@@ -89,7 +89,7 @@
 
 import { spawnSync } from "node:child_process";
 
-import { resolveCaptureTimeoutMs, tailChars, type CaptureSource, type EvidenceEntry, type LoreError } from "@lore/core";
+import { CAPTURE_TAIL_CHARS, resolveCaptureTimeoutMs, tailChars, type CaptureSource, type EvidenceEntry, type LoreError } from "@lore/core";
 
 // reason: TYPE-ONLY (erased at compile time — this adds NO runtime edge from an
 // adapter into the service layer, and nothing new is loaded when a vitest file
@@ -129,6 +129,10 @@ import { mergeStderrIntoStdout } from "../service/merged-stream-command.js";
  */
 export const DEFAULT_CAPTURE_TIMEOUT_MS = resolveCaptureTimeoutMs(undefined);
 
+// reason: CAPTURE_TAIL_CHARS is defined once in @lore/core (context-variables.ts); this re-export keeps
+// existing importers of this module working — it is NOT a second definition.
+export { CAPTURE_TAIL_CHARS };
+
 /**
  * `spawnSync`'s own captured-buffer ceiling (CLAUDE.md standing lesson: a spawn
  * capturing growing output MUST set an explicit `maxBuffer` — the 1 MiB Node
@@ -137,9 +141,6 @@ export const DEFAULT_CAPTURE_TIMEOUT_MS = resolveCaptureTimeoutMs(undefined);
  * what `spawnSync` buffers in memory before `tailChars` trims it.
  */
 export const CAPTURE_MAX_BUFFER_BYTES = 20 * 1024 * 1024;
-
-/** Persisted `output_tail` ceiling — mirrors `evidenceEntrySchema`'s own max. */
-export const CAPTURE_TAIL_CHARS = 4000;
 
 /** What to spawn, where, and what the caller claims the outcome will be. */
 export interface CaptureRequest {
