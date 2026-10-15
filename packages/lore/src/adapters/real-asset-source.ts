@@ -20,9 +20,9 @@
  *     global-machine installer.
  *   - After walking the four directories, `load()` APPENDS exactly ONE
  *     synthetic `kind: "settings-hook"` entry (`path: "settings.json"`) built
- *     from `@lore/core`'s `buildHookSettingsEntries("{{CLAUDE_DIR}}")` —
+ *     from `@lore/core`'s `buildHookSettingsEntries("{{lore:claude_dir}}")` —
  *     this port has no knowledge of the eventual install target, so the
- *     hook commands it emits carry the literal `"{{CLAUDE_DIR}}"` placeholder
+ *     hook commands it emits carry the literal `"{{lore:claude_dir}}"` placeholder
  *     token; `SetupService.resolvePayload` substitutes the real `targetDir`
  *     before merging (see that module's doc comment, and
  *     `distribution-hooks.ts`'s "does NOT know or care" invariant). This is
@@ -100,8 +100,8 @@ import { err, ok, buildHookSettingsEntries, expandTemplate } from "@lore/core";
 import type { Result, LoreError } from "@lore/core";
 import type { AssetFile, AssetOwnership, AssetPayload, SetupEntryKind } from "@lore/core";
 
-/** Placeholder token substituted for the real target dir by `SetupService.resolvePayload`. */
-const CLAUDE_DIR_PLACEHOLDER = "{{CLAUDE_DIR}}";
+/** Invocation variable `SetupService.resolvePayload` resolves to the real target dir via expandTemplate. */
+const CLAUDE_DIR_PLACEHOLDER = "{{lore:claude_dir}}";
 
 /**
  * SINGLE SOURCE OF TRUTH for files retired from the MACHINE install set

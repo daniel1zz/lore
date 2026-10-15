@@ -3,10 +3,11 @@
  *
  * Purpose: the single list of facts lore lets its own context text reference.
  * Public surface: `LORE_CONTEXT_VARIABLES`. Invariants: passes `validateRegistry`;
- * every entry here is a `code` variable (fixed by the lore version, never by settings).
+ * every `code` entry is fixed by the lore version, never by settings; the one `invocation`
+ * entry (`claude_dir`) is supplied by `lore setup` and allowed at `setup:settings-hook` only.
  * Side effects: pure.
  *
- * @spec_ref spec-lore-owned-agent-context-is-generated-from-templates-and (D1, D5)
+ * @spec_ref spec-lore-owned-agent-context-is-generated-from-templates-and (D1, D5, D7)
  */
 
 import { CAPTURE_TAIL_CHARS, LORE_AGENT_NAMES, OUTLET_IDS, type ContextVariable, type VariableOutlet } from "@lore/core";
@@ -36,5 +37,11 @@ export const LORE_CONTEXT_VARIABLES: readonly ContextVariable[] = [
     outlets: ALL_OUTLETS,
     describe: "Installed name of the lore reader agent.",
     value: () => LORE_AGENT_NAMES.reader,
+  },
+  {
+    name: "claude_dir",
+    source: "invocation",
+    outlets: ["setup:settings-hook"],
+    describe: "Absolute Claude Code config directory a settings-hook command points into (supplied by setup).",
   },
 ];
