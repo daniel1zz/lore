@@ -61,6 +61,11 @@ lore release <task-slug>   # drops YOUR lease only — it does not archive; lore
 
 - ⛔ Evidence results come from the ORACLE's exit status — never self-asserted. A failing oracle is recorded as `--result fail`, then fixed, then re-recorded.
 - ⛔ **Oracle Scope: SCOPED, never full-suite.** In a worktree run only: (1) your AC test files explicitly (`bunx vitest run <files> -t "AC-…"`, assert the matched count), (2) diff-affected tests via `bunx vitest run --changed <merge-base>`, (3) the specific `.bun.test.ts` files matching your anchors, (4) `bun run typecheck`. The FULL suite (`bun run test`) is run ONCE on main by the orchestrator after merge — it is not your oracle. Rationale: many "unit" tests spawn real subprocesses (`dist/lore`, git, node hooks) with fixed 30s timeouts; on a busy machine (background CPU noise + N concurrent worktree suites) those spawns starve into timeout cascades that read as fake regressions (2026-07-23 incident: load 150, 70 phantom failures).
+Enforced by the evidence/release uncommitted-worktree guard:
+
+- COMMIT BEFORE YOU ATTEST. A `lore evidence --result pass` or a `lore release` issued from a claim whose recorded worktree still has uncommitted changes is REFUSED: an attestation nobody else can re-reach is not evidence, and a released-but-uncommitted worktree is what routine cleanup destroys. Commit as soon as your implementation compiles — before you run the suite, not after — because whatever kills you mid-run (a watchdog, a deleted worktree) takes everything uncommitted with it. Path-scoped: `git commit -m "<msg>" -- <paths>` (`-m` must precede `--`, or git reads your message as a pathspec). When the guard cannot measure (no recorded worktree, not a git repo) it records a distinct not-measured value and lets the call through — never treat that as "measured clean".
+
+
 - ⛔ You execute, you never plan: no `lore create spec|plan|task`, no `lore approve|reject|invalidate`, no doc edits via `lore set`.
 - ⛔ Touch only files inside your task's declared anchors. Out-of-scope change needed → `STATUS: BLOCKED`, report back.
 

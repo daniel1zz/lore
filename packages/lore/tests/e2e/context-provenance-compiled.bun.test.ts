@@ -447,6 +447,7 @@ describe("AC-CP-7: embedded manifest + lore setup distribution parity for both T
     expect(runLore(["context", "refresh"], corpusDir).exitCode).toBe(0);
     const feedRules = join(corpusDir, ".claude", "rules", "lore-corpus-workflow-feed.md");
     expect(existsSync(feedRules)).toBe(true);
-    expect(readFileSync(feedRules, "utf8")).toContain("ACCOUNT, not to complete");
+    // RE-BASELINE (task-skill-implement-move-the-six-checkpoint-backed-rules): the ACCOUNT bullet moved to the lore-plan resume mode; the feed rules file still ships the resume-ticket rule.
+    expect(readFileSync(feedRules, "utf8")).toContain("NEVER start resuming work from a handoff pointer on your own initiative");
   }, 120_000);
 });

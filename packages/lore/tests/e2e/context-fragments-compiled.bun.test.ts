@@ -84,8 +84,8 @@ const HOOKS_DIR = join(ASSETS_DIR, "hooks");
 const HOOK_STRING_CAP = 10_000;
 /** Hard-coded pre-change executor text from assets/hooks/subagent-context.mjs (AC-CF-7 must-be-absent sentinel). */
 const OLD_EXECUTOR_SENTINEL = "类型→Skill：refactor→lore-refactor / bug|perf→lore-diagnose / tests→lore-test";
-/** One sentence from assets/governance/corpus-workflow.md (AC-CF-8 sentinel). */
-const CORPUS_WORKFLOW_SENTINEL = "a released-but-uncommitted worktree is what routine cleanup destroys";
+/** One sentence from the always-loaded corpus-workflow fragments (AC-CF-8 sentinel). RE-BASELINE (task-skill-implement-move-the-six-checkpoint-backed-rules): the previous sentinel (COMMIT BEFORE YOU ATTEST bullet) moved to the lore-implementer agent; this unbacked control rule stays always-loaded. */
+const CORPUS_WORKFLOW_SENTINEL = "Measure every oracle's exit code WITHOUT a pipe";
 
 let BIN_DIR = "";
 let NODE_DIR = "";

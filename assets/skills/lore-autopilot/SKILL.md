@@ -89,6 +89,18 @@ Identity needs no export: it comes from the agent integration, which registers e
 
 ⛔ **Dispatch bundles MUST scope the implementer's oracles** — AC test files (`-t "AC-…"` with matched-count assertion), `bunx vitest run --changed <merge-base>`, anchor-matching `.bun.test.ts` files, and `bun run typecheck` — NEVER the full suite. The full suite runs ONCE, on main, by the orchestrator after merge (Phase 4 step 2). N worktrees × full suite on one machine starves subprocess-spawning tests into 30s-timeout cascades that present as fake regressions (2026-07-23: load 150, 70+ phantom failures across two agents).
 
+Enforced by the task-claim gate (identity and claim placement):
+
+- `lore claim <task>`. For concurrent worktree dispatch, identity is assigned by the agent integration (each run is registered and attested, no export needed) and have each implementer claim from inside its own worktree (`--worktree` declared explicitly).
+
+Enforced by the task-claim gate (upstream governance docs):
+
+- Before each dispatch re-check that the upstream governance docs are claimable: a sibling task's wrap-up can block a later claim that the implementer cannot self-resolve. Re-check one by one, never from the batch-start snapshot.
+
+Enforced by the task-claim gate (`gate:task-claim:anchor-overlap`):
+
+- File mutex: tasks declare `--anchor` file anchors and a concurrent claim with an intersecting anchor is denied (`gate:task-claim:anchor-overlap`). Read `lore ready <plan> --json` (sessions / anchor_conflicts) first; manual queueing is defense in depth for anchors never declared.
+
 ### Claim-conflict handling (exit 5 / `CLAIM_CONFLICT`)
 Implementer reports the claim was rejected → **skip the task**, record the holder in the final
 report. ⛔ NEVER `--steal` and never `lore release --force` a foreign claim without explicit

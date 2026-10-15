@@ -189,6 +189,12 @@ The preview starts a Vite dev server (HMR-enabled). It auto-replaces previous in
 - **S2** — design EVERY slice of the initiative in this run, not only the next one; a slice that depends on an earlier slice's measurement carries a pre-registered branch instead of being deferred. Mode-internal parallel agent dispatch and scoring still run — they are design methodology, not review. ≥2-option choices are made by the AI and recorded with the rejected options.
 - **S3 / S4** — the mode's Quality Gates above become one lens of the single bundle review; the HTML preview and design summary go into the single S4 approval. No `lore review` / `lore approve` / `AskUserQuestion` here.
 
+## Living vs record
+
+Enforced by the locked-record write refusal (exit 4):
+
+- Living vs record: prd, baseline, reference/skill/prompt knowledge and open plans are living (edit in place); spec, adr, task and ideation/retro/research/assessment/handoff/uat knowledge are records, locked once settled. Read the `Standing:` line in `lore get <doc>` before changing a spec: not locked → edit it; locked, no criterion evidence → `lore reopen <spec> --reason` then edit; locked with evidence → new spec + `lore link <new> <old> --type relates-to`. A body/title change, `lore restore` or `lore ac add|set|rm` on a locked record is refused (exit 4); only a genuine small fix goes through `lore set --correction "<reason>"`, or for ONE criterion `lore ac set <spec> <AC> --correction "<reason>"` (`ac add|rm` have no correction exit).
+
 ## Persist
 
 - Persist as DRAFT during S2 — never wait for approval to write: `lore create spec --title ... --kind design --content ...` (run `lore feed spec-create` first) or `lore create adr --title ... --decision-status proposed --content ...` for decision records; declare every AC (`lore ac add`) before S3, and cite the baseline rules each AC implements (`lore ac add ... --cite BR-<n>` or `lore ac cite <spec> <AC> BR-<n>`) — a spec takes no parent and cannot be approved without a citing criterion (BR-1007)
