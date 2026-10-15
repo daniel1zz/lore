@@ -676,6 +676,22 @@ const WorkflowConfigSchema = z
       })
       .strict()
       .default({}),
+    /**
+     * Turn-end review knobs (spec-interception-moves-off-every-tool-call-one-turn-end-review,
+     * Scope 4a). Read by `assets/hooks/stop-turn-review.mjs`, which is a standalone script and so
+     * scans `.lore/config.yaml` for exactly this path (`workflow.turn_end.main_session_source_edits`)
+     * — rename the key here and that scan (SETTING_KEYS in the hook) must move with it.
+     * @invariant `main_session_source_edits` defaults to `"off"`: absence of the whole `workflow`
+     *   section, of `turn_end`, or of the field means the hook never reports main-session source
+     *   edits. `"block"` makes the Stop hook block a turn whose main-session source edits exceed
+     *   the 3-changed-line allowance (hook-owned constant).
+     */
+    turn_end: z
+      .object({
+        main_session_source_edits: z.enum(["off", "block"]).default("off"),
+      })
+      .strict()
+      .default({}),
   })
   .strict();
 
