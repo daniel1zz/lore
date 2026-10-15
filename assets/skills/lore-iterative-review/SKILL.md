@@ -53,7 +53,7 @@ Read `references/reviewer-prompts.md` for the exact prompts. The three reviewers
 | **Security** | Input validation, injection, auth, data safety, OWASP top 10 |
 | **Testing** | Coverage gaps, assertion quality, 6-dimension check, missing test files |
 
-Each reviewer is dispatched as `Agent(subagent_type="claude")`. They are strictly read-only — they analyze and output findings, they don't modify code. If `lore-reader` is available and the project has a lore corpus, prefer it for the review agents (it enforces read-only access by design).
+Each reviewer is dispatched as `Agent(subagent_type="claude")`. They are strictly read-only — they analyze and output findings, they don't modify code. If `lore-reader` is available and the project has a lore corpus, prefer it for the review agents (it has no Write/Edit/NotebookEdit tools; Bash writes are not mechanically prevented, so the reviewer prompt must still forbid them).
 
 **Subagent prompt structure** (details in references):
 1. Role declaration

@@ -45,7 +45,7 @@ export const LORE_BINARY_VERSION = "0.1.0" as const;
 
 export const EMBEDDED_ASSETS_MANIFEST: EmbeddedAssetsManifest = {
   binary_version: LORE_BINARY_VERSION,
-  tree_digest: "a9cb6312211c4985156e045415297af70ad04b063c6de0a74cb70bd2926c0e4f",
+  tree_digest: "e47c23339f67533e8ae59f848c6a3bbb0f27643a9db58629430d2d297ca6ef04",
   entries: [
   { path: "agents/lore-implementer.md", kind: "agent", ownership: "managed", sha256: "5dec1ded60d7e8d5de82d90695c884f9a43b37772e0f862e8b57c6868f1c9638" },
   { path: "agents/lore-reader.md", kind: "agent", ownership: "managed", sha256: "336b2da60cfe9afae51f17ac8f6f9f33e7c67b2f3639874795e22a0e257e8696" },
@@ -203,7 +203,7 @@ export const EMBEDDED_ASSETS_MANIFEST: EmbeddedAssetsManifest = {
   { path: "skills/lore-improve-codebase-architecture/LANGUAGE.md", kind: "skill", ownership: "managed", sha256: "6feca2140439c54a774749e8367f18350899ff69c777144ed2248cd4407949fa" },
   { path: "skills/lore-improve-codebase-architecture/SKILL.md", kind: "skill", ownership: "managed", sha256: "9a43b8eefe64cb99f4385c55efc346ba544648ad989a6d513ba329442a4ac38a" },
   { path: "skills/lore-init-context/SKILL.md", kind: "skill", ownership: "managed", sha256: "3ef716ccc6b5f122e8fb4147c4eecc5171c688b84962b7b4fdb2d9902d54c90d" },
-  { path: "skills/lore-iterative-review/SKILL.md", kind: "skill", ownership: "managed", sha256: "7ced2907e624c2ae2dff116127795423d10c10ca2831c96d416132f5736398bc" },
+  { path: "skills/lore-iterative-review/SKILL.md", kind: "skill", ownership: "managed", sha256: "aacf8ad786695d67573f849814f86b6993a5e3ff7af619adfd8effc3e764a701" },
   { path: "skills/lore-iterative-review/references/fix-agent-prompt.md", kind: "skill", ownership: "managed", sha256: "05e77fd19a9515e7467ac9f91d0fc601bf1386e2cbee2731873c1bc8b1097f4b" },
   { path: "skills/lore-iterative-review/references/reviewer-prompts.md", kind: "skill", ownership: "managed", sha256: "c68db2c4f0d27f7659786d49b6305596087b41e5e9776f36ca651ed2a9eeb6b0" },
   { path: "skills/lore-kickoff/SKILL.md", kind: "skill", ownership: "managed", sha256: "e7bc8c05e0d8de4234e09f3614955664119f8dc02afe3cfa64ab8605154f1233" },
