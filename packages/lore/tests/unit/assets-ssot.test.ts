@@ -477,17 +477,32 @@ const CORPUS_WORKFLOW_FRAGMENT_RELS = [
 // (resume disposition -> lore-plan resume mode; living-vs-record -> lore-design; claim identity + COMMIT BEFORE YOU
 // ATTEST -> lore-autopilot / lore-implementer). Only whole bullets were removed; no remaining text changed.
 const CORPUS_WORKFLOW_BODY_SHA256: Record<(typeof CORPUS_WORKFLOW_FRAGMENT_RELS)[number], string> = {
-  "context/corpus-workflow-0-overview.md": "31bec6c00584c31708413d8c34e0494bbfe758b9d3d43c6bc3d1e8780c0b070f",
+// RE-BASELINE (task-reword-the-ten-always-loaded-fragments-to-the-rule-only, spec-always-loaded-lore-fragments-state-the-rule-only-reasoning):
+// intended rule-wording compression; no rule moved or dropped (verbatim before-text in
+// knowledge-always-loaded-lore-fragments-verbatim-source-before).
+  "context/corpus-workflow-0-overview.md": "e9607ee9bfa401a4e7ff208eec306acc55c59e6e2665e586f09c2671b2ab64c7",
   // RE-BASELINE (task-prose-sweep-shipped-assets-say-pull-lore-bootstrap-when, AC-SI-5): the feed rule no longer
   // calls the bootstrap hook-injected; it says the injection carries only the seat's claims + plan handoff and
   // corpus state is pulled on demand (`lore bootstrap` / `lore ready` / `lore pending`).
-  "context/corpus-workflow-1-feed.md": "f7a14020883d4b7dc95373225155639b4fd74c35c70d85fae4da03b6be604a36",
+// RE-BASELINE (task-reword-the-ten-always-loaded-fragments-to-the-rule-only, spec-always-loaded-lore-fragments-state-the-rule-only-reasoning):
+// intended rule-wording compression; no rule moved or dropped (verbatim before-text in
+// knowledge-always-loaded-lore-fragments-verbatim-source-before).
+  "context/corpus-workflow-1-feed.md": "3d0875d32d44ce72981c3a89434b7134e5ff436a5b15b61a676b01c40713f68d",
   // RE-BASELINE (task-ac-set-correction-audited-fix-of-one-criterion-on-a-locked, AC-CC-4): names `lore ac set --correction`
-  "context/corpus-workflow-2-produce.md": "cc4ed9f31e30468f2fddea7f4d296620ec81399c62a1b835b4d1388465f4def2",
-  "context/corpus-workflow-3-execute.md": "26c7fa3bda9e61b53fc18bdc11d2183abe9900e136439884a39fe9effc3b90c9",
+// RE-BASELINE (task-reword-the-ten-always-loaded-fragments-to-the-rule-only, spec-always-loaded-lore-fragments-state-the-rule-only-reasoning):
+// intended rule-wording compression; no rule moved or dropped (verbatim before-text in
+// knowledge-always-loaded-lore-fragments-verbatim-source-before).
+  "context/corpus-workflow-2-produce.md": "a5719c1d3ccd871330904f678451257a26aaf4904245cc92eef4db5803558f34",
+// RE-BASELINE (task-reword-the-ten-always-loaded-fragments-to-the-rule-only, spec-always-loaded-lore-fragments-state-the-rule-only-reasoning):
+// intended rule-wording compression; no rule moved or dropped (verbatim before-text in
+// knowledge-always-loaded-lore-fragments-verbatim-source-before).
+  "context/corpus-workflow-3-execute.md": "9adb1259a4280654be8803507960042f90a1dfb7e7af6c2cd94d86846d1908a5",
   // RE-BASELINE (task-rs-t13-migration-promoted-shipped-fragments-agent-rules, AC-RS-13): gains the CLAUDE.md-vs-corpus
   // boundary bullet moved from the user-layer lore-loop fragment (user-03).
-  "context/corpus-workflow-4-close.md": "6739e28d8081b7d2de8d060b7796786aea384515635245ea5d2ad3c03c78ba6a",
+// RE-BASELINE (task-reword-the-ten-always-loaded-fragments-to-the-rule-only, spec-always-loaded-lore-fragments-state-the-rule-only-reasoning):
+// intended rule-wording compression; no rule moved or dropped (verbatim before-text in
+// knowledge-always-loaded-lore-fragments-verbatim-source-before).
+  "context/corpus-workflow-4-close.md": "d4ece34f664f755724e6d9a57f139a74ef91268ee7c27f0245218c40297cc9e8",
 };
 
 /** Concatenated bodies of the corpus-workflow fragments, in file-name (= rendering) order. */
