@@ -5,6 +5,7 @@ import { tanstackRouter } from "@tanstack/router-plugin/vite";
 import tailwindcss from "@tailwindcss/vite";
 import { fileURLToPath, URL } from "node:url";
 import { configDefaults } from "vitest/config";
+import { workspaceAliases } from "../../workspace-aliases";
 
 /**
  * Dev-only Vite plugin that inlines the bootstrap token into index.html.
@@ -41,9 +42,12 @@ export default defineConfig({
     loreBootstrapTokenPlugin,
   ],
   resolve: {
-    alias: {
-      "@": fileURLToPath(new URL("./src", import.meta.url)),
-    },
+    alias: [
+      // reason: @lore/* resolves to THIS checkout's packages, never through node_modules
+      // (see /workspace-aliases.ts). task-skill-implement-tg-20-worktrees-resolve-their-own-lore.
+      ...workspaceAliases(fileURLToPath(new URL("../..", import.meta.url))),
+      { find: /^@\//, replacement: fileURLToPath(new URL("./src/", import.meta.url)) },
+    ],
   },
   server: {
     proxy: {

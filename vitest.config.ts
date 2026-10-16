@@ -1,13 +1,18 @@
 import { defineConfig } from "vitest/config";
 import { fileURLToPath, URL } from "node:url";
+import { workspaceAliases } from "./workspace-aliases";
 
 export default defineConfig({
   resolve: {
-    alias: {
+    alias: [
+      // reason: @lore/* resolves to THIS checkout's packages, never through node_modules
+      // (a git worktree has none and would silently read the main checkout's). Derived from
+      // tsconfig.base.json `paths`. task-skill-implement-tg-20-worktrees-resolve-their-own-lore.
+      ...workspaceAliases(fileURLToPath(new URL(".", import.meta.url))),
       // reason: dashboard src uses "@/" path alias; root vitest must resolve it to
       // packages/dashboard/src/ for component tests to find ui primitives. SPEC-015 §4 M6.
-      "@": fileURLToPath(new URL("./packages/dashboard/src", import.meta.url)),
-    },
+      { find: /^@\//, replacement: fileURLToPath(new URL("./packages/dashboard/src/", import.meta.url)) },
+    ],
   },
   test: {
     environment: "node",

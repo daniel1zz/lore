@@ -8,9 +8,6 @@
   // exit 0 was the exit code of checking nothing. This project's own `exclude`
   // must NOT swallow "tests" the way the base config's does.
   "extends": "./tsconfig.json",
-  "compilerOptions": {
-    "rootDir": "."
-  },
   "include": ["src/**/*", "tests/**/*"],
   // "tests/e2e" excluded: two of its `.ts` helpers (mint-machine-dashboard-key.ts,
   // multi-project-server.ts) import from packages/lore/src/**, outside this

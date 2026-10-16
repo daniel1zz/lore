@@ -17,6 +17,10 @@
     "allowImportingTsExtensions": false,
     "isolatedModules": true,
     "noEmit": true,
-    "types": ["bun-types"]
+    "types": ["bun-types"],
+    "paths": {
+      "@lore/core": ["./packages/core/src/index.ts"],
+      "@lore/core/node": ["./packages/core/src/node.ts"]
+    }
   }
 }
