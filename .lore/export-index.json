@@ -11108,6 +11108,18 @@
     "01M520PXM968GDW5N81F41T86S": {
       "human_id": "TASK-1478",
       "file_path": "docs/requirements/task/TASK-1478-skill-implement-mirror-export-renumbers-human-ids.md"
+    },
+    "01M523R5F335FWPF5CD4FA7J4W": {
+      "human_id": "TASK-1479",
+      "file_path": "docs/requirements/task/TASK-1479-skill-implement-r0-11-lore-ac-add-set-timeout-ms-w.md"
+    },
+    "01M523R5YWYXZMWJC6W546EQ9N": {
+      "human_id": "TASK-1480",
+      "file_path": "docs/requirements/task/TASK-1480-skill-test-live-corpus-mirror-checks-leave-the-uni.md"
+    },
+    "01M522JNMYR56B6XZ5QXKDF6DA": {
+      "human_id": "TASK-1481",
+      "file_path": "docs/requirements/task/TASK-1481-skill-design-claude-md-eviction-requires-a-corpus.md"
     }
   }
 }
