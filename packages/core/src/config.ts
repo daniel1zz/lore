@@ -382,6 +382,25 @@ const GatesConfigSchema = z
   .catchall(GateCheckpointConfigSchema);
 
 /**
+ * One co-change rule: when a run's (or the unknown-source group's) changed paths match any `when` glob, they must
+ * also match a `require` glob, else the turn-end review reports a finding naming the rule (AC-ST-7).
+ * Globs are Bun.Glob patterns matched against repo-relative, `/`-separated paths.
+ * @invariant `when` and `require` are non-empty: an empty `require` could never be satisfied and an empty `when`
+ *   never fires, so both are refused loudly instead of reading as a rule that silently does nothing.
+ */
+export const CoChangeRuleSchema = z
+  .object({
+    name: z.string().min(1),
+    when: z.array(z.string().min(1)).min(1),
+    require: z.array(z.string().min(1)).min(1),
+  })
+  .strict();
+export type CoChangeRule = z.infer<typeof CoChangeRuleSchema>;
+
+/** `workflow.turn_end.co_change`: the rule list. Parsed by trail-review itself, see the `turn_end` comment. */
+export const CoChangeRulesSchema = z.array(CoChangeRuleSchema);
+
+/**
  * Task execution workflow configuration (SPEC-025) + gate enable/disable overrides.
  * Controls the advisory claim-lease TTL consumed by TaskWorkflowService, and (per
  * checkpoint) whether `lore gate` even runs its predicates.
@@ -679,8 +698,11 @@ const WorkflowConfigSchema = z
     /**
      * Turn-end review knobs (spec-interception-moves-off-every-tool-call-one-turn-end-review,
      * Scope 4a). Read by `assets/hooks/stop-turn-review.mjs`, which is a standalone script and so
-     * scans `.lore/config.yaml` for exactly this path (`workflow.turn_end.main_session_source_edits`)
-     * — rename the key here and that scan (SETTING_KEYS in the hook) must move with it.
+     * scans `.lore/config.yaml` for exactly two paths — `workflow.turn_end.main_session_source_edits`
+     * (SETTING_KEYS in the hook) and the PRESENCE of `workflow.turn_end.co_change` (CO_CHANGE_KEYS, which only
+     * arms the `lore session trail-review` spawn) — rename a key here and that scan must move with it. The
+     * `co_change` rule list itself is parsed by `lore session trail-review` through {@link CoChangeRulesSchema},
+     * never by the hook and never by the CLI loader's silent fallback.
      * @invariant `main_session_source_edits` defaults to `"off"`: absence of the whole `workflow`
      *   section, of `turn_end`, or of the field means the hook never reports main-session source
      *   edits. `"block"` makes the Stop hook block a turn whose main-session source edits exceed
@@ -689,6 +711,11 @@ const WorkflowConfigSchema = z
     turn_end: z
       .object({
         main_session_source_edits: z.enum(["off", "block"]).default("off"),
+        /**
+         * Co-change rules judged at turn end by `lore session trail-review` (spec-session-trail Design >
+         * Consumers, AC-ST-7). Default `[]`: no rule, nothing judged.
+         */
+        co_change: CoChangeRulesSchema.default([]),
       })
       .strict()
       .default({}),
