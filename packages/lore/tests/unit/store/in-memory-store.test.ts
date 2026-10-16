@@ -237,8 +237,6 @@ runStoreCoreSuite({
   label: "InMemoryStore",
   createStore: () => new InMemoryStore(),
   destroyStore: (store) => store.close(),
-  // N/A: InMemoryStore.detectParentCycle ignores docs.parent_id (see StoreSuiteOptions).
-  parentIdOnlyCycleDetection: false,
 });
 
 runStoreJudgmentsSuite({

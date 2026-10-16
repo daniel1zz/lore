@@ -33,14 +33,6 @@ export interface StoreSuiteOptions {
   readonly createStore: () => StoreInterface;
   /** Release the store and any temp files; called once per test. */
   readonly destroyStore: (store: StoreInterface) => void;
-  /**
-   * `false` marks AC-STORE-005.11 / .12 / .14 as NOT APPLICABLE (reported as
-   * skipped, never silently dropped). Reason: `InMemoryStore.detectParentCycle`
-   * walks only `links` rows and ignores `docs.parent_id`, so a cycle formed purely
-   * through `docs.parent_id` is not rejected there. SQLiteStore and TursoStore
-   * walk `docs.parent_id` and must pass. Defaults to `true`.
-   */
-  readonly parentIdOnlyCycleDetection?: boolean;
 }
 
 // ─── Factories ───────────────────────────────────────────────────────────────
@@ -165,7 +157,6 @@ export function resetCounter(): void {
 export function runStoreCoreSuite(opts: StoreSuiteOptions): void {
   describe(`${opts.label} — StoreInterface core contract`, () => {
     let store: StoreInterface;
-    const parentCycleIt = opts.parentIdOnlyCycleDetection === false ? it.skip : it;
 
     beforeEach(() => {
       _counter = 0;
@@ -782,7 +773,7 @@ export function runStoreCoreSuite(opts: StoreSuiteOptions): void {
         expect(result.error.code).toBe("LINK_CYCLE");
       });
 
-      parentCycleIt("AC-STORE-005.11 (REGRESSION, audit 2026-07-27 spec-corpus-schema §4.3): 2-node parent cycle formed via docs.parent_id only (no links row — mirrors `lore create --parent`) is rejected on link close", async () => {
+      it("AC-STORE-005.11 (REGRESSION, audit 2026-07-27 spec-corpus-schema §4.3): 2-node parent cycle formed via docs.parent_id only (no links row — mirrors `lore create --parent`) is rejected on link close", async () => {
         const root = makeDoc({ slug: "prd-pid-cycle-root" });
         await store.insert(root);
         // `lore create --parent` writes ONLY docs.parent_id — never an
@@ -806,7 +797,7 @@ export function runStoreCoreSuite(opts: StoreSuiteOptions): void {
         expect(result.error.code).toBe("LINK_CYCLE");
       });
 
-      parentCycleIt("AC-STORE-005.12 (REGRESSION): deeper 3-node parent cycle via docs.parent_id-only chain (zero links rows) is rejected", async () => {
+      it("AC-STORE-005.12 (REGRESSION): deeper 3-node parent cycle via docs.parent_id-only chain (zero links rows) is rejected", async () => {
         const a = makeDoc({ slug: "prd-pid-3c-a" });
         await store.insert(a);
         const b = makeDoc({ slug: "prd-pid-3c-b", parent_id: a.id });
@@ -840,7 +831,7 @@ export function runStoreCoreSuite(opts: StoreSuiteOptions): void {
         expect(result.ok).toBe(true);
       });
 
-      parentCycleIt("AC-STORE-005.14 (STATE/ERROR): a rejected cycle-closing link leaves docs.parent_id and the links table unchanged, and reports a well-formed path", async () => {
+      it("AC-STORE-005.14 (STATE/ERROR): a rejected cycle-closing link leaves docs.parent_id and the links table unchanged, and reports a well-formed path", async () => {
         const root = makeDoc({ slug: "prd-pid-noop-root" });
         await store.insert(root);
         const child = makeDoc({ slug: "prd-pid-noop-child", parent_id: root.id });
