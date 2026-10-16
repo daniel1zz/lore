@@ -64,6 +64,15 @@ describe("AC-TG-2 LORE_TEST_SANDBOX refuses this repository's corpus", () => {
     expect(realpathSync(process.env["LORE_TEST_SANDBOX_REPO"]!)).toBe(realpathSync(REPO_ROOT));
   });
 
+  it("AC-TG-2 REGRESSION: a node child spawned with NO explicit env from a vitest worker inherits the marker", () => {
+    const out = spawnSync("sh", ["-c", 'printf "%s|%s" "$LORE_TEST_SANDBOX" "$LORE_TEST_SANDBOX_REPO"'], {
+      encoding: "utf8",
+    }).stdout;
+    const [marker, repo] = out.split("|");
+    expect(marker).toBe("1");
+    expect(realpathSync(repo!)).toBe(realpathSync(REPO_ROOT));
+  });
+
   it("AC-TG-2 NEGATIVE: a read resolving the repo's own db exits 4 naming the variable and the path", () => {
     const { root, db } = fakeRepoWithDb();
     const r = runCli(["list"], root, { LORE_TEST_SANDBOX: "1", LORE_TEST_SANDBOX_REPO: root });
