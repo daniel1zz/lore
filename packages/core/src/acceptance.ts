@@ -504,6 +504,14 @@ export interface AcCoverageFact {
    * {@link computeAcCoverage} (which is pure and reads no filesystem).
    */
   oracle_file_missing?: readonly string[];
+  /**
+   * How many `pass` evidence rows tagged with this criterion RAN one of its missing oracle files (TG-22;
+   * `evidenceRanMissingOracle`, same normalised-location comparison, execution root included). Set by
+   * `AcService.listCriteria` beside {@link oracle_file_missing}; ABSENT = not computed = no such pass.
+   * {@link deriveAcCoverageState} answers `"not_measured"` only when this is positive: a pass that ran OTHER
+   * files proves nothing about the missing one, but must not be hidden by it either.
+   */
+  passes_ran_missing_oracle?: number;
 }
 
 /**
@@ -650,7 +658,8 @@ export function computeAcCoverage(
  * | 7 | `"none"` | `pass === 0` AND `fail === 0` |
  *
  * **AC-TG-6 — missing oracle file (between rows 2 and 3)**: when {@link AcCoverageFact.oracle_file_missing}
- * is non-empty and `fail === 0` and `pass > 0`, the state is `"not_measured"` BEFORE rows 3-6 are tried —
+ * is non-empty and `fail === 0` and `passes_ran_missing_oracle > 0` (TG-22: a pass that ran
+ * other files does not count), the state is `"not_measured"` BEFORE rows 3-6 are tried —
  * an earlier attested pass against a test file that no longer exists must not render as passing. A real
  * `fail` still outranks it (rows 1-2); a criterion with no evidence stays `"none"` (row 7).
  *
@@ -730,7 +739,9 @@ export function deriveAcCoverageState(fact: AcCoverageFact): AcCoverageState {
     return isSupersededByNewerAttestedPass(fact.refs) ? "fail_superseded" : "fail";
   }
   // AC-TG-6: the oracle file is gone, so no earlier pass (attested or not) may render as passing.
-  if (fact.pass > 0 && fact.oracle_file_missing !== undefined && fact.oracle_file_missing.length > 0) {
+  // TG-22: only a pass that RAN the missing file counts — a pass that ran other files proves nothing about it.
+  const missing = fact.oracle_file_missing;
+  if (missing !== undefined && missing.length > 0 && fact.passes_ran_missing_oracle !== undefined && fact.passes_ran_missing_oracle > 0) {
     return "not_measured";
   }
   if (fact.attested_pass > 0) return "attested_pass";
