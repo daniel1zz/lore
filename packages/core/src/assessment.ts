@@ -451,7 +451,15 @@ export type TypedGap = z.infer<typeof typedGapSchema>;
  */
 export const unverifiableFindingSchema = typedGapSchema.extend({
   failing_path: z.string().min(1),
-  checked_against_commit: z.string().min(1),
+  /** Absent for `not-shown-to-judge` withdrawals — that fact needs no git referent. */
+  checked_against_commit: z.string().min(1).optional(),
+  /**
+   * Why the finding was withdrawn. `"not-shown-to-judge"`: a path it declares was wholly
+   * omitted from the diff the judge saw (F2, AC-CRIT-3) — `failing_path` is the first such
+   * path. Absent means the legacy meaning, `"path-absent"` (a declared path does not exist at
+   * `checked_against_commit`); records written before F2 never carry the field.
+   */
+  reason: z.enum(["not-shown-to-judge", "path-absent"]).optional(),
 });
 
 /** Derived TypeScript type for one withdrawn (unverifiable) finding. */
@@ -475,6 +483,12 @@ export const pathsVerifiedSchema = z.object({
   checked: z.number().int().nonnegative(),
   unverifiable: z.number().int().nonnegative(),
   unchecked: z.number().int().nonnegative(),
+  /**
+   * Findings withdrawn because a path they declare was wholly omitted from the diff the judge
+   * saw (F2, AC-CRIT-3) — a COUNT OF FINDINGS, distinct from `unverifiable` (paths absent at
+   * the commit). Absent on records written before F2.
+   */
+  not_shown: z.number().int().nonnegative().optional(),
 });
 
 /** Derived TypeScript type for the D2/D3 path-verification tallies. */
@@ -1924,6 +1938,11 @@ export function renderAssessmentContent(result: AssessmentResult): string {
     lines.push("");
     lines.push(`- Checked (confirmed present at the assessed commit): ${result.paths_verified.checked}`);
     lines.push(`- Unverifiable (confirmed absent — finding withdrawn): ${result.paths_verified.unverifiable}`);
+    if (result.paths_verified.not_shown !== undefined) {
+      lines.push(
+        `- Not shown to the judge (omitted from the diff by truncation — finding withdrawn, NOT judged): ${result.paths_verified.not_shown}`,
+      );
+    }
     lines.push(
       `- Unchecked (NO assessed-commit referent — NOT verified; do not read as "fine"): ${result.paths_verified.unchecked}`,
     );
@@ -1935,14 +1954,15 @@ export function renderAssessmentContent(result: AssessmentResult): string {
     lines.push("");
     lines.push(
       `${result.unverifiable_findings.length} finding(s) below were EXCLUDED from ac_scores/typed_gaps/gaps ` +
-        `because a path they declared does not exist at the assessed commit. overall_score above is NOT ` +
+        `because a path they declared was never shown to the judge or does not exist at the assessed commit. overall_score above is NOT ` +
         `recomputed to account for their removal.\n`,
     );
     for (const finding of result.unverifiable_findings) {
-      lines.push(
-        `- [${finding.severity}] ${finding.statement.replace(/\|/g, "\\|")} — "${finding.failing_path}" not ` +
-          `found at commit ${finding.checked_against_commit}`,
-      );
+      const why =
+        finding.reason === "not-shown-to-judge"
+          ? `"${finding.failing_path}" was never shown to the judge (omitted from the truncated diff)`
+          : `"${finding.failing_path}" not found at commit ${finding.checked_against_commit}`;
+      lines.push(`- [${finding.severity}] ${finding.statement.replace(/\|/g, "\\|")} — ${why}`);
     }
   }
 

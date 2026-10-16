@@ -665,6 +665,31 @@ export interface FindingPathVerificationOutcome {
  * //        checked_against_commit: "def" }], pathsVerified: { checked: 0, unverifiable: 1, unchecked: 0 } })
  * // — assuming "def:src/gone.ts" does not resolve in "/repo"
  */
+/**
+ * Moves every finding whose `paths[]` intersects the WHOLLY omitted diff files into
+ * `withdrawn` with reason `not-shown-to-judge` (F2, AC-CRIT-3). Pure; never touches git.
+ *
+ * @param typedGaps - Judge findings after grounding suppression (may be undefined)
+ * @param omittedDiffFiles - `BuildAssessPromptResult.omittedDiffFiles` (head-truncated file excluded)
+ * @returns the surviving findings (same reference when nothing moved) and the withdrawn ones;
+ *   `failing_path` is the first intersecting path in encounter order
+ */
+export function withdrawFindingsOnUnshownFiles(
+  typedGaps: TypedGap[] | undefined,
+  omittedDiffFiles: readonly string[],
+): { typedGaps: TypedGap[] | undefined; withdrawn: UnverifiableFinding[] } {
+  if (typedGaps === undefined || omittedDiffFiles.length === 0) return { typedGaps, withdrawn: [] };
+  const omitted = new Set(omittedDiffFiles);
+  const kept: TypedGap[] = [];
+  const withdrawn: UnverifiableFinding[] = [];
+  for (const gap of typedGaps) {
+    const unshownPath = gap.paths.find((path) => omitted.has(path));
+    if (unshownPath === undefined) kept.push(gap);
+    else withdrawn.push({ ...gap, failing_path: unshownPath, reason: "not-shown-to-judge" });
+  }
+  return { typedGaps: kept, withdrawn };
+}
+
 export function verifyFindingPaths(
   typedGaps: TypedGap[] | undefined,
   diffSource: AssessDiffSource | undefined,
@@ -716,7 +741,12 @@ export function verifyFindingPaths(
       }
     }
     if (failingPath !== undefined) {
-      unverifiableFindings.push({ ...gap, failing_path: failingPath, checked_against_commit: commit });
+      unverifiableFindings.push({
+        ...gap,
+        failing_path: failingPath,
+        checked_against_commit: commit,
+        reason: "path-absent",
+      });
     } else {
       keptGaps.push(gap);
     }
@@ -1309,7 +1339,7 @@ export class AIProviderService {
     // conflation this task family exists to close (task's ADR three-question review, Q2).
     const reproducibleResult = getAssessTemplateReproducibility(ASSESS_PROMPT_VERSION);
     if (!reproducibleResult.ok) return reproducibleResult;
-    const { prompt, truncated, declaredAcIds } = templateResult.value(
+    const { prompt, truncated, declaredAcIds, omittedDiffFiles } = templateResult.value(
       bundle,
       diffText,
       this.assessBudgets,
@@ -1373,6 +1403,7 @@ export class AIProviderService {
         reproducibleResult.value,
         opts.diffSource,
         repoRoot,
+        omittedDiffFiles,
       );
       if (!finalizeResult.ok) {
         emitAssessEvent(finalizeResult);
@@ -1415,6 +1446,7 @@ export class AIProviderService {
         reproducibleResult.value,
         opts.diffSource,
         repoRoot,
+        omittedDiffFiles,
       );
       if (!finalizeResult.ok) {
         emitAssessEvent(finalizeResult);
@@ -1891,6 +1923,7 @@ export class AIProviderService {
     reproducible: boolean,
     diffSource: AssessDiffSource | undefined,
     repoRoot: string,
+    omittedDiffFiles: readonly string[],
   ): Result<AssessmentResult, LoreError> {
     // reason: SPEC-040 D4 — grounding cross-check runs on the validated-but-not-yet-final
     // output; warnings are advisory-only and never fail the run.
@@ -1939,9 +1972,22 @@ export class AIProviderService {
     // is the SURVIVOR of both passes. An unresolvable assessed commit fails this whole method
     // LOUD (see `verifyFindingPaths`'s own JSDoc) — propagated as this call's own `err`,
     // exactly like `templateResult`/`reproducibleResult` upstream in `assessPlan`.
-    const verification = verifyFindingPaths(typedGaps, diffSource, repoRoot);
+    // reason: F2 (AC-CRIT-3) — a finding on a file the judge never saw cannot be a judged
+    // finding, whether or not the file exists at the commit, so it is withdrawn BEFORE
+    // verifyFindingPaths (which would otherwise keep it: the path exists). Needs no git
+    // referent, so it also runs when diffSource is absent. Only WHOLLY omitted files count;
+    // the head-truncated file was shown in part and stays scored.
+    const unshown = withdrawFindingsOnUnshownFiles(typedGaps, omittedDiffFiles);
+    const verification = verifyFindingPaths(unshown.typedGaps, diffSource, repoRoot);
     if (!verification.ok) return verification;
-    const { typedGaps: verifiedTypedGaps, unverifiableFindings, pathsVerified } = verification.value;
+    const verifiedTypedGaps = verification.value.typedGaps;
+    const unverifiableFindings = [...unshown.withdrawn, ...verification.value.unverifiableFindings];
+    // reason: not_shown follows the present-iff-non-zero convention of unverifiable_findings —
+    // a run that withdrew nothing for visibility keeps the exact pre-F2 paths_verified shape.
+    const pathsVerified = {
+      ...verification.value.pathsVerified,
+      ...(unshown.withdrawn.length > 0 ? { not_shown: unshown.withdrawn.length } : {}),
+    };
 
     // reason: SPEC-040 D3 — only substitute the legacy string arrays when the judge
     // actually emitted the corresponding typed array; a typed_gaps-less response leaves
