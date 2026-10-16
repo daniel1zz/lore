@@ -68,6 +68,7 @@ import {
   buildAcExemptionCapError,
   buildNonLiveRuleRefusal,
   computeAuditEntryHash,
+  detectParentCycleViaAncestry,
   emptyKindsError,
   withoutNullHarnessRun,
 } from "./store-shared.js";
@@ -902,7 +903,7 @@ export class InMemoryStore implements StoreInterface {
 
   async addLink(link: LinkRecord): Promise<Result<LinkRecord, LoreError>> {
     if (link.link_type === "parent") {
-      const cycleResult = this.detectParentCycle(link.from_id, link.to_id);
+      const cycleResult = await this.detectParentCycle(link.from_id, link.to_id);
       if (!cycleResult.ok) return cycleResult;
     }
 
@@ -998,36 +999,24 @@ export class InMemoryStore implements StoreInterface {
 
   /**
    * Detect whether adding a parent link from_id → to_id would create a cycle.
-   * Mirrors SQLiteStore.detectParentCycle — iterative walk up the parent chain.
-   * A self-link (from_id === to_id) is always a cycle.
+   * Delegates to {@link detectParentCycleViaAncestry} (store-shared.ts), the
+   * same walk SQLiteStore/TursoStore use. Each node's effective parent is the
+   * outgoing `parent` link when one exists, else `docs.parent_id` — both
+   * sources must be consulted because `CorpusService.create --parent` writes
+   * only `docs.parent_id` (no links row), while `addLink` alone writes only a
+   * links row.
    */
-  private detectParentCycle(
+  private async detectParentCycle(
     fromId: DocId,
     toId: DocId,
-  ): Result<void, LoreError> {
-    if (fromId === toId) {
-      return err({ code: "LINK_CYCLE", path: [fromId] });
-    }
-
-    const path: string[] = [fromId, toId];
-    let current = toId;
-
-    while (true) {
+  ): Promise<Result<void, LoreError>> {
+    return detectParentCycleViaAncestry(fromId, toId, async (id) => {
       const parentLink = this.links.find(
-        (l) => l.from_id === current && l.link_type === "parent",
+        (l) => l.from_id === id && l.link_type === "parent",
       );
-
-      if (!parentLink) break;
-
-      const parentId = parentLink.to_id;
-      if (parentId === fromId) {
-        return err({ code: "LINK_CYCLE", path: [...path, parentId] });
-      }
-      path.push(parentId);
-      current = parentId;
-    }
-
-    return ok(undefined);
+      if (parentLink) return parentLink.to_id;
+      return this.docs.get(id)?.parent_id ?? null;
+    });
   }
 
   async removeLink(
