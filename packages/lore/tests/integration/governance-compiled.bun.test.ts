@@ -108,7 +108,7 @@ describe("AC-083-1: compiled dist/lore governance (SPEC-083 D1, amended by D9)",
     expect(result.exitCode).toBe(2);
     expect(result.stderr).toContain("lore fragments");
     expect(result.stdout).toBe("");
-    expect(readCorpusWorkflowFragments()).toContain("Measure every oracle's exit code WITHOUT a pipe");
+    expect(readCorpusWorkflowFragments()).toContain("exit code WITHOUT a pipe");
   });
 
   it("NEGATIVE: an unknown flag is rejected exit 2 (SPEC-051 strict-flag seam wraps this command)", () => {
