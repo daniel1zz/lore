@@ -4,7 +4,7 @@
 
 - Document type, target audience, optimization goal
 - Must preserve / cannot change constraints
-- Target reduction %
+- Measured reduction reported, no preset target
 
 ## Structure Analysis
 
@@ -33,4 +33,4 @@
 
 - [ ] All workflows executable, decision points clear, constraints preserved
 - [ ] No ambiguity, info actionable, context sufficient
-- [ ] Target reduction achieved, density increased, redundancy eliminated
+- [ ] Measured reduction reported (no preset target), density increased, redundancy eliminated

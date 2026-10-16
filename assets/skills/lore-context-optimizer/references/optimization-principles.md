@@ -21,7 +21,7 @@
 
 1. **Exact repetition** → consolidate to single global rule
 2. **Semantic repetition** → merge into one statement
-3. **Verbose explanations** → concise imperative
+3. **Verbose explanations** → concise imperative (a scope-setting reason clause stays)
 
 ## Progressive Disclosure
 
