@@ -83,7 +83,6 @@ import {
   readLedgerFromCorpus,
   main,
   LedgerReadError,
-  LEDGER_SLUG,
   type GapEntry,
 } from "../check-gap-namespace.js";
 
@@ -547,47 +546,6 @@ describe("check-gap-namespace: SSOT fixture (mkdtemp + lore init, never this rep
   }, 30000);
 });
 
-// ─── Arming: the REAL repo tree + REAL corpus (task oracle) ────────────────
-//
-// This is this checker's PRODUCTION WIRING (see the script's own module
-// header: this repo's established convention for a dev-repo-only static
-// checker — task-three-of-five-static-checkers-are-inert-no-exported-main —
-// is a real-tree main() call armed by `bun run test`, never `hooks/pre-push`,
-// which is byte-identical to the file shipped into every consumer project
-// and would break there since this checker's target doc does not exist in
-// any `lore init`-created project).
-//
-// It is ALSO AC-GD-3(g)/(h) (exits 0 against the LIVE renamed ledger; GAP-19's
-// scope line is correct). Whether this repo's OWN exported mirror happens to
-// be stale or fresh right now is irrelevant to this assertion and is
-// deliberately NOT checked here — that comparison (corpus-keyed, not
-// mirror-keyed) is owned entirely by the direction-2 fixture above, which
-// constructs both ends itself and so cannot be reddened by repairing this
-// repo's mirror.
-//
-// READ-ONLY against this repo's own `.lore/`: `main()`'s only corpus access
-// is one `lore get <slug> --json` (a GET), so this creates, edits, and
-// deletes exactly zero corpus docs.
-
-describe("check-gap-namespace: real repo tree (task oracle) — AC-GD-3(g)(h)", () => {
-  it("REGRESSION/HAPPY: exits 0 against the LIVE renamed ledger via the corpus (D4b)", () => {
-    const exitCode = main(); // production defaults: this repo's root + the real LEDGER_SLUG
-    expect(exitCode).toBe(0);
-  }, 30000);
-
-  it("REGRESSION: the live ledger's unowned-gap report is exactly the pinned set — SET EQUALITY, not just a count", () => {
-    const content = readLedgerFromCorpus(REPO_ROOT, LEDGER_SLUG);
-    const { entries } = extractGapEntries(content);
-    const unowned = computeUnownedGapIds(entries);
-    expect(new Set(unowned)).toEqual(
-      new Set(["GAP-7", "GAP-8", "GAP-11", "GAP-15", "GAP-16", "GAP-17", "GAP-18", "GAP-19"]),
-    );
-  }, 30000);
-
-  it("HAPPY: GAP-19's live scope line contains 'main' and none of PENDING/mirror branch/a9f801dd", () => {
-    const content = readLedgerFromCorpus(REPO_ROOT, LEDGER_SLUG);
-    const scope = checkGap19Scope(content);
-    expect(scope.present).toBe(true);
-    expect(scope.ok).toBe(true);
-  }, 30000);
-});
+// The REAL repo tree + REAL corpus arming cases moved to scripts/check-live-corpus-detectors.ts
+// (run by check:live-repo-state): LORE_TEST_SANDBOX refuses this repo's own corpus inside vitest.
+// task-skill-implement-tg-4, AC-TG-2.

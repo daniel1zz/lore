@@ -32,7 +32,7 @@
     "check:shipped-defaults": "bun scripts/check-shipped-defaults.ts",
     "check:ac-oracle-ownership": "bun scripts/check-ac-oracle-ownership.ts",
     "check:spec-mirror": "bun scripts/export-spec-mirror.ts --check",
-    "check:live-repo-state": "bun scripts/check-claude-md-live-sweep.ts && bun scripts/check-list-json-real-corpus-buffer.ts && bun scripts/check-phase-write-live-state.ts && bun scripts/check-live-mirror-integrity.ts",
+    "check:live-repo-state": "bun scripts/check-claude-md-live-sweep.ts && bun scripts/check-list-json-real-corpus-buffer.ts && bun scripts/check-phase-write-live-state.ts && bun scripts/check-live-mirror-integrity.ts && bun scripts/check-live-corpus-detectors.ts",
     "mirror:export": "bun scripts/export-spec-mirror.ts"
   },
   "devDependencies": {

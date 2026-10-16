@@ -56,6 +56,9 @@ export default defineConfig({
       },
     },
     setupFiles: [
+      // reason: arms LORE_TEST_SANDBOX so corpus resolution refuses this repo's own
+      // .lore/lore.db (AC-TG-2, task-skill-implement-tg-4). Child processes inherit it.
+      "scripts/test-isolation-setup.ts",
       // reason: dashboard component tests need jest-dom matchers + React cleanup wired before
       // each test. vitest globals:false prevents @testing-library/react auto-detecting afterEach,
       // so setup.ts registers it explicitly. SPEC-015 §4 M6.
