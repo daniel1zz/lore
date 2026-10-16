@@ -3,7 +3,7 @@ id: TASK-1477
 type: task
 role: plan
 title: "[Skill:test] R0-10 verify both suites green on main"
-status: draft
+status: archived
 priority: critical
 phase: "Phase 2: verify on main"
 created: 2026-10-16

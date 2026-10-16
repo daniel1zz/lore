@@ -36,9 +36,9 @@ AC-R0-1..5 (`lore ac add`). AC-R0-1/2 are the round's exit; AC-R0-3..5 pin the t
 
 ## Acceptance Criteria (structured)
 
-- [✘] [script] AC-R0-1: On main after the round's last merge, bun run test:vitest exits exactly 0
+- [⊘] [script] AC-R0-1: On main after the round's last merge, bun run test:vitest exits exactly 0
   script: test — bun run test:vitest
-- [✘] [script] AC-R0-2: On main after the round's last merge (dist/lore rebuilt), bun run test:bun exits exactly 0
+- [⊘] [script] AC-R0-2: On main after the round's last merge (dist/lore rebuilt), bun run test:bun exits exactly 0
   script: test — bun run test:bun
 - [⚑] [script] AC-R0-3: With a user config that sets a reply language (isolated HOME and XDG_CONFIG_HOME), the first lore setup records in its manifest a settings.json sha256 equal to the file's final on-disk bytes, and a second --dry-run right after reports every file as would-skip
   script: test — bunx vitest run packages/lore/tests/integration/cli/setup-language-manifest-sha.test.ts

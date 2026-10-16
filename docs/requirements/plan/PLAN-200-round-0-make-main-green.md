@@ -3,7 +3,7 @@ id: PLAN-200
 type: plan
 role: plan
 title: "Round 0: make main green"
-status: approved
+status: archived
 priority: medium
 created: 2026-10-16
 updated: 2026-10-16
@@ -12,6 +12,16 @@ parent: SPEC-194
 phases:
   - {name: "Phase 1: fixes"}
   - {name: "Phase 2: verify on main"}
+links:
+  - {id: TASK-1386, type: resolves}
+  - {id: TASK-1398, type: resolves}
+  - {id: TASK-975, type: resolves}
+  - {id: TASK-863, type: resolves}
+  - {id: TASK-1322, type: resolves}
+  - {id: TASK-1352, type: resolves}
+  - {id: TASK-1397, type: resolves}
+  - {id: TASK-916, type: resolves}
+  - {id: TASK-1404, type: resolves}
 ---
 ## Overview
 Round 0 of the backlog: make main green (spec-round-0-main-is-green-every-red-test-on-e1878626-traced-to). Ten tasks: nine fix tasks (Phase 1), one per root cause in the spec's Scope table, and one verification task (Phase 2).

@@ -11120,6 +11120,14 @@
     "01M522JNMYR56B6XZ5QXKDF6DA": {
       "human_id": "TASK-1481",
       "file_path": "docs/requirements/task/TASK-1481-skill-design-claude-md-eviction-requires-a-corpus.md"
+    },
+    "01M526BQAAMM8EX1KC2WQR1AV7": {
+      "human_id": "TASK-1482",
+      "file_path": "docs/requirements/task/TASK-1482-skill-implement-a-dirty-tree-verify-cannot-launder.md"
+    },
+    "01M526BPTGVVWF00J7GS4Y3Y1N": {
+      "human_id": "TASK-1483",
+      "file_path": "docs/requirements/task/TASK-1483-skill-implement-gate-audit-writes-are-awaited-befo.md"
     }
   }
 }
