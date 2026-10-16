@@ -234,6 +234,7 @@ import { resolveFeedbackUpstreamCfg } from "../report-issue-wiring.js";
 // calls `process.exit(1)` on a missing corpus — the bypass path must never do
 // that, see `openBypassRecordGateSkip` below).
 import { SQLiteStore } from "../../../store/sqlite-store.js";
+import { assertNoForeignSchemaMigration } from "../../../store/foreign-schema-guard.js";
 import { findLoreDbPathQuiet, runGateEnvBypassAudit } from "../gate-bypass-audit.js";
 import { renderPredicateContractsExplain } from "../../../service/predicate-contracts.js";
 
@@ -259,6 +260,10 @@ import { renderPredicateContractsExplain } from "../../../service/predicate-cont
 async function openBypassRecordGateSkip(): Promise<RecordGateSkip | null> {
   const dbPath = findLoreDbPathQuiet();
   if (dbPath === undefined) return null;
+  // reason: F5 (AC-CRIT-7) — a bypass audit from a linked worktree must not migrate main's behind corpus.
+  // Thrown BEFORE the catch below on purpose: runGateEnvBypassAudit turns the throw into its single
+  // `gate bypass NOT audited: <schema mismatch>` warning and the gate still exits 0.
+  assertNoForeignSchemaMigration(dbPath);
   try {
     const store = new SQLiteStore(dbPath);
     return store.appendAuditEntry.bind(store);
