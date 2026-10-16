@@ -35,10 +35,100 @@ import { hostname } from "node:os";
 import { defineCommand } from "citty";
 import type { SessionLivenessRecord } from "../../../service/session-service.js";
 import { resolveClaimSessionId } from "../../../service/task-workflow-service.js";
+import {
+  parseRunId,
+  readSessionTrail,
+  sessionOfRun,
+  stateBase,
+  TrailFileInvalidError,
+  TrailRunIdInvalidError,
+  type SessionTrail,
+} from "@lore/core/node";
 import { loadLoreApp } from "../loader.js";
+import { formatTrail, narrowTrail } from "../session-trail-render.js";
 import { exitCode, formatError } from "../utils.js";
 
-const RESERVED_SUBCOMMANDS = new Set(["list", "show"]);
+const RESERVED_SUBCOMMANDS = new Set(["list", "show", "trail"]);
+
+/** The trail-access rule id (AC-ST-6) every refusal of `lore session trail` names. */
+const TRAIL_ACCESS_RULE = "BR-1143";
+
+/**
+ * `lore session trail [--turn <id>] [--run <id>] [--json]` — the CALLER's own session trail (spec D12:
+ * no `--session`; the session is the attested `cc:<session>[:<agent>]` run's session part).
+ * Exit 0 ok; 3 unknown `--turn`; 4 no attested run / non-`cc:` run / no trail for the session / bad `--run`.
+ */
+async function runSessionTrail(
+  app: Awaited<ReturnType<typeof loadLoreApp>>["app"],
+  args: { turn?: unknown; run?: unknown; json?: unknown },
+): Promise<void> {
+  const refuse = (reason: string): void => {
+    process.stderr.write(`Error: ${reason} (${TRAIL_ACCESS_RULE}: \`lore session trail\` reads only the calling run's own session trail)\n`);
+    process.exitCode = 4;
+  };
+  // reason: the run is VERIFIED against the registry (unregistered -> null), so "attested" means attested, not merely claimed.
+  const verified = await app.verifiedInvocationIdentity?.();
+  if (verified !== undefined && !verified.ok) {
+    process.stderr.write(formatError(verified.error) + "\n");
+    process.exitCode = exitCode(verified.error);
+    return;
+  }
+  const callerRun = verified?.value?.harnessRun ?? null;
+  if (callerRun === null) {
+    refuse("no attested run: pass --harness-run or call from an attested harness");
+    return;
+  }
+  let session: string;
+  try {
+    session = sessionOfRun(callerRun);
+  } catch (err) {
+    if (err instanceof TrailRunIdInvalidError) {
+      refuse(`run ${callerRun} is not a claude-code run (cc:<session>[:<agent>])`);
+      return;
+    }
+    throw err;
+  }
+  let runFilter: string | undefined;
+  if (typeof args.run === "string") {
+    try {
+      parseRunId(args.run);
+    } catch (err) {
+      if (err instanceof TrailRunIdInvalidError) {
+        refuse(`--run ${args.run} is not a claude-code run (cc:<session>[:<agent>])`);
+        return;
+      }
+      throw err;
+    }
+    runFilter = args.run;
+  }
+  let trail: SessionTrail | null;
+  try {
+    trail = readSessionTrail(session);
+  } catch (err) {
+    if (err instanceof TrailFileInvalidError) {
+      process.stderr.write(`Error: ${err.message}\n`);
+      process.exitCode = 1;
+      return;
+    }
+    throw err;
+  }
+  if (trail === null) {
+    refuse(`no session trail for session ${session} under ${stateBase()}`);
+    return;
+  }
+  const turn = typeof args.turn === "string" ? args.turn : undefined;
+  if (turn !== undefined && !trail.turns.some((t) => t.turn === turn)) {
+    process.stderr.write(`Error: session ${session} has no turn "${turn}".\n`);
+    process.exitCode = 3;
+    return;
+  }
+  const view = narrowTrail(trail, { ...(turn !== undefined ? { turn } : {}), ...(runFilter !== undefined ? { run: runFilter } : {}) });
+  if (args.json) {
+    console.log(JSON.stringify({ ok: true, data: view }, null, 2));
+  } else {
+    console.log(formatTrail(view));
+  }
+}
 
 /**
  * The reason clause appended to an `"unmeasured"` liveness verdict at the
@@ -109,10 +199,22 @@ export default defineCommand({
       type: "boolean",
       description: "Output result as JSON",
     },
+    turn: {
+      type: "string",
+      description: "`trail` only: narrow to this turn id",
+    },
+    run: {
+      type: "string",
+      description: "`trail` only: narrow to the files this run (cc:<session>[:<agent>]) changed",
+    },
   },
   async run({ args }) {
     const { app } = loadLoreApp();
     try {
+      if (String(args.target) === "trail") {
+        await runSessionTrail(app, args);
+        return;
+      }
       if (app.sessionService === undefined) {
         process.stderr.write("Error: SessionService not wired on this App instance.\n");
         process.exitCode = 1;
