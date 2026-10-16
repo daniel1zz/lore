@@ -316,7 +316,7 @@
 
 import { spawnSync } from "node:child_process";
 import { z } from "zod";
-import { err, ok, hasClaimConflict, type ClaimHolder, type ClaimParty, type RunId, type Result } from "@lore/core";
+import { err, ok, extractDeclaredPhases, hasClaimConflict, type ClaimHolder, type ClaimParty, type RunId, type Result } from "@lore/core";
 import type { LoreError } from "@lore/core";
 import type { ActorSource } from "@lore/core/node";
 import {
@@ -610,6 +610,9 @@ export interface PlanMembershipDisagreement {
  */
 type PlanTerminalityFact =
   | { kind: "fully_terminal"; plan_slug: string }
+  // reason: F8 (AC-CRIT-11) — every member is terminal but the plan DECLARES phases no member
+  // occupies; the plan-close gate refuses such a plan, so the advisory must not offer archive.
+  | { kind: "fully_terminal_with_empty_phases"; plan_slug: string; empty_phases: string[] }
   | ({ kind: "membership_disagreement" } & PlanMembershipDisagreement);
 
 /** The `lore done` floors, by stable id (order = evaluation order). */
@@ -649,7 +652,16 @@ export interface DoneResult {
    * with that field, since a disagreement means the property-based member set
    * is empty and "fully terminal" cannot also be true.
    */
-  plan_now_fully_terminal?: { plan_slug: string };
+  plan_now_fully_terminal?: {
+    plan_slug: string;
+    /**
+     * F8 (AC-CRIT-11): declared `plan.extra.phases[].name` entries that NO member task occupies
+     * (`extra.phase`). Present iff non-empty — then archiving the plan is NOT the next step
+     * (the plan-close gate refuses an empty declared phase); the advisory names
+     * `lore phase rm <plan> <phase>` / adding a task instead.
+     */
+    empty_phases?: string[];
+  };
   /**
    * Present ONLY when `computePlanNowFullyTerminal` detected the membership-
    * source disagreement described on {@link PlanMembershipDisagreement} for the
@@ -3781,6 +3793,9 @@ export class TaskWorkflowService {
       ...(planFact?.kind === "fully_terminal"
         ? { plan_now_fully_terminal: { plan_slug: planFact.plan_slug } }
         : {}),
+      ...(planFact?.kind === "fully_terminal_with_empty_phases"
+        ? { plan_now_fully_terminal: { plan_slug: planFact.plan_slug, empty_phases: planFact.empty_phases } }
+        : {}),
       ...(planFact?.kind === "membership_disagreement"
         ? {
             plan_membership_disagreement: {
@@ -4794,6 +4809,18 @@ export class TaskWorkflowService {
 
     const allTerminal = members.every((t) => isTerminalStatus(t.status));
     if (!allTerminal) return ok(undefined);
+
+    // reason: F8 — same grouping key buildDeclaredPhaseScorecard's callers use (`extra.phase`
+    // string vs `plan.extra.phases[].name`); a declared phase with zero member tasks is "empty".
+    const occupiedPhases = new Set(
+      members.map((t) => t.extra["phase"]).filter((p): p is string => typeof p === "string"),
+    );
+    const emptyPhases = extractDeclaredPhases(plan)
+      .map((p) => p.name)
+      .filter((name) => !occupiedPhases.has(name));
+    if (emptyPhases.length > 0) {
+      return ok({ kind: "fully_terminal_with_empty_phases", plan_slug: plan.slug, empty_phases: emptyPhases });
+    }
 
     return ok({ kind: "fully_terminal", plan_slug: plan.slug });
   }
