@@ -3,7 +3,7 @@ id: TASK-1376
 type: task
 role: plan
 title: "[Skill:implement] co-change rules: config schema, trail-review judgment per run and for the unknown group, invalid settings reported without stopping other judgments"
-status: draft
+status: archived
 priority: high
 phase: "consumers"
 created: 2026-10-16

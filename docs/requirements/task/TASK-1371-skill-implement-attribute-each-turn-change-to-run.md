@@ -3,7 +3,7 @@ id: TASK-1371
 type: task
 role: plan
 title: "[Skill:implement] attribute each turn change to run, version control or unknown, and extend the source-edit finding"
-status: draft
+status: archived
 priority: critical
 phase: "measurement"
 created: 2026-10-16

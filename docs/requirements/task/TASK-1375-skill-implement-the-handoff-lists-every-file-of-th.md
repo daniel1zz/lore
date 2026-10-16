@@ -3,7 +3,7 @@ id: TASK-1375
 type: task
 role: plan
 title: "[Skill:implement] the handoff lists every file of the caller's session trail with its change source, and says not measured without a trail"
-status: draft
+status: archived
 priority: high
 phase: "consumers"
 created: 2026-10-16

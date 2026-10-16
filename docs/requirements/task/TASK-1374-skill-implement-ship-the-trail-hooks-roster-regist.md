@@ -3,7 +3,7 @@ id: TASK-1374
 type: task
 role: plan
 title: "[Skill:implement] ship the trail hooks: roster registration, regenerated manifest, this repo's settings"
-status: draft
+status: archived
 priority: high
 phase: "landing"
 created: 2026-10-16

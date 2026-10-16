@@ -19,7 +19,6 @@ links:
   - {id: SPEC-166, type: relates-to}
   - {id: SPEC-107, type: relates-to}
   - {id: TASK-727, type: resolves}
-  - {id: TASK-913, type: resolves}
   - {id: TASK-726, type: resolves}
   - {id: TASK-720, type: resolves}
   - {id: TASK-713, type: resolves}
@@ -27,9 +26,10 @@ links:
   - {id: TASK-936, type: resolves}
   - {id: TASK-884, type: resolves}
   - {id: TASK-719, type: resolves}
-  - {id: TASK-711, type: resolves}
   - {id: TASK-728, type: resolves}
   - {id: TASK-701, type: relates-to}
+  - {id: TASK-913, type: relates-to}
+  - {id: TASK-711, type: relates-to}
 ---
 ## Overview/Goal
 

@@ -3,7 +3,7 @@ id: TASK-1378
 type: task
 role: plan
 title: "[Skill:implement] lore session trail lists the caller's own session trail by whole session, turn or run"
-status: draft
+status: archived
 priority: high
 phase: "consumers"
 created: 2026-10-16

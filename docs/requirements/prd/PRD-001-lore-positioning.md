@@ -108,6 +108,12 @@ This PRD is the tree root. Each module is a child spec (kind=feature/tech/design
 
 The module tree below is rendered live from the corpus (SPEC-004 placeholder resolution) — a hand-maintained list demonstrably drifts (this section was 8 specs stale at v0.5, stopping at SPEC-011 while the corpus reached SPEC-031):
 
+- [task] A project config with one invalid workflow key is silently dropped whole by the CLI loader, disabling every workflow setting (gates included) for all lore commands (draft)
+- [task] main is red at 8395a3b6 on five unrelated pre-existing failures (test budgets, store CLAUDE.md eviction floor, plan-close-cascade, mirror-status-parity baseline mappings, ac-ref ambiguity, anchor-coverage ledger) (draft)
+- [task] export-index holds 10 duplicate human_id pairs (SPEC-092, 095-102, 156) and check:spec-mirror still exits 0; repairCollisions only checks file_path (draft)
+- [task] lore setup records settings.json's sha in the manifest BEFORE applyLanguageProjections writes language into it, so the first install's manifest is wrong and the next run silently rewrites it (draft)
+- [task] lore worktree sweep has no plan/spec scope: a plan's worktrees cannot be cleaned up together when the plan closes (draft)
+- [task] lore worktree sweep marks a worktree an agent is actively using as removable (draft)
 - [task] lore run register records the main run as the parent of every helper, so a helper started by another helper gets a guessed parent stated as fact (BR-1027) (draft)
 - [task] Oracle-file precheck ignores a cd in a non-first chain segment: 'A && cd packages/lore && bun test tests/x.bun.test.ts' is refused as a missing path (draft)
 - [task] review_judgments has no advisory column: SPEC-053 advisory findings are lost on every SQLite/Turso read-back (draft)

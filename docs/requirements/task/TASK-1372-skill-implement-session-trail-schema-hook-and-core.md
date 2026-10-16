@@ -3,7 +3,7 @@ id: TASK-1372
 type: task
 role: plan
 title: "[Skill:implement] session trail schema, hook and core readers, writers at session start, helper start and each edit, and 14-day retention"
-status: draft
+status: archived
 priority: critical
 phase: "foundation"
 created: 2026-10-16

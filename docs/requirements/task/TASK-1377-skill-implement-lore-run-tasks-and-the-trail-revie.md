@@ -3,7 +3,7 @@ id: TASK-1377
 type: task
 role: plan
 title: "[Skill:implement] lore run tasks and the trail-review helper-scope judgment, each helper end judged once by the turn-end review"
-status: draft
+status: archived
 priority: critical
 phase: "consumers"
 created: 2026-10-16

@@ -10688,6 +10688,38 @@
     "01M51EX2604G20AN1E610JX76V": {
       "human_id": "TASK-1394",
       "file_path": "docs/requirements/task/TASK-1394-lore-create-task-ac-scope-stores-an-id-the-governi.md"
+    },
+    "01M51KSRYVE0KH1ZC5BK22SNR9": {
+      "human_id": "KN-697",
+      "file_path": "docs/requirements/knowledge/KN-697-assessment-close-the-eight-verified-critical-defec.md"
+    },
+    "01M51KPJ4PCD13E3EF1F4ZDNK9": {
+      "human_id": "KN-698",
+      "file_path": "docs/requirements/knowledge/KN-698-assessment-close-the-eight-verified-critical-defec.md"
+    },
+    "01M51PR6KZ1KFA24XHCETDT653": {
+      "human_id": "TASK-1395",
+      "file_path": "docs/requirements/task/TASK-1395-a-project-config-with-one-invalid-workflow-key-is.md"
+    },
+    "01M51K5KEYC6W8BHDTFYCYXKXG": {
+      "human_id": "TASK-1396",
+      "file_path": "docs/requirements/task/TASK-1396-main-is-red-at-8395a3b6-on-five-unrelated-pre-exis.md"
+    },
+    "01M51K5FAK6GV2SVQHTY8NSSVT": {
+      "human_id": "TASK-1397",
+      "file_path": "docs/requirements/task/TASK-1397-export-index-holds-10-duplicate-human-id-pairs-spe.md"
+    },
+    "01M51K5AX9EBJYSHC0MGJ1SFFC": {
+      "human_id": "TASK-1398",
+      "file_path": "docs/requirements/task/TASK-1398-lore-setup-records-settings-json-s-sha-in-the-mani.md"
+    },
+    "01M51K3DRE797CHJVSR9YBE9DZ": {
+      "human_id": "TASK-1399",
+      "file_path": "docs/requirements/task/TASK-1399-lore-worktree-sweep-has-no-plan-spec-scope-a-plan.md"
+    },
+    "01M51K39PE8S9KHHJWSYVM8STG": {
+      "human_id": "TASK-1400",
+      "file_path": "docs/requirements/task/TASK-1400-lore-worktree-sweep-marks-a-worktree-an-agent-is-a.md"
     }
   }
 }
