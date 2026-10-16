@@ -3,7 +3,7 @@ id: TASK-1468
 type: task
 role: plan
 title: "[Skill:test] R0-5 plan-close-cascade asserts field by field (#201)"
-status: draft
+status: archived
 priority: low
 phase: "Phase 1: fixes"
 created: 2026-10-16

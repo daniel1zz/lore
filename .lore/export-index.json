@@ -11104,6 +11104,10 @@
     "01M51ZY2Y45Z829N2B6AY2ES98": {
       "human_id": "TASK-1477",
       "file_path": "docs/requirements/task/TASK-1477-skill-test-r0-10-verify-both-suites-green-on-main.md"
+    },
+    "01M520PXM968GDW5N81F41T86S": {
+      "human_id": "TASK-1478",
+      "file_path": "docs/requirements/task/TASK-1478-skill-implement-mirror-export-renumbers-human-ids.md"
     }
   }
 }

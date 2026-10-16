@@ -3,7 +3,7 @@ id: TASK-1470
 type: task
 role: plan
 title: "[Skill:refactor] R0-4 evict store/CLAUDE.md below its floor (#10)"
-status: draft
+status: archived
 priority: medium
 phase: "Phase 1: fixes"
 created: 2026-10-16
