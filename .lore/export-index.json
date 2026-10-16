@@ -10576,6 +10576,118 @@
     "01M4ZZ6MQ7Z21SQAH83C009PK3": {
       "human_id": "TASK-1370",
       "file_path": "docs/requirements/task/TASK-1370-an-ac-command-that-starts-with-an-absolute-cd-sile.md"
+    },
+    "01M51E9YP1Z2ZT247VNTZCP4HV": {
+      "human_id": "SPEC-186",
+      "file_path": "docs/requirements/spec/SPEC-186-close-the-eight-verified-critical-defects-no-judge.md"
+    },
+    "01M51H4MHKDFEDWDYWW7A4WAEZ": {
+      "human_id": "SPEC-190",
+      "file_path": "docs/requirements/spec/SPEC-190-session-trail-a-session-local-record-of-what-each.md"
+    },
+    "01M51H5ND6AZ3ASWZ5KQ1DX3VK": {
+      "human_id": "PLAN-188",
+      "file_path": "docs/requirements/plan/PLAN-188-session-trail-record-what-each-run-changed-judge-i.md"
+    },
+    "01M51EBWGKD3X1ZT09JKBXMVK5": {
+      "human_id": "PLAN-189",
+      "file_path": "docs/requirements/plan/PLAN-189-close-the-eight-verified-critical-defects.md"
+    },
+    "01M51H5QYHZ9T7A7YDAC4KE1NN": {
+      "human_id": "TASK-1371",
+      "file_path": "docs/requirements/task/TASK-1371-skill-implement-attribute-each-turn-change-to-run.md"
+    },
+    "01M51H5PY3H485NCPQJ09AJC41": {
+      "human_id": "TASK-1372",
+      "file_path": "docs/requirements/task/TASK-1372-skill-implement-session-trail-schema-hook-and-core.md"
+    },
+    "01M51H5V21BDRVTF503M8MC188": {
+      "human_id": "TASK-1373",
+      "file_path": "docs/requirements/task/TASK-1373-skill-verify-land-the-session-trail-verify-rule-ap.md"
+    },
+    "01M51H5THW5Z4ZAZW5D390N3C5": {
+      "human_id": "TASK-1374",
+      "file_path": "docs/requirements/task/TASK-1374-skill-implement-ship-the-trail-hooks-roster-regist.md"
+    },
+    "01M51H5T1MJHX8RQMC2Z3ZZPRG": {
+      "human_id": "TASK-1375",
+      "file_path": "docs/requirements/task/TASK-1375-skill-implement-the-handoff-lists-every-file-of-th.md"
+    },
+    "01M51H5SFGYP65HK2YP3D21PKW": {
+      "human_id": "TASK-1376",
+      "file_path": "docs/requirements/task/TASK-1376-skill-implement-co-change-rules-config-schema-trai.md"
+    },
+    "01M51H5RYYDQ34FS1KZ3E37YGZ": {
+      "human_id": "TASK-1377",
+      "file_path": "docs/requirements/task/TASK-1377-skill-implement-lore-run-tasks-and-the-trail-revie.md"
+    },
+    "01M51H5REHTNZNGDFHZ0C00P9B": {
+      "human_id": "TASK-1378",
+      "file_path": "docs/requirements/task/TASK-1378-skill-implement-lore-session-trail-lists-the-calle.md"
+    },
+    "01M51H5QEDAM6Y2HHEZ9F05R3D": {
+      "human_id": "TASK-1379",
+      "file_path": "docs/requirements/task/TASK-1379-skill-implement-measure-an-isolated-helper-s-chang.md"
+    },
+    "01M51GSC9QWFC1H75H39W5EQG8": {
+      "human_id": "TASK-1380",
+      "file_path": "docs/requirements/task/TASK-1380-lore-run-register-records-the-main-run-as-the-pare.md"
+    },
+    "01M51EJ6ZQ3J68MAC310SQSTBA": {
+      "human_id": "TASK-1381",
+      "file_path": "docs/requirements/task/TASK-1381-skill-test-verify-on-main-full-suite-lore-verify-c.md"
+    },
+    "01M51GGT67DM4E3ZE9HN6CN0VN": {
+      "human_id": "TASK-1382",
+      "file_path": "docs/requirements/task/TASK-1382-oracle-file-precheck-ignores-a-cd-in-a-non-first-c.md"
+    },
+    "01M51GESZ2YZ1BFCGK1GKA4H7D": {
+      "human_id": "TASK-1383",
+      "file_path": "docs/requirements/task/TASK-1383-review-judgments-has-no-advisory-column-spec-053-a.md"
+    },
+    "01M51EJ34A4HRR3KRA5C5VZ0N1": {
+      "human_id": "TASK-1384",
+      "file_path": "docs/requirements/task/TASK-1384-skill-implement-f1-review-notice-and-record-every.md"
+    },
+    "01M51EJ6H1XMVH54CFT9RQXQV7": {
+      "human_id": "TASK-1385",
+      "file_path": "docs/requirements/task/TASK-1385-skill-implement-f8-done-a-plan-with-an-empty-decla.md"
+    },
+    "01M51G8CARDK95XXBW9CXF5XDV": {
+      "human_id": "TASK-1386",
+      "file_path": "docs/requirements/task/TASK-1386-main-is-red-after-plan-always-loaded-lore-fragment.md"
+    },
+    "01M51EJ5KQNV4GJ85X6CF4W1DY": {
+      "human_id": "TASK-1387",
+      "file_path": "docs/requirements/task/TASK-1387-skill-implement-f6-hook-cap-the-concatenated-sessi.md"
+    },
+    "01M51EJ47PCCN5M9YK10GZ9RQ1": {
+      "human_id": "TASK-1388",
+      "file_path": "docs/requirements/task/TASK-1388-skill-implement-f3-mirror-export-rewrites-changed.md"
+    },
+    "01M51EJ62BW33DX24N9NJ2Z9K4": {
+      "human_id": "TASK-1389",
+      "file_path": "docs/requirements/task/TASK-1389-skill-implement-f7-done-honor-the-attested-executi.md"
+    },
+    "01M51EJ54WEDHNXTDB2TR6GW74": {
+      "human_id": "TASK-1390",
+      "file_path": "docs/requirements/task/TASK-1390-skill-implement-f5-store-a-worktree-never-migrates.md"
+    },
+    "01M51FWRCFCSK139XVH59XWP2D": {
+      "human_id": "TASK-1391",
+      "file_path": "docs/requirements/task/TASK-1391-lore-gate-spec-promote-prints-the-advisory-judge-s.md"
+    },
+    "01M51EJ4P9GETAJHRX8CR5TYZE": {
+      "human_id": "TASK-1392",
+      "file_path": "docs/requirements/task/TASK-1392-skill-implement-f4-list-report-omitted-invalid-ins.md"
+    },
+    "01M51EJ3PTMC42S3443F9SR6N2": {
+      "human_id": "TASK-1393",
+      "file_path": "docs/requirements/task/TASK-1393-skill-implement-f2-assess-findings-on-files-the-ju.md"
+    },
+    "01M51EX2604G20AN1E610JX76V": {
+      "human_id": "TASK-1394",
+      "file_path": "docs/requirements/task/TASK-1394-lore-create-task-ac-scope-stores-an-id-the-governi.md"
     }
   }
 }

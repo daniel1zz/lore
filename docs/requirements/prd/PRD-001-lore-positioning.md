@@ -108,6 +108,12 @@ This PRD is the tree root. Each module is a child spec (kind=feature/tech/design
 
 The module tree below is rendered live from the corpus (SPEC-004 placeholder resolution) — a hand-maintained list demonstrably drifts (this section was 8 specs stale at v0.5, stopping at SPEC-011 while the corpus reached SPEC-031):
 
+- [task] lore run register records the main run as the parent of every helper, so a helper started by another helper gets a guessed parent stated as fact (BR-1027) (draft)
+- [task] Oracle-file precheck ignores a cd in a non-first chain segment: 'A && cd packages/lore && bun test tests/x.bun.test.ts' is refused as a missing path (draft)
+- [task] review_judgments has no advisory column: SPEC-053 advisory findings are lost on every SQLite/Turso read-back (draft)
+- [task] main is red after plan-always-loaded-lore-fragments-state-the-rule-only closed: 3 tests pin fragment prose the compression rewrote (draft)
+- [task] lore gate spec-promote prints the advisory judge's decision (reject, confidence 0.72) with no reasons and has no --json, so the author cannot act on it (draft)
+- [task] lore create task --ac-scope stores an id the governing spec does not declare (e.g. 'AC-CRIT-1 AC-CRIT-2' as one id) without refusal (draft)
 - [knowledge] Retro: compressing always-loaded fragments without losing rules (2026-10-16) (approved)
 - [task] A pass evidence row that was later disproved cannot be retracted, so it keeps counting toward its AC's pass total (draft)
 - [task] Align compression and rubric-grading guidance with Anthropic's prompting and evaluation docs (archived)
