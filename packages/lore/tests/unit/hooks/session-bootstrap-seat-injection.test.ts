@@ -206,7 +206,7 @@ describe("session-bootstrap-seat-injection — BOUNDARY", () => {
     expect(ctx).not.toContain("```");
     expect(ctx).not.toContain(BOOTSTRAP_FRAMING_LINE);
     expect(ctx).toContain("Degradation Report");
-    expect(ctx).toContain("12005 chars exceeds 12000 backstop");
+    expect(ctx).toContain("chars dropped whole: session-start output");
   });
 });
 
