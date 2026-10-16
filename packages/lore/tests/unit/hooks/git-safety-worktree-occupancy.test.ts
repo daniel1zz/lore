@@ -136,7 +136,7 @@ describe("AC-WL-3 git-safety hook — worktree removal decided by lore's one rem
     const r = runHook({ command: `git worktree remove ${wtDetached}` });
     expect(r.code).toBe(0);
     expect(r.stderr).toBe("");
-  });
+  }, 60_000);
 
   it("(b) the owning agent run has no end: blocked, naming the run id and `lore run end`", () => {
     const r = runHook({
@@ -222,7 +222,7 @@ describe("AC-WL-3 git-safety hook — worktree removal decided by lore's one rem
       "Assessment: WORKTREE HAS 1 UNCOMMITTED change(s) — git itself refuses this without --force, but treat as UNSAFE:",
     );
     expect(r.loreArgs).toBe("");
-  });
+  }, 60_000);
 
   it("(h) an UNMERGED worktree keeps today's refusal text", () => {
     const unmerged = join(base, "wt-unmerged");

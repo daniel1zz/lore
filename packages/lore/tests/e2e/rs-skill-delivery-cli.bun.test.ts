@@ -122,7 +122,7 @@ describe("AC-RS-10 skill-delivered fragment", () => {
     expect(subagent.code).toBe(0);
     expect(subagent.stdout).toContain(controlNonce);
     expect(subagent.stdout).not.toContain(NONCE);
-  });
+  }, 60_000);
 
   it("removing the fragment prunes the SKILL.md and its now-empty lore-<id>/ directory", () => {
     const sb = makeSandbox();

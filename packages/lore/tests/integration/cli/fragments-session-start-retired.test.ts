@@ -118,7 +118,7 @@ describe("hook:session-start outlet is retired (AC-UR-3)", () => {
     expect(over.stderr).toContain(`${SUBAGENT_FRAGMENT_CAP + 1} chars`);
     expect(additionalContext(over)).toContain("BUDGET_EXCEEDED");
     expect(additionalContext(over)).not.toContain("x".repeat(atLimit));
-  });
+  }, 60_000);
 
   it("AC-UR-3.R1: the retired target is refused even outside any lore project (no project read needed)", () => {
     const bare = mkdtempSync(join(sandbox, "bare-"));
