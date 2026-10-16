@@ -107,6 +107,8 @@ export const HelperRecordSchema = z
     end_count: z.number().int().nonnegative(),
     working_copy: z.string().min(1).optional(),
     isolated: z.boolean().optional(),
+    /** Helper base fixed at its FIRST measured end; kept across failed ends and reused by every later end. */
+    base: z.string().min(1).optional(),
     changes: measuredOf(
       z.object({ base: z.string().min(1), files: z.array(TrailChangeSchema) }).strict(),
     ).optional(),
