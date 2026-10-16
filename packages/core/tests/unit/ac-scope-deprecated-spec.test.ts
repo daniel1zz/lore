@@ -32,12 +32,15 @@ function spec(slug: string, status: string, extra: Record<string, unknown> = {})
   } as unknown as DocRecord;
 }
 
+const NOW = "2026-06-01T00:00:00.000Z";
+
 describe("AC-R0-4 resolveGoverningSpecByAcScope ignores non-live specs", () => {
   it("AC-R0-4 deprecated + approved declaring the same id resolves to the approved one", () => {
     const r = resolveGoverningSpecByAcScope(
       ["AC-X-1"],
       [spec("old", "deprecated"), spec("new", "approved")],
       "t",
+      NOW,
     );
     expect(r.ok).toBe(true);
     if (r.ok) expect(r.value.spec.slug).toBe("new");
@@ -51,6 +54,7 @@ describe("AC-R0-4 resolveGoverningSpecByAcScope ignores non-live specs", () => {
         spec("new", "approved"),
       ],
       "t",
+      NOW,
     );
     expect(r.ok).toBe(true);
     if (r.ok) expect(r.value.spec.slug).toBe("new");
@@ -61,14 +65,25 @@ describe("AC-R0-4 resolveGoverningSpecByAcScope ignores non-live specs", () => {
       ["AC-X-1"],
       [spec("a", "approved"), spec("b", "draft"), spec("c", "deprecated")],
       "t",
+      NOW,
     );
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.error.message).toMatch(/ambiguous/);
   });
 
   it("AC-R0-4 only-deprecated is unresolved", () => {
-    const r = resolveGoverningSpecByAcScope(["AC-X-1"], [spec("old", "deprecated")], "t");
+    const r = resolveGoverningSpecByAcScope(["AC-X-1"], [spec("old", "deprecated")], "t", NOW);
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.error.message).toMatch(/matches no/);
+  });
+
+  it("AC-R0-4 an invalid_at in the future at the given now does NOT exclude the spec", () => {
+    const future = spec("future", "approved", { validity: { invalid_at: "2026-12-01T00:00:00.000Z" } });
+    const r = resolveGoverningSpecByAcScope(["AC-X-1"], [future], "t", NOW);
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.value.spec.slug).toBe("future");
+    // the same spec IS excluded once `now` passes its invalid_at
+    const later = resolveGoverningSpecByAcScope(["AC-X-1"], [future], "t", "2027-01-01T00:00:00.000Z");
+    expect(later.ok).toBe(false);
   });
 });
