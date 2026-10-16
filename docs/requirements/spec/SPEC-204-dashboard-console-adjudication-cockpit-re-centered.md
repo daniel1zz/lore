@@ -1,5 +1,5 @@
 ---
-id: SPEC-100
+id: SPEC-204
 type: spec
 role: spec
 title: "Dashboard Console (adjudication cockpit re-centered; admin-console breadth admission-gated) (domain overview)"

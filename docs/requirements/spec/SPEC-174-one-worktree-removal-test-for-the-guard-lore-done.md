@@ -6,7 +6,7 @@ title: "One worktree-removal test for the guard, lore done and a sweep"
 status: approved
 priority: medium
 created: 2026-10-12
-updated: 2026-10-12
+updated: 2026-10-16
 tags: []
 links:
   - {id: SPEC-158, type: supersedes}
@@ -83,3 +83,10 @@ Declared with `lore ac add` (AC-WS-1..6).
   script: other — ! grep -rnE 'recent-activity|DEFAULT_WORKTREE_QUIET_MINUTES|parseQuietMinutes|LORE_WORKTREE_QUIET_MINUTES|lsof' packages/lore/src/service/worktree-cleanup.ts assets/hooks/pre-bash-git-safety-gate.mjs && node scripts/embed-assets-manifest.mjs --check && echo 'AC-WS-5 PASS: no time window or duplicate process scan left in cleanup or hook'
 - [⚑] [script] AC-WS-6: bun run typecheck exits 0.
   script: tsc — bun run typecheck
+
+## Code anchors
+
+- packages/lore/src/service/worktree-removal-service.ts
+- packages/lore/src/service/worktree-removal-test.ts
+- packages/lore/src/service/worktree-cleanup.ts
+- assets/hooks/pre-bash-git-safety-gate.mjs

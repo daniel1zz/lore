@@ -1,5 +1,5 @@
 ---
-id: SPEC-102
+id: SPEC-199
 type: spec
 role: spec
 title: "Memory Hygiene (knowledge trustworthiness over time) (domain overview)"

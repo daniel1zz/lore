@@ -8,9 +8,9 @@ priority: medium
 created: 2026-07-26
 updated: 2026-07-26
 tags: []
-parent: SPEC-092
+parent: SPEC-200
 links:
-  - {id: SPEC-092, type: informs}
+  - {id: SPEC-200, type: informs}
 ---
 ## Context
 PRD v0.5 §13 needed a document taxonomy for feature/tech/design outputs; options included new first-class doc types per kind vs a discriminating field.

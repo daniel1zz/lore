@@ -6,7 +6,7 @@ title: "Interception moves off every tool call: one turn-end review replaces per
 status: approved
 priority: high
 created: 2026-10-15
-updated: 2026-10-15
+updated: 2026-10-16
 tags: [hooks, gates, distribution]
 links:
   - {id: TASK-882, type: resolves}
@@ -75,3 +75,9 @@ Structured criteria are declared with `lore ac add` (AC-TE-*). Hook tests run th
   script: test — bun run build >/dev/null 2>&1 && out=$(mktemp); bunx vitest run packages/lore/tests/integration/hooks/harness-run-any-server-name.test.ts > "$out" 2>&1; ec=$?; cat "$out"; n=$(sed -nE 's/^ *Tests +([0-9]+) passed.*/\1/p' "$out"); [ "$ec" -eq 0 ] && [ "${n:-0}" -ge 4 ] && grep -q REAL_BINARY_NO_STUB packages/lore/tests/integration/hooks/harness-run-any-server-name.test.ts && echo 'AC-TE-6 PASS: the real lore binary attributes the run for lore tools under any server name and never for other servers'
 - [⚑] [script] AC-TE-7: In a throwaway git repo with a 50-line uncommitted .ts change left by an earlier turn and the main-session source-edit setting on: user-prompt-turn-start.mjs records a tree id, the real index is byte-identical before and after, and a following turn that edits nothing produces no finding (exit 0, empty stdout), while a following turn that adds 50 more lines to another .ts file produces exactly one finding naming only that file.
   script: test — out=$(mktemp); bunx vitest run packages/lore/tests/integration/hooks/turn-start-snapshot.test.ts > "$out" 2>&1; ec=$?; cat "$out"; n=$(sed -nE 's/^ *Tests +([0-9]+) passed.*/\1/p' "$out"); [ "$ec" -eq 0 ] && [ "${n:-0}" -ge 3 ] && echo 'AC-TE-7 PASS: findings are measured against the turn-start snapshot; earlier uncommitted changes are never re-reported; the real index is untouched'
+
+## Code anchors
+
+- assets/hooks/stop-turn-review.mjs
+- assets/hooks/post-edit-mark.mjs
+- assets/hooks/user-prompt-turn-start.mjs

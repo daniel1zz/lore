@@ -6,7 +6,7 @@ title: "Archiving the work that resolves a defect report closes its GitHub issue
 status: approved
 priority: medium
 created: 2026-10-12
-updated: 2026-10-12
+updated: 2026-10-16
 tags: []
 ---
 # Archiving the work that resolves a defect report closes its GitHub issue
@@ -81,3 +81,8 @@ Declared with `lore ac add` (AC-IC-1..5).
   script: test — bunx vitest run packages/lore/tests/unit/adapters/issues-sync.test.ts packages/lore/tests/unit/adapters/status-check-issues.test.ts
 - [⚑] [script] AC-IC-5: bun run typecheck exits 0 with the closer port wired through app.ts and every archive path.
   script: tsc — bun run typecheck
+
+## Code anchors
+
+- packages/lore/src/service/issue-closer-port.ts
+- packages/lore/src/service/issue-close-on-archive.ts

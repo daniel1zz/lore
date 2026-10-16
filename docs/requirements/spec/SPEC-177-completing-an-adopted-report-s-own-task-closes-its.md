@@ -6,7 +6,7 @@ title: "Completing an adopted report's own task closes its GitHub issue"
 status: approved
 priority: medium
 created: 2026-10-12
-updated: 2026-10-12
+updated: 2026-10-16
 tags: []
 ---
 # Completing an adopted report's own task closes its GitHub issue
@@ -47,3 +47,8 @@ Declared with `lore ac add` (AC-IT-1..3).
   script: e2e — bun run build && cd packages/lore && bun test tests/e2e/issue-task-done-close-compiled.bun.test.ts
 - [⚑] [script] AC-IT-3: bun run typecheck exits 0.
   script: tsc — bun run typecheck
+
+## Code anchors
+
+- packages/lore/src/service/issue-closer-port.ts
+- packages/lore/src/service/issue-close-on-archive.ts

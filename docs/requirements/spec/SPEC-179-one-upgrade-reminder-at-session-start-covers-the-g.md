@@ -6,7 +6,7 @@ title: "One upgrade reminder at session start covers the global and the project 
 status: approved
 priority: high
 created: 2026-10-15
-updated: 2026-10-15
+updated: 2026-10-16
 tags: [hooks, setup, fragments, distribution]
 links:
   - {id: TASK-1049, type: resolves}
@@ -63,3 +63,7 @@ Structured criteria are declared with `lore ac add` (AC-UR-*). Every script crit
   script: test — out=$(mktemp); bunx vitest run packages/lore/tests/integration/cli/fragments-check-dynamic-refused.test.ts > "$out" 2>&1; ec=$?; cat "$out"; n=$(sed -nE 's/^ *Tests +([0-9]+) passed.*/\1/p' "$out"); [ "$ec" -eq 0 ] && [ "${n:-0}" -ge 2 ] && echo 'AC-UR-4 PASS: a dynamic main-session fragment is refused by fragments check with exit 4 naming it; control exits 0'
 - [⚑] [script] AC-UR-5: session-start-fragments.mjs is absent from the shipped hook roster and assets/hooks; in a throwaway claude dir installed by a build that shipped it (file + SessionStart and compact settings entries recorded in the ledger), lore setup removes the file and both settings entries, keeps session-start-resume.mjs and its entry, and leaves a user-owned SessionStart entry pointing elsewhere untouched.
   script: test — out=$(mktemp); bunx vitest run packages/lore/tests/integration/cli/setup-retires-session-start-fragments.test.ts > "$out" 2>&1; ec=$?; cat "$out"; n=$(sed -nE 's/^ *Tests +([0-9]+) passed.*/\1/p' "$out"); [ "$ec" -eq 0 ] && [ "${n:-0}" -ge 3 ] && echo 'AC-UR-5 PASS: converge removes the retired session-start-fragments hook file and both settings entries, keeps resume hook and user entries'
+
+## Code anchors
+
+- assets/hooks/session-start-resume.mjs

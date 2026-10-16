@@ -6,7 +6,7 @@ title: "Worktree removal is decided by who is inside, not by how long it has bee
 status: approved
 priority: medium
 created: 2026-10-12
-updated: 2026-10-12
+updated: 2026-10-16
 tags: []
 ---
 # Worktree removal is decided by who is inside, not by how long it has been quiet
@@ -81,3 +81,8 @@ Declared with `lore ac add` (AC-WL-1..5).
   script: test — ! grep -nE 'WORKTREE_LIVENESS_WINDOW_MINUTES|minutesSinceLastReflogActivity|liveness window' assets/hooks/pre-bash-git-safety-gate.mjs && node scripts/embed-assets-manifest.mjs --check && bunx vitest run packages/lore/tests/unit/hooks/git-safety-gate.test.ts packages/lore/tests/unit/core/distribution-hooks.test.ts packages/lore/tests/unit/assets-ssot.test.ts
 - [⚑] [script] AC-WL-5: bun run typecheck exits 0 with the occupancy read wired through the store, service and CLI.
   script: tsc — bun run typecheck
+
+## Code anchors
+
+- assets/hooks/pre-bash-git-safety-gate.mjs
+- packages/lore/src/service/worktree-removal-test.ts

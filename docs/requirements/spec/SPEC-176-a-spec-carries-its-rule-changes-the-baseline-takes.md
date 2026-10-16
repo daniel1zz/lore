@@ -6,7 +6,7 @@ title: "A spec carries its rule changes; the baseline takes them only when the s
 status: approved
 priority: medium
 created: 2026-10-12
-updated: 2026-10-12
+updated: 2026-10-16
 tags: []
 links:
   - {id: TASK-953, type: resolves}
@@ -98,3 +98,10 @@ Declared with `lore ac add` (AC-CS-1..6).
   script: other — bun run packages/lore/src/index.ts rule find --text 'lifecycle' --json > /dev/null && test "$(sqlite3 -readonly .lore/lore.db "select count(*) from rule_registry where lifecycle='deprecated'")" = 0 && echo 'AC-CS-5 PASS: no rule left in the deprecated lifecycle after migration'
 - [⊘] [script] AC-CS-6: bun run typecheck exits 0.
   script: tsc — bun run typecheck
+
+## Code anchors
+
+- packages/lore/src/service/rule-change-service.ts
+- packages/lore/src/service/rule-changes.ts
+- packages/lore/src/service/landing-evidence.ts
+- packages/lore/src/adapters/cli/commands/rule.ts

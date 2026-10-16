@@ -2225,10 +2225,6 @@
       "human_id": "TASK-314",
       "file_path": "docs/requirements/task/TASK-314-dashboard-declared-phase-rendering-mirror-server.md"
     },
-    "01KYENED6N2NT4Y5GQT67ECBY5": {
-      "human_id": "SPEC-092",
-      "file_path": "docs/requirements/spec/SPEC-092-output-contract-document-taxonomy-domain-overview.md"
-    },
     "01KYENECTCAJDTCJFTJW94KA77": {
       "human_id": "SPEC-093",
       "file_path": "docs/requirements/spec/SPEC-093-provenance-domain-overview.md"
@@ -2240,38 +2236,6 @@
     "01KYEN775Y0F3M8M71P24Z8J1R": {
       "human_id": "SPEC-094",
       "file_path": "docs/requirements/spec/SPEC-094-autonomous-feedback-loop-ai-review-data-driven-sel.md"
-    },
-    "01KYEN7WD20P4EV6ZHKTZD60JP": {
-      "human_id": "SPEC-095",
-      "file_path": "docs/requirements/spec/SPEC-095-session-layer-multi-session-collaboration-context.md"
-    },
-    "01KYEN7XX5J25PEY9X11SH836G": {
-      "human_id": "SPEC-096",
-      "file_path": "docs/requirements/spec/SPEC-096-distribution-adoption-phased-spike-gated-one-step.md"
-    },
-    "01KYEN7ZDFF9CEE6ZN6J48BXM2": {
-      "human_id": "SPEC-097",
-      "file_path": "docs/requirements/spec/SPEC-097-phase-execution-model-plan-phase-checklist-superse.md"
-    },
-    "01KYEN80YH9F95KVTEPMJKHRBX": {
-      "human_id": "SPEC-098",
-      "file_path": "docs/requirements/spec/SPEC-098-extension-hooks-system-direction-pointer-only-no.md"
-    },
-    "01KYEN82CATW2VDHSB9RR9XTQG": {
-      "human_id": "SPEC-099",
-      "file_path": "docs/requirements/spec/SPEC-099-upstream-issue-feedback-loop-consumer-reported-def.md"
-    },
-    "01KYEN83SNWBSPY495FRHVM0XM": {
-      "human_id": "SPEC-100",
-      "file_path": "docs/requirements/spec/SPEC-100-dashboard-console-admin-console-evolution-adjudica.md"
-    },
-    "01KYEN857ZRXXQJN58YTTCVE4F": {
-      "human_id": "SPEC-101",
-      "file_path": "docs/requirements/spec/SPEC-101-dashboard-multi-project-single-instance-switcher-o.md"
-    },
-    "01KYEN3EX8HRGQG24HM8QZ2ETY": {
-      "human_id": "SPEC-102",
-      "file_path": "docs/requirements/spec/SPEC-102-memory-hygiene-knowledge-trustworthiness-over-time.md"
     },
     "01KYEMQK4YXBFB5S49DCCMBS0H": {
       "human_id": "KN-168",
@@ -7321,10 +7285,6 @@
       "human_id": "TASK-912",
       "file_path": "docs/requirements/task/TASK-912-skill-implement-setup-writes-only-the-adoption-key.md"
     },
-    "01M4APBSGVFFX67X04RSR6GDMZ": {
-      "human_id": "SPEC-156",
-      "file_path": "docs/requirements/spec/SPEC-156-product-baseline-architecture-trees-the-product-s.md"
-    },
     "01M4APFXG31TC83Z600E94G5YY": {
       "human_id": "KN-564",
       "file_path": "docs/requirements/knowledge/KN-564-specification-branch-baseline-draft-from-experimen.md"
@@ -11052,6 +11012,98 @@
     "01M51TR6XTP8WDTX3R01J6S2ZQ": {
       "human_id": "TASK-1467",
       "file_path": "docs/requirements/task/TASK-1467-lore-archive-apply-exits-0-when-items-failed.md"
+    },
+    "01M51ZVNPJK76B4P0QFZ19H9BA": {
+      "human_id": "SPEC-194",
+      "file_path": "docs/requirements/spec/SPEC-194-round-0-main-is-green-every-red-test-on-e1878626-t.md"
+    },
+    "01M4APBSGVFFX67X04RSR6GDMZ": {
+      "human_id": "SPEC-195",
+      "file_path": "docs/requirements/spec/SPEC-195-product-baseline-architecture-trees-the-product-s.md"
+    },
+    "01KYEN82CATW2VDHSB9RR9XTQG": {
+      "human_id": "SPEC-196",
+      "file_path": "docs/requirements/spec/SPEC-196-upstream-issue-feedback-loop-consumer-reported-def.md"
+    },
+    "01KYEN7WD20P4EV6ZHKTZD60JP": {
+      "human_id": "SPEC-197",
+      "file_path": "docs/requirements/spec/SPEC-197-session-layer-multi-session-collaboration-context.md"
+    },
+    "01KYEN7ZDFF9CEE6ZN6J48BXM2": {
+      "human_id": "SPEC-198",
+      "file_path": "docs/requirements/spec/SPEC-198-phase-execution-model-plan-phase-checklist-superse.md"
+    },
+    "01KYEN3EX8HRGQG24HM8QZ2ETY": {
+      "human_id": "SPEC-199",
+      "file_path": "docs/requirements/spec/SPEC-199-memory-hygiene-knowledge-trustworthiness-over-time.md"
+    },
+    "01KYENED6N2NT4Y5GQT67ECBY5": {
+      "human_id": "SPEC-200",
+      "file_path": "docs/requirements/spec/SPEC-200-output-contract-document-taxonomy-domain-overview.md"
+    },
+    "01KYEN7XX5J25PEY9X11SH836G": {
+      "human_id": "SPEC-201",
+      "file_path": "docs/requirements/spec/SPEC-201-distribution-adoption-phased-spike-gated-one-step.md"
+    },
+    "01KYEN80YH9F95KVTEPMJKHRBX": {
+      "human_id": "SPEC-202",
+      "file_path": "docs/requirements/spec/SPEC-202-extension-hooks-system-direction-pointer-only-no.md"
+    },
+    "01KYEN857ZRXXQJN58YTTCVE4F": {
+      "human_id": "SPEC-203",
+      "file_path": "docs/requirements/spec/SPEC-203-dashboard-multi-project-single-instance-switcher-o.md"
+    },
+    "01KYEN83SNWBSPY495FRHVM0XM": {
+      "human_id": "SPEC-204",
+      "file_path": "docs/requirements/spec/SPEC-204-dashboard-console-adjudication-cockpit-re-centered.md"
+    },
+    "01M520AC77944YHDTC3E5FANBY": {
+      "human_id": "KN-702",
+      "file_path": "docs/requirements/knowledge/KN-702-evicted-from-the-store-module-doc-lazy-libsql-load.md"
+    },
+    "01M51ZWTX3JZBKVTRQ7GHVBVDJ": {
+      "human_id": "PLAN-200",
+      "file_path": "docs/requirements/plan/PLAN-200-round-0-make-main-green.md"
+    },
+    "01M51ZY0A3JDGXXTHF0Y2R92M2": {
+      "human_id": "TASK-1468",
+      "file_path": "docs/requirements/task/TASK-1468-skill-test-r0-5-plan-close-cascade-asserts-field-b.md"
+    },
+    "01M51ZXZ7ET8A8EXVW82XJPD3G": {
+      "human_id": "TASK-1469",
+      "file_path": "docs/requirements/task/TASK-1469-skill-test-r0-3-test-budget-ledger-and-missing-tim.md"
+    },
+    "01M51ZXZQD8S4W7KK6BVMQ6VE9": {
+      "human_id": "TASK-1470",
+      "file_path": "docs/requirements/task/TASK-1470-skill-refactor-r0-4-evict-store-claude-md-below-it.md"
+    },
+    "01M51ZY2DB60RFEQR8C38TX6VN": {
+      "human_id": "TASK-1471",
+      "file_path": "docs/requirements/task/TASK-1471-skill-test-r0-9-no-test-writes-into-the-repo-tree.md"
+    },
+    "01M51ZY1BSEFMGS8YXAN2YREG7": {
+      "human_id": "TASK-1472",
+      "file_path": "docs/requirements/task/TASK-1472-skill-implement-r0-7-ac-scope-resolution-ignores.md"
+    },
+    "01M51ZXYQHDE954R2FFPBYHNJ7": {
+      "human_id": "TASK-1473",
+      "file_path": "docs/requirements/task/TASK-1473-skill-implement-r0-2-setup-records-each-manifest-s.md"
+    },
+    "01M51ZY0V3DETB222R1CF14KD9": {
+      "human_id": "TASK-1474",
+      "file_path": "docs/requirements/task/TASK-1474-skill-implement-r0-6-mirror-detects-and-repairs-du.md"
+    },
+    "01M51ZXY7HA01SSS0KNTF0ZTBX": {
+      "human_id": "TASK-1475",
+      "file_path": "docs/requirements/task/TASK-1475-skill-test-r0-1-tests-assert-the-fragment-rules-no.md"
+    },
+    "01M51ZY1WQRQEQD2BW7YQBTBKF": {
+      "human_id": "TASK-1476",
+      "file_path": "docs/requirements/task/TASK-1476-skill-implement-r0-8-anchor-or-ledger-every-unanch.md"
+    },
+    "01M51ZY2Y45Z829N2B6AY2ES98": {
+      "human_id": "TASK-1477",
+      "file_path": "docs/requirements/task/TASK-1477-skill-test-r0-10-verify-both-suites-green-on-main.md"
     }
   }
 }

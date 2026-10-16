@@ -1,5 +1,5 @@
 ---
-id: SPEC-096
+id: SPEC-201
 type: spec
 role: spec
 title: "Distribution & Adoption (phased, spike-gated one-step install) (domain overview)"

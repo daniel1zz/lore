@@ -6,7 +6,7 @@ title: "Fresh-install probe fixes: a fresh consumer can run the whole baseline l
 status: approved
 priority: medium
 created: 2026-10-10
-updated: 2026-10-10
+updated: 2026-10-16
 tags: []
 ---
 # Fresh-install probe fixes: a fresh consumer can run the whole baseline loop
@@ -49,3 +49,8 @@ Declared after landing.
   script: test — cd packages/lore && bun test --timeout 120000 tests/integration/cli/cite-hint-and-tree-render.bun.test.ts && echo 'AC-FIP-5 PASS: hint and tree render'
 - [⊘] [script] AC-FIP-6: scripts/fresh-install-probe.ts, given a compiled lore binary path, runs init, setup --project, baseline business+architecture trees, a rule, a parentless spec with a cited criterion, review, approve, an uncited spec's approval refused (exit 4), Implements/Implemented by, census, migrate spec-parents preview, bootstrap/tree default root, in a mkdtemp project, printing one PASS/FAIL line per step, and exits 0 iff every step meets its expectation
   script: test — bun run build > /dev/null 2>&1 && bun scripts/fresh-install-probe.ts --bin dist/lore && echo 'AC-FIP-6 PASS: fresh consumer runs the whole baseline loop'
+
+## Code anchors
+
+- scripts/fresh-install-probe.ts
+- assets/skills/lore/SKILL.md

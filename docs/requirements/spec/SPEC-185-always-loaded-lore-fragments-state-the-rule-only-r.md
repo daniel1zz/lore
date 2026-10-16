@@ -74,3 +74,16 @@ F={i['file'] for i in T}
 p=re.compile(chr(96)+'(lore [a-z][a-z-]*(?: [a-z][a-z-]*)?)');v=lambda x:set(p.findall(x))
 E+=[f+':'+x for f in F for x in v(g(['git','show','b049f0ab:'+f]))-v(open(f).read())]
 print(len(T),'items',len(F),'files',E or 'ok');raise SystemExit(E!=[] or len(F)!=10)" && echo 'AC-RW-3 PASS: table covers ten fragments, KEPT/MERGED phrases present, DROPPED reasons given, no lore command lost'
+
+## Code anchors
+
+- assets/context/ac-design.md
+- assets/context/corpus-workflow-0-overview.md
+- assets/context/corpus-workflow-1-feed.md
+- assets/context/corpus-workflow-2-produce.md
+- assets/context/corpus-workflow-3-execute.md
+- assets/context/corpus-workflow-4-close.md
+- assets/context/dispatch-bundle.md
+- assets/context/evidence-attestation.md
+- assets/context/worktree-dispatch.md
+- .lore/context/scoped-oracles-in-worktrees.md

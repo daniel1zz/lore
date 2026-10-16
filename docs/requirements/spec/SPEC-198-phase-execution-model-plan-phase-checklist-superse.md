@@ -1,5 +1,5 @@
 ---
-id: SPEC-097
+id: SPEC-198
 type: spec
 role: spec
 title: "Phase Execution Model (plan → phase → checklist; supersedes fine-grained task pre-decomposition) (domain overview)"
