@@ -3697,6 +3697,29 @@ export class TaskWorkflowService {
    * @returns `ok(refusal)` naming each AC and its missing path(s), `ok(null)` when nothing is missing, `err` only
    *   when criteria resolution itself fails
    */
+  /**
+   * Ids of the governing spec's ACs declared with `--allow-missing-path` (`extra.allow_missing_path_declarations`).
+   * Plan-owned task: task -> plan -> spec. An `--adhoc` task (no structural spec link) yields the empty set, i.e.
+   * "no declaration" — the floor stays strict for it. A hop that does not resolve to the expected type is also empty.
+   */
+  private async readAllowMissingPathAcIds(task: DocRecord): Promise<Result<Set<string>, LoreError>> {
+    const ids = new Set<string>();
+    if (task.extra["adhoc"] === true || task.parent_id === null) return ok(ids);
+    const planResult = await this.store.find(task.parent_id);
+    if (!planResult.ok) return planResult;
+    const plan = planResult.value;
+    if (plan === null || plan.type !== "plan" || plan.parent_id === null) return ok(ids);
+    const specResult = await this.store.find(plan.parent_id);
+    if (!specResult.ok) return specResult;
+    const raw = specResult.value?.extra["allow_missing_path_declarations"];
+    if (!Array.isArray(raw)) return ok(ids);
+    for (const entry of raw) {
+      const acId = (entry as { ac_id?: unknown } | null)?.ac_id;
+      if (typeof acId === "string") ids.add(acId);
+    }
+    return ok(ids);
+  }
+
   private async findMissingOracleFileFloor(task: DocRecord): Promise<Result<DoneFloorRefusal | null, LoreError>> {
     if (this.repoRoot === undefined) return ok(null);
     const covered = new Set<string>(extractDeclaredAcScope(task) ?? []);
@@ -3717,6 +3740,10 @@ export class TaskWorkflowService {
       criteria = resolved.value ?? [];
     }
 
+    const declaredMissingOk = await this.readAllowMissingPathAcIds(task);
+    if (!declaredMissingOk.ok) return declaredMissingOk;
+    const evidence = readEvidence(task);
+
     const findings: string[] = [];
     for (const criterion of criteria) {
       if (!covered.has(criterion.id) || criterion.verify.mode !== "script") continue;
@@ -3724,7 +3751,12 @@ export class TaskWorkflowService {
         cwd: this.repoRoot,
         fileExists: existsSync,
       });
-      if (missing.length > 0) findings.push(`${criterion.id} (${missing.join(", ")})`);
+      if (missing.length === 0) continue;
+      // reason: a red-first AC declared with `--allow-missing-path` whose file a LATER task writes is not a lie —
+      // nothing was ever attested against it. It is refused only once a pass is on record (the file then vanished).
+      const hasPassOnRecord = evidence.some((e) => e.ac_ref === criterion.id && e.result === "pass");
+      if (declaredMissingOk.value.has(criterion.id) && !hasPassOnRecord) continue;
+      findings.push(`${criterion.id} (${missing.join(", ")})`);
     }
     if (findings.length === 0) return ok(null);
 

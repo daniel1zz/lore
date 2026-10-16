@@ -105,6 +105,10 @@ beforeEach(() => {
   rawStore = new SQLiteStore(dbPath);
   originalCwd = process.cwd();
   process.chdir(tmpDir);
+  // reason: AC-TG-6 — a command naming a missing test file renders `not_measured`; the fixtures' command
+  // names this file, so it must exist under the cwd the CLI resolves against.
+  writeFileSync(join(tmpDir, "fixture-one.test.ts"), "// fixture oracle file\n");
+  writeFileSync(join(tmpDir, "fixture.test.ts"), "// fixture oracle file\n");
 });
 
 afterEach(() => {
