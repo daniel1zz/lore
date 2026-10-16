@@ -45,14 +45,14 @@ export const LORE_BINARY_VERSION = "0.1.0" as const;
 
 export const EMBEDDED_ASSETS_MANIFEST: EmbeddedAssetsManifest = {
   binary_version: LORE_BINARY_VERSION,
-  tree_digest: "cc716c1985a6a6c54b60c1316696e192f4c1c268d329251e03259bca67bae414",
+  tree_digest: "cad3d9b4ae44a5194c5633195903fe4d56a88fd56313baa8aad5b56299f7f2ae",
   entries: [
   { path: "agents/lore-implementer.md", kind: "agent", ownership: "managed", sha256: "5229d158b6ce792f4bb0083b44995946d54cdc899983bc88a4b945769282ed0f" },
   { path: "agents/lore-reader.md", kind: "agent", ownership: "managed", sha256: "336b2da60cfe9afae51f17ac8f6f9f33e7c67b2f3639874795e22a0e257e8696" },
-  { path: "context/ac-design.md", kind: "context", ownership: "managed", sha256: "747a6a8423af33e5cfcefbfb541c39666812f97ed3ab5673901d0cdc4901e010" },
+  { path: "context/ac-design.md", kind: "context", ownership: "managed", sha256: "cb99bd0d8cb444da4eb362d9954213ee1294145db84628acbf12642393359d67" },
   { path: "context/agent-rules.md", kind: "context", ownership: "managed", sha256: "976b665a0f1596f718d33f34533c01dae49f702c0aca9bda45b573b7368660e7" },
   { path: "context/corpus-workflow-0-overview.md", kind: "context", ownership: "managed", sha256: "3163c206001e85333f8963e86e1ce057609a8ed2a1e8a290ec30a8d5811ba124" },
-  { path: "context/corpus-workflow-1-feed.md", kind: "context", ownership: "managed", sha256: "259e4dd737970759fd2e3d3bd90d57bdc53e2303689f98f7d271d874e060e1c9" },
+  { path: "context/corpus-workflow-1-feed.md", kind: "context", ownership: "managed", sha256: "9ffda72eb264f2ec358a1631ff6716f34a0d5279a47c48930ae677bccc0194a4" },
   { path: "context/corpus-workflow-2-produce.md", kind: "context", ownership: "managed", sha256: "25f65a6338ebabfef3c8b9a53e8ffd8e0408f8a0a531ca205366872dcca2f76e" },
   { path: "context/corpus-workflow-3-execute.md", kind: "context", ownership: "managed", sha256: "78c1039bcaa7082ec38f611d7eebc48de399994123740bfeed6946b40b72fb70" },
   { path: "context/corpus-workflow-4-close.md", kind: "context", ownership: "managed", sha256: "16c57a7f0d5b7285588c418764df044afd8197bdc3ff17940413a18bdc3e4f38" },
