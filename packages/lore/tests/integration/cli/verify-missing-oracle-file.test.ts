@@ -1,0 +1,168 @@
+/**
+ * A script AC whose command names a test file that no longer exists is NOT MEASURED
+ * (task-skill-implement-tg-10-verify-records-a-missing-oracle-file; spec-test-governance-guards-that-refuse-bad-tests-declared AC-TG-6;
+ * baseline AS-17: a completeness/fidelity oracle never reports complete over what it could not see).
+ *
+ * Subprocess pattern (commands/ac.ts imports bun:sqlite, unresolvable under vitest): `bun run src/index.ts` in a
+ * `mkdtemp` + `lore init` corpus, never this repo's `.lore/`.
+ *
+ * Dimension mapping:
+ *   HAPPY:      the oracle file exists -> verify records an attested pass, `ac list` renders attested_pass
+ *   NEGATIVE:   file deleted -> verify exits 3 (the inconclusive exit) with the missing path in its output, records `inconclusive` (never pass/fail),
+ *               `ac list` coverage state is `not_measured`, `lore done` exits exactly 4 naming the AC
+ *   STATE:      the earlier attested pass stays in the log but no longer renders as passing
+ *   REGRESSION: repointing the command to an existing file clears the refusal (verify passes, done exits 0)
+ *
+ * @spec_ref AC-TG-6
+ */
+
+import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { spawnSync, execFileSync } from "node:child_process";
+import { mkdtempSync, rmSync, appendFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+import { withSessionIdentity } from "../../helpers/session-actor.js";
+
+const GIT_AUTHOR_ARGS = ["-c", "user.email=lore-test@example.com", "-c", "user.name=Lore Test"] as const;
+const PACKAGE_ROOT = new URL("../../../", import.meta.url).pathname.replace(/\/$/, "");
+const INDEX_TS = join(PACKAGE_ROOT, "src", "index.ts");
+const AC_ID = "AC-M-1";
+
+interface RunResult {
+  readonly stdout: string;
+  readonly stderr: string;
+  readonly exitCode: number;
+}
+
+function runLore(args: string[], cwd: string, actor: string | null = "missing-oracle-test"): RunResult {
+  const result = spawnSync("bun", ["run", INDEX_TS, ...args], {
+    cwd,
+    env: withSessionIdentity({ ...process.env, HOME: cwd, EDITOR: "true", CLAUDECODE: "1" }, actor) as Record<string, string>,
+    encoding: "utf8",
+  });
+  return { stdout: result.stdout ?? "", stderr: result.stderr ?? "", exitCode: result.status ?? 1 };
+}
+
+function mustRun(args: string[], cwd: string): string {
+  const r = runLore(args, cwd);
+  if (r.exitCode !== 0) throw new Error(`lore ${args.join(" ")} failed (${r.exitCode}): ${r.stderr}${r.stdout}`);
+  return r.stdout;
+}
+
+function extractSlug(stdout: string): string {
+  const slug = stdout.match(/Slug:\s+(\S+)/)?.[1];
+  if (!slug) throw new Error(`Could not extract slug from: ${stdout}`);
+  return slug;
+}
+
+function disableAllGates(dir: string): void {
+  appendFileSync(
+    join(dir, ".lore", "config.yaml"),
+    [
+      "workflow:",
+      "  gates:",
+      ...["spec-create", "spec-promote", "plan-promote", "task-claim", '"task-create"'].flatMap((g) => [
+        `    ${g}:`,
+        "      enabled: false",
+      ]),
+      "",
+    ].join("\n"),
+  );
+}
+
+const PASSING_TEST_BODY = 'import { test, expect } from "bun:test";\ntest("ok", () => { expect(1).toBe(1); });\n';
+
+function commitAll(dir: string, msg: string): void {
+  execFileSync("git", ["add", "-A"], { cwd: dir });
+  execFileSync("git", [...GIT_AUTHOR_ARGS, "commit", "-q", "-m", msg, "--allow-empty"], { cwd: dir });
+}
+
+function coverageState(dir: string, spec: string): string | undefined {
+  const parsed = JSON.parse(mustRun(["ac", "list", spec, "--json"], dir)) as {
+    data: { coverage: Array<{ ac_id: string; state: string }> | null };
+  };
+  return parsed.data.coverage?.find((f) => f.ac_id === AC_ID)?.state;
+}
+
+function lastEvidenceResult(dir: string, task: string): string | undefined {
+  const parsed = JSON.parse(mustRun(["get", task, "--json"], dir)) as {
+    data: { doc: { extra: { verification_evidence?: Array<{ result: string }> } } };
+  };
+  const rows = parsed.data.doc.extra.verification_evidence ?? [];
+  return rows[rows.length - 1]?.result;
+}
+
+describe("lore verify / ac list / done over an AC whose oracle file is missing", () => {
+  let dir: string;
+  let spec: string;
+  let plan: string;
+  let task: string;
+
+  // reason: ~10 CLI spawns at ~1-2s each.
+  beforeAll(() => {
+    dir = mkdtempSync(join(tmpdir(), "lore-missing-oracle-"));
+    execFileSync("git", ["init", "-q"], { cwd: dir });
+    mustRun(["init"], dir);
+    disableAllGates(dir);
+    mustRun(["create", "prd", "--title", "Missing Oracle PRD", "--no-ai", "--content", "body"], dir);
+    spec = extractSlug(mustRun(["create", "spec", "--title", "Missing Oracle Spec", "--no-ai", "--content", "body"], dir));
+    writeFileSync(join(dir, "oracle.test.ts"), PASSING_TEST_BODY);
+    writeFileSync(join(dir, "replacement.test.ts"), PASSING_TEST_BODY);
+    mustRun(
+      ["ac", "add", spec, AC_ID, "--statement", "oracle file exists", "--mode", "script", "--oracle", "test",
+        "--command", `bun test oracle.test.ts && echo '${AC_ID} PASS: oracle ran'`],
+      dir,
+    );
+    plan = extractSlug(mustRun(["create", "plan", "--title", "Missing Oracle Plan", "--parent", spec, "--no-ai", "--content", "body"], dir));
+    task = extractSlug(
+      mustRun(["create", "task", "--title", "Missing Oracle Task", "--parent", plan, "--plan-id", plan, "--ac-scope", AC_ID, "--no-ai", "--content", "body"], dir),
+    );
+    commitAll(dir, "fixture");
+  }, 180_000);
+
+  afterAll(() => {
+    try {
+      rmSync(dir, { recursive: true, force: true });
+    } catch {
+      /* best-effort cleanup */
+    }
+  });
+
+  it("HAPPY: with the file present verify attests a pass and ac list renders attested_pass", { timeout: 120_000 }, () => {
+    const verified = runLore(["verify", plan, "--task", task, "--ac", AC_ID, "--yes"], dir);
+    expect(verified.exitCode, verified.stdout + verified.stderr).toBe(0);
+    expect(lastEvidenceResult(dir, task)).toBe("pass");
+    expect(coverageState(dir, spec)).toBe("attested_pass");
+  });
+
+  it("NEGATIVE/STATE: file deleted -> verify records not-measured with the path, list stops showing a pass, done exits 4 naming the AC", { timeout: 180_000 }, () => {
+    rmSync(join(dir, "oracle.test.ts"));
+    commitAll(dir, "delete oracle");
+
+    const verified = runLore(["verify", plan, "--task", task, "--ac", AC_ID, "--yes"], dir);
+    expect(verified.exitCode, verified.stdout + verified.stderr).toBe(3);
+    expect(verified.stdout + verified.stderr).toContain("oracle.test.ts");
+    expect(lastEvidenceResult(dir, task)).toBe("inconclusive");
+
+    expect(coverageState(dir, spec)).toBe("not_measured");
+
+    const done = runLore(["done", task, "--declare-no-new-tests", "fixture"], dir);
+    expect(done.exitCode, done.stdout + done.stderr).toBe(4);
+    expect(done.stderr).toContain(AC_ID);
+    expect(done.stderr).toContain("oracle.test.ts");
+  });
+
+  it("REGRESSION: repointing the command at an existing file restores verify and done", { timeout: 180_000 }, () => {
+    mustRun(
+      ["ac", "set", spec, AC_ID, "--command", `bun test replacement.test.ts && echo '${AC_ID} PASS: replacement ran'`],
+      dir,
+    );
+    commitAll(dir, "repoint");
+    const verified = runLore(["verify", plan, "--task", task, "--ac", AC_ID, "--yes"], dir);
+    expect(verified.exitCode, verified.stdout + verified.stderr).toBe(0);
+    expect(coverageState(dir, spec)).toBe("attested_pass");
+
+    const done = runLore(["done", task, "--declare-no-new-tests", "fixture"], dir);
+    expect(done.exitCode, done.stdout + done.stderr).toBe(0);
+  });
+});
