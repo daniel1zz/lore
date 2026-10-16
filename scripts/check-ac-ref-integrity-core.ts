@@ -81,6 +81,9 @@ import {
   type DocId,
 } from "@lore/core";
 
+/** Script-layer clock: the one wall-clock read feeding core's `nowIso` parameter. */
+const defaultNow = (): string => new Date().toISOString();
+
 // ─── Dangling ref shape ────────────────────────────────────────────────────
 
 /**
@@ -201,9 +204,10 @@ export function resolveGoverningSpec(
   task: DocRecord,
   docsById: ReadonlyMap<DocId, DocRecord>,
   allSpecs: readonly DocRecord[],
+  now: () => string = defaultNow,
 ): GoverningSpecResolution {
   if (task.extra["adhoc"] === true) {
-    return resolveGoverningSpecForAdhocTask(task, allSpecs);
+    return resolveGoverningSpecForAdhocTask(task, allSpecs, now());
   }
   return resolveGoverningSpecForPlanBoundTask(task, docsById);
 }
@@ -233,6 +237,7 @@ function resolveGoverningSpecForPlanBoundTask(
 function resolveGoverningSpecForAdhocTask(
   task: DocRecord,
   allSpecs: readonly DocRecord[],
+  nowIso: string,
 ): GoverningSpecResolution {
   const declared = extractDeclaredAcScope(task);
   if (declared === undefined) {
@@ -242,7 +247,7 @@ function resolveGoverningSpecForAdhocTask(
     return { spec: null, failureReason: "adhoc-scope-empty" };
   }
 
-  const resolved = resolveGoverningSpecByAcScope(declared, allSpecs, `task "${task.slug}"`);
+  const resolved = resolveGoverningSpecByAcScope(declared, allSpecs, `task "${task.slug}"`, nowIso);
   if (!resolved.ok) {
     // `resolveGoverningSpecByAcScope`'s own documented contract (@lore/core
     // acceptance.ts `@throws`) names exactly these two refusal shapes and
@@ -301,13 +306,14 @@ export function extractDeclaredAcIds(spec: DocRecord): Set<string> {
 export function findDanglingRefs(
   tasks: readonly DocRecord[],
   docsById: ReadonlyMap<DocId, DocRecord>,
+  now: () => string = defaultNow,
 ): DanglingRef[] {
   const allSpecs = Array.from(docsById.values()).filter((doc) => doc.type === "spec");
   const seen = new Set<string>();
   const results: DanglingRef[] = [];
 
   for (const task of tasks) {
-    const resolution = resolveGoverningSpec(task, docsById, allSpecs);
+    const resolution = resolveGoverningSpec(task, docsById, allSpecs, now);
     const declaredIds = resolution.spec !== null ? extractDeclaredAcIds(resolution.spec) : new Set<string>();
 
     for (const entry of extractEvidence(task)) {

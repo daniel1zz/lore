@@ -18,6 +18,9 @@ import type { DocId, DocRecord, LoreError, Result } from "@lore/core";
 import type { StoreInterface } from "../store/store-interface.js";
 import { isPlanMember } from "./plan-membership.js";
 
+/** Service-layer clock: the one wall-clock read feeding core's `nowIso` parameter. */
+const defaultNow = (): string => new Date().toISOString();
+
 /** Child plans of a spec (direct parent_id match only). */
 export async function findSpecChildPlans(
   store: StoreInterface,
@@ -54,6 +57,7 @@ export async function findTasksUnderPlans(
 export async function findAdhocGovernedTasks(
   store: StoreInterface,
   spec: DocRecord,
+  now: () => string = defaultNow,
 ): Promise<Result<DocRecord[], LoreError>> {
   const allTasksResult = await store.findMany({ type: "task" });
   if (!allTasksResult.ok) return allTasksResult;
@@ -64,11 +68,12 @@ export async function findAdhocGovernedTasks(
   if (!allSpecsResult.ok) return allSpecsResult;
   const allSpecs = allSpecsResult.value;
 
+  const nowIso = now();
   const governed: DocRecord[] = [];
   for (const task of adhocTasks) {
     const declared = extractDeclaredAcScope(task);
     if (declared === undefined || declared.length === 0) continue;
-    const resolveResult = resolveGoverningSpecByAcScope(declared, allSpecs, `ad-hoc task "${task.slug}"`);
+    const resolveResult = resolveGoverningSpecByAcScope(declared, allSpecs, `ad-hoc task "${task.slug}"`, nowIso);
     if (!resolveResult.ok) continue;
     if (resolveResult.value.spec.id === spec.id) governed.push(task);
   }
@@ -88,12 +93,13 @@ export interface SpecEvidenceTasks {
 export async function findSpecEvidenceTasks(
   store: StoreInterface,
   spec: DocRecord,
+  now: () => string = defaultNow,
 ): Promise<Result<SpecEvidenceTasks, LoreError>> {
   const plansResult = await findSpecChildPlans(store, spec.id);
   if (!plansResult.ok) return plansResult;
   const planTasksResult = await findTasksUnderPlans(store, plansResult.value);
   if (!planTasksResult.ok) return planTasksResult;
-  const adhocResult = await findAdhocGovernedTasks(store, spec);
+  const adhocResult = await findAdhocGovernedTasks(store, spec, now);
   if (!adhocResult.ok) return adhocResult;
   return ok({
     plans: plansResult.value,

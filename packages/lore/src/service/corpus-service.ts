@@ -4650,6 +4650,7 @@ export class CorpusService {
    */
   async resolveDeclaredAcCriteriaForAdhocTask(
     task: DocRecord,
+    now: () => string = defaultNow,
   ): Promise<Result<AcceptanceCriterion[], LoreError>> {
     const declared = extractDeclaredAcScope(task);
     if (declared === undefined) {
@@ -4682,6 +4683,7 @@ export class CorpusService {
       declared,
       specsResult.value,
       `ad-hoc task "${task.slug}"`,
+      now(),
     );
     if (!resolveResult.ok) return resolveResult;
 

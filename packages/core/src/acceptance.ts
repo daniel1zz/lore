@@ -83,6 +83,7 @@ import { ok, err } from "./errors.js";
 import type { Result, LoreError } from "./errors.js";
 import type { DocRecord } from "./types.js";
 import { ANY_RULE_ID_PATTERN } from "./baseline.js";
+import { isInvalidated } from "./validity.js";
 import {
   extractEvidence,
   resolveOracleGeneration,
@@ -997,23 +998,29 @@ export interface GoverningSpecMatch {
  * @param subjectLabel - Human-readable subject for error messages, e.g.
  *   `ad-hoc task "my-task-slug"` — keeps each caller's refusal worded for its
  *   own context without duplicating the search/ambiguity logic itself.
+ * @param nowIso - The caller's clock reading (core reads no wall-clock): a spec whose
+ *   `invalid_at` is at or before it is not live and is skipped, like a deprecated one.
  * @returns `ok({spec, criteria})` for the ONE fully-covering spec.
  * @throws (as `Result`) VALIDATION_ERROR field `ac_scope` — zero candidate specs
  *   fully cover `declaredAcScope` ("matches no"), or more than one does
  *   ("ambiguous", naming every matched spec's slug).
  *
  * @example
- * resolveGoverningSpecByAcScope(["AC-1"], [specA, specB], 'ad-hoc task "t"');
+ * resolveGoverningSpecByAcScope(["AC-1"], [specA, specB], 'ad-hoc task "t"', nowIso);
  * // => ok({ spec: specA, criteria: [...] }) when only specA declares AC-1 in full
  */
 export function resolveGoverningSpecByAcScope(
   declaredAcScope: readonly string[],
   candidateSpecs: readonly DocRecord[],
   subjectLabel: string,
+  nowIso: string,
 ): Result<GoverningSpecMatch, LoreError> {
   const declaredSet = new Set(declaredAcScope);
   const matches: GoverningSpecMatch[] = [];
+  // Only LIVE specs can govern: a deprecated or invalidated spec that still declares the
+  // id must not make a live spec ambiguous (report #237). Two live candidates still are.
   for (const candidate of candidateSpecs) {
+    if (candidate.status === "deprecated" || isInvalidated(candidate, nowIso)) continue;
     const parsed = specAcceptanceCriteriaSchema.safeParse(candidate.extra["acceptance_criteria"]);
     if (!parsed.success || parsed.data.length === 0) continue;
     const specIds = new Set(parsed.data.map((c) => c.id));

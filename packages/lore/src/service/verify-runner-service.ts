@@ -1434,6 +1434,7 @@ export class VerifyRunnerService {
       declared,
       candidateSpecs,
       `ad-hoc task "${task.slug}"`,
+      opts.nowIso,
     );
     if (!resolveResult.ok) return resolveResult;
     const { spec, criteria } = resolveResult.value;
