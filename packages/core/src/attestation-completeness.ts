@@ -1157,8 +1157,8 @@ function normalizeForComparison(rawPath: string): string {
  * @param filePath - The target test-file anchor (repo-relative, already
  *   normalized — see {@link isTestFileAnchor}).
  * @param opts.executionRoot - Optional attested execution root the command ran
- *   from (repo-relative, or an absolute recorded path); joined BEFORE any `cd`
- *   offset. Absent = the command's own `cd` offset alone (prior behaviour).
+ *   from, REPO-RELATIVE only (an absolute path never matches); joined BEFORE any
+ *   `cd` offset. Absent = the command's own `cd` offset alone (prior behaviour).
  * @returns `true` iff `command` is a genuine unfiltered run of `filePath`.
  *
  * @example
@@ -1217,19 +1217,19 @@ export function commandRunsFileUnfiltered(
   // reason: F7 (spec-close-the-eight-verified-critical-defects-no-judge-listing) —
   // the ATTESTED execution root (a caller-supplied value, e.g. a verify row's
   // `attestation.execution_root`; NEVER parsed from `--cwd` in the command text)
-  // is the base the `cd` offset and the token resolve against. A RECORDED root is
-  // typically an absolute path while anchors are repo-relative, and this pure
-  // function has no repo root — so an absolute root matches by whole-segment
-  // SUFFIX of the anchor (`/a/packages/lore` + `tests/x` ends `packages/lore/tests/x`).
+  // is the base the `cd` offset and the token resolve against. It MUST be
+  // REPO-RELATIVE: converting a recorded absolute root is the caller's job (it
+  // alone knows the repo root). An absolute root never matches — a suffix match
+  // would accept a root from a DIFFERENT repo whose tail equals the anchor's
+  // directory, and `normalizeForComparison` drops a leading `/`, so it must be
+  // refused here explicitly.
   const executionRoot = opts.executionRoot ?? "";
-  const rootIsAbsolute = executionRoot.startsWith("/");
+  if (executionRoot.startsWith("/")) return false;
 
   for (const token of tokens) {
     if (token.length === 0 || token.startsWith("-")) continue;
     const joined = [executionRoot, cdOffset, token].filter((part) => part.length > 0).join("/");
-    const normalized = normalizeForComparison(joined);
-    if (normalized === target) return true;
-    if (rootIsAbsolute && `/${normalized}`.endsWith(`/${target}`)) return true;
+    if (normalizeForComparison(joined) === target) return true;
   }
   return false;
 }

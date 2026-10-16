@@ -31,9 +31,9 @@ describe("AC-CRIT-9 commandRunsFileUnfiltered executionRoot", () => {
     expect(commandRunsFileUnfiltered(`bun test ${ANCHOR}`, ANCHOR, { executionRoot: "." })).toBe(true);
     expect(commandRunsFileUnfiltered("bun test tests/x.bun.test.ts", ANCHOR, { executionRoot: "packages/lore/" })).toBe(true);
   });
-  it("BOUNDARY: an absolute recorded root matches by whole-segment suffix of the anchor", () => {
-    expect(commandRunsFileUnfiltered("bun test tests/x.bun.test.ts", ANCHOR, { executionRoot: "/a/b/packages/lore" })).toBe(true);
-    expect(commandRunsFileUnfiltered("bun test tests/x.bun.test.ts", ANCHOR, { executionRoot: "/a/b/xpackages/lore" })).toBe(false);
+  it("NEGATIVE: an absolute root never matches (conversion to repo-relative is the caller's job; no suffix match)", () => {
+    expect(commandRunsFileUnfiltered("bun test tests/x.bun.test.ts", ANCHOR, { executionRoot: "/a/b/packages/lore" })).toBe(false);
+    expect(commandRunsFileUnfiltered("bun test tests/x.bun.test.ts", ANCHOR, { executionRoot: "/packages/lore" })).toBe(false);
   });
   it("REGRESSION: a case filter still defeats the match even with a root", () => {
     expect(
