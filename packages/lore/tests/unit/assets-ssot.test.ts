@@ -495,7 +495,8 @@ const CORPUS_WORKFLOW_BODY_SHA256: Record<(typeof CORPUS_WORKFLOW_FRAGMENT_RELS)
 // the reword dropped and cut three clauses (feed latest_handoffs, feed no-session-marker floor, produce legacy config clause); the second assessment (knowledge-assessment-always-loaded-lore-fragments-state-the-2) named what was still missing.
 // RE-BASELINE (task-restore-the-remaining-clauses-the-assessment-named-and): restores `latest_handoffs` as a neutral directory and the floor arming (fail-safe) when authorship cannot be determined.
 // RE-BASELINE (task-traceability-pass-over-the-ten-fragments-classify-every): traceability pass against knowledge-traceability-table-always-loaded-lore-fragments; restores the where-configured session-start injection scope, the `lore bootstrap` contents, the user-is-router rule, the source-label duty, and the unseen-artifact verification rule.
-  "context/corpus-workflow-1-feed.md": "ed6e086121e43d523dd8a826fab41700f8e687a11d995af70b417c946a741565",
+// RE-BASELINE (task-drop-the-explanation-the-traceability-pass-over-restored): drops the explanation clauses the traceability pass put back (see knowledge-traceability-table-always-loaded-lore-fragments v3); every instruction, condition and qualifier is kept.
+  "context/corpus-workflow-1-feed.md": "6447be07915fe313153f410155c7306170e168f8d599817b55b0fdc47f63794d",
   // RE-BASELINE (task-ac-set-correction-audited-fix-of-one-criterion-on-a-locked, AC-CC-4): names `lore ac set --correction`
 // RE-BASELINE (task-reword-the-ten-always-loaded-fragments-to-the-rule-only, spec-always-loaded-lore-fragments-state-the-rule-only-reasoning):
 // that commit shortened the wording of the ten always-loaded fragments (verbatim before-text in
@@ -513,7 +514,8 @@ const CORPUS_WORKFLOW_BODY_SHA256: Record<(typeof CORPUS_WORKFLOW_FRAGMENT_RELS)
 // RE-BASELINE (task-restore-the-instruction-parts-the-rule-only-reword-dropped): that commit restored six instructions
 // the reword dropped and cut three clauses (feed latest_handoffs, feed no-session-marker floor, produce legacy config clause); the second assessment (knowledge-assessment-always-loaded-lore-fragments-state-the-2) named what was still missing.
 // RE-BASELINE (task-traceability-pass-over-the-ten-fragments-classify-every): traceability pass against knowledge-traceability-table-always-loaded-lore-fragments; restores the snapshot-never-current-state rule, the UPSTREAM_NOT_APPROVED freeze, the verify exit-code rule and the piped-exit-code reason.
-  "context/corpus-workflow-3-execute.md": "9d638fc48251f3c039ac9f006c8d07800cdf450265d90e01f041515464de570d",
+// RE-BASELINE (task-drop-the-explanation-the-traceability-pass-over-restored): drops the explanation clauses the traceability pass put back (see knowledge-traceability-table-always-loaded-lore-fragments v3); every instruction, condition and qualifier is kept.
+  "context/corpus-workflow-3-execute.md": "f86cfd7cca00e67d45f8f702d34c1b29f0ed8afd1538798278200b15bad808d8",
   // RE-BASELINE (task-rs-t13-migration-promoted-shipped-fragments-agent-rules, AC-RS-13): gains the CLAUDE.md-vs-corpus
   // boundary bullet moved from the user-layer lore-loop fragment (user-03).
 // RE-BASELINE (task-reword-the-ten-always-loaded-fragments-to-the-rule-only, spec-always-loaded-lore-fragments-state-the-rule-only-reasoning):
@@ -524,7 +526,8 @@ const CORPUS_WORKFLOW_BODY_SHA256: Record<(typeof CORPUS_WORKFLOW_FRAGMENT_RELS)
 // the reword dropped and cut three clauses (feed latest_handoffs, feed no-session-marker floor, produce legacy config clause); the second assessment (knowledge-assessment-always-loaded-lore-fragments-state-the-2) named what was still missing.
 // RE-BASELINE (task-restore-the-remaining-clauses-the-assessment-named-and): restores `prohibitions` in the CLAUDE.md content list.
 // RE-BASELINE (task-traceability-pass-over-the-ten-fragments-classify-every): traceability pass against knowledge-traceability-table-always-loaded-lore-fragments; restores the CLAUDE.md state-narrative prohibition, the maintenance command labels, the report-issue trigger examples and the anchor-timing reason.
-  "context/corpus-workflow-4-close.md": "a40c046fcef0913ec8f8a14c5dc6712220f680f550f72fc68fa900acd78a7404",
+// RE-BASELINE (task-drop-the-explanation-the-traceability-pass-over-restored): drops the explanation clauses the traceability pass put back (see knowledge-traceability-table-always-loaded-lore-fragments v3); every instruction, condition and qualifier is kept.
+  "context/corpus-workflow-4-close.md": "43feeb78f8a34e8aed74aabd4cf4cce8c825a39e746b1cec7d6d903def2c0cfd",
 };
 
 /** Concatenated bodies of the corpus-workflow fragments, in file-name (= rendering) order. */
