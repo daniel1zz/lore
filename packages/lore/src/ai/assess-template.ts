@@ -353,6 +353,13 @@ export interface BuildAssessPromptResult {
    * apart on what "declared" means.
    */
   declaredAcIds: string[];
+  /**
+   * Diff files WHOLLY omitted from the prompt (the exact `diffResult.omittedFiles` that feeds
+   * the Truncation Manifest) — files the judge never saw. Excludes the head-truncated file,
+   * which the judge saw in part. `AIProviderService._finalizeAssessment` withdraws findings
+   * on these (F2, AC-CRIT-3). Empty when no diff was attached or nothing was dropped.
+   */
+  omittedDiffFiles: string[];
 }
 
 /**
@@ -715,6 +722,7 @@ export function buildAssessPrompt(
 
   let diffBlock = "(no diff provided)";
   let truncationManifest = "";
+  let omittedDiffFiles: string[] = [];
   if (diffText !== undefined) {
     // reason: file-boundary truncation (SPEC-028 AC-AE-2) replaces the old blind tail cut
     // for the diff section only — every other section still uses truncateSection above.
@@ -727,6 +735,7 @@ export function buildAssessPrompt(
     // reason: bugfix F3 — built from `diffResult.omittedFiles`, the SAME array
     // that feeds `truncated[]` above, so the manifest can never drift from what's recorded.
     truncationManifest = buildTruncationManifest(diffResult.omittedFiles);
+    omittedDiffFiles = diffResult.omittedFiles;
   }
 
   const prompt =
@@ -780,7 +789,7 @@ export function buildAssessPrompt(
     `characters, it will be silently clipped (with a trailing "…") before scoring is recorded — ` +
     `write terse, evidence-focused reasoning instead of relying on the clip.\n`;
 
-  return { prompt, truncated, declaredAcIds: declaredCriteria.map((c) => c.id) };
+  return { prompt, truncated, declaredAcIds: declaredCriteria.map((c) => c.id), omittedDiffFiles };
 }
 
 // ─── v6: Deterministic Facts + Three-Dimension Rubric (SPEC-040 §T2) ───────
@@ -992,6 +1001,7 @@ function assembleFactsBasedAssessPrompt(
 
   let diffBlock = "(no diff provided)";
   let truncationManifest = "";
+  let omittedDiffFiles: string[] = [];
   if (diffText !== undefined) {
     const diffResult = truncateDiffByFile(diffText, budgets.max_diff_chars);
     if (diffResult.truncated) {
@@ -1000,6 +1010,7 @@ function assembleFactsBasedAssessPrompt(
     }
     diffBlock = diffResult.text;
     truncationManifest = buildTruncationManifest(diffResult.omittedFiles);
+    omittedDiffFiles = diffResult.omittedFiles;
   }
 
   const prompt =
@@ -1103,7 +1114,7 @@ function assembleFactsBasedAssessPrompt(
     `respectively — every cap is silently clipped (trailing "…") before scoring is recorded; ` +
     `write terse, evidence-focused text instead of relying on the clip.\n`;
 
-  return { prompt, truncated, declaredAcIds: scopedDeclaredCriteria.map((c) => c.id) };
+  return { prompt, truncated, declaredAcIds: scopedDeclaredCriteria.map((c) => c.id), omittedDiffFiles };
 }
 
 /**

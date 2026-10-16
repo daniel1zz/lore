@@ -182,7 +182,7 @@ describe("AC-CRIT-3: findings on files the judge never saw are unverifiable, not
     expect(result.value.judgment?.truncated).toContain("diff:src/big.ts");
     expect(result.value.typed_gaps?.map((g) => g.statement)).toEqual(["big.ts is wrong."]);
     expect(result.value.unverifiable_findings).toBeUndefined();
-    expect(result.value.paths_verified?.not_shown).toBe(0);
+    expect(result.value.paths_verified?.not_shown).toBeUndefined();
   });
 
   it("REGRESSION: no truncation at all — nothing is moved, not_shown is 0", async () => {
@@ -198,6 +198,6 @@ describe("AC-CRIT-3: findings on files the judge never saw are unverifiable, not
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.value.typed_gaps).toHaveLength(1);
-    expect(result.value.paths_verified?.not_shown).toBe(0);
+    expect(result.value.paths_verified?.not_shown).toBeUndefined();
   });
 });
