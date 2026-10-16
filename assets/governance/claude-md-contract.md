@@ -150,9 +150,7 @@ A line belongs on tier 1 only when ALL three hold:
 
 Fail any one and the content moves down a tier; tier 1 keeps at most one
 pointer line naming where it went (an index entry, see the Index-Entry
-Contract). A tier-1 line states the rule, never the reasoning: the reasoning
-is tier 2 and is read by the agent that needs to change the rule, not by
-every agent that must obey it.
+Contract). A tier-1 line states the rule. It may keep one short reason clause when that reason tells the reader where or when the rule applies (`never X, since Y`); Anthropic's prompting guidance finds a stated reason improves adherence. A qualifier that limits when a rule applies (only when …, where configured, unless …) is part of the rule, never reasoning. History, incidents, dated measurements, mechanism walkthroughs and rejected alternatives are tier 2: read by whoever changes the rule, not by every agent that obeys it. To shorten a file, follow the `lore-context-optimizer` skill.
 
 ## What Goes In vs What Stays Out
 
@@ -188,10 +186,7 @@ as a failure):
 2. **Commands** — the verbatim build / test / lint / dev invocations. Nothing
    an AI has to guess at.
 3. **Architecture** — the repo-wide invariants every change must keep, one
-   line each, stated as rules (tier 1). The design intent and the *why*
-   behind them are tier 2: a pointer line to the ADR or module file, never
-   the reasoning inline. Not a file listing, not implementation detail, not
-   a fact only one module needs.
+   line each, stated as rules with at most one scope-setting reason clause (tier 1). Design intent, trade-offs and history are tier 2: a pointer line to the ADR or module file. Not a file listing, not implementation detail, not a fact only one module needs.
 4. **Module Index** — see the index-entry contract below.
 5. **Finding Live Project State** — how to query the project's own dynamic
    state (its own CLI/API if it has one, or the external system that tracks

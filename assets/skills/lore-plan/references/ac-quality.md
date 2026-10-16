@@ -121,6 +121,15 @@ AC:
   (proof: take 2 screenshots 3 seconds apart, attribute value differs).
 ```
 
+## Rubric (ai-mode) ACs
+
+- Prefer a script AC wherever the items can be enumerated; keep the rubric only for the residual judgment.
+- The rubric is a per-item checklist with a binary verdict per item, not one holistic score.
+- The grader reasons before each verdict.
+- The grader is a different run than the author (preferably a different model), never the session that made the change.
+- A rubric AC at 0 pass / 0 fail is evaluated before the plan archives.
+- Source: `knowledge-compressing-always-loaded-instructions-without-losing`.
+
 ## Enforcement
 
 - Spec-level structured ACs: `lore ac add <spec> <AC-ID> --statement "..." --mode script|ai|human` — script mode binds an oracle (`--oracle test --command "..."`), executed as attested evidence by `lore verify <plan>`; the `spec-promote` gate requires ≥1 AC before a spec can be approved

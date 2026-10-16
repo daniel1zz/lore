@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-⛔ Before hand-editing this file, read its content contract: `lore governance claude-md`. This file is tier 1 — rules only, no reasoning. The reasoning, mechanism notes and standing-lessons index behind every line here: `knowledge-root-claude-md-tier-2-text-verbatim-body-before-the`.
+⛔ Before hand-editing this file, read its content contract: `lore governance claude-md`. This file is tier 1: rules, each with at most one short scope-setting reason. The reasoning, mechanism notes and standing-lessons index behind every line here: `knowledge-root-claude-md-tier-2-text-verbatim-body-before-the`.
 
 ## What This Is
 
