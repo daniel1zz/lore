@@ -425,6 +425,10 @@ const DECLARED_FILES = [
   "hooks/lib/run-id.mjs",
   "hooks/pre-tool-harness-run.mjs",
   "hooks/lib/turn-state.mjs",
+  // session trail (spec-session-trail D13): start/end writers and their shared library
+  "hooks/session-trail-start.mjs",
+  "hooks/subagent-trail.mjs",
+  "hooks/lib/session-trail.mjs",
   // project (4 .sh gates + pre-push + tree.yaml template + verification-profile config template, SPEC-058 D6)
   "project/pre-push",
   "project/lore.tree.yaml.template",

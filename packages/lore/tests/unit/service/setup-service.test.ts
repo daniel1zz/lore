@@ -737,7 +737,7 @@ function buildPlaceholderHookPayload(): AssetPayload {
 }
 
 describe("{{lore:claude_dir}} settings-hook variable resolution", () => {
-  it("resolves {{lore:claude_dir}} to the real targetDir in every registered hook command, all 14 hook files registered, matchers/events correct, existing foreign hook preserved", async () => {
+  it("resolves {{lore:claude_dir}} to the real targetDir in every registered hook command, all 16 hook files registered, matchers/events correct, existing foreign hook preserved", async () => {
     const fs = new MapFs();
     fs.seed(
       path.join(TARGET_DIR, "settings.json"),
@@ -797,6 +797,9 @@ describe("{{lore:claude_dir}} settings-hook variable resolution", () => {
         "run-register.mjs",
         // Run end on SessionEnd/SubagentStop (BR-1059).
         "run-end.mjs",
+        // Session trail writers (spec-session-trail D13).
+        "session-trail-start.mjs",
+        "subagent-trail.mjs",
         "pre-tool-harness-run.mjs",
       ].sort(),
     );

@@ -39,6 +39,9 @@ const EXPECTED_FILES = [
   "run-register.mjs",
   // Run end on SessionEnd/SubagentStop (BR-1059).
   "run-end.mjs",
+  // Session trail writers (spec-session-trail D13): session/helper start and helper end.
+  "session-trail-start.mjs",
+  "subagent-trail.mjs",
   "pre-tool-harness-run.mjs",
 ];
 
@@ -85,9 +88,9 @@ describe("BOUNDARY: HOOK_REGISTRATIONS shape", () => {
     expect(files).toEqual([...EXPECTED_FILES].sort());
   });
 
-  it("expands to exactly 15 entries (12 hooks; per-event expansion for run-register, pre-tool-harness-run and run-end)", () => {
-    // pre-bash-git-safety-gate: 1, session-start-resume: 1, session-start-marker: 1, stop-turn-review: 1, stop-handoff-coverage: 1, subagent-context: 1, subagent-stop-commit-guard: 1, run-register: 2 (SessionStart + SubagentStart), pre-tool-harness-run: 2 (Bash + mcp__.*lore_.*), user-prompt-turn-start: 1, post-edit-mark: 1, run-end: 2 (SessionEnd + SubagentStop) = 15
-    expect(HOOK_REGISTRATIONS).toHaveLength(15);
+  it("expands to exactly 18 entries (14 hooks; per-event expansion for run-register, pre-tool-harness-run, run-end and session-trail-start)", () => {
+    // pre-bash-git-safety-gate: 1, session-start-resume: 1, session-start-marker: 1, stop-turn-review: 1, stop-handoff-coverage: 1, subagent-context: 1, subagent-stop-commit-guard: 1, run-register: 2 (SessionStart + SubagentStart), pre-tool-harness-run: 2 (Bash + mcp__.*lore_.*), user-prompt-turn-start: 1, post-edit-mark: 1, run-end: 2 (SessionEnd + SubagentStop), session-trail-start: 2 (SessionStart + SubagentStart), subagent-trail: 1 = 18
+    expect(HOOK_REGISTRATIONS).toHaveLength(18);
   });
 
   it("tolerates a trailing slash on claudeDir without a double slash in the command", () => {
