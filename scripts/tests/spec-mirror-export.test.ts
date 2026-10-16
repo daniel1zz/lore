@@ -89,6 +89,8 @@ import {
   loadMirrorMappings,
   countMdFilesFlat,
   MIRROR_DRIFT_EXIT_CODE,
+  MIRROR_MAPPED_FILE_MISSING_DETAIL,
+  mirrorParityOkMessage,
   SPEC_MIRROR_DIR_RELATIVE,
   MIRROR_TYPES,
   mirrorDirRelative,
@@ -743,7 +745,7 @@ describe("export-covers-corpus: AC-FR-6 end-to-end against a seeded corpus + mir
       // cannot pin it — see `scripts/check-live-mirror-integrity.ts` — and accepts 0 or the
       // documented drift code.)
       expect(checkResult.exitCode, checkResult.output).toBe(0);
-      expect(checkResult.stdout).toContain("OK — every corpus spec has a mirror file (count and slug parity; file CONTENT is not compared).");
+      expect(checkResult.stdout).toContain(mirrorParityOkMessage("spec"));
 
       // Independent, fresh re-derivation — never trusts the script's own self-report.
       const { root } = mirrorFixture();
@@ -883,7 +885,7 @@ describe("drift-check-is-separate: AC-FR-7 end-to-end against the REAL script + 
         // deletion. A check that repaired the file, or one that was already reporting this slug,
         // fails here.
         expect(baseline.output).not.toContain(target.slug);
-        expect(firstCheck.output).toContain(`${target.slug} — mapped file missing on disk`);
+        expect(firstCheck.output).toContain(`${target.slug} — ${MIRROR_MAPPED_FILE_MISSING_DETAIL}`);
       } finally {
         writeFileSync(path, original, "utf8");
         expect(readFileSync(path, "utf8")).toBe(original);

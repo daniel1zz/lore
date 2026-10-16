@@ -55,6 +55,7 @@ import { join, resolve } from "path";
 import { tmpdir } from "os";
 import { spawnSync } from "child_process";
 import { createApp } from "../../../src/app.js";
+import { ASSESS_NO_COMMITS_DERIVED } from "../../../src/adapters/cli/cli-refusal-messages.js";
 import { saveConfig } from "@lore/core/node";
 import type { CreateDocInput } from "@lore/core";
 
@@ -520,7 +521,7 @@ describe("lore assess — auto-derived commit set: BOUNDARY (no discoverable com
     expect(process.exitCode === 0 || process.exitCode === undefined).toBe(true);
 
     const stderrText = output.stderr.join("");
-    expect(stderrText).toContain("could not derive any commits");
+    expect(stderrText).toContain(ASSESS_NO_COMMITS_DERIVED);
 
     const app = createApp(join(tmpDir, ".lore", "lore.db"));
     try {

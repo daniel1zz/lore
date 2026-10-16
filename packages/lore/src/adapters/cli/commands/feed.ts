@@ -112,6 +112,7 @@ import { buildPhaseFeedFlowDeps } from "../phase-wiring.js";
 import { buildTaskFeedFlowDeps, resolveTaskStartBudgets } from "../task-feed-wiring.js";
 import { renderTaskStartPack } from "../task-feed-render.js";
 import { exitCode, formatError, resolveActor } from "../utils.js";
+import { FEED_PHASE_START_MISSING_TARGET, FEED_TASK_START_MISSING_TARGET } from "../cli-refusal-messages.js";
 
 /** Loosely-typed view of the args this command's dispatch table needs — mirrors citty's parsed-args shape. */
 interface FeedArgs {
@@ -166,7 +167,7 @@ async function handleSessionResume(app: App, args: FeedArgs, _config: LoreConfig
 async function handlePhaseStart(app: App, args: FeedArgs, _config: LoreConfig | undefined): Promise<void> {
   if (typeof args.target !== "string" || args.target.length === 0) {
     process.stderr.write(
-      "Error: `lore feed phase-start <phase>` requires a phase document ID or slug.\n",
+      `Error: \`lore feed phase-start <phase>\` ${FEED_PHASE_START_MISSING_TARGET}.\n`,
     );
     process.exitCode = 2;
     return;
@@ -192,7 +193,7 @@ async function handlePhaseStart(app: App, args: FeedArgs, _config: LoreConfig | 
 async function handleTaskStart(app: App, args: FeedArgs, config: LoreConfig | undefined): Promise<void> {
   if (typeof args.target !== "string" || args.target.length === 0) {
     process.stderr.write(
-      "Error: `lore feed task-start <task>` requires a task document ID or slug.\n",
+      `Error: \`lore feed task-start <task>\` ${FEED_TASK_START_MISSING_TARGET}.\n`,
     );
     process.exitCode = 2;
     return;

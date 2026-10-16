@@ -76,6 +76,7 @@ import {
   findLedgerEntryForRef,
   formatExemptionReasonForDisplay,
   LEDGER_RELATIVE_PATH,
+  LEDGER_ORPHAN_RULE,
   AcRefLedgerError,
   type AcRefLedgerFile,
   type AcRefLedgerCheckResult,
@@ -194,7 +195,7 @@ export async function main(dbPathOverride?: string, repoRootOverride?: string): 
 
     if (report.ledgerCheck.orphanedEntries.length > 0) {
       console.error(
-        `\ncheck-ac-ref-integrity: ${report.ledgerCheck.orphanedEntries.length} ledger entry(ies) in ${LEDGER_RELATIVE_PATH} no longer match a real dangling ac_ref:\n`,
+        `\ncheck-ac-ref-integrity: ${report.ledgerCheck.orphanedEntries.length} ledger entry(ies) in ${LEDGER_RELATIVE_PATH} ${LEDGER_ORPHAN_RULE}:\n`,
       );
       for (const e of report.ledgerCheck.orphanedEntries) {
         console.error(`  spec="${e.spec}" id="${e.id}" — recorded ${e.date} — ${e.reason}`);

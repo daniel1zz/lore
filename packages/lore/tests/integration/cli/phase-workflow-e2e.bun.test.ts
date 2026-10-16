@@ -75,6 +75,7 @@ import { spawnSync } from "child_process";
 import { mkdirSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
+import { FEED_PHASE_START_MISSING_TARGET } from "../../../src/adapters/cli/cli-refusal-messages.js";
 
 // ─── Path setup ───────────────────────────────────────────────────────────────
 
@@ -224,7 +225,7 @@ describe("SPEC-056 CLI phase surfaces — REGRESSION (argument errors)", () => {
   it("lore feed phase-start with no <phase> positional → exit 2, not a crash", () => {
     const result = runLore(["feed", "phase-start"], tmpDir);
     expect(result.exitCode).toBe(2);
-    expect(result.stderr).toContain("requires a phase document ID or slug");
+    expect(result.stderr).toContain(FEED_PHASE_START_MISSING_TARGET);
   });
 });
 

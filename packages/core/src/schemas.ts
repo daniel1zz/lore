@@ -17,7 +17,7 @@ import { validitySchema } from "./validity.js";
 import { acScopeArraySchema, phaseExtraSchema } from "./phase.js";
 import { baselineExtraSchema } from "./baseline.js";
 import { fnv1a32Hex } from "./slug-hash.js";
-import { isSelfDeclaredOrdinalTitle } from "./ordinal.js";
+import { isSelfDeclaredOrdinalTitle, SELF_DECLARED_ORDINAL_TITLE_REFUSAL } from "./ordinal.js";
 import type { MirrorHumanId } from "./ordinal.js";
 
 // ─── Primitive Schemas ─────────────────────────────────────────────────────
@@ -643,7 +643,7 @@ export const createDocInputSchema = baseCreateDocInputSchema.superRefine(
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         message:
-          "title must not self-declare a SPEC-/ADR- number — the ordinal is allocated at create; write the bare title",
+          `${SELF_DECLARED_ORDINAL_TITLE_REFUSAL} — the ordinal is allocated at create; write the bare title`,
         path: ["title"],
       });
     }

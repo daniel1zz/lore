@@ -176,6 +176,7 @@ import type {
   DoneResult,
 } from "./task-workflow-service.js";
 import { computeReadyCounts } from "./task-workflow-service.js";
+import { AC_REF_NOT_ON_PARENT_SPEC } from "./ac-ref-messages.js";
 import {
   rejectBlankClaimWorktree,
   computeArchiveWalk,
@@ -780,7 +781,7 @@ export class PhaseWorkflowService {
         return err({
           code: "VALIDATION_ERROR",
           field: "ac_ref",
-          message: `ac_ref "${parsedEntry.data.ac_ref}" is not declared on the parent spec. Available ids: ${available}`,
+          message: `ac_ref "${parsedEntry.data.ac_ref}" is ${AC_REF_NOT_ON_PARENT_SPEC}. Available ids: ${available}`,
           value: parsedEntry.data.ac_ref,
         });
       }

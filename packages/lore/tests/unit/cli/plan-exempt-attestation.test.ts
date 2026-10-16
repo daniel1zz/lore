@@ -792,7 +792,7 @@ describe("formatAttestationExemptionNotice — an exemption that allowed a close
     expect(notice).not.toBeNull();
     expect(notice).toContain("attestation");
     expect(notice).toContain("no-oracle");
-    expect(notice).toContain("no automatable oracle exists for this plan's scope");
+    expect(notice).toContain(activeExtra.attestation_exempt_reason);
   });
 
   it("NEGATIVE: a plan with no exemption gets no notice", () => {

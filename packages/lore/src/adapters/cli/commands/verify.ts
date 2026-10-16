@@ -186,6 +186,7 @@ import { createInterface } from "node:readline/promises";
 import { defineCommand } from "citty";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatError, resolveActor } from "../utils.js";
+import { VERIFY_NO_SCRIPT_ACS } from "../cli-refusal-messages.js";
 import { formatAcResultLine, buildVerifyHeaderLines } from "../verify-render.js";
 import { resolveVerifyExecutionRoot } from "@lore/core";
 import type { VerifyGitFacts, VerifyExecutionRootResolution, LoreError, Result } from "@lore/core";
@@ -694,7 +695,7 @@ export default defineCommand({
       if (results.length === 0 && skipped.length === 0) {
         console.log("  (no declared acceptance criteria matched the selection)");
       } else if (results.length === 0) {
-        console.log("  No script-mode acceptance criteria to run (all declared ACs are ai/human-mode).");
+        console.log(`  ${VERIFY_NO_SCRIPT_ACS} (all declared ACs are ai/human-mode).`);
       } else {
         for (const r of results) console.log(formatAcResultLine(r));
       }

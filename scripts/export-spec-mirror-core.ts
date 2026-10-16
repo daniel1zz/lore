@@ -126,6 +126,25 @@ export const MIRROR_HARD_FAILURE_EXIT_CODE = 4;
  */
 export const MIRROR_ZERO_COMPARED_EXIT_CODE = 5;
 
+/** Rule clause the zero-compared refusal ends with (consumer: exit {@link MIRROR_ZERO_COMPARED_EXIT_CODE} readers and tests). */
+export const MIRROR_ZERO_COMPARED_RULE = "a check that parsed nothing proves nothing";
+
+/** Per-slug detail `--check` prints when a mirror BODY diverges from the corpus document. */
+export const MIRROR_BODY_DIVERGENT_DETAIL = "body differs from the corpus document";
+
+/** Per-slug detail `--check` prints when an export-index mapping points at a file absent on disk. */
+export const MIRROR_MAPPED_FILE_MISSING_DETAIL = "mapped file missing on disk";
+
+/** The OK line (after the `export-spec-mirror (<label>): ` prefix) printed when count-and-slug parity holds for `type`. */
+export function mirrorParityOkMessage(type: MirrorDocType): string {
+  return `OK — every corpus ${type} has a mirror file (count and slug parity; file CONTENT is not compared).`;
+}
+
+/** The OK clause printed when every mirrored `type` body matches its corpus document. */
+export function mirrorContentOkMessage(type: MirrorDocType): string {
+  return `OK — every mirrored ${type} body matches its corpus document.`;
+}
+
 /**
  * Thrown when this script cannot even attempt a parity judgement — a hard failure distinct from
  * "corpus spec X is not mirrored" (that is data `computeMirrorParity` returns, never thrown).
@@ -346,7 +365,7 @@ export function evaluateComparedCount(
   if (comparedCount === mappedPresentCount) return { ok: true };
   const rule =
     comparedCount === 0
-      ? `compared 0 of ${mappedPresentCount} mapped ${type} mirror file(s) — a check that parsed nothing proves nothing`
+      ? `compared 0 of ${mappedPresentCount} mapped ${type} mirror file(s) — ${MIRROR_ZERO_COMPARED_RULE}`
       : `compared ${comparedCount} of ${mappedPresentCount} mapped ${type} mirror file(s) — the compared count must equal the mapped-and-present population`;
   return { ok: false, message: `export-spec-mirror (content): ${rule}` };
 }
@@ -367,7 +386,7 @@ export function evaluateComparedCount(
 export function printContentDrift(type: MirrorDocType, result: MirrorContentDriftResult): boolean {
   if (result.ok) {
     console.log(
-      `export-spec-mirror (content): OK — every mirrored ${type} body matches its corpus document. (compared ${result.comparedCount} ${type} file(s); ${result.mappedPresentCount} mapped-and-present)`,
+      `export-spec-mirror (content): ${mirrorContentOkMessage(type)} (compared ${result.comparedCount} ${type} file(s); ${result.mappedPresentCount} mapped-and-present)`,
     );
     return true;
   }
@@ -377,7 +396,7 @@ export function printContentDrift(type: MirrorDocType, result: MirrorContentDrif
   for (const entry of result.divergences) {
     const detail =
       entry.reason === "body_divergent"
-        ? "body differs from the corpus document"
+        ? MIRROR_BODY_DIVERGENT_DETAIL
         : entry.reason === "body_undecidable"
           ? "body not comparable — stale identity frontmatter pre-empts the body check"
           : "frontmatter (status/priority/title/tags/phase) differs from the corpus document";
@@ -631,7 +650,7 @@ export function printParity(label: "export" | "check", type: MirrorDocType, pari
       `\nexport-spec-mirror (${label}): ${parity.missing.length} corpus ${type}(s) not mirrored on disk:\n`,
     );
     for (const entry of parity.missing) {
-      const detail = entry.reason === "no_mapping" ? "never exported (no export-index mapping)" : "mapped file missing on disk";
+      const detail = entry.reason === "no_mapping" ? "never exported (no export-index mapping)" : MIRROR_MAPPED_FILE_MISSING_DETAIL;
       console.error(`  ${entry.slug} — ${detail}`);
     }
   }
@@ -640,7 +659,7 @@ export function printParity(label: "export" | "check", type: MirrorDocType, pari
     return false;
   }
   console.log(
-    `export-spec-mirror (${label}): OK — every corpus ${type} has a mirror file (count and slug parity; file CONTENT is not compared).`,
+    `export-spec-mirror (${label}): ${mirrorParityOkMessage(type)}`,
   );
   return true;
 }

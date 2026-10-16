@@ -43,6 +43,7 @@ import {
   MIRROR_DRIFT_EXIT_CODE,
   MIRROR_HARD_FAILURE_EXIT_CODE,
   MIRROR_ZERO_COMPARED_EXIT_CODE,
+  MIRROR_ZERO_COMPARED_RULE,
   type MirrorExportReportLike,
 } from "../export-spec-mirror-core.js";
 
@@ -252,7 +253,7 @@ describe("AC-OX-6 positive trace — the check states how many mirror files it a
       expect(blind.exitCode).toBe(5);
       expect(MIRROR_ZERO_COMPARED_EXIT_CODE).toBe(5);
       expect([0, MIRROR_DRIFT_EXIT_CODE, 3, MIRROR_HARD_FAILURE_EXIT_CODE]).not.toContain(MIRROR_ZERO_COMPARED_EXIT_CODE);
-      expect(blind.output).toContain("compared 0 of 1 mapped knowledge mirror file(s) — a check that parsed nothing proves nothing");
+      expect(blind.output).toContain(MIRROR_ZERO_COMPARED_RULE);
     },
     120_000,
   );

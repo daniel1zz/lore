@@ -100,6 +100,7 @@ import {
   MAX_REASON_DISPLAY_CHARS,
   AcRefLedgerError,
   LEDGER_RELATIVE_PATH,
+  LEDGER_ORPHAN_RULE,
   type AcRefLedgerEntry,
   type DanglingRef,
 } from "../check-ac-ref-integrity-core.js";
@@ -1095,7 +1096,7 @@ describe("check-ac-ref-integrity: exemption echo wiring (task-check-ac-ref-integ
       const combinedOutput = result.stdout + result.stderr;
       expect(combinedOutput).toContain("AC-DOES-NOT-EXIST");
       expect(combinedOutput).toContain("spec-does-not-exist");
-      expect(combinedOutput).toContain("no longer match a real dangling ac_ref");
+      expect(combinedOutput).toContain(LEDGER_ORPHAN_RULE);
     } finally {
       rmSync(cwd, { recursive: true, force: true });
     }

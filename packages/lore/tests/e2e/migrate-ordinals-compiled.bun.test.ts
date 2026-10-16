@@ -94,7 +94,7 @@ import { join } from "path";
 import { tmpdir } from "os";
 import { createHash } from "node:crypto";
 import type { DocRecord, ExportIndex, MirrorHumanId } from "@lore/core";
-import { assertIsMirrorHumanId } from "@lore/core";
+import { assertIsMirrorHumanId, SELF_DECLARED_ORDINAL_TITLE_REFUSAL } from "@lore/core";
 import { SQLiteStore } from "../../src/store/sqlite-store.js";
 import { assertFreshBinary } from "../integration/helpers/assert-fresh-binary";
 
@@ -407,7 +407,7 @@ describe("AC-084-5: compiled dist/lore migrate ordinals — dry-run/apply/idempo
       dir,
     );
     expect(result.exitCode).toBe(4);
-    expect(result.stderr).toContain("title must not self-declare a SPEC-/ADR- number");
+    expect(result.stderr).toContain(SELF_DECLARED_ORDINAL_TITLE_REFUSAL);
 
     // Confirm nothing was created — the corpus's numbered-doc count is
     // unaffected by this rejected attempt (BOUNDARY: still exactly the 6

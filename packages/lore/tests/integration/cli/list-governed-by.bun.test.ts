@@ -31,6 +31,7 @@ import { join, resolve } from "path";
 import { tmpdir } from "os";
 import { createApp } from "../../../src/app.js";
 import type { CreateDocInput } from "@lore/core";
+import { LIST_GOVERNED_BY_CONFLICT } from "../../../src/adapters/cli/cli-refusal-messages.js";
 
 // ─── Command type + output capture (mirrors pending-judgment-badges.bun.test.ts) ──
 
@@ -223,7 +224,7 @@ describe("lore list --governed-by — BOUNDARY", () => {
     expect(process.exitCode).toBe(2);
     expect(output.stdout.join("\n")).toBe(""); // no silent success output
     const stderr = output.stderr.join("\n");
-    expect(stderr).toContain("--governed-by cannot be combined with");
+    expect(stderr).toContain(LIST_GOVERNED_BY_CONFLICT);
     expect(stderr).toContain("--type");
   });
 

@@ -46,6 +46,7 @@ import { SQLiteStore } from "../../src/store/sqlite-store.js";
 import type { App } from "../../src/app.js";
 import { saveConfig } from "@lore/core/node";
 import { execFileSync } from "node:child_process";
+import { UNCITED_SPEC_RULE } from "../../src/service/spec-approval-citation.js";
 import { ensureLiveRuleViaCli } from "../helpers/cli-live-rule.js";
 import type { CreateDocInput, DocId, LoreConfig } from "@lore/core";
 
@@ -817,8 +818,8 @@ describe("lore gate spec-promote — BR-1007 parity with `lore approve` (issue #
     delete env["LORE_GATE_BYPASS"];
     const approve = Bun.spawnSync(["bun", "run", LORE_ENTRY, "approve", specSlug, "--override-no-judgment"], { cwd: tmpDir, env });
     expect(approve.exitCode).toBe(4);
-    expect(`${approve.stderr.toString()}${approve.stdout.toString()}`).toContain("cites no live business or architecture rule");
-    expect(gateRefusal).toContain("cites no live business or architecture rule");
+    expect(`${approve.stderr.toString()}${approve.stdout.toString()}`).toContain(UNCITED_SPEC_RULE);
+    expect(gateRefusal).toContain(UNCITED_SPEC_RULE);
   });
 
   it("HAPPY: after `lore ac cite` the gate passes and the same approve succeeds", async () => {
