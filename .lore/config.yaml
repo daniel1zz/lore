@@ -1,0 +1,106 @@
+project:
+  name: lore
+  author: owner
+ai:
+  providers:
+    claude-cli:
+      command: claude
+      args: ["-p"]
+      timeout_ms: 180000
+# Memory-file budgets (spec-project-claude-md-content-contract D1: numbers live
+# HERE, never in prose/hooks). Dogfood-tightened below the distribution defaults
+# (root 300L/30720B): the shipped defaults are an adoption-safe anti-explosion
+# ceiling, not a size recommendation — for our own repo the root file sits at
+# ~198L/20.4KB after the 2026-07-27 spec-index retirement, so the ceiling is
+# pinned ~10% above that. Growth beyond it must delete before it adds.
+context:
+  memory_files:
+    # Root H2 structure + every deterministic memory-file check block here
+    # (spec-claude-md-root-section-structure-check-and-adoption-mode).
+    adoption: enforce
+    root:
+      max_lines: 220
+      max_bytes: 24576
+audit:
+  verify_since: "2026-07-06T12:02:00Z"
+# SPEC-058 verification profiles — per-spec_kind oracle-coverage floors.
+# Armed on this corpus 2026-07-21: the mechanism shipped in SPEC-058 but was
+# only ever seeded by `lore setup --project`, so this (pre-SPEC-058) corpus
+# had no `workflow:` key at all and every floor was a vacuous pass — we built
+# the gate and never dogfooded it. An oracle counts as covered iff at least
+# one declared AC binds verify.mode=script to that oracle.
+workflow:
+  # The main agent dispatches all source changes to implementer agents in this repo
+  # (adr-rule-delivery-tiers-gate-hook-skill-and-optimistic); stop-turn-review checks it once per turn.
+  turn_end:
+    main_session_source_edits: block
+  verification_profiles:
+    design:
+      required_oracles:
+        - e2e
+      required_uat: true
+    feature:
+      required_oracles:
+        - test
+    tech:
+      required_oracles:
+        - test
+    # SPEC-080 C2 as-built (2026-07-26): domain-overview is a narrative kind —
+    # zero structured ACs is legal (profile-aware floor, gate-predicates
+    # acCountMeetsFloor). No required_oracles: no oracle-coverage floor either.
+    domain-overview:
+      min_acs: 0
+  # SPEC-080 Phase 3 ARMED 2026-07-26 after 5 observed clean plan-closes
+  # (SPEC-080/059/053/054/055; arming threshold was 2). plan-close now runs
+  # the prd-outline content-diff sync predicate; exemption via the dedicated
+  # verb (extra.prd_sync_exempt), surfaced by `lore status`.
+  gates:
+    plan-close:
+      prd_sync:
+        enabled: true
+    # Citation gate (SPEC-157 C4) ARMED 2026-10-09 on all 12 baseline branches after the fast-mode
+    # exit passed (knowledge-fast-mode-re-assessment-after-remediation-ac-bls2-13). A NEW or REVISED
+    # criterion must cite a live rule; untouched legacy criteria are never refused. Roll back: mode report.
+    ac-cite:
+      mode: enforce
+      armed_branches:
+        - baseline-corpus
+        - baseline-product-baseline
+        - baseline-specification-and-acceptance
+        - baseline-review
+        - baseline-execution
+        - baseline-session
+        - baseline-hygiene
+        - baseline-autonomy
+        - baseline-issue-loop
+        - baseline-distribution
+        - baseline-sync
+        - baseline-context
+
+# SPEC-GD D3 (spec-governance-defaults-must-ship-and-every-recorded-gap-must):
+# names WHERE this corpus's own `lore report-issue` reports go. Self-referential
+# and legitimate, not circular -- for the lore upstream itself, "where reports
+# go" IS this repo's own GitHub intake. Landed 2026-08-11 by
+# agent:main-orchestrator because this file is NOT git-tracked (.gitignore:9
+# `.lore/*`, excepting only export-index.json and audit-anchor.json), so no
+# commit-and-merge path exists and a worktree agent structurally cannot land it.
+#
+# MIGRATED 2026-08-24 (agent:main-orchestrator) from the retired SQLite shape
+# ({corpus_path, root_prd}) to the GitHub intake shape, per
+# spec-the-defect-channel-reaches-no-machine-but-its-own-github P4. The old
+# shape parsed but was IGNORED, printing a deprecation line on every `lore`
+# invocation while `lore report-issue` refused outright (exit 4).
+# ⛔ Two things this migration does NOT fix, both recorded in
+# knowledge-five-governance-findings-measured-while-closing-the F1:
+#   1. The GitHub branch of FeedbackConfigSchema is `.strict()` and accepts ONLY
+#      `repo`, so the `root_prd` identity pin (R-5a) has no home in the new
+#      shape and is dropped here -- not an oversight.
+#   2. The READ path still silently falls back: with a retired-only upstream,
+#      `lore issues` and `lore issues --local` were byte-identical (diff exit 0)
+#      while the WRITE path refused. The mechanism fix is one shared
+#      resolveFeedbackUpstream returning Result, consumed by both verbs.
+# `repo` must match the git remote (daniel1zz/lore) but is resolved from HERE,
+# never inferred from the remote via `gh -R`.
+feedback:
+  upstream:
+    repo: daniel1zz/lore
