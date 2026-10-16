@@ -1213,6 +1213,35 @@ export function buildAttestationFloorRefusal(slug: string, evidence: readonly Ev
 }
 
 /**
+ * Converts a recorded `attestation.execution_root` to a path relative to the corpus
+ * repo root (the root `VerifyRunnerService` measures `execution_root` against), or
+ * `undefined` when it yields no usable offset: absent, an absolute root with no
+ * configured repo root, or an absolute root OUTSIDE the repo (a different directory
+ * that merely shares a tail with an anchor must never satisfy the floor). A relative
+ * root is taken as repo-relative already, unless it escapes via `..`.
+ *
+ * @param executionRoot - The row's recorded root, if any.
+ * @param repoRoot - Absolute repo root, or `undefined` when not configured.
+ * @returns A normalized repo-relative path (`""` for the repo root itself), or `undefined`.
+ */
+function toRepoRelativeExecutionRoot(executionRoot: string | undefined, repoRoot: string | undefined): string | undefined {
+  if (executionRoot === undefined) return undefined;
+  const segments = (path: string): string[] => path.split("/").filter((s) => s.length > 0 && s !== ".");
+  let relative: string[];
+  if (executionRoot.startsWith("/")) {
+    if (repoRoot === undefined) return undefined;
+    const rootSegs = segments(repoRoot);
+    const execSegs = segments(executionRoot);
+    if (execSegs.length < rootSegs.length || !rootSegs.every((seg, i) => seg === execSegs[i])) return undefined;
+    relative = execSegs.slice(rootSegs.length);
+  } else {
+    relative = segments(executionRoot);
+  }
+  if (relative.includes("..")) return undefined;
+  return relative.join("/");
+}
+
+/**
  * The task's declared test-file anchors (task-every-ac-oracle-is-t-scoped-
  * so-the-file-passes-is-attested) still lacking an attested UNFILTERED
  * `result:pass` run — `done()`'s THIRD, independent evidence floor. Mirrors
@@ -1241,16 +1270,35 @@ export function buildAttestationFloorRefusal(slug: string, evidence: readonly Ev
  * @returns Every anchor lacking a satisfying row, in declaration order —
  *   `[]` iff every declared test-file anchor is satisfied (or none exist).
  */
-function findMissingUnfilteredTestFileRuns(task: DocRecord, evidence: EvidenceEntry[]): string[] {
+function findMissingUnfilteredTestFileRuns(
+  task: DocRecord,
+  evidence: EvidenceEntry[],
+  repoRoot: string | undefined,
+): string[] {
   const testFileAnchors = extractFileAnchors(task).filter(isTestFileAnchor);
   if (testFileAnchors.length === 0) return [];
 
-  const unfilteredPassingCommands = evidence
+  // reason: F7 — each row contributes its OWN attested `attestation.execution_root`
+  // (a `lore verify` row ran from that root, so a root-relative test path in its
+  // command names `<root>/<path>`), converted to a REPO-RELATIVE path here
+  // ({@link toRepoRelativeExecutionRoot}) because only this layer knows the repo
+  // root. Never parsed from the command text. The row ALSO still satisfies the
+  // floor by its bare command (prior behaviour — a worktree-mode row's root is
+  // the worktree, which gives no useful offset against the corpus repo root).
+  const unfilteredPassingRuns = evidence
     .filter((entry) => entry.oracle === "test" && entry.result === "pass")
-    .map((entry) => entry.command);
+    .map((entry) => ({
+      command: entry.command,
+      relativeRoot: toRepoRelativeExecutionRoot(entry.attestation?.execution_root, repoRoot),
+    }));
 
   return testFileAnchors.filter(
-    (anchor) => !unfilteredPassingCommands.some((command) => commandRunsFileUnfiltered(command, anchor)),
+    (anchor) =>
+      !unfilteredPassingRuns.some(
+        ({ command, relativeRoot }) =>
+          commandRunsFileUnfiltered(command, anchor) ||
+          (relativeRoot !== undefined && commandRunsFileUnfiltered(command, anchor, { executionRoot: relativeRoot })),
+      ),
   );
 }
 
@@ -2148,6 +2196,8 @@ export class TaskWorkflowService {
    * no second TTL value threaded through App.
    */
   readonly claimTtlMinutes: number;
+  /** Absolute repo root that verify's `execution_root` is measured against; absent on bare unit constructions. */
+  private readonly repoRoot: string | undefined;
 
   /**
    * Narrow port resolving the AC ids declared on a plan's parent spec — implemented
@@ -2295,7 +2345,7 @@ export class TaskWorkflowService {
   constructor(
     private readonly store: StoreInterface,
     telemetry: Telemetry = new NoOpTelemetry(),
-    config: { claimTtlMinutes: number },
+    config: { claimTtlMinutes: number; repoRoot?: string },
     resolveDeclaredAcIds: (
       planId: string,
     ) => Promise<Result<Set<string> | null, LoreError>> = async () => ok(null),
@@ -2336,6 +2386,7 @@ export class TaskWorkflowService {
   ) {
     this.telemetry = telemetry;
     this.claimTtlMinutes = config.claimTtlMinutes;
+    this.repoRoot = config.repoRoot;
     this.resolveDeclaredAcIds = resolveDeclaredAcIds;
     this.resolveAdhocGoverningAcIds = resolveAdhocGoverningAcIds;
     this.resolveDeclaredAcCriteria = resolveDeclaredAcCriteria;
@@ -3563,7 +3614,7 @@ export class TaskWorkflowService {
     // checked only after BOTH floors above already succeeded, so none of the
     // three can mask another. A task declaring no test-file anchors returns
     // [] here and never fires this branch.
-    const missingUnfilteredRuns = findMissingUnfilteredTestFileRuns(task, evidence);
+    const missingUnfilteredRuns = findMissingUnfilteredTestFileRuns(task, evidence, this.repoRoot);
     if (missingUnfilteredRuns.length > 0) {
       return doneFloorRefusal("unfiltered-test-file", {
         code: "VALIDATION_ERROR",
@@ -3573,8 +3624,12 @@ export class TaskWorkflowService {
           `result:pass run: ${missingUnfilteredRuns.join(", ")} — lore done requires, for ` +
           `EACH declared test-file anchor, at least one oracle:test result:pass evidence ` +
           `row whose command runs that file with no ${UNFILTERED_RUN_CASE_FILTER_DESCRIPTION} ` +
-          `case filter (record one via \`lore evidence ${task.slug} --oracle test --command ` +
-          `"<unfiltered file command>" --result pass\`)`,
+          `case filter AND carries a runner \`attestation\`. Routes that satisfy it: (1) ` +
+          `\`lore evidence ${task.slug} --oracle test --command "<unfiltered command from the ` +
+          `repo root>" --capture\` (the runner spawns it and attests the exit code); (2) when ` +
+          `the file is only reachable from a package directory, \`lore verify --execution-root ` +
+          `<that directory>\` — the attested root is joined with the command's paths, so a ` +
+          `package-relative command matches the repo-relative anchor`,
         value: missingUnfilteredRuns,
       });
     }

@@ -784,7 +784,7 @@ function buildAppFromSqlite(
   const taskWorkflowService = new TaskWorkflowService(
     store,
     telemetry,
-    { claimTtlMinutes },
+    { claimTtlMinutes, repoRoot },
     corpusService.resolveDeclaredAcIds.bind(corpusService),
     { enforcer: gateEnforcer, getPlanBundle: corpusService.getPlanBundle.bind(corpusService) },
     corpusService.resolveDeclaredAcIdsForAdhocTask.bind(corpusService),
@@ -1183,7 +1183,7 @@ function buildAppFromTurso(
   const taskWorkflowService = new TaskWorkflowService(
     store,
     telemetry,
-    { claimTtlMinutes },
+    { claimTtlMinutes, repoRoot },
     corpusService.resolveDeclaredAcIds.bind(corpusService),
     { enforcer: gateEnforcer, getPlanBundle: corpusService.getPlanBundle.bind(corpusService) },
     corpusService.resolveDeclaredAcIdsForAdhocTask.bind(corpusService),

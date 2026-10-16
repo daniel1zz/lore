@@ -1156,6 +1156,9 @@ function normalizeForComparison(rawPath: string): string {
  * @param command - The full evidence `command` string.
  * @param filePath - The target test-file anchor (repo-relative, already
  *   normalized — see {@link isTestFileAnchor}).
+ * @param opts.executionRoot - Optional attested execution root the command ran
+ *   from, REPO-RELATIVE only (an absolute path never matches); joined BEFORE any
+ *   `cd` offset. Absent = the command's own `cd` offset alone (prior behaviour).
  * @returns `true` iff `command` is a genuine unfiltered run of `filePath`.
  *
  * @example
@@ -1191,7 +1194,11 @@ function normalizeForComparison(rawPath: string): string {
  * // => false — no token names the file at all; a selective/derived-set
  * // command never counts, however plausible it is that the file ran
  */
-export function commandRunsFileUnfiltered(command: string, filePath: string): boolean {
+export function commandRunsFileUnfiltered(
+  command: string,
+  filePath: string,
+  opts: { executionRoot?: string } = {},
+): boolean {
   if (commandHasAnyCaseFilter(command)) return false;
 
   // reason: `extractCdPrefixTarget` returns ONLY the derived offset (or
@@ -1203,13 +1210,25 @@ export function commandRunsFileUnfiltered(command: string, filePath: string): bo
   // for the non-leading-cd case), so nothing is lost by not stripping them —
   // and every test-file token past the `cd` chain is still compared exactly
   // as before.
-  const offset = extractCdPrefixTarget(command) ?? "";
+  const cdOffset = extractCdPrefixTarget(command) ?? "";
   const target = normalizeForComparison(filePath);
   const tokens = tokenizeCommand(command);
 
+  // reason: F7 (spec-close-the-eight-verified-critical-defects-no-judge-listing) —
+  // the ATTESTED execution root (a caller-supplied value, e.g. a verify row's
+  // `attestation.execution_root`; NEVER parsed from `--cwd` in the command text)
+  // is the base the `cd` offset and the token resolve against. It MUST be
+  // REPO-RELATIVE: converting a recorded absolute root is the caller's job (it
+  // alone knows the repo root). An absolute root never matches — a suffix match
+  // would accept a root from a DIFFERENT repo whose tail equals the anchor's
+  // directory, and `normalizeForComparison` drops a leading `/`, so it must be
+  // refused here explicitly.
+  const executionRoot = opts.executionRoot ?? "";
+  if (executionRoot.startsWith("/")) return false;
+
   for (const token of tokens) {
     if (token.length === 0 || token.startsWith("-")) continue;
-    const joined = offset.length > 0 ? `${offset}/${token}` : token;
+    const joined = [executionRoot, cdOffset, token].filter((part) => part.length > 0).join("/");
     if (normalizeForComparison(joined) === target) return true;
   }
   return false;

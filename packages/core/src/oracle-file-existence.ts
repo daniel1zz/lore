@@ -611,10 +611,19 @@ function joinPath(base: string, segment: string): string {
  */
 function computeCandidateRoots(
   command: string,
-  opts: { cwd: string; additionalCwds?: string[]; corpusRoot?: string },
+  opts: { cwd: string; additionalCwds?: string[]; corpusRoot?: string; executionRoot?: string },
 ): string[] {
   const cdTarget = extractCdPrefixTarget(command);
-  const bases = [opts.cwd, ...(opts.additionalCwds ?? [])];
+  const plainBases = [opts.cwd, ...(opts.additionalCwds ?? [])];
+  // reason: F7 — an attested execution root is a base like any cwd, tried
+  // FIRST and ADDITIVELY (every plain base is still tried, so it can only
+  // resolve more tokens, never hide a real miss).
+  const executionRoot = opts.executionRoot;
+  const rootBases =
+    executionRoot === undefined || executionRoot.length === 0
+      ? []
+      : plainBases.map((base) => joinPath(base, executionRoot));
+  const bases = [...rootBases, ...plainBases];
   const roots: string[] = [];
   const seen = new Set<string>();
   const pushUnique = (root: string): void => {
@@ -671,7 +680,14 @@ function computeCandidateRoots(
  */
 export function findMissingOracleFiles(
   command: string,
-  opts: { cwd: string; additionalCwds?: string[]; corpusRoot?: string; fileExists: FileExistsPort },
+  opts: {
+    cwd: string;
+    additionalCwds?: string[];
+    corpusRoot?: string;
+    /** Attested execution root (repo-relative or absolute), joined with any `cd` offset. Never parsed from the command. */
+    executionRoot?: string;
+    fileExists: FileExistsPort;
+  },
 ): string[] {
   const tokens = extractTestFileTokens(command);
   if (tokens.length === 0) return [];
