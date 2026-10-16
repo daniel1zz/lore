@@ -981,7 +981,20 @@ async function runInstall(
   });
   if (!proceed) return;
 
-  const result = await service.install({ targetDir: opts.targetDir, binPath: opts.binPath, forceDiverged: opts.forceDiverged });
+  // reason: the global-layer language lands in `<targetDir>/settings.json`, the very file the install
+  // merges hooks into. Handing it to `install` makes the manifest sha the sha of the FINAL bytes (report
+  // #233); the post-install projection below then finds the value already equal and writes nothing.
+  const settingsPath = join(opts.targetDir, "settings.json");
+  const settingsLanguage = languagePlan.value.find(
+    (item) => item.layer === "global" && item.settingsPath === settingsPath,
+  )?.language;
+
+  const result = await service.install({
+    targetDir: opts.targetDir,
+    binPath: opts.binPath,
+    forceDiverged: opts.forceDiverged,
+    ...(settingsLanguage !== undefined ? { settingsLanguage } : {}),
+  });
   if (!result.ok) {
     process.stderr.write(formatError(result.error) + "\n");
     process.exitCode = exitCode(result.error);

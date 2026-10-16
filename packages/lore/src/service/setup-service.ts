@@ -533,6 +533,9 @@ export class SetupService {
    *   overwritten instead of reported via `SetupReceipt.skippedDiverged`. No
    *   effect on a fresh install (D3 — no prior manifest means no "diverged"
    *   concept to override).
+   *   `settingsLanguage` (optional) is Claude Code's `language` value for the target's `settings.json`:
+   *   it is folded into the merged settings content BEFORE the sha is computed, so the manifest records
+   *   the sha of the file's final on-disk bytes (report #233) instead of a pre-language intermediate.
    * @param now - Time seam (mirrors the codebase-wide `now: () => string`
    *   convention, e.g. `DriftCheckService`/`PhaseService`) — resolved ONCE per
    *   call; also doubles as the backup-run directory key `uninstall` later
@@ -547,7 +550,7 @@ export class SetupService {
    *   `planUpdate` divergence probe threw)
    */
   async install(
-    opts: { targetDir: string; binPath: string; forceDiverged?: boolean },
+    opts: { targetDir: string; binPath: string; forceDiverged?: boolean; settingsLanguage?: string },
     now: () => string = defaultNow,
   ): Promise<Result<SetupReceipt, LoreError>> {
     const guard = assertSafeTargetDir(opts.targetDir);
@@ -559,7 +562,12 @@ export class SetupService {
     const payloadResult = await this.assetSource.load();
     if (!payloadResult.ok) return payloadResult;
 
-    const resolvedResult = await resolvePayload(opts.targetDir, payloadResult.value, this.reader);
+    const resolvedResult = await resolvePayload(
+      opts.targetDir,
+      payloadResult.value,
+      this.reader,
+      opts.settingsLanguage,
+    );
     if (!resolvedResult.ok) return resolvedResult;
     const resolvedPayload = resolvedResult.value;
 
@@ -1035,6 +1043,7 @@ async function resolvePayload(
   targetDir: string,
   payload: AssetPayload,
   reader: SetupFsReader,
+  settingsLanguage?: string,
 ): Promise<Result<AssetPayload, LoreError>> {
   const resolvedFiles: AssetFile[] = [];
 
@@ -1080,7 +1089,14 @@ async function resolvePayload(
       const mergeResult = mergeSettings({ existingRaw, loreEntries, hooksPathPrefix });
       if (!mergeResult.ok) return mergeResult;
 
-      const mergedContent = `${JSON.stringify(mergeResult.value.merged, null, 2)}\n`;
+      // reason: `language` is set on the merged object (appended when absent, replaced in place when
+      // present) so the sha below covers the final bytes; `ClaudeSettingsPort.mergeLanguage` run after
+      // install then sees an equal value and performs no write.
+      const mergedSettings =
+        settingsLanguage !== undefined
+          ? { ...mergeResult.value.merged, language: settingsLanguage }
+          : mergeResult.value.merged;
+      const mergedContent = `${JSON.stringify(mergedSettings, null, 2)}\n`;
       resolvedFiles.push({
         path: file.path,
         kind: file.kind,
