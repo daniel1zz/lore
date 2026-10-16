@@ -8,7 +8,8 @@
  * Public surface: getStateBase, parseRunId, sessionOfRun, readSessionTrail (reader);
  *   writeJsonAtomic, writeJsonExclusive, recordSessionStart, recordHelperStart,
  *   recordHelperEnd, measureHelperChanges, applyRetention, RETENTION_DAYS, MARKER_RETENTION_DAYS
- *   (writers); typed errors.
+ *   (writers); snapshotWorkingTree, readHeadState, diffTrees, attributeTurn, recordTurnChanges
+ *   (turn-end attribution; `attributeTurn` is the PURE part, the rest gathers git facts); typed errors.
  *
  * Invariants:
  *   - Hooks are standalone files with no access to `@lore/core`, so the reader and the schemas
@@ -17,8 +18,9 @@
  *   - Every trail write is a temp file in the same directory + rename (`writeJsonAtomic`), or a
  *     temp file + hard link when an existing file must never be overwritten (`writeJsonExclusive`).
  *   - Each file has ONE writer: session.json (SessionStart, once), removed.json (retention),
- *     helpers/<agent>.json (SubagentStart/Stop), changes.json and *.judged.json (the turn-end
- *     review, not this module). edited-files.jsonl stays post-edit-mark's (BR-1088).
+ *     helpers/<agent>.json (SubagentStart/Stop), changes.json (the turn-end review, through
+ *     `recordTurnChanges`) and *.judged.json (the turn-end review, not this module).
+ *     edited-files.jsonl stays post-edit-mark's (BR-1088).
  *   - The reader mirrors the core one: unknown keys are invalid; per-turn files degrade to
  *     `{measured:false, reason}` with fixed reason strings; session-level files throw.
  *   - Writers throw on failure; the hook entrypoints (session-trail-start.mjs) turn that into
@@ -28,13 +30,13 @@
  */
 
 import {
-  existsSync, linkSync, lstatSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync,
+  existsSync, linkSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync,
   statSync, writeFileSync,
 } from 'node:fs';
 import { basename, dirname, join, resolve, sep } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { execFileSync } from 'node:child_process';
-import { copyFileSync, realpathSync } from 'node:fs';
+import { execFileSync, spawnSync } from 'node:child_process';
+import { copyFileSync, realpathSync, utimesSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { getStateBase } from './turn-state.mjs';
 
@@ -452,6 +454,21 @@ export function applyRetention(base, startingSessionId, nowMs = Date.now()) {
 // Helper measurement (SubagentStop) — spec Design > Helper measurement, D6
 // ---------------------------------------------------------------------------
 
+/**
+ * Copy the real index to `tempIndex` so unchanged files are not re-hashed, keeping its mtime.
+ * reason: git treats an entry as "racily clean" (re-hashes it) only while the entry's mtime is not older
+ * than the index FILE's mtime. A plain copy gets a fresh mtime, so a file edited in the same second
+ * the real index was written, with an unchanged size, would be trusted as unchanged and the edit
+ * would vanish from the diff. The copy takes the real index's mtime, floored to the millisecond so
+ * rounding can only make more entries racy (safe), never fewer.
+ */
+function seedTempIndex(realIndex, tempIndex) {
+  copyFileSync(realIndex, tempIndex);
+  const { mtimeMs } = statSync(realIndex);
+  const seconds = Math.floor(mtimeMs) / 1000;
+  utimesSync(tempIndex, seconds, seconds);
+}
+
 function runGit(cwd, args, env = {}) {
   return execFileSync('git', args, {
     cwd, encoding: 'utf8', env: { ...process.env, ...env }, stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 64 * 1024 * 1024,
@@ -507,7 +524,7 @@ export function measureHelperChanges(cwd, run, storedBase) {
     const base = storedBase ?? runGit(workingCopy, ['merge-base', 'HEAD', mainHead]).trim();
     tempIndex = join(tmpdir(), `lore-helper-index-${process.pid}-${randomUUID()}`);
     const realIndex = resolve(workingCopy, runGit(workingCopy, ['rev-parse', '--git-path', 'index']).trim());
-    if (existsSync(realIndex)) copyFileSync(realIndex, tempIndex);
+    if (existsSync(realIndex)) seedTempIndex(realIndex, tempIndex);
     const env = { GIT_INDEX_FILE: tempIndex };
     runGit(workingCopy, ['add', '-A'], env);
     const nameStatus = runGit(workingCopy, ['diff', '--cached', '--no-renames', '--name-status', '-z', base], env);
@@ -554,5 +571,299 @@ export function recordHelperEnd(base, sessionId, agentId, cwd, nowMs = Date.now(
     changes: measurement.changes,
   };
   writeJsonAtomic(file, record);
+  return record;
+}
+
+// ---------------------------------------------------------------------------
+// Turn-end attribution — spec Design > Attribution at turn end, D5, D14, D15
+// ---------------------------------------------------------------------------
+
+/** A fact needed for attribution could not be gathered; the turn's changes become measured:false. */
+export class TrailAttributionError extends Error {
+  constructor(reason) {
+    super(reason);
+    this.name = 'TrailAttributionError';
+    this.reason = reason;
+  }
+}
+
+/** Run git without throwing; `status` is the exit code (null when git could not be spawned). */
+function gitRaw(cwd, args, { env = {}, input } = {}) {
+  const r = spawnSync('git', args, {
+    cwd, encoding: 'utf8', env: { ...process.env, ...env }, input, maxBuffer: 256 * 1024 * 1024,
+  });
+  return { status: r.error ? null : r.status, stdout: r.stdout ?? '', stderr: r.stderr ?? '', error: r.error };
+}
+
+/** Run git and return stdout; an exit status outside `okStatuses` is a TrailAttributionError naming the command. */
+function gitText(cwd, args, { input, okStatuses = [0] } = {}) {
+  const r = gitRaw(cwd, args, { input });
+  if (r.status === null || !okStatuses.includes(r.status)) {
+    const detail = (r.error?.message ?? r.stderr.trim().split('\n')[0]) || `exit ${r.status}`;
+    throw new TrailAttributionError(`git ${args[0]} failed: ${detail}`);
+  }
+  return r.stdout;
+}
+
+/**
+ * Build a git TREE id of the working tree (untracked files included, ignored excluded) through a
+ * temporary index SEEDED FROM THE REAL INDEX so unchanged files are not re-hashed; the real index
+ * and every ref stay untouched. Used by the turn-start and turn-end hooks, which must build their
+ * trees identically or every unchanged file would show up as a diff.
+ * @param {string} cwd
+ * @returns {{tree: string} | {tree: null, reason: string}}
+ */
+export function snapshotWorkingTree(cwd) {
+  let tmpDir = null;
+  try {
+    const inside = gitRaw(cwd, ['rev-parse', '--is-inside-work-tree']);
+    if (inside.status !== 0 || inside.stdout.trim() !== 'true') return { tree: null, reason: 'not a git work tree' };
+    tmpDir = mkdtempSync(join(tmpdir(), 'lore-turn-index-'));
+    const tempIndex = join(tmpDir, 'index');
+    const realIndex = resolve(cwd, gitRaw(cwd, ['rev-parse', '--git-path', 'index']).stdout.trim());
+    // reason: an unborn HEAD or a fresh repo has no index file; add -A then starts from empty.
+    if (existsSync(realIndex)) seedTempIndex(realIndex, tempIndex);
+    const env = { GIT_INDEX_FILE: tempIndex };
+    const add = gitRaw(cwd, ['add', '-A'], { env });
+    if (add.status !== 0) return { tree: null, reason: `git add -A failed: ${add.stderr.trim()}` };
+    const write = gitRaw(cwd, ['write-tree'], { env });
+    const tree = write.stdout.trim();
+    if (write.status !== 0 || !/^[0-9a-f]{40,64}$/.test(tree)) return { tree: null, reason: `git write-tree failed: ${write.stderr.trim()}` };
+    return { tree };
+  } catch (err) {
+    return { tree: null, reason: `snapshot fault: ${err.message}` };
+  } finally {
+    if (tmpDir !== null) rmSync(tmpDir, { recursive: true, force: true });
+  }
+}
+
+/**
+ * HEAD and HEAD-reflog length, recorded at turn start so the turn's reflog steps can be told apart
+ * at turn end. `{head: null, reflog_len: 0}` on an unborn HEAD.
+ * @param {string} cwd @returns {{head: string | null, reflog_len: number}}
+ */
+export function readHeadState(cwd) {
+  const head = gitRaw(cwd, ['rev-parse', '--verify', '-q', 'HEAD']);
+  if (head.status !== 0) return { head: null, reflog_len: 0 };
+  const log = gitRaw(cwd, ['reflog', 'show', '--format=%H', 'HEAD']);
+  return { head: head.stdout.trim(), reflog_len: log.stdout.split('\n').filter(Boolean).length };
+}
+
+/**
+ * Diff two trees without rename detection (a rename is D old + A new).
+ * `lines` = added + deleted (trail convention); `changedLines` = max(added, deleted) per path (BR-1089 convention).
+ * @returns {{ok: true, entries: Array<{status: string, path: string, lines: number}>, changedLines: Map<string, number>}
+ *   | {ok: false, reason: string}}
+ */
+export function diffTrees(root, fromTree, toTree) {
+  const names = gitRaw(root, ['diff-tree', '-r', '--no-renames', '--name-status', '-z', fromTree, toTree]);
+  const stats = gitRaw(root, ['diff-tree', '-r', '--no-renames', '--numstat', '-z', fromTree, toTree]);
+  if (names.status !== 0 || stats.status !== 0) return { ok: false, reason: `git diff-tree failed: ${(names.stderr || stats.stderr).trim()}` };
+  const counts = new Map();
+  for (const record of stats.stdout.split('\0').filter(Boolean)) {
+    const [added, deleted, ...pathParts] = record.split('\t');
+    // binary files report "-": 0 lines, still listed by status
+    counts.set(pathParts.join('\t'), { added: Number(added) || 0, deleted: Number(deleted) || 0 });
+  }
+  const entries = [];
+  const changedLines = new Map();
+  const fields = names.stdout.split('\0').filter(Boolean);
+  for (let i = 0; i + 1 < fields.length; i += 2) {
+    const path = fields[i + 1];
+    const { added, deleted } = counts.get(path) ?? { added: 0, deleted: 0 };
+    entries.push({ status: fields[i], path, lines: added + deleted });
+    changedLines.set(path, Math.max(added, deleted));
+  }
+  return { ok: true, entries, changedLines };
+}
+
+const TAKE_IN_ACTIONS = new Set(['merge', 'pull', 'checkout', 'rebase', 'reset', 'cherry-pick']);
+
+/** Classify a HEAD reflog subject: `own-commit` | `merge-commit` (commit (merge)) | `take-in` | `other`. */
+function classifyReflogSubject(subject) {
+  const colon = subject.indexOf(':');
+  const head = (colon < 0 ? subject : subject.slice(0, colon)).trim();
+  const word = head.split(/\s+/)[0];
+  const qualifier = /\(([^)]*)\)/.exec(head)?.[1] ?? null;
+  if (word === 'commit') {
+    if (qualifier === null || qualifier === 'amend') return 'own-commit';
+    return qualifier === 'merge' ? 'merge-commit' : 'other';
+  }
+  return TAKE_IN_ACTIONS.has(word) ? 'take-in' : 'other';
+}
+
+/** The HEAD reflog, oldest first: `{sha, ts (unix seconds), kind}`; empty on an unborn HEAD. */
+function readHeadReflog(root) {
+  if (gitRaw(root, ['rev-parse', '--verify', '-q', 'HEAD']).status !== 0) return [];
+  const out = gitText(root, ['reflog', 'show', '--date=unix', '--format=%H%x09%gd%x09%gs', 'HEAD']);
+  return out.split('\n').filter(Boolean).map((line) => {
+    const [sha, selector, ...subject] = line.split('\t');
+    return { sha, ts: Number(/@\{(\d+)\}/.exec(selector)?.[1] ?? 0), kind: classifyReflogSubject(subject.join('\t')) };
+  }).reverse();
+}
+
+/** Index in `log` where the turn's steps start; the recorded length is trusted only while it still matches the start head. */
+function turnStepsStart(log, snapshot) {
+  const { head, reflog_len: len } = snapshot;
+  if (head === null) return 0; // unborn at turn start: every entry belongs to the turn
+  if (len > 0 && len <= log.length && log[len - 1].sha === head) return len;
+  // reason: reflog expired or rewritten since turn start - fall back to the newest entry that is the start head.
+  for (let i = log.length - 1; i >= 0; i--) if (log[i].sha === head) return i + 1;
+  if (len === 0) return 0; // the reflog was empty at turn start: every entry belongs to the turn
+  throw new TrailAttributionError(`turn-start head ${head} not found in the HEAD reflog`);
+}
+
+const nameSet = (text) => new Set(text.split('\0').filter(Boolean));
+
+/** `commit -> patch-id` for `shas` through one diff-tree + patch-id pipeline (`--stable`). */
+function patchIdsOf(root, shas) {
+  const result = new Map();
+  if (shas.length === 0) return result;
+  const diff = gitText(root, ['diff-tree', '--stdin', '-p', '--root', '--no-renames', '-r'], { input: `${shas.join('\n')}\n` });
+  for (const line of gitText(root, ['patch-id', '--stable'], { input: diff }).split('\n').filter(Boolean)) {
+    const [patchId, sha] = line.split(' ');
+    result.set(sha, patchId);
+  }
+  return result;
+}
+
+/** Own-commit set: non-merge commits this checkout's reflog records as commit / commit (amend) since started_at. */
+function ownCommitSet(root, log, startedAt) {
+  const sinceSec = Math.floor(Date.parse(startedAt) / 1000);
+  const shas = log.filter((e) => e.kind === 'own-commit' && e.ts >= sinceSec).map((e) => e.sha);
+  return { shas: new Set(shas), patchIds: new Set(patchIdsOf(root, shas).values()) };
+}
+
+/** Facts about one take-in step: everything `attributeTurn` needs, nothing it must fetch itself. */
+function collectStepFacts(root, step, nowTree, own) {
+  const parents = gitText(root, ['rev-list', '--parents', '-n1', step.sha]).trim().split(' ').slice(1);
+  if (parents.length > 2) throw new TrailAttributionError(`octopus merge ${step.sha} (${parents.length} parents) is not attributable`);
+  // a concluded merge (commit (merge)) is diffed against its first parent
+  const from = step.kind === 'merge-commit' ? parents[0] : step.old;
+  const base = from ?? gitText(root, ['hash-object', '-t', 'tree', '--stdin'], { input: '' }).trim();
+  const paths = nameSet(gitText(root, ['diff-tree', '-r', '--no-renames', '--name-only', '-z', base, step.sha]));
+  const diverged = nameSet(gitText(root, ['diff-tree', '-r', '--no-renames', '--name-only', '-z', step.sha, nowTree]));
+  const conflicted = new Set();
+  if (parents.length === 2) {
+    // reason: recomputed from the two parents so the result never depends on the index state at Stop.
+    const merged = gitText(root, ['merge-tree', '--write-tree', '--name-only', '-z', parents[0], parents[1]], { okStatuses: [0, 1] });
+    const fields = merged.split('\0');
+    for (let i = 1; i < fields.length && fields[i] !== ''; i++) conflicted.add(fields[i]);
+  }
+  const range = from === null || from === undefined ? step.sha : `${from}..${step.sha}`;
+  const commits = gitText(root, ['rev-list', '--no-merges', range]).split('\n').filter(Boolean);
+  const patchIds = patchIdsOf(root, commits);
+  const ownTouched = new Set();
+  for (const commit of commits) {
+    if (!own.shas.has(commit) && !own.patchIds.has(patchIds.get(commit))) continue;
+    const touched = gitText(root, ['diff-tree', '--root', '--no-commit-id', '-r', '--no-renames', '--name-only', '-z', commit]);
+    for (const path of nameSet(touched)) ownTouched.add(path);
+  }
+  return { paths, diverged, conflicted, ownTouched };
+}
+
+/**
+ * PURE attribution of every turn change to run, version control or unknown (spec Design >
+ * Attribution at turn end).
+ *   1. a path named by an edit record -> `run`, always first;
+ *   2. else the newest take-in step whose range touched the path, whose post-step HEAD content equals
+ *      the working tree (not `diverged`) and where the path is not conflicted -> `vcs`, downgraded to
+ *      `unknown` when an own commit (or one sharing an own patch-id) changed it: own commits are never laundered (D5);
+ *   3. else `unknown` (shell edits, own commits of shell edits, squash merges (D15), stash pop, hand-resolved conflicts).
+ * @param {{entries: Array<{status: string, path: string, lines: number}>,
+ *   editRuns: Map<string, string>,
+ *   steps: Array<{paths: Set<string>, diverged: Set<string>, conflicted: Set<string>, ownTouched: Set<string>}>}} input
+ *   `steps` = take-in steps in chronological order; `editRuns` maps repo-relative path -> run id.
+ * @returns {Array<{path: string, status: 'A'|'M'|'D', lines: number, source: object}>} sorted by path.
+ */
+export function attributeTurn({ entries, editRuns, steps }) {
+  const sourceOf = (path) => {
+    const run = editRuns.get(path);
+    if (run !== undefined) return { kind: 'run', run };
+    for (let i = steps.length - 1; i >= 0; i--) {
+      const step = steps[i];
+      if (!step.paths.has(path) || step.diverged.has(path) || step.conflicted.has(path)) continue;
+      return step.ownTouched.has(path) ? { kind: 'unknown' } : { kind: 'vcs' };
+    }
+    return { kind: 'unknown' };
+  };
+  return entries
+    .map((e) => ({ path: e.path, status: e.status === 'A' || e.status === 'D' ? e.status : 'M', lines: e.lines, source: sourceOf(e.path) }))
+    .sort((a, b) => byText(a.path, b.path));
+}
+
+/**
+ * Gather the reflog facts for the changes no edit record explains, then run `attributeTurn`.
+ * Never throws: a failed step is `{measured:false, reason}` (spec attribution step 5).
+ * @returns {{measured: true, value: object[]} | {measured: false, reason: string}}
+ */
+function measureTurnChanges({ root, snapshot, nowTree, entries, editRuns, sessionStartedAt }) {
+  try {
+    let steps = [];
+    if (entries.some((e) => !editRuns.has(e.path))) {
+      if (snapshot.head === undefined || snapshot.reflog_len === undefined) {
+        throw new TrailAttributionError('turn-start snapshot has no head (written before attribution existed)');
+      }
+      const log = readHeadReflog(root);
+      const turnLog = log.slice(turnStepsStart(log, snapshot));
+      const takeIns = turnLog
+        .map((e, i) => ({ ...e, old: i === 0 ? snapshot.head : turnLog[i - 1].sha }))
+        .filter((e) => (e.kind === 'take-in' || e.kind === 'merge-commit') && e.old !== e.sha);
+      if (takeIns.length > 0) {
+        if (typeof sessionStartedAt !== 'string') throw new TrailAttributionError('session.json absent: the own-commit window is unknown');
+        const own = ownCommitSet(root, log, sessionStartedAt);
+        steps = takeIns.map((step) => collectStepFacts(root, step, nowTree, own));
+      }
+    }
+    return { measured: true, value: attributeTurn({ entries, editRuns, steps }) };
+  } catch (err) {
+    return { measured: false, reason: err instanceof TrailAttributionError ? err.reason : `attribution fault: ${err.message}` };
+  }
+}
+
+/** True when a record shows a NON-isolated helper that was running at any point in the turn (spec D14). */
+function sharedWorkingCopyOpen(sessionDir, turnOpenedMs) {
+  const dir = join(sessionDir, 'helpers');
+  if (!existsSync(dir)) return false;
+  const turnOpenedAt = new Date(turnOpenedMs).toISOString();
+  for (const name of readdirSync(dir).filter((n) => n.endsWith('.json') && !n.endsWith('.judged.json'))) {
+    const record = readValidOrNull(join(dir, name), validHelperRecord);
+    if (record === null) throw new TrailAttributionError(`helpers/${name} is unreadable`);
+    // reason: `isolated` is only known after a helper's first SubagentStop, so a still-running helper
+    // (isolated undefined) is treated as sharing the working copy.
+    if (record.isolated !== true && (record.ended_at === undefined || record.ended_at >= turnOpenedAt)) return true;
+  }
+  return false;
+}
+
+/**
+ * Turn end: build the turn's `TurnChanges` record and write `<turn>/changes.json` atomically.
+ * @param {object} input
+ * @param {string} input.turnDir
+ * @param {string} input.root - repo top level.
+ * @param {{tree?: string | null, head?: string | null, reflog_len?: number}} input.snapshot - turn-start-snapshot.json.
+ * @param {string | null} input.nowTree
+ * @param {Array<{status: string, path: string, lines: number}> | null} input.entries - diff(turn start, now); null = unmeasured.
+ * @param {string | null} input.unmeasuredReason - why `entries` is null.
+ * @param {Map<string, string>} input.editRuns - repo-relative path -> run id from the turn's edit records.
+ * @returns {object} the record written (same shape as core `TurnChanges`).
+ * @throws on a failed write (the caller reports it as not measured).
+ */
+export function recordTurnChanges({ turnDir, root, snapshot, nowTree, entries, unmeasuredReason, editRuns }) {
+  const sessionDir = dirname(turnDir);
+  const startedAt = readValidOrNull(join(sessionDir, 'session.json'), validSessionJson)?.started_at;
+  let shared = false;
+  let changes;
+  try {
+    shared = sharedWorkingCopyOpen(sessionDir, statSync(join(turnDir, 'turn-start-snapshot.json')).mtimeMs);
+    changes = entries === null
+      ? { measured: false, reason: unmeasuredReason }
+      : measureTurnChanges({ root, snapshot, nowTree, entries, editRuns, sessionStartedAt: startedAt });
+  } catch (err) {
+    changes = { measured: false, reason: err instanceof TrailAttributionError ? err.reason : `turn changes fault: ${err.message}` };
+  }
+  const record = { turn: basename(turnDir), at: new Date().toISOString(), shared_working_copy: shared, changes };
+  if (!validTurnChanges(record)) throw new TrailFileInvalidError('changes.json', 'built record does not match the trail schema');
+  writeJsonAtomic(join(turnDir, 'changes.json'), record);
   return record;
 }

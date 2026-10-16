@@ -42,11 +42,11 @@
  * Env: CLAUDE_STATE_BASE_OVERRIDE — session-state root (testing, shared with turn-state.mjs).
  */
 
-import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { basename, extname, isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs';
+import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { getTurnDir, readHookPayload } from './lib/turn-state.mjs';
+import { diffTrees, recordTurnChanges, snapshotWorkingTree } from './lib/session-trail.mjs';
 
 /** Setting path inside `.lore/config.yaml`; values: off (default) | block. */
 const SETTING_KEYS = ['workflow', 'turn_end', 'main_session_source_edits'];
@@ -70,8 +70,14 @@ const DEAD_SPEC_STATUSES = new Set(['deprecated', 'archived']);
 
 /** Reasons a measurement could not be made; flushed as ONE stderr line at the end. */
 const notMeasuredReasons = [];
+/** The subset about the source-edit finding (attribution unmeasured); the only ones shown to the user via systemMessage (D13). */
+const sourceEditNotMeasured = [];
+let sourceEditSetting;
+/** True while the turn is already continuing from an earlier block: measure and record, never speak. */
+let quiet = false;
 
 function exitNotMeasured(reason) {
+  if (quiet) process.exit(0);
   process.stderr.write(`[stop-turn-review] turn state not measured: ${reason}\n`);
   process.exit(0);
 }
@@ -79,45 +85,6 @@ function exitNotMeasured(reason) {
 function runProcess(command, args, cwd, env = process.env) {
   const result = spawnSync(command, args, { cwd, env, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
   return { ok: !result.error && result.status === 0, status: result.status, stdout: result.stdout ?? '', stderr: result.stderr ?? '', error: result.error };
-}
-
-/** Builds a git tree id of the CURRENT working tree through a temporary index; null + reason on failure. */
-function snapshotCurrentTree(root) {
-  let tmpDir;
-  try {
-    tmpDir = mkdtempSync(join(tmpdir(), 'lore-turn-review-index-'));
-    const env = { ...process.env, GIT_INDEX_FILE: join(tmpDir, 'index') };
-    // reason: same recipe as user-prompt-turn-start.mjs snapshotWorkingTree — the two trees must be
-    // built identically or every unchanged file would show up as a diff.
-    runProcess('git', ['read-tree', 'HEAD'], root, env);
-    const add = runProcess('git', ['add', '-A'], root, env);
-    if (!add.ok) return { tree: null, reason: `git add -A failed: ${add.stderr.trim()}` };
-    const write = runProcess('git', ['write-tree'], root, env);
-    const tree = write.stdout.trim();
-    if (!write.ok || !/^[0-9a-f]{40,64}$/.test(tree)) return { tree: null, reason: `git write-tree failed: ${write.stderr.trim()}` };
-    return { tree };
-  } catch (err) {
-    return { tree: null, reason: `current tree fault: ${err.message}` };
-  } finally {
-    if (tmpDir) rmSync(tmpDir, { recursive: true, force: true });
-  }
-}
-
-/** Diffs two trees without rename detection: a rename is a delete of the old path + an add of the new. */
-function diffTrees(root, fromTree, toTree) {
-  const names = runProcess('git', ['diff-tree', '-r', '--no-renames', '--name-status', '-z', fromTree, toTree], root);
-  const stats = runProcess('git', ['diff-tree', '-r', '--no-renames', '--numstat', '-z', fromTree, toTree], root);
-  if (!names.ok || !stats.ok) return { ok: false, reason: `git diff-tree failed: ${(names.stderr || stats.stderr).trim()}` };
-  const entries = [];
-  const nameFields = names.stdout.split('\0').filter(Boolean);
-  for (let i = 0; i + 1 < nameFields.length; i += 2) entries.push({ status: nameFields[i], path: nameFields[i + 1] });
-  const changedLines = new Map();
-  for (const record of stats.stdout.split('\0').filter(Boolean)) {
-    const [added, deleted, ...pathParts] = record.split('\t');
-    // binary files report "-"; they are not source, count them as 0 changed lines
-    changedLines.set(pathParts.join('\t'), Math.max(Number(added) || 0, Number(deleted) || 0));
-  }
-  return { ok: true, entries, changedLines };
 }
 
 /**
@@ -143,6 +110,13 @@ function readYamlScalar(text, keys) {
 
 /** `off` (absent) | `block`; an unrecognised value is reported as not measured and treated as off. */
 function readSourceEditSetting(root) {
+  // reason: memoized — it is asked for by both the finding and the not-measured report, and an
+  // invalid value must be reported once, not twice.
+  sourceEditSetting ??= readSourceEditSettingUncached(root);
+  return sourceEditSetting;
+}
+
+function readSourceEditSettingUncached(root) {
   const configPath = join(root, '.lore', 'config.yaml');
   if (!existsSync(configPath)) return 'off';
   let value;
@@ -188,20 +162,35 @@ function isSourcePath(rel) {
   return !rel.split('/').some((segment) => EXEMPT_SEGMENTS.has(segment));
 }
 
-/** (a) Main-session source edits over the allowance; null when none or the setting is off. */
-function findSourceEdits(records, realRoot, cwd, changedLines) {
-  const mainFiles = new Set();
-  for (const record of records) {
-    if (typeof record.agent_id === 'string' && record.agent_id.length > 0) continue;
-    const rel = toRepoRelative(realRoot, record.file, cwd);
-    if (rel && isSourcePath(rel)) mainFiles.add(rel);
+/**
+ * (a) Source edits over the allowance, judged from the turn's attributed changes (spec Consumers):
+ * main-session (`run` = this session's own run) and `unknown` changes count, `vcs` never, a helper's
+ * run never; under a shared working copy `unknown` files are listed but not counted (D14).
+ * Returns `{counted, total, notCounted}`; `counted` is null when there is no finding to raise.
+ * Unmeasured attribution gives no verdict, only a not-measured reason (read from `.lore/config.yaml`
+ * only when the setting is `block`, so a project that never armed the finding hears nothing).
+ */
+function findSourceEdits(turnChanges, mainRun, changedLines, realRoot) {
+  if (!turnChanges.changes.measured) {
+    if (readSourceEditSetting(realRoot) === 'block') {
+      const reason = `source-edit finding not measured: turn changes unmeasured (${turnChanges.changes.reason})`;
+      notMeasuredReasons.push(reason);
+      sourceEditNotMeasured.push(reason);
+    }
+    return { counted: null, total: 0, notCounted: [] };
   }
-  const touched = [...mainFiles].map((file) => ({ file, lines: changedLines.get(file) ?? 0 })).filter((f) => f.lines > 0);
-  const total = touched.reduce((sum, f) => sum + f.lines, 0);
-  if (total <= SOURCE_EDIT_ALLOWANCE) return null;
+  const touched = turnChanges.changes.value
+    .filter((c) => isSourcePath(c.path) && (changedLines.get(c.path) ?? 0) > 0)
+    .map((c) => ({ file: c.path, lines: changedLines.get(c.path), label: c.source.kind === 'run' ? 'main session' : 'source unknown', source: c.source }));
+  const isMain = (c) => c.source.kind === 'run' && c.source.run === mainRun;
+  const unknown = touched.filter((c) => c.source.kind === 'unknown');
+  const counted = touched.filter((c) => isMain(c) || (c.source.kind === 'unknown' && !turnChanges.shared_working_copy));
+  const notCounted = turnChanges.shared_working_copy ? unknown : [];
+  const total = counted.reduce((sum, f) => sum + f.lines, 0);
   // reason: the setting is read lazily so the common no-edit turn never opens config.yaml
-  if (readSourceEditSetting(realRoot) !== 'block') return null;
-  return { total, files: touched };
+  const nothingToSay = total <= SOURCE_EDIT_ALLOWANCE && notCounted.length === 0;
+  if (nothingToSay || readSourceEditSetting(realRoot) !== 'block') return { counted: null, total, notCounted: [] };
+  return { counted: total > SOURCE_EDIT_ALLOWANCE ? counted : null, total, notCounted };
 }
 
 /** (b) Live-spec code anchors deleted since the snapshot; one `lore status --check-drift` spawn. */
@@ -255,13 +244,19 @@ function findClaudeMdBreach(realRoot, changedPaths) {
   return lines.length > 0 ? lines : null;
 }
 
-function renderBlock(findings) {
+
+const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
+const describeFile = (f) => `   - ${f.file} (${plural(f.lines, 'changed line')}, ${f.label})`;
+
+/** The block text: every finding, then — D13 — the parts that could not be measured, so the model sees them. */
+function renderBlock(findings, notMeasured) {
   const sections = findings.map((finding, index) => `${index + 1}. ${finding}`);
   return [
     '<turn-end-review>',
-    `Turn-end review: ${findings.length} finding${findings.length === 1 ? '' : 's'}. Resolve ${findings.length === 1 ? 'it' : 'all of them'}, then finish.`,
+    `Turn-end review: ${plural(findings.length, 'finding')}. Resolve ${findings.length === 1 ? 'it' : 'all of them'}, then finish.`,
     '',
     ...sections,
+    ...(notMeasured.length > 0 ? ['', `Not measured: ${notMeasured.join('; ').replace(/\s*\n\s*/g, ' ')}`] : []),
     '</turn-end-review>',
   ].join('\n');
 }
@@ -274,8 +269,9 @@ try {
   exitNotMeasured(`unreadable hook payload (${err.message})`);
 }
 
-// ── 1. loop prevention ────────────────────────────
-if (payload.stop_hook_active === true) process.exit(0);
+// reason: a turn that is already continuing because of an earlier block stays silent (BR-1087) but is
+// still measured, so changes.json describes the turn's final state and not the state at the first Stop.
+quiet = payload.stop_hook_active === true;
 
 // ── 2. turn state ─────────────────────────────────
 let turnDir;
@@ -294,41 +290,69 @@ const findings = [];
 // ── 3. working-tree diff against the turn-start snapshot ──
 let diff = null;
 let realRoot = null;
+let snapshot = {};
+let nowTree = null;
+let diffFailure = null;
+const noteUnmeasured = (reason) => { notMeasuredReasons.push(reason); diffFailure ??= reason; };
 const top = runProcess('git', ['rev-parse', '--show-toplevel'], cwd);
 if (!top.ok) {
-  notMeasuredReasons.push('not a git work tree; source edits and anchor drift need the turn-start snapshot');
+  noteUnmeasured('not a git work tree; source edits and anchor drift need the turn-start snapshot');
 } else {
   realRoot = realpathSync(top.stdout.trim());
-  let startTree = null;
   try {
-    const snapshot = JSON.parse(readFileSync(join(turnDir, 'turn-start-snapshot.json'), 'utf8'));
-    if (typeof snapshot.tree === 'string') startTree = snapshot.tree;
-    else notMeasuredReasons.push(`turn-start snapshot absent (${snapshot.reason ?? 'no reason recorded'})`);
+    snapshot = JSON.parse(readFileSync(join(turnDir, 'turn-start-snapshot.json'), 'utf8'));
+    if (typeof snapshot.tree !== 'string') noteUnmeasured(`turn-start snapshot absent (${snapshot.reason ?? 'no reason recorded'})`);
   } catch (err) {
-    notMeasuredReasons.push(`turn-start snapshot unreadable (${err.message})`);
+    noteUnmeasured(`turn-start snapshot unreadable (${err.message})`);
   }
-  if (startTree) {
-    const now = snapshotCurrentTree(realRoot);
-    if (!now.tree) notMeasuredReasons.push(now.reason);
+  if (typeof snapshot.tree === 'string') {
+    const now = snapshotWorkingTree(realRoot);
+    if (now.tree === null) noteUnmeasured(now.reason);
     else {
-      const result = diffTrees(realRoot, startTree, now.tree);
+      nowTree = now.tree;
+      const result = diffTrees(realRoot, snapshot.tree, nowTree);
       if (result.ok) diff = result;
-      else notMeasuredReasons.push(result.reason);
+      else noteUnmeasured(result.reason);
     }
   }
 }
 
+// ── 3b. attribute every change to run / vcs / unknown and write <turn>/changes.json ──
+const sessionId = basename(dirname(turnDir));
+const editRuns = new Map(); // repo-relative path -> run id; the main session's run wins a shared path
+for (const record of realRoot ? records : []) {
+  const rel = toRepoRelative(realRoot, record.file, cwd);
+  const helper = typeof record.agent_id === 'string' && record.agent_id.length > 0;
+  if (rel && (!helper || !editRuns.has(rel))) editRuns.set(rel, helper ? `cc:${sessionId}:${record.agent_id}` : `cc:${sessionId}`);
+}
+let turnChanges;
+try {
+  turnChanges = recordTurnChanges({
+    turnDir, root: realRoot ?? cwd, snapshot, nowTree, entries: diff?.entries ?? null,
+    unmeasuredReason: diffFailure ?? 'no working-tree diff', editRuns,
+  });
+} catch (err) {
+  notMeasuredReasons.push(`changes.json not written (${err.message})`);
+  turnChanges = { shared_working_copy: false, changes: { measured: false, reason: `changes.json not written (${err.message})` } };
+}
+
 // ── 4. findings ───────────────────────────────────
-if (diff) {
-  const sourceEdits = findSourceEdits(records, realRoot, cwd, diff.changedLines);
-  if (sourceEdits) {
-    const list = sourceEdits.files.map((f) => `   - ${f.file} (${f.lines} changed line${f.lines === 1 ? '' : 's'})`).join('\n');
+const infoLines = [];
+if (!quiet) {
+  const sourceEdits = findSourceEdits(turnChanges, `cc:${sessionId}`, diff?.changedLines ?? new Map(), realRoot ?? cwd);
+  const notCounted = sourceEdits.notCounted.map(describeFile);
+  if (sourceEdits.counted) {
     findings.push([
-      `Main-session source edits (${sourceEdits.total} changed lines; allowance ${SOURCE_EDIT_ALLOWANCE}; ${SETTING_KEYS.join('.')} = block):`,
-      list,
+      `Main-session source edits (${plural(sourceEdits.total, 'changed line')}; allowance ${SOURCE_EDIT_ALLOWANCE}; ${SETTING_KEYS.join('.')} = block):`,
+      ...sourceEdits.counted.map(describeFile),
+      ...(notCounted.length > 0 ? ['   Listed, not counted (a non-isolated helper shared the working copy):', ...notCounted] : []),
       '   Source changes belong to an implementer subagent. Hand this work to one (dispatch a lore implementer with these files as anchors) instead of editing in the main session.',
     ].join('\n'));
+  } else if (notCounted.length > 0) {
+    infoLines.push(`Source-edit finding: listed, not counted (a non-isolated helper shared the working copy this turn):\n${notCounted.join('\n')}`);
   }
+}
+if (diff && !quiet) {
   const deleted = diff.entries.filter((e) => e.status === 'D').map((e) => e.path);
   const drifted = findAnchorDrift(realRoot, deleted);
   if (drifted.length > 0) {
@@ -348,7 +372,7 @@ const changedClaudeMd = new Set(
     : records.filter((r) => basename(r.file) === 'CLAUDE.md')
         .map((r) => (realRoot ? toRepoRelative(realRoot, r.file, cwd) : r.file)).filter(Boolean),
 );
-if (changedClaudeMd.size > 0) {
+if (changedClaudeMd.size > 0 && !quiet) {
   const report = findClaudeMdBreach(realRoot ?? cwd, changedClaudeMd);
   if (report) {
     findings.push(['A CLAUDE.md edited this turn is over its ceiling (lore status --check-claude-md):', ...report.map((l) => `   - ${l}`), '   Evict detail into the corpus (or split into a module CLAUDE.md) before finishing.'].join('\n'));
@@ -356,8 +380,15 @@ if (changedClaudeMd.size > 0) {
 }
 
 // ── 5. report ─────────────────────────────────────
+if (quiet) process.exit(0);
 if (notMeasuredReasons.length > 0) {
   process.stderr.write(`[stop-turn-review] turn state not measured: ${notMeasuredReasons.join("; ").replace(/\s*\n\s*/g, " ")}\n`);
 }
-if (findings.length > 0) process.stdout.write(JSON.stringify({ decision: 'block', reason: renderBlock(findings) }));
+if (findings.length > 0) {
+  process.stdout.write(JSON.stringify({ decision: 'block', reason: renderBlock(findings, notMeasuredReasons) }));
+} else {
+  // D13: with no block the user (not the model) is told, through systemMessage with no decision
+  const notes = [...infoLines, ...sourceEditNotMeasured.map((reason) => `Turn-end review: ${reason}; no verdict.`)];
+  if (notes.length > 0) process.stdout.write(JSON.stringify({ systemMessage: notes.join('\n') }));
+}
 process.exit(0);
