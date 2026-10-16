@@ -166,3 +166,86 @@ describe("lore verify / ac list / done over an AC whose oracle file is missing",
     expect(done.exitCode, done.stdout + done.stderr).toBe(0);
   });
 });
+
+// ─── A declared-not-yet-written oracle is not a lie; a declared one that once passed and vanished is ───────────
+
+describe("AC-TG-6 — red-first (--allow-missing-path) ACs: no evidence stays none and does not block done; a vanished once-passing oracle still does", () => {
+  let dir: string;
+  let spec: string;
+  let plan: string;
+  let taskRedFirst: string;
+  let taskVanished: string;
+
+  const addScriptAc = (id: string, file: string, extra: string[] = []): void => {
+    mustRun(
+      ["ac", "add", spec, id, "--statement", `${id} oracle`, "--mode", "script", "--oracle", "test",
+        "--command", `bun test ${file} && echo '${id} PASS: ran'`, ...extra],
+      dir,
+    );
+  };
+  const stateOf = (id: string): string | undefined => {
+    const parsed = JSON.parse(mustRun(["ac", "list", spec, "--json"], dir)) as {
+      data: { coverage: Array<{ ac_id: string; state: string }> | null };
+    };
+    return parsed.data.coverage?.find((f) => f.ac_id === id)?.state;
+  };
+  const newTask = (title: string, scope: string[]): string => {
+    const slug = extractSlug(
+      mustRun(["create", "task", "--title", title, "--parent", plan, "--plan-id", plan, "--ac-scope", scope[0] as string, "--no-ai", "--content", "body"], dir),
+    );
+    for (const extra of scope.slice(1)) mustRun(["scope", "add", slug, extra], dir);
+    return slug;
+  };
+
+  // reason: ~20 CLI spawns at ~1-2s each.
+  beforeAll(() => {
+    dir = mkdtempSync(join(tmpdir(), "lore-missing-oracle-rf-"));
+    execFileSync("git", ["init", "-q"], { cwd: dir });
+    mustRun(["init"], dir);
+    disableAllGates(dir);
+    mustRun(["create", "prd", "--title", "RF PRD", "--no-ai", "--content", "body"], dir);
+    spec = extractSlug(mustRun(["create", "spec", "--title", "RF Spec", "--no-ai", "--content", "body"], dir));
+    writeFileSync(join(dir, "ok.test.ts"), PASSING_TEST_BODY);
+    addScriptAc("AC-OK", "ok.test.ts");
+    addScriptAc("AC-RF", "later.test.ts", ["--allow-missing-path", "red-first: a later task writes it"]);
+    addScriptAc("AC-VAN", "vanish.test.ts", ["--allow-missing-path", "red-first: written before verify"]);
+    plan = extractSlug(mustRun(["create", "plan", "--title", "RF Plan", "--parent", spec, "--no-ai", "--content", "body"], dir));
+    taskRedFirst = newTask("RF Task One", ["AC-OK", "AC-RF"]);
+    taskVanished = newTask("RF Task Two", ["AC-OK", "AC-VAN"]);
+    commitAll(dir, "fixture");
+  }, 180_000);
+
+  afterAll(() => {
+    try {
+      rmSync(dir, { recursive: true, force: true });
+    } catch {
+      /* best-effort cleanup */
+    }
+  });
+
+  it("STATE/HAPPY: a declared red-first AC with no evidence reads none and its task can be archived", { timeout: 180_000 }, () => {
+    const verified = runLore(["verify", plan, "--task", taskRedFirst, "--ac", "AC-OK", "--yes"], dir);
+    expect(verified.exitCode, verified.stdout + verified.stderr).toBe(0);
+    expect(stateOf("AC-RF")).toBe("none");
+
+    const done = runLore(["done", taskRedFirst, "--declare-no-new-tests", "fixture"], dir);
+    expect(done.exitCode, done.stdout + done.stderr).toBe(0);
+  });
+
+  it("NEGATIVE: a declared AC that once passed and whose file is gone is not measured and still refuses done with exit 4", { timeout: 180_000 }, () => {
+    writeFileSync(join(dir, "vanish.test.ts"), PASSING_TEST_BODY);
+    commitAll(dir, "write vanish oracle");
+    for (const ac of ["AC-OK", "AC-VAN"]) {
+      const verified = runLore(["verify", plan, "--task", taskVanished, "--ac", ac, "--yes"], dir);
+      expect(verified.exitCode, verified.stdout + verified.stderr).toBe(0);
+    }
+    rmSync(join(dir, "vanish.test.ts"));
+    commitAll(dir, "delete vanish oracle");
+
+    expect(stateOf("AC-VAN")).toBe("not_measured");
+    const done = runLore(["done", taskVanished, "--declare-no-new-tests", "fixture"], dir);
+    expect(done.exitCode, done.stdout + done.stderr).toBe(4);
+    expect(done.stderr).toContain("AC-VAN");
+    expect(done.stderr).toContain("vanish.test.ts");
+  });
+});
