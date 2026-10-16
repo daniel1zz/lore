@@ -12,7 +12,11 @@
     // See packages/core/src/CLAUDE.md "Browser safety" invariant.
     "types": ["node"],
     "paths": {
-      "@/*": ["./src/*"]
+      "@/*": ["./src/*"],
+      // reason: `paths` in a child config REPLACES the base's; repeat the workspace entries
+      // so @lore/core resolves to this checkout's own source, not a node_modules symlink.
+      "@lore/core": ["../core/src/index.ts"],
+      "@lore/core/node": ["../core/src/node.ts"]
     },
     "baseUrl": "."
   },

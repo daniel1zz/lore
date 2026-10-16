@@ -1,8 +1,9 @@
 {
   "extends": "../../tsconfig.base.json",
-  "compilerOptions": {
-    "rootDir": "src"
-  },
+  // reason: no rootDir. @lore/core resolves through tsconfig.base.json `paths` to THIS
+  // checkout's packages/core/src (so a git worktree never type-checks against the main
+  // checkout's core); those files sit outside src/, and an explicit rootDir would report
+  // each as TS6059. This project is noEmit, so rootDir has no other effect.
   "include": ["src/**/*"],
   "exclude": ["tests"]
 }
