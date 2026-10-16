@@ -639,10 +639,17 @@ export class AcService {
    * (evidence pointing at ids no longer declared).
    *
    * @param specIdOrSlug - Spec document ULID or slug
+   * @param pathContext - OPTIONAL injected fs context (AC-TG-6). When supplied, every script criterion's
+   *   command is checked against the live filesystem and each coverage fact carries `oracle_file_missing`
+   *   (`[]` when checked and clean), which `deriveAcCoverageState` renders as `not_measured`. Omitted =
+   *   the fact's field stays ABSENT ("not checked"), never `[]`.
    * @returns {@link AcListResult}
    * @throws DOC_NOT_FOUND, VALIDATION_ERROR (not a spec)
    */
-  async listCriteria(specIdOrSlug: string): Promise<Result<AcListResult, LoreError>> {
+  async listCriteria(
+    specIdOrSlug: string,
+    pathContext?: OraclePathContext,
+  ): Promise<Result<AcListResult, LoreError>> {
     const specResult = await this.resolveSpec(specIdOrSlug);
     if (!specResult.ok) return specResult;
     const spec = specResult.value;
@@ -652,8 +659,12 @@ export class AcService {
     if (!evidenceTasks.ok) return evidenceTasks;
     const { plans, adhocTasks, tasks } = evidenceTasks.value;
 
-    const coverage =
+    const baseCoverage =
       plans.length > 0 || adhocTasks.length > 0 ? computeAcCoverage(criteria, tasks) : null;
+    const coverage =
+      baseCoverage !== null && pathContext !== undefined
+        ? annotateMissingOracleFiles(baseCoverage, criteria, pathContext)
+        : baseCoverage;
 
     const declaredIds = new Set(criteria.map((c) => c.id));
     const danglingSet = new Set<string>();
@@ -1449,4 +1460,33 @@ function buildSetChangeSummary(
 ): string {
   const base = `Acceptance criterion "${acId ?? "?"}" updated — ${count} entries`;
   return fromStatus !== toStatus ? `${base} (demoted ${fromStatus} → ${toStatus} on edit)` : base;
+}
+
+/**
+ * Stamps each script criterion's coverage fact with the test-file paths its CURRENT command names that
+ * exist under no plausible root (AC-TG-6). Pure over its inputs plus the injected `fileExists`.
+ *
+ * @param coverage - {@link computeAcCoverage}'s facts, in criteria order
+ * @param criteria - the spec's declared criteria
+ * @param pathContext - injected fs context (never a real filesystem read here)
+ * @returns new facts (inputs untouched); non-script criteria keep the field ABSENT
+ */
+function annotateMissingOracleFiles(
+  coverage: AcListResult["coverage"] & object,
+  criteria: AcceptanceCriterion[],
+  pathContext: OraclePathContext,
+): AcListResult["coverage"] & object {
+  const byId = new Map(criteria.map((c) => [c.id, c] as const));
+  return coverage.map((fact) => {
+    const criterion = byId.get(fact.ac_id);
+    if (criterion === undefined || criterion.verify.mode !== "script") return fact;
+    return {
+      ...fact,
+      oracle_file_missing: findMissingOracleFiles(criterion.verify.command, {
+        cwd: pathContext.cwd,
+        ...(pathContext.corpusRoot !== undefined ? { corpusRoot: pathContext.corpusRoot } : {}),
+        fileExists: pathContext.fileExists,
+      }),
+    };
+  });
 }

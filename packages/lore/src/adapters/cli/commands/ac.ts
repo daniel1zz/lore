@@ -363,9 +363,13 @@ export default defineCommand({
         },
       },
       async run({ args }) {
-        const { app } = loadLoreApp();
+        const { app, dbPath } = loadLoreApp();
         try {
-          const result = await requireAcService(app).listCriteria(args.spec as string);
+          const result = await requireAcService(app).listCriteria(args.spec as string, {
+            fileExists: existsSync,
+            cwd: process.cwd(),
+            corpusRoot: dirname(dirname(dbPath)),
+          });
 
           if (!result.ok) {
             process.stderr.write(formatError(result.error) + "\n");

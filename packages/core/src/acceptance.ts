@@ -494,6 +494,16 @@ export interface AcCoverageFact {
    * measured at all.
    */
   oracle_generation?: AcOracleGenerationSplit;
+  /**
+   * Test-file paths the criterion's CURRENT script command names that exist under no plausible root
+   * right now (spec-test-governance-guards-that-refuse-bad-tests-declared AC-TG-6; baseline AS-17).
+   * ABSENT means "not checked" (the caller had no filesystem context) — never "nothing missing"; a
+   * checked-and-clean criterion carries `[]`. A non-empty list makes {@link deriveAcCoverageState}
+   * answer `"not_measured"` for any fact that is not a fail: evidence recorded against a file that
+   * is gone proves nothing about the code today. Set by `AcService.listCriteria`, not by
+   * {@link computeAcCoverage} (which is pure and reads no filesystem).
+   */
+  oracle_file_missing?: readonly string[];
 }
 
 /**
@@ -639,6 +649,11 @@ export function computeAcCoverage(
  * | 6 | `"pass"` | `fail === 0`, `attested_pass === 0`, `pass > 0`, `falsified > 0` |
  * | 7 | `"none"` | `pass === 0` AND `fail === 0` |
  *
+ * **AC-TG-6 — missing oracle file (between rows 2 and 3)**: when {@link AcCoverageFact.oracle_file_missing}
+ * is non-empty and `fail === 0` and `pass > 0`, the state is `"not_measured"` BEFORE rows 3-6 are tried —
+ * an earlier attested pass against a test file that no longer exists must not render as passing. A real
+ * `fail` still outranks it (rows 1-2); a criterion with no evidence stays `"none"` (row 7).
+ *
  * This is the COMPLETE return set — `"inconclusive"`/`"expected-fail"` are
  * badge-layer residuals `commands/ac.ts::coverageBadge` derives from `fact.refs`
  * ONLY after THIS function has already returned `"none"` (rendering `⚑?`/`⚑R`);
@@ -713,6 +728,10 @@ export function computeAcCoverage(
 export function deriveAcCoverageState(fact: AcCoverageFact): AcCoverageState {
   if (fact.fail > 0) {
     return isSupersededByNewerAttestedPass(fact.refs) ? "fail_superseded" : "fail";
+  }
+  // AC-TG-6: the oracle file is gone, so no earlier pass (attested or not) may render as passing.
+  if (fact.pass > 0 && fact.oracle_file_missing !== undefined && fact.oracle_file_missing.length > 0) {
+    return "not_measured";
   }
   if (fact.attested_pass > 0) return "attested_pass";
   if (fact.pass > 0) {
