@@ -76,7 +76,13 @@ import {
   parseSeatBranch,
   isInvalidated,
   computeArchiveCandidates,
+  mergeTrailIntoChangedFiles,
 } from "@lore/core";
+import {
+  parseRunId,
+  readSessionTrail,
+  type SessionTrail,
+} from "@lore/core/node";
 import { claimNamesWorktree, makeDirectoryResolver } from "./seat-claim-match.js";
 import type {
   BootstrapReport,
@@ -109,6 +115,24 @@ import {
 import { realpathNative, type RealpathPort } from "../adapters/real-realpath-port.js";
 
 const defaultNow = (): string => new Date().toISOString();
+
+/**
+ * Who is writing a handoff, as the ADAPTER verified it: the attested run (`cc:<session>[:<agent>]`), or
+ * `null` when the caller has none. The adapter resolves it (CLI: verified invocation identity; MCP: the
+ * call's verified `harness_run`); the service only reads the trail that run points at.
+ */
+export interface HandoffCaller {
+  readonly run: string | null;
+}
+
+/**
+ * Port reading one session's trail. `null` = no trail directory for that session. May throw the trail
+ * reader's typed errors for a malformed file; `writeHandoff` turns that into "not measured" with the reason.
+ */
+export type ReadHandoffTrail = (sessionId: string) => SessionTrail | null;
+
+/** Default port: the real filesystem reader over the resolved state base (`CLAUDE_STATE_BASE_OVERRIDE` or `~/.claude/session-state`). */
+const readHandoffTrailFromDisk: ReadHandoffTrail = (sessionId) => readSessionTrail(sessionId);
 
 /** Truncates `title` to at most `maxChars`, appending an ellipsis marker when cut. */
 function truncateTitle(title: string, maxChars = 120): string {
@@ -256,6 +280,7 @@ export class SessionService {
     private readonly writeHeartbeatPort: WriteSessionHeartbeat = writeSessionHeartbeat,
     private readonly readHeartbeatPort: ReadSessionHeartbeat = readSessionHeartbeat,
     private readonly realpathPort: RealpathPort = realpathNative,
+    private readonly readTrailPort: ReadHandoffTrail = readHandoffTrailFromDisk,
   ) {}
 
   // ── Seat claims (session-start injection) ─────────────────────────────────
@@ -788,6 +813,11 @@ export class SessionService {
    *   caller — the JSON IS the `extra.handoff` SSOT, D6).
    * @param now - Reserved for symmetry with `bootstrap`/`resume`'s time seam; not
    *   currently consulted (doc timestamps come from `createHandoffDoc`'s own clock).
+   * @param caller - The verified writer run. When given (CLI and MCP always give it), the handoff's
+   *   `changed_files` / `changed_files_measured` / `trail_gaps` are COMPUTED here from that run's session
+   *   trail merged with `modified_files` (session-trail D16) and any such fields in `input` are discarded;
+   *   `modified_files` itself is stored exactly as typed. A `null` run reads "changed files: not measured".
+   *   Omitted (internal callers and legacy tests) leaves the payload untouched.
    * @returns `ok(DocRecord)` of the created handoff doc, or `err(VALIDATION_ERROR)`.
    * @example
    * await sessionService.writeHandoff({
@@ -801,6 +831,7 @@ export class SessionService {
     // seam (D10-style discipline); writeHandoff itself performs no now()-dependent
     // computation — doc timestamps are stamped by createHandoffDoc's own clock.
     _now: () => string = defaultNow,
+    caller?: HandoffCaller,
   ): Promise<Result<DocRecord, LoreError>> {
     const parsed = handoffExtraSchema.safeParse(input);
     if (!parsed.success) {
@@ -812,7 +843,7 @@ export class SessionService {
         value: input,
       });
     }
-    const handoff = parsed.data;
+    const handoff = caller === undefined ? parsed.data : this.withTrailChangedFiles(parsed.data, caller);
 
     let parentId: DocId | null = null;
     if (handoff.plan_ref !== undefined) {
@@ -864,6 +895,30 @@ export class SessionService {
     };
 
     return this.deps.createHandoffDoc(createInput);
+  }
+
+  /**
+   * Replace the trail-derived fields of `handoff` with the merge of the caller's session trail and the
+   * author's `modified_files` (D16). Any `changed_files*` / `trail_gaps` the payload carried are dropped:
+   * only the trail may say what changed. Never throws — an unreadable trail is "not measured" with its reason.
+   */
+  private withTrailChangedFiles(handoff: HandoffExtra, caller: HandoffCaller): HandoffExtra {
+    const { changed_files: _dropFiles, changed_files_measured: _dropMeasured, trail_gaps: _dropGaps, ...base } = handoff;
+    let trail: SessionTrail | null = null;
+    let reason: string;
+    if (caller.run === null) {
+      reason = "no attested run";
+    } else {
+      try {
+        const { session } = parseRunId(caller.run);
+        trail = this.readTrailPort(session);
+        reason = `no session trail for ${session}`;
+      } catch (e) {
+        // reason: a trail that cannot be read is a measurement gap to SHOW (I7), never a handoff refusal.
+        reason = e instanceof Error ? e.message : String(e);
+      }
+    }
+    return { ...base, ...mergeTrailIntoChangedFiles(trail, handoff.modified_files, reason) };
   }
 
   // ── Resume rule diff (BL-15, SPEC-157 AC-BLS2-22 / BR-966) ───────────────

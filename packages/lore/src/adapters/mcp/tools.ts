@@ -936,7 +936,11 @@ export const LoreInvalidateSchema = z.object({
  * author stays non-empty because the wrapper fills `by` from the call's resolved name, while
  * `handoffExtraSchema` (the CLI contract) is untouched.
  */
-export const LoreHandoffSchema = handoffExtraSchema.omit({ by: true }).extend({
+export const LoreHandoffSchema = handoffExtraSchema
+  // reason: the trail-derived fields are computed by `SessionService.writeHandoff` from the call's session
+  // trail (D16); a caller cannot name them, so they are not part of the tool's input.
+  .omit({ by: true, changed_files: true, changed_files_measured: true, trail_gaps: true })
+  .extend({
   harness_run: HARNESS_RUN_FIELD,
 });
 
@@ -3021,7 +3025,11 @@ export function registerTools(server: McpServer, baseApp: App, getConfig?: () =>
       if (app.sessionService === undefined) {
         return errorContent({ code: "STORE_ERROR", message: "Internal error: SessionService not wired on App" });
       }
-      const result = await app.sessionService.writeHandoff(args);
+      // reason: session-trail D16 — the run is the call's VERIFIED run (`scope.run` verified it once); the service
+      // reads that run's session trail. An unattested call reads "changed files: not measured".
+      const result = await app.sessionService.writeHandoff(args, undefined, {
+        run: requireCallIdentity(scope).harnessRun,
+      });
       if (!result.ok) return errorContent(result.error);
       return textContent({ doc: result.value });
     },

@@ -1145,7 +1145,17 @@ export default defineCommand({
         return;
       }
 
-      const result = await app.sessionService.writeHandoff(candidate);
+      // reason: session-trail D16 — the trail read is keyed by the run lore VERIFIED (an unregistered or absent
+      // `--harness-run` verifies to null), never the raw flag; the service reads that run's session trail.
+      const identity = await app.verifiedInvocationIdentity?.();
+      if (identity !== undefined && !identity.ok) {
+        process.stderr.write(formatError(identity.error) + "\n");
+        process.exitCode = exitCode(identity.error);
+        return;
+      }
+      const run = identity?.value?.harnessRun ?? null;
+
+      const result = await app.sessionService.writeHandoff(candidate, undefined, { run });
       if (!result.ok) {
         process.stderr.write(formatError(result.error) + "\n");
         process.exitCode = exitCode(result.error);
