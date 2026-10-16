@@ -1,0 +1,4 @@
+# AC-TG-2: arm LORE_TEST_SANDBOX for every `bun test` run from packages/lore
+# (test:bun does `cd packages/lore`). Bun reads the nearest bunfig.toml.
+[test]
+preload = ["../../scripts/test-isolation-setup.ts"]

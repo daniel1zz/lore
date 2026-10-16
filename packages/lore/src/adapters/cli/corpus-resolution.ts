@@ -41,6 +41,14 @@
  * feeding a pure decision, replacing an ad hoc inline walk), never WHETHER it
  * fires for the same inputs.
  *
+ * ⛔ Test-run marker (task-skill-implement-tg-4, AC-TG-2): `resolveCorpus` is the
+ * ONE choke point every db-path resolution passes through (CLI loader, MCP,
+ * `findLoreDbPath*`). When `LORE_TEST_SANDBOX=1` (set by vitest `setupFiles` and the
+ * bun `[test] preload` via `scripts/test-isolation-setup.ts`) it refuses, with exit
+ * code 4, any resolved db that lies inside this repository
+ * (`LORE_TEST_SANDBOX_REPO` and that repo's main checkout) — see
+ * {@link findSandboxRefusal}.
+ *
  * Side-effect class: IO — `existsSync` (the pure resolver's injected probe),
  *   `spawnSync` (git facts), `process.exit` (findLoreDbPath's miss branch),
  *   `process.stderr.write` (the same branch's diagnostic).
@@ -49,8 +57,8 @@
  * §Design D1, D2, D3, D6.
  */
 
-import { existsSync } from "node:fs";
-import { dirname, join, resolve as resolvePath } from "node:path";
+import { existsSync, realpathSync } from "node:fs";
+import { dirname, isAbsolute, join, resolve as resolvePath, sep } from "node:path";
 import { spawnSync } from "node:child_process";
 import { resolveCorpusProvenance } from "@lore/core";
 import type { CorpusProvenanceGitFacts, ResolvedCorpus } from "@lore/core";
@@ -233,6 +241,58 @@ export function findMainCheckoutLoreDb(dir: string): string | undefined {
   return existsSync(candidate) ? candidate : undefined;
 }
 
+// ─── test-run marker guard (AC-TG-2) ────────────────────────────────────────
+
+/** Env var set to "1" by the test runners' setup files — arms the guard. */
+export const TEST_SANDBOX_ENV = "LORE_TEST_SANDBOX";
+/** Env var holding the absolute path of the repository checkout the tests run from. */
+export const TEST_SANDBOX_REPO_ENV = "LORE_TEST_SANDBOX_REPO";
+/** Exit code for the refusal — the validation/lifecycle family (adapters/cli/CLAUDE.md). */
+const SANDBOX_REFUSAL_EXIT_CODE = 4;
+
+function realPathOrSelf(p: string): string {
+  try {
+    return realpathSync(p);
+  } catch {
+    // reason: a path that does not exist cannot be a symlink alias of the repo; compare as given.
+    return resolvePath(p);
+  }
+}
+
+/**
+ * Decides (reads env + filesystem, never exits) whether the resolved `dbPath` must be
+ * refused because `LORE_TEST_SANDBOX=1` and it lies inside this repository. Refused
+ * roots are `LORE_TEST_SANDBOX_REPO` AND, when that checkout is a linked worktree, its
+ * main checkout (a worktree resolves the main `.lore/` via the git-common-dir route).
+ *
+ * @param dbPath - the resolved corpus db path
+ * @param env - environment to read (defaults to `process.env`)
+ * @returns the refusal message, or `undefined` when the path is allowed / guard unarmed
+ */
+export function findSandboxRefusal(dbPath: string, env: NodeJS.ProcessEnv = process.env): string | undefined {
+  if (env[TEST_SANDBOX_ENV] !== "1") return undefined;
+  const repo = env[TEST_SANDBOX_REPO_ENV];
+  if (repo === undefined || repo === "" || !isAbsolute(repo)) {
+    return (
+      `Error: ${TEST_SANDBOX_ENV}=1 but ${TEST_SANDBOX_REPO_ENV} is not an absolute path ` +
+      `(got ${JSON.stringify(repo ?? null)}); refusing to resolve "${dbPath}". ` +
+      `The test setup file (scripts/test-isolation-setup.ts) must set both variables.\n`
+    );
+  }
+  const roots = [realPathOrSelf(repo)];
+  const probe = probeGitCommonDir(repo);
+  if (probe.resolved && probe.isLinkedWorktree && probe.mainCheckoutRoot !== null) {
+    roots.push(realPathOrSelf(probe.mainCheckoutRoot));
+  }
+  const dbReal = realPathOrSelf(dbPath);
+  const root = roots.find((r) => dbReal === r || dbReal.startsWith(r + sep));
+  if (root === undefined) return undefined;
+  return (
+    `Error: ${TEST_SANDBOX_ENV}=1 refuses the repository's own corpus "${dbPath}" ` +
+    `(inside ${root}). A test must use a throwaway corpus (mkdtemp + \`lore init\`).\n`
+  );
+}
+
 // ─── §D3 composition boundary + wrappers ───────────────────────────────────
 
 /**
@@ -251,11 +311,20 @@ export function findMainCheckoutLoreDb(dir: string): string | undefined {
  *   `undefined` when no corpus exists on any route this module knows about
  */
 export function resolveCorpus(cwd: string = process.cwd()): ResolvedCorpus | undefined {
-  return resolveCorpusProvenance({
+  const resolved = resolveCorpusProvenance({
     cwd,
     probeExists: existsSync,
     gitFacts: gatherCorpusGitFacts(cwd),
   });
+  // "undetermined" carries a bare cwd directory, not a corpus file — nothing to refuse.
+  if (resolved !== undefined && resolved.provenance !== "undetermined") {
+    const refusal = findSandboxRefusal(resolved.path);
+    if (refusal !== undefined) {
+      process.stderr.write(refusal);
+      process.exit(SANDBOX_REFUSAL_EXIT_CODE);
+    }
+  }
+  return resolved;
 }
 
 /**
