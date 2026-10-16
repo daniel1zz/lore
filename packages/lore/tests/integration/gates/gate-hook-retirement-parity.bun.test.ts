@@ -11,8 +11,8 @@
  *   4. a claim of a task whose upstream spec is unapproved                      -> task-claim
  * Every refusal names its checkpoint and writes no document and no version.
  *
- * Structural half: no `lore-gate-g1..g4` / `g1..g4` hook name is left in the shipped roster, the
- * shipped assets, the project scaffold, this repo's hooks/ or `.claude/settings.json`.
+ * Structural half (no `lore-gate-g1..g4` hook name left in the shipped roster, assets, scaffold,
+ * hooks/ or `.claude/settings.json`) lives in `tests/integration/retirement-registry.bun.test.ts`.
  *
  * Dimensions: NEGATIVE (the four refusals x 2 surfaces), STATE (no doc/version written),
  * REGRESSION (structural: hooks retired), HAPPY control (an unrelated create still succeeds on
@@ -23,7 +23,7 @@
 
 import { afterAll, beforeAll, describe, expect, it, setDefaultTimeout } from "bun:test";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -232,36 +232,4 @@ describe("control: the same surfaces still accept a legal write (a refusal above
     );
     expect(result.isError ?? false).toBe(false);
   });
-});
-
-// ─── structural half: no g1-g4 hook remains shipped or registered ───────────
-
-const G_HOOK_NAME = /lore-gate-g[1-4]|(^|[^a-z0-9])g[1-4]-(spec-create|spec-promote|plan-promote|task-claim)/;
-
-function filesUnder(path: string): string[] {
-  if (!existsSync(path)) return [];
-  if (!statSync(path).isDirectory()) return [path];
-  return readdirSync(path).flatMap((entry) => filesUnder(join(path, entry)));
-}
-
-/** Files (names and contents) under `relPath` that still name a g1-g4 hook. */
-function offenders(relPath: string): string[] {
-  return filesUnder(join(REPO_ROOT, relPath)).filter((file) => G_HOOK_NAME.test(file.slice(REPO_ROOT.length)) || G_HOOK_NAME.test(readFileSync(file, "utf8")));
-}
-
-describe("no lore-gate-g1..g4 / g1..g4 hook remains shipped or registered", () => {
-  const LOCATIONS = [
-    "packages/core/src/distribution-hooks.ts",
-    "assets/hooks",
-    "assets/project",
-    "hooks",
-    ".claude/settings.json",
-    "packages/lore/src/service/project-setup-service.ts",
-    "packages/lore/src/flows/setup-project-flow.ts",
-  ];
-  for (const loc of LOCATIONS) {
-    it(`${loc} names no g1-g4 hook`, () => {
-      expect(offenders(loc)).toEqual([]);
-    });
-  }
 });

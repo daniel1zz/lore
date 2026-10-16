@@ -79,6 +79,7 @@ import { existsSync, lstatSync, mkdtempSync, realpathSync, rmSync, statSync } fr
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
+import { RETIREMENTS } from "../../src/adapters/retirements.js";
 
 // ─── Path setup ─────────────────────────────────────────────────────────────
 
@@ -290,8 +291,14 @@ describe("registry-free npm install simulation — HAPPY", () => {
       // BOTH governance files are asserted absent (proving the retirement, not
       // just silence on the old assertion).
       expect(setupDryRunJson.data.plan.writes.some((w) => w.path.includes("session-start-resume.mjs"))).toBe(true);
-      expect(setupDryRunJson.data.plan.writes.some((w) => w.path.includes("seat-briefing.md"))).toBe(false);
-      expect(setupDryRunJson.data.plan.writes.some((w) => w.path.includes("corpus-workflow.md"))).toBe(false);
+      // The retired names come from the registry (never a hand-typed name): a file deleted long ago
+      // can never fail a `not.includes` check, so only registry rows keep this assertion honest.
+      for (const row of RETIREMENTS.filter((r) => r.kind === "install-asset")) {
+        expect(
+          setupDryRunJson.data.plan.writes.some((w) => w.path.includes(row.target)),
+          `retired install asset ${row.target} must not be planned for writing`,
+        ).toBe(false);
+      }
     },
     600_000,
   );

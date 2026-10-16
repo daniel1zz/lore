@@ -1,4 +1,8 @@
 /**
+ * NOTE (task-skill-test-tg-8): the per-file "retired path is absent from the install walk and from
+ * the check-embedded manifest" cases moved into `tests/integration/retirement-registry.bun.test.ts`
+ * (one row per retired path in `RETIREMENTS`). What stays here is content and predicate pins.
+ *
  * AC-083-2 (extended by AC-085-2) — SPEC-083 D3 retirement pins, extended by
  * SPEC-085 D3: the MACHINE install asset set now yields ZERO
  * `governance/corpus-workflow.md` AND ZERO `governance/seat-briefing.md`
@@ -110,74 +114,6 @@ function readCorpusWorkflowFragments(): string {
 
 const RETIRED_PATH_CORPUS_WORKFLOW = "governance/corpus-workflow.md";
 const RETIRED_PATH_SEAT_BRIEFING = "governance/seat-briefing.md";
-// RE-BASELINE (fragments D9): corpus-workflow.md left RETIRED_FROM_INSTALL_PATHS when the file was deleted.
-const RETIRED_PATHS = [RETIRED_PATH_SEAT_BRIEFING];
-
-// ─── HAPPY — RealAssetSource.load() excludes BOTH governance files (SPEC-085 D3) ─
-
-describe("setup-governance-retirement — HAPPY (RealAssetSource install set)", () => {
-  it("RealAssetSource.load() against the real repo assets/ tree yields zero governance/corpus-workflow.md entries", async () => {
-    const source = new RealAssetSource(ASSETS_ROOT);
-    const result = await source.load();
-    expect(result.ok).toBe(true);
-    if (!result.ok) return;
-
-    const paths = result.value.files.map((f) => f.path);
-    expect(paths).not.toContain(RETIRED_PATH_CORPUS_WORKFLOW);
-  });
-
-  it("RealAssetSource.load() yields zero governance/seat-briefing.md entries (SPEC-085 D3)", async () => {
-    const source = new RealAssetSource(ASSETS_ROOT);
-    const result = await source.load();
-    expect(result.ok).toBe(true);
-    if (!result.ok) return;
-
-    const paths = result.value.files.map((f) => f.path);
-    expect(paths).not.toContain(RETIRED_PATH_SEAT_BRIEFING);
-  });
-
-  it("RealAssetSource.load() yields ZERO governance-kind entries at all (both retirements together empty the install directory)", async () => {
-    const source = new RealAssetSource(ASSETS_ROOT);
-    const result = await source.load();
-    expect(result.ok).toBe(true);
-    if (!result.ok) return;
-
-    const governanceFiles = result.value.files.filter((f) => f.kind === "governance");
-    expect(governanceFiles.length).toBe(0);
-  });
-});
-
-// ─── HAPPY — the check-embedded-manifest view (setup-check.ts) ─────────────
-// This is the SECOND consumer the 2026-07-26 regression addendum names — the
-// original AC-083-2 suite pinned RealAssetSource.load() only, missing that
-// `lore setup --check` classifies against a wholly separate data source.
-
-describe("setup-governance-retirement — HAPPY (check-embedded-manifest view)", () => {
-  it("buildCheckEmbeddedManifest() yields zero governance/corpus-workflow.md entries", () => {
-    const manifest = buildCheckEmbeddedManifest();
-    const paths = manifest.entries.map((e) => e.path);
-    expect(paths).not.toContain(RETIRED_PATH_CORPUS_WORKFLOW);
-  });
-
-  it("buildCheckEmbeddedManifest() yields zero governance/seat-briefing.md entries (SPEC-085 D3)", () => {
-    const manifest = buildCheckEmbeddedManifest();
-    const paths = manifest.entries.map((e) => e.path);
-    expect(paths).not.toContain(RETIRED_PATH_SEAT_BRIEFING);
-  });
-
-  it("buildCheckEmbeddedManifest() yields ZERO governance-kind entries at all", () => {
-    const manifest = buildCheckEmbeddedManifest();
-    const governanceEntries = manifest.entries.filter((e) => e.kind === "governance");
-    expect(governanceEntries.length).toBe(0);
-  });
-
-  it("every buildCheckEmbeddedManifest() entry independently satisfies !isRetiredFromInstall (cross-check against the shared predicate, not a hand-duplicated list)", () => {
-    const manifest = buildCheckEmbeddedManifest();
-    for (const entry of manifest.entries) {
-      expect(isRetiredFromInstall(entry.path)).toBe(false);
-    }
-  });
-});
 
 // ─── STATE — the entries filter narrows entries only, never tree_digest ────
 
@@ -185,14 +121,6 @@ describe("setup-governance-retirement — STATE (check-embedded-manifest tree_di
   it("buildCheckEmbeddedManifest()'s tree_digest is non-empty and independent of the entries filter (whole-tree digest, not recomputed over the narrowed subset)", () => {
     const manifest = buildCheckEmbeddedManifest();
     expect(manifest.tree_digest.length).toBeGreaterThan(0);
-    // The retired file is absent from `entries` but the digest still reflects
-    // the WHOLE tree (module doc: "tree_digest is carried through UNCHANGED") —
-    // this is a non-vacuous companion to the HAPPY absence assertion above:
-    // proves the fix didn't achieve "missing excluded" by also shrinking the
-    // digest input, which would break the SEPARATE assets_digest equality
-    // check `planUpdate` performs elsewhere.
-    expect(manifest.entries.map((e) => e.path)).not.toContain(RETIRED_PATH_CORPUS_WORKFLOW);
-    expect(manifest.entries.map((e) => e.path)).not.toContain(RETIRED_PATH_SEAT_BRIEFING);
   });
 });
 
@@ -446,12 +374,6 @@ describe("setup-governance-retirement — REGRESSION (files stay on disk as the 
 
   it("assets/governance/seat-briefing.md still physically exists (install-set exclusion, not a file deletion)", () => {
     expect(existsSync(join(ASSETS_ROOT, RETIRED_PATH_SEAT_BRIEFING))).toBe(true);
-  });
-
-  it("every still-retired path is a member of RETIRED_FROM_INSTALL_PATHS (cross-check, not a hand-duplicated list)", () => {
-    for (const path of RETIRED_PATHS) {
-      expect(isRetiredFromInstall(path)).toBe(true);
-    }
   });
 
   it("governance/corpus-workflow.md is NOT a member any more (its file is deleted; a stale entry makes npm staging copy a missing file), while the assets/context/ fragments are binary-read retired", () => {

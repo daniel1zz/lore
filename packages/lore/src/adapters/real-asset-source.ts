@@ -158,11 +158,10 @@ const CLAUDE_DIR_PLACEHOLDER = "{{lore:claude_dir}}";
  * classifies the governance trio, rather than needing a second, divergent
  * "file never existed" code path for this one entry.
  */
-export const RETIRED_FROM_INSTALL_PATHS = new Set<string>([
-  "governance/seat-briefing.md",
-  "governance/claude-md-contract.md",
-  "skills/lore-init-context/SKILL.md",
-]);
+export const RETIRED_FROM_INSTALL_PATHS = new Set<string>(
+  // reason: only still-shipped files belong here; npm staging copies every member (see retirements.ts module doc).
+  RETIREMENTS.filter((row) => row.kind === "install-asset" && row.still_shipped === true).map((row) => row.target),
+);
 
 /**
  * Top-level `assets/` directories that are BINARY-READ ONLY: shipped in the npm
@@ -198,6 +197,7 @@ export function isRetiredFromInstall(path: string): boolean {
 }
 
 import type { AssetSource } from "../service/setup-service.js";
+import { RETIREMENTS } from "./retirements.js";
 import { LORE_CONTEXT_VARIABLES } from "../service/context-variables-registry.js";
 
 /**
