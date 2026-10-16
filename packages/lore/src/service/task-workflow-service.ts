@@ -315,8 +315,9 @@
  */
 
 import { spawnSync } from "node:child_process";
+import { existsSync } from "node:fs";
 import { z } from "zod";
-import { err, ok, extractDeclaredPhases, hasClaimConflict, type ClaimHolder, type ClaimParty, type RunId, type Result } from "@lore/core";
+import { err, ok, findMissingOracleFiles, extractDeclaredPhases, hasClaimConflict, type ClaimHolder, type ClaimParty, type RunId, type Result } from "@lore/core";
 import type { LoreError } from "@lore/core";
 import type { ActorSource } from "@lore/core/node";
 import {
@@ -616,7 +617,13 @@ type PlanTerminalityFact =
   | ({ kind: "membership_disagreement" } & PlanMembershipDisagreement);
 
 /** The `lore done` floors, by stable id (order = evaluation order). */
-export type DoneFloorId = "attested-pass" | "red-first" | "no-new-tests" | "unfiltered-test-file";
+export type DoneFloorId =
+  | "attested-pass"
+  | "red-first"
+  | "no-new-tests"
+  | "unfiltered-test-file"
+  // reason: AC-TG-6 — evaluated after the four synchronous floors, by `findMissingOracleFileFloor` (async: resolves criteria).
+  | "missing-oracle-file";
 
 /** One floor's refusal: the id plus the exact LoreError `done()` returns (`details.floor` set). */
 export interface DoneFloorRefusal {
@@ -3672,7 +3679,66 @@ export class TaskWorkflowService {
     if (task.status === "archived" || task.status === "deprecated") return ok(null);
     const evaluated = this.evaluateDoneFloors(task, {});
     if (!evaluated.ok) return evaluated;
-    return ok(evaluated.value.refusal);
+    if (evaluated.value.refusal !== null) return ok(evaluated.value.refusal);
+    return this.findMissingOracleFileFloor(task);
+  }
+
+  /**
+   * The `missing-oracle-file` floor (spec-test-governance-guards-that-refuse-bad-tests-declared AC-TG-6; baseline
+   * AS-17): refuses while any AC this task covers (declared `extra.ac_scope` plus every evidence `ac_ref`) is a
+   * script criterion whose CURRENT command names a test file that exists under no plausible root. An attested pass
+   * recorded before the file was deleted cannot satisfy it; the ONLY exit is repointing the command
+   * (`lore ac set --command`) at an existing file — there is deliberately no override reason.
+   *
+   * Not armed (returns `ok(null)`) when the task covers no AC, when `repoRoot` is not configured (bare unit
+   * construction — nothing to resolve a relative path against), or when no governing criteria resolve.
+   *
+   * @param task - the task being archived
+   * @returns `ok(refusal)` naming each AC and its missing path(s), `ok(null)` when nothing is missing, `err` only
+   *   when criteria resolution itself fails
+   */
+  private async findMissingOracleFileFloor(task: DocRecord): Promise<Result<DoneFloorRefusal | null, LoreError>> {
+    if (this.repoRoot === undefined) return ok(null);
+    const covered = new Set<string>(extractDeclaredAcScope(task) ?? []);
+    for (const entry of readEvidence(task)) {
+      if (entry.ac_ref !== undefined) covered.add(entry.ac_ref);
+    }
+    if (covered.size === 0) return ok(null);
+
+    let criteria: AcceptanceCriterion[];
+    if (task.extra["adhoc"] === true) {
+      const resolved = await this.resolveAdhocGoverningAcCriteria(task);
+      if (!resolved.ok) return resolved;
+      criteria = resolved.value;
+    } else {
+      if (task.parent_id === null) return ok(null);
+      const resolved = await this.resolveDeclaredAcCriteria(task.parent_id);
+      if (!resolved.ok) return resolved;
+      criteria = resolved.value ?? [];
+    }
+
+    const findings: string[] = [];
+    for (const criterion of criteria) {
+      if (!covered.has(criterion.id) || criterion.verify.mode !== "script") continue;
+      const missing = findMissingOracleFiles(criterion.verify.command, {
+        cwd: this.repoRoot,
+        fileExists: existsSync,
+      });
+      if (missing.length > 0) findings.push(`${criterion.id} (${missing.join(", ")})`);
+    }
+    if (findings.length === 0) return ok(null);
+
+    const error: Extract<LoreError, { code: "VALIDATION_ERROR" }> = {
+      code: "VALIDATION_ERROR",
+      field: "extra.ac_scope",
+      message:
+        `Task "${task.slug}" covers AC(s) whose oracle file is missing: ${findings.join("; ")} — lore done ` +
+        "refuses: an AC whose test file does not exist is NOT MEASURED, whatever an earlier attested pass said. " +
+        "Repoint the command with `lore ac set <spec> <AC-ID> --command \"<cmd naming an existing file>\"`, " +
+        "then re-run `lore verify`.",
+      value: findings,
+    };
+    return ok({ floor: "missing-oracle-file", error: { ...error, details: { floor: "missing-oracle-file" } } });
   }
 
   private async _doneImpl(
@@ -3699,6 +3765,10 @@ export class TaskWorkflowService {
     if (!evaluated.ok) return evaluated;
     if (evaluated.value.refusal !== null) return err(evaluated.value.refusal.error);
     const { overrideReason, noNewTestsReason } = evaluated.value;
+
+    const missingOracle = await this.findMissingOracleFileFloor(task);
+    if (!missingOracle.ok) return missingOracle;
+    if (missingOracle.value !== null) return err(missingOracle.value.error);
 
     const nowIso = now();
     const claim = readClaim(task);

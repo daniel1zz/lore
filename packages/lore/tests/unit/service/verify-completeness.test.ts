@@ -166,6 +166,8 @@ const config = {
   envPassthroughAll: true,
   processEnv: {},
 };
+/** Every declared path exists: this file tests the completeness guard, not the AC-TG-6 missing-file branch. */
+const filesExist = (): boolean => true;
 const NOW = "2026-07-21T10:00:00.000Z";
 const FRESH_CLAIM_AT = "2026-07-21T09:59:00.000Z";
 
@@ -194,7 +196,7 @@ describe("REPRO — the exact AC-060-7 three-path-two-missing shape records inco
       ok({ exitCode: 0, outputTail: "...\nTest Files  1 passed (1)\n", durationMs: 639, timedOut: false }),
     ]);
     const recorder = makeRecordVerifiedEvidence();
-    const service = new VerifyRunnerService(getPlanBundle, recorder.fn, executor.fn, config);
+    const service = new VerifyRunnerService(getPlanBundle, recorder.fn, executor.fn, config, undefined, filesExist);
 
     const result = await service.verifyPlan("plan-1", { by: "runner", nowIso: NOW });
     expect(result.ok).toBe(true);
@@ -235,7 +237,7 @@ describe("NEGATIVE — a zero-match run also downgrades to inconclusive", () => 
       ok({ exitCode: 0, outputTail: "Test Files  0 passed (0)\n", durationMs: 50, timedOut: false }),
     ]);
     const recorder = makeRecordVerifiedEvidence();
-    const service = new VerifyRunnerService(getPlanBundle, recorder.fn, executor.fn, config);
+    const service = new VerifyRunnerService(getPlanBundle, recorder.fn, executor.fn, config, undefined, filesExist);
 
     const result = await service.verifyPlan("plan-1", { by: "runner", nowIso: NOW });
     expect(result.ok).toBe(true);
@@ -262,7 +264,7 @@ describe("BOUNDARY — a zero-declared-path command is NEVER downgraded, even wi
       ok({ exitCode: 0, outputTail: "no recognisable summary here\n", durationMs: 30, timedOut: false }),
     ]);
     const recorder = makeRecordVerifiedEvidence();
-    const service = new VerifyRunnerService(getPlanBundle, recorder.fn, executor.fn, config);
+    const service = new VerifyRunnerService(getPlanBundle, recorder.fn, executor.fn, config, undefined, filesExist);
 
     const result = await service.verifyPlan("plan-1", { by: "runner", nowIso: NOW });
     expect(result.ok).toBe(true);
@@ -291,7 +293,7 @@ describe("STATE — a non-test oracle never runs the guard at all", () => {
       ok({ exitCode: 0, outputTail: "", durationMs: 500, timedOut: false }),
     ]);
     const recorder = makeRecordVerifiedEvidence();
-    const service = new VerifyRunnerService(getPlanBundle, recorder.fn, executor.fn, config);
+    const service = new VerifyRunnerService(getPlanBundle, recorder.fn, executor.fn, config, undefined, filesExist);
 
     const result = await service.verifyPlan("plan-1", { by: "runner", nowIso: NOW });
     expect(result.ok).toBe(true);
@@ -318,7 +320,7 @@ describe("REGRESSION — declared count equal to executed count records pass + c
       ok({ exitCode: 0, outputTail: "Test Files  2 passed (2)\n", durationMs: 300, timedOut: false }),
     ]);
     const recorder = makeRecordVerifiedEvidence();
-    const service = new VerifyRunnerService(getPlanBundle, recorder.fn, executor.fn, config);
+    const service = new VerifyRunnerService(getPlanBundle, recorder.fn, executor.fn, config, undefined, filesExist);
 
     const result = await service.verifyPlan("plan-1", { by: "runner", nowIso: NOW });
     expect(result.ok).toBe(true);
@@ -344,7 +346,7 @@ describe("REGRESSION — an unrecognised runner records pass + completeness unkn
       ok({ exitCode: 0, outputTail: "All good, 1 suite ran.\n", durationMs: 40, timedOut: false }),
     ]);
     const recorder = makeRecordVerifiedEvidence();
-    const service = new VerifyRunnerService(getPlanBundle, recorder.fn, executor.fn, config);
+    const service = new VerifyRunnerService(getPlanBundle, recorder.fn, executor.fn, config, undefined, filesExist);
 
     const result = await service.verifyPlan("plan-1", { by: "runner", nowIso: NOW });
     expect(result.ok).toBe(true);
@@ -505,6 +507,7 @@ describe("HAPPY/REPRO — a stale dist/lore-referencing command downgrades to in
       executor.fn,
       config,
       checkBinaryFreshness,
+      filesExist,
     );
 
     const result = await service.verifyPlan("plan-1", { by: "runner", nowIso: NOW });
@@ -535,6 +538,7 @@ describe("NEGATIVE — a missing binary also downgrades to inconclusive", () => 
       executor.fn,
       config,
       checkBinaryFreshness,
+      filesExist,
     );
 
     const result = await service.verifyPlan("plan-1", { by: "runner", nowIso: NOW });
@@ -564,6 +568,7 @@ describe("BOUNDARY — a fresh binary leaves the result exactly as otherwise com
       executor.fn,
       config,
       checkBinaryFreshness,
+      filesExist,
     );
 
     const result = await service.verifyPlan("plan-1", { by: "runner", nowIso: NOW });
@@ -592,6 +597,7 @@ describe("STATE — a non-binary-referencing command never invokes checkBinaryFr
       executor.fn,
       config,
       makeThrowingFreshnessCheck(),
+      filesExist,
     );
 
     const result = await service.verifyPlan("plan-1", { by: "runner", nowIso: NOW });
@@ -632,7 +638,7 @@ describe("AC-OX-2 refusal-inconclusive — a discovery-refusal exit-nonzero tail
       }),
     ]);
     const recorder = makeRecordVerifiedEvidence();
-    const service = new VerifyRunnerService(getPlanBundle, recorder.fn, executor.fn, config);
+    const service = new VerifyRunnerService(getPlanBundle, recorder.fn, executor.fn, config, undefined, filesExist);
 
     const result = await service.verifyPlan("plan-1", { by: "runner", nowIso: NOW });
     expect(result.ok).toBe(true);
@@ -672,7 +678,7 @@ describe("AC-OX-3 genuine-failure-still-fail — REGRESSION: a genuine failure t
       }),
     ]);
     const recorder = makeRecordVerifiedEvidence();
-    const service = new VerifyRunnerService(getPlanBundle, recorder.fn, executor.fn, config);
+    const service = new VerifyRunnerService(getPlanBundle, recorder.fn, executor.fn, config, undefined, filesExist);
 
     const result = await service.verifyPlan("plan-1", { by: "runner", nowIso: NOW });
     expect(result.ok).toBe(true);
@@ -696,7 +702,7 @@ describe("REGRESSION — omitting the 5th constructor argument entirely is byte-
     const recorder = makeRecordVerifiedEvidence();
     // reason: the pre-Part-A 4-arg constructor call — proves app.ts's existing
     // wiring needs no change.
-    const service = new VerifyRunnerService(getPlanBundle, recorder.fn, executor.fn, config);
+    const service = new VerifyRunnerService(getPlanBundle, recorder.fn, executor.fn, config, undefined, filesExist);
 
     const result = await service.verifyPlan("plan-1", { by: "runner", nowIso: NOW });
     expect(result.ok).toBe(true);
@@ -725,6 +731,7 @@ describe("REGRESSION — omitting the 5th constructor argument entirely is byte-
       executor.fn,
       config,
       checkBinaryFreshness,
+      filesExist,
     );
 
     const result = await service.verifyPlan("plan-1", { by: "runner", nowIso: NOW });
@@ -733,5 +740,43 @@ describe("REGRESSION — omitting the 5th constructor argument entirely is byte-
     expect(result.value.results[0]?.result).toBe("inconclusive");
     expect(result.value.results[0]?.completeness).toBe("under_match");
     expect(result.value.results[0]?.binary_freshness).toBe("stale");
+  });
+});
+
+// ─── AC-TG-6 — a missing oracle file is NOT MEASURED ──────────────────────────
+
+describe("AC-TG-6 — a command naming a missing test file is recorded inconclusive and never spawned", () => {
+  it("NEGATIVE: fileExists false -> executor never called, result inconclusive, exit_code -1, tail names the path", async () => {
+    const spec = makeSpec([testAc("AC-060-7", "bun test packages/gone/oracle.test.ts")]);
+    const task = taskWithFreshClaim("task-1");
+    const { fn: getPlanBundle } = makeGetPlanBundle({ plan: makePlan(), spec, tasks: [task] });
+    const executor = makeExecutor([]);
+    const recorder = makeRecordVerifiedEvidence();
+    const service = new VerifyRunnerService(getPlanBundle, recorder.fn, executor.fn, config, undefined, () => false);
+
+    const result = await service.verifyPlan("plan-1", { by: "runner", nowIso: NOW });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(executor.calls).toHaveLength(0);
+    expect(result.value.results[0]?.result).toBe("inconclusive");
+    expect(result.value.warnings.some((w) => w.includes("packages/gone/oracle.test.ts"))).toBe(true);
+    expect(recorder.calls[0]?.entry.result).toBe("inconclusive");
+    expect(recorder.calls[0]?.entry.output_tail).toContain("packages/gone/oracle.test.ts");
+    expect(recorder.calls[0]?.entry.attestation?.exit_code).toBe(-1);
+  });
+
+  it("BOUNDARY: a command naming no test file is unaffected by fileExists (nothing extractable to check)", async () => {
+    const spec = makeSpec([tscAc("AC-1", "bun run typecheck")]);
+    const task = taskWithFreshClaim("task-1");
+    const { fn: getPlanBundle } = makeGetPlanBundle({ plan: makePlan(), spec, tasks: [task] });
+    const executor = makeExecutor([ok({ exitCode: 0, outputTail: "ok\n", durationMs: 5, timedOut: false })]);
+    const recorder = makeRecordVerifiedEvidence();
+    const service = new VerifyRunnerService(getPlanBundle, recorder.fn, executor.fn, config, undefined, () => false);
+
+    const result = await service.verifyPlan("plan-1", { by: "runner", nowIso: NOW });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(executor.calls).toHaveLength(1);
+    expect(result.value.results[0]?.result).toBe("pass");
   });
 });

@@ -185,7 +185,8 @@ import { existsSync, readdirSync, statSync, mkdtempSync, readFileSync, writeFile
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { execFileSync } from "node:child_process";
-import { CAPTURE_TAIL_CHARS, err, ok, RUNNER_UNATTESTED_CAPTURE_SOURCE } from "@lore/core";
+import { CAPTURE_TAIL_CHARS, err, findMissingOracleFiles, ok, RUNNER_UNATTESTED_CAPTURE_SOURCE } from "@lore/core";
+import type { FileExistsPort } from "@lore/core";
 import type {
   Result,
   LoreError,
@@ -236,6 +237,8 @@ export interface GitStateProbe {
 }
 
 const GIT_PROBE_TIMEOUT_MS = 10_000;
+/** Attested `exit_code` of an AC recorded without spawning anything because its oracle file is missing (AC-TG-6). */
+const MISSING_ORACLE_FILE_EXIT_CODE = -1;
 
 /**
  * Measures the git state of `root` for the attestation: full 40-hex `HEAD` and
@@ -806,6 +809,8 @@ export class VerifyRunnerService {
       processEnv: Readonly<Record<string, string | undefined>>;
     },
     private readonly checkBinaryFreshness?: () => BinaryFreshnessVerdict,
+    /** Existence probe behind the AC-TG-6 missing-oracle-file check; real `node:fs` by default, a fake in unit tests. */
+    private readonly fileExists: FileExistsPort = existsSync,
   ) {}
 
   /**
@@ -1110,7 +1115,24 @@ export class VerifyRunnerService {
         ...(recordAcRef ? { acRef: criterion.id } : {}),
       });
 
-      const execResult = await this.executor(spawnSpec);
+      // reason: spec-test-governance-guards-that-refuse-bad-tests-declared AC-TG-6 / baseline AS-17 — a command
+      // that names a test file absent from every plausible root cannot be measured: no runner can attest a file
+      // it never loaded. The AC is recorded `inconclusive` (not measured) with the missing path in its output;
+      // NO process is spawned, so no exit code is invented — `exit_code: -1` marks "nothing ran" in the attestation.
+      const missingOracleFiles = findMissingOracleFiles(criterion.verify.command, {
+        cwd: resolvedExecutionRoot.root,
+        corpusRoot: this.config.repoRoot,
+        fileExists: this.fileExists,
+      });
+      const execResult: Awaited<ReturnType<typeof this.executor>> =
+        missingOracleFiles.length > 0
+          ? ok({
+              exitCode: MISSING_ORACLE_FILE_EXIT_CODE,
+              outputTail: `oracle file missing: ${missingOracleFiles.join(", ")} (no command was run; AC not measured)`,
+              durationMs: 0,
+              timedOut: false,
+            })
+          : await this.executor(spawnSpec);
       if (!execResult.ok) {
         // Fail-loud abort (SPEC-039 §4 D6) — no partial ambiguity. Names every AC
         // already recorded (with attested evidence) before this abort.
@@ -1134,6 +1156,14 @@ export class VerifyRunnerService {
       // suppress the other's own check (both are informative on the result;
       // see the combined-signal REGRESSION test in this file's sibling suite).
       const executedSuccessfully = verifyResult === "pass";
+      if (missingOracleFiles.length > 0) {
+        verifyResult = "inconclusive";
+        warnings.push(
+          `AC "${criterion.id}": oracle file missing: ${missingOracleFiles.join(", ")} — ` +
+            "the command was not run and the AC is NOT MEASURED (an earlier attested pass no " +
+            "longer counts). Repoint the command with `lore ac set --command` to an existing file.",
+        );
+      }
 
       // ③.3 spec-oracle-executability-a-runner-s-discovery-refusal-is-not-a §M6.2
       // — discovery-refusal guard. A test-runner process that exits nonzero
@@ -1154,7 +1184,7 @@ export class VerifyRunnerService {
       // which never carries one of these phrases — see
       // `findDiscoveryRefusal`'s own mutual-exclusion invariant) leaves
       // `verifyResult` exactly as `deriveVerifyResult` already computed it.
-      if (!executedSuccessfully && !timedOut && criterion.verify.oracle === "test") {
+      if (!executedSuccessfully && !timedOut && missingOracleFiles.length === 0 && criterion.verify.oracle === "test") {
         const refusal = findDiscoveryRefusal(outputTail);
         if (refusal !== null) {
           verifyResult = "inconclusive";
