@@ -193,6 +193,8 @@ import {
   printParity,
   printContentDrift,
   printExportReport,
+  findDuplicateHumanIds,
+  printDuplicateHumanIds,
   type MirrorDocType,
   type MirrorParityResult,
   type MirrorParityMissing,
@@ -675,6 +677,19 @@ export async function main(
       const parity = await runCheck(app, repoRoot, types);
       const content = await runContentCheck(app, repoRoot, types);
       let allOk = true;
+      // AC-R0-5: one human_id naming two live docs is drift the count/slug/body checks cannot see.
+      const liveDocs: { id: string; slug: string }[] = [];
+      for (const type of types) {
+        const docsResult = await app.corpusService.listFull({ type });
+        if (!docsResult.ok) {
+          throw new SpecMirrorError("corpus_unreadable", `failed to list corpus ${type} docs: ${JSON.stringify(docsResult.error)}`, {
+            error: docsResult.error,
+            type,
+          });
+        }
+        liveDocs.push(...docsResult.value.docs.map((doc) => ({ id: doc.id, slug: doc.slug })));
+      }
+      if (!printDuplicateHumanIds(findDuplicateHumanIds(liveDocs, loadMirrorMappings(repoRoot)))) allOk = false;
       for (const type of types) {
         if (!printParity("check", type, requireVerdict(parity.perType, type, "parity"))) allOk = false;
         // reason: printed unconditionally, immediately after the parity line whose parenthetical

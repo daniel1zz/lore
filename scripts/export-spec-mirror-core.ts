@@ -337,6 +337,60 @@ export function printContentDrift(type: MirrorDocType, result: MirrorContentDrif
   return false;
 }
 
+/** One live corpus doc claiming a `human_id` another live doc also claims. */
+export interface MirrorHumanIdClaimant {
+  readonly id: string;
+  readonly slug: string;
+  /** Repo-relative mirror path from the doc's export-index mapping. */
+  readonly filePath: string;
+}
+
+/** A `human_id` mapped to two or more LIVE docs (task-skill-implement-r0-6, AC-R0-5). */
+export interface MirrorHumanIdDuplicate {
+  readonly humanId: string;
+  /** Sorted by doc id — deterministic output. */
+  readonly claimants: readonly MirrorHumanIdClaimant[];
+}
+
+/**
+ * PURE. Finds every `human_id` that the export index maps to two or more LIVE docs. A mapping whose
+ * doc is not in `liveDocs` (soft-deleted / inert reservation) never counts — only a live collision
+ * can mis-identify a mirror file. `computeMirrorParity` cannot see this: both docs have a mapping and
+ * a file, so count + slug parity is satisfied while one human_id names two documents.
+ */
+export function findDuplicateHumanIds(
+  liveDocs: readonly { id: string; slug: string }[],
+  mappings: Readonly<Record<string, ExportIndexMapping>>,
+): MirrorHumanIdDuplicate[] {
+  const byHumanId = new Map<string, MirrorHumanIdClaimant[]>();
+  for (const doc of liveDocs) {
+    const mapping = mappings[doc.id];
+    if (mapping === undefined) continue;
+    const list = byHumanId.get(mapping.human_id) ?? [];
+    list.push({ id: doc.id, slug: doc.slug, filePath: mapping.file_path });
+    byHumanId.set(mapping.human_id, list);
+  }
+  return [...byHumanId.entries()]
+    .filter(([, claimants]) => claimants.length > 1)
+    .map(([humanId, claimants]) => ({ humanId, claimants: [...claimants].sort((a, b) => a.id.localeCompare(b.id)) }))
+    .sort((a, b) => a.humanId.localeCompare(b.humanId));
+}
+
+/** Prints the duplicate-human_id verdict (one line when clean; one block per duplicate). Returns `true` iff none. */
+export function printDuplicateHumanIds(duplicates: readonly MirrorHumanIdDuplicate[]): boolean {
+  if (duplicates.length === 0) {
+    console.log("export-spec-mirror (check): OK — no human_id is mapped to more than one live corpus doc.");
+    return true;
+  }
+  console.log(`export-spec-mirror (check): ${duplicates.length} human_id(s) mapped to more than one live corpus doc:`);
+  for (const dup of duplicates) {
+    console.log(`  ${dup.humanId}:`);
+    for (const c of dup.claimants) console.log(`    ${c.id} (${c.slug}) -> ${c.filePath}`);
+  }
+  console.log("Run `bun run mirror:export` — the exporter renumbers the later doc(s) and prunes the stale file.");
+  return false;
+}
+
 /**
  * Loads and Zod-validates `.lore/export-index.json` from `repoRoot`. A MISSING file is treated as
  * "nothing exported yet" (`{}` — legitimate for a virgin checkout, never an error); a PRESENT but

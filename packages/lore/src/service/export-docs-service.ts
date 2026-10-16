@@ -988,9 +988,10 @@ async function buildOrExtendIndex(
     // Try title-match to an existing file (index rebuild path, SPEC-021 §9.3).
     // reason: title is NOT unique across docs (CorpusService dedupes slug only) — a
     // filePath already claimed by a different doc id this pass must NOT be inherited,
-    // or two docs end up sharing one human_id + file_path (the export-collision bug).
+    // or two docs end up sharing one human_id + file_path (the export-collision bug). The same
+    // holds for a human_id another mapping already owns (duplicate-human-id repair).
     const fileMatch = typeTitleMap?.get(doc.title);
-    if (fileMatch && !usedFilePaths.has(fileMatch.filePath)) {
+    if (fileMatch && !usedFilePaths.has(fileMatch.filePath) && !usedHumanIds.has(fileMatch.humanId)) {
       // Narrows the scanned-from-disk human_id to the branded MirrorHumanId (SPEC-mirror-
       // identifier-ssot D3/D4) via the exported assertion function, never a textual cast —
       // this legacy title-match rebuild path composes the SAME {PREFIX}-{digits} shape but is
@@ -1349,6 +1350,52 @@ function repairCollisions(index: ExportIndex, projectDir: string, docs: DocRecor
     }
   }
 
+  repairLog.push(...repairDuplicateHumanIds(index, docById));
+
+  return repairLog;
+}
+
+/**
+ * Second half of {@link repairCollisions}: two LIVE docs mapped to the SAME human_id under
+ * DIFFERENT file_paths (the file_path grouping above cannot see this). Measured on main
+ * @ e1878626: ten spec pairs (SPEC-092, 095-102, 156) — a legacy-allocated number that a later
+ * store-allocated ordinal (SPEC-084) landed on. Canonical owner per human_id:
+ *   1. the doc whose column-derived `formatMirrorHumanId` equals the id (the ordinal column is
+ *      the identity authority), else
+ *   2. the earliest `created_at`.
+ * Every other claimant's mapping is DELETED so the allocation loop re-issues it a fresh, unique
+ * human_id + file_path (the caller's `usedHumanIds` guard stops it re-inheriting the old id from
+ * its on-disk file). Logged, never silent.
+ */
+function repairDuplicateHumanIds(index: ExportIndex, docById: ReadonlyMap<string, DocRecord>): string[] {
+  const repairLog: string[] = [];
+  const claimantsByHumanId = new Map<string, string[]>();
+  for (const [docId, mapping] of Object.entries(index.mappings)) {
+    if (!docById.has(docId)) continue; // inert orphan reservation — not this repair's concern
+    const list = claimantsByHumanId.get(mapping.human_id) ?? [];
+    list.push(docId);
+    claimantsByHumanId.set(mapping.human_id, list);
+  }
+
+  for (const [humanId, claimants] of claimantsByHumanId) {
+    if (claimants.length < 2) continue;
+    const columnOwners = claimants.filter((id) => formatMirrorHumanId(docById.get(id)!) === humanId);
+    const pool = columnOwners.length === 1 ? columnOwners : claimants;
+    const canonicalId = [...pool].sort((a, b) =>
+      docById.get(a)!.created_at.localeCompare(docById.get(b)!.created_at),
+    )[0]!;
+
+    for (const id of claimants) {
+      if (id === canonicalId) continue;
+      const lost = index.mappings[id];
+      delete index.mappings[id];
+      const line =
+        `duplicate-human-id: doc ${id} ("${docById.get(id)!.title}") shared ${humanId} with doc ` +
+        `${canonicalId} (was ${lost?.file_path ?? "?"}) — reallocating a new human_id + file_path`;
+      repairLog.push(line);
+      process.stderr.write(`⚠ export-index duplicate-human-id: ${line}\n`);
+    }
+  }
   return repairLog;
 }
 
