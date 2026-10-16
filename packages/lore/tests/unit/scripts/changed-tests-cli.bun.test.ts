@@ -97,31 +97,92 @@ beforeAll(async () => {
   classifyTreeScanningOracle = mod.classifyTreeScanningOracle;
 });
 
+/**
+ * Isolated synthetic repo (mkdtemp, NEVER this repo's own git state) — a
+ * minimal two-package scaffold matching what `loadFileMap`/
+ * `loadCoreAliasMap` require: `packages/core/package.json` (the exports
+ * SSOT `loadCoreAliasMap` unconditionally reads on every invocation) plus
+ * one `packages/lore/src` file and its `packages/lore/tests` consumer,
+ * wired by a real relative import so the reverse-dependency BFS has an
+ * edge to walk. `--list HEAD` (as in the suite above) keeps the git diff
+ * itself empty (`HEAD...HEAD`), so selection is driven ONLY by `git status
+ * --porcelain`'s report of the uncommitted, UNSTAGED modification made
+ * below — the exact ` M `-prefixed line shape the porcelain-parser bug
+ * corrupts (a leading-space status line, trimmed before its fixed 3-char
+ * offset slice, loses the path's first character).
+ */
+function makeFixtureRepo(): string {
+  const root = mkdtempSync(join(tmpdir(), "lore-changed-tests-porcelain-"));
+  execFileSync("git", ["init", "-q"], { cwd: root });
+  execFileSync("git", ["config", "user.email", "porcelain-fixture@example.com"], { cwd: root });
+  execFileSync("git", ["config", "user.name", "Porcelain Fixture"], { cwd: root });
+
+  mkdirSync(join(root, "packages", "core"), { recursive: true });
+  writeFileSync(
+    join(root, "packages", "core", "package.json"),
+    JSON.stringify({ exports: { ".": "./src/index.ts", "./node": "./src/node.ts" } }),
+  );
+  mkdirSync(join(root, "packages", "lore", "src"), { recursive: true });
+  mkdirSync(join(root, "packages", "lore", "tests"), { recursive: true });
+  writeFileSync(join(root, "packages", "lore", "src", "thing.ts"), "export const thing = 1;\n");
+  writeFileSync(
+    join(root, "packages", "lore", "tests", "thing.test.ts"),
+    'import { thing } from "../src/thing.js";\nexport const _use = thing;\n',
+  );
+
+  execFileSync("git", ["add", "-A"], { cwd: root });
+  execFileSync("git", ["commit", "-q", "-m", "seed"], { cwd: root });
+
+  // Unstaged modification — `git status --porcelain` reports this as
+  // ` M packages/lore/src/thing.ts` (leading space + M + space, then the
+  // path): exactly the shape the parser-order bug corrupts.
+  writeFileSync(join(root, "packages", "lore", "src", "thing.ts"), "export const thing = 2;\n");
+
+  return root;
+}
+
+/** Runs the REAL `scripts/changed-tests.ts --list HEAD` with `cwd` set to a throwaway repo. */
+function runListHeadIn(cwd: string): { exitCode: number; stdout: string; stderr: string } {
+  const result = Bun.spawnSync(["bun", join(REPO_ROOT, "scripts", "changed-tests.ts"), "--list", "HEAD"], {
+    cwd,
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  return {
+    exitCode: result.exitCode,
+    stdout: result.stdout.toString("utf8"),
+    stderr: result.stderr.toString("utf8"),
+  };
+}
+
 describe("bun run test:changed CLI — --list HEAD (AC-TC-2)", () => {
   it("HAPPY: exits 0 and prints a selected-count line for both runners", () => {
-    const result = Bun.spawnSync(["bun", "scripts/changed-tests.ts", "--list", "HEAD"], {
-      cwd: REPO_ROOT,
-      stdout: "pipe",
-      stderr: "pipe",
-    });
+    const fixtureRoot = makeFixtureRepo();
+    try {
+      const result = runListHeadIn(fixtureRoot);
+      const stdout = result.stdout;
+      const stderr = result.stderr;
 
-    const stdout = result.stdout.toString("utf8");
-    const stderr = result.stderr.toString("utf8");
-
-    expect(result.exitCode, `expected exit 0, stderr:\n${stderr}`).toBe(0);
-    expect(stdout).toMatch(/^vitest: selected \d+$/m);
-    expect(stdout).toMatch(/^bun: selected \d+$/m);
+      expect(result.exitCode, `expected exit 0, stderr:\n${stderr}`).toBe(0);
+      expect(stdout).toMatch(/^vitest: selected \d+$/m);
+      expect(stdout).toMatch(/^bun: selected \d+$/m);
+    } finally {
+      rmSync(fixtureRoot, { recursive: true, force: true });
+    }
   });
 
-  it("HAPPY: at least one reason tag is printed for a selected file, and the captured tag is a real SELECTION_REASONS member (this suite's own new test files are uncommitted changed-test entries)", () => {
-    const result = Bun.spawnSync(["bun", "scripts/changed-tests.ts", "--list", "HEAD"], {
-      cwd: REPO_ROOT,
-      stdout: "pipe",
-      stderr: "pipe",
-    });
-
-    const stdout = result.stdout.toString("utf8");
-    expect(result.exitCode).toBe(0);
+  it("HAPPY: at least one reason tag is printed for a selected file, and the captured tag is a real SELECTION_REASONS member (the fixture repo's uncommitted source edit selects its test consumer)", () => {
+    // The fixture repo's uncommitted modification of `thing.ts` makes its test consumer
+    // a guaranteed selected entry, so the tag assertion below is always exercised.
+    const fixtureRoot = makeFixtureRepo();
+    let stdout: string;
+    try {
+      const result = runListHeadIn(fixtureRoot);
+      stdout = result.stdout;
+      expect(result.exitCode).toBe(0);
+    } finally {
+      rmSync(fixtureRoot, { recursive: true, force: true });
+    }
     // reason tags are rendered as "(<reason>)" on a per-file line — assert at least
     // one SELECTION_REASONS member appears somewhere in the accounting block
     // (mandatory accounting, D3 — never a bare count with no detail when something
@@ -223,50 +284,6 @@ describe("bun run test:changed CLI — --list HEAD (AC-TC-2)", () => {
 });
 
 describe("getChangedFiles porcelain-path parsing — modified (' M') files are not corrupted (SPEC-104 fallout T2)", () => {
-  /**
-   * Isolated synthetic repo (mkdtemp, NEVER this repo's own git state) — a
-   * minimal two-package scaffold matching what `loadFileMap`/
-   * `loadCoreAliasMap` require: `packages/core/package.json` (the exports
-   * SSOT `loadCoreAliasMap` unconditionally reads on every invocation) plus
-   * one `packages/lore/src` file and its `packages/lore/tests` consumer,
-   * wired by a real relative import so the reverse-dependency BFS has an
-   * edge to walk. `--list HEAD` (as in the suite above) keeps the git diff
-   * itself empty (`HEAD...HEAD`), so selection is driven ONLY by `git status
-   * --porcelain`'s report of the uncommitted, UNSTAGED modification made
-   * below — the exact ` M `-prefixed line shape the porcelain-parser bug
-   * corrupts (a leading-space status line, trimmed before its fixed 3-char
-   * offset slice, loses the path's first character).
-   */
-  function makeFixtureRepo(): string {
-    const root = mkdtempSync(join(tmpdir(), "lore-changed-tests-porcelain-"));
-    execFileSync("git", ["init", "-q"], { cwd: root });
-    execFileSync("git", ["config", "user.email", "porcelain-fixture@example.com"], { cwd: root });
-    execFileSync("git", ["config", "user.name", "Porcelain Fixture"], { cwd: root });
-
-    mkdirSync(join(root, "packages", "core"), { recursive: true });
-    writeFileSync(
-      join(root, "packages", "core", "package.json"),
-      JSON.stringify({ exports: { ".": "./src/index.ts", "./node": "./src/node.ts" } }),
-    );
-    mkdirSync(join(root, "packages", "lore", "src"), { recursive: true });
-    mkdirSync(join(root, "packages", "lore", "tests"), { recursive: true });
-    writeFileSync(join(root, "packages", "lore", "src", "thing.ts"), "export const thing = 1;\n");
-    writeFileSync(
-      join(root, "packages", "lore", "tests", "thing.test.ts"),
-      'import { thing } from "../src/thing.js";\nexport const _use = thing;\n',
-    );
-
-    execFileSync("git", ["add", "-A"], { cwd: root });
-    execFileSync("git", ["commit", "-q", "-m", "seed"], { cwd: root });
-
-    // Unstaged modification — `git status --porcelain` reports this as
-    // ` M packages/lore/src/thing.ts` (leading space + M + space, then the
-    // path): exactly the shape the parser-order bug corrupts.
-    writeFileSync(join(root, "packages", "lore", "src", "thing.ts"), "export const thing = 2;\n");
-
-    return root;
-  }
-
   it("REGRESSION: a modified-unstaged (' M') source file's test consumer is selected, not silently dropped", () => {
     const fixtureRoot = makeFixtureRepo();
     try {

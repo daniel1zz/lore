@@ -19,21 +19,15 @@
  * (knowledge-retro-a-fresh-install-probe-vacuously-passes) — a single-ended probe
  * against only a fresh corpus cannot tell "the assertion is meaningful" from "the
  * assertion always trivially passes". End 1 is a genuinely fresh `mkdtemp` +
- * `lore init` corpus; end 2 is a live-corpus CONTROL — a snapshot of THIS repo's
- * own populated `.lore/lore.db`, taken via `sqlite3 <src> .backup <dst>` (the
- * SQLite Online Backup API, safe against a concurrently-open/-written source —
- * several other agents' `lore claim`/`evidence` calls are hitting the real
- * corpus during this exact test run). ⛔ The ORIGINAL `.lore/lore.db` is NEVER
- * opened for writing anywhere in this file — every CLI invocation below that
- * could conceivably write (a spec-create denial, even though `_createImpl`
- * returns before any `store.insert`, still risks a `gate_deny` TRACE row if a
- * real `TraceRecorder` were wired — SPEC-102 D7 — and this repo's own
- * `.lore/config.yaml` does not disable `trace`, which defaults `enabled: true`)
- * runs ONLY against a disposable `.backup` copy in its own `mkdtemp` directory,
- * per project CLAUDE.md's "never write to the repo's own .lore/ corpus" rule
- * (mirrors `packages/dashboard/tests/e2e/global-setup.ts`'s throwaway-corpus
- * pattern, adapted here to a throwaway COPY since end 2 needs REAL populated
- * content, not an empty `lore init`).
+ * `lore init` corpus; end 2 is a SEEDED CONTROL — a second throwaway
+ * `mkdtemp` + `lore init` corpus into which `scripts/seed-write-spec-rule.ts` (the
+ * script this repo's own deploy runs against its real corpus) has seeded the
+ * approved write-spec rule doc, i.e. a corpus that genuinely has the feeding source
+ * the fresh end lacks. ⛔ This file never opens, copies or backs up this repository's
+ * own `.lore/lore.db` (test-governance TG-3: a test whose control end reads live
+ * corpus state goes red on unrelated corpus work and risks writing the team's
+ * knowledge base). Both ends are disposable `mkdtemp` directories, mirroring
+ * `packages/dashboard/tests/e2e/global-setup.ts`'s throwaway-corpus pattern.
  *
  * `runLore` spawns the real CLI (`bun run src/index.ts`) rather than importing
  * `commands/create.ts` in-process — that module transitively imports
@@ -68,10 +62,10 @@
 
 import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { describe, it, expect } from "vitest";
-import { execFileSync, spawnSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { mkdtempSync, rmSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, dirname, resolve as resolvePath } from "node:path";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
@@ -84,6 +78,7 @@ import type { CreateDocInput, DocRecord, LoreConfig, LoreError, Result } from "@
 // tests/unit/service/ -> tests/unit/ -> tests/ -> packages/lore/
 const PACKAGE_ROOT = fileURLToPath(new URL("../../../", import.meta.url));
 const INDEX_TS = join(PACKAGE_ROOT, "src", "index.ts");
+const SEED_SCRIPT = join(PACKAGE_ROOT, "..", "..", "scripts", "seed-write-spec-rule.ts");
 const NO_HEADING_CONTENT = "no headings anywhere in this body";
 
 // ─── Subprocess CLI harness (mirrors cli-ac-set.test.ts's proven pattern) ────
@@ -127,32 +122,21 @@ function extractSource(message: string): string | null {
 }
 
 /**
- * Resolves the absolute path to THIS repo's own populated `.lore/lore.db` —
- * walks from `fromDir` via `git rev-parse --git-common-dir` so this works
- * identically whether the test runs from the main checkout or (as in normal
- * worktree-dispatch operation) from a linked worktree, whose OWN `.lore/` is
- * never materialized (gitignored, untracked). Mirrors
- * `adapters/cli/utils.ts::findMainCheckoutLoreDb`'s derivation, reimplemented
- * locally rather than imported: that module transitively pulls in `bun:sqlite`
- * (`app.js`), which is not vitest-resolvable (this file's own module header).
- *
- * @returns The absolute `.lore/lore.db` path, or `null` when no populated
- *   corpus is discoverable from `fromDir` (e.g. `git` missing, not a repo, or
- *   the resolved checkout root has no `.lore/lore.db` at all).
+ * Seeds the approved write-spec rule doc (`sub_type: "skill"`, `applies_to: "spec"`)
+ * into the throwaway corpus at `corpusDir` by running the repo's own seed script
+ * against that corpus's db — the same script the real deploy runs, so the control end
+ * is populated by production code, not a hand-built imitation.
  */
-function resolveRepoLoreDbPath(fromDir: string): string | null {
-  try {
-    const commonDirRaw = execFileSync("git", ["rev-parse", "--git-common-dir"], {
-      cwd: fromDir,
-      encoding: "utf8",
-    }).trim();
-    if (!commonDirRaw) return null;
-    const commonDirAbs = resolvePath(fromDir, commonDirRaw);
-    const checkoutRoot = dirname(commonDirAbs);
-    const candidate = join(checkoutRoot, ".lore", "lore.db");
-    return existsSync(candidate) ? candidate : null;
-  } catch {
-    return null;
+function seedWriteSpecRuleInto(corpusDir: string): void {
+  const result = spawnSync("bun", [SEED_SCRIPT, join(corpusDir, ".lore", "lore.db")], {
+    cwd: corpusDir,
+    env: { ...process.env, HOME: corpusDir },
+    encoding: "utf8",
+  });
+  if (result.status !== 0) {
+    throw new Error(
+      `seed-write-spec-rule failed (exit ${String(result.status)}).\nstdout: ${result.stdout}\nstderr: ${result.stderr}`,
+    );
   }
 }
 
@@ -281,14 +265,13 @@ describe("CorpusService spec-create fallback — STATE", () => {
 // ─── both-ends integration probe (AC-GV-5) ───────────────────────────────────
 
 describe("gate-feeding fresh-install both-ends probe", () => {
-  // reason: this body spawns ~7 subprocesses (bun CLI x5, git rev-parse, sqlite3
-  // .backup of a real ~140MB corpus) — scripts/check-test-budgets.ts's
+  // reason: this body spawns ~7 subprocesses (bun CLI x8, the seed script) — scripts/check-test-budgets.ts's
   // SPAWN_THRESHOLD (3) requires a declared timeout for any new test case at or
   // above that count (spec-a-test-case-s-timeout-budget-must-be-declared-when-its
   // D1). 60s mirrors cli-ac-set.test.ts's identical CLI-subprocess-spawning
   // precedent in this same package.
   it(
-    "both-ends: a fresh lore-init corpus AND this repo's populated corpus both produce a non-empty, named rule slice",
+    "both-ends: a fresh lore-init corpus AND a seeded throwaway corpus both produce a non-empty, named rule slice",
     { timeout: 60_000 },
     () => {
       // ── END 1: a genuinely fresh mkdtemp + `lore init` corpus ──────────────
@@ -342,55 +325,28 @@ describe("gate-feeding fresh-install both-ends probe", () => {
         expect(freshDeny.stderr).toContain("## Rules a candidate spec must satisfy");
         expect(freshDeny.stderr).toContain("No parent.");
   
-        // ── END 2: this repo's populated corpus, used as a LIVE CONTROL ──────
-        // A `.backup`-based snapshot, never the original file (see module header).
-        const repoDbPath = resolveRepoLoreDbPath(PACKAGE_ROOT);
-        if (repoDbPath === null) {
-          throw new Error(
-            "gate-feeding both-ends probe requires this repo's own populated " +
-              ".lore/lore.db as a live control (project CLAUDE.md's dogfooding " +
-              "workflow assumes one exists on any machine actually running lore " +
-              "tasks) — none was found from " +
-              PACKAGE_ROOT +
-              ". This is a hard failure, not a skip: a single-ended probe " +
-              "against only the fresh corpus cannot prove the assertion is " +
-              "capable of discriminating a real miss from a real hit.",
-          );
-        }
-  
+        // ── END 2: a SEEDED throwaway corpus, used as the control ─────────────
+        // Also mkdtemp + `lore init`, then populated by the repo's own seed script.
         const controlDir = mkdtempSync(join(tmpdir(), "lore-gate-feeding-control-"));
         try {
-          const controlLoreDir = join(controlDir, ".lore");
-          mkdirSync(controlLoreDir, { recursive: true });
-          const controlDbPath = join(controlLoreDir, "lore.db");
-  
-          // SQLite Online Backup API via the sqlite3 CLI — safe against a
-          // concurrently open/written source (several sibling agents are
-          // running `lore claim`/`evidence` against the real corpus during
-          // this exact test). The ORIGINAL file is opened for reading only;
-          // everything downstream operates on `controlDbPath`.
-          execFileSync("sqlite3", [repoDbPath, `.backup ${controlDbPath}`], { encoding: "utf8" });
+          const controlInit = runLore(["init"], controlDir);
+          expect(controlInit.exitCode).toBe(0);
+          const controlDbPath = join(controlDir, ".lore", "lore.db");
           expect(existsSync(controlDbPath)).toBe(true);
-  
-          writeFileSync(join(controlLoreDir, "config.yaml"), "project:\n  name: control\n  author: owner\n");
-  
-          const prdListResult = runLore(["list", "--type", "prd", "--json"], controlDir);
-          expect(prdListResult.exitCode).toBe(0);
-          const prdListParsed = parseJsonStdout(prdListResult, "control prd list") as {
-            ok: boolean;
-            data?: { docs?: Array<{ slug?: string }> };
-          };
-          const controlPrdSlug = prdListParsed.data?.docs?.[0]?.slug;
-          if (!controlPrdSlug) {
-            throw new Error(`control corpus has no PRD to parent a spec to: ${prdListResult.stdout}`);
-          }
-  
+          seedWriteSpecRuleInto(controlDir);
+
+          const controlPrd = runLore(
+            ["create", "prd", "--title", "Control Root PRD", "--content", "# Control Root\n\nBody.", "--json"],
+            controlDir,
+          );
+          expect(controlPrd.exitCode).toBe(0);
+
           const controlDeny = runLore(
             [
               "create",
               "spec",
               "--title",
-              "Bad Control Spec (gate-feeding-fresh-install probe, throwaway)",
+              "Bad Control Spec",
               "--content",
               NO_HEADING_CONTENT,
               "--kind",
@@ -411,9 +367,8 @@ describe("gate-feeding fresh-install both-ends probe", () => {
           // helper itself cannot discriminate a miss from a hit — the exact
           // vacuous-probe failure mode this test exists to rule out.
           expect(controlSource).not.toBe(freshSource);
-          // The live control's source must be the REAL corpus doc this repo
-          // is actually seeded with (scripts/seed-write-spec-rule.ts), not
-          // another compiled-in fallback string.
+          // The control's source must be the SEEDED corpus doc
+          // (scripts/seed-write-spec-rule.ts), not another compiled-in fallback string.
           expect(controlSource).toContain("write-spec-rules");
           // re-baseline (BR-1, BR-2): rule 1 of the seeded doc is now "No parent." (a spec belongs to the trees through citations)
           expect(controlDeny.stderr).toContain("No parent.");
