@@ -142,6 +142,9 @@
  *       completed with 0 per-doc errors but still failed to reach parity for some type
  *       (defensive — should not occur, since `exportDocs` either creates or reports an error for
  *       every doc it processes).
+ *   {@link MIRROR_ZERO_COMPARED_EXIT_CODE} (5) — check mode compared FEWER mirror files than the
+ *       mapped-and-present population (in particular ZERO of a non-zero population, AC-OX-6): a
+ *       check that parsed nothing is indistinguishable from a clean one. Takes precedence over 2.
  *   {@link MIRROR_USAGE_EXIT_CODE} (3) — the ARGUMENTS were wrong, so NOTHING was measured: an
  *       unrecognised token, a `--type` with no value, an unknown type name, or a repeated `--type`.
  *       The offending token is echoed to stderr verbatim. ⛔ Returned BEFORE the corpus is opened,
@@ -183,6 +186,8 @@ import {
   SPEC_MIRROR_DIR_RELATIVE,
   MIRROR_DRIFT_EXIT_CODE,
   MIRROR_HARD_FAILURE_EXIT_CODE,
+  MIRROR_ZERO_COMPARED_EXIT_CODE,
+  evaluateComparedCount,
   SpecMirrorError,
   computeMirrorParity,
   computeMirrorContentDrift,
@@ -210,6 +215,8 @@ export {
   SPEC_MIRROR_DIR_RELATIVE,
   MIRROR_DRIFT_EXIT_CODE,
   MIRROR_HARD_FAILURE_EXIT_CODE,
+  MIRROR_ZERO_COMPARED_EXIT_CODE,
+  evaluateComparedCount,
   SpecMirrorError,
   computeMirrorParity,
   computeMirrorContentDrift,
@@ -677,6 +684,7 @@ export async function main(
       const parity = await runCheck(app, repoRoot, types);
       const content = await runContentCheck(app, repoRoot, types);
       let allOk = true;
+      let blind = false;
       // AC-R0-5: one human_id naming two live docs is drift the count/slug/body checks cannot see.
       const liveDocs: { id: string; slug: string }[] = [];
       for (const type of types) {
@@ -695,8 +703,16 @@ export async function main(
         // reason: printed unconditionally, immediately after the parity line whose parenthetical
         // says "file CONTENT is not compared" — that parenthetical is scoped to `computeMirrorParity`
         // and would read as a command-level claim without this line answering content right there.
-        if (!printContentDrift(type, requireVerdict(content.perType, type, "content"))) allOk = false;
+        const contentVerdict = requireVerdict(content.perType, type, "content");
+        if (!printContentDrift(type, contentVerdict)) allOk = false;
+        // AC-OX-6: positive trace — compared count must equal the mapped-and-present population.
+        const counted = evaluateComparedCount(type, contentVerdict);
+        if (!counted.ok) {
+          console.error(counted.message);
+          blind = true;
+        }
       }
+      if (blind) return MIRROR_ZERO_COMPARED_EXIT_CODE;
       return allOk ? 0 : MIRROR_DRIFT_EXIT_CODE;
     }
 
