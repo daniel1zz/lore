@@ -229,9 +229,12 @@ export interface MirrorContentDivergence {
    * rewrite first (`report.identity_repaired`; see `ExportDocsService`'s write loop, which
    * `continue`s before comparing bodies). Reported as divergence rather than dropped: the body
    * question is genuinely unanswered for that file, and a check that printed OK over an unanswered
-   * question would be exactly the vacuous pass AC-BFI-8 exists to forbid.
+   * question would be exactly the vacuous pass AC-BFI-8 exists to forbid. `frontmatter_divergent` —
+   * the body matches but a scalar frontmatter field (`status`/`priority`/`title`/`tags`/`phase`) is
+   * stale (`report.frontmatter_repaired`, dry-run) or unreadable (`report.frontmatter_declined`);
+   * AC-CRIT-5: a status-only drift is drift, so `--check` must exit 2 on it.
    */
-  readonly reason: "body_divergent" | "body_undecidable";
+  readonly reason: "body_divergent" | "body_undecidable" | "frontmatter_divergent";
 }
 
 /** Full body-comparison verdict for ONE {@link MirrorDocType}. */
@@ -276,20 +279,27 @@ export function computeMirrorContentDrift(
 ): MirrorContentDriftResult {
   const driftPaths = new Set(report.drift);
   const undecidablePaths = new Set(report.identity_repaired);
+  const frontmatterPaths = new Set([...report.frontmatter_repaired, ...report.frontmatter_declined]);
 
   const divergences: MirrorContentDivergence[] = [];
   const attributed = new Set<string>();
   for (const doc of docs) {
     const filePath = mappings[doc.id]?.file_path;
     if (filePath === undefined) continue;
-    const reason = driftPaths.has(filePath) ? "body_divergent" : undecidablePaths.has(filePath) ? "body_undecidable" : undefined;
+    const reason = driftPaths.has(filePath)
+      ? "body_divergent"
+      : undecidablePaths.has(filePath)
+        ? "body_undecidable"
+        : frontmatterPaths.has(filePath)
+          ? "frontmatter_divergent"
+          : undefined;
     if (reason === undefined) continue;
     divergences.push({ slug: doc.slug, filePath, reason });
     attributed.add(filePath);
   }
   divergences.sort((a, b) => a.slug.localeCompare(b.slug));
 
-  const unresolvedFilePaths = [...driftPaths, ...undecidablePaths].filter((path) => !attributed.has(path)).sort();
+  const unresolvedFilePaths = [...driftPaths, ...undecidablePaths, ...frontmatterPaths].filter((path) => !attributed.has(path)).sort();
   return { divergences, unresolvedFilePaths, ok: divergences.length === 0 };
 }
 
@@ -297,10 +307,10 @@ export function computeMirrorContentDrift(
  * Prints one type's body-comparison verdict, NAMING every divergent slug (AC-BFI-8) — IO
  * (stdout/stderr), presentation only.
  *
- * ⛔ The remediation named on failure is `lore export-docs --force`, NOT `bun run mirror:export`:
- * the latter's write loop leaves a body-drifted file untouched unless `force` is set (see
- * `ExportDocsService`'s `if (!opts.force) { report.drift.push(...) }` branch), so telling a reader
- * to run it would be a command that provably cannot fix what was just reported.
+ * The remediation named on failure is `bun run mirror:export`: since F3 (AC-CRIT-4) the mirror
+ * script treats its directories as a projection and passes `force: true` to the exporter, so it
+ * rewrites a changed body. `lore export-docs` without `--force` still leaves a changed body alone
+ * (SPEC-021 Amendment A2), which is why it is not the command named here.
  *
  * @returns `true` iff this type's bodies all match (mirrors `result.ok`, so a caller aggregating
  *   across {@link MIRROR_TYPES} does not re-derive it). ⛔ Says nothing about
@@ -318,10 +328,12 @@ export function printContentDrift(type: MirrorDocType, result: MirrorContentDrif
     const detail =
       entry.reason === "body_divergent"
         ? "body differs from the corpus document"
-        : "body not comparable — stale identity frontmatter pre-empts the body check";
+        : entry.reason === "body_undecidable"
+          ? "body not comparable — stale identity frontmatter pre-empts the body check"
+          : "frontmatter (status/priority/title/tags/phase) differs from the corpus document";
     console.error(`  ${entry.slug} — ${detail} (${entry.filePath})`);
   }
-  console.error(`\nRun \`lore export-docs --force\` to reconcile ${mirrorDirRelative(type)} bodies with the corpus.`);
+  console.error(`\nRun \`bun run mirror:export\` to reconcile ${mirrorDirRelative(type)} with the corpus.`);
   return false;
 }
 
@@ -473,6 +485,10 @@ export interface MirrorExportReportLike {
   readonly overwritten: readonly string[];
   readonly errors: readonly string[];
   readonly identity_repaired: readonly string[];
+  /** Dry-run: files whose scalar frontmatter is stale though the body matches (AC-CRIT-5). */
+  readonly frontmatter_repaired: readonly string[];
+  /** Files whose scalar frontmatter staleness could not be repaired or decided (AC-CRIT-5). */
+  readonly frontmatter_declined: readonly string[];
 }
 
 /**
