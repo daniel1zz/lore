@@ -118,6 +118,13 @@ export function mirrorDirRelative(type: MirrorDocType): string {
 export const MIRROR_DRIFT_EXIT_CODE = 2;
 /** Documented non-zero exit code for a hard failure (unreadable/corrupt index, corpus read failure, per-doc export error). */
 export const MIRROR_HARD_FAILURE_EXIT_CODE = 4;
+/**
+ * Exit code for "the check compared fewer mirror files than the mapped-and-present population" —
+ * in particular ZERO while that population is non-zero (AC-OX-6 positive trace). Distinct from 0
+ * (clean), 2 (drift), 3 (usage, declared in `export-spec-mirror.ts`) and 4 (hard failure): the tool
+ * was blind, which is neither "the mirror is stale" nor "the tool tried and failed to decide".
+ */
+export const MIRROR_ZERO_COMPARED_EXIT_CODE = 5;
 
 /**
  * Thrown when this script cannot even attempt a parity judgement — a hard failure distinct from
@@ -251,6 +258,13 @@ export interface MirrorContentDriftResult {
   readonly unresolvedFilePaths: readonly string[];
   /** `true` iff `divergences` is empty. Says nothing about {@link unresolvedFilePaths} — see there. */
   readonly ok: boolean;
+  /**
+   * AC-OX-6 positive trace: how many EXISTING mirror files the probe classified (clean, body drift,
+   * stale identity, stale/undecidable frontmatter) — the count of files actually compared.
+   */
+  readonly comparedCount: number;
+  /** Docs of this type whose export-index mapping exists and whose file is present (not reported `created` by the dry-run). The population {@link comparedCount} must equal. */
+  readonly mappedPresentCount: number;
 }
 
 /**
@@ -299,8 +313,42 @@ export function computeMirrorContentDrift(
   }
   divergences.sort((a, b) => a.slug.localeCompare(b.slug));
 
+  const createdPaths = new Set(report.created);
+  let mappedPresentCount = 0;
+  for (const doc of docs) {
+    const filePath = mappings[doc.id]?.file_path;
+    if (filePath !== undefined && !createdPaths.has(filePath)) mappedPresentCount += 1;
+  }
+  const comparedCount =
+    report.skipped_clean.length + report.drift.length + report.overwritten.length + driftlessCount(report);
+
   const unresolvedFilePaths = [...driftPaths, ...undecidablePaths, ...frontmatterPaths].filter((path) => !attributed.has(path)).sort();
-  return { divergences, unresolvedFilePaths, ok: divergences.length === 0 };
+  return { divergences, unresolvedFilePaths, ok: divergences.length === 0, comparedCount, mappedPresentCount };
+}
+
+/** Existing files the probe classified other than clean/drift/overwritten (those three are summed inline). */
+function driftlessCount(report: MirrorExportReportLike): number {
+  return report.identity_repaired.length + report.frontmatter_repaired.length + report.frontmatter_declined.length;
+}
+
+/**
+ * AC-OX-6 positive-trace verdict for ONE type — PURE. A check that compared ZERO files while the
+ * mapped-and-present population is non-zero is indistinguishable from a clean one (measured: 0
+ * mismatches while parsing 0 of 1490 files), so it FAILS with {@link MIRROR_ZERO_COMPARED_EXIT_CODE}.
+ * Any other shortfall (`comparedCount !== mappedPresentCount`) is the same blindness, partially.
+ * Rule text is asserted by tests: "compared 0 of N mapped".
+ */
+export function evaluateComparedCount(
+  type: MirrorDocType,
+  result: Pick<MirrorContentDriftResult, "comparedCount" | "mappedPresentCount">,
+): { readonly ok: true } | { readonly ok: false; readonly message: string } {
+  const { comparedCount, mappedPresentCount } = result;
+  if (comparedCount === mappedPresentCount) return { ok: true };
+  const rule =
+    comparedCount === 0
+      ? `compared 0 of ${mappedPresentCount} mapped ${type} mirror file(s) — a check that parsed nothing proves nothing`
+      : `compared ${comparedCount} of ${mappedPresentCount} mapped ${type} mirror file(s) — the compared count must equal the mapped-and-present population`;
+  return { ok: false, message: `export-spec-mirror (content): ${rule}` };
 }
 
 /**
@@ -318,7 +366,9 @@ export function computeMirrorContentDrift(
  */
 export function printContentDrift(type: MirrorDocType, result: MirrorContentDriftResult): boolean {
   if (result.ok) {
-    console.log(`export-spec-mirror (content): OK — every mirrored ${type} body matches its corpus document.`);
+    console.log(
+      `export-spec-mirror (content): OK — every mirrored ${type} body matches its corpus document. (compared ${result.comparedCount} ${type} file(s); ${result.mappedPresentCount} mapped-and-present)`,
+    );
     return true;
   }
   console.error(

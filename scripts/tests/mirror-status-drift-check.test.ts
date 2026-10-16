@@ -36,13 +36,22 @@ import { mkdtempSync, rmSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { loadMirrorMappings, MIRROR_DRIFT_EXIT_CODE } from "../export-spec-mirror-core.js";
+import {
+  computeMirrorContentDrift,
+  evaluateComparedCount,
+  loadMirrorMappings,
+  MIRROR_DRIFT_EXIT_CODE,
+  MIRROR_HARD_FAILURE_EXIT_CODE,
+  MIRROR_ZERO_COMPARED_EXIT_CODE,
+  type MirrorExportReportLike,
+} from "../export-spec-mirror-core.js";
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
 const REPO_ROOT = join(__dirname, "..", "..");
 const LORE_ENTRY = join(REPO_ROOT, "packages", "lore", "src", "index.ts");
 // `.js` specifier — Bun resolves this to the sibling `.ts` source (project CLAUDE.md "Import style").
 const MIRROR_SCRIPT_JS_SPECIFIER = join(REPO_ROOT, "scripts", "export-spec-mirror.js");
+const EXPORT_SERVICE_JS_SPECIFIER = join(REPO_ROOT, "packages", "lore", "src", "service", "export-docs-service.js");
 
 const tmpDirs: string[] = [];
 
@@ -62,7 +71,21 @@ function writeDriver(dir: string): string {
 import { main } from ${JSON.stringify(MIRROR_SCRIPT_JS_SPECIFIER)};
 
 const [, , mode, dbPath, repoRoot] = process.argv;
-const exitCode = await main(mode === "check" ? ["--check"] : [], repoRoot, dbPath);
+if (mode === "check-blind") {
+  // Simulates a probe that parsed NOTHING: every dry-run report is emptied (files exist, none classified).
+  const { ExportDocsService } = await import(${JSON.stringify(EXPORT_SERVICE_JS_SPECIFIER)});
+  const original = ExportDocsService.prototype.exportDocs;
+  ExportDocsService.prototype.exportDocs = async function (this: unknown, opts: { dryRun?: boolean }) {
+    const result = await original.call(this, opts);
+    if (opts.dryRun === true && result.ok) {
+      for (const key of ["skipped_clean", "drift", "overwritten", "identity_repaired", "frontmatter_repaired", "frontmatter_declined"]) {
+        result.value[key] = [];
+      }
+    }
+    return result;
+  };
+}
+const exitCode = await main(mode === "export" ? [] : ["--check"], repoRoot, dbPath);
 console.log(JSON.stringify({ exitCode }));
 process.exit(exitCode);
 `;
@@ -75,7 +98,7 @@ interface DriverResult {
   readonly output: string;
 }
 
-function runDriver(driverPath: string, mode: "check" | "export", dbPath: string, repoRoot: string): DriverResult {
+function runDriver(driverPath: string, mode: "check" | "check-blind" | "export", dbPath: string, repoRoot: string): DriverResult {
   const result = spawnSync("bun", ["run", driverPath, mode, dbPath, repoRoot], {
     encoding: "utf8",
     maxBuffer: 20 * 1024 * 1024,
@@ -202,4 +225,63 @@ describe("AC-OX-6 fixture — `--check` catches a status-only frontmatter drift 
     },
     120_000,
   );
+});
+
+describe("AC-OX-6 positive trace — the check states how many mirror files it actually compared", () => {
+  it(
+    "HAPPY: --check prints `compared N <type> file(s); M mapped-and-present` with N == M == the fixture population (1 knowledge doc, 0 elsewhere)",
+    () => {
+      const seeded = seedExportedMirror();
+      const run = runDriver(seeded.driverPath, "check", seeded.dbPath, seeded.dir);
+      expect(run.exitCode).toBe(0);
+      expect(run.output).toContain("compared 1 knowledge file(s); 1 mapped-and-present");
+      for (const m of run.output.matchAll(/compared (\d+) (\w+) file\(s\); (\d+) mapped-and-present/g)) {
+        expect(m[1], `type ${m[2]}: compared must equal mapped-and-present`).toBe(m[3]);
+      }
+      const types = [...run.output.matchAll(/compared \d+ (\w+) file\(s\)/g)].map((m) => m[1]);
+      expect(types.sort()).toEqual(["adr", "knowledge", "plan", "prd", "spec", "task"]);
+    },
+    120_000,
+  );
+
+  it(
+    "NEGATIVE: a probe that parsed ZERO of the 1 mapped-and-present file exits EXACTLY 5 (MIRROR_ZERO_COMPARED_EXIT_CODE) with the rule text, not 0 and not the drift code 2",
+    () => {
+      const seeded = seedExportedMirror();
+      const blind = runDriver(seeded.driverPath, "check-blind", seeded.dbPath, seeded.dir);
+      expect(blind.exitCode).toBe(5);
+      expect(MIRROR_ZERO_COMPARED_EXIT_CODE).toBe(5);
+      expect([0, MIRROR_DRIFT_EXIT_CODE, 3, MIRROR_HARD_FAILURE_EXIT_CODE]).not.toContain(MIRROR_ZERO_COMPARED_EXIT_CODE);
+      expect(blind.output).toContain("compared 0 of 1 mapped knowledge mirror file(s) — a check that parsed nothing proves nothing");
+    },
+    120_000,
+  );
+
+  it("BOUNDARY (pure): zero compared of an EMPTY population is fine; zero of non-zero and a partial count both fail with their own rule text", () => {
+    expect(evaluateComparedCount("task", { comparedCount: 0, mappedPresentCount: 0 })).toEqual({ ok: true });
+    expect(evaluateComparedCount("task", { comparedCount: 7, mappedPresentCount: 7 })).toEqual({ ok: true });
+    const zero = evaluateComparedCount("task", { comparedCount: 0, mappedPresentCount: 3 });
+    expect(zero.ok).toBe(false);
+    expect(zero.ok === false && zero.message).toContain("compared 0 of 3 mapped task mirror file(s)");
+    const partial = evaluateComparedCount("task", { comparedCount: 2, mappedPresentCount: 3 });
+    expect(partial.ok === false && partial.message).toContain("compared 2 of 3 mapped task mirror file(s)");
+  });
+
+  it("STATE (pure): computeMirrorContentDrift counts every classified existing file, and excludes a `created` (absent) file from the mapped-and-present population", () => {
+    const docs = ["a", "b", "c", "d", "e"].map((x) => ({ id: x, slug: `slug-${x}` }));
+    const mappings = Object.fromEntries(docs.map((d) => [d.id, { file_path: `docs/${d.id}.md` }])) as never;
+    const report: MirrorExportReportLike = {
+      created: ["docs/e.md"],
+      skipped_clean: ["docs/a.md"],
+      drift: ["docs/b.md"],
+      overwritten: [],
+      errors: [],
+      identity_repaired: [],
+      frontmatter_repaired: ["docs/c.md"],
+      frontmatter_declined: [],
+    };
+    const result = computeMirrorContentDrift(docs, mappings, report);
+    expect(result.comparedCount).toBe(3);
+    expect(result.mappedPresentCount).toBe(4);
+  });
 });
