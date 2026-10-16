@@ -6,7 +6,7 @@
  * Isolation (I1): throwaway git repos + mkdtemp state bases + CLAUDE_STATE_BASE_OVERRIDE.
  */
 import { describe, it, expect, afterEach } from "vitest";
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { git, makeGitRepo, makeTmpDir, runHook } from "./hook-harness";
 
@@ -129,6 +129,27 @@ describe("AC-ST-2 subagent-trail SubagentStop measurement", () => {
     expect(rec.end_count).toBe(2);
     expect(rec.changes.value.base).toBe(baseAtFirstEnd);
     expect(rec.changes.value.files.map((x: any) => x.path)).toContain("src/b.ts");
+  });
+
+  it("REGRESSION: a failed end between two measured ends keeps the end-1 base for end 3 after a merge", () => {
+    const f = makeFixture();
+    start(f);
+    stop(f, f.worktree);
+    const baseAtFirstEnd = record(f).changes.value.base;
+    const hidden = `${f.worktree}-hidden`;
+    renameSync(f.worktree, hidden);
+    expectSilent(stop(f, f.worktree));
+    const failed = record(f);
+    expect(failed.end_count).toBe(2);
+    expect(failed.changes.measured).toBe(false);
+    expect(failed.base).toBe(baseAtFirstEnd);
+    renameSync(hidden, f.worktree);
+    git(f.main, "merge", "-q", "--no-ff", "-m", "merge helper", "helper");
+    expectSilent(stop(f, f.worktree));
+    const third = record(f);
+    expect(third.end_count).toBe(3);
+    expect(third.changes.value.base).toBe(baseAtFirstEnd);
+    expect(third.changes.value.files.map((x: any) => x.path)).toContain("src/b.ts");
   });
 
   it("BOUNDARY: payloads that cannot be recorded exit 0 with empty output and write nothing", () => {

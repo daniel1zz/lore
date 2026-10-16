@@ -157,8 +157,9 @@ function validHelperChanges(v) {
 }
 
 function validHelperRecord(v) {
-  return hasShape(v, ['run', 'started_at', 'end_count'], ['ended_at', 'working_copy', 'isolated', 'changes'])
+  return hasShape(v, ['run', 'started_at', 'end_count'], ['ended_at', 'working_copy', 'isolated', 'base', 'changes'])
     && isText(v.run) && isText(v.started_at) && isCount(v.end_count)
+    && (v.base === undefined || isText(v.base))
     && (v.ended_at === undefined || isText(v.ended_at))
     && (v.working_copy === undefined || isText(v.working_copy))
     && (v.isolated === undefined || typeof v.isolated === 'boolean')
@@ -536,8 +537,11 @@ export function recordHelperEnd(base, sessionId, agentId, cwd, nowMs = Date.now(
   const file = join(base, 'sessions', sessionId, 'helpers', `${agentId}.json`);
   const run = `cc:${sessionId}:${agentId}`;
   const prior = readValidOrNull(file, validHelperRecord);
-  const storedBase = prior?.changes?.measured === true ? prior.changes.value.base : null;
+  // reason: spec D6 — the base is fixed at the FIRST measured end; a failed end in between keeps it
+  // in the top-level `base` field, so the next successful end still reuses it.
+  const storedBase = prior?.base ?? (prior?.changes?.measured === true ? prior.changes.value.base : null);
   const measurement = measureHelperChanges(cwd, run, storedBase);
+  const keptBase = measurement.changes.measured === true ? measurement.changes.value.base : storedBase;
   const at = new Date(nowMs).toISOString();
   const record = {
     run,
@@ -546,6 +550,7 @@ export function recordHelperEnd(base, sessionId, agentId, cwd, nowMs = Date.now(
     end_count: (prior?.end_count ?? 0) + 1,
     ...(typeof cwd === 'string' && cwd !== '' ? { working_copy: cwd } : {}),
     ...(measurement.isolated === undefined ? {} : { isolated: measurement.isolated }),
+    ...(keptBase === null ? {} : { base: keptBase }),
     changes: measurement.changes,
   };
   writeJsonAtomic(file, record);
