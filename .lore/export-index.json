@@ -11017,10 +11017,6 @@
       "human_id": "SPEC-194",
       "file_path": "docs/requirements/spec/SPEC-194-round-0-main-is-green-every-red-test-on-e1878626-t.md"
     },
-    "01M4APBSGVFFX67X04RSR6GDMZ": {
-      "human_id": "SPEC-195",
-      "file_path": "docs/requirements/spec/SPEC-195-product-baseline-architecture-trees-the-product-s.md"
-    },
     "01KYEN82CATW2VDHSB9RR9XTQG": {
       "human_id": "SPEC-196",
       "file_path": "docs/requirements/spec/SPEC-196-upstream-issue-feedback-loop-consumer-reported-def.md"
@@ -11128,6 +11124,106 @@
     "01M526BPTGVVWF00J7GS4Y3Y1N": {
       "human_id": "TASK-1483",
       "file_path": "docs/requirements/task/TASK-1483-skill-implement-gate-audit-writes-are-awaited-befo.md"
+    },
+    "01M52C33XQCWBJ0QNCTGZQKKNY": {
+      "human_id": "SPEC-195",
+      "file_path": "docs/requirements/spec/SPEC-195-test-governance-guards-that-refuse-bad-tests-decla.md"
+    },
+    "01M52C7Y0QBP0ZG6BSBVJN3PK7": {
+      "human_id": "PLAN-201",
+      "file_path": "docs/requirements/plan/PLAN-201-test-governance-decide-the-runner-clear-offenders.md"
+    },
+    "01M52CBRQ1SFZCPPJRHQ9JGBNP": {
+      "human_id": "TASK-1484",
+      "file_path": "docs/requirements/task/TASK-1484-skill-refactor-tg-12-store-tests-share-one-suite-a.md"
+    },
+    "01M52CBQPF1T3KQ8ZH8N9WWVXH": {
+      "human_id": "TASK-1485",
+      "file_path": "docs/requirements/task/TASK-1485-skill-implement-tg-10-verify-records-a-missing-ora.md"
+    },
+    "01M52GR7FEH5ADAEGXH4S3SS4P": {
+      "human_id": "TASK-1486",
+      "file_path": "docs/requirements/task/TASK-1486-skill-test-tg-21-fix-two-regressions-from-t18-and.md"
+    },
+    "01M52FMPDDFMC6GZKXAVM9SD01": {
+      "human_id": "TASK-1487",
+      "file_path": "docs/requirements/task/TASK-1487-skill-implement-tg-20-worktrees-resolve-their-own.md"
+    },
+    "01M52CBKK1J0DVVT69FPJQEEC5": {
+      "human_id": "TASK-1488",
+      "file_path": "docs/requirements/task/TASK-1488-skill-test-tg-2-move-five-live-repo-state-tests-in.md"
+    },
+    "01M52FKMYJ7M9YE0PBCG1M31NF": {
+      "human_id": "TASK-1489",
+      "file_path": "docs/requirements/task/TASK-1489-skill-implement-tg-19-inmemorystore-cycle-detectio.md"
+    },
+    "01M52FT0MP0MBB68WX7HPEN711": {
+      "human_id": "TASK-1490",
+      "file_path": "docs/requirements/task/TASK-1490-lore-done-prints-worktree-gone-for-a-worktree-that.md"
+    },
+    "01M52F8981BJEVA4FWTMQ4S9YJ": {
+      "human_id": "TASK-1491",
+      "file_path": "docs/requirements/task/TASK-1491-skill-test-tg-18-ac-ox-6-oracle-regains-its-positi.md"
+    },
+    "01M52CBM3CMAHDMDB3DM7CQDZ2": {
+      "human_id": "TASK-1492",
+      "file_path": "docs/requirements/task/TASK-1492-skill-test-tg-3-rewrite-four-live-corpus-tests-ont.md"
+    },
+    "01M52CBR6X6CQNPGQDZ2WHZ765": {
+      "human_id": "TASK-1493",
+      "file_path": "docs/requirements/task/TASK-1493-skill-test-tg-11-repoint-missing-oracle-paths-merg.md"
+    },
+    "01M52CBQ6ES53TBBDNS1P6WB1F": {
+      "human_id": "TASK-1494",
+      "file_path": "docs/requirements/task/TASK-1494-skill-implement-tg-9-check-ac-oracle-ownership.md"
+    },
+    "01M52CBSA5WXSSXMGK4AWAY6A7": {
+      "human_id": "TASK-1495",
+      "file_path": "docs/requirements/task/TASK-1495-skill-implement-tg-13-declared-test-inputs-drive-t.md"
+    },
+    "01M52CBVB1TMH8059NG1GDTNCA": {
+      "human_id": "TASK-1496",
+      "file_path": "docs/requirements/task/TASK-1496-skill-test-tg-17-verify-on-main-after-the-last-mer.md"
+    },
+    "01M52CBTV1NDJ7W8KGT4M4CX37": {
+      "human_id": "TASK-1497",
+      "file_path": "docs/requirements/task/TASK-1497-skill-docs-tg-16-workflow-docs-and-as-13-14-24-rul.md"
+    },
+    "01M52CBTAXWK05ZZ0T1EZN3CMS": {
+      "human_id": "TASK-1498",
+      "file_path": "docs/requirements/task/TASK-1498-skill-implement-tg-15-parallel-bun-run-and-wall-ti.md"
+    },
+    "01M52CBSTSH76W8NSQRGHZ3WW0": {
+      "human_id": "TASK-1499",
+      "file_path": "docs/requirements/task/TASK-1499-skill-implement-tg-14-selector-cross-check-against.md"
+    },
+    "01M52CBPN8MMF0CTRGPKF61D6Y": {
+      "human_id": "TASK-1500",
+      "file_path": "docs/requirements/task/TASK-1500-skill-test-tg-8-one-retirement-registry-replaces-f.md"
+    },
+    "01M52CBP41TR95WQ77KXRAD3RD": {
+      "human_id": "TASK-1501",
+      "file_path": "docs/requirements/task/TASK-1501-skill-test-tg-7-runtime-error-sentence-pins-assert.md"
+    },
+    "01M52CBNKEEP9V171V0ZZ5AFNC": {
+      "human_id": "TASK-1502",
+      "file_path": "docs/requirements/task/TASK-1502-skill-implement-tg-6-check-prose-pins-with-ledger.md"
+    },
+    "01M52CBN3B9MFVDTFTPMM7B6J7": {
+      "human_id": "TASK-1503",
+      "file_path": "docs/requirements/task/TASK-1503-skill-implement-tg-5-repo-tree-snapshot-guard-and.md"
+    },
+    "01M52CBMKAH91Y0RG48KJDK7Q8": {
+      "human_id": "TASK-1504",
+      "file_path": "docs/requirements/task/TASK-1504-skill-implement-tg-4-lore-test-sandbox-refuses-thi.md"
+    },
+    "01M52CB1W128NNR5AZ3VFG7XK9": {
+      "human_id": "TASK-1505",
+      "file_path": "docs/requirements/task/TASK-1505-skill-research-tg-1-runner-and-binary-execution-ad.md"
+    },
+    "01M4APBSGVFFX67X04RSR6GDMZ": {
+      "human_id": "SPEC-205",
+      "file_path": "docs/requirements/spec/SPEC-205-product-baseline-architecture-trees-the-product-s.md"
     }
   }
 }

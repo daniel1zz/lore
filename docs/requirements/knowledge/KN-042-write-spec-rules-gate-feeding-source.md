@@ -120,7 +120,7 @@ links:
   - {id: SPEC-153, type: governs}
   - {id: SPEC-154, type: governs}
   - {id: SPEC-155, type: governs}
-  - {id: SPEC-195, type: governs}
+  - {id: SPEC-205, type: governs}
   - {id: SPEC-156, type: governs}
   - {id: SPEC-157, type: governs}
   - {id: SPEC-158, type: governs}
@@ -157,6 +157,7 @@ links:
   - {id: SPEC-192, type: governs}
   - {id: SPEC-193, type: governs}
   - {id: SPEC-194, type: governs}
+  - {id: SPEC-195, type: governs}
 ---
 ## Overview
 
