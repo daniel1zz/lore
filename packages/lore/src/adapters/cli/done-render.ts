@@ -64,6 +64,17 @@ export function formatDoneMessage(result: DoneResult): string {
 export function formatLastTaskAdvisory(result: DoneResult): string | undefined {
   const fact = result.plan_now_fully_terminal;
   if (fact === undefined) return undefined;
+  if (fact.empty_phases !== undefined && fact.empty_phases.length > 0) {
+    // reason: F8 (AC-CRIT-11) — the plan-close gate refuses a plan with an empty declared
+    // phase, so NO archive command is printed here; name how to close the gap (BR-211).
+    const phases = fact.empty_phases;
+    const removals = phases.map((phase) => `lore phase rm ${fact.plan_slug} ${phase}`).join(" ; ");
+    return (
+      `⚠ "${fact.plan_slug}" has no more non-terminal tasks, but declares empty phase(s): ` +
+      `${phases.join(", ")}. The plan cannot be closed yet — remove each empty phase (${removals}) ` +
+      `or add a task to it, then close the plan.`
+    );
+  }
   return (
     `⚠ "${fact.plan_slug}" has no more non-terminal tasks — every child task is now ` +
     `archived/deprecated. The plan itself is still open; the plan-close gate will ` +
