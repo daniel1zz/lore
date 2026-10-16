@@ -15,7 +15,10 @@
  *                     ledger's entries (set equality), so exit 0 above is the ledger doing its job;
  *   gap HAPPY       — `check-gap-namespace` main() exits 0 against the live ledger;
  *   gap SET         — the unowned-gap report equals the pinned set;
- *   gap SCOPE       — GAP-19's scope line is present and ok.
+ *   gap SCOPE       — GAP-19's scope line is present and ok;
+ *   bfi-11(d)       — (moved from pre-push-trip.bun.test.ts) `lore status --check-drift` exits 0 on the
+ *                     live corpus AND the binary-provenance spec's stored code_anchors name
+ *                     pre-push-trip.bun.test.ts (the renamed file).
  *
  * Usage: `bun scripts/check-live-corpus-detectors.ts`. Exit 0 all hold; 1 a check failed (printed);
  * 2 a precondition failed loudly.
@@ -121,10 +124,44 @@ function checkGapNamespace(): string[] {
   return violations;
 }
 
+const LORE_ENTRY = join(REPO_ROOT, "packages", "lore", "src", "index.ts");
+const BFI_SPEC_SLUG = "spec-bootstrap-fixpoint-integrity-binary-provenance-an-anchor";
+
+function runLoreAtRepoRoot(args: readonly string[]) {
+  const result = spawnSync("bun", ["run", LORE_ENTRY, ...args], {
+    cwd: REPO_ROOT,
+    encoding: "utf8",
+    maxBuffer: 20 * 1024 * 1024,
+    env: { ...process.env },
+  });
+  if (result.status === null) {
+    throw new Error(`lore ${args.join(" ")} did not run to completion: ${String(result.error?.message ?? result.signal)}`);
+  }
+  return { status: result.status, stdout: result.stdout ?? "", stderr: result.stderr ?? "" };
+}
+
+/** bfi-11(d), moved from pre-push-trip.bun.test.ts: live drift clean AND the stored anchor names the renamed file. */
+function checkBfi11Anchor(): string[] {
+  const violations: string[] = [];
+  const drift = runLoreAtRepoRoot(["status", "--check-drift"]);
+  if (drift.status !== 0) violations.push(`bfi-11(d): status --check-drift exited ${drift.status}: ${(drift.stdout + drift.stderr).slice(0, 300)}`);
+  const got = runLoreAtRepoRoot(["get", BFI_SPEC_SLUG, "--json"]);
+  if (got.status !== 0) {
+    violations.push(`bfi-11(d): lore get ${BFI_SPEC_SLUG} exited ${got.status}: ${(got.stdout + got.stderr).slice(0, 300)}`);
+    return violations;
+  }
+  const parsed = JSON.parse(got.stdout) as { data?: { doc?: { extra?: { code_anchors?: readonly string[] } } } };
+  const anchors = parsed.data?.doc?.extra?.code_anchors ?? [];
+  if (!anchors.some((a) => a.endsWith("pre-push-trip.bun.test.ts"))) {
+    violations.push(`bfi-11(d): ${BFI_SPEC_SLUG} code_anchors do not name pre-push-trip.bun.test.ts: ${JSON.stringify(anchors)}`);
+  }
+  return violations;
+}
+
 function main(): number {
   let violations: string[];
   try {
-    violations = [...checkAcRef(), ...checkGapNamespace()];
+    violations = [...checkAcRef(), ...checkGapNamespace(), ...checkBfi11Anchor()];
   } catch (e) {
     console.error(`check-live-corpus-detectors: precondition failed — ${e instanceof Error ? e.message : String(e)}`);
     return 2;

@@ -390,6 +390,13 @@ describe("AC-BFI-9: the pre-push hook actually RUNS the anchor-coverage ratchet"
     mkdirSync(corpusRepo, { recursive: true });
     execFileSync("git", ["init", "-q", "."], { cwd: corpusRepo, encoding: "utf8" });
     symlinkSync(join(REPO_ROOT, "scripts"), join(corpusRepo, "scripts"));
+    // reason: the hook's prose-pin step (scripts/check-prose-pins.ts, AC-TG-4) runs with cwd = this
+    // fixture and reads the shipped ledger through the `scripts` symlink; every ledger row names a
+    // consumer under packages/ and the prose it pins under assets/ + docs/. Without these links the
+    // fixture looks like a dev repo that lost those files, so every row reads as a stale entry and
+    // the hook exits 1 — turning the "dispositioned ratchet is green" control red for an unrelated
+    // reason (measured on main after TG-6). Linking them models what the hook assumes: a dev checkout.
+    for (const dir of ["packages", "assets", "docs"]) symlinkSync(join(REPO_ROOT, dir), join(corpusRepo, dir));
     execFileSync(join(realBinDir, "lore"), ["init", "--name", "bfi9-ratchet-fixture"], {
       cwd: corpusRepo,
       encoding: "utf8",
@@ -627,40 +634,10 @@ describe("AC-BFI-11: the rename and every record of the old name are one accepta
     expect(ownSource.includes(`${OLD_BASENAME_LITERAL}:`)).toBe(false);
   });
 
-  it("(d) lore status --check-drift exits 0 AND the spec's stored anchor value NAMES the renamed file — not just some existing file", () => {
-    // `--check-drift` exiting 0 is consistent with `code_anchor` having been
-    // repointed to ANY file that exists on disk — it proves nothing about
-    // WHICH file. AC-BFI-12 closes that gap: read the stored value itself.
-    const driftRun = spawnSync(DIST_BINARY, ["status", "--check-drift"], { cwd: REPO_ROOT, encoding: "utf8" });
-    if (driftRun.status === null) {
-      throw new Error(`lore status was killed by signal ${String(driftRun.signal)} — no exit code to assert`);
-    }
-    if (driftRun.status !== 0) {
-      throw new Error(`lore status --check-drift exited ${String(driftRun.status)}: ${driftRun.stdout}${driftRun.stderr}`);
-    }
-    expect(driftRun.status).toBe(0);
-
-    // Read-only against this repo's OWN corpus (never a write — see this
-    // file's header and project CLAUDE.md's `.lore/` discipline) through the
-    // same DIST_BINARY the drift check above just ran, so both assertions are
-    // issued by the identical fresh binary.
-    const SPEC_SLUG = "spec-bootstrap-fixpoint-integrity-binary-provenance-an-anchor";
-    const getRun = spawnSync(DIST_BINARY, ["get", SPEC_SLUG, "--json"], { cwd: REPO_ROOT, encoding: "utf8" });
-    if (getRun.status === null) {
-      throw new Error(`lore get ${SPEC_SLUG} was killed by signal ${String(getRun.signal)} — no exit code to assert`);
-    }
-    if (getRun.status !== 0) {
-      throw new Error(`lore get ${SPEC_SLUG} --json exited ${String(getRun.status)}: ${getRun.stdout}${getRun.stderr}`);
-    }
-    const parsed = JSON.parse(getRun.stdout) as {
-      readonly data?: { readonly doc?: { readonly extra?: { readonly code_anchors?: readonly string[] } } };
-    };
-    const codeAnchors = parsed.data?.doc?.extra?.code_anchors ?? [];
-    expect(
-      codeAnchors.some((anchor) => anchor.endsWith("pre-push-trip.bun.test.ts")),
-      `${SPEC_SLUG}'s code_anchors must name pre-push-trip.bun.test.ts (the renamed file), not merely point at SOME existing file: ${JSON.stringify(codeAnchors)}`,
-    ).toBe(true);
-  });
+  // (d) — `lore status --check-drift` exits 0 AND the spec's stored anchor value NAMES the renamed
+  // file — read THIS repo's own live corpus, which LORE_TEST_SANDBOX (AC-TG-2) refuses inside a
+  // test. It moved to `scripts/check-live-corpus-detectors.ts` (check:live-repo-state); the
+  // AC-BFI-15 suite below proves the same assertion path, forced red, on a throwaway corpus.
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
