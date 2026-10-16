@@ -230,8 +230,11 @@ describe("claude-md contract asset — Content Tiers rule (tier 1 = rule only, t
       expect(content).toContain("A line belongs on tier 1 only when ALL three hold:");
     });
 
-    it("a tier-1 line states the rule, never the reasoning", () => {
-      expect(content).toContain("A tier-1 line states the rule, never the reasoning");
+    it("a tier-1 line states the rule and may keep one short scope-setting reason clause", () => {
+      const flat = content.replace(/\s+/g, " ");
+      expect(flat).toContain("A tier-1 line states the rule. It may keep one short reason clause");
+      expect(flat).toContain("is part of the rule, never reasoning");
+      expect(flat).toContain("follow the `lore-context-optimizer` skill");
     });
   });
 
@@ -252,8 +255,9 @@ describe("claude-md contract asset — Content Tiers rule (tier 1 = rule only, t
       const idx = content.indexOf("3. **Architecture**");
       expect(idx).toBeGreaterThanOrEqual(0);
       const section = content.slice(idx, content.indexOf("4. **Module Index**", idx));
-      expect(section).toContain("stated as rules (tier 1)");
-      expect(section).toContain("are tier 2: a pointer line to the ADR or module file");
+      const flat = section.replace(/\s+/g, " ");
+      expect(flat).toContain("stated as rules with at most one scope-setting reason clause (tier 1)");
+      expect(flat).toContain("Design intent, trade-offs and history are tier 2: a pointer line to the ADR or module file");
     });
 
     it("the module taxonomy applies the Content Tiers rule one level down", () => {
@@ -264,6 +268,10 @@ describe("claude-md contract asset — Content Tiers rule (tier 1 = rule only, t
   describe("NEGATIVE — the retired wording is gone", () => {
     it("root section 3 no longer asks for design intent and the why inline", () => {
       expect(content).not.toContain("design intent and the *why* behind key decisions, not a");
+    });
+
+    it("the absolute 'states the rule, never the reasoning' wording is gone", () => {
+      expect(content.replace(/\s+/g, " ")).not.toContain("states the rule, never the reasoning");
     });
   });
 });
