@@ -135,15 +135,16 @@ describe("the real corpus read fits the consumer's declared buffer", () => {
       expect(run.signal).toBeNull();
     });
 
-    it("ERROR: a buffer overflow is status null + ENOBUFS, and evaluateRun names it under (a) as separate facts", () => {
+    it("ERROR: a buffer overflow surfaces as error.code ENOBUFS, and evaluateRun names it under (a)", () => {
       // ⛔ A 1 KiB cap against a 3-row payload overflows: the same shape the 20MB cap produced on the
-      // wide payload. `status ?? 1` would have turned this into "exit 1" with empty stderr.
+      // wide payload. `status ?? 1` would have turned this into "exit 1" with empty stderr. Measured
+      // under load (2026-10-16): the child can finish before spawnSync's kill lands, so the status is
+      // `0` or `null` depending on the race while `error.code` is ENOBUFS either way — which is exactly
+      // why `error` is its own conjunct and why this asserts the error, never the status.
       const run = runListIn(REAL_CORPUS_ARGS, seeded, 1 / 1024);
-      expect(run.status).toBeNull();
       expect(run.error?.code).toBe("ENOBUFS");
       const violations = evaluateRun(run, 1);
-      expect(violations.some((v) => v.startsWith("(a) status is null"))).toBe(true);
-      expect(violations.some((v) => v.includes("ENOBUFS"))).toBe(true);
+      expect(violations.some((v) => v.startsWith("(a) spawnSync reported error ENOBUFS"))).toBe(true);
     });
   });
 
