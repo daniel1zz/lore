@@ -10876,6 +10876,182 @@
     "01M51SXZH7WPB1JYEA2DYPKZWG": {
       "human_id": "TASK-1432",
       "file_path": "docs/requirements/task/TASK-1432-a-string-option-whose-value-starts-with-is-rejecte.md"
+    },
+    "01M51WRZEAK6BCK8BW9EWQJQ0R": {
+      "human_id": "SPEC-193",
+      "file_path": "docs/requirements/spec/SPEC-193-in-repo-lore-defect-backlog-findings-from-developi.md"
+    },
+    "01M51WS3CX9NCVT40H3BV1AS04": {
+      "human_id": "PLAN-192",
+      "file_path": "docs/requirements/plan/PLAN-192-defect-backlog-baseline-mirror.md"
+    },
+    "01M51WS2YVAZR1CJF7YKNGFJYS": {
+      "human_id": "PLAN-193",
+      "file_path": "docs/requirements/plan/PLAN-193-defect-backlog-install-context.md"
+    },
+    "01M51WS2GY4AV7NAVDCR5QGZZG": {
+      "human_id": "PLAN-194",
+      "file_path": "docs/requirements/plan/PLAN-194-defect-backlog-session-seat-worktree.md"
+    },
+    "01M51WS22ZFHWNPZBQBS5TJDVC": {
+      "human_id": "PLAN-195",
+      "file_path": "docs/requirements/plan/PLAN-195-defect-backlog-issue-loop.md"
+    },
+    "01M51WS1N249HQJZABNZR46P5W": {
+      "human_id": "PLAN-196",
+      "file_path": "docs/requirements/plan/PLAN-196-defect-backlog-judge-review.md"
+    },
+    "01M51WS17454J8G668T9M2KP4E": {
+      "human_id": "PLAN-197",
+      "file_path": "docs/requirements/plan/PLAN-197-defect-backlog-workflow-gates.md"
+    },
+    "01M51WS0S2ZAJG54NKTAKHTW3P": {
+      "human_id": "PLAN-198",
+      "file_path": "docs/requirements/plan/PLAN-198-defect-backlog-corpus-integrity.md"
+    },
+    "01M51WS0B2X69K4HF9QQTMV4Y9": {
+      "human_id": "PLAN-199",
+      "file_path": "docs/requirements/plan/PLAN-199-defect-backlog-cli-surface.md"
+    },
+    "01M51TP402PP9J3YF1RHF4X2MP": {
+      "human_id": "TASK-1433",
+      "file_path": "docs/requirements/task/TASK-1433-lore-bootstrap-pending-reviews-counts-every-draft.md"
+    },
+    "01M51TP8MF2PA41YDWHFSZT159": {
+      "human_id": "TASK-1434",
+      "file_path": "docs/requirements/task/TASK-1434-an-archived-task-stays-in-my-claims-and-is-counted.md"
+    },
+    "01M51TPD6N7MWRXDFE040G9WA4": {
+      "human_id": "TASK-1435",
+      "file_path": "docs/requirements/task/TASK-1435-lore-session-resume-newest-wins-returns-archived-o.md"
+    },
+    "01M51TPHYP8R837KY1AKTNE4JE": {
+      "human_id": "TASK-1436",
+      "file_path": "docs/requirements/task/TASK-1436-lore-seat-enters-a-seat-for-a-non-plan-document.md"
+    },
+    "01M51TPPTSR9W6PBGSAMH6VQ32": {
+      "human_id": "TASK-1437",
+      "file_path": "docs/requirements/task/TASK-1437-lore-seat-remove-keeps-the-branch-although-its-hel.md"
+    },
+    "01M51TPVHAYBY3BRHAQZ9A1MMV": {
+      "human_id": "TASK-1438",
+      "file_path": "docs/requirements/task/TASK-1438-lore-seat-remove-errors-are-labelled-as-a-seat-ent.md"
+    },
+    "01M51TQ095K21HCT3QRCX1W2HX": {
+      "human_id": "TASK-1439",
+      "file_path": "docs/requirements/task/TASK-1439-session-heartbeat-records-the-short-lived-parent-s.md"
+    },
+    "01M51TQAMC27TS8MPPQPGT6BJW": {
+      "human_id": "TASK-1440",
+      "file_path": "docs/requirements/task/TASK-1440-lore-territory-gives-no-signal-when-branch-enumera.md"
+    },
+    "01M51TQF61EQTH1Z3RTN5J14H1": {
+      "human_id": "TASK-1441",
+      "file_path": "docs/requirements/task/TASK-1441-tree-check-fix-bumps-the-version-without-writing-a.md"
+    },
+    "01M51TQMAKN0GTXHSN68R1RSHW": {
+      "human_id": "TASK-1442",
+      "file_path": "docs/requirements/task/TASK-1442-lore-status-check-tree-fix-exits-0-while-a-plan.md"
+    },
+    "01M51TQRTTMK4JC2SR7CDVDY2H": {
+      "human_id": "TASK-1443",
+      "file_path": "docs/requirements/task/TASK-1443-lore-status-fix-without-check-tree-is-silently-ign.md"
+    },
+    "01M51TQXH7A9XJAYDCFJ2S245D": {
+      "human_id": "TASK-1444",
+      "file_path": "docs/requirements/task/TASK-1444-a-malformed-extra-requirements-reads-as-an-empty-l.md"
+    },
+    "01M51TR2AKPAENMH6Y535F3G7N": {
+      "human_id": "TASK-1445",
+      "file_path": "docs/requirements/task/TASK-1445-archive-sweep-rule-r4-selects-tasks-by-parent-id-n.md"
+    },
+    "01M51TRBPVZB2ZSMYZDXSZ1SFK": {
+      "human_id": "TASK-1446",
+      "file_path": "docs/requirements/task/TASK-1446-the-staleness-batch-probes-archived-and-deprecated.md"
+    },
+    "01M51TRG4Y2SDKGSPKCDEP5NVM": {
+      "human_id": "TASK-1447",
+      "file_path": "docs/requirements/task/TASK-1447-lore-audit-and-lore-trace-stats-accept-since-yeste.md"
+    },
+    "01M51TRMWHVCEX1B9YE80WXG9Y": {
+      "human_id": "TASK-1448",
+      "file_path": "docs/requirements/task/TASK-1448-trace-stats-maps-plan-close-success-to-an-archive.md"
+    },
+    "01M51TRS526ZBHB70B50YY4KGT": {
+      "human_id": "TASK-1449",
+      "file_path": "docs/requirements/task/TASK-1449-a-deprecated-defect-report-computes-as-open-foreve.md"
+    },
+    "01M51TRZXVRE99RKCE25Z1ZD4N": {
+      "human_id": "TASK-1450",
+      "file_path": "docs/requirements/task/TASK-1450-lore-report-issue-dedupes-on-exact-title-only-and.md"
+    },
+    "01M51TS8ZTTE5S8XQQTMT4M983": {
+      "human_id": "TASK-1451",
+      "file_path": "docs/requirements/task/TASK-1451-github-reads-use-per-page-100-without-pagination-s.md"
+    },
+    "01M51TSD879WY5YS59E6KVRTS3": {
+      "human_id": "TASK-1452",
+      "file_path": "docs/requirements/task/TASK-1452-lore-issues-verify-reports-every-unlabelled-open-r.md"
+    },
+    "01M51TSHXYFJ5KAHR2T38Y9P2X": {
+      "human_id": "TASK-1453",
+      "file_path": "docs/requirements/task/TASK-1453-a-generic-gh-failure-during-the-label-update-exits.md"
+    },
+    "01M51TSP94T2EAKDJBZAZWGY13": {
+      "human_id": "TASK-1454",
+      "file_path": "docs/requirements/task/TASK-1454-lore-issue-resolve-calls-set-without-expectedversi.md"
+    },
+    "01M51TSTTMMHAMWYN90NEJW7QQ": {
+      "human_id": "TASK-1455",
+      "file_path": "docs/requirements/task/TASK-1455-lore-issue-resolve-state-adopted-accepts-an-archiv.md"
+    },
+    "01M51TSZDY29W4GSP2FF534DJK": {
+      "human_id": "TASK-1456",
+      "file_path": "docs/requirements/task/TASK-1456-a-report-rejected-in-review-still-reads-open-the-r.md"
+    },
+    "01M51TT44D7ZV0SBZDJMTNNMPH": {
+      "human_id": "TASK-1457",
+      "file_path": "docs/requirements/task/TASK-1457-the-mcp-lore-report-issue-description-says-reports.md"
+    },
+    "01M51TT8ZB2XMNMYVVR9N2F8M4": {
+      "human_id": "TASK-1458",
+      "file_path": "docs/requirements/task/TASK-1458-a-soft-deleted-baseline-node-can-be-relabelled.md"
+    },
+    "01M51TTDN3GDXD38YAHEMXTA8Q": {
+      "human_id": "TASK-1459",
+      "file_path": "docs/requirements/task/TASK-1459-the-implementation-detail-lint-bl-11-never-warns-a.md"
+    },
+    "01M51TTJXS1TXG7NM9Q352C7SM": {
+      "human_id": "TASK-1460",
+      "file_path": "docs/requirements/task/TASK-1460-re-adding-an-existing-depends-on-entry-writes-a-ve.md"
+    },
+    "01M51TTQGY9GEZPYERDZKBMZH3": {
+      "human_id": "TASK-1461",
+      "file_path": "docs/requirements/task/TASK-1461-lore-requirement-add-and-rm-record-the-actor-as-sy.md"
+    },
+    "01M51TTW4A5VGN84KKZQSEY69C": {
+      "human_id": "TASK-1462",
+      "file_path": "docs/requirements/task/TASK-1462-one-malformed-evidence-row-empties-the-task-s-whol.md"
+    },
+    "01M51TV0DM8YXTE33REC5W3MTR": {
+      "human_id": "TASK-1463",
+      "file_path": "docs/requirements/task/TASK-1463-lore-rule-show-unknown-says-document-not-found-exi.md"
+    },
+    "01M51TVEGZ6D720G2V4VY84NQW": {
+      "human_id": "TASK-1464",
+      "file_path": "docs/requirements/task/TASK-1464-in-lore-seat-remove-the-ismerged-error-aborts-befo.md"
+    },
+    "01M51TQ5H6G9BR1SE606WETW0F": {
+      "human_id": "TASK-1465",
+      "file_path": "docs/requirements/task/TASK-1465-lore-territory-matches-worktrees-only-by-exact-pat.md"
+    },
+    "01M51TS4284QFEY0AZ3X8CE1ZW": {
+      "human_id": "TASK-1466",
+      "file_path": "docs/requirements/task/TASK-1466-an-unreadable-report-issue-receipt-log-silently-sk.md"
+    },
+    "01M51TR6XTP8WDTX3R01J6S2ZQ": {
+      "human_id": "TASK-1467",
+      "file_path": "docs/requirements/task/TASK-1467-lore-archive-apply-exits-0-when-items-failed.md"
     }
   }
 }

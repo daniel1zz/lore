@@ -2,7 +2,7 @@
 id: TASK-1412
 type: task
 role: plan
-title: "lore setup --check probes the vendor GitHub repo regardless of feedback.upstream"
+title: "lore setup --check probes the vendor GitHub repo instead of the configured feedback.upstream repo"
 status: draft
 priority: medium
 created: 2026-10-16
