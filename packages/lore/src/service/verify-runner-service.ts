@@ -186,6 +186,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { execFileSync } from "node:child_process";
 import { CAPTURE_TAIL_CHARS, err, findMissingOracleFiles, ok, RUNNER_UNATTESTED_CAPTURE_SOURCE } from "@lore/core";
+import type { FileExistsPort } from "@lore/core";
 import type {
   Result,
   LoreError,
@@ -808,6 +809,8 @@ export class VerifyRunnerService {
       processEnv: Readonly<Record<string, string | undefined>>;
     },
     private readonly checkBinaryFreshness?: () => BinaryFreshnessVerdict,
+    /** Existence probe behind the AC-TG-6 missing-oracle-file check; real `node:fs` by default, a fake in unit tests. */
+    private readonly fileExists: FileExistsPort = existsSync,
   ) {}
 
   /**
@@ -1119,7 +1122,7 @@ export class VerifyRunnerService {
       const missingOracleFiles = findMissingOracleFiles(criterion.verify.command, {
         cwd: resolvedExecutionRoot.root,
         corpusRoot: this.config.repoRoot,
-        fileExists: existsSync,
+        fileExists: this.fileExists,
       });
       const execResult: Awaited<ReturnType<typeof this.executor>> =
         missingOracleFiles.length > 0
