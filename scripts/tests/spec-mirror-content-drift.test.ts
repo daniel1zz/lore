@@ -359,7 +359,7 @@ describe("AC-BFI-8 — spec-mirror --check compares mirror BODIES against corpus
   );
 
   it(
-    "NEGATIVE (no over-match): a frontmatter-only edit on disk is NOT reported as body divergence — the content check keys on the BODY, not on whole-file bytes",
+    "NEGATIVE (no over-match): a frontmatter-only edit on disk is NOT reported as BODY divergence — it is counted as frontmatter drift (exit 2, AC-CRIT-5), never as a body difference",
     () => {
       const corpus = seedCorpusWithExportedMirror();
 
@@ -376,7 +376,9 @@ describe("AC-BFI-8 — spec-mirror --check compares mirror BODIES against corpus
       expect(hashBeforeAssertion).toBe(hashAfterMutation);
 
       expect(result.output).not.toContain("body differs from the corpus document");
-      expect(result.exitCode).toBe(0);
+      // AC-CRIT-5 (F3): a status-only drift is drift — --check exits exactly 2 and says it is frontmatter.
+      expect(result.exitCode).toBe(2);
+      expect(result.output).toContain("frontmatter (status/priority/title/tags/phase) differs");
     },
     120_000,
   );

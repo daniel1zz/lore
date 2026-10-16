@@ -41,13 +41,13 @@
  *     call the way body content is. Since THIS file's `runExport`/`main` call that service
  *     directly with no intervening logic of their own, `bun run mirror:export` (no flags) now
  *     repairs a status-only drift for the SAME reason `lore export-docs` (the other caller of the
- *     same service) does — one shared mechanism, not a duplicated one. ⛔ This is deliberately
- *     NOT the same thing as wiring a `--force` flag through to `ExportDocsOptions.force` here:
- *     BODY content drift still requires the existing, unchanged, explicit `--force` opt-in (SPEC-
- *     021 Amendment A2) — that axis is untouched by this task, which is scoped to the frontmatter-
- *     only case where the body is provably byte-identical (`scripts/tests/mirror-frontmatter-
- *     drift.test.ts` proves both halves against a throwaway corpus, driving this exact `main()`
- *     entry point).
+ *     same service) does — one shared mechanism, not a duplicated one.
+ *
+ *     F3 (spec-close-the-eight-verified-critical-defects-no-judge-listing, AC-CRIT-4): the mirror
+ *     directories are a PROJECTION of the corpus, so `runExport` ALSO passes `force: true` to
+ *     `ExportDocsOptions` — a changed spec or knowledge body is rewritten by `bun run mirror:export`
+ *     with no flags, and `--check` then exits 0. ⛔ This is scoped to THIS script: `lore export-docs`
+ *     keeps SPEC-021 Amendment A2 (a changed body is overwritten only with its own `--force`).
  *   - `bun run check:spec-mirror` (`--check` flag, this file's other mode) — READ-ONLY: never
  *     writes a byte. A run that finds drift reports the SAME drift on every subsequent run until
  *     something else (a real export) fixes it — see D6's own text: "a check that regenerates what
@@ -559,7 +559,9 @@ export async function runExport(
 ): Promise<MirrorExportResult> {
   const perType: Partial<Record<MirrorDocType, MirrorExportReportLike>> = {};
   for (const type of types) {
-    const exportResult = await app.exportDocsService.exportDocs({ projectDir: repoRoot, dryRun: false, type });
+    // reason: force:true = the mirror is a projection (F3/AC-CRIT-4); see module header. The
+    // read-only content probe in runContentCheck deliberately does NOT pass it.
+    const exportResult = await app.exportDocsService.exportDocs({ projectDir: repoRoot, dryRun: false, force: true, type });
     if (!exportResult.ok) {
       throw new SpecMirrorError("corpus_unreadable", `export failed for type ${type}: ${JSON.stringify(exportResult.error)}`, {
         error: exportResult.error,
