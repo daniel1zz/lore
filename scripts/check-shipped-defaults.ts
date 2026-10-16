@@ -222,6 +222,11 @@ export const PROJECT_SPECIFIC_KEYS: readonly ProjectSpecificKeyEntry[] = [
       "Designed per-project opt-in (spec-interception-moves-off-every-tool-call-one-turn-end-review): shipped default is off; a project whose discipline has the main agent dispatch all code sets block, as this repo does. Shipping block would break every consumer whose main agent edits source directly.",
   },
   {
+    key: "workflow.turn_end.co_change",
+    rationale:
+      "Co-change rules are project config with no shipped defaults (spec-session-trail-a-session-local-record-of-what-each-run, scope decision S1, 2026-10-16): each rule names this project's own file patterns, so any shipped rule would misjudge every other consumer's tree; the shipped surface stays [].",
+  },
+  {
     key: "workflow.gates",
     rationale:
       "Per-checkpoint gate arming is a deliberate, corpus-maturity opt-in (e.g. plan-close's prd_sync sub-predicate is default-OFF); shipping one project's arming choice would force unearned strictness on every fresh corpus.",
