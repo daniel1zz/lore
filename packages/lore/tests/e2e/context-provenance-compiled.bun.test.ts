@@ -379,7 +379,7 @@ describe("AC-CP-6: throwaway out-of-tree corpus reproduces both boundary declara
     const resumeResult = runLore(["feed", "session-resume", "--plan", planSlug], dir);
     expect(resumeResult.exitCode).toBe(0);
     expect(resumeResult.stdout).toContain(RESUME_SCOPE_CLOSURE);
-  });
+  }, 60_000);
 });
 
 // ─── "manifest parity" (AC-CP-7) ────────────────────────────────────────────

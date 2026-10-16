@@ -316,7 +316,7 @@ describe("AC-IC-2: archiving the resolving plan closes the issue on GitHub (stub
 
     const clean = runLore(corpus, ["issues", "--sync", "--json"]);
     expect((JSON.parse(clean.stdout) as { data: { drift: unknown[] } }).data.drift).toEqual([]);
-  });
+  }, 60_000);
 
   it("usage: --apply without --sync exits 2", () => {
     const corpus = makeCorpus();

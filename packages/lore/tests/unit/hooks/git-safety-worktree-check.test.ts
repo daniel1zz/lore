@@ -166,7 +166,7 @@ describe("AC-WS-4 git-safety hook delegates to `lore worktree check`", () => {
     expect(runHook({ check: checkJson({ verdict: "yes" }) }).code).toBe(2);
     expect(runHook({ check: checkJson({ reasons: [1, 2] }) }).code).toBe(2);
     expect(runHook({ check: checkJson({ processes: [{ pid: "x", command: "y" }] }) }).code).toBe(2);
-  });
+  }, 60_000);
 
   it("REGRESSION: the hook runs no lsof and reads no /proc itself (the scan exists once, in lore)", () => {
     const passing = runHook({ check: checkJson({}) });

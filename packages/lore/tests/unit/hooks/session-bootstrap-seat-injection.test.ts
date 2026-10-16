@@ -232,7 +232,7 @@ describe("session-bootstrap-seat-injection — STATE (seat flags)", () => {
     expect(runHook(mainRepo, main.stubDir).status).toBe(0);
     const mainCall = loggedArgv(main.logPath).find((a) => a.startsWith("bootstrap"));
     expect(mainCall).toBe("bootstrap --injection");
-  });
+  }, 60_000);
 });
 
 describe("session-bootstrap-seat-injection — NEGATIVE", () => {

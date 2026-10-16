@@ -137,7 +137,7 @@ describe("lore done under the dispatch protocol: --worktree is a branch NAME (is
     expect(derived.status).toBe("derived");
     expect(derived.commits.map((c) => c.sha)).toEqual([c1, c2]);
     expect(derived.attribution[done.value.task.slug]).toBe("recorded_range");
-  });
+  }, 60_000);
 });
 
 describe("lore done records extra.commit_range (issue #180)", () => {

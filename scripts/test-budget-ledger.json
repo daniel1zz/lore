@@ -32,20 +32,6 @@
       "reason": "Pre-existing test-budget debt measured at ledger-landing time (task-land-the-baseline-ledger-policy-for-check-test-budgets-55); not yet fixed. Retire this row in the SAME commit that adds an explicit it()/test() timeout argument to this test case (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3 — an orphaned row fails loud, it is never silently dropped)."
     },
     {
-      "path": "packages/lore/tests/e2e/context-provenance-compiled.bun.test.ts",
-      "titleFingerprint": "framing line — governance verb identity, bare unsplit injection JSON, and the real hook's outside-fence/inside-fence composition",
-      "spawnCount": 3,
-      "line": 247,
-      "reason": "Pre-existing test-budget debt measured at ledger-landing time (task-land-the-baseline-ledger-policy-for-check-test-budgets-55); not yet fixed. Retire this row in the SAME commit that adds an explicit it()/test() timeout argument to this test case (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3 — an orphaned row fails loud, it is never silently dropped)."
-    },
-    {
-      "path": "packages/lore/tests/e2e/context-provenance-compiled.bun.test.ts",
-      "titleFingerprint": "fresh install — resolved corpus root is the temp path (never this repo's .lore/), both boundary declarations match their exported constants by identity",
-      "spawnCount": 7,
-      "line": 416,
-      "reason": "Pre-existing test-budget debt measured at ledger-landing time (task-land-the-baseline-ledger-policy-for-check-test-budgets-55); not yet fixed. Retire this row in the SAME commit that adds an explicit it()/test() timeout argument to this test case (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3 — an orphaned row fails loud, it is never silently dropped)."
-    },
-    {
       "path": "packages/lore/tests/e2e/issue-closed-state.bun.test.ts",
       "titleFingerprint": "AC-ICL-10 HAPPY: an archived issue (no edge, no explicit state) computes 'closed'; excluded from --open, included in --resolved and --all",
       "spawnCount": 3,
@@ -135,13 +121,6 @@
       "spawnCount": 3,
       "line": 230,
       "reason": "Pre-existing test-budget debt measured at ledger-landing time (task-land-the-baseline-ledger-policy-for-check-test-budgets-55); not yet fixed. Retire this row in the SAME commit that adds an explicit it()/test() timeout argument to this test case (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3 — an orphaned row fails loud, it is never silently dropped)."
-    },
-    {
-      "path": "packages/lore/tests/integration/archive-sweep-cli.bun.test.ts",
-      "titleFingerprint": "AC-097-3: sweep reports a done_plan_straggler with a literal repair, apply archives it, re-sweep is clean",
-      "spawnCount": 9,
-      "line": 133,
-      "reason": "Pre-existing test-budget debt measured at ledger-landing time (task-land-the-baseline-ledger-policy-for-check-test-budgets-55); not yet fixed. Retire this row in the SAME commit that adds an explicit it()/test() timeout argument to this test case (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3 — an orphaned row fails loud, it is never silently dropped). Line moved 92->133 on 2026-08-01 when the live gate-disable control was inserted earlier in the same file (merge 52c5aef); the violation itself is unchanged and still unfixed."
     },
     {
       "path": "packages/lore/tests/integration/cli-feed-task-start.bun.test.ts",
@@ -274,20 +253,6 @@
       "titleFingerprint": "spec-promote exits 0 for a spec with zero acceptance criteria under bypass",
       "spawnCount": 3,
       "line": 162,
-      "reason": "Pre-existing test-budget debt measured at ledger-landing time (task-land-the-baseline-ledger-policy-for-check-test-budgets-55); not yet fixed. Retire this row in the SAME commit that adds an explicit it()/test() timeout argument to this test case (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3 — an orphaned row fails loud, it is never silently dropped)."
-    },
-    {
-      "path": "packages/lore/tests/integration/gate-hooks.bun.test.ts",
-      "titleFingerprint": "REGRESSION: never creates any corpus documents, allow or deny path",
-      "spawnCount": 4,
-      "line": 351,
-      "reason": "Pre-existing test-budget debt measured at ledger-landing time (task-land-the-baseline-ledger-policy-for-check-test-budgets-55); not yet fixed. Retire this row in the SAME commit that adds an explicit it()/test() timeout argument to this test case (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3 — an orphaned row fails loud, it is never silently dropped)."
-    },
-    {
-      "path": "packages/lore/tests/integration/gate-hooks.bun.test.ts",
-      "titleFingerprint": "REGRESSION: never changes doc status, allow or deny path",
-      "spawnCount": 3,
-      "line": 539,
       "reason": "Pre-existing test-budget debt measured at ledger-landing time (task-land-the-baseline-ledger-policy-for-check-test-budgets-55); not yet fixed. Retire this row in the SAME commit that adds an explicit it()/test() timeout argument to this test case (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3 — an orphaned row fails loud, it is never silently dropped)."
     },
     {

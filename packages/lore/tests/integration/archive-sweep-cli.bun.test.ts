@@ -210,7 +210,7 @@ describe("lore archive — HAPPY/STATE (sweep -> apply -> re-sweep)", () => {
     expect(getResult.exitCode).toBe(0);
     const getPayload = JSON.parse(getResult.stdout) as { data: { doc: { status: string } } };
     expect(getPayload.data.doc.status).toBe("archived");
-  });
+  }, 60_000);
 });
 
 describe("lore archive — NEGATIVE/STATE (a floor-refused straggler stays open; D8 / BR-1072 / #173)", () => {
@@ -276,7 +276,7 @@ describe("lore archive — NEGATIVE/STATE (a floor-refused straggler stays open;
     expect(reSweep.exitCode).toBe(3);
     const reSweepPayload = JSON.parse(reSweep.stdout) as { data: { candidates: Array<{ slug: string }> } };
     expect(reSweepPayload.data.candidates.map((c) => c.slug)).toEqual([taskSlug]);
-  });
+  }, 60_000);
 });
 
 describe("lore archive — NEGATIVE/BOUNDARY (usage errors)", () => {

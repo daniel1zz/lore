@@ -247,5 +247,5 @@ describe("AC-IT-2: lore done on a report's own task closes its issue (compiled, 
 
     const clean = runLore(corpus, "S-sync", ["issues", "--sync", "--json"]);
     expect((JSON.parse(clean.stdout) as { data: { drift: unknown[] } }).data.drift).toEqual([]);
-  });
+  }, 60_000);
 });

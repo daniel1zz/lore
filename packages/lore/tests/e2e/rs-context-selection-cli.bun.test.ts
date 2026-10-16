@@ -129,7 +129,7 @@ describe("AC-RS-7 lore context list | add | remove", () => {
     expect(added.code).toBe(0);
     expect(existsSync(rulesFile(sb))).toBe(true);
     expect(readFileSync(selectionFile(sb), "utf8")).not.toContain(FRAGMENT_ID);
-  });
+  }, 60_000);
 
   it("remove of an unknown fragment id exits 4 and writes no selection file", () => {
     const sb = makeSandbox();

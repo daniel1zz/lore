@@ -149,7 +149,7 @@ describe("AC-TE-6 REAL_BINARY_NO_STUB: built dist/lore attributes the run under 
     sh("git", ["init", "-q", "-b", "main"]);
     sh("lore", ["init"]);
     sh("lore", ["run", "register", "--harness", "claude-code", "--session", REAL_SESSION]);
-  });
+  }, 60_000);
 
   it.each(["mcp__lore__lore_get", "mcp__lore-dev__lore_get"])("%s gets updatedInput carrying the run", (tool) => {
     const r = hookOutput(tool);

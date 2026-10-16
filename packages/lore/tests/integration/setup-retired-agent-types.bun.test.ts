@@ -131,5 +131,5 @@ describe("lore setup converge — retired agent types — HAPPY / REGRESSION / S
     // STATE: converged — nothing further to remove.
     const again = runSetup(["--claude-dir", claudeDir, "--dry-run"], scratch);
     expect(again.stdout).not.toContain("Would remove");
-  });
+  }, 60_000);
 });
