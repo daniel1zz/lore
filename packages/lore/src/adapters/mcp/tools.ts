@@ -1886,7 +1886,7 @@ export function registerTools(server: McpServer, baseApp: App, getConfig?: () =>
     if (!result.ok) return errorContent(result.error);
     const truncated = result.value.docs.length > effectiveLimit;
     const docs = truncated ? result.value.docs.slice(0, effectiveLimit) : result.value.docs;
-    return textContent({ docs, total: docs.length, truncated });
+    return textContent({ docs, total: docs.length, omitted_invalid: result.value.omitted_invalid, truncated });
   });
 
   // lore_search
