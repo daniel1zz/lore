@@ -3623,7 +3623,7 @@ export class CorpusService {
   async list(
     filters: ListFilters,
     now: () => string = defaultNow,
-  ): Promise<Result<{ docs: DocSummary[]; total: number }, LoreError>> {
+  ): Promise<Result<{ docs: DocSummary[]; total: number; omitted_invalid: number }, LoreError>> {
     const startMs = Date.now();
     const { include_invalid, ...storeFilters } = filters;
     const storeResult = await this.store.findMany(storeFilters);
@@ -3644,8 +3644,12 @@ export class CorpusService {
         ? storeResult.value
         : storeResult.value.filter((d) => !isInvalidated(d, nowIso));
 
+    // F4 (AC-CRIT-6) — the count of rows THIS filter step removed, so a caller can
+    // tell "nothing matched" from "matches were hidden as invalidated". Always 0
+    // under include_invalid. Counted over the fetched (possibly paged) window.
+    const omittedInvalid = storeResult.value.length - visibleDocs.length;
     const docs = visibleDocs.map((d) => this.toSummary(d));
-    const result = ok({ docs, total: docs.length });
+    const result = ok({ docs, total: docs.length, omitted_invalid: omittedInvalid });
     this.recordTelemetryEvent("list", startMs, result, { filter_type: filters.type, count: docs.length });
     return result;
   }

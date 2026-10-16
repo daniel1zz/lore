@@ -523,10 +523,15 @@ export default defineCommand({
       // ⛔ Do not "optimise" this back into `listFull(withPaging(filters))` when
       // --include-invalid is set: one fetch shape for all four branches is what
       // keeps the exclusion from being silently skipped on one of them again.
+      // F4 (AC-CRIT-6): rows the validity filter removed, counted at that one step.
+      let omittedInvalid = 0;
+      const hiddenNote = (): string =>
+        omittedInvalid > 0 ? ` (+${omittedInvalid} invalidated hidden; --include-invalid)` : "";
       async function fetchGatedFullDocs(): Promise<Result<ListedDoc[], LoreError>> {
         const fullResult = await app.corpusService.listFull(filters);
         if (!fullResult.ok) return fullResult;
         const live = includeInvalid ? fullResult.value.docs : selectLiveDocs(fullResult.value.docs, nowIso);
+        omittedInvalid = fullResult.value.docs.length - live.length;
         return ok(withValidityStatus(live, nowIso));
       }
 
@@ -562,7 +567,7 @@ export default defineCommand({
 
         if (args.json) {
           console.log(
-            JSON.stringify({ ok: true, data: { docs: toListJsonRows(filtered, claimTtlMinutes), total } }, null, 2),
+            JSON.stringify({ ok: true, data: { docs: toListJsonRows(filtered, claimTtlMinutes), total, omitted_invalid: omittedInvalid } }, null, 2),
           );
           return;
         }
@@ -585,7 +590,7 @@ export default defineCommand({
           relativeTime(d.updated_at),
         ]);
         console.log(formatTable(headers, rows));
-        console.log(`\n${total} document${total === 1 ? "" : "s"} (filter: --phase ${phaseFilter}${planFilterDesc()})`);
+        console.log(`\n${total} document${total === 1 ? "" : "s"} (filter: --phase ${phaseFilter}${planFilterDesc()})${hiddenNote()}`);
         return;
       }
 
@@ -604,7 +609,7 @@ export default defineCommand({
         if (args.json) {
           console.log(
             JSON.stringify(
-              { ok: true, data: { docs: toListJsonRows(fullDocs, claimTtlMinutes), total: fullTotal } },
+              { ok: true, data: { docs: toListJsonRows(fullDocs, claimTtlMinutes), total: fullTotal, omitted_invalid: omittedInvalid } },
               null,
               2,
             ),
@@ -635,7 +640,7 @@ export default defineCommand({
         const taskFilterDesc = includeInvalid ? " --include-invalid" : "";
         console.log(
           `\n${fullTotal} document${fullTotal === 1 ? "" : "s"} ` +
-            `(filter: --type task${planFilterDesc()}${taskFilterDesc})`,
+            `(filter: --type task${planFilterDesc()}${taskFilterDesc})${hiddenNote()}`,
         );
         return;
       }
@@ -656,7 +661,7 @@ export default defineCommand({
         if (args.json) {
           console.log(
             JSON.stringify(
-              { ok: true, data: { docs: toListJsonRows(fullDocs, claimTtlMinutes), total: fullTotal } },
+              { ok: true, data: { docs: toListJsonRows(fullDocs, claimTtlMinutes), total: fullTotal, omitted_invalid: omittedInvalid } },
               null,
               2,
             ),
@@ -702,7 +707,7 @@ export default defineCommand({
         if (args.json) {
           console.log(
             JSON.stringify(
-              { ok: true, data: { docs: toListJsonRows(fullDocs, claimTtlMinutes), total: fullTotal } },
+              { ok: true, data: { docs: toListJsonRows(fullDocs, claimTtlMinutes), total: fullTotal, omitted_invalid: omittedInvalid } },
               null,
               2,
             ),
@@ -729,7 +734,7 @@ export default defineCommand({
           .join(" ");
         console.log(
           `\n${fullTotal} document${fullTotal === 1 ? "" : "s"} (filter:${planFilterDesc()}` +
-            `${otherFilterDesc ? ` ${otherFilterDesc}` : ""})`,
+            `${otherFilterDesc ? ` ${otherFilterDesc}` : ""})${hiddenNote()}`,
         );
         return;
       }
@@ -749,7 +754,7 @@ export default defineCommand({
         return;
       }
 
-      const { docs, total } = result.value;
+      const { docs, total, omitted_invalid: omittedInvalidDefault } = result.value;
 
       if (args.json) {
         // reason: DocSummary has no `extra`, so validity is NOT re-derivable from
@@ -757,7 +762,7 @@ export default defineCommand({
         // absent-metadata grounds even if the exclusion above had regressed. The
         // pre-gated stamp names that dependency at the call site instead; see
         // `withPreGatedLiveStatus`'s JSDoc for the contract it rests on.
-        console.log(JSON.stringify({ ok: true, data: { docs: withPreGatedLiveStatus(docs), total } }, null, 2));
+        console.log(JSON.stringify({ ok: true, data: { docs: withPreGatedLiveStatus(docs), total, omitted_invalid: omittedInvalidDefault } }, null, 2));
         return;
       }
 
@@ -786,7 +791,11 @@ export default defineCommand({
       const filterDesc = Object.entries(filters)
         .map(([k, v]) => `--${k} ${Array.isArray(v) ? v.join(",") : String(v)}`)
         .join(" ");
-      console.log(`\n${total} document${total === 1 ? "" : "s"}${filterDesc ? ` (filter: ${filterDesc})` : ""}`);
+      const defaultHiddenNote =
+        omittedInvalidDefault > 0 ? ` (+${omittedInvalidDefault} invalidated hidden; --include-invalid)` : "";
+      console.log(
+        `\n${total} document${total === 1 ? "" : "s"}${filterDesc ? ` (filter: ${filterDesc})` : ""}${defaultHiddenNote}`,
+      );
     } finally {
       app.close();
     }
