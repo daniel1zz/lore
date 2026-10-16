@@ -322,7 +322,8 @@ describe("lore_handoff", () => {
 
       // reason: this IS what commands/handoff.ts's `run()` calls after validation —
       // the CLI's --json `data` field for an equivalent write against the same corpus state.
-      const cliShapeResult = await sessionService.writeHandoff(input);
+      // The MCP call is unattested (no harness_run), so the equivalent CLI-shaped write names no run either.
+      const cliShapeResult = await sessionService.writeHandoff(input, undefined, { run: null });
       if (!cliShapeResult.ok) throw new Error(JSON.stringify(cliShapeResult.error));
 
       expect(mcpData.doc.extra).toEqual(cliShapeResult.value.extra);
