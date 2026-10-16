@@ -19,6 +19,7 @@
 import { Database } from "bun:sqlite";
 import { dirname } from "node:path";
 import { SQLiteStore } from "./store/sqlite-store.js";
+import { assertNoForeignSchemaMigration } from "./store/foreign-schema-guard.js";
 import { TursoStore, probeTmpdirUsability } from "./store/turso-store.js";
 import type { StoreInterface } from "./store/store-interface.js";
 import { CorpusService } from "./service/corpus-service.js";
@@ -1527,6 +1528,10 @@ function createAppUnscoped(
   config?: LoreConfig,
   writeContext?: AppWriteContext,
 ): App | Result<App, LoreError> {
+  // reason: spec-close-the-eight-verified-critical-defects F5 (AC-CRIT-7) — the composition root is the one
+  // place scripts/tests calling createApp(findLoreDbPath()) directly pass through; a linked worktree must
+  // never let `new SQLiteStore` migrate the MAIN checkout's behind corpus. Throws ForeignSchemaMigrationRefusedError.
+  assertNoForeignSchemaMigration(dbPath);
   // Resolve telemetry from config — defaults to NoOp when telemetry section is absent.
   // reason: AC-C3 — createApp default behavior MUST NOT produce file side effects.
   // Users must explicitly set telemetry.enabled=true in config.yaml to opt in.

@@ -73,6 +73,7 @@ import {
 } from "@lore/core/node";
 import { createApp, createAppWithWriteContext, type App } from "../../app.js";
 import { findLoreDbPath, formatError, exitCode } from "./utils.js";
+import { findForeignBehindSchema } from "../../store/foreign-schema-guard.js";
 import { getInvocationIdentity, replaceInvocationIdentity } from "./invocation-identity.js";
 import { resolveCorpus } from "./corpus-resolution.js";
 import {
@@ -380,6 +381,16 @@ export function loadLoreApp(opts: LoadLoreAppOptions = {}): {
   // direction.
   const bootSurface: LoreAppBootSurface = opts.surface ?? "cli";
   const dbPath = findLoreDbPath();
+  // reason: F5 (AC-CRIT-7) — refuse BEFORE createApp so a worktree never migrates main's corpus; the
+  // createApp try/catch below would downgrade this to a generic exit-1 "Storage failure".
+  const foreignBehind = findForeignBehindSchema(dbPath);
+  if (foreignBehind !== null) {
+    const refusal: LoreError = { code: "VALIDATION_ERROR", field: "schema_version", message: foreignBehind.message };
+    // reason: formatError renders "Validation failed on field …" without the code; the code is appended so
+    // a script can grep the machine-readable class (exit 4 alone is shared by every validation refusal).
+    console.error(`${formatError(refusal)} [${refusal.code}]`); // CLI surface
+    process.exit(exitCode(refusal));
+  }
   const configResult = resolveProjectConfigResult(dbPath);
   let rawConfig: LoreConfig | undefined;
   if (configResult.ok) {
