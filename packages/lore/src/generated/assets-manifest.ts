@@ -45,7 +45,7 @@ export const LORE_BINARY_VERSION = "0.1.0" as const;
 
 export const EMBEDDED_ASSETS_MANIFEST: EmbeddedAssetsManifest = {
   binary_version: LORE_BINARY_VERSION,
-  tree_digest: "1109b879666add8995a13b357379466ce92a42edc705622b380422f66ead78c3",
+  tree_digest: "62c705d8cde1bb6cc00abf06a2bc5e4a9a449c210232c6b0486eb4b4db7a7a28",
   entries: [
   { path: "agents/lore-implementer.md", kind: "agent", ownership: "managed", sha256: "5229d158b6ce792f4bb0083b44995946d54cdc899983bc88a4b945769282ed0f" },
   { path: "agents/lore-reader.md", kind: "agent", ownership: "managed", sha256: "336b2da60cfe9afae51f17ac8f6f9f33e7c67b2f3639874795e22a0e257e8696" },
@@ -62,7 +62,7 @@ export const EMBEDDED_ASSETS_MANIFEST: EmbeddedAssetsManifest = {
   { path: "governance/claude-md-contract.md", kind: "governance", ownership: "managed", sha256: "d10ddb7362141cea37279a7e81264f56041efefed9d36c43b618944e8ef24819" },
   { path: "governance/seat-briefing.md", kind: "governance", ownership: "managed", sha256: "62d33fe1d7f5124e74247fb0491ef65600e11ff8179ba77efc29bbb130ad1894" },
   { path: "hooks/lib/run-id.mjs", kind: "hook", ownership: "managed", sha256: "d19c976ed1819180c4654587f4c839d02ad2a1f87f49517928a780602024a773" },
-  { path: "hooks/lib/session-trail.mjs", kind: "hook", ownership: "managed", sha256: "1cebbada42869326424be0d691e7add7dc819f43e7931425eef023a8a1b38fe9" },
+  { path: "hooks/lib/session-trail.mjs", kind: "hook", ownership: "managed", sha256: "f9383ace7c3bcac8125dc3474f5076cb540aace1cbe827b0bef8597ebf715a01" },
   { path: "hooks/lib/turn-state.mjs", kind: "hook", ownership: "managed", sha256: "12b8751ce64f46fefee4f6d3e43010ce5346aace5c00281d7ccf64ea5bed319b" },
   { path: "hooks/post-edit-mark.mjs", kind: "hook", ownership: "managed", sha256: "1c4c5576b4d11f7a04ab2496d038d976fd11e95a93fd14b9fcdb0cfc29718782" },
   { path: "hooks/pre-bash-git-safety-gate.mjs", kind: "hook", ownership: "managed", sha256: "a4c488eba1a74d0b1ebde8d447457073f1b80c1d3c3ad150e1e33e6b5e72418a" },
@@ -75,11 +75,11 @@ export const EMBEDDED_ASSETS_MANIFEST: EmbeddedAssetsManifest = {
   { path: "hooks/session-start-resume.mjs", kind: "hook", ownership: "managed", sha256: "822a231c0a4b77eaf13bad1700c3447782d920c7ea4cb19d16c6054109dc57b8" },
   { path: "hooks/session-trail-start.mjs", kind: "hook", ownership: "managed", sha256: "c9520951baa313139e141dba7880beeb2c374865a6c2e8c5bb5edf74a14b86cc" },
   { path: "hooks/stop-handoff-coverage.mjs", kind: "hook", ownership: "managed", sha256: "4d32d297fc5e5763687327f2c808a8dc327fa78370d918287f237e3a2d4052ce" },
-  { path: "hooks/stop-turn-review.mjs", kind: "hook", ownership: "managed", sha256: "a32899f1b6a170d995d50129e45b1949fc03d466814783603b494b3a6b5601ca" },
+  { path: "hooks/stop-turn-review.mjs", kind: "hook", ownership: "managed", sha256: "31c96f4f23427e4d1a8428385350c079ca911a9e45e5d9cf2326bd443550f6a3" },
   { path: "hooks/subagent-context.mjs", kind: "hook", ownership: "managed", sha256: "383beb756e74a7bcaadb884c839bb22d0a5f1c467ba4641e2ab0411eb2eb96be" },
   { path: "hooks/subagent-stop-commit-guard.mjs", kind: "hook", ownership: "managed", sha256: "19de55e36e53490b8386acf19de9efef4c89f96a8d6d7ac1160b60156bd201d8" },
   { path: "hooks/subagent-trail.mjs", kind: "hook", ownership: "managed", sha256: "74c0365bdce7dc74093b9103a673c3c4eaa310e5f02a3ff0872b90fb1d6cc794" },
-  { path: "hooks/user-prompt-turn-start.mjs", kind: "hook", ownership: "managed", sha256: "bb00f24727e7a753a7616fb21ec8205f8fab22fad4a231cdd601dc34af38003b" },
+  { path: "hooks/user-prompt-turn-start.mjs", kind: "hook", ownership: "managed", sha256: "794798b431839236ef230be70362008b61409665350eda58a6950f9bedd0e130" },
   { path: "project/CLAUDE.md.skeleton", kind: "project", ownership: "user_once", sha256: "f5dc3ff590bf1791ad5372220de491c7973216d62153452eee022b9518814fc4" },
   { path: "project/CLAUDE.md.template", kind: "project", ownership: "merged", sha256: "18c6a76d66f28df567dcef19dc57a0f3c1a598184e578ed81bc74940cf043f64" },
   { path: "project/gitignore.template", kind: "project", ownership: "merged", sha256: "ae5fc002a59c4c940a269a293d4e5070eda567a5ef55f7e890ad02af18968d74" },
