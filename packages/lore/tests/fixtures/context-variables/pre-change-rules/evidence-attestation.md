@@ -1,6 +1,6 @@
-<!-- lore:managed fragment=evidence-attestation hash=5e31a920 -->
+<!-- lore:managed fragment=evidence-attestation hash=bcf1df9a -->
 ## Evidence attestation
 
 - `lore evidence --capture` attests only that the CALLER's chosen command exited 0 (clears the `lore done` attested floor). `lore verify` attests the AC's declared command and adds completeness / executed_files / execution_root / execution_mode. AC evidence goes through verify; `--capture` is auxiliary. A fix applies only after the writing binary is rebuilt.
-- `--capture` and `lore verify` record stdout and stderr as ONE merged stream; the 4000-char tail keeps the runner's final summary line.
+- `--capture` and `lore verify` record stdout and stderr as ONE stream, stdout and stderr merged in terminal order; the 4000-char tail keeps the runner's final summary line.
 - A script-mode AC command must print a checkable summary on success (`... && echo '<AC-ID> PASS: <fact proved>'`) and its tail must carry the runner summary (`N passed` / `Done`); fix a silent oracle (a `grep -q` chain) in the declared AC command, never in the recorder.

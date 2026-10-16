@@ -478,35 +478,48 @@ const CORPUS_WORKFLOW_FRAGMENT_RELS = [
 // ATTEST -> lore-autopilot / lore-implementer). Only whole bullets were removed; no remaining text changed.
 const CORPUS_WORKFLOW_BODY_SHA256: Record<(typeof CORPUS_WORKFLOW_FRAGMENT_RELS)[number], string> = {
 // RE-BASELINE (task-reword-the-ten-always-loaded-fragments-to-the-rule-only, spec-always-loaded-lore-fragments-state-the-rule-only-reasoning):
-// intended rule-wording compression; no rule moved or dropped (verbatim before-text in
-// knowledge-always-loaded-lore-fragments-verbatim-source-before).
-  "context/corpus-workflow-0-overview.md": "e9607ee9bfa401a4e7ff208eec306acc55c59e6e2665e586f09c2671b2ab64c7",
+// that commit shortened the wording of the ten always-loaded fragments (verbatim before-text in
+// knowledge-always-loaded-lore-fragments-verbatim-source-before). It also lost rules; see the assessments
+// knowledge-assessment-always-loaded-lore-fragments-state-the and knowledge-assessment-always-loaded-lore-fragments-state-the-2.
+// RE-BASELINE (task-restore-the-remaining-clauses-the-assessment-named-and): restores that projects without `.lore/` work normally (native plan mode + task tracking).
+  "context/corpus-workflow-0-overview.md": "8621e12d0bfe1149cf694a939a26d45a9007a295976e27f3177786dc64aeec53",
   // RE-BASELINE (task-prose-sweep-shipped-assets-say-pull-lore-bootstrap-when, AC-SI-5): the feed rule no longer
   // calls the bootstrap hook-injected; it says the injection carries only the seat's claims + plan handoff and
   // corpus state is pulled on demand (`lore bootstrap` / `lore ready` / `lore pending`).
 // RE-BASELINE (task-reword-the-ten-always-loaded-fragments-to-the-rule-only, spec-always-loaded-lore-fragments-state-the-rule-only-reasoning):
-// intended rule-wording compression; no rule moved or dropped (verbatim before-text in
-// knowledge-always-loaded-lore-fragments-verbatim-source-before).
-// RE-BASELINE (task-restore-the-instruction-parts-the-rule-only-reword-dropped): restores how-to-act instructions the rule-only reword dropped.
-  "context/corpus-workflow-1-feed.md": "c1ce4487a3e94a5d41c22d29719ea36b22003fe5637ec34b8cd90af4a010363d",
+// that commit shortened the wording of the ten always-loaded fragments (verbatim before-text in
+// knowledge-always-loaded-lore-fragments-verbatim-source-before). It also lost rules; see the assessments
+// knowledge-assessment-always-loaded-lore-fragments-state-the and knowledge-assessment-always-loaded-lore-fragments-state-the-2.
+// RE-BASELINE (task-restore-the-instruction-parts-the-rule-only-reword-dropped): that commit restored six instructions
+// the reword dropped and cut two clauses; the second assessment (knowledge-assessment-always-loaded-lore-fragments-state-the-2) named what was still missing.
+// RE-BASELINE (task-restore-the-remaining-clauses-the-assessment-named-and): restores `latest_handoffs` as a neutral directory and the floor arming (fail-safe) when authorship cannot be determined.
+  "context/corpus-workflow-1-feed.md": "76b8f203fa10a794787952a9805fe6ce3a30cfbef8f9fab22bb1d8790d5e76f4",
   // RE-BASELINE (task-ac-set-correction-audited-fix-of-one-criterion-on-a-locked, AC-CC-4): names `lore ac set --correction`
 // RE-BASELINE (task-reword-the-ten-always-loaded-fragments-to-the-rule-only, spec-always-loaded-lore-fragments-state-the-rule-only-reasoning):
-// intended rule-wording compression; no rule moved or dropped (verbatim before-text in
-// knowledge-always-loaded-lore-fragments-verbatim-source-before).
-// RE-BASELINE (task-restore-the-instruction-parts-the-rule-only-reword-dropped): restores how-to-act instructions the rule-only reword dropped.
-  "context/corpus-workflow-2-produce.md": "28f903b4674387c272bd14d8ec87b87de1e8ea09542825353271511a86544a19",
+// that commit shortened the wording of the ten always-loaded fragments (verbatim before-text in
+// knowledge-always-loaded-lore-fragments-verbatim-source-before). It also lost rules; see the assessments
+// knowledge-assessment-always-loaded-lore-fragments-state-the and knowledge-assessment-always-loaded-lore-fragments-state-the-2.
+// RE-BASELINE (task-restore-the-instruction-parts-the-rule-only-reword-dropped): that commit restored six instructions
+// the reword dropped and cut two clauses; the second assessment (knowledge-assessment-always-loaded-lore-fragments-state-the-2) named what was still missing.
+// RE-BASELINE (task-restore-the-remaining-clauses-the-assessment-named-and): restores the legacy `workflow.gates."task-claim"` config honored for phase-claim (one deprecation warning per process).
+  "context/corpus-workflow-2-produce.md": "3c5c0efbf103c2d005e53623ba1e6a8e9edff98fe00f8efc4584d7cd2c8939e6",
 // RE-BASELINE (task-reword-the-ten-always-loaded-fragments-to-the-rule-only, spec-always-loaded-lore-fragments-state-the-rule-only-reasoning):
-// intended rule-wording compression; no rule moved or dropped (verbatim before-text in
-// knowledge-always-loaded-lore-fragments-verbatim-source-before).
-// RE-BASELINE (task-restore-the-instruction-parts-the-rule-only-reword-dropped): restores how-to-act instructions the rule-only reword dropped.
+// that commit shortened the wording of the ten always-loaded fragments (verbatim before-text in
+// knowledge-always-loaded-lore-fragments-verbatim-source-before). It also lost rules; see the assessments
+// knowledge-assessment-always-loaded-lore-fragments-state-the and knowledge-assessment-always-loaded-lore-fragments-state-the-2.
+// RE-BASELINE (task-restore-the-instruction-parts-the-rule-only-reword-dropped): that commit restored six instructions
+// the reword dropped and cut two clauses; the second assessment (knowledge-assessment-always-loaded-lore-fragments-state-the-2) named what was still missing.
   "context/corpus-workflow-3-execute.md": "2b43538cb59a8bd7e04fa600d3f1512df3dc56db0f1d03ccfe872ae7db0998df",
   // RE-BASELINE (task-rs-t13-migration-promoted-shipped-fragments-agent-rules, AC-RS-13): gains the CLAUDE.md-vs-corpus
   // boundary bullet moved from the user-layer lore-loop fragment (user-03).
 // RE-BASELINE (task-reword-the-ten-always-loaded-fragments-to-the-rule-only, spec-always-loaded-lore-fragments-state-the-rule-only-reasoning):
-// intended rule-wording compression; no rule moved or dropped (verbatim before-text in
-// knowledge-always-loaded-lore-fragments-verbatim-source-before).
-// RE-BASELINE (task-restore-the-instruction-parts-the-rule-only-reword-dropped): restores how-to-act instructions the rule-only reword dropped.
-  "context/corpus-workflow-4-close.md": "0609d94f7bd00539decd2bab8739c17e7b4d2cd166231e2266ec5d96b18ca016",
+// that commit shortened the wording of the ten always-loaded fragments (verbatim before-text in
+// knowledge-always-loaded-lore-fragments-verbatim-source-before). It also lost rules; see the assessments
+// knowledge-assessment-always-loaded-lore-fragments-state-the and knowledge-assessment-always-loaded-lore-fragments-state-the-2.
+// RE-BASELINE (task-restore-the-instruction-parts-the-rule-only-reword-dropped): that commit restored six instructions
+// the reword dropped and cut two clauses; the second assessment (knowledge-assessment-always-loaded-lore-fragments-state-the-2) named what was still missing.
+// RE-BASELINE (task-restore-the-remaining-clauses-the-assessment-named-and): restores `prohibitions` in the CLAUDE.md content list.
+  "context/corpus-workflow-4-close.md": "ded26d3be05d9768771751284944caf797d03bed3f777bdb76bc20d21a83fb10",
 };
 
 /** Concatenated bodies of the corpus-workflow fragments, in file-name (= rendering) order. */
