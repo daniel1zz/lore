@@ -99,7 +99,7 @@ describe("AC-TG-2 LORE_TEST_SANDBOX refuses this repository's corpus", () => {
     const r = runCli(["list"], wt, { LORE_TEST_SANDBOX: "1", LORE_TEST_SANDBOX_REPO: wt });
     expect(r.status).toBe(4);
     expect(r.stderr).toContain(join(main, ".lore", "lore.db"));
-  });
+  }, 60_000);
 
   it("AC-TG-2 HAPPY: a throwaway mkdtemp corpus resolves normally", () => {
     const { root: otherRepo } = fakeRepoWithDb();

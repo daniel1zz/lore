@@ -441,7 +441,7 @@ describe("changed-tests selector — classifyTreeScanningOracle (rule (d))", () 
 
 describe("changed-tests selector — classifyTreeScanningOracle scopes are ADDITIVE, never pre-emptive (AC-TC-5, task-make-tree-scan-scopes-additive-instead-of-pre-emptive-and)", () => {
   /**
-   * Six REAL governance/gate test files that legitimately match BOTH
+   * Five REAL governance/gate test files that legitimately match BOTH
    * membership signals at once: they mention `hooks/pre-push` /
    * `assets/project/pre-push` in a doc comment or code string (never as an
    * executable path — none of these six files actually drive the pre-push
@@ -460,13 +460,14 @@ describe("changed-tests selector — classifyTreeScanningOracle scopes are ADDIT
   }> = [
     { path: "packages/lore/tests/unit/assets/pre-push-parity.test.ts", priorScope: "repo-tracked-text-source" },
     { path: "scripts/tests/check-no-nul-bytes.test.ts", priorScope: "repo-tracked-text-source" },
-    { path: "scripts/tests/check-ac-ref-integrity.test.ts", priorScope: "packages-test-tree" },
+    // check-ac-ref-integrity.test.ts left this table (task-skill-implement-tg-4): its real-tree
+    // main() arming case moved to scripts/check-live-corpus-detectors.ts, so it no longer scans the tree.
     { path: "scripts/tests/check-gap-namespace.test.ts", priorScope: "packages-test-tree" },
     { path: "scripts/tests/check-no-timer-retry.test.ts", priorScope: "packages-test-tree" },
     { path: "scripts/tests/check-ordinal-write-sites.test.ts", priorScope: "packages-test-tree" },
   ];
 
-  it("REGRESSION: each of the six real multi-scope files retains its prior tree-scan scope AND gains hooks-and-assets-pair — never narrowed to hooks-and-assets-pair alone", () => {
+  it("REGRESSION: each of the five real multi-scope files retains its prior tree-scan scope AND gains hooks-and-assets-pair — never narrowed to hooks-and-assets-pair alone", () => {
     const narrowed: string[] = [];
     for (const { path, priorScope } of RETAINED_SCOPE_CASES) {
       const content = readFileSync(join(REPO_ROOT, path), "utf8");
