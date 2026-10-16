@@ -142,6 +142,7 @@ import {
   parsePositiveIntArg,
   relativeTime,
 } from "../utils.js";
+import { LIST_GOVERNED_BY_CONFLICT } from "../cli-refusal-messages.js";
 import { isPlanMember } from "../../../service/plan-membership.js";
 import { resolveSubTypeFilter } from "../../../service/corpus-service.js";
 import {
@@ -411,7 +412,7 @@ export default defineCommand({
         const conflicting = otherFilterKeys.filter((k) => args[k] !== undefined);
         if (conflicting.length > 0) {
           process.stderr.write(
-            `Error: --governed-by cannot be combined with ${conflicting.map((k) => `--${k}`).join(", ")}.\n`,
+            `Error: ${LIST_GOVERNED_BY_CONFLICT} ${conflicting.map((k) => `--${k}`).join(", ")}.\n`,
           );
           process.exitCode = 2;
           return;

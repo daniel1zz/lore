@@ -41,6 +41,7 @@ import { join } from "path";
 import { tmpdir } from "os";
 import { assertFreshBinary } from "../../integration/helpers/assert-fresh-binary";
 import { saveConfig } from "@lore/core/node";
+import { PLAN_PROMOTE_ADVISORY_NON_BLOCKING, REACHABILITY_NO_SPEC_ANCESTOR } from "../../../src/service/checkpoint-registry.js";
 import { citeSpecViaCli, loreRunnerFor } from "../../helpers/cli-live-rule.js";
 
 // tests/unit/adapters/ → tests/unit/ → tests/ → packages/lore/ → packages/ → repo root (5 levels up).
@@ -139,8 +140,8 @@ describe("lore approve <plan-under-prd> — reachability advisory (AC-VRW-5a)", 
     // reason: D1 — the advisory names the plan-close consequence and the two
     // real options; assert the concrete precondition wording too (not just a
     // bare marker), and that it never claims to have blocked anything.
-    expect(result.stderr).toContain("does not block this promote");
-    expect(result.stderr).toContain("this plan has no spec-tier ancestor at all");
+    expect(result.stderr).toContain(PLAN_PROMOTE_ADVISORY_NON_BLOCKING);
+    expect(result.stderr).toContain(REACHABILITY_NO_SPEC_ANCESTOR);
   });
 });
 

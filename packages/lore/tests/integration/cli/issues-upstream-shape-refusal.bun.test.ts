@@ -62,6 +62,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadConfig, saveConfig } from "@lore/core/node";
 import { FeedbackConfigSchema, type FeedbackConfig, type LoreConfig } from "@lore/core";
+import { buildRetiredFeedbackUpstreamError } from "../../../src/adapters/cli/report-issue-wiring.js";
 import { cleanupPayloadGhStubDir, payloadGhStubDir } from "../helpers/payload-gh-stub";
 
 // tests/integration/cli/ -> tests/integration/ -> tests/ -> packages/lore/ (3 levels up).
@@ -320,9 +321,9 @@ describe("AC-IS-3 --local stays exit 0 under both shapes", () => {
 describe("AC-IS-4 both verbs source the retired refusal from one classifier", () => {
   it("AC-IS-4 both verbs source the retired refusal from one classifier", () => {
     const issuesResult = runLore(["issues"], retiredDir);
-    expect(issuesResult.stderr).toContain("configured with the retired SQLite shape");
+    expect(issuesResult.stderr).toContain(buildRetiredFeedbackUpstreamError().message);
 
     const reportIssueResult = runLore(["report-issue", ...REPORT_ISSUE_FILING_FLAGS], retiredDir);
-    expect(reportIssueResult.stderr).toContain("configured with the retired SQLite shape");
+    expect(reportIssueResult.stderr).toContain(buildRetiredFeedbackUpstreamError().message);
   });
 });

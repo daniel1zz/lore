@@ -349,6 +349,9 @@ export function findDanglingRefs(
  */
 export const LEDGER_RELATIVE_PATH = "scripts/ac-ref-exemption-ledger.json";
 
+/** Rule clause the detector prints (exit 5) when a ledger row matches no real dangling ac_ref. */
+export const LEDGER_ORPHAN_RULE = "no longer match a real dangling ac_ref";
+
 /**
  * One recorded exemption: a `(spec, id)` pair whose evidence-referencing `ac_ref`
  * is dangling by DESIGN (the criterion was genuinely retired/merged — D7 option 2),

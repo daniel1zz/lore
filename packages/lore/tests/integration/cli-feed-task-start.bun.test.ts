@@ -48,6 +48,7 @@ import { tmpdir } from "os";
 import yaml from "yaml";
 import { BOOTSTRAP_RESUME_CLOSURE_KEYS, RESUME_SCOPE_CLOSURE } from "@lore/core";
 import { assertFreshBinary } from "./helpers/assert-fresh-binary";
+import { FEED_PHASE_START_MISSING_TARGET, FEED_TASK_START_MISSING_TARGET } from "../../src/adapters/cli/cli-refusal-messages.js";
 import { citeSpecViaCli, loreRunnerFor } from "../helpers/cli-live-rule.js";
 import { sessionActorFor, withSessionIdentity } from "../helpers/session-actor";
 
@@ -485,7 +486,7 @@ describe("BOUNDARY — a missing task positional exits 2", () => {
   it("exits 2 naming the required task ID/slug", () => {
     const result = runLore(["feed", "task-start"], tmpDir);
     expect(result.exitCode).toBe(2);
-    expect(result.stderr).toContain("requires a task document ID or slug");
+    expect(result.stderr).toContain(FEED_TASK_START_MISSING_TARGET);
   });
 });
 
@@ -523,7 +524,7 @@ describe("REGRESSION — spec-create / session-resume / phase-start outputs are 
   it("phase-start with a missing positional still exits 2 naming a phase document ID or slug", () => {
     const result = runLore(["feed", "phase-start"], tmpDir);
     expect(result.exitCode).toBe(2);
-    expect(result.stderr).toContain("requires a phase document ID or slug");
+    expect(result.stderr).toContain(FEED_PHASE_START_MISSING_TARGET);
   });
 
   it("phase-start with an unresolvable target still exits 3 (unchanged error-mapping path)", () => {

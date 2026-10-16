@@ -82,6 +82,7 @@ import { readFileSync } from "node:fs";
 import { defineCommand } from "citty";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatError } from "../utils.js";
+import { ASSESS_NEWER_TASK_ACTIVITY, ASSESS_NO_COMMITS_DERIVED } from "../cli-refusal-messages.js";
 import { isAssessAiBraked } from "../../../ai/resolve-ai.js";
 import { renderAssessmentContent } from "@lore/core";
 import {
@@ -122,7 +123,7 @@ function formatDiffSourceLine(source: DiffSourceRecord): string {
           "MISMATCH, not evidence of missing work"
         );
       }
-      return "Diff source: none — could not derive any commits for this plan's tasks";
+      return `Diff source: none — ${ASSESS_NO_COMMITS_DERIVED} for this plan's tasks`;
   }
 }
 
@@ -220,7 +221,7 @@ export default defineCommand({
       if (!freshnessCheck.ok) {
         process.stderr.write(
           `Warning: the stored assessment for '${bundle.plan.slug}' (recorded ${freshness.newestAssessmentAt}) ` +
-            `is already stale — newer task activity was recorded at ${freshness.newestTaskActivityAt}. This run ` +
+            `is already stale — ${ASSESS_NEWER_TASK_ACTIVITY} ${freshness.newestTaskActivityAt}. This run ` +
             `will still produce and save a fresh assessment (\`lore assess\` never refuses; it is the remedy).\n`,
         );
       }
@@ -318,7 +319,7 @@ export default defineCommand({
           );
         } else {
           process.stderr.write(
-            `Warning: could not derive any commits for this plan's ${String(bundle.tasks.length)} task(s) — ` +
+            `Warning: ${ASSESS_NO_COMMITS_DERIVED} for this plan's ${String(bundle.tasks.length)} task(s) — ` +
               "proceeding without a diff. This can mean the plan has no merged code changes yet, or its commit " +
               "history was squashed/rewritten and no longer references the task slugs. Pass --diff/--diff-file " +
               "to supply one explicitly.\n",

@@ -66,7 +66,13 @@ import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { loadMirrorMappings, MIRROR_DRIFT_EXIT_CODE, MIRROR_HARD_FAILURE_EXIT_CODE } from "../export-spec-mirror-core.js";
+import {
+  loadMirrorMappings,
+  MIRROR_BODY_DIVERGENT_DETAIL,
+  MIRROR_DRIFT_EXIT_CODE,
+  MIRROR_HARD_FAILURE_EXIT_CODE,
+  mirrorContentOkMessage,
+} from "../export-spec-mirror-core.js";
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
 const REPO_ROOT = join(__dirname, "..", "..");
@@ -289,12 +295,12 @@ describe("AC-BFI-8 — spec-mirror --check compares mirror BODIES against corpus
       expect(first.exitCode).toBe(MIRROR_DRIFT_EXIT_CODE);
       expect(first.exitCode).not.toBe(MIRROR_HARD_FAILURE_EXIT_CODE);
       expect(first.output).toContain(corpus.slug);
-      expect(first.output).toContain("body differs from the corpus document");
+      expect(first.output).toContain(MIRROR_BODY_DIVERGENT_DETAIL);
 
       // Condition (i) — the check did not regenerate what it inspected.
       expect(second.exitCode).toBe(MIRROR_DRIFT_EXIT_CODE);
       expect(second.output).toContain(corpus.slug);
-      expect(second.output).toContain("body differs from the corpus document");
+      expect(second.output).toContain(MIRROR_BODY_DIVERGENT_DETAIL);
     },
     120_000,
   );
@@ -312,8 +318,8 @@ describe("AC-BFI-8 — spec-mirror --check compares mirror BODIES against corpus
       const restored = runDriver(corpus.driverPath, "check", corpus.dbPath, corpus.dir);
 
       expect(restored.exitCode).toBe(0);
-      expect(restored.output).toContain("every mirrored knowledge body matches its corpus document");
-      expect(restored.output).not.toContain("body differs from the corpus document");
+      expect(restored.output).toContain(mirrorContentOkMessage("knowledge"));
+      expect(restored.output).not.toContain(MIRROR_BODY_DIVERGENT_DETAIL);
     },
     120_000,
   );
@@ -333,7 +339,7 @@ describe("AC-BFI-8 — spec-mirror --check compares mirror BODIES against corpus
 
       const after = runDriver(corpus.driverPath, "check", corpus.dbPath, corpus.dir);
       expect(after.exitCode).toBe(0);
-      expect(after.output).not.toContain("body differs from the corpus document");
+      expect(after.output).not.toContain(MIRROR_BODY_DIVERGENT_DETAIL);
     },
     120_000,
   );
@@ -375,7 +381,7 @@ describe("AC-BFI-8 — spec-mirror --check compares mirror BODIES against corpus
       const hashBeforeAssertion = fileHash(corpus.absFilePath);
       expect(hashBeforeAssertion).toBe(hashAfterMutation);
 
-      expect(result.output).not.toContain("body differs from the corpus document");
+      expect(result.output).not.toContain(MIRROR_BODY_DIVERGENT_DETAIL);
       // AC-CRIT-5 (F3): a status-only drift is drift — --check exits exactly 2 and says it is frontmatter.
       expect(result.exitCode).toBe(2);
       expect(result.output).toContain("frontmatter (status/priority/title/tags/phase) differs");
@@ -397,7 +403,7 @@ describe("AC-BFI-8 — spec-mirror --check compares mirror BODIES against corpus
       expect(hashBeforeAssertion).toBe(hashAfterMutation);
 
       expect(result.exitCode).toBe(0);
-      expect(result.output).not.toContain("body differs from the corpus document");
+      expect(result.output).not.toContain(MIRROR_BODY_DIVERGENT_DETAIL);
     },
     120_000,
   );

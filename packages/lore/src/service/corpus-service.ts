@@ -44,6 +44,7 @@ import {
   prdSyncExemptEqual,
   ORDINAL_REGISTRY,
   isSelfDeclaredOrdinalTitle,
+  SELF_DECLARED_ORDINAL_TITLE_REFUSAL,
   computePlanCloseCascadeTargets,
   isLedgerKnowledgeSubType,
   computeAcCoverage,
@@ -2414,7 +2415,7 @@ export class CorpusService {
           code: "VALIDATION_ERROR",
           field: "title",
           message:
-            "title must not self-declare a SPEC-/ADR- number — the ordinal is allocated automatically; write the bare title",
+            `${SELF_DECLARED_ORDINAL_TITLE_REFUSAL} — the ordinal is allocated automatically; write the bare title`,
           value: parsedPatch.data.title,
         });
       }

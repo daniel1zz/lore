@@ -33,6 +33,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import { saveConfig } from "@lore/core/node";
+import { ASSESS_NEWER_TASK_ACTIVITY } from "../../../src/adapters/cli/cli-refusal-messages.js";
 import { assertFreshBinary } from "../helpers/assert-fresh-binary";
 
 // tests/integration/cli/ -> tests/integration/ -> tests/ -> packages/lore/ -> packages/ -> repo root (5 up).
@@ -237,7 +238,7 @@ describe("lore assess — AC-FRESH-4: non-blocking staleness advisory", () => {
     // bare "stale" claim.
     expect(second.stderr).toContain(`the stored assessment for '${plan.slug}'`);
     expect(second.stderr).toContain("is already stale");
-    expect(second.stderr).toContain("newer task activity was recorded at");
+    expect(second.stderr).toContain(ASSESS_NEWER_TASK_ACTIVITY);
     expect(second.stderr).toContain("lore assess` never refuses");
 
     // --json stdout stays a clean parseable envelope even with the stderr advisory.

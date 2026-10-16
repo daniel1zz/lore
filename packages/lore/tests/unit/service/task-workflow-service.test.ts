@@ -34,6 +34,7 @@
 import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
 import { describe, it, expect } from "vitest";
+import { AC_REF_NOT_ON_RESOLVED_GOVERNING_SPEC } from "../../../src/service/ac-ref-messages.js";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { approveCitedSpec } from "../../helpers/live-rule-fixture.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
@@ -1324,7 +1325,7 @@ describe("STATE — an ac_ref not declared on the correctly-resolved governing s
     expect(result.error.code).toBe("VALIDATION_ERROR");
     if (result.error.code !== "VALIDATION_ERROR") return;
     expect(result.error.field).toBe("ac_ref");
-    expect(result.error.message).toContain("not declared on the resolved governing spec");
+    expect(result.error.message).toContain(AC_REF_NOT_ON_RESOLVED_GOVERNING_SPEC);
   });
 });
 

@@ -268,6 +268,12 @@ export function parseOrdinalRef(input: string): { type: OrdinalDocType; ordinal:
 const TITLE_ORDINAL_PATTERN = /^(SPEC|ADR)-\d+\b/;
 
 /**
+ * Refusal head shared by the create path (schema superRefine) and the `set --title` guard
+ * (VALIDATION_ERROR, field `title`; CLI exit 4). Tests assert this constant, not the sentence.
+ */
+export const SELF_DECLARED_ORDINAL_TITLE_REFUSAL = "title must not self-declare a SPEC-/ADR- number";
+
+/**
  * True when `title` self-declares a store-allocated display id for a doc
  * `type` that IS in {@link ORDINAL_REGISTRY} — REGARDLESS of exempt kind
  * (SPEC-084 D6: the title-purity rule is independent of whether this

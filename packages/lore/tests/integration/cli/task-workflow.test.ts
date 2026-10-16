@@ -25,6 +25,7 @@ import { spawnSync } from "child_process";
 import { mkdirSync, rmSync, appendFileSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
+import { AC_REF_NOT_ON_PARENT_SPEC } from "../../../src/service/ac-ref-messages.js";
 import { sessionActorFor, withSessionIdentity } from "../../helpers/session-actor.js";
 
 // ─── Path setup ───────────────────────────────────────────────────────────────
@@ -450,7 +451,7 @@ describe("lore evidence", () => {
 
     expect(result.exitCode).toBe(4);
     expect(result.stderr).toContain("ac_ref");
-    expect(result.stderr).toContain("not declared on the parent spec");
+    expect(result.stderr).toContain(AC_REF_NOT_ON_PARENT_SPEC);
   });
 
   it("AC-ACODE-3.CLI.REG1: omitting --ac leaves ac_ref absent (existing no-flag behavior unchanged)", () => {

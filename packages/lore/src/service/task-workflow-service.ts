@@ -388,6 +388,7 @@ import { buildUpstreamSpecContext, buildAnchorGateContext, isNonPlanParentError 
 import { compareClaimSessions, type SessionComparison, type SiblingClaimInfo } from "./gate-predicates.js";
 import { collectFileAnchorResolution, type FileAnchorProbeContext } from "./anchor-resolution.js";
 import type { GateDependencies } from "./gate-enforcer.js";
+import { AC_REF_NOT_ON_PARENT_SPEC, AC_REF_NOT_ON_RESOLVED_GOVERNING_SPEC } from "./ac-ref-messages.js";
 // reason: spec-multi-session-concurrency-queryable-ownership-checkout §Scope
 // L0 (AC-OWN-2/AC-OWN-4) — the ONE deliberate exception to "services don't
 // import adapters": branch detection / trailer binding are leaf IO
@@ -2743,7 +2744,7 @@ export class TaskWorkflowService {
           return err({
             code: "VALIDATION_ERROR",
             field: "ac_ref",
-            message: `ac_ref "${parsedEntry.data.ac_ref}" is not declared on the resolved governing spec. Available ids: ${available}`,
+            message: `ac_ref "${parsedEntry.data.ac_ref}" is ${AC_REF_NOT_ON_RESOLVED_GOVERNING_SPEC}. Available ids: ${available}`,
             value: parsedEntry.data.ac_ref,
           });
         }
@@ -2767,7 +2768,7 @@ export class TaskWorkflowService {
           return err({
             code: "VALIDATION_ERROR",
             field: "ac_ref",
-            message: `ac_ref "${parsedEntry.data.ac_ref}" is not declared on the parent spec. Available ids: ${available}`,
+            message: `ac_ref "${parsedEntry.data.ac_ref}" is ${AC_REF_NOT_ON_PARENT_SPEC}. Available ids: ${available}`,
             value: parsedEntry.data.ac_ref,
           });
         }

@@ -21,13 +21,16 @@ import { err, ok, specAcceptanceCriteriaSchema, type LoreError, type Result } fr
 import type { StoreInterface } from "../store/store-interface.js";
 import { indexBaseline, specCitesLiveRule, type OwnProposedRule } from "./ac-cite-gate.js";
 
+/** The rule clause of the uncited-spec refusal (BR-1007); tests assert this, not the whole sentence. */
+export const UNCITED_SPEC_RULE = "cites no live business or architecture rule";
+
 /**
  * The refusal text for an uncited spec — one wording for `approve`, `set --status approved` and the
  * `lore gate spec-promote` pre-flight, so the gate and the approval can never disagree in what they say.
  */
 export function uncitedSpecMessage(specSlug: string): string {
   return (
-    `spec "${specSlug}" cites no live business or architecture rule — none of its criteria cites a live ` +
+    `spec "${specSlug}" ${UNCITED_SPEC_RULE} — none of its criteria cites a live ` +
     "BR or AS rule (or one its own change set proposes), so it cannot be approved. Cite one with `lore ac cite <spec> <ac-id> <rule-id>`"
   );
 }

@@ -59,6 +59,7 @@ import { spawnSync } from "child_process";
 import { mkdirSync, rmSync, appendFileSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
+import { VERIFY_NO_SCRIPT_ACS } from "../../../src/adapters/cli/cli-refusal-messages.js";
 import { sessionIdFor } from "../../helpers/session-actor.js";
 
 // ─── Path setup ───────────────────────────────────────────────────────────────
@@ -396,7 +397,7 @@ describe("lore verify — BOUNDARY (no script ACs)", () => {
     const result = runLore(["verify", planSlug, "--task", taskSlug], tmpDir);
 
     expect(result.exitCode).toBe(0);
-    expect(result.stdout).toContain("No script-mode acceptance criteria to run");
+    expect(result.stdout).toContain(VERIFY_NO_SCRIPT_ACS);
     expect(result.stdout).toContain("AC-VRF-HUMAN (human)");
   });
 });

@@ -1042,6 +1042,12 @@ function checkPlanPromote(ctx: GateContext): PredicateResult[] {
   return results;
 }
 
+/** Advisory marker clause of the plan-promote reachability warning: it never blocks the promote. */
+export const PLAN_PROMOTE_ADVISORY_NON_BLOCKING = "does not block this promote";
+
+/** Reachability explanation for `why === "parent-not-spec"`: the plan has no spec-tier ancestor. */
+export const REACHABILITY_NO_SPEC_ANCESTOR = "this plan has no spec-tier ancestor at all";
+
 /**
  * Human-readable explanation for one {@link ReachabilityResult.why} value —
  * the ONE place this prose is written (spec-verify-reachability-plan-promote-
@@ -1060,7 +1066,7 @@ function checkPlanPromote(ctx: GateContext): PredicateResult[] {
 function describeReachabilityWhy(why: Exclude<ReachabilityResult["why"], null>): string {
   if (why === "parent-not-spec") {
     return (
-      "this plan has no spec-tier ancestor at all — `lore verify` requires one to " +
+      `${REACHABILITY_NO_SPEC_ANCESTOR} — \`lore verify\` requires one to ` +
       "resolve script-mode acceptance criteria from"
     );
   }
@@ -1126,7 +1132,7 @@ export function planPromoteReachabilityAdvisory(ctx: GateContext): string | null
   }
   const plan = ctx.targetIdOrSlug ?? "<plan>";
   return (
-    `ADVISORY (does not block this promote): \`lore verify\` will be structurally ` +
+    `ADVISORY (${PLAN_PROMOTE_ADVISORY_NON_BLOCKING}): \`lore verify\` will be structurally ` +
     `unreachable for ${plan} — ${describeReachabilityWhy(reachability.why as Exclude<ReachabilityResult["why"], null>)}. ` +
     `At plan-close, the attestation floor (SPEC-069) will have no \`lore verify\` path ` +
     `to satisfy it. Two real options before that happens: (1) parent this plan under a ` +
