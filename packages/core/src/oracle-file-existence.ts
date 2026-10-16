@@ -164,6 +164,23 @@ export function extractTestFileTokens(command: string): string[] {
   return tokens;
 }
 
+/**
+ * True when `command` names (via {@link extractTestFileTokens}, the one extraction `verify` uses) at least one
+ * of `missingPaths` — the exact strings {@link findMissingOracleFiles} returned for a criterion's command.
+ * Answers "did this recorded run execute the missing oracle file?" so a pass that ran OTHER files is not
+ * mistaken for a pass of the file that is gone (TG-22; spec-test-governance-guards-that-refuse-bad-tests-declared AC-TG-6).
+ *
+ * @param command - the command recorded on an evidence row
+ * @param missingPaths - missing oracle paths as returned by {@link findMissingOracleFiles}
+ * @returns `false` for an empty `missingPaths` or a command that names none of them
+ * @example
+ *   commandNamesMissingOracle("bun test a.test.ts", ["b.test.ts"]) // => false
+ */
+export function commandNamesMissingOracle(command: string, missingPaths: readonly string[]): boolean {
+  if (missingPaths.length === 0) return false;
+  return extractTestFileTokens(command).some((token) => missingPaths.includes(token));
+}
+
 /** Strips a single layer of matching wrapping quote characters, if present. */
 function stripWrappingQuotes(token: string): string {
   if (token.length >= 2) {

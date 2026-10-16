@@ -10,6 +10,10 @@
     "esModuleInterop": true,
     "skipLibCheck": true,
     "types": ["bun-types"],
-    "noEmit": true
+    "noEmit": true,
+    "paths": {
+      "@lore/core": ["./packages/core/src/index.ts"],
+      "@lore/core/node": ["./packages/core/src/node.ts"]
+    }
   }
 }
