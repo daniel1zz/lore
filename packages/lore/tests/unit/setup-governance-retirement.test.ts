@@ -379,10 +379,9 @@ describe("setup-governance-retirement — STATE (corpus-workflow fragments hando
 
   it("HAPPY: the FEED bullet prohibits self-initiated resumption from an injected handoff pointer", () => {
     const content = readCorpusWorkflowFragments();
-    const bullet = content.split("\n").find((line) => line.includes("latest_handoffs"));
+    // One bullet (a single line of the fragment) must carry both the prohibition and the handoff noun.
+    const bullet = content.split("\n").find((line) => line.includes("NEVER") && line.includes("handoff"));
     expect(bullet).toBeDefined();
-    expect(bullet).toContain("NEVER");
-    expect(bullet).toContain("handoff");
     expect(content).toContain("own initiative");
   });
 

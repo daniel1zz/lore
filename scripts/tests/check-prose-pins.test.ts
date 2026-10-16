@@ -29,23 +29,23 @@ import {
   scanFile,
 } from "../check-prose-pins";
 
-const PROSE = normalizeText("Never resume from a handoff pointer.\nThe stub IS an index entry, always.");
+const PROSE = normalizeText("Quiet owls file paperwork nightly.\nZebra lanterns glow at midnight, always.");
 const READER = `import { readFileSync } from "node:fs";\nconst c = readFileSync("assets/x.md", "utf8");\n`;
 
 describe("scanFile", () => {
   it("HAPPY: flags a positive toContain of 5+ prose words with its line", () => {
-    const src = `${READER}expect(c).toContain("The stub IS an index entry");\n`;
+    const src = `${READER}expect(c).toContain("Zebra lanterns glow at midnight");\n`;
     const pins = scanFile("t.test.ts", src, PROSE);
-    expect(pins).toEqual([{ path: "t.test.ts", line: 3, literal: "The stub IS an index entry" }]);
+    expect(pins).toEqual([{ path: "t.test.ts", line: 3, literal: "Zebra lanterns glow at midnight" }]);
   });
 
   it("HAPPY: flags a toMatch regex literal and an includes() call", () => {
-    const src = `${READER}expect(c).toMatch(/Never resume from a handoff pointer/);\nc.includes('The stub IS an index entry');\n`;
+    const src = `${READER}expect(c).toMatch(/Quiet owls file paperwork nightly/);\nc.includes('Zebra lanterns glow at midnight');\n`;
     expect(scanFile("t.test.ts", src, PROSE).map((p) => p.line)).toEqual([3, 4]);
   });
 
   it("NEGATIVE: a .not. assertion is not a pin", () => {
-    const src = `${READER}expect(c).not.toContain("The stub IS an index entry");\n`;
+    const src = `${READER}expect(c).not.toContain("Zebra lanterns glow at midnight");\n`;
     expect(scanFile("t.test.ts", src, PROSE)).toEqual([]);
   });
 
@@ -55,7 +55,7 @@ describe("scanFile", () => {
   });
 
   it("NEGATIVE: a file that never names a prose location is out of scope", () => {
-    const src = `expect(c).toContain("The stub IS an index entry");\n`;
+    const src = `expect(c).toContain("Zebra lanterns glow at midnight");\n`;
     expect(scanFile("t.test.ts", src, PROSE)).toEqual([]);
   });
 
@@ -65,8 +65,8 @@ describe("scanFile", () => {
   });
 
   it("BOUNDARY: 4 words pass, 5 words fail", () => {
-    expect(scanFile("t.test.ts", `${READER}expect(c).toContain("stub IS an index");\n`, PROSE)).toEqual([]);
-    expect(scanFile("t.test.ts", `${READER}expect(c).toContain("The stub IS an index");\n`, PROSE)).toHaveLength(1);
+    expect(scanFile("t.test.ts", `${READER}expect(c).toContain("lanterns glow at midnight");\n`, PROSE)).toEqual([]);
+    expect(scanFile("t.test.ts", `${READER}expect(c).toContain("Zebra lanterns glow at midnight");\n`, PROSE)).toHaveLength(1);
   });
 
   it("BOUNDARY: a heading literal locates a section and is not a pin", () => {
@@ -76,12 +76,12 @@ describe("scanFile", () => {
   });
 
   it("REGRESSION: a literal that wraps across lines in the prose still matches", () => {
-    const src = `${READER}expect(c).toContain("Never resume from a handoff pointer");\n`;
-    expect(scanFile("t.test.ts", src, normalizeText("Never resume from a\n  handoff pointer"))).toHaveLength(1);
+    const src = `${READER}expect(c).toContain("Quiet owls file paperwork nightly");\n`;
+    expect(scanFile("t.test.ts", src, normalizeText("Quiet owls file\n  paperwork nightly"))).toHaveLength(1);
   });
 
   it("STATE: scanning twice gives the same answer", () => {
-    const src = `${READER}expect(c).toContain("The stub IS an index entry");\n`;
+    const src = `${READER}expect(c).toContain("Zebra lanterns glow at midnight");\n`;
     expect(scanFile("t.test.ts", src, PROSE)).toEqual(scanFile("t.test.ts", src, PROSE));
   });
 });
@@ -144,9 +144,9 @@ describe("main over a fixture tree", () => {
 
   it("HAPPY: exits 1 and prints file:line for a pin, exits 0 on a clean fixture", () => {
     const pinned = fixture({
-      "assets/p.md": "The stub IS an index entry.\n",
+      "assets/p.md": "Zebra lanterns glow at midnight.\n",
       "scripts/prose-pin-ledger.json": '{"entries":[]}',
-      "scripts/tests/a.test.ts": testSrc("The stub IS an index entry"),
+      "scripts/tests/a.test.ts": testSrc("Zebra lanterns glow at midnight"),
     });
     const lines: string[] = [];
     const orig = console.error;
@@ -159,9 +159,9 @@ describe("main over a fixture tree", () => {
     expect(lines[0]).toContain("scripts/tests/a.test.ts:3");
 
     const clean = fixture({
-      "assets/p.md": "The stub IS an index entry.\n",
+      "assets/p.md": "Zebra lanterns glow at midnight.\n",
       "scripts/prose-pin-ledger.json": '{"entries":[]}',
-      "scripts/tests/a.test.ts": testSrc("stub IS"),
+      "scripts/tests/a.test.ts": testSrc("lanterns glow"),
     });
     expect(main(clean)).toBe(0);
   });
@@ -169,31 +169,31 @@ describe("main over a fixture tree", () => {
   it("HAPPY: a ledgered pin exits 0, and its row going stale exits 1", () => {
     const row = {
       file: "scripts/tests/a.test.ts",
-      literal_fingerprint: "The stub IS an index entry",
+      literal_fingerprint: "Zebra lanterns glow at midnight",
       consumer: "agents",
       reason: "contract",
     };
     const root = fixture({
-      "assets/p.md": "The stub IS an index entry.\n",
+      "assets/p.md": "Zebra lanterns glow at midnight.\n",
       "scripts/prose-pin-ledger.json": JSON.stringify({ entries: [row] }),
-      "scripts/tests/a.test.ts": testSrc("The stub IS an index entry"),
+      "scripts/tests/a.test.ts": testSrc("Zebra lanterns glow at midnight"),
     });
     expect(main(root)).toBe(0);
-    writeFileSync(join(root, "scripts/tests/a.test.ts"), testSrc("stub IS"));
+    writeFileSync(join(root, "scripts/tests/a.test.ts"), testSrc("lanterns glow"));
     expect(main(root)).toBe(1);
   });
 
   it("REGRESSION: docs/requirements (the corpus mirror) is not governing prose", () => {
     const root = fixture({
-      "docs/requirements/m.md": "The stub IS an index entry.\n",
+      "docs/requirements/m.md": "Zebra lanterns glow at midnight.\n",
       "scripts/prose-pin-ledger.json": '{"entries":[]}',
-      "scripts/tests/a.test.ts": testSrc("The stub IS an index entry"),
+      "scripts/tests/a.test.ts": testSrc("Zebra lanterns glow at midnight"),
     });
     expect(main(root)).toBe(0);
   });
 
   it("ERROR: a missing ledger file exits 2, not 0", () => {
-    const root = fixture({ "scripts/tests/a.test.ts": testSrc("stub IS") });
+    const root = fixture({ "scripts/tests/a.test.ts": testSrc("lanterns glow") });
     const orig = console.error;
     console.error = () => undefined;
     try {
