@@ -144,6 +144,9 @@ describe("AC-OX-6 — back-catalogue sweep: every mirror file's frontmatter stat
       let mappedAndPresentCount = 0;
       let parsedCount = 0;
       for (const [docId, mapping] of Object.entries(mappings)) {
+        // A mapping whose file_path is under no mirror type's directory (e.g. a baseline doc,
+        // which is not a mirror type) is outside this oracle's population — skip, never "orphan".
+        if (resolveTypeFromFilePath(mapping.file_path) === null) continue;
         const liveDoc = liveDocsById.get(docId);
         if (liveDoc === undefined) {
           problems.push({
