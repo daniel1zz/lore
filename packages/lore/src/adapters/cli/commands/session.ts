@@ -23,6 +23,9 @@
  * list|show` at least once on this machine. A session that never does is
  * honestly reported `"unmeasured"`, never fabricated.
  *
+ * `lore session trail [--turn] [--run] [--json]`   — the caller's own session trail (AC-ST-6).
+ * `lore session trail-review [--turn] [--json]`    — judge the caller's session's unjudged helper ends (AC-ST-8).
+ *
  * Exit codes: 0 = success; 1 = SessionService not wired; 2 = missing/invalid
  *   `<id>` for `show`, or an unrecognized subcommand (CLI usage error); 3 =
  *   `show <id>` matched no session; other codes per `utils.ts::exitCode` on
@@ -31,8 +34,11 @@
  * Source: spec-multi-session-concurrency-queryable-ownership-checkout §Scope L0, AC-OWN-5.
  */
 
+import { realpathSync } from "node:fs";
 import { hostname } from "node:os";
+import { dirname } from "node:path";
 import { defineCommand } from "citty";
+import { reviewHelperScope } from "../../../service/helper-scope-review.js";
 import type { SessionLivenessRecord } from "../../../service/session-service.js";
 import { resolveClaimSessionId } from "../../../service/task-workflow-service.js";
 import {
@@ -44,14 +50,131 @@ import {
   TrailRunIdInvalidError,
   type SessionTrail,
 } from "@lore/core/node";
+import { findLoreDbPathQuiet } from "../corpus-resolution.js";
 import { loadLoreApp } from "../loader.js";
 import { formatTrail, narrowTrail } from "../session-trail-render.js";
 import { exitCode, formatError } from "../utils.js";
 
-const RESERVED_SUBCOMMANDS = new Set(["list", "show", "trail"]);
+const RESERVED_SUBCOMMANDS = new Set(["list", "show", "trail", "trail-review"]);
 
 /** The trail-access rule id (AC-ST-6) every refusal of `lore session trail` names. */
 const TRAIL_ACCESS_RULE = "BR-1143";
+
+/** The `trail-review` payload as `emit` receives it (text rendering only; `--json` prints it as is). */
+interface TrailReviewView {
+  readonly helpers: readonly { readonly agent_id: string; readonly end_count: number }[];
+  readonly findings: readonly { readonly message: string }[];
+  readonly not_measured: readonly string[];
+  readonly reason?: string;
+}
+
+function formatTrailReview(view: TrailReviewView): string {
+  const lines = [`── lore session trail-review (${view.helpers.length} helper end${view.helpers.length === 1 ? "" : "s"} judged) ──`];
+  if (view.reason !== undefined) lines.push(`  nothing to judge: ${view.reason}`);
+  lines.push(...(view.findings.length === 0 ? ["  no finding"] : view.findings.map((f) => `  - ${f.message}`)));
+  lines.push(...view.not_measured.map((reason) => `  not measured: ${reason}`));
+  return lines.join("\n");
+}
+
+/** Refuses a trail verb (`trail` | `trail-review`): exit 4 naming the trail-access rule. */
+function refuseTrailAccess(verb: "trail" | "trail-review", reason: string): void {
+  process.stderr.write(`Error: ${reason} (${TRAIL_ACCESS_RULE}: \`lore session ${verb}\` reads only the calling run's own session trail)\n`);
+  process.exitCode = 4;
+}
+
+/**
+ * The session of the caller's VERIFIED attested run, or null after writing the refusal (exit 4 no run / non-`cc:` run;
+ * the identity error's own exit code when verification fails).
+ * reason: the run is VERIFIED against the registry (unregistered -> null), so "attested" means attested, not merely claimed.
+ */
+async function resolveCallerSession(app: Awaited<ReturnType<typeof loadLoreApp>>["app"], verb: "trail" | "trail-review"): Promise<string | null> {
+  const verified = await app.verifiedInvocationIdentity?.();
+  if (verified !== undefined && !verified.ok) {
+    process.stderr.write(formatError(verified.error) + "\n");
+    process.exitCode = exitCode(verified.error);
+    return null;
+  }
+  const callerRun = verified?.value?.harnessRun ?? null;
+  if (callerRun === null) {
+    refuseTrailAccess(verb, "no attested run: pass --harness-run or call from an attested harness");
+    return null;
+  }
+  try {
+    return sessionOfRun(callerRun);
+  } catch (err) {
+    if (err instanceof TrailRunIdInvalidError) {
+      refuseTrailAccess(verb, `run ${callerRun} is not a claude-code run (cc:<session>[:<agent>])`);
+      return null;
+    }
+    throw err;
+  }
+}
+
+/**
+ * `lore session trail-review [--turn <id>] [--json]` — judges the caller's session's helper ends not yet judged
+ * (`end_count > judged_end_count`) against the tasks each helper claimed (spec session-trail, Helper scope; AC-ST-8).
+ * It NEVER marks a helper judged: that single write belongs to the turn-end hook, after this verb succeeded.
+ * Output `{ok, data: {turn?, helpers, findings, not_measured}}`. Exit 0 ok (also with no `.lore/` directory: nothing to
+ * judge against, checked BEFORE the corpus is opened); 3 unknown `--turn`; 4 no attested run / no trail; otherwise the
+ * service error's code (the hook turns any non-zero exit into a not-measured line).
+ */
+async function runSessionTrailReview(args: { turn?: unknown; json?: unknown }): Promise<void> {
+  const emit = (data: Record<string, unknown>): void => {
+    if (args.json) console.log(JSON.stringify({ ok: true, data }, null, 2));
+    else console.log(formatTrailReview(data as unknown as TrailReviewView));
+  };
+  const dbPath = findLoreDbPathQuiet();
+  if (dbPath === undefined) {
+    emit({ helpers: [], findings: [], not_measured: [], reason: "no .lore directory" });
+    return;
+  }
+  const { app } = loadLoreApp();
+  try {
+    const session = await resolveCallerSession(app, "trail-review");
+    if (session === null) return;
+    let trail: SessionTrail | null;
+    try {
+      trail = readSessionTrail(session);
+    } catch (err) {
+      if (err instanceof TrailFileInvalidError) {
+        process.stderr.write(`Error: ${err.message}\n`);
+        process.exitCode = 1;
+        return;
+      }
+      throw err;
+    }
+    if (trail === null) {
+      refuseTrailAccess("trail-review", `no session trail for session ${session} under ${stateBase()}`);
+      return;
+    }
+    const turn = typeof args.turn === "string" ? args.turn : undefined;
+    if (turn !== undefined && !trail.turns.some((t) => t.turn === turn)) {
+      process.stderr.write(`Error: session ${session} has no turn "${turn}".\n`);
+      process.exitCode = 3;
+      return;
+    }
+    const runService = app.runService;
+    if (runService === undefined) {
+      process.stderr.write("Error: RunService not wired on this App instance.\n");
+      process.exitCode = 1;
+      return;
+    }
+    const review = await reviewHelperScope({
+      trail,
+      claimedTasks: (run) => runService.claimedTasks(run),
+      projectRoot: dirname(dirname(dbPath)),
+      realpath: realpathSync,
+    });
+    if (!review.ok) {
+      process.stderr.write(formatError(review.error) + "\n");
+      process.exitCode = exitCode(review.error);
+      return;
+    }
+    emit({ ...(turn !== undefined ? { turn } : {}), ...review.value });
+  } finally {
+    app.close();
+  }
+}
 
 /**
  * `lore session trail [--turn <id>] [--run <id>] [--json]` — the CALLER's own session trail (spec D12:
@@ -62,32 +185,9 @@ async function runSessionTrail(
   app: Awaited<ReturnType<typeof loadLoreApp>>["app"],
   args: { turn?: unknown; run?: unknown; json?: unknown },
 ): Promise<void> {
-  const refuse = (reason: string): void => {
-    process.stderr.write(`Error: ${reason} (${TRAIL_ACCESS_RULE}: \`lore session trail\` reads only the calling run's own session trail)\n`);
-    process.exitCode = 4;
-  };
-  // reason: the run is VERIFIED against the registry (unregistered -> null), so "attested" means attested, not merely claimed.
-  const verified = await app.verifiedInvocationIdentity?.();
-  if (verified !== undefined && !verified.ok) {
-    process.stderr.write(formatError(verified.error) + "\n");
-    process.exitCode = exitCode(verified.error);
-    return;
-  }
-  const callerRun = verified?.value?.harnessRun ?? null;
-  if (callerRun === null) {
-    refuse("no attested run: pass --harness-run or call from an attested harness");
-    return;
-  }
-  let session: string;
-  try {
-    session = sessionOfRun(callerRun);
-  } catch (err) {
-    if (err instanceof TrailRunIdInvalidError) {
-      refuse(`run ${callerRun} is not a claude-code run (cc:<session>[:<agent>])`);
-      return;
-    }
-    throw err;
-  }
+  const refuse = (reason: string): void => refuseTrailAccess("trail", reason);
+  const session = await resolveCallerSession(app, "trail");
+  if (session === null) return;
   let runFilter: string | undefined;
   if (typeof args.run === "string") {
     try {
@@ -201,7 +301,7 @@ export default defineCommand({
     },
     turn: {
       type: "string",
-      description: "`trail` only: narrow to this turn id",
+      description: "`trail` | `trail-review`: narrow to / name this turn id",
     },
     run: {
       type: "string",
@@ -209,6 +309,12 @@ export default defineCommand({
     },
   },
   async run({ args }) {
+    // reason: trail-review decides whether a corpus exists itself (no `.lore/` is a clean "nothing to judge", not the
+    // loader's exit 1), so it must run before `loadLoreApp`.
+    if (String(args.target) === "trail-review") {
+      await runSessionTrailReview(args);
+      return;
+    }
     const { app } = loadLoreApp();
     try {
       if (String(args.target) === "trail") {

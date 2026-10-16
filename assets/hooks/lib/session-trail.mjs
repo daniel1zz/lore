@@ -867,3 +867,77 @@ export function recordTurnChanges({ turnDir, root, snapshot, nowTree, entries, u
   writeJsonAtomic(join(turnDir, 'changes.json'), record);
   return record;
 }
+
+// ---------------------------------------------------------------------------
+// Turn-end helper review — spec Design > Consumers, "Judging each helper end once", "Spawn gating"
+// ---------------------------------------------------------------------------
+
+/** Budget for one `lore session trail-review` spawn (cold start is ~230 ms; this only bounds a hang). */
+const TRAIL_REVIEW_TIMEOUT_MS = 15000;
+
+/**
+ * Snapshot of every helper end not yet judged: `end_count > judged_end_count`, read ONCE at review start.
+ * The snapshot, never a later re-read, is what `markHelpersJudged` records.
+ * @param {string} base - state base. @param {string} sessionId
+ * @returns {{helpers: Array<{agent_id: string, end_count: number}>, unreadable?: string}}
+ *   `unreadable` is set (and `helpers` empty) when the trail cannot be read: that is not "nothing to judge".
+ */
+export function snapshotUnjudgedHelpers(base, sessionId) {
+  try {
+    const trail = readSessionTrail(sessionId, base);
+    const helpers = (trail?.helpers ?? [])
+      .filter((h) => h.end_count > h.judged_end_count)
+      .map((h) => ({ agent_id: h.agent_id, end_count: h.end_count }));
+    return { helpers };
+  } catch (err) {
+    return { helpers: [], unreadable: `session trail unreadable (${err.message})` };
+  }
+}
+
+/**
+ * Write `helpers/<agent_id>.judged.json` = the snapshotted `end_count` (the ONLY writer of that file).
+ * @param {string} base @param {string} sessionId
+ * @param {Array<{agent_id: string, end_count: number}>} helpers - the review-start snapshot.
+ * @returns {string[]} reasons for helpers whose judged file could not be written (empty on success).
+ */
+export function markHelpersJudged(base, sessionId, helpers) {
+  const failures = [];
+  for (const { agent_id: agentId, end_count: endCount } of helpers) {
+    try {
+      writeJsonAtomic(join(base, 'sessions', sessionId, 'helpers', `${agentId}.judged.json`), { judged_end_count: endCount });
+    } catch (err) {
+      failures.push(`helper ${agentId} could not be marked judged (${err.message})`);
+    }
+  }
+  return failures;
+}
+
+/**
+ * Spawn `lore session trail-review` for this turn (the caller decides whether one is warranted) and turn its
+ * answer into relay lines. Nothing is marked judged here: the caller calls `markJudged()` after its own output
+ * is written, and only a successful review yields one that does anything.
+ * @param {object} input
+ * @param {string} input.base @param {string} input.sessionId @param {string} input.turnId
+ * @param {string} input.cwd - where `lore` finds the corpus.
+ * @param {Array<{agent_id: string, end_count: number}>} input.helpers - review-start snapshot.
+ * @returns {{findings: string[], notMeasured: string[], markJudged: () => string[]}}
+ */
+export function runTrailReview({ base, sessionId, turnId, cwd, helpers }) {
+  const argv = ['--harness-run', `cc:${sessionId}`, 'session', 'trail-review', '--turn', turnId, '--json'];
+  const run = spawnSync('lore', argv, { cwd, encoding: 'utf8', timeout: TRAIL_REVIEW_TIMEOUT_MS, maxBuffer: 16 * 1024 * 1024 });
+  const names = helpers.length > 0 ? `helpers left unjudged: ${helpers.map((h) => h.agent_id).join(', ')}` : 'no helper left unjudged';
+  const failed = (why) => ({
+    findings: [],
+    notMeasured: [`helper review not measured (lore session trail-review ${why}; ${names})`],
+    markJudged: () => [],
+  });
+  if (run.error) return failed(run.error.code === 'ETIMEDOUT' ? `timed out after ${TRAIL_REVIEW_TIMEOUT_MS} ms` : `could not run: ${run.error.message}`);
+  if (run.status !== 0) return failed(`exited ${run.status}: ${(run.stderr ?? '').trim().split('\n')[0] || 'no message'}`);
+  let data;
+  try { data = JSON.parse(run.stdout)?.data; } catch { data = undefined; }
+  if (!data || !Array.isArray(data.findings) || !data.findings.every((f) => typeof f?.message === 'string')) {
+    return failed('printed no readable result');
+  }
+  const notMeasured = Array.isArray(data.not_measured) ? data.not_measured.filter((r) => typeof r === 'string') : [];
+  return { findings: data.findings.map((f) => f.message), notMeasured, markJudged: () => markHelpersJudged(base, sessionId, helpers) };
+}

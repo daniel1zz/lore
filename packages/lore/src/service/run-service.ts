@@ -3,7 +3,8 @@
  *
  * Public surface: {@link RunService.register} (derive id + parent, validate, insert first-wins, reopen an ended
  * run, return the STORED record), {@link RunService.show} (read one run, DOC_NOT_FOUND when unregistered) and
- * {@link RunService.end} (mark a run ended and end its claims, BR-1057).
+ * {@link RunService.end} (mark a run ended and end its claims, BR-1057), {@link RunService.tasks} (the tasks a
+ * registered run ever claimed) and {@link RunService.claimedTasks} (the same read without the registry check).
  *
  * @invariant Side-effect class: stateful (store writes only). Holds a store and a clock, nothing else.
  * @invariant D5: the composition record is computed by the CALLER (the CLI command, from the existing
@@ -23,9 +24,11 @@ import {
   deriveRunId,
   err,
   extractClaim,
+  extractFileAnchors,
   ok,
   runRecordSchema,
   type CompositionRecord,
+  type DocId,
   type LoreError,
   type Result,
   type RunId,
@@ -36,7 +39,15 @@ import { claimNamesWorktree, makeDirectoryResolver, type RealpathFn } from "./se
 
 export type RunStore = Pick<
   StoreInterface,
-  "insertRun" | "getRun" | "endRun" | "reopenRun" | "getRunEnd" | "listRunsByAgentRef" | "findMany"
+  | "insertRun"
+  | "getRun"
+  | "endRun"
+  | "reopenRun"
+  | "getRunEnd"
+  | "listRunsByAgentRef"
+  | "findMany"
+  | "queryAudit"
+  | "findByIds"
 >;
 
 /** Claude Code names a subagent worktree `agent-<agentId>` (spec-worktree-removal D1). */
@@ -90,6 +101,19 @@ export interface RunClaimEnder {
 export type RunEndResult =
   | { readonly outcome: "unknown-run" }
   | { readonly outcome: "ended" | "already-ended"; readonly claims: readonly RunEndClaimReport[] };
+
+/** One task a run claimed: its CURRENT status and `file_anchors` (a released or archived task keeps its row). */
+export interface RunClaimedTask {
+  readonly slug: string;
+  readonly status: string;
+  readonly file_anchors: readonly string[];
+}
+
+/** The `--json` `data` of `lore run tasks`. */
+export interface RunTasks {
+  readonly run: string;
+  readonly tasks: readonly RunClaimedTask[];
+}
 
 export interface RegisterRunInput {
   readonly harness: string;
@@ -284,6 +308,49 @@ export class RunService {
       open_claims: openClaims,
       occupied: agentLive || openClaims.some((claim) => claim.run_ended !== true),
     });
+  }
+
+  /**
+   * The tasks `runId` ever claimed, oldest claim first: every audit row with action `claim` whose
+   * `details.harness_run` is the run (those rows survive release and archival, unlike `extra.claim`), then each
+   * task's CURRENT `file_anchors` (spec session-trail, Run -> tasks, D9). No registry check: a run id that never
+   * registered simply claimed nothing. Use {@link RunService.tasks} when an unknown id must be refused.
+   *
+   * @returns ok(tasks, possibly empty); STORE_ERROR from the store.
+   */
+  async claimedTasks(runId: string): Promise<Result<RunClaimedTask[], LoreError>> {
+    const rows = await this.store.queryAudit({ action: "claim" });
+    if (!rows.ok) return rows;
+    // reason: queryAudit orders newest first; reversing gives claim order, and the Set keeps a re-claimed task once.
+    const claimedIds = new Set<DocId>();
+    for (const row of [...rows.value].reverse()) {
+      if (row.doc_id !== undefined && row.details?.["harness_run"] === runId) claimedIds.add(row.doc_id);
+    }
+    if (claimedIds.size === 0) return ok([]);
+    const docs = await this.store.findByIds([...claimedIds]);
+    if (!docs.ok) return docs;
+    const tasks: RunClaimedTask[] = [];
+    for (const id of claimedIds) {
+      const doc = docs.value.get(id);
+      if (doc !== undefined) tasks.push({ slug: doc.slug, status: doc.status, file_anchors: extractFileAnchors(doc) });
+    }
+    return ok(tasks);
+  }
+
+  /**
+   * {@link RunService.claimedTasks} for a REGISTERED run.
+   *
+   * @returns ok({run, tasks}); VALIDATION_ERROR naming the id when the run is not registered (exit 4, like
+   *   BR-1038's refusal of an unknown id); STORE_ERROR from the store.
+   */
+  async tasks(runId: string): Promise<Result<RunTasks, LoreError>> {
+    if (runId === "") return err(validationError("run-id", "a run id is required", runId));
+    const known = await this.store.getRun(runId as RunId);
+    if (!known.ok) return known;
+    if (known.value === null) return err(validationError("run-id", `run ${runId} is not registered`, runId));
+    const claimed = await this.claimedTasks(runId);
+    if (!claimed.ok) return claimed;
+    return ok({ run: runId, tasks: claimed.value });
   }
 
   /** The registered run, or DOC_NOT_FOUND naming the id. */
