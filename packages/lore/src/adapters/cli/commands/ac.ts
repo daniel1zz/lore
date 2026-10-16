@@ -87,7 +87,7 @@
  *                                   Surface: CLI only — MCP exposes no `ac` tools today.
  *   rm   <spec> <id> [--force]     Remove a criterion (exit 4 if evidence still
  *                                   references it, unless --force).
- *   set  <spec> <id> [--statement <s>] [--oracle <o>] [--command <c>] [--rubric <r>]
+ *   set  <spec> <id> [--statement <s>] [--oracle <o>] [--command <c>] [--timeout-ms <n>|''] [--rubric <r>]
  *        [--note <n>] [--covers <req-id>] [--allow-missing-path <reason>]
  *        [--falsifier-path <p> --falsifier-find <text> --falsifier-replace <text>
  *         --falsifier-exit-code <n>]
@@ -252,6 +252,12 @@ export default defineCommand({
           type: "string",
           description: "script mode only: exact command to run",
         },
+        "timeout-ms": {
+          type: "string",
+          description:
+            "script mode only: per-AC verify timeout in ms (positive integer; stored as verify.timeout_ms, " +
+            "overrides the verify default for a long oracle)",
+        },
         rubric: {
           type: "string",
           description: "ai mode only: judging rubric text",
@@ -309,6 +315,7 @@ export default defineCommand({
       },
       async run({ args }) {
         if (refuseCorrectionFlag(args, "add")) return;
+        if (refuseBadTimeoutMs(args, "add")) return;
         const { app, dbPath } = loadLoreApp();
         try {
           const beforeStatus = await fetchSpecStatus(app, args.spec as string);
@@ -598,6 +605,11 @@ export default defineCommand({
           type: "string",
           description: "script mode only: replace the command",
         },
+        "timeout-ms": {
+          type: "string",
+          description:
+            "script mode only: set verify.timeout_ms (positive integer ms); pass '' to remove the field",
+        },
         rubric: {
           type: "string",
           description: "ai mode only: replace the judging rubric text",
@@ -675,11 +687,12 @@ export default defineCommand({
           return;
         }
 
+        if (refuseBadTimeoutMs(args, "set")) return;
         const patch = buildSetPatch(args);
         if (patch === null) {
           process.stderr.write(
             "Error: lore ac set requires at least one field to change: --statement, --oracle, --command, " +
-              "--rubric, --note, --covers, --cite, --falsifier-path/-find/-replace/-exit-code\n",
+              "--timeout-ms, --rubric, --note, --covers, --cite, --falsifier-path/-find/-replace/-exit-code\n",
           );
           process.exitCode = 2;
           return;
@@ -760,6 +773,36 @@ function refuseCorrectionFlag(args: Record<string, unknown>, verb: "add" | "rm")
   return true;
 }
 
+// ─── --timeout-ms validation ─────────────────────────────────────────────────
+
+/**
+ * Argv-decidable guard for `--timeout-ms` (AC-level `verify.timeout_ms`): the value must be a
+ * positive integer made only of digits. `ac set` additionally accepts `''` (removes the field).
+ * Violation writes a stderr line, sets exit 4 (validation) and returns true so the caller stops
+ * BEFORE the app/store is opened. `ac add --mode <non-script> --timeout-ms` is refused the same way
+ * (script mode only); `ac set` on a non-script criterion is refused by `AcService.setCriterion`.
+ *
+ * @param args - raw citty args
+ * @param verb - which subcommand is running (only `set` accepts the `''` clear sentinel)
+ * @returns true when the command was refused (caller must return)
+ */
+function refuseBadTimeoutMs(args: Record<string, unknown>, verb: "add" | "set"): boolean {
+  const raw = args["timeout-ms"];
+  if (raw === undefined) return false;
+  const fail = (why: string): true => {
+    process.stderr.write(`Error: --timeout-ms ${why}\n`);
+    process.exitCode = 4;
+    return true;
+  };
+  if (typeof raw !== "string") return fail("must be a positive integer number of milliseconds");
+  if (verb === "set" && raw === "") return false;
+  if (!/^[0-9]+$/.test(raw) || !Number.isSafeInteger(Number(raw)) || Number(raw) <= 0) {
+    return fail(`must be a positive integer number of milliseconds (got "${raw}")`);
+  }
+  if (verb === "add" && args.mode !== "script") return fail("applies to --mode script only");
+  return false;
+}
+
 // ─── Input Assembly ──────────────────────────────────────────────────────────
 
 /**
@@ -778,6 +821,7 @@ function buildCriterionCandidate(args: Record<string, unknown>): unknown {
       mode: "script",
       ...(typeof args.oracle === "string" ? { oracle: args.oracle } : {}),
       ...(typeof args.command === "string" ? { command: args.command } : {}),
+      ...(typeof args["timeout-ms"] === "string" ? { timeout_ms: Number(args["timeout-ms"]) } : {}),
       ...(falsifier !== undefined ? { falsifier } : {}),
     };
   } else if (mode === "ai") {
@@ -936,6 +980,10 @@ function buildSetPatch(args: Record<string, unknown>): SetCriterionPatch | null 
   if (typeof args.statement === "string") patch.statement = args.statement;
   if (typeof args.oracle === "string") patch.oracle = args.oracle;
   if (typeof args.command === "string") patch.command = args.command;
+  // '' clears (null); a non-empty value was already validated by refuseBadTimeoutMs.
+  if (typeof args["timeout-ms"] === "string") {
+    patch.timeout_ms = args["timeout-ms"] === "" ? null : Number(args["timeout-ms"]);
+  }
   if (typeof args.rubric === "string") patch.rubric = args.rubric;
   if (typeof args.note === "string") patch.note = args.note;
 

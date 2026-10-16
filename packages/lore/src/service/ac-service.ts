@@ -208,6 +208,8 @@ export interface SetCriterionPatch {
   statement?: string;
   oracle?: string;
   command?: string;
+  /** Script mode only: positive-integer `verify.timeout_ms`; `null` REMOVES the field. */
+  timeout_ms?: number | null;
   rubric?: string;
   note?: string;
   covers?: string[];
@@ -772,6 +774,7 @@ export class AcService {
       patch.statement !== undefined ||
       patch.oracle !== undefined ||
       patch.command !== undefined ||
+      patch.timeout_ms !== undefined ||
       patch.rubric !== undefined ||
       patch.note !== undefined ||
       patch.covers !== undefined ||
@@ -843,6 +846,9 @@ export class AcService {
     }
     if (patch.command !== undefined && mode !== "script") {
       return err(modeMismatchError(acId, "--command", mode));
+    }
+    if (patch.timeout_ms !== undefined && mode !== "script") {
+      return err(modeMismatchError(acId, "--timeout-ms", mode));
     }
     if (patch.falsifier !== undefined && mode !== "script") {
       return err(modeMismatchError(acId, "--falsifier-*", mode));
@@ -1321,7 +1327,14 @@ function buildVerifyCandidate(
         mode: "script",
         oracle: patch.oracle ?? existingVerify.oracle,
         command: patch.command ?? existingVerify.command,
-        ...(existingVerify.timeout_ms !== undefined ? { timeout_ms: existingVerify.timeout_ms } : {}),
+        // patch.timeout_ms: number replaces, null removes, undefined keeps the stored value.
+        ...(patch.timeout_ms === null
+          ? {}
+          : patch.timeout_ms !== undefined
+            ? { timeout_ms: patch.timeout_ms }
+            : existingVerify.timeout_ms !== undefined
+              ? { timeout_ms: existingVerify.timeout_ms }
+              : {}),
         // reason: REQUIRE-ALL-FOUR-TOGETHER partial-update contract (see
         // SetCriterionPatch.falsifier's own JSDoc) — `patch.falsifier` REPLACES
         // the whole object wholesale when present (a partial candidate fails
@@ -1410,7 +1423,7 @@ function modeMismatchError(acId: string, flag: string, actualMode: AcVerifyMode)
 
 /** The verify mode a given mode-specific flag belongs to (for modeMismatchError's message). */
 function modeFieldName(flag: string): AcVerifyMode {
-  if (flag === "--oracle" || flag === "--command" || flag === "--falsifier-*") return "script";
+  if (flag === "--oracle" || flag === "--command" || flag === "--timeout-ms" || flag === "--falsifier-*") return "script";
   if (flag === "--rubric") return "ai";
   return "human";
 }
