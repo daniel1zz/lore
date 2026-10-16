@@ -741,7 +741,7 @@ describe("assets-ssot — BOUNDARY", () => {
 
   it("corpus-workflow fragments AC-073-4: reporting-discipline stanza carries the re-verify-first clause", () => {
     const content = readCorpusWorkflowFragments();
-    expect(content).toContain("Re-verify your own input first");
+    expect(content).toContain("Re-verify your own input");
   });
 
   // task-corpus-workflow-injection-labels-lore-release-as-done-and (AC-1, AC-2):

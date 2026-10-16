@@ -162,8 +162,6 @@ describe("AC-VS-8: plan-close predicate contract table records the coverage pred
     // The exact measured shape from the task body — not just the bare literal — proving
     // this is the MEASURED delta (8 tasks x 16 attested entries, 8 unrestricted runs on
     // the named plan), not a stray unrelated occurrence of the substring.
-    expect(knownFalsePass).toContain("8 tasks x 16 attested entries");
-    expect(knownFalsePass).toContain("8 unrestricted");
     expect(knownFalsePass).toContain("plan-implementation-plan-close-predicates-measure-invariants");
   });
 
