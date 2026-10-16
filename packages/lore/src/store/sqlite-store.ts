@@ -30,6 +30,7 @@ import { MIGRATION_016_ADD_COLUMNS, MIGRATION_016_SQL } from "./migrations/migra
 import { MIGRATION_017_ADD_COLUMNS, MIGRATION_017_SQL } from "./migrations/migration-017.js";
 import { MIGRATION_015_SQL } from "./migrations/migration-015.js";
 import { MIGRATION_018_SQL } from "./migrations/migration-018.js";
+import { MIGRATION_019_ADD_COLUMNS, MIGRATION_019_SQL } from "./migrations/migration-019.js";
 // Re-exported here (beside the migration chain it describes) from a
 // bun:sqlite-free sibling module so bun-only readonly-probe callers (e.g.
 // store/schema-probe.ts's `probeSchemaVersion`, consumed by
@@ -634,6 +635,26 @@ export class SQLiteStore implements StoreInterface {
       // BEGIN/COMMIT with no PRAGMA toggles, like 015 — a failure only needs ROLLBACK.
       try {
         this.db.exec(MIGRATION_018_SQL);
+      } catch (error) {
+        try {
+          this.db.exec("ROLLBACK;");
+        } catch {
+          // reason: same as migration-004/005/006 — safe to ignore, see above.
+        }
+        throw error;
+      }
+    }
+
+    if (currentVersion < 19) {
+      // reason: migration-019 is two-phase like 017 (see migration-019.ts's module JSDoc): the nullable
+      // `review_judgments.truncated` / `.truncation` columns are added only where `PRAGMA table_info` lacks
+      // them, then one BEGIN/COMMIT bumps user_version.
+      try {
+        for (const { table, column, ddl } of MIGRATION_019_ADD_COLUMNS) {
+          const cols = this.db.query(`PRAGMA table_info(${table})`).all() as { name: string }[];
+          if (!cols.some((c) => c.name === column)) this.db.exec(ddl);
+        }
+        this.db.exec(MIGRATION_019_SQL);
       } catch (error) {
         try {
           this.db.exec("ROLLBACK;");
@@ -2634,8 +2655,8 @@ export class SQLiteStore implements StoreInterface {
           `INSERT INTO review_judgments
              (id, doc_id, doc_version, decision, confidence, reasons, checks,
               blocking_questions, judge_provider, judge_model, judge_prompt_version,
-              kind, superseded_candidate, created_at, created_by)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+              kind, superseded_candidate, truncated, truncation, created_at, created_by)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
         .run(
           judgment.id,
@@ -2651,6 +2672,8 @@ export class SQLiteStore implements StoreInterface {
           judgment.judge.prompt_version,
           judgment.kind ?? "review",
           judgment.superseded_candidate !== undefined ? JSON.stringify(judgment.superseded_candidate) : null,
+          judgment.truncated === true ? 1 : null,
+          judgment.truncation !== undefined ? JSON.stringify(judgment.truncation) : null,
           judgment.created_at,
           judgment.created_by,
         );

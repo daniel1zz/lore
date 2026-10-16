@@ -44,6 +44,7 @@ import { MIGRATION_016_ADD_COLUMNS, MIGRATION_016_SQL } from "./migrations/migra
 import { MIGRATION_017_ADD_COLUMNS, MIGRATION_017_SQL } from "./migrations/migration-017.js";
 import { MIGRATION_015_SQL } from "./migrations/migration-015.js";
 import { MIGRATION_018_SQL } from "./migrations/migration-018.js";
+import { MIGRATION_019_ADD_COLUMNS, MIGRATION_019_SQL } from "./migrations/migration-019.js";
 import type { RuleIdPrefix } from "@lore/core";
 import { listedRuleLifecycle } from "./index-rows.js";
 import type {
@@ -431,6 +432,8 @@ function libsqlRowToJudgmentRow(row: Row): JudgmentRow {
     judge_prompt_version: rowStr(row, "judge_prompt_version"),
     kind: rowStr(row, "kind") || "review",
     superseded_candidate: rowStrOrNull(row, "superseded_candidate"),
+    truncated: row["truncated"] === null || row["truncated"] === undefined ? null : Number(row["truncated"]),
+    truncation: rowStrOrNull(row, "truncation"),
     created_at: rowStr(row, "created_at"),
     created_by: rowStr(row, "created_by"),
   };
@@ -729,6 +732,16 @@ export class TursoStore implements StoreInterface {
         // reason: migration-018 (rule_registry rebuilt so lifecycle may be 'proposed', triggers re-created) is one
         // BEGIN/COMMIT string rebuilt via rule_registry_new — `executeMultiple`, same as 015.
         await this.client.executeMultiple(MIGRATION_018_SQL);
+      }
+
+      if (currentVersion < 19) {
+        // reason: migration-019 is two-phase like 017 (see migration-019.ts's module JSDoc): nullable
+        // `review_judgments.truncated` / `.truncation` added only where `PRAGMA table_info` lacks them.
+        for (const { table, column, ddl } of MIGRATION_019_ADD_COLUMNS) {
+          const info = await this.client.execute(`PRAGMA table_info(${table})`);
+          if (!info.rows.some((r) => rowStr(r, "name") === column)) await this.client.execute(ddl);
+        }
+        await this.client.executeMultiple(MIGRATION_019_SQL);
       }
     })();
 
@@ -3367,8 +3380,8 @@ export class TursoStore implements StoreInterface {
         sql: `INSERT INTO review_judgments
                (id, doc_id, doc_version, decision, confidence, reasons, checks,
                 blocking_questions, judge_provider, judge_model, judge_prompt_version,
-                kind, superseded_candidate, created_at, created_by)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                kind, superseded_candidate, truncated, truncation, created_at, created_by)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         args: [
           judgment.id,
           judgment.doc_id,
@@ -3383,6 +3396,8 @@ export class TursoStore implements StoreInterface {
           judgment.judge.prompt_version,
           judgment.kind ?? "review",
           judgment.superseded_candidate !== undefined ? JSON.stringify(judgment.superseded_candidate) : null,
+          judgment.truncated === true ? 1 : null,
+          judgment.truncation !== undefined ? JSON.stringify(judgment.truncation) : null,
           judgment.created_at,
           judgment.created_by,
         ] as InValue[],
