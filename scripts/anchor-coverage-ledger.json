@@ -317,6 +317,21 @@
       "slug": "spec-product-baseline-architecture-trees-the-product-s-current",
       "cohort": "debt",
       "reason": "Created 2026-10-07 after the anchor backfill cutoff, so the measured cohort is debt. It is the domain-overview narrative for the product-baseline domain (PRD-level requirements BL-1..BL-16) with no implementation of its own: each delivery slice has its own spec that declares the real code anchors (slice 1: spec-baseline-slice-1-rules-with-permanent-ids-ac-citations). Retire this row only if the overview itself ever gains code it alone owns."
+    },
+    {
+      "slug": "spec-in-repo-lore-defect-backlog-findings-from-developing-lore",
+      "cohort": "debt",
+      "reason": "Backlog umbrella spec: it groups defect findings into plans and governs no code of its own; each fix is anchored by the spec that implements it."
+    },
+    {
+      "slug": "spec-repository-upkeep-backlog-main-stays-green-and-repo-data",
+      "cohort": "debt",
+      "reason": "Process backlog spec for keeping main green and repo data current; it governs maintenance work items, not an implementation file."
+    },
+    {
+      "slug": "spec-round-0-main-is-green-every-red-test-on-e1878626-traced-to",
+      "cohort": "debt",
+      "reason": "Round 0 stabilisation spec: restores red tests across many existing modules and owns no new implementation file; its fixes land in specs that already own those files."
     }
   ]
 }
