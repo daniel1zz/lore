@@ -70,7 +70,8 @@ const TEMPLATE_PATH = join(REPO_ROOT, "assets", "project", "CLAUDE.md.template")
 
 const MANAGED_START_MARKER = "# ─── lore governance (managed) ───";
 const MANAGED_END_MARKER = "# ─── end lore governance ───";
-const RULES_POINTER_TEXT = "Instructions that should not load every session belong in `.claude/rules/*.md`";
+// A pointer to `.claude/rules/*.md` is the contract; the surrounding sentence is free to be reworded.
+const RULES_POINTER_TEXT = ".claude/rules/*.md";
 const EXISTING_GOVERNANCE_POINTER_TEXT = "This file's content contract";
 
 /**

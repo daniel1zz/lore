@@ -45,7 +45,7 @@ export const LORE_BINARY_VERSION = "0.1.0" as const;
 
 export const EMBEDDED_ASSETS_MANIFEST: EmbeddedAssetsManifest = {
   binary_version: LORE_BINARY_VERSION,
-  tree_digest: "6cec4aa406656004ecfb6c146946c31706313686c7d3825e7afe963ce1e643e9",
+  tree_digest: "463c6c5144e4433e2c7c02a9227d9c3ba12fd95122eb18a4d3ea081f44be8254",
   entries: [
   { path: "agents/lore-implementer.md", kind: "agent", ownership: "managed", sha256: "5229d158b6ce792f4bb0083b44995946d54cdc899983bc88a4b945769282ed0f" },
   { path: "agents/lore-reader.md", kind: "agent", ownership: "managed", sha256: "336b2da60cfe9afae51f17ac8f6f9f33e7c67b2f3639874795e22a0e257e8696" },
@@ -85,7 +85,7 @@ export const EMBEDDED_ASSETS_MANIFEST: EmbeddedAssetsManifest = {
   { path: "project/gitignore.template", kind: "project", ownership: "merged", sha256: "ae5fc002a59c4c940a269a293d4e5070eda567a5ef55f7e890ad02af18968d74" },
   { path: "project/lore-config-template.yaml", kind: "project", ownership: "user_once", sha256: "10b2ad0ffcced2590c7e1639cd95a0b3590d400bd45d30be6d7c59beb8946d23" },
   { path: "project/lore.tree.yaml.template", kind: "project", ownership: "user_once", sha256: "b169f38f2ec3a16249764a8360f37f177ad20de6eabe6f91882278bbbe71ddd9" },
-  { path: "project/pre-push", kind: "project", ownership: "managed", sha256: "670cc6b549e45c8fb5e74312f84a1135d083ff10b3d750d4af16dcac8f4f1920" },
+  { path: "project/pre-push", kind: "project", ownership: "managed", sha256: "aa20533c157ae6294bb547a825b9eb5e1f7ad6394f2f290e7f3ef327f4fe741b" },
   { path: "skills/lore-ai-native-coding/SKILL.md", kind: "skill", ownership: "managed", sha256: "7ddcbfab10a643beef91cf3f0f8dc00701964575c725d785f6e5fad441c9a5c3" },
   { path: "skills/lore-ai-native-coding/references/ai-anti-patterns.md", kind: "skill", ownership: "managed", sha256: "91edef16b885924ba3639d7b918a68c14160cf2f4ba01e27eac2492ba6b39743" },
   { path: "skills/lore-ai-native-coding/references/backend-layering.md", kind: "skill", ownership: "managed", sha256: "601e24d28845f8c08996e75bb4c64ee5b4ed67f844249d08336c1ee91328c150" },

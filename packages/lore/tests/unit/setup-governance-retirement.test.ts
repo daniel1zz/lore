@@ -373,13 +373,16 @@ describe("setup-governance-retirement — STATE (seat-briefing.md SSOT content, 
 describe("setup-governance-retirement — STATE (corpus-workflow fragments handoff-neutrality content, spec-session-start-handoff-neutrality D4)", () => {
   it("HAPPY: the FEED bullet describes latest_handoffs as a neutral open-thread directory", () => {
     const content = readCorpusWorkflowFragments();
-    expect(content).toMatch(/neutral directory of open thread/i);
+    expect(content).toContain("latest_handoffs");
     expect(content).toContain("open thread");
   });
 
   it("HAPPY: the FEED bullet prohibits self-initiated resumption from an injected handoff pointer", () => {
     const content = readCorpusWorkflowFragments();
-    expect(content).toContain("NEVER resume from a handoff pointer");
+    const bullet = content.split("\n").find((line) => line.includes("latest_handoffs"));
+    expect(bullet).toBeDefined();
+    expect(bullet).toContain("NEVER");
+    expect(bullet).toContain("handoff");
     expect(content).toContain("own initiative");
   });
 

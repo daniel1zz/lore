@@ -92,4 +92,26 @@ if [ -f "$anchor_coverage_checker" ] && command -v bun >/dev/null 2>&1; then
       ;;
   esac
 fi
+
+# Prose-pin guard (AC-TG-4): a test asserting a 5+ word sentence of shipped or
+# governing prose (assets, CLAUDE.md, SKILL.md, rules, docs) pins phrasing, not
+# behavior. Guarded by file existence AND `bun`, like the anchor-coverage step
+# above (a third-party project has no such script). Exit 1 = a pin or stale
+# ledger row the pusher must fix; any other code = the scan itself failed.
+prose_pin_checker="$(git rev-parse --show-toplevel)/scripts/check-prose-pins.ts"
+if [ -f "$prose_pin_checker" ] && command -v bun >/dev/null 2>&1; then
+  bun "$prose_pin_checker"
+  code=$?
+  case "$code" in
+    0) ;;
+    1)
+      echo "pre-push: prose-pin check failed (exit $code) — the report above names file:line; assert a heading or key token instead of the sentence, or add a row (consumer + reason) to scripts/prose-pin-ledger.json; or push with --no-verify" >&2
+      exit 1
+      ;;
+    *)
+      echo "pre-push: prose-pin check could not complete its scan (exit $code) — diagnose with \`bun scripts/check-prose-pins.ts\`, or push with --no-verify" >&2
+      exit 1
+      ;;
+  esac
+fi
 exit 0

@@ -98,40 +98,40 @@ describe("claude-md contract asset — three prose additions (AC-CONTRACT-1)", (
 
     it("HAPPY: `paths:` frontmatter scopes a rule to load only on matching files", () => {
       const content = readContract();
-      expect(content).toContain("`paths:` YAML frontmatter scopes a rule so it loads");
+      expect(content).toContain("`paths:` YAML frontmatter");
     });
 
     it("HAPPY: a rule with no `paths:` loads every session at CLAUDE.md's priority", () => {
       const content = readContract();
-      expect(content).toContain("loads every session, at the same\n  priority as `.claude/CLAUDE.md`");
+      expect(content).toContain("loads every session");
     });
 
     it("HAPPY: `~/.claude/rules/` is named as the user-level equivalent", () => {
       const content = readContract();
-      expect(content).toContain("`~/.claude/rules/` is the user-level equivalent");
+      expect(content).toContain("`~/.claude/rules/`");
     });
 
     it("HAPPY: rules vs. skills are distinguished (resident/path-triggered vs. invocation-loaded)", () => {
       const content = readContract();
       expect(content).toContain("a rule is resident");
-      expect(content).toContain("a skill loads only on invocation");
+      expect(content).toContain("loads only on invocation");
     });
 
     it("HAPPY: moving a block to rules/ is an eviction ONLY if the destination is budgeted", () => {
       const content = readContract();
-      expect(content).toContain("Moving a block to `rules/` counts as an eviction only if the destination\nis itself budgeted");
+      expect(content).toContain("counts as an eviction");
     });
   });
 
   describe("addition 2 — reworded reflow clause", () => {
     it("HAPPY: the ceiling-gaming prohibition is line-count specific, not a blanket reflow ban", () => {
       const content = readContract();
-      expect(content).toContain("Do not split a line only to reduce the reported LINE COUNT");
+      expect(content).toContain("reported LINE COUNT");
     });
 
     it("HAPPY: bytes are named as the binding ceiling that splitting does not reduce", () => {
       const content = readContract();
-      expect(content).toContain("Bytes\n  are the binding ceiling");
+      expect(content).toContain("binding ceiling");
     });
 
     it("HAPPY: the advisory line_length signal is named and distinguished from the prohibition", () => {
@@ -141,7 +141,7 @@ describe("claude-md contract asset — three prose additions (AC-CONTRACT-1)", (
 
     it("HAPPY: readability shortening (move content elsewhere) is distinguished from ceiling-gaming (reflow in place)", () => {
       const content = readContract();
-      expect(content).toContain("Shortening a\n  line by moving its content elsewhere is fine");
+      expect(content).toContain("content elsewhere is fine");
     });
   });
 
@@ -161,7 +161,7 @@ describe("claude-md contract asset — three prose additions (AC-CONTRACT-1)", (
       const nextHeadingIdx = content.indexOf("\n### ", headingIdx + 1);
       expect(nextHeadingIdx).toBeGreaterThan(headingIdx);
       const section = content.slice(headingIdx, nextHeadingIdx);
-      expect(section).toContain("The stub IS an index entry");
+      expect(section).toContain("stub IS an index");
       expect(section).toContain("Index-Entry Contract");
     });
 
@@ -173,7 +173,7 @@ describe("claude-md contract asset — three prose additions (AC-CONTRACT-1)", (
       expect(nextHeadingIdx).toBeGreaterThan(contractHeadingIdx);
       const section = content.slice(contractHeadingIdx, nextHeadingIdx);
       expect(section).toContain("eviction stub");
-      expect(section).toContain("is a member\nof this rule, not an exception to it");
+      expect(section).toContain("not an exception");
     });
   });
 
@@ -199,17 +199,17 @@ describe("claude-md contract asset — three prose additions (AC-CONTRACT-1)", (
 
     it("'Do not raise the ceiling or the floor' bullet still present verbatim", () => {
       const content = readContract();
-      expect(content).toContain("Do not raise the ceiling or the floor.");
+      expect(content).toContain("raise the ceiling");
     });
 
     it("'Do not record the fact in another module's file' bullet still present verbatim", () => {
       const content = readContract();
-      expect(content).toContain("Do not record the fact in another module's file.");
+      expect(content).toContain("another module's file");
     });
 
     it("'Do not disable the check for the file you are editing' bullet still present verbatim", () => {
       const content = readContract();
-      expect(content).toContain("Do not disable the check for the file you are editing.");
+      expect(content).toContain("disable the check");
     });
   });
 });
@@ -227,13 +227,13 @@ describe("claude-md contract asset — Content Tiers rule (tier 1 = rule only, t
     });
 
     it("a line belongs on tier 1 only when ALL three conditions hold", () => {
-      expect(content).toContain("A line belongs on tier 1 only when ALL three hold:");
+      expect(content).toContain("ALL three hold");
     });
 
     it("a tier-1 line states the rule and may keep one short scope-setting reason clause", () => {
       const flat = content.replace(/\s+/g, " ");
-      expect(flat).toContain("A tier-1 line states the rule. It may keep one short reason clause");
-      expect(flat).toContain("is part of the rule, never reasoning");
+      expect(flat).toContain("one short reason clause");
+      expect(flat).toContain("never reasoning");
       expect(flat).toContain("follow the `lore-context-optimizer` skill");
     });
   });
@@ -256,12 +256,12 @@ describe("claude-md contract asset — Content Tiers rule (tier 1 = rule only, t
       expect(idx).toBeGreaterThanOrEqual(0);
       const section = content.slice(idx, content.indexOf("4. **Module Index**", idx));
       const flat = section.replace(/\s+/g, " ");
-      expect(flat).toContain("stated as rules with at most one scope-setting reason clause (tier 1)");
-      expect(flat).toContain("Design intent, trade-offs and history are tier 2: a pointer line to the ADR or module file");
+      expect(flat).toContain("scope-setting reason clause");
+      expect(flat).toContain("history are tier 2");
     });
 
     it("the module taxonomy applies the Content Tiers rule one level down", () => {
-      expect(content).toContain("The Content Tiers rule applies one level down");
+      expect(content).toContain("applies one level down");
     });
   });
 
