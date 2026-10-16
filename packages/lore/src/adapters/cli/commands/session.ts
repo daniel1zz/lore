@@ -34,10 +34,11 @@
  * Source: spec-multi-session-concurrency-queryable-ownership-checkout §Scope L0, AC-OWN-5.
  */
 
-import { realpathSync } from "node:fs";
+import { readFileSync, realpathSync } from "node:fs";
 import { hostname } from "node:os";
 import { dirname } from "node:path";
 import { defineCommand } from "citty";
+import { loadCoChangeRules, reviewCoChange, type CoChangeFinding, type CoChangeGroup, type GlobMatchFn } from "../../../service/co-change-review.js";
 import { reviewHelperScope } from "../../../service/helper-scope-review.js";
 import type { SessionLivenessRecord } from "../../../service/session-service.js";
 import { resolveClaimSessionId } from "../../../service/task-workflow-service.js";
@@ -66,6 +67,29 @@ interface TrailReviewView {
   readonly findings: readonly { readonly message: string }[];
   readonly not_measured: readonly string[];
   readonly reason?: string;
+}
+
+/** `Bun.Glob` matcher, one compiled glob per pattern (the CLI runs under bun; no second glob grammar). */
+function createGlobMatcher(): GlobMatchFn {
+  const compiled = new Map<string, Bun.Glob>();
+  return (pattern, path) => {
+    let glob = compiled.get(pattern);
+    if (glob === undefined) {
+      glob = new Bun.Glob(pattern);
+      compiled.set(pattern, glob);
+    }
+    return glob.match(path);
+  };
+}
+
+/** File text, or null when the file does not exist; any other fault throws (loadCoChangeRules reports it). */
+function readFileOrNull(path: string): string | null {
+  try {
+    return readFileSync(path, "utf8");
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw err;
+  }
 }
 
 function formatTrailReview(view: TrailReviewView): string {
@@ -110,11 +134,55 @@ async function resolveCallerSession(app: Awaited<ReturnType<typeof loadLoreApp>>
   }
 }
 
+/** What the co-change judgment adds to the `trail-review` payload. */
+interface CoChangeJudgment {
+  readonly view: { readonly measured: true; readonly findings: readonly CoChangeFinding[] } | { readonly measured: false; readonly reason: string };
+  readonly findings: readonly CoChangeFinding[];
+  readonly notMeasured: readonly string[];
+}
+
+/**
+ * Judges the co-change rules: the main run (from the narrowed turns' `changes.json`), every helper end this review
+ * judged, and the turn's unknown-source changes as ONE group. Invalid settings never throw and never stop the other
+ * judgments of this run: they come back as `{measured:false, reason}` plus a `not_measured` line (the hook prints it).
+ */
+function judgeCoChange(input: {
+  readonly trail: SessionTrail;
+  readonly turn: string | undefined;
+  readonly session: string;
+  readonly projectRoot: string;
+  readonly helperReview: { readonly helpers: readonly { readonly run: string; readonly files: readonly string[] }[] };
+}): CoChangeJudgment {
+  const rules = loadCoChangeRules(input.projectRoot, readFileOrNull);
+  if (!rules.measured) return { view: { measured: false, reason: rules.reason }, findings: [], notMeasured: [`co_change not measured: ${rules.reason}`] };
+  const notMeasured: string[] = [];
+  const mainRun = `cc:${input.session}`;
+  const mainFiles = new Set<string>();
+  const unknownFiles = new Set<string>();
+  for (const turn of input.trail.turns.filter((t) => input.turn === undefined || t.turn === input.turn)) {
+    if (!turn.changes.measured) {
+      if (rules.rules.length > 0) notMeasured.push(`co_change: turn ${turn.turn} changes not measured (${turn.changes.reason}); main run and unknown-source group not judged for it`);
+      continue;
+    }
+    for (const change of turn.changes.value) {
+      if (change.source.kind === "run" && change.source.run === mainRun) mainFiles.add(change.path);
+      else if (change.source.kind === "unknown") unknownFiles.add(change.path);
+    }
+  }
+  const groups: CoChangeGroup[] = [
+    { subject: { kind: "run", run: mainRun }, files: [...mainFiles].sort() },
+    ...input.helperReview.helpers.map((h): CoChangeGroup => ({ subject: { kind: "run", run: h.run }, files: h.files })),
+    { subject: { kind: "unknown" }, files: [...unknownFiles].sort() },
+  ];
+  const findings = reviewCoChange(rules.rules, groups, createGlobMatcher());
+  return { view: { measured: true, findings }, findings, notMeasured };
+}
+
 /**
  * `lore session trail-review [--turn <id>] [--json]` — judges the caller's session's helper ends not yet judged
  * (`end_count > judged_end_count`) against the tasks each helper claimed (spec session-trail, Helper scope; AC-ST-8).
  * It NEVER marks a helper judged: that single write belongs to the turn-end hook, after this verb succeeded.
- * Output `{ok, data: {turn?, helpers, findings, not_measured}}`. Exit 0 ok (also with no `.lore/` directory: nothing to
+ * Output `{ok, data: {turn?, helpers, findings, not_measured, co_change}}` (`co_change` = `{measured:true, findings}` or `{measured:false, reason}`; its findings are also in `findings`). Exit 0 ok (also with no `.lore/` directory: nothing to
  * judge against, checked BEFORE the corpus is opened); 3 unknown `--turn`; 4 no attested run / no trail; otherwise the
  * service error's code (the hook turns any non-zero exit into a not-measured line).
  */
@@ -170,7 +238,14 @@ async function runSessionTrailReview(args: { turn?: unknown; json?: unknown }): 
       process.exitCode = exitCode(review.error);
       return;
     }
-    emit({ ...(turn !== undefined ? { turn } : {}), ...review.value });
+    const coChange = judgeCoChange({ trail, turn, session, projectRoot: dirname(dirname(dbPath)), helperReview: review.value });
+    emit({
+      ...(turn !== undefined ? { turn } : {}),
+      ...review.value,
+      findings: [...review.value.findings, ...coChange.findings],
+      not_measured: [...review.value.not_measured, ...coChange.notMeasured],
+      co_change: coChange.view,
+    });
   } finally {
     app.close();
   }

@@ -34,6 +34,11 @@ workflow:
   # (adr-rule-delivery-tiers-gate-hook-skill-and-optimistic); stop-turn-review checks it once per turn.
   turn_end:
     main_session_source_edits: block
+    # Files that must change together (AC-ST-7): an assets/ change without the regenerated manifest is a finding.
+    co_change:
+      - name: assets-manifest
+        when: ["assets/**"]
+        require: ["packages/lore/src/generated/assets-manifest.ts"]
   verification_profiles:
     design:
       required_oracles:
