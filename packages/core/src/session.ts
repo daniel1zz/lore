@@ -200,6 +200,7 @@
  */
 
 import { z } from "zod";
+import { ChangeSourceSchema, type ChangeSource, type SessionTrail } from "./session-trail.js";
 import { extractClaim, isClaimStale } from "./task-workflow.js";
 import type { DocId, DocRecord } from "./types.js";
 
@@ -239,6 +240,29 @@ export const handoffFailingOracleSchema = z.object({
 
 /** Derived TypeScript type for a handoff's failing-oracle snapshot. */
 export type HandoffFailingOracle = z.infer<typeof handoffFailingOracleSchema>;
+
+/**
+ * One entry of a handoff's merged changed-file view (session-trail D16): a path, every distinct change
+ * source the session trail recorded for it (empty when only the author named it), and whether the author
+ * typed it into `modified_files`. One entry per path, however many sources or turns touched it.
+ */
+export const handoffChangedFileSchema = z.object({
+  path: z.string().min(1),
+  sources: z.array(ChangeSourceSchema),
+  named_by_author: z.boolean(),
+});
+export type HandoffChangedFile = z.infer<typeof handoffChangedFileSchema>;
+
+/**
+ * A part of the session trail the handoff could not list files for: a removed part, or a turn / helper /
+ * whole trail that was not measured. Rendered as such, never as "no change" (plan invariant I7).
+ */
+export const handoffTrailGapSchema = z.object({
+  kind: z.enum(["removed", "unmeasured"]),
+  subject: z.string().min(1),
+  detail: z.string().min(1),
+});
+export type HandoffTrailGap = z.infer<typeof handoffTrailGapSchema>;
 
 /**
  * The full typed SSOT for a `knowledge` doc's `extra.handoff` (sub_type "handoff").
@@ -288,6 +312,9 @@ export const handoffExtraSchema = z.object({
   failing_oracle: handoffFailingOracleSchema.optional(),
   next_steps: z.array(z.string().min(1)).min(1),
   degraded: z.boolean().optional(),
+  changed_files: z.array(handoffChangedFileSchema).optional(),
+  changed_files_measured: z.boolean().optional(),
+  trail_gaps: z.array(handoffTrailGapSchema).optional(),
 });
 
 /** Derived TypeScript type for a `knowledge` doc's `extra.handoff` (sub_type "handoff"). */
@@ -301,6 +328,119 @@ export type HandoffExtra = z.infer<typeof handoffExtraSchema>;
  */
 export const DEGRADED_HANDOFF_MARKER =
   "⚠ degraded (git-only capture — no key decisions recorded, next_steps may be incomplete)";
+
+function formatChangeSource(source: ChangeSource): string {
+  switch (source.kind) {
+    case "run":
+      return `run ${source.run}`;
+    case "vcs":
+      return "vcs";
+    case "unknown":
+      return "source unknown";
+    default: {
+      const exhaustive: never = source;
+      return exhaustive;
+    }
+  }
+}
+
+function renderChangedFilesSection(extra: HandoffExtra): string[] {
+  const files = extra.changed_files ?? [];
+  const gaps = extra.trail_gaps ?? [];
+  const out: string[] = ["## Changed Files", ""];
+  if (extra.changed_files_measured === false) {
+    const why = gaps.find((g) => g.kind === "unmeasured" && g.subject === "trail");
+    out.push(`changed files: not measured${why !== undefined ? ` (${why.detail})` : ""}`);
+    if (files.length > 0) out.push("", "Files named by the author:");
+  }
+  if (files.length > 0) {
+    for (const f of files) {
+      const labels = f.sources.map(formatChangeSource);
+      if (f.named_by_author) labels.push("named by author");
+      out.push(`- ${f.path} (${labels.join("; ")})`);
+    }
+  } else if (extra.changed_files_measured !== false) {
+    out.push("(none recorded in the session trail)");
+  }
+  const shownGaps = gaps.filter((g) => !(g.kind === "unmeasured" && g.subject === "trail"));
+  if (shownGaps.length > 0) {
+    out.push("", "Trail gaps:");
+    for (const g of shownGaps) out.push(`- ${g.kind === "removed" ? "removed" : "not measured"}: ${g.subject} — ${g.detail}`);
+  }
+  return out;
+}
+
+/** The three handoff fields the session trail fills (D16). */
+export interface HandoffChangedFiles {
+  readonly changed_files: HandoffChangedFile[];
+  readonly changed_files_measured: boolean;
+  readonly trail_gaps: HandoffTrailGap[];
+}
+
+/**
+ * Merge a session trail with the files the author typed into one changed-file view (D16). Pure.
+ *
+ * @param trail - the caller's session trail, or `null` when it could not be read.
+ * @param authorFiles - `modified_files` exactly as typed (BR-343: matched by exact string).
+ * @param unmeasuredReason - why there is no trail; used only when `trail` is `null`.
+ * @returns trail files in first-seen order (one entry per path, every distinct source), then author-only
+ *   files; `changed_files_measured` is false only when there is no trail. Removed parts and unmeasured turns
+ *   or helpers become `trail_gaps`, never silence.
+ * @example
+ * mergeTrailIntoChangedFiles(null, ["a.ts"], "no attested run").changed_files_measured // => false
+ */
+export function mergeTrailIntoChangedFiles(
+  trail: SessionTrail | null,
+  authorFiles: readonly string[],
+  unmeasuredReason: string,
+): HandoffChangedFiles {
+  const sourcesByPath = new Map<string, Map<string, ChangeSource>>();
+  const gaps: HandoffTrailGap[] = [];
+  const note = (path: string, source: ChangeSource): void => {
+    const known = sourcesByPath.get(path) ?? new Map<string, ChangeSource>();
+    known.set(JSON.stringify(source), source);
+    sourcesByPath.set(path, known);
+  };
+
+  if (trail === null) {
+    gaps.push({ kind: "unmeasured", subject: "trail", detail: unmeasuredReason });
+  } else {
+    if (trail.removed !== null) {
+      gaps.push({
+        kind: "removed",
+        subject: `session ${trail.session}`,
+        detail: `earlier part removed on ${trail.removed.removed_at}`,
+      });
+    }
+    for (const turn of trail.turns) {
+      if (turn.changes.measured) {
+        for (const change of turn.changes.value) note(change.path, change.source);
+      } else {
+        gaps.push({ kind: "unmeasured", subject: `turn ${turn.turn}`, detail: turn.changes.reason });
+      }
+    }
+    for (const helper of trail.helpers) {
+      if (helper.changes === undefined) {
+        gaps.push({ kind: "unmeasured", subject: `helper ${helper.run}`, detail: "no end measurement recorded" });
+      } else if (helper.changes.measured) {
+        for (const change of helper.changes.value.files) note(change.path, change.source);
+      } else {
+        gaps.push({ kind: "unmeasured", subject: `helper ${helper.run}`, detail: helper.changes.reason });
+      }
+    }
+  }
+
+  const authored = new Set(authorFiles);
+  const changed_files: HandoffChangedFile[] = [...sourcesByPath].map(([path, sources]) => ({
+    path,
+    sources: [...sources.values()],
+    named_by_author: authored.has(path),
+  }));
+  for (const path of authored) {
+    if (!sourcesByPath.has(path)) changed_files.push({ path, sources: [], named_by_author: true });
+  }
+  return { changed_files, changed_files_measured: trail !== null, trail_gaps: gaps };
+}
 
 /**
  * Deterministic Markdown rendering of a `HandoffExtra` for the knowledge doc's
@@ -350,11 +490,17 @@ export function renderHandoffContent(extra: HandoffExtra): string {
   lines.push(extra.task_refs.length > 0 ? extra.task_refs.map((t) => `- ${t}`).join("\n") : "(none)");
   lines.push("");
 
-  lines.push("## Modified Files");
-  lines.push("");
-  lines.push(
-    extra.modified_files.length > 0 ? extra.modified_files.map((f) => `- ${f}`).join("\n") : "(none)",
-  );
+  if (extra.changed_files !== undefined || extra.changed_files_measured !== undefined) {
+    // reason: session-trail D16 — once the merged view exists it is the ONE list rendered; `modified_files`
+    // stays stored exactly as typed (BR-343) but is not shown a second time.
+    lines.push(...renderChangedFilesSection(extra));
+  } else {
+    lines.push("## Modified Files");
+    lines.push("");
+    lines.push(
+      extra.modified_files.length > 0 ? extra.modified_files.map((f) => `- ${f}`).join("\n") : "(none)",
+    );
+  }
   lines.push("");
 
   lines.push("## Key Decisions");
