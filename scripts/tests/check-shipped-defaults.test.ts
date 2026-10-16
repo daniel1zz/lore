@@ -18,11 +18,11 @@
  *     mirroring this repo's REAL `.lore/config.yaml` exits 0 end-to-end.
  *   NEGATIVE — an override the shipped surface does not carry exits exactly
  *     3, naming the offending path; an entirely-absent `.lore/config.yaml`
- *     is zero overrides, never a scan failure.
+ *     is a scan failure (#223), never "zero overrides".
  *   BOUNDARY — the THREE pinned rationale probes (whitespace-only,
  *     placeholder, 19-char) each independently trip exit 3; a 20-char
  *     non-placeholder rationale does not.
- *   ERROR — a missing template file, malformed template YAML, and malformed
+ *   ERROR — a missing `.lore/config.yaml` (#223), missing template file, malformed template YAML, and malformed
  *     `.lore/config.yaml` are SCAN FAILURES (thrown `ShippedDefaultsCheckError`),
  *     never silently reported as clean.
  *   STATE — every pure function is idempotent across repeated calls on the
@@ -37,7 +37,7 @@
  */
 
 import { describe, it, expect, afterEach, vi } from "vitest";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -93,6 +93,12 @@ const EMPTY_TEMPLATE_TEXT = "project_placeholder_never_a_real_key_do_not_seed: t
 
 /** `project` is REQUIRED (no Zod default) — every minimal fixture config.yaml below needs this prefix. */
 const TEST_PROJECT_HEADER = "project:\n  name: fixture-project\n  author: fixture-author\n";
+
+/** The required `project:` header is not shipped by the template, so injected-allowlist cases must allowlist it to isolate their own signal. */
+const PROJECT_HEADER_ALLOWLIST_ENTRY: ProjectSpecificKeyEntry = {
+  key: "project",
+  rationale: "required per-project identity header in every fixture config",
+};
 
 const activeTmpDirs: string[] = [];
 
@@ -379,8 +385,8 @@ describe("main(): HAPPY — AC-GD-1(a)/(b) duplicate values and allowlisted keys
     expect(main(root)).toBe(0);
   });
 
-  it("an entirely absent .lore/config.yaml is zero overrides, not a scan failure", () => {
-    const root = buildFixtureRepo(undefined, EMPTY_TEMPLATE_TEXT);
+  it("an explicit config with zero overrides beyond the required project header exits 0 (replaces the old vacuous absent-file case, #223)", () => {
+    const root = buildFixtureRepo(TEST_PROJECT_HEADER, EMPTY_TEMPLATE_TEXT);
     expect(main(root)).toBe(0);
   });
 
@@ -432,30 +438,30 @@ describe("main(): REGRESSION — issue #219: workflow.turn_end.main_session_sour
 describe("main(): BOUNDARY — AC-GD-1(c) the three pinned rationale probes, each independently, via main()'s own IO shell", () => {
   // `allowlist` is injectable on `main()` PRECISELY so this suite can prove the IO
   // shell itself (not just the pure findAllowlistRationaleViolations predicate above)
-  // surfaces an invalid rationale as exit 3 — a FRESH config file with ZERO overrides
+  // surfaces an invalid rationale as exit 3 — a FRESH config file with ONLY the allowlisted project header
   // per case, so the exit-3 provably comes from the allowlist check alone, never drift.
 
   it("a whitespace-only rationale exits 3", () => {
-    const root = buildFixtureRepo(undefined, EMPTY_TEMPLATE_TEXT);
-    const allowlist: ProjectSpecificKeyEntry[] = [{ key: "some.key", rationale: "                    " }];
+    const root = buildFixtureRepo(TEST_PROJECT_HEADER, EMPTY_TEMPLATE_TEXT);
+    const allowlist: ProjectSpecificKeyEntry[] = [PROJECT_HEADER_ALLOWLIST_ENTRY, { key: "some.key", rationale: "                    " }];
     expect(main(root, allowlist)).toBe(3);
   });
 
   it("a placeholder-token rationale exits 3", () => {
-    const root = buildFixtureRepo(undefined, EMPTY_TEMPLATE_TEXT);
-    const allowlist: ProjectSpecificKeyEntry[] = [{ key: "some.key", rationale: "TBD" }];
+    const root = buildFixtureRepo(TEST_PROJECT_HEADER, EMPTY_TEMPLATE_TEXT);
+    const allowlist: ProjectSpecificKeyEntry[] = [PROJECT_HEADER_ALLOWLIST_ENTRY, { key: "some.key", rationale: "TBD" }];
     expect(main(root, allowlist)).toBe(3);
   });
 
   it("a 19-char rationale (one under the floor) exits 3", () => {
-    const root = buildFixtureRepo(undefined, EMPTY_TEMPLATE_TEXT);
-    const allowlist: ProjectSpecificKeyEntry[] = [{ key: "some.key", rationale: "123456789012345678x" }];
+    const root = buildFixtureRepo(TEST_PROJECT_HEADER, EMPTY_TEMPLATE_TEXT);
+    const allowlist: ProjectSpecificKeyEntry[] = [PROJECT_HEADER_ALLOWLIST_ENTRY, { key: "some.key", rationale: "123456789012345678x" }];
     expect(main(root, allowlist)).toBe(3);
   });
 
   it("CONTROL: a 20-char, non-placeholder rationale on the SAME key exits 0 — proves the three probes above are discriminating, not a permanently-broken fixture", () => {
-    const root = buildFixtureRepo(undefined, EMPTY_TEMPLATE_TEXT);
-    const allowlist: ProjectSpecificKeyEntry[] = [{ key: "some.key", rationale: "1234567890123456789x" }];
+    const root = buildFixtureRepo(TEST_PROJECT_HEADER, EMPTY_TEMPLATE_TEXT);
+    const allowlist: ProjectSpecificKeyEntry[] = [PROJECT_HEADER_ALLOWLIST_ENTRY, { key: "some.key", rationale: "1234567890123456789x" }];
     expect(main(root, allowlist)).toBe(0);
   });
 });
@@ -464,16 +470,41 @@ describe("main(): ERROR — a scan failure is never reported as clean", () => {
   it("a missing template file throws ShippedDefaultsCheckError", () => {
     const root = mkdtempSync(join(tmpdir(), "check-shipped-defaults-fixture-"));
     activeTmpDirs.push(root);
+    mkdirSync(join(root, ".lore"), { recursive: true });
+    writeFileSync(join(root, ".lore", "config.yaml"), TEST_PROJECT_HEADER, "utf8");
+    expect(() => main(root)).toThrow(/lore-config-template\.yaml/);
+  });
+
+  it("a MISSING .lore/config.yaml throws ShippedDefaultsCheckError naming the path — absence is not 'zero overrides' (#223)", () => {
+    const root = buildFixtureRepo(undefined, EMPTY_TEMPLATE_TEXT);
     expect(() => main(root)).toThrow(ShippedDefaultsCheckError);
+    expect(() => main(root)).toThrow(/\.lore\/config\.yaml not found/);
+  });
+
+  it("the CLI on a root with no .lore/config.yaml exits exactly 4 and names the missing path (#223)", () => {
+    // The script resolves its repo root from its own location, so mirror it into the fixture.
+    const root = buildFixtureRepo(undefined, EMPTY_TEMPLATE_TEXT);
+    mkdirSync(join(root, "scripts"), { recursive: true });
+    const scriptSrc = readFileSync(join(REPO_ROOT, "scripts", "check-shipped-defaults.ts"), "utf8");
+    writeFileSync(join(root, "scripts", "check-shipped-defaults.ts"), scriptSrc, "utf8");
+    // Resolve @lore/core from the real repo: symlink its node_modules.
+    symlinkSync(join(REPO_ROOT, "node_modules"), join(root, "node_modules"));
+    const result = spawnSync("bun", [join(root, "scripts", "check-shipped-defaults.ts")], {
+      cwd: root,
+      encoding: "utf8",
+      timeout: 30_000,
+    });
+    expect(result.status).toBe(4);
+    expect(`${result.stdout}${result.stderr}`).toMatch(/\.lore\/config\.yaml not found/);
   });
 
   it("a malformed template YAML throws ShippedDefaultsCheckError", () => {
-    const root = buildFixtureRepo(undefined, "not: valid: yaml: [unterminated");
+    const root = buildFixtureRepo(TEST_PROJECT_HEADER, "not: valid: yaml: [unterminated");
     expect(() => main(root)).toThrow(ShippedDefaultsCheckError);
   });
 
   it("a template that parses to a non-object (a bare scalar) throws ShippedDefaultsCheckError", () => {
-    const root = buildFixtureRepo(undefined, "just a bare scalar string\n");
+    const root = buildFixtureRepo(TEST_PROJECT_HEADER, "just a bare scalar string\n");
     expect(() => main(root)).toThrow(ShippedDefaultsCheckError);
   });
 
@@ -487,8 +518,8 @@ describe("main(): ERROR — a scan failure is never reported as clean", () => {
 
 describe("main(): REGRESSION — this repo's real template + a fixture copy of the real .lore/config.yaml (task Acceptance Criterion)", () => {
   it("exits 0 against a fixture reconstructing this repo's ACTUAL .lore/config.yaml content (the genuine post-D2 tree, not a vacuous empty-file pass)", () => {
-    // .lore/config.yaml is gitignored (untracked) — this worktree's own copy is
-    // therefore ABSENT, which would make a real-tree main() call here vacuous.
+    // .lore/config.yaml is tracked since #223, so a real-tree main() call is measured
+    // (see the real-root case below); this fixture additionally pins the content.
     // This fixture reconstructs the REAL content read from the main checkout on
     // 2026-08-11 (this task's closing report cites the exact read), so this
     // assertion is a genuine "does the post-fix tree pass" proof, not a
@@ -554,8 +585,22 @@ ai:
     expect(main(root)).toBe(3);
   });
 
-  it("main() against THIS worktree's own real repo root (no injected repoRoot) does not throw and exits 0 (no .lore/config.yaml here — untracked, per-worktree state)", () => {
-    expect(main()).toBe(0);
+  it("main() against THIS worktree's own real repo root measures for real: config is tracked, exit 0, and >=1 configured override scanned (#223)", () => {
+    expect(existsSync(join(REPO_ROOT, ".lore", "config.yaml"))).toBe(true);
+    const lines: string[] = [];
+    const spy = vi.spyOn(console, "log").mockImplementation((...args: unknown[]) => {
+      lines.push(args.map(String).join(" "));
+    });
+    let exitCode: number;
+    try {
+      exitCode = main();
+    } finally {
+      spy.mockRestore();
+    }
+    expect(exitCode).toBe(0);
+    const match = lines.join("\n").match(/scanned (\d+) configured override/);
+    expect(match).not.toBeNull();
+    expect(Number(match?.[1])).toBeGreaterThanOrEqual(1);
   });
 });
 

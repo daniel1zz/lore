@@ -87,8 +87,8 @@
  *     `getAtPath` / `deepEqualJsonValue` / `isAllowlistedKey` — pure.
  *   - `meetsRationaleMinimalShape` / `findAllowlistRationaleViolations` — pure.
  *   - `findShippedDefaultDrift` — pure.
- *   - `main(repoRoot?)` — IO shell: reads `.lore/config.yaml` (if present)
- *     and the shipped template, prints a report, RETURNS the exit code
+ *   - `main(repoRoot?)` — IO shell: reads `.lore/config.yaml` (REQUIRED —
+ *     its absence throws, #223) and the shipped template, prints a report, RETURNS the exit code
  *     (never calls `process.exit` itself — mirrors
  *     `scripts/check-ordinal-write-sites.mjs`'s armable shape so a test can
  *     import and call it directly).
@@ -100,7 +100,7 @@
  *   0 — no drift violation and every allowlist entry's rationale is valid.
  *   3 — >=1 drift violation and/or >=1 invalid allowlist rationale — each
  *       printed by name.
- *   4 — the scan itself could not run (malformed `.lore/config.yaml`,
+ *   4 — the scan itself could not run (missing or malformed `.lore/config.yaml`,
  *       missing/malformed template, unreadable file) — `main` THROWS
  *       {@link ShippedDefaultsCheckError} in this case; the `import.meta.main`
  *       block below is what maps it to 4. NEVER reported as a clean tree.
@@ -495,11 +495,13 @@ export function findShippedDefaultDrift(
 const TemplateRawSchema = z.record(z.string(), z.unknown());
 
 /**
- * CLI entrypoint — reads `<repoRoot>/.lore/config.yaml` (if present; its
- * absence means zero overrides, never a scan failure) and
+ * CLI entrypoint — reads `<repoRoot>/.lore/config.yaml` (REQUIRED — its
+ * absence IS a scan failure, since this repo tracks the dogfood config (#223)
+ * and a missing file must never read as "zero overrides") and
  * `<repoRoot>/assets/project/lore-config-template.yaml` (REQUIRED — its
  * absence IS a scan failure, since the shipped surface is undefined without
- * it), computes the shipped surface, and reports.
+ * it), computes the shipped surface, and reports how many configured
+ * override leaves it scanned.
  *
  * Never calls `process.exit` — returns the exit code so a test can call this
  * directly (mirrors `scripts/check-ordinal-write-sites.mjs`'s armable
@@ -514,7 +516,7 @@ const TemplateRawSchema = z.record(z.string(), z.unknown());
  *   every other caller (including the direct-run CLI entry below) relies on
  * @returns 0 (clean) or 3 (drift and/or invalid-rationale violations found)
  * @throws ShippedDefaultsCheckError when the scan itself cannot run (missing
- *   template, malformed YAML, malformed config) — never reported as clean
+ *   config, missing template, malformed YAML, malformed config) — never reported as clean
  */
 export function main(
   repoRoot: string = REPO_ROOT,
@@ -523,8 +525,14 @@ export function main(
   const configPath = join(repoRoot, CONFIG_RELATIVE_PATH);
   const templatePath = join(repoRoot, TEMPLATE_RELATIVE_PATH);
 
-  let repoConfig: Record<string, unknown> | undefined;
-  if (existsSync(configPath)) {
+  if (!existsSync(configPath)) {
+    throw new ShippedDefaultsCheckError(
+      `${CONFIG_RELATIVE_PATH} not found at ${configPath}: the dogfood config is tracked (#223); a missing file is not 'zero overrides'`,
+    );
+  }
+  let repoConfig: Record<string, unknown>;
+  let scannedOverrideCount: number;
+  {
     let raw: string;
     try {
       raw = readFileSync(configPath, "utf8");
@@ -542,6 +550,9 @@ export function main(
     // reason: same widening as computeCodeDefaults above — flattenLeaves needs a
     // generic Record, not the precise LoreConfig type.
     repoConfig = parsed.value as unknown as Record<string, unknown>;
+    // reason: count the leaves the file ITSELF writes (raw YAML), not `parsed.value`,
+    // which has Zod defaults filled in — otherwise an empty config would still report >0.
+    scannedOverrideCount = flattenLeaves(yaml.parse(raw) as Record<string, unknown>).length;
   }
 
   let templateText: string;
@@ -572,7 +583,7 @@ export function main(
   const shippedSurface = deepMergeShippedSurface(codeDefaults, templateRawResult.data);
 
   const rationaleViolations = findAllowlistRationaleViolations(allowlist);
-  const driftViolations = repoConfig ? findShippedDefaultDrift(repoConfig, shippedSurface, allowlist) : [];
+  const driftViolations = findShippedDefaultDrift(repoConfig, shippedSurface, allowlist);
 
   if (rationaleViolations.length > 0 || driftViolations.length > 0) {
     console.error(
@@ -602,8 +613,8 @@ export function main(
   }
 
   console.log(
-    `check-shipped-defaults: OK — ${repoConfig ? "0" : "no .lore/config.yaml present, so 0"} shipped-default ` +
-      `drift violation(s), and all ${allowlist.length} PROJECT_SPECIFIC_KEYS entries carry a valid rationale.`,
+    `check-shipped-defaults: OK — scanned ${scannedOverrideCount} configured override(s) in ${CONFIG_RELATIVE_PATH}: ` +
+      `0 shipped-default drift violation(s), and all ${allowlist.length} PROJECT_SPECIFIC_KEYS entries carry a valid rationale.`,
   );
   return 0;
 }
