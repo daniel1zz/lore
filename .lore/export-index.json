@@ -10720,6 +10720,42 @@
     "01M51K39PE8S9KHHJWSYVM8STG": {
       "human_id": "TASK-1400",
       "file_path": "docs/requirements/task/TASK-1400-lore-worktree-sweep-marks-a-worktree-an-agent-is-a.md"
+    },
+    "01M51RM9E6D4YMP40JJ1WT8N9G": {
+      "human_id": "SPEC-192",
+      "file_path": "docs/requirements/spec/SPEC-192-repository-upkeep-backlog-main-stays-green-and-rep.md"
+    },
+    "01M51QWVSSMEKEN2BF371BDSTC": {
+      "human_id": "SPEC-191",
+      "file_path": "docs/requirements/spec/SPEC-191-the-shipped-close-guidance-scopes-defect-reports-l.md"
+    },
+    "01M51S3HX3H9KZM0F4CAS2Q2HX": {
+      "human_id": "KN-699",
+      "file_path": "docs/requirements/knowledge/KN-699-proposals-moved-out-of-the-defect-channel-2026-10.md"
+    },
+    "01M51RMKQY7XR6V6BDR3KB90YJ": {
+      "human_id": "PLAN-190",
+      "file_path": "docs/requirements/plan/PLAN-190-repository-upkeep-backlog.md"
+    },
+    "01M51QXNYX8VW7QAJE93P1QWMX": {
+      "human_id": "PLAN-191",
+      "file_path": "docs/requirements/plan/PLAN-191-ship-the-defect-report-scoping-rule-in-the-close-f.md"
+    },
+    "01M51SDA5PWCB0XVEPHGTW7ZB9": {
+      "human_id": "TASK-1401",
+      "file_path": "docs/requirements/task/TASK-1401-skill-implement-fix-the-three-landing-regressions.md"
+    },
+    "01M51SCSVZ86YM8DYDP2Q0K5B1": {
+      "human_id": "TASK-1402",
+      "file_path": "docs/requirements/task/TASK-1402-pre-bash-git-safety-gate-reports-could-not-read-th.md"
+    },
+    "01M51QXPNGV6GG21TGD3CMQBES": {
+      "human_id": "TASK-1403",
+      "file_path": "docs/requirements/task/TASK-1403-skill-implement-close-fragment-scopes-defect-repor.md"
+    },
+    "01M51QNXF7B6XHR9TR6FAR4X3S": {
+      "human_id": "TASK-1404",
+      "file_path": "docs/requirements/task/TASK-1404-ac-scope-resolution-counts-a-deprecated-spec-as-a.md"
     }
   }
 }

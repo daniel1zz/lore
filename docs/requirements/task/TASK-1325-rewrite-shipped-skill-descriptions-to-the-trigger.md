@@ -11,6 +11,8 @@ updated: 2026-10-15
 tags: []
 parent: PLAN-184
 plan: PLAN-184
+links:
+  - {id: TASK-1347, type: resolves}
 ---
 ## Goal
 

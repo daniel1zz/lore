@@ -14,5 +14,6 @@ plan: PLAN-167
 links:
   - {id: TASK-1104, type: blocks}
   - {id: TASK-1093, type: blocks}
+  - {id: TASK-1098, type: resolves}
 ---
 Implementer. Estimate: M

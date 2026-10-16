@@ -13,6 +13,7 @@ parent: PLAN-181
 plan: PLAN-181
 links:
   - {id: TASK-1303, type: blocks}
+  - {id: TASK-883, type: resolves}
 ---
 Estimate: S
 Approach: distribution-hooks.ts: register stop-turn-review on Stop; drop stop-doc-sync.mjs, claude-md-guard.sh; delete those asset files and assets/hooks/pre-subagent-gate.mjs; remove pre-subagent-gate from this repo's .claude/settings.json; regenerate manifest; converge proof per AC-TE-5.

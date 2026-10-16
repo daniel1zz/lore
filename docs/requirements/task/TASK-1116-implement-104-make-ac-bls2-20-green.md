@@ -13,5 +13,6 @@ parent: PLAN-169
 plan: PLAN-169
 links:
   - {id: TASK-1112, type: blocks}
+  - {id: TASK-1143, type: resolves}
 ---
 Implementer makes AC-BLS2-20 green without editing test assertions. Estimate: M
