@@ -7,7 +7,8 @@
  *
  * Public surface: getStateBase, parseRunId, sessionOfRun, readSessionTrail (reader);
  *   writeJsonAtomic, writeJsonExclusive, recordSessionStart, recordHelperStart,
- *   applyRetention, RETENTION_DAYS, MARKER_RETENTION_DAYS (writers); typed errors.
+ *   recordHelperEnd, measureHelperChanges, applyRetention, RETENTION_DAYS, MARKER_RETENTION_DAYS
+ *   (writers); typed errors.
  *
  * Invariants:
  *   - Hooks are standalone files with no access to `@lore/core`, so the reader and the schemas
@@ -30,8 +31,11 @@ import {
   existsSync, linkSync, lstatSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync,
   statSync, writeFileSync,
 } from 'node:fs';
-import { basename, dirname, join } from 'node:path';
+import { basename, dirname, join, resolve, sep } from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { execFileSync } from 'node:child_process';
+import { copyFileSync, realpathSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { getStateBase } from './turn-state.mjs';
 
 export { getStateBase };
@@ -441,4 +445,109 @@ export function applyRetention(base, startingSessionId, nowMs = Date.now()) {
     }
   }
   return result;
+}
+
+// ---------------------------------------------------------------------------
+// Helper measurement (SubagentStop) — spec Design > Helper measurement, D6
+// ---------------------------------------------------------------------------
+
+function runGit(cwd, args, env = {}) {
+  return execFileSync('git', args, {
+    cwd, encoding: 'utf8', env: { ...process.env, ...env }, stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 64 * 1024 * 1024,
+  });
+}
+
+/** Parse `--name-status -z` and `--numstat` output into trail changes labelled with the helper run. */
+function parseDiff(nameStatusZ, numstat, run, workingCopy) {
+  const lines = new Map();
+  for (const row of numstat.split('\n')) {
+    if (row === '') continue;
+    const [added, deleted, ...rest] = row.split('\t');
+    // binary files report "-": they count as 0 lines but are still listed by status
+    lines.set(rest.join('\t'), (Number(added) || 0) + (Number(deleted) || 0));
+  }
+  const parts = nameStatusZ.split('\0').filter((p) => p !== '');
+  const files = [];
+  for (let i = 0; i + 1 < parts.length; i += 2) {
+    const status = parts[i];
+    const path = parts[i + 1];
+    if (!['A', 'M', 'D'].includes(status)) continue;
+    const absolute = resolve(workingCopy, path);
+    // spec: paths outside the working copy are excluded from the helper's diff
+    if (!absolute.startsWith(workingCopy + sep)) continue;
+    files.push({ path, status, lines: lines.get(path) ?? 0, source: { kind: 'run', run } });
+  }
+  return files.sort((a, b) => byText(a.path, b.path));
+}
+
+/**
+ * Measure an isolated helper's changes in its own working copy: diff(base, working tree) through
+ * a temporary index seeded from the helper's real index plus `add -A`, so committed, staged,
+ * modified and untracked files all count. Never throws: failure is a measured:false value.
+ * @param {string} cwd - SubagentStop payload cwd (the helper worktree when isolated).
+ * @param {string} run - `cc:<session>:<agent>`, the source label of every file.
+ * @param {string | null} storedBase - base stored at the first measured end; null at the first.
+ * @returns {{isolated?: boolean, changes: object}}
+ */
+export function measureHelperChanges(cwd, run, storedBase) {
+  if (typeof cwd !== 'string' || cwd === '' || !existsSync(cwd)) {
+    return { changes: { measured: false, reason: 'working copy not found' } };
+  }
+  let tempIndex = null;
+  let isolated;
+  try {
+    const gitDir = realpathSync(runGit(cwd, ['rev-parse', '--absolute-git-dir']).trim());
+    const commonDir = realpathSync(resolve(cwd, runGit(cwd, ['rev-parse', '--git-common-dir']).trim()));
+    isolated = gitDir !== commonDir;
+    if (!isolated) return { isolated, changes: { measured: false, reason: 'not isolated' } };
+    const workingCopy = realpathSync(runGit(cwd, ['rev-parse', '--show-toplevel']).trim());
+    // reason: in a non-bare repo the common dir's HEAD is the main checkout's HEAD (spec D6)
+    const mainHead = runGit(workingCopy, [`--git-dir=${commonDir}`, 'rev-parse', 'HEAD']).trim();
+    const base = storedBase ?? runGit(workingCopy, ['merge-base', 'HEAD', mainHead]).trim();
+    tempIndex = join(tmpdir(), `lore-helper-index-${process.pid}-${randomUUID()}`);
+    const realIndex = resolve(workingCopy, runGit(workingCopy, ['rev-parse', '--git-path', 'index']).trim());
+    if (existsSync(realIndex)) copyFileSync(realIndex, tempIndex);
+    const env = { GIT_INDEX_FILE: tempIndex };
+    runGit(workingCopy, ['add', '-A'], env);
+    const nameStatus = runGit(workingCopy, ['diff', '--cached', '--no-renames', '--name-status', '-z', base], env);
+    const numstat = runGit(workingCopy, ['diff', '--cached', '--no-renames', '--numstat', base], env);
+    return { isolated, changes: { measured: true, value: { base, files: parseDiff(nameStatus, numstat, run, workingCopy) } } };
+  } catch (err) {
+    const detail = String(err?.stderr || err?.message || err).trim().split('\n')[0];
+    return {
+      ...(isolated === undefined ? {} : { isolated }),
+      changes: { measured: false, reason: `git measurement failed: ${detail}` },
+    };
+  } finally {
+    if (tempIndex !== null) rmSync(tempIndex, { force: true });
+  }
+}
+
+/**
+ * SubagentStop: overwrite the helper's measurement and `ended_at`, increment `end_count`, keep
+ * `run` / `started_at`, and reuse the base stored by an earlier measured end. Never writes
+ * `judged_end_count` (single-writer rule). A missing or invalid prior record counts from 0.
+ * @returns {object} the record written.
+ * @throws {TrailSessionIdInvalidError | TrailRunIdInvalidError | Error} on unusable ids or a failed write.
+ */
+export function recordHelperEnd(base, sessionId, agentId, cwd, nowMs = Date.now()) {
+  assertSessionId(sessionId);
+  if (typeof agentId !== 'string' || !ID_PATTERN.test(agentId)) throw new TrailRunIdInvalidError(`cc:${sessionId}:${agentId}`);
+  const file = join(base, 'sessions', sessionId, 'helpers', `${agentId}.json`);
+  const run = `cc:${sessionId}:${agentId}`;
+  const prior = readValidOrNull(file, validHelperRecord);
+  const storedBase = prior?.changes?.measured === true ? prior.changes.value.base : null;
+  const measurement = measureHelperChanges(cwd, run, storedBase);
+  const at = new Date(nowMs).toISOString();
+  const record = {
+    run,
+    started_at: prior?.started_at ?? at,
+    ended_at: at,
+    end_count: (prior?.end_count ?? 0) + 1,
+    ...(typeof cwd === 'string' && cwd !== '' ? { working_copy: cwd } : {}),
+    ...(measurement.isolated === undefined ? {} : { isolated: measurement.isolated }),
+    changes: measurement.changes,
+  };
+  writeJsonAtomic(file, record);
+  return record;
 }
