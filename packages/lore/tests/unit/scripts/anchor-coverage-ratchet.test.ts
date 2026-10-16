@@ -25,16 +25,12 @@
  * child: `?? 1` would let a killed process masquerade as the very code AC-BFI-6
  * pins.
  *
- * ⛔ NEVER WRITES TO THE REPO'S OWN `.lore/`. Two fixture strategies, both
- * write-free against the live corpus:
- *   - REAL-CORPUS cases (AC-BFI-5) read this repo's corpus (the checker's only
- *     corpus access is ONE `listFull({type:"spec"})` read) and mutate a COPY of the
- *     shipped ledger in a `mkdtemp` throwaway "repo root", injected via
- *     `LORE_ANCHOR_COVERAGE_REPO_ROOT`. The shipped `scripts/anchor-coverage-ledger.json`
- *     is never edited.
- *   - FIXTURE-CORPUS cases (AC-BFI-6) build a throwaway `mkdtemp` + `lore init`
- *     corpus (project CLAUDE.md's canonical pattern) so a spec can be created and
- *     dispositioned deterministically, independent of live-corpus drift.
+ * ⛔ NEVER READS OR WRITES THE REPO'S OWN `.lore/` OR ITS SHIPPED LEDGER. Every case
+ * that runs the checker (or the independent AC-BFI-10 witness) targets ONE throwaway
+ * `mkdtemp` + `lore init` fixture corpus (project CLAUDE.md's canonical pattern) with a
+ * fixture ledger injected via `LORE_ANCHOR_COVERAGE_REPO_ROOT`, so the verdict is
+ * deterministic and independent of live-corpus drift. The real corpus + shipped ledger
+ * is checked by `hooks/pre-push` (`scripts/check-anchor-coverage.ts` itself).
  *
  * Every RED here is a PAIRED transition — break it, then make the IDENTICAL run
  * green — because a bare exit-1 assertion cannot tell a fired ratchet from an
@@ -45,7 +41,7 @@
  * @spec_ref adr-a-newly-armed-structural-oracle-enforces-from-a-baseline (baseline + ledger shape)
  */
 
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { spawnSync, execFileSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -160,10 +156,6 @@ function runCheckerWithLedger(cwd: string, file: LedgerFile): RunResult {
   }
 }
 
-function loadShippedLedger(): LedgerFile {
-  return JSON.parse(readFileSync(join(REPO_ROOT, LEDGER_RELATIVE_PATH), "utf8")) as LedgerFile;
-}
-
 /** Deep-copies a ledger so a mutation in one case can never leak into another. */
 function copyLedger(file: LedgerFile): LedgerFile {
   return JSON.parse(JSON.stringify(file)) as LedgerFile;
@@ -200,11 +192,56 @@ const FIXTURE_REASON =
 
 // ─── AC-BFI-5: the ledger dispositions every unanchored live spec ───────────
 
-describe("check-anchor-coverage: the shipped ledger dispositions every unanchored live spec (AC-BFI-5)", () => {
+/**
+ * ⛔ Every case in this block runs the checker against ONE throwaway fixture corpus
+ * (`mkdtemp` + `lore init`, three unanchored specs) and a ledger shaped like the
+ * shipped one — never this repository's own `.lore/` and never the shipped ledger
+ * file. The checker only reads the corpus, so one fixture is shared across the block.
+ * The same checker run against the real corpus + shipped ledger is `hooks/pre-push`'s
+ * job; a unit test that read live state went red whenever unrelated corpus work
+ * landed (the TG-3 offender class).
+ */
+const FIXTURE_UNANCHORED_COUNT = 3;
+interface LedgerFixture {
+  readonly cwd: string;
+  readonly ledger: LedgerFile;
+}
+let fx: LedgerFixture;
+
+function buildLedgerFixture(): LedgerFixture {
+  const cwd = initFixtureCorpus("lore-anchor-cov-shipped-shape-");
+  try {
+    createDoc(cwd, "prd", "Anchor coverage ledger fixture root", "Fixture prd body.", []);
+    const entries: LedgerEntry[] = [];
+    for (let i = 0; i < FIXTURE_UNANCHORED_COUNT; i += 1) {
+      const spec = createDoc(cwd, "spec", `Anchor coverage ledger fixture spec ${i}`, FIXTURE_SPEC_CONTENT, []);
+      entries.push({ slug: spec.slug, cohort: "debt", reason: FIXTURE_REASON });
+    }
+    return { cwd, ledger: { entries } };
+  } catch (error) {
+    rmSync(cwd, { recursive: true, force: true });
+    throw error;
+  }
+}
+
+/** A fresh deep copy of the fixture ledger, so a mutation in one case never leaks into another. */
+function fixtureLedger(): LedgerFile {
+  return copyLedger(fx.ledger);
+}
+
+// File-scope hooks: the AC-BFI-5 block AND the AC-BFI-10 block below share this one fixture.
+beforeAll(() => {
+  fx = buildLedgerFixture();
+}, 240000);
+afterAll(() => {
+  if (fx !== undefined) rmSync(fx.cwd, { recursive: true, force: true });
+});
+
+describe("check-anchor-coverage: the ledger dispositions every unanchored live spec (AC-BFI-5)", () => {
   it(
-    "HAPPY: the shipped ledger's disposition set EQUALS the freshly measured unanchored live-spec set — exit EXACTLY 0 over a non-trivial, self-reported population",
+    "HAPPY: the fixture ledger's disposition set EQUALS the freshly measured unanchored live-spec set — exit EXACTLY 0 over a non-trivial, self-reported population",
     () => {
-      const result = runChecker(REPO_ROOT);
+      const result = runCheckerWithLedger(fx.cwd, fixtureLedger());
 
       expect(result.exitCode).toBe(0);
 
@@ -216,16 +253,15 @@ describe("check-anchor-coverage: the shipped ledger dispositions every unanchore
       const live = Number(scanned?.[1]);
       const anchored = Number(scanned?.[2]);
       const unanchored = Number(scanned?.[3]);
-      expect(live).toBeGreaterThan(0);
-      expect(anchored).toBeGreaterThan(0);
-      expect(unanchored).toBeGreaterThan(0);
+      expect(live).toBe(FIXTURE_UNANCHORED_COUNT);
+      expect(unanchored).toBe(FIXTURE_UNANCHORED_COUNT);
       expect(anchored + unanchored).toBe(live);
 
-      // Set equality's cardinality half, measured against the shipped file. Exit 0
+      // Set equality's cardinality half, measured against the fixture ledger. Exit 0
       // supplies the other half: a ledger row with no matching unanchored spec is a
       // stale/unknown finding, and an unanchored spec with no row is a missing one —
       // either would have exited 1.
-      const shipped = loadShippedLedger();
+      const shipped = fixtureLedger();
       expect(shipped.entries.length).toBe(unanchored);
 
       // Pins the duplicated LEDGER_RELATIVE_PATH constant to the checker's own output.
@@ -242,16 +278,16 @@ describe("check-anchor-coverage: the shipped ledger dispositions every unanchore
       // trailing rows and dropped the verdict — an evidence record proving a run
       // happened but not what it decided. This pins the ordering so that regression
       // cannot return silently.
-      const green = runChecker(REPO_ROOT);
+      const green = runCheckerWithLedger(fx.cwd, fixtureLedger());
       expect(green.exitCode).toBe(0);
       const lastGreenLine = green.stdout.trimEnd().split("\n").at(-1);
       expect(lastGreenLine).toMatch(/^check-anchor-coverage: OK — .*0 finding\(s\)\.$/);
 
-      const shipped = loadShippedLedger();
+      const shipped = fixtureLedger();
       const victim = [...shipped.entries].sort((a, b) => (a.slug < b.slug ? -1 : 1))[0] as LedgerEntry;
       const mutated = copyLedger(shipped);
       mutated.entries = mutated.entries.filter((e) => e.slug !== victim.slug);
-      const red = runCheckerWithLedger(REPO_ROOT, mutated);
+      const red = runCheckerWithLedger(fx.cwd, mutated);
       expect(red.exitCode).toBe(1);
       const lastRedLine = red.stderr.trimEnd().split("\n").at(-1);
       expect(lastRedLine).toMatch(/^check-anchor-coverage: FAILED — 1 finding\(s\) in 1 class\(es\): missing_disposition\.$/);
@@ -260,9 +296,9 @@ describe("check-anchor-coverage: the shipped ledger dispositions every unanchore
   );
 
   it(
-    "RED (a) PAIRED: deleting one shipped ledger row makes the IDENTICAL run exit EXACTLY 1 and NAME that slug; restoring the row exits EXACTLY 0",
+    "RED (a) PAIRED: deleting one fixture ledger row makes the IDENTICAL run exit EXACTLY 1 and NAME that slug; restoring the row exits EXACTLY 0",
     () => {
-      const shipped = loadShippedLedger();
+      const shipped = fixtureLedger();
       expect(shipped.entries.length).toBeGreaterThan(0);
 
       // Deterministic victim: lexicographically smallest slug, so a re-run picks the
@@ -271,7 +307,7 @@ describe("check-anchor-coverage: the shipped ledger dispositions every unanchore
 
       const withRowRemoved = copyLedger(shipped);
       withRowRemoved.entries = withRowRemoved.entries.filter((e) => e.slug !== victim.slug);
-      const red = runCheckerWithLedger(REPO_ROOT, withRowRemoved);
+      const red = runCheckerWithLedger(fx.cwd, withRowRemoved);
 
       expect(red.exitCode).toBe(1);
       expect(red.combined).toContain(victim.slug);
@@ -280,7 +316,7 @@ describe("check-anchor-coverage: the shipped ledger dispositions every unanchore
       expect(red.combined).toContain("no ledger disposition");
 
       // The paired green: same corpus, same command, only the row restored.
-      const green = runCheckerWithLedger(REPO_ROOT, copyLedger(shipped));
+      const green = runCheckerWithLedger(fx.cwd, copyLedger(shipped));
       expect(green.exitCode).toBe(0);
       expect(green.combined).not.toContain("no ledger disposition");
     },
@@ -288,22 +324,22 @@ describe("check-anchor-coverage: the shipped ledger dispositions every unanchore
   );
 
   it(
-    "RED (b) PAIRED: replacing one shipped ledger row's reason with 'tbd' makes the IDENTICAL run exit EXACTLY 1 and NAME that slug — the reason predicate is live, not decorative",
+    "RED (b) PAIRED: replacing one fixture ledger row's reason with 'tbd' makes the IDENTICAL run exit EXACTLY 1 and NAME that slug — the reason predicate is live, not decorative",
     () => {
-      const shipped = loadShippedLedger();
+      const shipped = fixtureLedger();
       expect(shipped.entries.length).toBeGreaterThan(0);
       const victim = [...shipped.entries].sort((a, b) => (a.slug < b.slug ? -1 : 1))[0] as LedgerEntry;
 
       const withPlaceholderReason = copyLedger(shipped);
       const row = withPlaceholderReason.entries.find((e) => e.slug === victim.slug) as LedgerEntry;
       row.reason = "tbd";
-      const red = runCheckerWithLedger(REPO_ROOT, withPlaceholderReason);
+      const red = runCheckerWithLedger(fx.cwd, withPlaceholderReason);
 
       expect(red.exitCode).toBe(1);
       expect(red.combined).toContain(victim.slug);
       expect(red.combined).toContain("unusable reason");
 
-      const green = runCheckerWithLedger(REPO_ROOT, copyLedger(shipped));
+      const green = runCheckerWithLedger(fx.cwd, copyLedger(shipped));
       expect(green.exitCode).toBe(0);
       expect(green.combined).not.toContain("unusable reason");
     },
@@ -319,12 +355,12 @@ describe("check-anchor-coverage: the shipped ledger dispositions every unanchore
   ])(
     "BOUNDARY: a ledger reason that is %s is refused — exit EXACTLY 1, naming the slug",
     (_label, reason) => {
-      const shipped = loadShippedLedger();
+      const shipped = fixtureLedger();
       const victim = [...shipped.entries].sort((a, b) => (a.slug < b.slug ? -1 : 1))[0] as LedgerEntry;
 
       const mutated = copyLedger(shipped);
       (mutated.entries.find((e) => e.slug === victim.slug) as LedgerEntry).reason = reason;
-      const result = runCheckerWithLedger(REPO_ROOT, mutated);
+      const result = runCheckerWithLedger(fx.cwd, mutated);
 
       expect(result.exitCode).toBe(1);
       expect(result.combined).toContain(victim.slug);
@@ -336,7 +372,7 @@ describe("check-anchor-coverage: the shipped ledger dispositions every unanchore
   it(
     "BOUNDARY: a reason of EXACTLY 20 characters is accepted — the floor is >= 20, not > 20",
     () => {
-      const shipped = loadShippedLedger();
+      const shipped = fixtureLedger();
       const victim = [...shipped.entries].sort((a, b) => (a.slug < b.slug ? -1 : 1))[0] as LedgerEntry;
 
       const mutated = copyLedger(shipped);
@@ -344,7 +380,7 @@ describe("check-anchor-coverage: the shipped ledger dispositions every unanchore
       expect(twentyChars.length).toBe(20);
       (mutated.entries.find((e) => e.slug === victim.slug) as LedgerEntry).reason = twentyChars;
 
-      const result = runCheckerWithLedger(REPO_ROOT, mutated);
+      const result = runCheckerWithLedger(fx.cwd, mutated);
       expect(result.exitCode).toBe(0);
     },
     60000,
@@ -355,7 +391,7 @@ describe("check-anchor-coverage: the shipped ledger dispositions every unanchore
     () => {
       const emptyRoot = mkdtempSync(join(tmpdir(), "lore-anchor-cov-noledger-"));
       try {
-        const result = runChecker(REPO_ROOT, emptyRoot);
+        const result = runChecker(fx.cwd, emptyRoot);
         expect(result.exitCode).toBe(2);
         expect(result.combined).toContain(LEDGER_RELATIVE_PATH);
       } finally {
@@ -603,10 +639,10 @@ function assertLedgerSlugSetMatchesMeasured(measured: ReadonlySet<string>, ledge
 
 describe("AC-BFI-10: ledger membership is asserted as a slug set, independently of the checker", () => {
   it(
-    "HAPPY: the independently-measured unanchored slug SET equals the shipped ledger's slug SET — computed WITHOUT reading the checker's stdout or exit code",
+    "HAPPY: the independently-measured unanchored slug SET equals the fixture ledger's slug SET — computed WITHOUT reading the checker's stdout or exit code",
     () => {
-      const independentlyMeasured = measureUnanchoredLiveSpecSlugsIndependently(REPO_ROOT);
-      const shipped = loadShippedLedger();
+      const independentlyMeasured = measureUnanchoredLiveSpecSlugsIndependently(fx.cwd);
+      const shipped = fixtureLedger();
       const shippedSlugs = new Set(shipped.entries.map((entry) => entry.slug));
 
       // Same function the falsifier case below calls — see its definition
@@ -620,18 +656,17 @@ describe("AC-BFI-10: ledger membership is asserted as a slug set, independently 
     "RED PAIRED (declared falsifier): overwriting one ledger row's slug with ANOTHER already-ledgered slug — row COUNT unchanged, so the cardinality assertion alone would stay green — makes the SHARED assertion function throw, NAMING the omitted slug",
     () => {
       // The exact falsifier this AC's oracle declares: both rows already exist in
-      // the shipped ledger, so replacing one slug with the other changes NOTHING
+      // the fixture ledger, so replacing one slug with the other changes NOTHING
       // about `entries.length` — only membership (one slug duplicated, one omitted).
-      const VICTIM_OMITTED = "spec-075-dashboard-adjudication-workbench-route-telemetry-prd";
-      const VICTIM_DUPLICATED = "spec-077-dashboard-execution-read-surface-prd-21-f3";
-
-      const shipped = loadShippedLedger();
+      const shipped = fixtureLedger();
+      const VICTIM_OMITTED = (shipped.entries[0] as LedgerEntry).slug;
+      const VICTIM_DUPLICATED = (shipped.entries[1] as LedgerEntry).slug;
       const rowToMutate = shipped.entries.find((entry) => entry.slug === VICTIM_OMITTED);
       const otherRow = shipped.entries.find((entry) => entry.slug === VICTIM_DUPLICATED);
       expect(rowToMutate, `declared falsifier requires ${VICTIM_OMITTED} to already be a ledger row`).toBeDefined();
       expect(otherRow, `declared falsifier requires ${VICTIM_DUPLICATED} to already be a ledger row`).toBeDefined();
 
-      const independentlyMeasured = measureUnanchoredLiveSpecSlugsIndependently(REPO_ROOT);
+      const independentlyMeasured = measureUnanchoredLiveSpecSlugsIndependently(fx.cwd);
 
       // Preconditions ONLY on the two slugs this test mutates — never a full-corpus
       // equality check here. That global check is the HAPPY case above; coupling

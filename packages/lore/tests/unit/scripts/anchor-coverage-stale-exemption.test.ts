@@ -28,7 +28,7 @@
 
 import { describe, it, expect } from "vitest";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -109,10 +109,6 @@ function runCheckerWithLedger(cwd: string, file: LedgerFile): RunResult {
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
-}
-
-function loadShippedLedger(): LedgerFile {
-  return JSON.parse(readFileSync(join(REPO_ROOT, LEDGER_RELATIVE_PATH), "utf8")) as LedgerFile;
 }
 
 function copyLedger(file: LedgerFile): LedgerFile {
@@ -264,72 +260,99 @@ describe("check-anchor-coverage: a ledger row cannot outlive its debt (AC-BFI-7)
   );
 });
 
-// ─── AC-BFI-7 against the REAL corpus + the SHIPPED ledger ──────────────────
+// ─── AC-BFI-7 against a FIXTURE corpus + a FIXTURE ledger ───────────────────
 //
-// The fixture cases above prove the reverse direction fires. These two prove it is
-// armed on the surface that actually ships: this repo's own corpus read through the
-// shipped ledger. ⛔ READ-ONLY — the checker's only corpus access is one
-// `listFull({type:"spec"})`; every mutation happens to a COPY of the ledger in a
-// throwaway root.
+// The cases above prove the reverse direction fires on one-spec corpora. These two
+// prove it fires on a MIXED corpus (one anchored spec, one still-unanchored ledgered
+// spec) read through a ledger shaped like the shipped one. ⛔ This suite never reads
+// this repository's own `.lore/` or its shipped ledger: the corpus is a throwaway
+// `mkdtemp` + `lore init`, the ledger a throwaway root. The same checker run against
+// the real corpus + shipped ledger is the `pre-push` hook's job (hooks/pre-push), not
+// a unit test's — a unit test that reads live state goes red whenever unrelated
+// corpus work lands.
 
-describe("check-anchor-coverage: the reverse direction is armed against the real corpus and the shipped ledger (AC-BFI-7)", () => {
+/** Builds a mixed fixture corpus: one anchored spec, one unanchored spec, plus the matching clean ledger. */
+function initMixedFixture(prefix: string): {
+  cwd: string;
+  anchoredSlug: string;
+  ledger: LedgerFile;
+} {
+  const cwd = initFixtureCorpus(prefix);
+  createDoc(cwd, "prd", "Anchor coverage mixed fixture root", "Fixture prd body.", []);
+  const anchored = createDoc(cwd, "spec", "Anchor coverage mixed fixture anchored spec", FIXTURE_SPEC_CONTENT, []);
+  const unanchored = createDoc(cwd, "spec", "Anchor coverage mixed fixture unanchored spec", FIXTURE_SPEC_CONTENT, []);
+  addCodeAnchor(cwd, anchored.id, FIXTURE_ANCHOR);
+  return {
+    cwd,
+    anchoredSlug: anchored.slug,
+    ledger: { entries: [{ slug: unanchored.slug, cohort: "debt", reason: FIXTURE_REASON }] },
+  };
+}
+
+describe("check-anchor-coverage: the reverse direction is armed on a mixed fixture corpus and a shipped-shape ledger (AC-BFI-7)", () => {
   it(
-    "RED PAIRED: injecting a row for a real spec that ALREADY declares code_anchors exits EXACTLY 1 naming it; the unmutated copy exits EXACTLY 0",
+    "RED PAIRED: injecting a row for a spec that ALREADY declares code_anchors exits EXACTLY 1 naming it; the unmutated ledger exits EXACTLY 0",
     () => {
-      const shipped = loadShippedLedger();
+      const { cwd, ledger } = initMixedFixture("lore-anchor-stale-mixed-");
+      try {
+        // Census taken from the FIXTURE corpus with --include-invalid (`lore list`
+        // omits invalidated docs by default). Every live spec not in the clean ledger
+        // is anchored by construction; deriving the victim at runtime keeps the test
+        // free of hardcoded slugs.
+        const listed = runLore(["list", "--type", "spec", "--include-invalid", "--json"], cwd);
+        expect(listed.exitCode).toBe(0);
+        const docs = (JSON.parse(listed.stdout) as { data: { docs: { slug: string }[] } }).data.docs;
+        expect(docs.length).toBe(2);
+        const ledgeredSlugs = new Set(ledger.entries.map((e) => e.slug));
+        const anchoredSlugs = docs.map((d) => d.slug).filter((slug) => !ledgeredSlugs.has(slug)).sort();
+        expect(anchoredSlugs.length).toBe(1);
+        const victim = anchoredSlugs[0] as string;
 
-      // Derive a genuinely anchored spec at runtime rather than hardcoding a live-corpus
-      // slug (which would rot). Given the shipped ledger is complete — the paired green
-      // below re-establishes that in this same run — every live spec NOT in the ledger is
-      // anchored by construction. The census is taken with --include-invalid because
-      // `lore list` silently omits invalidated docs by default, and a census wrong by a
-      // hidden population is the exact defect this repo recorded.
-      const listed = runLore(["list", "--type", "spec", "--include-invalid", "--json"], REPO_ROOT);
-      expect(listed.exitCode).toBe(0);
-      const docs = (JSON.parse(listed.stdout) as { data: { docs: { slug: string }[] } }).data.docs;
-      const ledgeredSlugs = new Set(shipped.entries.map((e) => e.slug));
-      const anchoredSlugs = docs.map((d) => d.slug).filter((slug) => !ledgeredSlugs.has(slug)).sort();
-      expect(anchoredSlugs.length).toBeGreaterThan(0);
-      const victim = anchoredSlugs[0] as string;
+        const mutated = copyLedger(ledger);
+        mutated.entries.push({
+          slug: victim,
+          cohort: "debt",
+          reason: "Deliberately stale row injected by the anchor-coverage reverse-direction test.",
+        });
+        const red = runCheckerWithLedger(cwd, mutated);
+        expect(red.exitCode).toBe(1);
+        expect(red.combined).toContain(victim);
+        expect(red.combined).toContain("now declares code_anchors");
 
-      const mutated = copyLedger(shipped);
-      mutated.entries.push({
-        slug: victim,
-        cohort: "debt",
-        reason: "Deliberately stale row injected by the anchor-coverage reverse-direction test.",
-      });
-      const red = runCheckerWithLedger(REPO_ROOT, mutated);
-      expect(red.exitCode).toBe(1);
-      expect(red.combined).toContain(victim);
-      expect(red.combined).toContain("now declares code_anchors");
-
-      const green = runCheckerWithLedger(REPO_ROOT, copyLedger(shipped));
-      expect(green.exitCode).toBe(0);
-      expect(green.combined).not.toContain("now declares code_anchors");
+        const green = runCheckerWithLedger(cwd, copyLedger(ledger));
+        expect(green.exitCode).toBe(0);
+        expect(green.combined).not.toContain("now declares code_anchors");
+      } finally {
+        rmSync(cwd, { recursive: true, force: true });
+      }
     },
     120000,
   );
 
   it(
-    "RED PAIRED: injecting a row for a slug that does not exist in the real corpus exits EXACTLY 1 naming it; the unmutated copy exits EXACTLY 0",
+    "RED PAIRED: injecting a row for a slug that does not exist in the fixture corpus exits EXACTLY 1 naming it; the unmutated ledger exits EXACTLY 0",
     () => {
-      const shipped = loadShippedLedger();
-      const ghost = "spec-anchor-coverage-control-slug-that-does-not-exist";
+      const { cwd, ledger } = initMixedFixture("lore-anchor-stale-ghost-");
+      try {
+        const ghost = "spec-anchor-coverage-control-slug-that-does-not-exist";
 
-      const mutated = copyLedger(shipped);
-      mutated.entries.push({
-        slug: ghost,
-        cohort: "debt",
-        reason: "Deliberately unresolvable row injected by the anchor-coverage reverse-direction test.",
-      });
-      const red = runCheckerWithLedger(REPO_ROOT, mutated);
-      expect(red.exitCode).toBe(1);
-      expect(red.combined).toContain(ghost);
-      expect(red.combined).toContain("not a live spec");
+        const mutated = copyLedger(ledger);
+        mutated.entries.push({
+          slug: ghost,
+          cohort: "debt",
+          reason: "Deliberately unresolvable row injected by the anchor-coverage reverse-direction test.",
+        });
+        const red = runCheckerWithLedger(cwd, mutated);
+        expect(red.exitCode).toBe(1);
+        expect(red.combined).toContain(ghost);
+        expect(red.combined).toContain("not a live spec");
 
-      const green = runCheckerWithLedger(REPO_ROOT, copyLedger(shipped));
-      expect(green.exitCode).toBe(0);
-      expect(green.combined).not.toContain("not a live spec");
+        const green = runCheckerWithLedger(cwd, copyLedger(ledger));
+        expect(green.exitCode).toBe(0);
+        expect(green.combined).not.toContain("not a live spec");
+      } finally {
+        rmSync(cwd, { recursive: true, force: true });
+      }
     },
     120000,
   );
