@@ -85,7 +85,14 @@ import {
   baselineExtraSchema,
   ruleChangeSchema,
 } from "@lore/core";
-import type { CheckResult, ReviewBundle, AcceptanceCriterion, BaselineRule, RuleChange } from "@lore/core";
+import type {
+  CheckResult,
+  ReviewBundle,
+  ReviewTruncationEntry,
+  AcceptanceCriterion,
+  BaselineRule,
+  RuleChange,
+} from "@lore/core";
 
 /**
  * Judge prompt schema version — the active key into {@link REVIEW_TEMPLATES}. Persisted
@@ -123,6 +130,11 @@ export interface BuildReviewPromptResult {
    * at the call site — see module header.
    */
   docTruncated: boolean;
+  /**
+   * One entry per cut section (`doc`, `parent`) with the REAL shown/total char counts
+   * (F1) — `[]` when every input fit. The service persists it as `judgment.truncation`.
+   */
+  cuts: ReviewTruncationEntry[];
 }
 
 /** Shape every entry in {@link REVIEW_TEMPLATES} must satisfy. */
@@ -509,17 +521,40 @@ function assembleReviewPrompt(
   structuredSection: string,
 ): BuildReviewPromptResult {
   const truncated: string[] = [];
+  const cuts: ReviewTruncationEntry[] = [];
 
   const docSection = truncateSection(bundle.doc.content, budgets.max_doc_chars);
-  if (docSection.truncated) truncated.push("doc");
+  if (docSection.truncated) {
+    truncated.push("doc");
+    cuts.push({ section: "doc", shown_chars: docSection.text.length, total_chars: bundle.doc.content.length });
+  }
 
   let contextBlock = "(no parent document — this doc is a root or its parent could not be resolved)";
   if (bundle.parent !== undefined) {
     const contextSection = truncateSection(bundle.parent.content, budgets.max_context_chars);
-    if (contextSection.truncated) truncated.push("parent");
+    if (contextSection.truncated) {
+      truncated.push("parent");
+      cuts.push({
+        section: "parent",
+        shown_chars: contextSection.text.length,
+        total_chars: bundle.parent.content.length,
+      });
+    }
+    // reason: F1 — the parent is the spec a plan/task is judged AGAINST; a cut there hid
+    // '## D8' from the judge with no notice. The heading list is enumerated from the FULL
+    // parent content (never the truncated copy), reusing the doc-body helper.
+    const parentNotice = contextSection.truncated
+      ? `\n\n# Parent Truncation Notice\n` +
+        `The parent document above was truncated: ${contextSection.text.length} of ` +
+        `${bundle.parent.content.length} chars are shown. Treat the FULL parent as present but ` +
+        `unseen beyond the excerpt — do NOT conclude a parent section is missing merely because ` +
+        `it isn't visible; a finding about unseen parent content MUST cite this notice.\n` +
+        `${buildOmittedSectionsNotice(bundle.parent.content, contextSection.text.length)}`
+      : "";
     contextBlock =
       `## Parent: ${bundle.parent.title} (${bundle.parent.slug}, type=${bundle.parent.type})\n` +
-      contextSection.text;
+      contextSection.text +
+      parentNotice;
   }
 
   // reason: SPEC-040 D8 — the doc-body-only truncation notice. Parent-context truncation
@@ -605,7 +640,7 @@ function assembleReviewPrompt(
     `- reasons MUST have at least one entry.\n` +
     advisory.rule;
 
-  return { prompt, truncated, docTruncated: docSection.truncated };
+  return { prompt, truncated, docTruncated: docSection.truncated, cuts };
 }
 
 // ─── Empty advisory (v1) ─────────────────────────────────────────────────────

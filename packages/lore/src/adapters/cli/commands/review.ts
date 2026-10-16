@@ -81,6 +81,7 @@ import {
   formatJudgmentSummary,
   renderSupersededCandidateNudgeBlock,
   renderAdvisoryBlock,
+  renderTruncationBlock,
 } from "../review-render.js";
 import {
   buildStalenessBatchJsonPayload,
@@ -575,7 +576,7 @@ export default defineCommand({
       }
 
       const nudgeBlock = await renderSupersededCandidateNudgeBlock(buildStalenessFlowDeps(app), docSlug, judgment);
-      console.log(formatJudgmentSummary(judgment) + renderAdvisoryBlock(judgment) + nudgeBlock);
+      console.log(formatJudgmentSummary(judgment) + renderAdvisoryBlock(judgment) + renderTruncationBlock(judgment) + nudgeBlock);
     } finally {
       app.close();
     }

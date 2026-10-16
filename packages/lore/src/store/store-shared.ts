@@ -30,6 +30,7 @@ import type {
   RunId,
   RunRecord,
   SearchHit,
+  ReviewTruncationEntry,
   SupersededCandidate,
   VersionRecord,
 } from "@lore/core";
@@ -248,6 +249,10 @@ export interface JudgmentRow {
   kind: string;
   /** JSON `SupersededCandidate` or NULL — nullable column since migration-005.ts (SPEC-044 D5/D11). */
   superseded_candidate: string | null;
+  /** 1 when the doc body was cut, else NULL — nullable column since migration-019.ts (F1). */
+  truncated?: number | bigint | null;
+  /** JSON `ReviewTruncationEntry[]` or NULL — nullable column since migration-019.ts (F1). */
+  truncation?: string | null;
   created_at: string;
   created_by: string;
 }
@@ -566,6 +571,7 @@ export function rowToAuditChainEntry(row: AuditChainRow): AuditChainEntry {
  */
 export function rowToReviewJudgment(row: JudgmentRow): ReviewJudgment {
   const supersededCandidate = parseJsonOptional<SupersededCandidate>(row.superseded_candidate);
+  const truncation = parseJsonOptional<ReviewTruncationEntry[]>(row.truncation);
   return {
     id: row.id,
     doc_id: row.doc_id,
@@ -582,6 +588,8 @@ export function rowToReviewJudgment(row: JudgmentRow): ReviewJudgment {
     },
     kind: (row.kind as ReviewJudgmentKind | undefined) ?? "review",
     ...(supersededCandidate !== undefined ? { superseded_candidate: supersededCandidate } : {}),
+    ...(row.truncated !== null && row.truncated !== undefined && Number(row.truncated) === 1 ? { truncated: true } : {}),
+    ...(truncation !== undefined ? { truncation } : {}),
     created_at: row.created_at,
     created_by: row.created_by,
   };
