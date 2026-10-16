@@ -90,7 +90,9 @@
 
 import { describe, it, expect, afterEach } from "vitest";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { createRequire } from "node:module";
+import { tmpdir } from "node:os";
 import { join, resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -119,6 +121,8 @@ const THIS_DIR = dirname(fileURLToPath(import.meta.url));
 const DASHBOARD_ROOT = resolve(THIS_DIR, "..", "..");
 /** Repo root — two more levels up from `packages/dashboard`. */
 const REPO_ROOT = resolve(DASHBOARD_ROOT, "..", "..");
+const CORE_VOCAB_MODULE = join(REPO_ROOT, "packages", "core", "src", "issue-resolution-vocab.js");
+const CORE_INDEX_MODULE = join(REPO_ROOT, "packages", "core", "src", "index.js");
 const TSC_BIN = join(REPO_ROOT, "node_modules", ".bin", "tsc");
 /** The REAL shipped-source project — the one `bun run typecheck:dashboard` runs. */
 const TSCONFIG_SRC_JSON = join(DASHBOARD_ROOT, "tsconfig.json");
@@ -145,9 +149,22 @@ const ISSUE_DETAIL_TSX = join(DASHBOARD_ROOT, "src", "components", "IssueDetail.
  * Explicit `paths` entries resolve dot-prefixed files fine; wildcard includes do
  * not see them. Both halves of that asymmetry are load-bearing here.
  */
-const PROBE_DIR = join(DASHBOARD_ROOT, ".vocab-probe");
-const PROBE_TSCONFIG = join(PROBE_DIR, "tsconfig.json");
-const PROBE_SHIM = join(PROBE_DIR, "core-vocab.probe.ts");
+/**
+ * ⛔ The overlay lives in an OS temp dir (`mkdtemp`), NEVER under the repo tree
+ * (plan INV-3: tests do not write into the repo). An in-tree `.vocab-probe/`
+ * appeared and vanished mid-run and made `grep -r packages/` in
+ * `phase-write-lifecycle-doc-parity.test.ts` exit 2 (R0-9). Because the overlay
+ * is outside the repo, every path in it is ABSOLUTE and `typeRoots` is pinned
+ * (the extended config's `"types": ["node"]` would otherwise resolve from the
+ * temp dir, which has no `node_modules`).
+ */
+/** The `@types` dir that holds `@types/node`, resolved the way tsc itself would from the dashboard package (walks up through hoisted/worktree layouts). */
+const NODE_TYPES_ROOT = dirname(dirname(createRequire(join(DASHBOARD_ROOT, "package.json")).resolve("@types/node/package.json")));
+const PROBE_PREFIX = "lore-vocab-probe-";
+let probeDir: string | undefined;
+function probeTsconfigPath(): string {
+  return join(definedOrThrow(probeDir, "probe overlay not written yet"), "tsconfig.json");
+}
 /** The member the falsification probe injects. Long and unmistakable so an assertion on it cannot match incidental text. */
 const SYNTHETIC_MEMBER = "synthetic-thirteenth-resolution-member";
 
@@ -259,33 +276,35 @@ function ensureRouteTreeGenerated(): void {
  * @param widen - `true` for the mutant, `false` for the machinery control
  */
 function writeProbeOverlay(widen: boolean): void {
-  mkdirSync(PROBE_DIR, { recursive: true });
+  removeProbeOverlay();
+  const dir = mkdtempSync(join(tmpdir(), PROBE_PREFIX));
+  probeDir = dir;
   const widenedUnion = widen ? `RealIssueResolution | "${SYNTHETIC_MEMBER}"` : "RealIssueResolution";
   writeFileSync(
-    PROBE_SHIM,
+    join(dir, "core-vocab.probe.ts"),
     [
       "/**",
       " * TRANSIENT fixture written and deleted by",
-      " * `issue-resolution-union-parity.test.ts` (AC-DC-12). If you are reading this",
-      " * in a committed tree, a test run was killed mid-flight — delete the whole",
-      " * `.vocab-probe/` directory.",
+      " * `issue-resolution-union-parity.test.ts` (AC-DC-12), in an OS temp dir.",
       " */",
-      'import type { IssueResolution as RealIssueResolution } from "../../core/src/issue-resolution-vocab.js";',
-      'export * from "../../core/src/index.js";',
+      `import type { IssueResolution as RealIssueResolution } from ${JSON.stringify(CORE_VOCAB_MODULE)};`,
+      `export * from ${JSON.stringify(CORE_INDEX_MODULE)};`,
       `export type IssueResolution = ${widenedUnion};`,
       "",
     ].join("\n"),
     "utf8",
   );
   writeFileSync(
-    PROBE_TSCONFIG,
+    join(dir, "tsconfig.json"),
     `${JSON.stringify(
       {
-        extends: "../tsconfig.json",
+        extends: TSCONFIG_SRC_JSON,
         compilerOptions: {
-          paths: { "@/*": ["./src/*"], "@lore/core": ["./.vocab-probe/core-vocab.probe.ts"] },
+          baseUrl: DASHBOARD_ROOT,
+          typeRoots: [NODE_TYPES_ROOT],
+          paths: { "@/*": ["./src/*"], "@lore/core": [join(dir, "core-vocab.probe.ts")] },
         },
-        include: ["../src/**/*"],
+        include: [join(DASHBOARD_ROOT, "src", "**", "*")],
       },
       null,
       2,
@@ -295,7 +314,9 @@ function writeProbeOverlay(widen: boolean): void {
 }
 
 function removeProbeOverlay(): void {
-  rmSync(PROBE_DIR, { recursive: true, force: true });
+  if (probeDir === undefined) return;
+  rmSync(probeDir, { recursive: true, force: true });
+  probeDir = undefined;
 }
 
 /** Fail-loud narrowing — never `!`, which trusts silently instead of naming the broken invariant. */
@@ -496,7 +517,7 @@ describe("dashboard resolution vocabulary <-> @lore/core IssueResolution union (
           // the `paths` remap, the `export *` shadowing, or the tsconfig
           // synthesis. Without it, a broken overlay would look like a pass.
           writeProbeOverlay(false);
-          const unwidened = runTsc([...SHARED_TSC_FLAGS, "-p", PROBE_TSCONFIG]);
+          const unwidened = runTsc([...SHARED_TSC_FLAGS, "-p", probeTsconfigPath()]);
           expect(
             unwidened.status,
             `the overlay with an UNWIDENED union is not clean, so the mutant's red cannot be attributed to the synthetic member:\n${unwidened.output}`,
@@ -505,7 +526,7 @@ describe("dashboard resolution vocabulary <-> @lore/core IssueResolution union (
 
           // MUTANT — the same overlay, one extra union member, no new `case`.
           writeProbeOverlay(true);
-          const mutant = runTsc([...SHARED_TSC_FLAGS, "-p", PROBE_TSCONFIG]);
+          const mutant = runTsc([...SHARED_TSC_FLAGS, "-p", probeTsconfigPath()]);
           expect(
             mutant.status,
             "a synthetic resolution member did NOT break compilation — the dashboard switches are NOT welded to the @lore/core vocabulary, they merely happen to match it today",
