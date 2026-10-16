@@ -8,7 +8,7 @@
   "scripts": {
     "dev": "bun run packages/lore/src/index.ts",
     "build": "bun run scripts/build.ts",
-    "test": "bun scripts/oracle-lock.ts sh -c \"bun run check:ac-state-renderers && bun run test:vitest && bun run test:bun && bun run check:spec-mirror\"",
+    "test": "bun scripts/oracle-lock.ts sh -c \"bun run check:ac-state-renderers && bun run test:vitest && bun run test:bun && bun run check:spec-mirror && bun run check:live-repo-state\"",
     "test:vitest": "NODE_OPTIONS=--max-old-space-size=2048 bunx vitest run",
     "test:bun": "cd packages/lore && bun test --timeout 30000 .bun.test",
     "test:changed": "bun scripts/changed-tests.ts",
@@ -30,6 +30,7 @@
     "check:ac-state-renderers": "bun scripts/check-ac-state-renderers.ts",
     "check:shipped-defaults": "bun scripts/check-shipped-defaults.ts",
     "check:spec-mirror": "bun scripts/export-spec-mirror.ts --check",
+    "check:live-repo-state": "bun scripts/check-claude-md-live-sweep.ts && bun scripts/check-list-json-real-corpus-buffer.ts && bun scripts/check-phase-write-live-state.ts && bun scripts/check-live-mirror-integrity.ts",
     "mirror:export": "bun scripts/export-spec-mirror.ts"
   },
   "devDependencies": {

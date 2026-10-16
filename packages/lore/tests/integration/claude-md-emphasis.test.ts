@@ -8,7 +8,7 @@
  * ⛔ Both ACs are bound by the spec's own coverage contract: "Every WIRING AC
  * drives the CLI subprocess, never the unit function directly." Every
  * scenario below drives `lore status --check-claude-md --json` against a
- * `mkdtemp` fixture (or, for the repo sweep, the real repo tree) and reads
+ * `mkdtemp` fixture (the live repo sweep runs from scripts/check-claude-md-live-sweep.ts) and reads
  * the JSON payload — this file never imports or calls a `measureEmphasis`-
  * shaped check function.
  *
@@ -92,21 +92,15 @@ interface RunResult {
 /**
  * Spawn `bun run <INDEX_TS> ...args` in `cwd`.
  *
- * @param opts.isolateHome - Defaults `true` (redirects `HOME` into `cwd` —
- *   the established mkdtemp-fixture isolation convention). Pass `false` for
- *   the real-repo sweep, which must run against this session's actual
- *   environment, not a fixture-redirected one — even though
- *   `--check-claude-md` is documented `HOME`-independent (config-only,
- *   `<cwd>/.lore/config.yaml`), this documents INTENT rather than relying on
- *   that being incidental.
+ * `HOME` is always redirected into `cwd` — every fixture is its own throwaway corpus and must never
+ * see a developer's real global lore state (the live-repo sweep moved to scripts/check-claude-md-live-sweep.ts).
  */
-function runLore(args: string[], cwd: string, opts: { isolateHome?: boolean } = {}): RunResult {
-  const isolateHome = opts.isolateHome ?? true;
+function runLore(args: string[], cwd: string): RunResult {
   const result = spawnSync("bun", ["run", INDEX_TS, ...args], {
     cwd,
     env: {
       ...process.env,
-      ...(isolateHome ? { HOME: cwd } : {}),
+      HOME: cwd,
       EDITOR: "true",
       CLAUDECODE: "1",
     },
@@ -151,9 +145,8 @@ interface CheckClaudeMdJson {
 
 function runCheckClaudeMdJson(
   cwd: string,
-  opts: { isolateHome?: boolean } = {},
 ): { result: RunResult; parsed: CheckClaudeMdJson } {
-  const result = runLore(["status", "--check-claude-md", "--json"], cwd, opts);
+  const result = runLore(["status", "--check-claude-md", "--json"], cwd);
   let parsed: CheckClaudeMdJson;
   try {
     parsed = JSON.parse(result.stdout) as CheckClaudeMdJson;
@@ -378,10 +371,33 @@ describe("emphasis saturation — over-threshold density is refused", () => {
 // ─── AC-EMPH-2: positive control + repo sweep at the shipped default ───────
 
 describe("emphasis saturation — positive control plus repo sweep at shipped default", () => {
-  it("positive control fires exactly one emphasis_saturated AND every real memory file in this repo yields zero at the shipped default", () => {
-    // Positive control — mandatory alongside the sweep: a skipped check and a
-    // passing check both produce zero findings, so the sweep's "zero" must be
-    // paired with proof the metric CAN fire at all (vacuously-true vs. true).
+  // ⛔ The LIVE sweep (this repo's own memory files at the shipped default) is NOT here: it reads the
+  // repo's `.lore/` and memory-file tree, so it lives in `scripts/check-claude-md-live-sweep.ts`
+  // (wired into `bun run test` as `check:live-repo-state`). What stays here is the positive control
+  // plus the sweep script's own logic, driven against mkdtemp fixtures (task-skill-test-tg-2).
+  const SWEEP_SCRIPT = join(REPO_ROOT, "scripts", "check-claude-md-live-sweep.ts");
+
+  /** Runs the sweep script with `--root <fixture>` and `HOME` redirected into it. */
+  function runSweep(root: string): RunResult {
+    const result = spawnSync("bun", [SWEEP_SCRIPT, "--root", root], {
+      cwd: tmpdir(),
+      env: { ...process.env, HOME: root, EDITOR: "true", CLAUDECODE: "1" },
+      encoding: "utf8",
+    });
+    return { stdout: result.stdout ?? "", stderr: result.stderr ?? "", exitCode: result.status ?? 1 };
+  }
+
+  /** A fixture corpus (`lore init`) — `--check-memory-pointers` needs a corpus; adoption stays at its default. */
+  function initFixture(label: string): string {
+    const dir = makeTempDir(label);
+    const init = runLore(["init"], dir);
+    if (init.exitCode !== 0) throw new Error(`lore init failed in ${dir}: ${init.stderr}`);
+    return dir;
+  }
+
+  it("positive control fires exactly one emphasis_saturated at 2x the shipped default", () => {
+    // Mandatory alongside any sweep: a skipped check and a passing check both produce zero
+    // findings, so "zero" must be paired with proof the metric CAN fire at all.
     const controlDir = makeTempDir("repo-sweep-control");
     try {
       pinEnforce(controlDir);
@@ -392,26 +408,46 @@ describe("emphasis saturation — positive control plus repo sweep at shipped de
     } finally {
       cleanupDir(controlDir);
     }
-
-    // Real corpus sweep — no HOME redirect, no fixture: THIS repo's actual
-    // memory files, at whatever this repo's `.lore/config.yaml` resolves
-    // `memory_files.emphasis` to (measured: this repo declares no
-    // `memory_files` override at all, so this IS the shipped default — N6's
-    // own guarantee that "0 files trip on landing").
-    // This repo's config may resolve adoption to `warn`, which moves every
-    // deterministic finding to advisory `downgraded` — so the sweep must read
-    // BOTH places, or "zero" would be vacuously true under warn.
-    const sweep = runCheckClaudeMdJson(REPO_ROOT, { isolateHome: false });
-    expect(findingsByKind(sweep.parsed, "emphasis_saturated")).toEqual([]);
-    const downgradedEmphasis = (sweep.parsed.data?.claude_md?.advisory ?? []).filter(
-      (a) => a.kind === "downgraded" && a.downgraded_kind === "emphasis_saturated",
-    );
-    expect(downgradedEmphasis).toEqual([]);
   });
 
-  it("NON-VACUITY: the real-corpus sweep actually walked more than zero memory files", () => {
-    const sweep = runCheckClaudeMdJson(REPO_ROOT, { isolateHome: false });
-    const headroom = sweep.parsed.data?.claude_md?.headroom ?? [];
-    expect(headroom.length).toBeGreaterThan(0);
+  it("the sweep script exits 1 naming emphasis_saturated on a fixture at 2x the default (sweep can FAIL)", () => {
+    const dir = initFixture("sweep-saturated");
+    try {
+      writeFileSync(join(dir, "CLAUDE.md"), buildEmphasisContent(scale.markerCount * 2, scale.kb));
+      const run = runSweep(dir);
+      expect(run.exitCode).toBe(1);
+      // default adoption is warn, so the finding surfaces as an advisory downgrade — the script reads both places
+      expect(run.stderr).toContain("emphasis_saturated");
+    } finally {
+      cleanupDir(dir);
+    }
+  });
+
+  it("the sweep script exits 0 on a fixture at EXACTLY the default, having walked >= 1 memory file", () => {
+    const dir = initFixture("sweep-clean");
+    try {
+      writeFileSync(join(dir, "CLAUDE.md"), buildEmphasisContent(scale.markerCount, scale.kb));
+      const run = runSweep(dir);
+      expect(run.exitCode, run.stderr).toBe(0);
+      expect(run.stdout).toMatch(/\b[1-9]\d* memory file\(s\) walked/);
+    } finally {
+      cleanupDir(dir);
+    }
+  });
+
+  it("NON-VACUITY: the sweep script exits 1 naming a vacuous sweep when the root holds no memory file", () => {
+    const dir = initFixture("sweep-vacuous");
+    try {
+      const run = runSweep(dir);
+      expect(run.exitCode).toBe(1);
+      expect(run.stderr).toContain("vacuous sweep");
+    } finally {
+      cleanupDir(dir);
+    }
+  });
+
+  it("ERROR: a --root that is not a directory makes the sweep script exit 2, never 0", () => {
+    const run = runSweep(join(tmpdir(), "lore-claude-md-emphasis-no-such-dir-xyz"));
+    expect(run.exitCode).toBe(2);
   });
 });

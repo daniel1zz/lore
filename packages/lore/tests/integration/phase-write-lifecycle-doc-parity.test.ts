@@ -90,11 +90,16 @@
  *     (`grep -rIl -e … packages/`, same cwd) run with a pattern known to be
  *     present, which must return >= 1 file.
  *
- * ## Reading the live corpus: `audit` + `list` only, and why not `get`
+ * ## The live corpus and tree reads moved out of this file (task-skill-test-tg-2)
  *
  * AC-PHASEVER-2(b) is a claim about THIS repo's corpus (an accepted ADR reachable
- * from this spec), so it cannot be measured in a throwaway. Two consequences,
- * both deliberate:
+ * from this spec) and AC-PHASEVER-3(d) is a grep over THIS repo's `packages/` tree.
+ * Neither belongs in the unit suite, so both run from
+ * `scripts/check-phase-write-live-state.ts` (wired into `bun run test` as
+ * `check:live-repo-state`); this file proves the same readers on mkdtemp
+ * fixtures (they PASS a recorded premise / clean tree and FAIL each way it can be
+ * missing). The AC commands run BOTH. What follows records why the live reader is
+ * `audit` + `list` only, and why not `get`. Two consequences, both deliberate:
  *   1. A git worktree carries no `.lore/` of its own, so `findLoreDbPath` walks
  *      up and resolves the MAIN checkout's corpus. File-based assertions read
  *      THIS worktree's files; corpus assertions read the shared corpus. That
@@ -106,7 +111,7 @@
  *      So this suite reads the live corpus with `audit` and `list` ONLY and never
  *      `get` — otherwise every full-suite run would inflate `trace_events` and
  *      quietly launder these two docs out of `lore trace stats`' "never-read
- *      docs" signal. `runLoreReadOnlyInRepo` enforces the allowlist.
+ *      docs" signal. `runLoreReadOnly` (scripts/check-phase-write-live-state.ts) enforces the allowlist.
  *
  * `lore audit <spec>` is also the STRONGER reader for the edge's direction: an
  * `action: "link"` row is written on the FROM doc with `details.to_id`, so a
@@ -150,10 +155,24 @@
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { basename, join, sep } from "node:path";
+import { basename, dirname, join, sep } from "node:path";
 import { fileURLToPath } from "node:url";
+
+// ⛔ The script is loaded with a DYNAMIC import of a computed path, and its surface is typed here.
+// A static import of a `.ts` file under `scripts/` makes `tsc -p packages/lore/tsconfig.tests.json`
+// pull it outside its `rootDir` (TS6059); the repo's `.mjs` scripts avoid that only because JS is
+// not a rooted source file.
+/** The slice of `scripts/check-phase-write-live-state.ts` this file drives. */
+interface PhaseLiveScript {
+  checkBannedPhrases(root: string): string[];
+  checkPremise(root: string, specSlug: string, adrSlug: string, home: string): string[];
+  runLoreReadOnly(args: readonly string[], root: string, home: string): unknown;
+}
+
+const PHASE_SCRIPT_PATH = new URL("../../../../scripts/check-phase-write-live-state.ts", import.meta.url).pathname;
+const { checkBannedPhrases, checkPremise, runLoreReadOnly } = (await import(/* @vite-ignore */ PHASE_SCRIPT_PATH)) as PhaseLiveScript;
 
 // ─── Locations ──────────────────────────────────────────────────────────────
 
@@ -278,9 +297,6 @@ function assertEntryUnderTest(): void {
 /** Fixture directories this file created. Nothing outside this list is ever a write target. */
 const fixtureDirs: string[] = [];
 
-/** A throwaway `HOME` for the repo READ-ONLY runs, so no global lore state on the machine is read or written. */
-const readOnlyHome = mkdtempSync(join(tmpdir(), "lore-phasever-home-"));
-
 function spawnLore(args: readonly string[], cwd: string, home: string): RunResult {
   assertEntryUnderTest();
   const proc = spawnSync("bun", [LORE_ENTRY, ...args], {
@@ -310,24 +326,6 @@ function runLoreInFixture(args: readonly string[], dir: string): RunResult {
     throw new Error(`refusing to run \`lore ${args.join(" ")}\` in ${dir} — not a fixture this file created`);
   }
   return spawnLore(args, dir, dir);
-}
-
-/**
- * The ONLY door to the live corpus. Allowlist is `audit` + `list`: both were
- * MEASURED to leave `trace_events` untouched, whereas `lore get` appends a row
- * (see the header). Anything else — and any write verb — is refused here rather
- * than discovered afterwards in the team's knowledge base.
- */
-const LIVE_CORPUS_ALLOWED_VERBS: readonly string[] = ["audit", "list"];
-
-function runLoreReadOnlyInRepo(args: readonly string[]): RunResult {
-  const verb = args[0];
-  if (verb === undefined || !LIVE_CORPUS_ALLOWED_VERBS.includes(verb)) {
-    throw new Error(
-      `refusing to run \`lore ${args.join(" ")}\` against the live corpus — only ${LIVE_CORPUS_ALLOWED_VERBS.join("/")} are allowed here`,
-    );
-  }
-  return spawnLore(args, REPO_ROOT, readOnlyHome);
 }
 
 /** Strict envelope parse — a non-JSON or failing `--json` run throws NAMING the raw output, never yields a default. */
@@ -416,83 +414,11 @@ function makeApprovedPlan(title: string): { readonly dir: string; readonly slug:
   return { dir, slug: created.slug };
 }
 
-// ─── Live-corpus readers (`audit` + `list` only) ────────────────────────────
-
-interface AuditEntry {
-  readonly action?: string;
-  readonly details?: unknown;
-}
-
-/**
- * Counts audit rows of `action` on the SPEC that name `toId` with link type
- * `wantedType`. `action: "link"` / `"unlink"` rows are written on the FROM doc
- * with `details.to_id` (corpus-service.ts), so a row here proves the edge's
- * DIRECTION — outbound from the spec — which `navigation.related` cannot
- * (it is built from `findLinks(id, "both")`).
- *
- * `unlink` rows carry `link_type` as the ARRAY of removed types, so both shapes
- * are accepted for the same `wantedType`.
- */
-function countLinkAuditRows(
-  entries: readonly AuditEntry[],
-  action: "link" | "unlink",
-  toId: string,
-  wantedType: string,
-): number {
-  let hits = 0;
-  for (const entry of entries) {
-    if (entry.action !== action) continue;
-    const details = entry.details;
-    if (typeof details !== "object" || details === null) continue;
-    const record = details as Record<string, unknown>;
-    if (record["to_id"] !== toId) continue;
-    const linkType = record["link_type"];
-    const namesWanted = linkType === wantedType || (Array.isArray(linkType) && linkType.includes(wantedType));
-    if (namesWanted) hits += 1;
-  }
-  return hits;
-}
-
-interface DocSummaryRow {
-  readonly id: string;
-  readonly slug: string;
-  readonly type: string;
-  readonly meta?: { readonly decision_status?: string };
-  readonly validity_status?: { readonly invalidated?: boolean };
-}
-
-// ─── `grep`, in the shape the criterion pins ────────────────────────────────
-
-/**
- * `grep -rIl -e <pattern>… packages/` from the repo root — AC-PHASEVER-3(d)'s
- * pinned match rule, verbatim: no `--exclude`, no path filter. Exit 1 (no match)
- * is a legitimate empty answer; anything else is a broken invocation and throws,
- * so a mis-aimed grep can never read as "0 files".
- */
-function grepFilesUnderPackages(patterns: readonly string[]): readonly string[] {
-  const args = ["-rIl"];
-  for (const pattern of patterns) args.push("-e", pattern);
-  args.push("packages/");
-  const proc = spawnSync("grep", args, { cwd: REPO_ROOT, encoding: "utf8" });
-  if (proc.status === null) throw new Error(`grep was killed by signal ${String(proc.signal)}`);
-  if (proc.status !== 0 && proc.status !== 1) {
-    throw new Error(`grep ${args.join(" ")} failed with exit ${proc.status}: ${proc.stderr}`);
-  }
-  const files = (proc.stdout ?? "")
-    .split("\n")
-    .map((line) => line.trim())
-    .filter((line) => line !== "");
-  if (proc.status === 1 && files.length > 0) {
-    throw new Error(`grep exited 1 ("no match") yet printed ${files.length} path(s) — the invocation is not being read correctly`);
-  }
-  return files;
-}
-
 // ─── Cleanup ────────────────────────────────────────────────────────────────
 
 afterAll(() => {
   const base = tmpdir();
-  for (const dir of [...fixtureDirs, readOnlyHome]) {
+  for (const dir of fixtureDirs) {
     if (dir === "" || !dir.startsWith(base)) continue;
     rmSync(dir, { recursive: true, force: true });
   }
@@ -517,8 +443,8 @@ describe("invocation shape and corpus safety guards", () => {
     );
   });
 
-  it("refuses a non-read verb against the live corpus", () => {
-    expect(() => runLoreReadOnlyInRepo(["set", SPEC_SLUG, "--content", "x"])).toThrow(/only audit\/list are allowed/);
+  it("the premise reader refuses a non-read verb against any corpus", () => {
+    expect(() => runLoreReadOnly(["set", SPEC_SLUG, "--content", "x"], tmpdir(), tmpdir())).toThrow(/only audit\/list are allowed/);
   });
 });
 
@@ -642,22 +568,8 @@ interface Ac2Measurement {
   readonly totalAfterControl: number;
 }
 
-interface PremiseRecord {
-  readonly adrId: string;
-  readonly adrDecisionStatus: string | undefined;
-  readonly adrInvalidated: boolean | undefined;
-  readonly adrListReturned: number;
-  readonly adrListTotal: number;
-  readonly auditReturned: number;
-  readonly auditTotal: number;
-  readonly outboundRelatesToRows: number;
-  readonly unlinkRelatesToRows: number;
-  readonly outboundParentRows: number;
-}
-
 describe(AC2_SUITE_TITLE, () => {
   let m: Ac2Measurement;
-  let premise: PremiseRecord;
 
   beforeAll(() => {
     const { dir, slug } = makeApprovedPlan("Phasever AC2 approved plan");
@@ -702,37 +614,6 @@ describe(AC2_SUITE_TITLE, () => {
       totalAfterControl,
     };
 
-    // ── (b) the premise record, read from the LIVE corpus with `list` + `audit` only ──
-    const adrList = jsonEnvelope<{ docs: readonly DocSummaryRow[]; total: number }>(
-      runLoreReadOnlyInRepo(["list", "--type", "adr", "--json"]),
-      "lore list --type adr --json",
-    );
-    if (adrList.docs.length !== adrList.total) {
-      throw new Error(`lore list --type adr --json is truncated: ${adrList.docs.length} rows vs total ${adrList.total}`);
-    }
-    const adr = adrList.docs.find((row) => row.slug === ADR_SLUG);
-    if (adr === undefined) throw new Error(`no ADR named ${ADR_SLUG} in this corpus — AC-PHASEVER-2(b) has nothing to measure`);
-
-    const audit = jsonEnvelope<{ entries: readonly AuditEntry[]; total: number }>(
-      runLoreReadOnlyInRepo(["audit", SPEC_SLUG, "--limit", "10000", "--json"]),
-      `lore audit ${SPEC_SLUG} --json`,
-    );
-    if (audit.entries.length !== audit.total) {
-      throw new Error(`lore audit ${SPEC_SLUG} --json is truncated: ${audit.entries.length} entries vs total ${audit.total} — raise --limit`);
-    }
-
-    premise = {
-      adrId: adr.id,
-      adrDecisionStatus: adr.meta?.decision_status,
-      adrInvalidated: adr.validity_status?.invalidated,
-      adrListReturned: adrList.docs.length,
-      adrListTotal: adrList.total,
-      auditReturned: audit.entries.length,
-      auditTotal: audit.total,
-      outboundRelatesToRows: countLinkAuditRows(audit.entries, "link", adr.id, "relates-to"),
-      unlinkRelatesToRows: countLinkAuditRows(audit.entries, "unlink", adr.id, "relates-to"),
-      outboundParentRows: countLinkAuditRows(audit.entries, "link", adr.id, "parent"),
-    };
   }, 90_000);
 
   // ── (a) `phase rename` — both conjuncts, explicitly ──
@@ -789,40 +670,76 @@ describe(AC2_SUITE_TITLE, () => {
     expect(m.totalAfterControl).toBe(m.totalAfterRm + 1);
   });
 
-  // ── (b) the premise question has a recorded answer ──
-  // ⛔ ALREADY SATISFIED 2026-08-24. Asserted so it cannot silently vanish; its
-  // pass is NOT coverage of this change. The oracle asserts reachability +
+  // ── (b) the premise question has a recorded answer — the LOGIC, on mkdtemp fixtures ──
+  // ⛔ The check against THIS repo's live corpus (spec -> ADR relates-to edge, accepted, not
+  // retracted) runs from `scripts/check-phase-write-live-state.ts` (wired into `bun run test` as
+  // `check:live-repo-state`); this file never reads the repo's `.lore/` (task-skill-test-tg-2).
+  // The reader `checkPremise` is exercised here against throwaway corpora so it is known to PASS
+  // a recorded premise and to FAIL each way the record can be missing. Asserts reachability +
   // `accepted`, NEVER a particular conclusion.
 
-  it("(b) an outbound `relates-to` edge runs from this spec to the ADR at depth 1", () => {
-    expect(
-      premise.outboundRelatesToRows,
-      `no audit row on ${SPEC_SLUG} records a relates-to link to ${premise.adrId} (${premise.auditReturned} entries scanned)`,
-    ).toBeGreaterThanOrEqual(1);
+  /** A fixture with a spec and an ADR (`decisionStatus`), optionally related spec -> ADR. */
+  function makePremiseFixture(opts: { decisionStatus: string; link: boolean; unlinkAfter?: boolean }): {
+    readonly dir: string;
+    readonly specSlug: string;
+    readonly adrSlug: string;
+  } {
+    const dir = mkdtempSync(join(tmpdir(), "lore-phasever-premise-"));
+    fixtureDirs.push(dir);
+    const init = spawnLore(["init", "--author", "phasever-oracle"], dir, dir);
+    if (init.exitCode !== 0) throw new Error(`lore init failed (exit ${init.exitCode}): ${init.stderr}`);
+    const adr = jsonEnvelope<{ slug: string }>(
+      runLoreInFixture(
+        ["create", "adr", "--title", "Fixture Premise Decision", "--decision-status", opts.decisionStatus, "--content", "d", "--no-ai", "--json"],
+        dir,
+      ),
+      "lore create adr --json",
+    );
+    const spec = jsonEnvelope<{ slug: string }>(
+      runLoreInFixture(
+        ["create", "spec", "--title", "Fixture Premise Spec", "--content", "## Overview/Goal\n\ng\n\n## Scope\n\ns\n\n## Acceptance Criteria\n\nSee ac add.\n", "--no-ai", "--json"],
+        dir,
+      ),
+      "lore create spec --json",
+    );
+    if (opts.link) {
+      jsonEnvelope<unknown>(runLoreInFixture(["link", spec.slug, adr.slug, "--json"], dir), "lore link --json");
+      if (opts.unlinkAfter === true) {
+        jsonEnvelope<unknown>(runLoreInFixture(["unlink", spec.slug, adr.slug, "--json"], dir), "lore unlink --json");
+      }
+    }
+    return { dir, specSlug: spec.slug, adrSlug: adr.slug };
+  }
+
+  const premiseHome = mkdtempSync(join(tmpdir(), "lore-phasever-premise-home-"));
+  fixtureDirs.push(premiseHome);
+
+  it("(b) HAPPY: an outbound relates-to edge to an accepted ADR leaves checkPremise with no violation", () => {
+    const f = makePremiseFixture({ decisionStatus: "accepted", link: true });
+    expect(checkPremise(f.dir, f.specSlug, f.adrSlug, premiseHome)).toEqual([]);
   });
 
-  it("(b) that edge was never unlinked afterwards", () => {
-    expect(premise.unlinkRelatesToRows).toBe(0);
+  it("(b) NEGATIVE: a spec with NO edge to the ADR is reported — the missing-edge conjunct can fail", () => {
+    const f = makePremiseFixture({ decisionStatus: "accepted", link: false });
+    const violations = checkPremise(f.dir, f.specSlug, f.adrSlug, premiseHome);
+    expect(violations.some((v) => v.includes("no audit row") && v.includes("relates-to"))).toBe(true);
   });
 
-  it("(b) the ADR's decision_status is accepted", () => {
-    expect(premise.adrDecisionStatus).toBe("accepted");
+  it("(b) NEGATIVE: an ADR whose decision_status is not accepted is reported", () => {
+    const f = makePremiseFixture({ decisionStatus: "proposed", link: true });
+    const violations = checkPremise(f.dir, f.specSlug, f.adrSlug, premiseHome);
+    expect(violations.some((v) => v.includes("decision_status is proposed"))).toBe(true);
   });
 
-  // ⛔ `validity_status` off a `list` row is ADVISORY, not authoritative — CLAUDE.md:
-  // "a listed doc is NOT proven live — validity is authoritative only by direct
-  // address". Kept anyway because `invalidated: true` here would be a real signal;
-  // the criterion's own requirement is the `accepted` assertion above.
-  it("(b) the ADR is not listed as retracted", () => {
-    expect(premise.adrInvalidated).toBe(false);
+  it("(b) STATE: an edge that was unlinked afterwards is reported", () => {
+    const f = makePremiseFixture({ decisionStatus: "accepted", link: true, unlinkAfter: true });
+    const violations = checkPremise(f.dir, f.specSlug, f.adrSlug, premiseHome);
+    expect(violations.some((v) => v.includes("unlinked"))).toBe(true);
   });
 
-  it("(b) the edge is a relates-to edge, NOT the tree parent edge in disguise", () => {
-    expect(premise.outboundParentRows).toBe(0);
-  });
-
-  it("(b) the audit scan was complete, so a missing link row means absent and never truncated", () => {
-    expect(premise.auditTotal).toBe(premise.auditReturned);
+  it("(b) ERROR: an ADR slug absent from the corpus throws, never reads as a pass", () => {
+    const f = makePremiseFixture({ decisionStatus: "accepted", link: true });
+    expect(() => checkPremise(f.dir, f.specSlug, "adr-no-such-decision", premiseHome)).toThrow(/no ADR named adr-no-such-decision/);
   });
 });
 
@@ -835,8 +752,6 @@ interface Ac3Measurement {
   readonly phaseServiceSingleQuotedDraft: number;
   readonly phaseServiceDoubleQuotedDraft: number;
   readonly acServiceDemotionHelperHits: number;
-  readonly bannedPhraseFiles: readonly string[];
-  readonly grepControlFiles: readonly string[];
   readonly phaseServiceHeaderAdrHits: number;
   readonly acServiceHeaderAdrHits: number;
   readonly selfBannedPhraseAHits: number;
@@ -856,8 +771,6 @@ describe(AC3_SUITE_TITLE, () => {
       phaseServiceSingleQuotedDraft: countOccurrences(phaseSource, "'draft'"),
       phaseServiceDoubleQuotedDraft: countOccurrences(phaseSource, '"draft"'),
       acServiceDemotionHelperHits: countOccurrences(acSource, DEMOTION_HELPER),
-      bannedPhraseFiles: grepFilesUnderPackages([BANNED_PHRASE_A, BANNED_PHRASE_B]),
-      grepControlFiles: grepFilesUnderPackages([GREP_CONTROL_PATTERN]),
       phaseServiceHeaderAdrHits: countOccurrences(leadingBlockComment(phaseSource, PHASE_SERVICE_PATH), ADR_SLUG),
       acServiceHeaderAdrHits: countOccurrences(leadingBlockComment(acSource, AC_SERVICE_PATH), ADR_SLUG),
       selfBannedPhraseAHits: countOccurrences(selfSource, BANNED_PHRASE_A),
@@ -886,12 +799,55 @@ describe(AC3_SUITE_TITLE, () => {
 
   // ── (d) NEGATIVE closed set, pinned match rule ──
 
-  it("(d) no file under packages/ still asserts that phase writes record nothing", () => {
-    expect(m.bannedPhraseFiles, `still carrying a banned phrase: ${m.bannedPhraseFiles.join(", ")}`).toEqual([]);
+  // ⛔ The scan of THIS repo's `packages/` tree (`grep -rIl -e <phrase A> -e <phrase B> packages/` == 0
+  // files, controlled by the same grep shape finding a pattern known present) runs from
+  // `scripts/check-phase-write-live-state.ts` (wired into `bun run test` as `check:live-repo-state`).
+  // Here the SAME function is driven against a mkdtemp tree, so it is known to PASS a clean tree and to
+  // FAIL on a banned phrase, on a vacuous grep and on a malfunctioning grep.
+
+  /** A mkdtemp tree whose `packages/` holds the given files (path relative to the root -> content). */
+  function makePackagesTree(files: Readonly<Record<string, string>>): string {
+    const root = mkdtempSync(join(tmpdir(), "lore-phasever-grep-"));
+    fixtureDirs.push(root);
+    for (const [rel, content] of Object.entries(files)) {
+      mkdirSync(dirname(join(root, rel)), { recursive: true });
+      writeFileSync(join(root, rel), content);
+    }
+    return root;
+  }
+
+  it("(d) HAPPY: a tree with no banned phrase and a control hit yields no violation", () => {
+    const root = makePackagesTree({ "packages/a/src/x.ts": `export const ${GREP_CONTROL_PATTERN} = 1;\n` });
+    expect(checkBannedPhrases(root)).toEqual([]);
   });
 
-  it("(d) CONTROL: the same grep shape DOES find files for a pattern known present", () => {
-    expect(m.grepControlFiles.length).toBeGreaterThanOrEqual(1);
+  it("(d) NEGATIVE: a file under packages/ carrying phrase A is named, so the sweep can FAIL", () => {
+    const root = makePackagesTree({
+      "packages/a/src/x.ts": `export const ${GREP_CONTROL_PATTERN} = 1;\n`,
+      "packages/a/tests/y.test.ts": `// a stale claim: ${BANNED_PHRASE_A}\n`,
+    });
+    const violations = checkBannedPhrases(root);
+    expect(violations).toHaveLength(1);
+    expect(violations[0]).toContain("packages/a/tests/y.test.ts");
+  });
+
+  it("(d) NEGATIVE: phrase B alone is caught too — both phrases are in the pattern set", () => {
+    const root = makePackagesTree({
+      "packages/a/src/x.ts": `export const ${GREP_CONTROL_PATTERN} = 1;\n`,
+      "packages/b/z.md": `${BANNED_PHRASE_B} writes\n`,
+    });
+    expect(checkBannedPhrases(root).some((v) => v.includes("packages/b/z.md"))).toBe(true);
+  });
+
+  it("(d) CONTROL: a tree where the control pattern is absent fails — a zero would be a mis-aimed grep", () => {
+    const root = makePackagesTree({ "packages/a/src/x.ts": "export const unrelated = 1;\n" });
+    expect(checkBannedPhrases(root).some((v) => v.includes("CONTROL failed"))).toBe(true);
+  });
+
+  it("(d) ERROR: a root with no packages/ directory throws (grep exit 2), never reads as 0 files", () => {
+    const root = mkdtempSync(join(tmpdir(), "lore-phasever-nopackages-"));
+    fixtureDirs.push(root);
+    expect(() => checkBannedPhrases(root)).toThrow(/grep .* failed with exit 2/);
   });
 
   it("(d) guards its own source against the banned phrases — this file lives under packages/", () => {
