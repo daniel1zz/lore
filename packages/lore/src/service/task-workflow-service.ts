@@ -317,7 +317,7 @@
 import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { z } from "zod";
-import { err, ok, findMissingOracleFiles, commandNamesMissingOracle, extractDeclaredPhases, hasClaimConflict, type ClaimHolder, type ClaimParty, type RunId, type Result } from "@lore/core";
+import { err, ok, findMissingOracleFiles, evidenceRanMissingOracle, extractDeclaredPhases, hasClaimConflict, type ClaimHolder, type ClaimParty, type RunId, type Result } from "@lore/core";
 import type { LoreError } from "@lore/core";
 import type { ActorSource } from "@lore/core/node";
 import {
@@ -3721,7 +3721,8 @@ export class TaskWorkflowService {
   }
 
   private async findMissingOracleFileFloor(task: DocRecord): Promise<Result<DoneFloorRefusal | null, LoreError>> {
-    if (this.repoRoot === undefined) return ok(null);
+    const repoRoot = this.repoRoot;
+    if (repoRoot === undefined) return ok(null);
     const covered = new Set<string>(extractDeclaredAcScope(task) ?? []);
     for (const entry of readEvidence(task)) {
       if (entry.ac_ref !== undefined) covered.add(entry.ac_ref);
@@ -3747,8 +3748,9 @@ export class TaskWorkflowService {
     const findings: string[] = [];
     for (const criterion of criteria) {
       if (!covered.has(criterion.id) || criterion.verify.mode !== "script") continue;
-      const missing = findMissingOracleFiles(criterion.verify.command, {
-        cwd: this.repoRoot,
+      const criterionCommand = criterion.verify.command;
+      const missing = findMissingOracleFiles(criterionCommand, {
+        cwd: repoRoot,
         fileExists: existsSync,
       });
       if (missing.length === 0) continue;
@@ -3756,7 +3758,14 @@ export class TaskWorkflowService {
       // nothing was ever attested against it. It is refused only once a pass OF THAT FILE is on record (the file then
       // vanished); a pass tagged with the AC whose command ran other files (TG-22) is not a pass of the missing file.
       const hasPassOnRecord = evidence.some(
-        (e) => e.ac_ref === criterion.id && e.result === "pass" && commandNamesMissingOracle(e.command, missing),
+        (e) =>
+          e.ac_ref === criterion.id &&
+          e.result === "pass" &&
+          evidenceRanMissingOracle(
+            { command: e.command, ...(e.attestation?.execution_root !== undefined ? { executionRoot: e.attestation.execution_root } : {}) },
+            { command: criterionCommand, missingPaths: missing },
+            { cwd: repoRoot },
+          ),
       );
       if (declaredMissingOk.value.has(criterion.id) && !hasPassOnRecord) continue;
       findings.push(`${criterion.id} (${missing.join(", ")})`);

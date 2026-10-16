@@ -553,23 +553,23 @@ describe("deriveAcCoverageState oracle_file_missing counts only passes that name
   const base = { ac_id: "AC-9", mode: "script", fail: 0, attested_pass: 0, attested_fail: 0, falsified: 1 } as const;
   const gone = ["scripts/tests/gone.test.ts"];
 
-  it("NEGATIVE: a pass whose command ran a different file is not not_measured", () => {
+  it("NEGATIVE: a pass that did not run the missing file is not not_measured", () => {
     const state = deriveAcCoverageState({
-      ...base, pass: 1, oracle_file_missing: gone,
-      refs: [{ task_id: "t1", result: "pass", command: "bun test other.bun.test.ts" }],
+      ...base, pass: 1, oracle_file_missing: gone, passes_ran_missing_oracle: 0,
+      refs: [{ task_id: "t1", result: "pass" }],
     });
     expect(state).toBe("pass");
   });
 
-  it("HAPPY: a pass whose command named the missing file is not_measured", () => {
+  it("HAPPY: a pass that ran the missing file is not_measured", () => {
     const state = deriveAcCoverageState({
-      ...base, pass: 1, oracle_file_missing: gone,
-      refs: [{ task_id: "t1", result: "pass", command: "bunx vitest run scripts/tests/gone.test.ts" }],
+      ...base, pass: 1, oracle_file_missing: gone, passes_ran_missing_oracle: 1,
+      refs: [{ task_id: "t1", result: "pass" }],
     });
     expect(state).toBe("not_measured");
   });
 
-  it("BOUNDARY: a pass ref without a recorded command never counts as naming the missing file", () => {
+  it("BOUNDARY: a fact whose passes_ran_missing_oracle was never computed never counts as running the missing file", () => {
     const state = deriveAcCoverageState({
       ...base, pass: 1, oracle_file_missing: gone,
       refs: [{ task_id: "t1", result: "pass" }],

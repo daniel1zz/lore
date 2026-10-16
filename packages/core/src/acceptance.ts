@@ -84,7 +84,6 @@ import type { Result, LoreError } from "./errors.js";
 import type { DocRecord } from "./types.js";
 import { ANY_RULE_ID_PATTERN } from "./baseline.js";
 import { isInvalidated } from "./validity.js";
-import { commandNamesMissingOracle } from "./oracle-file-existence.js";
 import {
   extractEvidence,
   resolveOracleGeneration,
@@ -370,12 +369,6 @@ export interface EvidenceRefLite {
   attested?: boolean;
   recorded_at?: string;
   /**
-   * The `EvidenceEntry.command` this ref was projected from — lets {@link deriveAcCoverageState} tell a pass
-   * that ran a criterion's now-missing oracle file from a pass that ran other files (TG-22). Absent on a
-   * hand-built fixture; an absent command never counts as naming the missing file.
-   */
-  command?: string;
-  /**
    * The RAW `EvidenceEntry.ac_oracle_generation` stamp this ref was projected from
    * (§M5, AC-DC-8) — present iff the source row carried one, deliberately NOT
    * normalised to {@link ORACLE_GENERATION_INITIAL} here. Normalising at projection
@@ -511,6 +504,14 @@ export interface AcCoverageFact {
    * {@link computeAcCoverage} (which is pure and reads no filesystem).
    */
   oracle_file_missing?: readonly string[];
+  /**
+   * How many `pass` evidence rows tagged with this criterion RAN one of its missing oracle files (TG-22;
+   * `evidenceRanMissingOracle`, same normalised-location comparison, execution root included). Set by
+   * `AcService.listCriteria` beside {@link oracle_file_missing}; ABSENT = not computed = no such pass.
+   * {@link deriveAcCoverageState} answers `"not_measured"` only when this is positive: a pass that ran OTHER
+   * files proves nothing about the missing one, but must not be hidden by it either.
+   */
+  passes_ran_missing_oracle?: number;
 }
 
 /**
@@ -569,7 +570,7 @@ export function computeAcCoverage(
       // the entry already in hand. `EvidenceRefLite.recorded_at` stays OPTIONAL on
       // the TYPE (defending hand-built fixtures, per that field's own JSDoc) even
       // though this real aggregator always supplies it.
-      const ref: EvidenceRefLite = { task_id: task.id, result: entry.result, recorded_at: entry.recorded_at, command: entry.command };
+      const ref: EvidenceRefLite = { task_id: task.id, result: entry.result, recorded_at: entry.recorded_at };
       if (entry.attestation !== undefined) {
         ref.attested = true;
       }
@@ -657,7 +658,7 @@ export function computeAcCoverage(
  * | 7 | `"none"` | `pass === 0` AND `fail === 0` |
  *
  * **AC-TG-6 — missing oracle file (between rows 2 and 3)**: when {@link AcCoverageFact.oracle_file_missing}
- * is non-empty and `fail === 0` and a `pass` ref's command NAMES one of those missing paths (TG-22: a pass that ran
+ * is non-empty and `fail === 0` and `passes_ran_missing_oracle > 0` (TG-22: a pass that ran
  * other files does not count), the state is `"not_measured"` BEFORE rows 3-6 are tried —
  * an earlier attested pass against a test file that no longer exists must not render as passing. A real
  * `fail` still outranks it (rows 1-2); a criterion with no evidence stays `"none"` (row 7).
@@ -738,12 +739,9 @@ export function deriveAcCoverageState(fact: AcCoverageFact): AcCoverageState {
     return isSupersededByNewerAttestedPass(fact.refs) ? "fail_superseded" : "fail";
   }
   // AC-TG-6: the oracle file is gone, so no earlier pass (attested or not) may render as passing.
-  // TG-22: only a pass whose command names the missing file counts — a pass that ran other files proves nothing about it.
+  // TG-22: only a pass that RAN the missing file counts — a pass that ran other files proves nothing about it.
   const missing = fact.oracle_file_missing;
-  if (
-    missing !== undefined &&
-    fact.refs.some((r) => r.result === "pass" && r.command !== undefined && commandNamesMissingOracle(r.command, missing))
-  ) {
+  if (missing !== undefined && missing.length > 0 && fact.passes_ran_missing_oracle !== undefined && fact.passes_ran_missing_oracle > 0) {
     return "not_measured";
   }
   if (fact.attested_pass > 0) return "attested_pass";

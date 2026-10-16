@@ -116,6 +116,7 @@ import {
   resolveStatusAfterContractEdit,
   resolveOracleGeneration,
   findMissingOracleFiles,
+  evidenceRanMissingOracle,
   type AcceptanceCriterion,
   type AcCoverageFact,
   type AcVerifyMode,
@@ -663,7 +664,7 @@ export class AcService {
       plans.length > 0 || adhocTasks.length > 0 ? computeAcCoverage(criteria, tasks) : null;
     const coverage =
       baseCoverage !== null && pathContext !== undefined
-        ? annotateMissingOracleFiles(baseCoverage, criteria, pathContext)
+        ? annotateMissingOracleFiles(baseCoverage, criteria, tasks, pathContext)
         : baseCoverage;
 
     const declaredIds = new Set(criteria.map((c) => c.id));
@@ -1468,25 +1469,42 @@ function buildSetChangeSummary(
  *
  * @param coverage - {@link computeAcCoverage}'s facts, in criteria order
  * @param criteria - the spec's declared criteria
+ * @param tasks - the tasks whose evidence produced `coverage` (their rows give each pass's command / execution root)
  * @param pathContext - injected fs context (never a real filesystem read here)
  * @returns new facts (inputs untouched); non-script criteria keep the field ABSENT
  */
 function annotateMissingOracleFiles(
   coverage: AcListResult["coverage"] & object,
   criteria: AcceptanceCriterion[],
+  tasks: DocRecord[],
   pathContext: OraclePathContext,
 ): AcListResult["coverage"] & object {
   const byId = new Map(criteria.map((c) => [c.id, c] as const));
   return coverage.map((fact) => {
     const criterion = byId.get(fact.ac_id);
     if (criterion === undefined || criterion.verify.mode !== "script") return fact;
-    return {
-      ...fact,
-      oracle_file_missing: findMissingOracleFiles(criterion.verify.command, {
-        cwd: pathContext.cwd,
-        ...(pathContext.corpusRoot !== undefined ? { corpusRoot: pathContext.corpusRoot } : {}),
-        fileExists: pathContext.fileExists,
-      }),
+    const rootCtx = {
+      cwd: pathContext.cwd,
+      ...(pathContext.corpusRoot !== undefined ? { corpusRoot: pathContext.corpusRoot } : {}),
     };
+    const criterionCommand = criterion.verify.command;
+    const missingPaths = findMissingOracleFiles(criterionCommand, { ...rootCtx, fileExists: pathContext.fileExists });
+    // reason: TG-22 — only a pass that RAN the missing file keeps the state at not_measured; see AcCoverageFact.passes_ran_missing_oracle.
+    const passesRanMissingOracle = tasks
+      .flatMap((task) => extractEvidence(task))
+      .filter(
+        (entry) =>
+          entry.ac_ref === fact.ac_id &&
+          entry.result === "pass" &&
+          evidenceRanMissingOracle(
+            {
+              command: entry.command,
+              ...(entry.attestation?.execution_root !== undefined ? { executionRoot: entry.attestation.execution_root } : {}),
+            },
+            { command: criterionCommand, missingPaths },
+            rootCtx,
+          ),
+      ).length;
+    return { ...fact, oracle_file_missing: missingPaths, passes_ran_missing_oracle: passesRanMissingOracle };
   });
 }

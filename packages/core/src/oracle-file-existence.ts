@@ -164,23 +164,6 @@ export function extractTestFileTokens(command: string): string[] {
   return tokens;
 }
 
-/**
- * True when `command` names (via {@link extractTestFileTokens}, the one extraction `verify` uses) at least one
- * of `missingPaths` — the exact strings {@link findMissingOracleFiles} returned for a criterion's command.
- * Answers "did this recorded run execute the missing oracle file?" so a pass that ran OTHER files is not
- * mistaken for a pass of the file that is gone (TG-22; spec-test-governance-guards-that-refuse-bad-tests-declared AC-TG-6).
- *
- * @param command - the command recorded on an evidence row
- * @param missingPaths - missing oracle paths as returned by {@link findMissingOracleFiles}
- * @returns `false` for an empty `missingPaths` or a command that names none of them
- * @example
- *   commandNamesMissingOracle("bun test a.test.ts", ["b.test.ts"]) // => false
- */
-export function commandNamesMissingOracle(command: string, missingPaths: readonly string[]): boolean {
-  if (missingPaths.length === 0) return false;
-  return extractTestFileTokens(command).some((token) => missingPaths.includes(token));
-}
-
 /** Strips a single layer of matching wrapping quote characters, if present. */
 function stripWrappingQuotes(token: string): string {
   if (token.length >= 2) {
@@ -723,6 +706,71 @@ export function findMissingOracleFiles(
     if (!existsSomewhere) missing.push(token);
   }
   return missing;
+}
+
+/** Collapses `.`, empty and `..` segments of a posix path so `./a/../x.test.ts` and `x.test.ts` compare equal. */
+function normalizePosixPath(path: string): string {
+  const out: string[] = [];
+  for (const part of path.split("/")) {
+    if (part === "" || part === ".") continue;
+    if (part === ".." && out.length > 0 && out[out.length - 1] !== "..") out.pop();
+    else out.push(part);
+  }
+  return (path.startsWith("/") ? "/" : "") + out.join("/");
+}
+
+/** Every normalised absolute location `tokens` could denote under `command`'s candidate roots. */
+function resolveTokenLocations(
+  command: string,
+  tokens: readonly string[],
+  opts: { cwd: string; additionalCwds?: string[]; corpusRoot?: string; executionRoot?: string },
+): Set<string> {
+  const roots = computeCandidateRoots(command, opts);
+  const locations = new Set<string>();
+  for (const token of tokens) {
+    if (token.startsWith("/")) {
+      locations.add(normalizePosixPath(token));
+      continue;
+    }
+    for (const root of roots) locations.add(normalizePosixPath(joinPath(root, token)));
+  }
+  return locations;
+}
+
+/**
+ * True when a recorded evidence command RAN a criterion's now-missing oracle file: some test-file token of
+ * the evidence command (extracted by {@link extractTestFileTokens}, the one extraction `verify` uses) resolves —
+ * under the SAME candidate roots {@link findMissingOracleFiles} uses, including the attested `executionRoot` —
+ * to the same normalised location as one of the criterion's missing paths. So `./x.test.ts` equals `x.test.ts`,
+ * and a package-relative path recorded with an execution root equals the repo-relative AC path. A pass that
+ * ran other files returns `false` (TG-22; spec-test-governance-guards-that-refuse-bad-tests-declared AC-TG-6).
+ *
+ * Fails CLOSED toward "it did run it": every location both sides could denote is compared, so ambiguity
+ * can only add matches (the refusal), never hide one.
+ *
+ * @param evidence.command - command recorded on the evidence row
+ * @param evidence.executionRoot - the row's attested `execution_root`, when present
+ * @param criterion.command - the criterion's CURRENT script command
+ * @param criterion.missingPaths - what {@link findMissingOracleFiles} returned for `criterion.command`
+ * @param ctx - the same cwd/additionalCwds/corpusRoot used to compute `missingPaths`
+ * @returns `false` when `missingPaths` is empty or the evidence command names none of them
+ * @example
+ *   evidenceRanMissingOracle({ command: "bun test ./a.test.ts" }, { command: "bun test a.test.ts", missingPaths: ["a.test.ts"] }, { cwd: "/r" })
+ *   // => true
+ */
+export function evidenceRanMissingOracle(
+  evidence: { command: string; executionRoot?: string },
+  criterion: { command: string; missingPaths: readonly string[] },
+  ctx: { cwd: string; additionalCwds?: string[]; corpusRoot?: string },
+): boolean {
+  if (criterion.missingPaths.length === 0) return false;
+  const ran = resolveTokenLocations(evidence.command, extractTestFileTokens(evidence.command), {
+    ...ctx,
+    ...(evidence.executionRoot !== undefined ? { executionRoot: evidence.executionRoot } : {}),
+  });
+  const missing = resolveTokenLocations(criterion.command, criterion.missingPaths, ctx);
+  for (const location of ran) if (missing.has(location)) return true;
+  return false;
 }
 
 /**
