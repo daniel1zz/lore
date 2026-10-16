@@ -186,6 +186,13 @@ export const HOOK_REGISTRATIONS: readonly HookRegistration[] = [
   { file: "run-end.mjs", runner: "node", event: "SessionEnd", timeout: RUN_END_HOOK_TIMEOUT_SECONDS },
   { file: "run-end.mjs", runner: "node", event: "SubagentStop", timeout: RUN_END_HOOK_TIMEOUT_SECONDS },
 
+  // session-trail-start.mjs — session trail writer: retention + session.json on SessionStart, helpers/<agent_id>.json on SubagentStart (spec-session-trail D13; silent, always exit 0).
+  { file: "session-trail-start.mjs", runner: "node", event: "SessionStart" },
+  { file: "session-trail-start.mjs", runner: "node", event: "SubagentStart" },
+
+  // subagent-trail.mjs — measures an isolated helper's changes at its end (spec-session-trail D13). timeout 10 s: it runs git against the helper's working copy.
+  { file: "subagent-trail.mjs", runner: "node", event: "SubagentStop", timeout: RUN_END_HOOK_TIMEOUT_SECONDS },
+
   // pre-tool-harness-run.mjs — rewrites each lore call to carry `--harness-run <run>` (updatedInput only, never a permissionDecision — D12); covers raw Bash and every lore MCP tool.
   { file: "pre-tool-harness-run.mjs", runner: "node", event: "PreToolUse", matcher: "Bash" },
   { file: "pre-tool-harness-run.mjs", runner: "node", event: "PreToolUse", matcher: "mcp__.*lore_.*" },

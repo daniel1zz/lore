@@ -409,6 +409,10 @@ const DECLARED_FILES_IN_SCOPE = [
   "hooks/lib/run-id.mjs",
   "hooks/pre-tool-harness-run.mjs",
   "hooks/lib/turn-state.mjs",
+  // session trail (spec-session-trail D13): start/end writers and their shared library
+  "hooks/session-trail-start.mjs",
+  "hooks/subagent-trail.mjs",
+  "hooks/lib/session-trail.mjs",
   // governance/corpus-workflow.md AND governance/seat-briefing.md are
   // DELIBERATELY ABSENT here (SPEC-083 D3, extended by SPEC-085 D3): both
   // still exist under assets/governance/ (assets-ssot.test.ts's
