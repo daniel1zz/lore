@@ -175,6 +175,7 @@ describe("AC-TG-6 — red-first (--allow-missing-path) ACs: no evidence stays no
   let plan: string;
   let taskRedFirst: string;
   let taskVanished: string;
+  let taskDifferentFile: string;
 
   const addScriptAc = (id: string, file: string, extra: string[] = []): void => {
     mustRun(
@@ -209,9 +210,11 @@ describe("AC-TG-6 — red-first (--allow-missing-path) ACs: no evidence stays no
     addScriptAc("AC-OK", "ok.test.ts");
     addScriptAc("AC-RF", "later.test.ts", ["--allow-missing-path", "red-first: a later task writes it"]);
     addScriptAc("AC-VAN", "vanish.test.ts", ["--allow-missing-path", "red-first: written before verify"]);
+    addScriptAc("AC-DIFF", "never-written.test.ts", ["--allow-missing-path", "red-first: a later task writes it"]);
     plan = extractSlug(mustRun(["create", "plan", "--title", "RF Plan", "--parent", spec, "--no-ai", "--content", "body"], dir));
     taskRedFirst = newTask("RF Task One", ["AC-OK", "AC-RF"]);
     taskVanished = newTask("RF Task Two", ["AC-OK", "AC-VAN"]);
+    taskDifferentFile = newTask("RF Task Three", ["AC-OK", "AC-DIFF"]);
     commitAll(dir, "fixture");
   }, 180_000);
 
@@ -247,5 +250,21 @@ describe("AC-TG-6 — red-first (--allow-missing-path) ACs: no evidence stays no
     expect(done.exitCode, done.stdout + done.stderr).toBe(4);
     expect(done.stderr).toContain("AC-VAN");
     expect(done.stderr).toContain("vanish.test.ts");
+  });
+
+  it("REGRESSION (TG-22): a declared red-first AC with a pass tagged to it that ran a DIFFERENT existing file is not a pass on its missing oracle -> done allowed, state not not_measured", { timeout: 180_000 }, () => {
+    const verified = runLore(["verify", plan, "--task", taskDifferentFile, "--ac", "AC-OK", "--yes"], dir);
+    expect(verified.exitCode, verified.stdout + verified.stderr).toBe(0);
+    // A pass tagged AC-DIFF whose command runs other.bun.test.ts (exists), never never-written.test.ts (the AC's oracle).
+    writeFileSync(join(dir, "other.bun.test.ts"), PASSING_TEST_BODY);
+    const recorded = runLore(
+      ["evidence", taskDifferentFile, "--oracle", "test", "--command", "bun test other.bun.test.ts", "--result", "pass", "--ac", "AC-DIFF", "--capture"],
+      dir,
+    );
+    expect(recorded.exitCode, recorded.stdout + recorded.stderr).toBe(0);
+
+    expect(stateOf("AC-DIFF")).not.toBe("not_measured");
+    const done = runLore(["done", taskDifferentFile, "--declare-no-new-tests", "fixture"], dir);
+    expect(done.exitCode, done.stdout + done.stderr).toBe(0);
   });
 });
