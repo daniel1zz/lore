@@ -3,10 +3,10 @@ id: BASE-032
 type: baseline
 role: intent
 title: "Install the agent integration"
-status: draft
+status: approved
 priority: medium
 created: 2026-10-09
-updated: 2026-10-11
+updated: 2026-10-15
 tags: []
 parent: BASE-046
 links:
@@ -22,11 +22,15 @@ Scope: the global install and its preview. Scaffolding a project, uninstalling a
 
 **Command.** Install (or preview) into an agent settings directory.
 
-**Constraint.** Confirmation is required. The whole run is planned before the first write: a broken settings file, a corrupt ledger or an unknown language setting refuses it with exit 4 and nothing written; so do shipped assets that cannot be read (exit 1) or a malformed shipped hook-entry list (exit 4) (BR-825). Shipped files the user changed since the last install are left alone unless the caller asks to overwrite them (BR-818). Files the product no longer ships are removed even if the user changed them (BR-975, suspected defect, Q3). A write or removal failure stops the run (BR-824). A failed tool-server registration keeps all the file work and the ledger, names the manual registration command, and exits 1 (BR-826).
+**Constraint.** Confirmation is required. The whole run is planned before the first write: a broken settings file (BR-820), a corrupt ledger (BR-821) or an unknown language setting (BR-828) refuses it with exit 4 and nothing written; so do shipped assets that cannot be read (exit 1) or a malformed shipped hook-entry list (exit 4) (BR-825). Shipped files the user changed since the last install are left alone unless the caller asks to overwrite them (BR-818). Files the product no longer ships are removed even if the user changed them (BR-975, suspected defect, Q3). A write or removal failure stops the run (BR-824). A failed tool-server registration keeps all the file work and the ledger, names the manual registration command, and exits 1 (BR-826).
 
 **Event.** `IntegrationInstalled`: files written or skipped, earlier versions backed up, files no longer shipped removed, hook entries merged, tool server registration attempted (an existing one is reported as already registered), and the ledger written last if what it records changed. A re-run with the same program when nothing changed writes no file at all, not even the ledger (BR-816). No corpus document or audit entry.
 
-**What a shipped guard does once installed.** Among the hooks the install puts in place is a shell-command guard. Before an agent's shell command runs, it refuses with exit 2 a git command that can destroy uncommitted or unmerged work (such as git branch -D) at a command position, including a later chained segment; the same words inside a heredoc body (any delimiter form, an unterminated heredoc being data to its end) or in an argument position pass. The guard writes nothing (BR-1021).
+**What the shipped hooks do once installed.** The install puts in place the hooks that register a run when a session or a helper agent starts and vouch for every lore call that run makes, so a freshly set-up project attributes its first write to a run (BR-1044), and the hooks that end the main run when the session ends and a helper's run when the helper finishes, each with a time budget long enough to release that run's claims (BR-1059). No shipped instruction tells an agent to set its own identity; identity comes only from these hooks (BR-1045). The shipped hook set contains no per-tool-call hook that can refuse an action except irreversible git operations: spec creation, spec and plan approval and claiming are refused by the write itself, not by a hook (BR-1092). The checkpoint hooks that used to refuse them (lore-gate-g1 to g4), and the per-edit and stop checks claude-md-guard, stop-doc-sync and pre-subagent-gate, are no longer shipped; a re-install removes their files and their hook entries (BR-975, BR-823), and their behavioural checks now run once per turn ("Check a turn at its end").
+
+**How the shipped skills present themselves.** Each shipped skill's description says when to pick it, not how it works: it opens with "Use when", stays short, names the neighbouring skills it should not be confused with and only skills the product ships, and no quoted trigger phrase is claimed by two shipped skills (BR-1099). The description is the only text an agent sees before choosing a skill, so a description that explains the method instead of the moment leaves the skill unchosen or wrongly chosen.
+
+**The one refusing guard.** Among the hooks the install puts in place is a shell-command guard. Before an agent's shell command runs, it refuses with exit 2 a git command that can destroy uncommitted or unmerged work (such as git branch -D) at a command position, including a later chained segment; the same words inside a heredoc body (any delimiter form, an unterminated heredoc being data to its end) or in an argument position pass. The guard writes nothing (BR-1021).
 
 ### Terms used here
 
@@ -37,6 +41,9 @@ Scope: the global install and its preview. Scaffolding a project, uninstalling a
 - The confirmation rule (BR-811) and the conflicting-mode rule (BR-812) apply to every mode of the command; they are written here once.
 - An install removes files the product no longer ships (BR-975) and stale hook entries (BR-823). Its removals follow the same link protection as the uninstall leaf's (BR-843).
 - What the language setting means is context's; this leaf owns only that an install projects it and refuses an unknown one.
+- BR-1045 is held here, not with context, because it is a promise about the whole shipped set (skills, agent definitions, rules fragments, session briefing) taken together, which only the install delivers; context owns what each governance text says, and a fragment that told an agent to set its identity would break both. BR-1044 and BR-1059 are held here as properties of the hooks this install puts in place; the project scaffold leaf owns the project-scope hooks.
+- BR-1099 is held here, not with context, for the same reason as BR-1045: it is a promise about the whole shipped skill set taken together (no trigger phrase claimed twice, no reference to a skill the product does not ship), which only the install delivers as a set; context owns what each governance text says inside its body.
+- BR-1092 is held here because it constrains the shipped hook set as a whole. Where each checkpoint's refusal now lives is the checkpoint's own leaf; what the turn-end review checks is session, "Check a turn at its end".
 - BR-1021 is held here as a property of what the install ships. The branch sends what the governance texts say and how session-start hooks use them to context and session; the shell-command guard is neither a governance text nor a session-start hook, and no other leaf describes the shipped command guards, so its refusal is written on the leaf that puts it in place.
 
 ### Current values
@@ -51,6 +58,8 @@ Scope: the global install and its preview. Scaffolding a project, uninstalling a
 - Uninstall an integration: the reversal of what this leaf writes, and the link protection on removal.
 - Check installation freshness: reads the ledger this leaf writes.
 - context: the language projection.
+- "Attribute work to a run": what the run hooks this leaf installs record.
+- session, "Check a turn at its end": the turn-end review hook this leaf installs.
 
 ### Open questions
 

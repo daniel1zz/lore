@@ -8,6 +8,9 @@ priority: medium
 created: 2026-10-15
 updated: 2026-10-15
 tags: []
+parent: PLAN-185
+links:
+  - {id: PLAN-185, type: informs}
 ---
 # Assessment: partially_met (76/100)
 

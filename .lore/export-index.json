@@ -10480,6 +10480,102 @@
     "01M4ZFSQBTV5EZXK40JXYSD13F": {
       "human_id": "TASK-1359",
       "file_path": "docs/requirements/task/TASK-1359-lore-run-attest-input-hard-codes-mcp-lore-prefix-r.md"
+    },
+    "01M4ZZ0JWWDJB1FMQRG5EQN4C8": {
+      "human_id": "SPEC-185",
+      "file_path": "docs/requirements/spec/SPEC-185-always-loaded-lore-fragments-state-the-rule-only-r.md"
+    },
+    "01M519MYJ38BDYK51TZRF5FB7N": {
+      "human_id": "KN-686",
+      "file_path": "docs/requirements/knowledge/KN-686-retro-compressing-always-loaded-fragments-without.md"
+    },
+    "01M519M9JR05C7BJMRQFHZPM6K": {
+      "human_id": "KN-687",
+      "file_path": "docs/requirements/knowledge/KN-687-assessment-always-loaded-lore-fragments-state-the.md"
+    },
+    "01M517QREZZ2ANWKK6RBCM904H": {
+      "human_id": "KN-688",
+      "file_path": "docs/requirements/knowledge/KN-688-traceability-table-always-loaded-lore-fragments.md"
+    },
+    "01M5192NQMYWT0NDA662TRPSGD": {
+      "human_id": "KN-689",
+      "file_path": "docs/requirements/knowledge/KN-689-assessment-always-loaded-lore-fragments-state-the.md"
+    },
+    "01M518WWSTEFAT0T71ED9BDGCS": {
+      "human_id": "KN-690",
+      "file_path": "docs/requirements/knowledge/KN-690-assessment-always-loaded-lore-fragments-state-the.md"
+    },
+    "01M518FQ2XSAD5W5224MFB0KS8": {
+      "human_id": "KN-691",
+      "file_path": "docs/requirements/knowledge/KN-691-assessment-always-loaded-lore-fragments-state-the.md"
+    },
+    "01M517G9DNX2AAKJK4E4YXK0SD": {
+      "human_id": "KN-692",
+      "file_path": "docs/requirements/knowledge/KN-692-compressing-always-loaded-instructions-without-los.md"
+    },
+    "01M5168GFNDYH92RX7E2832X7K": {
+      "human_id": "KN-693",
+      "file_path": "docs/requirements/knowledge/KN-693-assessment-always-loaded-lore-fragments-state-the.md"
+    },
+    "01M5002NYSXWDERNJJF3H0V8RT": {
+      "human_id": "KN-694",
+      "file_path": "docs/requirements/knowledge/KN-694-assessment-always-loaded-lore-fragments-state-the.md"
+    },
+    "01M4ZZR9GFD84CCYXB7MJ0JDY9": {
+      "human_id": "KN-695",
+      "file_path": "docs/requirements/knowledge/KN-695-assessment-always-loaded-lore-fragments-state-the.md"
+    },
+    "01M4ZYZ97101R01E3T994BY7GE": {
+      "human_id": "KN-696",
+      "file_path": "docs/requirements/knowledge/KN-696-always-loaded-lore-fragments-verbatim-source-befor.md"
+    },
+    "01M4ZZ4TBZK3AHVXM4MH45ZZSY": {
+      "human_id": "PLAN-187",
+      "file_path": "docs/requirements/plan/PLAN-187-always-loaded-lore-fragments-state-the-rule-only.md"
+    },
+    "01M51981QYHVAH2BCKTAB4TRY4": {
+      "human_id": "TASK-1360",
+      "file_path": "docs/requirements/task/TASK-1360-close-out-keep-the-three-borderline-clauses-and-fi.md"
+    },
+    "01M518H6ZQ3BYBGXXM7W2JD4EE": {
+      "human_id": "TASK-1361",
+      "file_path": "docs/requirements/task/TASK-1361-drop-the-explanation-the-traceability-pass-over-re.md"
+    },
+    "01M518Y7NW2Z6B50A91DBH2R9J": {
+      "human_id": "TASK-1362",
+      "file_path": "docs/requirements/task/TASK-1362-a-pass-evidence-row-that-was-later-disproved-canno.md"
+    },
+    "01M517T9GXYTWDRM69FJ1GG88S": {
+      "human_id": "TASK-1363",
+      "file_path": "docs/requirements/task/TASK-1363-traceability-pass-over-the-ten-fragments-classify.md"
+    },
+    "01M517H2BWC97Q5TJN8AGGBJYP": {
+      "human_id": "TASK-1364",
+      "file_path": "docs/requirements/task/TASK-1364-align-compression-and-rubric-grading-guidance-with.md"
+    },
+    "01M5162PW263XC0C12BMV9AR7C": {
+      "human_id": "TASK-1365",
+      "file_path": "docs/requirements/task/TASK-1365-check-shipped-defaults-passes-vacuously-wherever-l.md"
+    },
+    "01M4ZZ4V6BH9BJN2BDC26BFB0M": {
+      "human_id": "TASK-1366",
+      "file_path": "docs/requirements/task/TASK-1366-reword-the-ten-always-loaded-fragments-to-the-rule.md"
+    },
+    "01M515YRDSZNXYBPPH8GEANGV5": {
+      "human_id": "TASK-1367",
+      "file_path": "docs/requirements/task/TASK-1367-restore-the-remaining-clauses-the-assessment-named.md"
+    },
+    "01M4ZZRYGRJ4VCMT7WW0F0RNVJ": {
+      "human_id": "TASK-1368",
+      "file_path": "docs/requirements/task/TASK-1368-restore-the-instruction-parts-the-rule-only-reword.md"
+    },
+    "01M4ZZGD0QC0A76HAFFENR5A99": {
+      "human_id": "TASK-1369",
+      "file_path": "docs/requirements/task/TASK-1369-lore-context-refresh-run-inside-a-linked-worktree.md"
+    },
+    "01M4ZZ6MQ7Z21SQAH83C009PK3": {
+      "human_id": "TASK-1370",
+      "file_path": "docs/requirements/task/TASK-1370-an-ac-command-that-starts-with-an-absolute-cd-sile.md"
     }
   }
 }

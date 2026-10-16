@@ -8,6 +8,8 @@ priority: medium
 created: 2026-10-15
 updated: 2026-10-15
 tags: []
+links:
+  - {id: PLAN-185, type: relates-to}
 ---
 ## Context
 

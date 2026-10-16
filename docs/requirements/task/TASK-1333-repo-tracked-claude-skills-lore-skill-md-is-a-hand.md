@@ -3,7 +3,7 @@ id: TASK-1333
 type: task
 role: plan
 title: "Repo-tracked .claude/skills/lore/SKILL.md is a hand-synced copy of assets/skills/lore/SKILL.md and has drifted"
-status: draft
+status: archived
 priority: medium
 created: 2026-10-15
 updated: 2026-10-15

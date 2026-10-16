@@ -6,7 +6,7 @@ title: "Start a session"
 status: approved
 priority: medium
 created: 2026-10-09
-updated: 2026-10-12
+updated: 2026-10-15
 tags: []
 parent: BASE-027
 links:
@@ -16,17 +16,19 @@ links:
 
 > A session that has just opened learns where the corpus stands, without being told what to work on.
 
-Scope: the session start snapshot, its compact automatic injection, the seat-scoped resume pointer, and the seat briefing a session in a linked working copy receives at start. Resuming itself is "Resume a session".
+Scope: the session start snapshot, its compact automatic injection, the seat-scoped resume pointer, the seat briefing a session in a linked working copy receives at start, and the one-line upgrade advisory every session receives at start when an install is out of date. Resuming itself is "Resume a session".
 
 ### Behaviour
 
 **Command.** A session (usually the session-start hook on its behalf) asks for the snapshot, optionally naming who it is and the seat it sits on (its branch and its directory), in full or in compact form.
 
-**Constraint.** None refuses it; only a storage failure fails it (BR-332). The full snapshot's content opens with the product's root. The compact form is handed over only to a session sitting in a seat that has open items — unfinished claims recorded for the seat, by its branch or its directory, or, when the branch names a plan, that plan's newest handoff — and then first states that it holds only those items (BR-329); a main-checkout session, or a seat with none, is handed nothing, and corpus-wide state is always asked for, never handed over (BR-328). On an empty corpus there is no root and every list is empty, and the snapshot still succeeds (BR-322). When a baseline root exists, that baseline root is the root, and the full snapshot names the strategy document (the first requirements document) on a separate line; the compact form carries no root. With no baseline root, the first requirements document is the root and no strategy line appears (BR-981, BR-321). The compact form fits a size budget, delivered whole and marked when over it (BR-328), and leaves out the resume pointer unless the session sits in a seat that names a plan (BR-326). A seat branch is matched against every plan, closed ones included (BR-1003).
+**Constraint.** None refuses it; only a storage failure fails it (BR-332). The full snapshot's content opens with the product's root. The compact form is handed over only to a session sitting in a seat that has open items — unfinished claims recorded for the seat, by its branch or its directory, or, when the branch names a plan, that plan's newest handoff — and then first states that it holds only those items (BR-329); a main-checkout session, or a seat with none, is handed nothing, and corpus-wide state is always asked for, never handed over (BR-328). On an empty corpus there is no root and every list is empty, and the snapshot still succeeds (BR-322). When a baseline root exists, that baseline root is the root, and the full snapshot names the strategy document (the first requirements document) on a separate line; the compact form carries no root. With no baseline root, the first requirements document is the root and no strategy line appears (BR-981, BR-321). The compact form fits a size budget, delivered whole and marked when over it (BR-328), and leaves out the resume pointer unless the session sits in a seat that names a plan (BR-326). When the session names a seat branch that names a plan, the pointer is that plan's newest handoff or none, never another plan's; a seat branch that names no plan falls back to the newest handoff of the whole corpus, and the snapshot says the seat was not resolved (BR-327). A seat branch is matched against every plan, closed ones included (BR-1003). The resume hook also has a 12,000-character safety backstop on the snapshot part of its answer; the compact form is already sized below it, and if it were ever exceeded the hook drops the whole snapshot part and says why in a degradation line, so the compact form is still never cut (BR-328).
 
 **Seat briefing.** Separately from the snapshot, the session-start resume hook (`assets/hooks/session-start-resume.mjs`) adds a seat block when the session opens in a linked working copy of a lore project (its main checkout holds `.lore`). The block names the session's actor `agent:<branch>` and the main checkout's path. A main-checkout session gets no seat block. If the briefing cannot be obtained, the start still exits 0, with no seat block and one notice on the error stream (BR-1019).
 
-**Event.** None recorded; both the snapshot and the seat briefing are reads (BR-323).
+**Upgrade advisory.** The same session-start resume hook reads the global and the project check caches left by the freshness check ("Check installation freshness"). When either says the install is not in sync, the session is handed one advisory line naming which side is behind (the global install, the project scaffold, or both), why (the program's version changed, the project settings changed, or files were edited by hand, naming them), and the command to run before other work (`lore setup`, `lore setup --project`). Hand-edited files are named but never advised to be overwritten. When both caches say in sync nothing is handed over, and no rule text is ever injected (BR-1086). A missing or expired cache is never read as in sync: the hook starts a background check of that side for the next session and does not wait for it. This advisory replaces the retired session-start stale notice and its injected rule text (BR-909, BR-910 on "Inject context at start"; `spec-one-upgrade-reminder-at-session-start-covers-the-global`).
+
+**Event.** None recorded; the snapshot, the seat briefing and the advisory are reads (BR-323). The only write the start can cause is the background freshness check, which writes nothing but its own check cache.
 
 ### Terms used here
 
@@ -41,6 +43,7 @@ Scope: the session start snapshot, its compact automatic injection, the seat-sco
 - Which document is the baseline root is decided once for the whole product and shared with "Browse the document tree" (BR-982), so session start and the tree always agree.
 - The newest-handoff list and resume pointer read the same handoffs as "Resume a session", but filter them differently (BR-325 against BR-354).
 - The memory-file health line belongs to the context branch.
+- The upgrade advisory (BR-1086) is held here because it is what a session receives at start; the session branch's Inside boundary does not list it yet, which is a change to the parent, not to this leaf. How the check classifies files and writes its caches is distribution's ("Check installation freshness", BR-846, BR-1085); this leaf owns only the line the session is handed.
 - The seat block (BR-1019) is composed by the session-start resume hook, not by the fragments answer of context, "Inject context at start"; it never shares that answer's 10,000-character limit. The hook script and its registration are distribution's; this leaf owns the briefing the session receives. The same hook passes the seat branch to the snapshot request, which is how the seat scopes the resume pointer (BR-326).
 
 ### Current values
@@ -52,7 +55,9 @@ Scope: the session start snapshot, its compact automatic injection, the seat-sco
 | Waiting documents named in the full snapshot | 10 | fixed | 2026-10-09 |
 | Seat actor name | the branch lowercased, every character outside a-z, 0-9 and hyphen turned into a hyphen, runs collapsed, edge hyphens trimmed; a detached head becomes `worktree-<short commit>` (session-start-resume.mjs:214-240) | fixed in the hook | 2026-10-10 |
 | Seat briefing source | `lore governance --seat-briefing`, run in the main checkout (session-start-resume.mjs:253); template `assets/governance/seat-briefing.md`, 2,673 bytes | distribution (the template) | 2026-10-10 |
-| Resume hook answer size | no overall limit; a 12,000-character backstop on the bootstrap part only (session-start-resume.mjs:127, :332) | fixed in the hook | 2026-10-10 |
+| Resume hook answer size | no overall limit; a 12,000-character backstop on the bootstrap part only, which drops that part whole and records a degradation line rather than cutting it (session-start-resume.mjs:118, :339) | fixed in the hook | 2026-10-15 |
+| Upgrade advisory | on; switched off per project by `setup.check_reminder: false`, or for a process by `LORE_SETUP_NO_CHECK=1` | project settings maintainer (the setting), the caller (the environment) | 2026-10-15 |
+| Check caches the advisory reads | global `<agent settings directory>/.lore-setup-check.json`; project `.lore/.lore-project-check.json` | fixed | 2026-10-15 |
 
 ### Depends on
 
@@ -60,7 +65,8 @@ Scope: the session start snapshot, its compact automatic injection, the seat-sco
 - autonomy, "Check a gate before writing": the gates listed as armed.
 - Product baseline: the baseline root shown as the product's root.
 - Hand off a session: the handoffs listed.
-- distribution: the session-start resume hook that delivers the seat block, and the seat briefing template.
+- distribution: the session-start resume hook that delivers the seat block and the advisory, and the seat briefing template.
+- distribution, "Check installation freshness": the global and project check caches the advisory reads.
 - review, "List documents awaiting review": the queue the waiting count is meant to match.
 
 ### Open questions

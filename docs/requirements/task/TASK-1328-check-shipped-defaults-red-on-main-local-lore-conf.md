@@ -3,7 +3,7 @@ id: TASK-1328
 type: task
 role: plan
 title: "check-shipped-defaults red on main: local .lore/config.yaml sets workflow.turn_end.main_session_source_edits=block, shipped default is off"
-status: draft
+status: archived
 priority: medium
 created: 2026-10-15
 updated: 2026-10-15

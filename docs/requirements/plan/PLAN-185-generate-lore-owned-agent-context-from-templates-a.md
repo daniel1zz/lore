@@ -16,6 +16,7 @@ phases:
   - {name: "Phase 4: Verification", description: "Full suite on main, lore verify for all AC-CV, spec code anchors, check-drift exit 0."}
 links:
   - {id: SPEC-183, type: implements}
+  - {id: TASK-1353, type: resolves}
 ---
 ## Overview
 

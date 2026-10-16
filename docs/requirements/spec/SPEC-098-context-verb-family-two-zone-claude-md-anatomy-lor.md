@@ -6,7 +6,7 @@ title: "Context verb family — two-zone CLAUDE.md anatomy, lore context init re
 status: approved
 priority: medium
 created: 2026-07-27
-updated: 2026-10-10
+updated: 2026-10-15
 tags: [claude-md, context, distribution, governance]
 links:
   - {id: ADR-014, type: implements}
@@ -196,5 +196,5 @@ One direction only: core ← service ← flows ← adapters. No cycles.
 - packages/lore/src/flows/context-flow.ts
 - packages/lore/src/adapters/cli/commands/context.ts
 - packages/lore/src/ai/context-narrative-template.ts
-- assets/hooks/claude-md-guard.sh
 - packages/lore/src/service/claude-md-admission.ts#checkReferenceExistence
+- assets/hooks/stop-turn-review.mjs

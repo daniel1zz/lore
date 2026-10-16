@@ -6,7 +6,7 @@ title: "Rule store: git-tracked fragment selection, on-demand skill delivery, de
 status: approved
 priority: medium
 created: 2026-10-12
-updated: 2026-10-12
+updated: 2026-10-15
 tags: [context-fragments, rule-store]
 ---
 ## Overview/Goal
@@ -136,7 +136,6 @@ Structured criteria: `lore ac list <this spec>`, AC-RS-1 to AC-RS-15. Each cites
 - packages/lore/src/flows/selection-flow.ts#runSelectionChange
 - packages/lore/src/adapters/cli/commands/context.ts
 - packages/lore/src/adapters/cli/commands/status.ts
-- assets/hooks/pre-subagent-gate.mjs
 - packages/core/tests/unit/rs-frontmatter-delivery.test.ts
 - packages/lore/tests/unit/context-fragments/rs-select-skill-routing.test.ts
 - packages/lore/tests/unit/context-fragments/rs-selection.test.ts
@@ -144,7 +143,6 @@ Structured criteria: `lore ac list <this spec>`, AC-RS-1 to AC-RS-15. Each cites
 - packages/lore/tests/unit/context-fragments/rs-refresh-skills.test.ts
 - packages/lore/tests/unit/flows/rs-selection-cas.test.ts
 - packages/lore/tests/unit/context-fragments/rs-selection-determinism.test.ts
-- packages/lore/tests/unit/hooks/rs-pre-subagent-gate-message.test.ts
 - packages/lore/tests/e2e/rs-context-selection-cli.bun.test.ts
 - packages/lore/tests/e2e/rs-fragments-check-duplicates.bun.test.ts
 - packages/lore/tests/e2e/rs-status-check-fragments.bun.test.ts
@@ -152,3 +150,4 @@ Structured criteria: `lore ac list <this spec>`, AC-RS-1 to AC-RS-15. Each cites
 - packages/lore/tests/e2e/rs-shipped-catalog.bun.test.ts
 - packages/lore/tests/e2e/rs-user-config-resolver.bun.test.ts
 - packages/lore/tests/unit/context-fragments/rs-duplicates.test.ts#"findDuplicateLines"
+- packages/lore/tests/unit/hooks/pre-no-general-agent-gate-message.test.ts

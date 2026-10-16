@@ -6,7 +6,7 @@ title: "Gate hooks cross-corpus false-deny fix (cd-prefix TARGET_CWD + g1 lookup
 status: approved
 priority: medium
 created: 2026-07-17
-updated: 2026-10-10
+updated: 2026-10-15
 tags: []
 ---
 # SPEC-050 â€” Gate hooks: cross-corpus false-deny fix (cd-prefix TARGET_CWD + g1 lookup-anomaly fail-open)
@@ -64,4 +64,3 @@ The trigger-phrase regex currently matches ANYWHERE in the raw command string â€
 
 - hooks/
 - assets/hooks/
-- packages/lore/tests/unit/hooks/gate-cross-corpus-fix.test.ts

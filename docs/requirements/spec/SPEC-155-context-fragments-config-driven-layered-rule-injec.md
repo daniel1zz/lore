@@ -6,7 +6,7 @@ title: "Context fragments: config-driven layered rule injection into Claude Code
 status: approved
 priority: high
 created: 2026-10-07
-updated: 2026-10-10
+updated: 2026-10-15
 tags: []
 links:
   - {id: SPEC-083, type: relates-to}
@@ -284,6 +284,5 @@ Estimate: `subagent:*` ≈ 5,200 chars; `subagent:lore-implementer` ≈ 9,300 + 
 - packages/lore/src/flows/context-flow.ts
 - packages/lore/src/adapters/cli/commands/fragments.ts
 - packages/lore/src/adapters/claude-settings-port.ts
-- assets/hooks/session-start-fragments.mjs
 - assets/hooks/subagent-context.mjs
 - packages/lore/tests/e2e/context-fragments-compiled.bun.test.ts

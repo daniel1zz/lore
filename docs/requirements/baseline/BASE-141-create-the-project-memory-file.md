@@ -3,10 +3,10 @@ id: BASE-141
 type: baseline
 role: intent
 title: "Create the project memory file"
-status: approved
+status: draft
 priority: medium
 created: 2026-10-09
-updated: 2026-10-10
+updated: 2026-10-15
 tags: []
 parent: BASE-139
 ---

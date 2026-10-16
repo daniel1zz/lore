@@ -59,7 +59,7 @@ Let `core` = the description with any trailing ` Args: '<mode> [context]' …` s
   script: test — o=$(mktemp); bunx vitest run packages/lore/tests/unit/assets/skill-description-trigger-contract.test.ts -t 'AC-SD-5' > $o 2>&1; rc=$?; tail -4 $o; [ $rc -eq 0 ] && grep -qE 'Tests +[0-9]+ passed' $o && echo 'AC-SD-5 PASS: neighbour pairs cross-reference'
 - [⚑] [script] AC-SD-6: Negative controls: the checker reports a violation for the old lore-analyze description, a 501-char core, a description saying 'use verify', and two descriptions both quoting 'new project'.
   script: test — o=$(mktemp); bunx vitest run packages/lore/tests/unit/assets/skill-description-trigger-contract.test.ts -t 'AC-SD-6' > $o 2>&1; rc=$?; tail -4 $o; [ $rc -eq 0 ] && grep -qE 'Tests +[0-9]+ passed' $o && echo 'AC-SD-6 PASS: checker rejects each negative control'
-- [⚑] [script] AC-SD-7: .claude/skills/lore/SKILL.md description equals assets/skills/lore/SKILL.md's; lore-write-a-skill's body states the 'Use when' opening and the 500-character limit.
+- [⚑] [script] AC-SD-7: No repo-tracked copy of the lore skill exists (.claude/skills/lore/SKILL.md is absent; assets/skills/lore/SKILL.md is the single source and lore setup renders the installed copy — issue #218); lore-write-a-skill's body states the 'Use when' opening and the 500-character limit.
   script: test — o=$(mktemp); bunx vitest run packages/lore/tests/unit/assets/skill-description-trigger-contract.test.ts -t 'AC-SD-7' > $o 2>&1; rc=$?; tail -4 $o; [ $rc -eq 0 ] && grep -qE 'Tests +[0-9]+ passed' $o && echo 'AC-SD-7 PASS: repo copy in sync and authoring guide states the standard'
 
 ## Code anchors
