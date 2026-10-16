@@ -108,6 +108,8 @@ This PRD is the tree root. Each module is a child spec (kind=feature/tech/design
 
 The module tree below is rendered live from the corpus (SPEC-004 placeholder resolution) — a hand-maintained list demonstrably drifts (this section was 8 specs stale at v0.5, stopping at SPEC-011 while the corpus reached SPEC-031):
 
+- [task] lore create --help never marks per-type required flags (--plan-id, --decision-status) as required (draft)
+- [task] The shared docs/requirements mirror is written outside every lease or session check, so concurrent sessions can overwrite each other's export (draft)
 - [task] active_sessions is built from claims only, so a session that writes without a claim is invisible (draft)
 - [task] lore agent create and revoke exit 1 for validation and not-found errors instead of 4 and 3 (draft)
 - [task] lore baseline sites silently drops a second positional argument (draft)
@@ -453,7 +455,6 @@ The module tree below is rendered live from the corpus (SPEC-004 placeholder res
 - [task] A phase carries only a name, so 'this phase's criteria' is unfalsifiable and an empty phase vacuously satisfies the one implicit condition (draft)
 - [task] One unknown key discards the whole .lore/config.yaml and the error then claims nothing was configured: silence, not the non-abort, is the defect (draft)
 - [task] The Turso half of the DUPLICATE_SLUG fix has no committed oracle: the anchors circled the SQLite test file only (draft)
-- [task] Nothing stops one session overwriting another's in-flight shared state, and exclusivity-dependent ACs make the overwrite the only route to a green verdict (draft)
 - [knowledge] A correction asserting an oracle's strength is itself an unverified claim, and test:changed can demand a build a worktree agent must refuse (approved)
 - [task] [Skill:test] the mirror end-to-end oracles cost O(corpus) against a fixed 30s timeout and now exceed it (archived)
 - [task] lore log and created_by print the literal system while the audit trail holds the real actor: a false label that made me accuse the wrong agent (draft)
@@ -553,7 +554,6 @@ The module tree below is rendered live from the corpus (SPEC-004 placeholder res
 - [task] De-vacuuming AC-ACQ-7 exposed three sibling faults it was masking: a withdrawn false-positive bound, an identically vacuous AC-ACQ-6, and a drifted verbatim fixture (draft)
 - [task] AC-ACQ-7 is vacuous by construction and its oracle never reads the corpus, hiding a 5-of-5 false-positive rate in the shipped quantifiability lint's hyphen-boundary matching (archived)
 - [task] MCP lore_create.supersedes still creates-then-fails — the type precheck landed in the CLI command, above the shared flow both surfaces document as the anti-divergence seam (archived)
-- [task] 可用性两则：必填参数靠二次报错发现；CLI 参数名与存储字段名不一致 (draft)
 - [task] lore approve 的 review「独立性」不校验 actor：改→自审→自批可在单 actor 内闭环 (draft)
 - [task] lore done 的红先行 gate 不读 capture_source：转录文本即可满足 expected-fail 要求 (draft)
 - [task] lore ac add/set 静默把 approved spec 打回 draft，进而阻塞并发批次中后发 task 的 claim (draft)
