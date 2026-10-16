@@ -6,7 +6,7 @@ mode: static
 ---
 ## AC design
 
-- After writing an oracle, name the simplest case where the goal fails yet it stays green, and assert it. Assert the exit code EXACTLY plus the rule name in the output, never "non-zero". A probe outside the linted tree proves nothing; three green runs do not clear a flaky oracle; an SSOT AC must check residual duplicates are gone, not only that the new function exists. Make every oracle go red once.
+- After writing an oracle, name the simplest case where the goal fails yet it stays green, and assert it. Assert the exit code EXACTLY plus the rule name in the output, never "non-zero". A probe outside the linted tree proves nothing; three green runs do not clear a flaky oracle; an SSOT AC must check residual duplicates are gone, not only that the new function exists. Make every oracle go red once (weaken the rule, build a tie).
 - Editing an oracle after it went red is a spec change: record in place, on the AC itself, the original command, its exact failure, and why this corrects rather than weakens.
 - Read a shared field back before `set`.
 - A capability and its production wiring are ONE acceptance unit: same-phase wiring task, an AC asserting the live call site, file anchors covering both the implementation and the wiring point.

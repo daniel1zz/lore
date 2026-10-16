@@ -495,8 +495,9 @@ const CORPUS_WORKFLOW_BODY_SHA256: Record<(typeof CORPUS_WORKFLOW_FRAGMENT_RELS)
 // the reword dropped and cut three clauses (feed latest_handoffs, feed no-session-marker floor, produce legacy config clause); the second assessment (knowledge-assessment-always-loaded-lore-fragments-state-the-2) named what was still missing.
 // RE-BASELINE (task-restore-the-remaining-clauses-the-assessment-named-and): restores `latest_handoffs` as a neutral directory and the floor arming (fail-safe) when authorship cannot be determined.
 // RE-BASELINE (task-traceability-pass-over-the-ten-fragments-classify-every): traceability pass against knowledge-traceability-table-always-loaded-lore-fragments; restores the where-configured session-start injection scope, the `lore bootstrap` contents, the user-is-router rule, the source-label duty, and the unseen-artifact verification rule.
-// RE-BASELINE (task-drop-the-explanation-the-traceability-pass-over-restored): drops the explanation clauses the traceability pass put back (see knowledge-traceability-table-always-loaded-lore-fragments v3); every instruction, condition and qualifier is kept.
-  "context/corpus-workflow-1-feed.md": "6447be07915fe313153f410155c7306170e168f8d599817b55b0fdc47f63794d",
+// RE-BASELINE (task-drop-the-explanation-the-traceability-pass-over-restored): drops the explanation clauses the traceability pass put back (see knowledge-traceability-table-always-loaded-lore-fragments v3); it also dropped the user-is-router clause and the clause that rendering your own outgoing ticket does not charge you with next-steps.
+// RE-BASELINE (task-close-out-keep-the-three-borderline-clauses-and-fix-the): restores the user-is-router clause and the own-outgoing-ticket clause the drop pass removed (and the ac-design "weaken the rule, build a tie" clause in another fragment).
+  "context/corpus-workflow-1-feed.md": "673ad618bb6a55929d935fb5f2ccb69febef852b79d2d71342779e304a525c66",
   // RE-BASELINE (task-ac-set-correction-audited-fix-of-one-criterion-on-a-locked, AC-CC-4): names `lore ac set --correction`
 // RE-BASELINE (task-reword-the-ten-always-loaded-fragments-to-the-rule-only, spec-always-loaded-lore-fragments-state-the-rule-only-reasoning):
 // that commit shortened the wording of the ten always-loaded fragments (verbatim before-text in
