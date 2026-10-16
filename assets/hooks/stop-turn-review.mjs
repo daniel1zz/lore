@@ -26,6 +26,12 @@
  *   (c) a CLAUDE.md changed this turn that is over its ceiling per `lore status --check-claude-md`
  *       (config-only check; spawned only when a CLAUDE.md changed).
  *
+ *   (d) helper review — ONE `lore session trail-review` spawn, only when a helper end is unjudged
+ *       (`end_count > judged_end_count`, snapshotted at start) or the `workflow.turn_end.co_change` key is
+ *       present; its findings join the single block, and only after it succeeded are the snapshotted helpers
+ *       marked judged (`helpers/<agent>.judged.json`). A failed or timed-out spawn marks nothing and leaves one
+ *       not-measured line naming the unjudged helpers (spec-session-trail, AC-ST-9 / AC-ST-10).
+ *
  * Flow: stop_hook_active=true -> exit 0 silent (loop prevention) | turn state unreadable ->
  * exit 0 + ONE stderr line "turn state not measured: ..." (lore issue #156, same policy as
  * the retired stop-doc-sync hook) | measure (a)(b)(c) | no finding -> exit 0 silent | else one block.
@@ -46,11 +52,13 @@ import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { getTurnDir, readHookPayload } from './lib/turn-state.mjs';
-import { diffTrees, recordTurnChanges, snapshotWorkingTree } from './lib/session-trail.mjs';
+import { diffTrees, recordTurnChanges, runTrailReview, snapshotUnjudgedHelpers, snapshotWorkingTree } from './lib/session-trail.mjs';
 
 /** Setting path inside `.lore/config.yaml`; values: off (default) | block. */
 const SETTING_KEYS = ['workflow', 'turn_end', 'main_session_source_edits'];
 const SETTING_VALUES = ['off', 'block'];
+/** Co-change rule list; its PRESENCE arms the `trail-review` spawn (spec Design, "Spawn gating"). */
+const CO_CHANGE_KEYS = ['workflow', 'turn_end', 'co_change'];
 
 /** Main-session source edits totalling this many changed lines or fewer are exempt (spec Scope 4a). */
 const SOURCE_EDIT_ALLOWANCE = 3;
@@ -106,6 +114,22 @@ function readYamlScalar(text, keys) {
     if (rest === '' || rest.startsWith('#')) { indents.push(indent); level++; }
   }
   return undefined;
+}
+
+/**
+ * True when `.lore/config.yaml` carries the `workflow.turn_end.co_change` key at all (presence only: the rule
+ * list is judged by `lore session trail-review`, this hook has no list grammar). An unreadable config is
+ * reported as not measured and counts as absent.
+ */
+function hasCoChangeKey(root) {
+  const configPath = join(root, '.lore', 'config.yaml');
+  if (!existsSync(configPath)) return false;
+  try {
+    return readYamlScalar(readFileSync(configPath, 'utf8'), CO_CHANGE_KEYS) !== undefined;
+  } catch (err) {
+    notMeasuredReasons.push(`co_change key not measured (${configPath} unreadable: ${err.message})`);
+    return false;
+  }
 }
 
 /** `off` (absent) | `block`; an unrecognised value is reported as not measured and treated as off. */
@@ -379,6 +403,21 @@ if (changedClaudeMd.size > 0 && !quiet) {
   }
 }
 
+// ── 4b. helper review: one `lore session trail-review` spawn, only when something needs judging ──
+// reason: the unjudged-helper snapshot is read ONCE here and is what gets marked judged afterwards, never a
+// re-read (a SubagentStop landing during the spawn is judged by the NEXT review — AC-ST-9). A quiet turn
+// (continuing after a block) neither spawns nor marks: its findings could not be spoken.
+let helperReview = null;
+if (!quiet) {
+  const unjudged = snapshotUnjudgedHelpers(dirname(dirname(dirname(turnDir))), sessionId);
+  if (unjudged.unreadable) notMeasuredReasons.push(`helper review ${unjudged.unreadable}`);
+  if (unjudged.helpers.length > 0 || hasCoChangeKey(realRoot ?? cwd)) {
+    helperReview = runTrailReview({ base: dirname(dirname(dirname(turnDir))), sessionId, turnId: basename(turnDir), cwd: realRoot ?? cwd, helpers: unjudged.helpers });
+    findings.push(...helperReview.findings);
+    notMeasuredReasons.push(...helperReview.notMeasured);
+  }
+}
+
 // ── 5. report ─────────────────────────────────────
 if (quiet) process.exit(0);
 if (notMeasuredReasons.length > 0) {
@@ -391,4 +430,7 @@ if (findings.length > 0) {
   const notes = [...infoLines, ...sourceEditNotMeasured.map((reason) => `Turn-end review: ${reason}; no verdict.`)];
   if (notes.length > 0) process.stdout.write(JSON.stringify({ systemMessage: notes.join('\n') }));
 }
+// reason: marked only now, after the findings were written — a review that dies before here leaves the helpers
+// unjudged, so the next review reports them again instead of losing them.
+for (const failure of helperReview?.markJudged() ?? []) process.stderr.write(`[stop-turn-review] ${failure}\n`);
 process.exit(0);

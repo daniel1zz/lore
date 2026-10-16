@@ -21,6 +21,10 @@
  *       (basename `agent-<agentId>`) and the open task claims recorded for it, each with whether its run has ended,
  *       plus `occupied`. `--json` prints `{ok, data}`. Consumed by the git-safety hook. Exit 2 without
  *       `--worktree`, 1 on a store failure.
+ *   tasks <run id> [--json]
+ *       Read-only (spec session-trail, Run -> tasks): the tasks the run ever claimed, from the claim audit rows
+ *       (so a released or archived task is still listed), each with its current status and `file_anchors`.
+ *       `--json` prints `{ok, data: {run, tasks}}`. An unregistered run id exits 4 naming it.
  *   attest-input
  *       Reads a Claude Code PreToolUse payload on stdin and prints hook JSON carrying `updatedInput` with the
  *       run (derived from `session_id` + `agent_id`) inserted by the core rewrite. ⛔ The output NEVER carries
@@ -52,7 +56,7 @@ import { runFragmentsRender } from "../../../flows/fragments-flow.js";
 import { detectWorktreeBranch } from "../../real-git-port.js";
 import { buildFlowDeps } from "./fragments.js";
 
-const ACTIONS = ["register", "show", "end", "occupancy", "attest-input"] as const;
+const ACTIONS = ["register", "show", "end", "occupancy", "tasks", "attest-input"] as const;
 type Action = (typeof ACTIONS)[number];
 
 const USAGE_EXIT = 2;
@@ -248,6 +252,30 @@ async function runOccupancy(args: Record<string, unknown>): Promise<void> {
   });
 }
 
+async function runTasks(args: Record<string, unknown>): Promise<void> {
+  const id = stringArg(args, "id");
+  if (id === undefined) return usageError("lore run tasks requires a run id");
+  await withRunService(async (service) => {
+    const result = await service.tasks(id);
+    if (!result.ok) {
+      process.stderr.write(`${formatError(result.error)}\n`);
+      process.exitCode = exitCode(result.error);
+      return;
+    }
+    if (args["json"] === true) {
+      writeAllSync(1, `${JSON.stringify({ ok: true, data: result.value }, null, 2)}\n`);
+      return;
+    }
+    const lines = [
+      `Run: ${result.value.run}`,
+      ...(result.value.tasks.length === 0
+        ? ["Tasks: none claimed"]
+        : result.value.tasks.map((t) => `  ${t.slug} (${t.status}) anchors: ${t.file_anchors.join(", ") || "-"}`)),
+    ];
+    writeAllSync(1, `${lines.join("\n")}\n`);
+  });
+}
+
 const preToolUsePayloadSchema =z.object({
   session_id: z.string().min(1),
   agent_id: z.string().min(1).optional(),
@@ -294,11 +322,11 @@ export default defineCommand({
     description:
       "Harness run identity: `register --harness claude-code --session <id> [--agent-id <id> --agent-type <t>]`, " +
       "`show <run id> [--json]`, `end <run id> --reason <r>`, `occupancy --worktree <path> [--json]`, " +
-      "`attest-input` (PreToolUse payload on stdin -> hook JSON).",
+      "`tasks <run id> [--json]`, `attest-input` (PreToolUse payload on stdin -> hook JSON).",
   },
   args: {
     action: { type: "positional", description: "register | show | end | attest-input", required: false },
-    id: { type: "positional", description: "show | end: run id", required: false },
+    id: { type: "positional", description: "show | end | tasks: run id", required: false },
     harness: { type: "string", description: "register: harness name (claude-code)" },
     session: { type: "string", description: "register: harness session id" },
     "agent-id": { type: "string", description: "register: subagent id (makes the run a subagent)" },
@@ -322,6 +350,8 @@ export default defineCommand({
         return runEnd(rest);
       case "occupancy":
         return runOccupancy(rest);
+      case "tasks":
+        return runTasks(rest);
       case "attest-input":
         return runAttestInput();
       default: {
