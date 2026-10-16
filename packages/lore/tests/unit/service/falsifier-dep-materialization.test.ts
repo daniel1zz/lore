@@ -952,15 +952,24 @@ describe("both runners", () => {
       });
       const bunOutput = `${bunTestRun.stdout ?? ""}${bunTestRun.stderr ?? ""}`;
       // THE TRAP, pinned permanently: with no materialized node_modules at
-      // all, bare-specifier resolution of `@lore/core` fails outright — never
-      // treated as a proven red by anything else in this suite, exactly
+      // all, bare-specifier resolution of a THIRD-PARTY package fails outright —
+      // never treated as a proven red by anything else in this suite, exactly
       // mirroring "mutation observability"'s own BOUNDARY test one describe
       // block up.
+      // reason: this control used to pin `@lore/core` as the unresolvable
+      // module. Since 472b755e (TG-20) `@lore/*` resolves through tsconfig.base.json
+      // `paths` (workspace-aliases.ts) from the scratch tree's OWN packages, with no
+      // node_modules at all — so that pin went stale (measured: the run now fails on
+      // `zod`, imported by src/adapters/cli/utils.ts). Only a third-party package
+      // still NEEDS materialized node_modules, so the control pins `zod`, and the
+      // negative assertion keeps the workspace alias honest: if `@lore/core` ever
+      // stops resolving, the failure must be reported as that, not hidden behind zod.
       expect(
         bunTestRun.status,
         `expected a nonzero exit with materialization skipped; output:\n${bunOutput}`,
       ).not.toBe(0);
-      expect(bunOutput.toLowerCase()).toContain("cannot find module");
+      expect(bunOutput).toMatch(/cannot find (?:package|module) ['"]zod['"]/i);
+      expect(bunOutput).not.toMatch(/cannot find (?:package|module) ['"]@lore\//i);
     },
     30000,
   );
