@@ -59,6 +59,8 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { TursoStore } from "../../../src/store/turso-store.js";
+import { runFileBackedDbSizeSuite, runStoreCoreSuite } from "./store-core.shared.js";
+import { runStoreJudgmentsSuite } from "./store-judgments.shared.js";
 import {
   SNIPPET_MARK_CLOSE,
   SNIPPET_MARK_OPEN,
@@ -1616,4 +1618,53 @@ describe("TursoStore", () => {
       expect(result.value % 512).toBe(0);
     });
   });
+});
+
+runStoreCoreSuite({
+  label: "TursoStore",
+  createStore: () => {
+    const tmpDir = mkdtempSync(join(tmpdir(), "lore-turso-core-"));
+    const store = new TursoStore({ localPath: join(tmpDir, "lore.db") });
+    // reason: stash tmpDir on the instance so destroyStore can remove it.
+    (store as TursoStore & { __tmpDir?: string }).__tmpDir = tmpDir;
+    return store;
+  },
+  destroyStore: (store) => {
+    const turso = store as TursoStore & { __tmpDir?: string };
+    turso.close();
+    if (turso.__tmpDir !== undefined) rmSync(turso.__tmpDir, { recursive: true, force: true });
+  },
+});
+
+runStoreJudgmentsSuite({
+  label: "TursoStore",
+  createStore: () => {
+    const tmpDir = mkdtempSync(join(tmpdir(), "lore-turso-judg-"));
+    const store = new TursoStore({ localPath: join(tmpDir, "lore.db") });
+    // reason: stash tmpDir on the instance so destroyStore can remove it.
+    (store as TursoStore & { __tmpDir?: string }).__tmpDir = tmpDir;
+    return store;
+  },
+  destroyStore: (store) => {
+    const turso = store as TursoStore & { __tmpDir?: string };
+    turso.close();
+    if (turso.__tmpDir !== undefined) rmSync(turso.__tmpDir, { recursive: true, force: true });
+  },
+  enforcesForeignKeys: true,
+});
+
+runFileBackedDbSizeSuite({
+  label: "TursoStore",
+  createStore: () => {
+    const tmpDir = mkdtempSync(join(tmpdir(), "lore-turso-size-"));
+    const store = new TursoStore({ localPath: join(tmpDir, "lore.db") });
+    // reason: stash tmpDir on the instance so destroyStore can remove it.
+    (store as TursoStore & { __tmpDir?: string }).__tmpDir = tmpDir;
+    return store;
+  },
+  destroyStore: (store) => {
+    const turso = store as TursoStore & { __tmpDir?: string };
+    turso.close();
+    if (turso.__tmpDir !== undefined) rmSync(turso.__tmpDir, { recursive: true, force: true });
+  },
 });

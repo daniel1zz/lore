@@ -26,6 +26,8 @@
 
 import { beforeEach, describe, expect, it } from "vitest";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
+import { runStoreCoreSuite } from "./store-core.shared.js";
+import { runStoreJudgmentsSuite } from "./store-judgments.shared.js";
 import type {
   AuditEntry,
   CalibrationRecord,
@@ -1322,4 +1324,20 @@ describe("InMemoryStore", () => {
       expect(found.value).toEqual([]);
     });
   });
+});
+
+runStoreCoreSuite({
+  label: "InMemoryStore",
+  createStore: () => new InMemoryStore(),
+  destroyStore: (store) => store.close(),
+  // N/A: InMemoryStore.detectParentCycle ignores docs.parent_id (see StoreSuiteOptions).
+  parentIdOnlyCycleDetection: false,
+});
+
+runStoreJudgmentsSuite({
+  label: "InMemoryStore",
+  createStore: () => new InMemoryStore(),
+  destroyStore: (store) => store.close(),
+  // N/A: InMemoryStore has no FK constraints; the orphan reference surfaces at query time.
+  enforcesForeignKeys: false,
 });

@@ -26,6 +26,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { SQLiteStore } from "../../../src/store/sqlite-store.js";
+import { runFileBackedDbSizeSuite, runStoreCoreSuite } from "./store-core.shared.js";
+import { runStoreJudgmentsSuite } from "./store-judgments.shared.js";
 import { formatError } from "../../../src/adapters/cli/utils.js";
 import type {
   AuditEntry,
@@ -2051,4 +2053,34 @@ describe("AC-3 SSOT: no store constructs DUPLICATE_SLUG from the REJECTED doc's 
         `bump this count. Sites: ${constructionSites.join(", ")}`,
     ).toBe(EXPECTED_CONSTRUCTION_SITE_COUNT);
   });
+});
+
+runStoreCoreSuite({
+  label: "SQLiteStore",
+  createStore: () => new SQLiteStore(":memory:"),
+  destroyStore: (store) => store.close(),
+});
+
+runStoreJudgmentsSuite({
+  label: "SQLiteStore",
+  createStore: () => new SQLiteStore(":memory:"),
+  destroyStore: (store) => store.close(),
+  enforcesForeignKeys: true,
+});
+
+// Disk-backed size contract: a temp-file SQLiteStore (the suites above use ":memory:").
+runFileBackedDbSizeSuite({
+  label: "SQLiteStore",
+  createStore: () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "lore-db-size-"));
+    const store = new SQLiteStore(join(tempDir, "test.db"));
+    // reason: stash tempDir on the instance so destroyStore can remove it.
+    (store as SQLiteStore & { __tmpDir?: string }).__tmpDir = tempDir;
+    return store;
+  },
+  destroyStore: (store) => {
+    const sqlite = store as SQLiteStore & { __tmpDir?: string };
+    sqlite.close();
+    if (sqlite.__tmpDir !== undefined) rmSync(sqlite.__tmpDir, { recursive: true, force: true });
+  },
 });
