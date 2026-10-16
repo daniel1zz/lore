@@ -29,6 +29,7 @@ interface Spawned {
 
 const roots: string[] = [];
 let env: Record<string, string>;
+let throwawayCorpus: string;
 
 beforeAll(() => {
   assertFreshBinary(LORE_BIN, [join(REPO_ROOT, "packages", "lore", "src"), join(REPO_ROOT, "packages", "core", "src")]);
@@ -43,6 +44,10 @@ beforeAll(() => {
   env["HOME"] = home;
   env["XDG_CONFIG_HOME"] = xdg;
   env["CLAUDECODE"] = "1";
+  throwawayCorpus = join(root, "corpus");
+  mkdirSync(throwawayCorpus, { recursive: true });
+  const init = Bun.spawnSync([LORE_BIN, "init", "--author", "rs13-oracle"], { cwd: throwawayCorpus, env });
+  if (init.exitCode !== 0) throw new Error(`fixture lore init failed: ${init.stderr.toString()}`);
 });
 
 afterAll(() => {
@@ -50,7 +55,11 @@ afterAll(() => {
 });
 
 function lore(...args: string[]): Spawned {
-  const proc = Bun.spawnSync([LORE_BIN, ...args], { cwd: REPO_ROOT, env });
+  return loreIn(REPO_ROOT, ...args);
+}
+
+function loreIn(cwd: string, ...args: string[]): Spawned {
+  const proc = Bun.spawnSync([LORE_BIN, ...args], { cwd, env });
   return { code: proc.exitCode ?? -1, stdout: proc.stdout.toString(), stderr: proc.stderr.toString() };
 }
 
@@ -71,7 +80,10 @@ describe("AC-RS-13 shipped catalog passes check within caps", () => {
   });
 
   it("AC-RS-13 shipped ids include the four promoted lore-tool fragments", () => {
-    const res = lore("context", "list", "--json");
+    // reason: `context list` resolves a corpus; cwd is a throwaway `lore init` corpus, never the
+    // repo's own `.lore/` (LORE_TEST_SANDBOX refuses that, AC-TG-2). The shipped layer is
+    // corpus-independent, so the assertion is unchanged.
+    const res = loreIn(throwawayCorpus, "context", "list", "--json");
     expect(res.code).toBe(0);
     const rows = (JSON.parse(res.stdout) as { data: { id: string; layer: string }[] }).data;
     const shipped = rows.filter((r) => r.layer === "shipped").map((r) => r.id);

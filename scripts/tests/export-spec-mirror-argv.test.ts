@@ -59,6 +59,8 @@
 
 import { describe, it, expect } from "vitest";
 import { spawnSync } from "node:child_process";
+import { mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { MIRROR_DRIFT_EXIT_CODE, MIRROR_HARD_FAILURE_EXIT_CODE } from "../export-spec-mirror-core.js";
@@ -79,9 +81,9 @@ interface MirrorRun {
 }
 
 /** One real `bun scripts/export-spec-mirror.ts <args>` invocation — the production command surface, never `main()` in-process. */
-function runMirror(args: readonly string[]): MirrorRun {
+function runMirror(args: readonly string[], cwd: string = REPO_ROOT): MirrorRun {
   const result = spawnSync("bun", [MIRROR_SCRIPT, ...args], {
-    cwd: REPO_ROOT,
+    cwd,
     encoding: "utf8",
     maxBuffer: 20 * 1024 * 1024,
   });
@@ -145,9 +147,22 @@ describe("an unrecognised flag is refused, not ignored", () => {
 
       // (c) — GREEN CONTROL in the same run: a parser that refused everything would satisfy (a)
       // just as well, so the accepted invocation must still reach a real verdict.
-      const accepted = runMirror(["--check"]);
-      expect(accepted.exitCode).not.toBe(codes.usage);
-      expect([0, MIRROR_DRIFT_EXIT_CODE]).toContain(accepted.exitCode);
+      // reason: runs from a throwaway `lore init` corpus, never this repo's own `.lore/` —
+      // LORE_TEST_SANDBOX (AC-TG-2) refuses that with exit 4. An empty corpus against this
+      // checkout's mirror is drift (2), which is still "a real verdict, not a usage refusal".
+      const corpus = realpathSync(mkdtempSync(join(tmpdir(), "mirror-argv-corpus-")));
+      try {
+        const init = spawnSync("bun", ["run", join(REPO_ROOT, "packages", "lore", "src", "index.ts"), "init"], {
+          cwd: corpus,
+          encoding: "utf8",
+        });
+        expect(init.status).toBe(0);
+        const accepted = runMirror(["--check"], corpus);
+        expect(accepted.exitCode).not.toBe(codes.usage);
+        expect([0, MIRROR_DRIFT_EXIT_CODE]).toContain(accepted.exitCode);
+      } finally {
+        rmSync(corpus, { recursive: true, force: true });
+      }
     },
     300_000,
   );

@@ -366,13 +366,16 @@ describe("AC-CP-6: throwaway out-of-tree corpus reproduces both boundary declara
     expect(getInTemp.exitCode).toBe(0);
     expect(getInTemp.stdout).toContain(markerTitle);
 
-    // ... and never this repo's OWN `.lore/` — the marker doc created only in
-    // the temp corpus is invisible from a READ-ONLY lookup against the repo's
-    // real corpus (this would only pass by accident if resolution genuinely
-    // fell back to some shared root instead of the temp path).
-    const getInRepo = runLore(["get", prdSlug], REPO_ROOT);
-    expect(getInRepo.exitCode).toBe(3); // SLUG_NOT_FOUND
-    expect(getInRepo.stderr).toContain("not found");
+    // ... and never a shared root — the marker doc created only in the temp corpus is invisible
+    // from a lookup against a SECOND throwaway corpus (this would only pass by accident if
+    // resolution genuinely fell back to some shared root instead of the cwd's own corpus).
+    // reason: this used to read the repo's own `.lore/`; LORE_TEST_SANDBOX (AC-TG-2) now
+    // refuses that with exit 4, so the "someone else's corpus" side is another mkdtemp corpus.
+    const otherDir = trackDir(mkdtempSync(join(tmpdir(), "lore-t5-fresh-install-other-")));
+    initCorpus(otherDir);
+    const getInOther = runLore(["get", prdSlug], otherDir);
+    expect(getInOther.exitCode).toBe(3); // SLUG_NOT_FOUND
+    expect(getInOther.stderr).toContain("not found");
 
     // (b) both boundary declarations reproduce here, matching their exported
     // constants by identity.
