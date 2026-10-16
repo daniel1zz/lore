@@ -2,11 +2,11 @@
 id: TASK-348
 type: task
 role: plan
-title: "可用性两则：必填参数靠二次报错发现；CLI 参数名与存储字段名不一致"
+title: "lore create --help never marks per-type required flags (--plan-id, --decision-status) as required"
 status: draft
 priority: medium
 created: 2026-08-07
-updated: 2026-08-07
+updated: 2026-10-16
 tags: []
 parent: PRD-001
 ---

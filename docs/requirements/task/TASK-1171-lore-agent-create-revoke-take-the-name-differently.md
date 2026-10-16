@@ -2,11 +2,11 @@
 id: TASK-1171
 type: task
 role: plan
-title: "lore agent create/revoke take the name differently and return exit 1 for a duplicate name"
+title: "lore agent create and revoke exit 1 for validation and not-found errors instead of 4 and 3"
 status: draft
 priority: medium
 created: 2026-10-09
-updated: 2026-10-09
+updated: 2026-10-16
 tags: []
 parent: PRD-001
 ---

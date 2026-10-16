@@ -2,11 +2,11 @@
 id: TASK-855
 type: task
 role: plan
-title: "lore log and created_by print the literal system while the audit trail holds the real actor, and active_sessions hides claimless sessions: together they produced a false accusation"
+title: "active_sessions is built from claims only, so a session that writes without a claim is invisible"
 status: draft
 priority: medium
 created: 2026-08-25
-updated: 2026-08-25
+updated: 2026-10-16
 tags: []
 parent: PRD-001
 ---

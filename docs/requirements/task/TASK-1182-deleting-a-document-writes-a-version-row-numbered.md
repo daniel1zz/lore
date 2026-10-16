@@ -2,11 +2,11 @@
 id: TASK-1182
 type: task
 role: plan
-title: "Deleting a document writes a version row numbered 0, and approving the deleted document afterwards keeps adding versions while it stays deleted"
+title: "Deleting a document writes a version row numbered 0"
 status: draft
 priority: medium
 created: 2026-10-09
-updated: 2026-10-09
+updated: 2026-10-16
 tags: []
 parent: PRD-001
 ---

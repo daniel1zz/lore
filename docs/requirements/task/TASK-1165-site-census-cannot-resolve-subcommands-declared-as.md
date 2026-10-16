@@ -2,11 +2,11 @@
 id: TASK-1165
 type: task
 role: plan
-title: "Site census cannot resolve subcommands declared as standalone constants (uat, eval, issue) and silently under-counts sites when node_modules is absent"
+title: "lore baseline sites silently drops a second positional argument"
 status: draft
 priority: medium
 created: 2026-10-09
-updated: 2026-10-09
+updated: 2026-10-16
 tags: []
 parent: PRD-001
 ---

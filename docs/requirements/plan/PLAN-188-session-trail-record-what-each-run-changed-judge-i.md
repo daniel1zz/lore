@@ -3,7 +3,7 @@ id: PLAN-188
 type: plan
 role: plan
 title: "Session trail: record what each run changed, judge it at turn end, carry it in the handoff"
-status: approved
+status: archived
 priority: high
 created: 2026-10-16
 updated: 2026-10-16

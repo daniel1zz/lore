@@ -10756,6 +10756,126 @@
     "01M51QNXF7B6XHR9TR6FAR4X3S": {
       "human_id": "TASK-1404",
       "file_path": "docs/requirements/task/TASK-1404-ac-scope-resolution-counts-a-deprecated-spec-as-a.md"
+    },
+    "01M51T3PS80Y32S31B41TB13A0": {
+      "human_id": "KN-700",
+      "file_path": "docs/requirements/knowledge/KN-700-retro-session-trail-landing-three-copied-red-first.md"
+    },
+    "01M51SXQP0P47H5SXWQ3BZY6SN": {
+      "human_id": "KN-701",
+      "file_path": "docs/requirements/knowledge/KN-701-assessment-session-trail-record-what-each-run-chan.md"
+    },
+    "01M51T1PH1KKH8XDMGXY3M3N6Q": {
+      "human_id": "TASK-1405",
+      "file_path": "docs/requirements/task/TASK-1405-lore-context-init-calls-the-ai-before-refusing-an.md"
+    },
+    "01M51T1J50EJ2BCT7NADWA75CA": {
+      "human_id": "TASK-1406",
+      "file_path": "docs/requirements/task/TASK-1406-lore-fragments-check-never-compares-user-scope-cla.md"
+    },
+    "01M51T1DERCD3XSHRVB6M6F4F2": {
+      "human_id": "TASK-1407",
+      "file_path": "docs/requirements/task/TASK-1407-lore-context-refresh-deletes-a-hand-edited-deselec.md"
+    },
+    "01M51T19HCM9PWAXZXF4QWK5JN": {
+      "human_id": "TASK-1408",
+      "file_path": "docs/requirements/task/TASK-1408-lore-dashboard-crashes-when-the-browser-opener-can.md"
+    },
+    "01M51T1582SKNY0DX6Q6AJQPS8": {
+      "human_id": "TASK-1409",
+      "file_path": "docs/requirements/task/TASK-1409-lore-dashboard-silently-mounts-no-extra-projects-w.md"
+    },
+    "01M51T0ZWCAZ7NAQZ7GFE21V9Q": {
+      "human_id": "TASK-1410",
+      "file_path": "docs/requirements/task/TASK-1410-project-rules-files-and-settings-local-json-langua.md"
+    },
+    "01M51T0VQMMY09G63YT35RBNYK": {
+      "human_id": "TASK-1411",
+      "file_path": "docs/requirements/task/TASK-1411-lore-setup-project-overwrites-an-existing-core-hoo.md"
+    },
+    "01M51T0Q2JFHYRT6NCPRC5T7XA": {
+      "human_id": "TASK-1412",
+      "file_path": "docs/requirements/task/TASK-1412-lore-setup-check-probes-the-vendor-github-repo-reg.md"
+    },
+    "01M51T0JQ43CY34HG74AV7K6QG": {
+      "human_id": "TASK-1413",
+      "file_path": "docs/requirements/task/TASK-1413-lore-setup-check-treats-an-unreadable-manifest-as.md"
+    },
+    "01M51T0DQA3KXSM1H33N5X620S": {
+      "human_id": "TASK-1414",
+      "file_path": "docs/requirements/task/TASK-1414-lore-setup-force-diverged-is-silently-ignored-with.md"
+    },
+    "01M51T09ENQJTF3JZSYCFBV5Q0": {
+      "human_id": "TASK-1415",
+      "file_path": "docs/requirements/task/TASK-1415-lore-init-leaves-a-half-made-lore-on-failure-so-a.md"
+    },
+    "01M51T055EPJQ06K5J1TNCGKNZ": {
+      "human_id": "TASK-1416",
+      "file_path": "docs/requirements/task/TASK-1416-invalidate-restore-and-migrations-skip-the-foreign.md"
+    },
+    "01M51T00Z5GN6CEFKDB9SC11TP": {
+      "human_id": "TASK-1417",
+      "file_path": "docs/requirements/task/TASK-1417-lore-migrate-v1-exits-0-json-ok-true-while-files-f.md"
+    },
+    "01M51SZWXT7Z5J5XJ842MA5DMZ": {
+      "human_id": "TASK-1418",
+      "file_path": "docs/requirements/task/TASK-1418-lore-migrate-v1-writes-docs-with-no-audit-row-and.md"
+    },
+    "01M51SZRPTXVW0C1HGW6ZTGXBP": {
+      "human_id": "TASK-1419",
+      "file_path": "docs/requirements/task/TASK-1419-lore-restore-audits-and-versions-as-the-document-a.md"
+    },
+    "01M51SZMK7MH2J4AG7KBZK4V48": {
+      "human_id": "TASK-1420",
+      "file_path": "docs/requirements/task/TASK-1420-lore-link-accepts-a-self-link.md"
+    },
+    "01M51SZG5WR9ZDVNBQ6EKTA4WE": {
+      "human_id": "TASK-1421",
+      "file_path": "docs/requirements/task/TASK-1421-lore-unlink-reports-success-when-no-link-existed.md"
+    },
+    "01M51SZC16X9MCRGRAQZET0GZN": {
+      "human_id": "TASK-1422",
+      "file_path": "docs/requirements/task/TASK-1422-parent-id-and-parent-link-rows-desync-a-second-par.md"
+    },
+    "01M51SZ7QA7902YFN18GRZM84J": {
+      "human_id": "TASK-1423",
+      "file_path": "docs/requirements/task/TASK-1423-lore-list-with-an-unknown-type-or-status-is-silent.md"
+    },
+    "01M51SZ3GC9XGXHDN06P52VDNH": {
+      "human_id": "TASK-1424",
+      "file_path": "docs/requirements/task/TASK-1424-lore-set-accepts-an-empty-or-whitespace-only-title.md"
+    },
+    "01M51SYZ7BFX0QPWMT76BM8PJW": {
+      "human_id": "TASK-1425",
+      "file_path": "docs/requirements/task/TASK-1425-mcp-lore-set-can-rewrite-extra-uat-of-a-recorded-u.md"
+    },
+    "01M51SYTWW87H3HEQEC2TF2ZZA": {
+      "human_id": "TASK-1426",
+      "file_path": "docs/requirements/task/TASK-1426-invalidated-knowledge-docs-still-act-findfeedingsk.md"
+    },
+    "01M51SYPDTQPMQTNC9GSG7M4NZ": {
+      "human_id": "TASK-1427",
+      "file_path": "docs/requirements/task/TASK-1427-lore-feed-parent-with-an-unresolvable-id-is-silent.md"
+    },
+    "01M51SYJ4WHNGKCVF9EXGXHNFS": {
+      "human_id": "TASK-1428",
+      "file_path": "docs/requirements/task/TASK-1428-lore-calibration-accepts-an-unknown-doc-type-with.md"
+    },
+    "01M51SYE1BS9625JJ7C5J4BHYC": {
+      "human_id": "TASK-1429",
+      "file_path": "docs/requirements/task/TASK-1429-lore-eval-fts-always-fails-outside-the-lore-repo-b.md"
+    },
+    "01M51SY9VR5HY5ZSFJYBP0XX84": {
+      "human_id": "TASK-1430",
+      "file_path": "docs/requirements/task/TASK-1430-lore-eval-migration-imports-into-the-live-corpus-w.md"
+    },
+    "01M51SY4AH1RH7W37QTNGTRXM7": {
+      "human_id": "TASK-1431",
+      "file_path": "docs/requirements/task/TASK-1431-lore-agent-create-takes-the-name-as-name-but-agent.md"
+    },
+    "01M51SXZH7WPB1JYEA2DYPKZWG": {
+      "human_id": "TASK-1432",
+      "file_path": "docs/requirements/task/TASK-1432-a-string-option-whose-value-starts-with-is-rejecte.md"
     }
   }
 }

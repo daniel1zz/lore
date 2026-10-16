@@ -2,7 +2,7 @@
 id: TASK-1397
 type: task
 role: plan
-title: "export-index holds 10 duplicate human_id pairs (SPEC-092, 095-102, 156) and check:spec-mirror still exits 0; repairCollisions only checks file_path"
+title: "export-docs repairCollisions does not detect duplicate mirror human_ids, so the mirror check cannot see them"
 status: draft
 priority: medium
 created: 2026-10-16

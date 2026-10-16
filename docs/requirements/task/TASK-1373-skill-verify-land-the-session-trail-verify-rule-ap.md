@@ -3,7 +3,7 @@ id: TASK-1373
 type: task
 role: plan
 title: "[Skill:verify] land the session trail: verify, rule apply, leaf prose, anchors, full suite, build, Stop latency"
-status: approved
+status: archived
 priority: high
 phase: "landing"
 created: 2026-10-16

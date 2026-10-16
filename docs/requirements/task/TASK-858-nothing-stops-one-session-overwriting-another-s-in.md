@@ -2,11 +2,11 @@
 id: TASK-858
 type: task
 role: plan
-title: "Nothing stops one session overwriting another's in-flight shared state, and exclusivity-dependent ACs make the overwrite the only route to a green verdict"
+title: "The shared docs/requirements mirror is written outside every lease or session check, so concurrent sessions can overwrite each other's export"
 status: draft
 priority: medium
 created: 2026-08-25
-updated: 2026-08-25
+updated: 2026-10-16
 tags: []
 parent: PRD-001
 ---

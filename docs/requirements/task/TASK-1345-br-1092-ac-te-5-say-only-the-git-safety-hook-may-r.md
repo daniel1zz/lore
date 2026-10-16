@@ -2,11 +2,11 @@
 id: TASK-1345
 type: task
 role: plan
-title: "BR-1092 / AC-TE-5 say only the git-safety hook may refuse a tool call, yet assets/hooks still ships pre-no-general-agent-gate.mjs and pre-dispatch-isolation-gate.mjs, which exit 2 on a dispatch"
+title: "Repo-only hooks (pre-no-general-agent-gate, pre-dispatch-isolation-gate) ship to consumers as managed hooks but are never registered"
 status: draft
 priority: medium
 created: 2026-10-15
-updated: 2026-10-15
+updated: 2026-10-16
 tags: []
 parent: PRD-001
 ---

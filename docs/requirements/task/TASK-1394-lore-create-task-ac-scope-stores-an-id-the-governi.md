@@ -2,7 +2,7 @@
 id: TASK-1394
 type: task
 role: plan
-title: "lore create task --ac-scope stores an id the governing spec does not declare (e.g. 'AC-CRIT-1 AC-CRIT-2' as one id) without refusal"
+title: "lore create task --ac-scope and lore scope add store an id the governing spec does not declare"
 status: draft
 priority: medium
 created: 2026-10-16
