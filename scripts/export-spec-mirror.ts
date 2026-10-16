@@ -697,7 +697,11 @@ export async function main(
         }
         liveDocs.push(...docsResult.value.docs.map((doc) => ({ id: doc.id, slug: doc.slug })));
       }
-      if (!printDuplicateHumanIds(findDuplicateHumanIds(liveDocs, loadMirrorMappings(repoRoot)))) allOk = false;
+      // reason: a reported collision EXPLAINS a compared-count shortfall (the content probe cannot
+      // pair a doc to its file while two docs claim one human_id), so exit 5 ("unexplained
+      // blindness") must not outrank the drift code the collision already earned.
+      const collisionReported = !printDuplicateHumanIds(findDuplicateHumanIds(liveDocs, loadMirrorMappings(repoRoot)));
+      if (collisionReported) allOk = false;
       for (const type of types) {
         if (!printParity("check", type, requireVerdict(parity.perType, type, "parity"))) allOk = false;
         // reason: printed unconditionally, immediately after the parity line whose parenthetical
@@ -712,7 +716,7 @@ export async function main(
           blind = true;
         }
       }
-      if (blind) return MIRROR_ZERO_COMPARED_EXIT_CODE;
+      if (blind && !collisionReported) return MIRROR_ZERO_COMPARED_EXIT_CODE;
       return allOk ? 0 : MIRROR_DRIFT_EXIT_CODE;
     }
 
