@@ -83,6 +83,7 @@ import { ok, err } from "./errors.js";
 import type { Result, LoreError } from "./errors.js";
 import type { DocRecord } from "./types.js";
 import { ANY_RULE_ID_PATTERN } from "./baseline.js";
+import { isInvalidated } from "./validity.js";
 import {
   extractEvidence,
   resolveOracleGeneration,
@@ -1013,7 +1014,11 @@ export function resolveGoverningSpecByAcScope(
 ): Result<GoverningSpecMatch, LoreError> {
   const declaredSet = new Set(declaredAcScope);
   const matches: GoverningSpecMatch[] = [];
+  // Only LIVE specs can govern: a deprecated or invalidated spec that still declares the
+  // id must not make a live spec ambiguous (report #237). Two live candidates still are.
+  const nowIso = new Date().toISOString();
   for (const candidate of candidateSpecs) {
+    if (candidate.status === "deprecated" || isInvalidated(candidate, nowIso)) continue;
     const parsed = specAcceptanceCriteriaSchema.safeParse(candidate.extra["acceptance_criteria"]);
     if (!parsed.success || parsed.data.length === 0) continue;
     const specIds = new Set(parsed.data.map((c) => c.id));
