@@ -8,9 +8,9 @@
  * ⛔ Both ACs are bound by the spec's own coverage contract: "Every WIRING AC
  * drives the CLI subprocess, never the unit function directly." Every
  * scenario below spawns the real CLI against a `mkdtemp` + `lore init`
- * throwaway corpus (or, for the repo sweep, this repo's own real corpus,
- * read-only) — this file never imports or calls a `checkSlugPointers`-shaped
- * function directly.
+ * throwaway corpus — this file never imports or calls a
+ * `checkSlugPointers`-shaped function directly. The sweep over this repo's own
+ * real corpus runs from `scripts/check-claude-md-live-sweep.ts`, not from here.
  *
  * RED baseline, confirmed empirically against this worktree before writing
  * this file:
@@ -40,11 +40,9 @@
  * on purpose to pin that it structurally CANNOT resolve slugs.
  *
  * ⛔ SAFETY: every mkdtemp fixture below runs its OWN `lore init` — never the
- * repo's own `.lore/`. The repo-sweep scenarios run `--check-memory-pointers`
- * against THIS repo's real corpus with `HOME` unmodified, but this is a
- * READ-ONLY lint (slug existence lookup), never a write — the same
- * discipline `anchor-coverage-surface.test.ts` and this repo's other
- * real-corpus-reading suites already rely on.
+ * repo's own `.lore/`. Nothing in this file reads this repo's real corpus or
+ * memory-file tree (task-skill-test-tg-2 moved that sweep into
+ * `scripts/check-claude-md-live-sweep.ts`).
  *
  * ## A measured false-positive class (⚠ pinned as a dedicated NEGATIVE case)
  *
@@ -108,18 +106,15 @@ interface RunResult {
 /**
  * Spawn `bun run <INDEX_TS> ...args` in `cwd`.
  *
- * @param opts.isolateHome - Defaults `true` (redirects `HOME` into `cwd` —
- *   every mkdtemp fixture is its own throwaway corpus and must never see a
- *   developer's real global lore state). Pass `false` for the real-repo
- *   sweep, which must read THIS session's actual environment/corpus.
+ * `HOME` is always redirected into `cwd` — every fixture is its own throwaway corpus and must never
+ * see a developer's real global lore state (the live-repo sweep moved to scripts/check-claude-md-live-sweep.ts).
  */
-function runLore(args: string[], cwd: string, opts: { isolateHome?: boolean } = {}): RunResult {
-  const isolateHome = opts.isolateHome ?? true;
+function runLore(args: string[], cwd: string): RunResult {
   const result = spawnSync("bun", ["run", INDEX_TS, ...args], {
     cwd,
     env: {
       ...process.env,
-      ...(isolateHome ? { HOME: cwd } : {}),
+      HOME: cwd,
       EDITOR: "true",
       CLAUDECODE: "1",
     },
@@ -223,9 +218,8 @@ function collectFindingsByKind(value: unknown, targetKind: string, out: JsonFind
 
 function runCheckMemoryPointersJson(
   cwd: string,
-  opts: { isolateHome?: boolean } = {},
 ): { result: RunResult; parsed: unknown } {
-  const result = runLore(["status", "--check-memory-pointers", "--json"], cwd, opts);
+  const result = runLore(["status", "--check-memory-pointers", "--json"], cwd);
   let parsed: unknown;
   try {
     parsed = JSON.parse(result.stdout);
@@ -239,8 +233,8 @@ function runCheckMemoryPointersJson(
 }
 
 /** Same helper for `--check-claude-md` — used ONLY by the N14-boundary regression test below. */
-function runCheckClaudeMdJson(cwd: string, opts: { isolateHome?: boolean } = {}): { result: RunResult; parsed: unknown } {
-  const result = runLore(["status", "--check-claude-md", "--json"], cwd, opts);
+function runCheckClaudeMdJson(cwd: string): { result: RunResult; parsed: unknown } {
+  const result = runLore(["status", "--check-claude-md", "--json"], cwd);
   let parsed: unknown;
   try {
     parsed = JSON.parse(result.stdout);
@@ -357,10 +351,25 @@ describe("slug pointers — a dangling slug is refused", () => {
 // ─── AC-SLUG-2: positive control + real-corpus sweep ───────────────────────
 
 describe("slug pointers — positive control plus real-corpus sweep", () => {
-  it("positive control fires exactly one slug_pointer_missing AND every memory file in this repo yields zero", () => {
-    // Positive control — mandatory alongside the sweep: a skipped check and a
-    // passing check both produce zero findings, so "the real corpus is
-    // clean" must be paired with proof the metric CAN fire at all.
+  // ⛔ The LIVE sweep (this repo's own memory files against this repo's own corpus) is NOT here: it reads
+  // the repo's `.lore/`, so it lives in `scripts/check-claude-md-live-sweep.ts` (wired into `bun run test`
+  // as `check:live-repo-state`). What stays here is the positive control plus the sweep script's own
+  // logic, driven against mkdtemp fixtures (task-skill-test-tg-2).
+  const SWEEP_SCRIPT = join(REPO_ROOT, "scripts", "check-claude-md-live-sweep.ts");
+
+  /** Runs the sweep script with `--root <fixture>` and `HOME` redirected into it. */
+  function runSweep(root: string): RunResult {
+    const result = spawnSync("bun", [SWEEP_SCRIPT, "--root", root], {
+      cwd: tmpdir(),
+      env: { ...process.env, HOME: root, EDITOR: "true", CLAUDECODE: "1" },
+      encoding: "utf8",
+    });
+    return { stdout: result.stdout ?? "", stderr: result.stderr ?? "", exitCode: result.status ?? 1 };
+  }
+
+  it("positive control fires exactly one slug_pointer_missing for a dangling slug", () => {
+    // Mandatory alongside any sweep: a skipped check and a passing check both produce zero
+    // findings, so "the corpus is clean" must be paired with proof the metric CAN fire at all.
     const controlDir = makeTempDir("repo-sweep-control");
     try {
       initCorpus(controlDir);
@@ -371,30 +380,58 @@ describe("slug pointers — positive control plus real-corpus sweep", () => {
     } finally {
       cleanupDir(controlDir);
     }
-
-    // Real corpus sweep — this repo's OWN memory files against this repo's
-    // OWN corpus, read-only, HOME unmodified (see module header ⛔ SAFETY).
-    const sweep = runCheckMemoryPointersJson(REPO_ROOT, { isolateHome: false });
-    expect(collectFindingsByKind(sweep.parsed, "slug_pointer_missing")).toEqual([]);
-    // Under adoption=warn the deterministic finding would surface as advisory
-    // `downgraded` instead — read both, or "zero" is vacuously true.
-    expect(
-      collectFindingsByKind(sweep.parsed, "downgraded").filter(
-        (f) => (f as { downgraded_kind?: string }).downgraded_kind === "slug_pointer_missing",
-      ),
-    ).toEqual([]);
   });
 
-  it("NON-VACUITY: the real-corpus sweep actually walked more than zero memory files (cross-checked against --check-claude-md's discovery of the same tree)", () => {
-    // `--check-memory-pointers`'s own envelope shape is not yet decided, so
-    // file-count cannot be read off it directly. `discoverMemoryFiles` is
-    // the SAME walker both branches route through over the SAME cwd —
-    // `--check-claude-md`'s headroom array (already-shipped, known shape)
-    // is therefore solid proof the walk over REPO_ROOT finds a nonzero,
-    // known file set, not "found nothing to check".
-    const claudeMd = runCheckClaudeMdJson(REPO_ROOT, { isolateHome: false });
-    const headroom =
-      (claudeMd.parsed as { data?: { claude_md?: { headroom?: unknown[] } } }).data?.claude_md?.headroom ?? [];
-    expect(headroom.length).toBeGreaterThan(0);
+  it("the sweep script exits 1 naming slug_pointer_missing on a fixture whose CLAUDE.md cites a dangling slug (sweep can FAIL)", () => {
+    const dir = makeTempDir("sweep-dangling");
+    try {
+      initCorpus(dir);
+      writeEnforcedRoot(dir, `See \`${DANGLING_SLUG_1}\` for the mechanism.\n`);
+      const run = runSweep(dir);
+      expect(run.exitCode).toBe(1);
+      expect(run.stderr).toContain("slug_pointer_missing");
+    } finally {
+      cleanupDir(dir);
+    }
+  });
+
+  it("the sweep script also catches the dangling slug when adoption is warn (finding downgraded to advisory)", () => {
+    const dir = makeTempDir("sweep-dangling-warn");
+    try {
+      initCorpus(dir);
+      // no adoption pin: absent key resolves to warn, which moves the finding to advisory `downgraded`
+      writeFileSync(join(dir, "CLAUDE.md"), SECTIONS_PREFIX + `See \`${DANGLING_SLUG_1}\` for the mechanism.\n`);
+      const run = runSweep(dir);
+      expect(run.exitCode).toBe(1);
+      expect(run.stderr).toContain("slug_pointer_missing");
+    } finally {
+      cleanupDir(dir);
+    }
+  });
+
+  it("the sweep script exits 0 on a fixture citing only an existing slug, having walked >= 1 memory file", () => {
+    const dir = makeTempDir("sweep-clean");
+    try {
+      initCorpus(dir);
+      const realSlug = createReferenceDoc(dir, "Sweep Clean Reference");
+      writeEnforcedRoot(dir, `See \`${realSlug}\` for the mechanism.\n`);
+      const run = runSweep(dir);
+      expect(run.exitCode, run.stderr).toBe(0);
+      expect(run.stdout).toMatch(/\b[1-9]\d* memory file\(s\) walked/);
+    } finally {
+      cleanupDir(dir);
+    }
+  });
+
+  it("NON-VACUITY: the sweep script exits 1 naming a vacuous sweep when the root holds no memory file", () => {
+    const dir = makeTempDir("sweep-vacuous");
+    try {
+      initCorpus(dir);
+      const run = runSweep(dir);
+      expect(run.exitCode).toBe(1);
+      expect(run.stderr).toContain("vacuous sweep");
+    } finally {
+      cleanupDir(dir);
+    }
   });
 });
