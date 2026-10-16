@@ -273,7 +273,7 @@ describe("session-bootstrap-injection — HAPPY", () => {
 // ─── BOUNDARY — INJECTION_BACKSTOP_CAP overflow drops the whole composed block ─
 
 describe("session-bootstrap-injection — BOUNDARY", () => {
-  it("JSON stdout exceeding the 12000-char backstop drops the ENTIRE block (framing line included), never sliced, with a degradation entry naming the length", () => {
+  it("JSON stdout exceeding the 10000-char hook cap drops the ENTIRE block (framing line included), never sliced, with a degradation entry naming the length", () => {
     const cwd = mkLoreCwd();
     const oversized = "x".repeat(12005);
     const stubDir = makeLoreStub({ bootstrapStdout: oversized, framingStdout: BOOTSTRAP_FRAMING_LINE });
@@ -294,7 +294,7 @@ describe("session-bootstrap-injection — BOUNDARY", () => {
 
     expect(ctx).toContain("Degradation Report");
     expect(ctx).toContain("lore bootstrap");
-    expect(ctx).toContain("12005 chars exceeds 12000 backstop");
+    expect(ctx).toContain("chars dropped whole: session-start output");
   });
 });
 

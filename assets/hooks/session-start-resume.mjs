@@ -109,13 +109,12 @@ const AGENTS_DIR = process.env.CLAUDE_AGENTS_DIR_OVERRIDE
   || join(homedir(), '.claude', 'agents');
 const SESSION_STATE_BASE = process.env.CLAUDE_STATE_BASE_OVERRIDE
   || join(homedir(), '.claude', 'session-state');
-// SPEC-080 D3 — a pure safety backstop on the ALREADY char-budgeted tier-1
-// injection payload (`buildBootstrapInjection`, `@lore/core`), never a
-// second truncation policy: exceeding it means the binary side is not
-// honoring its own budget, so the hook drops the whole block rather than
-// mid-JSON-slicing (which would violate the projection contract's
-// no-mid-JSON-slice rule at this layer too).
-const INJECTION_BACKSTOP_CAP = 12000;
+// Claude Code caps EACH hook output string at 10,000 chars; past it the
+// harness replaces the whole string with a file preview. The cap is checked on
+// the FINAL concatenated additionalContext (see "Compose" below), never on the
+// bootstrap payload alone. SPEC-080 forbids clipping, so an over-cap total drops
+// the bootstrap fence WHOLE (never slices mid-JSON); the seat briefing is never cut.
+const HOOK_OUTPUT_CAP = 10000;
 
 // Phase F (SPEC-076 §C6) — cache filename is a DELIBERATE literal duplicate of
 // `adapters/cli/setup-check.ts`'s private `CHECK_CACHE_FILENAME` constant of
@@ -332,36 +331,27 @@ if (existsSync(join(bootstrapCwd, '.lore'))) {
     // answer: no fence, no framing line, NO degradation entry, and the
     // framing spawn below never happens.
   } else if (stdout) {
-    if (stdout.length > INJECTION_BACKSTOP_CAP) {
-      // Drops the whole block, never slices mid-JSON.
-      degradations.push({
-        component: 'lore bootstrap',
-        reason: `injection payload ${stdout.length} chars exceeds ${INJECTION_BACKSTOP_CAP} backstop `
-          + '— binary-side bug, run `lore setup` / investigate',
+    // E-a: the scope-boundary framing line — spawned ONLY now that there is
+    // a payload for it to bound. Fail-open, same contract as Phase C/D's
+    // governance topics: a missing binary, non-zero exit, or empty stdout
+    // leaves `framingLine` at '' and the bare fence still renders — advisory
+    // framing is never degradation-worthy on its own.
+    let framingLine = '';
+    try {
+      const framingResult = spawnSync('lore', ['governance', 'bootstrap-framing'], {
+        cwd: bootstrapCwd,
+        encoding: 'utf8',
+        timeout: 5000,
       });
-    } else {
-      // E-a: the scope-boundary framing line — spawned ONLY now that there is
-      // a payload for it to bound. Fail-open, same contract as Phase C/D's
-      // governance topics: a missing binary, non-zero exit, or empty stdout
-      // leaves `framingLine` at '' and the bare fence still renders — advisory
-      // framing is never degradation-worthy on its own.
-      let framingLine = '';
-      try {
-        const framingResult = spawnSync('lore', ['governance', 'bootstrap-framing'], {
-          cwd: bootstrapCwd,
-          encoding: 'utf8',
-          timeout: 5000,
-        });
-        if (framingResult.status === 0 && typeof framingResult.stdout === 'string'
-            && framingResult.stdout.length > 0) {
-          framingLine = framingResult.stdout;
-        }
-      } catch { /* fail-open — framing-line injection must never block session start */ }
+      if (framingResult.status === 0 && typeof framingResult.stdout === 'string'
+          && framingResult.stdout.length > 0) {
+        framingLine = framingResult.stdout;
+      }
+    } catch { /* fail-open — framing-line injection must never block session start */ }
 
-      // D2 placement: framing line OUTSIDE the markdown fence, JSON INSIDE it.
-      const fence = `\`\`\`json\n${stdout}\n\`\`\``;
-      bootstrapBlock = framingLine ? `${framingLine}\n\n${fence}` : fence;
-    }
+    // D2 placement: framing line OUTSIDE the markdown fence, JSON INSIDE it.
+    const fence = `\`\`\`json\n${stdout}\n\`\`\``;
+    bootstrapBlock = framingLine ? `${framingLine}\n\n${fence}` : fence;
   } else {
     const reason = r.error?.code === 'ENOENT'
       ? 'lore binary not on PATH (expected: symlink of <lore-repo>/dist/lore)'
@@ -371,16 +361,16 @@ if (existsSync(join(bootstrapCwd, '.lore'))) {
 }
 
 // ── Degradation report — only for critical component failures ─────
-let degradationBlock = '';
-if (degradations.length > 0) {
+function renderDegradationBlock(list) {
+  if (list.length === 0) return '';
   const seen = new Set();
-  const unique = degradations.filter(d => {
+  const unique = list.filter(d => {
     if (seen.has(d.component)) return false;
     seen.add(d.component);
     return true;
   });
   const items = unique.map(d => `- **${d.component}**: ${d.reason}`).join('\n');
-  degradationBlock = `## ⚠️ Degradation Report
+  return `## ⚠️ Degradation Report
 
 Critical hook component(s) unavailable this session. Some workflow features may be reduced:
 
@@ -531,5 +521,32 @@ try {
 }
 
 // ── Compose (order: seat → bootstrap → degradation → advisory) ─
-const parts = [seatBlock, bootstrapBlock, degradationBlock, advisoryBlock].filter(Boolean);
-emit(parts.join('\n\n'));
+// The cap applies to the FINAL concatenated string, degradation report and
+// advisory included. Over the cap: drop the bootstrap fence whole (framing line
+// with it) and record why; the seat briefing is never cut. If the rest alone
+// still reaches the cap, emit it whole and record that too (SPEC-080: no clipping).
+function compose(withFence) {
+  return [seatBlock, withFence ? bootstrapBlock : '', renderDegradationBlock(degradations), advisoryBlock]
+    .filter(Boolean).join('\n\n');
+}
+
+let composed = compose(true);
+if (composed.length >= HOOK_OUTPUT_CAP && bootstrapBlock !== '') {
+  const droppedLength = bootstrapBlock.length;
+  degradations.push({
+    component: 'lore bootstrap',
+    reason: `injection block ${droppedLength} chars dropped whole: session-start output `
+      + `(${composed.length} chars) reached the ${HOOK_OUTPUT_CAP}-char hook cap`,
+  });
+  bootstrapBlock = '';
+  composed = compose(false);
+}
+if (composed.length >= HOOK_OUTPUT_CAP) {
+  degradations.push({
+    component: 'session-start output',
+    reason: `${composed.length} chars reach the ${HOOK_OUTPUT_CAP}-char hook cap with nothing left to drop; `
+      + 'emitted whole (the seat briefing is never clipped), the harness may spill it to a file preview',
+  });
+  composed = compose(false);
+}
+emit(composed);
