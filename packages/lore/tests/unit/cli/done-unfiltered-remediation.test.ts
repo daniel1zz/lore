@@ -53,8 +53,7 @@ describe("AC-CRIT-10 done honors attestation.execution_root", () => {
   it("HAPPY: a verify pass row with execution_root=packages/lore clears the unfiltered floor", async () => {
     const { svc, taskId } = await setup();
     await svc.recordVerifiedEvidence(taskId, verifyRow("bun test tests/unit/x.bun.test.ts", "packages/lore"), "2026-10-16T00:00:00.000Z");
-    const done = await svc.done(taskId, { by: "alice" });
-    expect(done.ok).toBe(true);
+    const done = await svc.done(taskId, { by: "alice" });    expect(done.ok).toBe(true);
   });
 
   it("NEGATIVE: the same row without execution_root is refused, and the refusal names only passing routes", async () => {

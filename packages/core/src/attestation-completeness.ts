@@ -1156,6 +1156,9 @@ function normalizeForComparison(rawPath: string): string {
  * @param command - The full evidence `command` string.
  * @param filePath - The target test-file anchor (repo-relative, already
  *   normalized — see {@link isTestFileAnchor}).
+ * @param opts.executionRoot - Optional attested execution root the command ran
+ *   from (repo-relative, or an absolute recorded path); joined BEFORE any `cd`
+ *   offset. Absent = the command's own `cd` offset alone (prior behaviour).
  * @returns `true` iff `command` is a genuine unfiltered run of `filePath`.
  *
  * @example
@@ -1191,7 +1194,11 @@ function normalizeForComparison(rawPath: string): string {
  * // => false — no token names the file at all; a selective/derived-set
  * // command never counts, however plausible it is that the file ran
  */
-export function commandRunsFileUnfiltered(command: string, filePath: string): boolean {
+export function commandRunsFileUnfiltered(
+  command: string,
+  filePath: string,
+  opts: { executionRoot?: string } = {},
+): boolean {
   if (commandHasAnyCaseFilter(command)) return false;
 
   // reason: `extractCdPrefixTarget` returns ONLY the derived offset (or
@@ -1203,14 +1210,26 @@ export function commandRunsFileUnfiltered(command: string, filePath: string): bo
   // for the non-leading-cd case), so nothing is lost by not stripping them —
   // and every test-file token past the `cd` chain is still compared exactly
   // as before.
-  const offset = extractCdPrefixTarget(command) ?? "";
+  const cdOffset = extractCdPrefixTarget(command) ?? "";
   const target = normalizeForComparison(filePath);
   const tokens = tokenizeCommand(command);
 
+  // reason: F7 (spec-close-the-eight-verified-critical-defects-no-judge-listing) —
+  // the ATTESTED execution root (a caller-supplied value, e.g. a verify row's
+  // `attestation.execution_root`; NEVER parsed from `--cwd` in the command text)
+  // is the base the `cd` offset and the token resolve against. A RECORDED root is
+  // typically an absolute path while anchors are repo-relative, and this pure
+  // function has no repo root — so an absolute root matches by whole-segment
+  // SUFFIX of the anchor (`/a/packages/lore` + `tests/x` ends `packages/lore/tests/x`).
+  const executionRoot = opts.executionRoot ?? "";
+  const rootIsAbsolute = executionRoot.startsWith("/");
+
   for (const token of tokens) {
     if (token.length === 0 || token.startsWith("-")) continue;
-    const joined = offset.length > 0 ? `${offset}/${token}` : token;
-    if (normalizeForComparison(joined) === target) return true;
+    const joined = [executionRoot, cdOffset, token].filter((part) => part.length > 0).join("/");
+    const normalized = normalizeForComparison(joined);
+    if (normalized === target) return true;
+    if (rootIsAbsolute && `/${normalized}`.endsWith(`/${target}`)) return true;
   }
   return false;
 }

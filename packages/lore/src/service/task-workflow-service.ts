@@ -1245,12 +1245,19 @@ function findMissingUnfilteredTestFileRuns(task: DocRecord, evidence: EvidenceEn
   const testFileAnchors = extractFileAnchors(task).filter(isTestFileAnchor);
   if (testFileAnchors.length === 0) return [];
 
-  const unfilteredPassingCommands = evidence
+  // reason: F7 — each row contributes its OWN attested `attestation.execution_root`
+  // (a `lore verify` row ran from that root, so a root-relative test path in its
+  // command names `<root>/<path>`). Never parsed from the command text; an
+  // un-attested row passes `undefined` and keeps the prior behaviour.
+  const unfilteredPassingRuns = evidence
     .filter((entry) => entry.oracle === "test" && entry.result === "pass")
-    .map((entry) => entry.command);
+    .map((entry) => ({ command: entry.command, executionRoot: entry.attestation?.execution_root }));
 
   return testFileAnchors.filter(
-    (anchor) => !unfilteredPassingCommands.some((command) => commandRunsFileUnfiltered(command, anchor)),
+    (anchor) =>
+      !unfilteredPassingRuns.some(({ command, executionRoot }) =>
+        commandRunsFileUnfiltered(command, anchor, executionRoot === undefined ? {} : { executionRoot }),
+      ),
   );
 }
 
@@ -3573,8 +3580,12 @@ export class TaskWorkflowService {
           `result:pass run: ${missingUnfilteredRuns.join(", ")} — lore done requires, for ` +
           `EACH declared test-file anchor, at least one oracle:test result:pass evidence ` +
           `row whose command runs that file with no ${UNFILTERED_RUN_CASE_FILTER_DESCRIPTION} ` +
-          `case filter (record one via \`lore evidence ${task.slug} --oracle test --command ` +
-          `"<unfiltered file command>" --result pass\`)`,
+          `case filter AND carries a runner \`attestation\`. Routes that satisfy it: (1) ` +
+          `\`lore evidence ${task.slug} --oracle test --command "<unfiltered command from the ` +
+          `repo root>" --capture\` (the runner spawns it and attests the exit code); (2) when ` +
+          `the file is only reachable from a package directory, \`lore verify --execution-root ` +
+          `<that directory>\` — the attested root is joined with the command's paths, so a ` +
+          `package-relative command matches the repo-relative anchor`,
         value: missingUnfilteredRuns,
       });
     }
