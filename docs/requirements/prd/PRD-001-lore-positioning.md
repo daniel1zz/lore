@@ -9,17 +9,17 @@ created: 2026-06-07
 updated: 2026-10-10
 tags: [product-overview, L0, lore, mvp, internal-first, ai-native, protocol-aware]
 links:
-  - {id: SPEC-102, type: relates-to}
+  - {id: SPEC-199, type: relates-to}
   - {id: SPEC-094, type: relates-to}
-  - {id: SPEC-095, type: relates-to}
-  - {id: SPEC-096, type: relates-to}
-  - {id: SPEC-097, type: relates-to}
-  - {id: SPEC-098, type: relates-to}
-  - {id: SPEC-099, type: relates-to}
-  - {id: SPEC-100, type: relates-to}
-  - {id: SPEC-101, type: relates-to}
+  - {id: SPEC-197, type: relates-to}
+  - {id: SPEC-201, type: relates-to}
+  - {id: SPEC-198, type: relates-to}
+  - {id: SPEC-202, type: relates-to}
+  - {id: SPEC-196, type: relates-to}
+  - {id: SPEC-204, type: relates-to}
+  - {id: SPEC-203, type: relates-to}
   - {id: SPEC-093, type: relates-to}
-  - {id: SPEC-092, type: relates-to}
+  - {id: SPEC-200, type: relates-to}
 ---
 # Lore — Internal-First AI Team Knowledge Platform
 
