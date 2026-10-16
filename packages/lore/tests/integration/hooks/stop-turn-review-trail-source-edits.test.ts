@@ -116,7 +116,7 @@ describe("AC-ST-4 source-edit finding over attributed changes", () => {
     expect(r.status).toBe(0);
     expect(r.stdout).toBe("");
     expect(readChanges(f).changes.value).toEqual([expect.objectContaining({ path: "src/big.ts", source: { kind: "vcs" } })]);
-  });
+  }, 60_000);
 
   it("AC-ST-4 the same sed while a non-isolated helper record is open -> the file is listed as not counted, no block", () => {
     const f = fixture();

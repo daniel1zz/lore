@@ -38,6 +38,10 @@
           {
             "type": "command",
             "command": "node <CLAUDE_DIR>/hooks/run-register.mjs"
+          },
+          {
+            "type": "command",
+            "command": "node <CLAUDE_DIR>/hooks/session-trail-start.mjs"
           }
         ]
       }
@@ -87,6 +91,10 @@
           {
             "type": "command",
             "command": "node <CLAUDE_DIR>/hooks/run-register.mjs"
+          },
+          {
+            "type": "command",
+            "command": "node <CLAUDE_DIR>/hooks/session-trail-start.mjs"
           }
         ]
       }
@@ -101,6 +109,11 @@
           {
             "type": "command",
             "command": "node <CLAUDE_DIR>/hooks/run-end.mjs",
+            "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "node <CLAUDE_DIR>/hooks/subagent-trail.mjs",
             "timeout": 10
           }
         ]
