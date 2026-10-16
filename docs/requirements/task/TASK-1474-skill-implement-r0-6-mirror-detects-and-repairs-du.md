@@ -3,7 +3,7 @@ id: TASK-1474
 type: task
 role: plan
 title: "[Skill:implement] R0-6 mirror detects and repairs duplicate human_ids; parity skips baseline (#210 #234 #32)"
-status: draft
+status: archived
 priority: high
 phase: "Phase 1: fixes"
 created: 2026-10-16

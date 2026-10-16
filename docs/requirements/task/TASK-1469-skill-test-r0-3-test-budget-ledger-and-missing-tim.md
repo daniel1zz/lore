@@ -3,7 +3,7 @@ id: TASK-1469
 type: task
 role: plan
 title: "[Skill:test] R0-3 test-budget ledger and missing timeouts (#170)"
-status: draft
+status: archived
 priority: medium
 phase: "Phase 1: fixes"
 created: 2026-10-16
