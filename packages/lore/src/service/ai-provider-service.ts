@@ -133,7 +133,7 @@ import {
   resolveAssessedCommit,
   TRUNCATION_DOWNGRADE_THRESHOLDS,
 } from "@lore/core";
-import type { CheckResult, LlmReviewOutput, NewReviewJudgment, ReviewBundle } from "@lore/core";
+import type { CheckResult, LlmReviewOutput, NewReviewJudgment, ReviewBundle, ReviewTruncationEntry } from "@lore/core";
 import { llmReviewOutputSchema } from "@lore/core";
 import type { StalenessBundle, StalenessVerdict } from "@lore/core";
 import {
@@ -1526,7 +1526,7 @@ export class AIProviderService {
     // Notice" section (bundle.doc/bundle.parent invalidated-state check). judgeDoc is
     // the sole production caller of this template — resolving "now" here, once, keeps
     // review-template.ts itself wall-clock-free (its own module invariant).
-    const { prompt, docTruncated } = template(bundle, checks, this.reviewBudgets, new Date().toISOString());
+    const { prompt, docTruncated, cuts } = template(bundle, checks, this.reviewBudgets, new Date().toISOString());
 
     const emitReviewEvent = (
       providerResult: Result<GenerateOutput, LoreError>,
@@ -1551,7 +1551,7 @@ export class AIProviderService {
       return first.providerResult;
     }
     if (first.parsed !== undefined) {
-      const finalized = this._finalizeJudgment(first.parsed, bundle, checks, docTruncated);
+      const finalized = this._finalizeJudgment(first.parsed, bundle, checks, docTruncated, cuts);
       emitReviewEvent(first.providerResult, finalized.decision, finalized.confidence);
       return ok(finalized);
     }
@@ -1564,7 +1564,7 @@ export class AIProviderService {
       return second.providerResult;
     }
     if (second.parsed !== undefined) {
-      const finalized = this._finalizeJudgment(second.parsed, bundle, checks, docTruncated);
+      const finalized = this._finalizeJudgment(second.parsed, bundle, checks, docTruncated, cuts);
       emitReviewEvent(second.providerResult, finalized.decision, finalized.confidence);
       return ok(finalized);
     }
@@ -2156,12 +2156,15 @@ export class AIProviderService {
    *   prompt budget (`BuildReviewPromptResult.docTruncated`) — set additive-only (only
    *   `truncated: true` when true; omitted, never `false`, otherwise), mirroring
    *   `judgment.reasoning_clipped`'s additive-only convention in assessment.ts
+   * @param cuts - F1: every cut prompt section with real shown/total chars
+   *   (`BuildReviewPromptResult.cuts`) — stored as `truncation`; key omitted when empty
    */
   private _finalizeJudgment(
     parsed: LlmReviewOutput,
     bundle: ReviewBundle,
     checks: CheckResult[],
     docTruncated: boolean,
+    cuts: readonly ReviewTruncationEntry[],
   ): NewReviewJudgment {
     return {
       doc_id: bundle.doc.id,
@@ -2175,6 +2178,7 @@ export class AIProviderService {
       // "review" behavior, SPEC-044 D3) — production code states its intent plainly.
       kind: "review",
       ...(docTruncated ? { truncated: true } : {}),
+      ...(cuts.length > 0 ? { truncation: [...cuts] } : {}),
       // reason: SPEC-044 D11 byproduct — a review judge MAY emit this nomination
       // alongside its normal verdict; passed through verbatim, never re-derived here.
       ...(parsed.superseded_candidate !== undefined ? { superseded_candidate: parsed.superseded_candidate } : {}),

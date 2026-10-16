@@ -216,6 +216,19 @@ export type ReviewAdvisory = z.infer<typeof reviewAdvisorySchema>;
 // ─── Shared Shape + Escalate Invariant ──────────────────────────────────────
 
 /**
+ * One review-prompt section that was cut to fit its character budget (F1, spec
+ * close-the-eight-verified-critical-defects). `shown_chars` / `total_chars` are the REAL
+ * lengths the service measured (never model-reported). `section` is `"doc"` or `"parent"`.
+ */
+export const reviewTruncationEntrySchema = z.object({
+  section: z.string().min(1),
+  shown_chars: z.number().int().nonnegative(),
+  total_chars: z.number().int().nonnegative(),
+});
+
+export type ReviewTruncationEntry = z.infer<typeof reviewTruncationEntrySchema>;
+
+/**
  * Fields common to both the raw LLM output and the persisted judgment.
  * `checks` is optional here (the model may omit it); reviewJudgmentSchema
  * overrides it to required via `.extend()` once the service has layered
@@ -240,6 +253,14 @@ const reviewJudgmentBaseShape = z.object({
    * not an unknown state.
    */
   truncated: z.boolean().optional(),
+  /**
+   * Every prompt section that was cut, with real shown/total lengths (F1). Additive-only and
+   * optional on both schemas: the key is ABSENT when every input fit (never `[]`), and
+   * absent on every pre-F1 row. `truncated` keeps its AC-ADF-8 meaning (doc body cut) and is
+   * NOT derived from this list. Service-authoritative like `truncated` — the model is never
+   * trusted to report it.
+   */
+  truncation: z.array(reviewTruncationEntrySchema).optional(),
   /**
    * A judge's optional nomination that some OTHER document is superseded by this one
    * (SPEC-044 D5/D11). Present on the shared base shape (not just the persisted schema)

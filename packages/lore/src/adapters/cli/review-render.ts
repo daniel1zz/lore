@@ -120,3 +120,16 @@ export function renderAdvisoryBlock(judgment: ReviewJudgment): string {
   });
   return `\n\nAdvisory (non-blocking):\n${lines.join("\n")}`;
 }
+
+/**
+ * F1 — one line per prompt section that was cut to fit its budget, appended after
+ * {@link formatJudgmentSummary}. Pure; `""` when `judgment.truncation` is absent/empty (the
+ * REGRESSION guarantee for every judgment whose inputs fit and every pre-F1 row). The numbers
+ * are the service-measured lengths stored on the judgment, never re-derived here.
+ */
+export function renderTruncationBlock(judgment: ReviewJudgment): string {
+  const cuts = judgment.truncation;
+  if (cuts === undefined || cuts.length === 0) return "";
+  const lines = cuts.map((c) => `  - ${c.section} cut: showed ${c.shown_chars} of ${c.total_chars} chars`);
+  return `\n\nTruncated input (the judge did not see the rest):\n${lines.join("\n")}`;
+}
