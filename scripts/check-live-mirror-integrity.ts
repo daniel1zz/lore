@@ -26,6 +26,9 @@
  * of `bun run check:spec-mirror`, which is in the test chain) rather than AC-FR-6's subject, the
  * SPEC mirror. A crash (MIRROR_HARD_FAILURE_EXIT_CODE) or a killed child still fails here.
  *
+ * Usage: `bun scripts/check-live-mirror-integrity.ts [--root <dir>]` — `--root` defaults to this
+ * repository; it selects the checkout whose corpus, mirror and package.json are measured (read-only).
+ *
  * Exit codes: 0 all conjuncts hold; 1 at least one conjunct failed (each printed); 2 a precondition
  * failed loudly (cannot read package.json, `lore list` did not complete, `--check` was killed).
  */
@@ -43,14 +46,23 @@ import {
 } from "./export-spec-mirror-core.js";
 import { measureAllTypesParity, measureLinksBrokenAt, runLoreList } from "./lib/mirror-integrity.js";
 
-const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const SCRIPT_REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+
+/** `--root <dir>` selects the repository whose corpus and mirror are measured; defaults to this one. */
+function parseRoot(argv: readonly string[]): string {
+  const i = argv.indexOf("--root");
+  if (i === -1) return SCRIPT_REPO_ROOT;
+  const value = argv[i + 1];
+  if (value === undefined || value.startsWith("--")) throw new Error("--root requires a directory argument");
+  return resolve(value);
+}
 
 /** The spec-scoped line `--check` prints when every corpus spec has a mirror file. */
 const SPEC_OK_LINE = "OK — every corpus spec has a mirror file (count and slug parity; file CONTENT is not compared).";
 
-/** AC-FR-6(a): the REAL root package.json's `test` chain reaches the export script. */
-function checkChainWired(): string[] {
-  const raw = readFileSync(join(REPO_ROOT, "package.json"), "utf8");
+/** AC-FR-6(a): the root's package.json's `test` chain reaches the export script. */
+function checkChainWired(root: string): string[] {
+  const raw = readFileSync(join(root, "package.json"), "utf8");
   const scripts = (JSON.parse(raw) as { scripts?: Record<string, string> }).scripts;
   if (scripts === undefined) throw new Error("package.json has no \"scripts\" section");
   return scriptChainReachesTarget(scripts, "test", "export-spec-mirror.ts")
@@ -59,10 +71,10 @@ function checkChainWired(): string[] {
 }
 
 /** AC-FR-6(b): one real read-only `--check` pass plus an independent parity re-derivation. */
-function checkSpecParity(): string[] {
+function checkSpecParity(root: string): string[] {
   const violations: string[] = [];
-  const run = spawnSync("bun", ["run", join(REPO_ROOT, "scripts", "export-spec-mirror.ts"), "--check"], {
-    cwd: REPO_ROOT,
+  const run = spawnSync("bun", ["run", join(root, "scripts", "export-spec-mirror.ts"), "--check"], {
+    cwd: root,
     encoding: "utf8",
     maxBuffer: 64 * 1024 * 1024,
     env: { ...process.env },
@@ -76,14 +88,14 @@ function checkSpecParity(): string[] {
   if (!run.stdout.includes(SPEC_OK_LINE)) violations.push(`AC-FR-6(b): --check did not print the spec-scoped OK line`);
 
   // Independent re-derivation — never trusts the script's own self-report.
-  const specs = runLoreList("spec", REPO_ROOT);
+  const specs = runLoreList("spec", root);
   if (specs.length === 0) violations.push("AC-FR-6(b): the live corpus lists zero specs — a vacuous parity pass refused");
-  const mappings = loadMirrorMappings(REPO_ROOT);
+  const mappings = loadMirrorMappings(root);
   const parity = computeMirrorParity(
     specs,
     mappings,
-    (relPath) => existsSync(join(REPO_ROOT, relPath)),
-    countMdFilesFlat(join(REPO_ROOT, SPEC_MIRROR_DIR_RELATIVE)),
+    (relPath) => existsSync(join(root, relPath)),
+    countMdFilesFlat(join(root, SPEC_MIRROR_DIR_RELATIVE)),
   );
   if (parity.missing.length > 0) {
     violations.push(`AC-FR-6(b): ${parity.missing.length} corpus spec(s) missing a mirror file: ${parity.missing.slice(0, 5).map((m) => `${m.slug} (${m.reason})`).join(", ")}`);
@@ -95,24 +107,25 @@ function checkSpecParity(): string[] {
 }
 
 /** AC-FR-10 (a)+(b)+(c) over the real mirror. */
-async function checkAllTypes(): Promise<string[]> {
+async function checkAllTypes(root: string): Promise<string[]> {
   const violations: string[] = [];
-  const parity = measureAllTypesParity(REPO_ROOT, REPO_ROOT);
+  const parity = measureAllTypesParity(root, root);
   if (parity.totalFilesChecked === 0) violations.push("AC-FR-10: zero mirror files inspected — a vacuous pass refused");
   for (const line of parity.idViolations) violations.push(`AC-FR-10(b): ${line}`);
   for (const line of parity.countMismatches) violations.push(`AC-FR-10(a): ${line}`);
-  const links = await measureLinksBrokenAt(REPO_ROOT);
+  const links = await measureLinksBrokenAt(root);
   if (links.expected_files === 0) violations.push("AC-FR-10(c): migration-coverage saw zero expected files — a vacuous pass refused");
   if (links.links_broken !== 0) violations.push(`AC-FR-10(c): migration-coverage reports links_broken ${links.links_broken}, not 0`);
   return violations;
 }
 
-async function main(): Promise<number> {
+async function main(argv: readonly string[]): Promise<number> {
   const violations: string[] = [];
   try {
-    violations.push(...checkChainWired());
-    violations.push(...checkSpecParity());
-    violations.push(...(await checkAllTypes()));
+    const root = parseRoot(argv);
+    violations.push(...checkChainWired(root));
+    violations.push(...checkSpecParity(root));
+    violations.push(...(await checkAllTypes(root)));
   } catch (e) {
     console.error(`check-live-mirror-integrity: precondition failed — ${e instanceof Error ? e.message : String(e)}`);
     return 2;
@@ -127,4 +140,4 @@ async function main(): Promise<number> {
   return 0;
 }
 
-if (import.meta.main) process.exit(await main());
+if (import.meta.main) process.exit(await main(process.argv.slice(2)));

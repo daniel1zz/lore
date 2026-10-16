@@ -244,15 +244,25 @@ export function resolveLiveCorpusDb(start: string): string | undefined {
   }
 }
 
-function main(): number {
+/** `--root <dir>` selects the checkout whose corpus is read; defaults to this repository. */
+function parseRoot(argv: readonly string[]): string {
+  const i = argv.indexOf("--root");
+  if (i === -1) return SCRIPT_REPO_ROOT;
+  const value = argv[i + 1];
+  if (value === undefined || value.startsWith("--")) throw new Error("--root requires a directory argument");
+  return resolve(value);
+}
+
+function main(argv: readonly string[]): number {
   let run: RealCorpusRun;
   let declared: number;
   try {
-    if (resolveLiveCorpusDb(SCRIPT_REPO_ROOT) === undefined) {
-      throw new Error(`no .lore/lore.db at or above ${SCRIPT_REPO_ROOT} — there is no live corpus to measure`);
+    const root = parseRoot(argv);
+    if (resolveLiveCorpusDb(root) === undefined) {
+      throw new Error(`no .lore/lore.db at or above ${root} — there is no live corpus to measure`);
     }
     declared = consumerDeclaredMaxBufferMb();
-    run = runListIn(REAL_CORPUS_ARGS, SCRIPT_REPO_ROOT, CONSUMER_MAX_BUFFER_MB);
+    run = runListIn(REAL_CORPUS_ARGS, root, CONSUMER_MAX_BUFFER_MB);
   } catch (e) {
     console.error(`check-list-json-real-corpus-buffer: precondition failed — ${e instanceof Error ? e.message : String(e)}`);
     return 2;
@@ -274,4 +284,4 @@ function main(): number {
   return 0;
 }
 
-if (import.meta.main) process.exit(main());
+if (import.meta.main) process.exit(main(process.argv.slice(2)));
