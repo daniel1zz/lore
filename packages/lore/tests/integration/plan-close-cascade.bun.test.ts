@@ -264,7 +264,10 @@ describe("plan-close cascade (R1) — STATE (never rolls back the plan's own wri
       if (!archiveResult.ok) return;
       expect(archiveResult.value.status).toBe("archived");
       const cascade = cascadeOf(archiveResult.value);
-      expect(cascade).toEqual({ archived: [], skipped: [], failed: [] });
+      expect(cascade).toBeDefined();
+      expect(cascade!.archived).toEqual([]);
+      expect(cascade!.skipped).toEqual([]);
+      expect(cascade!.failed).toEqual([]);
     } finally {
       app.close();
     }
