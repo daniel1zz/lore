@@ -221,7 +221,7 @@ describe("dashboard-assets-loader", () => {
   });
 
   it(
-    "bun run typecheck exits 0 regardless of whether the generated manifest module exists in this checkout (the loader has no static import of it — verified by the prior scenario — so the fresh-clone typecheck contract holds identically before and after `bun run build`)",
+    "bun run typecheck:lore exits 0 regardless of whether the generated manifest module exists in this checkout (the loader has no static import of it — verified by the prior scenario — so the fresh-clone typecheck contract holds identically before and after `bun run build`)",
     async () => {
       // reason: async on purpose (TG-15). A synchronous spawn blocks this vitest worker's event loop for the
       // whole typecheck (measured 76 s under an 8-worker run); past 60 s the worker cannot answer the
@@ -229,11 +229,15 @@ describe("dashboard-assets-loader", () => {
       // exits 1 even though every test passed. Awaiting keeps the loop serving the runner.
       const env: Record<string, string> = {};
       for (const [k, v] of Object.entries(process.env)) if (v !== undefined) env[k] = v;
-      const result = await runProcessGroup("bun", ["run", "typecheck"], { cwd: REPO_ROOT, env, timeoutMs: 110_000 });
+      // reason: `typecheck:lore` (tsc over packages/lore, the only project that contains the loader and could
+      // raise TS2307 for an absent generated module), not the whole seven-project `typecheck` chain: the chain
+      // took 34 s alone and over 110 s inside an 8-12 worker run, and the other six projects cannot see the
+      // loader. The full chain is its own step of the release gate.
+      const result = await runProcessGroup("bun", ["run", "typecheck:lore"], { cwd: REPO_ROOT, env, timeoutMs: 110_000 });
 
       if (result.exitCode !== 0) {
         throw new Error(
-          `bun run typecheck exited ${String(result.exitCode)}\n--- stdout ---\n${result.stdout}\n--- stderr ---\n${result.stderr}`,
+          `bun run typecheck:lore exited ${String(result.exitCode)}\n--- stdout ---\n${result.stdout}\n--- stderr ---\n${result.stderr}`,
         );
       }
       expect(result.exitCode).toBe(0);
