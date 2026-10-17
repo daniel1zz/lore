@@ -1,3 +1,4 @@
+// @layer core-module (pure @lore/core context-fragments config/schema/constants; owners drive packages/lore select/render flows and the compiled dist/lore)
 /**
  * @spec_ref AC-CF-2, AC-CF-3, AC-CF-14, AC-CF-18
  * Spec: spec-context-fragments-config-driven-layered-rule-injection (D3, D6, D11, D14)
