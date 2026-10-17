@@ -6,7 +6,7 @@ title: "A write-side fact with no read-side address: counts with no member list,
 status: approved
 priority: medium
 created: 2026-08-11
-updated: 2026-10-10
+updated: 2026-10-17
 tags: []
 ---
 # Overview
@@ -148,19 +148,19 @@ observe going RED:
 ## Acceptance Criteria (structured)
 
 - [⚑] [script] AC-RR-1: lore trace stats --enumerate never_read_docs_count returns EXACTLY the expected never-read doc id set over a fixture corpus of at least three docs with at least two never read, and the reported never_read_docs_count equals that returned list's length.
-  script: test — bun test packages/lore/tests/integration/cli/trace-enumerate-never-read.bun.test.ts 2>&1 && echo "AC-RR-1 PASS: the never-read count is derived from an enumerable member list whose ids match exactly"
+  script: test — bunx --bun vitest run packages/lore/tests/integration/cli/trace-enumerate-never-read.bun.test.ts 2>&1 && echo "AC-RR-1 PASS: the never-read count is derived from an enumerable member list whose ids match exactly"
 - [⚑] [script] AC-RR-2: An unregistered enumerate field name on lore trace stats exits with code exactly 4 and names both registered fields in its refusal — never a silent empty result.
-  script: test — bun test packages/lore/tests/integration/cli/trace-enumerate-unregistered.bun.test.ts 2>&1 && echo "AC-RR-2 PASS: an unregistered enumerate field is refused by name with exit exactly 4"
+  script: test — bunx --bun vitest run packages/lore/tests/integration/cli/trace-enumerate-unregistered.bun.test.ts 2>&1 && echo "AC-RR-2 PASS: an unregistered enumerate field is refused by name with exit exactly 4"
 - [⚑] [script] AC-RR-3: Enumerating zero_hit_search_count WITHOUT --raw-queries omits the fixture's distinctive literal query string from the output entirely, and the same enumeration WITH --raw-queries includes it — both directions asserted in one run.
-  script: test — bun test packages/lore/tests/integration/cli/trace-enumerate-zero-hit-privacy.bun.test.ts 2>&1 && echo "AC-RR-3 PASS: zero-hit enumeration honours the raw-queries privacy boundary in both directions"
+  script: test — bunx --bun vitest run packages/lore/tests/integration/cli/trace-enumerate-zero-hit-privacy.bun.test.ts 2>&1 && echo "AC-RR-3 PASS: zero-hit enumeration honours the raw-queries privacy boundary in both directions"
 - [⚑] [script] AC-RR-4: A knowledge doc's code anchor pointing at a MISSING path makes lore status --check-drift exit with code exactly 3, and the emitted drift row carries doc_type 'knowledge' with doc_slug equal to that doc plus the missing path; the CONTROL run, with the anchored file and symbol present, exits exactly 0 with zero drift rows attributed to doc_type 'knowledge' while knowledge_checked stays 1 — so the control discriminates the knowledge-anchor path itself, not global corpus cleanliness.
-  script: test — bun test packages/lore/tests/integration/cli/knowledge-code-anchor-drift.bun.test.ts 2>&1 && echo "AC-RR-4 PASS: a knowledge code anchor enters --check-drift and the check discriminates present from missing"
+  script: test — bunx --bun vitest run packages/lore/tests/integration/cli/knowledge-code-anchor-drift.bun.test.ts 2>&1 && echo "AC-RR-4 PASS: a knowledge code anchor enters --check-drift and the check discriminates present from missing"
 - [⚑] [script] AC-RR-5: lore list --type knowledge --sub-type retro --json returns only retro-sub-typed docs, and the same query with --limit 1 --offset 1 returns the SECOND retro of the filtered set — proving the predicate is applied in the store query rather than after the pagination window.
-  script: test — bun test packages/lore/tests/integration/cli/list-sub-type-filter.bun.test.ts 2>&1 && echo "AC-RR-5 PASS: sub_type filters in the store query, so limit/offset paginate the filtered set"
+  script: test — bunx --bun vitest run packages/lore/tests/integration/cli/list-sub-type-filter.bun.test.ts 2>&1 && echo "AC-RR-5 PASS: sub_type filters in the store query, so limit/offset paginate the filtered set"
 - [⚑] [script] AC-RR-6: A sub-type filter passed with --type spec, and one passed with no --type at all, BOTH exit with code exactly 2 and name the conflict — never a silently empty result set.
-  script: test — bun test packages/lore/tests/integration/cli/list-sub-type-usage-error.bun.test.ts 2>&1 && echo "AC-RR-6 PASS: a sub-type filter outside --type knowledge is refused by name with exit exactly 2"
+  script: test — bunx --bun vitest run packages/lore/tests/integration/cli/list-sub-type-usage-error.bun.test.ts 2>&1 && echo "AC-RR-6 PASS: a sub-type filter outside --type knowledge is refused by name with exit exactly 2"
 - [⚑] [script] AC-RR-7: lore search over a fixture corpus where retro and handoff docs both match the query returns only the retro when the sub-type filter is retro, and both without it — the same two-sided discrimination AC-RR-5 asserts for list.
-  script: test — bun test packages/lore/tests/integration/cli/search-sub-type-filter.bun.test.ts 2>&1 && echo "AC-RR-7 PASS: search discriminates by sub_type and returns the unfiltered superset without the filter"
+  script: test — bunx --bun vitest run packages/lore/tests/integration/cli/search-sub-type-filter.bun.test.ts 2>&1 && echo "AC-RR-7 PASS: search discriminates by sub_type and returns the unfiltered superset without the filter"
 - [⚑] [script] AC-RR-8: DriftCheckResult carries knowledge_checked as its own field: on a fixture corpus with N knowledge docs of which zero declare code_anchors, knowledge_checked equals exactly 0 while specs_checked keeps its own independent value; after one of those N declares an anchor, knowledge_checked equals exactly 1 — and a repo-wide search finds zero remaining occurrences of the retired DriftRow.spec_slug spelling.
   script: test — bunx vitest run packages/lore/tests/unit/service/drift-population-reporting.test.ts 2>&1 && echo "AC-RR-8 PASS: the drift report names the knowledge scanned population separately from specs"
 - [⚑] [script] AC-RR-9: The per-entry code_anchors grammar check lives at the SERVICE layer and is doc-type-agnostic, so every write surface inherits it -- closing the MCP side door at corpus-service.ts create/set that gated the check on type === spec. Driven through the MCP tool handler (lore_create and lore_set, which accept extra directly), never by calling the validator: (a) REFUSAL, both doors -- a knowledge doc carrying a grammar-invalid code_anchors entry is refused with a validation error and stores nothing, asserted by the doc being absent after create and by the target extra being byte-identical (SHA compared) before and after set; (b) CONTROL, the discriminator -- the SAME MCP door with a grammar-VALID knowledge entry is ACCEPTED and the stored entry is returned by extractParsedCodeAnchors, so the oracle can fail for a check that refuses everything as well as for one that refuses nothing; (c) the pre-existing spec-doc refusal through the same door is unchanged.

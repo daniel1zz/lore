@@ -6,7 +6,7 @@ title: "Documents are living or records; a locked record is never rewritten, onl
 status: approved
 priority: medium
 created: 2026-10-11
-updated: 2026-10-11
+updated: 2026-10-17
 tags: []
 links:
   - {id: ADR-041, type: implements}
@@ -255,7 +255,7 @@ Three lenses over spec + plan + baseline leaves: cross-document contradiction (1
 - [⚑] [script] AC-DR-4: ReviewService.reopen: approved spec, zero evidence (counted through the same AC-coverage query as ac-service for plan-member AND ad-hoc tasks), reason -> draft, one status version + audit with reason; evidence only on an ad-hoc governed task -> refused naming 1; 3 evidence rows -> refused naming 3; empty reason -> err, no write; non-spec -> err naming the type; seam afterStatusWrite inserts evidence -> spec stays draft, err names the evidence, no write back to approved; CorpusService.set with status draft on an approved spec is still refused. Smallest red mutation: counting only plan-member tasks misses the ad-hoc case.
   script: test — bunx vitest run packages/lore/tests/unit/service/record-reopen.test.ts
 - [⚑] [script] AC-DR-5: Compiled dist/lore (built by the command) on a mkdtemp + lore init corpus: approve a spec; lore set --content exits exactly 4 with stderr containing 'locked record' and 'lore reopen'; lore restore and lore ac add on it exit exactly 4; lore set --correction 'typo' exits 0 and lore get shows 'Standing: record', 'locked (approved)', 'Corrections: 1'; a newer spec linked relates-to appears under 'Later changed by'; a knowledge reference shows 'Standing: living'; on a second evidence-free approved spec lore reopen --reason r exits 0 and get shows draft; via the MCP stdio server on the same corpus, lore_set and lore_batch set on the locked spec return gate:record-edit and lore_reopen succeeds on a third spec. Smallest red mutation: not wiring RecordLockService into VersionService makes lore restore exit 0.
-  script: e2e — bun run build && cd packages/lore && bun test tests/e2e/record-lock-compiled.bun.test.ts
+  script: e2e — bun run build && bunx --bun vitest run packages/lore/tests/e2e/record-lock-compiled.bun.test.ts
 - [⚑] [script] AC-DR-6: ImpactService.impact(BR-n) on a fixture with one leaf, one dependent leaf and two citing specs returns living deep-equal [leaf, dependent-leaf] and records deep-equal the two {slug, acId} pairs, alongside the unchanged citingCriteria/dependentLeaves/cycles fields; the CLI text rendering prints a 'Living' group before a 'Records' group. Smallest red mutation: putting citing specs under living fails the deep-equal.
   script: test — bunx vitest run packages/lore/tests/unit/service/impact-service-standing.test.ts
 - [⚑] [script] AC-DR-7: Shipped prose no longer prescribes rewriting an existing spec in place: case-insensitive grep of assets/ for 'update or extend', 'update existing (lore set <spec', 'governing spec: lore set <spec', 'edit the existing|approved spec' exits exactly 1, AND each of lore-design SKILL, lore-design-ui SKILL, lore-design-ui mode-ui, lore-session-capture knowledge-types and the PRODUCE rule contains all three of 'Standing', 'lore reopen', 'relates-to'. Measured red 2026-10-11: 4 needle hits. Residual: a file can still reword the old instruction while carrying the three tokens.
@@ -265,7 +265,7 @@ Three lenses over spec + plan + baseline leaves: cross-document contradiction (1
 - [⚑] [script] AC-DR-9: Embedded assets manifest is fresh after the prose edits: embed-assets-manifest --check exits 0 (exit 3 = stale).
   script: build — node scripts/embed-assets-manifest.mjs --check
 - [⚑] [script] AC-DR-10: HTTP and dashboard surfaces on a throwaway corpus: PUT/PATCH update of a locked spec's content via routes.ts and dashboard-routes.ts PATCH -> 4xx carrying gate:record-edit, version unchanged; the same with a correction field and non-empty reason -> 2xx, one version, status kept; dashboard restore of a locked ADR -> refused; a dashboard save that resends identical content with a changed tag -> 2xx. Smallest red mutation: dropping the correction field mapping in routes.ts makes the correction request refused.
-  script: test — cd packages/lore && bun test tests/unit/adapters/http-record-lock.bun.test.ts
+  script: test — bunx --bun vitest run packages/lore/tests/unit/adapters/http-record-lock.bun.test.ts
 
 ## Code anchors
 

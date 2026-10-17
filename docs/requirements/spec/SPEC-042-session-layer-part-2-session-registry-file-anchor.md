@@ -6,7 +6,7 @@ title: "Session layer part 2: session registry + file-anchor claim safety (S3)"
 status: approved
 priority: high
 created: 2026-07-11
-updated: 2026-10-10
+updated: 2026-10-17
 tags: [session, claims, file-anchors, spec-042, write-conflict]
 ---
 # SPEC-042 — Session layer part 2: session registry + file-anchor claim safety (PRD §15 S3)
@@ -326,7 +326,7 @@ three lenses independently returned revise-then-approve; v2 incorporates:
   script: test — bunx vitest run packages/lore/tests/unit/service/claim-anchor-gate.test.ts
 - [○] [human] AC-S3-12: Live dual-session script: session A claims task-a with --by agent:a --branch wt-a; session B claims anchor-overlapping task-b with --by agent:b --branch wt-b and gets nonzero exit with stderr naming task-a, agent:a, the paths and the recovery command; lore ready during both shows two sessions; after lore release task-a --by agent:a the identical retry succeeds
 - [⚑] [script] AC-S3-7: Spawned CLI on throwaway corpus: create task --anchor repeatable persists; lore anchor add/rm/list round-trip; invalid anchor exits 4 (VALIDATION_ERROR pipeline — validation lives solely in normalizeFileAnchors per D3, no duplicated CLI pre-check; cli-handoff exit-4 precedent, AC corrected with evidence pre-verify per SPEC-041 retro learning 3); claim --machine override beats auto-capture; auto-captured machine equals os.hostname() computed in the test file at run time; omitted --worktree yields no worktree field (no cwd capture); anchor-overlap claim block exits 4 with stderr carrying the gate:task-claim:anchor-overlap discriminator and ANCHOR_OVERLAP reason — the rich feeding pack (conflicting slug/holder/paths + literal recovery command) is the lore gate task-claim pre-flight surface, asserted by the gate-parity regression suite and AC-S3-2 at the registry layer
-  script: test — cd packages/lore && bun test tests/unit/adapters/cli-claim-anchors.bun.test.ts
+  script: test — bunx --bun vitest run packages/lore/tests/unit/adapters/cli-claim-anchors.bun.test.ts
 
 ## Code anchors
 

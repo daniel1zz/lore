@@ -6,7 +6,7 @@ title: "Interception moves off every tool call: one turn-end review replaces per
 status: approved
 priority: high
 created: 2026-10-15
-updated: 2026-10-16
+updated: 2026-10-17
 tags: [hooks, gates, distribution]
 links:
   - {id: TASK-882, type: resolves}
@@ -62,7 +62,7 @@ Structured criteria are declared with `lore ac add` (AC-TE-*). Hook tests run th
 ## Acceptance Criteria (structured)
 
 - [⚑] [script] AC-TE-1: In a throwaway corpus, every refusal the retired g1-g4 hooks produced is produced by the write itself: a spec created with any parent (a spec takes no parent, BR-2), a spec approved with no structured criterion, a plan approved over an unapproved spec, and a claim on a task whose upstream spec is unapproved each exit 4 through the CLI and return an error through the MCP tool, naming the checkpoint, and write no document or version; and neither distribution-hooks.ts, assets/hooks, hooks/ nor .claude/settings.json names lore-gate-g1..g4 or g1..g4 any more.
-  script: test — cd packages/lore && out=$(mktemp) && bun test tests/integration/gates/gate-hook-retirement-parity.bun.test.ts > "$out" 2>&1; ec=$?; cat "$out"; n=$(sed -nE 's/^ *([0-9]+) pass$/\1/p' "$out"); [ "$ec" -eq 0 ] && [ "${n:-0}" -ge 9 ] && echo 'AC-TE-1 PASS: four checkpoint refusals hold on CLI and MCP writes with no hook; no g1-g4 hook remains shipped or registered'
+  script: test — out=$(mktemp) && bunx --bun vitest run packages/lore/tests/integration/gates/gate-hook-retirement-parity.bun.test.ts > "$out" 2>&1; ec=$?; cat "$out"; n=$(sed -nE 's/^ *Tests +([0-9]+) passed.*/\1/p' "$out"); [ "$ec" -eq 0 ] && [ "${n:-0}" -ge 9 ] && echo 'AC-TE-1 PASS: four checkpoint refusals hold on CLI and MCP writes with no hook; no g1-g4 hook remains shipped or registered'
 - [⚑] [script] AC-TE-2: post-edit-mark.mjs fed an Edit payload carrying agent_id and agent_type records the entry with that agent id, and stop-turn-review.mjs over a turn whose only edits carry an agent_id produces no output and exit 0; the same edit without agent_id is counted as the main session's (control).
   script: test — out=$(mktemp); bunx vitest run packages/lore/tests/integration/hooks/turn-record-agent-id.test.ts > "$out" 2>&1; ec=$?; cat "$out"; n=$(sed -nE 's/^ *Tests +([0-9]+) passed.*/\1/p' "$out"); [ "$ec" -eq 0 ] && [ "${n:-0}" -ge 3 ] && echo 'AC-TE-2 PASS: helper-agent edits are recorded with their agent id and never counted as the main turn edits; control counted'
 - [⚑] [script] AC-TE-3: stop-turn-review.mjs in a throwaway git repo: a turn with no edits -> exit 0, empty stdout; stop_hook_active true -> silent; setting absent and a 50-line main-session edit to a .ts file -> silent; setting block and the same edit -> one block naming the file and 'implementer'; setting block and a 2-line edit -> silent; setting block and a 50-line edit under .claude/ or to a .json file -> silent; two findings in one turn -> one block listing both; unreadable turn state -> exit 0 with one stderr line containing 'not measured'.

@@ -6,7 +6,7 @@ title: "Two helper agent types: lore-reader and lore-implementer"
 status: approved
 priority: medium
 created: 2026-10-15
-updated: 2026-10-15
+updated: 2026-10-17
 tags: [agents, subagent, dispatch]
 ---
 ## Overview/Goal
@@ -59,8 +59,8 @@ Structured criteria are declared with `lore ac add` (AC-AT-1 .. AC-AT-6). Each s
   script: other — cd /Users/apple/Projects/zz/lore && h=assets/hooks/pre-no-general-agent-gate.mjs; e=$(mktemp); printf '{"tool_name":"Agent","tool_input":{"subagent_type":"general-purpose","prompt":"x"}}' | node $h >/dev/null 2>"$e"; r=$?; echo "general-purpose exit=$r"; [ $r -eq 2 ] && grep -q "lore-reader" "$e" && grep -q "lore-implementer" "$e" && ! grep -qE "lore-explorer|lore-reviewer|tester" "$e" && echo "AC-AT-3 PASS: no-general gate refuses general-purpose (exit 2) and its roster names exactly lore-reader and lore-implementer"
 - [⚑] [script] AC-AT-5: grep finds no 'lore-explorer' or 'lore-reviewer' under assets/skills, assets/agents, assets/hooks, assets/context, assets/project; no match of 'tester agent', 'tester subagent' or 'subagent_type="tester' / 'subagent_type=tester' (case-insensitive) under assets; every line under assets/skills containing 'subagent_type="lore-implementer"' also contains 'isolation="worktree"'; assets/skills/lore-review contains 'lore-reader'.
   script: other — cd /Users/apple/Projects/zz/lore && ! grep -rnE 'lore-explorer|lore-reviewer' assets/skills assets/agents assets/hooks assets/context assets/project && ! grep -rniE 'tester (sub)?agent|subagent_type="?tester' assets && ! (grep -rnE 'subagent_type="lore-implementer"' assets/skills | grep -v 'isolation="worktree"' | grep -q .) && grep -rq 'lore-reader' assets/skills/lore-review && echo "AC-AT-5 PASS: no shipped asset names lore-explorer/lore-reviewer/tester as a type; every lore-implementer dispatch example carries isolation=worktree"
-- [⊘] [script] AC-AT-6: packages/lore/tests/integration/setup-retired-agent-types.bun.test.ts passes (N pass, 0 fail): an install whose manifest tracks agents/lore-explorer.md and agents/lore-reviewer.md, converged with the current payload, no longer has either file, reports both as removals, has agents/lore-reader.md, and keeps an untracked user agent file untouched.
-  script: test — cd /Users/apple/Projects/zz/lore && o=$(mktemp); (cd packages/lore && bun test ./tests/integration/setup-retired-agent-types.bun.test.ts) > "$o" 2>&1; rc=$?; tail -5 "$o"; [ $rc -eq 0 ] && grep -qE '^ *[1-9][0-9]* pass' "$o" && grep -qE '^ *0 fail' "$o" && echo "AC-AT-6 PASS: setup converge removes the retired agent files from an install that tracked them, prints them, and leaves untracked agents alone"
+- [⊘] [script] AC-AT-6: The retirement registry test (packages/lore/tests/integration/retirement-registry.bun.test.ts, rows install-agent-lore-explorer and install-agent-lore-reviewer plus the shared converge cases) passes (N pass, 0 fail): an install whose manifest tracks agents/lore-explorer.md and agents/lore-reviewer.md, converged with the current payload, no longer has either file, reports both as removals, has agents/lore-reader.md, and keeps an untracked user agent file untouched.
+  script: test — o=$(mktemp); bunx --bun vitest run --testTimeout=30000 --hookTimeout=30000 packages/lore/tests/integration/retirement-registry.bun.test.ts -t 'install-agent-lore-explorer|install-agent-lore-reviewer|not a blanket wipe|second converge has nothing' > "$o" 2>&1; rc=$?; tail -5 "$o"; [ $rc -eq 0 ] && grep -qE '^ *Tests +[1-9][0-9]* passed' "$o" && ! grep -qE '^ *(Tests|Test Files) .*[0-9]+ failed' "$o" && echo 'AC-AT-6 PASS: setup converge removes the retired agent files from an install that tracked them, prints them as removals, lands lore-reader and leaves an untracked user agent untouched'
 
 ## Code anchors
 
@@ -68,4 +68,4 @@ Structured criteria are declared with `lore ac add` (AC-AT-1 .. AC-AT-6). Each s
 - assets/agents/lore-implementer.md
 - assets/hooks/pre-dispatch-isolation-gate.mjs
 - assets/hooks/pre-no-general-agent-gate.mjs
-- packages/lore/tests/integration/setup-retired-agent-types.bun.test.ts
+- packages/lore/tests/integration/retirement-registry.bun.test.ts

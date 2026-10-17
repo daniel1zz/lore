@@ -6,7 +6,7 @@ title: "ADR decision_status has a create surface and no CLI update surface: a va
 status: approved
 priority: medium
 created: 2026-07-31
-updated: 2026-10-10
+updated: 2026-10-17
 tags: []
 ---
 ## Overview
@@ -78,19 +78,19 @@ Prose form; the machine-checkable set is added with `lore ac add` and is what `l
 ## Acceptance Criteria (structured)
 
 - [⚑] [script] AC-DS-1: create an adr with decision_status proposed, run the accept writer, then lore get --json reports extra.decision_status === accepted
-  script: e2e — cd packages/lore && bun test tests/unit/adapters/cli-adr-decision-status.bun.test.ts -t 'accept end-to-end'
+  script: e2e — bunx --bun vitest run packages/lore/tests/unit/adapters/cli-adr-decision-status.bun.test.ts -t 'accept end-to-end'
 - [⚑] [script] AC-DS-2: the accept writer against a non-adr document exits 4 and stderr names the target's actual type
-  script: e2e — cd packages/lore && bun test tests/unit/adapters/cli-adr-decision-status.bun.test.ts -t 'non-adr target'
+  script: e2e — bunx --bun vitest run packages/lore/tests/unit/adapters/cli-adr-decision-status.bun.test.ts -t 'non-adr target'
 - [⚑] [script] AC-DS-3: aiming the writer at deprecated or superseded exits 2 and stderr names lore invalidate
-  script: e2e — cd packages/lore && bun test tests/unit/adapters/cli-adr-decision-status.bun.test.ts -t 'names lore invalidate'
+  script: e2e — bunx --bun vitest run packages/lore/tests/unit/adapters/cli-adr-decision-status.bun.test.ts -t 'names lore invalidate'
 - [⚑] [script] AC-DS-4: accepting an adr whose status is approved leaves status approved with no draft demotion
-  script: e2e — cd packages/lore && bun test tests/unit/adapters/cli-adr-decision-status.bun.test.ts -t 'no draft demotion'
+  script: e2e — bunx --bun vitest run packages/lore/tests/unit/adapters/cli-adr-decision-status.bun.test.ts -t 'no draft demotion'
 - [⚑] [script] AC-DS-5: an adr carrying an additional unrelated extra key still has that key byte-identical after the accept
-  script: e2e — cd packages/lore && bun test tests/unit/adapters/cli-adr-decision-status.bun.test.ts -t 'unrelated extra key survives'
+  script: e2e — bunx --bun vitest run packages/lore/tests/unit/adapters/cli-adr-decision-status.bun.test.ts -t 'unrelated extra key survives'
 - [⚑] [script] AC-DS-6: two consecutive accepts both exit 0 and the document version advances exactly once in total
-  script: e2e — cd packages/lore && bun test tests/unit/adapters/cli-adr-decision-status.bun.test.ts -t 'idempotent second accept'
+  script: e2e — bunx --bun vitest run packages/lore/tests/unit/adapters/cli-adr-decision-status.bun.test.ts -t 'idempotent second accept'
 - [⚑] [script] AC-DS-7: an unrecognised decision-status value exits 2 and stderr lists the accepted value
-  script: e2e — cd packages/lore && bun test tests/unit/adapters/cli-adr-decision-status.bun.test.ts -t 'unknown decision-status value'
+  script: e2e — bunx --bun vitest run packages/lore/tests/unit/adapters/cli-adr-decision-status.bun.test.ts -t 'unknown decision-status value'
 - [⚑] [script] AC-DS-8: the pure value-restriction module accepts the value accepted, refuses deprecated and superseded with a message naming lore invalidate, and refuses an unrecognised value listing the accepted value, all as a unit test with no store and no spawn
   script: test — bunx vitest run packages/lore/tests/unit/cli/decision-status-validation.test.ts -t 'closed value set'
 

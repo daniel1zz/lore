@@ -6,7 +6,7 @@ title: "Dashboard multi-project: mount registry, machine-scope auth, project-add
 status: approved
 priority: medium
 created: 2026-07-25
-updated: 2026-10-10
+updated: 2026-10-17
 tags: []
 links:
   - {id: SPEC-064, type: relates-to}
@@ -98,19 +98,19 @@ PRD §22 launch oracles 1-5 carried verbatim, plus: D8 spike test (empirical pin
 ## Acceptance Criteria (structured)
 
 - [⊘] [script] AC-078-1: Mount classifier bun-test passes: a 2-corpus fixture classifies both mountable; a missing-path entry classifies missing; a version-skewed corpus classifies schema-skew AND its db file sha256 is identical before/after the mount attempt; a duplicate registry name is rejected at validation; an all-error registry yields a running MountRegistry with 0 mounted entries and no throw.
-  script: test — cd packages/lore && bun test tests/unit/mount/mount-registry.bun.test.ts
+  script: test — bunx --bun vitest run packages/lore/tests/unit/mount/mount-registry.bun.test.ts
 - [⊘] [script] AC-078-2: SQLiteStore init sets PRAGMA busy_timeout to 2000ms: bun test opens two connections to one corpus, holds a write transaction on the first, and asserts the second writer succeeds after waiting instead of failing immediately with SQLITE_BUSY.
-  script: test — cd packages/lore && bun test tests/unit/store/busy-timeout.bun.test.ts
+  script: test — bunx --bun vitest run packages/lore/tests/unit/store/busy-timeout.bun.test.ts
 - [⊘] [script] AC-078-3: Empirical liveness pin: with 2 corpora mounted, deleting corpus A's db file mid-session yields an error response for A's routes within 5000ms (never a hang) while a concurrent request to corpus B returns 200 during the same window.
-  script: test — cd packages/lore && bun test tests/unit/mount/deleted-corpus-liveness.bun.test.ts
+  script: test — bunx --bun vitest run packages/lore/tests/unit/mount/deleted-corpus-liveness.bun.test.ts
 - [⊘] [script] AC-078-4: Machine-scope auth store: dashboard-auth.db is created with file mode 0600; the cookie login flow authenticates against the machine store in BOTH registry-less and multi-project modes, asserted by one test exercising both paths through the same store instance.
-  script: test — cd packages/lore && bun test tests/unit/http/machine-auth.bun.test.ts
+  script: test — bunx --bun vitest run packages/lore/tests/unit/http/machine-auth.bun.test.ts
 - [⊘] [script] AC-078-5: GET /api/projects returns one entry per registry item with state in {mounted, missing, schema-skew, error}, the per-entry diagnosis string, and the serving instance identity (port plus registry name); test asserts at least 3 distinct states and both identity fields.
-  script: test — cd packages/lore && bun test tests/unit/http/projects-route.bun.test.ts
+  script: test — bunx --bun vitest run packages/lore/tests/unit/http/projects-route.bun.test.ts
 - [⚑] [script] AC-078-9: Registry-less compatibility: with dashboard.projects absent, the existing single-project Playwright suite passes unchanged AND a new assertion pins the registry-less URL shape (a canonical route resolves with no /p/:name segment and returns 200), so a route-shape regression cannot pass vacuously.
   script: e2e — cd packages/dashboard && bunx playwright test
 - [⊘] [script] AC-078-10: Runtime isolation stub test: injecting a throwing-stub App for one registry entry makes that project's routes return a named 5xx-class diagnostic and flips its /api/projects state to error, while the other mounted project's routes return 200 and a write still lands.
-  script: test — cd packages/lore && bun test tests/unit/mount/runtime-isolation.bun.test.ts
+  script: test — bunx --bun vitest run packages/lore/tests/unit/mount/runtime-isolation.bun.test.ts
 - [⊘] [script] AC-078-6: Two-corpus Playwright e2e under the dedicated multi-project config (registry over 2 mkdtemp corpora, machine-auth mkdtemp baseDir, guard authenticated against both): one login reads both projects; an approve plus doc edit addressed to project A lands in A while B's doc set is byte-unchanged; a request naming an unregistered project returns 404-class; an If-Match token minted under A replayed against B is rejected, never applied.
   script: e2e — cd packages/dashboard && bunx playwright test tests/e2e/multi-project-isolation.spec.ts --config=tests/e2e/playwright.multi-project.config.ts
 - [⊘] [script] AC-078-7: Write-surface equivalence e2e under the multi-project config: a gate-armed spec write in project A is denied rendering A's feeding pack while the same write in project B succeeds; audit rows in both corpora carry surface=http_cookie; component tests assert the selected project's name renders adjacent to adjudication and save controls.

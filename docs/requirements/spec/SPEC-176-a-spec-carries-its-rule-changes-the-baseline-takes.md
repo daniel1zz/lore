@@ -6,7 +6,7 @@ title: "A spec carries its rule changes; the baseline takes them only when the s
 status: approved
 priority: medium
 created: 2026-10-12
-updated: 2026-10-16
+updated: 2026-10-17
 tags: []
 links:
   - {id: TASK-953, type: resolves}
@@ -91,7 +91,7 @@ Declared with `lore ac add` (AC-CS-1..6).
 - [⚑] [script] AC-CS-2: Apply (new file rule-apply.test.ts): (a) with every criterion citing a changed id holding a runner-attested pass, apply writes each touched leaf exactly once (one version naming the spec), proposed ids become live in the leaf, modified statements replace the old ones, retired ids are retired with their note; (b) with one citing criterion lacking an attested pass (self-reported pass, expected-fail, none) nothing is written and the result names that criterion; (c) apply twice is a no-op the second time; (d) a spec deprecated or superseded before landing turns its proposed ids retired with note 'never landed: <spec>'; (f) an add or modify id that no criterion of the spec cites -> nothing written, the result names the id as an unproven change; (e) rule set --lifecycle deprecated is refused naming retire and the change set. Smallest red mutation: counting a self-reported pass fails (b).
   script: test — bunx vitest run packages/lore/tests/unit/service/rule-apply.test.ts
 - [⚑] [script] AC-CS-3: Compiled CLI on a throwaway corpus with the citation gate enforcing (new file rule-change-set-compiled.bun.test.ts, hermetic session ids): lore rule propose <spec> add ... prints the reserved BR id; lore ac add citing it exits 0; lore rule changes --json lists it; lore rule apply exits exactly 4 before evidence, naming the criterion; after a runner-attested pass (lore verify) apply exits 0 and lore rule show prints the rule live on its leaf; closing the implementing plan while apply would fail is refused naming the criterion. Smallest red mutation: plan close not calling apply leaves the proposed id proposed after close.
-  script: e2e — bun run build && cd packages/lore && bun test tests/e2e/rule-change-set-compiled.bun.test.ts
+  script: e2e — bun run build && bunx --bun vitest run packages/lore/tests/e2e/rule-change-set-compiled.bun.test.ts
 - [⊘] [script] AC-CS-4: Snapshot views (new file rule-snapshot-views.test.ts): the leaf's rule list, lore rule find, rule impact and baseline coverage list only live rules; proposed rules appear only in lore rule changes / lore rule show; retired rules appear only when a view asks for tombstones; the spec review judge input includes extra.rule_changes. Smallest red mutation: rule find returning proposed rules.
   script: test — bunx vitest run packages/lore/tests/unit/service/rule-snapshot-views.test.ts
 - [⚑] [script] AC-CS-5: Migration done on the live corpus (read-only check): no rule_registry row is in lifecycle deprecated (the 7 were each retired with a note naming what replaced them); BR-1080 and BR-1081, written into the snapshot ahead of implementation, are retired and re-proposed as BR-1082 and BR-1083 in the change set of spec-archiving-the-work-that-resolves-a-defect-report-closes; BR-961 and BR-962 are retired naming BR-1079. Measured red 2026-10-12: 7 deprecated rows. Smallest red mutation: leaving one deprecated rule fails the count.

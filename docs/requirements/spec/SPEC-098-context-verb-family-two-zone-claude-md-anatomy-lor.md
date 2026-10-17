@@ -6,7 +6,7 @@ title: "Context verb family — two-zone CLAUDE.md anatomy, lore context init re
 status: approved
 priority: medium
 created: 2026-07-27
-updated: 2026-10-15
+updated: 2026-10-17
 tags: [claude-md, context, distribution, governance]
 links:
   - {id: ADR-014, type: implements}
@@ -173,13 +173,13 @@ One direction only: core ← service ← flows ← adapters. No cycles.
 - [⚑] [script] AC-CTX-2: Admission-check unit suite passes: reference_missing findings fire for backtick-quoted repo-relative paths that do not exist and stay silent for existing paths and URL-scheme tokens; detectNarrativeSmells findings are emitted as advisory and never alter the deterministic finding set or exit-relevant output
   script: test — bunx vitest run packages/lore/tests/unit/service/claude-md-admission.test.ts
 - [⊘] [script] AC-CTX-3: Compiled-binary e2e passes in a temp repo: lore context init without a usable AI provider exits 0, writes a skeleton, and prints a warning on stderr; an immediately following lore context refresh is byte-identical (idempotent); a hand-edit inside a managed section makes the next refresh report diverged_skip and leave the file bytes untouched
-  script: e2e — cd packages/lore && bun test tests/e2e/context-verbs-compiled.bun.test.ts
+  script: e2e — bunx --bun vitest run packages/lore/tests/e2e/context-verbs-compiled.bun.test.ts
 - [⊘] [script] AC-CTX-4: Splice SSOT holds: setup-project-flow imports spliceManagedSections from context-projection (grep-pin asserts no second marker-splice implementation remains) and the existing setup e2e suite stays green
   script: test — bunx vitest run packages/lore/tests/unit/flows/setup-splice-ssot.test.ts
 - [⊘] [script] AC-CTX-5: Guard hook trips end-to-end in a temp repo: the PostToolUse hook script emits blocking feedback (non-zero) for an over-ceiling memory file, exits 0 when lore or .lore is absent (fail-open), and contains zero numeric budget literals (grep-pin)
-  script: e2e — cd packages/lore && bun test tests/integration/claude-md-guard-hook-trip.bun.test.ts
+  script: e2e — bunx --bun vitest run packages/lore/tests/integration/claude-md-guard-hook-trip.bun.test.ts
 - [⊘] [script] AC-CTX-6: Skill retirement completes end-to-end: on a fixture with a previously-installed lore-init-context skill, lore setup removes the installed copy, and the embedded assets manifest check exits 0
-  script: e2e — cd packages/lore && bun test tests/integration/init-context-skill-retirement.bun.test.ts && node ../../scripts/embed-assets-manifest.mjs --check
+  script: e2e — bunx --bun vitest run --testTimeout=30000 --hookTimeout=30000 packages/lore/tests/integration/retirement-registry.bun.test.ts -t 'install-skill-lore-init-context|an emptied skill directory' && bun scripts/embed-assets-manifest.mjs --check
 - [⚑] [script] AC-CTX-7: Full gates pass: bun run typecheck exits 0 and both test runners (vitest suite and bun test suite) exit 0
   script: test — bun run typecheck && bun run test
 - [⚑] [script] AC-CTX-8: Refresh pre-write admission: contextRefresh runs the claude-md ceiling admission check (same max_lines/max_bytes source as lore status --check-claude-md) on the SPLICED candidate BEFORE writing; a would-be breach performs NO write and returns a loud non-ok Result naming the findings; a within-budget splice writes as before (byte-identical to pre-change behavior)

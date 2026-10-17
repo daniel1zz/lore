@@ -6,7 +6,7 @@ title: "Completing an adopted report's own task closes its GitHub issue"
 status: approved
 priority: medium
 created: 2026-10-12
-updated: 2026-10-16
+updated: 2026-10-17
 tags: []
 ---
 # Completing an adopted report's own task closes its GitHub issue
@@ -44,7 +44,7 @@ Declared with `lore ac add` (AC-IT-1..3).
 - [⚑] [script] AC-IT-1: Service level with a recording fake closer (new file issue-task-done-close.test.ts): (a) TaskWorkflowService.done on a task carrying extra.issue_report with a github ref calls close(#N) once with state_reason completed and a comment naming the task, then label(resolution:closed); (b) the same task archived through the archive sweep or a plain status change -> no close call, label only; (c) close failure -> task still archived, one issue_close_failed audit row, the result names the failure; (d) no github ref -> no call, the result says so; (e) already closed -> no-op success. Smallest red mutation: closing from the sweep path fails (b).
   script: test — bunx vitest run packages/lore/tests/unit/service/issue-task-done-close.test.ts
 - [⚑] [script] AC-IT-2: Compiled CLI, stub gh first on PATH, throwaway corpus with a {repo} feedback.upstream (new file issue-task-done-close-compiled.bun.test.ts, hermetic session ids): a filed report task for #9 completed with lore done (after a runner-attested pass) exits 0 and the stub log shows a close with state_reason completed naming the task; lore issues --sync --json lists a done-archived report whose close had failed and --sync --apply closes it, while a sweep-archived report is only labelled. Smallest red mutation: done not calling the step leaves the stub log empty.
-  script: e2e — bun run build && cd packages/lore && bun test tests/e2e/issue-task-done-close-compiled.bun.test.ts
+  script: e2e — bun run build && bunx --bun vitest run packages/lore/tests/e2e/issue-task-done-close-compiled.bun.test.ts
 - [⚑] [script] AC-IT-3: bun run typecheck exits 0.
   script: tsc — bun run typecheck
 

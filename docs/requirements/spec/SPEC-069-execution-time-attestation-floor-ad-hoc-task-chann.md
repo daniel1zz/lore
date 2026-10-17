@@ -6,7 +6,7 @@ title: "Execution-time attestation floor + ad-hoc task channel"
 status: approved
 priority: medium
 created: 2026-07-23
-updated: 2026-10-10
+updated: 2026-10-17
 tags: []
 links:
   - {id: SPEC-039, type: relates-to}
@@ -120,7 +120,7 @@ single-pass create-task validation (missing/conflicting flags reported together)
 - [·] [script] AC-069-12: WRITER-EXISTS CLASS AUDIT: a source scan enumerates every plan-level extra.* field the plan-close checkpoint reads and asserts each has an authoring surface in packages/lore/src/adapters — the class this task's finding is one instance of, mechanized so the next gate-read field without a writer fails a test instead of an incident
   script: test — bunx vitest run packages/lore/tests/unit/cli/plan-exempt-attestation.test.ts -t 'AC-069-12'
 - [·] [script] AC-069-13: From a throwaway corpus driven by compiled dist/lore, THE PAIR: a plan denied by the attestation floor closes WITH the exemption and the close output NAMES the exemption and its reason; the identical plan WITHOUT it is still denied — so the exemption is provably what changed the verdict, and an exemption that allowed a close is never invisible
-  script: e2e — cd packages/lore && bun test tests/e2e/plan-exempt-attestation-compiled.bun.test.ts
+  script: e2e — bunx --bun vitest run packages/lore/tests/e2e/plan-exempt-attestation-compiled.bun.test.ts
 - [·] [script] AC-069-14: NO ORPHAN CASES: the whole plan-exempt-attestation suite passes as a single unfiltered file run, so the three formatAttestationExemptionNotice renderer cases that no tagged AC selects (HAPPY/NEGATIVE/BOUNDARY on the notice's activeness rule) are still exercised by a declared AC — 8+11+5+4+12 tagged = 40 of 43
   script: test — bunx vitest run packages/lore/tests/unit/cli/plan-exempt-attestation.test.ts
 - [·] [script] AC-069-15: verifyAdhocTask records ac_ref on its runner-attested evidence: the entry written for each executed script criterion carries ac_ref equal to that criterion id, cross-validated through the ad-hoc governing-AC port (resolveAdhocGoverningAcIds) rather than the plan-only parent_id walk

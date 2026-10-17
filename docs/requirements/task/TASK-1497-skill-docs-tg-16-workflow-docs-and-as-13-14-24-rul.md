@@ -7,7 +7,7 @@ status: draft
 priority: medium
 phase: "Phase 5: cadence"
 created: 2026-10-16
-updated: 2026-10-16
+updated: 2026-10-17
 tags: []
 parent: PLAN-201
 plan: PLAN-201
@@ -18,3 +18,5 @@ Estimate: M
 Approach: Update CLAUDE.md Commands (test:changed no longer "under- AND over-selects" once AC-TG-7/8 hold; when the full suite runs), the scoped-oracle rule (.claude/rules/lore-project-scoped-oracles-in-worktrees.md and its source fragment), and the rule records: AS-14 enforced_by guaranteed with current reality, AS-13 per the runner decision, AS-24 per the new selector (lore rule set, then re-render). Keep CLAUDE.md within lore governance claude-md.
 Source: spec-test-governance-guards-that-refuse-bad-tests-declared
 AC: AC-TG-10 (supporting docs).
+
+Runner decision (ADR adr-tg-1-test-runner-decision-measured-comparison-of-bun-only, accepted 2026-10-17): option (b), one runner = vitest on the Bun runtime, migrated by T23 (blocks this task). AS-13 becomes the one-runner rule (vitest on Bun; the Node project file list is explicit).

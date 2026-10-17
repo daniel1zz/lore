@@ -3,11 +3,11 @@ id: TASK-1504
 type: task
 role: plan
 title: "[Skill:implement] TG-4 LORE_TEST_SANDBOX refuses this repository's corpus"
-status: draft
+status: archived
 priority: high
 phase: "Phase 3: guards"
 created: 2026-10-16
-updated: 2026-10-16
+updated: 2026-10-17
 tags: []
 parent: PLAN-201
 plan: PLAN-201

@@ -3,11 +3,11 @@ id: TASK-1505
 type: task
 role: plan
 title: "[Skill:research] TG-1 runner and binary-execution ADR, measured"
-status: draft
+status: archived
 priority: critical
 phase: "Phase 1: decide"
 created: 2026-10-16
-updated: 2026-10-16
+updated: 2026-10-17
 tags: []
 parent: PLAN-201
 plan: PLAN-201

@@ -6,7 +6,7 @@ title: "Deterministic task dispatch bundle: lore feed task-start"
 status: approved
 priority: medium
 created: 2026-07-23
-updated: 2026-10-10
+updated: 2026-10-17
 tags: []
 links:
   - {id: ADR-005, type: relates-to}
@@ -195,7 +195,7 @@ the thick-bundle property).
 - [⚑] [script] AC-070-6: workflow.task_feed.* config budgets override DEFAULT_TASK_START_BUDGETS per section, clipped section keys land in truncated[], unclipped sections never appear in truncated[]
   script: test — bunx vitest run packages/lore/tests/unit/flows/task-feed-flow.test.ts -t "AC-070-6"
 - [⚑] [script] AC-070-7: CLI lore feed task-start <task> prints all 8 section headers; --json emits the pack object; unresolvable task exits 3; missing positional exits 2; spec-create/session-resume/phase-start outputs unchanged after the table-driven dispatch refactor
-  script: test — cd packages/lore && bun test tests/integration/cli-feed-task-start.bun.test.ts
+  script: test — bunx --bun vitest run packages/lore/tests/integration/cli-feed-task-start.bun.test.ts
 - [⚑] [script] AC-070-8: MCP lore_feed checkpoint=task-start returns a pack deep-equal to the CLI --json pack for the same corpus state, and checkpoint=phase-start returns the real buildPhaseStartPack pack instead of the generic buildFeed note
   script: test — bunx vitest run packages/lore/tests/unit/adapters/mcp-feed-task-start.test.ts
 - [⚑] [script] AC-070-9: MCP lore_feed task-start resolves workflow.task_feed.* config budgets identically to the CLI path: with a non-default budget set in config, the MCP pack's truncated[] and section clipping deep-equal the CLI --json pack for the same corpus state
@@ -217,7 +217,7 @@ the thick-bundle property).
 - [⚑] [script] AC-070-17: pack assembly issues no duplicate store reads: the task doc is fetched exactly once (navigation threaded from the first fetch, call-count-asserted via fakes) and computeAcCoverage parses each task's evidence exactly once via single-pass bucketing with output equal to the previous implementation on mixed fixtures
   script: test — bunx vitest run packages/lore/tests/unit/adapters/task-feed-wiring.test.ts -t "AC-070-17"
 - [⚑] [script] AC-070-18: phase-start CLI happy-path four-section render text is regression-pinned with a full-output assertion in the integration suite (previously only its error paths were pinned)
-  script: test — cd packages/lore && bun test tests/integration/cli-feed-task-start.bun.test.ts
+  script: test — bunx --bun vitest run packages/lore/tests/integration/cli-feed-task-start.bun.test.ts
 
 ## Code anchors
 

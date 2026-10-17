@@ -6,7 +6,7 @@ title: "Dashboard adjudication workbench + route telemetry (PRD §21 F1+F2)"
 status: approved
 priority: high
 created: 2026-07-24
-updated: 2026-10-10
+updated: 2026-10-17
 tags: [spec-075, dashboard, workbench, telemetry]
 ---
 # SPEC-075 — Dashboard adjudication workbench + route telemetry (PRD §21 F1+F2)
@@ -192,9 +192,9 @@ Structured ACs via `lore ac add` (script-mode, commands pinned there). Prose sum
 - [⚑] [script] AC-075-7: JudgmentDrilldown renders decision, confidence, qualitative reasons[] (dimension+finding), blocking_questions, prompt_version; a doc with no judgment record shows no drill-down affordance and no error; a stale judgment renders with the existing stale badge
   script: test — cd packages/dashboard && bunx vitest run -t "AC-075-7"
 - [⊘] [script] AC-075-8: Telemetry enabled: exactly one JSONL event per dashboard route navigation carrying route_id (+doc_type when applicable); disabled: zero sink writes; sink write failure via injected throwing writer: HTTP 204, zero user-visible errors, one server-side log line
-  script: test — cd packages/lore && bun test tests/http/telemetry-route.bun.test.ts && cd ../dashboard && bunx vitest run -t "AC-075-8"
+  script: test — bunx --bun vitest run packages/lore/tests/http/telemetry-route.bun.test.ts && cd packages/dashboard && bunx vitest run -t "AC-075-8"
 - [⊘] [script] AC-075-9: Auth matrix: GET /api/evidence-panel returns 401 unauthenticated and 200 for both cookie and bearer; POST /api/dashboard/telemetry/route-view returns 403 for bearer auth and for a disallowed Origin
-  script: test — cd packages/lore && bun test tests/http -t "AC-075-9"
+  script: test — bunx --bun vitest run packages/lore/tests/http/ -t "AC-075-9"
 - [⚑] [script] AC-075-10: Import-graph pins hold: verification-projection-service defines no local derive/compute functions (derivations imported from @lore/core only) and packages/dashboard/src contains zero @lore/lore imports
   script: other — bash -c '! grep -nE "function (derive|compute)" packages/lore/src/service/verification-projection-service.ts && ! grep -rn "from \"@lore/lore\"" packages/dashboard/src/'
 - [⚑] [script] AC-075-11: attestationFloor delegates to core deriveAttestationSummary reproducing BOTH conditions (per-task zero-attested AND plan-wide ratio >= min_ratio) with byte-identical gate behavior: existing gate tests green plus a dedicated parity unit test over both condition classes

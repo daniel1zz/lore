@@ -11224,6 +11224,34 @@
     "01M4APBSGVFFX67X04RSR6GDMZ": {
       "human_id": "SPEC-205",
       "file_path": "docs/requirements/spec/SPEC-205-product-baseline-architecture-trees-the-product-s.md"
+    },
+    "01M52SMXVE645DD4Q0HV8FD04X": {
+      "human_id": "ADR-048",
+      "file_path": "docs/requirements/adr/ADR-048-tg-1-test-runner-decision-measured-comparison-of-b.md"
+    },
+    "01M53P0AXCRT62WM1031GN40T0": {
+      "human_id": "TASK-1506",
+      "file_path": "docs/requirements/task/TASK-1506-skill-implement-tg-23-one-runner-vitest-on-the-bun.md"
+    },
+    "01M53P0CEFTD7KFQ1NZEQGP5QG": {
+      "human_id": "TASK-1507",
+      "file_path": "docs/requirements/task/TASK-1507-skill-refactor-tg-26-second-half-of-the-in-process.md"
+    },
+    "01M53P0BY1BMDX0E85XND0G9ST": {
+      "human_id": "TASK-1508",
+      "file_path": "docs/requirements/task/TASK-1508-skill-refactor-tg-25-in-process-command-helper-and.md"
+    },
+    "01M53P0BDSK1DT1Z80BMHBHF48": {
+      "human_id": "TASK-1509",
+      "file_path": "docs/requirements/task/TASK-1509-skill-implement-tg-24-build-dist-lore-once-per-run.md"
+    },
+    "01M52KE7MWV28S8ZTCGTNEWXZJ": {
+      "human_id": "TASK-1510",
+      "file_path": "docs/requirements/task/TASK-1510-ac-add-set-path-check-ignores-cd-inside-a-subshell.md"
+    },
+    "01M52H4K3RNKW1BFZYFPZ7HK8S": {
+      "human_id": "TASK-1511",
+      "file_path": "docs/requirements/task/TASK-1511-skill-implement-tg-22-missing-oracle-floor-counts.md"
     }
   }
 }

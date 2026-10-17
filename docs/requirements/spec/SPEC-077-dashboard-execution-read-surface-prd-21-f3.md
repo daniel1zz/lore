@@ -6,7 +6,7 @@ title: "Dashboard execution read surface (PRD §21 F3)"
 status: approved
 priority: medium
 created: 2026-07-25
-updated: 2026-10-10
+updated: 2026-10-17
 tags: []
 ---
 ## Overview/Goal
@@ -70,7 +70,7 @@ Structured ACs live in `extra.acceptance_criteria` (added via `lore ac add`, all
 - [⚑] [script] AC-077-3: PhaseProgressPanel renders one scorecard per phase carrying attested counts in a/b form, per-item checklist states, dropped item names, a vacuous badge exactly when the projection vacuous flag is true, and manual-vs-attested trust labels taken verbatim from the projection; zero phases renders the literal empty-state text
   script: test — cd packages/dashboard && bunx vitest run tests/component/PhaseProgressPanel.test.tsx
 - [⚑] [script] AC-077-4: GET /api/phase-status/:planIdOrSlug returns 200 with the pinned {plan:{id,slug,title},phases:[]} shape (phases populated for a plan with phases, empty array for a plan without), 404 DOC_NOT_FOUND for an unknown id, 422 VALIDATION_ERROR naming the actual type for a non-plan doc, and accepts both cookie and bearer auth; GET /api/ready/:planIdOrSlug response carries top-level claim_ttl_minutes equal to the resolved workflow.claim_ttl_minutes config value
-  script: test — cd packages/lore && bun test tests/http/phase-status.bun.test.ts tests/unit/adapters/http/ready-route.bun.test.ts
+  script: test — bunx --bun vitest run packages/lore/tests/http/phase-status.bun.test.ts packages/lore/tests/unit/adapters/http/ready-route.bun.test.ts
 - [⊘] [script] AC-077-5: Playwright: the nav entry reaches /execution; the seeded plan renders at least one ready task row with a claim badge, one session row, one anchor-conflict row and one phase scorecard; clicking the task row navigates to the doc detail page with the Evidence tab visible
   script: e2e — cd packages/dashboard && bunx playwright test tests/e2e/execution.pw.ts
 - [⚑] [script] AC-077-6: Navigating to /execution issues exactly one POST /api/dashboard/telemetry/route-view whose payload route_id equals /execution

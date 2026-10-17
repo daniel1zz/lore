@@ -3,7 +3,7 @@ id: TASK-1500
 type: task
 role: plan
 title: "[Skill:test] TG-8 one retirement registry replaces four tombstone test files"
-status: draft
+status: archived
 priority: medium
 phase: "Phase 2: clear offenders"
 created: 2026-10-16

@@ -6,7 +6,7 @@ title: "Plan closure must be loud — terminality divergence, silent demotion, a
 status: approved
 priority: medium
 created: 2026-07-28
-updated: 2026-10-10
+updated: 2026-10-17
 tags: [governance, plan-close, gates]
 links:
   - {id: SPEC-198, type: implements}
@@ -85,14 +85,14 @@ Two-part, both required:
 ## Acceptance Criteria (structured)
 
 - [⚑] [script] AC-CLOSURE-1: TreeCheckService reports a plan-terminality drift when a plan is non-terminal and has >=1 child task with ALL child tasks terminal; and reports NO drift for (a) a plan with zero tasks, (b) a plan with any non-terminal task, (c) an already-archived plan
-  script: test — cd packages/lore && bun test tests/unit/service/tree-check-service.bun.test.ts -t "plan-terminality"
+  script: test — bunx --bun vitest run packages/lore/tests/unit/service/tree-check-service.bun.test.ts -t "plan-terminality"
 - [⊘] [script] AC-CLOSURE-2: lore status --check-tree surfaces plan-terminality drift with a nonzero exit, and lore status --check-tree --fix leaves it UNFIXED (auto-transitioning a plan would fire plan-close from inside a repair command)
   script: test — bunx vitest run packages/lore/tests/integration/cli/check-tree.test.ts -t "plan-terminality"
 - [⚑] [script] AC-CLOSURE-3: lore done on the LAST non-terminal task of a plan emits a stderr advisory naming the plan slug and the literal command 'lore set <plan> --status archived'; done on a non-last task emits none; the service performs no plan write in either case
   script: test — bunx vitest run packages/lore/tests/unit/cli/done-command.test.ts -t "last non-terminal task"
 - [⊘] [script] AC-CLOSURE-4: CorpusService.set carries the approved-to-draft auto-demotion as a fact on its result, and lore set prints the demotion advisory on the STANDARD patch path (--content/--content-file/--title), not only the AI --regenerate/--refine branch
-  script: test — cd packages/lore && bun test tests/unit/adapters/cli-set-demotion-advisory.bun.test.ts
+  script: test — bunx --bun vitest run packages/lore/tests/unit/adapters/cli-set-demotion-advisory.bun.test.ts
 - [⊘] [script] AC-CLOSURE-5: verifyReachability distinguishes unknown (caller supplied no parent type) from known-false (parent type supplied and is not a spec); describeReachabilityWhy never renders the definite claim 'no spec-tier ancestor' for the unknown case
   script: test — bunx vitest run packages/lore/tests/unit/service/checkpoint-registry.test.ts -t "reachability unknown"
 - [⊘] [script] AC-CLOSURE-6: REGRESSION (live 2026-07-28 case): a plan whose parent IS an approved tech spec declaring >=1 script-mode AC, closed via lore set --status archived, NEVER produces remediation text containing 'no spec-tier ancestor' — plan-close threads hasSpecParent and parentSpecScriptAcCount from the already-resolved plan bundle
-  script: test — cd packages/lore && bun test tests/integration/plan-close-reachability.bun.test.ts
+  script: test — bunx --bun vitest run packages/lore/tests/integration/plan-close-reachability.bun.test.ts

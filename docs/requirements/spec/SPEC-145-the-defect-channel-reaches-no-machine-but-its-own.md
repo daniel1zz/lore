@@ -6,7 +6,7 @@ title: "The defect channel reaches no machine but its own: GitHub becomes intake
 status: approved
 priority: critical
 created: 2026-08-23
-updated: 2026-10-10
+updated: 2026-10-17
 tags: [defect-channel, transport, github, intake, cap-removal]
 links:
   - {id: ADR-037, type: informs}
@@ -150,7 +150,7 @@ Structured criteria are declared via `lore ac add` and are the executable form; 
 - [⚑] [script] AC-GI-9: Cap removal is complete: a CASE-SENSITIVE literal scan of .ts sources finds no surviving reference to the six deleted cap symbols — case sensitivity is load-bearing because open_report_cap, the config key AC-GI-10 requires to survive, is a case variant of OPEN_REPORT_CAP
   script: lint — c=$(grep -rn --include="*.ts" -e "OPEN_REPORT_CAP" -e "resolveOpenReportCap" -e "countOpenReports" -e "OpenReportCapRefusal" -e "QUOTA_FREEING_RESOLUTIONS" -e "listOpenAdhocDrafts" packages/ | wc -l | tr -d " "); test "$c" = "0" && echo "AC-GI-9 PASS: 0 case-sensitive matches for the six deleted cap symbols"
 - [⚑] [script] AC-GI-1: Filing succeeds from a working directory that is not, and contains no, clone of the upstream repo
-  script: e2e — bun test packages/lore/tests/integration/cli/github-intake-reach.bun.test.ts && echo 'AC-GI-1 PASS: report filed from a directory holding no clone of the upstream repo'
+  script: e2e — bunx --bun vitest run packages/lore/tests/integration/cli/github-intake-reach.bun.test.ts && echo 'AC-GI-1 PASS: report filed from a directory holding no clone of the upstream repo'
 - [⚑] [script] AC-GI-2: gh absent or unauthenticated exits with the AUTH_REQUIRED code, never the generic 1, and stderr carries the matching remedy literal: cli.github.com when the binary is missing, 'gh auth login' when present but unauthenticated
   script: test — bunx vitest run packages/lore/tests/unit/service/gh-runner-auth.test.ts && echo 'AC-GI-2 PASS: both auth-absent paths exit AUTH_REQUIRED with a named remedy'
 - [⚑] [script] AC-GI-3: A filing whose network call fails leaves an intent receipt line and no outcome line for the same idempotency key
@@ -166,7 +166,7 @@ Structured criteria are declared via `lore ac add` and are the executable form; 
 - [⚑] [script] AC-GI-10: A config carrying feedback.inbound.open_report_cap parses successfully and emits a warning naming the key (the permanence of that behaviour is policy in Scope, not part of this oracle)
   script: test — bunx vitest run packages/lore/tests/unit/service/feedback-config-compat.test.ts && echo 'AC-GI-10 PASS: legacy cap key parses and warns by name'
 - [⚑] [script] AC-GI-11: Migration lands 12 issues, exactly 2 closed with a state_reason, and each of the six closed front-matter fields (severity, category, tags, idempotency_key, reporter_corpus, reporter_root_prd) equals its corpus source
-  script: e2e — bun test packages/lore/tests/integration/cli/issue-migration.bun.test.ts && echo 'AC-GI-11 PASS: 12 issues, 2 closed with reason, front-matter equal field by field'
+  script: e2e — bunx --bun vitest run packages/lore/tests/integration/cli/issue-migration.bun.test.ts && echo 'AC-GI-11 PASS: 12 issues, 2 closed with reason, front-matter equal field by field'
 - [⚑] [script] AC-GI-12: No read surface issues one network call per issue: the call count for listing 50 issues equals the call count for listing 1
   script: test — bunx vitest run packages/lore/tests/unit/service/issue-read-batching.test.ts && echo 'AC-GI-12 PASS: listing N issues costs O(1) calls, not O(N)'
 - [⚑] [script] AC-GI-13: A GitHub-side close-as-completed does NOT produce a corpus fixed resolution: computeIssueResolution still reports the pre-close state, and the only transition into fixed remains a resolves edge

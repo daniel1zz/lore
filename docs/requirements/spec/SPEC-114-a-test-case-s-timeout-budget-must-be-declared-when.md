@@ -6,7 +6,7 @@ title: "A test case's timeout budget must be declared when its spawn count makes
 status: approved
 priority: medium
 created: 2026-07-31
-updated: 2026-10-10
+updated: 2026-10-17
 tags: []
 ---
 ## Overview
@@ -86,7 +86,7 @@ Out of scope, each deliberately:
 - [⚑] [script] AC-TB-3: a fixture with exactly 2 spawns and no explicit timeout exits 0 while the same fixture with a 3rd spawn exits non-zero
   script: test — bunx vitest run scripts/tests/check-test-budgets.test.ts -t 'threshold boundary two versus three'
 - [⚑] [script] AC-TB-4: the AC-VRW-5b case in cli-plan-promote-advisory.bun.test.ts declares an explicit timeout and passes in isolation
-  script: e2e — cd packages/lore && bun test tests/unit/adapters/cli-plan-promote-advisory.bun.test.ts
+  script: e2e — bunx --bun vitest run packages/lore/tests/unit/adapters/cli-plan-promote-advisory.bun.test.ts
 - [⚑] [script] AC-TB-5: an unparseable test file makes the oracle exit non-zero with the path in its output and never exit 0
   script: test — bunx vitest run scripts/tests/check-test-budgets.test.ts -t 'unparseable file is loud'
 - [·] [script] AC-TB-6: The baseline ledger fails loud in every direction, never silently re-exempting: a violation with no matching ledger row is reported as NEW debt (exit 2); a ledger row whose violation was fixed, or whose (path,line) matches but spawnCount drifted, is ORPHANED rather than re-exempted (exit 5); a ledger row naming a nonexistent path is reported by name (exit 5); and every row carries path/line/spawnCount/reason. Deliberately run as the WHOLE file with no -t filter: a -t name filter that matches nothing exits 0 with zero tests executed (measured 2026-08-01), which is indistinguishable from passing, so name-filtered ACs silently rot the moment a test is renamed.

@@ -6,7 +6,7 @@ title: "Seat-briefing runtime injection: retire the installed seat-briefing.md"
 status: approved
 priority: medium
 created: 2026-07-26
-updated: 2026-10-10
+updated: 2026-10-17
 tags: []
 links:
   - {id: SPEC-201, type: implements}
@@ -43,7 +43,7 @@ Structured ACs via `lore ac add`. Sketch: (1) compiled e2e — `dist/lore govern
 ## Acceptance Criteria (structured)
 
 - [⚑] [script] AC-085-1: Compiled-binary e2e: dist/lore governance --seat-briefing exits 0 with stdout byte-identical to assets/governance/seat-briefing.md (placeholders intact); bare dist/lore governance stdout stays byte-identical to assets/governance/corpus-workflow.md
-  script: e2e — cd packages/lore && bun test tests/integration/governance-compiled.bun.test.ts
+  script: e2e — bunx --bun vitest run packages/lore/tests/integration/governance-compiled.bun.test.ts
 - [⚑] [script] AC-085-2: Retirement pins: install set and check-embedded manifest view both yield zero governance/ entries; hook source contains zero seat-briefing.md path-read occurrences and passes --seat-briefing as a spawn argument; SSOT briefing contains zero 'create knowledge --sub-type handoff' occurrences
   script: test — bunx vitest run packages/lore/tests/unit/setup-governance-retirement.test.ts
 - [⚑] [script] AC-085-3: session-seat-injection unit suite exits 0 with Phase D spawn-based injection: placeholder substitution for ACTOR/BRANCH/MAIN_CHECKOUT and fail-open on spawn failure both pinned

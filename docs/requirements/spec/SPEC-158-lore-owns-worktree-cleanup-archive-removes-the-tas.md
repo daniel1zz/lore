@@ -6,7 +6,7 @@ title: "Lore owns worktree cleanup: archive removes the task's recorded worktree
 status: deprecated
 priority: medium
 created: 2026-10-10
-updated: 2026-10-12
+updated: 2026-10-17
 tags: []
 ---
 # Lore owns worktree cleanup: archive removes the task's recorded worktree; a sweep catches the rest
@@ -34,9 +34,9 @@ See `lore ac list` (AC-WTC-1..3).
 ## Acceptance Criteria (structured)
 
 - [⚑] [script] AC-WTC-1: In a temp git repo with a temp corpus (describe 'done removes the recorded worktree (#106)'): after lore done on a task whose claim recorded a worktree, a clean worktree whose branch has >=1 own commit in main and no git activity inside the quiet window is removed and its branch deleted, and the output says removed; a zero-commit branch, an uncommitted change, an unmerged commit, recent activity, or a git-locked worktree each keep the worktree, exit 0, and name that reason; a worktree no claim recorded is untouched
-  script: test — cd packages/lore && bun test tests/integration/cli/done-worktree-cleanup.bun.test.ts && echo 'AC-WTC-1 PASS: done removes only clean+merged+quiet recorded worktrees; every keep reason named'
+  script: test — bunx --bun vitest run packages/lore/tests/integration/cli/done-worktree-cleanup.bun.test.ts && echo 'AC-WTC-1 PASS: done removes only clean+merged+quiet recorded worktrees; every keep reason named'
 - [⚑] [script] AC-WTC-2: lore worktree sweep (describe 'worktree sweep (#106)'): without --apply it lists every claim-recorded worktree of archived/deprecated tasks with remove/keep and a reason, exits 0 and changes nothing (worktree list byte-identical before/after); with --apply it removes exactly the rows listed remove; a worktree no claim recorded is not listed; a failing git probe yields not-measured, never remove
-  script: test — cd packages/lore && bun test tests/integration/cli/worktree-sweep.bun.test.ts && echo 'AC-WTC-2 PASS: sweep reports by default, --apply removes exactly the remove rows, unrecorded untouched, git failure not-measured'
+  script: test — bunx --bun vitest run packages/lore/tests/integration/cli/worktree-sweep.bun.test.ts && echo 'AC-WTC-2 PASS: sweep reports by default, --apply removes exactly the remove rows, unrecorded untouched, git failure not-measured'
 - [⚑] [script] AC-WTC-3: After the change, lore baseline coverage on the branch holding baseline-archive-a-task exits 0: every new census site of done and worktree sweep is mapped to BR-961, BR-962 or a non-business reason
   script: other — bun run packages/lore/src/index.ts baseline coverage baseline-execution && echo 'AC-WTC-3 PASS: execution branch 0 coverage gaps after worktree cleanup'
 

@@ -6,7 +6,7 @@ title: "Verify reachability — plan-promote early warning, reachability-aware a
 status: approved
 priority: medium
 created: 2026-07-28
-updated: 2026-10-10
+updated: 2026-10-17
 tags: []
 links:
   - {id: SPEC-094, type: implements}
@@ -57,7 +57,7 @@ Structured via `lore ac add` (script-mode, oracle-bound). Sketch: (1) `verifyRea
 - [⚑] [script] AC-VRW-4: bun run typecheck exits 0 across all packages
   script: tsc — bun run typecheck
 - [⊘] [script] AC-VRW-5: End-to-end on built dist/lore in a throwaway corpus: approving a plan parented to a PRD prints >=1 reachability advisory line to stderr with exit 0, and approving a plan parented to a spec with >=1 script-mode AC prints zero advisory lines; suite exits 0
-  script: e2e — cd packages/lore && bun test tests/unit/adapters/cli-plan-promote-advisory.bun.test.ts
+  script: e2e — bunx --bun vitest run packages/lore/tests/unit/adapters/cli-plan-promote-advisory.bun.test.ts
 
 ## Code anchors
 

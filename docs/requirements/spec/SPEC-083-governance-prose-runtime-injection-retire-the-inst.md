@@ -6,7 +6,7 @@ title: "Governance prose runtime injection: retire the installed corpus-workflow
 status: deprecated
 priority: medium
 created: 2026-07-26
-updated: 2026-10-10
+updated: 2026-10-17
 tags: []
 links:
   - {id: SPEC-201, type: implements}
@@ -42,7 +42,7 @@ Structured ACs via `lore ac add` (script-mode; see `lore ac list spec-083-...`).
 ## Acceptance Criteria (structured)
 
 - [⚑] [script] AC-083-1: Compiled-binary e2e: spawning dist/lore governance exits 0 and its stdout is byte-identical to assets/governance/corpus-workflow.md
-  script: e2e — cd packages/lore && bun test tests/integration/governance-compiled.bun.test.ts
+  script: e2e — bunx --bun vitest run packages/lore/tests/integration/governance-compiled.bun.test.ts
 - [⚑] [script] AC-083-2: Unit suite pins: machine install set yields zero governance/corpus-workflow.md entries while governance/seat-briefing.md remains; hook source contains zero corpus-workflow references and spawns the governance verb
   script: test — bunx vitest run packages/lore/tests/unit/setup-governance-retirement.test.ts
 - [⚑] [script] AC-083-3: bun run typecheck exits 0 across all packages

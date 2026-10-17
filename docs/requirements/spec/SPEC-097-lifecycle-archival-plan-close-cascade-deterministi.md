@@ -6,7 +6,7 @@ title: "Lifecycle archival — plan-close cascade, deterministic archive sweep, 
 status: approved
 priority: medium
 created: 2026-07-27
-updated: 2026-10-10
+updated: 2026-10-17
 tags: []
 ---
 # Lifecycle archival — plan-close cascade, deterministic archive sweep, injected candidate surfacing
@@ -53,10 +53,10 @@ Structured via `lore ac add`. Sketch: (1) core unit — R2/R3/R4 six-dimension c
 - [⚑] [script] AC-097-1: Core unit: computeArchiveCandidates covers superseded_handoff, expired_handoff (boundary at exactly TTL), done_plan_straggler, knowledge/adr exclusion, fresh-claim exclusion, and empty-corpus regression
   script: test — bunx vitest run packages/core/tests/unit/archive-candidates.test.ts
 - [⚑] [script] AC-097-2: Integration: archiving a plan cascades unclaimed child tasks and plan-parented handoffs to archived with one audit entry per doc; fresh-claimed tasks are skipped and named in the result; plan archival itself never rolls back
-  script: test — cd packages/lore && bun test tests/integration/plan-close-cascade.bun.test.ts
+  script: test — bunx --bun vitest run packages/lore/tests/integration/plan-close-cascade.bun.test.ts
 - [⚑] [script] AC-097-3: CLI e2e: lore archive --sweep exits 3 listing each candidate with rule and literal apply repair; lore archive --apply archives all candidates with audit entries; immediate re-sweep exits 0
-  script: e2e — cd packages/lore && bun test tests/integration/archive-sweep-cli.bun.test.ts
+  script: e2e — bunx --bun vitest run packages/lore/tests/integration/archive-sweep-cli.bun.test.ts
 - [⚑] [script] AC-097-4: Compiled injection e2e: archive_candidates key present in lore bootstrap --injection output iff count is positive; zero-candidate injection shape stays byte-stable vs the SPEC-096 key order
-  script: e2e — cd packages/lore && bun test tests/e2e/bootstrap-injection-compiled.bun.test.ts
+  script: e2e — bunx --bun vitest run packages/lore/tests/e2e/bootstrap-injection-compiled.bun.test.ts
 - [⚑] [script] AC-097-5: bun run typecheck exits 0 across all packages
   script: tsc — bun run typecheck

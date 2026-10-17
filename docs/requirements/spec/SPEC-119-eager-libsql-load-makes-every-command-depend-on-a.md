@@ -6,7 +6,7 @@ title: "Eager libsql load makes every command depend on a healthy TMPDIR"
 status: approved
 priority: medium
 created: 2026-07-31
-updated: 2026-10-10
+updated: 2026-10-17
 tags: [store, compiled-binary, native-module, dogfood]
 ---
 ## Overview/Goal
@@ -89,9 +89,9 @@ Putting the in-process assertions in the vitest file would fail to resolve `bun:
 - [⚑] [script] AC-LL-4: Invocation is lore sync push, not lore status: loadLoreApp strips config.sync unconditionally so no command routed through it can reach the credential-resolution or TursoStore branch, while lore sync is exempt by design and calls resolveSyncCredentials before touching libsql. Fixture by literals: sync.enabled true, remote_url present, LORE_SYNC_TOKEN set to probe-token-not-a-real-credential, TMPDIR set to /nonexistent-tmpdir-probe, no reachable network. The run exits non-zero AND its stderr contains the literal token TMPDIR, the literal value /nonexistent-tmpdir-probe, a remediation line with the literal substring export TMPDIR= , and a first line containing TMPDIR
   script: test — bunx vitest run packages/lore/tests/e2e/libsql-lazy-load.test.ts -t "AC-LL-4"
 - [⊘] [script] AC-LL-5: Anti-downgrade invariant in-process on the createApp return value: err(VALIDATION_ERROR) and never an App whose store is a SQLiteStore instance. VALIDATION_ERROR rather than STORE_ERROR because resolveSyncCredentials returns it and app.ts propagates verbatim, as measured by T1's RED run; that mapping is pre-existing and out of scope. Induced by the one in-process reachable state, sync.enabled true with LORE_SYNC_TOKEN absent. Native-load failure itself is covered at the CLI layer by AC-LL-4
-  script: test — cd packages/lore && bun test tests/integration/libsql-store-selection.bun.test.ts -t "AC-LL-5"
+  script: test — bunx --bun vitest run packages/lore/tests/integration/libsql-store-selection.bun.test.ts -t "AC-LL-5"
 - [⊘] [script] AC-LL-7: Under a healthy TMPDIR the D-007 store selection is unchanged across three cases asserted in-process on the createApp return value: sync key absent yields a SQLiteStore-backed App, sync.enabled false yields a SQLiteStore-backed App, and sync.enabled true with missing credentials yields err(VALIDATION_ERROR) and never a store instance; store identity read from the store property constructor, Result shape for the third
-  script: test — cd packages/lore && bun test tests/integration/libsql-store-selection.bun.test.ts -t "AC-LL-7"
+  script: test — bunx --bun vitest run packages/lore/tests/integration/libsql-store-selection.bun.test.ts -t "AC-LL-7"
 - [⚑] [script] AC-LL-8: Unreachability guard for the source-mode-only synchronous fallback: a corpus with sync.enabled true, run under TMPDIR set to /nonexistent-tmpdir-probe via a command routed through loadLoreApp (lore status), exits 0 and emits Total documents. This holds only because loader.ts strips config.sync unconditionally so the compiled binary never reaches app.ts's Turso branch and its createRequire fallback, which is known to throw Cannot find module from a compiled binary. If that strip is ever removed, this AC goes red at once — replacing the orchestrator's one-time hand audit of every createApp call site with a standing oracle
   script: test — bunx vitest run packages/lore/tests/e2e/libsql-lazy-load.test.ts -t "AC-LL-8"
 - [⚑] [script] AC-LL-9: The pinned ordering's untested half: a corpus with sync.enabled true and credentials MISSING, run under TMPDIR set to /nonexistent-tmpdir-probe via lore sync push, reports the CREDENTIAL failure and not the TMPDIR failure. Concretely, stderr names the missing credential and its first line does not contain TMPDIR. This is the only observation that distinguishes credential-validation-first from probe-first, since AC-LL-4's fixture supplies a valid token and both orderings are indistinguishable under it

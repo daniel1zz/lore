@@ -6,7 +6,7 @@ title: "Claim-time actor-identity guard + zero-evidence release advisory"
 status: approved
 priority: medium
 created: 2026-07-14
-updated: 2026-10-10
+updated: 2026-10-17
 tags: []
 ---
 ## Overview/Goal
@@ -40,11 +40,11 @@ Structured ACs are declared via `lore ac add` (script mode); prose summary:
 ## Acceptance Criteria (structured)
 
 - [·] [script] AC-IDENTITY-REJECT: A claim whose actor resolved from os_default, colliding with a fresh same-by/os_default/different-worktree claim in the same plan, is rejected with field gate:task-claim:actor-identity; distinct explicit identities (flag/env) never trip the predicate
-  script: test — cd packages/lore && bun test tests/unit/service/actor-identity-guard.bun.test.ts
+  script: test — bunx --bun vitest run packages/lore/tests/unit/service/actor-identity-guard.bun.test.ts
 - [·] [script] AC-IDENTITY-ESCAPE: Config workflow.gates."task-claim".actor_identity.enabled=false disables ONLY the actor-identity predicate; anchor-overlap and upstream-approval outcomes stay byte-identical (REGRESSION)
-  script: test — cd packages/lore && bun test tests/unit/service/actor-identity-guard.bun.test.ts
+  script: test — bunx --bun vitest run packages/lore/tests/unit/service/actor-identity-guard.bun.test.ts
 - [·] [script] AC-RELEASE-ADVISORY: lore release on a task with zero evidence entries exits 0 AND emits a warning (text line + warnings[] in --json/MCP lore_release); with >=1 evidence entry output is byte-identical to current behavior (REGRESSION)
-  script: test — cd packages/lore && bun test tests/unit/service/release-advisory.bun.test.ts
+  script: test — bunx --bun vitest run packages/lore/tests/unit/service/release-advisory.bun.test.ts
 
 ## Code anchors
 

@@ -6,7 +6,7 @@ title: "Resume-ticket coverage floor — blocking channel, arming provenance, cr
 status: approved
 priority: medium
 created: 2026-08-01
-updated: 2026-10-10
+updated: 2026-10-17
 tags: []
 links:
   - {id: SPEC-112, type: relates-to}
@@ -97,6 +97,6 @@ Seven structured criteria are declared on this spec (`lore ac list`); each summa
 - [⚑] [script] AC-RCH-6: Given a transcript in which an assistant message AFTER the ticket already carries the complete disposition set while the current last_assistant_message carries none, the verb exits 0 and writes nothing to stdout, proving one accounting closes the item for the rest of the session; paired with a control on the same transcript where that earlier message carries only a proper subset and the verb DOES emit a block decision whose named id set is SET-EQUAL to the still-missing remainder, so the exit-0 half cannot come from ignoring the transcript entirely; the run reports exactly 1 matched test file
   script: test — bunx vitest run packages/lore/tests/unit/handoff-coverage-check.test.ts -t "cross-turn"
 - [⚑] [script] AC-RCH-7: Against a freshly built dist/lore binary and the real unmodified assets/hooks/stop-handoff-coverage.mjs resolving that binary through PATH, an incomplete-accounting Stop payload yields hook exit 0 with a stdout JSON block decision naming the missing ids, and a complete-accounting payload yields hook exit 0 with empty stdout — proving the consumer-visible compiled path and not only the in-process verb; the run reports exactly 1 matched test file
-  script: e2e — bun run build && cd packages/lore && bun test tests/e2e/resume-coverage-compiled.bun.test.ts
+  script: e2e — bun run build && bunx --bun vitest run packages/lore/tests/e2e/resume-coverage-compiled.bun.test.ts
 - [⚑] [script] AC-RCH-8: Over a structured array of five payload classes — incomplete accounting, complete accounting, no ticket present, malformed stdin, and an unreadable transcript path — the verb exits 0 for EVERY class, so the exit status is proven to carry no verdict at all; the classes are told apart solely by stdout, which is a parsed block decision for the incomplete class and empty for the other four; this pins the H2 indistinguishability so a later change cannot re-load the verdict onto the exit status without failing here; the run reports exactly 1 matched test file
   script: test — bunx vitest run packages/lore/tests/unit/handoff-coverage-check.test.ts -t "exit status carries no verdict"

@@ -6,7 +6,7 @@ title: "SPEC — AC-Quantifiability Gate (design-time standardization enforcemen
 status: draft
 priority: medium
 created: 2026-07-17
-updated: 2026-10-10
+updated: 2026-10-17
 tags: []
 ---
 # SPEC — AC-Quantifiability Gate (design-time standardization enforcement)
@@ -53,7 +53,7 @@ The lint is the hard gate; the AI judge is advisory. `lintAcQuantifiability` mir
 - [⚑] [script] AC-ACQ-1: lintAcQuantifiability returns >=1 block finding for an AC statement with an abstract word and 0 measurable token, and exactly 0 findings when rewritten with a numeric threshold
   script: test — bunx vitest run packages/core/tests/unit/ac-quality.test.ts
 - [⚑] [script] AC-ACQ-2: ac-quality.ts imports no AIProvider/generate symbol and issues 0 provider calls; source-scan test asserts grep finds no AIProvider in the module
-  script: test — bun test packages/core/tests/unit/ac-quality-no-llm.bun.test.ts
+  script: test — bunx --bun vitest run packages/core/tests/unit/ac-quality-no-llm.bun.test.ts
 - [⚑] [script] AC-ACQ-3: spec-create with an AC carrying an unquantified abstract word exits 4 with a feeding pack naming the offending AC id; same spec with all ACs quantified exits 0
   script: test — bunx vitest run packages/lore/tests/unit/service/ac-quantifiable-gate.test.ts
 - [⚑] [script] AC-ACQ-4: with workflow.gates.spec-create.ac_quantifiable.enabled false, a spec that AC-ACQ-3 would block passes with exit 0

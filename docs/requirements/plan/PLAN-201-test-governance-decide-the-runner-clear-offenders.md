@@ -6,7 +6,7 @@ title: "Test governance: decide the runner, clear offenders, land guards, scope 
 status: approved
 priority: medium
 created: 2026-10-16
-updated: 2026-10-16
+updated: 2026-10-17
 tags: []
 parent: SPEC-195
 phases:
@@ -15,6 +15,7 @@ phases:
   - {name: "Phase 3: guards", description: "Sandbox guard, tree snapshot, prose-pin check, oracle ownership, missing-oracle verify (T4, T5, T6, T9, T10, T11)"}
   - {name: "Phase 4: selector", description: "Declared test inputs and the selector cross-check (T13, T14)"}
   - {name: "Phase 5: cadence", description: "Parallel bun run, workflow docs and rule records, final verify on main (T15, T16, T17)"}
+  - {name: "Phase 3b: one runner", description: "Per ADR TG-1 option (b): migrate to vitest on Bun (T23), build once (T24), in-process command tests (T25, T26); precedes the selector and cadence phases"}
 ---
 ## Overview
 Implements spec-test-governance-guards-that-refuse-bad-tests-declared (AC-TG-1..11). Order: decide the runner first, clear the known offenders, then turn each guard on (a guard lands only when main already passes it), then the selector, then the cadence.
@@ -38,8 +39,17 @@ Implements spec-test-governance-guards-that-refuse-bad-tests-declared (AC-TG-1..
 | T15 | Parallel bun run + measure-test-wall script | AC-TG-11 |
 | T16 | Workflow update: CLAUDE.md Commands, scoped-oracle rule, AS-13/AS-14/AS-24 rule records | AC-TG-10 |
 | T17 | Verify on main: rebuild, lore verify AC-TG-2..11 | AC-TG-9, AC-TG-10, AC-TG-11 |
+| T18 | AC-OX-6 oracle regains its positive parsed count and clean-tree tail (found merging T3) | INV-1 |
+| T19 | InMemoryStore cycle detection follows parent_id (found by T12) | AC-TG-9 |
+| T20 | Worktrees resolve their own @lore packages via tsconfig paths (found by T10) | INV-2 |
+| T21 | Two regressions from T18 and T20 (mirror exit precedence, falsifier RED control) | INV-2 |
+| T22 | Missing-oracle floor counts only passes that ran the missing file | AC-TG-6 |
+| T23 | One runner: vitest on the Bun runtime for every test (ADR TG-1 option b) | AC-TG-10 |
+| T24 | Build dist/lore once per run; no test rebuilds it | AC-TG-11 |
+| T25 | In-process command helper + first half of the 67 command-logic tests that start dist/lore | AC-TG-11 |
+| T26 | Second half of the in-process migration | AC-TG-11 |
 
-Dependencies: T2, T3 block T4; T4 blocks T5 (shared setup file); T9 blocks T11; T10 blocks T11; T1 blocks T13 and T15; T13 blocks T14; T4, T5 block T15; T13, T14, T15 block T16; every task blocks T17. Phases: 1 decide (T1); 2 clear offenders (T2, T3, T7, T8, T12); 3 guards (T4, T5, T6, T9, T10, T11); 4 selector (T13, T14); 5 cadence (T15, T16, T17). Phase 4 and 5 tasks are re-planned if the T1 decision changes the runner.
+Dependencies: T2, T3 block T4; T4 blocks T5 (shared setup file); T9 blocks T11; T10 blocks T11; T1 blocks T13 and T15; T13 blocks T14; T4, T5 block T15; T13, T14, T15 block T16; every task blocks T17. Phases: 1 decide (T1); 2 clear offenders (T2, T3, T7, T8, T12); 3 guards (T4, T5, T6, T9, T10, T11); 4 selector (T13, T14); 5 cadence (T15, T16, T17). Runner decision (2026-10-17): ADR adr-tg-1-test-runner-decision-measured-comparison-of-bun-only, option (b). Phase 3b (T23-T26) precedes the selector and cadence phases: T23 blocks T5, T11, T13, T15, T24, T25; T25 blocks T26; T24 and T26 block T15.
 
 Approved ACs changed with `lore ac set --correction`: T2 owns AC-MOS-2, AC-PHASEVER-2/3, AC-FR-6/7/10; T3 owns AC-GV-5, AC-BFI-6/7, AC-TC-2, AC-OX-6; T11 owns every AC it repoints.
 
@@ -56,7 +66,7 @@ Source audits (2026-10-16, main 2fc7661e): live-corpus/repo-write audit (74 file
 ## Risk Register
 | Risk | Impact | Mitigation |
 |---|---|---|
-| A concurrent session merges a new offender while a guard lands | M | The guard fails loud on main and names it; the merging task fixes it before T17 |
+| A concurrent session merges a new offender while a guard lands | M | The guard fails loud on main and names it; the guard's own task fixes the offender before its merge (INV-2) |
 | Parallel bun runs expose shared-state races (e.g. #191 falsifier-dep-materialization) | H | T15 fixes the shared state at its root; no retries or timeout bumps |
 | The T1 decision invalidates T13/T15 approaches | M | They are blocked by T1 and re-planned after it |
 | Moving approved ACs' oracles weakens them | M | INV-1; reviewers compare the old and new oracle on the same falsifier |

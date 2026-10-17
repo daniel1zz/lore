@@ -6,7 +6,7 @@ title: "Distribution integration model + asset update convergence"
 status: approved
 priority: medium
 created: 2026-07-25
-updated: 2026-10-10
+updated: 2026-10-17
 tags: []
 links:
   - {id: SPEC-046, type: relates-to}
@@ -287,23 +287,23 @@ Structured ACs are declared via `lore ac add` (see corpus). Prose summary: the e
 - [⚑] [script] AC-076-1: planUpdate assigns each golden fixture exactly one of the five states (sync/outdated/diverged/missing/orphaned); a digest-equal input returns summary=sync with zero per-file sha comparisons (spy call count = 0)
   script: test — bunx vitest run packages/lore/tests/unit/core/plan-update.test.ts
 - [⚑] [script] AC-076-2: On a fully-sync install 'lore setup --check' exits 0; after mutating one managed file it exits 3 and --json lists that path under files.diverged
-  script: test — cd packages/lore && bun test tests/integration/setup-check.bun.test.ts
+  script: test — bunx --bun vitest run packages/lore/tests/integration/setup-check.bun.test.ts
 - [⚑] [script] AC-076-3: Re-running 'lore setup --yes' over a user-modified managed file leaves its bytes unchanged and prints the path plus a repair command; with --force-diverged the file's sha256 equals the embedded sha and a backup file exists
-  script: test — cd packages/lore && bun test tests/integration/setup-converge-diverged.bun.test.ts
+  script: test — bunx --bun vitest run packages/lore/tests/integration/setup-converge-diverged.bun.test.ts
 - [⚑] [script] AC-076-4: After converge, every user_once file is byte-identical to its pre-converge content; CLAUDE.md content outside the lore marker pair is byte-identical while the section between markers equals the new template
-  script: test — cd packages/lore && bun test tests/integration/setup-user-once-marker.bun.test.ts
+  script: test — bunx --bun vitest run packages/lore/tests/integration/setup-user-once-marker.bun.test.ts
 - [⚑] [script] AC-076-5: mergeSettings removes lore-owned hook registrations whose command path is absent from the new payload and leaves non-lore entries byte-identical; prune count is reported in the merge result
   script: test — bunx vitest run packages/lore/tests/unit/core/merge-settings-prune.test.ts
 - [⚑] [script] AC-076-6: After converge the manifest's binary_version equals the binary's embedded LORE_BINARY_VERSION, assets_digest equals the embedded tree_digest, and installed_at parses as ISO8601
-  script: test — cd packages/lore && bun test tests/integration/setup-manifest-fields.bun.test.ts
+  script: test — bunx --bun vitest run packages/lore/tests/integration/setup-manifest-fields.bun.test.ts
 - [⚑] [script] AC-076-7: Hook Phase F emits 0 advisory bytes when cache status=sync; exactly 1 advisory line when status=stale; with LORE_SETUP_NO_CHECK=1 it emits 0 bytes and spawns 0 child processes
   script: test — bunx vitest run packages/lore/tests/unit/hooks/session-start-freshness.test.ts
 - [⚑] [script] AC-076-8: After 7 converge runs each writing differing content, .lore-backups contains at most 5 run directories and the removed runs are the oldest by timestamp
-  script: test — cd packages/lore && bun test tests/integration/setup-backup-prune.bun.test.ts
+  script: test — bunx --bun vitest run packages/lore/tests/integration/setup-backup-prune.bun.test.ts
 - [⚑] [script] AC-076-9: With assets/ unchanged since generation, the freshness check exits 0; after any assets/ file edit it exits non-zero until the manifest is regenerated
   script: build — bun scripts/embed-assets-manifest.mjs --check
 - [⚑] [script] AC-076-10: Compiled-binary end-to-end cycle against a temp target dir: fresh 'lore setup --yes' then '--check' exits 0; mutating one managed file flips '--check' to exit 3 listing it under diverged; 'lore setup --yes --force-diverged' restores it and '--check' exits 0 again
-  script: e2e — cd packages/lore && bun test tests/e2e/setup-freshness-cycle.bun.test.ts
+  script: e2e — bunx --bun vitest run packages/lore/tests/e2e/setup-freshness-cycle.bun.test.ts
 
 ## Code anchors
 

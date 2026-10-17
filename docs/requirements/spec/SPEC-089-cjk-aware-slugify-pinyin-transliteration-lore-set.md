@@ -6,7 +6,7 @@ title: "CJK-aware slugify (pinyin transliteration) + lore set --slug repair path
 status: approved
 priority: medium
 created: 2026-07-23
-updated: 2026-10-10
+updated: 2026-10-17
 tags: [slugify, cjk, cli, core]
 ---
 # SPEC-068 — CJK-aware slugify + `lore set --slug` repair path
@@ -90,4 +90,4 @@ After truncating to 64 chars, cut back to the last complete hyphen-separated tok
 - [⚑] [script] AC-068-9: Golden regression table: representative ASCII titles produce byte-identical slugs to the pre-change algorithm (except documented D3/D4 degenerate cases)
   script: test — bunx vitest run packages/lore/tests/unit/core/slugify-cjk.test.ts -t 'AC-068-9'
 - [⚑] [script] AC-068-10: Compiled-binary e2e: freshly built dist/lore, run from a temp corpus OUTSIDE the repo (no node_modules), creates an all-CJK-title doc whose slug is pinyin (starts with the type prefix + first pinyin token), exit 0
-  script: test — cd packages/lore && bun test tests/integration/cli/slugify-compiled.bun.test.ts
+  script: test — bunx --bun vitest run packages/lore/tests/integration/cli/slugify-compiled.bun.test.ts

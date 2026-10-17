@@ -6,7 +6,7 @@ title: "plan-close predicates measure invariants: an applicability verdict in th
 status: approved
 priority: medium
 created: 2026-07-30
-updated: 2026-10-10
+updated: 2026-10-17
 tags: []
 links:
   - {id: ADR-017, type: implements}
@@ -166,7 +166,7 @@ Structured criteria are authored via `lore ac add` (below); the prose here is a 
 - [⚑] [script] AC-PCI-11: PREDICATE_CONTRACTS declares an entry for every field checkPlanClose can emit (asserted by comparing the table's key set against the emitted-field constants), and lore gate --explain plan-close prints each predicate's invariant, measured proxy, and known_false_pass/known_false_block entries.
   script: test — bunx vitest run packages/lore/tests/unit/service/predicate-contracts.test.ts -t 'contract table'
 - [⚑] [script] AC-PCI-12: From a throwaway corpus driven by the compiled dist/lore binary: a plan whose single claimed AC carries attested evidence, whose ancestor spec has no domain doc, and whose config sets no min_ratio, archives at exit 0 with the not-applicable advisory printed; a sibling plan with an unattested claimed AC exits 4 with that AC id in the output.
-  script: e2e — cd packages/lore && bun test tests/e2e/plan-close-invariants-compiled.bun.test.ts -t 'compiled close'
+  script: e2e — bunx --bun vitest run packages/lore/tests/e2e/plan-close-invariants-compiled.bun.test.ts -t 'compiled close'
 - [⚑] [script] AC-PCI-9: The attestation-floor feeding pack names every unattested claimed AC id; it contains the literal substring 'attested ratio' when min_ratio is explicitly configured and does NOT contain that substring when min_ratio is unconfigured; feed-attestation-reachability.test.ts's byte-pinned Recovery tail still passes unchanged.
   script: test — bunx vitest run packages/lore/tests/unit/service/feed-attestation-ac-diagnostics.test.ts packages/lore/tests/unit/service/feed-attestation-reachability.test.ts -t 'unattested naming'
 - [⚑] [script] AC-PCI-13: VerificationProjectionService's plan panel passes a null min_ratio through verbatim (never coerced to 0 or a numeric default) and its claimed-AC coverage field equals deriveClaimedAcCoverage over computeAcCoverage's own output for the same fixture, so the panel and the gate cannot disagree.
@@ -186,4 +186,4 @@ Structured criteria are authored via `lore ac add` (below); the prose here is a 
 - [·] [script] AC-PCI-20: A plan-close run in which EVERY blocking conjunct returned notApplicable reports that vacuity as a literal string on the gate's own output surface, asserted by string equality and never inferred from an empty failure list; a run with at least one applicable conjunct does NOT carry that string
   script: test — bunx vitest run packages/lore/tests/unit/service/plan-close-vacuity-guard.test.ts -t 'PCI-20'
 - [·] [script] AC-PCI-21: From a throwaway corpus driven by the compiled dist/lore binary: archiving a plan whose tasks carry evidence and declare no ac_scope exits NONZERO and names the missing declaration, while the same corpus's zero-evidence plan still archives at exit 0
-  script: e2e — cd packages/lore && bun test tests/e2e/plan-close-invariants-compiled.bun.test.ts -t 'PCI-21'
+  script: e2e — bunx --bun vitest run packages/lore/tests/e2e/plan-close-invariants-compiled.bun.test.ts -t 'PCI-21'

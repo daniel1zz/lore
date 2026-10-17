@@ -6,7 +6,7 @@ title: "A criterion of a locked specification can be fixed as an audited correct
 status: approved
 priority: medium
 created: 2026-10-12
-updated: 2026-10-12
+updated: 2026-10-17
 tags: []
 links:
   - {id: SPEC-166, type: relates-to}
@@ -76,7 +76,7 @@ Declared with `lore ac add` (AC-CC-1..4).
 - [⚑] [script] AC-CC-1: AcService.setCriterion correction on InMemoryStore (new file record-lock-criterion-correction.test.ts): an approved spec with one evidence row; (a) correction {reason:'r'} + statement patch -> ok, statement changed, status still approved, exactly one new version whose change_summary starts 'Correction: r', one audit update row whose details.correction.reason === 'r'; (b) same patch without correction -> the existing record-edit refusal, store write spy count 0; (c) reason '' and '   ' -> VALIDATION_ERROR field correction.reason, write count 0; (d) correction + command change -> oracle_generation exactly +1; (e) correction + falsifier fields -> ok, falsifier stored (closes #162); (f) addCriterion and removeCriterion on the locked spec return the same record-edit refusal code as (b) with write count 0 (their opts type carries no correction); (g) draft spec + correction -> ok, status draft, change_summary carries the reason; (h) unknown AC id + correction -> not-found, write count 0. Smallest red mutation: skipping the demotion-skip makes (a) see status draft; letting correction bypass the gate in addCriterion fails (f).
   script: test — bunx vitest run packages/lore/tests/unit/service/record-lock-criterion-correction.test.ts
 - [⚑] [script] AC-CC-2: Compiled CLI, throwaway corpus (mkdtemp + lore init, new file ac-set-correction-compiled.bun.test.ts), an approved spec with an evidence row: (a) lore ac set <spec> <AC> --statement x --correction 'r' exits exactly 0, stdout contains '(correction recorded: r)', and lore get <spec> then prints 'Corrections: 1' and Status approved; (b) the same call without --correction exits exactly 4 and its stderr names 'lore ac set' together with '--correction'; (c) --correction '' exits exactly 2 and lore log shows no new version; (d) lore ac add and lore ac rm with --correction 'r' each exit exactly 2 naming 'ac set --correction', nothing written; (e) a correction declaring --falsifier-path/find/replace/exit-code exits 0 and lore ac list --json shows the falsifier. Smallest red mutation: not registering --correction on ac set makes (a) exit 4.
-  script: e2e — bun run build && cd packages/lore && bun test tests/e2e/ac-set-correction-compiled.bun.test.ts
+  script: e2e — bun run build && bunx --bun vitest run packages/lore/tests/e2e/ac-set-correction-compiled.bun.test.ts
 - [⚑] [script] AC-CC-3: bun run typecheck exits 0 with the new option threaded through AcService and the ac CLI command.
   script: tsc — bun run typecheck
 - [⚑] [script] AC-CC-4: Shipped prose names the new exit: the produce-rule asset assets/context/corpus-workflow-2-produce.md, its installed copy .claude/rules/lore-corpus-workflow-produce.md and root CLAUDE.md each contain 'lore ac set' followed in the same sentence by '--correction'. Root CLAUDE.md under its eviction floor is plan invariant I3, not this AC. Measured red 2026-10-12: all three lack it. Smallest red mutation: dropping '--correction' from the asset sentence makes this command (the three-file grep loop) exit 1.

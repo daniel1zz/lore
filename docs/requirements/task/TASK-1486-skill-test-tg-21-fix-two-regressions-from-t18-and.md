@@ -3,7 +3,7 @@ id: TASK-1486
 type: task
 role: plan
 title: "[Skill:test] TG-21 fix two regressions from T18 and T20 (mirror exit precedence, falsifier RED control)"
-status: draft
+status: archived
 priority: critical
 phase: "Phase 3: guards"
 created: 2026-10-16

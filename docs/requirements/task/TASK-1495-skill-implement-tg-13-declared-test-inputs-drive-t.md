@@ -7,7 +7,7 @@ status: draft
 priority: high
 phase: "Phase 4: selector"
 created: 2026-10-16
-updated: 2026-10-16
+updated: 2026-10-17
 tags: []
 parent: PLAN-201
 plan: PLAN-201
@@ -21,3 +21,5 @@ Approach: Per the T1 decision. Each test that reads a repository file other than
 Source: spec-test-governance-guards-that-refuse-bad-tests-declared
 AC: AC-TG-7.
 Also: add the input declarations to every existing test that reads repository files other than by static import (at least the 28 tests selected today as tree-scan-oracle) so the run-time check lands green; cover reads made by child processes and by the compiled binary (state the mechanism, one fixture each).
+
+Runner decision (ADR adr-tg-1-test-runner-decision-measured-comparison-of-bun-only, accepted 2026-10-17): option (b), one runner = vitest on the Bun runtime, migrated by T23 (blocks this task). Selection = vitest static import graph (vitest related/--changed are usable for every file once migrated) plus declared inputs for file reads and subprocess starts; experimental.recordDependencies does not exist in the pinned vitest 3.2.6.

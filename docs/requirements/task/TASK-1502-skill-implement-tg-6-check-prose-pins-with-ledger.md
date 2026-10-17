@@ -3,7 +3,7 @@ id: TASK-1502
 type: task
 role: plan
 title: "[Skill:implement] TG-6 check-prose-pins with ledger and pre-push wiring; fix four prose pins"
-status: draft
+status: archived
 priority: high
 phase: "Phase 3: guards"
 created: 2026-10-16

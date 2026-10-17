@@ -6,7 +6,7 @@ title: "Close the eight verified critical defects: no judge, listing, mirror, wo
 status: approved
 priority: medium
 created: 2026-10-16
-updated: 2026-10-16
+updated: 2026-10-17
 tags: []
 links:
   - {id: SPEC-040, type: relates-to}
@@ -83,19 +83,19 @@ Extends (not edits) the governing specs in the Scope table; each fix task links 
 - [⚑] [script] AC-CRIT-1: Given a parent spec longer than max_context_chars whose heading '## D8' starts after the cut, the built review prompt contains a parent truncation notice stating shown and total chars and listing 'D8'; given a parent that fits, the prompt contains no parent truncation notice
   script: test — bunx vitest run packages/lore/tests/unit/ai/review-parent-truncation.test.ts
 - [⚑] [script] AC-CRIT-2: A review whose body and parent were both cut keeps truncated=true (AC-ADF-8 unchanged) and stores truncation as exactly two entries {section, shown_chars, total_chars} for body and parent whose numbers equal the shown and full lengths, and both survive a SQLite write and re-open (read back from a real SQLiteStore); lore review text output prints one line per cut section; a review whose inputs fit reads back with no truncation key and prints no such line
-  script: test — bunx vitest run packages/lore/tests/unit/service/review-truncation-record.test.ts && bun test packages/lore/tests/unit/store/judgment-truncation-roundtrip.bun.test.ts
+  script: test — bunx vitest run packages/lore/tests/unit/service/review-truncation-record.test.ts && bunx --bun vitest run packages/lore/tests/unit/store/judgment-truncation-roundtrip.bun.test.ts
 - [⚑] [script] AC-CRIT-3: Given an assessment whose omitted-file list holds src/a.ts (wholly omitted, not head-truncated) and a MAJOR finding whose paths[] include src/a.ts (a file that exists at the assessed commit), the finalized assessment lists that finding in unverifiable_findings with reason 'not-shown-to-judge' and counts it in a not_shown count separate from path_verification.unverifiable, and not in typed_gaps; a finding on a file the judge was shown, wholly or head-truncated, stays in typed_gaps
-  script: test — cd packages/lore && bun test tests/unit/service/assess-truncated-path-findings.bun.test.ts
+  script: test — bunx --bun vitest run packages/lore/tests/unit/service/assess-truncated-path-findings.bun.test.ts
 - [⚑] [script] AC-CRIT-4: In a throwaway corpus, after changing the body of an exported spec and of an exported knowledge doc, running the mirror export script (bun run mirror:export entry point) with no flags rewrites both mirror files with the new body and the following --check exits 0; lore export-docs without --force still leaves a changed body untouched (SPEC-021 A2 unchanged)
   script: test — bunx vitest run scripts/tests/mirror-body-drift-rewrite.test.ts -t 'body change'
 - [⚑] [script] AC-CRIT-5: In a throwaway corpus, after changing ONLY a doc's status, the mirror --check run before any export exits exactly 2 and its output names that doc's mirror file
   script: test — bunx vitest run scripts/tests/mirror-body-drift-rewrite.test.ts -t 'status-only'
 - [⚑] [script] AC-CRIT-6: In a throwaway corpus with two knowledge docs, one invalidated: 'lore list --type knowledge --json' exits 0 with data.total=1 and data.omitted_invalid=1, its text output contains '1 invalidated hidden', and with --include-invalid it reports total=2 and omitted_invalid=0; the MCP lore_list result carries the same omitted_invalid
-  script: test — cd packages/lore && bun test tests/integration/cli/list-omitted-invalid.bun.test.ts
+  script: test — bunx --bun vitest run packages/lore/tests/integration/cli/list-omitted-invalid.bun.test.ts
 - [⚑] [script] AC-CRIT-7: Given a temp git repo whose .lore/lore.db user_version is one below the code's and a linked worktree without .lore: (a) a CLI command run from the worktree that resolves the corpus through the git_common_dir fallback exits exactly 4 with a VALIDATION_ERROR naming the schema mismatch; (b) createApp(findLoreDbPath()) called in-process with the worktree as cwd throws the named schema-mismatch error before opening the store; (c) 'lore gate spec-create' run from the worktree with LORE_GATE_BYPASS=1 (the bypass-audit path that must never exit) exits exactly 0 and prints one warning line naming the mismatch; after (a)-(c) the main db's user_version is unchanged; (d) the same CLI command run from the main checkout migrates the db to the code's version
-  script: test — cd packages/lore && bun test tests/e2e/worktree-no-foreign-migration.bun.test.ts
+  script: test — bunx --bun vitest run packages/lore/tests/e2e/worktree-no-foreign-migration.bun.test.ts
 - [⚑] [script] AC-CRIT-8: In a sandboxed worktree session whose seat holds claims: when seat briefing + framing + bootstrap fence total 10000 chars or more, the SessionStart hook's additionalContext is shorter than 10000 chars, the seat briefing is byte-identical to its unbudgeted form, the bootstrap fence is absent and the hook's existing backstop degradation record (the one session-start-resume.mjs writes when it drops bootstrap today) is present; when the total fits, the bootstrap fence is present unchanged. If seat briefing + framing alone reach 10000 chars, the hook still emits the seat briefing whole and records a cap-exceeded degradation (the seat is never cut)
-  script: test — cd packages/lore && bun test tests/e2e/session-start-worktree-cap.bun.test.ts
+  script: test — bunx --bun vitest run packages/lore/tests/e2e/session-start-worktree-cap.bun.test.ts
 - [⚑] [script] AC-CRIT-9: commandRunsFileUnfiltered('bun test tests/x.bun.test.ts', 'packages/lore/tests/x.bun.test.ts', {executionRoot: 'packages/lore'}) returns true and returns false without the execution root; with executionRoot 'packages' and command 'cd lore && bun test tests/x.bun.test.ts' it returns true (root joined before the cd offset); findMissingOracleFiles with the same execution roots reports no missing file
   script: test — bunx vitest run packages/core/tests/unit/execution-root-offset.test.ts
 - [⚑] [script] AC-CRIT-10: lore done on a task whose only test-anchor pass row is a lore verify row with attestation.execution_root=packages/lore and command 'bun test tests/x.bun.test.ts' passes the unfiltered-run floor; when the floor refuses, its message contains no 'lore evidence' command with '--result pass' lacking '--capture' and names 'lore verify --execution-root'

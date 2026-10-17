@@ -6,7 +6,7 @@ title: "Version snapshots capture slug values (SPEC-068 D5 follow-up)"
 status: approved
 priority: medium
 created: 2026-07-24
-updated: 2026-10-10
+updated: 2026-10-17
 tags: [spec-072, version-history, slug]
 ---
 # SPEC-072 — version snapshots capture slug values (SPEC-068 D5 follow-up)
@@ -51,4 +51,4 @@ AC-072-1 originally said the row carries the "pre-change" slug. Implementation f
 - [⚑] [script] AC-072-3: lore restore to a version whose row carries a different slug leaves the doc's current slug untouched
   script: test — bunx vitest run packages/lore/tests/unit/service/version-slug.test.ts -t 'AC-072-3'
 - [⚑] [script] AC-072-4: SQLite store migration adds nullable slug column; pre-migration db opens cleanly post-migration and new version inserts persist slug (bun:sqlite runner)
-  script: test — cd packages/lore && bun test tests/unit/store/version-slug-migration.bun.test.ts
+  script: test — bunx --bun vitest run packages/lore/tests/unit/store/version-slug-migration.bun.test.ts

@@ -3,7 +3,7 @@ id: TASK-1501
 type: task
 role: plan
 title: "[Skill:test] TG-7 runtime error sentence pins assert constants or rule tokens"
-status: draft
+status: archived
 priority: medium
 phase: "Phase 2: clear offenders"
 created: 2026-10-16

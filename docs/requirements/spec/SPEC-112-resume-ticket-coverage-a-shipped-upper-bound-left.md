@@ -6,7 +6,7 @@ title: "Resume-ticket coverage: a shipped upper bound left the lower bound unrep
 status: approved
 priority: medium
 created: 2026-07-30
-updated: 2026-10-10
+updated: 2026-10-17
 tags: []
 links:
   - {id: SPEC-110, type: relates-to}
@@ -122,9 +122,9 @@ Structured, machine-checkable ACs are registered via `lore ac add`; the prose he
 - [⚑] [script] AC-RC-3: The rendered ticket contains both RESUME_SCOPE_CLOSURE and RESUME_COVERAGE_FLOOR, each asserted by identity against its own exported constant in a separate assertion, and the two constants are proven distinct strings so a merged single-string implementation fails
   script: test — bunx vitest run packages/lore/tests/unit/feed-resume-coverage.test.ts -t "both bounds"
 - [⚑] [script] AC-RC-4: The compiled binary CLI stdout for lore feed session-resume AND the MCP lore_feed response for checkpoint session-resume each contain the ordinal tags, the cardinality line, and RESUME_COVERAGE_FLOOR, asserted per surface so passing on one surface alone fails
-  script: e2e — cd packages/lore && bun test tests/e2e/resume-coverage-compiled.bun.test.ts -t "both surfaces"
+  script: e2e — bunx --bun vitest run packages/lore/tests/e2e/resume-coverage-compiled.bun.test.ts -t "both surfaces"
 - [⚑] [script] AC-RC-8: After running lore setup against a throwaway claude-dir the installed stop-handoff-coverage hook is byte-identical to its assets SSOT path, and the embedded assets manifest sha256 entries for the new hook and the edited governance asset both equal the on-disk file digests
-  script: e2e — cd packages/lore && bun test tests/e2e/resume-coverage-compiled.bun.test.ts -t "install parity"
+  script: e2e — bunx --bun vitest run packages/lore/tests/e2e/resume-coverage-compiled.bun.test.ts -t "install parity"
 - [⚑] [script] AC-RC-7: Given three synthetic Stop payloads the coverage-check verb behaves as follows: with a transcript carrying a rendered ticket and a last_assistant_message disposition line that omits a subset of ids it exits non-zero and the id set parsed from its stderr is SET-EQUAL to the omitted subset so naming extra or fewer ids fails; with every id dispositioned it exits 0; with a transcript containing no ticket it exits 0
   script: test — bunx vitest run packages/lore/tests/unit/handoff-coverage-check.test.ts -t "three-way"
 - [⚑] [script] AC-RC-9: Round-trip identity: given a transcript whose entries carry a ticket this build rendered from a handoff fixture, the coverage-check verb recovers an id set SET-EQUAL to the ids derived from that fixture extra.key_decisions and extra.next_steps array lengths, computed from the arrays rather than compared against a literal list
@@ -144,7 +144,7 @@ Structured, machine-checkable ACs are registered via `lore ac add`; the prose he
 - [⚑] [script] AC-RC-12: The coverage-check verb exits 0 when handed a transcript whose ticket came from the multi-actor render path — this is the deferred verb half of AC-RC-11, which T2 could only satisfy on the render side because the verb did not yet exist; paired with a control assertion that the same verb exits non-zero for a single-record transcript with an incomplete disposition set, so the exit-0 result cannot come from the verb failing to find any ticket at all
   script: test — bunx vitest run packages/lore/tests/unit/handoff-coverage-check.test.ts -t "multi-actor exits zero"
 - [⚑] [script] AC-RC-13: After lore setup against a throwaway --claude-dir the resulting settings.json contains a Stop hook registration whose command names stop-handoff-coverage.mjs, asserted by deriving the expected entry from the exported HOOK_REGISTRATIONS rather than a hand-written command string, so a rename that misses the registry fails; paired with a control assertion that the same parsed settings.json DOES carry the already-registered stop-doc-sync Stop entry, so the positive half cannot pass vacuously against an unparsed or empty settings file
-  script: e2e — cd packages/lore && bun test tests/e2e/resume-coverage-compiled.bun.test.ts -t "stop hook registered"
+  script: e2e — bunx --bun vitest run packages/lore/tests/e2e/resume-coverage-compiled.bun.test.ts -t "stop hook registered"
 - [⚑] [script] AC-RC-14: The new stop-handoff-coverage hook asset is declared in every hardcoded asset roster that cross-checks RealAssetSource's directory enumeration, proving the tripwire those rosters exist to be was answered by declaring the asset rather than by loosening the check: both assets-ssot.test.ts and real-setup-ports.test.ts pass, and the run reports exactly 2 matched test files so a mistyped path cannot produce a partial-match exit 0
   script: test — bunx vitest run packages/lore/tests/unit/assets-ssot.test.ts packages/lore/tests/unit/adapters/real-setup-ports.test.ts
 

@@ -6,7 +6,7 @@ title: "Verification profiles: per-spec_kind oracle-coverage floors"
 status: approved
 priority: medium
 created: 2026-07-19
-updated: 2026-10-10
+updated: 2026-10-17
 tags: []
 ---
 # Module Design: Verification profiles — per-spec_kind oracle-coverage floors (PRD §18 P6, spec_kind: tech)
@@ -92,7 +92,7 @@ Coverage rule: an oracle kind is covered IFF ≥1 declared AC has `verify.mode =
 - [⚑] [script] AC-V-5: bun run typecheck exits 0 across all packages
   script: build — bun run typecheck
 - [⊘] [script] AC-V-6: lore create plan --requires-uat sets extra.requires_uat===true; the flag is plan-type-only and passing it on any non-plan type exits 4 naming the mismatch; a plan created without it has no requires_uat key. At least 1 CLI test case runs and exits 0
-  script: test — cd packages/lore && bun test tests/unit/adapters/cli-create.bun.test.ts
+  script: test — bunx --bun vitest run packages/lore/tests/unit/adapters/cli-create.bun.test.ts
 - [⚑] [script] AC-V-7: MCP lore_create accepts a requires_uat boolean with plan-only semantics identical to the CLI flag (sets extra.requires_uat===true on a plan; ignored-or-rejected consistently on non-plan types), so an agent creating a design-parented plan over MCP can satisfy the plan-promote requiresUat gate. At least 1 MCP test case runs and exits 0
   script: test — bunx vitest run packages/lore/tests/unit/adapters/mcp-tools.test.ts
 

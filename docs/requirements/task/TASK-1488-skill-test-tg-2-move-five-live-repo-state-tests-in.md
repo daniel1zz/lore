@@ -3,7 +3,7 @@ id: TASK-1488
 type: task
 role: plan
 title: "[Skill:test] TG-2 move five live-repo-state tests into check scripts"
-status: draft
+status: archived
 priority: high
 phase: "Phase 2: clear offenders"
 created: 2026-10-16

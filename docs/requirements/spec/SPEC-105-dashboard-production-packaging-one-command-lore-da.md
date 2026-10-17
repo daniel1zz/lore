@@ -6,7 +6,7 @@ title: "Dashboard production packaging — one-command lore dashboard (F5a)"
 status: approved
 priority: medium
 created: 2026-07-28
-updated: 2026-10-10
+updated: 2026-10-17
 tags: [dashboard, packaging, f5a]
 links:
   - {id: SPEC-204, type: implements}
@@ -106,21 +106,21 @@ New Playwright pair `playwright.static.config.ts` + `global-setup-static.ts`: en
 - [⊘] [script] AC-F5A-2: Nonce auth flow: first GET /auth/bootstrap?nonce=N answers 302 with Set-Cookie lore_sid and redirect to /; replay of the same nonce answers 410; the authenticated session can read corpus data via /api
   script: e2e — cd packages/dashboard && bunx playwright test --config=tests/e2e/playwright.static.config.ts -g "nonce"
 - [⊘] [script] AC-F5A-3: Built artifact is secret-free: served index.html and all built assets contain no __LORE_BOOTSTRAP_TOKEN__ mechanism and no local-key material (grep oracle over packages/dashboard/dist and a curl of GET /)
-  script: test — bun test packages/lore/tests/integration/static-serving.bun.test.ts -t "secret-free"
+  script: test — bunx --bun vitest run packages/lore/tests/integration/static-serving.bun.test.ts -t "secret-free"
 - [⊘] [script] AC-F5A-4: Route priority: unknown /api/* answers JSON 404 (never index.html); deep client routes /library and /p/:name/library answer 200 index.html; SPEC-078 /api/p/:name/* dispatch unaffected
-  script: test — bun test packages/lore/tests/integration/static-serving.bun.test.ts -t "route priority"
+  script: test — bunx --bun vitest run packages/lore/tests/integration/static-serving.bun.test.ts -t "route priority"
 - [⚑] [script] AC-F5A-6: Fresh-clone typecheck contract holds: bun run typecheck passes with packages/dashboard never built (committed loader owns the guarded dynamic import of the git-ignored generated manifest)
   script: tsc — bun run typecheck
 - [⊘] [script] AC-F5A-7: Machine-auth store unavailability degrades gracefully: GET / still serves the UI (unauthenticated state) and the nonce endpoint answers 503 with actionable message — never a blanket 500 on page loads
-  script: test — bun test packages/lore/tests/integration/static-serving.bun.test.ts -t "auth-store degradation"
+  script: test — bunx --bun vitest run packages/lore/tests/integration/static-serving.bun.test.ts -t "auth-store degradation"
 - [⊘] [script] AC-F5A-8: Origin allowlist is computed from actual ports: packaged mode allowlists only the api origin; --dev threads the real --dashboard-port (5173 hardcode retired); served build-stamp digest matches freshly computed dashboard source digest in the static e2e (stale bundle is a failure, not a pass)
   script: e2e — cd packages/dashboard && bunx playwright test --config=tests/e2e/playwright.static.config.ts -g "allowlist|freshness"
 - [⊘] [script] AC-F5A-5: Source-run guard: packaged mode without built assets exits non-zero with a message naming bun run build and --dev; no silent fallback to dev topology. The test MUST control this precondition itself (deterministic regardless of whether a build artifact exists in the checkout)
-  script: test — bun test packages/lore/tests/integration/dashboard-command.bun.test.ts -t "source-run guard"
+  script: test — bunx --bun vitest run packages/lore/tests/integration/dashboard-command.bun.test.ts -t "source-run guard"
 - [⚑] [script] AC-F5A-9: lore dashboard --no-open honours the flag and spawns NO browser opener, despite citty/mri rewriting --no-X into {X:false}: the packaged and --dev startup paths both read the negated form. Oracle intercepts the opener rather than trusting argv parsing.
-  script: test — bun test packages/lore/tests/integration/dashboard-command.bun.test.ts -t "no-open"
+  script: test — bunx --bun vitest run packages/lore/tests/integration/dashboard-command.bun.test.ts -t "no-open"
 - [⚑] [script] AC-F5A-10: A consumed/expired/unknown nonce answers 410 with Content-Type text/html carrying the human-readable page the Failure Modes table already demands: it names the lore dashboard relaunch, and forwards an already-authenticated browser to / by probing GET /api/auth/me client-side. A bare JSON envelope on this path is a failure.
-  script: test — bun test packages/lore/tests/integration/static-serving.bun.test.ts -t "nonce failure page"
+  script: test — bunx --bun vitest run packages/lore/tests/integration/static-serving.bun.test.ts -t "nonce failure page"
 
 ## Code anchors
 

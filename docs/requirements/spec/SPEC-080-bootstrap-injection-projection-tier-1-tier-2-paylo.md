@@ -6,7 +6,7 @@ title: "Bootstrap injection projection: tier-1/tier-2 payload split"
 status: approved
 priority: medium
 created: 2026-07-26
-updated: 2026-10-10
+updated: 2026-10-17
 tags: []
 links:
   - {id: SPEC-041, type: relates-to}
@@ -118,9 +118,9 @@ Design produced via lore-design module mode: 4-perspective parallel review (coup
 - [⊘] [script] AC-080-5: Monorepo typecheck passes with the new BootstrapInjection types and config schema extension: tsc --noEmit exits 0 across all packages and scripts
   script: tsc — bun run typecheck
 - [⚑] [script] AC-080-3: Compiled-binary e2e: dist/lore bootstrap --injection against a seeded throwaway corpus returns compact JSON whose key order matches the literal contract list pinned in the test (resume_hint, my_claims, active_sessions, armed_gates, root, pending_reviews, active_plans, latest_handoffs, corpus, omitted last-two rule) with omitted ledger present; plain dist/lore bootstrap --json on the same corpus has exactly the literal 9-key set pinned in the test (root, active_plans, pending_reviews, my_claims, armed_gates, latest_handoffs, resume_hint, corpus, active_sessions)
-  script: e2e — cd packages/lore && bun test tests/e2e/bootstrap-injection-compiled.bun.test.ts
+  script: e2e — bunx --bun vitest run packages/lore/tests/e2e/bootstrap-injection-compiled.bun.test.ts
 - [⚑] [script] AC-080-6: Config knobs reach the projection end-to-end (never decorative): the same compiled-binary e2e file seeds a throwaway corpus whose .lore/config.yaml sets non-default workflow.bootstrap_injection values (max_active_plans=1, max_handoffs=1, max_pending_slugs=1, char_budget=2000) and asserts the --injection payload reflects each (1 plan + omitted count, 1 handoff, 1 pending slug, json length <= 2000 or budget_exceeded)
-  script: e2e — cd packages/lore && bun test tests/e2e/bootstrap-injection-compiled.bun.test.ts
+  script: e2e — bunx --bun vitest run packages/lore/tests/e2e/bootstrap-injection-compiled.bun.test.ts
 
 ## Code anchors
 

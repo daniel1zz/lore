@@ -6,7 +6,7 @@ title: "Tiered review — ledger fast-track, judgment-required promote, pending-
 status: approved
 priority: medium
 created: 2026-07-28
-updated: 2026-10-10
+updated: 2026-10-17
 tags: []
 links:
   - {id: SPEC-094, type: informs}
@@ -100,17 +100,17 @@ Structured ACs via `lore ac add` (script:test):
 - [⚑] [script] AC-TIER-3: Default lore pending excludes task type and ledger sub_types; --all restores them
   script: test — bunx vitest run packages/lore/tests/unit/service/tiered-review.test.ts -t AC-TIER-3
 - [⚑] [script] AC-TIER-4: Approve of a spec with zero judgments for the current version exits 4 naming lore review; with a fresh approve-judgment for the current version approve succeeds
-  script: test — cd packages/lore && bun test tests/integration/cli/tiered-review-gate.bun.test.ts -t AC-TIER-4
+  script: test — bunx --bun vitest run packages/lore/tests/integration/cli/tiered-review-gate.bun.test.ts -t AC-TIER-4
 - [⊘] [script] AC-TIER-5: Worst-decision-wins per version: reject on version N cannot be outrolled by a later approve-judgment on N; version bump + fresh approve-judgment approves; --override-judgment approves with audit row recording overridden judgment id
-  script: test — cd packages/lore && bun test tests/integration/cli/tiered-review-gate.bun.test.ts -t AC-TIER-5
+  script: test — bunx --bun vitest run packages/lore/tests/integration/cli/tiered-review-gate.bun.test.ts -t AC-TIER-5
 - [⚑] [script] AC-TIER-6: Judgment whose judge tuple equals doc extra.ai_provenance denies naming the collision; provenance-less doc passes on judgment-required alone
   script: test — bunx vitest run packages/lore/tests/unit/service/tiered-review.test.ts -t AC-TIER-6
 - [⚑] [script] AC-TIER-7: ledger_auto_approve=false and judgment_required_types=[] reproduce legacy behavior byte-identically
   script: test — bunx vitest run packages/lore/tests/unit/service/tiered-review.test.ts -t AC-TIER-7
 - [⚑] [script] AC-TIER-8: lore review backfill-ledger fast-tracks existing draft ledger docs exactly once; second run is a no-op reporting zero changes
-  script: test — cd packages/lore && bun test tests/integration/cli/tiered-review-gate.bun.test.ts -t AC-TIER-8
+  script: test — bunx --bun vitest run packages/lore/tests/integration/cli/tiered-review-gate.bun.test.ts -t AC-TIER-8
 - [⚑] [script] AC-TIER-9: lore approve --override-no-judgment approves a never-judged doc and writes an audit row carrying override_no_judgment=true; the same flag is rejected loud on a doc that has any judgment (pointing at --override-judgment); the two override flags together exit non-zero as mutually exclusive
-  script: test — cd packages/lore && bun test tests/integration/cli/tiered-review-gate.bun.test.ts -t override-no-judgment
+  script: test — bunx --bun vitest run packages/lore/tests/integration/cli/tiered-review-gate.bun.test.ts -t override-no-judgment
 - [⚑] [script] AC-TIER-10: ai_provenance carries a real model id when the active provider exposes one via the ModelAwareProvider capability, and is OMITTED entirely (never filled with the provider name) when it does not; prompt_version comes from the GENERATE_PROMPT_VERSION registry constant, not a literal
   script: test — bunx vitest run packages/lore/tests/unit/service/tiered-review.test.ts -t ai_provenance
 

@@ -6,7 +6,7 @@ title: "Audit hardening part 2: gate-skip observability + push-time chain verifi
 status: approved
 priority: medium
 created: 2026-07-26
-updated: 2026-10-10
+updated: 2026-10-17
 tags: []
 ---
 # SPEC-081 — Audit hardening part 2: gate-skip observability + push-time chain verification
@@ -116,7 +116,7 @@ Structured ACs via `lore ac add` (all script-mode); canonical test paths are con
 - [⚑] [script] AC-080-3: hooks/pre-push and assets/project/pre-push are byte-identical and both invoke lore audit --verify
   script: test — bunx vitest run packages/lore/tests/unit/assets/pre-push-parity.test.ts
 - [⚑] [script] AC-080-4: tamper suite gains the genesis-row deletion pin (new first row reports prev_link_mismatch) and the whole suite passes
-  script: test — cd packages/lore && bun test tests/unit/store/audit-tamper.bun.test.ts
+  script: test — bunx --bun vitest run packages/lore/tests/unit/store/audit-tamper.bun.test.ts
 - [⚑] [script] AC-080-5: full regression passes: typecheck and both test runners exit 0
   script: build — bun run typecheck && bun run test
 

@@ -6,7 +6,7 @@ title: "Assessment freshness — plan-close denies a stale assessment"
 status: approved
 priority: medium
 created: 2026-07-28
-updated: 2026-10-10
+updated: 2026-10-17
 tags: []
 links:
   - {id: SPEC-094, type: implements}
@@ -59,6 +59,6 @@ Structured ACs via `lore ac add` (script:test):
 - [⚑] [script] AC-FRESH-3: Cosmetic doc edits after an assessment (anchor add, link write, status change) do not trip the predicate; only evidence/done audit activity does
   script: test — bunx vitest run packages/lore/tests/unit/service/assessment-freshness.test.ts -t AC-FRESH-3
 - [⚑] [script] AC-FRESH-4: lore assess on a plan whose stored assessment is already stale prints a loud advisory naming the newer activity and still writes the assessment, never refusing
-  script: test — cd packages/lore && bun test tests/integration/cli/assessment-freshness.bun.test.ts -t AC-FRESH-4
+  script: test — bunx --bun vitest run packages/lore/tests/integration/cli/assessment-freshness.bun.test.ts -t AC-FRESH-4
 - [⚑] [script] AC-FRESH-5: extra.assessment_freshness_exempt true WITH a non-empty reason short-circuits the predicate; the flag without a reason does not
   script: test — bunx vitest run packages/lore/tests/unit/service/assessment-freshness.test.ts -t AC-FRESH-5

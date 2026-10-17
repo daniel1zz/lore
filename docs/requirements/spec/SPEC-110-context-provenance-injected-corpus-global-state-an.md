@@ -6,7 +6,7 @@ title: "Context provenance: injected corpus-global state and a pasted resume tic
 status: approved
 priority: medium
 created: 2026-07-30
-updated: 2026-10-10
+updated: 2026-10-17
 tags: []
 ---
 ## Overview
@@ -112,16 +112,16 @@ Structured, machine-checkable ACs are registered via `lore ac add`; the prose he
 ## Acceptance Criteria (structured)
 
 - [⚑] [script] AC-CP-6: With cwd inside an out-of-tree mkdtemp corpus, the resolved corpus root is that temp path rather than the repo .lore directory, and both boundary declarations match their exported constants by identity
-  script: e2e — cd packages/lore && bun test tests/e2e/context-provenance-compiled.bun.test.ts -t 'fresh install'
+  script: e2e — bunx --bun vitest run packages/lore/tests/e2e/context-provenance-compiled.bun.test.ts -t 'fresh install'
 - [⚑] [script] AC-CP-1: The first key of the bootstrap injection payload is the scope declaration and its value is strictly identical to the exported BOOTSTRAP_SCOPE_DECLARATION constant, and the test iterates the exported REQUIRED_DISCLAIMER_TOKENS array asserting the constant contains each member
   script: test — bunx vitest run packages/core/tests/unit/bootstrap-injection-provenance.test.ts -t 'first key'
 - [⚑] [script] AC-CP-4: Both the CLI stdout and the MCP lore_feed session-resume response contain the exported RESUME_SCOPE_CLOSURE constant verbatim, and the test iterates BOOTSTRAP_INJECTION_KNOWN_KEYS asserting that constant names each member
-  script: e2e — cd packages/lore && bun test tests/e2e/context-provenance-compiled.bun.test.ts -t 'scope closure'
+  script: e2e — bunx --bun vitest run packages/lore/tests/e2e/context-provenance-compiled.bun.test.ts -t 'scope closure'
 - [⚑] [script] AC-CP-2: Projecting a BootstrapReport with both droppable arrays empty and one oversized field against a char budget it cannot meet yields budget_exceeded true with EVERY data field intact per the SPEC-080 payload-returned-intact rule, the declaration present and unsliced at position 1, and the omission ledger never naming the declaration
   script: test — bunx vitest run packages/core/tests/unit/bootstrap-injection-provenance.test.ts -t 'budget-exceeded'
 - [⚑] [script] AC-CP-9: The lore governance FEED rule text names each member of BOOTSTRAP_INJECTION_KNOWN_KEYS EXCEPT resume_hint (excluded by the handoff-neutrality zero-occurrence invariant, covered generically instead) and each member of SOURCE_CATEGORY_TOKENS, one assertion per member, plus a paired assertion that resume_hint still has zero literal occurrences in that file
-  script: e2e — cd packages/lore && bun test tests/e2e/context-provenance-compiled.bun.test.ts -t 'governance rule'
+  script: e2e — bunx --bun vitest run packages/lore/tests/e2e/context-provenance-compiled.bun.test.ts -t 'governance rule'
 - [⊘] [script] AC-CP-10: The governance verb serves BOOTSTRAP_FRAMING_LINE verbatim as its own topic and the hook renders it OUTSIDE the markdown fence with the JSON inside, lore bootstrap --injection stdout remains bare compact JSON parseable with no split per SPEC-080 AC-080-3, and both retired hook strings return zero literal hits
-  script: e2e — cd packages/lore && bun test tests/e2e/context-provenance-compiled.bun.test.ts -t 'framing line'
+  script: e2e — bunx --bun vitest run packages/lore/tests/e2e/context-provenance-compiled.bun.test.ts -t 'framing line'
 - [⚑] [script] AC-CP-11: After lore setup against a throwaway claude-dir: the hook asset is byte-identical between its assets SSOT path and its installed copy read back from that dir, AND corpus-workflow.md is asserted ABSENT there because it is retired from the install set, with the compiled binary lore governance output asserted byte-identical to its SSOT as its actual delivery surface
-  script: e2e — cd packages/lore && bun test tests/e2e/context-provenance-compiled.bun.test.ts -t 'manifest parity'
+  script: e2e — bunx --bun vitest run packages/lore/tests/e2e/context-provenance-compiled.bun.test.ts -t 'manifest parity'
