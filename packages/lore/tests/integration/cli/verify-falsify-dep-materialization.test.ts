@@ -1,3 +1,4 @@
+// @reads package.json
 // @spawns packages/lore/src/index.ts
 /**
  * AC-SD-6 (spec-a-falsifier-s-scratch-worktree-must-be-runnable-and) — the

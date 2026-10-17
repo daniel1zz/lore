@@ -1,3 +1,4 @@
+// @reads dist-npm/** -- the repo-wide walk sees this build output whenever a prior run left it
 // @spawns scripts/check-ac-state-renderers.ts
 // @reads .gitattributes
 // @reads .gitignore

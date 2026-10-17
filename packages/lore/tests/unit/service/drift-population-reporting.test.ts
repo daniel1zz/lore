@@ -1,3 +1,4 @@
+// @reads dist-npm/** -- the repo-wide walk sees this build output whenever a prior run left it
 // @reads .claude/**
 // @reads CHANGELOG.md
 // @reads CLAUDE.md

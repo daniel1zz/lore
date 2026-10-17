@@ -1,4 +1,4 @@
-// @spawns packages/lore/tests/unit/store/.verbatim-slug-worker.41553.mjs
+// @spawns packages/lore/tests/unit/store/.verbatim-slug-worker.*.mjs -- the test writes a pid-named worker script next to itself
 /** @spec_ref AC-GR-4 */
 /**
  * Tests for D2 (spec-a-github-filed-defect-must-be-claimable-one-ingest-seam):
