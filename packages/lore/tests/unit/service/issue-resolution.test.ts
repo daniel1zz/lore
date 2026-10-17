@@ -17,10 +17,11 @@
  *   terminal state > resolves-edge computation > recorded review rejection >
  *   archived doc status > open). The e2e/cross-corpus oracles for this
  *   extension are AC-ICL-10 (`tests/e2e/issue-closed-state.bun.test.ts`) and
- *   AC-ICL-11 (`tests/unit/service/issue-report-cross-corpus.bun.test.ts`);
- *   the cases below cross-check the SAME precedence at the pure-function
- *   layer, each precedence step asserted independently rather than inferred
- *   from one combined fixture.
+ *   AC-ICL-11 (this file, since TG-11B: its cross-corpus oracle left with the
+ *   SQLite transport in 8b3845b1 and the criterion was corrected to the
+ *   pure-function layer); the cases below assert the precedence at that
+ *   layer, each precedence step independently rather than inferred from one
+ *   combined fixture.
  *
  * @spec_ref spec-issue-closure-loop-computed-resolution-agent-reachable AC-ICL-1, AC-ICL-2, AC-ICL-10, AC-ICL-11
  */
@@ -321,7 +322,14 @@ describe("P2: computeIssueResolution — 'closed' state (archived issue, no edge
   });
 });
 
-describe("P2: computeIssueResolution — recorded review rejection (hasRecordedReviewRejection)", () => {
+describe("AC-ICL-11 (P2): computeIssueResolution — recorded review rejection (hasRecordedReviewRejection)", () => {
+  it("AC-ICL-11 NEGATIVE: a rejected state carrying a recorded reason is never computed 'open' (no self-contradicting row)", () => {
+    const withReason = { extra: { issue_report: { resolution: { state: "rejected", reason: "not reproducible" } } } };
+    expect(computeIssueResolution(withReason, [], [])).toBe("rejected");
+    expect(computeIssueResolution(withReason, [], [], true)).toBe("rejected");
+    expect(computeIssueResolution(withReason, [], [])).not.toBe("open");
+  });
+
   it("HAPPY: no resolves in-edge + hasRecordedReviewRejection=true computes 'rejected' with no explicit write at all", () => {
     const result = computeIssueResolution({ extra: {} }, [], [], true);
     expect(result).toBe("rejected");
