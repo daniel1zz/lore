@@ -88,14 +88,14 @@ function slugOf(r: RunResult): string {
 }
 
 /** prd -> spec -> plan -> task, claimed; returns the task slug. Tracked files stay clean (db is gitignored). */
-function makeClaimedTask(dir: string, claimWorktree: string = dir): string {
+function makeClaimedTask(dir: string, claimWorktree: string | null = dir): string {
   mustLore(["create", "prd", "--title", "CT3b PRD", "--no-ai", "--content", "## Overview\nbody"], dir);
   const spec = slugOf(mustLore(["create", "spec", "--title", "CT3b Spec", "--no-ai", "--content", "## Overview\nbody", "--json"], dir));
   const plan = slugOf(mustLore(["create", "plan", "--title", "CT3b Plan", "--parent", spec, "--no-ai", "--content", "body", "--json"], dir));
   const task = slugOf(
     mustLore(["create", "task", "--title", "CT3b Task", "--parent", plan, "--plan-id", plan, "--no-ai", "--content", "body", "--json"], dir),
   );
-  mustLore(["claim", task, "--worktree", claimWorktree], dir);
+  mustLore(claimWorktree === null ? ["claim", task] : ["claim", task, "--worktree", claimWorktree], dir);
   return task;
 }
 
@@ -129,15 +129,23 @@ async function armingRows(dir: string): Promise<number> {
   }
 }
 
-describe("lore init arms a fresh corpus (AC-CT-3)", () => {
-  it("writes exactly one state-binding-armed row and reports zero affected rows", async () => {
+function statusStateBinding(dir: string): unknown {
+  const r = mustLore(["status", "--json"], dir);
+  return (JSON.parse(r.stdout) as { data: { state_binding: unknown } }).data.state_binding;
+}
+
+describe("lore init inside a git repository arms a fresh corpus (AC-CT-3)", () => {
+  it("writes exactly one state-binding-armed row, reports zero affected rows, and status says armed", async () => {
     const d = realpathSync(mkdtempSync(join(tmpdir(), "ct3b-init-")));
     scratch.push(d);
+    git(d, ["init", "-q", "-b", "main"]);
     const init = mustLore(["init", "--json"], d);
-    const data = (JSON.parse(init.stdout) as { data: { state_binding: { status: string; would_become_unbound_rows: number } } }).data;
+    const data = (JSON.parse(init.stdout) as { data: { state_binding: { armed: boolean; status: string; would_become_unbound_rows: number } } }).data;
+    expect(data.state_binding.armed).toBe(true);
     expect(data.state_binding.status).toBe("armed");
     expect(data.state_binding.would_become_unbound_rows).toBe(0);
     expect(await armingRows(d)).toBe(1);
+    expect(statusStateBinding(d)).toMatchObject({ armed: true });
   });
 
   it("REGRESSION: `lore audit arm --confirm` on an already armed corpus is idempotent", async () => {
@@ -145,6 +153,61 @@ describe("lore init arms a fresh corpus (AC-CT-3)", () => {
     const r = mustLore(["audit", "arm", "--confirm", "--json"], d);
     expect(r.stdout).toContain("already_armed");
     expect(await armingRows(d)).toBe(1);
+  });
+});
+
+describe("lore init OUTSIDE a git repository does not arm, and says so (AC-CT-3b, user decision 2026-10-17)", () => {
+  function makeNonGitCorpus(): string {
+    const d = realpathSync(mkdtempSync(join(tmpdir(), "ct3b-nogit-")));
+    if (d.startsWith(REPO_ROOT)) throw new Error("fixture must live outside the repo");
+    scratch.push(d);
+    return d;
+  }
+
+  it("writes no arming row and prints the explicit not-armed line naming the path", async () => {
+    const d = makeNonGitCorpus();
+    const init = mustLore(["init"], d);
+    expect(init.stdout).toContain(`state binding not armed: ${d} is not inside a git repository`);
+    expect(init.stdout).toContain("lore audit arm --confirm");
+    expect(await armingRows(d)).toBe(0);
+  });
+
+  it("--json carries state_binding {armed:false, reason:not_a_git_repo}", () => {
+    const d = makeNonGitCorpus();
+    const init = mustLore(["init", "--json"], d);
+    const data = (JSON.parse(init.stdout) as { data: { state_binding: unknown } }).data;
+    expect(data.state_binding).toEqual({ armed: false, reason: "not_a_git_repo" });
+  });
+
+  it("lore status reports the unarmed state in JSON and in a human line, for this reason", () => {
+    const d = makeNonGitCorpus();
+    mustLore(["init"], d);
+    expect(statusStateBinding(d)).toEqual({ armed: false, reason: "not_a_git_repo" });
+    const human = mustLore(["status"], d);
+    expect(human.stdout).toContain("State binding: NOT armed");
+    expect(human.stdout).toContain("not inside a git repository");
+  });
+
+  it("a captured pass is accepted by lore done (unarmed corpus refuses nothing)", () => {
+    const d = makeNonGitCorpus();
+    mustLore(["init"], d);
+    appendFileSync(
+      join(d, ".lore", "config.yaml"),
+      ["workflow:", "  gates:", ...["task-claim", "task-create"].flatMap((g) => [`    ${g}:`, "      enabled: false"]), ""].join("\n"),
+    );
+    const task = makeClaimedTask(d, null);
+    mustLore(["evidence", task, "--oracle", "build", "--command", "true", "--result", "pass", "--capture"], d);
+    const done = lore(["done", task], d);
+    expect(done.exitCode, done.stderr + done.stdout).toBe(0);
+  });
+
+  it("CONTROL: after the corpus is placed in git, `lore audit arm --confirm` arms it and status flips", async () => {
+    const d = makeNonGitCorpus();
+    mustLore(["init"], d);
+    git(d, ["init", "-q", "-b", "main"]);
+    mustLore(["audit", "arm", "--confirm"], d);
+    expect(await armingRows(d)).toBe(1);
+    expect(statusStateBinding(d)).toMatchObject({ armed: true });
   });
 });
 

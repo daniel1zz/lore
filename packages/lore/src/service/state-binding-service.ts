@@ -35,6 +35,7 @@ import {
 } from "@lore/core";
 import type { StoreInterface } from "../store/store-interface.js";
 import { readArmingRev } from "./stamp-binding-reader.js";
+import { isInsideGitRepository } from "./git-state-stamp.js";
 
 /** What arming now would do to the existing back-catalogue (SPEC-143 R13). */
 export interface ArmingImpactReport {
@@ -66,9 +67,39 @@ export interface ArmOptions {
   readonly nowIso: string;
 }
 
+/**
+ * Whether state binding is armed for a corpus, with the reason when it is not. Reported by
+ * `lore init` and `lore status` (SPEC-143 AC-CT-3b) so an unarmed corpus is never silent.
+ * `not_a_git_repo`: the corpus root is outside any git repository (nothing to stamp against);
+ * `not_armed`: inside a repository but never armed (an existing corpus awaiting `lore audit arm`).
+ */
+export type StateBindingState =
+  | { readonly armed: true; readonly arming_rev: number }
+  | { readonly armed: false; readonly reason: "not_a_git_repo" | "not_armed" };
+
+/**
+ * Reads the arming state of `store`'s corpus rooted at `corpusRoot`.
+ *
+ * @returns the state; a store failure is returned, never read as unarmed.
+ */
+export async function readStateBindingState(
+  store: StoreInterface,
+  corpusRoot: string,
+): Promise<Result<StateBindingState, LoreError>> {
+  const rev = await readArmingRev(store);
+  if (!rev.ok) return rev;
+  if (rev.value !== undefined) return ok({ armed: true, arming_rev: rev.value });
+  return ok({ armed: false, reason: isInsideGitRepository(corpusRoot) ? "not_armed" : "not_a_git_repo" });
+}
+
 /** Arming step for one corpus's store. */
 export class StateBindingService {
   constructor(private readonly store: StoreInterface) {}
+
+  /** Arming state of this corpus (see {@link readStateBindingState}). */
+  async readState(corpusRoot: string): Promise<Result<StateBindingState, LoreError>> {
+    return readStateBindingState(this.store, corpusRoot);
+  }
 
   /**
    * Measures what arming now would do to existing rows. Read-only.

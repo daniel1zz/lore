@@ -14,13 +14,39 @@
 import { execFileSync } from "node:child_process";
 import type { StateStamp } from "@lore/core";
 
+const GIT_PROBE_TIMEOUT_MS = 10_000;
+
+/**
+ * Whether `root` lies inside a git work tree (a repository with zero commits still counts).
+ * Distinct from {@link probeGitState}, which also needs a first commit: this answers "is there
+ * a repository at all", the question `lore init` asks before arming state binding.
+ *
+ * @param root - directory to test
+ * @sideeffect IO — spawns `git rev-parse` once
+ *
+ * reason: `false` on any git failure (git missing, not a work tree) is the answer, not a swallowed
+ * error: the caller reports it explicitly as `not_a_git_repo` — see SPEC-143 AC-CT-3b.
+ */
+export function isInsideGitRepository(root: string): boolean {
+  try {
+    execFileSync("git", ["rev-parse", "--is-inside-work-tree"], {
+      cwd: root,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+      timeout: GIT_PROBE_TIMEOUT_MS,
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /** Git facts stamped onto a runner attestation; both fields present together or not at all. */
 export interface GitStateProbe {
   readonly head_sha: string;
   readonly worktree_dirty: boolean;
 }
 
-const GIT_PROBE_TIMEOUT_MS = 10_000;
 
 /**
  * Measures the git state of `root` for the attestation: full 40-hex `HEAD` and
