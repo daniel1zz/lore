@@ -1,4 +1,4 @@
-// @spawns dist/lore
+// @reads scripts/check-unclaimed-oracle.ts
 /**
  * Compiled-binary e2e for baseline-slice-1 QA-8 / AC-BLS1-8 — ROLLBACK
  * LEAVES NO TRACE: a corpus that adopted the baseline feature (baseline
@@ -41,16 +41,19 @@
  *
  * @spec_ref AC-BLS1-8; spec-baseline-slice-1-rules-with-permanent-ids-ac-citations (QA-8);
  *   task-skill-test-rollback-e2e-no-baselines-and-no-cites-byte
+ *
+ * TG-25 (adr-tg-1 option b): the commands run IN-PROCESS through tests/helpers/run-lore-in-process.ts, not through
+ * dist/lore. Wherever the prose above says the compiled binary is spawned or its freshness asserted, that is the
+ * history of this file; the assertions and the throwaway-corpus rule are unchanged.
  */
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { assertFreshBinary } from "../integration/helpers/assert-fresh-binary";
+import { runLoreInProcess } from "../helpers/run-lore-in-process";
 
 const REPO_ROOT = new URL("../../../../", import.meta.url).pathname.replace(/\/$/, "");
-const LORE_BIN = join(REPO_ROOT, "dist", "lore");
 
 interface RunResult {
   readonly stdout: string;
@@ -67,17 +70,17 @@ interface Capture {
   readonly acAdd: RunResult;
 }
 
-function runLore(args: string[], cwd: string): RunResult {
-  const proc = Bun.spawnSync([LORE_BIN, ...args], {
+async function runLore(args: string[], cwd: string): Promise<RunResult> {
+  const proc = await runLoreInProcess(args, {
     cwd,
     env: { ...process.env, HOME: cwd, CLAUDECODE: "1", CLAUDE_CODE_SESSION_ID: "baseline-rollback-e2e-session" },
   });
-  return { stdout: proc.stdout.toString(), stderr: proc.stderr.toString(), exitCode: proc.exitCode ?? 1 };
+  return { stdout: proc.stdout, stderr: proc.stderr, exitCode: proc.exitCode };
 }
 
 /** Runs a setup step; any non-zero exit fails loud with the command and stderr. */
-function mustRun(args: string[], cwd: string): RunResult {
-  const result = runLore(args, cwd);
+async function mustRun(args: string[], cwd: string): Promise<RunResult> {
+  const result = await runLore(args, cwd);
   if (result.exitCode !== 0) {
     throw new Error(`lore ${args.join(" ")} exited ${result.exitCode}: ${result.stderr}${result.stdout}`);
   }
@@ -107,28 +110,28 @@ interface Corpus {
 }
 
 /** Control shape shared by A, A2 and B: prd, spec (1 script AC + 1 human AC), plan, task. */
-function buildControlCorpus(label: string): Corpus {
+async function buildControlCorpus(label: string): Promise<Corpus> {
   const dir = mkdtempSync(join(tmpdir(), `lore-baseline-rollback-${label}-`));
   expect(dir.startsWith(REPO_ROOT)).toBe(false);
-  mustRun(["init"], dir);
-  const prd = mustRun(["create", "prd", "--title", "Rollback Root", "--content", "# PRD\n\nroot.", "--no-ai"], dir);
+  await mustRun(["init"], dir);
+  const prd = await mustRun(["create", "prd", "--title", "Rollback Root", "--content", "# PRD\n\nroot.", "--no-ai"], dir);
   const prdSlug = parseSlug(prd.stdout);
-  const spec = mustRun(
+  const spec = await mustRun(
     ["create", "spec", "--title", SPEC_TITLE,"--content", "## Spec\n\nbody", "--no-ai"],
     dir,
   );
   const specSlug = parseSlug(spec.stdout);
-  mustRun(
+  await mustRun(
     ["ac", "add", specSlug, "AC-RB-1", "--statement", "script criterion", "--mode", "script", "--oracle", "test", "--command", "echo ok"],
     dir,
   );
-  mustRun(["ac", "add", specSlug, "AC-RB-2", "--statement", "human criterion", "--mode", "human"], dir);
-  const plan = mustRun(
+  await mustRun(["ac", "add", specSlug, "AC-RB-2", "--statement", "human criterion", "--mode", "human"], dir);
+  const plan = await mustRun(
     ["create", "plan", "--title", "Rollback Plan", "--parent", specSlug, "--content", "## Plan", "--no-ai"],
     dir,
   );
   const planSlug = parseSlug(plan.stdout);
-  mustRun(
+  await mustRun(
     ["create", "task", "--title", "Rollback Task", "--plan-id", planSlug, "--parent", planSlug, "--content", "## Task", "--ac-scope", "AC-RB-1", "--no-ai"],
     dir,
   );
@@ -136,47 +139,47 @@ function buildControlCorpus(label: string): Corpus {
 }
 
 /** Adopt the baseline feature end to end, then undo it: remove every cite, soft-delete every baseline doc. */
-function adoptAndRollBackBaseline(corpus: Corpus): void {
+async function adoptAndRollBackBaseline(corpus: Corpus): Promise<void> {
   const { dir, specSlug, prdSlug } = corpus;
   const root = parseBaselineSlug(
-    mustRun(["baseline", "add", prdSlug, "--node", "root", "--label", "Root", "--title", "Rollback BL Root"], dir).stdout,
+    (await mustRun(["baseline", "add", prdSlug, "--node", "root", "--label", "Root", "--title", "Rollback BL Root"], dir)).stdout,
   );
   const branch = parseBaselineSlug(
-    mustRun(["baseline", "add", root, "--node", "branch", "--label", "Branch", "--title", "Rollback BL Branch"], dir).stdout,
+    (await mustRun(["baseline", "add", root, "--node", "branch", "--label", "Branch", "--title", "Rollback BL Branch"], dir)).stdout,
   );
   const leaf = parseBaselineSlug(
-    mustRun(["baseline", "add", branch, "--node", "leaf", "--label", "Leaf", "--title", "Rollback BL Leaf"], dir).stdout,
+    (await mustRun(["baseline", "add", branch, "--node", "leaf", "--label", "Leaf", "--title", "Rollback BL Leaf"], dir)).stdout,
   );
   for (const [statement, enforcedBy, example] of [
     ["Users see the first thing", "guaranteed", "example one"],
     ["Users see the second thing", "both", "example two"],
   ] as const) {
-    mustRun(
+    await mustRun(
       ["rule", "add", leaf, "--statement", statement, "--confidence", "established", "--enforced-by", enforcedBy, "--example", example],
       dir,
     );
   }
-  mustRun(["ac", "cite", specSlug, "AC-RB-1", "BR-1"], dir);
-  mustRun(["baseline", "depends", leaf, "--add", "BR-2"], dir);
-  mustRun(["baseline", "glossary", "add", root, "--term", "Widget", "--meaning", "A thing"], dir);
+  await mustRun(["ac", "cite", specSlug, "AC-RB-1", "BR-1"], dir);
+  await mustRun(["baseline", "depends", leaf, "--add", "BR-2"], dir);
+  await mustRun(["baseline", "glossary", "add", root, "--term", "Widget", "--meaning", "A thing"], dir);
 
   // Sanity: the feature really was adopted (else the rollback comparison is vacuous).
-  const adopted = JSON.parse(mustRun(["status", "--json"], dir).stdout) as { data: Record<string, unknown> };
+  const adopted = JSON.parse((await mustRun(["status", "--json"], dir)).stdout) as { data: Record<string, unknown> };
   expect(adopted.data.baseline).toBeDefined();
 
   // Rollback: citations first (a cited rule's leaf is referenced), then leaf -> branch -> root.
-  mustRun(["ac", "cite", specSlug, "AC-RB-1", "BR-1", "--remove"], dir);
-  for (const slug of [leaf, branch, root]) mustRun(["delete", slug, "--confirm"], dir);
+  await mustRun(["ac", "cite", specSlug, "AC-RB-1", "BR-1", "--remove"], dir);
+  for (const slug of [leaf, branch, root]) await mustRun(["delete", slug, "--confirm"], dir);
 }
 
-function capture(corpus: Corpus): Capture {
+async function capture(corpus: Corpus): Promise<Capture> {
   const { dir, specSlug } = corpus;
   return {
-    status: runLore(["status", "--json"], dir),
-    tree: runLore(["tree"], dir),
-    list: runLore(["list"], dir),
-    acList: runLore(["ac", "list", specSlug], dir),
-    acAdd: runLore(["ac", "add", specSlug, "AC-RB-3", ...NEW_AC_ARGS], dir),
+    status: await runLore(["status", "--json"], dir),
+    tree: await runLore(["tree"], dir),
+    list: await runLore(["list"], dir),
+    acList: await runLore(["ac", "list", specSlug], dir),
+    acAdd: await runLore(["ac", "add", specSlug, "AC-RB-3", ...NEW_AC_ARGS], dir),
   };
 }
 
@@ -233,15 +236,14 @@ let capA: Capture;
 let capA2: Capture;
 let capB: Capture;
 
-beforeAll(() => {
-  assertFreshBinary(LORE_BIN, [join(REPO_ROOT, "packages", "lore", "src"), join(REPO_ROOT, "packages", "core", "src")]);
-  controlA = buildControlCorpus("a");
-  controlA2 = buildControlCorpus("a2");
-  treatmentB = buildControlCorpus("b");
-  adoptAndRollBackBaseline(treatmentB);
-  capA = capture(controlA);
-  capA2 = capture(controlA2);
-  capB = capture(treatmentB);
+beforeAll(async () => {
+  controlA = await buildControlCorpus("a");
+  controlA2 = await buildControlCorpus("a2");
+  treatmentB = await buildControlCorpus("b");
+  await adoptAndRollBackBaseline(treatmentB);
+  capA = await capture(controlA);
+  capA2 = await capture(controlA2);
+  capB = await capture(treatmentB);
 }, SETUP_TIMEOUT_MS);
 
 afterAll(() => {

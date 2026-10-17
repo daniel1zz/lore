@@ -1,4 +1,4 @@
-// @spawns dist/lore
+// @reads assets/**
 /**
  * Compiled-binary e2e for `lore context list | add | remove`
  * (spec-rule-store-git-tracked-fragment-selection-on-demand-skill, Scope 7, AC-RS-7, BR-1063;
@@ -16,6 +16,10 @@
  * Isolation: mkdtemp HOME + XDG + `lore init` corpus; never touches the repo's `.lore/` or the real HOME.
  *
  * @spec_ref spec-rule-store-git-tracked-fragment-selection-on-demand-skill AC-RS-7
+ *
+ * TG-25 (adr-tg-1 option b): the commands run IN-PROCESS through tests/helpers/run-lore-in-process.ts, not through
+ * dist/lore. Wherever the prose above says the compiled binary is spawned or its freshness asserted, that is the
+ * history of this file; the assertions and the throwaway-corpus rule are unchanged.
  */
 
 import { afterAll, describe, expect, it } from "vitest";
@@ -26,10 +30,9 @@ import type { FsWritePort } from "@lore/core";
 import { exitCode } from "../../src/adapters/cli/utils";
 import { makeRealContextFsPort } from "../../src/adapters/cli/commands/context";
 import { runSelectionChange } from "../../src/flows/selection-flow";
-import { assertFreshBinary } from "../integration/helpers/assert-fresh-binary";
+import { runLoreInProcess } from "../helpers/run-lore-in-process";
 
 const REPO_ROOT = new URL("../../../../", import.meta.url).pathname.replace(/\/$/, "");
-const LORE_BIN = join(REPO_ROOT, "dist", "lore");
 const FRAGMENT_ID = "corpus-workflow-close";
 
 interface Sandbox {
@@ -50,13 +53,12 @@ afterAll(() => {
   for (const root of sandboxRoots) rmSync(root, { recursive: true, force: true });
 });
 
-function lore(sb: Sandbox, ...args: string[]): Run {
-  const proc = Bun.spawnSync([LORE_BIN, ...args], { cwd: sb.corpus, env: sb.env });
-  return { code: proc.exitCode ?? -1, stdout: proc.stdout.toString(), stderr: proc.stderr.toString() };
+async function lore(sb: Sandbox, ...args: string[]): Promise<Run> {
+  const proc = await runLoreInProcess(args, { cwd: sb.corpus, env: sb.env });
+  return { code: proc.exitCode, stdout: proc.stdout, stderr: proc.stderr };
 }
 
-function makeSandbox(): Sandbox {
-  assertFreshBinary(LORE_BIN, [join(REPO_ROOT, "packages", "lore", "src"), join(REPO_ROOT, "packages", "core", "src")]);
+async function makeSandbox(): Promise<Sandbox> {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "lore-rs-selection-")));
   expect(root.startsWith(REPO_ROOT)).toBe(false);
   sandboxRoots.push(root);
@@ -74,7 +76,7 @@ function makeSandbox(): Sandbox {
   env["CLAUDECODE"] = "1";
   const sb: Sandbox = { root, corpus, userConfigDir: join(xdg, "lore"), env };
   for (const step of [["init"], ["context", "init", "--no-ai"], ["context", "refresh"]]) {
-    const run = lore(sb, ...step);
+    const run = await lore(sb, ...step);
     if (run.code !== 0) throw new Error(`harness: lore ${step.join(" ")} failed in fixture setup: ${run.stderr}`);
   }
   return sb;
@@ -84,15 +86,15 @@ const rulesFile = (sb: Sandbox): string => join(sb.corpus, ".claude", "rules", `
 const selectionFile = (sb: Sandbox): string => join(sb.corpus, ".lore", "context", "selection.yaml");
 
 describe("AC-RS-7 lore context list | add | remove", () => {
-  it("fixture liveness: the rules file exists before any selection change", () => {
-    const sb = makeSandbox();
+  it("fixture liveness: the rules file exists before any selection change", async () => {
+    const sb = await makeSandbox();
     expect(existsSync(rulesFile(sb))).toBe(true);
     expect(existsSync(selectionFile(sb))).toBe(false);
   });
 
-  it("list --json lists every fragment with layer, delivery and selected", () => {
-    const sb = makeSandbox();
-    const run = lore(sb, "context", "list", "--json");
+  it("list --json lists every fragment with layer, delivery and selected", async () => {
+    const sb = await makeSandbox();
+    const run = await lore(sb, "context", "list", "--json");
     expect(run.code).toBe(0);
     const report = JSON.parse(run.stdout) as {
       ok: boolean;
@@ -110,31 +112,31 @@ describe("AC-RS-7 lore context list | add | remove", () => {
     expect(report.data.every((row) => row.selected)).toBe(true);
   });
 
-  it("remove records the id in selection.yaml and deletes the rules file; repeat exits 0 byte-equal; add restores it", () => {
-    const sb = makeSandbox();
+  it("remove records the id in selection.yaml and deletes the rules file; repeat exits 0 byte-equal; add restores it", async () => {
+    const sb = await makeSandbox();
 
-    const removed = lore(sb, "context", "remove", FRAGMENT_ID);
+    const removed = await lore(sb, "context", "remove", FRAGMENT_ID);
     expect(removed.code).toBe(0);
     expect(readFileSync(selectionFile(sb), "utf8")).toContain(FRAGMENT_ID);
     expect(existsSync(rulesFile(sb))).toBe(false);
-    const listed = JSON.parse(lore(sb, "context", "list", "--json").stdout) as { data: { id: string; selected: boolean }[] };
+    const listed = JSON.parse((await lore(sb, "context", "list", "--json")).stdout) as { data: { id: string; selected: boolean }[] };
     expect(listed.data.find((row) => row.id === FRAGMENT_ID)?.selected).toBe(false);
 
     const before = readFileSync(selectionFile(sb));
-    const again = lore(sb, "context", "remove", FRAGMENT_ID);
+    const again = await lore(sb, "context", "remove", FRAGMENT_ID);
     expect(again.code).toBe(0);
     expect(Buffer.compare(readFileSync(selectionFile(sb)), before)).toBe(0);
     expect(existsSync(rulesFile(sb))).toBe(false);
 
-    const added = lore(sb, "context", "add", FRAGMENT_ID);
+    const added = await lore(sb, "context", "add", FRAGMENT_ID);
     expect(added.code).toBe(0);
     expect(existsSync(rulesFile(sb))).toBe(true);
     expect(readFileSync(selectionFile(sb), "utf8")).not.toContain(FRAGMENT_ID);
   }, 60_000);
 
-  it("remove of an unknown fragment id exits 4 and writes no selection file", () => {
-    const sb = makeSandbox();
-    const run = lore(sb, "context", "remove", "no-such-fragment");
+  it("remove of an unknown fragment id exits 4 and writes no selection file", async () => {
+    const sb = await makeSandbox();
+    const run = await lore(sb, "context", "remove", "no-such-fragment");
     expect(run.code).toBe(4);
     expect(run.stderr).toContain("no-such-fragment");
     expect(existsSync(selectionFile(sb))).toBe(false);
@@ -142,7 +144,7 @@ describe("AC-RS-7 lore context list | add | remove", () => {
   });
 
   it("a write that lands between the flow's read and its CAS re-read exits 5 and leaves the foreign bytes", async () => {
-    const sb = makeSandbox();
+    const sb = await makeSandbox();
     const path = selectionFile(sb);
     const foreign = "schemaVersion: 1\ndisable:\n  - agent-rules\n";
     const real = makeRealContextFsPort(sb.corpus);

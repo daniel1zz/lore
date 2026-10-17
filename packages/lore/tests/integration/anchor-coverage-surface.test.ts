@@ -1,4 +1,5 @@
-// @spawns dist/lore
+// @reads scripts/check-unclaimed-oracle.ts
+// @reads scripts/build.ts
 /**
  * AC-BFI-4 oracle — `spec-bootstrap-fixpoint-integrity-binary-provenance-an-anchor`.
  *
@@ -54,19 +55,21 @@
  *               `--json` envelope agrees with the human render
  *
  * @spec_ref AC-BFI-4
+ *
+ * TG-25 (adr-tg-1 option b): the commands run IN-PROCESS through tests/helpers/run-lore-in-process.ts, not through
+ * dist/lore. Wherever the prose above says the compiled binary is spawned or its freshness asserted, that is the
+ * history of this file; the assertions and the throwaway-corpus rule are unchanged.
  */
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { spawnSync } from "node:child_process";
 import { appendFileSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { assertFreshBinary } from "./helpers/assert-fresh-binary.js";
+import { runLoreInProcess } from "../helpers/run-lore-in-process";
 
 /** Repo root: four levels up from `packages/lore/tests/integration/`. Asserted in `beforeAll`. */
 const REPO_ROOT = fileURLToPath(new URL("../../../../", import.meta.url)).replace(/\/$/, "");
-const LORE_BIN = join(REPO_ROOT, "dist", "lore");
 
 /** The count field under test — the SPEC-045 D5 declared-anchor count this slice ratchets. */
 const FIELD = "code_anchor_specs";
@@ -89,21 +92,13 @@ interface RunResult {
  * Spawns the compiled binary in `cwd`. `HOME` is redirected into the fixture so
  * no global lore config on the developer's machine can influence a run.
  */
-function runLore(args: readonly string[], cwd: string): RunResult {
-  const proc = spawnSync(LORE_BIN, [...args], {
-    cwd,
-    encoding: "utf8",
-    env: { ...process.env, HOME: cwd, EDITOR: "true" },
-  });
-  if (proc.status === null) {
-    throw new Error(`lore ${args.join(" ")} was killed by signal ${String(proc.signal)} — no exit code to assert`);
-  }
-  return { stdout: proc.stdout ?? "", stderr: proc.stderr ?? "", exitCode: proc.status };
+async function runLore(args: readonly string[], cwd: string): Promise<RunResult> {
+  return await runLoreInProcess(args, { cwd, env: { ...process.env, HOME: cwd, EDITOR: "true" } });
 }
 
 /** `lore status --json`'s `code_anchor_specs`, read off the real envelope. */
-function statusCodeAnchorSpecs(cwd: string): number {
-  const run = runLore(["status", "--json"], cwd);
+async function statusCodeAnchorSpecs(cwd: string): Promise<number> {
+  const run = await runLore(["status", "--json"], cwd);
   if (run.exitCode !== 0) throw new Error(`lore status --json failed (exit ${run.exitCode}): ${run.stderr}`);
   const envelope = JSON.parse(run.stdout) as { data: Record<string, unknown> };
   const value = envelope.data[FIELD];
@@ -137,8 +132,8 @@ let anchoredSlugs: string[] = [];
 /** Slug of a seeded spec deliberately left with NO anchors — the STATE case anchors it later. */
 let laterAnchoredSlug = "";
 
-function initCorpus(dir: string): void {
-  const run = runLore(["init"], dir);
+async function initCorpus(dir: string): Promise<void> {
+  const run = await runLore(["init"], dir);
   if (run.exitCode !== 0) throw new Error(`lore init failed (exit ${run.exitCode}): ${run.stderr}`);
 }
 
@@ -171,8 +166,8 @@ function parseSlug(stdout: string): string {
   return (JSON.parse(stdout) as { data: { slug: string } }).data.slug;
 }
 
-function createPrd(dir: string, title: string): string {
-  const run = runLore(
+async function createPrd(dir: string, title: string): Promise<string> {
+  const run = await runLore(
     ["create", "prd", "--title", title, "--no-ai", "--content", "## Overview\n\nFixture body.", "--json"],
     dir,
   );
@@ -180,7 +175,7 @@ function createPrd(dir: string, title: string): string {
   return parseSlug(run.stdout);
 }
 
-function createSpec(dir: string, prdSlug: string, title: string, codeAnchors: readonly string[]): string {
+async function createSpec(dir: string, prdSlug: string, title: string, codeAnchors: readonly string[]): Promise<string> {
   const args = [
     "create",
     "spec",
@@ -194,44 +189,43 @@ function createSpec(dir: string, prdSlug: string, title: string, codeAnchors: re
     "--json",
   ];
   for (const anchor of codeAnchors) args.push("--code-anchor", anchor);
-  const run = runLore(args, dir);
+  const run = await runLore(args, dir);
   if (run.exitCode !== 0) throw new Error(`create spec "${title}" failed (exit ${run.exitCode}): ${run.stderr}`);
   return parseSlug(run.stdout);
 }
 
-beforeAll(() => {
+beforeAll(async () => {
   if (!existsSync(join(REPO_ROOT, "scripts", "build.ts"))) {
     throw new Error(
       `anchor-coverage-surface.test.ts: REPO_ROOT resolved to "${REPO_ROOT}", which has no scripts/build.ts — ` +
         `the up-level count in this file's REPO_ROOT is wrong.`,
     );
   }
-  assertFreshBinary(LORE_BIN, [join(REPO_ROOT, "packages", "lore", "src"), join(REPO_ROOT, "packages", "core", "src")]);
 
   // ── anchored fixture: 3 specs WITH anchors, 2 without ──
   anchoredCorpus = mkdtempSync(join(tmpdir(), "lore-bfi4-anchored-"));
-  initCorpus(anchoredCorpus);
+  await initCorpus(anchoredCorpus);
   disableAllGates(anchoredCorpus);
   mkdirSync(join(anchoredCorpus, "src"), { recursive: true });
   for (const name of ["a.ts", "b.ts", "c.ts", "d.ts"]) {
     writeFileSync(join(anchoredCorpus, "src", name), "export const Exported = 1;\n");
   }
-  const anchoredPrd = createPrd(anchoredCorpus, "Anchor Coverage Fixture Root PRD");
+  const anchoredPrd = await createPrd(anchoredCorpus, "Anchor Coverage Fixture Root PRD");
   anchoredSlugs = [
-    createSpec(anchoredCorpus, anchoredPrd, "ZzzCoverageAnchoredOne", ["src/a.ts#Exported"]),
-    createSpec(anchoredCorpus, anchoredPrd, "ZzzCoverageAnchoredTwo", ["src/b.ts#Exported"]),
-    createSpec(anchoredCorpus, anchoredPrd, "ZzzCoverageAnchoredThree", ["src/c.ts#Exported", "src/d.ts#Exported"]),
+    await createSpec(anchoredCorpus, anchoredPrd, "ZzzCoverageAnchoredOne", ["src/a.ts#Exported"]),
+    await createSpec(anchoredCorpus, anchoredPrd, "ZzzCoverageAnchoredTwo", ["src/b.ts#Exported"]),
+    await createSpec(anchoredCorpus, anchoredPrd, "ZzzCoverageAnchoredThree", ["src/c.ts#Exported", "src/d.ts#Exported"]),
   ].sort();
-  laterAnchoredSlug = createSpec(anchoredCorpus, anchoredPrd, "ZzzCoverageUnanchoredOne", []);
-  createSpec(anchoredCorpus, anchoredPrd, "ZzzCoverageUnanchoredTwo", []);
+  laterAnchoredSlug = await createSpec(anchoredCorpus, anchoredPrd, "ZzzCoverageUnanchoredOne", []);
+  await createSpec(anchoredCorpus, anchoredPrd, "ZzzCoverageUnanchoredTwo", []);
 
   // ── boundary fixture: specs exist, none declares an anchor ──
   bareCorpus = mkdtempSync(join(tmpdir(), "lore-bfi4-bare-"));
-  initCorpus(bareCorpus);
+  await initCorpus(bareCorpus);
   disableAllGates(bareCorpus);
-  const barePrd = createPrd(bareCorpus, "Anchor Coverage Bare Fixture Root PRD");
-  createSpec(bareCorpus, barePrd, "ZzzBareSpecOne", []);
-  createSpec(bareCorpus, barePrd, "ZzzBareSpecTwo", []);
+  const barePrd = await createPrd(bareCorpus, "Anchor Coverage Bare Fixture Root PRD");
+  await createSpec(bareCorpus, barePrd, "ZzzBareSpecOne", []);
+  await createSpec(bareCorpus, barePrd, "ZzzBareSpecTwo", []);
 }, 180_000);
 
 afterAll(() => {
@@ -243,14 +237,14 @@ afterAll(() => {
 // ─── AC-BFI-4's own assertions ──────────────────────────────────────────────
 
 describe("AC-BFI-4: anchor coverage is enumerable through the existing COUNT_FIELD_ENUMERATORS seam", () => {
-  it("HAPPY: --enumerate code_anchor_specs exits EXACTLY 0 and prints as many members as --json counts", () => {
-    const jsonCount = statusCodeAnchorSpecs(anchoredCorpus);
+  it("HAPPY: --enumerate code_anchor_specs exits EXACTLY 0 and prints as many members as --json counts", async () => {
+    const jsonCount = await statusCodeAnchorSpecs(anchoredCorpus);
     // reason: NON-VACUITY — pinned to the fixture's own anchored population
     // before the comparison, so the equality below can never be `0 === 0`
     // between a truncating enumerator and a broken counter.
     expect(jsonCount).toBe(anchoredSlugs.length);
 
-    const run = runLore(["status", "--enumerate", FIELD], anchoredCorpus);
+    const run = await runLore(["status", "--enumerate", FIELD], anchoredCorpus);
     expect(run.exitCode).toBe(0);
 
     // reason: RED (b) — a truncated member list with a correct count field must
@@ -265,16 +259,16 @@ describe("AC-BFI-4: anchor coverage is enumerable through the existing COUNT_FIE
     expect(run.stdout).toContain(`${FIELD}: ${jsonCount} member(s)`);
   }, 60_000);
 
-  it("HAPPY: the printed members are EXACTLY the anchor-declaring specs, and no unanchored spec appears", () => {
-    const run = runLore(["status", "--enumerate", FIELD], anchoredCorpus);
+  it("HAPPY: the printed members are EXACTLY the anchor-declaring specs, and no unanchored spec appears", async () => {
+    const run = await runLore(["status", "--enumerate", FIELD], anchoredCorpus);
     expect(run.exitCode).toBe(0);
     expect(printedMembers(run.stdout)).toEqual(anchoredSlugs);
     expect(run.stdout).not.toContain(laterAnchoredSlug);
   }, 60_000);
 
-  it("REGRESSION: --enumerate --json carries the same field/count/members the human render shows", () => {
-    const jsonCount = statusCodeAnchorSpecs(anchoredCorpus);
-    const run = runLore(["status", "--enumerate", FIELD, "--json"], anchoredCorpus);
+  it("REGRESSION: --enumerate --json carries the same field/count/members the human render shows", async () => {
+    const jsonCount = await statusCodeAnchorSpecs(anchoredCorpus);
+    const run = await runLore(["status", "--enumerate", FIELD, "--json"], anchoredCorpus);
     expect(run.exitCode).toBe(0);
     const payload = (JSON.parse(run.stdout) as { data: { field: string; count: number; members: string[] } }).data;
     expect(payload.field).toBe(FIELD);
@@ -284,16 +278,16 @@ describe("AC-BFI-4: anchor coverage is enumerable through the existing COUNT_FIE
     );
   }, 60_000);
 
-  it("STATE: anchoring one more spec moves the count and the member list TOGETHER", () => {
-    const before = statusCodeAnchorSpecs(anchoredCorpus);
+  it("STATE: anchoring one more spec moves the count and the member list TOGETHER", async () => {
+    const before = await statusCodeAnchorSpecs(anchoredCorpus);
 
-    const added = runLore(["anchor", "add", laterAnchoredSlug, "src/d.ts#Exported"], anchoredCorpus);
+    const added = await runLore(["anchor", "add", laterAnchoredSlug, "src/d.ts#Exported"], anchoredCorpus);
     expect(added.exitCode).toBe(0);
 
-    const after = statusCodeAnchorSpecs(anchoredCorpus);
+    const after = await statusCodeAnchorSpecs(anchoredCorpus);
     expect(after).toBe(before + 1);
 
-    const run = runLore(["status", "--enumerate", FIELD], anchoredCorpus);
+    const run = await runLore(["status", "--enumerate", FIELD], anchoredCorpus);
     expect(run.exitCode).toBe(0);
     const members = printedMembers(run.stdout);
     expect(members).toContain(laterAnchoredSlug);
@@ -302,11 +296,11 @@ describe("AC-BFI-4: anchor coverage is enumerable through the existing COUNT_FIE
     );
   }, 90_000);
 
-  it("BOUNDARY: a corpus where no spec declares anchors enumerates ZERO members and still exits EXACTLY 0", () => {
-    const jsonCount = statusCodeAnchorSpecs(bareCorpus);
+  it("BOUNDARY: a corpus where no spec declares anchors enumerates ZERO members and still exits EXACTLY 0", async () => {
+    const jsonCount = await statusCodeAnchorSpecs(bareCorpus);
     expect(jsonCount).toBe(0);
 
-    const run = runLore(["status", "--enumerate", FIELD], bareCorpus);
+    const run = await runLore(["status", "--enumerate", FIELD], bareCorpus);
     // An empty member list is a valid answer, never an error: refusing here
     // would make "nothing is anchored" indistinguishable from "unregistered".
     expect(run.exitCode).toBe(0);
@@ -314,8 +308,8 @@ describe("AC-BFI-4: anchor coverage is enumerable through the existing COUNT_FIE
     expect(printedMembers(run.stdout)).toEqual([]);
   }, 60_000);
 
-  it("NEGATIVE: an unregistered field is refused with EXACTLY exit 4, and code_anchor_specs is listed as known", () => {
-    const run = runLore(["status", "--enumerate", "code_anchor_spec"], anchoredCorpus);
+  it("NEGATIVE: an unregistered field is refused with EXACTLY exit 4, and code_anchor_specs is listed as known", async () => {
+    const run = await runLore(["status", "--enumerate", "code_anchor_spec"], anchoredCorpus);
     expect(run.exitCode).toBe(4);
     const output = `${run.stdout}${run.stderr}`;
     expect(output).toContain("no enumerator registered for count field");
@@ -326,9 +320,9 @@ describe("AC-BFI-4: anchor coverage is enumerable through the existing COUNT_FIE
     expect(output).toContain(FIELD);
   }, 30_000);
 
-  it("REGRESSION: the four fields registered before AC-BFI-4 still enumerate, exit EXACTLY 0", () => {
+  it("REGRESSION: the four fields registered before AC-BFI-4 still enumerate, exit EXACTLY 0", async () => {
     for (const field of PRE_EXISTING_FIELDS) {
-      const run = runLore(["status", "--enumerate", field], bareCorpus);
+      const run = await runLore(["status", "--enumerate", field], bareCorpus);
       expect(`${field} -> exit ${run.exitCode}`).toBe(`${field} -> exit 0`);
       expect(run.stdout).toContain(`${field}: `);
     }

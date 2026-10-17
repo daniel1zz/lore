@@ -1,4 +1,3 @@
-// @spawns dist/lore
 /**
  * @spec_ref SPEC-080 §Projection Contract, §Public Interface — task
  *   task-skill-test-t6-compiled-binary-e2e-injection-knobs-json-pin,
@@ -72,13 +71,17 @@
  *               resulting payload stays comfortably under the 2000-char
  *               budget (`budget_exceeded` absent) — knobs are never
  *               decorative (AC-080-6).
+ *
+ * TG-25 (adr-tg-1 option b): the commands run IN-PROCESS through tests/helpers/run-lore-in-process.ts, not through
+ * dist/lore. Wherever the prose above says the compiled binary is spawned or its freshness asserted, that is the
+ * history of this file; the assertions and the throwaway-corpus rule are unchanged.
  */
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
-import { assertFreshBinary } from "../integration/helpers/assert-fresh-binary";
+import { runLoreInProcess } from "../helpers/run-lore-in-process";
 
 // ─── Path / spawn setup ─────────────────────────────────────────────────────
 
@@ -86,7 +89,6 @@ import { assertFreshBinary } from "../integration/helpers/assert-fresh-binary";
 // mirrors tests/e2e/setup-freshness-cycle.bun.test.ts's own REPO_ROOT derivation
 // (same directory, same depth).
 const REPO_ROOT = new URL("../../../../", import.meta.url).pathname.replace(/\/$/, "");
-const LORE_BIN = join(REPO_ROOT, "dist", "lore");
 
 interface RunResult {
   readonly stdout: string;
@@ -95,20 +97,20 @@ interface RunResult {
 }
 
 /** Spawns the COMPILED `dist/lore` binary with `cwd`/`HOME` both pointed at the throwaway corpus dir. `CLAUDECODE=1` resolves the "agent" caller surface (SPEC-024) so no create/handoff call risks a nested AI invocation even though every create below already passes `--no-ai` explicitly. */
-function runLore(args: string[], cwd: string): RunResult {
-  const proc = Bun.spawnSync([LORE_BIN, ...args], {
+async function runLore(args: string[], cwd: string): Promise<RunResult> {
+  const proc = await runLoreInProcess(args, {
     cwd,
     env: { ...process.env, HOME: cwd, CLAUDECODE: "1" },
   });
   return {
-    stdout: proc.stdout.toString(),
-    stderr: proc.stderr.toString(),
-    exitCode: proc.exitCode ?? 1,
+    stdout: proc.stdout,
+    stderr: proc.stderr,
+    exitCode: proc.exitCode,
   };
 }
 
-function initCorpus(dir: string): void {
-  const result = runLore(["init"], dir);
+async function initCorpus(dir: string): Promise<void> {
+  const result = await runLore(["init"], dir);
   if (result.exitCode !== 0) {
     throw new Error(`lore init failed: ${result.stderr}`);
   }
@@ -138,22 +140,22 @@ interface SeededCorpus {
  * producing an empty/partial corpus that the assertions below would then
  * misinterpret as "the projection dropped everything".
  */
-function seedCorpus(dir: string): SeededCorpus {
-  const prdResult = runLore(
+async function seedCorpus(dir: string): Promise<SeededCorpus> {
+  const prdResult = await runLore(
     ["create", "prd", "--title", "T6 Bootstrap Injection E2E PRD", "--content", "root", "--no-ai"],
     dir,
   );
   expect(prdResult.exitCode).toBe(0);
   const prdSlug = parseSlug(prdResult.stdout);
 
-  const planAResult = runLore(
+  const planAResult = await runLore(
     ["create", "plan", "--title", "Plan A actionable", "--parent", prdSlug, "--content", "x", "--no-ai"],
     dir,
   );
   expect(planAResult.exitCode).toBe(0);
   const planASlug = parseSlug(planAResult.stdout);
 
-  const taskAResult = runLore(
+  const taskAResult = await runLore(
     [
       "create",
       "task",
@@ -171,14 +173,14 @@ function seedCorpus(dir: string): SeededCorpus {
   );
   expect(taskAResult.exitCode).toBe(0);
 
-  const planBResult = runLore(
+  const planBResult = await runLore(
     ["create", "plan", "--title", "Plan B actionable", "--parent", prdSlug, "--content", "x", "--no-ai"],
     dir,
   );
   expect(planBResult.exitCode).toBe(0);
   const planBSlug = parseSlug(planBResult.stdout);
 
-  const taskBResult = runLore(
+  const taskBResult = await runLore(
     [
       "create",
       "task",
@@ -198,20 +200,20 @@ function seedCorpus(dir: string): SeededCorpus {
 
   // Plan C: zero tasks -> ready:0, claimed:0 -> "dead", excluded from the
   // injection's active_plans regardless of max_active_plans (SPEC-080 D4).
-  const planCResult = runLore(
+  const planCResult = await runLore(
     ["create", "plan", "--title", "Plan C dead", "--parent", prdSlug, "--content", "x", "--no-ai"],
     dir,
   );
   expect(planCResult.exitCode).toBe(0);
   const planCSlug = parseSlug(planCResult.stdout);
 
-  const handoffAResult = runLore(
+  const handoffAResult = await runLore(
     ["handoff", "--plan", planASlug, "--next", "next step A", "--decision", "decision A@80"],
     dir,
   );
   expect(handoffAResult.exitCode).toBe(0);
 
-  const handoffBResult = runLore(
+  const handoffBResult = await runLore(
     ["handoff", "--plan", planBSlug, "--next", "next step B", "--decision", "decision B@70"],
     dir,
   );
@@ -242,24 +244,17 @@ const PLAIN_BOOTSTRAP_REPORT_KEYS = [
   "archive_candidates",
 ] as const;
 
-beforeAll(() => {
-  assertFreshBinary(LORE_BIN, [
-    join(REPO_ROOT, "packages", "lore", "src"),
-    join(REPO_ROOT, "packages", "core", "src"),
-  ]);
-});
-
 describe("AC-080-3: compiled dist/lore bootstrap --injection / --json default-budget contract", () => {
   let dir: string;
   let seeded: SeededCorpus;
 
-  beforeAll(() => {
+  beforeAll(async () => {
     dir = mkdtempSync(join(tmpdir(), "lore-t6-bootstrap-injection-"));
     // Never the repo's own .lore/ corpus (project CLAUDE.md hard rule) — a
     // genuine os.tmpdir() path is never a prefix of REPO_ROOT.
     expect(dir.startsWith(REPO_ROOT)).toBe(false);
-    initCorpus(dir);
-    seeded = seedCorpus(dir);
+    await initCorpus(dir);
+    seeded = await seedCorpus(dir);
   });
 
   afterAll(() => {
@@ -270,8 +265,8 @@ describe("AC-080-3: compiled dist/lore bootstrap --injection / --json default-bu
     }
   });
 
-  it("REGRESSION: plain --json on the same corpus has exactly the literal 10-key BootstrapReport set", () => {
-    const result = runLore(["bootstrap", "--json"], dir);
+  it("REGRESSION: plain --json on the same corpus has exactly the literal 10-key BootstrapReport set", async () => {
+    const result = await runLore(["bootstrap", "--json"], dir);
     expect(result.exitCode).toBe(0);
 
     const envelope = JSON.parse(result.stdout) as { ok: boolean; data: Record<string, unknown> };
@@ -289,15 +284,15 @@ describe("AC-080-3: compiled dist/lore bootstrap --injection / --json default-bu
     expect(envelope.data["archive_candidates"]).toBe(0);
   });
 
-  it("NEGATIVE: --injectoin (typo) exits 2 (SPEC-051 strict-flags), never a silent no-op", () => {
-    const result = runLore(["bootstrap", "--injectoin"], dir);
+  it("NEGATIVE: --injectoin (typo) exits 2 (SPEC-051 strict-flags), never a silent no-op", async () => {
+    const result = await runLore(["bootstrap", "--injectoin"], dir);
     expect(result.exitCode).toBe(2);
     expect(result.stderr).toContain("Unknown option: --injectoin");
   });
 
-  it("STATE: --injection --json combined takes --injection precedence — byte-identical output, never a rejection", () => {
-    const injectionOnly = runLore(["bootstrap", "--injection"], dir);
-    const combined = runLore(["bootstrap", "--injection", "--json"], dir);
+  it("STATE: --injection --json combined takes --injection precedence — byte-identical output, never a rejection", async () => {
+    const injectionOnly = await runLore(["bootstrap", "--injection"], dir);
+    const combined = await runLore(["bootstrap", "--injection", "--json"], dir);
 
     expect(injectionOnly.exitCode).toBe(0);
     expect(combined.exitCode).toBe(0);
@@ -310,10 +305,10 @@ describe("AC-097-4: archive_candidates injection surfacing (spec-lifecycle-archi
   let dir: string;
   let planSlug: string;
 
-  beforeAll(() => {
+  beforeAll(async () => {
     dir = mkdtempSync(join(tmpdir(), "lore-t6-archive-candidates-"));
     expect(dir.startsWith(REPO_ROOT)).toBe(false);
-    initCorpus(dir);
+    await initCorpus(dir);
 
     // Disable plan-close so this fixture (out of THIS suite's scope — it's
     // about the INJECTION surfacing, not the gate) can archive a plan with
@@ -332,23 +327,23 @@ describe("AC-097-4: archive_candidates injection surfacing (spec-lifecycle-archi
     const existing = readFileSync(cfgPath, "utf8");
     writeFileSync(cfgPath, `${existing}\nworkflow:\n  gates:\n    "plan-close":\n      enabled: false\n`, "utf8");
 
-    const prdResult = runLore(["create", "prd", "--title", "Archive Candidates PRD", "--content", "root", "--no-ai"], dir);
+    const prdResult = await runLore(["create", "prd", "--title", "Archive Candidates PRD", "--content", "root", "--no-ai"], dir);
     expect(prdResult.exitCode).toBe(0);
     const prdSlug = parseSlug(prdResult.stdout);
 
-    const planResult = runLore(
+    const planResult = await runLore(
       ["create", "plan", "--title", "Archive Candidates Plan", "--parent", prdSlug, "--content", "x", "--no-ai"],
       dir,
     );
     expect(planResult.exitCode).toBe(0);
     planSlug = parseSlug(planResult.stdout);
 
-    expect(runLore(["set", planSlug, "--status", "approved"], dir).exitCode).toBe(0);
-    expect(runLore(["set", planSlug, "--status", "archived"], dir).exitCode).toBe(0);
+    expect((await runLore(["set", planSlug, "--status", "approved"], dir)).exitCode).toBe(0);
+    expect((await runLore(["set", planSlug, "--status", "archived"], dir)).exitCode).toBe(0);
 
     // Created AFTER the plan archived — a genuine R4 done_plan_straggler
     // candidate, never touched by the R1 cascade.
-    const taskResult = runLore(
+    const taskResult = await runLore(
       [
         "create",
         "task",
@@ -380,8 +375,8 @@ describe("AC-097-4: archive_candidates injection surfacing (spec-lifecycle-archi
     }
   });
 
-  it("REGRESSION: plain --json also carries archive_candidates: 1 on the same corpus", () => {
-    const result = runLore(["bootstrap", "--json"], dir);
+  it("REGRESSION: plain --json also carries archive_candidates: 1 on the same corpus", async () => {
+    const result = await runLore(["bootstrap", "--json"], dir);
     expect(result.exitCode).toBe(0);
     const envelope = JSON.parse(result.stdout) as { ok: boolean; data: Record<string, unknown> };
     expect(envelope.ok).toBe(true);

@@ -1,4 +1,3 @@
-// @spawns dist/lore
 /**
  * @spec_ref AC-CP-3 (spec-corpus-resolution-carries-provenance-and-a-foreign-write §D5)
  *
@@ -82,6 +81,10 @@
  * never accidentally build/spawn a sibling worktree's or the main
  * checkout's binary (mirrors `foreign-corpus-write-default.bun.test.ts`'s
  * identical guard).
+ *
+ * TG-25 (adr-tg-1 option b): the commands run IN-PROCESS through tests/helpers/run-lore-in-process.ts, not through
+ * dist/lore. Wherever the prose above says the compiled binary is spawned or its freshness asserted, that is the
+ * history of this file; the assertions and the throwaway-corpus rule are unchanged.
  */
 
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
@@ -90,17 +93,16 @@ import { appendFileSync, existsSync, mkdirSync, mkdtempSync, realpathSync, rmSyn
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { assertFreshBinary } from "../integration/helpers/assert-fresh-binary";
 import {
   checkForeignCorpusWrite,
   FOREIGN_CORPUS_WRITE_TOKEN,
   type ForeignCorpusWriteContext,
 } from "../../src/service/foreign-corpus-write-guard.js";
+import { runLoreInProcess } from "../helpers/run-lore-in-process";
 
 // ─── Path / spawn setup (mirrors foreign-corpus-write-default.bun.test.ts) ──
 
 const REPO_ROOT = new URL("../../../../", import.meta.url).pathname.replace(/\/$/, "");
-const LORE_BIN = join(REPO_ROOT, "dist", "lore");
 
 interface RunResult {
   readonly stdout: string;
@@ -125,11 +127,6 @@ beforeAll(() => {
         `a sibling worktree or the main checkout.`,
     );
   }
-
-  assertFreshBinary(LORE_BIN, [
-    join(REPO_ROOT, "packages", "lore", "src"),
-    join(REPO_ROOT, "packages", "core", "src"),
-  ]);
 });
 
 const cleanupDirs: string[] = [];
@@ -167,20 +164,20 @@ function initGitRepo(dir: string): void {
  * the "agent" caller surface (SPEC-024) so no write here risks a nested AI
  * invocation.
  */
-function runLore(args: string[], cwd: string): RunResult {
-  const proc = Bun.spawnSync([LORE_BIN, ...args], {
+async function runLore(args: string[], cwd: string): Promise<RunResult> {
+  const proc = await runLoreInProcess(args, {
     cwd,
     env: { ...process.env, HOME: cwd, CLAUDECODE: "1" },
   });
   return {
-    stdout: proc.stdout.toString(),
-    stderr: proc.stderr.toString(),
-    exitCode: proc.exitCode ?? 1,
+    stdout: proc.stdout,
+    stderr: proc.stderr,
+    exitCode: proc.exitCode,
   };
 }
 
-function initCorpus(dir: string): void {
-  const result = runLore(["init", "--author", "foreign-write-guard-e2e"], dir);
+async function initCorpus(dir: string): Promise<void> {
+  const result = await runLore(["init", "--author", "foreign-write-guard-e2e"], dir);
   if (result.exitCode !== 0) {
     throw new Error(`fixture setup: 'lore init' failed in ${dir}: ${result.stderr}`);
   }
@@ -233,15 +230,15 @@ function parseSlug(stdout: string): string {
  * the only doc that carries a claim lease, so a task-free fixture is what makes
  * "no declared intent anywhere" a structural fact rather than an assumption.
  */
-function seedPlan(dir: string, titleSuffix: string): string {
-  const prdResult = runLore(
+async function seedPlan(dir: string, titleSuffix: string): Promise<string> {
+  const prdResult = await runLore(
     ["create", "prd", "--title", `FCWG E2E PRD ${titleSuffix}`, "--content", "root", "--no-ai"],
     dir,
   );
   expect(prdResult.exitCode).toBe(0);
   const prdSlug = parseSlug(prdResult.stdout);
 
-  const planResult = runLore(
+  const planResult = await runLore(
     ["create", "plan", "--title", `FCWG E2E Plan ${titleSuffix}`, "--parent", prdSlug, "--content", "x", "--no-ai"],
     dir,
   );
@@ -256,10 +253,10 @@ function seedPlan(dir: string, titleSuffix: string): string {
  * own `seedTask` shape exactly (task requires a plan parent + `extra.plan_id`
  * per `CreateDocInput` validation).
  */
-function seedTask(dir: string, titleSuffix: string): string {
-  const planSlug = seedPlan(dir, titleSuffix);
+async function seedTask(dir: string, titleSuffix: string): Promise<string> {
+  const planSlug = await seedPlan(dir, titleSuffix);
 
-  const taskResult = runLore(
+  const taskResult = await runLore(
     [
       "create",
       "task",
@@ -284,7 +281,7 @@ function seedTask(dir: string, titleSuffix: string): string {
  * with a NESTED worktree at `repo/.claude/worktrees/agent-x` carrying no
  * `.lore/` of its own — every write from `worktreePath` is genuinely foreign.
  */
-function createNestedWorktreeFixture(prefix: string): { repoRoot: string; worktreePath: string } {
+async function createNestedWorktreeFixture(prefix: string): Promise<{ repoRoot: string; worktreePath: string }> {
   const repoRoot = mkScratchDir(`fcwg-${prefix}-repo-`);
 
   if (repoRoot === REPO_ROOT || repoRoot.startsWith(`${REPO_ROOT}/`)) {
@@ -296,7 +293,7 @@ function createNestedWorktreeFixture(prefix: string): { repoRoot: string; worktr
   }
 
   initGitRepo(repoRoot);
-  initCorpus(repoRoot);
+  await initCorpus(repoRoot);
   disableUnrelatedGates(repoRoot);
 
   mkdirSync(join(repoRoot, ".claude", "worktrees"), { recursive: true });
@@ -339,17 +336,17 @@ function expectRefused(result: RunResult, label: string): void {
 describe("foreign-corpus-write guard — the central 2x2-minus-one (AC-CP-3)", () => {
   it(
     "(1) ALLOWED: claim --worktree then evidence (no flag) on the SAME task both land in the parent corpus",
-    () => {
-      const { repoRoot, worktreePath } = createNestedWorktreeFixture("cell1");
-      const taskSlug = seedTask(repoRoot, "cell1");
+    async () => {
+      const { repoRoot, worktreePath } = await createNestedWorktreeFixture("cell1");
+      const taskSlug = await seedTask(repoRoot, "cell1");
 
-      const claimResult = runLore(
+      const claimResult = await runLore(
         ["claim", taskSlug, "--worktree", worktreePath],
         worktreePath,
       );
       expect(claimResult.exitCode).toBe(0);
 
-      const evidenceResult = runLore(
+      const evidenceResult = await runLore(
         [
           "evidence",
           taskSlug,
@@ -371,7 +368,7 @@ describe("foreign-corpus-write guard — the central 2x2-minus-one (AC-CP-3)", (
       // and the evidence row is matched on its OWN recorded fields rather than
       // on the array merely being length 1: a row-shaped placeholder written by
       // some other path would satisfy a count but not this.
-      const verify = runLore(["get", taskSlug, "--json"], repoRoot);
+      const verify = await runLore(["get", taskSlug, "--json"], repoRoot);
       expect(verify.exitCode).toBe(0);
       const parsed = JSON.parse(verify.stdout) as {
         data: {
@@ -396,15 +393,15 @@ describe("foreign-corpus-write guard — the central 2x2-minus-one (AC-CP-3)", (
 
   it(
     "(2a) REFUSED: claim WITHOUT --worktree from the foreign worktree",
-    () => {
-      const { repoRoot, worktreePath } = createNestedWorktreeFixture("cell2a");
-      const taskSlug = seedTask(repoRoot, "cell2a");
+    async () => {
+      const { repoRoot, worktreePath } = await createNestedWorktreeFixture("cell2a");
+      const taskSlug = await seedTask(repoRoot, "cell2a");
 
-      const claimResult = runLore(["claim", taskSlug], worktreePath);
+      const claimResult = await runLore(["claim", taskSlug], worktreePath);
       expectRefused(claimResult, "cell2a-claim");
 
       // The refused claim must not have landed a lease at all.
-      const verify = runLore(["get", taskSlug, "--json"], repoRoot);
+      const verify = await runLore(["get", taskSlug, "--json"], repoRoot);
       expect(verify.exitCode).toBe(0);
       const parsed = JSON.parse(verify.stdout) as { data: { doc: { extra: { claim?: unknown } } } };
       expect(parsed.data.doc.extra.claim).toBeUndefined();
@@ -414,25 +411,25 @@ describe("foreign-corpus-write guard — the central 2x2-minus-one (AC-CP-3)", (
 
   it(
     "(2b) REFUSED: evidence on a task whose lease has a claim but no worktree field",
-    () => {
-      const { repoRoot, worktreePath } = createNestedWorktreeFixture("cell2b");
-      const taskSlug = seedTask(repoRoot, "cell2b");
+    async () => {
+      const { repoRoot, worktreePath } = await createNestedWorktreeFixture("cell2b");
+      const taskSlug = await seedTask(repoRoot, "cell2b");
 
       // Constructed from the PRIMARY checkout, where provenance is "own" and
       // the guard is inert regardless of --worktree — this legitimately
       // lands a claim lease with NO worktree field, the exact precondition
       // cell (2b) needs.
-      const primaryClaimResult = runLore(["claim", taskSlug], repoRoot);
+      const primaryClaimResult = await runLore(["claim", taskSlug], repoRoot);
       expect(primaryClaimResult.exitCode).toBe(0);
 
-      const precondition = runLore(["get", taskSlug, "--json"], repoRoot);
+      const precondition = await runLore(["get", taskSlug, "--json"], repoRoot);
       const preParsed = JSON.parse(precondition.stdout) as {
         data: { doc: { extra: { claim?: { worktree?: string } } } };
       };
       expect(preParsed.data.doc.extra.claim).toBeDefined();
       expect(preParsed.data.doc.extra.claim?.worktree).toBeUndefined();
 
-      const evidenceResult = runLore(
+      const evidenceResult = await runLore(
         [
           "evidence",
           taskSlug,
@@ -450,7 +447,7 @@ describe("foreign-corpus-write guard — the central 2x2-minus-one (AC-CP-3)", (
       expectRefused(evidenceResult, "cell2b-evidence");
 
       // The refused evidence write must not have landed.
-      const verify = runLore(["get", taskSlug, "--json"], repoRoot);
+      const verify = await runLore(["get", taskSlug, "--json"], repoRoot);
       const parsed = JSON.parse(verify.stdout) as {
         data: { doc: { extra: { verification_evidence?: unknown[] } } };
       };
@@ -461,10 +458,10 @@ describe("foreign-corpus-write guard — the central 2x2-minus-one (AC-CP-3)", (
 
   it(
     "(3) REFUSED: a non-lifecycle write, lore create knowledge",
-    () => {
-      const { repoRoot, worktreePath } = createNestedWorktreeFixture("cell3");
+    async () => {
+      const { repoRoot, worktreePath } = await createNestedWorktreeFixture("cell3");
 
-      const createResult = runLore(
+      const createResult = await runLore(
         [
           "create",
           "knowledge",
@@ -481,7 +478,7 @@ describe("foreign-corpus-write guard — the central 2x2-minus-one (AC-CP-3)", (
       expectRefused(createResult, "cell3-create");
 
       // The refused create must not have landed in the parent corpus.
-      const verify = runLore(["list", "--type", "knowledge", "--json"], repoRoot);
+      const verify = await runLore(["list", "--type", "knowledge", "--json"], repoRoot);
       expect(verify.exitCode).toBe(0);
       const parsed = JSON.parse(verify.stdout) as { data: { docs: Array<{ title: string }> } };
       expect(parsed.data.docs.some((d) => d.title === "FCWG E2E fixture cell3")).toBe(false);
@@ -491,9 +488,9 @@ describe("foreign-corpus-write guard — the central 2x2-minus-one (AC-CP-3)", (
 
   it(
     "(4) ALLOWED: the D5 seam exemption — `lore handoff` and `lore uat record` land from the SAME foreign worktree with NO lease",
-    () => {
-      const { repoRoot, worktreePath } = createNestedWorktreeFixture("cell4");
-      const planSlug = seedPlan(repoRoot, "cell4");
+    async () => {
+      const { repoRoot, worktreePath } = await createNestedWorktreeFixture("cell4");
+      const planSlug = await seedPlan(repoRoot, "cell4");
 
       // The precondition that makes this cell mean what AC-CP-3 says it means,
       // ASSERTED rather than assumed: the fixture holds no task at all, and a
@@ -502,12 +499,12 @@ describe("foreign-corpus-write guard — the central 2x2-minus-one (AC-CP-3)", (
       // THEY ARE (the two §D5 seams), never because something declared intent.
       // Without this assertion cell 4 would be indistinguishable from the
       // UNCONSTRUCTIBLE non-lifecycle-WITH-intent cell it must not become.
-      const tasks = runLore(["list", "--type", "task", "--json"], repoRoot);
+      const tasks = await runLore(["list", "--type", "task", "--json"], repoRoot);
       expect(tasks.exitCode).toBe(0);
       expect((JSON.parse(tasks.stdout) as { data: { docs: unknown[] } }).data.docs).toEqual([]);
 
       // ── Seam 1: `lore handoff` → SessionService.writeHandoff → createHandoffDoc ──
-      const handoffResult = runLore(
+      const handoffResult = await runLore(
         [
           "handoff",
           "--plan",
@@ -533,7 +530,7 @@ describe("foreign-corpus-write guard — the central 2x2-minus-one (AC-CP-3)", (
           run_meta: { at: "2026-08-12T00:00:00.000Z", by: "agent:fcwg-cell4" },
         }),
       );
-      const uatResult = runLore(
+      const uatResult = await runLore(
         ["uat", "record", planSlug, "--json-file", uatPayloadPath, "--json"],
         worktreePath,
       );
@@ -547,7 +544,7 @@ describe("foreign-corpus-write guard — the central 2x2-minus-one (AC-CP-3)", (
         [handoffSlug, "handoff"],
         [uatSlug, "uat"],
       ] as const) {
-        const readBack = runLore(["get", slug, "--json"], repoRoot);
+        const readBack = await runLore(["get", slug, "--json"], repoRoot);
         expect(readBack.exitCode).toBe(0);
         const doc = (
           JSON.parse(readBack.stdout) as {

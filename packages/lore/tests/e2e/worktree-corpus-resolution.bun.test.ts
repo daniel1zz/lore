@@ -1,4 +1,3 @@
-// @spawns dist/lore
 /**
  * @spec_ref AC-WH-4
  *
@@ -43,6 +42,10 @@
  *   ERROR:      a directory that isn't even a git repository (no `.git`
  *               anywhere, the git-facts probe itself fails) degrades to the
  *               same pre-existing loud failure, never a crash.
+ *
+ * TG-25 (adr-tg-1 option b): the commands run IN-PROCESS through tests/helpers/run-lore-in-process.ts, not through
+ * dist/lore. Wherever the prose above says the compiled binary is spawned or its freshness asserted, that is the
+ * history of this file; the assertions and the throwaway-corpus rule are unchanged.
  */
 
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
@@ -58,7 +61,7 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { assertFreshBinary } from "../integration/helpers/assert-fresh-binary";
+import { runLoreInProcess } from "../helpers/run-lore-in-process";
 
 // ─── Path / spawn setup ─────────────────────────────────────────────────────
 
@@ -66,20 +69,12 @@ import { assertFreshBinary } from "../integration/helpers/assert-fresh-binary";
 // mirrors tests/e2e/bootstrap-injection-compiled.bun.test.ts's own REPO_ROOT
 // derivation (same directory, same depth).
 const REPO_ROOT = new URL("../../../../", import.meta.url).pathname.replace(/\/$/, "");
-const LORE_BIN = join(REPO_ROOT, "dist", "lore");
 
 interface RunResult {
   readonly stdout: string;
   readonly stderr: string;
   readonly exitCode: number;
 }
-
-beforeAll(() => {
-  assertFreshBinary(LORE_BIN, [
-    join(REPO_ROOT, "packages", "lore", "src"),
-    join(REPO_ROOT, "packages", "core", "src"),
-  ]);
-});
 
 const cleanupDirs: string[] = [];
 
@@ -126,20 +121,20 @@ function initGitRepo(dir: string): void {
  * (SPEC-024) so no `create`/`claim`/`evidence`/`release` call risks a nested
  * AI invocation.
  */
-function runLore(args: string[], cwd: string): RunResult {
-  const proc = Bun.spawnSync([LORE_BIN, ...args], {
+async function runLore(args: string[], cwd: string): Promise<RunResult> {
+  const proc = await runLoreInProcess(args, {
     cwd,
     env: { ...process.env, HOME: cwd, CLAUDECODE: "1" },
   });
   return {
-    stdout: proc.stdout.toString(),
-    stderr: proc.stderr.toString(),
-    exitCode: proc.exitCode ?? 1,
+    stdout: proc.stdout,
+    stderr: proc.stderr,
+    exitCode: proc.exitCode,
   };
 }
 
-function initCorpus(dir: string): void {
-  const result = runLore(["init"], dir);
+async function initCorpus(dir: string): Promise<void> {
+  const result = await runLore(["init"], dir);
   expect(result.exitCode).toBe(0);
 }
 
@@ -184,22 +179,22 @@ function parseSlug(stdout: string): string {
  * returns the task's slug — the one doc this suite's HAPPY/STATE/REGRESSION
  * scenarios claim/evidence/release from a worktree.
  */
-function seedTask(dir: string): string {
-  const prdResult = runLore(
+async function seedTask(dir: string): Promise<string> {
+  const prdResult = await runLore(
     ["create", "prd", "--title", "WCR E2E PRD", "--content", "root", "--no-ai"],
     dir,
   );
   expect(prdResult.exitCode).toBe(0);
   const prdSlug = parseSlug(prdResult.stdout);
 
-  const planResult = runLore(
+  const planResult = await runLore(
     ["create", "plan", "--title", "WCR E2E Plan", "--parent", prdSlug, "--content", "x", "--no-ai"],
     dir,
   );
   expect(planResult.exitCode).toBe(0);
   const planSlug = parseSlug(planResult.stdout);
 
-  const taskResult = runLore(
+  const taskResult = await runLore(
     [
       "create",
       "task",
@@ -222,12 +217,12 @@ function seedTask(dir: string): string {
 const NO_DB_MESSAGE = "No Lore database found in this directory or any parent";
 
 describe("worktree corpus resolution — git-common-dir fallback (AC-WH-4)", () => {
-  it("HAPPY: get/claim/evidence/release from a linked worktree with no local .lore/ operate on the main checkout's corpus, no symlinks ever created", () => {
+  it("HAPPY: get/claim/evidence/release from a linked worktree with no local .lore/ operate on the main checkout's corpus, no symlinks ever created", async () => {
     const repoRoot = mkScratchDir("wcr-happy-repo-");
     initGitRepo(repoRoot);
-    initCorpus(repoRoot);
+    await initCorpus(repoRoot);
     disableAllGates(repoRoot);
-    const taskSlug = seedTask(repoRoot);
+    const taskSlug = await seedTask(repoRoot);
 
     const worktreeBase = mkScratchDir("wcr-happy-wt-");
     const worktreePath = join(worktreeBase, "linked-worktree");
@@ -237,17 +232,17 @@ describe("worktree corpus resolution — git-common-dir fallback (AC-WH-4)", () 
     // is the exact gap SPEC M4 closes, not a fixture artifact.
     expect(existsSync(join(worktreePath, ".lore"))).toBe(false);
 
-    const getResult = runLore(["get", taskSlug], worktreePath);
+    const getResult = await runLore(["get", taskSlug], worktreePath);
     expect(getResult.exitCode).toBe(0);
     expect(getResult.stdout).toContain("WCR E2E Task");
 
-    const claimResult = runLore(
+    const claimResult = await runLore(
       ["claim", taskSlug, "--worktree", "wcr-happy-feature"],
       worktreePath,
     );
     expect(claimResult.exitCode).toBe(0);
 
-    const evidenceResult = runLore(
+    const evidenceResult = await runLore(
       [
         // reason: SUPERSEDED oracle (task-raise-the-evidence-tail-guard-s-
         // predicate-to-its-own) — "test" self-report is now refused
@@ -269,13 +264,13 @@ describe("worktree corpus resolution — git-common-dir fallback (AC-WH-4)", () 
     );
     expect(evidenceResult.exitCode).toBe(0);
 
-    const releaseResult = runLore(["release", taskSlug], worktreePath);
+    const releaseResult = await runLore(["release", taskSlug], worktreePath);
     expect(releaseResult.exitCode).toBe(0);
 
     // Confirm the writes landed in the MAIN checkout's corpus (not some
     // phantom local state) by reading the task back from the PRIMARY
     // checkout itself.
-    const verifyFromMain = runLore(["get", taskSlug, "--json"], repoRoot);
+    const verifyFromMain = await runLore(["get", taskSlug, "--json"], repoRoot);
     expect(verifyFromMain.exitCode).toBe(0);
     const parsed = JSON.parse(verifyFromMain.stdout) as {
       data: { doc: { extra: { verification_evidence?: unknown[] } } };
@@ -287,25 +282,25 @@ describe("worktree corpus resolution — git-common-dir fallback (AC-WH-4)", () 
     expect(existsSync(join(worktreePath, ".lore"))).toBe(false);
   }, 30000);
 
-  it("REGRESSION: primary-checkout resolution is unchanged — get/claim/evidence/release from the main checkout itself still succeed", () => {
+  it("REGRESSION: primary-checkout resolution is unchanged — get/claim/evidence/release from the main checkout itself still succeed", async () => {
     const repoRoot = mkScratchDir("wcr-regression-repo-");
     initGitRepo(repoRoot);
-    initCorpus(repoRoot);
+    await initCorpus(repoRoot);
     disableAllGates(repoRoot);
-    const taskSlug = seedTask(repoRoot);
+    const taskSlug = await seedTask(repoRoot);
 
     // Primary checkout: git-common-dir === git-dir, fallback never engaged —
     // the pre-existing local walk-up resolves `.lore/lore.db` directly.
-    const getResult = runLore(["get", taskSlug], repoRoot);
+    const getResult = await runLore(["get", taskSlug], repoRoot);
     expect(getResult.exitCode).toBe(0);
 
-    const claimResult = runLore(
+    const claimResult = await runLore(
       ["claim", taskSlug, "--worktree", "main"],
       repoRoot,
     );
     expect(claimResult.exitCode).toBe(0);
 
-    const evidenceResult = runLore(
+    const evidenceResult = await runLore(
       [
         // reason: SUPERSEDED oracle (task-raise-the-evidence-tail-guard-s-
         // predicate-to-its-own) — "test" self-report is now refused
@@ -327,16 +322,16 @@ describe("worktree corpus resolution — git-common-dir fallback (AC-WH-4)", () 
     );
     expect(evidenceResult.exitCode).toBe(0);
 
-    const releaseResult = runLore(["release", taskSlug], repoRoot);
+    const releaseResult = await runLore(["release", taskSlug], repoRoot);
     expect(releaseResult.exitCode).toBe(0);
   }, 30000);
 
-  it("BOUNDARY: cwd inside a subdirectory of the linked worktree (not its root) still resolves via the fallback", () => {
+  it("BOUNDARY: cwd inside a subdirectory of the linked worktree (not its root) still resolves via the fallback", async () => {
     const repoRoot = mkScratchDir("wcr-boundary-repo-");
     initGitRepo(repoRoot);
-    initCorpus(repoRoot);
+    await initCorpus(repoRoot);
     disableAllGates(repoRoot);
-    const taskSlug = seedTask(repoRoot);
+    const taskSlug = await seedTask(repoRoot);
 
     const worktreeBase = mkScratchDir("wcr-boundary-wt-");
     const worktreePath = join(worktreeBase, "linked-worktree");
@@ -345,17 +340,17 @@ describe("worktree corpus resolution — git-common-dir fallback (AC-WH-4)", () 
     const subDir = join(worktreePath, "packages", "lore", "src");
     mkdirSync(subDir, { recursive: true });
 
-    const getResult = runLore(["get", taskSlug], subDir);
+    const getResult = await runLore(["get", taskSlug], subDir);
     expect(getResult.exitCode).toBe(0);
     expect(getResult.stdout).toContain("WCR E2E Task");
   }, 30000);
 
-  it("STATE: a worktree with its OWN local .lore/lore.db resolves that corpus — the fallback is never consulted, and the main checkout's task is invisible there", () => {
+  it("STATE: a worktree with its OWN local .lore/lore.db resolves that corpus — the fallback is never consulted, and the main checkout's task is invisible there", async () => {
     const repoRoot = mkScratchDir("wcr-state-repo-");
     initGitRepo(repoRoot);
-    initCorpus(repoRoot);
+    await initCorpus(repoRoot);
     disableAllGates(repoRoot);
-    const taskSlug = seedTask(repoRoot);
+    const taskSlug = await seedTask(repoRoot);
 
     const worktreeBase = mkScratchDir("wcr-state-wt-");
     const worktreePath = join(worktreeBase, "linked-worktree");
@@ -363,17 +358,17 @@ describe("worktree corpus resolution — git-common-dir fallback (AC-WH-4)", () 
 
     // The worktree gets its OWN separate corpus (mirrors a session that
     // never adopted the SPEC M4 fallback and still ran `lore init` locally).
-    initCorpus(worktreePath);
+    await initCorpus(worktreePath);
     expect(existsSync(join(worktreePath, ".lore", "lore.db"))).toBe(true);
 
     // The main checkout's task is NOT visible from the worktree — local
     // walk-up found the worktree's OWN (empty) corpus first, the fallback
     // was never reached.
-    const getResult = runLore(["get", taskSlug], worktreePath);
+    const getResult = await runLore(["get", taskSlug], worktreePath);
     expect(getResult.exitCode).toBe(3);
   }, 30000);
 
-  it("NEGATIVE: a linked worktree of a repo with neither local nor common-dir .lore/ fails loud with the existing error", () => {
+  it("NEGATIVE: a linked worktree of a repo with neither local nor common-dir .lore/ fails loud with the existing error", async () => {
     const repoRoot = mkScratchDir("wcr-negative-repo-");
     initGitRepo(repoRoot);
     // Deliberately never `lore init` in repoRoot — neither the main checkout
@@ -383,17 +378,17 @@ describe("worktree corpus resolution — git-common-dir fallback (AC-WH-4)", () 
     const worktreePath = join(worktreeBase, "linked-worktree");
     git(repoRoot, ["worktree", "add", "-b", "wcr-negative-feature", worktreePath]);
 
-    const getResult = runLore(["get", "anything"], worktreePath);
+    const getResult = await runLore(["get", "anything"], worktreePath);
     expect(getResult.exitCode).toBe(1);
     expect(getResult.stderr).toContain(NO_DB_MESSAGE);
   }, 30000);
 
-  it("ERROR: a plain non-git directory (no .git anywhere) degrades to the same pre-existing loud failure, never a crash", () => {
+  it("ERROR: a plain non-git directory (no .git anywhere) degrades to the same pre-existing loud failure, never a crash", async () => {
     const plainDir = mkScratchDir("wcr-error-plain-");
     // No `git init`, no `.lore/` — the git-facts probe itself fails (not a
     // git repository), and must degrade gracefully rather than throwing.
 
-    const getResult = runLore(["get", "anything"], plainDir);
+    const getResult = await runLore(["get", "anything"], plainDir);
     expect(getResult.exitCode).toBe(1);
     expect(getResult.stderr).toContain(NO_DB_MESSAGE);
   }, 30000);

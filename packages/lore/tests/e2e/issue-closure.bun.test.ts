@@ -1,4 +1,3 @@
-// @spawns dist/lore
 /**
  * Compiled-binary e2e oracle for AC-ICL-3/AC-ICL-4/AC-ICL-5
  * (spec-issue-closure-loop-computed-resolution-agent-reachable, §D3/§D4) —
@@ -57,6 +56,10 @@
  * @spec_ref spec-issue-closure-loop-computed-resolution-agent-reachable §D3,
  *   §D4, AC-ICL-3, AC-ICL-4, AC-ICL-5;
  *   task-p2-cli-verbs-lore-issue-resolve-lore-issues.
+ *
+ * TG-25 (adr-tg-1 option b): the commands run IN-PROCESS through tests/helpers/run-lore-in-process.ts, not through
+ * dist/lore. Wherever the prose above says the compiled binary is spawned or its freshness asserted, that is the
+ * history of this file; the assertions and the throwaway-corpus rule are unchanged.
  */
 
 import { RecordLockService } from "../../src/service/record-lock-service.js";
@@ -65,16 +68,15 @@ import { afterEach, beforeAll, describe, expect, it } from "vitest";
 import { mkdtempSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
-import { assertFreshBinary } from "../integration/helpers/assert-fresh-binary";
 import { SQLiteStore } from "../../src/store/sqlite-store.js";
 import { CorpusService } from "../../src/service/corpus-service.js";
 import type { CreateDocInput, DocRecord } from "@lore/core";
+import { runLoreInProcess } from "../helpers/run-lore-in-process";
 
 // tests/e2e/ -> tests/ -> packages/lore/ -> packages/ -> repo root (4 levels up),
 // same derivation as tests/e2e/context-verbs-compiled.bun.test.ts and
 // tests/e2e/migrate-ordinals-compiled.bun.test.ts.
 const REPO_ROOT = new URL("../../../../", import.meta.url).pathname.replace(/\/$/, "");
-const LORE_BIN = join(REPO_ROOT, "dist", "lore");
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -109,20 +111,20 @@ interface IssueRow {
  * have an AI path, but this matches every other compiled-binary suite's
  * convention).
  */
-function runLore(args: string[], cwd: string): RunResult {
-  const proc = Bun.spawnSync([LORE_BIN, ...args], {
+async function runLore(args: string[], cwd: string): Promise<RunResult> {
+  const proc = await runLoreInProcess(args, {
     cwd,
     env: { ...process.env, HOME: cwd, CLAUDECODE: "1" },
   });
   return {
-    stdout: proc.stdout.toString(),
-    stderr: proc.stderr.toString(),
-    exitCode: proc.exitCode ?? 1,
+    stdout: proc.stdout,
+    stderr: proc.stderr,
+    exitCode: proc.exitCode,
   };
 }
 
-function initCorpus(dir: string): void {
-  const result = runLore(["init"], dir);
+async function initCorpus(dir: string): Promise<void> {
+  const result = await runLore(["init"], dir);
   if (result.exitCode !== 0) {
     throw new Error(`lore init failed in fixture setup: ${result.stderr}`);
   }
@@ -151,7 +153,7 @@ async function mustCreate(cs: CorpusService, input: CreateDocInput): Promise<Doc
 }
 
 async function seedRootPrd(cs: CorpusService): Promise<DocRecord> {
-  return mustCreate(cs, { type: "prd", title: "Root PRD", content: "# PRD" } as CreateDocInput);
+  return await mustCreate(cs, { type: "prd", title: "Root PRD", content: "# PRD" } as CreateDocInput);
 }
 
 function defaultIssueReport(overrides: Record<string, unknown> = {}): Record<string, unknown> {
@@ -172,7 +174,7 @@ async function seedIssueTask(
   title: string,
   issueReport: Record<string, unknown> = defaultIssueReport(),
 ): Promise<DocRecord> {
-  return mustCreate(cs, {
+  return await mustCreate(cs, {
     type: "task",
     title,
     content: `# ${title}`,
@@ -181,7 +183,7 @@ async function seedIssueTask(
 }
 
 async function seedPlainTask(cs: CorpusService, title: string): Promise<DocRecord> {
-  return mustCreate(cs, {
+  return await mustCreate(cs, {
     type: "task",
     title,
     content: `# ${title}`,
@@ -223,19 +225,12 @@ afterEach(() => {
   }
 });
 
-beforeAll(() => {
-  assertFreshBinary(LORE_BIN, [
-    join(REPO_ROOT, "packages", "lore", "src"),
-    join(REPO_ROOT, "packages", "core", "src"),
-  ]);
-});
-
 // ─── AC-ICL-3: --state fixed is rejected unconditionally ───────────────────
 
 describe("AC-ICL-3: lore issue resolve --state fixed is rejected unconditionally", () => {
   it("HAPPY: a genuine issue task's --state fixed exits non-zero, names lore link + resolves, writes nothing", async () => {
     const dir = freshDir("lore-issue-closure-3-happy-");
-    initCorpus(dir);
+    await initCorpus(dir);
 
     const store = new SQLiteStore(dbPathFor(dir));
     const cs = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
@@ -243,13 +238,13 @@ describe("AC-ICL-3: lore issue resolve --state fixed is rejected unconditionally
     const issue = await seedIssueTask(cs, "Filed defect A");
     store.close();
 
-    const result = runLore(["issue", "resolve", issue.slug, "--state", "fixed"], dir);
+    const result = await runLore(["issue", "resolve", issue.slug, "--state", "fixed"], dir);
     expect(result.exitCode).not.toBe(0);
     expect(result.stderr).toContain("lore link");
     expect(result.stderr).toContain("resolves");
 
     // Writes NOTHING — re-read via a fresh `dist/lore get --json` call.
-    const getResult = runLore(["get", issue.slug, "--json"], dir);
+    const getResult = await runLore(["get", issue.slug, "--json"], dir);
     expect(getResult.exitCode).toBe(0);
     const parsed = parseJson<{ doc: DocRecord }>(getResult.stdout);
     const extra = parsed.data?.doc.extra as Record<string, unknown>;
@@ -260,7 +255,7 @@ describe("AC-ICL-3: lore issue resolve --state fixed is rejected unconditionally
 
   it("NEGATIVE: --state fixed on a PLAIN task (no extra.issue_report) is rejected the SAME way — the fixed-check fires before any issue_report/type validation", async () => {
     const dir = freshDir("lore-issue-closure-3-negative-");
-    initCorpus(dir);
+    await initCorpus(dir);
 
     const store = new SQLiteStore(dbPathFor(dir));
     const cs = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
@@ -268,7 +263,7 @@ describe("AC-ICL-3: lore issue resolve --state fixed is rejected unconditionally
     const plain = await seedPlainTask(cs, "Ordinary task");
     store.close();
 
-    const result = runLore(["issue", "resolve", plain.slug, "--state", "fixed"], dir);
+    const result = await runLore(["issue", "resolve", plain.slug, "--state", "fixed"], dir);
     expect(result.exitCode).not.toBe(0);
     expect(result.stderr).toContain("lore link");
     expect(result.stderr).toContain("resolves");
@@ -276,7 +271,7 @@ describe("AC-ICL-3: lore issue resolve --state fixed is rejected unconditionally
 
   it("BOUNDARY: --state fixed with --reason ALSO supplied is still rejected identically (reason is irrelevant to this branch)", async () => {
     const dir = freshDir("lore-issue-closure-3-boundary-");
-    initCorpus(dir);
+    await initCorpus(dir);
 
     const store = new SQLiteStore(dbPathFor(dir));
     const cs = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
@@ -284,7 +279,7 @@ describe("AC-ICL-3: lore issue resolve --state fixed is rejected unconditionally
     const issue = await seedIssueTask(cs, "Filed defect B");
     store.close();
 
-    const result = runLore(
+    const result = await runLore(
       ["issue", "resolve", issue.slug, "--state", "fixed", "--reason", "irrelevant"],
       dir,
     );
@@ -295,7 +290,7 @@ describe("AC-ICL-3: lore issue resolve --state fixed is rejected unconditionally
 
   it("ERROR: an unrecognized --state value exits non-zero via a DISTINCT message from the fixed-specific rejection", async () => {
     const dir = freshDir("lore-issue-closure-3-error-");
-    initCorpus(dir);
+    await initCorpus(dir);
 
     const store = new SQLiteStore(dbPathFor(dir));
     const cs = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
@@ -303,7 +298,7 @@ describe("AC-ICL-3: lore issue resolve --state fixed is rejected unconditionally
     const issue = await seedIssueTask(cs, "Filed defect C");
     store.close();
 
-    const result = runLore(["issue", "resolve", issue.slug, "--state", "bogus-value"], dir);
+    const result = await runLore(["issue", "resolve", issue.slug, "--state", "bogus-value"], dir);
     expect(result.exitCode).not.toBe(0);
     expect(result.stderr).toContain("Invalid");
     expect(result.stderr).toContain("state");
@@ -311,7 +306,7 @@ describe("AC-ICL-3: lore issue resolve --state fixed is rejected unconditionally
 
   it("REGRESSION: a legitimate resolve on the SAME issue still works after an earlier failed --state fixed attempt", async () => {
     const dir = freshDir("lore-issue-closure-3-regression-");
-    initCorpus(dir);
+    await initCorpus(dir);
 
     const store = new SQLiteStore(dbPathFor(dir));
     const cs = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
@@ -319,10 +314,10 @@ describe("AC-ICL-3: lore issue resolve --state fixed is rejected unconditionally
     const issue = await seedIssueTask(cs, "Filed defect D");
     store.close();
 
-    const failedAttempt = runLore(["issue", "resolve", issue.slug, "--state", "fixed"], dir);
+    const failedAttempt = await runLore(["issue", "resolve", issue.slug, "--state", "fixed"], dir);
     expect(failedAttempt.exitCode).not.toBe(0);
 
-    const legitAttempt = runLore(
+    const legitAttempt = await runLore(
       ["issue", "resolve", issue.slug, "--state", "wontfix", "--reason", "not a bug", "--json"],
       dir,
     );
@@ -337,7 +332,7 @@ describe("AC-ICL-3: lore issue resolve --state fixed is rejected unconditionally
 describe("AC-ICL-4: lore issue resolve --state rejected|wontfix --reason persists explicit terminal state", () => {
   it("HAPPY: --state wontfix --reason persists both fields under extra.issue_report.resolution and bumps version", async () => {
     const dir = freshDir("lore-issue-closure-4-happy-wontfix-");
-    initCorpus(dir);
+    await initCorpus(dir);
 
     const store = new SQLiteStore(dbPathFor(dir));
     const cs = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
@@ -345,7 +340,7 @@ describe("AC-ICL-4: lore issue resolve --state rejected|wontfix --reason persist
     const issue = await seedIssueTask(cs, "Filed defect E");
     store.close();
 
-    const result = runLore(
+    const result = await runLore(
       ["issue", "resolve", issue.slug, "--state", "wontfix", "--reason", "not a bug", "--json"],
       dir,
     );
@@ -362,7 +357,7 @@ describe("AC-ICL-4: lore issue resolve --state rejected|wontfix --reason persist
 
   it("HAPPY: --state rejected --reason on a different issue also persists correctly", async () => {
     const dir = freshDir("lore-issue-closure-4-happy-rejected-");
-    initCorpus(dir);
+    await initCorpus(dir);
 
     const store = new SQLiteStore(dbPathFor(dir));
     const cs = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
@@ -370,7 +365,7 @@ describe("AC-ICL-4: lore issue resolve --state rejected|wontfix --reason persist
     const issue = await seedIssueTask(cs, "Filed defect F");
     store.close();
 
-    const result = runLore(
+    const result = await runLore(
       ["issue", "resolve", issue.slug, "--state", "rejected", "--reason", "duplicate of #1", "--json"],
       dir,
     );
@@ -385,7 +380,7 @@ describe("AC-ICL-4: lore issue resolve --state rejected|wontfix --reason persist
 
   it("NEGATIVE: target lacking extra.issue_report is rejected, left unchanged", async () => {
     const dir = freshDir("lore-issue-closure-4-negative-");
-    initCorpus(dir);
+    await initCorpus(dir);
 
     const store = new SQLiteStore(dbPathFor(dir));
     const cs = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
@@ -393,21 +388,21 @@ describe("AC-ICL-4: lore issue resolve --state rejected|wontfix --reason persist
     const plain = await seedPlainTask(cs, "Ordinary task 2");
     store.close();
 
-    const result = runLore(
+    const result = await runLore(
       ["issue", "resolve", plain.slug, "--state", "wontfix", "--reason", "n/a"],
       dir,
     );
     expect(result.exitCode).not.toBe(0);
     expect(result.stderr).toContain("issue_report");
 
-    const getResult = runLore(["get", plain.slug, "--json"], dir);
+    const getResult = await runLore(["get", plain.slug, "--json"], dir);
     const parsed = parseJson<{ doc: DocRecord }>(getResult.stdout);
     expect(parsed.data?.doc.version).toBe(1);
   });
 
   it("BOUNDARY: an empty --reason is rejected", async () => {
     const dir = freshDir("lore-issue-closure-4-boundary-");
-    initCorpus(dir);
+    await initCorpus(dir);
 
     const store = new SQLiteStore(dbPathFor(dir));
     const cs = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
@@ -415,16 +410,16 @@ describe("AC-ICL-4: lore issue resolve --state rejected|wontfix --reason persist
     const issue = await seedIssueTask(cs, "Filed defect G");
     store.close();
 
-    const result = runLore(["issue", "resolve", issue.slug, "--state", "wontfix", "--reason", ""], dir);
+    const result = await runLore(["issue", "resolve", issue.slug, "--state", "wontfix", "--reason", ""], dir);
     expect(result.exitCode).not.toBe(0);
     expect(result.stderr).toContain("reason");
   });
 
   it("ERROR: a nonexistent issue id exits non-zero", async () => {
     const dir = freshDir("lore-issue-closure-4-doc-not-found-");
-    initCorpus(dir);
+    await initCorpus(dir);
 
-    const result = runLore(
+    const result = await runLore(
       ["issue", "resolve", "task-does-not-exist", "--state", "wontfix", "--reason", "n/a"],
       dir,
     );
@@ -433,7 +428,7 @@ describe("AC-ICL-4: lore issue resolve --state rejected|wontfix --reason persist
 
   it("STATE: an explicit terminal state WINS over a resolves-edge computation that would otherwise be 'fixed'", async () => {
     const dir = freshDir("lore-issue-closure-4-state-precedence-");
-    initCorpus(dir);
+    await initCorpus(dir);
 
     const store = new SQLiteStore(dbPathFor(dir));
     const cs = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
@@ -443,16 +438,16 @@ describe("AC-ICL-4: lore issue resolve --state rejected|wontfix --reason persist
     await transitionToActive(cs, fixer.id); // active source -> would compute "fixed" absent the explicit state
     store.close();
 
-    const linkResult = runLore(["link", fixer.slug, issue.slug, "--type", "resolves"], dir);
+    const linkResult = await runLore(["link", fixer.slug, issue.slug, "--type", "resolves"], dir);
     expect(linkResult.exitCode).toBe(0);
 
-    const resolveResult = runLore(
+    const resolveResult = await runLore(
       ["issue", "resolve", issue.slug, "--state", "wontfix", "--reason", "explicit wins"],
       dir,
     );
     expect(resolveResult.exitCode).toBe(0);
 
-    const issuesResult = runLore(["issues", "--all", "--json"], dir);
+    const issuesResult = await runLore(["issues", "--all", "--json"], dir);
     expect(issuesResult.exitCode).toBe(0);
     const parsed = parseJson<{ reports: IssueRow[] }>(issuesResult.stdout);
     const row = parsed.data?.reports.find((r) => r.slug === issue.slug);
@@ -462,7 +457,7 @@ describe("AC-ICL-4: lore issue resolve --state rejected|wontfix --reason persist
 
   it("REGRESSION: resolving does not clobber sibling extra fields (issue_report's other fields, extra.adhoc)", async () => {
     const dir = freshDir("lore-issue-closure-4-regression-");
-    initCorpus(dir);
+    await initCorpus(dir);
 
     const store = new SQLiteStore(dbPathFor(dir));
     const cs = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
@@ -474,7 +469,7 @@ describe("AC-ICL-4: lore issue resolve --state rejected|wontfix --reason persist
     );
     store.close();
 
-    const result = runLore(
+    const result = await runLore(
       ["issue", "resolve", issue.slug, "--state", "wontfix", "--reason", "not a bug", "--json"],
       dir,
     );
@@ -497,7 +492,7 @@ describe("AC-ICL-4: lore issue resolve --state rejected|wontfix --reason persist
 describe("AC-ICL-5: lore issues --json lists exactly issue-report-carrying tasks with computed resolution", () => {
   it("HAPPY: --all lists exactly the 3 issue tasks with correct resolutions, excludes a plain task entirely", async () => {
     const dir = freshDir("lore-issue-closure-5-happy-");
-    initCorpus(dir);
+    await initCorpus(dir);
 
     const store = new SQLiteStore(dbPathFor(dir));
     const cs = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
@@ -512,15 +507,15 @@ describe("AC-ICL-5: lore issues --json lists exactly issue-report-carrying tasks
     const plain = await seedPlainTask(cs, "Totally unrelated plain task");
     store.close();
 
-    const linkResolving = runLore(
+    const linkResolving = await runLore(
       ["link", fixerDraft.slug, issueResolving.slug, "--type", "resolves"],
       dir,
     );
     expect(linkResolving.exitCode).toBe(0);
-    const linkFixed = runLore(["link", fixerActive.slug, issueFixed.slug, "--type", "resolves"], dir);
+    const linkFixed = await runLore(["link", fixerActive.slug, issueFixed.slug, "--type", "resolves"], dir);
     expect(linkFixed.exitCode).toBe(0);
 
-    const result = runLore(["issues", "--all", "--json"], dir);
+    const result = await runLore(["issues", "--all", "--json"], dir);
     expect(result.exitCode).toBe(0);
     const parsed = parseJson<{ total: number; reports: IssueRow[] }>(result.stdout);
     expect(parsed.data?.total).toBe(3);
@@ -542,7 +537,7 @@ describe("AC-ICL-5: lore issues --json lists exactly issue-report-carrying tasks
 
   it("BOUNDARY: default (--open) excludes fixed/rejected/wontfix but includes open+resolving", async () => {
     const dir = freshDir("lore-issue-closure-5-boundary-");
-    initCorpus(dir);
+    await initCorpus(dir);
 
     const store = new SQLiteStore(dbPathFor(dir));
     const cs = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
@@ -555,10 +550,10 @@ describe("AC-ICL-5: lore issues --json lists exactly issue-report-carrying tasks
     await transitionToActive(cs, fixerActive.id);
     store.close();
 
-    expect(runLore(["link", fixerDraft.slug, issueResolving.slug, "--type", "resolves"], dir).exitCode).toBe(0);
-    expect(runLore(["link", fixerActive.slug, issueFixed.slug, "--type", "resolves"], dir).exitCode).toBe(0);
+    expect((await runLore(["link", fixerDraft.slug, issueResolving.slug, "--type", "resolves"], dir)).exitCode).toBe(0);
+    expect((await runLore(["link", fixerActive.slug, issueFixed.slug, "--type", "resolves"], dir)).exitCode).toBe(0);
     expect(
-      runLore(["issue", "resolve", issueFixed.slug, "--state", "wontfix", "--reason", "n/a"], dir).exitCode,
+      (await runLore(["issue", "resolve", issueFixed.slug, "--state", "wontfix", "--reason", "n/a"], dir)).exitCode,
     ).toBe(0);
     // reason: issueFixed is now explicitly "wontfix" (still terminal, just a
     // different one of the 3 excluded states) — this simultaneously proves
@@ -567,9 +562,9 @@ describe("AC-ICL-5: lore issues --json lists exactly issue-report-carrying tasks
     // precedence) and gives --open a genuine terminal row to exclude even
     // without relying on the "fixed" pathway specifically.
 
-    const defaultResult = runLore(["issues", "--json"], dir);
+    const defaultResult = await runLore(["issues", "--json"], dir);
     expect(defaultResult.exitCode).toBe(0);
-    const explicitOpenResult = runLore(["issues", "--open", "--json"], dir);
+    const explicitOpenResult = await runLore(["issues", "--open", "--json"], dir);
     expect(explicitOpenResult.exitCode).toBe(0);
 
     // No-flag default matches --open exactly (REGRESSION half of this case).
@@ -585,9 +580,9 @@ describe("AC-ICL-5: lore issues --json lists exactly issue-report-carrying tasks
 
   it("ERROR: a corpus with zero issue reports yields an empty list and exit 0", async () => {
     const dir = freshDir("lore-issue-closure-5-empty-");
-    initCorpus(dir);
+    await initCorpus(dir);
 
-    const result = runLore(["issues", "--all", "--json"], dir);
+    const result = await runLore(["issues", "--all", "--json"], dir);
     expect(result.exitCode).toBe(0);
     const parsed = parseJson<{ total: number; reports: IssueRow[] }>(result.stdout);
     expect(parsed.data?.total).toBe(0);
@@ -596,7 +591,7 @@ describe("AC-ICL-5: lore issues --json lists exactly issue-report-carrying tasks
 
   it("STATE: resolving an open report transitions it out of --open and into --resolved", async () => {
     const dir = freshDir("lore-issue-closure-5-state-transition-");
-    initCorpus(dir);
+    await initCorpus(dir);
 
     const store = new SQLiteStore(dbPathFor(dir));
     const cs = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
@@ -604,34 +599,34 @@ describe("AC-ICL-5: lore issues --json lists exactly issue-report-carrying tasks
     const issue = await seedIssueTask(cs, "Transitioning issue");
     store.close();
 
-    const beforeOpen = runLore(["issues", "--open", "--json"], dir);
+    const beforeOpen = await runLore(["issues", "--open", "--json"], dir);
     const beforeParsed = parseJson<{ reports: IssueRow[] }>(beforeOpen.stdout);
     expect(beforeParsed.data?.reports.some((r) => r.slug === issue.slug)).toBe(true);
 
-    const beforeResolved = runLore(["issues", "--resolved", "--json"], dir);
+    const beforeResolved = await runLore(["issues", "--resolved", "--json"], dir);
     const beforeResolvedParsed = parseJson<{ reports: IssueRow[] }>(beforeResolved.stdout);
     expect(beforeResolvedParsed.data?.reports.some((r) => r.slug === issue.slug)).toBe(false);
 
-    const resolveResult = runLore(
+    const resolveResult = await runLore(
       ["issue", "resolve", issue.slug, "--state", "rejected", "--reason", "not reproducible"],
       dir,
     );
     expect(resolveResult.exitCode).toBe(0);
 
-    const afterOpen = runLore(["issues", "--open", "--json"], dir);
+    const afterOpen = await runLore(["issues", "--open", "--json"], dir);
     const afterOpenParsed = parseJson<{ reports: IssueRow[] }>(afterOpen.stdout);
     expect(afterOpenParsed.data?.reports.some((r) => r.slug === issue.slug)).toBe(false);
 
-    const afterResolved = runLore(["issues", "--resolved", "--json"], dir);
+    const afterResolved = await runLore(["issues", "--resolved", "--json"], dir);
     const afterResolvedParsed = parseJson<{ reports: IssueRow[] }>(afterResolved.stdout);
     expect(afterResolvedParsed.data?.reports.some((r) => r.slug === issue.slug)).toBe(true);
   });
 
   it("REGRESSION: passing more than one of --open/--resolved/--all is a usage error (exit 2)", async () => {
     const dir = freshDir("lore-issue-closure-5-mutex-");
-    initCorpus(dir);
+    await initCorpus(dir);
 
-    const result = runLore(["issues", "--open", "--all"], dir);
+    const result = await runLore(["issues", "--open", "--all"], dir);
     expect(result.exitCode).toBe(2);
     expect(result.stderr).toContain("mutually exclusive");
   });

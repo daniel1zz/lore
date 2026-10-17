@@ -126,7 +126,7 @@
  * spec-a-github-filed-defect-must-be-claimable-one-ingest-seam D8, D13.
  */
 
-import { homedir } from "node:os";
+import { currentHomeDir } from "@lore/core/node";
 import { basename, dirname, join } from "node:path";
 import {
   assembleIssueBody,
@@ -814,7 +814,7 @@ export async function fileGithubIssue(
 
   const identity: RawReporterIdentity = {
     corpusRoot: ctx.consumerCorpusRoot,
-    home: ctx.home ?? homedir(),
+    home: ctx.home ?? currentHomeDir(),
     rootPrdId: rootPrd.slug,
     actor: ctx.actor,
     actorSource: ctx.actorSource,

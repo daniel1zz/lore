@@ -1,4 +1,4 @@
-// @spawns dist/lore
+// @reads assets/**
 /**
  * RED (TDD role) — compiled-binary e2e oracle for AC-CTX-3
  * (spec-context-verb-family-two-zone-claude-md-anatomy-lore). The `lore
@@ -91,6 +91,10 @@
  * @spec_ref spec-context-verb-family-two-zone-claude-md-anatomy-lore
  *   §Public Interface, §Design Decisions D3/D5, AC-CTX-3; task
  *   task-skill-test-red-compiled-binary-e2e-for-context-init-and.
+ *
+ * TG-25 (adr-tg-1 option b): the commands run IN-PROCESS through tests/helpers/run-lore-in-process.ts, not through
+ * dist/lore. Wherever the prose above says the compiled binary is spawned or its freshness asserted, that is the
+ * history of this file; the assertions and the throwaway-corpus rule are unchanged.
  */
 
 import { beforeAll, describe, expect, it } from "vitest";
@@ -98,13 +102,12 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { CLAUDE_MD_MARKER_START, CLAUDE_MD_MARKER_END, MANAGED_SECTION_HASH_PATTERN } from "@lore/core";
-import { assertFreshBinary } from "../integration/helpers/assert-fresh-binary";
+import { runLoreInProcess } from "../helpers/run-lore-in-process";
 
 // tests/e2e/context-verbs-compiled.bun.test.ts -> repo root is 4 levels up,
 // same derivation as tests/e2e/bootstrap-injection-compiled.bun.test.ts and
 // tests/e2e/governance-claude-md-compiled.bun.test.ts.
 const REPO_ROOT = new URL("../../../../", import.meta.url).pathname.replace(/\/$/, "");
-const LORE_BIN = join(REPO_ROOT, "dist", "lore");
 const CLAUDE_MD_FILENAME = "CLAUDE.md";
 
 interface RunResult {
@@ -122,21 +125,21 @@ interface RunResult {
  * configured" per the task's setup requirement, not merely "AI defaulted
  * off but a key happens to be present in the ambient shell".
  */
-function runLore(args: string[], cwd: string): RunResult {
+async function runLore(args: string[], cwd: string): Promise<RunResult> {
   const env: Record<string, string | undefined> = { ...process.env, HOME: cwd, CLAUDECODE: "1" };
   delete env["ANTHROPIC_API_KEY"];
   delete env["OPENAI_API_KEY"];
   delete env["LORE_AI_DEFAULT"];
-  const proc = Bun.spawnSync([LORE_BIN, ...args], { cwd, env });
+  const proc = await runLoreInProcess(args, { cwd, env });
   return {
-    stdout: proc.stdout.toString(),
-    stderr: proc.stderr.toString(),
-    exitCode: proc.exitCode ?? 1,
+    stdout: proc.stdout,
+    stderr: proc.stderr,
+    exitCode: proc.exitCode,
   };
 }
 
-function initCorpus(dir: string): void {
-  const result = runLore(["init"], dir);
+async function initCorpus(dir: string): Promise<void> {
+  const result = await runLore(["init"], dir);
   if (result.exitCode !== 0) {
     throw new Error(`lore init failed in fixture setup: ${result.stderr}`);
   }
@@ -155,23 +158,16 @@ function extractSectionIds(content: string): string[] {
   return ids;
 }
 
-beforeAll(() => {
-  assertFreshBinary(LORE_BIN, [
-    join(REPO_ROOT, "packages", "lore", "src"),
-    join(REPO_ROOT, "packages", "core", "src"),
-  ]);
-});
-
 describe("AC-CTX-3: compiled dist/lore context init/refresh two-zone CLAUDE.md lifecycle (RED — target D3/D5 behavior)", () => {
-  it("HAPPY: `context init` in a temp repo with no usable AI provider exits 0 and writes a root CLAUDE.md carrying the lore-managed (Z1) zone markers", () => {
+  it("HAPPY: `context init` in a temp repo with no usable AI provider exits 0 and writes a root CLAUDE.md carrying the lore-managed (Z1) zone markers", async () => {
     const dir = mkdtempSync(join(tmpdir(), "lore-context-init-happy-"));
     // Never the repo's own .lore/ corpus (project CLAUDE.md hard rule) — a
     // genuine os.tmpdir() path is never a prefix of REPO_ROOT.
     expect(dir.startsWith(REPO_ROOT)).toBe(false);
     try {
-      initCorpus(dir);
+      await initCorpus(dir);
 
-      const result = runLore(["context", "init"], dir);
+      const result = await runLore(["context", "init"], dir);
       expect(result.exitCode).toBe(0);
 
       const claudeMdPath = join(dir, CLAUDE_MD_FILENAME);
@@ -190,12 +186,12 @@ describe("AC-CTX-3: compiled dist/lore context init/refresh two-zone CLAUDE.md l
     }
   });
 
-  it("BOUNDARY: the written CLAUDE.md is non-empty, ends with a trailing newline, and contains at least one well-formed fingerprint comment", () => {
+  it("BOUNDARY: the written CLAUDE.md is non-empty, ends with a trailing newline, and contains at least one well-formed fingerprint comment", async () => {
     const dir = mkdtempSync(join(tmpdir(), "lore-context-init-boundary-"));
     expect(dir.startsWith(REPO_ROOT)).toBe(false);
     try {
-      initCorpus(dir);
-      const initResult = runLore(["context", "init"], dir);
+      await initCorpus(dir);
+      const initResult = await runLore(["context", "init"], dir);
       expect(initResult.exitCode).toBe(0);
 
       const content = readFileSync(join(dir, CLAUDE_MD_FILENAME), "utf8");
@@ -213,18 +209,18 @@ describe("AC-CTX-3: compiled dist/lore context init/refresh two-zone CLAUDE.md l
     }
   });
 
-  it("REGRESSION: an immediately-following `context refresh` (no edits) reproduces byte-identical CLAUDE.md content", () => {
+  it("REGRESSION: an immediately-following `context refresh` (no edits) reproduces byte-identical CLAUDE.md content", async () => {
     const dir = mkdtempSync(join(tmpdir(), "lore-context-refresh-idempotent-"));
     expect(dir.startsWith(REPO_ROOT)).toBe(false);
     try {
-      initCorpus(dir);
-      const initResult = runLore(["context", "init"], dir);
+      await initCorpus(dir);
+      const initResult = await runLore(["context", "init"], dir);
       expect(initResult.exitCode).toBe(0);
 
       const claudeMdPath = join(dir, CLAUDE_MD_FILENAME);
       const beforeRefresh = readFileSync(claudeMdPath, "utf8");
 
-      const refreshResult = runLore(["context", "refresh"], dir);
+      const refreshResult = await runLore(["context", "refresh"], dir);
       expect(refreshResult.exitCode).toBe(0);
 
       const afterRefresh = readFileSync(claudeMdPath, "utf8");
@@ -234,12 +230,12 @@ describe("AC-CTX-3: compiled dist/lore context init/refresh two-zone CLAUDE.md l
     }
   });
 
-  it("ERROR: `context bogus-topic` (unrecognized topic) exits 2 with a usage message naming the bad token", () => {
+  it("ERROR: `context bogus-topic` (unrecognized topic) exits 2 with a usage message naming the bad token", async () => {
     const dir = mkdtempSync(join(tmpdir(), "lore-context-error-topic-"));
     expect(dir.startsWith(REPO_ROOT)).toBe(false);
     try {
-      initCorpus(dir);
-      const result = runLore(["context", "bogus-topic"], dir);
+      await initCorpus(dir);
+      const result = await runLore(["context", "bogus-topic"], dir);
       expect(result.exitCode).toBe(2);
       expect(result.stderr).toContain("bogus-topic");
     } finally {
@@ -247,12 +243,12 @@ describe("AC-CTX-3: compiled dist/lore context init/refresh two-zone CLAUDE.md l
     }
   });
 
-  it("STATE: hand-editing one line inside a managed section makes the next `refresh` report diverged_skip for that section and leave the file bytes untouched", () => {
+  it("STATE: hand-editing one line inside a managed section makes the next `refresh` report diverged_skip for that section and leave the file bytes untouched", async () => {
     const dir = mkdtempSync(join(tmpdir(), "lore-context-refresh-diverged-"));
     expect(dir.startsWith(REPO_ROOT)).toBe(false);
     try {
-      initCorpus(dir);
-      const initResult = runLore(["context", "init"], dir);
+      await initCorpus(dir);
+      const initResult = await runLore(["context", "init"], dir);
       expect(initResult.exitCode).toBe(0);
 
       const claudeMdPath = join(dir, CLAUDE_MD_FILENAME);
@@ -285,7 +281,7 @@ describe("AC-CTX-3: compiled dist/lore context init/refresh two-zone CLAUDE.md l
       // task explicitly hedges "exit 0 (or documented non-zero — assert on
       // the REPORTED state)". What must hold is the REPORTED divergence and
       // the untouched bytes.
-      const refreshResult = runLore(["context", "refresh"], dir);
+      const refreshResult = await runLore(["context", "refresh"], dir);
       const reportedDivergence =
         refreshResult.stdout.includes("diverged_skip") || refreshResult.stderr.includes("diverged_skip");
       expect(reportedDivergence).toBe(true);
@@ -298,12 +294,12 @@ describe("AC-CTX-3: compiled dist/lore context init/refresh two-zone CLAUDE.md l
     }
   });
 
-  it("NEGATIVE: `context init --bogus-flag` (unknown flag on a registered verb) is rejected by strict-flags, exit 2, naming --bogus-flag", () => {
+  it("NEGATIVE: `context init --bogus-flag` (unknown flag on a registered verb) is rejected by strict-flags, exit 2, naming --bogus-flag", async () => {
     const dir = mkdtempSync(join(tmpdir(), "lore-context-negative-flag-"));
     expect(dir.startsWith(REPO_ROOT)).toBe(false);
     try {
-      initCorpus(dir);
-      const result = runLore(["context", "init", "--bogus-flag"], dir);
+      await initCorpus(dir);
+      const result = await runLore(["context", "init", "--bogus-flag"], dir);
       expect(result.exitCode).toBe(2);
       expect(result.stderr).toContain("--bogus-flag");
     } finally {

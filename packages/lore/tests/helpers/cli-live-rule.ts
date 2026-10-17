@@ -86,3 +86,54 @@ export function citeSpecViaCli(lore: LoreRunner, corpusKey: string, prdSlug: str
   const ruleId = ensureLiveRuleViaCli(lore, corpusKey, prdSlug);
   lore(["ac", "cite", specSlug, acId, ruleId]);
 }
+
+// ── Async variants (tg-25) ──────────────────────────────────────────────────────────────────────
+// A test that runs `lore` in-process (tests/helpers/run-lore-in-process.ts) cannot be synchronous: the command is
+// async. These mirror the three functions above one for one and share their `ruleByCorpus` cache and parsing.
+// reason: kept beside the sync set, not in place of it, because files that still spawn `dist/lore` use the sync set;
+// the sync set goes when the last of those files is migrated (task tg-26).
+
+/** Async twin of {@link LoreRunner}. */
+export type AsyncLoreRunner = (args: string[]) => Promise<string>;
+
+/** Async twin of {@link loreRunnerFor}: adapts `runLore(args, cwd) -> Promise<{exitCode, stdout, stderr}>`. */
+export function asyncLoreRunnerFor(
+  run: (args: string[], cwd: string) => Promise<{ exitCode: number; stdout: string; stderr: string }>,
+  cwd: string,
+): AsyncLoreRunner {
+  return async (args) => {
+    const result = await run(args, cwd);
+    if (result.exitCode !== 0) throw new Error(`lore ${args.join(" ")} failed (${result.exitCode}): ${result.stderr}${result.stdout}`);
+    return result.stdout;
+  };
+}
+
+/** Async twin of {@link ensureLiveRuleViaCli}. */
+export async function ensureLiveRuleViaAsyncCli(lore: AsyncLoreRunner, corpusKey: string, prdSlug?: string): Promise<string> {
+  const known = ruleByCorpus.get(corpusKey);
+  if (known !== undefined) return known;
+  if (prdSlug === undefined) {
+    const parsed = JSON.parse(await lore(["list", "--type", "prd", "--json", "--limit", "1"])) as {
+      data?: { docs?: Array<{ slug: string }> };
+    };
+    prdSlug = parsed.data?.docs?.[0]?.slug;
+    if (prdSlug === undefined) throw new Error("live-rule fixture needs a PRD in the corpus and found none");
+  }
+  const root = slugOf(await lore(["baseline", "add", prdSlug, "--node", "root", "--label", "Root", "--title", "Fixture Root"]));
+  const branch = slugOf(await lore(["baseline", "add", root, "--node", "branch", "--label", "Branch", "--title", "Fixture Branch"]));
+  const leaf = slugOf(await lore(["baseline", "add", branch, "--node", "leaf", "--label", "Leaf", "--title", "Fixture Leaf"]));
+  const out = await lore([
+    "rule", "add", leaf, "--statement", "a live rule the fixture specs cite",
+    "--confidence", "established", "--enforced-by", "guaranteed", "--example", "example one",
+  ]);
+  const ruleId = out.match(/\bBR-\d+\b/)?.[0];
+  if (ruleId === undefined) throw new Error(`no rule id in: ${out}`);
+  ruleByCorpus.set(corpusKey, ruleId);
+  return ruleId;
+}
+
+/** Async twin of {@link citeSpecViaCli}. */
+export async function citeSpecViaAsyncCli(lore: AsyncLoreRunner, corpusKey: string, prdSlug: string | undefined, specSlug: string, acId: string): Promise<void> {
+  const ruleId = await ensureLiveRuleViaAsyncCli(lore, corpusKey, prdSlug);
+  await lore(["ac", "cite", specSlug, acId, ruleId]);
+}
