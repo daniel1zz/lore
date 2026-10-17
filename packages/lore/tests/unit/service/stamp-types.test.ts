@@ -446,9 +446,9 @@ function changedOf(radius: RadiusMeasurement): boolean | "unmeasured" {
 }
 
 const stamp: StateStamp = {
-  tree_digest: "0000000000000000000000000000000000000000",
+  head_sha: "0000000000000000000000000000000000000000",
+  worktree_dirty: false,
   corpus_rev: 6176,
-  captured_at: "2026-08-23T00:00:00.000Z",
 };
 const cutoff: number = ARMING_REV;
 
