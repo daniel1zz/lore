@@ -12,6 +12,8 @@
  *   - StampBindingContext              — the resolved facts a corpus read hands the pure side
  *   - classifyEvidenceStamps(...)      — a doc's whole evidence log -> readings (null = not attested)
  *   - tallyStampReadings(...)          — the stamp-verdict distribution counts
+ *   - RadiusMeasurement / readStampedRadius / classifyEvidenceRadii — the RADIUS axis of a stamped
+ *                                        row (AC-CT-9: the floor reads stamp FIRST, radius only when stamped)
  *
  * Invariants:
  *   - ⛔ The cutoff is the id of the `state-binding-armed` audit row, never a
@@ -53,6 +55,37 @@ export type StampAxisReading =
   | { readonly stamp: "stamped" }
   | { readonly stamp: "legacy_unbound" }
   | { readonly stamp: "unbound"; readonly reason: UnboundReason };
+
+/**
+ * The RADIUS axis — whether a peer commit landed inside the verdict's blast radius, or whether
+ * that comparison could not be made at all. (Moved here from `gate-predicates.ts`, which
+ * re-exports it, so the pure floor derivation in `evidence-panel.ts` and the service-layer
+ * projection share ONE declaration.)
+ *
+ * ⛔ NEVER `boolean | "unmeasured"`: a consumer reading the sentinel in a boolean position gets
+ * `truthy`/`falsy` instead of a type error and reports an unmeasured radius as a measured one
+ * (SPEC-143 C3). "Not measured" and "measured, and nothing changed" have OPPOSITE safe defaults.
+ */
+export type RadiusMeasurement =
+  | { readonly status: "measured"; readonly changed: boolean }
+  | { readonly status: "unmeasured" };
+
+/** The three readings a STAMPED row can take once its radius is read (AC-CT-9 (c)). */
+export type StampedRadiusVerdict = "bound" | "stale" | "radius_unmeasured";
+
+/**
+ * The single derivation of `bound` / `stale` / `radius_unmeasured` from a stamped row's radius.
+ * `gate-predicates.ts::readStampVerdict`'s `stamped` arm and {@link tallyStampReadings} both call
+ * this, so the distribution and the floor cannot disagree about which stamped rows are stale.
+ *
+ * @example
+ * readStampedRadius({ status: "measured", changed: true }); // => "stale"
+ * readStampedRadius({ status: "unmeasured" }); // => "radius_unmeasured" — accepted by the floor
+ */
+export function readStampedRadius(radius: RadiusMeasurement): StampedRadiusVerdict {
+  if (radius.status === "unmeasured") return "radius_unmeasured";
+  return radius.changed ? "stale" : "bound";
+}
 
 /** Input to {@link classifyStampAxis}. */
 export interface StampAxisInput {
@@ -105,6 +138,13 @@ export interface StampBindingContext {
    * `(doc_id, details.version)` join. Absent key = the doc has no evidence audit row.
    */
   readonly evidenceAuditIdsByDoc: ReadonlyMap<string, readonly number[]>;
+  /**
+   * Per doc id, the radius measurement of each evidence row, index-aligned with the doc's
+   * evidence log (the reader measures STAMPED rows only; other slots are `unmeasured`).
+   * Absent key / absent map = the radius was not measured, which {@link classifyEvidenceRadii}
+   * reads as `unmeasured` — accepted by the floor, never "unchanged" (AC-CT-9 (a)).
+   */
+  readonly radiusByDoc?: ReadonlyMap<string, readonly RadiusMeasurement[]>;
 }
 
 /**
@@ -148,18 +188,48 @@ export function classifyEvidenceStamps(
   });
 }
 
+/**
+ * Every evidence row's radius measurement, index-aligned with `evidence`; a row with no recorded
+ * measurement reads `unmeasured`.
+ */
+export function classifyEvidenceRadii(
+  docId: string,
+  evidence: readonly EvidenceEntry[],
+  binding: StampBindingContext,
+): RadiusMeasurement[] {
+  const measured = binding.radiusByDoc?.get(docId);
+  return evidence.map((_, index) => measured?.[index] ?? { status: "unmeasured" });
+}
+
 /** The stamp-verdict distribution over the stamp axis: counts per class, `unbound` split by reason. */
 export interface StampReadingTally {
+  /** Every stamped row; `bound + stale + radius_unmeasured === stamped`. */
   readonly stamped: number;
+  /** Stamped, radius measured, nothing inside it changed since the recorded HEAD. */
+  readonly bound: number;
+  /** Stamped, and a commit since the recorded HEAD touched the blast radius. REFUSED by the floor. */
+  readonly stale: number;
+  /** Stamped, radius not measurable. ACCEPTED by the floor (AC-CT-9 (a)), counted on its own. */
+  readonly radius_unmeasured: number;
   readonly legacy_unbound: number;
   readonly unbound: number;
   /** Sums to `unbound` (AC-CT-9: every unbound row carries exactly one reason). */
   readonly unbound_reasons: Readonly<Record<UnboundReason, number>>;
 }
 
-/** Counts readings into a {@link StampReadingTally}; `null` (not attested) entries are skipped. */
-export function tallyStampReadings(readings: readonly (StampAxisReading | null)[]): StampReadingTally {
+/**
+ * Counts readings into a {@link StampReadingTally}; `null` (not attested) entries are skipped.
+ * `radii` is index-aligned with `readings` and read ONLY for stamped rows (stamp axis first);
+ * omitted, every stamped row is `radius_unmeasured`.
+ */
+export function tallyStampReadings(
+  readings: readonly (StampAxisReading | null)[],
+  radii?: readonly RadiusMeasurement[],
+): StampReadingTally {
   let stamped = 0;
+  let bound = 0;
+  let stale = 0;
+  let radiusUnmeasured = 0;
   let legacy = 0;
   let unbound = 0;
   const reasons: Record<UnboundReason, number> = {
@@ -168,12 +238,17 @@ export function tallyStampReadings(readings: readonly (StampAxisReading | null)[
     audit_id_unresolved: 0,
     no_stamp: 0,
   };
-  for (const reading of readings) {
+  for (const [index, reading] of readings.entries()) {
     if (reading === null) continue;
     switch (reading.stamp) {
-      case "stamped":
+      case "stamped": {
         stamped += 1;
+        const verdict = readStampedRadius(radii?.[index] ?? { status: "unmeasured" });
+        if (verdict === "bound") bound += 1;
+        else if (verdict === "stale") stale += 1;
+        else radiusUnmeasured += 1;
         break;
+      }
       case "legacy_unbound":
         legacy += 1;
         break;
@@ -187,5 +262,13 @@ export function tallyStampReadings(readings: readonly (StampAxisReading | null)[
       }
     }
   }
-  return { stamped, legacy_unbound: legacy, unbound, unbound_reasons: reasons };
+  return {
+    stamped,
+    bound,
+    stale,
+    radius_unmeasured: radiusUnmeasured,
+    legacy_unbound: legacy,
+    unbound,
+    unbound_reasons: reasons,
+  };
 }

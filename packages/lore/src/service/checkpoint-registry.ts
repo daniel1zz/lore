@@ -89,6 +89,8 @@ import {
   checkOracleCoverage,
   deriveClaimedAcCoverage,
   isUnboundOnlyTask,
+  isStaleOnlyTask,
+  isStampRefusedOnlyTask,
   UNRESOLVED_DECLARED_SCOPE,
   type AcceptanceCriterion,
   type AcCiteFeedingPack,
@@ -1710,8 +1712,11 @@ function feedAttestationFloor(ctx: GateContext, failures: PredicateResult[]): st
   // too, but it is NOT "self-reported-only": naming it so would misdirect (the rows ARE runner
   // output, about an unnamed state). It gets its own line below.
   const unboundOnly = tasks.filter((t) => isUnboundOnlyTask(t));
+  // reason: SPEC-143 AC-CT-9 — likewise a task whose attested rows are stamped but STALE (a commit since the
+  // recorded HEAD touched the verdict's blast radius): runner output about a state that no longer exists.
+  const staleOnly = tasks.filter((t) => isStaleOnlyTask(t));
   const offending = tasks.filter(
-    (t) => t.evidenceCount > 0 && t.attestedCount === 0 && !isUnboundOnlyTask(t),
+    (t) => t.evidenceCount > 0 && t.attestedCount === 0 && !isStampRefusedOnlyTask(t),
   );
   const totalEvidence = tasks.reduce((sum, t) => sum + t.evidenceCount, 0);
   const totalAttested = tasks.reduce((sum, t) => sum + t.attestedCount, 0);
@@ -1730,8 +1735,15 @@ function feedAttestationFloor(ctx: GateContext, failures: PredicateResult[]): st
         `${unboundOnly.map((t) => `${t.slug} — "${t.title}"`).join(", ")}. Re-run \`lore verify\` ` +
         `on a committed tree to record a stamped row. `
       : "";
+  const staleLine =
+    staleOnly.length > 0
+      ? `Task(s) whose runner-attested rows are all STALE (a later commit changed the files the verdict ` +
+        `covers): ${staleOnly.map((t) => `${t.slug} — "${t.title}"`).join(", ")}. Re-run \`lore verify\` ` +
+        `against the current tree. `
+      : "";
   const offendingLine =
     unboundLine +
+    staleLine +
     (offending.length > 0
       ? `Task(s) with self-reported-only evidence (zero runner-attested entries): ` +
         `${offending.map((t) => `${t.slug} — "${t.title}"`).join(", ")}. Listed for ` +

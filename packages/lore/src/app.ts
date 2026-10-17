@@ -81,6 +81,7 @@ import { ImpactService } from "./service/impact-service.js";
 import { PrdOutlineService } from "./service/prd-outline-service.js";
 import { RuleStateService } from "./service/rule-state-service.js";
 import { SpawnGitPort, resolveGitRoot } from "./service/rule-state-git-port.js";
+import type { RadiusDiffPort } from "./service/stamp-binding-reader.js";
 import { RunService } from "./service/run-service.js";
 import { WorktreeRemovalService, type WorktreeRemovalRunStore } from "./service/worktree-removal-service.js";
 import { createRealWorktreeProbe } from "./service/worktree-cleanup.js";
@@ -644,6 +645,20 @@ export interface AppWriteContext {
 }
 
 /**
+ * The diff port the attestation floor's radius axis measures through (SPEC-143 AC-CT-9): a `SpawnGitPort`
+ * whose repository root is resolved on FIRST use, so an app that never reads a stamped row never spawns the VCS.
+ */
+function lazyRadiusDiffPort(): RadiusDiffPort {
+  let port: SpawnGitPort | undefined;
+  return {
+    changedSince(sha, paths) {
+      port ??= new SpawnGitPort(resolveGitRoot(process.cwd()));
+      return port.changedSince(sha, paths);
+    },
+  };
+}
+
+/**
  * Wires `VerifyRunnerService`'s state-binding SKIP path (SPEC-143 AC-CT-8): the read-only occupancy
  * reader plus the store's audit append. The writer of the lock protocol stays `scripts/oracle-lock.ts`.
  */
@@ -774,6 +789,10 @@ function buildAppFromSqlite(
   corpusService.setRuleStateService({
     full: () => new RuleStateService(store, new SpawnGitPort(resolveGitRoot(process.cwd()))).full(),
   });
+  // reason: AC-CT-9 — the attestation floor's radius axis diffs through the SAME lazy git port shape (git root
+  // resolved on first measurement, so an app that never reads a stamped row never spawns git).
+  const stampRadiusDiff = lazyRadiusDiffPort();
+  corpusService.setStampRadiusDiff(stampRadiusDiff);
   const outlineService = new OutlineService(store);
   // reason: own telemetry wiring restores parity with CorpusService (D8) — TaskWorkflowService
   // never routes writes through CorpusService (cross-service calls forbidden). SPEC-025 §3 D5, D8.
@@ -914,7 +933,7 @@ function buildAppFromSqlite(
     // reason: VerificationProjectionService depends only on StoreInterface plus the
     // resolved attestationMinRatio scalar — stateless, no AI, no telemetry, same DI
     // shape as DriftCheckService/PhaseService. SPEC-075 §Module Boundary D1/D6.
-    verificationProjectionService: new VerificationProjectionService(store, attestationMinRatio),
+    verificationProjectionService: new VerificationProjectionService(store, attestationMinRatio, stampRadiusDiff),
     // reason: OutlineMigrationService depends only on StoreInterface — stateless,
     // no AI, no telemetry, same shape as PhaseMigrationService/DriftCheckService.
     // SPEC-080 §Migration Plan Phase 1.
@@ -1190,6 +1209,10 @@ function buildAppFromTurso(
   corpusService.setRuleStateService({
     full: () => new RuleStateService(store, new SpawnGitPort(resolveGitRoot(process.cwd()))).full(),
   });
+  // reason: AC-CT-9 — the attestation floor's radius axis diffs through the SAME lazy git port shape (git root
+  // resolved on first measurement, so an app that never reads a stamped row never spawns git).
+  const stampRadiusDiff = lazyRadiusDiffPort();
+  corpusService.setStampRadiusDiff(stampRadiusDiff);
   const outlineService = new OutlineService(store);
   // reason: extracted to a local (see buildAppFromSqlite's identical comment) so
   // VerifyRunnerService can bind its recordVerifiedEvidence method below. 5th arg
@@ -1311,7 +1334,7 @@ function buildAppFromTurso(
     // reason: VerificationProjectionService depends only on StoreInterface plus the
     // resolved attestationMinRatio scalar — stateless, no AI, no telemetry, same DI
     // shape as DriftCheckService/PhaseService. SPEC-075 §Module Boundary D1/D6.
-    verificationProjectionService: new VerificationProjectionService(store, attestationMinRatio),
+    verificationProjectionService: new VerificationProjectionService(store, attestationMinRatio, stampRadiusDiff),
     // reason: OutlineMigrationService depends only on StoreInterface — stateless,
     // no AI, no telemetry, same shape as PhaseMigrationService/DriftCheckService.
     // SPEC-080 §Migration Plan Phase 1.

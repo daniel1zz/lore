@@ -121,6 +121,7 @@ import {
   type EvidenceResultTally,
 } from "./task-workflow.js";
 import {
+  classifyEvidenceRadii,
   classifyEvidenceStamps,
   tallyStampReadings,
   type StampBindingContext,
@@ -143,7 +144,10 @@ export interface TaskAttestationInfo {
   /**
    * Of those, how many carry a runner-issued `attestation` object. When the builder was given a
    * {@link StampBindingContext}, rows classified `unbound` are EXCLUDED (SPEC-143 AC-CT-3): a
-   * post-arming verdict about an unnamed state is not attestation the floor may count.
+   * post-arming verdict about an unnamed state is not attestation the floor may count. STAMPED
+   * rows whose blast radius changed since their recorded HEAD (`stale`) are EXCLUDED too
+   * (AC-CT-9 (a)/(b): the floor reads stamp first, radius only when stamped); a stamped row with
+   * an unmeasurable radius STAYS counted.
    */
   attestedCount: number;
   /**
@@ -161,7 +165,37 @@ export interface TaskAttestationInfo {
  * was not measured (`stampTally` absent).
  */
 export function isUnboundOnlyTask(info: TaskAttestationInfo): boolean {
-  return info.stampTally !== undefined && info.stampTally.unbound > 0 && info.attestedCount === 0;
+  return (
+    info.stampTally !== undefined &&
+    info.stampTally.unbound > 0 &&
+    info.stampTally.stale === 0 &&
+    info.attestedCount === 0
+  );
+}
+
+/**
+ * `true` iff the task carries attested rows and EVERY one is refused by the stamp-then-radius
+ * read (SPEC-143 AC-CT-9): `unbound` (stamp axis) or `stale` (radius axis, only read for stamped
+ * rows). Such a task's runner evidence certifies no CURRENT named state, so it satisfies no floor.
+ * Superset of {@link isUnboundOnlyTask}; a task with ANY accepted row (stamped-and-bound,
+ * stamped-and-unmeasured, or `legacy_unbound`) is not refused, and neither is one whose stamp axis
+ * was not measured (`stampTally` absent).
+ */
+export function isStampRefusedOnlyTask(info: TaskAttestationInfo): boolean {
+  return (
+    info.stampTally !== undefined &&
+    info.stampTally.unbound + info.stampTally.stale > 0 &&
+    info.attestedCount === 0
+  );
+}
+
+/**
+ * `true` iff the task carries at least one stale stamped row and nothing the floor accepts
+ * (see {@link isStampRefusedOnlyTask}); the radius-axis counterpart of {@link isUnboundOnlyTask},
+ * so a feeding message can name WHY the floor refused.
+ */
+export function isStaleOnlyTask(info: TaskAttestationInfo): boolean {
+  return isStampRefusedOnlyTask(info) && info.stampTally !== undefined && info.stampTally.stale > 0;
 }
 
 /**
@@ -194,12 +228,15 @@ export function buildTaskAttestationInfos(
     if (stampBinding === undefined) {
       return { slug: task.slug, title: task.title, evidenceCount: evidence.length, attestedCount: attested };
     }
-    const stampTally = tallyStampReadings(classifyEvidenceStamps(task.id, evidence, stampBinding));
+    const stampTally = tallyStampReadings(
+      classifyEvidenceStamps(task.id, evidence, stampBinding),
+      classifyEvidenceRadii(task.id, evidence, stampBinding),
+    );
     return {
       slug: task.slug,
       title: task.title,
       evidenceCount: evidence.length,
-      attestedCount: attested - stampTally.unbound,
+      attestedCount: attested - stampTally.unbound - stampTally.stale,
       stampTally,
     };
   });
@@ -558,7 +595,7 @@ export interface AttestationSummary {
    * `true` when the RATIO conjunct clears: `min_ratio === null` (unconfigured, so
    * it never runs) OR `ratio >= min_ratio` — or the vacuous-pass case,
    * `total_evidence === 0`, which is always `true`. ALSO `false` whenever a task's
-   * runner-attested rows are all `unbound` ({@link isUnboundOnlyTask}, SPEC-143 AC-CT-3),
+   * runner-attested rows are all `unbound` or `stale` ({@link isStampRefusedOnlyTask}, SPEC-143 AC-CT-3/AC-CT-9),
    * independent of the ratio's configuration.
    *
    * NOT the plan-close verdict on its own: the per-task zero-attested condition
@@ -680,7 +717,7 @@ export function deriveAttestationSummary(
   // SPEC-143 AC-CT-3: the stamp axis rides the SAME conjunct so every consumer (plan-close gate,
   // dashboard badge, compact chip) reads one verdict. A task whose runner-attested rows are ALL
   // `unbound` fails the floor whether or not the opt-in ratio is configured.
-  const meetsFloor = (minRatio === null || ratio >= minRatio) && !infos.some(isUnboundOnlyTask);
+  const meetsFloor = (minRatio === null || ratio >= minRatio) && !infos.some(isStampRefusedOnlyTask);
   return {
     total_evidence: totalEvidence,
     attested,
