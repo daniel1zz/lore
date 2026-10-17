@@ -8,7 +8,7 @@
   "scripts": {
     "dev": "bun run packages/lore/src/index.ts",
     "build": "bun run scripts/build.ts",
-    "test": "bun scripts/oracle-lock.ts sh -c \"bun run check:ac-state-renderers && bun run check:prose-pins && bun run check:capture-source-buckets && bun run test:vitest && bun run check:spec-mirror && bun run check:live-repo-state && bun run check:corpus-fail-census && bun run check:ac-oracle-ownership\"",
+    "test": "bun scripts/oracle-lock.ts bun scripts/run-chain.ts",
     "test:vitest": "bun scripts/run-tests.ts",
     "test:bun": "echo 'test:bun is retired (task-skill-implement-tg-23): one runner. Run a file with: bunx --bun vitest run <file> [-t <name>]; run everything with: bun run test' >&2; exit 1",
     "test:changed": "bun scripts/changed-tests.ts",

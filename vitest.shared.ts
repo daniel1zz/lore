@@ -1,6 +1,7 @@
 import { defineConfig } from "vitest/config";
 import { fileURLToPath, URL } from "node:url";
 import { workspaceAliases } from "./workspace-aliases";
+import { resolveMaxWorkers } from "./vitest.workers";
 import { armSandboxEnv } from "./scripts/test-isolation-env";
 import { readRecorderAliases, readRecorderMockRedirect } from "./scripts/test-read-aliases";
 
@@ -93,7 +94,7 @@ export function createConfig(selection: { include: readonly string[]; exclude: r
       // every full run spawned one fork process per CPU (~200-300MB RSS each),
       // and overlapping suite runs exhausted machine memory (2026-07-17).
       // Overridable per-run via the VITEST_MAX_WORKERS env var.
-      maxWorkers: 4,
+      maxWorkers: resolveMaxWorkers(process.env),
       // reason: maxWorkers caps process COUNT, not per-process memory — without
       // an explicit heap cap each fork can balloon to Node's 64-bit default
       // (~4GB old-space) before GC pressure kicks in, so 4 workers could still
