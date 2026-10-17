@@ -9,6 +9,13 @@ import { armSandboxEnv } from "./scripts/test-isolation-env";
 // would arm the worker but not its children; scripts/test-isolation-setup.ts measures the result.
 armSandboxEnv(fileURLToPath(new URL(".", import.meta.url)));
 
+// reason: under the Bun runtime the vitest MAIN process can exit 0 in the middle of a run: Bun ends a
+// process whose event loop is empty even while the run still awaits worker results, so vitest never prints
+// its summary or writes its report and `bunx` reports success (measured 2026-10-17: 3 of 3 full runs, and a
+// 6-file subset 5 of 5 times, before this line). A ref'd timer in the main process keeps the loop alive until
+// vitest itself calls process.exit() at the end of the run. Workers do not load this config.
+setInterval(() => undefined, 60_000);
+
 /** Every test file glob; the Bun-runtime config runs all of them except the files vitest.node-files.ts lists. */
 export const ALL_TEST_GLOBS: readonly string[] = [
   "packages/lore/tests/**/*.test.ts",
