@@ -3,7 +3,7 @@ id: TASK-1508
 type: task
 role: plan
 title: "[Skill:refactor] TG-25 in-process command helper and first half of 67 binary-spawning tests"
-status: draft
+status: archived
 priority: high
 phase: "Phase 3b: one runner"
 created: 2026-10-17

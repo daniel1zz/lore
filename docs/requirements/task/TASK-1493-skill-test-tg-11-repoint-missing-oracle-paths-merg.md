@@ -3,11 +3,11 @@ id: TASK-1493
 type: task
 role: plan
 title: "[Skill:test] TG-11 repoint missing oracle paths, merge duplicate AC tests, wire ownership check"
-status: draft
+status: archived
 priority: medium
 phase: "Phase 3: guards"
 created: 2026-10-16
-updated: 2026-10-16
+updated: 2026-10-17
 tags: []
 parent: PLAN-201
 plan: PLAN-201

@@ -3,7 +3,7 @@ id: TASK-1527
 type: task
 role: plan
 title: "[Skill:implement] CT-6 AC-CT-10 capture-source bucket site scan in the test chain"
-status: draft
+status: archived
 priority: medium
 phase: "Phase 2: implement"
 created: 2026-10-17

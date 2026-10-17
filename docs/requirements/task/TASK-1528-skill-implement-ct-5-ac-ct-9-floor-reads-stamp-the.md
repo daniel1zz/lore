@@ -3,7 +3,7 @@ id: TASK-1528
 type: task
 role: plan
 title: "[Skill:implement] CT-5 AC-CT-9 floor reads stamp then radius; one distribution predicate"
-status: draft
+status: archived
 priority: medium
 phase: "Phase 2: implement"
 created: 2026-10-17
