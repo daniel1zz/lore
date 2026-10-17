@@ -1,4 +1,5 @@
 /**
+ * @layer core-unit (buildBootstrapInjection; the AC's oracle is the compiled-binary e2e)
  * Unit suite for the seat-only `buildBootstrapInjection` projection
  * (spec-session-start-injection-carries-only-the-session-s-own, AC-SI-1).
  *

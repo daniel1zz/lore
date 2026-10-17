@@ -1,4 +1,5 @@
 /**
+ * @layer script-unit (pure step evaluation; the AC's oracle runs the whole probe against dist/lore)
  * Unit suite for scripts/lib/fresh-install-probe-steps.ts (AC-FIP-6): pure step evaluation, no subprocess.
  * Dimensions: HAPPY (matching output passes), NEGATIVE (wrong exit / missing text fails), BOUNDARY (empty scan),
  * ERROR (malformed JSON, usage errors), REGRESSION (the manual-probe defects F1-F6 are detected).

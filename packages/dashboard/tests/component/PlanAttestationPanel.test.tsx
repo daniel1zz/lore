@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 /**
+ * @layer dashboard-component (PlanAttestationPanel; the AC's oracle is the core evidence-panel suite)
  * Tests for PlanAttestationPanel — Evidence-tab rendering for a `plan` doc's
  * projection (SPEC-075 §Module Boundary D7; task-meets-floor-renders-pass-
  * while-the-declared-scope-conjunct for the declared-scope conjunct badge).

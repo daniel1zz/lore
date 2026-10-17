@@ -6,6 +6,7 @@
 // @reads packages/lore/src/service/issue-resolution.ts
 /** @spec_ref AC-IC-3 */
 /**
+ * @layer script-unit (check-no-timer-retry; the AC's oracle is the IssueCloser port suite)
  * Unit tests for `scripts/check-no-timer-retry.ts`'s PURE parsers — the D3
  * target extraction and the source scan (AC-IC-3 of
  * spec-report-issue-has-no-specified-concurrency-contract-ac-072). No corpus, no

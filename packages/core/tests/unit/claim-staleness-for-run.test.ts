@@ -1,4 +1,5 @@
 /**
+ * @layer core-unit (isClaimStaleForRun; the AC's oracle is the run-end integration suite)
  * @spec_ref spec-run-only-write-identity-and-run-end-claim-release (Scope 5; AC-ROI-5; BR-1058)
  *
  * `isClaimStaleForRun` — the pure staleness rule that reads the holder run's end and an `orphaned_dirty` mark.

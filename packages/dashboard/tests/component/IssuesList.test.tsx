@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 /**
+ * @layer dashboard-component (IssuesList; the AC's oracle is the Playwright issues-resolution spec)
  * @spec_ref SPEC-078 T13 dispatch deliverable, AC-078-7/AC-078-8
  *
  * Tests for `IssuesList` (`components/IssuesList.tsx`) — the SPEC-074 issues
