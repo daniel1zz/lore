@@ -37,7 +37,7 @@
  * on the promote gate) / REGRESSION (LORE_GATE_BYPASS=1 skips the entire chain).
  */
 
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "bun:test";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { mkdtempSync, mkdirSync, rmSync } from "fs";
 import { join, resolve, dirname } from "path";
 import { tmpdir } from "os";

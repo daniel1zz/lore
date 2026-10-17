@@ -65,7 +65,7 @@
  * @spec_ref task-refuse-a-self-reported-evidence-command-containing-a-shell
  */
 
-import { describe, it, expect } from "bun:test";
+import { describe, it, expect } from "vitest";
 import {
   commandHasUnsafePipe,
   findPipeRefusal,

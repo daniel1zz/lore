@@ -48,7 +48,8 @@
  * @spec_ref task-lore-evidence-capture-has-a-hard-coded-600s-window-that-a
  */
 
-import { describe, it, expect, spyOn, beforeEach, afterEach } from "bun:test";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+const spyOn = vi.spyOn.bind(vi);
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from "fs";
 import { join, resolve } from "path";
 import { tmpdir } from "os";

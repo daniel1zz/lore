@@ -37,7 +37,8 @@
  * Coverage dimensions: HAPPY / NEGATIVE / BOUNDARY / ERROR / STATE / REGRESSION.
  */
 
-import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { fileURLToPath } from "node:url";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "fs";
 import { join, resolve } from "path";
 import { tmpdir } from "os";
@@ -96,7 +97,7 @@ let originalEnv: string | undefined;
 /** The live rule seeded into this test's corpus by {@link seedLiveRule}; reset per test. */
 let seededRuleId: string | undefined;
 
-const LORE_ENTRY = resolve(import.meta.dir, "..", "..", "src", "index.ts");
+const LORE_ENTRY = resolve(fileURLToPath(new URL(".", import.meta.url)), "..", "..", "src", "index.ts");
 
 /** Runs the real `lore` CLI against this test's throwaway corpus; throws on a non-zero exit. */
 function loreCli(args: string[]): string {

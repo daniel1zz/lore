@@ -19,7 +19,8 @@
  * Uses bun:test (loadLoreApp transitively imports bun:sqlite via app.ts / SQLiteStore).
  */
 
-import { describe, it, expect, beforeEach, afterEach, spyOn } from "bun:test";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+const spyOn = vi.spyOn.bind(vi);
 import {
   mkdtempSync,
   mkdirSync,

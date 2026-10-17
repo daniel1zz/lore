@@ -80,7 +80,7 @@
  *   task-skill-test-governance-topic-dispatch-red-incl-compiled-e2e.
  */
 
-import { beforeAll, describe, expect, it } from "bun:test";
+import { beforeAll, describe, expect, it } from "vitest";
 import { readFileSync } from "fs";
 import { join } from "path";
 import { assertFreshBinary } from "../integration/helpers/assert-fresh-binary";

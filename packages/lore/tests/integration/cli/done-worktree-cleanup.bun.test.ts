@@ -24,13 +24,14 @@
  * sibling and a never-claimed worktree).
  */
 
-import { afterAll, beforeAll, describe, expect, it } from "bun:test";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
-const REPO_ROOT = resolve(import.meta.dir, "..", "..", "..", "..", "..");
+const REPO_ROOT = resolve(fileURLToPath(new URL(".", import.meta.url)), "..", "..", "..", "..", "..");
 const LORE_ENTRY = join(REPO_ROOT, "packages", "lore", "src", "index.ts");
 // BR-1055: LORE_ACTOR is ignored; the writer identity is injected through the session tier.
 const SESSION_ID = "7e5d1060-aaaa-bbbb-cccc-111111111111";

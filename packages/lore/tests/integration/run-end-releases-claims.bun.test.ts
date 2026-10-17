@@ -12,7 +12,8 @@
  *           runs' claims untouched) / REGRESSION (release audit records the ending run).
  */
 
-import { afterAll, beforeAll, describe, expect, it, setDefaultTimeout } from "bun:test";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+const setDefaultTimeout = (ms: number): void => { vi.setConfig({ testTimeout: ms, hookTimeout: ms }); };
 import { rmSync } from "node:fs";
 import { createCorpus, getClaim, registerRun, runLore, type Corpus } from "./cli/support/claim-run-fixture.js";
 import {

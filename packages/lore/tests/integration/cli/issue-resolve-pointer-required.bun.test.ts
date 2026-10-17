@@ -58,7 +58,8 @@
 
 import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
-import { afterAll, beforeAll, describe, expect, it } from "bun:test";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -67,7 +68,7 @@ import { SQLiteStore } from "../../../src/store/sqlite-store.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
 
 /** packages/lore/tests/integration/cli -> this worktree's root (5 levels up). */
-const WORKTREE_ROOT = resolve(import.meta.dir, "..", "..", "..", "..", "..");
+const WORKTREE_ROOT = resolve(fileURLToPath(new URL(".", import.meta.url)), "..", "..", "..", "..", "..");
 const DIST_LORE = join(WORKTREE_ROOT, "dist", "lore");
 const TMP_ROOT = tmpdir();
 

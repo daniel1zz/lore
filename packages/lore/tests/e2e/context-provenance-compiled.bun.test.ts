@@ -96,7 +96,7 @@
  *   AC-CP-9, AC-CP-10. Task task-t5-compiled-e2e-suite-proving-every-surface-from-a.
  */
 
-import { afterAll, beforeAll, describe, expect, it } from "bun:test";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";

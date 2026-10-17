@@ -50,7 +50,7 @@
  *   Criteria AC-085-1
  */
 
-import { describe, expect, it, beforeAll } from "bun:test";
+import { describe, expect, it, beforeAll } from "vitest";
 import { readdirSync, readFileSync } from "fs";
 import { join } from "path";
 import { assertFreshBinary } from "./helpers/assert-fresh-binary";

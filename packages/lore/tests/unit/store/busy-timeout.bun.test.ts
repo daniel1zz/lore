@@ -38,6 +38,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { fileURLToPath } from "node:url";
 import { Database } from "bun:sqlite";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -301,7 +302,7 @@ describe("SQLiteStore busy_timeout pragma (AC-078-2)", () => {
   });
 
   it("BOUNDARY: TursoStore source has no busy_timeout call (SPEC-078 D9 scope — libsql serializes writes at the replica-sync layer, not via SQLite's file-level busy handler)", () => {
-    const tursoSourcePath = join(import.meta.dir, "../../../src/store/turso-store.ts");
+    const tursoSourcePath = join(fileURLToPath(new URL(".", import.meta.url)), "../../../src/store/turso-store.ts");
     const tursoSource = readFileSync(tursoSourcePath, "utf-8");
     expect(tursoSource).not.toMatch(/busy_timeout/i);
   });

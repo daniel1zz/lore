@@ -87,7 +87,7 @@
  *               (empty report, zero writes, byte-unchanged file hash).
  */
 
-import { afterAll, beforeAll, describe, expect, it } from "bun:test";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { Database } from "bun:sqlite";
 import { appendFileSync, existsSync, mkdtempSync, readFileSync, rmSync } from "fs";
 import { join } from "path";

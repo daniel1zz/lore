@@ -21,7 +21,8 @@
  *   - the command stops printing the issue address / number
  */
 
-import { afterAll, beforeAll, describe, expect, it } from "bun:test";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { fileURLToPath } from "node:url";
 import { chmodSync, existsSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -31,7 +32,7 @@ import { parseIssueBody } from "@lore/core";
 import { assertFreshBinary } from "../helpers/assert-fresh-binary";
 import { cleanupPayloadGhStubDir, payloadGhStubDir } from "../helpers/payload-gh-stub";
 
-const WORKTREE_ROOT = resolve(import.meta.dir, "..", "..", "..", "..", "..");
+const WORKTREE_ROOT = resolve(fileURLToPath(new URL(".", import.meta.url)), "..", "..", "..", "..", "..");
 const DIST_LORE = join(WORKTREE_ROOT, "dist", "lore");
 const TMP_ROOT = tmpdir();
 

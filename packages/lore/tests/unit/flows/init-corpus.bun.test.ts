@@ -25,7 +25,7 @@
  * @spec_ref AC-046-E
  */
 
-import { describe, expect, it, afterEach } from "bun:test";
+import { describe, expect, it, afterEach } from "vitest";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";

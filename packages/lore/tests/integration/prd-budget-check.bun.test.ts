@@ -30,7 +30,7 @@
  * @spec_ref AC-080-1 AC-080-10 (SPEC-080 C3, C1)
  */
 
-import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { Database } from "bun:sqlite";
 import { mkdirSync, rmSync, writeFileSync } from "fs";
 import { join } from "path";

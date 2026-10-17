@@ -67,7 +67,7 @@
  * @spec_ref spec-mirror-identifier-ssot-one-writer-for-export-index-human D5, AC-MIS-5
  */
 
-import { afterEach, beforeAll, beforeEach, describe, expect, it } from "bun:test";
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { createHash } from "node:crypto";
 import {
   existsSync,

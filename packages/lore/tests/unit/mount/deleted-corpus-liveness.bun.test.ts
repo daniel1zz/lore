@@ -84,7 +84,7 @@
  * @spec_ref spec-078-dashboard-multi-project-mount-registry-machine-scope AC-078-3
  */
 
-import { afterEach, describe, expect, it } from "bun:test";
+import { afterEach, describe, expect, it } from "vitest";
 import { existsSync, mkdirSync, mkdtempSync, rmSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";

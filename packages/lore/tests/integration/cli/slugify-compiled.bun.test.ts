@@ -37,7 +37,7 @@
  * @spec_ref SPEC-068 §Acceptance Criteria AC-068-10
  */
 
-import { describe, expect, it, beforeAll, afterEach } from "bun:test";
+import { describe, expect, it, beforeAll, afterEach } from "vitest";
 import { mkdtempSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";

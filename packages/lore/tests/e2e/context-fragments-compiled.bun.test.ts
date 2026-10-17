@@ -56,7 +56,7 @@
  *   task task-skill-test-compiled-e2e-red-fragments-cli-hooks-setup.
  */
 
-import { afterAll, beforeAll, describe, expect, it } from "bun:test";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { randomUUID } from "crypto";
 import {
   chmodSync,

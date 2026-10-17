@@ -55,7 +55,7 @@
  * @spec_ref spec-multi-session-concurrency-queryable-ownership-checkout AC-OWN-5
  */
 
-import { afterEach, beforeAll, describe, expect, it } from "bun:test";
+import { afterEach, beforeAll, describe, expect, it } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";

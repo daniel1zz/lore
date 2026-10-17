@@ -84,7 +84,7 @@
  * @spec_ref task-red-failing-tests-for-no-open-suppression-nonce-failure
  */
 
-import { afterEach, describe, expect, it } from "bun:test";
+import { afterEach, describe, expect, it } from "vitest";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";

@@ -57,7 +57,7 @@
  * @spec_ref SPEC-042 §Acceptance Criteria AC-S3-7
  */
 
-import { describe, expect, it, beforeAll, beforeEach, afterEach } from "bun:test";
+import { describe, expect, it, beforeAll, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir, hostname } from "os";

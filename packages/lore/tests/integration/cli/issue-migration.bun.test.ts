@@ -110,7 +110,8 @@
  * migrated, scenario 5).
  */
 
-import { afterAll, beforeAll, describe, expect, it } from "bun:test";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { fileURLToPath } from "node:url";
 import { existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
@@ -131,7 +132,7 @@ import {
 // ─── Paths ──────────────────────────────────────────────────────────────────
 
 /** packages/lore/tests/integration/cli -> this worktree's root (5 levels up). */
-const REPO_ROOT = resolve(import.meta.dir, "..", "..", "..", "..", "..");
+const REPO_ROOT = resolve(fileURLToPath(new URL(".", import.meta.url)), "..", "..", "..", "..", "..");
 const TMP_ROOT = tmpdir();
 
 /** The (not-yet-existing) migration entry point this file specifies the contract for. */

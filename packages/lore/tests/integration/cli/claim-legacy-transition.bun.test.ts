@@ -22,7 +22,8 @@
  *           BOUNDARY (stale legacy) / STATE (release then run rules) / REGRESSION (by-name).
  */
 
-import { afterAll, beforeAll, describe, expect, it, setDefaultTimeout } from "bun:test";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+const setDefaultTimeout = (ms: number): void => { vi.setConfig({ testTimeout: ms, hookTimeout: ms }); };
 import { sessionActorFor } from "../../helpers/session-actor";
 import {
   CLAIM_CONFLICT_EXIT,

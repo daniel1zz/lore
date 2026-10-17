@@ -38,7 +38,7 @@
  * Coverage dimensions: HAPPY / NEGATIVE / BOUNDARY / ERROR / STATE / REGRESSION.
  */
 
-import { describe, expect, it, beforeAll, afterEach } from "bun:test";
+import { describe, expect, it, beforeAll, afterEach } from "vitest";
 import { mkdtempSync, rmSync, writeFileSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";

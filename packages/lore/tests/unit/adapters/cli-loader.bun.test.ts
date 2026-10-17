@@ -19,7 +19,7 @@
  * Uses bun:sqlite (bun test only — vitest cannot resolve bun:sqlite).
  */
 
-import { describe, it, expect, beforeEach, afterEach } from "bun:test";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, existsSync, mkdirSync, readFileSync } from "fs";
 import { join, resolve } from "path";
 import { tmpdir } from "os";

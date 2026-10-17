@@ -38,7 +38,7 @@
  * @spec_ref SPEC-076 §C5 (task-skill-test-t7r-orphan-backup-pruning-red-test-scenarios), AC-076-8
  */
 
-import { afterEach, describe, expect, it } from "bun:test";
+import { afterEach, describe, expect, it } from "vitest";
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";

@@ -27,7 +27,7 @@
  *   REGRESSION — a `.lore/` line still verdicts dirty after the widening (the
  *                pre-existing behaviour this task must not break).
  */
-import { describe, expect, it } from "bun:test";
+import { describe, expect, it } from "vitest";
 import { readFileSync } from "fs";
 import { dirname, join } from "path";
 import { fileURLToPath } from "url";

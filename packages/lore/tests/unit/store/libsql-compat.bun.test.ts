@@ -18,7 +18,7 @@
  *   - WAL is set in SQLiteStore.init() via: PRAGMA journal_mode = WAL
  */
 
-import { afterAll, beforeAll, describe, expect, it } from "bun:test";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { Database } from "bun:sqlite";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";

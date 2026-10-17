@@ -70,7 +70,7 @@
  *   task-skill-implement-cli-mcp-surfaces-checklist-ref-evidence
  */
 
-import { describe, it, expect, beforeEach, afterEach } from "bun:test";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { spawnSync } from "child_process";
 import { mkdirSync, rmSync } from "fs";
 import { join } from "path";

@@ -49,7 +49,7 @@
  * task-lore-assess-diff-spawnsync-sets-no-maxbuffer-a-diff-over-1
  */
 
-import { describe, it, expect, beforeEach, afterEach } from "bun:test";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, writeFileSync, mkdirSync, readFileSync, existsSync } from "fs";
 import { join, resolve } from "path";
 import { tmpdir } from "os";

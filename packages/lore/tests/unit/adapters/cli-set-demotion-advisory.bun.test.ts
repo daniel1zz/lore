@@ -24,6 +24,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { fileURLToPath } from "node:url";
 import { mkdtempSync, writeFileSync } from "fs";
 import { readFileSync } from "node:fs";
 import { join } from "path";
@@ -322,7 +323,7 @@ describe("lore set — approved→draft demotion advisory on the standard patch 
     // the same string literal (AC-CLOSURE-4: "a duplicated string literal fails this AC").
     const { APPROVED_DEMOTION_ADVISORY } = await importSetCommand();
     const setSourcePath = join(
-      import.meta.dir,
+      fileURLToPath(new URL(".", import.meta.url)),
       "../../../src/adapters/cli/commands/set.ts",
     );
     const source = readFileSync(setSourcePath, "utf8");

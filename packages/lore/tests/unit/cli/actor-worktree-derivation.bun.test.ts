@@ -40,7 +40,7 @@
  *                `expect(() => ...).not.toThrow()`.
  */
 
-import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   existsSync,
   mkdirSync,

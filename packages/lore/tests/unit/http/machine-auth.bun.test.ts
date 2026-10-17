@@ -53,7 +53,7 @@
  * @spec_ref spec-078-dashboard-multi-project-mount-registry-machine-scope AC-078-4
  */
 
-import { describe, expect, it } from "bun:test";
+import { describe, expect, it } from "vitest";
 import { Database } from "bun:sqlite";
 import { existsSync, mkdtempSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";

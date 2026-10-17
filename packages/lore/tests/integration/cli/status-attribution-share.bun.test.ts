@@ -29,7 +29,8 @@
  * Hardcoded-return defence: other corpora with different mixes must report their own numbers.
  */
 
-import { afterAll, describe, expect, it, setDefaultTimeout } from "bun:test";
+import { afterAll, describe, expect, it, vi } from "vitest";
+const setDefaultTimeout = (ms: number): void => { vi.setConfig({ testTimeout: ms, hookTimeout: ms }); };
 import { mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";

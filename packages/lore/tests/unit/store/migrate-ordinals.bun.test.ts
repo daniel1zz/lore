@@ -86,7 +86,8 @@
  * Source: SPEC-084 §One-shot repair migration, §Acceptance Criteria AC-084-4.
  */
 
-import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { fileURLToPath } from "node:url";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -720,7 +721,7 @@ describe("OrdinalMigrationService.migrateOrdinals — declared-number claims pre
 describe("AC-MIS-4 self-assertion: this file's own RE-BASELINE record", () => {
   it("contains the literal RE-BASELINE tokens citing the prior decision (ordinal.ts:133-145, 2026-08-10) and the padded re-baseline value, grep-checkable rather than an unfalsifiable adequacy judgment", () => {
     const BOUNDARY_MARKER = ">>> AC-MIS-4 SELF-ASSERTION BOUNDARY <<<";
-    const ownSource = readFileSync(import.meta.path, "utf8");
+    const ownSource = readFileSync(fileURLToPath(import.meta.url), "utf8");
     const boundaryIndex = ownSource.indexOf(BOUNDARY_MARKER);
     // The boundary marker itself must be found — if it is ever renamed this
     // assertion must fail loud, not silently scan the whole (self-

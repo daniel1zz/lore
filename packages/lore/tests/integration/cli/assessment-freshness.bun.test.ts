@@ -28,7 +28,7 @@
  * @spec_ref SPEC-106 §Acceptance Criteria AC-FRESH-4
  */
 
-import { afterEach, beforeAll, describe, expect, it } from "bun:test";
+import { afterEach, beforeAll, describe, expect, it } from "vitest";
 import { mkdtempSync, rmSync, writeFileSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";

@@ -136,7 +136,7 @@
  *   AC-RC-13 (task task-t6-wire-the-stop-hook-into-settings-json-auto-registration).
  */
 
-import { afterAll, beforeAll, describe, expect, it } from "bun:test";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   appendFileSync,
   existsSync,

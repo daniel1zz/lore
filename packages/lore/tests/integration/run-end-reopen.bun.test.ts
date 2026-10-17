@@ -10,7 +10,8 @@
  * REGRESSION (registering an open run is a no-op).
  */
 
-import { afterAll, beforeAll, describe, expect, it, setDefaultTimeout } from "bun:test";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+const setDefaultTimeout = (ms: number): void => { vi.setConfig({ testTimeout: ms, hookTimeout: ms }); };
 import { CLAIM_CONFLICT_EXIT, createCorpus, getClaim, runLore, type Corpus } from "./cli/support/claim-run-fixture.js";
 import { claimAs, cleanupWorktrees, endRun, getRunRow, makeWorktree } from "./support/run-end-fixture.js";
 

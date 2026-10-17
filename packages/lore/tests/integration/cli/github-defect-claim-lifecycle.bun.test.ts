@@ -73,7 +73,8 @@
  * them here would blur which file is the oracle for which AC.
  */
 
-import { afterAll, beforeAll, describe, expect, it } from "bun:test";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { fileURLToPath } from "node:url";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -86,7 +87,7 @@ import { sessionEnvFor } from "../../helpers/session-actor";
 
 // ─── Worktree-anchored dist/lore binary (never the main checkout's) ─────────
 
-const WORKTREE_ROOT = resolve(import.meta.dir, "..", "..", "..", "..", "..");
+const WORKTREE_ROOT = resolve(fileURLToPath(new URL(".", import.meta.url)), "..", "..", "..", "..", "..");
 const DIST_LORE = join(WORKTREE_ROOT, "dist", "lore");
 const TMP_ROOT = tmpdir();
 
