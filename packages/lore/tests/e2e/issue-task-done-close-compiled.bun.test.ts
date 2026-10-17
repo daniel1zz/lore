@@ -18,6 +18,7 @@
  */
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { FIXTURE_HOME_OUTSIDE_REPO, makeCleanTreeRepo } from "../helpers/clean-tree-repo";
 import { Database } from "bun:sqlite";
 import { appendFileSync, chmodSync, existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -114,7 +115,7 @@ function runLore(corpus: Corpus, session: string, args: string[]): RunResult {
     cwd: corpus.dir,
     env: {
       ...env,
-      HOME: corpus.dir,
+      HOME: FIXTURE_HOME_OUTSIDE_REPO,
       CLAUDE_CODE_SESSION_ID: session,
       EDITOR: "true",
       // stub first; the original PATH stays behind it only so `sed`/`cat` resolve inside the stub.
@@ -172,6 +173,7 @@ function makeCorpus(): Corpus & { slugs: Record<number, string> } {
   dirsToClean.push(dir, stubDir);
   writeStubGh(stubDir);
   const corpus: Corpus = { dir, stubDir };
+  makeCleanTreeRepo(dir);
   mustRun(corpus, "setup", ["init"]);
   appendFileSync(join(dir, ".lore", "config.yaml"), ["feedback:", "  upstream:", `    repo: ${FAKE_REPO}`, ""].join("\n"));
   mustRun(corpus, "setup", ["create", "prd", "--title", "Task Done Fixture PRD", "--no-ai", "--content", "## Overview\n\nBody.", "--json"]);

@@ -128,6 +128,9 @@ beforeAll(() => {
   mustOk(git(repo, "add", "-A"), "git add");
   mustOk(git(repo, "commit", "-q", "-m", "base"), "git commit");
   mustOk(lore(["init"]), "lore init");
+  // reason: `lore init` arms state binding (AC-CT-3); evidence captured on a dirty tree is unbound and refused by `lore done`.
+  mustOk(git(repo, "add", "-A"), "git add corpus");
+  mustOk(git(repo, "commit", "-q", "-m", "lore corpus"), "git commit corpus");
   mustOk(lore(["create", "prd", "--title", "Root", "--content", "Root PRD.", "--no-ai", "--json"]), "create prd");
 
   aaa = addMergedWorktree("agent-AAA");

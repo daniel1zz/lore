@@ -83,6 +83,7 @@
  */
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { FIXTURE_HOME_OUTSIDE_REPO, makeCleanTreeRepo } from "../helpers/clean-tree-repo";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -121,7 +122,7 @@ function runLore(args: string[], cwd: string, envOverrides: Record<string, strin
     cwd,
     env: {
       ...process.env,
-      HOME: cwd,
+      HOME: FIXTURE_HOME_OUTSIDE_REPO,
       CLAUDECODE: "1",
       LORE_ACTOR: "agent:t5-pci12-probe",
       ...envOverrides,
@@ -238,6 +239,7 @@ function writeConfigWithRatioFloor(dir: string, minRatio: number): void {
 }
 
 function initCorpus(dir: string): void {
+  makeCleanTreeRepo(dir);
   const initResult = runLore(["init"], dir);
   if (initResult.exitCode !== 0) {
     throw new Error(`lore init failed: ${initResult.stderr}`);
@@ -582,6 +584,7 @@ describe("AC-AP-6: compiled plan close prints the cascade in human output and ca
   beforeAll(() => {
     dir = trackDir(mkdtempSync(join(tmpdir(), "lore-ap6-")));
     expect(dir.startsWith(REPO_ROOT)).toBe(false);
+    makeCleanTreeRepo(dir);
     const initResult = runLore(["init"], dir);
     if (initResult.exitCode !== 0) throw new Error(`lore init failed: ${initResult.stderr}`);
     writeConfigPlanCloseGateOff(dir);
