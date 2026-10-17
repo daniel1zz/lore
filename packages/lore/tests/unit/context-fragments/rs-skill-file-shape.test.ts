@@ -1,4 +1,4 @@
-// @layer unit-skill-file-render (renderSkillFile/parseSkillFile pure functions; owner drives lore context refresh)
+// @layer unit-skill-file-render AC-RS-5 (renderSkillFile/parseSkillFile pure functions; owner drives lore context refresh)
 /** @spec_ref AC-RS-5 */
 /**
  * Skill file shape (unit part of AC-RS-5, BR-1064): `lore-<id>/SKILL.md` = YAML frontmatter

@@ -18,7 +18,8 @@
  *     references that id without a spec-qualified `<spec-slug>#AC-ID` reference.
  *   - `unowned-ac-reference`: a test file references (describe/it name or `@spec_ref`) an AC
  *     id that exists in the corpus but that this file does not own, with no spec-qualified
- *     reference and no `@layer <surface>` tag (the tag declares a different entry point).
+ *     reference and no `@layer <surface> AC-X AC-Y` tag naming that id (the tag declares a
+ *     different entry point for exactly the ACs it lists; a bare tag or an unnamed id still fails).
  *   - `nothing-scanned`: zero script ACs were visible (AS-17: never complete over nothing).
  *   - `stale-ledger-row`: a not-built ledger row whose AC is no longer a live script AC, or
  *     whose owner file now exists (the oracle was built; the row must be deleted).
@@ -101,7 +102,21 @@ export interface AcReference {
 const AC_ID = "AC-[A-Z][A-Z0-9]*(?:-[A-Z][A-Z0-9]*)*-\\d+";
 const AC_REF_RE = new RegExp(`(?:([a-z0-9][a-z0-9-]*)#)?\\b(${AC_ID})\\b`, "g");
 const TEST_NAME_RE = /\b(?:describe|it|test)(?:\.(?:only|skip|todo|concurrent))?\s*\(\s*(["'`])((?:\\.|(?!\1)[\s\S])*)\1/g;
-const LAYER_TAG_RE = /@layer\s+\S+/;
+const LAYER_TAG_RE = new RegExp(`@layer\\s+\\S+((?:[ \\t]+${AC_ID}(?![\\w-]))*)`, "g");
+
+/**
+ * Pure. AC ids a file declares as covered by an `@layer <surface> AC-X AC-Y` tag (one or more
+ * tags per file, union). The ids must follow the surface token directly; free text after them
+ * is ignored. A bare `@layer <surface>` covers nothing — reason: a file-level tag that silenced
+ * every reference also silenced future ones (TG-11 follow-up).
+ */
+export function extractLayerCoveredAcIds(content: string): Set<string> {
+  const covered = new Set<string>();
+  for (const m of content.matchAll(LAYER_TAG_RE)) {
+    for (const id of (m[1] ?? "").match(new RegExp(AC_ID, "g")) ?? []) covered.add(id);
+  }
+  return covered;
+}
 
 /** AC references from describe/it/test names and `@spec_ref` lines of one test file (deduplicated per spec+id). */
 export function extractAcReferences(content: string): AcReference[] {
@@ -153,13 +168,13 @@ export function evaluateOwnership(
 
   for (const tf of testFiles) {
     const ownedHere = owners.get(tf.path) ?? new Map<string, string[]>();
-    const hasLayerTag = LAYER_TAG_RE.test(tf.content);
+    const layerCovered = extractLayerCoveredAcIds(tf.content);
     for (const ref of extractAcReferences(tf.content)) {
       if (ref.spec !== undefined) continue; // spec-qualified: explicit, resolved per spec
       const ownerSpecs = ownedHere.get(ref.acId) ?? [];
       if (ownerSpecs.length >= 2) {
         for (const spec of ownerSpecs) findings.push({ rule: "ambiguous-ac-id", spec, acId: ref.acId, path: tf.path });
-      } else if (ownerSpecs.length === 0 && !hasLayerTag) {
+      } else if (ownerSpecs.length === 0 && !layerCovered.has(ref.acId)) {
         const candidates = specsByAcId.get(ref.acId);
         if (candidates === undefined) continue; // not an AC of any live spec
         for (const spec of candidates) findings.push({ rule: "unowned-ac-reference", spec, acId: ref.acId, path: tf.path });

@@ -1,4 +1,4 @@
-// @layer core-module (pure @lore/core context-fragments config/schema/constants; owners drive packages/lore select/render flows and the compiled dist/lore)
+// @layer core-module AC-CF-2 AC-CF-3 AC-CF-14 AC-CF-18 (pure @lore/core context-fragments config/schema/constants; owners drive packages/lore select/render flows and the compiled dist/lore)
 /**
  * @layer core-module (context-fragments.ts; the ACs' oracles are the lore select/render suites and the compiled e2e)
  * @spec_ref AC-CF-2, AC-CF-3, AC-CF-14, AC-CF-18

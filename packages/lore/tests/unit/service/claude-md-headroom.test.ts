@@ -1,4 +1,4 @@
-// @layer service-claude-md-headroom
+// @layer service-claude-md-headroom AC-CMC-1
 /**
  * Unit suite for `computeHeadroom` / `computeHeadroomWarnings` — the
  * headroom-reporting extension to

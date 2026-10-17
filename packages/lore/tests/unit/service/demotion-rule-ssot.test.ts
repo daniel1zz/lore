@@ -1,4 +1,4 @@
-// @layer service-demotion-ssot
+// @layer service-demotion-ssot AC-ACS-4
 /**
  * REGRESSION oracle for the ONE-IMPLEMENTATION property of the contract-edit
  * demotion rule — *"an `approved` doc whose governing contract content changes

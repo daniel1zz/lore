@@ -1,5 +1,5 @@
 /**
- * @layer script-unit (recorder wrapper modules; the AC's oracle is the changed-tests declared-inputs suite)
+ * @layer script-unit AC-TG-7 (recorder wrapper modules; the AC's oracle is the changed-tests declared-inputs suite)
  * Guards for the declared-input recorder's wrapper modules (task-skill-implement-tg-13, AC-TG-7):
  * the alias targets must export every name the real module exports (a missing name would turn a
  * named import into `undefined` without any error), the alias regexes must match exactly the

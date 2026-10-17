@@ -1,4 +1,4 @@
-// @layer service-rule-add-standard
+// @layer service-rule-add-standard AC-BLS3-1
 /**
  * @spec_ref AC-BLS3-1
  * @task task-implement-a-architecture-tree-type-as-ad-registry-cite (spec baseline-slice-3a, rule BR-979)

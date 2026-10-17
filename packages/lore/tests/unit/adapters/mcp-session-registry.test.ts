@@ -1,6 +1,6 @@
 // @reads src/a
 // @reads src/b
-// @layer mcp-adapter (in-process lore_anchor_set tool; owner drives the file-anchor service)
+// @layer mcp-adapter AC-S3-5 (in-process lore_anchor_set tool; owner drives the file-anchor service)
 /**
  * Unit tests for the SPEC-042 session-registry MCP surface: `lore_claim`'s new
  * `machine`/`worktree` fields, `lore_anchor_set`, `lore_ready`'s `ReadyReport`

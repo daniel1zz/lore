@@ -1,4 +1,4 @@
-// @layer service-gate-predicates
+// @layer service-gate-predicates AC-VS-6
 /**
  * Unit tests for the deterministic gate predicates that back `lore gate spec-create`
  * (a separate, not-yet-implemented CLI task). Pure functions only — no store, no IO,

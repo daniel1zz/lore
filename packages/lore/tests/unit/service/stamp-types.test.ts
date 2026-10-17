@@ -5,7 +5,7 @@
 // @reads packages/lore/tests/unit/packages/core/src/index.ts
 // @reads packages/lore/tests/unit/service/packages/core/src/index.ts
 // @reads packages/packages/core/src/index.ts
-// @layer service-stamp-verdict
+// @layer service-stamp-verdict AC-CT-9
 /**
  * RED-phase oracle for SPEC-143's two-axis stamp type foundation (C1 + C2, R9;
  * AC-CT-9 half (c)).

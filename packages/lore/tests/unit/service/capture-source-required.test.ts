@@ -1,6 +1,6 @@
 // @reads packages/lore/src/service/task-workflow-service.ts
 // @reads packages/lore/tests/unit/service/capture-source-required.type-fixture.ts
-// @layer service-task-workflow-evidence
+// @layer service-task-workflow-evidence AC-EH-2
 /**
  * Six-dimension tests closing task-capture-source-is-optional-at-the-evidence-
  * write-boundary — `capture_source` becomes REQUIRED on both `EvidenceInput`

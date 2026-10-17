@@ -1,4 +1,4 @@
-// @layer service-baseline-create-guard
+// @layer service-baseline-create-guard AC-BLS1-1
 /**
  * @spec_ref spec-baseline-slice-1-rules-with-permanent-ids-ac-citations (C2/C3, AC-BLS1-1)
  * @task task-skill-implement-ruleservice-replace-guard-cli-rule ([C2], create-time guard)

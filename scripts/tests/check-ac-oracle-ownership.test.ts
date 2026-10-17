@@ -74,7 +74,7 @@ describe("check-ac-oracle-ownership — AC-TG-5 pure rules", () => {
     expect(r.findings).toEqual([]);
   });
 
-  it("NEGATIVE: a file referencing an AC it does not own is unowned-ac-reference, unless an @layer tag declares another entry point", () => {
+  it("NEGATIVE: a file referencing an AC it does not own is unowned-ac-reference, unless an @layer tag AC-SD-1 AC-TG-9 declares another entry point", () => {
     const owner = "scripts/tests/a.test.ts";
     const other = "scripts/tests/b.test.ts";
     const acs = [{ spec: "spec-a", id: "AC-A-1", command: cmd(owner) }];
@@ -86,10 +86,37 @@ describe("check-ac-oracle-ownership — AC-TG-5 pure rules", () => {
     expect(bad.findings).toEqual([{ rule: "unowned-ac-reference", spec: "spec-a", acId: "AC-A-1", path: other }]);
     const tagged = evaluateOwnership(
       acs,
-      [{ path: other, content: '// @layer cli\nit("AC-A-1 again", () => {});' }],
+      [{ path: other, content: '// @layer cli AC-A-1 (another entry point)\nit("AC-A-1 again", () => {});' }],
       exists(owner, other),
     );
     expect(tagged.findings).toEqual([]);
+  });
+
+  it("NEGATIVE: an @layer tag silences only the ACs it names; a bare tag and an unnamed AC still fail", () => {
+    const owner = "scripts/tests/a.test.ts";
+    const other = "scripts/tests/b.test.ts";
+    const acs = [
+      { spec: "spec-a", id: "AC-A-1", command: cmd(owner) },
+      { spec: "spec-a", id: "AC-A-2", command: cmd(owner) },
+    ];
+    const partial = evaluateOwnership(
+      acs,
+      [{ path: other, content: '// @layer cli AC-A-1\nit("AC-A-1 and AC-A-2", () => {});' }],
+      exists(owner, other),
+    );
+    expect(partial.findings).toEqual([{ rule: "unowned-ac-reference", spec: "spec-a", acId: "AC-A-2", path: other }]);
+    const bare = evaluateOwnership(
+      acs,
+      [{ path: other, content: '// @layer cli\nit("AC-A-1", () => {});' }],
+      exists(owner, other),
+    );
+    expect(bare.findings).toEqual([{ rule: "unowned-ac-reference", spec: "spec-a", acId: "AC-A-1", path: other }]);
+    const twoTags = evaluateOwnership(
+      acs,
+      [{ path: other, content: '// @layer cli AC-A-1\n// @layer svc AC-A-2 (why)\nit("AC-A-1 AC-A-2", () => {});' }],
+      exists(owner, other),
+    );
+    expect(twoTags.findings).toEqual([]);
   });
 
   it("BOUNDARY: an id that belongs to no live spec is ignored; a command with no test file is counted, not failed", () => {

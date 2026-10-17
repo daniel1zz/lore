@@ -1,4 +1,4 @@
-// @layer service-issue-resolution
+// @layer service-issue-resolution AC-ICL-10
 /**
  * Unit tests for the `resolves` link type (D1) and `computeIssueResolution`
  * (D2) — spec-issue-closure-loop-computed-resolution-agent-reachable.
