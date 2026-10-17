@@ -1,4 +1,4 @@
-// @layer mcp-adapter (in-process MCP tool handlers; owners drive services, the CLI and a CLI write-surface test)
+// @layer mcp-adapter AC-ROI-1 AC-VRF-2 AC-VRF-10 (in-process MCP tool handlers; owners drive services, the CLI and a CLI write-surface test)
 /**
  * Unit tests for the SPEC-039 lore_verify MCP tool + the AC-VRF-2 adapter half
  * (evidence write surfaces reject/never-receive attestation-carrying input).

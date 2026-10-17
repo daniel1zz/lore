@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 /**
- * @layer dashboard-component (SpecAcCoveragePanel rendering; the ACs' oracle is deriveAcCoverageState in core)
+ * @layer dashboard-component AC-FALS-2 AC-FALS-3 (SpecAcCoveragePanel rendering; the ACs' oracle is deriveAcCoverageState in core)
  * Tests for SpecAcCoveragePanel — Evidence-tab rendering for a `spec` doc's
  * projection (SPEC-075 §Module Boundary D7).
  * @spec_ref AC-075-2, AC-075-3

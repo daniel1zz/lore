@@ -1,4 +1,4 @@
-// @layer service-claude-md-admission
+// @layer service-claude-md-admission AC-CMC-1
 /**
  * RED-phase TDD tests for AC-CTX-2 — the admission-check extension to
  * `packages/lore/src/service/claude-md-check.ts`

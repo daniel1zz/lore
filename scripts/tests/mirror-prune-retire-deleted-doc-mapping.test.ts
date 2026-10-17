@@ -1,6 +1,6 @@
 // @spawns packages/lore/src/index.ts
 /**
- * @layer script-integration (mirror prune; the AC's oracles are status JSON and check:spec-mirror)
+ * @layer script-integration AC-OX-6 (mirror prune; the AC's oracles are status JSON and check:spec-mirror)
  * task-the-mirror-prune-does-not-retire-a-mapping-whose-doc-was —
  * spec-oracle-exclusivity-in-a-shared-checkout-a-mirror-check AC-OX-6.
  *

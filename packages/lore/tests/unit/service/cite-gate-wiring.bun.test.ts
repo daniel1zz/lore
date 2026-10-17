@@ -1,4 +1,4 @@
-// @layer service-cite-gate-app-wiring
+// @layer service-cite-gate-app-wiring AC-BLS2-2
 /**
  * @spec_ref AC-BLS2-2
  *

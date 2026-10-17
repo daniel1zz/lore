@@ -1,5 +1,5 @@
 /**
- * @layer script-unit (pure decision logic; the ACs' oracles run the scripts on the live corpus)
+ * @layer script-unit AC-BLS3B-11 AC-BLS3B-12 (pure decision logic; the ACs' oracles run the scripts on the live corpus)
  * Tests for the pure decision logic of `scripts/check-spec-citation-census.ts` (AC-BLS3B-11) and
  * `scripts/check-uncited-spec-ledger.ts` (AC-BLS3B-12). In-memory strings only: no subprocess, no corpus.
  */

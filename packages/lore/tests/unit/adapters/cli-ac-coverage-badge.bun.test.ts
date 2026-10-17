@@ -24,7 +24,7 @@
  *   REGRESSION — zero-evidence fact (`pass: 0, fail: 0`) still renders bare `"·"`,
  *              matching pre-SPEC-039 behaviour byte-for-byte
  *
- * @layer unit-coverage-badge-render (coverageBadge glyph rendering; owners are the core acceptance and service workflow tests)
+ * @layer unit-coverage-badge-render AC-WH-1 AC-VRF-8 (coverageBadge glyph rendering; owners are the core acceptance and service workflow tests)
  * @spec_ref AC-VRF-8
  *
  * SPEC-061 §Scope D5 addition (task-t2-close-spec-061-deferred-gaps): a separate

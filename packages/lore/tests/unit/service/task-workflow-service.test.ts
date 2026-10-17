@@ -1,4 +1,4 @@
-// @layer service-task-workflow
+// @layer service-task-workflow AC-ACODE-3 AC-S3-5
 /**
  * Six-dimension tests for TaskWorkflowService (SPEC-025).
  * Uses InMemoryStore — no file I/O, no SQLite.

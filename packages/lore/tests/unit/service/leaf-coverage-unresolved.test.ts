@@ -1,5 +1,5 @@
 // @reads packages/lore/tests/fixtures/site-census-fidelity/**
-// @layer service-leaf-coverage
+// @layer service-leaf-coverage AC-BLS2-15
 /**
  * computeLeafCoverage treats a census with unresolved imports as INCOMPLETE (issue #94):
  * never a smaller site list presented as complete.

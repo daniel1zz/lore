@@ -1,5 +1,5 @@
 // @reads assets/context/**
-// @layer unit-refresh-flow (in-process refresh service; owner drives the compiled dist/lore)
+// @layer unit-refresh-flow AC-CTX-3 AC-CF-6 (in-process refresh service; owner drives the compiled dist/lore)
 /**
  * @spec_ref AC-CTX-3, AC-CF-6
  *

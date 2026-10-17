@@ -1,4 +1,4 @@
-// @layer service-outline-writer
+// @layer service-outline-writer AC-BLS3-6
 /**
  * Outline writers RETIRED (slice 3a, BR-985) — what survives of SPEC-080 C1's dedicated-writer contract.
  *

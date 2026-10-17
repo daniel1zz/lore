@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 /**
- * @layer dashboard-component (NewDocModal; the AC's first oracle is the assets distribution suite)
+ * @layer dashboard-component AC-BLS3B-9 (NewDocModal; the AC's first oracle is the assets distribution suite)
  * NewDocModal spec-parent contract (AC-BLS3B-9, BR-1 / BR-2 / AS-18).
  *
  * A spec takes no parent — it relates to the trees by citing rules. The new

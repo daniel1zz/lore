@@ -1,4 +1,4 @@
-// @layer service-task-done-membership
+// @layer service-task-done-membership AC-CLOSURE-3
 /**
  * task-workflow-plan-membership.test.ts —
  * task-plan-membership-is-extra-plan-id-but-the-last-task.

@@ -1,4 +1,4 @@
-// @layer service-verification-projection
+// @layer service-verification-projection AC-VS-6
 /**
  * Six-dimension tests for VerificationProjectionService (SPEC-075 §Module Boundary
  * D1/D3/D9). Uses InMemoryStore + CorpusService (fixture builder only) — no file I/O,

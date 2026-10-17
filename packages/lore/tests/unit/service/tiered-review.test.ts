@@ -1,4 +1,4 @@
-// @layer service-review-approve
+// @layer service-review-approve AC-TIER-5
 /**
  * Tests for SPEC-103 tiered review — M1 ledger fast-track, M2 judgment-required
  * promote (worst-decision-wins anti-lottery + I1 provenance collision), M3

@@ -1,7 +1,7 @@
 // @reads scripts/test-isolation-env.ts
 // @reads scripts/test-isolation-setup.ts
 /**
- * @layer integration-test-sandbox-preload (bun preload marker in spawned children; owner is the vitest sandbox guard test)
+ * @layer integration-test-sandbox-preload AC-TG-2 (bun preload marker in spawned children; owner is the vitest sandbox guard test)
  * AC-TG-2 (one-runner half, task-skill-implement-tg-23): the runner is armed AND so are its
  * children. Under the Bun runtime (`bunx --bun vitest`) a child spawned WITHOUT an explicit `env`
  * inherits the STARTUP environment, not runtime `process.env` mutations, so the marker is armed
