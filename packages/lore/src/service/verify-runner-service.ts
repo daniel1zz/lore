@@ -189,7 +189,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { execFileSync } from "node:child_process";
 import { CAPTURE_TAIL_CHARS, err, findMissingOracleFiles, ok, RUNNER_UNATTESTED_CAPTURE_SOURCE } from "@lore/core";
-import type { FileExistsPort, StateStamp } from "@lore/core";
+import type { AuditEntry, FileExistsPort, StateStamp } from "@lore/core";
 import type {
   Result,
   LoreError,
@@ -228,6 +228,7 @@ import {
   type VerifyExecutionResult,
 } from "./verify-spawn.js";
 import type { VerifiedEvidenceInput } from "./task-workflow-service.js";
+import { buildStateBindingSkipAuditEntry } from "./state-binding-skip.js";
 import { materializeFalsifierDependencies } from "./falsifier-dep-materialization.js";
 import { FALSIFIER_EXIT_CODE_MAX, FALSIFIER_EXIT_CODE_MIN, isValidFalsifierExitCode } from "./ac-write-chokepoint.js";
 
@@ -315,6 +316,29 @@ export function decideStampOutcome(pre: GitStateProbe | undefined, post: GitStat
     head_sha: post.head_sha,
     worktree_dirty: false,
   };
+}
+
+// ─── State-binding occupancy port (SPEC-143 AC-CT-8) ───────────────────────
+
+/**
+ * What the occupancy reader reports. Structurally identical to the adapter's `OccupancyProbe`
+ * (`adapters/oracle-occupancy.ts`); declared here so this service imports no adapter.
+ */
+export type StateBindingOccupancy =
+  | { readonly kind: "free" }
+  | { readonly kind: "held"; readonly holder_pid: number; readonly lock_path: string }
+  | { readonly kind: "unmeasured"; readonly reason: string };
+
+/**
+ * Optional port that arms the state-binding SKIP path. Omitted -> the check is ABSENT (the
+ * control the AC-CT-8 exit-code comparison runs against). Wired in `app.ts` to the read-only
+ * `probeOccupancy` reader and `store.appendAuditEntry`.
+ */
+export interface StateBindingOccupancyPort {
+  /** Reads whether a peer holds the checkout-level oracle lock, for the checkout containing `executionRoot`. */
+  readonly probe: (executionRoot: string) => StateBindingOccupancy;
+  /** Appends the one audit row a skipped check writes. */
+  readonly recordSkip: (entry: AuditEntry) => Promise<Result<void, LoreError>>;
 }
 
 // ─── Pinned refusal literals (declared-scope contract) ─────────────────────
@@ -858,6 +882,11 @@ export class VerifyRunnerService {
     private readonly checkBinaryFreshness?: () => BinaryFreshnessVerdict,
     /** Existence probe behind the AC-TG-6 missing-oracle-file check; real `node:fs` by default, a fake in unit tests. */
     private readonly fileExists: FileExistsPort = existsSync,
+    /**
+     * SPEC-143 AC-CT-8 — when a peer holds the oracle lock the stamp step marks SKIPPED and
+     * continues (never blocks, never changes the verify result). Omitted -> no occupancy check.
+     */
+    private readonly stateBindingOccupancy?: StateBindingOccupancyPort,
   ) {}
 
   /**
@@ -1173,8 +1202,16 @@ export class VerifyRunnerService {
       });
       // SPEC-143 AC-CT-5 — the PRE read of the stamp, taken immediately before the command
       // can run; the POST read is `gitState` below, immediately after it ran.
+      // SPEC-143 AC-CT-8 — occupancy is read BEFORE the oracle runs: a peer holding the checkout-level
+      // lock means no verdict about the state can be certified, and the step must not wait for it.
+      const occupancy = this.stateBindingOccupancy?.probe(resolvedExecutionRoot.root);
+      if (occupancy?.kind === "unmeasured") {
+        warnings.push(
+          `AC "${criterion.id}": oracle-lock occupancy could not be read (${occupancy.reason}) — the state-binding check ran as if the lock were free`,
+        );
+      }
       const preRunGitState = probeGitState(resolvedExecutionRoot.root);
-      const execResult: Awaited<ReturnType<typeof this.executor>> =
+      const execResult: Result<VerifyExecutionResult, LoreError> =
         missingOracleFiles.length > 0
           ? ok({
               exitCode: MISSING_ORACLE_FILE_EXIT_CODE,
@@ -1317,7 +1354,10 @@ export class VerifyRunnerService {
       }
 
       const postRunGitState = probeGitState(resolvedExecutionRoot.root);
-      const stampOutcome = decideStampOutcome(preRunGitState, postRunGitState);
+      // reason: a SKIPPED check writes NO stamp and NO head_sha (the row stays `unbound` until re-recorded),
+      // so the git reads are discarded when a peer held the lock — spec AC-CT-8; see StateBindingOccupancyPort.
+      const stampOutcome: StampOutcome =
+        occupancy?.kind === "held" ? {} : decideStampOutcome(preRunGitState, postRunGitState);
       const recordResult = await this.recordVerifiedEvidence(
         task.id,
         {
@@ -1370,6 +1410,24 @@ export class VerifyRunnerService {
         opts.nowIso,
       );
       if (!recordResult.ok) return recordResult;
+
+      if (occupancy?.kind === "held" && this.stateBindingOccupancy !== undefined) {
+        const skipResult = await this.stateBindingOccupancy.recordSkip(
+          buildStateBindingSkipAuditEntry({
+            task_id: task.id,
+            ac_id: criterion.id,
+            holder_pid: occupancy.holder_pid,
+            lock_path: occupancy.lock_path,
+            nowIso: opts.nowIso,
+            actor: opts.by,
+          }),
+        );
+        if (!skipResult.ok) return skipResult;
+        warnings.push(
+          `AC "${criterion.id}": state-binding check SKIPPED — oracle lock held by pid ${occupancy.holder_pid}; ` +
+            "the evidence row is unbound until `lore verify` is re-run with the lock free",
+        );
+      }
 
       completedAcIds.push(criterion.id);
       results.push({
