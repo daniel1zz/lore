@@ -1,3 +1,4 @@
+// @layer mcp-adapter (in-process lore_evidence_add tool; owner drives the CLI write surface)
 /**
  * `lore_evidence_add` takes no caller-named recorder (BR-1055).
  *

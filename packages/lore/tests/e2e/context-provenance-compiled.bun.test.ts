@@ -105,6 +105,7 @@ import { createHash } from "node:crypto";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import {
+  BOOTSTRAP_FRAMING_LINE,
   BOOTSTRAP_RESUME_CLOSURE_KEYS,
   RESUME_SCOPE_CLOSURE,
   SOURCE_CATEGORY_TOKENS,
@@ -454,4 +455,62 @@ describe("AC-CP-7: embedded manifest + lore setup distribution parity for both T
     // RE-BASELINE (task-skill-implement-move-the-six-checkpoint-backed-rules): the ACCOUNT bullet moved to the lore-plan resume mode; the feed rules file still ships the resume-ticket rule.
     expect(readFileSync(feedRules, "utf8")).toMatch(/NEVER[^\n]*handoff/);
   }, 120_000);
+});
+
+// ─── "framing line" (AC-CP-10) — moved here from governance-bootstrap-framing-compiled.bun.test.ts ──
+// (TG-11D2: same compiled-binary entry point as this owner file; the owner's `-t 'framing line'`
+// oracle matched no test before the move.) `bootstrap-framing` is bootstrap-stage: it needs no
+// corpus, so every call runs with the repo root as cwd, like the original suite.
+
+describe("AC-CP-10: compiled dist/lore governance bootstrap-framing — framing line (D2)", () => {
+  it("HAPPY: exits 0 with stdout strictly identical to the exported BOOTSTRAP_FRAMING_LINE constant", () => {
+    const result = runLore(["governance", "bootstrap-framing"], REPO_ROOT);
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toBe(BOOTSTRAP_FRAMING_LINE);
+  });
+
+  it("BOUNDARY: stdout carries ZERO trailing newline (unlike every file-backed topic's asset)", () => {
+    const result = runLore(["governance", "bootstrap-framing"], REPO_ROOT);
+
+    expect(result.stdout.length).toBeGreaterThan(0);
+    expect(BOOTSTRAP_FRAMING_LINE.endsWith("\n")).toBe(false);
+    expect(result.stdout.endsWith("\n")).toBe(false);
+  });
+
+  // RE-BASELINE (SPEC-083 amended by spec-context-fragments-config-driven-layered-rule-injection D9):
+  // the no-topic default (`corpus-workflow`) is retired. Corrected, not weakened: the byte-parity
+  // claim became a refusal claim (exit 2, stderr names `lore fragments`, zero prose on stdout) and
+  // the `bootstrap-framing` topic is asserted unaffected by the retirement.
+  it("REGRESSION: bare `governance` (no topic) is the retired default — exit 2, stderr names `lore fragments`, stdout empty; bootstrap-framing still serves", () => {
+    const result = runLore(["governance"], REPO_ROOT);
+
+    expect(result.exitCode).toBe(2);
+    expect(result.stderr).toContain("lore fragments");
+    expect(result.stdout).toBe("");
+    expect(result.stdout).not.toContain("<corpus-workflow>");
+    expect(runLore(["governance", "bootstrap-framing"], REPO_ROOT).exitCode).toBe(0);
+  });
+
+  it("ERROR: `governance bootstrap-framing seat-briefing` (two topic tokens) exits 2, message names both topics", () => {
+    const result = runLore(["governance", "bootstrap-framing", "seat-briefing"], REPO_ROOT);
+
+    expect(result.exitCode).toBe(2);
+    expect(result.stderr).toContain("bootstrap-framing");
+    expect(result.stderr).toContain("seat-briefing");
+  });
+
+  it("NEGATIVE: an unknown flag alongside bootstrap-framing is still rejected exit 2 (strict-flag seam applies regardless of topic)", () => {
+    const result = runLore(["governance", "bootstrap-framing", "--bogus-flag"], REPO_ROOT);
+    expect(result.exitCode).toBe(2);
+  });
+
+  it("STATE: bootstrap-framing output and seat-briefing output are DIFFERENT non-empty content (the topic actually switches source, not a no-op)", () => {
+    const framingResult = runLore(["governance", "bootstrap-framing"], REPO_ROOT);
+    const otherResult = runLore(["governance", "seat-briefing"], REPO_ROOT);
+
+    expect(framingResult.stdout.length).toBeGreaterThan(0);
+    expect(otherResult.stdout.length).toBeGreaterThan(0);
+    expect(framingResult.stdout).not.toBe(otherResult.stdout);
+  });
 });
