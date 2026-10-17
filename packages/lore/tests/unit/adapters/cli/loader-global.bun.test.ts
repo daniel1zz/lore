@@ -107,7 +107,7 @@ describe("loadLoreApp — global config HAPPY", () => {
     process.chdir(projectDir);
     const { app, dbPath, defaults } = loadLoreApp();
     try {
-      expect(dbPath).toEndWith("/.lore/lore.db");
+      expect(dbPath.endsWith("/.lore/lore.db")).toBe(true);
       expect(defaults.editor).toBe("vim");
       expect(app).toBeDefined();
     } finally {
@@ -324,7 +324,7 @@ describe("loadLoreApp — REGRESSION (AC-GC-6)", () => {
       expect(result.app).toBeDefined();
       expect(result.dbPath).toBeDefined();
       expect(result.defaults).toBeDefined();
-      expect(result.dbPath).toEndWith("/.lore/lore.db");
+      expect(result.dbPath.endsWith("/.lore/lore.db")).toBe(true);
       expect(existsSync(result.dbPath)).toBe(true);
     } finally {
       result.app.close();

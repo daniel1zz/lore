@@ -77,7 +77,7 @@ describe("loadLoreApp — HAPPY", () => {
 
     try {
       // Check path ends with /.lore/lore.db (normalize macOS /var → /private/var symlink)
-      expect(dbPath).toEndWith("/.lore/lore.db");
+      expect(dbPath.endsWith("/.lore/lore.db")).toBe(true);
       expect(app).toBeDefined();
       expect(app.corpusService).toBeDefined();
 
@@ -97,7 +97,7 @@ describe("loadLoreApp — HAPPY", () => {
     process.chdir(projectDir);
     const { app, dbPath } = loadLoreApp();
     try {
-      expect(dbPath).toEndWith("/.lore/lore.db");
+      expect(dbPath.endsWith("/.lore/lore.db")).toBe(true);
       expect(existsSync(dbPath)).toBe(true);
     } finally {
       app.close();
