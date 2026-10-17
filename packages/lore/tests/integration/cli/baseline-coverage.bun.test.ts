@@ -134,10 +134,14 @@ describe("lore baseline coverage (e2e)", () => {
     expect(r.stdout).toContain(sites[0]!.key);
   });
 
-  it("mapping every census site (first to the leaf's rule, rest non-business) -> coverage exits 0", () => {
+  it("mapping every census site (first to the leaf's rule, rest non-business) -> coverage exits 0", async () => {
     mustRun(["baseline", "map", leaf, "--site", sites[0]!.key, "--rule", "BR-1"], repo);
     for (const s of sites.slice(1)) {
       mustRun(["baseline", "map", leaf, "--site", s.key, "--non-business", "plumbing, not business behaviour"], repo);
+      // reason: each mustRun blocks the worker's event loop; under load this loop exceeds 60 s, and vitest's
+      // worker->main RPC ("onTaskUpdate") times out after 60 s of an unserviced loop (unhandled error, exit 1).
+      // Yielding once per iteration lets the reply be processed (TG-23).
+      await new Promise<void>((resolve) => setImmediate(resolve));
     }
     const r = runLore(["baseline", "coverage", leaf], repo);
     expect(r.stderr + r.stdout).not.toContain("INCOMPLETE");
