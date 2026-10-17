@@ -59,7 +59,7 @@ const ROOT_ENV = "LORE_CAPTURE_SOURCE_BUCKETS_REPO_ROOT";
 const TIMEOUT_MS = 60_000;
 
 const CAPTURE_CLASSIFIER_FILE = "packages/core/src/task-workflow.ts";
-const STAMP_CLASSIFIER_FILE = "packages/lore/src/service/gate-predicates.ts";
+const STAMP_CLASSIFIER_FILE = "packages/core/src/stamp-binding.ts";
 
 /** A minimal classifier file for the capture axis: vocabulary + `classifyCaptureSource` with one site. */
 const CAPTURE_CLASSIFIER_STUB = `
@@ -404,15 +404,12 @@ export function readStampVerdict(value: string): StampVerdict { return value ===
 
 /** The real tree's sites, pinned WITHOUT line numbers so an unrelated edit above a site does not redden this. */
 const PINNED_REAL_SITES: readonly string[] = [
-  "allowlisted|stamp_verdict|raw-field-read|packages/core/src/stamp-binding.ts|tallyStampReadings",
   "allowlisted|stamp_verdict|raw-field-read|packages/lore/src/service/state-binding-service.ts|reportImpact>(anonymous)",
   "classifier-file|capture_source|case-literal|packages/core/src/task-workflow.ts|classifyCaptureSource",
   "classifier-file|capture_source|literal-comparison|packages/core/src/task-workflow.ts|rejectSelfLabelledRunnerUnattested",
   "classifier-file|capture_source|raw-field-read|packages/core/src/task-workflow.ts|resolveWrittenCaptureSource",
-  "classifier-file|stamp_verdict|literal-comparison|packages/lore/src/service/gate-predicates.ts|stampVerdictDistribution",
-  "classifier-file|stamp_verdict|raw-field-read|packages/lore/src/service/gate-predicates.ts|collectStampCurrencies>(anonymous)",
-  "classifier-file|stamp_verdict|raw-field-read|packages/lore/src/service/gate-predicates.ts|readStampVerdict",
-  "classifier-file|stamp_verdict|raw-field-read|packages/lore/src/service/gate-predicates.ts|stampCurrency",
+  "classifier-file|stamp_verdict|raw-field-read|packages/core/src/stamp-binding.ts|readStampVerdict",
+  "classifier-file|stamp_verdict|raw-field-read|packages/core/src/stamp-binding.ts|stampCurrencyOf",
   "classifier-input|capture_source|raw-field-read|packages/lore/src/adapters/cli/assess-render.ts|computeCaptureSourceDistribution",
   "classifier-input|capture_source|raw-field-read|packages/lore/src/adapters/cli/commands/status.ts|collectCaptureSourceMembers>(anonymous)",
   "exempt-by-shape|capture_source|literal-comparison|packages/lore/src/service/task-workflow-service.ts|rejectMissingPassOutputTail",
@@ -427,7 +424,8 @@ const PINNED_REAL_SITES: readonly string[] = [
   "exempt-by-shape|stamp_verdict|raw-field-read|packages/lore/src/service/task-workflow-service.ts|evaluateDoneFloors>(anonymous)",
   "sanctioned-consumer|capture_source|case-literal|packages/lore/src/adapters/cli/assess-render.ts|computeCaptureSourceDistribution",
   "sanctioned-consumer|capture_source|case-literal|packages/lore/src/adapters/cli/commands/status.ts|collectCaptureSourceMembers>(anonymous)",
-  "sanctioned-consumer|stamp_verdict|literal-comparison|packages/core/src/stamp-binding.ts|tallyStampReadings",
+  "sanctioned-consumer|stamp_verdict|case-literal|packages/core/src/stamp-binding.ts|tallyStampReadings",
+  "sanctioned-consumer|stamp_verdict|literal-comparison|packages/lore/src/service/gate-predicates.ts|stampVerdictDistribution",
 ];
 
 describe("AC-CT-10 the real tree", () => {
@@ -462,11 +460,70 @@ describe("AC-CT-10 the real tree", () => {
     // the capture_source axis needs NO allowlist entry: only the stamp axis has two
     const { ALLOWLIST } = (await import(SCAN_SCRIPT)) as typeof import("../../../../../scripts/check-capture-source-buckets.js");
     expect(ALLOWLIST.filter((entry) => entry.axis === "capture_source")).toEqual([]);
+    // CT-6b: the allowlist has exactly ONE row — `reportImpact`'s what-if count. The tally lives beside
+    // `readStampVerdict` in @lore/core now and is enforced by the scan, not waived.
+    expect(ALLOWLIST.map((entry) => `${entry.axis}|${entry.file}`)).toEqual([
+      "stamp_verdict|packages/lore/src/service/state-binding-service.ts",
+    ]);
+    expect(ALLOWLIST[0]?.reason).toContain("reportImpact");
     for (const entry of ALLOWLIST) {
       expect(entry.reason.length).toBeGreaterThan(40);
       expect(report.sites.some((s) => s.disposition === "allowlisted" && s.file === entry.file)).toBe(true);
     }
   }, TIMEOUT_MS);
+});
+
+describe("AC-CT-10 / CT-6b: a consumer living in the classifier FILE is still enforced", () => {
+  it("AC-CT-10: a raw `switch (reading.stamp)` tally beside readStampVerdict in the stamp classifier file exits EXACTLY 1, naming the function", () => {
+    const run = runScan(
+      cleanTree({
+        [STAMP_CLASSIFIER_FILE]: `${STAMP_CLASSIFIER_STUB}
+export function tallyByStamp(readings: readonly { stamp: string }[]): number {
+  let stamped = 0;
+  let unbound = 0;
+  for (const reading of readings) {
+    switch (reading.stamp) {
+      case "stamped":
+        stamped += 1;
+        break;
+      case "unbound":
+        unbound += 1;
+        break;
+    }
+  }
+  return stamped + unbound;
+}
+`,
+      }),
+    );
+    expect(run.exitCode).toBe(1);
+    expect(run.combined).toContain("tallyByStamp");
+  });
+
+  it("AC-CT-10: a tally beside readStampVerdict that switches over readStampVerdict's RETURN exits 0", () => {
+    const run = runScan(
+      cleanTree({
+        [STAMP_CLASSIFIER_FILE]: `${STAMP_CLASSIFIER_STUB}
+export function tallyByVerdict(readings: readonly { stamp: string }[]): number {
+  let bound = 0;
+  let other = 0;
+  for (const reading of readings) {
+    const verdict = readStampVerdict(reading);
+    switch (verdict) {
+      case "bound":
+        bound += 1;
+        break;
+      default:
+        other += 1;
+    }
+  }
+  return bound + other;
+}
+`,
+      }),
+    );
+    expect(run.exitCode).toBe(0);
+  });
 });
 
 describe("AC-CT-10 wiring", () => {

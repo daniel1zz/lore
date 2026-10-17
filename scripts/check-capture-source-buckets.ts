@@ -9,7 +9,7 @@
  * runner-unattested) and the stamp verdict (bound / stale / radius_unmeasured / unbound /
  * legacy_unbound). Each axis has ONE exported classifier: `classifyCaptureSource`
  * (`packages/core/src/task-workflow.ts`) and `readStampVerdict`
- * (`packages/lore/src/service/gate-predicates.ts`). `lore assess` and `lore status` both route
+ * (`packages/core/src/stamp-binding.ts`). `lore assess` and `lore status` both route
  * through them. This scan refuses the NEXT private re-derivation: the day somebody adds a third
  * surface and writes `if (e.capture_source === "runner") r++ else s++` there, the two
  * distributions can disagree with no test red.
@@ -138,6 +138,13 @@ interface AxisSpec {
   readonly axis: BucketAxis;
   /** The one file allowed to derive the bucket. */
   readonly classifierFile: string;
+  /**
+   * `"file"` (default): every site in {@link classifierFile} is the classifier's own. `"functions"`: only sites
+   * inside a function named in {@link classifierNames} are — the file ALSO hosts consumers (the evidence-panel
+   * tally lives beside `readStampVerdict` in `@lore/core`), and a consumer in that file must be enforced, not
+   * waived by its address.
+   */
+  readonly classifierScope?: "file" | "functions";
   /** The classifier declared IN {@link classifierFile}; the scan exits 2 if it is absent there. */
   readonly declaredClassifier: string;
   /** Functions whose RETURN value is a bucket (includes {@link declaredClassifier}). */
@@ -165,15 +172,17 @@ const AXES: readonly AxisSpec[] = [
   },
   {
     axis: "stamp_verdict",
-    classifierFile: "packages/lore/src/service/gate-predicates.ts",
+    classifierFile: "packages/core/src/stamp-binding.ts",
+    classifierScope: "functions",
     declaredClassifier: "readStampVerdict",
-    // reason: `readStampedRadius` (packages/core/src/stamp-binding.ts) is the shared radius -> verdict
-    // step `readStampVerdict` itself delegates to; its return is a StampVerdict member too.
-    classifierNames: ["readStampVerdict", "readStampedRadius"],
+    // reason: `readStampedRadius` is the shared radius -> verdict step `readStampVerdict` itself delegates
+    // to; its return is a StampVerdict member too. `stampCurrencyOf` only pairs a reading with its radius
+    // (it decides no bucket) and is the one place a StampAxisReading becomes the classifier's input.
+    classifierNames: ["readStampVerdict", "readStampedRadius", "stampCurrencyOf"],
     rawFields: ["stamp", "state_stamp"],
     valueIdentifiers: [],
     relevance: /stamp|verdict|radius|bucket/i,
-    vocabulary: { file: "packages/lore/src/service/gate-predicates.ts", kind: "type-union", name: "StampVerdict" },
+    vocabulary: { file: "packages/core/src/stamp-binding.ts", kind: "type-union", name: "StampVerdict" },
   },
 ];
 
@@ -182,15 +191,6 @@ const AXES: readonly AxisSpec[] = [
  * `task-workflow-service.ts`) needs NONE: it is exempt by shape and stays exempt if it moves.
  */
 export const ALLOWLIST: readonly AllowlistEntry[] = [
-  {
-    axis: "stamp_verdict",
-    file: "packages/core/src/stamp-binding.ts",
-    reason:
-      "lives in @lore/core, which cannot import `readStampVerdict` (packages/lore). Its `tallyStampReadings` " +
-      "`switch (reading.stamp)` is the per-stamp-class tally the evidence panel feeds on; it derives the radius " +
-      "sub-verdict through `readStampedRadius` (a classifier named in this scan) and the stamp class from the " +
-      "already-classified `classifyStampAxis` reading, never from a raw row field.",
-  },
   {
     axis: "stamp_verdict",
     file: "packages/lore/src/service/state-binding-service.ts",
@@ -524,7 +524,12 @@ function scanFile(
     sanction: "classifier-input" | "sanctioned-consumer" | undefined,
   ): void => {
     let disposition: SiteDisposition;
-    if (file === axis.spec.classifierFile) disposition = "classifier-file";
+    if (
+      file === axis.spec.classifierFile &&
+      (axis.spec.classifierScope !== "functions" || axis.spec.classifierNames.includes(ctx.name))
+    ) {
+      disposition = "classifier-file";
+    }
     else if (sanction !== undefined) disposition = sanction;
     else if (ctx.targets < 2) disposition = "exempt-by-shape";
     else if (allowlisted(allowlist, axis.spec.axis, file)) disposition = "allowlisted";
