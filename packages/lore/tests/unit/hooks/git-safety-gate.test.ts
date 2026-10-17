@@ -1,3 +1,4 @@
+// @spawns assets/hooks/pre-bash-git-safety-gate.mjs
 /**
  * git-safety-gate.test.ts — the state-aware (Design B) destructive-git guard.
  *

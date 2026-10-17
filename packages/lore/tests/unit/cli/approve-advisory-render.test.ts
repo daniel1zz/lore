@@ -1,3 +1,4 @@
+// @spawns packages/lore/src/index.ts
 /**
  * `lore approve <plan>` — `prd_sync_advisories` CHANNEL render (task
  * task-t7-lore-approve-renders-the-prd-sync-advisory-to-stderr,

@@ -1,3 +1,5 @@
+// @spawns packages/lore/src/index.ts
+// @reads packages/lore/src/service/**
 /**
  * RED-phase TDD tests for AC-WIRE-1 and AC-WIRE-2 of
  * `spec-claude-md-governance-content-dimension-checks-wire-the` (the paired

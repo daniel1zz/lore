@@ -1,3 +1,4 @@
+// @reads lore.tree.yaml
 /**
  * Regression oracles for the ARMED repo-root `lore.tree.yaml` blueprint (SPEC-032 T2).
  *

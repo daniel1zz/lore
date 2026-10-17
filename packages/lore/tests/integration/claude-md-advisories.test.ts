@@ -1,3 +1,4 @@
+// @spawns packages/lore/src/index.ts
 /**
  * RED-phase tests for AC-ADV-1 of
  * `spec-claude-md-governance-content-dimension-checks-wire-the` (the two

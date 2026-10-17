@@ -1,3 +1,5 @@
+// @reads packages/core/src/**
+// @reads packages/lore/src/**
 /**
  * Unit tests for `createWithSupersedes`/`renderSupersedeRepairMessage`/
  * `SUPERSEDE_CREATE_ELIGIBLE_TYPES` (`flows/supersede-flow.ts`) — the SPEC-043 D11

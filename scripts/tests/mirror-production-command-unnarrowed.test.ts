@@ -1,3 +1,4 @@
+// @reads package.json
 /**
  * AC-MOS-5 — `spec-the-mirror-oracles-two-command-surfaces-are-o-corpus-by`,
  * `task-a-real-argv-parser-for-export-spec-mirror-unknown-flags`.

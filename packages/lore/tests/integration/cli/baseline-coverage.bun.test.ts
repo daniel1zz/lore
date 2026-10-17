@@ -1,3 +1,4 @@
+// @spawns packages/lore/src/index.ts
 /**
  * End-to-end test of the census CLI verbs `lore baseline sites | map | coverage`
  * (Baseline slice 2a, AC-BLS2-5), driven through the real CLI against a throwaway corpus.

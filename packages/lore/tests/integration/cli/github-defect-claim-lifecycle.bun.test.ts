@@ -1,3 +1,4 @@
+// @spawns dist/lore
 /**
  * @spec_ref spec-a-github-filed-defect-must-be-claimable-one-ingest-seam AC-GR-9
  * @spec_ref spec-a-github-filed-defect-must-be-claimable-one-ingest-seam AC-GR-3

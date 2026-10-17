@@ -1,3 +1,4 @@
+// @reads packages/lore/src/store/**
 /** @spec_ref AC-STORE-001 */
 /**
  * Tests for SQLiteStore — the SQLite-specific cases only (bun:sqlite, `bun test`).

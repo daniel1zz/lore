@@ -1,3 +1,4 @@
+// @spawns packages/lore/src/index.ts
 /**
  * Test-title anchors — `lore anchor add <doc> <test-file>#"describe title"` end to end
  * through the real CLI (task-gh-1343388703-178, lore issue #178).

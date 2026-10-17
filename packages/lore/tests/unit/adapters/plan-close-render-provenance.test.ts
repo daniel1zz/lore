@@ -1,3 +1,4 @@
+// @spawns packages/lore/src/index.ts
 /**
  * AC-GV-6 (spec-governance-visibility-an-armed-gate-that-vacuously-passes §B1.1,
  * task-assert-the-plan-close-vacuity-discriminator-on-the-render) — the plan-close

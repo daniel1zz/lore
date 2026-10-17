@@ -1,3 +1,5 @@
+// @spawns assets/hooks/subagent-context.mjs
+// @spawns dist/lore
 /**
  * RED (TDD role) — compiled-binary e2e oracles for the context-fragments
  * feature (spec-context-fragments-config-driven-layered-rule-injection):

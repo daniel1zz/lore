@@ -1,3 +1,4 @@
+// @spawns dist/lore
 /**
  * `lore create task --anchor` / `lore anchor add` / `lore ready --json` — the
  * author→trip end-to-end oracle for

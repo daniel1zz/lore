@@ -1,3 +1,4 @@
+// @spawns packages/lore/src/index.ts
 /**
  * Integration tests for the retired `hook:session-start` outlet (spec-one-upgrade-reminder-at-session-
  * start-covers-the-global, AC-UR-3; BR-912 / BR-907 modified). Real CLI via subprocess in a throwaway

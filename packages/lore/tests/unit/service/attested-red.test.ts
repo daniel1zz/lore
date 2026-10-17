@@ -1,3 +1,4 @@
+// @spawns packages/lore/src/service/verify-runner-service.ts
 /**
  * Attested-red runner oracle for AC-FR-2 / AC-FR-3 / AC-FR-11
  * (spec-falsifiability-reachability-a-feedable-checkpoint-an §D2/D3/D4,

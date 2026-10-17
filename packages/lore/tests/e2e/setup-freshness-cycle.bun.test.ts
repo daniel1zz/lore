@@ -1,3 +1,4 @@
+// @spawns dist/lore
 /**
  * @spec_ref SPEC-076 §C3 (five-state classification, `--check` CLI contract,
  *   digest-equality short-circuit), §C7 (`lore setup --yes` IS the converge

@@ -1,3 +1,7 @@
+// @spawns packages/lore/src/index.ts
+// @reads assets/**
+// @reads packages/lore/package.json
+// @reads packages/lore/src/generated/assets-manifest.ts
 /**
  * End-to-end test that `lore setup --project` seeds baseline adoption (Baseline slice 3a, BL-8, AC-BLS3-7), driven
  * through the real CLI in a throwaway git repo.

@@ -1,3 +1,4 @@
+// @spawns packages/lore/src/index.ts
 /**
  * RED suite for slice 3a BL-16 (outline retirement), driven through the real CLI against a throwaway
  * corpus (`mkdtemp` + `lore init`, cwd inside it; the repo's own `.lore/` is never touched).

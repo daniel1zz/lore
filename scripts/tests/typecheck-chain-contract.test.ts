@@ -1,3 +1,4 @@
+// @reads package.json
 /** @spec_ref AC-TC-1 */
 /**
  * Contract test proving `typecheck:dashboard-e2e` is LIVE-WIRED into the root

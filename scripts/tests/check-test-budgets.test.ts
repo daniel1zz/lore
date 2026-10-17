@@ -1,3 +1,5 @@
+// @reads packages/**
+// @reads scripts/test-budget-ledger.json
 /**
  * Unit suite for `scripts/check-test-budgets.ts`'s pure `scanFile` algorithm
  * (`spec-a-test-case-s-timeout-budget-must-be-declared-when-its`, task

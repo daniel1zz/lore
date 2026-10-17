@@ -1,3 +1,5 @@
+// @reads packages/lore/src/flows/setup-project-flow.ts
+// @reads packages/lore/src/service/context-projection.ts
 /**
  * RED pin for AC-CTX-4 (spec-context-verb-family-two-zone-claude-md-anatomy-lore):
  * "Splice SSOT holds: setup-project-flow imports spliceManagedSections from

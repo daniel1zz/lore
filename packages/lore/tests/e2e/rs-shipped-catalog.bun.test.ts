@@ -1,3 +1,4 @@
+// @spawns dist/lore
 /**
  * Compiled-binary e2e for AC-RS-13 (spec-rule-store-git-tracked-fragment-selection-on-demand-skill):
  * the shipped catalog (promoted lore-tool fragments + trimmed agent-rules) passes `lore fragments check`

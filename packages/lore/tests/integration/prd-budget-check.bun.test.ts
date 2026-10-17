@@ -1,3 +1,4 @@
+// @spawns packages/lore/src/index.ts
 /**
  * RED-phase TDD tests for `lore status --check-prd-budget` (SPEC-080 C3, paired
  * implementation task T4). The flag does NOT exist yet on `lore status` — no source

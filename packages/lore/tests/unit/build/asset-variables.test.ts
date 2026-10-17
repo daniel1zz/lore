@@ -1,3 +1,8 @@
+// @spawns scripts/embed-assets-manifest.mjs
+// @reads assets/**
+// @reads package.json
+// @reads packages/lore/package.json
+// @reads packages/lore/src/**
 /**
  * @spec_ref spec-lore-owned-agent-context-is-generated-from-templates-and AC-CV-5 (D6, BR-1097)
  *

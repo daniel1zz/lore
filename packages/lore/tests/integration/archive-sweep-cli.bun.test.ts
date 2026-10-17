@@ -1,3 +1,4 @@
+// @spawns packages/lore/src/index.ts
 /**
  * @spec_ref spec-lifecycle-archival-plan-close-cascade-deterministic
  *   §Design Decisions D3, AC-097-3

@@ -1,3 +1,4 @@
+// @spawns packages/lore/src/index.ts
 /**
  * Integration tests for `lore fragments check` refusing a dynamic main-session fragment
  * (spec-one-upgrade-reminder-at-session-start-covers-the-global, AC-UR-4; BR-1066 modified).

@@ -1,3 +1,4 @@
+// @spawns packages/lore/src/index.ts
 /**
  * @spec_ref task-wire-findpiperefusal-into-the-live-lore-evidence-and-mcp
  *   AC-FALS-9 (spec-oracle-tier-falsifiability-a-criterion-never-observed-red

@@ -1,3 +1,4 @@
+// @spawns packages/lore/src/index.ts
 /**
  * AC-BFI-8 — `spec-bootstrap-fixpoint-integrity-binary-provenance-an-anchor`,
  * task-compare-mirror-bodies-against-corpus-content-in-the-spec.

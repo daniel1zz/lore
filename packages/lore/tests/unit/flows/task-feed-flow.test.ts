@@ -1,3 +1,4 @@
+// @reads packages/lore/src/flows/task-feed-flow.ts
 /**
  * CONTRACT NOTE (this file is the authoritative shape `packages/lore/src/flows/
  * task-feed-flow.ts` satisfies — mirrors `phase-feed-flow.test.ts`'s own CONTRACT

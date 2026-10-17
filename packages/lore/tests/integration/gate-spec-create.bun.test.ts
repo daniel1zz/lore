@@ -1,3 +1,5 @@
+// @spawns packages/lore/src/index.ts
+// @spawns scripts/seed-write-spec-rule.ts
 /**
  * @spec_ref IoC vertical-slice tech-spec §4.1/§11 — `lore gate spec-create` (deterministic
  * zone + active feeding)

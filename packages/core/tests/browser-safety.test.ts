@@ -1,3 +1,4 @@
+// @reads packages/core/src/**
 /**
  * AC-062-8 REGRESSION oracle — `@lore/core`'s default barrel (`src/index.ts`)
  * must never transitively import a Node builtin, or `@lore/dashboard`'s Vite

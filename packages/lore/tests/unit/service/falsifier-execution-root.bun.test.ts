@@ -1,3 +1,4 @@
+// @spawns packages/lore/src/index.ts
 /**
  * AC-JV-3 oracle (spec-judgment-surfaces-must-verify-before-they-certify-machine
  * §D5) — `verifyFalsifier` resolves its execution root through SPEC-063's

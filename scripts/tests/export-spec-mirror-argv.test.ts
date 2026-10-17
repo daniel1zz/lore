@@ -1,3 +1,5 @@
+// @spawns packages/lore/src/index.ts
+// @spawns scripts/export-spec-mirror.ts
 /**
  * AC-MOS-3 — `spec-the-mirror-oracles-two-command-surfaces-are-o-corpus-by`,
  * `task-a-real-argv-parser-for-export-spec-mirror-unknown-flags`.

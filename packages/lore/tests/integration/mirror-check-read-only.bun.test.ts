@@ -1,3 +1,4 @@
+// @spawns packages/lore/src/index.ts
 /**
  * AC-MIS-5 (`spec-mirror-identifier-ssot-one-writer-for-export-index-human`, D5) —
  * `runCheck` (`scripts/export-spec-mirror.ts:167-200`) claims in its OWN JSDoc that it

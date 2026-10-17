@@ -1,3 +1,4 @@
+// @reads packages/lore/src/ai/assess-template.ts
 /**
  * AC-JV-2 (spec-judgment-surfaces-must-verify-before-they-certify-machine, D4) — the assess
  * diff excludes the generated `docs/requirements/**` mirror BEFORE truncation: given a diff

@@ -1,3 +1,4 @@
+// @reads packages/lore/src/adapters/http/sync-push.ts
 /** @spec_ref SPEC-102 §Schema, §Design Decisions D3/D4, §Acceptance Criteria AC-TRACE-1/AC-TRACE-7 */
 /**
  * Tests for migration-011 (`trace_events` table + its four indexes) and the

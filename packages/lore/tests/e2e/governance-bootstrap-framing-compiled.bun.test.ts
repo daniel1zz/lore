@@ -1,3 +1,4 @@
+// @spawns dist/lore
 /**
  * Compiled-binary e2e oracle for `lore governance bootstrap-framing`
  * (spec-context-provenance-injected-corpus-global-state-and-a D2, AC-CP-10).

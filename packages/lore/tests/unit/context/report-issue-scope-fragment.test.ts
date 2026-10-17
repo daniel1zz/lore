@@ -1,3 +1,6 @@
+// @spawns packages/lore/src/index.ts
+// @reads .claude/rules/lore-corpus-workflow-close.md
+// @reads assets/context/**
 /**
  * @spec_ref AC-ISCOPE-1 (BR-1153)
  *

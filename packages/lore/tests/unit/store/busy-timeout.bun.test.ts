@@ -1,3 +1,4 @@
+// @reads packages/lore/src/store/turso-store.ts
 /** @spec_ref AC-078-2 */
 /**
  * Tests for SPEC-078 D9's `PRAGMA busy_timeout = 2000` addition in

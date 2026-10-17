@@ -1,3 +1,4 @@
+// @spawns packages/lore/src/index.ts
 /**
  * AC-ST-6 — `lore session trail` lists the caller's own session trail.
  *

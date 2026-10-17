@@ -1,3 +1,4 @@
+// @spawns dist/lore
 /**
  * AC-068-10 — compiled-binary regression oracle for SPEC-068's CJK-aware
  * slugify (SPEC-068 hotfix, 2026-07-23): the original pinyin-pro lazy-load

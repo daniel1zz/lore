@@ -1,3 +1,4 @@
+// @spawns packages/lore/src/index.ts
 /**
  * RED: a claim stored BEFORE runs existed (no `harness_run` key at all) is compared by its
  * stored name until it is released or goes stale; after that the run rules apply. Both the

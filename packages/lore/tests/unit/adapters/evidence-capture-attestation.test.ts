@@ -1,3 +1,4 @@
+// @spawns packages/lore/src/index.ts
 /**
  * PRODUCTION WIRING oracle for SPEC-143 AC-CT-2 — "NO FALSE TRUST LABEL": zero
  * evidence rows may carry `capture_source: "runner"` without an `attestation`

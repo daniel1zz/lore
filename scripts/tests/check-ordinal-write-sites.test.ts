@@ -1,3 +1,4 @@
+// @reads packages/**
 /**
  * Unit + fixture-tree suite for `scripts/check-ordinal-write-sites.mjs`
  * (`task-three-of-five-static-checkers-are-inert-no-exported-main`,

@@ -1,3 +1,7 @@
+// @spawns assets/hooks/stop-turn-review.mjs
+// @spawns assets/hooks/user-prompt-turn-start.mjs
+// @spawns packages/lore/src/index.ts
+// @reads .lore/config.yaml
 /**
  * AC-ST-7: co-change rules (`workflow.turn_end.co_change`) judged by `lore session trail-review`, and relayed by
  * the turn-end hook.

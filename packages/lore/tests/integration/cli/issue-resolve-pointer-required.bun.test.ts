@@ -1,3 +1,5 @@
+// @spawns dist/lore
+// @reads package.json
 /**
  * AC-DC-4 (spec-the-defect-channel-cannot-be-honestly-maintained-an §M3) — the
  * two NON-DEROGATORY terminal states each REQUIRE a pointer that resolves to an

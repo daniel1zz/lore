@@ -1,3 +1,4 @@
+// @spawns assets/hooks/pre-bash-git-safety-gate.mjs
 /**
  * @spec_ref spec-worktree-removal-is-decided-by-who-is-inside-not-by-how (AC-WL-3; D1-D6; BR-1070)
  * @spec_ref spec-one-worktree-removal-test-for-the-guard-lore-done-and-a (AC-WS-4: stub moved to the check JSON shape)

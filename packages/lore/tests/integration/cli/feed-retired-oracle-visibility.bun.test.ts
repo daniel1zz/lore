@@ -1,3 +1,4 @@
+// @spawns dist/lore
 /**
  * AC-DC-11 — the retired-oracle signal reaches the FEED surface (spec-the-defect-
  * channel-cannot-be-honestly-maintained-an §M5), not only `lore ac list` (AC-DC-10,

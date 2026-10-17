@@ -1,3 +1,4 @@
+// @reads packages/lore/src/adapters/cli/evidence-precheck.ts
 /**
  * @spec_ref task-lore-evidence-self-reported-pass-lacks-oracle-file AC-1
  *

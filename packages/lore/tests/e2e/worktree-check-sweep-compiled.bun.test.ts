@@ -1,3 +1,4 @@
+// @spawns dist/lore
 /**
  * worktree-check-sweep-compiled.bun.test.ts — AC-WS-2 (spec-one-worktree-removal-test-for-the-guard-lore-done-and-a;
  * D1, D2, D4, D5; BR-1070, BR-1079).

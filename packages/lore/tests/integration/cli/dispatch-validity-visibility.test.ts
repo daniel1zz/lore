@@ -1,3 +1,4 @@
+// @spawns packages/lore/src/index.ts
 /**
  * Integration tests: a RETRACTED (invalidated) doc must be DISTINGUISHABLE from a live
  * one on every read surface the parent fix deliberately scoped OUT — the DISPATCH

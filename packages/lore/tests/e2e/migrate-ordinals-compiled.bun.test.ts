@@ -1,3 +1,4 @@
+// @spawns dist/lore
 /**
  * @spec_ref SPEC-084 §One-shot repair migration, §Acceptance Criteria AC-084-5 —
  *   task task-skill-test-t7-compiled-binary-e2e-migrate-ordinals-dry-run.

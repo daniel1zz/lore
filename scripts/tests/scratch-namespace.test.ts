@@ -1,3 +1,6 @@
+// @reads package.json
+// @reads packages/**
+// @reads tsconfig.json
 /** @spec_ref AC-OX-3 */
 /**
  * Static assertion suite for the `.scratch/` probe/negative-control

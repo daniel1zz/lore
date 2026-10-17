@@ -1,3 +1,4 @@
+// @reads assets/context/**
 /**
  * @spec_ref AC-CTX-3, AC-CF-6
  *

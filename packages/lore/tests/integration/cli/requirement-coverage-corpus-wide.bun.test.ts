@@ -1,3 +1,4 @@
+// @spawns packages/lore/src/index.ts
 /**
  * Requirement coverage and the requirement-removal guard scan EVERY spec that is not deleted
  * (AC-BLS3B-6; BR-418, BR-420, BR-692, BR-2).

@@ -1,3 +1,4 @@
+// @spawns packages/lore/src/index.ts
 /**
  * `lore get` Implements / Implemented by views, computed from citations (Baseline slice 3b, AC-BLS3B-4 / BR-1008),
  * over a throwaway corpus (an `mkdtemp` outside the repo; the repo's own `.lore/` is never touched).

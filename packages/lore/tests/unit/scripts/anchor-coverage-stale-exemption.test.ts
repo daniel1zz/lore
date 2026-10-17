@@ -1,3 +1,5 @@
+// @spawns packages/lore/src/index.ts
+// @spawns scripts/check-anchor-coverage.ts
 /**
  * Reverse-direction arming suite for `scripts/check-anchor-coverage.ts` — AC-BFI-7
  * (a ledger row cannot outlive its debt) of

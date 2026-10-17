@@ -1,3 +1,4 @@
+// @spawns dist/lore
 /**
  * Compiled-binary e2e for `lore status --check-fragments`
  * (spec-rule-store-git-tracked-fragment-selection-on-demand-skill, Scope 7 status bullet,

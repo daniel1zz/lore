@@ -1,3 +1,8 @@
+// @reads playwright.config.cjs
+// @reads playwright.config.js
+// @reads playwright.config.mjs
+// @reads playwright.config.ts
+// @reads test-results
 /**
  * Live-runner capture oracle for `findDiscoveryRefusal` (`@lore/core`,
  * `packages/core/src/attestation-completeness.ts`) — SPEC

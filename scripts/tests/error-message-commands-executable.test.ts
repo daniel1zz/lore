@@ -1,3 +1,7 @@
+// @spawns packages/lore/src/index.ts
+// @reads packages/core/src/**
+// @reads packages/lore/src/**
+// @reads scripts/**
 /**
  * SUGGESTED-COMMAND INTEGRITY (AC-FR-9, spec-falsifiability-reachability-a-feedable-
  * checkpoint-an) — task-make-lore-ac-set-accept-the-falsifier-flags-its-own-error.

@@ -1,3 +1,5 @@
+// @spawns packages/lore/src/index.ts
+// @reads lore.tree.yaml
 /**
  * Consumers that derived structure from a spec's parent accept a parentless spec
  * (AC-BLS3B-5; BR-400 tree check, BR-718 lore get navigation, BR-789 spec-file import, BR-2).

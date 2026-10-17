@@ -1,3 +1,4 @@
+// @spawns dist/lore
 /**
  * SPEC-106 (AC-FRESH-4) — `lore assess`'s non-blocking staleness advisory, exercised
  * end-to-end against the COMPILED `dist/lore` binary (`Bun.spawnSync`) over a

@@ -1,3 +1,4 @@
+// @reads scripts/check-unclaimed-oracle.ts
 /**
  * Adapter-wiring tests for the M1 surfacing task (spec-oracle-tier-falsifiability-
  * a-criterion-never-observed-red, AC-FALS-4/5/6/10) — proves `lore ac list`

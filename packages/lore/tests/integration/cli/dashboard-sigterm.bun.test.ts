@@ -1,3 +1,4 @@
+// @spawns dist/lore
 /**
  * AC-3 (task-lore-dashboard-leaks-the-vite-child-on-sigterm-only-sigint) — end-to-end
  * oracle spawning the COMPILED `dist/lore dashboard` binary, sending it SIGTERM (the

@@ -1,3 +1,4 @@
+// @spawns packages/lore/src/index.ts
 /**
  * RED test for the CLI surface of the captured-red proof (AC-EH-9 d; issue #53;
  * BR-1077, BR-152; spec-evidence-labels-and-reds-are-honest D8-D10).

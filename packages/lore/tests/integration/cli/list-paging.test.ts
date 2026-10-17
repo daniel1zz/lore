@@ -1,3 +1,4 @@
+// @spawns packages/lore/src/index.ts
 /**
  * Integration tests for `lore list --limit`/`--offset` (pagination hardening,
  * unbounded-payload review). Runs the real CLI via subprocess against an isolated

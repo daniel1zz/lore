@@ -1,3 +1,4 @@
+// @spawns packages/lore/src/index.ts
 /**
  * `lore status --check-claude-md` (and its parallel consumer `lore context
  * refresh`) must never measure a project against budgets it silently

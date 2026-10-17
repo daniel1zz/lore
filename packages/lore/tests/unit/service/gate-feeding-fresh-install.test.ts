@@ -1,3 +1,5 @@
+// @spawns packages/lore/src/index.ts
+// @spawns scripts/seed-write-spec-rule.ts
 /**
  * spec-governance-visibility-an-armed-gate-that-vacuously-passes §B3 — "a fresh
  * consumer install receives an empty feeding pack".

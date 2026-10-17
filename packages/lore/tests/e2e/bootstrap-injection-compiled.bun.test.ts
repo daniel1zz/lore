@@ -1,3 +1,4 @@
+// @spawns dist/lore
 /**
  * @spec_ref SPEC-080 §Projection Contract, §Public Interface — task
  *   task-skill-test-t6-compiled-binary-e2e-injection-knobs-json-pin,

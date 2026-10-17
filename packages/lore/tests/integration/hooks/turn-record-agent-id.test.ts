@@ -1,3 +1,6 @@
+// @spawns assets/hooks/post-edit-mark.mjs
+// @spawns assets/hooks/stop-turn-review.mjs
+// @spawns assets/hooks/user-prompt-turn-start.mjs
 /** AC-TE-2 (recording half): post-edit-mark records agent_id/agent_type from the hook payload. */
 import { describe, it, expect } from "vitest";
 import { join } from "node:path";

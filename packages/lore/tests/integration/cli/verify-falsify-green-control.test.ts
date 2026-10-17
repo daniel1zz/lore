@@ -1,3 +1,4 @@
+// @spawns packages/lore/src/index.ts
 /**
  * AC-FR-12 (spec-falsifiability-reachability-a-feedable-checkpoint-an) — the
  * SURFACE + PERSISTENCE oracle for `lore verify --falsify`'s green-control path

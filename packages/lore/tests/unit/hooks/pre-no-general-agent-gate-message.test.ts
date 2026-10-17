@@ -1,3 +1,4 @@
+// @spawns assets/hooks/pre-no-general-agent-gate.mjs
 /**
  * AC-AT-3: pre-no-general-agent-gate refuses a general-purpose dispatch and its message names exactly the
  * two shipped agent types. (The former AC-RS-12 case for the retired pre-subagent-gate.mjs was deleted

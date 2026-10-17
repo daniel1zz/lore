@@ -1,3 +1,4 @@
+// @spawns packages/lore/src/index.ts
 /** @spec_ref AC-079-5 */
 /**
  * Integration tests for `lore audit anchor` + `lore audit --verify`'s

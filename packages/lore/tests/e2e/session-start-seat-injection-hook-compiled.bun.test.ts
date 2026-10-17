@@ -1,3 +1,5 @@
+// @spawns assets/hooks/session-start-resume.mjs
+// @spawns dist/lore
 /**
  * @spec_ref spec-session-start-injection-carries-only-the-session-s-own — AC-SI-12.
  *

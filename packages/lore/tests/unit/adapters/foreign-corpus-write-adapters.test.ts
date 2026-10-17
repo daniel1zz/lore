@@ -1,3 +1,4 @@
+// @reads packages/lore/src/**
 /**
  * @spec_ref spec-corpus-resolution-carries-provenance-and-a-foreign-write AC-CP-5
  *   ("THE ADAPTER MATRIX IS ASSERTED, INCLUDING ITS EXEMPTION")

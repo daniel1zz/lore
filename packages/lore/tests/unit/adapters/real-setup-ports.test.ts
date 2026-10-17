@@ -1,3 +1,4 @@
+// @reads assets/**
 /**
  * Direct-behavior suite for the SPEC-046 P1 real `SetupService` port
  * implementations (`RealAssetSource`, `RealSetupFsReader`/`RealSetupFsWriter`,

@@ -1,3 +1,4 @@
+// @spawns packages/lore/src/index.ts
 /**
  * AC-FIP-5 (BR-86, BR-982, BR-753): the enforce-mode citation refusal's hint, `lore tree --help`, and the
  * connector prefixes of `lore tree <prd>`.

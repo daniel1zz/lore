@@ -1,3 +1,4 @@
+// @spawns assets/hooks/pre-bash-git-safety-gate.mjs
 /**
  * @spec_ref spec-one-worktree-removal-test-for-the-guard-lore-done-and-a (AC-WS-4; D1, D2; BR-1070, BR-1079)
  * @task task-single-worktree-removal-test-used-by-the-hook-lore-done

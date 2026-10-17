@@ -1,3 +1,4 @@
+// @reads packages/lore/tests/unit/adapters/ghost-nonexistent-oracle-file.test.ts
 /**
  * Unit tests for the SPEC-056 phase-execution-model MCP surfaces
  * (task-skill-implement-cli-mcp-surfaces-checklist-ref-evidence):

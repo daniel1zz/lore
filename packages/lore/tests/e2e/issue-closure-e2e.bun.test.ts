@@ -1,3 +1,4 @@
+// @spawns dist/lore
 /**
  * AC-ICL-8 e2e suite (spec-issue-closure-loop-computed-resolution-agent-reachable,
  * §D1/§D2/§D4/§D5) — the DECISIVE end-to-end proof that the issue closure loop

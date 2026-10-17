@@ -1,3 +1,4 @@
+// @spawns packages/lore/src/index.ts
 /**
  * @spec_ref BUG-006/007/008/012 audit — unguarded `parseInt(args.<flag>)` calls
  * across `search`/`list`/`log`/`tree`/`diff`/`audit`/`review` CLI commands.

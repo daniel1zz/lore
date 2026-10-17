@@ -1,3 +1,4 @@
+// @spawns assets/hooks/pre-tool-harness-run.mjs
 /**
  * @spec_ref AC-RID-3
  *

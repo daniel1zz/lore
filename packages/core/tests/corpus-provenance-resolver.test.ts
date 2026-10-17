@@ -1,3 +1,4 @@
+// @reads packages/core/src/corpus-provenance.ts
 /**
  * Unit tests for `resolveCorpusProvenance` (AC-CP-1,
  * spec-corpus-resolution-carries-provenance-and-a-foreign-write §Design D1/D2).

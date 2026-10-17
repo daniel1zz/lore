@@ -1,3 +1,4 @@
+// @spawns packages/lore/src/index.ts
 /**
  * task-the-mirror-prune-does-not-retire-a-mapping-whose-doc-was —
  * spec-oracle-exclusivity-in-a-shared-checkout-a-mirror-check AC-OX-6.

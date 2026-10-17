@@ -1,3 +1,5 @@
+// @spawns dist/lore
+// @spawns packages/lore/src/index.ts
 /**
  * TDD-RED suite for `lore dashboard`'s packaged-mode default flip (DD-5, AC-F5A-5).
  * Paired-Impl: "[Skill:implement] F5a lore dashboard packaged-mode default flip"

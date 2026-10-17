@@ -1,3 +1,4 @@
+// @spawns dist/lore
 /**
  * `lore done --override-attestation-cite <n>` — the CLI author→trip
  * end-to-end oracle for

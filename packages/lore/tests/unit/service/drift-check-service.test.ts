@@ -1,3 +1,4 @@
+// @reads packages/lore/src/service/drift-check-service.ts
 /**
  * Six-dimension tests for DriftCheckService (SPEC-045 §Design Decisions D4, D6, D9).
  * Uses InMemoryStore + CorpusService (fixture builder) + TaskWorkflowService

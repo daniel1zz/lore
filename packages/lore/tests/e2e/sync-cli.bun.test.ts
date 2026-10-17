@@ -1,3 +1,4 @@
+// @spawns packages/lore/src/index.ts
 /**
  * @spec_ref AC-SYNC-APP-001 (SPEC-009 §3.3 §7, D-005, D-006, D-007)
  *

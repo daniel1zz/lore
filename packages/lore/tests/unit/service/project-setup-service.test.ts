@@ -1,3 +1,7 @@
+// @reads assets/project/**
+// @reads packages/lore/src/flows/setup-project-flow.ts
+// @reads packages/lore/src/service/project-setup-service.ts
+// @reads packages/lore/src/service/setup-service.ts
 /**
  * ProjectSetupService + setup-project-flow suite (SPEC-046 AC-046-C).
  *

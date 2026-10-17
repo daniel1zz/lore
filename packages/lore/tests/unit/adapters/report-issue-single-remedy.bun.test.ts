@@ -1,3 +1,5 @@
+// @spawns packages/lore/src/index.ts
+// @reads packages/**
 /**
  * @spec_ref spec-governance-defaults-must-ship-and-every-recorded-gap-must
  *   AC-GD-2 (D3 — "one condition, one remedy").

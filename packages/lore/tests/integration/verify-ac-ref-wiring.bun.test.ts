@@ -1,3 +1,4 @@
+// @spawns dist/lore
 /**
  * Bun-only integration seam test for the acRef THREE-HOP WIRING between
  * `VerifyRunnerService`'s `recordAcRef` gate, `buildVerifySpawnSpec`'s `acRef`
@@ -56,17 +57,12 @@
  *      evidence with runs this file WHOLESALE (no `-t`/testNamePattern
  *      filter) — sidestepping "no match + exit 0 reads as passed" entirely
  *      rather than relying on a filter that could silently match zero.
- *   Q3 Opt-in — `bun run test:changed` selects files by CONTENT MARKER, not
- *      by import edges: this file spawns the CLI as a subprocess, which is
- *      invisible to static import tracing. This file's `LORE_BIN`/`dist/lore`
- *      identifiers (below) are exactly `changed-tests.ts`'s
- *      `classifyBinaryConsumer` "compiled"-kind marker, so this file is
- *      selected by RULE (c) — a `binary-consumer` — whenever ANY file under
- *      `packages/lore/src/**` or `packages/core/src/**` changes, INCLUDING
- *      `verify-spawn.ts`, independent of whether this test file itself
- *      changed. Measured (not assumed): see this task's completion report
- *      for the actual `bun run test:changed --list` output against a real
- *      `verify-spawn.ts` diff.
+ *   Q3 Opt-in — `bun run test:changed` selects this file through its `@spawns dist/lore`
+ *      declaration (header of this file), not through import edges: the CLI runs as a subprocess,
+ *      invisible to static import tracing. A change anywhere in the compiled binary's source closure
+ *      (`COMPILED_BINARY_INPUTS` in scripts/test-declared-inputs.ts), INCLUDING `verify-spawn.ts`,
+ *      selects it as `declared-spawn`, independent of whether this test file itself changed. The
+ *      run-time recorder (scripts/test-read-recorder.ts) fails this file if the declaration is removed.
  *
  * Coverage:
  *   HAPPY (AC-ETI-7, driven end-to-end): AC-PW-1's command prints its own id

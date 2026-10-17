@@ -1,3 +1,4 @@
+// @reads packages/lore/tests/fixtures/review-prompt-v1.txt
 /**
  * Tests for the SPEC-053 v2 review judge prompt in `review-template.ts` — the non-blocking
  * AC-quantifiability advisory dimension, the version/registry bump, and the FROZEN v1

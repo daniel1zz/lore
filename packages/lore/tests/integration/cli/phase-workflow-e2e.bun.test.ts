@@ -1,3 +1,4 @@
+// @spawns packages/lore/src/index.ts
 /**
  * Real-CLI-subprocess integration test for the SPEC-056 phase-execution-model CLI
  * surfaces (task-skill-implement-cli-mcp-surfaces-checklist-ref-evidence).

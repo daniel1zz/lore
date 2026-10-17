@@ -1,3 +1,4 @@
+// @reads assets/**
 /**
  * Every shipped asset carries the no-parent spec contract (AC-FIP-2; BR-1, BR-2, BR-1007).
  *

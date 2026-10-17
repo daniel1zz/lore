@@ -1,3 +1,5 @@
+// @spawns scripts/publish-npm.ts
+// @reads dist-npm/artifacts/lore-npm-scope-placeholder-cli-darwin-arm64-0.1.0.tgz
 /**
  * Registry-FREE npm install simulation (SPEC-048 AC-048-C, task
  * `task-skill-test-registry-free-npm-i-install-simulation`).

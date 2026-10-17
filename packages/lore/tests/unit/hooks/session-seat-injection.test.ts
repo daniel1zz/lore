@@ -1,3 +1,6 @@
+// @spawns assets/hooks/session-start-resume.mjs
+// @reads assets/governance/seat-briefing.md
+// @reads packages/lore/tests/fixtures/seat-branch-sanitize.golden.json
 /**
  * session-seat-injection.test.ts — SPEC-047 AC-047-B, reworked for SPEC-085 D2.
  *

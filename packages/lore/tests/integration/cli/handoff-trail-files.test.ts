@@ -1,3 +1,4 @@
+// @spawns packages/lore/src/index.ts
 /**
  * AC-ST-11: `lore handoff` fills the changed files from the caller's session trail.
  *

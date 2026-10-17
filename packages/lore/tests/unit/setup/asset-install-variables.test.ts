@@ -1,3 +1,5 @@
+// @spawns packages/lore/src/index.ts
+// @reads assets/skills/lore/SKILL.md
 /**
  * @spec_ref spec-lore-owned-agent-context-is-generated-from-templates-and AC-CV-4 (D6, BR-1097)
  *

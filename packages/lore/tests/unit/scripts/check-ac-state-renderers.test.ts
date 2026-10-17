@@ -1,3 +1,25 @@
+// @spawns scripts/check-ac-state-renderers.ts
+// @reads .gitattributes
+// @reads .gitignore
+// @reads CHANGELOG.md
+// @reads CLAUDE.md
+// @reads README.md
+// @reads assets/**
+// @reads bun.lock
+// @reads bunfig.toml
+// @reads hooks/**
+// @reads lore.tree.yaml
+// @reads lore.tree.yaml.example
+// @reads package.json
+// @reads packages/**
+// @reads scripts/**
+// @reads tsconfig.base.json
+// @reads tsconfig.json
+// @reads vitest.config.ts
+// @reads vitest.node-files.ts
+// @reads vitest.node.config.ts
+// @reads vitest.shared.ts
+// @reads workspace-aliases.ts
 /**
  * RED suite for SPEC-143's two-rule renderer site scan,
  * `scripts/check-ac-state-renderers.ts` — AC-CT-7 (the scan and its RULE 1

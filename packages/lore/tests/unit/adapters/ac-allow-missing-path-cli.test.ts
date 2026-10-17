@@ -1,3 +1,4 @@
+// @spawns packages/lore/src/index.ts
 /**
  * PRODUCTION WIRING oracle for AC-OX-10 (spec-oracle-executability-a-runner-s-
  * discovery-refusal-is-not-a §D8, task-wire-allow-missing-path-and-the-

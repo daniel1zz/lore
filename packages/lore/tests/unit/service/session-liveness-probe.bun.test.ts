@@ -1,3 +1,4 @@
+// @spawns dist/lore
 /**
  * AC-OWN-5 (spec-multi-session-concurrency-queryable-ownership-checkout) —
  * `lore session list` derives each liveness verdict from the orchestrator

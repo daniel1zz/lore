@@ -1,3 +1,5 @@
+// @reads packages/core/src/**
+// @reads packages/lore/src/**
 /**
  * AC-DC-13 — the injected declared-AC port carries the full acceptance CRITERION
  * (not just its id), and the duplicate task→plan→spec traversal

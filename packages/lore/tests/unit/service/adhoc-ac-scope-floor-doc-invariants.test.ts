@@ -1,3 +1,8 @@
+// @reads assets/project/lore-config-template.yaml
+// @reads packages/core/src/config.ts
+// @reads packages/core/src/issue-report.ts
+// @reads packages/lore/src/service/gate-predicates.ts
+// @reads packages/lore/src/service/task-workflow-service.ts
 /**
  * adhoc-ac-scope-floor-doc-invariants.test.ts —
  * task-the-ac-scope-re-keying-left-the-red-first-floor-unarmed (faces 1, 2, 3.2,

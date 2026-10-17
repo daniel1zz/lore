@@ -1,3 +1,4 @@
+// @spawns assets/hooks/stop-handoff-coverage.mjs
 /**
  * stop-handoff-coverage.test.ts — AC-RC-10 for
  * `assets/hooks/stop-handoff-coverage.mjs`

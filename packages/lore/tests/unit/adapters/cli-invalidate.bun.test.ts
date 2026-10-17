@@ -1,3 +1,5 @@
+// @spawns dist/lore
+// @spawns scripts/seed-write-spec-rule.ts
 /**
  * `lore invalidate` / `lore create --supersedes` / `--include-invalid` / `lore status`
  * warning — CLI-adapter exit-code + wiring contract tests (SPEC-043 §Design Decisions

@@ -1,3 +1,7 @@
+// @reads CLAUDE.md
+// @reads assets/**
+// @reads packages/core/src/**
+// @reads packages/lore/src/**
 /**
  * AC-ROI-8 (spec-run-only-write-identity-and-run-end-claim-release): a retired identity mechanism is
  * never named in shipped text — not even as a prohibition.

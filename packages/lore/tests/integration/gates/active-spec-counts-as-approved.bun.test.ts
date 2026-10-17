@@ -1,3 +1,4 @@
+// @spawns packages/lore/src/index.ts
 /**
  * @spec_ref spec-an-active-spec-counts-as-approved-for-claiming-its-tasks (AC-ACT-1, BR-104, BR-111)
  *

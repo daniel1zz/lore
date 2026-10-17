@@ -1,3 +1,5 @@
+// @reads package.json
+// @reads packages/**
 /**
  * AC-DC-9 (spec-the-defect-channel-cannot-be-honestly-maintained-an §M1) — the
  * terminal-issue-resolution MEMBER SET has exactly ONE construction site

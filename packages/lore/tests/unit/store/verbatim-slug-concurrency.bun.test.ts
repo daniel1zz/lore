@@ -1,3 +1,4 @@
+// @spawns packages/lore/tests/unit/store/.verbatim-slug-worker.41553.mjs
 /** @spec_ref AC-GR-4 */
 /**
  * Tests for D2 (spec-a-github-filed-defect-must-be-claimable-one-ingest-seam):

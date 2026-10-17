@@ -1,3 +1,4 @@
+// @spawns dist/lore
 /**
  * `lore set --decision-status accepted` — CLI-adapter exit-code + wiring contract tests
  * (spec-adr-decision-status-has-a-create-surface-and-no-cli-update, AC-DS-1..7).

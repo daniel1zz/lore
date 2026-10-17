@@ -1,3 +1,4 @@
+// @spawns dist/lore
 /**
  * @spec_ref AC-CP-4 (spec-corpus-resolution-carries-provenance-and-a-foreign-write §D4)
  *

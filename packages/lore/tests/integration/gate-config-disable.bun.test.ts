@@ -1,3 +1,4 @@
+// @spawns packages/lore/src/index.ts
 /**
  * @spec_ref IoC vertical-slice tech-spec §4.1/§11 — `workflow.gates.<checkpoint>.enabled`
  * per-checkpoint gate config override (task AC-P2-7)

@@ -1,3 +1,4 @@
+// @spawns packages/lore/src/index.ts
 /**
  * RED tests: `lore status --check-memory-pointers` must never be silent under
  * `adoption: warn` (the default when the key is absent).

@@ -1,3 +1,7 @@
+// @spawns packages/lore/src/index.ts
+// @reads .lore/config.yaml
+// @reads assets/project/lore-config-template.yaml
+// @reads scripts/check-shipped-defaults.ts
 /**
  * Unit + fixture-driven suite for `scripts/check-shipped-defaults.ts`
  * (`spec-governance-defaults-must-ship-and-every-recorded-gap-must` D1/D2,

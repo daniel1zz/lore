@@ -1,3 +1,4 @@
+// @spawns dist/lore
 /**
  * AC-DC-10 — the oracle-generation split is REACHABLE from a user-facing read
  * surface (spec-the-defect-channel-cannot-be-honestly-maintained-an §M5).

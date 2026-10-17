@@ -1,3 +1,4 @@
+// @spawns packages/lore/src/index.ts
 /**
  * Integration tests: an invalidated (RETRACTED) doc must be DISTINGUISHABLE from a
  * live one on every `lore list` surface, and `--include-invalid` must have a MEASURABLE

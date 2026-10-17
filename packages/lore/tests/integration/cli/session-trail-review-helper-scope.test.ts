@@ -1,3 +1,4 @@
+// @spawns packages/lore/src/index.ts
 /**
  * AC-ST-8: `lore run tasks` and the helper-scope judgment of `lore session trail-review`.
  *

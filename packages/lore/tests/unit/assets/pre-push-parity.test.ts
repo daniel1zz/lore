@@ -1,3 +1,5 @@
+// @reads assets/project/pre-push
+// @reads hooks/pre-push
 /**
  * Pre-push hook-pair parity suite (SPEC-080 G5, AC-080-3).
  *

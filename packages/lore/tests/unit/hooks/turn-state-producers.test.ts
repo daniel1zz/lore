@@ -1,3 +1,9 @@
+// @spawns assets/hooks/post-edit-mark.mjs
+// @spawns assets/hooks/session-start-marker.mjs
+// @spawns assets/hooks/session-start-resume.mjs
+// @spawns assets/hooks/stop-turn-review.mjs
+// @spawns assets/hooks/user-prompt-turn-start.mjs
+// @reads assets/hooks/**
 /**
  * Task task-gh-1343388703-156 (lore issue #156), ported to the turn-end review by
  * spec-interception-moves-off-every-tool-call-one-turn-end-review AC-TE-5: every producer of the turn

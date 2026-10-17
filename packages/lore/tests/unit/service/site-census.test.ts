@@ -1,3 +1,6 @@
+// @reads package.json
+// @reads packages/**
+// @reads tsconfig.json
 /**
  * RED test: completeness census (listSites) + leaf coverage (computeLeafCoverage).
  * Fixture: packages/lore/tests/fixtures/site-census/ — runCommand -> Service.process with

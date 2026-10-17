@@ -1,3 +1,5 @@
+// @spawns packages/lore/src/index.ts
+// @reads assets/agents/lore-implementer.md
 /**
  * @spec_ref SPEC-076 §C3 (five-state classification, diverged-skip-by-default
  *   D2), §C7 (`lore setup --yes` IS the converge verb) — task

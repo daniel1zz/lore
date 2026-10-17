@@ -1,3 +1,4 @@
+// @spawns dist/lore
 /**
  * The COMPILED `dist/lore` runs the completeness census (issue #58; AS-16 "every shipped command
  * works from the compiled binary").

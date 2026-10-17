@@ -1,3 +1,4 @@
+// @spawns dist/lore
 /**
  * @spec_ref spec-eager-libsql-load-makes-every-command-depend-on-a-healthy
  *   AC-LL-1, AC-LL-2, AC-LL-3, AC-LL-4, AC-LL-8, AC-LL-9, AC-LL-10

@@ -1,3 +1,4 @@
+// @spawns packages/lore/src/index.ts
 /**
  * Integration tests for `lore assess` CLI subcommand (SPEC-026) — pre-AI validation
  * paths only. Runs the real CLI via subprocess against an isolated temp SQLite DB,

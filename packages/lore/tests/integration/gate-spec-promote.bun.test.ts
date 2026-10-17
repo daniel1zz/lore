@@ -1,3 +1,4 @@
+// @spawns packages/lore/src/index.ts
 /**
  * @spec_ref IoC vertical-slice tech-spec §4.1/§11 — `lore gate spec-promote`
  * (deterministic AC-count gate + INV2 probabilistic-zone judge advisory)

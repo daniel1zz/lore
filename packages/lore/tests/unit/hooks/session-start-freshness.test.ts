@@ -1,3 +1,4 @@
+// @spawns assets/hooks/session-start-resume.mjs
 /**
  * session-start-freshness.test.ts — SPEC-076 §C6 / AC-076-7.
  *

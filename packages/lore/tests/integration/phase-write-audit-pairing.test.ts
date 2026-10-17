@@ -1,3 +1,8 @@
+// @spawns packages/lore/src/index.ts
+// @reads packages/lore/src/service/ac-service.ts
+// @reads packages/lore/src/service/phase-service.ts
+// @reads packages/lore/src/service/requirement-service.ts
+// @reads packages/lore/src/store/sqlite-store.ts
 /**
  * Phase-write audit-pairing oracle — the SINGLE file behind SPEC-148's
  * AC-PHASEVER-4 (`spec-lore-phase-add-and-phase-rm-mutate-a-plan-s-declared`).

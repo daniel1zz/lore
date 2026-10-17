@@ -1,3 +1,4 @@
+// @spawns packages/lore/src/index.ts
 /**
  * Integration test: `lore setup` records each manifest sha from the file's FINAL on-disk bytes
  * even when a user config sets a reply language (task R0-2, AC-R0-3, report #233).

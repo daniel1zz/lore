@@ -1,3 +1,4 @@
+// @spawns packages/lore/src/index.ts
 /**
  * @spec_ref AC-STR-11 (spec-claude-md-root-section-structure-check-and-adoption-mode)
  *

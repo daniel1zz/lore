@@ -1,3 +1,4 @@
+// @reads assets/governance/claude-md-contract.md
 /**
  * RED-phase contract-parity suite for
  * `spec-claude-md-root-section-structure-check-and-adoption-mode` AC-STR-7

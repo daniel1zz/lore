@@ -1,3 +1,5 @@
+// @reads src/a
+// @reads src/b
 /**
  * Unit tests for the SPEC-042 session-registry MCP surface: `lore_claim`'s new
  * `machine`/`worktree` fields, `lore_anchor_set`, `lore_ready`'s `ReadyReport`

@@ -1,3 +1,4 @@
+// @spawns packages/lore/src/index.ts
 /**
  * Tests for `scripts/check-gap-namespace.ts` (AC-GD-3,
  * `spec-governance-defaults-must-ship-and-every-recorded-gap-must` D4/D4a/D4b/

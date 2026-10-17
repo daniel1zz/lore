@@ -1,3 +1,4 @@
+// @reads packages/core/src/ac-quality.ts
 /**
  * Source-scan regression test for @lore/core ac-quality's zero-LLM invariant
  * (AC-ACQ-2). Runs under `bun test` (reads the source file from disk via

@@ -1,3 +1,10 @@
+// @reads packages/core/src/index.ts
+// @reads packages/core/src/node.ts
+// @reads packages/dashboard/vite.config.ts
+// @reads packages/lore/tsconfig.json
+// @reads tsconfig.base.json
+// @reads vitest.shared.ts
+// @reads workspace-aliases.ts
 /**
  * task-skill-implement-tg-20-worktrees-resolve-their-own-lore.
  *

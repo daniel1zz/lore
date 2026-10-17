@@ -1,3 +1,4 @@
+// @spawns packages/lore/src/index.ts
 /**
  * `lore outline` CLI regression pins AFTER the write retirement (slice 3a, BR-985).
  *

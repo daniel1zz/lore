@@ -1,3 +1,5 @@
+// @reads package.json
+// @reads packages/dashboard/tests/typecheck-scope-probe-tmp
 /**
  * Tests for `packages/dashboard/tsconfig.tests.json`'s SCOPE — a direct probe of
  * the tsconfig fix this task's own defect report was wrong about (spec-oracle-

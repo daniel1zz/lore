@@ -1,3 +1,4 @@
+// @reads packages/lore/src/flows/feed-flow.ts
 /**
  * Unit suite for the resume-ticket LOWER-bound floor as wired into
  * `renderResumeFeed` (`packages/lore/src/flows/feed-flow.ts`) —

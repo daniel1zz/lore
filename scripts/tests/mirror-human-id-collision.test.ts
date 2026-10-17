@@ -1,3 +1,4 @@
+// @spawns packages/lore/src/index.ts
 /**
  * task-skill-implement-r0-6-mirror-detects-and-repairs-duplicate — AC-R0-5
  * (spec-round-0-main-is-green-every-red-test-on-e1878626-traced-to; reports #210, #234, #32).

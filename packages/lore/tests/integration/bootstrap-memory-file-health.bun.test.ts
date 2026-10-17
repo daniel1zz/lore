@@ -1,3 +1,4 @@
+// @spawns packages/lore/src/index.ts
 /**
  * `lore bootstrap` never goes silent about memory-file health — RED-first suite for
  * `task-skill-test-bootstrap-memory-file-health-red` (paired implementation: I3,

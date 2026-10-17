@@ -1,3 +1,4 @@
+// @spawns packages/lore/src/index.ts
 /**
  * AC-CRIT-4 / AC-CRIT-5 — spec-close-the-eight-verified-critical-defects-no-judge-listing §Design F3.
  *

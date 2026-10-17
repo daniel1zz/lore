@@ -1,3 +1,4 @@
+// @spawns assets/hooks/session-start-resume.mjs
 /**
  * session-bootstrap-seat-injection.test.ts —
  * spec-session-start-injection-carries-only-the-session-s-own D2, D6, D11, D12;

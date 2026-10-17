@@ -1,3 +1,4 @@
+// @spawns packages/lore/src/index.ts
 /**
  * `lore status` spec citation census (Baseline slice 3b, AC-BLS3B-3 / BR-1011), over a throwaway corpus
  * (an `mkdtemp` outside the repo; the repo's own `.lore/` is never touched).

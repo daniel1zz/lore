@@ -1,3 +1,4 @@
+// @spawns packages/lore/src/index.ts
 /**
  * AC-TE-1 (spec-interception-moves-off-every-tool-call-one-turn-end-review, Scope 1; BR-1092, AS-8):
  * the g1-g4 checkpoint hooks are retired only because the WRITE ITSELF refuses every case they

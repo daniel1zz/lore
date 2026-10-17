@@ -1,3 +1,4 @@
+// @spawns packages/lore/src/index.ts
 /**
  * @spec_ref SPEC-076 §C3 (five-state classification, `--check` CLI contract),
  *   §C6 (`SetupCheckCache` shape) — task

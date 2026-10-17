@@ -1,3 +1,4 @@
+// @reads docs/requirements/**
 /**
  * Unit tests for src/eval/scenarios/migration-coverage.ts
  * Uses InMemoryStore (no SQLite) via createApp pattern with InMemoryStore injected.

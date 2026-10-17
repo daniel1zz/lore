@@ -1,3 +1,7 @@
+// @spawns packages/lore/src/index.ts
+// @reads CLAUDE.md
+// @reads packages/lore/src/service/ac-service.ts
+// @reads packages/lore/src/service/phase-service.ts
 /**
  * Phase-write lifecycle + doc-parity oracle — the SINGLE file behind SPEC-148's
  * AC-PHASEVER-1, AC-PHASEVER-2 and AC-PHASEVER-3

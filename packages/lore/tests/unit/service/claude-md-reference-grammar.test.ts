@@ -1,3 +1,47 @@
+// @reads .claude/**
+// @reads .lore-bootstrap/**
+// @reads .lore/**
+// @reads .serena/**
+// @reads CLAUDE.md
+// @reads adapters/cli
+// @reads adapters/read-side-by-filters.ts
+// @reads ai/assess-template.ts
+// @reads assets/**
+// @reads commands
+// @reads commands/feed.ts
+// @reads commands/set.ts
+// @reads commands/sync.ts
+// @reads components/evidence
+// @reads core
+// @reads core/types.ts
+// @reads dist-npm/**
+// @reads dist/**
+// @reads docs/**
+// @reads flows/context-flow.ts
+// @reads flows/phase-status-flow.ts
+// @reads flows/task-feed-flow.ts
+// @reads hooks/**
+// @reads npm-pkg/**
+// @reads package.json
+// @reads packages/**
+// @reads scenarios
+// @reads scripts/**
+// @reads service
+// @reads service/CLAUDE.md
+// @reads service/anchor-resolution.ts
+// @reads service/validity-service.ts
+// @reads src
+// @reads src/api/mutations.ts
+// @reads src/components/ui
+// @reads src/index.css
+// @reads src/lib/api.ts
+// @reads src/lib/type-accent.ts
+// @reads src/routes
+// @reads tests/e2e/global-setup.ts
+// @reads tests/fixtures/review-prompt-v1.txt
+// @reads tests/unit/adapters/mcp-tools.test.ts
+// @reads tests/unit/service/demotion-rule-ssot.test.ts
+// @reads tests/unit/store/**
 /**
  * RED-phase tests for AC-GRAM-1 of
  * `spec-claude-md-governance-content-dimension-checks-wire-the` (N4: the

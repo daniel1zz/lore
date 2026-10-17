@@ -1,3 +1,4 @@
+// @reads packages/core/src/**
 /**
  * @spec_ref SPEC-046 §Design ("`@lore/core` (pure, browser-safe)"), AC-046-A
  *

@@ -1,3 +1,4 @@
+// @spawns packages/lore/src/index.ts
 /**
  * RED-phase tests for AC-STR-10 of
  * `spec-claude-md-root-section-structure-check-and-adoption-mode`:

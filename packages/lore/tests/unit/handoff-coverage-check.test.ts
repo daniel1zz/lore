@@ -1,3 +1,6 @@
+// @spawns assets/hooks/stop-handoff-coverage.mjs
+// @spawns packages/lore/src/index.ts
+// @reads packages/lore/src/adapters/cli/commands/handoff.ts
 /**
  * `lore handoff coverage-check` — the SOLE parser of the rendered
  * resume-ticket grammar and of the disposition-line grammar.

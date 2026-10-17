@@ -1,3 +1,4 @@
+// @reads packages/core/src/plan-update.ts
 /**
  * @spec_ref SPEC-076 §C3 (five-state classification table) + Downstream
  *   Handoff (`UpdatePlan`/`EmbeddedAssetsManifest`/`FileFreshness` type

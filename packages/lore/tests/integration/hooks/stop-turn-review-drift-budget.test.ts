@@ -1,3 +1,6 @@
+// @spawns assets/hooks/post-edit-mark.mjs
+// @spawns assets/hooks/stop-turn-review.mjs
+// @spawns assets/hooks/user-prompt-turn-start.mjs
 /**
  * AC-TE-4: stop-turn-review.mjs anchor drift (measured against the turn-start snapshot, so Bash
  * rm / git mv count) and CLAUDE.md budget (delegated to `lore status --check-claude-md`).

@@ -1,3 +1,4 @@
+// @spawns assets/hooks/session-start-resume.mjs
 /**
  * session-bootstrap-injection.test.ts —
  * spec-context-provenance-injected-corpus-global-state-and-a D2, AC-CP-10.

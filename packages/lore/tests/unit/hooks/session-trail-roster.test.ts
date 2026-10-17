@@ -1,3 +1,5 @@
+// @spawns assets/hooks/session-trail-start.mjs
+// @spawns assets/hooks/subagent-trail.mjs
 /**
  * @spec_ref AC-ST-12
  *

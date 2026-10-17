@@ -1,3 +1,4 @@
+// @spawns packages/lore/src/index.ts
 /**
  * @spec_ref AC-RID-9
  * @task task-skill-test-red-attested-claimed-rendering-and-status (RED; paired impl =

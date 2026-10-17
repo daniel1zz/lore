@@ -1,3 +1,4 @@
+// @spawns packages/lore/src/index.ts
 /**
  * @spec_ref SPEC-076 §C4 (manifest version fields: `binary_version` /
  *   `installed_at` / `assets_digest`, per-entry `ownership`), §C3

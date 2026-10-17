@@ -1,3 +1,9 @@
+// @spawns scripts/check-no-timer-retry.ts
+// @reads packages/core/src/issue-report.ts
+// @reads packages/lore/src/adapters/cli/commands/report-issue.ts
+// @reads packages/lore/src/service/gh-runner.ts
+// @reads packages/lore/src/service/github-intake-port.ts
+// @reads packages/lore/src/service/issue-resolution.ts
 /** @spec_ref AC-IC-3 */
 /**
  * Unit tests for `scripts/check-no-timer-retry.ts`'s PURE parsers — the D3

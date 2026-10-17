@@ -1,3 +1,4 @@
+// @spawns packages/lore/src/index.ts
 /**
  * RED test for claim-scoped corpus authoring (Baseline slice 2a, component C8).
  *

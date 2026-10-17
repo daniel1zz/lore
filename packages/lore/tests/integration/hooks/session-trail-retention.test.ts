@@ -1,3 +1,4 @@
+// @spawns assets/hooks/session-trail-start.mjs
 /**
  * @spec_ref AC-ST-5
  *

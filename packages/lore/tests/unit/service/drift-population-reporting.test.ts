@@ -1,3 +1,22 @@
+// @reads .claude/**
+// @reads CHANGELOG.md
+// @reads CLAUDE.md
+// @reads README.md
+// @reads assets/**
+// @reads docs/**
+// @reads hooks/**
+// @reads lore.tree.yaml
+// @reads npm-pkg/**
+// @reads package.json
+// @reads packages/**
+// @reads scripts/**
+// @reads tsconfig.base.json
+// @reads tsconfig.json
+// @reads vitest.config.ts
+// @reads vitest.node-files.ts
+// @reads vitest.node.config.ts
+// @reads vitest.shared.ts
+// @reads workspace-aliases.ts
 /**
  * `DriftCheckResult` reports the KNOWLEDGE scanned population as its own field,
  * independent of `specs_checked`, and the retired `DriftRow` slug spelling is gone

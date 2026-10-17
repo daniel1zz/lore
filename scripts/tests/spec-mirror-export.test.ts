@@ -1,3 +1,4 @@
+// @spawns packages/lore/src/index.ts
 /**
  * Tests for `scripts/export-spec-mirror.ts` + `scripts/export-spec-mirror-core.ts` —
  * `spec-falsifiability-reachability-a-feedable-checkpoint-an` D6, AC-FR-6/AC-FR-7/AC-FR-10 (G5).
