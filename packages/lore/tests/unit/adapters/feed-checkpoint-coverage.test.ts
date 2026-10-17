@@ -1,3 +1,4 @@
+// @spawns packages/lore/src/index.ts
 /**
  * AC-FR-1 (task-derive-lore-feed-s-checkpoint-set-from-the-registry-make,
  * spec-falsifiability-reachability-a-feedable-checkpoint-an) — `lore feed`'s

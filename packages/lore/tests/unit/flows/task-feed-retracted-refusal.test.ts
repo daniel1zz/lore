@@ -1,3 +1,4 @@
+// @reads packages/lore/src/flows/task-feed-flow.ts
 /**
  * CONTRACT NOTE — `buildTaskStartPack` must REFUSE to assemble a dispatch pack for a
  * RETRACTED (invalidated) task, and must be byte-for-byte unchanged for a live one

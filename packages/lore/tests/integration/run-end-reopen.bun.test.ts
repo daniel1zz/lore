@@ -1,3 +1,4 @@
+// @spawns packages/lore/src/index.ts
 /**
  * Registering an ENDED run reopens it, and later claims by that run are owned by it.
  *

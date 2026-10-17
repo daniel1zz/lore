@@ -1,3 +1,6 @@
+// @reads packages/lore/src/service/ac-service.ts
+// @reads packages/lore/src/service/checkpoint-registry.ts
+// @reads packages/lore/src/service/gate-predicates.ts
 /**
  * Tests for the AC-Quantifiability Gate's service-layer wiring: the `acQuantifiable`
  * predicate (`gate-predicates.ts`) as run through `GateEnforcer` on the `spec-create`

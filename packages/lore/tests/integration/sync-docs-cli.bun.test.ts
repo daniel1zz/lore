@@ -1,3 +1,4 @@
+// @spawns packages/lore/src/index.ts
 /**
  * Integration tests for `lore sync-docs` CLI subcommand.
  * Uses real CLI invocations against isolated temp directories with real lore.db.

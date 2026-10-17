@@ -1,3 +1,4 @@
+// @spawns packages/lore/src/index.ts
 /**
  * End-to-end test of `lore baseline fidelity` (Baseline slice 2c C7, AC-BLS2-21, AC-BLS2-23) through the
  * real CLI against a throwaway corpus (`lore init` in a temp dir; the repo's own `.lore/` is never touched).

@@ -1,3 +1,7 @@
+// @spawns dist/lore
+// @reads hooks/pre-push
+// @reads assets/project/pre-push -- the shipped copy this guard drives (embedded in dist/lore, run by its setup)
+// @reads packages/lore/tests/integration/pre-push-binary-provenance-*.bun.test.ts -- AC-BFI-11 checks the pre-rename file is gone (the old name itself may not appear in this file)
 /**
  * Behavioural trip tests for the pre-push gate's two newest steps —
  * `spec-bootstrap-fixpoint-integrity-binary-provenance-an-anchor` AC-BFI-3

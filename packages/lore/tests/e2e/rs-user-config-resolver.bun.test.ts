@@ -1,3 +1,4 @@
+// @spawns dist/lore
 /**
  * Compiled-binary e2e for the shared user-config-dir resolver
  * (spec-rule-store-git-tracked-fragment-selection-on-demand-skill, Scope 7, AC-RS-15, BR-1065;

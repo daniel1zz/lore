@@ -1,3 +1,4 @@
+// @spawns packages/lore/src/index.ts
 /**
  * @spec_ref spec-approval-and-plan-closure-go-through-the-same-checks-on
  *   AC-AP-10, §Design Decisions D8 (supersedes spec-lifecycle-archival-plan-close-cascade-deterministic D3's

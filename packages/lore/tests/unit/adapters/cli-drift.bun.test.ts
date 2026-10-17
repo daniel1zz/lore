@@ -1,3 +1,4 @@
+// @spawns dist/lore
 /**
  * `lore status --check-tree` / `--check-drift` composition, `lore anchor` spec-target
  * dispatch (exercised indirectly via `lore create spec --code-anchor`), and the

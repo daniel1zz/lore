@@ -1,3 +1,4 @@
+// @reads packages/core/src/**
 /**
  * AC-068-6 — static import-graph oracle: `pinyin-pro` (SPEC-068 D1, ~931KB
  * unpacked) MUST be unreachable from the `@lore/core` default barrel

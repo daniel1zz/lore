@@ -1,3 +1,4 @@
+// @spawns packages/lore/src/index.ts
 /**
  * Integration tests for `lore setup --project --check` (spec-one-upgrade-reminder-at-session-start-
  * covers-the-global, BR-1085 / BR-849, AC-UR-1). Runs the real CLI via subprocess in throwaway

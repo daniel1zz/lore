@@ -1,3 +1,4 @@
+// @spawns assets/hooks/run-end.mjs
 /**
  * @spec_ref AC-ROI-7
  *

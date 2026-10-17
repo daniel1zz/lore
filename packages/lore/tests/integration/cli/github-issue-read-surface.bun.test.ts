@@ -1,3 +1,4 @@
+// @spawns dist/lore
 /**
  * @spec_ref spec-a-github-filed-defect-must-be-claimable-one-ingest-seam AC-GR-1/2/8/10/12
  * @task task-skill-implement-the-read-surface-reaches-github-and-never

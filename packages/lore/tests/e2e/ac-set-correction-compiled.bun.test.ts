@@ -1,3 +1,4 @@
+// @spawns dist/lore
 /**
  * ac-set-correction-compiled.bun.test.ts — AC-CC-2: `lore ac set --correction` on a locked spec, observed from
  * the REAL compiled binary on a throwaway corpus.

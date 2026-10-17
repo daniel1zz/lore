@@ -1,3 +1,4 @@
+// @reads packages/lore/src/service/anchor-resolution.ts
 /**
  * `service/anchor-resolution.ts` — the ONE place a task's declared
  * `extra.file_anchors` are probed against the working tree, plus the ONE

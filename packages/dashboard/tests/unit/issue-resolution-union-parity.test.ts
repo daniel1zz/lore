@@ -1,3 +1,6 @@
+// @reads packages/dashboard/src/components/IssueDetail.tsx
+// @reads packages/dashboard/src/components/IssuesList.tsx
+// @reads packages/dashboard/src/routeTree.gen.ts
 /**
  * Parity oracle for the dashboard's issue-resolution vocabulary
  * (`spec-the-defect-channel-cannot-be-honestly-maintained-an`, AC-DC-12).

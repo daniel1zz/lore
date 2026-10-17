@@ -1,3 +1,4 @@
+// @spawns packages/lore/src/index.ts
 /**
  * @spec_ref spec-lore-issues-falls-through-to-the-local-corpus-on-a-retired
  *   AC-IS-1, AC-IS-2, AC-IS-3, AC-IS-4.

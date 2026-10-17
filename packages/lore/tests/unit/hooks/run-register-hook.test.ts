@@ -1,3 +1,4 @@
+// @spawns assets/hooks/run-register.mjs
 /**
  * @spec_ref AC-RID-3
  *

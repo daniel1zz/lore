@@ -1,3 +1,4 @@
+// @spawns packages/lore/src/index.ts
 /**
  * @spec_ref spec-lore-owns-worktree-cleanup-archive-removes-the-task-s AC-WTC-1
  * @task task-red-for-106-ac-wtc-1-ac-wtc-2-ac-wtc-3

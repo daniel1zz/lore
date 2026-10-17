@@ -1,3 +1,10 @@
+// @reads packages/core/src/**
+// @reads packages/lore/packages/lore/src
+// @reads packages/lore/src/**
+// @reads packages/lore/tests/packages/lore/src
+// @reads packages/lore/tests/unit/adapters/packages/lore/src
+// @reads packages/lore/tests/unit/packages/lore/src
+// @reads packages/packages/lore/src
 /**
  * @spec_ref spec-out-of-box-reporting-channel-report-issue-self-provisions
  *   (plan invariant 1, plan-implementation-out-of-box-reporting-channel-self-provision:

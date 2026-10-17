@@ -1,3 +1,6 @@
+// @spawns packages/lore/src/index.ts
+// @reads .claude/settings.json
+// @reads assets/hooks/**
 /**
  * Integration tests for the turn-end-review roster swap (spec-interception-moves-off-every-tool-call-
  * one-turn-end-review, AC-TE-5; BR-823 / BR-975 converge, BR-1092). Real `lore setup` via subprocess

@@ -1,3 +1,6 @@
+// @reads assets/**
+// @reads packages/**
+// @reads scripts/**
 /**
  * `feedback.upstream.vendor` — the vendor-intake consent branch (2026-08-25).
  *

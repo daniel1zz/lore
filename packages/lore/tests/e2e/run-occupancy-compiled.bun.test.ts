@@ -1,3 +1,4 @@
+// @spawns dist/lore
 /**
  * @spec_ref spec-worktree-removal-is-decided-by-who-is-inside-not-by-how (AC-WL-2; D1; BR-1070)
  *

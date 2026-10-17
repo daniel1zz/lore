@@ -1,3 +1,4 @@
+// @reads packages/lore/src/**
 /**
  * isplanmember-single-definition.test.ts —
  * task-three-byte-identical-copies-of-isplanmember-survive.

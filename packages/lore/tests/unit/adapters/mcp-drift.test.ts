@@ -1,3 +1,7 @@
+// @reads never/exists/anywhere.ts
+// @reads package.json
+// @reads src/task-anchor.ts
+// @reads this/path/definitely/does/not/exist.ts
 /**
  * Unit tests for the SPEC-045 `lore_status {check_drift}` extension and
  * `lore_anchor_set`'s spec-target dispatch (doc-code drift oracle, memory hygiene

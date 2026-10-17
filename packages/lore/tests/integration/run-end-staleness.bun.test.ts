@@ -1,3 +1,4 @@
+// @spawns packages/lore/src/index.ts
 /**
  * Staleness accounts for ended runs and orphaned_dirty claims.
  *

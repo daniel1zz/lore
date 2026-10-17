@@ -1,3 +1,4 @@
+// @spawns packages/lore/src/index.ts
 /**
  * @spec_ref AC-AI-8, AC-HJ-4
  *

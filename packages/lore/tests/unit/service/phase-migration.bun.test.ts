@@ -1,3 +1,4 @@
+// @reads packages/lore/tests/fixtures/phase-migration/seed.json
 /**
  * RED suite (TDD-Role: red, paired-impl task-skill-implement-phasemigrationservice)
  * for `packages/lore/src/service/phase-migration-service.ts` — a module that does NOT

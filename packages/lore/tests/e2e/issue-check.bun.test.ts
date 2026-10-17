@@ -1,3 +1,4 @@
+// @spawns dist/lore
 /**
  * `lore status --check-issues` (D5, spec-issue-closure-loop-computed-
  * resolution-agent-reachable) — the deterministic, report-only detector that

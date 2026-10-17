@@ -1,3 +1,5 @@
+// @reads packages/core/src/**
+// @reads packages/lore/src/**
 /**
  * SPEC-084 service+resolution unit suite: ordinal auto-allocation on
  * create, title-purity rejection on BOTH write paths (create + set/rename),

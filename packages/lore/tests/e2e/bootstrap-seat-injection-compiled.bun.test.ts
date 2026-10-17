@@ -1,3 +1,4 @@
+// @spawns dist/lore
 /**
  * @spec_ref spec-session-start-injection-carries-only-the-session-s-own — AC-SI-2, AC-SI-4.
  *

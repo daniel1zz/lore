@@ -1,3 +1,4 @@
+// @spawns packages/lore/src/index.ts
 /**
  * @spec_ref TECH-01KV4W88GZF74B98BHCBBV9GHD §5
  *

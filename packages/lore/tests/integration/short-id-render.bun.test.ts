@@ -1,3 +1,4 @@
+// @spawns packages/lore/src/index.ts
 /**
  * @spec_ref task-short-id-rendering-truncates-ulids-to-8-chars-a-1024ms
  *

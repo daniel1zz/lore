@@ -1,3 +1,4 @@
+// @spawns packages/lore/src/index.ts
 /**
  * RED — write attribution matrix (spec-run-identity-slice-1-harness-attested-runs-attested,
  * D1 / D3 / D4 / D11; rules BR-1032, BR-1036).

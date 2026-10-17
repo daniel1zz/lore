@@ -1,3 +1,4 @@
+// @reads packages/dashboard/src/index.css
 /**
  * CSS-level regression test for ISSUE-009 (light-theme markdown prose
  * near-invisible, ~1.4:1 contrast).

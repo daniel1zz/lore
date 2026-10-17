@@ -1,3 +1,5 @@
+// @reads assets/governance/DOES-NOT-EXIST.md
+// @reads assets/governance/claude-md-contract.md
 /**
  * Contract-prose content pins (spec-claude-md-governance-content-dimension-checks-wire-the,
  * AC-CONTRACT-1) — the RED half of a paired red/green task

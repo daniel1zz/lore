@@ -1,3 +1,5 @@
+// @reads packages/core/src/**
+// @reads packages/lore/src/**
 /**
  * RED tests for the declaration-time pipe refusal at the AC write chokepoint (#19) —
  * task-skill-test-red-declaration-time-pipe-refusal-on-service. Paired impl:

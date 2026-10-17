@@ -1,3 +1,4 @@
+// @spawns packages/lore/src/index.ts
 /**
  * Baseline-root navigation (Baseline slice 3a, AC-BLS3-3 / BR-981 / BR-982), driven through the
  * real CLI plus the real HTTP route dispatcher and MCP tool handler, all over a throwaway SQLite corpus.

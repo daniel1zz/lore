@@ -1,3 +1,6 @@
+// @spawns scripts/changed-tests.ts
+// @reads packages/lore/tests/integration/pre-push-trip.bun.test.ts
+// @reads packages/lore/tests/unit/assets/pre-push-parity.test.ts
 /**
  * Real-repo e2e for `bun run test:changed`'s CLI shell
  * (`spec-two-runner-changed-test-selection-deterministic-test`, AC-TC-2).
@@ -36,7 +39,7 @@ const REPO_ROOT = resolve(fileURLToPath(new URL(".", import.meta.url)), "../../.
 // this suite's own accounting-line matcher is built FROM it, never
 // hand-transcribed as an independent regex/list. That transcription drift is
 // exactly what went stale and turned `main` red when a fourth reason
-// (`"tree-scan-oracle"`) was added to the producer's TYPE alone (task
+// was added to the producer's TYPE alone (task
 // `task-main-is-red-a-fourth-selectionreason-was-added-to-the`) — a type
 // erases at runtime, so a hand-copied regex here had nothing forcing it to
 // notice.
@@ -61,6 +64,8 @@ const REPO_ROOT = resolve(fileURLToPath(new URL(".", import.meta.url)), "../../.
 // target has no such exemption.)
 const CHANGED_TESTS_SPECIFIER = pathToFileURL(join(REPO_ROOT, "scripts", "changed-tests.ts")).href;
 
+const DECLARED_INPUTS_SPECIFIER = pathToFileURL(join(REPO_ROOT, "scripts", "test-declared-inputs.ts")).href;
+
 let SELECTION_REASONS: readonly string[];
 let isSelectionReason: (value: string) => boolean;
 /**
@@ -74,28 +79,19 @@ let isSelectionReason: (value: string) => boolean;
  * accounting output can never legitimately contain an out-of-vocabulary tag.
  */
 let KNOWN_REASON_TAG_RE: RegExp;
-/**
- * `scripts/changed-tests.ts`'s own `HOOK_OR_ASSET_PAIR_MARKER_RE` — imported
- * (not re-transcribed) so the AC-TC-5 pinning describe block below tests the
- * EXACT literal the production classifier uses, never an independent copy
- * that could silently drift out of sync with it.
- */
-let HOOK_OR_ASSET_PAIR_MARKER_RE: RegExp;
-/** `scripts/changed-tests.ts`'s own `classifyTreeScanningOracle` — see the AC-TC-5 describe block below. */
-let classifyTreeScanningOracle: (path: string, content: string) => ReadonlySet<string> | undefined;
+/** `scripts/test-declared-inputs.ts`'s own parser — imported (not re-implemented) so the pinning block below tests the production parse. */
+let parseDeclaredInputs: (content: string) => { reads: readonly string[]; spawns: readonly string[] };
 
 beforeAll(async () => {
   const mod: {
     SELECTION_REASONS: readonly string[];
     isSelectionReason: (value: string) => boolean;
-    HOOK_OR_ASSET_PAIR_MARKER_RE: RegExp;
-    classifyTreeScanningOracle: (path: string, content: string) => ReadonlySet<string> | undefined;
   } = await import(CHANGED_TESTS_SPECIFIER);
+  const declared: { parseDeclaredInputs: typeof parseDeclaredInputs } = await import(DECLARED_INPUTS_SPECIFIER);
+  parseDeclaredInputs = declared.parseDeclaredInputs;
   SELECTION_REASONS = mod.SELECTION_REASONS;
   isSelectionReason = mod.isSelectionReason;
   KNOWN_REASON_TAG_RE = new RegExp(`\\((${SELECTION_REASONS.join("|")})\\)`);
-  HOOK_OR_ASSET_PAIR_MARKER_RE = mod.HOOK_OR_ASSET_PAIR_MARKER_RE;
-  classifyTreeScanningOracle = mod.classifyTreeScanningOracle;
 });
 
 /**
@@ -241,15 +237,15 @@ describe("bun run test:changed CLI — --list HEAD (AC-TC-2)", () => {
     expect(KNOWN_REASON_TAG_RE.test(syntheticZeroAccounting)).toBe(false);
   });
 
-  it("STATE/REGRESSION: the three pre-existing reasons (changed-test, transitive, binary-consumer) remain valid SELECTION_REASONS members alongside the newly added tree-scan-oracle", () => {
-    for (const preExisting of ["changed-test", "transitive", "binary-consumer"] as const) {
-      expect(SELECTION_REASONS).toContain(preExisting);
-      expect(isSelectionReason(preExisting)).toBe(true);
+  it("STATE/REGRESSION: the four reasons (changed-test, transitive, declared-read, declared-spawn) are the whole vocabulary; the removed content-marker reasons are not members (AC-TG-7)", () => {
+    for (const reason of ["changed-test", "transitive", "declared-read", "declared-spawn"] as const) {
+      expect(SELECTION_REASONS).toContain(reason);
+      expect(isSelectionReason(reason)).toBe(true);
     }
-    // tree-scan-oracle — the fourth reason whose TYPE-only addition originally broke
-    // the hand-transcribed regex this task replaces — must also be recognised now.
-    expect(SELECTION_REASONS).toContain("tree-scan-oracle");
-    expect(isSelectionReason("tree-scan-oracle")).toBe(true);
+    for (const removed of ["binary-consumer", "tree-scan-oracle"]) {
+      expect(SELECTION_REASONS).not.toContain(removed);
+      expect(isSelectionReason(removed)).toBe(false);
+    }
     // ERROR-adjacent: isSelectionReason is a total function over `string` — it never
     // throws for a malformed/empty/unexpected input, only ever returns false.
     expect(isSelectionReason("")).toBe(false);
@@ -336,6 +332,8 @@ describe("AC-TC-4: hooks-only and assets-only change sets select both pre-push g
    * without this task ever touching them (out of its file anchors).
    */
   const FIXTURE_PARITY_TEST_CONTENT = [
+    "// @reads hooks/pre-push",
+    "// @reads assets/project/pre-push",
     "// Fixture stand-in for packages/lore/tests/unit/assets/pre-push-parity.test.ts",
     "// Real suite compares hooks/pre-push against assets/project/pre-push byte-for-byte.",
     'import { describe, it, expect } from "vitest";',
@@ -349,6 +347,8 @@ describe("AC-TC-4: hooks-only and assets-only change sets select both pre-push g
   ].join("\n");
 
   const FIXTURE_TRIP_TEST_CONTENT = [
+    "// @reads hooks/pre-push",
+    "// @reads assets/project/pre-push",
     "// Fixture stand-in for packages/lore/tests/integration/pre-push-trip.bun.test.ts",
     "// Real suite drives hooks/pre-push (repo copy) and assets/project/pre-push (shipped copy).",
     'import { describe, it, expect } from "bun:test";',
@@ -423,14 +423,14 @@ describe("AC-TC-4: hooks-only and assets-only change sets select both pre-push g
   }
 
   /**
-   * Both guard tests, tagged with their expected `(tree-scan-oracle)` reason —
+   * Both guard tests, tagged with their expected `(declared-read)` reason (they DECLARE the hook pair; no content marker is involved) —
    * asserting the reason tag (not merely path presence) rules out the guard
    * showing up for an unrelated reason (e.g. `transitive`) that would not
    * actually prove the hooks/assets scope fix.
    */
   function expectBothGuardsSelected(stdout: string): void {
-    expect(stdout, `expected the parity guard in:\n${stdout}`).toContain(`${PARITY_TEST_RELATIVE} (tree-scan-oracle)`);
-    expect(stdout, `expected the trip guard in:\n${stdout}`).toContain(`${TRIP_TEST_RELATIVE} (tree-scan-oracle)`);
+    expect(stdout, `expected the parity guard in:\n${stdout}`).toContain(`${PARITY_TEST_RELATIVE} (declared-read)`);
+    expect(stdout, `expected the trip guard in:\n${stdout}`).toContain(`${TRIP_TEST_RELATIVE} (declared-read)`);
   }
 
   it("PURE hooks-only change set selects both pre-push guards", () => {
@@ -495,40 +495,23 @@ describe("AC-TC-4: hooks-only and assets-only change sets select both pre-push g
   });
 });
 
-describe("AC-TC-5: the hooks/assets marker is pinned against the two REAL guard files, not only fixture stand-ins (task-make-tree-scan-scopes-additive-instead-of-pre-emptive-and)", () => {
+describe("AC-TC-5: the two REAL pre-push guard files declare the hook pair they judge, not only fixture stand-ins (AC-TG-7 replaces the former content marker)", () => {
   /**
-   * The AC-TC-4 suite above proves the classifier recognizes the marker
-   * using FIXTURE strings that merely reproduce the real suites' literal
-   * substrings — it never reads the real files, so a future edit that
-   * accidentally rewords `packages/lore/tests/unit/assets/pre-push-parity
-   * .test.ts` or `packages/lore/tests/integration/pre-push-trip.bun.test.ts`
-   * out of matching `HOOK_OR_ASSET_PAIR_MARKER_RE` would go undetected by any
-   * test in this repo. This block closes that gap by reading the two REAL,
-   * checked-out files from disk and asserting the PRODUCTION regex — and the
-   * production classifier built on it — actually recognizes them.
+   * The AC-TC-4 suite above proves the selector honours a declaration using FIXTURE strings; it never
+   * reads the real files, so a future edit that drops the `@reads` lines from
+   * `packages/lore/tests/unit/assets/pre-push-parity.test.ts` or
+   * `packages/lore/tests/integration/pre-push-trip.bun.test.ts` would go undetected. This block reads
+   * the two REAL files and asserts the production parser finds both hook paths in their declarations.
    */
   const REAL_PARITY_TEST_PATH = "packages/lore/tests/unit/assets/pre-push-parity.test.ts";
   const REAL_TRIP_TEST_PATH = "packages/lore/tests/integration/pre-push-trip.bun.test.ts";
 
-  it("HAPPY: HOOK_OR_ASSET_PAIR_MARKER_RE matches the REAL pre-push-parity.test.ts content read from disk", () => {
-    const content = readFileSync(join(REPO_ROOT, REAL_PARITY_TEST_PATH), "utf8");
-    expect(HOOK_OR_ASSET_PAIR_MARKER_RE.test(content)).toBe(true);
-  });
-
-  it("HAPPY: HOOK_OR_ASSET_PAIR_MARKER_RE matches the REAL pre-push-trip.bun.test.ts content read from disk", () => {
-    const content = readFileSync(join(REPO_ROOT, REAL_TRIP_TEST_PATH), "utf8");
-    expect(HOOK_OR_ASSET_PAIR_MARKER_RE.test(content)).toBe(true);
-  });
-
-  it("REGRESSION: classifyTreeScanningOracle on the REAL pre-push-parity.test.ts keeps BOTH its prior repo-tracked-text-source scope AND hooks-and-assets-pair — never narrowed to hooks-and-assets-pair alone", () => {
-    const content = readFileSync(join(REPO_ROOT, REAL_PARITY_TEST_PATH), "utf8");
-    const scopes = classifyTreeScanningOracle(REAL_PARITY_TEST_PATH, content);
-    expect(scopes).toEqual(new Set(["repo-tracked-text-source", "hooks-and-assets-pair"]));
-  });
-
-  it("HAPPY: classifyTreeScanningOracle on the REAL pre-push-trip.bun.test.ts classifies as hooks-and-assets-pair (this file has no bare main() call, so it never had a prior tree-scan scope to retain)", () => {
-    const content = readFileSync(join(REPO_ROOT, REAL_TRIP_TEST_PATH), "utf8");
-    const scopes = classifyTreeScanningOracle(REAL_TRIP_TEST_PATH, content);
-    expect(scopes).toEqual(new Set(["hooks-and-assets-pair"]));
-  });
+  for (const realPath of [REAL_PARITY_TEST_PATH, REAL_TRIP_TEST_PATH]) {
+    it(`HAPPY: ${realPath} declares both hook copies it judges`, () => {
+      const declared = parseDeclaredInputs(readFileSync(join(REPO_ROOT, realPath), "utf8"));
+      const covered = [...declared.reads, ...declared.spawns];
+      expect(covered).toContain("hooks/pre-push");
+      expect(covered).toContain("assets/project/pre-push");
+    });
+  }
 });

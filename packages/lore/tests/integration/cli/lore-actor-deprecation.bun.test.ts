@@ -1,3 +1,4 @@
+// @spawns packages/lore/src/index.ts
 /**
  * `$LORE_ACTOR` is retired (spec-run-only-write-identity-and-run-end-claim-release, BR-1055; supersedes the
  * deprecation contract of spec-run-identity-slice-1 D8 / AC-RID-6, CLI half).

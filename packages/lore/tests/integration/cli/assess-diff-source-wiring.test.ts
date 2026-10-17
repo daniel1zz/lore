@@ -1,3 +1,4 @@
+// @spawns packages/lore/src/index.ts
 /**
  * Integration oracle for AC-JV-5 (spec-judgment-surfaces-must-verify-before-they-certify-machine,
  * D6) — PRODUCTION WIRING of `diffSource` through BOTH the CLI (`commands/assess.ts`) and MCP

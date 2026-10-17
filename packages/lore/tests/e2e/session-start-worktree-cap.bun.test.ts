@@ -1,3 +1,4 @@
+// @spawns assets/hooks/session-start-resume.mjs
 /**
  * AC-CRIT-8 — the SessionStart hook keeps its CONCATENATED additionalContext
  * under Claude Code's 10,000-char per-hook-output cap in a linked-worktree seat.

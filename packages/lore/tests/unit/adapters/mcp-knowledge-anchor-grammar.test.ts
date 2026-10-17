@@ -1,3 +1,5 @@
+// @reads src/another-valid-target.ts
+// @reads src/valid-target.ts
 /**
  * AC-RR-9 — closing the MCP side door that stored a grammar-invalid knowledge
  * `code_anchors` entry as a silent false green

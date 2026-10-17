@@ -1,3 +1,16 @@
+// @reads .claude/**
+// @reads .lore-bootstrap/**
+// @reads .lore/**
+// @reads .serena/**
+// @reads CLAUDE.md
+// @reads assets/**
+// @reads dist-npm/**
+// @reads dist/**
+// @reads docs/**
+// @reads hooks/**
+// @reads npm-pkg/**
+// @reads packages/**
+// @reads scripts/**
 /**
  * RED scenarios for AC-CV-8 (issue #209): the MCP tool count is a registered
  * variable (LORE_MCP_TOOL_NAMES), never a hand-typed number.

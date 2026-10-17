@@ -1,3 +1,4 @@
+// @spawns packages/lore/src/index.ts
 /**
  * Integration tests for `lore claim` / `lore release` / `lore evidence` / `lore ready`
  * CLI subcommands (SPEC-025). Runs the real CLI via subprocess against an isolated

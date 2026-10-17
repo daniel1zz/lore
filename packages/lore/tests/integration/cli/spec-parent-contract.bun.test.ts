@@ -1,3 +1,4 @@
+// @spawns packages/lore/src/index.ts
 /**
  * End-to-end test of the spec parent contract (Baseline slice 3b, AC-BLS3B-1), driven through the
  * real CLI (and therefore CorpusService) against a throwaway corpus.

@@ -1,3 +1,5 @@
+// @spawns assets/hooks/pre-tool-harness-run.mjs
+// @spawns dist/lore
 /**
  * @spec_ref AC-TE-6
  *

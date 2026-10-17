@@ -1,3 +1,4 @@
+// @spawns packages/lore/src/index.ts
 /**
  * Integration tests for `lore setup` (SPEC-046 §Design, task AC-046-E — the
  * FINAL CLI-wiring task). Runs the real CLI via subprocess (`bun run

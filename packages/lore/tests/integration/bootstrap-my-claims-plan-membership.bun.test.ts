@@ -1,3 +1,4 @@
+// @spawns packages/lore/src/index.ts
 /**
  * `lore bootstrap --json`'s `my_claims[].plan_slug` — RED-first suite for site
  * 12 of `task-plan-member-sites-twelve-and-thirteen-both-structurally`.

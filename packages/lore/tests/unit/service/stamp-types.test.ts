@@ -1,3 +1,10 @@
+// @reads packages/core/src/**
+// @reads packages/lore/packages/core/src/index.ts
+// @reads packages/lore/src/service/gate-predicates.ts
+// @reads packages/lore/tests/packages/core/src/index.ts
+// @reads packages/lore/tests/unit/packages/core/src/index.ts
+// @reads packages/lore/tests/unit/service/packages/core/src/index.ts
+// @reads packages/packages/core/src/index.ts
 /**
  * RED-phase oracle for SPEC-143's two-axis stamp type foundation (C1 + C2, R9;
  * AC-CT-9 half (c)).

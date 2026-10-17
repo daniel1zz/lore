@@ -1,3 +1,4 @@
+// @spawns packages/lore/src/index.ts
 /**
  * `lore ac add|set --timeout-ms` writes the AC-level `verify.timeout_ms`
  * (task-skill-implement-r0-11-lore-ac-add-set-timeout-ms-writes; spec-round-0-main-is-green AC-R0-2).

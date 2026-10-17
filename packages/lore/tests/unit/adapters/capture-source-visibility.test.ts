@@ -1,3 +1,4 @@
+// @spawns packages/lore/src/index.ts
 /**
  * `capture_source` visibility + a generic count↔enumerator contract
  * (task-raise-the-evidence-tail-guard-s-predicate-to-its-own,

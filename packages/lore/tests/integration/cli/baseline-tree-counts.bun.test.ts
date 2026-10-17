@@ -1,3 +1,4 @@
+// @spawns packages/lore/src/index.ts
 /**
  * `lore baseline tree` rule counts on every rule-holding node (issue #125, BR-674, AC-BLC-6), over a throwaway corpus.
  *

@@ -1,3 +1,10 @@
+// @spawns packages/lore/src/index.ts
+// @reads .claude/settings.json
+// @reads assets/**
+// @reads hooks/**
+// @reads packages/core/src/distribution-hooks.ts
+// @reads packages/lore/src/flows/setup-project-flow.ts
+// @reads packages/lore/src/service/project-setup-service.ts
 /**
  * One test for the whole retirement registry (`RETIREMENTS`, src/adapters/retirements.ts).
  * It replaces four tombstone files (setup-retires-session-start-fragments, init-context-skill-

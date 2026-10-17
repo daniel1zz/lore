@@ -1,3 +1,4 @@
+// @spawns dist/lore
 /**
  * Compiled-binary e2e for `lore context list | add | remove`
  * (spec-rule-store-git-tracked-fragment-selection-on-demand-skill, Scope 7, AC-RS-7, BR-1063;

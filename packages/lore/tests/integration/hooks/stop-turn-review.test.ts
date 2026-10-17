@@ -1,3 +1,6 @@
+// @spawns assets/hooks/post-edit-mark.mjs
+// @spawns assets/hooks/stop-turn-review.mjs
+// @spawns assets/hooks/user-prompt-turn-start.mjs
 /**
  * AC-TE-3 (+ AC-TE-2 remaining half): stop-turn-review.mjs reviews the MAIN session's turn once —
  * silent when compliant, setting-gated on main-session source edits, one block listing every finding.

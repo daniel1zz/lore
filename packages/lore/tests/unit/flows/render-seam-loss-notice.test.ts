@@ -1,3 +1,5 @@
+// @reads packages/lore/src/adapters/cli/commands/get.ts
+// @reads packages/lore/src/flows/feed-flow.ts
 /**
  * The SHARED `renderDocMarkdown` seam announces withheld structured `extra`
  * (task-the-shared-renderdocmarkdown-seam-still-drops-structured).

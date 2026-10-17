@@ -1,3 +1,6 @@
+// @spawns packages/lore/src/index.ts
+// @reads assets/**
+// @reads packages/**
 /**
  * AC-CV-7 RED scenarios — the settings-hook claude dir is an invocation
  * variable `{{lore:claude_dir}}` resolved through expandTemplate (spec D7).

@@ -1,3 +1,4 @@
+// @spawns dist/lore
 /**
  * `lore create task --anchor` / `lore anchor add|rm|list` / `lore claim
  * --machine/--worktree` — CLI-adapter exit-code contract tests (SPEC-042

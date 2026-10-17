@@ -1,3 +1,6 @@
+// @reads package.json
+// @reads packages/**
+// @reads tsconfig.json
 /**
  * RED test: census fidelity — completeness (non-err refusals, field-distinct keys) and
  * determinism (keys independent of node_modules layout). Issues #59 and #60.

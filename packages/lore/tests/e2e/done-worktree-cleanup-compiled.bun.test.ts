@@ -1,3 +1,4 @@
+// @spawns dist/lore
 /**
  * done-worktree-cleanup-compiled.bun.test.ts — AC-WS-3 (spec-one-worktree-removal-test-for-the-guard-lore-done-and-a;
  * D1, D3, D5; BR-1079): `lore done` removes its claim-recorded worktree through the SAME test as `lore worktree check`.

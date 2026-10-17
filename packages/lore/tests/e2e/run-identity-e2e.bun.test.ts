@@ -1,3 +1,6 @@
+// @spawns assets/hooks/pre-tool-harness-run.mjs
+// @spawns assets/hooks/run-register.mjs
+// @spawns dist/lore
 /**
  * @spec_ref AC-RID-18
  *

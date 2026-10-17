@@ -1,3 +1,5 @@
+// @reads assets/project/CLAUDE.md.template
+// @reads assets/skills/lore-init-context/SKILL.md
 /**
  * init-context skill + project CLAUDE.md template — SSOT-consumption contract
  * (SPEC-project-claude-md-content-contract-governance-injected, AC-CMC-5).

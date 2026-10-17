@@ -1,3 +1,5 @@
+// @spawns packages/lore/src/index.ts
+// @spawns scripts/seed-write-spec-rule.ts
 /**
  * The shared `renderDocMarkdown` seam's loss notice REACHES `lore feed` and — the sharp
  * end — a `lore gate` DENIAL pack

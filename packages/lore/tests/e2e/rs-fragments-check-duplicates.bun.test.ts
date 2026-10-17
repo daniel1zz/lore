@@ -1,3 +1,4 @@
+// @spawns dist/lore
 /**
  * Compiled-binary e2e for AC-RS-8 (spec-rule-store-git-tracked-fragment-selection-on-demand-skill):
  * `lore fragments check` fails with exit 4 on a whitespace-normalized duplicate line across layers

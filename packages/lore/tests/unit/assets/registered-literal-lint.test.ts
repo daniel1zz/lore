@@ -1,3 +1,30 @@
+// @reads .gitattributes
+// @reads .gitignore
+// @reads .lore-bootstrap/**
+// @reads .lore/**
+// @reads .serena/**
+// @reads CHANGELOG.md
+// @reads CLAUDE.md
+// @reads README.md
+// @reads assets/**
+// @reads bun.lock
+// @reads bunfig.toml
+// @reads dist-npm/**
+// @reads docs/**
+// @reads hooks/**
+// @reads lore.tree.yaml
+// @reads lore.tree.yaml.example
+// @reads npm-pkg/**
+// @reads package.json
+// @reads packages/**
+// @reads scripts/**
+// @reads tsconfig.base.json
+// @reads tsconfig.json
+// @reads vitest.config.ts
+// @reads vitest.node-files.ts
+// @reads vitest.node.config.ts
+// @reads vitest.shared.ts
+// @reads workspace-aliases.ts
 /**
  * @spec_ref spec-lore-owned-agent-context-is-generated-from-templates-and AC-CV-6 (D8, D9)
  *

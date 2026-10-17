@@ -1,3 +1,4 @@
+// @spawns dist/lore
 /**
  * SPEC-103 §Mechanisms M2/M3 — judgment-required promote (anti-lottery worst-
  * decision-wins, `--override-judgment`/`--override-no-judgment` audited escapes) +

@@ -1,3 +1,6 @@
+// @reads package.json
+// @reads packages/**
+// @reads tsconfig.json
 /**
  * RED test: the site census follows functions passed by dependency injection (issue #104).
  *

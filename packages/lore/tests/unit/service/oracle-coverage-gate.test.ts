@@ -1,3 +1,6 @@
+// @reads packages/lore/src/service/checkpoint-registry.ts
+// @reads packages/lore/src/service/gate-predicates.ts
+// @reads packages/lore/tests/fixtures/spec-promote-unconfigured-baseline.json
 /**
  * RED suite (TDD-Role: red, paired-impl task-skill-implement-core-profiles-gate-wiring-
  * threading-status) for SPEC-058 AC-V-2 — the `oracleCoverage` gate predicate wired

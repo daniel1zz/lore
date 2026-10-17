@@ -1,3 +1,4 @@
+// @spawns packages/lore/src/index.ts
 /**
  * End-to-end test of the spec approval citation requirement (Baseline slice 3b, AC-BLS3B-2),
  * driven through the real CLI against a throwaway corpus.

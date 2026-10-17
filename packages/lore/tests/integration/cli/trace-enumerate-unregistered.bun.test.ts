@@ -1,3 +1,4 @@
+// @spawns packages/lore/src/index.ts
 /**
  * @spec_ref spec-a-write-side-fact-with-no-read-side-address-counts-with-no
  *           §Scope M1, AC-RR-2

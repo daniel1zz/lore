@@ -1,3 +1,4 @@
+// @spawns packages/lore/src/index.ts
 /**
  * AC-MOS-6 — `spec-the-mirror-oracles-two-command-surfaces-are-o-corpus-by`,
  * `task-a-narrowed-export-must-never-delete-another-type-s-mirror`.

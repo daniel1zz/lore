@@ -1,3 +1,4 @@
+// @spawns packages/lore/src/index.ts
 /**
  * CLI e2e test for `lore requirement add`'s SPEC-059 quantifiability lint
  * (AC-RQ-4). Spawns the real CLI from source against a THROWAWAY corpus

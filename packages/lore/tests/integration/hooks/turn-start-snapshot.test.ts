@@ -1,3 +1,6 @@
+// @spawns assets/hooks/post-edit-mark.mjs
+// @spawns assets/hooks/stop-turn-review.mjs
+// @spawns assets/hooks/user-prompt-turn-start.mjs
 /** AC-TE-2 (snapshot half): turn start records a working-tree tree id via a temporary index. */
 import { describe, it, expect } from "vitest";
 import { readFileSync, writeFileSync, existsSync } from "node:fs";

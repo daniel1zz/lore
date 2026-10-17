@@ -1,3 +1,5 @@
+// @reads packages/lore/tests/integration/cli/assess-ai.bun.test.ts
+// @reads packages/lore/tests/unit/adapters/mcp-tools-assess.test.ts
 /**
  * `lore evidence` mixed-runner invocation guard — closes
  * task-vitest-run-silently-drops-a-bun-test-ts-named-alongside-a.

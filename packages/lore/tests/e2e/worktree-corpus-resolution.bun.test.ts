@@ -1,3 +1,4 @@
+// @spawns dist/lore
 /**
  * @spec_ref AC-WH-4
  *

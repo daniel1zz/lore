@@ -1,3 +1,4 @@
+// @spawns packages/lore/src/index.ts
 /**
  * RED tests for requirement coverage from citations (baseline slice 3a, BL-6 step 4) —
  * task-red-c-requirement-coverage-from-citations.

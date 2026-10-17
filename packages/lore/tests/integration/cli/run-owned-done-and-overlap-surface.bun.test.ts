@@ -1,3 +1,4 @@
+// @spawns packages/lore/src/index.ts
 /**
  * The CLI SURFACE decides `lore done` and the anchor-overlap claim gate by RUN.
  *

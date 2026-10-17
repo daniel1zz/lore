@@ -1,3 +1,4 @@
+// @spawns packages/lore/src/index.ts
 /**
  * AC-GV-4 (spec-governance-visibility-an-armed-gate-that-vacuously-passes §B2) —
  * `lore ac add`/`lore ac set` PRINT the approved->draft demotion `commands/ac.ts:50`

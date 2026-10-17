@@ -1,3 +1,4 @@
+// @spawns packages/lore/tests/fixtures/cite-retire-race-worker.ts
 /**
  * @spec_ref AC-BLS2-3
  * @task task-skill-test-red-retire-vs-cite-race-ac-bls2-3 (RED; paired impl = C4 gate + migration-014)

@@ -1,3 +1,4 @@
+// @spawns dist/lore
 /**
  * AC-IT-2 — the COMPILED `dist/lore`: `lore done` on a filed report's OWN task closes its GitHub issue, and
  * `lore issues --sync` closes the done-archived ones while only labelling the rest

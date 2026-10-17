@@ -1,3 +1,5 @@
+// @reads assets/**
+// @reads packages/lore/package.json
 /**
  * Asset SSOT conformance suite (SPEC-046 AC-046-D).
  *

@@ -1,3 +1,4 @@
+// @spawns packages/lore/src/index.ts
 /**
  * `lore evidence`'s tail guard — the PREDICATE now matches its own MESSAGE
  * (task-raise-the-evidence-tail-guard-s-predicate-to-its-own,

@@ -1,3 +1,5 @@
+// @spawns packages/lore/src/index.ts
+// @reads assets/project/CLAUDE.md.template
 /**
  * Template pointer — `.claude/rules/` reaches consumers via `lore setup
  * --project` (spec-claude-md-governance-content-dimension-checks-wire-the,

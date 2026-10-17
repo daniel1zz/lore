@@ -1,3 +1,5 @@
+// @reads .claude/**
+// @reads assets/**
 /**
  * Distribution carries the no-parent spec contract (AC-BLS3B-9, BR-1, BR-2, AS-18).
  *

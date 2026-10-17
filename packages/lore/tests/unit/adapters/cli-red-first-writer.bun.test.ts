@@ -1,3 +1,4 @@
+// @spawns dist/lore
 /**
  * `lore red-first <task>` — the CLI author→trip end-to-end oracle for
  * task-red-first-discipline-is-asked-for-in-prose-but-never. Proves the

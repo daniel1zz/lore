@@ -1,3 +1,4 @@
+// @spawns packages/lore/src/index.ts
 /**
  * RED integration tests for the adoption mode on `lore status --check-claude-md`
  * (spec-claude-md-root-section-structure-check-and-adoption-mode, AC-STR-2;

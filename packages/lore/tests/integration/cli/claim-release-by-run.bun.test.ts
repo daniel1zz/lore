@@ -1,3 +1,4 @@
+// @spawns packages/lore/src/index.ts
 /**
  * RED: release is decided and recorded by harness RUN, on BOTH the task and the phase path.
  *

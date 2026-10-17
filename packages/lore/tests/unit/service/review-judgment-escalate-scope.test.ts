@@ -1,3 +1,4 @@
+// @reads packages/core/src/config.ts
 /**
  * Tests for `spec-an-escalate-blocks-approval-for-every-doc-type-and-the` (D1-D5):
  * the `escalate` VERDICT escapes `workflow.review.judgment_required_types` and blocks

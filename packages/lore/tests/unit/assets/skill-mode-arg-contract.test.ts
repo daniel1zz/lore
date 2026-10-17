@@ -1,3 +1,4 @@
+// @reads assets/skills/**
 /**
  * Mode-routed skills advertise their argument contract in the description (issue #213).
  *

@@ -1,3 +1,4 @@
+// @spawns packages/lore/src/index.ts
 /**
  * Six-dimension tests for the whole-CLI stdout non-blocking-fd1 truncation fix
  * (SPEC-048 follow-up, task

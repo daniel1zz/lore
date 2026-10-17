@@ -1,3 +1,5 @@
+// @reads packages/lore/src/adapters/**
+// @reads packages/lore/src/service/corpus-service.ts
 /**
  * plan-exempt-attestation.test.ts — SPEC-069 AC-069-8 … AC-069-12: the
  * `lore plan exempt-attestation` writer for the plan-close attestation floor's

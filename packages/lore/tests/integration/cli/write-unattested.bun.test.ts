@@ -1,3 +1,4 @@
+// @spawns packages/lore/src/index.ts
 /**
  * RED — unattested writes are kept, never refused, never guessed
  * (spec-run-identity-slice-1-harness-attested-runs-attested D7 / D11; rules BR-1035, BR-1030, BR-1033).

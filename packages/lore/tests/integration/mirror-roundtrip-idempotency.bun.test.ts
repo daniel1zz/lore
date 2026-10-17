@@ -1,3 +1,4 @@
+// @spawns packages/lore/src/index.ts
 /**
  * AC-MIS-2 oracle (spec-mirror-identifier-ssot D1) — round-trip idempotency
  * across the corpus<->file mirror's export<->migrate seam.

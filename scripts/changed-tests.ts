@@ -1,207 +1,55 @@
 #!/usr/bin/env bun
 /**
- * Two-runner changed-test selector (`bun run test:changed`) — SPEC
- * `spec-two-runner-changed-test-selection-deterministic-test`.
+ * Changed-test selector (`bun run test:changed`) — AC-TG-7 of
+ * `spec-test-governance-guards-that-refuse-bad-tests-declared`; baseline rule AS-24.
  *
- * TG-23 (task-skill-implement-tg-23): the repo now has ONE runner — vitest on the Bun runtime —
- * and the two groups below are only the file-naming split (`.bun.test.ts` vs the rest) that the
- * selection and accounting still report; both groups execute through `bunx --bun vitest run`
- * (files listed in `vitest.node-files.ts` through the Node config). The text below describes
- * the original two-runner design the selection rules came from. It was:
- * `.bun.test.ts` under `bun test` (needs `bun:sqlite`), everything else under
- * `vitest`. The de-facto worktree regression command, `bunx vitest run
- * --changed <base>`, is STRUCTURALLY BLIND to every `.bun.test.ts` file —
- * vitest's own dependency graph never loads them, so a change whose only
- * consumers live bun-side sweeps green while broken (incident: T1's M3
- * schema change broke `plan-close-cascade.bun.test.ts`; `vitest --changed`
- * showed green; the break surfaced only in the main-checkout full-suite run —
- * retro `knowledge-full-system-spec-compliance-audit-2026-07-27-85-11-1`,
- * follow-up lesson 2).
+ * Purpose: from the files a change touches, select the test files that can be affected, run them
+ * under the one runner (vitest on the Bun runtime; files listed in `vitest.node-files.ts` under
+ * Node), and print the selection with a reason per file. Never a silent partial sweep.
  *
- * This script replaces that ad-hoc habit with one deterministic command that
- * selects and runs affected tests across BOTH runners via a reverse-dependency
- * BFS over a regex-scanned static import graph, with loud, mandatory
- * selection accounting (never a silent partial sweep).
+ * ## Selection = static imports UNION declared inputs, nothing else
  *
- * ## Algorithm
+ *   1. Changed set: `git diff --name-only <base>...HEAD` unioned with uncommitted changes
+ *      (`git status --porcelain`). Default base: `git merge-base main HEAD`.
+ *   2. `changed-test`: a changed `*.test.ts(x)` file selects itself.
+ *   3. `transitive`: reverse-dependency BFS over the static import graph of every
+ *      `packages/*\/src`, `packages/*\/tests` and `scripts/` `.ts(x)` file. The graph is built by
+ *      `extractImportSpecifiers`, a regex scan for `import ... from`, `export ... from`, bare
+ *      `import "x"` and `import("x")` with a LITERAL specifier. A computed specifier is invisible.
+ *      Measured 2026-10-17 on this tree: `packages/lore/src/index.ts` reaches every CLI command
+ *      only through literal `import("./commands/x.js")` calls, so the scan MUST follow them (the
+ *      previous scan ignored them, which made every closure computed from the CLI entry empty).
+ *   4. `declared-read` / `declared-spawn`: a test that depends on a repository file it does not
+ *      import says so in its leading comment block (format and rationale: scripts/test-declared-inputs.ts):
  *
- *   1. Changed set: `git diff --name-only <base>...HEAD` unioned with
- *      uncommitted changes (`git status --porcelain`). Default base: `main`
- *      via `git merge-base main HEAD` (correct under a worktree checkout,
- *      where `main` itself may be checked out elsewhere) — an explicit
- *      `<base>` argument overrides this and is diffed against directly.
- *   2. Import graph: every `packages/*\/src/**\/*.ts(x)` file, every
- *      `packages/*\/tests/**\/*.ts` file, AND every `scripts/**\/*.ts` file
- *      (flat — `scripts/` has no `src`/`tests` split of its own;
- *      `scripts/tests/` is walked as part of the same `scripts/` tree) is
- *      regex-scanned for static `import ... from "..."` / `export ... from
- *      "..."` specifiers (see `extractImportSpecifiers`). `scripts/` was
- *      ADDED to this universe (previously `packages/*` only) because it
- *      hosts this repo's OWN deterministic gates — the test-budget ledger,
- *      AC-ref integrity, and this very selector — and a changed
- *      `scripts/tests/*.test.ts` file went unselected under the narrower
- *      universe even though rule (a), "changed test files", is the simplest
- *      rule this script has (task
- *      `task-test-changed-s-file-universe-is-packages-not-the-repo-the`).
- *      Relative specifiers resolve against the importing file's directory
- *      with this repo's `.js`-import→`.ts`-file convention; the workspace
- *      aliases `@lore/core` / `@lore/core/node` resolve via
- *      `packages/core/package.json`'s `exports` map. Dynamic `import(...)`
- *      and any other non-literal specifier are IGNORED BY DESIGN — a regex
- *      scan cannot evaluate expressions, and this repo does not use dynamic
- *      imports for cross-module wiring. A `scripts/*.ts` file with no
- *      reverse-dependent test (most of them — `scripts/build.ts`,
- *      `scripts/platform-map.ts`, ...) selects nothing when it alone
- *      changes; this is the SAME D3 zero-selection-warning path every other
- *      untested source file already takes (step 5/6 — the accounting prints
- *      `WARNING:` because the file was graph-known, AND the run now exits
- *      non-zero via the loud-zero rule, step 6) — never a crash, never a
- *      silent select-everything fallback, and NOT a scripts/-specific
- *      special case.
- *   3. Selection = union of:
- *      (a) changed test files themselves (`changed-test`);
- *      (b) test files whose transitive reverse-dependency closure reaches
- *          >=1 changed source file (`transitive`);
- *      (c) binary-consumers — ANY `*.test.ts` / `*.test.tsx` file (not only
- *          `.bun.test.ts`) whose OWN content spawns this repo's CLI entry as
- *          a subprocess, included whenever ANY `packages/lore/src/**` or
- *          `packages/core/src/**` file changed (`binary-consumer`). Two
- *          distinct spawn shapes exist in this repo and are told apart by
- *          marker (`classifyBinaryConsumer`): a "compiled" spawn (`dist/lore`
- *          / `LORE_BIN` marker) runs the built binary; a "source" spawn
- *          (`INDEX_TS` marker — every `tests/integration/cli/*.test.ts` file
- *          spawns `bun run <INDEX_TS>` where `INDEX_TS` resolves to
- *          `src/index.ts`) runs the entry source directly. Both spawn a
- *          subprocess, so import tracing cannot see through to either — only
- *          the COMPILED kind additionally gates the step-4 pre-build (a
- *          source-entry spawn always runs current source, never a stale
- *          artifact). Pretending either kind were reachable by import tracing
- *          would silently rebuild the exact blind spot this script exists to
- *          close.
- *      (d) tree-scanning oracles — a test that judges files it reaches by a
- *          RUNTIME FILESYSTEM SCAN rather than any import edge
- *          (`classifyTreeScanningOracle`; `tree-scan-oracle`), included
- *          whenever >=1 file in the FULL raw changed-file list (not just the
- *          traced universe — see below) falls within THAT test's own scan
- *          scope (`isChangedFileInTreeScanScope`). Membership + scope are
- *          derived from content markers already present in the test's own
- *          source, never a hardcoded filename list — the same shape as (c)'s
- *          `classifyBinaryConsumer`, and the same underlying escape as (c):
- *          import tracing cannot see through a `readdirSync`/`git ls-files`
- *          walk any more than it can see through a subprocess spawn (D2, now
- *          measured a third time: `scripts/tests/check-test-budgets.test.ts`
- *          scans `<repoRoot>/packages` for every `.test.ts`/`.bun.test.ts`
- *          file via `scanRepoTree`, scope `"packages-test-tree"`;
- *          `scripts/tests/check-no-nul-bytes.test.ts` scans every git-tracked
- *          file in the ENTIRE repo via `git ls-files`, scope
- *          `"repo-tracked-text-source"` — genuinely DIFFERENT scopes, so this
- *          rule checks each qualifying test against its OWN scope rather than
- *          firing all tree-scanning oracles off one shared trigger; a change
- *          to a file outside BOTH scopes, e.g. a binary asset, selects
- *          neither). Conservative in the direction this task requires:
- *          over-selecting one extra whole-tree oracle costs one fast test
- *          file; under-selecting it is exactly how 8 spawn-budget violations
- *          reached `main` twice in one day (task
- *          `task-test-changed-s-fourth-invisible-edge-a-tree-scanning`).
+ *          // @reads packages/lore/assets/**     selected when a changed file matches the glob
+ *          // @spawns dist/lore                  selected when a changed file is in the spawned
+ *          //                                    program's source closure (see below)
  *
- *          A THIRD scope, `"hooks-and-assets-pair"`, was added later (task
- *          `task-teach-changed-tests-membership-and-tree-scan-scope-about`,
- *          AC-TC-4) for the two pre-push guard suites
- *          (`packages/lore/tests/unit/assets/pre-push-parity.test.ts`,
- *          `packages/lore/tests/integration/pre-push-trip.bun.test.ts`),
- *          which judge `hooks/pre-push` and `assets/project/pre-push`
- *          directly via `readFileSync`/`spawnSync` rather than a directory
- *          walk. `hooks/**` and `assets/**` are OUTSIDE `loadFileMap`'s
- *          universe entirely (below), so those two paths were previously
- *          invisible to every rule in this file at once: a hook-only change
- *          set was refused by loud-zero (step 6), but hook + ANY OTHER
- *          matched file (e.g. the assets manifest a real `assets/` edit
- *          forces you to regenerate) selected non-empty, silenced loud-zero,
- *          and still omitted both guards — a confident false green. Neither
- *          real guard suite contains a bare `main()`, so this scope's
- *          membership signal is a different content marker (the literal
- *          `hooks/pre-push` / `assets/project/pre-push` substrings both
- *          suites already carry, unedited, in their own doc comments and
- *          path constants — see `HOOK_OR_ASSET_PAIR_MARKER_RE`), and its
- *          scope check is a plain `hooks/`/`assets/` prefix rather than
- *          `hasTextSourceExtension`, which returns `false` for both real
- *          paths precisely because they are extensionless.
+ *      `@spawns <path>` names a program or script the test starts as a child process. A source file
+ *      (`packages/lore/src/index.ts`, `scripts/x.ts`) selects the test on a change to that file or to
+ *      anything in its static import closure. `dist/lore` stands for the compiled binary: its closure
+ *      is `COMPILED_BINARY_INPUTS` (the entries scripts/build.ts compiles plus the directories it
+ *      embeds), and a selection containing such a test is run after `bun run build`.
+ *      A test that declares nothing is selected only through steps 2 and 3. There is no content-marker
+ *      heuristic: the former `binary-consumer` rule (any `INDEX_TS` / `dist/lore` mention selected on
+ *      ANY change under packages/{lore,core}/src) and the whole-tree-scanner rule (bare `main()` and
+ *      `hooks/pre-push` content markers) are removed; both are replaced by declarations the run-time check
+ *      enforces (scripts/test-read-recorder.ts fails a test whose reads or spawns are undeclared).
+ *   5. Accounting is mandatory: a `selected N` line per runner, a reason per file, the build-first
+ *      decision, a `WARNING:` for a graph-known changed file that selected nothing.
+ *   6. Loud zero (`isLoudZero`): the ONE legitimate silent zero-selection is a genuinely empty changed
+ *      set. Any other zero-selection outcome (including a changed file outside the traced universe)
+ *      exits 1 in both `--list` and executing mode.
  *
- *          `classifyTreeScanningOracle` originally CHECKED this new marker
- *          first and RETURNED on match, before the pre-existing `main()`
- *          path ever ran — a pre-emptive pick, not an additive one. Six real
- *          governance test files (see `HOOK_OR_ASSET_PAIR_MARKER_RE`'s own
- *          doc comment) legitimately match BOTH signals — they document the
- *          pre-push hook in prose while ALSO being genuine `"packages-
- *          test-tree"` / `"repo-tracked-text-source"` tree-scanning oracles
- *          — so that pre-emptive return silently NARROWED each one's real
- *          scope the moment AC-TC-4 landed, regressing rule (d) for files it
- *          already correctly covered before. Fixed (task
- *          `task-make-tree-scan-scopes-additive-instead-of-pre-emptive-and`,
- *          AC-TC-5) by making `classifyTreeScanningOracle` return the UNION
- *          of every matching scope (a `Set`, never a single "first match
- *          wins" value) and having this rule fire on a match against ANY
- *          member of that set — never on the OLD 3-way exclusive choice.
+ * Vitest's own graph (`vitest list --filesOnly --changed <ref>`, a list-only form that exists in 3.2.6) was
+ * measured and NOT adopted for selection: it resolves the graph by transforming candidate tests (a
+ * list over a ~450-file diff had not finished after 300 s, while this regex scan answers in seconds),
+ * and it sees neither declared reads nor spawns, so this scan would still be needed for those. One
+ * parser (this regex scan) feeds both the import graph and the `@spawns` closure.
  *
- *      Rule (d)'s membership/scope derivation was one of three explicitly
- *      weighed options (task requirement): (i) a CONTENT MARKER in the test
- *      file, the same shape (c) already uses — CHOSEN, for the reason above;
- *      (ii) selecting every tree-scanning oracle whenever ANY test file
- *      changed, on the premise that "their scan scope IS the test tree" —
- *      REJECTED, because it is only true for `"packages-test-tree"`;
- *      `check-no-nul-bytes.test.ts`'s real scope is every git-tracked
- *      TEXT-SOURCE file repo-wide (`.md`, `.json`, `.yaml`, ...), most of
- *      which are not test files at all — this option would silently
- *      UNDER-select exactly the class of change the second measured incident
- *      involved; (iii) an explicit declaration the test (or its module)
- *      exports — REJECTED as the primary mechanism because it would require
- *      editing `scripts/check-test-budgets.ts` / `scripts/check-no-nul-bytes.ts`
- *      to add a symbol whose only purpose is feeding this selector, when a
- *      marker already present in each test's own content (a bare `main()`
- *      call, and — for the wider scope only — an import of
- *      `hasTextSourceExtension`) says the same thing for free. Where an
- *      explicit export ALREADY exists for another reason, it is reused
- *      rather than duplicated: `isChangedFileInTreeScanScope`'s
- *      `"repo-tracked-text-source"` branch defers entirely to the imported
- *      `hasTextSourceExtension` (`check-no-nul-bytes.ts`'s own allowlist,
- *      never re-hardcoded here) — SSOT, in the spirit of option (iii),
- *      without inventing a new export solely to satisfy this selector.
- *   4. Execution: selected vitest files run via one `bunx vitest run <files>`;
- *      selected bun files run via `cd packages/lore && bun test <files>`. If
- *      >=1 COMPILED binary-consumer was selected (as opposed to a source-only
- *      one — see step 3(c)), `bun run build` runs FIRST (a stale compiled
- *      `dist/lore` is a known false-oracle vector); this decision is carried
- *      on the selection data (`SelectedFile.binaryConsumerKind`), never
- *      re-derived by re-reading files at execution time. `--list` prints the
- *      selection and accounting — including the build-first decision, so it
- *      is observable without actually running anything — without executing
- *      any runner.
- *   5. Accounting is mandatory, not optional: a `selected N` line per runner
- *      plus a reason tag per selected file, always printed — a changed,
- *      graph-known source file that selects zero tests additionally prints a
- *      `WARNING:` line, and the loud-zero rule (step 6) prints a `FAIL:`
- *      line naming every unselected changed path whenever it fires.
- *   6. Loud zero (`isLoudZero`, task
- *      `task-test-changed-selects-nothing-for-any-scripts-change-and`): the
- *      ONE legitimate silent zero-selection is a genuinely EMPTY changed-file
- *      set (nothing changed at all). Any other zero-selection outcome —
- *      including a changed file OUTSIDE the traced universe entirely (a
- *      repo-root config file, or a future directory nobody thought to widen
- *      `loadFileMap` for) — is loud, not silent: `runCli` returns exit code 1
- *      for it, in BOTH `--list` and executing mode, so `--list`'s output AND
- *      exit code both distinguish "nothing changed" from "N files changed, 0
- *      selected" — they must never render alike. Before this rule, a
- *      worktree agent whose entire slice lived in an untraced directory got
- *      exit 0 with zero files selected and had measured nothing (the exact
- *      incident this task fixes; the `scripts/` tracing gap that TRIGGERED
- *      it is closed separately by step 2's universe widening — this rule is
- *      the backstop for the NEXT untraced directory nobody thought of).
- *
- * Exit code is non-zero iff any executed runner fails, a git/import-graph
- * resolution step fails (missing `packages/core/package.json` exports,
- * unreachable git ref, etc.), OR the loud-zero condition above fires — never
- * a silent partial result and never a silent zero-selection unless truly
- * nothing changed.
+ * Exit code is non-zero iff an executed runner fails, a git/graph/declaration step fails, or the
+ * loud-zero condition fires.
  *
  * Usage:
  *   bun scripts/changed-tests.ts                # diff against merge-base(main, HEAD)
@@ -209,12 +57,10 @@
  *   bun scripts/changed-tests.ts --list HEAD     # diff against an explicit ref
  *   bun scripts/changed-tests.ts <base>          # diff against an explicit ref and run
  *
- * Side-effect class: the CLI entrypoint (`main`, below `import.meta.main`) is
- * IO — spawns `git`, reads the working tree, spawns `vitest`/`bun test`/`bun
- * run build`. Every other exported symbol above it is PURE (operates only on
- * an injected file map / alias map / changed-file list), which is what makes
- * `packages/lore/tests/unit/scripts/changed-tests-selector.test.ts` able to
- * unit-test the selection algorithm with zero git dependency.
+ * Side-effect class: `runCli` is IO (git, disk, subprocesses). Every other exported symbol is PURE
+ * (operates on an injected file map / alias map / changed-file list) so the selection algorithm is
+ * unit-testable with no git (scripts/tests/changed-tests-declared-inputs.test.ts,
+ * packages/lore/tests/unit/scripts/changed-tests-selector.test.ts).
  */
 
 import { existsSync, readFileSync, readdirSync } from "node:fs";
@@ -222,18 +68,13 @@ import { join as osJoin } from "node:path";
 import { posix } from "node:path";
 import { spawnSync } from "node:child_process";
 import { z } from "zod";
-// reason: reuse (not re-hardcode) `check-no-nul-bytes.ts`'s OWN text-source
-// extension/dotfile allowlist for rule (d)'s "repo-tracked-text-source" scope
-// below — that oracle already exports this exact predicate for its own
-// `git ls-files` scan; importing it keeps the two lists SSOT-linked instead
-// of drifting apart the next time a text extension is added there.
-import { hasTextSourceExtension } from "./check-no-nul-bytes.js";
+import { COMPILED_BINARY_INPUTS, DeclaredInputsError, matchesAnyPattern, parseDeclaredInputs, type DeclaredInputs } from "./test-declared-inputs.js";
 import { NODE_PROJECT_FILES } from "../vitest.node-files.js";
 
 /** Typed error for every git/graph/runner resolution failure this script can hit — never a bare `throw new Error`. */
 export class ChangedTestsError extends Error {
   constructor(
-    public readonly code: "cli" | "git" | "graph" | "runner",
+    public readonly code: "cli" | "git" | "graph" | "runner" | "declaration",
     message: string,
     public readonly context?: Record<string, unknown>,
   ) {
@@ -259,92 +100,63 @@ export interface ImportGraph {
 }
 
 /**
- * Runtime SSOT for the selection-reason vocabulary. {@link SelectionReason}
- * (below) is DERIVED from this tuple via `(typeof SELECTION_REASONS)[number]`
- * — never the reverse, and never hand-transcribed independently elsewhere.
- * Mirrors `@lore/core`'s `EVIDENCE_RESULTS` shape (`task-workflow.ts`): any
- * consumer that needs to recognise every valid reason at runtime (e.g. a test
- * assertion matcher built over `formatAccounting`'s rendered `(reason)`
- * suffix) must read this array, not re-transcribe the union into an
- * independent regex/list of its own — the exact transcription drift that
- * silently narrowed a consumer's hard-coded regex out of sync the moment
- * rule (d) added `"tree-scan-oracle"` to the TYPE alone (a type erases at
- * runtime, so nothing forced that consumer to notice — task
- * `task-main-is-red-a-fourth-selectionreason-was-added-to-the`).
- *
- * Array order is enumeration order only — it carries NO precedence meaning.
- * The real precedence rule (`changed-test` > `binary-consumer` >
- * `tree-scan-oracle` > `transitive`) lives solely in `selectAffectedTests`'s
- * rule-application order below.
+ * Runtime SSOT for the selection-reason vocabulary; {@link SelectionReason} is derived from it.
+ * Consumers that must recognise every reason at runtime read this array instead of transcribing the
+ * union. Array order is enumeration order only; precedence lives in `selectAffectedTests`
+ * (`changed-test` > `declared-spawn` > `declared-read` > `transitive`).
  */
-export const SELECTION_REASONS = ["changed-test", "transitive", "binary-consumer", "tree-scan-oracle"] as const;
+export const SELECTION_REASONS = ["changed-test", "transitive", "declared-read", "declared-spawn"] as const;
 
-/** Why a file was selected — derived from {@link SELECTION_REASONS}; add a new reason THERE, never as an independent literal here. Precedence when a file qualifies under >=1 rule: `changed-test` > `binary-consumer` > `tree-scan-oracle` > `transitive` (see `selectAffectedTests`). */
+/** Why a file was selected — derived from {@link SELECTION_REASONS}. */
 export type SelectionReason = (typeof SELECTION_REASONS)[number];
 
 /**
- * Type guard narrowing an untrusted string to {@link SelectionReason} — proof
- * a scraped tag is a REAL member of the vocabulary, not merely "looked like
- * one." A regex alternation built from `SELECTION_REASONS.join("|")` alone
- * can only ever match a KNOWN member by construction, which makes it
- * incapable of failing against an unknown tag; pairing it with this
- * independent membership check (or using this guard directly against an
- * extracted tag) is what lets a consumer's assertion actually reject an
- * out-of-vocabulary value instead of vacuously accepting anything shaped like
- * `(word)` (see `changed-tests-cli.bun.test.ts`'s CONTROL case).
+ * Type guard narrowing an untrusted string to {@link SelectionReason}: proof a scraped tag is a REAL
+ * member of the vocabulary, not merely shaped like one (a regex built from `SELECTION_REASONS.join("|")`
+ * alone cannot fail against an unknown tag).
  */
 export function isSelectionReason(value: string): value is SelectionReason {
   return (SELECTION_REASONS as readonly string[]).includes(value);
 }
+
 /** Which runner executes this file, derived solely from the `.bun.test.ts` naming convention (`isBunTestFile`). */
 export type TestRunner = "vitest" | "bun";
 
-/** Which CLI-entry shape a binary-consumer test spawns — see `classifyBinaryConsumer`. Only the `"compiled"` kind needs a fresh `dist/lore` before running (step 4's pre-build gate). */
-export type BinaryConsumerKind = "compiled" | "source";
-
 /**
- * One file in the final selection, with its runner and the reason it was
- * included. `binaryConsumerKind` is set whenever this file's own content
- * matches a binary-consumer marker (`classifyBinaryConsumer`), REGARDLESS of
- * `reason` — a file can be selected as `changed-test` or `transitive` and
- * still itself be a binary-consumer that needs the pre-build gate (AC-2: the
- * kind is computed once here, in the selection data, never re-derived later
- * by re-reading files at execution time).
+ * One file in the final selection. `needsCompiledBinary` is set whenever the test declares
+ * `@spawns dist/lore`, REGARDLESS of `reason`: a changed or transitively selected test that starts
+ * the binary still needs a fresh build first. Computed once here, never re-derived at execution time.
  */
 export interface SelectedFile {
   readonly path: string;
   readonly reason: SelectionReason;
   readonly runner: TestRunner;
-  readonly binaryConsumerKind?: BinaryConsumerKind;
+  readonly needsCompiledBinary?: true;
 }
 
 /** The full output of `selectAffectedTests` — the selection plus the mandatory zero-selection signal. */
 export interface SelectionResult {
   readonly selected: readonly SelectedFile[];
-  /** True iff >=1 changed, graph-known file selected zero tests — the "never silent" signal (D3). */
+  /** True iff >=1 changed, graph-known file selected zero tests — the "never silent" signal. */
   readonly zeroSelectionWarning: boolean;
   /**
-   * The full changed-file list exactly as given to `selectAffectedTests` —
-   * unlike `selected`/`zeroSelectionWarning`, this counts EVERY changed path,
-   * including ones outside the traced universe entirely (not even present in
-   * `fileMap` — e.g. a repo-root config file, or a future directory nobody
-   * thought to widen `loadFileMap` for). This is the SSOT for the loud-zero
-   * decision (`isLoudZero`, task
-   * `task-test-changed-selects-nothing-for-any-scripts-change-and`): an EMPTY
-   * list here is the ONE legitimate silent zero-selection state (nothing
-   * changed at all); anything else combined with `selected.length === 0` is
-   * not, regardless of whether any of those files were graph-known.
+   * The full changed-file list exactly as given — including paths outside the traced universe. SSOT
+   * for the loud-zero decision (`isLoudZero`): an EMPTY list is the one legitimate silent zero.
    */
   readonly changedFiles: readonly string[];
 }
 
 const FROM_IMPORT_RE = /\b(?:import|export)\b[^;'"()]*?\bfrom\s*["']([^"']+)["']/g;
 const BARE_IMPORT_RE = /\bimport\s*["']([^"']+)["']/g;
+// reason: the CLI entry reaches every command only through literal `import("./commands/x.js")` calls
+// (measured 2026-10-17, packages/lore/src/index.ts and adapters/cli/index.ts); a scan that ignores them
+// computes an empty closure for `@spawns` and misses real transitive tests. A COMPUTED specifier stays invisible.
+const DYNAMIC_IMPORT_RE = /\bimport\s*\(\s*(?:\/\*[^*]*\*\/\s*)?["']([^"']+)["']\s*\)/g;
 
 /**
  * Regex-scan one file's content for static `import ... from "..."` /
- * `export ... from "..."` / bare `import "..."` specifiers. Dynamic
- * `import(...)` and any specifier built from an expression are invisible to
+ * `export ... from "..."` / bare `import "..."` / `import("...")` specifiers
+ * with a LITERAL string. A specifier built from an expression is invisible to
  * this scan by design (see module header).
  */
 export function extractImportSpecifiers(content: string): string[] {
@@ -353,6 +165,9 @@ export function extractImportSpecifiers(content: string): string[] {
     if (match[1]) specifiers.add(match[1]);
   }
   for (const match of content.matchAll(BARE_IMPORT_RE)) {
+    if (match[1]) specifiers.add(match[1]);
+  }
+  for (const match of content.matchAll(DYNAMIC_IMPORT_RE)) {
     if (match[1]) specifiers.add(match[1]);
   }
   return [...specifiers];
@@ -431,265 +246,52 @@ export function isBunTestFile(path: string): boolean {
   return /\.bun\.test\.ts$/.test(path);
 }
 
-/** Matches a test file that spawns the COMPILED binary — `LORE_BIN`/`dist/lore` are this repo's established constant name / path for that spawn target (see e.g. `tests/e2e/libsql-lazy-load.test.ts`, `tests/integration/cli/slugify-compiled.bun.test.ts`). */
-const COMPILED_BINARY_MARKER_RE = /dist\/lore|LORE_BIN/;
-/**
- * Matches a test file that spawns the entry SOURCE directly (`bun run
- * <INDEX_TS>`, where `INDEX_TS` resolves to `packages/lore/src/index.ts` —
- * every `tests/integration/cli/*.test.ts` file, and ~40 more across the
- * suite, declare `const INDEX_TS = join(..., "src", "index.ts")` and spawn
- * via that identifier, never a literal path string). Keyed on the identifier
- * rather than a `src/index.ts` path substring on purpose: a literal-path scan
- * would also match unrelated prose like "packages/core/src/index.ts" (e.g.
- * `tests/unit/core/barrel-isolation.test.ts`'s doc comment) which spawns
- * nothing at all.
- */
-const SOURCE_ENTRY_MARKER_RE = /\bINDEX_TS\b/;
-
-/**
- * Classify `path`/`content` as one of two binary-consumer kinds, or neither.
- * A binary-consumer is ANY test file (`isTestFile` — not only
- * `.bun.test.ts`) whose OWN content spawns this repo's CLI entry as a
- * subprocess: there is no import edge for the reverse-dependency walk to
- * traverse through a subprocess call (D2 — a dependency-closure escape import
- * tracing cannot see through). Both kinds are escape-hatch candidates for
- * SELECTION; only `"compiled"` additionally forces the step-4 pre-build gate
- * (a "source" spawn runs `bun run <INDEX_TS>` against current source
- * directly — never a stale artifact, so no build is needed first). A marker
- * occurring only inside a comment still counts: neither this scan nor the
- * import-specifier scan above it is comment-aware, and a regex cannot
- * evaluate "is this line executable" any more than it can evaluate a dynamic
- * `import()` expression (see module header, step 2).
- */
-export function classifyBinaryConsumer(path: string, content: string): BinaryConsumerKind | undefined {
-  if (!isTestFile(path)) return undefined;
-  if (COMPILED_BINARY_MARKER_RE.test(content)) return "compiled";
-  if (SOURCE_ENTRY_MARKER_RE.test(content)) return "source";
-  return undefined;
-}
-
-/** `true` iff `path`/`content` is a binary-consumer candidate of EITHER kind (see `classifyBinaryConsumer`) — the boolean gate rule (c) uses to decide inclusion. */
-export function isBinaryConsumerCandidate(path: string, content: string): boolean {
-  return classifyBinaryConsumer(path, content) !== undefined;
-}
-
-/**
- * Rule (c)'s trigger stays scoped to `packages/{lore,core}/src/` ON PURPOSE —
- * the binary-consumer escape hatch (subprocess spawns of the CLI entry) is a
- * property of THOSE two packages' source, not of `scripts/`. Widening the
- * file UNIVERSE (see `loadFileMap`) to include `scripts/**\/*.ts` does not
- * change this trigger's prefix; it only grows the CANDIDATE pool the trigger
- * scans over (any `scripts/tests/*.test.ts` that itself matched a
- * binary-consumer marker would now be eligible too — none do today, see the
- * `changed-tests-selector.test.ts` scripts/-universe coverage).
- */
-const LORE_OR_CORE_SRC_PREFIX_RE = /^packages\/(?:lore|core)\/src\//;
-
-/**
- * Which real-tree scope a tree-scanning oracle test judges — see
- * `classifyTreeScanningOracle` for how a test earns one of these, and
- * `isChangedFileInTreeScanScope` for how a changed path is checked against
- * it. `"packages-test-tree"` mirrors `scripts/check-test-budgets.ts`'s own
- * documented scan root (`scanRepoTree` walks `<repoRoot>/packages` for every
- * `.test.ts`/`.bun.test.ts` file, EXCLUDING `scripts/tests/` on purpose — see
- * that function's header). `"repo-tracked-text-source"` mirrors
- * `scripts/check-no-nul-bytes.ts`'s `main()`, which scans every git-tracked
- * file in the ENTIRE repo matching {@link hasTextSourceExtension}'s allowlist
- * — a strictly WIDER scope than `"packages-test-tree"`, not limited to
- * `packages/` or to test files at all. `"hooks-and-assets-pair"` is neither —
- * it does not scan a directory tree at runtime at all; it judges exactly two
- * fixed files (`hooks/pre-push`, `assets/project/pre-push`) via a direct
- * `readFileSync`. It reuses rule (d) anyway (rather than inventing a fifth
- * rule) because the underlying escape is identical: the files it reaches are
- * invisible to import tracing, so membership + scope must both come from
- * content markers, exactly like the two real tree-scanning oracles (task
- * `task-teach-changed-tests-membership-and-tree-scan-scope-about`, AC-TC-4).
- * See `HOOK_OR_ASSET_PAIR_MARKER_RE` for why bare `main()` — the membership
- * signal the other two scopes require — does not apply to this one.
- */
-export type TreeScanScope = "packages-test-tree" | "repo-tracked-text-source" | "hooks-and-assets-pair";
-
-/**
- * A bare (zero-argument) invocation of the test's own imported `main` entry —
- * the exact shape both `scripts/tests/check-test-budgets.test.ts`'s
- * "main(): real repo tree" suite and `scripts/tests/check-no-nul-bytes.test.ts`'s
- * "real repo tree (task oracle)" suite use to prove their oracle actually
- * measures THIS checkout's own tree, never an injected fixture (both files'
- * OTHER `main(dir)` / `main(tmpDir)` calls pass an explicit argument and are
- * NOT this shape).
- *
- * Measured against the real, post-merge tree (task
- * `task-test-changed-s-fourth-invisible-edge-a-tree-scanning`; re-verify with
- * `grep -rlE '\bmain\(\)' --include='*.test.ts' packages scripts` before
- * trusting any count here — this file's own earlier draft asserted "exactly
- * two" from a PRE-merge grep and was wrong the moment it landed): THREE
- * files match today, not two —
- *   `scripts/tests/check-test-budgets.test.ts`,
- *   `scripts/tests/check-no-nul-bytes.test.ts`, and
- *   `packages/lore/tests/unit/scripts/changed-tests-selector.test.ts` (THIS
- *   rule's own unit-test file).
- * The third is a KNOWN, ACCEPTED over-selection, not a bug: that test file's
- * source contains literal fixture STRINGS mimicking the two real oracles'
- * content (to exercise `classifyTreeScanningOracle` without touching real
- * files) — those strings happen to also contain a bare `main()` substring
- * and, in several cases, the literal identifier `hasTextSourceExtension`
- * (see `REPO_TRACKED_TEXT_SOURCE_MARKER_RE` below), so the file classifies
- * as `"repo-tracked-text-source"`, the WIDEST scope, and gets selected on
- * nearly any tracked text-source change alongside the two real oracles.
- * Accepted rather than fixed, because: (1) over-selection is the SAFE
- * direction this task's AC-2 explicitly prefers — one extra fast vitest file
- * costs nothing measurable; (2) narrowing the marker (e.g. requiring it
- * outside any string literal, or comment-stripping first) would reduce this
- * function's recall against FUTURE real tree-scanning oracles for the sake
- * of a cosmetic count, which is the wrong trade — see D2 elsewhere in this
- * file for why a regex-based marker is deliberately not code-aware.
- *
- * Discriminating-power boundary (residual, must stay named — not left for a
- * future reader to rediscover): this marker works only because BOTH known
- * tree-scanning oracles happen to follow the same "prove it against the real
- * tree via a bare `main()` call" convention. That convention is NOT
- * enforced anywhere — a future tree-scanning oracle written as
- * `main(repoRoot)` (always passing an argument, even the default) or as a
- * differently-named entry point (`runCheck()`, `scan()`, ...) earns NO
- * membership here and is silently invisible to rule (d), exactly like an
- * untraced directory is invisible to `loadFileMap` until someone widens it.
- * The mitigating floor is `classifyBinaryConsumer`'s existing rule (c): if
- * such an oracle also happens to spawn `dist/lore`/`LORE_BIN`/`bun run
- * <INDEX_TS>`, it is still caught there — but a purely in-process tree scan
- * with a non-conventional entry point name has no fallback and needs its own
- * marker added here when it appears.
- */
-const BARE_MAIN_INVOCATION_RE = /\bmain\(\)/;
-
-/**
- * Content marker unique to `check-no-nul-bytes.ts`'s public surface: a test
- * that imports and directly drives {@link hasTextSourceExtension} is
- * necessarily testing THAT oracle's repo-wide text-source scan, not some
- * other tree-scanning oracle with a narrower scope. Naturally-occurring (the
- * test already does this to cover `hasTextSourceExtension` itself, see its
- * own "hasTextSourceExtension / hasNoExtension" describe block) rather than a
- * marker invented solely for this selector, mirroring how rule (c)'s
- * `dist/lore`/`LORE_BIN`/`INDEX_TS` markers are code that was already there
- * for the CLI-spawn itself.
- */
-const REPO_TRACKED_TEXT_SOURCE_MARKER_RE = /\bhasTextSourceExtension\b/;
-
-/**
- * Content marker for the `"hooks-and-assets-pair"` scope — the LITERAL
- * `hooks/pre-push` / `assets/project/pre-push` substrings, present UNEDITED
- * in both real guard suites' own doc comments and path constants today
- * (`packages/lore/tests/unit/assets/pre-push-parity.test.ts`'s
- * `REPO_HOOK_RELATIVE`/`ASSET_HOOK_RELATIVE`; `.../integration/pre-push-trip
- * .bun.test.ts`'s doc comment at "one (not `hooks/pre-push`) is what makes
- * the test consumer-relevant" and "actually executes (`assets/project/pre
- * -push`, ..."). Neither file contains a bare `main()` invocation — they
- * drive their subject via `readFileSync`/`spawnSync`, not a full-tree walk —
- * so `BARE_MAIN_INVOCATION_RE` structurally cannot be this scope's membership
- * signal; this marker is the SAME shape (a content marker already present
- * for another reason, reused rather than invented — the same principle
- * `REPO_TRACKED_TEXT_SOURCE_MARKER_RE` above documents) applied to a
- * different fact these two files already assert about themselves.
- *
- * ⛔ MEASURED: adding these literals to a test file WITHOUT also widening this
- * selector's own membership/scope predicates buys nothing — that was tried
- * and found INERT (`knowledge-bun-run-test-changed-full-selection-contract-
- * and-its`). This marker only has effect because `classifyTreeScanningOracle`
- * and `isChangedFileInTreeScanScope` below were BOTH changed to recognize it;
- * neither change alone is sufficient (AC-TC-4's own falsifying revert check).
- *
- * ⛔ MEASURED (AC-TC-5, `task-make-tree-scan-scopes-additive-instead-of-pre-emptive-and`):
- * exported (not module-private) so a test can pin this exact literal against
- * the two REAL guard files' own content, rather than only against synthetic
- * fixture strings that merely mimic the marker. Six real files — all of them
- * governance/gate test suites that legitimately document the pre-push hook in
- * prose (`hooks/pre-push`, `assets/project/pre-push` appear in a doc comment
- * or code string, never as an executable path) — ALSO independently qualify
- * under the pre-existing `BARE_MAIN_INVOCATION_RE` path below
- * (`packages/lore/tests/unit/assets/pre-push-parity.test.ts`,
- * `scripts/tests/check-no-nul-bytes.test.ts`,
- * `scripts/tests/check-ac-ref-integrity.test.ts`,
- * `scripts/tests/check-gap-namespace.test.ts`,
- * `scripts/tests/check-no-timer-retry.test.ts`,
- * `scripts/tests/check-ordinal-write-sites.test.ts`) — a PRE-EMPTIVE
- * single-scope return (checking this marker first and returning immediately)
- * silently DROPPED each file's real `"packages-test-tree"` /
- * `"repo-tracked-text-source"` scope the moment this marker started matching
- * it, which is exactly backwards: this marker's presence is evidence the file
- * ALSO judges the hooks/assets pair, never proof it stops judging whatever it
- * judged before.
- */
-export const HOOK_OR_ASSET_PAIR_MARKER_RE = /hooks\/pre-push|assets\/project\/pre-push/;
-
-/**
- * Classify `path`/`content` as a tree-scanning oracle test and, if so, EVERY
- * scope it judges — rule (d)'s membership + scope derivation, entirely from
- * content markers already present in the test's own source (never a
- * hardcoded filename list — AC-1 of
- * `task-test-changed-s-fourth-invisible-edge-a-tree-scanning`). Returns a
- * possibly-multi-member `Set` because the two membership signals are
- * ADDITIVE, not mutually exclusive — a single test file can legitimately
- * carry both:
- *
- *   1. `HOOK_OR_ASSET_PAIR_MARKER_RE` — a test file naming either real
- *      hook-copy path adds the narrow, fixed `"hooks-and-assets-pair"` scope.
- *   2. A bare `main()` invocation (`BARE_MAIN_INVOCATION_RE`) — proof the
- *      file drives its module's real, unmocked full-tree scan, the same
- *      "reaches its subject by a means other than static import" shape rule
- *      (c) already handles for subprocess spawns (D2) — adds EITHER the
- *      wider `"repo-tracked-text-source"` scope (when the file also imports
- *      `hasTextSourceExtension`) or the narrower `"packages-test-tree"`
- *      scope (AC-2: a future tree-scanning oracle nobody has taught this
- *      function about yet still gets the narrower scope rather than being
- *      silently dropped).
- *
- * ⛔ MEASURED (AC-TC-5): checking these two paths in sequence and RETURNING
- * on the first match — the shape this function used before this task — is a
- * regression, not merely an ordering choice: six real files (see
- * `HOOK_OR_ASSET_PAIR_MARKER_RE`'s own doc comment) satisfy BOTH paths
- * simultaneously, and returning only path (1)'s scope silently narrowed each
- * one's real selection scope the moment AC-TC-4 added path (1). The return
- * type is therefore a `Set`, and the union of scopes is what callers must
- * treat as "matches ANY of these" — never "matches the first one found."
- */
-export function classifyTreeScanningOracle(path: string, content: string): ReadonlySet<TreeScanScope> | undefined {
-  if (!isTestFile(path)) return undefined;
-  const scopes = new Set<TreeScanScope>();
-  if (HOOK_OR_ASSET_PAIR_MARKER_RE.test(content)) scopes.add("hooks-and-assets-pair");
-  if (BARE_MAIN_INVOCATION_RE.test(content)) {
-    scopes.add(REPO_TRACKED_TEXT_SOURCE_MARKER_RE.test(content) ? "repo-tracked-text-source" : "packages-test-tree");
+/** Parse a test file's declarations, naming the file when one is malformed (never a bare parser error). */
+function declarationsOf(path: string, content: string): DeclaredInputs {
+  try {
+    return parseDeclaredInputs(content);
+  } catch (error) {
+    if (error instanceof DeclaredInputsError) {
+      throw new ChangedTestsError("declaration", `${path}: ${error.message}`, { file: path, line: error.context.line });
+    }
+    throw error;
   }
-  return scopes.size > 0 ? scopes : undefined;
+}
+
+/** `entries` plus everything they statically import, transitively (forward closure over `graph`). */
+function forwardClosure(entries: Iterable<string>, graph: ImportGraph): Set<string> {
+  const seen = new Set<string>(entries);
+  const queue = [...seen];
+  while (queue.length > 0) {
+    const current = queue.shift()!;
+    for (const dependency of graph.forward.get(current) ?? []) {
+      if (seen.has(dependency)) continue;
+      seen.add(dependency);
+      queue.push(dependency);
+    }
+  }
+  return seen;
 }
 
 /**
- * Does `changedPath` fall within `scope`'s real scan scope? `"packages-test-tree"`
- * reuses this file's own `isTestFile` plus the SAME `packages/` scan-root
- * prefix `scanRepoTree` documents (a structural prefix condition, not a
- * per-file list — the same shape as `LORE_OR_CORE_SRC_PREFIX_RE` above).
- * `"repo-tracked-text-source"` defers entirely to the imported
- * `hasTextSourceExtension` — no re-hardcoded extension list here.
- * `"hooks-and-assets-pair"` is a structural PREFIX condition exactly like
- * `"packages-test-tree"`'s, deliberately NOT routed through
- * `hasTextSourceExtension` — both `hooks/pre-push` and `assets/project/
- * pre-push` are extensionless, and `hasTextSourceExtension` returns `false`
- * for exactly that shape (its own doc comment uses `hooks/pre-push` as the
- * worked example), which is the second of the two measured blockers this
- * scope exists to lift.
+ * The files a test depends on through ONE `@spawns` declaration: the matching source files plus
+ * their static import closure, and the pattern itself (a spawned non-TS file such as `hooks/pre-push`
+ * is matched against the changed list directly). `dist/lore` expands to {@link COMPILED_BINARY_INPUTS}.
  */
-export function isChangedFileInTreeScanScope(changedPath: string, scope: TreeScanScope): boolean {
-  if (scope === "repo-tracked-text-source") return hasTextSourceExtension(changedPath);
-  if (scope === "hooks-and-assets-pair") return changedPath.startsWith("hooks/") || changedPath.startsWith("assets/");
-  return changedPath.startsWith("packages/") && isTestFile(changedPath);
+function spawnDependencies(pattern: string, fileMap: FileMap, graph: ImportGraph): { files: Set<string>; globs: string[] } {
+  if (pattern === COMPILED_BINARY_INPUTS.declaration) {
+    const entries = COMPILED_BINARY_INPUTS.entries.filter((entry) => fileMap.has(entry));
+    return { files: forwardClosure(entries, graph), globs: [...COMPILED_BINARY_INPUTS.embeddedGlobs] };
+  }
+  const sources = [...fileMap.keys()].filter((file) => matchesAnyPattern(file, [pattern]));
+  return { files: forwardClosure(sources, graph), globs: [pattern] };
 }
 
 /**
- * Core selection algorithm (D1/D2/D3). Pure — takes the changed-file list and
- * a full file map (source + test) and returns the union selection with a
- * reason tag per file, plus the zero-selection warning flag. See module
- * header §Algorithm step 3 for the precedence rule: `changed-test` >
- * `binary-consumer` > `tree-scan-oracle` > `transitive` (a changed test
- * file's reason is always "changed-test" even if it also happens to be a
- * binary-consumer, tree-scanning oracle, or transitively reachable).
+ * Core selection algorithm. Pure. Selection = changed tests, plus tests whose static import closure
+ * reaches a changed file, plus tests whose declarations (`@reads` globs, `@spawns` closures) cover a
+ * changed file. A test that declares nothing is selected only by the first two. See the module header.
+ * @throws ChangedTestsError("declaration") when a test file's declaration block is malformed.
  */
 export function selectAffectedTests(params: {
   readonly changedFiles: readonly string[];
@@ -701,46 +303,37 @@ export function selectAffectedTests(params: {
   const knownChanged = changedFiles.filter((f) => fileMap.has(f));
 
   const reasonByPath = new Map<string, SelectionReason>();
+  const needsBinary = new Set<string>();
+  const dependencyCache = new Map<string, { files: Set<string>; globs: string[] }>();
+  const dependenciesOf = (pattern: string) => {
+    const cached = dependencyCache.get(pattern) ?? spawnDependencies(pattern, fileMap, graph);
+    dependencyCache.set(pattern, cached);
+    return cached;
+  };
 
-  // (a) changed-test direct inclusion — highest precedence.
   for (const file of knownChanged) {
     if (isTestFile(file)) reasonByPath.set(file, "changed-test");
   }
 
-  // (c) binary-consumers — escape the import graph entirely; triggered by
-  // ANY changed file under packages/{lore,core}/src/, not by reachability.
-  const triggersBinaryConsumers = changedFiles.some((f) => LORE_OR_CORE_SRC_PREFIX_RE.test(f));
-  if (triggersBinaryConsumers) {
-    for (const [path, content] of fileMap) {
-      if (isBinaryConsumerCandidate(path, content) && reasonByPath.get(path) !== "changed-test") {
-        reasonByPath.set(path, "binary-consumer");
-      }
-    }
-  }
-
-  // (d) tree-scanning oracles — a test that scans the REAL repo tree at
-  // runtime (classifyTreeScanningOracle) is selected whenever ANY file in the
-  // FULL raw changedFiles list (not just knownChanged/fileMap-filtered — a
-  // "repo-tracked-text-source" scope reaches files entirely outside this
-  // selector's traced universe, e.g. a doc under docs/) falls within ANY ONE
-  // of ITS OWN declared scan scopes — a test can hold >=1 scope at once (AC-TC-5:
-  // classifyTreeScanningOracle's scopes are additive, never a single "first
-  // match wins" pick), so this rule fires on a match against ANY member. Per-
-  // oracle, not a single blanket trigger for the whole set — a change that
-  // matches only the narrower scope must not also drag in an oracle whose
-  // scopes exclude it (AC-3: no existing rule is weakened, and this rule
-  // itself must stay scoped, never "select every tree-scanning oracle on any
-  // change whatsoever").
+  // declared inputs — escape the import graph; matched against the FULL raw changed list because a
+  // declared read may name a file outside the traced universe (a doc, an asset, a hook).
   for (const [path, content] of fileMap) {
-    if (reasonByPath.has(path)) continue; // (a)/(c) already decided this file
-    const scopes = classifyTreeScanningOracle(path, content);
-    if (scopes === undefined) continue;
-    if (changedFiles.some((f) => [...scopes].some((scope) => isChangedFileInTreeScanScope(f, scope)))) {
-      reasonByPath.set(path, "tree-scan-oracle");
+    if (!isTestFile(path)) continue;
+    const declared = declarationsOf(path, content);
+    if (declared.spawns.includes(COMPILED_BINARY_INPUTS.declaration)) needsBinary.add(path);
+    if (reasonByPath.has(path)) continue;
+    const spawnHit = declared.spawns.some((pattern) => {
+      const { files, globs } = dependenciesOf(pattern);
+      return changedFiles.some((changed) => files.has(changed) || matchesAnyPattern(changed, globs));
+    });
+    if (spawnHit) {
+      reasonByPath.set(path, "declared-spawn");
+    } else if (changedFiles.some((changed) => matchesAnyPattern(changed, declared.reads))) {
+      reasonByPath.set(path, "declared-read");
     }
   }
 
-  // (b) transitive — reverse-dependency BFS from every known-changed file.
+  // transitive — reverse-dependency BFS from every known-changed file.
   const visited = new Set<string>(knownChanged);
   const queue = [...knownChanged];
   while (queue.length > 0) {
@@ -757,25 +350,10 @@ export function selectAffectedTests(params: {
     }
   }
 
-  // Attach binaryConsumerKind to EVERY selected file (not only ones selected
-  // BECAUSE of rule (c)) — a file selected as changed-test or transitive can
-  // still itself spawn the CLI entry and therefore still needs the step-4
-  // pre-build gate when its kind is "compiled" (AC-2: computed once here from
-  // the in-memory fileMap already scanned above, never re-derived by
-  // re-reading files later at execution time).
   const selected: SelectedFile[] = [...reasonByPath.entries()]
-    .map(([path, reason]) => {
+    .map(([path, reason]): SelectedFile => {
       const runner: TestRunner = isBunTestFile(path) ? "bun" : "vitest";
-      // Invariant: every `path` here came FROM `fileMap` (knownChanged is
-      // `fileMap.has`-filtered; rule (c) iterates `fileMap` directly; the BFS
-      // below walks edges built only from `fileMap` keys) — `.get` cannot
-      // miss. Non-null assertion, not a silent fallback (mirrors
-      // `buildImportGraph`'s established `forward.get(file)!` convention
-      // above).
-      const binaryConsumerKind = classifyBinaryConsumer(path, fileMap.get(path)!);
-      return binaryConsumerKind === undefined
-        ? { path, reason, runner }
-        : { path, reason, runner, binaryConsumerKind };
+      return needsBinary.has(path) ? { path, reason, runner, needsCompiledBinary: true } : { path, reason, runner };
     })
     .sort((a, b) => a.path.localeCompare(b.path));
 
@@ -787,38 +365,24 @@ export function selectAffectedTests(params: {
 }
 
 /**
- * The "loud zero" predicate (requirement 2 of
- * `task-test-changed-selects-nothing-for-any-scripts-change-and`): true iff
- * the changed-file set was NON-EMPTY yet nothing was selected overall. The
- * single legitimate silent zero-selection is the reverse — a genuinely empty
- * changed-file set (`selection.changedFiles.length === 0`, the CONTROL case:
- * nothing changed at all).
- *
- * This condition is a strict SUPERSET of `zeroSelectionWarning`: every
- * graph-known-zero-selection case (`zeroSelectionWarning === true`) also has
- * `changedFiles.length > 0` and `selected.length === 0`, so it is also a loud
- * zero. It additionally covers a changed file OUTSIDE the traced universe
- * entirely — a directory `loadFileMap` never learned to walk — which
- * `zeroSelectionWarning` alone cannot see (it only looks at graph-known
- * files via `knownChanged`). `runCli` uses this predicate to decide the exit
- * code in BOTH `--list` and executing mode — never only one of them, since a
- * hollow `--list` preview is exactly as misleading as a hollow executing run.
+ * The "loud zero" predicate: true iff the changed-file set was NON-EMPTY yet nothing was selected.
+ * The single legitimate silent zero is a genuinely empty changed set. A strict superset of
+ * `zeroSelectionWarning` (it also covers a changed file outside the traced universe). `runCli` uses
+ * it for the exit code in BOTH `--list` and executing mode.
  */
 export function isLoudZero(selection: SelectionResult): boolean {
   return selection.changedFiles.length > 0 && selection.selected.length === 0;
 }
 
 /**
- * Render the mandatory accounting block: per-runner `selected N` line, a
- * reason tag per selected file, the build-first decision (AC-2/AC-5 —
- * printed here so it is observable from `--list` output alone, without
- * actually executing anything), and the zero-selection warning when it
- * applies (D3 — never silent).
+ * Render the mandatory accounting block: per-runner `selected N` line, a reason tag per selected
+ * file, the build-first decision (observable from `--list` alone), the zero-selection warning, and
+ * the loud-zero FAIL block when it applies.
  */
 export function formatAccounting(selection: SelectionResult): string {
   const vitestFiles = selection.selected.filter((f) => f.runner === "vitest");
   const bunFiles = selection.selected.filter((f) => f.runner === "bun");
-  const compiledBinaryConsumers = selection.selected.filter((f) => f.binaryConsumerKind === "compiled");
+  const compiledBinaryTests = selection.selected.filter((f) => f.needsCompiledBinary === true);
 
   const lines: string[] = [];
   lines.push(`vitest: selected ${vitestFiles.length}`);
@@ -826,8 +390,8 @@ export function formatAccounting(selection: SelectionResult): string {
   lines.push(`bun: selected ${bunFiles.length}`);
   for (const f of bunFiles) lines.push(`  [bun] ${f.path} (${f.reason})`);
   lines.push(
-    compiledBinaryConsumers.length > 0
-      ? `build-first: yes (${compiledBinaryConsumers.length} compiled binary-consumer file(s) selected)`
+    compiledBinaryTests.length > 0
+      ? `build-first: yes (${compiledBinaryTests.length} selected test(s) declare @spawns ${COMPILED_BINARY_INPUTS.declaration})`
       : "build-first: no",
   );
 
@@ -838,13 +402,6 @@ export function formatAccounting(selection: SelectionResult): string {
     );
   }
 
-  // D3' — the loud-zero rule (requirement 2 of
-  // task-test-changed-selects-nothing-for-any-scripts-change-and): this block
-  // is what makes AC-3's "0 selected because nothing changed" render
-  // differently from "0 selected although N files changed" — the former
-  // never reaches here (isLoudZero requires changedFiles.length > 0), the
-  // latter always does. Lists every changed path since, when selected.length
-  // is 0, ALL of them are unselected by definition — never a diff to compute.
   if (isLoudZero(selection)) {
     lines.push(
       `FAIL: 0 tests selected despite ${selection.changedFiles.length} changed file(s) — refusing to report ` +
@@ -1103,14 +660,12 @@ export function runCli(argv: readonly string[], cwd: string): number {
 
   const vitestFiles = selection.selected.filter((f) => f.runner === "vitest").map((f) => f.path);
   const bunFiles = selection.selected.filter((f) => f.runner === "bun").map((f) => f.path);
-  // AC-2: keyed on the COMPILED kind only — a source-entry spawn (`bun run
-  // <INDEX_TS>`) always runs current source and never needs a fresh
-  // `dist/lore` first. Read from the selection data computed once in
-  // `selectAffectedTests`, never re-derived by re-reading files here.
-  const hasCompiledBinaryConsumer = selection.selected.some((f) => f.binaryConsumerKind === "compiled");
+  // The build-first decision is read from the selection data (`needsCompiledBinary`), computed once in
+  // `selectAffectedTests` from the tests' `@spawns dist/lore` declarations.
+  const hasCompiledBinaryConsumer = selection.selected.some((f) => f.needsCompiledBinary === true);
 
   if (hasCompiledBinaryConsumer) {
-    console.log("changed-tests: >=1 compiled binary-consumer selected — running `bun run build` first");
+    console.log("changed-tests: >=1 selected test declares @spawns dist/lore — running `bun run build` first");
     const buildStatus = runBuild(repoRoot);
     if (buildStatus !== 0) {
       console.error(`changed-tests: bun run build failed (exit ${buildStatus})`);

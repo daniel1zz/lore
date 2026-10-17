@@ -1,3 +1,7 @@
+// @reads packages/core/src/**
+// @reads packages/core/tests/**
+// @reads packages/lore/src/**
+// @reads packages/lore/tests/**
 /**
  * The `DriftRow` identity is doc-flavoured end to end — `doc_id`/`doc_status`
  * (alongside the already-renamed `doc_slug`/`doc_type`) — and the RETIRED

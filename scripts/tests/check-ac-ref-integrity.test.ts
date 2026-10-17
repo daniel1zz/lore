@@ -1,3 +1,6 @@
+// @spawns packages/lore/src/index.ts
+// @spawns scripts/check-ac-ref-integrity.ts
+// @reads scripts/ac-ref-exemption-ledger.json
 /**
  * Tests for `scripts/check-ac-ref-integrity.ts` (spec-lore-ac-set-in-place-edit-of-a-
  * declared-acceptance D7, AC-ACS-7): the corpus-wide dangling-`ac_ref` detector, its

@@ -1,3 +1,12 @@
+// @reads .lore-bootstrap/**
+// @reads .serena/**
+// @reads assets/**
+// @reads dist-npm/**
+// @reads docs/**
+// @reads hooks/**
+// @reads npm-pkg/**
+// @reads packages/**
+// @reads scripts/**
 /**
  * check-test-file-census: the "files on disk == files run" proof (task-skill-implement-tg-23).
  * Six dimensions: HAPPY (complete census) / NEGATIVE (dropped, double-run, stale, mis-routed files) /

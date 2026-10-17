@@ -1,3 +1,4 @@
+// @spawns packages/lore/src/index.ts
 /**
  * Integration tests for `lore verify` (SPEC-039 §2, §3, §4 AC-VRF-10; §M2
  * trust-hardening). Runs the real CLI via subprocess against an isolated

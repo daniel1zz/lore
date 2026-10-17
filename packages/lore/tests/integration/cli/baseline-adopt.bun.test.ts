@@ -1,3 +1,4 @@
+// @spawns packages/lore/src/index.ts
 /**
  * End-to-end test of `lore baseline adopt` and the `lore status` ac-cite provenance flag
  * (Baseline slice 3a, BL-8, AC-BLS3-8), driven through the real CLI against a throwaway corpus.

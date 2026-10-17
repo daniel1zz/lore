@@ -1,3 +1,4 @@
+// @spawns dist/lore
 /**
  * RED-phase e2e for the pre-push CLAUDE.md-budget trip step (AC-CMC-3, task
  * `task-skill-test-pre-push-hook-trip-parity-extension-red-ac-cmc`; paired

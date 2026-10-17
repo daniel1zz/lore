@@ -1,3 +1,5 @@
+// @spawns scripts/build.ts
+// @spawns dist/lore
 /**
  * AC-BFI-2 oracle — `spec-bootstrap-fixpoint-integrity-binary-provenance-an-anchor`.
  *

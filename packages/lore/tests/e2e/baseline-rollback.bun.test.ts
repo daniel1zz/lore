@@ -1,3 +1,4 @@
+// @spawns dist/lore
 /**
  * Compiled-binary e2e for baseline-slice-1 QA-8 / AC-BLS1-8 — ROLLBACK
  * LEAVES NO TRACE: a corpus that adopted the baseline feature (baseline

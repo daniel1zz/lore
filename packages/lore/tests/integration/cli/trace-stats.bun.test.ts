@@ -1,3 +1,4 @@
+// @spawns packages/lore/src/index.ts
 /**
  * @spec_ref SPEC-102 §Acceptance Criteria AC-TRACE-4, AC-TRACE-5, AC-TRACE-6
  *

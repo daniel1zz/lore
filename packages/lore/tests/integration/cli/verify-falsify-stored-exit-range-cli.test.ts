@@ -1,3 +1,4 @@
+// @spawns packages/lore/src/index.ts
 /**
  * AC-EH-5 (f) (spec-evidence-labels-and-reds-are-honest, BR-1074) — SURFACE oracle: the REAL CLI
  * `lore verify <plan> --falsify <ac>` refuses a criterion whose STORED falsifier expected exit code is 0 (a legacy

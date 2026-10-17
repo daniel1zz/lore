@@ -1,3 +1,4 @@
+// @spawns packages/lore/src/index.ts
 /**
  * AC-CRIT-6 — `lore list` / MCP `lore_list` report how many invalidated docs the
  * default validity filter hid (`omitted_invalid`), instead of hiding them silently.

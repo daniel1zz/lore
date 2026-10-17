@@ -1,3 +1,4 @@
+// @reads packages/lore/tests/integration/spec-loop-e2e.bun.test.ts
 /**
  * Unit tests for the repo-corpus pollution guard's pure predicate (SPEC-OX D3,
  * AC-OX-2). Drives BOTH directions — accepts a clean tree, rejects a dirty one under

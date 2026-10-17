@@ -1,3 +1,5 @@
+// @reads .claude/skills/lore/SKILL.md
+// @reads assets/skills/**
 /**
  * Shipped skill descriptions state WHEN to use the skill (BR-1099, spec
  * spec-shipped-skill-descriptions-state-when-to-use-the-skill).

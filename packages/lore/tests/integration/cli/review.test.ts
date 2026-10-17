@@ -1,3 +1,4 @@
+// @spawns packages/lore/src/index.ts
 /**
  * Integration tests for `lore review` CLI subcommand (SPEC-034 §4, §6). Runs the real CLI
  * via subprocess against an isolated temp SQLite DB, same pattern as

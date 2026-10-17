@@ -1,3 +1,4 @@
+// @reads packages/lore/src/adapters/cli/commands/get.ts
 /**
  * `lore get` structured-`extra` loss-notice projection tests
  * (task-lore-get-s-default-render-silently-omits-structured-extra, AC-1..AC-6).

@@ -1,3 +1,4 @@
+// @reads npm-pkg/postinstall.mjs
 /**
  * postinstall.mjs unit + conformance suite (SPEC-048 AC-048-A, INV-4).
  *

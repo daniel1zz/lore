@@ -1,3 +1,4 @@
+// @reads packages/lore/src/service/resolution-label-port.ts
 /**
  * Test scenarios for `GhResolutionLabelPort` — the `gh`-backed
  * `ResolutionLabelPort` implementation

@@ -1,3 +1,4 @@
+// @spawns dist/lore
 /**
  * Compiled-binary e2e for the `lore evidence` mixed-runner invocation guard —
  * closes task-vitest-run-silently-drops-a-bun-test-ts-named-alongside-a,

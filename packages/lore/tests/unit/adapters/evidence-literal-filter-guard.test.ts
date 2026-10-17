@@ -1,3 +1,4 @@
+// @spawns packages/lore/tests/fixtures/regex-case-filter/vitest.fixture.config.ts
 /**
  * The literal-vs-regex `-t` filter defect
  * (task-a-t-filter-is-a-regex-so-this-repo-s-own-ac-titles), covered on BOTH

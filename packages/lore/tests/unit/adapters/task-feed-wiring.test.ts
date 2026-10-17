@@ -1,3 +1,4 @@
+// @reads packages/lore/src/adapters/cli/commands/ac.ts
 /**
  * Unit tests for `adapters/cli/task-feed-wiring.ts`'s real `TaskFeedFlowDeps`
  * binding (SPEC-070 review-fix wave — task-skill-implement-fixa-wiring-core-

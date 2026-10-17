@@ -1,3 +1,4 @@
+// @reads packages/core/src/setup-manifest.ts
 /**
  * @spec_ref SPEC-076 §C1 (ownership three-zone model), §C4 (manifest version
  *   fields, additive), D8 (ownership is declared, never derived) —

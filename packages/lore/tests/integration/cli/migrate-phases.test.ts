@@ -1,3 +1,4 @@
+// @spawns packages/lore/src/index.ts
 /**
  * Integration tests for `lore migrate phases` CLI subcommand.
  * Runs the real CLI via subprocess against an isolated temp SQLite DB.

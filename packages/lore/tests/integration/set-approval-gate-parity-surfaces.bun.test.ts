@@ -1,3 +1,4 @@
+// @spawns packages/lore/src/index.ts
 /**
  * AC-AP-2 (issues #65 #50, BR-1071) — `set ... status approved` gives the approve verdict through
  * every real write surface: MCP, CLI and HTTP.

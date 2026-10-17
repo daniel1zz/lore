@@ -1,3 +1,4 @@
+// @reads assets/**
 /**
  * @spec_ref SPEC-076 §C1 (ownership three-zone model), D8 (ownership is
  *   declared, never derived) — task-skill-implement-t2-ownership-schema-manifest-version,

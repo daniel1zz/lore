@@ -1,3 +1,5 @@
+// @spawns packages/lore/src/index.ts
+// @reads packages/lore/src/service/**
 /**
  * RED-phase TDD tests for `lore status --check-claude-md` (SPEC-project-claude-md-
  * content-contract, task-skill-implement-lore-status-check-claude-md-config-only —

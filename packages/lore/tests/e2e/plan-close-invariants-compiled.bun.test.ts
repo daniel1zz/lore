@@ -1,3 +1,4 @@
+// @spawns dist/lore
 /**
  * Compiled-binary e2e suite proving
  * spec-plan-close-predicates-measure-invariants-an-applicability end-to-end,

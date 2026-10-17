@@ -1,3 +1,5 @@
+// @spawns dist/lore
+// @reads package.json
 /**
  * AC-DC-17 — REWRITTEN (task-skill-test-retire-or-rewrite-ac-dc-17-whose-
  * subject-cap), not retired. Compiled-binary e2e, the bun-runner half of

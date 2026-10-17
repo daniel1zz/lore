@@ -1,3 +1,4 @@
+// @spawns dist/lore
 /**
  * RED (TDD role) — compiled-binary e2e oracle for the SPEC TARGET behavior of
  * `lore governance [topic]` positional topic dispatch, which does NOT exist

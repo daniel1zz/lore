@@ -2,6 +2,7 @@ import { defineConfig } from "vitest/config";
 import { fileURLToPath, URL } from "node:url";
 import { workspaceAliases } from "./workspace-aliases";
 import { armSandboxEnv } from "./scripts/test-isolation-env";
+import { readRecorderAliases, readRecorderMockRedirect } from "./scripts/test-read-aliases";
 
 // reason: arm the AC-TG-2 sandbox marker HERE, at config load in the runner's main process.
 // Workers are forked with this environment as their STARTUP environment, which is the only kind
@@ -42,12 +43,16 @@ export const ALL_TEST_GLOBS: readonly string[] = [
 /** One config body for both invocations: `include`/`exclude` are the only differences. */
 export function createConfig(selection: { include: readonly string[]; exclude: readonly string[] }) {
   return defineConfig({
+    plugins: [readRecorderMockRedirect(fileURLToPath(new URL(".", import.meta.url)))],
     resolve: {
       alias: [
         // reason: @lore/* resolves to THIS checkout's packages, never through node_modules
         // (a git worktree has none and would silently read the main checkout's). Derived from
         // tsconfig.base.json `paths`. task-skill-implement-tg-20-worktrees-resolve-their-own-lore.
         ...workspaceAliases(fileURLToPath(new URL(".", import.meta.url))),
+        // reason: route fs / fs/promises / child_process through the declared-input recorder (AC-TG-7,
+        // scripts/test-read-log.ts explains why an alias and not a patch).
+        ...readRecorderAliases(fileURLToPath(new URL(".", import.meta.url))),
         // reason: dashboard src uses "@/" path alias; root vitest must resolve it to
         // packages/dashboard/src/ for component tests to find ui primitives. SPEC-015 §4 M6.
         { find: /^@\//, replacement: fileURLToPath(new URL("./packages/dashboard/src/", import.meta.url)) },
@@ -110,6 +115,9 @@ export function createConfig(selection: { include: readonly string[]; exclude: r
         // each test. vitest globals:false prevents @testing-library/react auto-detecting afterEach,
         // so setup.ts registers it explicitly. SPEC-015 §4 M6.
         "packages/dashboard/tests/setup.ts",
+        // reason: LAST, so it discards the reads of the setup files above and then fails a test that
+        // reads a repository file or spawns a repository program without declaring it (AC-TG-7).
+        "scripts/test-read-recorder.ts",
       ],
       include: [...selection.include],
       // reason: "**/*.pw.ts" (Playwright e2e specs, packages/dashboard/tests/e2e/**) already

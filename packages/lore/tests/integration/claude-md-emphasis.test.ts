@@ -1,3 +1,5 @@
+// @spawns packages/lore/src/index.ts
+// @spawns scripts/check-claude-md-live-sweep.ts
 /**
  * RED-phase TDD tests for AC-EMPH-1 and AC-EMPH-2 of
  * `spec-claude-md-governance-content-dimension-checks-wire-the` (Phase 2 —

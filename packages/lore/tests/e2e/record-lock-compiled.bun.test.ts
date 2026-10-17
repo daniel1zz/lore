@@ -1,3 +1,4 @@
+// @spawns dist/lore
 /**
  * record-lock-compiled.bun.test.ts — AC-DR-5: the record-edit gate and its read surfaces, observed from the
  * REAL compiled binary on a throwaway corpus.

@@ -1,3 +1,4 @@
+// @spawns packages/lore/src/index.ts
 /**
  * @spec_ref spec-080-prd-as-outline-contract-structured-outline-domain
  *   AC-080-3: "lore create spec --kind domain-overview --parent <prd> passes the

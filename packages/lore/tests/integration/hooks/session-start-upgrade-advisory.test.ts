@@ -1,3 +1,4 @@
+// @spawns assets/hooks/session-start-resume.mjs
 /**
  * session-start-upgrade-advisory.test.ts — AC-UR-2 (spec-one-upgrade-reminder-at-session-start-covers-the-global).
  *

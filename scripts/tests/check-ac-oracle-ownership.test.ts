@@ -1,3 +1,4 @@
+// @spawns packages/lore/src/index.ts
 /**
  * AC-TG-5 (`spec-test-governance-guards-that-refuse-bad-tests-declared`; cites AS-17):
  * `scripts/check-ac-oracle-ownership.ts` exits EXACTLY 1 naming rule, spec, AC id and path

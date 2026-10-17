@@ -1,3 +1,4 @@
+// @spawns packages/lore/src/index.ts
 /**
  * `lore bootstrap`'s plan-membership contract — RED-first suite for
  * `task-the-eleventh-plan-member-site-found-by-enumeration`.

@@ -1,3 +1,6 @@
+// @spawns packages/lore/src/index.ts
+// @reads assets/context/**
+// @reads packages/lore/tests/fixtures/context-variables/pre-change-rules/**
 /**
  * @spec_ref AC-CV-2
  *

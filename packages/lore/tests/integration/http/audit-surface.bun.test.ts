@@ -1,3 +1,4 @@
+// @spawns packages/lore/src/index.ts
 /**
  * AC-BLC-1 (issue #128, AS-19) — every audit entry records the write surface.
  *

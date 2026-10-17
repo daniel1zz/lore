@@ -1,3 +1,4 @@
+// @spawns dist/lore
 /**
  * RED (TDD role) — compiled-binary e2e oracle for AC-CTX-3
  * (spec-context-verb-family-two-zone-claude-md-anatomy-lore). The `lore

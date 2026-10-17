@@ -1,3 +1,7 @@
+// @reads packages/lore/src/flows/setup-project-flow.ts
+// @reads packages/lore/src/flows/setup-project-uninstall.ts
+// @reads packages/lore/src/service/setup-service.ts
+// @reads packages/lore/tests/unit/adapters/setup-fs-boundary-required.type-fixture.ts
 /**
  * Real-filesystem regression suite for `RealSetupFsWriter`'s removal path
  * (spec-lore-setup-deletes-repo-source-through-dev-symlinks).

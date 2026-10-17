@@ -1,3 +1,4 @@
+// @spawns packages/lore/src/index.ts
 /**
  * `lore list --plan-id`'s CONTRACT is plan MEMBERSHIP (`extra.plan_id`, via the
  * shared `isPlanMember` predicate) — RED-first suite for site 13 of

@@ -1,3 +1,8 @@
+// @spawns packages/lore/src/index.ts
+// @spawns scripts/check-anchor-coverage.ts
+// @reads package.json
+// @reads packages/**
+// @reads scripts/**
 /**
  * Arming suite for `scripts/check-anchor-coverage.ts` — AC-BFI-5 (the ledger
  * dispositions every currently-unanchored live spec) and AC-BFI-6 (the ratchet

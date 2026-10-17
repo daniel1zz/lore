@@ -1,3 +1,4 @@
+// @spawns dist/lore
 /**
  * RED-phase real-binary pre-push trip for the root CLAUDE.md section-structure
  * check (`spec-claude-md-root-section-structure-check-and-adoption-mode`

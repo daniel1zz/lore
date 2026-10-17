@@ -1,3 +1,4 @@
+// @spawns packages/lore/src/index.ts
 /**
  * `lore status --json` reports a count per identity source and the `orphaned_dirty` claims.
  *

@@ -1,3 +1,4 @@
+// @spawns dist/lore
 /**
  * Compiled-binary e2e for the `lore evidence` oracle-file precheck's
  * MULTI-SEGMENT cd derivation — closes

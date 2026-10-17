@@ -1,3 +1,4 @@
+// @spawns packages/lore/src/index.ts
 /**
  * AC-OX-6 — spec-oracle-exclusivity-in-a-shared-checkout-a-mirror-check (fixture half).
  *

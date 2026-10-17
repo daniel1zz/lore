@@ -1,3 +1,4 @@
+// @spawns packages/lore/src/index.ts
 /**
  * `lore review` mechanical tree_position check must accept a PARENTLESS spec (BR-261 revised, BR-400, BR-2).
  *

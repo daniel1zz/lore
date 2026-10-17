@@ -1,3 +1,4 @@
+// @spawns packages/lore/src/index.ts
 /**
  * BOUNDARY test for `lore ac set` (AC-ACS-3, spec-lore-ac-set-in-place-edit-of-a-
  * declared-acceptance D3/D5a) — no field flag exits 2, stderr names --statement, and

@@ -1,3 +1,4 @@
+// @spawns packages/lore/src/index.ts
 /**
  * Per-kind baseline node size budgets in `lore status --check-prd-budget`
  * (Baseline slice 3b, AC-BLS3B-8 / BR-1010, BR-422, BR-423, BR-425), over a throwaway corpus

@@ -1,3 +1,4 @@
+// @reads assets/skills/**
 /**
  * Issue #218 guard: `assets/skills/<name>/` is the single source of a shipped
  * skill; `lore setup` renders the real copy. A git-tracked

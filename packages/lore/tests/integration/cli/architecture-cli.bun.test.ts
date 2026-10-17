@@ -1,3 +1,4 @@
+// @spawns packages/lore/src/index.ts
 /**
  * Architecture tree on the CLI + MCP surfaces (Baseline slice 3a, AC-BLS3-1 / BR-979), over a throwaway corpus.
  *

@@ -1,3 +1,4 @@
+// @spawns dist/lore
 /**
  * Compiled-binary e2e suite proving spec-context-provenance-injected-corpus-global-state-and-a
  * end-to-end, from a consumer's position — a throwaway corpus AND a throwaway

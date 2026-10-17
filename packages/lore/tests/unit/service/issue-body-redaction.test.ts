@@ -1,3 +1,4 @@
+// @reads packages/core/src/issue-front-matter.ts
 /**
  * RED scenarios for AC-GI-6 (spec-the-defect-channel-reaches-no-machine-but-its-own-github)
  * and the paired implementation task's own AC — the `frontMatterCodec` module

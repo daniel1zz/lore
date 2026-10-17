@@ -1,3 +1,4 @@
+// @reads lore.tree.yaml
 /**
  * Unit tests for the SPEC-034 lore_review MCP tool.
  *

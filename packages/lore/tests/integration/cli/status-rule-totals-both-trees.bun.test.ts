@@ -1,3 +1,4 @@
+// @spawns packages/lore/src/index.ts
 /**
  * `lore status --json` baseline rule totals count BOTH trees (BR-670, AC-FIP-4, issue #136), over a
  * throwaway corpus (mkdtemp + `lore init`; the repo's own `.lore/` is never touched).

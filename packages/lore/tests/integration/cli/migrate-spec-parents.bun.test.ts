@@ -1,3 +1,4 @@
+// @spawns packages/lore/src/index.ts
 /**
  * `lore migrate spec-parents` — preview / --apply / --revert (BR-1009, BR-798, BR-801; AC-BLS3B-7).
  *

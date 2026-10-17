@@ -1,3 +1,4 @@
+// @spawns dist/lore
 /**
  * `lore done --override-attestation "<reason>"` — the CLI author→trip
  * end-to-end oracle for adr-lore-done-requires-a-runner-attested-pass-the-

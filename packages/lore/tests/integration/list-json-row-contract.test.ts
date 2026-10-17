@@ -1,3 +1,6 @@
+// @spawns packages/lore/src/index.ts
+// @reads packages/core/src/doc-type-meta.ts
+// @reads packages/lore/src/adapters/cli/commands/list.ts
 /**
  * `lore list --json` ROW CONTRACT — the single file behind AC-MOS-1 of
  * `spec-the-mirror-oracles-two-command-surfaces-are-o-corpus-by`.

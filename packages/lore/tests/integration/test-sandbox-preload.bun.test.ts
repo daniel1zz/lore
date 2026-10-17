@@ -1,3 +1,5 @@
+// @reads scripts/test-isolation-env.ts
+// @reads scripts/test-isolation-setup.ts
 /**
  * AC-TG-2 (one-runner half, task-skill-implement-tg-23): the runner is armed AND so are its
  * children. Under the Bun runtime (`bunx --bun vitest`) a child spawned WITHOUT an explicit `env`

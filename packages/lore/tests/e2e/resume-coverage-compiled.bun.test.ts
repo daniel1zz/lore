@@ -1,3 +1,6 @@
+// @spawns assets/hooks/stop-handoff-coverage.mjs
+// @spawns dist/lore
+// @reads packages/lore/package.json
 /**
  * Compiled-binary e2e oracle for the resume-ticket COVERAGE FLOOR's two
  * shipping surfaces (spec-resume-ticket-coverage-a-shipped-upper-bound-left-the,

@@ -1,3 +1,4 @@
+// @spawns packages/lore/src/index.ts
 /**
  * D3 incident regressions (SPEC-051 §Design D3) — reproduces the two REAL
  * dogfood incidents that motivated this spec, byte-for-byte, against the

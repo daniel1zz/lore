@@ -1,3 +1,4 @@
+// @reads packages/lore/src/**
 /**
  * `lore evidence` filtered-pass matched-count guard — SPEC-061 AC-061-11 …
  * AC-061-14, AC-061-17.

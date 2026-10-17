@@ -1,3 +1,4 @@
+// @spawns packages/lore/src/index.ts
 /**
  * `lore run end` ends a run and its claims (clean claims released, dirty claims kept as orphaned_dirty).
  *

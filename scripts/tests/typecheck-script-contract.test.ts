@@ -1,3 +1,4 @@
+// @reads packages/dashboard/src/routeTree.gen.ts
 /** @spec_ref AC-TC-3 */
 /**
  * Contract test for the `typecheck:dashboard-tests` root script

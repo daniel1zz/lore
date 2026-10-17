@@ -1,3 +1,4 @@
+// @spawns packages/lore/src/index.ts
 /**
  * Fixture test of the `lore list --json` production-wiring oracle — the vitest half of AC-MOS-2 of
  * `spec-the-mirror-oracles-two-command-surfaces-are-o-corpus-by`.

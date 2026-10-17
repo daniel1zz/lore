@@ -1,3 +1,6 @@
+// @reads assets/**
+// @reads packages/lore/package.json
+// @reads packages/lore/src/generated/assets-manifest.ts
 /**
  * @spec_ref SPEC-076 §C2, Downstream Handoff `EmbeddedAssetsManifest`
  *

@@ -1,3 +1,4 @@
+// @reads packages/lore/tests/fixtures/seat-branch-sanitize.golden.json
 /**
  * RED suite (TDD-Role: red, paired-impl task-skill-implement-core-seat-ts-seatservice-
  * realgitport) for `@lore/core`'s `seat.ts` — a module that does NOT exist yet. Covers

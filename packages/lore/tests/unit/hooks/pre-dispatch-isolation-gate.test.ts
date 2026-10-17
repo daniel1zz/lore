@@ -1,3 +1,5 @@
+// @spawns assets/hooks/pre-dispatch-isolation-gate.mjs
+// @reads .claude/settings.json
 /**
  * Behavioural suite for `assets/hooks/pre-dispatch-isolation-gate.mjs`.
  *

@@ -1,3 +1,6 @@
+// @spawns assets/hooks/post-edit-mark.mjs
+// @spawns assets/hooks/session-trail-start.mjs
+// @spawns assets/hooks/user-prompt-turn-start.mjs
 /**
  * @spec_ref AC-ST-1
  *

@@ -1,3 +1,4 @@
+// @spawns packages/lore/src/index.ts
 /**
  * Gap cases of Baseline slice 3a group E that the RED files left open, decided by the orchestrator:
  *   G1. A no-op adopt (state unchanged) writes no audit row, prints `no change`, exits 0.

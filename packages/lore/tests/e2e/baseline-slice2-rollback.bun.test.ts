@@ -1,3 +1,4 @@
+// @spawns packages/lore/src/index.ts
 /**
  * E2E for baseline-slice-2 QA-5 / AC-BLS2-11 — ROLLBACK / UPGRADE LEAVES NO TRACE: a corpus upgraded to
  * slice 2a that (a) has NO baseline documents and no gate config, or (b) has baseline documents but

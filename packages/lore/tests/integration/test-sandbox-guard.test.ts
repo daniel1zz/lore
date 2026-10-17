@@ -1,3 +1,4 @@
+// @spawns packages/lore/src/index.ts
 /**
  * AC-TG-2: with LORE_TEST_SANDBOX=1, resolving a corpus whose lore.db lies inside this
  * repository fails with exit 4 naming LORE_TEST_SANDBOX and the refused path (read and

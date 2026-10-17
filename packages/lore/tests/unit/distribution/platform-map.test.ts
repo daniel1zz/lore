@@ -1,3 +1,4 @@
+// @reads scripts/build.ts
 /**
  * `scripts/platform-map.ts` unit suite (SPEC-048 Scope IN #1, AC-048-A).
  *

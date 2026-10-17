@@ -1,3 +1,4 @@
+// @spawns dist/lore
 /**
  * AC-VS-8 e2e (spec-declared-scope-attestation-contract-task-owned-ac-scope;
  * task-t4-record-the-coverage-predicate-s-measured-false-pass-in): proves

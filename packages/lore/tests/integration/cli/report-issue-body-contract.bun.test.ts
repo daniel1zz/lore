@@ -1,3 +1,4 @@
+// @spawns dist/lore
 /**
  * @spec_ref spec-p0-requirement-coverage-falsifying-criteria-for-the-8 AC-P0C-1
  * @task task-test-br-494-report-issue-filed-body-contract

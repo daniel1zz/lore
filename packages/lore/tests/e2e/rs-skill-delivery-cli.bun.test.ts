@@ -1,3 +1,4 @@
+// @spawns dist/lore
 /**
  * Compiled-binary e2e for skill-delivered fragments
  * (spec-rule-store-git-tracked-fragment-selection-on-demand-skill, Scope 7, AC-RS-10, BR-1061;

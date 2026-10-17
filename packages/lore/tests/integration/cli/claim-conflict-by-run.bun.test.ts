@@ -1,3 +1,4 @@
+// @spawns packages/lore/src/index.ts
 /**
  * RED: claim conflicts are decided by harness RUN, on BOTH the task and the phase claim path.
  *

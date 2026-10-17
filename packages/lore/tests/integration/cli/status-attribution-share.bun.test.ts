@@ -1,3 +1,5 @@
+// @spawns packages/lore/src/index.ts
+// @spawns packages/lore/tests/integration/cli/fixtures/frozen-clock.preload.ts
 /**
  * @spec_ref AC-RID-11
  * @task task-skill-test-red-attested-claimed-rendering-and-status (RED; paired impl =

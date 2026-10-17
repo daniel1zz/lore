@@ -1,3 +1,4 @@
+// @reads assets/project/**
 /**
  * Config-template overlay suite (SPEC-058 §Design Decisions D6, task
  * AC-V-4) — proves the NEW `assets/project/lore-config-template.yaml`

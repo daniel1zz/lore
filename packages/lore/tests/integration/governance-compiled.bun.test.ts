@@ -1,3 +1,4 @@
+// @spawns dist/lore
 /**
  * AC-083-1 (extended by AC-085-1) — compiled-binary e2e oracle for
  * `lore governance` (SPEC-083 D1) and its `--seat-briefing` flag (SPEC-085

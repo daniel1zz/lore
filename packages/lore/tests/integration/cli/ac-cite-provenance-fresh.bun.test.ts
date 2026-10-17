@@ -1,3 +1,4 @@
+// @spawns packages/lore/src/index.ts
 /**
  * End-to-end test for the fresh-install ac-cite provenance fixes (spec-fresh-install-probe-fixes, AC-FIP-3; BR-987),
  * driven through the real CLI in a throwaway git repo (never the repo's own .lore/).

@@ -1,3 +1,4 @@
+// @spawns packages/lore/src/index.ts
 /**
  * @spec_ref AC-AI-1, AC-AI-5, AC-AI-6, AC-AI-7, AC-AI-20
  *

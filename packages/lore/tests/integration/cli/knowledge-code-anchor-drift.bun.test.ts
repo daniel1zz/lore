@@ -1,3 +1,4 @@
+// @spawns packages/lore/src/index.ts
 /**
  * A `knowledge` document may declare `code_anchors`, `lore status --check-drift`
  * scans them, and every drift row states WHICH DOC TYPE its anchor came from —

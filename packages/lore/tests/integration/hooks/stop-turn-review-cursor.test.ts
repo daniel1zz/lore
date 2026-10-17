@@ -1,3 +1,5 @@
+// @spawns assets/hooks/stop-turn-review.mjs
+// @spawns assets/hooks/user-prompt-turn-start.mjs
 /**
  * @spec_ref AC-ST-9
  *

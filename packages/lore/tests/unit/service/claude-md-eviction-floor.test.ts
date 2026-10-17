@@ -1,3 +1,7 @@
+// @reads packages/lore/src/adapters/http/CLAUDE.md
+// @reads packages/lore/src/ai/CLAUDE.md
+// @reads packages/lore/src/service/CLAUDE.md
+// @reads packages/lore/src/store/CLAUDE.md
 /**
  * Unit + repo-state suite for the EVICTION FLOOR — the third band added to
  * `packages/lore/src/service/claude-md-check.ts`'s `lintMemoryFiles`

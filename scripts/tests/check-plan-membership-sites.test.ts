@@ -1,3 +1,6 @@
+// @reads packages/core/src/**
+// @reads packages/lore/src/**
+// @reads packages/lore/tests/unit/service/isplanmember-single-definition.test.ts
 /**
  * Unit + fixture-tree + real-tree suite for `scripts/check-plan-membership-sites.ts`
  * (`task-plan-membership-has-ten-known-sites-and-no-enumeration`) — the

@@ -1,3 +1,5 @@
+// @spawns packages/lore/src/index.ts
+// @reads lore.tree.yaml
 /**
  * Integration tests for `lore status --check-tree` (SPEC-032 T2) — proves the
  * repo-root `lore.tree.yaml` blueprint actually arms the check-tree mechanism

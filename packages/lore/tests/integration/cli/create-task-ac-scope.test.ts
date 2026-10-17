@@ -1,3 +1,4 @@
+// @spawns packages/lore/src/index.ts
 /**
  * Integration tests for the `task-create` admission gate (spec-declaring-ac-
  * scope-is-required-at-task-creation-so-the) — declaring `extra.ac_scope` is

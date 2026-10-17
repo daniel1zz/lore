@@ -1,3 +1,4 @@
+// @spawns dist/lore
 /**
  * RED/TDD REGRESSION anchor for spec-plan-closure-must-be-loud-terminality-
  * divergence-silent §Design Decisions DD-4 — AC-CLOSURE-6.
