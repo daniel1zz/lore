@@ -38,7 +38,7 @@ Structured via `lore ac add` (AC-073-1..4), all script-mode.
 - [⚑] [script] AC-073-3: Internal-error path: with feedback.upstream configured and a corrupted .lore/lore.db, the failing command's stderr carries exactly 1 hint line; unconfigured carries 0.
   script: test — bunx --bun vitest run packages/lore/tests/unit/adapters/report-issue-hint.bun.test.ts -t 'AC-073-3'
 - [⚑] [script] AC-073-4: Vendored stanza: the assets corpus-workflow snippet SSOT contains the reporting-discipline stanza (token assertions: 'report-issue' + re-verify clause), and the existing assets-conformance oracle passes with the stanza present (parity cannot vacuously pass with it absent from both copies).
-  script: test — bunx vitest run packages/lore/tests/unit/assets-conformance.test.ts scripts 2>/dev/null || bunx vitest run -t 'AC-073-4'
+  script: test — bunx --bun vitest run packages/lore/tests/unit/assets-ssot.test.ts -t 'AC-073-4'
 
 ## Code anchors
 

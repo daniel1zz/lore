@@ -3,7 +3,7 @@ id: TASK-1506
 type: task
 role: plan
 title: "[Skill:implement] TG-23 one runner: vitest on the Bun runtime for every test"
-status: draft
+status: archived
 priority: critical
 phase: "Phase 3b: one runner"
 created: 2026-10-17

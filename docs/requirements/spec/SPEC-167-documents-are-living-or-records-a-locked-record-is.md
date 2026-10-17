@@ -263,7 +263,7 @@ Three lenses over spec + plan + baseline leaves: cross-document contradiction (1
 - [⚑] [script] AC-DR-8: Monorepo typecheck exits 0 with the exhaustive DOC_TYPE_STANDING / KNOWLEDGE_SUB_TYPE_STANDING Records (adding a DocType member without classifying it is a tsc error).
   script: tsc — bun run typecheck
 - [⚑] [script] AC-DR-9: Embedded assets manifest is fresh after the prose edits: embed-assets-manifest --check exits 0 (exit 3 = stale).
-  script: build — node scripts/embed-assets-manifest.mjs --check
+  script: build — bun scripts/embed-assets-manifest.mjs --check
 - [⚑] [script] AC-DR-10: HTTP and dashboard surfaces on a throwaway corpus: PUT/PATCH update of a locked spec's content via routes.ts and dashboard-routes.ts PATCH -> 4xx carrying gate:record-edit, version unchanged; the same with a correction field and non-empty reason -> 2xx, one version, status kept; dashboard restore of a locked ADR -> refused; a dashboard save that resends identical content with a changed tag -> 2xx. Smallest red mutation: dropping the correction field mapping in routes.ts makes the correction request refused.
   script: test — bunx --bun vitest run packages/lore/tests/unit/adapters/http-record-lock.bun.test.ts
 

@@ -6,7 +6,7 @@ title: "Config write layer: ConfigService, HTTP surface, and the edit-safety mod
 status: approved
 priority: medium
 created: 2026-07-21
-updated: 2026-10-10
+updated: 2026-10-17
 tags: []
 ---
 # SPEC-062 — Config write layer: ConfigService, HTTP surface, and the edit-safety model
@@ -137,12 +137,12 @@ receives the corpus directory, not a store — config is file state, not
   script: test — bunx vitest run packages/lore/tests/unit/service/config-service.test.ts -t 'deny keys'
 - [⚑] [script] AC-062-2: GET /api/config emits 0 occurrences of a literal ai.http.headers.x-api-key value present in the on-disk config: the serialized response body does not contain that string
   script: test — bunx vitest run packages/lore/tests/unit/service/config-service.test.ts -t 'redaction'
-- [✘] [script] AC-062-3: PATCH with a stale If-Match hash returns HTTP status exactly 409 carrying the current hash, and leaves config.yaml byte-identical
-  script: test — bunx vitest run packages/lore/tests/unit/http/config-routes.test.ts -t 'stale If-Match'
+- [⊘] [script] AC-062-3: PATCH with a stale If-Match hash returns HTTP status exactly 409 carrying the current hash, and leaves config.yaml byte-identical
+  script: test — bunx --bun vitest run packages/lore/tests/unit/adapters/http/config-routes.test.ts -t 'stale If-Match'
 - [⚑] [script] AC-062-4: A successful PATCH changing sync.enabled returns restart_required containing exactly 1 entry equal to sync.enabled; a PATCH changing workflow.claim_ttl_minutes returns restart_required with exactly 0 entries
   script: test — bunx vitest run packages/lore/tests/unit/service/config-service.test.ts -t 'restart_required'
-- [✘] [script] AC-062-5: PATCH /api/dashboard/config with a bearer token and no cookie returns HTTP status exactly 403 and writes 0 bytes to config.yaml
-  script: test — bunx vitest run packages/lore/tests/unit/http/config-routes.test.ts -t 'bearer rejected'
+- [⊘] [script] AC-062-5: PATCH /api/dashboard/config with a bearer token and no cookie returns HTTP status exactly 403 and writes 0 bytes to config.yaml
+  script: test — bunx --bun vitest run packages/lore/tests/unit/adapters/http/config-routes.test.ts -t 'bearer rejected'
 - [⚑] [script] AC-062-6: A PATCH whose merged result fails the LoreConfig Zod schema is rejected with VALIDATION_ERROR and leaves config.yaml byte-identical, proving validate-then-write with 0 partial application
   script: test — bunx vitest run packages/lore/tests/unit/service/config-service.test.ts -t 'schema rejection'
 - [⚑] [script] AC-062-7: Every accepted PATCH produces exactly 1 audit row naming the changed key set; a rejected PATCH produces exactly 0 audit rows

@@ -3,7 +3,7 @@ id: TASK-1512
 type: task
 role: plan
 title: "[Skill:review] TG-27 audit the 133 citations auto-added by the T23 AC repoint"
-status: draft
+status: archived
 priority: high
 phase: "Phase 3b: one runner"
 created: 2026-10-17

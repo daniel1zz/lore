@@ -73,7 +73,7 @@ Typed ACs authored via `lore ac add` (script-mode). Coverage contract: pure-lint
 - [⚑] [script] AC-CMC-3: Hook trips end-to-end: in a temp repo, assets/project/pre-push exits non-zero on an over-ceiling CLAUDE.md, exits 0 when context.memory_files.enabled is false, and exits 0 when .lore is absent (fail-open)
   script: e2e — bunx --bun vitest run packages/lore/tests/integration/pre-push-claude-md-trip.bun.test.ts
 - [⚑] [script] AC-CMC-4: Distribution parity holds: hooks/pre-push and assets/project/pre-push remain byte-identical and both contain the check-claude-md invocation; assets manifest is regenerated (embed-assets-manifest --check exits 0)
-  script: test — bunx vitest run packages/lore/tests/unit/assets/pre-push-parity.test.ts && node scripts/embed-assets-manifest.mjs --check
+  script: test — bunx vitest run packages/lore/tests/unit/assets/pre-push-parity.test.ts && bun scripts/embed-assets-manifest.mjs --check
 - [⚑] [script] AC-CMC-5: Skill consumes the SSOT: lore-init-context SKILL.md contains both literal commands (lore governance claude-md; lore status --check-claude-md) and no longer contains its own What-Goes-In taxonomy section; template contains the pointer line
   script: test — bunx vitest run packages/lore/tests/unit/assets/init-context-contract.test.ts
 

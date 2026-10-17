@@ -220,8 +220,8 @@ Full mechanism, why no exit code can fix it, and the required repair:
   script: test — bunx vitest run packages/lore/tests/unit/service/verify-completeness.test.ts -t 'REGRESSION'
 - [⚑] [script] AC-061-6: A caller-supplied result=inconclusive through the public lore evidence path is rejected with VALIDATION_ERROR and exit code 4
   script: test — bunx vitest run packages/lore/tests/unit/service/verify-completeness.test.ts -t 'caller-supplied inconclusive'
-- [✘] [script] AC-061-7: computeAcCoverage counts an inconclusive entry as neither attested_pass nor attested_fail, and coverage totals for a corpus with 0 inconclusive entries stay byte-identical to the pre-change values
-  script: test — bunx vitest run packages/core/tests/acceptance.test.ts
+- [⊘] [script] AC-061-7: computeAcCoverage counts an inconclusive entry as neither attested_pass nor attested_fail, and coverage totals for a corpus with 0 inconclusive entries stay byte-identical to the pre-change values
+  script: test — bunx --bun vitest run packages/core/src/acceptance.test.ts -t 'AC-061-7'
 - [⚑] [script] AC-061-8: REGRESSION (corrects AC-061-7's path: core colocates tests in src/, so packages/core/tests/acceptance.test.ts does not exist): computeAcCoverage counts an inconclusive entry as neither attested_pass nor attested_fail across exactly 1 test file
   script: test — bunx vitest run packages/core/src/acceptance.test.ts
 - [⊘] [script] AC-061-G1: A caller-supplied result=inconclusive through the phase-target evidence dispatch path (including an as EvidenceInput type-bypass cast) is rejected with VALIDATION_ERROR field=result and exit code 4, matching the task-path rejection byte-for-byte across code/field/message/value

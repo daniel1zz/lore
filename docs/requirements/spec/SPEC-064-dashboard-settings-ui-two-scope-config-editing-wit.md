@@ -6,7 +6,7 @@ title: "Dashboard Settings UI: two-scope config editing with precedence and blas
 status: approved
 priority: medium
 created: 2026-07-21
-updated: 2026-10-10
+updated: 2026-10-17
 tags: []
 ---
 # SPEC-064 — Dashboard Settings UI: two-scope config editing with precedence and blast-radius disclosure
@@ -95,8 +95,8 @@ This is a `design`-kind spec; this corpus's `workflow.verification_profiles.desi
   script: test — bunx vitest run packages/core/src/config-precedence.test.ts
 - [○] [script] AC-064-6: REGRESSION: the @lore/core default barrel imports exactly 0 Node builtins after adding config-precedence.ts, and packages/dashboard/src imports @lore/core/node exactly 0 times, asserted by the existing browser-safety source scan. Exactly 1 test file runs and exits 0.
   script: test — bunx vitest run packages/core/tests/browser-safety.test.ts
-- [✘] [script] AC-064-7: REGRESSION: the pre-existing dashboard e2e suites remain green after the Settings route is added, proving the new route did not perturb routing, auth, or the write flow. Exactly 4 e2e spec files run and exit 0.
-  script: e2e — cd packages/dashboard && bunx playwright test tests/e2e/read-flow.pw.ts tests/e2e/write-flow.pw.ts tests/e2e/browse-ux.pw.ts tests/e2e/review-loop.pw.ts
+- [⊘] [script] AC-064-7: RETIRED 2026-10-17 (TG-31), REPLACED BY AC-064-8: the original wording required 4 dashboard e2e suites to exit 0, which is unsatisfiable because browse-ux and review-loop carry pre-existing spec-create seed-gate debt (knowledge-pre-existing-e2e-seed-gate-debt-dashboard-spec-create, identical at baseline 1e5ac3c). This criterion stays as a tombstone only because an approved spec with evidence cannot drop a criterion; it asserts the surviving fact: the routing/auth/write-sensitive suites read-flow and write-flow both run and exit 0 after the Settings route was added
+  script: e2e — cd packages/dashboard && bunx playwright test tests/e2e/read-flow.pw.ts tests/e2e/write-flow.pw.ts
 - [⚑] [script] AC-064-8: REPLACES AC-064-7 whose 4-suite exit-0 wording is unsatisfiable due to pre-existing spec-create-gate seed debt in browse-ux/review-loop (proven identical at pre-session baseline 1e5ac3c, knowledge-pre-existing-e2e-seed-gate-debt-dashboard-spec-create): the routing/auth/write-regression-sensitive suites read-flow and write-flow both run and exit 0 on merged main, proving the Settings route added zero e2e regression; exactly 2 e2e spec files run and exit 0
   script: e2e — cd packages/dashboard && bunx playwright test tests/e2e/read-flow.pw.ts tests/e2e/write-flow.pw.ts
 

@@ -11260,6 +11260,90 @@
     "01M53Z5YVD1XYG9HRFX70NXA56": {
       "human_id": "TASK-1513",
       "file_path": "docs/requirements/task/TASK-1513-ac-set-correction-of-a-command-forces-a-citation-s.md"
+    },
+    "01M54J8R5H6R2E24DQHY55P2XS": {
+      "human_id": "KN-703",
+      "file_path": "docs/requirements/knowledge/KN-703-ac-ct-3-10-re-measured-on-main-cb55711d-verdicts-n.md"
+    },
+    "01M54HC60DV5F58PAWDHG5TX1P": {
+      "human_id": "PLAN-202",
+      "file_path": "docs/requirements/plan/PLAN-202-corpus-truthfulness-finish-ac-ct-3-10-never-implem.md"
+    },
+    "01M54TY4AY99TQ8884C6W0Q9JE": {
+      "human_id": "TASK-1514",
+      "file_path": "docs/requirements/task/TASK-1514-skill-implement-tg-32-evidence-precheck-follows-th.md"
+    },
+    "01M54RFHYZ9EJSA4WNDT7A75S2": {
+      "human_id": "TASK-1515",
+      "file_path": "docs/requirements/task/TASK-1515-skill-implement-ct-7-ac-ct-8-occupancy-skipped-and.md"
+    },
+    "01M54SKZTG1NGE8D7SR7AEJBF7": {
+      "human_id": "TASK-1516",
+      "file_path": "docs/requirements/task/TASK-1516-skill-test-tg-31-corpus-fail-census-to-zero-stale.md"
+    },
+    "01M54RFEAC2H7428AR6JKTDM4A": {
+      "human_id": "TASK-1517",
+      "file_path": "docs/requirements/task/TASK-1517-skill-implement-ct-3-ac-ct-3-stamp-axis-per-corpus.md"
+    },
+    "01M54HB9N55WWMMRKHAPR69HMP": {
+      "human_id": "TASK-1518",
+      "file_path": "docs/requirements/task/TASK-1518-skill-test-tg-11d4-unowned-ac-references-everythin.md"
+    },
+    "01M54HB5FC17A70N5T2R675YY9": {
+      "human_id": "TASK-1519",
+      "file_path": "docs/requirements/task/TASK-1519-skill-test-tg-11d1-unowned-ac-references-sync-docs.md"
+    },
+    "01M54HB6S4NBQQ1SF12CSFAMZH": {
+      "human_id": "TASK-1520",
+      "file_path": "docs/requirements/task/TASK-1520-skill-test-tg-11d2-unowned-ac-references-context-f.md"
+    },
+    "01M54RFD98S9FVZ14209PQDPCX": {
+      "human_id": "TASK-1521",
+      "file_path": "docs/requirements/task/TASK-1521-skill-implement-ct-2-ac-ct-5-runner-reads-the-stam.md"
+    },
+    "01M54RFF8MJX3MYXTMRK9VFVGX": {
+      "human_id": "TASK-1522",
+      "file_path": "docs/requirements/task/TASK-1522-skill-implement-ct-4-ac-ct-4-blast-radius-stalenes.md"
+    },
+    "01M54HB87D01Q55C7QMWDKXY7V": {
+      "human_id": "TASK-1523",
+      "file_path": "docs/requirements/task/TASK-1523-skill-test-tg-11d3-unowned-ac-references-scripts-c.md"
+    },
+    "01M54HB2JJ0WWKNDT0K0SYAA22": {
+      "human_id": "TASK-1524",
+      "file_path": "docs/requirements/task/TASK-1524-skill-test-tg-11a-ownership-check-skips-deprecated.md"
+    },
+    "01M54RFC1H75GG1QJVFHQ8SW2E": {
+      "human_id": "TASK-1525",
+      "file_path": "docs/requirements/task/TASK-1525-skill-spec-ct-1-spec-corrections-c1-c9-with-the-us.md"
+    },
+    "01M54RFJRD203J6S6NHF5BBCM0": {
+      "human_id": "TASK-1526",
+      "file_path": "docs/requirements/task/TASK-1526-skill-test-ct-9-plan-gate-on-merged-main.md"
+    },
+    "01M54RFH2QJ53C8QJS1R8MJWV7": {
+      "human_id": "TASK-1527",
+      "file_path": "docs/requirements/task/TASK-1527-skill-implement-ct-6-ac-ct-10-capture-source-bucke.md"
+    },
+    "01M54RFG51YYXYFW7QPTB292P5": {
+      "human_id": "TASK-1528",
+      "file_path": "docs/requirements/task/TASK-1528-skill-implement-ct-5-ac-ct-9-floor-reads-stamp-the.md"
+    },
+    "01M54HB44QGFVYFM1GZ0WPA7EQ": {
+      "human_id": "TASK-1529",
+      "file_path": "docs/requirements/task/TASK-1529-skill-test-tg-11b-report-issue-channel-acs-whose-t.md"
+    },
+    "01M54HN1F7QRMWYQQSWTX9YQ1P": {
+      "human_id": "TASK-1530",
+      "file_path": "docs/requirements/task/TASK-1530-skill-review-tg-30-bring-the-11-rejected-baseline.md"
+    },
+    "01M54HCH28TBCYSG2D0TGGGJ51": {
+      "human_id": "TASK-1531",
+      "file_path": "docs/requirements/task/TASK-1531-skill-research-ct-r1-re-measure-ac-ct-3-10-against.md"
+    },
+    "01M54DSHCRM9YRS7B27JJDFK7K": {
+      "human_id": "TASK-1532",
+      "file_path": "docs/requirements/task/TASK-1532-skill-review-tg-29-replace-the-106-wrong-auto-adde.md"
     }
   }
 }

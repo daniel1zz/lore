@@ -176,8 +176,8 @@ One direction only: core ← service ← flows ← adapters. No cycles.
   script: e2e — bunx --bun vitest run packages/lore/tests/e2e/context-verbs-compiled.bun.test.ts
 - [⊘] [script] AC-CTX-4: Splice SSOT holds: setup-project-flow imports spliceManagedSections from context-projection (grep-pin asserts no second marker-splice implementation remains) and the existing setup e2e suite stays green
   script: test — bunx vitest run packages/lore/tests/unit/flows/setup-splice-ssot.test.ts
-- [⊘] [script] AC-CTX-5: Guard hook trips end-to-end in a temp repo: the PostToolUse hook script emits blocking feedback (non-zero) for an over-ceiling memory file, exits 0 when lore or .lore is absent (fail-open), and contains zero numeric budget literals (grep-pin)
-  script: e2e — bunx --bun vitest run packages/lore/tests/integration/claude-md-guard-hook-trip.bun.test.ts
+- [⊘] [script] AC-CTX-5: RETIRED HOOK, current mechanism: the claude-md-guard PostToolUse hook was retired in ee114c62; its check now runs at turn end in stop-turn-review.mjs, which blocks a turn that edited a CLAUDE.md past its ceiling, carrying the 'lore status --check-claude-md' report; a CLAUDE.md edited within budget is silent, and an over-budget file the turn did not touch is not re-reported
+  script: e2e — bunx --bun vitest run packages/lore/tests/integration/hooks/stop-turn-review-drift-budget.test.ts -t 'CLAUDE.md budget'
 - [⊘] [script] AC-CTX-6: Skill retirement completes end-to-end: on a fixture with a previously-installed lore-init-context skill, lore setup removes the installed copy, and the embedded assets manifest check exits 0
   script: e2e — bunx --bun vitest run --testTimeout=30000 --hookTimeout=30000 packages/lore/tests/integration/retirement-registry.bun.test.ts -t 'install-skill-lore-init-context|an emptied skill directory' && bun scripts/embed-assets-manifest.mjs --check
 - [⚑] [script] AC-CTX-7: Full gates pass: bun run typecheck exits 0 and both test runners (vitest suite and bun test suite) exit 0

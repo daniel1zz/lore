@@ -14,6 +14,8 @@ plan: PLAN-201
 links:
   - {id: TASK-1498, type: blocks}
   - {id: TASK-1496, type: blocks}
+  - {id: TASK-1503, type: blocks}
+  - {id: TASK-1508, type: blocks}
 ---
 Estimate: M
 Approach: 8 test files run `bun run build` in beforeAll, which trips the stale-binary check of other compiled tests in any parallel run (5 failures measured in the ADR). Build dist/lore once in the runner's globalSetup (or as the first step of `bun run test`), fail loud if the build fails, and remove the in-test rebuilds; tests that need a variant binary build it into their own mkdtemp dir, never dist/.

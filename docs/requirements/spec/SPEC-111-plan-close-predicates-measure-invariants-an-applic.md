@@ -172,7 +172,7 @@ Structured criteria are authored via `lore ac add` (below); the prose here is a 
 - [⚑] [script] AC-PCI-13: VerificationProjectionService's plan panel passes a null min_ratio through verbatim (never coerced to 0 or a numeric default) and its claimed-AC coverage field equals deriveClaimedAcCoverage over computeAcCoverage's own output for the same fixture, so the panel and the gate cannot disagree.
   script: test — bunx vitest run packages/lore/tests/unit/service/verification-projection-service.test.ts -t 'ratio disabled render'
 - [⚑] [script] AC-PCI-14: PlanAttestationPanel renders the literal text 'ratio conjunct disabled' when min_ratio is null and renders the numeric floor when it is set; the null case's rendered output contains neither '0%' nor '50%'.
-  script: test — cd packages/dashboard && bunx vitest run tests/component/PlanAttestationPanel.test.tsx -t 'ratio disabled render'
+  script: test — bunx --bun vitest run packages/dashboard/tests/component/PlanAttestationPanel.test.tsx -t 'ratio disabled render'
 - [⚑] [script] AC-PCI-15: The upstream ADR carries its revision clause: lore get adr-plan-close-predicates-must-measure-invariants-not-proxies emits a line starting with '## Revision 2026-07-30', so the corrected decision cannot land without the ADR that states it.
   script: other — lore get adr-plan-close-predicates-must-measure-invariants-not-proxies | grep -q '^## Revision 2026-07-30'
 - [⚑] [script] AC-PCI-16: lore approve prints every prd_sync_advisories entry to stderr (never stdout) with an unchanged exit code 0, keeps that rendering distinct from the reachability_advisories loop, and prints nothing when both fields are absent.
