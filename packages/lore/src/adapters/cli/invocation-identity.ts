@@ -30,6 +30,17 @@ export function setInvocationIdentity(identity: InvocationIdentity): void {
 }
 
 /**
+ * Forget the recorded identity so the next CLI entry can record its own.
+ *
+ * reason: the in-process test runner (tests/helpers/run-lore-in-process.ts) runs many invocations in ONE
+ * process, where the real binary runs exactly one. It calls this after each run so "resolved once per
+ * process" still holds for every invocation. Production code must never call it.
+ */
+export function resetInvocationIdentityForNextRun(): void {
+  current = undefined;
+}
+
+/**
  * Replace the recorded identity with its run-VERIFIED value (unregistered run -> `harnessRun` null). Called once,
  * by the store wrapper's `onVerified`, so {@link getInvocationIdentity} reads the verified identity from then on.
  */
