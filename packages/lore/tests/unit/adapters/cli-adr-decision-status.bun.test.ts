@@ -28,7 +28,7 @@
  * @spec_ref spec-adr-decision-status-has-a-create-surface-and-no-cli-update
  */
 
-import { describe, expect, it, beforeAll, beforeEach, afterEach } from "bun:test";
+import { describe, expect, it, beforeAll, beforeEach, afterEach } from "vitest";
 import { Database } from "bun:sqlite";
 import { mkdtempSync, rmSync } from "fs";
 import { join } from "path";

@@ -41,7 +41,7 @@
  *   REGRESSION — `--json` output matches the FeedOutcome shape; feed never mutates the corpus.
  */
 
-import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { mkdtempSync, mkdirSync, rmSync } from "fs";
 import { join, resolve } from "path";
 import { tmpdir } from "os";

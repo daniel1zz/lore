@@ -12,7 +12,7 @@
  * REGRESSION (a real SQLite store applies the same refusal as the in-memory double, end to end).
  */
 
-import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";

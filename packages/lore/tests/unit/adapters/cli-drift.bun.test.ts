@@ -47,7 +47,7 @@
  * @spec_ref SPEC-045 §Acceptance Criteria AC-DR-4
  */
 
-import { describe, expect, it, beforeAll, afterAll } from "bun:test";
+import { describe, expect, it, beforeAll, afterAll } from "vitest";
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync, unlinkSync, appendFileSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";

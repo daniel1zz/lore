@@ -14,21 +14,22 @@
  * this suite runs — deterministic enough to assert "both runner lines
  * present, exit 0" without depending on which commit HEAD happens to be.
  *
- * cwd is pinned EXPLICITLY to the repo root (`path.resolve(import.meta.dir,
+ * cwd is pinned EXPLICITLY to the repo root (`path.resolve(<this file's directory>,
  * "../../../../..")`) rather than assumed from the process's inherited cwd —
  * this file is itself invoked via `cd packages/lore && bun test <path>`
  * (this repo's `test:bun` convention), so `process.cwd()` at the point this
  * test runs is `packages/lore`, not the repo root the script needs.
  */
 
-import { describe, expect, it, beforeAll } from "bun:test";
+import { describe, expect, it, beforeAll } from "vitest";
+import { fileURLToPath } from "node:url";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 
-const REPO_ROOT = resolve(import.meta.dir, "../../../../..");
+const REPO_ROOT = resolve(fileURLToPath(new URL(".", import.meta.url)), "../../../../..");
 
 // reason: the selection-reason vocabulary is a runtime SSOT
 // (`scripts/changed-tests.ts`'s `SELECTION_REASONS` + `isSelectionReason`) —

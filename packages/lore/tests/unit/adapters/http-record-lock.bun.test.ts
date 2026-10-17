@@ -15,7 +15,7 @@
  *   REGRESSION  `correction` never leaks into the stored patch (the version carries it only as change_summary)
  */
 
-import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { mkdirSync, mkdtempSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";

@@ -22,7 +22,8 @@
  * Not covered: a claim whose worktree later went clean (that transition is AC-ROI-5's), the text-mode status lines.
  */
 
-import { afterAll, beforeAll, describe, expect, it, setDefaultTimeout } from "bun:test";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+const setDefaultTimeout = (ms: number): void => { vi.setConfig({ testTimeout: ms, hookTimeout: ms }); };
 import { join } from "node:path";
 import type { AuditEntry } from "@lore/core";
 import { RunSeeder, type SeedIdentity } from "./cli/fixtures/run-seeder.js";

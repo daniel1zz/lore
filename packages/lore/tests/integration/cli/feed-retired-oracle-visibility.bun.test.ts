@@ -55,7 +55,8 @@
  * @spec_ref AC-DC-11
  */
 
-import { describe, expect, it, beforeAll, afterAll, setDefaultTimeout } from "bun:test";
+import { describe, expect, it, beforeAll, afterAll, vi } from "vitest";
+const setDefaultTimeout = (ms: number): void => { vi.setConfig({ testTimeout: ms, hookTimeout: ms }); };
 import { mkdtempSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";

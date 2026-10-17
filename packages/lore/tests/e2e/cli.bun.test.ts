@@ -21,7 +21,7 @@
  * Run with: bun test tests/e2e/
  */
 
-import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { mkdirSync, rmSync, existsSync, writeFileSync, appendFileSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";

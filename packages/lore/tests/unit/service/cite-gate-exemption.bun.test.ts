@@ -12,7 +12,7 @@
  * Dimensions: HAPPY (case 1), NEGATIVE (2, 3, 4, 5), BOUNDARY (expires_at == now), STATE (version unchanged).
  */
 
-import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";

@@ -68,7 +68,7 @@
  *   §C1, §Migration Plan Phase 1, §Risk Registry, §Acceptance Criteria AC-080-7.
  */
 
-import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";

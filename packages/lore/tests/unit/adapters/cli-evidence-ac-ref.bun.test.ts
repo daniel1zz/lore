@@ -22,7 +22,7 @@
  *               (existing no-flag behavior unchanged)
  */
 
-import { describe, it, expect, beforeEach, afterEach } from "bun:test";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, mkdirSync, writeFileSync } from "fs";
 import { join, resolve } from "path";
 import { tmpdir } from "os";

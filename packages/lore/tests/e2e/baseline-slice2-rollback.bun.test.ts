@@ -41,7 +41,7 @@
  *   task-skill-test-rollback-e2e-mode-off-no-baseline-docs-leaves
  */
 
-import { afterAll, beforeAll, describe, expect, it } from "bun:test";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { Database } from "bun:sqlite";
 import { appendFileSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { join } from "node:path";

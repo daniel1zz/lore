@@ -34,7 +34,8 @@
  * @spec_ref AC-ACS-6 AC-ACS-8
  */
 
-import { describe, expect, it, beforeAll, afterEach, setDefaultTimeout } from "bun:test";
+import { describe, expect, it, beforeAll, afterEach, vi } from "vitest";
+const setDefaultTimeout = (ms: number): void => { vi.setConfig({ testTimeout: ms, hookTimeout: ms }); };
 import { mkdtempSync, rmSync, appendFileSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";

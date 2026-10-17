@@ -79,7 +79,7 @@
  * @spec_ref AC-JV-3 (spec-judgment-surfaces-must-verify-before-they-certify-machine §D5)
  */
 
-import { afterEach, describe, expect, it } from "bun:test";
+import { afterEach, describe, expect, it } from "vitest";
 import { execFileSync, spawnSync } from "node:child_process";
 import { appendFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";

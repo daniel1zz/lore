@@ -86,7 +86,8 @@
  * @spec_ref spec-multi-session-concurrency-queryable-ownership-checkout AC-OWN-1, AC-REPLAY-1
  */
 
-import { afterEach, describe, expect, it, spyOn } from "bun:test";
+import { afterEach, describe, expect, it, vi } from "vitest";
+const spyOn = vi.spyOn.bind(vi);
 import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";

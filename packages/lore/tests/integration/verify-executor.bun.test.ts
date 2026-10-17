@@ -27,7 +27,7 @@
  * @spec_ref AC-VRF-5 AC-VRF-6
  */
 
-import { describe, it, expect } from "bun:test";
+import { describe, it, expect } from "vitest";
 import { executeVerifySpawnSpec } from "../../src/service/verify-executor.js";
 import type { VerifySpawnSpec } from "../../src/service/verify-spawn.js";
 

@@ -81,7 +81,7 @@
  *   Task task-t5-compiled-binary-e2e-from-a-throwaway-corpus-clean-close.
  */
 
-import { afterAll, beforeAll, describe, expect, it } from "bun:test";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";

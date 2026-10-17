@@ -17,7 +17,7 @@
  * @spec_ref spec-rule-store-git-tracked-fragment-selection-on-demand-skill AC-RS-7
  */
 
-import { afterAll, describe, expect, it } from "bun:test";
+import { afterAll, describe, expect, it } from "vitest";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { dirname, join } from "path";

@@ -57,7 +57,7 @@
 
 import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
-import { describe, it, expect, beforeEach, afterEach } from "bun:test";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";

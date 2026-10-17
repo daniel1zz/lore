@@ -53,7 +53,8 @@
  * @spec_ref task-lore-done-override-attestation-demands-fresh-prose-that
  */
 
-import { describe, expect, it, beforeAll, beforeEach, afterEach, setDefaultTimeout } from "bun:test";
+import { describe, expect, it, beforeAll, beforeEach, afterEach, vi } from "vitest";
+const setDefaultTimeout = (ms: number): void => { vi.setConfig({ testTimeout: ms, hookTimeout: ms }); };
 import { mkdtempSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";

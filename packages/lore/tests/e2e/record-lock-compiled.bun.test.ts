@@ -16,7 +16,8 @@
  * @spec_ref AC-DR-5 — spec-documents-are-living-or-records-a-locked-record-is-never D4, D5, D6, D7
  */
 
-import { afterAll, beforeAll, describe, expect, it, setDefaultTimeout } from "bun:test";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+const setDefaultTimeout = (ms: number): void => { vi.setConfig({ testTimeout: ms, hookTimeout: ms }); };
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";

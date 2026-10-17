@@ -27,7 +27,7 @@
  * They will FAIL RED until src/adapters/http/sync-push.ts is implemented.
  */
 
-import { afterAll, beforeAll, describe, expect, it } from "bun:test";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";

@@ -33,7 +33,7 @@
  *   REGRESSION: content flag bypasses AI even when ai flag is true (AC-AI-3)
  */
 
-import { describe, it, expect, beforeEach, afterEach } from "bun:test";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, writeFileSync, mkdirSync } from "fs";
 import { join, resolve } from "path";
 import { tmpdir } from "os";

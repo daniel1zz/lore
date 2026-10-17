@@ -42,7 +42,7 @@
  *   task-skill-test-rollback-e2e-no-baselines-and-no-cites-byte
  */
 
-import { afterAll, beforeAll, describe, expect, it } from "bun:test";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";

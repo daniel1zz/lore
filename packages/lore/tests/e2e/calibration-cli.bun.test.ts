@@ -37,7 +37,7 @@
  *               swallowing the exit code or throwing out of the command
  */
 
-import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { mkdirSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";

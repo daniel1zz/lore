@@ -16,7 +16,7 @@
  * @spec_ref task-gh-1343388703-181
  */
 
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test } from "vitest";
 import { executeVerifySpawnSpec } from "../../src/service/verify-executor.js";
 import type { VerifySpawnSpec } from "../../src/service/verify-spawn.js";
 

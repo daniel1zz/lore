@@ -65,7 +65,7 @@
  *   AC-ICL-6.
  */
 
-import { afterAll, beforeAll, describe, expect, it } from "bun:test";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { Database } from "bun:sqlite";
 import { mkdtempSync, appendFileSync, rmSync } from "node:fs";
 import { join } from "node:path";

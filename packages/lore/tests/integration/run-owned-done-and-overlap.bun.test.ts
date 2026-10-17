@@ -20,7 +20,8 @@
  *                one holder and reports no overlap
  */
 
-import { afterAll, afterEach, beforeEach, describe, expect, it, setDefaultTimeout } from "bun:test";
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+const setDefaultTimeout = (ms: number): void => { vi.setConfig({ testTimeout: ms, hookTimeout: ms }); };
 import { Database } from "bun:sqlite";
 import { mkdtempSync, mkdirSync, rmSync } from "fs";
 import { join, resolve } from "path";

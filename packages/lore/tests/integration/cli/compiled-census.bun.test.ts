@@ -17,7 +17,8 @@
  * @spec_ref AC-BLC-4
  */
 
-import { afterAll, beforeAll, describe, expect, it, setDefaultTimeout } from "bun:test";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+const setDefaultTimeout = (ms: number): void => { vi.setConfig({ testTimeout: ms, hookTimeout: ms }); };
 import { execFileSync } from "node:child_process";
 import { mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -127,10 +128,14 @@ describe("compiled dist/lore: lore baseline coverage (specification branch leaf)
     expect(r.stdout).toContain(sites[0]!.key);
   });
 
-  it("every census site mapped -> coverage exits 0 with at least one site counted", () => {
+  it("every census site mapped -> coverage exits 0 with at least one site counted", async () => {
     mustRun(["baseline", "map", leaf, "--site", sites[0]!.key, "--rule", "BR-1"], repo);
     for (const s of sites.slice(1)) {
       mustRun(["baseline", "map", leaf, "--site", s.key, "--non-business", "plumbing, not business behaviour"], repo);
+      // reason: each mustRun blocks the worker's event loop; under load this loop exceeds 60 s, and vitest's
+      // worker->main RPC ("onTaskUpdate") times out after 60 s of an unserviced loop (unhandled error, exit 1).
+      // Yielding once per iteration lets the reply be processed (TG-23).
+      await new Promise<void>((resolve) => setImmediate(resolve));
     }
     const r = runLore(["baseline", "coverage", leaf], repo);
     expect(r.stderr + r.stdout).not.toContain("typescript-unavailable");

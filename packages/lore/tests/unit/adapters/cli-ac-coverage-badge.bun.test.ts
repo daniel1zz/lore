@@ -49,7 +49,7 @@
  * @spec_ref AC-WH-1
  */
 
-import { describe, it, expect } from "bun:test";
+import { describe, it, expect } from "vitest";
 import { coverageBadge } from "../../../src/adapters/cli/commands/ac.js";
 import type { AcCoverageFact } from "@lore/core";
 

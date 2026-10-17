@@ -46,6 +46,7 @@
 import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { fileURLToPath } from "node:url";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -131,7 +132,7 @@ describe("CorpusService.create verbatim slug is the sole identity arbiter (D2, A
   beforeAll(() => {
     // Written next to this test file, not an OS tmpdir — see WORKER_SCRIPT's
     // own doc comment above for why that placement is load-bearing.
-    workerScriptPath = join(import.meta.dir, `.verbatim-slug-worker.${process.pid}.mjs`);
+    workerScriptPath = join(fileURLToPath(new URL(".", import.meta.url)), `.verbatim-slug-worker.${process.pid}.mjs`);
     writeFileSync(workerScriptPath, WORKER_SCRIPT);
   });
 

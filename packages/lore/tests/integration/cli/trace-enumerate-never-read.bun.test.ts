@@ -35,7 +35,7 @@
  *               subsequent never-read answer wrong).
  */
 
-import { afterEach, describe, expect, it } from "bun:test";
+import { afterEach, describe, expect, it } from "vitest";
 import { Database } from "bun:sqlite";
 import { mkdtempSync, rmSync } from "fs";
 import { join } from "path";

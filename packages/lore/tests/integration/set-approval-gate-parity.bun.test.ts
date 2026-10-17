@@ -19,7 +19,7 @@
  * @spec_ref spec-approval-and-plan-closure-go-through-the-same-checks-on AC-AP-1
  */
 
-import { afterAll, beforeAll, describe, expect, it } from "bun:test";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { mkdirSync, mkdtempSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";

@@ -89,7 +89,7 @@
  * @spec_ref task-active-sessions-derives-only-over-active-plans-tasks-with
  */
 
-import { afterAll, describe, expect, it } from "bun:test";
+import { afterAll, describe, expect, it } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";

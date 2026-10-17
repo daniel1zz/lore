@@ -44,7 +44,7 @@
  * @spec_ref AC-076-4
  */
 
-import { describe, expect, it } from "bun:test";
+import { describe, expect, it } from "vitest";
 import { err, ok, setupManifestSchema } from "@lore/core";
 import type { LoreError, Result } from "@lore/core";
 import {

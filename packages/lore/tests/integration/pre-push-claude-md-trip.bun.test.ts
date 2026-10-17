@@ -68,7 +68,7 @@
  * @spec_ref spec-project-claude-md-content-contract-governance-injected AC-CMC-3
  */
 
-import { afterEach, beforeAll, beforeEach, describe, expect, it } from "bun:test";
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";

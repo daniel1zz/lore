@@ -35,7 +35,7 @@
  * @spec_ref SPEC-044 §Acceptance Criteria AC-SP-6
  */
 
-import { describe, expect, it, beforeAll, beforeEach, afterEach } from "bun:test";
+import { describe, expect, it, beforeAll, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, rmSync, writeFileSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";

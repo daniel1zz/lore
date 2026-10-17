@@ -18,7 +18,7 @@
  * Isolation: mkdtemp HOME/XDG + throwaway `lore init` corpus; never the repo's `.lore/`.
  */
 
-import { afterAll, beforeAll, describe, expect, it } from "bun:test";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { mkdirSync, mkdtempSync, rmSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";

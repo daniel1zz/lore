@@ -37,7 +37,7 @@
 
 import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
-import { describe, it, expect } from "bun:test";
+import { describe, it, expect } from "vitest";
 import { readFileSync } from "fs";
 import { AIProviderService } from "../../../src/service/ai-provider-service.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";

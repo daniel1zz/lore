@@ -38,7 +38,7 @@
  * @spec_ref task-getassesstemplatereproducibility-has-zero-production-callers
  */
 
-import { describe, it, expect, beforeEach, afterEach } from "bun:test";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, writeFileSync, mkdirSync } from "fs";
 import { join, resolve } from "path";
 import { tmpdir } from "os";

@@ -12,7 +12,7 @@
  * Run `bun run build` first; `assertFreshBinary` fails loud on a stale `dist/lore`.
  */
 
-import { afterAll, beforeAll, describe, expect, it } from "bun:test";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { appendFileSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";

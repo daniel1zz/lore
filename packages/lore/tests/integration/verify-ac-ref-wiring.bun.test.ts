@@ -95,7 +95,7 @@
  * @spec_ref AC-ETI-7 AC-ETI-8 (task-ac-eti-7-proves-the-tail-window-helper-but-not-its)
  */
 
-import { afterEach, beforeAll, beforeEach, describe, expect, it } from "bun:test";
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { appendFileSync, mkdtempSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";

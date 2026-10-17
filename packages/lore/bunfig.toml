@@ -1,5 +1,0 @@
-# AC-TG-2: guard for every `bun test` run from packages/lore (test:bun does `cd packages/lore`).
-# Bun reads the nearest bunfig.toml. The marker itself comes from ./.env.test (startup env, so
-# children inherit it); this preload verifies it and fails loud otherwise.
-[test]
-preload = ["../../scripts/test-isolation-bun-preload.ts"]

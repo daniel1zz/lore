@@ -21,7 +21,7 @@
  *               never re-sorted by this render layer.
  */
 
-import { describe, expect, it } from "bun:test";
+import { describe, expect, it } from "vitest";
 
 import { handleGetProjects } from "../../../src/adapters/http/projects-route.js";
 import type { MountEntry, MountRegistry, ProjectsResponse } from "../../../src/mount/types.js";

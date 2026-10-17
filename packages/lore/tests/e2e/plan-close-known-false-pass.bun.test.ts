@@ -48,7 +48,7 @@
  *   AC-VS-8. Task task-t4-record-the-coverage-predicate-s-measured-false-pass-in.
  */
 
-import { afterAll, beforeAll, describe, expect, it } from "bun:test";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";

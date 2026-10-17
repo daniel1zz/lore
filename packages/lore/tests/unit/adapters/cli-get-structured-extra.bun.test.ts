@@ -44,7 +44,7 @@
  *               human-only notice added no byte anywhere) and still carries `extra`
  */
 
-import { describe, expect, it, beforeAll, afterAll } from "bun:test";
+import { describe, expect, it, beforeAll, afterAll } from "vitest";
 import { mkdtempSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";

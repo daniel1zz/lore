@@ -41,7 +41,8 @@
  * @spec_ref task-the-ac-scope-re-keying-left-the-red-first-floor-unarmed
  */
 
-import { describe, expect, it, beforeAll, afterAll, beforeEach, afterEach, setDefaultTimeout } from "bun:test";
+import { describe, expect, it, beforeAll, afterAll, beforeEach, afterEach, vi } from "vitest";
+const setDefaultTimeout = (ms: number): void => { vi.setConfig({ testTimeout: ms, hookTimeout: ms }); };
 import { mkdtempSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";

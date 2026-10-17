@@ -44,7 +44,7 @@
  *               same pre-existing loud failure, never a crash.
  */
 
-import { afterEach, beforeAll, describe, expect, it } from "bun:test";
+import { afterEach, beforeAll, describe, expect, it } from "vitest";
 import { execFileSync } from "node:child_process";
 import {
   appendFileSync,

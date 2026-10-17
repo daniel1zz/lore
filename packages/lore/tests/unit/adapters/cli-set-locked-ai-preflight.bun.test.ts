@@ -48,8 +48,16 @@ function silence(): { stderr: string[]; restore: () => void } {
   };
 }
 
-async function importCmd(file: string): Promise<RunnableCommand> {
-  const mod = (await import(`../../../src/adapters/cli/commands/${file}.js`)) as { default?: RunnableCommand };
+// reason: a template-literal dynamic import is not resolvable by vite under the Bun runtime
+// ("Unknown variable dynamic import"); a literal per command keeps the lazy load and the module graph static.
+const COMMAND_LOADERS = {
+  create: () => import("../../../src/adapters/cli/commands/create.js"),
+  init: () => import("../../../src/adapters/cli/commands/init.js"),
+  set: () => import("../../../src/adapters/cli/commands/set.js"),
+} as const;
+
+async function importCmd(file: keyof typeof COMMAND_LOADERS): Promise<RunnableCommand> {
+  const mod = (await COMMAND_LOADERS[file]()) as { default?: RunnableCommand };
   if (!mod.default?.run) throw new Error(`${file} command not exported`);
   return mod.default;
 }

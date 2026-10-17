@@ -32,7 +32,8 @@
  * @spec_ref AC-WH-1
  */
 
-import { describe, it, expect, spyOn, beforeEach, afterEach } from "bun:test";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+const spyOn = vi.spyOn.bind(vi);
 import { mkdtempSync, mkdirSync } from "fs";
 import { join, resolve } from "path";
 import { tmpdir } from "os";

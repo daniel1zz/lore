@@ -33,7 +33,7 @@
  * Run with: bun test tests/integration/tree-consistency.bun.test.ts
  */
 
-import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { mkdirSync, rmSync, writeFileSync, appendFileSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";

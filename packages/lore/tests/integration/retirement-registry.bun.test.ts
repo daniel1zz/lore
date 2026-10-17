@@ -21,7 +21,8 @@
  * @spec_ref spec-test-governance-guards-that-refuse-bad-tests-declared AC-TG-9
  */
 
-import { afterAll, beforeAll, describe, expect, it, setDefaultTimeout } from "bun:test";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+const setDefaultTimeout = (ms: number): void => { vi.setConfig({ testTimeout: ms, hookTimeout: ms }); };
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import {

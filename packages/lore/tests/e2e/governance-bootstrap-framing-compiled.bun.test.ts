@@ -44,7 +44,7 @@
  *   §Design Decisions D2, §Acceptance Criteria AC-CP-10.
  */
 
-import { beforeAll, describe, expect, it } from "bun:test";
+import { beforeAll, describe, expect, it } from "vitest";
 import { join } from "path";
 import { BOOTSTRAP_FRAMING_LINE } from "@lore/core";
 import { assertFreshBinary } from "../integration/helpers/assert-fresh-binary";

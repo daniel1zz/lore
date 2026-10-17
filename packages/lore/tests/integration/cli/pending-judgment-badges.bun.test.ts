@@ -28,7 +28,7 @@
  * @spec_ref SPEC-034 §4
  */
 
-import { describe, it, expect, beforeEach, afterEach } from "bun:test";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, mkdirSync, rmSync } from "fs";
 import { join, resolve } from "path";
 import { tmpdir } from "os";

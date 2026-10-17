@@ -40,7 +40,8 @@
 import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
 import { Database } from "bun:sqlite";
-import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { fileURLToPath } from "node:url";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -54,7 +55,7 @@ import { RuleStateService as RuleStateServiceImpl } from "../../../src/service/r
 import { SQLiteStore } from "../../../src/store/sqlite-store.js";
 import { makeRuleService } from "../../helpers/make-rule-service.js";
 
-const WORKER = join(import.meta.dir, "..", "..", "fixtures", "cite-retire-race-worker.ts");
+const WORKER = join(fileURLToPath(new URL(".", import.meta.url)), "..", "..", "fixtures", "cite-retire-race-worker.ts");
 const WRITERS = 8;
 const ROUNDS = 3;
 const RULE_ID = "BR-1";

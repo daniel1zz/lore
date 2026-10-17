@@ -66,7 +66,8 @@
  * `resolveGithubJoinedRows`/`runGithubIssuesListing`/`runGithubVerify`.
  */
 
-import { afterAll, beforeAll, describe, expect, it } from "bun:test";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { fileURLToPath } from "node:url";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -79,7 +80,7 @@ import { cleanupPayloadGhStubDir, payloadGhStubDir, type PayloadGhStubIssue } fr
 
 // ─── Worktree-anchored dist/lore binary (never the main checkout's) ─────────
 
-const WORKTREE_ROOT = resolve(import.meta.dir, "..", "..", "..", "..", "..");
+const WORKTREE_ROOT = resolve(fileURLToPath(new URL(".", import.meta.url)), "..", "..", "..", "..", "..");
 const DIST_LORE = join(WORKTREE_ROOT, "dist", "lore");
 const TMP_ROOT = tmpdir();
 

@@ -19,7 +19,7 @@
  * Uses bun:sqlite (bun test only — vitest cannot resolve bun:sqlite).
  */
 
-import { describe, it, expect, beforeEach, afterEach } from "bun:test";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, existsSync, mkdirSync, readFileSync } from "fs";
 import { join, resolve } from "path";
 import { tmpdir } from "os";
@@ -77,7 +77,7 @@ describe("loadLoreApp — HAPPY", () => {
 
     try {
       // Check path ends with /.lore/lore.db (normalize macOS /var → /private/var symlink)
-      expect(dbPath).toEndWith("/.lore/lore.db");
+      expect(dbPath.endsWith("/.lore/lore.db")).toBe(true);
       expect(app).toBeDefined();
       expect(app.corpusService).toBeDefined();
 
@@ -97,7 +97,7 @@ describe("loadLoreApp — HAPPY", () => {
     process.chdir(projectDir);
     const { app, dbPath } = loadLoreApp();
     try {
-      expect(dbPath).toEndWith("/.lore/lore.db");
+      expect(dbPath.endsWith("/.lore/lore.db")).toBe(true);
       expect(existsSync(dbPath)).toBe(true);
     } finally {
       app.close();

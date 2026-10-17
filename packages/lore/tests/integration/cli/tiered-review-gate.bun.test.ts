@@ -38,7 +38,7 @@
  * @spec_ref SPEC-103 §Acceptance Criteria AC-TIER-4, AC-TIER-5, AC-TIER-8
  */
 
-import { afterEach, beforeAll, describe, expect, it } from "bun:test";
+import { afterEach, beforeAll, describe, expect, it } from "vitest";
 import { Database } from "bun:sqlite";
 import { mkdtempSync, rmSync, writeFileSync } from "fs";
 import { join } from "path";

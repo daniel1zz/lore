@@ -215,7 +215,8 @@ describe("the real checkout wires the same resolution", () => {
   });
 
   it("every vite/vitest config that resolves @lore/* derives it from workspaceAliases", () => {
-    for (const config of ["vitest.config.ts", "packages/dashboard/vite.config.ts"]) {
+    // vitest.shared.ts holds the one config body (TG-23); vitest.config.ts / vitest.node.config.ts only pick files.
+    for (const config of ["vitest.shared.ts", "packages/dashboard/vite.config.ts"]) {
       expect(readFileSync(join(REAL_ROOT, config), "utf8"), config).toContain("workspaceAliases(");
     }
   });

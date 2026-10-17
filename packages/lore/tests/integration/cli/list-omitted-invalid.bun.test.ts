@@ -11,7 +11,7 @@
  *   REGRESSION: BR-745 — the invalidated doc stays excluded from the default rows
  *   MCP:        lore_list result carries omitted_invalid
  */
-import { afterAll, describe, expect, it } from "bun:test";
+import { afterAll, describe, expect, it } from "vitest";
 import { appendFileSync, mkdtempSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";

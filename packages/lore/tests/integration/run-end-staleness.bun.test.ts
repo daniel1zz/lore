@@ -13,7 +13,8 @@
  * stays fresh).
  */
 
-import { afterAll, beforeAll, describe, expect, it, setDefaultTimeout } from "bun:test";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+const setDefaultTimeout = (ms: number): void => { vi.setConfig({ testTimeout: ms, hookTimeout: ms }); };
 import { CLAIM_CONFLICT_EXIT, ageClaim, createCorpus, getClaim, registerRun, type Corpus } from "./cli/support/claim-run-fixture.js";
 import {
   claimAs,

@@ -8,7 +8,7 @@
  * Six dimensions: HAPPY (Bash, subagent Bash, MCP), NEGATIVE (non-lore Bash, other tool, malformed stdin),
  * BOUNDARY (caller-forged flag overwritten, unsafe session id), REGRESSION (no permissionDecision anywhere).
  */
-import { afterAll, beforeAll, describe, expect, it } from "bun:test";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { mkdirSync, mkdtempSync, rmSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";

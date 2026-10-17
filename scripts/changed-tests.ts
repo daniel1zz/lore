@@ -3,7 +3,11 @@
  * Two-runner changed-test selector (`bun run test:changed`) — SPEC
  * `spec-two-runner-changed-test-selection-deterministic-test`.
  *
- * This repo splits tests across two runners by a hard file-naming convention:
+ * TG-23 (task-skill-implement-tg-23): the repo now has ONE runner — vitest on the Bun runtime —
+ * and the two groups below are only the file-naming split (`.bun.test.ts` vs the rest) that the
+ * selection and accounting still report; both groups execute through `bunx --bun vitest run`
+ * (files listed in `vitest.node-files.ts` through the Node config). The text below describes
+ * the original two-runner design the selection rules came from. It was:
  * `.bun.test.ts` under `bun test` (needs `bun:sqlite`), everything else under
  * `vitest`. The de-facto worktree regression command, `bunx vitest run
  * --changed <base>`, is STRUCTURALLY BLIND to every `.bun.test.ts` file —
@@ -224,6 +228,7 @@ import { z } from "zod";
 // `git ls-files` scan; importing it keeps the two lists SSOT-linked instead
 // of drifting apart the next time a text extension is added there.
 import { hasTextSourceExtension } from "./check-no-nul-bytes.js";
+import { NODE_PROJECT_FILES } from "../vitest.node-files.js";
 
 /** Typed error for every git/graph/runner resolution failure this script can hit — never a bare `throw new Error`. */
 export class ChangedTestsError extends Error {
@@ -1029,25 +1034,36 @@ function loadCoreAliasMap(repoRoot: string): AliasMap {
   };
 }
 
-function runVitest(repoRoot: string, files: readonly string[]): number {
-  const result = spawnSync("bunx", ["vitest", "run", ...files], { cwd: repoRoot, stdio: "inherit" });
+/** Spawns `bunx [--bun] vitest run [-c <config>] <files>` from the repo root; returns the exit code. */
+function spawnVitest(repoRoot: string, files: readonly string[], node: boolean): number {
+  if (files.length === 0) return 0;
+  const args = node ? ["vitest", "run", "-c", "vitest.node.config.ts", ...files] : ["--bun", "vitest", "run", ...files];
+  const result = spawnSync("bunx", args, { cwd: repoRoot, stdio: "inherit" });
   if (result.error) {
-    throw new ChangedTestsError("runner", `bunx vitest run failed to spawn: ${result.error.message}`, { files });
+    throw new ChangedTestsError("runner", `bunx ${args.join(" ")} failed to spawn: ${result.error.message}`, { files });
   }
   return result.status ?? 1;
 }
 
+/**
+ * One runner (task-skill-implement-tg-23): every selected file runs under vitest on the Bun runtime,
+ * except the files `vitest.node-files.ts` lists by name, which run under Node. The `vitest` / `bun`
+ * labels in the accounting are kept (they still mean "vitest-named" / "`.bun.test.ts`-named" files).
+ */
+function runSelected(repoRoot: string, files: readonly string[]): number {
+  const nodeFiles = files.filter((f) => Object.hasOwn(NODE_PROJECT_FILES, f));
+  const bunFiles = files.filter((f) => !Object.hasOwn(NODE_PROJECT_FILES, f));
+  const bunCode = spawnVitest(repoRoot, bunFiles, false);
+  const nodeCode = spawnVitest(repoRoot, nodeFiles, true);
+  return bunCode !== 0 ? bunCode : nodeCode;
+}
+
+function runVitest(repoRoot: string, files: readonly string[]): number {
+  return runSelected(repoRoot, files);
+}
+
 function runBunTest(repoRoot: string, files: readonly string[]): number {
-  const loreRelDir = "packages/lore";
-  const relFiles = files.map((f) => posix.relative(loreRelDir, f));
-  const result = spawnSync("bun", ["test", "--timeout", "30000", ...relFiles], {
-    cwd: osJoin(repoRoot, loreRelDir),
-    stdio: "inherit",
-  });
-  if (result.error) {
-    throw new ChangedTestsError("runner", `bun test failed to spawn: ${result.error.message}`, { files });
-  }
-  return result.status ?? 1;
+  return runSelected(repoRoot, files);
 }
 
 function runBuild(repoRoot: string): number {

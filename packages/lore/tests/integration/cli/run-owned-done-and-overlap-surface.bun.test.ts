@@ -15,7 +15,8 @@
  * (no-run writers keep the name comparison) / STATE (nothing archived or claimed on a refusal).
  */
 
-import { afterAll, beforeAll, describe, expect, it, setDefaultTimeout } from "bun:test";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+const setDefaultTimeout = (ms: number): void => { vi.setConfig({ testTimeout: ms, hookTimeout: ms }); };
 import { sessionActorFor } from "../../helpers/session-actor";
 import {
   R1,

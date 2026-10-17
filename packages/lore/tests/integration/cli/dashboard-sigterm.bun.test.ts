@@ -96,7 +96,7 @@
  * @spec_ref task-lore-dashboard-leaks-the-vite-child-on-sigterm-only-sigint AC-1, AC-2
  */
 
-import { describe, expect, it, beforeAll, afterEach } from "bun:test";
+import { describe, expect, it, beforeAll, afterEach } from "vitest";
 import { mkdtempSync, rmSync, symlinkSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";

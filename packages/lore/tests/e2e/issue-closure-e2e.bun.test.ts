@@ -71,7 +71,7 @@
 
 import { RecordLockService } from "../../src/service/record-lock-service.js";
 import { GateEnforcer } from "../../src/service/gate-enforcer.js";
-import { afterEach, beforeAll, describe, expect, it } from "bun:test";
+import { afterEach, beforeAll, describe, expect, it } from "vitest";
 import { Database } from "bun:sqlite";
 import { mkdtempSync, rmSync } from "fs";
 import { join } from "path";

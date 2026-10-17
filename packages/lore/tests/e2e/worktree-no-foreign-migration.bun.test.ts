@@ -18,7 +18,7 @@
  *   (d) the same CLI command from the main checkout migrates (user_version == latest).
  */
 
-import { afterAll, beforeAll, describe, expect, it } from "bun:test";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { Database } from "bun:sqlite";
 import { execFileSync } from "node:child_process";
 import { mkdtempSync, realpathSync, rmSync } from "node:fs";

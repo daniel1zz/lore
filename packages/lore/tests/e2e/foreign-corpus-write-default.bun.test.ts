@@ -57,7 +57,7 @@
  *       named off-pattern) goes RED. Pure, in-process, no subprocess spawn.
  */
 
-import { afterEach, beforeAll, describe, expect, it } from "bun:test";
+import { afterEach, beforeAll, describe, expect, it } from "vitest";
 import { execFileSync } from "node:child_process";
 import { appendFileSync, existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { writeFileSync } from "node:fs";

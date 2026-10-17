@@ -55,7 +55,7 @@
  * fails on every legitimately built checkout.
  */
 
-import { describe, it, expect, afterEach } from "bun:test";
+import { describe, it, expect, afterEach } from "vitest";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";

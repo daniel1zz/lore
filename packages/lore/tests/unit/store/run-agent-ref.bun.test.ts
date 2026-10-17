@@ -8,7 +8,7 @@
  * BOUNDARY (same registered_at -> id ASC) / REGRESSION (read does not alter end state or records).
  */
 
-import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
