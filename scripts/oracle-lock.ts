@@ -85,12 +85,19 @@ import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+// SPEC-143 AC-CT-8 (d): the lock name, directory resolution and liveness probe have ONE definition,
+// in the read-only reader the shipped binary uses; this file is the WRITER of the same protocol.
+import {
+  isPidAlive,
+  ORACLE_LOCK_FILE_NAME,
+  resolveOracleLockDir,
+} from "../packages/lore/src/adapters/oracle-occupancy.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const REPO_ROOT = join(__filename, "..", "..");
 
 /** Fixed lock file name inside whichever directory `main`/`releaseLock` are given. */
-export const LOCK_FILE_NAME = "lore-oracle-test.lock";
+export const LOCK_FILE_NAME = ORACLE_LOCK_FILE_NAME;
 
 /**
  * Resolves the PRODUCTION lock directory: `git rev-parse --git-common-dir`,
@@ -106,34 +113,9 @@ export const LOCK_FILE_NAME = "lore-oracle-test.lock";
  *   path, which would defeat the whole mechanism.
  */
 export function resolveDefaultLockDir(repoRoot: string = REPO_ROOT): string {
-  const result = spawnSync("git", ["rev-parse", "--git-common-dir"], {
-    cwd: repoRoot,
-    encoding: "utf8",
-  });
-  if (result.status !== 0 || !result.stdout) {
-    throw new Error(
-      `oracle-lock: "git rev-parse --git-common-dir" failed (status ${result.status}): ${result.stderr ?? "<no stderr>"}`,
-    );
-  }
-  return resolve(repoRoot, result.stdout.trim());
-}
-
-/**
- * True iff a process with `pid` is currently alive, probed via the
- * zero-signal `kill(pid, 0)` convention (no signal is actually delivered).
- * `ESRCH` ("no such process") is the only outcome treated as dead; any other
- * failure (most commonly `EPERM` — the process exists but is owned by
- * another user) is treated as alive, since the mutex's job is only to avoid
- * colliding with a REAL running holder, never to distinguish "alive" from
- * "alive and inspectable by me".
- */
-function isPidAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (e) {
-    return (e as NodeJS.ErrnoException).code !== "ESRCH";
-  }
+  const resolved = resolveOracleLockDir(repoRoot);
+  if ("error" in resolved) throw new Error(`oracle-lock: ${resolved.error}`);
+  return resolved.dir;
 }
 
 /**

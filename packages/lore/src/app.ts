@@ -88,6 +88,8 @@ import { ensureVerifiedIdentity, resolveWriteActorFor, withVerifiedWriteContext 
 import { PlanExemptionService } from "./service/plan-exemption-service.js";
 import { UatService } from "./service/uat-service.js";
 import { VerifyRunnerService } from "./service/verify-runner-service.js";
+import type { StateBindingOccupancyPort } from "./service/verify-runner-service.js";
+import { probeOccupancyForCheckout } from "./adapters/oracle-occupancy.js";
 import { executeVerifySpawnSpec } from "./service/verify-executor.js";
 import { GateEnforcer } from "./service/gate-enforcer.js";
 import { RecordLockService } from "./service/record-lock-service.js";
@@ -634,6 +636,17 @@ export interface AppWriteContext {
   readonly onVerified?: (verified: InvocationIdentity) => void;
 }
 
+/**
+ * Wires `VerifyRunnerService`'s state-binding SKIP path (SPEC-143 AC-CT-8): the read-only occupancy
+ * reader plus the store's audit append. The writer of the lock protocol stays `scripts/oracle-lock.ts`.
+ */
+function buildStateBindingOccupancyPort(store: Pick<StoreInterface, "appendAuditEntry">): StateBindingOccupancyPort {
+  return {
+    probe: probeOccupancyForCheckout,
+    recordSkip: (entry) => store.appendAuditEntry(entry),
+  };
+}
+
 function warnOnStderr(line: string): void {
   process.stderr.write(`${line}\n`); // CLI surface
 }
@@ -990,6 +1003,9 @@ function buildAppFromSqlite(
         envPassthroughAll: verifyEnvConfig.passthrough_all,
         processEnv: process.env,
       },
+      undefined,
+      undefined,
+      buildStateBindingOccupancyPort(store),
     ),
     // reason: ConfigService (SPEC-062 D1) — constructed over the SAME repoRoot
     // VerifyRunnerService/SeatService already receive (config lives at
@@ -1378,6 +1394,9 @@ function buildAppFromTurso(
         envPassthroughAll: verifyEnvConfig.passthrough_all,
         processEnv: process.env,
       },
+      undefined,
+      undefined,
+      buildStateBindingOccupancyPort(store),
     ),
     // reason: ConfigService (SPEC-062 D1) — see buildAppFromSqlite's identical comment.
     configService: new ConfigService(repoRoot, store.appendAuditEntry.bind(store)),

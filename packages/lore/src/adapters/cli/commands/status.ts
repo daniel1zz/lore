@@ -219,6 +219,13 @@ import { computeIssueCheck, type IssueCheckPayload } from "../status-issue-check
 // setup-check.ts's identical precedent for this exact import.
 import { loadConfig } from "@lore/core/node";
 import { resolveCiteGateRaw, classifyCaptureSource } from "@lore/core";
+import type { EvidenceEntry } from "@lore/core";
+import {
+  findUnresolvedStateBindingSkips,
+  renderStateBindingSkipLine,
+  STATE_BINDING_SKIP_AUDIT_ACTION,
+  type UnresolvedStateBindingSkip,
+} from "../../../service/state-binding-skip.js";
 import { resolveCiteGateFor } from "../../../service/ac-write-chokepoint.js";
 import { BASELINE_ADOPT_AUDIT_ACTION } from "./baseline-adopt.js";
 import { decideAcCiteStatus, ENFORCE_REFUSES_NOTHING_WARNING, lastAdoptedModeOf } from "../../../service/ac-cite-status.js";
@@ -254,6 +261,26 @@ const ALL_SURFACES:ReadonlyArray<CallerSurface> = [
  * @param app - Wired App instance.
  * @returns Record mapping each CallerSurface to its resolved AI boolean.
  */
+/**
+ * SPEC-143 AC-CT-8 — the state-binding skips still waiting for a stamped re-record: every
+ * `state_binding_skipped` audit row, minus those a later stamped runner row for the same task + AC
+ * has superseded. Reads only (audit query + `corpusService.get`); a failed read is returned, never
+ * flattened to "no skips".
+ */
+async function collectStateBindingSkips(
+  app: ReturnType<typeof loadLoreApp>["app"],
+): Promise<Result<UnresolvedStateBindingSkip[], LoreError>> {
+  const rows = await app.auditService.query({ action: STATE_BINDING_SKIP_AUDIT_ACTION, limit: 500 });
+  if (!rows.ok) return rows;
+  const evidenceByTask = new Map<string, EvidenceEntry[]>();
+  for (const taskId of new Set(rows.value.flatMap((r) => (r.doc_id === undefined ? [] : [r.doc_id])))) {
+    const task = await app.corpusService.get(taskId);
+    if (!task.ok) return task;
+    evidenceByTask.set(taskId, extractEvidence(task.value.doc));
+  }
+  return { ok: true, value: findUnresolvedStateBindingSkips(rows.value, (id) => evidenceByTask.get(id) ?? []) };
+}
+
 function computeAiDefaults(app: ReturnType<typeof loadLoreApp>["app"]): Record<string, boolean> {
   const saved = app.callerSurface;
   const result: Record<string, boolean> = {};
@@ -1590,6 +1617,15 @@ export default defineCommand({
       // SPEC-024 AC-NOAI-10: resolved per-surface AI defaults.
       const aiDefaults = computeAiDefaults(app);
 
+      // SPEC-143 AC-CT-8 — state-binding checks `lore verify` SKIPPED because a peer held the oracle lock.
+      const stateBindingSkipsResult = await collectStateBindingSkips(app);
+      if (!stateBindingSkipsResult.ok) {
+        process.stderr.write(formatError(stateBindingSkipsResult.error) + "\n");
+        process.exitCode = exitCode(stateBindingSkipsResult.error);
+        return;
+      }
+      const stateBindingSkips = stateBindingSkipsResult.value;
+
       // SPEC-044 §Design Decisions D14 — open_stale_candidates, computed by the SAME
       // query `lore review --staleness --list` uses (one derivation site,
       // `flows/staleness-flow.ts::listFreshStalenessEscalates` — mirrors SPEC-043's
@@ -1817,6 +1853,7 @@ export default defineCommand({
                 harness_run_attribution: attributionShare,
                 identity_sources: identitySources,
                 orphaned_dirty: orphanedDirty,
+                ...(stateBindingSkips.length > 0 ? { state_binding_skips: stateBindingSkips } : {}),
                 ...(baselineStatus !== null ? { baseline: baselineStatus } : {}),
                 ...(acCiteStatus !== null ? { ac_cite: acCiteStatus } : {}),
                 ...(specCitationCensus !== null ? specCitationCensus : {}),
@@ -2026,6 +2063,10 @@ export default defineCommand({
           console.log(line);
         }
       }
+
+      // SPEC-143 AC-CT-8 — printed only when a skip is unresolved (a corpus with none prints what it printed before).
+      const stateBindingSkipLine = renderStateBindingSkipLine(stateBindingSkips);
+      if (stateBindingSkipLine !== undefined) console.log(`\n${stateBindingSkipLine}`);
 
       // SPEC-024 AC-NOAI-10: show resolved per-surface AI defaults
       console.log("\nAI defaults (per surface):");
