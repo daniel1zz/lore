@@ -28,6 +28,11 @@ function run(label: string, cmd: string, args: string[], env: Record<string, str
 }
 
 try {
+  // reason: dist/lore is built ONCE per run, here, before any test (task-skill-implement-tg-24); a
+  // failed build stops the run loud. scripts/test-global-setup.ts then finds it fresh in both
+  // invocations and only snapshots it for the no-test-writes-dist check.
+  const build = run("build dist/lore (once)", "bun", ["run", "build"]);
+  if (build !== 0) throw new Error(`run-tests: \`bun run build\` failed (exit ${build}); no test ran`);
   const bun = run("vitest on the Bun runtime", "bunx", ["--bun", "vitest", "run", "--reporter=default", "--reporter=json", `--outputFile.json=${bunReport}`]);
   const node = run(
     "vitest on Node (files listed in vitest.node-files.ts)",

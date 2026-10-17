@@ -23,7 +23,7 @@
  * for why it is computed at that exact point in the sequence.
  */
 
-import { join, dirname } from "path";
+import { join, dirname, isAbsolute } from "path";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { spawnSync } from "node:child_process";
 import type { BunPlugin, PluginBuilder, OnLoadArgs } from "bun";
@@ -42,19 +42,26 @@ import {
 
 const root = join(import.meta.dir, "..");
 const entrypoint = join(root, "packages", "lore", "src", "index.ts");
-// ⛔ The output path is FIXED, and an earlier revision of this slice was wrong
-// to make it overridable. A `LORE_BUILD_OUTFILE` escape let the two
-// binary-provenance test suites build without racing each other on one path —
-// but `bun run build` ALSO rewrites `packages/lore/src/generated/
-// assets-manifest.ts` on every run, so a build that skipped `dist/lore` left a
-// generated source NEWER than the binary. That is precisely the condition
-// `tests/integration/helpers/assert-fresh-binary.ts` refuses, and it took
-// `dashboard-command.bun.test.ts` and `gate-hooks.bun.test.ts` down with it
-// (measured 2026-08-17 in one `bun run test:changed` run). Keeping the
-// destination fixed keeps "a build happened" and "dist/lore is current" the
-// same fact. Suites needing their own artifact build here and COPY it — see
-// those two suites' `beforeAll`.
-const outfile = join(root, "dist", "lore");
+// The DEFAULT output is dist/lore, built ONCE per test run by the runner (scripts/run-tests.ts, and
+// scripts/test-global-setup.ts for a single-file run); no test builds into dist/ (TG-24,
+// adr-tg-1: in-test rebuilds tripped the stale-binary check of every parallel compiled test).
+// A caller that needs its OWN artifact (the two binary-provenance suites, which assert on a fresh
+// build's embedded commit/dirty/built_at) passes `--outfile <absolute path>`. That is safe now
+// because the generated-source write below is IDEMPOTENT: a build whose generated module is
+// already current leaves it untouched, so a variant build never makes a source newer than dist/lore
+// (the condition tests/integration/helpers/assert-fresh-binary.ts refuses; the earlier
+// `LORE_BUILD_OUTFILE` escape failed exactly there, measured 2026-08-17).
+const outfileFlagIndex = process.argv.indexOf("--outfile");
+const outfile =
+  outfileFlagIndex === -1
+    ? join(root, "dist", "lore")
+    : (() => {
+        const value = process.argv[outfileFlagIndex + 1];
+        if (value === undefined || value.startsWith("--") || !isAbsolute(value)) {
+          throw new Error(`[build] --outfile requires an ABSOLUTE path, got ${JSON.stringify(value)}`);
+        }
+        return value;
+      })();
 
 /** Resolves the absolute path to the native .node file for the current platform. */
 function resolveNativeNodePath(nativePkg: string): string {
@@ -281,7 +288,14 @@ console.log(`  Native: ${nativeNodePath}`);
 console.log(`Regenerating embedded assets manifest...`);
 const assetsManifest = buildManifest(join(root, "assets"), root);
 mkdirSync(dirname(GENERATED_FILE_PATH), { recursive: true });
-writeFileSync(GENERATED_FILE_PATH, renderGeneratedFile(assetsManifest), "utf8");
+// reason: write only when the content changed. An unconditional write bumps the mtime of a source
+// file the stale-binary check compares against dist/lore, so a build that changed nothing would make
+// the existing binary look stale. See the outfile comment above.
+const renderedManifest = renderGeneratedFile(assetsManifest);
+const currentManifest = existsSync(GENERATED_FILE_PATH) ? readFileSync(GENERATED_FILE_PATH, "utf8") : null;
+if (currentManifest !== renderedManifest) {
+  writeFileSync(GENERATED_FILE_PATH, renderedManifest, "utf8");
+}
 
 // Post-write self-check: read back what was just written and confirm its
 // embedded tree_digest equals the freshly-computed one — this is the ordering
