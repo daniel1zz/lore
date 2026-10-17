@@ -1,3 +1,4 @@
+// @layer service-rule-set-site-map
 /**
  * RuleService.setSiteMap (baseline slice 2a, AC-BLS2-5): the only writer of a leaf's
  * `extra.site_map` and `extra.commands`.

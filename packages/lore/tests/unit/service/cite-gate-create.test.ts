@@ -1,3 +1,4 @@
+// @layer service-create-inline-criteria
 /**
  * The citation gate covers `CorpusService.create`'s inline criteria (spec C3: create is a sanctioned AC
  * write path "with the same citation gate" — it must not bypass the gate `lore ac add` applies).

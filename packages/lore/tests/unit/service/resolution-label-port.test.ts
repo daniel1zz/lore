@@ -94,7 +94,7 @@ function okJson(body: unknown): Promise<GhExecFileResult> {
   return Promise.resolve({ stdout: JSON.stringify(body), stderr: "" });
 }
 
-describe("GhResolutionLabelPort (AC-GI-4, spec-the-defect-channel-reaches-no-machine-but-its-own-github)", () => {
+describe("GhResolutionLabelPort (spec-the-defect-channel-reaches-no-machine-but-its-own-github#AC-GI-4, spec-the-defect-channel-reaches-no-machine-but-its-own-github)", () => {
   it("HAPPY: no existing resolution:* label — lists once, then adds the target with exactly one POST", async () => {
     const calls: CapturedCall[] = [];
     const execFile = scriptedExecFile(calls, [
@@ -235,7 +235,7 @@ describe("GhResolutionLabelPort (AC-GI-4, spec-the-defect-channel-reaches-no-mac
     expect(calls.some((c) => isPost(c.args))).toBe(false);
   });
 
-  it("REGRESSION (AC-GI-7): resolution-label-port.ts imports zero node:child_process", () => {
+  it("REGRESSION (spec-the-defect-channel-reaches-no-machine-but-its-own-github#AC-GI-7): resolution-label-port.ts imports zero node:child_process", () => {
     const sourcePath = fileURLToPath(
       new URL("../../../src/service/resolution-label-port.ts", import.meta.url),
     );

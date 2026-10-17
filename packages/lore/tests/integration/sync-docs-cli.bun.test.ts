@@ -130,7 +130,7 @@ afterEach(() => {
 
 // ─── AC-SD-1 (e2e): creates new specs ────────────────────────────────────────
 
-describe("AC-SD-1 e2e — creates missing specs from files", () => {
+describe("spec-lore-sync-docs-backfill-new-spec-files-into-corpus#AC-SD-1 e2e — creates missing specs from files", () => {
   it("3 spec files → creates 3 rows, exits 0", () => {
     const specDir = join(tmpDir, "docs", "requirements", "spec");
     mkdirSync(specDir, { recursive: true });
@@ -159,7 +159,7 @@ describe("AC-SD-1 e2e — creates missing specs from files", () => {
 
 // ─── AC-SD-2: --dry-run creates 0 rows ───────────────────────────────────────
 
-describe("AC-SD-2 — --dry-run writes nothing", () => {
+describe("spec-lore-sync-docs-backfill-new-spec-files-into-corpus#AC-SD-2 — --dry-run writes nothing", () => {
   it("dry-run reports but creates 0 corpus rows", () => {
     const specDir = join(tmpDir, "docs", "requirements", "spec");
     mkdirSync(specDir, { recursive: true });
@@ -182,7 +182,7 @@ describe("AC-SD-2 — --dry-run writes nothing", () => {
 
 // ─── AC-SD-3: empty dir → 0 files ────────────────────────────────────────────
 
-describe("AC-SD-3 — empty directory exits 0", () => {
+describe("spec-lore-sync-docs-backfill-new-spec-files-into-corpus#AC-SD-3 — empty directory exits 0", () => {
   it("empty dir → scanned 0 files, exit 0", () => {
     const emptyDir = join(tmpDir, "empty-spec-dir");
     mkdirSync(emptyDir, { recursive: true });
@@ -195,7 +195,7 @@ describe("AC-SD-3 — empty directory exits 0", () => {
 
 // ─── AC-SD-5: --json outputs valid SyncReport ────────────────────────────────
 
-describe("AC-SD-5 — --json outputs SyncReport", () => {
+describe("spec-lore-sync-docs-backfill-new-spec-files-into-corpus#AC-SD-5 — --json outputs SyncReport", () => {
   it("JSON output has correct SyncReport shape", () => {
     const specDir = join(tmpDir, "docs", "requirements", "spec");
     mkdirSync(specDir, { recursive: true });
@@ -231,7 +231,7 @@ describe("AC-SD-5 — --json outputs SyncReport", () => {
 
 // ─── AC-SD-5 drift: diff_chars > 0 for changed content (FU#1 regression) ─────
 
-describe("AC-SD-5 drift — diff_chars > 0 when body changed (validates FU#1 fix)", () => {
+describe("spec-lore-sync-docs-backfill-new-spec-files-into-corpus#AC-SD-5 drift — diff_chars > 0 when body changed (validates FU#1 fix)", () => {
   it("same-length different-content body → diff_chars > 0", () => {
     // reason: Old algorithm Math.abs(len_a - len_b) reports 0 for equal-length-but-different
     // bodies, contradicting the matched_drift bucket. FU#1 fixes this with diffChars (LCS).
@@ -356,7 +356,7 @@ describe("Bug B — drift hint shows slug and mentions --content-file", () => {
 
 // ─── AC-SD-9: exit 4 on VALIDATION_ERROR ─────────────────────────────────────
 
-describe("AC-SD-9 — per-file validation error exits 4", () => {
+describe("spec-lore-sync-docs-backfill-new-spec-files-into-corpus#AC-SD-9 — per-file validation error exits 4", () => {
   it("file without frontmatter → exit 4, error on stderr", () => {
     const specDir = join(tmpDir, "docs", "requirements", "spec");
     mkdirSync(specDir, { recursive: true });
@@ -377,8 +377,8 @@ describe("AC-SD-9 — per-file validation error exits 4", () => {
 
 // ─── AC-SD-19: sync-docs subcommand is registered and flags work ──────────────
 
-describe("AC-SD-19 — sync-docs subcommand is registered and executable", () => {
-  it("lore sync-docs --dry-run on empty dir exits 0 (AC-SD-19 proxy — verifies flags)", () => {
+describe("spec-lore-sync-docs-backfill-new-spec-files-into-corpus#AC-SD-19 — sync-docs subcommand is registered and executable", () => {
+  it("lore sync-docs --dry-run on empty dir exits 0 (spec-lore-sync-docs-backfill-new-spec-files-into-corpus#AC-SD-19 proxy — verifies flags)", () => {
     // AC-SD-19 Approach C: citty --help is not capturable via piped subprocess in bun:test.
     // Approach A (Bun.spawn with stdio:pipe) confirmed empty output — citty writes help
     // directly to the process's inherited terminal fd, bypassing both spawnSync's pipe

@@ -94,7 +94,7 @@ async function createSpec(corpus: CorpusService, parentId: string, title: string
 
 // ─── AC-SD-1: creates new specs, exits 0 ─────────────────────────────────────
 
-describe("AC-SD-1 HAPPY — creates missing specs from files", () => {
+describe("spec-lore-sync-docs-backfill-new-spec-files-into-corpus#AC-SD-1 HAPPY — creates missing specs from files", () => {
   it("4 spec files, 0 in corpus → creates 4 rows", async () => {
     const { corpus, sync } = makeServices();
     const prd = await createPrd(corpus);
@@ -147,7 +147,7 @@ describe("AC-SD-1 HAPPY — creates missing specs from files", () => {
 
 // ─── AC-SD-2: --dry-run creates 0 rows ───────────────────────────────────────
 
-describe("AC-SD-2 HAPPY — dry-run creates 0 rows", () => {
+describe("spec-lore-sync-docs-backfill-new-spec-files-into-corpus#AC-SD-2 HAPPY — dry-run creates 0 rows", () => {
   it("dry-run reports created but writes nothing", async () => {
     const { corpus, sync } = makeServices();
     const prd = await createPrd(corpus);
@@ -178,7 +178,7 @@ describe("AC-SD-2 HAPPY — dry-run creates 0 rows", () => {
 
 // ─── AC-SD-3: empty dir → 0 files, exit 0 ────────────────────────────────────
 
-describe("AC-SD-3 BOUNDARY — empty directory scans 0 files", () => {
+describe("spec-lore-sync-docs-backfill-new-spec-files-into-corpus#AC-SD-3 BOUNDARY — empty directory scans 0 files", () => {
   it("empty dir → scanned=0, no errors", async () => {
     const { sync } = makeServices();
     const dir = makeTempDir();
@@ -192,7 +192,7 @@ describe("AC-SD-3 BOUNDARY — empty directory scans 0 files", () => {
     expect(result.value.errors).toHaveLength(0);
   });
 
-  it("non-existent dir → scanned=0, no errors (AC-SD-3 boundary)", async () => {
+  it("non-existent dir → scanned=0, no errors (spec-lore-sync-docs-backfill-new-spec-files-into-corpus#AC-SD-3 boundary)", async () => {
     const { sync } = makeServices();
     const result = await sync.run({ fromDir: "/nonexistent/path/xyz123", dryRun: false });
     expect(result.ok).toBe(true);
@@ -204,7 +204,7 @@ describe("AC-SD-3 BOUNDARY — empty directory scans 0 files", () => {
 
 // ─── AC-SD-4: idempotency — re-running creates 0 rows ────────────────────────
 
-describe("AC-SD-4 STATE — idempotency: re-run creates 0 rows", () => {
+describe("spec-lore-sync-docs-backfill-new-spec-files-into-corpus#AC-SD-4 STATE — idempotency: re-run creates 0 rows", () => {
   it("run twice on same files → second run creates 0, all matched_clean", async () => {
     const { corpus, sync } = makeServices();
     const prd = await createPrd(corpus);
@@ -236,7 +236,7 @@ describe("AC-SD-4 STATE — idempotency: re-run creates 0 rows", () => {
 
 // ─── AC-SD-6: drift detected, corpus body unchanged ──────────────────────────
 
-describe("AC-SD-6 STATE — drift reported but corpus body unchanged", () => {
+describe("spec-lore-sync-docs-backfill-new-spec-files-into-corpus#AC-SD-6 STATE — drift reported but corpus body unchanged", () => {
   it("file body differs from corpus → matched_drift, corpus content unchanged", async () => {
     const { corpus, sync } = makeServices();
     const prd = await createPrd(corpus);
@@ -309,7 +309,7 @@ async function parentIdOfSlug(corpus: CorpusService, slug: string): Promise<stri
   return got.value.doc.parent_id;
 }
 
-describe("AC-SD-7 HAPPY — single PRD in corpus is NOT used as a parent", () => {
+describe("spec-lore-sync-docs-backfill-new-spec-files-into-corpus#AC-SD-7 HAPPY — single PRD in corpus is NOT used as a parent", () => {
   it("1 PRD → the spec is created with parent_id null, whatever the frontmatter says", async () => {
     const { corpus, sync } = makeServices();
     await createPrd(corpus, "The Only PRD");
@@ -336,7 +336,7 @@ describe("AC-SD-7 HAPPY — single PRD in corpus is NOT used as a parent", () =>
   });
 });
 
-describe("AC-SD-8 HAPPY — 2 PRDs, a matching frontmatter parent is ignored", () => {
+describe("spec-lore-sync-docs-backfill-new-spec-files-into-corpus#AC-SD-8 HAPPY — 2 PRDs, a matching frontmatter parent is ignored", () => {
   it("2 PRDs and a matching parent hint → parentless spec, one stderr note", async () => {
     const { corpus, sync } = makeServices();
     await createPrd(corpus, "PRD-001");
@@ -371,7 +371,7 @@ describe("AC-SD-8 HAPPY — 2 PRDs, a matching frontmatter parent is ignored", (
   });
 });
 
-describe("AC-SD-9 NEGATIVE — 2 PRDs and an unmatched parent is no longer an error", () => {
+describe("spec-lore-sync-docs-backfill-new-spec-files-into-corpus#AC-SD-9 NEGATIVE — 2 PRDs and an unmatched parent is no longer an error", () => {
   it("2 PRDs + a hint matching neither → both files are created parentless, no error", async () => {
     const { corpus, sync } = makeServices();
     await createPrd(corpus, "PRD-001");
@@ -403,7 +403,7 @@ describe("AC-SD-9 NEGATIVE — 2 PRDs and an unmatched parent is no longer an er
   });
 });
 
-describe("AC-SD-10 BOUNDARY — a corpus with 0 PRDs still accepts synced specs", () => {
+describe("spec-lore-sync-docs-backfill-new-spec-files-into-corpus#AC-SD-10 BOUNDARY — a corpus with 0 PRDs still accepts synced specs", () => {
   it("no PRD in corpus → the spec is created parentless, no error", async () => {
     const { corpus, sync } = makeServices();
     const dir = makeTempDir();
@@ -426,7 +426,7 @@ describe("AC-SD-10 BOUNDARY — a corpus with 0 PRDs still accepts synced specs"
 
 // ─── AC-SD-11: missing frontmatter → VALIDATION_ERROR ────────────────────────
 
-describe("AC-SD-11 ERROR — file without frontmatter → error, others still process", () => {
+describe("spec-lore-sync-docs-backfill-new-spec-files-into-corpus#AC-SD-11 ERROR — file without frontmatter → error, others still process", () => {
   it("file without --- delimiters → error for that file", async () => {
     const { corpus, sync } = makeServices();
     const prd = await createPrd(corpus);
@@ -456,7 +456,7 @@ describe("AC-SD-11 ERROR — file without frontmatter → error, others still pr
 
 // ─── AC-SD-12: type != "spec" → VALIDATION_ERROR ─────────────────────────────
 
-describe("AC-SD-12 ERROR — type=knowledge skips file with error", () => {
+describe("spec-lore-sync-docs-backfill-new-spec-files-into-corpus#AC-SD-12 ERROR — type=knowledge skips file with error", () => {
   it("file with type: knowledge → VALIDATION_ERROR", async () => {
     const { corpus, sync } = makeServices();
     await createPrd(corpus);
@@ -480,7 +480,7 @@ describe("AC-SD-12 ERROR — type=knowledge skips file with error", () => {
 
 // ─── AC-SD-13: malformed YAML → VALIDATION_ERROR ─────────────────────────────
 
-describe("AC-SD-13 ERROR — malformed YAML frontmatter → error, others still process", () => {
+describe("spec-lore-sync-docs-backfill-new-spec-files-into-corpus#AC-SD-13 ERROR — malformed YAML frontmatter → error, others still process", () => {
   it("invalid YAML → error for that file", async () => {
     const { corpus, sync } = makeServices();
     const prd = await createPrd(corpus);
@@ -511,7 +511,7 @@ describe("AC-SD-13 ERROR — malformed YAML frontmatter → error, others still 
 
 // ─── AC-SD-14: SyncDocsService constructor takes only CorpusService ──────────
 
-describe("AC-SD-14 BOUNDARY — SyncDocsService accepts only CorpusService", () => {
+describe("spec-lore-sync-docs-backfill-new-spec-files-into-corpus#AC-SD-14 BOUNDARY — SyncDocsService accepts only CorpusService", () => {
   it("constructor has exactly one parameter: CorpusService", () => {
     const store = new InMemoryStore();
     const corpus = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
@@ -524,7 +524,7 @@ describe("AC-SD-14 BOUNDARY — SyncDocsService accepts only CorpusService", () 
 
 // ─── AC-SD-15: sync-docs does NOT call aiProviderService ─────────────────────
 
-describe("AC-SD-15 BOUNDARY — sync-docs does not invoke aiProviderService", () => {
+describe("spec-lore-sync-docs-backfill-new-spec-files-into-corpus#AC-SD-15 BOUNDARY — sync-docs does not invoke aiProviderService", () => {
   it("grep: sync-docs-service.ts must not call or import AIProviderService", () => {
     // Structural assertion per AC-SD-15: verify no code calls or imports the AI provider.
     // Comments that document the invariant (mentioning the field name) are intentionally

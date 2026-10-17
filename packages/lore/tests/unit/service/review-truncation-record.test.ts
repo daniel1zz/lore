@@ -1,3 +1,4 @@
+// @layer service-review-truncation-record
 /**
  * AC-CRIT-2 — every cut section (doc body AND parent) is RECORDED on the stored judgment as
  * `truncation: [{section, shown_chars, total_chars}]` with the real lengths, `truncated: true`

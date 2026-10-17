@@ -1,3 +1,4 @@
+// @layer service-task-workflow
 /**
  * Six-dimension tests for TaskWorkflowService (SPEC-025).
  * Uses InMemoryStore — no file I/O, no SQLite.

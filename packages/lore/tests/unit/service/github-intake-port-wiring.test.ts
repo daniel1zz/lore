@@ -1,4 +1,5 @@
 // @reads packages/lore/src/service/github-intake-port.ts
+// @layer service-intake-port-wiring
 /**
  * @spec_ref spec-the-defect-channel-reaches-no-machine-but-its-own-github AC-GI-1
  * @task task-skill-implement-githubintakeport-and-the-live-filing-path

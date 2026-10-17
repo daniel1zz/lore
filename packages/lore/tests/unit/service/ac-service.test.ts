@@ -1,3 +1,4 @@
+// @layer service-ac-service
 /**
  * Six-dimension tests for AcService (SPEC-038 §4, §6, §7 D4).
  * Uses InMemoryStore + CorpusService (fixture builder only) — no file I/O, no SQLite.

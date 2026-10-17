@@ -1,3 +1,4 @@
+// @layer service-ac-set-criterion
 /**
  * Six-dimension tests for AcService.setCriterion (spec-lore-ac-set-in-place-edit-of-
  * a-declared-acceptance D1-D6). Uses InMemoryStore + CorpusService (fixture builder

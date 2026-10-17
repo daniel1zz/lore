@@ -1,3 +1,4 @@
+// @layer service-rule-find-anchor-suffix
 /**
  * find({file}) strips a `#Symbol` suffix on code anchors (and on the query) before comparing paths.
  * @spec_ref AC-BLS2-6

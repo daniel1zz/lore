@@ -1,3 +1,4 @@
+// @layer service-claude-md-headroom
 /**
  * Unit suite for `computeHeadroom` / `computeHeadroomWarnings` — the
  * headroom-reporting extension to

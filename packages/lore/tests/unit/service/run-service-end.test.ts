@@ -1,5 +1,5 @@
 /**
- * @spec_ref spec-run-only-write-identity-and-run-end-claim-release (Scope 4; AC-ROI-4, AC-ROI-6; BR-1057, BR-1029)
+ * @spec_ref spec-run-only-write-identity-and-run-end-claim-release (Scope 4; spec-run-only-write-identity-and-run-end-claim-release#AC-ROI-4, spec-run-only-write-identity-and-run-end-claim-release#AC-ROI-6; BR-1057, BR-1029)
  *
  * `RunService.end` / `register` over the InMemoryStore with a recording fake claim port — the service's own
  * decisions (what it asks the claim owner, when it refuses) without a database or a spawned CLI.

@@ -1,3 +1,4 @@
+// @layer service-seat-list
 /**
  * RED suite (TDD-Role: red, paired-impl task-skill-implement-core-seat-ts-seatservice-
  * realgitport) for `packages/lore/src/service/seat-service.ts` — a module that does NOT

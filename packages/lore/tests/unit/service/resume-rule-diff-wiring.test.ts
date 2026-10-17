@@ -1,3 +1,4 @@
+// @layer service-resume-rule-diff-wiring
 /**
  * @spec_ref AC-BLS2-22
  * @task task-implement-the-bl-15-resume-rule-diff
