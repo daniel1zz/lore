@@ -2,6 +2,7 @@
 // @spawns scripts/check-ac-ref-integrity.ts
 // @reads scripts/ac-ref-exemption-ledger.json
 /**
+ * @layer script-unit (check-ac-ref-integrity detector and fixtures; one AC oracle is the script on the live corpus, the other the create-task CLI suite)
  * Tests for `scripts/check-ac-ref-integrity.ts` (spec-lore-ac-set-in-place-edit-of-a-
  * declared-acceptance D7, AC-ACS-7): the corpus-wide dangling-`ac_ref` detector, its
  * pure resolution/ledger algorithm, and the real (mkdtemp + `lore init`) fixture proof

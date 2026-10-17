@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 /**
+ * @layer dashboard-component (DocDetail project-scoped writes; the AC's first oracle is the mutations unit suite)
  * @spec_ref AC-P0C-8
  *
  * BR-996: a dashboard edit on a registered project behaves as with a single project — the

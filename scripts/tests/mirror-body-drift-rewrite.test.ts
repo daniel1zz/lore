@@ -22,7 +22,7 @@ import { mkdtempSync, rmSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { loadMirrorMappings } from "../export-spec-mirror-core.js";
+import { loadMirrorMappings, MIRROR_BODY_DIVERGENT_DETAIL } from "../export-spec-mirror-core.js";
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
 const REPO_ROOT = join(__dirname, "..", "..");
@@ -156,6 +156,9 @@ describe("AC-CRIT-5 — status-only drift is counted by --check", () => {
       expect(check.exitCode).toBe(2);
       const relPath = loadMirrorMappings(fx.dir)[fx.knowledgeId]!.file_path;
       expect(check.stdout + check.stderr).toContain(relPath);
+      // status-only drift is reported as frontmatter drift, never as body divergence
+      expect(check.stdout + check.stderr).toContain("frontmatter (status/priority/title/tags/phase) differs");
+      expect(check.stdout + check.stderr).not.toContain(MIRROR_BODY_DIVERGENT_DETAIL);
       // --check stays read-only
       expect(readFileSync(file, "utf8")).toMatch(/^status: draft$/m);
 

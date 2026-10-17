@@ -1,4 +1,5 @@
 /**
+ * @layer core-module (context-fragments.ts; the ACs' oracles are the lore select/render suites and the compiled e2e)
  * @spec_ref AC-CF-2, AC-CF-3, AC-CF-14, AC-CF-18
  * Spec: spec-context-fragments-config-driven-layered-rule-injection (D3, D6, D11, D14)
  *

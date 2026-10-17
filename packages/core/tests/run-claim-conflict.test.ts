@@ -1,4 +1,5 @@
 /**
+ * @layer core-unit (hasClaimConflict; the AC's oracle is the CLI integration suite)
  * RED table for hasClaimConflict (spec D6, BR-1040/1042): the decision is by
  * harness run, not by name; legacy holders and two unattested parties compare
  * by name; stale holders are taken over.
