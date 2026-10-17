@@ -23,8 +23,10 @@
  * author is responsible for any other file the child reads and declares it with `@reads`.
  *
  * Public surface: recordRepoPath, recordSpawn, wrapFsModule, wrapFsPromisesModule,
- * wrapChildProcessModule, takeUndeclaredInputs, UndeclaredTestInputError, REPO_ROOT.
- * Side-effect class: stateful (module-level event list, per test worker); never writes to disk.
+ * wrapChildProcessModule, takeUndeclaredInputs, UndeclaredTestInputError, GitIgnoreQueryError, REPO_ROOT.
+ * Ignored paths: an undeclared READ of a git-ignored path (or a directory with only ignored content) is not
+ * an input, because it never shows in a git diff; classified by one batched git call per check, fail loud.
+ * Side-effect class: stateful (module-level event list, per test worker); runs read-only git; never writes to disk.
  */
 import { createRequire } from "node:module";
 import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
@@ -36,7 +38,7 @@ const nodeRequire = createRequire(import.meta.url);
 // to the recorder wrapper that imports this module (infinite recursion).
 const realFs = nodeRequire("node:fs") as {
   readFileSync(path: string, encoding: "utf8"): string;
-  statSync(path: string, options: { throwIfNoEntry: false }): { isFile(): boolean } | undefined;
+  statSync(path: string, options: { throwIfNoEntry: false }): { isFile(): boolean; isDirectory(): boolean } | undefined;
   realpathSync(path: string): string;
 };
 // reason: same as realFs — the aliased "node:child_process" would resolve to the recorder wrapper.
@@ -254,16 +256,25 @@ export class GitIgnoreQueryError extends Error {
  * undeclared read still fails. Exit 0 = some ignored, 1 = none, anything else = git cannot answer: throw.
  */
 function findGitIgnoredPaths(paths: readonly string[]): Set<string> {
-  const result = realChildProcess.spawnSync("git", ["check-ignore", "--stdin", "-z"], {
-    cwd: REPO_ROOT,
-    input: `${paths.join("\0")}\0`,
-    encoding: "utf8",
-    maxBuffer: 16 * 1024 * 1024,
-  });
+  const ignoredByRule = new Set(runGit(["check-ignore", "--stdin", "-z"], paths, `${paths.join("\0")}\0`, [1]));
+  // reason: a directory holding only ignored files (`.lore-safety-backups/x.db` under `*.db`) has no ignore rule of
+  // its own, yet git tracks and diffs nothing in it. It counts as ignored when no tracked or non-ignored untracked
+  // file lives under it. Missing paths are not directories, so a read of a missing file is still undeclared.
+  const bareDirs = paths.filter((p) => !ignoredByRule.has(p) && realFs.statSync(resolve(REPO_ROOT, p), { throwIfNoEntry: false })?.isDirectory() === true);
+  if (bareDirs.length > 0) {
+    const visible = runGit(["ls-files", "-z", "--cached", "--others", "--exclude-standard", "--", ...bareDirs], bareDirs, undefined, []);
+    for (const dir of bareDirs) if (!visible.some((file) => file.startsWith(`${dir}/`))) ignoredByRule.add(dir);
+  }
+  return ignoredByRule;
+}
+
+/** Run git in REPO_ROOT and return its NUL-separated stdout; exit codes in `tolerated` mean "empty answer", any other non-zero exit throws. */
+function runGit(args: readonly string[], paths: readonly string[], input: string | undefined, tolerated: readonly number[]): string[] {
+  const result = realChildProcess.spawnSync("git", args, { cwd: REPO_ROOT, input: input ?? "", encoding: "utf8", maxBuffer: 16 * 1024 * 1024 });
   if (result.error !== undefined) throw new GitIgnoreQueryError(REPO_ROOT, paths, result.error.message);
-  if (result.status === 1) return new Set();
+  if (result.status !== null && tolerated.includes(result.status)) return [];
   if (result.status !== 0) throw new GitIgnoreQueryError(REPO_ROOT, paths, `exit ${String(result.status)}: ${result.stderr.trim()}`);
-  return new Set(result.stdout.split("\0").filter((p) => p !== ""));
+  return result.stdout.split("\0").filter((p) => p !== "");
 }
 
 /** One group of undeclared accesses, keyed by the label (test name) they were recorded under. */

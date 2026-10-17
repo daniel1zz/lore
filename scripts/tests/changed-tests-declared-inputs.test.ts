@@ -343,6 +343,22 @@ describe("AC-TG-7: run-time check fails an undeclared read or spawn naming the t
     expect(status).toBe(0);
   });
 
+  it("AC-TG-7 (task-skill-fix-tg-34) BOUNDARY: a directory holding only ignored files is ignored; one holding a visible file, and a missing path, are not", () => {
+    const dirBody = [
+      'import { readdirSync } from "node:fs";',
+      'import { it } from "vitest";',
+      'it("lists the dir", () => { readdirSync("scratch"); });',
+      "",
+    ].join("\n");
+    expect(runProject(dirBody, { ".gitignore": "*.db\n", "scratch/x.db": "1\n" }).status).toBe(0);
+    const visible = runProject(dirBody, { ".gitignore": "*.db\n", "scratch/x.db": "1\n", "scratch/y.txt": "2\n" });
+    expect(visible.status).not.toBe(0);
+    expect(visible.output).toContain("@reads scratch");
+    const missing = runProject(READ_IGNORED_BODY.replaceAll("readFileSync", "existsSync"));
+    expect(missing.status).not.toBe(0);
+    expect(missing.output).toContain("@reads scratch/x.db");
+  });
+
   it("AC-TG-7 (task-skill-fix-tg-34) ERROR: a tracked file still fails even when a .gitignore pattern matches it, and an untracked non-ignored one fails too", () => {
     const tracked = runProject(READ_IGNORED_BODY, { ".gitignore": "scratch/\n", "scratch/x.db": "1\n" }, ["scratch/x.db"]);
     expect(tracked.status).not.toBe(0);
