@@ -71,15 +71,15 @@
  * same module) — the pre-fix message named none, leaving an author unable to
  * tell "your file is missing" from "the precheck looked in the wrong tree".
  *
- * `lore_evidence_add` gains the mixed-runner invocation guard (defect: task-
- * vitest-run-silently-drops-a-bun-test-ts-named-alongside-a) — a self-reported
- * `oracle: "test"|"e2e"`, `result: "pass"` call whose `command` is a single
- * `vitest run` invocation naming a `.bun.test.ts` path alongside a real vitest
- * file (or the symmetric `bun test` invocation naming a plain `.test.ts` file)
- * now returns `isError` `VALIDATION_ERROR` — the runner silently executes only
- * the files belonging to the invoked runner and exits 0 with no warning about
- * the rest. Same shared-decision CLI/MCP split as the two guards above
- * (`findMixedRunnerRefusal`, `../cli/evidence-precheck.js`).
+ * `lore_evidence_add` gains the dropped-file guard (defect: task-vitest-run-
+ * silently-drops-a-bun-test-ts-named-alongside-a, re-derived by task-skill-
+ * implement-tg-32-evidence-precheck-follows-the-one) — an `oracle: "test"|"e2e"`,
+ * `result: "pass"` call whose runner summary (captured or supplied) shows fewer
+ * test files executed than `command` named now returns `isError`
+ * `VALIDATION_ERROR` — a runner silently drops files it cannot load and exits
+ * 0. Decided from the runner's output, not a filename suffix. Same shared-
+ * decision CLI/MCP split as the two guards above (`findUnderMatchedPassRefusal`,
+ * `../cli/evidence-precheck.js`).
  *
  * `lore_evidence_add` gains the pipe-refusal guard (task-wire-findpiperefusal-
  * into-the-live-lore-evidence-and-mcp, SPEC oracle-tier-falsifiability-a-
@@ -276,7 +276,7 @@ import { collectRecordedRanges } from "../../service/task-commit-range.js";
 import {
   findMissingOracleFilesForEvidence,
   findFilteredPassRefusal,
-  findMixedRunnerRefusal,
+  findUnderMatchedPassRefusal,
   findCaptureFlagConflict,
   findPipeRefusal,
   findCapturedFailDiscoveryRefusal,
@@ -2187,7 +2187,7 @@ export function registerTools(server: McpServer, baseApp: App, getConfig?: () =>
     // reason: runner capture (task-mcp-lore-evidence-add-cannot-set-capture-
     // source-and-has-no) — resolved FIRST, in the same order the CLI's
     // `commands/evidence.ts` uses (conflict guard → spawn → missing-oracle-file
-    // → mixed-runner → filtered-pass), so the downstream guards below see the
+    // → filtered-pass → dropped-file), so the downstream guards below see the
     // CAPTURED tail rather than an absent one and neither surface can gate on a
     // different value than the other.
     //
@@ -2201,7 +2201,7 @@ export function registerTools(server: McpServer, baseApp: App, getConfig?: () =>
     // reason: the SAME shared guard the CLI applies (`findCaptureFlagConflict`),
     // returning a fully-formed LoreError so scope/code/field/wording cannot
     // drift between the two surfaces — the identical sharing rationale the
-    // sibling mixed-runner and filtered-pass guards below already document.
+    // sibling filtered-pass and dropped-file guards below already document.
     const captureConflict = findCaptureFlagConflict({
       oracle: args.oracle,
       capture: captureRequested,
@@ -2368,34 +2368,14 @@ export function registerTools(server: McpServer, baseApp: App, getConfig?: () =>
       });
     }
 
-    // reason: mixed-runner invocation guard (defect: task-vitest-run-silently-
-    // drops-a-bun-test-ts-named-alongside-a) — gate PARITY with the CLI is
-    // structural: both surfaces call the SAME `findMixedRunnerRefusal`, which
-    // returns the fully-formed LoreError rather than a boolean, so
-    // scope/code/field/wording cannot drift. Runs after the missing-oracle-
-    // file precheck above (a nonexistent path is refused for that more
-    // fundamental reason first) and before the filtered-pass guard below
-    // (whether the invocation would even run a named file matters before
-    // asking whether a filter matched inside it) — same ordering the CLI's
-    // `commands/evidence.ts` documents.
-    const mixedRunnerRefusal = findMixedRunnerRefusal({
-      oracle: args.oracle,
-      result: args.result,
-      command: args.command,
-    });
-    if (mixedRunnerRefusal !== null) {
-      return errorContent(mixedRunnerRefusal);
-    }
-
     // reason: pipe-refusal guard (SPEC oracle-tier-falsifiability-a-
     // criterion-never-observed-red M2; ADR falsifiability-moves-from-the-
     // task-tier-to-the-oracle-tier) — gate PARITY with the CLI is
     // structural: both surfaces call the SAME `findPipeRefusal`, which
     // returns the fully-formed LoreError rather than a boolean, so
     // scope/code/field/wording cannot drift between them. Runs after the
-    // missing-oracle-file and mixed-runner guards above (a nonexistent file
-    // or a dropped-runner file is a more fundamental fault than a pipe
-    // hazard); ordering against the filtered-pass guard below is
+    // missing-oracle-file guard above (a nonexistent file is a more
+    // fundamental fault than a pipe hazard); ordering against the filtered-pass guard below is
     // immaterial — the two conditions are independent (`findPipeRefusal`'s
     // own header). `capture: captureRequested` is the SAME boolean already
     // resolved above — a captured run's exit code is measured directly by
@@ -2430,6 +2410,22 @@ export function registerTools(server: McpServer, baseApp: App, getConfig?: () =>
     });
     if (filteredPassRefusal !== null) {
       return errorContent(filteredPassRefusal);
+    }
+
+    // reason: dropped-file guard (task-skill-implement-tg-32-evidence-precheck-
+    // follows-the-one) — gate PARITY with the CLI is structural: both surfaces
+    // call the SAME `findUnderMatchedPassRefusal`. It reads the runner's summary,
+    // so it runs here, after capture produced `effectiveOutputTail` (the CLI
+    // feeds it the same post-capture tail), and after the filtered-pass guard
+    // that owns case-filtered commands.
+    const underMatchedRefusal = findUnderMatchedPassRefusal({
+      oracle: args.oracle,
+      result: args.result,
+      command: args.command,
+      ...(effectiveOutputTail !== undefined ? { outputTail: effectiveOutputTail } : {}),
+    });
+    if (underMatchedRefusal !== null) {
+      return errorContent(underMatchedRefusal);
     }
 
     const evidenceInput = {

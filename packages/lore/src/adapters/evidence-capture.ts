@@ -287,7 +287,7 @@ export type CaptureOutcome = { ok: true; value: CaptureSuccess } | { ok: false; 
  * stdout+stderr tail-truncated to {@link CAPTURE_TAIL_CHARS}.
  *
  * Refusal wording is shared VERBATIM with the CLI (same reasoning the sibling
- * `findMixedRunnerRefusal` / `findFilteredPassRefusal` guards already rely on:
+ * `findUnderMatchedPassRefusal` / `findFilteredPassRefusal` guards already rely on:
  * one function returning a fully-formed `LoreError` means code/field/wording
  * cannot drift between adapters). It therefore names the CLI's flags — the
  * established convention for this family of shared refusals.

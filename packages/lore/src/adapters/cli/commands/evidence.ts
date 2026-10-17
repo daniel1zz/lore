@@ -130,7 +130,7 @@
  *   suffices for a capturable oracle), a `--capture` spawn whose observed exit code contradicts the declared
  *   `--result`, a `--capture`d fail-family result whose OWN observed output is
  *   a runner discovery refusal (AC-OX-12 — see below), OR a missing oracle
- *   file / an unproven filtered pass / a mixed-runner command / a piped
+ *   file / an unproven filtered pass / a pass that dropped a named file / a piped
  *   self-reported command per the prechecks below, OR a `--result pass` from a
  *   claim whose recorded worktree is
  *   uncommitted / from a no-worktree claim running inside a real git repo —
@@ -165,29 +165,26 @@
  * cleanly even though `$?` after a pipe belongs to the LAST stage of the
  * pipeline, never the oracle the call means to assert about (THIRD measured
  * recurrence of this exact trap in this repo). Runs AFTER the missing-
- * oracle-file and mixed-runner guards above (a nonexistent file or a
- * dropped-runner file is a more fundamental fault); ordering against the
+ * oracle-file guard above (a nonexistent file is a more fundamental
+ * fault); ordering against the
  * filtered-pass guard below is immaterial, the two conditions are
  * independent. `--capture` is the load-bearing escape — it measures the
  * real exit code itself, so the pipe hazard does not apply there. The
  * decision itself lives in `../evidence-precheck.js::findPipeRefusal`,
  * shared verbatim with the MCP `lore_evidence_add` handler.
  *
- * Mixed-runner invocation guard (defect: task-vitest-run-silently-drops-a-bun-
- * test-ts-named-alongside-a) — a single `vitest run` invocation naming a
- * `.bun.test.ts` path alongside a real vitest file (or the symmetric `bun test`
- * invocation naming a plain `.test.ts` file) used to record a self-reported
- * `pass` cleanly even though the runner silently ran ONLY the files belonging
- * to the invoked runner and dropped the rest — vitest's own "no test files
- * found" loud refusal evaluates over the WHOLE invocation, not per named
- * argument, so a quorum of one matching file silences it. Runs AFTER the
- * missing-oracle-file precheck (a nonexistent path is refused for that more
- * fundamental reason first) and BEFORE the filtered-pass guard (whether the
- * invocation would even run a named file matters before asking whether a
- * filter matched inside it). The decision itself lives in
- * `../evidence-precheck.js::findMixedRunnerRefusal`, shared verbatim with the
- * MCP `lore_evidence_add` handler — same CLI/MCP split the other two
- * prechecks already use.
+ * Dropped-file guard (defect: task-vitest-run-silently-drops-a-bun-test-ts-
+ * named-alongside-a; re-derived by task-skill-implement-tg-32-evidence-
+ * precheck-follows-the-one) — a runner given several files runs the ones it can
+ * load, silently drops the rest and exits 0 (its own "no test files found"
+ * refusal evaluates over the WHOLE invocation, not per named argument), so a
+ * pass whose runner summary shows FEWER test files executed than `--command`
+ * named is refused. Decided from the runner's OWN output, never a filename
+ * suffix, so it holds for the one-runner `bunx --bun vitest run x.bun.test.ts`
+ * and for any consumer's runner. Needs the tail, so it runs AFTER `--capture`
+ * and after the filtered-pass guard (which owns case-filtered commands). The
+ * decision lives in `../evidence-precheck.js::findUnderMatchedPassRefusal`,
+ * shared verbatim with the MCP `lore_evidence_add` handler.
  *
  * Filtered-pass matched-count guard (SPEC-061 AC-061-11..14, decided by
  * adr-lore-evidence-proves-a-filtered-pass-with-the-runner-s-own) — a
@@ -301,7 +298,7 @@ import { requirePhaseWorkflowService } from "../phase-wiring.js";
 import {
   findMissingOracleFilesForEvidence,
   findFilteredPassRefusal,
-  findMixedRunnerRefusal,
+  findUnderMatchedPassRefusal,
   findCaptureFlagConflict,
   findPipeRefusal,
   findCapturedFailDiscoveryRefusal,
@@ -568,28 +565,10 @@ export default defineCommand({
         return;
       }
 
-      // reason: mixed-runner invocation guard (see module header) — runs
-      // AFTER the missing-oracle-file precheck (a nonexistent path is refused
-      // for that more fundamental reason first) and BEFORE the filtered-pass
-      // guard below (whether the invocation would even run a named file
-      // matters before asking whether a filter matched inside it). The
-      // decision itself lives in `../evidence-precheck.js` and is shared
-      // verbatim with the MCP `lore_evidence_add` handler.
-      const mixedRunnerRefusal = findMixedRunnerRefusal({
-        oracle: args.oracle as string,
-        result: args.result as string,
-        command: args.command as string,
-      });
-      if (mixedRunnerRefusal !== null) {
-        process.stderr.write(formatError(mixedRunnerRefusal) + "\n");
-        process.exitCode = exitCode(mixedRunnerRefusal);
-        return;
-      }
-
       // reason: pipe-refusal guard (see module header; SPEC oracle-tier-
-      // falsifiability M2) — runs AFTER the missing-oracle-file and
-      // mixed-runner guards above (a nonexistent file or a dropped-runner
-      // file is a more fundamental fault than a pipe hazard); ordering
+      // falsifiability M2) — runs AFTER the missing-oracle-file guard
+      // above (a nonexistent file is a more fundamental fault than a pipe
+      // hazard); ordering
       // against the filtered-pass guard below is immaterial, the two
       // conditions are independent (`findPipeRefusal`'s own header). The
       // decision itself lives in `../evidence-precheck.js` and is shared
@@ -625,6 +604,25 @@ export default defineCommand({
       if (filteredPassRefusal !== null) {
         process.stderr.write(formatError(filteredPassRefusal) + "\n");
         process.exitCode = exitCode(filteredPassRefusal);
+        return;
+      }
+
+      // reason: dropped-file guard (see module header; task-skill-implement-
+      // tg-32-evidence-precheck-follows-the-one) — decided from the runner's
+      // OWN summary, so it needs the tail: it runs here, after `--capture` has
+      // produced the real one, never on the command string alone. A
+      // case-filtered command is the filtered-pass guard's, above. The
+      // decision lives in `../evidence-precheck.js`, shared verbatim with the
+      // MCP `lore_evidence_add` handler.
+      const underMatchedRefusal = findUnderMatchedPassRefusal({
+        oracle: args.oracle as string,
+        result: args.result as string,
+        command: args.command as string,
+        ...(outputTail !== undefined ? { outputTail } : {}),
+      });
+      if (underMatchedRefusal !== null) {
+        process.stderr.write(formatError(underMatchedRefusal) + "\n");
+        process.exitCode = exitCode(underMatchedRefusal);
         return;
       }
 
