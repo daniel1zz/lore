@@ -14,7 +14,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { evaluateOwnership, extractAcReferences } from "../check-ac-oracle-ownership.js";
+import { applyNotBuiltLedger, collectScriptAcs, evaluateOwnership, extractAcReferences } from "../check-ac-oracle-ownership.js";
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const LORE_ENTRY = join(REPO_ROOT, "packages", "lore", "src", "index.ts");
@@ -105,6 +105,63 @@ describe("check-ac-oracle-ownership — AC-TG-5 pure rules", () => {
     const refs = extractAcReferences('// @spec_ref spec-x#AC-Q-2\ndescribe("AC-Q-1 case", () => {});');
     expect(refs).toContainEqual({ acId: "AC-Q-2", spec: "spec-x" });
     expect(refs).toContainEqual({ acId: "AC-Q-1", spec: undefined });
+  });
+});
+
+describe("check-ac-oracle-ownership — deprecated specs are skipped, counted and named (AS-17)", () => {
+  // a deprecated spec cannot be built in a throwaway corpus (approval needs a baseline rule chain), so the lister is injected
+  const fakeRunner = ((args: readonly string[]) => {
+    if (args[0] === "list") {
+      return {
+        ok: true,
+        data: {
+          docs: [
+            { slug: "spec-live", status: "approved" },
+            { slug: "spec-dead", status: "deprecated" },
+          ],
+        },
+      };
+    }
+    const slug = args[2];
+    return {
+      ok: true,
+      data: { criteria: [{ id: `AC-${slug === "spec-live" ? "L" : "D"}-1`, verify: { mode: "script", command: "bunx vitest run scripts/tests/x.test.ts" } }] },
+    };
+  }) as unknown as Parameters<typeof collectScriptAcs>[2];
+
+  it("HAPPY: the deprecated spec's criteria are not collected; its slug is returned", () => {
+    const r = collectScriptAcs("/unused", "/unused", fakeRunner);
+    expect(r.acs.map((a) => `${a.spec}#${a.id}`)).toEqual(["spec-live#AC-L-1"]);
+    expect(r.skippedDeprecatedSpecs).toEqual(["spec-dead"]);
+  });
+});
+
+describe("check-ac-oracle-ownership — AC-TG-5/AC-TG-9 not-built ledger (pure)", () => {
+  const acs = [{ spec: "spec-a", id: "AC-A-1", command: cmd("scripts/tests/gone.test.ts") }];
+  const finding = { rule: "missing-owner-file" as const, spec: "spec-a", acId: "AC-A-1", path: "scripts/tests/gone.test.ts" };
+  const row = { spec: "spec-a", ac: "AC-A-1", reason: "oracle never written", owner_plan: "plan-x" };
+
+  it("HAPPY: a ledgered missing-owner-file finding is removed from findings and reported as ledgered", () => {
+    const r = applyNotBuiltLedger([finding], [row], acs, exists());
+    expect(r.findings).toEqual([]);
+    expect(r.ledgered).toEqual([row]);
+    expect(r.staleRows).toEqual([]);
+  });
+
+  it("NEGATIVE: a row whose owner file now exists is stale (the oracle was built; delete the row)", () => {
+    const r = applyNotBuiltLedger([], [row], acs, exists("scripts/tests/gone.test.ts"));
+    expect(r.staleRows).toEqual([{ row, why: "owner file exists" }]);
+  });
+
+  it("NEGATIVE: a row naming an AC that is not a live script AC is stale", () => {
+    const r = applyNotBuiltLedger([], [{ ...row, ac: "AC-A-9" }], acs, exists());
+    expect(r.staleRows.map((s) => s.why)).toEqual(["no live script AC"]);
+  });
+
+  it("BOUNDARY: a ledger row never hides an unowned-ac-reference or ambiguous finding", () => {
+    const other = { rule: "unowned-ac-reference" as const, spec: "spec-a", acId: "AC-A-1", path: "x.test.ts" };
+    const r = applyNotBuiltLedger([other], [row], acs, exists());
+    expect(r.findings).toEqual([other]);
   });
 });
 
@@ -215,6 +272,33 @@ describe("check-ac-oracle-ownership — AC-TG-5 end to end (mkdtemp + lore init)
       const r = runMainAt(dir);
       expect(r.status).toBe(1);
       expect(r.out).toContain("rule=nothing-scanned");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }, 60000);
+});
+
+describe("check-ac-oracle-ownership — deprecated specs and ledger end to end", () => {
+  it("ledger: a ledgered row passes and is named; after the file exists the row is stale and exits 1", () => {
+    const dir = fixtureCorpus();
+    try {
+      const rel = "scripts/tests/later.test.ts";
+      const slug = addSpec(dir, "Ownership fixture ledger", "AC-FX-6", cmd(rel));
+      mkdirSync(join(dir, "scripts"), { recursive: true });
+      writeFileSync(
+        join(dir, "scripts", "ac-oracle-not-built-ledger.json"),
+        JSON.stringify([{ spec: slug, ac: "AC-FX-6", reason: "oracle not written yet", owner_plan: "plan-fixture" }]),
+        "utf8",
+      );
+      const before = runMainAt(dir);
+      expect(before.out).toContain("not-built ledger: 1 row(s)");
+      expect(before.out).toContain("AC-FX-6");
+      expect(before.status).toBe(0);
+      mkdirSync(join(dir, "scripts", "tests"), { recursive: true });
+      writeFileSync(join(dir, rel), 'it("AC-FX-6 holds", () => {});\n', "utf8");
+      const after = runMainAt(dir);
+      expect(after.out).toContain("rule=stale-ledger-row");
+      expect(after.status).toBe(1);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
