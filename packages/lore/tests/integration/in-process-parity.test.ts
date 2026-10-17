@@ -1,5 +1,6 @@
 // @spawns dist/lore
 // @reads .lore/lore.db
+// @layer integration-helper-parity AC-TG-11 (in-process helper vs dist/lore parity; owner is the full-run wall-time script)
 /**
  * Parity of the in-process command helper with the compiled binary (task tg-25,
  * adr-tg-1-test-runner-decision-measured-comparison-of-bun-only option b).

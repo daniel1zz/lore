@@ -1,4 +1,5 @@
 // @spawns packages/lore/src/index.ts
+// @layer integration-cli-capture-and-init AC-CT-3 (real CLI in a throwaway repo; owner is the in-process stamp-currency-floor unit test)
 /**
  * AC-CT-3b (SPEC-143) — `lore evidence --capture` stamps state exactly like `lore verify`, and a
  * fresh `lore init` corpus is armed at init.
