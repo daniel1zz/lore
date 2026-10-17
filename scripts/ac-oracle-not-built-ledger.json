@@ -1,7 +1,1 @@
-[
-  {"spec": "spec-corpus-truthfulness-a-verdict-must-carry-the-state-it", "ac": "AC-CT-3", "reason": "oracle test never written (stamp-currency-floor.test.ts absent)", "owner_plan": "plan-corpus-truthfulness-finish-ac-ct-3-10-never-implemented"},
-  {"spec": "spec-corpus-truthfulness-a-verdict-must-carry-the-state-it", "ac": "AC-CT-9", "reason": "oracle test never written (unmeasured-floor-consequence.test.ts absent)", "owner_plan": "plan-corpus-truthfulness-finish-ac-ct-3-10-never-implemented"},
-  {"spec": "spec-corpus-truthfulness-a-verdict-must-carry-the-state-it", "ac": "AC-CT-10", "reason": "oracle script never written (scripts/check-capture-source-buckets.ts absent)", "owner_plan": "plan-corpus-truthfulness-finish-ac-ct-3-10-never-implemented"},
-  {"spec": "spec-test-governance-guards-that-refuse-bad-tests-declared", "ac": "AC-TG-3", "reason": "oracle test not written yet (scripts/tests/test-tree-snapshot-guard.test.ts absent); owned by task-skill-implement-tg-5-repo-tree-snapshot-guard-and", "owner_plan": "plan-test-governance-decide-the-runner-clear-offenders-land"},
-  {"spec": "spec-test-governance-guards-that-refuse-bad-tests-declared", "ac": "AC-TG-8", "reason": "oracle test not written yet (scripts/tests/selector-miss-report.test.ts absent); owned by task-skill-implement-tg-14-selector-cross-check-against-a-full", "owner_plan": "plan-test-governance-decide-the-runner-clear-offenders-land"}
-]
+[]

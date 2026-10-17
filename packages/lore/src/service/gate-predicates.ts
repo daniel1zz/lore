@@ -67,8 +67,16 @@ import {
   deriveAttestationSummary,
   extractTestFileTokens,
   classifyStampAxis,
+  classifyEvidenceRadii,
+  classifyEvidenceStamps,
+  extractEvidence,
+  readStampedRadius,
+  type DocRecord,
+  type RadiusMeasurement,
   type StampAxisClass,
   type StampAxisInput,
+  type StampBindingContext,
+  type UnboundReason,
   type LoreError,
   type Result,
   attestationExemptKindSchema,
@@ -1690,27 +1698,15 @@ export function assessmentFreshness(
 export type StampClass = StampAxisClass;
 
 /**
- * The RADIUS axis — whether a peer commit landed inside the verdict's blast
- * radius, or whether that comparison could not be made at all.
+ * The RADIUS axis (declared in `@lore/core`'s `stamp-binding.ts` so the pure floor derivation shares it;
+ * re-exported here, where every consumer of the two-axis types already imports from). Structurally identical
+ * to `adapters/real-git-port.ts::BranchMeasurement`: "not measured" and "measured, and nothing changed" are
+ * different facts with OPPOSITE safe defaults.
  *
- * Structurally identical to `adapters/real-git-port.ts::BranchMeasurement`, for
- * the reason that type's own JSDoc states: "not measured" and "measured, and
- * nothing changed" are different facts with OPPOSITE safe defaults.
- *
- * ⛔ NEVER `boolean | "unmeasured"`. SPEC-143 C3 retired exactly that
- * primitive-plus-sentinel shape: a consumer reading the sentinel in a boolean
- * position gets `truthy`/`falsy` instead of a type error, and reports an
- * unmeasured radius as a measured one. The discriminant makes that unwriteable
- * rather than merely discouraged, which is why AC-CT-9(c) spends a compile-time
- * oracle on it.
- *
- * Contrast {@link SessionComparison}, deliberately a BARE three-valued string:
- * it carries no payload, so it needs no discriminated object. This one carries
- * `changed`, so it does.
+ * ⛔ NEVER `boolean | "unmeasured"` (SPEC-143 C3 retired that shape); AC-CT-9(c) spends a compile-time oracle
+ * on it. Contrast {@link SessionComparison}, a BARE three-valued string because it carries no payload.
  */
-export type RadiusMeasurement =
-  | { readonly status: "measured"; readonly changed: boolean }
-  | { readonly status: "unmeasured" };
+export type { RadiusMeasurement };
 
 /**
  * The blast radius of one AC verdict: pathspecs extracted from the AC command's test-file targets
@@ -1864,13 +1860,10 @@ export function readStampVerdict(currency: StampCurrency): StampVerdict {
       return "unbound";
     case "legacy_unbound":
       return "legacy_unbound";
-    case "stamped": {
-      const { radius } = currency;
-      if (radius.status === "unmeasured") {
-        return "radius_unmeasured";
-      }
-      return radius.changed ? "stale" : "bound";
-    }
+    case "stamped":
+      // reason: the stamp axis is read FIRST (above); the radius only decides among stamped rows, through
+      // the ONE derivation the floor's tally shares (`readStampedRadius`, @lore/core).
+      return readStampedRadius(currency.radius);
     default: {
       // Exhaustiveness gate — a FOURTH `StampClass` member fails `tsc` on this
       // line, never silently projects onto an existing reading. SPEC-143
@@ -1880,4 +1873,88 @@ export function readStampVerdict(currency: StampCurrency): StampVerdict {
       return _exhaustive;
     }
   }
+}
+
+
+// ─── SPEC-143 AC-CT-9(d) — the stamp-verdict distribution, ONE predicate ────
+// ─── consumed by `lore assess` and `lore status` ────────────────────────────
+
+/**
+ * The stamp-verdict distribution: how many attested evidence rows read each of the five
+ * {@link StampVerdict}s. A SECOND axis over the same rows as the `capture_source` distribution
+ * (`classifyCaptureSource`), reported alongside it and NEVER merged (folding gives buckets summing to
+ * twice the row count, SPEC-143 R12). `radius_unmeasured` keeps its own count.
+ *
+ * `total` counts ATTESTED rows only (a self-report has no stamp reading, `classifyEvidenceStamps` maps it to
+ * `null`), so the five buckets sum to `total` by construction; `unbound_reasons` partitions `unbound`.
+ */
+export interface StampVerdictDistribution {
+  readonly total: number;
+  readonly bound: number;
+  readonly stale: number;
+  readonly radius_unmeasured: number;
+  readonly unbound: number;
+  readonly legacy_unbound: number;
+  /** Sums to `unbound` (every `unbound` row carries exactly one reason). */
+  readonly unbound_reasons: Readonly<Record<UnboundReason, number>>;
+}
+
+/**
+ * The two-axis currency of every ATTESTED row of `docs`' evidence, one entry per row, in doc-then-row order
+ * (self-reports have no stamp axis and are skipped). Pure: both axes arrive pre-resolved in `binding`.
+ */
+export function collectStampCurrencies(
+  docs: readonly DocRecord[],
+  binding: StampBindingContext,
+): StampCurrency[] {
+  const currencies: StampCurrency[] = [];
+  for (const doc of docs) {
+    const evidence = extractEvidence(doc);
+    const readings = classifyEvidenceStamps(doc.id, evidence, binding);
+    const radii = classifyEvidenceRadii(doc.id, evidence, binding);
+    readings.forEach((reading, index) => {
+      if (reading === null) return;
+      const radius = radii[index] ?? { status: "unmeasured" as const };
+      currencies.push(
+        reading.stamp === "unbound"
+          ? { stamp: reading.stamp, radius, reason: reading.reason }
+          : { stamp: reading.stamp, radius },
+      );
+    });
+  }
+  return currencies;
+}
+
+/**
+ * Buckets rows through {@link readStampVerdict} — the ONLY place the five-way distribution is derived.
+ * `lore assess` and `lore status` both render this value; neither re-derives a bucket.
+ *
+ * @example
+ * stampVerdictDistribution([{ stamp: "stamped", radius: { status: "unmeasured" } }]);
+ * // => { total: 1, radius_unmeasured: 1, bound: 0, stale: 0, unbound: 0, legacy_unbound: 0, unbound_reasons: {…0} }
+ */
+export function stampVerdictDistribution(rows: readonly StampCurrency[]): StampVerdictDistribution {
+  const counts = { bound: 0, stale: 0, radius_unmeasured: 0, unbound: 0, legacy_unbound: 0 };
+  const reasons: Record<UnboundReason, number> = {
+    dirty_tree: 0,
+    state_moved: 0,
+    audit_id_unresolved: 0,
+    no_stamp: 0,
+  };
+  for (const row of rows) {
+    const verdict = readStampVerdict(row);
+    counts[verdict] += 1;
+    if (verdict === "unbound" && row.reason !== undefined && row.reason in reasons) {
+      reasons[row.reason as UnboundReason] += 1;
+    }
+  }
+  return { total: rows.length, ...counts, unbound_reasons: reasons };
+}
+
+/** The distribution over every attested row of `docs` — `stampVerdictDistribution(collectStampCurrencies(...))`. */
+export function computeStampVerdictDistribution(
+  docs: readonly DocRecord[],
+  binding: StampBindingContext,
+): StampVerdictDistribution {
+  return stampVerdictDistribution(collectStampCurrencies(docs, binding));
 }

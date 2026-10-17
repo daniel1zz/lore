@@ -45,7 +45,7 @@ import {
   type AcceptanceCriterion,
   type EvidencePanelProjection,
 } from "@lore/core";
-import { loadStampBindingContext } from "./stamp-binding-reader.js";
+import { loadStampBindingContext, type RadiusDiffPort } from "./stamp-binding-reader.js";
 import type { StoreInterface } from "../store/store-interface.js";
 import { resolveDoc } from "./resolve.js";
 import { isPlanMember } from "./plan-membership.js";
@@ -152,6 +152,8 @@ export class VerificationProjectionService {
   constructor(
     private readonly store: StoreInterface,
     private readonly minRatio: number | null,
+    /** The radius axis's diff port (AC-CT-9); absent ⇒ stamped rows read `radius_unmeasured`, like the gate's bare form. */
+    private readonly stampRadiusDiff?: RadiusDiffPort,
   ) {}
 
   /**
@@ -232,7 +234,7 @@ export class VerificationProjectionService {
 
         // reason: SPEC-143 AC-CT-3 — the SAME stamp-binding facts the plan-close gate reads, so this
         // panel's attested counts and `tasks[].stampTally` cannot disagree with the gate's verdict.
-        const stampBinding = await loadStampBindingContext(this.store, tasksResult.value);
+        const stampBinding = await loadStampBindingContext(this.store, tasksResult.value, this.stampRadiusDiff);
         if (!stampBinding.ok) return stampBinding;
         const taskAttestationInfos = buildTaskAttestationInfos(tasksResult.value, stampBinding.value);
         const attestation = deriveAttestationSummary(taskAttestationInfos, this.minRatio, acCoverage);

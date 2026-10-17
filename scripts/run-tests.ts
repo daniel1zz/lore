@@ -6,6 +6,8 @@
  * (`bunx --bun vitest run`, vitest.config.ts) and the Node invocation for the files listed BY FILE
  * in vitest.node-files.ts (vitest.node.config.ts) — then prove files on disk == files run
  * (scripts/check-test-file-census.ts). Exit 0 only when all three succeed.
+ * With `--base <ref>` it then runs the selector cross-check (scripts/selector-miss-report.ts, AC-TG-8)
+ * over `<ref>..HEAD` using those same reports, and that must succeed too.
  * Reports go to a throwaway directory under the OS temp dir, never into the repository tree.
  * Side-effect class: IO (spawns the runners, writes reports to a temp dir).
  */
@@ -41,8 +43,13 @@ try {
     { NODE_OPTIONS: "--max-old-space-size=2048" },
   );
   const census = run("census", "bun", ["scripts/check-test-file-census.ts", bunReport, nodeReport]);
-  console.log(`\nrun-tests: bun-runtime exit ${bun}, node exit ${node}, census exit ${census}`);
-  process.exitCode = bun === 0 && node === 0 && census === 0 ? 0 : 1;
+  // AC-TG-8: with `--base <ref>`, cross-check the selector against this run's own reports.
+  const baseIdx = process.argv.indexOf("--base");
+  const baseRef = baseIdx === -1 ? undefined : process.argv[baseIdx + 1];
+  if (baseIdx !== -1 && (baseRef === undefined || baseRef.startsWith("--"))) throw new Error("run-tests: --base needs a git ref");
+  const miss = baseRef === undefined ? 0 : run("selector cross-check", "bun", ["scripts/selector-miss-report.ts", `${baseRef}..HEAD`, bunReport, nodeReport]);
+  console.log(`\nrun-tests: bun-runtime exit ${bun}, node exit ${node}, census exit ${census}, selector cross-check exit ${miss}`);
+  process.exitCode = bun === 0 && node === 0 && census === 0 && miss === 0 ? 0 : 1;
 } finally {
   rmSync(dir, { recursive: true, force: true });
 }
