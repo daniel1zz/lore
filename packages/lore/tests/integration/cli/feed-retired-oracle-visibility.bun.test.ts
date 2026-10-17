@@ -1,4 +1,3 @@
-// @spawns dist/lore
 /**
  * AC-DC-11 — the retired-oracle signal reaches the FEED surface (spec-the-defect-
  * channel-cannot-be-honestly-maintained-an §M5), not only `lore ac list` (AC-DC-10,
@@ -54,6 +53,10 @@
  *               documents for the sibling surface).
  *
  * @spec_ref AC-DC-11
+ *
+ * TG-25 (adr-tg-1 option b): the commands run IN-PROCESS through tests/helpers/run-lore-in-process.ts, not through
+ * dist/lore. Wherever the prose above says the compiled binary is spawned or its freshness asserted, that is the
+ * history of this file; the assertions and the throwaway-corpus rule are unchanged.
  */
 
 import { describe, expect, it, beforeAll, afterAll, vi } from "vitest";
@@ -61,7 +64,7 @@ const setDefaultTimeout = (ms: number): void => { vi.setConfig({ testTimeout: ms
 import { mkdtempSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
-import { assertFreshBinary } from "../helpers/assert-fresh-binary";
+import { runLoreInProcess } from "../../helpers/run-lore-in-process";
 
 // reason: the main fixture spawns ~20 compiled-binary processes to build a corpus
 // whose evidence rows straddle a generation bump; bun's 5s default is comfortably
@@ -70,7 +73,6 @@ setDefaultTimeout(180_000);
 
 // tests/integration/cli/ -> tests/integration/ -> tests/ -> packages/lore/ -> packages/ -> repo root.
 const REPO_ROOT = new URL("../../../../../", import.meta.url).pathname.replace(/\/$/, "");
-const LORE_BIN = join(REPO_ROOT, "dist", "lore");
 
 interface RunResult {
   readonly stdout: string;
@@ -78,23 +80,23 @@ interface RunResult {
   readonly exitCode: number;
 }
 
-function runLore(args: string[], cwd: string): RunResult {
-  const proc = Bun.spawnSync([LORE_BIN, ...args], {
+async function runLore(args: string[], cwd: string): Promise<RunResult> {
+  const proc = await runLoreInProcess(args, {
     // reason: HOME is redirected into the throwaway corpus so no global lore
     // config on the developer's machine can influence the run.
     cwd,
     env: { ...process.env, HOME: cwd, EDITOR: "true", LORE_ACTOR: "agent:feed-oracle-gen-test" },
   });
   return {
-    stdout: proc.stdout.toString(),
-    stderr: proc.stderr.toString(),
-    exitCode: proc.exitCode ?? 1,
+    stdout: proc.stdout,
+    stderr: proc.stderr,
+    exitCode: proc.exitCode,
   };
 }
 
 /** Runs a fixture-setup command, failing loud (never silently) on a nonzero exit. */
-function mustRun(args: string[], cwd: string): RunResult {
-  const result = runLore(args, cwd);
+async function mustRun(args: string[], cwd: string): Promise<RunResult> {
+  const result = await runLore(args, cwd);
   if (result.exitCode !== 0) {
     throw new Error(`fixture command \`lore ${args.join(" ")}\` failed (${result.exitCode}): ${result.stderr}`);
   }
@@ -129,8 +131,8 @@ interface TaskStartPackJson {
   readonly acceptance_detail: readonly AcceptanceDetailEntry[];
 }
 
-function acListJson(spec: string, cwd: string): AcListJson {
-  const result = mustRun(["ac", "list", spec, "--json"], cwd);
+async function acListJson(spec: string, cwd: string): Promise<AcListJson> {
+  const result = await mustRun(["ac", "list", spec, "--json"], cwd);
   return (JSON.parse(result.stdout) as { data: AcListJson }).data;
 }
 
@@ -140,8 +142,8 @@ function factFor(payload: AcListJson, acId: string): CoverageFactJson {
   return fact;
 }
 
-function feedTaskStartJson(task: string, cwd: string): TaskStartPackJson {
-  const result = mustRun(["feed", "task-start", task, "--json"], cwd);
+async function feedTaskStartJson(task: string, cwd: string): Promise<TaskStartPackJson> {
+  const result = await mustRun(["feed", "task-start", task, "--json"], cwd);
   return JSON.parse(result.stdout) as TaskStartPackJson;
 }
 
@@ -172,27 +174,20 @@ function parseRetiredMarker(line: string): { raw: string; prior: number; current
   return { raw: m[0], prior: Number(m[1]), current: Number(m[2]), generation: Number(m[3]) };
 }
 
-beforeAll(() => {
-  assertFreshBinary(LORE_BIN, [
-    join(REPO_ROOT, "packages", "lore", "src"),
-    join(REPO_ROOT, "packages", "core", "src"),
-  ]);
-});
-
 // ─── Main fixture: one corpus, observed BEFORE and AFTER the command rewrite ──
 
-function addScriptAc(spec: string, id: string, statement: string, command: string, dir: string): void {
-  mustRun(
+async function addScriptAc(spec: string, id: string, statement: string, command: string, dir: string): Promise<void> {
+  await mustRun(
     ["ac", "add", spec, id, "--statement", statement, "--mode", "script", "--oracle", "other", "--command", command],
     dir,
   );
 }
 
-function recordPass(task: string, command: string, acId: string, tail: string, dir: string): void {
+async function recordPass(task: string, command: string, acId: string, tail: string, dir: string): Promise<void> {
   // reason: `--oracle manual` is the one oracle a self-reported `pass` is admissible
   // for, and it still requires a genuinely non-empty --output-tail describing what
   // was checked (task-raise-the-evidence-tail-guard-s-predicate-to-its-own D5).
-  mustRun(
+  await mustRun(
     ["evidence", task, "--oracle", "manual", "--command", command, "--result", "pass", "--ac", acId, "--output-tail", tail],
     dir,
   );
@@ -216,11 +211,11 @@ interface Observed {
  * AC-FEED-2  one `pass` row, never rewritten ⇒ negative control (all-current).
  * AC-FEED-3  no evidence at all ⇒ boundary control (zero-evidence).
  */
-function buildCorpus(): Observed {
+async function buildCorpus(): Promise<Observed> {
   const dir = mkdtempSync(join(tmpdir(), "lore-feed-oracle-gen-"));
-  mustRun(["init"], dir);
-  mustRun(["create", "prd", "--title", "Feed Gen PRD", "--no-ai", "--content", "## Overview\nbody"], dir);
-  mustRun(
+  await mustRun(["init"], dir);
+  await mustRun(["create", "prd", "--title", "Feed Gen PRD", "--no-ai", "--content", "## Overview\nbody"], dir);
+  await mustRun(
     [
       "create", "spec",
       "--title", "Feed Gen Spec",
@@ -231,12 +226,12 @@ function buildCorpus(): Observed {
   );
 
   const spec = "spec-feed-gen-spec";
-  addScriptAc(spec, "AC-FEED-1", "A marker token is present in the corpus root.", "grep -rq MARKER .", dir);
-  addScriptAc(spec, "AC-FEED-2", "A second marker token is present in the corpus root.", "grep -rq OTHER .", dir);
-  addScriptAc(spec, "AC-FEED-3", "A third token is present in the corpus root.", "grep -rq THIRD .", dir);
+  await addScriptAc(spec, "AC-FEED-1", "A marker token is present in the corpus root.", "grep -rq MARKER .", dir);
+  await addScriptAc(spec, "AC-FEED-2", "A second marker token is present in the corpus root.", "grep -rq OTHER .", dir);
+  await addScriptAc(spec, "AC-FEED-3", "A third token is present in the corpus root.", "grep -rq THIRD .", dir);
 
-  mustRun(["create", "plan", "--title", "Feed Gen Plan", "--parent", spec, "--no-ai", "--content", "body"], dir);
-  mustRun(
+  await mustRun(["create", "plan", "--title", "Feed Gen Plan", "--parent", spec, "--no-ai", "--content", "body"], dir);
+  await mustRun(
     [
       "create", "task",
       "--title", "Feed Gen Task",
@@ -253,33 +248,33 @@ function buildCorpus(): Observed {
   const task = "task-feed-gen-task";
 
   // ── generation 1 evidence ──
-  recordPass(task, "grep -rq MARKER .", "AC-FEED-1", "manual check: the MARKER token was located by hand", dir);
-  recordPass(task, "grep -rq OTHER .", "AC-FEED-2", "manual check: the OTHER token was located by hand", dir);
+  await recordPass(task, "grep -rq MARKER .", "AC-FEED-1", "manual check: the MARKER token was located by hand", dir);
+  await recordPass(task, "grep -rq OTHER .", "AC-FEED-2", "manual check: the OTHER token was located by hand", dir);
 
   // ── observation 1: BEFORE any rewrite ──
-  const beforeFeed = mustRun(["feed", "task-start", task], dir);
+  const beforeFeed = await mustRun(["feed", "task-start", task], dir);
   const beforeFeedHuman = beforeFeed.stdout;
-  const beforeFeedJson = feedTaskStartJson(task, dir);
+  const beforeFeedJson = await feedTaskStartJson(task, dir);
 
   // ── the rewrite under test: a POLARITY REVERSAL of AC-FEED-1's oracle (F3's shape) ──
-  mustRun(["ac", "set", spec, "AC-FEED-1", "--command", "! grep -rq MARKER ."], dir);
+  await mustRun(["ac", "set", spec, "AC-FEED-1", "--command", "! grep -rq MARKER ."], dir);
 
   // ── generation 2 evidence for AC-FEED-1 ──
-  recordPass(task, "! grep -rq MARKER .", "AC-FEED-1", "manual check: the MARKER token is absent, as now required", dir);
+  await recordPass(task, "! grep -rq MARKER .", "AC-FEED-1", "manual check: the MARKER token is absent, as now required", dir);
 
   // ── observation 2: AFTER the rewrite ──
-  const afterFeed = mustRun(["feed", "task-start", task], dir);
+  const afterFeed = await mustRun(["feed", "task-start", task], dir);
   const afterFeedHuman = afterFeed.stdout;
-  const afterFeedJson = feedTaskStartJson(task, dir);
-  const afterAcJson = acListJson(spec, dir);
+  const afterFeedJson = await feedTaskStartJson(task, dir);
+  const afterAcJson = await acListJson(spec, dir);
 
   return { dir, task, spec, beforeFeedHuman, beforeFeedJson, afterFeedHuman, afterFeedJson, afterAcJson };
 }
 
 let obs: Observed;
 
-beforeAll(() => {
-  obs = buildCorpus();
+beforeAll(async () => {
+  obs = await buildCorpus();
 });
 
 afterAll(() => {
@@ -302,9 +297,9 @@ describe("fixture integrity (the generation bump really happened before any surf
 // ─── HAPPY — the feed pack carries the SAME marker `lore ac list` renders ────
 
 describe("lore feed task-start — retired-oracle evidence on the acceptance section (AC-DC-11, HAPPY)", () => {
-  it("renders the retired-oracle marker on sections.acceptance, byte-identical to lore ac list's own marker", () => {
+  it("renders the retired-oracle marker on sections.acceptance, byte-identical to lore ac list's own marker", async () => {
     const feedLine = lineFor(obs.afterFeedHuman, "AC-FEED-1");
-    const acLine = lineFor(mustRun(["ac", "list", obs.spec], obs.dir).stdout, "AC-FEED-1");
+    const acLine = lineFor((await mustRun(["ac", "list", obs.spec], obs.dir)).stdout, "AC-FEED-1");
 
     const feedMarker = parseRetiredMarker(feedLine);
     const acMarker = parseRetiredMarker(acLine);
@@ -357,8 +352,8 @@ describe("lore feed task-start — a criterion with no evidence at all carries n
 // ─── ERROR — an unresolvable task never leaks marker text through a nonexistent pack ──
 
 describe("lore feed task-start — an unresolvable task produces no pack at all (AC-DC-11, ERROR)", () => {
-  it("exits nonzero and prints no retired_oracle_evidence text anywhere", () => {
-    const result = runLore(["feed", "task-start", "task-does-not-exist"], obs.dir);
+  it("exits nonzero and prints no retired_oracle_evidence text anywhere", async () => {
+    const result = await runLore(["feed", "task-start", "task-does-not-exist"], obs.dir);
     expect(result.exitCode).not.toBe(0);
     expect(result.stdout).not.toContain("retired_oracle_evidence");
     expect(result.stderr).not.toContain("retired_oracle_evidence");

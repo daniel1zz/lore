@@ -1,4 +1,3 @@
-// @spawns dist/lore
 /**
  * SPEC-106 (AC-FRESH-4) — `lore assess`'s non-blocking staleness advisory, exercised
  * end-to-end against the COMPILED `dist/lore` binary (`Bun.spawnSync`) over a
@@ -27,6 +26,10 @@
  *               "stale" claim, so an operator can verify the comparison itself
  *
  * @spec_ref SPEC-106 §Acceptance Criteria AC-FRESH-4
+ *
+ * TG-25 (adr-tg-1 option b): the commands run IN-PROCESS through tests/helpers/run-lore-in-process.ts, not through
+ * dist/lore. Wherever the prose above says the compiled binary is spawned or its freshness asserted, that is the
+ * history of this file; the assertions and the throwaway-corpus rule are unchanged.
  */
 
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
@@ -35,11 +38,10 @@ import { join } from "path";
 import { tmpdir } from "os";
 import { saveConfig } from "@lore/core/node";
 import { ASSESS_NEWER_TASK_ACTIVITY } from "../../../src/adapters/cli/cli-refusal-messages.js";
-import { assertFreshBinary } from "../helpers/assert-fresh-binary";
+import { runLoreInProcess } from "../../helpers/run-lore-in-process";
 
 // tests/integration/cli/ -> tests/integration/ -> tests/ -> packages/lore/ -> packages/ -> repo root (5 up).
 const REPO_ROOT = new URL("../../../../../", import.meta.url).pathname.replace(/\/$/, "");
-const LORE_BIN = join(REPO_ROOT, "dist", "lore");
 
 interface RunResult {
   readonly stdout: string;
@@ -48,16 +50,15 @@ interface RunResult {
 }
 
 /** Spawns the compiled `dist/lore` binary with `cwd` as its working directory. */
-function runLore(args: string[], cwd: string): RunResult {
-  const proc = Bun.spawnSync([LORE_BIN, ...args], {
+async function runLore(args: string[], cwd: string): Promise<RunResult> {
+  const proc = await runLoreInProcess(args, {
     cwd,
     env: { ...process.env, HOME: cwd, EDITOR: "true", CLAUDECODE: "1" },
-    stdin: "ignore",
   });
   return {
-    stdout: proc.stdout.toString(),
-    stderr: proc.stderr.toString(),
-    exitCode: proc.exitCode ?? 1,
+    stdout: proc.stdout,
+    stderr: proc.stderr,
+    exitCode: proc.exitCode,
   };
 }
 
@@ -73,8 +74,8 @@ interface DocEnvelope {
   status: string;
 }
 
-function initCorpus(dir: string): void {
-  const result = runLore(["init"], dir);
+async function initCorpus(dir: string): Promise<void> {
+  const result = await runLore(["init"], dir);
   if (result.exitCode !== 0) {
     throw new Error(`lore init failed: ${result.stderr}`);
   }
@@ -115,8 +116,8 @@ function writeAiConfig(dir: string, command: string): void {
   }
 }
 
-function createPlan(dir: string): DocEnvelope {
-  const result = runLore(
+async function createPlan(dir: string): Promise<DocEnvelope> {
+  const result = await runLore(
     ["create", "plan", "--title", "Freshness CLI Plan", "--content", "## Plan\n\nbody", "--json"],
     dir,
   );
@@ -126,8 +127,8 @@ function createPlan(dir: string): DocEnvelope {
   return (JSON.parse(result.stdout) as JsonEnvelope<DocEnvelope>).data;
 }
 
-function createTask(dir: string, planSlug: string): DocEnvelope {
-  const result = runLore(
+async function createTask(dir: string, planSlug: string): Promise<DocEnvelope> {
+  const result = await runLore(
     [
       "create",
       "task",
@@ -154,21 +155,14 @@ function createTask(dir: string, planSlug: string): DocEnvelope {
  * "assessment"` directly; every fixture in this file creates `knowledge` docs
  * EXCLUSIVELY via `lore assess`, so a plain `knowledge`-type count is equivalent here.
  */
-function countAssessmentDocs(dir: string): number {
-  const result = runLore(["list", "--type", "knowledge", "--json"], dir);
+async function countAssessmentDocs(dir: string): Promise<number> {
+  const result = await runLore(["list", "--type", "knowledge", "--json"], dir);
   if (result.exitCode !== 0) {
     throw new Error(`lore list failed: ${result.stderr}`);
   }
   const parsed = JSON.parse(result.stdout) as JsonEnvelope<{ docs: unknown[] }>;
   return parsed.data.docs.length;
 }
-
-beforeAll(() => {
-  assertFreshBinary(LORE_BIN, [
-    join(REPO_ROOT, "packages", "lore", "src"),
-    join(REPO_ROOT, "packages", "core", "src"),
-  ]);
-});
 
 let tmpDir: string;
 
@@ -183,35 +177,35 @@ afterEach(() => {
 describe("lore assess — AC-FRESH-4: non-blocking staleness advisory", () => {
   it("AC-FRESH-4: HAPPY — a first assess on a never-assessed plan succeeds with no staleness warning", async () => {
     tmpDir = mkdtempSync(join(tmpdir(), "lore-assess-freshness-"));
-    initCorpus(tmpDir);
+    await initCorpus(tmpDir);
     const captureFile = join(tmpDir, "captured-prompt-1.txt");
     const scriptPath = writeFixedJsonProviderScript(tmpDir, captureFile);
     writeAiConfig(tmpDir, scriptPath);
 
-    const plan = createPlan(tmpDir);
-    createTask(tmpDir, plan.slug);
+    const plan = await createPlan(tmpDir);
+    await createTask(tmpDir, plan.slug);
 
-    const result = runLore(["assess", plan.slug, "--json"], tmpDir);
+    const result = await runLore(["assess", plan.slug, "--json"], tmpDir);
 
     expect(result.exitCode).toBe(0);
     expect(result.stderr).not.toContain("is already stale");
-    expect(countAssessmentDocs(tmpDir)).toBe(1);
+    expect(await countAssessmentDocs(tmpDir)).toBe(1);
   });
 
   it("AC-FRESH-4: STATE/REGRESSION — a second assess after newer task activity warns loudly, names both timestamps, and STILL writes a fresh assessment (never refuses)", async () => {
     tmpDir = mkdtempSync(join(tmpdir(), "lore-assess-freshness-"));
-    initCorpus(tmpDir);
+    await initCorpus(tmpDir);
 
     const scriptPath = writeFixedJsonProviderScript(tmpDir, join(tmpDir, "captured-prompt-a.txt"));
     writeAiConfig(tmpDir, scriptPath);
 
-    const plan = createPlan(tmpDir);
-    const task = createTask(tmpDir, plan.slug);
+    const plan = await createPlan(tmpDir);
+    const task = await createTask(tmpDir, plan.slug);
 
     // First assessment — nothing to be stale relative to yet.
-    const first = runLore(["assess", plan.slug, "--json"], tmpDir);
+    const first = await runLore(["assess", plan.slug, "--json"], tmpDir);
     expect(first.exitCode).toBe(0);
-    expect(countAssessmentDocs(tmpDir)).toBe(1);
+    expect(await countAssessmentDocs(tmpDir)).toBe(1);
 
     // Real task-evidence activity AFTER the first assessment — a genuine
     // `action: "evidence"` audit row (D2), via the real `lore evidence` write path.
@@ -221,7 +215,7 @@ describe("lore assess — AC-FRESH-4: non-blocking staleness advisory", () => {
     // non-empty self-reported tail succeed. This test only needs a genuine
     // audit row to land AFTER the first assessment, not a specific oracle
     // kind.
-    const evidence = runLore(
+    const evidence = await runLore(
       ["evidence", task.slug, "--oracle", "manual", "--command", "true", "--result", "pass", "--output-tail", "ok", "--json"],
       tmpDir,
     );
@@ -229,11 +223,11 @@ describe("lore assess — AC-FRESH-4: non-blocking staleness advisory", () => {
 
     // Second assessment — the stored (first) assessment is now stale relative to the
     // evidence activity that landed after it.
-    const second = runLore(["assess", plan.slug, "--json"], tmpDir);
+    const second = await runLore(["assess", plan.slug, "--json"], tmpDir);
 
     // REGRESSION (D3) — never refuses; still exits 0 and writes a fresh assessment.
     expect(second.exitCode).toBe(0);
-    expect(countAssessmentDocs(tmpDir)).toBe(2);
+    expect(await countAssessmentDocs(tmpDir)).toBe(2);
 
     // BOUNDARY — the advisory is loud and names the concrete comparison, not just a
     // bare "stale" claim.

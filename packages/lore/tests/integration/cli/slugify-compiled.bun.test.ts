@@ -1,4 +1,3 @@
-// @spawns dist/lore
 /**
  * AC-068-10 — compiled-binary regression oracle for SPEC-068's CJK-aware
  * slugify (SPEC-068 hotfix, 2026-07-23): the original pinyin-pro lazy-load
@@ -36,17 +35,20 @@
  *               (`slugify-cjk.test.ts` AC-068-5), re-run here end-to-end
  *
  * @spec_ref SPEC-068 §Acceptance Criteria AC-068-10
+ *
+ * TG-25 (adr-tg-1 option b): the commands run IN-PROCESS through tests/helpers/run-lore-in-process.ts, not through
+ * dist/lore. Wherever the prose above says the compiled binary is spawned or its freshness asserted, that is the
+ * history of this file; the assertions and the throwaway-corpus rule are unchanged.
  */
 
 import { describe, expect, it, beforeAll, afterEach } from "vitest";
 import { mkdtempSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
-import { assertFreshBinary } from "../helpers/assert-fresh-binary";
+import { runLoreInProcess } from "../../helpers/run-lore-in-process";
 
 // tests/integration/cli/ -> tests/integration/ -> tests/ -> packages/lore/ -> packages/ -> repo root (5 levels up).
 const REPO_ROOT = new URL("../../../../../", import.meta.url).pathname.replace(/\/$/, "");
-const LORE_BIN = join(REPO_ROOT, "dist", "lore");
 
 interface RunResult {
   readonly stdout: string;
@@ -62,15 +64,15 @@ interface RunResult {
  * gate-feeding AI calls (none triggered by an `adr` create) from attempting
  * a nested Claude invocation.
  */
-function runLore(args: string[], cwd: string): RunResult {
-  const proc = Bun.spawnSync([LORE_BIN, ...args], {
+async function runLore(args: string[], cwd: string): Promise<RunResult> {
+  const proc = await runLoreInProcess(args, {
     cwd,
     env: { ...process.env, HOME: cwd, EDITOR: "true", CLAUDECODE: "1" },
   });
   return {
-    stdout: proc.stdout.toString(),
-    stderr: proc.stderr.toString(),
-    exitCode: proc.exitCode ?? 1,
+    stdout: proc.stdout,
+    stderr: proc.stderr,
+    exitCode: proc.exitCode,
   };
 }
 
@@ -79,19 +81,12 @@ interface JsonDocEnvelope {
   data: { slug: string; type: string; title: string };
 }
 
-function initCorpus(tmpDir: string): void {
-  const result = runLore(["init"], tmpDir);
+async function initCorpus(tmpDir: string): Promise<void> {
+  const result = await runLore(["init"], tmpDir);
   if (result.exitCode !== 0) {
     throw new Error(`lore init failed: ${result.stderr}`);
   }
 }
-
-beforeAll(() => {
-  assertFreshBinary(LORE_BIN, [
-    join(REPO_ROOT, "packages", "lore", "src"),
-    join(REPO_ROOT, "packages", "core", "src"),
-  ]);
-});
 
 let tmpDir: string;
 
@@ -104,15 +99,15 @@ afterEach(() => {
 });
 
 describe("AC-068-10: compiled dist/lore survives a CJK-title create (SPEC-068 hotfix)", () => {
-  it("HAPPY: all-CJK ADR title yields a pinyin slug, not exit 1 / a bare 'adr' collapse", () => {
+  it("HAPPY: all-CJK ADR title yields a pinyin slug, not exit 1 / a bare 'adr' collapse", async () => {
     // Genuinely outside the repo's own working tree — os.tmpdir() (e.g.
     // /tmp or /var/folders on macOS) has no ancestor node_modules the
     // compiled binary's pre-hotfix createRequire() could have fallen back
     // to; this is what makes the pre-hotfix defect reproduce deterministically.
     tmpDir = mkdtempSync(join(tmpdir(), "lore-slugify-compiled-"));
-    initCorpus(tmpDir);
+    await initCorpus(tmpDir);
 
-    const result = runLore(
+    const result = await runLore(
       [
         "create",
         "adr",
@@ -147,11 +142,11 @@ describe("AC-068-10: compiled dist/lore survives a CJK-title create (SPEC-068 ho
     expect(slug).toBe("adr-ce-shi");
   });
 
-  it("REGRESSION: Korean-title create still yields the deterministic {type}-{8hex} hash slug (D2 guard, compiled binary)", () => {
+  it("REGRESSION: Korean-title create still yields the deterministic {type}-{8hex} hash slug (D2 guard, compiled binary)", async () => {
     tmpDir = mkdtempSync(join(tmpdir(), "lore-slugify-compiled-korean-"));
-    initCorpus(tmpDir);
+    await initCorpus(tmpDir);
 
-    const result = runLore(
+    const result = await runLore(
       [
         "create",
         "adr",

@@ -1,4 +1,3 @@
-// @spawns dist/lore
 /**
  * `lore create task --anchor` / `lore anchor add` / `lore ready --json` — the
  * author→trip end-to-end oracle for
@@ -42,6 +41,10 @@
  *               with no declared anchors stays silent
  *
  * @spec_ref task-a-mistyped-task-file-anchor-is-stored-and-consulted
+ *
+ * TG-25 (adr-tg-1 option b): the commands run IN-PROCESS through tests/helpers/run-lore-in-process.ts, not through
+ * dist/lore. Wherever the prose above says the compiled binary is spawned or its freshness asserted, that is the
+ * history of this file; the assertions and the throwaway-corpus rule are unchanged.
  */
 
 import { describe, expect, it, beforeAll, beforeEach, afterEach, vi } from "vitest";
@@ -49,13 +52,12 @@ const setDefaultTimeout = (ms: number): void => { vi.setConfig({ testTimeout: ms
 import { mkdtempSync, realpathSync, rmSync, writeFileSync, mkdirSync, appendFileSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
-import { assertFreshBinary } from "../../integration/helpers/assert-fresh-binary";
+import { runLoreInProcess } from "../../helpers/run-lore-in-process";
 
 setDefaultTimeout(60_000);
 
 // tests/unit/adapters/ → tests/unit/ → tests/ → packages/lore/ → packages/ → repo root (5 levels up).
 const REPO_ROOT = new URL("../../../../../", import.meta.url).pathname.replace(/\/$/, "");
-const LORE_BIN = join(REPO_ROOT, "dist", "lore");
 
 /** The literal marker every advisory header carries — one grep-able token. */
 const ADVISORY_MARKER = "file_anchors advisory";
@@ -66,20 +68,20 @@ interface RunResult {
   readonly exitCode: number;
 }
 
-function runLore(args: string[], cwd: string): RunResult {
-  const proc = Bun.spawnSync([LORE_BIN, ...args], {
+async function runLore(args: string[], cwd: string): Promise<RunResult> {
+  const proc = await runLoreInProcess(args, {
     cwd,
     env: { ...process.env, HOME: cwd, EDITOR: "true" },
   });
   return {
-    stdout: proc.stdout.toString(),
-    stderr: proc.stderr.toString(),
-    exitCode: proc.exitCode ?? 1,
+    stdout: proc.stdout,
+    stderr: proc.stderr,
+    exitCode: proc.exitCode,
   };
 }
 
-function mustRun(args: string[], cwd: string): RunResult {
-  const result = runLore(args, cwd);
+async function mustRun(args: string[], cwd: string): Promise<RunResult> {
+  const result = await runLore(args, cwd);
   if (result.exitCode !== 0) {
     throw new Error(`fixture command \`lore ${args.join(" ")}\` failed (${result.exitCode}): ${result.stderr}`);
   }
@@ -110,8 +112,8 @@ function parseSlug(stdout: string): string {
   return (JSON.parse(stdout) as { data: { slug: string } }).data.slug;
 }
 
-function createTask(cwd: string, title: string, planSlug: string, anchors: string[]): RunResult {
-  return runLore(
+async function createTask(cwd: string, title: string, planSlug: string, anchors: string[]): Promise<RunResult> {
+  return await runLore(
     [
       "create",
       "task",
@@ -129,8 +131,8 @@ function createTask(cwd: string, title: string, planSlug: string, anchors: strin
   );
 }
 
-function listAnchors(cwd: string, slug: string): string[] {
-  const result = mustRun(["anchor", "list", slug, "--json"], cwd);
+async function listAnchors(cwd: string, slug: string): Promise<string[]> {
+  const result = await mustRun(["anchor", "list", slug, "--json"], cwd);
   return (JSON.parse(result.stdout) as { data: { anchors: string[] } }).data.anchors;
 }
 
@@ -149,23 +151,16 @@ interface ReadyJson {
 let tmpDir: string;
 let planSlug: string;
 
-beforeAll(() => {
-  assertFreshBinary(LORE_BIN, [
-    join(REPO_ROOT, "packages", "lore", "src"),
-    join(REPO_ROOT, "packages", "core", "src"),
-  ]);
-});
-
-beforeEach(() => {
+beforeEach(async () => {
   tmpDir = mkdtempSync(join(tmpdir(), "lore-anchor-resolve-"));
-  mustRun(["init"], tmpDir);
+  await mustRun(["init"], tmpDir);
   disableAllGates(tmpDir);
   // Fixture working tree: one real file and one real directory inside the probe
   // root, so a RESOLVING anchor is available as the CONTROL.
   mkdirSync(join(tmpDir, "src", "existing-dir"), { recursive: true });
   writeFileSync(join(tmpDir, "src", "real.ts"), "export const real = 1;\n");
   planSlug = parseSlug(
-    mustRun(["create", "plan", "--title", "Anchor Probe Plan", "--content", "# Plan", "--no-ai", "--json"], tmpDir)
+    (await mustRun(["create", "plan", "--title", "Anchor Probe Plan", "--content", "# Plan", "--no-ai", "--json"], tmpDir))
       .stdout,
   );
 });
@@ -179,8 +174,8 @@ afterEach(() => {
 });
 
 describe("HAPPY — a mistyped anchor is advised, stored, and exits 0", () => {
-  it("names the exact non-resolving path on stderr, exits 0, and keeps --json stdout parseable", () => {
-    const result = createTask(tmpDir, "Typo Task", planSlug, ["packages/lore/src/does-not-exist.ts"]);
+  it("names the exact non-resolving path on stderr, exits 0, and keeps --json stdout parseable", async () => {
+    const result = await createTask(tmpDir, "Typo Task", planSlug, ["packages/lore/src/does-not-exist.ts"]);
 
     expect(result.exitCode).toBe(0);
     expect(result.stderr).toContain(ADVISORY_MARKER);
@@ -191,56 +186,56 @@ describe("HAPPY — a mistyped anchor is advised, stored, and exits 0", () => {
     expect(parsed.ok).toBe(true);
   });
 
-  it("STORES the anchor anyway — the advisory is not a refusal", () => {
-    const slug = parseSlug(createTask(tmpDir, "Typo Task", planSlug, ["packages/lore/src/does-not-exist.ts"]).stdout);
-    expect(listAnchors(tmpDir, slug)).toEqual(["packages/lore/src/does-not-exist.ts"]);
+  it("STORES the anchor anyway — the advisory is not a refusal", async () => {
+    const slug = parseSlug((await createTask(tmpDir, "Typo Task", planSlug, ["packages/lore/src/does-not-exist.ts"])).stdout);
+    expect(await listAnchors(tmpDir, slug)).toEqual(["packages/lore/src/does-not-exist.ts"]);
   });
 
-  it("`lore anchor add` of a missing path also advises, exits 0, and stores it", () => {
-    const slug = parseSlug(createTask(tmpDir, "Grow Task", planSlug, ["src/real.ts"]).stdout);
-    const added = runLore(["anchor", "add", slug, "src/added-but-missing.ts"], tmpDir);
+  it("`lore anchor add` of a missing path also advises, exits 0, and stores it", async () => {
+    const slug = parseSlug((await createTask(tmpDir, "Grow Task", planSlug, ["src/real.ts"])).stdout);
+    const added = await runLore(["anchor", "add", slug, "src/added-but-missing.ts"], tmpDir);
 
     expect(added.exitCode).toBe(0);
     expect(added.stderr).toContain(ADVISORY_MARKER);
     expect(added.stderr).toContain("src/added-but-missing.ts");
-    expect(listAnchors(tmpDir, slug)).toEqual(["src/real.ts", "src/added-but-missing.ts"]);
+    expect(await listAnchors(tmpDir, slug)).toEqual(["src/real.ts", "src/added-but-missing.ts"]);
   });
 });
 
 describe("REGRESSION CONTROL — a resolving anchor emits NO advisory", () => {
-  it("a task whose only anchor resolves prints no advisory at all", () => {
-    const result = createTask(tmpDir, "Clean Task", planSlug, ["src/real.ts"]);
+  it("a task whose only anchor resolves prints no advisory at all", async () => {
+    const result = await createTask(tmpDir, "Clean Task", planSlug, ["src/real.ts"]);
 
     expect(result.exitCode).toBe(0);
     expect(result.stderr).not.toContain(ADVISORY_MARKER);
     expect(result.stderr).not.toContain("file_missing");
   });
 
-  it("`lore anchor add` of a resolving path prints no advisory", () => {
-    const slug = parseSlug(createTask(tmpDir, "Clean Task", planSlug, ["src/real.ts"]).stdout);
-    const added = runLore(["anchor", "add", slug, "src/existing-dir/"], tmpDir);
+  it("`lore anchor add` of a resolving path prints no advisory", async () => {
+    const slug = parseSlug((await createTask(tmpDir, "Clean Task", planSlug, ["src/real.ts"])).stdout);
+    const added = await runLore(["anchor", "add", slug, "src/existing-dir/"], tmpDir);
 
     expect(added.exitCode).toBe(0);
     expect(added.stderr).not.toContain(ADVISORY_MARKER);
   });
 
-  it("a task with NO anchors at all prints no advisory", () => {
-    const result = createTask(tmpDir, "Anchorless Task", planSlug, []);
+  it("a task with NO anchors at all prints no advisory", async () => {
+    const result = await createTask(tmpDir, "Anchorless Task", planSlug, []);
     expect(result.exitCode).toBe(0);
     expect(result.stderr).not.toContain(ADVISORY_MARKER);
   });
 });
 
 describe("BOUNDARY — directory-scope anchors resolve against a directory", () => {
-  it("an EXISTING directory declared with a trailing slash is silent", () => {
-    const result = createTask(tmpDir, "Dir Task", planSlug, ["src/existing-dir/"]);
+  it("an EXISTING directory declared with a trailing slash is silent", async () => {
+    const result = await createTask(tmpDir, "Dir Task", planSlug, ["src/existing-dir/"]);
     expect(result.exitCode).toBe(0);
     expect(result.stderr).not.toContain(ADVISORY_MARKER);
-    expect(listAnchors(tmpDir, parseSlug(result.stdout))).toEqual(["src/existing-dir/"]);
+    expect(await listAnchors(tmpDir, parseSlug(result.stdout))).toEqual(["src/existing-dir/"]);
   });
 
-  it("a MISSING directory declared with a trailing slash advises dir_missing (never file_missing)", () => {
-    const result = createTask(tmpDir, "Missing Dir Task", planSlug, ["src/no-such-dir/"]);
+  it("a MISSING directory declared with a trailing slash advises dir_missing (never file_missing)", async () => {
+    const result = await createTask(tmpDir, "Missing Dir Task", planSlug, ["src/no-such-dir/"]);
     expect(result.exitCode).toBe(0);
     expect(result.stderr).toContain(ADVISORY_MARKER);
     expect(result.stderr).toContain("src/no-such-dir/");
@@ -250,11 +245,11 @@ describe("BOUNDARY — directory-scope anchors resolve against a directory", () 
 });
 
 describe("STATE — lore ready <plan> --json surfaces it for the dispatcher", () => {
-  it("reports the non-resolving anchor of a CLAIMED task, keyed by task_slug, with probed:true", () => {
-    const slug = parseSlug(createTask(tmpDir, "Claimed Typo", planSlug, ["src/gone.ts"]).stdout);
-    mustRun(["claim", slug, "--worktree", tmpDir], tmpDir);
+  it("reports the non-resolving anchor of a CLAIMED task, keyed by task_slug, with probed:true", async () => {
+    const slug = parseSlug((await createTask(tmpDir, "Claimed Typo", planSlug, ["src/gone.ts"])).stdout);
+    await mustRun(["claim", slug, "--worktree", tmpDir], tmpDir);
 
-    const ready = mustRun(["ready", planSlug, "--json"], tmpDir);
+    const ready = await mustRun(["ready", planSlug, "--json"], tmpDir);
     const payload = (JSON.parse(ready.stdout) as { data: ReadyJson }).data;
     const resolution = payload.ready.anchor_resolution;
 
@@ -270,10 +265,10 @@ describe("STATE — lore ready <plan> --json surfaces it for the dispatcher", ()
     ]);
   });
 
-  it("reports probed:true with an EMPTY unresolved list when every declared anchor resolves", () => {
-    createTask(tmpDir, "Clean Task", planSlug, ["src/real.ts", "src/existing-dir/"]);
+  it("reports probed:true with an EMPTY unresolved list when every declared anchor resolves", async () => {
+    await createTask(tmpDir, "Clean Task", planSlug, ["src/real.ts", "src/existing-dir/"]);
 
-    const ready = mustRun(["ready", planSlug, "--json"], tmpDir);
+    const ready = await mustRun(["ready", planSlug, "--json"], tmpDir);
     const resolution = (JSON.parse(ready.stdout) as { data: ReadyJson }).data.ready.anchor_resolution;
 
     expect(resolution.probed).toBe(true);
@@ -281,9 +276,9 @@ describe("STATE — lore ready <plan> --json surfaces it for the dispatcher", ()
     expect(resolution.unresolved).toEqual([]);
   });
 
-  it("human-mode `lore ready` prints the advisory too, still exiting 0", () => {
-    createTask(tmpDir, "Typo Task", planSlug, ["src/gone.ts"]);
-    const ready = runLore(["ready", planSlug], tmpDir);
+  it("human-mode `lore ready` prints the advisory too, still exiting 0", async () => {
+    await createTask(tmpDir, "Typo Task", planSlug, ["src/gone.ts"]);
+    const ready = await runLore(["ready", planSlug], tmpDir);
 
     expect(ready.exitCode).toBe(0);
     expect(`${ready.stdout}${ready.stderr}`).toContain("src/gone.ts");

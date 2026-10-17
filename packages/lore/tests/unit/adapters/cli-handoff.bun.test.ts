@@ -1,4 +1,3 @@
-// @spawns dist/lore
 /**
  * `lore handoff` / `lore create knowledge --sub-type handoff` — CLI-adapter exit-code
  * contract tests (SPEC-041 §3 D4, D6; §4 AC-SL-4 CLI half, AC-SL-9).
@@ -24,6 +23,10 @@
  *               repair (D4 drive-by) didn't narrow the pre-existing sub-type set
  *
  * @spec_ref SPEC-041 §4 spec-spec-041-session-layer-part-1-bootstrap-pointer-set-lossles#AC-SL-4 AC-SL-9
+ *
+ * TG-25 (adr-tg-1 option b): the commands run IN-PROCESS through tests/helpers/run-lore-in-process.ts, not through
+ * dist/lore. Wherever the prose above says the compiled binary is spawned or its freshness asserted, that is the
+ * history of this file; the assertions and the throwaway-corpus rule are unchanged.
  */
 
 import { describe, expect, it, beforeAll, beforeEach, afterEach } from "vitest";
@@ -31,11 +34,10 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import { sessionActorFor, withSessionIdentity } from "../../helpers/session-actor";
-import { assertFreshBinary } from "../../integration/helpers/assert-fresh-binary";
+import { runLoreInProcess } from "../../helpers/run-lore-in-process";
 
 // tests/unit/adapters/ → tests/unit/ → tests/ → packages/lore/ → packages/ → repo root (5 levels up).
 const REPO_ROOT = new URL("../../../../../", import.meta.url).pathname.replace(/\/$/, "");
-const LORE_BIN = join(REPO_ROOT, "dist", "lore");
 
 interface RunResult {
   readonly stdout: string;
@@ -44,15 +46,15 @@ interface RunResult {
 }
 
 /** `actor` names the writer through the session tier (no write command takes `--by`); `null` = unnamed. */
-function runLore(args: string[], cwd: string, actor: string | null = null): RunResult {
-  const proc = Bun.spawnSync([LORE_BIN, ...args], {
+async function runLore(args: string[], cwd: string, actor: string | null = null): Promise<RunResult> {
+  const proc = await runLoreInProcess(args, {
     cwd,
     env: withSessionIdentity({ ...process.env, HOME: cwd, EDITOR: "true" }, actor) as Record<string, string>,
   });
   return {
-    stdout: proc.stdout.toString(),
-    stderr: proc.stderr.toString(),
-    exitCode: proc.exitCode ?? 1,
+    stdout: proc.stdout,
+    stderr: proc.stderr,
+    exitCode: proc.exitCode,
   };
 }
 
@@ -63,35 +65,26 @@ function parseSlug(stdout: string): string {
   return slug;
 }
 
-function initCorpus(tmpDir: string): void {
-  const result = runLore(["init"], tmpDir);
+async function initCorpus(tmpDir: string): Promise<void> {
+  const result = await runLore(["init"], tmpDir);
   if (result.exitCode !== 0) {
     throw new Error(`lore init failed: ${result.stderr}`);
   }
 }
 
-function createPlan(tmpDir: string, title: string): string {
-  const result = runLore(["create", "plan", "--title", title, "--content", "Plan body.", "--no-ai"], tmpDir);
+async function createPlan(tmpDir: string, title: string): Promise<string> {
+  const result = await runLore(["create", "plan", "--title", title, "--content", "Plan body.", "--no-ai"], tmpDir);
   if (result.exitCode !== 0) throw new Error(`create plan failed: ${result.stderr}`);
   return parseSlug(result.stdout);
 }
-
-// ─── Suite: binary freshness guard ───────────────────────────────────────────
-
-beforeAll(() => {
-  assertFreshBinary(LORE_BIN, [
-    join(REPO_ROOT, "packages", "lore", "src"),
-    join(REPO_ROOT, "packages", "core", "src"),
-  ]);
-});
 
 // ─── Fixtures ────────────────────────────────────────────────────────────────
 
 let tmpDir: string;
 
-beforeEach(() => {
+beforeEach(async () => {
   tmpDir = mkdtempSync(join(tmpdir(), "lore-cli-handoff-"));
-  initCorpus(tmpDir);
+  await initCorpus(tmpDir);
 });
 
 afterEach(() => {
@@ -105,10 +98,10 @@ afterEach(() => {
 // ─── HAPPY ───────────────────────────────────────────────────────────────────
 
 describe("lore handoff — HAPPY", () => {
-  it("flags path: --plan/--by/--file/--decision/--next → exit 0, writes a fast-tracked approved knowledge/handoff doc", () => {
-    const planSlug = createPlan(tmpDir, "Handoff Flags Plan");
+  it("flags path: --plan/--by/--file/--decision/--next → exit 0, writes a fast-tracked approved knowledge/handoff doc", async () => {
+    const planSlug = await createPlan(tmpDir, "Handoff Flags Plan");
 
-    const result = runLore(
+    const result = await runLore(
       [
         "handoff",
         "--plan",
@@ -134,8 +127,8 @@ describe("lore handoff — HAPPY", () => {
     expect(parsed.data.extra["sub_type"]).toBe("handoff");
   });
 
-  it("--json-file path: a handoffExtraSchema-valid JSON file → exit 0", () => {
-    const planSlug = createPlan(tmpDir, "Handoff JsonFile Plan");
+  it("--json-file path: a handoffExtraSchema-valid JSON file → exit 0", async () => {
+    const planSlug = await createPlan(tmpDir, "Handoff JsonFile Plan");
     const jsonFile = join(tmpDir, "handoff.json");
     writeFileSync(
       jsonFile,
@@ -150,7 +143,7 @@ describe("lore handoff — HAPPY", () => {
       "utf8",
     );
 
-    const result = runLore(["handoff", "--json-file", jsonFile, "--json"], tmpDir);
+    const result = await runLore(["handoff", "--json-file", jsonFile, "--json"], tmpDir);
 
     expect(result.exitCode).toBe(0);
     const parsed = JSON.parse(result.stdout) as { ok: boolean; data: { slug: string } };
@@ -182,8 +175,8 @@ describe("lore create knowledge --sub-type handoff — NEGATIVE (writer-identity
   //      the pre-existing `session-handoff-exclusivity.test.ts` (T1, vitest),
   //      which supplies a full extra.handoff payload via `corpusService.create()`
   //      — unreachable from CLI flags alone, hence tested there, not here.
-  it("exit 4 (VALIDATION_ERROR) — blocked before the write-path-exclusivity guard, by the schema-level extra.handoff presence check", () => {
-    const result = runLore(
+  it("exit 4 (VALIDATION_ERROR) — blocked before the write-path-exclusivity guard, by the schema-level extra.handoff presence check", async () => {
+    const result = await runLore(
       ["create", "knowledge", "--sub-type", "handoff", "--title", "Sneaky handoff", "--content", "not a real handoff", "--no-ai"],
       tmpDir,
     );
@@ -196,8 +189,8 @@ describe("lore create knowledge --sub-type handoff — NEGATIVE (writer-identity
 // ─── BOUNDARY: missing --next ────────────────────────────────────────────────
 
 describe("lore handoff — BOUNDARY: missing --next", () => {
-  it("flags path with zero --next flags → exit 2 (a handoff naming no next step is a status report, not a handoff)", () => {
-    const result = runLore(["handoff", "--file", "a.ts"], tmpDir, "alice");
+  it("flags path with zero --next flags → exit 2 (a handoff naming no next step is a status report, not a handoff)", async () => {
+    const result = await runLore(["handoff", "--file", "a.ts"], tmpDir, "alice");
 
     expect(result.exitCode).toBe(2);
     expect(result.stderr).toContain("next_steps");
@@ -207,8 +200,8 @@ describe("lore handoff — BOUNDARY: missing --next", () => {
 // ─── ERROR: mutex / dependency guards ───────────────────────────────────────
 
 describe("lore handoff — ERROR: flag guards", () => {
-  it("--failing-command without --failing-tail-file → exit 2", () => {
-    const result = runLore(
+  it("--failing-command without --failing-tail-file → exit 2", async () => {
+    const result = await runLore(
       ["handoff", "--next", "step", "--failing-command", "bun test"],
       tmpDir,
       "alice",
@@ -219,11 +212,11 @@ describe("lore handoff — ERROR: flag guards", () => {
     expect(result.stderr).toContain("--failing-tail-file");
   });
 
-  it("--failing-tail-file without --failing-command → exit 2 (inverse)", () => {
+  it("--failing-tail-file without --failing-command → exit 2 (inverse)", async () => {
     const tailFile = join(tmpDir, "tail.txt");
     writeFileSync(tailFile, "1 test failed", "utf8");
 
-    const result = runLore(
+    const result = await runLore(
       ["handoff", "--next", "step", "--failing-tail-file", tailFile],
       tmpDir,
       "alice",
@@ -234,7 +227,7 @@ describe("lore handoff — ERROR: flag guards", () => {
     expect(result.stderr).toContain("--failing-tail-file");
   });
 
-  it("--json-file + a field flag (--file) → exit 2, naming the conflict", () => {
+  it("--json-file + a field flag (--file) → exit 2, naming the conflict", async () => {
     const jsonFile = join(tmpDir, "handoff.json");
     writeFileSync(
       jsonFile,
@@ -242,7 +235,7 @@ describe("lore handoff — ERROR: flag guards", () => {
       "utf8",
     );
 
-    const result = runLore(
+    const result = await runLore(
       ["handoff", "--json-file", jsonFile, "--file", "a.ts"],
       tmpDir,
     );
@@ -257,9 +250,9 @@ describe("lore handoff — ERROR: flag guards", () => {
 // ─── STATE: written handoff is visible via `lore get` ───────────────────────
 
 describe("lore handoff — STATE: round trip through the real store", () => {
-  it("a handoff written via the CLI is retrievable via `lore get --json` with extra.handoff intact", () => {
-    const planSlug = createPlan(tmpDir, "Handoff State Plan");
-    const writeResult = runLore(
+  it("a handoff written via the CLI is retrievable via `lore get --json` with extra.handoff intact", async () => {
+    const planSlug = await createPlan(tmpDir, "Handoff State Plan");
+    const writeResult = await runLore(
       [
         "handoff",
         "--plan",
@@ -274,7 +267,7 @@ describe("lore handoff — STATE: round trip through the real store", () => {
     expect(writeResult.exitCode).toBe(0);
     const written = JSON.parse(writeResult.stdout) as { data: { slug: string } };
 
-    const getResult = runLore(["get", written.data.slug, "--json"], tmpDir);
+    const getResult = await runLore(["get", written.data.slug, "--json"], tmpDir);
     expect(getResult.exitCode).toBe(0);
     const got = JSON.parse(getResult.stdout) as { data: { doc: { extra: { sub_type: string; handoff: { by: string; next_steps: string[] } } } } };
     expect(got.data.doc.extra.sub_type).toBe("handoff");
@@ -286,8 +279,8 @@ describe("lore handoff — STATE: round trip through the real store", () => {
 // ─── REGRESSION: CLI sub-type SSOT repair didn't narrow the accepted set ────
 
 describe("lore create knowledge --sub-type — REGRESSION (SSOT import repair, D4 drive-by)", () => {
-  it("--sub-type prompt is accepted by CLI validation (reaches the service, exit 0)", () => {
-    const result = runLore(
+  it("--sub-type prompt is accepted by CLI validation (reaches the service, exit 0)", async () => {
+    const result = await runLore(
       ["create", "knowledge", "--sub-type", "prompt", "--title", "A reusable prompt", "--content", "prompt body", "--no-ai"],
       tmpDir,
     );
@@ -296,8 +289,8 @@ describe("lore create knowledge --sub-type — REGRESSION (SSOT import repair, D
     expect(result.stderr).not.toContain("Invalid --sub-type");
   });
 
-  it("--sub-type skill is accepted by CLI validation (reaches the service, exit 0)", () => {
-    const result = runLore(
+  it("--sub-type skill is accepted by CLI validation (reaches the service, exit 0)", async () => {
+    const result = await runLore(
       ["create", "knowledge", "--sub-type", "skill", "--title", "A reusable skill", "--content", "skill body", "--no-ai"],
       tmpDir,
     );

@@ -1,4 +1,3 @@
-// @spawns dist/lore
 /**
  * `lore get` structured-`extra` loss notice — COMPILED-BINARY end-to-end contract
  * (task-lore-get-s-default-render-silently-omits-structured-extra, AC-1/AC-2/AC-4/AC-5).
@@ -43,17 +42,20 @@
  *   REGRESSION: AC-4 — `lore get --json` stdout is byte-identical to a pure
  *               `JSON.stringify(JSON.parse(stdout), null, 2)` round-trip (proving the
  *               human-only notice added no byte anywhere) and still carries `extra`
+ *
+ * TG-25 (adr-tg-1 option b): the commands run IN-PROCESS through tests/helpers/run-lore-in-process.ts, not through
+ * dist/lore. Wherever the prose above says the compiled binary is spawned or its freshness asserted, that is the
+ * history of this file; the assertions and the throwaway-corpus rule are unchanged.
  */
 
 import { describe, expect, it, beforeAll, afterAll } from "vitest";
 import { mkdtempSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
-import { assertFreshBinary } from "../../integration/helpers/assert-fresh-binary";
+import { runLoreInProcess } from "../../helpers/run-lore-in-process";
 
 // tests/unit/adapters/ → tests/unit/ → tests/ → packages/lore/ → packages/ → repo root.
 const REPO_ROOT = new URL("../../../../../", import.meta.url).pathname.replace(/\/$/, "");
-const LORE_BIN = join(REPO_ROOT, "dist", "lore");
 
 /** The notice's two stable lone tokens — asserted independently, never as one phrase. */
 const NOTICE_MARKER = "structured";
@@ -65,21 +67,21 @@ interface RunResult {
   readonly exitCode: number;
 }
 
-function runLore(args: string[], cwd: string): RunResult {
-  const proc = Bun.spawnSync([LORE_BIN, ...args], {
+async function runLore(args: string[], cwd: string): Promise<RunResult> {
+  const proc = await runLoreInProcess(args, {
     cwd,
     env: { ...process.env, HOME: cwd, EDITOR: "true", CLAUDECODE: "1" },
   });
   return {
-    stdout: proc.stdout.toString(),
-    stderr: proc.stderr.toString(),
-    exitCode: proc.exitCode ?? 1,
+    stdout: proc.stdout,
+    stderr: proc.stderr,
+    exitCode: proc.exitCode,
   };
 }
 
 /** Runs a fixture step and fails LOUD — a silently-failed write makes every assertion vacuous. */
-function mustRun(args: string[], cwd: string): RunResult {
-  const result = runLore(args, cwd);
+async function mustRun(args: string[], cwd: string): Promise<RunResult> {
+  const result = await runLore(args, cwd);
   if (result.exitCode !== 0) {
     throw new Error(`fixture step failed (exit ${result.exitCode}): lore ${args.join(" ")}\n${result.stderr}`);
   }
@@ -113,18 +115,17 @@ let taskSlug: string;
 let plainKnowledgeSlug: string;
 let handoffSlug: string;
 
-beforeAll(() => {
-  assertFreshBinary(LORE_BIN, [join(REPO_ROOT, "packages", "lore", "src"), join(REPO_ROOT, "packages", "core", "src")]);
+beforeAll(async () => {
 
   tmpDir = mkdtempSync(join(tmpdir(), "lore-cli-get-structured-extra-"));
-  mustRun(["init"], tmpDir);
+  await mustRun(["init"], tmpDir);
 
-  const prdSlug = parseSlug(mustRun(["create", "prd", "--title", "Extra Notice Root", "--no-ai", "--content", "body"], tmpDir).stdout);
+  const prdSlug = parseSlug((await mustRun(["create", "prd", "--title", "Extra Notice Root", "--no-ai", "--content", "body"], tmpDir)).stdout);
   const planSlug = parseSlug(
-    mustRun(["create", "plan", "--title", "Extra Notice Plan", "--no-ai", "--parent", prdSlug, "--content", "body"], tmpDir).stdout,
+    (await mustRun(["create", "plan", "--title", "Extra Notice Plan", "--no-ai", "--parent", prdSlug, "--content", "body"], tmpDir)).stdout,
   );
   taskSlug = parseSlug(
-    mustRun(
+    (await mustRun(
       [
         "create", "task",
         "--title", "Extra Notice Task",
@@ -136,26 +137,26 @@ beforeAll(() => {
         "--anchor", "src/second.ts",
       ],
       tmpDir,
-    ).stdout,
+    )).stdout,
   );
   plainKnowledgeSlug = parseSlug(
-    mustRun(
+    (await mustRun(
       ["create", "knowledge", "--title", "Extra Notice Plain", "--sub-type", "reference", "--no-ai", "--parent", prdSlug, "--content", "Plain body."],
       tmpDir,
-    ).stdout,
+    )).stdout,
   );
   handoffSlug = parseSlug(
-    mustRun(["handoff", "--decision", "probe decision@0.9", "--next", "probe next step", "--plan", planSlug], tmpDir)
+    (await mustRun(["handoff", "--decision", "probe decision@0.9", "--next", "probe next step", "--plan", planSlug], tmpDir))
       .stdout,
   );
 
   // Fixture verification: the writers really did persist structured `extra` (read via the
   // --json surface, which this feature must leave untouched).
-  const taskExtra = JSON.parse(mustRun(["get", taskSlug, "--json"], tmpDir).stdout).data.doc.extra;
+  const taskExtra = JSON.parse((await mustRun(["get", taskSlug, "--json"], tmpDir)).stdout).data.doc.extra;
   if (!Array.isArray(taskExtra.file_anchors) || taskExtra.file_anchors.length !== 2) {
     throw new Error(`fixture task lacks the expected extra.file_anchors: ${JSON.stringify(taskExtra)}`);
   }
-  const plainExtra = JSON.parse(mustRun(["get", plainKnowledgeSlug, "--json"], tmpDir).stdout).data.doc.extra;
+  const plainExtra = JSON.parse((await mustRun(["get", plainKnowledgeSlug, "--json"], tmpDir)).stdout).data.doc.extra;
   const plainStructuredKeys = Object.keys(plainExtra).filter((key) => typeof plainExtra[key] === "object" && plainExtra[key] !== null);
   if (plainStructuredKeys.length > 0) {
     throw new Error(`negative-control doc unexpectedly carries structured extra: ${plainStructuredKeys.join(", ")}`);
@@ -173,8 +174,8 @@ afterAll(() => {
 // ─── HAPPY (AC-1) ───────────────────────────────────────────────────────────
 
 describe("lore get — AC-1 HAPPY (withheld structured extra is announced on stdout)", () => {
-  it("AC-1 names the key, its shape, and the exact --json command", () => {
-    const result = runLore(["get", taskSlug], tmpDir);
+  it("AC-1 names the key, its shape, and the exact --json command", async () => {
+    const result = await runLore(["get", taskSlug], tmpDir);
     expect(result.exitCode).toBe(0);
 
     // Independent lone tokens.
@@ -187,8 +188,8 @@ describe("lore get — AC-1 HAPPY (withheld structured extra is announced on std
     expect(result.stdout).toContain("2 item(s)");
   });
 
-  it("AC-1 the notice sits after the body and before the Navigation footer", () => {
-    const { stdout } = runLore(["get", taskSlug], tmpDir);
+  it("AC-1 the notice sits after the body and before the Navigation footer", async () => {
+    const { stdout } = await runLore(["get", taskSlug], tmpDir);
     const bodyIndex = stdout.indexOf("Task body.");
     const noticeIndex = stdout.indexOf(NOTICE_COMMAND_TOKEN);
     const navigationIndex = stdout.indexOf("Navigation");
@@ -201,8 +202,8 @@ describe("lore get — AC-1 HAPPY (withheld structured extra is announced on std
 // ─── NEGATIVE (AC-2): the vacuity guard ────────────────────────────────────
 
 describe("lore get — AC-2 NEGATIVE control (scalars-only extra emits no notice)", () => {
-  it("AC-2 a knowledge doc whose extra holds only sub_type prints no marker at all", () => {
-    const result = runLore(["get", plainKnowledgeSlug], tmpDir);
+  it("AC-2 a knowledge doc whose extra holds only sub_type prints no marker at all", async () => {
+    const result = await runLore(["get", plainKnowledgeSlug], tmpDir);
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toContain("Plain body."); // the render still works
     expect(result.stdout).not.toContain(NOTICE_COMMAND_TOKEN);
@@ -213,8 +214,8 @@ describe("lore get — AC-2 NEGATIVE control (scalars-only extra emits no notice
 // ─── REGRESSION (AC-4): --json gains no byte ───────────────────────────────
 
 describe("lore get --json — AC-4 REGRESSION (payload untouched)", () => {
-  it("AC-4 stdout is exactly a pretty-printed JSON document — nothing prepended or appended", () => {
-    const { stdout, exitCode } = runLore(["get", taskSlug, "--json"], tmpDir);
+  it("AC-4 stdout is exactly a pretty-printed JSON document — nothing prepended or appended", async () => {
+    const { stdout, exitCode } = await runLore(["get", taskSlug, "--json"], tmpDir);
     expect(exitCode).toBe(0);
     // Byte-level: re-serialising the parsed payload with the command's own formatting
     // reproduces stdout exactly, so no notice line (or any other byte) leaked in.
@@ -227,10 +228,10 @@ describe("lore get --json — AC-4 REGRESSION (payload untouched)", () => {
 // ─── STATE (AC-5) + BOUNDARY (--raw) ───────────────────────────────────────
 
 describe("lore get — AC-5 STATE (invalidation banner keeps its place)", () => {
-  it("AC-5 the banner still prints, comes FIRST, and the notice does not list validity", () => {
-    mustRun(["invalidate", handoffSlug, "--reason", "probe retraction"], tmpDir);
+  it("AC-5 the banner still prints, comes FIRST, and the notice does not list validity", async () => {
+    await mustRun(["invalidate", handoffSlug, "--reason", "probe retraction"], tmpDir);
 
-    const { stdout, exitCode } = runLore(["get", handoffSlug], tmpDir);
+    const { stdout, exitCode } = await runLore(["get", handoffSlug], tmpDir);
     expect(exitCode).toBe(0);
     const bannerIndex = stdout.indexOf("INVALIDATED");
     const noticeIndex = stdout.indexOf(NOTICE_COMMAND_TOKEN);
@@ -242,8 +243,8 @@ describe("lore get — AC-5 STATE (invalidation banner keeps its place)", () => 
     expect(inventory).not.toContain("validity");
   });
 
-  it("--raw prints the notice too, and announces validity because no banner rendered there", () => {
-    const { stdout, exitCode } = runLore(["get", handoffSlug, "--raw"], tmpDir);
+  it("--raw prints the notice too, and announces validity because no banner rendered there", async () => {
+    const { stdout, exitCode } = await runLore(["get", handoffSlug, "--raw"], tmpDir);
     expect(exitCode).toBe(0);
     expect(stdout).not.toContain("INVALIDATED"); // --raw never carries the banner (SPEC-043)
     expect(stdout).toContain(NOTICE_COMMAND_TOKEN);

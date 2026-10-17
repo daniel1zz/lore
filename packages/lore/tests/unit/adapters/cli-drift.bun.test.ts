@@ -1,4 +1,4 @@
-// @spawns dist/lore
+// @reads scripts/check-unclaimed-oracle.ts
 /**
  * `lore status --check-tree` / `--check-drift` composition, `lore anchor` spec-target
  * dispatch (exercised indirectly via `lore create spec --code-anchor`), and the
@@ -46,17 +46,20 @@
  *               `tests/integration/cli/knowledge-code-anchor-drift.bun.test.ts`)
  *
  * @spec_ref SPEC-045 §Acceptance Criteria AC-DR-4
+ *
+ * TG-25 (adr-tg-1 option b): the commands run IN-PROCESS through tests/helpers/run-lore-in-process.ts, not through
+ * dist/lore. Wherever the prose above says the compiled binary is spawned or its freshness asserted, that is the
+ * history of this file; the assertions and the throwaway-corpus rule are unchanged.
  */
 
 import { describe, expect, it, beforeAll, afterAll } from "vitest";
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync, unlinkSync, appendFileSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
-import { assertFreshBinary } from "../../integration/helpers/assert-fresh-binary";
+import { runLoreInProcess } from "../../helpers/run-lore-in-process";
 
 // tests/unit/adapters/ → tests/unit/ → tests/ → packages/lore/ → packages/ → repo root (5 levels up).
 const REPO_ROOT = new URL("../../../../../", import.meta.url).pathname.replace(/\/$/, "");
-const LORE_BIN = join(REPO_ROOT, "dist", "lore");
 
 interface RunResult {
   readonly stdout: string;
@@ -64,15 +67,15 @@ interface RunResult {
   readonly exitCode: number;
 }
 
-function runLore(args: string[], cwd: string): RunResult {
-  const proc = Bun.spawnSync([LORE_BIN, ...args], {
+async function runLore(args: string[], cwd: string): Promise<RunResult> {
+  const proc = await runLoreInProcess(args, {
     cwd,
     env: { ...process.env, HOME: cwd, EDITOR: "true" },
   });
   return {
-    stdout: proc.stdout.toString(),
-    stderr: proc.stderr.toString(),
-    exitCode: proc.exitCode ?? 1,
+    stdout: proc.stdout,
+    stderr: proc.stderr,
+    exitCode: proc.exitCode,
   };
 }
 
@@ -106,8 +109,8 @@ function parseJsonSlug(stdout: string): string {
   return parsed.data.slug;
 }
 
-function initCorpus(tmpDir: string): void {
-  const result = runLore(["init"], tmpDir);
+async function initCorpus(tmpDir: string): Promise<void> {
+  const result = await runLore(["init"], tmpDir);
   if (result.exitCode !== 0) {
     throw new Error(`lore init failed: ${result.stderr}`);
   }
@@ -149,8 +152,8 @@ function disableDrift(dir: string): void {
   );
 }
 
-function createPrd(tmpDir: string): string {
-  const result = runLore(
+async function createPrd(tmpDir: string): Promise<string> {
+  const result = await runLore(
     ["create", "prd", "--title", "Drift Fixture Root PRD", "--no-ai", "--content", "## Overview\n\nBody.", "--json"],
     tmpDir,
   );
@@ -158,7 +161,7 @@ function createPrd(tmpDir: string): string {
   return parseJsonSlug(result.stdout);
 }
 
-function createSpec(tmpDir: string, prdSlug: string, title: string, codeAnchors: string[]): string {
+async function createSpec(tmpDir: string, prdSlug: string, title: string, codeAnchors: string[]): Promise<string> {
   const args = [
     "create",
     "spec",
@@ -174,13 +177,13 @@ function createSpec(tmpDir: string, prdSlug: string, title: string, codeAnchors:
   for (const anchor of codeAnchors) {
     args.push("--code-anchor", anchor);
   }
-  const result = runLore(args, tmpDir);
+  const result = await runLore(args, tmpDir);
   if (result.exitCode !== 0) throw new Error(`create spec "${title}" failed: ${result.stderr}`);
   return parseJsonSlug(result.stdout);
 }
 
-function checkDriftJson(tmpDir: string): { result: RunResult; data: CodeDriftJson } {
-  const result = runLore(["status", "--check-drift", "--json"], tmpDir);
+async function checkDriftJson(tmpDir: string): Promise<{ result: RunResult; data: CodeDriftJson }> {
+  const result = await runLore(["status", "--check-drift", "--json"], tmpDir);
   const envelope = JSON.parse(result.stdout) as JsonEnvelope;
   return { result, data: envelope.data["code_drift"] as CodeDriftJson };
 }
@@ -189,21 +192,12 @@ function findDrift(data: CodeDriftJson, specSlug: string, anchor: string): Drift
   return data.drifts.find((d) => d.doc_slug === specSlug && d.doc_type === "spec" && d.anchor === anchor);
 }
 
-// ─── Suite: binary freshness guard ───────────────────────────────────────────
-
-beforeAll(() => {
-  assertFreshBinary(LORE_BIN, [
-    join(REPO_ROOT, "packages", "lore", "src"),
-    join(REPO_ROOT, "packages", "core", "src"),
-  ]);
-});
-
 // ─── Main fixture: one corpus, seeded once, mutated sequentially ────────────
 
 const tmpDir = mkdtempSync(join(tmpdir(), "lore-cli-drift-"));
-initCorpus(tmpDir);
+await initCorpus(tmpDir);
 disableAllGates(tmpDir);
-const prdSlug = createPrd(tmpDir);
+const prdSlug = await createPrd(tmpDir);
 
 // File layout under tmpDir (the drift probe's repo root == process.cwd() of the
 // spawned binary, which Bun.spawnSync's `cwd` option sets to tmpDir):
@@ -218,9 +212,9 @@ writeFileSync(join(tmpDir, "src", "b.ts"), "export const Exported = 1;\n");
 writeFileSync(join(tmpDir, "adir", "keep.txt"), "placeholder\n");
 writeFileSync(join(tmpDir, "src", "c.ts"), "export const Whatever = 1;\n");
 
-const specASlug = createSpec(tmpDir, prdSlug, "ZzzDriftSpecFileMissing", ["src/a.ts#Exported"]);
-const specBSlug = createSpec(tmpDir, prdSlug, "ZzzDriftSpecSymbolMissing", ["src/b.ts#Exported"]);
-const specCSlug = createSpec(tmpDir, prdSlug, "ZzzDriftSpecDirEmpty", ["adir/"]);
+const specASlug = await createSpec(tmpDir, prdSlug, "ZzzDriftSpecFileMissing", ["src/a.ts#Exported"]);
+const specBSlug = await createSpec(tmpDir, prdSlug, "ZzzDriftSpecSymbolMissing", ["src/b.ts#Exported"]);
+const specCSlug = await createSpec(tmpDir, prdSlug, "ZzzDriftSpecDirEmpty", ["adir/"]);
 
 afterAll(() => {
   try {
@@ -233,15 +227,15 @@ afterAll(() => {
 // ─── HAPPY: fully-consistent initial state ───────────────────────────────────
 
 describe("lore status --check-drift — HAPPY (fully-consistent initial state)", () => {
-  it("3 armed specs, every anchor real on disk → exit 0, 'consistent' text", () => {
-    const result = runLore(["status", "--check-drift"], tmpDir);
+  it("3 armed specs, every anchor real on disk → exit 0, 'consistent' text", async () => {
+    const result = await runLore(["status", "--check-drift"], tmpDir);
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toContain("consistent");
     expect(result.stdout).not.toContain("drift(s)");
   });
 
-  it("--json carries the full CodeDriftPayload shape (armed:true, enabled:true, consistent:true, 3 specs_checked)", () => {
-    const { result, data } = checkDriftJson(tmpDir);
+  it("--json carries the full CodeDriftPayload shape (armed:true, enabled:true, consistent:true, 3 specs_checked)", async () => {
+    const { result, data } = await checkDriftJson(tmpDir);
     expect(result.exitCode).toBe(0);
     expect(data.armed).toBe(true);
     expect(data.enabled).toBe(true);
@@ -257,10 +251,10 @@ describe("lore status --check-drift — HAPPY (fully-consistent initial state)",
 // ─── ERROR: five drift-kind classifications, sequential mutations ───────────
 
 describe("lore status --check-drift — ERROR (drift-kind classification, sequential mutations)", () => {
-  it("1) deleting the anchored file → file_missing, with the literal repair hint", () => {
+  it("1) deleting the anchored file → file_missing, with the literal repair hint", async () => {
     unlinkSync(join(tmpDir, "src", "a.ts"));
 
-    const result = runLore(["status", "--check-drift"], tmpDir);
+    const result = await runLore(["status", "--check-drift"], tmpDir);
     expect(result.exitCode).toBe(3);
     expect(result.stdout).toContain(`[spec] ${specASlug} → src/a.ts#Exported (file_missing)`);
     expect(result.stdout).toContain(
@@ -268,51 +262,51 @@ describe("lore status --check-drift — ERROR (drift-kind classification, sequen
     );
   });
 
-  it("2) renaming the exported symbol → symbol_missing, with the SYMBOL_MISSING_FOOTNOTE note", () => {
+  it("2) renaming the exported symbol → symbol_missing, with the SYMBOL_MISSING_FOOTNOTE note", async () => {
     writeFileSync(join(tmpDir, "src", "b.ts"), "export const Renamed = 1;\n");
 
-    const result = runLore(["status", "--check-drift"], tmpDir);
+    const result = await runLore(["status", "--check-drift"], tmpDir);
     expect(result.exitCode).toBe(3);
     expect(result.stdout).toContain(`[spec] ${specBSlug} → src/b.ts#Exported (symbol_missing)`);
     expect(result.stdout).toContain("does not recognize `export * from`");
   });
 
-  it("3) emptying the anchored directory → dir_empty", () => {
+  it("3) emptying the anchored directory → dir_empty", async () => {
     unlinkSync(join(tmpDir, "adir", "keep.txt"));
 
-    const result = runLore(["status", "--check-drift"], tmpDir);
+    const result = await runLore(["status", "--check-drift"], tmpDir);
     expect(result.exitCode).toBe(3);
     expect(result.stdout).toContain(`[spec] ${specCSlug} → adir/ (dir_empty)`);
   });
 
-  it("STATE bridge: restoring specA's file clears ITS drift row while specB/specC's persist", () => {
+  it("STATE bridge: restoring specA's file clears ITS drift row while specB/specC's persist", async () => {
     writeFileSync(join(tmpDir, "src", "a.ts"), "export const Exported = 1;\n");
 
-    const { result, data } = checkDriftJson(tmpDir);
+    const { result, data } = await checkDriftJson(tmpDir);
     expect(result.exitCode).toBe(3); // specB (symbol_missing) + specC (dir_empty) still broken
     expect(findDrift(data, specASlug, "src/a.ts#Exported")).toBeUndefined();
     expect(findDrift(data, specBSlug, "src/b.ts#Exported")?.kind).toBe("symbol_missing");
     expect(findDrift(data, specCSlug, "adir/")?.kind).toBe("dir_empty");
   });
 
-  it("4) a spec anchoring a path that NEVER existed → file_missing, NEVER reported consistent even while specA IS consistent in the same run", () => {
-    const specDSlug = createSpec(tmpDir, prdSlug, "ZzzDriftSpecNeverExists", ["never/exists.ts"]);
+  it("4) a spec anchoring a path that NEVER existed → file_missing, NEVER reported consistent even while specA IS consistent in the same run", async () => {
+    const specDSlug = await createSpec(tmpDir, prdSlug, "ZzzDriftSpecNeverExists", ["never/exists.ts"]);
 
-    const { data } = checkDriftJson(tmpDir);
+    const { data } = await checkDriftJson(tmpDir);
     expect(findDrift(data, specDSlug, "never/exists.ts")?.kind).toBe("file_missing");
     // specA was restored in the previous step and remains consistent in the SAME run.
     expect(findDrift(data, specASlug, "src/a.ts#Exported")).toBeUndefined();
 
     // Persistence proof: a second, independent read-only run still reports the SAME
     // permanently-broken row (nothing "heals" it without an actual fix or `lore anchor rm`).
-    const { data: dataAgain } = checkDriftJson(tmpDir);
+    const { data: dataAgain } = await checkDriftJson(tmpDir);
     expect(findDrift(dataAgain, specDSlug, "never/exists.ts")?.kind).toBe("file_missing");
   });
 
-  it("5) dir-anchoring a plain file → node_type_mismatch", () => {
-    createSpec(tmpDir, prdSlug, "ZzzDriftSpecNodeTypeMismatch", ["src/c.ts/"]);
+  it("5) dir-anchoring a plain file → node_type_mismatch", async () => {
+    await createSpec(tmpDir, prdSlug, "ZzzDriftSpecNodeTypeMismatch", ["src/c.ts/"]);
 
-    const { result, data } = checkDriftJson(tmpDir);
+    const { result, data } = await checkDriftJson(tmpDir);
     expect(result.exitCode).toBe(3);
     const row = data.drifts.find((d) => d.anchor === "src/c.ts/");
     expect(row?.kind).toBe("node_type_mismatch");
@@ -322,8 +316,8 @@ describe("lore status --check-drift — ERROR (drift-kind classification, sequen
 // ─── STATE: --check-drift --check-tree composition (D5 precedence) ──────────
 
 describe("lore status --check-drift --check-tree — STATE (composition, D5 exit precedence)", () => {
-  it("drift wins the exit-code precedence over a missing lore.tree.yaml blueprint (no blueprint armed in this fixture)", () => {
-    const result = runLore(["status", "--check-drift", "--check-tree"], tmpDir);
+  it("drift wins the exit-code precedence over a missing lore.tree.yaml blueprint (no blueprint armed in this fixture)", async () => {
+    const result = await runLore(["status", "--check-drift", "--check-tree"], tmpDir);
     // Both a real drift (from the mutations above) AND a missing blueprint are true
     // here — D5 says drift wins (exit 3), never masked by the missing-blueprint exit 4.
     expect(result.exitCode).toBe(3);
@@ -334,15 +328,15 @@ describe("lore status --check-drift --check-tree — STATE (composition, D5 exit
 // ─── REGRESSION: plain `lore status` never fs-probes ─────────────────────────
 
 describe("lore status (no flags) — REGRESSION (zero fs probing)", () => {
-  it("prints the declared-count line and exits 0 even though every anchored file is currently broken on disk", () => {
-    const result = runLore(["status"], tmpDir);
+  it("prints the declared-count line and exits 0 even though every anchored file is currently broken on disk", async () => {
+    const result = await runLore(["status"], tmpDir);
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toContain("Code anchors declared: 5 specs (run `lore status --check-drift` to verify)");
     expect(result.stdout).not.toContain("Code drift:");
   });
 
-  it("--json carries code_anchor_specs: 5, computed with zero fs probing", () => {
-    const result = runLore(["status", "--json"], tmpDir);
+  it("--json carries code_anchor_specs: 5, computed with zero fs probing", async () => {
+    const result = await runLore(["status", "--json"], tmpDir);
     expect(result.exitCode).toBe(0);
     const parsed = JSON.parse(result.stdout) as JsonEnvelope;
     expect(parsed.data["code_anchor_specs"]).toBe(5);
@@ -353,17 +347,17 @@ describe("lore status (no flags) — REGRESSION (zero fs probing)", () => {
 // ─── BOUNDARY: unarmed corpus ────────────────────────────────────────────────
 
 describe("lore status --check-drift — BOUNDARY (unarmed corpus, zero specs declare code_anchors)", () => {
-  it("a freshly-inited corpus with no specs at all → exit 0, armed=false", () => {
+  it("a freshly-inited corpus with no specs at all → exit 0, armed=false", async () => {
     const unarmedDir = mkdtempSync(join(tmpdir(), "lore-cli-drift-unarmed-"));
     try {
-      initCorpus(unarmedDir);
-      const result = runLore(["status", "--check-drift"], unarmedDir);
+      await initCorpus(unarmedDir);
+      const result = await runLore(["status", "--check-drift"], unarmedDir);
       expect(result.exitCode).toBe(0);
       expect(result.stdout).toContain(
         "Code drift: armed=false (no spec or knowledge doc declares code_anchors)",
       );
 
-      const jsonResult = runLore(["status", "--check-drift", "--json"], unarmedDir);
+      const jsonResult = await runLore(["status", "--check-drift", "--json"], unarmedDir);
       const envelope = JSON.parse(jsonResult.stdout) as JsonEnvelope;
       const data = envelope.data["code_drift"] as CodeDriftJson;
       expect(data.armed).toBe(false);
@@ -377,17 +371,17 @@ describe("lore status --check-drift — BOUNDARY (unarmed corpus, zero specs dec
 // ─── BOUNDARY: workflow.drift.enabled: false ─────────────────────────────────
 
 describe("lore status --check-drift — BOUNDARY (workflow.drift.enabled: false)", () => {
-  it("the config brake short-circuits to a LOUD 'disabled' payload — exit 0, no fs probing attempted", () => {
+  it("the config brake short-circuits to a LOUD 'disabled' payload — exit 0, no fs probing attempted", async () => {
     const disabledDir = mkdtempSync(join(tmpdir(), "lore-cli-drift-disabled-"));
     try {
-      initCorpus(disabledDir);
+      await initCorpus(disabledDir);
       disableDrift(disabledDir);
 
-      const result = runLore(["status", "--check-drift"], disabledDir);
+      const result = await runLore(["status", "--check-drift"], disabledDir);
       expect(result.exitCode).toBe(0);
       expect(result.stdout).toContain("Code drift: disabled (workflow.drift.enabled=false)");
 
-      const jsonResult = runLore(["status", "--check-drift", "--json"], disabledDir);
+      const jsonResult = await runLore(["status", "--check-drift", "--json"], disabledDir);
       const envelope = JSON.parse(jsonResult.stdout) as JsonEnvelope;
       const data = envelope.data["code_drift"] as CodeDriftJson;
       expect(data.enabled).toBe(false);

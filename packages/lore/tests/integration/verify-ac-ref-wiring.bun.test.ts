@@ -1,4 +1,3 @@
-// @spawns dist/lore
 /**
  * Bun-only integration seam test for the acRef THREE-HOP WIRING between
  * `VerifyRunnerService`'s `recordAcRef` gate, `buildVerifySpawnSpec`'s `acRef`
@@ -89,18 +88,21 @@
  * throwaway `mkdtemp` corpus (never this repo's own `.lore/`).
  *
  * @spec_ref spec-evidence-output-tail-integrity-a-self-reported-non-pass#AC-ETI-7 spec-evidence-output-tail-integrity-a-self-reported-non-pass#AC-ETI-8 (task-ac-eti-7-proves-the-tail-window-helper-but-not-its)
+ *
+ * TG-25 (adr-tg-1 option b): the commands run IN-PROCESS through tests/helpers/run-lore-in-process.ts, not through
+ * dist/lore. Wherever the prose above says the compiled binary is spawned or its freshness asserted, that is the
+ * history of this file; the assertions and the throwaway-corpus rule are unchanged.
  */
 
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { appendFileSync, mkdtempSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
-import { assertFreshBinary } from "./helpers/assert-fresh-binary";
+import { runLoreInProcess } from "../helpers/run-lore-in-process";
 
 // ─── Paths ──────────────────────────────────────────────────────────────────
 
 const PROJECT_ROOT = new URL("../../../../", import.meta.url).pathname.replace(/\/$/, "");
-const LORE_BIN = join(PROJECT_ROOT, "dist", "lore");
 
 // ─── RunResult ──────────────────────────────────────────────────────────────
 
@@ -111,20 +113,20 @@ interface RunResult {
 }
 
 /** Runs the compiled `dist/lore` binary directly (real e2e binary, not `bun run src/`). */
-function runLore(args: readonly string[], cwd: string): RunResult {
-  const proc = Bun.spawnSync([LORE_BIN, ...args], {
+async function runLore(args: readonly string[], cwd: string): Promise<RunResult> {
+  const proc = await runLoreInProcess(args, {
     cwd,
     env: { ...process.env, HOME: cwd, CLAUDECODE: "1" },
   });
   return {
-    stdout: proc.stdout.toString(),
-    stderr: proc.stderr.toString(),
-    exitCode: proc.exitCode ?? 1,
+    stdout: proc.stdout,
+    stderr: proc.stderr,
+    exitCode: proc.exitCode,
   };
 }
 
-function initCorpus(dir: string): void {
-  const r = runLore(["init"], dir);
+async function initCorpus(dir: string): Promise<void> {
+  const r = await runLore(["init"], dir);
   if (r.exitCode !== 0) throw new Error(`lore init failed: ${r.stderr}`);
 }
 
@@ -165,14 +167,14 @@ function extractSlug(stdout: string): string {
   return slug;
 }
 
-function createPrd(dir: string, title: string): string {
-  const r = runLore(["create", "prd", "--title", title, "--no-ai", "--content", "body"], dir);
+async function createPrd(dir: string, title: string): Promise<string> {
+  const r = await runLore(["create", "prd", "--title", title, "--no-ai", "--content", "body"], dir);
   if (r.exitCode !== 0) throw new Error(`create prd failed: ${r.stderr}`);
   return extractSlug(r.stdout);
 }
 
-function createSpec(dir: string, title: string, parentSlug: string): string {
-  const r = runLore(
+async function createSpec(dir: string, title: string, parentSlug: string): Promise<string> {
+  const r = await runLore(
     ["create", "spec", "--title", title,"--no-ai", "--content", "body"],
     dir,
   );
@@ -180,8 +182,8 @@ function createSpec(dir: string, title: string, parentSlug: string): string {
   return extractSlug(r.stdout);
 }
 
-function createPlan(dir: string, title: string, parentSlug: string): string {
-  const r = runLore(
+async function createPlan(dir: string, title: string, parentSlug: string): Promise<string> {
+  const r = await runLore(
     ["create", "plan", "--title", title, "--parent", parentSlug, "--no-ai", "--content", "body"],
     dir,
   );
@@ -189,7 +191,7 @@ function createPlan(dir: string, title: string, parentSlug: string): string {
   return extractSlug(r.stdout);
 }
 
-function createTask(dir: string, planSlug: string, title: string, acScope: readonly string[]): string {
+async function createTask(dir: string, planSlug: string, title: string, acScope: readonly string[]): Promise<string> {
   const args = [
     "create",
     "task",
@@ -204,14 +206,14 @@ function createTask(dir: string, planSlug: string, title: string, acScope: reado
     "body",
   ];
   for (const acId of acScope) args.push("--ac-scope", acId);
-  const r = runLore(args, dir);
+  const r = await runLore(args, dir);
   if (r.exitCode !== 0) throw new Error(`create task failed: ${r.stderr}`);
   return extractSlug(r.stdout);
 }
 
 /** Declares a script-mode AC via `lore ac add` (oracle "other" — avoids the "test"-oracle-only completeness guard, matching this repo's established fixture convention). */
-function declareScriptAc(dir: string, specSlug: string, acId: string, command: string): void {
-  const r = runLore(
+async function declareScriptAc(dir: string, specSlug: string, acId: string, command: string): Promise<void> {
+  const r = await runLore(
     [
       "ac",
       "add",
@@ -245,8 +247,8 @@ interface EvidenceEntry {
   readonly attestation?: EvidenceAttestation;
 }
 
-function getEvidence(dir: string, taskSlug: string): readonly EvidenceEntry[] {
-  const r = runLore(["get", taskSlug, "--json"], dir);
+async function getEvidence(dir: string, taskSlug: string): Promise<readonly EvidenceEntry[]> {
+  const r = await runLore(["get", taskSlug, "--json"], dir);
   if (r.exitCode !== 0) throw new Error(`lore get failed: ${r.stderr}`);
   const parsed = JSON.parse(r.stdout) as {
     data?: { doc?: { extra?: { verification_evidence?: EvidenceEntry[] } } };
@@ -281,13 +283,13 @@ const AC_PW_1_COMMAND = `printf '${MARKER_1}\\n'; bun -e "process.stdout.write('
 /** AC-PW-2: floods output but NEVER prints any AC id anywhere — the negative control. */
 const AC_PW_2_COMMAND = `bun -e "process.stdout.write('y'.repeat(${FLOOD_CHARS}))"`;
 
-function buildFixture(dir: string): { readonly specSlug: string; readonly planSlug: string; readonly taskSlug: string } {
-  const prdSlug = createPrd(dir, "AcRefWiring PRD");
-  const specSlug = createSpec(dir, "AcRefWiring Spec", prdSlug);
-  declareScriptAc(dir, specSlug, MARKER_1, AC_PW_1_COMMAND);
-  declareScriptAc(dir, specSlug, MARKER_2, AC_PW_2_COMMAND);
-  const planSlug = createPlan(dir, "AcRefWiring Plan", specSlug);
-  const taskSlug = createTask(dir, planSlug, "AcRefWiring Task", [MARKER_1, MARKER_2]);
+async function buildFixture(dir: string): Promise<{ readonly specSlug: string; readonly planSlug: string; readonly taskSlug: string }> {
+  const prdSlug = await createPrd(dir, "AcRefWiring PRD");
+  const specSlug = await createSpec(dir, "AcRefWiring Spec", prdSlug);
+  await declareScriptAc(dir, specSlug, MARKER_1, AC_PW_1_COMMAND);
+  await declareScriptAc(dir, specSlug, MARKER_2, AC_PW_2_COMMAND);
+  const planSlug = await createPlan(dir, "AcRefWiring Plan", specSlug);
+  const taskSlug = await createTask(dir, planSlug, "AcRefWiring Task", [MARKER_1, MARKER_2]);
   return { specSlug, planSlug, taskSlug };
 }
 
@@ -295,19 +297,9 @@ function buildFixture(dir: string): { readonly specSlug: string; readonly planSl
 
 let tmpDir: string;
 
-// Fails loud (throws) if dist/lore is missing or older than the newest .ts source under
-// packages/{lore,core}/src — this suite spawns the COMPILED binary directly, so a stale
-// artifact would otherwise let it silently validate old logic against new source.
-beforeAll(() => {
-  assertFreshBinary(LORE_BIN, [
-    join(PROJECT_ROOT, "packages", "lore", "src"),
-    join(PROJECT_ROOT, "packages", "core", "src"),
-  ]);
-});
-
-beforeEach(() => {
+beforeEach(async () => {
   tmpDir = mkdtempSync(join(tmpdir(), "lore-verify-ac-ref-wiring-"));
-  initCorpus(tmpDir);
+  await initCorpus(tmpDir);
   disableAllGates(tmpDir);
 });
 
@@ -320,14 +312,14 @@ afterEach(() => {
 });
 
 describe("lore verify — acRef three-hop wiring seam, driven end-to-end through the compiled CLI", () => {
-  it("spec-evidence-output-tail-integrity-a-self-reported-non-pass#AC-ETI-7 (HAPPY, wiring): the stored output_tail for AC-PW-1 witnesses its own id even though the plain stream-tail structurally cannot; spec-evidence-output-tail-integrity-a-self-reported-non-pass#AC-ETI-8 (CONTROL, negative): AC-PW-2's stored tail is the byte-length-identical plain tail and does not witness AC-PW-1", () => {
-    const { planSlug, taskSlug } = buildFixture(tmpDir);
+  it("spec-evidence-output-tail-integrity-a-self-reported-non-pass#AC-ETI-7 (HAPPY, wiring): the stored output_tail for AC-PW-1 witnesses its own id even though the plain stream-tail structurally cannot; spec-evidence-output-tail-integrity-a-self-reported-non-pass#AC-ETI-8 (CONTROL, negative): AC-PW-2's stored tail is the byte-length-identical plain tail and does not witness AC-PW-1", async () => {
+    const { planSlug, taskSlug } = await buildFixture(tmpDir);
 
-    const result = runLore(["verify", planSlug, "--task", taskSlug, "--allow-new-commands"], tmpDir);
+    const result = await runLore(["verify", planSlug, "--task", taskSlug, "--allow-new-commands"], tmpDir);
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toContain("2 passed, 0 failed.");
 
-    const evidence = getEvidence(tmpDir, taskSlug);
+    const evidence = await getEvidence(tmpDir, taskSlug);
 
     // -- Part A (AC-ETI-7 HAPPY): the wiring witnesses AC-PW-1's id --
     const row1 = evidence.find((e) => e.ac_ref === MARKER_1);

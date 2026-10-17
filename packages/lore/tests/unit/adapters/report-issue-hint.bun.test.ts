@@ -1,4 +1,3 @@
-// @spawns dist/lore
 /**
  * @spec_ref SPEC-073 §Design, §Acceptance Criteria AC-073-1/2/3; SPEC-OOB (out-of-box
  *   reporting channel — report-issue self-provisions its upstream config) §Acceptance
@@ -37,6 +36,10 @@
  * already-working configured path).
  *
  * Coverage dimensions: HAPPY / NEGATIVE / BOUNDARY / ERROR / STATE / REGRESSION.
+ *
+ * TG-25 (adr-tg-1 option b): the commands run IN-PROCESS through tests/helpers/run-lore-in-process.ts, not through
+ * dist/lore. Wherever the prose above says the compiled binary is spawned or its freshness asserted, that is the
+ * history of this file; the assertions and the throwaway-corpus rule are unchanged.
  */
 
 import { describe, expect, it, beforeAll, afterEach } from "vitest";
@@ -44,12 +47,11 @@ import { mkdtempSync, rmSync, writeFileSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import { saveConfig } from "@lore/core/node";
-import { assertFreshBinary } from "../../integration/helpers/assert-fresh-binary";
 import { buildReportIssueHint } from "../../../src/adapters/cli/report-issue-hint.js";
+import { runLoreInProcess } from "../../helpers/run-lore-in-process";
 
 // tests/unit/adapters/ -> tests/unit/ -> tests/ -> packages/lore/ -> packages/ -> repo root (5 levels up).
 const REPO_ROOT = new URL("../../../../../", import.meta.url).pathname.replace(/\/$/, "");
-const LORE_BIN = join(REPO_ROOT, "dist", "lore");
 
 /** Lone token every rendered hint line carries — never split across a wrap point. */
 const HINT_TOKEN = "lore report-issue";
@@ -88,15 +90,15 @@ interface RunResult {
  * suite in an environment where the ambient var is absent regardless of the invoking
  * shell) which would silently inflate every exact-stderr-line-count assertion below.
  */
-function runLore(args: string[], cwd: string): RunResult {
-  const proc = Bun.spawnSync([LORE_BIN, ...args], {
+async function runLore(args: string[], cwd: string): Promise<RunResult> {
+  const proc = await runLoreInProcess(args, {
     cwd,
     env: { ...process.env, HOME: cwd, EDITOR: "true", CLAUDECODE: "1", CLAUDE_CODE_SESSION_ID: "report-issue-hint-test-session" },
   });
   return {
-    stdout: proc.stdout.toString(),
-    stderr: proc.stderr.toString(),
-    exitCode: proc.exitCode ?? 1,
+    stdout: proc.stdout,
+    stderr: proc.stderr,
+    exitCode: proc.exitCode,
   };
 }
 
@@ -115,8 +117,8 @@ function nonEmptyLineCount(text: string): number {
   return text.split("\n").filter((line) => line.length > 0).length;
 }
 
-function initCorpus(tmpDir: string): void {
-  const result = runLore(["init"], tmpDir);
+async function initCorpus(tmpDir: string): Promise<void> {
+  const result = await runLore(["init"], tmpDir);
   if (result.exitCode !== 0) {
     throw new Error(`lore init failed: ${result.stderr}`);
   }
@@ -165,13 +167,6 @@ function corruptDb(tmpDir: string): void {
   writeFileSync(join(loreDir, "lore.db"), "garbage-not-a-sqlite-file-xyz");
 }
 
-beforeAll(() => {
-  assertFreshBinary(LORE_BIN, [
-    join(REPO_ROOT, "packages", "lore", "src"),
-    join(REPO_ROOT, "packages", "core", "src"),
-  ]);
-});
-
 let tmpDir: string;
 
 afterEach(() => {
@@ -183,12 +178,12 @@ afterEach(() => {
 });
 
 describe("AC-073-1: gate-denial hint — configured consumer earns exactly 1 hint line; unconfigured now carries the SPEC-OOB provision-guidance line", () => {
-  it("HAPPY: configured consumer's `lore gate spec-create` denial carries EXACTLY 1 hint line naming lore report-issue + the re-verify-first clause", () => {
+  it("HAPPY: configured consumer's `lore gate spec-create` denial carries EXACTLY 1 hint line naming lore report-issue + the re-verify-first clause", async () => {
     tmpDir = mkdtempSync(join(tmpdir(), "lore-hint-gate-cfg-"));
-    initCorpus(tmpDir);
+    await initCorpus(tmpDir);
     configureUpstream(tmpDir);
 
-    const result = runLore(
+    const result = await runLore(
       ["gate", "spec-create", "--input-json", '{"type":"spec","title":"x","content":""}'],
       tmpDir,
     );
@@ -201,13 +196,13 @@ describe("AC-073-1: gate-denial hint — configured consumer earns exactly 1 hin
     expect(result.stdout).toContain("MISSING_SKELETON");
   });
 
-  it("BOUNDARY: unconfigured consumer's IDENTICAL gate denial now carries exactly 1 provision-guidance line naming feedback.upstream.repo (SPEC-OOB supersedes the old SPEC-073 byte-absent baseline)", () => {
+  it("BOUNDARY: unconfigured consumer's IDENTICAL gate denial now carries exactly 1 provision-guidance line naming feedback.upstream.repo (SPEC-OOB supersedes the old SPEC-073 byte-absent baseline)", async () => {
     tmpDir = mkdtempSync(join(tmpdir(), "lore-hint-gate-unc-"));
-    initCorpus(tmpDir);
+    await initCorpus(tmpDir);
     // deliberately NOT calling configureUpstream() — init's own default
     // config.yaml has no feedback.upstream section at all.
 
-    const result = runLore(
+    const result = await runLore(
       ["gate", "spec-create", "--input-json", '{"type":"spec","title":"x","content":""}'],
       tmpDir,
     );
@@ -228,30 +223,30 @@ describe("AC-073-1: gate-denial hint — configured consumer earns exactly 1 hin
 });
 
 describe("AC-073-2: hint scoping negatives — a usage error and a plain non-gate VALIDATION_ERROR never earn a hint, even when configured", () => {
-  it("NEGATIVE: unknown flag (exit 2 usage error), configured consumer — 0 hint lines", () => {
+  it("NEGATIVE: unknown flag (exit 2 usage error), configured consumer — 0 hint lines", async () => {
     tmpDir = mkdtempSync(join(tmpdir(), "lore-hint-usage-"));
-    initCorpus(tmpDir);
+    await initCorpus(tmpDir);
     configureUpstream(tmpDir);
 
-    const result = runLore(["list", "--bogus-flag"], tmpDir);
+    const result = await runLore(["list", "--bogus-flag"], tmpDir);
 
     expect(result.exitCode).toBe(2);
     expect(countHintLines(result.stderr)).toBe(0);
   });
 
-  it("NEGATIVE: plain non-gate VALIDATION_ERROR (illegal draft→archived transition), configured consumer — 0 hint lines", () => {
+  it("NEGATIVE: plain non-gate VALIDATION_ERROR (illegal draft→archived transition), configured consumer — 0 hint lines", async () => {
     tmpDir = mkdtempSync(join(tmpdir(), "lore-hint-validation-"));
-    initCorpus(tmpDir);
+    await initCorpus(tmpDir);
     configureUpstream(tmpDir);
 
-    const created = runLore(
+    const created = await runLore(
       ["create", "prd", "--title", "Probe Root", "--content", "x", "--json"],
       tmpDir,
     );
     expect(created.exitCode).toBe(0);
     const { data } = JSON.parse(created.stdout) as { data: { slug: string } };
 
-    const result = runLore(["set", data.slug, "--status", "archived"], tmpDir);
+    const result = await runLore(["set", data.slug, "--status", "archived"], tmpDir);
 
     expect(result.exitCode).toBe(4);
     expect(result.stderr).toContain("Cannot transition");
@@ -260,13 +255,13 @@ describe("AC-073-2: hint scoping negatives — a usage error and a plain non-gat
 });
 
 describe("AC-073-3: internal-error hint — a corrupted .lore/lore.db earns exactly 1 hint line when configured, 0 when not", () => {
-  it("ERROR: configured consumer's corrupted-db failure carries EXACTLY 1 hint line", () => {
+  it("ERROR: configured consumer's corrupted-db failure carries EXACTLY 1 hint line", async () => {
     tmpDir = mkdtempSync(join(tmpdir(), "lore-hint-corrupt-cfg-"));
-    initCorpus(tmpDir);
+    await initCorpus(tmpDir);
     configureUpstream(tmpDir);
     corruptDb(tmpDir);
 
-    const result = runLore(["list"], tmpDir);
+    const result = await runLore(["list"], tmpDir);
 
     expect(result.exitCode).toBe(1);
     expect(result.stderr).toContain("Storage failure");
@@ -274,12 +269,12 @@ describe("AC-073-3: internal-error hint — a corrupted .lore/lore.db earns exac
     expect(result.stderr).toContain(HINT_TOKEN);
   });
 
-  it("STATE: unconfigured consumer's SAME corrupted-db failure state now carries exactly 1 provision-guidance line naming feedback.upstream.repo (underlying error message unchanged; SPEC-OOB supersedes the old SPEC-073 byte-absent baseline)", () => {
+  it("STATE: unconfigured consumer's SAME corrupted-db failure state now carries exactly 1 provision-guidance line naming feedback.upstream.repo (underlying error message unchanged; SPEC-OOB supersedes the old SPEC-073 byte-absent baseline)", async () => {
     tmpDir = mkdtempSync(join(tmpdir(), "lore-hint-corrupt-unc-"));
-    initCorpus(tmpDir);
+    await initCorpus(tmpDir);
     corruptDb(tmpDir);
 
-    const result = runLore(["list"], tmpDir);
+    const result = await runLore(["list"], tmpDir);
 
     expect(result.exitCode).toBe(1);
     expect(result.stderr).toContain("Storage failure");
@@ -288,16 +283,16 @@ describe("AC-073-3: internal-error hint — a corrupted .lore/lore.db earns exac
 });
 
 describe("AC-OOB-6: self-lock broken, both directions — unconfigured gate-denial gains exactly 1 provision-guidance line, configured gate-denial stays byte-identical to the AC-073-1 baseline", () => {
-  it("AC-OOB-6: unconfigured consumer earns exactly 1 provision-guidance line (RED — today 0); configured consumer's hint stays byte-identical to the SPEC-073 baseline (regression floor)", () => {
+  it("AC-OOB-6: unconfigured consumer earns exactly 1 provision-guidance line (RED — today 0); configured consumer's hint stays byte-identical to the SPEC-073 baseline (regression floor)", async () => {
     // ---- Direction 1: UNCONFIGURED consumer — the self-lock scenario. ----
     // Deliberately NOT calling configureUpstream(): a fresh consumer whose
     // `.lore/config.yaml` has no `feedback.upstream` at all is exactly the state
     // SPEC-OOB names as unreachable — the promotion mechanism's trigger condition
     // (upstreamConfigured) is exactly the configuration nothing ever provisions.
     tmpDir = mkdtempSync(join(tmpdir(), "lore-hint-oob6-unc-"));
-    initCorpus(tmpDir);
+    await initCorpus(tmpDir);
 
-    const unconfigured = runLore(
+    const unconfigured = await runLore(
       ["gate", "spec-create", "--input-json", '{"type":"spec","title":"x","content":""}'],
       tmpDir,
     );
@@ -322,10 +317,10 @@ describe("AC-OOB-6: self-lock broken, both directions — unconfigured gate-deni
 
     // ---- Direction 2: CONFIGURED consumer — the AC-073-1 regression floor. ----
     tmpDir = mkdtempSync(join(tmpdir(), "lore-hint-oob6-cfg-"));
-    initCorpus(tmpDir);
+    await initCorpus(tmpDir);
     configureUpstream(tmpDir);
 
-    const configured = runLore(
+    const configured = await runLore(
       ["gate", "spec-create", "--input-json", '{"type":"spec","title":"x","content":""}'],
       tmpDir,
     );
@@ -359,19 +354,19 @@ describe("AC-OOB-6: self-lock broken, both directions — unconfigured gate-deni
 });
 
 describe("REGRESSION: the hint wiring never fires on an ALLOW branch", () => {
-  it("a configured consumer's PASSING `lore gate spec-create` still prints only 'gate: pass' — 0 hint lines, empty stderr", () => {
+  it("a configured consumer's PASSING `lore gate spec-create` still prints only 'gate: pass' — 0 hint lines, empty stderr", async () => {
     tmpDir = mkdtempSync(join(tmpdir(), "lore-hint-allow-"));
-    initCorpus(tmpDir);
+    await initCorpus(tmpDir);
     configureUpstream(tmpDir);
 
-    const prdResult = runLore(
+    const prdResult = await runLore(
       ["create", "prd", "--title", "Root", "--content", "x", "--json"],
       tmpDir,
     );
     expect(prdResult.exitCode).toBe(0);
     const { data } = JSON.parse(prdResult.stdout) as { data: { id: string } };
 
-    const result = runLore(
+    const result = await runLore(
       [
         "gate",
         "spec-create",

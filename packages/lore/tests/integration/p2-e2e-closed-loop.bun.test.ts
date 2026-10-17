@@ -1,4 +1,3 @@
-// @spawns dist/lore
 /**
  * @spec_ref IoC vertical-slice tech-spec §4.1/§5.1/§11 — closed-loop e2e for the P2
  * gate slice's C2 state machine (task AC-P2-8): "authoring is free; every COMMIT
@@ -35,15 +34,19 @@
  *
  * Coverage dimensions: HAPPY / NEGATIVE / BOUNDARY / STATE / REGRESSION (the same
  * ancestor spec is re-queried by both gates before and after approval and must agree).
+ *
+ * TG-25 (adr-tg-1 option b): the commands run IN-PROCESS through tests/helpers/run-lore-in-process.ts, not through
+ * dist/lore. Wherever the prose above says the compiled binary is spawned or its freshness asserted, that is the
+ * history of this file; the assertions and the throwaway-corpus rule are unchanged.
  */
 
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
-import { assertFreshBinary } from "./helpers/assert-fresh-binary";
 import { saveConfig } from "@lore/core/node";
-import { citeSpecViaCli, loreRunnerFor } from "../helpers/cli-live-rule.js";
+import { citeSpecViaAsyncCli, asyncLoreRunnerFor } from "../helpers/cli-live-rule.js";
+import { runLoreInProcess } from "../helpers/run-lore-in-process";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -56,25 +59,24 @@ interface RunResult {
 // ─── Paths ──────────────────────────────────────────────────────────────────
 
 const PROJECT_ROOT = new URL("../../../../", import.meta.url).pathname.replace(/\/$/, "");
-const LORE_BIN = join(PROJECT_ROOT, "dist", "lore");
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 /** Runs the compiled `dist/lore` binary directly (real e2e binary, not `bun run src/`). */
-function runLore(args: string[], cwd: string): RunResult {
-  const proc = Bun.spawnSync([LORE_BIN, ...args], {
+async function runLore(args: string[], cwd: string): Promise<RunResult> {
+  const proc = await runLoreInProcess(args, {
     cwd,
     env: { ...process.env, HOME: cwd },
   });
   return {
-    stdout: proc.stdout.toString(),
-    stderr: proc.stderr.toString(),
-    exitCode: proc.exitCode ?? 1,
+    stdout: proc.stdout,
+    stderr: proc.stderr,
+    exitCode: proc.exitCode,
   };
 }
 
-function initCorpus(dir: string): void {
-  const result = runLore(["init"], dir);
+async function initCorpus(dir: string): Promise<void> {
+  const result = await runLore(["init"], dir);
   if (result.exitCode !== 0) {
     throw new Error(`lore init failed: ${result.stderr}`);
   }
@@ -90,20 +92,20 @@ function parseSlug(stdout: string): string {
 }
 
 /** Creates a PRD → spec (draft, no AC) → plan (draft) → task (draft) chain. */
-function createFullChain(dir: string): {
+async function createFullChain(dir: string): Promise<{
   prdSlug: string;
   specSlug: string;
   planSlug: string;
   taskSlug: string;
-} {
-  const prdResult = runLore(
+}> {
+  const prdResult = await runLore(
     ["create", "prd", "--title", "P2 E2E PRD", "--content", "PRD body.", "--no-ai"],
     dir,
   );
   expect(prdResult.exitCode).toBe(0);
   const prdSlug = parseSlug(prdResult.stdout);
 
-  const specResult = runLore(
+  const specResult = await runLore(
     [
       "create",
       "spec",
@@ -118,14 +120,14 @@ function createFullChain(dir: string): {
   expect(specResult.exitCode).toBe(0);
   const specSlug = parseSlug(specResult.stdout);
 
-  const planResult = runLore(
+  const planResult = await runLore(
     ["create", "plan", "--title", "P2 E2E Plan", "--parent", specSlug, "--content", "Plan body.", "--no-ai"],
     dir,
   );
   expect(planResult.exitCode).toBe(0);
   const planSlug = parseSlug(planResult.stdout);
 
-  const taskResult = runLore(
+  const taskResult = await runLore(
     [
       "create",
       "task",
@@ -159,20 +161,9 @@ function disableGateInConfig(dir: string, checkpoint: string): void {
 
 let tmpDir: string;
 
-// Fails loud (throws) if dist/lore is missing or older than the newest .ts source under
-// packages/{lore,core}/src — this suite spawns the COMPILED binary directly (see `runLore`
-// above), so a stale artifact would otherwise let the test silently validate old logic
-// against new source. Computed once for the whole suite (AC3), not per-test.
-beforeAll(() => {
-  assertFreshBinary(LORE_BIN, [
-    join(PROJECT_ROOT, "packages", "lore", "src"),
-    join(PROJECT_ROOT, "packages", "core", "src"),
-  ]);
-});
-
-beforeEach(() => {
+beforeEach(async () => {
   tmpDir = mkdtempSync(join(tmpdir(), "lore-p2-e2e-closed-loop-"));
-  initCorpus(tmpDir);
+  await initCorpus(tmpDir);
 });
 
 afterEach(() => {
@@ -186,18 +177,18 @@ afterEach(() => {
 // ─── AC-P2-8: full closed-loop narrative ─────────────────────────────────────
 
 describe("AC-P2-8: authoring is free, every COMMIT transition gates on real upstream corpus state", () => {
-  it("walks prd → spec → plan → task creation (ungated) through both commit-time gates blocking-then-passing as the spec is approved", () => {
+  it("walks prd → spec → plan → task creation (ungated) through both commit-time gates blocking-then-passing as the spec is approved", async () => {
     // -- 1. HAPPY: authoring the full chain is never blocked --
-    const { specSlug, planSlug, taskSlug } = createFullChain(tmpDir);
+    const { specSlug, planSlug, taskSlug } = await createFullChain(tmpDir);
 
     // -- 2. NEGATIVE: plan-promote blocked while spec is draft (no AC either) --
-    const planBlocked = runLore(["gate", "plan-promote", "--plan", planSlug], tmpDir);
+    const planBlocked = await runLore(["gate", "plan-promote", "--plan", planSlug], tmpDir);
     expect(planBlocked.exitCode).toBe(4);
     expect(planBlocked.stdout).toContain("UPSTREAM_NOT_APPROVED");
     expect(planBlocked.stdout).toContain("UPSTREAM_NO_AC");
 
     // -- 3. NEGATIVE: task-claim blocked while spec is draft --
-    const taskBlocked = runLore(["gate", "task-claim", "--task", taskSlug], tmpDir);
+    const taskBlocked = await runLore(["gate", "task-claim", "--task", taskSlug], tmpDir);
     expect(taskBlocked.exitCode).toBe(4);
     expect(taskBlocked.stdout).toContain("UPSTREAM_NOT_APPROVED");
 
@@ -217,41 +208,41 @@ describe("AC-P2-8: authoring is free, every COMMIT transition gates on real upst
       workflow: { review: { judgment_required_types: [] } },
     } as never);
 
-    const acResult = runLore(
+    const acResult = await runLore(
       ["ac", "add", specSlug, "AC-P2-8-1", "--statement", "The gated behaviour works as declared.", "--mode", "human"],
       tmpDir,
     );
     expect(acResult.exitCode).toBe(0);
 
-    citeSpecViaCli(loreRunnerFor(runLore, tmpDir), tmpDir, undefined, specSlug, "AC-P2-8-1"); // BR-1007: approvable only when a criterion cites a live rule
-    const approveResult = runLore(["approve", specSlug], tmpDir);
+    await citeSpecViaAsyncCli(asyncLoreRunnerFor(runLore, tmpDir), tmpDir, undefined, specSlug, "AC-P2-8-1"); // BR-1007: approvable only when a criterion cites a live rule
+    const approveResult = await runLore(["approve", specSlug], tmpDir);
     expect(approveResult.exitCode).toBe(0);
     expect(approveResult.stdout).toContain("approved");
 
     // -- 5. HAPPY: plan-promote now passes --
-    const planPass = runLore(["gate", "plan-promote", "--plan", planSlug], tmpDir);
+    const planPass = await runLore(["gate", "plan-promote", "--plan", planSlug], tmpDir);
     expect(planPass.exitCode).toBe(0);
     expect(planPass.stdout).toContain("gate: pass");
 
     // -- 6. HAPPY: task-claim now passes (REGRESSION: agrees with plan-promote on the
     //    exact same ancestor spec transition) --
-    const taskPass = runLore(["gate", "task-claim", "--task", taskSlug], tmpDir);
+    const taskPass = await runLore(["gate", "task-claim", "--task", taskSlug], tmpDir);
     expect(taskPass.exitCode).toBe(0);
     expect(taskPass.stdout).toContain("gate: pass");
   });
 
   // -- 7. BOUNDARY: per-checkpoint config disable flips task-claim's block to a pass,
   //    independently of plan-promote, on a fresh unapproved-spec fixture --
-  it("workflow.gates.task-claim.enabled=false flips an otherwise-blocked task-claim to exit 0, while plan-promote (not disabled) still exits 4 on the same draft spec", () => {
-    const { specSlug: _specSlug, planSlug, taskSlug } = createFullChain(tmpDir);
+  it("workflow.gates.task-claim.enabled=false flips an otherwise-blocked task-claim to exit 0, while plan-promote (not disabled) still exits 4 on the same draft spec", async () => {
+    const { specSlug: _specSlug, planSlug, taskSlug } = await createFullChain(tmpDir);
 
     disableGateInConfig(tmpDir, "task-claim");
 
-    const taskDisabled = runLore(["gate", "task-claim", "--task", taskSlug], tmpDir);
+    const taskDisabled = await runLore(["gate", "task-claim", "--task", taskSlug], tmpDir);
     expect(taskDisabled.exitCode).toBe(0);
     expect(taskDisabled.stderr).toContain("task-claim disabled by config");
 
-    const planStillBlocked = runLore(["gate", "plan-promote", "--plan", planSlug], tmpDir);
+    const planStillBlocked = await runLore(["gate", "plan-promote", "--plan", planSlug], tmpDir);
     expect(planStillBlocked.exitCode).toBe(4);
     expect(planStillBlocked.stdout).toContain("UPSTREAM_NOT_APPROVED");
   });

@@ -1,4 +1,3 @@
-// @spawns dist/lore
 /**
  * SPEC-103 §Mechanisms M2/M3 — judgment-required promote (anti-lottery worst-
  * decision-wins, `--override-judgment`/`--override-no-judgment` audited escapes) +
@@ -37,6 +36,10 @@
  *               audit row recording `override_no_judgment: true`
  *
  * @spec_ref SPEC-103 §Acceptance Criteria AC-TIER-4, AC-TIER-5, AC-TIER-8
+ *
+ * TG-25 (adr-tg-1 option b): the commands run IN-PROCESS through tests/helpers/run-lore-in-process.ts, not through
+ * dist/lore. Wherever the prose above says the compiled binary is spawned or its freshness asserted, that is the
+ * history of this file; the assertions and the throwaway-corpus rule are unchanged.
  */
 
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
@@ -44,12 +47,11 @@ import { Database } from "bun:sqlite";
 import { mkdtempSync, rmSync, writeFileSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
-import { assertFreshBinary } from "../helpers/assert-fresh-binary";
-import { citeSpecViaCli, loreRunnerFor } from "../../helpers/cli-live-rule.js";
+import { citeSpecViaAsyncCli, asyncLoreRunnerFor } from "../../helpers/cli-live-rule.js";
+import { runLoreInProcess } from "../../helpers/run-lore-in-process";
 
 // tests/integration/cli/ -> tests/integration/ -> tests/ -> packages/lore/ -> packages/ -> repo root (5 up).
 const REPO_ROOT = new URL("../../../../../", import.meta.url).pathname.replace(/\/$/, "");
-const LORE_BIN = join(REPO_ROOT, "dist", "lore");
 
 interface RunResult {
   readonly stdout: string;
@@ -64,21 +66,20 @@ interface RunResult {
  * runner's own stdin, which can otherwise leave a spawned child blocked on a
  * read that never resolves.
  */
-function runLore(args: string[], cwd: string): RunResult {
-  const proc = Bun.spawnSync([LORE_BIN, ...args], {
+async function runLore(args: string[], cwd: string): Promise<RunResult> {
+  const proc = await runLoreInProcess(args, {
     cwd,
     env: { ...process.env, HOME: cwd, EDITOR: "true", CLAUDECODE: "1" },
-    stdin: "ignore",
   });
   return {
-    stdout: proc.stdout.toString(),
-    stderr: proc.stderr.toString(),
-    exitCode: proc.exitCode ?? 1,
+    stdout: proc.stdout,
+    stderr: proc.stderr,
+    exitCode: proc.exitCode,
   };
 }
 
-function initCorpus(dir: string): void {
-  const result = runLore(["init"], dir);
+async function initCorpus(dir: string): Promise<void> {
+  const result = await runLore(["init"], dir);
   if (result.exitCode !== 0) {
     throw new Error(`lore init failed: ${result.stderr}`);
   }
@@ -96,8 +97,8 @@ interface DocEnvelope {
   status: string;
 }
 
-function createPrd(dir: string): DocEnvelope {
-  const result = runLore(["create", "prd", "--title", "Root PRD", "--content", "x", "--json"], dir);
+async function createPrd(dir: string): Promise<DocEnvelope> {
+  const result = await runLore(["create", "prd", "--title", "Root PRD", "--content", "x", "--json"], dir);
   if (result.exitCode !== 0) {
     throw new Error(`lore create prd failed: ${result.stderr}`);
   }
@@ -116,8 +117,8 @@ function createPrd(dir: string): DocEnvelope {
  *   create() response (whose `version: 1` is already stale by the time a
  *   judgment gets seeded against it).
  */
-function createSpecWithAc(dir: string, parentSlug: string, title: string): DocEnvelope {
-  const createResult = runLore(
+async function createSpecWithAc(dir: string, parentSlug: string, title: string): Promise<DocEnvelope> {
+  const createResult = await runLore(
     ["create", "spec", "--title", title,"--content", "## Overview\n\nBody.", "--json"],
     dir,
   );
@@ -125,7 +126,7 @@ function createSpecWithAc(dir: string, parentSlug: string, title: string): DocEn
     throw new Error(`lore create spec failed: ${createResult.stderr}`);
   }
   const created = (JSON.parse(createResult.stdout) as JsonEnvelope<DocEnvelope>).data;
-  const acResult = runLore(
+  const acResult = await runLore(
     [
       "ac",
       "add",
@@ -147,12 +148,12 @@ function createSpecWithAc(dir: string, parentSlug: string, title: string): DocEn
   }
   // BR-1007: the criterion cites a live rule, so the spec is approvable once its judgment gate passes.
   // The cite bumps the version, so the snapshot below (the version judgments are seeded against) is read AFTER it.
-  citeSpecViaCli(loreRunnerFor(runLore, dir), dir, undefined, created.slug, "AC-1");
-  return getDoc(dir, created.slug);
+  await citeSpecViaAsyncCli(asyncLoreRunnerFor(runLore, dir), dir, undefined, created.slug, "AC-1");
+  return await getDoc(dir, created.slug);
 }
 
-function getDoc(dir: string, idOrSlug: string): DocEnvelope {
-  const result = runLore(["get", idOrSlug, "--json"], dir);
+async function getDoc(dir: string, idOrSlug: string): Promise<DocEnvelope> {
+  const result = await runLore(["get", idOrSlug, "--json"], dir);
   if (result.exitCode !== 0) {
     throw new Error(`lore get failed: ${result.stderr}`);
   }
@@ -222,13 +223,6 @@ function latestApproveAuditDetails(dbDir: string, docId: string): Record<string,
   }
 }
 
-beforeAll(() => {
-  assertFreshBinary(LORE_BIN, [
-    join(REPO_ROOT, "packages", "lore", "src"),
-    join(REPO_ROOT, "packages", "core", "src"),
-  ]);
-});
-
 let tmpDir: string;
 
 afterEach(() => {
@@ -242,32 +236,32 @@ afterEach(() => {
 // ─── AC-TIER-4: judgment-required gate ────────────────────────────────────────
 
 describe("AC-TIER-4 judgment gate", () => {
-  it("approve of a spec with zero judgments for the current version exits 4 naming lore review", () => {
+  it("approve of a spec with zero judgments for the current version exits 4 naming lore review", async () => {
     tmpDir = mkdtempSync(join(tmpdir(), "lore-tiered-review-ac4-"));
-    initCorpus(tmpDir);
-    const prd = createPrd(tmpDir);
-    const spec = createSpecWithAc(tmpDir, prd.slug, "Spec Needing Judgment");
+    await initCorpus(tmpDir);
+    const prd = await createPrd(tmpDir);
+    const spec = await createSpecWithAc(tmpDir, prd.slug, "Spec Needing Judgment");
 
-    const result = runLore(["approve", spec.slug], tmpDir);
+    const result = await runLore(["approve", spec.slug], tmpDir);
     expect(result.exitCode).toBe(4);
     expect(result.stderr).toContain("lore review");
 
-    const doc = getDoc(tmpDir, spec.slug);
+    const doc = await getDoc(tmpDir, spec.slug);
     expect(doc.status).toBe("draft");
   });
 
-  it("after a fresh approve-judgment for the current version, approve succeeds", () => {
+  it("after a fresh approve-judgment for the current version, approve succeeds", async () => {
     tmpDir = mkdtempSync(join(tmpdir(), "lore-tiered-review-ac4b-"));
-    initCorpus(tmpDir);
-    const prd = createPrd(tmpDir);
-    const spec = createSpecWithAc(tmpDir, prd.slug, "Spec With Fresh Judgment");
+    await initCorpus(tmpDir);
+    const prd = await createPrd(tmpDir);
+    const spec = await createSpecWithAc(tmpDir, prd.slug, "Spec With Fresh Judgment");
 
     insertRawJudgment(tmpDir, { docId: spec.id, docVersion: spec.version, decision: "approve" });
 
-    const result = runLore(["approve", spec.slug], tmpDir);
+    const result = await runLore(["approve", spec.slug], tmpDir);
     expect(result.exitCode).toBe(0);
 
-    const doc = getDoc(tmpDir, spec.slug);
+    const doc = await getDoc(tmpDir, spec.slug);
     expect(doc.status).toBe("approved");
   });
 });
@@ -275,57 +269,57 @@ describe("AC-TIER-4 judgment gate", () => {
 // ─── AC-TIER-5: anti-lottery worst-decision-wins + --override-judgment ────────
 
 describe("AC-TIER-5 anti-lottery worst-decision-wins", () => {
-  it("a reject judgment on version N cannot be outrolled by a later approve-judgment on version N", () => {
+  it("a reject judgment on version N cannot be outrolled by a later approve-judgment on version N", async () => {
     tmpDir = mkdtempSync(join(tmpdir(), "lore-tiered-review-ac5-"));
-    initCorpus(tmpDir);
-    const prd = createPrd(tmpDir);
-    const spec = createSpecWithAc(tmpDir, prd.slug, "Spec With Reject Then Approve");
+    await initCorpus(tmpDir);
+    const prd = await createPrd(tmpDir);
+    const spec = await createSpecWithAc(tmpDir, prd.slug, "Spec With Reject Then Approve");
 
     insertRawJudgment(tmpDir, { docId: spec.id, docVersion: spec.version, decision: "reject" });
 
-    const firstAttempt = runLore(["approve", spec.slug], tmpDir);
+    const firstAttempt = await runLore(["approve", spec.slug], tmpDir);
     expect(firstAttempt.exitCode).toBe(4);
 
     // A LATER approve-judgment on the SAME version — must NOT outroll the reject.
     insertRawJudgment(tmpDir, { docId: spec.id, docVersion: spec.version, decision: "approve" });
 
-    const secondAttempt = runLore(["approve", spec.slug], tmpDir);
+    const secondAttempt = await runLore(["approve", spec.slug], tmpDir);
     expect(secondAttempt.exitCode).toBe(4);
 
-    const doc = getDoc(tmpDir, spec.slug);
+    const doc = await getDoc(tmpDir, spec.slug);
     expect(doc.status).toBe("draft");
   });
 
-  it("version bump + fresh approve-judgment approves", () => {
+  it("version bump + fresh approve-judgment approves", async () => {
     tmpDir = mkdtempSync(join(tmpdir(), "lore-tiered-review-ac5b-"));
-    initCorpus(tmpDir);
-    const prd = createPrd(tmpDir);
-    const spec = createSpecWithAc(tmpDir, prd.slug, "Spec Unlocked By Version Bump");
+    await initCorpus(tmpDir);
+    const prd = await createPrd(tmpDir);
+    const spec = await createSpecWithAc(tmpDir, prd.slug, "Spec Unlocked By Version Bump");
 
     insertRawJudgment(tmpDir, { docId: spec.id, docVersion: spec.version, decision: "reject" });
-    const blocked = runLore(["approve", spec.slug], tmpDir);
+    const blocked = await runLore(["approve", spec.slug], tmpDir);
     expect(blocked.exitCode).toBe(4);
 
     // Version bump (still draft — the reject blocked promotion, so this is a normal
     // draft content edit, not the approved->draft reset path).
-    const editResult = runLore(["set", spec.slug, "--content", "## Overview\n\nUpdated body."], tmpDir);
+    const editResult = await runLore(["set", spec.slug, "--content", "## Overview\n\nUpdated body."], tmpDir);
     expect(editResult.exitCode).toBe(0);
-    const editedDoc = getDoc(tmpDir, spec.slug);
+    const editedDoc = await getDoc(tmpDir, spec.slug);
     expect(editedDoc.version).toBeGreaterThan(spec.version);
 
     insertRawJudgment(tmpDir, { docId: spec.id, docVersion: editedDoc.version, decision: "approve" });
-    const unlocked = runLore(["approve", spec.slug], tmpDir);
+    const unlocked = await runLore(["approve", spec.slug], tmpDir);
     expect(unlocked.exitCode).toBe(0);
 
-    const finalDoc = getDoc(tmpDir, spec.slug);
+    const finalDoc = await getDoc(tmpDir, spec.slug);
     expect(finalDoc.status).toBe("approved");
   });
 
-  it("--override-judgment approves with an audit row recording the overridden judgment id", () => {
+  it("--override-judgment approves with an audit row recording the overridden judgment id", async () => {
     tmpDir = mkdtempSync(join(tmpdir(), "lore-tiered-review-ac5c-"));
-    initCorpus(tmpDir);
-    const prd = createPrd(tmpDir);
-    const spec = createSpecWithAc(tmpDir, prd.slug, "Spec Overridden");
+    await initCorpus(tmpDir);
+    const prd = await createPrd(tmpDir);
+    const spec = await createSpecWithAc(tmpDir, prd.slug, "Spec Overridden");
 
     const rejectJudgmentId = insertRawJudgment(tmpDir, {
       docId: spec.id,
@@ -333,13 +327,13 @@ describe("AC-TIER-5 anti-lottery worst-decision-wins", () => {
       decision: "reject",
     });
 
-    const blocked = runLore(["approve", spec.slug], tmpDir);
+    const blocked = await runLore(["approve", spec.slug], tmpDir);
     expect(blocked.exitCode).toBe(4);
 
-    const overridden = runLore(["approve", spec.slug, "--override-judgment", rejectJudgmentId], tmpDir);
+    const overridden = await runLore(["approve", spec.slug, "--override-judgment", rejectJudgmentId], tmpDir);
     expect(overridden.exitCode).toBe(0);
 
-    const doc = getDoc(tmpDir, spec.slug);
+    const doc = await getDoc(tmpDir, spec.slug);
     expect(doc.status).toBe("approved");
 
     const auditDetails = latestApproveAuditDetails(tmpDir, spec.id);
@@ -351,22 +345,22 @@ describe("AC-TIER-5 anti-lottery worst-decision-wins", () => {
   // judged has no id anywhere to supply, so the escape hatch was structurally unreachable for
   // the most common denial (NO_JUDGMENT, exercised by AC-TIER-4's own first test). This proves
   // the sibling `--override-no-judgment` flag reaches it instead.
-  it("--override-no-judgment approves a doc that has never been judged, with an audit row recording it", () => {
+  it("--override-no-judgment approves a doc that has never been judged, with an audit row recording it", async () => {
     tmpDir = mkdtempSync(join(tmpdir(), "lore-tiered-review-ac5d-"));
-    initCorpus(tmpDir);
-    const prd = createPrd(tmpDir);
-    const spec = createSpecWithAc(tmpDir, prd.slug, "Spec Never Judged");
+    await initCorpus(tmpDir);
+    const prd = await createPrd(tmpDir);
+    const spec = await createSpecWithAc(tmpDir, prd.slug, "Spec Never Judged");
 
     // Zero judgments ever recorded for this doc — NO_JUDGMENT_REASON, the state
     // `--override-judgment` cannot unlock (there is no id to name).
-    const blocked = runLore(["approve", spec.slug], tmpDir);
+    const blocked = await runLore(["approve", spec.slug], tmpDir);
     expect(blocked.exitCode).toBe(4);
     expect(blocked.stderr).toContain("lore review");
 
-    const overridden = runLore(["approve", spec.slug, "--override-no-judgment"], tmpDir);
+    const overridden = await runLore(["approve", spec.slug, "--override-no-judgment"], tmpDir);
     expect(overridden.exitCode).toBe(0);
 
-    const doc = getDoc(tmpDir, spec.slug);
+    const doc = await getDoc(tmpDir, spec.slug);
     expect(doc.status).toBe("approved");
 
     const auditDetails = latestApproveAuditDetails(tmpDir, spec.id);
@@ -375,18 +369,18 @@ describe("AC-TIER-5 anti-lottery worst-decision-wins", () => {
     expect(auditDetails["override_judgment_id"]).toBeUndefined();
   });
 
-  it("--override-no-judgment is rejected loud when the doc already has a judgment recorded", () => {
+  it("--override-no-judgment is rejected loud when the doc already has a judgment recorded", async () => {
     tmpDir = mkdtempSync(join(tmpdir(), "lore-tiered-review-ac5e-"));
-    initCorpus(tmpDir);
-    const prd = createPrd(tmpDir);
-    const spec = createSpecWithAc(tmpDir, prd.slug, "Spec Already Judged, Wrong Escape");
+    await initCorpus(tmpDir);
+    const prd = await createPrd(tmpDir);
+    const spec = await createSpecWithAc(tmpDir, prd.slug, "Spec Already Judged, Wrong Escape");
     insertRawJudgment(tmpDir, { docId: spec.id, docVersion: spec.version, decision: "reject" });
 
-    const result = runLore(["approve", spec.slug, "--override-no-judgment"], tmpDir);
+    const result = await runLore(["approve", spec.slug, "--override-no-judgment"], tmpDir);
     expect(result.exitCode).toBe(4);
     expect(result.stderr).toContain("--override-judgment");
 
-    const doc = getDoc(tmpDir, spec.slug);
+    const doc = await getDoc(tmpDir, spec.slug);
     expect(doc.status).toBe("draft");
   });
 });
@@ -394,10 +388,10 @@ describe("AC-TIER-5 anti-lottery worst-decision-wins", () => {
 // ─── AC-TIER-8: idempotent ledger backfill ────────────────────────────────────
 
 describe("AC-TIER-8 backfill-ledger", () => {
-  it("fast-tracks existing draft ledger docs exactly once; a second run reports zero changes", () => {
+  it("fast-tracks existing draft ledger docs exactly once; a second run reports zero changes", async () => {
     tmpDir = mkdtempSync(join(tmpdir(), "lore-tiered-review-ac8-"));
-    initCorpus(tmpDir);
-    const prd = createPrd(tmpDir);
+    await initCorpus(tmpDir);
+    const prd = await createPrd(tmpDir);
 
     // Simulate pre-SPEC-103 legacy drafts: disable the live fast-track toggle BEFORE
     // creating the ledger docs, so they land (and stay) draft — backfill-ledger's job
@@ -408,7 +402,7 @@ describe("AC-TIER-8 backfill-ledger", () => {
       "utf8",
     );
 
-    const retroA = runLore(
+    const retroA = await runLore(
       ["create", "knowledge", "--sub-type", "retro", "--title", "Retro A", "--parent", prd.slug, "--content", "x", "--json"],
       tmpDir,
     );
@@ -416,7 +410,7 @@ describe("AC-TIER-8 backfill-ledger", () => {
     const docA = (JSON.parse(retroA.stdout) as JsonEnvelope<DocEnvelope>).data;
     expect(docA.status).toBe("draft");
 
-    const retroB = runLore(
+    const retroB = await runLore(
       ["create", "knowledge", "--sub-type", "retro", "--title", "Retro B", "--parent", prd.slug, "--content", "x", "--json"],
       tmpDir,
     );
@@ -424,16 +418,16 @@ describe("AC-TIER-8 backfill-ledger", () => {
     const docB = (JSON.parse(retroB.stdout) as JsonEnvelope<DocEnvelope>).data;
     expect(docB.status).toBe("draft");
 
-    const firstRun = runLore(["review", "backfill-ledger", "--json"], tmpDir);
+    const firstRun = await runLore(["review", "backfill-ledger", "--json"], tmpDir);
     expect(firstRun.exitCode).toBe(0);
     const firstReport = (JSON.parse(firstRun.stdout) as JsonEnvelope<{ fast_tracked: string[] }>).data;
     expect(firstReport.fast_tracked).toContain(docA.slug);
     expect(firstReport.fast_tracked).toContain(docB.slug);
 
-    expect(getDoc(tmpDir, docA.slug).status).toBe("approved");
-    expect(getDoc(tmpDir, docB.slug).status).toBe("approved");
+    expect((await getDoc(tmpDir, docA.slug)).status).toBe("approved");
+    expect((await getDoc(tmpDir, docB.slug)).status).toBe("approved");
 
-    const secondRun = runLore(["review", "backfill-ledger", "--json"], tmpDir);
+    const secondRun = await runLore(["review", "backfill-ledger", "--json"], tmpDir);
     expect(secondRun.exitCode).toBe(0);
     const secondReport = (JSON.parse(secondRun.stdout) as JsonEnvelope<{ fast_tracked: string[] }>).data;
     expect(secondReport.fast_tracked).toEqual([]);

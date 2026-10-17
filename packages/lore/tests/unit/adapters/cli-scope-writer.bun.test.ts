@@ -1,4 +1,3 @@
-// @spawns dist/lore
 /**
  * `lore scope add|rm|list` + `lore create task --ac-scope` — the declared-scope
  * authoring surface's CLI contract (spec-declared-scope-attestation-contract-
@@ -43,6 +42,10 @@
  *               `scope add` of an already-declared id does not duplicate it
  *
  * @spec_ref AC-VS-9, AC-VS-10, AC-VS-11
+ *
+ * TG-25 (adr-tg-1 option b): the commands run IN-PROCESS through tests/helpers/run-lore-in-process.ts, not through
+ * dist/lore. Wherever the prose above says the compiled binary is spawned or its freshness asserted, that is the
+ * history of this file; the assertions and the throwaway-corpus rule are unchanged.
  */
 
 import { describe, expect, it, beforeAll, afterAll, beforeEach, afterEach, vi } from "vitest";
@@ -50,7 +53,7 @@ const setDefaultTimeout = (ms: number): void => { vi.setConfig({ testTimeout: ms
 import { appendFileSync, cpSync, mkdtempSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
-import { assertFreshBinary } from "../../integration/helpers/assert-fresh-binary";
+import { runLoreInProcess } from "../../helpers/run-lore-in-process";
 
 // reason: the fixture chain below spawns ~10 compiled-binary processes; bun's
 // 5s default applies to HOOKS too, so the one-time `beforeAll` seed and every
@@ -61,7 +64,6 @@ setDefaultTimeout(120_000);
 
 // tests/unit/adapters/ → tests/unit/ → tests/ → packages/lore/ → packages/ → repo root (5 levels up).
 const REPO_ROOT = new URL("../../../../../", import.meta.url).pathname.replace(/\/$/, "");
-const LORE_BIN = join(REPO_ROOT, "dist", "lore");
 
 /** The exact refusal literal `assertScopeFreeze` carries (`packages/core/src/phase.ts`). */
 const FREEZE_LITERAL = "cannot remove ac_scope id(s) with recorded evidence";
@@ -72,21 +74,21 @@ interface RunResult {
   readonly exitCode: number;
 }
 
-function runLore(args: string[], cwd: string): RunResult {
-  const proc = Bun.spawnSync([LORE_BIN, ...args], {
+async function runLore(args: string[], cwd: string): Promise<RunResult> {
+  const proc = await runLoreInProcess(args, {
     cwd,
     env: { ...process.env, HOME: cwd, EDITOR: "true" },
   });
   return {
-    stdout: proc.stdout.toString(),
-    stderr: proc.stderr.toString(),
-    exitCode: proc.exitCode ?? 1,
+    stdout: proc.stdout,
+    stderr: proc.stderr,
+    exitCode: proc.exitCode,
   };
 }
 
 /** Runs a fixture-setup command, failing loud (never silently) on a nonzero exit. */
-function mustRun(args: string[], cwd: string): RunResult {
-  const result = runLore(args, cwd);
+async function mustRun(args: string[], cwd: string): Promise<RunResult> {
+  const result = await runLore(args, cwd);
   if (result.exitCode !== 0) {
     throw new Error(`fixture command \`lore ${args.join(" ")}\` failed (${result.exitCode}): ${result.stderr}`);
   }
@@ -99,14 +101,14 @@ interface DocJson {
 }
 
 /** `lore get <slug> --json` → the doc record. */
-function getDoc(slug: string, cwd: string): DocJson {
-  const result = mustRun(["get", slug, "--json"], cwd);
+async function getDoc(slug: string, cwd: string): Promise<DocJson> {
+  const result = await mustRun(["get", slug, "--json"], cwd);
   return (JSON.parse(result.stdout) as { data: { doc: DocJson } }).data.doc;
 }
 
 /** Reads `extra.ac_scope` as-stored — `undefined` distinguishes ABSENT from `[]`. */
-function readAcScope(slug: string, cwd: string): string[] | undefined {
-  return getDoc(slug, cwd).extra["ac_scope"] as string[] | undefined;
+async function readAcScope(slug: string, cwd: string): Promise<string[] | undefined> {
+  return (await getDoc(slug, cwd)).extra["ac_scope"] as string[] | undefined;
 }
 
 // ─── Fixture ────────────────────────────────────────────────────────────────
@@ -123,8 +125,8 @@ const PHASE_SLUG = "phase-alpha";
  * `ac_ref` is `AC-SC-1` (merged from the source task by the migration), which
  * is what makes the phase-tier freeze assertion possible.
  */
-function seedFixture(cwd: string): void {
-  mustRun(["init"], cwd);
+async function seedFixture(cwd: string): Promise<void> {
+  await mustRun(["init"], cwd);
   // The task-claim gate (ancestor spec must be `approved`) is irrelevant to
   // THIS suite's subject — the scope writer. The fixture spec stays `draft`
   // deliberately (approving a spec would demand a review judgment, i.e. an AI
@@ -160,23 +162,23 @@ function seedFixture(cwd: string): void {
     ].join("\n"),
     "utf8",
   );
-  mustRun(["create", "prd", "--title", "Scope Root", "--content", "## Overview\nroot", "--no-ai"], cwd);
-  mustRun(
+  await mustRun(["create", "prd", "--title", "Scope Root", "--content", "## Overview\nroot", "--no-ai"], cwd);
+  await mustRun(
     ["create", "spec", "--title", "Scope Fixture","--content", "## Overview\nspec body", "--no-ai"],
     cwd,
   );
   for (const id of ["AC-SC-1", "AC-SC-2"]) {
-    mustRun(
+    await mustRun(
       ["ac", "add", SPEC_SLUG, id, "--statement", `criterion ${id}`, "--mode", "script", "--oracle", "test", "--command", `bun test ${id}`],
       cwd,
     );
   }
-  mustRun(["create", "plan", "--title", "Scope Fixture", "--parent", SPEC_SLUG, "--content", "plan body", "--no-ai"], cwd);
-  mustRun(["phase", "add", PLAN_SLUG, "Alpha"], cwd);
+  await mustRun(["create", "plan", "--title", "Scope Fixture", "--parent", SPEC_SLUG, "--content", "plan body", "--no-ai"], cwd);
+  await mustRun(["phase", "add", PLAN_SLUG, "Alpha"], cwd);
 
   // Source task for the phase migration — its evidence (ac_ref AC-SC-1) is
   // merged onto the phase doc, then the task itself is archived.
-  mustRun(
+  await mustRun(
     ["create", "task", "--title", "Migration Source", "--parent", PLAN_SLUG, "--plan-id", PLAN_SLUG, "--phase", "Alpha", "--content", "body", "--no-ai"],
     cwd,
   );
@@ -185,22 +187,22 @@ function seedFixture(cwd: string): void {
   // tail content; "manual" is the one oracle that still lets a genuinely
   // non-empty self-reported tail succeed. This fixture only needs a
   // successful pass row referencing AC-SC-1, not a specific oracle kind.
-  mustRun(
+  await mustRun(
     ["evidence", "task-migration-source", "--oracle", "manual", "--command", "bun test AC-SC-1", "--result", "pass", "--ac", "AC-SC-1", "--output-tail", "ok"],
     cwd,
   );
-  mustRun(["migrate", "tasks-to-phases"], cwd);
+  await mustRun(["migrate", "tasks-to-phases"], cwd);
 }
 
 /**
  * Creates a task under the fixture plan (AFTER the migration, so it survives
  * as a `task` doc) and returns its slug. `acScope`/`evidenceAc` are optional.
  */
-function createTask(
+async function createTask(
   cwd: string,
   title: string,
   opts: { acScope?: string[]; evidenceAc?: string; anchors?: string[] } = {},
-): string {
+): Promise<string> {
   const args = [
     "create",
     "task",
@@ -217,13 +219,13 @@ function createTask(
   ];
   for (const id of opts.acScope ?? []) args.push("--ac-scope", id);
   for (const path of opts.anchors ?? []) args.push("--anchor", path);
-  const created = mustRun(args, cwd);
+  const created = await mustRun(args, cwd);
   const slug = (JSON.parse(created.stdout) as { data: { slug: string } }).data.slug;
 
   if (opts.evidenceAc !== undefined) {
     // reason: SUPERSEDED oracle (task-raise-the-evidence-tail-guard-s-
     // predicate-to-its-own) — see seedFixture's identical fix above.
-    mustRun(
+    await mustRun(
       ["evidence", slug, "--oracle", "manual", "--command", `bun test ${opts.evidenceAc}`, "--result", "pass", "--ac", opts.evidenceAc, "--output-tail", "ok"],
       cwd,
     );
@@ -241,13 +243,9 @@ function createTask(
 let templateDir: string;
 let tmpDir: string;
 
-beforeAll(() => {
-  assertFreshBinary(LORE_BIN, [
-    join(REPO_ROOT, "packages", "lore", "src"),
-    join(REPO_ROOT, "packages", "core", "src"),
-  ]);
+beforeAll(async () => {
   templateDir = mkdtempSync(join(tmpdir(), "lore-cli-scope-writer-template-"));
-  seedFixture(templateDir);
+  await seedFixture(templateDir);
 });
 
 afterAll(() => {
@@ -274,66 +272,66 @@ afterEach(() => {
 // ─── AC-VS-10 — HAPPY: create task --ac-scope round trip ────────────────────
 
 describe("lore create task --ac-scope (AC-VS-10)", () => {
-  it("create task with ac-scope round trip — repeatable flags author exactly the ids passed", () => {
-    const slug = createTask(tmpDir, "Scoped Task", { acScope: ["AC-SC-1", "AC-SC-2"] });
+  it("create task with ac-scope round trip — repeatable flags author exactly the ids passed", async () => {
+    const slug = await createTask(tmpDir, "Scoped Task", { acScope: ["AC-SC-1", "AC-SC-2"] });
 
-    expect(readAcScope(slug, tmpDir)).toEqual(["AC-SC-1", "AC-SC-2"]);
+    expect(await readAcScope(slug, tmpDir)).toEqual(["AC-SC-1", "AC-SC-2"]);
   });
 
-  it("create task with ac-scope round trip — a SINGLE --ac-scope occurrence still yields an array, not a bare string", () => {
-    const slug = createTask(tmpDir, "Single Scoped Task", { acScope: ["AC-SC-2"] });
+  it("create task with ac-scope round trip — a SINGLE --ac-scope occurrence still yields an array, not a bare string", async () => {
+    const slug = await createTask(tmpDir, "Single Scoped Task", { acScope: ["AC-SC-2"] });
 
-    expect(readAcScope(slug, tmpDir)).toEqual(["AC-SC-2"]);
+    expect(await readAcScope(slug, tmpDir)).toEqual(["AC-SC-2"]);
   });
 });
 
 // ─── AC-VS-9 — NEGATIVE: evidenced removal blocked, non-evidenced allowed ───
 
 describe("lore scope rm freeze invariant (AC-VS-9)", () => {
-  it("evidenced removal blocked non-evidenced allowed — TASK tier", () => {
-    const slug = createTask(tmpDir, "Frozen Task", { evidenceAc: "AC-SC-1" });
-    mustRun(["scope", "add", slug, "AC-SC-1", "AC-SC-2"], tmpDir);
+  it("evidenced removal blocked non-evidenced allowed — TASK tier", async () => {
+    const slug = await createTask(tmpDir, "Frozen Task", { evidenceAc: "AC-SC-1" });
+    await mustRun(["scope", "add", slug, "AC-SC-1", "AC-SC-2"], tmpDir);
 
-    const blocked = runLore(["scope", "rm", slug, "AC-SC-1"], tmpDir);
+    const blocked = await runLore(["scope", "rm", slug, "AC-SC-1"], tmpDir);
     expect(blocked.exitCode).toBe(4);
     expect(blocked.stderr).toContain(FREEZE_LITERAL);
-    expect(readAcScope(slug, tmpDir)).toEqual(["AC-SC-1", "AC-SC-2"]);
+    expect(await readAcScope(slug, tmpDir)).toEqual(["AC-SC-1", "AC-SC-2"]);
 
-    const allowed = runLore(["scope", "rm", slug, "AC-SC-2"], tmpDir);
+    const allowed = await runLore(["scope", "rm", slug, "AC-SC-2"], tmpDir);
     expect(allowed.exitCode).toBe(0);
-    expect(readAcScope(slug, tmpDir)).toEqual(["AC-SC-1"]);
+    expect(await readAcScope(slug, tmpDir)).toEqual(["AC-SC-1"]);
   });
 
-  it("evidenced removal blocked non-evidenced allowed — PHASE tier", () => {
-    mustRun(["scope", "add", PHASE_SLUG, "AC-SC-1", "AC-SC-2"], tmpDir);
+  it("evidenced removal blocked non-evidenced allowed — PHASE tier", async () => {
+    await mustRun(["scope", "add", PHASE_SLUG, "AC-SC-1", "AC-SC-2"], tmpDir);
 
-    const blocked = runLore(["scope", "rm", PHASE_SLUG, "AC-SC-1"], tmpDir);
+    const blocked = await runLore(["scope", "rm", PHASE_SLUG, "AC-SC-1"], tmpDir);
     expect(blocked.exitCode).toBe(4);
     expect(blocked.stderr).toContain(FREEZE_LITERAL);
-    expect(readAcScope(PHASE_SLUG, tmpDir)).toEqual(["AC-SC-1", "AC-SC-2"]);
+    expect(await readAcScope(PHASE_SLUG, tmpDir)).toEqual(["AC-SC-1", "AC-SC-2"]);
 
-    const allowed = runLore(["scope", "rm", PHASE_SLUG, "AC-SC-2"], tmpDir);
+    const allowed = await runLore(["scope", "rm", PHASE_SLUG, "AC-SC-2"], tmpDir);
     expect(allowed.exitCode).toBe(0);
-    expect(readAcScope(PHASE_SLUG, tmpDir)).toEqual(["AC-SC-1"]);
+    expect(await readAcScope(PHASE_SLUG, tmpDir)).toEqual(["AC-SC-1"]);
   });
 });
 
 // ─── AC-VS-11 — BOUNDARY: empty array is the terminal state; set has no flag ─
 
 describe("lore scope add/rm terminal state (AC-VS-11)", () => {
-  it("scope writer round trip and set rejects the flag", () => {
-    const slug = createTask(tmpDir, "Round Trip Task", { anchors: ["src/a"] });
-    const before = getDoc(slug, tmpDir).extra;
+  it("scope writer round trip and set rejects the flag", async () => {
+    const slug = await createTask(tmpDir, "Round Trip Task", { anchors: ["src/a"] });
+    const before = (await getDoc(slug, tmpDir)).extra;
     expect(before["ac_scope"]).toBeUndefined();
 
-    mustRun(["scope", "add", slug, "AC-SC-1"], tmpDir);
-    expect(readAcScope(slug, tmpDir)).toEqual(["AC-SC-1"]);
+    await mustRun(["scope", "add", slug, "AC-SC-1"], tmpDir);
+    expect(await readAcScope(slug, tmpDir)).toEqual(["AC-SC-1"]);
 
-    mustRun(["scope", "rm", slug, "AC-SC-1"], tmpDir);
+    await mustRun(["scope", "rm", slug, "AC-SC-1"], tmpDir);
 
     // Removing the LAST id un-declares the scope explicitly: an empty array,
     // never an absent key (Contract Details §"Removing the last id…").
-    const after = getDoc(slug, tmpDir).extra;
+    const after = (await getDoc(slug, tmpDir)).extra;
     expect("ac_scope" in after).toBe(true);
     expect(after["ac_scope"]).toEqual([]);
 
@@ -346,7 +344,7 @@ describe("lore scope add/rm terminal state (AC-VS-11)", () => {
 
     // `lore set` deliberately gains NO --ac-scope flag — the existing strict
     // unknown-flag seam is what refuses it (exit 2), not a bespoke check.
-    const setAttempt = runLore(["set", slug, "--ac-scope", "AC-SC-1"], tmpDir);
+    const setAttempt = await runLore(["set", slug, "--ac-scope", "AC-SC-1"], tmpDir);
     expect(setAttempt.exitCode).toBe(2);
     expect(setAttempt.stderr).toContain("Unknown option: --ac-scope");
   });
@@ -355,35 +353,35 @@ describe("lore scope add/rm terminal state (AC-VS-11)", () => {
 // ─── NEGATIVE: unsupported target type / malformed id ───────────────────────
 
 describe("lore scope — NEGATIVE", () => {
-  it("a plan target (neither task nor phase) → exit 4 naming the supported types", () => {
-    const result = runLore(["scope", "add", PLAN_SLUG, "AC-SC-1"], tmpDir);
+  it("a plan target (neither task nor phase) → exit 4 naming the supported types", async () => {
+    const result = await runLore(["scope", "add", PLAN_SLUG, "AC-SC-1"], tmpDir);
 
     expect(result.exitCode).toBe(4);
     expect(result.stderr).toContain("task or phase");
   });
 
-  it("a plan target on the READ verb too → exit 4 (list is type-checked, not just the mutations)", () => {
-    const result = runLore(["scope", "list", PLAN_SLUG, "--json"], tmpDir);
+  it("a plan target on the READ verb too → exit 4 (list is type-checked, not just the mutations)", async () => {
+    const result = await runLore(["scope", "list", PLAN_SLUG, "--json"], tmpDir);
 
     expect(result.exitCode).toBe(4);
     expect(result.stderr).toContain("task or phase");
   });
 
-  it("an empty-string id → exit 4 naming ac_scope, and nothing is written", () => {
-    const slug = createTask(tmpDir, "Empty Id Task");
-    const result = runLore(["scope", "add", slug, ""], tmpDir);
+  it("an empty-string id → exit 4 naming ac_scope, and nothing is written", async () => {
+    const slug = await createTask(tmpDir, "Empty Id Task");
+    const result = await runLore(["scope", "add", slug, ""], tmpDir);
 
     expect(result.exitCode).toBe(4);
     expect(result.stderr).toContain("ac_scope");
-    expect(readAcScope(slug, tmpDir)).toBeUndefined();
+    expect(await readAcScope(slug, tmpDir)).toBeUndefined();
   });
 });
 
 // ─── ERROR: nonexistent target ──────────────────────────────────────────────
 
 describe("lore scope — ERROR", () => {
-  it("a nonexistent target slug → exit 3 (DOC_NOT_FOUND)", () => {
-    const result = runLore(["scope", "add", "task-does-not-exist", "AC-SC-1"], tmpDir);
+  it("a nonexistent target slug → exit 3 (DOC_NOT_FOUND)", async () => {
+    const result = await runLore(["scope", "add", "task-does-not-exist", "AC-SC-1"], tmpDir);
 
     expect(result.exitCode).toBe(3);
   });
@@ -392,9 +390,9 @@ describe("lore scope — ERROR", () => {
 // ─── BOUNDARY: list with no declared scope ──────────────────────────────────
 
 describe("lore scope list — BOUNDARY", () => {
-  it("a task that never declared a scope → exit 0, empty list, scope_declared false", () => {
-    const slug = createTask(tmpDir, "Undeclared Task");
-    const result = runLore(["scope", "list", slug, "--json"], tmpDir);
+  it("a task that never declared a scope → exit 0, empty list, scope_declared false", async () => {
+    const slug = await createTask(tmpDir, "Undeclared Task");
+    const result = await runLore(["scope", "list", slug, "--json"], tmpDir);
 
     expect(result.exitCode).toBe(0);
     const parsed = JSON.parse(result.stdout) as {
@@ -404,11 +402,11 @@ describe("lore scope list — BOUNDARY", () => {
     expect(parsed.data.scope_declared).toBe(false);
   });
 
-  it("a task whose scope was declared then emptied → scope_declared true with an empty array", () => {
-    const slug = createTask(tmpDir, "Emptied Task", { acScope: ["AC-SC-2"] });
-    mustRun(["scope", "rm", slug, "AC-SC-2"], tmpDir);
+  it("a task whose scope was declared then emptied → scope_declared true with an empty array", async () => {
+    const slug = await createTask(tmpDir, "Emptied Task", { acScope: ["AC-SC-2"] });
+    await mustRun(["scope", "rm", slug, "AC-SC-2"], tmpDir);
 
-    const result = runLore(["scope", "list", slug, "--json"], tmpDir);
+    const result = await runLore(["scope", "list", slug, "--json"], tmpDir);
     expect(result.exitCode).toBe(0);
     const parsed = JSON.parse(result.stdout) as {
       data: { ac_scope: string[]; scope_declared: boolean };
@@ -421,13 +419,13 @@ describe("lore scope list — BOUNDARY", () => {
 // ─── STATE: sibling extra keys survive a scope edit ─────────────────────────
 
 describe("lore scope add — STATE", () => {
-  it("a scope edit leaves extra.claim and extra.verification_evidence byte-identical", () => {
-    const slug = createTask(tmpDir, "Stateful Task", { evidenceAc: "AC-SC-2" });
-    mustRun(["claim", slug, "--worktree", "wt-x"], tmpDir);
-    const before = getDoc(slug, tmpDir).extra;
+  it("a scope edit leaves extra.claim and extra.verification_evidence byte-identical", async () => {
+    const slug = await createTask(tmpDir, "Stateful Task", { evidenceAc: "AC-SC-2" });
+    await mustRun(["claim", slug, "--worktree", "wt-x"], tmpDir);
+    const before = (await getDoc(slug, tmpDir)).extra;
 
-    mustRun(["scope", "add", slug, "AC-SC-1"], tmpDir);
-    const after = getDoc(slug, tmpDir).extra;
+    await mustRun(["scope", "add", slug, "AC-SC-1"], tmpDir);
+    const after = (await getDoc(slug, tmpDir)).extra;
 
     expect(JSON.stringify(after["claim"])).toBe(JSON.stringify(before["claim"]));
     expect(JSON.stringify(after["verification_evidence"])).toBe(
@@ -440,17 +438,17 @@ describe("lore scope add — STATE", () => {
 // ─── REGRESSION ─────────────────────────────────────────────────────────────
 
 describe("lore create task / scope add — REGRESSION", () => {
-  it("omitting --ac-scope leaves extra.ac_scope ABSENT, never an empty array", () => {
-    const slug = createTask(tmpDir, "Plain Task");
-    const extra = getDoc(slug, tmpDir).extra;
+  it("omitting --ac-scope leaves extra.ac_scope ABSENT, never an empty array", async () => {
+    const slug = await createTask(tmpDir, "Plain Task");
+    const extra = (await getDoc(slug, tmpDir)).extra;
 
     expect("ac_scope" in extra).toBe(false);
   });
 
-  it("scope add of an already-declared id does not duplicate it", () => {
-    const slug = createTask(tmpDir, "Dedup Task", { acScope: ["AC-SC-1"] });
-    mustRun(["scope", "add", slug, "AC-SC-1", "AC-SC-2"], tmpDir);
+  it("scope add of an already-declared id does not duplicate it", async () => {
+    const slug = await createTask(tmpDir, "Dedup Task", { acScope: ["AC-SC-1"] });
+    await mustRun(["scope", "add", slug, "AC-SC-1", "AC-SC-2"], tmpDir);
 
-    expect(readAcScope(slug, tmpDir)).toEqual(["AC-SC-1", "AC-SC-2"]);
+    expect(await readAcScope(slug, tmpDir)).toEqual(["AC-SC-1", "AC-SC-2"]);
   });
 });

@@ -1,4 +1,3 @@
-// @spawns dist/lore
 /**
  * `lore red-first <task>` — the CLI author→trip end-to-end oracle for
  * task-red-first-discipline-is-asked-for-in-prose-but-never. Proves the
@@ -40,6 +39,10 @@
  *
  * @spec_ref task-red-first-discipline-is-asked-for-in-prose-but-never
  * @spec_ref task-the-ac-scope-re-keying-left-the-red-first-floor-unarmed
+ *
+ * TG-25 (adr-tg-1 option b): the commands run IN-PROCESS through tests/helpers/run-lore-in-process.ts, not through
+ * dist/lore. Wherever the prose above says the compiled binary is spawned or its freshness asserted, that is the
+ * history of this file; the assertions and the throwaway-corpus rule are unchanged.
  */
 
 import { describe, expect, it, beforeAll, afterAll, beforeEach, afterEach, vi } from "vitest";
@@ -47,13 +50,12 @@ const setDefaultTimeout = (ms: number): void => { vi.setConfig({ testTimeout: ms
 import { mkdtempSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
-import { assertFreshBinary } from "../../integration/helpers/assert-fresh-binary";
+import { runLoreInProcess } from "../../helpers/run-lore-in-process";
 
 setDefaultTimeout(60_000);
 
 // tests/unit/adapters/ → tests/unit/ → tests/ → packages/lore/ → packages/ → repo root (5 levels up).
 const REPO_ROOT = new URL("../../../../../", import.meta.url).pathname.replace(/\/$/, "");
-const LORE_BIN = join(REPO_ROOT, "dist", "lore");
 
 interface RunResult {
   readonly stdout: string;
@@ -61,15 +63,15 @@ interface RunResult {
   readonly exitCode: number;
 }
 
-function runLore(args: string[], cwd: string): RunResult {
-  const proc = Bun.spawnSync([LORE_BIN, ...args], {
+async function runLore(args: string[], cwd: string): Promise<RunResult> {
+  const proc = await runLoreInProcess(args, {
     cwd,
     env: { ...process.env, HOME: cwd, EDITOR: "true" },
   });
   return {
-    stdout: proc.stdout.toString(),
-    stderr: proc.stderr.toString(),
-    exitCode: proc.exitCode ?? 1,
+    stdout: proc.stdout,
+    stderr: proc.stderr,
+    exitCode: proc.exitCode,
   };
 }
 
@@ -79,8 +81,8 @@ function runLore(args: string[], cwd: string): RunResult {
 // for any other oracle regardless of tail content, and none of these fixture
 // rows care about oracle-kind semantics - only the red-first/attestation
 // floors this suite actually tests.
-function mustRun(args: string[], cwd: string): RunResult {
-  const result = runLore(args, cwd);
+async function mustRun(args: string[], cwd: string): Promise<RunResult> {
+  const result = await runLore(args, cwd);
   if (result.exitCode !== 0) {
     throw new Error(`fixture command \`lore ${args.join(" ")}\` failed (${result.exitCode}): ${result.stderr}`);
   }
@@ -94,8 +96,8 @@ interface DocJson {
   readonly extra: Record<string, unknown>;
 }
 
-function getDoc(slug: string, cwd: string): DocJson {
-  const result = mustRun(["get", slug, "--json"], cwd);
+async function getDoc(slug: string, cwd: string): Promise<DocJson> {
+  const result = await mustRun(["get", slug, "--json"], cwd);
   return (JSON.parse(result.stdout) as { data: { doc: DocJson } }).data.doc;
 }
 
@@ -116,8 +118,8 @@ function getDoc(slug: string, cwd: string): DocJson {
  * and VISIBLE for the plain-task STATE case, which now carries
  * `--declare-no-new-tests` — see that test's own comment.
  */
-function createAdhocTask(cwd: string, title: string): string {
-  const created = mustRun(
+async function createAdhocTask(cwd: string, title: string): Promise<string> {
+  const created = await mustRun(
     ["create", "task", "--title", title, "--adhoc", "--ac-scope", "", "--content", "body", "--no-ai", "--json"],
     cwd,
   );
@@ -126,19 +128,12 @@ function createAdhocTask(cwd: string, title: string): string {
 
 let tmpDir: string;
 
-beforeAll(() => {
-  assertFreshBinary(LORE_BIN, [
-    join(REPO_ROOT, "packages", "lore", "src"),
-    join(REPO_ROOT, "packages", "core", "src"),
-  ]);
-});
-
-beforeEach(() => {
+beforeEach(async () => {
   tmpDir = mkdtempSync(join(tmpdir(), "lore-cli-red-first-"));
-  mustRun(["init"], tmpDir);
+  await mustRun(["init"], tmpDir);
   // An --adhoc task parents to the corpus root PRD (CorpusService._createImpl) —
   // one must exist first, mirroring every other --adhoc fixture in this repo.
-  mustRun(["create", "prd", "--title", "Red First Root", "--content", "## Overview\nroot", "--no-ai"], tmpDir);
+  await mustRun(["create", "prd", "--title", "Red First Root", "--content", "## Overview\nroot", "--no-ai"], tmpDir);
 });
 
 afterEach(() => {
@@ -150,19 +145,19 @@ afterEach(() => {
 });
 
 describe("HAPPY — lore red-first declares the flag and lore done accepts a proven red_first task", () => {
-  it("red-first --json round-trips extra.red_first: true", () => {
-    const slug = createAdhocTask(tmpDir, "Declare Target");
+  it("red-first --json round-trips extra.red_first: true", async () => {
+    const slug = await createAdhocTask(tmpDir, "Declare Target");
 
-    const result = mustRun(["red-first", slug, "--json"], tmpDir);
+    const result = await mustRun(["red-first", slug, "--json"], tmpDir);
     const parsed = JSON.parse(result.stdout) as { data: { extra: Record<string, unknown> } };
     expect(parsed.data.extra["red_first"]).toBe(true);
-    expect(getDoc(slug, tmpDir).extra["red_first"]).toBe(true);
+    expect((await getDoc(slug, tmpDir)).extra["red_first"]).toBe(true);
   });
 
-  it("a red_first task with a pass AND an expected-fail row archives via lore done", () => {
-    const slug = createAdhocTask(tmpDir, "Proven Red First");
-    mustRun(["red-first", slug], tmpDir);
-    mustRun(
+  it("a red_first task with a pass AND an expected-fail row archives via lore done", async () => {
+    const slug = await createAdhocTask(tmpDir, "Proven Red First");
+    await mustRun(["red-first", slug], tmpDir);
+    await mustRun(
       [
         "evidence",
         slug,
@@ -177,7 +172,7 @@ describe("HAPPY — lore red-first declares the flag and lore done accepts a pro
       ],
       tmpDir,
     );
-    mustRun(
+    await mustRun(
       ["evidence", slug, "--oracle", "manual", "--command", "bunx vitest run --grep new-feature-again", "--result", "pass", "--output-tail", "ok"],
       tmpDir,
     );
@@ -187,24 +182,24 @@ describe("HAPPY — lore red-first declares the flag and lore done accepts a pro
     // exactly the --adhoc/no-declared-AC shape the ADR calls out as structurally
     // unattestable) so the audited escape hatch is required to reach exit 0. This
     // suite's subject is the red-first floor, not the attestation floor.
-    const result = runLore(["done", slug, "--override-attestation", "red-first-writer fixture: self-reported only"], tmpDir);
+    const result = await runLore(["done", slug, "--override-attestation", "red-first-writer fixture: self-reported only"], tmpDir);
     expect(result.exitCode).toBe(0);
-    expect(getDoc(slug, tmpDir).extra["red_first"]).toBe(true);
+    expect((await getDoc(slug, tmpDir)).extra["red_first"]).toBe(true);
   });
 });
 
 describe("NEGATIVE — lore done refuses a red_first task holding only a pass row", () => {
-  it("exit 4, naming the task slug and the missing expected-fail/fail row", () => {
-    const slug = createAdhocTask(tmpDir, "Unproven Red First");
-    mustRun(["red-first", slug], tmpDir);
-    mustRun(["evidence", slug, "--oracle", "manual", "--command", "bun run typecheck", "--result", "pass", "--output-tail", "ok"], tmpDir);
+  it("exit 4, naming the task slug and the missing expected-fail/fail row", async () => {
+    const slug = await createAdhocTask(tmpDir, "Unproven Red First");
+    await mustRun(["red-first", slug], tmpDir);
+    await mustRun(["evidence", slug, "--oracle", "manual", "--command", "bun run typecheck", "--result", "pass", "--output-tail", "ok"], tmpDir);
 
     // reason: adr-lore-done-requires-a-runner-attested-pass-the-sixth-false — the
     // escape hatch clears the ATTESTATION floor (this fixture's evidence is
     // self-reported only, structurally unattestable for a --adhoc/no-declared-AC
     // task) so the RED-FIRST floor underneath — this suite's actual subject — is
     // what fires and is what this assertion proves.
-    const result = runLore(
+    const result = await runLore(
       ["done", slug, "--override-attestation", "red-first-writer fixture: self-reported only"],
       tmpDir,
     );
@@ -215,28 +210,28 @@ describe("NEGATIVE — lore done refuses a red_first task holding only a pass ro
 });
 
 describe("BOUNDARY — declaring red-first twice is idempotent", () => {
-  it("both calls exit 0, flag stays true", () => {
-    const slug = createAdhocTask(tmpDir, "Double Declare");
+  it("both calls exit 0, flag stays true", async () => {
+    const slug = await createAdhocTask(tmpDir, "Double Declare");
 
-    const first = runLore(["red-first", slug], tmpDir);
-    const second = runLore(["red-first", slug], tmpDir);
+    const first = await runLore(["red-first", slug], tmpDir);
+    const second = await runLore(["red-first", slug], tmpDir);
     expect(first.exitCode).toBe(0);
     expect(second.exitCode).toBe(0);
-    expect(getDoc(slug, tmpDir).extra["red_first"]).toBe(true);
+    expect((await getDoc(slug, tmpDir)).extra["red_first"]).toBe(true);
   });
 });
 
 describe("ERROR — lore red-first on a nonexistent task", () => {
-  it("exit 3 (DOC_NOT_FOUND)", () => {
-    const result = runLore(["red-first", "task-does-not-exist"], tmpDir);
+  it("exit 3 (DOC_NOT_FOUND)", async () => {
+    const result = await runLore(["red-first", "task-does-not-exist"], tmpDir);
     expect(result.exitCode).toBe(3);
   });
 });
 
 describe("STATE — a plain task (no red-first declared) is unaffected by THIS feature", () => {
-  it("lore done archives a plain task exactly as before red-first existed, once the (unrelated) attestation and no-new-tests floors are satisfied", () => {
-    const slug = createAdhocTask(tmpDir, "Plain Task");
-    mustRun(["evidence", slug, "--oracle", "manual", "--command", "bun run typecheck", "--result", "pass", "--output-tail", "ok"], tmpDir);
+  it("lore done archives a plain task exactly as before red-first existed, once the (unrelated) attestation and no-new-tests floors are satisfied", async () => {
+    const slug = await createAdhocTask(tmpDir, "Plain Task");
+    await mustRun(["evidence", slug, "--oracle", "manual", "--command", "bun run typecheck", "--result", "pass", "--output-tail", "ok"], tmpDir);
 
     // reason: adr-lore-done-requires-a-runner-attested-pass-the-sixth-false — a
     // self-reported pass alone no longer suffices for ANY task, red-first or not
@@ -250,7 +245,7 @@ describe("STATE — a plain task (no red-first declared) is unaffected by THIS f
     // `--ac-scope ""` declaration arms the opt-OUT no-new-tests floor precisely
     // because this task never declared red_first. That is this file's own
     // demonstration of the two floors' mutual exclusion from the other side.
-    const result = runLore(
+    const result = await runLore(
       [
         "done",
         slug,
@@ -262,7 +257,7 @@ describe("STATE — a plain task (no red-first declared) is unaffected by THIS f
       tmpDir,
     );
     expect(result.exitCode).toBe(0);
-    expect(getDoc(slug, tmpDir).extra["red_first"]).toBeUndefined();
+    expect((await getDoc(slug, tmpDir)).extra["red_first"]).toBeUndefined();
   });
 
   // ─── task-the-ac-scope-re-keying-left-the-red-first-floor-unarmed ──────────
@@ -272,16 +267,16 @@ describe("STATE — a plain task (no red-first declared) is unaffected by THIS f
   // asserted — the refusal AND, on the very same fixture shape, the archival
   // under the audited declaration. Asserting only one direction would pass
   // against the pre-fix silent behaviour.
-  it("an --ac-scope \"\" task with NO red row is REFUSED (exit 4) and stays draft; the same shape archives once the declaration is supplied", () => {
-    const refusedSlug = createAdhocTask(tmpDir, "Empty Scope Unarmed Probe");
-    mustRun(
+  it("an --ac-scope \"\" task with NO red row is REFUSED (exit 4) and stays draft; the same shape archives once the declaration is supplied", async () => {
+    const refusedSlug = await createAdhocTask(tmpDir, "Empty Scope Unarmed Probe");
+    await mustRun(
       ["evidence", refusedSlug, "--oracle", "manual", "--command", "bun run typecheck", "--result", "pass", "--output-tail", "ok"],
       tmpDir,
     );
 
     // --override-attestation clears the FIRST floor, so what fires here is the
     // no-new-tests floor — the one that used to be inapplicable for `[]`.
-    const refusal = runLore(
+    const refusal = await runLore(
       ["done", refusedSlug, "--override-attestation", "red-first-writer fixture: self-reported only"],
       tmpDir,
     );
@@ -289,17 +284,17 @@ describe("STATE — a plain task (no red-first declared) is unaffected by THIS f
     // Two INDEPENDENT lone tokens rather than one remembered sentence.
     expect(refusal.stderr).toContain("ac_scope");
     expect(refusal.stderr).toContain("--declare-no-new-tests");
-    expect(getDoc(refusedSlug, tmpDir).status).toBe("draft");
+    expect((await getDoc(refusedSlug, tmpDir)).status).toBe("draft");
 
     // The OTHER branch on the identical fixture shape: with the audited
     // declaration the same task archives, and the reason is on the audit rows.
-    const declaredSlug = createAdhocTask(tmpDir, "Empty Scope Declared Probe");
-    mustRun(
+    const declaredSlug = await createAdhocTask(tmpDir, "Empty Scope Declared Probe");
+    await mustRun(
       ["evidence", declaredSlug, "--oracle", "manual", "--command", "bun run typecheck", "--result", "pass", "--output-tail", "ok"],
       tmpDir,
     );
     const declaredReason = "empty-scope probe: docs-only, covered by a grep oracle";
-    const archived = runLore(
+    const archived = await runLore(
       [
         "done",
         declaredSlug,
@@ -311,15 +306,15 @@ describe("STATE — a plain task (no red-first declared) is unaffected by THIS f
       tmpDir,
     );
     expect(archived.exitCode).toBe(0);
-    expect(getDoc(declaredSlug, tmpDir).status).toBe("archived");
+    expect((await getDoc(declaredSlug, tmpDir)).status).toBe("archived");
   });
 });
 
 describe("REGRESSION — lore set gains no --red-first flag", () => {
-  it("lore set --red-first exits 2 at the strict-flag seam", () => {
-    const slug = createAdhocTask(tmpDir, "Set Rejection Task");
+  it("lore set --red-first exits 2 at the strict-flag seam", async () => {
+    const slug = await createAdhocTask(tmpDir, "Set Rejection Task");
 
-    const result = runLore(["set", slug, "--red-first", "true"], tmpDir);
+    const result = await runLore(["set", slug, "--red-first", "true"], tmpDir);
     expect(result.exitCode).toBe(2);
     expect(result.stderr).toContain("Unknown option: --red-first");
   });

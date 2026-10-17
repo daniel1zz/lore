@@ -1,4 +1,3 @@
-// @spawns dist/lore
 /**
  * `lore approve <plan>` — `plan-promote` reachability EARLY-WARNING advisory,
  * rendered on the LIVE CLI approve path (spec-verify-reachability-plan-promote-
@@ -34,20 +33,23 @@
  *
  * @spec_ref spec-verify-reachability-plan-promote-early-warning §Acceptance
  *   Criteria AC-VRW-5
+ *
+ * TG-25 (adr-tg-1 option b): the commands run IN-PROCESS through tests/helpers/run-lore-in-process.ts, not through
+ * dist/lore. Wherever the prose above says the compiled binary is spawned or its freshness asserted, that is the
+ * history of this file; the assertions and the throwaway-corpus rule are unchanged.
  */
 
 import { describe, expect, it, beforeAll, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
-import { assertFreshBinary } from "../../integration/helpers/assert-fresh-binary";
 import { saveConfig } from "@lore/core/node";
 import { PLAN_PROMOTE_ADVISORY_NON_BLOCKING, REACHABILITY_NO_SPEC_ANCESTOR } from "../../../src/service/checkpoint-registry.js";
-import { citeSpecViaCli, loreRunnerFor } from "../../helpers/cli-live-rule.js";
+import { citeSpecViaAsyncCli, asyncLoreRunnerFor } from "../../helpers/cli-live-rule.js";
+import { runLoreInProcess } from "../../helpers/run-lore-in-process";
 
 // tests/unit/adapters/ → tests/unit/ → tests/ → packages/lore/ → packages/ → repo root (5 levels up).
 const REPO_ROOT = new URL("../../../../../", import.meta.url).pathname.replace(/\/$/, "");
-const LORE_BIN = join(REPO_ROOT, "dist", "lore");
 
 interface RunResult {
   readonly stdout: string;
@@ -55,8 +57,8 @@ interface RunResult {
   readonly exitCode: number;
 }
 
-function runLore(args: string[], cwd: string): RunResult {
-  const proc = Bun.spawnSync([LORE_BIN, ...args], {
+async function runLore(args: string[], cwd: string): Promise<RunResult> {
+  const proc = await runLoreInProcess(args, {
     cwd,
     // Hermetic actor identity: without it, environments that strip CLAUDECODE
     // (e.g. `lore verify`'s env allowlist) fall to the OS username and emit an
@@ -65,9 +67,9 @@ function runLore(args: string[], cwd: string): RunResult {
     env: { ...process.env, HOME: cwd, EDITOR: "true", CLAUDE_CODE_SESSION_ID: "e2e-advisory-probe-session" },
   });
   return {
-    stdout: proc.stdout.toString(),
-    stderr: proc.stderr.toString(),
-    exitCode: proc.exitCode ?? 1,
+    stdout: proc.stdout,
+    stderr: proc.stderr,
+    exitCode: proc.exitCode,
   };
 }
 
@@ -78,19 +80,19 @@ function parseSlug(stdout: string): string {
   return slug;
 }
 
-function initCorpus(dir: string): void {
-  const result = runLore(["init"], dir);
+async function initCorpus(dir: string): Promise<void> {
+  const result = await runLore(["init"], dir);
   if (result.exitCode !== 0) throw new Error(`lore init failed: ${result.stderr}`);
 }
 
-function createPrd(dir: string, title: string): string {
-  const result = runLore(["create", "prd", "--title", title, "--content", "PRD body.", "--no-ai"], dir);
+async function createPrd(dir: string, title: string): Promise<string> {
+  const result = await runLore(["create", "prd", "--title", title, "--content", "PRD body.", "--no-ai"], dir);
   if (result.exitCode !== 0) throw new Error(`create prd failed: ${result.stderr}`);
   return parseSlug(result.stdout);
 }
 
-function createPlan(dir: string, parentSlug: string, title: string): string {
-  const result = runLore(
+async function createPlan(dir: string, parentSlug: string, title: string): Promise<string> {
+  const result = await runLore(
     ["create", "plan", "--title", title, "--parent", parentSlug, "--content", "Plan body.", "--no-ai"],
     dir,
   );
@@ -98,22 +100,13 @@ function createPlan(dir: string, parentSlug: string, title: string): string {
   return parseSlug(result.stdout);
 }
 
-// ─── Suite: binary freshness guard ───────────────────────────────────────────
-
-beforeAll(() => {
-  assertFreshBinary(LORE_BIN, [
-    join(REPO_ROOT, "packages", "lore", "src"),
-    join(REPO_ROOT, "packages", "core", "src"),
-  ]);
-});
-
 // ─── Fixtures ────────────────────────────────────────────────────────────────
 
 let tmpDir: string;
 
-beforeEach(() => {
+beforeEach(async () => {
   tmpDir = mkdtempSync(join(tmpdir(), "lore-cli-plan-promote-advisory-"));
-  initCorpus(tmpDir);
+  await initCorpus(tmpDir);
 });
 
 afterEach(() => {
@@ -127,11 +120,11 @@ afterEach(() => {
 // ─── HAPPY (a): PRD-parented plan — unreachable, advisory prints, exit 0 ────
 
 describe("lore approve <plan-under-prd> — reachability advisory (AC-VRW-5a)", () => {
-  it("prints >= 1 reachability advisory line to stderr and exits 0", () => {
-    const prdSlug = createPrd(tmpDir, "Advisory PRD");
-    const planSlug = createPlan(tmpDir, prdSlug, "PRD-Parented Plan");
+  it("prints >= 1 reachability advisory line to stderr and exits 0", async () => {
+    const prdSlug = await createPrd(tmpDir, "Advisory PRD");
+    const planSlug = await createPlan(tmpDir, prdSlug, "PRD-Parented Plan");
 
-    const result = runLore(["approve", planSlug], tmpDir);
+    const result = await runLore(["approve", planSlug], tmpDir);
 
     expect(result.exitCode).toBe(0);
     const advisoryLines = result.stderr
@@ -149,9 +142,9 @@ describe("lore approve <plan-under-prd> — reachability advisory (AC-VRW-5a)", 
 // ─── HAPPY (b) / REGRESSION: spec-parented, reachable plan — silent, exit 0 ─
 
 describe("lore approve <plan-under-reachable-spec> — no advisory (AC-VRW-5b)", () => {
-  it("prints ZERO advisory lines and exits 0 when the ancestor spec declares >= 1 script-mode AC", () => {
-    const prdSlug = createPrd(tmpDir, "Reachable PRD");
-    const specResult = runLore(
+  it("prints ZERO advisory lines and exits 0 when the ancestor spec declares >= 1 script-mode AC", async () => {
+    const prdSlug = await createPrd(tmpDir, "Reachable PRD");
+    const specResult = await runLore(
       [
         "create",
         "spec",
@@ -166,7 +159,7 @@ describe("lore approve <plan-under-reachable-spec> — no advisory (AC-VRW-5b)",
     expect(specResult.exitCode).toBe(0);
     const specSlug = parseSlug(specResult.stdout);
 
-    const acResult = runLore(
+    const acResult = await runLore(
       [
         "ac",
         "add",
@@ -198,13 +191,13 @@ describe("lore approve <plan-under-reachable-spec> — no advisory (AC-VRW-5b)",
       workflow: { review: { judgment_required_types: [] } },
     } as never);
 
-    citeSpecViaCli(loreRunnerFor(runLore, tmpDir), tmpDir, undefined, specSlug, "AC-REACH-1"); // BR-1007: approvable only when a criterion cites a live rule
-    const specApprove = runLore(["approve", specSlug], tmpDir);
+    await citeSpecViaAsyncCli(asyncLoreRunnerFor(runLore, tmpDir), tmpDir, undefined, specSlug, "AC-REACH-1"); // BR-1007: approvable only when a criterion cites a live rule
+    const specApprove = await runLore(["approve", specSlug], tmpDir);
     expect(specApprove.exitCode).toBe(0);
 
-    const planSlug = createPlan(tmpDir, specSlug, "Spec-Parented Reachable Plan");
+    const planSlug = await createPlan(tmpDir, specSlug, "Spec-Parented Reachable Plan");
 
-    const result = runLore(["approve", planSlug], tmpDir);
+    const result = await runLore(["approve", planSlug], tmpDir);
 
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toContain("approved");
