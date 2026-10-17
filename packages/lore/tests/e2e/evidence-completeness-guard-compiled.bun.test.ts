@@ -1,4 +1,3 @@
-// @spawns dist/lore
 /**
  * Compiled-binary e2e for SPEC-061 AC-061-16 — the `lore evidence`
  * filtered-pass matched-count guard, driven end-to-end through the COMPILED
@@ -51,18 +50,21 @@
  *
  * @spec_ref AC-061-16; adr-lore-evidence-proves-a-filtered-pass-with-the-runner-s-own;
  *   task-lore-evidence-must-refuse-a-t-filtered-pass-with-no
+ *
+ * TG-25 (adr-tg-1 option b): the commands run IN-PROCESS through tests/helpers/run-lore-in-process.ts, not through
+ * dist/lore. Wherever the prose above says the compiled binary is spawned or its freshness asserted, that is the
+ * history of this file; the assertions and the throwaway-corpus rule are unchanged.
  */
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { assertFreshBinary } from "../integration/helpers/assert-fresh-binary";
+import { runLoreInProcess } from "../helpers/run-lore-in-process";
 
 // tests/e2e/ -> tests/ -> packages/lore/ -> packages/ -> repo root (4 levels up),
 // mirrors every sibling compiled-binary e2e suite's own REPO_ROOT derivation.
 const REPO_ROOT = new URL("../../../../", import.meta.url).pathname.replace(/\/$/, "");
-const LORE_BIN = join(REPO_ROOT, "dist", "lore");
 
 /** Path (relative to the throwaway corpus root) of the oracle file every command names. */
 const ORACLE_FILE_RELATIVE = "tests/sample.test.ts";
@@ -93,8 +95,8 @@ interface RunResult {
  * `LORE_ACTOR` keeps writes attributable and avoids an unrelated
  * actor-traceability warning polluting the exact stderr assertions below.
  */
-function runLore(args: string[], cwd: string): RunResult {
-  const proc = Bun.spawnSync([LORE_BIN, ...args], {
+async function runLore(args: string[], cwd: string): Promise<RunResult> {
+  const proc = await runLoreInProcess(args, {
     cwd,
     env: {
       ...process.env,
@@ -104,9 +106,9 @@ function runLore(args: string[], cwd: string): RunResult {
     },
   });
   return {
-    stdout: proc.stdout.toString(),
-    stderr: proc.stderr.toString(),
-    exitCode: proc.exitCode ?? 1,
+    stdout: proc.stdout,
+    stderr: proc.stderr,
+    exitCode: proc.exitCode,
   };
 }
 
@@ -129,8 +131,8 @@ function seedOracleFile(dir: string): void {
 }
 
 /** Reads the task's CURRENT evidence-row count straight from the corpus. */
-function readEvidenceCount(dir: string, taskSlug: string): number {
-  const result = runLore(["get", taskSlug, "--json"], dir);
+async function readEvidenceCount(dir: string, taskSlug: string): Promise<number> {
+  const result = await runLore(["get", taskSlug, "--json"], dir);
   if (result.exitCode !== 0) throw new Error(`lore get failed: ${result.stderr}`);
   const parsed = JSON.parse(result.stdout) as {
     data: { doc: { extra: { verification_evidence?: unknown[] } } };
@@ -138,34 +140,30 @@ function readEvidenceCount(dir: string, taskSlug: string): number {
   return parsed.data.doc.extra.verification_evidence?.length ?? 0;
 }
 
-function recordEvidence(dir: string, taskSlug: string, extraArgs: string[]): RunResult {
-  return runLore(["evidence", taskSlug, "--oracle", "test", "--result", "pass", ...extraArgs], dir);
+async function recordEvidence(dir: string, taskSlug: string, extraArgs: string[]): Promise<RunResult> {
+  return await runLore(["evidence", taskSlug, "--oracle", "test", "--result", "pass", ...extraArgs], dir);
 }
 
 let dir: string;
 let taskSlug: string;
 
-beforeAll(() => {
-  assertFreshBinary(LORE_BIN, [
-    join(REPO_ROOT, "packages", "lore", "src"),
-    join(REPO_ROOT, "packages", "core", "src"),
-  ]);
+beforeAll(async () => {
 
   dir = mkdtempSync(join(tmpdir(), "lore-ac-061-16-"));
   // Never inside this repo — the corpus under test must not be the repo's own.
   expect(dir.startsWith(REPO_ROOT)).toBe(false);
 
-  const init = runLore(["init"], dir);
+  const init = await runLore(["init"], dir);
   if (init.exitCode !== 0) throw new Error(`lore init failed: ${init.stderr}`);
   seedOracleFile(dir);
 
-  const prd = runLore(
+  const prd = await runLore(
     ["create", "prd", "--title", "AC-061-16 Root", "--content", "# PRD\n\nroot.", "--no-ai"],
     dir,
   );
   if (prd.exitCode !== 0) throw new Error(`create prd failed: ${prd.stderr}`);
 
-  const plan = runLore(
+  const plan = await runLore(
     [
       "create", "plan",
       "--title", "AC-061-16 Plan",
@@ -177,7 +175,7 @@ beforeAll(() => {
   );
   if (plan.exitCode !== 0) throw new Error(`create plan failed: ${plan.stderr}`);
 
-  const task = runLore(
+  const task = await runLore(
     [
       "create", "task",
       "--title", "AC-061-16 Task",
@@ -202,16 +200,16 @@ afterAll(() => {
 });
 
 describe("AC-061-16 — compiled lore evidence refuses an unproven filtered pass", () => {
-  it("a -t-filtered --result pass with NO output tail exits 4 and writes no evidence row", () => {
-    expect(readEvidenceCount(dir, taskSlug)).toBe(0);
+  it("a -t-filtered --result pass with NO output tail exits 4 and writes no evidence row", async () => {
+    expect(await readEvidenceCount(dir, taskSlug)).toBe(0);
 
-    const refused = recordEvidence(dir, taskSlug, ["--command", FILTERED_COMMAND]);
+    const refused = await recordEvidence(dir, taskSlug, ["--command", FILTERED_COMMAND]);
 
     expect(refused.exitCode).toBe(4);
     expect(refused.stderr).toContain(MATCHED_COUNT_WORDING);
     // CONFOUND CONTROL: refused by THIS guard, not by the older missing-file precheck.
     expect(refused.stderr).not.toContain(MISSING_FILE_WORDING);
-    expect(readEvidenceCount(dir, taskSlug)).toBe(0);
+    expect(await readEvidenceCount(dir, taskSlug)).toBe(0);
   });
 
   // reason: SUPERSEDED title (task-a-non-empty-output-tail-can-be-hand-authored-
@@ -228,17 +226,17 @@ describe("AC-061-16 — compiled lore evidence refuses an unproven filtered pass
   // below now asserts the ORIGINAL guard's own verdict (via the absence/
   // presence of MATCHED_COUNT_WORDING) while the overall call is refused by
   // D5 (naming --capture) — row counts stay flat at 0 throughout.
-  it("CONTROL: an UNFILTERED pass is exempt from the FILTERED-pass guard specifically, but D5's separate pass-tail guard still refuses without --capture", () => {
-    const accepted = recordEvidence(dir, taskSlug, ["--command", UNFILTERED_COMMAND, "--output-tail", "ok"]);
+  it("CONTROL: an UNFILTERED pass is exempt from the FILTERED-pass guard specifically, but D5's separate pass-tail guard still refuses without --capture", async () => {
+    const accepted = await recordEvidence(dir, taskSlug, ["--command", UNFILTERED_COMMAND, "--output-tail", "ok"]);
 
     expect(accepted.exitCode).toBe(4);
     expect(accepted.stderr).not.toContain(MATCHED_COUNT_WORDING);
     expect(accepted.stderr).toContain("--capture");
-    expect(readEvidenceCount(dir, taskSlug)).toBe(0);
+    expect(await readEvidenceCount(dir, taskSlug)).toBe(0);
   });
 
-  it("a filtered pass carrying a proving --output-tail clears the FILTERED-pass guard, but D5 still refuses without --capture", () => {
-    const accepted = recordEvidence(dir, taskSlug, [
+  it("a filtered pass carrying a proving --output-tail clears the FILTERED-pass guard, but D5 still refuses without --capture", async () => {
+    const accepted = await recordEvidence(dir, taskSlug, [
       "--command", FILTERED_COMMAND,
       "--output-tail", PROVING_TAIL,
     ]);
@@ -246,14 +244,14 @@ describe("AC-061-16 — compiled lore evidence refuses an unproven filtered pass
     expect(accepted.exitCode).toBe(4);
     expect(accepted.stderr).not.toContain(MATCHED_COUNT_WORDING);
     expect(accepted.stderr).toContain("--capture");
-    expect(readEvidenceCount(dir, taskSlug)).toBe(0);
+    expect(await readEvidenceCount(dir, taskSlug)).toBe(0);
   });
 
-  it("a filtered pass whose proof arrives via --output-tail-file clears the FILTERED-pass guard, but D5 still refuses without --capture", () => {
+  it("a filtered pass whose proof arrives via --output-tail-file clears the FILTERED-pass guard, but D5 still refuses without --capture", async () => {
     const tailPath = join(dir, "run-output.txt");
     writeFileSync(tailPath, `some earlier noise\n${PROVING_TAIL}`);
 
-    const accepted = recordEvidence(dir, taskSlug, [
+    const accepted = await recordEvidence(dir, taskSlug, [
       "--command", FILTERED_COMMAND,
       "--output-tail-file", tailPath,
     ]);
@@ -261,11 +259,11 @@ describe("AC-061-16 — compiled lore evidence refuses an unproven filtered pass
     expect(accepted.exitCode).toBe(4);
     expect(accepted.stderr).not.toContain(MATCHED_COUNT_WORDING);
     expect(accepted.stderr).toContain("--capture");
-    expect(readEvidenceCount(dir, taskSlug)).toBe(0);
+    expect(await readEvidenceCount(dir, taskSlug)).toBe(0);
   });
 
-  it("a filtered pass whose tail reports every case skipped is refused, naming zero_match", () => {
-    const refused = recordEvidence(dir, taskSlug, [
+  it("a filtered pass whose tail reports every case skipped is refused, naming zero_match", async () => {
+    const refused = await recordEvidence(dir, taskSlug, [
       "--command", FILTERED_COMMAND,
       "--output-tail", " Test Files  1 skipped (1)\n      Tests  46 skipped (46)\n",
     ]);
@@ -275,6 +273,6 @@ describe("AC-061-16 — compiled lore evidence refuses an unproven filtered pass
     expect(refused.stderr).not.toContain(MISSING_FILE_WORDING);
     // Unchanged from the previous scenario — no scenario in this file ever
     // reaches a stored row under D5 (see the note above this describe block).
-    expect(readEvidenceCount(dir, taskSlug)).toBe(0);
+    expect(await readEvidenceCount(dir, taskSlug)).toBe(0);
   });
 });

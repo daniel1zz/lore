@@ -1,4 +1,3 @@
-// @spawns dist/lore
 /**
  * AC-IC-2 — the COMPILED `dist/lore` closes the GitHub issue a plan resolves when that plan is archived,
  * and binds plans to reports at creation (spec-archiving-the-work-that-resolves-a-defect-report-closes
@@ -15,6 +14,10 @@
  *   REGRESSION: mutation "closer not wired in app.ts" leaves the close log empty (first test fails).
  *
  * Requires `bun run build` first; `assertFreshBinary` fails loud on a stale binary.
+ *
+ * TG-25 (adr-tg-1 option b): the commands run IN-PROCESS through tests/helpers/run-lore-in-process.ts, not through
+ * dist/lore. Wherever the prose above says the compiled binary is spawned or its freshness asserted, that is the
+ * history of this file; the assertions and the throwaway-corpus rule are unchanged.
  */
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -22,10 +25,9 @@ import { Database } from "bun:sqlite";
 import { appendFileSync, chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { assertFreshBinary } from "../integration/helpers/assert-fresh-binary";
+import { runLoreInProcess } from "../helpers/run-lore-in-process";
 
 const REPO_ROOT = new URL("../../../../", import.meta.url).pathname.replace(/\/$/, "");
-const LORE_BIN = join(REPO_ROOT, "dist", "lore");
 const FAKE_REPO = "acme/widget";
 
 interface RunResult {
@@ -40,10 +42,6 @@ interface Corpus {
 }
 
 const dirsToClean: string[] = [];
-
-beforeAll(() => {
-  assertFreshBinary(LORE_BIN, [join(REPO_ROOT, "packages", "lore", "src"), join(REPO_ROOT, "packages", "core", "src")]);
-});
 afterAll(() => {
   for (const dir of dirsToClean) rmSync(dir, { recursive: true, force: true });
 });
@@ -100,8 +98,8 @@ exit 99
   chmodSync(ghPath, 0o755);
 }
 
-function runLore(corpus: Corpus, args: string[]): RunResult {
-  const proc = Bun.spawnSync([LORE_BIN, ...args], {
+async function runLore(corpus: Corpus, args: string[]): Promise<RunResult> {
+  const proc = await runLoreInProcess(args, {
     cwd: corpus.dir,
     env: {
       ...process.env,
@@ -112,11 +110,11 @@ function runLore(corpus: Corpus, args: string[]): RunResult {
       PATH: `${corpus.stubDir}:${process.env["PATH"] ?? ""}`,
     },
   });
-  return { stdout: proc.stdout.toString(), stderr: proc.stderr.toString(), exitCode: proc.exitCode ?? 1 };
+  return { stdout: proc.stdout, stderr: proc.stderr, exitCode: proc.exitCode };
 }
 
-function mustRun(corpus: Corpus, args: string[]): RunResult {
-  const result = runLore(corpus, args);
+async function mustRun(corpus: Corpus, args: string[]): Promise<RunResult> {
+  const result = await runLore(corpus, args);
   if (result.exitCode !== 0) throw new Error(`lore ${args.join(" ")} failed (${result.exitCode}): ${result.stderr}${result.stdout}`);
   return result;
 }
@@ -131,13 +129,13 @@ function slugOfCreate(stdout: string): string {
   return slug;
 }
 
-function idOf(corpus: Corpus, slug: string): string {
-  return (JSON.parse(mustRun(corpus, ["get", slug, "--json"]).stdout) as { data: { doc: { id: string } } }).data.doc.id;
+async function idOf(corpus: Corpus, slug: string): Promise<string> {
+  return (JSON.parse((await mustRun(corpus, ["get", slug, "--json"])).stdout) as { data: { doc: { id: string } } }).data.doc.id;
 }
 
 /** Marks an adhoc task as a filed report for GitHub #<number> (no CLI verb writes issue_report with a github ref offline). */
-function makeFiledReport(corpus: Corpus, slug: string, number: number): void {
-  const id = idOf(corpus, slug);
+async function makeFiledReport(corpus: Corpus, slug: string, number: number): Promise<void> {
+  const id = await idOf(corpus, slug);
   const db = new Database(join(corpus.dir, ".lore", "lore.db"));
   try {
     const row = db.query("SELECT extra FROM docs WHERE id = ?").get(id) as { extra: string };
@@ -158,13 +156,13 @@ function makeFiledReport(corpus: Corpus, slug: string, number: number): void {
 }
 
 /** A fresh corpus: initialised, gates that would reject placeholder fixtures disabled, feedback.upstream naming the FAKE repo, two filed reports (#7, #8). */
-function makeCorpus(): Corpus & { prdSlug: string; report7: string; report8: string } {
+async function makeCorpus(): Promise<Corpus & { prdSlug: string; report7: string; report8: string }> {
   const dir = mkdtempSync(join(tmpdir(), "lore-issue-close-e2e-"));
   const stubDir = mkdtempSync(join(tmpdir(), "lore-issue-close-stub-"));
   dirsToClean.push(dir, stubDir);
   writeStubGh(stubDir);
   const corpus: Corpus = { dir, stubDir };
-  mustRun(corpus, ["init"]);
+  await mustRun(corpus, ["init"]);
   appendFileSync(
     join(dir, ".lore", "config.yaml"),
     [
@@ -183,96 +181,96 @@ function makeCorpus(): Corpus & { prdSlug: string; report7: string; report8: str
     ].join("\n"),
   );
   const prd = slugOfCreate(
-    mustRun(corpus, ["create", "prd", "--title", "Close Fixture PRD", "--no-ai", "--content", "## Overview\n\nBody.", "--json"]).stdout,
+    (await mustRun(corpus, ["create", "prd", "--title", "Close Fixture PRD", "--no-ai", "--content", "## Overview\n\nBody.", "--json"])).stdout,
   );
   const report7 = slugOfCreate(
-    mustRun(corpus, ["create", "task", "--adhoc", "--ac-scope", "", "--title", "Defect seven", "--no-ai", "--content", "Defect.", "--json"]).stdout,
+    (await mustRun(corpus, ["create", "task", "--adhoc", "--ac-scope", "", "--title", "Defect seven", "--no-ai", "--content", "Defect.", "--json"])).stdout,
   );
   const report8 = slugOfCreate(
-    mustRun(corpus, ["create", "task", "--adhoc", "--ac-scope", "", "--title", "Defect eight", "--no-ai", "--content", "Defect.", "--json"]).stdout,
+    (await mustRun(corpus, ["create", "task", "--adhoc", "--ac-scope", "", "--title", "Defect eight", "--no-ai", "--content", "Defect.", "--json"])).stdout,
   );
-  makeFiledReport(corpus, report7, 7);
-  makeFiledReport(corpus, report8, 8);
+  await makeFiledReport(corpus, report7, 7);
+  await makeFiledReport(corpus, report8, 8);
   return { ...corpus, prdSlug: prd, report7, report8 };
 }
 
-function createPlan(corpus: Corpus & { prdSlug: string }, title: string, extraArgs: string[]): RunResult {
-  return runLore(corpus, [
+async function createPlan(corpus: Corpus & { prdSlug: string }, title: string, extraArgs: string[]): Promise<RunResult> {
+  return await runLore(corpus, [
     "create", "plan", "--title", title, "--parent", corpus.prdSlug, "--no-ai", "--content", "Plan body.", "--json", ...extraArgs,
   ]);
 }
 
-function planCount(corpus: Corpus): number {
-  return (JSON.parse(mustRun(corpus, ["list", "--type", "plan", "--json"]).stdout) as { data: { docs: unknown[] } }).data.docs.length;
+async function planCount(corpus: Corpus): Promise<number> {
+  return (JSON.parse((await mustRun(corpus, ["list", "--type", "plan", "--json"])).stdout) as { data: { docs: unknown[] } }).data.docs.length;
 }
 
-function resolvesTargets(corpus: Corpus, planSlug: string): string[] {
-  const got = JSON.parse(mustRun(corpus, ["get", planSlug, "--json"]).stdout) as {
+async function resolvesTargets(corpus: Corpus, planSlug: string): Promise<string[]> {
+  const got = JSON.parse((await mustRun(corpus, ["get", planSlug, "--json"])).stdout) as {
     data: { navigation: { related: Array<{ slug: string; link_type: string }> } };
   };
   return got.data.navigation.related.filter((r) => r.link_type === "resolves").map((r) => r.slug).sort();
 }
 
-function archivePlan(corpus: Corpus, planSlug: string): RunResult {
-  mustRun(corpus, ["set", planSlug, "--status", "approved"]);
-  mustRun(corpus, ["set", planSlug, "--status", "active"]);
-  return runLore(corpus, ["set", planSlug, "--status", "archived"]);
+async function archivePlan(corpus: Corpus, planSlug: string): Promise<RunResult> {
+  await mustRun(corpus, ["set", planSlug, "--status", "approved"]);
+  await mustRun(corpus, ["set", planSlug, "--status", "active"]);
+  return await runLore(corpus, ["set", planSlug, "--status", "archived"]);
 }
 
 describe("AC-IC-2: --resolves binds a plan to filed reports at creation", () => {
-  it("--resolves 7 writes the plan and a resolves link that lore get shows", () => {
-    const corpus = makeCorpus();
-    const created = createPlan(corpus, "Plan resolving seven", ["--resolves", "7"]);
+  it("--resolves 7 writes the plan and a resolves link that lore get shows", async () => {
+    const corpus = await makeCorpus();
+    const created = await createPlan(corpus, "Plan resolving seven", ["--resolves", "7"]);
     expect(created.exitCode).toBe(0);
     const planSlug = slugOfCreate(created.stdout);
-    expect(resolvesTargets(corpus, planSlug)).toEqual([corpus.report7]);
+    expect(await resolvesTargets(corpus, planSlug)).toEqual([corpus.report7]);
   });
 
-  it("NEGATIVE: --resolves 999 exits exactly 4 and creates nothing", () => {
-    const corpus = makeCorpus();
-    const before = planCount(corpus);
-    const refused = createPlan(corpus, "Plan resolving nothing", ["--resolves", "999"]);
+  it("NEGATIVE: --resolves 999 exits exactly 4 and creates nothing", async () => {
+    const corpus = await makeCorpus();
+    const before = await planCount(corpus);
+    const refused = await createPlan(corpus, "Plan resolving nothing", ["--resolves", "999"]);
     expect(refused.exitCode).toBe(4);
     expect(refused.stderr).toContain("999");
-    expect(planCount(corpus)).toBe(before);
+    expect(await planCount(corpus)).toBe(before);
   });
 
-  it("NEGATIVE: --resolves naming an existing document that is not a filed report exits exactly 4 and creates nothing", () => {
-    const corpus = makeCorpus();
-    const before = planCount(corpus);
-    const refused = createPlan(corpus, "Plan resolving a PRD", ["--resolves", corpus.prdSlug]);
+  it("NEGATIVE: --resolves naming an existing document that is not a filed report exits exactly 4 and creates nothing", async () => {
+    const corpus = await makeCorpus();
+    const before = await planCount(corpus);
+    const refused = await createPlan(corpus, "Plan resolving a PRD", ["--resolves", corpus.prdSlug]);
     expect(refused.exitCode).toBe(4);
-    expect(planCount(corpus)).toBe(before);
+    expect(await planCount(corpus)).toBe(before);
   });
 
-  it("NEGATIVE: one bad value among good ones refuses the whole creation", () => {
-    const corpus = makeCorpus();
-    const before = planCount(corpus);
-    const refused = createPlan(corpus, "Plan half good", ["--resolves", "7", "--resolves", "999"]);
+  it("NEGATIVE: one bad value among good ones refuses the whole creation", async () => {
+    const corpus = await makeCorpus();
+    const before = await planCount(corpus);
+    const refused = await createPlan(corpus, "Plan half good", ["--resolves", "7", "--resolves", "999"]);
     expect(refused.exitCode).toBe(4);
-    expect(planCount(corpus)).toBe(before);
+    expect(await planCount(corpus)).toBe(before);
   });
 
-  it("BOUNDARY: --resolves given twice (number form and task-gh slug form) writes both links", () => {
-    const corpus = makeCorpus();
-    const created = createPlan(corpus, "Plan resolving two", ["--resolves", "7", "--resolves", corpus.report8]);
+  it("BOUNDARY: --resolves given twice (number form and task-gh slug form) writes both links", async () => {
+    const corpus = await makeCorpus();
+    const created = await createPlan(corpus, "Plan resolving two", ["--resolves", "7", "--resolves", corpus.report8]);
     expect(created.exitCode).toBe(0);
-    expect(resolvesTargets(corpus, slugOfCreate(created.stdout))).toEqual([corpus.report7, corpus.report8].sort());
+    expect(await resolvesTargets(corpus, slugOfCreate(created.stdout))).toEqual([corpus.report7, corpus.report8].sort());
   });
 
-  it("usage: --resolves on a type that cannot resolve (prd) exits 2", () => {
-    const corpus = makeCorpus();
-    const refused = runLore(corpus, ["create", "prd", "--title", "Second PRD", "--no-ai", "--content", "x", "--resolves", "7"]);
+  it("usage: --resolves on a type that cannot resolve (prd) exits 2", async () => {
+    const corpus = await makeCorpus();
+    const refused = await runLore(corpus, ["create", "prd", "--title", "Second PRD", "--no-ai", "--content", "x", "--resolves", "7"]);
     expect(refused.exitCode).toBe(2);
   });
 });
 
 describe("AC-IC-2: archiving the resolving plan closes the issue on GitHub (stub gh)", () => {
-  it("HAPPY: exits 0, prints 'issue #7: closed on GitHub', and the stub log shows close completed + a comment naming the plan", () => {
-    const corpus = makeCorpus();
-    const planSlug = slugOfCreate(createPlan(corpus, "Plan that fixes seven", ["--resolves", "7"]).stdout);
+  it("HAPPY: exits 0, prints 'issue #7: closed on GitHub', and the stub log shows close completed + a comment naming the plan", async () => {
+    const corpus = await makeCorpus();
+    const planSlug = slugOfCreate((await createPlan(corpus, "Plan that fixes seven", ["--resolves", "7"])).stdout);
 
-    const archived = archivePlan(corpus, planSlug);
+    const archived = await archivePlan(corpus, planSlug);
 
     expect(archived.exitCode).toBe(0);
     expect(archived.stdout).toContain("issue #7: closed on GitHub");
@@ -283,25 +281,25 @@ describe("AC-IC-2: archiving the resolving plan closes the issue on GitHub (stub
     expect(comment).toContain(planSlug);
     expect(log.some((line) => line.includes(`repos/${FAKE_REPO}/issues/7/labels`) && line.includes("labels[]=resolution:fixed"))).toBe(true);
     // the issue task itself is untouched (spec Out of scope)
-    const report = JSON.parse(mustRun(corpus, ["get", corpus.report7, "--json"]).stdout) as { data: { doc: { status: string } } };
+    const report = JSON.parse((await mustRun(corpus, ["get", corpus.report7, "--json"])).stdout) as { data: { doc: { status: string } } };
     expect(report.data.doc.status).toBe("draft");
   });
 
-  it("ERROR: with the stub failing the close the archive still exits 0, stderr names #8 and 'lore issues --sync'; --sync lists it and --sync --apply closes it", () => {
-    const corpus = makeCorpus();
-    const planSlug = slugOfCreate(createPlan(corpus, "Plan that fixes eight", ["--resolves", "8"]).stdout);
+  it("ERROR: with the stub failing the close the archive still exits 0, stderr names #8 and 'lore issues --sync'; --sync lists it and --sync --apply closes it", async () => {
+    const corpus = await makeCorpus();
+    const planSlug = slugOfCreate((await createPlan(corpus, "Plan that fixes eight", ["--resolves", "8"])).stdout);
     writeFileSync(join(corpus.stubDir, "fail"), "");
 
-    const archived = archivePlan(corpus, planSlug);
+    const archived = await archivePlan(corpus, planSlug);
 
     expect(archived.exitCode).toBe(0);
     expect(archived.stderr).toContain("#8");
     expect(archived.stderr).toContain("lore issues --sync");
     expect(archived.stdout).not.toContain("closed on GitHub");
-    const plan = JSON.parse(mustRun(corpus, ["get", planSlug, "--json"]).stdout) as { data: { doc: { status: string } } };
+    const plan = JSON.parse((await mustRun(corpus, ["get", planSlug, "--json"])).stdout) as { data: { doc: { status: string } } };
     expect(plan.data.doc.status).toBe("archived");
 
-    const listed = runLore(corpus, ["issues", "--sync", "--json"]);
+    const listed = await runLore(corpus, ["issues", "--sync", "--json"]);
     expect(listed.exitCode).toBe(0);
     const drift = (JSON.parse(listed.stdout) as { data: { drift: Array<{ number: number; computed: string; github_state: string }> } }).data.drift;
     expect(drift.map((d) => d.number)).toEqual([8]);
@@ -309,18 +307,18 @@ describe("AC-IC-2: archiving the resolving plan closes the issue on GitHub (stub
     expect(ghLog(corpus).filter((line) => line.includes("-X PATCH"))).toHaveLength(1); // only the failed archive-time attempt; --sync wrote nothing
 
     rmSync(join(corpus.stubDir, "fail"));
-    const applied = runLore(corpus, ["issues", "--sync", "--apply", "--json"]);
+    const applied = await runLore(corpus, ["issues", "--sync", "--apply", "--json"]);
     expect(applied.exitCode).toBe(0);
     const appliedRows = (JSON.parse(applied.stdout) as { data: { applied: Array<{ number: number; closed: boolean; labelled: boolean }> } }).data.applied;
     expect(appliedRows).toEqual([{ number: 8, closed: true, labelled: true }]);
     expect(ghLog(corpus).filter((line) => line.includes("-X PATCH"))).toHaveLength(2);
 
-    const clean = runLore(corpus, ["issues", "--sync", "--json"]);
+    const clean = await runLore(corpus, ["issues", "--sync", "--json"]);
     expect((JSON.parse(clean.stdout) as { data: { drift: unknown[] } }).data.drift).toEqual([]);
   }, 60_000);
 
-  it("usage: --apply without --sync exits 2", () => {
-    const corpus = makeCorpus();
-    expect(runLore(corpus, ["issues", "--apply"]).exitCode).toBe(2);
+  it("usage: --apply without --sync exits 2", async () => {
+    const corpus = await makeCorpus();
+    expect((await runLore(corpus, ["issues", "--apply"])).exitCode).toBe(2);
   });
 });

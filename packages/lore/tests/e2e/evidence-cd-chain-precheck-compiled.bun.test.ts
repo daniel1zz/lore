@@ -1,4 +1,3 @@
-// @spawns dist/lore
 /**
  * Compiled-binary e2e for the `lore evidence` oracle-file precheck's
  * MULTI-SEGMENT cd derivation — closes
@@ -66,18 +65,21 @@
  *               working, and `;` separators behave exactly like `&&`
  *
  * @spec_ref task-evidence-precheck-only-sees-a-cd-in-the-first-segment-of-a
+ *
+ * TG-25 (adr-tg-1 option b): the commands run IN-PROCESS through tests/helpers/run-lore-in-process.ts, not through
+ * dist/lore. Wherever the prose above says the compiled binary is spawned or its freshness asserted, that is the
+ * history of this file; the assertions and the throwaway-corpus rule are unchanged.
  */
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { assertFreshBinary } from "../integration/helpers/assert-fresh-binary";
+import { runLoreInProcess } from "../helpers/run-lore-in-process";
 
 // tests/e2e/ -> tests/ -> packages/lore/ -> packages/ -> repo root (4 levels up),
 // mirrors every sibling compiled-binary e2e suite's own REPO_ROOT derivation.
 const REPO_ROOT = new URL("../../../../", import.meta.url).pathname.replace(/\/$/, "");
-const LORE_BIN = join(REPO_ROOT, "dist", "lore");
 
 /**
  * Replicates this repo's own geometry inside the throwaway corpus: the oracle
@@ -126,8 +128,8 @@ interface RunResult {
  * `LORE_ACTOR` keeps writes attributable and avoids an unrelated
  * actor-traceability warning polluting the exact stderr assertions below.
  */
-function runLore(args: string[], cwd: string): RunResult {
-  const proc = Bun.spawnSync([LORE_BIN, ...args], {
+async function runLore(args: string[], cwd: string): Promise<RunResult> {
+  const proc = await runLoreInProcess(args, {
     cwd,
     env: {
       ...process.env,
@@ -137,9 +139,9 @@ function runLore(args: string[], cwd: string): RunResult {
     },
   });
   return {
-    stdout: proc.stdout.toString(),
-    stderr: proc.stderr.toString(),
-    exitCode: proc.exitCode ?? 1,
+    stdout: proc.stdout,
+    stderr: proc.stderr,
+    exitCode: proc.exitCode,
   };
 }
 
@@ -163,8 +165,8 @@ function seedOracleFiles(dir: string): void {
 }
 
 /** Reads the task's CURRENT evidence-row count straight from the corpus. */
-function readEvidenceCount(dir: string, taskSlug: string): number {
-  const result = runLore(["get", taskSlug, "--json"], dir);
+async function readEvidenceCount(dir: string, taskSlug: string): Promise<number> {
+  const result = await runLore(["get", taskSlug, "--json"], dir);
   if (result.exitCode !== 0) throw new Error(`lore get failed: ${result.stderr}`);
   const parsed = JSON.parse(result.stdout) as {
     data: { doc: { extra: { verification_evidence?: unknown[] } } };
@@ -172,8 +174,8 @@ function readEvidenceCount(dir: string, taskSlug: string): number {
   return parsed.data.doc.extra.verification_evidence?.length ?? 0;
 }
 
-function recordEvidence(dir: string, taskSlug: string, command: string): RunResult {
-  return runLore(
+async function recordEvidence(dir: string, taskSlug: string, command: string): Promise<RunResult> {
+  return await runLore(
     ["evidence", taskSlug, "--oracle", "test", "--result", "pass", "--command", command, "--output-tail", "ok"],
     dir,
   );
@@ -182,27 +184,23 @@ function recordEvidence(dir: string, taskSlug: string, command: string): RunResu
 let dir: string;
 let taskSlug: string;
 
-beforeAll(() => {
-  assertFreshBinary(LORE_BIN, [
-    join(REPO_ROOT, "packages", "lore", "src"),
-    join(REPO_ROOT, "packages", "core", "src"),
-  ]);
+beforeAll(async () => {
 
   dir = mkdtempSync(join(tmpdir(), "lore-cd-chain-precheck-"));
   // Never inside this repo — the corpus under test must not be the repo's own.
   expect(dir.startsWith(REPO_ROOT)).toBe(false);
 
-  const init = runLore(["init"], dir);
+  const init = await runLore(["init"], dir);
   if (init.exitCode !== 0) throw new Error(`lore init failed: ${init.stderr}`);
   seedOracleFiles(dir);
 
-  const prd = runLore(
+  const prd = await runLore(
     ["create", "prd", "--title", "Cd Chain Precheck Root", "--content", "# PRD\n\nroot.", "--no-ai"],
     dir,
   );
   if (prd.exitCode !== 0) throw new Error(`create prd failed: ${prd.stderr}`);
 
-  const plan = runLore(
+  const plan = await runLore(
     [
       "create", "plan",
       "--title", "Cd Chain Precheck Plan",
@@ -214,7 +212,7 @@ beforeAll(() => {
   );
   if (plan.exitCode !== 0) throw new Error(`create plan failed: ${plan.stderr}`);
 
-  const task = runLore(
+  const task = await runLore(
     [
       "create", "task",
       "--title", "Cd Chain Precheck Task",
@@ -239,10 +237,10 @@ afterAll(() => {
 });
 
 describe("compiled lore evidence derives a cd target from ANY chain segment", () => {
-  it("accepts the mandated `bun run build && cd <dir> && bun test <file>` form", () => {
-    expect(readEvidenceCount(dir, taskSlug)).toBe(0);
+  it("accepts the mandated `bun run build && cd <dir> && bun test <file>` form", async () => {
+    expect(await readEvidenceCount(dir, taskSlug)).toBe(0);
 
-    const accepted = recordEvidence(dir, taskSlug, MANDATED_BUILD_THEN_CD);
+    const accepted = await recordEvidence(dir, taskSlug, MANDATED_BUILD_THEN_CD);
 
     // The pre-fix binary exited 4 here with MISSING_FILE_WORDING, naming a file
     // that exists — the defect. Assert the wording's ABSENCE too, so a future
@@ -261,11 +259,11 @@ describe("compiled lore evidence derives a cd target from ANY chain segment", ()
     expect(accepted.stderr).not.toContain(MISSING_FILE_WORDING);
     expect(accepted.stderr).toContain("--capture");
     expect(accepted.exitCode).toBe(4);
-    expect(readEvidenceCount(dir, taskSlug)).toBe(0);
+    expect(await readEvidenceCount(dir, taskSlug)).toBe(0);
   });
 
-  it("accepts the mandated fresh-worktree `bun install && cd <dir> && ...` form", () => {
-    const accepted = recordEvidence(dir, taskSlug, MANDATED_INSTALL_THEN_CD);
+  it("accepts the mandated fresh-worktree `bun install && cd <dir> && ...` form", async () => {
+    const accepted = await recordEvidence(dir, taskSlug, MANDATED_INSTALL_THEN_CD);
 
     // reason: SUPERSEDED (task-raise-the-evidence-tail-guard-s-predicate-to-
     // its-own, spec-falsifiability-reachability-a-feedable-checkpoint-an §D5)
@@ -281,11 +279,11 @@ describe("compiled lore evidence derives a cd target from ANY chain segment", ()
     expect(accepted.stderr).not.toContain(MISSING_FILE_WORDING);
     expect(accepted.stderr).toContain("--capture");
     expect(accepted.exitCode).toBe(4);
-    expect(readEvidenceCount(dir, taskSlug)).toBe(0);
+    expect(await readEvidenceCount(dir, taskSlug)).toBe(0);
   });
 
-  it("REGRESSION: the pre-existing leading-cd form keeps working", () => {
-    const accepted = recordEvidence(dir, taskSlug, LEADING_CD);
+  it("REGRESSION: the pre-existing leading-cd form keeps working", async () => {
+    const accepted = await recordEvidence(dir, taskSlug, LEADING_CD);
 
     // reason: SUPERSEDED (task-raise-the-evidence-tail-guard-s-predicate-to-
     // its-own, spec-falsifiability-reachability-a-feedable-checkpoint-an §D5)
@@ -301,11 +299,11 @@ describe("compiled lore evidence derives a cd target from ANY chain segment", ()
     expect(accepted.stderr).not.toContain(MISSING_FILE_WORDING);
     expect(accepted.stderr).toContain("--capture");
     expect(accepted.exitCode).toBe(4);
-    expect(readEvidenceCount(dir, taskSlug)).toBe(0);
+    expect(await readEvidenceCount(dir, taskSlug)).toBe(0);
   });
 
-  it("REGRESSION: `;` separators behave exactly like `&&`", () => {
-    const accepted = recordEvidence(dir, taskSlug, SEMICOLON_CHAIN);
+  it("REGRESSION: `;` separators behave exactly like `&&`", async () => {
+    const accepted = await recordEvidence(dir, taskSlug, SEMICOLON_CHAIN);
 
     // reason: SUPERSEDED (task-raise-the-evidence-tail-guard-s-predicate-to-
     // its-own, spec-falsifiability-reachability-a-feedable-checkpoint-an §D5)
@@ -321,11 +319,11 @@ describe("compiled lore evidence derives a cd target from ANY chain segment", ()
     expect(accepted.stderr).not.toContain(MISSING_FILE_WORDING);
     expect(accepted.stderr).toContain("--capture");
     expect(accepted.exitCode).toBe(4);
-    expect(readEvidenceCount(dir, taskSlug)).toBe(0);
+    expect(await readEvidenceCount(dir, taskSlug)).toBe(0);
   });
 
-  it("CONTROL: a no-cd command still resolves against cwd exactly as before", () => {
-    const accepted = recordEvidence(dir, taskSlug, NO_CD);
+  it("CONTROL: a no-cd command still resolves against cwd exactly as before", async () => {
+    const accepted = await recordEvidence(dir, taskSlug, NO_CD);
 
     // reason: SUPERSEDED (task-raise-the-evidence-tail-guard-s-predicate-to-
     // its-own, spec-falsifiability-reachability-a-feedable-checkpoint-an §D5)
@@ -341,13 +339,13 @@ describe("compiled lore evidence derives a cd target from ANY chain segment", ()
     expect(accepted.stderr).not.toContain(MISSING_FILE_WORDING);
     expect(accepted.stderr).toContain("--capture");
     expect(accepted.exitCode).toBe(4);
-    expect(readEvidenceCount(dir, taskSlug)).toBe(0);
+    expect(await readEvidenceCount(dir, taskSlug)).toBe(0);
   });
 
-  it("ERROR: the SAME mandated shape naming an ABSENT file is still refused, writing no row", () => {
-    const before = readEvidenceCount(dir, taskSlug);
+  it("ERROR: the SAME mandated shape naming an ABSENT file is still refused, writing no row", async () => {
+    const before = await readEvidenceCount(dir, taskSlug);
 
-    const refused = recordEvidence(dir, taskSlug, MANDATED_SHAPE_ABSENT_FILE);
+    const refused = await recordEvidence(dir, taskSlug, MANDATED_SHAPE_ABSENT_FILE);
 
     expect(refused.exitCode).toBe(4);
     expect(refused.stderr).toContain(MISSING_FILE_WORDING);
@@ -355,29 +353,29 @@ describe("compiled lore evidence derives a cd target from ANY chain segment", ()
     expect(refused.stderr).toContain(join(dir, NESTED_DIR_RELATIVE));
     // ...and the new clause must name the target it DERIVED, by value.
     expect(refused.stderr).toContain(`${DERIVED_TARGET_WORDING} ${NESTED_DIR_RELATIVE}`);
-    expect(readEvidenceCount(dir, taskSlug)).toBe(before);
+    expect(await readEvidenceCount(dir, taskSlug)).toBe(before);
   });
 
-  it("BOUNDARY: a two-cd chain's refusal names the LAST target by value", () => {
-    const before = readEvidenceCount(dir, taskSlug);
+  it("BOUNDARY: a two-cd chain's refusal names the LAST target by value", async () => {
+    const before = await readEvidenceCount(dir, taskSlug);
 
-    const refused = recordEvidence(dir, taskSlug, TWO_CD_ABSENT_FILE);
+    const refused = await recordEvidence(dir, taskSlug, TWO_CD_ABSENT_FILE);
 
     expect(refused.exitCode).toBe(4);
     expect(refused.stderr).toContain(`${DERIVED_TARGET_WORDING} second`);
     // The FIRST cd must not be what it derived — pins last-cd-wins by value.
     expect(refused.stderr).not.toContain(`${DERIVED_TARGET_WORDING} first`);
     expect(refused.stderr).toContain(join(dir, "second"));
-    expect(readEvidenceCount(dir, taskSlug)).toBe(before);
+    expect(await readEvidenceCount(dir, taskSlug)).toBe(before);
   });
 
-  it("NEGATIVE: a no-cd refusal reports that no cd target was derived", () => {
-    const before = readEvidenceCount(dir, taskSlug);
+  it("NEGATIVE: a no-cd refusal reports that no cd target was derived", async () => {
+    const before = await readEvidenceCount(dir, taskSlug);
 
-    const refused = recordEvidence(dir, taskSlug, NO_CD_ABSENT_FILE);
+    const refused = await recordEvidence(dir, taskSlug, NO_CD_ABSENT_FILE);
 
     expect(refused.exitCode).toBe(4);
     expect(refused.stderr).toContain(`${DERIVED_TARGET_WORDING} none`);
-    expect(readEvidenceCount(dir, taskSlug)).toBe(before);
+    expect(await readEvidenceCount(dir, taskSlug)).toBe(before);
   });
 });

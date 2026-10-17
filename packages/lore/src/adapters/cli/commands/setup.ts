@@ -80,7 +80,7 @@
  * `--project` is scaffolding).
  *
  * Target directory resolution (SPEC-046 §Design, "in the ADAPTER"):
- *   `--claude-dir <path>` > `$CLAUDE_CONFIG_DIR` > `join(homedir(), ".claude")`
+ *   `--claude-dir <path>` > `$CLAUDE_CONFIG_DIR` > `join(currentHomeDir(), ".claude")`
  *   — see `../setup-args.js::resolveTargetDir` (the ONLY `os.homedir()` call
  *   site in this command).
  *
@@ -131,7 +131,7 @@
 
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
-import { homedir } from "node:os";
+import { currentHomeDir } from "@lore/core/node";
 import { createInterface } from "node:readline/promises";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -648,7 +648,7 @@ function buildProjectRefreshDeps(opts: {
   const fragmentDeps = buildRefreshFragmentDeps({
     repoRoot: opts.repoDir,
     assetsRoot: opts.assetsRoot,
-    home: homedir(),
+    home: currentHomeDir(),
     globalLayer: toContextLayer(globalConfig.value),
     projectLayer: toContextLayer(projectConfig.value),
   });
@@ -1231,7 +1231,7 @@ export default defineCommand({
       const checkTargetDir = resolveTargetDir({
         ...(claudeDirFlag !== undefined ? { claudeDirFlag } : {}),
         env: process.env,
-        homeDir: homedir(),
+        homeDir: currentHomeDir(),
       });
       await runCheckDispatch({ targetDir: checkTargetDir, json });
       return;
@@ -1270,7 +1270,7 @@ export default defineCommand({
       const claudeDir = resolveTargetDir({
         ...(claudeDirFlag !== undefined ? { claudeDirFlag } : {}),
         env: process.env,
-        homeDir: homedir(),
+        homeDir: currentHomeDir(),
       });
       await runProjectScaffold({ json, yes: args.yes === true, assetsRoot, binPath, claudeDir });
       return;
@@ -1283,7 +1283,7 @@ export default defineCommand({
     const targetDir = resolveTargetDir({
       ...(claudeDirFlag !== undefined ? { claudeDirFlag } : {}),
       env: process.env,
-      homeDir: homedir(),
+      homeDir: currentHomeDir(),
     });
 
     const mcpRegistrar = new CapturingMcpRegistrar(new RealMcpRegistrar());

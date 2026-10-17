@@ -125,6 +125,23 @@ function sleepSyncMs(ms: number): void {
   Atomics.wait(sharedFlag, 0, 0, ms);
 }
 
+/** Receives every `writeAllSync` write instead of the real fd (see {@link setStdioInterceptor}). */
+export type StdioInterceptor = (fd: 1 | 2, text: string) => void;
+
+let stdioInterceptor: StdioInterceptor | null = null;
+
+/**
+ * Route every `writeAllSync` write to `interceptor` (or back to the real fds with `null`).
+ *
+ * reason: the in-process test runner (tests/helpers/run-lore-in-process.ts, adr-tg-1 option b) runs a
+ * command inside the test process and must capture what it prints. Commands that call `writeAllSync`
+ * directly (governance, fragments) bypass `console` and `process.stdout`, so this is the one seam that
+ * catches them. Production never installs an interceptor.
+ */
+export function setStdioInterceptor(interceptor: StdioInterceptor | null): void {
+  stdioInterceptor = interceptor;
+}
+
 /**
  * Write the FULL utf8-encoded `text` to `fd`, looping through short writes
  * and EAGAIN retries until every byte is delivered — the fix for the
@@ -139,6 +156,10 @@ function sleepSyncMs(ms: number): void {
  *   writeAllSync(1, JSON.stringify(bigPayload) + "\n");
  */
 export function writeAllSync(fd: 1 | 2, text: string): void {
+  if (stdioInterceptor !== null) {
+    stdioInterceptor(fd, text);
+    return;
+  }
   const buffer = Buffer.from(text, "utf8");
   let offset = 0;
   while (offset < buffer.length) {

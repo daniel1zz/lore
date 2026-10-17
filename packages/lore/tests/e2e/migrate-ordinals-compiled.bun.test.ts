@@ -1,4 +1,3 @@
-// @spawns dist/lore
 /**
  * @spec_ref SPEC-084 §One-shot repair migration, §Acceptance Criteria AC-084-5 —
  *   task task-skill-test-t7-compiled-binary-e2e-migrate-ordinals-dry-run.
@@ -86,6 +85,10 @@
  *   REGRESSION: dry-run performs literally ZERO writes (row-state +
  *               whole-file hash proof); a second `--apply` run is idempotent
  *               (empty report, zero writes, byte-unchanged file hash).
+ *
+ * TG-25 (adr-tg-1 option b): the commands run IN-PROCESS through tests/helpers/run-lore-in-process.ts, not through
+ * dist/lore. Wherever the prose above says the compiled binary is spawned or its freshness asserted, that is the
+ * history of this file; the assertions and the throwaway-corpus rule are unchanged.
  */
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -97,7 +100,7 @@ import { createHash } from "node:crypto";
 import type { DocRecord, ExportIndex, MirrorHumanId } from "@lore/core";
 import { assertIsMirrorHumanId, SELF_DECLARED_ORDINAL_TITLE_REFUSAL } from "@lore/core";
 import { SQLiteStore } from "../../src/store/sqlite-store.js";
-import { assertFreshBinary } from "../integration/helpers/assert-fresh-binary";
+import { runLoreInProcess } from "../helpers/run-lore-in-process";
 
 /**
  * Narrows a raw human_id string literal to the branded {@link MirrorHumanId} for fixture
@@ -114,7 +117,6 @@ function brandedHumanId(value: string): MirrorHumanId {
 
 // tests/e2e/ -> tests/ -> packages/lore/ -> packages/ -> repo root (4 levels up).
 const REPO_ROOT = new URL("../../../../", import.meta.url).pathname.replace(/\/$/, "");
-const LORE_BIN = join(REPO_ROOT, "dist", "lore");
 
 interface RunResult {
   readonly stdout: string;
@@ -130,20 +132,20 @@ interface RunResult {
  * bounded default buffer (Bun's own default, never piped through a shell) —
  * BUG-004 spawn discipline (project CLAUDE.md).
  */
-function runLore(args: string[], cwd: string): RunResult {
-  const proc = Bun.spawnSync([LORE_BIN, ...args], {
+async function runLore(args: string[], cwd: string): Promise<RunResult> {
+  const proc = await runLoreInProcess(args, {
     cwd,
     env: { ...process.env, HOME: cwd, CLAUDECODE: "1" },
   });
   return {
-    stdout: proc.stdout.toString(),
-    stderr: proc.stderr.toString(),
-    exitCode: proc.exitCode ?? 1,
+    stdout: proc.stdout,
+    stderr: proc.stderr,
+    exitCode: proc.exitCode,
   };
 }
 
-function initCorpus(dir: string): void {
-  const result = runLore(["init"], dir);
+async function initCorpus(dir: string): Promise<void> {
+  const result = await runLore(["init"], dir);
   if (result.exitCode !== 0) {
     throw new Error(`lore init failed: ${result.stderr}`);
   }
@@ -284,22 +286,18 @@ describe("AC-084-5: compiled dist/lore migrate ordinals — dry-run/apply/idempo
   let specExempt: DocRecord; // domain-overview, permanently NULL ordinal
   let adrOne: DocRecord; // ADR-1, cross-type independence + "first of type"
 
-  beforeAll(() => {
-    assertFreshBinary(LORE_BIN, [
-      join(REPO_ROOT, "packages", "lore", "src"),
-      join(REPO_ROOT, "packages", "core", "src"),
-    ]);
+  beforeAll(async () => {
 
     dir = mkdtempSync(join(tmpdir(), "lore-t7-migrate-ordinals-"));
     // Never the repo's own .lore/ corpus (project CLAUDE.md hard rule) — a
     // genuine os.tmpdir() path is never a prefix of REPO_ROOT.
     expect(dir.startsWith(REPO_ROOT)).toBe(false);
-    initCorpus(dir);
+    await initCorpus(dir);
     disableAllGates(dir);
     disableTraceRecording(dir);
     dbPath = dbPathFor(dir);
 
-    const prdResult = runLore(
+    const prdResult = await runLore(
       ["create", "prd", "--title", "T7 Ordinal Migration E2E Root PRD", "--content", "## Overview\nroot", "--no-ai", "--json"],
       dir,
     );
@@ -394,8 +392,8 @@ describe("AC-084-5: compiled dist/lore migrate ordinals — dry-run/apply/idempo
     }
   });
 
-  it("NEGATIVE: dist/lore create spec with a self-declared SPEC-99 title is rejected exit 4 (the guard the raw-store seeding above must bypass)", () => {
-    const result = runLore(
+  it("NEGATIVE: dist/lore create spec with a self-declared SPEC-99 title is rejected exit 4 (the guard the raw-store seeding above must bypass)", async () => {
+    const result = await runLore(
       [
         "create",
         "spec",
@@ -420,10 +418,10 @@ describe("AC-084-5: compiled dist/lore migrate ordinals — dry-run/apply/idempo
     expect(rows[0]?.n).toBe(0);
   });
 
-  it("HAPPY+BOUNDARY: dry-run computes the full converging report (collision priority, cross-type coexistence) with ZERO writes", () => {
+  it("HAPPY+BOUNDARY: dry-run computes the full converging report (collision priority, cross-type coexistence) with ZERO writes", async () => {
     const beforeHash = hashDbState(dbPath);
 
-    const result = runLore(["migrate", "ordinals", "--json"], dir);
+    const result = await runLore(["migrate", "ordinals", "--json"], dir);
     expect(result.exitCode).toBe(0);
 
     const envelope = JSON.parse(result.stdout) as JsonEnvelope<{
@@ -497,8 +495,8 @@ describe("AC-084-5: compiled dist/lore migrate ordinals — dry-run/apply/idempo
     expect(afterHash).toBe(beforeHash);
   });
 
-  it("STATE: --apply converges the corpus (bijective ordinals, prose-pure titles, export-index reconciled, SPEC-<n>/ADR-<n> resolve)", () => {
-    const result = runLore(["migrate", "ordinals", "--apply", "--json"], dir);
+  it("STATE: --apply converges the corpus (bijective ordinals, prose-pure titles, export-index reconciled, SPEC-<n>/ADR-<n> resolve)", async () => {
+    const result = await runLore(["migrate", "ordinals", "--apply", "--json"], dir);
     expect(result.exitCode).toBe(0);
 
     const envelope = JSON.parse(result.stdout) as JsonEnvelope<{
@@ -558,28 +556,28 @@ describe("AC-084-5: compiled dist/lore migrate ordinals — dry-run/apply/idempo
     // the CLI/MCP/dashboard display convention (`formatDocDisplayId`) — deliberately UNCHANGED
     // by the mirror's own padded `human_id` convention (`formatMirrorHumanId` is consumed only
     // by the export-index/filename mirror, never by general display — ordinal.ts:194-200).
-    const getSpec1 = runLore(["get", "SPEC-1", "--json"], dir);
+    const getSpec1 = await runLore(["get", "SPEC-1", "--json"], dir);
     expect(getSpec1.exitCode).toBe(0);
     const spec1Envelope = JSON.parse(getSpec1.stdout) as JsonEnvelope<{ doc: DocRecord }>;
     expect(spec1Envelope.data!.doc.slug).toBe(specA.slug);
     expect(spec1Envelope.data!.doc.title).toBe("Alpha decision");
     expect(spec1Envelope.data!.doc.ordinal).toBe(1);
 
-    const getSpec5 = runLore(["get", "spec-5", "--json"], dir); // lowercase + zero-form regression
+    const getSpec5 = await runLore(["get", "spec-5", "--json"], dir); // lowercase + zero-form regression
     expect(getSpec5.exitCode).toBe(0);
     const spec5Envelope = JSON.parse(getSpec5.stdout) as JsonEnvelope<{ doc: DocRecord }>;
     expect(spec5Envelope.data!.doc.slug).toBe(specE.slug);
 
     // Cross-type independence resolved through the compiled binary too:
     // ADR-1 and SPEC-1 both resolve to their own distinct docs.
-    const getAdr1 = runLore(["get", "ADR-1", "--json"], dir);
+    const getAdr1 = await runLore(["get", "ADR-1", "--json"], dir);
     expect(getAdr1.exitCode).toBe(0);
     const adr1Envelope = JSON.parse(getAdr1.stdout) as JsonEnvelope<{ doc: DocRecord }>;
     expect(adr1Envelope.data!.doc.slug).toBe(adrOne.slug);
     expect(adr1Envelope.data!.doc.title).toBe("Use store-atomic ordinals");
 
     // The exempt-kind doc never resolves via an ordinal ref (it never got one).
-    const getSpecExempt = runLore(["get", "spec-t7-domain-exempt", "--json"], dir);
+    const getSpecExempt = await runLore(["get", "spec-t7-domain-exempt", "--json"], dir);
     expect(getSpecExempt.exitCode).toBe(0);
     const exemptEnvelope = JSON.parse(getSpecExempt.stdout) as JsonEnvelope<{ doc: DocRecord }>;
     expect(exemptEnvelope.data!.doc.ordinal ?? null).toBeNull();
@@ -591,7 +589,7 @@ describe("AC-084-5: compiled dist/lore migrate ordinals — dry-run/apply/idempo
   // already-5-spawn STATE test would silently orphan that test's entry in
   // scripts/test-budget-ledger.json (spawnCount 5 -> 6), a change outside this task's own
   // file anchor (task-main-carries-two-red-e2e-cases-migrate-ordinals-compiled).
-  it("RESOLUTION SURFACE: dist/lore get resolves SPEC-1 and SPEC-001 to the SAME document, never silently different ones", () => {
+  it("RESOLUTION SURFACE: dist/lore get resolves SPEC-1 and SPEC-001 to the SAME document, never silently different ones", async () => {
     // This task's own load-bearing extra assertion: `SPEC-1` vs `SPEC-001` is a RESOLUTION
     // surface, not merely a rendering choice. `parseOrdinalRef` (ordinal.ts:244,
     // `/^(spec|adr)-0*(\d+)$/i`) strips leading zeros before matching, so both forms parse to
@@ -599,11 +597,11 @@ describe("AC-084-5: compiled dist/lore migrate ordinals — dry-run/apply/idempo
     // silent resolution to a DIFFERENT document — not the padding choice itself — is the
     // dangerous failure mode this assertion exists to catch; it must fail loud if that ever
     // stops being true, never quietly diverge.
-    const getSpec1 = runLore(["get", "SPEC-1", "--json"], dir);
+    const getSpec1 = await runLore(["get", "SPEC-1", "--json"], dir);
     expect(getSpec1.exitCode).toBe(0);
     const spec1Envelope = JSON.parse(getSpec1.stdout) as JsonEnvelope<{ doc: DocRecord }>;
 
-    const getSpec001 = runLore(["get", "SPEC-001", "--json"], dir);
+    const getSpec001 = await runLore(["get", "SPEC-001", "--json"], dir);
     expect(getSpec001.exitCode).toBe(0);
     const spec001Envelope = JSON.parse(getSpec001.stdout) as JsonEnvelope<{ doc: DocRecord }>;
 
@@ -614,10 +612,10 @@ describe("AC-084-5: compiled dist/lore migrate ordinals — dry-run/apply/idempo
     expect(spec1Envelope.data!.doc.ordinal).toBe(1);
   });
 
-  it("REGRESSION: a second --apply run is idempotent — empty report, zero writes, byte-unchanged corpus DB", () => {
+  it("REGRESSION: a second --apply run is idempotent — empty report, zero writes, byte-unchanged corpus DB", async () => {
     const beforeHash = hashDbState(dbPath);
 
-    const result = runLore(["migrate", "ordinals", "--apply", "--json"], dir);
+    const result = await runLore(["migrate", "ordinals", "--apply", "--json"], dir);
     expect(result.exitCode).toBe(0);
 
     const envelope = JSON.parse(result.stdout) as JsonEnvelope<{
@@ -643,8 +641,8 @@ describe("AC-084-5: compiled dist/lore migrate ordinals — dry-run/apply/idempo
     expect(afterHash).toBe(beforeHash);
   });
 
-  it("HAPPY: a NEW create after migration auto-allocates the next-free ordinal", () => {
-    const result = runLore(
+  it("HAPPY: a NEW create after migration auto-allocates the next-free ordinal", async () => {
+    const result = await runLore(
       [
         "create",
         "spec",
@@ -666,7 +664,7 @@ describe("AC-084-5: compiled dist/lore migrate ordinals — dry-run/apply/idempo
     // The stored title itself is never prefixed — composition is display-only.
     expect(doc.title).toBe("New Spec After Migration");
 
-    const getResult = runLore(["get", "SPEC-6", "--json"], dir);
+    const getResult = await runLore(["get", "SPEC-6", "--json"], dir);
     expect(getResult.exitCode).toBe(0);
     const getEnvelope = JSON.parse(getResult.stdout) as JsonEnvelope<{ doc: DocRecord }>;
     expect(getEnvelope.data!.doc.slug).toBe(doc.slug);

@@ -1,4 +1,3 @@
-// @spawns dist/lore
 /**
  * @spec_ref AC-CP-4 (spec-corpus-resolution-carries-provenance-and-a-foreign-write §D4)
  *
@@ -56,6 +55,10 @@
  *       keys already use — so a seventh predicate wired PAST that convention
  *       (e.g. a schema key with no matching exported resolver, or a resolver
  *       named off-pattern) goes RED. Pure, in-process, no subprocess spawn.
+ *
+ * TG-25 (adr-tg-1 option b): the commands run IN-PROCESS through tests/helpers/run-lore-in-process.ts, not through
+ * dist/lore. Wherever the prose above says the compiled binary is spawned or its freshness asserted, that is the
+ * history of this file; the assertions and the throwaway-corpus rule are unchanged.
  */
 
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
@@ -72,7 +75,7 @@ import { z } from "zod";
 // naming-convention.
 import { GateCheckpointConfigSchema } from "@lore/core";
 import * as loreCore from "@lore/core";
-import { assertFreshBinary } from "../integration/helpers/assert-fresh-binary";
+import { runLoreInProcess } from "../helpers/run-lore-in-process";
 
 // ─── Path / spawn setup (mirrors worktree-corpus-resolution.bun.test.ts) ───
 
@@ -80,7 +83,6 @@ import { assertFreshBinary } from "../integration/helpers/assert-fresh-binary";
 // up) — THIS worktree's own root, never a sibling worktree or main checkout,
 // because import.meta.url always points at THIS file's own on-disk location.
 const REPO_ROOT = new URL("../../../../", import.meta.url).pathname.replace(/\/$/, "");
-const LORE_BIN = join(REPO_ROOT, "dist", "lore");
 
 interface RunResult {
   readonly stdout: string;
@@ -110,11 +112,6 @@ beforeAll(() => {
         `a sibling worktree or the main checkout.`,
     );
   }
-
-  assertFreshBinary(LORE_BIN, [
-    join(REPO_ROOT, "packages", "lore", "src"),
-    join(REPO_ROOT, "packages", "core", "src"),
-  ]);
 });
 
 const cleanupDirs: string[] = [];
@@ -158,20 +155,20 @@ function initGitRepo(dir: string): void {
  * `cwd` (never the real user's `~/.config/lore`). `CLAUDECODE=1` resolves the
  * "agent" caller surface (SPEC-024) so no write here risks a nested AI call.
  */
-function runLore(args: string[], cwd: string): RunResult {
-  const proc = Bun.spawnSync([LORE_BIN, ...args], {
+async function runLore(args: string[], cwd: string): Promise<RunResult> {
+  const proc = await runLoreInProcess(args, {
     cwd,
     env: { ...process.env, HOME: cwd, CLAUDECODE: "1" },
   });
   return {
-    stdout: proc.stdout.toString(),
-    stderr: proc.stderr.toString(),
-    exitCode: proc.exitCode ?? 1,
+    stdout: proc.stdout,
+    stderr: proc.stderr,
+    exitCode: proc.exitCode,
   };
 }
 
-function initCorpus(dir: string): void {
-  const result = runLore(["init", "--author", "foreign-write-default-e2e"], dir);
+async function initCorpus(dir: string): Promise<void> {
+  const result = await runLore(["init", "--author", "foreign-write-default-e2e"], dir);
   if (result.exitCode !== 0) {
     throw new Error(`fixture setup: 'lore init' failed in ${dir}: ${result.stderr}`);
   }
@@ -185,7 +182,7 @@ function initCorpus(dir: string): void {
  * worktree at `repo/.claude/worktrees/agent-x` carrying no `.lore/` of its
  * own. Returns both paths; every write in (a)/(b) targets `worktreePath`.
  */
-function createNestedWorktreeFixture(prefix: string): { repoRoot: string; worktreePath: string } {
+async function createNestedWorktreeFixture(prefix: string): Promise<{ repoRoot: string; worktreePath: string }> {
   const repoRoot = mkScratchDir(`fcwd-${prefix}-repo-`);
 
   // Pins "every fixture is an mkdtemp repo asserted to live OUTSIDE the repo
@@ -201,7 +198,7 @@ function createNestedWorktreeFixture(prefix: string): { repoRoot: string; worktr
   }
 
   initGitRepo(repoRoot);
-  initCorpus(repoRoot);
+  await initCorpus(repoRoot);
 
   mkdirSync(join(repoRoot, ".claude", "worktrees"), { recursive: true });
   const worktreeRelPath = join(".claude", "worktrees", "agent-x");
@@ -264,9 +261,9 @@ function assertForeignWriteRefused(result: RunResult, acLabel: string): void {
 describe("foreign_corpus_write config default, control, and structural dispatch (AC-CP-4)", () => {
   it(
     "(a) BEHAVIOURAL DEFAULT: a non-lifecycle foreign write is refused by default — EXPECTED RED until the guard task lands",
-    () => {
-      const { worktreePath } = createNestedWorktreeFixture("a");
-      const result = runLore(knowledgeCreateArgs("a"), worktreePath);
+    async () => {
+      const { worktreePath } = await createNestedWorktreeFixture("a");
+      const result = await runLore(knowledgeCreateArgs("a"), worktreePath);
       assertForeignWriteRefused(result, "AC-CP-4(a)");
     },
     30000,
@@ -274,8 +271,8 @@ describe("foreign_corpus_write config default, control, and structural dispatch 
 
   it(
     "(b) CONTROL: foreign_corpus_write.enabled:false in the project config leaves the identical write succeeding — VACUOUS until (a) is also green (see module header)",
-    () => {
-      const { repoRoot, worktreePath } = createNestedWorktreeFixture("b");
+    async () => {
+      const { repoRoot, worktreePath } = await createNestedWorktreeFixture("b");
 
       // Same map key `resolveForeignCorpusWriteGateEnabled` reads
       // (config.ts) — "corpus-write", deliberately not one of the four real
@@ -287,7 +284,7 @@ describe("foreign_corpus_write config default, control, and structural dispatch 
         ),
       );
 
-      const result = runLore(knowledgeCreateArgs("b"), worktreePath);
+      const result = await runLore(knowledgeCreateArgs("b"), worktreePath);
       // NOTE (per this file's module header): with no guard wired at all yet,
       // EVERY write succeeds regardless of this config knob — this assertion
       // is currently satisfied for the WRONG reason (vacuously) and only
@@ -298,7 +295,7 @@ describe("foreign_corpus_write config default, control, and structural dispatch 
       // Positive landing check (mirrors AC-CP-3's "asserts both writes
       // LANDED" discipline) — even vacuously, confirm the doc actually
       // reached the PARENT corpus rather than the command silently no-op'ing.
-      const verify = runLore(["list", "--type", "knowledge", "--json"], repoRoot);
+      const verify = await runLore(["list", "--type", "knowledge", "--json"], repoRoot);
       expect(verify.exitCode).toBe(0);
       const parsed = JSON.parse(verify.stdout) as { data: { docs: Array<{ title: string }> } };
       expect(parsed.data.docs.some((d) => d.title === "AC-CP-4 fixture write b")).toBe(true);

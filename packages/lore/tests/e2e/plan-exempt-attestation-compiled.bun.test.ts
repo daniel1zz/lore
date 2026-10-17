@@ -1,4 +1,3 @@
-// @spawns dist/lore
 /**
  * plan-exempt-attestation-compiled.bun.test.ts — SPEC-069 AC-069-13: THE PAIR.
  *
@@ -31,6 +30,10 @@
  * @spec_ref AC-069-13 (the pair + naming), AC-069-9 (refusal exit codes
  *   observed from a REAL process), AC-069-11 (no `lore set` back door,
  *   observed as a real exit code) — SPEC-069 §Design Decisions D1
+ *
+ * TG-25 (adr-tg-1 option b): the commands run IN-PROCESS through tests/helpers/run-lore-in-process.ts, not through
+ * dist/lore. Wherever the prose above says the compiled binary is spawned or its freshness asserted, that is the
+ * history of this file; the assertions and the throwaway-corpus rule are unchanged.
  */
 
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
@@ -38,8 +41,8 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import yaml from "yaml";
-import { assertFreshBinary } from "../integration/helpers/assert-fresh-binary";
-import { citeSpecViaCli, loreRunnerFor } from "../helpers/cli-live-rule.js";
+import { citeSpecViaAsyncCli, asyncLoreRunnerFor } from "../helpers/cli-live-rule.js";
+import { runLoreInProcess } from "../helpers/run-lore-in-process";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -53,27 +56,26 @@ interface RunResult {
 
 // tests/e2e/ -> packages/lore/ -> packages/ -> repo root (4 levels up).
 const PROJECT_ROOT = new URL("../../../../", import.meta.url).pathname.replace(/\/$/, "");
-const LORE_BIN = join(PROJECT_ROOT, "dist", "lore");
 
 const EXEMPT_REASON = "every task here is a RED/TDD anchor; attesting would misrepresent it";
 const EXEMPT_KIND = "red-tdd";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-function runLore(args: string[], cwd: string): RunResult {
-  const proc = Bun.spawnSync([LORE_BIN, ...args], {
+async function runLore(args: string[], cwd: string): Promise<RunResult> {
+  const proc = await runLoreInProcess(args, {
     cwd,
     env: { ...process.env, HOME: cwd, CLAUDE_CODE_SESSION_ID: "a77e57e1-aaaa-bbbb-cccc-111111111111" },
   });
   return {
-    stdout: proc.stdout.toString(),
-    stderr: proc.stderr.toString(),
-    exitCode: proc.exitCode ?? 1,
+    stdout: proc.stdout,
+    stderr: proc.stderr,
+    exitCode: proc.exitCode,
   };
 }
 
-function initCorpus(dir: string): void {
-  const result = runLore(["init"], dir);
+async function initCorpus(dir: string): Promise<void> {
+  const result = await runLore(["init"], dir);
   if (result.exitCode !== 0) throw new Error(`lore init failed: ${result.stderr}`);
 }
 
@@ -96,8 +98,8 @@ function appendWorkflowConfig(dir: string, fragmentYaml: string): void {
 }
 
 /** Reads a doc's `extra` through the real binary's JSON surface. */
-function getExtra(slug: string, dir: string): Record<string, unknown> {
-  const result = runLore(["get", slug, "--json"], dir);
+async function getExtra(slug: string, dir: string): Promise<Record<string, unknown>> {
+  const result = await runLore(["get", slug, "--json"], dir);
   expect(result.exitCode).toBe(0);
   const payload = JSON.parse(result.stdout) as { data: { doc: { extra: Record<string, unknown> } } };
   return payload.data.doc.extra;
@@ -113,14 +115,14 @@ function getExtra(slug: string, dir: string): Record<string, unknown> {
  * Walks the plan to `active` so the later `archived` transition is a legal
  * `VALID_TRANSITIONS` edge and the denial can only be the gate's doing.
  */
-function createDeniedPlan(dir: string): { planSlug: string } {
-  const prd = runLore(
+async function createDeniedPlan(dir: string): Promise<{ planSlug: string }> {
+  const prd = await runLore(
     ["create", "prd", "--title", "AC-069-13 Exemption PRD", "--content", "PRD body.", "--no-ai"],
     dir,
   );
   expect(prd.exitCode).toBe(0);
 
-  const spec = runLore(
+  const spec = await runLore(
     [
       "create", "spec",
       "--title", "AC-069-13 Exemption Spec",
@@ -133,7 +135,7 @@ function createDeniedPlan(dir: string): { planSlug: string } {
   expect(spec.exitCode).toBe(0);
   const specSlug = parseSlug(spec.stdout);
 
-  const ac = runLore(
+  const ac = await runLore(
     [
       "ac", "add", specSlug, "AC-069-13-1",
       "--statement", "The attestation exemption is what changes the plan-close verdict.",
@@ -150,10 +152,10 @@ function createDeniedPlan(dir: string): { planSlug: string } {
   appendWorkflowConfig(dir, "\nworkflow:\n  review:\n    judgment_required_types: []\n");
   appendWorkflowConfig(dir, "\nworkflow:\n  attestation:\n    min_ratio: 0.5\n");
 
-  citeSpecViaCli(loreRunnerFor(runLore, dir), dir, undefined, specSlug, "AC-069-13-1"); // BR-1007: approvable only when a criterion cites a live rule
-  expect(runLore(["approve", specSlug], dir).exitCode).toBe(0);
+  await citeSpecViaAsyncCli(asyncLoreRunnerFor(runLore, dir), dir, undefined, specSlug, "AC-069-13-1"); // BR-1007: approvable only when a criterion cites a live rule
+  expect((await runLore(["approve", specSlug], dir)).exitCode).toBe(0);
 
-  const plan = runLore(
+  const plan = await runLore(
     [
       "create", "plan",
       "--title", "AC-069-13 Exemption Plan",
@@ -167,11 +169,11 @@ function createDeniedPlan(dir: string): { planSlug: string } {
   const planSlug = parseSlug(plan.stdout);
 
   // A sibling `extra` key the exemption write must preserve byte-identically.
-  expect(runLore(["phase", "add", planSlug, "Phase One"], dir).exitCode).toBe(0);
-  expect(runLore(["approve", planSlug], dir).exitCode).toBe(0);
-  expect(runLore(["set", planSlug, "--status", "active"], dir).exitCode).toBe(0);
+  expect((await runLore(["phase", "add", planSlug, "Phase One"], dir)).exitCode).toBe(0);
+  expect((await runLore(["approve", planSlug], dir)).exitCode).toBe(0);
+  expect((await runLore(["set", planSlug, "--status", "active"], dir)).exitCode).toBe(0);
 
-  const task = runLore(
+  const task = await runLore(
     [
       "create", "task",
       "--title", "AC-069-13 Exemption Task",
@@ -200,10 +202,10 @@ function createDeniedPlan(dir: string): { planSlug: string } {
   // non-empty self-reported tail succeed while staying UNATTESTED (this
   // fixture's own point, per the comment above).
   expect(
-    runLore(
+    (await runLore(
       ["evidence", parseSlug(task.stdout), "--oracle", "manual", "--command", "bun test", "--result", "pass", "--output-tail", "ok"],
       dir,
-    ).exitCode,
+    )).exitCode,
   ).toBe(0);
 
   return { planSlug };
@@ -213,16 +215,9 @@ function createDeniedPlan(dir: string): { planSlug: string } {
 
 let tmpDir: string;
 
-beforeAll(() => {
-  assertFreshBinary(LORE_BIN, [
-    join(PROJECT_ROOT, "packages", "lore", "src"),
-    join(PROJECT_ROOT, "packages", "core", "src"),
-  ]);
-});
-
-beforeEach(() => {
+beforeEach(async () => {
   tmpDir = mkdtempSync(join(tmpdir(), "lore-plan-exempt-attestation-"));
-  initCorpus(tmpDir);
+  await initCorpus(tmpDir);
 });
 
 afterEach(() => {
@@ -236,29 +231,29 @@ afterEach(() => {
 // ═══ AC-069-13 — THE PAIR ═══════════════════════════════════════════════════
 
 describe("AC-069-13 — the exemption is what changes the plan-close verdict", () => {
-  it("AC-069-13 the SAME plan is denied without the exemption and closes with it, and the close NAMES it", () => {
-    const { planSlug } = createDeniedPlan(tmpDir);
+  it("AC-069-13 the SAME plan is denied without the exemption and closes with it, and the close NAMES it", async () => {
+    const { planSlug } = await createDeniedPlan(tmpDir);
 
     // ── 1. CONTROL: the floor genuinely denies this plan ──────────────────
-    const denied = runLore(["set", planSlug, "--status", "archived"], tmpDir);
+    const denied = await runLore(["set", planSlug, "--status", "archived"], tmpDir);
     expect(denied.exitCode).not.toBe(0);
     expect(denied.stderr).toContain("ATTESTATION_FLOOR_NOT_MET");
     // Still not archived — the gate refused before the write.
-    expect(runLore(["get", planSlug, "--json"], tmpDir).stdout).not.toContain('"status": "archived"');
+    expect((await runLore(["get", planSlug, "--json"], tmpDir)).stdout).not.toContain('"status": "archived"');
 
     // The denial must ALSO advertise the verb that resolves it — guidance with
     // no command behind it is the defect SPEC-069 closes.
     expect(denied.stderr).toContain("lore plan exempt-attestation");
 
     // ── 2. Declare the exemption with the dedicated writer ────────────────
-    const exempt = runLore(
+    const exempt = await runLore(
       ["plan", "exempt-attestation", planSlug, "--reason", EXEMPT_REASON, "--kind", EXEMPT_KIND],
       tmpDir,
     );
     expect(exempt.exitCode).toBe(0);
 
     // All three fields authored; the sibling `phases` key survived the merge.
-    const extra = getExtra(planSlug, tmpDir);
+    const extra = await getExtra(planSlug, tmpDir);
     expect(extra["attestation_exempt"]).toBe(true);
     expect(extra["attestation_exempt_reason"]).toBe(EXEMPT_REASON);
     expect(extra["attestation_exempt_kind"]).toBe(EXEMPT_KIND);
@@ -266,7 +261,7 @@ describe("AC-069-13 — the exemption is what changes the plan-close verdict", (
     expect(JSON.stringify(extra["phases"])).toContain("Phase One");
 
     // ── 3. TREATMENT: the identical plan now closes ───────────────────────
-    const closed = runLore(["set", planSlug, "--status", "archived"], tmpDir);
+    const closed = await runLore(["set", planSlug, "--status", "archived"], tmpDir);
     expect(closed.exitCode).toBe(0);
     expect(closed.stderr).not.toContain("ATTESTATION_FLOOR_NOT_MET");
 
@@ -283,19 +278,19 @@ describe("AC-069-13 — the exemption is what changes the plan-close verdict", (
    * is closed twice — if a second attempt were what unblocked the close, this
    * would pass too. It must stay denied.
    */
-  it("AC-069-13 CONTROL: an identical plan with NO exemption stays denied on the second attempt too", () => {
-    const { planSlug } = createDeniedPlan(tmpDir);
+  it("AC-069-13 CONTROL: an identical plan with NO exemption stays denied on the second attempt too", async () => {
+    const { planSlug } = await createDeniedPlan(tmpDir);
 
-    const first = runLore(["set", planSlug, "--status", "archived"], tmpDir);
+    const first = await runLore(["set", planSlug, "--status", "archived"], tmpDir);
     expect(first.exitCode).not.toBe(0);
     expect(first.stderr).toContain("ATTESTATION_FLOOR_NOT_MET");
 
-    const second = runLore(["set", planSlug, "--status", "archived"], tmpDir);
+    const second = await runLore(["set", planSlug, "--status", "archived"], tmpDir);
     expect(second.exitCode).not.toBe(0);
     expect(second.stderr).toContain("ATTESTATION_FLOOR_NOT_MET");
 
     // And no exemption fields materialised on their own.
-    const extra = getExtra(planSlug, tmpDir);
+    const extra = await getExtra(planSlug, tmpDir);
     expect(extra["attestation_exempt"]).toBeUndefined();
   });
 
@@ -304,16 +299,16 @@ describe("AC-069-13 — the exemption is what changes the plan-close verdict", (
    * writer must never be able to author one. Both halves are refused BEFORE any
    * write — proven here against a real process, not just the pure classifier.
    */
-  it("AC-069-13 a half-declared exemption can never reach the corpus (a bare flag would be a lie)", () => {
-    const { planSlug } = createDeniedPlan(tmpDir);
+  it("AC-069-13 a half-declared exemption can never reach the corpus (a bare flag would be a lie)", async () => {
+    const { planSlug } = await createDeniedPlan(tmpDir);
 
-    const blankReason = runLore(
+    const blankReason = await runLore(
       ["plan", "exempt-attestation", planSlug, "--reason", "   ", "--kind", EXEMPT_KIND],
       tmpDir,
     );
     expect(blankReason.exitCode).toBe(2);
 
-    const badKind = runLore(
+    const badKind = await runLore(
       ["plan", "exempt-attestation", planSlug, "--reason", EXEMPT_REASON, "--kind", "bogus-kind"],
       tmpDir,
     );
@@ -321,30 +316,30 @@ describe("AC-069-13 — the exemption is what changes the plan-close verdict", (
     expect(badKind.stderr).toContain("red-tdd");
     expect(badKind.stderr).toContain("pipeline-unreachable");
 
-    const missingKind = runLore(
+    const missingKind = await runLore(
       ["plan", "exempt-attestation", planSlug, "--reason", EXEMPT_REASON],
       tmpDir,
     );
     expect(missingKind.exitCode).toBe(2);
 
     // Nothing was written by any of the three, and the plan is still denied.
-    expect(getExtra(planSlug, tmpDir)["attestation_exempt"]).toBeUndefined();
-    expect(runLore(["set", planSlug, "--status", "archived"], tmpDir).exitCode).not.toBe(0);
+    expect((await getExtra(planSlug, tmpDir))["attestation_exempt"]).toBeUndefined();
+    expect((await runLore(["set", planSlug, "--status", "archived"], tmpDir)).exitCode).not.toBe(0);
   });
 
-  it("AC-069-11 NO BACK DOOR: `lore set <plan> --attestation-exempt` exits 2 as an unknown flag", () => {
-    const { planSlug } = createDeniedPlan(tmpDir);
+  it("AC-069-11 NO BACK DOOR: `lore set <plan> --attestation-exempt` exits 2 as an unknown flag", async () => {
+    const { planSlug } = await createDeniedPlan(tmpDir);
 
-    const backDoor = runLore(["set", planSlug, "--attestation-exempt"], tmpDir);
+    const backDoor = await runLore(["set", planSlug, "--attestation-exempt"], tmpDir);
     expect(backDoor.exitCode).toBe(2);
 
-    const backDoorValued = runLore(["set", planSlug, "--attestation-exempt", "true"], tmpDir);
+    const backDoorValued = await runLore(["set", planSlug, "--attestation-exempt", "true"], tmpDir);
     expect(backDoorValued.exitCode).toBe(2);
 
     // CONTROL: `set` is not refusing everything — a declared flag still works.
-    expect(runLore(["set", planSlug, "--priority", "high"], tmpDir).exitCode).toBe(0);
+    expect((await runLore(["set", planSlug, "--priority", "high"], tmpDir)).exitCode).toBe(0);
 
-    expect(getExtra(planSlug, tmpDir)["attestation_exempt"]).toBeUndefined();
+    expect((await getExtra(planSlug, tmpDir))["attestation_exempt"]).toBeUndefined();
   });
 
   /**
@@ -352,32 +347,32 @@ describe("AC-069-13 — the exemption is what changes the plan-close verdict", (
    * plan, and why" from the REAL binary with a REAL actor, not just from the
    * service under a hand-passed `by`.
    */
-  it("AC-069-10 the exemption lands in the audit trail with the resolved actor and the reason", () => {
-    const { planSlug } = createDeniedPlan(tmpDir);
+  it("AC-069-10 the exemption lands in the audit trail with the resolved actor and the reason", async () => {
+    const { planSlug } = await createDeniedPlan(tmpDir);
     expect(
-      runLore(
+      (await runLore(
         ["plan", "exempt-attestation", planSlug, "--reason", EXEMPT_REASON, "--kind", EXEMPT_KIND],
         tmpDir,
-      ).exitCode,
+      )).exitCode,
     ).toBe(0);
 
-    const audit = runLore(["audit", "--json"], tmpDir);
+    const audit = await runLore(["audit", "--json"], tmpDir);
     expect(audit.exitCode).toBe(0);
     expect(audit.stdout).toContain("exempt-attestation");
     expect(audit.stdout).toContain("agent:session-a77e57e1");
     expect(audit.stdout).toContain(EXEMPT_REASON);
   });
 
-  it("AC-069-13 the assessment-freshness sibling verb is reachable from the same group", () => {
-    const { planSlug } = createDeniedPlan(tmpDir);
+  it("AC-069-13 the assessment-freshness sibling verb is reachable from the same group", async () => {
+    const { planSlug } = await createDeniedPlan(tmpDir);
 
-    const result = runLore(
+    const result = await runLore(
       ["plan", "exempt-assessment-freshness", planSlug, "--reason", "judged outcome is stale by design"],
       tmpDir,
     );
     expect(result.exitCode).toBe(0);
 
-    const extra = getExtra(planSlug, tmpDir);
+    const extra = await getExtra(planSlug, tmpDir);
     expect(extra["assessment_freshness_exempt"]).toBe(true);
     expect(extra["assessment_freshness_exempt_reason"]).toBe("judged outcome is stale by design");
     // The attestation fields were NOT written by the freshness verb.

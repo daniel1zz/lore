@@ -1,4 +1,3 @@
-// @spawns dist/lore
 /**
  * Compiled-binary e2e oracle for AC-ICL-10
  * (spec-issue-closure-loop-computed-resolution-agent-reachable, §D2) — the
@@ -48,6 +47,10 @@
  *
  * @spec_ref spec-issue-closure-loop-computed-resolution-agent-reachable §D2,
  *   AC-ICL-10; task-p2-computed-closed-state-for-archived-issues-without-a.
+ *
+ * TG-25 (adr-tg-1 option b): the commands run IN-PROCESS through tests/helpers/run-lore-in-process.ts, not through
+ * dist/lore. Wherever the prose above says the compiled binary is spawned or its freshness asserted, that is the
+ * history of this file; the assertions and the throwaway-corpus rule are unchanged.
  */
 
 import { RecordLockService } from "../../src/service/record-lock-service.js";
@@ -56,15 +59,14 @@ import { afterEach, beforeAll, describe, expect, it } from "vitest";
 import { mkdtempSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
-import { assertFreshBinary } from "../integration/helpers/assert-fresh-binary";
 import { SQLiteStore } from "../../src/store/sqlite-store.js";
 import { CorpusService } from "../../src/service/corpus-service.js";
 import type { CreateDocInput, DocRecord } from "@lore/core";
+import { runLoreInProcess } from "../helpers/run-lore-in-process";
 
 // tests/e2e/ -> tests/ -> packages/lore/ -> packages/ -> repo root (4 levels up),
 // same derivation as tests/e2e/issue-closure.bun.test.ts.
 const REPO_ROOT = new URL("../../../../", import.meta.url).pathname.replace(/\/$/, "");
-const LORE_BIN = join(REPO_ROOT, "dist", "lore");
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -92,20 +94,20 @@ interface IssueRow {
 
 // ─── Spawn helpers ──────────────────────────────────────────────────────────
 
-function runLore(args: string[], cwd: string): RunResult {
-  const proc = Bun.spawnSync([LORE_BIN, ...args], {
+async function runLore(args: string[], cwd: string): Promise<RunResult> {
+  const proc = await runLoreInProcess(args, {
     cwd,
     env: { ...process.env, HOME: cwd, CLAUDECODE: "1" },
   });
   return {
-    stdout: proc.stdout.toString(),
-    stderr: proc.stderr.toString(),
-    exitCode: proc.exitCode ?? 1,
+    stdout: proc.stdout,
+    stderr: proc.stderr,
+    exitCode: proc.exitCode,
   };
 }
 
-function initCorpus(dir: string): void {
-  const result = runLore(["init"], dir);
+async function initCorpus(dir: string): Promise<void> {
+  const result = await runLore(["init"], dir);
   if (result.exitCode !== 0) {
     throw new Error(`lore init failed in fixture setup: ${result.stderr}`);
   }
@@ -134,7 +136,7 @@ async function mustCreate(cs: CorpusService, input: CreateDocInput): Promise<Doc
 }
 
 async function seedRootPrd(cs: CorpusService): Promise<DocRecord> {
-  return mustCreate(cs, { type: "prd", title: "Root PRD", content: "# PRD" } as CreateDocInput);
+  return await mustCreate(cs, { type: "prd", title: "Root PRD", content: "# PRD" } as CreateDocInput);
 }
 
 function defaultIssueReport(overrides: Record<string, unknown> = {}): Record<string, unknown> {
@@ -155,7 +157,7 @@ async function seedIssueTask(
   title: string,
   issueReport: Record<string, unknown> = defaultIssueReport(),
 ): Promise<DocRecord> {
-  return mustCreate(cs, {
+  return await mustCreate(cs, {
     type: "task",
     title,
     content: `# ${title}`,
@@ -164,7 +166,7 @@ async function seedIssueTask(
 }
 
 async function seedPlainTask(cs: CorpusService, title: string): Promise<DocRecord> {
-  return mustCreate(cs, {
+  return await mustCreate(cs, {
     type: "task",
     title,
     content: `# ${title}`,
@@ -217,19 +219,12 @@ afterEach(() => {
   }
 });
 
-beforeAll(() => {
-  assertFreshBinary(LORE_BIN, [
-    join(REPO_ROOT, "packages", "lore", "src"),
-    join(REPO_ROOT, "packages", "core", "src"),
-  ]);
-});
-
 // ─── AC-ICL-10: 'closed' state for an archived issue with no edge/no explicit state ─
 
 describe("AC-ICL-10: archived issue with no resolves in-edge and no explicit terminal state computes 'closed'", () => {
   it("AC-ICL-10 HAPPY: an archived issue (no edge, no explicit state) computes 'closed'; excluded from --open, included in --resolved and --all", async () => {
     const dir = freshDir("lore-issue-closed-happy-");
-    initCorpus(dir);
+    await initCorpus(dir);
 
     const store = new SQLiteStore(dbPathFor(dir));
     const cs = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
@@ -238,19 +233,19 @@ describe("AC-ICL-10: archived issue with no resolves in-edge and no explicit ter
     await archiveDoc(cs, issue.id);
     store.close();
 
-    const openResult = runLore(["issues", "--open", "--json"], dir);
+    const openResult = await runLore(["issues", "--open", "--json"], dir);
     expect(openResult.exitCode).toBe(0);
     const openParsed = parseJson<{ reports: IssueRow[] }>(openResult.stdout);
     expect(openParsed.data?.reports.some((r) => r.slug === issue.slug)).toBe(false);
 
-    const resolvedResult = runLore(["issues", "--resolved", "--json"], dir);
+    const resolvedResult = await runLore(["issues", "--resolved", "--json"], dir);
     expect(resolvedResult.exitCode).toBe(0);
     const resolvedParsed = parseJson<{ reports: IssueRow[] }>(resolvedResult.stdout);
     const row = resolvedParsed.data?.reports.find((r) => r.slug === issue.slug);
     expect(row).toBeDefined();
     expect(row?.resolution).toBe("closed");
 
-    const allResult = runLore(["issues", "--all", "--json"], dir);
+    const allResult = await runLore(["issues", "--all", "--json"], dir);
     expect(allResult.exitCode).toBe(0);
     const allParsed = parseJson<{ reports: IssueRow[] }>(allResult.stdout);
     expect(allParsed.data?.reports.find((r) => r.slug === issue.slug)?.resolution).toBe("closed");
@@ -258,7 +253,7 @@ describe("AC-ICL-10: archived issue with no resolves in-edge and no explicit ter
 
   it("AC-ICL-10 NEGATIVE: a non-archived (draft) issue with no edge stays 'open' — closed is gated on status === 'archived' specifically", async () => {
     const dir = freshDir("lore-issue-closed-negative-");
-    initCorpus(dir);
+    await initCorpus(dir);
 
     const store = new SQLiteStore(dbPathFor(dir));
     const cs = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
@@ -266,20 +261,20 @@ describe("AC-ICL-10: archived issue with no resolves in-edge and no explicit ter
     const issue = await seedIssueTask(cs, "Still draft, never touched");
     store.close();
 
-    const openResult = runLore(["issues", "--open", "--json"], dir);
+    const openResult = await runLore(["issues", "--open", "--json"], dir);
     const openParsed = parseJson<{ reports: IssueRow[] }>(openResult.stdout);
     const row = openParsed.data?.reports.find((r) => r.slug === issue.slug);
     expect(row).toBeDefined();
     expect(row?.resolution).toBe("open");
 
-    const resolvedResult = runLore(["issues", "--resolved", "--json"], dir);
+    const resolvedResult = await runLore(["issues", "--resolved", "--json"], dir);
     const resolvedParsed = parseJson<{ reports: IssueRow[] }>(resolvedResult.stdout);
     expect(resolvedParsed.data?.reports.some((r) => r.slug === issue.slug)).toBe(false);
   });
 
   it("AC-ICL-10 BOUNDARY: an explicit terminal state on an archived issue WINS over 'closed'", async () => {
     const dir = freshDir("lore-issue-closed-boundary-");
-    initCorpus(dir);
+    await initCorpus(dir);
 
     const store = new SQLiteStore(dbPathFor(dir));
     const cs = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
@@ -288,13 +283,13 @@ describe("AC-ICL-10: archived issue with no resolves in-edge and no explicit ter
     await archiveDoc(cs, issue.id);
     store.close();
 
-    const resolveResult = runLore(
+    const resolveResult = await runLore(
       ["issue", "resolve", issue.slug, "--state", "wontfix", "--reason", "stale, closed manually"],
       dir,
     );
     expect(resolveResult.exitCode).toBe(0);
 
-    const allResult = runLore(["issues", "--all", "--json"], dir);
+    const allResult = await runLore(["issues", "--all", "--json"], dir);
     const allParsed = parseJson<{ reports: IssueRow[] }>(allResult.stdout);
     const row = allParsed.data?.reports.find((r) => r.slug === issue.slug);
     expect(row?.resolution).toBe("wontfix");
@@ -303,7 +298,7 @@ describe("AC-ICL-10: archived issue with no resolves in-edge and no explicit ter
 
   it("AC-ICL-10 STATE: a resolves edge on an archived issue WINS over 'closed' (both terminal 'fixed' and non-terminal 'resolving' sources), and a draft->archived transition moves an issue from --open into --resolved as 'closed'", async () => {
     const dir = freshDir("lore-issue-closed-state-");
-    initCorpus(dir);
+    await initCorpus(dir);
 
     const store = new SQLiteStore(dbPathFor(dir));
     const cs = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
@@ -316,7 +311,7 @@ describe("AC-ICL-10: archived issue with no resolves in-edge and no explicit ter
     await transitionToActive(cs, fixerActive.id);
     store.close();
 
-    const linkFixed = runLore(["link", fixerActive.slug, issueWithFixedEdge.slug, "--type", "resolves"], dir);
+    const linkFixed = await runLore(["link", fixerActive.slug, issueWithFixedEdge.slug, "--type", "resolves"], dir);
     expect(linkFixed.exitCode).toBe(0);
 
     // Precedence: resolves-edge (resolving, non-terminal) ALSO beats closed.
@@ -327,13 +322,13 @@ describe("AC-ICL-10: archived issue with no resolves in-edge and no explicit ter
     const fixerDraft = await seedPlainTask(cs2, "Fixer (still draft)");
     store2.close();
 
-    const linkResolving = runLore(
+    const linkResolving = await runLore(
       ["link", fixerDraft.slug, issueWithResolvingEdge.slug, "--type", "resolves"],
       dir,
     );
     expect(linkResolving.exitCode).toBe(0);
 
-    const allResult = runLore(["issues", "--all", "--json"], dir);
+    const allResult = await runLore(["issues", "--all", "--json"], dir);
     const allParsed = parseJson<{ reports: IssueRow[] }>(allResult.stdout);
     const bySlug = new Map(allParsed.data?.reports.map((r) => [r.slug, r]));
     expect(bySlug.get(issueWithFixedEdge.slug)?.resolution).toBe("fixed");
@@ -346,7 +341,7 @@ describe("AC-ICL-10: archived issue with no resolves in-edge and no explicit ter
     const transitioning = await seedIssueTask(cs3, "Transitioning to closed");
     store3.close();
 
-    const beforeOpen = runLore(["issues", "--open", "--json"], dir);
+    const beforeOpen = await runLore(["issues", "--open", "--json"], dir);
     const beforeParsed = parseJson<{ reports: IssueRow[] }>(beforeOpen.stdout);
     expect(beforeParsed.data?.reports.some((r) => r.slug === transitioning.slug)).toBe(true);
 
@@ -355,11 +350,11 @@ describe("AC-ICL-10: archived issue with no resolves in-edge and no explicit ter
     await archiveDoc(cs4, transitioning.id);
     store4.close();
 
-    const afterOpen = runLore(["issues", "--open", "--json"], dir);
+    const afterOpen = await runLore(["issues", "--open", "--json"], dir);
     const afterOpenParsed = parseJson<{ reports: IssueRow[] }>(afterOpen.stdout);
     expect(afterOpenParsed.data?.reports.some((r) => r.slug === transitioning.slug)).toBe(false);
 
-    const afterResolved = runLore(["issues", "--resolved", "--json"], dir);
+    const afterResolved = await runLore(["issues", "--resolved", "--json"], dir);
     const afterResolvedParsed = parseJson<{ reports: IssueRow[] }>(afterResolved.stdout);
     const afterRow = afterResolvedParsed.data?.reports.find((r) => r.slug === transitioning.slug);
     expect(afterRow?.resolution).toBe("closed");
@@ -367,7 +362,7 @@ describe("AC-ICL-10: archived issue with no resolves in-edge and no explicit ter
 
   it("AC-ICL-10 ERROR: a corpus with only a PLAIN archived task (no extra.issue_report) never leaks into lore issues under any flag — empty lists, exit 0, no crash", async () => {
     const dir = freshDir("lore-issue-closed-error-");
-    initCorpus(dir);
+    await initCorpus(dir);
 
     const store = new SQLiteStore(dbPathFor(dir));
     const cs = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
@@ -376,13 +371,13 @@ describe("AC-ICL-10: archived issue with no resolves in-edge and no explicit ter
     await archiveDoc(cs, plain.id);
     store.close();
 
-    const resolvedResult = runLore(["issues", "--resolved", "--json"], dir);
+    const resolvedResult = await runLore(["issues", "--resolved", "--json"], dir);
     expect(resolvedResult.exitCode).toBe(0);
     const resolvedParsed = parseJson<{ total: number; reports: IssueRow[] }>(resolvedResult.stdout);
     expect(resolvedParsed.data?.total).toBe(0);
     expect(resolvedParsed.data?.reports).toEqual([]);
 
-    const allResult = runLore(["issues", "--all", "--json"], dir);
+    const allResult = await runLore(["issues", "--all", "--json"], dir);
     expect(allResult.exitCode).toBe(0);
     const allParsed = parseJson<{ total: number; reports: IssueRow[] }>(allResult.stdout);
     expect(allParsed.data?.total).toBe(0);
@@ -391,7 +386,7 @@ describe("AC-ICL-10: archived issue with no resolves in-edge and no explicit ter
 
   it("AC-ICL-10 REGRESSION: --all's total count is exact across a mix of open/closed issues, and the no-flag default still matches --open byte-for-byte", async () => {
     const dir = freshDir("lore-issue-closed-regression-");
-    initCorpus(dir);
+    await initCorpus(dir);
 
     const store = new SQLiteStore(dbPathFor(dir));
     const cs = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
@@ -401,7 +396,7 @@ describe("AC-ICL-10: archived issue with no resolves in-edge and no explicit ter
     await archiveDoc(cs, closedIssue.id);
     store.close();
 
-    const allResult = runLore(["issues", "--all", "--json"], dir);
+    const allResult = await runLore(["issues", "--all", "--json"], dir);
     expect(allResult.exitCode).toBe(0);
     const allParsed = parseJson<{ total: number; reports: IssueRow[] }>(allResult.stdout);
     expect(allParsed.data?.total).toBe(2);
@@ -409,8 +404,8 @@ describe("AC-ICL-10: archived issue with no resolves in-edge and no explicit ter
     expect(bySlug.get(openIssue.slug)?.resolution).toBe("open");
     expect(bySlug.get(closedIssue.slug)?.resolution).toBe("closed");
 
-    const defaultResult = runLore(["issues", "--json"], dir);
-    const explicitOpenResult = runLore(["issues", "--open", "--json"], dir);
+    const defaultResult = await runLore(["issues", "--json"], dir);
+    const explicitOpenResult = await runLore(["issues", "--open", "--json"], dir);
     expect(defaultResult.stdout).toBe(explicitOpenResult.stdout);
     const defaultParsed = parseJson<{ reports: IssueRow[] }>(defaultResult.stdout);
     expect(defaultParsed.data?.reports.some((r) => r.slug === closedIssue.slug)).toBe(false);

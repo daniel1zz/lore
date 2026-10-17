@@ -1,4 +1,3 @@
-// @spawns dist/lore
 /**
  * Compiled-binary e2e suite proving
  * spec-plan-close-predicates-measure-invariants-an-applicability end-to-end,
@@ -80,6 +79,10 @@
  * @spec_ref spec-plan-close-predicates-measure-invariants-an-applicability
  *   §Design Decisions D2, D3, D4, D6; §Acceptance Criteria AC-PCI-12.
  *   Task task-t5-compiled-binary-e2e-from-a-throwaway-corpus-clean-close.
+ *
+ * TG-25 (adr-tg-1 option b): the commands run IN-PROCESS through tests/helpers/run-lore-in-process.ts, not through
+ * dist/lore. Wherever the prose above says the compiled binary is spawned or its freshness asserted, that is the
+ * history of this file; the assertions and the throwaway-corpus rule are unchanged.
  */
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -89,15 +92,14 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { saveConfig } from "@lore/core/node";
 import type { LoreConfig } from "@lore/core";
-import { assertFreshBinary } from "../integration/helpers/assert-fresh-binary";
-import { citeSpecViaCli, loreRunnerFor } from "../helpers/cli-live-rule.js";
+import { citeSpecViaAsyncCli, asyncLoreRunnerFor } from "../helpers/cli-live-rule.js";
+import { runLoreInProcess } from "../helpers/run-lore-in-process";
 
 // ─── Path / spawn setup ─────────────────────────────────────────────────────
 
 // tests/e2e/ -> tests/ -> packages/lore/ -> packages/ -> repo root (4 levels up),
 // mirrors every sibling compiled-binary e2e suite's own REPO_ROOT derivation.
 const REPO_ROOT = new URL("../../../../", import.meta.url).pathname.replace(/\/$/, "");
-const LORE_BIN = join(REPO_ROOT, "dist", "lore");
 
 /** The one script-mode AC id both sibling plans claim. */
 const AC_ID = "AC-E2E-1";
@@ -117,8 +119,8 @@ interface RunResult {
  * stable identity and avoids an unrelated actor-traceability warning polluting
  * the exact stderr assertions below (mirrors `approve-advisory-render.test.ts`).
  */
-function runLore(args: string[], cwd: string, envOverrides: Record<string, string> = {}): RunResult {
-  const proc = Bun.spawnSync([LORE_BIN, ...args], {
+async function runLore(args: string[], cwd: string, envOverrides: Record<string, string> = {}): Promise<RunResult> {
+  const proc = await runLoreInProcess(args, {
     cwd,
     env: {
       ...process.env,
@@ -129,9 +131,9 @@ function runLore(args: string[], cwd: string, envOverrides: Record<string, strin
     },
   });
   return {
-    stdout: proc.stdout.toString(),
-    stderr: proc.stderr.toString(),
-    exitCode: proc.exitCode ?? 1,
+    stdout: proc.stdout,
+    stderr: proc.stderr,
+    exitCode: proc.exitCode,
   };
 }
 
@@ -161,13 +163,6 @@ function cleanupAll(): void {
     }
   }
 }
-
-beforeAll(() => {
-  assertFreshBinary(LORE_BIN, [
-    join(REPO_ROOT, "packages", "lore", "src"),
-    join(REPO_ROOT, "packages", "core", "src"),
-  ]);
-});
 
 afterAll(() => {
   cleanupAll();
@@ -238,25 +233,25 @@ function writeConfigWithRatioFloor(dir: string, minRatio: number): void {
   }
 }
 
-function initCorpus(dir: string): void {
+async function initCorpus(dir: string): Promise<void> {
   makeCleanTreeRepo(dir);
-  const initResult = runLore(["init"], dir);
+  const initResult = await runLore(["init"], dir);
   if (initResult.exitCode !== 0) {
     throw new Error(`lore init failed: ${initResult.stderr}`);
   }
   writeConfig(dir);
 }
 
-function createPrd(dir: string, title: string): string {
-  const r = runLore(["create", "prd", "--title", title, "--content", "# PRD\n\nroot.", "--no-ai"], dir);
+async function createPrd(dir: string, title: string): Promise<string> {
+  const r = await runLore(["create", "prd", "--title", title, "--content", "# PRD\n\nroot.", "--no-ai"], dir);
   if (r.exitCode !== 0) throw new Error(`create prd failed: ${r.stderr}`);
   return parseSlug(r.stdout);
 }
 
 /** Parented DIRECTLY under the PRD — no `implements` edge declared anywhere,
  *  so it resolves NO domain doc (historically §D6; irrelevant since BR-984). */
-function createSpec(dir: string, prdSlug: string, title: string): string {
-  const r = runLore(
+async function createSpec(dir: string, prdSlug: string, title: string): Promise<string> {
+  const r = await runLore(
     ["create", "spec", "--title", title,"--content", "## Overview\n\nBody.", "--no-ai"],
     dir,
   );
@@ -264,8 +259,8 @@ function createSpec(dir: string, prdSlug: string, title: string): string {
   return parseSlug(r.stdout);
 }
 
-function addScriptAc(dir: string, specSlug: string, acId: string, command: string): void {
-  const r = runLore(
+async function addScriptAc(dir: string, specSlug: string, acId: string, command: string): Promise<void> {
+  const r = await runLore(
     [
       "ac",
       "add",
@@ -285,8 +280,8 @@ function addScriptAc(dir: string, specSlug: string, acId: string, command: strin
   if (r.exitCode !== 0) throw new Error(`ac add failed: ${r.stderr}`);
 }
 
-function createPlan(dir: string, specSlug: string, title: string): string {
-  const r = runLore(
+async function createPlan(dir: string, specSlug: string, title: string): Promise<string> {
+  const r = await runLore(
     ["create", "plan", "--title", title, "--parent", specSlug, "--content", "## Plan\n\nbody", "--no-ai"],
     dir,
   );
@@ -294,8 +289,8 @@ function createPlan(dir: string, specSlug: string, title: string): string {
   return parseSlug(r.stdout);
 }
 
-function createTask(dir: string, planSlug: string, title: string): string {
-  const r = runLore(
+async function createTask(dir: string, planSlug: string, title: string): Promise<string> {
+  const r = await runLore(
     [
       "create",
       "task",
@@ -324,14 +319,14 @@ function createTask(dir: string, planSlug: string, title: string): string {
  * undeclared scope a DENIAL, so every scenario expecting a clean close must now
  * declare what its task owns.
  */
-function declareScope(dir: string, taskSlug: string, acId: string): RunResult {
-  return runLore(["scope", "add", taskSlug, acId], dir);
+async function declareScope(dir: string, taskSlug: string, acId: string): Promise<RunResult> {
+  return await runLore(["scope", "add", taskSlug, acId], dir);
 }
 
 /** Records ATTESTED evidence via the trusted-runner path (SPEC-039) — the ONLY
  *  legitimate producer of an `attestation`-bearing entry; never hand-crafted. */
-function verifyAttested(dir: string, planSlug: string, taskSlug: string, acId: string): RunResult {
-  return runLore(["verify", planSlug, "--task", taskSlug, "--ac", acId, "--allow-new-commands"], dir);
+async function verifyAttested(dir: string, planSlug: string, taskSlug: string, acId: string): Promise<RunResult> {
+  return await runLore(["verify", planSlug, "--task", taskSlug, "--ac", acId, "--allow-new-commands"], dir);
 }
 
 /** Records SELF-REPORTED (never attested) evidence via `lore evidence`. */
@@ -342,19 +337,19 @@ function verifyAttested(dir: string, planSlug: string, taskSlug: string, acId: s
 // SPEC-061 attestation-completeness guard's and the missing-oracle-file
 // precheck's test/e2e-only scope (see this file's own module header), so
 // this fixture's other invariants are unaffected by the switch.
-function evidenceSelfReported(dir: string, taskSlug: string, acId: string, command: string): RunResult {
-  return runLore(
+async function evidenceSelfReported(dir: string, taskSlug: string, acId: string, command: string): Promise<RunResult> {
+  return await runLore(
     ["evidence", taskSlug, "--oracle", "manual", "--command", command, "--result", "pass", "--ac", acId, "--output-tail", "ok"],
     dir,
   );
 }
 
-function approvePlan(dir: string, planSlug: string): RunResult {
-  return runLore(["approve", planSlug], dir);
+async function approvePlan(dir: string, planSlug: string): Promise<RunResult> {
+  return await runLore(["approve", planSlug], dir);
 }
 
-function archivePlan(dir: string, planSlug: string): RunResult {
-  return runLore(["set", planSlug, "--status", "archived"], dir);
+async function archivePlan(dir: string, planSlug: string): Promise<RunResult> {
+  return await runLore(["set", planSlug, "--status", "archived"], dir);
 }
 
 // ─── Suite ───────────────────────────────────────────────────────────────────
@@ -363,42 +358,42 @@ describe("AC-PCI-12: compiled close — throwaway corpus, dist/lore binary, one 
   let dir: string;
   let specSlug: string;
 
-  beforeAll(() => {
+  beforeAll(async () => {
     dir = trackDir(mkdtempSync(join(tmpdir(), "lore-t5-pci12-")));
     expect(dir.startsWith(REPO_ROOT)).toBe(false);
-    initCorpus(dir);
+    await initCorpus(dir);
 
-    const prdSlug = createPrd(dir, "T5 PCI-12 Root PRD");
+    const prdSlug = await createPrd(dir, "T5 PCI-12 Root PRD");
     // Parented directly under the PRD (never under another spec) — the
     // fixture shape that leaves `resolvePrdSyncDomainDoc` resolving nothing.
-    specSlug = createSpec(dir, prdSlug, "T5 PCI-12 Governing Spec (no domain doc)");
-    addScriptAc(dir, specSlug, AC_ID, AC_COMMAND);
+    specSlug = await createSpec(dir, prdSlug, "T5 PCI-12 Governing Spec (no domain doc)");
+    await addScriptAc(dir, specSlug, AC_ID, AC_COMMAND);
 
-    citeSpecViaCli(loreRunnerFor(runLore, dir), dir, undefined, specSlug, AC_ID); // BR-1007: approvable only when a criterion cites a live rule
-    const approveSpec = runLore(["approve", specSlug], dir);
+    await citeSpecViaAsyncCli(asyncLoreRunnerFor(runLore, dir), dir, undefined, specSlug, AC_ID); // BR-1007: approvable only when a criterion cites a live rule
+    const approveSpec = await runLore(["approve", specSlug], dir);
     if (approveSpec.exitCode !== 0) {
       throw new Error(`approve spec failed (setup): ${approveSpec.stderr}`);
     }
   });
 
-  it("compiled close — scenario A: an attested single-claimed-AC plan archives at exit 0 with prd_sync ON, and approve prints NO retired prd-sync advisory", () => {
-    const planSlug = createPlan(dir, specSlug, "T5 PCI-12 Plan A (clean close)");
-    const taskSlug = createTask(dir, planSlug, "T5 PCI-12 Task A");
+  it("compiled close — scenario A: an attested single-claimed-AC plan archives at exit 0 with prd_sync ON, and approve prints NO retired prd-sync advisory", async () => {
+    const planSlug = await createPlan(dir, specSlug, "T5 PCI-12 Plan A (clean close)");
+    const taskSlug = await createTask(dir, planSlug, "T5 PCI-12 Task A");
 
     // The task DECLARES the criterion it owns before recording any evidence —
     // the order a real workflow follows, and (post task-plan-close-must-block-
     // when-the-coverage-conjunct-is-scope) a precondition of any clean close.
-    expect(declareScope(dir, taskSlug, AC_ID).exitCode).toBe(0);
+    expect((await declareScope(dir, taskSlug, AC_ID)).exitCode).toBe(0);
 
     // Attested evidence for the claimed AC, via the trusted runner — never
     // hand-crafted.
-    const verifyResult = verifyAttested(dir, planSlug, taskSlug, AC_ID);
+    const verifyResult = await verifyAttested(dir, planSlug, taskSlug, AC_ID);
     expect(verifyResult.exitCode).toBe(0);
     expect(verifyResult.stdout).toContain(AC_ID);
 
     // `lore approve <plan>`: the retired plan-promote prd-sync advisory must never print (BR-984). Exit
     // stays 0 and neither channel carries it.
-    const approveResult = approvePlan(dir, planSlug);
+    const approveResult = await approvePlan(dir, planSlug);
     expect(approveResult.exitCode).toBe(0);
     expect(approveResult.stderr).not.toContain("prd-sync predicate");
     expect(approveResult.stderr).not.toContain("NOT-APPLICABLE");
@@ -408,7 +403,7 @@ describe("AC-PCI-12: compiled close — throwaway corpus, dist/lore binary, one 
 
     // Archive: every claimed AC attested, no `min_ratio` configured, the spec cites no rule — clean
     // close, exit 0, no exemption field needed anywhere.
-    const archiveResult = archivePlan(dir, planSlug);
+    const archiveResult = await archivePlan(dir, planSlug);
     expect(archiveResult.exitCode).toBe(0);
     expect(archiveResult.stderr).not.toContain("attestation-floor");
   });
@@ -424,9 +419,9 @@ describe("AC-PCI-12: compiled close — throwaway corpus, dist/lore binary, one 
   // through the compiled binary — `lore scope add` / `lore create task --ac-scope`
   // is a SIBLING task of this same spec; a compiled-binary oracle for the declared
   // conjunct belongs with that writer, not here.
-  it("compiled close — scenario B: a declared-but-unattested scope blocks, while an explicitly configured ratio floor still blocks the SAME command until evidence is attested (control proving the RIGHT cause)", () => {
-    const planSlug = createPlan(dir, specSlug, "T5 PCI-12 Plan B (declared, unattested)");
-    const taskSlug = createTask(dir, planSlug, "T5 PCI-12 Task B");
+  it("compiled close — scenario B: a declared-but-unattested scope blocks, while an explicitly configured ratio floor still blocks the SAME command until evidence is attested (control proving the RIGHT cause)", async () => {
+    const planSlug = await createPlan(dir, specSlug, "T5 PCI-12 Plan B (declared, unattested)");
+    const taskSlug = await createTask(dir, planSlug, "T5 PCI-12 Task B");
 
     // REWRITTEN by task-plan-close-must-block-when-the-coverage-conjunct-is-
     // scope. This half used to assert that an UNDECLARED scope with evidence
@@ -435,14 +430,14 @@ describe("AC-PCI-12: compiled close — throwaway corpus, dist/lore binary, one 
     // own describe block below; this half keeps the scenario's remaining
     // distinct value: a DECLARED but unattested scope blocks on the
     // attestation-floor field, which is a different cause and a different pack.
-    expect(declareScope(dir, taskSlug, AC_ID).exitCode).toBe(0);
-    const evidenceResult = evidenceSelfReported(dir, taskSlug, AC_ID, AC_COMMAND);
+    expect((await declareScope(dir, taskSlug, AC_ID)).exitCode).toBe(0);
+    const evidenceResult = await evidenceSelfReported(dir, taskSlug, AC_ID, AC_COMMAND);
     expect(evidenceResult.exitCode).toBe(0);
 
-    const approveResult = approvePlan(dir, planSlug);
+    const approveResult = await approvePlan(dir, planSlug);
     expect(approveResult.exitCode).toBe(0);
 
-    const declaredUnattested = archivePlan(dir, planSlug);
+    const declaredUnattested = await archivePlan(dir, planSlug);
     expect(declaredUnattested.exitCode).toBe(4);
     expect(declaredUnattested.stderr).toContain("gate:plan-close:attestation-floor");
     expect(declaredUnattested.stderr).toContain(AC_ID);
@@ -454,22 +449,22 @@ describe("AC-PCI-12: compiled close — throwaway corpus, dist/lore binary, one 
     // disappears once the SAME task's evidence carries a runner attestation. Two
     // runs of one command differing only in that fact prove the block's cause.
     writeConfigWithRatioFloor(dir, 0.5);
-    const controlPlanSlug = createPlan(dir, specSlug, "T5 PCI-12 Plan C (ratio floor)");
-    const controlTaskSlug = createTask(dir, controlPlanSlug, "T5 PCI-12 Task C");
+    const controlPlanSlug = await createPlan(dir, specSlug, "T5 PCI-12 Plan C (ratio floor)");
+    const controlTaskSlug = await createTask(dir, controlPlanSlug, "T5 PCI-12 Task C");
     // Declared, so the ratio stays the only variable between the two runs below.
-    expect(declareScope(dir, controlTaskSlug, AC_ID).exitCode).toBe(0);
-    expect(evidenceSelfReported(dir, controlTaskSlug, AC_ID, AC_COMMAND).exitCode).toBe(0);
-    expect(approvePlan(dir, controlPlanSlug).exitCode).toBe(0);
+    expect((await declareScope(dir, controlTaskSlug, AC_ID)).exitCode).toBe(0);
+    expect((await evidenceSelfReported(dir, controlTaskSlug, AC_ID, AC_COMMAND)).exitCode).toBe(0);
+    expect((await approvePlan(dir, controlPlanSlug)).exitCode).toBe(0);
 
-    const blockedResult = archivePlan(dir, controlPlanSlug);
+    const blockedResult = await archivePlan(dir, controlPlanSlug);
     expect(blockedResult.exitCode).toBe(4);
     expect(blockedResult.stderr).toContain("gate:plan-close:attestation-floor");
     expect(blockedResult.stderr).toContain("lore verify");
 
-    const verifyResult = verifyAttested(dir, controlPlanSlug, controlTaskSlug, AC_ID);
+    const verifyResult = await verifyAttested(dir, controlPlanSlug, controlTaskSlug, AC_ID);
     expect(verifyResult.exitCode).toBe(0);
 
-    const unblockedResult = archivePlan(dir, controlPlanSlug);
+    const unblockedResult = await archivePlan(dir, controlPlanSlug);
     expect(unblockedResult.exitCode).toBe(0);
     expect(unblockedResult.stderr).not.toContain("attestation-floor");
   });
@@ -492,32 +487,32 @@ describe("AC-PCI-21: an undeclared scope carrying evidence is denied through the
   let dir: string;
   let specSlug: string;
 
-  beforeAll(() => {
+  beforeAll(async () => {
     dir = trackDir(mkdtempSync(join(tmpdir(), "lore-pci21-")));
     expect(dir.startsWith(REPO_ROOT)).toBe(false);
-    initCorpus(dir);
+    await initCorpus(dir);
 
-    const prdSlug = createPrd(dir, "PCI-21 Root PRD");
-    specSlug = createSpec(dir, prdSlug, "PCI-21 Governing Spec");
-    addScriptAc(dir, specSlug, AC_ID, AC_COMMAND);
+    const prdSlug = await createPrd(dir, "PCI-21 Root PRD");
+    specSlug = await createSpec(dir, prdSlug, "PCI-21 Governing Spec");
+    await addScriptAc(dir, specSlug, AC_ID, AC_COMMAND);
 
-    citeSpecViaCli(loreRunnerFor(runLore, dir), dir, undefined, specSlug, AC_ID); // BR-1007: approvable only when a criterion cites a live rule
-    const approveSpec = runLore(["approve", specSlug], dir);
+    await citeSpecViaAsyncCli(asyncLoreRunnerFor(runLore, dir), dir, undefined, specSlug, AC_ID); // BR-1007: approvable only when a criterion cites a live rule
+    const approveSpec = await runLore(["approve", specSlug], dir);
     if (approveSpec.exitCode !== 0) {
       throw new Error(`approve spec failed (setup): ${approveSpec.stderr}`);
     }
   });
 
   // HAPPY (the deny) — the exact shape that archived four plans at exit 0.
-  it("PCI-21: a plan whose tasks carry evidence and declare no ac_scope exits NONZERO and names the missing declaration", () => {
-    const planSlug = createPlan(dir, specSlug, "PCI-21 Plan (evidence, undeclared)");
-    const taskSlug = createTask(dir, planSlug, "PCI-21 Task (undeclared)");
+  it("PCI-21: a plan whose tasks carry evidence and declare no ac_scope exits NONZERO and names the missing declaration", async () => {
+    const planSlug = await createPlan(dir, specSlug, "PCI-21 Plan (evidence, undeclared)");
+    const taskSlug = await createTask(dir, planSlug, "PCI-21 Task (undeclared)");
 
     // Evidence recorded, `lore scope add` deliberately never called.
-    expect(evidenceSelfReported(dir, taskSlug, AC_ID, AC_COMMAND).exitCode).toBe(0);
-    expect(approvePlan(dir, planSlug).exitCode).toBe(0);
+    expect((await evidenceSelfReported(dir, taskSlug, AC_ID, AC_COMMAND)).exitCode).toBe(0);
+    expect((await approvePlan(dir, planSlug)).exitCode).toBe(0);
 
-    const denied = archivePlan(dir, planSlug);
+    const denied = await archivePlan(dir, planSlug);
 
     expect(denied.exitCode).not.toBe(0);
     // The field discriminates this cause from the attestation-floor one — a
@@ -533,15 +528,15 @@ describe("AC-PCI-21: an undeclared scope carrying evidence is denied through the
   // CONTROL — the pure-planning path survives, in the SAME corpus and through
   // the SAME command. Without this, the deny above would be indistinguishable
   // from a gate that simply refuses every close.
-  it("PCI-21 control: the same corpus's zero-evidence plan still archives at exit 0", () => {
-    const planSlug = createPlan(dir, specSlug, "PCI-21 Plan (pure planning)");
+  it("PCI-21 control: the same corpus's zero-evidence plan still archives at exit 0", async () => {
+    const planSlug = await createPlan(dir, specSlug, "PCI-21 Plan (pure planning)");
     // A task with NO evidence and, like the plan above, no `ac_scope`: the
     // difference between the two cases is the EVIDENCE, nothing else.
-    createTask(dir, planSlug, "PCI-21 Task (no evidence)");
+    await createTask(dir, planSlug, "PCI-21 Task (no evidence)");
 
-    expect(approvePlan(dir, planSlug).exitCode).toBe(0);
+    expect((await approvePlan(dir, planSlug)).exitCode).toBe(0);
 
-    const archived = archivePlan(dir, planSlug);
+    const archived = await archivePlan(dir, planSlug);
 
     expect(archived.exitCode).toBe(0);
     expect(archived.stderr).not.toContain("attestation-scope-undeclared");
@@ -581,55 +576,55 @@ describe("AC-AP-6: compiled plan close prints the cascade in human output and ca
   let dir: string;
   let specSlug: string;
 
-  beforeAll(() => {
+  beforeAll(async () => {
     dir = trackDir(mkdtempSync(join(tmpdir(), "lore-ap6-")));
     expect(dir.startsWith(REPO_ROOT)).toBe(false);
     makeCleanTreeRepo(dir);
-    const initResult = runLore(["init"], dir);
+    const initResult = await runLore(["init"], dir);
     if (initResult.exitCode !== 0) throw new Error(`lore init failed: ${initResult.stderr}`);
     writeConfigPlanCloseGateOff(dir);
 
-    const prdSlug = createPrd(dir, "AP-6 Root PRD");
-    specSlug = createSpec(dir, prdSlug, "AP-6 Governing Spec");
-    addScriptAc(dir, specSlug, AC_ID, AC_COMMAND);
-    citeSpecViaCli(loreRunnerFor(runLore, dir), dir, undefined, specSlug, AC_ID);
-    const approveSpec = runLore(["approve", specSlug], dir);
+    const prdSlug = await createPrd(dir, "AP-6 Root PRD");
+    specSlug = await createSpec(dir, prdSlug, "AP-6 Governing Spec");
+    await addScriptAc(dir, specSlug, AC_ID, AC_COMMAND);
+    await citeSpecViaAsyncCli(asyncLoreRunnerFor(runLore, dir), dir, undefined, specSlug, AC_ID);
+    const approveSpec = await runLore(["approve", specSlug], dir);
     if (approveSpec.exitCode !== 0) throw new Error(`approve spec failed (setup): ${approveSpec.stderr}`);
   });
 
   /** One plan, attested task A, evidence-less task B, plan approved and ready to close. */
-  function seedPlan(label: string): { planSlug: string; a: string; b: string } {
-    const planSlug = createPlan(dir, specSlug, `AP-6 Plan ${label}`);
-    const a = createTask(dir, planSlug, `AP-6 Task A ${label}`);
-    const b = createTask(dir, planSlug, `AP-6 Task B ${label}`);
-    const verified = verifyAttested(dir, planSlug, a, AC_ID);
+  async function seedPlan(label: string): Promise<{ planSlug: string; a: string; b: string }> {
+    const planSlug = await createPlan(dir, specSlug, `AP-6 Plan ${label}`);
+    const a = await createTask(dir, planSlug, `AP-6 Task A ${label}`);
+    const b = await createTask(dir, planSlug, `AP-6 Task B ${label}`);
+    const verified = await verifyAttested(dir, planSlug, a, AC_ID);
     if (verified.exitCode !== 0) throw new Error(`verify A failed (setup): ${verified.stdout}${verified.stderr}`);
-    const approved = approvePlan(dir, planSlug);
+    const approved = await approvePlan(dir, planSlug);
     if (approved.exitCode !== 0) throw new Error(`approve plan failed (setup): ${approved.stderr}`);
     return { planSlug, a, b };
   }
 
-  it("AP-6 human: stdout names the archived task and the skipped task with its floor, and the skipped task stays open", () => {
-    const { planSlug, a, b } = seedPlan("human");
+  it("AP-6 human: stdout names the archived task and the skipped task with its floor, and the skipped task stays open", async () => {
+    const { planSlug, a, b } = await seedPlan("human");
 
-    const closed = archivePlan(dir, planSlug);
+    const closed = await archivePlan(dir, planSlug);
     expect(closed.exitCode).toBe(0);
 
     const lines = closed.stdout.split("\n").map((l) => l.trim());
     expect(lines, `stdout was:\n${closed.stdout}`).toContain(`Cascade archived: ${a}`);
     expect(lines, `stdout was:\n${closed.stdout}`).toContain(`Cascade skipped: ${b} (attested-pass)`);
 
-    const getB = runLore(["get", b], dir);
+    const getB = await runLore(["get", b], dir);
     expect(getB.exitCode).toBe(0);
     expect(getB.stdout).not.toContain("Status: archived");
-    const getA = runLore(["get", a], dir);
+    const getA = await runLore(["get", a], dir);
     expect(getA.stdout).toContain("Status: archived");
   });
 
-  it("AP-6 json: the same close with --json carries cascade.skipped[0].floor === 'attested-pass'", () => {
-    const { planSlug, a, b } = seedPlan("json");
+  it("AP-6 json: the same close with --json carries cascade.skipped[0].floor === 'attested-pass'", async () => {
+    const { planSlug, a, b } = await seedPlan("json");
 
-    const closed = runLore(["set", planSlug, "--status", "archived", "--json"], dir);
+    const closed = await runLore(["set", planSlug, "--status", "archived", "--json"], dir);
     expect(closed.exitCode).toBe(0);
 
     const parsed = JSON.parse(closed.stdout) as {

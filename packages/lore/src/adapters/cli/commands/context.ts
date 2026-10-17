@@ -79,7 +79,7 @@
  */
 
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, rmdirSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
+import { currentHomeDir } from "@lore/core/node";
 import { dirname, isAbsolute, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { defineCommand } from "citty";
@@ -487,7 +487,7 @@ export default defineCommand({
       process.exitCode = exitCode(globalConfigResult.error);
       return;
     }
-    const home = homedir();
+    const home = currentHomeDir();
     const pathCtx: SetupPathContext = {
       repoRoot: REPO_ROOT,
       isCompiled: Bun.main.startsWith("/$bunfs/"),

@@ -24,7 +24,7 @@
  */
 import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
-import { homedir } from "node:os";
+import { currentHomeDir } from "@lore/core/node";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { defineCommand } from "citty";
@@ -174,8 +174,8 @@ export function buildFlowDeps(cwd: string): DepsResult {
   const project = loadContextLayer(join(projectRoot, ".lore", "config.yaml"), contextConfigSchema);
   if (!project.ok) return project;
   const assetsRoot = resolveAssets();
-  const claudeDir = resolveTargetDir({ env: process.env, homeDir: homedir() });
-  const userConfigDir = resolveUserConfigDir(process.env, homedir());
+  const claudeDir = resolveTargetDir({ env: process.env, homeDir: currentHomeDir() });
+  const userConfigDir = resolveUserConfigDir(process.env, currentHomeDir());
   const userSelection = readSelectionText(join(userConfigDir, SELECTION_FILE.user));
   if (!userSelection.ok) return userSelection;
   const projectSelection = readSelectionText(join(projectRoot, SELECTION_FILE.project));
