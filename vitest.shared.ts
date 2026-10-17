@@ -1,7 +1,7 @@
 import { defineConfig } from "vitest/config";
 import { fileURLToPath, URL } from "node:url";
 import { workspaceAliases } from "./workspace-aliases";
-import { resolveMaxWorkers } from "./vitest.workers";
+import { resolveMaxWorkers } from "./scripts/test-max-workers";
 import { armSandboxEnv } from "./scripts/test-isolation-env";
 import { readRecorderAliases, readRecorderMockRedirect } from "./scripts/test-read-aliases";
 

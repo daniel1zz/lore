@@ -11,7 +11,7 @@ import { spawnSync } from "node:child_process";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { DEFAULT_MAX_WORKERS, resolveMaxWorkers } from "../../vitest.workers";
+import { DEFAULT_MAX_WORKERS, resolveMaxWorkers } from "../test-max-workers";
 import { evaluateMeasurement, main, parseMaxSeconds, type MeasureDeps } from "../measure-test-wall";
 
 const ROOT = join(fileURLToPath(import.meta.url), "..", "..", "..");

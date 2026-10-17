@@ -21,7 +21,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { findTestFilesOnDisk, readReportedFiles } from "./check-test-file-census";
 import { runSuite, suiteExit, type SuiteOutcome } from "./run-tests";
-import { resolveMaxWorkers } from "../vitest.workers";
+import { resolveMaxWorkers } from "./test-max-workers";
 
 const ROOT = join(fileURLToPath(import.meta.url), "..", "..");
 
