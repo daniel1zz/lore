@@ -14,7 +14,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { applyNotBuiltLedger, evaluateOwnership, extractAcReferences } from "../check-ac-oracle-ownership.js";
+import { applyNotBuiltLedger, collectScriptAcs, evaluateOwnership, extractAcReferences } from "../check-ac-oracle-ownership.js";
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const LORE_ENTRY = join(REPO_ROOT, "packages", "lore", "src", "index.ts");
@@ -105,6 +105,34 @@ describe("check-ac-oracle-ownership — AC-TG-5 pure rules", () => {
     const refs = extractAcReferences('// @spec_ref spec-x#AC-Q-2\ndescribe("AC-Q-1 case", () => {});');
     expect(refs).toContainEqual({ acId: "AC-Q-2", spec: "spec-x" });
     expect(refs).toContainEqual({ acId: "AC-Q-1", spec: undefined });
+  });
+});
+
+describe("check-ac-oracle-ownership — deprecated specs are skipped, counted and named (AS-17)", () => {
+  // a deprecated spec cannot be built in a throwaway corpus (approval needs a baseline rule chain), so the lister is injected
+  const fakeRunner = ((args: readonly string[]) => {
+    if (args[0] === "list") {
+      return {
+        ok: true,
+        data: {
+          docs: [
+            { slug: "spec-live", status: "approved" },
+            { slug: "spec-dead", status: "deprecated" },
+          ],
+        },
+      };
+    }
+    const slug = args[2];
+    return {
+      ok: true,
+      data: { criteria: [{ id: `AC-${slug === "spec-live" ? "L" : "D"}-1`, verify: { mode: "script", command: "bunx vitest run scripts/tests/x.test.ts" } }] },
+    };
+  }) as unknown as Parameters<typeof collectScriptAcs>[2];
+
+  it("HAPPY: the deprecated spec's criteria are not collected; its slug is returned", () => {
+    const r = collectScriptAcs("/unused", "/unused", fakeRunner);
+    expect(r.acs.map((a) => `${a.spec}#${a.id}`)).toEqual(["spec-live#AC-L-1"]);
+    expect(r.skippedDeprecatedSpecs).toEqual(["spec-dead"]);
   });
 });
 
@@ -251,25 +279,6 @@ describe("check-ac-oracle-ownership — AC-TG-5 end to end (mkdtemp + lore init)
 });
 
 describe("check-ac-oracle-ownership — deprecated specs and ledger end to end", () => {
-  it("HAPPY (AS-17): a deprecated spec with a missing owner file is skipped, counted and named; exit 0", () => {
-    const dir = fixtureCorpus();
-    try {
-      const rel = "scripts/tests/ok2.test.ts";
-      mkdirSync(join(dir, "scripts", "tests"), { recursive: true });
-      writeFileSync(join(dir, rel), 'it("AC-FX-4 holds", () => {});\n', "utf8");
-      addSpec(dir, "Ownership fixture live", "AC-FX-4", cmd(rel));
-      const dead = addSpec(dir, "Ownership fixture dead", "AC-FX-5", cmd("scripts/tests/never-built.test.ts"));
-      mustLore(["set", dead, "--status", "deprecated", "--json"], dir);
-      const r = runMainAt(dir);
-      expect(r.out).toContain("skipped 1 deprecated spec(s)");
-      expect(r.out).toContain(dead);
-      expect(r.out).not.toContain("rule=missing-owner-file");
-      expect(r.status).toBe(0);
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
-  }, 60000);
-
   it("ledger: a ledgered row passes and is named; after the file exists the row is stale and exits 1", () => {
     const dir = fixtureCorpus();
     try {

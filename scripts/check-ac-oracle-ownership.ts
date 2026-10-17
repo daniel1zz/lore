@@ -20,6 +20,16 @@
  *     id that exists in the corpus but that this file does not own, with no spec-qualified
  *     reference and no `@layer <surface>` tag (the tag declares a different entry point).
  *   - `nothing-scanned`: zero script ACs were visible (AS-17: never complete over nothing).
+ *   - `stale-ledger-row`: a not-built ledger row whose AC is no longer a live script AC, or
+ *     whose owner file now exists (the oracle was built; the row must be deleted).
+ *
+ * Scope (AC-TG-5 "live script AC"): only criteria of non-deprecated specs are scanned. Each
+ * deprecated spec skipped is COUNTED and NAMED in the output (AS-17: nothing is silently skipped).
+ *
+ * Not-built ledger (`scripts/ac-oracle-not-built-ledger.json`, rows `{spec, ac, reason,
+ * owner_plan}`): the explicit, owned list of live criteria whose oracle is not written yet. A
+ * ledgered `missing-owner-file` finding is reported as ledgered instead of failing; the ledger
+ * never hides `ambiguous-ac-id` / `unowned-ac-reference`. An absent ledger file means no rows.
  *
  * Exit codes: 0 every script AC has one existing owner and no rule fired; 1 a rule fired, OR
  * the scan could not see the corpus (lore failure, zero script ACs).
@@ -30,7 +40,7 @@
  * Usage: bun scripts/check-ac-oracle-ownership.ts
  */
 
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
@@ -44,6 +54,26 @@ export interface ScriptAc {
   readonly spec: string;
   readonly id: string;
   readonly command: string;
+}
+
+/** One not-built ledger row: a live criterion whose owning test is not written yet, with an owning plan. */
+export const LedgerRowSchema = z.object({
+  spec: z.string().min(1),
+  ac: z.string().min(1),
+  reason: z.string().min(1),
+  owner_plan: z.string().min(1),
+});
+export type LedgerRow = z.infer<typeof LedgerRowSchema>;
+
+export interface StaleLedgerRow {
+  readonly row: LedgerRow;
+  readonly why: "no live script AC" | "owner file exists";
+}
+
+export interface LedgerOutcome {
+  readonly findings: readonly OwnershipFinding[];
+  readonly ledgered: readonly LedgerRow[];
+  readonly staleRows: readonly StaleLedgerRow[];
 }
 
 export type OwnershipRule = "missing-owner-file" | "ambiguous-ac-id" | "unowned-ac-reference";
@@ -140,6 +170,38 @@ export function evaluateOwnership(
   return { scannedScriptAcs: acs.length, scannedTestFiles: testFiles.length, acsWithoutTestFile, findings };
 }
 
+/**
+ * Pure. Removes ledgered `missing-owner-file` findings from `findings`, and flags rows that no
+ * longer describe a missing oracle (no live script AC for the row, or its owner file exists).
+ */
+export function applyNotBuiltLedger(
+  findings: readonly OwnershipFinding[],
+  ledger: readonly LedgerRow[],
+  acs: readonly ScriptAc[],
+  fileExists: (path: string) => boolean,
+): LedgerOutcome {
+  const ledgered: LedgerRow[] = [];
+  const staleRows: StaleLedgerRow[] = [];
+  const covered = new Set<OwnershipFinding>();
+  for (const row of ledger) {
+    const ac = acs.find((a) => a.spec === row.spec && a.id === row.ac);
+    if (ac === undefined) {
+      staleRows.push({ row, why: "no live script AC" });
+      continue;
+    }
+    const owner = extractTestFilePaths(ac.command)[0];
+    if (owner !== undefined && fileExists(owner)) {
+      staleRows.push({ row, why: "owner file exists" });
+      continue;
+    }
+    ledgered.push(row);
+    for (const f of findings) {
+      if (f.rule === "missing-owner-file" && f.spec === row.spec && f.acId === row.ac) covered.add(f);
+    }
+  }
+  return { findings: findings.filter((f) => !covered.has(f)), ledgered, staleRows };
+}
+
 // ─── IO ─────────────────────────────────────────────────────────────────────
 
 /** Thrown when the corpus cannot be read — loud, never an empty "clean" result (AS-17). */
@@ -150,7 +212,10 @@ export class OwnershipScanError extends Error {
   }
 }
 
-const ListSchema = z.object({ ok: z.literal(true), data: z.object({ docs: z.array(z.object({ slug: z.string() })) }) });
+const ListSchema = z.object({
+  ok: z.literal(true),
+  data: z.object({ docs: z.array(z.object({ slug: z.string(), status: z.string() })) }),
+});
 const AcListSchema = z.object({
   ok: z.literal(true),
   data: z.object({
@@ -179,19 +244,51 @@ function runLoreJson<T extends z.ZodTypeAny>(corpusCwd: string, indexTs: string,
   return parsed.data;
 }
 
-/** Every script-mode AC of every spec in the corpus rooted at `corpusCwd`, with its spec slug. */
-export function collectScriptAcs(corpusCwd: string, indexTs: string): ScriptAc[] {
-  const specs = runLoreJson(corpusCwd, indexTs, ["list", "--type", "spec", "--json"], ListSchema);
+/** Injected `lore ... --json` reader (the default spawns the CLI); lets tests feed specs of any status. */
+export type LoreJsonRunner = <T extends z.ZodTypeAny>(args: readonly string[], schema: T) => z.infer<T>;
+
+/** Script ACs of every LIVE spec, plus the slugs of the deprecated specs that were skipped (AS-17). */
+export interface ScriptAcScan {
+  readonly acs: ScriptAc[];
+  readonly skippedDeprecatedSpecs: string[];
+}
+
+/** Every script-mode AC of every non-deprecated spec in the corpus rooted at `corpusCwd`, with its spec slug. */
+export function collectScriptAcs(
+  corpusCwd: string,
+  indexTs: string,
+  runJson: LoreJsonRunner = (args, schema) => runLoreJson(corpusCwd, indexTs, args, schema),
+): ScriptAcScan {
+  const specs = runJson(["list", "--type", "spec", "--json"], ListSchema);
   const out: ScriptAc[] = [];
+  const skippedDeprecatedSpecs: string[] = [];
   for (const doc of specs.data.docs) {
-    const acs = runLoreJson(corpusCwd, indexTs, ["ac", "list", doc.slug, "--json"], AcListSchema);
+    if (doc.status === "deprecated") {
+      skippedDeprecatedSpecs.push(doc.slug);
+      continue;
+    }
+    const acs = runJson(["ac", "list", doc.slug, "--json"], AcListSchema);
     for (const c of acs.data.criteria) {
       if (c.verify?.mode === "script" && typeof c.verify.command === "string") {
         out.push({ spec: doc.slug, id: c.id, command: c.verify.command });
       }
     }
   }
-  return out;
+  return { acs: out, skippedDeprecatedSpecs };
+}
+
+/** Reads the not-built ledger; an absent file is no rows, a malformed one throws (never a silent empty). */
+export function readNotBuiltLedger(ledgerPath: string): LedgerRow[] {
+  if (!existsSync(ledgerPath)) return [];
+  let json: unknown;
+  try {
+    json = JSON.parse(readFileSync(ledgerPath, "utf8"));
+  } catch (e) {
+    throw new OwnershipScanError(`ledger ${ledgerPath} is not valid JSON: ${e instanceof Error ? e.message : String(e)}`);
+  }
+  const parsed = z.array(LedgerRowSchema).safeParse(json);
+  if (!parsed.success) throw new OwnershipScanError(`ledger ${ledgerPath} has an invalid row: ${parsed.error.message}`);
+  return parsed.data;
 }
 
 /**
@@ -202,27 +299,39 @@ export function main(
   corpusCwd: string = REPO_ROOT,
   treeRoot: string = corpusCwd,
   indexTs: string = join(REPO_ROOT, "packages", "lore", "src", "index.ts"),
+  ledgerPath: string = join(treeRoot, "scripts", "ac-oracle-not-built-ledger.json"),
 ): number {
-  const acs = collectScriptAcs(corpusCwd, indexTs);
+  const { acs, skippedDeprecatedSpecs } = collectScriptAcs(corpusCwd, indexTs);
+  console.log(
+    `check-ac-oracle-ownership: skipped ${skippedDeprecatedSpecs.length} deprecated spec(s)${skippedDeprecatedSpecs.length > 0 ? `: ${skippedDeprecatedSpecs.join(", ")}` : ""}`,
+  );
   if (acs.length === 0) {
     console.log("check-ac-oracle-ownership: FAIL — rule=nothing-scanned: 0 script ACs were visible; refusing to report complete (AS-17).");
     return 1;
   }
-  const report = evaluateOwnership(acs, collectRepoTestFiles(treeRoot), (p) => existsSync(join(treeRoot, p)));
+  const fileExists = (p: string): boolean => existsSync(join(treeRoot, p));
+  const raw = evaluateOwnership(acs, collectRepoTestFiles(treeRoot), fileExists);
+  const ledger = readNotBuiltLedger(ledgerPath);
+  const outcome = applyNotBuiltLedger(raw.findings, ledger, acs, fileExists);
+  const report = { ...raw, findings: outcome.findings };
+  console.log(`check-ac-oracle-ownership: not-built ledger: ${ledger.length} row(s), ${outcome.ledgered.length} still missing an oracle.`);
+  for (const r of outcome.ledgered) console.log(`  ledgered spec=${r.spec} ac=${r.ac} owner_plan=${r.owner_plan} reason=${r.reason}`);
+  for (const s of outcome.staleRows) console.log(`  rule=stale-ledger-row spec=${s.row.spec} ac=${s.row.ac} why=${s.why}`);
   console.log(
     `check-ac-oracle-ownership: scanned ${report.scannedScriptAcs} script AC(s), ${report.scannedTestFiles} test file(s); ${report.acsWithoutTestFile} script AC(s) name no test file (not checked).`,
   );
-  if (report.findings.length === 0) {
-    console.log("check-ac-oracle-ownership: OK — every script AC has one existing owning test file.");
+  if (report.findings.length === 0 && outcome.staleRows.length === 0) {
+    console.log("check-ac-oracle-ownership: OK — every script AC has one existing owning test file, except the ledgered not-built rows named above.");
     return 0;
   }
-  const byRule = new Map<OwnershipRule, number>();
+  const byRule = new Map<OwnershipRule | "stale-ledger-row", number>();
+  if (outcome.staleRows.length > 0) byRule.set("stale-ledger-row", outcome.staleRows.length);
   for (const f of report.findings) {
     byRule.set(f.rule, (byRule.get(f.rule) ?? 0) + 1);
     console.log(`  rule=${f.rule} spec=${f.spec} ac=${f.acId} path=${f.path}`);
   }
   console.log(
-    `check-ac-oracle-ownership: FAIL — ${report.findings.length} finding(s): ${[...byRule].map(([r, n]) => `${r}=${n}`).join(", ")}`,
+    `check-ac-oracle-ownership: FAIL — ${report.findings.length + outcome.staleRows.length} finding(s): ${[...byRule].map(([r, n]) => `${r}=${n}`).join(", ")}`,
   );
   return 1;
 }
