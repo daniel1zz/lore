@@ -1,3 +1,5 @@
+// @reads packages
+// @reads packages/*/package.json
 // @reads package.json
 /**
  * Hybrid dependency materializer oracle for AC-SD-1 / AC-SD-2 / AC-SD-3 / AC-SD-4
