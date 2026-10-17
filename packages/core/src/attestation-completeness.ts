@@ -687,9 +687,11 @@ export function parseFailedCaseCount(stdout: string): number | null {
  * original incident). Never throws — arbitrary or garbled stdout that
  * matches neither pattern degrades to `null`.
  *
- * This repo has TWO runners BY DESIGN (`.bun.test.ts` files under `bun test`,
- * everything else under vitest), so a single captured stdout legitimately
- * carries both summaries when an AC's oracle command chains one runner after
+ * This repo had TWO runners when AC-061-19 was measured (`.bun.test.ts` files
+ * under `bun test`, everything else under vitest; since 90c2b081 every test
+ * runs under one runner, adr-tg-1-test-runner-decision-measured-comparison-of-
+ * bun-only) and a consumer project may still run several, so a single captured
+ * stdout legitimately carries both summaries when an AC's oracle command chains one runner after
  * the other (`bunx vitest run a.test.ts && bun test b.bun.test.ts`), and its
  * own split-by-runner oracle practice makes chaining TWO invocations of the
  * SAME runner just as likely. Measured 2026-08-19 (AC-061-19's own incident):

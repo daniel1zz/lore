@@ -1,14 +1,15 @@
 // @spawns dist/lore
 /**
- * Compiled-binary e2e for the `lore evidence` mixed-runner invocation guard —
- * closes task-vitest-run-silently-drops-a-bun-test-ts-named-alongside-a,
- * driven end-to-end through the COMPILED `dist/lore` binary against a
- * THROWAWAY `mkdtemp` corpus (never this repo's own `.lore/`; project
- * CLAUDE.md hard rule, 2026-07-07 pollution incident).
+ * Compiled-binary e2e for the `lore evidence` dropped-file guard — closes
+ * task-vitest-run-silently-drops-a-bun-test-ts-named-alongside-a (re-derived by
+ * task-skill-implement-tg-32-evidence-precheck-follows-the-one), driven
+ * end-to-end through the COMPILED `dist/lore` binary against a THROWAWAY
+ * `mkdtemp` corpus (never this repo's own `.lore/`; project CLAUDE.md hard
+ * rule, 2026-07-07 pollution incident).
  *
  * Why a compiled suite exists at all: the guard's decision function is pure
- * and exhaustively unit-tested from vitest
- * (`tests/unit/adapters/evidence-mixed-runner-guard.test.ts`), but the CLI
+ * and unit-tested from vitest
+ * (`tests/unit/adapters/evidence-dropped-file-guard.test.ts`), but the CLI
  * command that must CALL it (`src/adapters/cli/commands/evidence.ts`) imports
  * the bun-only `loader.ts` (`bun:sqlite`) and is unreachable from vitest — the
  * SAME reason `evidence-completeness-guard-compiled.bun.test.ts` (SPEC-061
@@ -16,41 +17,32 @@
  * nothing would leave every unit test green; this file is the only oracle
  * that the wiring exists in the artifact a consumer actually runs.
  *
- * The refusal assertions are guarded against a CONFOUND: `lore evidence` runs
- * the older missing-oracle-file precheck FIRST, and it also exits 4. Every
- * command below names test files that genuinely EXIST inside the throwaway
- * corpus (`seedOracleFiles`), and each refusal assertion pins the
- * mixed-runner wording AND asserts the missing-file wording is ABSENT — so a
- * pass here can never be a right-exit-code-for-the-wrong-reason.
+ * The runner is a STUB `node_modules/.bin/vitest` inside the throwaway corpus
+ * that prints a fixed one-file summary, so `--capture` runs a real child
+ * process through `bunx --bun vitest run ...` without needing vitest installed
+ * and without depending on how many files the command names. That makes the
+ * two scenarios exact: the stub always reports ONE executed file, so a command
+ * naming one file is complete and a command naming two is the silent drop.
  *
  * Freshness guard (repo CLAUDE.md false-oracle vector #4 — a stale
  * `dist/lore` silently validates stale compiled logic against current
  * source): `beforeAll` calls `assertFreshBinary`. Run `bun run build` (repo
  * root) first.
  *
- * ⛔ SUPERSEDED (task-raise-the-evidence-tail-guard-s-predicate-to-its-own,
- * spec-falsifiability-reachability-a-feedable-checkpoint-an §D5): a
- * self-reported oracle-"test" `--result pass` is now refused by the SEPARATE,
- * later-running `rejectMissingPassOutputTail` guard regardless of tail
- * content — clearing THIS mixed-runner guard is necessary but no longer
- * sufficient. Scenarios 3-4 below now assert THIS guard's own verdict (via
- * MIXED_RUNNER_WORDING's absence) while the overall write is refused by D5
- * (naming --capture); row counts stay flat at 0 throughout.
- *
  * Coverage (sequential scenarios over ONE task):
- *   1. a single `vitest run` command naming BOTH a real vitest file and a
- *      real `.bun.test.ts` file → exit 4, 0 rows, mixed-runner wording
- *   2. the symmetric `bun test` command naming BOTH files → exit 4, 0 rows
- *   3. the same file set split into two separate recordings → clears THIS
- *      guard both times, refused by D5 instead, 0 rows
- *   4. a plain unfiltered single-runner pass → clears THIS guard, refused by
- *      D5, 0 rows
+ *   1. `--capture` of `bunx --bun vitest run <x>.bun.test.ts` (the one-runner
+ *      command this repo records since 90c2b081; the old filename-suffix guard
+ *      refused it) -> exit 0, one runner-captured row
+ *   2. `--capture` of a command naming TWO files while the runner executes one
+ *      -> exit 4, dropped-file wording, no new row
+ *   3. the same two-file command naming a consumer-style plain `.test.ts` pair
+ *      is refused the same way (no repo naming convention involved)
  *
- * @spec_ref task-vitest-run-silently-drops-a-bun-test-ts-named-alongside-a
+ * @spec_ref task-skill-implement-tg-32-evidence-precheck-follows-the-one
  */
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { assertFreshBinary } from "../integration/helpers/assert-fresh-binary";
@@ -60,20 +52,22 @@ import { assertFreshBinary } from "../integration/helpers/assert-fresh-binary";
 const REPO_ROOT = new URL("../../../../", import.meta.url).pathname.replace(/\/$/, "");
 const LORE_BIN = join(REPO_ROOT, "dist", "lore");
 
-/** Paths (relative to the throwaway corpus root) of the two oracle files every command names. */
-const VITEST_FILE_RELATIVE = "tests/sample.test.ts";
+/** Paths (relative to the throwaway corpus root) of the files the commands name. */
+const PLAIN_FILE_RELATIVE = "tests/sample.test.ts";
 const BUN_FILE_RELATIVE = "tests/sample.bun.test.ts";
+const OTHER_PLAIN_FILE_RELATIVE = "tests/other.test.ts";
 
-/** A single vitest invocation naming BOTH files — the exact defect shape. */
-const MIXED_VITEST_COMMAND = `bunx vitest run ${VITEST_FILE_RELATIVE} ${BUN_FILE_RELATIVE}`;
-/** The symmetric case: a single bun test invocation naming BOTH files. */
-const MIXED_BUN_COMMAND = `bun test ${BUN_FILE_RELATIVE} ${VITEST_FILE_RELATIVE}`;
-/** The same file set, correctly split. */
-const SPLIT_VITEST_COMMAND = `bunx vitest run ${VITEST_FILE_RELATIVE}`;
-const SPLIT_BUN_COMMAND = `bun test ${BUN_FILE_RELATIVE}`;
+/** The one-runner command for a `.bun.test.ts` file; the stub runner executes one file. */
+const ONE_FILE_COMMAND = `bunx --bun vitest run ${BUN_FILE_RELATIVE}`;
+/** Two files named; the stub runner still reports ONE executed — the silent drop. */
+const TWO_FILE_COMMAND = `bunx --bun vitest run ${PLAIN_FILE_RELATIVE} ${BUN_FILE_RELATIVE}`;
+/** A consumer-style pair with no `.bun.test.ts` involved at all. */
+const CONSUMER_PAIR_COMMAND = `bunx --bun vitest run ${PLAIN_FILE_RELATIVE} ${OTHER_PLAIN_FILE_RELATIVE}`;
 
 /** Wording unique to the guard under test. */
-const MIXED_RUNNER_WORDING = "Mixed-runner --command";
+const DROPPED_FILE_WORDING = "Dropped-file --result pass";
+/** Wording the retired filename-suffix guard used; its presence would be the regression. */
+const RETIRED_WORDING = "Mixed-runner --command";
 /** Wording unique to the OLDER precheck — its presence would mean a confounded refusal. */
 const MISSING_FILE_WORDING = "Oracle file(s) not found";
 
@@ -96,7 +90,7 @@ function runLore(args: string[], cwd: string): RunResult {
       ...process.env,
       HOME: cwd,
       CLAUDECODE: "1",
-      LORE_ACTOR: "agent:mixed-runner-guard-probe",
+      LORE_ACTOR: "agent:dropped-file-guard-probe",
     },
   });
   return {
@@ -122,8 +116,20 @@ function parseSlug(stdout: string): string {
  */
 function seedOracleFiles(dir: string): void {
   mkdirSync(join(dir, "tests"), { recursive: true });
-  writeFileSync(join(dir, VITEST_FILE_RELATIVE), "// existence-only fixture\n");
-  writeFileSync(join(dir, BUN_FILE_RELATIVE), "// existence-only fixture\n");
+  for (const relative of [PLAIN_FILE_RELATIVE, BUN_FILE_RELATIVE, OTHER_PLAIN_FILE_RELATIVE]) {
+    writeFileSync(join(dir, relative), "// existence-only fixture\n");
+  }
+  // reason: a stub runner, not real vitest — `bunx` resolves a project-local
+  // node_modules/.bin entry first, so `--capture` spawns this script. It prints
+  // a fixed ONE-file summary regardless of arguments, which is exactly the
+  // runner behaviour under test (a runner that executed fewer files than named).
+  mkdirSync(join(dir, "node_modules", ".bin"), { recursive: true });
+  const stub = join(dir, "node_modules", ".bin", "vitest");
+  writeFileSync(
+    stub,
+    "#!/bin/sh\necho ' Test Files  1 passed (1)'\necho '      Tests  3 passed (3)'\n",
+  );
+  chmodSync(stub, 0o755);
 }
 
 /** Reads the task's CURRENT evidence-row count straight from the corpus. */
@@ -136,9 +142,9 @@ function readEvidenceCount(dir: string, taskSlug: string): number {
   return parsed.data.doc.extra.verification_evidence?.length ?? 0;
 }
 
-function recordEvidence(dir: string, taskSlug: string, command: string): RunResult {
+function recordCapturedEvidence(dir: string, taskSlug: string, command: string): RunResult {
   return runLore(
-    ["evidence", taskSlug, "--oracle", "test", "--result", "pass", "--command", command, "--output-tail", "ok"],
+    ["evidence", taskSlug, "--oracle", "test", "--result", "pass", "--capture", "--command", command],
     dir,
   );
 }
@@ -152,7 +158,7 @@ beforeAll(() => {
     join(REPO_ROOT, "packages", "core", "src"),
   ]);
 
-  dir = mkdtempSync(join(tmpdir(), "lore-mixed-runner-guard-"));
+  dir = mkdtempSync(join(tmpdir(), "lore-dropped-file-guard-"));
   // Never inside this repo — the corpus under test must not be the repo's own.
   expect(dir.startsWith(REPO_ROOT)).toBe(false);
 
@@ -161,7 +167,7 @@ beforeAll(() => {
   seedOracleFiles(dir);
 
   const prd = runLore(
-    ["create", "prd", "--title", "Mixed Runner Guard Root", "--content", "# PRD\n\nroot.", "--no-ai"],
+    ["create", "prd", "--title", "Dropped File Guard Root", "--content", "# PRD\n\nroot.", "--no-ai"],
     dir,
   );
   if (prd.exitCode !== 0) throw new Error(`create prd failed: ${prd.stderr}`);
@@ -169,7 +175,7 @@ beforeAll(() => {
   const plan = runLore(
     [
       "create", "plan",
-      "--title", "Mixed Runner Guard Plan",
+      "--title", "Dropped File Guard Plan",
       "--parent", parseSlug(prd.stdout),
       "--content", "## Plan\n\nbody",
       "--no-ai",
@@ -181,7 +187,7 @@ beforeAll(() => {
   const task = runLore(
     [
       "create", "task",
-      "--title", "Mixed Runner Guard Task",
+      "--title", "Dropped File Guard Task",
       "--plan-id", parseSlug(plan.stdout),
       "--content", "## Task\n\nbody",
       "--no-ai",
@@ -202,61 +208,40 @@ afterAll(() => {
   }
 });
 
-describe("compiled lore evidence refuses a mixed-runner --command", () => {
-  it("a single vitest run invocation naming a .bun.test.ts file too exits 4 and writes no row", () => {
+describe("compiled lore evidence follows the one-runner rule and still refuses a dropped file", () => {
+  it("--capture accepts `bunx --bun vitest run <x>.bun.test.ts` and records one runner-captured row", () => {
     expect(readEvidenceCount(dir, taskSlug)).toBe(0);
 
-    const refused = recordEvidence(dir, taskSlug, MIXED_VITEST_COMMAND);
+    const accepted = recordCapturedEvidence(dir, taskSlug, ONE_FILE_COMMAND);
+
+    expect(accepted.stderr).not.toContain(RETIRED_WORDING);
+    expect(accepted.stderr).not.toContain(DROPPED_FILE_WORDING);
+    expect(accepted.exitCode).toBe(0);
+    expect(readEvidenceCount(dir, taskSlug)).toBe(1);
+  });
+
+  it("a captured command naming two files while the runner executes one exits 4 and writes no row", () => {
+    const before = readEvidenceCount(dir, taskSlug);
+
+    const refused = recordCapturedEvidence(dir, taskSlug, TWO_FILE_COMMAND);
 
     expect(refused.exitCode).toBe(4);
-    expect(refused.stderr).toContain(MIXED_RUNNER_WORDING);
-    expect(refused.stderr).toContain(BUN_FILE_RELATIVE);
-    expect(refused.stderr).toContain("vitest run");
-    expect(refused.stderr).toContain("bun test");
+    expect(refused.stderr).toContain(DROPPED_FILE_WORDING);
+    expect(refused.stderr).toContain("under_match");
+    expect(refused.stderr).not.toContain(RETIRED_WORDING);
     // CONFOUND CONTROL: refused by THIS guard, not by the older missing-file precheck.
     expect(refused.stderr).not.toContain(MISSING_FILE_WORDING);
-    expect(readEvidenceCount(dir, taskSlug)).toBe(0);
+    expect(readEvidenceCount(dir, taskSlug)).toBe(before);
   });
 
-  it("the symmetric bun test invocation naming the plain .test.ts file too exits 4 and writes no row", () => {
-    const refused = recordEvidence(dir, taskSlug, MIXED_BUN_COMMAND);
+  it("a consumer-style pair of plain .test.ts files is refused for the same reason, with no repo naming rule involved", () => {
+    const before = readEvidenceCount(dir, taskSlug);
+
+    const refused = recordCapturedEvidence(dir, taskSlug, CONSUMER_PAIR_COMMAND);
 
     expect(refused.exitCode).toBe(4);
-    expect(refused.stderr).toContain(MIXED_RUNNER_WORDING);
-    expect(refused.stderr).toContain(VITEST_FILE_RELATIVE);
-    expect(refused.stderr).not.toContain(MISSING_FILE_WORDING);
-    expect(readEvidenceCount(dir, taskSlug)).toBe(0);
-  });
-
-  // reason: SUPERSEDED (task-raise-the-evidence-tail-guard-s-predicate-to-its-
-  // own, spec-falsifiability-reachability-a-feedable-checkpoint-an §D5) —
-  // clearing THIS mixed-runner guard is now necessary but no longer
-  // sufficient: `rejectMissingPassOutputTail` separately refuses EVERY
-  // self-reported oracle-"test" pass without --capture, regardless of tail
-  // content. `--oracle manual` is not usable here (it would skip the guard
-  // this file exists to test). Both calls below now clear THIS guard (proven
-  // by MIXED_RUNNER_WORDING's absence) but are refused by D5 instead (naming
-  // --capture); row counts stay flat at 0.
-  it("the same file set split into two separate recordings clears the mixed-runner guard both times, but D5 still refuses without --capture", () => {
-    const first = recordEvidence(dir, taskSlug, SPLIT_VITEST_COMMAND);
-    expect(first.exitCode).toBe(4);
-    expect(first.stderr).not.toContain(MIXED_RUNNER_WORDING);
-    expect(first.stderr).toContain("--capture");
-    expect(readEvidenceCount(dir, taskSlug)).toBe(0);
-
-    const second = recordEvidence(dir, taskSlug, SPLIT_BUN_COMMAND);
-    expect(second.exitCode).toBe(4);
-    expect(second.stderr).not.toContain(MIXED_RUNNER_WORDING);
-    expect(second.stderr).toContain("--capture");
-    expect(readEvidenceCount(dir, taskSlug)).toBe(0);
-  });
-
-  it("CONTROL: an unrelated unfiltered single-runner pass clears the mixed-runner guard, but D5 still refuses without --capture", () => {
-    const accepted = recordEvidence(dir, taskSlug, SPLIT_VITEST_COMMAND);
-
-    expect(accepted.exitCode).toBe(4);
-    expect(accepted.stderr).not.toContain(MIXED_RUNNER_WORDING);
-    expect(accepted.stderr).toContain("--capture");
-    expect(readEvidenceCount(dir, taskSlug)).toBe(0);
+    expect(refused.stderr).toContain(DROPPED_FILE_WORDING);
+    expect(refused.stderr).not.toContain("CLAUDE.md");
+    expect(readEvidenceCount(dir, taskSlug)).toBe(before);
   });
 });
