@@ -29,7 +29,8 @@ import { createApp } from "../../../app.js";
 // reason: saveConfig writes .lore/config.yaml via Node fs — only reachable via
 // the @lore/core/node subpath (browser-safety split, packages/core/src/CLAUDE.md).
 import { saveConfig } from "@lore/core/node";
-import { formatError } from "../utils.js";
+import { formatError, resolveActor } from "../utils.js";
+import { isInsideGitRepository } from "../../../service/git-state-stamp.js";
 
 export default defineCommand({
   meta: {
@@ -51,7 +52,7 @@ export default defineCommand({
       description: "Output as JSON",
     },
   },
-  run({ args }) {
+  async run({ args }) {
     const cwd = process.cwd();
     const loreDir = join(cwd, ".lore");
 
@@ -91,16 +92,75 @@ export default defineCommand({
     // Initialise the SQLite DB (SQLiteStore constructor runs migrations)
     const dbPath = join(loreDir, "lore.db");
     const app = createApp(dbPath);
+    // reason: SPEC-143 AC-CT-3 — a fresh corpus is armed at init: nothing predates the cutoff, so
+    // the R13 impact report is zero rows by construction, and both write paths (`lore verify`,
+    // `lore evidence --capture`) now stamp state. Existing corpora keep the explicit
+    // `lore audit arm --confirm` step. A failed arm is fatal: an unarmed "fresh" corpus would
+    // silently accept unbound rows.
+    //
+    // reason: user decision 2026-10-17 — outside a git repository there is no state to stamp
+    // against, so init does NOT arm, and says so (stdout line, `--json` field, `lore status`) rather
+    // than downgrading silently. `lore audit arm --confirm` arms it once the corpus is in git.
+    const stateBinding = app.stateBindingService;
+    const insideGit = isInsideGitRepository(cwd);
+    const armed = !insideGit
+      ? "not_a_git_repo"
+      : stateBinding === undefined
+        ? undefined
+        : await stateBinding.arm({ actor: resolveActor(), nowIso: new Date().toISOString() });
     app.close();
+    if (armed === "not_a_git_repo") {
+      const line = `state binding not armed: ${cwd} is not inside a git repository; run \`lore audit arm --confirm\` after placing the corpus in git`;
+      if (args.json) {
+        console.log(
+          JSON.stringify({
+            ok: true,
+            data: {
+              path: loreDir,
+              project: projectName,
+              author: args.author,
+              state_binding: { armed: false, reason: "not_a_git_repo" },
+            },
+          }),
+        );
+      } else {
+        console.log(line);
+        console.log(`Initialised Lore project "${projectName}"`);
+        console.log(`  Database: ${join(loreDir, "lore.db")}`);
+        console.log(`  Config:   ${join(loreDir, "config.yaml")}`);
+        console.log("");
+        console.log("Run `lore create prd --title \"My Project\"` to add your first document.");
+      }
+      return;
+    }
+    if (armed === undefined || !armed.ok) {
+      const msg =
+        armed === undefined
+          ? "stateBindingService is not wired on this App (internal wiring error)"
+          : `Failed to arm state binding: ${formatError(armed.error)}`;
+      if (args.json) {
+        console.log(JSON.stringify({ ok: false, error: msg }));
+      } else {
+        process.stderr.write(`Error: ${msg}\n`);
+      }
+      process.exit(1);
+    }
+    const armedRows = armed.value.status === "armed" ? armed.value.report.would_become_unbound_rows : 0;
 
     if (args.json) {
       console.log(
         JSON.stringify({
           ok: true,
-          data: { path: loreDir, project: projectName, author: args.author },
+          data: {
+            path: loreDir,
+            project: projectName,
+            author: args.author,
+            state_binding: { armed: true, status: armed.value.status, arming_rev: armed.value.arming_rev, would_become_unbound_rows: armedRows },
+          },
         }),
       );
     } else {
+      console.log(`State binding armed (audit row id ${armed.value.arming_rev}); ${armedRows} existing rows affected.`);
       console.log(`Initialised Lore project "${projectName}"`);
       console.log(`  Database: ${join(loreDir, "lore.db")}`);
       console.log(`  Config:   ${join(loreDir, "config.yaml")}`);

@@ -57,6 +57,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { appendFileSync, mkdtempSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
+import { FIXTURE_HOME_OUTSIDE_REPO, makeCleanTreeRepo } from "../helpers/clean-tree-repo.js";
 
 interface RunResult {
   readonly stdout: string;
@@ -71,7 +72,7 @@ const INDEX_TS = join(PROJECT_ROOT, "src", "index.ts");
 function runLore(args: string[], cwd: string): RunResult {
   const proc = Bun.spawnSync(["bun", "run", INDEX_TS, ...args], {
     cwd,
-    env: { ...process.env, HOME: cwd, CLAUDECODE: "1", LORE_ACTOR: "agent:archive-sweep-cli-test" },
+    env: { ...process.env, HOME: FIXTURE_HOME_OUTSIDE_REPO, CLAUDECODE: "1", LORE_ACTOR: "agent:archive-sweep-cli-test" },
   });
   return {
     stdout: proc.stdout.toString(),
@@ -119,6 +120,7 @@ let tmpDir: string;
 
 beforeEach(() => {
   tmpDir = mkdtempSync(join(tmpdir(), "lore-archive-sweep-cli-test-"));
+  makeCleanTreeRepo(tmpDir);
   const initResult = runLore(["init"], tmpDir);
   expect(initResult.exitCode).toBe(0);
 });

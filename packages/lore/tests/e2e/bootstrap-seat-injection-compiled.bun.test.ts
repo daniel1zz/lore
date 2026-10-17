@@ -17,6 +17,7 @@
  */
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { FIXTURE_HOME_OUTSIDE_REPO, makeCleanTreeRepo } from "../helpers/clean-tree-repo";
 import { appendFileSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
@@ -39,7 +40,7 @@ const BASE_SESSION = "5ea70000-seat-e2e-base";
  * the OS user and trip the claim-conflict gate). Each simulated session passes its own id.
  */
 async function runLore(args: string[], cwd: string, session: string = BASE_SESSION): Promise<RunResult> {
-  const env: Record<string, string | undefined> = { ...process.env, HOME: cwd, CLAUDECODE: "1" };
+  const env: Record<string, string | undefined> = { ...process.env, HOME: FIXTURE_HOME_OUTSIDE_REPO, CLAUDECODE: "1" };
   delete env["CLAUDE_SESSION_ID"];
   delete env["LORE_ACTOR"];
   env["CLAUDE_CODE_SESSION_ID"] = session;
@@ -66,6 +67,7 @@ interface Seeded {
 
 /** prd + plan; tasks are created on demand by `claimTask`. */
 async function seed(dir: string): Promise<Seeded> {
+  makeCleanTreeRepo(dir);
   await mustRun(["init"], dir);
   const prd = parseSlug((await mustRun(["create", "prd", "--title", "Seat PRD", "--content", "r", "--no-ai"], dir)).stdout);
   const plan = parseSlug(

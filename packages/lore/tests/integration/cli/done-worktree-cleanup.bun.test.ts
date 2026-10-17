@@ -140,6 +140,10 @@ describe("done removes the recorded worktree (#106)", () => {
     mustOk(git(repo, "add", "-A"), "git add base");
     mustOk(git(repo, "commit", "-q", "-m", "base"), "git commit base");
     mustOk(lore(["init"]), "lore init");
+    // reason: `lore init` arms state binding (AC-CT-3); a captured pass on a dirty tree is unbound and
+    // refused by `lore done`, so the corpus scaffold is committed before any evidence is captured.
+    mustOk(git(repo, "add", "-A"), "git add corpus");
+    mustOk(git(repo, "commit", "-q", "-m", "lore corpus"), "git commit corpus");
     mustOk(lore(["create", "prd", "--title", "Root", "--json"]), "create root prd");
 
     // removable: clean + own commit merged into main + 
