@@ -1,3 +1,4 @@
+// @layer unit-fragments-flow (in-process runFragmentsCheck; owners drive the compiled dist/lore)
 /**
  * Unit oracles for flows/fragments-flow.ts (render + check), injected InMemoryFsPort.
  * Spec: spec-context-fragments-config-driven-layered-rule-injection D3, D6, D7, D12 —

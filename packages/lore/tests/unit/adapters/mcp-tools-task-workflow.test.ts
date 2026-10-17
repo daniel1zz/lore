@@ -1,6 +1,7 @@
 // @reads packages/lore/tests/unit/adapters/ghost-nonexistent-oracle-file.test.ts
 // @reads tests/unit/adapters/ghost-nonexistent-oracle-file.test.ts
 // @reads tests/unit/adapters/mcp-tools-task-workflow.test.ts
+// @layer mcp-adapter (in-process MCP tool handlers; owners drive the CLI / source grep)
 /**
  * Unit tests for the 4 SPEC-025 task-workflow MCP tools: lore_claim, lore_release,
  * lore_evidence_add, lore_ready.

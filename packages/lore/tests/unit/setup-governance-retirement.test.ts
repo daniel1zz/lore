@@ -1,4 +1,5 @@
 // @reads assets/**
+// @layer unit-asset-text (seat-briefing asset text; owner is a source grep script)
 /**
  * NOTE (task-skill-test-tg-8): the per-file "retired path is absent from the install walk and from
  * the check-embedded manifest" cases moved into `tests/integration/retirement-registry.bun.test.ts`

@@ -1,3 +1,4 @@
+// @layer mcp-adapter (in-process MCP session tools; owners drive services and the CLI)
 /**
  * Unit tests for the SPEC-041 session MCP tools: lore_bootstrap, lore_handoff, and
  * lore_feed's session-resume dispatch branch.
