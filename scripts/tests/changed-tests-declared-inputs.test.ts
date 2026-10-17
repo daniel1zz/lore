@@ -224,7 +224,7 @@ describe("AC-TG-7: run-time check fails an undeclared read or spawn naming the t
   });
 
   /** A throwaway vitest project that uses the REAL recorder (aliases + setup file) with its own repository root. */
-  function runProject(testSource: string, extraFiles: Record<string, string> = {}): { status: number; output: string } {
+  function runProject(testSource: string, extraFiles: Record<string, string> = {}, trackedPaths: readonly string[] = []): { status: number; output: string } {
     const dir = realpathSync(mkdtempSync(join(tmpdir(), "declared-inputs-run-")));
     dirs.push(dir);
     const vitestPackageJson = createRequire(import.meta.url).resolve("vitest/package.json");
@@ -244,6 +244,11 @@ describe("AC-TG-7: run-time check fails an undeclared read or spawn naming the t
     for (const [rel, content] of Object.entries(files)) {
       mkdirSync(dirname(join(dir, rel)), { recursive: true });
       writeFileSync(join(dir, rel), content, "utf8");
+    }
+    // reason: the recorder asks git which undeclared reads are ignored (task-skill-fix-tg-34), so the fixture is a repository.
+    expect(spawnSync("git", ["init", "-q"], { cwd: dir, encoding: "utf8" }).status).toBe(0);
+    if (trackedPaths.length > 0) {
+      expect(spawnSync("git", ["add", "-f", ...trackedPaths], { cwd: dir, encoding: "utf8" }).status).toBe(0);
     }
     const result = spawnSync("bun", ["--bun", join(dir, "node_modules", "vitest", "vitest.mjs"), "run"], {
       cwd: dir,
@@ -323,5 +328,27 @@ describe("AC-TG-7: run-time check fails an undeclared read or spawn naming the t
       "",
     ].join("\n");
     expect(runProject(body).status).toBe(0);
+  });
+
+  const READ_IGNORED_BODY = [
+    'import { readFileSync } from "node:fs";',
+    'import { it } from "vitest";',
+    'it("reads the ignored file", () => { readFileSync("scratch/x.db", "utf8"); });',
+    "",
+  ].join("\n");
+
+  it("AC-TG-7 (task-skill-fix-tg-34) HAPPY: a read of a git-ignored path (file under an ignored directory) is not an undeclared input", () => {
+    const { status, output } = runProject(READ_IGNORED_BODY, { ".gitignore": "scratch/\n", "scratch/x.db": "1\n" });
+    expect(output).not.toContain("@reads");
+    expect(status).toBe(0);
+  });
+
+  it("AC-TG-7 (task-skill-fix-tg-34) ERROR: a tracked file still fails even when a .gitignore pattern matches it, and an untracked non-ignored one fails too", () => {
+    const tracked = runProject(READ_IGNORED_BODY, { ".gitignore": "scratch/\n", "scratch/x.db": "1\n" }, ["scratch/x.db"]);
+    expect(tracked.status).not.toBe(0);
+    expect(tracked.output).toContain("@reads scratch/x.db");
+    const untracked = runProject(READ_IGNORED_BODY, { "scratch/x.db": "1\n" });
+    expect(untracked.status).not.toBe(0);
+    expect(untracked.output).toContain("@reads scratch/x.db");
   });
 });

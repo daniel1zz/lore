@@ -39,6 +39,14 @@ const realFs = nodeRequire("node:fs") as {
   statSync(path: string, options: { throwIfNoEntry: false }): { isFile(): boolean } | undefined;
   realpathSync(path: string): string;
 };
+// reason: same as realFs — the aliased "node:child_process" would resolve to the recorder wrapper.
+const realChildProcess = nodeRequire("node:child_process") as {
+  spawnSync(
+    command: string,
+    args: readonly string[],
+    options: { cwd: string; input: string; encoding: "utf8"; maxBuffer: number },
+  ): { status: number | null; stdout: string; stderr: string; error?: Error };
+};
 
 /**
  * Absolute path of the repository whose files tests must declare: this checkout (the directory above
@@ -228,6 +236,36 @@ function binaryBuildInputs(declared: DeclaredInputs): readonly string[] {
     : [];
 }
 
+/** Typed failure: git could not say which paths are ignored, so an undeclared read cannot be classified. */
+export class GitIgnoreQueryError extends Error {
+  constructor(
+    public readonly root: string,
+    public readonly paths: readonly string[],
+    public readonly reason: string,
+  ) {
+    super(`test-read-log: \`git check-ignore\` failed in ${root} for ${paths.join(", ")}: ${reason}`);
+    this.name = "GitIgnoreQueryError";
+  }
+}
+
+/**
+ * The subset of `paths` (repo-relative posix) that git ignores in REPO_ROOT. One batched
+ * `git check-ignore --stdin -z` call; tracked files are never reported (git's own rule), so a tracked
+ * undeclared read still fails. Exit 0 = some ignored, 1 = none, anything else = git cannot answer: throw.
+ */
+function findGitIgnoredPaths(paths: readonly string[]): Set<string> {
+  const result = realChildProcess.spawnSync("git", ["check-ignore", "--stdin", "-z"], {
+    cwd: REPO_ROOT,
+    input: `${paths.join("\0")}\0`,
+    encoding: "utf8",
+    maxBuffer: 16 * 1024 * 1024,
+  });
+  if (result.error !== undefined) throw new GitIgnoreQueryError(REPO_ROOT, paths, result.error.message);
+  if (result.status === 1) return new Set();
+  if (result.status !== 0) throw new GitIgnoreQueryError(REPO_ROOT, paths, `exit ${String(result.status)}: ${result.stderr.trim()}`);
+  return new Set(result.stdout.split("\0").filter((p) => p !== ""));
+}
+
 /** One group of undeclared accesses, keyed by the label (test name) they were recorded under. */
 export interface UndeclaredGroup {
   readonly label: string;
@@ -246,13 +284,21 @@ export function takeUndeclaredInputs(testFileAbsolute: string): UndeclaredGroup[
   const declared = declarationsOf(testFileAbsolute);
   const own = toRepoRelative(testFileAbsolute);
   const groups = new Map<string, Map<string, { kind: "read" | "spawn"; path: string }>>();
+  const uncovered: InputEvent[] = [];
   for (const event of taken) {
     if (event.path === own) continue;
     const covered =
       event.kind === "spawn"
         ? matchesAnyPattern(event.path, declared.spawns)
         : matchesAnyPattern(event.path, [...declared.reads, ...declared.spawns, ...binaryBuildInputs(declared)]);
-    if (covered) continue;
+    if (!covered) uncovered.push(event);
+  }
+  // reason: a git-ignored path never appears in a git diff, so the selector can never use a declaration of it
+  // (task-skill-fix-tg-34). Only undeclared READS are classified, in one batch, and only when there are any.
+  const readPaths = [...new Set(uncovered.filter((e) => e.kind === "read").map((e) => e.path))];
+  const ignored = readPaths.length === 0 ? new Set<string>() : findGitIgnoredPaths(readPaths);
+  for (const event of uncovered) {
+    if (event.kind === "read" && ignored.has(event.path)) continue;
     const group = groups.get(event.label) ?? new Map();
     group.set(`${event.kind}:${event.path}`, { kind: event.kind, path: event.path });
     groups.set(event.label, group);
