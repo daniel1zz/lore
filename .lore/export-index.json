@@ -11252,6 +11252,14 @@
     "01M52H4K3RNKW1BFZYFPZ7HK8S": {
       "human_id": "TASK-1511",
       "file_path": "docs/requirements/task/TASK-1511-skill-implement-tg-22-missing-oracle-floor-counts.md"
+    },
+    "01M53Z5ZJ7RK3S2MH2S9GH6P96": {
+      "human_id": "TASK-1512",
+      "file_path": "docs/requirements/task/TASK-1512-skill-review-tg-27-audit-the-133-citations-auto-ad.md"
+    },
+    "01M53Z5YVD1XYG9HRFX70NXA56": {
+      "human_id": "TASK-1513",
+      "file_path": "docs/requirements/task/TASK-1513-ac-set-correction-of-a-command-forces-a-citation-s.md"
     }
   }
 }
