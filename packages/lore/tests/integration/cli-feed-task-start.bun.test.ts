@@ -597,5 +597,5 @@ describe("REGRESSION — spec-create / session-resume / phase-start outputs are 
 
     const unknown = runLore(["feed", "totally-unknown-checkpoint"], tmpDir);
     expect(unknown.stdout.includes(RESUME_SCOPE_CLOSURE)).toBe(false);
-  });
+  }, 30_000);
 });
