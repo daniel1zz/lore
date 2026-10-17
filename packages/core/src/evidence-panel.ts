@@ -120,6 +120,12 @@ import {
   type EvidenceEntry,
   type EvidenceResultTally,
 } from "./task-workflow.js";
+import {
+  classifyEvidenceStamps,
+  tallyStampReadings,
+  type StampBindingContext,
+  type StampReadingTally,
+} from "./stamp-binding.js";
 import type { DocRecord } from "./types.js";
 
 // ─── Task Attestation Counting ──────────────────────────────────────────────
@@ -134,8 +140,28 @@ export interface TaskAttestationInfo {
   title: string;
   /** Total `verification_evidence[]` entries on this task. */
   evidenceCount: number;
-  /** Of those, how many carry a runner-issued `attestation` object. */
+  /**
+   * Of those, how many carry a runner-issued `attestation` object. When the builder was given a
+   * {@link StampBindingContext}, rows classified `unbound` are EXCLUDED (SPEC-143 AC-CT-3): a
+   * post-arming verdict about an unnamed state is not attestation the floor may count.
+   */
   attestedCount: number;
+  /**
+   * The stamp-axis distribution of this task's attested rows. PRESENT-IFF a binding context was
+   * supplied (absent = stamp axis not measured, never "all stamped"); `plan-close`'s
+   * `attestationFloor` refuses a task whose attested rows are ALL `unbound`.
+   */
+  stampTally?: StampReadingTally;
+}
+
+/**
+ * `true` iff the task carries attested rows and EVERY one is `unbound` (SPEC-143 AC-CT-3): the
+ * task's runner evidence certifies no named state, so it satisfies no floor. A task with any
+ * stamped or `legacy_unbound` attested row is NOT unbound-only; neither is one whose stamp axis
+ * was not measured (`stampTally` absent).
+ */
+export function isUnboundOnlyTask(info: TaskAttestationInfo): boolean {
+  return info.stampTally !== undefined && info.stampTally.unbound > 0 && info.attestedCount === 0;
 }
 
 /**
@@ -148,6 +174,8 @@ export interface TaskAttestationInfo {
  *
  * @param tasks - Task (or phase) documents to derive attestation facts for,
  *   typically a plan's resolved child tasks (`CorpusService.getPlanBundle`).
+ * @param stampBinding - the corpus's resolved arming facts (SPEC-143 AC-CT-3). Omitted = the
+ *   stamp axis is not measured and the counts are exactly the pre-SPEC-143 ones.
  * @returns One {@link TaskAttestationInfo} per input task, in input order. Never
  *   throws — a task with malformed/absent `extra.verification_evidence` yields
  *   `evidenceCount: 0, attestedCount: 0` (via `extractEvidence`'s own
@@ -156,14 +184,23 @@ export interface TaskAttestationInfo {
  * buildTaskAttestationInfos([taskWithTwoSelfReportedEntries]);
  * // => [{ slug: "task-x", title: "X", evidenceCount: 2, attestedCount: 0 }]
  */
-export function buildTaskAttestationInfos(tasks: readonly DocRecord[]): TaskAttestationInfo[] {
+export function buildTaskAttestationInfos(
+  tasks: readonly DocRecord[],
+  stampBinding?: StampBindingContext,
+): TaskAttestationInfo[] {
   return tasks.map((task) => {
     const evidence: EvidenceEntry[] = extractEvidence(task);
+    const attested = evidence.filter((entry) => entry.attestation !== undefined).length;
+    if (stampBinding === undefined) {
+      return { slug: task.slug, title: task.title, evidenceCount: evidence.length, attestedCount: attested };
+    }
+    const stampTally = tallyStampReadings(classifyEvidenceStamps(task.id, evidence, stampBinding));
     return {
       slug: task.slug,
       title: task.title,
       evidenceCount: evidence.length,
-      attestedCount: evidence.filter((entry) => entry.attestation !== undefined).length,
+      attestedCount: attested - stampTally.unbound,
+      stampTally,
     };
   });
 }
@@ -520,7 +557,9 @@ export interface AttestationSummary {
   /**
    * `true` when the RATIO conjunct clears: `min_ratio === null` (unconfigured, so
    * it never runs) OR `ratio >= min_ratio` — or the vacuous-pass case,
-   * `total_evidence === 0`, which is always `true`.
+   * `total_evidence === 0`, which is always `true`. ALSO `false` whenever a task's
+   * runner-attested rows are all `unbound` ({@link isUnboundOnlyTask}, SPEC-143 AC-CT-3),
+   * independent of the ratio's configuration.
    *
    * NOT the plan-close verdict on its own: the per-task zero-attested condition
    * was DEMOTED to the reported `zero_attested_tasks` fact (§Facts D5) and the
@@ -559,7 +598,7 @@ export interface AttestationSummary {
  *      would let the audited evidence define its own audit scope;
  *   3. the plan-wide attested-evidence ratio (total attested / total evidence)
  *      must be >= `minRatio` — OPT-IN: evaluated only when `minRatio` is
- *      non-`null`. This is the ONLY conjunct `meets_floor` still carries.
+ *      non-`null`. This and the stamp-axis refusal (an unbound-only task, SPEC-143 AC-CT-3) are the ONLY conjuncts `meets_floor` carries.
  *
  * A plan with NO evidence at all on any task (`total_evidence === 0`) is a
  * vacuous PASS (`meets_floor: true`, `ratio: null`) — the "pure-planning plan"
@@ -579,7 +618,7 @@ export interface AttestationSummary {
  *   REQUIRED (not optional): an optional parameter here would let a caller
  *   silently drop the exercised-coverage facts from a rendered panel. Pass `[]`
  *   for a caller with no spec-tier ancestor to resolve criteria from.
- * @returns The facts object. `meets_floor` is the RATIO conjunct only — a caller
+ * @returns The facts object. `meets_floor` is the RATIO + stamp-axis conjuncts only — a caller
  *   needing the plan-close verdict must AND it with
  *   {@link declaredScopeCoverageVerdict} over the plan's declared scope.
  * @example
@@ -638,7 +677,10 @@ export function deriveAttestationSummary(
   // evidence-derived — AND-ing either back in would (a) resurrect a per-task
   // proxy this spec deliberately removed and (b) make this value disagree with
   // `attestationFloor`, whose coverage conjunct reads the DECLARED scope.
-  const meetsFloor = minRatio === null || ratio >= minRatio;
+  // SPEC-143 AC-CT-3: the stamp axis rides the SAME conjunct so every consumer (plan-close gate,
+  // dashboard badge, compact chip) reads one verdict. A task whose runner-attested rows are ALL
+  // `unbound` fails the floor whether or not the opt-in ratio is configured.
+  const meetsFloor = (minRatio === null || ratio >= minRatio) && !infos.some(isUnboundOnlyTask);
   return {
     total_evidence: totalEvidence,
     attested,

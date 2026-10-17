@@ -2,6 +2,7 @@
  * lore audit [<doc>] [--actor <a>] [--action <x>] [--since <t>] [--limit <n>] [--json]
  * lore audit --verify [--since <t>] [--json]
  * lore audit anchor [--json]
+ * lore audit arm [--confirm] [--json]
  *
  * Read/verify surface over the audit table (SPEC-035 §2; chain-integrity +
  * anchor added SPEC-079 G3):
@@ -32,6 +33,13 @@
  *     collide with a real doc address. Fails loud (`VALIDATION_ERROR` → exit
  *     4) on an empty audit table rather than writing a degenerate anchor.
  *
+ *   - `lore audit arm [--confirm]` — the per-corpus state-binding arming step (SPEC-143
+ *     AC-CT-3, R13). Without `--confirm` it is READ-ONLY: it prints how many existing
+ *     runner-attested rows would become `unbound` (refused by the floors) and exits 0.
+ *     With `--confirm` it writes the single `state-binding-armed` audit row (idempotent) and
+ *     reports the same numbers. Dispatched by positional value like `anchor`. Run it only
+ *     after the runner writes stamps; arming earlier refuses every new stamp-less row.
+ *
  * AI-authored entries (action="judge") carry `created_by`/`actor` encoded as
  * `ai:{provider}:{model}:{prompt_version}` (SPEC-034 §2) — rendered here via
  * `parseAuditActor` so human output never shows the raw encoded string.
@@ -49,7 +57,7 @@ import { z } from "zod";
 import { defineCommand } from "citty";
 import { loadLoreApp } from "../loader.js";
 import { resolveConsumerCorpusRoot } from "../report-issue-wiring.js";
-import { exitCode, formatError, formatTable, parsePositiveIntArg } from "../utils.js";
+import { exitCode, formatError, formatTable, parsePositiveIntArg, resolveActor } from "../utils.js";
 import { parseAuditActor, type AuditEntry } from "@lore/core";
 import type { AuditFilters } from "../../../store/store-interface.js";
 import type { AuditAnchorRef, AuditMiss } from "../../../service/audit-service.js";
@@ -120,7 +128,7 @@ export default defineCommand({
   args: {
     doc: {
       type: "positional",
-      description: "Document ID or slug — show its decision trail. The literal 'anchor' pins the chain head to .lore/audit-anchor.json instead",
+      description: "Document ID or slug — show its decision trail. The literal 'anchor' pins the chain head to .lore/audit-anchor.json instead; 'arm' reports (or with --confirm writes) the state-binding arming row",
       required: false,
     },
     actor: {
@@ -143,6 +151,10 @@ export default defineCommand({
       type: "boolean",
       description: "Run the completeness oracle instead of a query (versions⋈audit reconcile)",
     },
+    confirm: {
+      type: "boolean",
+      description: "With `arm`: actually write the state-binding-armed audit row (default is a read-only impact report)",
+    },
     json: {
       type: "boolean",
       description: "Output as JSON",
@@ -151,6 +163,52 @@ export default defineCommand({
   async run({ args }) {
     const { app } = loadLoreApp();
     try {
+      // ── arm branch (positional value "arm", same dispatch as "anchor") ──
+      if (args.doc === "arm") {
+        const stateBinding = app.stateBindingService;
+        if (stateBinding === undefined) {
+          process.stderr.write("Error: stateBindingService is not wired on this App (internal wiring error)\n");
+          process.exitCode = 1;
+          return;
+        }
+        const result = args.confirm
+          ? await stateBinding.arm({ actor: resolveActor(), nowIso: new Date().toISOString() })
+          : await stateBinding.reportImpact();
+        if (!result.ok) {
+          process.stderr.write(formatError(result.error) + "\n");
+          process.exitCode = exitCode(result.error);
+          return;
+        }
+        if (args.json) {
+          console.log(JSON.stringify({ ok: true, data: result.value }, null, 2));
+          process.exitCode = 0;
+          return;
+        }
+        const value = result.value;
+        if ("status" in value && value.status === "already_armed") {
+          console.log(`State binding already armed (audit row id ${value.arming_rev}); nothing written.`);
+          process.exitCode = 0;
+          return;
+        }
+        const report = "status" in value ? value.report : value;
+        console.log(
+          `${report.would_become_unbound_rows} attested row(s) in ${report.would_become_unbound_docs} doc(s) ` +
+            `would become UNBOUND (audit_id_unresolved) and be refused by the floors once armed ` +
+            `(${report.attested_rows} attested of ${report.evidence_rows} evidence rows in ${report.docs_with_evidence} docs; ` +
+            `${report.unresolved_evidence_rows} evidence rows have no resolvable audit id).`,
+        );
+        if (report.would_become_unbound_slugs.length > 0) {
+          console.log(`Docs: ${report.would_become_unbound_slugs.join(", ")}`);
+        }
+        if ("status" in value) {
+          console.log(`Armed: wrote state-binding-armed audit row id ${value.arming_rev}.`);
+        } else {
+          console.log("Report only — nothing written. Re-run with --confirm to arm this corpus.");
+        }
+        process.exitCode = 0;
+        return;
+      }
+
       // ── anchor branch (positional value "anchor" — see module header for
       // why this is a positional-value dispatch, not a citty subCommand) ──
       if (args.doc === "anchor") {

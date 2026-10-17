@@ -131,11 +131,17 @@ export const SIXTH_STAMP_CLASS_MEMBER = "future_sixth_class";
 /** Repo-relative path of the module that owns the two-axis types (SPEC-143 C2). */
 export const GATE_PREDICATES_RELATIVE = "packages/lore/src/service/gate-predicates.ts";
 
-/** Repo-relative path of the browser-safe barrel that must re-export `StateStamp`/`ARMING_REV` (C1). */
+/** Repo-relative path of the browser-safe barrel that must re-export `StateStamp`/`STATE_BINDING_ARMED_ACTION` (C1, R13). */
 export const CORE_BARREL_RELATIVE = "packages/core/src/index.ts";
 
-/** Repo-relative path of the module that owns `StateStamp` and `ARMING_REV` (SPEC-143 C1 Scope table). */
+/** Repo-relative path of the module that owns `StateStamp` (SPEC-143 C1 Scope table). */
 export const TASK_WORKFLOW_RELATIVE = "packages/core/src/task-workflow.ts";
+
+/**
+ * Repo-relative path of the module that owns the per-corpus arming vocabulary
+ * (`STATE_BINDING_ARMED_ACTION`, SPEC-143 R13 - the shipped `ARMING_REV` literal it replaced is gone).
+ */
+export const STAMP_BINDING_RELATIVE = "packages/core/src/stamp-binding.ts";
 
 // ─── Checkout layout resolution ────────────────────────────────────────────
 
@@ -517,9 +523,9 @@ export function widenStampClassUnion(source: string, member: string): string {
  * (an optional `: Type` annotation is tolerated and excluded from the result).
  *
  * Reads the SOURCE rather than the runtime value on purpose. SPEC-143 C1 says
- * of `ARMING_REV`: "It is data, not a computation — nothing re-derives it".
+ * of the former `ARMING_REV`: "It is data, not a computation — nothing re-derives it".
  * A runtime `typeof x === "number"` check cannot tell a literal from
- * `deriveArmingRev()`; the initializer text can.
+ * a computed value; the initializer text can.
  *
  * @throws StampFixtureError when no such declaration exists, or it is not
  *   `;`-terminated.
@@ -629,7 +635,7 @@ export function buildRealTypeConsumerProject(
     `import type { StampClass, RadiusMeasurement, StampCurrency, StampVerdict } from "${gateSpecifier}";\n` +
     `import { readStampVerdict } from "${gateSpecifier}";\n` +
     `import type { StateStamp } from "${coreSpecifier}";\n` +
-    `import { ARMING_REV } from "${coreSpecifier}";\n` +
+    `import { STATE_BINDING_ARMED_ACTION } from "${coreSpecifier}";\n` +
     `\n${body}\n`;
   writeIsolatedProject(paths, root, { "src/index.ts": source });
   return { root, srcDir };
@@ -784,9 +790,9 @@ export function maskComments(source: string): string {
 /**
  * Files in `closure` that declare `name` at top level as an exported `const`,
  * `type`, or `interface`. Used to assert WHERE a symbol lives, not merely that
- * it is importable — SPEC-143 C1 pins `ARMING_REV`'s owner to
- * `packages/core/src/task-workflow.ts` ("a single exported constant ... stored
- * in packages/core/src/task-workflow.ts. It is data, not a computation").
+ * it is importable — SPEC-143 C1 pins `StateStamp`'s owner to
+ * `packages/core/src/task-workflow.ts`, and R13 pins the arming vocabulary to
+ * `packages/core/src/stamp-binding.ts`.
  */
 export function filesDeclaring(closure: ImportClosure, name: string): readonly string[] {
   const declaration = new RegExp(

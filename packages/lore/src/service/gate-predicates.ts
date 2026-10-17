@@ -66,6 +66,9 @@ import {
   declaredScopeCoverageVerdict,
   deriveAttestationSummary,
   extractTestFileTokens,
+  classifyStampAxis,
+  type StampAxisClass,
+  type StampAxisInput,
   type LoreError,
   type Result,
   attestationExemptKindSchema,
@@ -1668,14 +1671,14 @@ export function assessmentFreshness(
 /**
  * The STAMP axis of a verdict's currency — whether the row is bound to a named
  * state at all, and when it is not, which side of the immutable arming cutoff
- * (`@lore/core`'s `ARMING_REV`, task-workflow.ts) it was written on.
+ * (the corpus's `state-binding-armed` audit row; `@lore/core`'s `stamp-binding.ts`) it was written on.
  *
  * - `"stamped"` — the row carries a `StateStamp`. Whether that binding is still
  *   CURRENT is the RADIUS axis's question, never this one's.
- * - `"unbound"` — no stamp, `recordedAuditId > ARMING_REV`. Satisfies NO floor:
+ * - `"unbound"` — no stamp, `recordedAuditId` above the armed audit id. Satisfies NO floor:
  *   after arming, a stamp-less row is a verdict about an unnamed state
  *   (SPEC-143 G3, `adr-a-record-with-no-state-stamp-is-acceptable-but-never-green`).
- * - `"legacy_unbound"` — no stamp, `recordedAuditId <= ARMING_REV`. ACCEPTED by
+ * - `"legacy_unbound"` — no stamp, `recordedAuditId` at or below the armed audit id (or the corpus is unarmed). ACCEPTED by
  *   every floor that accepts it today, which is precisely what makes arming
  *   non-retro-invalidating (SPEC-143 N2).
  *
@@ -1684,7 +1687,7 @@ export function assessmentFreshness(
  * retro-fails the entire back-catalogue or grandfathers every future row. Same
  * argument as {@link SessionComparison} above, one axis over.
  */
-export type StampClass = "stamped" | "unbound" | "legacy_unbound";
+export type StampClass = StampAxisClass;
 
 /**
  * The RADIUS axis — whether a peer commit landed inside the verdict's blast
@@ -1791,6 +1794,27 @@ export interface StampCurrency {
   readonly radius: RadiusMeasurement;
   readonly reason?: string;
   readonly field?: string;
+}
+
+/**
+ * The two-axis currency of one attested row, stamp axis classified against the corpus's arming
+ * row (SPEC-143 AC-CT-3). The radius axis is supplied by the caller already measured
+ * ({@link blastRadiusChanged}); until the floor reads it (CT-5) callers pass `unmeasured`.
+ *
+ * `reason` carries the `unbound` reason (`dirty_tree`, `state_moved`, `audit_id_unresolved`,
+ * `no_stamp`).
+ *
+ * ⛔ `hasStamp: false` can never yield `stamped` — the classifier reads the flag, never a default.
+ *
+ * @example
+ * stampCurrency({ armingRev: 100, hasStamp: false, runnerReason: undefined, recordedAuditId: 150 }, { status: "unmeasured" });
+ * // => { stamp: "unbound", radius: { status: "unmeasured" }, reason: "no_stamp" }
+ */
+export function stampCurrency(input: StampAxisInput, radius: RadiusMeasurement): StampCurrency {
+  const reading = classifyStampAxis(input);
+  return reading.stamp === "unbound"
+    ? { stamp: reading.stamp, radius, reason: reading.reason }
+    : { stamp: reading.stamp, radius };
 }
 
 /**

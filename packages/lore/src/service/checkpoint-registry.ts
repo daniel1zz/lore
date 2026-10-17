@@ -88,6 +88,7 @@ import {
   lintAcQuantifiability,
   checkOracleCoverage,
   deriveClaimedAcCoverage,
+  isUnboundOnlyTask,
   UNRESOLVED_DECLARED_SCOPE,
   type AcceptanceCriterion,
   type AcCiteFeedingPack,
@@ -1705,7 +1706,13 @@ function checkPlanClose(ctx: GateContext): ApplicablePredicateResult[] {
  */
 function feedAttestationFloor(ctx: GateContext, failures: PredicateResult[]): string {
   const tasks = ctx.planTasksAttestation ?? [];
-  const offending = tasks.filter((t) => t.evidenceCount > 0 && t.attestedCount === 0);
+  // reason: SPEC-143 AC-CT-3 — a task whose attested rows are ALL `unbound` has attestedCount 0
+  // too, but it is NOT "self-reported-only": naming it so would misdirect (the rows ARE runner
+  // output, about an unnamed state). It gets its own line below.
+  const unboundOnly = tasks.filter((t) => isUnboundOnlyTask(t));
+  const offending = tasks.filter(
+    (t) => t.evidenceCount > 0 && t.attestedCount === 0 && !isUnboundOnlyTask(t),
+  );
   const totalEvidence = tasks.reduce((sum, t) => sum + t.evidenceCount, 0);
   const totalAttested = tasks.reduce((sum, t) => sum + t.attestedCount, 0);
   const ratio = totalEvidence > 0 ? totalAttested / totalEvidence : 0;
@@ -1716,13 +1723,21 @@ function feedAttestationFloor(ctx: GateContext, failures: PredicateResult[]): st
   // `deriveAttestationSummary` — never a second hand-rolled derivation.
   const claimedCoverage = deriveClaimedAcCoverage(ctx.planClaimedAcCoverage ?? []);
   const plan = ctx.targetIdOrSlug ?? "<plan>";
+  const unboundLine =
+    unboundOnly.length > 0
+      ? `Task(s) whose runner-attested rows are all UNBOUND (recorded after state-binding was ` +
+        `armed with no valid state stamp, so they certify no named state): ` +
+        `${unboundOnly.map((t) => `${t.slug} — "${t.title}"`).join(", ")}. Re-run \`lore verify\` ` +
+        `on a committed tree to record a stamped row. `
+      : "";
   const offendingLine =
-    offending.length > 0
+    unboundLine +
+    (offending.length > 0
       ? `Task(s) with self-reported-only evidence (zero runner-attested entries): ` +
         `${offending.map((t) => `${t.slug} — "${t.title}"`).join(", ")}. Listed for ` +
         `DIAGNOSTIC purposes only — the exemption below is PLAN-level; do NOT write ` +
         `\`extra.attestation_exempt\` onto any of these tasks, this gate never reads it there. `
-      : "";
+      : "");
   // reason: §D5 — names every unattested claimed AC id; empty when the caller
   // never resolved claimed-AC coverage (or every claimed AC IS attested), so a
   // ctx fixture that predates this field (e.g. feed-attestation-reachability

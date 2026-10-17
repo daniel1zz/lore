@@ -108,6 +108,7 @@ import {
 import { attestationExemptKindValid, type CitedRuleViolation } from "./gate-predicates.js";
 import type { RuleStateFull } from "./rule-state-service.js";
 import { resolveDoc, ULID_REGEX } from "./resolve.js";
+import { loadStampBindingContext } from "./stamp-binding-reader.js";
 import { collectKnownRuleIds } from "./baseline-rule-ids.js";
 import { buildRuleIndex, collectLiveScriptCitedRuleIds } from "./ac-citations.js";
 import { pickBaselineRoot, pickStrategyDocument } from "./navigation-roots.js";
@@ -2911,7 +2912,11 @@ export class CorpusService {
         // @lore/core's buildTaskAttestationInfos (evidence-panel.ts), which the
         // dashboard adjudication workbench's plan Evidence-panel branch also
         // calls; this call site no longer re-derives the same counts inline.
-        const planTasksAttestation = buildTaskAttestationInfos(bundleResult!.value.tasks);
+        // SPEC-143 AC-CT-3 — the stamp axis rides the same counting call: `unbound` rows leave
+        // `attestedCount` and a task attested only by them is refused by `attestationFloor`.
+        const stampBinding = await loadStampBindingContext(this.store, bundleResult!.value.tasks);
+        if (!stampBinding.ok) return stampBinding;
+        const planTasksAttestation = buildTaskAttestationInfos(bundleResult!.value.tasks, stampBinding.value);
         // reason: spec-plan-close-predicates-measure-invariants-an-applicability
         // §D3/§D5 — per-claimed-AC attested-coverage facts, computed via the
         // SAME `computeAcCoverage` (@lore/core) AND the SAME declared-criteria

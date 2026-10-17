@@ -332,7 +332,7 @@ function isWellFormedOracleGeneration(value: number | undefined): value is numbe
  * fail-close every array holding one pre-SPEC-143 row and silently zero that
  * task's entire evidence log. An ABSENT stamp is a FACT with a name —
  * `gate-predicates.ts::StampClass` classifies it `unbound` or `legacy_unbound`
- * against {@link ARMING_REV} — never a default-to-current.
+ * against the corpus's arming row (`stamp-binding.ts::classifyStampAxis`) — never a default-to-current.
  *
  * @example
  * stateStampSchema.parse({
@@ -351,7 +351,7 @@ export const stateStampSchema = z.object({
   worktree_dirty: z.literal(false),
   /**
    * `MAX(audit.id)` at capture time. OPTIONAL: the RUNNER has no audit port and must not
-   * invent one; the per-row `recorded_corpus_rev` (SPEC-143 C1, CT-3) is written server-side.
+   * invent one; the per-row `recorded_corpus_rev` ({@link evidenceEntrySchema}) is written server-side.
    */
   corpus_rev: z.number().int().min(0).optional(),
 });
@@ -368,39 +368,6 @@ export type StampUnboundReason = (typeof STAMP_UNBOUND_REASONS)[number];
 
 /** Derived TypeScript type for one state stamp — see {@link stateStampSchema}. */
 export type StateStamp = z.infer<typeof stateStampSchema>;
-
-/**
- * The immutable arming cutoff: the `MAX(audit.id)` value that separates evidence
- * written BEFORE state-binding was armed from evidence written after it
- * (SPEC-143 G3, `adr-a-record-with-no-state-stamp-is-acceptable-but-never-green`).
- *
- * A stamp-less row at or below this id classifies `legacy_unbound` and is
- * ACCEPTED by every floor that accepts it today, so arming retro-fails nothing
- * (N2). A stamp-less row ABOVE it classifies `unbound` and satisfies no floor.
- *
- * ⛔ DATA, NOT A COMPUTATION — nothing re-derives it at runtime. `audit.id` sits
- * on an append-only, hash-chain-verified table, so an integer cutoff on it
- * cannot be backdated or renumbered; a cutoff derived at read time, or a
- * timestamp cutoff, WOULD be mintable by choosing when to write. A migration
- * that loses this constant must fail loud rather than default to `0` — `0`
- * reclassifies the entire back-catalogue as `unbound` and wedges every open plan
- * (that is also AC-CT-3's declared falsifier (b)).
- *
- * MEASURED 2026-08-23 on this repository's live corpus: `SELECT MAX(id) FROM
- * audit` = 14992 (read-only probe against `.lore/lore.db`; no `lore` subcommand
- * exposes the integer, which is a reported tooling gap). The spec text's earlier
- * figure of 6176 was measured 2026-08-17 and is 2.4x stale — pinning it would
- * reclassify ~8800 already-written rows as post-arming `unbound`.
- *
- * ⛔ RE-CAPTURE DUTY, unenforced by any gate today: this constant is DECLARED
- * here by the type-foundation task but the ARMING COMMIT is the one that first
- * makes a floor CONSUME it (SPEC-143 AC-CT-3). That commit MUST re-read
- * `MAX(audit.id)` and update this literal in the same commit — a cutoff older
- * than the arming point retro-classifies every row written in between as
- * `unbound`, which is the mass-wedge N2 and G5 both forbid. Nothing refuses a
- * violation of this paragraph; it is prose, and it is counted as such.
- */
-export const ARMING_REV = 14992;
 
 /**
  * One oracle verification record, appended to task.extra.verification_evidence.
@@ -561,6 +528,13 @@ export const evidenceEntrySchema = z.object({
   capture_source: z.enum(CAPTURE_SOURCES).optional(),
   /** The oracle generation in force for `ac_ref`'s criterion when this row was recorded (§M5) — see the field-level invariant above. */
   ac_oracle_generation: z.number().int().min(ORACLE_GENERATION_INITIAL).optional(),
+  /**
+   * `MAX(audit.id)` when this row was written (SPEC-143 AC-CT-3). SERVER-WRITTEN by the evidence
+   * write chokepoint, never caller-supplied (the write paths refuse the key); it dates the row
+   * against the corpus's arming audit row. OPTIONAL and present-iff-written: rows recorded before
+   * this field existed carry none and are dated by the (doc_id, details.version) audit join.
+   */
+  recorded_corpus_rev: z.number().int().min(0).optional(),
   /** Runner-issued attestation metadata (SPEC-039 §2 D1) — see the field-level invariant above. */
   attestation: z
     .object({
@@ -612,8 +586,8 @@ export const evidenceEntrySchema = z.object({
        * The state this attested run was measured against (SPEC-143 C1) — see
        * {@link stateStampSchema}. OPTIONAL and PRESENT-IFF-COMPUTED: every
        * pre-SPEC-143 attestation carries none and still parses (REGRESSION),
-       * and its ABSENCE is classified against {@link ARMING_REV} by
-       * `gate-predicates.ts::StampClass` (`legacy_unbound` at or below the
+       * and its ABSENCE is classified against the corpus's arming row by
+       * `stamp-binding.ts::classifyStampAxis` (`legacy_unbound` at or below the
        * cutoff, `unbound` above it) rather than read as "current".
        * ⛔ Written by the runner only, on the same terms as the enclosing
        * `attestation` object: `VerifyRunnerService` stamps it around the

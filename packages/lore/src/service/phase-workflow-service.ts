@@ -162,6 +162,7 @@ import { resolveDoc } from "./resolve.js";
 //   retirement is recorded in that module's SSOT note
 //   (task-three-byte-identical-copies-of-isplanmember-survive).
 import { isPlanMember } from "./plan-membership.js";
+import { readRecordedCorpusRev } from "./stamp-binding-reader.js";
 import { buildUpstreamSpecContext, buildAnchorGateContext } from "./checkpoint-registry.js";
 import type { GateDependencies } from "./gate-enforcer.js";
 import type {
@@ -716,6 +717,17 @@ export class PhaseWorkflowService {
     actor: string,
     now: () => string,
   ): Promise<Result<DocRecord, LoreError>> {
+    if (Object.prototype.hasOwnProperty.call(entry, "recorded_corpus_rev")) {
+      return err({
+        code: "VALIDATION_ERROR",
+        field: "recorded_corpus_rev",
+        message:
+          "recorded_corpus_rev is written by the evidence write path from the audit head " +
+          "(not a valid evidence input field)",
+        value: (entry as Record<string, unknown>)["recorded_corpus_rev"],
+      });
+    }
+
     const phaseResult = await this.resolvePhase(idOrSlug);
     if (!phaseResult.ok) return phaseResult;
     const phase = phaseResult.value;
@@ -729,6 +741,10 @@ export class PhaseWorkflowService {
         value: existing.length,
       });
     }
+
+    // reason: SPEC-143 AC-CT-3 — server-written from the audit head (see TaskWorkflowService).
+    const corpusRev = await readRecordedCorpusRev(this.store);
+    if (!corpusRev.ok) return corpusRev;
 
     const nowIso = now();
     // reason: see this method's own @invariant above — `entry.capture_source` is
@@ -748,6 +764,7 @@ export class PhaseWorkflowService {
       ...(entry.output_tail !== undefined ? { output_tail: entry.output_tail } : {}),
       ...(entry.ac_ref !== undefined ? { ac_ref: entry.ac_ref } : {}),
       ...(entry.checklist_ref !== undefined ? { checklist_ref: entry.checklist_ref } : {}),
+      recorded_corpus_rev: corpusRev.value,
       ...(entry.attestation !== undefined ? { attestation: entry.attestation } : {}),
     };
     const parsedEntry = evidenceEntrySchema.safeParse(candidate);

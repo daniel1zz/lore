@@ -2646,6 +2646,36 @@ export class SQLiteStore implements StoreInterface {
     }
   }
 
+  /**
+   * @see StoreInterface.listAuditRowsByAction
+   */
+  async listAuditRowsByAction(action: string, docId?: DocId): Promise<Result<AuditChainEntry[], LoreError>> {
+    try {
+      const rows =
+        docId === undefined
+          ? (this.db.prepare("SELECT * FROM audit WHERE action = ? ORDER BY id ASC").all(action) as AuditChainRow[])
+          : (this.db
+              .prepare("SELECT * FROM audit WHERE action = ? AND doc_id = ? ORDER BY id ASC")
+              .all(action, docId) as AuditChainRow[]);
+      return ok(rows.map(rowToAuditChainEntry));
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
+  /**
+   * @see StoreInterface.getAuditHeadId
+   */
+  async getAuditHeadId(): Promise<Result<number, LoreError>> {
+    try {
+      const row = this.db.query("SELECT MAX(id) AS head FROM audit").get() as { head: number | null } | null;
+      const head = row?.head;
+      return ok(head === null || head === undefined ? 0 : Number(head));
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
   // ── Review Judgments ───────────────────────────────────────────────────────
 
   async insertJudgment(judgment: ReviewJudgment): Promise<Result<void, LoreError>> {
