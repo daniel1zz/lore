@@ -1,3 +1,4 @@
+// @spawns dist/lore
 /**
  * @spec_ref spec-the-defect-channel-cannot-be-honestly-maintained-an AC-DC-5, AC-DC-6, AC-DC-7
  * @spec_ref spec-issue-closure-loop-computed-resolution-agent-reachable AC-ICL-7

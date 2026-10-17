@@ -1,3 +1,6 @@
+// @spawns dist/lore
+// @reads packages
+// @reads packages/*/src/**
 /**
  * @spec_ref spec-the-defect-channel-cannot-be-honestly-maintained-an AC-DC-1, AC-DC-2, AC-DC-3
  * @task task-skill-test-tg-11b-report-issue-channel-acs-whose-tests
