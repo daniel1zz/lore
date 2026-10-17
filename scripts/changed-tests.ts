@@ -42,11 +42,11 @@
  *      set. Any other zero-selection outcome (including a changed file outside the traced universe)
  *      exits 1 in both `--list` and executing mode.
  *
- * Vitest's own graph (`vitest related`, `--changed`) was measured and NOT adopted for selection:
- * it must transform every candidate test to answer, runs the tests as it goes (there is no
- * list-only form in 3.2.6), and sees neither declared reads nor spawns, so using it would need this
- * scan anyway for those. One parser (this regex scan) feeds both the import graph and the `@spawns`
- * closure.
+ * Vitest's own graph (`vitest list --filesOnly --changed <ref>`, a list-only form that exists in 3.2.6) was
+ * measured and NOT adopted for selection: it resolves the graph by transforming candidate tests (a
+ * list over a ~450-file diff had not finished after 300 s, while this regex scan answers in seconds),
+ * and it sees neither declared reads nor spawns, so this scan would still be needed for those. One
+ * parser (this regex scan) feeds both the import graph and the `@spawns` closure.
  *
  * Exit code is non-zero iff an executed runner fails, a git/graph/declaration step fails, or the
  * loud-zero condition fires.
