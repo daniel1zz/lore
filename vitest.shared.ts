@@ -83,11 +83,10 @@ export function createConfig(selection: { include: readonly string[]; exclude: r
       // re-measuring worst-case subprocess latency under full-suite contention first.
       testTimeout: 30000,
       hookTimeout: 30000,
-      // reason: same contention as above — capping workers below the 8 available
-      // CPUs leaves headroom for each worker's spawned `bun run` subprocess to get
-      // CPU time. 4 halves the worst-case subprocess-spawning parallelism while
-      // still running 4 files concurrently (this is not a global serialization —
-      // fileParallelism stays true, maxWorkers=1 would 10x wall-clock).
+      // reason: one worker per CPU, capped at 8 (scripts/test-max-workers.ts has the measurement:
+      // 4 workers 732 s, 8 workers 538 s for the full run). Command logic runs in-process and
+      // dist/lore is built once (TG-24/25/26), so workers are CPU-bound and no longer starve on
+      // per-case `bun run` subprocesses, the reason this used to be capped at 4.
       // MUST be the pool-agnostic top-level `maxWorkers`: vitest 2+ defaults
       // `pool` to 'forks' (resolveConfig: `resolved.pool ??= 'forks'`), so a cap
       // written under poolOptions.threads.maxThreads silently never applies —

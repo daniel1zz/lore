@@ -99,6 +99,8 @@ describe("pure helpers", () => {
   });
   it("REGRESSION: resolveMaxWorkers defaults, honours a valid override and rejects an invalid one loudly", () => {
     expect(resolveMaxWorkers({})).toBe(DEFAULT_MAX_WORKERS);
+    expect(DEFAULT_MAX_WORKERS).toBeGreaterThanOrEqual(1);
+    expect(DEFAULT_MAX_WORKERS).toBeLessThanOrEqual(8);
     expect(resolveMaxWorkers({ VITEST_MAX_WORKERS: "6" })).toBe(6);
     expect(() => resolveMaxWorkers({ VITEST_MAX_WORKERS: "0" })).toThrow(/positive integer/);
     expect(() => resolveMaxWorkers({ VITEST_MAX_WORKERS: "four" })).toThrow(/positive integer/);
