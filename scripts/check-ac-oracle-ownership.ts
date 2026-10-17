@@ -212,7 +212,7 @@ export class OwnershipScanError extends Error {
   }
 }
 
-const ListSchema = z.object({
+export const ListSchema = z.object({
   ok: z.literal(true),
   data: z.object({ docs: z.array(z.object({ slug: z.string(), status: z.string() })) }),
 });
@@ -228,7 +228,7 @@ const AcListSchema = z.object({
   }),
 });
 
-function runLoreJson<T extends z.ZodTypeAny>(corpusCwd: string, indexTs: string, args: readonly string[], schema: T): z.infer<T> {
+export function runLoreJson<T extends z.ZodTypeAny>(corpusCwd: string, indexTs: string, args: readonly string[], schema: T): z.infer<T> {
   const r = spawnSync("bun", ["run", indexTs, ...args], { cwd: corpusCwd, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
   if (r.error || r.status !== 0) {
     throw new OwnershipScanError(`lore ${args.join(" ")} failed (exit ${r.status ?? -1}): ${r.error?.message ?? r.stderr ?? r.stdout}`);
