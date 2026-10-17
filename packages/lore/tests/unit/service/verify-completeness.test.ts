@@ -1,3 +1,4 @@
+// @layer service-verify-completeness
 /**
  * Six-dimension tests for the SPEC-061 attestation-completeness guard's
  * integration into `VerifyRunnerService` (D3) and its runner-issued-only

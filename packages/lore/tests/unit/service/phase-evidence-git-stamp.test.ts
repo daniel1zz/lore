@@ -1,3 +1,4 @@
+// @layer service-phase-evidence-stamp
 /**
  * PhaseWorkflowService._addEvidenceImpl refuses caller-supplied `head_sha` /
  * `worktree_dirty` (baseline slice 1 §C5, task c5b) — the parallel phase evidence

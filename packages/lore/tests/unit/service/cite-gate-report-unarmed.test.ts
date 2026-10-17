@@ -1,3 +1,4 @@
+// @layer service-cite-gate-report-mode
 /**
  * Report mode records would-refuse decisions on UNARMED branches too (orchestrator decision
  * 2026-10-08, citation gate C4 of spec-baseline-slice-2-completeness-census-per-branch-citation):

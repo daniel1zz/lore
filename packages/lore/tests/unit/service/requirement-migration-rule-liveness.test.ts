@@ -1,4 +1,5 @@
 // @spawns packages/lore/src/index.ts
+// @layer service-requirement-migration
 /**
  * Tests for rule liveness in requirement-from-citation coverage and the migrate verb
  * (baseline slice 3a, BR-983) — task-implement-c-requirement-coverage-from-citations.

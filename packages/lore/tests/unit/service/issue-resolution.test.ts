@@ -1,3 +1,4 @@
+// @layer service-issue-resolution
 /**
  * Unit tests for the `resolves` link type (D1) and `computeIssueResolution`
  * (D2) — spec-issue-closure-loop-computed-resolution-agent-reachable.

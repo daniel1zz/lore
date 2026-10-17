@@ -1,3 +1,4 @@
+// @layer service-gate-predicates
 /**
  * Unit tests for the deterministic gate predicates that back `lore gate spec-create`
  * (a separate, not-yet-implemented CLI task). Pure functions only — no store, no IO,

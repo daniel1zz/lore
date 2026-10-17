@@ -1,7 +1,7 @@
 /**
  * `noAnchorOverlap` / `findAnchorOverlapConflict` compare holders by RUN (BR-1056).
  *
- * @spec_ref AC-ROI-3
+ * @spec_ref spec-run-only-write-identity-and-run-end-claim-release#AC-ROI-3
  *   spec-run-only-write-identity-and-run-end-claim-release Scope 3.
  *
  * Coverage: NEGATIVE (two runs sharing a name; exactly one side attested) / HAPPY (the same run is one holder) /

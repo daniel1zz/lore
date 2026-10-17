@@ -1,3 +1,4 @@
+// @layer service-cite-gate-decision
 /**
  * RED tests for the citation gate (baseline slice 2a §C4 CiteGate, QA-1, QA-5) —
  * task-skill-test-red-citation-gate-modes-x-armed-branch-feeding. Paired impl: C4.

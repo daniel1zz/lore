@@ -1,3 +1,4 @@
+// @layer service-export-docs
 /**
  * Unit tests for ExportDocsService (SPEC-021).
  *
