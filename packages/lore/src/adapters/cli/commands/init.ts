@@ -29,7 +29,7 @@ import { createApp } from "../../../app.js";
 // reason: saveConfig writes .lore/config.yaml via Node fs — only reachable via
 // the @lore/core/node subpath (browser-safety split, packages/core/src/CLAUDE.md).
 import { saveConfig } from "@lore/core/node";
-import { formatError } from "../utils.js";
+import { formatError, resolveActor } from "../utils.js";
 
 export default defineCommand({
   meta: {
@@ -51,7 +51,7 @@ export default defineCommand({
       description: "Output as JSON",
     },
   },
-  run({ args }) {
+  async run({ args }) {
     const cwd = process.cwd();
     const loreDir = join(cwd, ".lore");
 
@@ -91,16 +91,45 @@ export default defineCommand({
     // Initialise the SQLite DB (SQLiteStore constructor runs migrations)
     const dbPath = join(loreDir, "lore.db");
     const app = createApp(dbPath);
+    // reason: SPEC-143 AC-CT-3 — a fresh corpus is armed at init: nothing predates the cutoff, so
+    // the R13 impact report is zero rows by construction, and both write paths (`lore verify`,
+    // `lore evidence --capture`) now stamp state. Existing corpora keep the explicit
+    // `lore audit arm --confirm` step. A failed arm is fatal: an unarmed "fresh" corpus would
+    // silently accept unbound rows.
+    const stateBinding = app.stateBindingService;
+    const armed =
+      stateBinding === undefined
+        ? undefined
+        : await stateBinding.arm({ actor: resolveActor(), nowIso: new Date().toISOString() });
     app.close();
+    if (armed === undefined || !armed.ok) {
+      const msg =
+        armed === undefined
+          ? "stateBindingService is not wired on this App (internal wiring error)"
+          : `Failed to arm state binding: ${formatError(armed.error)}`;
+      if (args.json) {
+        console.log(JSON.stringify({ ok: false, error: msg }));
+      } else {
+        process.stderr.write(`Error: ${msg}\n`);
+      }
+      process.exit(1);
+    }
+    const armedRows = armed.value.status === "armed" ? armed.value.report.would_become_unbound_rows : 0;
 
     if (args.json) {
       console.log(
         JSON.stringify({
           ok: true,
-          data: { path: loreDir, project: projectName, author: args.author },
+          data: {
+            path: loreDir,
+            project: projectName,
+            author: args.author,
+            state_binding: { status: armed.value.status, arming_rev: armed.value.arming_rev, would_become_unbound_rows: armedRows },
+          },
         }),
       );
     } else {
+      console.log(`State binding armed (audit row id ${armed.value.arming_rev}); ${armedRows} existing rows affected.`);
       console.log(`Initialised Lore project "${projectName}"`);
       console.log(`  Database: ${join(loreDir, "lore.db")}`);
       console.log(`  Config:   ${join(loreDir, "config.yaml")}`);

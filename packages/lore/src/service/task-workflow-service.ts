@@ -370,6 +370,7 @@ import { resolveDoc } from "./resolve.js";
 //   lives in `plan-membership.ts`'s SSOT note — do not reintroduce one
 //   (task-three-byte-identical-copies-of-isplanmember-survive).
 import { isPlanMember } from "./plan-membership.js";
+import type { StampOutcome } from "./git-state-stamp.js";
 import { loadStampBindingContext, readRecordedCorpusRev } from "./stamp-binding-reader.js";
 import type { ArchiveIssueClosePort, IssueCloseItem } from "./issue-close-on-archive.js";
 import {
@@ -753,6 +754,13 @@ export type EvidenceInput = Omit<
    * guarantees is narrower and checkable: no PRODUCTION CAPTURE PATH can mint one.
    */
   capture_attestation?: EvidenceEntry["attestation"];
+  /**
+   * The state stamp `captureOracleCommand` measured around the spawn (SPEC-143 AC-CT-3b), the
+   * output of the shared `decideStampOutcome`. Same trust argument as {@link capture_attestation}:
+   * produced only by the capture path, merged into `attestation` by `promoteCapturedAttestation`,
+   * and meaningless without an attestation to merge into. Never persisted as its own key.
+   */
+  capture_stamp?: StampOutcome;
   /** See {@link ClaimOpts.source}. */
   source?: string;
   /** See {@link ReleaseOpts.callerCwd} — same field, same Q3 mismatch use, `commands/evidence.ts` is this one's populator. Never persisted onto the written evidence entry (consumed pre-write only, see `_addEvidenceImpl`). */
@@ -1887,10 +1895,10 @@ export function rejectCallerGitStamp(entry: EvidenceInput): LoreError | undefine
  * // => { …, capture_source: "runner", attestation: { runner: "lore-cli", exit_code: 0, … } }
  */
 export function promoteCapturedAttestation(entry: EvidenceInput): VerifiedEvidenceInput {
-  const { capture_attestation: measured, ...rest } = entry;
+  const { capture_attestation: measured, capture_stamp: stamp, ...rest } = entry;
   return {
     ...rest,
-    ...(measured !== undefined ? { attestation: measured } : {}),
+    ...(measured !== undefined ? { attestation: { ...measured, ...(stamp ?? {}) } } : {}),
   };
 }
 

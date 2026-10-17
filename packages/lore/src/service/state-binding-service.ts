@@ -11,7 +11,7 @@
  * Invariants:
  *   - ⛔ Never arm before the runner writes stamps (CT-2, merged): a corpus armed earlier would
  *     refuse every new row. This service cannot check that, so `arm` is reachable only through an
- *     explicit operator step (`lore audit arm --confirm`), never from startup or `lore init`.
+ *     explicit operator step (`lore audit arm --confirm`), never from startup. A FRESH `lore init` corpus is armed by init itself (zero rows affected).
  *   - Idempotent: a second `arm` writes nothing and reports the existing cutoff.
  *   - The arming row is a NON-doc audit row (`doc_id` absent) on the append-only, hash-chained
  *     audit table, so it cannot be backdated or renumbered (G3).
