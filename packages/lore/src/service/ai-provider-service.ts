@@ -84,11 +84,12 @@
  *     `opts.diffSource` verbatim, into `_finalizeAssessment`, which runs `verifyFindingPaths`
  *     on the (grounding-)suppressed `typedGaps` — withdrawing any finding with an absent
  *     declared path into `unverifiable_findings[]`, tallying `paths_verified`, and NEVER
- *     recomputing `overall_score`. `opts.diffSource` is currently supplied by NO production
- *     caller (`commands/assess.ts`/MCP `tools.ts` are outside this task's scope — see
- *     `assessPlan`'s own `@param opts.diffSource` doc) so every live `lore assess` run today
- *     resolves to `paths_verified.unchecked` for any declared path — a real, named,
- *     un-closed gap, not a claim that the mechanism itself is inert.
+ *     recomputing `overall_score`. `opts.diffSource` is supplied by both production callers,
+ *     `adapters/cli/commands/assess.ts` and `adapters/mcp/tools.ts` (each passes its
+ *     resolved `diffSource` local into `assessPlan`; closed by
+ *     task-thread-diff-source-through-the-cli-and-mcp-assess-adapters), so a live
+ *     `lore assess` / `lore_assess` run verifies declared paths against the assessed commit.
+ *     A caller that omits it still gets `paths_verified.unchecked`, never a silent pass.
  *
  * Side-effect class: IO (delegates to AIProvider.generate, Telemetry.emit, and — D2,
  * spec-judgment-surfaces-must-verify-before-they-certify-machine — `git cat-file -e`
@@ -1216,17 +1217,15 @@ export class AIProviderService {
    *   {@link AssessDiffSource}; see that type's own JSDoc for why it is not imported
    *   directly from the adapter layer). Resolved via {@link resolveAssessedCommit} to the ONE
    *   commit every `typed_gaps[].paths` entry is checked against, by
-   *   {@link verifyFindingPaths} (called from `_finalizeAssessment`, below). ⛔ Still NOT
-   *   THREADED by either production caller (`commands/assess.ts`, MCP `tools.ts` — both
-   *   outside this task's file anchors, spec-judgment-surfaces-must-verify-before-they-
-   *   certify-machine's own declared Scope): a follow-up task must have the CLI/MCP layer
-   *   pass its already-resolved `diffSource` local through here. Until then this stays
-   *   `undefined` in production, which {@link verifyFindingPaths} treats as "no referent" —
-   *   every declared path is recorded `"unchecked"`, NEVER silently "verified" or dropped.
-   *   This mechanism itself (the verification pass, its wiring into `_finalizeAssessment`,
-   *   and its unit coverage) IS fully live and exercised the moment a caller supplies
-   *   `diffSource` — e.g. every test in `assess-path-verification.bun.test.ts` — the gap is
-   *   solely "no production caller supplies it yet", never "the mechanism is inert".
+   *   {@link verifyFindingPaths} (called from `_finalizeAssessment`, below). Threaded by
+   *   both production callers — `adapters/cli/commands/assess.ts` and
+   *   `adapters/mcp/tools.ts` each pass their already-resolved `diffSource` local through
+   *   here (task-thread-diff-source-through-the-cli-and-mcp-assess-adapters). A caller that
+   *   leaves it `undefined` gets "no referent" from {@link verifyFindingPaths} — every
+   *   declared path is recorded `"unchecked"`, NEVER silently "verified" or dropped.
+   *   The verification pass, its wiring into `_finalizeAssessment`, and its unit coverage
+   *   are fully live (e.g. every test in `assess-path-verification.bun.test.ts`).
+   *   Currency is pinned by `ai-provider-service-comment-currency.test.ts` (AC-JV-6).
    * @param opts.repoRoot - OPTIONAL — directory `git cat-file -e` runs in when verifying
    *   finding paths. Defaults to `process.cwd()`; tests pass a throwaway git fixture.
    * @returns Result<AssessmentResult, LoreError> — never throws. Returns

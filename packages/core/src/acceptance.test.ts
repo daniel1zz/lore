@@ -577,3 +577,38 @@ describe("deriveAcCoverageState oracle_file_missing counts only passes that name
     expect(state).toBe("pass");
   });
 });
+
+// ─── AC-061-7 (spec-spec-061-attestation-completeness-guard): inconclusive counts in neither bucket ───
+
+describe("AC-061-7 computeAcCoverage treats inconclusive as neither pass nor fail", () => {
+  const attestation = { runner: "lore-cli", exit_code: 0, duration_ms: 1, timed_out: false };
+  const row = (result: string, extra: Record<string, unknown> = {}) => ({
+    oracle: "test",
+    command: "bun test",
+    result,
+    recorded_at: "2026-01-01T00:00:00.000Z",
+    recorded_by: "alice",
+    ac_ref: "AC-1",
+    ...extra,
+  });
+
+  it("HAPPY: an inconclusive entry adds to neither pass/fail nor attested_pass/attested_fail but stays in refs", () => {
+    const task = makeTask({ extra: { plan_id: "p", verification_evidence: [row("inconclusive", { attestation })] } });
+    const [fact] = computeAcCoverage([scriptAc("AC-1")], [task]);
+    expect(fact).toMatchObject({ pass: 0, fail: 0, attested_pass: 0, attested_fail: 0 });
+    expect(fact?.refs.map((r) => r.result)).toEqual(["inconclusive"]);
+  });
+
+  it("REGRESSION: pass/fail totals are unchanged by an added inconclusive row", () => {
+    const base = [row("pass", { attestation }), row("fail")];
+    const without = computeAcCoverage([scriptAc("AC-1")], [makeTask({ extra: { plan_id: "p", verification_evidence: base } })]);
+    const withInc = computeAcCoverage(
+      [scriptAc("AC-1")],
+      [makeTask({ extra: { plan_id: "p", verification_evidence: [...base, row("inconclusive", { attestation })] } })],
+    );
+    const counts = (f: { pass: number; fail: number; attested_pass: number; attested_fail: number }) =>
+      [f.pass, f.fail, f.attested_pass, f.attested_fail];
+    expect(counts(without[0]!)).toEqual([1, 1, 1, 0]);
+    expect(counts(withInc[0]!)).toEqual(counts(without[0]!));
+  });
+});
