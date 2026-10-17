@@ -91,6 +91,7 @@ import {
   formatGitDiffEnobufsMessage,
   computeCaptureSourceDistribution,
   formatCaptureSourceLine,
+  formatStampVerdictLine,
 } from "../assess-render.js";
 import { assessmentFreshness } from "../../../service/gate-predicates.js";
 import { deriveCommitSetForPlan, type DiffSourceRecord } from "../assess-commit-derivation.js";
@@ -407,6 +408,15 @@ export default defineCommand({
       // reason: computed BEFORE persistence — deterministic, from the
       // already-loaded bundle, never touching the AI judge's own `result`.
       const captureSourceDistribution = computeCaptureSourceDistribution(bundle);
+      // reason: SPEC-143 AC-CT-9(d) — the SECOND axis over the same rows (stamp verdict), through the ONE
+      // exported predicate `lore status` also renders; reported alongside, never merged into capture_source.
+      const stampVerdictResult = await app.corpusService.stampVerdictDistribution(bundle.tasks);
+      if (!stampVerdictResult.ok) {
+        process.stderr.write(formatError(stampVerdictResult.error) + "\n");
+        process.exitCode = exitCode(stampVerdictResult.error);
+        return;
+      }
+      const stampVerdictDistribution = stampVerdictResult.value;
 
       // ─── Step 6: persist as a knowledge doc, linked to the plan ────────────────
       const dateStr = new Date().toISOString().slice(0, 10);
@@ -461,6 +471,7 @@ export default defineCommand({
                   runner_unattested_count: captureSourceDistribution.runnerUnattestedCount,
                   ratio: captureSourceDistribution.ratio,
                 },
+                stamp_verdicts: stampVerdictDistribution,
               },
             },
             null,
@@ -481,6 +492,7 @@ export default defineCommand({
       // would carry no `facts` at all — additive, never a thrown error).
       const attestedRatio = result.facts?.regression.attested_evidence_ratio;
       console.log(formatCaptureSourceLine(captureSourceDistribution, attestedRatio));
+      console.log(formatStampVerdictLine(stampVerdictDistribution));
       console.log(formatDiffSourceLine(diffSource));
       console.log(`Saved as ${assessmentDoc.slug} (linked to ${bundle.plan.slug} via informs)`);
     } finally {

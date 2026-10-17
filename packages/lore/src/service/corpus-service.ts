@@ -108,7 +108,8 @@ import {
 import { attestationExemptKindValid, type CitedRuleViolation } from "./gate-predicates.js";
 import type { RuleStateFull } from "./rule-state-service.js";
 import { resolveDoc, ULID_REGEX } from "./resolve.js";
-import { loadStampBindingContext } from "./stamp-binding-reader.js";
+import { loadStampBindingContext, type RadiusDiffPort } from "./stamp-binding-reader.js";
+import { computeStampVerdictDistribution, type StampVerdictDistribution } from "./gate-predicates.js";
 import { collectKnownRuleIds } from "./baseline-rule-ids.js";
 import { buildRuleIndex, collectLiveScriptCitedRuleIds } from "./ac-citations.js";
 import { pickBaselineRoot, pickStrategyDocument } from "./navigation-roots.js";
@@ -886,6 +887,35 @@ export class CorpusService {
    */
   setRuleStateService(service: { full(): Promise<Result<RuleStateFull, LoreError>> }): void {
     this.ruleStateService = service;
+  }
+
+  /**
+   * Hands the corpus service the diff port the RADIUS axis of the attestation floor measures through
+   * (SPEC-143 AC-CT-9: a stamped row whose blast radius changed since its recorded HEAD is stale). Called once
+   * by `app.ts`; absent (every bare `new CorpusService(store)`) ⇒ every stamped row's radius is `unmeasured`,
+   * which the floor ACCEPTS, byte-identical to a corpus whose radius was never measurable.
+   */
+  setStampRadiusDiff(port: RadiusDiffPort): void {
+    this.stampRadiusDiff = port;
+  }
+
+  /** Present iff {@link setStampRadiusDiff} was called. */
+  private stampRadiusDiff: RadiusDiffPort | undefined;
+
+  /**
+   * The stamp-verdict distribution (SPEC-143 AC-CT-9(d)) over every attested row of `docs`: five readings,
+   * `radius_unmeasured` on its own, derived by the ONE exported predicate (`computeStampVerdictDistribution`)
+   * that `lore assess` and `lore status` both render — never re-derived by an adapter.
+   *
+   * @param docs - task/phase documents whose evidence is bucketed
+   * @returns the distribution, or the store error the binding read hit (never swallowed into "unarmed")
+   */
+  async stampVerdictDistribution(
+    docs: readonly DocRecord[],
+  ): Promise<Result<StampVerdictDistribution, LoreError>> {
+    const binding = await loadStampBindingContext(this.store, docs, this.stampRadiusDiff);
+    if (!binding.ok) return binding;
+    return ok(computeStampVerdictDistribution(docs, binding.value));
   }
 
   /** Present iff {@link setRuleStateService} was called. */
@@ -2914,7 +2944,7 @@ export class CorpusService {
         // calls; this call site no longer re-derives the same counts inline.
         // SPEC-143 AC-CT-3 — the stamp axis rides the same counting call: `unbound` rows leave
         // `attestedCount` and a task attested only by them is refused by `attestationFloor`.
-        const stampBinding = await loadStampBindingContext(this.store, bundleResult!.value.tasks);
+        const stampBinding = await loadStampBindingContext(this.store, bundleResult!.value.tasks, this.stampRadiusDiff);
         if (!stampBinding.ok) return stampBinding;
         const planTasksAttestation = buildTaskAttestationInfos(bundleResult!.value.tasks, stampBinding.value);
         // reason: spec-plan-close-predicates-measure-invariants-an-applicability

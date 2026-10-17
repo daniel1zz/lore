@@ -218,7 +218,9 @@ import { computeIssueCheck, type IssueCheckPayload } from "../status-issue-check
 // Boundary invariant 2 must NEVER reach loadLoreApp/bun:sqlite — mirrors
 // setup-check.ts's identical precedent for this exact import.
 import { loadConfig } from "@lore/core/node";
-import { resolveCiteGateRaw, classifyCaptureSource } from "@lore/core";
+import { resolveCiteGateRaw, classifyCaptureSource, type DocRecord } from "@lore/core";
+import type { StampVerdictDistribution } from "../../../service/gate-predicates.js";
+import { formatStampVerdictLine } from "../assess-render.js";
 import type { EvidenceEntry } from "@lore/core";
 import {
   findUnresolvedStateBindingSkips,
@@ -644,6 +646,24 @@ async function collectCaptureSourceMembers(
   }
 
   return ok({ runner, selfReport, runnerUnattested });
+}
+
+/**
+ * Corpus-wide stamp-verdict distribution (SPEC-143 AC-CT-9(d)) over every task AND phase doc — the SECOND
+ * axis over the same evidence rows `collectCaptureSourceMembers` buckets, reported alongside it and never
+ * merged. The five buckets come from the ONE exported predicate (`computeStampVerdictDistribution`, through
+ * `CorpusService.stampVerdictDistribution`) that `lore assess` also renders; this adapter derives nothing.
+ */
+async function collectStampVerdictDistribution(
+  app: ReturnType<typeof loadLoreApp>["app"],
+): Promise<Result<StampVerdictDistribution, LoreError>> {
+  const docs: DocRecord[] = [];
+  for (const type of ["task", "phase"] as const) {
+    const listResult = await app.corpusService.listFull({ type });
+    if (!listResult.ok) return listResult;
+    docs.push(...listResult.value.docs);
+  }
+  return app.corpusService.stampVerdictDistribution(docs);
 }
 
 /**
@@ -1705,6 +1725,14 @@ export default defineCommand({
         process.exitCode = exitCode(captureSourceMembersResult.error);
         return;
       }
+      // reason: SPEC-143 AC-CT-9(d) — report-only, alongside (never merged into) the capture_source counts.
+      const stampVerdictResult = await collectStampVerdictDistribution(app);
+      if (!stampVerdictResult.ok) {
+        process.stderr.write(formatError(stampVerdictResult.error) + "\n");
+        process.exitCode = exitCode(stampVerdictResult.error);
+        return;
+      }
+      const stampVerdicts = stampVerdictResult.value;
       const captureSourceRunnerCount = captureSourceMembersResult.value.runner.length;
       const captureSourceSelfReportCount = captureSourceMembersResult.value.selfReport.length;
       const captureSourceRunnerUnattestedCount = captureSourceMembersResult.value.runnerUnattested.length;
@@ -1845,6 +1873,7 @@ export default defineCommand({
                 capture_source_runner_count: captureSourceRunnerCount,
                 capture_source_self_report_count: captureSourceSelfReportCount,
                 capture_source_runner_unattested_count: captureSourceRunnerUnattestedCount,
+                stamp_verdicts: stampVerdicts,
                 adopted_abandoned_count: adoptedAbandonedCount,
                 // ALWAYS present, `null` included (same convention as
                 // `invalid_docs`) — an omitted key would let a consumer read
@@ -1961,6 +1990,9 @@ export default defineCommand({
           `self-reported / ${captureSourceRunnerUnattestedCount} runner-unattested (across every task/phase evidence entry — report-only, see ` +
           "spec-falsifiability-reachability-a-feedable-checkpoint-an §D5)",
       );
+
+      // SPEC-143 AC-CT-9(d) — the stamp-verdict axis, printed UNCONDITIONALLY beside the capture_source line.
+      console.log(`${formatStampVerdictLine(stampVerdicts)} (report-only, never merged into the capture_source buckets)`);
 
       // spec-the-defect-channel-cannot-be-honestly-maintained-an §M7, AC-DC-16
       // — printed UNCONDITIONALLY (including 0), same "never a silent count"

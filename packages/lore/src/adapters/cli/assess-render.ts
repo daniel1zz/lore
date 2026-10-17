@@ -48,6 +48,7 @@
  */
 
 import { classifyCaptureSource, extractEvidence, type AssessmentResult, type PlanBundle } from "@lore/core";
+import type { StampVerdictDistribution } from "../../service/gate-predicates.js";
 
 /** The three disjoint `capture_source` buckets; `ratio` = runner / total (0 when no evidence). */
 export interface CaptureSourceDistribution {
@@ -123,6 +124,27 @@ export function formatCaptureSourceLine(
     `${distribution.selfReportCount} self-report / ` +
     `${distribution.runnerUnattestedCount} runner-unattested (ratio ${distribution.ratio.toFixed(2)})` +
     (attestedRatio !== undefined ? `, attested_evidence_ratio ${attestedRatio.toFixed(2)}` : "")
+  );
+}
+
+/**
+ * One-line human render of the stamp-verdict distribution (SPEC-143 AC-CT-9(d)) — the SECOND axis over the
+ * same evidence rows as {@link formatCaptureSourceLine}, printed ALONGSIDE it and NEVER merged. This is a
+ * RENDERER only: the five buckets arrive already derived by `computeStampVerdictDistribution` (via
+ * `CorpusService.stampVerdictDistribution`), shared verbatim by `lore assess` and `lore status`.
+ *
+ * `radius_unmeasured` keeps its own count; the five sum to the attested-row total printed first.
+ */
+export function formatStampVerdictLine(distribution: StampVerdictDistribution): string {
+  const reasons = Object.entries(distribution.unbound_reasons)
+    .filter(([, count]) => count > 0)
+    .map(([reason, count]) => `${reason} ${count}`)
+    .join(", ");
+  return (
+    `Stamp verdicts (${distribution.total} attested rows): ${distribution.bound} bound / ` +
+    `${distribution.stale} stale / ${distribution.radius_unmeasured} radius-unmeasured / ` +
+    `${distribution.unbound} unbound${reasons === "" ? "" : ` (${reasons})`} / ` +
+    `${distribution.legacy_unbound} legacy-unbound`
   );
 }
 
