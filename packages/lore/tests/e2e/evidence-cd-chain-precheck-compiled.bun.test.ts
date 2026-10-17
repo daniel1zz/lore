@@ -12,7 +12,7 @@
  * (`tests/unit/adapters/evidence-precheck.test.ts`), but the CLI command that
  * must CALL it (`src/adapters/cli/commands/evidence.ts`) imports the bun-only
  * `loader.ts` (`bun:sqlite`) and is unreachable from vitest — the SAME reason
- * `evidence-mixed-runner-guard-compiled.bun.test.ts` and
+ * `evidence-dropped-file-guard-compiled.bun.test.ts` and
  * `evidence-completeness-guard-compiled.bun.test.ts` exist for the sibling
  * guards. A parser fixed but not wired would leave every unit test green;
  * this file is the only oracle that the ACCEPTANCE, and the refusal message's
