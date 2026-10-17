@@ -15,7 +15,7 @@
 import { spawnSync } from "node:child_process";
 import { err, ok } from "@lore/core";
 import type { LoreError, Result } from "@lore/core";
-import { gitDiffChangedSince } from "../adapters/real-git-port.js";
+import { gitDiffChangedSince } from "./git-diff-since.js";
 import type { GitPort } from "./rule-state-service.js";
 
 interface GitRun {
