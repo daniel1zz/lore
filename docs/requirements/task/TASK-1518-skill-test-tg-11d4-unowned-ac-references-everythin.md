@@ -3,7 +3,7 @@ id: TASK-1518
 type: task
 role: plan
 title: "[Skill:test] TG-11D4 unowned AC references: everything not in D1-D3"
-status: draft
+status: archived
 priority: high
 phase: "Phase 3: guards"
 created: 2026-10-17

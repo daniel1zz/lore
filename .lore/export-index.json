@@ -11344,6 +11344,26 @@
     "01M54DSHCRM9YRS7B27JJDFK7K": {
       "human_id": "TASK-1532",
       "file_path": "docs/requirements/task/TASK-1532-skill-review-tg-29-replace-the-106-wrong-auto-adde.md"
+    },
+    "01M552AE3F2ZFJ5GM4J7VXC960": {
+      "human_id": "TASK-1533",
+      "file_path": "docs/requirements/task/TASK-1533-skill-fix-tg-34-read-recorder-ignores-git-ignored.md"
+    },
+    "01M5518DK00VBJNXM2Z7CQYFCR": {
+      "human_id": "TASK-1534",
+      "file_path": "docs/requirements/task/TASK-1534-skill-refactor-ct-6b-one-stamp-verdict-derivation.md"
+    },
+    "01M54Y7W68E216DWGK2PJMVHR2": {
+      "human_id": "TASK-1535",
+      "file_path": "docs/requirements/task/TASK-1535-skill-implement-ct-3b-lore-evidence-capture-stamps.md"
+    },
+    "01M54WY9K2JYWVDXB4GRT4A65T": {
+      "human_id": "TASK-1536",
+      "file_path": "docs/requirements/task/TASK-1536-skill-test-tg-33-declare-inputs-of-the-two-gh-test.md"
+    },
+    "01M54WHMBMDT8ABB4X1SDAGBE7": {
+      "human_id": "TASK-1537",
+      "file_path": "docs/requirements/task/TASK-1537-ac-list-in-source-mode-from-a-worktree-may-show-a.md"
     }
   }
 }

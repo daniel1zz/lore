@@ -112,6 +112,9 @@ beforeAll(async () => {
   mustOk(git(repo, "add", "-A"), "git add");
   mustOk(git(repo, "commit", "-q", "-m", "base"), "git commit");
   mustOk(await lore(["init"], "init-0"), "lore init");
+  // reason: `lore init` arms state binding (AC-CT-3); evidence captured on a dirty tree is unbound and refused by `lore done`.
+  mustOk(git(repo, "add", "-A"), "git add corpus");
+  mustOk(git(repo, "commit", "-q", "-m", "lore corpus"), "git commit corpus");
   mustOk(await lore(["create", "prd", "--title", "Root", "--content", "Root PRD.", "--no-ai", "--json"], "init-0"), "create prd");
 }, 300_000);
 

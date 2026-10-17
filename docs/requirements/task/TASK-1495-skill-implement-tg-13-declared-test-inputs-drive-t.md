@@ -3,7 +3,7 @@ id: TASK-1495
 type: task
 role: plan
 title: "[Skill:implement] TG-13 declared test inputs drive the change selector"
-status: draft
+status: archived
 priority: high
 phase: "Phase 4: selector"
 created: 2026-10-16

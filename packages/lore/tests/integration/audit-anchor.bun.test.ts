@@ -236,6 +236,14 @@ describe("lore audit anchor — HAPPY", () => {
 
 describe("lore audit anchor — NEGATIVE", () => {
   it("on a freshly-init'd corpus (empty audit table) fails loud — exit 4, no file written", () => {
+    // reason: `lore init` now writes the one `state-binding-armed` audit row (AC-CT-3), so a fresh corpus
+    // is no longer audit-empty. Empty the table directly to keep exercising the empty-table refusal.
+    const db = new Database(dbPath(tmpDir));
+    try {
+      db.run("DELETE FROM audit");
+    } finally {
+      db.close();
+    }
     const result = runLore(["audit", "anchor"], tmpDir);
     expect(result.exitCode).toBe(4);
     expect(result.stderr.length).toBeGreaterThan(0);

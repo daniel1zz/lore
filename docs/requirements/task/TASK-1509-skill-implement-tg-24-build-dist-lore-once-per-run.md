@@ -3,7 +3,7 @@ id: TASK-1509
 type: task
 role: plan
 title: "[Skill:implement] TG-24 build dist/lore once per run; no test rebuilds it"
-status: draft
+status: archived
 priority: high
 phase: "Phase 3b: one runner"
 created: 2026-10-17

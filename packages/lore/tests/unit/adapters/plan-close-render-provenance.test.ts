@@ -64,6 +64,7 @@ import { spawnSync } from "child_process";
 import { mkdtempSync, rmSync, existsSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
+import { FIXTURE_HOME_OUTSIDE_REPO, makeCleanTreeRepo } from "../../helpers/clean-tree-repo.js";
 
 // tests/unit/adapters/ → tests/unit/ → tests/ → packages/lore/
 const PACKAGE_ROOT = new URL("../../../", import.meta.url).pathname.replace(/\/$/, "");
@@ -82,7 +83,7 @@ interface RunResult {
 function runLore(args: string[], cwd: string): RunResult {
   const result = spawnSync("bun", ["run", INDEX_TS, ...args], {
     cwd,
-    env: { ...process.env, HOME: cwd, EDITOR: "true", LORE_ACTOR: "agent:plan-close-render-probe" },
+    env: { ...process.env, HOME: FIXTURE_HOME_OUTSIDE_REPO, EDITOR: "true", LORE_ACTOR: "agent:plan-close-render-probe" },
     encoding: "utf8",
   });
   return {
@@ -136,7 +137,7 @@ function createTaskWithEmptyScope(dir: string, planSlug: string, title: string):
 }
 
 function claimTask(dir: string, taskSlug: string): void {
-  const r = runLore(["claim", taskSlug], dir);
+  const r = runLore(["claim", taskSlug, "--worktree", dir], dir);
   if (r.exitCode !== 0) throw new Error(`claim ${taskSlug} failed: ${r.stderr}`);
 }
 
@@ -206,6 +207,7 @@ let bothExemptJson: RunResult;
 
 beforeAll(() => {
   tmpDir = mkdtempSync(join(tmpdir(), "lore-plan-close-render-"));
+  makeCleanTreeRepo(tmpDir);
   const init = runLore(["init", "--author", "plan-close-render-probe"], tmpDir);
   if (init.exitCode !== 0) throw new Error(`lore init failed: ${init.stderr}`);
   // reason: a positive trace of execution, not merely a zero exit code (root

@@ -3,7 +3,7 @@ id: TASK-1517
 type: task
 role: plan
 title: "[Skill:implement] CT-3 AC-CT-3 stamp axis, per-corpus arming, unbound refused"
-status: draft
+status: archived
 priority: high
 phase: "Phase 2: implement"
 created: 2026-10-17

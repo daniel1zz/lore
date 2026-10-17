@@ -1733,6 +1733,20 @@ export default defineCommand({
         return;
       }
       const stampVerdicts = stampVerdictResult.value;
+      // reason: SPEC-143 AC-CT-3b — the arming state is ALWAYS reported (never absent), so a corpus
+      // left unarmed (outside git, or an existing corpus not yet armed) cannot read as "fine".
+      if (app.stateBindingService === undefined) {
+        process.stderr.write("Error: stateBindingService is not wired on this App (internal wiring error)\n");
+        process.exitCode = 1;
+        return;
+      }
+      const stateBindingResult = await app.stateBindingService.readState(dirname(dirname(dbPath)));
+      if (!stateBindingResult.ok) {
+        process.stderr.write(formatError(stateBindingResult.error) + "\n");
+        process.exitCode = exitCode(stateBindingResult.error);
+        return;
+      }
+      const stateBindingState = stateBindingResult.value;
       const captureSourceRunnerCount = captureSourceMembersResult.value.runner.length;
       const captureSourceSelfReportCount = captureSourceMembersResult.value.selfReport.length;
       const captureSourceRunnerUnattestedCount = captureSourceMembersResult.value.runnerUnattested.length;
@@ -1874,6 +1888,7 @@ export default defineCommand({
                 capture_source_self_report_count: captureSourceSelfReportCount,
                 capture_source_runner_unattested_count: captureSourceRunnerUnattestedCount,
                 stamp_verdicts: stampVerdicts,
+                state_binding: stateBindingState,
                 adopted_abandoned_count: adoptedAbandonedCount,
                 // ALWAYS present, `null` included (same convention as
                 // `invalid_docs`) — an omitted key would let a consumer read
@@ -1993,6 +2008,13 @@ export default defineCommand({
 
       // SPEC-143 AC-CT-9(d) — the stamp-verdict axis, printed UNCONDITIONALLY beside the capture_source line.
       console.log(`${formatStampVerdictLine(stampVerdicts)} (report-only, never merged into the capture_source buckets)`);
+      console.log(
+        stateBindingState.armed
+          ? `State binding: armed (audit row id ${stateBindingState.arming_rev})`
+          : stateBindingState.reason === "not_a_git_repo"
+            ? "State binding: NOT armed — the corpus is not inside a git repository; run `lore audit arm --confirm` after placing it in git"
+            : "State binding: NOT armed — run `lore audit arm` to see the impact, then `lore audit arm --confirm`",
+      );
 
       // spec-the-defect-channel-cannot-be-honestly-maintained-an §M7, AC-DC-16
       // — printed UNCONDITIONALLY (including 0), same "never a silent count"

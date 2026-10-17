@@ -3,7 +3,7 @@ id: TASK-1516
 type: task
 role: plan
 title: "[Skill:test] TG-31 corpus fail census to zero, stale AC-080 statements, retire BR-1068"
-status: draft
+status: archived
 priority: high
 phase: "Phase 3: guards"
 created: 2026-10-17

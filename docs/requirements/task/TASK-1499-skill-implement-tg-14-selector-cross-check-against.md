@@ -3,11 +3,11 @@ id: TASK-1499
 type: task
 role: plan
 title: "[Skill:implement] TG-14 selector cross-check against a full-suite result"
-status: draft
+status: archived
 priority: medium
 phase: "Phase 4: selector"
 created: 2026-10-16
-updated: 2026-10-16
+updated: 2026-10-17
 tags: []
 parent: PLAN-201
 plan: PLAN-201

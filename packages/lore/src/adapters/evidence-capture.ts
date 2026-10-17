@@ -103,6 +103,7 @@ import { CAPTURE_TAIL_CHARS, resolveCaptureTimeoutMs, tailChars, type CaptureSou
 // silent drop into a build failure.
 import type { EvidenceInput } from "../service/task-workflow-service.js";
 import { mergeStderrIntoStdout } from "../service/merged-stream-command.js";
+import { decideStampOutcome, probeGitState, type StampOutcome } from "../service/git-state-stamp.js";
 
 /**
  * Default capture window in ms, DERIVED from the config schema rather than
@@ -235,6 +236,13 @@ export interface CapturedProvenance {
    * it stays optional for self-reported rows and the legacy back-catalogue.
    */
   readonly capture_attestation: NonNullable<EvidenceInput["capture_attestation"]>;
+  /**
+   * The state stamp this capture measured around the command (SPEC-143 AC-CT-3b): produced by the
+   * SAME `decideStampOutcome` over a pre-spawn and a post-spawn `probeGitState` that `lore verify`
+   * uses. Kept OUT of `capture_attestation` because that channel refuses `head_sha` /
+   * `worktree_dirty` from callers; `promoteCapturedAttestation` merges it into the attestation.
+   */
+  readonly capture_stamp: StampOutcome;
 }
 
 /**
@@ -322,6 +330,9 @@ export function captureOracleCommand(request: CaptureRequest): CaptureOutcome {
   // reason: performance.now() is MONOTONIC — Date.now() is wall-clock and an NTP
   // step during a long oracle could manufacture a phantom timeout (or mask a real
   // one) on the elapsed conjunct below.
+  // reason: SPEC-143 AC-CT-3b — the stamp is read BEFORE and AFTER the spawn through the shared
+  // git-state-stamp module (the same code `lore verify` runs), at the directory the command runs in.
+  const preRunGitState = probeGitState(request.cwd);
   const startedAt = performance.now();
   const spawnResult = spawnSync(mergeStderrIntoStdout(request.command), {
     shell: true,
@@ -331,6 +342,7 @@ export function captureOracleCommand(request: CaptureRequest): CaptureOutcome {
     timeout: timeoutMs,
   });
   const elapsedMs = Math.round(performance.now() - startedAt);
+  const postRunGitState = probeGitState(request.cwd);
 
   // reason: THE TIMEOUT IS MEASURED, AND CHECKED FIRST (task-lore-evidence-capture-
   // has-a-hard-coded-600s-window-that-a). Both facts below were measured against
@@ -488,6 +500,7 @@ export function captureOracleCommand(request: CaptureRequest): CaptureOutcome {
       duration_ms: elapsedMs,
       timed_out: false,
     },
+    capture_stamp: decideStampOutcome(preRunGitState, postRunGitState),
   };
   return {
     ok: true,
