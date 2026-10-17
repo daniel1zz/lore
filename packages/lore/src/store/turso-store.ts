@@ -3371,6 +3371,42 @@ export class TursoStore implements StoreInterface {
     }
   }
 
+  /**
+   * @see StoreInterface.listAuditRowsByAction
+   */
+  async listAuditRowsByAction(action: string, docId?: DocId): Promise<Result<AuditChainEntry[], LoreError>> {
+    try {
+      await this.ensureReady();
+      const rs =
+        docId === undefined
+          ? await this.client.execute({
+              sql: "SELECT * FROM audit WHERE action = ? ORDER BY id ASC",
+              args: [action],
+            })
+          : await this.client.execute({
+              sql: "SELECT * FROM audit WHERE action = ? AND doc_id = ? ORDER BY id ASC",
+              args: [action, docId],
+            });
+      return ok(rs.rows.map((row) => rowToAuditChainEntry(libsqlRowToAuditChainRow(row))));
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
+  /**
+   * @see StoreInterface.getAuditHeadId
+   */
+  async getAuditHeadId(): Promise<Result<number, LoreError>> {
+    try {
+      await this.ensureReady();
+      const rs = await this.client.execute("SELECT MAX(id) AS head FROM audit");
+      const head = rs.rows[0]?.["head"];
+      return ok(head === null || head === undefined ? 0 : Number(head));
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
   // ── Review Judgments ────────────────────────────────────────────────────
 
   async insertJudgment(judgment: ReviewJudgment): Promise<Result<void, LoreError>> {

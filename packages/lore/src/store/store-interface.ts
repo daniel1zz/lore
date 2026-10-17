@@ -1051,6 +1051,21 @@ export interface StoreInterface {
    */
   listAuditChain(): Promise<Result<AuditChainEntry[], LoreError>>;
 
+  /**
+   * Every audit row whose `action` equals `action` (optionally only for one doc), in `id` ASC
+   * order, WITH its `id` — the read the state-binding arming cutoff and the per-row evidence
+   * audit join are built on (SPEC-143 AC-CT-3). Narrow on purpose: {@link listAuditChain} reads
+   * the whole table and {@link queryAudit} drops the `id`.
+   */
+  listAuditRowsByAction(action: string, docId?: DocId): Promise<Result<AuditChainEntry[], LoreError>>;
+
+  /**
+   * `MAX(audit.id)`, or `0` for an empty audit table — the corpus state an evidence row is
+   * written against (`recorded_corpus_rev`, SPEC-143 AC-CT-3). A rightmost-B-tree read, free
+   * regardless of corpus size.
+   */
+  getAuditHeadId(): Promise<Result<number, LoreError>>;
+
   // ── Review Judgments ───────────────────────────────────────────────────
   // SPEC-034 §2, §3. Dual use: production write path for JudgmentService
   // (not yet implemented — this task lands the data layer only) AND the test

@@ -317,7 +317,7 @@
 import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { z } from "zod";
-import { err, ok, findMissingOracleFiles, evidenceRanMissingOracle, extractDeclaredPhases, hasClaimConflict, type ClaimHolder, type ClaimParty, type RunId, type Result } from "@lore/core";
+import { err, ok, classifyEvidenceStamps, findMissingOracleFiles, evidenceRanMissingOracle, extractDeclaredPhases, hasClaimConflict, type ClaimHolder, type ClaimParty, type RunId, type Result } from "@lore/core";
 import type { LoreError } from "@lore/core";
 import type { ActorSource } from "@lore/core/node";
 import {
@@ -357,7 +357,7 @@ import {
   type FileAnchorResolutionReport,
   type NonResolvingFileAnchor,
 } from "@lore/core";
-import type { DocId, DocRecord, DocStatus } from "@lore/core";
+import type { DocId, DocRecord, DocStatus, StampBindingContext } from "@lore/core";
 import { NoOpTelemetry, type Telemetry, type TelemetryEvent, type TaskWorkflowEventName } from "@lore/core";
 import type { StoreInterface } from "../store/store-interface.js";
 import { resolveDoc } from "./resolve.js";
@@ -370,6 +370,7 @@ import { resolveDoc } from "./resolve.js";
 //   lives in `plan-membership.ts`'s SSOT note — do not reintroduce one
 //   (task-three-byte-identical-copies-of-isplanmember-survive).
 import { isPlanMember } from "./plan-membership.js";
+import { loadStampBindingContext, readRecordedCorpusRev } from "./stamp-binding-reader.js";
 import type { ArchiveIssueClosePort, IssueCloseItem } from "./issue-close-on-archive.js";
 import {
   applyWorktreeRemoval,
@@ -2659,6 +2660,17 @@ export class TaskWorkflowService {
       });
     }
 
+    if (Object.prototype.hasOwnProperty.call(entry, "recorded_corpus_rev")) {
+      return err({
+        code: "VALIDATION_ERROR",
+        field: "recorded_corpus_rev",
+        message:
+          "recorded_corpus_rev is written by the evidence write path from the audit head " +
+          "(not a valid evidence input field)",
+        value: (entry as Record<string, unknown>)["recorded_corpus_rev"],
+      });
+    }
+
     const taskResult = await this.resolveTask(idOrSlug);
     if (!taskResult.ok) return taskResult;
     const task = taskResult.value;
@@ -2685,6 +2697,12 @@ export class TaskWorkflowService {
     if (!generationResult.ok) return generationResult;
     const acOracleGeneration = generationResult.value;
 
+    // reason: SPEC-143 AC-CT-3 — `recorded_corpus_rev` is SERVER-written from the audit head, never
+    // read from `entry`: the candidate below is assembled field by field, so a caller-supplied value
+    // cannot reach it, and the explicit refusal above makes an attempt loud instead of ignored.
+    const corpusRev = await readRecordedCorpusRev(this.store);
+    if (!corpusRev.ok) return corpusRev;
+
     const nowIso = now();
     // reason: NO fallback here by design (task-capture-source-is-optional-at-the-
     // evidence-write-boundary) — `entry.capture_source` is compile-time REQUIRED on
@@ -2710,6 +2728,7 @@ export class TaskWorkflowService {
       // §M5 (AC-DC-8) — present-iff-resolved, and validated by the same
       // `evidenceEntrySchema.safeParse` every other field goes through below.
       ...(acOracleGeneration !== null ? { ac_oracle_generation: acOracleGeneration } : {}),
+      recorded_corpus_rev: corpusRev.value,
       ...(entry.attestation !== undefined ? { attestation: entry.attestation } : {}),
     };
     const parsedEntry = evidenceEntrySchema.safeParse(candidate);
@@ -3498,6 +3517,7 @@ export class TaskWorkflowService {
   private evaluateDoneFloors(
     task: DocRecord,
     escapes: { overrideReason?: string; noNewTestsReason?: string },
+    stampBinding: StampBindingContext,
   ): Result<
     {
       refusal: DoneFloorRefusal | null;
@@ -3521,7 +3541,19 @@ export class TaskWorkflowService {
     // `execution_root`/`execution_mode` (SPEC-063). A consumer that needs the stronger
     // class must test for those fields — never re-derive it from `capture_source`,
     // which both shapes set to `"runner"`.
-    const hasAttestedPass = evidence.some((e) => e.result === "pass" && e.attestation !== undefined);
+    // reason: SPEC-143 AC-CT-3 (half 5) — an attested pass whose stamp-axis reading is `unbound`
+    // (recorded after the corpus was armed, with no valid state stamp: no_stamp / dirty_tree /
+    // state_moved / audit_id_unresolved) certifies no named state and does NOT satisfy this
+    // floor. `legacy_unbound` and every row of an UNARMED corpus still do, so arming refuses
+    // nothing retroactively.
+    const stampReadings = classifyEvidenceStamps(task.id, evidence, stampBinding);
+    const hasAttestedPass = evidence.some(
+      (e, index) => e.result === "pass" && e.attestation !== undefined && stampReadings[index]?.stamp !== "unbound",
+    );
+    const unboundPassReasons = evidence.flatMap((e, index) => {
+      const reading = stampReadings[index];
+      return e.result === "pass" && reading?.stamp === "unbound" ? [reading.reason] : [];
+    });
     let overrideReason: string | undefined;
     if (!hasAttestedPass) {
       // reason: adr-lore-done-requires-a-runner-attested-pass-the-sixth-false — a
@@ -3552,8 +3584,18 @@ export class TaskWorkflowService {
         return doneFloorRefusal("attested-pass", {
           code: "VALIDATION_ERROR",
           field: "extra.verification_evidence",
-          message: buildAttestationFloorRefusal(task.slug, evidence),
-          value: evidence.map((e) => ({ result: e.result, attested: e.attestation !== undefined })),
+          message:
+            unboundPassReasons.length > 0
+              ? `Task "${task.slug}" holds runner-attested pass evidence, but every one of those rows is ` +
+                `UNBOUND (${[...new Set(unboundPassReasons)].join(", ")}): recorded after state-binding was ` +
+                `armed without a valid state stamp, so it certifies no named state. Re-run \`lore verify\` ` +
+                `on a committed tree to record a stamped row (or use --override-attestation with a reason).`
+              : buildAttestationFloorRefusal(task.slug, evidence),
+          value: evidence.map((e, index) => ({
+            result: e.result,
+            attested: e.attestation !== undefined,
+            ...(stampReadings[index]?.stamp === "unbound" ? { unbound: true } : {}),
+          })),
         });
       }
       overrideReason = escapes.overrideReason;
@@ -3678,7 +3720,9 @@ export class TaskWorkflowService {
     if (!taskResult.ok) return taskResult;
     const task = taskResult.value;
     if (task.status === "archived" || task.status === "deprecated") return ok(null);
-    const evaluated = this.evaluateDoneFloors(task, {});
+    const stampBinding = await loadStampBindingContext(this.store, [task]);
+    if (!stampBinding.ok) return stampBinding;
+    const evaluated = this.evaluateDoneFloors(task, {}, stampBinding.value);
     if (!evaluated.ok) return evaluated;
     if (evaluated.value.refusal !== null) return ok(evaluated.value.refusal);
     return this.findMissingOracleFileFloor(task);
@@ -3803,10 +3847,16 @@ export class TaskWorkflowService {
       return ok({ task, already_done: true, transitions: [] });
     }
 
-    const evaluated = this.evaluateDoneFloors(task, {
-      ...(opts.overrideReason !== undefined ? { overrideReason: opts.overrideReason } : {}),
-      ...(opts.noNewTestsReason !== undefined ? { noNewTestsReason: opts.noNewTestsReason } : {}),
-    });
+    const stampBinding = await loadStampBindingContext(this.store, [task]);
+    if (!stampBinding.ok) return stampBinding;
+    const evaluated = this.evaluateDoneFloors(
+      task,
+      {
+        ...(opts.overrideReason !== undefined ? { overrideReason: opts.overrideReason } : {}),
+        ...(opts.noNewTestsReason !== undefined ? { noNewTestsReason: opts.noNewTestsReason } : {}),
+      },
+      stampBinding.value,
+    );
     if (!evaluated.ok) return evaluated;
     if (evaluated.value.refusal !== null) return err(evaluated.value.refusal.error);
     const { overrideReason, noNewTestsReason } = evaluated.value;

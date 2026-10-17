@@ -109,7 +109,10 @@ export const PREDICATE_CONTRACTS: Record<PlanCloseField, PredicateContract> = {
       "that a closing plan reports as verified was actually run by a trusted oracle, not " +
       "merely self-reported.",
     measured:
-      "Three conditions (attestationFloor, delegating to deriveAttestationSummary): (1) every " +
+      "Four conditions (attestationFloor, delegating to deriveAttestationSummary; the stamp axis, " +
+      "SPEC-143 AC-CT-3, is read FIRST: (0) no evidence-bearing task whose runner-attested rows " +
+      "are ALL `unbound` — recorded after the corpus's state-binding-armed audit row with no " +
+      "valid state stamp — a pre-arming `legacy_unbound` row and an unarmed corpus are accepted); (1) every " +
       "task carrying verification_evidence carries >= 1 runner-attested entry; (2) every " +
       "CLAIMED-AND-ATTESTABLE acceptance criterion (declared script-mode, referenced by >= 1 " +
       "evidence entry) carries >= 1 runner-attested entry; (3) the plan-wide attested/evidence " +

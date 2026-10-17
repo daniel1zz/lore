@@ -45,6 +45,7 @@ import {
   type AcceptanceCriterion,
   type EvidencePanelProjection,
 } from "@lore/core";
+import { loadStampBindingContext } from "./stamp-binding-reader.js";
 import type { StoreInterface } from "../store/store-interface.js";
 import { resolveDoc } from "./resolve.js";
 import { isPlanMember } from "./plan-membership.js";
@@ -229,7 +230,11 @@ export class VerificationProjectionService {
         }
         const acCoverage = computeAcCoverage(criteria, tasksResult.value);
 
-        const taskAttestationInfos = buildTaskAttestationInfos(tasksResult.value);
+        // reason: SPEC-143 AC-CT-3 — the SAME stamp-binding facts the plan-close gate reads, so this
+        // panel's attested counts and `tasks[].stampTally` cannot disagree with the gate's verdict.
+        const stampBinding = await loadStampBindingContext(this.store, tasksResult.value);
+        if (!stampBinding.ok) return stampBinding;
+        const taskAttestationInfos = buildTaskAttestationInfos(tasksResult.value, stampBinding.value);
         const attestation = deriveAttestationSummary(taskAttestationInfos, this.minRatio, acCoverage);
 
         // reason: task-meets-floor-renders-pass-while-the-declared-scope-conjunct

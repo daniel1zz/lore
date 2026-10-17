@@ -717,6 +717,8 @@ describe("OutlineService.resolve", () => {
         // reason: SPEC-079 G3 — new required StoreInterface method; mechanical
         // addition (same class of fix as every other explicit delegate above).
         listAuditChain: () => store.listAuditChain(),
+        listAuditRowsByAction: (action, docId) => store.listAuditRowsByAction(action, docId),
+        getAuditHeadId: () => store.getAuditHeadId(),
         // reason: SPEC-034 §3 — new required StoreInterface methods; mechanical
         // addition (same class of fix as every other explicit delegate above).
         insertJudgment: (j) => store.insertJudgment(j),

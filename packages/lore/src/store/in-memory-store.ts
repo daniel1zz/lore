@@ -1265,6 +1265,24 @@ export class InMemoryStore implements StoreInterface {
     return ok(this.auditChain.map((e) => ({ ...e })));
   }
 
+  /**
+   * @see StoreInterface.listAuditRowsByAction
+   */
+  async listAuditRowsByAction(action: string, docId?: DocId): Promise<Result<AuditChainEntry[], LoreError>> {
+    return ok(
+      this.auditChain
+        .filter((e) => e.action === action && (docId === undefined || e.doc_id === docId))
+        .map((e) => ({ ...e })),
+    );
+  }
+
+  /**
+   * @see StoreInterface.getAuditHeadId
+   */
+  async getAuditHeadId(): Promise<Result<number, LoreError>> {
+    return ok(this.auditChain.length);
+  }
+
   // ── Review Judgments ─────────────────────────────────────────────────────────
 
   async insertJudgment(judgment: ReviewJudgment): Promise<Result<void, LoreError>> {

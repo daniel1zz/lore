@@ -14,7 +14,7 @@
  * (`task-skill-implement-two-axis-type-foundation-stampclass`) lands
  * `StampClass` / `RadiusMeasurement` / `StampCurrency` / `StampVerdict` /
  * `readStampVerdict` in `packages/lore/src/service/gate-predicates.ts` and
- * `StateStamp` / `ARMING_REV` in `packages/core/src/task-workflow.ts`. Every
+ * `StateStamp` in `packages/core/src/task-workflow.ts` (and, after R13, the arming vocabulary in `stamp-binding.ts`). Every
  * failure below is engineered to name the missing symbol, so a red run is
  * attributable to a missing implementation and never to a broken test.
  *
@@ -50,7 +50,7 @@
  *    RETIRED `boolean | "unmeasured"` in favour of. The negative halves are
  *    compile-time, measured by exit code against the REAL imported type.
  *
- * 4. `StateStamp` and `ARMING_REV` must be reachable from the BROWSER-SAFE
+ * 4. `StateStamp` and `STATE_BINDING_ARMED_ACTION` must be reachable from the BROWSER-SAFE
  *    `@lore/core` barrel with no Node builtin anywhere in that barrel's
  *    transitive closure — the dashboard imports it, and Vite's dev-mode `fs`
  *    stub throws at module-LOAD time, blanking the SPA before React mounts
@@ -117,7 +117,7 @@ import { join } from "node:path";
 // reaches main, and would read green for a reverted one while the worktree
 // still held it. Measured directly: with a correct reference implementation
 // applied to THIS worktree, the `@lore/core` runtime read still reported
-// `ARMING_REV` missing while all fifteen other cases were green.
+// the arming symbol missing while all fifteen other cases were green.
 //
 // A relative `../../../../core/src/index.js` import is not the fix either:
 // `packages/lore/tsconfig.tests.json` sets `rootDir: "."`, so crossing the
@@ -126,7 +126,7 @@ import { join } from "node:path";
 //
 // So the `@lore/core` side of scenario 4 is asserted by the two mechanisms
 // that DO read this checkout: the isolated compile-consumer project (which
-// imports `ARMING_REV`/`StateStamp` from this worktree's own
+// imports `STATE_BINDING_ARMED_ACTION`/`StateStamp` from this worktree's own
 // `packages/core/src/index.js` and must type-check clean) and the fs-level
 // import-graph scan below — the same relative-path approach
 // `packages/lore/tests/unit/core/barrel-isolation.test.ts` takes.
@@ -138,6 +138,7 @@ import {
   EXIT_CLEAN,
   GATE_PREDICATES_RELATIVE,
   SIXTH_STAMP_CLASS_MEMBER,
+  STAMP_BINDING_RELATIVE,
   TASK_WORKFLOW_RELATIVE,
   TS18003,
   TS2322,
@@ -145,7 +146,6 @@ import {
   buildRealTypeConsumerProject,
   cleanupScratchDirs,
   collectImportClosure,
-  exportedConstInitializer,
   filesDeclaring,
   isBunRuntimeSpecifier,
   isNodeBuiltinSpecifier,
@@ -423,7 +423,7 @@ describe("SPEC-143 AC-CT-9(c) scenario 2: a sixth StampClass member fails the bu
 /**
  * The compile-only consumer body. Constructs both radius arms, all three stamp
  * classes, the full nine-cell product, every reading through the real
- * `readStampVerdict`, plus a `StateStamp` and `ARMING_REV` — all through the
+ * `readStampVerdict`, plus a `StateStamp` and `STATE_BINDING_ARMED_ACTION` — all through the
  * PUBLIC exports. Doubles as scenario 3's green control and as the shape check
  * that keeps this file's local mirror types honest.
  */
@@ -450,7 +450,7 @@ const stamp: StateStamp = {
   worktree_dirty: false,
   corpus_rev: 6176,
 };
-const cutoff: number = ARMING_REV;
+const cutoff: string = STATE_BINDING_ARMED_ACTION;
 
 export const probe = { readings, stamp, cutoff, changedOf };
 `;
@@ -517,41 +517,32 @@ describe("SPEC-143 C2/C3 scenario 3: RadiusMeasurement is a discriminated union,
 });
 
 // ─────────────────────────────────────────────────────────────────────────
-// Scenario 4 — StateStamp / ARMING_REV stay inside the browser-safe barrel
+// Scenario 4 — StateStamp / the arming vocabulary stay inside the browser-safe barrel
 // ─────────────────────────────────────────────────────────────────────────
 
-describe("SPEC-143 C1 scenario 4: StateStamp and ARMING_REV are reachable from @lore/core with no Node builtin in the barrel's closure", () => {
-  it('ARMING_REV is DATA, not a computation: task-workflow.ts declares it as a plain non-negative integer literal — SPEC-143 C1, "It is data, not a computation — nothing re-derives it"', () => {
-    const initializer = exportedConstInitializer(
-      readRepoFile(paths, TASK_WORKFLOW_RELATIVE),
-      "ARMING_REV",
-    );
+describe("SPEC-143 C1 scenario 4: StateStamp and the arming vocabulary are reachable from @lore/core with no Node builtin in the barrel's closure", () => {
+  it("R13: the shipped ARMING_REV literal is GONE from the barrel closure; the cutoff is a per-corpus audit row and only its action name is declared, in stamp-binding.ts", () => {
+    const closure = collectImportClosure(repoFile(paths, CORE_BARREL_RELATIVE));
 
-    // A literal, asserted on the SOURCE. A runtime `typeof === "number"` check
-    // would pass equally for `export const ARMING_REV = deriveArmingRev()`,
-    // which is exactly what C1 forbids — the cutoff must be un-backdatable, so
-    // nothing may recompute it.
-    expect(initializer).toMatch(/^\d[\d_]*(?:\s+as\s+const)?$/);
-    expect(Number(initializer.replace(/\s+as\s+const$/, "").split("_").join(""))).toBeGreaterThanOrEqual(
-      0,
-    );
+    expect(
+      filesDeclaring(closure, "ARMING_REV"),
+      "a shipped `ARMING_REV` literal is back in the @lore/core closure - SPEC-143 R13 removed it " +
+        "because a literal never arms a consumer corpus",
+    ).toStrictEqual([]);
+    expect(filesDeclaring(closure, "STATE_BINDING_ARMED_ACTION")).toStrictEqual([
+      repoFile(paths, STAMP_BINDING_RELATIVE),
+    ]);
   });
 
-  it("packages/core/src/task-workflow.ts is IN the browser-safe barrel's transitive closure and declares BOTH StateStamp and ARMING_REV — SPEC-143 C1 pins that file as their single home", () => {
+  it("packages/core/src/task-workflow.ts is IN the browser-safe barrel's transitive closure and declares StateStamp - SPEC-143 C1 pins that file as its single home", () => {
     const closure = collectImportClosure(repoFile(paths, CORE_BARREL_RELATIVE));
     const taskWorkflow = repoFile(paths, TASK_WORKFLOW_RELATIVE);
 
     expect([...closure.files]).toContain(taskWorkflow);
 
     expect(
-      filesDeclaring(closure, "ARMING_REV"),
-      "no file in the @lore/core barrel closure declares `ARMING_REV` — SPEC-143 C1 requires it " +
-        `in ${TASK_WORKFLOW_RELATIVE}; this is the RED-phase failure this test is designed to produce`,
-    ).toStrictEqual([taskWorkflow]);
-
-    expect(
       filesDeclaring(closure, "StateStamp"),
-      "no file in the @lore/core barrel closure declares `StateStamp` — SPEC-143 C1 requires it " +
+      "no file in the @lore/core barrel closure declares `StateStamp` - SPEC-143 C1 requires it " +
         `in ${TASK_WORKFLOW_RELATIVE}; this is the RED-phase failure this test is designed to produce`,
     ).toStrictEqual([taskWorkflow]);
   });

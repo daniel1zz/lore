@@ -39,6 +39,7 @@ export * from "./attestation-completeness.js";
 export * from "./command-pipe.js";
 export * from "./oracle-file-existence.js";
 export * from "./task-workflow.js";
+export * from "./stamp-binding.js";
 export * from "./acceptance.js";
 export * from "./ac-quality.js";
 export * from "./verification-profile.js";

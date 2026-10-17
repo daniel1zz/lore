@@ -71,6 +71,7 @@ import { SpecKindService } from "./service/spec-kind-service.js";
 import { JudgmentService } from "./service/judgment-service.js";
 import { StalenessProbeService } from "./service/staleness-probe-service.js";
 import { AuditService } from "./service/audit-service.js";
+import { StateBindingService } from "./service/state-binding-service.js";
 import { AcService } from "./service/ac-service.js";
 import { RequirementService } from "./service/requirement-service.js";
 import { RuleService } from "./service/rule-service.js";
@@ -262,6 +263,12 @@ export interface App {
    * Source: SPEC-035 §2, §5, §9.1
    */
   auditService: AuditService;
+  /**
+   * StateBindingService — the per-corpus state-binding arming step (SPEC-143 AC-CT-3) behind
+   * `lore audit arm`. Optional on the same precedent as `acService` (hand-built App test stubs
+   * stay valid); always present in production — both build paths wire it unconditionally.
+   */
+  stateBindingService?: StateBindingService;
   /**
    * AcService — add/list/rm on spec.extra.acceptance_criteria (structured AC-as-code).
    * Store-only, no telemetry, same DI shape as PhaseService — AC declarations ride
@@ -935,6 +942,7 @@ function buildAppFromSqlite(
     // the resolved watermark via constructor, same DI shape as TaskWorkflowService's
     // claimTtlMinutes (D5). SPEC-035 §2, §5, §9.1.
     auditService: new AuditService(store, { verifySince: auditVerifySince }),
+    stateBindingService: new StateBindingService(store),
     // reason: AcService depends only on StoreInterface — stateless, no AI, no telemetry,
     // same shape as PhaseService. SPEC-038 §4, §6, §9.1.
     acService: new AcService(store, recordLockService, { citeGate: citeGateRaw }),
@@ -1325,6 +1333,7 @@ function buildAppFromTurso(
     // the resolved watermark via constructor, same DI shape as TaskWorkflowService's
     // claimTtlMinutes (D5). SPEC-035 §2, §5, §9.1.
     auditService: new AuditService(store, { verifySince: auditVerifySince }),
+    stateBindingService: new StateBindingService(store),
     // reason: AcService depends only on StoreInterface — stateless, no AI, no telemetry,
     // same shape as PhaseService. SPEC-038 §4, §6, §9.1.
     acService: new AcService(store, recordLockService, { citeGate: citeGateRaw }),
