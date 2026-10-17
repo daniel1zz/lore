@@ -283,7 +283,9 @@ export interface ClassifiedSegment {
   readonly runner: RecognizedRunner | "unclassified";
 }
 
-const VITEST_SEGMENT_PATTERN = /^\s*(?:bunx\s+)?vitest\b/;
+// reason: `bunx --bun vitest` is the one-runner form every AC command uses (SPEC-143 C9); without
+// the optional `--bun` the segment read "unclassified" and AC-CT-4's radius lost its test-file targets.
+const VITEST_SEGMENT_PATTERN = /^\s*(?:bunx\s+(?:--bun\s+)?)?vitest\b/;
 const BUN_TEST_SEGMENT_PATTERN = /^\s*bun\s+test\b/;
 const BUN_RUN_SEGMENT_PATTERN = /^\s*bun\s+run\s+\S+/;
 const PLAYWRIGHT_SEGMENT_PATTERN = /^\s*(?:bunx\s+)?playwright\s+test\b/;

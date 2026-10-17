@@ -137,7 +137,7 @@
  *   spec-multi-session-concurrency-queryable-ownership-checkout §Scope L0.
  */
 
-import { execFileSync, spawn } from "node:child_process";
+import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { chmodSync, mkdirSync, readFileSync, realpathSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { join, resolve, sep } from "node:path";
 
@@ -378,6 +378,33 @@ export function countUnmergedCommitsSync(cwd: string, branch: string, into: stri
       message: `git ${args.join(" ")} in "${cwd}" failed: ${cause instanceof Error ? cause.message : String(cause)}`,
     });
   }
+}
+
+/**
+ * Did any of `paths` change between `sha` and HEAD? The ONE definition of the blast-radius
+ * diff (`git diff --quiet <sha> HEAD -- <paths>`), shared by `SpawnGitPort.changedSince` (rule
+ * state) and the AC-CT-4 radius measurement — never copy this git call.
+ *
+ * Exit 0 = nothing changed, 1 = something changed (a path CREATED or DELETED after `sha` counts
+ * as changed; one that never existed does not — measured 2026-10-17, SPEC-143 AC-CT-4). Any other
+ * exit (unknown `sha`, not a repo, git missing) is an `err`, NEVER a guessed boolean.
+ *
+ * @param repoRoot - directory `git` runs in (repository root; pathspecs are root-relative).
+ * @param sha - the recorded revision to compare HEAD against.
+ * @param paths - repo-relative pathspecs.
+ * @returns `ok(true)` changed, `ok(false)` unchanged, `err` when git cannot answer.
+ * @example
+ * gitDiffChangedSince("/repo", "abc123…", ["src/a.ts"]); // => { ok: true, value: false }
+ */
+export function gitDiffChangedSince(repoRoot: string, sha: string, paths: readonly string[]): Result<boolean, LoreError> {
+  const run = spawnSync(GIT_COMMAND, ["diff", "--quiet", sha, "HEAD", "--", ...paths], {
+    cwd: repoRoot,
+    encoding: "utf8",
+  });
+  if (run.status === 0) return ok(false);
+  if (run.status === 1) return ok(true);
+  const detail = run.error !== undefined ? run.error.message : `exit ${String(run.status)}: ${(run.stderr ?? "").trim()}`;
+  return err({ code: "STORE_ERROR", message: `git unavailable for diff since ${sha}: ${detail}` });
 }
 
 /** Filename of the per-worktree active-claim-session marker, written inside that worktree's OWN private git-dir (never the tracked working tree). */

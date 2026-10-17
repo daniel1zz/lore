@@ -65,6 +65,9 @@ import {
   checkOracleCoverage,
   declaredScopeCoverageVerdict,
   deriveAttestationSummary,
+  extractTestFileTokens,
+  type LoreError,
+  type Result,
   attestationExemptKindSchema,
   SCOPE_UNDECLARED_REASON,
   type AcCoverageFact,
@@ -1705,6 +1708,65 @@ export type StampClass = "stamped" | "unbound" | "legacy_unbound";
 export type RadiusMeasurement =
   | { readonly status: "measured"; readonly changed: boolean }
   | { readonly status: "unmeasured" };
+
+/**
+ * The blast radius of one AC verdict: pathspecs extracted from the AC command's test-file targets
+ * UNION the governing task's `file_anchors`, de-duplicated, command tokens first.
+ *
+ * ⛔ A member resolves when it is a syntactically valid repo-relative pathspec, NOT when the file
+ * exists (SPEC-143 AC-CT-4): a path deleted or created after the recorded HEAD is exactly the
+ * change the diff must see. Invalid members (empty, absolute, `..`-escaping, option-like, NUL or
+ * newline-bearing) are dropped, never repaired.
+ *
+ * @example
+ * resolveBlastRadiusPaths("bunx vitest run a.test.ts", ["src/a.ts"]); // => ["a.test.ts", "src/a.ts"]
+ * resolveBlastRadiusPaths("bun run typecheck", []); // => []
+ */
+export function resolveBlastRadiusPaths(command: string, fileAnchors: readonly string[]): string[] {
+  const radius = new Set<string>();
+  for (const candidate of [...extractTestFileTokens(command), ...fileAnchors]) {
+    const path = candidate.trim();
+    if (isValidRepoRelativePathspec(path)) radius.add(path);
+  }
+  return [...radius];
+}
+
+function isValidRepoRelativePathspec(path: string): boolean {
+  if (path === "" || path.startsWith("/") || path.startsWith("-")) return false;
+  if (/[\0\n\r]/.test(path)) return false;
+  return !path.split("/").includes("..");
+}
+
+/** Input to {@link blastRadiusChanged}. */
+export interface BlastRadiusInput {
+  /** The AC's verify command (its test-file targets seed the radius). */
+  readonly command: string;
+  /** The governing task's `file_anchors`. */
+  readonly fileAnchors: readonly string[];
+  /** HEAD recorded on the verdict row (`head_sha`). */
+  readonly recordedHead: string;
+}
+
+/**
+ * Staleness of a recorded verdict by blast radius, NOT ancestry (SPEC-143 AC-CT-4, D4): the
+ * decision IS `git diff --quiet <recordedHead> HEAD -- <radius>` through the injected port
+ * (production: `SpawnGitPort`, which delegates to the one shared `gitDiffChangedSince`).
+ *
+ * - radius empty (command and anchors yield no pathspec) -> `unmeasured`, never `bound`;
+ * - git cannot answer (unknown head, shallow clone, not a repo) -> `unmeasured`, never a guess;
+ * - else `measured` with `changed` from the diff.
+ *
+ * Dirty-tree evidence is the stamp axis's business (AC-CT-3/5) and is not read here.
+ */
+export function blastRadiusChanged(
+  input: BlastRadiusInput,
+  git: { changedSince(sha: string, paths: string[]): Result<boolean, LoreError> },
+): RadiusMeasurement {
+  const radius = resolveBlastRadiusPaths(input.command, input.fileAnchors);
+  if (radius.length === 0) return { status: "unmeasured" };
+  const diff = git.changedSince(input.recordedHead, radius);
+  return diff.ok ? { status: "measured", changed: diff.value } : { status: "unmeasured" };
+}
 
 /**
  * The two-axis currency of one verdict-bearing row: what `stampCurrency` (the
