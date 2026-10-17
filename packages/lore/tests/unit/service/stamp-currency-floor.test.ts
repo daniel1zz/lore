@@ -325,8 +325,13 @@ describe("AC-CT-3 half 3: unbound and legacy_unbound appear distinctly in the st
 
     const tally = (await infosFor(c, [await refetch(c, task.id)]))[0]?.stampTally;
 
+    // AC-CT-9 grew the tally with the radius axis of STAMPED rows; no diff port here, so the one stamped row is
+    // radius_unmeasured (accepted), never bound.
     expect(tally).toEqual({
       stamped: 1,
+      bound: 0,
+      stale: 0,
+      radius_unmeasured: 1,
       legacy_unbound: 1,
       unbound: 2,
       unbound_reasons: { dirty_tree: 1, state_moved: 0, audit_id_unresolved: 0, no_stamp: 1 },

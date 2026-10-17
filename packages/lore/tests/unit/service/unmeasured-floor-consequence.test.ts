@@ -394,7 +394,7 @@ describe("AC-CT-9 (d): the stamp-verdict distribution", () => {
     await record(c, task, attestedPass(stampedAt(HEAD), NO_PATHSPEC)); // radius_unmeasured
     await record(c, task, attestedPass({}, NO_PATHSPEC)); // unbound / no_stamp
     await record(c, task, attestedPass({ stamp_unbound_reason: "dirty_tree" }, NO_PATHSPEC)); // unbound / dirty_tree
-    const self = await c.tasks.addEvidence(task.id, { oracle: "manual", command: "looked", result: "pass", recorded_by: "agent:test", output_tail: "read the rendered page by eye" }, () => NOW);
+    const self = await c.tasks.addEvidence(task.id, { oracle: "manual", command: "looked", result: "pass", recorded_by: "agent:test", capture_source: "self-report", output_tail: "read the rendered page by eye" }, () => NOW);
     if (!self.ok) throw new Error(`self-report failed: ${JSON.stringify(self.error)}`);
     const docs = [await refetch(c, legacyTask.id), await refetch(c, task.id)];
     // changed for HEAD…8, unchanged for HEAD: the answer depends on the question.
