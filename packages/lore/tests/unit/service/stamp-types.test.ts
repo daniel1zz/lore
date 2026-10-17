@@ -359,7 +359,7 @@ describe("SPEC-143 AC-CT-9(c) scenario 1: readStampVerdict projects five mutuall
 // ─────────────────────────────────────────────────────────────────────────
 
 describe("SPEC-143 AC-CT-9(c) scenario 2: a sixth StampClass member fails the build at readStampVerdict's never check", () => {
-  it("GREEN CONTROL: a VERBATIM copy of the real gate-predicates.ts compiles clean (exit 0) in the isolated project — so a failure in the widened case is attributable to the widening and nothing else", () => {
+  it("GREEN CONTROL: a VERBATIM copy of the real stamp-binding.ts (home of readStampVerdict) compiles clean (exit 0) in the isolated project — so a failure in the widened case is attributable to the widening and nothing else", () => {
     const project = buildGatePredicatesProject(paths);
     const run = runTsc(paths, project.root);
 

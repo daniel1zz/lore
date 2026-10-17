@@ -267,6 +267,10 @@ function baseCompilerOptions(paths: RepoPaths): Record<string, unknown> {
     lib: ["ESNext"],
     typeRoots: [join(paths.nodeModules, "@types"), paths.nodeModules],
     types: ["bun-types"],
+    // reason: a worktree resolves a bare `@lore/core` upward into the MAIN checkout's symlink, i.e. the main
+    // checkout's source, so a copy importing a symbol this checkout just added (CT-6b moved `readStampVerdict`
+    // into core) would read red until merge. Pin it to THIS checkout's barrel.
+    paths: { "@lore/core": [join(paths.repoRoot, CORE_BARREL_RELATIVE)] },
   };
 }
 
@@ -597,12 +601,14 @@ export function buildGatePredicatesProject(
 ): IsolatedProject & { readonly copiedSource: string; readonly copiedFileName: string } {
   const root = makeScratchDir();
   const srcDir = join(root, "src");
-  const realSource = readFileSync(repoFile(paths, GATE_PREDICATES_RELATIVE), "utf8");
-  const coreSpecifier = moduleSpecifierFor(srcDir, repoFile(paths, CORE_BARREL_RELATIVE));
-  const rewritten = realSource.split('from "@lore/core"').join(`from "${coreSpecifier}"`);
+  // CT-6b: `readStampVerdict` and `StampClass` live in `@lore/core`'s stamp-binding.ts (ONE derivation);
+  // gate-predicates.ts only re-exports them. The never-check is therefore measured on THAT file's copy.
+  const realSource = readFileSync(repoFile(paths, STAMP_BINDING_RELATIVE), "utf8");
+  const taskWorkflowSpecifier = moduleSpecifierFor(srcDir, repoFile(paths, TASK_WORKFLOW_RELATIVE));
+  const rewritten = realSource.split('from "./task-workflow.js"').join(`from "${taskWorkflowSpecifier}"`);
   if (rewritten === realSource) {
     throw new StampFixtureError(
-      `${GATE_PREDICATES_RELATIVE} no longer imports from "@lore/core" — the specifier rewrite ` +
+      `${STAMP_BINDING_RELATIVE} no longer imports from "./task-workflow.js" — the specifier rewrite ` +
         `this harness depends on did nothing, so the copy would not compile for an unrelated reason`,
     );
   }
@@ -610,7 +616,7 @@ export function buildGatePredicatesProject(
     options.widenWith === undefined
       ? rewritten
       : widenStampClassUnion(rewritten, options.widenWith);
-  const copiedFileName = "gate-predicates.ts";
+  const copiedFileName = "stamp-binding.ts";
   writeIsolatedProject(paths, root, { [`src/${copiedFileName}`]: copiedSource });
   return { root, srcDir, copiedSource, copiedFileName };
 }
