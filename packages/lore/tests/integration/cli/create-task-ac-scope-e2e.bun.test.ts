@@ -1,4 +1,3 @@
-// @spawns dist/lore
 /**
  * End-to-end tests for the `task-create` admission gate's interaction with
  * `lore verify` (spec-declaring-ac-scope-is-required-at-task-creation-so-the),
@@ -33,6 +32,10 @@
  *               (AC-ACS-8)
  *
  * @spec_ref AC-ACS-6 AC-ACS-8
+ *
+ * TG-25 (adr-tg-1 option b): the commands run IN-PROCESS through tests/helpers/run-lore-in-process.ts, not through
+ * dist/lore. Wherever the prose above says the compiled binary is spawned or its freshness asserted, that is the
+ * history of this file; the assertions and the throwaway-corpus rule are unchanged.
  */
 
 import { describe, expect, it, beforeAll, afterEach, vi } from "vitest";
@@ -40,7 +43,7 @@ const setDefaultTimeout = (ms: number): void => { vi.setConfig({ testTimeout: ms
 import { mkdtempSync, rmSync, appendFileSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
-import { assertFreshBinary } from "../helpers/assert-fresh-binary";
+import { runLoreInProcess } from "../../helpers/run-lore-in-process";
 
 // reason: each test spawns ~6-7 compiled-binary processes; bun's 5s default
 // hook timeout is comfortably exceeded on a loaded machine (mirrors
@@ -49,7 +52,6 @@ setDefaultTimeout(120_000);
 
 // tests/integration/cli/ → tests/integration/ → tests/ → packages/lore/ → packages/ → repo root (5 levels up).
 const REPO_ROOT = new URL("../../../../../", import.meta.url).pathname.replace(/\/$/, "");
-const LORE_BIN = join(REPO_ROOT, "dist", "lore");
 
 interface RunResult {
   readonly stdout: string;
@@ -57,21 +59,21 @@ interface RunResult {
   readonly exitCode: number;
 }
 
-function runLore(args: string[], cwd: string): RunResult {
-  const proc = Bun.spawnSync([LORE_BIN, ...args], {
+async function runLore(args: string[], cwd: string): Promise<RunResult> {
+  const proc = await runLoreInProcess(args, {
     cwd,
     env: { ...process.env, HOME: cwd, EDITOR: "true" },
   });
   return {
-    stdout: proc.stdout.toString(),
-    stderr: proc.stderr.toString(),
-    exitCode: proc.exitCode ?? 1,
+    stdout: proc.stdout,
+    stderr: proc.stderr,
+    exitCode: proc.exitCode,
   };
 }
 
 /** Runs a fixture-setup command, failing loud (never silently) on a nonzero exit. */
-function mustRun(args: string[], cwd: string): RunResult {
-  const result = runLore(args, cwd);
+async function mustRun(args: string[], cwd: string): Promise<RunResult> {
+  const result = await runLore(args, cwd);
   if (result.exitCode !== 0) {
     throw new Error(`fixture command \`lore ${args.join(" ")}\` failed (${result.exitCode}): ${result.stderr}`);
   }
@@ -90,17 +92,10 @@ interface DocJson {
   readonly extra: Record<string, unknown>;
 }
 
-function getDoc(slug: string, cwd: string): DocJson {
-  const result = mustRun(["get", slug, "--json"], cwd);
+async function getDoc(slug: string, cwd: string): Promise<DocJson> {
+  const result = await mustRun(["get", slug, "--json"], cwd);
   return (JSON.parse(result.stdout) as { data: { doc: DocJson } }).data.doc;
 }
-
-beforeAll(() => {
-  assertFreshBinary(LORE_BIN, [
-    join(REPO_ROOT, "packages", "lore", "src"),
-    join(REPO_ROOT, "packages", "core", "src"),
-  ]);
-});
 
 let tmpDir: string;
 
@@ -115,9 +110,9 @@ afterEach(() => {
 // ─── AC-ACS-6 — REGRESSION: ac_scope ABSENT + explicit --ac still attests ───
 
 describe("lore verify — ac_scope ABSENT + explicit --ac (AC-ACS-6, back-catalogue recovery)", () => {
-  it("still runs the named id and writes runner-attested evidence", () => {
+  it("still runs the named id and writes runner-attested evidence", async () => {
     tmpDir = mkdtempSync(join(tmpdir(), "lore-acscope-e2e-regression-"));
-    mustRun(["init"], tmpDir);
+    await mustRun(["init"], tmpDir);
 
     // reason: simulates a task created BEFORE this admission rule existed —
     // the ONLY way to construct a real ac_scope-ABSENT task under a
@@ -130,12 +125,12 @@ describe("lore verify — ac_scope ABSENT + explicit --ac (AC-ACS-6, back-catalo
       ["workflow:", "  gates:", '    "task-create":', "      enabled: false", ""].join("\n"),
     );
 
-    mustRun(["create", "prd", "--title", "Regression PRD", "--no-ai", "--content", "## Overview\nbody"], tmpDir);
-    mustRun(
+    await mustRun(["create", "prd", "--title", "Regression PRD", "--no-ai", "--content", "## Overview\nbody"], tmpDir);
+    await mustRun(
       ["create", "spec", "--title", "Regression Spec","--no-ai", "--content", "## Overview\nbody"],
       tmpDir,
     );
-    mustRun(
+    await mustRun(
       [
         "ac",
         "add",
@@ -152,8 +147,8 @@ describe("lore verify — ac_scope ABSENT + explicit --ac (AC-ACS-6, back-catalo
       ],
       tmpDir,
     );
-    mustRun(["create", "plan", "--title", "Regression Plan", "--parent", "spec-regression-spec", "--no-ai", "--content", "body"], tmpDir);
-    const createResult = mustRun(
+    await mustRun(["create", "plan", "--title", "Regression Plan", "--parent", "spec-regression-spec", "--no-ai", "--content", "body"], tmpDir);
+    const createResult = await mustRun(
       [
         "create",
         "task",
@@ -173,9 +168,9 @@ describe("lore verify — ac_scope ABSENT + explicit --ac (AC-ACS-6, back-catalo
 
     // Verify the fixture actually constructed the state this REGRESSION guards:
     // ac_scope genuinely ABSENT on the created task.
-    expect("ac_scope" in getDoc(taskSlug, tmpDir).extra).toBe(false);
+    expect("ac_scope" in (await getDoc(taskSlug, tmpDir)).extra).toBe(false);
 
-    const verifyResult = runLore(
+    const verifyResult = await runLore(
       ["verify", "plan-regression-plan", "--task", taskSlug, "--ac", "AC-REG-1", "--allow-new-commands"],
       tmpDir,
     );
@@ -184,7 +179,7 @@ describe("lore verify — ac_scope ABSENT + explicit --ac (AC-ACS-6, back-catalo
     expect(verifyResult.stdout).toContain("AC-REG-1");
     expect(verifyResult.stdout).toContain("pass");
 
-    const evidence = getDoc(taskSlug, tmpDir).extra["verification_evidence"] as
+    const evidence = (await getDoc(taskSlug, tmpDir)).extra["verification_evidence"] as
       | Array<Record<string, unknown>>
       | undefined;
     expect(evidence ?? []).toHaveLength(1);
@@ -198,16 +193,16 @@ describe("lore verify — ac_scope ABSENT + explicit --ac (AC-ACS-6, back-catalo
 // ─── AC-ACS-8 — HAPPY (E2E, the whole point) ─────────────────────────────────
 
 describe("lore verify — a task created under this rule is attested end-to-end (AC-ACS-8)", () => {
-  it("declares --ac-scope at creation, is verified, and the STORED evidence entry carries an attestation block", () => {
+  it("declares --ac-scope at creation, is verified, and the STORED evidence entry carries an attestation block", async () => {
     tmpDir = mkdtempSync(join(tmpdir(), "lore-acscope-e2e-happy-"));
-    mustRun(["init"], tmpDir);
+    await mustRun(["init"], tmpDir);
 
-    mustRun(["create", "prd", "--title", "E2E PRD", "--no-ai", "--content", "## Overview\nbody"], tmpDir);
-    mustRun(
+    await mustRun(["create", "prd", "--title", "E2E PRD", "--no-ai", "--content", "## Overview\nbody"], tmpDir);
+    await mustRun(
       ["create", "spec", "--title", "E2E Spec","--no-ai", "--content", "## Overview\nbody"],
       tmpDir,
     );
-    mustRun(
+    await mustRun(
       [
         "ac",
         "add",
@@ -224,13 +219,13 @@ describe("lore verify — a task created under this rule is attested end-to-end 
       ],
       tmpDir,
     );
-    mustRun(["create", "plan", "--title", "E2E Plan", "--parent", "spec-e2e-spec", "--no-ai", "--content", "body"], tmpDir);
+    await mustRun(["create", "plan", "--title", "E2E Plan", "--parent", "spec-e2e-spec", "--no-ai", "--content", "body"], tmpDir);
 
     // Declares --ac-scope AT CREATION TIME — this is the admission rule's
     // whole point: the create path REQUIRES this, unlike the regression
     // fixture above (which disabled the checkpoint to construct the
     // pre-rule state).
-    const createResult = mustRun(
+    const createResult = await mustRun(
       [
         "create",
         "task",
@@ -249,16 +244,16 @@ describe("lore verify — a task created under this rule is attested end-to-end 
       tmpDir,
     );
     const taskSlug = extractSlug(createResult.stdout);
-    expect(getDoc(taskSlug, tmpDir).extra["ac_scope"]).toEqual(["AC-E2E-1"]);
+    expect((await getDoc(taskSlug, tmpDir)).extra["ac_scope"]).toEqual(["AC-E2E-1"]);
 
-    const verifyResult = runLore(["verify", "plan-e2e-plan", "--task", taskSlug, "--allow-new-commands"], tmpDir);
+    const verifyResult = await runLore(["verify", "plan-e2e-plan", "--task", taskSlug, "--allow-new-commands"], tmpDir);
 
     expect(verifyResult.exitCode).toBe(0);
     expect(verifyResult.stdout).toContain("AC-E2E-1");
     expect(verifyResult.stdout).toContain("pass");
 
     // Asserted on the STORED entry, never on the zero exit code alone.
-    const evidence = getDoc(taskSlug, tmpDir).extra["verification_evidence"] as
+    const evidence = (await getDoc(taskSlug, tmpDir)).extra["verification_evidence"] as
       | Array<Record<string, unknown>>
       | undefined;
     expect(evidence ?? []).toHaveLength(1);

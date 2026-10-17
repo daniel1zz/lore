@@ -1,4 +1,3 @@
-// @spawns dist/lore
 /**
  * `lore review --staleness` / `--list` / `--fail-on-candidate` — CLI-adapter spawned-
  * binary tests (SPEC-044 §Design Decisions D6, D7, D9; §Acceptance Criteria AC-SP-6).
@@ -34,6 +33,10 @@
  *   REGRESSION: n/a — this is new SPEC-044 CLI surface, nothing pre-existing to regress
  *
  * @spec_ref SPEC-044 §Acceptance Criteria AC-SP-6
+ *
+ * TG-25 (adr-tg-1 option b): the commands run IN-PROCESS through tests/helpers/run-lore-in-process.ts, not through
+ * dist/lore. Wherever the prose above says the compiled binary is spawned or its freshness asserted, that is the
+ * history of this file; the assertions and the throwaway-corpus rule are unchanged.
  */
 
 import { describe, expect, it, beforeAll, beforeEach, afterEach } from "vitest";
@@ -41,11 +44,10 @@ import { mkdtempSync, rmSync, writeFileSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import { saveConfig } from "@lore/core/node";
-import { assertFreshBinary } from "../../integration/helpers/assert-fresh-binary";
+import { runLoreInProcess } from "../../helpers/run-lore-in-process";
 
 // tests/unit/adapters/ → tests/unit/ → tests/ → packages/lore/ → packages/ → repo root (5 levels up).
 const REPO_ROOT = new URL("../../../../../", import.meta.url).pathname.replace(/\/$/, "");
-const LORE_BIN = join(REPO_ROOT, "dist", "lore");
 
 interface RunResult {
   readonly stdout: string;
@@ -53,15 +55,15 @@ interface RunResult {
   readonly exitCode: number;
 }
 
-function runLore(args: string[], cwd: string): RunResult {
-  const proc = Bun.spawnSync([LORE_BIN, ...args], {
+async function runLore(args: string[], cwd: string): Promise<RunResult> {
+  const proc = await runLoreInProcess(args, {
     cwd,
     env: { ...process.env, HOME: cwd, EDITOR: "true" },
   });
   return {
-    stdout: proc.stdout.toString(),
-    stderr: proc.stderr.toString(),
-    exitCode: proc.exitCode ?? 1,
+    stdout: proc.stdout,
+    stderr: proc.stderr,
+    exitCode: proc.exitCode,
   };
 }
 
@@ -70,13 +72,13 @@ function parseJsonSlug(stdout: string): string {
   return parsed.data.slug;
 }
 
-function initCorpus(tmpDir: string): void {
-  const result = runLore(["init"], tmpDir);
+async function initCorpus(tmpDir: string): Promise<void> {
+  const result = await runLore(["init"], tmpDir);
   if (result.exitCode !== 0) throw new Error(`lore init failed: ${result.stderr}`);
 }
 
-function createKnowledge(tmpDir: string, title: string): string {
-  const result = runLore(
+async function createKnowledge(tmpDir: string, title: string): Promise<string> {
+  const result = await runLore(
     ["create", "knowledge", "--title", title, "--sub-type", "reference", "--no-ai", "--content", "Body.", "--json"],
     tmpDir,
   );
@@ -166,22 +168,13 @@ function writeAiConfig(tmpDir: string, command: string): void {
   } as never);
 }
 
-// ─── Suite: binary freshness guard ───────────────────────────────────────────
-
-beforeAll(() => {
-  assertFreshBinary(LORE_BIN, [
-    join(REPO_ROOT, "packages", "lore", "src"),
-    join(REPO_ROOT, "packages", "core", "src"),
-  ]);
-});
-
 // ─── Fixtures ────────────────────────────────────────────────────────────────
 
 let tmpDir: string;
 
-beforeEach(() => {
+beforeEach(async () => {
   tmpDir = mkdtempSync(join(tmpdir(), "lore-cli-staleness-"));
-  initCorpus(tmpDir);
+  await initCorpus(tmpDir);
 });
 
 afterEach(() => {
@@ -200,11 +193,11 @@ interface JsonEnvelope {
 // ─── HAPPY: batch probe exits 0, persists a judgment, --json shape ──────────
 
 describe("lore review --staleness — HAPPY", () => {
-  it("--limit 1 --min-age-days 0 exits 0, persists a judgment, and --json carries the full payload shape", () => {
+  it("--limit 1 --min-age-days 0 exits 0, persists a judgment, and --json carries the full payload shape", async () => {
     writeAiConfig(tmpDir, writeHoldsScript(tmpDir));
-    const slug = createKnowledge(tmpDir, "ZzzCliStalenessHappyTarget");
+    const slug = await createKnowledge(tmpDir, "ZzzCliStalenessHappyTarget");
 
-    const result = runLore(["review", "--staleness", "--limit", "1", "--min-age-days", "0", "--json"], tmpDir);
+    const result = await runLore(["review", "--staleness", "--limit", "1", "--min-age-days", "0", "--json"], tmpDir);
     expect(result.exitCode).toBe(0);
 
     const parsed = JSON.parse(result.stdout) as JsonEnvelope;
@@ -227,7 +220,7 @@ describe("lore review --staleness — HAPPY", () => {
     // instead — re-querying `lore get` isn't sufficient (judgments aren't doc fields).
     // Simplest positive-existence proof at the CLI layer: run --list and confirm this
     // doc is ABSENT (a holds verdict never appears there) without an error.
-    const listResult = runLore(["review", "--staleness", "--list", "--json"], tmpDir);
+    const listResult = await runLore(["review", "--staleness", "--list", "--json"], tmpDir);
     expect(listResult.exitCode).toBe(0);
   });
 });
@@ -235,13 +228,13 @@ describe("lore review --staleness — HAPPY", () => {
 // ─── NEGATIVE: synchronous mutexes, before any IO ────────────────────────────
 
 describe("lore review --staleness — NEGATIVE (synchronous mutexes, before any IO)", () => {
-  it("--staleness --no-ai exits 2", () => {
-    const result = runLore(["review", "--staleness", "--no-ai"], tmpDir);
+  it("--staleness --no-ai exits 2", async () => {
+    const result = await runLore(["review", "--staleness", "--no-ai"], tmpDir);
     expect(result.exitCode).toBe(2);
   });
 
-  it("--pending --staleness exits 2", () => {
-    const result = runLore(["review", "--pending", "--staleness"], tmpDir);
+  it("--pending --staleness exits 2", async () => {
+    const result = await runLore(["review", "--pending", "--staleness"], tmpDir);
     expect(result.exitCode).toBe(2);
   });
 });
@@ -249,11 +242,11 @@ describe("lore review --staleness — NEGATIVE (synchronous mutexes, before any 
 // ─── BOUNDARY: --list never invokes the provider ─────────────────────────────
 
 describe("lore review --staleness --list — BOUNDARY (no provider call)", () => {
-  it("succeeds even when the configured provider would fail loudly if invoked", () => {
+  it("succeeds even when the configured provider would fail loudly if invoked", async () => {
     writeAiConfig(tmpDir, writeLoudFailScript(tmpDir));
-    createKnowledge(tmpDir, "ZzzCliStalenessListNoProviderTarget");
+    await createKnowledge(tmpDir, "ZzzCliStalenessListNoProviderTarget");
 
-    const result = runLore(["review", "--staleness", "--list", "--json"], tmpDir);
+    const result = await runLore(["review", "--staleness", "--list", "--json"], tmpDir);
     expect(result.exitCode).toBe(0);
     expect(result.stderr).not.toContain("PROVIDER SHOULD NEVER BE CALLED");
 
@@ -261,23 +254,23 @@ describe("lore review --staleness --list — BOUNDARY (no provider call)", () =>
     expect(parsed.ok).toBe(true);
   });
 
-  it("drops a listed doc after it is edited (freshness)", () => {
+  it("drops a listed doc after it is edited (freshness)", async () => {
     writeAiConfig(tmpDir, writeEscalateScript(tmpDir));
-    const slug = createKnowledge(tmpDir, "ZzzCliStalenessListFreshnessTarget");
+    const slug = await createKnowledge(tmpDir, "ZzzCliStalenessListFreshnessTarget");
 
-    const probeResult = runLore(["review", "--staleness", "--limit", "1", "--min-age-days", "0"], tmpDir);
+    const probeResult = await runLore(["review", "--staleness", "--limit", "1", "--min-age-days", "0"], tmpDir);
     expect(probeResult.exitCode).toBe(0);
 
-    const listBefore = runLore(["review", "--staleness", "--list", "--json"], tmpDir);
+    const listBefore = await runLore(["review", "--staleness", "--list", "--json"], tmpDir);
     expect(listBefore.exitCode).toBe(0);
     const beforeData = (JSON.parse(listBefore.stdout) as JsonEnvelope).data as { docs: Array<{ slug: string }> };
     expect(beforeData.docs.some((d) => d.slug === slug)).toBe(true);
 
     // Edit the doc — bumps its version, dropping it off the fresh-escalate list.
-    const editResult = runLore(["set", slug, "--content", "Edited body.", "--json"], tmpDir);
+    const editResult = await runLore(["set", slug, "--content", "Edited body.", "--json"], tmpDir);
     expect(editResult.exitCode).toBe(0);
 
-    const listAfter = runLore(["review", "--staleness", "--list", "--json"], tmpDir);
+    const listAfter = await runLore(["review", "--staleness", "--list", "--json"], tmpDir);
     expect(listAfter.exitCode).toBe(0);
     const afterData = (JSON.parse(listAfter.stdout) as JsonEnvelope).data as { docs: Array<{ slug: string }> };
     expect(afterData.docs.some((d) => d.slug === slug)).toBe(false);
@@ -287,13 +280,13 @@ describe("lore review --staleness --list — BOUNDARY (no provider call)", () =>
 // ─── ERROR: partial-batch collect-and-continue, all-fail, invalidated target ─
 
 describe("lore review --staleness — ERROR", () => {
-  it("a partially-failing batch keeps completed judgments, reports the per-probe error, and exits 0", () => {
+  it("a partially-failing batch keeps completed judgments, reports the per-probe error, and exits 0", async () => {
     const failMarker = "ZzzCliStalenessPartialFailTarget";
     writeAiConfig(tmpDir, writeSelectiveFailScript(tmpDir, failMarker));
-    const okSlug = createKnowledge(tmpDir, "ZzzCliStalenessPartialOkTarget");
-    const failSlug = createKnowledge(tmpDir, failMarker);
+    const okSlug = await createKnowledge(tmpDir, "ZzzCliStalenessPartialOkTarget");
+    const failSlug = await createKnowledge(tmpDir, failMarker);
 
-    const result = runLore(["review", "--staleness", "--limit", "5", "--min-age-days", "0", "--json"], tmpDir);
+    const result = await runLore(["review", "--staleness", "--limit", "5", "--min-age-days", "0", "--json"], tmpDir);
     expect(result.exitCode).toBe(0);
 
     const parsed = JSON.parse(result.stdout) as JsonEnvelope;
@@ -306,22 +299,22 @@ describe("lore review --staleness — ERROR", () => {
     expect(failProbe?.error?.code).toBe("AI_PROVIDER_ERROR");
   });
 
-  it("an ALL-fail batch exits 6", () => {
+  it("an ALL-fail batch exits 6", async () => {
     writeAiConfig(tmpDir, writeMalformedScript(tmpDir));
-    createKnowledge(tmpDir, "ZzzCliStalenessAllFailTarget");
+    await createKnowledge(tmpDir, "ZzzCliStalenessAllFailTarget");
 
-    const result = runLore(["review", "--staleness", "--limit", "5", "--min-age-days", "0"], tmpDir);
+    const result = await runLore(["review", "--staleness", "--limit", "5", "--min-age-days", "0"], tmpDir);
     expect(result.exitCode).toBe(6);
   });
 
-  it("lore review <doc> --staleness refuses an already-invalidated target (exit 4)", () => {
+  it("lore review <doc> --staleness refuses an already-invalidated target (exit 4)", async () => {
     writeAiConfig(tmpDir, writeHoldsScript(tmpDir));
-    const slug = createKnowledge(tmpDir, "ZzzCliStalenessInvalidatedTarget");
+    const slug = await createKnowledge(tmpDir, "ZzzCliStalenessInvalidatedTarget");
 
-    const invalidateResult = runLore(["invalidate", slug, "--reason", "obsolete", "--json"], tmpDir);
+    const invalidateResult = await runLore(["invalidate", slug, "--reason", "obsolete", "--json"], tmpDir);
     expect(invalidateResult.exitCode).toBe(0);
 
-    const result = runLore(["review", slug, "--staleness"], tmpDir);
+    const result = await runLore(["review", slug, "--staleness"], tmpDir);
     expect(result.exitCode).toBe(4);
   });
 });
@@ -329,22 +322,22 @@ describe("lore review --staleness — ERROR", () => {
 // ─── STATE: --fail-on-candidate exits 3 on >=1 fresh stale_candidate ─────────
 
 describe("lore review --staleness --fail-on-candidate — STATE", () => {
-  it("exits 3 when the batch finds >=1 fresh stale_candidate result", () => {
+  it("exits 3 when the batch finds >=1 fresh stale_candidate result", async () => {
     writeAiConfig(tmpDir, writeEscalateScript(tmpDir));
-    createKnowledge(tmpDir, "ZzzCliStalenessFailOnCandidateTarget");
+    await createKnowledge(tmpDir, "ZzzCliStalenessFailOnCandidateTarget");
 
-    const result = runLore(
+    const result = await runLore(
       ["review", "--staleness", "--limit", "5", "--min-age-days", "0", "--fail-on-candidate"],
       tmpDir,
     );
     expect(result.exitCode).toBe(3);
   });
 
-  it("exits 0 (not 3) when every result holds (no candidates)", () => {
+  it("exits 0 (not 3) when every result holds (no candidates)", async () => {
     writeAiConfig(tmpDir, writeHoldsScript(tmpDir));
-    createKnowledge(tmpDir, "ZzzCliStalenessFailOnCandidateHoldsTarget");
+    await createKnowledge(tmpDir, "ZzzCliStalenessFailOnCandidateHoldsTarget");
 
-    const result = runLore(
+    const result = await runLore(
       ["review", "--staleness", "--limit", "5", "--min-age-days", "0", "--fail-on-candidate"],
       tmpDir,
     );

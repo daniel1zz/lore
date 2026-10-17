@@ -1,4 +1,3 @@
-// @spawns dist/lore
 /**
  * RED/TDD REGRESSION anchor for spec-plan-closure-must-be-loud-terminality-
  * divergence-silent §Design Decisions DD-4 — AC-CLOSURE-6.
@@ -37,6 +36,10 @@
  *
  * @spec_ref spec-plan-closure-must-be-loud-terminality-divergence-silent
  *   §Design Decisions DD-4, §Acceptance Criteria AC-CLOSURE-6
+ *
+ * TG-25 (adr-tg-1 option b): the commands run IN-PROCESS through tests/helpers/run-lore-in-process.ts, not through
+ * dist/lore. Wherever the prose above says the compiled binary is spawned or its freshness asserted, that is the
+ * history of this file; the assertions and the throwaway-corpus rule are unchanged.
  */
 
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
@@ -44,8 +47,8 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import yaml from "yaml";
-import { assertFreshBinary } from "./helpers/assert-fresh-binary";
-import { citeSpecViaCli, loreRunnerFor } from "../helpers/cli-live-rule.js";
+import { citeSpecViaAsyncCli, asyncLoreRunnerFor } from "../helpers/cli-live-rule.js";
+import { runLoreInProcess } from "../helpers/run-lore-in-process";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -59,25 +62,24 @@ interface RunResult {
 
 // tests/integration/ -> packages/lore/ -> packages/ -> repo root (4 levels up).
 const PROJECT_ROOT = new URL("../../../../", import.meta.url).pathname.replace(/\/$/, "");
-const LORE_BIN = join(PROJECT_ROOT, "dist", "lore");
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 /** Runs the compiled `dist/lore` binary directly (real e2e binary, not `bun run src/`). */
-function runLore(args: string[], cwd: string): RunResult {
-  const proc = Bun.spawnSync([LORE_BIN, ...args], {
+async function runLore(args: string[], cwd: string): Promise<RunResult> {
+  const proc = await runLoreInProcess(args, {
     cwd,
     env: { ...process.env, HOME: cwd, LORE_ACTOR: "agent:plan-close-reachability-test" },
   });
   return {
-    stdout: proc.stdout.toString(),
-    stderr: proc.stderr.toString(),
-    exitCode: proc.exitCode ?? 1,
+    stdout: proc.stdout,
+    stderr: proc.stderr,
+    exitCode: proc.exitCode,
   };
 }
 
-function initCorpus(dir: string): void {
-  const result = runLore(["init"], dir);
+async function initCorpus(dir: string): Promise<void> {
+  const result = await runLore(["init"], dir);
   if (result.exitCode !== 0) {
     throw new Error(`lore init failed: ${result.stderr}`);
   }
@@ -116,15 +118,15 @@ function appendWorkflowConfig(dir: string, yamlFragment: string): void {
  * evidence (a `pass` recorded via plain `lore evidence`, never runner-attested
  * via `lore verify`).
  */
-function createFixtureChain(dir: string): { planSlug: string } {
-  const prdResult = runLore(
+async function createFixtureChain(dir: string): Promise<{ planSlug: string }> {
+  const prdResult = await runLore(
     ["create", "prd", "--title", "AC-CLOSURE-6 Regression PRD", "--content", "PRD body.", "--no-ai"],
     dir,
   );
   expect(prdResult.exitCode).toBe(0);
   const prdSlug = parseSlug(prdResult.stdout);
 
-  const specResult = runLore(
+  const specResult = await runLore(
     [
       "create",
       "spec",
@@ -141,7 +143,7 @@ function createFixtureChain(dir: string): { planSlug: string } {
   expect(specResult.exitCode).toBe(0);
   const specSlug = parseSlug(specResult.stdout);
 
-  const acResult = runLore(
+  const acResult = await runLore(
     [
       "ac",
       "add",
@@ -186,11 +188,11 @@ function createFixtureChain(dir: string): { planSlug: string } {
   // WORDING, per this file's header, not which conjunct produced it).
   appendWorkflowConfig(dir, "\nworkflow:\n  attestation:\n    min_ratio: 0.5\n");
 
-  citeSpecViaCli(loreRunnerFor(runLore, dir), dir, undefined, specSlug, "AC-CLOSURE-6-1"); // BR-1007: approvable only when a criterion cites a live rule
-  const approveSpecResult = runLore(["approve", specSlug], dir);
+  await citeSpecViaAsyncCli(asyncLoreRunnerFor(runLore, dir), dir, undefined, specSlug, "AC-CLOSURE-6-1"); // BR-1007: approvable only when a criterion cites a live rule
+  const approveSpecResult = await runLore(["approve", specSlug], dir);
   expect(approveSpecResult.exitCode).toBe(0);
 
-  const planResult = runLore(
+  const planResult = await runLore(
     [
       "create",
       "plan",
@@ -210,10 +212,10 @@ function createFixtureChain(dir: string): { planSlug: string } {
   // draft -> approved is the fast-track edge (VALID_TRANSITIONS); the plan's
   // ancestor spec is already approved with a declared script-mode AC, so
   // plan-promote's own predicates are satisfied.
-  const approvePlanResult = runLore(["approve", planSlug], dir);
+  const approvePlanResult = await runLore(["approve", planSlug], dir);
   expect(approvePlanResult.exitCode).toBe(0);
 
-  const taskResult = runLore(
+  const taskResult = await runLore(
     [
       "create",
       "task",
@@ -240,7 +242,7 @@ function createFixtureChain(dir: string): { planSlug: string } {
   // non-empty self-reported tail succeed while staying UNATTESTED (this
   // fixture's own point — zero runner attestation for the attestation-gate
   // regression it exercises).
-  const evidenceResult = runLore(
+  const evidenceResult = await runLore(
     ["evidence", taskSlug, "--oracle", "manual", "--command", "bun test", "--result", "pass", "--output-tail", "ok"],
     dir,
   );
@@ -253,16 +255,9 @@ function createFixtureChain(dir: string): { planSlug: string } {
 
 let tmpDir: string;
 
-beforeAll(() => {
-  assertFreshBinary(LORE_BIN, [
-    join(PROJECT_ROOT, "packages", "lore", "src"),
-    join(PROJECT_ROOT, "packages", "core", "src"),
-  ]);
-});
-
-beforeEach(() => {
+beforeEach(async () => {
   tmpDir = mkdtempSync(join(tmpdir(), "lore-plan-close-reachability-test-"));
-  initCorpus(tmpDir);
+  await initCorpus(tmpDir);
 });
 
 afterEach(() => {
@@ -276,10 +271,10 @@ afterEach(() => {
 // ─── REGRESSION — the live 2026-07-28 incident, reproduced end to end ──────
 
 describe("REGRESSION — plan parented to an approved tech spec with >=1 script-mode AC (AC-CLOSURE-6)", () => {
-  it("denies `lore set <plan> --status archived` on attestation grounds and NEVER claims 'no spec-tier ancestor'", () => {
-    const { planSlug } = createFixtureChain(tmpDir);
+  it("denies `lore set <plan> --status archived` on attestation grounds and NEVER claims 'no spec-tier ancestor'", async () => {
+    const { planSlug } = await createFixtureChain(tmpDir);
 
-    const archiveResult = runLore(["set", planSlug, "--status", "archived"], tmpDir);
+    const archiveResult = await runLore(["set", planSlug, "--status", "archived"], tmpDir);
 
     // DENIES — the plan's only task carries self-reported-only evidence, so
     // the attestation floor (SPEC-069) is genuinely unmet. This is the

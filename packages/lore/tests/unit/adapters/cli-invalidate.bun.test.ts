@@ -1,5 +1,5 @@
-// @spawns dist/lore
 // @spawns scripts/seed-write-spec-rule.ts
+// @reads scripts/check-unclaimed-oracle.ts
 /**
  * `lore invalidate` / `lore create --supersedes` / `--include-invalid` / `lore status`
  * warning — CLI-adapter exit-code + wiring contract tests (SPEC-043 §Design Decisions
@@ -56,11 +56,10 @@ import { mkdtempSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import { withSessionIdentity } from "../../helpers/session-actor";
-import { assertFreshBinary } from "../../integration/helpers/assert-fresh-binary";
+import { runLoreInProcess } from "../../helpers/run-lore-in-process";
 
 // tests/unit/adapters/ → tests/unit/ → tests/ → packages/lore/ → packages/ → repo root (5 levels up).
 const REPO_ROOT = new URL("../../../../../", import.meta.url).pathname.replace(/\/$/, "");
-const LORE_BIN = join(REPO_ROOT, "dist", "lore");
 const SEED_SCRIPT = join(REPO_ROOT, "scripts", "seed-write-spec-rule.ts");
 
 interface RunResult {
@@ -70,15 +69,15 @@ interface RunResult {
 }
 
 /** `actor` names the writer through the session tier (no write command takes `--by`); `null` = unnamed. */
-function runLore(args: string[], cwd: string, actor: string | null = null): RunResult {
-  const proc = Bun.spawnSync([LORE_BIN, ...args], {
+async function runLore(args: string[], cwd: string, actor: string | null = null): Promise<RunResult> {
+  const proc = await runLoreInProcess(args, {
     cwd,
     env: withSessionIdentity({ ...process.env, HOME: cwd, EDITOR: "true" }, actor) as Record<string, string>,
   });
   return {
-    stdout: proc.stdout.toString(),
-    stderr: proc.stderr.toString(),
-    exitCode: proc.exitCode ?? 1,
+    stdout: proc.stdout,
+    stderr: proc.stderr,
+    exitCode: proc.exitCode,
   };
 }
 
@@ -88,15 +87,15 @@ function parseJsonSlug(stdout: string): string {
   return parsed.data.slug;
 }
 
-function initCorpus(tmpDir: string): void {
-  const result = runLore(["init"], tmpDir);
+async function initCorpus(tmpDir: string): Promise<void> {
+  const result = await runLore(["init"], tmpDir);
   if (result.exitCode !== 0) {
     throw new Error(`lore init failed: ${result.stderr}`);
   }
 }
 
-function createKnowledge(tmpDir: string, title: string): string {
-  const result = runLore(
+async function createKnowledge(tmpDir: string, title: string): Promise<string> {
+  const result = await runLore(
     ["create", "knowledge", "--title", title, "--sub-type", "reference", "--no-ai", "--content", "Body.", "--json"],
     tmpDir,
   );
@@ -104,8 +103,8 @@ function createKnowledge(tmpDir: string, title: string): string {
   return parseJsonSlug(result.stdout);
 }
 
-function createAdr(tmpDir: string, title: string): string {
-  const result = runLore(
+async function createAdr(tmpDir: string, title: string): Promise<string> {
+  const result = await runLore(
     ["create", "adr", "--title", title, "--decision-status", "accepted", "--no-ai", "--content", "Body.", "--json"],
     tmpDir,
   );
@@ -113,8 +112,8 @@ function createAdr(tmpDir: string, title: string): string {
   return parseJsonSlug(result.stdout);
 }
 
-function createPlan(tmpDir: string, title: string): string {
-  const result = runLore(["create", "plan", "--title", title, "--no-ai", "--content", "Body.", "--json"], tmpDir);
+async function createPlan(tmpDir: string, title: string): Promise<string> {
+  const result = await runLore(["create", "plan", "--title", title, "--no-ai", "--content", "Body.", "--json"], tmpDir);
   if (result.exitCode !== 0) throw new Error(`create plan failed: ${result.stderr}`);
   return parseJsonSlug(result.stdout);
 }
@@ -137,22 +136,13 @@ interface JsonDocEnvelope {
   data: Record<string, unknown>;
 }
 
-// ─── Suite: binary freshness guard ───────────────────────────────────────────
-
-beforeAll(() => {
-  assertFreshBinary(LORE_BIN, [
-    join(REPO_ROOT, "packages", "lore", "src"),
-    join(REPO_ROOT, "packages", "core", "src"),
-  ]);
-});
-
 // ─── Fixtures ────────────────────────────────────────────────────────────────
 
 let tmpDir: string;
 
-beforeEach(() => {
+beforeEach(async () => {
   tmpDir = mkdtempSync(join(tmpdir(), "lore-cli-invalidate-"));
-  initCorpus(tmpDir);
+  await initCorpus(tmpDir);
 });
 
 afterEach(() => {
@@ -166,11 +156,11 @@ afterEach(() => {
 // ─── HAPPY: invalidate + search filter + --include-invalid badge ────────────
 
 describe("lore invalidate — HAPPY", () => {
-  it("invalidate exits 0; search hides by default; --include-invalid shows with [invalid] badge", () => {
+  it("invalidate exits 0; search hides by default; --include-invalid shows with [invalid] badge", async () => {
     const title = "ZzzInvalidateSearchTargetKnowledge";
-    const slug = createKnowledge(tmpDir, title);
+    const slug = await createKnowledge(tmpDir, title);
 
-    const invalidateResult = runLore(["invalidate", slug, "--reason", "obsolete", "--json"], tmpDir);
+    const invalidateResult = await runLore(["invalidate", slug, "--reason", "obsolete", "--json"], tmpDir);
     expect(invalidateResult.exitCode).toBe(0);
     const invalidated = JSON.parse(invalidateResult.stdout) as JsonDocEnvelope;
     expect(invalidated.ok).toBe(true);
@@ -178,12 +168,12 @@ describe("lore invalidate — HAPPY", () => {
     // Default search excludes the now-invalidated doc (the "No results" message
     // legitimately echoes the query text itself, so assert on the no-results
     // sentinel rather than title absence).
-    const hiddenResult = runLore(["search", title], tmpDir);
+    const hiddenResult = await runLore(["search", title], tmpDir);
     expect(hiddenResult.exitCode).toBe(0);
     expect(hiddenResult.stdout).toContain("No results for");
 
     // --include-invalid restores it, badged.
-    const shownResult = runLore(["search", title, "--include-invalid"], tmpDir);
+    const shownResult = await runLore(["search", title, "--include-invalid"], tmpDir);
     expect(shownResult.exitCode).toBe(0);
     expect(shownResult.stdout).toContain("[invalid]");
 
@@ -193,11 +183,11 @@ describe("lore invalidate — HAPPY", () => {
     // it). --raw is always the stored bytes — banner format itself is pinned at the
     // vitest layer via `validity-projection.test.ts`'s `renderDocMarkdown`/
     // `ExportDocsService` assertions.
-    const rawGetResult = runLore(["get", slug, "--raw"], tmpDir);
+    const rawGetResult = await runLore(["get", slug, "--raw"], tmpDir);
     expect(rawGetResult.exitCode).toBe(0);
     expect(rawGetResult.stdout).not.toContain("INVALIDATED");
 
-    const nonRawGetResult = runLore(["get", slug], tmpDir);
+    const nonRawGetResult = await runLore(["get", slug], tmpDir);
     expect(nonRawGetResult.exitCode).toBe(0);
     expect(nonRawGetResult.stdout).toContain("INVALIDATED");
   });
@@ -206,10 +196,10 @@ describe("lore invalidate — HAPPY", () => {
 // ─── HAPPY: create --supersedes composes create + invalidate + link ─────────
 
 describe("lore create adr --supersedes — HAPPY (SPEC-043 D11)", () => {
-  it("creates the new ADR, invalidates the old one, and links them in one command", () => {
-    const oldSlug = createAdr(tmpDir, "Old Decision To Be Superseded");
+  it("creates the new ADR, invalidates the old one, and links them in one command", async () => {
+    const oldSlug = await createAdr(tmpDir, "Old Decision To Be Superseded");
 
-    const result = runLore(
+    const result = await runLore(
       [
         "create",
         "adr",
@@ -232,7 +222,7 @@ describe("lore create adr --supersedes — HAPPY (SPEC-043 D11)", () => {
     expect(parsed.data["supersede_error"]).toBeUndefined();
     const newSlug = parsed.data["slug"] as string;
 
-    const oldDocResult = runLore(["get", oldSlug, "--json"], tmpDir);
+    const oldDocResult = await runLore(["get", oldSlug, "--json"], tmpDir);
     expect(oldDocResult.exitCode).toBe(0);
     const oldDoc = JSON.parse(oldDocResult.stdout) as {
       data: { doc: { extra: { validity?: { invalid_at?: string; invalidated_by?: string }; decision_status?: string } } };
@@ -241,7 +231,7 @@ describe("lore create adr --supersedes — HAPPY (SPEC-043 D11)", () => {
     expect(oldDoc.data.doc.extra.decision_status).toBe("superseded");
 
     // Links the new successor to the old doc via a `supersedes` edge.
-    const newDocResult = runLore(["get", newSlug, "--json"], tmpDir);
+    const newDocResult = await runLore(["get", newSlug, "--json"], tmpDir);
     expect(newDocResult.exitCode).toBe(0);
     const newDoc = JSON.parse(newDocResult.stdout) as {
       data: { navigation: { related: Array<{ slug: string; link_type: string }> } };
@@ -255,9 +245,9 @@ describe("lore create adr --supersedes — HAPPY (SPEC-043 D11)", () => {
 // ─── ERROR: undo on never-invalidated doc ────────────────────────────────────
 
 describe("lore invalidate --undo — ERROR", () => {
-  it("a never-invalidated doc → exit 4 (VALIDATION_ERROR)", () => {
-    const slug = createKnowledge(tmpDir, "Never Invalidated Knowledge");
-    const result = runLore(["invalidate", slug, "--undo"], tmpDir);
+  it("a never-invalidated doc → exit 4 (VALIDATION_ERROR)", async () => {
+    const slug = await createKnowledge(tmpDir, "Never Invalidated Knowledge");
+    const result = await runLore(["invalidate", slug, "--undo"], tmpDir);
     expect(result.exitCode).toBe(4);
   });
 });
@@ -265,9 +255,9 @@ describe("lore invalidate --undo — ERROR", () => {
 // ─── ERROR: non-knowledge/adr target ─────────────────────────────────────────
 
 describe("lore invalidate — ERROR (ineligible type)", () => {
-  it("a plan target → exit 4 (VALIDATION_ERROR naming allowed types)", () => {
-    const planSlug = createPlan(tmpDir, "Plan Cannot Be Invalidated");
-    const result = runLore(["invalidate", planSlug, "--reason", "n/a"], tmpDir);
+  it("a plan target → exit 4 (VALIDATION_ERROR naming allowed types)", async () => {
+    const planSlug = await createPlan(tmpDir, "Plan Cannot Be Invalidated");
+    const result = await runLore(["invalidate", planSlug, "--reason", "n/a"], tmpDir);
     expect(result.exitCode).toBe(4);
     expect(result.stderr).toContain("knowledge/adr");
   });
@@ -276,17 +266,17 @@ describe("lore invalidate — ERROR (ineligible type)", () => {
 // ─── STATE: lore status invalidated-feeding-source warning ──────────────────
 
 describe("lore status — STATE (SPEC-043 D8)", () => {
-  it("the warning string surfaces once the feeding-source skill doc is invalidated", () => {
+  it("the warning string surfaces once the feeding-source skill doc is invalidated", async () => {
     const { slug: skillSlug } = seedFeedingSkill(tmpDir);
 
-    const beforeStatus = runLore(["status"], tmpDir);
+    const beforeStatus = await runLore(["status"], tmpDir);
     expect(beforeStatus.exitCode).toBe(0);
     expect(beforeStatus.stdout).not.toContain("Invalidated feeding sources");
 
-    const invalidateResult = runLore(["invalidate", skillSlug, "--reason", "outdated rules"], tmpDir);
+    const invalidateResult = await runLore(["invalidate", skillSlug, "--reason", "outdated rules"], tmpDir);
     expect(invalidateResult.exitCode).toBe(0);
 
-    const afterStatus = runLore(["status"], tmpDir);
+    const afterStatus = await runLore(["status"], tmpDir);
     expect(afterStatus.exitCode).toBe(0);
     expect(afterStatus.stdout).toContain("Invalidated feeding sources");
     expect(afterStatus.stdout).toContain(skillSlug);

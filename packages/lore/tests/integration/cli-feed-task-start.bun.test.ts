@@ -1,4 +1,3 @@
-// @spawns dist/lore
 /**
  * @spec_ref spec-070-deterministic-task-dispatch-bundle-lore-feed-task-start
  *   §Design D1, D7; §Acceptance Criteria AC-070-7, AC-070-18.
@@ -40,6 +39,10 @@
  *                `tests/unit/adapters/mcp-session-tools.test.ts`; pure
  *                render-function mechanics:
  *                `tests/unit/flows/feed-flow-resume-closure.test.ts`).
+ *
+ * TG-25 (adr-tg-1 option b): the commands run IN-PROCESS through tests/helpers/run-lore-in-process.ts, not through
+ * dist/lore. Wherever the prose above says the compiled binary is spawned or its freshness asserted, that is the
+ * history of this file; the assertions and the throwaway-corpus rule are unchanged.
  */
 
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
@@ -48,10 +51,10 @@ import { join } from "path";
 import { tmpdir } from "os";
 import yaml from "yaml";
 import { BOOTSTRAP_RESUME_CLOSURE_KEYS, RESUME_SCOPE_CLOSURE } from "@lore/core";
-import { assertFreshBinary } from "./helpers/assert-fresh-binary";
 import { FEED_PHASE_START_MISSING_TARGET, FEED_TASK_START_MISSING_TARGET } from "../../src/adapters/cli/cli-refusal-messages.js";
-import { citeSpecViaCli, loreRunnerFor } from "../helpers/cli-live-rule.js";
+import { citeSpecViaAsyncCli, asyncLoreRunnerFor } from "../helpers/cli-live-rule.js";
 import { sessionActorFor, withSessionIdentity } from "../helpers/session-actor";
+import { runLoreInProcess } from "../helpers/run-lore-in-process";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -80,26 +83,25 @@ interface TaskStartPackJson {
 
 // tests/integration/ -> packages/lore/ -> packages/ -> repo root (4 levels up).
 const PROJECT_ROOT = new URL("../../../../", import.meta.url).pathname.replace(/\/$/, "");
-const LORE_BIN = join(PROJECT_ROOT, "dist", "lore");
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 /** Runs the compiled `dist/lore` binary directly (real e2e binary, not `bun run src/`). */
 /** `actor` names the writer through the session tier (no write command takes `--by`). */
-function runLore(args: string[], cwd: string, actor: string | null = "cli-feed-task-start-test"): RunResult {
-  const proc = Bun.spawnSync([LORE_BIN, ...args], {
+async function runLore(args: string[], cwd: string, actor: string | null = "cli-feed-task-start-test"): Promise<RunResult> {
+  const proc = await runLoreInProcess(args, {
     cwd,
     env: withSessionIdentity({ ...process.env, HOME: cwd }, actor) as Record<string, string>,
   });
   return {
-    stdout: proc.stdout.toString(),
-    stderr: proc.stderr.toString(),
-    exitCode: proc.exitCode ?? 1,
+    stdout: proc.stdout,
+    stderr: proc.stderr,
+    exitCode: proc.exitCode,
   };
 }
 
-function initCorpus(dir: string): void {
-  const result = runLore(["init"], dir);
+async function initCorpus(dir: string): Promise<void> {
+  const result = await runLore(["init"], dir);
   if (result.exitCode !== 0) {
     throw new Error(`lore init failed: ${result.stderr}`);
   }
@@ -136,20 +138,20 @@ function appendWorkflowConfig(dir: string, yamlFragment: string): void {
 }
 
 /** Creates a prd -> spec (1 declared script-mode AC, approved) -> plan -> task chain, with anchors + evidence + a fresh claim. */
-function createFullChain(dir: string): {
+async function createFullChain(dir: string): Promise<{
   prdSlug: string;
   specSlug: string;
   planSlug: string;
   taskSlug: string;
-} {
-  const prdResult = runLore(
+}> {
+  const prdResult = await runLore(
     ["create", "prd", "--title", "T1 E2E PRD", "--content", "PRD body.", "--no-ai"],
     dir,
   );
   expect(prdResult.exitCode).toBe(0);
   const prdSlug = parseSlug(prdResult.stdout);
 
-  const specResult = runLore(
+  const specResult = await runLore(
     [
       "create",
       "spec",
@@ -164,7 +166,7 @@ function createFullChain(dir: string): {
   expect(specResult.exitCode).toBe(0);
   const specSlug = parseSlug(specResult.stdout);
 
-  const acResult = runLore(
+  const acResult = await runLore(
     [
       "ac",
       "add",
@@ -193,18 +195,18 @@ function createFullChain(dir: string): {
   // precedent.
   appendWorkflowConfig(dir, "\nworkflow:\n  review:\n    judgment_required_types: []\n");
 
-  citeSpecViaCli(loreRunnerFor(runLore, dir), dir, undefined, specSlug, "AC-T1-1"); // BR-1007: approvable only when a criterion cites a live rule
-  const approveResult = runLore(["approve", specSlug], dir);
+  await citeSpecViaAsyncCli(asyncLoreRunnerFor(runLore, dir), dir, undefined, specSlug, "AC-T1-1"); // BR-1007: approvable only when a criterion cites a live rule
+  const approveResult = await runLore(["approve", specSlug], dir);
   expect(approveResult.exitCode).toBe(0);
 
-  const planResult = runLore(
+  const planResult = await runLore(
     ["create", "plan", "--title", "T1 E2E Plan", "--parent", specSlug, "--content", "Plan body.", "--no-ai"],
     dir,
   );
   expect(planResult.exitCode).toBe(0);
   const planSlug = parseSlug(planResult.stdout);
 
-  const taskResult = runLore(
+  const taskResult = await runLore(
     [
       "create",
       "task",
@@ -231,7 +233,7 @@ function createFullChain(dir: string): {
   expect(taskResult.exitCode).toBe(0);
   const taskSlug = parseSlug(taskResult.stdout);
 
-  const failEvidence = runLore(
+  const failEvidence = await runLore(
     [
       "evidence",
       taskSlug,
@@ -253,13 +255,13 @@ function createFullChain(dir: string): {
   // content; "manual" is the one oracle that still lets a genuinely
   // non-empty self-reported tail succeed. This fixture only needs a
   // successful pass row referencing AC-T1-1, not a specific oracle kind.
-  const passEvidence = runLore(
+  const passEvidence = await runLore(
     ["evidence", taskSlug, "--oracle", "manual", "--command", "bun test", "--result", "pass", "--ac", "AC-T1-1", "--output-tail", "ok"],
     dir,
   );
   expect(passEvidence.exitCode).toBe(0);
 
-  const claimResult = runLore(
+  const claimResult = await runLore(
     ["claim", taskSlug, "--worktree", "/tmp/t1-worktree"],
     dir,
   );
@@ -274,15 +276,15 @@ function createFullChain(dir: string): {
  * session-resume`'s FOUND branch (spec-context-provenance-injected-corpus-global-state-and-a
  * D3 scope-closure block). Returns the plan/handoff slugs for assertion use.
  */
-function createHandoffChain(dir: string): { planSlug: string; handoffSlug: string } {
-  const planResult = runLore(
+async function createHandoffChain(dir: string): Promise<{ planSlug: string; handoffSlug: string }> {
+  const planResult = await runLore(
     ["create", "plan", "--title", "T3 Resume Plan", "--content", "Plan body.", "--no-ai"],
     dir,
   );
   expect(planResult.exitCode).toBe(0);
   const planSlug = parseSlug(planResult.stdout);
 
-  const handoffResult = runLore(
+  const handoffResult = await runLore(
     [
       "handoff",
       "--plan",
@@ -313,8 +315,8 @@ function createHandoffChain(dir: string): { planSlug: string; handoffSlug: strin
  * the created phase doc's title equals the source task's own title verbatim
  * (`PhaseMigrationService.buildGroups`'s `solo:` branch).
  */
-function createPhaseChain(dir: string): { planSlug: string; phaseSlug: string; taskTitle: string; planTitle: string } {
-  const prdResult = runLore(
+async function createPhaseChain(dir: string): Promise<{ planSlug: string; phaseSlug: string; taskTitle: string; planTitle: string }> {
+  const prdResult = await runLore(
     ["create", "prd", "--title", "AC-070-18 Phase PRD", "--content", "PRD body.", "--no-ai"],
     dir,
   );
@@ -322,7 +324,7 @@ function createPhaseChain(dir: string): { planSlug: string; phaseSlug: string; t
   const prdSlug = parseSlug(prdResult.stdout);
 
   const planTitle = "AC-070-18 Phase Plan";
-  const planResult = runLore(
+  const planResult = await runLore(
     ["create", "plan", "--title", planTitle, "--parent", prdSlug, "--content", "Plan body.", "--no-ai"],
     dir,
   );
@@ -330,7 +332,7 @@ function createPhaseChain(dir: string): { planSlug: string; phaseSlug: string; t
   const planSlug = parseSlug(planResult.stdout);
 
   const taskTitle = "AC-070-18 Phase Task";
-  const taskResult = runLore(
+  const taskResult = await runLore(
     [
       "create",
       "task",
@@ -348,10 +350,10 @@ function createPhaseChain(dir: string): { planSlug: string; phaseSlug: string; t
   );
   expect(taskResult.exitCode).toBe(0);
 
-  const migrateResult = runLore(["migrate", "tasks-to-phases"], dir);
+  const migrateResult = await runLore(["migrate", "tasks-to-phases"], dir);
   expect(migrateResult.exitCode).toBe(0);
 
-  const listResult = runLore(["list", "--type", "phase", "--json"], dir);
+  const listResult = await runLore(["list", "--type", "phase", "--json"], dir);
   expect(listResult.exitCode).toBe(0);
   const listPayload = JSON.parse(listResult.stdout) as { data: { docs: Array<{ slug: string }> } };
   const phaseSlug = listPayload.data.docs[0]?.slug;
@@ -366,16 +368,9 @@ function createPhaseChain(dir: string): { planSlug: string; phaseSlug: string; t
 
 let tmpDir: string;
 
-beforeAll(() => {
-  assertFreshBinary(LORE_BIN, [
-    join(PROJECT_ROOT, "packages", "lore", "src"),
-    join(PROJECT_ROOT, "packages", "core", "src"),
-  ]);
-});
-
-beforeEach(() => {
+beforeEach(async () => {
   tmpDir = mkdtempSync(join(tmpdir(), "lore-cli-feed-task-start-"));
-  initCorpus(tmpDir);
+  await initCorpus(tmpDir);
 });
 
 afterEach(() => {
@@ -389,10 +384,10 @@ afterEach(() => {
 // ─── AC-070-7: HAPPY — full end-to-end pack ─────────────────────────────────
 
 describe("HAPPY — lore feed task-start <task> against a real corpus (AC-070-7)", () => {
-  it("prints all eight section headers with real data, exit 0", () => {
-    const { specSlug, planSlug, taskSlug } = createFullChain(tmpDir);
+  it("prints all eight section headers with real data, exit 0", async () => {
+    const { specSlug, planSlug, taskSlug } = await createFullChain(tmpDir);
 
-    const result = runLore(["feed", "task-start", taskSlug], tmpDir);
+    const result = await runLore(["feed", "task-start", taskSlug], tmpDir);
 
     expect(result.exitCode).toBe(0);
     for (const header of [
@@ -440,10 +435,10 @@ describe("HAPPY — lore feed task-start <task> against a real corpus (AC-070-7)
     expect(result.stdout).toContain("no handoff recorded");
   });
 
-  it("--json emits the pack object with the exact eight section keys, and plan_state carries this task's own fresh-claim session", () => {
-    const { taskSlug } = createFullChain(tmpDir);
+  it("--json emits the pack object with the exact eight section keys, and plan_state carries this task's own fresh-claim session", async () => {
+    const { taskSlug } = await createFullChain(tmpDir);
 
-    const result = runLore(["feed", "task-start", taskSlug, "--json"], tmpDir);
+    const result = await runLore(["feed", "task-start", taskSlug, "--json"], tmpDir);
     expect(result.exitCode).toBe(0);
 
     const pack = JSON.parse(result.stdout) as TaskStartPackJson;
@@ -475,8 +470,8 @@ describe("HAPPY — lore feed task-start <task> against a real corpus (AC-070-7)
 // ─── NEGATIVE — unresolvable task ──────────────────────────────────────────
 
 describe("NEGATIVE — an unresolvable task target exits 3", () => {
-  it("exits 3 with a DOC_NOT_FOUND-shaped error", () => {
-    const result = runLore(["feed", "task-start", "no-such-task-at-all"], tmpDir);
+  it("exits 3 with a DOC_NOT_FOUND-shaped error", async () => {
+    const result = await runLore(["feed", "task-start", "no-such-task-at-all"], tmpDir);
     expect(result.exitCode).toBe(3);
   });
 });
@@ -484,8 +479,8 @@ describe("NEGATIVE — an unresolvable task target exits 3", () => {
 // ─── BOUNDARY — missing positional ─────────────────────────────────────────
 
 describe("BOUNDARY — a missing task positional exits 2", () => {
-  it("exits 2 naming the required task ID/slug", () => {
-    const result = runLore(["feed", "task-start"], tmpDir);
+  it("exits 2 naming the required task ID/slug", async () => {
+    const result = await runLore(["feed", "task-start"], tmpDir);
     expect(result.exitCode).toBe(2);
     expect(result.stderr).toContain(FEED_TASK_START_MISSING_TARGET);
   });
@@ -494,11 +489,11 @@ describe("BOUNDARY — a missing task positional exits 2", () => {
 // ─── STATE — workflow.task_feed.* config override clips a section end to end ──
 
 describe("STATE — workflow.task_feed.* config override clips the objective section end to end", () => {
-  it("a tiny max_objective_chars override truncates the objective section and records it in truncated[]", () => {
-    const { taskSlug } = createFullChain(tmpDir);
+  it("a tiny max_objective_chars override truncates the objective section and records it in truncated[]", async () => {
+    const { taskSlug } = await createFullChain(tmpDir);
     appendWorkflowConfig(tmpDir, "\nworkflow:\n  task_feed:\n    max_objective_chars: 20\n");
 
-    const result = runLore(["feed", "task-start", taskSlug, "--json"], tmpDir);
+    const result = await runLore(["feed", "task-start", taskSlug, "--json"], tmpDir);
     expect(result.exitCode).toBe(0);
 
     const pack = JSON.parse(result.stdout) as TaskStartPackJson;
@@ -510,33 +505,33 @@ describe("STATE — workflow.task_feed.* config override clips the objective sec
 // ─── REGRESSION — spec-create / session-resume / phase-start unchanged (AC-070-7) ──
 
 describe("REGRESSION — spec-create / session-resume / phase-start outputs are unchanged after the table-driven dispatch refactor", () => {
-  it("spec-create with no approved skill still prints the one-line note, exit 0", () => {
-    const result = runLore(["feed", "spec-create"], tmpDir);
+  it("spec-create with no approved skill still prints the one-line note, exit 0", async () => {
+    const result = await runLore(["feed", "spec-create"], tmpDir);
     expect(result.exitCode).toBe(0);
     expect(result.stdout.trim()).toBe("no approved governing skill for spec");
   });
 
-  it("session-resume with no handoff recorded still prints '(no handoff recorded)', exit 0", () => {
-    const result = runLore(["feed", "session-resume"], tmpDir);
+  it("session-resume with no handoff recorded still prints '(no handoff recorded)', exit 0", async () => {
+    const result = await runLore(["feed", "session-resume"], tmpDir);
     expect(result.exitCode).toBe(0);
     expect(result.stdout.trim()).toBe("(no handoff recorded)");
   });
 
-  it("phase-start with a missing positional still exits 2 naming a phase document ID or slug", () => {
-    const result = runLore(["feed", "phase-start"], tmpDir);
+  it("phase-start with a missing positional still exits 2 naming a phase document ID or slug", async () => {
+    const result = await runLore(["feed", "phase-start"], tmpDir);
     expect(result.exitCode).toBe(2);
     expect(result.stderr).toContain(FEED_PHASE_START_MISSING_TARGET);
   });
 
-  it("phase-start with an unresolvable target still exits 3 (unchanged error-mapping path)", () => {
-    const result = runLore(["feed", "phase-start", "no-such-phase-at-all"], tmpDir);
+  it("phase-start with an unresolvable target still exits 3 (unchanged error-mapping path)", async () => {
+    const result = await runLore(["feed", "phase-start", "no-such-phase-at-all"], tmpDir);
     expect(result.exitCode).toBe(3);
   });
 
-  it("phase-start HAPPY path pins the FULL text output byte-for-byte (AC-070-18 — previously only its error paths were pinned)", () => {
-    const { phaseSlug, taskTitle, planTitle } = createPhaseChain(tmpDir);
+  it("phase-start HAPPY path pins the FULL text output byte-for-byte (AC-070-18 — previously only its error paths were pinned)", async () => {
+    const { phaseSlug, taskTitle, planTitle } = await createPhaseChain(tmpDir);
 
-    const result = runLore(["feed", "phase-start", phaseSlug], tmpDir);
+    const result = await runLore(["feed", "phase-start", phaseSlug], tmpDir);
     expect(result.exitCode).toBe(0);
 
     // Mirrors `renderPhaseStartPackText`'s exact `console.log` call sequence
@@ -562,20 +557,20 @@ describe("REGRESSION — spec-create / session-resume / phase-start outputs are 
   // make) — an UNREGISTERED checkpoint name now exits EXACTLY 2, never the
   // pre-fix silent-success 0. `checkpointRegistry` (not the special-dispatch
   // table this file otherwise exercises) is the SSOT for this refusal.
-  it("an unregistered checkpoint exits EXACTLY 2, never the pre-fix silent-success 0", () => {
-    const result = runLore(["feed", "totally-unknown-checkpoint"], tmpDir);
+  it("an unregistered checkpoint exits EXACTLY 2, never the pre-fix silent-success 0", async () => {
+    const result = await runLore(["feed", "totally-unknown-checkpoint"], tmpDir);
     expect(result.exitCode).toBe(2);
     expect(result.stdout.trim()).toBe("");
     expect(result.stderr).toContain("totally-unknown-checkpoint");
   });
 
-  it("REGRESSION (spec-context-provenance-injected-corpus-global-state-and-a#AC-CP-4, CLI stdout): the derivation-path call (no --handoff flag) carries RESUME_SCOPE_CLOSURE verbatim once a ticket is found", () => {
-    createHandoffChain(tmpDir);
+  it("REGRESSION (spec-context-provenance-injected-corpus-global-state-and-a#AC-CP-4, CLI stdout): the derivation-path call (no --handoff flag) carries RESUME_SCOPE_CLOSURE verbatim once a ticket is found", async () => {
+    await createHandoffChain(tmpDir);
 
     // reason: no `--handoff <slug>` supplied — exercises the SAME newest-wins
     // derivation path the task's REGRESSION requirement names, not the direct
     // shortcut.
-    const result = runLore(["feed", "session-resume"], tmpDir);
+    const result = await runLore(["feed", "session-resume"], tmpDir);
     expect(result.exitCode).toBe(0);
     // reason: identity against the exported constant (D6), not a remembered
     // substring — the stdout literally ENDS with the constant (the module's
@@ -586,16 +581,16 @@ describe("REGRESSION — spec-create / session-resume / phase-start outputs are 
     }
   });
 
-  it("REGRESSION (spec-context-provenance-injected-corpus-global-state-and-a#AC-CP-4): spec-create / phase-start / an unknown checkpoint stay closure-free even once a resume ticket exists in the same corpus", () => {
-    createHandoffChain(tmpDir);
+  it("REGRESSION (spec-context-provenance-injected-corpus-global-state-and-a#AC-CP-4): spec-create / phase-start / an unknown checkpoint stay closure-free even once a resume ticket exists in the same corpus", async () => {
+    await createHandoffChain(tmpDir);
 
-    const specCreate = runLore(["feed", "spec-create"], tmpDir);
+    const specCreate = await runLore(["feed", "spec-create"], tmpDir);
     expect(specCreate.stdout.includes(RESUME_SCOPE_CLOSURE)).toBe(false);
 
-    const phaseStart = runLore(["feed", "phase-start"], tmpDir);
+    const phaseStart = await runLore(["feed", "phase-start"], tmpDir);
     expect(phaseStart.stderr.includes(RESUME_SCOPE_CLOSURE)).toBe(false);
 
-    const unknown = runLore(["feed", "totally-unknown-checkpoint"], tmpDir);
+    const unknown = await runLore(["feed", "totally-unknown-checkpoint"], tmpDir);
     expect(unknown.stdout.includes(RESUME_SCOPE_CLOSURE)).toBe(false);
   }, 30_000);
 });

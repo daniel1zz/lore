@@ -1,4 +1,3 @@
-// @spawns dist/lore
 /**
  * AC-DC-10 — the oracle-generation split is REACHABLE from a user-facing read
  * surface (spec-the-defect-channel-cannot-be-honestly-maintained-an §M5).
@@ -54,6 +53,10 @@
  *               dropped, or double-counted to produce the split).
  *
  * @spec_ref AC-DC-10
+ *
+ * TG-25 (adr-tg-1 option b): the commands run IN-PROCESS through tests/helpers/run-lore-in-process.ts, not through
+ * dist/lore. Wherever the prose above says the compiled binary is spawned or its freshness asserted, that is the
+ * history of this file; the assertions and the throwaway-corpus rule are unchanged.
  */
 
 import { describe, expect, it, beforeAll, afterAll, vi } from "vitest";
@@ -61,7 +64,7 @@ const setDefaultTimeout = (ms: number): void => { vi.setConfig({ testTimeout: ms
 import { mkdtempSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
-import { assertFreshBinary } from "../helpers/assert-fresh-binary";
+import { runLoreInProcess } from "../../helpers/run-lore-in-process";
 
 // reason: the main fixture spawns ~20 compiled-binary processes to build a corpus
 // whose evidence rows straddle a generation bump; bun's 5s default is comfortably
@@ -70,7 +73,6 @@ setDefaultTimeout(180_000);
 
 // tests/integration/cli/ → tests/integration/ → tests/ → packages/lore/ → packages/ → repo root.
 const REPO_ROOT = new URL("../../../../../", import.meta.url).pathname.replace(/\/$/, "");
-const LORE_BIN = join(REPO_ROOT, "dist", "lore");
 
 interface RunResult {
   readonly stdout: string;
@@ -78,23 +80,23 @@ interface RunResult {
   readonly exitCode: number;
 }
 
-function runLore(args: string[], cwd: string): RunResult {
-  const proc = Bun.spawnSync([LORE_BIN, ...args], {
+async function runLore(args: string[], cwd: string): Promise<RunResult> {
+  const proc = await runLoreInProcess(args, {
     // reason: HOME is redirected into the throwaway corpus so no global lore
     // config on the developer's machine can influence the run.
     cwd,
     env: { ...process.env, HOME: cwd, EDITOR: "true", LORE_ACTOR: "agent:ac-gen-surface-test" },
   });
   return {
-    stdout: proc.stdout.toString(),
-    stderr: proc.stderr.toString(),
-    exitCode: proc.exitCode ?? 1,
+    stdout: proc.stdout,
+    stderr: proc.stderr,
+    exitCode: proc.exitCode,
   };
 }
 
 /** Runs a fixture-setup command, failing loud (never silently) on a nonzero exit. */
-function mustRun(args: string[], cwd: string): RunResult {
-  const result = runLore(args, cwd);
+async function mustRun(args: string[], cwd: string): Promise<RunResult> {
+  const result = await runLore(args, cwd);
   if (result.exitCode !== 0) {
     throw new Error(`fixture command \`lore ${args.join(" ")}\` failed (${result.exitCode}): ${result.stderr}`);
   }
@@ -130,8 +132,8 @@ interface AcListJson {
   readonly coverage: readonly CoverageFactJson[] | null;
 }
 
-function acListJson(spec: string, cwd: string): AcListJson {
-  const result = mustRun(["ac", "list", spec, "--json"], cwd);
+async function acListJson(spec: string, cwd: string): Promise<AcListJson> {
+  const result = await mustRun(["ac", "list", spec, "--json"], cwd);
   return (JSON.parse(result.stdout) as { data: AcListJson }).data;
 }
 
@@ -152,13 +154,6 @@ function parseRetiredMarker(line: string): { prior: number; current: number; gen
   if (m === null) return null;
   return { prior: Number(m[1]), current: Number(m[2]), generation: Number(m[3]) };
 }
-
-beforeAll(() => {
-  assertFreshBinary(LORE_BIN, [
-    join(REPO_ROOT, "packages", "lore", "src"),
-    join(REPO_ROOT, "packages", "core", "src"),
-  ]);
-});
 
 // ─── Main fixture: one corpus, observed BEFORE and AFTER the command rewrite ──
 
@@ -182,40 +177,40 @@ interface Observed {
   readonly taskExtra: Record<string, unknown>;
 }
 
-function addScriptAc(spec: string, id: string, statement: string, command: string, dir: string): void {
-  mustRun(
+async function addScriptAc(spec: string, id: string, statement: string, command: string, dir: string): Promise<void> {
+  await mustRun(
     ["ac", "add", spec, id, "--statement", statement, "--mode", "script", "--oracle", "other", "--command", command],
     dir,
   );
 }
 
-function recordPass(task: string, command: string, acId: string, tail: string, dir: string): void {
+async function recordPass(task: string, command: string, acId: string, tail: string, dir: string): Promise<void> {
   // reason: `--oracle manual` is the one oracle a self-reported `pass` is admissible
   // for, and it still requires a genuinely non-empty --output-tail describing what
   // was checked (task-raise-the-evidence-tail-guard-s-predicate-to-its-own D5).
-  mustRun(
+  await mustRun(
     ["evidence", task, "--oracle", "manual", "--command", command, "--result", "pass", "--ac", acId, "--output-tail", tail],
     dir,
   );
 }
 
-function buildCorpus(): Observed {
+async function buildCorpus(): Promise<Observed> {
   const dir = mkdtempSync(join(tmpdir(), "lore-ac-oracle-gen-"));
-  mustRun(["init"], dir);
-  mustRun(["create", "prd", "--title", "Gen PRD", "--no-ai", "--content", "## Overview\nbody"], dir);
-  mustRun(
+  await mustRun(["init"], dir);
+  await mustRun(["create", "prd", "--title", "Gen PRD", "--no-ai", "--content", "## Overview\nbody"], dir);
+  await mustRun(
     ["create", "spec", "--title", "Gen Spec","--no-ai", "--content", "## Overview\nbody"],
     dir,
   );
 
   const spec = "spec-gen-spec";
-  addScriptAc(spec, "AC-GEN-1", "A marker token is present in the corpus root.", "grep -rq MARKER .", dir);
-  addScriptAc(spec, "AC-GEN-2", "A second marker token is present in the corpus root.", "grep -rq OTHER .", dir);
-  addScriptAc(spec, "AC-GEN-3", "A third token is present in the corpus root.", "grep -rq THIRD .", dir);
-  addScriptAc(spec, "AC-GEN-4", "A fourth token is present in the corpus root.", "grep -rq FOURTH .", dir);
+  await addScriptAc(spec, "AC-GEN-1", "A marker token is present in the corpus root.", "grep -rq MARKER .", dir);
+  await addScriptAc(spec, "AC-GEN-2", "A second marker token is present in the corpus root.", "grep -rq OTHER .", dir);
+  await addScriptAc(spec, "AC-GEN-3", "A third token is present in the corpus root.", "grep -rq THIRD .", dir);
+  await addScriptAc(spec, "AC-GEN-4", "A fourth token is present in the corpus root.", "grep -rq FOURTH .", dir);
 
-  mustRun(["create", "plan", "--title", "Gen Plan", "--parent", spec, "--no-ai", "--content", "body"], dir);
-  mustRun(
+  await mustRun(["create", "plan", "--title", "Gen Plan", "--parent", spec, "--no-ai", "--content", "body"], dir);
+  await mustRun(
     [
       "create", "task",
       "--title", "Gen Task",
@@ -232,32 +227,32 @@ function buildCorpus(): Observed {
   const task = "task-gen-task";
 
   // ── generation 1 evidence ──
-  recordPass(task, "grep -rq MARKER .", "AC-GEN-1", "manual check: the MARKER token was located by hand", dir);
-  mustRun(
+  await recordPass(task, "grep -rq MARKER .", "AC-GEN-1", "manual check: the MARKER token was located by hand", dir);
+  await mustRun(
     ["evidence", task, "--oracle", "test", "--command", "grep -rq MARKER .", "--result", "expected-fail",
      "--ac", "AC-GEN-1", "--output-tail", "red-first pin: MARKER absent"],
     dir,
   );
-  recordPass(task, "grep -rq OTHER .", "AC-GEN-2", "manual check: the OTHER token was located by hand", dir);
-  recordPass(task, "grep -rq FOURTH .", "AC-GEN-4", "manual check: the FOURTH token was located by hand", dir);
+  await recordPass(task, "grep -rq OTHER .", "AC-GEN-2", "manual check: the OTHER token was located by hand", dir);
+  await recordPass(task, "grep -rq FOURTH .", "AC-GEN-4", "manual check: the FOURTH token was located by hand", dir);
 
   // ── observation 1: BEFORE any rewrite ──
-  const beforeHuman = mustRun(["ac", "list", spec], dir).stdout;
-  const beforeJson = acListJson(spec, dir);
+  const beforeHuman = (await mustRun(["ac", "list", spec], dir)).stdout;
+  const beforeJson = await acListJson(spec, dir);
 
   // ── the rewrite under test: a POLARITY REVERSAL of AC-GEN-1's oracle (F3's shape) ──
-  mustRun(["ac", "set", spec, "AC-GEN-1", "--command", "! grep -rq MARKER ."], dir);
+  await mustRun(["ac", "set", spec, "AC-GEN-1", "--command", "! grep -rq MARKER ."], dir);
   // ── the NEGATIVE control: a statement-only edit, no command change ──
-  mustRun(["ac", "set", spec, "AC-GEN-4", "--statement", "A fourth token is present in the corpus root now."], dir);
+  await mustRun(["ac", "set", spec, "AC-GEN-4", "--statement", "A fourth token is present in the corpus root now."], dir);
 
   // ── generation 2 evidence for AC-GEN-1 ──
-  recordPass(task, "! grep -rq MARKER .", "AC-GEN-1", "manual check: the MARKER token is absent, as now required", dir);
+  await recordPass(task, "! grep -rq MARKER .", "AC-GEN-1", "manual check: the MARKER token is absent, as now required", dir);
 
   // ── observation 2: AFTER the rewrite ──
-  const afterHuman = mustRun(["ac", "list", spec], dir).stdout;
-  const afterJson = acListJson(spec, dir);
+  const afterHuman = (await mustRun(["ac", "list", spec], dir)).stdout;
+  const afterJson = await acListJson(spec, dir);
 
-  const taskDoc = mustRun(["get", task, "--json"], dir).stdout;
+  const taskDoc = (await mustRun(["get", task, "--json"], dir)).stdout;
   const taskExtra = (JSON.parse(taskDoc) as { data: { doc: { extra: Record<string, unknown> } } }).data.doc.extra;
 
   return { dir, beforeHuman, beforeJson, afterHuman, afterJson, taskExtra };
@@ -265,8 +260,8 @@ function buildCorpus(): Observed {
 
 let obs: Observed;
 
-beforeAll(() => {
-  obs = buildCorpus();
+beforeAll(async () => {
+  obs = await buildCorpus();
 });
 
 afterAll(() => {
@@ -429,15 +424,15 @@ describe("lore ac list — the split is additive presentation only (AC-DC-10, RE
 describe("lore ac list — degrades loudly, never crashes, with no coverage to read (AC-DC-10, ERROR)", () => {
   let errDir: string;
 
-  beforeAll(() => {
+  beforeAll(async () => {
     errDir = mkdtempSync(join(tmpdir(), "lore-ac-oracle-gen-null-"));
-    mustRun(["init"], errDir);
-    mustRun(["create", "prd", "--title", "Bare PRD", "--no-ai", "--content", "## Overview\nbody"], errDir);
-    mustRun(
+    await mustRun(["init"], errDir);
+    await mustRun(["create", "prd", "--title", "Bare PRD", "--no-ai", "--content", "## Overview\nbody"], errDir);
+    await mustRun(
       ["create", "spec", "--title", "Bare Spec","--no-ai", "--content", "## Overview\nbody"],
       errDir,
     );
-    addScriptAc("spec-bare-spec", "AC-BARE-1", "A token is present in the corpus root.", "grep -rq BARE .", errDir);
+    await addScriptAc("spec-bare-spec", "AC-BARE-1", "A token is present in the corpus root.", "grep -rq BARE .", errDir);
   });
 
   afterAll(() => {
@@ -448,17 +443,17 @@ describe("lore ac list — degrades loudly, never crashes, with no coverage to r
     }
   });
 
-  it("renders no badge and no marker for a spec with no child plan (coverage: null)", () => {
-    const result = runLore(["ac", "list", "spec-bare-spec"], errDir);
+  it("renders no badge and no marker for a spec with no child plan (coverage: null)", async () => {
+    const result = await runLore(["ac", "list", "spec-bare-spec"], errDir);
     expect(result.exitCode).toBe(0);
     const line = lineFor(result.stdout, "AC-BARE-1");
     expect(parseRetiredMarker(line)).toBeNull();
     expect(line).not.toContain("retired_oracle_evidence");
-    expect(acListJson("spec-bare-spec", errDir).coverage).toBeNull();
+    expect((await acListJson("spec-bare-spec", errDir)).coverage).toBeNull();
   });
 
-  it("exits 3 for an unknown spec instead of rendering an empty list", () => {
-    const result = runLore(["ac", "list", "spec-does-not-exist"], errDir);
+  it("exits 3 for an unknown spec instead of rendering an empty list", async () => {
+    const result = await runLore(["ac", "list", "spec-does-not-exist"], errDir);
     expect(result.exitCode).toBe(3);
     expect(result.stdout).not.toContain("retired_oracle_evidence");
   });

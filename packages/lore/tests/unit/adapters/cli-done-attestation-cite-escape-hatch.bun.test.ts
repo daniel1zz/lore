@@ -1,4 +1,3 @@
-// @spawns dist/lore
 /**
  * `lore done --override-attestation-cite <n>` — the CLI author→trip
  * end-to-end oracle for
@@ -52,6 +51,10 @@
  *                exclusive)
  *
  * @spec_ref task-lore-done-override-attestation-demands-fresh-prose-that
+ *
+ * TG-25 (adr-tg-1 option b): the commands run IN-PROCESS through tests/helpers/run-lore-in-process.ts, not through
+ * dist/lore. Wherever the prose above says the compiled binary is spawned or its freshness asserted, that is the
+ * history of this file; the assertions and the throwaway-corpus rule are unchanged.
  */
 
 import { describe, expect, it, beforeAll, beforeEach, afterEach, vi } from "vitest";
@@ -59,13 +62,12 @@ const setDefaultTimeout = (ms: number): void => { vi.setConfig({ testTimeout: ms
 import { mkdtempSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
-import { assertFreshBinary } from "../../integration/helpers/assert-fresh-binary";
+import { runLoreInProcess } from "../../helpers/run-lore-in-process";
 
 setDefaultTimeout(60_000);
 
 // tests/unit/adapters/ → tests/unit/ → tests/ → packages/lore/ → packages/ → repo root (5 levels up).
 const REPO_ROOT = new URL("../../../../../", import.meta.url).pathname.replace(/\/$/, "");
-const LORE_BIN = join(REPO_ROOT, "dist", "lore");
 
 interface RunResult {
   readonly stdout: string;
@@ -73,20 +75,20 @@ interface RunResult {
   readonly exitCode: number;
 }
 
-function runLore(args: string[], cwd: string): RunResult {
-  const proc = Bun.spawnSync([LORE_BIN, ...args], {
+async function runLore(args: string[], cwd: string): Promise<RunResult> {
+  const proc = await runLoreInProcess(args, {
     cwd,
     env: { ...process.env, HOME: cwd, EDITOR: "true" },
   });
   return {
-    stdout: proc.stdout.toString(),
-    stderr: proc.stderr.toString(),
-    exitCode: proc.exitCode ?? 1,
+    stdout: proc.stdout,
+    stderr: proc.stderr,
+    exitCode: proc.exitCode,
   };
 }
 
-function mustRun(args: string[], cwd: string): RunResult {
-  const result = runLore(args, cwd);
+async function mustRun(args: string[], cwd: string): Promise<RunResult> {
+  const result = await runLore(args, cwd);
   if (result.exitCode !== 0) {
     throw new Error(`fixture command \`lore ${args.join(" ")}\` failed (${result.exitCode}): ${result.stderr}`);
   }
@@ -100,8 +102,8 @@ interface DocJson {
   readonly extra: Record<string, unknown>;
 }
 
-function getDoc(slug: string, cwd: string): DocJson {
-  const result = mustRun(["get", slug, "--json"], cwd);
+async function getDoc(slug: string, cwd: string): Promise<DocJson> {
+  const result = await mustRun(["get", slug, "--json"], cwd);
   return (JSON.parse(result.stdout) as { data: { doc: DocJson } }).data.doc;
 }
 
@@ -111,8 +113,8 @@ interface AuditEntryJson {
 }
 
 /** Every audit row for `slug`, via the REAL `lore audit <doc> --json` CLI verb. */
-function getAuditEntries(slug: string, cwd: string): AuditEntryJson[] {
-  const result = mustRun(["audit", slug, "--json"], cwd);
+async function getAuditEntries(slug: string, cwd: string): Promise<AuditEntryJson[]> {
+  const result = await mustRun(["audit", slug, "--json"], cwd);
   return (JSON.parse(result.stdout) as { data: { entries: AuditEntryJson[] } }).data.entries;
 }
 
@@ -129,8 +131,8 @@ function getAuditEntries(slug: string, cwd: string): AuditEntryJson[] {
  * whichever attestation escape it exercises — a DIFFERENT floor with a
  * DIFFERENT escape than this suite's subject.
  */
-function createAdhocTask(cwd: string, title: string): string {
-  const created = mustRun(
+async function createAdhocTask(cwd: string, title: string): Promise<string> {
+  const created = await mustRun(
     ["create", "task", "--title", title, "--adhoc", "--ac-scope", "", "--content", "body", "--no-ai", "--json"],
     cwd,
   );
@@ -147,8 +149,8 @@ const NO_NEW_TESTS_REASON = "cite-escape-hatch fixture: no new test, this suite 
  * `rejectMissingPassOutputTail` still lets through non-empty (mirrors the
  * free-text sibling suite's own `recordSelfReportedPass`).
  */
-function recordCitablePass(slug: string, cwd: string): void {
-  mustRun(
+async function recordCitablePass(slug: string, cwd: string): Promise<void> {
+  await mustRun(
     [
       "evidence",
       slug,
@@ -166,8 +168,8 @@ function recordCitablePass(slug: string, cwd: string): void {
 }
 
 /** Records ONE self-reported `result:"fail"` evidence row — a row that must NEVER be citable. */
-function recordCitableFail(slug: string, cwd: string): void {
-  mustRun(["evidence", slug, "--oracle", "test", "--command", "bun test", "--result", "fail", "--output-tail", "boom"], cwd);
+async function recordCitableFail(slug: string, cwd: string): Promise<void> {
+  await mustRun(["evidence", slug, "--oracle", "test", "--command", "bun test", "--result", "fail", "--output-tail", "boom"], cwd);
 }
 
 /**
@@ -179,25 +181,18 @@ function recordCitableFail(slug: string, cwd: string): void {
  * empty tail unconditionally, mirroring the "empty tail is never AC coverage"
  * rule applied everywhere else in this repo.
  */
-function recordCitablePassWithEmptyTail(slug: string, cwd: string): void {
-  mustRun(["evidence", slug, "--oracle", "test", "--command", "true", "--result", "pass", "--capture"], cwd);
+async function recordCitablePassWithEmptyTail(slug: string, cwd: string): Promise<void> {
+  await mustRun(["evidence", slug, "--oracle", "test", "--command", "true", "--result", "pass", "--capture"], cwd);
 }
 
 let tmpDir: string;
 
-beforeAll(() => {
-  assertFreshBinary(LORE_BIN, [
-    join(REPO_ROOT, "packages", "lore", "src"),
-    join(REPO_ROOT, "packages", "core", "src"),
-  ]);
-});
-
-beforeEach(() => {
+beforeEach(async () => {
   tmpDir = mkdtempSync(join(tmpdir(), "lore-cli-done-cite-escape-hatch-"));
-  mustRun(["init"], tmpDir);
+  await mustRun(["init"], tmpDir);
   // An --adhoc task parents to the corpus root PRD (CorpusService._createImpl) —
   // one must exist first, mirroring every other --adhoc fixture in this repo.
-  mustRun(["create", "prd", "--title", "Cite Escape Hatch Root", "--content", "## Overview\nroot", "--no-ai"], tmpDir);
+  await mustRun(["create", "prd", "--title", "Cite Escape Hatch Root", "--content", "## Overview\nroot", "--no-ai"], tmpDir);
 });
 
 afterEach(() => {
@@ -209,25 +204,25 @@ afterEach(() => {
 });
 
 describe("HAPPY — citing a valid pass row with a non-empty tail archives the task", () => {
-  it("index 1, a real pass row with a real tail, reaches exit 0 and the task is archived", () => {
-    const slug = createAdhocTask(tmpDir, "Citable Pass Task");
-    recordCitablePass(slug, tmpDir);
+  it("index 1, a real pass row with a real tail, reaches exit 0 and the task is archived", async () => {
+    const slug = await createAdhocTask(tmpDir, "Citable Pass Task");
+    await recordCitablePass(slug, tmpDir);
 
-    const result = mustRun(
+    const result = await mustRun(
       ["done", slug, "--override-attestation-cite", "1", "--declare-no-new-tests", NO_NEW_TESTS_REASON],
       tmpDir,
     );
     expect(result.exitCode).toBe(0);
-    expect(getDoc(slug, tmpDir).status).toBe("archived");
+    expect((await getDoc(slug, tmpDir)).status).toBe("archived");
   });
 
-  it("the archived record snapshots the cited row's identifying fields verbatim, and never reads as attested", () => {
-    const slug = createAdhocTask(tmpDir, "Snapshot Task");
-    recordCitablePass(slug, tmpDir);
+  it("the archived record snapshots the cited row's identifying fields verbatim, and never reads as attested", async () => {
+    const slug = await createAdhocTask(tmpDir, "Snapshot Task");
+    await recordCitablePass(slug, tmpDir);
 
-    mustRun(["done", slug, "--override-attestation-cite", "1", "--declare-no-new-tests", NO_NEW_TESTS_REASON], tmpDir);
+    await mustRun(["done", slug, "--override-attestation-cite", "1", "--declare-no-new-tests", NO_NEW_TESTS_REASON], tmpDir);
 
-    const doneSteps = getAuditEntries(slug, tmpDir).filter((e) => e.details?.["done"] === true);
+    const doneSteps = (await getAuditEntries(slug, tmpDir)).filter((e) => e.details?.["done"] === true);
     expect(doneSteps.length).toBeGreaterThan(0);
     for (const step of doneSteps) {
       const reason = step.details?.["override_reason"];
@@ -254,148 +249,148 @@ describe("HAPPY — citing a valid pass row with a non-empty tail archives the t
 });
 
 describe("NEGATIVE — a fail row is refused; nothing is archived", () => {
-  it("citing a result:fail row exits 4, names the row, and leaves the task untouched", () => {
-    const slug = createAdhocTask(tmpDir, "Fail Row Task");
-    recordCitableFail(slug, tmpDir);
-    const before = getDoc(slug, tmpDir);
+  it("citing a result:fail row exits 4, names the row, and leaves the task untouched", async () => {
+    const slug = await createAdhocTask(tmpDir, "Fail Row Task");
+    await recordCitableFail(slug, tmpDir);
+    const before = await getDoc(slug, tmpDir);
 
-    const result = runLore(["done", slug, "--override-attestation-cite", "1"], tmpDir);
+    const result = await runLore(["done", slug, "--override-attestation-cite", "1"], tmpDir);
     expect(result.exitCode).toBe(4);
     expect(result.stderr).toContain("verification_evidence[1]");
     expect(result.stderr).toContain('"fail"');
     expect(result.stderr).toContain("not \"pass\"");
 
-    const after = getDoc(slug, tmpDir);
+    const after = await getDoc(slug, tmpDir);
     expect(after.status).toBe(before.status);
     expect(after.version).toBe(before.version);
   });
 });
 
 describe("NEGATIVE — an empty-output_tail pass row is refused; nothing is archived", () => {
-  it("citing a genuinely-empty-tail (real --capture of `true`) pass row exits 4 and leaves the task untouched", () => {
-    const slug = createAdhocTask(tmpDir, "Empty Tail Task");
-    recordCitablePassWithEmptyTail(slug, tmpDir);
+  it("citing a genuinely-empty-tail (real --capture of `true`) pass row exits 4 and leaves the task untouched", async () => {
+    const slug = await createAdhocTask(tmpDir, "Empty Tail Task");
+    await recordCitablePassWithEmptyTail(slug, tmpDir);
     // Confirm the fixture actually produced an empty tail before asserting the refusal —
     // a non-empty tail here would make this test vacuously pass for the wrong reason.
-    expect((getDoc(slug, tmpDir).extra["verification_evidence"] as Array<{ output_tail?: string }>)[0]?.output_tail).toBe(
+    expect(((await getDoc(slug, tmpDir)).extra["verification_evidence"] as Array<{ output_tail?: string }>)[0]?.output_tail).toBe(
       "",
     );
-    const before = getDoc(slug, tmpDir);
+    const before = await getDoc(slug, tmpDir);
 
-    const result = runLore(["done", slug, "--override-attestation-cite", "1"], tmpDir);
+    const result = await runLore(["done", slug, "--override-attestation-cite", "1"], tmpDir);
     expect(result.exitCode).toBe(4);
     expect(result.stderr).toContain("verification_evidence[1]");
     expect(result.stderr).toContain("empty");
     expect(result.stderr).toContain("output_tail");
 
-    const after = getDoc(slug, tmpDir);
+    const after = await getDoc(slug, tmpDir);
     expect(after.status).toBe(before.status);
     expect(after.version).toBe(before.version);
   });
 });
 
 describe("NEGATIVE — an out-of-range index is refused; nothing is archived", () => {
-  it("citing index 99 on a single-row task exits 4, names the valid range, and leaves the task untouched", () => {
-    const slug = createAdhocTask(tmpDir, "Out Of Range Task");
-    recordCitablePass(slug, tmpDir);
-    const before = getDoc(slug, tmpDir);
+  it("citing index 99 on a single-row task exits 4, names the valid range, and leaves the task untouched", async () => {
+    const slug = await createAdhocTask(tmpDir, "Out Of Range Task");
+    await recordCitablePass(slug, tmpDir);
+    const before = await getDoc(slug, tmpDir);
 
-    const result = runLore(["done", slug, "--override-attestation-cite", "99"], tmpDir);
+    const result = await runLore(["done", slug, "--override-attestation-cite", "99"], tmpDir);
     expect(result.exitCode).toBe(4);
     expect(result.stderr).toContain("out of range");
     expect(result.stderr).toContain("1..1");
 
-    const after = getDoc(slug, tmpDir);
+    const after = await getDoc(slug, tmpDir);
     expect(after.status).toBe(before.status);
     expect(after.version).toBe(before.version);
   });
 });
 
 describe("BOUNDARY — index 0 (out of range) vs index 1 (the only valid row) on the same single-row task", () => {
-  it("index 0 is refused as out of range, never treated as the first row", () => {
-    const slug = createAdhocTask(tmpDir, "Off By One Task");
-    recordCitablePass(slug, tmpDir);
+  it("index 0 is refused as out of range, never treated as the first row", async () => {
+    const slug = await createAdhocTask(tmpDir, "Off By One Task");
+    await recordCitablePass(slug, tmpDir);
 
-    const result = runLore(["done", slug, "--override-attestation-cite", "0"], tmpDir);
+    const result = await runLore(["done", slug, "--override-attestation-cite", "0"], tmpDir);
     expect(result.exitCode).toBe(4);
     expect(result.stderr).toContain("out of range");
-    expect(getDoc(slug, tmpDir).status).toBe("draft");
+    expect((await getDoc(slug, tmpDir)).status).toBe("draft");
   });
 
-  it("index 1 on the SAME single-row task succeeds", () => {
-    const slug = createAdhocTask(tmpDir, "Off By One Task Valid Index");
-    recordCitablePass(slug, tmpDir);
+  it("index 1 on the SAME single-row task succeeds", async () => {
+    const slug = await createAdhocTask(tmpDir, "Off By One Task Valid Index");
+    await recordCitablePass(slug, tmpDir);
 
-    const result = mustRun(
+    const result = await mustRun(
       ["done", slug, "--override-attestation-cite", "1", "--declare-no-new-tests", NO_NEW_TESTS_REASON],
       tmpDir,
     );
     expect(result.exitCode).toBe(0);
-    expect(getDoc(slug, tmpDir).status).toBe("archived");
+    expect((await getDoc(slug, tmpDir)).status).toBe("archived");
   });
 });
 
 describe("BOUNDARY — a task with ZERO evidence rows has nothing to cite", () => {
-  it("citing index 1 on a task with no evidence at all exits 4, naming the zero-rows condition", () => {
-    const slug = createAdhocTask(tmpDir, "Zero Evidence Task");
+  it("citing index 1 on a task with no evidence at all exits 4, naming the zero-rows condition", async () => {
+    const slug = await createAdhocTask(tmpDir, "Zero Evidence Task");
 
-    const result = runLore(["done", slug, "--override-attestation-cite", "1"], tmpDir);
+    const result = await runLore(["done", slug, "--override-attestation-cite", "1"], tmpDir);
     expect(result.exitCode).toBe(4);
     expect(result.stderr).toContain("zero");
     expect(result.stderr).toContain("verification_evidence");
-    expect(getDoc(slug, tmpDir).status).toBe("draft");
+    expect((await getDoc(slug, tmpDir)).status).toBe("draft");
   });
 });
 
 describe("USAGE ERROR — a non-integer index is refused before the corpus is touched", () => {
-  it("a non-numeric value exits 2 and leaves the task untouched", () => {
-    const slug = createAdhocTask(tmpDir, "Bad Index Syntax Task");
-    recordCitablePass(slug, tmpDir);
-    const before = getDoc(slug, tmpDir);
+  it("a non-numeric value exits 2 and leaves the task untouched", async () => {
+    const slug = await createAdhocTask(tmpDir, "Bad Index Syntax Task");
+    await recordCitablePass(slug, tmpDir);
+    const before = await getDoc(slug, tmpDir);
 
-    const result = runLore(["done", slug, "--override-attestation-cite", "abc"], tmpDir);
+    const result = await runLore(["done", slug, "--override-attestation-cite", "abc"], tmpDir);
     expect(result.exitCode).toBe(2);
     expect(result.stderr).toContain("--override-attestation-cite");
 
-    const after = getDoc(slug, tmpDir);
+    const after = await getDoc(slug, tmpDir);
     expect(after.status).toBe(before.status);
     expect(after.version).toBe(before.version);
   });
 
-  it("a negative value exits 2", () => {
-    const slug = createAdhocTask(tmpDir, "Negative Index Syntax Task");
-    recordCitablePass(slug, tmpDir);
+  it("a negative value exits 2", async () => {
+    const slug = await createAdhocTask(tmpDir, "Negative Index Syntax Task");
+    await recordCitablePass(slug, tmpDir);
 
-    const result = runLore(["done", slug, "--override-attestation-cite", "-1"], tmpDir);
+    const result = await runLore(["done", slug, "--override-attestation-cite", "-1"], tmpDir);
     expect(result.exitCode).toBe(2);
   });
 });
 
 describe("USAGE ERROR — --override-attestation and --override-attestation-cite are mutually exclusive", () => {
-  it("supplying both flags together exits 2, before the corpus is touched", () => {
-    const slug = createAdhocTask(tmpDir, "Both Flags Task");
-    recordCitablePass(slug, tmpDir);
-    const before = getDoc(slug, tmpDir);
+  it("supplying both flags together exits 2, before the corpus is touched", async () => {
+    const slug = await createAdhocTask(tmpDir, "Both Flags Task");
+    await recordCitablePass(slug, tmpDir);
+    const before = await getDoc(slug, tmpDir);
 
-    const result = runLore(
+    const result = await runLore(
       ["done", slug, "--override-attestation", "some reason", "--override-attestation-cite", "1"],
       tmpDir,
     );
     expect(result.exitCode).toBe(2);
     expect(result.stderr).toContain("mutually exclusive");
 
-    const after = getDoc(slug, tmpDir);
+    const after = await getDoc(slug, tmpDir);
     expect(after.status).toBe(before.status);
     expect(after.version).toBe(before.version);
   });
 });
 
 describe("REGRESSION — the pre-existing free-text --override-attestation path is unaffected", () => {
-  it("a real free-text reason still archives an otherwise-blocked self-reported-only task", () => {
-    const slug = createAdhocTask(tmpDir, "Free Text Regression Task");
-    recordCitablePass(slug, tmpDir);
+  it("a real free-text reason still archives an otherwise-blocked self-reported-only task", async () => {
+    const slug = await createAdhocTask(tmpDir, "Free Text Regression Task");
+    await recordCitablePass(slug, tmpDir);
 
-    const result = mustRun(
+    const result = await mustRun(
       [
         "done",
         slug,
@@ -407,10 +402,10 @@ describe("REGRESSION — the pre-existing free-text --override-attestation path 
       tmpDir,
     );
     expect(result.exitCode).toBe(0);
-    expect(getDoc(slug, tmpDir).status).toBe("archived");
+    expect((await getDoc(slug, tmpDir)).status).toBe("archived");
 
     // The free-text reason lands VERBATIM, not the citation's composed-snapshot shape.
-    const doneSteps = getAuditEntries(slug, tmpDir).filter((e) => e.details?.["done"] === true);
+    const doneSteps = (await getAuditEntries(slug, tmpDir)).filter((e) => e.details?.["done"] === true);
     expect(doneSteps.every((e) => e.details?.["override_reason"] === "manual browser check: verified in staging")).toBe(
       true,
     );
@@ -418,13 +413,13 @@ describe("REGRESSION — the pre-existing free-text --override-attestation path 
 });
 
 describe("REGRESSION — no escape hatch at all still refuses a self-reported-only task", () => {
-  it("neither --override-attestation nor --override-attestation-cite → exit 4, task stays draft", () => {
-    const slug = createAdhocTask(tmpDir, "No Escape Hatch At All Task");
-    recordCitablePass(slug, tmpDir);
+  it("neither --override-attestation nor --override-attestation-cite → exit 4, task stays draft", async () => {
+    const slug = await createAdhocTask(tmpDir, "No Escape Hatch At All Task");
+    await recordCitablePass(slug, tmpDir);
 
-    const result = runLore(["done", slug], tmpDir);
+    const result = await runLore(["done", slug], tmpDir);
     expect(result.exitCode).toBe(4);
     expect(result.stderr).toContain("--override-attestation");
-    expect(getDoc(slug, tmpDir).status).toBe("draft");
+    expect((await getDoc(slug, tmpDir)).status).toBe("draft");
   });
 });

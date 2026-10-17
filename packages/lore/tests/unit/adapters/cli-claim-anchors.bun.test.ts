@@ -1,4 +1,3 @@
-// @spawns dist/lore
 /**
  * `lore create task --anchor` / `lore anchor add|rm|list` / `lore claim
  * --machine/--worktree` — CLI-adapter exit-code contract tests (SPEC-042
@@ -56,6 +55,10 @@
  *      field), not the sibling slug/recovery-command text.
  *
  * @spec_ref SPEC-042 §Acceptance Criteria AC-S3-7
+ *
+ * TG-25 (adr-tg-1 option b): the commands run IN-PROCESS through tests/helpers/run-lore-in-process.ts, not through
+ * dist/lore. Wherever the prose above says the compiled binary is spawned or its freshness asserted, that is the
+ * history of this file; the assertions and the throwaway-corpus rule are unchanged.
  */
 
 import { describe, expect, it, beforeAll, beforeEach, afterEach } from "vitest";
@@ -63,11 +66,10 @@ import { mkdtempSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir, hostname } from "os";
 import { sessionActorFor, withSessionIdentity } from "../../helpers/session-actor";
-import { assertFreshBinary } from "../../integration/helpers/assert-fresh-binary";
+import { runLoreInProcess } from "../../helpers/run-lore-in-process";
 
 // tests/unit/adapters/ → tests/unit/ → tests/ → packages/lore/ → packages/ → repo root (5 levels up).
 const REPO_ROOT = new URL("../../../../../", import.meta.url).pathname.replace(/\/$/, "");
-const LORE_BIN = join(REPO_ROOT, "dist", "lore");
 
 interface RunResult {
   readonly stdout: string;
@@ -76,15 +78,15 @@ interface RunResult {
 }
 
 /** `actor` names the writer through the session tier (no write command takes `--by`); `null` = unnamed. */
-function runLore(args: string[], cwd: string, actor: string | null = null): RunResult {
-  const proc = Bun.spawnSync([LORE_BIN, ...args], {
+async function runLore(args: string[], cwd: string, actor: string | null = null): Promise<RunResult> {
+  const proc = await runLoreInProcess(args, {
     cwd,
     env: withSessionIdentity({ ...process.env, HOME: cwd, EDITOR: "true" }, actor) as Record<string, string>,
   });
   return {
-    stdout: proc.stdout.toString(),
-    stderr: proc.stderr.toString(),
-    exitCode: proc.exitCode ?? 1,
+    stdout: proc.stdout,
+    stderr: proc.stderr,
+    exitCode: proc.exitCode,
   };
 }
 
@@ -95,20 +97,20 @@ function parseSlug(stdout: string): string {
   return slug;
 }
 
-function initCorpus(tmpDir: string): void {
-  const result = runLore(["init"], tmpDir);
+async function initCorpus(tmpDir: string): Promise<void> {
+  const result = await runLore(["init"], tmpDir);
   if (result.exitCode !== 0) {
     throw new Error(`lore init failed: ${result.stderr}`);
   }
 }
 
-function createPlan(tmpDir: string, title: string): string {
-  const result = runLore(["create", "plan", "--title", title, "--content", "Plan body.", "--no-ai"], tmpDir);
+async function createPlan(tmpDir: string, title: string): Promise<string> {
+  const result = await runLore(["create", "plan", "--title", title, "--content", "Plan body.", "--no-ai"], tmpDir);
   if (result.exitCode !== 0) throw new Error(`create plan failed: ${result.stderr}`);
   return parseSlug(result.stdout);
 }
 
-function createTask(tmpDir: string, planSlug: string, title: string, anchors: string[] = []): string {
+async function createTask(tmpDir: string, planSlug: string, title: string, anchors: string[] = []): Promise<string> {
   const args = [
     "create",
     "task",
@@ -125,7 +127,7 @@ function createTask(tmpDir: string, planSlug: string, title: string, anchors: st
   for (const anchor of anchors) {
     args.push("--anchor", anchor);
   }
-  const result = runLore(args, tmpDir);
+  const result = await runLore(args, tmpDir);
   if (result.exitCode !== 0) throw new Error(`create task failed: ${result.stderr}`);
   return parseSlug(result.stdout);
 }
@@ -135,22 +137,13 @@ interface JsonDocEnvelope {
   data: { slug: string; extra: Record<string, unknown> };
 }
 
-// ─── Suite: binary freshness guard ───────────────────────────────────────────
-
-beforeAll(() => {
-  assertFreshBinary(LORE_BIN, [
-    join(REPO_ROOT, "packages", "lore", "src"),
-    join(REPO_ROOT, "packages", "core", "src"),
-  ]);
-});
-
 // ─── Fixtures ────────────────────────────────────────────────────────────────
 
 let tmpDir: string;
 
-beforeEach(() => {
+beforeEach(async () => {
   tmpDir = mkdtempSync(join(tmpdir(), "lore-cli-claim-anchors-"));
-  initCorpus(tmpDir);
+  await initCorpus(tmpDir);
 });
 
 afterEach(() => {
@@ -164,9 +157,9 @@ afterEach(() => {
 // ─── HAPPY: create task --anchor (repeatable) persists ──────────────────────
 
 describe("lore create task --anchor — HAPPY", () => {
-  it("repeatable --anchor flags persist into extra.file_anchors", () => {
-    const planSlug = createPlan(tmpDir, "Anchor Create Plan");
-    const result = runLore(
+  it("repeatable --anchor flags persist into extra.file_anchors", async () => {
+    const planSlug = await createPlan(tmpDir, "Anchor Create Plan");
+    const result = await runLore(
       [
         "create",
         "task",
@@ -198,9 +191,9 @@ describe("lore create task --anchor — HAPPY", () => {
 // ─── REGRESSION: omitting --anchor leaves file_anchors absent ───────────────
 
 describe("lore create task (no --anchor) — REGRESSION", () => {
-  it("omitting --anchor entirely leaves extra.file_anchors absent (unchanged pre-SPEC-042 create behavior)", () => {
-    const planSlug = createPlan(tmpDir, "No Anchor Plan");
-    const result = runLore(
+  it("omitting --anchor entirely leaves extra.file_anchors absent (unchanged pre-SPEC-042 create behavior)", async () => {
+    const planSlug = await createPlan(tmpDir, "No Anchor Plan");
+    const result = await runLore(
       ["create", "task", "--title", "Plain Task", "--parent", planSlug, "--plan-id", planSlug, "--no-ai", "--content", "body", "--json"],
       tmpDir,
     );
@@ -214,9 +207,9 @@ describe("lore create task (no --anchor) — REGRESSION", () => {
 // ─── NEGATIVE: invalid anchor entry ──────────────────────────────────────────
 
 describe("lore create task --anchor <invalid> — NEGATIVE", () => {
-  it("a leading-'/' anchor → nonzero exit (4, VALIDATION_ERROR), stderr names the offending entry", () => {
-    const planSlug = createPlan(tmpDir, "Invalid Anchor Plan");
-    const result = runLore(
+  it("a leading-'/' anchor → nonzero exit (4, VALIDATION_ERROR), stderr names the offending entry", async () => {
+    const planSlug = await createPlan(tmpDir, "Invalid Anchor Plan");
+    const result = await runLore(
       [
         "create",
         "task",
@@ -244,22 +237,22 @@ describe("lore create task --anchor <invalid> — NEGATIVE", () => {
 // ─── HAPPY: lore anchor add/rm/list round-trip ───────────────────────────────
 
 describe("lore anchor add/rm/list — HAPPY round-trip", () => {
-  it("add appends, list shows current set, rm removes one entry", () => {
-    const planSlug = createPlan(tmpDir, "Anchor Roundtrip Plan");
-    const taskSlug = createTask(tmpDir, planSlug, "Roundtrip Task", ["src/a"]);
+  it("add appends, list shows current set, rm removes one entry", async () => {
+    const planSlug = await createPlan(tmpDir, "Anchor Roundtrip Plan");
+    const taskSlug = await createTask(tmpDir, planSlug, "Roundtrip Task", ["src/a"]);
 
-    const addResult = runLore(["anchor", "add", taskSlug, "src/b", "src/c/"], tmpDir);
+    const addResult = await runLore(["anchor", "add", taskSlug, "src/b", "src/c/"], tmpDir);
     expect(addResult.exitCode).toBe(0);
 
-    const listResult = runLore(["anchor", "list", taskSlug, "--json"], tmpDir);
+    const listResult = await runLore(["anchor", "list", taskSlug, "--json"], tmpDir);
     expect(listResult.exitCode).toBe(0);
     const listed = JSON.parse(listResult.stdout) as { ok: boolean; data: { anchors: string[] } };
     expect(listed.data.anchors).toEqual(["src/a", "src/b", "src/c/"]);
 
-    const rmResult = runLore(["anchor", "rm", taskSlug, "src/a"], tmpDir);
+    const rmResult = await runLore(["anchor", "rm", taskSlug, "src/a"], tmpDir);
     expect(rmResult.exitCode).toBe(0);
 
-    const listAfterRm = runLore(["anchor", "list", taskSlug, "--json"], tmpDir);
+    const listAfterRm = await runLore(["anchor", "list", taskSlug, "--json"], tmpDir);
     const listedAfterRm = JSON.parse(listAfterRm.stdout) as { ok: boolean; data: { anchors: string[] } };
     expect(listedAfterRm.data.anchors).toEqual(["src/b", "src/c/"]);
   });
@@ -268,11 +261,11 @@ describe("lore anchor add/rm/list — HAPPY round-trip", () => {
 // ─── BOUNDARY: zero anchors ───────────────────────────────────────────────────
 
 describe("lore anchor list — BOUNDARY", () => {
-  it("a task with zero declared anchors → exit 0, empty list", () => {
-    const planSlug = createPlan(tmpDir, "Zero Anchor Plan");
-    const taskSlug = createTask(tmpDir, planSlug, "Anchorless Task");
+  it("a task with zero declared anchors → exit 0, empty list", async () => {
+    const planSlug = await createPlan(tmpDir, "Zero Anchor Plan");
+    const taskSlug = await createTask(tmpDir, planSlug, "Anchorless Task");
 
-    const result = runLore(["anchor", "list", taskSlug, "--json"], tmpDir);
+    const result = await runLore(["anchor", "list", taskSlug, "--json"], tmpDir);
     expect(result.exitCode).toBe(0);
     const parsed = JSON.parse(result.stdout) as { ok: boolean; data: { anchors: string[] } };
     expect(parsed.data.anchors).toEqual([]);
@@ -282,8 +275,8 @@ describe("lore anchor list — BOUNDARY", () => {
 // ─── ERROR: nonexistent task ──────────────────────────────────────────────────
 
 describe("lore anchor add — ERROR", () => {
-  it("a nonexistent task slug → exit 3 (DOC_NOT_FOUND)", () => {
-    const result = runLore(["anchor", "add", "task-does-not-exist", "src/a"], tmpDir);
+  it("a nonexistent task slug → exit 3 (DOC_NOT_FOUND)", async () => {
+    const result = await runLore(["anchor", "add", "task-does-not-exist", "src/a"], tmpDir);
     expect(result.exitCode).toBe(3);
   });
 });
@@ -291,27 +284,27 @@ describe("lore anchor add — ERROR", () => {
 // ─── STATE: anchor mutation preserves claim + evidence (AC-S3-5 at the CLI seam) ─
 
 describe("lore anchor rm — STATE (spec-spec-042-session-layer-part-2-session-registry-file-anchor#AC-S3-5 regression)", () => {
-  it("removing an anchor on a task holding an active claim + evidence preserves both untouched", () => {
-    const planSlug = createPlan(tmpDir, "Anchor State Plan");
-    const taskSlug = createTask(tmpDir, planSlug, "Stateful Task", ["src/a", "src/b"]);
+  it("removing an anchor on a task holding an active claim + evidence preserves both untouched", async () => {
+    const planSlug = await createPlan(tmpDir, "Anchor State Plan");
+    const taskSlug = await createTask(tmpDir, planSlug, "Stateful Task", ["src/a", "src/b"]);
 
-    const claimResult = runLore(["claim", taskSlug, "--branch", "wt-x"], tmpDir, "alice");
+    const claimResult = await runLore(["claim", taskSlug, "--branch", "wt-x"], tmpDir, "alice");
     expect(claimResult.exitCode).toBe(0);
     // reason: SUPERSEDED oracle (task-raise-the-evidence-tail-guard-s-
     // predicate-to-its-own) — "tsc" self-report is now refused regardless of
     // tail content; "manual" is the one oracle that still lets a genuinely
     // non-empty self-reported tail succeed. This test only checks anchor
     // removal preserves claim+evidence, not oracle-kind semantics.
-    const evidenceResult = runLore(
+    const evidenceResult = await runLore(
       ["evidence", taskSlug, "--oracle", "manual", "--command", "bun run typecheck", "--result", "pass", "--output-tail", "ok"],
       tmpDir,
     );
     expect(evidenceResult.exitCode).toBe(0);
 
-    const rmResult = runLore(["anchor", "rm", taskSlug, "src/a"], tmpDir);
+    const rmResult = await runLore(["anchor", "rm", taskSlug, "src/a"], tmpDir);
     expect(rmResult.exitCode).toBe(0);
 
-    const getResult = runLore(["get", taskSlug, "--json"], tmpDir);
+    const getResult = await runLore(["get", taskSlug, "--json"], tmpDir);
     expect(getResult.exitCode).toBe(0);
     const got = JSON.parse(getResult.stdout) as {
       data: { doc: { extra: { claim: { by: string; branch: string }; verification_evidence: unknown[]; file_anchors: string[] } } };
@@ -325,41 +318,41 @@ describe("lore anchor rm — STATE (spec-spec-042-session-layer-part-2-session-r
 // ─── HAPPY: claim --machine override + auto-capture; --worktree omission ────
 
 describe("lore claim --machine/--worktree — HAPPY (SPEC-042 D2)", () => {
-  it("--machine explicit override beats auto-capture", () => {
-    const planSlug = createPlan(tmpDir, "Machine Override Plan");
-    const taskSlug = createTask(tmpDir, planSlug, "Machine Override Task");
+  it("--machine explicit override beats auto-capture", async () => {
+    const planSlug = await createPlan(tmpDir, "Machine Override Plan");
+    const taskSlug = await createTask(tmpDir, planSlug, "Machine Override Task");
 
-    const result = runLore(["claim", taskSlug, "--machine", "custom-host", "--json"], tmpDir, "alice");
+    const result = await runLore(["claim", taskSlug, "--machine", "custom-host", "--json"], tmpDir, "alice");
     expect(result.exitCode).toBe(0);
     const parsed = JSON.parse(result.stdout) as { data: { doc: { extra: { claim: { machine: string } } } } };
     expect(parsed.data.doc.extra.claim.machine).toBe("custom-host");
   });
 
-  it("omitted --machine auto-captures os.hostname() (computed IN THIS FILE at run time, never hardcoded)", () => {
-    const planSlug = createPlan(tmpDir, "Machine Auto Plan");
-    const taskSlug = createTask(tmpDir, planSlug, "Machine Auto Task");
+  it("omitted --machine auto-captures os.hostname() (computed IN THIS FILE at run time, never hardcoded)", async () => {
+    const planSlug = await createPlan(tmpDir, "Machine Auto Plan");
+    const taskSlug = await createTask(tmpDir, planSlug, "Machine Auto Task");
 
-    const result = runLore(["claim", taskSlug, "--json"], tmpDir, "alice");
+    const result = await runLore(["claim", taskSlug, "--json"], tmpDir, "alice");
     expect(result.exitCode).toBe(0);
     const parsed = JSON.parse(result.stdout) as { data: { doc: { extra: { claim: { machine: string } } } } };
     expect(parsed.data.doc.extra.claim.machine).toBe(hostname());
   });
 
-  it("omitted --worktree yields NO worktree field at all (no process.cwd() capture, D2)", () => {
-    const planSlug = createPlan(tmpDir, "Worktree Omitted Plan");
-    const taskSlug = createTask(tmpDir, planSlug, "Worktree Omitted Task");
+  it("omitted --worktree yields NO worktree field at all (no process.cwd() capture, D2)", async () => {
+    const planSlug = await createPlan(tmpDir, "Worktree Omitted Plan");
+    const taskSlug = await createTask(tmpDir, planSlug, "Worktree Omitted Task");
 
-    const result = runLore(["claim", taskSlug, "--json"], tmpDir, "alice");
+    const result = await runLore(["claim", taskSlug, "--json"], tmpDir, "alice");
     expect(result.exitCode).toBe(0);
     const parsed = JSON.parse(result.stdout) as { data: { doc: { extra: { claim: Record<string, unknown> } } } };
     expect("worktree" in parsed.data.doc.extra.claim).toBe(false);
   });
 
-  it("explicit --worktree persists", () => {
-    const planSlug = createPlan(tmpDir, "Worktree Explicit Plan");
-    const taskSlug = createTask(tmpDir, planSlug, "Worktree Explicit Task");
+  it("explicit --worktree persists", async () => {
+    const planSlug = await createPlan(tmpDir, "Worktree Explicit Plan");
+    const taskSlug = await createTask(tmpDir, planSlug, "Worktree Explicit Task");
 
-    const result = runLore(
+    const result = await runLore(
       ["claim", taskSlug, "--worktree", "/repo/.worktrees/t1", "--json"],
       tmpDir,
       "alice",
@@ -373,28 +366,28 @@ describe("lore claim --machine/--worktree — HAPPY (SPEC-042 D2)", () => {
 // ─── NEGATIVE: anchor-overlap gate blocks a fresh foreign conflicting claim ──
 
 describe("lore claim — anchor-overlap gate block (SPEC-042 D5)", () => {
-  it("a fresh foreign claim whose declared anchors overlap a sibling's → nonzero exit, stderr identifies the anchor-overlap failure", () => {
-    const planSlug = createPlan(tmpDir, "Anchor Overlap Plan"); // top-level plan, no spec ancestor
-    const taskASlug = createTask(tmpDir, planSlug, "Task A", ["src/shared"]);
-    const taskBSlug = createTask(tmpDir, planSlug, "Task B", ["src/shared"]);
+  it("a fresh foreign claim whose declared anchors overlap a sibling's → nonzero exit, stderr identifies the anchor-overlap failure", async () => {
+    const planSlug = await createPlan(tmpDir, "Anchor Overlap Plan"); // top-level plan, no spec ancestor
+    const taskASlug = await createTask(tmpDir, planSlug, "Task A", ["src/shared"]);
+    const taskBSlug = await createTask(tmpDir, planSlug, "Task B", ["src/shared"]);
 
-    const claimA = runLore(["claim", taskASlug], tmpDir, "agent:t1");
+    const claimA = await runLore(["claim", taskASlug], tmpDir, "agent:t1");
     expect(claimA.exitCode).toBe(0);
 
-    const claimB = runLore(["claim", taskBSlug], tmpDir, "agent:t2");
+    const claimB = await runLore(["claim", taskBSlug], tmpDir, "agent:t2");
 
     expect(claimB.exitCode).not.toBe(0);
     expect(claimB.stderr).toContain("ANCHOR_OVERLAP");
     expect(claimB.stderr).toContain("gate:task-claim:anchor-overlap");
   });
 
-  it("REGRESSION: --steal on the candidate task does NOT bypass a sibling anchor conflict", () => {
-    const planSlug = createPlan(tmpDir, "Anchor Overlap Steal Plan");
-    const taskASlug = createTask(tmpDir, planSlug, "Steal Task A", ["src/shared"]);
-    const taskBSlug = createTask(tmpDir, planSlug, "Steal Task B", ["src/shared"]);
+  it("REGRESSION: --steal on the candidate task does NOT bypass a sibling anchor conflict", async () => {
+    const planSlug = await createPlan(tmpDir, "Anchor Overlap Steal Plan");
+    const taskASlug = await createTask(tmpDir, planSlug, "Steal Task A", ["src/shared"]);
+    const taskBSlug = await createTask(tmpDir, planSlug, "Steal Task B", ["src/shared"]);
 
-    runLore(["claim", taskASlug], tmpDir, "agent:t1");
-    const stealAttempt = runLore(["claim", taskBSlug, "--steal"], tmpDir, "agent:t2");
+    await runLore(["claim", taskASlug], tmpDir, "agent:t1");
+    const stealAttempt = await runLore(["claim", taskBSlug, "--steal"], tmpDir, "agent:t2");
 
     expect(stealAttempt.exitCode).not.toBe(0);
     expect(stealAttempt.stderr).toContain("ANCHOR_OVERLAP");
