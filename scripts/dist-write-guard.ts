@@ -8,7 +8,72 @@
  */
 
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { join } from "node:path";
+
+/**
+ * Environment marker the OUTER run's global setup sets so any vitest a test spawns (it inherits the
+ * environment) knows it is nested and must neither build nor snapshot dist/lore. A nested
+ * `vitest run` loads the same vitest.shared.ts, so without this its global setup would rebuild a
+ * "stale" dist/lore in the middle of the outer run.
+ */
+export const TEST_RUN_ACTIVE_ENV = "LORE_TEST_RUN_ACTIVE";
+
+/** True when `env` says an outer test run is already active. */
+export function isNestedTestRun(env: Readonly<Record<string, string | undefined>>): boolean {
+  return env[TEST_RUN_ACTIVE_ENV] === "1";
+}
+
+/** Path -> mtimeMs of every `.ts` file under the snapshotted source directories. */
+export type SourceTreeSnapshot = ReadonlyMap<string, number>;
+
+/** Raised when a `.ts` file under the source dirs was added, removed or touched during the run. */
+export class SourceTreeWrittenDuringRunError extends Error {
+  constructor(readonly changedPaths: readonly string[]) {
+    super(
+      `a test run changed ${changedPaths.length} source file(s) the stale-binary check compares against dist/lore: ` +
+        `${changedPaths.join(", ")}. Any such write makes every compiled test fail with "dist/lore is stale". ` +
+        `No test may write packages/*/src; a test that needs a built tree works in a mkdtemp copy.`,
+    );
+    this.name = "SourceTreeWrittenDuringRunError";
+  }
+}
+
+function collectTsMtimes(dir: string, into: Map<string, number>): void {
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const path = join(dir, entry.name);
+    if (entry.isDirectory()) collectTsMtimes(path, into);
+    else if (entry.isFile() && entry.name.endsWith(".ts")) into.set(path, statSync(path).mtimeMs);
+  }
+}
+
+/**
+ * Records the mtime of every `.ts` file under `dirs` (the dirs tests/integration/helpers/
+ * assert-fresh-binary.ts compares against dist/lore).
+ *
+ * @throws {Error} when a directory does not exist.
+ */
+export function snapshotSourceTree(dirs: readonly string[]): SourceTreeSnapshot {
+  const into = new Map<string, number>();
+  for (const dir of dirs) {
+    if (!existsSync(dir)) throw new Error(`cannot snapshot source dir ${dir}: it does not exist`);
+    collectTsMtimes(dir, into);
+  }
+  return into;
+}
+
+/**
+ * Throws when any `.ts` file under `dirs` was added, removed, or has a different mtime than in `before`.
+ *
+ * @throws {SourceTreeWrittenDuringRunError} naming every such path, sorted.
+ */
+export function assertSourceTreeUnchanged(before: SourceTreeSnapshot, dirs: readonly string[]): void {
+  const after = snapshotSourceTree(dirs);
+  const changed = new Set<string>();
+  for (const [path, mtime] of after) if (before.get(path) !== mtime) changed.add(path);
+  for (const path of before.keys()) if (!after.has(path)) changed.add(path);
+  if (changed.size > 0) throw new SourceTreeWrittenDuringRunError([...changed].sort());
+}
 
 /** What a binary looked like at one instant. */
 export interface BinarySnapshot {

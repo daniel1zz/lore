@@ -62,6 +62,9 @@ const outfile =
         }
         return value;
       })();
+const isVariantBuild = outfileFlagIndex !== -1;
+/** Printed by a variant build in place of the dashboard step; scripts/tests/dist-write-guard.test.ts pins it. */
+const VARIANT_BUILD_MARKER = "variant build (--outfile): dashboard and assets-manifest steps skipped; the repo tree is not written";
 
 /** Resolves the absolute path to the native .node file for the current platform. */
 function resolveNativeNodePath(nativePkg: string): string {
@@ -223,6 +226,15 @@ const dashboardPkgJsonPath = join(dashboardRoot, "package.json");
 const dashboardDistDir = join(dashboardRoot, "dist");
 const DASHBOARD_GENERATED_PATH = join(root, "packages", "lore", "src", "generated", "dashboard-assets.ts");
 
+// reason: a VARIANT build (`--outfile`) writes NOTHING under the repo tree: no vite build, no
+// dashboard-assets.ts, no assets-manifest.ts. Before this guard a variant build run by a test
+// (binary-provenance-check.test.ts) found the dashboard digest stale after an earlier test's router
+// codegen, rebuilt the dashboard and rewrote the git-ignored generated/dashboard-assets.ts, which made
+// every compiled test's stale-binary check fail for the rest of the run (TG-24 follow-up, measured
+// 2026-10-17: 16 suite errors in one full run). It embeds whatever generated modules are on disk.
+if (isVariantBuild) {
+  console.log(VARIANT_BUILD_MARKER);
+} else {
 console.log(`Checking dashboard build freshness...`);
 const dashboardStep = runDashboardAssetsStep({
   dashboardSrcDir,
@@ -266,6 +278,7 @@ if (dashboardStep.action === "short-circuited") {
       `digest ${String(dashboardStep.digest)} (verified fresh)`,
   );
 }
+}
 
 // ─── Main ────────────────────────────────────────────────────────────────────
 
@@ -288,12 +301,12 @@ console.log(`  Native: ${nativeNodePath}`);
 console.log(`Regenerating embedded assets manifest...`);
 const assetsManifest = buildManifest(join(root, "assets"), root);
 mkdirSync(dirname(GENERATED_FILE_PATH), { recursive: true });
-// reason: write only when the content changed. An unconditional write bumps the mtime of a source
-// file the stale-binary check compares against dist/lore, so a build that changed nothing would make
-// the existing binary look stale. See the outfile comment above.
+// reason: write only when the content changed, and never in a variant build. An unconditional write
+// bumps the mtime of a source file the stale-binary check compares against dist/lore, so a build that
+// changed nothing would make the existing binary look stale. See the outfile comment above.
 const renderedManifest = renderGeneratedFile(assetsManifest);
 const currentManifest = existsSync(GENERATED_FILE_PATH) ? readFileSync(GENERATED_FILE_PATH, "utf8") : null;
-if (currentManifest !== renderedManifest) {
+if (currentManifest !== renderedManifest && !isVariantBuild) {
   writeFileSync(GENERATED_FILE_PATH, renderedManifest, "utf8");
 }
 
@@ -302,7 +315,7 @@ if (currentManifest !== renderedManifest) {
 // assertion the compiled binary's embedded digest correctness depends on
 // (AC: "compiled binary's embedded tree_digest equals a fresh recomputation").
 const verifyDigest = extractEmbeddedTreeDigest(readFileSync(GENERATED_FILE_PATH, "utf8"));
-if (verifyDigest !== assetsManifest.tree_digest) {
+if (verifyDigest !== assetsManifest.tree_digest && !isVariantBuild) {
   throw new Error(
     `[build] Post-write verification failed: ${GENERATED_FILE_PATH} embeds tree_digest ` +
       `"${verifyDigest}" but a fresh recomputation over assets/ is "${assetsManifest.tree_digest}". ` +
