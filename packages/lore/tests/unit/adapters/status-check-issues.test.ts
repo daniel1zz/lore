@@ -69,7 +69,7 @@ async function linkResolver(w: World, report: DocRecord, status: DocStatus): Pro
   await must(w.store.update(plan.id, { status, version: plan.version + 1 }, { expected_version: plan.version }), "status");
 }
 
-describe("AC-IC-4: --check-issues no longer flags a computed-fixed report (D6)", () => {
+describe("spec-archiving-the-work-that-resolves-a-defect-report-closes#AC-IC-4: --check-issues no longer flags a computed-fixed report (D6)", () => {
   it("NEGATIVE: fixed on an ARCHIVED source with the issue task still draft is not flagged — consistent", async () => {
     const w = await buildWorld();
     const report = await fileReport(w, "Fixed and archived fixer", 5);
@@ -103,7 +103,7 @@ describe("AC-IC-4: --check-issues no longer flags a computed-fixed report (D6)",
   });
 });
 
-describe("AC-IC-4: --check-issues still flags everything else it flagged", () => {
+describe("spec-archiving-the-work-that-resolves-a-defect-report-closes#AC-IC-4: --check-issues still flags everything else it flagged", () => {
   it("HAPPY: a stale open report is flagged with its age", async () => {
     const w = await buildWorld();
     const report = await fileReport(w, "Old and open", 100);

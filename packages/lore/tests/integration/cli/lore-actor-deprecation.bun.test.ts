@@ -15,7 +15,7 @@
  *
  * No mocks. Throwaway git repo + `lore init` corpus; the repo's own `.lore/` is never touched.
  *
- * @spec_ref AC-ROI-2
+ * @spec_ref spec-run-only-write-identity-and-run-end-claim-release#AC-ROI-2
  */
 
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
@@ -103,7 +103,7 @@ afterAll(() => {
   for (const d of scratch) rmSync(d, { recursive: true, force: true });
 });
 
-describe("AC-ROI-2 (CLI): $LORE_ACTOR is ignored and never named", () => {
+describe("spec-run-only-write-identity-and-run-end-claim-release#AC-ROI-2 (CLI): $LORE_ACTOR is ignored and never named", () => {
   it("a single-write process with $LORE_ACTOR set prints no line naming it", () => {
     const r = lore(["create", "knowledge", "--sub-type", "reference", "--title", "Retired single write", "--content", "body", "--no-ai"], dir, ACTOR_Y);
     expect(r.exitCode).toBe(0);
@@ -152,7 +152,7 @@ describe("AC-ROI-2 (CLI): $LORE_ACTOR is ignored and never named", () => {
   });
 });
 
-describe("AC-ROI-2 (CLI): nothing about $LORE_ACTOR when it is not set", () => {
+describe("spec-run-only-write-identity-and-run-end-claim-release#AC-ROI-2 (CLI): nothing about $LORE_ACTOR when it is not set", () => {
   it("naming the writer through the session tier and no $LORE_ACTOR prints no deprecation line", () => {
     const task = newTask("Deprecation by session");
     const r = lore(["claim", task], dir, null, ACTOR_Y);

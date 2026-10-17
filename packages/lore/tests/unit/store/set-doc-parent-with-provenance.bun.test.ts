@@ -1,5 +1,5 @@
 /**
- * @spec_ref AC-BLS3B-7 (BR-1009) — `StoreInterface.setDocParentWithProvenance` is all-or-none on every store.
+ * @spec_ref spec-baseline-slice-3b-specs-belong-to-the-trees-through#AC-BLS3B-7 (BR-1009) — `StoreInterface.setDocParentWithProvenance` is all-or-none on every store.
  *
  * Clearing a spec's parent writes the column, deletes any `parent` link row and appends ONE audit entry in a
  * single transaction, with no `versions` row and no `version`/`status` change. A SQL trigger (SQLite / Turso)

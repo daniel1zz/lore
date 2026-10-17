@@ -1,5 +1,5 @@
 /**
- * @spec_ref AC-BLS3-1
+ * @spec_ref spec-baseline-slice-3a-architecture-tree-baseline-root#AC-BLS3-1
  * @task task-red-a-architecture-tree-and-as-ad-citation (RED; spec baseline-slice-3a, rule BR-979, owner decision D1)
  *
  * The real-SQLite half of AC-BLS3-1's "interleaved adds never collide, also under 8 concurrent adds":
@@ -81,7 +81,7 @@ const rule = (tag: string) => ({
 const numberOf = (id: string): number => Number(id.slice(id.indexOf("-") + 1));
 const prefixOf = (id: string): string => id.slice(0, id.indexOf("-"));
 
-describe("rule registry — BR / AS / AD from one registry on real SQLite (AC-BLS3-1)", () => {
+describe("rule registry — BR / AS / AD from one registry on real SQLite (spec-baseline-slice-3a-architecture-tree-baseline-root#AC-BLS3-1)", () => {
   let dir: string;
   let dbPath: string;
   let s1: SQLiteStore;

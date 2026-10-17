@@ -78,8 +78,8 @@
  *   REGRESSION: both copies stay byte-identical and both carry the invocation;
  *               the fail-open preamble still precedes the new last step.
  *
- * @spec_ref spec-bootstrap-fixpoint-integrity-binary-provenance-an-anchor AC-BFI-3
- * @spec_ref spec-bootstrap-fixpoint-integrity-binary-provenance-an-anchor AC-BFI-9
+ * @spec_ref spec-bootstrap-fixpoint-integrity-binary-provenance-an-anchor#AC-BFI-3
+ * @spec_ref spec-bootstrap-fixpoint-integrity-binary-provenance-an-anchor#AC-BFI-9
  */
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -199,7 +199,7 @@ afterAll(() => {
   if (tempRoot.length > 0) rmSync(tempRoot, { recursive: true, force: true });
 });
 
-describe("AC-BFI-3: the pre-push hook actually RUNS the binary-provenance check", () => {
+describe("spec-bootstrap-fixpoint-integrity-binary-provenance-an-anchor#AC-BFI-3: the pre-push hook actually RUNS the binary-provenance check", () => {
   it("NEGATIVE: a dev-stale binary blocks the push — exit 1, the output names the provenance failure and its exit 3, and the corpus check never runs", () => {
     const result = runHook(staleRepo, realBinDir);
 
@@ -296,7 +296,7 @@ interface RatchetRun extends RunResult {
   readonly loreCalls: readonly string[];
 }
 
-describe("AC-BFI-9: the pre-push hook actually RUNS the anchor-coverage ratchet", () => {
+describe("spec-bootstrap-fixpoint-integrity-binary-provenance-an-anchor#AC-BFI-9: the pre-push hook actually RUNS the anchor-coverage ratchet", () => {
   // ── Single-variable fixture design ────────────────────────────────────────
   // ONE throwaway corpus is built once, holding exactly two live specs:
   //   specA — declares NO code_anchors

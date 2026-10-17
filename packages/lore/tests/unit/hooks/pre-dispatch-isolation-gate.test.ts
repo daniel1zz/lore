@@ -60,7 +60,7 @@ function dispatchWithIsolation(subagentType: string, isolation = "worktree"): Re
 
 describe("pre-dispatch-isolation-gate", () => {
   describe("NEGATIVE — an implementation subagent without worktree isolation is denied", () => {
-    it("AC-AT-2 denies lore-implementer with exit 2 and names the missing field", () => {
+    it("spec-two-helper-agent-types-lore-reader-and-lore-implementer#AC-AT-2 denies lore-implementer with exit 2 and names the missing field", () => {
       const run = runHook(dispatchWithoutIsolation("lore-implementer"));
       expect(run.status).toBe(2);
       expect(run.stderr).toContain("DISPATCH_ISOLATION_GATE");
@@ -92,7 +92,7 @@ describe("pre-dispatch-isolation-gate", () => {
       expect(run.status).toBe(0);
     });
 
-    it("AC-AT-2 allows lore-reader without isolation (read-only type) and the source names only current types", () => {
+    it("spec-two-helper-agent-types-lore-reader-and-lore-implementer#AC-AT-2 allows lore-reader without isolation (read-only type) and the source names only current types", () => {
       expect(runHook(dispatchWithoutIsolation("lore-reader")).status).toBe(0);
       const source = readFileSync(HOOK_PATH, "utf8");
       expect(source).toContain("lore-reader");

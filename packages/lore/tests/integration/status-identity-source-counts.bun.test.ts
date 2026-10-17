@@ -2,7 +2,7 @@
 /**
  * `lore status --json` reports a count per identity source and the `orphaned_dirty` claims.
  *
- * @spec_ref AC-ROI-10
+ * @spec_ref spec-run-only-write-identity-and-run-end-claim-release#AC-ROI-10
  *   spec-run-only-write-identity-and-run-end-claim-release Scope 8; BR-1039 (`baseline-attribute-work-to-a-run`).
  *
  * Shape under test: `data.identity_sources { window_days, run, session, worktree, os, other }` and
@@ -106,7 +106,7 @@ const ident = (claimedSource: string, harnessRun: string | null = null): SeedIde
   claimedSource,
 });
 
-describe("AC-ROI-10 lore status identity sources and orphaned_dirty claims", () => {
+describe("spec-run-only-write-identity-and-run-end-claim-release#AC-ROI-10 lore status identity sources and orphaned_dirty claims", () => {
   it("HAPPY: reports a count per identity source (run, session, worktree, os) for writes in the window", async () => {
     const before = sourcesOf(statusData());
     const now = Date.now();

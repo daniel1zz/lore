@@ -37,7 +37,7 @@
  * exercise it directly (real class, not a test double) to prove the capability is no longer
  * dead abstraction — they do not change what happens on this corpus today.
  *
- * @spec_ref AC-HTTP-4, AC-HTTP-5, AC-HTTP-6, AC-HTTP-7, AC-HTTP-8, AC-HTTP-TEL-1, AC-TIER-10
+ * @spec_ref AC-HTTP-4, AC-HTTP-5, AC-HTTP-6, AC-HTTP-7, AC-HTTP-8, AC-HTTP-TEL-1, spec-tiered-review-ledger-fast-track-judgment-required-promote#AC-TIER-10
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
@@ -614,7 +614,7 @@ describe("HttpAIProvider.generate — network timeout (AC-HTTP-6)", () => {
 
 // ─── modelId — ModelAwareProvider capability (SPEC-103 AC-TIER-10) ───────────
 
-describe("HttpAIProvider.modelId — ModelAwareProvider capability (AC-TIER-10)", () => {
+describe("HttpAIProvider.modelId — ModelAwareProvider capability (spec-tiered-review-ledger-fast-track-judgment-required-promote#AC-TIER-10)", () => {
   it("modelId equals the configured model", () => {
     const cfg = AiHttpConfigSchema.parse({
       url: "https://api.test.invalid/v1/messages",
@@ -670,7 +670,7 @@ describe("HttpAIProvider.modelId — ModelAwareProvider capability (AC-TIER-10)"
 // with a REAL HttpAIProvider instance (not a test double) stamps ai_provenance.model with
 // HttpAIProvider's actual configured model — never the provider (registry) name.
 
-describe("HttpAIProvider wired into AIProviderService — ai_provenance.model (AC-TIER-10)", () => {
+describe("HttpAIProvider wired into AIProviderService — ai_provenance.model (spec-tiered-review-ledger-fast-track-judgment-required-promote#AC-TIER-10)", () => {
   const assessBudgets = { max_plan_chars: 8000, max_spec_chars: 12000, max_task_chars: 4000, max_diff_chars: 24000 };
 
   function makeTelemetry(): Telemetry {

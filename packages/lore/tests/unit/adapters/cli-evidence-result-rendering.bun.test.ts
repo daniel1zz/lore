@@ -29,6 +29,7 @@
  *   REGRESSION — --result pass and --result fail still render their own value
  *                verbatim, byte-identical to pre-AC-WH-1 behavior
  *
+ * @layer unit-evidence-result-rendering (CLI success-line rendering; owner is the service workflow test)
  * @spec_ref AC-WH-1
  */
 

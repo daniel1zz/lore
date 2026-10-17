@@ -25,7 +25,7 @@
  * Safety: every setup run uses `PATH: ""` (never reaches a real `claude` CLI) and a fresh mkdtemp
  * `--claude-dir`; CLI probes run in a throwaway `lore init` corpus outside the repo.
  *
- * @spec_ref spec-test-governance-guards-that-refuse-bad-tests-declared AC-TG-9
+ * @spec_ref spec-test-governance-guards-that-refuse-bad-tests-declared#AC-TG-9
  */
 
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";

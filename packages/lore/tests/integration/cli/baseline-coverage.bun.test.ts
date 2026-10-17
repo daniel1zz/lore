@@ -14,7 +14,7 @@
  * Dimensions: HAPPY (full mapping -> 0), NEGATIVE (no commands -> 1; unmapped site -> 1 names it),
  * STATE (different mapping removed -> different named site), BOUNDARY (sites exist at all).
  *
- * @spec_ref AC-BLS2-5
+ * @spec_ref spec-baseline-slice-2-completeness-census-per-branch-citation#AC-BLS2-5
  */
 
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";

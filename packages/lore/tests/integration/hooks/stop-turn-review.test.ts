@@ -90,7 +90,7 @@ describe("AC-TE-3 stop-turn-review", () => {
     expect(stopTurn(editedTurn("t7", "block", "package.json")).stdout).toBe("");
   });
 
-  it("AC-TE-2 edits carrying agent_id are never counted as the main session's", () => {
+  it("spec-interception-moves-off-every-tool-call-one-turn-end-review#AC-TE-2 edits carrying agent_id are never counted as the main session's", () => {
     const f = editedTurn("t8", "block", "src/big.ts", FIFTY, "agent-abc");
     const r = stopTurn(f);
     expect(r.status).toBe(0);

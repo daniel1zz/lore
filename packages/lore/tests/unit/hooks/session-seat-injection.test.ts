@@ -548,7 +548,7 @@ describe("session-seat-injection — SPEC-057 seat signal on lore bootstrap (AC-
   });
 });
 
-describe("session-seat-injection — sanitizer golden-fixture parity (AC-S-5, hook side)", () => {
+describe("session-seat-injection — sanitizer golden-fixture parity (spec-spec-057-two-tier-worktree-seat-model-lore-seat-verb-seat-a#AC-S-5, hook side)", () => {
   const pairs = loadGoldenPairs();
 
   it("loaded golden fixture has at least 10 pairs", () => {

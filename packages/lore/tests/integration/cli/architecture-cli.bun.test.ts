@@ -22,7 +22,7 @@
  * Dimensions: HAPPY (5 node kinds, AS-1/AD-1), NEGATIVE (partial parts, AD-99, wrong parent / kind / tree),
  * STATE (set edits parts), REGRESSION (business add/tree unchanged), BOUNDARY (all-or-nothing), MCP acceptance.
  *
- * @spec_ref AC-BLS3-1
+ * @spec_ref spec-baseline-slice-3a-architecture-tree-baseline-root#AC-BLS3-1
  */
 
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
@@ -108,7 +108,7 @@ afterAll(() => {
 
 const RULE = ["--confidence", "established", "--enforced-by", "guaranteed", "--example", "e.g. one"];
 
-describe("lore baseline add --tree architecture (AC-BLS3-1)", () => {
+describe("lore baseline add --tree architecture (spec-baseline-slice-3a-architecture-tree-baseline-root#AC-BLS3-1)", () => {
   it("creates root, section, standard and debt-registry (fixture) and a module-card", () => {
     expect(archRoot).not.toBe("");
     expect(archSection).not.toBe("");

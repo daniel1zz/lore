@@ -119,7 +119,7 @@ afterEach(() => {
 
 // ─── HAPPY — `lore outline list` (read verb intact) ───────────────────────────
 
-describe("HAPPY — lore outline list still reads (AC-BLS3-6)", () => {
+describe("HAPPY — lore outline list still reads (spec-baseline-slice-3a-architecture-tree-baseline-root#AC-BLS3-6)", () => {
   it("exits 0 and reports an empty outline on a fresh PRD", () => {
     const prdSlug = createPrd(tmpDir);
 

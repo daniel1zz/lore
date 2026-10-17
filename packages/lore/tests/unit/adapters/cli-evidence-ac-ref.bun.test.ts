@@ -1,5 +1,5 @@
 /**
- * @spec_ref AC-ACODE-3, AC-ACODE-8
+ * @spec_ref spec-spec-038-ac-as-code-structured-acceptance-criteria-oracle-b#AC-ACODE-3, spec-spec-038-ac-as-code-structured-acceptance-criteria-oracle-b#AC-ACODE-8
  *
  * `lore evidence --ac <id>` — adapter-boundary test for SPEC-038 §4/§7 D3.
  *
@@ -138,7 +138,7 @@ function spyOnAddEvidence(): {
 // ─── HAPPY ───────────────────────────────────────────────────────────────────
 
 describe("lore evidence --ac — HAPPY", () => {
-  it("AC-ACODE-3.H1: --ac <id> lands as ac_ref on the EvidenceInput passed to the service", async () => {
+  it("spec-spec-038-ac-as-code-structured-acceptance-criteria-oracle-b#AC-ACODE-3.H1: --ac <id> lands as ac_ref on the EvidenceInput passed to the service", async () => {
     taskSlug = await seedTask();
     const cmd = await importEvidenceCommand();
     const spy = spyOnAddEvidence();
@@ -165,7 +165,7 @@ describe("lore evidence --ac — HAPPY", () => {
 // ─── REGRESSION ──────────────────────────────────────────────────────────────
 
 describe("lore evidence --ac — REGRESSION", () => {
-  it("AC-ACODE-3.REG1: omitting --ac leaves ac_ref absent from the EvidenceInput (no default value)", async () => {
+  it("spec-spec-038-ac-as-code-structured-acceptance-criteria-oracle-b#AC-ACODE-3.REG1: omitting --ac leaves ac_ref absent from the EvidenceInput (no default value)", async () => {
     taskSlug = await seedTask();
     const cmd = await importEvidenceCommand();
     const spy = spyOnAddEvidence();

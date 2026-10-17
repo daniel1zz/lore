@@ -1,6 +1,6 @@
 // @spawns assets/hooks/pre-tool-harness-run.mjs
 /**
- * @spec_ref AC-RID-3
+ * @spec_ref spec-run-identity-slice-1-harness-attested-runs-attested#AC-RID-3
  *
  * RED (TDD role) for `assets/hooks/pre-tool-harness-run.mjs` — spec
  * spec-run-identity-slice-1-harness-attested-runs-attested, D10 (the hook owns NO grammar:

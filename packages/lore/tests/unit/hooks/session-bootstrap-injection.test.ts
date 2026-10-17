@@ -58,7 +58,7 @@
  *               own contract for their topics — NO degradation entry is
  *               added for the missing framing line by itself
  *
- * @spec_ref AC-CP-10
+ * @spec_ref spec-context-provenance-injected-corpus-global-state-and-a#AC-CP-10
  */
 
 import { describe, it, expect, afterEach } from "vitest";

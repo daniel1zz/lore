@@ -131,7 +131,7 @@
  *               fixture is self-checked to violate ONLY its own rule, so a fixture that
  *               drifts into violating both cannot silently destroy case 4's power.
  *
- * @spec_ref spec-corpus-truthfulness-a-verdict-must-carry-the-state-it AC-CT-7, AC-CT-1 (C8, C4)
+ * @spec_ref spec-corpus-truthfulness-a-verdict-must-carry-the-state-it#AC-CT-7, spec-corpus-truthfulness-a-verdict-must-carry-the-state-it#AC-CT-1 (C8, C4)
  * @spec_ref task-skill-test-glyph-projection-and-the-two-rule-renderer-scan
  */
 
@@ -459,7 +459,7 @@ describe("check-ac-state-renderers — fixture-tree harness", () => {
 
 // ─── Clean-mirror control ───────────────────────────────────────────────────
 
-describe("check-ac-state-renderers — clean-mirror control (AC-CT-7)", () => {
+describe("check-ac-state-renderers — clean-mirror control (spec-corpus-truthfulness-a-verdict-must-carry-the-state-it#AC-CT-7)", () => {
   it("CONTROL: the unmodified mirror scans clean at exit EXACTLY 0 with no --rule flag", () => {
     const result = runScan(mirrorRoot, []);
     expect(result.exitCode).toBe(EXIT_CLEAN);
@@ -475,7 +475,7 @@ describe("check-ac-state-renderers — clean-mirror control (AC-CT-7)", () => {
 
 // ─── Scenario 3 ─────────────────────────────────────────────────────────────
 
-describe("check-ac-state-renderers — RULE 2 glyph-projection (AC-CT-1)", () => {
+describe("check-ac-state-renderers — RULE 2 glyph-projection (spec-corpus-truthfulness-a-verdict-must-carry-the-state-it#AC-CT-1)", () => {
   it("scenario 3: a rule-2-ONLY violation exits EXACTLY 1 under --rule glyph-projection, naming the function", async () => {
     const alphabet = await readGlyphAlphabet();
     const fixture = rule2OnlyFixture(alphabet);
@@ -512,7 +512,7 @@ describe("check-ac-state-renderers — RULE 2 glyph-projection (AC-CT-1)", () =>
 
 // ─── Scenarios 4 and 5 ──────────────────────────────────────────────────────
 
-describe("check-ac-state-renderers — RULE 1 fact-field-read and the selector (AC-CT-7)", () => {
+describe("check-ac-state-renderers — RULE 1 fact-field-read and the selector (spec-corpus-truthfulness-a-verdict-must-carry-the-state-it#AC-CT-7)", () => {
   it("scenario 4: a rule-1-ONLY violation exits EXACTLY 0 under --rule glyph-projection — the flag is not inert", async () => {
     const alphabet = await readGlyphAlphabet();
     const fixture = rule1OnlyFixture();
@@ -549,7 +549,7 @@ describe("check-ac-state-renderers — RULE 1 fact-field-read and the selector (
 
 // ─── Scenario 6 ─────────────────────────────────────────────────────────────
 
-describe("check-ac-state-renderers — an undecidable scan (AC-CT-7)", () => {
+describe("check-ac-state-renderers — an undecidable scan (spec-corpus-truthfulness-a-verdict-must-carry-the-state-it#AC-CT-7)", () => {
   it("scenario 6: a tree with none of the scan's roots exits EXACTLY 2, naming the scan, against a live green control", () => {
     // GREEN CONTROL FIRST, on the same harness and the same env seam — without it, an
     // exit 2 here could be the harness, the env var, or the scan script being absent,

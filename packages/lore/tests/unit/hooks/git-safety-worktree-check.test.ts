@@ -1,6 +1,6 @@
 // @spawns assets/hooks/pre-bash-git-safety-gate.mjs
 /**
- * @spec_ref spec-one-worktree-removal-test-for-the-guard-lore-done-and-a (AC-WS-4; D1, D2; BR-1070, BR-1079)
+ * @spec_ref spec-one-worktree-removal-test-for-the-guard-lore-done-and-a (spec-one-worktree-removal-test-for-the-guard-lore-done-and-a#AC-WS-4; D1, D2; BR-1070, BR-1079)
  * @task task-single-worktree-removal-test-used-by-the-hook-lore-done
  *
  * The git-safety hook DELEGATES occupancy and ownership to `lore worktree check` — it spawns
@@ -103,7 +103,7 @@ afterAll(() => {
   if (base) rmSync(base, { recursive: true, force: true });
 });
 
-describe("AC-WS-4 git-safety hook delegates to `lore worktree check`", () => {
+describe("spec-one-worktree-removal-test-for-the-guard-lore-done-and-a#AC-WS-4 git-safety hook delegates to `lore worktree check`", () => {
   it("HAPPY: spawns `lore worktree check <path> --session <payload session_id> --json` and passes on removable", () => {
     const r = runHook({ check: checkJson({}), sessionId: "S-payload-7" });
     expect(r.code).toBe(0);

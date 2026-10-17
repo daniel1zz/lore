@@ -1,7 +1,7 @@
 /**
  * Claim conflict, the `lore done` holder check and the `lore ready` overlap test identify the holder by RUN.
  *
- * @spec_ref AC-ROI-3
+ * @spec_ref spec-run-only-write-identity-and-run-end-claim-release#AC-ROI-3
  *   spec-run-only-write-identity-and-run-end-claim-release Scope 3 + 5; BR-1056, BR-1058;
  *   ADR adr-write-identity-is-the-attested-run-alone-a-run-s-claims-end decisions 3 and 5.
  *
@@ -160,7 +160,7 @@ function errorText(result: { ok: boolean; error?: unknown }): string {
   return JSON.stringify(result.error);
 }
 
-describe("lore done decides the holder by run (AC-ROI-3)", () => {
+describe("lore done decides the holder by run (spec-run-only-write-identity-and-run-end-claim-release#AC-ROI-3)", () => {
   it("NEGATIVE: refuses run B, which carries the same derived name as the holding run A, and the refusal names run A", async () => {
     const { taskIds } = await createPlanWithTasks([[]]);
     const runA = await newRun();
@@ -222,7 +222,7 @@ describe("lore done decides the holder by run (AC-ROI-3)", () => {
   });
 });
 
-describe("claim conflict decides by run (AC-ROI-3)", () => {
+describe("claim conflict decides by run (spec-run-only-write-identity-and-run-end-claim-release#AC-ROI-3)", () => {
   it("NEGATIVE: a claimant without a run against a holder with a run is a conflict, even with the holder's name", async () => {
     const { taskIds } = await createPlanWithTasks([[]]);
     const runA = await newRun();
@@ -247,7 +247,7 @@ describe("claim conflict decides by run (AC-ROI-3)", () => {
   });
 });
 
-describe("lore ready overlap decides by run (AC-ROI-3)", () => {
+describe("lore ready overlap decides by run (spec-run-only-write-identity-and-run-end-claim-release#AC-ROI-3)", () => {
   /** Two anchor-overlapping tasks each held (fresh) by the given runs; the gate would refuse the second, so the claim is seeded. */
   async function seedOverlappingHolders(runForFirst: RunId, runForSecond: RunId): Promise<string> {
     const { planId, taskIds } = await createPlanWithTasks([[SHARED_ANCHOR], ["docs/unrelated-anchor.md"]]);

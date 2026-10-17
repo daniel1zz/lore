@@ -14,7 +14,7 @@
  *   STATE:      other verify fields (command) survive a timeout-only set
  *   REGRESSION: `lore verify` honours the stored value — sleeping command with timeout_ms 1500 is TIMED OUT
  *
- * @spec_ref AC-R0-2 — spec-round-0-main-is-green-every-red-test-on-e1878626-traced-to
+ * @spec_ref spec-round-0-main-is-green-every-red-test-on-e1878626-traced-to#AC-R0-2 — spec-round-0-main-is-green-every-red-test-on-e1878626-traced-to
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest";

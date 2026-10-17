@@ -1,5 +1,5 @@
 /**
- * @spec_ref spec-corpus-resolution-carries-provenance-and-a-foreign-write AC-CP-5
+ * @spec_ref spec-corpus-resolution-carries-provenance-and-a-foreign-write#AC-CP-5
  *   (§D5 adapter matrix — THE HTTP ROW, driven at the WIRED path)
  *
  * WHY THIS FILE EXISTS AT ALL, and why it is a `.bun.test.ts` rather than

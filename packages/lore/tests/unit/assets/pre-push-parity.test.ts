@@ -45,7 +45,7 @@
  * does protect that change set today (the selector's loud-zero refusal).
  *
  * @spec_ref AC-080-3
- * @spec_ref spec-bootstrap-fixpoint-integrity-binary-provenance-an-anchor AC-BFI-9
+ * @spec_ref spec-bootstrap-fixpoint-integrity-binary-provenance-an-anchor#AC-BFI-9
  */
 
 import { describe, it, expect } from "vitest";
@@ -131,7 +131,7 @@ describe("pre-push hook pair — content parity + audit-verify wiring (SPEC-080 
   // also matches a comment — the exact G6 gap the behavioural trip suite
   // (packages/lore/tests/integration/pre-push-trip.bun.test.ts)
   // exists to close, and there is no reason to reproduce it here.
-  it("HAPPY: both hook copies invoke the anchor-coverage ratchet script (AC-BFI-9)", () => {
+  it("HAPPY: both hook copies invoke the anchor-coverage ratchet script (spec-bootstrap-fixpoint-integrity-binary-provenance-an-anchor#AC-BFI-9)", () => {
     const repoHook = readFileSync(REPO_HOOK_PATH, "utf8");
     const assetHook = readFileSync(ASSET_HOOK_PATH, "utf8");
     expect(repoHook).toContain("scripts/check-anchor-coverage.ts");

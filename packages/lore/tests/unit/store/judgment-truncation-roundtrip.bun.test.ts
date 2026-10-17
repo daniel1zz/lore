@@ -7,7 +7,7 @@
  *
  * Runner: `bun test` (bun:sqlite) — never vitest.
  *
- * @spec_ref AC-CRIT-2
+ * @spec_ref spec-close-the-eight-verified-critical-defects-no-judge-listing#AC-CRIT-2
  */
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -91,8 +91,8 @@ async function recordAndReadBack(parentContent: string, planContent: string) {
   }
 }
 
-describe("review judgment truncation survives a SQLite round-trip (AC-CRIT-2)", () => {
-  it("AC-CRIT-2: body and parent both cut -> read-back has truncated=true and two entries with the exact lengths", async () => {
+describe("review judgment truncation survives a SQLite round-trip (spec-close-the-eight-verified-critical-defects-no-judge-listing#AC-CRIT-2)", () => {
+  it("spec-close-the-eight-verified-critical-defects-no-judge-listing#AC-CRIT-2: body and parent both cut -> read-back has truncated=true and two entries with the exact lengths", async () => {
     const parent = "## P1\n" + "p".repeat(9500) + "\n## D8\nlate\n";
     const body = "## B1\n" + "b".repeat(13000);
     const { bundle, stored } = await recordAndReadBack(parent, body);

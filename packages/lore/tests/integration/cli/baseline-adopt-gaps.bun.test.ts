@@ -8,8 +8,8 @@
  *
  * Every case runs in a `mkdtemp` repo + corpus; the repo's own `.lore/` is never touched.
  *
- * @spec_ref AC-BLS3-7
- * @spec_ref AC-BLS3-8
+ * @spec_ref spec-baseline-slice-3a-architecture-tree-baseline-root#AC-BLS3-7
+ * @spec_ref spec-baseline-slice-3a-architecture-tree-baseline-root#AC-BLS3-8
  */
 
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
@@ -108,7 +108,7 @@ describe("baseline adopt gaps (BL-8)", () => {
     expect(acCite(withBaseline)).toEqual({ mode: "report", provenance: "default", armed_branches: [], enforce_refuses_nothing: false });
   });
 
-  it("G2: no stored mode, no baseline docs -> ac_cite is absent (AC-BLS2-11: slice-1 status output, byte for byte)", () => {
+  it("G2: no stored mode, no baseline docs -> ac_cite is absent (spec-baseline-slice-2-completeness-census-per-branch-citation#AC-BLS2-11: slice-1 status output, byte for byte)", () => {
     const bare = makeRepo();
     expect(acCite(bare)).toBeUndefined();
   });

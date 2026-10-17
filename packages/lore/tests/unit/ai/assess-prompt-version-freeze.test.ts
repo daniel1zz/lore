@@ -241,7 +241,7 @@ describe("AC-AEP-10: getAssessTemplate(7) renders the projected shape via the sh
     expect(templateResult.value).toBe(buildAssessPromptV7);
   });
 
-  it("REGRESSION for D2/AC-AEP-3: getAssessTemplate(7) still emits the frozen `task:<slug>` truncated[] vocabulary when the task block overflows budget", () => {
+  it("REGRESSION for D2/spec-lore-assess-project-evidence-rows-instead-of-embedding-the#AC-AEP-3: getAssessTemplate(7) still emits the frozen `task:<slug>` truncated[] vocabulary when the task block overflows budget", () => {
     const templateResult = getAssessTemplate(7);
     expect(templateResult.ok).toBe(true);
     if (!templateResult.ok) return;

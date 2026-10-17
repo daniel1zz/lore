@@ -42,7 +42,7 @@
  * unrelated crash, and a bare exit-0 assertion cannot tell a working checker from
  * an inert one.
  *
- * @spec_ref spec-bootstrap-fixpoint-integrity-binary-provenance-an-anchor AC-BFI-5, AC-BFI-6
+ * @spec_ref spec-bootstrap-fixpoint-integrity-binary-provenance-an-anchor#AC-BFI-5, AC-BFI-6
  * @spec_ref adr-a-newly-armed-structural-oracle-enforces-from-a-baseline (baseline + ledger shape)
  */
 
@@ -242,7 +242,7 @@ afterAll(() => {
   if (fx !== undefined) rmSync(fx.cwd, { recursive: true, force: true });
 });
 
-describe("check-anchor-coverage: the ledger dispositions every unanchored live spec (AC-BFI-5)", () => {
+describe("check-anchor-coverage: the ledger dispositions every unanchored live spec (spec-bootstrap-fixpoint-integrity-binary-provenance-an-anchor#AC-BFI-5)", () => {
   it(
     "HAPPY: the fixture ledger's disposition set EQUALS the freshly measured unanchored live-spec set — exit EXACTLY 0 over a non-trivial, self-reported population",
     () => {

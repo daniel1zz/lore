@@ -2,7 +2,7 @@
 /**
  * Registering an ENDED run reopens it, and later claims by that run are owned by it.
  *
- * @spec_ref AC-ROI-6
+ * @spec_ref spec-run-only-write-identity-and-run-end-claim-release#AC-ROI-6
  *   spec-run-only-write-identity-and-run-end-claim-release Scope 4 (last bullet); BR-1029 (re-registering
  *   changes nothing about the stored run — except that an ended run is reopened).
  *
@@ -42,7 +42,7 @@ function freshSession(): string {
   return `reopen-${counter}`;
 }
 
-describe("registering an ended run reopens it (AC-ROI-6)", () => {
+describe("registering an ended run reopens it (spec-run-only-write-identity-and-run-end-claim-release#AC-ROI-6)", () => {
   it("clears ended_at and end_reason, leaving the registered record untouched", () => {
     const session = freshSession();
     const run = register(session);

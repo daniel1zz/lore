@@ -1,6 +1,6 @@
 /**
  * ClaudeSettingsPort.mergeLanguage — injected fake fs, never the real ~/.claude.
- * @spec_ref spec-context-fragments-config-driven-layered-rule-injection AC-CF-5 AC-CF-18
+ * @spec_ref spec-context-fragments-config-driven-layered-rule-injection#AC-CF-5 spec-context-fragments-config-driven-layered-rule-injection#AC-CF-18
  */
 import { describe, expect, it } from "vitest";
 import { ClaudeSettingsPort, resolveLanguageName, type ClaudeSettingsFs } from "../../../src/adapters/claude-settings-port.js";

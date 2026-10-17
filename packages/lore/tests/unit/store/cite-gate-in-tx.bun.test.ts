@@ -1,5 +1,5 @@
 /**
- * @spec_ref AC-BLS2-3
+ * @spec_ref spec-baseline-slice-2-completeness-census-per-branch-citation#AC-BLS2-3
  *
  * Deterministic companion to cite-retire-race.bun.test.ts (D6 / QA-2 of
  * spec-baseline-slice-2-completeness-census-per-branch-citation): the citing write re-reads the

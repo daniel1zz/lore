@@ -23,7 +23,7 @@
  *               validation (reach the service — exit 0), proving the SSOT-import
  *               repair (D4 drive-by) didn't narrow the pre-existing sub-type set
  *
- * @spec_ref SPEC-041 §4 AC-SL-4 AC-SL-9
+ * @spec_ref SPEC-041 §4 spec-spec-041-session-layer-part-1-bootstrap-pointer-set-lossles#AC-SL-4 AC-SL-9
  */
 
 import { describe, expect, it, beforeAll, beforeEach, afterEach } from "vitest";

@@ -2,7 +2,7 @@
 /**
  * `lore run end` ends a run and its claims (clean claims released, dirty claims kept as orphaned_dirty).
  *
- * @spec_ref AC-ROI-4
+ * @spec_ref spec-run-only-write-identity-and-run-end-claim-release#AC-ROI-4
  *   spec-run-only-write-identity-and-run-end-claim-release Scope 4; ADR decision 4; BR-1057, BR-1043.
  *
  * Drives the REAL CLI against an mkdtemp corpus (`lore init`, never the repo's `.lore/`), with REAL temp
@@ -49,7 +49,7 @@ function freshRun(): string {
   return run;
 }
 
-describe("lore run end — claim release (AC-ROI-4)", () => {
+describe("lore run end — claim release (spec-run-only-write-identity-and-run-end-claim-release#AC-ROI-4)", () => {
   it("releases a claim whose worktree is clean, stamps ended_at/end_reason, and records the ENDING run on the release", async () => {
     const run = freshRun();
     const task = await corpus.newTarget("task");

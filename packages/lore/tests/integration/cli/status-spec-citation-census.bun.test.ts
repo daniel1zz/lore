@@ -189,7 +189,7 @@ describe("AC-BLS3B-3 census over a corpus with baseline docs", () => {
   });
 });
 
-describe("AC-BLS3B-3 census is absent when the corpus has no baseline docs (AC-BLS2-11 byte-identity)", () => {
+describe("AC-BLS3B-3 census is absent when the corpus has no baseline docs (spec-baseline-slice-2-completeness-census-per-branch-citation#AC-BLS2-11 byte-identity)", () => {
   it("emits neither field and prints neither line", () => {
     const dir = realpathSync(mkdtempSync(join(tmpdir(), "census-plain-")));
     try {

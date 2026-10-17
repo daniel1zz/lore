@@ -110,7 +110,7 @@ describe("D3 incident (a): lore link A B --kind blocks", () => {
   });
 });
 
-describe("D3 incident (b): lore approve X --by daniel (the writer flags were later removed — AC-ROI-1)", () => {
+describe("D3 incident (b): lore approve X --by daniel (the writer flags were later removed — spec-run-only-write-identity-and-run-end-claim-release#AC-ROI-1)", () => {
   it("REGRESSION: --by is rejected loudly (exit 2, names the flag) and writes nothing", () => {
     const doc = createKnowledgeDoc("Approve By Retired Doc");
 
