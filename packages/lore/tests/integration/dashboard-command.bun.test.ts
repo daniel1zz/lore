@@ -551,6 +551,52 @@ describe("--no-open honours the flag by suppressing the browser opener (AC-F5A-9
       let controlProc: DashboardProcessHandle | undefined;
 
       try {
+        // reason (TG-15): the control runs FIRST and is POLLED, not slept on. The opener is spawned by the
+        // compiled binary AFTER it prints the handshake line, and a fixed 1 s grace was measured too short
+        // when the machine is busy with an 8-worker full run (the control then saw 0 invocations). The
+        // control's observed latency (handshake line -> OPEN_CALLED in the shim log) also sizes the grace
+        // window of the suppressed case, so "no invocation" is judged against a window the opener
+        // demonstrably fits in on this machine at this load, not a guessed constant.
+        const controlPort = randomPort();
+        controlProc = Bun.spawn([DIST_LORE, "dashboard", "--api-port", String(controlPort)], {
+          cwd: fixture.corpusDir,
+          env: {
+            ...process.env,
+            HOME: fixture.corpusDir,
+            LORE_STATE_HOME: fixture.stateDir,
+            LORE_CONFIG_HOME: fixture.configDir,
+            CLAUDECODE: "1",
+            PATH: `${controlShim.shimDir}:${process.env.PATH ?? ""}`,
+          },
+          stdout: "pipe",
+          stderr: "pipe",
+        });
+
+        const controlHandshake = await waitForDashboardHandshake(controlProc.stdout, 15_000);
+        expect(controlHandshake.url).toContain(`:${controlPort}`);
+        const handshakeAt = Date.now();
+
+        const openDeadline = handshakeAt + 15_000;
+        while (!readShimLog(controlShim.logFile).includes("OPEN_CALLED") && Date.now() < openDeadline) {
+          await new Promise((resolve) => setTimeout(resolve, 20));
+        }
+        const openLatencyMs = Date.now() - handshakeAt;
+        // a duplicate invocation would land right after the first: keep watching for one more window
+        await new Promise((resolve) => setTimeout(resolve, 500));
+
+        await killAndWait(controlProc);
+
+        const controlLog = readShimLog(controlShim.logFile);
+        const controlInvocations = controlLog
+          .split("\n")
+          .filter((line) => line.startsWith("OPEN_CALLED"));
+        // Proves the shim itself is live and the grace window is sufficient: a
+        // "suppressedLog === ''" result below is only meaningful relative to this control
+        // actually recording exactly one call.
+        expect(controlInvocations.length, `control log after ${openLatencyMs} ms: ${JSON.stringify(controlLog)}`).toBe(1);
+        expect(controlLog).toContain(`:${controlPort}`);
+        expect(controlLog).toContain("/auth/bootstrap?nonce=");
+
         // ── Suppressed case: --no-open must yield ZERO opener invocations ──────────
         const suppressedPort = randomPort();
         suppressedProc = Bun.spawn(
@@ -574,54 +620,17 @@ describe("--no-open honours the flag by suppressing the browser opener (AC-F5A-9
         expect(suppressedHandshake.url).toContain(`:${suppressedPort}`);
         expect(suppressedHandshake.url).toContain("/auth/bootstrap?nonce=");
 
-        // Grace window for the (buggy) opener spawn to have fired and the shim script
-        // to have flushed its log line — the real invocation, if it happens, is
-        // effectively instantaneous (a trivial shell echo), so this is generous.
-        await new Promise((resolve) => setTimeout(resolve, 1_000));
+        // Grace window for the (buggy) opener spawn to have fired and the shim script to have flushed
+        // its log line: three times what the control just took, never less than one second.
+        await new Promise((resolve) => setTimeout(resolve, Math.max(1_000, 3 * openLatencyMs)));
 
         await killAndWait(suppressedProc);
 
         const suppressedLog = readShimLog(suppressedShim.logFile);
-        // THE assertion: --no-open must suppress the opener entirely. This FAILS against
-        // current `commands/dashboard.ts` (both `runPackagedMode`/`runDevMode` read
-        // `args["no-open"]`, which citty/mri never populates — see this file's header
-        // addendum) — the log instead contains exactly one OPEN_CALLED line, identical to
-        // the control case below.
+        // THE assertion: --no-open must suppress the opener entirely (a regression of
+        // `commands/dashboard.ts` reading `args["no-open"]`, which citty/mri never populates, would
+        // leave exactly one OPEN_CALLED line here, identical to the control above).
         expect(suppressedLog).toBe("");
-
-        // ── Control case: WITHOUT --no-open, the opener must fire exactly once ─────
-        const controlPort = randomPort();
-        controlProc = Bun.spawn([DIST_LORE, "dashboard", "--api-port", String(controlPort)], {
-          cwd: fixture.corpusDir,
-          env: {
-            ...process.env,
-            HOME: fixture.corpusDir,
-            LORE_STATE_HOME: fixture.stateDir,
-            LORE_CONFIG_HOME: fixture.configDir,
-            CLAUDECODE: "1",
-            PATH: `${controlShim.shimDir}:${process.env.PATH ?? ""}`,
-          },
-          stdout: "pipe",
-          stderr: "pipe",
-        });
-
-        const controlHandshake = await waitForDashboardHandshake(controlProc.stdout, 15_000);
-        expect(controlHandshake.url).toContain(`:${controlPort}`);
-
-        await new Promise((resolve) => setTimeout(resolve, 1_000));
-
-        await killAndWait(controlProc);
-
-        const controlLog = readShimLog(controlShim.logFile);
-        const controlInvocations = controlLog
-          .split("\n")
-          .filter((line) => line.startsWith("OPEN_CALLED"));
-        // Proves the shim itself is live and the grace window is sufficient — a
-        // "suppressedLog === ''" result above is only meaningful relative to this control
-        // actually recording exactly one call.
-        expect(controlInvocations.length).toBe(1);
-        expect(controlLog).toContain(`:${controlPort}`);
-        expect(controlLog).toContain("/auth/bootstrap?nonce=");
       } finally {
         if (suppressedProc !== undefined) await killAndWait(suppressedProc);
         if (controlProc !== undefined) await killAndWait(controlProc);
