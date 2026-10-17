@@ -290,7 +290,7 @@ describe("lore anchor add — ERROR", () => {
 
 // ─── STATE: anchor mutation preserves claim + evidence (AC-S3-5 at the CLI seam) ─
 
-describe("lore anchor rm — STATE (AC-S3-5 regression)", () => {
+describe("lore anchor rm — STATE (spec-spec-042-session-layer-part-2-session-registry-file-anchor#AC-S3-5 regression)", () => {
   it("removing an anchor on a task holding an active claim + evidence preserves both untouched", () => {
     const planSlug = createPlan(tmpDir, "Anchor State Plan");
     const taskSlug = createTask(tmpDir, planSlug, "Stateful Task", ["src/a", "src/b"]);

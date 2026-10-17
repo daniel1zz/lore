@@ -55,7 +55,7 @@
  *   a dedicated falsifier case, proving it can actually go red before it is
  *   trusted to stay green).
  *
- * @spec_ref AC-GI-2
+ * @spec_ref spec-the-defect-channel-reaches-no-machine-but-its-own-github#AC-GI-2
  */
 
 import { describe, expect, it } from "vitest";

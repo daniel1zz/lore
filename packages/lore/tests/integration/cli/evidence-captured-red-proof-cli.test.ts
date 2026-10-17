@@ -90,7 +90,7 @@ afterAll(() => {
   }
 });
 
-describe("lore evidence --capture refuses a broken-command red (AC-EH-9 d)", () => {
+describe("lore evidence --capture refuses a broken-command red (spec-evidence-labels-and-reds-are-honest#AC-EH-9 d)", () => {
   it("ERROR (d): test + expected-fail + `cd /nonexistent-dir-for-red && true` exits exactly 4 and writes no row", { timeout: 60_000 }, () => {
     const before = readRows(slug, tmpDir).length;
     const run = runLore(

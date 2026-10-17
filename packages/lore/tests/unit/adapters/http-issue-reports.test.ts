@@ -518,7 +518,7 @@ describe("GET /api/issue-reports (AC-074-5)", () => {
 
   // ─── D7 (spec-issue-closure-loop-computed-resolution-agent-reachable, AC-ICL-9) ──
 
-  it("AC-ICL-9 HAPPY: a resolves in-edge from a non-terminal source computes 'resolving'", async () => {
+  it("spec-issue-closure-loop-computed-resolution-agent-reachable#AC-ICL-9 HAPPY: a resolves in-edge from a non-terminal source computes 'resolving'", async () => {
     const store = new InMemoryStore();
     const app = makeApp(store);
     const prdId = await createRootPrd(app.corpusService);
@@ -536,7 +536,7 @@ describe("GET /api/issue-reports (AC-074-5)", () => {
     expect(body.data!.open_count).toBe(0);
   });
 
-  it("AC-ICL-9 HAPPY: a resolves in-edge from an archived source computes 'fixed'", async () => {
+  it("spec-issue-closure-loop-computed-resolution-agent-reachable#AC-ICL-9 HAPPY: a resolves in-edge from an archived source computes 'fixed'", async () => {
     const store = new InMemoryStore();
     const app = makeApp(store);
     const prdId = await createRootPrd(app.corpusService);
@@ -554,7 +554,7 @@ describe("GET /api/issue-reports (AC-074-5)", () => {
     expect(body.data!.open_count).toBe(0);
   });
 
-  it("AC-ICL-9 STATE: an unclosed escalation — status stays 'draft' but resolution is 'fixed' — stays visible in rows while excluded from open_count", async () => {
+  it("spec-issue-closure-loop-computed-resolution-agent-reachable#AC-ICL-9 STATE: an unclosed escalation — status stays 'draft' but resolution is 'fixed' — stays visible in rows while excluded from open_count", async () => {
     const store = new InMemoryStore();
     const app = makeApp(store);
     const prdId = await createRootPrd(app.corpusService);

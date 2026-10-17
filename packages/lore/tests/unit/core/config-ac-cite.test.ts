@@ -7,7 +7,7 @@
  * undefined; `enabled` alone is not the gate's switch), REGRESSION (a pre-existing gates entry with only
  * `enabled` still parses unchanged).
  *
- * @spec_ref AC-BLS2-2
+ * @spec_ref spec-baseline-slice-2-completeness-census-per-branch-citation#AC-BLS2-2
  */
 
 import { describe, it, expect } from "vitest";

@@ -1,5 +1,5 @@
 /**
- * @spec_ref spec-worktree-removal-is-decided-by-who-is-inside-not-by-how (D1; AC-WL-1 store half)
+ * @spec_ref spec-worktree-removal-is-decided-by-who-is-inside-not-by-how (D1; spec-worktree-removal-is-decided-by-who-is-inside-not-by-how#AC-WL-1 store half)
  *
  * `StoreInterface.listRunsByAgentRef` across ALL THREE stores (SQLite, Turso local file, InMemory) with one
  * shared contract, so a store that drifts fails here rather than in the occupancy read.

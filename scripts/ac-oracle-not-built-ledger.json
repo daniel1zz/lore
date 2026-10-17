@@ -1,7 +1,5 @@
 [
   {"spec": "spec-corpus-truthfulness-a-verdict-must-carry-the-state-it", "ac": "AC-CT-3", "reason": "oracle test never written (stamp-currency-floor.test.ts absent)", "owner_plan": "plan-corpus-truthfulness-finish-ac-ct-3-10-never-implemented"},
-  {"spec": "spec-corpus-truthfulness-a-verdict-must-carry-the-state-it", "ac": "AC-CT-4", "reason": "oracle test never written (blast-radius-staleness.test.ts absent)", "owner_plan": "plan-corpus-truthfulness-finish-ac-ct-3-10-never-implemented"},
-  {"spec": "spec-corpus-truthfulness-a-verdict-must-carry-the-state-it", "ac": "AC-CT-5", "reason": "oracle test never written (stamp-pre-post-demotion.test.ts absent)", "owner_plan": "plan-corpus-truthfulness-finish-ac-ct-3-10-never-implemented"},
   {"spec": "spec-corpus-truthfulness-a-verdict-must-carry-the-state-it", "ac": "AC-CT-8", "reason": "oracle test never written (occupancy-skip-continuity.test.ts absent)", "owner_plan": "plan-corpus-truthfulness-finish-ac-ct-3-10-never-implemented"},
   {"spec": "spec-corpus-truthfulness-a-verdict-must-carry-the-state-it", "ac": "AC-CT-9", "reason": "oracle test never written (unmeasured-floor-consequence.test.ts absent)", "owner_plan": "plan-corpus-truthfulness-finish-ac-ct-3-10-never-implemented"},
   {"spec": "spec-corpus-truthfulness-a-verdict-must-carry-the-state-it", "ac": "AC-CT-10", "reason": "oracle script never written (scripts/check-capture-source-buckets.ts absent)", "owner_plan": "plan-corpus-truthfulness-finish-ac-ct-3-10-never-implemented"}

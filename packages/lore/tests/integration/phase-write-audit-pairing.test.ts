@@ -491,7 +491,7 @@ describe("invocation shape and corpus safety guards", () => {
     );
   });
 
-  it("guards its own source against the phrases AC-PHASEVER-3(d) bans from packages/", () => {
+  it("guards its own source against the phrases spec-lore-phase-add-and-phase-rm-mutate-a-plan-s-declared#AC-PHASEVER-3(d) bans from packages/", () => {
     const self = readFileSync(SELF_PATH, "utf8");
     expect(countOccurrences(self, BANNED_PHRASE_A), `${SELF_PATH} spells out a banned phrase contiguously`).toBe(0);
     expect(countOccurrences(self, BANNED_PHRASE_B), `${SELF_PATH} spells out a banned phrase contiguously`).toBe(0);

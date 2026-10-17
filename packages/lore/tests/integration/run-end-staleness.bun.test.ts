@@ -2,7 +2,7 @@
 /**
  * Staleness accounts for ended runs and orphaned_dirty claims.
  *
- * @spec_ref AC-ROI-5
+ * @spec_ref spec-run-only-write-identity-and-run-end-claim-release#AC-ROI-5
  *   spec-run-only-write-identity-and-run-end-claim-release Scope 5; ADR decision 5; BR-1058.
  *
  * The clean re-check is LAZY (claim time and `lore ready`; no sweep), so every verdict below is observed by
@@ -59,7 +59,7 @@ async function orphanedDirtyTask(run: string, worktree: string): Promise<string>
   return task;
 }
 
-describe("ended run + clean worktree is stale at once (AC-ROI-5)", () => {
+describe("ended run + clean worktree is stale at once (spec-run-only-write-identity-and-run-end-claim-release#AC-ROI-5)", () => {
   it("lets a plain claim take a FRESH claim of an ended run whose worktree is clean", async () => {
     const run = freshRun();
     const rival = freshRun();
@@ -99,7 +99,7 @@ describe("ended run + clean worktree is stale at once (AC-ROI-5)", () => {
   });
 });
 
-describe("orphaned_dirty claims are exempt from age (AC-ROI-5)", () => {
+describe("orphaned_dirty claims are exempt from age (spec-run-only-write-identity-and-run-end-claim-release#AC-ROI-5)", () => {
   it("refuses a plain claim even when older than claim_ttl_minutes", async () => {
     const run = freshRun();
     const rival = freshRun();

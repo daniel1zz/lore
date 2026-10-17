@@ -88,7 +88,7 @@
  * Side-effect class: IO — spawns the compiled `dist/lore` binary against a
  * throwaway `mkdtemp` corpus (never this repo's own `.lore/`).
  *
- * @spec_ref AC-ETI-7 AC-ETI-8 (task-ac-eti-7-proves-the-tail-window-helper-but-not-its)
+ * @spec_ref spec-evidence-output-tail-integrity-a-self-reported-non-pass#AC-ETI-7 spec-evidence-output-tail-integrity-a-self-reported-non-pass#AC-ETI-8 (task-ac-eti-7-proves-the-tail-window-helper-but-not-its)
  */
 
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
@@ -320,7 +320,7 @@ afterEach(() => {
 });
 
 describe("lore verify — acRef three-hop wiring seam, driven end-to-end through the compiled CLI", () => {
-  it("AC-ETI-7 (HAPPY, wiring): the stored output_tail for AC-PW-1 witnesses its own id even though the plain stream-tail structurally cannot; AC-ETI-8 (CONTROL, negative): AC-PW-2's stored tail is the byte-length-identical plain tail and does not witness AC-PW-1", () => {
+  it("spec-evidence-output-tail-integrity-a-self-reported-non-pass#AC-ETI-7 (HAPPY, wiring): the stored output_tail for AC-PW-1 witnesses its own id even though the plain stream-tail structurally cannot; spec-evidence-output-tail-integrity-a-self-reported-non-pass#AC-ETI-8 (CONTROL, negative): AC-PW-2's stored tail is the byte-length-identical plain tail and does not witness AC-PW-1", () => {
     const { planSlug, taskSlug } = buildFixture(tmpDir);
 
     const result = runLore(["verify", planSlug, "--task", taskSlug, "--allow-new-commands"], tmpDir);

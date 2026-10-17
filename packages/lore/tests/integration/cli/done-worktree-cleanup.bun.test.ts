@@ -267,7 +267,7 @@ describe("done removes the recorded worktree (#106)", () => {
     expect(branchExists(unmerged.branch)).toBe(true);
   }, 120_000);
 
-  it("removes a worktree whose last commit is seconds old: no elapsed-time clause exists (RE-BASELINE, AC-WS-5)", () => {
+  it("removes a worktree whose last commit is seconds old: no elapsed-time clause exists (RE-BASELINE, spec-one-worktree-removal-test-for-the-guard-lore-done-and-a#AC-WS-5)", () => {
     const r = done(recent);
     expect(r.status).toBe(0);
     expect(worktreeLine(r)).toBe(`worktree: removed ${recent.path}`);

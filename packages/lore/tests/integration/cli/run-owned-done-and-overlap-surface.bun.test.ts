@@ -2,7 +2,7 @@
 /**
  * The CLI SURFACE decides `lore done` and the anchor-overlap claim gate by RUN.
  *
- * @spec_ref AC-ROI-3
+ * @spec_ref spec-run-only-write-identity-and-run-end-claim-release#AC-ROI-3
  *   spec-run-only-write-identity-and-run-end-claim-release Scope 3; BR-1056.
  *
  * `run-owned-done-and-overlap.bun.test.ts` proves the service. That is not enough: `DoneOpts.harnessRun` and the
@@ -59,7 +59,7 @@ function statusOf(dir: string, target: string): string {
   return parsed.data.doc?.status ?? parsed.data.status ?? "unknown";
 }
 
-describe("lore done through the CLI decides the holder by run (AC-ROI-3)", () => {
+describe("lore done through the CLI decides the holder by run (spec-run-only-write-identity-and-run-end-claim-release#AC-ROI-3)", () => {
   it("NEGATIVE: run R2 with the SAME derived name is refused a fresh claim of R1, the refusal names R1, nothing is archived", async () => {
     const target = await plain.newTarget("task");
     registerRun(plain.dir, R1);
@@ -105,7 +105,7 @@ describe("lore done through the CLI decides the holder by run (AC-ROI-3)", () =>
   });
 });
 
-describe("the claim gate's anchor overlap decides by run through the CLI (AC-ROI-3, BR-1056)", () => {
+describe("the claim gate's anchor overlap decides by run through the CLI (spec-run-only-write-identity-and-run-end-claim-release#AC-ROI-3, BR-1056)", () => {
   it("NEGATIVE: a second run sharing the derived name is refused an overlapping claim", async () => {
     const first = await gated.newTarget("task", [ANCHOR]);
     const second = await gated.newTarget("task", [ANCHOR]);

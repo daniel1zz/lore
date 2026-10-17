@@ -51,7 +51,7 @@ function dbPath(): string {
   return join(tmpDir, ".lore", "lore.db");
 }
 
-describe("createApp wiring — resolutionProjector (AC-GI-4 production-reachability)", () => {
+describe("createApp wiring — resolutionProjector (spec-the-defect-channel-reaches-no-machine-but-its-own-github#AC-GI-4 production-reachability)", () => {
   it("HAPPY: the real composition root returns an App whose resolutionProjector is defined and is a real ResolutionProjector", () => {
     // reason: `createApp(dbPath)` with no config always returns a bare `App`
     // (the `Result<App>` arm exists only for the sync-enabled TursoStore

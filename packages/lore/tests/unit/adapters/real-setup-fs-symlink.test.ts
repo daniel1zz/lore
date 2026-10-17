@@ -462,7 +462,7 @@ describe("RealSetupFsWriter removal never resolves through a symlink", () => {
       expect(disabled).toEqual([]);
     });
 
-    it("AC-SL-7's negative-control fixture is present and still discriminates", () => {
+    it("spec-lore-setup-deletes-repo-source-through-dev-symlinks#AC-SL-7's negative-control fixture is present and still discriminates", () => {
       // The control for AC-SL-7 is a `tsc` artifact, so NO test run would notice
       // if it were deleted — every test here would still pass while the AC
       // silently became "a required signature also typechecks", which is

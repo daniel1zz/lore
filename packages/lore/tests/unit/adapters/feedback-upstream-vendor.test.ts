@@ -297,7 +297,7 @@ describe("buildUnconfiguredUpstreamRemedy — two paths, one message (AC4)", () 
     expect(message.slice(repoAt)).toContain("host yourself");
   });
 
-  it("REGRESSION: keeps the three pinned disclosure substrings (AC-GD-2(b))", () => {
+  it("REGRESSION: keeps the three pinned disclosure substrings (spec-governance-defaults-must-ship-and-every-recorded-gap-must#AC-GD-2(b))", () => {
     const message = remedyMessage();
     expect(message).toContain(".lore/config.yaml");
     expect(message).toContain("git-tracked");

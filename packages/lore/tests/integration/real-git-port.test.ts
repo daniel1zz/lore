@@ -221,7 +221,7 @@ describe("RealGitPort — worktreeAdd on an already-existing path (ERROR)", () =
   });
 });
 
-describe("RealGitPort — countUnmergedCommits (AC-REPLAY-1)", () => {
+describe("RealGitPort — countUnmergedCommits (spec-multi-session-concurrency-queryable-ownership-checkout#AC-REPLAY-1)", () => {
   it("HAPPY: a branch several commits ahead of main counts exactly", async () => {
     const repoRoot = mkScratchDir("rgp-repo-count-happy-");
     initGitRepo(repoRoot);

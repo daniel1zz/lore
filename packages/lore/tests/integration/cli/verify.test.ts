@@ -52,7 +52,7 @@
  *               and `verify.require_command_approval: false` disables the
  *               gate entirely (a brand-new command runs without the flag)
  *
- * @spec_ref AC-VRF-10 AC-VRF-2; SPEC-039 §M2
+ * @spec_ref AC-VRF-10 spec-spec-039-trusted-runner-attested-evidence-for-script-mode-a#AC-VRF-2; SPEC-039 §M2
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest";

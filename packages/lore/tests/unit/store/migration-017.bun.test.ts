@@ -1,5 +1,5 @@
 /**
- * @spec_ref spec-run-only-write-identity-and-run-end-claim-release (Scope 4; AC-ROI-4/5/6 store half; BR-1057)
+ * @spec_ref spec-run-only-write-identity-and-run-end-claim-release (Scope 4; spec-run-only-write-identity-and-run-end-claim-release#AC-ROI-4/5/6 store half; BR-1057)
  *
  * migration-017: nullable `runs.ended_at` / `runs.end_reason`, and the three store methods built on them
  * (`endRun`, `reopenRun`, `getRunEnd`) across ALL THREE stores (SQLite, Turso, InMemory) with one shared

@@ -148,7 +148,7 @@ describe("formatWorkflowBadge — REGRESSION (stale suffix + evidence counts unc
 
 // ─── REGRESSION — AC-WH-1: expected-fail/inconclusive last result never counted as green ──
 
-describe("formatWorkflowBadge — AC-WH-1 (expected-fail/inconclusive never render as green ✔)", () => {
+describe("formatWorkflowBadge — spec-workflow-hardening-evidence-red-vocabulary-claim-worktree#AC-WH-1 (expected-fail/inconclusive never render as green ✔)", () => {
   it("last evidence result 'expected-fail' → ⚑R<n>, never ✔<n>", () => {
     const doc = makeTask({
       verification_evidence: [

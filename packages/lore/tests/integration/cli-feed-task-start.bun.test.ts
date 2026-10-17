@@ -569,7 +569,7 @@ describe("REGRESSION — spec-create / session-resume / phase-start outputs are 
     expect(result.stderr).toContain("totally-unknown-checkpoint");
   });
 
-  it("REGRESSION (AC-CP-4, CLI stdout): the derivation-path call (no --handoff flag) carries RESUME_SCOPE_CLOSURE verbatim once a ticket is found", () => {
+  it("REGRESSION (spec-context-provenance-injected-corpus-global-state-and-a#AC-CP-4, CLI stdout): the derivation-path call (no --handoff flag) carries RESUME_SCOPE_CLOSURE verbatim once a ticket is found", () => {
     createHandoffChain(tmpDir);
 
     // reason: no `--handoff <slug>` supplied — exercises the SAME newest-wins
@@ -586,7 +586,7 @@ describe("REGRESSION — spec-create / session-resume / phase-start outputs are 
     }
   });
 
-  it("REGRESSION (AC-CP-4): spec-create / phase-start / an unknown checkpoint stay closure-free even once a resume ticket exists in the same corpus", () => {
+  it("REGRESSION (spec-context-provenance-injected-corpus-global-state-and-a#AC-CP-4): spec-create / phase-start / an unknown checkpoint stay closure-free even once a resume ticket exists in the same corpus", () => {
     createHandoffChain(tmpDir);
 
     const specCreate = runLore(["feed", "spec-create"], tmpDir);

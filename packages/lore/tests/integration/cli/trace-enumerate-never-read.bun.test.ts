@@ -221,7 +221,7 @@ describe("AC-RR-1: lore trace stats --enumerate never_read_docs_count", () => {
     expect(statsReport(tmpDir, ["--since", future]).never_read_docs_count).toBe(3);
   }, 60_000);
 
-  it("REGRESSION: enumerating emits ZERO trace rows of its own (SPEC-102 AC-TRACE-6)", () => {
+  it("REGRESSION: enumerating emits ZERO trace rows of its own (SPEC-102 spec-trace-layer-read-deny-observability-table-default-on-with#AC-TRACE-6)", () => {
     tmpDir = mkdtempSync(join(tmpdir(), "lore-trace-enum-neverread-norecursion-"));
     initCorpus(tmpDir);
 

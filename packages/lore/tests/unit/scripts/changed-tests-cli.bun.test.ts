@@ -237,7 +237,7 @@ describe("bun run test:changed CLI — --list HEAD (AC-TC-2)", () => {
     expect(KNOWN_REASON_TAG_RE.test(syntheticZeroAccounting)).toBe(false);
   });
 
-  it("STATE/REGRESSION: the four reasons (changed-test, transitive, declared-read, declared-spawn) are the whole vocabulary; the removed content-marker reasons are not members (AC-TG-7)", () => {
+  it("STATE/REGRESSION: the four reasons (changed-test, transitive, declared-read, declared-spawn) are the whole vocabulary; the removed content-marker reasons are not members (spec-test-governance-guards-that-refuse-bad-tests-declared#AC-TG-7)", () => {
     for (const reason of ["changed-test", "transitive", "declared-read", "declared-spawn"] as const) {
       expect(SELECTION_REASONS).toContain(reason);
       expect(isSelectionReason(reason)).toBe(true);
@@ -495,7 +495,7 @@ describe("AC-TC-4: hooks-only and assets-only change sets select both pre-push g
   });
 });
 
-describe("AC-TC-5: the two REAL pre-push guard files declare the hook pair they judge, not only fixture stand-ins (AC-TG-7 replaces the former content marker)", () => {
+describe("spec-two-runner-changed-test-selection-deterministic-test#AC-TC-5: the two REAL pre-push guard files declare the hook pair they judge, not only fixture stand-ins (spec-test-governance-guards-that-refuse-bad-tests-declared#AC-TG-7 replaces the former content marker)", () => {
   /**
    * The AC-TC-4 suite above proves the selector honours a declaration using FIXTURE strings; it never
    * reads the real files, so a future edit that drops the `@reads` lines from

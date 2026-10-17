@@ -1,7 +1,7 @@
 /**
  * Internal writers keep their code-set identities when the run is the only caller identity.
  *
- * @spec_ref AC-ROI-9
+ * @spec_ref spec-run-only-write-identity-and-run-end-claim-release#AC-ROI-9
  *   spec-run-only-write-identity-and-run-end-claim-release Scope 2 ("lore's internal writer identities");
  *   BR-1032 (`baseline-attribute-work-to-a-run`).
  *
@@ -71,7 +71,7 @@ async function createDoc(corpus: CorpusService, input: CreateDocInput): Promise<
   return r.value;
 }
 
-describe("AC-ROI-9 internal writers keep their code-set identities", () => {
+describe("spec-run-only-write-identity-and-run-end-claim-release#AC-ROI-9 internal writers keep their code-set identities", () => {
   it("HAPPY: an AI-judge review row records ai:claude-cli:* and its audit row names the judge, not the caller", async () => {
     const { store, corpus } = openFixture();
     await createDoc(corpus, { type: "prd", title: "Root", content: "root" } as CreateDocInput);

@@ -16,7 +16,7 @@
  *
  * Coverage: HAPPY / NEGATIVE / BOUNDARY / ERROR / STATE / REGRESSION
  *
- * @spec_ref AC-WH-3 — spec-workflow-hardening-evidence-red-vocabulary-claim-worktree §M3
+ * @spec_ref spec-workflow-hardening-evidence-red-vocabulary-claim-worktree#AC-WH-3 — spec-workflow-hardening-evidence-red-vocabulary-claim-worktree §M3
  */
 
 import { RecordLockService } from "../../../src/service/record-lock-service.js";
@@ -60,7 +60,7 @@ function makeTaskDoc(overrides: Partial<DocRecord> = {}): DocRecord {
   };
 }
 
-describe("lore done — success message rendering (AC-WH-3)", () => {
+describe("lore done — success message rendering (spec-workflow-hardening-evidence-red-vocabulary-claim-worktree#AC-WH-3)", () => {
   // ── HAPPY ──────────────────────────────────────────────────────────────
 
   it("HAPPY: a real lifecycle walk names the slug, final version, and full transitions path", () => {

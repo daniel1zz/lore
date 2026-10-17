@@ -1,6 +1,6 @@
 // @spawns packages/lore/src/index.ts
 /**
- * @spec_ref AC-RID-1
+ * @spec_ref spec-run-identity-slice-1-harness-attested-runs-attested#AC-RID-1
  *
  * `lore run attest-input` (spec run-identity-slice-1 D10 / D12): a Claude Code PreToolUse payload on stdin
  * becomes hook JSON whose `updatedInput` carries the run. ⛔ The output must NEVER contain

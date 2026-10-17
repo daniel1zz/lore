@@ -19,7 +19,7 @@ function run(hook: string, payload: unknown) {
 }
 
 describe("pre-no-general-agent-gate message", () => {
-  it("AC-AT-3 pre-no-general-agent-gate refusal lists exactly lore-reader and lore-implementer", () => {
+  it("spec-two-helper-agent-types-lore-reader-and-lore-implementer#AC-AT-3 pre-no-general-agent-gate refusal lists exactly lore-reader and lore-implementer", () => {
     const r = run(NO_GENERAL, { tool_name: "Agent", tool_input: { subagent_type: "general-purpose" } });
     expect(r.status).toBe(2);
     expect(r.stderr).toContain("lore-reader");

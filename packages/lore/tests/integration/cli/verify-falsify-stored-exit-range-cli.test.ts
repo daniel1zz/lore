@@ -24,7 +24,7 @@
  * RED-first: against current code the stored 0 runs the control, then the mutation, and the exit is not 4 — an
  * ASSERTION failure on the exit code and the stderr text.
  *
- * @spec_ref AC-EH-5 (f) — spec-evidence-labels-and-reds-are-honest; BR-1074
+ * @spec_ref spec-evidence-labels-and-reds-are-honest#AC-EH-5 (f) — spec-evidence-labels-and-reds-are-honest; BR-1074
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
@@ -112,7 +112,7 @@ function evidenceCount(dir: string, taskSlug: string): number {
   return extractEvidence(parsed.data.doc).length;
 }
 
-describe("AC-EH-5 (f) — lore verify --falsify refuses a stored falsifier exit code of 0", () => {
+describe("spec-evidence-labels-and-reds-are-honest#AC-EH-5 (f) — lore verify --falsify refuses a stored falsifier exit code of 0", () => {
   let tmpDir: string;
 
   beforeEach(() => {

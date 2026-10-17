@@ -14,8 +14,8 @@ const start = (base: string, sid: string, cwd: string) =>
 const readSnapshot = (base: string, sid: string) =>
   JSON.parse(readFileSync(join(currentTurnDir(base, sid), SNAPSHOT), "utf8"));
 
-describe("AC-TE-2 turn-start working-tree snapshot", () => {
-  it("AC-TE-2 records a tree id with uncommitted + untracked changes, real index untouched, no ref", () => {
+describe("spec-interception-moves-off-every-tool-call-one-turn-end-review#AC-TE-2 turn-start working-tree snapshot", () => {
+  it("spec-interception-moves-off-every-tool-call-one-turn-end-review#AC-TE-2 records a tree id with uncommitted + untracked changes, real index untouched, no ref", () => {
     const repo = makeGitRepo(); const base = makeTmpDir("turn-state-");
     writeFileSync(join(repo, "a.txt"), "one\n");
     git(repo, "add", "a.txt"); git(repo, "commit", "-qm", "init");
@@ -35,7 +35,7 @@ describe("AC-TE-2 turn-start working-tree snapshot", () => {
     expect(git(repo, "for-each-ref")).toBe(refsBefore);
   });
 
-  it("AC-TE-2 records tree null with a reason (unmeasured) outside a git repo", () => {
+  it("spec-interception-moves-off-every-tool-call-one-turn-end-review#AC-TE-2 records tree null with a reason (unmeasured) outside a git repo", () => {
     const dir = makeTmpDir("not-a-repo-"); const base = makeTmpDir("turn-state-");
     const r = start(base, "s2", dir);
     expect(r.status).toBe(0);
@@ -45,7 +45,7 @@ describe("AC-TE-2 turn-start working-tree snapshot", () => {
     expect(snap.reason.length).toBeGreaterThan(0);
   });
 
-  it("AC-TE-2 still opens the turn (current-turn.id) when the snapshot is absent", () => {
+  it("spec-interception-moves-off-every-tool-call-one-turn-end-review#AC-TE-2 still opens the turn (current-turn.id) when the snapshot is absent", () => {
     const dir = makeTmpDir("not-a-repo-"); const base = makeTmpDir("turn-state-");
     start(base, "s3", dir);
     expect(existsSync(currentTurnDir(base, "s3"))).toBe(true);

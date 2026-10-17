@@ -10,8 +10,8 @@
  * agent surface without --ai -> 2, judge never spawned), ERROR (unparseable judge reply -> 6, nothing
  * stored), STATE (the stored doc names the seed and share; a refused run stores nothing).
  *
- * @spec_ref AC-BLS2-21
- * @spec_ref AC-BLS2-23
+ * @spec_ref spec-baseline-slice-2-completeness-census-per-branch-citation#AC-BLS2-21
+ * @spec_ref spec-baseline-slice-2-completeness-census-per-branch-citation#AC-BLS2-23
  */
 
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";

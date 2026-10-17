@@ -83,7 +83,7 @@
  * REGRESSION (a probe path outside any git repo; a worktree entry whose OWN
  * path is stale still measures via fallback).
  *
- * @spec_ref spec-multi-session-concurrency-queryable-ownership-checkout AC-OWN-1, AC-REPLAY-1
+ * @spec_ref spec-multi-session-concurrency-queryable-ownership-checkout AC-OWN-1, spec-multi-session-concurrency-queryable-ownership-checkout#AC-REPLAY-1
  */
 
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -666,7 +666,7 @@ describe("commands/territory.ts's production run() — the live call site (AC-OW
   }, 15000);
 });
 
-describe("partitionTerritory — unmerged_commits (AC-REPLAY-1)", () => {
+describe("partitionTerritory — unmerged_commits (spec-multi-session-concurrency-queryable-ownership-checkout#AC-REPLAY-1)", () => {
   it("HAPPY: an orphan branch several commits ahead of main counts exactly", () => {
     const repoRoot = mkdtempReal("tp-count-happy-");
     initRepo(repoRoot);
