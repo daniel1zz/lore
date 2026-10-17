@@ -1,4 +1,3 @@
-// @spawns dist/lore
 /**
  * AC-VS-8 e2e (spec-declared-scope-attestation-contract-task-owned-ac-scope;
  * task-t4-record-the-coverage-predicate-s-measured-false-pass-in): proves
@@ -47,18 +46,21 @@
  *
  * @spec_ref spec-declared-scope-attestation-contract-task-owned-ac-scope
  *   AC-VS-8. Task task-t4-record-the-coverage-predicate-s-measured-false-pass-in.
+ *
+ * TG-25 (adr-tg-1 option b): the commands run IN-PROCESS through tests/helpers/run-lore-in-process.ts, not through
+ * dist/lore. Wherever the prose above says the compiled binary is spawned or its freshness asserted, that is the
+ * history of this file; the assertions and the throwaway-corpus rule are unchanged.
  */
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { assertFreshBinary } from "../integration/helpers/assert-fresh-binary";
+import { runLoreInProcess } from "../helpers/run-lore-in-process";
 
 // tests/e2e/ -> tests/ -> packages/lore/ -> packages/ -> repo root (4 levels up),
 // mirrors every sibling compiled-binary e2e suite's own REPO_ROOT derivation.
 const REPO_ROOT = new URL("../../../../", import.meta.url).pathname.replace(/\/$/, "");
-const LORE_BIN = join(REPO_ROOT, "dist", "lore");
 
 /** The literal AC-VS-8 requires, verbatim. */
 const LITERAL = "plan-wide run";
@@ -85,22 +87,18 @@ let explainStdout: string;
 let explainExitCode: number;
 const cleanupDirs: string[] = [];
 
-beforeAll(() => {
-  assertFreshBinary(LORE_BIN, [
-    join(REPO_ROOT, "packages", "lore", "src"),
-    join(REPO_ROOT, "packages", "core", "src"),
-  ]);
+beforeAll(async () => {
   // `gate plan-close --explain` is a pure offline render (gate.ts's own header: "this one
   // never reads the corpus"); spawned from a throwaway dir anyway, never this repo's own
   // `.lore/` (project CLAUDE.md hard rule; 2026-07-07 pollution incident).
   const dir = mkdtempSync(join(tmpdir(), "lore-t4-vs8-"));
   cleanupDirs.push(dir);
-  const proc = Bun.spawnSync([LORE_BIN, "gate", "plan-close", "--explain"], {
+  const proc = await runLoreInProcess(["gate", "plan-close", "--explain"], {
     cwd: dir,
     env: { ...process.env, HOME: dir, CLAUDECODE: "1" },
   });
-  explainStdout = proc.stdout.toString();
-  explainExitCode = proc.exitCode ?? 1;
+  explainStdout = proc.stdout;
+  explainExitCode = proc.exitCode;
 });
 
 afterAll(() => {

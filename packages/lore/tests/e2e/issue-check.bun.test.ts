@@ -1,4 +1,4 @@
-// @spawns dist/lore
+// @reads scripts/check-unclaimed-oracle.ts
 /**
  * `lore status --check-issues` (D5, spec-issue-closure-loop-computed-
  * resolution-agent-reachable) — the deterministic, report-only detector that
@@ -64,6 +64,10 @@
  * @spec_ref spec-issue-closure-loop-computed-resolution-agent-reachable §D5,
  *   §D5b; task-p2-lore-status-check-issues-detector-stale-after-days;
  *   AC-ICL-6.
+ *
+ * TG-25 (adr-tg-1 option b): the commands run IN-PROCESS through tests/helpers/run-lore-in-process.ts, not through
+ * dist/lore. Wherever the prose above says the compiled binary is spawned or its freshness asserted, that is the
+ * history of this file; the assertions and the throwaway-corpus rule are unchanged.
  */
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -71,13 +75,12 @@ import { Database } from "bun:sqlite";
 import { mkdtempSync, appendFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { assertFreshBinary } from "../integration/helpers/assert-fresh-binary";
-import { citeSpecViaCli, loreRunnerFor } from "../helpers/cli-live-rule.js";
+import { citeSpecViaAsyncCli, asyncLoreRunnerFor } from "../helpers/cli-live-rule.js";
+import { runLoreInProcess } from "../helpers/run-lore-in-process";
 
 // tests/e2e/ -> tests/ -> packages/lore/ -> packages/ -> repo root (4 levels up),
 // mirrors tests/e2e/bootstrap-injection-compiled.bun.test.ts's own REPO_ROOT derivation.
 const REPO_ROOT = new URL("../../../../", import.meta.url).pathname.replace(/\/$/, "");
-const LORE_BIN = join(REPO_ROOT, "dist", "lore");
 
 interface RunResult {
   readonly stdout: string;
@@ -86,15 +89,15 @@ interface RunResult {
 }
 
 /** Spawns the COMPILED `dist/lore` binary — `cwd`/`HOME` both pointed at the throwaway corpus dir, `CLAUDECODE=1` resolves the "agent" caller surface (SPEC-024) so AI defaults off. */
-function runLore(args: string[], cwd: string): RunResult {
-  const proc = Bun.spawnSync([LORE_BIN, ...args], {
+async function runLore(args: string[], cwd: string): Promise<RunResult> {
+  const proc = await runLoreInProcess(args, {
     cwd,
     env: { ...process.env, HOME: cwd, CLAUDECODE: "1", EDITOR: "true" },
   });
   return {
-    stdout: proc.stdout.toString(),
-    stderr: proc.stderr.toString(),
-    exitCode: proc.exitCode ?? 1,
+    stdout: proc.stdout,
+    stderr: proc.stderr,
+    exitCode: proc.exitCode,
   };
 }
 
@@ -112,8 +115,8 @@ function parseJson<T>(stdout: string): T {
   return (JSON.parse(stdout) as JsonEnvelope<T>).data;
 }
 
-function initCorpus(tmpDir: string): void {
-  const result = runLore(["init"], tmpDir);
+async function initCorpus(tmpDir: string): Promise<void> {
+  const result = await runLore(["init"], tmpDir);
   if (result.exitCode !== 0) {
     throw new Error(`lore init failed: ${result.stderr}`);
   }
@@ -150,8 +153,8 @@ function configureStaleAfterDays(dir: string, days: number): void {
   appendFileSync(join(dir, ".lore", "config.yaml"), ["feedback:", `  stale_after_days: ${days}`, ""].join("\n"));
 }
 
-function createPrd(tmpDir: string): CreatedDoc {
-  const result = runLore(
+async function createPrd(tmpDir: string): Promise<CreatedDoc> {
+  const result = await runLore(
     ["create", "prd", "--title", "Issue Check Fixture Root PRD", "--no-ai", "--content", "## Overview\n\nBody.", "--json"],
     tmpDir,
   );
@@ -159,8 +162,8 @@ function createPrd(tmpDir: string): CreatedDoc {
   return parseJson<CreatedDoc>(result.stdout);
 }
 
-function createPlan(tmpDir: string, prdSlug: string, title: string): CreatedDoc {
-  const result = runLore(
+async function createPlan(tmpDir: string, prdSlug: string, title: string): Promise<CreatedDoc> {
+  const result = await runLore(
     ["create", "plan", "--title", title, "--parent", prdSlug, "--no-ai", "--content", "Plan body.", "--json"],
     tmpDir,
   );
@@ -168,8 +171,8 @@ function createPlan(tmpDir: string, prdSlug: string, title: string): CreatedDoc 
   return parseJson<CreatedDoc>(result.stdout);
 }
 
-function createTask(tmpDir: string, planSlug: string, title: string): CreatedDoc {
-  const result = runLore(
+async function createTask(tmpDir: string, planSlug: string, title: string): Promise<CreatedDoc> {
+  const result = await runLore(
     ["create", "task", "--title", title, "--plan-id", planSlug, "--no-ai", "--content", "Task body.", "--json"],
     tmpDir,
   );
@@ -177,8 +180,8 @@ function createTask(tmpDir: string, planSlug: string, title: string): CreatedDoc
   return parseJson<CreatedDoc>(result.stdout);
 }
 
-function createSpec(tmpDir: string, prdSlug: string, title: string): CreatedDoc {
-  const result = runLore(
+async function createSpec(tmpDir: string, prdSlug: string, title: string): Promise<CreatedDoc> {
+  const result = await runLore(
     [
       "create",
       "spec",
@@ -197,22 +200,22 @@ function createSpec(tmpDir: string, prdSlug: string, title: string): CreatedDoc 
   return parseJson<CreatedDoc>(result.stdout);
 }
 
-function setStatus(tmpDir: string, slug: string, status: string): void {
-  const result = runLore(["set", slug, "--status", status], tmpDir);
+async function setStatus(tmpDir: string, slug: string, status: string): Promise<void> {
+  const result = await runLore(["set", slug, "--status", status], tmpDir);
   if (result.exitCode !== 0) throw new Error(`set --status ${status} on ${slug} failed: ${result.stderr}`);
 }
 
 /** Walks a doc from `draft` all the way to `archived` via the fast-track edge (draft -> approved -> active -> archived) — valid for spec/plan/adr per VALID_TRANSITIONS. */
-function archiveViaFastTrack(tmpDir: string, slug: string): void {
+async function archiveViaFastTrack(tmpDir: string, slug: string): Promise<void> {
   // BR-1007: a spec is approved only when a criterion cites a live rule; the fixing spec gets one.
-  const lore = loreRunnerFor(runLore, tmpDir);
-  lore(["ac", "add", slug, "AC-FT-1", "--statement", "the fixing spec behaviour responds in < 200ms", "--mode", "human"]);
-  citeSpecViaCli(lore, tmpDir, undefined, slug, "AC-FT-1");
+  const lore = asyncLoreRunnerFor(runLore, tmpDir);
+  await lore(["ac", "add", slug, "AC-FT-1", "--statement", "the fixing spec behaviour responds in < 200ms", "--mode", "human"]);
+  await citeSpecViaAsyncCli(lore, tmpDir, undefined, slug, "AC-FT-1");
   // #65: `set --status approved` now runs the approve checks (BR-1071); this fixture has no judgment, so it takes the audited escape.
-  const approved = runLore(["approve", slug, "--override-no-judgment"], tmpDir);
+  const approved = await runLore(["approve", slug, "--override-no-judgment"], tmpDir);
   if (approved.exitCode !== 0) throw new Error(`approve ${slug} failed: ${approved.stderr}`);
-  setStatus(tmpDir, slug, "active");
-  setStatus(tmpDir, slug, "archived");
+  await setStatus(tmpDir, slug, "active");
+  await setStatus(tmpDir, slug, "archived");
 }
 
 function dbPath(tmpDir: string): string {
@@ -312,8 +315,8 @@ interface IssueCheckJson {
   stale_open: StaleOpenJson[];
 }
 
-function checkIssues(tmpDir: string): { result: RunResult; data: IssueCheckJson | undefined } {
-  const result = runLore(["status", "--check-issues", "--json"], tmpDir);
+async function checkIssues(tmpDir: string): Promise<{ result: RunResult; data: IssueCheckJson | undefined }> {
+  const result = await runLore(["status", "--check-issues", "--json"], tmpDir);
   if (result.exitCode !== 0 && result.exitCode !== 3) {
     // Any exit other than 0 (consistent) or 3 (flagged) is a genuine failure — surface it loud.
     throw new Error(`status --check-issues failed unexpectedly: ${result.stderr}`);
@@ -326,18 +329,12 @@ function daysAgoIso(days: number, extraMs = 0): string {
   return new Date(Date.now() - days * 86_400_000 - extraMs).toISOString();
 }
 
-// ─── Suite: binary freshness guard ───────────────────────────────────────────
-
-beforeAll(() => {
-  assertFreshBinary(LORE_BIN, [join(REPO_ROOT, "packages", "lore", "src"), join(REPO_ROOT, "packages", "core", "src")]);
-});
-
 const tmpDirsToClean: string[] = [];
 
-function makeCorpus(prefix: string): string {
+async function makeCorpus(prefix: string): Promise<string> {
   const dir = mkdtempSync(join(tmpdir(), `lore-issue-check-${prefix}-`));
   tmpDirsToClean.push(dir);
-  initCorpus(dir);
+  await initCorpus(dir);
   disableAllGates(dir);
   return dir;
 }
@@ -354,12 +351,12 @@ afterAll(() => {
 
 // ─── Corpus A: escalation lifecycle (HAPPY / ERROR / STATE) + mutates-nothing ──
 
-describe("AC-ICL-6 (amended by D6 of spec-archiving-the-work-that-resolves-a-defect-report-closes): a computed-fixed report is never flagged", () => {
-  const tmpDir = makeCorpus("escalation");
-  const prd = createPrd(tmpDir);
-  const plan = createPlan(tmpDir, prd.slug, "Escalation Fixture Plan");
-  const issueTask = createTask(tmpDir, plan.slug, "Filed report: escalation fixture");
-  const fixingSpec = createSpec(tmpDir, prd.slug, "ZzzEscalationFixingSpec");
+describe("AC-ICL-6 (amended by D6 of spec-archiving-the-work-that-resolves-a-defect-report-closes): a computed-fixed report is never flagged", async () => {
+  const tmpDir = await makeCorpus("escalation");
+  const prd = await createPrd(tmpDir);
+  const plan = await createPlan(tmpDir, prd.slug, "Escalation Fixture Plan");
+  const issueTask = await createTask(tmpDir, plan.slug, "Filed report: escalation fixture");
+  const fixingSpec = await createSpec(tmpDir, prd.slug, "ZzzEscalationFixingSpec");
 
   mergeExtra(tmpDir, issueTask.id, {
     issue_report: {
@@ -373,8 +370,8 @@ describe("AC-ICL-6 (amended by D6 of spec-archiving-the-work-that-resolves-a-def
     },
   });
 
-  it("AC-ICL-6: HAPPY — no resolves edge, no explicit terminal state → consistent, exit 0", () => {
-    const { result, data } = checkIssues(tmpDir);
+  it("AC-ICL-6: HAPPY — no resolves edge, no explicit terminal state → consistent, exit 0", async () => {
+    const { result, data } = await checkIssues(tmpDir);
     expect(result.exitCode).toBe(0);
     expect(data).toBeDefined();
     expect(data!.consistent).toBe(true);
@@ -382,36 +379,36 @@ describe("AC-ICL-6 (amended by D6 of spec-archiving-the-work-that-resolves-a-def
     expect(data!.stale_open).toEqual([]);
   });
 
-  it("AC-ICL-6: HAPPY — fixing spec reaching archived with NO resolves edge yet still reports consistent", () => {
+  it("AC-ICL-6: HAPPY — fixing spec reaching archived with NO resolves edge yet still reports consistent", async () => {
     widenLinksTableForResolves(tmpDir);
-    archiveViaFastTrack(tmpDir, fixingSpec.slug);
+    await archiveViaFastTrack(tmpDir, fixingSpec.slug);
 
-    const { result, data } = checkIssues(tmpDir);
+    const { result, data } = await checkIssues(tmpDir);
     expect(result.exitCode).toBe(0);
     expect(data!.consistent).toBe(true);
   });
 
-  it("AC-ICL-6 (D6): a resolves edge from the now-archived spec computes fixed while the issue task is still draft → NOT flagged, exit 0", () => {
+  it("AC-ICL-6 (D6): a resolves edge from the now-archived spec computes fixed while the issue task is still draft → NOT flagged, exit 0", async () => {
     insertResolvesLink(tmpDir, fixingSpec.id, issueTask.id, new Date().toISOString());
 
-    const { result, data } = checkIssues(tmpDir);
+    const { result, data } = await checkIssues(tmpDir);
     expect(result.exitCode).toBe(0);
     expect(data!.consistent).toBe(true);
     expect(data!.stale_open).toEqual([]);
   });
 
-  it("AC-ICL-6: mutates nothing — every issue doc's raw docs row is byte-identical before and after a --check-issues run", () => {
+  it("AC-ICL-6: mutates nothing — every issue doc's raw docs row is byte-identical before and after a --check-issues run", async () => {
     const before = snapshotDocRow(tmpDir, issueTask.id);
-    const result = runLore(["status", "--check-issues"], tmpDir);
+    const result = await runLore(["status", "--check-issues"], tmpDir);
     expect(result.exitCode).toBe(0);
     const after = snapshotDocRow(tmpDir, issueTask.id);
     expect(after).toEqual(before);
   });
 
-  it("AC-ICL-6: STATE — archiving the issue task itself leaves the verdict unchanged (still consistent)", () => {
-    setStatus(tmpDir, issueTask.slug, "archived"); // task type: draft -> archived is a valid direct edge
+  it("AC-ICL-6: STATE — archiving the issue task itself leaves the verdict unchanged (still consistent)", async () => {
+    await setStatus(tmpDir, issueTask.slug, "archived"); // task type: draft -> archived is a valid direct edge
 
-    const { result, data } = checkIssues(tmpDir);
+    const { result, data } = await checkIssues(tmpDir);
     expect(result.exitCode).toBe(0);
     expect(data!.consistent).toBe(true);
   });
@@ -419,15 +416,15 @@ describe("AC-ICL-6 (amended by D6 of spec-archiving-the-work-that-resolves-a-def
 
 // ─── Corpus B: stale-open-report boundary (BOUNDARY) ─────────────────────────
 
-describe("AC-ICL-6: stale open report boundary (feedback.stale_after_days)", () => {
+describe("AC-ICL-6: stale open report boundary (feedback.stale_after_days)", async () => {
   const STALE_AFTER_DAYS = 3;
-  const tmpDir = makeCorpus("staleness");
+  const tmpDir = await makeCorpus("staleness");
   configureStaleAfterDays(tmpDir, STALE_AFTER_DAYS);
 
-  const prd = createPrd(tmpDir);
-  const plan = createPlan(tmpDir, prd.slug, "Staleness Fixture Plan");
-  const atBoundary = createTask(tmpDir, plan.slug, "Filed report: exactly at boundary");
-  const underBoundary = createTask(tmpDir, plan.slug, "Filed report: one day under boundary");
+  const prd = await createPrd(tmpDir);
+  const plan = await createPlan(tmpDir, prd.slug, "Staleness Fixture Plan");
+  const atBoundary = await createTask(tmpDir, plan.slug, "Filed report: exactly at boundary");
+  const underBoundary = await createTask(tmpDir, plan.slug, "Filed report: one day under boundary");
 
   // Exactly STALE_AFTER_DAYS days old.
   const atBoundaryReportedAt = daysAgoIso(STALE_AFTER_DAYS);
@@ -459,8 +456,8 @@ describe("AC-ICL-6: stale open report boundary (feedback.stale_after_days)", () 
     },
   });
 
-  it("AC-ICL-6: BOUNDARY — age exactly AT stale_after_days is flagged stale (INCLUSIVE boundary)", () => {
-    const { result, data } = checkIssues(tmpDir);
+  it("AC-ICL-6: BOUNDARY — age exactly AT stale_after_days is flagged stale (INCLUSIVE boundary)", async () => {
+    const { result, data } = await checkIssues(tmpDir);
     expect(result.exitCode).toBe(3);
     expect(data!.checked).toBe(2);
     const staleSlugs = data!.stale_open.map((row) => row.slug).sort();
@@ -470,23 +467,23 @@ describe("AC-ICL-6: stale open report boundary (feedback.stale_after_days)", () 
     expect(flagged.reported_at).toBe(atBoundaryReportedAt);
   });
 
-  it("AC-ICL-6: BOUNDARY — age one day under stale_after_days is NOT flagged", () => {
-    const { data } = checkIssues(tmpDir);
+  it("AC-ICL-6: BOUNDARY — age one day under stale_after_days is NOT flagged", async () => {
+    const { data } = await checkIssues(tmpDir);
     expect(data!.stale_open.some((row) => row.slug === underBoundary.slug)).toBe(false);
   });
 });
 
 // ─── Corpus C: malformed extra + default stale_after_days (NEGATIVE) ─────────
 
-describe("AC-ICL-6: malformed extra.issue_report + default feedback.stale_after_days (no override)", () => {
-  const tmpDir = makeCorpus("malformed");
+describe("AC-ICL-6: malformed extra.issue_report + default feedback.stale_after_days (no override)", async () => {
+  const tmpDir = await makeCorpus("malformed");
   // Deliberately NO configureStaleAfterDays call — proves the schema default (14) engages.
 
-  const prd = createPrd(tmpDir);
-  const plan = createPlan(tmpDir, prd.slug, "Malformed Fixture Plan");
-  const malformed = createTask(tmpDir, plan.slug, "Not actually an issue report");
-  const missingReportedAt = createTask(tmpDir, plan.slug, "Issue report missing reported_at");
-  const recentUnderDefault = createTask(tmpDir, plan.slug, "Recent report under the 14-day default");
+  const prd = await createPrd(tmpDir);
+  const plan = await createPlan(tmpDir, prd.slug, "Malformed Fixture Plan");
+  const malformed = await createTask(tmpDir, plan.slug, "Not actually an issue report");
+  const missingReportedAt = await createTask(tmpDir, plan.slug, "Issue report missing reported_at");
+  const recentUnderDefault = await createTask(tmpDir, plan.slug, "Recent report under the 14-day default");
 
   // NEGATIVE: extra.issue_report is a STRING, not an object — hasIssueReport must
   // reject this shape entirely (the doc is not even counted as an issue task).
@@ -522,21 +519,21 @@ describe("AC-ICL-6: malformed extra.issue_report + default feedback.stale_after_
     },
   });
 
-  it("AC-ICL-6: NEGATIVE — malformed extra.issue_report (string) is excluded from checked entirely, no crash", () => {
-    const { result, data } = checkIssues(tmpDir);
+  it("AC-ICL-6: NEGATIVE — malformed extra.issue_report (string) is excluded from checked entirely, no crash", async () => {
+    const { result, data } = await checkIssues(tmpDir);
     expect(result.exitCode).toBe(0);
     expect(data).toBeDefined();
     // Only the 2 well-shaped issue tasks count — the malformed one is invisible.
     expect(data!.checked).toBe(2);
   });
 
-  it("AC-ICL-6: NEGATIVE — issue_report missing reported_at is never flagged stale (defensive degrade)", () => {
-    const { data } = checkIssues(tmpDir);
+  it("AC-ICL-6: NEGATIVE — issue_report missing reported_at is never flagged stale (defensive degrade)", async () => {
+    const { data } = await checkIssues(tmpDir);
     expect(data!.stale_open.some((row) => row.slug === missingReportedAt.slug)).toBe(false);
   });
 
-  it("AC-ICL-6: default feedback.stale_after_days (14) engages when unconfigured — a 1-day-old report is not flagged", () => {
-    const { result, data } = checkIssues(tmpDir);
+  it("AC-ICL-6: default feedback.stale_after_days (14) engages when unconfigured — a 1-day-old report is not flagged", async () => {
+    const { result, data } = await checkIssues(tmpDir);
     expect(result.exitCode).toBe(0);
     expect(data!.consistent).toBe(true);
     expect(data!.stale_open).toEqual([]);
@@ -545,11 +542,11 @@ describe("AC-ICL-6: malformed extra.issue_report + default feedback.stale_after_
 
 // ─── Corpus D: plain `lore status` never computes/exposes issues (REGRESSION) ─
 
-describe("AC-ICL-6: plain `lore status` is unaffected (opt-in only)", () => {
-  const tmpDir = makeCorpus("regression");
-  const prd = createPrd(tmpDir);
-  const plan = createPlan(tmpDir, prd.slug, "Regression Fixture Plan");
-  const issueTask = createTask(tmpDir, plan.slug, "Filed report: would be stale if checked");
+describe("AC-ICL-6: plain `lore status` is unaffected (opt-in only)", async () => {
+  const tmpDir = await makeCorpus("regression");
+  const prd = await createPrd(tmpDir);
+  const plan = await createPlan(tmpDir, prd.slug, "Regression Fixture Plan");
+  const issueTask = await createTask(tmpDir, plan.slug, "Filed report: would be stale if checked");
 
   // 999 days old — would obviously be flagged stale under ANY reasonable
   // stale_after_days if `--check-issues` were reached, proving its absence from
@@ -566,8 +563,8 @@ describe("AC-ICL-6: plain `lore status` is unaffected (opt-in only)", () => {
     },
   });
 
-  it("AC-ICL-6: REGRESSION — plain `lore status --json` carries no `issues` key at all", () => {
-    const result = runLore(["status", "--json"], tmpDir);
+  it("AC-ICL-6: REGRESSION — plain `lore status --json` carries no `issues` key at all", async () => {
+    const result = await runLore(["status", "--json"], tmpDir);
     expect(result.exitCode).toBe(0);
     const envelope = JSON.parse(result.stdout) as JsonEnvelope<Record<string, unknown>>;
     expect(envelope.data["issues"]).toBeUndefined();

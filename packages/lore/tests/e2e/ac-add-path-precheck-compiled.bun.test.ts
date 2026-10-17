@@ -1,4 +1,3 @@
-// @spawns dist/lore
 /**
  * Compiled-binary e2e for SPEC-061/AC-061-21 — `lore ac add`'s D8
  * declaration-time path-existence check, driven end-to-end through the
@@ -42,18 +41,21 @@
  *   zero-match-u; spec-oracle-executability-a-runner-s-discovery-refusal-
  *   is-not-a §M6.3/D8; task-promote-splitcommandsegments-to-the-one-
  *   segmentation-seam
+ *
+ * TG-25 (adr-tg-1 option b): the commands run IN-PROCESS through tests/helpers/run-lore-in-process.ts, not through
+ * dist/lore. Wherever the prose above says the compiled binary is spawned or its freshness asserted, that is the
+ * history of this file; the assertions and the throwaway-corpus rule are unchanged.
  */
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { assertFreshBinary } from "../integration/helpers/assert-fresh-binary";
+import { runLoreInProcess } from "../helpers/run-lore-in-process";
 
 // tests/e2e/ -> tests/ -> packages/lore/ -> packages/ -> repo root (4 levels up),
 // mirrors every sibling compiled-binary e2e suite's own REPO_ROOT derivation.
 const REPO_ROOT = new URL("../../../../", import.meta.url).pathname.replace(/\/$/, "");
-const LORE_BIN = join(REPO_ROOT, "dist", "lore");
 
 /** Path (relative to the throwaway corpus root) of the REAL test file the accept scenario names. */
 const REAL_TEST_RELATIVE = "packages/x/real.test.ts";
@@ -80,8 +82,8 @@ interface RunResult {
  * surface (SPEC-024) so no `create`/`ac add` risks a nested AI call; a fixed
  * `LORE_ACTOR` keeps writes attributable.
  */
-function runLore(args: string[], cwd: string): RunResult {
-  const proc = Bun.spawnSync([LORE_BIN, ...args], {
+async function runLore(args: string[], cwd: string): Promise<RunResult> {
+  const proc = await runLoreInProcess(args, {
     cwd,
     env: {
       ...process.env,
@@ -91,9 +93,9 @@ function runLore(args: string[], cwd: string): RunResult {
     },
   });
   return {
-    stdout: proc.stdout.toString(),
-    stderr: proc.stderr.toString(),
-    exitCode: proc.exitCode ?? 1,
+    stdout: proc.stdout,
+    stderr: proc.stderr,
+    exitCode: proc.exitCode,
   };
 }
 
@@ -116,8 +118,8 @@ function seedRealTestFile(dir: string): void {
 }
 
 /** Reads the spec's CURRENT declared acceptance-criteria ids straight from the corpus. */
-function readCriterionIds(dir: string, specSlug: string): string[] {
-  const result = runLore(["get", specSlug, "--json"], dir);
+async function readCriterionIds(dir: string, specSlug: string): Promise<string[]> {
+  const result = await runLore(["get", specSlug, "--json"], dir);
   if (result.exitCode !== 0) throw new Error(`lore get failed: ${result.stderr}`);
   const parsed = JSON.parse(result.stdout) as {
     data: { doc: { extra: { acceptance_criteria?: Array<{ id: string }> } } };
@@ -125,8 +127,8 @@ function readCriterionIds(dir: string, specSlug: string): string[] {
   return (parsed.data.doc.extra.acceptance_criteria ?? []).map((c) => c.id);
 }
 
-function addCriterion(dir: string, specSlug: string, id: string, command: string): RunResult {
-  return runLore(
+async function addCriterion(dir: string, specSlug: string, id: string, command: string): Promise<RunResult> {
+  return await runLore(
     [
       "ac",
       "add",
@@ -148,27 +150,23 @@ function addCriterion(dir: string, specSlug: string, id: string, command: string
 let dir: string;
 let specSlug: string;
 
-beforeAll(() => {
-  assertFreshBinary(LORE_BIN, [
-    join(REPO_ROOT, "packages", "lore", "src"),
-    join(REPO_ROOT, "packages", "core", "src"),
-  ]);
+beforeAll(async () => {
 
   dir = mkdtempSync(join(tmpdir(), "lore-ac-061-21-"));
   // Never inside this repo — the corpus under test must not be the repo's own.
   expect(dir.startsWith(REPO_ROOT)).toBe(false);
 
-  const init = runLore(["init"], dir);
+  const init = await runLore(["init"], dir);
   if (init.exitCode !== 0) throw new Error(`lore init failed: ${init.stderr}`);
   seedRealTestFile(dir);
 
-  const prd = runLore(
+  const prd = await runLore(
     ["create", "prd", "--title", "AC-061-21 Root", "--content", "# PRD\n\nroot.", "--no-ai"],
     dir,
   );
   if (prd.exitCode !== 0) throw new Error(`create prd failed: ${prd.stderr}`);
 
-  const spec = runLore(
+  const spec = await runLore(
     [
       "create",
       "spec",
@@ -195,23 +193,23 @@ afterAll(() => {
 });
 
 describe("AC-061-21 — compiled lore ac add scopes its path precheck to runner segments", () => {
-  it("accepts a declaration whose success-echo segment mentions the real file's bare basename as prose, and writes the criterion", () => {
-    expect(readCriterionIds(dir, specSlug)).toEqual([]);
+  it("accepts a declaration whose success-echo segment mentions the real file's bare basename as prose, and writes the criterion", async () => {
+    expect(await readCriterionIds(dir, specSlug)).toEqual([]);
 
-    const accepted = addCriterion(dir, specSlug, "AC-CLI-1", ECHO_PROSE_COMMAND);
+    const accepted = await addCriterion(dir, specSlug, "AC-CLI-1", ECHO_PROSE_COMMAND);
 
     expect(accepted.exitCode).toBe(0);
-    expect(readCriterionIds(dir, specSlug)).toEqual(["AC-CLI-1"]);
+    expect(await readCriterionIds(dir, specSlug)).toEqual(["AC-CLI-1"]);
   });
 
-  it("still refuses a genuinely missing path named in the RUNNER segment, echo prose notwithstanding, and writes nothing", () => {
-    const before = readCriterionIds(dir, specSlug);
+  it("still refuses a genuinely missing path named in the RUNNER segment, echo prose notwithstanding, and writes nothing", async () => {
+    const before = await readCriterionIds(dir, specSlug);
 
-    const refused = addCriterion(dir, specSlug, "AC-CLI-2", MISSING_RUNNER_PATH_COMMAND);
+    const refused = await addCriterion(dir, specSlug, "AC-CLI-2", MISSING_RUNNER_PATH_COMMAND);
 
     expect(refused.exitCode).toBe(4);
     expect(refused.stderr).toContain("packages/x/ghost.test.ts");
     // Nothing was written — the criteria list is byte-unchanged from before this call.
-    expect(readCriterionIds(dir, specSlug)).toEqual(before);
+    expect(await readCriterionIds(dir, specSlug)).toEqual(before);
   });
 });

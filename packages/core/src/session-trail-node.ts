@@ -16,7 +16,7 @@
  */
 
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
-import { homedir } from "node:os";
+import { currentHomeDir } from "./home-dir-node.js";
 import { join } from "node:path";
 import {
   assertTrailSessionId,
@@ -33,7 +33,7 @@ import {
  */
 export function stateBase(
   env: Readonly<Record<string, string | undefined>> = process.env,
-  home: string = homedir(),
+  home: string = currentHomeDir(),
 ): string {
   return env.CLAUDE_STATE_BASE_OVERRIDE || join(home, ".claude", "session-state");
 }

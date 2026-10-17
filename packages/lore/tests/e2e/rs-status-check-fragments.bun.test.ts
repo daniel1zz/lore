@@ -1,4 +1,4 @@
-// @spawns dist/lore
+// @reads assets/**
 /**
  * Compiled-binary e2e for `lore status --check-fragments`
  * (spec-rule-store-git-tracked-fragment-selection-on-demand-skill, Scope 7 status bullet,
@@ -14,16 +14,19 @@
  * Isolation: never touches the repo's own `.lore/` or the real HOME.
  *
  * @spec_ref spec-rule-store-git-tracked-fragment-selection-on-demand-skill AC-RS-9
+ *
+ * TG-25 (adr-tg-1 option b): the commands run IN-PROCESS through tests/helpers/run-lore-in-process.ts, not through
+ * dist/lore. Wherever the prose above says the compiled binary is spawned or its freshness asserted, that is the
+ * history of this file; the assertions and the throwaway-corpus rule are unchanged.
  */
 
 import { afterAll, describe, expect, it } from "vitest";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
-import { assertFreshBinary } from "../integration/helpers/assert-fresh-binary";
+import { runLoreInProcess } from "../helpers/run-lore-in-process";
 
 const REPO_ROOT = new URL("../../../../", import.meta.url).pathname.replace(/\/$/, "");
-const LORE_BIN = join(REPO_ROOT, "dist", "lore");
 const CHECK_FAILED_EXIT = 4;
 
 interface Sandbox {
@@ -45,13 +48,12 @@ afterAll(() => {
   for (const root of sandboxRoots) rmSync(root, { recursive: true, force: true });
 });
 
-function lore(sb: Sandbox, ...args: string[]): Run {
-  const proc = Bun.spawnSync([LORE_BIN, ...args], { cwd: sb.corpus, env: sb.env });
-  return { code: proc.exitCode ?? -1, stdout: proc.stdout.toString(), stderr: proc.stderr.toString() };
+async function lore(sb: Sandbox, ...args: string[]): Promise<Run> {
+  const proc = await runLoreInProcess(args, { cwd: sb.corpus, env: sb.env });
+  return { code: proc.exitCode, stdout: proc.stdout, stderr: proc.stderr };
 }
 
-function makeSandbox(): Sandbox {
-  assertFreshBinary(LORE_BIN, [join(REPO_ROOT, "packages", "lore", "src"), join(REPO_ROOT, "packages", "core", "src")]);
+async function makeSandbox(): Promise<Sandbox> {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "lore-rs-status-frag-")));
   expect(root.startsWith(REPO_ROOT)).toBe(false);
   sandboxRoots.push(root);
@@ -74,7 +76,7 @@ function makeSandbox(): Sandbox {
     projectContextDir: join(corpus, ".lore", "context"),
     env,
   };
-  const init = lore(sb, "init");
+  const init = await lore(sb, "init");
   if (init.code !== 0) throw new Error(`harness: lore init failed in fixture setup: ${init.stderr}`);
   return sb;
 }
@@ -88,12 +90,12 @@ function writeDynamicHelperFragment(dir: string, id: string, body: string): void
 const DUPLICATED_LINE = "Always run the fixture linter before committing.";
 
 describe("AC-RS-9 lore status --check-fragments", () => {
-  it("cross-layer duplicate line: exits 4 and reports the same duplicate_line finding as `lore fragments check`", () => {
-    const sb = makeSandbox();
+  it("cross-layer duplicate line: exits 4 and reports the same duplicate_line finding as `lore fragments check`", async () => {
+    const sb = await makeSandbox();
     writeDynamicHelperFragment(sb.userContextDir, "fixture-user-rule", DUPLICATED_LINE);
     writeDynamicHelperFragment(sb.projectContextDir, "fixture-project-rule", DUPLICATED_LINE);
 
-    const direct = lore(sb, "fragments", "check");
+    const direct = await lore(sb, "fragments", "check");
     // Liveness control: the fixture really is a finding for the reference command, so the status
     // assertions below cannot pass vacuously.
     expect(direct.code).toBe(CHECK_FAILED_EXIT);
@@ -101,19 +103,19 @@ describe("AC-RS-9 lore status --check-fragments", () => {
     expect(directLine).toBeDefined();
     expect(directLine).toContain(DUPLICATED_LINE);
 
-    const status = lore(sb, "status", "--check-fragments");
+    const status = await lore(sb, "status", "--check-fragments");
     expect(status.code).toBe(CHECK_FAILED_EXIT);
     const statusLine = status.stderr.split("\n").find((l) => l.startsWith("[duplicate_line]"));
     expect(statusLine).toBe(directLine);
   });
 
-  it("--json carries the duplicate_line finding in the same report shape as `lore fragments check --json`", () => {
-    const sb = makeSandbox();
+  it("--json carries the duplicate_line finding in the same report shape as `lore fragments check --json`", async () => {
+    const sb = await makeSandbox();
     writeDynamicHelperFragment(sb.userContextDir, "fixture-user-rule", DUPLICATED_LINE);
     writeDynamicHelperFragment(sb.projectContextDir, "fixture-project-rule", DUPLICATED_LINE);
 
-    const direct = lore(sb, "fragments", "check", "--json");
-    const status = lore(sb, "status", "--check-fragments", "--json");
+    const direct = await lore(sb, "fragments", "check", "--json");
+    const status = await lore(sb, "status", "--check-fragments", "--json");
     expect(status.code).toBe(CHECK_FAILED_EXIT);
     const directReport = JSON.parse(direct.stdout) as { ok: boolean; data: { findings: { kind: string }[] } };
     const statusReport = JSON.parse(status.stdout) as { ok: boolean; data: { findings: { kind: string }[] } };
@@ -122,14 +124,14 @@ describe("AC-RS-9 lore status --check-fragments", () => {
     expect(statusReport.data.findings).toEqual(directReport.data.findings);
   });
 
-  it("clean fixture: exits 0 (and `lore fragments check` agrees)", () => {
-    const sb = makeSandbox();
+  it("clean fixture: exits 0 (and `lore fragments check` agrees)", async () => {
+    const sb = await makeSandbox();
     writeDynamicHelperFragment(sb.userContextDir, "fixture-user-rule", "Fixture user line one.");
     writeDynamicHelperFragment(sb.projectContextDir, "fixture-project-rule", "Fixture project line two.");
 
-    const direct = lore(sb, "fragments", "check");
+    const direct = await lore(sb, "fragments", "check");
     expect(direct.code).toBe(0);
-    const status = lore(sb, "status", "--check-fragments");
+    const status = await lore(sb, "status", "--check-fragments");
     expect(status.code).toBe(0);
     expect(status.stderr).not.toContain("[duplicate_line]");
   });

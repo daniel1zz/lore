@@ -1,4 +1,4 @@
-// @spawns dist/lore
+// @reads assets/**
 /**
  * @spec_ref spec-worktree-removal-is-decided-by-who-is-inside-not-by-how (AC-WL-2; D1; BR-1070)
  *
@@ -11,20 +11,23 @@
  *
  * Every spawned `lore` runs with the identity sources scrubbed (no inherited CLAUDE_CODE_SESSION_ID), so the
  * session under test is the one the test names.
+ *
+ * TG-25 (adr-tg-1 option b): the commands run IN-PROCESS through tests/helpers/run-lore-in-process.ts, not through
+ * dist/lore. Wherever the prose above says the compiled binary is spawned or its freshness asserted, that is the
+ * history of this file; the assertions and the throwaway-corpus rule are unchanged.
  */
 
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 const setDefaultTimeout = (ms: number): void => { vi.setConfig({ testTimeout: ms, hookTimeout: ms }); };
-import { execFileSync, spawnSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { assertFreshBinary } from "../integration/helpers/assert-fresh-binary";
+import { runLoreInProcess } from "../helpers/run-lore-in-process";
 
 setDefaultTimeout(180_000);
 
 const REPO_ROOT = new URL("../../../../", import.meta.url).pathname.replace(/\/$/, "");
-const LORE_BIN = join(REPO_ROOT, "dist", "lore");
 
 const SESSION = "occ-e2e-session";
 const AGENT = "occagent42";
@@ -52,13 +55,12 @@ function childEnv(): NodeJS.ProcessEnv {
   return e;
 }
 
-function lore(args: string[]): Out {
-  const p = spawnSync(LORE_BIN, args, { cwd: corpus, env: childEnv(), encoding: "utf8" });
-  return { stdout: p.stdout, stderr: p.stderr, exitCode: p.status ?? 1 };
+async function lore(args: string[]): Promise<Out> {
+  return await runLoreInProcess(args, { cwd: corpus, env: childEnv() });
 }
 
-function mustLore(args: string[]): Out {
-  const r = lore(args);
+async function mustLore(args: string[]): Promise<Out> {
+  const r = await lore(args);
   if (r.exitCode !== 0) throw new Error(`fixture \`lore ${args.join(" ")}\` failed (${r.exitCode}): ${r.stderr}${r.stdout}`);
   return r;
 }
@@ -70,13 +72,12 @@ interface OccupancyData {
   readonly occupied: boolean;
 }
 
-function occupancy(): { exitCode: number; data: OccupancyData } {
-  const r = lore(["run", "occupancy", "--worktree", worktreeDir, "--json"]);
+async function occupancy(): Promise<{ exitCode: number; data: OccupancyData }> {
+  const r = await lore(["run", "occupancy", "--worktree", worktreeDir, "--json"]);
   return { exitCode: r.exitCode, data: (JSON.parse(r.stdout) as { data: OccupancyData }).data };
 }
 
-beforeAll(() => {
-  assertFreshBinary(LORE_BIN, [join(REPO_ROOT, "packages", "lore", "src"), join(REPO_ROOT, "packages", "core", "src")]);
+beforeAll(async () => {
   root = realpathSync(mkdtempSync(join(tmpdir(), "run-occupancy-e2e-")));
   if (root.startsWith(REPO_ROOT)) throw new Error("fixture must live outside the repo");
   mkdirSync(join(root, "home"), { recursive: true });
@@ -90,8 +91,8 @@ beforeAll(() => {
   writeFileSync(join(corpus, "README.md"), "fixture\n");
   vcs(["add", "."]);
   vcs(["commit", "-q", "-m", "init"]);
-  mustLore(["init"]);
-  mustLore(["create", "prd", "--title", "Occupancy E2E Root", "--content", "root", "--no-ai"]);
+  await mustLore(["init"]);
+  await mustLore(["create", "prd", "--title", "Occupancy E2E Root", "--content", "root", "--no-ai"]);
   worktreeDir = join(root, `agent-${AGENT}`);
   mkdirSync(worktreeDir);
 });
@@ -105,45 +106,45 @@ afterAll(() => {
 });
 
 describe("AC-WL-2 lore run occupancy (compiled)", () => {
-  it("HAPPY + STATE: a registered agent run occupies its worktree until `lore run end`", () => {
-    mustLore(["run", "register", "--harness", "claude-code", "--session", SESSION]);
-    mustLore(["run", "register", "--harness", "claude-code", "--session", SESSION, "--agent-id", AGENT, "--agent-type", "t"]);
+  it("HAPPY + STATE: a registered agent run occupies its worktree until `lore run end`", async () => {
+    await mustLore(["run", "register", "--harness", "claude-code", "--session", SESSION]);
+    await mustLore(["run", "register", "--harness", "claude-code", "--session", SESSION, "--agent-id", AGENT, "--agent-type", "t"]);
 
-    const live = occupancy();
+    const live = await occupancy();
     expect(live.exitCode).toBe(0);
     expect(live.data.occupied).toBe(true);
     expect(live.data.agent_run?.id).toBe(RUN_ID);
     expect(live.data.agent_run?.ended).toBe(false);
     expect(live.data.worktree).toBe(worktreeDir);
 
-    mustLore(["run", "end", RUN_ID, "--reason", "e2e agent stopped"]);
+    await mustLore(["run", "end", RUN_ID, "--reason", "e2e agent stopped"]);
 
-    const gone = occupancy();
+    const gone = await occupancy();
     expect(gone.exitCode).toBe(0);
     expect(gone.data.occupied).toBe(false);
     expect(gone.data.agent_run?.id).toBe(RUN_ID);
     expect(gone.data.agent_run?.ended).toBe(true);
   });
 
-  it("BOUNDARY: a worktree whose basename names no agent has no owning run", () => {
+  it("BOUNDARY: a worktree whose basename names no agent has no owning run", async () => {
     const other = join(root, "hand-made");
     mkdirSync(other);
-    const r = lore(["run", "occupancy", "--worktree", other, "--json"]);
+    const r = await lore(["run", "occupancy", "--worktree", other, "--json"]);
     expect(r.exitCode).toBe(0);
     const data = (JSON.parse(r.stdout) as { data: OccupancyData }).data;
     expect(data.agent_run).toBeNull();
     expect(data.occupied).toBe(false);
   });
 
-  it("HAPPY: the human render names the run and the verdict", () => {
-    const r = lore(["run", "occupancy", "--worktree", worktreeDir]);
+  it("HAPPY: the human render names the run and the verdict", async () => {
+    const r = await lore(["run", "occupancy", "--worktree", worktreeDir]);
     expect(r.exitCode).toBe(0);
     expect(r.stdout).toContain(RUN_ID);
     expect(r.stdout).toContain("Occupied: no");
   });
 
-  it("NEGATIVE: without --worktree it exits exactly 2", () => {
-    const r = lore(["run", "occupancy"]);
+  it("NEGATIVE: without --worktree it exits exactly 2", async () => {
+    const r = await lore(["run", "occupancy"]);
     expect(r.exitCode).toBe(2);
     expect(r.stderr).toContain("--worktree");
   });

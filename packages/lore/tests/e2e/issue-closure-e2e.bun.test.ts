@@ -1,4 +1,3 @@
-// @spawns dist/lore
 /**
  * AC-ICL-8 e2e suite (spec-issue-closure-loop-computed-resolution-agent-reachable,
  * §D1/§D2/§D4/§D5) — the DECISIVE end-to-end proof that the issue closure loop
@@ -68,6 +67,10 @@
  * @spec_ref spec-issue-closure-loop-computed-resolution-agent-reachable §D1,
  *   §D2, §D4, §D5, AC-ICL-8;
  *   task-p3-e2e-closure-proof-live-backlog-closure.
+ *
+ * TG-25 (adr-tg-1 option b): the commands run IN-PROCESS through tests/helpers/run-lore-in-process.ts, not through
+ * dist/lore. Wherever the prose above says the compiled binary is spawned or its freshness asserted, that is the
+ * history of this file; the assertions and the throwaway-corpus rule are unchanged.
  */
 
 import { RecordLockService } from "../../src/service/record-lock-service.js";
@@ -77,16 +80,15 @@ import { Database } from "bun:sqlite";
 import { mkdtempSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
-import { assertFreshBinary } from "../integration/helpers/assert-fresh-binary";
 import { SQLiteStore } from "../../src/store/sqlite-store.js";
 import { CorpusService } from "../../src/service/corpus-service.js";
 import type { CreateDocInput, DocRecord, DocStatus } from "@lore/core";
 import { approveCitedSpec } from "../helpers/live-rule-fixture.js";
+import { runLoreInProcess } from "../helpers/run-lore-in-process";
 
 // tests/e2e/ -> tests/ -> packages/lore/ -> packages/ -> repo root (4 levels up),
 // same derivation as tests/e2e/issue-closure.bun.test.ts.
 const REPO_ROOT = new URL("../../../../", import.meta.url).pathname.replace(/\/$/, "");
-const LORE_BIN = join(REPO_ROOT, "dist", "lore");
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -132,20 +134,20 @@ interface IssueCheckJson {
  * (SPEC-024) resolves the AI default OFF — mirrors every other compiled-
  * binary e2e suite's `runLore` convention.
  */
-function runLore(args: string[], cwd: string): RunResult {
-  const proc = Bun.spawnSync([LORE_BIN, ...args], {
+async function runLore(args: string[], cwd: string): Promise<RunResult> {
+  const proc = await runLoreInProcess(args, {
     cwd,
     env: { ...process.env, HOME: cwd, CLAUDECODE: "1" },
   });
   return {
-    stdout: proc.stdout.toString(),
-    stderr: proc.stderr.toString(),
-    exitCode: proc.exitCode ?? 1,
+    stdout: proc.stdout,
+    stderr: proc.stderr,
+    exitCode: proc.exitCode,
   };
 }
 
-function initCorpus(dir: string): void {
-  const result = runLore(["init"], dir);
+async function initCorpus(dir: string): Promise<void> {
+  const result = await runLore(["init"], dir);
   if (result.exitCode !== 0) {
     throw new Error(`lore init failed in fixture setup: ${result.stderr}`);
   }
@@ -191,7 +193,7 @@ async function mustSet(cs: CorpusService, id: string, status: DocStatus): Promis
 }
 
 async function seedRootPrd(cs: CorpusService): Promise<DocRecord> {
-  return mustCreate(cs, { type: "prd", title: "AC-ICL-8 Root PRD", content: "# PRD" } as CreateDocInput);
+  return await mustCreate(cs, { type: "prd", title: "AC-ICL-8 Root PRD", content: "# PRD" } as CreateDocInput);
 }
 
 function defaultIssueReport(overrides: Record<string, unknown> = {}): Record<string, unknown> {
@@ -212,7 +214,7 @@ async function seedIssueTask(
   title: string,
   issueReport: Record<string, unknown> = defaultIssueReport(),
 ): Promise<DocRecord> {
-  return mustCreate(cs, {
+  return await mustCreate(cs, {
     type: "task",
     title,
     content: `# ${title}`,
@@ -221,7 +223,7 @@ async function seedIssueTask(
 }
 
 async function seedFixingSpec(cs: CorpusService, prdId: string, title: string): Promise<DocRecord> {
-  return mustCreate(cs, {
+  return await mustCreate(cs, {
     type: "spec",
     title,
     content: "## Overview\n\nFixing doc body.",
@@ -229,7 +231,7 @@ async function seedFixingSpec(cs: CorpusService, prdId: string, title: string): 
 }
 
 async function seedFixingPlan(cs: CorpusService, prdId: string, title: string): Promise<DocRecord> {
-  return mustCreate(cs, {
+  return await mustCreate(cs, {
     type: "plan",
     title,
     content: "## Goal\n\nFixing plan body.",
@@ -279,19 +281,12 @@ afterEach(() => {
   }
 });
 
-beforeAll(() => {
-  assertFreshBinary(LORE_BIN, [
-    join(REPO_ROOT, "packages", "lore", "src"),
-    join(REPO_ROOT, "packages", "core", "src"),
-  ]);
-});
-
 // ─── AC-ICL-8: HAPPY ─────────────────────────────────────────────────────────
 
 describe("AC-ICL-8: filed issue + archived spec resolves-edge computes fixed", () => {
   it("AC-ICL-8: HAPPY — computed resolution is fixed; --open omits it, --resolved includes it", async () => {
     const dir = freshDir("lore-icl8-happy-");
-    initCorpus(dir);
+    await initCorpus(dir);
 
     const store = new SQLiteStore(dbPathFor(dir));
     const cs = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
@@ -302,22 +297,22 @@ describe("AC-ICL-8: filed issue + archived spec resolves-edge computes fixed", (
     store.close();
 
     // The real CLI path, against a real SQLite-backed corpus — no widening workaround.
-    const linkResult = runLore(["link", fixingSpec.slug, issue.slug, "--type", "resolves"], dir);
+    const linkResult = await runLore(["link", fixingSpec.slug, issue.slug, "--type", "resolves"], dir);
     expect(linkResult.exitCode).toBe(0);
 
-    const allResult = runLore(["issues", "--all", "--json"], dir);
+    const allResult = await runLore(["issues", "--all", "--json"], dir);
     expect(allResult.exitCode).toBe(0);
     const allParsed = parseJson<IssuesListPayload>(allResult.stdout);
     const row = allParsed.data?.reports.find((r) => r.slug === issue.slug);
     expect(row).toBeDefined();
     expect(row?.resolution).toBe("fixed");
 
-    const openResult = runLore(["issues", "--open", "--json"], dir);
+    const openResult = await runLore(["issues", "--open", "--json"], dir);
     expect(openResult.exitCode).toBe(0);
     const openParsed = parseJson<IssuesListPayload>(openResult.stdout);
     expect(openParsed.data?.reports.some((r) => r.slug === issue.slug)).toBe(false);
 
-    const resolvedResult = runLore(["issues", "--resolved", "--json"], dir);
+    const resolvedResult = await runLore(["issues", "--resolved", "--json"], dir);
     expect(resolvedResult.exitCode).toBe(0);
     const resolvedParsed = parseJson<IssuesListPayload>(resolvedResult.stdout);
     expect(resolvedParsed.data?.reports.some((r) => r.slug === issue.slug)).toBe(true);
@@ -329,7 +324,7 @@ describe("AC-ICL-8: filed issue + archived spec resolves-edge computes fixed", (
 describe("AC-ICL-8 (amended by D6 of spec-archiving-the-work-that-resolves-a-defect-report-closes): --check-issues never flags a computed-fixed report", () => {
   it("AC-ICL-8: STATE — quiet while the issue task is not archived AND after it is archived; resolution stays fixed", async () => {
     const dir = freshDir("lore-icl8-state-");
-    initCorpus(dir);
+    await initCorpus(dir);
 
     const store = new SQLiteStore(dbPathFor(dir));
     const cs = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
@@ -339,11 +334,11 @@ describe("AC-ICL-8 (amended by D6 of spec-archiving-the-work-that-resolves-a-def
     await walkToArchived(cs, fixingSpec.id, store);
     store.close();
 
-    const linkResult = runLore(["link", fixingSpec.slug, issue.slug, "--type", "resolves"], dir);
+    const linkResult = await runLore(["link", fixingSpec.slug, issue.slug, "--type", "resolves"], dir);
     expect(linkResult.exitCode).toBe(0);
 
     // D6: computed `fixed` with the issue task still draft is NOT flagged any more.
-    const beforeJson = runLore(["status", "--check-issues", "--json"], dir);
+    const beforeJson = await runLore(["status", "--check-issues", "--json"], dir);
     expect(beforeJson.exitCode).toBe(0);
     const beforeData = parseJson<{ issues: IssueCheckJson }>(beforeJson.stdout).data?.issues;
     expect(beforeData).toBeDefined();
@@ -351,22 +346,22 @@ describe("AC-ICL-8 (amended by D6 of spec-archiving-the-work-that-resolves-a-def
     expect(beforeData!.checked).toBe(1);
     expect(Object.keys(beforeData!).sort()).toEqual(["checked", "consistent", "stale_open"]);
 
-    const beforeText = runLore(["status", "--check-issues"], dir);
+    const beforeText = await runLore(["status", "--check-issues"], dir);
     expect(beforeText.exitCode).toBe(0);
     expect(beforeText.stdout).not.toContain("unclosed escalation");
 
-    const archiveResult = runLore(["set", issue.slug, "--status", "archived"], dir);
+    const archiveResult = await runLore(["set", issue.slug, "--status", "archived"], dir);
     expect(archiveResult.exitCode).toBe(0);
 
     // Archiving the issue task changes nothing about the verdict: still quiet.
-    const afterJson = runLore(["status", "--check-issues", "--json"], dir);
+    const afterJson = await runLore(["status", "--check-issues", "--json"], dir);
     expect(afterJson.exitCode).toBe(0);
     const afterData = parseJson<{ issues: IssueCheckJson }>(afterJson.stdout).data?.issues;
     expect(afterData!.consistent).toBe(true);
 
     // The row itself still reads "fixed" — archiving the issue task closes
     // the ESCALATION, it does not change the COMPUTED RESOLUTION.
-    const resolvedResult = runLore(["issues", "--resolved", "--json"], dir);
+    const resolvedResult = await runLore(["issues", "--resolved", "--json"], dir);
     expect(resolvedResult.exitCode).toBe(0);
     const resolvedParsed = parseJson<IssuesListPayload>(resolvedResult.stdout);
     const row = resolvedParsed.data?.reports.find((r) => r.slug === issue.slug);
@@ -379,7 +374,7 @@ describe("AC-ICL-8 (amended by D6 of spec-archiving-the-work-that-resolves-a-def
 describe("AC-ICL-8: a resolves edge whose source is not yet terminal never false-positives", () => {
   it("AC-ICL-8: NEGATIVE — a draft fixing spec computes resolving, not fixed; --check-issues stays consistent; --open still includes it", async () => {
     const dir = freshDir("lore-icl8-negative-");
-    initCorpus(dir);
+    await initCorpus(dir);
 
     const store = new SQLiteStore(dbPathFor(dir));
     const cs = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
@@ -389,22 +384,22 @@ describe("AC-ICL-8: a resolves edge whose source is not yet terminal never false
     const fixingSpec = await seedFixingSpec(cs, prd.id, "AC-ICL-8 Negative Draft Fixing Spec");
     store.close();
 
-    const linkResult = runLore(["link", fixingSpec.slug, issue.slug, "--type", "resolves"], dir);
+    const linkResult = await runLore(["link", fixingSpec.slug, issue.slug, "--type", "resolves"], dir);
     expect(linkResult.exitCode).toBe(0);
 
-    const allResult = runLore(["issues", "--all", "--json"], dir);
+    const allResult = await runLore(["issues", "--all", "--json"], dir);
     expect(allResult.exitCode).toBe(0);
     const row = parseJson<IssuesListPayload>(allResult.stdout).data?.reports.find(
       (r) => r.slug === issue.slug,
     );
     expect(row?.resolution).toBe("resolving");
 
-    const checkResult = runLore(["status", "--check-issues", "--json"], dir);
+    const checkResult = await runLore(["status", "--check-issues", "--json"], dir);
     expect(checkResult.exitCode).toBe(0);
     const checkData = parseJson<{ issues: IssueCheckJson }>(checkResult.stdout).data?.issues;
     expect(checkData!.consistent).toBe(true);
 
-    const openResult = runLore(["issues", "--open", "--json"], dir);
+    const openResult = await runLore(["issues", "--open", "--json"], dir);
     expect(openResult.exitCode).toBe(0);
     const openParsed = parseJson<IssuesListPayload>(openResult.stdout);
     expect(openParsed.data?.reports.some((r) => r.slug === issue.slug)).toBe(true);
@@ -416,7 +411,7 @@ describe("AC-ICL-8: a resolves edge whose source is not yet terminal never false
 describe("AC-ICL-8: D2's active-OR-archived boundary, proven with a PLAN (not just a spec) as the fixing doc", () => {
   it("AC-ICL-8: BOUNDARY — a fixing plan reaching only active already computes fixed, and --check-issues does not flag it (D6)", async () => {
     const dir = freshDir("lore-icl8-boundary-");
-    initCorpus(dir);
+    await initCorpus(dir);
 
     const store = new SQLiteStore(dbPathFor(dir));
     const cs = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
@@ -426,10 +421,10 @@ describe("AC-ICL-8: D2's active-OR-archived boundary, proven with a PLAN (not ju
     await walkToActive(cs, fixingPlan.id, store); // stops at "active" -- never archived
     store.close();
 
-    const linkResult = runLore(["link", fixingPlan.slug, issue.slug, "--type", "resolves"], dir);
+    const linkResult = await runLore(["link", fixingPlan.slug, issue.slug, "--type", "resolves"], dir);
     expect(linkResult.exitCode).toBe(0);
 
-    const allResult = runLore(["issues", "--all", "--json"], dir);
+    const allResult = await runLore(["issues", "--all", "--json"], dir);
     expect(allResult.exitCode).toBe(0);
     const row = parseJson<IssuesListPayload>(allResult.stdout).data?.reports.find(
       (r) => r.slug === issue.slug,
@@ -437,7 +432,7 @@ describe("AC-ICL-8: D2's active-OR-archived boundary, proven with a PLAN (not ju
     // "active" alone (never archived) already computes fixed -- the D2 boundary.
     expect(row?.resolution).toBe("fixed");
 
-    const checkResult = runLore(["status", "--check-issues", "--json"], dir);
+    const checkResult = await runLore(["status", "--check-issues", "--json"], dir);
     expect(checkResult.exitCode).toBe(0);
     const checkData = parseJson<{ issues: IssueCheckJson }>(checkResult.stdout).data?.issues;
     expect(checkData!.consistent).toBe(true);
@@ -449,7 +444,7 @@ describe("AC-ICL-8: D2's active-OR-archived boundary, proven with a PLAN (not ju
 describe("AC-ICL-8: the hand-set anti-pattern is rejected even inside a genuinely-fixed real corpus", () => {
   it("AC-ICL-8: ERROR — lore issue resolve --state fixed is rejected unconditionally and writes nothing", async () => {
     const dir = freshDir("lore-icl8-error-");
-    initCorpus(dir);
+    await initCorpus(dir);
 
     const store = new SQLiteStore(dbPathFor(dir));
     const cs = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
@@ -459,28 +454,28 @@ describe("AC-ICL-8: the hand-set anti-pattern is rejected even inside a genuinel
     await walkToArchived(cs, fixingSpec.id, store);
     store.close();
 
-    const linkResult = runLore(["link", fixingSpec.slug, issue.slug, "--type", "resolves"], dir);
+    const linkResult = await runLore(["link", fixingSpec.slug, issue.slug, "--type", "resolves"], dir);
     expect(linkResult.exitCode).toBe(0);
 
     // Sanity: the corpus really is in the "fixed" state this test means to attack.
-    const beforeAll = runLore(["issues", "--all", "--json"], dir);
+    const beforeAll = await runLore(["issues", "--all", "--json"], dir);
     const beforeRow = parseJson<IssuesListPayload>(beforeAll.stdout).data?.reports.find(
       (r) => r.slug === issue.slug,
     );
     expect(beforeRow?.resolution).toBe("fixed");
 
-    const resolveResult = runLore(["issue", "resolve", issue.slug, "--state", "fixed"], dir);
+    const resolveResult = await runLore(["issue", "resolve", issue.slug, "--state", "fixed"], dir);
     expect(resolveResult.exitCode).not.toBe(0);
     expect(resolveResult.stderr).toContain("lore link");
     expect(resolveResult.stderr).toContain("resolves");
 
     // Nothing was written: version unchanged, resolution still exactly "fixed".
-    const getResult = runLore(["get", issue.slug, "--json"], dir);
+    const getResult = await runLore(["get", issue.slug, "--json"], dir);
     expect(getResult.exitCode).toBe(0);
     const doc = parseJson<{ doc: DocRecord }>(getResult.stdout).data?.doc;
     expect(doc?.version).toBe(1);
 
-    const afterAll = runLore(["issues", "--all", "--json"], dir);
+    const afterAll = await runLore(["issues", "--all", "--json"], dir);
     const afterRow = parseJson<IssuesListPayload>(afterAll.stdout).data?.reports.find(
       (r) => r.slug === issue.slug,
     );
@@ -493,7 +488,7 @@ describe("AC-ICL-8: the hand-set anti-pattern is rejected even inside a genuinel
 describe("AC-ICL-8: archived-with-a-fixed-edge never regresses to closed; an unrelated sibling report is untouched", () => {
   it("AC-ICL-8: REGRESSION — resolution stays fixed (not closed) after archival; a separate unrelated report is byte-identical throughout", async () => {
     const dir = freshDir("lore-icl8-regression-");
-    initCorpus(dir);
+    await initCorpus(dir);
 
     const store = new SQLiteStore(dbPathFor(dir));
     const cs = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
@@ -508,13 +503,13 @@ describe("AC-ICL-8: archived-with-a-fixed-edge never regresses to closed; an unr
 
     const siblingBefore = snapshotDocRow(dir, sibling.id);
 
-    const linkResult = runLore(["link", fixingSpec.slug, issue.slug, "--type", "resolves"], dir);
+    const linkResult = await runLore(["link", fixingSpec.slug, issue.slug, "--type", "resolves"], dir);
     expect(linkResult.exitCode).toBe(0);
 
-    const archiveResult = runLore(["set", issue.slug, "--status", "archived"], dir);
+    const archiveResult = await runLore(["set", issue.slug, "--status", "archived"], dir);
     expect(archiveResult.exitCode).toBe(0);
 
-    const allResult = runLore(["issues", "--all", "--json"], dir);
+    const allResult = await runLore(["issues", "--all", "--json"], dir);
     expect(allResult.exitCode).toBe(0);
     const parsed = parseJson<IssuesListPayload>(allResult.stdout);
 

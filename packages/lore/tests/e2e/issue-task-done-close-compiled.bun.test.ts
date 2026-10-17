@@ -1,4 +1,3 @@
-// @spawns dist/lore
 /**
  * AC-IT-2 — the COMPILED `dist/lore`: `lore done` on a filed report's OWN task closes its GitHub issue, and
  * `lore issues --sync` closes the done-archived ones while only labelling the rest
@@ -15,6 +14,10 @@
  *   REGRESSION: mutation "done does not call the step" leaves the stub log empty (HAPPY fails).
  *
  * Requires `bun run build` first; `assertFreshBinary` fails loud on a stale binary.
+ *
+ * TG-25 (adr-tg-1 option b): the commands run IN-PROCESS through tests/helpers/run-lore-in-process.ts, not through
+ * dist/lore. Wherever the prose above says the compiled binary is spawned or its freshness asserted, that is the
+ * history of this file; the assertions and the throwaway-corpus rule are unchanged.
  */
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -22,10 +25,9 @@ import { Database } from "bun:sqlite";
 import { appendFileSync, chmodSync, existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { assertFreshBinary } from "../integration/helpers/assert-fresh-binary";
+import { runLoreInProcess } from "../helpers/run-lore-in-process";
 
 const REPO_ROOT = new URL("../../../../", import.meta.url).pathname.replace(/\/$/, "");
-const LORE_BIN = join(REPO_ROOT, "dist", "lore");
 const FAKE_REPO = "acme/widget";
 
 interface RunResult {
@@ -40,10 +42,6 @@ interface Corpus {
 }
 
 const dirsToClean: string[] = [];
-
-beforeAll(() => {
-  assertFreshBinary(LORE_BIN, [join(REPO_ROOT, "packages", "lore", "src"), join(REPO_ROOT, "packages", "core", "src")]);
-});
 afterAll(() => {
   for (const dir of dirsToClean) rmSync(dir, { recursive: true, force: true });
 });
@@ -104,13 +102,13 @@ exit 99
   chmodSync(ghPath, 0o755);
 }
 
-function runLore(corpus: Corpus, session: string, args: string[]): RunResult {
+async function runLore(corpus: Corpus, session: string, args: string[]): Promise<RunResult> {
   const env: Record<string, string> = {};
   for (const [key, value] of Object.entries(process.env)) {
     if (value === undefined || /^(CLAUDE|LORE|ANTHROPIC)/.test(key)) continue;
     env[key] = value;
   }
-  const proc = Bun.spawnSync([LORE_BIN, ...args], {
+  const proc = await runLoreInProcess(args, {
     cwd: corpus.dir,
     env: {
       ...env,
@@ -121,11 +119,11 @@ function runLore(corpus: Corpus, session: string, args: string[]): RunResult {
       PATH: `${corpus.stubDir}:${process.env["PATH"] ?? ""}`,
     },
   });
-  return { stdout: proc.stdout.toString(), stderr: proc.stderr.toString(), exitCode: proc.exitCode ?? 1 };
+  return { stdout: proc.stdout, stderr: proc.stderr, exitCode: proc.exitCode };
 }
 
-function mustRun(corpus: Corpus, session: string, args: string[]): RunResult {
-  const result = runLore(corpus, session, args);
+async function mustRun(corpus: Corpus, session: string, args: string[]): Promise<RunResult> {
+  const result = await runLore(corpus, session, args);
   if (result.exitCode !== 0) throw new Error(`lore ${args.join(" ")} failed (${result.exitCode}): ${result.stderr}${result.stdout}`);
   return result;
 }
@@ -144,8 +142,8 @@ function slugOfCreate(stdout: string): string {
 }
 
 /** Marks an adhoc task as a filed report for GitHub #<number> (no CLI verb writes issue_report with a github ref offline). */
-function makeFiledReport(corpus: Corpus, slug: string, number: number): void {
-  const id = (JSON.parse(mustRun(corpus, "setup", ["get", slug, "--json"]).stdout) as { data: { doc: { id: string } } }).data.doc.id;
+async function makeFiledReport(corpus: Corpus, slug: string, number: number): Promise<void> {
+  const id = (JSON.parse((await mustRun(corpus, "setup", ["get", slug, "--json"])).stdout) as { data: { doc: { id: string } } }).data.doc.id;
   const db = new Database(join(corpus.dir, ".lore", "lore.db"));
   try {
     const row = db.query("SELECT extra FROM docs WHERE id = ?").get(id) as { extra: string };
@@ -166,38 +164,38 @@ function makeFiledReport(corpus: Corpus, slug: string, number: number): void {
 }
 
 /** A fresh corpus with feedback.upstream naming the FAKE repo and filed report tasks for #9, #10 and #11. */
-function makeCorpus(): Corpus & { slugs: Record<number, string> } {
+async function makeCorpus(): Promise<Corpus & { slugs: Record<number, string> }> {
   const dir = realpathSync(mkdtempSync(join(tmpdir(), "lore-issue-task-done-e2e-")));
   const stubDir = mkdtempSync(join(tmpdir(), "lore-issue-task-done-stub-"));
   dirsToClean.push(dir, stubDir);
   writeStubGh(stubDir);
   const corpus: Corpus = { dir, stubDir };
-  mustRun(corpus, "setup", ["init"]);
+  await mustRun(corpus, "setup", ["init"]);
   appendFileSync(join(dir, ".lore", "config.yaml"), ["feedback:", "  upstream:", `    repo: ${FAKE_REPO}`, ""].join("\n"));
-  mustRun(corpus, "setup", ["create", "prd", "--title", "Task Done Fixture PRD", "--no-ai", "--content", "## Overview\n\nBody.", "--json"]);
+  await mustRun(corpus, "setup", ["create", "prd", "--title", "Task Done Fixture PRD", "--no-ai", "--content", "## Overview\n\nBody.", "--json"]);
   const slugs: Record<number, string> = {};
   for (const number of [9, 10, 11]) {
     const slug = slugOfCreate(
-      mustRun(corpus, "setup", ["create", "task", "--adhoc", "--ac-scope", "", "--title", `Defect ${number}`, "--no-ai", "--content", "Defect.", "--json"]).stdout,
+      (await mustRun(corpus, "setup", ["create", "task", "--adhoc", "--ac-scope", "", "--title", `Defect ${number}`, "--no-ai", "--content", "Defect.", "--json"])).stdout,
     );
     slugs[number] = slug;
-    makeFiledReport(corpus, slug, number);
+    await makeFiledReport(corpus, slug, number);
   }
   return { ...corpus, slugs };
 }
 
 /** `lore done` after a runner-attested pass (`--capture` runs the command and attests its exit code). */
-function completeWithDone(corpus: Corpus, session: string, slug: string): RunResult {
-  mustRun(corpus, session, ["evidence", slug, "--oracle", "test", "--command", "echo 1 passed", "--result", "pass", "--capture"]);
-  return runLore(corpus, session, ["done", slug, "--declare-no-new-tests", "fixture: throwaway task"]);
+async function completeWithDone(corpus: Corpus, session: string, slug: string): Promise<RunResult> {
+  await mustRun(corpus, session, ["evidence", slug, "--oracle", "test", "--command", "echo 1 passed", "--result", "pass", "--capture"]);
+  return await runLore(corpus, session, ["done", slug, "--declare-no-new-tests", "fixture: throwaway task"]);
 }
 
 describe("AC-IT-2: lore done on a report's own task closes its issue (compiled, stub gh)", () => {
-  it("HAPPY: exits 0, stub log shows close completed + a comment naming the task + label resolution:closed", () => {
-    const corpus = makeCorpus();
+  it("HAPPY: exits 0, stub log shows close completed + a comment naming the task + label resolution:closed", async () => {
+    const corpus = await makeCorpus();
     const slug = corpus.slugs[9] as string;
 
-    const done = completeWithDone(corpus, "S-happy", slug);
+    const done = await completeWithDone(corpus, "S-happy", slug);
 
     expect(done.exitCode).toBe(0);
     expect(done.stdout).toContain("issue #9: closed on GitHub");
@@ -209,26 +207,26 @@ describe("AC-IT-2: lore done on a report's own task closes its issue (compiled, 
     expect(log.some((line) => line.includes(`repos/${FAKE_REPO}/issues/9/labels`) && line.includes("resolution:closed"))).toBe(true);
   });
 
-  it("STATE: failed close keeps the archive; --sync lists the done-archived report and the status-archived one; --apply closes only the done one", () => {
-    const corpus = makeCorpus();
+  it("STATE: failed close keeps the archive; --sync lists the done-archived report and the status-archived one; --apply closes only the done one", async () => {
+    const corpus = await makeCorpus();
     const doneSlug = corpus.slugs[10] as string;
     const plainSlug = corpus.slugs[11] as string;
     writeFileSync(join(corpus.stubDir, "fail"), "");
 
-    const done = completeWithDone(corpus, "S-fail", doneSlug);
+    const done = await completeWithDone(corpus, "S-fail", doneSlug);
 
     expect(done.exitCode).toBe(0);
     expect(done.stderr).toContain("#10");
     expect(done.stderr).toContain("lore issues --sync");
-    const doc = JSON.parse(mustRun(corpus, "S-fail", ["get", doneSlug, "--json"]).stdout) as { data: { doc: { status: string } } };
+    const doc = JSON.parse((await mustRun(corpus, "S-fail", ["get", doneSlug, "--json"])).stdout) as { data: { doc: { status: string } } };
     expect(doc.data.doc.status).toBe("archived");
 
-    mustRun(corpus, "S-plain", ["set", plainSlug, "--status", "approved"]);
-    mustRun(corpus, "S-plain", ["set", plainSlug, "--status", "active"]);
-    mustRun(corpus, "S-plain", ["set", plainSlug, "--status", "archived"]);
+    await mustRun(corpus, "S-plain", ["set", plainSlug, "--status", "approved"]);
+    await mustRun(corpus, "S-plain", ["set", plainSlug, "--status", "active"]);
+    await mustRun(corpus, "S-plain", ["set", plainSlug, "--status", "archived"]);
     expect(patchCount(corpus)).toBe(1); // only the failed done-time attempt; the plain archive never tried to close
 
-    const listed = runLore(corpus, "S-sync", ["issues", "--sync", "--json"]);
+    const listed = await runLore(corpus, "S-sync", ["issues", "--sync", "--json"]);
     expect(listed.exitCode).toBe(0);
     const drift = (JSON.parse(listed.stdout) as {
       data: { drift: Array<{ number: number; computed: string; github_state: string; completed_via_done?: boolean }> };
@@ -238,7 +236,7 @@ describe("AC-IT-2: lore done on a report's own task closes its issue (compiled, 
     expect(drift.find((entry) => entry.number === 11)?.completed_via_done).toBeUndefined();
 
     rmSync(join(corpus.stubDir, "fail"));
-    const applied = runLore(corpus, "S-sync", ["issues", "--sync", "--apply", "--json"]);
+    const applied = await runLore(corpus, "S-sync", ["issues", "--sync", "--apply", "--json"]);
     expect(applied.exitCode).toBe(0);
     const rows = (JSON.parse(applied.stdout) as { data: { applied: Array<{ number: number; closed: boolean; labelled: boolean }> } }).data.applied;
     expect(rows.find((row) => row.number === 10)).toEqual({ number: 10, closed: true, labelled: true });
@@ -246,7 +244,7 @@ describe("AC-IT-2: lore done on a report's own task closes its issue (compiled, 
     expect(patchCount(corpus)).toBe(2); // exactly one more PATCH: #10. #11 is only labelled.
     expect(ghLog(corpus).some((line) => line.includes("issues/11 -X PATCH"))).toBe(false);
 
-    const clean = runLore(corpus, "S-sync", ["issues", "--sync", "--json"]);
+    const clean = await runLore(corpus, "S-sync", ["issues", "--sync", "--json"]);
     expect((JSON.parse(clean.stdout) as { data: { drift: unknown[] } }).data.drift).toEqual([]);
   }, 60_000);
 });

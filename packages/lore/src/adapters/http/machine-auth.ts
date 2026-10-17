@@ -28,7 +28,7 @@
 
 import { Database } from "bun:sqlite";
 import { chmodSync, mkdirSync } from "node:fs";
-import { homedir } from "node:os";
+import { currentHomeDir } from "@lore/core/node";
 import { join } from "node:path";
 
 import { ApiKeyStore } from "./auth.js";
@@ -76,7 +76,7 @@ export interface CreateMachineAuthStoresOptions {
  *   2. `$XDG_STATE_HOME/lore` — XDG explicit
  *   3. `~/.local/state/lore` — XDG default
  *
- * Pure side-effect: reads env vars + `homedir()` only. Never touches the filesystem.
+ * Pure side-effect: reads env vars + `currentHomeDir()` only. Never touches the filesystem.
  */
 function resolveMachineAuthBaseDir(): string {
   const loreStateHome = process.env["LORE_STATE_HOME"];
@@ -85,7 +85,7 @@ function resolveMachineAuthBaseDir(): string {
   const xdgStateHome = process.env["XDG_STATE_HOME"];
   if (xdgStateHome) return join(xdgStateHome, "lore");
 
-  return join(homedir(), ".local", "state", "lore");
+  return join(currentHomeDir(), ".local", "state", "lore");
 }
 
 /**

@@ -20,11 +20,11 @@
  *
  * Invariants:
  *   - `targetDir` is a RESOLVED string parameter on every method — this module
- *     NEVER calls `os.homedir()` or reads `process.env.CLAUDE_CONFIG_DIR`
+ *     NEVER calls `currentHomeDir()` or reads `process.env.CLAUDE_CONFIG_DIR`
  *     itself; that resolution (`--claude-dir` > `$CLAUDE_CONFIG_DIR` >
  *     `homedir()`) lives in the CLI adapter (SPEC-046 §Design).
  *   - `assertSafeTargetDir` REFUSES a `targetDir` that is or is inside the
- *     REAL `os.homedir()/.claude` unless `process.env.LORE_SETUP_ALLOW_REAL
+ *     REAL `currentHomeDir()/.claude` unless `process.env.LORE_SETUP_ALLOW_REAL
  *     === "1"` (the production escape hatch — a real `lore setup` run DOES
  *     target `~/.claude`). Every public method calls this FIRST, before any
  *     port call — this is this task's dedicated test-pollution guard (mirrors
@@ -181,6 +181,7 @@
 import { createHash } from "node:crypto";
 import path from "node:path";
 import os from "node:os";
+import { currentHomeDir } from "@lore/core/node";
 
 import { err, ok, expandTemplate } from "@lore/core";
 import type { Result, LoreError } from "@lore/core";
@@ -430,7 +431,7 @@ const defaultNow = (): string => new Date().toISOString();
 
 /**
  * Refuses a `targetDir` that is (or is nested inside) the REAL
- * `os.homedir()/.claude` directory of the executing user, unless
+ * `currentHomeDir()/.claude` directory of the executing user, unless
  * `process.env.LORE_SETUP_ALLOW_REAL === "1"` (the production escape hatch —
  * a genuine `lore setup` run targets exactly this directory). Every
  * {@link SetupService} public method calls this first.
@@ -442,12 +443,12 @@ const defaultNow = (): string => new Date().toISOString();
  *
  * @example
  * assertSafeTargetDir("/tmp/some-mkdtemp-dir"); // => ok(undefined)
- * assertSafeTargetDir(`${os.homedir()}/.claude`); // => err({code: "VALIDATION_ERROR", ...})
+ * assertSafeTargetDir(`${currentHomeDir()}/.claude`); // => err({code: "VALIDATION_ERROR", ...})
  */
 export function assertSafeTargetDir(targetDir: string): Result<void, LoreError> {
   if (process.env["LORE_SETUP_ALLOW_REAL"] === "1") return ok(undefined);
 
-  const realClaudeDir = path.resolve(os.homedir(), ".claude");
+  const realClaudeDir = path.resolve(currentHomeDir(), ".claude");
   const resolved = path.resolve(targetDir);
   const isRealOrNested = resolved === realClaudeDir || resolved.startsWith(`${realClaudeDir}${path.sep}`);
 

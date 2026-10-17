@@ -36,7 +36,7 @@
 import yaml from "yaml";
 import { readFileSync, writeFileSync, mkdirSync, existsSync, renameSync } from "fs";
 import { join, dirname } from "path";
-import { homedir } from "os";
+import { currentHomeDir } from "./home-dir-node.js";
 import { ok, err } from "./errors.js";
 import type { Result, LoreError } from "./errors.js";
 import {
@@ -148,7 +148,7 @@ export function resolveGlobalConfigPath(): string | undefined {
   //    reaching this branch with $XDG_CONFIG_HOME set would silently leak the
   //    real machine-wide config into a caller that asked for an isolated XDG root.
   if (!xdgConfigHome) {
-    const defaultCandidate = join(homedir(), ".config", "lore", "config.yaml");
+    const defaultCandidate = join(currentHomeDir(), ".config", "lore", "config.yaml");
     if (existsSync(defaultCandidate)) return defaultCandidate;
   }
 
@@ -258,7 +258,7 @@ export function loadGlobalConfig(
  * Callers that want read-or-create semantics compose:
  *   `resolveGlobalConfigPath() ?? resolveGlobalConfigWritePath()`.
  *
- * Pure side-effect: reads env vars + `homedir()` only. Never touches the filesystem.
+ * Pure side-effect: reads env vars + `currentHomeDir()` only. Never touches the filesystem.
  *
  * @example
  *   const path = resolveGlobalConfigPath() ?? resolveGlobalConfigWritePath();
@@ -271,7 +271,7 @@ export function resolveGlobalConfigWritePath(): string {
   const xdgConfigHome = process.env["XDG_CONFIG_HOME"];
   if (xdgConfigHome) return join(xdgConfigHome, "lore", "config.yaml");
 
-  return join(homedir(), ".config", "lore", "config.yaml");
+  return join(currentHomeDir(), ".config", "lore", "config.yaml");
 }
 
 /**
