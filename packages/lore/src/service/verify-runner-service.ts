@@ -94,8 +94,11 @@
  *      ③.5 ran (SPEC-061), ALWAYS `execution_root`/`execution_mode` (SPEC-063
  *      §Design Decisions D2/D3 — see `opts.executionRoot` below), and `head_sha` +
  *      `worktree_dirty` (baseline slice 1 §C5 — measured by {@link probeGitState} at
- *      the RESOLVED execution root after the command ran; both omitted together
- *      when git cannot answer). Step ③.4's
+ *      the RESOLVED execution root BEFORE the command and again AFTER it, SPEC-143
+ *      AC-CT-5; {@link decideStampOutcome} compares the two reads: HEAD moved ->
+ *      `stamp_unbound_reason: "state_moved"` with NO `head_sha`; tree dirty at either
+ *      read -> `"dirty_tree"`; otherwise `state_stamp`. Never the post read alone.
+ *      All omitted when git cannot answer at either read). Step ③.4's
  *      `binary_freshness` verdict is surfaced on the in-memory `VerifyAcResult` and
  *      the run's `warnings` ONLY — it is NOT persisted onto `attestation` (the
  *      `evidenceEntrySchema.attestation` shape lives outside this task's anchors;

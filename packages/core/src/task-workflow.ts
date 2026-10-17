@@ -630,6 +630,9 @@ export const evidenceEntrySchema = z.object({
       /**
        * Full 40-hex git HEAD the runner measured this attested run at (baseline slice 1
        * §C5) — lets rule-state derivation decide ancestry without trusting the caller.
+       * Read BEFORE and AFTER the command (SPEC-143 AC-CT-5); when the two differ the
+       * runner omits it and sets `stamp_unbound_reason: "state_moved"`
+       * (`verify-runner-service.ts::decideStampOutcome`), so it is never the post-run read alone.
        * OPTIONAL and present-iff-computed: pre-slice attestations carry none and still
        * parse (REGRESSION). ⛔ Runner-issued only, on the same terms as the enclosing
        * `attestation` object — no public write path may supply it.
