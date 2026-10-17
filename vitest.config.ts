@@ -1,6 +1,14 @@
 import { defineConfig } from "vitest/config";
 import { fileURLToPath, URL } from "node:url";
 import { workspaceAliases } from "./workspace-aliases";
+import { NODE_PROJECT_FILES } from "./vitest.node-files";
+import { armSandboxEnv } from "./scripts/test-isolation-env";
+
+// reason: arm the AC-TG-2 sandbox marker HERE, at config load in the runner's main process.
+// Workers are forked with this environment as their STARTUP environment, which is the only kind
+// a child spawned without an explicit `env` inherits under the Bun runtime. A setupFiles mutation
+// would arm the worker but not its children; scripts/test-isolation-setup.ts measures the result.
+armSandboxEnv(fileURLToPath(new URL(".", import.meta.url)));
 
 export default defineConfig({
   resolve: {
@@ -15,6 +23,10 @@ export default defineConfig({
     ],
   },
   test: {
+    // reason: under the Bun runtime vite-node evaluates zod's package before its `z` export is
+    // wired, so `z` is undefined at module evaluation; inlining zod makes vite transform it.
+    // adr-tg-1 option (b): 530 of the 557 failures of an unchanged config had this one cause.
+    server: { deps: { inline: ["zod"] } },
     environment: "node",
     globals: false,
     // reason: packages/lore/tests/integration/cli/*.test.ts spawn the CLI as a real
@@ -89,7 +101,9 @@ export default defineConfig({
     // fail to match the `include` globs above (which only list *.test.ts(x)), but this
     // exclude is a belt-and-suspenders guard so a future include-glob change can't
     // accidentally pull Playwright specs into the vitest run. SPEC-022 §9.7.
-    exclude: ["**/*.bun.test.ts", "**/*.pw.ts", "node_modules/**"],
+    // reason: the former `*.bun.test.ts` files run here too (one runner, TG-23); only the files
+    // listed BY FILE in vitest.node-files.ts are left to the Node invocation (vitest.node.config.ts).
+    exclude: ["**/*.pw.ts", "node_modules/**", ...Object.keys(NODE_PROJECT_FILES)],
     coverage: {
       provider: "v8",
       reporter: ["text", "lcov"],
