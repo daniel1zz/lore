@@ -149,14 +149,8 @@ beforeAll(() => {
   if (pkg.name !== "lore-workspace") {
     throw new Error(`WORKTREE_ROOT resolved to a non-workspace directory: ${WORKTREE_ROOT}`);
   }
-  const buildResult = Bun.spawnSync(["bun", "run", "build"], { cwd: WORKTREE_ROOT });
-  if (buildResult.exitCode !== 0) {
-    throw new Error(
-      `'bun run build' failed (exit ${buildResult.exitCode}):\n` +
-        `stdout: ${buildResult.stdout.toString()}\nstderr: ${buildResult.stderr.toString()}`,
-    );
-  }
-  if (!existsSync(DIST_LORE)) throw new Error(`Expected ${DIST_LORE} to exist after 'bun run build'`);
+  // dist/lore is built ONCE per run by the runner (scripts/test-global-setup.ts); a test never rebuilds it (TG-24).
+  if (!existsSync(DIST_LORE)) throw new Error(`Expected ${DIST_LORE} to exist after the runner's one build`);
 
   // BINARY FRESHNESS IS ASSERTED, NOT ASSUMED — before spawning anything
   // else, drive the SAME dist binary's own provenance check against THIS

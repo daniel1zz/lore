@@ -102,6 +102,13 @@ export interface PublishNpmFlags {
   tag: string;
   /** `--registry <url>` — resolved registry override, when passed. */
   registry?: string;
+  /**
+   * `--skip-build` — reuse the existing `dist/lore` instead of running `bun run build`. Present ONLY
+   * when passed. For a harness that has already built it once for the whole run (TG-24: the npm
+   * install simulation test); never combinable with `--publish`, which must ship a binary this
+   * invocation built.
+   */
+  skipBuild?: true;
 }
 
 /**
@@ -123,12 +130,16 @@ export function parseArgs(argv: string[]): Result<PublishNpmFlags, LoreError> {
   let packOnly = false;
   let tag: string | undefined;
   let registry: string | undefined;
+  let skipBuild = false;
 
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     switch (arg) {
       case "--publish":
         publish = true;
+        break;
+      case "--skip-build":
+        skipBuild = true;
         break;
       case "--pack-only":
         packOnly = true;
@@ -165,10 +176,19 @@ export function parseArgs(argv: string[]): Result<PublishNpmFlags, LoreError> {
         return err({
           code: "VALIDATION_ERROR",
           field: "argv",
-          message: `Unknown argument: "${arg}". Known flags: --publish, --tag <dist-tag>, --registry <url>, --pack-only`,
+          message: `Unknown argument: "${arg}". Known flags: --publish, --tag <dist-tag>, --registry <url>, --pack-only, --skip-build`,
           value: arg,
         });
     }
+  }
+
+  if (publish && skipBuild) {
+    return err({
+      code: "VALIDATION_ERROR",
+      field: "argv",
+      message: "--skip-build cannot be combined with --publish: a publish must ship a binary this invocation built",
+      value: "--skip-build",
+    });
   }
 
   return ok({
@@ -176,6 +196,7 @@ export function parseArgs(argv: string[]): Result<PublishNpmFlags, LoreError> {
     packOnly,
     tag: tag ?? DEFAULT_TAG,
     ...(registry !== undefined ? { registry } : {}),
+    ...(skipBuild ? { skipBuild: true as const } : {}),
   });
 }
 
@@ -266,8 +287,10 @@ export async function runPipeline(
   flags: PublishNpmFlags,
   deps: PipelineDeps
 ): Promise<Result<PipelineReport, LoreError>> {
-  const buildResult = await deps.build();
-  if (!buildResult.ok) return buildResult;
+  if (flags.skipBuild !== true) {
+    const buildResult = await deps.build();
+    if (!buildResult.ok) return buildResult;
+  }
 
   const assembleResult = await deps.assemble();
   if (!assembleResult.ok) return assembleResult;
@@ -306,6 +329,12 @@ function describeCaught(caught: unknown): string {
   return caught instanceof Error ? caught.message : String(caught);
 }
 
+/**
+ * Wall-clock cap on any one subprocess this pipeline spawns. A healthy build is ~1 min and a pack
+ * seconds; past this the process tree is killed and the stage fails loud instead of hanging.
+ */
+const DEFAULT_SPAWN_TIMEOUT_MS = 480_000;
+
 /** A completed subprocess's collected output. */
 interface CommandResult {
   exitCode: number;
@@ -319,12 +348,40 @@ interface CommandResult {
  * `exitCode: -1` and the error message folded into `stderr`, mirroring
  * `real-mcp-registrar.ts`'s "never throws" port contract.
  */
-function spawnCollect(cmd: string, args: string[], cwd: string, extraEnv: NodeJS.ProcessEnv = {}): Promise<CommandResult> {
+function spawnCollect(
+  cmd: string,
+  args: string[],
+  cwd: string,
+  extraEnv: NodeJS.ProcessEnv = {},
+  timeoutMs: number = DEFAULT_SPAWN_TIMEOUT_MS,
+): Promise<CommandResult> {
   return new Promise((resolve) => {
-    const child = spawn(cmd, args, { cwd, stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, ...extraEnv } });
+    // reason: `detached` makes the child its own process-group leader so the timeout below can kill
+    // the WHOLE tree (`bun run build` -> vite, `npm pack` -> its helpers). Killing only the direct
+    // child left an `npm pack --dry-run --json` running for 5+ hours (TG-24, measured 2026-10-17).
+    const child = spawn(cmd, args, {
+      cwd,
+      stdio: ["ignore", "pipe", "pipe"],
+      env: { ...process.env, ...extraEnv },
+      detached: true,
+    });
     let stdout = "";
     let stderr = "";
     let settled = false;
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      try {
+        if (child.pid !== undefined) process.kill(-child.pid, "SIGKILL");
+      } catch {
+        child.kill("SIGKILL");
+      }
+      resolve({
+        exitCode: -1,
+        stdout,
+        stderr: `${stderr}\n[publish-npm] "${cmd} ${args.join(" ")}" timed out after ${timeoutMs} ms and its process group was killed`,
+      });
+    }, timeoutMs);
 
     child.stdout?.on("data", (chunk: Buffer) => {
       stdout += chunk.toString("utf8");
@@ -333,11 +390,22 @@ function spawnCollect(cmd: string, args: string[], cwd: string, extraEnv: NodeJS
       stderr += chunk.toString("utf8");
     });
     child.once("error", (cause) => {
+      clearTimeout(timer);
       if (settled) return;
       settled = true;
       resolve({ exitCode: -1, stdout, stderr: stderr || describeCaught(cause) });
     });
+    child.once("exit", () => {
+      // reason: a grandchild that inherited the stdout pipe keeps `close` from ever firing, so the
+      // stage would wait for the timeout; kill the group as soon as the direct child is gone.
+      try {
+        if (child.pid !== undefined) process.kill(-child.pid, "SIGKILL");
+      } catch {
+        // group already gone
+      }
+    });
     child.once("close", (exitCode) => {
+      clearTimeout(timer);
       if (settled) return;
       settled = true;
       resolve({ exitCode: exitCode ?? -1, stdout, stderr });
