@@ -15,6 +15,7 @@
 import { spawnSync } from "node:child_process";
 import { err, ok } from "@lore/core";
 import type { LoreError, Result } from "@lore/core";
+import { gitDiffChangedSince } from "./git-diff-since.js";
 import type { GitPort } from "./rule-state-service.js";
 
 interface GitRun {
@@ -69,10 +70,7 @@ export class SpawnGitPort implements GitPort {
   }
 
   changedSince(sha: string, paths: string[]): Result<boolean, LoreError> {
-    const run = this.run(["diff", "--quiet", sha, "HEAD", "--", ...paths]);
-    if (run.status === 0) return ok(false);
-    if (run.status === 1) return ok(true);
-    return err(gitUnavailable(`diff since ${sha}`, this.describe(run)));
+    return gitDiffChangedSince(this.repoRoot, sha, paths);
   }
 
   private run(args: string[]): GitRun {

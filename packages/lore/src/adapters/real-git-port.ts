@@ -380,6 +380,9 @@ export function countUnmergedCommitsSync(cwd: string, branch: string, into: stri
   }
 }
 
+/** Re-export: the blast-radius diff has ONE definition, in `service/git-diff-since.ts` (see its header). */
+export { gitDiffChangedSince } from "../service/git-diff-since.js";
+
 /** Filename of the per-worktree active-claim-session marker, written inside that worktree's OWN private git-dir (never the tracked working tree). */
 const CLAIM_SESSION_MARKER_FILENAME = "LORE_SESSION_ID";
 
