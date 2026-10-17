@@ -522,7 +522,7 @@ function walkDir(repoRoot: string, dir: string, matches: (relPath: string) => bo
 }
 
 /** Load every `packages/*\/src/**\/*.ts(x)` file, every `packages/*\/tests/**\/*.ts` file, and every `scripts/**\/*.ts` file (flat — no src/tests split there; `scripts/tests/` falls out of the same walk) under `repoRoot` into a `FileMap`, keyed by repo-relative posix path. */
-function loadFileMap(repoRoot: string): FileMap {
+export function loadFileMap(repoRoot: string): FileMap {
   const files: string[] = [];
   const packagesDir = osJoin(repoRoot, "packages");
   for (const pkg of readdirSync(packagesDir, { withFileTypes: true })) {
@@ -565,7 +565,7 @@ const PackageExportsSchema = z.object({
 });
 
 /** Derive the `@lore/core` / `@lore/core/node` alias map from `packages/core/package.json`'s `exports` field — the SSOT for what those bare specifiers resolve to, rather than hardcoding the target paths here. */
-function loadCoreAliasMap(repoRoot: string): AliasMap {
+export function loadCoreAliasMap(repoRoot: string): AliasMap {
   const pkgJsonPath = osJoin(repoRoot, "packages/core/package.json");
   const raw = readFileSync(pkgJsonPath, "utf8");
   const parsed = PackageExportsSchema.safeParse(JSON.parse(raw));
