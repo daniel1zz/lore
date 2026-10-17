@@ -186,7 +186,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { execFileSync } from "node:child_process";
 import { CAPTURE_TAIL_CHARS, err, findMissingOracleFiles, ok, RUNNER_UNATTESTED_CAPTURE_SOURCE } from "@lore/core";
-import type { FileExistsPort } from "@lore/core";
+import type { FileExistsPort, StateStamp } from "@lore/core";
 import type {
   Result,
   LoreError,
@@ -268,6 +268,50 @@ export function probeGitState(root: string): GitStateProbe | undefined {
   } catch {
     return undefined;
   }
+}
+
+/**
+ * The attestation fields {@link decideStampOutcome} contributes: the git facts plus either a
+ * `state_stamp` (certified) or a `stamp_unbound_reason` (demoted), or neither (not measured).
+ */
+export type StampOutcome =
+  | { readonly state_stamp: StateStamp; readonly head_sha: string; readonly worktree_dirty: false }
+  | {
+      readonly stamp_unbound_reason: "dirty_tree";
+      readonly head_sha: string;
+      readonly worktree_dirty: true;
+    }
+  | { readonly stamp_unbound_reason: "state_moved" }
+  | Record<string, never>;
+
+/**
+ * Decides what the runner may certify about the state an oracle ran against (SPEC-143 AC-CT-5).
+ * Pure: compares the PRE-run and POST-run {@link probeGitState} readings.
+ *
+ * - either read unmeasured (git could not answer) -> `{}`: nothing measured, NO reason invented
+ *   (the absent stamp is classified `unbound` / `legacy_unbound` by the consumer);
+ * - `head_sha` differs -> `state_moved`, and NEITHER head is recorded: the post-run value is never
+ *   silently written as the measured state (and the pre value did not survive the run);
+ * - tree dirty at either read -> `dirty_tree`; the facts keep the existing contract (head_sha +
+ *   worktree_dirty: true) that rule-state derivation reads as "dirty";
+ * - otherwise -> `state_stamp` + the facts.
+ *
+ * `state_moved` outranks `dirty_tree`: a state that moved cannot be described by either read.
+ *
+ * @param pre - reading taken immediately before the command
+ * @param post - reading taken immediately after it
+ */
+export function decideStampOutcome(pre: GitStateProbe | undefined, post: GitStateProbe | undefined): StampOutcome {
+  if (pre === undefined || post === undefined) return {};
+  if (pre.head_sha !== post.head_sha) return { stamp_unbound_reason: "state_moved" };
+  if (pre.worktree_dirty || post.worktree_dirty) {
+    return { stamp_unbound_reason: "dirty_tree", head_sha: post.head_sha, worktree_dirty: true };
+  }
+  return {
+    state_stamp: { head_sha: post.head_sha, worktree_dirty: false },
+    head_sha: post.head_sha,
+    worktree_dirty: false,
+  };
 }
 
 // ─── Pinned refusal literals (declared-scope contract) ─────────────────────
@@ -1124,6 +1168,9 @@ export class VerifyRunnerService {
         corpusRoot: this.config.repoRoot,
         fileExists: this.fileExists,
       });
+      // SPEC-143 AC-CT-5 — the PRE read of the stamp, taken immediately before the command
+      // can run; the POST read is `gitState` below, immediately after it ran.
+      const preRunGitState = probeGitState(resolvedExecutionRoot.root);
       const execResult: Awaited<ReturnType<typeof this.executor>> =
         missingOracleFiles.length > 0
           ? ok({
@@ -1266,7 +1313,8 @@ export class VerifyRunnerService {
         }
       }
 
-      const gitState = probeGitState(resolvedExecutionRoot.root);
+      const postRunGitState = probeGitState(resolvedExecutionRoot.root);
+      const stampOutcome = decideStampOutcome(preRunGitState, postRunGitState);
       const recordResult = await this.recordVerifiedEvidence(
         task.id,
         {
@@ -1311,9 +1359,9 @@ export class VerifyRunnerService {
             // "corpus_root").
             execution_root: resolvedExecutionRoot.root,
             execution_mode: resolvedExecutionRoot.mode,
-            // Baseline slice 1 §C5 — git state AFTER the command ran, present-iff-computed
-            // (both omitted together when git cannot answer; see `probeGitState`).
-            ...(gitState !== undefined ? gitState : {}),
+            // Baseline slice 1 §C5 + SPEC-143 AC-CT-5 — the git facts and the stamp verdict, decided
+            // from the PRE and POST reads together (see `decideStampOutcome`); never the post read alone.
+            ...stampOutcome,
           },
         },
         opts.nowIso,

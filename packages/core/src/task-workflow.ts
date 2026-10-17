@@ -316,14 +316,13 @@ function isWellFormedOracleGeneration(value: number | undefined): value is numbe
  * peer can land a commit without writing a doc, and can write a doc without
  * touching the tree. One coordinate would make one of those invisible.
  *
- * - `tree_digest` — the code state (git tree identity, resolved by the caller's
- *   `GitPort`; this module computes nothing).
+ * - `head_sha` + `worktree_dirty` — the code state, the attestation's own
+ *   coordinates (R13, user decision 2026-10-17: NO tree digest; a tree dirty at
+ *   either read is never stamped, so `worktree_dirty` is the literal `false`).
  * - `corpus_rev` — the corpus state, `MAX(audit.id)`. Free to read: `audit.id`
  *   is `INTEGER PRIMARY KEY AUTOINCREMENT`, so `SELECT MAX(id)` is a rightmost
  *   B-tree descent, and the audit hash chain already commits the content behind
- *   that integer.
- * - `captured_at` — when the two coordinates above were read, so a stamp can be
- *   audited against the audit trail's own timestamps.
+ *   that integer. OPTIONAL: the runner has no audit port and never invents one.
  *
  * ⛔ NEVER an mtime: git rewrites mtimes, so they are unusable as identity.
  * ⛔ PRESENT-IFF-COMPUTED. The stamp is `.optional()` on
@@ -337,19 +336,35 @@ function isWellFormedOracleGeneration(value: number | undefined): value is numbe
  *
  * @example
  * stateStampSchema.parse({
- *   tree_digest: "7ab1d742c0f9e1b6a3d5c8e2f4b7a9d0c1e3f5a7",
- *   corpus_rev: 14992,
- *   captured_at: "2026-08-23T06:30:00.000Z",
+ *   head_sha: "7ab1d742c0f9e1b6a3d5c8e2f4b7a9d0c1e3f5a7",
+ *   worktree_dirty: false,
  * });
  */
 export const stateStampSchema = z.object({
-  /** Git tree identity of the code state — resolved by the caller, never derived here. */
-  tree_digest: z.string().min(1),
-  /** `MAX(audit.id)` at capture time — the corpus state's monotone, append-only coordinate. */
-  corpus_rev: z.number().int().min(0),
-  /** ISO 8601 instant the two coordinates above were read (caller's time seam, D10). */
-  captured_at: z.string().min(1),
+  /** Full 40-hex git HEAD the runner read BEFORE and AFTER the command and found identical. */
+  head_sha: z.string().regex(/^[0-9a-f]{40}$/, "head_sha must be a 40-hex git sha"),
+  /**
+   * ALWAYS `false`: a tree dirty at either read is demoted to `unbound`/`dirty_tree`
+   * (see {@link STAMP_UNBOUND_REASONS}), never stamped, so a stamp can only certify a
+   * committed tree. A literal makes "stamped on a dirty tree" unrepresentable.
+   */
+  worktree_dirty: z.literal(false),
+  /**
+   * `MAX(audit.id)` at capture time. OPTIONAL: the RUNNER has no audit port and must not
+   * invent one; the per-row `recorded_corpus_rev` (SPEC-143 C1, CT-3) is written server-side.
+   */
+  corpus_rev: z.number().int().min(0).optional(),
 });
+
+/**
+ * Why the runner demoted an attested run to `unbound` instead of stamping it (SPEC-143
+ * AC-CT-5, R13). `state_moved`: the pre-run and post-run stamps differ. `dirty_tree`: the
+ * tree was dirty at either read.
+ */
+export const STAMP_UNBOUND_REASONS = ["state_moved", "dirty_tree"] as const;
+
+/** One member of {@link STAMP_UNBOUND_REASONS}. */
+export type StampUnboundReason = (typeof STAMP_UNBOUND_REASONS)[number];
 
 /** Derived TypeScript type for one state stamp — see {@link stateStampSchema}. */
 export type StateStamp = z.infer<typeof stateStampSchema>;
@@ -605,6 +620,13 @@ export const evidenceEntrySchema = z.object({
        * command (SPEC-143 AC-CT-5), and no public write path may supply it.
        */
       state_stamp: stateStampSchema.optional(),
+      /**
+       * Present iff the runner READ a stamp before and after the command and refused to
+       * certify it (SPEC-143 AC-CT-5): `state_moved` or `dirty_tree`. Mutually exclusive
+       * with `state_stamp`. Absent when git could not answer (nothing measured, so no
+       * reason is invented). Runner-issued only, like the enclosing `attestation`.
+       */
+      stamp_unbound_reason: z.enum(STAMP_UNBOUND_REASONS).optional(),
       /**
        * Full 40-hex git HEAD the runner measured this attested run at (baseline slice 1
        * §C5) — lets rule-state derivation decide ancestry without trusting the caller.
