@@ -141,13 +141,7 @@ function prepareCorpus(root: string): void {
 }
 
 beforeAll(() => {
-  const buildResult = Bun.spawnSync(["bun", "run", "build"], { cwd: WORKTREE_ROOT });
-  if (buildResult.exitCode !== 0) {
-    throw new Error(
-      `'bun run build' failed (exit ${buildResult.exitCode}):\n` +
-        `stdout: ${buildResult.stdout.toString()}\nstderr: ${buildResult.stderr.toString()}`,
-    );
-  }
+  // dist/lore is built ONCE per run by the runner (scripts/test-global-setup.ts); a test never rebuilds it (TG-24).
   assertFreshBinary(DIST_LORE, [
     join(WORKTREE_ROOT, "packages", "lore", "src"),
     join(WORKTREE_ROOT, "packages", "core", "src"),

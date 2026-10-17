@@ -61,6 +61,7 @@ interface PublishNpmFlags {
   packOnly: boolean;
   tag: string;
   registry?: string;
+  skipBuild?: true;
 }
 
 /** Minimal structural stand-in for `PublishPlan` — the pipeline never inspects its shape, only threads it through. */
@@ -273,6 +274,30 @@ describe("scripts/publish-npm — parseArgs", () => {
       if (!result.ok) return;
       expect("registry" in result.value).toBe(false);
     });
+
+    it("a bare parse never carries a 'skipBuild' key at all", () => {
+      const result = parseArgs([]);
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect("skipBuild" in result.value).toBe(false);
+    });
+  });
+
+  describe("TG-24 — --skip-build", () => {
+    it("HAPPY: --skip-build --pack-only resolves skipBuild: true", () => {
+      const result = parseArgs(["--pack-only", "--skip-build"]);
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.value).toMatchObject({ packOnly: true, skipBuild: true, publish: false });
+    });
+
+    it("NEGATIVE: --skip-build with --publish is refused (a publish must ship a binary it built)", () => {
+      const result = parseArgs(["--publish", "--skip-build"]);
+      expect(result.ok).toBe(false);
+      if (result.ok) return;
+      expect(result.error.code).toBe("VALIDATION_ERROR");
+      expect((result.error as { message: string }).message).toContain("--skip-build");
+    });
   });
 });
 
@@ -287,6 +312,13 @@ describe("scripts/publish-npm — runPipeline", () => {
       expect(result.value.verify).toEqual(FAKE_VERIFY_REPORT);
       expect(result.value.published).toBe(false);
       expect(tracker.order).toEqual(["build", "assemble", "verify"]);
+    });
+
+    it("TG-24 skipBuild run: build() is never called; assemble and verify still run", async () => {
+      const { deps, tracker } = makeFakeDeps();
+      const result = await runPipeline({ ...BASE_FLAGS, skipBuild: true }, deps);
+      expect(result.ok).toBe(true);
+      expect(tracker.order).toEqual(["assemble", "verify"]);
     });
 
     it("--pack-only run: calls npmPack exactly once with the plan, still published=false", async () => {

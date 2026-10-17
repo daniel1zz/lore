@@ -30,16 +30,12 @@
  * SAFETY: never writes to the repo's own `.lore/` — the status read below runs
  * inside a `mkdtemp` throwaway corpus (project CLAUDE.md hard rule).
  *
- * ⛔ The build writes the ORDINARY `dist/lore`, then this suite COPIES the
- * artifact to a `mkdtemp` path and spawns only the copy. Do NOT "improve" this
- * by redirecting the build's output elsewhere: `bun run build` also rewrites
- * `packages/lore/src/generated/assets-manifest.ts`, so a build that leaves
- * `dist/lore` untouched makes a generated source newer than the binary — the
- * exact condition `tests/integration/helpers/assert-fresh-binary.ts` refuses,
- * which took two unrelated suites down when it was tried (measured 2026-08-17;
- * see the fixed-`outfile` comment in `scripts/build.ts`). Copying is what
- * protects THIS suite's binary from a later rebuild by a co-scheduled test,
- * and it is the pattern `report-issue-provision.bun.test.ts` already uses.
+ * ⛔ TG-24: this suite builds into its OWN `mkdtemp` path with
+ * `scripts/build.ts --outfile`, never into `dist/`. The build's generated-source
+ * write is idempotent (see the outfile comment in `scripts/build.ts`), so this
+ * variant build cannot make a source newer than `dist/lore` and trip the
+ * stale-binary check (`tests/integration/helpers/assert-fresh-binary.ts`) of the
+ * compiled tests running in parallel.
  *
  * Coverage dimensions: HAPPY (real build → real HEAD equality) / NEGATIVE
  * (malformed and schema-violating embedded payloads) / BOUNDARY (unreadable
@@ -53,7 +49,7 @@
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { execFileSync, execSync, spawnSync } from "node:child_process";
-import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -141,24 +137,22 @@ beforeAll(() => {
   porcelainBeforeBuild = git(REPO_ROOT, "status", "--porcelain");
 
   buildSpawnedAtMs = Date.now();
-  const build = spawnSync(BUN_BIN, ["run", "build"], {
+  // TG-24: build into THIS suite's own mkdtemp path (`--outfile`), never into dist/.
+  const build = spawnSync(BUN_BIN, ["run", "scripts/build.ts", "--outfile", builtBinary], {
     cwd: REPO_ROOT,
     encoding: "utf8",
     env: sanitizedEnv(),
+    timeout: 300_000,
   });
   buildFinishedAtMs = Date.now();
   if (build.status !== 0) {
     throw new Error(
-      `'bun run build' failed (exit ${String(build.status)}):\n${build.stdout ?? ""}\n${build.stderr ?? ""}`,
+      `variant build failed (exit ${String(build.status)}, signal ${String(build.signal)}):\n${build.stdout ?? ""}\n${build.stderr ?? ""}`,
     );
   }
-  const distBinary = join(REPO_ROOT, "dist", "lore");
-  if (!existsSync(distBinary)) {
-    throw new Error(`'bun run build' exited 0 but produced no binary at ${distBinary}`);
+  if (!existsSync(builtBinary)) {
+    throw new Error(`the variant build exited 0 but produced no binary at ${builtBinary}`);
   }
-  // Copy immediately: from here on every spawn reads THIS suite's own artifact,
-  // so a co-scheduled test rebuilding `dist/lore` cannot swap it mid-suite.
-  copyFileSync(distBinary, builtBinary);
   chmodSync(builtBinary, 0o755);
 
   porcelainAfterBuild = git(REPO_ROOT, "status", "--porcelain");

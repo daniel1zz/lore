@@ -63,6 +63,10 @@ export function createConfig(selection: { include: readonly string[]; exclude: r
       // wired, so `z` is undefined at module evaluation; inlining zod makes vite transform it.
       // adr-tg-1 option (b): 530 of the 557 failures of an unchanged config had this one cause.
       server: { deps: { inline: ["zod"] } },
+      // reason: dist/lore is built ONCE per run here (not in any test), and the teardown fails the run
+      // loud if a test wrote it (task-skill-implement-tg-24, adr-tg-1: in-test rebuilds tripped the
+      // stale-binary check of every compiled test in a parallel run).
+      globalSetup: ["scripts/test-global-setup.ts"],
       environment: "node",
       globals: false,
       // reason: packages/lore/tests/integration/cli/*.test.ts spawn the CLI as a real

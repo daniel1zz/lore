@@ -41,6 +41,19 @@ function newestTsMtimeMs(dir: string): number {
 }
 
 /**
+ * Non-throwing form of {@link assertFreshBinary}'s decision: true when `binPath` is missing or any
+ * `.ts` under `srcDirs` is newer than it. Used by the run's global setup to decide whether the one
+ * build before the tests is needed (scripts/test-global-setup.ts).
+ */
+export function isBinaryStale(binPath: string, srcDirs: readonly string[]): boolean {
+  if (!existsSync(binPath)) {
+    return true;
+  }
+  const binMtimeMs = statSync(binPath).mtimeMs;
+  return srcDirs.some((dir) => newestTsMtimeMs(dir) > binMtimeMs);
+}
+
+/**
  * Throws loudly if `binPath` is missing, or if any `.ts` file under any of `srcDirs` (searched
  * recursively) is newer than `binPath`. Call once (e.g. from `beforeAll`) before any test that
  * spawns the compiled binary runs.

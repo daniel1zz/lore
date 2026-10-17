@@ -76,7 +76,8 @@
  */
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { execSync, spawnSync } from "node:child_process";
+import { execSync } from "node:child_process";
+import { runProcessGroup } from "./helpers/run-process-group.js";
 import { existsSync, lstatSync, mkdtempSync, realpathSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -148,18 +149,15 @@ interface RunResult {
   readonly exitCode: number;
 }
 
-function run(bin: string, args: string[], cwd: string, env: Record<string, string>): RunResult {
-  // reason: `spawnSync`'s default maxBuffer is 1 MiB — `lore setup --dry-run --json`'s
-  // asset-manifest payload is ~1.76 MB (grows with the vendored skill/hook tree), so the
-  // default silently truncated stdout at ~1 MB and the downstream JSON.parse threw
-  // "Unterminated string". Raise to 64 MiB so the whole payload is captured (the binary
-  // itself emits valid JSON — verified directly; this was purely a test-harness capture cap).
-  const result = spawnSync(bin, args, { cwd, env, encoding: "utf8", timeout: 570_000, maxBuffer: 64 * 1024 * 1024 });
-  return {
-    stdout: result.stdout ?? "",
-    stderr: result.stderr ?? "",
-    exitCode: result.status ?? 1,
-  };
+/**
+ * reason: runs through `runProcessGroup` (TG-24), not `spawnSync` — `spawnSync`'s timeout kills only
+ * the direct child, and an `npm pack --dry-run --json` grandchild outlived a timed-out run by 5+
+ * hours (measured 2026-10-17). The helper kills the whole process group on timeout and rejects, so
+ * a hung stage fails loud and leaves nothing behind. It collects output without a buffer cap (the
+ * `lore setup --dry-run --json` payload is ~1.76 MB, which the old 1 MiB spawnSync default truncated).
+ */
+function run(bin: string, args: string[], cwd: string, env: Record<string, string>, timeoutMs: number): Promise<RunResult> {
+  return runProcessGroup(bin, args, { cwd, env, timeoutMs });
 }
 
 // ─── Shared fixture state (populated once by beforeAll) ────────────────────
@@ -193,7 +191,9 @@ beforeAll(async () => {
   expectedNudgeMessage = postinstallModule.decide({ isTTY: false, env: {} }).message;
 
   // ── Stage 1: build + stage + verify + pack (real `npm pack`, D2 beta artifact) ──
-  const packResult = run(BUN_BIN, ["run", "scripts/publish-npm.ts", "--pack-only"], REPO_ROOT, sanitizedEnv());
+  // `--skip-build`: dist/lore was built ONCE for the whole run (scripts/test-global-setup.ts); a
+  // second concurrent `bun run build` here is the rebuild race of TG-24.
+  const packResult = await run(BUN_BIN, ["run", "scripts/publish-npm.ts", "--pack-only", "--skip-build"], REPO_ROOT, sanitizedEnv(), 300_000);
   if (packResult.exitCode !== 0) {
     throw new Error(
       `npm-install-simulation.test.ts: \`bun run scripts/publish-npm.ts --pack-only\` failed (exit ${packResult.exitCode}).\n` +
@@ -213,17 +213,18 @@ beforeAll(async () => {
 
   // ── Stage 2: registry-free `npm i <tarball>` into a throwaway prefix ──
   installPrefix = makeScratchDir("lore-npm-install-sim-");
-  installResult = run(
+  installResult = await run(
     NPM_BIN,
     ["install", "--prefix", installPrefix, tarballPath, "--no-audit", "--fund=false", "--foreground-scripts"],
     installPrefix,
     sanitizedEnv(),
+    150_000,
   );
 
   binSymlinkPath = join(installPrefix, "node_modules", ".bin", "lore");
 
   // ── Stage 3: `--version` THROUGH the installed bin symlink (T4 realpath fix) ──
-  versionResult = run(binSymlinkPath, ["--version"], installPrefix, sanitizedEnv());
+  versionResult = await run(binSymlinkPath, ["--version"], installPrefix, sanitizedEnv(), 60_000);
 
   // ── Stage 4: `lore setup --dry-run --claude-dir <mkdtemp>/.claude` from the installed location ──
   // reason: `--claude-dir` must point at a NOT-YET-EXISTING nested path (mirrors
@@ -233,11 +234,12 @@ beforeAll(async () => {
   // wrong reason (it existed before the command ever ran).
   const setupDryRunScratchParent = makeScratchDir("lore-npm-install-sim-setup-dryrun-");
   setupDryRunTargetDir = join(setupDryRunScratchParent, ".claude");
-  setupDryRunResult = run(
+  setupDryRunResult = await run(
     binSymlinkPath,
     ["setup", "--dry-run", "--claude-dir", setupDryRunTargetDir, "--json"],
     installPrefix,
     sanitizedEnv({ PATH: "" }), // forces `claude` ENOENT deterministically; --dry-run never reaches McpRegistrar anyway (setup.test.ts convention)
+    60_000,
   );
   setupDryRunJson = JSON.parse(setupDryRunResult.stdout);
 }, 600_000);
