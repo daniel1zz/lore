@@ -154,6 +154,12 @@ import {
 import { buildRealFsProbe } from "../../real-fs-probe.js";
 import { SQLiteStore } from "../../../store/sqlite-store.js";
 import { DECISION_LOG_BREAK_EXIT, collectDecisionLogStatus, renderDecisionLogLine } from "../status-decision-log.js";
+import {
+  AUTONOMY_THRESHOLD_BREAK_EXIT,
+  collectAutonomyThresholdStatus,
+  isAutonomyThresholdBreak,
+  renderAutonomyThresholdLine,
+} from "../status-autonomy-thresholds.js";
 import { RuleStateService } from "../../../service/rule-state-service.js";
 import { SpawnGitPort, resolveGitRoot } from "../../../service/rule-state-git-port.js";
 import {
@@ -1065,6 +1071,11 @@ export default defineCommand({
       description:
         "Verify the autonomy decision log's hash chain (AC-AU-2). Intact or empty -> exit 0; a tampered, deleted or reordered row -> exit 1, naming the first broken row. Standalone — runs alone when combined with the app-backed --check-* flags.",
     },
+    "check-autonomy-thresholds": {
+      type: "boolean",
+      description:
+        "Verify the governed autonomy threshold record against its decision-log chain (AC-AU-9). Intact, confirmed or not yet recorded -> exit 0; a record edited outside lore -> exit 1, naming the integrity break (every class escalates until the human accepts the threshold-integrity decision). Standalone — runs alone when combined with the app-backed --check-* flags.",
+    },
     "check-fragments": {
       type: "boolean",
       description:
@@ -1273,6 +1284,26 @@ export default defineCommand({
           console.log(renderDecisionLogLine(checked.value));
         }
         process.exitCode = checked.value.verify.clean ? 0 : DECISION_LOG_BREAK_EXIT;
+      } finally {
+        app.close();
+      }
+      return;
+    }
+
+    // ── check-autonomy-thresholds branch (spec-autonomy-phase-1 AC-AU-9) ──
+    // reason: standalone like --check-decision-log; exit 1 on a mismatched, unconfirmed record, naming the break.
+    if (args["check-autonomy-thresholds"] === true) {
+      const { app, dbPath } = loadLoreApp();
+      try {
+        const checked = await collectAutonomyThresholdStatus(dbPath);
+        if (!checked.ok) {
+          process.stderr.write(formatError(checked.error) + "\n");
+          process.exitCode = exitCode(checked.error);
+          return;
+        }
+        if (args.json) console.log(JSON.stringify({ ok: true, data: { autonomy_thresholds: checked.value } }, null, 2));
+        else console.log(renderAutonomyThresholdLine(checked.value));
+        process.exitCode = isAutonomyThresholdBreak(checked.value) ? AUTONOMY_THRESHOLD_BREAK_EXIT : 0;
       } finally {
         app.close();
       }
@@ -2165,6 +2196,17 @@ export default defineCommand({
       if (!decisionLogStatus.value.verify.clean || decisionLogStatus.value.head !== null) {
         console.log(`\n${renderDecisionLogLine(decisionLogStatus.value)}`);
       }
+
+      // AC-AU-9 — the governed threshold record's integrity. A BREAK is named and fails the command (exit 1): every
+      // class is escalating, which a status that exits 0 would hide. Other states print one informational line.
+      const thresholdStatus = await collectAutonomyThresholdStatus(dbPath);
+      if (!thresholdStatus.ok) {
+        process.stderr.write(formatError(thresholdStatus.error) + "\n");
+        process.exitCode = exitCode(thresholdStatus.error);
+        return;
+      }
+      if (thresholdStatus.value.state !== "unseeded") console.log(`\n${renderAutonomyThresholdLine(thresholdStatus.value)}`);
+      if (isAutonomyThresholdBreak(thresholdStatus.value)) process.exitCode = AUTONOMY_THRESHOLD_BREAK_EXIT;
 
       // baseline slice 1 §C7 — one line, only when a warning count is non-zero (report-only).
       if (baselineStatus !== null && baselineWarningCount(baselineStatus) > 0) {

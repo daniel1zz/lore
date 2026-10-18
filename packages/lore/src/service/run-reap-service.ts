@@ -46,7 +46,6 @@ import {
   decide,
   err,
   ok,
-  OPERATION_CLASS_REGISTRY,
   type AutonomyFacts,
   type LoreError,
   type OperationClassRegistry,
@@ -71,7 +70,7 @@ export type RunReapStore = Pick<StoreInterface, "listRunLifecycles" | "queryAudi
 export interface RunEnder {
   end(runId: string, reason: string): Promise<Result<RunEndResult, LoreError>>;
 }
-export type RunReapDecisions = Pick<DecisionService, "decide" | "effectiveVerdict">;
+export type RunReapDecisions = Pick<DecisionService, "decide" | "effectiveVerdict" | "governed">;
 
 export interface RunReapDeps {
   readonly store: RunReapStore;
@@ -163,6 +162,9 @@ function priorConfidenceOf(registry: OperationClassRegistry, classId: string): n
 }
 
 export class RunReapService {
+  /** The class table of the sweep in progress (set at the top of `reap`). */
+  private sweepRegistry: OperationClassRegistry | undefined;
+
   constructor(private readonly deps: RunReapDeps) {}
 
   /**
@@ -172,7 +174,16 @@ export class RunReapService {
    *   has no prior confidence (nothing is touched in that case); err from a failed decision append.
    */
   async reap(options: { readonly apply: boolean }): Promise<Result<ReapReport, LoreError>> {
-    const registry = this.deps.registry ?? OPERATION_CLASS_REGISTRY;
+    // reason: the GOVERNED class table (AC-AU-9) unless a test injected one; held for this sweep so the dry-run
+    // pure decide() calls and the recorded ones score against the same thresholds.
+    if (this.deps.registry === undefined) {
+      const governed = await this.deps.decisions.governed();
+      if (!governed.ok) return governed;
+      this.sweepRegistry = governed.value.registry;
+    } else {
+      this.sweepRegistry = this.deps.registry;
+    }
+    const registry = this.sweepRegistry;
     const processPrior = priorConfidenceOf(registry, PROCESS_CLASS);
     const stalePrior = priorConfidenceOf(registry, STALE_RUN_CLASS);
     if (processPrior === null || stalePrior === null) {
@@ -273,7 +284,7 @@ export class RunReapService {
     const facts: AutonomyFacts = { recoverability: "reversible", evidence: "lore-evaluated", confidence: prior };
     const subject = { id: LEGACY_SUBJECT_ID, version };
     if (!apply) {
-      const verdict = decide(STALE_RUN_CLASS, LEGACY_SUBJECT_ID, facts, this.deps.registry);
+      const verdict = decide(STALE_RUN_CLASS, LEGACY_SUBJECT_ID, facts, this.sweepRegistry);
       return ok({ run_ids: runIds, subject_version: version, verdict: verdict.verdict, already_pending: false });
     }
     const existing = await this.deps.decisions.effectiveVerdict(STALE_RUN_CLASS, subject);
@@ -493,7 +504,7 @@ export class RunReapService {
     facts: AutonomyFacts,
   ): Promise<Result<{ verdict: string; score: number; record_id?: number }, LoreError>> {
     if (!apply) {
-      const decision = decide(classId, subject.id, facts, this.deps.registry);
+      const decision = decide(classId, subject.id, facts, this.sweepRegistry);
       return ok({ verdict: decision.verdict, score: decision.score });
     }
     const outcome = await this.deps.decisions.decide(classId, subject, facts);

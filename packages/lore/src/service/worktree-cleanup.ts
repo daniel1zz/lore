@@ -37,7 +37,7 @@
 import { spawnSync } from "node:child_process";
 import { existsSync, lstatSync, readdirSync, readFileSync, readlinkSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
-import { WORKTREE_REMOVE_REGENERABLE_PATTERNS, type AuditEntry } from "@lore/core";
+import type { AuditEntry } from "@lore/core";
 import {
   decideWorktreeRemoval,
   type Measured,
@@ -167,14 +167,16 @@ function matchesRegenerablePattern(path: string, pattern: string): boolean {
 }
 
 /**
- * The ignored paths NOT in the declared regenerable set ({@link WORKTREE_REMOVE_REGENERABLE_PATTERNS}) — rule (b).
+ * The ignored paths NOT in the declared regenerable set — rule (b). The set is GOVERNED data (AC-AU-9): callers pass
+ * `DecisionService.governed().regenerablePatterns`, never the code seed.
  *
- * @param ignored - ignored paths as `git status --ignored --porcelain` printed them (directories end with `/`)
+ * @param ignored - ignored paths as the status listing printed them (directories end with `/`)
+ * @param patterns - the governed regenerable patterns
  * @example
- * ignoredPathsOutsideRegenerableSet(["node_modules/", ".env", "packages/a/dist/"]) // [".env"]
+ * ignoredPathsOutsideRegenerableSet(["node_modules/", ".env"], ["node_modules/"]) // [".env"]
  */
-export function ignoredPathsOutsideRegenerableSet(ignored: readonly string[]): string[] {
-  return ignored.filter((path) => !WORKTREE_REMOVE_REGENERABLE_PATTERNS.some((pattern) => matchesRegenerablePattern(path, pattern)));
+export function ignoredPathsOutsideRegenerableSet(ignored: readonly string[], patterns: readonly string[]): string[] {
+  return ignored.filter((path) => !patterns.some((pattern) => matchesRegenerablePattern(path, pattern)));
 }
 
 /**
@@ -186,8 +188,9 @@ export function ignoredPathsOutsideLossFreeSet(
   probe: Pick<WorktreeGitProbe, "ignoredPathIdenticalToMain">,
   worktreePath: string,
   ignored: readonly string[],
+  patterns: readonly string[],
 ): string[] {
-  return ignoredPathsOutsideRegenerableSet(ignored).filter((path) => {
+  return ignoredPathsOutsideRegenerableSet(ignored, patterns).filter((path) => {
     const identical = probe.ignoredPathIdenticalToMain?.(worktreePath, path);
     return !(identical?.ok === true && identical.value);
   });

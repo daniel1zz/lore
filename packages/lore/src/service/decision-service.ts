@@ -4,7 +4,7 @@
  * Purpose: every autonomy decision made through the service layer is appended to the hash-chained decision log,
  * and the EFFECTIVE verdict of a (class, subject, version) is answered from that log, never from a re-score.
  * Public surface: DecisionService.{decide, effectiveVerdict, verifyChain, chainHead, listPending, getPending,
- *   resolvePending}, DecisionSubject, DecideOutcome.
+ *   resolvePending, governed}, DecisionSubject, DecideOutcome.
  * Invariants:
  *   - INV-2 (plan): no public method accepts caller-provided factor values. `decide` takes MEASURED FACTS
  *     (autonomyFactsSchema) and the factor values are computed by @lore/core's decide(); a new method that
@@ -16,12 +16,24 @@
  *   - A new `subject.version` is a new subject: re-scoring the same version with better facts cannot improve it.
  *   - `resolvePending` is the ONLY writer of channel `human-tty` and requires a HumanChannelProof (AC-AU-3); a
  *     method that appends a human-tty row without one is a defect (the former ungated test seam is deleted).
+ *   - AC-AU-9: decide() scores against the GOVERNED record (AutonomyThresholdService), not the code table. When the
+ *     record fails its integrity check, EVERY class escalates (reason `threshold-integrity`) and one pending
+ *     `threshold-integrity` decision is opened; only a human-tty accept of that decision restores scoring.
+ *     A `registry` override (tests) bypasses the governed record entirely — production never passes one.
  * Side-effect class: IO (decision_log appends through the injected store; clock via the injected `now`).
  *
  * Source: spec-autonomy-phase-1-decision-function-human-channel-lore AC-AU-2, AC-AU-3;
  *   adr-autonomy-is-decided-by-measured-facts-one-decision-function D5.
  */
 import { decide, err, ok, type AutonomyDecision, type LoreError, type Result, type OperationClassRegistry } from "@lore/core";
+import {
+  AutonomyThresholdService,
+  THRESHOLD_INTEGRITY_CLASS,
+  THRESHOLD_RECORD_MISSING_VERSION,
+  THRESHOLD_SUBJECT_ID,
+  canonicalJson,
+  type GovernedAutonomy,
+} from "./autonomy-threshold-service.js";
 import {
   decisionChainHead,
   effectiveDecisionVerdict,
@@ -61,22 +73,6 @@ export interface DecisionServiceDeps {
   readonly registry?: OperationClassRegistry;
 }
 
-/** JSON with object keys recursively sorted, so equal values serialise to equal text. */
-function canonicalJson(value: unknown): string {
-  const sort = (v: unknown): unknown => {
-    if (Array.isArray(v)) return v.map(sort);
-    if (v !== null && typeof v === "object") {
-      return Object.fromEntries(
-        Object.entries(v as Record<string, unknown>)
-          .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
-          .map(([k, val]) => [k, sort(val)]),
-      );
-    }
-    return v;
-  };
-  return JSON.stringify(sort(value));
-}
-
 function validationError(field: string, message: string): LoreError {
   return { code: "VALIDATION_ERROR", field, message };
 }
@@ -103,7 +99,24 @@ export class DecisionService {
     } catch (cause) {
       return err(validationError("facts", `facts are not JSON-serialisable: ${String(cause)}`));
     }
-    const decision = decide(classId, subject.id, facts, this.deps.registry);
+    const governed = this.deps.registry === undefined ? await this.governed() : null;
+    if (governed !== null && !governed.ok) return governed;
+    const integrity = governed === null ? null : governed.value.integrity;
+    let decision = decide(classId, subject.id, facts, this.deps.registry ?? governed?.value.registry);
+    if (integrity !== null && integrity.state === "broken") {
+      // reason: a mismatched record means NO threshold can be trusted -> every factor is unmeasured -> escalate
+      // (AC-AU-9). A refuse (invariant violation) stays a refuse: it never runs anything either.
+      if (decision.verdict !== "refuse") {
+        decision = {
+          ...decision,
+          verdict: "escalate",
+          score: 0,
+          reasons: [`threshold-integrity: ${integrity.reason} — ${integrity.detail}; every class escalates until the human accepts the threshold-integrity decision (lore pending)`, ...decision.reasons],
+        };
+      }
+      const opened = await this.openIntegrityDecision(integrity);
+      if (!opened.ok) return opened;
+    }
     const appended = await this.deps.store.appendDecisionRecord({
       ts: this.now(),
       class: classId,
@@ -127,6 +140,42 @@ export class DecisionService {
     return ok({ decision, record_id: appended.value.id, effective: effective.value });
   }
 
+  /**
+   * The live governed autonomy values (class table, regenerable patterns) and the record's integrity verdict.
+   * Every service-layer reader of a threshold, prior or pattern goes through here — never through the code seed.
+   */
+  async governed(): Promise<Result<GovernedAutonomy, LoreError>> {
+    return this.thresholds().load();
+  }
+
+  /** The record service over this service's store/clock/run — the `lore autonomy` verbs use it directly. */
+  thresholds(): AutonomyThresholdService {
+    return new AutonomyThresholdService({ store: this.deps.store, executorRun: this.deps.executorRun, now: () => this.now() });
+  }
+
+  /** Opens (once per content hash) the pending `threshold-integrity` decision a human answers with `lore decide`. */
+  private async openIntegrityDecision(integrity: Extract<GovernedAutonomy["integrity"], { state: "broken" }>): Promise<Result<void, LoreError>> {
+    const subject = { id: THRESHOLD_SUBJECT_ID, version: integrity.content_hash ?? THRESHOLD_RECORD_MISSING_VERSION };
+    const existing = await this.effectiveVerdict(THRESHOLD_INTEGRITY_CLASS, subject);
+    if (!existing.ok) return existing;
+    if (existing.value !== null) return ok(undefined);
+    const appended = await this.deps.store.appendDecisionRecord({
+      ts: this.now(),
+      class: THRESHOLD_INTEGRITY_CLASS,
+      subject_id: subject.id,
+      subject_version: subject.version,
+      facts: canonicalJson({ reason: integrity.reason, detail: integrity.detail }),
+      factors: "{}",
+      score: 0,
+      threshold: null,
+      verdict: "escalate",
+      reasons: canonicalJson([`threshold-integrity: ${integrity.reason}`, integrity.detail]),
+      executor_run: this.deps.executorRun,
+      channel: "machine",
+    });
+    return appended.ok ? ok(undefined) : appended;
+  }
+
   /** Effective verdict for one subject version, or null when it has no decision yet. */
   async effectiveVerdict(classId: string, subject: DecisionSubject): Promise<Result<EffectiveDecisionVerdict | null, LoreError>> {
     const key = { class: classId, subject_id: subject.id, subject_version: subject.version };
@@ -140,6 +189,11 @@ export class DecisionService {
     const rows = await this.deps.store.listDecisionLog();
     if (!rows.ok) return rows;
     return ok(verifyDecisionChain(rows.value));
+  }
+
+  /** The whole log in id ASC order WITH chain hashes — what `reproducesHead` checks pushed heads against. */
+  async chainRows(): Promise<Result<DecisionLogRow[], LoreError>> {
+    return this.deps.store.listDecisionLog();
   }
 
   /** Current chain head (id, hash, row count), or null for an empty log. AU-T9 records it in mirror exports. */

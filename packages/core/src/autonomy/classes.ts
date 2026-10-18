@@ -8,6 +8,9 @@
  *   EVIDENCE_SCORE, JUDGE_SCORE, BEYOND_OWN_SESSION_BLAST, and the derived types.
  * Invariants: data only, immutable (`as const` / readonly); numbers are STARTING POINTS
  *   governed as data (AC-AU-9) — tightened by outcomes, loosened only by the human.
+ *   ⛔ OPERATION_CLASS_REGISTRY and WORKTREE_REMOVE_REGENERABLE_PATTERNS are the SEED of the governed record
+ *   (thresholds.ts / lore's AutonomyThresholdService), not the live values: a service-layer reader takes them from
+ *   DecisionService.governed(), never from these constants (the record may have been tightened since).
  *   The C factor (confidence from outcomes) is NOT computed here: the caller passes it
  *   as a number; AU-T8 will compute it. `priorConfidence` is the value a caller uses
  *   before any outcomes exist — decide() never substitutes it for an absent C.
@@ -117,9 +120,9 @@ export const OPERATION_CLASS_REGISTRY: OperationClassRegistry = {
  * Syntax: a trailing `/` matches a directory (and everything under it); a pattern without an inner `/` matches at
  * any depth; otherwise it is anchored at the worktree root; `*` stays inside one path segment, `**` crosses them.
  *
- * reason: SEED DATA. AU-T9 moves this into the governed class record (loosening it is `governance-loosen`, human
- * only); until then it lives beside the registry so the rule has one declared source, not a list inside the
- * cleanup service. Widening it here is a governance-loosen change — do not add a path just to make a worktree pass.
+ * reason: SEED DATA of the governed record (AU-T9): the live set is read from DecisionService.governed(); loosening it
+ * is `governance-loosen`, human only. Editing this seed changes only a corpus seeded AFTER the edit — and a git diff
+ * here is a visible governance change; do not add a path just to make a worktree pass.
  * Source: task AU-T13; spec-autonomy-phase-1-decision-function-human-channel-lore AC-AU-11.
  * dist-npm/ added 2026-10-18 by user approval (governance-loosen): the output of `bun run build:npm`.
  */

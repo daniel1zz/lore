@@ -18,6 +18,9 @@ packages/dashboard/.tanstack/
 .lore/*
 !.lore/export-index.json
 !.lore/audit-anchor.json
+# autonomy-mirror.json (AC-AU-9) is the git-tracked projection of the governed autonomy threshold record + the decision
+# chain head, written by `bun run mirror:export`; the pushed-heads ledger beside the DB stays local on purpose.
+!.lore/autonomy-mirror.json
 # D14 (spec-context-fragments-config-driven-layered-rule-injection): project fragments are git-shared.
 !.lore/context/
 # This repo's dogfood config is a versioned repo fact: scripts/check-shipped-defaults.ts measures it, and an

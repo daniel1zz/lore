@@ -26,7 +26,7 @@
  */
 import { createHash } from "node:crypto";
 import { resolve } from "node:path";
-import { deriveRunId, err, ok, OPERATION_CLASS_REGISTRY, type LoreError, type Result, type RunId } from "@lore/core";
+import { deriveRunId, err, ok, type LoreError, type OperationClassRegistry, type Result, type RunId } from "@lore/core";
 import type { ProcessScanPort } from "../adapters/real-process-scan-port.js";
 import type { StoreInterface } from "../store/store-interface.js";
 import {
@@ -69,8 +69,10 @@ export interface RunOccupancyPort {
 /** Run + run-end reads the owner-session lookup needs. */
 export type WorktreeRemovalRunStore = Pick<StoreInterface, "getRun" | "getRunEnd">;
 
-/** Structurally `DecisionService.decide` — the only autonomy surface this module consumes (no cross-service import). */
+/** Structurally `DecisionService.decide` + `.governed` — the only autonomy surface this module consumes (no cross-service import). */
 export interface RemovalDecisionPort {
+  /** The governed class table and regenerable patterns (AC-AU-9). */
+  governed(): Promise<Result<{ readonly registry: OperationClassRegistry; readonly regenerablePatterns: readonly string[] }, LoreError>>;
   decide(
     classId: string,
     subject: { readonly id: string; readonly version: string },
@@ -130,11 +132,11 @@ interface Inspection {
 
 const WORKTREE_REMOVE_CLASS = "worktree-remove";
 
-/** C until AU-T8 measures it: the class prior from the registry; absent -> omitted -> decide() scores C as 0 (fail closed). */
-const WORKTREE_REMOVE_PRIOR_CONFIDENCE: number | undefined = (() => {
-  const operationClass = OPERATION_CLASS_REGISTRY[WORKTREE_REMOVE_CLASS];
+/** C until AU-T8 measures it: the GOVERNED class prior; absent -> omitted -> decide() scores C as 0 (fail closed). */
+function priorConfidenceOf(registry: OperationClassRegistry): number | undefined {
+  const operationClass = Object.hasOwn(registry, WORKTREE_REMOVE_CLASS) ? registry[WORKTREE_REMOVE_CLASS] : undefined;
   return operationClass !== undefined && operationClass.tier === "normal" ? operationClass.priorConfidence : undefined;
-})();
+}
 
 function miss<T>(reason: string): Measured<T> {
   return { ok: false, reason };
@@ -175,8 +177,11 @@ export class WorktreeRemovalService implements WorktreeRemovalFactsPort, Worktre
 
   private async decideRemoval(path: string): Promise<WorktreeRemovalGate> {
     const { probe } = this.deps;
+    const governed = await this.deps.decisions.governed();
+    if (!governed.ok) return { allowed: false, reason: `removal not decided (nothing removed): governed thresholds unreadable: ${governed.error.code}`, ignored_paths: [] };
     const ignored = probe.ignoredPaths(path);
-    const outside = ignored.ok ? ignoredPathsOutsideLossFreeSet(probe, path, ignored.value) : [];
+    const outside = ignored.ok ? ignoredPathsOutsideLossFreeSet(probe, path, ignored.value, governed.value.regenerablePatterns) : [];
+    const prior = priorConfidenceOf(governed.value.registry);
     const head = probe.headSha(path);
     // reason: the version carries the ignored-outside list, so removing the offending file produces a NEW subject and the
     // worktree can become auto — while the SAME listing can never be re-scored upward (AC-AU-2 worst-of per version).
@@ -187,7 +192,7 @@ export class WorktreeRemovalService implements WorktreeRemovalFactsPort, Worktre
       // reason: the removal test (owned-or-abandoned, no live run/claim/process) already established the blast radius.
       blast: "own-or-ended-run",
       evidence: "lore-evaluated",
-      ...(WORKTREE_REMOVE_PRIOR_CONFIDENCE !== undefined ? { confidence: WORKTREE_REMOVE_PRIOR_CONFIDENCE } : {}),
+      ...(prior !== undefined ? { confidence: prior } : {}),
     };
     const outcome = await this.deps.decisions.decide(WORKTREE_REMOVE_CLASS, { id: path, version }, facts);
     if (!outcome.ok) {
