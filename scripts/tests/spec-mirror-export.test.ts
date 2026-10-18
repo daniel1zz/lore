@@ -84,6 +84,7 @@ import { join, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ExportIndexMapping, MirrorHumanId } from "@lore/core";
 import { assertIsMirrorHumanId } from "@lore/core";
+import { DEFAULT_STEPS } from "../run-chain.js";
 import {
   computeMirrorParity,
   scriptChainReachesTarget,
@@ -105,6 +106,8 @@ import {
   measureAllTypesParity,
   measureLinksBrokenAt,
   runLoreList,
+  chainWiredViolations,
+  CHAIN_NOT_WIRED_VIOLATION,
 } from "../lib/mirror-integrity.js";
 
 /**
@@ -713,6 +716,33 @@ function readPackageScripts(root: string): Record<string, string> {
   if (!parsed.scripts) throw new Error(`${join(root, "package.json")} has no "scripts" section`);
   return parsed.scripts;
 }
+
+describe("AC-FR-6(a): chainWiredViolations follows the run-chain step list", () => {
+  const scripts = {
+    test: "bun scripts/oracle-lock.ts bun scripts/run-chain.ts",
+    "check:spec-mirror": "bun scripts/export-spec-mirror.ts --check",
+  };
+
+  it("HAPPY: the real DEFAULT_STEPS plus a package.json shaped like the repo's are wired (the live package.json is read by check-live-mirror-integrity.ts)", () => {
+    expect(chainWiredViolations(scripts, DEFAULT_STEPS)).toEqual([]);
+  });
+
+  it("RED control: DEFAULT_STEPS without check:spec-mirror is not wired, with the original message", () => {
+    const steps = DEFAULT_STEPS.filter((s) => s !== "bun run check:spec-mirror");
+    expect(steps.length).toBe(DEFAULT_STEPS.length - 1);
+    expect(chainWiredViolations(scripts, steps)).toEqual([CHAIN_NOT_WIRED_VIOLATION]);
+  });
+
+  it("NEGATIVE: a test script that no longer invokes run-chain.ts is refused even with a wired step list", () => {
+    const v = chainWiredViolations({ ...scripts, test: "bunx vitest run" }, ["bun run check:spec-mirror"]);
+    expect(v).toHaveLength(1);
+    expect(v[0]).toContain("run-chain.ts");
+  });
+
+  it("BOUNDARY: an empty step list is not wired", () => {
+    expect(chainWiredViolations(scripts, [])).toEqual([CHAIN_NOT_WIRED_VIOLATION]);
+  });
+});
 
 describe("export-covers-corpus: AC-FR-6 end-to-end against a seeded corpus + mirror (production half: scripts/check-live-mirror-integrity.ts)", () => {
   it("export-covers-corpus: HAPPY and RED (a) — a package.json whose test chain reaches export-spec-mirror.ts (via check:spec-mirror) is WIRED, and removing it from the chain makes the check fail", () => {
