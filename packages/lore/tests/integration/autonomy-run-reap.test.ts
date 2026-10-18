@@ -101,23 +101,27 @@ async function spawnParentWithChild(childCwd: string): Promise<{ parent: number;
 }
 
 /**
- * A node "shared main harness" that spawns a `sleep` child with cwd `childCwd` only after `delayMs`, so the child starts
- * AFTER the runs registered against the parent pid (the proof windows are second-precision). Returns both pids.
+ * A node "shared main harness" that spawns a `sleep` child with cwd `childCwd` only when the test sends it a line on stdin
+ * (`startChild()`), so the child provably starts AFTER the runs registered against the parent pid. The proof windows are
+ * second-precision and floored at registered_at, so "after registration" is the whole requirement: no wall-clock delay,
+ * which a slow `lore run register` under load could outlast. `startChild` resolves with the child's pid once it runs.
  */
-async function spawnHarnessWithLateChild(childCwd: string, delayMs: number): Promise<{ parent: number; childPid: Promise<number> }> {
-  const script = `const {spawn}=require("node:child_process");setTimeout(()=>{const c=spawn("sleep",["600"],{cwd:${JSON.stringify(childCwd)},stdio:"ignore"});console.log(c.pid);},${delayMs});setInterval(()=>{},1000);`;
-  const parent = spawn("node", ["-e", script], { cwd: tmpdir(), stdio: ["ignore", "pipe", "ignore"] });
+function spawnHarnessWithLateChild(childCwd: string): { parent: number; startChild: () => Promise<number> } {
+  const script = `const {spawn}=require("node:child_process");process.stdin.once("data",()=>{const c=spawn("sleep",["600"],{cwd:${JSON.stringify(childCwd)},stdio:"ignore"});console.log(c.pid);});setInterval(()=>{},1000);`;
+  const parent = spawn("node", ["-e", script], { cwd: tmpdir(), stdio: ["pipe", "pipe", "ignore"] });
   if (parent.pid === undefined) throw new Error("node harness did not start");
   trackedPids.add(parent.pid);
-  const childPid = new Promise<number>((resolve, reject) => {
-    parent.stdout?.once("data", (chunk: Buffer) => {
-      const pid = Number.parseInt(chunk.toString("utf8").trim(), 10);
-      trackedPids.add(pid);
-      resolve(pid);
+  const startChild = () =>
+    new Promise<number>((resolve, reject) => {
+      parent.stdout?.once("data", (chunk: Buffer) => {
+        const pid = Number.parseInt(chunk.toString("utf8").trim(), 10);
+        trackedPids.add(pid);
+        resolve(pid);
+      });
+      parent.once("error", reject);
+      parent.stdin?.write("go\n");
     });
-    parent.once("error", reject);
-  });
-  return { parent: parent.pid, childPid };
+  return { parent: parent.pid, startChild };
 }
 
 afterEach(async () => {
@@ -192,6 +196,11 @@ function makeFixture(): Fixture {
         cwd,
       );
       if (r.exitCode !== 0) throw new Error(`register ${session} failed (${r.exitCode}): ${r.stderr}`);
+      // Assert on recorded state: a harness whose pid the CLI could not probe silently registers as a legacy run, which
+      // would surface later as an unrelated mismatch. Fail here, naming the registration, with what the probe said.
+      if (pid !== undefined && r.stderr.includes("could not be probed")) {
+        throw new Error(`register ${session}: harness pid ${pid} was not recorded (ps lstart=${JSON.stringify(psField(pid, "lstart"))}): ${r.stderr}`);
+      }
     },
     endRun(runId) {
       const r = lore(["run", "end", runId, "--reason", "test-ended"]);
@@ -552,14 +561,14 @@ describe("AC-AU-5 lore run reap", () => {
 });
 
 describe("AC-AU-5 proof C (AU-T14): an ended subagent run sharing the live main pid", () => {
-  /** main run (live, corpus checkout) + subagent run (shares main's pid, worktree W); a child of main starts later in `childAt`. */
+  /** main run (live, corpus checkout) + subagent run (shares main's pid, worktree W); a child of main is started (on signal) in `childAt` once both runs are registered. */
   async function sharedMainFixture(childAt: "worktree" | "main-checkout") {
     const fixture = makeFixture();
     const worktree = fixture.worktree("c1");
-    const harness = await spawnHarnessWithLateChild(childAt === "worktree" ? worktree : fixture.corpus, 3000);
+    const harness = spawnHarnessWithLateChild(childAt === "worktree" ? worktree : fixture.corpus);
     fixture.register("main-s", { cwd: fixture.corpus, pid: harness.parent });
     fixture.register("sub-s", { cwd: worktree, pid: harness.parent });
-    const child = await harness.childPid;
+    const child = await harness.startChild();
     return { fixture, worktree, harness, child };
   }
 
