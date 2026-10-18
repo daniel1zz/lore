@@ -10,7 +10,11 @@
  * Invariants:
  *   - Dispatch order (DD-4), enforced by `DashboardHandler.handle`'s caller (`index.ts`,
  *     invoked only for paths that already fell through the untouched `/api/*` branch):
- *       1. `GET /auth/bootstrap` — nonce lifecycle.
+ *       1. `GET /auth/bootstrap` — nonce lifecycle. A valid redemption answers 302 to the
+ *          optional `next` query value ONLY when `resolveSameOriginNext` accepts it (a path
+ *          with exactly one leading `/`; no `//`, no `\`, no scheme, no control chars, checked
+ *          raw and percent-decoded; AC-HR-7, spec-human-review-surface D6, changes BR-862);
+ *          otherwise, or with no `next`, the 302 goes to `/`.
  *       2. Exact static asset match (manifest key === pathname).
  *       3. `GET` SPA fallback (any other non-`/api` path) — serves `/index.html`.
  *   - `handle()` returns `null` for anything it does not claim (wrong method, or a GET
@@ -305,8 +309,38 @@ function renderNonceFailurePage(reasonMessage: string): string {
 }
 
 /**
- * `GET /auth/bootstrap?nonce=<n>` — redeem a single-use nonce into a `lore_sid` session
- * cookie and 302-redirect to `/` (DD-2).
+ * Validate the sign-in `next` redirect target at the boundary (AC-HR-7).
+ *
+ * Accepts only a same-origin absolute PATH: exactly one leading `/`, no `//`, no backslash,
+ * no control characters, no scheme — checked on the raw value AND on its fully percent-decoded
+ * form (so `%2F%2Fevil` / `%5C` variants cannot smuggle an authority past the browser).
+ * Anything else (including absent) yields `/`, the pre-existing landing page.
+ *
+ * @param next - raw (already query-decoded) `next` query value, or null when absent.
+ * @returns a path safe to use as a `Location` header value.
+ */
+export function resolveSameOriginNext(next: string | null): string {
+  if (next === null) return "/";
+  const candidates = [next];
+  try {
+    candidates.push(decodeURIComponent(next));
+  } catch {
+    // reason: malformed percent-encoding is an invalid target, not a crash; fall back to "/".
+    return "/";
+  }
+  for (const candidate of candidates) {
+    // reason: reject `//host` (protocol-relative), `/\host` (browsers treat `\` as `/`) and
+    // control chars (header smuggling). See spec-human-review-surface D6.
+    if (!candidate.startsWith("/") || candidate.startsWith("//")) return "/";
+    if (candidate.includes("\\") || /[\u0000-\u001f\u007f]/.test(candidate)) return "/";
+  }
+  return next;
+}
+
+/**
+ * `GET /auth/bootstrap?nonce=<n>[&next=<path>]` — redeem a single-use nonce into a `lore_sid`
+ * session cookie and 302-redirect to `/` (DD-2), or to the same-origin path in `next` when it
+ * passes {@link resolveSameOriginNext} (spec-human-review-surface D6 / AC-HR-7, changes BR-862).
  */
 async function handleNonceBootstrap(
   req: Request,
@@ -360,7 +394,7 @@ async function handleNonceBootstrap(
   }
 
   const { session_id } = stores.sessionStore.create(BOOTSTRAP_SESSION_OWNER);
-  const headers = new Headers({ Location: "/" });
+  const headers = new Headers({ Location: resolveSameOriginNext(url.searchParams.get("next")) });
   headers.append("Set-Cookie", buildSessionCookieHeader(req, session_id));
   return new Response(null, { status: 302, headers });
 }
