@@ -590,7 +590,8 @@ export default defineCommand({
           default: false,
         },
       },
-      async run({ args }) {
+      async run(context) {
+        const { args } = context;
         // reason: unlike the five checkpoint subcommands above, this one never
         // reads the corpus or runs a predicate — it is a pure, offline render
         // of the static contract table, so it deliberately has no
