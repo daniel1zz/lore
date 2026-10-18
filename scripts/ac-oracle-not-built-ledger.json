@@ -103,12 +103,6 @@
   },
   {
     "spec": "spec-ambient-state-is-read-once-at-the-entry-owned-only-prune",
-    "ac": "AC-IV-6",
-    "reason": "oracle test not written yet (check-ambient-reads.test.ts absent); owned by task-skill-implement-iv-4-check-ambient-reads-script-with",
-    "owner_plan": "plan-ambient-state-read-once-at-the-entry-owned-only-prune-user"
-  },
-  {
-    "spec": "spec-ambient-state-is-read-once-at-the-entry-owned-only-prune",
     "ac": "AC-IV-8",
     "reason": "oracle test not written yet (iv-run-lore-in-process.test.ts absent); owned by task-skill-refactor-iv-9-runloreinprocess-builds-an-invocation",
     "owner_plan": "plan-ambient-state-read-once-at-the-entry-owned-only-prune-user"
