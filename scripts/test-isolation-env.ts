@@ -61,28 +61,44 @@ export function armSandboxEnv(checkoutRoot: string, env: EnvBag = process.env): 
   env[REPO] = repo;
 }
 
+/** The slice of `spawnSync` the probe reads; injectable so the verdict logic is testable without a real child. */
+export type ProbeSpawn = (
+  command: string,
+  args: string[],
+) => { status: number | null; stdout?: string | null; error?: Error | undefined };
+
+const EXIT_MARKER_UNARMED = 3;
+const EXIT_REPO_MISMATCH = 4;
+
 /**
  * Spawns a child with NO explicit env and throws unless it sees the armed marker and the
  * recorded repository. This is a measurement, not an assumption: it is the property
  * the guard exists to provide (children of a test are guarded).
+ * The verdict is the child's EXIT STATUS, never its stdout: under the Bun runtime a spawnSync call
+ * intermittently returns stdout "" with status 0 (about 1 in 18000 under load, measured 2026-10-19,
+ * TG-49), which a stdout-reading probe misreported as an unarmed environment and failed a whole test file.
  */
-export function assertChildrenInheritSandbox(): void {
-  const probe = spawnSync("sh", ["-c", `printf '%s|%s' "$${MARKER}" "$${REPO}"`], { encoding: "utf8" });
-  if (probe.error !== undefined || probe.status !== 0) {
-    throw new Error(`test-isolation: the child-environment probe failed to run: ${probe.error?.message ?? `exit ${probe.status}`}`);
+export function assertChildrenInheritSandbox(spawn: ProbeSpawn = (cmd, args) => spawnSync(cmd, args, { encoding: "utf8" })): void {
+  const expectedRepo = process.env[REPO] ?? "";
+  const script = `[ "$${MARKER}" = 1 ] || exit ${EXIT_MARKER_UNARMED}; [ -n "$${REPO}" ] && [ "$${REPO}" = "$1" ] || exit ${EXIT_REPO_MISMATCH}`;
+  const probe = spawn("sh", ["-c", script, "sh", expectedRepo]);
+  if (probe.error !== undefined) {
+    throw new Error(`test-isolation: the child-environment probe failed to run: ${probe.error.message}`);
   }
-  const [marker, repo] = probe.stdout.split("|");
-  if (marker !== "1" || repo === undefined || repo === "") {
+  if (probe.status === EXIT_MARKER_UNARMED) {
     throw new Error(
-      `test-isolation: a child spawned with no explicit env saw ${MARKER}=${JSON.stringify(marker ?? null)} and ${REPO}=${JSON.stringify(repo ?? null)}, ` +
-        `expected "1" and the protected repository. Under the Bun runtime children inherit only the STARTUP environment; ` +
+      `test-isolation: a child spawned with no explicit env saw ${MARKER} is not "1". Under the Bun runtime children inherit only the STARTUP environment; ` +
         `vitest.config.ts must arm it at config load (scripts/test-isolation-env.ts) and the run must go through that config. ` +
         `Without it spawned children would run unguarded against this repository's corpus.`,
     );
   }
-  if (repo !== process.env[REPO]) {
+  if (probe.status === EXIT_REPO_MISMATCH) {
     throw new Error(
-      `test-isolation: a child saw ${REPO}=${JSON.stringify(repo)} but this process has ${JSON.stringify(process.env[REPO] ?? null)}; the run's environment is inconsistent.`,
+      `test-isolation: a child spawned with no explicit env saw a ${REPO} that is empty or differs from this process's ${JSON.stringify(expectedRepo)}; ` +
+        `the run's environment is inconsistent.`,
     );
+  }
+  if (probe.status !== 0) {
+    throw new Error(`test-isolation: the child-environment probe failed to run: exit ${String(probe.status)}`);
   }
 }
