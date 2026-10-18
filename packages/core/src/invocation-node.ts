@@ -91,6 +91,6 @@ export function resolveInvocation(rawArgv: readonly string[], resolvers: Invocat
     execPath: process.execPath,
     isCompiled: bunMain !== undefined && bunMain.startsWith("/$bunfs/"),
     identity: resolution.identity,
-    io: Object.freeze({ stdout: process.stdout, stderr: process.stderr }),
+    io: Object.freeze({ stdout: process.stdout, stderr: process.stderr, stdin: process.stdin, stdinIsTTY: process.stdin.isTTY === true }),
   });
 }

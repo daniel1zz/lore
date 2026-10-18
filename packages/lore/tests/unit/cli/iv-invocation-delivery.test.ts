@@ -17,6 +17,7 @@
 
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
+import { Readable } from "node:stream";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { CommandDef } from "citty";
 import type { Invocation } from "@lore/core";
@@ -76,7 +77,7 @@ function makeInvocation(argv: readonly string[]): Invocation {
     execPath: "/nonexistent/lore",
     isCompiled: false,
     identity: Object.freeze({ harnessRun: null, claimed: "agent:iv-5-test", claimedSource: "flag" as const }),
-    io: Object.freeze({ stdout: sink, stderr: sink }),
+    io: Object.freeze({ stdout: sink, stderr: sink, stdin: Readable.from([]), stdinIsTTY: false }),
   });
 }
 

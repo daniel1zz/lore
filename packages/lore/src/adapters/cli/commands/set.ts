@@ -623,6 +623,7 @@ export default defineCommand({
           env: inv.env,
           tmpDir: inv.paths.tmpDir,
           cwd: inv.cwd,
+          stdinIsTTY: inv.io.stdinIsTTY,
         });
         if (!editorResult.ok) {
           inv.io.stderr.write(formatErrorFor(inv, editorResult.error) + "\n");

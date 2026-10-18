@@ -18,7 +18,7 @@
 import { realpathSync } from "node:fs";
 import { hostname, tmpdir, userInfo } from "node:os";
 import { resolveInvocationIdentity } from "@lore/core/node";
-import type { Invocation, InvocationWriter, OsUser } from "@lore/core";
+import type { Invocation, OsUser } from "@lore/core";
 import { invocationResolvers } from "../../src/adapters/cli/run-cli";
 
 /** What a test names to build an Invocation. */
@@ -31,8 +31,8 @@ export interface TestInvocationInput {
   readonly env: Readonly<Record<string, string | undefined>>;
   /** The home directory of the run (a throwaway directory). */
   readonly home: string;
-  /** Where the run's stdout / stderr go. */
-  readonly io: Readonly<{ stdout: InvocationWriter; stderr: InvocationWriter }>;
+  /** Where the run's stdout / stderr go, and what its stdin is. */
+  readonly io: Invocation["io"];
 }
 
 /** The OS account name every test run reports (the os-fallback tier of actor resolution): the real one, as the binary's entry reads it. */

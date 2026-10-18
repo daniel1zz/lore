@@ -180,8 +180,9 @@ export function installSyncStdio(): void {
   console.warn = (...args: unknown[]): void => writeLine(2, args);
   console.error = (...args: unknown[]): void => writeLine(2, args);
   // reason: `runCli` now RETURNS and the entry ends the process with the code right after, where a successful run used
-  // to end by the event loop draining. A direct `process.stdout.write` (consola's reporter, ~600 command sites) on a
-  // non-blocking pipe can still hold unsent bytes at that moment, so those writes go through `writeAllSync` too.
+  // to end by the event loop draining. Commands write through `inv.io`; the writers left that reach the process streams
+  // directly are third-party ones (citty's usage renderer, consola's reporter). On a non-blocking pipe such a write can
+  // still hold unsent bytes at that moment, so those writes go through `writeAllSync` too.
   for (const [stream, fd] of [[process.stdout, 1], [process.stderr, 2]] as const) {
     stream.write = ((chunk: string | Uint8Array, encodingOrCallback?: unknown, callback?: unknown): boolean => {
       writeAllSync(fd, typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8"));

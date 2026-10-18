@@ -457,7 +457,7 @@ export default defineCommand({
 
         if (!useAi) {
           // No-AI path: fall back to editor (SPEC-003 §3.1 / AC-AI-2)
-          const editorResult = await openEditor({ defaults, env: inv.env, tmpDir: inv.paths.tmpDir, cwd: inv.cwd });
+          const editorResult = await openEditor({ defaults, env: inv.env, tmpDir: inv.paths.tmpDir, cwd: inv.cwd, stdinIsTTY: inv.io.stdinIsTTY });
           if (!editorResult.ok) {
             inv.io.stderr.write(formatErrorFor(inv, editorResult.error) + "\n");
             return exitCode(editorResult.error);

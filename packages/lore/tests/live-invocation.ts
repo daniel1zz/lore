@@ -39,13 +39,13 @@ export function liveInvocation(): Invocation {
     execPath: process.execPath,
     isCompiled: false,
     identity: { harnessRun: null, claimed: "test-actor", claimedSource: "os" },
-    io: { stdout: process.stdout, stderr: process.stderr },
+    io: liveIo(),
   };
 }
 
 /** The live process streams as the writers of a run: what a test passes where production passes `inv.io`. */
 export function liveIo(): Invocation["io"] {
-  return { stdout: process.stdout, stderr: process.stderr };
+  return { stdout: process.stdout, stderr: process.stderr, stdin: process.stdin, stdinIsTTY: process.stdin.isTTY === true };
 }
 
 /** The live stderr as a {@link WarnSink}: what a test passes where the composition passes `warnSinkOf(inv.io.stderr)`. */

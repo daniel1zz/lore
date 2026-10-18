@@ -29,6 +29,7 @@
  */
 
 import type { CommandDef } from "citty";
+import { Readable } from "node:stream";
 import { RunIdentityArgumentError } from "@lore/core/node";
 import type { Invocation } from "@lore/core";
 import { runCli } from "../../src/adapters/cli/run-cli";
@@ -114,7 +115,8 @@ export async function runLoreInProcess(args: readonly string[], options: InProce
       cwd: options.cwd,
       env,
       home,
-      io: { stdout: { write: (text) => out.push(text) }, stderr: { write: (text) => err.push(text) } },
+      // reason: a run has no terminal and no input unless a test gives it one: an empty, non-TTY stdin.
+      io: { stdout: { write: (text) => out.push(text) }, stderr: { write: (text) => err.push(text) }, stdin: Readable.from([]), stdinIsTTY: false },
     });
   } catch (error) {
     if (!(error instanceof RunIdentityArgumentError)) throw error;

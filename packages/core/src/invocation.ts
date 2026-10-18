@@ -4,7 +4,7 @@
  *
  * Purpose: the single value the program entry builds once and every layer below RECEIVES, so no layer
  * reads `process.env` / `process.cwd()` / the home directory itself.
- * Public surface: {@link Invocation}, {@link InvocationWriter}, {@link InvocationPaths}, {@link OsUser}.
+ * Public surface: {@link Invocation}, {@link InvocationWriter}, {@link InvocationPaths}, {@link InvocationReader}, {@link OsUser}.
  * Invariants:
  *   - Pure types, no Node import (browser-safe barrel, AS-4). The resolver is `resolveInvocation` in
  *     `@lore/core/node` (`invocation-node.ts`), the ONE core file allowed to read ambient state.
@@ -30,6 +30,14 @@ export interface InvocationWriter {
  * OS-username tier is the one selected.
  */
 export type OsUser = { readonly ok: true; readonly name: string } | { readonly ok: false; readonly reason: string };
+
+/**
+ * The input of one invocation as a structural async stream of chunks (`process.stdin` satisfies it). Node-free on
+ * purpose: this file is part of the browser-safe barrel.
+ */
+export interface InvocationReader {
+  [Symbol.asyncIterator](): AsyncIterator<string | Uint8Array>;
+}
 
 /** Directories of one invocation, all absolute. */
 export interface InvocationPaths {
@@ -60,5 +68,6 @@ export type Invocation = Readonly<{
   isCompiled: boolean;
   /** Who this invocation is (run vouched for + claimed name); unverified until the store verifies it. */
   identity: InvocationIdentity;
-  io: Readonly<{ stdout: InvocationWriter; stderr: InvocationWriter }>;
+  /** The run's streams: the two writers, the input, and whether the input is an interactive terminal (resolved once at the entry). */
+  io: Readonly<{ stdout: InvocationWriter; stderr: InvocationWriter; stdin: InvocationReader; stdinIsTTY: boolean }>;
 }>;
