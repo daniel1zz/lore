@@ -71,9 +71,9 @@ function findProjectRoot(cwd: string): string | null {
  * the binary cannot disagree on where a path comes from.
  */
 export const invocationResolvers: InvocationResolvers = {
-  claudeDir: ({ argv, env, home }) => {
+  claudeDir: ({ argv, env, home, cwd }) => {
     const claudeDirFlag = findClaudeDirFlag(argv);
-    return resolveTargetDir({ ...(claudeDirFlag === undefined ? {} : { claudeDirFlag }), env, homeDir: home });
+    return resolveTargetDir({ ...(claudeDirFlag === undefined ? {} : { claudeDirFlag }), env, homeDir: home, cwd });
   },
   userConfigDir: (env, home) => resolveUserConfigDir(env, home),
   worktreeActor: (cwd) => detectWorktreeDerivedActor(cwd),

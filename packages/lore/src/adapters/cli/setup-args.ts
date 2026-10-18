@@ -188,6 +188,8 @@ export interface ResolveTargetDirOptions {
   env: Readonly<Record<string, string | undefined>>;
   /** `os.homedir()`, caller-resolved. */
   homeDir: string;
+  /** The invocation's working directory: the base a RELATIVE `--claude-dir` / `CLAUDE_CONFIG_DIR` resolves against. */
+  cwd: string;
 }
 
 /**
@@ -197,20 +199,20 @@ export interface ResolveTargetDirOptions {
  * `$CLAUDE_CONFIG_DIR` value becomes absolute before it ever reaches
  * `SetupService` (which requires an already-resolved `targetDir`).
  *
- * @param opts - `{claudeDirFlag?, env, homeDir}`.
+ * @param opts - `{claudeDirFlag?, env, homeDir, cwd}`.
  * @returns An absolute directory path.
  * @throws Never.
  * @example
- * resolveTargetDir({ env: {}, homeDir: "/Users/x" }); // => "/Users/x/.claude"
- * resolveTargetDir({ claudeDirFlag: "/tmp/x", env: {}, homeDir: "/Users/x" }); // => "/tmp/x"
+ * resolveTargetDir({ env: {}, homeDir: "/Users/x", cwd: "/work" }); // => "/Users/x/.claude"
+ * resolveTargetDir({ claudeDirFlag: "/tmp/x", env: {}, homeDir: "/Users/x", cwd: "/work" }); // => "/tmp/x"
  */
 export function resolveTargetDir(opts: ResolveTargetDirOptions): string {
   if (typeof opts.claudeDirFlag === "string" && opts.claudeDirFlag.trim() !== "") {
-    return resolve(opts.claudeDirFlag);
+    return resolve(opts.cwd, opts.claudeDirFlag);
   }
   const envDir = opts.env["CLAUDE_CONFIG_DIR"];
   if (typeof envDir === "string" && envDir.trim() !== "") {
-    return resolve(envDir);
+    return resolve(opts.cwd, envDir);
   }
   return join(opts.homeDir, ".claude");
 }

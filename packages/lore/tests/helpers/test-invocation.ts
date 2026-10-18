@@ -54,7 +54,7 @@ export function buildTestInvocation(input: TestInvocationInput): Invocation {
     argv,
     paths: Object.freeze({
       home,
-      claudeDir: invocationResolvers.claudeDir({ argv, env, home }),
+      claudeDir: invocationResolvers.claudeDir({ argv, env, home, cwd }),
       userConfigDir: invocationResolvers.userConfigDir(env, home),
       projectRoot: invocationResolvers.projectRoot(cwd),
       tmpDir: tmpdir(),

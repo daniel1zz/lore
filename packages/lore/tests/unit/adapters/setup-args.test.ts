@@ -116,12 +116,12 @@ describe("validateSetupFlags — NEGATIVE", () => {
 
 describe("resolveTargetDir — HAPPY", () => {
   it("no flag, no env -> join(homeDir, '.claude')", () => {
-    const result = resolveTargetDir({ env: {}, homeDir: "/Users/x" });
+    const result = resolveTargetDir({ env: {}, homeDir: "/Users/x", cwd: "/work/dir" });
     expect(result).toBe(join("/Users/x", ".claude"));
   });
 
   it("$CLAUDE_CONFIG_DIR set, no flag -> the env value (resolved)", () => {
-    const result = resolveTargetDir({ env: { CLAUDE_CONFIG_DIR: "/opt/claude-cfg" }, homeDir: "/Users/x" });
+    const result = resolveTargetDir({ env: { CLAUDE_CONFIG_DIR: "/opt/claude-cfg" }, homeDir: "/Users/x", cwd: "/work/dir" });
     expect(result).toBe(resolve("/opt/claude-cfg"));
   });
 
@@ -130,6 +130,7 @@ describe("resolveTargetDir — HAPPY", () => {
       claudeDirFlag: "/tmp/flag-target",
       env: { CLAUDE_CONFIG_DIR: "/opt/claude-cfg" },
       homeDir: "/Users/x",
+      cwd: "/work/dir",
     });
     expect(result).toBe(resolve("/tmp/flag-target"));
   });
@@ -137,25 +138,25 @@ describe("resolveTargetDir — HAPPY", () => {
 
 describe("resolveTargetDir — BOUNDARY", () => {
   it("an empty-string --claude-dir flag is treated as absent", () => {
-    const result = resolveTargetDir({ claudeDirFlag: "", env: { CLAUDE_CONFIG_DIR: "/opt/claude-cfg" }, homeDir: "/Users/x" });
+    const result = resolveTargetDir({ claudeDirFlag: "", env: { CLAUDE_CONFIG_DIR: "/opt/claude-cfg" }, homeDir: "/Users/x", cwd: "/work/dir" });
     expect(result).toBe(resolve("/opt/claude-cfg"));
   });
 
   it("a whitespace-only --claude-dir flag is treated as absent", () => {
-    const result = resolveTargetDir({ claudeDirFlag: "   ", env: {}, homeDir: "/Users/x" });
+    const result = resolveTargetDir({ claudeDirFlag: "   ", env: {}, homeDir: "/Users/x", cwd: "/work/dir" });
     expect(result).toBe(join("/Users/x", ".claude"));
   });
 
   it("an empty-string $CLAUDE_CONFIG_DIR is treated as absent", () => {
-    const result = resolveTargetDir({ env: { CLAUDE_CONFIG_DIR: "" }, homeDir: "/Users/x" });
+    const result = resolveTargetDir({ env: { CLAUDE_CONFIG_DIR: "" }, homeDir: "/Users/x", cwd: "/work/dir" });
     expect(result).toBe(join("/Users/x", ".claude"));
   });
 });
 
 describe("resolveTargetDir — REGRESSION", () => {
   it("a relative --claude-dir value is resolved to an absolute path", () => {
-    const result = resolveTargetDir({ claudeDirFlag: "relative/path", env: {}, homeDir: "/Users/x" });
-    expect(result).toBe(resolve("relative/path"));
+    const result = resolveTargetDir({ claudeDirFlag: "relative/path", env: {}, homeDir: "/Users/x", cwd: "/work/dir" });
+    expect(result).toBe(resolve("/work/dir", "relative/path"));
     expect(result.startsWith("/")).toBe(true);
   });
 });

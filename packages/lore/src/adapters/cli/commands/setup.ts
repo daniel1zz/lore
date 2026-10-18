@@ -1242,6 +1242,7 @@ export default defineCommand({
         ...(claudeDirFlag !== undefined ? { claudeDirFlag } : {}),
         env: inv.env,
         homeDir: inv.paths.home,
+        cwd: inv.cwd,
       });
       return await runCheckDispatch({ targetDir: checkTargetDir, json, inv });
     }
@@ -1276,6 +1277,7 @@ export default defineCommand({
         ...(claudeDirFlag !== undefined ? { claudeDirFlag } : {}),
         env: inv.env,
         homeDir: inv.paths.home,
+        cwd: inv.cwd,
       });
       return await runProjectScaffold({ json, yes: args.yes === true, assetsRoot, binPath, claudeDir, inv });
     }
@@ -1287,6 +1289,7 @@ export default defineCommand({
       ...(claudeDirFlag !== undefined ? { claudeDirFlag } : {}),
       env: inv.env,
       homeDir: inv.paths.home,
+      cwd: inv.cwd,
     });
 
     const mcpRegistrar = new CapturingMcpRegistrar(new RealMcpRegistrar(inv.env, inv.cwd));

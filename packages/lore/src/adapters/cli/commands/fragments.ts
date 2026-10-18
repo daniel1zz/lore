@@ -178,7 +178,7 @@ export function buildFlowDeps(cwd: string, inv: Invocation): DepsResult {
   const project = loadContextLayer(join(projectRoot, ".lore", "config.yaml"), contextConfigSchema);
   if (!project.ok) return project;
   const assetsRoot = resolveAssets(inv);
-  const claudeDir = resolveTargetDir({ env: inv.env, homeDir: inv.paths.home });
+  const claudeDir = resolveTargetDir({ env: inv.env, homeDir: inv.paths.home, cwd: inv.cwd });
   const userConfigDir = resolveUserConfigDir(inv.env, inv.paths.home);
   const userSelection = readSelectionText(join(userConfigDir, SELECTION_FILE.user));
   if (!userSelection.ok) return userSelection;
@@ -327,7 +327,7 @@ export default defineCommand({
     if (!isAction(action)) {
       return usageError(inv.io, `lore fragments requires an action: ${ACTIONS.join(" | ")} (got "${action}")`);
     }
-    const cwd = typeof args.cwd === "string" && args.cwd !== "" ? resolve(args.cwd) : inv.cwd;
+    const cwd = typeof args.cwd === "string" && args.cwd !== "" ? resolve(inv.cwd, args.cwd) : inv.cwd;
     const rest = args as Record<string, unknown>;
     switch (action) {
       case "render":

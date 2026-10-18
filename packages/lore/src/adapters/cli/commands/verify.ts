@@ -323,7 +323,7 @@ function resolveCliExecutionRoot(
   cwd: string,
 ): { resolution: VerifyExecutionRootResolution; explicitOverride: boolean } {
   if (explicitRootArg !== undefined) {
-    const explicitRoot = resolvePath(explicitRootArg);
+    const explicitRoot = resolvePath(cwd, explicitRootArg);
     return {
       resolution: resolveVerifyExecutionRoot({
         corpusRoot,
