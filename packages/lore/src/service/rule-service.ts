@@ -67,6 +67,7 @@ import type { CreateDocInput } from "@lore/core";
 import { resolveWriteActorFor } from "../store/write-context-store.js";
 import type { StoreInterface } from "../store/store-interface.js";
 import { NON_BUSINESS_PREFIX } from "./leaf-coverage.js";
+import { buildOwnerLeafIndex, judgeOwnedBy, parseOwnedBy, type OwnerLeafIndex } from "./owned-by.js";
 import { resolveDoc } from "./resolve.js";
 import type { CreateDocResult, WriteActorOpts } from "./corpus-service.js";
 import { collectKnownRuleIds } from "./baseline-rule-ids.js";
@@ -577,6 +578,16 @@ export class RuleService {
     if (!target.ok) return target;
     const gate = await this.authorizeCorpusWrite([target.value], "baseline-map", opts?.by);
     if (!gate.ok) return gate;
+    // Only the sites SET in this call are judged (entries already stored are never re-validated at write time).
+    let ownerLeaves: OwnerLeafIndex | undefined;
+    if (Object.values(sites).some((entries) => entries.some((e) => parseOwnedBy(e).kind !== "not_owned_by"))) {
+      const docs = await this.listBaselineDocs();
+      if (!docs.ok) return docs;
+      ownerLeaves = buildOwnerLeafIndex(docs.value);
+    }
+    const mappedLeafId = target.value.id;
+    // A command add/remove changes what the census measures, so it re-opens approval; a site-only change does not.
+    const keepsApproval = addCommands.length + removeCommands.length === 0;
     return this.retryWrite(target.value.id, opts?.by, (doc) => {
       const ruleIds = new Set(rulesOf(doc).map((r) => r.id));
       for (const [site, entries] of Object.entries(sites)) {
@@ -587,6 +598,14 @@ export class RuleService {
           const isReason = entry.startsWith(NON_BUSINESS_PREFIX) && entry.slice(NON_BUSINESS_PREFIX.length).trim().length > 0;
           if (!isReason && !ruleIds.has(entry)) {
             return err(validationError("site_map", `'${entry}' for site '${site}' is neither a rule of this leaf nor '${NON_BUSINESS_PREFIX}<reason>'`, entry));
+          }
+          const owned = parseOwnedBy(entry);
+          if (owned.kind === "malformed") {
+            return err(validationError("site_map", `owned-by entry for site '${site}': ${owned.problem} (grammar: ${NON_BUSINESS_PREFIX}owned-by <leaf> BR-n[ BR-m...] — <reason>)`, entry));
+          }
+          if (owned.kind === "owned_by") {
+            const judged = judgeOwnedBy(owned, ownerLeaves, mappedLeafId);
+            if (!judged.ok) return err(validationError("site_map", `owned-by entry for site '${site}': ${judged.problem}`, entry));
           }
         }
       }
@@ -613,7 +632,7 @@ export class RuleService {
         summary: `site_map set ${Object.keys(sites).length} removed ${removeSites.length}; commands +${addCommands.length} -${removeCommands.length}`,
         details: { operation: "baseline-map", sites: Object.keys(sites), removeSites, addCommands, removeCommands },
       });
-    });
+    }, keepsApproval);
   }
 
   /** Add a glossary entry to a root|branch node; a duplicate term is refused. */
@@ -862,8 +881,9 @@ export class RuleService {
     doc: DocRecord,
     actor: string,
     mutate: (doc: DocRecord) => Mutation,
+    keepsApproval = false,
   ): Promise<Result<DocRecord, LoreError>> {
-    const ready = await this.demoteIfApproved(doc, actor, "baseline edit");
+    const ready = keepsApproval ? ok(doc) : await this.demoteIfApproved(doc, actor, "baseline edit");
     if (!ready.ok) return ready;
     const mutation = mutate(ready.value);
     if (!mutation.ok) return mutation;
@@ -880,13 +900,14 @@ export class RuleService {
     docId: string,
     by: string | undefined,
     mutate: (doc: DocRecord) => Mutation,
+    keepsApproval = false,
   ): Promise<Result<DocRecord, LoreError>> {
     const actor = this.resolveActor(by);
     let lastStale: LoreError | undefined;
     for (let attempt = 0; attempt <= MAX_CAS_REAPPLIES; attempt += 1) {
       const fresh = await this.readLeaf(docId);
       if (!fresh.ok) return fresh;
-      const written = await this.writeLeafExtra(fresh.value, actor, mutate);
+      const written = await this.writeLeafExtra(fresh.value, actor, mutate, keepsApproval);
       if (written.ok) return written;
       if (written.error.code !== "STALE_VERSION") return written;
       lastStale = written.error;
