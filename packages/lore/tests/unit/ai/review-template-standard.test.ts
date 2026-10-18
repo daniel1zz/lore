@@ -84,8 +84,9 @@ describe("AC-BLC-5 — judge sees architecture standard four parts", () => {
     });
     const out = v2(leaf, CHECKS, BUDGETS, NOW).prompt;
     expect(out).toContain("BR-1");
+    // the rendered label is `<key>: <value>`; the bare word "migration" also appears in the v4 design_necessity rule
     for (const key of ["current_reality", "target_rule", "current_exceptions", "migration"]) {
-      expect(out).not.toContain(key);
+      expect(out).not.toContain(`${key}:`);
     }
   });
 
