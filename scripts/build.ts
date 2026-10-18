@@ -327,6 +327,19 @@ console.log(
   `  Assets manifest: ${assetsManifest.entries.length} files, tree_digest ${assetsManifest.tree_digest} (verified fresh)`,
 );
 
+// ─── Rendered rules files (CL-6) ─────────────────────────────────────────────
+// `.claude/rules/lore-*.md` are a pure function of their fragments (assets/context/*.md), like the
+// assets manifest above: re-rendered here through the product renderer, a hand-edited file is
+// overwritten (and named in the output) so a hand edit can never survive a build. Skipped in a variant
+// build, which never writes the repo tree. Runs as a child process so a renderer failure fails the build loudly.
+if (!isVariantBuild) {
+  console.log(`Re-rendering rules files from their fragments...`);
+  const rulesRender = Bun.spawnSync(["bun", join(root, "scripts", "render-repo-rules.ts")], { cwd: root, stdout: "inherit", stderr: "inherit" });
+  if (rulesRender.exitCode !== 0) {
+    throw new Error(`[build] scripts/render-repo-rules.ts failed (exit ${String(rulesRender.exitCode)}) — see its output above.`);
+  }
+}
+
 // ─── Build provenance injection (spec-bootstrap-fixpoint-integrity-binary-
 // provenance-an-anchor, AC-BFI-1) ────────────────────────────────────────────
 // MUST be computed HERE, after every generation step above and immediately

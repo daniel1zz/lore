@@ -29,7 +29,7 @@ function input(n: number, verdict: DecisionRecordInput["verdict"]): DecisionReco
 }
 
 /** A corpus at schema 21: the 020 table (old CHECK) holding a valid 3-row chain. */
-function legacyDb(path: string): void {
+function legacyDb(path: string, version: 21 | 22 = 21): void {
   const db = new Database(path);
   db.exec(MIGRATION_020_SQL);
   let prev = DECISION_GENESIS_HASH;
@@ -42,7 +42,7 @@ function legacyDb(path: string): void {
     ).run(row.ts, row.class, row.subject_id, row.subject_version, row.facts, row.factors, row.score, row.threshold, row.verdict, row.reasons, row.executor_run, row.channel, prev, hash);
     prev = hash;
   }
-  db.exec("PRAGMA user_version = 21");
+  db.exec(`PRAGMA user_version = ${version}`);
   db.close();
 }
 
@@ -66,11 +66,11 @@ describe("migration 023 decision_log superseded verdict", () => {
     }
   }, 30_000);
 
-  it("upgrade from 21 keeps rows verbatim, the chain clean, the triggers armed, and accepts 'superseded'", async () => {
+  it.each([21, 22] as const)("upgrade from %i keeps rows verbatim, the chain clean, the triggers armed, and accepts 'superseded'", async (from) => {
     const dir = mkdtempSync(join(tmpdir(), "lore-m023-"));
     const path = join(dir, "lore.db");
     try {
-      legacyDb(path);
+      legacyDb(path, from);
       const store = new SQLiteStore(path);
       try {
         const before = await store.listDecisionLog();

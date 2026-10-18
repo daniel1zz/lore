@@ -61,7 +61,7 @@
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { spawnSync } from "child_process";
-import { mkdtempSync, rmSync, existsSync } from "fs";
+import { appendFileSync, mkdtempSync, rmSync, existsSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import { FIXTURE_HOME_OUTSIDE_REPO, makeCleanTreeRepo } from "../../helpers/clean-tree-repo.js";
@@ -216,6 +216,10 @@ beforeAll(() => {
   if (!existsSync(join(tmpDir, ".lore", "lore.db"))) {
     throw new Error(`lore init reported success but produced no .lore/lore.db under ${tmpDir}`);
   }
+
+  // reason: plans are judged by default (BR-281 / BR-1237); these fixtures approve plans only to reach
+  // plan-close rendering, never review-judgment.
+  appendFileSync(join(tmpDir, ".lore", "config.yaml"), "workflow:\n  review:\n    judgment_required_types: []\n", "utf8");
 
   prdSlug = createPrd(tmpDir, "GV6 PRD");
 

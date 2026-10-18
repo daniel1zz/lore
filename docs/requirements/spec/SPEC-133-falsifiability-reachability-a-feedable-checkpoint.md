@@ -6,7 +6,7 @@ title: "Falsifiability reachability: a feedable checkpoint, an attestable red, a
 status: approved
 priority: medium
 created: 2026-08-10
-updated: 2026-10-16
+updated: 2026-10-18
 tags: []
 ---
 ## Overview/Goal
@@ -124,9 +124,11 @@ measured in the session preceding this spec.
   script: test — bunx vitest run packages/lore/tests/unit/adapters/feed-checkpoint-coverage.test.ts -t derived-from-registry
   other_command=3
 - [⚑] [script] AC-FR-2: LIVE SURFACE (G2): an AC carrying a declared falsifier can be driven to an ATTESTED red — a real `lore verify` invocation applies the falsifier, runs the AC command, and records an expected-fail row whose capture_source is 'runner', not 'self-report'. The recorded row's exit code MUST equal the exact value the falsifier declares, and its output MUST contain a token naming what failed. RED: strip the falsifier from the AC and verify must record NOTHING rather than a passing red; declare an exit code the mutation does not actually produce and the run must fail loudly instead of recording. Baseline 2026-08-10: attested_fail=0 on every AC of three separate plans.
-  script: test — bunx vitest run packages/lore/tests/unit/service/attested-red.test.ts -t falsifier-produces-attested-fail
+  script: test — bun run test:file packages/lore/tests/unit/service/attested-red.test.ts -t falsifier-produces-attested-fail
+  other_command=4
 - [⚑] [script] AC-FR-3: ISOLATION (G2/D3): after a falsifier run — including one that CRASHES mid-run — the working tree is byte-identical to its pre-run state, proven by comparing a content hash of every path the falsifier touches, taken before and after, plus `git status --porcelain` being empty. The mutation MUST be applied in a scratch worktree, never in the working tree. RED: apply the falsifier in-place with a finally-block revert, then kill the process mid-run; the hash comparison must fail. ⛔ A revert that only restores from an in-memory copy does NOT satisfy this — this repo already shipped one such backup that was never read back.
-  script: test — bunx vitest run packages/lore/tests/unit/service/attested-red.test.ts -t working-tree-untouched
+  script: test — bun run test:file packages/lore/tests/unit/service/attested-red.test.ts -t working-tree-untouched
+  other_command=4
 - [⚑] [script] AC-FR-4: GUARD PREDICATE (G4): a real `lore evidence --result pass` with a NON-EMPTY but hand-authored tail and capture_source 'self-report' is REFUSED at exactly the same exit code the empty-tail case already returns, and the refusal names --capture. The same call with --capture SUCCEEDS. ⛔ Asserted by driving the CLI, never the service. RED (both directions required): (a) supply a non-empty hand-written tail and the call must be refused — today it is ACCEPTED, which is the defect; (b) supply --capture and it must NOT be refused, proving the guard did not simply become a blanket denial. Baseline 2026-08-10: 2 of 3 dispatched agents passed this guard with a hand-written summary.
   script: test — bunx vitest run packages/lore/tests/unit/adapters/evidence-tail-guard.test.ts -t predicate-matches-message
 - [⚑] [script] AC-FR-5: VISIBILITY (G4 + the count-without-members gap): EVERY corpus-wide count `lore status --json` reports has a sibling that ENUMERATES its members — asserted generically: the test reads the set of count-suffixed fields from a real `lore status --json` and, for EACH one, drives a real enumeration call and asserts the returned member count EQUALS the reported number. This MUST cover at minimum pass_unfalsified_count, unredeemed_allow_missing_path_count, and a new capture_source distribution (runner vs self-report). `lore assess` reports the capture_source ratio alongside the attested ratio it already prints. RED (both required): (a) seed a corpus with one runner row and one self-report row and assert BOTH counts are non-zero and correct — a projection hardcoding zero self-reports would otherwise pass; (b) add a new count field WITHOUT an enumerator and the test must fail naming that field, so the contract binds future counts too. ⛔ Measured 2026-08-10: producing the member list behind pass_unfalsified_count=29 required a throwaway script iterating all 138 specs, because no enumerator exists.
@@ -147,6 +149,7 @@ measured in the session preceding this spec.
   script: test — bunx vitest run scripts/tests/spec-mirror-export.test.ts -t all-types-parity-and-id-format && bun scripts/check-live-mirror-integrity.ts && echo 'AC-FR-10 PASS: the seeded-fixture RED controls passed and the live mirror has per-type counts equal to the corpus, zero-padded ids equal to filenames, and links_broken 0'
   other_command=1
 - [⚑] [script] AC-FR-11: Given a scratch worktree in which the AC's own UNMUTATED command already exits nonzero, lore verify --falsify records result inconclusive with no attestation and never records result expected-fail: the green control runs BEFORE the mutation is applied, so an unrunnable scratch environment (absent node_modules, absent untracked test file, absent gitignored binary) cannot mint a machine-proven red.
-  script: test — bunx vitest run packages/lore/tests/unit/service/attested-red.test.ts -t "green-control" && echo "AC-FR-11 PASS: an unrunnable scratch worktree records inconclusive, never expected-fail"
+  script: test — bun run test:file packages/lore/tests/unit/service/attested-red.test.ts -t "green-control" && echo "AC-FR-11 PASS: an unrunnable scratch worktree records inconclusive, never expected-fail"
+  other_command=3
 - [⚑] [script] AC-FR-12: SURFACE + PERSISTENCE (the layer AC-FR-11's service-level oracle does not reach): a real lore verify --falsify invocation against a throwaway corpus whose scratch worktree cannot run the command PERSISTS an evidence row with result inconclusive and NO attestation block — asserted by reading the row back out of the corpus, never from an injected recorder spy — AND the CLI prints a message naming the green control and exits 3, not 0. RED (both required): (a) make the CLI branch print success and exit 0 and this must fail; (b) make the runner skip the inconclusive record entirely and the read-back must fail finding the row.
   script: test — bunx vitest run packages/lore/tests/integration/cli/verify-falsify-green-control.test.ts && echo "AC-FR-12 PASS: the persisted row is inconclusive with no attestation and the CLI exits 3"

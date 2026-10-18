@@ -226,7 +226,7 @@ describe("migration-014 (registry lifecycle/version, ac_cites, rule_depends, ac_
     raw.close();
   });
 
-  it("STATE: opening a schema-13 file lands on user_version 21 == LATEST_SCHEMA_VERSION (014, 015, 016, 017: runs.ended_at, then 018: proposed registry state)", async () => {
+  it("STATE: opening a schema-13 file lands on user_version 22 == LATEST_SCHEMA_VERSION (014, 015, 016, 017: runs.ended_at, then 018: proposed registry state)", async () => {
     await seedSchema13();
     const store = new SQLiteStore(path);
     expect(LATEST_SCHEMA_VERSION).toBe(23);

@@ -1,0 +1,98 @@
+{
+  "version": 1,
+  "thresholds": {
+    "version": 1,
+    "classes": {
+      "ac-exempt": {
+        "tier": "normal",
+        "declaredRecoverability": "reversible",
+        "threshold": 0.8,
+        "priorConfidence": 0.5,
+        "usesJudge": false
+      },
+      "archive-ref-prune": {
+        "tier": "human-always",
+        "usesJudge": false
+      },
+      "governance-loosen": {
+        "tier": "human-always",
+        "usesJudge": false
+      },
+      "override-attestation": {
+        "tier": "normal",
+        "declaredRecoverability": "reversible",
+        "threshold": 0.8,
+        "priorConfidence": 0.5,
+        "usesJudge": false
+      },
+      "override-judgment": {
+        "tier": "normal",
+        "declaredRecoverability": "reversible",
+        "threshold": 0.8,
+        "priorConfidence": 0.5,
+        "usesJudge": false
+      },
+      "process-reap": {
+        "tier": "normal",
+        "declaredRecoverability": "loss-free-by-proof",
+        "threshold": 0.85,
+        "priorConfidence": 0.97,
+        "usesJudge": false
+      },
+      "push-force": {
+        "tier": "human-always",
+        "usesJudge": false
+      },
+      "report-issue": {
+        "tier": "human-always",
+        "usesJudge": false
+      },
+      "run-end-stale": {
+        "tier": "normal",
+        "declaredRecoverability": "reversible",
+        "threshold": 0.8,
+        "priorConfidence": 0.97,
+        "usesJudge": false
+      },
+      "stash-drop": {
+        "tier": "normal",
+        "declaredRecoverability": "loss-free-by-proof",
+        "threshold": 0.8,
+        "priorConfidence": 0.95,
+        "usesJudge": false
+      },
+      "verify-new-command": {
+        "tier": "normal",
+        "declaredRecoverability": "reversible",
+        "threshold": 0.8,
+        "priorConfidence": 0.95,
+        "usesJudge": false
+      },
+      "worktree-remove": {
+        "tier": "normal",
+        "declaredRecoverability": "loss-free-by-proof",
+        "threshold": 0.8,
+        "priorConfidence": 0.97,
+        "usesJudge": false
+      }
+    },
+    "worktreeRemoveRegenerable": [
+      "node_modules/",
+      "dist/",
+      "dist-npm/",
+      ".turbo/",
+      "coverage/",
+      "*.tsbuildinfo",
+      "packages/*/dist/",
+      "**/*.gen.ts",
+      "packages/lore/src/generated/**"
+    ]
+  },
+  "thresholds_hash": "fbfe96b61ef3c26965cf236b8aeaf1fed98555f45e0e4fea581cda75f103c573",
+  "integrity": "intact",
+  "decision_chain_head": {
+    "head_id": 31,
+    "head_hash": "0c59f2eeb1058732c766f983a194393f87c5776cab2e460d4f3fd6c92eb98f62",
+    "count": 31
+  }
+}

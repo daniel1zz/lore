@@ -3,7 +3,7 @@ id: TASK-1567
 type: task
 role: plan
 title: "[Skill:fix] CL-6 pre-push runs lore fragments check so a hand-edited rendered rules file cannot reach main"
-status: draft
+status: archived
 priority: high
 phase: "Phase 1: cleanup without a human"
 created: 2026-10-18

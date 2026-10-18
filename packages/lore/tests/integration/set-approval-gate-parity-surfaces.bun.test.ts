@@ -179,6 +179,8 @@ describe("AC-AP-2 MCP lore_set to approved", () => {
     const plan = await must(
       app.corpusService.create({ type: "plan", title: next("Surface mcp plan"), parent_id: spec.id, content: "Plan body." } as CreateDocInput),
     );
+    // reason: plans are judged by default (BR-281 / BR-1237); a judgment lets the refusal come from plan-promote.
+    await judge(plan.id);
     const before = await versionRows(plan.id);
 
     const viaSet = await callMcp("lore_set", { id_or_slug: plan.id, status: "approved" });

@@ -232,7 +232,7 @@ describe("migration-018 (SQLite)", () => {
     store.close();
   });
 
-  it("REGRESSION: upgrading a v17 file keeps every registry row and lands on user_version 21 (019 follows 018)", () => {
+  it("REGRESSION: upgrading a v17 file keeps every registry row and lands on user_version 22 (019 follows 018)", () => {
     const path = join(dir, "v17.db");
     new SQLiteStore(path).close();
     const raw = new Database(path);

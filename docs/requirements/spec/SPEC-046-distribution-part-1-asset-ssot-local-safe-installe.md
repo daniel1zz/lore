@@ -6,7 +6,7 @@ title: "Distribution part 1: asset SSOT + local safe installer (P0+P1)"
 status: approved
 priority: high
 created: 2026-07-16
-updated: 2026-10-10
+updated: 2026-10-18
 tags: [distribution, installer, p17, setup]
 ---
 **spec_kind:** feature · **implements →** PRD §17 Distribution & Adoption (P0+P1 slice)
@@ -72,8 +72,9 @@ Thin glue over existing conventions: services return `Result`, ports injected (F
 
 - [⚑] [script] AC-046-A: Pure-fn suite green: setup-manifest schema, planInstall, mergeSettings (malformed existing JSON returns err), register-mcp args builder — six-dimension coverage
   script: test — bunx vitest run packages/lore/tests/unit/core/setup-pure.test.ts
-- [⚑] [script] AC-046-B: SetupService lifecycle green: fake-fs fault injection (partial-write honesty, re-run convergence) + mkdtemp roundtrip; invariants I1-I5 each have a dedicated test
-  script: test — bunx vitest run packages/lore/tests/unit/service/setup-service.test.ts
+- [·] [script] AC-046-B: SetupService lifecycle green: fake-fs fault injection (partial-write honesty, re-run convergence) + mkdtemp roundtrip; invariants I1-I5 each have a dedicated test
+  script: test — bun run test:file packages/lore/tests/unit/service/setup-service.test.ts
+  other_command=2
 - [⚑] [script] AC-046-C: ProjectSetupService scaffold green: init + g1-g4 hooks + pre-push + lore.tree.yaml + core.hooksPath in a throwaway git repo
   script: test — bunx vitest run packages/lore/tests/unit/service/project-setup-service.test.ts
 - [⚑] [script] AC-046-D: Asset SSOT conformance: assets/ tree contains every declared skill/agent/hook/governance/project file; governance snippet parses standalone

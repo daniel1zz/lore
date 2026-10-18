@@ -99,7 +99,7 @@ import type {
  * verbatim into `judge.prompt_version` on every review judgment (SPEC-034 §2) so calibration
  * queries can filter/aggregate per prompt version without a join.
  */
-export const REVIEW_PROMPT_VERSION = "v3";
+export const REVIEW_PROMPT_VERSION = "v4";
 
 /**
  * The exact advisory-only clause the v2 prompt embeds (SPEC-053 AC-053-4). Exported so a
@@ -692,6 +692,40 @@ function buildReviewPromptV3(
   return buildReviewPromptWithStructuredParts(bundle, checks, budgets, nowIso, true);
 }
 
+/**
+ * The v4 RULES block (spec-the-approval-judge-rejects-patch-shaped-designs-design D1, BR-1237):
+ * the judge answers one extra question for EVERY document type — does the document patch where an
+ * end-state design would make the patch unnecessary. Exported so a test can pin the wording.
+ * reason: this is prompt text, not a detector — a deterministic "patch-ness" scanner would itself
+ * be the bespoke guard check the rule rejects (spec INV-1).
+ */
+export const DESIGN_NECESSITY_RULE =
+  `- DESIGN NECESSITY (dimension "design_necessity", applies to every document type): decide ` +
+  `whether the document introduces ANY of (a) a stopgap or temporary seam, (b) a bespoke guard ` +
+  `check, scanner or ledger whose purpose is to guard a design constraint, (c) a silent fallback ` +
+  `that substitutes a value for a missing required input, (d) a phased or transitional migration ` +
+  `with intermediate states. For each one found, ask whether an end-state design would make it ` +
+  `unnecessary. If yes, you MUST return decision "reject" with a reasons entry whose dimension ` +
+  `is "design_necessity", naming each such item and the end-state alternative. A check, fallback ` +
+  `or phase that the end-state design itself requires (for example a behavioural acceptance test ` +
+  `of the design, or a user-visible degraded mode the document defines) is not a finding when ` +
+  `the document says why it is necessary.\n`;
+
+/**
+ * v4 review judge prompt (spec-the-approval-judge-rejects-patch-shaped-designs-design D1) — v3 plus
+ * {@link DESIGN_NECESSITY_RULE} appended as the final RULES entry. Everything before the rule is
+ * byte-identical to v3.
+ */
+function buildReviewPromptV4(
+  bundle: ReviewBundle,
+  checks: CheckResult[],
+  budgets: ReviewBudgets,
+  nowIso?: string,
+): BuildReviewPromptResult {
+  const v3 = buildReviewPromptV3(bundle, checks, budgets, nowIso);
+  return { ...v3, prompt: v3.prompt + DESIGN_NECESSITY_RULE };
+}
+
 /** Shared v2/v3 body; `withFourParts` is the ONLY difference between the two versions. */
 function buildReviewPromptWithStructuredParts(
   bundle: ReviewBundle,
@@ -723,7 +757,8 @@ function buildReviewPromptWithStructuredParts(
  * Version-keyed registry of review judge prompt builders. `v1` (SPEC-034, frozen —
  * byte-identical to its original output, locked by the `review-prompt-v1.txt` fixture) and
  * `v2` (SPEC-053, adds the non-blocking AC-quantifiability advisory dimension, frozen) and
- * `v3` (lore #126, v2 plus an architecture standard rule's four parts). The active
+ * `v3` (lore #126, v2 plus an architecture standard rule's four parts) and `v4` (v3 plus the
+ * design_necessity rule, BR-1237). The active
  * key is `REVIEW_PROMPT_VERSION`. A future prompt spec adds a NEW key here rather than
  * mutating an existing one, so historical judgments' `judge.prompt_version` stays meaningful.
  */
@@ -731,6 +766,7 @@ export const REVIEW_TEMPLATES: Record<string, ReviewTemplateFn> = {
   v1: buildReviewPromptV1,
   v2: buildReviewPromptV2,
   v3: buildReviewPromptV3,
+  v4: buildReviewPromptV4,
 };
 
 /**

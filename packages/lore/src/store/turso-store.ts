@@ -47,6 +47,7 @@ import { MIGRATION_018_SQL } from "./migrations/migration-018.js";
 import { MIGRATION_019_ADD_COLUMNS, MIGRATION_019_SQL } from "./migrations/migration-019.js";
 import { MIGRATION_020_SQL } from "./migrations/migration-020.js";
 import { MIGRATION_021_ADD_COLUMNS, MIGRATION_021_SQL } from "./migrations/migration-021.js";
+import { MIGRATION_022_SQL } from "./migrations/migration-022.js";
 import { MIGRATION_023_SQL } from "./migrations/migration-023.js";
 import { DECISION_GENESIS_HASH, computeDecisionEntryHash } from "./decision-log.js";
 import type { DecisionLogRow, DecisionRecordInput } from "./decision-log.js";
@@ -768,6 +769,11 @@ export class TursoStore implements StoreInterface {
           if (!info.rows.some((r) => rowStr(r, "name") === column)) await this.client.execute(ddl);
         }
         await this.client.executeMultiple(MIGRATION_021_SQL);
+      }
+
+      if (currentVersion < 22) {
+        // reason: migration-022 (autonomy_thresholds) is one idempotent BEGIN/COMMIT string.
+        await this.client.executeMultiple(MIGRATION_022_SQL);
       }
 
       if (currentVersion < 23) {
@@ -2586,6 +2592,36 @@ export class TursoStore implements StoreInterface {
       } finally {
         tx.close();
       }
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
+  /**
+   * @see StoreInterface.readAutonomyThresholds
+   */
+  async readAutonomyThresholds(): Promise<Result<{ readonly content: string; readonly updated_at: string } | null, LoreError>> {
+    try {
+      await this.ensureReady();
+      const rs = await this.client.execute("SELECT content, updated_at FROM autonomy_thresholds WHERE id = 1");
+      const row = rs.rows[0];
+      return ok(row === undefined ? null : { content: rowStr(row, "content"), updated_at: rowStr(row, "updated_at") });
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
+  /**
+   * @see StoreInterface.writeAutonomyThresholds
+   */
+  async writeAutonomyThresholds(content: string, updatedAt: string): Promise<Result<void, LoreError>> {
+    try {
+      await this.ensureReady();
+      await this.client.execute({
+        sql: "INSERT INTO autonomy_thresholds (id, content, updated_at) VALUES (1, ?, ?) ON CONFLICT(id) DO UPDATE SET content = excluded.content, updated_at = excluded.updated_at",
+        args: [content, updatedAt],
+      });
+      return ok(undefined);
     } catch (e) {
       return wrapStoreError(e);
     }

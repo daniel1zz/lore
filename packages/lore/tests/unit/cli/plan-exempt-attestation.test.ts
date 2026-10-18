@@ -482,11 +482,13 @@ describe("AC-069-11 — the dedicated writer has no `lore set` back door", () =>
   });
 
   it("AC-069-11 every top-level command — `set` included — is routed through the strict seam", () => {
-    const indexSource = readFileSync(CLI_INDEX_PATH, "utf8");
-    // `wrapDefault` is the ONE place index.ts applies wrapCommandStrict; if
-    // `set` were registered without it, the seam would not cover this flag.
-    expect(indexSource).toMatch(/set:\s*\(\)\s*=>\s*import\([^)]*\)\.then\(wrapDefault\("set"\)\)/);
-    expect(stripCommentLines(indexSource).join("\n")).toContain("wrapCommandStrict");
+    const code = stripCommentLines(readFileSync(CLI_INDEX_PATH, "utf8")).join("\n");
+    // `set` is a COMMAND_LOADERS entry; buildMain routes EVERY entry through wrapDefault, and wrapDefault
+    // is the ONE place index.ts applies wrapCommandStrict (registration form since the Invocation entry,
+    // spec-ambient-state-is-read-once-at-the-entry-owned-only-prune D4).
+    expect(code).toMatch(/export const COMMAND_LOADERS\b[\s\S]*?=\s*\{[\s\S]*?\bset:\s*\(\)\s*=>\s*import\("\.\/commands\/set\.js"\)/);
+    expect(code).toMatch(/for\s*\(const \[name, load\] of Object\.entries\(COMMAND_LOADERS\)\)[\s\S]*?wrapDefault\(name/);
+    expect(code).toMatch(/function wrapDefault[\s\S]*?await wrapCommandStrict\(/);
   });
 });
 

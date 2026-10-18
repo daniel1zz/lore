@@ -348,6 +348,8 @@ describe("every-checkpoint-leaves-a-trace — a passing gate evaluation is query
         const plan = parseSlug(
           runLoreOk(["create", "plan", "--title", "GET-4 plan-promote target", "--parent", spec, "--content", "plan body", "--no-ai"], tmpDir, "create plan").stdout,
         );
+        // plans are judged by default (BR-281 / BR-1237): the plan needs a judgment of its current version
+        seedServiceOps(join(tmpDir, ".lore", "lore.db"), tmpDir, [{ kind: "record_judgment", docSlug: plan }]);
         runLoreOk(["approve", plan], tmpDir, "approve plan (plan-promote)");
 
         const entries = queryAudit(plan, tmpDir);
@@ -381,6 +383,8 @@ describe("every-checkpoint-leaves-a-trace — a passing gate evaluation is query
       () => {
         const prd = parseSlug(runLoreOk(["create", "prd", "--title", "GET-6 PRD", "--content", "## Overview\n\nbody", "--no-ai"], tmpDir, "create prd").stdout);
         const plan = parseSlug(runLoreOk(["create", "plan", "--title", "GET-6 plan-close target", "--parent", prd, "--content", "plan body", "--no-ai"], tmpDir, "create plan").stdout);
+        // plans are judged by default (BR-281 / BR-1237): the plan needs a judgment of its current version
+        seedServiceOps(join(tmpDir, ".lore", "lore.db"), tmpDir, [{ kind: "record_judgment", docSlug: plan }]);
         runLoreOk(["set", plan, "--status", "approved"], tmpDir, "approve plan (precondition for archive)");
         runLoreOk(["set", plan, "--status", "archived"], tmpDir, "archive plan (plan-close)");
 

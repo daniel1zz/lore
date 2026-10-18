@@ -763,6 +763,9 @@ describe("OutlineService.resolve", () => {
         // reason: AC-AU-5 — new required StoreInterface methods (run process record, run lifecycles).
         recordRunProcess: (id, proc) => store.recordRunProcess(id, proc),
         listRunLifecycles: () => store.listRunLifecycles(),
+        // reason: AC-AU-9 — new required StoreInterface methods (governed autonomy threshold record).
+        readAutonomyThresholds: () => store.readAutonomyThresholds(),
+        writeAutonomyThresholds: (content, updatedAt) => store.writeAutonomyThresholds(content, updatedAt),
       };
 
       const brokenService = new OutlineService(brokenStore);

@@ -206,7 +206,7 @@ describe("migration-016 (runs table, audit/versions.harness_run) — v15 corpus"
     raw.close();
   });
 
-  it("STATE: LATEST_SCHEMA_VERSION is 21 and opening a schema-15 file lands on user_version 21", async () => {
+  it("STATE: LATEST_SCHEMA_VERSION is 22 and opening a schema-15 file lands on user_version 22", async () => {
     await seedSchema15();
     const store = new SQLiteStore(path);
     expect(LATEST_SCHEMA_VERSION).toBe(23);
@@ -306,7 +306,7 @@ describe("migration-016 (runs table, audit/versions.harness_run) — v15 corpus"
     store.close();
   });
 
-  it("REGRESSION: a fresh (never-migrated) corpus is created at the same shape: version 21 + runs + columns", () => {
+  it("REGRESSION: a fresh (never-migrated) corpus is created at the same shape: version 22 + runs + columns", () => {
     const store = new SQLiteStore(path);
     const db = store.getDatabase();
     expect(userVersion(db)).toBe(23);

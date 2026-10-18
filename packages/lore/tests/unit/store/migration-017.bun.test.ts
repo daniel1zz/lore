@@ -83,7 +83,7 @@ describe("migration-017 on a SQLite file", () => {
     raw.close();
   }
 
-  it("STATE: upgrading a v16 file adds the columns, keeps the run open (ended_at NULL), lands on 21 (018, 019, 020, 021 follow 017)", async () => {
+  it("STATE: upgrading a v16 file adds the columns, keeps the run open (ended_at NULL), lands on 22 (018, 019, 020, 021, 022 follow 017)", async () => {
     const path = join(dir, "v16.db");
     seedV16WithRun(path);
 

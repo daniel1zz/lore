@@ -95,7 +95,7 @@ describe("migration-012 (widen links.link_type CHECK to accept 'resolves')", () 
     rmSync(tempDir, { recursive: true, force: true });
   });
 
-  it("HAPPY: a fresh SQLiteStore lands on user_version 21 and accepts a 'resolves' link row", () => {
+  it("HAPPY: a fresh SQLiteStore lands on user_version 22 and accepts a 'resolves' link row", () => {
     const store = new SQLiteStore(":memory:");
     const db = store.getDatabase();
 

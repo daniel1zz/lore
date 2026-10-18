@@ -110,7 +110,7 @@ function openApp(config?: LoreConfig): App {
 /**
  * SPEC-103 §Mechanisms M2 — this whole file predates the judgment-required gate, which
  * is a SEPARATE, ADDITIVE checkpoint on `ReviewService.approve` for spec/adr docs
- * (default `workflow.review.judgment_required_types: ["spec","adr"]`). Every test below
+ * (default `workflow.review.judgment_required_types: ["spec","adr","plan"]`). Every test below
  * that approves a spec/plan to exercise spec-promote/plan-promote/task-claim's OWN
  * concern (not M2's) uses this config to isolate that concern — mirrors this file's own
  * `ALL_GATES_DISABLED_CONFIG` precedent, disabling only the ORTHOGONAL new gate rather
@@ -399,7 +399,9 @@ describe("GateEnforcer — plan-promote (via ReviewService.approve, default conf
   }
 
   it("NEGATIVE: approving a plan whose ancestor spec is still draft is BLOCKED", async () => {
-    const app = openApp();
+    // reason: plans are judged by default (BR-281 / BR-1237); without this config the review-judgment
+    // checkpoint would refuse the plan first, hiding the plan-promote refusal this case asserts.
+    const app = openApp(JUDGMENT_NOT_REQUIRED_CONFIG);
     try {
       const { planId } = await createSpecParentedPlan(app);
       const result = await app.reviewService.approve(planId);

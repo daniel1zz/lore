@@ -146,8 +146,9 @@ mirroring `SetupFsWriter`'s surface.
 - [⚑] [script] AC-060-7: REGRESSION: the machine-target SetupService install/uninstall path produces a byte-identical <claude-dir> tree and manifest before and after this change, with 0 failing tests in the 3 existing setup suites
   script: test — bunx --bun vitest run packages/lore/tests/unit/assets-ssot.test.ts packages/lore/tests/unit/adapters/real-setup-ports.test.ts && bunx vitest run --config vitest.node.config.ts packages/lore/tests/unit/service/setup-service.test.ts
   other_command=5
-- [⚑] [script] AC-060-8: REGRESSION (corrects AC-060-7 whose paths were wrong and silently matched only 1 of 3 suites): the 3 machine-target setup suites at their real paths (service/setup-service, assets-ssot, adapters/real-setup-ports) execute and report 0 failures across exactly 3 test files
-  script: test — bunx vitest run packages/lore/tests/unit/service/setup-service.test.ts packages/lore/tests/unit/assets-ssot.test.ts packages/lore/tests/unit/adapters/real-setup-ports.test.ts
+- [·] [script] AC-060-8: REGRESSION (corrects AC-060-7 whose paths were wrong and silently matched only 1 of 3 suites): the 3 machine-target setup suites at their real paths (service/setup-service, assets-ssot, adapters/real-setup-ports) execute and report 0 failures across exactly 3 test files
+  script: test — bun run test:file packages/lore/tests/unit/service/setup-service.test.ts packages/lore/tests/unit/assets-ssot.test.ts packages/lore/tests/unit/adapters/real-setup-ports.test.ts
+  other_command=3
 
 ## Code anchors
 

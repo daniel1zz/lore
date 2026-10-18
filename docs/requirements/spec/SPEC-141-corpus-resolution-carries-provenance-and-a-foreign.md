@@ -6,7 +6,7 @@ title: "Corpus resolution carries provenance, and a foreign write is a decision 
 status: approved
 priority: medium
 created: 2026-08-12
-updated: 2026-10-17
+updated: 2026-10-18
 tags: []
 links:
   - {id: SPEC-099, type: relates-to}
@@ -227,4 +227,5 @@ The AC's statement is deliberately left AS IT PASSED. Rewriting a criterion afte
   script: test — bunx --bun vitest run packages/lore/tests/e2e/foreign-corpus-write-default.bun.test.ts 2>&1 && echo "AC-CP-4 PASS: a bare lore init project has the foreign-corpus-write guard on by default, and the config knob flips it both ways"
   other_command=2
 - [⚑] [script] AC-CP-5: THE ADAPTER MATRIX IS ASSERTED, INCLUDING ITS EXEMPTION. (a) MCP INHERITS: driving the MCP tool handler with caller_cwd pointing INTO a nested worktree, a non-lifecycle write is refused carrying the SAME literal token gate:corpus-write:foreign-provenance the CLI emits -- one vocabulary across both surfaces, asserted by equality against the CLI string, never by each surface having its own wording. (b) MCP CONTROL: the same MCP call with caller_cwd inside the corpus own tree is ACCEPTED and the doc lands, so the refusal tracks provenance rather than refusing every MCP write. (c) THE HTTP EXEMPTION IS OBSERVED AT THE PREDICATE BOUNDARY, not inferred from behaviour: a typed spy wraps the service predicate and asserts it WAS invoked exactly once on an HTTP-adapter write with its provenance argument EXACTLY null, and that the write landed. ⛔ Asserting only that the HTTP write succeeded is the same false-oracle class this spec rejects elsewhere -- via behaviour alone a null argument is indistinguishable from the predicate never being called at all, so the spy is what makes the exemption falsifiable rather than decorative.
-  script: test — bunx vitest run packages/lore/tests/unit/adapters/foreign-corpus-write-adapters.test.ts 2>&1 && echo "AC-CP-5 PASS: MCP inherits the guard via caller_cwd under one message vocabulary, and the HTTP null-provenance exemption is asserted rather than assumed"
+  script: test — bun run test:file packages/lore/tests/unit/adapters/foreign-corpus-write-adapters.test.ts 2>&1 && echo "AC-CP-5 PASS: MCP inherits the guard via caller_cwd under one message vocabulary, and the HTTP null-provenance exemption is asserted rather than assumed"
+  other_command=1

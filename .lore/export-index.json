@@ -11640,6 +11640,30 @@
     "01M579WS5Z8R9DE9P4WYY5EFW8": {
       "human_id": "TASK-1588",
       "file_path": "docs/requirements/task/TASK-1588-39-rule-ids-are-registered-to-session-leaves-that.md"
+    },
+    "01M57ARSEJB5KVGAZ1CTNG06NX": {
+      "human_id": "SPEC-200",
+      "file_path": "docs/requirements/spec/SPEC-200-the-approval-judge-rejects-patch-shaped-designs-de.md"
+    },
+    "01M57B10E7A3HE0GMPTEB9XMD1": {
+      "human_id": "PLAN-209",
+      "file_path": "docs/requirements/plan/PLAN-209-the-approval-judge-rejects-patch-shaped-designs.md"
+    },
+    "01M57B19ZPD6CS4WJCZVCNZ9CF": {
+      "human_id": "TASK-1589",
+      "file_path": "docs/requirements/task/TASK-1589-skill-implement-dn-1-review-prompt-v4-with-design.md"
+    },
+    "01M57BAB3RKAM3NK3CB0AV6RWM": {
+      "human_id": "TASK-1590",
+      "file_path": "docs/requirements/task/TASK-1590-skill-investigate-tg-42-remove-the-node-bun-projec.md"
+    },
+    "01M57B8RCM2AQXZH7NQ06AC3EJ": {
+      "human_id": "TASK-1591",
+      "file_path": "docs/requirements/task/TASK-1591-skill-fix-tg-41-ac-commands-that-run-a-node-projec.md"
+    },
+    "01M57B4DRBHQ6XMBV5JZ1FE0R1": {
+      "human_id": "TASK-1592",
+      "file_path": "docs/requirements/task/TASK-1592-skill-perf-tg-40-full-one-runner-suite-714-9-s-on.md"
     }
   }
 }
