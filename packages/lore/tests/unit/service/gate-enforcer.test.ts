@@ -386,7 +386,7 @@ describe("GateEnforcer", () => {
     // two independent lone tokens.
     it("variable set to \"1\": enforce() still blocks, message grows the boundary note", () => {
       process.env[ENV_VAR] = "1";
-      const enforcer = new GateEnforcer(undefined);
+      const enforcer = new GateEnforcer(undefined, undefined, undefined, undefined, process.env);
       const result = enforcer.enforce("spec-create", {
         parentType: null,
         specKind: "feature",

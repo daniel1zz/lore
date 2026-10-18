@@ -67,7 +67,7 @@ async function importConfigIO() {
   const coreMod = await import("@lore/core");
   type LoadConfig = (dir: string) => import("@lore/core").Result<import("@lore/core").LoreConfig, import("@lore/core").LoreError>;
   type SaveConfig = (dir: string, config: import("@lore/core").LoreConfig) => import("@lore/core").Result<void, import("@lore/core").LoreError>;
-  type ResolveSyncCredentials = (config: import("@lore/core").LoreConfig) => import("@lore/core").Result<{ url: string; token: string }, import("@lore/core").LoreError>;
+  type ResolveSyncCredentials = (config: import("@lore/core").LoreConfig, env: Readonly<Record<string, string | undefined>>) => import("@lore/core").Result<{ url: string; token: string }, import("@lore/core").LoreError>;
 
   const loadConfig = (nodeMod as any).loadConfig as LoadConfig;
   const saveConfig = (nodeMod as any).saveConfig as SaveConfig;
@@ -258,7 +258,7 @@ describe("resolveSyncCredentials() — happy path (D-004, SPEC-009 §6)", () => 
       },
     };
 
-    const result = resolveSyncCredentials(config);
+    const result = resolveSyncCredentials(config, process.env);
 
     expect(result.ok).toBe(true);
     if (result.ok) {
@@ -281,7 +281,7 @@ describe("resolveSyncCredentials() — happy path (D-004, SPEC-009 §6)", () => 
       },
     };
 
-    const result = resolveSyncCredentials(config);
+    const result = resolveSyncCredentials(config, process.env);
 
     delete process.env["MY_PROJECT_TOKEN"];
 
@@ -376,7 +376,7 @@ describe("resolveSyncCredentials() — negative cases (D-004, SPEC-009 §6)", ()
       },
     };
 
-    const result = resolveSyncCredentials(config);
+    const result = resolveSyncCredentials(config, process.env);
 
     // MUST fail loud — NOT return {ok:true, value:{token: undefined}}
     expect(result.ok).toBe(false);
@@ -395,7 +395,7 @@ describe("resolveSyncCredentials() — negative cases (D-004, SPEC-009 §6)", ()
       // sync intentionally absent
     };
 
-    const result = resolveSyncCredentials(config);
+    const result = resolveSyncCredentials(config, process.env);
 
     expect(result.ok).toBe(false);
     if (!result.ok) {
@@ -417,7 +417,7 @@ describe("resolveSyncCredentials() — negative cases (D-004, SPEC-009 §6)", ()
       },
     };
 
-    const result = resolveSyncCredentials(config);
+    const result = resolveSyncCredentials(config, process.env);
 
     // Empty string is not a valid token — must fail loud
     expect(result.ok).toBe(false);
@@ -447,7 +447,7 @@ describe("resolveSyncCredentials() — negative cases (D-004, SPEC-009 §6)", ()
 
     // Cast to LoreConfig because TypeScript enforces runtime shape via Zod,
     // but our test exercises the JS runtime guard directly.
-    const result = resolveSyncCredentials(config as any);
+    const result = resolveSyncCredentials(config as any, process.env);
 
     delete process.env["LORE_SYNC_TOKEN"];
 
@@ -548,7 +548,7 @@ describe("resolveSyncCredentials() — boundary values", () => {
       },
     };
 
-    const result = resolveSyncCredentials(config);
+    const result = resolveSyncCredentials(config, process.env);
 
     delete process.env["ACME_CORP_LORE_TOKEN_PROD"];
 

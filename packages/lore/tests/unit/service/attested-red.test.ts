@@ -567,7 +567,7 @@ describe("AC-FR-3 — working-tree-untouched", () => {
           "import { pathToFileURL } from 'node:url';",
           "async function main() {",
           "  const mod = await import(pathToFileURL(process.argv[2]).href);",
-          "  const created = mod.createFalsifierScratchWorktree(process.argv[3]);",
+          "  const created = mod.createFalsifierScratchWorktree(process.argv[3], { tmpDir: (await import('node:os')).tmpdir() });",
           "  if (!created.ok) { console.error('CREATE_FAILED ' + JSON.stringify(created.error)); process.exit(2); }",
           "  const falsifier = JSON.parse(process.argv[4]);",
           "  const applied = mod.applyFalsifierMutation(created.value.worktreeDir, falsifier);",

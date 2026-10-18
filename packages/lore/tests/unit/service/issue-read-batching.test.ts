@@ -61,6 +61,8 @@
  * @spec_ref AC-GI-12 — spec-the-defect-channel-reaches-no-machine-but-its-own-github
  */
 
+import type { Invocation } from "@lore/core";
+import { liveInvocation } from "../../live-invocation.js";
 import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from "vitest";
 import { ok, assembleIssueBody, type DocRecord, type IssueFrontMatterFields } from "@lore/core";
 import { resolutionToLabel } from "../../../src/service/resolution-projector.js";
@@ -155,11 +157,11 @@ function ghListEntryFor(doc: DocRecord, severity: "critical" | "high" | "medium"
 }
 
 function callIssuesRun(args: Record<string, unknown>): Promise<void> {
-  const run = issuesCommand.run as unknown as (ctx: { args: Record<string, unknown> }) => Promise<void>;
+  const run = issuesCommand.run as unknown as (ctx: { args: Record<string, unknown>; inv: Invocation }) => Promise<void>;
   if (run === undefined) {
     throw new Error("lore issues has no run() handler");
   }
-  return run({ args });
+  return run({ args, inv: liveInvocation() });
 }
 
 function wireApp(): void {

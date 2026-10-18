@@ -23,8 +23,23 @@ type Resolve = (
 
 async function load(): Promise<Resolve> {
   vi.resetModules();
-  const mod = (await import("@lore/core/node")) as unknown as { resolveInvocationIdentity: Resolve };
-  return mod.resolveInvocationIdentity;
+  const mod = (await import("@lore/core/node")) as unknown as {
+    resolveInvocationIdentity: (
+      argv: string[],
+      env: Record<string, string | undefined>,
+      osUsername: () => string,
+      detectWorktree?: () => string | undefined,
+    ) => ReturnType<Resolve>;
+    readOsUsername: () => string;
+  };
+  // the OS username and the invocation cwd are now parameters; the tests keep the old (argv, env, detect?(cwd)) shape
+  return (argv, env, detectWorktree) =>
+    mod.resolveInvocationIdentity(
+      argv,
+      env,
+      mod.readOsUsername,
+      detectWorktree === undefined ? undefined : () => detectWorktree(process.cwd()),
+    );
 }
 
 describe("resolveInvocationIdentity", () => {

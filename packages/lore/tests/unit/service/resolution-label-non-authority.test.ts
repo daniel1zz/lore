@@ -98,6 +98,8 @@
  * @spec_ref AC-GI-5 — spec-the-defect-channel-reaches-no-machine-but-its-own-github
  */
 
+import type { Invocation } from "@lore/core";
+import { liveInvocation } from "../../live-invocation.js";
 import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from "vitest";
 import { ok, err, type DocRecord, type IssueResolution, type LoreError } from "@lore/core";
 
@@ -185,11 +187,11 @@ function makeIssueTaskDoc(overrides: Partial<DocRecord> & { extra: Record<string
 
 /** Real `run()` extracted directly off the flat (non-subcommand) `issues` command. */
 function callIssuesRun(args: Record<string, unknown>): Promise<void> {
-  const run = issuesCommand.run as unknown as (ctx: { args: Record<string, unknown> }) => Promise<void>;
+  const run = issuesCommand.run as unknown as (ctx: { args: Record<string, unknown>; inv: Invocation }) => Promise<void>;
   if (run === undefined) {
     throw new Error("lore issues has no run() handler");
   }
-  return run({ args });
+  return run({ args, inv: liveInvocation() });
 }
 
 /** Wires `loadLoreAppMock` to a synthetic App exposing exactly what `issues.ts` reads. */

@@ -69,7 +69,8 @@ describe("GateEnforcer — SPEC-080 G4 gate-skip audit (recordGateSkip port)", (
   it("writes exactly ONE gate_skipped audit entry with correct checkpoint/actor/target/mechanism", async () => {
     const stderrSpy = spyStderr();
     const recordGateSkip = vi.fn<RecordGateSkip>().mockResolvedValue(ok(undefined));
-    const enforcer = new GateEnforcer(DISABLED_SPEC_PROMOTE_CONFIG, recordGateSkip);
+    // the session tier of the port-less actor fallback reads the injected env (5th arg), not the process
+    const enforcer = new GateEnforcer(DISABLED_SPEC_PROMOTE_CONFIG, recordGateSkip, undefined, undefined, process.env);
 
     const result = enforcer.enforce("spec-promote", {
       acceptanceCriteriaCount: 0,
