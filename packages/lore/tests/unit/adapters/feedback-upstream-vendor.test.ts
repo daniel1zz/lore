@@ -45,7 +45,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { readdirSync, readFileSync, existsSync, statSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
-import { LoreConfigSchema, VENDOR_INTAKE_REPO, buildUnconfiguredUpstreamRemedy, parseConfig } from "@lore/core";
+import { LoreConfigSchema, VENDOR_INTAKE_REPO, buildUnconfiguredUpstreamRemedy, parseConfig, retiredConfigKeyNotices } from "@lore/core";
 import type { LoreConfig } from "@lore/core";
 import {
   classifyFeedbackUpstream,
@@ -77,9 +77,9 @@ function makeConfig(upstream?: Record<string, unknown>): LoreConfig {
   ) as LoreConfig;
 }
 
-/** Flattens every `console.warn` call made during a test into one searchable string. */
-function warnedText(spy: ReturnType<typeof vi.spyOn>): string {
-  return spy.mock.calls.map((call) => call.join(" ")).join("\n");
+/** The by-name notices a raw config earns, as one searchable string (the schema itself prints nothing). */
+function warnedText(raw: unknown): string {
+  return retiredConfigKeyNotices(raw).join("\n");
 }
 
 // ─── AC1: one definition site for the address ──────────────────────────────
@@ -138,10 +138,11 @@ describe("FeedbackConfigSchema.upstream — the vendor-consent branch (AC2)", ()
     // the legacy object parse fails first (missing `root_prd`, unrecognized
     // `vendor`), so the refinement never runs. Asserted rather than assumed,
     // because union branch ORDER is what makes it true.
-    const result = parseConfig(rawWithUpstream({ vendor: true }));
+    const raw = rawWithUpstream({ vendor: true });
+    const result = parseConfig(raw);
 
     expect(result.ok).toBe(true);
-    const warned = warnedText(warnSpy);
+    const warned = warnedText(raw);
     expect(warned).not.toContain("retired");
     expect(warned).not.toContain("corpus_path");
     expect(warned).not.toContain("transport");
@@ -190,12 +191,11 @@ describe("FeedbackConfigSchema.upstream — the vendor-consent branch (AC2)", ()
   });
 
   it("REGRESSION: the legacy {root_prd} shape still parses, and a retired key still warns BY NAME", () => {
-    const result = parseConfig(
-      rawWithUpstream({ root_prd: "prd-upstream-root", corpus_path: "/abs/path/to/upstream" }),
-    );
+    const raw = rawWithUpstream({ root_prd: "prd-upstream-root", corpus_path: "/abs/path/to/upstream" });
+    const result = parseConfig(raw);
 
     expect(result.ok).toBe(true);
-    expect(warnedText(warnSpy)).toContain("corpus_path");
+    expect(warnedText(raw)).toContain("corpus_path");
   });
 });
 

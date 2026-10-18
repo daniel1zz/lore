@@ -34,7 +34,7 @@
  */
 
 import { describe, it, expect, vi } from "vitest";
-import { FeedbackConfigSchema } from "@lore/core";
+import { FeedbackConfigSchema, retiredConfigKeyNotices } from "@lore/core";
 
 /** Flattens every recorded `console.warn` call's arguments into one string, so a
  * substring check for the retired key's name is robust to whatever exact
@@ -56,10 +56,10 @@ describe("feedback-config-compat: retired open_report_cap key parses with a warn
       // default) — the failing half of THIS scenario is the warning below.
       expect(result.success).toBe(true);
 
-      // RED today: nothing in FeedbackConfigSchema ever calls console.warn for
-      // this key — 0 calls, not >=1.
-      expect(warnSpy).toHaveBeenCalled();
-      expect(flattenWarnCalls(warnSpy)).toContain("open_report_cap");
+      // The schema prints nothing (no process stream below the entry); the by-name notice is the pure
+      // `retiredConfigKeyNotices` of the raw config, printed by the loader through the run's stderr.
+      expect(warnSpy).not.toHaveBeenCalled();
+      expect(retiredConfigKeyNotices({ feedback: raw }).join("\n")).toContain("open_report_cap");
     } finally {
       warnSpy.mockRestore();
     }
@@ -99,6 +99,7 @@ describe("feedback-config-compat: retired open_report_cap key parses with a warn
 
       expect(result.success).toBe(true);
       expect(warnSpy).not.toHaveBeenCalled();
+      expect(retiredConfigKeyNotices({})).toEqual([]);
     } finally {
       warnSpy.mockRestore();
     }

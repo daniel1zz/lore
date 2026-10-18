@@ -47,6 +47,7 @@
 import { defineCommand } from "citty";
 
 import type { BootstrapReport } from "@lore/core";
+import { warnSinkOf } from "../../../service/warn-sink.js";
 import { buildBootstrapInjection, resolveBootstrapInjectionBudgets } from "@lore/core";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatErrorFor, relativeTime, resolveActor } from "../utils.js";
@@ -238,7 +239,7 @@ export default defineCommand({
           return 2;
         }
         // Resolved BEFORE the main-checkout early-out so a retired knob is announced on every call (D5).
-        const budgets = resolveBootstrapInjectionBudgets(config);
+        const budgets = resolveBootstrapInjectionBudgets(config, warnSinkOf(inv.io.stderr));
         if (seatBranch === undefined || seatWorktreeArg === undefined) return; // main checkout: print NOTHING (D2)
 
         const injectionSeat = { branch: seatBranch, worktree: seatWorktreeArg };

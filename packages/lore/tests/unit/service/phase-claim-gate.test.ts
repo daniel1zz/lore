@@ -126,7 +126,7 @@ import {
   type GateCheckpoint,
 } from "../../../src/service/checkpoint-registry.js";
 import { ANCHOR_OVERLAP_FIELD, type SiblingClaimInfo } from "../../../src/service/gate-predicates.js";
-import { resolveGateEnabled } from "@lore/core";
+import { resolveGateEnabled, retiredConfigKeyNotices } from "@lore/core";
 import type { LoreConfig } from "@lore/core";
 
 // ─── §1 — SPEC-042 fixture, imported (never copied, plan invariant R4) ────────
@@ -341,28 +341,24 @@ describe("resolveGateEnabled config alias — 'task-claim' legacy key honored fo
     ).toBe(true);
   });
 
-  it("emits EXACTLY ONE console.warn deprecation notice across repeated legacy-alias resolutions in this process", () => {
+  it("resolving the legacy alias writes nothing anywhere; the deprecation is named once at load time by retiredConfigKeyNotices", () => {
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     try {
       const config = legacyOnlyDisabledConfig();
       resolveGateEnabled(config, "phase-claim");
       resolveGateEnabled(config, "phase-claim");
-      resolveGateEnabled(config, "phase-claim");
-      // Today: zero alias-deprecation warnings are ever emitted (the branch
-      // doesn't exist) — genuinely RED (expected 1, actual 0).
-      expect(warnSpy).toHaveBeenCalledTimes(1);
-    } finally {
-      warnSpy.mockRestore();
-    }
-  });
-
-  it("an explicit canonical key never triggers the deprecation warning, even alongside a legacy key", () => {
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
-    try {
-      resolveGateEnabled(bothKeysPresentConfig(), "phase-claim");
       expect(warnSpy).not.toHaveBeenCalled();
     } finally {
       warnSpy.mockRestore();
     }
+    const raw = { workflow: { gates: { "task-claim": { enabled: false } } } };
+    const notices = retiredConfigKeyNotices(raw);
+    expect(notices).toHaveLength(1);
+    expect(notices[0]).toContain('workflow.gates."task-claim" is deprecated for the phase doc type');
+  });
+
+  it("an explicit canonical key never earns the deprecation notice, even alongside a legacy key", () => {
+    const raw = { workflow: { gates: { "task-claim": { enabled: false }, "phase-claim": { enabled: true } } } };
+    expect(retiredConfigKeyNotices(raw)).toEqual([]);
   });
 });

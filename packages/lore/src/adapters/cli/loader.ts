@@ -267,11 +267,25 @@ async function readTaskClaimLease(app: App, idOrSlug: string): Promise<TaskClaim
  * @returns The raw `loadConfig` result — `sync` NOT yet stripped (each caller
  *   strips it on its own success path, matching their pre-existing behaviour).
  */
-function resolveProjectConfigResult(dbPath: string): Result<LoreConfig, LoreError> {
+function resolveProjectConfigResult(dbPath: string, io: CliIo): Result<LoreConfig, LoreError> {
   // The .lore dir is always one level up from lore.db
   const loreDir = dirname(dbPath);
   const projectDir = dirname(loreDir);
-  return loadConfig(projectDir);
+  return loadConfig(projectDir, warnOncePerWriter(io));
+}
+
+/** Retired-key notices already printed, per run: keyed on the run's stderr writer, so a re-read of the config stays quiet. */
+const noticesPrinted = new WeakMap<object, Set<string>>();
+
+/** A sink writing each distinct line to the run's stderr once (a long-lived server re-reads its config on every call). */
+function warnOncePerWriter(io: CliIo): (line: string) => void {
+  return (line) => {
+    const seen = noticesPrinted.get(io.stderr) ?? new Set<string>();
+    noticesPrinted.set(io.stderr, seen);
+    if (seen.has(line)) return;
+    seen.add(line);
+    printLine(io.stderr, line);
+  };
 }
 
 /**
@@ -318,7 +332,7 @@ function safeInternalErrorHint(rawConfig: LoreConfig | undefined): string | null
  */
 export function loadProjectConfig(io: CliIo, locator: CorpusLocator): LoreConfig | undefined {
   const dbPath = findLoreDbPath(io, locator);
-  const configResult = resolveProjectConfigResult(dbPath);
+  const configResult = resolveProjectConfigResult(dbPath, io);
   if (!configResult.ok) return undefined;
   const { sync: _sync, ...configWithoutSync } = configResult.value;
   return configWithoutSync as LoreConfig;
@@ -398,7 +412,7 @@ export function loadLoreApp(opts: LoadLoreAppOptions): {
     printLine(opts.inv.io.stderr, `${formatErrorFor(opts.inv, refusal)} [${refusal.code}]`); // CLI surface
     exitCli(exitCode(refusal));
   }
-  const configResult = resolveProjectConfigResult(dbPath);
+  const configResult = resolveProjectConfigResult(dbPath, opts.inv.io);
   let rawConfig: LoreConfig | undefined;
   if (configResult.ok) {
     rawConfig = configResult.value;

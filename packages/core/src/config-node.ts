@@ -55,12 +55,13 @@ const CONFIG_FILE = ".lore/config.yaml";
 /**
  * Load LoreConfig from <dir>/.lore/config.yaml.
  * Missing file or invalid content → {ok:false, error}. Never throws.
+ * `warn`, when given, receives one line per retired key the file still carries (see `retiredConfigKeyNotices`).
  */
-export function loadConfig(dir: string): Result<LoreConfig, LoreError> {
+export function loadConfig(dir: string, warn?: (line: string) => void): Result<LoreConfig, LoreError> {
   try {
     const configPath = join(dir, CONFIG_FILE);
     const raw = readFileSync(configPath, "utf8");
-    return loadConfigFromString(raw);
+    return loadConfigFromString(raw, warn);
   } catch (e) {
     const message =
       e instanceof Error ? e.message : "Failed to read config file";
