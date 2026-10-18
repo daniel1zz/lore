@@ -17,6 +17,11 @@
  * (unknown branch, missing floor key, missing session); 75 = three lost races (EX_TEMPFAIL, safe to re-run; the
  * integrations that moved main are named).
  *
+ * The floor runs against a snapshot of the shared corpus (INT-T12): a consistent `VACUUM INTO` copy written to
+ * `<integration worktree>/.lore/lore.db` just before the floor and removed right after, so a branch that adds a DB
+ * migration can pass the floor without migrating the live corpus. The line `integrate: floor runs against a corpus
+ * snapshot taken <iso ts>` is printed per attempt.
+ *
  * After landing (and on an already-integrated no-op) the shared checkout's detached view is moved to main with a plain
  * `git checkout --detach main`; the outcome carries `shared_view` = refreshed | kept_dirty <paths> | not_measured <reason>.
  * With `workflow.integrate.post_refresh_command` set, a `refreshed` view is then rebuilt (INT-T11); the outcome carries
@@ -32,6 +37,7 @@ import { invocationOf } from "../command-invocation.js";
 import { loadLoreApp } from "../loader.js";
 import { resolveCallerSession } from "../caller-session.js";
 import { exitCode, formatError } from "../utils.js";
+import { removeCorpusSnapshot, takeCorpusSnapshot } from "../../../store/corpus-snapshot.js";
 import { IntegrateLossLedger } from "../../../service/integrate-loss-ledger.js";
 import {
   IntegrateService,
@@ -154,6 +160,10 @@ export default defineCommand({
       const service = new IntegrateService({
         git: runGit,
         runFloor: floorRunnerFor(inv.env),
+        corpus: {
+          take: (worktree) => takeCorpusSnapshot(corpusDir, worktree),
+          remove: (worktree) => removeCorpusSnapshot(worktree),
+        },
         ledger: new IntegrateLossLedger(corpusDir),
         projectRoot,
         worktreesRoot: resolvePath(mainRoot, ".claude", "worktrees"),

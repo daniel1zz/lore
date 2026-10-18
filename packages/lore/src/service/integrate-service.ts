@@ -6,7 +6,7 @@
  * (`git update-ref refs/heads/main <new> <base>`). Git's own ref lock + old-value check refuses a lost race, so no
  * exclusivity is needed (adr-main-advances-only-by-lore-integrate-per-session, Option A; experiments E4, E8).
  * Public surface: IntegrateService.integrate, IntegrateOutcome, integrateExitCode, IntegrateRequest,
- *   IntegrateDeps, IntegrateGit, FloorRunner, INTEGRATE_MAX_ATTEMPTS, INTEGRATE_EXIT_LOST_RACES, INTEGRATE_MARKER_ENV,
+ *   IntegrateDeps, IntegrateGit, FloorRunner, CorpusSnapshotter, INTEGRATE_MAX_ATTEMPTS, INTEGRATE_EXIT_LOST_RACES, INTEGRATE_MARKER_ENV,
  *   integrationWorktreePath.
  * Invariants:
  *   - Main moves ONLY by the CAS of an attempt whose merge passed the floor; every other outcome leaves main
@@ -36,6 +36,11 @@
  *     refused naming it. Both refusals are `err(VALIDATION_ERROR, field "worktree")`, exit 4.
  * The reference-transaction hook that refuses every other move of main ships as assets/project/reference-transaction
  * and is installed by `lore setup --project`; it recognises INTEGRATE_MARKER_ENV on the CAS.
+ *
+ * The floor's corpus (INT-T12): just before the floor runs, `deps.corpus.take` writes a consistent snapshot (VACUUM INTO)
+ * of the shared corpus into `<integration worktree>/.lore/`, so a branch whose binary needs a newer schema migrates the
+ * snapshot instead of tripping the foreign-schema guard on the live corpus; `remove` deletes it right after the floor.
+ * One line `integrate: floor runs against a corpus snapshot taken <iso ts>` is logged per attempt.
  *
  * After the shared view is `refreshed` (INT-T11), `workflow.integrate.post_refresh_command` (this repo: `bun run
  * build`) runs in the shared checkout so its build artifacts (dist/lore, which ~/.local/bin/lore links to) match main.
@@ -83,8 +88,19 @@ export type IntegrateGit = (cwd: string, args: readonly string[], env?: Readonly
 /** Runs the floor shell command in `cwd`; `output` is stdout+stderr merged. Never throws. */
 export type FloorRunner = (command: string, cwd: string) => { readonly status: number; readonly output: string };
 
+/**
+ * Gives the integration worktree a private copy of the shared corpus for the floor (INT-T12) and takes it away again.
+ * `take` returns the ISO instant of the snapshot; `remove` deletes it. Neither ever writes the shared corpus.
+ */
+export interface CorpusSnapshotter {
+  readonly take: (integrationWorktree: string) => Result<{ readonly takenAt: string }, LoreError>;
+  readonly remove: (integrationWorktree: string) => Result<void, LoreError>;
+}
+
 export interface IntegrateDeps {
   readonly git: IntegrateGit;
+  /** Floor corpus: the floor reads a snapshot of the shared corpus inside the integration worktree, never the live one. */
+  readonly corpus: CorpusSnapshotter;
   readonly runFloor: FloorRunner;
   readonly ledger: IntegrateLossLedger;
   /** The main checkout's root: the repo whose refs main lives in (git commands run here). */
@@ -235,7 +251,13 @@ export class IntegrateService {
       const merged = git(wt, ["merge", fromRemote ? "--ff" : "--no-ff", "-m", message, tip], { GIT_MERGE_AUTOEDIT: "no" });
       if (merged.status !== 0) return this.afterFailedMerge(request.branch, wt, base.value, merged);
 
+      const snapshot = this.deps.corpus.take(wt);
+      if (!snapshot.ok) return snapshot;
+      log(`integrate: floor runs against a corpus snapshot taken ${snapshot.value.takenAt}`);
       const floor = this.deps.runFloor(request.floorCommand, wt);
+      // the snapshot is removed whatever the floor said: it is never written back and never outlives its run
+      const dropped = this.deps.corpus.remove(wt);
+      if (!dropped.ok) return dropped;
       if (floor.status !== 0) {
         const back = this.resetWorktree(wt, base.value);
         if (!back.ok) return back;
