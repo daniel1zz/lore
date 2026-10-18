@@ -99,7 +99,7 @@ import type {
  * verbatim into `judge.prompt_version` on every review judgment (SPEC-034 §2) so calibration
  * queries can filter/aggregate per prompt version without a join.
  */
-export const REVIEW_PROMPT_VERSION = "v4";
+export const REVIEW_PROMPT_VERSION = "v5";
 
 /**
  * The exact advisory-only clause the v2 prompt embeds (SPEC-053 AC-053-4). Exported so a
@@ -726,6 +726,48 @@ function buildReviewPromptV4(
   return { ...v3, prompt: v3.prompt + DESIGN_NECESSITY_RULE };
 }
 
+/**
+ * The v5 RULES block (spec-design-necessity-rule-v5-separate-what-a-design-needs-from D1/D2): the
+ * refined design_necessity rule REPLACES v4's. It separates what an end-state design NEEDS (four
+ * non-findings) from what only exists because the design is not yet end-state (four findings), and
+ * forces the judge to classify every candidate item before deciding so runs agree with each other.
+ * reason: v4 over-applied on the real judge (rejected owned-only prune, the rooted write port and a
+ * throwaway test HOME in an end-state spec) and varied run to run. Prompt text, not a detector.
+ */
+export const DESIGN_NECESSITY_RULE_V5 =
+  `- DESIGN NECESSITY (dimension "design_necessity", applies to every document type): decide ` +
+  `whether the document contains anything that exists only because the design is not yet its ` +
+  `end state. Work in this order. FIRST list every candidate item in the document: each check, ` +
+  `guard, scanner, ledger, allowlist, fallback, phase, skip/compat/legacy state and seam. Then ` +
+  `classify each candidate with a one-line reason as exactly one of the classes below. Only then ` +
+  `decide.\n` +
+  `  NOT findings (an end-state design needs these): (i) product semantics a user relies on; ` +
+  `(ii) an interface or port contract; (iii) validation of outside input at the boundary; ` +
+  `(iv) what an acceptance test needs to be safe and meaningful when the design is violated.\n` +
+  `  FINDINGS (each exists only because the design is incomplete): (a) a check, scanner, ledger ` +
+  `or allowlist whose only purpose is catching a violation of the document's OWN invariant that ` +
+  `the design already rules out; (b) a stopgap or temporary seam; (c) a silent fallback for a ` +
+  `missing required input; (d) a transitional or phased state: a skip/compat/legacy mode, a ` +
+  `ratchet, or an intermediate phase.\n` +
+  `  An item the document justifies under (i)-(iv) is not raised unless that justification is ` +
+  `false. If any item is classified (a)-(d), you MUST return decision "reject" with a reasons ` +
+  `entry whose dimension is "design_necessity" that names each such item, its class, and the ` +
+  `end-state alternative. If no item is classified (a)-(d), raise no design_necessity reason.\n`;
+
+/**
+ * v5 review judge prompt — v3 plus {@link DESIGN_NECESSITY_RULE_V5} as the final RULES entry
+ * (v4's block is not included). Everything before the rule is byte-identical to v3.
+ */
+function buildReviewPromptV5(
+  bundle: ReviewBundle,
+  checks: CheckResult[],
+  budgets: ReviewBudgets,
+  nowIso?: string,
+): BuildReviewPromptResult {
+  const v3 = buildReviewPromptV3(bundle, checks, budgets, nowIso);
+  return { ...v3, prompt: v3.prompt + DESIGN_NECESSITY_RULE_V5 };
+}
+
 /** Shared v2/v3 body; `withFourParts` is the ONLY difference between the two versions. */
 function buildReviewPromptWithStructuredParts(
   bundle: ReviewBundle,
@@ -758,7 +800,7 @@ function buildReviewPromptWithStructuredParts(
  * byte-identical to its original output, locked by the `review-prompt-v1.txt` fixture) and
  * `v2` (SPEC-053, adds the non-blocking AC-quantifiability advisory dimension, frozen) and
  * `v3` (lore #126, v2 plus an architecture standard rule's four parts) and `v4` (v3 plus the
- * design_necessity rule, BR-1237). The active
+ * design_necessity rule, BR-1237, frozen) and `v5` (v3 plus the refined rule that replaces it). The active
  * key is `REVIEW_PROMPT_VERSION`. A future prompt spec adds a NEW key here rather than
  * mutating an existing one, so historical judgments' `judge.prompt_version` stays meaningful.
  */
@@ -767,6 +809,7 @@ export const REVIEW_TEMPLATES: Record<string, ReviewTemplateFn> = {
   v2: buildReviewPromptV2,
   v3: buildReviewPromptV3,
   v4: buildReviewPromptV4,
+  v5: buildReviewPromptV5,
 };
 
 /**

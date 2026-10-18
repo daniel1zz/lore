@@ -77,7 +77,7 @@ describe("review prompt v5", () => {
     const prompt = render("v5", kind);
     expect(prompt).toContain("FIRST list every candidate item");
     expect(prompt).toContain("classify each");
-    expect(prompt).toContain("only then decide");
+    expect(prompt).toContain("Only then decide");
     expect(prompt).toContain("end-state alternative");
     expect(prompt).toContain('you MUST return decision "reject"');
   });

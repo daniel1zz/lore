@@ -37,14 +37,14 @@ function render(version: string, kind: (typeof KINDS)[number]): string {
 }
 
 describe("review prompt v4", () => {
-  it("STATE: the current version is v4 and the registry holds exactly v1..v4", () => {
-    expect(REVIEW_PROMPT_VERSION).toBe("v4");
-    expect(Object.keys(REVIEW_TEMPLATES).sort()).toEqual(["v1", "v2", "v3", "v4"]);
+  it("STATE: v4 stays registered (frozen) while v5 is the current version", () => {
+    expect(REVIEW_PROMPT_VERSION).toBe("v5");
+    expect(typeof REVIEW_TEMPLATES["v4"]).toBe("function");
     expect(typeof REVIEW_TEMPLATES[REVIEW_PROMPT_VERSION]).toBe("function");
   });
 
   it("ERROR: an unknown version key is not registered", () => {
-    expect(REVIEW_TEMPLATES["v5"]).toBeUndefined();
+    expect(REVIEW_TEMPLATES["v6"]).toBeUndefined();
   });
 
   it.each(KINDS)("HAPPY: the v4 prompt for a %s carries the design_necessity rule", (kind) => {
