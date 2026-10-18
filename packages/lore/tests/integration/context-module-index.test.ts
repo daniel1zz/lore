@@ -221,7 +221,7 @@ describe("AC-MI-3 (throwaway half): context refresh --check computes, writes not
     const grown = read(dir, "CLAUDE.md") + Array.from({ length: 400 }, (_, i) => `line ${String(i)}\n`).join("");
     put(dir, "CLAUDE.md", grown);
     const check = await runLore(["context", "refresh", "--check"], dir);
-    expect(check.exitCode).toBe(1);
+    expect(check.exitCode, check.stdout + check.stderr).toBe(1);
     expect((check.stdout + check.stderr).toLowerCase()).toContain("ceiling");
     expect(read(dir, "CLAUDE.md")).toBe(grown);
   });

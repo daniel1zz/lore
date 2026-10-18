@@ -12,6 +12,8 @@
  * Public surface:
  *   - ModuleIndexEntry — one discovered module directory + memory-file presence
  *   - ContextFacts — `{ moduleIndex, commands }`, the full collected bundle
+ *   - MemoryModuleEntry — a folder with a memory file + its Purpose sentence
+ *   - extractPurposeSentence(content) — pure Purpose-section reader
  *   - collectContextFacts(fs, root, budgetsCfg) — the collection entry point
  *
  * Invariants:
@@ -65,8 +67,13 @@
  *     not" risk posture, `claude-md-admission.ts`'s identical stance).
  *   - Walk is capped at `MAX_MODULE_INDEX_ENTRIES` recorded entries — a
  *     defensive ceiling against a pathological (or adversarially deep)
- *     tree; hitting it silently stops recording further entries rather than
- *     failing the whole collection.
+ *     tree; hitting it stops recording further entries rather than
+ *     failing the whole collection, and sets `walkTruncated` so the
+ *     rendered index says so (spec-module-index-lists-only-folders-with-a-
+ *     memory-file-managed, BR-882 modified: nothing is dropped silently).
+ *   - `memoryModules` is the subset of discovered folders holding a memory
+ *     file, each with the first sentence of its `Purpose` section
+ *     (`extractPurposeSentence`); `modulesWithoutMemoryFile` counts the rest.
  *   - An absent, unreadable, or schema-invalid root `package.json` degrades
  *     `commands` to `{}` rather than failing the whole collection — a
  *     missing/malformed manifest must never block `lore context init` from
@@ -98,10 +105,26 @@ export interface ModuleIndexEntry {
   hasMemoryFile: boolean;
 }
 
+/** One discovered folder that carries its own memory file — the only kind of folder the rendered module index lists. */
+export interface MemoryModuleEntry {
+  /** Repo-relative directory path (POSIX separators), relative to `root`. */
+  path: string;
+  /** Repo-relative path of the memory file itself (`<path>/<filename>`), the link target of the index line. */
+  memoryFilePath: string;
+  /** First sentence of the memory file's `Purpose` section, or `null` when it has none (rendered as "no Purpose section", never skipped). */
+  purpose: string | null;
+}
+
 /** The full facts bundle `flows/context-flow.ts` renders into managed sections. */
 export interface ContextFacts {
   /** Discovered nested module directories, in walk order (breadth-first per directory, depth-first overall). */
   moduleIndex: ModuleIndexEntry[];
+  /** The subset of {@link moduleIndex} that carries a memory file, in walk order, with each file's Purpose sentence. */
+  memoryModules: MemoryModuleEntry[];
+  /** How many discovered folders carry NO memory file — counted in one rendered line, never listed. */
+  modulesWithoutMemoryFile: number;
+  /** `true` iff the walk hit {@link MAX_MODULE_INDEX_ENTRIES} and stopped; rendered as a notice so nothing is dropped silently. */
+  walkTruncated: boolean;
   /** `root`'s `package.json` `scripts` map, or `{}` when absent/unreadable/schema-invalid. */
   commands: Record<string, string>;
 }
@@ -119,8 +142,16 @@ const EXCLUDED_DIR_BASENAMES: ReadonlySet<string> = new Set([
   "coverage",
 ]);
 
-/** Defensive ceiling on recorded module-index entries — see module header. */
-const MAX_MODULE_INDEX_ENTRIES = 500;
+/**
+ * Defensive ceiling on recorded module-index entries — see module header. Hitting it sets
+ * `ContextFacts.walkTruncated`, which the renderer turns into a visible notice (BR-882 modified:
+ * nothing is dropped silently). Sized far above any real repo's folder count so a memory-file folder
+ * is never missed on a large tree.
+ */
+const MAX_MODULE_INDEX_ENTRIES = 20000;
+
+/** Longest Purpose sentence copied into an index line; a longer one is cut with an ellipsis so the entry stays one line. */
+const MAX_PURPOSE_CHARS = 160;
 
 /**
  * Boundary validation for a root `package.json`'s parsed JSON (SPEC boundary
@@ -187,12 +218,41 @@ async function readCommands(fs: FsReadPort, root: string): Promise<Record<string
 
 // ─── Module index walk ───────────────────────────────────────────────────────
 
-/** `true` iff any of `filenames` exists directly inside `dir`. */
-async function hasAnyMemoryFile(fs: FsReadPort, dir: string, filenames: readonly string[]): Promise<boolean> {
+/** The first of `filenames` that exists directly inside `dir`, or `null` when none does. */
+async function findMemoryFile(fs: FsReadPort, dir: string, filenames: readonly string[]): Promise<string | null> {
   for (const filename of filenames) {
-    if (await fs.exists(joinRepoPath(dir, filename))) return true;
+    if (await fs.exists(joinRepoPath(dir, filename))) return filename;
   }
-  return false;
+  return null;
+}
+
+/**
+ * First sentence of the `Purpose` section of a memory file's text, or `null` when the file has no
+ * `Purpose` heading (any level) or the section is empty. Pure.
+ *
+ * The section runs from the heading to the next heading; its first non-empty paragraph is whitespace-
+ * collapsed and cut at the first sentence end (`.`, `!` or `?` followed by whitespace or end of text).
+ */
+export function extractPurposeSentence(content: string): string | null {
+  const lines = content.split(/\r?\n/);
+  const headingIdx = lines.findIndex((line) => /^#{1,6}\s+purpose\s*$/i.test(line.trim()));
+  if (headingIdx === -1) return null;
+
+  const paragraph: string[] = [];
+  for (const line of lines.slice(headingIdx + 1)) {
+    if (/^#{1,6}\s/.test(line)) break;
+    if (line.trim().length === 0) {
+      if (paragraph.length > 0) break;
+      continue;
+    }
+    paragraph.push(line.trim());
+  }
+  if (paragraph.length === 0) return null;
+
+  const text = paragraph.join(" ");
+  const sentenceEnd = text.search(/[.!?](\s|$)/);
+  const sentence = sentenceEnd === -1 ? text : text.slice(0, sentenceEnd + 1);
+  return sentence.length > MAX_PURPOSE_CHARS ? `${sentence.slice(0, MAX_PURPOSE_CHARS - 1)}…` : sentence;
 }
 
 /**
@@ -256,6 +316,14 @@ function isExcludedByGitignore(childPath: string, layers: readonly GitignoreLaye
   return verdict;
 }
 
+/** Accumulator of one module-index walk (mutated in place by {@link walkModuleIndex}). */
+interface WalkResult {
+  entries: ModuleIndexEntry[];
+  memoryModules: MemoryModuleEntry[];
+  withoutMemoryFile: number;
+  truncated: boolean;
+}
+
 /**
  * Recursively walks `dir` (starting at `root`), recording every discovered
  * subdirectory (see module header for how "directory" is inferred from
@@ -271,10 +339,13 @@ async function walkModuleIndex(
   root: string,
   dir: string,
   filenames: readonly string[],
-  out: ModuleIndexEntry[],
+  out: WalkResult,
   layers: readonly GitignoreLayer[],
 ): Promise<void> {
-  if (out.length >= MAX_MODULE_INDEX_ENTRIES) return;
+  if (out.entries.length >= MAX_MODULE_INDEX_ENTRIES) {
+    out.truncated = true;
+    return;
+  }
 
   const entries = await fs.listDir(dir);
   for (const entry of entries) {
@@ -287,10 +358,21 @@ async function walkModuleIndex(
     const grandchildren = await fs.listDir(childPath);
     if (grandchildren.length === 0) continue; // indistinguishable from a plain file — never recorded (module header)
 
-    const hasMemoryFile = await hasAnyMemoryFile(fs, childPath, filenames);
+    const memoryFile = await findMemoryFile(fs, childPath, filenames);
     const relPath = root.length > 0 ? childPath.slice(root.length + 1) : childPath;
-    out.push({ path: relPath, hasMemoryFile });
-    if (out.length >= MAX_MODULE_INDEX_ENTRIES) return;
+    out.entries.push({ path: relPath, hasMemoryFile: memoryFile !== null });
+    if (memoryFile === null) {
+      out.withoutMemoryFile += 1;
+    } else {
+      const memoryFilePath = joinRepoPath(relPath, memoryFile);
+      // reason: a memory file that exists but cannot be read is listed as "no Purpose section", never skipped (BR-882 modified).
+      const content = await fs.readFile(joinRepoPath(childPath, memoryFile));
+      out.memoryModules.push({ path: relPath, memoryFilePath, purpose: content === null ? null : extractPurposeSentence(content) });
+    }
+    if (out.entries.length >= MAX_MODULE_INDEX_ENTRIES) {
+      out.truncated = true;
+      return;
+    }
 
     const childLayer = await loadGitignoreLayer(fs, childPath);
     const childLayers = childLayer !== null ? [...layers, childLayer] : layers;
@@ -333,8 +415,14 @@ export async function collectContextFacts(
   const rootLayer = await loadGitignoreLayer(fs, root);
   const rootLayers = rootLayer !== null ? [rootLayer] : [];
 
-  const moduleIndex: ModuleIndexEntry[] = [];
-  await walkModuleIndex(fs, root, root, budgetsCfg.filenames, moduleIndex, rootLayers);
+  const walk: WalkResult = { entries: [], memoryModules: [], withoutMemoryFile: 0, truncated: false };
+  await walkModuleIndex(fs, root, root, budgetsCfg.filenames, walk, rootLayers);
 
-  return ok({ moduleIndex, commands });
+  return ok({
+    moduleIndex: walk.entries,
+    memoryModules: walk.memoryModules,
+    modulesWithoutMemoryFile: walk.withoutMemoryFile,
+    walkTruncated: walk.truncated,
+    commands,
+  });
 }

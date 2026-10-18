@@ -12,7 +12,7 @@
 
 import { describe, expect, it } from "vitest";
 import { InMemoryFsPort, resolveMemoryFileBudgets } from "@lore/core";
-import { collectContextFacts } from "../../../src/service/context-facts.js";
+import { collectContextFacts, extractPurposeSentence } from "../../../src/service/context-facts.js";
 
 const DEFAULT_BUDGETS = resolveMemoryFileBudgets(undefined);
 
@@ -205,5 +205,44 @@ describe("collectContextFacts", () => {
     const paths = result.value.moduleIndex.map((e) => e.path);
     expect(paths).toContain("dist-npm");
     expect(paths).toContain("packages/real");
+  });
+});
+
+describe("module index = memory-file folders (spec-module-index-lists-only-folders-with-a-memory-file-managed, AC-MI-1)", () => {
+  it("HAPPY: memoryModules carries link target + first Purpose sentence; the rest are counted, not listed", async () => {
+    const fs = new InMemoryFsPort({
+      "a/CLAUDE.md": "# A\n\n## Purpose\n\nA does x. Then y.\n",
+      "b/src/index.ts": "export {};",
+    });
+    const result = await collectContextFacts(fs, "", DEFAULT_BUDGETS);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.memoryModules).toEqual([{ path: "a", memoryFilePath: "a/CLAUDE.md", purpose: "A does x." }]);
+    expect(result.value.modulesWithoutMemoryFile).toBe(2); // b, b/src
+    expect(result.value.walkTruncated).toBe(false);
+  });
+
+  it("BOUNDARY: a memory file without a Purpose section is kept with purpose null", async () => {
+    const fs = new InMemoryFsPort({ "a/CLAUDE.md": "# A\n\n## Notes\n\nx\n" });
+    const result = await collectContextFacts(fs, "", DEFAULT_BUDGETS);
+    expect(result.ok && result.value.memoryModules).toEqual([{ path: "a", memoryFilePath: "a/CLAUDE.md", purpose: null }]);
+  });
+});
+
+describe("extractPurposeSentence", () => {
+  it("HAPPY: first sentence of the first paragraph, multi-line paragraph joined", () => {
+    expect(extractPurposeSentence("# T\n\n## Purpose\n\nOne two\nthree. Four.\n")).toBe("One two three.");
+  });
+  it("BOUNDARY: no sentence end keeps the paragraph; stops at the next heading", () => {
+    expect(extractPurposeSentence("## Purpose\nNo end here\n## Other\nz.\n")).toBe("No end here");
+  });
+  it("NEGATIVE: absent or empty Purpose section is null", () => {
+    expect(extractPurposeSentence("# T\n\n## Other\n\nx.\n")).toBeNull();
+    expect(extractPurposeSentence("## Purpose\n\n## Next\n")).toBeNull();
+  });
+  it("BOUNDARY: an over-long sentence is cut with an ellipsis", () => {
+    const out = extractPurposeSentence(`## Purpose\n\n${"w".repeat(300)}.\n`);
+    expect(out?.length).toBe(160);
+    expect(out?.endsWith("…")).toBe(true);
   });
 });

@@ -24,10 +24,14 @@ const RULES_B = ".claude/rules/lore-d16-b.md";
 
 /** Hand-written CLAUDE.md with no Z1 markers, long enough that the appended Z1 block breaches the root ceiling. */
 const OVERSIZE_CLAUDE_MD = `# Hand written\n\n${Array.from({ length: 400 }, (_, i) => `rule line ${i}`).join("\n")}\n`;
-/** Small CLAUDE.md carrying every root-required section, so `enforce` admits the spliced candidate. */
+/**
+ * Small CLAUDE.md carrying the hand-written root-required sections, so `enforce` admits the spliced candidate.
+ * `## Module Index` and `## Finding Live Project State` are NOT here: the managed zone emits them itself
+ * (spec-module-index-lists-only-folders-with-a-memory-file-managed, AC-MI-2) and a second copy is `section_duplicate`.
+ */
 const SMALL_CLAUDE_MD =
   "# Hand written\n\n" +
-  ["What This Is", "Commands", "Architecture", "Module Index", "Finding Live Project State"]
+  ["What This Is", "Commands", "Architecture"]
     .map((heading) => `## ${heading}\n\nshort\n`)
     .join("\n");
 

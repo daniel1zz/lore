@@ -40,17 +40,5 @@
     "ac": "AC-ES-3",
     "reason": "oracle test not written yet (es-fingerprint-prune.test.ts absent); owned by the implementing task of this spec's plan",
     "owner_plan": "plan-process-state-end-state"
-  },
-  {
-    "spec": "spec-module-index-lists-only-folders-with-a-memory-file-managed",
-    "ac": "AC-MI-1",
-    "reason": "oracle test not written yet (context-module-index.test.ts absent); owned by task-skill-implement-mi-t1-module-index-lists-only-folders-with",
-    "owner_plan": "plan-module-index-lists-only-folders-with-a-memory-file"
-  },
-  {
-    "spec": "spec-module-index-lists-only-folders-with-a-memory-file-managed",
-    "ac": "AC-MI-2",
-    "reason": "oracle test not written yet (context-module-index.test.ts absent); owned by task-skill-implement-mi-t1-module-index-lists-only-folders-with",
-    "owner_plan": "plan-module-index-lists-only-folders-with-a-memory-file"
   }
 ]
