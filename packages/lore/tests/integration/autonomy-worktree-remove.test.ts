@@ -264,6 +264,19 @@ describe("AC-AU-11 / AU-T13 sweep --apply: an ignored path is loss-free when ide
     expect(decisions().map((row) => row.verdict)).toEqual(["auto"]);
   }, { timeout: 60_000 });
 
+  it("(c) a worktree whose only ignored path is .scratch/x (implementer temp dir) is removed with an auto decision", () => {
+    const wt = addWorktree("scratch-only");
+    mkdirSync(join(wt, ".scratch"));
+    writeFileSync(join(wt, ".scratch/x"), "temp\n");
+    ignoreInWorktree(wt, ".scratch/");
+    const run = lore(["worktree", "sweep", "--apply", "--json"]);
+    expect(run.exitCode).toBe(0);
+    const rows = (JSON.parse(run.stdout) as { data: { worktrees: { path: string; removed?: boolean }[] } }).data.worktrees;
+    expect(rows.find((row) => row.path === wt)?.removed).toBe(true);
+    expect(existsSync(wt)).toBe(false);
+    expect(decisions().map((row) => row.verdict)).toEqual(["auto"]);
+  }, { timeout: 60_000 });
+
   it("(a) an ignored .env byte-identical to main's copy is loss-free: removed", () => {
     writeFileSync(join(repo, ".env"), "SECRET=1\n");
     const wt = addWorktree("same-env", { env: true });
