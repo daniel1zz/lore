@@ -25,6 +25,8 @@ import { InMemoryStore } from "../../src/store/in-memory-store.js";
 import { DecisionService } from "../../src/service/decision-service.js";
 import type { StoreInterface } from "../../src/store/store-interface.js";
 import { verifyDecisionChain } from "../../src/store/decision-log.js";
+import { proveHumanChannel } from "../../src/service/human-channel.js";
+import { scriptedHumanPorts } from "./fixtures/scripted-human-ports.js";
 
 const PACKAGE_ROOT = new URL("../../", import.meta.url).pathname.replace(/\/$/, "");
 const INDEX_TS = join(PACKAGE_ROOT, "src", "index.ts");
@@ -136,22 +138,36 @@ describe("AC-AU-2 decision log", () => {
   it("(3b) a human-tty accept makes the version auto (channel human-tty) over an escalate record; a reject makes it refuse", async () => {
     const { service, store } = freshService(dbPath);
     try {
+      // The human channel is the ONLY writer of human-tty rows: the proof comes from the injectable seam
+      // (scripted ports), exactly what autonomy-human-channel.test.ts exercises against a real pty.
+      const humanAnswer = async (subject: { id: string; version: string }, answer: "accept" | "reject") => {
+        const pending = await service.listPending();
+        const row = pending.ok ? pending.value.find((p) => p.subject_id === subject.id && p.subject_version === subject.version) : undefined;
+        if (row === undefined) throw new Error("subject is not pending");
+        const proof = proveHumanChannel(scriptedHumanPorts(), { summary: `${answer} ${subject.id}` });
+        if (!proof.ok) throw new Error("scripted human channel refused");
+        return service.resolvePending(row.id, answer, undefined, proof.value);
+      };
+
       const accepted = { id: "human-accept", version: "v1" };
       await service.decide(CLASS_ID, accepted, WEAK);
-      expect((await service.effectiveVerdict(CLASS_ID, accepted)).ok).toBe(true);
       const before = await service.effectiveVerdict(CLASS_ID, accepted);
       expect(before.ok && before.value?.verdict).toBe("escalate");
-      const recorded = await service.recordHumanTtyUngated(CLASS_ID, accepted, "auto");
+      const recorded = await humanAnswer(accepted, "accept");
       expect(recorded.ok).toBe(true);
       const after = await service.effectiveVerdict(CLASS_ID, accepted);
       expect(after.ok && after.value).toMatchObject({ verdict: "auto", channel: "human-tty" });
 
-      // a LATER machine escalate does not undo the human decision; a later human reject does
+      // a LATER machine escalate does not undo the human decision
       await service.decide(CLASS_ID, accepted, WEAK);
       const stillAuto = await service.effectiveVerdict(CLASS_ID, accepted);
       expect(stillAuto.ok && stillAuto.value?.verdict).toBe("auto");
-      await service.recordHumanTtyUngated(CLASS_ID, accepted, "refuse");
-      const rejected = await service.effectiveVerdict(CLASS_ID, accepted);
+
+      // a human reject makes another subject refuse
+      const rejectedSubject = { id: "human-reject", version: "v1" };
+      await service.decide(CLASS_ID, rejectedSubject, WEAK);
+      expect((await humanAnswer(rejectedSubject, "reject")).ok).toBe(true);
+      const rejected = await service.effectiveVerdict(CLASS_ID, rejectedSubject);
       expect(rejected.ok && rejected.value).toMatchObject({ verdict: "refuse", channel: "human-tty" });
 
       // control: the human decision is per version

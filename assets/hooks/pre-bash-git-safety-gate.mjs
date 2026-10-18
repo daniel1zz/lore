@@ -51,6 +51,10 @@
  *   git update-ref -d
  *   git reflog delete / expire --expire=now
  *
+ * Not a git rule — `lore decide` (rule `human-channel-only`, spec-autonomy-phase-1 AC-AU-3): an agent's Bash
+ * call containing `lore decide` is denied (exit 2) before it starts; see LORE_DECIDE_PAT below. The git rules
+ * and their probes are unchanged.
+ *
  * Allowed (safe variants, never matched):
  *   git reset --soft/--mixed · git restore --staged · git stash (non-destructive verbs)
  *   git clean -n · git branch -d (merged-only)
@@ -845,9 +849,31 @@ function isCommandPositionMatch(segment, pattern) {
   return anchored.test(stripped);
 }
 
+// ── lore-decide-gate (spec-autonomy-phase-1 AC-AU-3, adr-autonomy D7) ─────────
+// `lore decide` is the HUMAN's channel for answering a pending autonomy decision. An agent's Bash call may never
+// run it, whatever the outcome would be: the verb itself refuses non-TTY / agent-ancestry callers, and this rule
+// stops the attempt before it starts. Same command-position matching as the git rules (a quoted mention such as
+// `git commit -m "… lore decide …"` or `echo lore decide` never fires). Allows wrappers (`env`, `sudo`, `npx`, …),
+// a path-qualified binary, global flags before the verb, and `bun|node run …/index.(ts|js) decide`.
+// reason: the git refusals below are untouched; this block only ADDS a deny and exits 2 like they do.
+const LORE_DECIDE_RULE_NAME = 'human-channel-only';
+const LORE_DECIDE_PAT =
+  /(?:(?:env|command|exec|nohup|time|sudo|npx|bunx|xargs)\s+(?:-\S+\s+)*)*(?:(?:\S*\/)?lore|(?:bun|node)\s+(?:run\s+)?\S*index\.(?:ts|js))\s+(?:-\S+\s+(?:[^-\s]\S*\s+)?)*decide(?:\s|$)/;
+
 for (const pair of segmentPairs) {
   const target = selectInspectionTarget(pair);
   if (!target.inspect) continue;
+  if (isCommandPositionMatch(target.sanitized, LORE_DECIDE_PAT)) {
+    process.stderr.write(
+      `\n⛔ [lore-decide-gate] BLOCKED — rule ${LORE_DECIDE_RULE_NAME}.\n` +
+        `Segment : ${target.raw}\n` +
+        `Why     : \`lore decide\` answers a pending decision and is the human's own channel (interactive terminal, ` +
+        `nonce typed back). An agent's Bash call may never run it.\n` +
+        `Safer   : Run \`lore pending\` to read the open decision, tell the user its id, and ask them to run ` +
+        `\`lore decide <id> --accept|--reject\` in their own terminal.\n`,
+    );
+    process.exit(2);
+  }
   for (const rule of RULES) {
     // Matching consumes the SANITIZED text — SPEC-066's guarantee that a quoted
     // string cannot smuggle a trigger into command position is untouched by D1.

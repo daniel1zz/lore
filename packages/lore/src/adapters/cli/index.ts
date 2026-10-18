@@ -45,6 +45,7 @@ const main = defineCommand({
     link: () => import("./commands/link.js").then(wrapDefault("link")),
     unlink: () => import("./commands/unlink.js").then(wrapDefault("unlink")),
     pending: () => import("./commands/pending.js").then(wrapDefault("pending")),
+    decide: () => import("./commands/decide.js").then(wrapDefault("decide")),
     approve: () => import("./commands/approve.js").then(wrapDefault("approve")),
     reject: () => import("./commands/reject.js").then(wrapDefault("reject")),
     reopen: () => import("./commands/reopen.js").then(wrapDefault("reopen")),

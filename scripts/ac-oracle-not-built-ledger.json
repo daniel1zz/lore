@@ -19,12 +19,6 @@
   },
   {
     "spec": "spec-autonomy-phase-1-decision-function-human-channel-lore",
-    "ac": "AC-AU-3",
-    "reason": "oracle test not written yet (autonomy-human-channel.test.ts absent); owned by plan-autonomy-phase-1-decision-function-human-channel-lore",
-    "owner_plan": "plan-autonomy-phase-1-decision-function-human-channel-lore"
-  },
-  {
-    "spec": "spec-autonomy-phase-1-decision-function-human-channel-lore",
     "ac": "AC-AU-4",
     "reason": "oracle test not written yet (autonomy-stash-prune.test.ts absent); owned by plan-autonomy-phase-1-decision-function-human-channel-lore",
     "owner_plan": "plan-autonomy-phase-1-decision-function-human-channel-lore"
