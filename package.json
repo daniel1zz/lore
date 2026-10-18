@@ -33,6 +33,7 @@
     "check:prose-pins": "bun scripts/check-prose-pins.ts",
     "check:shipped-defaults": "bun scripts/check-shipped-defaults.ts",
     "check:ac-oracle-ownership": "bun scripts/check-ac-oracle-ownership.ts",
+    "check:evidence-identity-drop-set": "bun scripts/check-evidence-identity-drop-set.ts",
     "check:capture-source-buckets": "bun scripts/check-capture-source-buckets.ts",
     "check:spec-mirror": "bun scripts/export-spec-mirror.ts --check",
     "check:corpus-fail-census": "bun scripts/check-corpus-fail-census.ts",

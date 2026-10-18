@@ -7,9 +7,9 @@
  * Public surface: `DropSetRowSchema` / `DropSetSchema` (the committed file's row format, shared with the
  * generator), `evaluateDropSet` (pure), `runCheck` (prints, returns the exit code), `main` (IO).
  * Invariants: this script derives NO coverage state; it reads the state verbatim from
- * `lore ac list --json` (the single derivation) and compares only against the literal `attested_pass`.
- * A row is `green` when its AC renders attested_pass NOW (a corrected command counts only once re-verified,
- * because the live state is read, not the recorded one); `explained` when the AC is not attested_pass AND
+ * `lore ac list --json` (the single derivation) and compares only against the literals in GREEN_STATES (`attested_pass`, `fail_superseded`).
+ * A row is `green` when its AC renders attested_pass or fail_superseded NOW (a corrected command counts only once re-verified,
+ * because the live state is read, not the recorded one); `explained` when the AC is not green AND
  * the row names a task whose status is not archived; otherwise `unexplained`.
  * Side-effect class: IO (spawns `lore`, reads the drop-set file, prints).
  *
@@ -64,11 +64,17 @@ export type RowOutcome =
   | { readonly kind: "explained"; readonly row: DropSetRow; readonly state: string }
   | { readonly kind: "unexplained"; readonly row: DropSetRow; readonly state: string; readonly reason: string };
 
+/**
+ * States that count as green: attested_pass, or fail_superseded (the newest attested pass is strictly newer
+ * than the newest fail, M4 - corrected on AC-EI-3). A plain `fail`, not_measured, none and absent never are.
+ */
+const GREEN_STATES: ReadonlySet<string> = new Set(["attested_pass", "fail_superseded"]);
+
 /** Classifies every row against the live corpus. */
 export function evaluateDropSet(rows: readonly DropSetRow[], corpus: CorpusReader): RowOutcome[] {
   return rows.map((row): RowOutcome => {
     const state = corpus.getAcState(row.spec, row.ac) ?? "absent";
-    if (state === "attested_pass") return { kind: "green", row };
+    if (GREEN_STATES.has(state)) return { kind: "green", row };
     if (row.task === undefined) return { kind: "unexplained", row, state, reason: "no task recorded" };
     const status = corpus.getTaskStatus(row.task);
     if (status === null) return { kind: "unexplained", row, state, reason: `task ${row.task} not found` };

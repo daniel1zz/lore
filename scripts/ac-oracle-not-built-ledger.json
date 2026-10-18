@@ -1,11 +1,5 @@
 [
   {
-    "spec": "spec-evidence-identity-an-attested-row-counts-only-for-the",
-    "ac": "AC-EI-3",
-    "reason": "oracle script not written yet (scripts/check-evidence-identity-drop-set.ts absent); owned by task-skill-test-ei-3-drop-set-snapshot-and-check-evidence",
-    "owner_plan": "plan-evidence-identity-count-only-equal-command-attested-rows"
-  },
-  {
     "spec": "spec-autonomy-phase-1-decision-function-human-channel-lore",
     "ac": "AC-AU-7",
     "reason": "oracle test not written yet (autonomy-overrides-escalate.test.ts absent); owned by plan-autonomy-phase-1-decision-function-human-channel-lore",

@@ -1,0 +1,1755 @@
+[
+  {
+    "spec": "spec-070-deterministic-task-dispatch-bundle-lore-feed-task-start",
+    "ac": "AC-070-18",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-070-deterministic-task-dispatch-bundle-lore-feed-task-start",
+    "ac": "AC-070-7",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-073-report-issue-trigger-surfaces-error-path-hints",
+    "ac": "AC-073-1",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-073-report-issue-trigger-surfaces-error-path-hints",
+    "ac": "AC-073-2",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-073-report-issue-trigger-surfaces-error-path-hints",
+    "ac": "AC-073-3",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-073-report-issue-trigger-surfaces-error-path-hints",
+    "ac": "AC-073-4",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-076-distribution-integration-model-asset-update-convergence",
+    "ac": "AC-076-10",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-076-distribution-integration-model-asset-update-convergence",
+    "ac": "AC-076-2",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-076-distribution-integration-model-asset-update-convergence",
+    "ac": "AC-076-3",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-076-distribution-integration-model-asset-update-convergence",
+    "ac": "AC-076-4",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-076-distribution-integration-model-asset-update-convergence",
+    "ac": "AC-076-6",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-076-distribution-integration-model-asset-update-convergence",
+    "ac": "AC-076-8",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-077-dashboard-execution-read-surface-prd-21-f3",
+    "ac": "AC-077-1",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-077-dashboard-execution-read-surface-prd-21-f3",
+    "ac": "AC-077-2",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-077-dashboard-execution-read-surface-prd-21-f3",
+    "ac": "AC-077-3",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-077-dashboard-execution-read-surface-prd-21-f3",
+    "ac": "AC-077-4",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-077-dashboard-execution-read-surface-prd-21-f3",
+    "ac": "AC-077-6",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-079-audit-hardening-link-provenance-actor-fidelity-tamper",
+    "ac": "AC-079-3",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-079-audit-hardening-link-provenance-actor-fidelity-tamper",
+    "ac": "AC-079-4",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-079-audit-hardening-link-provenance-actor-fidelity-tamper",
+    "ac": "AC-079-5",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-080-bootstrap-injection-projection-tier-1-tier-2-payload",
+    "ac": "AC-080-1",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-080-bootstrap-injection-projection-tier-1-tier-2-payload",
+    "ac": "AC-080-4",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-081-audit-hardening-part-2-gate-skip-observability-push",
+    "ac": "AC-080-4",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-084-corpus-allocated-ordinal-identity-store-atomic-spec",
+    "ac": "AC-084-4",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-085-seat-briefing-runtime-injection-retire-the-installed",
+    "ac": "AC-085-1",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-a-criterion-of-a-locked-specification-can-be-fixed-as-an",
+    "ac": "AC-CC-2",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-a-github-filed-defect-must-be-claimable-one-ingest-seam",
+    "ac": "AC-GR-1",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-a-github-filed-defect-must-be-claimable-one-ingest-seam",
+    "ac": "AC-GR-10",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-a-github-filed-defect-must-be-claimable-one-ingest-seam",
+    "ac": "AC-GR-12",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-a-github-filed-defect-must-be-claimable-one-ingest-seam",
+    "ac": "AC-GR-2",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-a-github-filed-defect-must-be-claimable-one-ingest-seam",
+    "ac": "AC-GR-3",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-a-github-filed-defect-must-be-claimable-one-ingest-seam",
+    "ac": "AC-GR-4",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-a-github-filed-defect-must-be-claimable-one-ingest-seam",
+    "ac": "AC-GR-8",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-a-github-filed-defect-must-be-claimable-one-ingest-seam",
+    "ac": "AC-GR-9",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-a-spec-carries-its-rule-changes-the-baseline-takes-them",
+    "ac": "AC-CS-3",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-a-test-case-s-timeout-budget-must-be-declared-when-its",
+    "ac": "AC-TB-4",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-a-write-side-fact-with-no-read-side-address-counts-with-no",
+    "ac": "AC-RR-1",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-a-write-side-fact-with-no-read-side-address-counts-with-no",
+    "ac": "AC-RR-2",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-a-write-side-fact-with-no-read-side-address-counts-with-no",
+    "ac": "AC-RR-3",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-a-write-side-fact-with-no-read-side-address-counts-with-no",
+    "ac": "AC-RR-4",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-a-write-side-fact-with-no-read-side-address-counts-with-no",
+    "ac": "AC-RR-5",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-a-write-side-fact-with-no-read-side-address-counts-with-no",
+    "ac": "AC-RR-6",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-a-write-side-fact-with-no-read-side-address-counts-with-no",
+    "ac": "AC-RR-7",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-adr-decision-status-has-a-create-surface-and-no-cli-update",
+    "ac": "AC-DS-1",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-adr-decision-status-has-a-create-surface-and-no-cli-update",
+    "ac": "AC-DS-2",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-adr-decision-status-has-a-create-surface-and-no-cli-update",
+    "ac": "AC-DS-3",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-adr-decision-status-has-a-create-surface-and-no-cli-update",
+    "ac": "AC-DS-4",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-adr-decision-status-has-a-create-surface-and-no-cli-update",
+    "ac": "AC-DS-5",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-adr-decision-status-has-a-create-surface-and-no-cli-update",
+    "ac": "AC-DS-6",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-adr-decision-status-has-a-create-surface-and-no-cli-update",
+    "ac": "AC-DS-7",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-ambient-state-is-read-once-at-the-entry-owned-only-prune",
+    "ac": "AC-IV-1",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-ambient-state-is-read-once-at-the-entry-owned-only-prune",
+    "ac": "AC-IV-2",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-ambient-state-is-read-once-at-the-entry-owned-only-prune",
+    "ac": "AC-IV-3",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-ambient-state-is-read-once-at-the-entry-owned-only-prune",
+    "ac": "AC-IV-6",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-an-active-spec-counts-as-approved-for-claiming-its-tasks",
+    "ac": "AC-ACT-1",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-approval-and-plan-closure-go-through-the-same-checks-on",
+    "ac": "AC-AP-1",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-approval-and-plan-closure-go-through-the-same-checks-on",
+    "ac": "AC-AP-10",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-approval-and-plan-closure-go-through-the-same-checks-on",
+    "ac": "AC-AP-2",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-approval-and-plan-closure-go-through-the-same-checks-on",
+    "ac": "AC-AP-4",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-approval-and-plan-closure-go-through-the-same-checks-on",
+    "ac": "AC-AP-6",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-archiving-the-work-that-resolves-a-defect-report-closes",
+    "ac": "AC-IC-2",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-assessment-freshness-plan-close-denies-a-stale-assessment",
+    "ac": "AC-FRESH-4",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-baseline-close-out-fixes-audit-surface-node-validation",
+    "ac": "AC-BLC-1",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-baseline-close-out-fixes-audit-surface-node-validation",
+    "ac": "AC-BLC-4",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-baseline-close-out-fixes-audit-surface-node-validation",
+    "ac": "AC-BLC-6",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-baseline-close-out-fixes-audit-surface-node-validation",
+    "ac": "AC-BLC-7",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-baseline-slice-1-rules-with-permanent-ids-ac-citations",
+    "ac": "AC-BLS1-1",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-baseline-slice-1-rules-with-permanent-ids-ac-citations",
+    "ac": "AC-BLS1-8",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-baseline-slice-2-completeness-census-per-branch-citation",
+    "ac": "AC-BLS2-11",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-baseline-slice-2-completeness-census-per-branch-citation",
+    "ac": "AC-BLS2-19",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-baseline-slice-2-completeness-census-per-branch-citation",
+    "ac": "AC-BLS2-3",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-baseline-slice-2-completeness-census-per-branch-citation",
+    "ac": "AC-BLS2-4",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-baseline-slice-3a-architecture-tree-baseline-root",
+    "ac": "AC-BLS3-11",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-baseline-slice-3a-architecture-tree-baseline-root",
+    "ac": "AC-BLS3-12",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-baseline-slice-3a-architecture-tree-baseline-root",
+    "ac": "AC-BLS3-3",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-baseline-slice-3a-architecture-tree-baseline-root",
+    "ac": "AC-BLS3-6",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-baseline-slice-3a-architecture-tree-baseline-root",
+    "ac": "AC-BLS3-7",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-baseline-slice-3a-architecture-tree-baseline-root",
+    "ac": "AC-BLS3-8",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-baseline-slice-3b-specs-belong-to-the-trees-through",
+    "ac": "AC-BLS3B-1",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-baseline-slice-3b-specs-belong-to-the-trees-through",
+    "ac": "AC-BLS3B-2",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-baseline-slice-3b-specs-belong-to-the-trees-through",
+    "ac": "AC-BLS3B-3",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-baseline-slice-3b-specs-belong-to-the-trees-through",
+    "ac": "AC-BLS3B-4",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-baseline-slice-3b-specs-belong-to-the-trees-through",
+    "ac": "AC-BLS3B-5",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-baseline-slice-3b-specs-belong-to-the-trees-through",
+    "ac": "AC-BLS3B-6",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-baseline-slice-3b-specs-belong-to-the-trees-through",
+    "ac": "AC-BLS3B-7",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-baseline-slice-3b-specs-belong-to-the-trees-through",
+    "ac": "AC-BLS3B-8",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-bootstrap-fixpoint-integrity-binary-provenance-an-anchor",
+    "ac": "AC-BFI-11",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-bootstrap-fixpoint-integrity-binary-provenance-an-anchor",
+    "ac": "AC-BFI-13",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-bootstrap-fixpoint-integrity-binary-provenance-an-anchor",
+    "ac": "AC-BFI-15",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-cjk-aware-slugify-pinyin-transliteration-lore-set-slug-repa",
+    "ac": "AC-068-10",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-claude-md-governance-content-dimension-checks-wire-the",
+    "ac": "AC-CONTRACT-1",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-claude-md-governance-content-dimension-checks-wire-the",
+    "ac": "AC-EMPH-2",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-claude-md-governance-content-dimension-checks-wire-the",
+    "ac": "AC-SLUG-2",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-claude-md-root-section-structure-check-and-adoption-mode",
+    "ac": "AC-STR-11",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-claude-md-root-section-structure-check-and-adoption-mode",
+    "ac": "AC-STR-3",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-claude-md-root-section-structure-check-and-adoption-mode",
+    "ac": "AC-STR-4",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-claude-md-root-section-structure-check-and-adoption-mode",
+    "ac": "AC-STR-5",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-claude-md-root-section-structure-check-and-adoption-mode",
+    "ac": "AC-STR-7",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-close-the-eight-verified-critical-defects-no-judge-listing",
+    "ac": "AC-CRIT-2",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-close-the-eight-verified-critical-defects-no-judge-listing",
+    "ac": "AC-CRIT-3",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-close-the-eight-verified-critical-defects-no-judge-listing",
+    "ac": "AC-CRIT-6",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-close-the-eight-verified-critical-defects-no-judge-listing",
+    "ac": "AC-CRIT-7",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-close-the-eight-verified-critical-defects-no-judge-listing",
+    "ac": "AC-CRIT-8",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-completing-an-adopted-report-s-own-task-closes-its-github",
+    "ac": "AC-IT-2",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-context-fragments-config-driven-layered-rule-injection",
+    "ac": "AC-CF-10",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-context-fragments-config-driven-layered-rule-injection",
+    "ac": "AC-CF-11",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-context-fragments-config-driven-layered-rule-injection",
+    "ac": "AC-CF-12",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-context-fragments-config-driven-layered-rule-injection",
+    "ac": "AC-CF-15",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-context-fragments-config-driven-layered-rule-injection",
+    "ac": "AC-CF-17",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-context-fragments-config-driven-layered-rule-injection",
+    "ac": "AC-CF-18",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-context-fragments-config-driven-layered-rule-injection",
+    "ac": "AC-CF-22",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-context-fragments-config-driven-layered-rule-injection",
+    "ac": "AC-CF-4",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-context-fragments-config-driven-layered-rule-injection",
+    "ac": "AC-CF-5",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-context-fragments-config-driven-layered-rule-injection",
+    "ac": "AC-CF-7",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-context-fragments-config-driven-layered-rule-injection",
+    "ac": "AC-CF-8",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-context-fragments-config-driven-layered-rule-injection",
+    "ac": "AC-CF-9",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-context-provenance-injected-corpus-global-state-and-a",
+    "ac": "AC-CP-11",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-context-provenance-injected-corpus-global-state-and-a",
+    "ac": "AC-CP-4",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-context-provenance-injected-corpus-global-state-and-a",
+    "ac": "AC-CP-6",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-context-provenance-injected-corpus-global-state-and-a",
+    "ac": "AC-CP-9",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-corpus-resolution-carries-provenance-and-a-foreign-write",
+    "ac": "AC-CP-3",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-corpus-resolution-carries-provenance-and-a-foreign-write",
+    "ac": "AC-CP-4",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-dashboard-production-packaging-one-command-lore-dashboard",
+    "ac": "AC-F5A-10",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-dashboard-production-packaging-one-command-lore-dashboard",
+    "ac": "AC-F5A-9",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-declared-scope-attestation-contract-task-owned-ac-scope",
+    "ac": "AC-VS-10",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-declared-scope-attestation-contract-task-owned-ac-scope",
+    "ac": "AC-VS-11",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-declared-scope-attestation-contract-task-owned-ac-scope",
+    "ac": "AC-VS-8",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-declared-scope-attestation-contract-task-owned-ac-scope",
+    "ac": "AC-VS-9",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-declaring-ac-scope-is-required-at-task-creation-so-the",
+    "ac": "AC-ACS-6",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-declaring-ac-scope-is-required-at-task-creation-so-the",
+    "ac": "AC-ACS-8",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-documents-are-living-or-records-a-locked-record-is-never",
+    "ac": "AC-DR-10",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-documents-are-living-or-records-a-locked-record-is-never",
+    "ac": "AC-DR-5",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-documents-are-living-or-records-a-locked-record-is-never",
+    "ac": "AC-DR-9",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-evidence-identity-an-attested-row-counts-only-for-the",
+    "ac": "AC-EI-3",
+    "before": "attested_pass",
+    "after": "none",
+    "task": "task-skill-test-ei-4-re-verify-the-drop-set-on-main-and-triage"
+  },
+  {
+    "spec": "spec-evidence-labels-and-reds-are-honest",
+    "ac": "AC-EH-4",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-evidence-labels-and-reds-are-honest",
+    "ac": "AC-EH-7",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-fresh-install-probe-fixes-a-fresh-consumer-can-run-the",
+    "ac": "AC-FIP-1",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-fresh-install-probe-fixes-a-fresh-consumer-can-run-the",
+    "ac": "AC-FIP-3",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-fresh-install-probe-fixes-a-fresh-consumer-can-run-the",
+    "ac": "AC-FIP-4",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-fresh-install-probe-fixes-a-fresh-consumer-can-run-the",
+    "ac": "AC-FIP-5",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-interception-moves-off-every-tool-call-one-turn-end-review",
+    "ac": "AC-TE-1",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-interception-moves-off-every-tool-call-one-turn-end-review",
+    "ac": "AC-TE-2",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-issue-closure-loop-computed-resolution-agent-reachable",
+    "ac": "AC-ICL-10",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-issue-closure-loop-computed-resolution-agent-reachable",
+    "ac": "AC-ICL-11",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-issue-closure-loop-computed-resolution-agent-reachable",
+    "ac": "AC-ICL-12",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-issue-closure-loop-computed-resolution-agent-reachable",
+    "ac": "AC-ICL-3",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-issue-closure-loop-computed-resolution-agent-reachable",
+    "ac": "AC-ICL-4",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-issue-closure-loop-computed-resolution-agent-reachable",
+    "ac": "AC-ICL-5",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-issue-closure-loop-computed-resolution-agent-reachable",
+    "ac": "AC-ICL-6",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-issue-closure-loop-computed-resolution-agent-reachable",
+    "ac": "AC-ICL-7",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-issue-closure-loop-computed-resolution-agent-reachable",
+    "ac": "AC-ICL-8",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-judgment-surfaces-must-verify-before-they-certify-machine",
+    "ac": "AC-JV-1",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-judgment-surfaces-must-verify-before-they-certify-machine",
+    "ac": "AC-JV-2",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-judgment-surfaces-must-verify-before-they-certify-machine",
+    "ac": "AC-JV-3",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-lifecycle-archival-plan-close-cascade-deterministic",
+    "ac": "AC-097-2",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-lifecycle-archival-plan-close-cascade-deterministic",
+    "ac": "AC-097-3",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-lifecycle-archival-plan-close-cascade-deterministic",
+    "ac": "AC-097-4",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-lore-ac-set-in-place-edit-of-a-declared-acceptance",
+    "ac": "AC-ACS-1",
+    "before": "attested_pass",
+    "after": "pass_unfalsified"
+  },
+  {
+    "spec": "spec-lore-issues-falls-through-to-the-local-corpus-on-a-retired",
+    "ac": "AC-IS-1",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-lore-issues-falls-through-to-the-local-corpus-on-a-retired",
+    "ac": "AC-IS-2",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-lore-issues-falls-through-to-the-local-corpus-on-a-retired",
+    "ac": "AC-IS-3",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-lore-issues-falls-through-to-the-local-corpus-on-a-retired",
+    "ac": "AC-IS-4",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-lore-phase-add-and-phase-rm-mutate-a-plan-s-declared",
+    "ac": "AC-PHASEVER-1",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-lore-phase-add-and-phase-rm-mutate-a-plan-s-declared",
+    "ac": "AC-PHASEVER-2",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-lore-phase-add-and-phase-rm-mutate-a-plan-s-declared",
+    "ac": "AC-PHASEVER-3",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-mirror-identifier-ssot-one-writer-for-export-index-human",
+    "ac": "AC-MIS-1",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-mirror-identifier-ssot-one-writer-for-export-index-human",
+    "ac": "AC-MIS-2",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-mirror-identifier-ssot-one-writer-for-export-index-human",
+    "ac": "AC-MIS-4",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-mirror-identifier-ssot-one-writer-for-export-index-human",
+    "ac": "AC-MIS-5",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-mirror-identifier-ssot-one-writer-for-export-index-human",
+    "ac": "AC-MIS-7",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-multi-session-concurrency-queryable-ownership-checkout",
+    "ac": "AC-OWN-1",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-multi-session-concurrency-queryable-ownership-checkout",
+    "ac": "AC-OWN-2",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-multi-session-concurrency-queryable-ownership-checkout",
+    "ac": "AC-OWN-3",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-multi-session-concurrency-queryable-ownership-checkout",
+    "ac": "AC-OWN-4",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-multi-session-concurrency-queryable-ownership-checkout",
+    "ac": "AC-OWN-5",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-one-upgrade-reminder-at-session-start-covers-the-global",
+    "ac": "AC-UR-5",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-one-worktree-removal-test-for-the-guard-lore-done-and-a",
+    "ac": "AC-WS-2",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-one-worktree-removal-test-for-the-guard-lore-done-and-a",
+    "ac": "AC-WS-5",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-oracle-exclusivity-in-a-shared-checkout-a-mirror-check",
+    "ac": "AC-OX-2",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-oracle-executability-a-runner-s-discovery-refusal-is-not-a",
+    "ac": "AC-OX-5",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-oracle-tier-falsifiability-a-criterion-never-observed-red",
+    "ac": "AC-FALS-10",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-oracle-tier-falsifiability-a-criterion-never-observed-red",
+    "ac": "AC-FALS-19",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-oracle-tier-falsifiability-a-criterion-never-observed-red",
+    "ac": "AC-FALS-4",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-oracle-tier-falsifiability-a-criterion-never-observed-red",
+    "ac": "AC-FALS-5",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-oracle-tier-falsifiability-a-criterion-never-observed-red",
+    "ac": "AC-FALS-6",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-oracle-tier-falsifiability-a-criterion-never-observed-red",
+    "ac": "AC-FALS-7",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-oracle-tier-falsifiability-a-criterion-never-observed-red",
+    "ac": "AC-FALS-9",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-p0-requirement-coverage-falsifying-criteria-for-the-8",
+    "ac": "AC-P0C-1",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-p0-requirement-coverage-falsifying-criteria-for-the-8",
+    "ac": "AC-P0C-5",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-p0-requirement-coverage-falsifying-criteria-for-the-8",
+    "ac": "AC-P0C-6",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-p0-requirement-coverage-falsifying-criteria-for-the-8",
+    "ac": "AC-P0C-8",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-plan-close-predicates-measure-invariants-an-applicability",
+    "ac": "AC-PCI-12",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-plan-close-predicates-measure-invariants-an-applicability",
+    "ac": "AC-PCI-14",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-plan-closure-must-be-loud-terminality-divergence-silent",
+    "ac": "AC-CLOSURE-1",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-project-claude-md-content-contract-governance-injected",
+    "ac": "AC-CMC-2",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-project-claude-md-content-contract-governance-injected",
+    "ac": "AC-CMC-3",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-project-claude-md-content-contract-governance-injected",
+    "ac": "AC-CMC-4",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-resume-ticket-coverage-a-shipped-upper-bound-left-the",
+    "ac": "AC-RC-13",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-resume-ticket-coverage-a-shipped-upper-bound-left-the",
+    "ac": "AC-RC-4",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-resume-ticket-coverage-a-shipped-upper-bound-left-the",
+    "ac": "AC-RC-8",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-resume-ticket-coverage-floor-blocking-channel-arming",
+    "ac": "AC-RCH-7",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-rule-store-git-tracked-fragment-selection-on-demand-skill",
+    "ac": "AC-RS-1",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-rule-store-git-tracked-fragment-selection-on-demand-skill",
+    "ac": "AC-RS-10",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-rule-store-git-tracked-fragment-selection-on-demand-skill",
+    "ac": "AC-RS-11",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-rule-store-git-tracked-fragment-selection-on-demand-skill",
+    "ac": "AC-RS-12",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-rule-store-git-tracked-fragment-selection-on-demand-skill",
+    "ac": "AC-RS-13",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-rule-store-git-tracked-fragment-selection-on-demand-skill",
+    "ac": "AC-RS-15",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-rule-store-git-tracked-fragment-selection-on-demand-skill",
+    "ac": "AC-RS-2",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-rule-store-git-tracked-fragment-selection-on-demand-skill",
+    "ac": "AC-RS-3",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-rule-store-git-tracked-fragment-selection-on-demand-skill",
+    "ac": "AC-RS-4",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-rule-store-git-tracked-fragment-selection-on-demand-skill",
+    "ac": "AC-RS-5",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-rule-store-git-tracked-fragment-selection-on-demand-skill",
+    "ac": "AC-RS-6",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-rule-store-git-tracked-fragment-selection-on-demand-skill",
+    "ac": "AC-RS-7",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-rule-store-git-tracked-fragment-selection-on-demand-skill",
+    "ac": "AC-RS-8",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-rule-store-git-tracked-fragment-selection-on-demand-skill",
+    "ac": "AC-RS-9",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-run-identity-slice-1-harness-attested-runs-attested",
+    "ac": "AC-RID-1",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-run-identity-slice-1-harness-attested-runs-attested",
+    "ac": "AC-RID-10",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-run-identity-slice-1-harness-attested-runs-attested",
+    "ac": "AC-RID-11",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-run-identity-slice-1-harness-attested-runs-attested",
+    "ac": "AC-RID-12",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-run-identity-slice-1-harness-attested-runs-attested",
+    "ac": "AC-RID-13",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-run-identity-slice-1-harness-attested-runs-attested",
+    "ac": "AC-RID-14",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-run-identity-slice-1-harness-attested-runs-attested",
+    "ac": "AC-RID-2",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-run-identity-slice-1-harness-attested-runs-attested",
+    "ac": "AC-RID-4",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-run-identity-slice-1-harness-attested-runs-attested",
+    "ac": "AC-RID-6",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-run-identity-slice-1-harness-attested-runs-attested",
+    "ac": "AC-RID-7",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-run-only-write-identity-and-run-end-claim-release",
+    "ac": "AC-ROI-1",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-run-only-write-identity-and-run-end-claim-release",
+    "ac": "AC-ROI-10",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-run-only-write-identity-and-run-end-claim-release",
+    "ac": "AC-ROI-2",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-run-only-write-identity-and-run-end-claim-release",
+    "ac": "AC-ROI-3",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-run-only-write-identity-and-run-end-claim-release",
+    "ac": "AC-ROI-4",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-run-only-write-identity-and-run-end-claim-release",
+    "ac": "AC-ROI-5",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-run-only-write-identity-and-run-end-claim-release",
+    "ac": "AC-ROI-6",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-run-only-write-identity-and-run-end-claim-release",
+    "ac": "AC-ROI-7",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-run-only-write-identity-and-run-end-claim-release",
+    "ac": "AC-ROI-8",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-run-only-write-identity-and-run-end-claim-release",
+    "ac": "AC-ROI-9",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-session-start-handoff-neutrality-injection-drops-resume",
+    "ac": "AC-096-1",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-session-start-injection-carries-only-the-session-s-own",
+    "ac": "AC-SI-11",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-session-start-injection-carries-only-the-session-s-own",
+    "ac": "AC-SI-12",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-session-start-injection-carries-only-the-session-s-own",
+    "ac": "AC-SI-7",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-spec-039-trusted-runner-attested-evidence-for-script-mode-a",
+    "ac": "AC-VRF-6",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-spec-043-memory-hygiene-part-1-bi-temporal-invalidation-h1",
+    "ac": "AC-MH-8",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-spec-044-memory-hygiene-part-2-staleness-probes-h2",
+    "ac": "AC-SP-6",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-spec-045-memory-hygiene-part-3-doc-code-drift-oracle-h3",
+    "ac": "AC-DR-4",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-spec-056-phase-execution-model-phase-doc-type-computed-comp",
+    "ac": "AC-P-5",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-spec-060-lore-setup-project-scaffold-completion-repo-level",
+    "ac": "AC-060-7",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-spec-061-attestation-completeness-guard-detect-zero-match-u",
+    "ac": "AC-061-21",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-spec-061-attestation-completeness-guard-detect-zero-match-u",
+    "ac": "AC-061-G2",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-spec-ac-quantifiability-gate-design-time-standardization-en",
+    "ac": "AC-ACQ-2",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-spec-ac-quantifiability-gate-design-time-standardization-en",
+    "ac": "AC-ACQ-7",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-test-governance-guards-that-refuse-bad-tests-declared",
+    "ac": "AC-TG-4",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-test-governance-guards-that-refuse-bad-tests-declared",
+    "ac": "AC-TG-6",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-the-defect-channel-cannot-be-honestly-maintained-an",
+    "ac": "AC-DC-1",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-the-defect-channel-cannot-be-honestly-maintained-an",
+    "ac": "AC-DC-10",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-the-defect-channel-cannot-be-honestly-maintained-an",
+    "ac": "AC-DC-11",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-the-defect-channel-cannot-be-honestly-maintained-an",
+    "ac": "AC-DC-17",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-the-defect-channel-cannot-be-honestly-maintained-an",
+    "ac": "AC-DC-2",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-the-defect-channel-cannot-be-honestly-maintained-an",
+    "ac": "AC-DC-3",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-the-defect-channel-cannot-be-honestly-maintained-an",
+    "ac": "AC-DC-4",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-the-defect-channel-cannot-be-honestly-maintained-an",
+    "ac": "AC-DC-5",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-the-defect-channel-cannot-be-honestly-maintained-an",
+    "ac": "AC-DC-6",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-the-defect-channel-cannot-be-honestly-maintained-an",
+    "ac": "AC-DC-7",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-the-defect-channel-reaches-no-machine-but-its-own-github",
+    "ac": "AC-GI-1",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-the-defect-channel-reaches-no-machine-but-its-own-github",
+    "ac": "AC-GI-10",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-the-defect-channel-reaches-no-machine-but-its-own-github",
+    "ac": "AC-GI-11",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-the-defect-channel-reaches-no-machine-but-its-own-github",
+    "ac": "AC-GI-13",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-the-defect-channel-reaches-no-machine-but-its-own-github",
+    "ac": "AC-GI-14",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-the-defect-channel-reaches-no-machine-but-its-own-github",
+    "ac": "AC-GI-3",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-the-defect-channel-reaches-no-machine-but-its-own-github",
+    "ac": "AC-GI-6",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-the-defect-channel-reaches-no-machine-but-its-own-github",
+    "ac": "AC-GI-7",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-the-defect-channel-reaches-no-machine-but-its-own-github",
+    "ac": "AC-GI-9",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-the-mirror-oracles-two-command-surfaces-are-o-corpus-by",
+    "ac": "AC-MOS-2",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-the-retired-shape-refusal-message-has-two-byte-identical",
+    "ac": "AC-MS-4",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-tiered-review-ledger-fast-track-judgment-required-promote",
+    "ac": "AC-TIER-4",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-tiered-review-ledger-fast-track-judgment-required-promote",
+    "ac": "AC-TIER-8",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-tiered-review-ledger-fast-track-judgment-required-promote",
+    "ac": "AC-TIER-9",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-trace-layer-read-deny-observability-table-default-on-with",
+    "ac": "AC-TRACE-1",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-trace-layer-read-deny-observability-table-default-on-with",
+    "ac": "AC-TRACE-4",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-trace-layer-read-deny-observability-table-default-on-with",
+    "ac": "AC-TRACE-5",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-trace-layer-read-deny-observability-table-default-on-with",
+    "ac": "AC-TRACE-6",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-trace-layer-read-deny-observability-table-default-on-with",
+    "ac": "AC-TRACE-7",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-two-runner-changed-test-selection-deterministic-test",
+    "ac": "AC-TC-2",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-two-runner-changed-test-selection-deterministic-test",
+    "ac": "AC-TC-4",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-two-runner-changed-test-selection-deterministic-test",
+    "ac": "AC-TC-6",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-version-snapshots-capture-slug-values-spec-068-d5-follow-up",
+    "ac": "AC-072-4",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-workflow-hardening-evidence-red-vocabulary-claim-worktree",
+    "ac": "AC-WH-1B",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-worktree-derived-actor-identity-agent-branch-as",
+    "ac": "AC-ACTOR-1",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-worktree-derived-actor-identity-agent-branch-as",
+    "ac": "AC-ACTOR-2",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-worktree-derived-actor-identity-agent-branch-as",
+    "ac": "AC-ACTOR-3",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-worktree-derived-actor-identity-agent-branch-as",
+    "ac": "AC-ACTOR-4",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-worktree-derived-actor-identity-agent-branch-as",
+    "ac": "AC-ACTOR-5",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-worktree-removal-is-decided-by-who-is-inside-not-by-how",
+    "ac": "AC-WL-2",
+    "before": "attested_pass",
+    "after": "none"
+  },
+  {
+    "spec": "spec-worktree-removal-is-decided-by-who-is-inside-not-by-how",
+    "ac": "AC-WL-4",
+    "before": "attested_pass",
+    "after": "none"
+  }
+]
