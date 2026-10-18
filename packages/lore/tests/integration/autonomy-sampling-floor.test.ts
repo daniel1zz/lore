@@ -186,7 +186,7 @@ describe("AC-AU-10 half 3: a human-tty 'wrong' lowers C by the same amount as an
     const before = (await readLog(rightCorpus)).length;
     const twice = await runDecide(rightCorpus, r.ids[9] as number, "reject");
     expect(twice.code).toBe(4);
-    expect(twice.stderr).toMatch(/neither pending nor awaiting audit/);
+    expect(twice.stderr).toMatch(/not pending and not awaiting audit/);
     expect((await readLog(rightCorpus)).length).toBe(before);
   }, 240_000);
 

@@ -87,7 +87,7 @@ export async function runDecideFlow(input: DecideFlowInput, ports: HumanChannelP
       }
       if (audit.value === null) {
         pre.value.terminal.close();
-        return usageRefusal(io, `decision ${pendingId} is neither pending nor awaiting audit (see \`lore pending\`)`);
+        return usageRefusal(io, `decision ${pendingId} is not pending and not awaiting audit (see \`lore pending\`)`);
       }
       const item = audit.value;
       const auditAnswer = input.accept ? "right" : "wrong";
