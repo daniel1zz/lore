@@ -92,7 +92,7 @@ export interface RecordedWorktree {
 
 /** What was measured about one recorded worktree — the pure decision's only input. */
 export type WorktreeFacts =
-  | { readonly kind: "gone" }
+  | { readonly kind: "gone"; /** The failed lookups, naming both the path and the branch form. */ readonly lookups?: string }
   | { readonly kind: "not-measured"; readonly reason: string }
   | { readonly kind: "claimed-by-active-task" }
   | {
@@ -165,6 +165,37 @@ export function resolveClaimHead(
   return tip.ok ? { ok: true, value: { sha: tip.value, source: "branch" } } : tip;
 }
 
+// ── Worktree resolution: worktree path OR branch name → linked-worktree directory ──
+
+/** How a recorded `--worktree` value resolved to a directory. */
+export type WorktreeResolution =
+  | { readonly kind: "resolved"; readonly path: string; readonly source: HeadSource }
+  | { readonly kind: "unresolved"; /** Both failed lookups, ready to print. */ readonly lookups: string }
+  | { readonly kind: "not-measured"; readonly reason: string };
+
+/**
+ * Resolves the directory a claim's `--worktree` value stands for — the ONE branch→directory resolver
+ * (the sibling {@link resolveClaimHead} resolves the same value to a sha). Lore's dispatch protocol records the
+ * BRANCH name, so reading the value only as a path made every real claim look `gone`.
+ *
+ * An ABSOLUTE value naming an existing directory is the worktree itself. Otherwise the value is a branch name,
+ * matched exactly against `git worktree list --porcelain` run from `repoCwd` (any worktree of the repo; the list
+ * is repo-wide). A relative value is never read as a directory (same rule as `resolveClaimHead`). A failed
+ * `git worktree list` is `not-measured` — never `unresolved`: an unreadable list must not read as "gone".
+ *
+ * @example
+ * resolveClaimWorktree(probe, "agent-x", "/repo") // → {kind:"resolved", path:"/wt/agent-x", source:"branch"}
+ */
+export function resolveClaimWorktree(probe: WorktreeGitProbe, value: string, repoCwd: string): WorktreeResolution {
+  if (isAbsolute(value) && probe.pathExists(value)) return { kind: "resolved", path: value, source: "worktree" };
+  const pathLookup = isAbsolute(value) ? `no directory at path ${value}` : `${value} is not an absolute path`;
+  const listed = probe.listWorktrees(repoCwd);
+  if (!listed.ok) return { kind: "not-measured", reason: `${pathLookup}; git worktree list failed: ${listed.reason}` };
+  const match = listed.value.find((entry) => entry.branch === value);
+  if (match !== undefined) return { kind: "resolved", path: match.path, source: "branch" };
+  return { kind: "unresolved", lookups: `${pathLookup}; no worktree has branch ${value}` };
+}
+
 // ── Pure: recorded worktrees from claim history ─────────────────────────────
 
 /**
@@ -213,7 +244,7 @@ export function collectRecordedWorktrees(
 export function decideWorktreeCleanup(facts: WorktreeFacts): WorktreeDecision {
   switch (facts.kind) {
     case "gone":
-      return { decision: "gone", reason: "path does not exist" };
+      return { decision: "gone", reason: facts.lookups ?? "path does not exist" };
     case "not-measured":
       return { decision: "not-measured", reason: facts.reason };
     case "claimed-by-active-task":
@@ -240,7 +271,10 @@ export function decideWorktreeCleanup(facts: WorktreeFacts): WorktreeDecision {
 
 // ── IO: gather facts ────────────────────────────────────────────────────────
 
-function normalizedForms(probe: WorktreeGitProbe, path: string): string[] {
+/** Resolved + canonical forms of a claim's worktree value (a branch name is first resolved to its directory). */
+function normalizedForms(probe: WorktreeGitProbe, value: string): string[] {
+  const resolution = resolveClaimWorktree(probe, value, probe.currentWorkingDirectory());
+  const path = resolution.kind === "resolved" ? resolution.path : value;
   const forms = new Set<string>([resolve(path)]);
   if (probe.pathExists(path)) forms.add(probe.realPath(path));
   return [...forms];
@@ -263,34 +297,38 @@ export async function gatherWorktreeFacts(
   recorded: RecordedWorktree,
   activeClaimedPaths: ReadonlySet<string>,
   callerSession: string | null,
-): Promise<{ readonly facts: WorktreeFacts; readonly repoRoot?: string; readonly branch?: string }> {
-  if (!probe.pathExists(recorded.path)) return { facts: { kind: "gone" } };
+): Promise<{ readonly facts: WorktreeFacts; readonly worktreePath?: string; readonly repoRoot?: string; readonly branch?: string }> {
+  const resolution = resolveClaimWorktree(probe, recorded.path, probe.currentWorkingDirectory());
+  if (resolution.kind === "unresolved") return { facts: { kind: "gone", lookups: resolution.lookups } };
+  if (resolution.kind === "not-measured") return { facts: { kind: "not-measured", reason: resolution.reason } };
+  const worktreePath = resolution.path;
 
-  const forms = normalizedForms(probe, recorded.path);
-  if (forms.some((form) => activeClaimedPaths.has(form))) return { facts: { kind: "claimed-by-active-task" } };
+  const forms = normalizedForms(probe, worktreePath);
+  if (forms.some((form) => activeClaimedPaths.has(form))) return { facts: { kind: "claimed-by-active-task" }, worktreePath };
 
-  const listed = probe.listWorktrees(recorded.path);
+  const listed = probe.listWorktrees(worktreePath);
   if (!listed.ok) return { facts: { kind: "not-measured", reason: `git worktree list failed: ${listed.reason}` } };
   const entries = listed.value;
-  const real = probe.realPath(recorded.path);
+  const real = probe.realPath(worktreePath);
   const index = entries.findIndex((entry) => probe.realPath(entry.path) === real);
   if (index < 0) return { facts: { kind: "not-measured", reason: "not a linked worktree of its repository" } };
   const entry = entries[index] as ListedWorktree;
   const repoRoot = (entries[0] as ListedWorktree).path;
   const branch = entry.branch;
 
-  const removalFacts = await removal.gatherRemovalFacts(recorded.path, callerSession);
+  const removalFacts = await removal.gatherRemovalFacts(worktreePath, callerSession);
   let ownCommitCount: Measured<number>;
   if (index === 0) ownCommitCount = { ok: false, reason: "main checkout" };
   else if (branch === undefined) ownCommitCount = { ok: false, reason: "detached HEAD (no branch to delete)" };
   else if (recorded.baseSha === undefined) {
     ownCommitCount = { ok: false, reason: "no claim-time base recorded (claim predates worktree-cleanup tracking)" };
   } else {
-    const own = probe.countCommits(recorded.path, `${recorded.baseSha}..${branch}`);
+    const own = probe.countCommits(worktreePath, `${recorded.baseSha}..${branch}`);
     ownCommitCount = own.ok ? own : { ok: false, reason: `own-commit count failed: ${own.reason}` };
   }
   return {
     facts: { kind: "measured", removal: removalFacts, ownCommitCount },
+    worktreePath,
     repoRoot,
     ...(branch !== undefined ? { branch } : {}),
   };
@@ -306,7 +344,8 @@ export async function evaluateRecordedWorktree(
   const gathered = await gatherWorktreeFacts(probe, removal, recorded, ctx.activeClaimedPaths, ctx.callerSession);
   const decision = decideWorktreeCleanup(gathered.facts);
   return {
-    worktree: recorded.path,
+    // the resolved directory when one was found, so removal and every printed line name the real path
+    worktree: gathered.worktreePath ?? recorded.path,
     ...decision,
     ...(decision.decision === "remove" && gathered.repoRoot !== undefined && gathered.branch !== undefined
       ? { repoRoot: gathered.repoRoot, branch: gathered.branch }
@@ -343,7 +382,7 @@ export function applyWorktreeRemoval(probe: WorktreeGitProbe, evaluation: Worktr
 /**
  * The one line `lore done` prints per recorded worktree:
  * `worktree: removed <path>` | `worktree: kept <path>: <reason>` | `worktree: not-measured <path>: <reason>`
- * | `worktree: gone <path>`.
+ * | `worktree: gone <value>: <path lookup>; <branch lookup>`.
  */
 export function formatWorktreeOutcomeLine(outcome: WorktreeOutcome): string {
   switch (outcome.decision) {
@@ -354,7 +393,7 @@ export function formatWorktreeOutcomeLine(outcome: WorktreeOutcome): string {
     case "not-measured":
       return `worktree: not-measured ${outcome.worktree}: ${outcome.reason}`;
     case "gone":
-      return `worktree: gone ${outcome.worktree}`;
+      return `worktree: gone ${outcome.worktree}: ${outcome.reason}`;
   }
 }
 
