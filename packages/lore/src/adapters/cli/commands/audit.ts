@@ -62,6 +62,7 @@ import { parseAuditActor, type AuditEntry } from "@lore/core";
 import type { AuditFilters } from "../../../store/store-interface.js";
 import type { AuditAnchorRef, AuditMiss } from "../../../service/audit-service.js";
 import { invocationOf } from "../command-invocation.js";
+import { resolveTrackedWriteRoot } from "../working-tree-root.js";
 
 // ─── SPEC-079 G3 — `.lore/audit-anchor.json` file contract ─────────────────
 //
@@ -228,8 +229,15 @@ export default defineCommand({
           entry_count: headResult.value.entry_count,
           anchored_at: new Date().toISOString(),
         };
-        const corpusRoot = resolveConsumerCorpusRoot(inv);
-        writeFileSync(auditAnchorFilePath(corpusRoot), `${JSON.stringify(anchorFile, null, 2)}\n`, "utf8");
+        // reason: INT-T5 — audit-anchor.json is tracked; pin the head in the invoking working tree, while the
+        // chain head itself was read from the shared corpus above.
+        const anchorRoot = resolveTrackedWriteRoot(inv.cwd, resolveConsumerCorpusRoot(inv));
+        if (!anchorRoot.ok) {
+          process.stderr.write(formatError(anchorRoot.error) + "\n");
+          process.exitCode = exitCode(anchorRoot.error);
+          return;
+        }
+        writeFileSync(auditAnchorFilePath(anchorRoot.value),`${JSON.stringify(anchorFile, null, 2)}\n`, "utf8");
 
         if (args.json) {
           console.log(JSON.stringify({ ok: true, data: anchorFile }, null, 2));
@@ -244,8 +252,14 @@ export default defineCommand({
 
       // ── --verify branch ─────────────────────────────────────────────────
       if (args.verify) {
-        const corpusRoot = resolveConsumerCorpusRoot(inv);
-        const { anchor, error: anchorFileError } = readAuditAnchorFile(corpusRoot);
+        // reason: INT-T5 — the anchor file is tracked, so it is read from the same invoking working tree it is written to.
+        const anchorRoot = resolveTrackedWriteRoot(inv.cwd, resolveConsumerCorpusRoot(inv));
+        if (!anchorRoot.ok) {
+          process.stderr.write(formatError(anchorRoot.error) + "\n");
+          process.exitCode = exitCode(anchorRoot.error);
+          return;
+        }
+        const { anchor, error: anchorFileError } = readAuditAnchorFile(anchorRoot.value);
         if (anchorFileError !== undefined) {
           process.stderr.write(`Error: ${anchorFileError}\n`);
           process.exitCode = 4;

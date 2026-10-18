@@ -24,6 +24,7 @@ import { dirname } from "path";
 import { defineCommand } from "citty";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatError } from "../utils.js";
+import { resolveTrackedWriteRoot } from "../working-tree-root.js";
 import type { DocType } from "@lore/core";
 import { docTypeSchema } from "@lore/core";
 import { invocationOf } from "../command-invocation.js";
@@ -80,7 +81,16 @@ export default defineCommand({
     // Derive project root from the lore DB path: dbPath = <projectDir>/.lore/lore.db.
     // reason: all docs and the export-index live relative to the project root, not cwd.
     // This mirrors the convention used by MigrationService and loader.ts itself.
-    const projectDir = dirname(dirname(dbPath));
+    // reason: INT-T5 — the corpus (DB) may be the shared checkout, but the mirror (.lore/export-index.json,
+    // docs/requirements) is tracked and is written only into the invoking working tree.
+    const projectDirResolved = resolveTrackedWriteRoot(inv.cwd, dirname(dirname(dbPath)));
+    if (!projectDirResolved.ok) {
+      app.close();
+      process.stderr.write(formatError(projectDirResolved.error) + "\n");
+      process.exitCode = exitCode(projectDirResolved.error);
+      return;
+    }
+    const projectDir = projectDirResolved.value;
 
     try {
       // reason: exactOptionalPropertyTypes=true forbids passing undefined for optional `type`.
