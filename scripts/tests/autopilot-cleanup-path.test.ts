@@ -1,5 +1,6 @@
 // @reads assets/skills/lore-autopilot/SKILL.md
 // @reads assets/context/worktree-dispatch.md
+// @reads assets/context/autopilot-cleanup-path-missing.md
 /**
  * CL-4: the shipped orchestrator guidance trusts `lore done` to remove a merged agent worktree and sweeps at round end,
  * instead of telling the orchestrator to run `git worktree remove` by hand after the merge.
