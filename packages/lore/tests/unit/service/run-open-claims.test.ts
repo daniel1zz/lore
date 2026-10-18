@@ -13,6 +13,7 @@ import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
+import { actedStore } from "../../live-invocation.js";
 import { RunService } from "../../../src/service/run-service.js";
 import type { WorktreeGitProbe } from "../../../src/service/worktree-cleanup.js";
 
@@ -27,7 +28,7 @@ function probeOf(listed: Listed): WorktreeGitProbe {
 const REPO = "/repo";
 
 async function setup(listed: Listed, claimedWorktree: string, probe: WorktreeGitProbe = probeOf(listed)) {
-  const store = new InMemoryStore();
+  const store = actedStore(new InMemoryStore());
   const corpus = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
   const plan = await corpus.create({ type: "plan", title: "Plan A", content: "# A" } as CreateDocInput);
   if (!plan.ok) throw new Error(JSON.stringify(plan.error));
