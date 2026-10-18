@@ -54,7 +54,7 @@ import type {
   Telemetry,
   TelemetryEvent,
 } from "@lore/core";
-import { actedStore } from "../../live-invocation.js";
+import { actedStore, liveWarn } from "../../live-invocation.js";
 
 // ─── Test helpers ─────────────────────────────────────────────────────────────
 
@@ -166,7 +166,8 @@ describe("runCalibrationHook — HAPPY (decision pairing persists the correct hu
       const doc = makeDoc({ id: "01ARZ3DOC00000000000010", version: 3 });
 
       await runCalibrationHook(
-        { judgmentService: service, telemetry: makeMockTelemetry().telemetry },
+        {
+    warn: liveWarn(), judgmentService: service, telemetry: makeMockTelemetry().telemetry },
         { updatedDoc: doc, actedOnVersion: 3, humanAction, actor: "alice" },
       );
 
@@ -195,7 +196,8 @@ describe("runCalibrationHook — REGRESSION (--calibration-note plumbing)", () =
     const doc = makeDoc({ id: "01ARZ3DOC00000000000020", version: 1 });
 
     await runCalibrationHook(
-      { judgmentService: service, telemetry: makeMockTelemetry().telemetry },
+      {
+    warn: liveWarn(), judgmentService: service, telemetry: makeMockTelemetry().telemetry },
       {
         updatedDoc: doc,
         actedOnVersion: 1,
@@ -222,7 +224,8 @@ describe("runCalibrationHook — REGRESSION (--calibration-note plumbing)", () =
     const doc = makeDoc({ id: "01ARZ3DOC00000000000021", version: 1 });
 
     await runCalibrationHook(
-      { judgmentService: service, telemetry: makeMockTelemetry().telemetry },
+      {
+    warn: liveWarn(), judgmentService: service, telemetry: makeMockTelemetry().telemetry },
       { updatedDoc: doc, actedOnVersion: 1, humanAction: "approve", actor: "bob" },
     );
 
@@ -255,7 +258,8 @@ describe("runCalibrationHook — STATE (judgment.doc_version !== actedOnVersion 
     const doc = makeDoc({ id: "01ARZ3DOC00000000000030", version: 5 });
 
     await runCalibrationHook(
-      { judgmentService: service, telemetry: hookTelemetry },
+      {
+    warn: liveWarn(), judgmentService: service, telemetry: hookTelemetry },
       { updatedDoc: doc, actedOnVersion: 5, humanAction: "approve", actor: "alice" },
     );
 
@@ -284,7 +288,8 @@ describe("runCalibrationHook — NEGATIVE (no judgment exists for the doc)", () 
     const doc = makeDoc({ id: "01ARZ3DOC00000000000040", version: 1 });
 
     await runCalibrationHook(
-      { judgmentService: service, telemetry: hookTelemetry },
+      {
+    warn: liveWarn(), judgmentService: service, telemetry: hookTelemetry },
       { updatedDoc: doc, actedOnVersion: 1, humanAction: "approve", actor: "alice" },
     );
 
@@ -331,7 +336,8 @@ describe("runCalibrationHook — ERROR (calibration write failure warns but neve
 
     await expect(
       runCalibrationHook(
-        { judgmentService: service, telemetry: hookTelemetry },
+        {
+    warn: liveWarn(), judgmentService: service, telemetry: hookTelemetry },
         { updatedDoc: doc, actedOnVersion: 1, humanAction: "approve", actor: "alice" },
       ),
     ).resolves.toBeUndefined();
@@ -365,7 +371,8 @@ describe("runCalibrationHook — ERROR (calibration write failure warns but neve
     const doc = makeDoc({ id: "01ARZ3DOC00000000000051", version: 1 });
 
     await runCalibrationHook(
-      { judgmentService: service, telemetry: hookTelemetry },
+      {
+    warn: liveWarn(), judgmentService: service, telemetry: hookTelemetry },
       { updatedDoc: doc, actedOnVersion: 1, humanAction: "reject", actor: "alice" },
     );
 

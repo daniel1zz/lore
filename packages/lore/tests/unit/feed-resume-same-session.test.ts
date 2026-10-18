@@ -106,6 +106,7 @@ import {
 import { buildResumeFeed, renderResumeFeed } from "../../src/flows/feed-flow.js";
 import type { App } from "../../src/app.js";
 import type { ResumeHandoffRecord, ResumeResult } from "../../src/service/session-service.js";
+import { liveIo } from "../live-invocation.js";
 
 // ─── Env/marker isolation ───────────────────────────────────────────────────
 // This suite mutates CLAUDE_CODE_SESSION_ID/CLAUDE_SESSION_ID and writes a
@@ -189,7 +190,8 @@ describe("HAPPY — RED scenario: verifying my own just-authored ticket withhold
     const record = buildRecord(ORCHESTRATOR_EXTRA, HANDOFF_CREATED_AT);
     const resumeResult: ResumeResult = { found: true, handoff: record, multi_actor: false, readiness: null };
 
-    const result = await buildResumeFeed(stubApp(resumeResult), { handoff: record.handoff_slug, by: CURRENT_ACTOR }, { env: process.env, tmpDir: tmpdir(), cwd: process.cwd(), user: userInfo().username });
+    const result = await buildResumeFeed(stubApp(resumeResult), { handoff: record.handoff_slug, by: CURRENT_ACTOR }, {
+    io: liveIo(), env: process.env, tmpDir: tmpdir(), cwd: process.cwd(), user: userInfo().username });
 
     expect(result.ok).toBe(true);
     if (!result.ok) return;
@@ -209,7 +211,8 @@ describe("NEGATIVE — CONTROL 5: consuming a DIFFERENT session's (different act
     const record = buildRecord(OTHER_ACTOR_EXTRA, HANDOFF_CREATED_AT);
     const resumeResult: ResumeResult = { found: true, handoff: record, multi_actor: false, readiness: null };
 
-    const result = await buildResumeFeed(stubApp(resumeResult), { handoff: record.handoff_slug, by: CURRENT_ACTOR }, { env: process.env, tmpDir: tmpdir(), cwd: process.cwd(), user: userInfo().username });
+    const result = await buildResumeFeed(stubApp(resumeResult), { handoff: record.handoff_slug, by: CURRENT_ACTOR }, {
+    io: liveIo(), env: process.env, tmpDir: tmpdir(), cwd: process.cwd(), user: userInfo().username });
 
     expect(result.ok).toBe(true);
     if (!result.ok) return;
@@ -233,7 +236,8 @@ describe("BOUNDARY — CONTROL 6: consuming a genuinely EARLIER session's own ti
     const record = buildRecord(ORCHESTRATOR_EXTRA, HANDOFF_CREATED_AT);
     const resumeResult: ResumeResult = { found: true, handoff: record, multi_actor: false, readiness: null };
 
-    const result = await buildResumeFeed(stubApp(resumeResult), { handoff: record.handoff_slug, by: CURRENT_ACTOR }, { env: process.env, tmpDir: tmpdir(), cwd: process.cwd(), user: userInfo().username });
+    const result = await buildResumeFeed(stubApp(resumeResult), { handoff: record.handoff_slug, by: CURRENT_ACTOR }, {
+    io: liveIo(), env: process.env, tmpDir: tmpdir(), cwd: process.cwd(), user: userInfo().username });
 
     expect(result.ok).toBe(true);
     if (!result.ok) return;
@@ -249,7 +253,8 @@ describe("STATE — Q2 fail-safe: no CLAUDE_CODE_SESSION_ID/CLAUDE_SESSION_ID at
     const record = buildRecord(ORCHESTRATOR_EXTRA, HANDOFF_CREATED_AT);
     const resumeResult: ResumeResult = { found: true, handoff: record, multi_actor: false, readiness: null };
 
-    const result = await buildResumeFeed(stubApp(resumeResult), { handoff: record.handoff_slug, by: CURRENT_ACTOR }, { env: process.env, tmpDir: tmpdir(), cwd: process.cwd(), user: userInfo().username });
+    const result = await buildResumeFeed(stubApp(resumeResult), { handoff: record.handoff_slug, by: CURRENT_ACTOR }, {
+    io: liveIo(), env: process.env, tmpDir: tmpdir(), cwd: process.cwd(), user: userInfo().username });
 
     expect(result.ok).toBe(true);
     if (!result.ok) return;
@@ -267,7 +272,8 @@ describe("REGRESSION — Q2 fail-safe: session id present but the marker cannot 
     const record = buildRecord(ORCHESTRATOR_EXTRA, HANDOFF_CREATED_AT);
     const resumeResult: ResumeResult = { found: true, handoff: record, multi_actor: false, readiness: null };
 
-    const result = await buildResumeFeed(stubApp(resumeResult), { handoff: record.handoff_slug, by: CURRENT_ACTOR }, { env: process.env, tmpDir: tmpdir(), cwd: process.cwd(), user: userInfo().username });
+    const result = await buildResumeFeed(stubApp(resumeResult), { handoff: record.handoff_slug, by: CURRENT_ACTOR }, {
+    io: liveIo(), env: process.env, tmpDir: tmpdir(), cwd: process.cwd(), user: userInfo().username });
 
     expect(result.ok).toBe(true);
     if (!result.ok) return;
@@ -281,7 +287,8 @@ describe("REGRESSION — Q2 fail-safe: session id present but the marker cannot 
     const record = buildRecord(ORCHESTRATOR_EXTRA, HANDOFF_CREATED_AT);
     const resumeResult: ResumeResult = { found: true, handoff: record, multi_actor: false, readiness: null };
 
-    const result = await buildResumeFeed(stubApp(resumeResult), { handoff: record.handoff_slug, by: CURRENT_ACTOR }, { env: process.env, tmpDir: tmpdir(), cwd: process.cwd(), user: userInfo().username });
+    const result = await buildResumeFeed(stubApp(resumeResult), { handoff: record.handoff_slug, by: CURRENT_ACTOR }, {
+    io: liveIo(), env: process.env, tmpDir: tmpdir(), cwd: process.cwd(), user: userInfo().username });
 
     expect(result.ok).toBe(true);
     if (!result.ok) return;
@@ -303,7 +310,8 @@ describe("HAPPY — AC 5 CONTROL: measured + matching actor -> output BYTE-IDENT
     const record = buildRecord(ORCHESTRATOR_EXTRA, HANDOFF_CREATED_AT);
     const resumeResult: ResumeResult = { found: true, handoff: record, multi_actor: false, readiness: null };
 
-    const result = await buildResumeFeed(stubApp(resumeResult), { handoff: record.handoff_slug, by: CURRENT_ACTOR }, { env: process.env, tmpDir: tmpdir(), cwd: process.cwd(), user: userInfo().username });
+    const result = await buildResumeFeed(stubApp(resumeResult), { handoff: record.handoff_slug, by: CURRENT_ACTOR }, {
+    io: liveIo(), env: process.env, tmpDir: tmpdir(), cwd: process.cwd(), user: userInfo().username });
 
     expect(result.ok).toBe(true);
     if (!result.ok) return;
@@ -325,7 +333,8 @@ describe("NEGATIVE — AC 4a: no CLAUDE_CODE_SESSION_ID/CLAUDE_SESSION_ID at all
     const record = buildRecord(ORCHESTRATOR_EXTRA, HANDOFF_CREATED_AT);
     const resumeResult: ResumeResult = { found: true, handoff: record, multi_actor: false, readiness: null };
 
-    const result = await buildResumeFeed(stubApp(resumeResult), { handoff: record.handoff_slug, by: CURRENT_ACTOR }, { env: process.env, tmpDir: tmpdir(), cwd: process.cwd(), user: userInfo().username });
+    const result = await buildResumeFeed(stubApp(resumeResult), { handoff: record.handoff_slug, by: CURRENT_ACTOR }, {
+    io: liveIo(), env: process.env, tmpDir: tmpdir(), cwd: process.cwd(), user: userInfo().username });
 
     expect(result.ok).toBe(true);
     if (!result.ok) return;
@@ -345,7 +354,8 @@ describe("BOUNDARY — AC 4b: session id set, marker absent -> feed carries no-m
     const record = buildRecord(ORCHESTRATOR_EXTRA, HANDOFF_CREATED_AT);
     const resumeResult: ResumeResult = { found: true, handoff: record, multi_actor: false, readiness: null };
 
-    const result = await buildResumeFeed(stubApp(resumeResult), { handoff: record.handoff_slug, by: CURRENT_ACTOR }, { env: process.env, tmpDir: tmpdir(), cwd: process.cwd(), user: userInfo().username });
+    const result = await buildResumeFeed(stubApp(resumeResult), { handoff: record.handoff_slug, by: CURRENT_ACTOR }, {
+    io: liveIo(), env: process.env, tmpDir: tmpdir(), cwd: process.cwd(), user: userInfo().username });
 
     expect(result.ok).toBe(true);
     if (!result.ok) return;
@@ -370,7 +380,8 @@ describe("ERROR — AC 4c: marker with a wrong-typed started_at -> unreadable ki
       const result = await buildResumeFeed(stubApp(resumeResult), {
         handoff: record.handoff_slug,
         by: CURRENT_ACTOR,
-      }, { env: process.env, tmpDir: tmpdir(), cwd: process.cwd(), user: userInfo().username });
+      }, {
+    io: liveIo(), env: process.env, tmpDir: tmpdir(), cwd: process.cwd(), user: userInfo().username });
 
       expect(result.ok).toBe(true);
       if (!result.ok) return;
@@ -398,7 +409,8 @@ describe("ERROR — AC 4d: marker with invalid JSON -> unreadable kind surfaced 
       const result = await buildResumeFeed(stubApp(resumeResult), {
         handoff: record.handoff_slug,
         by: CURRENT_ACTOR,
-      }, { env: process.env, tmpDir: tmpdir(), cwd: process.cwd(), user: userInfo().username });
+      }, {
+    io: liveIo(), env: process.env, tmpDir: tmpdir(), cwd: process.cwd(), user: userInfo().username });
 
       expect(result.ok).toBe(true);
       if (!result.ok) return;
@@ -421,7 +433,8 @@ describe("STATE — the authorship note is inserted BEFORE RESUME_COVERAGE_FLOOR
     const record = buildRecord(ORCHESTRATOR_EXTRA, HANDOFF_CREATED_AT);
     const resumeResult: ResumeResult = { found: true, handoff: record, multi_actor: false, readiness: null };
 
-    const result = await buildResumeFeed(stubApp(resumeResult), { handoff: record.handoff_slug, by: CURRENT_ACTOR }, { env: process.env, tmpDir: tmpdir(), cwd: process.cwd(), user: userInfo().username });
+    const result = await buildResumeFeed(stubApp(resumeResult), { handoff: record.handoff_slug, by: CURRENT_ACTOR }, {
+    io: liveIo(), env: process.env, tmpDir: tmpdir(), cwd: process.cwd(), user: userInfo().username });
 
     expect(result.ok).toBe(true);
     if (!result.ok) return;

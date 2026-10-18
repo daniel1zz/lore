@@ -44,7 +44,7 @@ import { createMachineAuthStores, type MachineAuthStores } from "../../src/adapt
 import { createApp } from "../../src/app.js";
 import type { App } from "../../src/app.js";
 import type { CreateDocInput } from "@lore/core";
-import { liveAmbient, liveWriteContext } from "../live-invocation.js";
+import { liveAmbient, liveWriteContext, liveIo } from "../live-invocation.js";
 
 interface TestContext {
   server: ReturnType<typeof Bun.serve>;
@@ -117,7 +117,8 @@ async function makeTestServer(): Promise<TestContext> {
   } as CreateDocInput);
   if (!taskResult.ok) throw new Error("Failed to create seed task");
 
-  const server = startHttpServer(app, { port: 0, host: "127.0.0.1", machineAuth });
+  const server = startHttpServer(app, {
+    io: liveIo(), port: 0, host: "127.0.0.1", machineAuth });
   const baseUrl = `http://127.0.0.1:${server.port}`;
 
   return {

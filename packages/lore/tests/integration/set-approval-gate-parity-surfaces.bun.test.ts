@@ -21,7 +21,7 @@
  * @spec_ref spec-approval-and-plan-closure-go-through-the-same-checks-on AC-AP-2
  */
 
-import { liveInvocation, liveAmbient, liveWriteContext, actedStore } from "../live-invocation.js";
+import { liveInvocation, liveAmbient, liveWriteContext, actedStore, liveIo } from "../live-invocation.js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { mkdirSync, mkdtempSync, rmSync } from "fs";
 import { join } from "path";
@@ -71,7 +71,8 @@ beforeAll(async () => {
   const key = await app.apiKeyStore.create("agent-key", "agent");
   if (!key.ok) throw new Error("bearer key creation failed");
   bearer = key.value.rawKey;
-  server = startHttpServer(app, { port: 0, host: "127.0.0.1", machineAuth });
+  server = startHttpServer(app, {
+    io: liveIo(), port: 0, host: "127.0.0.1", machineAuth });
   baseUrl = `http://127.0.0.1:${server.port}`;
 });
 

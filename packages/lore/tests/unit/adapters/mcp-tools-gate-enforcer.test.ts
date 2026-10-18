@@ -54,6 +54,7 @@ function makeGatedApp(): App {
   const store = actedStore(new InMemoryStore());
   const gateEnforcer = new GateEnforcer(undefined);
   return {
+    warn: () => undefined,
     corpusService: new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)), new NoOpTelemetry(), undefined, gateEnforcer),
     reviewService: new ReviewService(store, new RecordLockService(store, new GateEnforcer(undefined))),
     versionService: new VersionService(store, new RecordLockService(store, new GateEnforcer(undefined))),

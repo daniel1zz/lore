@@ -15,8 +15,8 @@
  *     `runCli(inv)`, the function the binary's entry calls; the exit code is what `runCli` RETURNS. There is no
  *     mapping and no startup copy in this file.
  *   - It assigns NO process global: not `process.env`, `process.chdir`, `process.argv`, `process.exit`,
- *     `process.exitCode`, `console.*`, nor `process.stdout/stderr.write`. A run's output and exit code live in its
- *     run scope (`src/adapters/cli/run-scope.ts`), so there is NO serial queue: two calls started together
+ *     `process.exitCode`, `console.*`, nor `process.stdout/stderr.write`. Every command writes through `inv.io` and
+ *     reports its code by return value, so there is NO serial queue: two calls started together
  *     (`Promise.all`, `it.concurrent`) overlap, each with its own cwd, env, home, output and code.
  *   - `options.home` is required and is the run's home directory; a call without one throws (a default would be the
  *     developer's real home, AS-27). `options.env` is the WHOLE environment of the run (like
@@ -24,8 +24,6 @@
  *     The sandbox marker (`LORE_TEST_SANDBOX`, `LORE_TEST_SANDBOX_REPO`) is always carried over from the test process,
  *     so the repository's own corpus is refused exactly as for a spawned binary. A test process without the marker
  *     armed makes the call throw (never runs unguarded).
- *   - Output written after the command ended with `exitCli` (a `catch` that ran because the exit unwound the stack)
- *     is dropped and only the FIRST exit code counts, as for a dead process.
  * Side-effect class: IO (whatever the command does to the corpus and under `home`); reads the test process's env once
  * per call to build the default env and to carry the sandbox marker.
  */
@@ -120,15 +118,12 @@ export async function runLoreInProcess(args: readonly string[], options: InProce
     });
   } catch (error) {
     if (!(error instanceof RunIdentityArgumentError)) throw error;
-    // reason: the binary's entry refuses a malformed identity flag with exit 2 (runCliFromProcess); same here.
+    // reason: the binary's entry (`src/index.ts`) refuses a malformed identity flag with exit 2; same here.
     return { stdout: "", stderr: `Error: ${error.message}\n`, exitCode: 2 };
   }
   let exitCode: number;
   try {
-    exitCode = await runCli(inv, {
-      installSyncStdout: false,
-      ...(options.transformCommand === undefined ? {} : { transformCommand: options.transformCommand }),
-    });
+    exitCode = await runCli(inv, options.transformCommand === undefined ? {} : { transformCommand: options.transformCommand });
   } catch (error) {
     // reason: an exception that escaped runCli is a defect in the command or the helper; show it, never swallow it.
     err.push(`${error instanceof Error ? (error.stack ?? error.message) : String(error)}\n`);

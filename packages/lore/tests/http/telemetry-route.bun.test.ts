@@ -40,7 +40,7 @@ import { createMachineAuthStores, type MachineAuthStores } from "../../src/adapt
 import { createApp } from "../../src/app.js";
 import type { App } from "../../src/app.js";
 import type { LoreConfig, Telemetry, TelemetryEvent } from "@lore/core";
-import { liveAmbient, liveWriteContext } from "../live-invocation.js";
+import { liveAmbient, liveWriteContext, liveIo } from "../live-invocation.js";
 
 interface TestContext {
   server: ReturnType<typeof Bun.serve>;
@@ -91,7 +91,8 @@ async function makeTestServer(telemetryEnabled: boolean): Promise<TestContext> {
   const machineKeyResult = await machineAuth.apiKeyStore.create("dashboard-local", "admin");
   if (!machineKeyResult.ok) throw new Error("Failed to create machine API key");
 
-  const server = startHttpServer(app, { port: 0, host: "127.0.0.1", machineAuth });
+  const server = startHttpServer(app, {
+    io: liveIo(), port: 0, host: "127.0.0.1", machineAuth });
   const baseUrl = `http://127.0.0.1:${server.port}`;
 
   return {

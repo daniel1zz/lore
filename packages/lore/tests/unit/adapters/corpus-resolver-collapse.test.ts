@@ -56,12 +56,13 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve as resolvePath } from "node:path";
 import { fileURLToPath } from "node:url";
 import ts from "typescript";
-import { CliExit } from "../../../src/adapters/cli/run-scope.js";
+import { CliExit } from "../../../src/adapters/cli/cli-exit.js";
 import {
   findLoreDbPath,
   findLoreDbPathQuiet,
   resolveCorpus,
 } from "../../../src/adapters/cli/corpus-resolution.js";
+import { liveIo } from "../../live-invocation.js";
 
 // ─── Paths ───────────────────────────────────────────────────────────────
 
@@ -476,8 +477,8 @@ describe("AC-CP-2(a) BEHAVIOUR — both wrappers delegate to ONE shared resolver
     const dbPath = makeCorpus(repo);
     process.chdir(repo);
 
-    expect(findLoreDbPathQuiet({ cwd: process.cwd(), env: process.env })).toBe(dbPath);
-    expect(findLoreDbPath({ cwd: process.cwd(), env: process.env })).toBe(dbPath);
+    expect(findLoreDbPathQuiet(liveIo(), { cwd: process.cwd(), env: process.env })).toBe(dbPath);
+    expect(findLoreDbPath(liveIo(), { cwd: process.cwd(), env: process.env })).toBe(dbPath);
   });
 
   it("NEGATIVE: the loud wrapper exits EXACTLY 1 with the pre-change stderr message, byte-identical, when no corpus exists anywhere", () => {
@@ -487,7 +488,7 @@ describe("AC-CP-2(a) BEHAVIOUR — both wrappers delegate to ONE shared resolver
 
     const stderrSpy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
 
-    expect(exitCodeOf(() => findLoreDbPath({ cwd: process.cwd(), env: process.env }))).toBe(1);
+    expect(exitCodeOf(() => findLoreDbPath(liveIo(), { cwd: process.cwd(), env: process.env }))).toBe(1);
     expect(stderrSpy.mock.calls.map((c) => String(c[0])).join("")).toBe(PRE_CHANGE_NO_DB_STDERR_MESSAGE);
   });
 
@@ -496,7 +497,7 @@ describe("AC-CP-2(a) BEHAVIOUR — both wrappers delegate to ONE shared resolver
     initGitRepo(repo);
     process.chdir(repo);
 
-    expect(findLoreDbPathQuiet({ cwd: process.cwd(), env: process.env })).toBeUndefined();
+    expect(findLoreDbPathQuiet(liveIo(), { cwd: process.cwd(), env: process.env })).toBeUndefined();
   });
 
   it("MECHANISM: findLoreDbPath's and findLoreDbPathQuiet's function bodies call a SHARED symbol (checker identity, not text)", () => {
@@ -551,14 +552,14 @@ describe("§5.2 — provenance: undetermined never surfaces its own cwd path", (
     const dir = mkScratchDir("ac-cp-2-undetermined-resolve-");
     // Deliberately NOT a git repo at all -- gatherCorpusGitFacts's rev-parse probes
     // both fail, and there is no `.lore/lore.db` anywhere in dir's ancestor chain.
-    const resolved = resolveCorpus(dir, process.env);
+    const resolved = resolveCorpus(liveIo(), dir, process.env);
     expect(resolved).toEqual({ path: dir, provenance: "undetermined" });
   });
 
   it("findLoreDbPathQuiet returns undefined for that SAME fixture, never the directory path", () => {
     const dir = mkScratchDir("ac-cp-2-undetermined-quiet-");
     process.chdir(dir);
-    const result = findLoreDbPathQuiet({ cwd: process.cwd(), env: process.env });
+    const result = findLoreDbPathQuiet(liveIo(), { cwd: process.cwd(), env: process.env });
     expect(result).toBeUndefined();
     expect(result).not.toBe(dir);
   });
@@ -569,7 +570,7 @@ describe("§5.2 — provenance: undetermined never surfaces its own cwd path", (
 
     const stderrSpy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
 
-    expect(exitCodeOf(() => findLoreDbPath({ cwd: process.cwd(), env: process.env }))).toBe(1);
+    expect(exitCodeOf(() => findLoreDbPath(liveIo(), { cwd: process.cwd(), env: process.env }))).toBe(1);
     expect(stderrSpy.mock.calls.map((c) => String(c[0])).join("")).toBe(PRE_CHANGE_NO_DB_STDERR_MESSAGE);
   });
 });

@@ -77,6 +77,7 @@ const stubApiKeyStore = {} as ApiKeyStore;
 
 function makeApp(store: InMemoryStore): App {
   return {
+    warn: () => undefined,
     corpusService: new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined))),
     // reason: real ReviewService/AuditService (not null-cast, unlike the
     // other unused services below) — the AC-074-3 exclusion this route now

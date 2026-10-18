@@ -397,7 +397,8 @@ describe("AC-AU-5 lore run reap", () => {
     await killAndWait(harness.pid);
     fixture.endRun("cc:h4a");
 
-    const real = createRealProcessTablePort({ env: process.env });
+    const real = createRealProcessTablePort({
+    cwd: process.cwd(), env: process.env });
     let arrivals = 0;
     let termsSent = 0;
     let openGate: () => void = () => undefined;

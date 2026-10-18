@@ -444,7 +444,7 @@ describe("AC-AU-3 human channel units (injectable seams)", () => {
   });
 
   it("the live process-table reader sees this process and its parent chain (production wiring)", () => {
-    const table = readLiveProcessTable();
+    const table = readLiveProcessTable(process.cwd());
     expect(table.ok).toBe(true);
     if (!table.ok) return;
     const self = table.value.find((e) => e.pid === process.pid);

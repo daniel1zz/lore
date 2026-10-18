@@ -40,6 +40,7 @@ function makeApp(): App {
   const lock = new RecordLockService(store, new GateEnforcer(undefined));
   corpusService = new CorpusService(store, lock);
   return {
+    warn: () => undefined,
     corpusService,
     reviewService: new ReviewService(store, lock),
     versionService: new VersionService(store, lock),

@@ -113,7 +113,6 @@ describe("AC-IV-5: every registered command receives the one resolved Invocation
         const inv = makeInvocation(path);
         const seen: unknown[] = [];
         await runCli(inv, {
-          installSyncStdout: false,
           transformCommand: (commandName, command) =>
             commandName === name ? stubRuns(command, (context) => seen.push(context.inv)) : command,
         });

@@ -72,6 +72,7 @@ function makeApp(): App {
   validityService = new ValidityService(store);
 
   const app: App = {
+    warn: () => undefined,
     corpusService,
     reviewService: new ReviewService(store, new RecordLockService(store, new GateEnforcer(undefined))),
     versionService: new VersionService(store, new RecordLockService(store, new GateEnforcer(undefined))),

@@ -19,7 +19,7 @@ import {
   resolveActorWithIdentitySource,
   resetActorFallbackWarningForTests,
 } from "../../../src/adapters/cli/utils.js";
-import { liveInvocation } from "../../live-invocation.js";
+import { liveInvocation, liveIo } from "../../live-invocation.js";
 
 const root = mkdtempSync(join(tmpdir(), "lore-actor-ignores-lore-actor-"));
 afterAll(() => rmSync(root, { recursive: true, force: true }));
@@ -88,7 +88,7 @@ describe("AC-ROI-2 CLI resolver ignores LORE_ACTOR", () => {
 
   it("AC-ROI-2 cli: resolveActorWithIdentitySource never reports env", () => {
     const wt = makeLinkedWorktree("feat-y");
-    const r = resolveActorWithIdentitySource(undefined, { LORE_ACTOR: LORE_ACTOR_VALUE }, wt, liveInvocation().user);
+    const r = resolveActorWithIdentitySource(liveIo(), undefined, { LORE_ACTOR: LORE_ACTOR_VALUE }, wt, liveInvocation().user);
     expect(r).toEqual({ actor: "agent:feat-y", source: "worktree-derived" });
   });
 });
@@ -103,7 +103,7 @@ describe("AC-ROI-2 retired mechanism is not named in the OS-fallback advisory", 
       return true;
     }) as typeof process.stderr.write;
     try {
-      resolveActorWithIdentitySource(undefined, { LORE_ACTOR: LORE_ACTOR_VALUE }, makeMainCheckout(), liveInvocation().user);
+      resolveActorWithIdentitySource(liveIo(), undefined, { LORE_ACTOR: LORE_ACTOR_VALUE }, makeMainCheckout(), liveInvocation().user);
     } finally {
       process.stderr.write = original;
     }

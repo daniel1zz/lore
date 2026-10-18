@@ -28,6 +28,7 @@ function makeApp(store?: InMemoryStore): App {
   const s = store ?? actedStore(new InMemoryStore());
   const telemetry = new NoOpTelemetry();
   return {
+    warn: () => undefined,
     corpusService: new CorpusService(s, new RecordLockService(s, new GateEnforcer(undefined)), telemetry),
     reviewService: new ReviewService(s, new RecordLockService(s, new GateEnforcer(undefined))),
     versionService: new VersionService(s, new RecordLockService(s, new GateEnforcer(undefined))),

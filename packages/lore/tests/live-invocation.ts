@@ -11,7 +11,8 @@ import type { ProviderRuntime } from "../src/ai/registry.js";
 import { declareWriteActorForTests } from "../src/store/write-context-store.js";
 import type { StoreInterface } from "../src/store/store-interface.js";
 import { resolveActorWithSource } from "@lore/core/node";
-import { runInScope } from "../src/adapters/cli/run-scope.js";
+import { CliExit } from "../src/adapters/cli/cli-exit.js";
+import { warnSinkOf, type WarnSink } from "../src/service/warn-sink.js";
 
 /** The live process as an Invocation: `env` is the LIVE `process.env` object, so a test's later env edits stay visible. */
 export function liveInvocation(): Invocation {
@@ -37,6 +38,16 @@ export function liveInvocation(): Invocation {
   };
 }
 
+/** The live process streams as the writers of a run: what a test passes where production passes `inv.io`. */
+export function liveIo(): Invocation["io"] {
+  return { stdout: process.stdout, stderr: process.stderr };
+}
+
+/** The live stderr as a {@link WarnSink}: what a test passes where the composition passes `warnSinkOf(inv.io.stderr)`. */
+export function liveWarn(): WarnSink {
+  return warnSinkOf(process.stderr);
+}
+
 /** The live process as the composition's {@link AppAmbient}: what `createApp(dbPath, config, ambient)` takes. */
 export function liveAmbient(): AppAmbient {
   const envHome = process.env["HOME"];
@@ -45,6 +56,7 @@ export function liveAmbient(): AppAmbient {
     home: envHome !== undefined && envHome !== "" ? envHome : homedir(),
     tmpDir: tmpdir(),
     cwd: process.cwd(),
+    io: liveIo(),
   };
 }
 
@@ -72,16 +84,19 @@ export function actedStore<T extends StoreInterface>(store: T): T {
 }
 
 /**
- * Run `body` (a command handler called directly: `cmd.run({ args, inv })`) as ONE run and return the exit code it ended
- * with: the code of `exitCli`, else the last `setExitCode`, else 0. Commands report their code to the run, never to
- * `process.exit` / `process.exitCode`, so a test that calls a handler without `runCli` reads the code from here.
+ * Run `body` (a command handler called directly: `cmd.run({ args, inv })`) and return the exit code it ended with: the
+ * code `body` RETURNED (a number), the code of a thrown `CliExit`, else 0. Commands report their code by return value,
+ * never to `process.exit` / `process.exitCode`, so a test that calls a handler without `runCli` reads the code here.
  *
- * @param body - the handler call; its returned value is ignored
- * @param inv - the run's Invocation (default: the live process; its io is the real process streams, so a test that
- *   captures output by spying on `console` / `process.stderr.write` keeps working)
+ * @param body - the handler call, e.g. `() => cmd.run({ args, inv })`
+ * @returns the exit code of the run
  */
-export async function runHandlerForExit(body: () => unknown, inv: Invocation = liveInvocation()): Promise<number> {
-  return runInScope(inv, async () => {
-    await body();
-  });
+export async function runHandlerForExit(body: () => unknown): Promise<number> {
+  try {
+    const returned = await body();
+    return typeof returned === "number" ? returned : 0;
+  } catch (error) {
+    if (error instanceof CliExit) return error.code;
+    throw error;
+  }
 }

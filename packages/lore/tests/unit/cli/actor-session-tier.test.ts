@@ -42,7 +42,7 @@ import {
   resetActorFallbackWarningForTests,
   type ActorSource,
 } from "../../../src/adapters/cli/utils.js";
-import { liveInvocation } from "../../live-invocation.js";
+import { liveInvocation, liveIo } from "../../live-invocation.js";
 
 /**
  * SPEC-104 fallout (`knowledge-spec-104-fallout-changed-tests-ts-porcelain-path-bug`):
@@ -225,7 +225,7 @@ describe("SPEC-069 AC-069-1: resolveActorWithSource session tier", () => {
       const stderrSpy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
       let actor = "";
       expect(() => {
-        actor = resolveActor(undefined, process.env, process.cwd(), liveInvocation().user);
+        actor = resolveActor(liveIo(), undefined, process.env, process.cwd(), liveInvocation().user);
       }).not.toThrow();
       expect(actor.length).toBeGreaterThan(0);
       expect(stderrSpy).toHaveBeenCalledTimes(1);

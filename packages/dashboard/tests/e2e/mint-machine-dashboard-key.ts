@@ -31,7 +31,7 @@ async function main(): Promise<void> {
   }
 
   const machineAuth = createMachineAuthStores({ baseDir });
-  const rawKey = await ensureLocalApiKey(machineAuth.apiKeyStore, machineAuth.baseDir);
+  const rawKey = await ensureLocalApiKey(machineAuth.apiKeyStore, machineAuth.baseDir, { stdout: process.stdout, stderr: process.stderr });
   console.log(JSON.stringify({ ok: true, data: { api_key: rawKey } }));
   machineAuth.db.close();
 }

@@ -43,7 +43,7 @@ async function run(args: readonly string[]): Promise<{ code: number; stdout: str
     home,
     io: { stdout: { write: (text) => out.push(text) }, stderr: { write: (text) => err.push(text) } },
   });
-  const code = await runCli(inv, { installSyncStdout: false });
+  const code = await runCli(inv);
   return { code, stdout: out.join(""), stderr: err.join("") };
 }
 

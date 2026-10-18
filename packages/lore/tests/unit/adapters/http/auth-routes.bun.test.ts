@@ -56,7 +56,7 @@ import { TreeCheckService } from "../../../../src/service/tree-check-service.js"
 import { NoOpTelemetry } from "@lore/core";
 import { MIGRATION_002_SQL } from "../../../../src/store/migrations/migration-002.js";
 import type { App } from "../../../../src/app.js";
-import { actedStore } from "../../../live-invocation.js";
+import { actedStore, liveIo } from "../../../live-invocation.js";
 
 // ─── Setup ────────────────────────────────────────────────────────────────────
 
@@ -88,6 +88,7 @@ async function makeTestServer(): Promise<TestContext> {
   const machineAuth = createMachineAuthStores({ baseDir: mkdtempSync(join(tmpdir(), "lore-auth-routes-test-")) });
 
   const app: App = {
+    warn: () => undefined,
     corpusService: new CorpusService(docStore, new RecordLockService(docStore, new GateEnforcer(undefined))),
     reviewService: new ReviewService(docStore, new RecordLockService(docStore, new GateEnforcer(undefined))),
     versionService: new VersionService(docStore, new RecordLockService(docStore, new GateEnforcer(undefined))),
@@ -126,7 +127,8 @@ async function makeTestServer(): Promise<TestContext> {
   const rawKey = createResult.value.rawKey;
 
   // Port 0 → OS assigns a free port
-  const server = startHttpServer(app, { port: 0, host: "127.0.0.1", machineAuth });
+  const server = startHttpServer(app, {
+    io: liveIo(), port: 0, host: "127.0.0.1", machineAuth });
   const baseUrl = `http://127.0.0.1:${server.port}`;
 
   return { server, app, db, apiKeyStore, sessionStore, machineAuth, rawKey, baseUrl };

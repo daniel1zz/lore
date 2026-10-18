@@ -50,7 +50,7 @@ import { createApp } from "../../src/app.js";
 import type { App } from "../../src/app.js";
 import type { CreateDocInput, DocRecord, TaskClaim } from "@lore/core";
 import { resolveActor } from "../../src/adapters/cli/utils.js";
-import { liveInvocation, liveAmbient, liveWriteContext, runHandlerForExit } from "../live-invocation.js";
+import { liveInvocation, liveAmbient, liveWriteContext, runHandlerForExit, liveIo } from "../live-invocation.js";
 import type { Invocation } from "@lore/core";
 
 /**
@@ -59,7 +59,7 @@ import type { Invocation } from "@lore/core";
  * test sets its session env, never captured at module load.
  */
 function currentActor(): string {
-  return resolveActor(undefined, process.env, process.cwd(), liveInvocation().user);
+  return resolveActor(liveIo(), undefined, process.env, process.cwd(), liveInvocation().user);
 }
 const SHARED_ANCHOR = "packages/core/src/session.ts";
 const SESSION_ENV_VARS = ["CLAUDE_CODE_SESSION_ID", "CLAUDE_SESSION_ID"] as const;

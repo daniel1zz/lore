@@ -124,6 +124,7 @@ function makeApp(): App {
     async () => ok(new Set()),
   );
   return {
+    warn: () => undefined,
     corpusService,
     reviewService: new ReviewService(store, new RecordLockService(store, new GateEnforcer(undefined))),
     versionService: new VersionService(store, new RecordLockService(store, new GateEnforcer(undefined))),

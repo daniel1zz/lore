@@ -33,6 +33,7 @@ import { parseArgs, renderUsage } from "citty";
 import type { ArgsDef, CommandContext, CommandDef } from "citty";
 import { findSingleDashViolation, findUnknownFlag, wrapCommandStrict } from "../../../src/adapters/cli/strict-flags.js";
 import { fixSingleDashAliasRendering, renderUsageDoubleDash } from "../../../src/adapters/cli/usage-render.js";
+import { liveIo } from "../../live-invocation.js";
 
 // Mirrors commands/list.ts's declared args at time of writing — enough of
 // the shape to exercise the --json flag AC-073-1 names.
@@ -372,7 +373,7 @@ describe("renderUsageDoubleDash (SPEC-073 D2 composition-site wrapper)", () => {
       args: VERIFY_ALLOW_NEW_COMMANDS_ARGS,
     };
 
-    await renderUsageDoubleDash(cmd);
+    await renderUsageDoubleDash(liveIo(), cmd);
 
     expect(logSpy).toHaveBeenCalledTimes(1);
     const printed = logSpy.mock.calls[0]?.[0] as string;

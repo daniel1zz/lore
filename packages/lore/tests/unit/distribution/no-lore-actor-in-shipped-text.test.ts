@@ -28,7 +28,7 @@ import { join, relative, resolve } from "node:path";
 import type { CommandDef } from "citty";
 import { checkpointRegistry, selectFailures } from "../../../src/service/checkpoint-registry.js";
 import type { GateContext } from "../../../src/service/checkpoint-registry.js";
-import { liveInvocation } from "../../live-invocation.js";
+import { liveInvocation, liveIo } from "../../live-invocation.js";
 
 // reason: command modules import `loader.ts` -> `app.ts` -> `bun:sqlite` (unresolvable under vitest/node);
 // walking the registry never opens a store.
@@ -183,7 +183,7 @@ describe("AC-ROI-8 positive counterpart: recovery texts name the agent-integrati
         return true;
       });
       const { resolveActorWithIdentitySource } = await import("../../../src/adapters/cli/utils.js");
-      const resolved = resolveActorWithIdentitySource(undefined, {}, cwd, liveInvocation().user);
+      const resolved = resolveActorWithIdentitySource(liveIo(), undefined, {}, cwd, liveInvocation().user);
       expect(resolved.source).toBe("os-fallback");
       const warning = written.join("");
       expect(warning).toContain("lore setup");

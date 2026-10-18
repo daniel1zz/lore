@@ -118,6 +118,7 @@ function makeApp(): App {
   });
 
   return {
+    warn: () => undefined,
     corpusService,
     ...phaseServices,
     reviewService: new ReviewService(store, new RecordLockService(store, new GateEnforcer(undefined))),
