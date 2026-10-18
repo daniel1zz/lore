@@ -22,7 +22,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { execFileSync, spawnSync } from "node:child_process";
 import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { Database } from "bun:sqlite";
 import { evaluateRecordedWorktree, type WorktreeGitProbe } from "../../src/service/worktree-cleanup.js";
 import type { WorktreeRemovalFacts } from "../../src/service/worktree-removal-test.js";
@@ -195,6 +195,113 @@ describe("AC-AU-11 (1)+(2) sweep --apply: the ignored-file rule", () => {
     expect(run.exitCode).toBe(0);
     expect(run.stdout).not.toContain("keep");
     expect(existsSync(wt)).toBe(false);
+  });
+});
+
+/** Ignore `patterns` through the worktree's own info/exclude, so the worktree stays merged with main. */
+function ignoreInWorktree(wt: string, ...patterns: string[]): void {
+  const exclude = git(wt, "rev-parse", "--git-path", "info/exclude").trim();
+  appendFileSync(resolve(wt, exclude), `${patterns.join("\n")}\n`);
+}
+
+/** The three generated paths live-measured on 2026-10-18 as "outside the regenerable set". */
+function trackGeneratedPathParents(): void {
+  // reason: git collapses an untracked directory holding only ignored files into one `dir/` entry; the live repo
+  // tracks sources beside every generated path, so the fixture must too or the listing is `packages/` alone.
+  for (const file of ["packages/dashboard/package.json", "packages/dashboard/src/main.ts", "packages/lore/src/generated/README.md"]) {
+    mkdirSync(dirname(join(repo, file)), { recursive: true });
+    writeFileSync(join(repo, file), "tracked\n");
+  }
+  git(repo, "add", "-A");
+  git(repo, ...GIT_ID, "commit", "-q", "-m", "tracked sources beside generated paths");
+}
+
+function addGeneratedPaths(wt: string): void {
+  mkdirSync(join(wt, "packages/dashboard/dist"), { recursive: true });
+  writeFileSync(join(wt, "packages/dashboard/dist/index.js"), "built\n");
+  mkdirSync(join(wt, "packages/dashboard/src"), { recursive: true });
+  writeFileSync(join(wt, "packages/dashboard/src/routeTree.gen.ts"), "// generated\n");
+  mkdirSync(join(wt, "packages/lore/src/generated"), { recursive: true });
+  writeFileSync(join(wt, "packages/lore/src/generated/dashboard-assets.ts"), "export const assets = {};\n");
+  ignoreInWorktree(wt, "packages/dashboard/dist/", "packages/dashboard/src/routeTree.gen.ts", "packages/lore/src/generated/dashboard-assets.ts");
+}
+
+describe("AC-AU-11 / AU-T13 sweep --apply: an ignored path is loss-free when identical to main's copy or declared regenerable", () => {
+  it("(b) a worktree whose only ignored data is the three live generated paths is removed (exit 0, removed, one auto record)", () => {
+    trackGeneratedPathParents();
+    const wt = addWorktree("gen");
+    addGeneratedPaths(wt);
+    const run = lore(["worktree", "sweep", "--apply", "--json"]);
+    expect(run.exitCode).toBe(0);
+    const rows = (JSON.parse(run.stdout) as { data: { worktrees: { path: string; removed?: boolean }[] } }).data.worktrees;
+    expect(rows.find((row) => row.path === wt)?.removed).toBe(true);
+    expect(existsSync(wt)).toBe(false);
+    expect(decisions().map((row) => row.verdict)).toEqual(["auto"]);
+  });
+
+  it("control: the same generated paths plus an ignored .env absent from main are kept, escalated, only .env named", () => {
+    trackGeneratedPathParents();
+    const wt = addWorktree("gen-env", { env: true });
+    addGeneratedPaths(wt);
+    const run = lore(["worktree", "sweep", "--apply", "--json"]);
+    expect(run.exitCode).toBe(0);
+    const row = (JSON.parse(run.stdout) as { data: { worktrees: { path: string; verdict: string; escalated?: { ignored_paths: string[] } }[] } }).data.worktrees.find((r) => r.path === wt);
+    expect(row).toMatchObject({ verdict: "keep", escalated: { ignored_paths: [".env"] } });
+    expect(existsSync(join(wt, ".env"))).toBe(true);
+    expect(decisions().map((r) => r.verdict)).toEqual(["escalate"]);
+  });
+
+  it("(a) an ignored .env byte-identical to main's copy is loss-free: removed", () => {
+    writeFileSync(join(repo, ".env"), "SECRET=1\n");
+    const wt = addWorktree("same-env", { env: true });
+    expect(lore(["worktree", "sweep", "--apply"]).exitCode).toBe(0);
+    expect(existsSync(wt)).toBe(false);
+    expect(decisions().map((r) => r.verdict)).toEqual(["auto"]);
+  });
+
+  it("control: an ignored .env whose content differs from main's copy is kept and named", () => {
+    writeFileSync(join(repo, ".env"), "SECRET=main\n");
+    const wt = addWorktree("diff-env", { env: true });
+    const run = lore(["worktree", "sweep", "--apply"]);
+    expect(run.exitCode).toBe(0);
+    expect(run.stdout).toContain(".env");
+    expect(existsSync(join(wt, ".env"))).toBe(true);
+    expect(decisions().map((r) => r.verdict)).toEqual(["escalate"]);
+  });
+
+  it("(a) an ignored directory is identical only when EVERY file under it is: one differing file keeps it", () => {
+    for (const root of [repo]) {
+      mkdirSync(join(root, "cache"), { recursive: true });
+      writeFileSync(join(root, "cache/a"), "a\n");
+      writeFileSync(join(root, "cache/b"), "b\n");
+    }
+    appendFileSync(join(repo, ".gitignore"), "cache/\n");
+    git(repo, "add", "-A");
+    git(repo, ...GIT_ID, "commit", "-q", "-m", "ignore cache");
+    const same = addWorktree("dir-same");
+    mkdirSync(join(same, "cache"));
+    writeFileSync(join(same, "cache/a"), "a\n");
+    writeFileSync(join(same, "cache/b"), "b\n");
+    const differs = addWorktree("dir-differs");
+    mkdirSync(join(differs, "cache"));
+    writeFileSync(join(differs, "cache/a"), "a\n");
+    writeFileSync(join(differs, "cache/b"), "CHANGED\n");
+    const run = lore(["worktree", "sweep", "--apply"]);
+    expect(run.exitCode).toBe(0);
+    expect(existsSync(same)).toBe(false);
+    expect(existsSync(differs)).toBe(true);
+    expect(run.stdout).toContain("cache/");
+  });
+
+  it("control: an ignored path absent in main is NOT identical (kept, named) even when it is empty", () => {
+    const wt = addWorktree("absent");
+    mkdirSync(join(wt, "scratch-data"));
+    writeFileSync(join(wt, "scratch-data/x"), "x\n");
+    ignoreInWorktree(wt, "scratch-data/");
+    const run = lore(["worktree", "sweep", "--apply"]);
+    expect(run.exitCode).toBe(0);
+    expect(run.stdout).toContain("scratch-data/");
+    expect(existsSync(wt)).toBe(true);
   });
 });
 
