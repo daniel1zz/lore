@@ -3808,9 +3808,9 @@ export class TaskWorkflowService {
       });
       if (missing.length === 0) continue;
       // reason: a red-first AC declared with `--allow-missing-path` whose file a LATER task writes is not a lie —
-      // nothing was ever attested against it. It is refused only once a pass OF THAT FILE is on record (the file then
-      // vanished). AC-TG-6's text has no "ran the missing file" narrowing and AC-EI-2 removed TG-22's: ANY pass tagged
-      // with the AC counts, via the same `hasPassOnRecord` predicate `deriveAcCoverageState` uses.
+      // nothing was ever attested against it. It is refused once ANY pass tagged with the AC is on record (BR-1179):
+      // AC-TG-6's text has no "ran the missing file" narrowing and AC-EI-2 removed TG-22's. The displayed state is
+      // stricter still: `deriveAcCoverageState` renders a missing oracle not_measured even with no pass (EI-6).
       const acHasPass = hasPassOnRecord(evidence.filter((e) => e.ac_ref === criterion.id));
       if (declaredMissingOk.value.has(criterion.id) && !acHasPass) continue;
       findings.push(`${criterion.id} (${missing.join(", ")})`);
