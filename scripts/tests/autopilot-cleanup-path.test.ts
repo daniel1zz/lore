@@ -8,7 +8,6 @@
  * ERROR (missing file fails loud) / STATE (`kept` reason is followed) / REGRESSION (the dispatch rule fragment agrees).
  */
 import { readFileSync } from "node:fs";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
@@ -55,6 +54,6 @@ describe("autopilot cleanup path (CL-4)", () => {
   });
 
   it("ERROR: a missing shipped file throws", () => {
-    expect(() => readFileSync(join(tmpdir(), "autopilot-cleanup-path-missing.md"), "utf8")).toThrow(/ENOENT/);
+    expect(() => read("assets/context/autopilot-cleanup-path-missing.md")).toThrow(/ENOENT/);
   });
 });
