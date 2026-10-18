@@ -47,3 +47,15 @@ Excavators are read-only (one per branch group, in parallel) and return a data f
 - I2 No repo .lore/ writes from tests; corpus writes only via lore commands from main.
 - I3 Every agent-reported verdict is re-run by the orchestrator on main.
 - I4 No rule is renumbered or recreated; existing rules are edited in place with `lore rule set`.
+
+## Result (2026-10-18, measured on main d459f853 with dist/lore built at that commit)
+- `lore baseline coverage baseline-root`: exit 0, complete=true, 123 leaves ok, 0 gaps, 0 unaccounted not_measured. AC-BLS2-12 checks (specification + execution) pass with the built binary; the source-run form could not be run at close because another session's merge left a conflict in packages/lore/src/generated/assets-manifest.ts.
+- Mechanism first (owner choice): plan-site-map-maintenance-keeps-approval-owned-by-is-checked landed (merge 2308a0e2; BR-654/658/660 modified via rule apply). Site-only maps no longer demote; owned-by exclusions are checked — it surfaced 16 stale or malformed legacy entries, all repaired.
+- Writes: ~7,600 site mappings; 9 new leaves (REOP, PHCL, PHTR, RCHG, RAPL, RDFT, WTRM, JDGR, EVPN); 75 new rules (BR-1178..BR-1236 range and the P4 entry-point rules BR-1222..1231); 15 rules reworded in place (incl. BR-209, BR-252, BR-897, BR-1029, BR-1032, BR-1062, BR-1083, BR-32, BR-1206, BR-256, BR-971); 3 rules moved (BR-1050, BR-1054 → REOP; BR-1079 → WTRM); 117 legacy BR-283/BR-285 attributions corrected; held-below tables completed on 16 leaves; 46 baseline nodes re-approved (3 architecture nodes left in draft belong to other sessions).
+- Owner decisions recorded: BR-1023 stays on Enter a seat (Session boundary widened); BR-370 is a defect (task-lore-seat-accepts-any-document-as-target-it-must-refuse-a); BR-1032 reworded (no environment source); write-a-business-rule escalation was already resolved in content; P4 attribution gap filed (task-web-api-approve-and-reject-record-no-reviewer-and-web), other entry-point differences recorded as observed rules.
+- Defects filed (not fixed here): judge-review stale reject blocks approve; ac exempt help vs code; duplicate checklist ids; 39 registry-leaf mismatches (BR-1114..~1152).
+
+## Not covered / open
+- Verbs `decide`, `stash` and `run reap` (autonomy plan in progress) are declared by no leaf; their sites are mapped `out-of-branch:autonomy`. They need leaves when plan-autonomy-phase-1-decision-function-human-channel-lore lands.
+- Coverage is a moving target: other sessions' merges add census sites (one appeared between the final root measurement and close: StoreInterface#readAutonomyThresholds, mapped). Nothing refuses a merge that adds an unmapped site — NOT ENFORCED.
+- The census measures CLI entry points only; MCP/HTTP/dashboard behaviour is described by rules (P4) but not measured.

@@ -3,7 +3,7 @@ id: TASK-1544
 type: task
 role: plan
 title: "[Skill:implement] AU-T9 threshold record integrity: fail-safe escalate, git-tracked mirror, pre-push head check"
-status: draft
+status: archived
 priority: high
 phase: "Phase 1c: overrides, calibration, integrity"
 created: 2026-10-18

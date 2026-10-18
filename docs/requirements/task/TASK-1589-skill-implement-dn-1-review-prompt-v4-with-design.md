@@ -3,7 +3,7 @@ id: TASK-1589
 type: task
 role: plan
 title: "[Skill:implement] DN-1 review prompt v4 with design_necessity; plans judged by default; produce rule sentence"
-status: draft
+status: archived
 priority: medium
 phase: "P1"
 created: 2026-10-18

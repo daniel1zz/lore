@@ -19,7 +19,7 @@ links:
   - {id: SPEC-204, type: relates-to}
   - {id: SPEC-203, type: relates-to}
   - {id: SPEC-093, type: relates-to}
-  - {id: SPEC-200, type: relates-to}
+  - {id: SPEC-210, type: relates-to}
 ---
 # Lore — Internal-First AI Team Knowledge Platform
 

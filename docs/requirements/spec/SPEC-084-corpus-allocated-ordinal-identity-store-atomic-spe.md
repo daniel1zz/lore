@@ -11,8 +11,8 @@ tags: []
 links:
   - {id: KN-162, type: relates-to}
   - {id: KN-168, type: supersedes}
-  - {id: SPEC-200, type: relates-to}
-  - {id: SPEC-200, type: implements}
+  - {id: SPEC-210, type: relates-to}
+  - {id: SPEC-210, type: implements}
 ---
 ## Overview / Goal
 

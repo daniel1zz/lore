@@ -3,7 +3,7 @@ id: TASK-1587
 type: task
 role: plan
 title: "[Skill:fix] AU-T16 lore pending lists escalations whose subject is gone or was decided on a newer version"
-status: draft
+status: archived
 priority: high
 phase: "Phase 1d: apply on main"
 created: 2026-10-18

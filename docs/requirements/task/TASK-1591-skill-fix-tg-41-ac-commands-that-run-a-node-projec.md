@@ -3,7 +3,7 @@ id: TASK-1591
 type: task
 role: plan
 title: "[Skill:fix] TG-41 AC commands that run a Node-project test file under the Bun config collect nothing; correct them and add a check"
-status: draft
+status: archived
 priority: high
 phase: "Phase 3b: one runner"
 created: 2026-10-18

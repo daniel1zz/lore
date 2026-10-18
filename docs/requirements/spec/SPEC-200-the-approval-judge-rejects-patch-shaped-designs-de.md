@@ -45,9 +45,9 @@ Structured criteria via `lore ac add`: AC-DN-1 (v4 current, dimension present, v
 
 - [·] [script] AC-DN-1: The current review prompt version is v4; the assembled v4 prompt for a spec, a plan and an ADR each contains the design_necessity rule naming the four item classes (stopgap, guard check or ledger, silent fallback, phased migration) and the end-state test; the v1, v2 and v3 builders produce byte-identical output to before.
   script: test — bunx --bun vitest run packages/lore/tests/unit/ai/review-template-v4.test.ts && echo 'AC-DN-1 PASS: v4 current with design_necessity; v1-v3 frozen'
-  other_command=1
+  other_command=2
 - [·] [script] AC-DN-2: With default review settings, lore approve on a plan whose current version carries a reject judgment exits 4 naming the review-judgment checkpoint and leaves the plan in draft; a project whose judged types are [spec] approves the same plan with exit 0.
   script: test — bunx --bun vitest run packages/lore/tests/integration/plan-approval-judged-by-default.test.ts && echo 'AC-DN-2 PASS: plan approval gated by default'
-  other_command=1
+  other_command=2
 - [·] [human] AC-DN-3: Under prompt v4 the real judge rejects the 2026-10-18 patch-shaped spec on design_necessity and does not raise design_necessity against an end-state control spec, in two runs each.
   human: Fixtures: packages/lore/tests/fixtures/design-necessity/patch-shaped-spec.md (ambient-state spec v19 body) and end-state-spec.md (same goal, end state only). lore review under v4 on each in a throwaway corpus, twice. Expect (a) reject with a design_necessity finding naming seam, check+ledger, bridge/fallbacks, phased migration; (b) no design_necessity finding. Runs must agree.

@@ -11017,10 +11017,6 @@
       "human_id": "SPEC-194",
       "file_path": "docs/requirements/spec/SPEC-194-round-0-main-is-green-every-red-test-on-e1878626-t.md"
     },
-    "01KYENED6N2NT4Y5GQT67ECBY5": {
-      "human_id": "SPEC-200",
-      "file_path": "docs/requirements/spec/SPEC-200-output-contract-document-taxonomy-domain-overview.md"
-    },
     "01KYEN7XX5J25PEY9X11SH836G": {
       "human_id": "SPEC-201",
       "file_path": "docs/requirements/spec/SPEC-201-distribution-adoption-phased-spike-gated-one-step.md"
@@ -11664,6 +11660,18 @@
     "01M57B4DRBHQ6XMBV5JZ1FE0R1": {
       "human_id": "TASK-1592",
       "file_path": "docs/requirements/task/TASK-1592-skill-perf-tg-40-full-one-runner-suite-714-9-s-on.md"
+    },
+    "01KYENED6N2NT4Y5GQT67ECBY5": {
+      "human_id": "SPEC-210",
+      "file_path": "docs/requirements/spec/SPEC-210-output-contract-document-taxonomy-domain-overview.md"
+    },
+    "01M57ES0J08FXRSVE0D6N8FYWW": {
+      "human_id": "TASK-1593",
+      "file_path": "docs/requirements/task/TASK-1593-skill-baseline-tg-43-add-the-rule-tg-41-s-14-ac.md"
+    },
+    "01M57ECE3MJ8Q2J10TB6NPBY96": {
+      "human_id": "TASK-1594",
+      "file_path": "docs/requirements/task/TASK-1594-skill-fix-au-t17-autonomy-run-reap-test-1-failed-o.md"
     }
   }
 }
