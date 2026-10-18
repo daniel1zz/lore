@@ -244,3 +244,26 @@ describe("AC-EI-2 half 5 (REGRESSION): an unclassifiable segment is listed, neve
     expect(await textLineOf("AC-EI2-U")).toContain("1 segment(s) not checked");
   });
 });
+
+describe("AC-EI-2 half 8 (NEGATIVE/BOUNDARY): a missing oracle is not measured even with ZERO evidence rows (EI-6)", () => {
+  it("a test-path AC whose file is missing and that has no evidence renders not_measured naming the path (--json and text)", async () => {
+    await mustRun([
+      "ac", "add", SPEC, "AC-EI2-N", "--statement", "Never-run criterion whose oracle file is missing.", "--mode", "script", "--oracle", "test",
+      "--command", "bun test never-written.test.ts", "--allow-missing-path", "oracle lands with the implementing task",
+    ]);
+    const fact = await coverageOf("AC-EI2-N");
+    expect(fact.state).toBe("not_measured");
+    expect(fact.oracle_file_missing).toEqual(["never-written.test.ts"]);
+    expect(await textLineOf("AC-EI2-N")).toContain("never-written.test.ts");
+  });
+
+  it("control: a present oracle with no evidence stays none", async () => {
+    await mustRun([
+      "ac", "add", SPEC, "AC-EI2-P", "--statement", "Never-run criterion whose oracle file exists.", "--mode", "script", "--oracle", "test",
+      "--command", "bun test a.test.ts",
+    ]);
+    const fact = await coverageOf("AC-EI2-P");
+    expect(fact.state).toBe("none");
+    expect(fact.oracle_file_missing).toEqual([]);
+  });
+});

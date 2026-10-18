@@ -585,14 +585,17 @@ describe("deriveAcCoverageState oracle_file_missing is not_measured whatever ear
     expect(state).toBe("not_measured");
   });
 
-  it("BOUNDARY: a fail outranks it, an empty missing list does not demote, and no counted pass stays none", () => {
+  it("BOUNDARY: a fail outranks it, an empty missing list does not demote, and zero evidence is not_measured only when a path is missing (EI-6)", () => {
     expect(
       deriveAcCoverageState({ ...base, pass: 0, fail: 1, oracle_file_missing: gone, refs: [{ task_id: "t1", result: "fail" }] }),
     ).toBe("fail");
     expect(
       deriveAcCoverageState({ ...base, pass: 1, oracle_file_missing: [], refs: [{ task_id: "t1", result: "pass" }] }),
     ).toBe("pass");
-    expect(deriveAcCoverageState({ ...base, pass: 0, oracle_file_missing: gone, refs: [] })).toBe("none");
+    // EI-6: a missing oracle is not measured even with zero evidence; a present one (empty missing list, or not computed) stays none.
+    expect(deriveAcCoverageState({ ...base, pass: 0, oracle_file_missing: gone, refs: [] })).toBe("not_measured");
+    expect(deriveAcCoverageState({ ...base, pass: 0, oracle_file_missing: [], refs: [] })).toBe("none");
+    expect(deriveAcCoverageState({ ...base, pass: 0, refs: [] })).toBe("none");
   });
 });
 
