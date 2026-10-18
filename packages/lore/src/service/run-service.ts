@@ -352,6 +352,44 @@ export class RunService {
   }
 
   /**
+   * Every OPEN claim (a non-archived, non-deprecated task still carrying `extra.claim`) whose recorded worktree is
+   * the directory `workingCopy`, as the claimed task with its CURRENT `file_anchors`. Path comparison only: a claim
+   * recording a branch name or a relative value never matches (no inference from names; AU-T22). Unlike
+   * {@link RunService.claimedTasks} it needs no run id, so it sees a claim whose run has no end record yet.
+   *
+   * @param workingCopy - absolute directory of the working copy (need not exist: ENOENT falls back to `path.resolve`).
+   * @returns ok(tasks sorted by slug, possibly empty); VALIDATION_ERROR for a blank path or a service built without
+   *   a realpath port; STORE_ERROR from the store or a non-ENOENT realpath failure.
+   */
+  async openClaimsOfWorkingCopy(workingCopy: string): Promise<Result<RunClaimedTask[], LoreError>> {
+    if (workingCopy === "") return err(validationError("working-copy", "a working copy path is required", workingCopy));
+    if (this.realpathPort === undefined) {
+      return err(validationError("realpath", "RunService was built without a realpath port; cannot compare worktrees"));
+    }
+    const tasks = await this.store.findMany({ type: "task" });
+    if (!tasks.ok) return tasks;
+    const open: RunClaimedTask[] = [];
+    try {
+      const resolveDirectory = makeDirectoryResolver(this.realpathPort);
+      const resolvedDirectory = resolveDirectory(workingCopy);
+      for (const task of tasks.value) {
+        if (task.status === "archived" || task.status === "deprecated") continue;
+        const claim = extractClaim(task);
+        if (claim === undefined) continue;
+        if (!claimNamesWorktree(claim.worktree, { branch: undefined, resolvedDirectory }, resolveDirectory)) continue;
+        open.push({ slug: task.slug, status: task.status, file_anchors: extractFileAnchors(task) });
+      }
+    } catch (cause) {
+      return err({
+        code: "STORE_ERROR",
+        message: `openClaimsOfWorkingCopy: could not resolve a worktree path: ${cause instanceof Error ? cause.message : String(cause)}`,
+        ...(cause instanceof Error ? { cause } : {}),
+      });
+    }
+    return ok(open.sort((a, b) => a.slug.localeCompare(b.slug)));
+  }
+
+  /**
    * {@link RunService.claimedTasks} for a REGISTERED run.
    *
    * @returns ok({run, tasks}); VALIDATION_ERROR naming the id when the run is not registered (exit 4, like
