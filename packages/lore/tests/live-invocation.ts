@@ -11,9 +11,15 @@ export function liveInvocation(): Invocation {
   const envHome = process.env["HOME"];
   const home = envHome !== undefined && envHome !== "" ? envHome : homedir();
   return {
-    cwd: process.cwd(),
+    // reason: getters, not snapshots — tests chdir and set `process.argv` AFTER building this, and the code under test
+    // previously read both at call time; a live view keeps those tests meaning what they meant.
+    get cwd() {
+      return process.cwd();
+    },
     env: process.env,
-    argv: [],
+    get argv() {
+      return process.argv.slice(2);
+    },
     paths: { home, claudeDir: `${home}/.claude`, userConfigDir: `${home}/.config/lore`, projectRoot: null, tmpDir: tmpdir() },
     host: hostname(),
     execPath: process.execPath,

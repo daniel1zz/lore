@@ -43,6 +43,8 @@
  *               "no_commits_found" contract of never blocking the run).
  */
 
+import type { Invocation } from "@lore/core";
+import { liveInvocation } from "../../live-invocation.js";
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, writeFileSync, mkdirSync } from "fs";
 import { join, resolve } from "path";
@@ -52,7 +54,7 @@ import { createApp } from "../../../src/app.js";
 import { saveConfig } from "@lore/core/node";
 import type { CreateDocInput } from "@lore/core";
 
-type RunnableCommand = { run: (ctx: { args: Record<string, unknown> }) => Promise<void> };
+type RunnableCommand = { run: (ctx: { args: Record<string, unknown>; inv?: Invocation }) => Promise<void> };
 
 function captureOutput() {
   const stdout: string[] = [];
@@ -256,7 +258,7 @@ describe("lore assess — archived plan + conventional (non-matching) commits: H
     const cmd = await importAssessCommand();
     const output = captureOutput();
     try {
-      await cmd.run({ args: { plan: planSlug, json: true } });
+      await cmd.run({ args: { plan: planSlug, json: true }, inv: liveInvocation() });
     } finally {
       output.restore();
     }
@@ -296,7 +298,7 @@ describe("lore assess — archived plan + MATCHING commits: CONTROL", () => {
     const cmd = await importAssessCommand();
     const output = captureOutput();
     try {
-      await cmd.run({ args: { plan: planSlug, json: true } });
+      await cmd.run({ args: { plan: planSlug, json: true }, inv: liveInvocation() });
     } finally {
       output.restore();
     }
@@ -323,7 +325,7 @@ describe("lore assess — NON-archived plan + conventional (non-matching) commit
     const cmd = await importAssessCommand();
     const output = captureOutput();
     try {
-      await cmd.run({ args: { plan: planSlug, json: true } });
+      await cmd.run({ args: { plan: planSlug, json: true }, inv: liveInvocation() });
     } finally {
       output.restore();
     }

@@ -38,6 +38,8 @@
  * @spec_ref task-getassesstemplatereproducibility-has-zero-production-callers
  */
 
+import type { Invocation } from "@lore/core";
+import { liveInvocation } from "../../live-invocation.js";
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, writeFileSync, mkdirSync } from "fs";
 import { join, resolve } from "path";
@@ -50,7 +52,7 @@ import { ASSESS_PROMPT_VERSION } from "../../../src/ai/assess-template.js";
 
 // ─── Command type / output capture (mirrors assess-ai.bun.test.ts) ────────────
 
-type RunnableCommand = { run: (ctx: { args: Record<string, unknown> }) => Promise<void> };
+type RunnableCommand = { run: (ctx: { args: Record<string, unknown>; inv?: Invocation }) => Promise<void> };
 
 function captureOutput() {
   const stdout: string[] = [];
@@ -205,7 +207,7 @@ describe("lore assess — judgment.reproducible is stamped by a REAL run (task-g
     const cmd = await importAssessCommand();
     const output = captureOutput();
     try {
-      await cmd.run({ args: { plan: planSlug, json: true } });
+      await cmd.run({ args: { plan: planSlug, json: true }, inv: liveInvocation() });
     } finally {
       output.restore();
     }
@@ -244,7 +246,7 @@ describe("lore assess — judgment.reproducible is stamped by a REAL run (task-g
     const cmd = await importAssessCommand();
     const output = captureOutput();
     try {
-      await cmd.run({ args: { plan: planSlug, json: true } });
+      await cmd.run({ args: { plan: planSlug, json: true }, inv: liveInvocation() });
     } finally {
       output.restore();
     }

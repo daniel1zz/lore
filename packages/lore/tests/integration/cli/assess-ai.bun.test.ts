@@ -49,6 +49,8 @@
  * task-lore-assess-diff-spawnsync-sets-no-maxbuffer-a-diff-over-1
  */
 
+import type { Invocation } from "@lore/core";
+import { liveInvocation } from "../../live-invocation.js";
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, writeFileSync, mkdirSync, readFileSync, existsSync } from "fs";
 import { join, resolve } from "path";
@@ -61,7 +63,7 @@ import type { CreateDocInput } from "@lore/core";
 
 // ─── Command type ─────────────────────────────────────────────────────────────
 
-type RunnableCommand = { run: (ctx: { args: Record<string, unknown> }) => Promise<void> };
+type RunnableCommand = { run: (ctx: { args: Record<string, unknown>; inv?: Invocation }) => Promise<void> };
 
 // ─── Output / exit capture (mirrors cli-create-ai.bun.test.ts) ───────────────
 
@@ -255,7 +257,7 @@ describe("lore assess --diff-file — hermetic success path (AC-ASSESS-1)", () =
     const cmd = await importAssessCommand();
     const output = captureOutput();
     try {
-      await cmd.run({ args: { plan: planSlug, "diff-file": diffFile, json: true } });
+      await cmd.run({ args: { plan: planSlug, "diff-file": diffFile, json: true }, inv: liveInvocation() });
     } finally {
       output.restore();
     }
@@ -291,7 +293,7 @@ describe("lore assess --diff-file — hermetic success path (AC-ASSESS-1)", () =
     const cmd = await importAssessCommand();
     const output = captureOutput();
     try {
-      await cmd.run({ args: { plan: planSlug, "diff-file": diffFile, json: true } });
+      await cmd.run({ args: { plan: planSlug, "diff-file": diffFile, json: true }, inv: liveInvocation() });
     } finally {
       output.restore();
     }
@@ -325,7 +327,7 @@ describe("lore assess --diff <range> — real git subprocess fixture (AC-ASSESS-
     const cmd = await importAssessCommand();
     const output = captureOutput();
     try {
-      await cmd.run({ args: { plan: planSlug, diff: "HEAD~1..HEAD", json: true } });
+      await cmd.run({ args: { plan: planSlug, diff: "HEAD~1..HEAD", json: true }, inv: liveInvocation() });
     } finally {
       output.restore();
     }
@@ -344,7 +346,7 @@ describe("lore assess --diff <range> — real git subprocess fixture (AC-ASSESS-
     const cmd = await importAssessCommand();
     const output = captureOutput();
     try {
-      await cmd.run({ args: { plan: planSlug, diff: "HEAD~1..HEAD", json: true } });
+      await cmd.run({ args: { plan: planSlug, diff: "HEAD~1..HEAD", json: true }, inv: liveInvocation() });
     } finally {
       output.restore();
     }
@@ -395,7 +397,7 @@ describe("lore assess — auto-derived commit set: PRIMARY ORACLE (interleaved f
     const output = captureOutput();
     try {
       // Deliberately NO --diff / --diff-file — this is the auto-derivation path.
-      await cmd.run({ args: { plan: planSlug, json: true } });
+      await cmd.run({ args: { plan: planSlug, json: true }, inv: liveInvocation() });
     } finally {
       output.restore();
     }
@@ -460,7 +462,7 @@ describe("lore assess — auto-derived commit set: CONTROL (contiguous, no forei
     const cmd = await importAssessCommand();
     const output = captureOutput();
     try {
-      await cmd.run({ args: { plan: planSlug, json: true } });
+      await cmd.run({ args: { plan: planSlug, json: true }, inv: liveInvocation() });
     } finally {
       output.restore();
     }
@@ -511,7 +513,7 @@ describe("lore assess — auto-derived commit set: BOUNDARY (no discoverable com
     const cmd = await importAssessCommand();
     const output = captureOutput();
     try {
-      await cmd.run({ args: { plan: planSlug, json: true } });
+      await cmd.run({ args: { plan: planSlug, json: true }, inv: liveInvocation() });
     } finally {
       output.restore();
     }
@@ -582,7 +584,7 @@ describe("lore assess — SPEC-028 AC-AE-1: pre-flight diff-budget stderr warnin
     const cmd = await importAssessCommand();
     const output = captureOutput();
     try {
-      await cmd.run({ args: { plan: planSlug, "diff-file": diffFile, json: true } });
+      await cmd.run({ args: { plan: planSlug, "diff-file": diffFile, json: true }, inv: liveInvocation() });
     } finally {
       output.restore();
     }
@@ -615,7 +617,7 @@ describe("lore assess — SPEC-028 AC-AE-1: pre-flight diff-budget stderr warnin
     const cmd = await importAssessCommand();
     const output = captureOutput();
     try {
-      await cmd.run({ args: { plan: planSlug, "diff-file": diffFile, json: true } });
+      await cmd.run({ args: { plan: planSlug, "diff-file": diffFile, json: true }, inv: liveInvocation() });
     } finally {
       output.restore();
     }
@@ -644,7 +646,7 @@ describe("lore assess — SPEC-028 AC-AE-1: pre-flight diff-budget stderr warnin
     const cmd = await importAssessCommand();
     const output = captureOutput();
     try {
-      await cmd.run({ args: { plan: planSlug, "diff-file": diffFile, json: true } });
+      await cmd.run({ args: { plan: planSlug, "diff-file": diffFile, json: true }, inv: liveInvocation() });
     } finally {
       output.restore();
     }
@@ -710,7 +712,7 @@ describe("lore assess --diff <range> — git-diff spawnSync maxBuffer (task-lore
     const cmd = await importAssessCommand();
     const output = captureOutput();
     try {
-      await cmd.run({ args: { plan: planSlug, diff: "HEAD~1..HEAD", json: true } });
+      await cmd.run({ args: { plan: planSlug, diff: "HEAD~1..HEAD", json: true }, inv: liveInvocation() });
     } finally {
       output.restore();
     }
@@ -749,7 +751,7 @@ describe("lore assess --diff <range> — git-diff spawnSync maxBuffer (task-lore
     const cmd = await importAssessCommand();
     const output = captureOutput();
     try {
-      await cmd.run({ args: { plan: planSlug, diff: "HEAD~1..HEAD", json: true } });
+      await cmd.run({ args: { plan: planSlug, diff: "HEAD~1..HEAD", json: true }, inv: liveInvocation() });
     } finally {
       output.restore();
     }
@@ -785,7 +787,7 @@ describe("lore assess --diff <range> — git-diff spawnSync maxBuffer (task-lore
     const cmd = await importAssessCommand();
     const output = captureOutput();
     try {
-      await cmd.run({ args: { plan: planSlug, diff: "HEAD~1..HEAD", json: true } });
+      await cmd.run({ args: { plan: planSlug, diff: "HEAD~1..HEAD", json: true }, inv: liveInvocation() });
     } finally {
       output.restore();
     }
@@ -821,7 +823,7 @@ describe("lore assess --diff <range> — git-diff spawnSync maxBuffer (task-lore
     const cmd = await importAssessCommand();
     const output = captureOutput();
     try {
-      await cmd.run({ args: { plan: planSlug, diff: "HEAD~1..HEAD", json: true } });
+      await cmd.run({ args: { plan: planSlug, diff: "HEAD~1..HEAD", json: true }, inv: liveInvocation() });
     } finally {
       output.restore();
     }
@@ -851,7 +853,7 @@ describe("lore assess — double-malformed AI output end-to-end (AC-ASSESS-4)", 
     const cmd = await importAssessCommand();
     const output = captureOutput();
     try {
-      await cmd.run({ args: { plan: planSlug, json: true } });
+      await cmd.run({ args: { plan: planSlug, json: true }, inv: liveInvocation() });
     } finally {
       output.restore();
     }
@@ -883,7 +885,7 @@ describe("lore assess — double-malformed AI output end-to-end (AC-ASSESS-4)", 
     const cmd = await importAssessCommand();
     const output = captureOutput();
     try {
-      await cmd.run({ args: { plan: planSlug, json: true } });
+      await cmd.run({ args: { plan: planSlug, json: true }, inv: liveInvocation() });
     } finally {
       output.restore();
     }
