@@ -152,6 +152,7 @@ describe("AC-MI-2: managed zone keeps the template headings; legacy auto blocks 
     expect(after).toContain("## Finding Live Project State");
 
     const health = await runLore(["status", "--check-claude-md"], dir);
+    expect(health.exitCode, health.stdout + health.stderr).toBe(0);
     expect(health.stdout + health.stderr).not.toContain("section_missing");
   });
 
@@ -190,6 +191,21 @@ describe("AC-MI-2: managed zone keeps the template headings; legacy auto blocks 
     expect(second.exitCode, second.stderr).toBe(0);
     expect(second.stdout).not.toContain("auto:module-index");
     expect(read(dir, "CLAUDE.md")).toBe(after);
+  });
+});
+
+describe("MI-T3 refresh --check labels each finding by its own kind", () => {
+  it("MI-T3 NEGATIVE: under adoption enforce a CLAUDE.md lacking required sections exits 1 printing section_missing, never labelled 'ceiling:'", async () => {
+    const dir = await makeProject();
+    put(dir, ".lore/config.yaml", "context:\n  memory_files:\n    adoption: enforce\n");
+    put(dir, "CLAUDE.md", "# Proj\n\nhand text only\n");
+    const before = read(dir, "CLAUDE.md");
+    const check = await runLore(["context", "refresh", "--check"], dir);
+    const out = check.stdout + check.stderr;
+    expect(check.exitCode, out).toBe(1);
+    expect(out).toContain("section_missing:");
+    expect(out).not.toMatch(/ceiling:/i);
+    expect(read(dir, "CLAUDE.md")).toBe(before);
   });
 });
 
