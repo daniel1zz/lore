@@ -29,6 +29,7 @@ export const DEFAULT_STEPS: readonly string[] = [
   "bun run check:live-repo-state",
   "bun run check:corpus-fail-census",
   "bun run check:ac-oracle-ownership",
+  "bun run check:evidence-identity-drop-set",
 ];
 
 export interface StepResult {

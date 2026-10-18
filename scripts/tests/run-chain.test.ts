@@ -78,6 +78,8 @@ describe("runChain", () => {
       expect(pkg.scripts[name as string], step).toBeDefined();
     }
     expect(DEFAULT_STEPS).toContain("bun run test:vitest");
+    expect(DEFAULT_STEPS).toContain("bun run check:evidence-identity-drop-set");
+    expect(pkg.scripts["check:evidence-identity-drop-set"]).toBe("bun scripts/check-evidence-identity-drop-set.ts");
   });
 });
 
