@@ -363,7 +363,7 @@ export default defineCommand({
               .filter((tag) => tag.length > 0)
           : [];
 
-      const { actor, source: actorSource } = resolveActorWithSource(undefined, inv.env, () => inv.user);
+      const { actor, source: actorSource } = resolveActorWithSource(undefined, inv.env, inv.user);
       const reproCommand = args["repro-command"];
 
       const githubResult = await fileGithubIssue(

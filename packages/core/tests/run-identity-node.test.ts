@@ -28,7 +28,7 @@ async function load(): Promise<Resolve> {
     resolveInvocationIdentity: (
       argv: string[],
       env: Record<string, string | undefined>,
-      osUsername: () => string,
+      osUser: { ok: true; name: string },
       detectWorktree?: () => string | undefined,
     ) => ReturnType<Resolve>;
   };
@@ -37,7 +37,7 @@ async function load(): Promise<Resolve> {
     mod.resolveInvocationIdentity(
       argv,
       env,
-      () => userInfo().username,
+      { ok: true, name: userInfo().username },
       detectWorktree === undefined ? undefined : () => detectWorktree(process.cwd()),
     );
 }

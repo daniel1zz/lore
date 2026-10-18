@@ -35,6 +35,7 @@ import { resolveTargetDir } from "./setup-args.js";
 import { detectWorktreeDerivedActor } from "./utils.js";
 import { resolveUserConfigDir } from "../../service/context-fragments/user-config-dir.js";
 import { existsSync } from "node:fs";
+import { userInfo } from "node:os";
 import { dirname, join } from "node:path";
 
 /** Options for {@link runCli}. */
@@ -77,6 +78,7 @@ export const invocationResolvers: InvocationResolvers = {
   },
   userConfigDir: (env, home) => resolveUserConfigDir(env, home),
   worktreeActor: (cwd) => detectWorktreeDerivedActor(cwd),
+  osUsername: () => userInfo().username,
   projectRoot: findProjectRoot,
 };
 

@@ -55,7 +55,7 @@ function errorResult(error: LoreError): CallToolResult {
 export function buildCallIdentity(input: CallAttestation, server: Pick<Invocation, "env" | "user">): Result<InvocationIdentity, LoreError> {
   const argv = input.harness_run !== undefined ? ["--harness-run", input.harness_run] : [];
   try {
-    const { identity } = resolveInvocationIdentity(argv, server.env, () => server.user);
+    const { identity } = resolveInvocationIdentity(argv, server.env, server.user);
     return ok(identity);
   } catch (e) {
     if (e instanceof RunIdentityArgumentError) {

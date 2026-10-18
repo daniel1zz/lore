@@ -14,12 +14,13 @@
  *   working copy > OS user (D11), reusing {@link resolveActorWithSource}. The
  *   environment never supplies a name (BR-1055).
  *
- * Side-effect class: pure given its arguments (env, OS-username thunk, worktree probe are supplied). Lives under
+ * Side-effect class: pure given its arguments (env, OS-user value, worktree probe are supplied). Lives under
  * `@lore/core/node` for the same barrel-isolation reason as actor-resolution-node.ts.
  */
 
-import { resolveActorWithSource } from "./actor-resolution-node.js";
-import type { ActorSource } from "./actor-resolution-node.js";
+import { resolveActorWithWorktree } from "./actor-resolution-node.js";
+import type { OsUser } from "./invocation.js";
+import type { WorktreeAwareActorSource } from "./actor-resolution-node.js";
 import { HARNESS_RUN_FLAG } from "./run-identity.js";
 import type { InvocationIdentity, NameSource, RunId } from "./run-identity.js";
 
@@ -47,10 +48,12 @@ export interface InvocationResolution {
 
 // reason: total over ActorSource (minus os-fallback) so a new member fails compilation; `env` stays
 // mapped only because the type member remains — nothing produces it (BR-1055).
-const NAME_SOURCE_BY_ACTOR_SOURCE: Record<Exclude<ActorSource, "os-fallback">, NameSource> = {
+const NAME_SOURCE_BY_ACTOR_SOURCE: Record<WorktreeAwareActorSource, NameSource> = {
   explicit: "flag",
   env: "env",
   session: "session",
+  "worktree-derived": "worktree",
+  "os-fallback": "os",
 };
 
 /** Value of a `--flag <v>` / `--flag=<v>` token at `index`, or null when the token is another flag. */
@@ -72,7 +75,7 @@ function readFlagAt(argv: readonly string[], index: number, flag: string): { val
  *
  * @param argv - Command-line tokens after the program name; not mutated.
  * @param env - Environment to read session ids from (`Invocation.env`).
- * @param osUsername - Lazy OS-username source for the os-fallback tier (see `resolveActorWithSource`).
+ * @param osUser - The entry's recorded OS-username lookup for the os-fallback tier (see `resolveActorWithSource`).
  * @param detectWorktree - Working-copy tier probe `() => "agent:<branch>" | undefined`, closed over
  *   the invocation cwd by the caller. `detectWorktreeDerivedActor` lives in packages/lore
  *   (adapters/cli/utils.ts), which core cannot import, so the CLI injects it; when omitted that
@@ -80,14 +83,15 @@ function readFlagAt(argv: readonly string[], index: number, flag: string): { val
  * @returns the identity and argv with `--harness-run <id>` removed.
  * @throws {RunIdentityArgumentError} when `--by` / `--harness-run` has no value or an empty value
  *   (an empty `--by` must not silently fall through to a lower tier).
+ * @throws {OsUserLookupError} when no higher tier names the writer and `osUser` is a failure
  * @example
- *   resolveInvocationIdentity(["claim", "t", "--harness-run", "cc:S1", "--by", "x"], {}, () => "os-user")
+ *   resolveInvocationIdentity(["claim", "t", "--harness-run", "cc:S1", "--by", "x"], {}, { ok: true, name: "os-user" })
  *   // => { identity: { harnessRun: "cc:S1", claimed: "x", claimedSource: "flag" }, argv: ["claim", "t", "--by", "x"] }
  */
 export function resolveInvocationIdentity(
   argv: readonly string[],
   env: Readonly<Record<string, string | undefined>>,
-  osUsername: () => string,
+  osUser: OsUser,
   detectWorktree?: () => string | undefined,
 ): InvocationResolution {
   const remaining: string[] = [];
@@ -112,23 +116,10 @@ export function resolveInvocationIdentity(
     i++;
   }
 
-  const resolved = resolveActorWithSource(by, env, osUsername);
-  let claimed = resolved.actor;
-  let claimedSource: NameSource;
-  if (resolved.source === "os-fallback") {
-    const worktreeActor = detectWorktree?.();
-    if (worktreeActor !== undefined && worktreeActor !== "") {
-      claimed = worktreeActor;
-      claimedSource = "worktree";
-    } else {
-      claimedSource = "os";
-    }
-  } else {
-    claimedSource = NAME_SOURCE_BY_ACTOR_SOURCE[resolved.source];
-  }
+  const resolved = resolveActorWithWorktree(by, env, osUser, detectWorktree ?? (() => undefined));
 
   return {
-    identity: { harnessRun: harnessRun as RunId | null, claimed, claimedSource },
+    identity: { harnessRun: harnessRun as RunId | null, claimed: resolved.actor, claimedSource: NAME_SOURCE_BY_ACTOR_SOURCE[resolved.source] },
     argv: remaining,
   };
 }

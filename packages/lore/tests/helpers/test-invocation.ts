@@ -18,7 +18,7 @@
 import { realpathSync } from "node:fs";
 import { hostname, tmpdir, userInfo } from "node:os";
 import { resolveInvocationIdentity } from "@lore/core/node";
-import type { Invocation, InvocationWriter } from "@lore/core";
+import type { Invocation, InvocationWriter, OsUser } from "@lore/core";
 import { invocationResolvers } from "../../src/adapters/cli/run-cli";
 
 /** What a test names to build an Invocation. */
@@ -36,7 +36,7 @@ export interface TestInvocationInput {
 }
 
 /** The OS account name every test run reports (the os-fallback tier of actor resolution): the real one, as the binary's entry reads it. */
-const TEST_USER = userInfo().username;
+const TEST_USER: OsUser = { ok: true, name: userInfo().username };
 
 /**
  * @throws {RunIdentityArgumentError} on an empty or valueless `--by` / `--harness-run`
@@ -46,7 +46,7 @@ export function buildTestInvocation(input: TestInvocationInput): Invocation {
   // reason: the binary's `process.cwd()` is the REAL path of the directory it started in (a symlinked tmp dir such as
   // macOS /var -> /private/var resolves), and commands report that; the in-process run must report the same one.
   const cwd = realpathSync(input.cwd);
-  const resolution = resolveInvocationIdentity(input.argv, { ...env }, () => TEST_USER, () => invocationResolvers.worktreeActor(cwd));
+  const resolution = resolveInvocationIdentity(input.argv, { ...env }, TEST_USER, () => invocationResolvers.worktreeActor(cwd));
   const argv: readonly string[] = Object.freeze([...resolution.argv]);
   return Object.freeze({
     cwd,

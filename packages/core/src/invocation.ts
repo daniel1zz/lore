@@ -4,7 +4,7 @@
  *
  * Purpose: the single value the program entry builds once and every layer below RECEIVES, so no layer
  * reads `process.env` / `process.cwd()` / the home directory itself.
- * Public surface: {@link Invocation}, {@link InvocationWriter}, {@link InvocationPaths}.
+ * Public surface: {@link Invocation}, {@link InvocationWriter}, {@link InvocationPaths}, {@link OsUser}.
  * Invariants:
  *   - Pure types, no Node import (browser-safe barrel, AS-4). The resolver is `resolveInvocation` in
  *     `@lore/core/node` (`invocation-node.ts`), the ONE core file allowed to read ambient state.
@@ -23,6 +23,13 @@ export interface InvocationWriter {
   /** `true` when the writer is an interactive terminal (a command may then show a progress spinner); absent otherwise. */
   readonly isTTY?: boolean | undefined;
 }
+
+/**
+ * The OS account name lookup, recorded as the entry's outcome. The lookup can throw (no passwd entry for the uid,
+ * e.g. in a container), so the entry stores the failure as a value; actor resolution fails loud only when the
+ * OS-username tier is the one selected.
+ */
+export type OsUser = { readonly ok: true; readonly name: string } | { readonly ok: false; readonly reason: string };
 
 /** Directories of one invocation, all absolute. */
 export interface InvocationPaths {
@@ -46,8 +53,8 @@ export type Invocation = Readonly<{
   argv: readonly string[];
   paths: InvocationPaths;
   host: string;
-  /** The OS account name of the running process (the os-fallback tier of actor resolution). */
-  user: string;
+  /** The OS account lookup of the running process (the os-fallback tier of actor resolution), success or failure. */
+  user: OsUser;
   execPath: string;
   /** True inside the `bun build --compile` binary (`Bun.main` under `/$bunfs/`). */
   isCompiled: boolean;
