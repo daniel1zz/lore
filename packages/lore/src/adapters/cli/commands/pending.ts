@@ -30,7 +30,7 @@
 
 import { defineCommand } from "citty";
 import { loadLoreApp } from "../loader.js";
-import { exitCode, formatError, formatTable } from "../utils.js";
+import { exitCode, formatErrorFor, formatTable } from "../utils.js";
 import { PENDING_TABLE_HEADERS, buildPendingTableRows } from "../pending-render.js";
 import { collectAuditItems, collectPendingDecisions, renderAuditItems, renderPendingDecisions } from "../pending-decisions-render.js";
 import { withValidityStatus } from "../../../service/validity-service.js";
@@ -90,9 +90,9 @@ export default defineCommand({
     try {
       // AC-AU-3: open autonomy decisions (escalations awaiting the human) are listed beside the pending docs,
       // in both output modes. A read failure is loud, never an empty list.
-      const decisionsResult = await collectPendingDecisions(dbPath, repoRoot);
+      const decisionsResult = await collectPendingDecisions(dbPath, inv.env, repoRoot);
       if (!decisionsResult.ok) {
-        process.stderr.write(formatError(decisionsResult.error) + "\n");
+        process.stderr.write(formatErrorFor(inv, decisionsResult.error) + "\n");
         process.exitCode = exitCode(decisionsResult.error);
         return;
       }
@@ -100,7 +100,7 @@ export default defineCommand({
       // AC-AU-10: the sampling floor's audit queue is listed SEPARATELY from the blocking escalations.
       const auditResult = await collectAuditItems(dbPath);
       if (!auditResult.ok) {
-        process.stderr.write(formatError(auditResult.error) + "\n");
+        process.stderr.write(formatErrorFor(inv, auditResult.error) + "\n");
         process.exitCode = exitCode(auditResult.error);
         return;
       }
@@ -117,7 +117,7 @@ export default defineCommand({
       const result = await app.reviewService.pending(filters);
 
       if (!result.ok) {
-        process.stderr.write(formatError(result.error) + "\n");
+        process.stderr.write(formatErrorFor(inv, result.error) + "\n");
         process.exitCode = exitCode(result.error);
         return;
       }
@@ -145,7 +145,7 @@ export default defineCommand({
       for (const doc of docs) {
         const judgmentResult = await app.judgmentService.latestFor(doc.id);
         if (!judgmentResult.ok) {
-          process.stderr.write(formatError(judgmentResult.error) + "\n");
+          process.stderr.write(formatErrorFor(inv, judgmentResult.error) + "\n");
           process.exitCode = exitCode(judgmentResult.error);
           return;
         }

@@ -44,6 +44,8 @@ export type Invocation = Readonly<{
   argv: readonly string[];
   paths: InvocationPaths;
   host: string;
+  /** The OS account name of the running process (the os-fallback tier of actor resolution). */
+  user: string;
   execPath: string;
   /** True inside the `bun build --compile` binary (`Bun.main` under `/$bunfs/`). */
   isCompiled: boolean;

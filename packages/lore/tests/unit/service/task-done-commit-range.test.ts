@@ -92,7 +92,7 @@ describe("lore done under the dispatch protocol: --worktree is a branch NAME (is
     run(repo, "checkout", "-q", "-b", "agent-branch-x");
 
     // `.claude/rules/lore-worktree-dispatch.md`: implementers claim with the branch NAME.
-    const probe = { ...createRealWorktreeProbe(), currentWorkingDirectory: () => repo };
+    const probe = createRealWorktreeProbe(repo);
     const store = new InMemoryStore();
     const cs = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
     const svc = new TaskWorkflowService(

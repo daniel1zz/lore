@@ -189,7 +189,7 @@
 import { defineCommand } from "citty";
 import { z } from "zod";
 import { loadLoreApp } from "../loader.js";
-import { exitCode, formatError, resolveActor } from "../utils.js";
+import { exitCode, formatError, formatErrorFor, resolveActor } from "../utils.js";
 import {
   checkpointRegistry,
   isCheckpointBlocked,
@@ -265,7 +265,7 @@ async function openBypassRecordGateSkip(inv: Invocation): Promise<RecordGateSkip
   // reason: F5 (AC-CRIT-7) — a bypass audit from a linked worktree must not migrate main's behind corpus.
   // Thrown BEFORE the catch below on purpose: runGateEnvBypassAudit turns the throw into its single
   // `gate bypass NOT audited: <schema mismatch>` warning and the gate still exits 0.
-  assertNoForeignSchemaMigration(dbPath);
+  assertNoForeignSchemaMigration(dbPath, inv.cwd);
   try {
     const store = new SQLiteStore(dbPath);
     return store.appendAuditEntry.bind(store);
@@ -518,7 +518,7 @@ export default defineCommand({
         const { app, config } = loadLoreApp({ inv });
         try {
           if (isGateDisabledByConfig("task-claim", config)) return;
-          const by = resolveActor(undefined, inv.env, inv.cwd);
+          const by = resolveActor(undefined, inv.env, inv.cwd, inv.user);
           await runTaskClaimGate(app, args.task as string, by, config, inv);
         } finally {
           app.close();
@@ -558,7 +558,7 @@ export default defineCommand({
         const { app, config } = loadLoreApp({ inv });
         try {
           if (isGateDisabledByConfig("phase-claim", config)) return;
-          const by = resolveActor(undefined, inv.env, inv.cwd);
+          const by = resolveActor(undefined, inv.env, inv.cwd, inv.user);
           await runPhaseClaimGate(app, args.phase as string, by, config, inv);
         } finally {
           app.close();
@@ -775,7 +775,7 @@ function recordHookGateDeny(
   actor?: string,
 ): void {
   if (app.traceRecorder === undefined) return;
-  const resolvedActor = actor ?? resolveActor(undefined, inv.env, inv.cwd);
+  const resolvedActor = actor ?? resolveActor(undefined, inv.env, inv.cwd, inv.user);
   app.traceRecorder.recordGateDeny(
     resolvedActor,
     checkpoint,
@@ -833,7 +833,7 @@ async function runPlanPromoteGate(
 ): Promise<void> {
   const bundleResult = await app.corpusService.getPlanBundle(planIdOrSlug);
   if (!bundleResult.ok) {
-    process.stderr.write(formatError(bundleResult.error) + "\n");
+    process.stderr.write(formatErrorFor(inv, bundleResult.error) + "\n");
     process.exitCode = exitCode(bundleResult.error);
     return;
   }
@@ -925,7 +925,7 @@ async function runTaskClaimGate(
 ): Promise<void> {
   const taskResult = await app.corpusService.get(taskIdOrSlug);
   if (!taskResult.ok) {
-    process.stderr.write(formatError(taskResult.error) + "\n");
+    process.stderr.write(formatErrorFor(inv, taskResult.error) + "\n");
     process.exitCode = exitCode(taskResult.error);
     return;
   }
@@ -938,7 +938,7 @@ async function runTaskClaimGate(
       message: `Expected a task document; got type '${task.type}'`,
       value: task.type,
     };
-    process.stderr.write(formatError(error) + "\n");
+    process.stderr.write(formatErrorFor(inv, error) + "\n");
     process.exitCode = exitCode(error);
     return;
   }
@@ -957,7 +957,7 @@ async function runTaskClaimGate(
   // session id is surfaced here exactly as `claim()` surfaces it, never ignored.
   const sessionIdResult = resolveClaimSessionId(inv.env);
   if (!sessionIdResult.ok) {
-    process.stderr.write(formatError(sessionIdResult.error) + "\n");
+    process.stderr.write(formatErrorFor(inv, sessionIdResult.error) + "\n");
     process.exitCode = exitCode(sessionIdResult.error);
     return;
   }
@@ -967,7 +967,7 @@ async function runTaskClaimGate(
   // run, so the dry-run reads the same invocation identity (unregistered -> null + one warning).
   const verifiedIdentity = await app.verifiedInvocationIdentity?.();
   if (verifiedIdentity !== undefined && !verifiedIdentity.ok) {
-    process.stderr.write(formatError(verifiedIdentity.error) + "\n");
+    process.stderr.write(formatErrorFor(inv, verifiedIdentity.error) + "\n");
     process.exitCode = exitCode(verifiedIdentity.error);
     return;
   }
@@ -1013,13 +1013,13 @@ async function runTaskClaimGate(
       // Every OTHER `getPlanBundle` failure (unresolvable/soft-deleted parent,
       // store error) still exits loud, unchanged.
       if (!isNonPlanParentError(bundleResult.error)) {
-        process.stderr.write(formatError(bundleResult.error) + "\n");
+        process.stderr.write(formatErrorFor(inv, bundleResult.error) + "\n");
         process.exitCode = exitCode(bundleResult.error);
         return;
       }
       const siblingsResult = await app.taskWorkflowService.findAdhocSiblingTasks();
       if (!siblingsResult.ok) {
-        process.stderr.write(formatError(siblingsResult.error) + "\n");
+        process.stderr.write(formatErrorFor(inv, siblingsResult.error) + "\n");
         process.exitCode = exitCode(siblingsResult.error);
         return;
       }
@@ -1097,7 +1097,7 @@ async function runPhaseClaimGate(
 ): Promise<void> {
   const phaseResult = await app.corpusService.get(phaseIdOrSlug);
   if (!phaseResult.ok) {
-    process.stderr.write(formatError(phaseResult.error) + "\n");
+    process.stderr.write(formatErrorFor(inv, phaseResult.error) + "\n");
     process.exitCode = exitCode(phaseResult.error);
     return;
   }
@@ -1110,7 +1110,7 @@ async function runPhaseClaimGate(
       message: `Expected a phase document; got type '${phase.type}'`,
       value: phase.type,
     };
-    process.stderr.write(formatError(error) + "\n");
+    process.stderr.write(formatErrorFor(inv, error) + "\n");
     process.exitCode = exitCode(error);
     return;
   }
@@ -1126,7 +1126,7 @@ async function runPhaseClaimGate(
   // identical surfacing of an unusable id, as `runTaskClaimGate` above.
   const sessionIdResult = resolveClaimSessionId(inv.env);
   if (!sessionIdResult.ok) {
-    process.stderr.write(formatError(sessionIdResult.error) + "\n");
+    process.stderr.write(formatErrorFor(inv, sessionIdResult.error) + "\n");
     process.exitCode = exitCode(sessionIdResult.error);
     return;
   }
@@ -1147,7 +1147,7 @@ async function runPhaseClaimGate(
   } else {
     const bundleResult = await app.corpusService.getPlanBundle(phase.parent_id);
     if (!bundleResult.ok) {
-      process.stderr.write(formatError(bundleResult.error) + "\n");
+      process.stderr.write(formatErrorFor(inv, bundleResult.error) + "\n");
       process.exitCode = exitCode(bundleResult.error);
       return;
     }
@@ -1222,7 +1222,7 @@ async function runSpecPromoteGate(
 ): Promise<void> {
   const listResult = await requireAcService(app).listCriteria(specIdOrSlug);
   if (!listResult.ok) {
-    process.stderr.write(formatError(listResult.error) + "\n");
+    process.stderr.write(formatErrorFor(inv, listResult.error) + "\n");
     process.exitCode = exitCode(listResult.error);
     return;
   }
@@ -1233,7 +1233,7 @@ async function runSpecPromoteGate(
   // second lookup cannot newly fail on a target this call would otherwise reject.
   const specResult = await app.corpusService.get(specIdOrSlug);
   if (!specResult.ok) {
-    process.stderr.write(formatError(specResult.error) + "\n");
+    process.stderr.write(formatErrorFor(inv, specResult.error) + "\n");
     process.exitCode = exitCode(specResult.error);
     return;
   }
@@ -1250,7 +1250,7 @@ async function runSpecPromoteGate(
   // read as "cites".
   const citesResult = await app.corpusService.specCitesLiveRule(specResult.value.doc.extra);
   if (!citesResult.ok) {
-    process.stderr.write(formatError(citesResult.error) + "\n");
+    process.stderr.write(formatErrorFor(inv, citesResult.error) + "\n");
     process.exitCode = exitCode(citesResult.error);
     return;
   }

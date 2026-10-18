@@ -31,6 +31,7 @@ import { tmpdir } from "os";
 import { createApp } from "../../src/app.js";
 import type { App } from "../../src/app.js";
 import { ResolutionProjector } from "../../src/service/resolution-projector.js";
+import { liveAmbient } from "../live-invocation.js";
 
 let tmpDir: string;
 
@@ -57,7 +58,7 @@ describe("createApp wiring — resolutionProjector (spec-the-defect-channel-reac
     // (the `Result<App>` arm exists only for the sync-enabled TursoStore
     // path, D-007) — same single-argument narrowing every other integration
     // bun test in this suite relies on.
-    const app = createApp(dbPath()) as App;
+    const app = createApp(dbPath(), undefined, liveAmbient()) as App;
     try {
       expect(app.resolutionProjector).toBeDefined();
       expect(app.resolutionProjector).toBeInstanceOf(ResolutionProjector);

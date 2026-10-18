@@ -67,6 +67,7 @@ import { saveConfig } from "@lore/core/node";
 import { createApp, type App } from "../../../src/app.js";
 import { loadLoreApp } from "../../../src/adapters/cli/loader.js";
 import { FOREIGN_CORPUS_WRITE_TOKEN } from "../../../src/service/foreign-corpus-write-guard.js";
+import { liveAmbient, liveInvocation } from "../../live-invocation.js";
 
 // ─── Fixtures ──────────────────────────────────────────────────────────────
 
@@ -97,7 +98,7 @@ function initGitRepo(dir: string): void {
 function makeCorpus(dir: string): void {
   const loreDir = join(dir, ".lore");
   mkdirSync(loreDir, { recursive: true });
-  const app = createApp(join(loreDir, "lore.db"));
+  const app = createApp(join(loreDir, "lore.db"), undefined, liveAmbient());
   (app as App).close();
 }
 
@@ -161,7 +162,7 @@ describe("loadLoreApp — the HTTP exemption is a property of the SURFACE, not o
     const { worktreePath } = makeNestedWorktreeFixture("http-exempt");
     process.chdir(worktreePath);
 
-    const { app } = loadLoreApp({ surface: "http" });
+    const { app } = loadLoreApp({ surface: "http", inv: liveInvocation() });
     try {
       const created = await app.corpusService.create({ type: "prd", title: "HTTP write from a nested worktree" });
 
@@ -187,7 +188,7 @@ describe("loadLoreApp — the CLI surface still derives provenance from its own 
     const { worktreePath } = makeNestedWorktreeFixture("cli-control");
     process.chdir(worktreePath);
 
-    const { app } = loadLoreApp();
+    const { app } = loadLoreApp({ inv: liveInvocation() });
     try {
       const created = await app.corpusService.create({ type: "prd", title: "CLI write from a nested worktree" });
 
@@ -215,7 +216,7 @@ describe("loadLoreApp — a CLI boot inside a repo that OWNS its corpus is untou
     const ownRoot = makeOwnCorpusFixture("cli-own");
     process.chdir(ownRoot);
 
-    const { app } = loadLoreApp();
+    const { app } = loadLoreApp({ inv: liveInvocation() });
     try {
       const created = await app.corpusService.create({ type: "prd", title: "CLI write in its own tree" });
       expect(isForeignWriteRefusal(created)).toBe(false);
@@ -237,7 +238,7 @@ describe("loadLoreApp — the foreign_corpus_write knob still governs the CLI br
     } as never);
     process.chdir(worktreePath);
 
-    const { app } = loadLoreApp();
+    const { app } = loadLoreApp({ inv: liveInvocation() });
     try {
       const created = await app.corpusService.create({ type: "prd", title: "CLI write with the guard disabled" });
       expect(isForeignWriteRefusal(created)).toBe(false);
@@ -255,8 +256,8 @@ describe("loadLoreApp — two boots in ONE process from ONE directory", () => {
     const { worktreePath } = makeNestedWorktreeFixture("state-pair");
     process.chdir(worktreePath);
 
-    const { app: httpApp } = loadLoreApp({ surface: "http" });
-    const { app: cliApp } = loadLoreApp();
+    const { app: httpApp } = loadLoreApp({ surface: "http", inv: liveInvocation() });
+    const { app: cliApp } = loadLoreApp({ inv: liveInvocation() });
     try {
       const viaHttp = await httpApp.corpusService.create({ type: "prd", title: "state pair — http" });
       const viaCli = await cliApp.corpusService.create({ type: "prd", title: "state pair — cli" });
@@ -279,7 +280,7 @@ describe("loadLoreApp — guardTaskLifecycleWrites reads the same surface-keyed 
     // Seed prd → plan → task from INSIDE the owning repo (provenance "own",
     // so seeding is never itself subject to the refusal under test).
     process.chdir(repoRoot);
-    const seed = loadLoreApp();
+    const seed = loadLoreApp({ inv: liveInvocation() });
     let taskId: string;
     try {
       const prd = await seed.app.corpusService.create({ type: "prd", title: "lifecycle prd" });
@@ -307,7 +308,7 @@ describe("loadLoreApp — guardTaskLifecycleWrites reads the same surface-keyed 
 
     process.chdir(worktreePath);
 
-    const { app: cliApp } = loadLoreApp();
+    const { app: cliApp } = loadLoreApp({ inv: liveInvocation() });
     try {
       const claimed = await cliApp.taskWorkflowService.claim(taskId, { by: "agent:lifecycle-probe" });
       expect(isForeignWriteRefusal(claimed)).toBe(true);
@@ -315,7 +316,7 @@ describe("loadLoreApp — guardTaskLifecycleWrites reads the same surface-keyed 
       cliApp.close();
     }
 
-    const { app: httpApp } = loadLoreApp({ surface: "http" });
+    const { app: httpApp } = loadLoreApp({ surface: "http", inv: liveInvocation() });
     try {
       const claimed = await httpApp.taskWorkflowService.claim(taskId, { by: "agent:lifecycle-probe" });
       // Keyed on the TOKEN, not on `ok` — an unrelated denial (a task-claim

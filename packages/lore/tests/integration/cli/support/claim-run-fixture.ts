@@ -27,6 +27,7 @@ import { createApp } from "../../../../src/app.js";
 import type { App } from "../../../../src/app.js";
 import type { CreateDocInput } from "@lore/core";
 import { sessionIdOfActor } from "../../../helpers/session-actor";
+import { liveAmbient } from "../../../live-invocation.js";
 
 const PACKAGE_ROOT = new URL("../../../../", import.meta.url).pathname.replace(/\/$/, "");
 const ENTRY = join(PACKAGE_ROOT, "src", "index.ts");
@@ -146,7 +147,7 @@ export async function createCorpus(opts: { claimGates?: "enabled" | "disabled" }
   let counter = 0;
 
   const withApp = async <T>(fn: (app: App) => Promise<T>): Promise<T> => {
-    const app = createApp(join(dir, ".lore", "lore.db")) as App;
+    const app = createApp(join(dir, ".lore", "lore.db"), undefined, liveAmbient()) as App;
     try {
       return await fn(app);
     } finally {

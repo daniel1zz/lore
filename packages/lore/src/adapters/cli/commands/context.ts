@@ -91,7 +91,7 @@ import { err, isInsideRoots, ok, outsideRootsError } from "@lore/core";
 import type { CallerSurface, ContextConfigLayer, FsWritePort, LoreError, MemoryFileBudgets, Result } from "@lore/core";
 import { loadConfig, loadGlobalConfig, resolveGlobalConfigPath } from "@lore/core/node";
 import { invocationOf } from "../command-invocation.js";
-import { exitCode, findLoreDbPath, formatError } from "../utils.js";
+import { exitCode, findLoreDbPath, formatError, formatErrorFor } from "../utils.js";
 import { resolveAssetsRoot, type SetupPathContext } from "../setup-args.js";
 import { collectContextFacts } from "../../../service/context-facts.js";
 import {
@@ -102,7 +102,7 @@ import {
   type ContextRefreshScope,
 } from "../../../flows/context-flow.js";
 import { buildContextNarrativePrompt } from "../../../ai/context-narrative-template.js";
-import { buildProviderRegistry } from "../../../ai/registry.js";
+import { buildProviderRegistry, type ProviderRuntime } from "../../../ai/registry.js";
 import { resolveAiDefault } from "../../../ai/resolve-ai.js";
 import { runSelectionChange, runSelectionList, type SelectionFlowDeps } from "../../../flows/selection-flow.js";
 import {
@@ -292,13 +292,14 @@ async function resolveInitNarrative(
   useAi: boolean,
   aiConfig: ReturnType<typeof AiConfigSchema.parse>,
   budgets: MemoryFileBudgets,
+  runtime: ProviderRuntime,
 ): Promise<string | undefined> {
   if (!useAi) return undefined;
 
   const factsResult = await collectContextFacts(fsPort, "", budgets);
   if (!factsResult.ok) return undefined;
 
-  const registryResult = buildProviderRegistry(aiConfig);
+  const registryResult = buildProviderRegistry(aiConfig, runtime);
   if (!registryResult.ok) return undefined;
 
   const provider = registryResult.value.providers.get(registryResult.value.active);
@@ -524,7 +525,7 @@ export default defineCommand({
     const home = inv.paths.home;
     const globalConfigResult = loadGlobalConfig(resolveGlobalConfigPath(inv.env, home));
     if (!globalConfigResult.ok) {
-      process.stderr.write(formatError(globalConfigResult.error) + "\n");
+      process.stderr.write(formatErrorFor(inv, globalConfigResult.error) + "\n");
       process.exitCode = exitCode(globalConfigResult.error);
       return;
     }
@@ -643,7 +644,7 @@ export default defineCommand({
     const { ai: useAi } = resolveAiDefault(explicitAi, surface, config?.ai?.default_per_surface);
     const aiConfig = config?.ai ?? AiConfigSchema.parse({});
 
-    const narrative = await resolveInitNarrative(fsPort, repoRoot, useAi, aiConfig, budgets);
+    const narrative = await resolveInitNarrative(fsPort, repoRoot, useAi, aiConfig, budgets, { env: inv.env, tmpDir: inv.paths.tmpDir });
     if (narrative === undefined) {
       process.stderr.write(
         "Warning: no usable AI provider — writing a skeleton narrative placeholder instead of an AI-generated one.\n",

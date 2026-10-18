@@ -55,7 +55,7 @@ import { defineCommand } from "citty";
 import type { DocRecord, LoreError, Result } from "@lore/core";
 import { extractDeclaredAcScope } from "@lore/core";
 import { loadLoreApp } from "../loader.js";
-import { exitCode, formatError, resolveActor } from "../utils.js";
+import { exitCode, formatError, formatErrorFor, resolveActor } from "../utils.js";
 import { invocationOf } from "../command-invocation.js";
 
 /**
@@ -220,12 +220,12 @@ export default defineCommand({
 
           const targetResult = await resolveScopeTarget(app, targetId);
           if (!targetResult.ok) {
-            process.stderr.write(formatError(targetResult.error) + "\n");
+            process.stderr.write(formatErrorFor(inv, targetResult.error) + "\n");
             process.exitCode = exitCode(targetResult.error);
             return;
           }
 
-          const by = resolveActor(undefined, inv.env, inv.cwd);
+          const by = resolveActor(undefined, inv.env, inv.cwd, inv.user);
           await runScopeMutation(app, targetResult.value, "add", targetId, acIds, by, args.json === true);
         } finally {
           app.close();
@@ -265,12 +265,12 @@ export default defineCommand({
 
           const targetResult = await resolveScopeTarget(app, targetId);
           if (!targetResult.ok) {
-            process.stderr.write(formatError(targetResult.error) + "\n");
+            process.stderr.write(formatErrorFor(inv, targetResult.error) + "\n");
             process.exitCode = exitCode(targetResult.error);
             return;
           }
 
-          const by = resolveActor(undefined, inv.env, inv.cwd);
+          const by = resolveActor(undefined, inv.env, inv.cwd, inv.user);
           await runScopeMutation(app, targetResult.value, "rm", targetId, acIds, by, args.json === true);
         } finally {
           app.close();
@@ -298,7 +298,7 @@ export default defineCommand({
         try {
           const targetResult = await resolveScopeTarget(app, args.target as string);
           if (!targetResult.ok) {
-            process.stderr.write(formatError(targetResult.error) + "\n");
+            process.stderr.write(formatErrorFor(inv, targetResult.error) + "\n");
             process.exitCode = exitCode(targetResult.error);
             return;
           }
@@ -306,7 +306,7 @@ export default defineCommand({
           const doc = targetResult.value;
           if (doc.type !== "task" && doc.type !== "phase") {
             const error = unsupportedTargetTypeError(doc.type);
-            process.stderr.write(formatError(error) + "\n");
+            process.stderr.write(formatErrorFor(inv, error) + "\n");
             process.exitCode = exitCode(error);
             return;
           }

@@ -105,7 +105,7 @@
 import { readFileSync } from "node:fs";
 import { defineCommand } from "citty";
 import { loadLoreApp } from "../loader.js";
-import { exitCode, formatError, resolveActor } from "../utils.js";
+import { exitCode, formatErrorFor, resolveActor } from "../utils.js";
 import { openEditor } from "../editor.js";
 import { formatAttestationExemptionNotice } from "../plan-exempt-validation.js";
 import { PLAN_CLOSE_VACUITY_NOTICE_FIELD } from "../../../service/checkpoint-registry.js";
@@ -336,7 +336,7 @@ export default defineCommand({
       }
     }
 
-    const resolvedActor = resolveActor(undefined, inv.env, inv.cwd);
+    const resolvedActor = resolveActor(undefined, inv.env, inv.cwd, inv.user);
     const { app, defaults } = loadLoreApp({ inv });
     try {
       // ─── Step 2: AI mutation path (SPEC-019) ──────────────────────────────────
@@ -360,13 +360,13 @@ export default defineCommand({
         // Fetch the document to be mutated
         const resolveResult = await app.corpusService.resolve(args.id);
         if (!resolveResult.ok) {
-          process.stderr.write(formatError(resolveResult.error) + "\n");
+          process.stderr.write(formatErrorFor(inv, resolveResult.error) + "\n");
           process.exitCode = exitCode(resolveResult.error);
           return;
         }
         const getResult = await app.corpusService.get(resolveResult.value);
         if (!getResult.ok) {
-          process.stderr.write(formatError(getResult.error) + "\n");
+          process.stderr.write(formatErrorFor(inv, getResult.error) + "\n");
           process.exitCode = exitCode(getResult.error);
           return;
         }
@@ -376,7 +376,7 @@ export default defineCommand({
         // own gate then refuses its output. A correction cannot reach here (rejected above), so no exit applies.
         const rewriteGate = await app.corpusService.assertAiRewriteAllowed(doc);
         if (!rewriteGate.ok) {
-          process.stderr.write(formatError(rewriteGate.error) + "\n");
+          process.stderr.write(formatErrorFor(inv, rewriteGate.error) + "\n");
           process.exitCode = exitCode(rewriteGate.error);
           return;
         }
@@ -409,7 +409,7 @@ export default defineCommand({
           });
 
           if (!aiResult.ok) {
-            process.stderr.write(formatError(aiResult.error) + "\n");
+            process.stderr.write(formatErrorFor(inv, aiResult.error) + "\n");
             process.exitCode = exitCode(aiResult.error);
             return;
           }
@@ -439,7 +439,7 @@ export default defineCommand({
           });
 
           if (!aiResult.ok) {
-            process.stderr.write(formatError(aiResult.error) + "\n");
+            process.stderr.write(formatErrorFor(inv, aiResult.error) + "\n");
             process.exitCode = exitCode(aiResult.error);
             return;
           }
@@ -465,7 +465,7 @@ export default defineCommand({
         );
 
         if (!setResult.ok) {
-          process.stderr.write(formatError(setResult.error) + "\n");
+          process.stderr.write(formatErrorFor(inv, setResult.error) + "\n");
           process.exitCode = exitCode(setResult.error);
           return;
         }
@@ -515,13 +515,13 @@ export default defineCommand({
       if (args.kind !== undefined) {
         const resolveForKind = await app.corpusService.resolve(args.id);
         if (!resolveForKind.ok) {
-          process.stderr.write(formatError(resolveForKind.error) + "\n");
+          process.stderr.write(formatErrorFor(inv, resolveForKind.error) + "\n");
           process.exitCode = exitCode(resolveForKind.error);
           return;
         }
         const getForKind = await app.corpusService.get(resolveForKind.value);
         if (!getForKind.ok) {
-          process.stderr.write(formatError(getForKind.error) + "\n");
+          process.stderr.write(formatErrorFor(inv, getForKind.error) + "\n");
           process.exitCode = exitCode(getForKind.error);
           return;
         }
@@ -560,13 +560,13 @@ export default defineCommand({
 
         const resolveForDecisionStatus = await app.corpusService.resolve(args.id);
         if (!resolveForDecisionStatus.ok) {
-          process.stderr.write(formatError(resolveForDecisionStatus.error) + "\n");
+          process.stderr.write(formatErrorFor(inv, resolveForDecisionStatus.error) + "\n");
           process.exitCode = exitCode(resolveForDecisionStatus.error);
           return;
         }
         const getForDecisionStatus = await app.corpusService.get(resolveForDecisionStatus.value);
         if (!getForDecisionStatus.ok) {
-          process.stderr.write(formatError(getForDecisionStatus.error) + "\n");
+          process.stderr.write(formatErrorFor(inv, getForDecisionStatus.error) + "\n");
           process.exitCode = exitCode(getForDecisionStatus.error);
           return;
         }
@@ -618,13 +618,13 @@ export default defineCommand({
         // No flags provided — open editor pre-populated with current content (AC-SET-1)
         const resolvedId = await app.corpusService.resolve(args.id);
         if (!resolvedId.ok) {
-          process.stderr.write(formatError(resolvedId.error) + "\n");
+          process.stderr.write(formatErrorFor(inv, resolvedId.error) + "\n");
           process.exitCode = exitCode(resolvedId.error);
           return;
         }
         const getResult = await app.corpusService.get(resolvedId.value);
         if (!getResult.ok) {
-          process.stderr.write(formatError(getResult.error) + "\n");
+          process.stderr.write(formatErrorFor(inv, getResult.error) + "\n");
           process.exitCode = exitCode(getResult.error);
           return;
         }
@@ -638,7 +638,7 @@ export default defineCommand({
           tmpDir: inv.paths.tmpDir,
         });
         if (!editorResult.ok) {
-          process.stderr.write(formatError(editorResult.error) + "\n");
+          process.stderr.write(formatErrorFor(inv, editorResult.error) + "\n");
           process.exitCode = exitCode(editorResult.error);
           return;
         }
@@ -665,13 +665,13 @@ export default defineCommand({
       ) {
         const resolveForDemotion = await app.corpusService.resolve(args.id);
         if (!resolveForDemotion.ok) {
-          process.stderr.write(formatError(resolveForDemotion.error) + "\n");
+          process.stderr.write(formatErrorFor(inv, resolveForDemotion.error) + "\n");
           process.exitCode = exitCode(resolveForDemotion.error);
           return;
         }
         const getForDemotion = await app.corpusService.get(resolveForDemotion.value);
         if (!getForDemotion.ok) {
-          process.stderr.write(formatError(getForDemotion.error) + "\n");
+          process.stderr.write(formatErrorFor(inv, getForDemotion.error) + "\n");
           process.exitCode = exitCode(getForDemotion.error);
           return;
         }
@@ -684,7 +684,7 @@ export default defineCommand({
       });
 
       if (!result.ok) {
-        process.stderr.write(formatError(result.error) + "\n");
+        process.stderr.write(formatErrorFor(inv, result.error) + "\n");
         process.exitCode = exitCode(result.error);
         return;
       }

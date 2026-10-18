@@ -20,6 +20,7 @@
 import { describe, it, expect } from "vitest";
 import { buildProviderRegistry } from "../../../src/ai/registry.js";
 import { AiConfigSchema } from "@lore/core";
+import { liveProviderRuntime } from "../../live-invocation.js";
 
 // ─── AC-HTTP-1: HTTP provider wired correctly ─────────────────────────────────
 
@@ -35,31 +36,31 @@ describe("buildProviderRegistry — provider='http' (AC-HTTP-1)", () => {
   const mockEnv = { ANTHROPIC_API_KEY: "sk-ant-mock-key-for-tests" };
 
   it("returns ok with provider='http' and valid config + env", () => {
-    const result = buildProviderRegistry(httpConfig, mockEnv);
+    const result = buildProviderRegistry(httpConfig, { ...liveProviderRuntime(), env: mockEnv });
     expect(result.ok).toBe(true);
   });
 
   it("active is 'http' when provider='http'", () => {
-    const result = buildProviderRegistry(httpConfig, mockEnv);
+    const result = buildProviderRegistry(httpConfig, { ...liveProviderRuntime(), env: mockEnv });
     if (!result.ok) throw new Error(`Expected ok, got: ${JSON.stringify(result.error)}`);
     expect(result.value.active).toBe("http");
   });
 
   it("providers map contains 'http' key", () => {
-    const result = buildProviderRegistry(httpConfig, mockEnv);
+    const result = buildProviderRegistry(httpConfig, { ...liveProviderRuntime(), env: mockEnv });
     if (!result.ok) throw new Error("Expected ok");
     expect(result.value.providers.has("http")).toBe(true);
   });
 
   it("providers map still contains 'claude-cli' (built-in always seeded)", () => {
     // The registry always seeds ClaudeCliProvider for "claude-cli" before registering HTTP
-    const result = buildProviderRegistry(httpConfig, mockEnv);
+    const result = buildProviderRegistry(httpConfig, { ...liveProviderRuntime(), env: mockEnv });
     if (!result.ok) throw new Error("Expected ok");
     expect(result.value.providers.has("claude-cli")).toBe(true);
   });
 
   it("providers map has exactly 2 keys: 'claude-cli' and 'http'", () => {
-    const result = buildProviderRegistry(httpConfig, mockEnv);
+    const result = buildProviderRegistry(httpConfig, { ...liveProviderRuntime(), env: mockEnv });
     if (!result.ok) throw new Error("Expected ok");
     expect(result.value.providers.size).toBe(2);
     const keys = [...result.value.providers.keys()].sort();
@@ -67,7 +68,7 @@ describe("buildProviderRegistry — provider='http' (AC-HTTP-1)", () => {
   });
 
   it("the 'http' key maps to a provider whose name is 'http'", () => {
-    const result = buildProviderRegistry(httpConfig, mockEnv);
+    const result = buildProviderRegistry(httpConfig, { ...liveProviderRuntime(), env: mockEnv });
     if (!result.ok) throw new Error("Expected ok");
     const httpProvider = result.value.providers.get("http");
     expect(httpProvider).toBeDefined();
@@ -75,7 +76,7 @@ describe("buildProviderRegistry — provider='http' (AC-HTTP-1)", () => {
   });
 
   it("the 'claude-cli' provider has name 'claude-cli'", () => {
-    const result = buildProviderRegistry(httpConfig, mockEnv);
+    const result = buildProviderRegistry(httpConfig, { ...liveProviderRuntime(), env: mockEnv });
     if (!result.ok) throw new Error("Expected ok");
     const cliProvider = result.value.providers.get("claude-cli");
     expect(cliProvider?.name).toBe("claude-cli");
@@ -85,8 +86,8 @@ describe("buildProviderRegistry — provider='http' (AC-HTTP-1)", () => {
     // Anti-tautology: verify env is actually read, not hardcoded
     const env1 = { ANTHROPIC_API_KEY: "key-alpha" };
     const env2 = { ANTHROPIC_API_KEY: "key-beta" };
-    const r1 = buildProviderRegistry(httpConfig, env1);
-    const r2 = buildProviderRegistry(httpConfig, env2);
+    const r1 = buildProviderRegistry(httpConfig, { ...liveProviderRuntime(), env: env1 });
+    const r2 = buildProviderRegistry(httpConfig, { ...liveProviderRuntime(), env: env2 });
     expect(r1.ok).toBe(true);
     expect(r2.ok).toBe(true);
     // Both registries should succeed — different envs don't affect registry shape
@@ -107,7 +108,7 @@ describe("buildProviderRegistry — AC-HTTP-3 missing env var in headers", () =>
         headers: { "x-api-key": "${MISSING_API_KEY}" },
       },
     });
-    const result = buildProviderRegistry(config, {}); // empty env — no MISSING_API_KEY
+    const result = buildProviderRegistry(config, { ...liveProviderRuntime(), env: {} }); // empty env — no MISSING_API_KEY
     expect(result.ok).toBe(false);
   });
 
@@ -119,7 +120,7 @@ describe("buildProviderRegistry — AC-HTTP-3 missing env var in headers", () =>
         headers: { "x-api-key": "${MISSING_KEY}" },
       },
     });
-    const result = buildProviderRegistry(config, {});
+    const result = buildProviderRegistry(config, { ...liveProviderRuntime(), env: {} });
     if (result.ok) throw new Error("Expected err");
     expect(result.error.code).toBe("VALIDATION_ERROR");
   });
@@ -132,7 +133,7 @@ describe("buildProviderRegistry — AC-HTTP-3 missing env var in headers", () =>
         headers: { "x-api-key": "${MY_SECRET_KEY}" },
       },
     });
-    const result = buildProviderRegistry(config, {});
+    const result = buildProviderRegistry(config, { ...liveProviderRuntime(), env: {} });
     if (result.ok) throw new Error("Expected err");
     if (result.error.code !== "VALIDATION_ERROR") throw new Error("Expected VALIDATION_ERROR");
     expect(result.error.field).toContain("x-api-key");
@@ -146,7 +147,7 @@ describe("buildProviderRegistry — AC-HTTP-3 missing env var in headers", () =>
         headers: { auth: "${VERY_SPECIFIC_TOKEN_VAR}" },
       },
     });
-    const result = buildProviderRegistry(config, {});
+    const result = buildProviderRegistry(config, { ...liveProviderRuntime(), env: {} });
     if (result.ok) throw new Error("Expected err");
     if (result.error.code !== "VALIDATION_ERROR") throw new Error("Expected VALIDATION_ERROR");
     expect(result.error.message).toContain("VERY_SPECIFIC_TOKEN_VAR");
@@ -160,7 +161,7 @@ describe("buildProviderRegistry — AC-HTTP-3 missing env var in headers", () =>
         headers: { "x-api-key": "${ANTHROPIC_API_KEY}" },
       },
     });
-    const result = buildProviderRegistry(config, { ANTHROPIC_API_KEY: "" });
+    const result = buildProviderRegistry(config, { ...liveProviderRuntime(), env: { ANTHROPIC_API_KEY: "" } });
     expect(result.ok).toBe(false);
     if (result.ok) throw new Error("Expected err");
     expect(result.error.code).toBe("VALIDATION_ERROR");
@@ -172,20 +173,20 @@ describe("buildProviderRegistry — AC-HTTP-3 missing env var in headers", () =>
 describe("buildProviderRegistry — claude-cli path regression", () => {
   it("default config (provider='claude-cli') still returns ok", () => {
     const config = AiConfigSchema.parse({});
-    const result = buildProviderRegistry(config);
+    const result = buildProviderRegistry(config, liveProviderRuntime());
     expect(result.ok).toBe(true);
   });
 
   it("default config has active='claude-cli'", () => {
     const config = AiConfigSchema.parse({});
-    const result = buildProviderRegistry(config);
+    const result = buildProviderRegistry(config, liveProviderRuntime());
     if (!result.ok) throw new Error("Expected ok");
     expect(result.value.active).toBe("claude-cli");
   });
 
   it("default config has only 'claude-cli' in providers map (no 'http' added)", () => {
     const config = AiConfigSchema.parse({});
-    const result = buildProviderRegistry(config);
+    const result = buildProviderRegistry(config, liveProviderRuntime());
     if (!result.ok) throw new Error("Expected ok");
     expect(result.value.providers.has("http")).toBe(false);
     expect(result.value.providers.has("claude-cli")).toBe(true);
@@ -194,7 +195,7 @@ describe("buildProviderRegistry — claude-cli path regression", () => {
   it("default config does not pass env to resolveEnvInHeaders (no env resolution for CLI)", () => {
     // Regression: CLI path must succeed even with an empty env (no headers to resolve)
     const config = AiConfigSchema.parse({});
-    const result = buildProviderRegistry(config, {}); // empty env should NOT cause VALIDATION_ERROR
+    const result = buildProviderRegistry(config, { ...liveProviderRuntime(), env: {} }); // empty env should NOT cause VALIDATION_ERROR
     expect(result.ok).toBe(true);
   });
 });
@@ -204,20 +205,20 @@ describe("buildProviderRegistry — claude-cli path regression", () => {
 describe("buildProviderRegistry — unknown provider regression (AC-AI-11)", () => {
   it("unknown provider name → err result", () => {
     const config = AiConfigSchema.parse({ provider: "ghost-provider" });
-    const result = buildProviderRegistry(config);
+    const result = buildProviderRegistry(config, liveProviderRuntime());
     expect(result.ok).toBe(false);
   });
 
   it("unknown provider → STORE_ERROR code", () => {
     const config = AiConfigSchema.parse({ provider: "ghost-provider" });
-    const result = buildProviderRegistry(config);
+    const result = buildProviderRegistry(config, liveProviderRuntime());
     if (result.ok) throw new Error("Expected err");
     expect(result.error.code).toBe("STORE_ERROR");
   });
 
   it("unknown provider error message lists known providers for diagnosis", () => {
     const config = AiConfigSchema.parse({ provider: "ghost-provider" });
-    const result = buildProviderRegistry(config);
+    const result = buildProviderRegistry(config, liveProviderRuntime());
     if (result.ok) throw new Error("Expected err");
     if (result.error.code !== "STORE_ERROR") throw new Error("Expected STORE_ERROR");
     expect(result.error.message).toContain("claude-cli");

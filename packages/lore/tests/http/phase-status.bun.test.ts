@@ -44,6 +44,7 @@ import { createMachineAuthStores, type MachineAuthStores } from "../../src/adapt
 import { createApp } from "../../src/app.js";
 import type { App } from "../../src/app.js";
 import type { CreateDocInput } from "@lore/core";
+import { liveAmbient } from "../live-invocation.js";
 
 interface TestContext {
   server: ReturnType<typeof Bun.serve>;
@@ -66,7 +67,7 @@ async function makeTestServer(): Promise<TestContext> {
   mkdirSync(join(tmpDir, ".lore"), { recursive: true });
   const dbPath = join(tmpDir, ".lore", "lore.db");
 
-  const app = createApp(dbPath);
+  const app = createApp(dbPath, undefined, liveAmbient());
 
   // reason: SPEC-078 D1 — this key is used ONLY for the bearer-token tests below;
   // "dashboard-local" for the cookie-bootstrap regression test lives on machineAuth.

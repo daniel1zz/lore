@@ -99,7 +99,7 @@ import {
 import type { HandoffExtra } from "@lore/core";
 import { SESSION_RESUME_CHECKPOINT } from "../../../flows/feed-flow.js";
 import { loadLoreApp } from "../loader.js";
-import { exitCode, formatError, resolveActor } from "../utils.js";
+import { exitCode, formatError, formatErrorFor, resolveActor } from "../utils.js";
 import { assembleHandoffInput, parseHandoffJsonFile } from "../handoff-input.js";
 import { invocationOf } from "../command-invocation.js";
 
@@ -1085,7 +1085,7 @@ export default defineCommand({
 
       const parsed = parseHandoffJsonFile(raw, {
         // reason: the writer is the invoking run alone — a payload-supplied `by` is overridden, never trusted.
-        by: resolveActor(undefined, inv.env, inv.cwd),
+        by: resolveActor(undefined, inv.env, inv.cwd, inv.user),
         ...(explicitPlan !== undefined ? { plan: explicitPlan } : {}),
       });
       if (!parsed.ok) {
@@ -1119,7 +1119,7 @@ export default defineCommand({
       }
 
       const assembled = assembleHandoffInput({
-        by: resolveActor(undefined, inv.env, inv.cwd),
+        by: resolveActor(undefined, inv.env, inv.cwd, inv.user),
         ...(explicitPlan !== undefined ? { plan: explicitPlan } : {}),
         files: normalizeRepeatable(args.file),
         decisions: normalizeRepeatable(args.decision),
@@ -1152,7 +1152,7 @@ export default defineCommand({
       // `--harness-run` verifies to null), never the raw flag; the service reads that run's session trail.
       const identity = await app.verifiedInvocationIdentity?.();
       if (identity !== undefined && !identity.ok) {
-        process.stderr.write(formatError(identity.error) + "\n");
+        process.stderr.write(formatErrorFor(inv, identity.error) + "\n");
         process.exitCode = exitCode(identity.error);
         return;
       }
@@ -1160,7 +1160,7 @@ export default defineCommand({
 
       const result = await app.sessionService.writeHandoff(candidate, undefined, { run });
       if (!result.ok) {
-        process.stderr.write(formatError(result.error) + "\n");
+        process.stderr.write(formatErrorFor(inv, result.error) + "\n");
         process.exitCode = exitCode(result.error);
         return;
       }

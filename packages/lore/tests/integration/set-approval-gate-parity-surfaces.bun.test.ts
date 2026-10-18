@@ -21,7 +21,7 @@
  * @spec_ref spec-approval-and-plan-closure-go-through-the-same-checks-on AC-AP-2
  */
 
-import { liveInvocation } from "../live-invocation.js";
+import { liveInvocation, liveAmbient } from "../live-invocation.js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { mkdirSync, mkdtempSync, rmSync } from "fs";
 import { join } from "path";
@@ -59,7 +59,7 @@ beforeAll(async () => {
   dir = mkdtempSync(join(tmpdir(), "lore-set-approval-surfaces-"));
   mkdirSync(join(dir, ".lore"), { recursive: true });
   const dbPath = join(dir, ".lore", "lore.db");
-  app = createApp(dbPath);
+  app = createApp(dbPath, undefined, liveAmbient());
   reader = new SQLiteStore(dbPath);
   await must(app.corpusService.create({ type: "prd", title: "Surfaces root PRD", content: "root" } as CreateDocInput));
 

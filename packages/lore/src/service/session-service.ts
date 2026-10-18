@@ -106,8 +106,6 @@ import { computeRuleDiffSinceClaim, renderRuleDiff } from "./resume-rule-diff.js
 import { deriveLivenessVerdict, type LivenessVerdict } from "./session-liveness.js";
 import { probeProcessStartTime, type ProcessStartTimeProbe } from "../adapters/process-probe-port.js";
 import {
-  writeSessionHeartbeat,
-  readSessionHeartbeat,
   type WriteSessionHeartbeat,
   type ReadSessionHeartbeat,
 } from "../adapters/session-heartbeat-port.js";
@@ -280,20 +278,19 @@ export class SessionService {
    *   `detectBranch` ctor-DI precedent). Tests inject a fake to avoid a real
    *   `ps` subprocess.
    * @param writeHeartbeatPort - AC-OWN-5 injected port persisting a session's
-   *   own heartbeat. Defaults to the REAL implementation
-   *   (`adapters/session-heartbeat-port.ts::writeSessionHeartbeat`), same
-   *   no-app.ts-wiring-needed reason as `probeProcessStartTimePort`.
+   *   own heartbeat, built by `app.ts` over the invocation's temp directory
+   *   (`adapters/session-heartbeat-port.ts::createWriteSessionHeartbeat`).
+   *   Absent => no heartbeat is recorded (advisory data; every bare test construction).
    * @param readHeartbeatPort - AC-OWN-5 injected port reading a session's
-   *   recorded heartbeat. Defaults to the REAL implementation
-   *   (`adapters/session-heartbeat-port.ts::readSessionHeartbeat`), same
-   *   reason.
+   *   recorded heartbeat (`createReadSessionHeartbeat`). Absent => every
+   *   session reads "unmeasured".
    */
   constructor(
     private readonly store: StoreInterface,
     private readonly deps: SessionServiceDeps,
     private readonly probeProcessStartTimePort: ProcessStartTimeProbe = probeProcessStartTime,
-    private readonly writeHeartbeatPort: WriteSessionHeartbeat = writeSessionHeartbeat,
-    private readonly readHeartbeatPort: ReadSessionHeartbeat = readSessionHeartbeat,
+    private readonly writeHeartbeatPort?: WriteSessionHeartbeat,
+    private readonly readHeartbeatPort?: ReadSessionHeartbeat,
     private readonly realpathPort: RealpathPort = realpathNative,
     private readonly readTrailPort: ReadHandoffTrail = deps.readTrail ?? readHandoffTrailUnwired,
   ) {}
@@ -739,7 +736,7 @@ export class SessionService {
     // recorded" (readSessionHeartbeat later reports "unmeasured"), never a
     // fabricated value.
     if (startedAt === null) return;
-    await this.writeHeartbeatPort(sessionId, {
+    await this.writeHeartbeatPort?.(sessionId, {
       pid,
       started_at: startedAt,
       ...(machine !== undefined ? { machine } : {}),
@@ -798,7 +795,7 @@ export class SessionService {
         records.push({ ...session, liveness: "unmeasured" });
         continue;
       }
-      const recorded = await this.readHeartbeatPort(session.session_id);
+      const recorded = await this.readHeartbeatPort?.(session.session_id);
       if (recorded === undefined) {
         records.push({ ...session, liveness: "unmeasured" });
         continue;

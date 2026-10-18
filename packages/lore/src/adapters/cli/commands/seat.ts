@@ -34,7 +34,7 @@
 
 import { defineCommand } from "citty";
 import { loadLoreApp } from "../loader.js";
-import { exitCode, formatError } from "../utils.js";
+import { exitCode, formatErrorFor } from "../utils.js";
 import { buildSeatListJsonPayload, formatSeatList } from "../seat-render.js";
 import { invocationOf } from "../command-invocation.js";
 
@@ -82,7 +82,7 @@ export default defineCommand({
       if (target === "list") {
         const result = await seatService.list();
         if (!result.ok) {
-          process.stderr.write(formatError(result.error) + "\n");
+          process.stderr.write(formatErrorFor(inv, result.error) + "\n");
           process.exitCode = exitCode(result.error);
           return;
         }
@@ -104,7 +104,7 @@ export default defineCommand({
         if (target === "resume") {
           const result = await seatService.resume(planArg);
           if (!result.ok) {
-            process.stderr.write(formatError(result.error) + "\n");
+            process.stderr.write(formatErrorFor(inv, result.error) + "\n");
             process.exitCode = exitCode(result.error);
             return;
           }
@@ -119,7 +119,7 @@ export default defineCommand({
         // target === "remove"
         const result = await seatService.remove(planArg, { force: args.force === true });
         if (!result.ok) {
-          process.stderr.write(formatError(result.error) + "\n");
+          process.stderr.write(formatErrorFor(inv, result.error) + "\n");
           process.exitCode = exitCode(result.error);
           return;
         }
@@ -138,7 +138,7 @@ export default defineCommand({
       }
       const result = await seatService.enter(target, { mainCwd: inv.cwd });
       if (!result.ok) {
-        process.stderr.write(formatError(result.error) + "\n");
+        process.stderr.write(formatErrorFor(inv, result.error) + "\n");
         process.exitCode = exitCode(result.error);
         return;
       }

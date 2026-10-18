@@ -42,6 +42,7 @@ import {
   resetActorFallbackWarningForTests,
   type ActorSource,
 } from "../../../src/adapters/cli/utils.js";
+import { liveInvocation } from "../../live-invocation.js";
 
 /**
  * SPEC-104 fallout (`knowledge-spec-104-fallout-changed-tests-ts-porcelain-path-bug`):
@@ -78,7 +79,7 @@ describe("SPEC-069 AC-069-1: resolveActorWithSource session tier", () => {
       const result = resolveActorWithSource("alice", {
         LORE_ACTOR: "agent:bob",
         CLAUDE_CODE_SESSION_ID: "3de02220-5d69-4b5a-ac23-d66e14c0261b",
-      }, process.cwd());
+      }, process.cwd(), liveInvocation().user);
       expect(result).toEqual({ actor: "alice", source: "explicit" });
     });
 
@@ -86,20 +87,20 @@ describe("SPEC-069 AC-069-1: resolveActorWithSource session tier", () => {
       const result = resolveActorWithSource(undefined, {
         LORE_ACTOR: "agent:x",
         CLAUDE_CODE_SESSION_ID: "abc",
-      }, process.cwd());
+      }, process.cwd(), liveInvocation().user);
       expect(result).toEqual({ actor: "agent:session-abc", source: "session" });
     });
 
     it("session tier fires from CLAUDE_CODE_SESSION_ID when no --by and no $LORE_ACTOR (literal SPEC-069 AC example)", () => {
       const result = resolveActorWithSource(undefined, {
         CLAUDE_CODE_SESSION_ID: "3DE02220-5d69-4b5a-ac23-d66e14c0261b",
-      }, process.cwd());
+      }, process.cwd(), liveInvocation().user);
       expect(result.actor).toBe("agent:session-3de02220");
       expect(result.source).toBe("session");
     });
 
     it("falls through to os-fallback when neither --by, $LORE_ACTOR, nor any session var is set", () => {
-      const result = resolveActorWithSource(undefined, {}, nonWorktreeCwd);
+      const result = resolveActorWithSource(undefined, {}, nonWorktreeCwd, liveInvocation().user);
       expect(result.source).toBe("os-fallback");
       expect(result.actor.length).toBeGreaterThan(0);
     });
@@ -107,7 +108,7 @@ describe("SPEC-069 AC-069-1: resolveActorWithSource session tier", () => {
 
   describe("STATE — CLAUDE_SESSION_ID alias", () => {
     it("the CLAUDE_SESSION_ID alias fires the session tier when CLAUDE_CODE_SESSION_ID is absent", () => {
-      const result = resolveActorWithSource(undefined, { CLAUDE_SESSION_ID: "abcdef12" }, process.cwd());
+      const result = resolveActorWithSource(undefined, { CLAUDE_SESSION_ID: "abcdef12" }, process.cwd(), liveInvocation().user);
       expect(result).toEqual({ actor: "agent:session-abcdef12", source: "session" });
     });
 
@@ -115,7 +116,7 @@ describe("SPEC-069 AC-069-1: resolveActorWithSource session tier", () => {
       const result = resolveActorWithSource(undefined, {
         CLAUDE_CODE_SESSION_ID: "primary1",
         CLAUDE_SESSION_ID: "alias0002",
-      }, process.cwd());
+      }, process.cwd(), liveInvocation().user);
       expect(result).toEqual({ actor: "agent:session-primary1", source: "session" });
     });
   });
@@ -125,7 +126,7 @@ describe("SPEC-069 AC-069-1: resolveActorWithSource session tier", () => {
       const result = resolveActorWithSource("   ", {
         LORE_ACTOR: "agent:carol",
         CLAUDE_CODE_SESSION_ID: "deadbeef",
-      }, process.cwd());
+      }, process.cwd(), liveInvocation().user);
       expect(result).toEqual({ actor: "agent:session-deadbeef", source: "session" });
     });
 
@@ -133,47 +134,47 @@ describe("SPEC-069 AC-069-1: resolveActorWithSource session tier", () => {
       const result = resolveActorWithSource(undefined, {
         LORE_ACTOR: "   ",
         CLAUDE_CODE_SESSION_ID: "deadbeef",
-      }, process.cwd());
+      }, process.cwd(), liveInvocation().user);
       expect(result).toEqual({ actor: "agent:session-deadbeef", source: "session" });
     });
 
     it("a whitespace-only session id falls through to os-fallback", () => {
-      const result = resolveActorWithSource(undefined, { CLAUDE_CODE_SESSION_ID: "   " }, nonWorktreeCwd);
+      const result = resolveActorWithSource(undefined, { CLAUDE_CODE_SESSION_ID: "   " }, nonWorktreeCwd, liveInvocation().user);
       expect(result.source).toBe("os-fallback");
     });
 
     it("an empty-string session id falls through to os-fallback", () => {
-      const result = resolveActorWithSource(undefined, { CLAUDE_CODE_SESSION_ID: "" }, nonWorktreeCwd);
+      const result = resolveActorWithSource(undefined, { CLAUDE_CODE_SESSION_ID: "" }, nonWorktreeCwd, liveInvocation().user);
       expect(result.source).toBe("os-fallback");
     });
 
     it("a non-whitespace session id that sanitizes to empty (\"---\") falls through to os-fallback without throwing", () => {
       expect(() =>
-        resolveActorWithSource(undefined, { CLAUDE_CODE_SESSION_ID: "---" }, nonWorktreeCwd),
+        resolveActorWithSource(undefined, { CLAUDE_CODE_SESSION_ID: "---" }, nonWorktreeCwd, liveInvocation().user),
       ).not.toThrow();
-      const result = resolveActorWithSource(undefined, { CLAUDE_CODE_SESSION_ID: "---" }, nonWorktreeCwd);
+      const result = resolveActorWithSource(undefined, { CLAUDE_CODE_SESSION_ID: "---" }, nonWorktreeCwd, liveInvocation().user);
       expect(result.source).toBe("os-fallback");
       expect(result.actor.length).toBeGreaterThan(0);
     });
 
     it("a non-whitespace session id that sanitizes to empty (\"!!!\") falls through to os-fallback without throwing", () => {
       expect(() =>
-        resolveActorWithSource(undefined, { CLAUDE_CODE_SESSION_ID: "!!!" }, nonWorktreeCwd),
+        resolveActorWithSource(undefined, { CLAUDE_CODE_SESSION_ID: "!!!" }, nonWorktreeCwd, liveInvocation().user),
       ).not.toThrow();
-      const result = resolveActorWithSource(undefined, { CLAUDE_CODE_SESSION_ID: "!!!" }, nonWorktreeCwd);
+      const result = resolveActorWithSource(undefined, { CLAUDE_CODE_SESSION_ID: "!!!" }, nonWorktreeCwd, liveInvocation().user);
       expect(result.source).toBe("os-fallback");
       expect(result.actor.length).toBeGreaterThan(0);
     });
 
     it("the CLAUDE_SESSION_ID alias also degrades to os-fallback on a sanitize-to-empty value, not a throw", () => {
-      const result = resolveActorWithSource(undefined, { CLAUDE_SESSION_ID: "___" }, nonWorktreeCwd);
+      const result = resolveActorWithSource(undefined, { CLAUDE_SESSION_ID: "___" }, nonWorktreeCwd, liveInvocation().user);
       expect(result.source).toBe("os-fallback");
     });
   });
 
   describe("NEGATIVE — omitted env keys never crash, missing means absent", () => {
     it("an env object with unrelated keys only still falls through to os-fallback", () => {
-      const result = resolveActorWithSource(undefined, { PATH: "/usr/bin", HOME: "/home/x" }, nonWorktreeCwd);
+      const result = resolveActorWithSource(undefined, { PATH: "/usr/bin", HOME: "/home/x" }, nonWorktreeCwd, liveInvocation().user);
       expect(result.source).toBe("os-fallback");
     });
   });
@@ -185,7 +186,7 @@ describe("SPEC-069 AC-069-1: resolveActorWithSource session tier", () => {
     });
 
     it("an explicit process env and cwd return a ResolvedActor (no ambient default)", () => {
-      const result = resolveActorWithSource("zed", process.env, process.cwd());
+      const result = resolveActorWithSource("zed", process.env, process.cwd(), liveInvocation().user);
       expect(result).toEqual({ actor: "zed", source: "explicit" });
     });
   });
@@ -224,7 +225,7 @@ describe("SPEC-069 AC-069-1: resolveActorWithSource session tier", () => {
       const stderrSpy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
       let actor = "";
       expect(() => {
-        actor = resolveActor(undefined, process.env, process.cwd());
+        actor = resolveActor(undefined, process.env, process.cwd(), liveInvocation().user);
       }).not.toThrow();
       expect(actor.length).toBeGreaterThan(0);
       expect(stderrSpy).toHaveBeenCalledTimes(1);

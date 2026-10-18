@@ -135,7 +135,7 @@ import { defineCommand } from "citty";
 import { loadLoreApp } from "../loader.js";
 import {
   exitCode,
-  formatError,
+  formatErrorFor,
   formatTable,
   formatValidityBadge,
   formatWorkflowBadge,
@@ -429,7 +429,7 @@ export default defineCommand({
           include_invalid: includeInvalid,
         });
         if (!governedResult.ok) {
-          process.stderr.write(formatError(governedResult.error) + "\n");
+          process.stderr.write(formatErrorFor(inv, governedResult.error) + "\n");
           process.exitCode = exitCode(governedResult.error);
           return;
         }
@@ -496,7 +496,7 @@ export default defineCommand({
       if (args["plan-id"] !== undefined) {
         const resolveResult = await app.corpusService.resolve(args["plan-id"]);
         if (!resolveResult.ok) {
-          process.stderr.write(formatError(resolveResult.error) + "\n");
+          process.stderr.write(formatErrorFor(inv, resolveResult.error) + "\n");
           process.exitCode = exitCode(resolveResult.error);
           return;
         }
@@ -555,7 +555,7 @@ export default defineCommand({
       if (phaseFilter !== undefined) {
         const gatedResult = await fetchGatedFullDocs();
         if (!gatedResult.ok) {
-          process.stderr.write(formatError(gatedResult.error) + "\n");
+          process.stderr.write(formatErrorFor(inv, gatedResult.error) + "\n");
           process.exitCode = exitCode(gatedResult.error);
           return;
         }
@@ -604,7 +604,7 @@ export default defineCommand({
       if (filters["type"] === "task") {
         const fullResult = await fetchListing();
         if (!fullResult.ok) {
-          process.stderr.write(formatError(fullResult.error) + "\n");
+          process.stderr.write(formatErrorFor(inv, fullResult.error) + "\n");
           process.exitCode = exitCode(fullResult.error);
           return;
         }
@@ -656,7 +656,7 @@ export default defineCommand({
       if (includeInvalid) {
         const fullResult = await fetchListing();
         if (!fullResult.ok) {
-          process.stderr.write(formatError(fullResult.error) + "\n");
+          process.stderr.write(formatErrorFor(inv, fullResult.error) + "\n");
           process.exitCode = exitCode(fullResult.error);
           return;
         }
@@ -702,7 +702,7 @@ export default defineCommand({
       if (planMemberId !== undefined) {
         const fullResult = await fetchListing();
         if (!fullResult.ok) {
-          process.stderr.write(formatError(fullResult.error) + "\n");
+          process.stderr.write(formatErrorFor(inv, fullResult.error) + "\n");
           process.exitCode = exitCode(fullResult.error);
           return;
         }
@@ -753,7 +753,7 @@ export default defineCommand({
       const result = await app.corpusService.list(withPaging(filters), () => nowIso);
 
       if (!result.ok) {
-        process.stderr.write(formatError(result.error) + "\n");
+        process.stderr.write(formatErrorFor(inv, result.error) + "\n");
         process.exitCode = exitCode(result.error);
         return;
       }

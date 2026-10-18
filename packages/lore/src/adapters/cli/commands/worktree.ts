@@ -20,7 +20,7 @@
 
 import { defineCommand } from "citty";
 import { loadLoreApp } from "../loader.js";
-import { exitCode, formatError } from "../utils.js";
+import { exitCode, formatErrorFor } from "../utils.js";
 import { resolveCallerSession } from "../caller-session.js";
 import type { WorktreeCheck, WorktreeSweepEntry } from "../../../service/worktree-removal-service.js";
 import { invocationOf } from "../command-invocation.js";
@@ -111,7 +111,7 @@ export default defineCommand({
           }
           const result = await service.sweep({ apply: args.apply === true, callerSession, cwd: inv.cwd });
           if (!result.ok) {
-            process.stderr.write(formatError(result.error) + "\n");
+            process.stderr.write(formatErrorFor(inv, result.error) + "\n");
             process.exitCode = exitCode(result.error);
             return;
           }

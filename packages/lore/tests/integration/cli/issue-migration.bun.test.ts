@@ -128,6 +128,7 @@ import {
   type IssueResolution,
   type IssueSeverity,
 } from "@lore/core";
+import { liveAmbient } from "../../live-invocation.js";
 
 // ─── Paths ──────────────────────────────────────────────────────────────────
 
@@ -260,7 +261,7 @@ function makeThrowawayApp(prefix: string): { app: App; root: string } {
   assertUnderTmp(root);
   const loreDir = join(root, ".lore");
   mkdirSync(loreDir, { recursive: true });
-  const app = createApp(join(loreDir, "lore.db"));
+  const app = createApp(join(loreDir, "lore.db"), undefined, liveAmbient());
   return { app, root };
 }
 

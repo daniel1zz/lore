@@ -344,7 +344,7 @@ async function runFidelityCommand(args: Record<string, unknown>, inv: Invocation
     if (!hasExplicitAi && !app.resolveAiDefault(undefined).ai) {
       return fail("ai", "lore baseline fidelity needs an AI judge and AI is off by default on this surface; pass --ai (the judge is never silently skipped)");
     }
-    const registry = buildProviderRegistry(config?.ai ?? AiConfigSchema.parse({}));
+    const registry = buildProviderRegistry(config?.ai ?? AiConfigSchema.parse({}), { env: inv.env, tmpDir: inv.paths.tmpDir });
     if (!registry.ok) return reportFidelityFailure(registry.error, json);
     const provider: AIProvider | undefined = registry.value.providers.get(registry.value.active);
     if (provider === undefined) return fail("ai", `active AI provider '${registry.value.active}' is not registered`);
@@ -426,7 +426,7 @@ export default defineCommand({
             title: args.title as string,
             content,
           };
-          const result = await svc.addNode(args.parent as string, input, { by: resolveActor(undefined, inv.env, inv.cwd) });
+          const result = await svc.addNode(args.parent as string, input, { by: resolveActor(undefined, inv.env, inv.cwd, inv.user) });
           if (!result.ok) return reportFailure(result.error, args.json === true);
           if (args.json) console.log(JSON.stringify({ ok: true, data: { id: result.value.id, slug: result.value.slug, node: input.node, tree } }, null, 2));
           else console.log(`Created baseline ${input.node} ${result.value.slug} (${result.value.id}).`);
@@ -444,7 +444,7 @@ export default defineCommand({
         const { args } = context;
         const inv = invocationOf(context);
         await withRuleService(inv, async (svc) => {
-          const result = await svc.setLabel(args.node as string, args.label as string, { by: resolveActor(undefined, inv.env, inv.cwd) });
+          const result = await svc.setLabel(args.node as string, args.label as string, { by: resolveActor(undefined, inv.env, inv.cwd, inv.user) });
           if (!result.ok) return reportFailure(result.error, args.json === true);
           if (args.json) console.log(JSON.stringify({ ok: true, data: { slug: result.value.slug, label: args.label } }, null, 2));
           else console.log(`Label of ${result.value.slug} set to '${String(args.label)}'.`);
@@ -466,7 +466,7 @@ export default defineCommand({
           const result = await svc.setDependsOn(
             args.leaf as string,
             { add: repeatable(args.add), remove: repeatable(args.remove) },
-            { by: resolveActor(undefined, inv.env, inv.cwd) },
+            { by: resolveActor(undefined, inv.env, inv.cwd, inv.user) },
           );
           if (!result.ok) return reportFailure(result.error, args.json === true);
           const dependsOn = result.value.extra["depends_on"];
@@ -496,7 +496,7 @@ export default defineCommand({
                 meaning: args.meaning as string,
                 ...(args.note !== undefined ? { note: args.note as string } : {}),
               };
-              const result = await svc.glossaryAdd(args.node as string, entry, { by: resolveActor(undefined, inv.env, inv.cwd) });
+              const result = await svc.glossaryAdd(args.node as string, entry, { by: resolveActor(undefined, inv.env, inv.cwd, inv.user) });
               if (!result.ok) return reportFailure(result.error, args.json === true);
               if (args.json) console.log(JSON.stringify({ ok: true, data: { slug: result.value.slug, term: entry.term } }, null, 2));
               else console.log(`Defined '${entry.term}' on ${result.value.slug}.`);
@@ -514,7 +514,7 @@ export default defineCommand({
             const { args } = context;
             const inv = invocationOf(context);
             await withRuleService(inv, async (svc) => {
-              const result = await svc.glossaryRemove(args.node as string, args.term as string, { by: resolveActor(undefined, inv.env, inv.cwd) });
+              const result = await svc.glossaryRemove(args.node as string, args.term as string, { by: resolveActor(undefined, inv.env, inv.cwd, inv.user) });
               if (!result.ok) return reportFailure(result.error, args.json === true);
               if (args.json) console.log(JSON.stringify({ ok: true, data: { slug: result.value.slug, term: args.term } }, null, 2));
               else console.log(`Removed '${String(args.term)}' from ${result.value.slug}.`);
@@ -540,7 +540,7 @@ export default defineCommand({
         const inv = invocationOf(context);
         await withRuleService(inv, async (svc) => {
           const json = args.json === true;
-          const by = resolveActor(undefined, inv.env, inv.cwd);
+          const by = resolveActor(undefined, inv.env, inv.cwd, inv.user);
           const site = typeof args.site === "string" ? args.site : undefined;
           const rules = repeatable(args.rule);
           const reason = typeof args["non-business"] === "string" ? args["non-business"] : undefined;

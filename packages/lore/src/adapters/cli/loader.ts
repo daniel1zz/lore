@@ -72,8 +72,8 @@ import {
   loadGlobalConfig,
   resolveGlobalConfigPath,
 } from "@lore/core/node";
-import { ambientFromProcess, createApp, createAppWithWriteContext, type App, type AppAmbient } from "../../app.js";
-import { findLoreDbPath, formatError, exitCode } from "./utils.js";
+import { ambientOfInvocation, createAppWithWriteContext, type App, type AppAmbient } from "../../app.js";
+import { findLoreDbPath, formatErrorFor, exitCode } from "./utils.js";
 import { findForeignBehindSchema } from "../../store/foreign-schema-guard.js";
 import { resolveCorpus, type CorpusLocator } from "./corpus-resolution.js";
 import {
@@ -157,10 +157,10 @@ export interface LoadLoreAppOptions {
   readonly surface?: LoreAppBootSurface;
   /**
    * The Invocation to compose against (env, home, temp dir, identity): a CLI command passes `invocationOf(context)`,
-   * the MCP server the one it resolved at start. Omitted (tests and scripts calling `loadLoreApp()` directly) → the
-   * process snapshot and an unwrapped store.
+   * the MCP server and the HTTP boot the one they resolved at start, tests `liveInvocation()`. Required: there is no
+   * process-reading fallback.
    */
-  readonly inv?: Invocation;
+  readonly inv: Invocation;
 }
 
 /**
@@ -373,7 +373,7 @@ export function loadProjectConfig(locator: CorpusLocator): LoreConfig | undefine
  *   const { app, defaults, config } = loadLoreApp();
  *   try { ... } finally { app.close(); }
  */
-export function loadLoreApp(opts: LoadLoreAppOptions = {}): {
+export function loadLoreApp(opts: LoadLoreAppOptions): {
   app: App;
   dbPath: string;
   defaults: LoreDefaults;
@@ -384,15 +384,15 @@ export function loadLoreApp(opts: LoadLoreAppOptions = {}): {
   // for why "cli" is both the overwhelming majority case and the fail-closed
   // direction.
   const bootSurface: LoreAppBootSurface = opts.surface ?? "cli";
-  const dbPath = findLoreDbPath(opts.inv ?? ambientFromProcess());
+  const dbPath = findLoreDbPath(opts.inv);
   // reason: F5 (AC-CRIT-7) — refuse BEFORE createApp so a worktree never migrates main's corpus; the
   // createApp try/catch below would downgrade this to a generic exit-1 "Storage failure".
-  const foreignBehind = findForeignBehindSchema(dbPath);
+  const foreignBehind = findForeignBehindSchema(dbPath, opts.inv.cwd);
   if (foreignBehind !== null) {
     const refusal: LoreError = { code: "VALIDATION_ERROR", field: "schema_version", message: foreignBehind.message };
     // reason: formatError renders "Validation failed on field …" without the code; the code is appended so
     // a script can grep the machine-readable class (exit 4 alone is shared by every validation refusal).
-    console.error(`${formatError(refusal)} [${refusal.code}]`); // CLI surface
+    console.error(`${formatErrorFor(opts.inv, refusal)} [${refusal.code}]`); // CLI surface
     process.exit(exitCode(refusal));
   }
   const configResult = resolveProjectConfigResult(dbPath);
@@ -404,7 +404,7 @@ export function loadLoreApp(opts: LoadLoreAppOptions = {}): {
     // AiConfigSchema.parse({}) defaults here previously masked typos (e.g. an unrecognized
     // `ai.cli` key silently reverting BOTH `ai.assess.max_diff_chars` and every
     // `ai.providers.<name>.timeout_ms` override to built-in defaults with zero warning).
-    console.error(formatError(configResult.error)); // CLI surface
+    console.error(formatErrorFor(opts.inv, configResult.error)); // CLI surface
     process.exit(exitCode(configResult.error));
   } else {
     // reason: all OTHER config parse failures (malformed YAML, invalid sync/telemetry/
@@ -423,18 +423,8 @@ export function loadLoreApp(opts: LoadLoreAppOptions = {}): {
 
   // ─── Global config + defaults merge ─────────────────────────────────────────
   // reason: SPEC-003 §6.2 — resolve once here so we have the path for the warning message.
-  // reason: the caller's Invocation when it passed one, else the process snapshot an Invocation-less entry
-  // (HTTP/tests/scripts) would resolve at startup.
   const composedInvocation = opts.inv;
-  const ambient: AppAmbient =
-    composedInvocation !== undefined
-      ? {
-          env: composedInvocation.env,
-          home: composedInvocation.paths.home,
-          tmpDir: composedInvocation.paths.tmpDir,
-          cwd: composedInvocation.cwd,
-        }
-      : ambientFromProcess();
+  const ambient: AppAmbient = ambientOfInvocation(composedInvocation);
   const globalConfigPath = resolveGlobalConfigPath(ambient.env, ambient.home);
   let globalDefaults: LoreDefaults | undefined;
   if (globalConfigPath !== undefined) {
@@ -477,15 +467,10 @@ export function loadLoreApp(opts: LoadLoreAppOptions = {}): {
   // "internal unexpected throw" errClass (SPEC-073 §Design) actually reachable.
   let appOrResult: App | Result<App, LoreError>;
   try {
-    // reason: the identity of the Invocation the CLI entry resolved and the command handed in as `opts.inv` wraps the
-    // store inside createApp (spec-run-identity-slice-1 D3); undefined for HTTP/tests/scripts, which pass none. The
-    // verified identity is the store's fact (`ensureVerifiedIdentity(store)`), so there is no `onVerified`
-    // write-back into a process slot.
-    const invocationIdentity = composedInvocation?.identity;
-    appOrResult =
-      invocationIdentity === undefined
-        ? createApp(dbPath, telemetryOnlyConfig)
-        : createAppWithWriteContext(dbPath, telemetryOnlyConfig, { identity: invocationIdentity }, ambient);
+    // reason: the identity of the Invocation the entry resolved wraps the store inside createApp
+    // (spec-run-identity-slice-1 D3). The verified identity is the store's fact (`ensureVerifiedIdentity(store)`), so
+    // there is no `onVerified` write-back into a process slot.
+    appOrResult = createAppWithWriteContext(dbPath, telemetryOnlyConfig, ambient, { identity: composedInvocation.identity });
   } catch (thrown) {
     const message = thrown instanceof Error ? thrown.message : String(thrown);
     console.error(`Error: Storage failure: ${message}`); // CLI surface
@@ -497,7 +482,7 @@ export function loadLoreApp(opts: LoadLoreAppOptions = {}): {
   if ("ok" in appOrResult) {
     // createApp returned a Result — only happens when ai.provider is unknown
     if (!appOrResult.ok) {
-      console.error(formatError(appOrResult.error)); // CLI surface
+      console.error(formatErrorFor(opts.inv, appOrResult.error)); // CLI surface
       const hint = safeInternalErrorHint(rawConfig);
       if (hint !== null) console.error(hint); // CLI surface
       process.exit(1);

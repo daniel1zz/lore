@@ -95,7 +95,8 @@ import {
 } from "@lore/core";
 import { loadConfig } from "@lore/core/node";
 
-import { createApp, type App } from "../packages/lore/src/app.js";
+import { ambientOfInvocation, createApp, type App } from "../packages/lore/src/app.js";
+import { resolveEntryInvocation } from "../packages/lore/src/adapters/cli/run-cli.js";
 import {
   isGithubUpstreamCfg,
   resolveConsumerCorpusRoot,
@@ -542,7 +543,7 @@ async function runCli(): Promise<number> {
   }
   const targetRepo = upstreamCfg.repo;
 
-  const app = createApp(join(corpusRoot, ".lore", "lore.db"));
+  const app = createApp(join(corpusRoot, ".lore", "lore.db"), undefined, ambientOfInvocation(await resolveEntryInvocation(process.argv.slice(2))));
   try {
     const gathered = await gatherMigrationCandidates(app);
     if (!gathered.ok) {

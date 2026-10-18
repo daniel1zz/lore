@@ -32,6 +32,7 @@ import { tmpdir } from "os";
 import { createApp } from "../../../../src/app.js";
 import { loadLoreApp } from "../../../../src/adapters/cli/loader.js";
 import { saveConfig } from "@lore/core/node";
+import { liveAmbient, liveInvocation } from "../../../live-invocation.js";
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -40,7 +41,7 @@ function createTempProject(): string {
   const loreDir = join(dir, ".lore");
   mkdirSync(loreDir, { recursive: true });
   const dbPath = join(loreDir, "lore.db");
-  const app = createApp(dbPath);
+  const app = createApp(dbPath, undefined, liveAmbient());
   app.close();
   return dir;
 }
@@ -105,7 +106,7 @@ describe("loadLoreApp — global config HAPPY", () => {
     process.env["LORE_CONFIG_HOME"] = globalDir;
 
     process.chdir(projectDir);
-    const { app, dbPath, defaults } = loadLoreApp();
+    const { app, dbPath, defaults } = loadLoreApp({ inv: liveInvocation() });
     try {
       expect(dbPath.endsWith("/.lore/lore.db")).toBe(true);
       expect(defaults.editor).toBe("vim");
@@ -122,7 +123,7 @@ describe("loadLoreApp — global config HAPPY", () => {
     process.env["LORE_CONFIG_HOME"] = globalDir;
 
     process.chdir(projectDir);
-    const { app, defaults } = loadLoreApp();
+    const { app, defaults } = loadLoreApp({ inv: liveInvocation() });
     try {
       expect(defaults.editor).toBe("emacs");
       expect(defaults.format).toBe("json");
@@ -140,7 +141,7 @@ describe("loadLoreApp — global config NEGATIVE", () => {
     const projectDir = createTempProject();
     process.chdir(projectDir);
 
-    const { app, defaults } = loadLoreApp();
+    const { app, defaults } = loadLoreApp({ inv: liveInvocation() });
     try {
       expect(defaults).toEqual({});
     } finally {
@@ -155,7 +156,7 @@ describe("loadLoreApp — global config NEGATIVE", () => {
     process.env["LORE_CONFIG_HOME"] = globalDir;
 
     process.chdir(projectDir);
-    const { app, defaults } = loadLoreApp();
+    const { app, defaults } = loadLoreApp({ inv: liveInvocation() });
     try {
       expect(defaults).toEqual({});
     } finally {
@@ -174,7 +175,7 @@ describe("loadLoreApp — global config BOUNDARY", () => {
     process.env["LORE_CONFIG_HOME"] = globalDir;
 
     process.chdir(projectDir);
-    const { app, defaults } = loadLoreApp();
+    const { app, defaults } = loadLoreApp({ inv: liveInvocation() });
     try {
       expect(defaults).toEqual({});
     } finally {
@@ -189,7 +190,7 @@ describe("loadLoreApp — global config BOUNDARY", () => {
     process.env["LORE_CONFIG_HOME"] = globalDir;
 
     process.chdir(projectDir);
-    const { app, defaults } = loadLoreApp();
+    const { app, defaults } = loadLoreApp({ inv: liveInvocation() });
     try {
       expect(defaults).toEqual({});
     } finally {
@@ -209,7 +210,7 @@ describe("loadLoreApp — global config BOUNDARY", () => {
     process.env["LORE_CONFIG_HOME"] = globalDir;
 
     process.chdir(projectDir);
-    const { app, defaults } = loadLoreApp();
+    const { app, defaults } = loadLoreApp({ inv: liveInvocation() });
     try {
       expect(defaults.editor).toBe("nano"); // project wins
       expect(defaults.color).toBe(true);   // global fallback preserved
@@ -236,7 +237,7 @@ describe("loadLoreApp — global config ERROR (AC-GC-5)", () => {
     process.chdir(projectDir);
     let app;
     try {
-      const result = loadLoreApp();
+      const result = loadLoreApp({ inv: liveInvocation() });
       app = result.app;
       const { defaults } = result;
 
@@ -270,7 +271,7 @@ describe("loadLoreApp — global config ERROR (AC-GC-5)", () => {
     process.chdir(projectDir);
     let app;
     try {
-      const result = loadLoreApp();
+      const result = loadLoreApp({ inv: liveInvocation() });
       app = result.app;
 
       expect(stderrMessages.some((m) => m.includes("Warning"))).toBe(true);
@@ -295,8 +296,8 @@ describe("loadLoreApp — global config STATE", () => {
     process.env["LORE_CONFIG_HOME"] = globalDir;
 
     process.chdir(projectDir);
-    const { app: app1, defaults: defaults1 } = loadLoreApp();
-    const { app: app2, defaults: defaults2 } = loadLoreApp();
+    const { app: app1, defaults: defaults1 } = loadLoreApp({ inv: liveInvocation() });
+    const { app: app2, defaults: defaults2 } = loadLoreApp({ inv: liveInvocation() });
 
     try {
       expect(app1).not.toBe(app2);
@@ -318,7 +319,7 @@ describe("loadLoreApp — REGRESSION (AC-GC-6)", () => {
     const projectDir = createTempProject();
     process.chdir(projectDir);
 
-    const result = loadLoreApp();
+    const result = loadLoreApp({ inv: liveInvocation() });
     try {
       // All three keys present — non-breaking addition
       expect(result.app).toBeDefined();
@@ -338,7 +339,7 @@ describe("loadLoreApp — REGRESSION (AC-GC-6)", () => {
     });
     process.chdir(projectDir);
 
-    const { app } = loadLoreApp();
+    const { app } = loadLoreApp({ inv: liveInvocation() });
     try {
       const createResult = await app.corpusService.create({
         type: "prd",
@@ -365,7 +366,7 @@ describe("loadLoreApp — REGRESSION (AC-GC-6)", () => {
     process.chdir(projectDir);
 
     // Should not throw, not print anything extra to stderr
-    const { app, defaults } = loadLoreApp();
+    const { app, defaults } = loadLoreApp({ inv: liveInvocation() });
     try {
       expect(defaults).toEqual({});
       expect(app.corpusService).toBeDefined();

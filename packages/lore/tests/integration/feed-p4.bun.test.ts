@@ -42,7 +42,7 @@
  */
 
 import type { Invocation } from "@lore/core";
-import { liveInvocation } from "../live-invocation.js";
+import { liveInvocation, liveAmbient } from "../live-invocation.js";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { mkdtempSync, mkdirSync, rmSync } from "fs";
 import { join, resolve } from "path";
@@ -119,7 +119,7 @@ beforeEach(() => {
   mkdirSync(loreDir, { recursive: true });
   dbPath = join(loreDir, "lore.db");
 
-  const app = createApp(dbPath);
+  const app = createApp(dbPath, undefined, liveAmbient());
   app.close();
 
   originalCwd = process.cwd();
@@ -139,7 +139,7 @@ afterEach(() => {
 // ─── Fixture helpers ─────────────────────────────────────────────────────────
 
 async function withApp<T>(fn: (app: App) => Promise<T>): Promise<T> {
-  const app = createApp(dbPath);
+  const app = createApp(dbPath, undefined, liveAmbient());
   try {
     return await fn(app);
   } finally {

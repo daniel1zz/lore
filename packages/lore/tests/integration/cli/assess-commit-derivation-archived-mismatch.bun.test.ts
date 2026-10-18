@@ -44,7 +44,7 @@
  */
 
 import type { Invocation } from "@lore/core";
-import { liveInvocation } from "../../live-invocation.js";
+import { liveInvocation, liveAmbient } from "../../live-invocation.js";
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, writeFileSync, mkdirSync } from "fs";
 import { join, resolve } from "path";
@@ -95,7 +95,7 @@ beforeEach(() => {
   tmpDir = resolve(mkdtempSync(join(tmpdir(), "lore-cli-assess-archived-mismatch-test-")));
   const loreDir = join(tmpDir, ".lore");
   mkdirSync(loreDir, { recursive: true });
-  const app = createApp(join(loreDir, "lore.db"));
+  const app = createApp(join(loreDir, "lore.db"), undefined, liveAmbient());
   app.close();
   originalCwd = process.cwd();
   process.chdir(tmpDir);
@@ -117,7 +117,7 @@ async function createPlanWithTasks(
   taskTitles: string[],
   opts: { archiveAll: boolean },
 ): Promise<{ planId: string; planSlug: string; taskSlugs: string[] }> {
-  const app = createApp(join(tmpDir, ".lore", "lore.db"));
+  const app = createApp(join(tmpDir, ".lore", "lore.db"), undefined, liveAmbient());
   try {
     const planResult = await app.corpusService.create({
       type: "plan",
@@ -231,7 +231,7 @@ async function readPersistedAssessment(): Promise<{
   diffSource: { mode: string; status?: string } | undefined;
   assessment: { dimension_scores?: Record<string, unknown>; unverifiable?: { material: string; reason: string }[] } | undefined;
 }> {
-  const app = createApp(join(tmpDir, ".lore", "lore.db"));
+  const app = createApp(join(tmpDir, ".lore", "lore.db"), undefined, liveAmbient());
   try {
     const docsResult = await app.corpusService.listFull({ type: "knowledge" });
     if (!docsResult.ok) throw new Error("listFull failed");

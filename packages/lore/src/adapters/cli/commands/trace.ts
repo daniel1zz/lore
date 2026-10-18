@@ -50,7 +50,7 @@ import type {
   TraceStatsService,
 } from "../../../service/trace-stats-service.js";
 import { loadLoreApp } from "../loader.js";
-import { exitCode, formatError, formatTable } from "../utils.js";
+import { exitCode, formatErrorFor, formatTable } from "../utils.js";
 import { invocationOf } from "../command-invocation.js";
 
 /** Default `--since` when omitted — effectively "all time" (SPEC-102 names no pinned watermark). */
@@ -202,14 +202,14 @@ export default defineCommand({
                 message: `no enumerator registered for count field "${args.enumerate}" — known fields: ${knownFields}`,
                 value: args.enumerate,
               };
-              process.stderr.write(formatError(error) + "\n");
+              process.stderr.write(formatErrorFor(inv, error) + "\n");
               process.exitCode = exitCode(error);
               return;
             }
 
             const enumerationResult = await enumerator(app.traceStatsService, statsOpts);
             if (!enumerationResult.ok) {
-              process.stderr.write(formatError(enumerationResult.error) + "\n");
+              process.stderr.write(formatErrorFor(inv, enumerationResult.error) + "\n");
               process.exitCode = exitCode(enumerationResult.error);
               return;
             }
@@ -243,7 +243,7 @@ export default defineCommand({
           const result = await app.traceStatsService.stats(statsOpts);
 
           if (!result.ok) {
-            process.stderr.write(formatError(result.error) + "\n");
+            process.stderr.write(formatErrorFor(inv, result.error) + "\n");
             process.exitCode = exitCode(result.error);
             return;
           }

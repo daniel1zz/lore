@@ -47,7 +47,7 @@ describe("createRealProcessScanPort", () => {
   it("HAPPY: a real child process with its cwd inside the worktree is found, naming its command", () => {
     const child = spawn("sleep", ["30"], { cwd: inside, stdio: "ignore" });
     try {
-      const result = createRealProcessScanPort().processesInside([inside]);
+      const result = createRealProcessScanPort({ cwd: process.cwd() }).processesInside([inside]);
       expect(result.ok).toBe(true);
       if (!result.ok) return;
       const hit = result.value.find((proc) => proc.pid === child.pid);
@@ -60,7 +60,7 @@ describe("createRealProcessScanPort", () => {
   it("NEGATIVE: a process in a sibling directory sharing the name prefix does not count", () => {
     const child = spawn("sleep", ["30"], { cwd: sibling, stdio: "ignore" });
     try {
-      const result = createRealProcessScanPort().processesInside([inside]);
+      const result = createRealProcessScanPort({ cwd: process.cwd() }).processesInside([inside]);
       expect(result.ok && result.value.some((proc) => proc.pid === child.pid)).toBe(false);
     } finally {
       child.kill();
@@ -73,14 +73,14 @@ describe("createRealProcessScanPort", () => {
     symlinkSync(inside, join(proc, "9001", "cwd"));
     mkdirSync(join(proc, String(process.pid)), { recursive: true });
     symlinkSync(inside, join(proc, String(process.pid), "cwd"));
-    const result = withoutLsof(() => createRealProcessScanPort({ procDir: proc }).processesInside([inside]));
+    const result = withoutLsof(() => createRealProcessScanPort({ procDir: proc, cwd: process.cwd() }).processesInside([inside]));
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.value.map((p) => p.pid)).toEqual([9001]);
   });
 
   it("ERROR: no lsof and an unreadable /proc dir is not measurable, never `nobody inside`", () => {
-    const result = withoutLsof(() => createRealProcessScanPort({ procDir: join(base, "no-such-proc") }).processesInside([inside]));
+    const result = withoutLsof(() => createRealProcessScanPort({ procDir: join(base, "no-such-proc"), cwd: process.cwd() }).processesInside([inside]));
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.reason).toContain("not readable");
   });
@@ -88,7 +88,7 @@ describe("createRealProcessScanPort", () => {
   it("BOUNDARY: an empty /proc yields an empty, measured list", () => {
     const empty = join(base, "empty-proc");
     mkdirSync(empty);
-    const result = withoutLsof(() => createRealProcessScanPort({ procDir: empty }).processesInside([inside]));
+    const result = withoutLsof(() => createRealProcessScanPort({ procDir: empty, cwd: process.cwd() }).processesInside([inside]));
     expect(result).toEqual({ ok: true, value: [] });
   });
 });

@@ -1612,7 +1612,7 @@ export function registerTools(
   // reason: spec-run-identity-slice-1 D3 — handlers are registered ONCE but each attested call runs against its own
   // call-scoped App (see call-scope.ts). `app` and the service names below are live views that resolve to the
   // current call's App, so handler bodies stay unchanged.
-  const scope = new McpCallScope(baseApp, inv.env);
+  const scope = new McpCallScope(baseApp, inv);
   const app = scope.app;
   const corpusService = scope.service("corpusService");
   const versionService = scope.service("versionService");
@@ -1750,7 +1750,7 @@ export function registerTools(
     // reported is exactly what `noAnchorOverlap` will consult.
     const createdAnchors = extractFileAnchors(result.value);
     if (createdAnchors.length > 0) {
-      payload["anchor_resolution"] = collectFileAnchorResolution(createdAnchors, buildFileAnchorProbeContext());
+      payload["anchor_resolution"] = collectFileAnchorResolution(createdAnchors, buildFileAnchorProbeContext(inv.cwd));
     }
     return textContent(payload);
   });
@@ -2533,7 +2533,7 @@ export function registerTools(
         const storedAnchors = extractFileAnchors(result.value);
         const payload: Record<string, unknown> = { doc: result.value };
         if (storedAnchors.length > 0) {
-          payload["anchor_resolution"] = collectFileAnchorResolution(storedAnchors, buildFileAnchorProbeContext());
+          payload["anchor_resolution"] = collectFileAnchorResolution(storedAnchors, buildFileAnchorProbeContext(inv.cwd));
         }
         return textContent(payload);
       }
@@ -2931,7 +2931,7 @@ export function registerTools(
             ...(args.handoff !== undefined ? { handoff: args.handoff } : {}),
             ...(args.by !== undefined ? { by: args.by } : {}),
           },
-          { env: inv.env, tmpDir: inv.paths.tmpDir, cwd: inv.cwd },
+          { env: inv.env, tmpDir: inv.paths.tmpDir, cwd: inv.cwd, user: inv.user },
         );
         if (!result.ok) return errorContent(result.error);
         return textContent(result.value);

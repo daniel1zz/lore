@@ -25,33 +25,34 @@
 import { describe, it, expect } from "vitest";
 import { buildProviderRegistry } from "../../../src/ai/registry.js";
 import { AiConfigSchema } from "@lore/core";
+import { liveProviderRuntime } from "../../live-invocation.js";
 
 // ─── Default config ──────────────────────────────────────────────────────────
 
 describe("buildProviderRegistry — default config", () => {
   it("returns ok with default AiConfig", () => {
     const config = AiConfigSchema.parse({});
-    const result = buildProviderRegistry(config);
+    const result = buildProviderRegistry(config, liveProviderRuntime());
     expect(result.ok).toBe(true);
   });
 
   it("providers map contains 'claude-cli' with default config", () => {
     const config = AiConfigSchema.parse({});
-    const result = buildProviderRegistry(config);
+    const result = buildProviderRegistry(config, liveProviderRuntime());
     if (!result.ok) throw new Error("Expected ok");
     expect(result.value.providers.has("claude-cli")).toBe(true);
   });
 
   it("active is 'claude-cli' with default config", () => {
     const config = AiConfigSchema.parse({});
-    const result = buildProviderRegistry(config);
+    const result = buildProviderRegistry(config, liveProviderRuntime());
     if (!result.ok) throw new Error("Expected ok");
     expect(result.value.active).toBe("claude-cli");
   });
 
   it("only claude-cli is in the providers map by default (no extra built-ins)", () => {
     const config = AiConfigSchema.parse({});
-    const result = buildProviderRegistry(config);
+    const result = buildProviderRegistry(config, liveProviderRuntime());
     if (!result.ok) throw new Error("Expected ok");
     expect(result.value.providers.size).toBe(1);
     expect([...result.value.providers.keys()]).toEqual(["claude-cli"]);
@@ -59,7 +60,7 @@ describe("buildProviderRegistry — default config", () => {
 
   it("provider object has correct name property", () => {
     const config = AiConfigSchema.parse({});
-    const result = buildProviderRegistry(config);
+    const result = buildProviderRegistry(config, liveProviderRuntime());
     if (!result.ok) throw new Error("Expected ok");
     const provider = result.value.providers.get("claude-cli");
     expect(provider).toBeDefined();
@@ -76,7 +77,7 @@ describe("buildProviderRegistry — user overrides", () => {
         "claude-cli": { command: "my-custom-claude", args: ["--print"], timeout_ms: 1000 },
       },
     });
-    const result = buildProviderRegistry(config);
+    const result = buildProviderRegistry(config, liveProviderRuntime());
     expect(result.ok).toBe(true);
     if (!result.ok) throw new Error("Expected ok");
     expect(result.value.active).toBe("claude-cli");
@@ -90,7 +91,7 @@ describe("buildProviderRegistry — user overrides", () => {
         "codex-cli": { command: "codex", args: ["--output", "text"], timeout_ms: 30_000 },
       },
     });
-    const result = buildProviderRegistry(config);
+    const result = buildProviderRegistry(config, liveProviderRuntime());
     expect(result.ok).toBe(true);
     if (!result.ok) throw new Error("Expected ok");
     // Built-in still present
@@ -107,7 +108,7 @@ describe("buildProviderRegistry — user overrides", () => {
         "codex-cli": { command: "codex", args: [], timeout_ms: 30_000 },
       },
     });
-    const result = buildProviderRegistry(config);
+    const result = buildProviderRegistry(config, liveProviderRuntime());
     expect(result.ok).toBe(true);
     if (!result.ok) throw new Error("Expected ok");
     expect(result.value.active).toBe("codex-cli");
@@ -124,7 +125,7 @@ describe("buildProviderRegistry — user overrides", () => {
         "codex-cli": { command: "codex", args: [], timeout_ms: 30_000 },
       },
     });
-    const result = buildProviderRegistry(config);
+    const result = buildProviderRegistry(config, liveProviderRuntime());
     expect(result.ok).toBe(true);
     if (!result.ok) throw new Error("Expected ok");
     expect(result.value.providers.size).toBe(2);
@@ -137,20 +138,20 @@ describe("buildProviderRegistry — user overrides", () => {
 describe("buildProviderRegistry — AC-AI-11 unknown provider rejection", () => {
   it("returns err when provider is not in the merged map", () => {
     const config = AiConfigSchema.parse({ provider: "ghost" });
-    const result = buildProviderRegistry(config);
+    const result = buildProviderRegistry(config, liveProviderRuntime());
     expect(result.ok).toBe(false);
   });
 
   it("error has code 'STORE_ERROR' (not AI_PROVIDER_ERROR)", () => {
     const config = AiConfigSchema.parse({ provider: "ghost" });
-    const result = buildProviderRegistry(config);
+    const result = buildProviderRegistry(config, liveProviderRuntime());
     if (result.ok) throw new Error("Expected err");
     expect(result.error.code).toBe("STORE_ERROR");
   });
 
   it("error message mentions the unknown provider name", () => {
     const config = AiConfigSchema.parse({ provider: "ghost" });
-    const result = buildProviderRegistry(config);
+    const result = buildProviderRegistry(config, liveProviderRuntime());
     if (result.ok) throw new Error("Expected err");
     // Narrow to STORE_ERROR (which has message) via discriminated union
     if (result.error.code !== "STORE_ERROR") throw new Error("Expected STORE_ERROR");
@@ -159,7 +160,7 @@ describe("buildProviderRegistry — AC-AI-11 unknown provider rejection", () => 
 
   it("error message lists known providers so user can diagnose", () => {
     const config = AiConfigSchema.parse({ provider: "ghost" });
-    const result = buildProviderRegistry(config);
+    const result = buildProviderRegistry(config, liveProviderRuntime());
     if (result.ok) throw new Error("Expected err");
     if (result.error.code !== "STORE_ERROR") throw new Error("Expected STORE_ERROR");
     // Built-in "claude-cli" should appear in the error message
@@ -173,7 +174,7 @@ describe("buildProviderRegistry — AC-AI-11 unknown provider rejection", () => 
         "codex-cli": { command: "codex", args: [], timeout_ms: 30_000 },
       },
     });
-    const result = buildProviderRegistry(config);
+    const result = buildProviderRegistry(config, liveProviderRuntime());
     expect(result.ok).toBe(false);
     if (result.ok) throw new Error("Expected err");
     if (result.error.code !== "STORE_ERROR") throw new Error("Expected STORE_ERROR");

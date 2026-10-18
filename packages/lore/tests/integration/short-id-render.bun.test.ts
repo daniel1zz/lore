@@ -43,6 +43,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createApp } from "../../src/app.js";
 import type { CreateDocResult } from "../../src/service/corpus-service.js";
+import { liveAmbient } from "../live-invocation.js";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -115,7 +116,7 @@ function extractShortIdBeforeTitle(line: string, title: string): string {
  * — unrelated to the short-id defect, just the gate's own admission floor.
  */
 async function createCollidingSiblingPair(dbPath: string, parentId: string): Promise<SiblingPair> {
-  const app = createApp(dbPath);
+  const app = createApp(dbPath, undefined, liveAmbient());
   try {
     const originalDateNow = Date.now;
     // Arbitrary fixed epoch ms — only needs to be a valid, stable timestamp;
@@ -197,7 +198,7 @@ describe("short-id rendering: same-1024ms-window collision fixture across CLI su
     parentSlug = slugMatch[1];
 
     const dbPath = join(tmpDir, ".lore", "lore.db");
-    const app = createApp(dbPath);
+    const app = createApp(dbPath, undefined, liveAmbient());
     const parentResolve = await app.corpusService.resolve(parentSlug);
     app.close();
     if (!parentResolve.ok) {

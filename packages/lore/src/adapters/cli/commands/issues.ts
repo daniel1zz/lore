@@ -192,7 +192,7 @@ import {
 } from "@lore/core";
 import { loadLoreApp } from "../loader.js";
 import { runIssuesSync } from "../issues-sync.js";
-import { relativeTime, formatTable, exitCode, formatError } from "../utils.js";
+import { relativeTime, formatTable, exitCode, formatError, formatErrorFor } from "../utils.js";
 import { classifyFeedbackUpstream, resolveGithubJoinedRows, type GithubUpstreamCfg } from "../report-issue-wiring.js";
 import type { CorpusLocator } from "../corpus-resolution.js";
 import {
@@ -664,7 +664,7 @@ export default defineCommand({
       // ingest-seam, AC-GR-1/2/10/12: `runGithubIssuesListing` reads live via
       // `report-issue-wiring.ts::resolveGithubJoinedRows`).
       if (args.local !== true && classification.kind === "retired") {
-        process.stderr.write(formatError(classification.error) + "\n");
+        process.stderr.write(formatErrorFor(inv, classification.error) + "\n");
         process.exitCode = exitCode(classification.error);
         return;
       }
@@ -719,7 +719,7 @@ export default defineCommand({
       const rowsResult =
         source.kind === "upstream" ? unsupportedUpstreamReadError<IssueRow[]>() : await readLocalRows(app, mode);
       if (!rowsResult.ok) {
-        process.stderr.write(formatError(rowsResult.error) + "\n");
+        process.stderr.write(formatErrorFor(inv, rowsResult.error) + "\n");
         process.exitCode = exitCode(rowsResult.error);
         return;
       }

@@ -6,7 +6,7 @@
  *   - BUILT_IN_PROVIDER_CONFIGS — default CLI provider configs (hard-coded; not user-editable)
  *   - mergeProviderConfigs(userProviders) — pure built-in + user-override merge (replace-not-merge)
  *   - validateMergedProviderEntry(name, cfg) — pure per-entry command/args presence check (SPEC-067 D2)
- *   - buildProviderRegistry(config, env?) → Result<{providers, active}, LoreError>
+ *   - buildProviderRegistry(config, runtime) → Result<{providers, active}, LoreError>
  *
  * Invariants:
  *   - Built-in "claude-cli" is always seeded; user entries in config.providers REPLACE whole records
@@ -23,7 +23,7 @@
  *     missing env vars fail loud at startup (AC-HTTP-3), not at first generate() call
  *   - Unknown config.provider name → STORE_ERROR (fail loud, AC-AI-11)
  *   - Returns a ReadonlyMap — no mutation after construction
- *   - env parameter defaults to process.env — pass a mock env in tests for isolation
+ *   - the runtime (env + tmpDir) is a required parameter — pass a mock env in tests for isolation
  *
  * Side-effect class: pure (no IO; provider construction is synchronous + side-effect-free)
  *
@@ -125,6 +125,14 @@ export function validateMergedProviderEntry(
 
 // ─── Registry Builder ─────────────────────────────────────────────────────────
 
+/** What the registry needs from the process, handed in by the composition (never read here). */
+export interface ProviderRuntime {
+  /** The invocation's environment: `${VAR}` header references resolve against it, `claude-cli` children inherit from it. */
+  readonly env: Readonly<Record<string, string | undefined>>;
+  /** The invocation's temp directory (the hermetic `claude-cli` spawn's working directory root). */
+  readonly tmpDir: string;
+}
+
 /**
  * Build the immutable provider registry from the resolved AiConfig.
  *
@@ -143,8 +151,7 @@ export function validateMergedProviderEntry(
  * This also surfaces at createApp() time via the same Result propagation path.
  *
  * @param config - Resolved AiConfig (from AiConfigSchema.parse() — always has defaults filled)
- * @param env - Environment map to resolve ${VAR} header references (default: process.env).
- *   Pass a mock object in tests to avoid reading real env vars.
+ * @param runtime - The invocation's environment (`${VAR}` header references) and temp directory; tests pass a mock env.
  * @returns Result<{ providers, active }> where providers is immutable after return
  *
  * @example
@@ -162,13 +169,13 @@ export function validateMergedProviderEntry(
  *     provider: "http",
  *     http: { url: "https://api.anthropic.com/v1/messages", headers: { "x-api-key": "${ANTHROPIC_API_KEY}" } },
  *   }),
- *   { ANTHROPIC_API_KEY: "sk-ant-..." }, // mock env in tests
+ *   { env: { ANTHROPIC_API_KEY: "sk-ant-..." }, tmpDir: "/tmp" }, // mock runtime in tests
  * );
  * // result.ok === true, result.value.active === "http"
  */
 export function buildProviderRegistry(
   config: AiConfig,
-  env: NodeJS.ProcessEnv = process.env,
+  runtime: ProviderRuntime,
 ): Result<{ providers: ReadonlyMap<string, AIProvider>; active: string }, LoreError> {
   // Merge: built-in CLI defaults first, then user overrides replace whole entries (not deep-merge)
   // reason: whole-record replacement avoids surprising partial-override semantics where
@@ -190,7 +197,7 @@ export function buildProviderRegistry(
 
   // Register all CLI providers (ClaudeCliProvider for each merged entry)
   for (const [name, cfg] of Object.entries(merged)) {
-    providers.set(name, new ClaudeCliProvider(name, cfg));
+    providers.set(name, new ClaudeCliProvider(name, cfg, runtime));
   }
 
   // Register HTTP provider if the active provider is "http" (SPEC-020 AC-HTTP-1)
@@ -214,7 +221,7 @@ export function buildProviderRegistry(
     // reason: fail loud at startup so the user sees the missing-env error before any
     // document generation is attempted. resolveEnvInHeaders never reads process.env directly —
     // it receives the env map as a parameter for test isolation.
-    const headersResult = resolveEnvInHeaders(config.http.headers, env);
+    const headersResult = resolveEnvInHeaders(config.http.headers, runtime.env);
     if (!headersResult.ok) {
       return headersResult;
     }

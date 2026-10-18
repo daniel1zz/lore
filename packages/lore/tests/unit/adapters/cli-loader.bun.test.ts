@@ -26,6 +26,7 @@ import { tmpdir } from "os";
 import { createApp } from "../../../src/app.js";
 import { loadLoreApp } from "../../../src/adapters/cli/loader.js";
 import { saveConfig } from "@lore/core/node";
+import { liveAmbient, liveInvocation } from "../../live-invocation.js";
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -38,7 +39,7 @@ function createTempProject(): string {
   const loreDir = join(dir, ".lore");
   mkdirSync(loreDir, { recursive: true });
   const dbPath = join(loreDir, "lore.db");
-  const app = createApp(dbPath);
+  const app = createApp(dbPath, undefined, liveAmbient());
   app.close();
   return dir;
 }
@@ -73,7 +74,7 @@ describe("loadLoreApp — HAPPY", () => {
     });
 
     process.chdir(projectDir);
-    const { app, dbPath } = loadLoreApp();
+    const { app, dbPath } = loadLoreApp({ inv: liveInvocation() });
 
     try {
       // Check path ends with /.lore/lore.db (normalize macOS /var → /private/var symlink)
@@ -95,7 +96,7 @@ describe("loadLoreApp — HAPPY", () => {
   it("returns dbPath pointing to the existing .lore/lore.db", () => {
     const projectDir = createTempProject();
     process.chdir(projectDir);
-    const { app, dbPath } = loadLoreApp();
+    const { app, dbPath } = loadLoreApp({ inv: liveInvocation() });
     try {
       expect(dbPath.endsWith("/.lore/lore.db")).toBe(true);
       expect(existsSync(dbPath)).toBe(true);
@@ -116,7 +117,7 @@ describe("loadLoreApp — NEGATIVE", () => {
     });
 
     process.chdir(projectDir);
-    const { app } = loadLoreApp();
+    const { app } = loadLoreApp({ inv: liveInvocation() });
     try {
       await app.corpusService.list({});
     } finally {
@@ -136,7 +137,7 @@ describe("loadLoreApp — BOUNDARY", () => {
     // Intentionally no config.yaml written
 
     process.chdir(projectDir);
-    const { app } = loadLoreApp();
+    const { app } = loadLoreApp({ inv: liveInvocation() });
     try {
       await app.corpusService.list({});
     } finally {
@@ -163,7 +164,7 @@ describe("loadLoreApp — BOUNDARY", () => {
 
     process.chdir(projectDir);
     // Should not throw or wrap in Result
-    const { app } = loadLoreApp();
+    const { app } = loadLoreApp({ inv: liveInvocation() });
 
     let result;
     try {
@@ -191,7 +192,7 @@ describe("loadLoreApp — ERROR", () => {
     });
 
     process.chdir(projectDir);
-    const { app } = loadLoreApp();
+    const { app } = loadLoreApp({ inv: liveInvocation() });
 
     let thrownError: unknown = null;
     try {
@@ -214,8 +215,8 @@ describe("loadLoreApp — STATE", () => {
     const projectDir = createTempProject();
     process.chdir(projectDir);
 
-    const { app: app1 } = loadLoreApp();
-    const { app: app2 } = loadLoreApp();
+    const { app: app1 } = loadLoreApp({ inv: liveInvocation() });
+    const { app: app2 } = loadLoreApp({ inv: liveInvocation() });
 
     try {
       // Different references
@@ -245,7 +246,7 @@ describe("loadLoreApp — REGRESSION (all telemetry-instrumented corpus operatio
     });
 
     process.chdir(projectDir);
-    const { app } = loadLoreApp();
+    const { app } = loadLoreApp({ inv: liveInvocation() });
 
     try {
       // create (instrumented)

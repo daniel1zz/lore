@@ -31,8 +31,6 @@
  */
 
 import { ok, type LoreError, type Result } from "@lore/core";
-import { resolveActorWithSource } from "@lore/core/node";
-import { readOsUsername } from "../os-username.js";
 import { verifyInvocationIdentity } from "../service/run-identity-verify.js";
 import type { AuditEntry, InvocationIdentity, VersionRecord } from "@lore/core";
 
@@ -87,27 +85,35 @@ export function readWriteContext(store: StoreInterface): StampingContext | undef
 }
 
 /**
+ * Thrown by {@link resolveWriteActorFor} when a write names no author and its store carries no write context: the
+ * composition that built the service did not hand it an identity. A wiring defect, never a caller error — nothing
+ * may guess an author from the process. `error` is the `LoreError` an adapter can render.
+ */
+export class WriteActorUnresolvedError extends Error {
+  readonly error: LoreError;
+  constructor() {
+    const message =
+      "no author for this write: the call gave no `by` and its store has no write context — build the app with an Invocation " +
+      "(`createApp(dbPath, config, ambient, { identity })`) so the claimed name reaches the write";
+    super(message);
+    this.name = "WriteActorUnresolvedError";
+    this.error = { code: "VALIDATION_ERROR", field: "actor", message };
+  }
+}
+
+/**
  * The author of a write: the explicit `by` when given, else the claimed name of the store's write context
- * (the invocation identity), else the env chain (session → OS user) for an unwrapped store.
+ * (the invocation identity). ⛔ Fails loud ({@link WriteActorUnresolvedError}) when neither exists — never reads the
+ * process.
  * ⛔ Every service that writes an audit row MUST resolve its actor here, never by an independent
  * `resolveActorWithSource` call: a second resolution can disagree with the invocation's name (gate rows once
  * read the OS user next to a `--by` claim).
  */
 export function resolveWriteActorFor(store: StoreInterface, by?: string): string {
-  if (by !== undefined) return actorFromProcessTiers(by);
-  return readWriteContext(store)?.identity.claimed ?? actorFromProcessTiers(undefined);
-}
-
-/**
- * The env-chain tiers (explicit > session > OS user) for a store with NO write context.
- *
- * reason: a visible, counted process read (AS-26 ledger) rather than a threaded value: the services that call
- * `resolveWriteActorFor` are constructed bare (`new CorpusService(store)`) by hundreds of tests and by the HTTP/MCP
- * read paths, none of which has an Invocation to inject, so failing loud here would break every unwrapped write
- * instead of naming it. Goes away when every store is built with a write context (IV-7/8).
- */
-function actorFromProcessTiers(by: string | undefined): string {
-  return resolveActorWithSource(by, process.env, readOsUsername).actor;
+  if (by !== undefined && by.trim() !== "") return by;
+  const claimed = readWriteContext(store)?.identity.claimed;
+  if (claimed === undefined) throw new WriteActorUnresolvedError();
+  return claimed;
 }
 
 function stampRecord<T extends object>(record: T, stamp: Stamp): T {

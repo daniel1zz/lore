@@ -28,7 +28,7 @@ import { CITE_GATE_MODES, err, ok } from "@lore/core";
 import type { CiteGateMode, Invocation, LoreError, Result } from "@lore/core";
 import { invocationOf } from "../command-invocation.js";
 import { loadLoreApp } from "../loader.js";
-import { exitCode, formatError, resolveActor } from "../utils.js";
+import { exitCode, formatError, formatErrorFor, resolveActor } from "../utils.js";
 import { resolveDoc } from "../../../service/resolve.js";
 import { SQLiteStore } from "../../../store/sqlite-store.js";
 import { readAcCiteStored, seedAcCiteModeIfAbsent, writeAcCiteStored } from "../../ac-cite-config-file.js";
@@ -76,7 +76,7 @@ export async function seedAcCiteModeAudited(repoDir: string, inv: Invocation): P
   try {
     const row = await appendAdoptAuditRow(
       store,
-      resolveActor(undefined, inv.env, inv.cwd),
+      resolveActor(undefined, inv.env, inv.cwd, inv.user),
       { mode: null, armed_branches: [] },
       { mode: "report", armed_branches: [] },
     );
@@ -191,12 +191,12 @@ async function runAdopt(args: Record<string, unknown>, inv: Invocation): Promise
       if (!written.ok) return fail(written.error, json, exitCode(written.error));
     }
 
-    const audited = await appendAdoptAuditRow(store, resolveActor(undefined, inv.env, inv.cwd), old, next);
+    const audited = await appendAdoptAuditRow(store, resolveActor(undefined, inv.env, inv.cwd, inv.user), old, next);
     if (!audited.ok) {
       return fail(
         {
           code: "STORE_ERROR",
-          message: `config was changed but the audit row was NOT written (status will report the mode as unaudited): ${formatError(audited.error).trim()}`,
+          message: `config was changed but the audit row was NOT written (status will report the mode as unaudited): ${formatErrorFor(inv, audited.error).trim()}`,
         },
         json,
         exitCode(audited.error),

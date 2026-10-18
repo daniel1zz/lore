@@ -49,6 +49,12 @@ export interface HttpConfig {
    */
   machineAuth?: MachineAuthStores;
   /**
+   * Directory the lazily-built machine-scope auth stores open in when `machineAuth` is not given
+   * (`resolveMachineAuthBaseDir(inv.env, inv.paths.home)` at the entry). A request that needs the stores while
+   * neither is configured fails loud — the server never resolves a state path from the process itself.
+   */
+  machineAuthBaseDir?: string;
+  /**
    * Multi-project mount registry (SPEC-078 D2/D4/D7) — when supplied, this server ALSO
    * accepts project-addressed traffic under `/api/p/:name/*` (path-rewrite shim, D4) and
    * `GET /api/projects` (D7 registry+identity projection). Omitted (registry-less mode,
@@ -295,7 +301,12 @@ export function startHttpServer(app: App, config: HttpConfig = {}): ReturnType<t
   // that wants one shared instance) skips lazy resolution entirely.
   let machineAuth: MachineAuthStores | undefined = config.machineAuth;
   function getMachineAuth(): MachineAuthStores {
-    if (machineAuth === undefined) machineAuth = createMachineAuthStores();
+    if (machineAuth === undefined) {
+      if (config.machineAuthBaseDir === undefined) {
+        throw new Error("startHttpServer: a request needs the machine auth stores but neither `machineAuth` nor `machineAuthBaseDir` was configured");
+      }
+      machineAuth = createMachineAuthStores({ baseDir: config.machineAuthBaseDir });
+    }
     return machineAuth;
   }
 

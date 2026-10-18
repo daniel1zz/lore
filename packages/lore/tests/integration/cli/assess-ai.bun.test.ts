@@ -50,7 +50,7 @@
  */
 
 import type { Invocation } from "@lore/core";
-import { liveInvocation } from "../../live-invocation.js";
+import { liveInvocation, liveAmbient } from "../../live-invocation.js";
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, writeFileSync, mkdirSync, readFileSync, existsSync } from "fs";
 import { join, resolve } from "path";
@@ -109,7 +109,7 @@ beforeEach(() => {
   const loreDir = join(tmpDir, ".lore");
   mkdirSync(loreDir, { recursive: true });
 
-  const app = createApp(join(loreDir, "lore.db"));
+  const app = createApp(join(loreDir, "lore.db"), undefined, liveAmbient());
   app.close();
 
   originalCwd = process.cwd();
@@ -130,7 +130,7 @@ afterEach(() => {
 // ─── Fixture helpers ──────────────────────────────────────────────────────────
 
 async function createPlanWithTask(): Promise<{ planId: string; planSlug: string }> {
-  const app = createApp(join(tmpDir, ".lore", "lore.db"));
+  const app = createApp(join(tmpDir, ".lore", "lore.db"), undefined, liveAmbient());
   try {
     const planResult = await app.corpusService.create({
       type: "plan",
@@ -163,7 +163,7 @@ async function createPlanWithTask(): Promise<{ planId: string; planSlug: string 
  * guessed one — `deriveCommitSetForPlan` matches on the corpus's own `task.slug`).
  */
 async function createPlanWithNamedTasks(taskTitles: string[]): Promise<{ planId: string; planSlug: string; taskSlugs: string[] }> {
-  const app = createApp(join(tmpDir, ".lore", "lore.db"));
+  const app = createApp(join(tmpDir, ".lore", "lore.db"), undefined, liveAmbient());
   try {
     const planResult = await app.corpusService.create({
       type: "plan",
@@ -267,7 +267,7 @@ describe("lore assess --diff-file — hermetic success path (AC-ASSESS-1)", () =
     expect(stdoutText).toContain('"ok": true');
 
     // Verify the doc actually landed in the store — open a fresh App to inspect.
-    const app = createApp(join(tmpDir, ".lore", "lore.db"));
+    const app = createApp(join(tmpDir, ".lore", "lore.db"), undefined, liveAmbient());
     try {
       const docsResult = await app.corpusService.listFull({ type: "knowledge" });
       expect(docsResult.ok).toBe(true);
@@ -353,7 +353,7 @@ describe("lore assess --diff <range> — real git subprocess fixture (AC-ASSESS-
 
     expect(process.exitCode).toBe(2);
 
-    const app = createApp(join(tmpDir, ".lore", "lore.db"));
+    const app = createApp(join(tmpDir, ".lore", "lore.db"), undefined, liveAmbient());
     try {
       const docsResult = await app.corpusService.listFull({ type: "knowledge" });
       expect(docsResult.ok).toBe(true);
@@ -412,7 +412,7 @@ describe("lore assess — auto-derived commit set: PRIMARY ORACLE (interleaved f
     expect(capturedPrompt).not.toContain("FOREIGN_GAMMA_CONTENT");
 
     // AC #3: the assessment RECORDS which commits it diffed — not just diff_available.
-    const app = createApp(join(tmpDir, ".lore", "lore.db"));
+    const app = createApp(join(tmpDir, ".lore", "lore.db"), undefined, liveAmbient());
     try {
       const docsResult = await app.corpusService.listFull({ type: "knowledge" });
       expect(docsResult.ok).toBe(true);
@@ -525,7 +525,7 @@ describe("lore assess — auto-derived commit set: BOUNDARY (no discoverable com
     const stderrText = output.stderr.join("");
     expect(stderrText).toContain(ASSESS_NO_COMMITS_DERIVED);
 
-    const app = createApp(join(tmpDir, ".lore", "lore.db"));
+    const app = createApp(join(tmpDir, ".lore", "lore.db"), undefined, liveAmbient());
     try {
       const docsResult = await app.corpusService.listFull({ type: "knowledge" });
       expect(docsResult.ok).toBe(true);
@@ -725,7 +725,7 @@ describe("lore assess --diff <range> — git-diff spawnSync maxBuffer (task-lore
     expect(stderrText).not.toContain("spawnSync ENOBUFS"); // never the misleading pre-fix wording
 
     // STATE: the early ENOBUFS return skips Step 6 entirely — no knowledge doc lands.
-    const app = createApp(join(tmpDir, ".lore", "lore.db"));
+    const app = createApp(join(tmpDir, ".lore", "lore.db"), undefined, liveAmbient());
     try {
       const docsResult = await app.corpusService.listFull({ type: "knowledge" });
       expect(docsResult.ok).toBe(true);
@@ -860,7 +860,7 @@ describe("lore assess — double-malformed AI output end-to-end (AC-ASSESS-4)", 
 
     expect(process.exitCode).toBe(6);
 
-    const app = createApp(join(tmpDir, ".lore", "lore.db"));
+    const app = createApp(join(tmpDir, ".lore", "lore.db"), undefined, liveAmbient());
     try {
       const docsResult = await app.corpusService.listFull({ type: "knowledge" });
       expect(docsResult.ok).toBe(true);

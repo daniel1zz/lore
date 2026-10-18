@@ -85,10 +85,10 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { defineCommand } from "citty";
 import { loadGlobalConfig, resolveGlobalConfigPath } from "@lore/core/node";
 import { loadLoreApp } from "../loader.js";
-import { createApp } from "../../../app.js";
+import { ambientOfInvocation, createApp } from "../../../app.js";
 import type { App } from "../../../app.js";
 import { startHttpServer } from "../../http/index.js";
-import { createMachineAuthStores } from "../../http/machine-auth.js";
+import { createMachineAuthStores, resolveMachineAuthBaseDir } from "../../http/machine-auth.js";
 import { buildAllowedOrigins } from "../../http/auth.js";
 import { createNonceStore } from "../../http/static-serving.js";
 import type { DashboardAssetsManifest, DashboardAssetsResult } from "../../http/static-serving.js";
@@ -149,7 +149,7 @@ async function buildMountRegistry(inv: Invocation): Promise<MountRegistry<App> |
     // reason: registered projects are always plain local SQLite corpora (no `sync`
     // config passed) — `createApp(dbPath)`'s single-arg overload always returns a
     // bare `App`, never `Result<App>` (see `app.ts`'s overload pair).
-    { createApp: async (registryDbPath: string) => createApp(registryDbPath) },
+    { createApp: async (registryDbPath: string) => createApp(registryDbPath, undefined, ambientOfInvocation(inv)) },
   );
 
   process.stdout.write(`\n[dashboard] Multi-project registry (${registeredProjects.length} declared):\n`);
@@ -296,7 +296,7 @@ async function runPackagedMode(
   // exemption for the foreign-corpus-write guard verbatim. See serve.ts's own
   // call site for the lockout this prevents.
   const { app } = loadLoreApp({ surface: "http", inv });
-  const machineAuth = createMachineAuthStores();
+  const machineAuth = createMachineAuthStores({ baseDir: resolveMachineAuthBaseDir(inv.env, inv.paths.home) });
 
   // GAP-1 fix (see this file's header): ensure the machine-scope "dashboard-local"
   // api_keys ROW exists before any nonce is minted, so a session `GET /auth/bootstrap`
@@ -472,7 +472,7 @@ async function runDevMode(
   // into BOTH ensureLocalApiKey (below) and startHttpServer (below) so the key this
   // command mints and the key the running server validates are the SAME store
   // instance — never two independently-constructed stores that could disagree.
-  const machineAuth = createMachineAuthStores();
+  const machineAuth = createMachineAuthStores({ baseDir: resolveMachineAuthBaseDir(inv.env, inv.paths.home) });
 
   // Ensure local API key (create if absent, reuse if present). Fail-loud on error.
   // The cached raw-key file lives alongside the machine auth db (machineAuth's own

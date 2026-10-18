@@ -72,6 +72,7 @@ function makeInvocation(argv: readonly string[]): Invocation {
       tmpDir: "/nonexistent/iv-5-tmp",
     }),
     host: "iv-5-host",
+    user: "iv-5-user",
     execPath: "/nonexistent/lore",
     isCompiled: false,
     identity: Object.freeze({ harnessRun: null, claimed: "agent:iv-5-test", claimedSource: "flag" as const }),

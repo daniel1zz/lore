@@ -245,7 +245,7 @@ describe("MCP tools accept the architecture fields", () => {
     const prevHome = process.env["HOME"];
     process.chdir(dir);
     process.env["HOME"] = dir;
-    const { app } = loadLoreApp({ surface: "http" });
+    const { app } = loadLoreApp({ surface: "http", inv: liveInvocation() });
     try {
       const server = new McpServer({ name: "arch", version: "0.0.0" });
       registerTools(server, app, undefined, liveInvocation());

@@ -54,7 +54,7 @@ import { createApp } from "../../../src/app.js";
 import { SQLiteStore } from "../../../src/store/sqlite-store.js";
 import type { App } from "../../../src/app.js";
 import type { DocRecord } from "@lore/core";
-import { liveInvocation } from "../../live-invocation.js";
+import { liveInvocation, liveAmbient } from "../../live-invocation.js";
 import type { Invocation } from "@lore/core";
 
 // ─── Command type + in-process importers ────────────────────────────────────
@@ -223,7 +223,7 @@ async function seedSpecPlanTask(prefix: string): Promise<{
 }
 
 async function withApp<T>(fn: (app: App) => Promise<T>): Promise<T> {
-  const app = createApp(dbPath);
+  const app = createApp(dbPath, undefined, liveAmbient());
   try {
     return await fn(app);
   } finally {

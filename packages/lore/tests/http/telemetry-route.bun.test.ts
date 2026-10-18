@@ -40,6 +40,7 @@ import { createMachineAuthStores, type MachineAuthStores } from "../../src/adapt
 import { createApp } from "../../src/app.js";
 import type { App } from "../../src/app.js";
 import type { LoreConfig, Telemetry, TelemetryEvent } from "@lore/core";
+import { liveAmbient } from "../live-invocation.js";
 
 interface TestContext {
   server: ReturnType<typeof Bun.serve>;
@@ -74,7 +75,7 @@ async function makeTestServer(telemetryEnabled: boolean): Promise<TestContext> {
     telemetry: { enabled: telemetryEnabled, path: telemetryPath },
   } as unknown as LoreConfig;
 
-  const appResult = createApp(dbPath, config);
+  const appResult = createApp(dbPath, config, liveAmbient());
   // reason: no sync section in `config` above → createApp's SQLiteStore branch
   // always returns a bare App, never the Result-wrapped TursoStore branch — this
   // narrows the union for TS without a runtime branch that can ever be false.

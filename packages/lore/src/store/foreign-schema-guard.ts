@@ -88,13 +88,13 @@ function mainCheckoutRootOfLinkedWorktree(cwd: string): string | undefined {
  * checkout) corpus from a linked worktree.
  *
  * @param dbPath - the discovered `.lore/lore.db` about to be opened
- * @param cwd - defaults to `process.cwd()`; tests pass a fixture directory
+ * @param cwd - the directory the invocation runs in (`Invocation.cwd`); tests pass a fixture directory
  * @returns the refusal facts, or `null` when opening is safe
  * @example
  *   const behind = findForeignBehindSchema(findLoreDbPath());
  *   if (behind !== null) refuse(behind.message);
  */
-export function findForeignBehindSchema(dbPath: string, cwd: string = process.cwd()): ForeignBehindSchema | null {
+export function findForeignBehindSchema(dbPath: string, cwd: string): ForeignBehindSchema | null {
   const mainRoot = mainCheckoutRootOfLinkedWorktree(cwd);
   if (mainRoot === undefined) return null;
   const mainDb = join(mainRoot, ".lore", "lore.db");
@@ -121,7 +121,7 @@ export function findForeignBehindSchema(dbPath: string, cwd: string = process.cw
  *
  * @throws ForeignSchemaMigrationRefusedError when the open would migrate a foreign corpus
  */
-export function assertNoForeignSchemaMigration(dbPath: string, cwd: string = process.cwd()): void {
+export function assertNoForeignSchemaMigration(dbPath: string, cwd: string): void {
   const behind = findForeignBehindSchema(dbPath, cwd);
   if (behind !== null) throw new ForeignSchemaMigrationRefusedError(behind);
 }

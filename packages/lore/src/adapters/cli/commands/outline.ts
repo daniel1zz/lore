@@ -23,7 +23,7 @@
 
 import { defineCommand } from "citty";
 import { loadLoreApp } from "../loader.js";
-import { exitCode, formatError } from "../utils.js";
+import { exitCode, formatError, formatErrorFor } from "../utils.js";
 import type { LoreError, OutlineEntry } from "@lore/core";
 import type { PrdOutlineService } from "../../../service/prd-outline-service.js";
 import type { App } from "../../../app.js";
@@ -115,7 +115,7 @@ export default defineCommand({
 
           if (!result.ok) {
             if (args.json) console.log(JSON.stringify({ ok: false, error: result.error }, null, 2));
-            else process.stderr.write(formatError(result.error) + "\n");
+            else process.stderr.write(formatErrorFor(inv, result.error) + "\n");
             process.exitCode = exitCode(result.error);
             return;
           }

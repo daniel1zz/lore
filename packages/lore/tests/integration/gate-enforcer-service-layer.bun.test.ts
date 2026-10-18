@@ -55,6 +55,7 @@ import { tmpdir } from "os";
 import { createApp, type App } from "../../src/app.js";
 import type { CreateDocInput, LoreConfig } from "@lore/core";
 import { citeSpecWithLiveRule } from "../helpers/app-live-rule.js";
+import { liveAmbient } from "../live-invocation.js";
 
 // ─── Project setup ────────────────────────────────────────────────────────────
 
@@ -64,7 +65,7 @@ beforeEach(() => {
   tmpDir = resolve(mkdtempSync(join(tmpdir(), "lore-gate-enforcer-service-layer-test-")));
   const loreDir = join(tmpDir, ".lore");
   mkdirSync(loreDir, { recursive: true });
-  const app = createApp(join(loreDir, "lore.db"));
+  const app = createApp(join(loreDir, "lore.db"), undefined, liveAmbient());
   app.close();
 });
 
@@ -104,7 +105,7 @@ const ALL_GATES_DISABLED_CONFIG = {
 
 /** `createApp(dbPath, config)` always returns a bare App here — `sync` is absent. */
 function openApp(config?: LoreConfig): App {
-  return config === undefined ? createApp(dbPath()) : (createApp(dbPath(), config) as App);
+  return config === undefined ? createApp(dbPath(), undefined, liveAmbient()) : (createApp(dbPath(), config, liveAmbient()) as App);
 }
 
 /**

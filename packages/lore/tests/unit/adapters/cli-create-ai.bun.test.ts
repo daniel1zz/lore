@@ -39,7 +39,7 @@ import { join, resolve } from "path";
 import { tmpdir } from "os";
 import { createApp } from "../../../src/app.js";
 import { saveConfig } from "@lore/core/node";
-import { liveInvocation } from "../../live-invocation.js";
+import { liveInvocation, liveAmbient } from "../../live-invocation.js";
 import type { Invocation } from "@lore/core";
 
 // ─── Command type ─────────────────────────────────────────────────────────────
@@ -121,7 +121,7 @@ beforeEach(() => {
   mkdirSync(loreDir, { recursive: true });
 
   // Create real SQLite DB
-  const app = createApp(join(loreDir, "lore.db"));
+  const app = createApp(join(loreDir, "lore.db"), undefined, liveAmbient());
   app.close();
 
   originalCwd = process.cwd();

@@ -27,6 +27,7 @@ import type { CreateDocInput, DocRecord, LoreError, NewReviewJudgment, Result } 
 import { createApp, type App } from "../../src/app.js";
 import { SQLiteStore } from "../../src/store/sqlite-store.js";
 import { citeSpecWithLiveRule } from "../helpers/app-live-rule.js";
+import { liveAmbient } from "../live-invocation.js";
 
 // ─── Rig ─────────────────────────────────────────────────────────────────────
 
@@ -40,7 +41,7 @@ beforeAll(async () => {
   dir = mkdtempSync(join(tmpdir(), "lore-set-approval-parity-"));
   mkdirSync(join(dir, ".lore"), { recursive: true });
   const dbPath = join(dir, ".lore", "lore.db");
-  app = createApp(dbPath);
+  app = createApp(dbPath, undefined, liveAmbient());
   reader = new SQLiteStore(dbPath);
   // One PRD for the live-rule fixture's baseline root to hang under.
   await must(app.corpusService.create({ type: "prd", title: "Parity root PRD", content: "root" } as CreateDocInput));

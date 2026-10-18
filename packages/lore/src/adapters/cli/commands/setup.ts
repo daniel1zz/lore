@@ -164,6 +164,7 @@ import {
   type ProjectUninstallReport,
 } from "../../../flows/setup-project-uninstall.js";
 import { initCorpusAt } from "../../../flows/init-corpus.js";
+import { ambientOfInvocation } from "../../../app.js";
 import { runContextRefresh } from "../../../flows/context-flow.js";
 import { ClaudeSettingsPort, createRealClaudeSettingsFs, resolveLanguageName } from "../../claude-settings-port.js";
 import { RealAssetSource } from "../../real-asset-source.js";
@@ -847,6 +848,7 @@ async function runProjectScaffold(opts: {
       const templateResult = await projectAssets.readAsset(CONFIG_TEMPLATE_ASSET_NAME);
       return initCorpusAt(
         targetRepoDir,
+        ambientOfInvocation(opts.inv),
         templateResult.ok ? { configTemplateYaml: templateResult.value } : {},
       );
     },
@@ -1291,7 +1293,7 @@ export default defineCommand({
       homeDir: inv.paths.home,
     });
 
-    const mcpRegistrar = new CapturingMcpRegistrar(new RealMcpRegistrar());
+    const mcpRegistrar = new CapturingMcpRegistrar(new RealMcpRegistrar(inv.env));
     const service = new SetupService(
       new RealAssetSource(assetsRoot),
       new RealSetupFsReader(),

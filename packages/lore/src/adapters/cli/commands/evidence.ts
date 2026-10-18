@@ -293,7 +293,7 @@ import {
   type OracleKind,
 } from "@lore/core";
 import { loadLoreApp, loadProjectConfig } from "../loader.js";
-import { exitCode, formatError, resolveActor } from "../utils.js";
+import { exitCode, formatErrorFor, resolveActor } from "../utils.js";
 import { requirePhaseWorkflowService } from "../phase-wiring.js";
 import {
   findMissingOracleFilesForEvidence,
@@ -391,7 +391,7 @@ export default defineCommand({
       ...(typeof args["output-tail-file"] === "string" ? { outputTailFile: args["output-tail-file"] } : {}),
     });
     if (captureConflict !== null) {
-      process.stderr.write(formatError(captureConflict) + "\n");
+      process.stderr.write(formatErrorFor(inv, captureConflict) + "\n");
       process.exitCode = exitCode(captureConflict);
       return;
     }
@@ -452,7 +452,7 @@ export default defineCommand({
         timeoutMs: captureTimeoutMs,
       });
       if (!captured.ok) {
-        process.stderr.write(formatError(captured.error) + "\n");
+        process.stderr.write(formatErrorFor(inv, captured.error) + "\n");
         process.exitCode = exitCode(captured.error);
         return;
       }
@@ -492,7 +492,7 @@ export default defineCommand({
         outputTail,
       });
       if (capturedDiscoveryRefusal !== null) {
-        process.stderr.write(formatError(capturedDiscoveryRefusal) + "\n");
+        process.stderr.write(formatErrorFor(inv, capturedDiscoveryRefusal) + "\n");
         process.exitCode = exitCode(capturedDiscoveryRefusal);
         return;
       }
@@ -505,7 +505,7 @@ export default defineCommand({
         outputTail,
       });
       if (capturedRedProofGap !== null) {
-        process.stderr.write(formatError(capturedRedProofGap) + "\n");
+        process.stderr.write(formatErrorFor(inv, capturedRedProofGap) + "\n");
         process.exitCode = exitCode(capturedRedProofGap);
         return;
       }
@@ -563,7 +563,7 @@ export default defineCommand({
             "use --oracle manual for genuinely manual checks.",
           value: args.command,
         };
-        process.stderr.write(formatError(precheckError) + "\n");
+        process.stderr.write(formatErrorFor(inv, precheckError) + "\n");
         process.exitCode = exitCode(precheckError);
         return;
       }
@@ -587,7 +587,7 @@ export default defineCommand({
         capture: captureRequested,
       });
       if (pipeRefusal !== null) {
-        process.stderr.write(formatError(pipeRefusal) + "\n");
+        process.stderr.write(formatErrorFor(inv, pipeRefusal) + "\n");
         process.exitCode = exitCode(pipeRefusal);
         return;
       }
@@ -605,7 +605,7 @@ export default defineCommand({
         ...(outputTail !== undefined ? { outputTail } : {}),
       });
       if (filteredPassRefusal !== null) {
-        process.stderr.write(formatError(filteredPassRefusal) + "\n");
+        process.stderr.write(formatErrorFor(inv, filteredPassRefusal) + "\n");
         process.exitCode = exitCode(filteredPassRefusal);
         return;
       }
@@ -624,12 +624,12 @@ export default defineCommand({
         ...(outputTail !== undefined ? { outputTail } : {}),
       });
       if (underMatchedRefusal !== null) {
-        process.stderr.write(formatError(underMatchedRefusal) + "\n");
+        process.stderr.write(formatErrorFor(inv, underMatchedRefusal) + "\n");
         process.exitCode = exitCode(underMatchedRefusal);
         return;
       }
 
-      const by = resolveActor(undefined, inv.env, inv.cwd);
+      const by = resolveActor(undefined, inv.env, inv.cwd, inv.user);
       const evidenceInput = {
         // reason: cast — CLI arg strings are validated by evidenceEntrySchema server-side;
         // an invalid oracle/result value fails loud with VALIDATION_ERROR rather than
@@ -678,7 +678,7 @@ export default defineCommand({
       }
 
       if (!result.ok) {
-        process.stderr.write(formatError(result.error) + "\n");
+        process.stderr.write(formatErrorFor(inv, result.error) + "\n");
         process.exitCode = exitCode(result.error);
         return;
       }

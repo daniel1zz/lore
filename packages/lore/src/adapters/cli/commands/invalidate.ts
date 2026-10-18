@@ -15,7 +15,7 @@
 
 import { defineCommand } from "citty";
 import { loadLoreApp } from "../loader.js";
-import { exitCode, formatError, resolveActor } from "../utils.js";
+import { exitCode, formatErrorFor, resolveActor } from "../utils.js";
 import type { InvalidateOpts } from "../../../service/validity-service.js";
 import { invocationOf } from "../command-invocation.js";
 
@@ -58,7 +58,7 @@ export default defineCommand({
         return;
       }
 
-      const by = resolveActor(undefined, inv.env, inv.cwd);
+      const by = resolveActor(undefined, inv.env, inv.cwd, inv.user);
       const opts: InvalidateOpts = { by };
       if (args["superseded-by"] !== undefined) opts.supersededBy = args["superseded-by"];
       if (args.reason !== undefined) opts.reason = args.reason;
@@ -67,7 +67,7 @@ export default defineCommand({
       const result = await app.validityService.invalidate(args.id, opts);
 
       if (!result.ok) {
-        process.stderr.write(formatError(result.error) + "\n");
+        process.stderr.write(formatErrorFor(inv, result.error) + "\n");
         process.exitCode = exitCode(result.error);
         return;
       }

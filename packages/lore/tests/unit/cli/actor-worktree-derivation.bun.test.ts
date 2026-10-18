@@ -61,7 +61,7 @@ import {
   resolveActorWithIdentitySource,
   resolveActorWithSource,
 } from "../../../src/adapters/cli/utils.js";
-import { liveInvocation } from "../../live-invocation.js";
+import { liveInvocation, liveAmbient } from "../../live-invocation.js";
 import type { Invocation } from "@lore/core";
 
 // ─── Git fixture helpers ────────────────────────────────────────────────────
@@ -176,7 +176,7 @@ describe("SPEC-104 AC-ACTOR-1 — linked worktree, no identity, resolves worktre
     const wt = join(tmpRoot, "wt-trace-layer");
     addWorktree(mainRepo, wt, "trace-layer");
 
-    const result = resolveActorWithSource(undefined, {}, wt);
+    const result = resolveActorWithSource(undefined, {}, wt, liveInvocation().user);
 
     expect(result).toEqual({ actor: "agent:trace-layer", source: "worktree-derived" });
   });
@@ -194,7 +194,7 @@ describe("SPEC-104 AC-ACTOR-1 — linked worktree, no identity, resolves worktre
 
     let result: { actor: string; source: string } | undefined;
     const stderr = captureStderr(() => {
-      result = resolveActorWithIdentitySource(undefined, {}, wt);
+      result = resolveActorWithIdentitySource(undefined, {}, wt, liveInvocation().user);
     });
 
     expect(result).toEqual({ actor: "agent:no-warning-branch", source: "worktree-derived" });
@@ -205,7 +205,7 @@ describe("SPEC-104 AC-ACTOR-1 — linked worktree, no identity, resolves worktre
     const wt = join(tmpRoot, "wt-feature-x");
     addWorktree(mainRepo, wt, "feature/x");
 
-    const result = resolveActorWithSource(undefined, {}, wt);
+    const result = resolveActorWithSource(undefined, {}, wt, liveInvocation().user);
 
     expect(result).toEqual({ actor: "agent:feature/x", source: "worktree-derived" });
   });
@@ -219,7 +219,7 @@ describe("SPEC-104 AC-ACTOR-1 — linked worktree, no identity, resolves worktre
     // subdirectory of a checked-out worktree would look to the upward walk.
     execFileSync("mkdir", ["-p", nested]);
 
-    const result = resolveActorWithSource(undefined, {}, nested);
+    const result = resolveActorWithSource(undefined, {}, nested, liveInvocation().user);
 
     expect(result).toEqual({ actor: "agent:nested-branch", source: "worktree-derived" });
   });
@@ -232,7 +232,7 @@ describe("SPEC-104 AC-ACTOR-2 — explicit --by / $LORE_ACTOR win over worktree 
     const wt = join(tmpRoot, "wt-explicit-wins");
     addWorktree(mainRepo, wt, "explicit-wins-branch");
 
-    const result = resolveActorWithSource("alice", {}, wt);
+    const result = resolveActorWithSource("alice", {}, wt, liveInvocation().user);
 
     expect(result).toEqual({ actor: "alice", source: "explicit" });
   });
@@ -241,7 +241,7 @@ describe("SPEC-104 AC-ACTOR-2 — explicit --by / $LORE_ACTOR win over worktree 
     const wt = join(tmpRoot, "wt-env-wins");
     addWorktree(mainRepo, wt, "env-wins-branch");
 
-    const result = resolveActorWithSource(undefined, { LORE_ACTOR: "agent:bob" }, wt);
+    const result = resolveActorWithSource(undefined, { LORE_ACTOR: "agent:bob" }, wt, liveInvocation().user);
 
     expect(result).toEqual({ actor: "agent:env-wins-branch", source: "worktree-derived" });
   });
@@ -251,7 +251,7 @@ describe("SPEC-104 AC-ACTOR-2 — explicit --by / $LORE_ACTOR win over worktree 
     addWorktree(mainRepo, wt, "no-warn-explicit-branch");
 
     const stderr = captureStderr(() => {
-      resolveActorWithIdentitySource("alice", {}, wt);
+      resolveActorWithIdentitySource("alice", {}, wt, liveInvocation().user);
     });
 
     expect(stderr).toBe("");
@@ -262,7 +262,7 @@ describe("SPEC-104 AC-ACTOR-2 — explicit --by / $LORE_ACTOR win over worktree 
 
 describe("SPEC-104 AC-ACTOR-3 — main checkout resolves OS username, byte-identical to legacy", () => {
   it("resolveActorWithSource resolves OS username with source os-fallback in the main checkout", () => {
-    const result = resolveActorWithSource(undefined, {}, mainRepo);
+    const result = resolveActorWithSource(undefined, {}, mainRepo, liveInvocation().user);
 
     expect(result).toEqual({ actor: userInfo().username, source: "os-fallback" });
   });
@@ -270,7 +270,7 @@ describe("SPEC-104 AC-ACTOR-3 — main checkout resolves OS username, byte-ident
   it("resolveActorWithIdentitySource prints the EXACT pre-existing os-fallback warning text", () => {
     let result: { actor: string; source: string } | undefined;
     const stderr = captureStderr(() => {
-      result = resolveActorWithIdentitySource(undefined, {}, mainRepo);
+      result = resolveActorWithIdentitySource(undefined, {}, mainRepo, liveInvocation().user);
     });
 
     const username = userInfo().username;
@@ -284,10 +284,10 @@ describe("SPEC-104 AC-ACTOR-3 — main checkout resolves OS username, byte-ident
 
   it("warns only ONCE per process even across repeated main-checkout resolutions", () => {
     const first = captureStderr(() => {
-      resolveActorWithIdentitySource(undefined, {}, mainRepo);
+      resolveActorWithIdentitySource(undefined, {}, mainRepo, liveInvocation().user);
     });
     const second = captureStderr(() => {
-      resolveActorWithIdentitySource(undefined, {}, mainRepo);
+      resolveActorWithIdentitySource(undefined, {}, mainRepo, liveInvocation().user);
     });
 
     expect(first).not.toBe("");
@@ -305,7 +305,7 @@ describe("SPEC-104 AC-ACTOR-4 — detached HEAD / unreadable or missing gitdir f
     expect(() => detectWorktreeDerivedActor(wt)).not.toThrow();
     expect(detectWorktreeDerivedActor(wt)).toBeUndefined();
 
-    const result = resolveActorWithSource(undefined, {}, wt);
+    const result = resolveActorWithSource(undefined, {}, wt, liveInvocation().user);
     expect(result).toEqual({ actor: userInfo().username, source: "os-fallback" });
   });
 
@@ -403,7 +403,7 @@ describe("SPEC-104 AC-ACTOR-5 — lore claim from a linked worktree records agen
     const dbPath = join(loreDir, "lore.db");
     {
       mkdirSync(loreDir, { recursive: true });
-      const setupApp = createApp(dbPath);
+      const setupApp = createApp(dbPath, undefined, liveAmbient());
       const planResult = await setupApp.corpusService.create({
         type: "plan",
         title: "Actor Derive E2E Plan",
@@ -435,7 +435,7 @@ describe("SPEC-104 AC-ACTOR-5 — lore claim from a linked worktree records agen
       expect(output.stderr.join("\n")).toBe("");
 
       // Verify the durable record, not just stdout.
-      const verifyApp = createApp(dbPath);
+      const verifyApp = createApp(dbPath, undefined, liveAmbient());
       const docResult = await verifyApp.corpusService.get(taskResult.value.slug);
       verifyApp.close();
       if (!docResult.ok) throw new Error(`verify get failed: ${JSON.stringify(docResult.error)}`);
@@ -444,7 +444,7 @@ describe("SPEC-104 AC-ACTOR-5 — lore claim from a linked worktree records agen
 
       // Bonus REGRESSION: resolveActor's plain-string surface agrees too,
       // at the SAME real cwd claim.ts itself resolved against.
-      expect(resolveActor(undefined, process.env, process.cwd())).toBe(`agent:${branch}`);
+      expect(resolveActor(undefined, process.env, process.cwd(), liveInvocation().user)).toBe(`agent:${branch}`);
     }
   });
 });

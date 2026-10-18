@@ -55,7 +55,7 @@ import {
 import { findLoreDbPathQuiet } from "../corpus-resolution.js";
 import { loadLoreApp } from "../loader.js";
 import { formatTrail, narrowTrail } from "../session-trail-render.js";
-import { exitCode, formatError } from "../utils.js";
+import { exitCode, formatError, formatErrorFor } from "../utils.js";
 
 const RESERVED_SUBCOMMANDS = new Set(["list", "show", "trail", "trail-review"]);
 
@@ -235,7 +235,7 @@ async function runSessionTrailReview(args: { turn?: unknown; json?: unknown }, i
       realpath: realpathSync,
     });
     if (!review.ok) {
-      process.stderr.write(formatError(review.error) + "\n");
+      process.stderr.write(formatErrorFor(inv, review.error) + "\n");
       process.exitCode = exitCode(review.error);
       return;
     }
@@ -438,7 +438,7 @@ export default defineCommand({
 
       const activeSessionsResult = await sessionService.getActiveSessions();
       if (!activeSessionsResult.ok) {
-        process.stderr.write(formatError(activeSessionsResult.error) + "\n");
+        process.stderr.write(formatErrorFor(inv, activeSessionsResult.error) + "\n");
         process.exitCode = exitCode(activeSessionsResult.error);
         return;
       }

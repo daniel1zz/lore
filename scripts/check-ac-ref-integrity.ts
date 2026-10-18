@@ -67,7 +67,8 @@
 import { fileURLToPath } from "node:url";
 import { join } from "node:path";
 import { extractEvidence, type DocId, type DocRecord, type LoreError } from "@lore/core";
-import { createApp, type App } from "../packages/lore/src/app.js";
+import { ambientOfInvocation, createApp, type App } from "../packages/lore/src/app.js";
+import { resolveEntryInvocation } from "../packages/lore/src/adapters/cli/run-cli.js";
 import { findLoreDbPath } from "../packages/lore/src/adapters/cli/utils.js";
 import {
   findDanglingRefs,
@@ -184,7 +185,7 @@ export async function runCheck(app: App, ledger: AcRefLedgerFile): Promise<AcRef
 export async function main(dbPathOverride?: string, repoRootOverride?: string): Promise<number> {
   const repoRoot = repoRootOverride ?? REPO_ROOT;
   const dbPath = dbPathOverride ?? findLoreDbPath({ cwd: process.cwd(), env: process.env });
-  const app = createApp(dbPath);
+  const app = createApp(dbPath, undefined, ambientOfInvocation(await resolveEntryInvocation(process.argv.slice(2))));
   try {
     const ledger = loadLedgerFromDisk(repoRoot);
     const report = await runCheck(app, ledger);

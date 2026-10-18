@@ -90,7 +90,7 @@ function isWithinRoot(realRepoRoot: string, resolved: string): boolean {
  * const probe = buildRealFsProbe(process.cwd());
  * const result = await app.driftCheckService.checkDrift(probe);
  */
-export function buildRealFsProbe(repoRoot: string = process.cwd()): FsProbe {
+export function buildRealFsProbe(repoRoot: string): FsProbe {
   // reason: realpath the root ONCE, at construction — comparing a realpath'd
   // anchor resolution against a NON-realpath'd repoRoot would false-positive
   // "escape" every single anchor whenever the root itself sits behind a
@@ -174,6 +174,6 @@ export function buildRealFsProbe(repoRoot: string = process.cwd()): FsProbe {
  * @example
  * const report = collectFileAnchorResolution(anchors, buildFileAnchorProbeContext());
  */
-export function buildFileAnchorProbeContext(repoRoot: string = process.cwd()): FileAnchorProbeContext {
+export function buildFileAnchorProbeContext(repoRoot: string): FileAnchorProbeContext {
   return { probe: buildRealFsProbe(repoRoot), root: repoRoot };
 }

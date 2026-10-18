@@ -106,7 +106,7 @@ import { fileURLToPath } from "node:url";
 import { defineCommand } from "citty";
 import { BOOTSTRAP_FRAMING_LINE, type LoreError } from "@lore/core";
 import { resolveAssetsRoot, type SetupPathContext } from "../setup-args.js";
-import { exitCode, formatError } from "../utils.js";
+import { exitCode, formatError, formatErrorFor } from "../utils.js";
 import { writeAllSync } from "../stdio-sync.js";
 import { invocationOf } from "../command-invocation.js";
 
@@ -322,7 +322,7 @@ export default defineCommand({
 
     const result = readGovernanceAsset(assetsRoot, GOVERNANCE_TOPIC_ASSETS[topic]);
     if (!result.ok) {
-      process.stderr.write(formatError(result.error) + "\n");
+      process.stderr.write(formatErrorFor(inv, result.error) + "\n");
       process.exitCode = exitCode(result.error);
       return;
     }

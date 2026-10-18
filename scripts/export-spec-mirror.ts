@@ -178,7 +178,8 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { createApp, type App } from "../packages/lore/src/app.js";
+import { ambientOfInvocation, createApp, type App } from "../packages/lore/src/app.js";
+import { resolveEntryInvocation } from "../packages/lore/src/adapters/cli/run-cli.js";
 import { findLoreDbPath } from "../packages/lore/src/adapters/cli/utils.js";
 import { checkAutonomyMirror, exportAutonomyMirror } from "./export-autonomy-mirror.js";
 import {
@@ -679,7 +680,7 @@ export async function main(
 
   const repoRoot = repoRootOverride ?? REPO_ROOT;
   const dbPath = dbPathOverride ?? findLoreDbPath({ cwd: process.cwd(), env: process.env });
-  const app = createApp(dbPath);
+  const app = createApp(dbPath, undefined, ambientOfInvocation(await resolveEntryInvocation(process.argv.slice(2))));
   try {
     if (checkMode) {
       const parity = await runCheck(app, repoRoot, types);

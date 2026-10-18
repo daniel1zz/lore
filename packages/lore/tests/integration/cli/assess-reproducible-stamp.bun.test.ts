@@ -39,7 +39,7 @@
  */
 
 import type { Invocation } from "@lore/core";
-import { liveInvocation } from "../../live-invocation.js";
+import { liveInvocation, liveAmbient } from "../../live-invocation.js";
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, writeFileSync, mkdirSync } from "fs";
 import { join, resolve } from "path";
@@ -96,7 +96,7 @@ beforeEach(() => {
   const loreDir = join(tmpDir, ".lore");
   mkdirSync(loreDir, { recursive: true });
 
-  const app = createApp(join(loreDir, "lore.db"));
+  const app = createApp(join(loreDir, "lore.db"), undefined, liveAmbient());
   app.close();
 
   originalCwd = process.cwd();
@@ -117,7 +117,7 @@ afterEach(() => {
 // ─── Fixture helpers ──────────────────────────────────────────────────────────
 
 async function createPlanWithTask(): Promise<{ planId: string; planSlug: string }> {
-  const app = createApp(join(tmpDir, ".lore", "lore.db"));
+  const app = createApp(join(tmpDir, ".lore", "lore.db"), undefined, liveAmbient());
   try {
     const planResult = await app.corpusService.create({
       type: "plan",
@@ -216,7 +216,7 @@ describe("lore assess — judgment.reproducible is stamped by a REAL run (task-g
 
     // Re-open the store fresh — proves the field is PERSISTED, not just present on the
     // in-process return value (STATE dimension).
-    const app = createApp(join(tmpDir, ".lore", "lore.db"));
+    const app = createApp(join(tmpDir, ".lore", "lore.db"), undefined, liveAmbient());
     try {
       const docsResult = await app.corpusService.listFull({ type: "knowledge" });
       expect(docsResult.ok).toBe(true);
@@ -253,7 +253,7 @@ describe("lore assess — judgment.reproducible is stamped by a REAL run (task-g
 
     expect(process.exitCode === 0 || process.exitCode === undefined).toBe(true);
 
-    const app = createApp(join(tmpDir, ".lore", "lore.db"));
+    const app = createApp(join(tmpDir, ".lore", "lore.db"), undefined, liveAmbient());
     try {
       const docsResult = await app.corpusService.listFull({ type: "knowledge" });
       expect(docsResult.ok).toBe(true);
@@ -279,7 +279,7 @@ describe("lore assess — judgment.reproducible is stamped by a REAL run (task-g
 
 describe("legacy assessment docs (no reproducible field) — CONTROL, task AC #4", () => {
   it("a schema-valid assessment doc authored before this field existed still reads reproducible === undefined, and renders with NO 'Reproducible:' line", async () => {
-    const app = createApp(join(tmpDir, ".lore", "lore.db"));
+    const app = createApp(join(tmpDir, ".lore", "lore.db"), undefined, liveAmbient());
     try {
       const planResult = await app.corpusService.create({
         type: "plan",

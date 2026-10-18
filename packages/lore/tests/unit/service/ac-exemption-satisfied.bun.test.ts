@@ -21,6 +21,7 @@ import { SQLiteStore } from "../../../src/store/sqlite-store.js";
 import { AcExemptionService } from "../../../src/service/ac-exemption-service.js";
 import { exemptionHeadroom, indexBaseline, satisfiedExemptionKeys } from "../../../src/service/ac-cite-gate.js";
 import { exemptionState } from "../../../src/store/store-shared.js";
+import { liveAmbient } from "../../live-invocation.js";
 
 const SKELETON = "## Overview/Goal\n\nx\n\n## Scope\n\nx\n\n## Acceptance Criteria\n\nx";
 const DAY = 86_400_000;
@@ -40,7 +41,7 @@ let specId: string;
 beforeEach(async () => {
   dir = mkdtempSync(join(tmpdir(), "ac-exempt-satisfied-"));
   const config = LoreConfigSchema.parse({ project: { name: "exempt-sat", author: "tester" } });
-  const made = createApp(join(dir, "c.db"), config);
+  const made = createApp(join(dir, "c.db"), config, liveAmbient());
   if ("ok" in made) throw new Error(`createApp failed: ${JSON.stringify(made)}`);
   app = made;
   side = new SQLiteStore(join(dir, "c.db"));

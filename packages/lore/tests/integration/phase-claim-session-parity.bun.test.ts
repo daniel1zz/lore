@@ -50,7 +50,7 @@ import { createApp } from "../../src/app.js";
 import type { App } from "../../src/app.js";
 import type { CreateDocInput, DocRecord, TaskClaim } from "@lore/core";
 import { resolveActor } from "../../src/adapters/cli/utils.js";
-import { liveInvocation } from "../live-invocation.js";
+import { liveInvocation, liveAmbient } from "../live-invocation.js";
 import type { Invocation } from "@lore/core";
 
 /**
@@ -59,7 +59,7 @@ import type { Invocation } from "@lore/core";
  * test sets its session env, never captured at module load.
  */
 function currentActor(): string {
-  return resolveActor(undefined, process.env, process.cwd());
+  return resolveActor(undefined, process.env, process.cwd(), liveInvocation().user);
 }
 const SHARED_ANCHOR = "packages/core/src/session.ts";
 const SESSION_ENV_VARS = ["CLAUDE_CODE_SESSION_ID", "CLAUDE_SESSION_ID"] as const;
@@ -76,7 +76,7 @@ beforeEach(() => {
   for (const name of SESSION_ENV_VARS) originalSessionEnv.set(name, process.env[name]);
   tmpDir = resolve(mkdtempSync(join(tmpdir(), "lore-phase-claim-session-parity-")));
   mkdirSync(join(tmpDir, ".lore"), { recursive: true });
-  const app = createApp(dbPath()) as App;
+  const app = createApp(dbPath(), undefined, liveAmbient()) as App;
   app.close();
   originalCwd = process.cwd();
   process.chdir(tmpDir);
@@ -116,7 +116,7 @@ function setSessionEnv(variable: (typeof SESSION_ENV_VARS)[number] | null, value
 async function withApp<T>(fn: (app: App) => Promise<T>): Promise<T> {
   // reason: `createApp(dbPath)` with no config always returns a bare `App` (the
   // `Result<App>` arm exists only for the sync-enabled TursoStore path, D-007).
-  const app = createApp(dbPath()) as App;
+  const app = createApp(dbPath(), undefined, liveAmbient()) as App;
   try {
     return await fn(app);
   } finally {

@@ -42,7 +42,7 @@ import { defineCommand } from "citty";
 import { loadLoreApp } from "../loader.js";
 import {
   exitCode,
-  formatError,
+  formatErrorFor,
   formatTree,
   formatValidityBadge,
   formatWorkflowBadge,
@@ -244,7 +244,7 @@ export default defineCommand({
           ORPHAN_DETECTION_BLUEPRINT,
         );
         if (!checkR.ok) {
-          process.stderr.write(formatError(checkR.error) + "\n");
+          process.stderr.write(formatErrorFor(inv, checkR.error) + "\n");
           process.exitCode = exitCode(checkR.error);
           return;
         }
@@ -311,7 +311,7 @@ export default defineCommand({
           process.exitCode = 3;
           return;
         }
-        process.stderr.write(formatError(result.error) + "\n");
+        process.stderr.write(formatErrorFor(inv, result.error) + "\n");
         process.exitCode = exitCode(result.error);
         return;
       }

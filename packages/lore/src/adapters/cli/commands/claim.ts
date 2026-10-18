@@ -58,7 +58,7 @@ import { defineCommand } from "citty";
 import { taskClaimSchema } from "@lore/core";
 import type { ActorSource } from "@lore/core/node";
 import { loadLoreApp } from "../loader.js";
-import { exitCode, formatError, resolveActorWithIdentitySource } from "../utils.js";
+import { exitCode, formatErrorFor, resolveActorWithIdentitySource } from "../utils.js";
 import { requirePhaseWorkflowService } from "../phase-wiring.js";
 
 export default defineCommand({
@@ -107,11 +107,11 @@ export default defineCommand({
       // below and the stamped rows then agree (BR-1035, spec-run-identity-slice-1 D7).
       const verifiedIdentity = await app.verifiedInvocationIdentity?.();
       if (verifiedIdentity !== undefined && !verifiedIdentity.ok) {
-        console.error(formatError(verifiedIdentity.error)); // CLI surface
+        console.error(formatErrorFor(inv, verifiedIdentity.error)); // CLI surface
         process.exit(exitCode(verifiedIdentity.error));
       }
       const verifiedRun = verifiedIdentity?.value?.harnessRun ?? null;
-      const resolvedActor = resolveActorWithIdentitySource(undefined, inv.env, inv.cwd);
+      const resolvedActor = resolveActorWithIdentitySource(undefined, inv.env, inv.cwd, inv.user);
       const by = resolvedActor.actor;
       const machine = typeof args.machine === "string" ? args.machine : inv.host;
       const claimOpts = {
@@ -162,7 +162,7 @@ export default defineCommand({
       }
 
       if (!result.ok) {
-        process.stderr.write(formatError(result.error) + "\n");
+        process.stderr.write(formatErrorFor(inv, result.error) + "\n");
         process.exitCode = exitCode(result.error);
         return;
       }

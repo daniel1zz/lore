@@ -53,6 +53,7 @@
 import { AiConfigSchema, extractAssessmentJson, llmAssessmentOutputSchema } from "@lore/core";
 import { loadConfig } from "@lore/core/node";
 import { buildProviderRegistry } from "../packages/lore/src/ai/registry.js";
+import { resolveEntryInvocation } from "../packages/lore/src/adapters/cli/run-cli.js";
 import { getAssessTemplate } from "../packages/lore/src/ai/assess-template.js";
 import { ASSESS_GOLDEN_FIXTURES } from "../packages/lore/tests/fixtures/assess-golden/index.js";
 import type { AssessGoldenFixture } from "../packages/lore/tests/fixtures/assess-golden/index.js";
@@ -187,7 +188,8 @@ async function runScored(candidate: number, incumbent: number, runs: number): Pr
     ? configResult.value.ai
     : AiConfigSchema.parse({});
 
-  const registryResult = buildProviderRegistry(aiConfig);
+  const inv = await resolveEntryInvocation(process.argv.slice(2));
+  const registryResult = buildProviderRegistry(aiConfig, { env: inv.env, tmpDir: inv.paths.tmpDir });
   if (!registryResult.ok) {
     console.error(`assess-golden: failed to build provider registry: ${describeLoreError(registryResult.error)}`);
     return 1;

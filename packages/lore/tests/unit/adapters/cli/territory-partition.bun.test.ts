@@ -101,7 +101,7 @@ import {
   type TerritoryPartition,
   type TerritoryWorktree,
 } from "../../../../src/adapters/cli/territory-partition.js";
-import { liveInvocation } from "../../../live-invocation.js";
+import { liveInvocation, liveAmbient } from "../../../live-invocation.js";
 import type { Invocation } from "@lore/core";
 
 const CURRENT_SESSION_ID = "aaaa1111";
@@ -620,7 +620,7 @@ describe("commands/territory.ts's production run() — the live call site (AC-OW
     // test performs its OWN `loadLoreApp()` call below, which re-opens this
     // SAME db (mirrors `loader-foreign-write-surface.bun.test.ts`'s
     // established fixture pattern).
-    const bootstrapApp = createApp(join(loreDir, "lore.db"));
+    const bootstrapApp = createApp(join(loreDir, "lore.db"), undefined, liveAmbient());
     bootstrapApp.close();
 
     const originalCwd = process.cwd();

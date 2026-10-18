@@ -15,7 +15,7 @@
  * different-inputs-different-outputs (two distinct runs R1/R2 produce distinct stamps).
  */
 
-import { liveInvocation } from "../../live-invocation.js";
+import { liveInvocation, liveAmbient } from "../../live-invocation.js";
 import { Database } from "bun:sqlite";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
@@ -94,7 +94,7 @@ describe("AC-RID-7 MCP harness_run attestation (real server, tools/list + tools/
     tmpRoot = mkdtempSync(join(tmpdir(), "lore-mcp-harness-run-"));
     mkdirSync(join(tmpRoot, ".lore"), { recursive: true });
     dbPath = join(tmpRoot, ".lore", "lore.db");
-    app = createApp(dbPath);
+    app = createApp(dbPath, undefined, liveAmbient());
     const plan = await app.corpusService.create({ type: "plan", title: "MCP Run Plan", content: "# Plan" } as CreateDocInput);
     if (!plan.ok) throw new Error(`plan: ${JSON.stringify(plan.error)}`);
     const task = await app.corpusService.create({

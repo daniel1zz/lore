@@ -192,7 +192,7 @@ import { SQLiteStore } from "../../../store/sqlite-store.js";
 import { AcExemptionService } from "../../../service/ac-exemption-service.js";
 import { DecisionService } from "../../../service/decision-service.js";
 import { createOverrideDecisionPort } from "../../../service/override-decision.js";
-import { exitCode, formatError, resolveActor } from "../utils.js";
+import { exitCode, formatError, formatErrorFor, resolveActor } from "../utils.js";
 import { deriveAcCoverageState, getAllowedTransitions, ok } from "@lore/core";
 import type { AcceptanceCriterion, AcCoverageFact, Invocation, LoreError, Result } from "@lore/core";
 import type { AcService, AcListResult, DeclarePathOpts, SetCriterionOpts, SetCriterionPatch } from "../../../service/ac-service.js";
@@ -333,7 +333,7 @@ export default defineCommand({
           );
 
           if (!result.ok) {
-            process.stderr.write(formatError(result.error) + "\n");
+            process.stderr.write(formatErrorFor(inv, result.error) + "\n");
             process.exitCode = exitCode(result.error);
             return;
           }
@@ -379,7 +379,7 @@ export default defineCommand({
           });
 
           if (!result.ok) {
-            process.stderr.write(formatError(result.error) + "\n");
+            process.stderr.write(formatErrorFor(inv, result.error) + "\n");
             process.exitCode = exitCode(result.error);
             return;
           }
@@ -435,10 +435,10 @@ export default defineCommand({
             acId: args.id as string,
             reason: args.reason as string,
             expiresAt: args.expires as string,
-            by: resolveActor(undefined, inv.env, inv.cwd),
+            by: resolveActor(undefined, inv.env, inv.cwd, inv.user),
           });
           if (!result.ok) {
-            process.stderr.write(formatError(result.error) + "\n");
+            process.stderr.write(formatErrorFor(inv, result.error) + "\n");
             process.exitCode = exitCode(result.error);
             return;
           }
@@ -499,11 +499,11 @@ export default defineCommand({
             args.id as string,
             ruleIds,
             { remove: args.remove === true },
-            { by: resolveActor(undefined, inv.env, inv.cwd) },
+            { by: resolveActor(undefined, inv.env, inv.cwd, inv.user) },
           );
 
           if (!result.ok) {
-            process.stderr.write(formatError(result.error) + "\n");
+            process.stderr.write(formatErrorFor(inv, result.error) + "\n");
             process.exitCode = exitCode(result.error);
             return;
           }
@@ -570,11 +570,11 @@ export default defineCommand({
         try {
           const result = await requireAcService(app).removeCriterion(args.spec as string, args.id as string, {
             force: args.force === true,
-            by: resolveActor(undefined, inv.env, inv.cwd),
+            by: resolveActor(undefined, inv.env, inv.cwd, inv.user),
           });
 
           if (!result.ok) {
-            process.stderr.write(formatError(result.error) + "\n");
+            process.stderr.write(formatErrorFor(inv, result.error) + "\n");
             process.exitCode = exitCode(result.error);
             return;
           }
@@ -749,7 +749,7 @@ export default defineCommand({
           );
 
           if (!result.ok) {
-            process.stderr.write(formatError(result.error) + "\n");
+            process.stderr.write(formatErrorFor(inv, result.error) + "\n");
             process.exitCode = exitCode(result.error);
             return;
           }
@@ -965,7 +965,7 @@ function buildFalsifierCandidate(args: Record<string, unknown>): unknown {
 function buildDeclarePathOpts(args: Record<string, unknown>, dbPath: string, inv: Invocation): DeclarePathOpts {
   const reason = args["allow-missing-path"];
   return {
-    by: resolveActor(undefined, inv.env, inv.cwd),
+    by: resolveActor(undefined, inv.env, inv.cwd, inv.user),
     pathContext: {
       fileExists: existsSync,
       cwd: inv.cwd,

@@ -19,6 +19,7 @@ import { join } from "node:path";
 import { LoreConfigSchema, type CreateDocInput } from "@lore/core";
 import { createApp, type App } from "../../../src/app.js";
 import { SQLiteStore } from "../../../src/store/sqlite-store.js";
+import { liveAmbient } from "../../live-invocation.js";
 
 const PROJECT = { name: "exempt", author: "tester" };
 const SKELETON = "## Overview/Goal\n\nx\n\n## Scope\n\nx\n\n## Acceptance Criteria\n\nx";
@@ -48,7 +49,7 @@ beforeEach(async () => {
     project: PROJECT,
     workflow: { gates: { "ac-cite": { mode: "enforce", armed_branches: ["baseline-exempt"] } } },
   });
-  const made = createApp(join(dir, "c.db"), config);
+  const made = createApp(join(dir, "c.db"), config, liveAmbient());
   if ("ok" in made) throw new Error(`createApp failed: ${JSON.stringify(made)}`);
   app = made;
   side = new SQLiteStore(join(dir, "c.db"));

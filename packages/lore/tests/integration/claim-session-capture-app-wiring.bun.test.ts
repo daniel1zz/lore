@@ -36,6 +36,7 @@ import { tmpdir } from "os";
 import { createApp } from "../../src/app.js";
 import type { App } from "../../src/app.js";
 import type { CreateDocInput, DocRecord, TaskClaim } from "@lore/core";
+import { liveAmbient } from "../live-invocation.js";
 
 const ORCHESTRATOR = "agent:main-orchestrator";
 const SHARED_ANCHOR = "packages/core/src/session.ts";
@@ -49,7 +50,7 @@ beforeEach(() => {
   for (const name of SESSION_ENV_VARS) originalSessionEnv.set(name, process.env[name]);
   tmpDir = resolve(mkdtempSync(join(tmpdir(), "lore-claim-session-wiring-")));
   mkdirSync(join(tmpDir, ".lore"), { recursive: true });
-  const app = createApp(dbPath()) as App;
+  const app = createApp(dbPath(), undefined, liveAmbient()) as App;
   app.close();
   originalCwd = process.cwd();
   process.chdir(tmpDir);
@@ -87,7 +88,7 @@ async function withApp<T>(fn: (app: App) => Promise<T>): Promise<T> {
   // reason: `createApp(dbPath)` with no config always returns a bare `App` (the
   // `Result<App>` arm exists only for the sync-enabled TursoStore path, D-007) —
   // the same single-argument narrowing every other integration bun test relies on.
-  const app = createApp(dbPath()) as App;
+  const app = createApp(dbPath(), undefined, liveAmbient()) as App;
   try {
     return await fn(app);
   } finally {

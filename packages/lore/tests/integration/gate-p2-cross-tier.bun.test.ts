@@ -39,7 +39,7 @@ import { SQLiteStore } from "../../src/store/sqlite-store.js";
 import type { CreateDocInput, LoreConfig } from "@lore/core";
 import { asSessionActor } from "../helpers/session-actor";
 import { resolveActor } from "../../src/adapters/cli/utils.js";
-import { liveInvocation } from "../live-invocation.js";
+import { liveInvocation, liveAmbient } from "../live-invocation.js";
 import type { Invocation } from "@lore/core";
 
 /**
@@ -83,7 +83,7 @@ function createFixtureApp(path: string): App {
       review: { judgment_required_types: [] },
     },
   } as unknown as LoreConfig;
-  return createApp(path, config) as App;
+  return createApp(path, config, liveAmbient()) as App;
 }
 
 // ─── Command type (mirrors gate-spec-promote.bun.test.ts) ────────────────────
@@ -164,7 +164,7 @@ beforeEach(() => {
   const loreDir = join(tmpDir, ".lore");
   mkdirSync(loreDir, { recursive: true });
 
-  const app = createApp(join(loreDir, "lore.db"));
+  const app = createApp(join(loreDir, "lore.db"), undefined, liveAmbient());
   app.close();
 
   originalCwd = process.cwd();
@@ -918,7 +918,7 @@ describe("lore gate task-claim — AC-P2-ANCHOR: anchor-overlap parity with `lor
     // No session on either side: the name the gate resolves is the fallback tier's (OS user / worktree
     // name), so the holder is recorded under exactly that name — same actor, nothing measured.
     setSessionEnv(null);
-    await claimTask(taskAId, resolveActor(undefined, process.env, process.cwd()));
+    await claimTask(taskAId, resolveActor(undefined, process.env, process.cwd(), liveInvocation().user));
 
     const cmd = await importGateSubCommand("task-claim");
     setSessionEnv(null);

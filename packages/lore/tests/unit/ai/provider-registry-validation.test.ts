@@ -32,6 +32,7 @@ import {
 } from "../../../src/ai/registry.js";
 import { AiConfigSchema, AiProviderConfigSchema } from "@lore/core";
 import type { AiProviderConfig } from "@lore/core";
+import { liveProviderRuntime } from "../../live-invocation.js";
 
 // ─── AC-067-1: timeout floor 180000 ───────────────────────────────────────────
 
@@ -50,7 +51,7 @@ describe("AC-067-1: built-in claude-cli timeout_ms floor", () => {
     const merged = mergeProviderConfigs(config.providers);
     expect(merged["claude-cli"]?.timeout_ms).toBe(180_000);
 
-    const result = buildProviderRegistry(config);
+    const result = buildProviderRegistry(config, liveProviderRuntime());
     expect(result.ok).toBe(true);
   });
 
@@ -118,7 +119,7 @@ describe("AC-067-2: partial provider entry fails registry build", () => {
       providers: { "claude-cli": { timeout_ms: 300_000 } },
     } as unknown as Parameters<typeof buildProviderRegistry>[0];
 
-    const result = buildProviderRegistry(configWithPartialProvider);
+    const result = buildProviderRegistry(configWithPartialProvider, liveProviderRuntime());
     expect(result.ok).toBe(false);
     if (result.ok) throw new Error("Expected err");
     expect(result.error.code).toBe("VALIDATION_ERROR");
@@ -133,7 +134,7 @@ describe("AC-067-2: partial provider entry fails registry build", () => {
       providers: { "claude-cli": { timeout_ms: 300_000 } },
     } as unknown as Parameters<typeof buildProviderRegistry>[0];
 
-    const result = buildProviderRegistry(configWithPartialProvider);
+    const result = buildProviderRegistry(configWithPartialProvider, liveProviderRuntime());
     expect(result.ok).toBe(false);
     // A failing Result carries no `value` — nothing was constructed to leak.
     expect((result as { value?: unknown }).value).toBeUndefined();
@@ -155,7 +156,7 @@ describe("AC-067-3: complete provider override builds with effective timeout", (
         "claude-cli": { command: "claude", args: ["-p"], timeout_ms: 300_000 },
       },
     });
-    const result = buildProviderRegistry(config);
+    const result = buildProviderRegistry(config, liveProviderRuntime());
     expect(result.ok).toBe(true);
     if (!result.ok) throw new Error("Expected ok");
     expect(result.value.providers.has("claude-cli")).toBe(true);
@@ -172,7 +173,7 @@ describe("AC-067-3: complete provider override builds with effective timeout", (
     const merged = mergeProviderConfigs(config.providers);
     expect(merged["claude-cli"]?.timeout_ms).toBe(300_000);
 
-    const result = buildProviderRegistry(config);
+    const result = buildProviderRegistry(config, liveProviderRuntime());
     expect(result.ok).toBe(true);
   });
 
@@ -182,7 +183,7 @@ describe("AC-067-3: complete provider override builds with effective timeout", (
         "codex-cli": { command: "codex", args: ["--output", "text"], timeout_ms: 30_000 },
       },
     });
-    const result = buildProviderRegistry(config);
+    const result = buildProviderRegistry(config, liveProviderRuntime());
     expect(result.ok).toBe(true);
     if (!result.ok) throw new Error("Expected ok");
     expect(result.value.providers.size).toBe(2);
