@@ -8,7 +8,7 @@
  * Public surface: {@link resolveCiteGateConfig}, {@link CiteGateConfigError}, {@link indexBaseline},
  *   {@link placeSpecInBranch}, {@link isBranchArmed}, {@link changedCriteria}, {@link decideCiteGate},
  *   {@link buildCiteFeedingPack}, {@link maxActiveExemptions}, {@link exemptionHeadroom},
- *   {@link countLiveCriteria}, {@link activeExemptedAcIds}, and the config / decision types.
+ *   {@link countLiveCriteria}, {@link activeExemptedAcIds}, {@link satisfiedExemptionKeys}, and the config / decision types.
  * Invariants:
  *   - Mode is three-state (`off` | `report` | `enforce`). ⛔ UNLIKE every other gate key, an ABSENT mode
  *     is NOT "enabled": it resolves to `off` when the corpus has no baseline docs (a consumer project
@@ -42,7 +42,8 @@ import {
   type CiteGateMode,
   type DocRecord,
 } from "@lore/core";
-import type { AcExemptionRow } from "../store/store-interface.js";
+import type { AcCiteRow, AcExemptionRow } from "../store/store-interface.js";
+import { exemptionKey, isExemptionActive } from "../store/store-shared.js";
 import { AC_CITE_CHECKPOINT, isCheckpointBlocked, type GateContext } from "./checkpoint-registry.js";
 import { findAcCiteViolations, type AcCiteCandidate, type AcCiteRuleStates } from "./gate-predicates.js";
 import {
@@ -297,7 +298,7 @@ function groupFindings(
  * @param existing - the spec's criteria BEFORE the write (`[]` on create)
  * @param next - the spec's criteria AFTER the write
  * @param index - the baseline index (rule lifecycles + branches)
- * @param exemptedAcIds - ids of this spec's criteria holding an ACTIVE exemption (`expires_at > nowIso`),
+ * @param exemptedAcIds - ids of this spec's criteria holding an ACTIVE exemption (unexpired and uncited),
  *   computed by the caller (see {@link activeExemptedAcIds}); an exempt criterion that cites NOTHING is not
  *   a violation (no refusal, no report-mode would-refuse finding). Exempt criteria that cite anything are
  *   still checked, so a missing / deprecated / retired cite stays refused.
@@ -361,30 +362,62 @@ export function countLiveCriteria(specs: readonly DocRecord[]): number {
   return total;
 }
 
+type ExemptionRef = Pick<AcExemptionRow, "doc_id" | "ac_id" | "expires_at">;
+
 /**
- * The ac_ids holding an ACTIVE exemption for one spec: `doc_id` matches and `expires_at > nowIso` — the
- * same activity rule as {@link exemptionHeadroom} and `AcExemptionService.counts`.
+ * The exemptions whose criterion now cites at least one LIVE rule (BR-959: such an exemption has no uncited
+ * case left to waive). Returned as `exemptionKey`s. "Live" is the citation gate's own measure
+ * (`BaselineCiteIndex.states` from {@link indexBaseline}); a cite of a retired / deprecated / unknown id does
+ * not satisfy. The result feeds {@link isExemptionActive} (store-shared.ts), the single activity predicate.
+ */
+export function satisfiedExemptionKeys(
+  exemptions: readonly Pick<AcExemptionRow, "doc_id" | "ac_id">[],
+  cites: readonly AcCiteRow[],
+  states: AcCiteRuleStates,
+): Set<string> {
+  const liveCited = new Set<string>();
+  for (const cite of cites) {
+    if (Object.prototype.hasOwnProperty.call(states, cite.rule_id) && states[cite.rule_id] === "live") {
+      liveCited.add(exemptionKey(cite.doc_id as string, cite.ac_id));
+    }
+  }
+  const out = new Set<string>();
+  for (const row of exemptions) {
+    const key = exemptionKey(row.doc_id as string, row.ac_id);
+    if (liveCited.has(key)) out.add(key);
+  }
+  return out;
+}
+
+/**
+ * The ac_ids holding an ACTIVE exemption for one spec: `doc_id` matches and the row is active per
+ * {@link isExemptionActive} (unexpired AND uncited) - the same predicate as {@link exemptionHeadroom},
+ * `AcExemptionService.counts` and the grant cap.
  */
 export function activeExemptedAcIds(
-  exemptions: readonly Pick<AcExemptionRow, "doc_id" | "ac_id" | "expires_at">[],
+  exemptions: readonly ExemptionRef[],
   specId: string,
   nowIso: string,
+  satisfiedKeys: ReadonlySet<string>,
 ): Set<string> {
   return new Set(
-    exemptions.filter((row) => (row.doc_id as string) === specId && row.expires_at > nowIso).map((row) => row.ac_id),
+    exemptions
+      .filter((row) => (row.doc_id as string) === specId && isExemptionActive(row, nowIso, satisfiedKeys))
+      .map((row) => row.ac_id),
   );
 }
 
 /**
- * Exemptions still grantable: `floor(10% x liveCriteria) - active`, never negative. An exemption is
- * active iff `expires_at > nowIso` (the rule `AcExemptionService.counts` applies).
+ * Exemptions still grantable: `floor(10% x liveCriteria) - active`, never negative. Active is
+ * {@link isExemptionActive}: unexpired AND its criterion cites no live rule.
  */
 export function exemptionHeadroom(
   liveCriteria: number,
-  exemptions: readonly Pick<AcExemptionRow, "expires_at">[],
+  exemptions: readonly ExemptionRef[],
   nowIso: string,
+  satisfiedKeys: ReadonlySet<string>,
 ): number {
-  const active = exemptions.filter((row) => row.expires_at > nowIso).length;
+  const active = exemptions.filter((row) => isExemptionActive(row, nowIso, satisfiedKeys)).length;
   return Math.max(0, maxActiveExemptions(liveCriteria) - active);
 }
 
@@ -413,7 +446,7 @@ export interface CiteFeedingPackInput {
   /** Baseline docs, specs and the `ac_cites` / `rule_depends` rows. */
   data: RuleIndexData;
   /** Every `ac_exemptions` row. */
-  exemptions: readonly Pick<AcExemptionRow, "expires_at">[];
+  exemptions: readonly ExemptionRef[];
   nowIso: string;
 }
 
@@ -472,6 +505,11 @@ export function buildCiteFeedingPack(input: CiteFeedingPackInput): AcCiteFeeding
     cite_line: input.refusedIsNew
       ? `lore ac add ${input.specSlug} ${input.acId} ... --cite ${citeRule}`
       : `lore ac cite ${input.specSlug} ${input.acId} ${citeRule}`,
-    exemption_headroom: exemptionHeadroom(countLiveCriteria(input.data.specs), input.exemptions, input.nowIso),
+    exemption_headroom: exemptionHeadroom(
+      countLiveCriteria(input.data.specs),
+      input.exemptions,
+      input.nowIso,
+      satisfiedExemptionKeys(input.exemptions, input.data.cites, index.states),
+    ),
   };
 }

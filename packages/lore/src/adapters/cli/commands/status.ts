@@ -2231,9 +2231,9 @@ export default defineCommand({
       }
 
       // baseline slice 2 §C4 — exemptions on this branch's corpus, only when any exist (report-only).
-      if (baselineStatus !== null && baselineStatus.exemptions_active + baselineStatus.exemptions_expired > 0) {
+      if (baselineStatus !== null && baselineStatus.exemptions_active + baselineStatus.exemptions_expired + baselineStatus.exemptions_satisfied > 0) {
         console.log(
-          `\nExemptions: ${baselineStatus.exemptions_active} active, ${baselineStatus.exemptions_expired} expired ` +
+          `\nExemptions: ${baselineStatus.exemptions_active} active, ${baselineStatus.exemptions_expired} expired, ${baselineStatus.exemptions_satisfied} satisfied (cited) ` +
             `(${(baselineStatus.exemption_ratio * 100).toFixed(1)}% of live criteria, cap 10%)`,
         );
       }

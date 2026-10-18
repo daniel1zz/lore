@@ -68,6 +68,8 @@ import {
   allocateWithBoundedRetry,
   buildAcExemptionAlreadyActiveError,
   buildAcExemptionCapError,
+  isExemptionActive,
+  NO_SATISFIED_EXEMPTIONS,
   buildNonLiveRuleRefusal,
   computeAuditEntryHash,
   detectParentCycleViaAncestry,
@@ -877,11 +879,12 @@ export class InMemoryStore implements StoreInterface {
   ): Promise<Result<AcExemptionRow, LoreError>> {
     const key = `${row.doc_id}\u0000${row.ac_id}`;
     const existing = this.acExemptions.get(key);
-    if (existing !== undefined && existing.expires_at > cap.now) {
+    const satisfied = cap.satisfied ?? NO_SATISFIED_EXEMPTIONS;
+    if (existing !== undefined && isExemptionActive(existing, cap.now, satisfied)) {
       return err(buildAcExemptionAlreadyActiveError(row.doc_id, row.ac_id));
     }
     if (existing !== undefined) this.acExemptions.delete(key);
-    const active = [...this.acExemptions.values()].filter((r) => r.expires_at > cap.now).length;
+    const active = [...this.acExemptions.values()].filter((r) => isExemptionActive(r, cap.now, satisfied)).length;
     if (active >= cap.maxActive) {
       if (existing !== undefined) this.acExemptions.set(key, existing);
       return err(buildAcExemptionCapError(active, cap.liveCriteria, cap.maxActive));

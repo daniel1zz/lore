@@ -9,7 +9,8 @@
  *   - A grant needs a non-blank reason, a non-blank actor and a parseable FUTURE expiry; the AC must exist on the spec.
  *   - Active exemptions never exceed floor(10% x live criteria); the count-then-insert is one store
  *     transaction (`insertAcExemptionCapped`), so concurrent grants cannot overfill the cap.
- *   - "Live criteria" = acceptance criteria across all non-deleted spec docs; an exemption is active iff expiresAt > now.
+ *   - "Live criteria" = acceptance criteria across all non-deleted spec docs; an exemption is active iff expiresAt > now AND its criterion cites no live rule
+ *     (BR-959; `exemptionState` in store-shared.ts is the one predicate; a cited one reads `satisfied`).
  * Side-effect class: IO (the injected store); the clock is injectable.
  * Source: spec-baseline-slice-2-completeness-census-per-branch-citation C4 "Exemptions" (AC-BLS2-10).
  */
@@ -22,7 +23,8 @@ import { resolveDoc } from "./resolve.js";
 // reason: the 10% budget has ONE home, `ac-cite-gate.ts`, because the citation gate's feeding pack reports
 // the remaining headroom and must never disagree with what `grant` enforces. Re-exported so every existing
 // importer of these two names is unchanged.
-import { countLiveCriteria, maxActiveExemptions } from "./ac-cite-gate.js";
+import { countLiveCriteria, indexBaseline, maxActiveExemptions, satisfiedExemptionKeys } from "./ac-cite-gate.js";
+import { exemptionState, type ExemptionState } from "../store/store-shared.js";
 export { EXEMPTION_CAP_RATIO, maxActiveExemptions } from "./ac-cite-gate.js";
 
 /** Input of {@link AcExemptionService.grant}. */
@@ -44,13 +46,16 @@ export interface AcExemptionView {
   reason: string;
   expiresAt: string;
   by: string;
-  state: "active" | "expired";
+  /** `satisfied` = unexpired but its criterion now cites a live rule (BR-959): excuses nothing, uses no cap. */
+  state: ExemptionState;
 }
 
 /** Result of {@link AcExemptionService.counts}. */
 export interface AcExemptionCounts {
   active: number;
   expired: number;
+  /** Unexpired exemptions whose criterion now cites a live rule; not counted in `active` or `ratio`. */
+  satisfied: number;
   liveCriteria: number;
   /** `active / liveCriteria`, 0 when there are no live criteria. */
   ratio: number;
@@ -60,14 +65,14 @@ function validationError(field: string, message: string, value?: unknown): LoreE
   return { code: "VALIDATION_ERROR", field, message, value } as LoreError;
 }
 
-function viewOf(row: AcExemptionRow, nowIso: string): AcExemptionView {
+function viewOf(row: AcExemptionRow, nowIso: string, satisfied: ReadonlySet<string>): AcExemptionView {
   return {
     specId: row.doc_id,
     acId: row.ac_id,
     reason: row.reason,
     expiresAt: row.expires_at,
     by: row.granted_by,
-    state: row.expires_at > nowIso ? "active" : "expired",
+    state: exemptionState(row, nowIso, satisfied),
   };
 }
 
@@ -125,6 +130,8 @@ export class AcExemptionService {
 
     const live = await this.countLiveCriteria();
     if (!live.ok) return live;
+    const satisfied = await this.satisfiedKeys();
+    if (!satisfied.ok) return satisfied;
     const nowIso = now.toISOString();
     return this.store.insertAcExemptionCapped(
       {
@@ -135,7 +142,7 @@ export class AcExemptionService {
         granted_by: by,
         granted_at: nowIso,
       },
-      { liveCriteria: live.value, maxActive: maxActiveExemptions(live.value), now: nowIso },
+      { liveCriteria: live.value, maxActive: maxActiveExemptions(live.value), now: nowIso, satisfied: satisfied.value },
     );
   }
 
@@ -144,7 +151,9 @@ export class AcExemptionService {
     const nowIso = opts.now ?? this.clock().toISOString();
     const rows = await this.store.listAcExemptions();
     if (!rows.ok) return rows;
-    return ok(rows.value.map((row) => viewOf(row, nowIso)));
+    const satisfied = await this.satisfiedKeys();
+    if (!satisfied.ok) return satisfied;
+    return ok(rows.value.map((row) => viewOf(row, nowIso, satisfied.value)));
   }
 
   /** Active/expired exemption counts against the live-criteria total at `now`. */
@@ -153,13 +162,29 @@ export class AcExemptionService {
     if (!rows.ok) return rows;
     const live = await this.countLiveCriteria();
     if (!live.ok) return live;
-    const active = rows.value.filter((r) => r.expires_at > opts.now).length;
+    const satisfiedKeys = await this.satisfiedKeys();
+    if (!satisfiedKeys.ok) return satisfiedKeys;
+    const states = rows.value.map((r) => exemptionState(r, opts.now, satisfiedKeys.value));
+    const count = (state: ExemptionState): number => states.filter((x) => x === state).length;
+    const active = count("active");
     return ok({
       active,
-      expired: rows.value.length - active,
+      expired: count("expired"),
+      satisfied: count("satisfied"),
       liveCriteria: live.value,
       ratio: live.value === 0 ? 0 : active / live.value,
     });
+  }
+
+  /** Keys of exemptions whose criterion now cites a live rule (same liveness as the citation gate). */
+  private async satisfiedKeys(): Promise<Result<Set<string>, LoreError>> {
+    const rows = await this.store.listAcExemptions();
+    if (!rows.ok) return rows;
+    const cites = await this.store.listAcCites();
+    if (!cites.ok) return cites;
+    const baseline = await this.store.findMany({ type: "baseline" });
+    if (!baseline.ok) return baseline;
+    return ok(satisfiedExemptionKeys(rows.value, cites.value, indexBaseline(baseline.value).states));
   }
 
   private async countLiveCriteria(): Promise<Result<number, LoreError>> {

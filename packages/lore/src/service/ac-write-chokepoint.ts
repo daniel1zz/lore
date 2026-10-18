@@ -59,6 +59,7 @@ import {
   changedCriteria,
   CiteGateConfigError,
   activeExemptedAcIds,
+  satisfiedExemptionKeys,
   decideCiteGate,
   indexBaseline,
   placeSpecInBranch,
@@ -436,7 +437,17 @@ export async function admitAcWrite(
   const exemptions = await store.listAcExemptions();
   if (!exemptions.ok) return exemptions;
   const nowIso = new Date().toISOString();
-  const exempted = activeExemptedAcIds(exemptions.value, input.target.id, nowIso);
+  // reason: satisfaction is judged on the cites AFTER this write (`next`), not the stored ones: removing a
+  // criterion's only cite leaves it uncited again, so its unexpired exemption must waive that very write.
+  const nextCites = input.next.flatMap((c) =>
+    (c.cites ?? []).map((rule_id) => ({ doc_id: input.target.id as DocId, ac_id: c.id, rule_id })),
+  );
+  const exempted = activeExemptedAcIds(
+    exemptions.value,
+    input.target.id,
+    nowIso,
+    satisfiedExemptionKeys(exemptions.value, nextCites, index.states),
+  );
   const decision = decideCiteGate(config.value, input.existing, input.next, index, exempted);
 
   if (decision.kind === "skip") return ok(unconstrained);

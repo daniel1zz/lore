@@ -148,6 +148,8 @@ import {
   runRecordToParams,
   buildAcExemptionAlreadyActiveError,
   buildAcExemptionCapError,
+  isExemptionActive,
+  NO_SATISFIED_EXEMPTIONS,
   buildNonLiveRuleRefusal,
 } from "./store-shared.js";
 import { stampAuditSurface } from "./audit-surface.js";
@@ -3065,7 +3067,15 @@ export class TursoStore implements StoreInterface {
         args: [row.doc_id, row.ac_id],
       });
       const existingRow = existing.rows[0];
-      if (existingRow !== undefined && rowStr(existingRow, "expires_at") > cap.now) {
+      const satisfied = cap.satisfied ?? NO_SATISFIED_EXEMPTIONS;
+      if (
+        existingRow !== undefined &&
+        isExemptionActive(
+          { doc_id: row.doc_id, ac_id: row.ac_id, expires_at: rowStr(existingRow, "expires_at") },
+          cap.now,
+          satisfied,
+        )
+      ) {
         await tx.rollback();
         return err(buildAcExemptionAlreadyActiveError(row.doc_id, row.ac_id));
       }
@@ -3075,20 +3085,28 @@ export class TursoStore implements StoreInterface {
           args: [row.doc_id, row.ac_id],
         });
       }
-      const inserted = await tx.execute({
-        sql: `INSERT INTO ac_exemptions (doc_id, ac_id, reason, expires_at, granted_by, granted_at)
-              SELECT ?, ?, ?, ?, ?, ?
-              WHERE (SELECT COUNT(*) FROM ac_exemptions WHERE expires_at > ?) < ?`,
-        args: [row.doc_id, row.ac_id, row.reason, row.expires_at, row.granted_by, row.granted_at, cap.now, cap.maxActive],
+      // reason: the active count applies the shared predicate in TS (cite-satisfaction is not a SQL fact);
+      // the write transaction serialises count-then-insert.
+      const unexpired = await tx.execute({
+        sql: "SELECT doc_id, ac_id, expires_at FROM ac_exemptions WHERE expires_at > ?",
+        args: [cap.now],
       });
-      if (inserted.rowsAffected === 0) {
-        const count = await tx.execute({
-          sql: "SELECT COUNT(*) AS n FROM ac_exemptions WHERE expires_at > ?",
-          args: [cap.now],
-        });
+      const activeCount = unexpired.rows.filter((r) =>
+        isExemptionActive(
+          { doc_id: rowStr(r, "doc_id"), ac_id: rowStr(r, "ac_id"), expires_at: rowStr(r, "expires_at") },
+          cap.now,
+          satisfied,
+        ),
+      ).length;
+      if (activeCount >= cap.maxActive) {
         await tx.rollback();
-        return err(buildAcExemptionCapError(rowNum(count.rows[0] as Row, "n"), cap.liveCriteria, cap.maxActive));
+        return err(buildAcExemptionCapError(activeCount, cap.liveCriteria, cap.maxActive));
       }
+      await tx.execute({
+        sql: `INSERT INTO ac_exemptions (doc_id, ac_id, reason, expires_at, granted_by, granted_at)
+              VALUES (?, ?, ?, ?, ?, ?)`,
+        args: [row.doc_id, row.ac_id, row.reason, row.expires_at, row.granted_by, row.granted_at],
+      });
       await tx.commit();
       return ok({ ...row });
     } catch (e) {

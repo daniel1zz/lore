@@ -354,8 +354,13 @@ export interface AcExemptionCap {
   liveCriteria: number;
   /** Largest number of ACTIVE (unexpired) exemptions allowed after the insert. */
   maxActive: number;
-  /** ISO 8601 instant: a row is active iff `expires_at > now`. */
+  /** ISO 8601 instant: a row is active iff `expires_at > now` and it is not in `satisfied`. */
   now: string;
+  /**
+   * `exemptionKey`s of exemptions whose criterion now cites a live rule (state `satisfied`, not counted
+   * against the cap). Absent = none known; production callers always pass it (see `loadExemptionContext`).
+   */
+  satisfied?: ReadonlySet<string>;
 }
 
 /** One `ac_exemptions` row (migration-014): criterion `ac_id` of spec `doc_id` is excused from the citation gate. */
@@ -378,8 +383,13 @@ export interface AcExemptionCap {
   liveCriteria: number;
   /** Largest number of ACTIVE (unexpired) exemptions allowed after the insert. */
   maxActive: number;
-  /** ISO 8601 instant: a row is active iff `expires_at > now`. */
+  /** ISO 8601 instant: a row is active iff `expires_at > now` and it is not in `satisfied`. */
   now: string;
+  /**
+   * `exemptionKey`s of exemptions whose criterion now cites a live rule (state `satisfied`, not counted
+   * against the cap). Absent = none known; production callers always pass it (see `loadExemptionContext`).
+   */
+  satisfied?: ReadonlySet<string>;
 }
 
 /** One `ac_cites` index row (migration-014): spec `doc_id`'s criterion `ac_id` cites rule `rule_id`. */

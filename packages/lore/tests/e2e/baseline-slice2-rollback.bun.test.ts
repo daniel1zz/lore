@@ -278,7 +278,7 @@ const SLICE1_BASELINE_STATUS_KEYS = [
 /** spec-baseline-slice-2 C5: the only status additions slice 2a may make. */
 // RE-BASELINE (fip AC-FIP-4, BR-670): old set = the four C5 keys only; the baseline block also names the rule family
 // of every counted rule (`rules_by_family`) and the AD entries the totals leave out (`debt_entries`).
-const C5_STATUS_ADDITIONS = ["index_mismatch", "exemptions_active", "exemptions_expired", "exemption_ratio", "rules_by_family", "debt_entries"];
+const C5_STATUS_ADDITIONS = ["index_mismatch", "exemptions_active", "exemptions_expired", "exemptions_satisfied", "exemption_ratio", "rules_by_family", "debt_entries"];
 
 /** Literal `data` key set of `status --json` in a no-baseline corpus before slice 3a added `ac_cite` (observed, then frozen).
  *  RE-BASELINE (spec-run-identity-slice-1, status.ts): `harness_run_attribution` is the one additive key that slice made;
