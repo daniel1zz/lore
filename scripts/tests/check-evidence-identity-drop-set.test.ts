@@ -91,6 +91,18 @@ describe("check-evidence-identity-drop-set - AC-EI-3 pure evaluation", () => {
     expect(outcomes[0]).toMatchObject({ kind: "unexplained", state: "absent" });
   });
 
+  it("STATE: fail_superseded is green without a task; a plain fail with no task stays unexplained (exit 1)", () => {
+    const g = collect([row()], fakeCorpus({ "spec-a/AC-A-1": "fail_superseded" }));
+    expect(g.code).toBe(0);
+    expect(g.out).toContain("green=1 explained=0 unexplained=0");
+    const f = collect([row()], fakeCorpus({ "spec-a/AC-A-1": "fail" }));
+    expect(f.code).toBe(1);
+    expect(f.out).toContain("ac=AC-A-1");
+    for (const state of ["not_measured", "none"]) {
+      expect(collect([row()], fakeCorpus({ "spec-a/AC-A-1": state })).code, state).toBe(1);
+    }
+  });
+
   it("BOUNDARY: an attested_pass AC is green even when it names an archived task (re-verified wins)", () => {
     const outcomes = evaluateDropSet([row({ task: "task-x" })], fakeCorpus({ "spec-a/AC-A-1": "attested_pass" }, { "task-x": "archived" }));
     expect(outcomes[0]?.kind).toBe("green");
