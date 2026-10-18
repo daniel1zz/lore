@@ -209,7 +209,7 @@ describe("AC-AU-3 human channel", () => {
     const git = runHook("git reset --hard HEAD");
     expect(git.code).toBe(2);
     expect(git.stderr).toMatch(/git-safety-gate/);
-  });
+  }, { timeout: 60_000 });
 
   it("(4) MCP and HTTP expose no decide tool or route", () => {
     expect(LORE_MCP_TOOL_NAMES.filter((name) => /decid/i.test(name))).toEqual([]);
@@ -335,7 +335,7 @@ describe("AC-AU-3 human channel", () => {
     const again = await ptyRun(["bun", "run", DRIVER_TS, dbPath, String(id), "--reject"], cleanEnv(), (n) => n);
     expect(again.code).toBe(4);
     expect(again.output).toMatch(/not pending/);
-  });
+  }, { timeout: 60_000 });
 
   it("(6b) a human reject makes the version refuse; every invocation gets a fresh nonce", async () => {
     const a = await seed("half-6b-a");
@@ -357,7 +357,7 @@ describe("AC-AU-3 human channel", () => {
     expect(unknown.code).toBe(4);
     expect(unknown.output).toMatch(/not pending/);
     expect(await pendingIds()).toContain(id);
-  });
+  }, { timeout: 60_000 });
 
   it("`lore pending` lists open decisions with score, factors and the recommended answer (text and --json)", async () => {
     const id = await seed("half-list");

@@ -1,4 +1,5 @@
 // @spawns packages/lore/src/index.ts
+// @layer integration-cli-verify-missing-oracle AC-EI-2 (real CLI in a throwaway corpus; owner is the evidence-identity spec oracle)
 /**
  * A script AC whose command names a test file that no longer exists is NOT MEASURED
  * (task-skill-implement-tg-10-verify-records-a-missing-oracle-file; spec-test-governance-guards-that-refuse-bad-tests-declared AC-TG-6;

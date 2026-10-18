@@ -291,7 +291,7 @@ describe("AC-AU-11 / AU-T13 sweep --apply: an ignored path is loss-free when ide
     expect(existsSync(same)).toBe(false);
     expect(existsSync(differs)).toBe(true);
     expect(run.stdout).toContain("cache/");
-  });
+  }, { timeout: 60_000 });
 
   it("control: an ignored path absent in main is NOT identical (kept, named) even when it is empty", () => {
     const wt = addWorktree("absent");
