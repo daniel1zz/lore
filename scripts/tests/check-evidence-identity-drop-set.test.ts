@@ -2,6 +2,7 @@
 // @spawns scripts/generate-evidence-identity-drop-set.ts
 // @spawns scripts/check-evidence-identity-drop-set.ts
 /**
+ * @layer unit AC-EI-3 — unit/fixture coverage of the drop-set checker script; the AC itself is owned by scripts/check-evidence-identity-drop-set.ts
  * AC-EI-3 (spec-evidence-identity-an-attested-row-counts-only-for-the): the drop-set checker exits 0 only
  * when every listed AC is attested_pass now or is not attested_pass AND names a non-archived task; exit 1
  * names each other AC; exit 2 when the file is absent or empty while the corpus has script ACs; the
