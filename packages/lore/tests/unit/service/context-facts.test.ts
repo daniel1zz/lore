@@ -29,13 +29,35 @@ describe("collectContextFacts", () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
 
-    expect(result.value.commands).toEqual({ build: "bun run build", test: "bun test" });
+    // no `lore.documentedScripts` marker => nothing is documented => the table carries no scripts (MI-T4)
+    expect(result.value.commands).toEqual({});
 
     const byPath = new Map(result.value.moduleIndex.map((entry) => [entry.path, entry.hasMemoryFile]));
     expect(byPath.get("packages")).toBe(false);
     expect(byPath.get("packages/core")).toBe(true);
     expect(byPath.get("packages/core/src")).toBe(false);
     expect(byPath.get("packages/lore")).toBe(false);
+  });
+
+  it("HAPPY: only scripts named in package.json lore.documentedScripts are collected (MI-T4)", async () => {
+    const fs = new InMemoryFsPort({
+      "package.json": JSON.stringify({
+        scripts: { build: "bun run build", test: "bun test", "test:bun": "echo retired >&2; exit 1" },
+        lore: { documentedScripts: ["build", "test"] },
+      }),
+    });
+    const result = await collectContextFacts(fs, "", DEFAULT_BUDGETS);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.commands).toEqual({ build: "bun run build", test: "bun test" });
+  });
+
+  it("ERROR: a documentedScripts entry naming a script that does not exist fails loud, not silently dropped (MI-T4)", async () => {
+    const fs = new InMemoryFsPort({
+      "package.json": JSON.stringify({ scripts: { build: "x" }, lore: { documentedScripts: ["build", "gone"] } }),
+    });
+    const result = await collectContextFacts(fs, "", DEFAULT_BUDGETS);
+    expect(result.ok).toBe(false);
   });
 
   it("NEGATIVE: a malformed (non-JSON) root package.json degrades commands to {} rather than failing collection", async () => {
