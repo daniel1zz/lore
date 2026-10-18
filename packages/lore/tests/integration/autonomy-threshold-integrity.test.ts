@@ -282,14 +282,17 @@ describe("AC-AU-9 thresholds are governed data and fail safe", () => {
   it("a loosening escalates as governance-loosen and applies only after a human-tty accept of that exact proposal", async () => {
     const corpus = newCorpus();
     const loosen = lore(corpus, ["autonomy", "set", "stash-drop", "--threshold", "0.5"]);
-    expect(loosen.exitCode).toBe(7);
+    expect(loosen.exitCode).toBe(4);
     expect(loosen.stderr).toMatch(/governance-loosen/);
     expect(storedRecord(corpus).classes["stash-drop"]?.["threshold"]).toBe(0.8);
     const id = await pendingOf(corpus, "governance-loosen");
+    expect(loosen.stderr).toContain(`Pending decision ${id} created`);
+    expect(loosen.stderr).toContain(`lore decide ${id} --accept`);
+    expect(loosen.stderr).not.toMatch(/Confirmation code/);
 
     expect((await ptyAccept(corpus, ["bun", "run", DRIVER_TS, corpus.dbPath, String(id), "--accept"])).code).toBe(0);
     // a DIFFERENT loosening is not covered by that accept
-    expect(lore(corpus, ["autonomy", "set", "stash-drop", "--threshold", "0.4"]).exitCode).toBe(7);
+    expect(lore(corpus, ["autonomy", "set", "stash-drop", "--threshold", "0.4"]).exitCode).toBe(4);
     // the same proposal applies
     const applied = lore(corpus, ["autonomy", "set", "stash-drop", "--threshold", "0.5"]);
     expect(applied.exitCode).toBe(0);
@@ -300,7 +303,7 @@ describe("AC-AU-9 thresholds are governed data and fail safe", () => {
 
   it("a widened regenerable set is a loosening; narrowing it applies and the governed set reaches the ignored-path rule", async () => {
     const corpus = newCorpus();
-    expect(lore(corpus, ["autonomy", "regenerable", "add", "build-cache/"]).exitCode).toBe(7);
+    expect(lore(corpus, ["autonomy", "regenerable", "add", "build-cache/"]).exitCode).toBe(4);
     expect(storedRecord(corpus).worktreeRemoveRegenerable).not.toContain("build-cache/");
 
     expect(lore(corpus, ["autonomy", "regenerable", "rm", "dist-npm/"]).exitCode).toBe(0);

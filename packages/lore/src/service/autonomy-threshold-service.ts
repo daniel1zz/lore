@@ -112,7 +112,7 @@ export interface AutonomyThresholdDeps {
 }
 
 /** The slice of DecisionService `propose` uses (kept narrow so a double is trivial). */
-export type ThresholdDecisionPort = Pick<DecisionService, "decide" | "effectiveVerdict">;
+export type ThresholdDecisionPort = Pick<DecisionService, "decide" | "effectiveVerdict" | "listPending">;
 
 export type ProposeOutcome =
   | { readonly kind: "noop" }
@@ -121,6 +121,8 @@ export type ProposeOutcome =
       readonly kind: "escalated";
       readonly change: ThresholdChange;
       readonly decision_record_id: number;
+      /** The id `lore decide` takes. */
+      readonly pending_id: number;
       readonly subject: { readonly id: string; readonly version: string };
     }
   | { readonly kind: "refused"; readonly integrity: Extract<ThresholdIntegrity, { state: "broken" }> };
@@ -227,7 +229,11 @@ export class AutonomyThresholdService {
     }
     const decided = await decisions.decide(GOVERNANCE_LOOSEN_CLASS, subject, {});
     if (!decided.ok) return decided;
-    return ok({ kind: "escalated", change, decision_record_id: decided.value.record_id, subject });
+    const pending = await decisions.listPending();
+    if (!pending.ok) return pending;
+    const open = pending.value.find((p) => p.class === GOVERNANCE_LOOSEN_CLASS && p.subject_id === subject.id && p.subject_version === subject.version);
+    if (open === undefined) return err(storeError(`escalated loosening has no pending decision (record ${decided.value.record_id})`));
+    return ok({ kind: "escalated", change, decision_record_id: decided.value.record_id, pending_id: open.id, subject });
   }
 
   /** What the git-tracked mirror file holds: the record text, its hash, its integrity and the decision chain head. */

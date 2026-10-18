@@ -8,7 +8,7 @@
  *                                                     pushed (hooks/pre-push; --record notes the current head)
  *
  * Tightening applies at once with an auto write record. Loosening is class `governance-loosen` (human-always): the
- * command opens a pending decision and exits 7; after the human answers it with `lore decide <id> --accept`, re-running
+ * command opens a pending decision and exits 4 printing its id; after the human answers it with `lore decide <id> --accept`, re-running
  * the SAME command applies it. A record whose content no longer matches its decision-log chain is refused here and
  * makes every class escalate (see `lore status`, `lore pending`).
  *
@@ -23,8 +23,8 @@ import { recordPushedHead, pushedHeadsPath, readPushedHeads, verifyPushedHeads }
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatError, formatTable } from "../utils.js";
 
-/** Exit code when a loosening was escalated to the human (same family as NEEDS_APPROVAL). */
-const NEEDS_HUMAN_EXIT = 7;
+/** Exit code when a loosening was escalated to the human: 4, the spec's escalate exit (AC-AU-7) and the gate-denial convention. */
+const NEEDS_HUMAN_EXIT = 4;
 
 interface Opened {
   readonly service: DecisionService;
@@ -85,7 +85,7 @@ function renderOutcome(outcome: ProposeOutcome): { text: string; code: number } 
       };
     case "escalated":
       return {
-        text: `Not applied: this change LOOSENS governance (class governance-loosen, human-always):\n${outcome.change.loosened.map((l) => `  ${l}`).join("\n")}\nA human must answer the pending decision (lore pending, then lore decide <id> --accept); re-run this same command afterwards.`,
+        text: `Not applied: this change LOOSENS governance (class governance-loosen, human-always):\n${outcome.change.loosened.map((l) => `  ${l}`).join("\n")}\nPending decision ${outcome.pending_id} created. A human answers it with: lore decide ${outcome.pending_id} --accept (or --reject); re-run this same command afterwards.`,
         code: NEEDS_HUMAN_EXIT,
       };
     case "refused":
