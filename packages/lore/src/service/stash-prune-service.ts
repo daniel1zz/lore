@@ -34,6 +34,17 @@ import type { StoreInterface } from "../store/store-interface.js";
 /** Class id in @lore/core's registry. */
 const STASH_DROP_CLASS = "stash-drop";
 
+/**
+ * Decision subject version for a stash drop: the stash sha plus the attribution facts (owner run ids, each one's
+ * ended state, overall state), canonically serialised. New facts (the owner run ended) start a new version so the
+ * decision is re-made; unchanged facts keep the version so re-running prune cannot re-roll it (ADR D5, AC-AU-2).
+ */
+export function stashDecisionVersion(sha: string, attribution: StashAttribution): string {
+  const ended = new Set(attribution.endedRuns ?? []);
+  const runs = [...attribution.runs].sort().map((id) => `${id}=${ended.has(id) ? "ended" : "live"}`);
+  return `${sha}|${attribution.state}|${runs.join(",")}`;
+}
+
 /** Where every stash commit is kept before lore drops it. */
 export const ARCHIVE_REF_PREFIX = "refs/lore/archive/stash/";
 
@@ -47,6 +58,8 @@ export interface StashAttribution {
   readonly branch: string | null;
   /** Run ids the branch maps to (agent runs by agent_ref, claim runs by harness_run). */
   readonly runs: readonly string[];
+  /** Run ids whose end is recorded (a subset of `runs`); feeds the decision subject version. */
+  readonly endedRuns?: readonly string[];
   readonly state: StashRunState;
   /** Human sentence naming why `state` was chosen. */
   readonly reason: string;
@@ -164,7 +177,7 @@ export class StashPruneService {
   private async decideAndMaybeDrop(facts: StashFacts, archiveRef: string): Promise<Result<StashOutcome, LoreError>> {
     const measured = await this.buildDecisionFacts(facts.attribution);
     if (!measured.ok) return measured;
-    const decided = await this.deps.decisions.decide(STASH_DROP_CLASS, { id: facts.sha, version: facts.sha }, measured.value);
+    const decided = await this.deps.decisions.decide(STASH_DROP_CLASS, { id: facts.sha, version: stashDecisionVersion(facts.sha, facts.attribution) }, measured.value);
     if (!decided.ok) return decided;
     const { decision, effective } = decided.value;
     if (effective.verdict !== "auto") {
@@ -250,15 +263,16 @@ export class StashPruneService {
       runIds.set(claimRun, end.value?.endedAt != null);
     }
     const runs = [...runIds.keys()];
+    const endedRuns = [...runIds.entries()].filter(([, ended]) => ended).map(([id]) => id);
     const live = [...runIds.entries()].filter(([, ended]) => !ended).map(([id]) => id);
     if (live.length > 0) {
-      return { branch, runs, state: "live", reason: `branch ${branch} belongs to live run ${live.join(", ")}` };
+      return { branch, runs, endedRuns, state: "live", reason: `branch ${branch} belongs to live run ${live.join(", ")}` };
     }
     if (claimWithoutRun) {
-      return { branch, runs, state: "live", reason: `branch ${branch} has an open task claim with no run to prove it ended: treated as a live run` };
+      return { branch, runs, endedRuns, state: "live", reason: `branch ${branch} has an open task claim with no run to prove it ended: treated as a live run` };
     }
     if (runs.length > 0) {
-      return { branch, runs, state: "ended", reason: `branch ${branch} belongs to ended run ${runs.join(", ")}` };
+      return { branch, runs, endedRuns, state: "ended", reason: `branch ${branch} belongs to ended run ${runs.join(", ")}` };
     }
     return { branch, runs, state: "no-provable-owner", reason: `branch ${branch} maps to no run or claim: no provable owner` };
   }
