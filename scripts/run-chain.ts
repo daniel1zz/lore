@@ -12,8 +12,10 @@
  * Side-effect class: IO in `main` (spawns each step with inherited stdio); `runChain`/`renderTable` are pure.
  *
  * Usage: bun scripts/run-chain.ts [shell-command ...]   (no arguments = DEFAULT_STEPS)
+ *        bun scripts/run-chain.ts --static [package.json]   (build + typecheck + every ^check: script = `bun run check:static`)
  */
 import { spawnSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -46,12 +48,56 @@ export function runChain(steps: readonly string[], run: StepRunner): StepResult[
   return steps.map((step) => ({ step, ...run(step) }));
 }
 
-export function renderTable(results: readonly StepResult[]): string {
+/**
+ * Render the per-step exit table. `labels` maps a step to a short note appended to its row
+ * (check:static uses it to mark corpus-dependent steps); steps absent from the map get no note.
+ */
+export function renderTable(results: readonly StepResult[], labels: ReadonlyMap<string, string> = new Map()): string {
   const width = Math.max(...results.map((r) => r.step.length));
-  const rows = results.map((r) => `  ${r.exit === 0 ? "PASS" : "FAIL"}  exit ${String(r.exit).padStart(3)}  ${r.seconds.toFixed(1).padStart(7)}s  ${r.step.padEnd(width)}`);
+  const rows = results.map((r) => {
+    const note = labels.get(r.step);
+    return `  ${r.exit === 0 ? "PASS" : "FAIL"}  exit ${String(r.exit).padStart(3)}  ${r.seconds.toFixed(1).padStart(7)}s  ${r.step.padEnd(width)}${note === undefined ? "" : `  [${note}]`}`;
+  });
   const failed = results.filter((r) => r.exit !== 0);
   const verdict = failed.length === 0 ? `run-chain: all ${results.length} steps passed` : `run-chain: ${failed.length} of ${results.length} steps FAILED: ${failed.map((r) => r.step).join("; ")}`;
   return ["", "=== run-chain: per-step exit table", ...rows, verdict].join("\n");
+}
+
+/**
+ * The check:* scripts whose verdict depends on live corpus / mirror state rather than on the code alone:
+ * the first two are red until `bun scripts/export-spec-mirror.ts` ran, the census reads recorded AC states.
+ */
+export const CORPUS_DEPENDENT_CHECKS: ReadonlySet<string> = new Set(["check:spec-mirror", "check:live-repo-state", "check:corpus-fail-census"]);
+export const CORPUS_DEPENDENT_LABEL = "corpus-dependent: needs a fresh mirror export / live corpus state";
+
+/** The aggregate script itself: excluded from its own step list, or the floor would recurse into itself. */
+const STATIC_FLOOR_SCRIPT = "check:static";
+
+/**
+ * Derive the `check:static` step list from a package.json `scripts` map: build, typecheck, then EVERY
+ * `^check:` script in declaration order (so a new check is picked up with no edit here).
+ * @throws Error when the map has no `build` or `typecheck` script (a floor missing its base steps is not a floor).
+ */
+export function deriveStaticSteps(scripts: Readonly<Record<string, string>>): { steps: string[]; labels: Map<string, string> } {
+  for (const base of ["build", "typecheck"]) {
+    if (!(base in scripts)) throw new Error(`check:static: package.json has no "${base}" script`);
+  }
+  const checks = Object.keys(scripts).filter((name) => /^check:/.test(name) && name !== STATIC_FLOOR_SCRIPT);
+  const steps = ["build", "typecheck", ...checks].map((name) => `bun run ${name}`);
+  const labels = new Map<string, string>();
+  for (const name of checks) if (CORPUS_DEPENDENT_CHECKS.has(name)) labels.set(`bun run ${name}`, CORPUS_DEPENDENT_LABEL);
+  return { steps, labels };
+}
+
+/** Run the derived static floor over `packageJsonPath` and print the labelled table; returns the exit code. */
+export function runStaticFloor(packageJsonPath: string, run: StepRunner = spawnStep): number {
+  const parsed: unknown = JSON.parse(readFileSync(packageJsonPath, "utf8"));
+  const scripts = (parsed as { scripts?: Record<string, string> }).scripts;
+  if (scripts === undefined) throw new Error(`check:static: ${packageJsonPath} has no scripts`);
+  const { steps, labels } = deriveStaticSteps(scripts);
+  const results = runChain(steps, run);
+  console.log(renderTable(results, labels));
+  return results.every((r) => r.exit === 0) ? 0 : 1;
 }
 
 function spawnStep(step: string): { exit: number; seconds: number } {
@@ -76,7 +122,9 @@ export function main(argv: readonly string[], run: StepRunner = spawnStep): numb
 
 if (import.meta.main) {
   try {
-    process.exit(main(process.argv.slice(2)));
+    const argv = process.argv.slice(2);
+    // `--static [package.json]`: the post-merge floor (build + typecheck + every check:*)
+    process.exit(argv[0] === "--static" ? runStaticFloor(argv[1] ?? join(ROOT, "package.json")) : main(argv));
   } catch (e) {
     console.error(`run-chain: ${e instanceof Error ? e.message : String(e)}`);
     process.exit(2);

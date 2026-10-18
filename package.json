@@ -21,6 +21,7 @@
     "typecheck:dashboard": "bun run --filter '@lore/dashboard' typecheck",
     "typecheck:dashboard-tests": "bun --cwd=packages/dashboard run prebuild && tsc --noEmit -p packages/dashboard/tsconfig.tests.json",
     "typecheck:dashboard-e2e": "tsc --noEmit -p packages/dashboard/tsconfig.e2e.json",
+    "check:static": "bun scripts/run-chain.ts --static",
     "check:ordinal-sites": "node scripts/check-ordinal-write-sites.mjs",
     "check:test-budgets": "bun scripts/check-test-budgets.ts",
     "check:no-timer-retry": "bun scripts/check-no-timer-retry.ts",
