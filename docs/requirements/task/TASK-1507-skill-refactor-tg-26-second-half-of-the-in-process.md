@@ -3,7 +3,7 @@ id: TASK-1507
 type: task
 role: plan
 title: "[Skill:refactor] TG-26 second half of the in-process command test migration"
-status: draft
+status: archived
 priority: medium
 phase: "Phase 3b: one runner"
 created: 2026-10-17

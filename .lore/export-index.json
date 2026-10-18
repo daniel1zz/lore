@@ -11364,6 +11364,42 @@
     "01M54WHMBMDT8ABB4X1SDAGBE7": {
       "human_id": "TASK-1537",
       "file_path": "docs/requirements/task/TASK-1537-ac-list-in-source-mode-from-a-worktree-may-show-a.md"
+    },
+    "01M56GFJSD05254PVW67CYFVZE": {
+      "human_id": "SPEC-196",
+      "file_path": "docs/requirements/spec/SPEC-196-evidence-identity-an-attested-row-counts-only-for.md"
+    },
+    "01M56F1KDG0WB9BCKJNV7NRJHX": {
+      "human_id": "KN-704",
+      "file_path": "docs/requirements/knowledge/KN-704-assessment-corpus-truthfulness-finish-ac-ct-3-10.md"
+    },
+    "01M56EYX1WQPDJPB9MBHFAMXH6": {
+      "human_id": "KN-705",
+      "file_path": "docs/requirements/knowledge/KN-705-assessment-corpus-truthfulness-finish-ac-ct-3-10.md"
+    },
+    "01M56GH74M7XVH6M3A50RC5A2C": {
+      "human_id": "PLAN-203",
+      "file_path": "docs/requirements/plan/PLAN-203-evidence-identity-count-only-equal-command-atteste.md"
+    },
+    "01M56GJ2S20KKX37VQV8HD6ZEG": {
+      "human_id": "TASK-1538",
+      "file_path": "docs/requirements/task/TASK-1538-skill-implement-ei-2-missing-oracle-detection-cove.md"
+    },
+    "01M56GJ3K0Q0SCCCFYQD2DH0JZ": {
+      "human_id": "TASK-1539",
+      "file_path": "docs/requirements/task/TASK-1539-skill-test-ei-4-re-verify-the-drop-set-on-main-and.md"
+    },
+    "01M56GJ1Z9YFJF8ETS1W9HF1AK": {
+      "human_id": "TASK-1540",
+      "file_path": "docs/requirements/task/TASK-1540-skill-implement-ei-1-coverage-counts-only-equal-co.md"
+    },
+    "01M56GJ0ZJ00MKAZZV9S8TVRV3": {
+      "human_id": "TASK-1541",
+      "file_path": "docs/requirements/task/TASK-1541-skill-test-ei-3-drop-set-snapshot-and-check-eviden.md"
+    },
+    "01M553VY6JXVCJ6A7GS6MVX2D6": {
+      "human_id": "TASK-1542",
+      "file_path": "docs/requirements/task/TASK-1542-skill-fix-tg-35-two-new-test-files-reference-ac-ct.md"
     }
   }
 }

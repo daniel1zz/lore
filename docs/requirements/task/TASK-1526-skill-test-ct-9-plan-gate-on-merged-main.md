@@ -3,11 +3,11 @@ id: TASK-1526
 type: task
 role: plan
 title: "[Skill:test] CT-9 plan gate on merged main"
-status: draft
+status: archived
 priority: high
 phase: "Phase 2: implement"
 created: 2026-10-17
-updated: 2026-10-17
+updated: 2026-10-18
 tags: []
 parent: PLAN-202
 plan: PLAN-202

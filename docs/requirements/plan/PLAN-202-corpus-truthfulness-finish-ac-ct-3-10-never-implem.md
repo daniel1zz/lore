@@ -3,10 +3,10 @@ id: PLAN-202
 type: plan
 role: plan
 title: "Corpus truthfulness: finish AC-CT-3..10 (never implemented)"
-status: approved
+status: archived
 priority: medium
 created: 2026-10-17
-updated: 2026-10-17
+updated: 2026-10-18
 tags: []
 parent: SPEC-143
 phases:

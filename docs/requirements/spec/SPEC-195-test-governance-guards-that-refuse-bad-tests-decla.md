@@ -67,7 +67,7 @@ AC-TG-1..11 (`lore ac add`). AC-TG-1 is the user-facing runner decision; AC-TG-2
   script: test — bun run check:ac-oracle-ownership && bunx --bun vitest run scripts/tests/test-cleanup-exit.test.ts
 - [·] [script] AC-TG-10: On main after the plan's last merge, with dist/lore rebuilt and both runner guards active, bun run test exits exactly 0
   script: test — bun run test
-- [⚑] [script] AC-TG-11: On the development machine this plan is run on (Apple Silicon M1 Pro, 8 CPUs, darwin; baseline: two runners, vitest ~282-300 s plus bun 1235-1753 s serial, measured 2026-10-16), the one-runner full run (vitest on the Bun runtime, ADR tg-1 option b, including the explicit Node project) finishes in 600 seconds or less of wall time with exit 0; the script prints the measured seconds, the worker count, the file count run and the machine (os, arch, cpu count), and exits 1 above the limit or when the file count run is lower than the test files on disk
+- [✘] [script] AC-TG-11: On the development machine this plan is run on (Apple Silicon M1 Pro, 8 CPUs, darwin; baseline: two runners, vitest ~282-300 s plus bun 1235-1753 s serial, measured 2026-10-16), the one-runner full run (vitest on the Bun runtime, ADR tg-1 option b, including the explicit Node project) finishes in 600 seconds or less of wall time with exit 0; the script prints the measured seconds, the worker count, the file count run and the machine (os, arch, cpu count), and exits 1 above the limit or when the file count run is lower than the test files on disk
   script: test — bun scripts/measure-test-wall.ts --max-seconds 600
 
 ## Code anchors
