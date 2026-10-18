@@ -72,7 +72,7 @@ function mustOk(run: Run, what: string): Run {
 }
 
 /** Task claimed from a fresh `agent-<agent>` worktree (own commit merged into main, evidence recorded, tree clean). */
-async function makeCase(agent: string, session: string): Promise<Case> {
+async function makeCase(agent: string, session: string, claimValue: "path" | "branch" = "path"): Promise<Case> {
   const branch = `agent-${agent}`;
   const path = join(parent, branch);
   const created = mustOk(
@@ -81,7 +81,8 @@ async function makeCase(agent: string, session: string): Promise<Case> {
   );
   const slug = (JSON.parse(created.stdout) as { data: { slug: string } }).data.slug;
   mustOk(git(repo, "worktree", "add", "-q", "-b", branch, path), `worktree add ${agent}`);
-  mustOk(await lore(["claim", slug, "--worktree", path], session), `claim ${agent}`);
+  // the dispatch protocol claims with `--worktree "$(git branch --show-current)"`, i.e. the BRANCH name (CL-1)
+  mustOk(await lore(["claim", slug, "--worktree", claimValue === "branch" ? branch : path], session), `claim ${agent}`);
   writeFileSync(join(path, `${agent}.txt`), `${agent}\n`);
   mustOk(git(path, "add", "-A"), `add ${agent}`);
   mustOk(git(path, "commit", "-q", "-m", `own commit ${agent}`), `commit ${agent}`);
@@ -158,6 +159,57 @@ describe("AC-WS-3 lore done removes its worktree through the single removal test
     mustOk(await lore(["run", "end", "cc:S5", "--reason", "session over"], "S5"), "end S5 main");
     const c = { path: join(parent, "agent-CCC"), branch: "agent-CCC" };
     const swept = await lore(["worktree", "sweep", "--apply", "--json"], "S6");
+    expect(swept.status).toBe(0);
+    expect(existsSync(c.path)).toBe(false);
+    expect(branchExists(c.branch)).toBe(false);
+  });
+
+  it("BRANCH CLAIM (a): the claim records the branch name; clean+merged+unoccupied+run ended -> removed, path named, exit 0", async () => {
+    await registerAgentRun("S10", "FFF");
+    const c = await makeCase("FFF", "S10", "branch");
+    mustOk(await lore(["run", "end", "cc:S10:FFF", "--reason", "agent stopped"], "S10"), "end FFF");
+    const r = await done(c, "S10");
+    expect(r.status).toBe(0);
+    expect(worktreeLine(r)).toBe(`worktree: removed ${c.path}`);
+    expect(existsSync(c.path)).toBe(false);
+    expect(branchExists(c.branch)).toBe(false);
+  });
+
+  it("BRANCH CLAIM (b): resolves, but a live process has its cwd inside -> kept with the removal test's reason, exit 0", async () => {
+    await registerAgentRun("S11", "GGG");
+    const c = await makeCase("GGG", "S11", "branch");
+    mustOk(await lore(["run", "end", "cc:S11:GGG", "--reason", "agent stopped"], "S11"), "end GGG");
+    const occupant = Bun.spawn(["sleep", "120"], { cwd: c.path, env: envFor("S11") });
+    try {
+      const r = await done(c, "S11");
+      expect(r.status).toBe(0);
+      expect(worktreeLine(r)).toBe(`worktree: kept ${c.path}: process-inside`);
+      expect(existsSync(c.path)).toBe(true);
+      expect(branchExists(c.branch)).toBe(true);
+    } finally {
+      occupant.kill();
+      await occupant.exited;
+    }
+  });
+
+  it("BRANCH CLAIM (c): neither a path nor a branch resolves -> gone, naming both lookups, exit 0", async () => {
+    await registerAgentRun("S12", "HHH");
+    const c = await makeCase("HHH", "S12", "branch");
+    mustOk(git(repo, "worktree", "remove", c.path), "remove HHH worktree");
+    mustOk(git(repo, "branch", "-d", c.branch), "delete HHH branch");
+    const r = await done(c, "S12");
+    expect(r.status).toBe(0);
+    expect(worktreeLine(r)).toBe(`worktree: gone ${c.branch}: ${c.branch} is not an absolute path; no worktree has branch ${c.branch}`);
+  });
+
+  it("BRANCH CLAIM sweep: an archived task's branch-claimed worktree is removed by `worktree sweep --apply` once the run ends", async () => {
+    await registerAgentRun("S13", "III");
+    const c = await makeCase("III", "S13", "branch");
+    const kept = await done(c, "S13");
+    expect(kept.status).toBe(0);
+    expect(worktreeLine(kept)).toBe(`worktree: kept ${c.path}: run-not-ended`);
+    mustOk(await lore(["run", "end", "cc:S13:III", "--reason", "agent stopped"], "S13"), "end III");
+    const swept = await lore(["worktree", "sweep", "--apply", "--json"], "S13");
     expect(swept.status).toBe(0);
     expect(existsSync(c.path)).toBe(false);
     expect(branchExists(c.branch)).toBe(false);

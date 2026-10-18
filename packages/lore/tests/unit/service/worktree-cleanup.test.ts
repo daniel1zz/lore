@@ -200,6 +200,33 @@ describe("evaluateRecordedWorktree (fake probe + fake removal facts)", () => {
     expect(port.asked).toEqual([]);
   });
 
+  it("a branch-name claim resolves to its linked worktree; the outcome and the removal port name the resolved path", async () => {
+    const { e, port } = await evaluate({ exists: false }, { path: "feat", baseSha: "base" });
+    expect(e).toMatchObject({ decision: "remove", worktree: "/wt/a", repoRoot: "/repo", branch: "feat" });
+    expect(port.asked).toEqual([["/wt/a", "S1"]]);
+  });
+
+  it("an unmatched branch name is gone, naming both the path and the branch lookup", async () => {
+    const { e, port } = await evaluate({ exists: false }, { path: "no-such-branch", baseSha: "base" });
+    expect(e).toMatchObject({ decision: "gone", worktree: "no-such-branch" });
+    expect(e.reason).toBe("no-such-branch is not an absolute path; no worktree has branch no-such-branch");
+    expect(port.asked).toEqual([]);
+  });
+
+  it("an unreadable worktree list is not-measured, never gone", async () => {
+    const { e } = await evaluate({ exists: false, listed: { ok: false, reason: "git worktree exited 128" } }, { path: "feat", baseSha: "base" });
+    expect(e.decision).toBe("not-measured");
+    expect(e.reason).toContain("git worktree exited 128");
+  });
+
+  it("a branch-form claim of another open task protects its worktree (claimed-by-active-task)", async () => {
+    const { probe } = fakeProbe({ exists: false });
+    const active = buildActiveClaimedPathSet(probe, ["feat"]);
+    const { e } = await evaluate({ exists: false }, { path: "feat", baseSha: "base" }, active);
+    expect(e.decision).toBe("keep");
+    expect(e.reason).toBe("claimed-by-active-task");
+  });
+
   it("not-measured (never remove) when the claim recorded no base", async () => {
     const { e } = await evaluate({}, { path: "/wt/a", baseSha: undefined });
     expect(e.decision).toBe("not-measured");
@@ -275,6 +302,6 @@ describe("formatWorktreeOutcomeLine", () => {
     expect(formatWorktreeOutcomeLine({ worktree: "/w", decision: "remove", reason: "removed" })).toBe("worktree: removed /w");
     expect(formatWorktreeOutcomeLine({ worktree: "/w", decision: "keep", reason: "locked" })).toBe("worktree: kept /w: locked");
     expect(formatWorktreeOutcomeLine({ worktree: "/w", decision: "not-measured", reason: "x" })).toBe("worktree: not-measured /w: x");
-    expect(formatWorktreeOutcomeLine({ worktree: "/w", decision: "gone", reason: "path does not exist" })).toBe("worktree: gone /w");
+    expect(formatWorktreeOutcomeLine({ worktree: "/w", decision: "gone", reason: "path does not exist" })).toBe("worktree: gone /w: path does not exist");
   });
 });
