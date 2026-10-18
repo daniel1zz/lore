@@ -21,6 +21,9 @@ export const VERIFY_SHELL = "sh" as const;
 
 /** Parse-only timeout; `sh -n` on one command line takes milliseconds. */
 const PARSE_TIMEOUT_MS = 10_000;
+// reason: `sh -n -c` parses text; it never reads the directory it runs in. A fixed root keeps the child independent of
+// the calling process's working directory (nothing below an entry reads the cwd, AS-26).
+const PARSE_CWD = "/";
 
 /** Thrown when the verify shell cannot be started, so no parse verdict exists. */
 export class ShellParseCheckUnavailableError extends Error {
@@ -42,7 +45,7 @@ export class ShellParseCheckUnavailableError extends Error {
  * @throws ShellParseCheckUnavailableError when the shell cannot be spawned or times out.
  */
 export function shellParseError(command: string): string | null {
-  const run = spawnSync(VERIFY_SHELL, ["-n", "-c", command], { encoding: "utf8", timeout: PARSE_TIMEOUT_MS });
+  const run = spawnSync(VERIFY_SHELL, ["-n", "-c", command], { cwd: PARSE_CWD, encoding: "utf8", timeout: PARSE_TIMEOUT_MS });
   if (run.error !== undefined) throw new ShellParseCheckUnavailableError(VERIFY_SHELL, run.error.message);
   if (run.status === 0) return null;
   const message = (run.stderr ?? "").trim();

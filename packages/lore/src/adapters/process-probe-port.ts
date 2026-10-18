@@ -42,10 +42,14 @@ interface PsRunResult {
   stdout: string;
 }
 
+// reason: `ps` reads the process table, never the directory it runs in; a fixed root keeps the child independent of
+// the calling process's working directory (nothing below an entry reads the cwd, AS-26).
+const PS_CWD = "/";
+
 /** Runs `ps -o lstart= -p <pid>` and captures its exit code + stdout — NEVER rejects (mirrors `real-git-port.ts::runGit`). */
 function runPs(pid: number): Promise<PsRunResult> {
   return new Promise((resolve) => {
-    const child = spawn("ps", ["-o", "lstart=", "-p", String(pid)], { stdio: ["ignore", "pipe", "ignore"] });
+    const child = spawn("ps", ["-o", "lstart=", "-p", String(pid)], { cwd: PS_CWD, stdio: ["ignore", "pipe", "ignore"] });
 
     let stdout = "";
     let settled = false;

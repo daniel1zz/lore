@@ -53,6 +53,8 @@ export interface OpenEditorOptions {
   env: NodeJS.ProcessEnv;
   /** The Invocation's temp directory (`inv.paths.tmpDir`): where the per-invocation edit dir is created. */
   tmpDir: string;
+  /** The Invocation's working directory (`inv.cwd`): the editor child starts there. */
+  cwd: string;
 }
 
 // ─── Editor resolution ────────────────────────────────────────────────────────
@@ -143,6 +145,7 @@ export async function openEditor(
     // spawnSync blocks until the editor process exits.
     // stdio: 'inherit' gives the editor full terminal control (critical for vi/nano/emacs).
     const spawnResult = spawnSync(editorBin, [...editorArgs, tempFile], {
+      cwd: opts.cwd,
       stdio: "inherit",
     });
 

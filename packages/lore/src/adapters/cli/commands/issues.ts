@@ -1017,9 +1017,10 @@ async function collectLocalVerifyTargets(app: ReturnType<typeof loadLoreApp>["ap
  */
 async function fetchGithubLabelResolutions(
   targets: readonly VerifyTarget[],
+  cwd: string,
   env: NodeJS.ProcessEnv,
 ): Promise<Result<Map<string, IssueResolution | undefined>, LoreError>> {
-  const runner = new GhRunner({ execFile: createNodeGhExecFile(), env });
+  const runner = new GhRunner({ execFile: createNodeGhExecFile(cwd), env });
 
   const targetsByRepo = new Map<string, VerifyTarget[]>();
   for (const target of targets) {
@@ -1159,7 +1160,7 @@ async function runVerify(inv: Invocation, app: ReturnType<typeof loadLoreApp>["a
     return renderVerifyResult(inv.io, source.corpus_path, [], json);
   }
 
-  const labelsResult = await fetchGithubLabelResolutions(targets, env);
+  const labelsResult = await fetchGithubLabelResolutions(targets, inv.cwd, env);
   if (!labelsResult.ok) {
     inv.io.stderr.write(formatErrorFor(inv, labelsResult.error) + "\n");
     return exitCode(labelsResult.error);

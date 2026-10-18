@@ -26,8 +26,8 @@ const PS_LINE = /^\s*(\d+)\s+(\d+)\s+(.*)$/;
 const EAGAIN_RETRY_MS = 20;
 
 /** The whole OS process table via `ps -axo pid=,ppid=,command=`. */
-export function readLiveProcessTable(): HumanChannelOutcome<readonly ProcessEntry[], string> {
-  const run = spawnSync("ps", ["-axo", "pid=,ppid=,command="], { encoding: "utf8", maxBuffer: MAX_PS_BYTES });
+export function readLiveProcessTable(cwd: string): HumanChannelOutcome<readonly ProcessEntry[], string> {
+  const run = spawnSync("ps", ["-axo", "pid=,ppid=,command="], { cwd, encoding: "utf8", maxBuffer: MAX_PS_BYTES });
   if (run.error !== undefined || run.status !== 0) {
     return { ok: false, error: `ps failed: ${run.error?.message ?? `exit ${String(run.status)}`}` };
   }
@@ -105,7 +105,7 @@ export function createProductionHumanChannelPorts(inv: Invocation, overrides: Pa
       return harnessRun != null ? [...args, "--harness-run", String(harnessRun)] : args;
     },
     selfPid: () => process.pid,
-    readProcessTable: readLiveProcessTable,
+    readProcessTable: () => readLiveProcessTable(inv.cwd),
     newNonce: generateNonce,
     openTerminal: openControllingTerminal,
     ...overrides,

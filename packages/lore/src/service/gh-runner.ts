@@ -249,12 +249,13 @@ function scrubGhEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
  * `util.promisify(child_process.execFile)` bound to the `gh` binary name,
  * with an argv ARRAY (never a shell string) and UTF-8 decoding. A real
  * caller (a later task's `GitHubIntakePort` implementation) opts into this
- * explicitly via `new GhRunner({ execFile: createNodeGhExecFile() })` — it
+ * explicitly via `new GhRunner({ execFile: createNodeGhExecFile(cwd) })` — it
  * is never the constructor's implicit default (see {@link GhExecFile}).
  */
-export function createNodeGhExecFile(): GhExecFile {
+export function createNodeGhExecFile(cwd: string): GhExecFile {
   return async (args, options) => {
     const { stdout, stderr } = await execFilePromise("gh", [...args], {
+      cwd,
       env: options.env,
       maxBuffer: options.maxBuffer,
       encoding: "utf8",

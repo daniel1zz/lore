@@ -104,11 +104,12 @@ function runClaudeMcpCommand<T>(
   args: string[],
   manualCommand: string,
   env: NodeJS.ProcessEnv,
+  cwd: string,
   onExitZero: T,
   reclassifyNonZeroExit?: (stderr: string) => T | undefined,
 ): Promise<Result<T, LoreError>> {
   return new Promise((resolve) => {
-    const child = spawn(CLAUDE_COMMAND, args, { stdio: ["ignore", "pipe", "pipe"], env });
+    const child = spawn(CLAUDE_COMMAND, args, { cwd, stdio: ["ignore", "pipe", "pipe"], env });
 
     let stderr = "";
     let settled = false;
@@ -174,15 +175,19 @@ export class RealMcpRegistrar implements McpRegistrar {
    *   `process.env` is process-global, so a test-local mutate/restore of it
    *   would be a real cross-file race.
    */
-  constructor(private readonly env: NodeJS.ProcessEnv) {}
+  constructor(
+    private readonly env: NodeJS.ProcessEnv,
+    /** Working directory of the `claude mcp` child (the invocation's `cwd`). */
+    private readonly cwd: string,
+  ) {}
 
   async add(binPath: string): Promise<Result<McpAddOutcome, LoreError>> {
-    return runClaudeMcpCommand(buildMcpAddArgs(binPath), manualAddCommand(binPath), this.env, "added", (stderr) =>
+    return runClaudeMcpCommand(buildMcpAddArgs(binPath), manualAddCommand(binPath), this.env, this.cwd, "added", (stderr) =>
       isAlreadyRegisteredStderr(stderr) ? "already_registered" : undefined,
     );
   }
 
   async remove(): Promise<Result<void, LoreError>> {
-    return runClaudeMcpCommand(buildMcpRemoveArgs(), manualRemoveCommand(), this.env, undefined);
+    return runClaudeMcpCommand(buildMcpRemoveArgs(), manualRemoveCommand(), this.env, this.cwd, undefined);
   }
 }

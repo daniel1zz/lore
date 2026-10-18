@@ -250,7 +250,7 @@ export default defineCommand({
         // ai.assess.max_diff_chars instead (task-lore-assess-diff-spawnsync-sets-no-
         // maxbuffer-a-diff-over-1, AC-1).
         const maxBuffer = computeGitDiffMaxBuffer(maxDiffChars);
-        const gitResult = spawnSync("git", ["diff", args.diff], { encoding: "utf8", maxBuffer });
+        const gitResult = spawnSync("git", ["diff", args.diff], { cwd: inv.cwd, encoding: "utf8", maxBuffer });
         if (gitResult.error || gitResult.status !== 0) {
           // reason: ENOBUFS is THIS call site's own buffer ceiling, not a git failure —
           // name the buffer + the ai.assess.max_diff_chars knob instead of rendering the

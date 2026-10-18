@@ -169,12 +169,12 @@ async function buildMountRegistry(inv: Invocation): Promise<MountRegistry<App> |
  *
  * @param url - URL to open.
  */
-function openBrowser(io: CliIo, url: string): void {
+function openBrowser(io: CliIo, cwd: string, url: string): void {
   const platform = process.platform;
   const cmd =
     platform === "darwin" ? "open" : platform === "win32" ? "start" : "xdg-open";
   try {
-    spawn(cmd, [url], { detached: true, stdio: "ignore" });
+    spawn(cmd, [url], { cwd, detached: true, stdio: "ignore" });
   } catch {
     io.stdout.write(`Could not open browser automatically. Visit: ${url}\n`);
   }
@@ -342,7 +342,7 @@ async function runPackagedMode(
   // comment below for why the declared name and the read site must agree with citty/mri's
   // negation rewrite.
   if (args.open !== false) {
-    openBrowser(inv.io, bootstrapUrl);
+    openBrowser(inv.io, inv.cwd, bootstrapUrl);
   }
 
   const teardown = createDashboardTeardown(inv.io, {
@@ -671,7 +671,7 @@ async function runDevMode(
   // reason: `args.open` — see the flag definition's `reason:` comment (below) on citty/mri's
   // `--no-X` negation rewrite.
   if (args.open !== false) {
-    openBrowser(inv.io, dashUrl);
+    openBrowser(inv.io, inv.cwd, dashUrl);
   }
 
   // Block until SIGINT (Ctrl+C) OR SIGTERM (kill/pkill default) — handlers were already

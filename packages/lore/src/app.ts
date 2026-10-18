@@ -1113,7 +1113,7 @@ function buildAppFromSqlite(
     // above, is constructed fresh inline rather than threaded down as a
     // createApp parameter.
     resolutionProjector: new ResolutionProjector(
-      new GhResolutionLabelPort(new GhRunner({ execFile: createNodeGhExecFile(), env: ambient.env })),
+      new GhResolutionLabelPort(new GhRunner({ execFile: createNodeGhExecFile(ambient.cwd), env: ambient.env })),
     ),
     // reason: TraceStatsService (SPEC-102) is store-only, no telemetry, same
     // shape as AuditService/DriftCheckService — always constructed regardless
@@ -1508,7 +1508,7 @@ function buildAppFromTurso(
     // see buildAppFromSqlite's identical comment; GhRunner needs no
     // repoRoot/config, so this is constructed fresh inline here too.
     resolutionProjector: new ResolutionProjector(
-      new GhResolutionLabelPort(new GhRunner({ execFile: createNodeGhExecFile(), env: ambient.env })),
+      new GhResolutionLabelPort(new GhRunner({ execFile: createNodeGhExecFile(ambient.cwd), env: ambient.env })),
     ),
     // reason: TraceStatsService (SPEC-102) reads from `store` (the TursoStore
     // embedded replica, local reads) — same shape as buildAppFromSqlite's
@@ -1589,7 +1589,7 @@ function buildAppFromTurso(
 function wireIssueCloseOnArchive(app: App, store: StoreInterface, config: LoreConfig | undefined, ambient: AppAmbient): void {
   const upstream = resolveFeedbackUpstreamCfg(config);
   const repo = upstream !== undefined && isGithubUpstreamCfg(upstream) ? upstream.repo : undefined;
-  const closer = repo === undefined ? undefined : new GhIssueCloser(new GhRunner({ execFile: createNodeGhExecFile(), env: ambient.env }));
+  const closer = repo === undefined ? undefined : new GhIssueCloser(new GhRunner({ execFile: createNodeGhExecFile(ambient.cwd), env: ambient.env }));
   const step = new IssueCloseOnArchive(store, closer, repo);
   app.corpusService.setArchiveIssueClosePort(step);
   app.taskWorkflowService.setArchiveIssueClosePort(step);
@@ -1997,7 +1997,7 @@ function buildRunReapService(
     store,
     runs: new RunService(store, undefined, taskWorkflowService, realpathNative, repoRoot, createRealWorktreeProbe(ambient.cwd)),
     decisions: new DecisionService({ store, executorRun: null }),
-    processes: createRealProcessTablePort({ env: ambient.env }),
+    processes: createRealProcessTablePort({ env: ambient.env, cwd: ambient.cwd }),
   });
 }
 

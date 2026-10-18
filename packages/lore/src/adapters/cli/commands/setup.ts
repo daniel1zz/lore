@@ -1084,7 +1084,7 @@ function mcpOutcomeExitCode(receipt: SetupReceipt): number {
  * only state this is allowed to override.
  */
 async function runGitHubChannelHealthCheck(opts: { json: boolean; inv: Invocation; priorExit: ExitReport }): Promise<ExitReport> {
-  const runner = createGhRunnerHealthProbe(new GhRunner({ execFile: createNodeGhExecFile(), env: opts.inv.env }));
+  const runner = createGhRunnerHealthProbe(new GhRunner({ execFile: createNodeGhExecFile(opts.inv.cwd), env: opts.inv.env }));
   const report = await runGitHubHealthCheck({ runner });
 
   if (opts.json) {
@@ -1137,7 +1137,7 @@ async function runCheckDispatch(opts: { targetDir: string; json: boolean; inv: I
   }
   const report = freshnessResult.value;
 
-  const runner = createGhRunnerHealthProbe(new GhRunner({ execFile: createNodeGhExecFile(), env: opts.inv.env }));
+  const runner = createGhRunnerHealthProbe(new GhRunner({ execFile: createNodeGhExecFile(opts.inv.cwd), env: opts.inv.env }));
   const channelReport = await runGitHubHealthCheck({ runner });
 
   printLine(opts.inv.io.stdout, JSON.stringify({ ok: true, data: { ...report, github_channel: channelReport } }, null, 2));
@@ -1289,7 +1289,7 @@ export default defineCommand({
       homeDir: inv.paths.home,
     });
 
-    const mcpRegistrar = new CapturingMcpRegistrar(new RealMcpRegistrar(inv.env));
+    const mcpRegistrar = new CapturingMcpRegistrar(new RealMcpRegistrar(inv.env, inv.cwd));
     const service = new SetupService(
       new RealAssetSource(assetsRoot),
       new RealSetupFsReader(),

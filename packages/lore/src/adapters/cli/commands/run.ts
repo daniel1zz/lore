@@ -131,7 +131,7 @@ async function computeComposition(agentType: string | undefined, inv: Invocation
 async function measureRunProcess(io: CliIo, rawPid: string | undefined, cwd: string, env: Invocation["env"]): Promise<RunProcessRecord | undefined | { error: string }> {
   if (rawPid === undefined) return undefined;
   if (!/^[0-9]+$/.test(rawPid)) return { error: `--harness-pid must be a positive integer (got "${rawPid}")` };
-  const port = createRealProcessTablePort({ env });
+  const port = createRealProcessTablePort({ env, cwd });
   const pid = await port.resolveHarnessPid(Number.parseInt(rawPid, 10));
   const inspected = pid === null ? null : await port.inspect(pid);
   const startTime = inspected === null || inspected.zombie ? null : inspected.startTime;

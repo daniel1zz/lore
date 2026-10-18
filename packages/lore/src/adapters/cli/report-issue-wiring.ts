@@ -417,7 +417,7 @@ export async function resolveGithubIssueListing(io: CliIo,
   locator: CorpusLocator,
 ): Promise<Result<GithubIssueListing, LoreError>> {
   const receiptsPath = join(resolveConsumerCorpusRoot(io, locator), ".lore", RECEIPT_LOG_V2_FILENAME);
-  const runner = new GhRunner({ execFile: createNodeGhExecFile(), env: locator.env });
+  const runner = new GhRunner({ execFile: createNodeGhExecFile(locator.cwd), env: locator.env });
   const port = new GitHubIntakePort({ runner, repo: cfg.repo, receiptsPath });
 
   const verifyResult = await port.verifyTarget();
@@ -790,7 +790,7 @@ export async function fileGithubIssue(
     }
   }
 
-  const runner = new GhRunner({ execFile: createNodeGhExecFile(), env: ctx.env });
+  const runner = new GhRunner({ execFile: createNodeGhExecFile(ctx.consumerCorpusRoot), env: ctx.env });
   const port = new GitHubIntakePort({ runner, repo: cfg.repo, receiptsPath });
 
   const verifyResult = await port.verifyTarget();
