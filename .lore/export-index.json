@@ -11480,6 +11480,138 @@
     "01M56NZ5XJ4MY3FV6XC66Z2K0J": {
       "human_id": "PLAN-206",
       "file_path": "docs/requirements/plan/PLAN-206-baseline-completeness-restoration-every-verb-decla.md"
+    },
+    "01M56Q68ZZCTTAKJXQ82G64FGG": {
+      "human_id": "SPEC-198",
+      "file_path": "docs/requirements/spec/SPEC-198-ambient-state-is-read-once-at-the-entry-owned-only.md"
+    },
+    "01M56Q7WXVPDSZNGTSCQ98ST3F": {
+      "human_id": "SPEC-199",
+      "file_path": "docs/requirements/spec/SPEC-199-site-map-maintenance-keeps-a-leaf-s-approval-an-ow.md"
+    },
+    "01M56Q2ZGQASV343F9HM4ENB3G": {
+      "human_id": "ADR-050",
+      "file_path": "docs/requirements/adr/ADR-050-ambient-process-state-is-read-once-at-the-entry-on.md"
+    },
+    "01M56Q68YCA5B0X1DH5J8N9D9W": {
+      "human_id": "ADR-051",
+      "file_path": "docs/requirements/adr/ADR-051-mapping-a-census-site-does-not-demote-a-baseline-l.md"
+    },
+    "01M56S0SQSJV9KCYKEKWJ46AJ0": {
+      "human_id": "KN-706",
+      "file_path": "docs/requirements/knowledge/KN-706-ei-2-evidence-v10-expected-fail-is-invalid-it-ran.md"
+    },
+    "01M56RKC6B9ZFTXV075R0J66NK": {
+      "human_id": "KN-707",
+      "file_path": "docs/requirements/knowledge/KN-707-assessment-site-map-maintenance-keeps-approval-own.md"
+    },
+    "01M56QFRKEYPERJ9C1A5PR1V7J": {
+      "human_id": "KN-708",
+      "file_path": "docs/requirements/knowledge/KN-708-non-cli-entry-points-mapped-to-baseline-leaves-by.md"
+    },
+    "01M56QDF2THS8QMACC8C7Q8A88": {
+      "human_id": "PLAN-207",
+      "file_path": "docs/requirements/plan/PLAN-207-site-map-maintenance-keeps-approval-owned-by-is-ch.md"
+    },
+    "01M56QG1XHZ1Y08QH135E9PZ40": {
+      "human_id": "PLAN-208",
+      "file_path": "docs/requirements/plan/PLAN-208-ambient-state-read-once-at-the-entry-owned-only-pr.md"
+    },
+    "01M56QH9G2K35NXFTW942MQ0J1": {
+      "human_id": "TASK-1558",
+      "file_path": "docs/requirements/task/TASK-1558-skill-refactor-iv-6-remove-ambient-reads-from-serv.md"
+    },
+    "01M56QH8YK4BE5HK8F46WV338S": {
+      "human_id": "TASK-1559",
+      "file_path": "docs/requirements/task/TASK-1559-skill-implement-iv-5-invocation-resolved-once-at-t.md"
+    },
+    "01M56QHANAWHD4AC9SX4G5N6F9": {
+      "human_id": "TASK-1560",
+      "file_path": "docs/requirements/task/TASK-1560-skill-refactor-iv-8-remaining-adapter-ambient-read.md"
+    },
+    "01M56T16255DFDH6Y0KG7BTAAM": {
+      "human_id": "TASK-1561",
+      "file_path": "docs/requirements/task/TASK-1561-skill-fix-tg-39-one-post-merge-static-floor-bun-ru.md"
+    },
+    "01M56QH7R0VVJRGXGHM6B4N3SF": {
+      "human_id": "TASK-1562",
+      "file_path": "docs/requirements/task/TASK-1562-skill-implement-iv-3-rooted-write-port-roots-at.md"
+    },
+    "01M56RZZ5H72061T91FPMYR90E": {
+      "human_id": "TASK-1563",
+      "file_path": "docs/requirements/task/TASK-1563-skill-fix-au-t14-a-subagent-run-s-orphans-are-prov.md"
+    },
+    "01M56RZY803TX69P42BTF8Z4Z9": {
+      "human_id": "TASK-1564",
+      "file_path": "docs/requirements/task/TASK-1564-skill-fix-au-t13-an-ignored-file-identical-to-main.md"
+    },
+    "01M56SBM1118HBBVZDRFYH5RSE": {
+      "human_id": "TASK-1565",
+      "file_path": "docs/requirements/task/TASK-1565-skill-design-au-t15-concurrent-sessions-merging-in.md"
+    },
+    "01M56SBK75YEPWEEQ6WT1APGCT": {
+      "human_id": "TASK-1566",
+      "file_path": "docs/requirements/task/TASK-1566-skill-design-cl-7-lore-context-refresh-cannot-run.md"
+    },
+    "01M56SBJD0K72H47EN9H0SQMPZ": {
+      "human_id": "TASK-1567",
+      "file_path": "docs/requirements/task/TASK-1567-skill-fix-cl-6-pre-push-runs-lore-fragments-check.md"
+    },
+    "01M56S0JNK3XS1XM0JECT919WT": {
+      "human_id": "TASK-1568",
+      "file_path": "docs/requirements/task/TASK-1568-skill-fix-cl-5-lore-worktree-dispatch-md-rules-fil.md"
+    },
+    "01M56QH6HJN97KV3K81Y1HD6CA": {
+      "human_id": "TASK-1569",
+      "file_path": "docs/requirements/task/TASK-1569-skill-implement-iv-1-owned-only-rules-prune-source.md"
+    },
+    "01M56QDQKDBZXF82QQQBQQBY9V": {
+      "human_id": "TASK-1570",
+      "file_path": "docs/requirements/task/TASK-1570-implement-ac-smm-1-3-site-only-map-keeps-approval.md"
+    },
+    "01M56QH8BV21E6W6XM5ZQYY5QE": {
+      "human_id": "TASK-1571",
+      "file_path": "docs/requirements/task/TASK-1571-skill-implement-iv-4-check-ambient-reads-script-wi.md"
+    },
+    "01M56QH74MSZACVQG4E3YAZZG5": {
+      "human_id": "TASK-1572",
+      "file_path": "docs/requirements/task/TASK-1572-skill-implement-iv-2-user-level-state-guard-for-th.md"
+    },
+    "01M56QZGRQXE4VXA7PDAZKKVXQ": {
+      "human_id": "TASK-1573",
+      "file_path": "docs/requirements/task/TASK-1573-skill-implement-tg-38-spec-promote-refuses-a-scrip.md"
+    },
+    "01M56QZ72KAMM3JAPJ4XYSDQ64": {
+      "human_id": "TASK-1574",
+      "file_path": "docs/requirements/task/TASK-1574-skill-fix-au-t12-stash-drop-subject-version-includ.md"
+    },
+    "01M56QHB8P5X70DCP8J8RH08QR": {
+      "human_id": "TASK-1575",
+      "file_path": "docs/requirements/task/TASK-1575-skill-refactor-iv-9-runloreinprocess-builds-an-inv.md"
+    },
+    "01M56QHA1H5TZBQ6JH8APTQ9CY": {
+      "human_id": "TASK-1576",
+      "file_path": "docs/requirements/task/TASK-1576-skill-refactor-iv-7-remove-ambient-reads-from-adap.md"
+    },
+    "01M56QFHBA4430XE709HZBXTZP": {
+      "human_id": "TASK-1577",
+      "file_path": "docs/requirements/task/TASK-1577-a-phase-checklist-accepts-two-items-with-the-same.md"
+    },
+    "01M56QFGTYRJXJDCR9TKQYTTTZ": {
+      "human_id": "TASK-1578",
+      "file_path": "docs/requirements/task/TASK-1578-lore-ac-exempt-help-says-the-criterion-must-be-unc.md"
+    },
+    "01M56QFG93ES8XWK2DH4T235K3": {
+      "human_id": "TASK-1579",
+      "file_path": "docs/requirements/task/TASK-1579-a-resolved-deterministic-reject-still-blocks-appro.md"
+    },
+    "01M56P384AMC6WGT6M95TSMYGB": {
+      "human_id": "TASK-1580",
+      "file_path": "docs/requirements/task/TASK-1580-skill-fix-tg-36-ac-tg-11-verify-evidence-tail-lose.md"
+    },
+    "01M56PEFKCMXJS1CW6RQP07D0K": {
+      "human_id": "TASK-1581",
+      "file_path": "docs/requirements/task/TASK-1581-skill-fix-tg-37-check-shipped-defaults-no-lore-con.md"
     }
   }
 }
