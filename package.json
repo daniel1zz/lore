@@ -26,6 +26,7 @@
     "check:no-timer-retry": "bun scripts/check-no-timer-retry.ts",
     "check:ac-ref-integrity": "bun scripts/check-ac-ref-integrity.ts",
     "check:no-nul-bytes": "bun scripts/check-no-nul-bytes.ts",
+    "check:agent-hygiene": "bun scripts/check-agent-hygiene.ts",
     "check:plan-member-sites": "bun scripts/check-plan-membership-sites.ts",
     "check:ac-state-renderers": "bun scripts/check-ac-state-renderers.ts",
     "check:prose-pins": "bun scripts/check-prose-pins.ts",
