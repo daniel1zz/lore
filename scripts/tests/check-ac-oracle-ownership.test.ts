@@ -1,4 +1,7 @@
 // @spawns packages/lore/src/index.ts
+// @reads scripts/check-ac-oracle-ownership.ts -- the AC-c case asserts nothing in it names the deleted JSON ledger
+// @reads package.json -- the AC-c case asserts the chain does not name the deleted JSON ledger
+// @reads scripts/ac-oracle-not-built-ledger.json -- the AC-c case asserts this file is gone
 /**
  * AC-TG-5 (`spec-test-governance-guards-that-refuse-bad-tests-declared`; cites AS-17):
  * `scripts/check-ac-oracle-ownership.ts` exits EXACTLY 1 naming rule, spec, AC id and path

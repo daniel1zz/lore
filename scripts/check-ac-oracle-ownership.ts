@@ -27,7 +27,7 @@
  *
  * Red-first declarations: an AC declared with `lore ac add|set --allow-missing-path "<reason>"` is
  * the corpus's own record that its oracle is not written yet (`lore ac list --json` carries it as
- * `coverage[].allow_missing_reason`). A `missing-owner-file` for such an AC is reported as ledgered
+ * `allow_missing_declarations`). A `missing-owner-file` for such an AC is reported as ledgered
  * with that reason instead of failing; a declaration whose file exists needs nothing. A declaration
  * never hides `ambiguous-ac-id` / `unowned-ac-reference`. Without a declaration the file is missing: exit 1.
  *
@@ -204,7 +204,7 @@ const AcListSchema = z.object({
         verify: z.object({ mode: z.string().optional(), command: z.string().optional() }).optional(),
       }),
     ),
-    coverage: z.array(z.object({ ac_id: z.string(), allow_missing_reason: z.string().optional() })).nullable().optional(),
+    allow_missing_declarations: z.array(z.object({ ac_id: z.string(), reason: z.string() })).optional(),
   }),
 });
 
@@ -248,7 +248,7 @@ export function collectScriptAcs(
       continue;
     }
     const acs = runJson(["ac", "list", doc.slug, "--json"], AcListSchema);
-    const reasons = new Map((acs.data.coverage ?? []).flatMap((f) => (f.allow_missing_reason !== undefined ? [[f.ac_id, f.allow_missing_reason] as const] : [])));
+    const reasons = new Map((acs.data.allow_missing_declarations ?? []).map((d) => [d.ac_id, d.reason] as const));
     for (const c of acs.data.criteria) {
       if (c.verify?.mode === "script" && typeof c.verify.command === "string") {
         const reason = reasons.get(c.id);

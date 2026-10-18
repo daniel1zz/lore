@@ -532,8 +532,6 @@ export interface AcCoverageFact {
    * Set by `AcService.listCriteria` beside {@link oracle_file_missing}; ABSENT = not declared.
    */
   allow_missing_declared?: boolean;
-  /** The reason given with `--allow-missing-path`; present exactly when {@link allow_missing_declared} is true. */
-  allow_missing_reason?: string;
   /**
    * How many `pass` evidence rows tagged with this criterion RAN one of its missing oracle files (TG-22;
    * `evidenceRanMissingOracle`, same normalised-location comparison, execution root included). Set by

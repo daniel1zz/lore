@@ -158,6 +158,12 @@ export interface AcListResult {
    * true})` call whose evidence was deliberately left untouched. Sorted, deduplicated.
    */
   dangling: string[];
+  /**
+   * The spec's live `--allow-missing-path` (red-first) declarations, `{ac_id, reason}`, independent of `coverage`
+   * (which is `null` for a spec with no plan/task yet). Read by `scripts/check-ac-oracle-ownership.ts`.
+   * Optional: list renderers that build an `AcListResult` by hand omit it.
+   */
+  allow_missing_declarations?: { ac_id: string; reason: string }[];
 }
 
 /** Options for {@link AcService.removeCriterion}. */
@@ -670,7 +676,7 @@ export class AcService {
             criteria,
             tasks,
             pathContext,
-            new Map(extractAllowMissingPathDeclarations(spec).map((d) => [d.ac_id, d.reason] as const)),
+            new Set(extractAllowMissingPathDeclarations(spec).map((d) => d.ac_id)),
           )
         : baseCoverage;
 
@@ -684,7 +690,8 @@ export class AcService {
       }
     }
 
-    return ok({ criteria, coverage, dangling: Array.from(danglingSet).sort() });
+    const allowMissing = extractAllowMissingPathDeclarations(spec).map((d) => ({ ac_id: d.ac_id, reason: d.reason }));
+    return ok({ criteria, coverage, dangling: Array.from(danglingSet).sort(), allow_missing_declarations: allowMissing });
   }
 
   // ── removeCriterion ───────────────────────────────────────────────────────
@@ -1478,8 +1485,8 @@ function buildSetChangeSummary(
  * @param criteria - the spec's declared criteria
  * @param tasks - the tasks whose evidence produced `coverage` (their rows give each pass's command / execution root)
  * @param pathContext - injected fs context (never a real filesystem read here)
- * @param allowMissingAcIds - ac id -> reason of the ACs declared with `--allow-missing-path` (red-first); stamped onto the fact as
- *   `allow_missing_declared` (+ `allow_missing_reason`, read by scripts/check-ac-oracle-ownership.ts) so {@link deriveAcCoverageState} can apply its one missing-oracle rule
+ * @param allowMissingAcIds - ids of the ACs declared with `--allow-missing-path` (red-first); stamped onto the fact as
+ *   `allow_missing_declared` so {@link deriveAcCoverageState} can apply its one missing-oracle rule
  * @returns new facts (inputs untouched); non-script criteria keep the field ABSENT
  */
 function annotateMissingOracleFiles(
@@ -1487,7 +1494,7 @@ function annotateMissingOracleFiles(
   criteria: AcceptanceCriterion[],
   tasks: DocRecord[],
   pathContext: OraclePathContext,
-  allowMissingAcIds: ReadonlyMap<string, string>,
+  allowMissingAcIds: ReadonlySet<string>,
 ): AcListResult["coverage"] & object {
   const byId = new Map(criteria.map((c) => [c.id, c] as const));
   return coverage.map((fact) => {
@@ -1519,7 +1526,6 @@ function annotateMissingOracleFiles(
       ...fact,
       oracle_file_missing: missingPaths,
       allow_missing_declared: allowMissingAcIds.has(fact.ac_id),
-      ...(allowMissingAcIds.has(fact.ac_id) ? { allow_missing_reason: allowMissingAcIds.get(fact.ac_id) as string } : {}),
       passes_ran_missing_oracle: passesRanMissingOracle,
       oracle_paths_unchecked: findUncheckedOracleSegments(criterionCommand),
     };
