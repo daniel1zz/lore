@@ -196,6 +196,11 @@ function makeFixture(): Fixture {
         cwd,
       );
       if (r.exitCode !== 0) throw new Error(`register ${session} failed (${r.exitCode}): ${r.stderr}`);
+      // Assert on recorded state: a harness whose pid the CLI could not probe silently registers as a legacy run, which
+      // would surface later as an unrelated mismatch. Fail here, naming the registration, with what the probe said.
+      if (pid !== undefined && r.stderr.includes("could not be probed")) {
+        throw new Error(`register ${session}: harness pid ${pid} was not recorded (ps lstart=${JSON.stringify(psField(pid, "lstart"))}): ${r.stderr}`);
+      }
     },
     endRun(runId) {
       const r = lore(["run", "end", runId, "--reason", "test-ended"]);
