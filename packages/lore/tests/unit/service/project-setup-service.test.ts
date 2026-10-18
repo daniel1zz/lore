@@ -20,7 +20,7 @@
  *
  * Coverage:
  *   HAPPY:      fresh git repo -> full scaffold, all steps done, hooks
- *               executable, hooksPath == "hooks"
+ *               executable, hooksPath == <abs repo>/hooks
  *   NEGATIVE:   pre-existing DIFFERENT hooks/pre-push -> conflict
  *               reported, file left byte-for-byte untouched
  *   BOUNDARY:   (a) fully-scaffolded repo re-run -> everything skipped
@@ -247,7 +247,7 @@ describe("scaffoldProject — HAPPY", () => {
     expect(result.value.git_hooks_path.status).toBe("done");
     expect(result.value.git_hooks_path.prior_value).toBeNull();
     const hooksPath = execSync("git config --get core.hooksPath", { cwd: repoDir }).toString().trim();
-    expect(hooksPath).toBe("hooks");
+    expect(hooksPath).toBe(join(repoDir, "hooks"));
   });
 });
 
@@ -301,7 +301,7 @@ describe("scaffoldProject — BOUNDARY", () => {
     }
     expect(second.value.tree_yaml.status).toBe("skipped");
     expect(second.value.git_hooks_path.status).toBe("skipped");
-    expect(second.value.git_hooks_path.prior_value).toBe("hooks");
+    expect(second.value.git_hooks_path.prior_value).toBe(join(repoDir, "hooks"));
   });
 
   it("repo with no .git ancestor: git-config step fails loud, file steps still done", async () => {

@@ -505,7 +505,7 @@ describe("AC-INT-2 (2) the main-ref hook installed by lore setup", () => {
     const installed = join(fx.repo, "hooks", "reference-transaction");
     expect(readFileSync(installed)).toEqual(readFileSync(HOOK_ASSET));
     expect(statSync(installed).mode & 0o111).not.toBe(0);
-    expect(fx.git(["config", "core.hooksPath"])).toBe("hooks");
+    expect(fx.git(["config", "core.hooksPath"])).toBe(join(realpathSync(fx.repo), "hooks"));
 
     const branch = fx.makeBranch("hooked");
     const before = fx.main();

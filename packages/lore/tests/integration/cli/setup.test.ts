@@ -51,7 +51,7 @@
 
 import { describe, it, expect, afterEach } from "vitest";
 import { execSync, spawnSync } from "child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, writeFileSync } from "fs";
 import { createHash } from "crypto";
 import { join } from "path";
 import { tmpdir } from "os";
@@ -240,7 +240,7 @@ describe("lore setup — HAPPY", () => {
     expect(existsSync(join(repoDir, "hooks", "pre-push"))).toBe(true);
     expect(existsSync(join(repoDir, "lore.tree.yaml"))).toBe(true);
     const hooksPath = spawnSync("git", ["config", "--get", "core.hooksPath"], { cwd: repoDir, encoding: "utf8" });
-    expect(hooksPath.stdout.trim()).toBe("hooks");
+    expect(hooksPath.stdout.trim()).toBe(join(realpathSync(repoDir), "hooks"));
   });
 });
 
@@ -416,7 +416,7 @@ describe("lore setup — STATE", () => {
         cwd: repoDir,
         encoding: "utf8",
       });
-      expect(hooksPathAfterInstall.stdout.trim()).toBe("hooks");
+      expect(hooksPathAfterInstall.stdout.trim()).toBe(join(realpathSync(repoDir), "hooks"));
 
       // 4. Real uninstall.
       const uninstallResult = runSetup(["--project", "--uninstall", "--yes"], repoDir);
@@ -459,7 +459,7 @@ describe("lore setup — STATE", () => {
         cwd: repoDir,
         encoding: "utf8",
       });
-      expect(hooksPathAfterUninstall.stdout.trim()).toBe("hooks");
+      expect(hooksPathAfterUninstall.stdout.trim()).toBe(join(realpathSync(repoDir), "hooks"));
 
       // (c) the `hooks/` DIRECTORY itself is left behind, now empty —
       // `uninstallProject` removes exactly the manifest-tracked FILE paths
