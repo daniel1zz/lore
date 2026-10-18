@@ -60,24 +60,6 @@
     "owner_plan": "plan-autonomy-phase-1-decision-function-human-channel-lore"
   },
   {
-    "spec": "spec-site-map-maintenance-keeps-a-leaf-s-approval-an-owned-by",
-    "ac": "AC-SMM-1",
-    "reason": "oracle test not written yet (site-map-approval.test.ts absent); owned by plan-site-map-maintenance-keeps-approval-owned-by-is-checked",
-    "owner_plan": "plan-site-map-maintenance-keeps-approval-owned-by-is-checked"
-  },
-  {
-    "spec": "spec-site-map-maintenance-keeps-a-leaf-s-approval-an-owned-by",
-    "ac": "AC-SMM-2",
-    "reason": "oracle test not written yet (site-map-owned-by-write.test.ts absent); owned by plan-site-map-maintenance-keeps-approval-owned-by-is-checked",
-    "owner_plan": "plan-site-map-maintenance-keeps-approval-owned-by-is-checked"
-  },
-  {
-    "spec": "spec-site-map-maintenance-keeps-a-leaf-s-approval-an-owned-by",
-    "ac": "AC-SMM-3",
-    "reason": "oracle test not written yet (leaf-coverage-owned-by.test.ts absent); owned by plan-site-map-maintenance-keeps-approval-owned-by-is-checked",
-    "owner_plan": "plan-site-map-maintenance-keeps-approval-owned-by-is-checked"
-  },
-  {
     "spec": "spec-ambient-state-is-read-once-at-the-entry-owned-only-prune",
     "ac": "AC-IV-1",
     "reason": "oracle test not written yet (iv-owned-prune.test.ts absent); owned by task-skill-implement-iv-1-owned-only-rules-prune-source",
