@@ -217,25 +217,44 @@ describe("lore status --check-prd-budget: whole-doc budget (24000-char cap)", ()
   });
 });
 
-// ─── Scenario 2: compliant fixture — exit 0 AND runtime < 1000ms (QA-3 pin) ─
+// ─── Scenario 2: compliant fixture — the budget check's WORK is bounded (QA-3) ─
+//
+// TG-50: the old oracle asserted `elapsedMs < 1000` around a CLI spawn, which measures the
+// machine (1305 ms under a full parallel run, green alone). The product property the budget
+// check promises is that it is a pure, store-bounded scan: it reads ONLY the PRD docs of the
+// corpus (never every doc), measures each PRD's rendered body once, and reports within-budget.
+// So the oracle asserts the work done: `checked` equals the PRD count (extra non-PRD docs in the
+// corpus are NOT scanned) and the measured length equals the stored body length.
 
-describe("lore status --check-prd-budget: compliant fixture latency (QA-3, < 1000ms)", () => {
+describe("lore status --check-prd-budget: compliant fixture scans only the PRDs (QA-3, work-bounded)", () => {
   let tmpDir: string;
 
   beforeEach(() => {
     tmpDir = makeTempDir("latency");
     initCorpus(tmpDir);
-    createPrd(tmpDir, "Compliant Latency PRD", "A small, fully compliant PRD body.");
   });
 
   afterEach(() => cleanupDir(tmpDir));
 
-  it("exits 0 on a compliant fixture and completes in under 1000ms", () => {
-    const start = Date.now();
-    const result = runLore(["status", "--check-prd-budget"], tmpDir);
-    const elapsedMs = Date.now() - start;
+  it("exits 0 on a compliant fixture and scans exactly the one PRD — non-PRD docs are not scanned", () => {
+    const body = "A small, fully compliant PRD body.";
+    const prd = createPrd(tmpDir, "Compliant Scope PRD", body);
+    // Distractor docs of other types: a scan that widened beyond type=prd would count them.
+    createSpec(tmpDir, "Distractor Spec One", prd.slug);
+    createSpec(tmpDir, "Distractor Spec Two", prd.slug);
+
+    const result = runLore(["status", "--check-prd-budget", "--json"], tmpDir);
     expect(result.exitCode).toBe(0);
-    expect(elapsedMs).toBeLessThan(1000);
+    const parsed = JSON.parse(result.stdout) as {
+      data?: { prd_budget?: { checked: number; consistent: boolean; prds: Array<{ slug: string; whole_doc_chars: number }> } };
+    };
+    const section = parsed.data?.prd_budget;
+    expect(section).toBeDefined();
+    expect(section?.consistent).toBe(true);
+    expect(section?.checked).toBe(1);
+    expect(section?.prds.map((p) => p.slug)).toEqual([prd.slug]);
+    // canonicaliseBody stores the body trimmed + one trailing newline.
+    expect(section?.prds[0]?.whole_doc_chars).toBe(body.length + 1);
   });
 });
 
