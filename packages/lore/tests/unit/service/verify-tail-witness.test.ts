@@ -22,6 +22,7 @@
  *               into an unpaired code unit (BUG-001)
  *
  * @spec_ref AC-ETI-7, AC-ETI-8
+ * @layer unit AC-TG-11 — the tail-keeps-the-final-summary half of the wall-time AC, proven on the pure helper
  */
 
 import { describe, it, expect } from "vitest";

@@ -1,5 +1,6 @@
 // @spawns scripts/measure-test-wall.ts
 /** @spec_ref AC-TG-11 */
+/** @layer unit AC-TG-11 — unit coverage of one mechanism behind the wall-time AC; the AC itself is owned by scripts/measure-test-wall.ts */
 /**
  * measure-test-wall: exit 1 above the limit OR when files run < files on disk (task-skill-implement-tg-15).
  * Six dimensions: HAPPY (in limit, complete: 0) / NEGATIVE (over limit: 1; incomplete: 1; each reason alone,
