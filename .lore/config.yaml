@@ -35,6 +35,8 @@ workflow:
   # (check:static minus the corpus-dependent checks, scripts/run-chain.ts CORPUS_DEPENDENT_CHECKS).
   integrate:
     floor_command: "bun install --frozen-lockfile && bun run check:floor"
+    # After a landing refreshes the shared checkout, rebuild its dist/lore (the binary ~/.local/bin/lore links to).
+    post_refresh_command: "bun run build"
   # The main agent dispatches all source changes to implementer agents in this repo
   # (adr-rule-delivery-tiers-gate-hook-skill-and-optimistic); stop-turn-review checks it once per turn.
   turn_end:
