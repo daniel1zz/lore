@@ -29,12 +29,11 @@
  * hits and no entry fails. `--ledger-empty` exits 1 while the ledger has any
  * entry (AC-IV-7), 0 when empty.
  *
- * ## Comment / string handling (documented edge cases)
- * Comments (line, block) and the CONTENT of string/template literals are
- * blanked before matching, preserving line numbers; `${...}` expressions inside
- * templates stay code. Regex literals are not tokenised: a regex literal that
- * contains an unbalanced quote or `//` can confuse the blanker (accepted;
- * the ledger ratchet shows any count shift).
+ * ## Comment / string handling
+ * Source is parsed with the TypeScript compiler (`ts.createSourceFile`); comments,
+ * string literals, regex literals and template-literal text are blanked before
+ * matching, preserving line numbers; `${...}` expressions inside templates stay
+ * code. The parser (not a hand-written scanner) decides regex vs division.
  *
  * Exit codes: 0 pass / 1 violations (or ledger non-empty with --ledger-empty) /
  * 2 precondition failure (no corpus, D5 unparseable, scan root missing,
@@ -48,6 +47,7 @@ import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import ts from "typescript";
 
 export const SPEC_SLUG = "spec-ambient-state-is-read-once-at-the-entry-owned-only-prune";
 export const RULE_TAG = "[AS-26]";
@@ -125,103 +125,44 @@ export function extractD5Targets(specMarkdown: string): D5Targets {
   return { tokens, allowlist };
 }
 
+/** Node kinds whose whole text is data, never code: strings, regex literals, template text pieces. */
+const DATA_LITERAL_KINDS: ReadonlySet<ts.SyntaxKind> = new Set([
+  ts.SyntaxKind.StringLiteral,
+  ts.SyntaxKind.NoSubstitutionTemplateLiteral,
+  ts.SyntaxKind.TemplateHead,
+  ts.SyntaxKind.TemplateMiddle,
+  ts.SyntaxKind.TemplateTail,
+  ts.SyntaxKind.RegularExpressionLiteral,
+]);
+
 /**
- * Blanks comments and string/template-literal contents, preserving every
- * newline and column so line numbers survive. `${…}` in templates stays code.
+ * Blanks comments, string literals, regex literals and template-literal TEXT,
+ * preserving every newline and column (output length === input length) so line
+ * numbers survive. `${...}` expressions stay code.
+ *
+ * reason: classification comes from the TypeScript parser, not a hand-written
+ * scanner — only the parser can tell a regex literal from division, which the
+ * previous blanker could not (a `/'/g` opened a phantom string and inverted
+ * comment/code regions for the rest of the file; task iv-10).
  */
 export function stripCommentsAndStrings(source: string): string {
-  const out: string[] = [];
-  // Stack of template contexts: each entry is the brace depth at which `${` was opened.
-  const templateStack: number[] = [];
-  let braceDepth = 0;
-  let i = 0;
-  const blank = (ch: string): string => (ch === "\n" ? "\n" : " ");
-  const readQuoted = (quote: string): void => {
-    out.push(quote);
-    i++;
-    while (i < source.length) {
-      const ch = source[i] as string;
-      if (ch === "\\") {
-        out.push(" ", blank(source[i + 1] ?? " "));
-        i += 2;
-        continue;
-      }
-      if (ch === quote) {
-        out.push(quote);
-        i++;
-        return;
-      }
-      if (ch === "\n") return; // unterminated on this line: bail out rather than swallow the file
-      out.push(" ");
-      i++;
-    }
+  const sourceFile = ts.createSourceFile("scan.ts", source, ts.ScriptTarget.Latest, /* setParentNodes */ false, ts.ScriptKind.TS);
+  const chars = source.split("");
+  const blankRange = (from: number, to: number): void => {
+    for (let i = from; i < to && i < chars.length; i++) if (chars[i] !== "\n") chars[i] = " ";
   };
-  const readTemplateChunk = (): void => {
-    // Positioned just after a backtick or after the closing `}` of a `${…}`.
-    while (i < source.length) {
-      const ch = source[i] as string;
-      if (ch === "\\") {
-        out.push(" ", blank(source[i + 1] ?? " "));
-        i += 2;
-      } else if (ch === "`") {
-        out.push("`");
-        i++;
-        return;
-      } else if (ch === "$" && source[i + 1] === "{") {
-        out.push("${");
-        i += 2;
-        templateStack.push(braceDepth);
-        braceDepth++;
-        return;
-      } else {
-        out.push(blank(ch));
-        i++;
-      }
+  const visit = (node: ts.Node): void => {
+    const children = node.getChildren(sourceFile);
+    if (children.length === 0) {
+      // Leaf token: the text between `pos` and `getStart()` is whitespace and comments only.
+      blankRange(node.pos, node.getStart(sourceFile));
+      if (DATA_LITERAL_KINDS.has(node.kind)) blankRange(node.getStart(sourceFile), node.end);
+      return;
     }
+    for (const child of children) visit(child);
   };
-  while (i < source.length) {
-    const ch = source[i] as string;
-    const next = source[i + 1];
-    if (ch === "/" && next === "/") {
-      while (i < source.length && source[i] !== "\n") {
-        out.push(" ");
-        i++;
-      }
-    } else if (ch === "/" && next === "*") {
-      out.push(" ", " ");
-      i += 2;
-      while (i < source.length && !(source[i] === "*" && source[i + 1] === "/")) {
-        out.push(blank(source[i] as string));
-        i++;
-      }
-      if (i < source.length) {
-        out.push(" ", " ");
-        i += 2;
-      }
-    } else if (ch === '"' || ch === "'") {
-      readQuoted(ch);
-    } else if (ch === "`") {
-      out.push("`");
-      i++;
-      readTemplateChunk();
-    } else if (ch === "{") {
-      braceDepth++;
-      out.push(ch);
-      i++;
-    } else if (ch === "}") {
-      braceDepth--;
-      out.push(ch);
-      i++;
-      if (templateStack.length > 0 && templateStack[templateStack.length - 1] === braceDepth) {
-        templateStack.pop();
-        readTemplateChunk();
-      }
-    } else {
-      out.push(ch);
-      i++;
-    }
-  }
-  return out.join("");
+  visit(sourceFile);
+  return chars.join("");
 }
 
 function escapeRegExp(value: string): string {

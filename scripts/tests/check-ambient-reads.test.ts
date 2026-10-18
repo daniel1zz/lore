@@ -182,3 +182,26 @@ describe("evaluate", () => {
     expect(o.exitCode).toBe(1);
   });
 });
+
+describe("AC-IV-6 tokenizer: regex literals, division and template substitutions", () => {
+  it("AC-IV-6 a banned token inside a regex literal is NOT counted", () => {
+    expect(scanSource("f.ts", "const r = /process.env|homedir(/g;\n", TOKENS)).toEqual([]);
+  });
+
+  const QUOTE_LINE = "return `'${arg.replace(/'/g, `'\\\\''`)}'`;";
+
+  it("AC-IV-6 a regex with a quote does not hide a later real read: exact line is counted", () => {
+    const src = ["export function q(arg: string) {", `  ${QUOTE_LINE}`, "}", "export const e = process.env;", ""].join("\n");
+    expect(scanSource("f.ts", src, TOKENS).map((s) => [s.line, s.token])).toEqual([[4, "process.env"]]);
+  });
+
+  it("AC-IV-6 after a quote-bearing regex line a banned token in a block comment is NOT counted", () => {
+    const src = ["export function q(arg: string) {", `  ${QUOTE_LINE}`, "}", "/**", " * mentions process.env and homedir()", " */", "export const k = 1;", ""].join("\n");
+    expect(scanSource("f.ts", src, TOKENS)).toEqual([]);
+  });
+
+  it("AC-IV-6 division is not mistaken for a regex: the read after `a / b;` is counted", () => {
+    const src = "const x = a / b; const y = process.env;\n";
+    expect(scanSource("f.ts", src, TOKENS).map((s) => [s.line, s.token])).toEqual([[1, "process.env"]]);
+  });
+});

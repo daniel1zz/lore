@@ -31,7 +31,7 @@
   "packages/lore/src/adapters/cli/phase-wiring.ts": 1,
   "packages/lore/src/adapters/cli/report-issue-wiring.ts": 1,
   "packages/lore/src/adapters/cli/setup-check.ts": 1,
-  "packages/lore/src/adapters/cli/utils.ts": 9,
+  "packages/lore/src/adapters/cli/utils.ts": 7,
   "packages/lore/src/adapters/http/machine-auth.ts": 3,
   "packages/lore/src/adapters/mcp/tools.ts": 1,
   "packages/lore/src/adapters/process-table-port.ts": 1,
