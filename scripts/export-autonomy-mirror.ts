@@ -33,6 +33,11 @@ export type AutonomyMirrorVerdict =
   | { readonly ok: true; readonly message: string }
   | { readonly ok: false; readonly kind: "drift" | "refused"; readonly message: string };
 
+/** A LoreError's message when it carries one, else its code. */
+function errorText(error: { readonly code: string; readonly message?: string }): string {
+  return error.message ?? error.code;
+}
+
 async function withService<T>(dbPath: string, fn: (service: DecisionService) => Promise<T>): Promise<T> {
   const store = new SQLiteStore(dbPath);
   try {
@@ -53,7 +58,7 @@ export async function exportAutonomyMirror(dbPath: string, repoRoot: string): Pr
       return { ok: false, kind: "refused", message: `autonomy mirror: REFUSED — the threshold record fails its integrity check (${integrity.reason}: ${integrity.detail}); resolve the threshold-integrity decision first` };
     }
     const heads = readPushedHeads(pushedHeadsPath(dbPath));
-    if (!heads.ok) return { ok: false, kind: "refused", message: `autonomy mirror: REFUSED — ${heads.error.message}` };
+    if (!heads.ok) return { ok: false, kind: "refused", message: `autonomy mirror: REFUSED — ${errorText(heads.error)}` };
     const rows = await service.chainRows();
     if (!rows.ok) return { ok: false, kind: "refused", message: `autonomy mirror: cannot read the decision log: ${rows.error.code}` };
     const verdict = verifyPushedHeads(rows.value, heads.value);
@@ -83,7 +88,7 @@ export async function checkAutonomyMirror(dbPath: string, repoRoot: string): Pro
     }
     if (!existsSync(path)) return { ok: false, kind: "drift", message: `autonomy mirror: ${AUTONOMY_MIRROR_RELATIVE} is missing — run bun run mirror:export` };
     const onDisk = parseMirror(readFileSync(path, "utf8"));
-    if (!onDisk.ok) return { ok: false, kind: "drift", message: `autonomy mirror: ${AUTONOMY_MIRROR_RELATIVE} is unusable (${onDisk.error.message}) — run bun run mirror:export` };
+    if (!onDisk.ok) return { ok: false, kind: "drift", message: `autonomy mirror: ${AUTONOMY_MIRROR_RELATIVE} is unusable (${errorText(onDisk.error)}) — run bun run mirror:export` };
     if (onDisk.value.thresholds_hash !== mirror.value.thresholds_hash) {
       return { ok: false, kind: "drift", message: `autonomy mirror: ${AUTONOMY_MIRROR_RELATIVE} holds a different threshold record than the database — run bun run mirror:export` };
     }
