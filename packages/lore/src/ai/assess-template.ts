@@ -610,7 +610,8 @@ function renderCoverageCell(fact: AcCoverageFact | undefined): string {
   if (fact === undefined) return "0 pass, 0 fail";
   const passCell = fact.attested_pass > 0 ? `${fact.pass} pass (${fact.attested_pass} attested)` : `${fact.pass} pass`;
   const failCell = fact.attested_fail > 0 ? `${fact.fail} fail (${fact.attested_fail} attested)` : `${fact.fail} fail`;
-  return `${passCell}, ${failCell}`;
+  const otherCommandCell = fact.other_command !== undefined && fact.other_command > 0 ? `, other_command=${fact.other_command}` : "";
+  return `${passCell}, ${failCell}${otherCommandCell}`;
 }
 
 /**

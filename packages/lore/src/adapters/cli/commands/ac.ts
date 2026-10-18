@@ -1199,8 +1199,9 @@ function renderCriteriaList(result: AcListResult): void {
     const badge = result.coverage !== null ? `${coverageBadge(result.coverage, criterion.id)} ` : "";
     const marker = passUnfalsifiedMarker(result.coverage, criterion.id);
     const retiredOracle = retiredOracleMarker(result.coverage, criterion.id);
+    const otherCommand = otherCommandMarker(result.coverage, criterion.id);
     console.log(
-      `  ${badge}${criterion.id} — ${criterion.statement} [${describeVerify(criterion.verify)}]${marker}${retiredOracle}`,
+      `  ${badge}${criterion.id} — ${criterion.statement} [${describeVerify(criterion.verify)}]${marker}${retiredOracle}${otherCommand}`,
     );
   }
   if (result.dangling.length > 0) {
@@ -1289,6 +1290,24 @@ function retiredOracleMarker(coverage: AcListResult["coverage"], acId: string): 
   if (split === undefined) return " [retired_oracle_evidence: not_computed]";
   if (split.prior_refs === 0) return "";
   return ` [retired_oracle_evidence: prior_refs=${split.prior_refs} current_refs=${split.current_refs} generation=${split.current}]`;
+}
+
+/**
+ * Trailing human-table marker naming how many evidence rows tagged with this criterion ran a command other
+ * than its CURRENT declared one (AC-EI-1, spec-evidence-identity-an-attested-row-counts-only-for-the). Those
+ * rows are excluded from the badge's pass/fail counts and from the state; this marker is what keeps them
+ * visible instead of silently dropped. RENDERS `AcCoverageFact.other_command` (counted once, in
+ * `computeAcCoverage`) — never compares a row's command itself. `--json` carries the same number as the
+ * `other_command` key of each `coverage[]` entry (the fact serialized verbatim, see {@link withCoverageState}).
+ *
+ * @param coverage - `AcListResult.coverage` (`null` when the spec has no coverage infrastructure: no marker)
+ * @param acId - the criterion id whose fact to read
+ * @returns ` [other_command=<n>]` when n > 0; `""` for no fact, a zero tally, or a fact that never computed one
+ */
+function otherCommandMarker(coverage: AcListResult["coverage"], acId: string): string {
+  const fact = coverage?.find((f) => f.ac_id === acId);
+  if (fact === undefined || fact.other_command === undefined || fact.other_command === 0) return "";
+  return ` [other_command=${fact.other_command}]`;
 }
 
 function describeVerify(verify: AcceptanceCriterion["verify"]): string {

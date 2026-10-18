@@ -378,6 +378,16 @@ export interface EvidenceRefLite {
    * once, in {@link computeAcCoverage}'s split, via {@link resolveOracleGeneration}).
    */
   ac_oracle_generation?: number;
+  /**
+   * Present (and `true`) iff the source row ran a command that is NOT string-equal to its criterion's CURRENT
+   * declared `verify.command` (AC-EI-1, spec-evidence-identity-an-attested-row-counts-only-for-the). Such a ref
+   * stays in {@link AcCoverageFact.refs} for audit visibility but is counted in NEITHER the pass nor the fail
+   * tallies, and {@link deriveAcCoverageState}'s supersession check ignores it. Set ONLY by
+   * {@link computeAcCoverage} — the one site that compares commands — and only for a script-mode criterion
+   * (an ai/human criterion declares no command, so there is nothing to compare). Absent on a hand-built ref
+   * means "counted", the pre-AC-EI-1 reading.
+   */
+  other_command?: true;
 }
 
 /**
@@ -495,6 +505,18 @@ export interface AcCoverageFact {
    */
   oracle_generation?: AcOracleGenerationSplit;
   /**
+   * How many evidence rows tagged with this criterion ran a command NOT string-equal to its CURRENT declared
+   * `verify.command` (AC-EI-1; BR-40; no normalisation, any `result`). Those rows are counted here and
+   * nowhere else: never in `pass`/`fail`/`attested_pass`/`attested_fail`, so they cannot hold or lift the
+   * coverage state. Rendered on every surface that renders the state (`lore ac list` text and `--json`,
+   * `lore status`, the spec mirror, `lore assess`'s AC table) — each reads THIS field, never re-compares.
+   *
+   * OPTIONAL on the type, ALWAYS populated by {@link computeAcCoverage} (same convention as
+   * {@link oracle_generation}): ABSENT on a hand-built fact means "not computed", and a renderer must not
+   * print a measured zero for it.
+   */
+  other_command?: number;
+  /**
    * Test-file paths the criterion's CURRENT script command names that exist under no plausible root
    * right now (spec-test-governance-guards-that-refuse-bad-tests-declared AC-TG-6; baseline AS-17).
    * ABSENT means "not checked" (the caller had no filesystem context) — never "nothing missing"; a
@@ -560,6 +582,13 @@ export function computeAcCoverage(
   tasks: DocRecord[],
 ): AcCoverageFact[] {
   const refsByAcId = new Map<string, EvidenceRefLite[]>();
+  // reason: AC-EI-1 — the ONE place an evidence row's command is compared with its criterion's CURRENT
+  // declared command. Only script-mode criteria declare a command; ai/human criteria are absent from this
+  // map, so none of their rows is ever classified other_command.
+  const declaredCommandByAcId = new Map<string, string>();
+  for (const criterion of criteria) {
+    if (criterion.verify.mode === "script") declaredCommandByAcId.set(criterion.id, criterion.verify.command);
+  }
   for (const task of tasks) {
     for (const entry of extractEvidence(task)) {
       if (entry.ac_ref === undefined) continue;
@@ -578,6 +607,10 @@ export function computeAcCoverage(
       // `EvidenceRefLite.ac_oracle_generation`'s own JSDoc. §M5, AC-DC-8.
       if (entry.ac_oracle_generation !== undefined) {
         ref.ac_oracle_generation = entry.ac_oracle_generation;
+      }
+      const declaredCommand = declaredCommandByAcId.get(entry.ac_ref);
+      if (declaredCommand !== undefined && entry.command !== declaredCommand) {
+        ref.other_command = true;
       }
       const bucket = refsByAcId.get(entry.ac_ref);
       if (bucket === undefined) {
@@ -598,15 +631,23 @@ export function computeAcCoverage(
     const priorGenerationRefs = refs.filter(
       (r) => resolveOracleGeneration(r.ac_oracle_generation) < currentGeneration,
     ).length;
+    // AC-EI-1: only rows that ran the criterion's CURRENT command are tallied below; the rest are the
+    // `other_command` tally. `refs`, `falsified` and the generation split deliberately still read ALL rows —
+    // refs for audit visibility, falsified because a red observed under any command shows the criterion's
+    // oracle family can go red (the red-first protocol records its red under the pre-implementation command),
+    // the generation split to keep BR-40's retired-oracle report and its `current + prior === refs.length`
+    // invariant.
+    const counted = refs.filter((r) => r.other_command !== true);
     return {
       ac_id: criterion.id,
       mode: criterion.verify.mode,
-      pass: refs.filter((r) => r.result === "pass").length,
-      fail: refs.filter((r) => r.result === "fail").length,
+      pass: counted.filter((r) => r.result === "pass").length,
+      fail: counted.filter((r) => r.result === "fail").length,
       refs,
-      attested_pass: refs.filter((r) => r.result === "pass" && r.attested === true).length,
-      attested_fail: refs.filter((r) => r.result === "fail" && r.attested === true).length,
+      attested_pass: counted.filter((r) => r.result === "pass" && r.attested === true).length,
+      attested_fail: counted.filter((r) => r.result === "fail" && r.attested === true).length,
       falsified: refs.filter((r) => r.result === "expected-fail" || r.result === "fail").length,
+      other_command: refs.length - counted.length,
       oracle_generation: {
         current: currentGeneration,
         current_refs: refs.length - priorGenerationRefs,
@@ -916,7 +957,9 @@ function isWellFormedFalsifiedCount(falsified: number): boolean {
  *   as a string" convention `session.ts::deriveLastActivityAt` already uses, no
  *   `Date` parsing) than the newest fail ref's `recorded_at`.
  */
-function isSupersededByNewerAttestedPass(refs: readonly EvidenceRefLite[]): boolean {
+function isSupersededByNewerAttestedPass(allRefs: readonly EvidenceRefLite[]): boolean {
+  // AC-EI-1: a row that ran another command is neither a failure to supersede nor a superseding pass.
+  const refs = allRefs.filter((r) => r.other_command !== true);
   const failRefs = refs.filter((r) => r.result === "fail");
   // A fail ref with an unusable recorded_at is treated as the newest possible
   // fail (tie-break 2) — one such ref makes supersession impossible regardless

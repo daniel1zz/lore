@@ -508,6 +508,7 @@ describe("STATE/REGRESSION — the task doc is fetched exactly once; computeAcCo
         attested_fail: 0,
         falsified: 1,
         oracle_generation: { current: 1, current_refs: 2, prior_refs: 0 },
+        other_command: 0,
       },
       {
         ac_id: "AC-2",
@@ -519,6 +520,7 @@ describe("STATE/REGRESSION — the task doc is fetched exactly once; computeAcCo
         attested_fail: 0,
         falsified: 0,
         oracle_generation: { current: 1, current_refs: 1, prior_refs: 0 },
+        other_command: 0,
       },
     ]);
   });

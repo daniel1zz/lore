@@ -1100,7 +1100,7 @@ describe("OutlineService.resolve — acceptance criteria projection (SPEC-038 §
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.value.acceptanceCriteria?.coverage).toEqual([
-      { ac_id: "AC-1", mode: "script", pass: 0, fail: 0, refs: [], attested_pass: 0, attested_fail: 0, falsified: 0, oracle_generation: { current: 1, current_refs: 0, prior_refs: 0 } },
+      { ac_id: "AC-1", mode: "script", pass: 0, fail: 0, refs: [], attested_pass: 0, attested_fail: 0, falsified: 0, oracle_generation: { current: 1, current_refs: 0, prior_refs: 0 }, other_command: 0 },
     ]);
   });
 

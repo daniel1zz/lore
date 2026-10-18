@@ -1126,7 +1126,12 @@ function renderAcceptanceCriteriaBlock(criteria: AcceptanceCriterion[], coverage
     const prefix = acCoveragePrefix(coverageByAcId.get(criterion.id));
     const bullet = `- [${prefix}] [${criterion.verify.mode}] ${criterion.id}: ${criterion.statement}`;
     const verifyLine = renderAcVerifyLine(criterion);
-    return verifyLine !== undefined ? [bullet, verifyLine] : [bullet];
+    // AC-EI-1: rows that ran another command than the declared one are tallied by computeAcCoverage and shown
+    // here, beside the glyph they do not count toward — never compared again at this site.
+    const otherCommand = coverageByAcId.get(criterion.id)?.other_command;
+    const otherCommandLine =
+      otherCommand !== undefined && otherCommand > 0 ? `  other_command=${otherCommand}` : undefined;
+    return [bullet, ...(verifyLine !== undefined ? [verifyLine] : []), ...(otherCommandLine !== undefined ? [otherCommandLine] : [])];
   });
   return `\n\n## Acceptance Criteria (structured)\n\n${lines.join("\n")}`;
 }
