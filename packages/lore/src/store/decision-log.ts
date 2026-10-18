@@ -4,7 +4,8 @@
  * Purpose: the ONE home of what a decision record is, how it is chained, how a broken chain is found and
  * which verdict is effective for a (class, subject, version).
  * Public surface: DecisionLogRow, DecisionRecordInput, DecisionChannel, DecisionVerdict, DECISION_GENESIS_HASH,
- *   computeDecisionEntryHash, verifyDecisionChain, effectiveDecisionVerdict, decisionChainHead.
+ *   computeDecisionEntryHash, verifyDecisionChain, effectiveDecisionVerdict, decisionChainHead,
+ *   decisionDetailSchema, DecisionDetail, renderDecisionDetailSummary, NO_DETAIL_TEXT.
  * Invariants:
  *   - The hash covers the exact stored text of every column (JSON columns as stored, never re-serialised) plus
  *     prev_hash, as a fixed-order JSON array — column order is a frozen contract once rows exist.
@@ -17,12 +18,17 @@
  *     counts, calibrates or SAMPLES auto decisions (AU-T8 outcome calibration, 1-in-10 sampling) must select
  *     `verdict = 'auto'` and therefore never sees them. Only service/pending-decisions.ts reads them. A new
  *     `subject_version` is a new subject: records of another version are never consulted.
+ *   - `detail` (migration 024, HR-T1) is the human-readable account of what a decision asks. It is part of the
+ *     chained payload ONLY when the row carries one (versioned payload): a row written before detail existed has
+ *     `detail = null`, hashes exactly as before and still verifies, so pushed chain heads stay reproducible. Rewriting
+ *     a stored detail therefore fails verification as `hash_mismatch`. Detail is NOT a factor and never in `facts`.
  * Side-effect class: pure (node:crypto hashing only). Not in @lore/core's browser-safe barrel on purpose.
  *
  * Source: spec-autonomy-phase-1-decision-function-human-channel-lore AC-AU-2;
  *   adr-autonomy-is-decided-by-measured-facts-one-decision-function D5.
  */
 import { createHash } from "node:crypto";
+import { z } from "zod";
 
 /** `superseded` (migration 023) is a CLOSING record, not a decision: see the invariants above. */
 export type DecisionVerdict = "auto" | "escalate" | "refuse" | "superseded";
@@ -43,6 +49,8 @@ export interface DecisionRecordInput {
   readonly reasons: string;
   readonly executor_run: string | null;
   readonly channel: DecisionChannel;
+  /** Serialised {@link DecisionDetail} (canonical JSON), or absent/null for a decision recorded without one. */
+  readonly detail?: string | null;
 }
 
 /** A stored row: the input plus its position and chain hashes. */
@@ -57,7 +65,8 @@ export const DECISION_GENESIS_HASH = "";
 
 /** sha256 over the fixed-order payload of `input` chained to `prevHash`. */
 export function computeDecisionEntryHash(input: DecisionRecordInput, prevHash: string): string {
-  const payload = JSON.stringify([
+  const detail = input.detail ?? null;
+  const base = [
     input.ts,
     input.class,
     input.subject_id,
@@ -71,8 +80,53 @@ export function computeDecisionEntryHash(input: DecisionRecordInput, prevHash: s
     input.executor_run,
     input.channel,
     prevHash,
-  ]);
+  ];
+  // reason: detail joins the payload only when present, so every pre-detail row (and every pushed chain head) keeps
+  // its original hash — see the invariants above. Do not "simplify" to always appending `detail`.
+  const payload = JSON.stringify(detail === null ? base : [...base, detail]);
   return createHash("sha256").update(payload).digest("hex");
+}
+
+/** What the renderer shows for a row decided before detail existed (CLI and HTTP share it; never an empty field). */
+export const NO_DETAIL_TEXT = "no detail recorded (decided before detail existed)";
+
+const HEX_RUN = /[0-9a-fA-F]{40,}/;
+/** A human sentence: non-empty and never a bare hash (a run of 40+ hex chars is refused, fail loud). */
+const readableText = z
+  .string()
+  .trim()
+  .min(1)
+  .refine((t) => !HEX_RUN.test(t), { message: "must be readable words, not contain a run of 40+ hex characters (a hash)" });
+
+/**
+ * The human-readable account of one decision: what is asked, who asks, what changes and what each answer does.
+ * `change` is class-specific (governance-loosen: `entry`, `before`, `after`); extra fields are kept.
+ */
+export const decisionDetailSchema = z
+  .object({
+    summary: readableText,
+    requested_by: readableText,
+    change: z.record(z.string(), z.unknown()),
+    on_accept: readableText,
+    on_reject: readableText,
+  })
+  .strict();
+export type DecisionDetail = z.infer<typeof decisionDetailSchema>;
+
+/**
+ * The ONE renderer of a row's detail summary line: the stored summary, or {@link NO_DETAIL_TEXT} for a pre-detail
+ * row. A present-but-unreadable detail is reported as such (never silently shown as absent).
+ */
+export function renderDecisionDetailSummary(row: Pick<DecisionLogRow, "detail">): string {
+  if (row.detail === null || row.detail === undefined) return NO_DETAIL_TEXT;
+  let json: unknown;
+  try {
+    json = JSON.parse(row.detail);
+  } catch {
+    return "detail recorded but unreadable (stored text is not JSON)";
+  }
+  const parsed = decisionDetailSchema.safeParse(json);
+  return parsed.success ? parsed.data.summary : "detail recorded but unreadable (unexpected shape)";
 }
 
 export type DecisionChainBreakReason = "hash_mismatch" | "prev_link_mismatch";

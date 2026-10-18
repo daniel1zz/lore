@@ -1275,6 +1275,7 @@ export class InMemoryStore implements StoreInterface {
     const prevHash = head?.entry_hash ?? DECISION_GENESIS_HASH;
     const row: DecisionLogRow = {
       ...input,
+      detail: input.detail ?? null,
       id: this.decisionLog.length + 1,
       prev_hash: prevHash,
       entry_hash: computeDecisionEntryHash(input, prevHash),

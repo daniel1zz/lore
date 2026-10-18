@@ -49,10 +49,12 @@ import {
 } from "./autonomy-threshold-service.js";
 import {
   decisionChainHead,
+  decisionDetailSchema,
   effectiveDecisionVerdict,
   verifyDecisionChain,
   type DecisionChainHead,
   type DecisionChainVerifyResult,
+  type DecisionDetail,
   type DecisionLogRow,
   type DecisionRecordInput,
   type EffectiveDecisionVerdict,
@@ -115,11 +117,20 @@ export class DecisionService {
    * Run decide() over measured `facts`, append the machine-channel record, and return the decision together
    * with the effective verdict of `(classId, subject.id, subject.version)`.
    *
-   * @returns err(VALIDATION_ERROR) when `subject.version` is empty or `facts` is not JSON-serialisable (nothing
-   *   recorded); err(STORE_ERROR) when the append fails.
+   * `detail` (HR-T1) is the human-readable account of what the decision asks; it is validated, serialised
+   * canonically and chained into the record's hash. It is not a fact and not a factor.
+   *
+   * @returns err(VALIDATION_ERROR) when `subject.version` is empty, `facts` is not JSON-serialisable or `detail`
+   *   is not a valid DecisionDetail (nothing recorded); err(STORE_ERROR) when the append fails.
    */
-  async decide(classId: string, subject: DecisionSubject, facts: unknown): Promise<Result<DecideOutcome, LoreError>> {
+  async decide(classId: string, subject: DecisionSubject, facts: unknown, detail?: DecisionDetail): Promise<Result<DecideOutcome, LoreError>> {
     if (subject.version === "") return err(validationError("subject.version", "a decision subject needs a version or sha"));
+    let detailJson: string | null = null;
+    if (detail !== undefined) {
+      const checked = decisionDetailSchema.safeParse(detail);
+      if (!checked.success) return err(validationError("detail", checked.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ")));
+      detailJson = canonicalJson(checked.data);
+    }
     const scored = await this.scoreDecision(classId, subject.id, facts);
     if (!scored.ok) return scored;
     const { decision, factsJson, integrity } = scored.value;
@@ -140,6 +151,7 @@ export class DecisionService {
       reasons: canonicalJson(decision.reasons),
       executor_run: this.deps.executorRun,
       channel: "machine",
+      detail: detailJson,
     });
     if (!appended.ok) return appended;
     const effective = await this.effectiveVerdict(classId, subject);
