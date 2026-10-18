@@ -23,6 +23,7 @@ import { loadLoreApp } from "../loader.js";
 import { exitCode, formatError, formatShortId, resolveActor } from "../utils.js";
 import { linkTypeSchema } from "@lore/core";
 import type { LinkType } from "@lore/core";
+import { invocationOf } from "../command-invocation.js";
 
 /**
  * The CLI's accepted `--type` values — DERIVED from `linkTypeSchema.options`
@@ -69,11 +70,13 @@ export default defineCommand({
       description: "Output as JSON",
     },
   },
-  async run({ args }) {
+  async run(context) {
+    const { args } = context;
+    const inv = invocationOf(context);
     const hasInfer = args.infer === true;
-    const resolvedActor = resolveActor();
+    const resolvedActor = resolveActor(undefined, inv.env, inv.cwd);
 
-    const { app } = loadLoreApp();
+    const { app } = loadLoreApp({ inv });
     try {
       // ─── AI inference path (SPEC-019 AC-LINK-AI-1) ────────────────────────────
       if (hasInfer) {

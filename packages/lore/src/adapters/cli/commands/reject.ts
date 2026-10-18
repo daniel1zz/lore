@@ -14,6 +14,7 @@ import { loadLoreApp } from "../loader.js";
 import { exitCode, formatError, resolveActor } from "../utils.js";
 import { runCalibrationHook } from "../../../flows/calibration-hook.js";
 import type { DocId } from "@lore/core";
+import { invocationOf } from "../command-invocation.js";
 
 export default defineCommand({
   meta: {
@@ -39,10 +40,12 @@ export default defineCommand({
       description: "Output as JSON",
     },
   },
-  async run({ args }) {
-    const { app } = loadLoreApp();
+  async run(context) {
+    const { args } = context;
+    const inv = invocationOf(context);
+    const { app } = loadLoreApp({ inv });
     try {
-      const reviewer = resolveActor();
+      const reviewer = resolveActor(undefined, inv.env, inv.cwd);
       const opts: Record<string, unknown> = { reviewer };
       if (args.reason !== undefined) opts["reason"] = args.reason;
 

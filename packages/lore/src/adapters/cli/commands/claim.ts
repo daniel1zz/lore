@@ -54,7 +54,6 @@
  */
 
 import { invocationOf } from "../command-invocation.js";
-import { hostname } from "os";
 import { defineCommand } from "citty";
 import { taskClaimSchema } from "@lore/core";
 import type { ActorSource } from "@lore/core/node";
@@ -102,7 +101,7 @@ export default defineCommand({
   async run(context) {
     const { args } = context;
     const inv = invocationOf(context);
-    const { app } = loadLoreApp();
+    const { app } = loadLoreApp({ inv });
     try {
       // reason: the run is verified ONCE against the registry (unregistered -> null + one warning); the decision
       // below and the stamped rows then agree (BR-1035, spec-run-identity-slice-1 D7).
@@ -114,7 +113,7 @@ export default defineCommand({
       const verifiedRun = verifiedIdentity?.value?.harnessRun ?? null;
       const resolvedActor = resolveActorWithIdentitySource(undefined, inv.env, inv.cwd);
       const by = resolvedActor.actor;
-      const machine = typeof args.machine === "string" ? args.machine : hostname();
+      const machine = typeof args.machine === "string" ? args.machine : inv.host;
       const claimOpts = {
         by,
         // reason: spec-run-identity-slice-1 D6 — the claimant's run is passed EXPLICITLY (services that decide on

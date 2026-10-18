@@ -27,6 +27,7 @@ import {
   type StashPruneEntry,
   type StashPruneReport,
 } from "../../../service/stash-prune-service.js";
+import { invocationOf } from "../command-invocation.js";
 
 function yesNo(value: boolean, measured: boolean): string {
   return measured ? (value ? "yes" : "no") : "not measured";
@@ -80,8 +81,10 @@ const prune = defineCommand({
     apply: { type: "boolean", description: "Archive and drop stashes whose decision is auto (default: list only)" },
     json: { type: "boolean", description: "Output the report as JSON" },
   },
-  async run({ args }) {
-    const { app, dbPath } = loadLoreApp();
+  async run(context) {
+    const { args } = context;
+    const inv = invocationOf(context);
+    const { app, dbPath } = loadLoreApp({ inv });
     let store: SQLiteStore | undefined;
     try {
       if (app.repoRoot === undefined) {

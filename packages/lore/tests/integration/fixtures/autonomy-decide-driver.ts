@@ -10,6 +10,7 @@
  * argv: <dbPath> <pendingId> <--accept|--reject> [reason]
  * env:  FIXTURE_ANCESTRY_COMMAND — when set, the synthetic ancestry carries that command as the driver's parent.
  */
+import { liveInvocation } from "../../live-invocation.js";
 import { runDecideFlow } from "../../../src/adapters/cli/decide-flow.js";
 import { createProductionHumanChannelPorts } from "../../../src/adapters/real-human-channel-port.js";
 
@@ -20,7 +21,7 @@ if (dbPath === undefined || id === undefined || flag === undefined) {
 }
 
 const parentCommand = process.env["FIXTURE_ANCESTRY_COMMAND"];
-const ports = createProductionHumanChannelPorts({
+const ports = createProductionHumanChannelPorts(liveInvocation(), {
   readProcessTable: () => ({
     ok: true as const,
     value:

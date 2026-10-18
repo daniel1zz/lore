@@ -501,7 +501,7 @@ export default defineCommand({
       return;
     }
 
-    const dbPath = findLoreDbPath();
+    const dbPath = findLoreDbPath(inv);
     const repoRoot = dirname(dirname(dbPath));
     const json = args.json === true;
 

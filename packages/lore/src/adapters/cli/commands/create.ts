@@ -82,6 +82,7 @@ import {
   resolveAcScopeForCreate,
   type ResolvedAcScope,
 } from "../create-task-validation.js";
+import { invocationOf } from "../command-invocation.js";
 
 const VALID_TYPES: DocType[] = ["prd", "spec", "adr", "plan", "knowledge", "task"];
 
@@ -251,7 +252,9 @@ export default defineCommand({
       description: "Explicitly enable AI content generation (overrides surface default). Pass --no-ai to disable.",
     },
   },
-  async run({ args }) {
+  async run(context) {
+    const { args } = context;
+    const inv = invocationOf(context);
     const docType = args.type as DocType;
 
     if (!VALID_TYPES.includes(docType)) {
@@ -380,7 +383,7 @@ export default defineCommand({
     //
     // Precedence: process.argv scan > args.ai (programmatic) > undefined (resolved by surface)
     // This scan must happen before loadLoreApp() so we can exit 2 before touching the DB.
-    const _rawArgv = process.argv.slice(2);
+    const _rawArgv = inv.argv;
     const _hasExplicitAi = _rawArgv.includes("--ai");
     const _hasExplicitNoAi = _rawArgv.includes("--no-ai");
 
@@ -399,7 +402,7 @@ export default defineCommand({
         // process.argv was not set; undefined when flag not present since no default).
         : (args.ai as boolean | undefined);
 
-    const { app, defaults } = loadLoreApp();
+    const { app, defaults } = loadLoreApp({ inv });
     try {
       const tags = args.tags
         ? args.tags
@@ -452,7 +455,7 @@ export default defineCommand({
 
         if (!useAi) {
           // No-AI path: fall back to editor (SPEC-003 §3.1 / AC-AI-2)
-          const editorResult = await openEditor({ defaults });
+          const editorResult = await openEditor({ defaults, env: inv.env, tmpDir: inv.paths.tmpDir });
           if (!editorResult.ok) {
             process.stderr.write(formatError(editorResult.error) + "\n");
             process.exitCode = exitCode(editorResult.error);
@@ -578,7 +581,7 @@ export default defineCommand({
       // SPEC-079 G2 — resolved once, reused as the create's own audit actor
       // (both branches below) and, when --supersedes is set, the invalidate
       // step's actor too.
-      const resolvedActor = resolveActor();
+      const resolvedActor = resolveActor(undefined, inv.env, inv.cwd);
 
       if (args.supersedes !== undefined) {
         if (app.validityService === undefined) {

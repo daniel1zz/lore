@@ -1340,9 +1340,9 @@ function resolveMcpCallerCwd(callerCwdArg: string | undefined): string {
  * @example
  * resolveMcpCorpusProvenance(undefined); // => null — HTTP's own treatment
  */
-function resolveMcpCorpusProvenance(callerCwdArg: string | undefined): CorpusProvenance | null {
+function resolveMcpCorpusProvenance(callerCwdArg: string | undefined, env: NodeJS.ProcessEnv): CorpusProvenance | null {
   if (callerCwdArg === undefined) return null;
-  return resolveCorpus(callerCwdArg)?.provenance ?? null;
+  return resolveCorpus(callerCwdArg, env)?.provenance ?? null;
 }
 
 /**
@@ -1382,10 +1382,11 @@ function resolveMcpCorpusProvenance(callerCwdArg: string | undefined): CorpusPro
 function checkMcpForeignCorpusWrite(
   callerCwdArg: string | undefined,
   getConfig: (() => LoreConfig | undefined) | undefined,
+  env: NodeJS.ProcessEnv,
 ): ReturnType<typeof errorContent> | undefined {
   const verdict = checkForeignCorpusWrite(
     {
-      provenance: resolveMcpCorpusProvenance(callerCwdArg),
+      provenance: resolveMcpCorpusProvenance(callerCwdArg, env),
       enabled: resolveForeignCorpusWriteGateEnabled(getConfig?.()),
     },
     false,
@@ -1641,7 +1642,7 @@ export function registerTools(
     // AC-CP-5(a)/(b) — checked FIRST, before any other side effect
     // (including the AI-generation call below), so a refused write never
     // spends an AI call first. See checkMcpForeignCorpusWrite's own header.
-    const foreignWriteRefusal = checkMcpForeignCorpusWrite(args.caller_cwd, getConfig);
+    const foreignWriteRefusal = checkMcpForeignCorpusWrite(args.caller_cwd, getConfig, inv.env);
     if (foreignWriteRefusal !== undefined) return foreignWriteRefusal;
 
     // SPEC-024 AC-NOAI-4/5: ai=false (default) → create with empty/provided content (no AI call).
@@ -2930,7 +2931,7 @@ export function registerTools(
             ...(args.handoff !== undefined ? { handoff: args.handoff } : {}),
             ...(args.by !== undefined ? { by: args.by } : {}),
           },
-          { env: inv.env, tmpDir: inv.paths.tmpDir },
+          { env: inv.env, tmpDir: inv.paths.tmpDir, cwd: inv.cwd },
         );
         if (!result.ok) return errorContent(result.error);
         return textContent(result.value);
@@ -3393,10 +3394,11 @@ export function registerTools(
           },
           cfg,
           {
-            consumerCorpusRoot: resolveConsumerCorpusRoot(),
+            consumerCorpusRoot: resolveConsumerCorpusRoot(inv),
             corpusService: app.corpusService,
             actor,
             actorSource,
+            home: inv.paths.home,
             env: inv.env,
           },
         );

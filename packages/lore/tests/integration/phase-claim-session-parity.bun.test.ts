@@ -59,7 +59,7 @@ import type { Invocation } from "@lore/core";
  * test sets its session env, never captured at module load.
  */
 function currentActor(): string {
-  return resolveActor();
+  return resolveActor(undefined, process.env, process.cwd());
 }
 const SHARED_ANCHOR = "packages/core/src/session.ts";
 const SESSION_ENV_VARS = ["CLAUDE_CODE_SESSION_ID", "CLAUDE_SESSION_ID"] as const;

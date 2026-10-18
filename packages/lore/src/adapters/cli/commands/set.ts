@@ -119,6 +119,7 @@ import {
   checkDecisionStatusValue,
   formatDecisionStatusRefusal,
 } from "../decision-status-validation.js";
+import { invocationOf } from "../command-invocation.js";
 
 /**
  * Advisory text printed when `CorpusService.set`'s internal approved→draft
@@ -228,11 +229,13 @@ export default defineCommand({
         "Explicitly enable AI for --regenerate/--refine (overrides surface default). Pass --no-ai to disable.",
     },
   },
-  async run({ args }) {
+  async run(context) {
+    const { args } = context;
+    const inv = invocationOf(context);
     // ─── Step 1: flag parsing and mutex checks ─────────────────────────────────
     // reason: process.argv scan is needed for tri-state --ai detection (same as create.ts).
     // mri/citty cannot distinguish "flag absent" from "flag=false (default)" for booleans.
-    const _rawArgv = process.argv;
+    const _rawArgv = inv.argv;
     const _hasExplicitAi = _rawArgv.includes("--ai");
     const _hasExplicitNoAi = _rawArgv.includes("--no-ai");
 
@@ -333,8 +336,8 @@ export default defineCommand({
       }
     }
 
-    const resolvedActor = resolveActor();
-    const { app, defaults } = loadLoreApp();
+    const resolvedActor = resolveActor(undefined, inv.env, inv.cwd);
+    const { app, defaults } = loadLoreApp({ inv });
     try {
       // ─── Step 2: AI mutation path (SPEC-019) ──────────────────────────────────
       if (hasAiMutation) {
@@ -631,6 +634,8 @@ export default defineCommand({
         const editorResult = await openEditor({
           initialContent: currentDoc.content,
           defaults,
+          env: inv.env,
+          tmpDir: inv.paths.tmpDir,
         });
         if (!editorResult.ok) {
           process.stderr.write(formatError(editorResult.error) + "\n");

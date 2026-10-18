@@ -23,6 +23,7 @@ import { loadLoreApp } from "../loader.js";
 import { exitCode, formatError } from "../utils.js";
 import { resolveCallerSession } from "../caller-session.js";
 import type { WorktreeCheck, WorktreeSweepEntry } from "../../../service/worktree-removal-service.js";
+import { invocationOf } from "../command-invocation.js";
 
 /** Human rendering of one check. */
 function formatCheckLines(check: WorktreeCheck): string[] {
@@ -64,11 +65,13 @@ export default defineCommand({
         session: sessionArg,
         json: { type: "boolean", description: "Output { ok, data } as JSON" },
       },
-      async run({ args }) {
+      async run(context) {
+        const { args } = context;
+        const inv = invocationOf(context);
         const path = typeof args.path === "string" ? args.path : "";
         if (path === "") return usageError("lore worktree check requires a <path>");
-        const callerSession = resolveCallerSession(typeof args.session === "string" ? args.session : undefined, process.env) ?? null;
-        const { app } = loadLoreApp();
+        const callerSession = resolveCallerSession(typeof args.session === "string" ? args.session : undefined, inv.env) ?? null;
+        const { app } = loadLoreApp({ inv });
         try {
           const service = app.worktreeRemovalService;
           if (service === undefined) {
@@ -94,9 +97,11 @@ export default defineCommand({
         session: sessionArg,
         json: { type: "boolean", description: "Output { ok, data: { worktrees } } as JSON" },
       },
-      async run({ args }) {
-        const callerSession = resolveCallerSession(typeof args.session === "string" ? args.session : undefined, process.env) ?? null;
-        const { app } = loadLoreApp();
+      async run(context) {
+        const { args } = context;
+        const inv = invocationOf(context);
+        const callerSession = resolveCallerSession(typeof args.session === "string" ? args.session : undefined, inv.env) ?? null;
+        const { app } = loadLoreApp({ inv });
         try {
           const service = app.worktreeRemovalService;
           if (service === undefined) {
@@ -104,7 +109,7 @@ export default defineCommand({
             process.exitCode = 1;
             return;
           }
-          const result = await service.sweep({ apply: args.apply === true, callerSession, cwd: process.cwd() });
+          const result = await service.sweep({ apply: args.apply === true, callerSession, cwd: inv.cwd });
           if (!result.ok) {
             process.stderr.write(formatError(result.error) + "\n");
             process.exitCode = exitCode(result.error);

@@ -18,6 +18,7 @@ import { readFileSync } from "fs";
 import { defineCommand } from "citty";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatError, resolveActor } from "../utils.js";
+import { invocationOf } from "../command-invocation.js";
 
 const recordCommand = defineCommand({
   meta: { name: "record", description: "Record a structured UAT verdict for a plan (SPEC-054)" },
@@ -36,8 +37,10 @@ const recordCommand = defineCommand({
     },
     json: { type: "boolean", description: "Output result as JSON" },
   },
-  async run({ args }) {
-    const { app } = loadLoreApp();
+  async run(context) {
+    const { args } = context;
+    const inv = invocationOf(context);
+    const { app } = loadLoreApp({ inv });
     try {
       if (app.uatService === undefined) {
         process.stderr.write("Error: UAT service is not available in this build.\n");
@@ -52,7 +55,7 @@ const recordCommand = defineCommand({
         process.exitCode = 2;
         return;
       }
-      const by = resolveActor();
+      const by = resolveActor(undefined, inv.env, inv.cwd);
       const result = await app.uatService.record(String(args.plan), payload, { by });
       if (!result.ok) {
         if (args.json) {
@@ -80,8 +83,10 @@ const showCommand = defineCommand({
     plan: { type: "positional", description: "Plan doc id/slug (reads its latest informs-linked UAT verdict)" },
     json: { type: "boolean", description: "Output result as JSON" },
   },
-  async run({ args }) {
-    const { app } = loadLoreApp();
+  async run(context) {
+    const { args } = context;
+    const inv = invocationOf(context);
+    const { app } = loadLoreApp({ inv });
     try {
       const result = await app.corpusService.getLatestUatVerdict(String(args.plan));
       if (!result.ok) {

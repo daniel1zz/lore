@@ -40,6 +40,7 @@ import { exitCode, formatError, resolveActor } from "../utils.js";
 import type { App } from "../../../app.js";
 import type { AddRuleInput, SetRulePatch } from "../../../service/rule-service.js";
 import type { ProposeRuleChangeInput, RuleEnforcement } from "../../../service/rule-change-service.js";
+import { invocationOf } from "../command-invocation.js";
 
 /** citty/mri yields one string for a single occurrence of a repeatable flag, an array for >= 2, `undefined` for none. */
 function repeatable(value: unknown): string[] | undefined {
@@ -99,8 +100,10 @@ export default defineCommand({
         rule: { type: "positional", description: "Rule id, e.g. BR-12", required: true },
         json: { type: "boolean", description: "Output result as JSON" },
       },
-      async run({ args }) {
-        const { app } = loadLoreApp();
+      async run(context) {
+        const { args } = context;
+        const inv = invocationOf(context);
+        const { app } = loadLoreApp({ inv });
         try {
           if (app.ruleReadService === undefined) return failUsage("RuleReadService is not available in this build.", args.json === true);
           const result = await app.ruleReadService.show(args.rule as string);
@@ -128,10 +131,12 @@ export default defineCommand({
         "include-retired": { type: "boolean", description: "Also list retired rules (tombstones); default lists only rules that still describe the product" },
         json: { type: "boolean", description: "Output result as JSON" },
       },
-      async run({ args }) {
+      async run(context) {
+        const { args } = context;
+        const inv = invocationOf(context);
         const given = [args.spec, args.file, args.text].filter((v) => typeof v === "string");
         if (given.length !== 1) return failUsage("pass exactly one of --spec, --file, --text", args.json === true);
-        const { app } = loadLoreApp();
+        const { app } = loadLoreApp({ inv });
         try {
           if (app.ruleReadService === undefined) return failUsage("RuleReadService is not available in this build.", args.json === true);
           const query =
@@ -151,8 +156,10 @@ export default defineCommand({
         rule: { type: "positional", description: "Rule id, e.g. BR-12", required: true },
         json: { type: "boolean", description: "Output result as JSON" },
       },
-      async run({ args }) {
-        const { app } = loadLoreApp();
+      async run(context) {
+        const { args } = context;
+        const inv = invocationOf(context);
+        const { app } = loadLoreApp({ inv });
         try {
           if (app.impactService === undefined) return failUsage("ImpactService is not available in this build.", args.json === true);
           const result = await app.impactService.impact(args.rule as string);
@@ -188,7 +195,9 @@ export default defineCommand({
         correction: { type: "string", description: "Fix a LOCKED spec's change set as an audited correction; the value is the reason (BR-1069)" },
         json: { type: "boolean", description: "Output result as JSON" },
       },
-      async run({ args }) {
+      async run(context) {
+        const { args } = context;
+        const inv = invocationOf(context);
         const json = args.json === true;
         const op = args.op as string;
         const examples = repeatable(args.example);
@@ -224,11 +233,11 @@ export default defineCommand({
         } else {
           return failUsage(`op must be add, modify or retire (got '${op}')`, json);
         }
-        const { app } = loadLoreApp();
+        const { app } = loadLoreApp({ inv });
         try {
           if (app.ruleChangeService === undefined) return failUsage("RuleChangeService is not available in this build.", json);
           const result = await app.ruleChangeService.propose(args.spec as string, input, {
-            by: resolveActor(),
+            by: resolveActor(undefined, inv.env, inv.cwd),
             ...(args.correction !== undefined ? { correction: { reason: args.correction as string } } : {}),
           });
           if (!result.ok) return reportFailure(result.error, json);
@@ -254,12 +263,14 @@ export default defineCommand({
         spec: { type: "positional", description: "Spec document ID or slug", required: true },
         json: { type: "boolean", description: "Output result as JSON" },
       },
-      async run({ args }) {
+      async run(context) {
+        const { args } = context;
+        const inv = invocationOf(context);
         const json = args.json === true;
-        const { app } = loadLoreApp();
+        const { app } = loadLoreApp({ inv });
         try {
           if (app.ruleChangeService === undefined) return failUsage("RuleChangeService is not available in this build.", json);
-          const result = await app.ruleChangeService.apply(args.spec as string, { by: resolveActor() });
+          const result = await app.ruleChangeService.apply(args.spec as string, { by: resolveActor(undefined, inv.env, inv.cwd) });
           if (!result.ok) return reportFailure(result.error, json);
           const outcome = result.value;
           if (json) return void console.log(JSON.stringify({ ok: true, data: outcome }, null, 2));
@@ -285,8 +296,10 @@ export default defineCommand({
         spec: { type: "positional", description: "Spec document ID or slug", required: true },
         json: { type: "boolean", description: "Output result as JSON" },
       },
-      async run({ args }) {
-        const { app } = loadLoreApp();
+      async run(context) {
+        const { args } = context;
+        const inv = invocationOf(context);
+        const { app } = loadLoreApp({ inv });
         try {
           if (app.ruleChangeService === undefined) return failUsage("RuleChangeService is not available in this build.", args.json === true);
           const result = await app.ruleChangeService.changes(args.spec as string);
@@ -320,8 +333,10 @@ export default defineCommand({
         migration: { type: "string", description: "[architecture standard] How the exceptions get closed" },
         json: { type: "boolean", description: "Output result as JSON" },
       },
-      async run({ args }) {
-        const { app } = loadLoreApp();
+      async run(context) {
+        const { args } = context;
+        const inv = invocationOf(context);
+        const { app } = loadLoreApp({ inv });
         try {
           const svc = requireRuleService(app);
           if (svc === undefined) return;
@@ -334,7 +349,7 @@ export default defineCommand({
             examples: repeatable(args.example) ?? [],
             ...four.parts,
           };
-          const result = await svc.addRule(args.leaf as string, input, { by: resolveActor() });
+          const result = await svc.addRule(args.leaf as string, input, { by: resolveActor(undefined, inv.env, inv.cwd) });
           if (!result.ok) return reportFailure(result.error, args.json === true);
           if (args.json) {
             console.log(JSON.stringify({ ok: true, data: { ruleId: result.value.ruleId, leaf: result.value.doc.slug, version: result.value.doc.version } }, null, 2));
@@ -364,8 +379,10 @@ export default defineCommand({
         "move-to": { type: "string", description: "Destination baseline leaf (ID or slug); the BR-n id is unchanged" },
         json: { type: "boolean", description: "Output result as JSON" },
       },
-      async run({ args }) {
-        const { app } = loadLoreApp();
+      async run(context) {
+        const { args } = context;
+        const inv = invocationOf(context);
+        const { app } = loadLoreApp({ inv });
         try {
           const svc = requireRuleService(app);
           if (svc === undefined) return;
@@ -382,7 +399,7 @@ export default defineCommand({
             ...(args["move-to"] !== undefined ? { moveTo: args["move-to"] as string } : {}),
             ...four.parts,
           };
-          const result = await svc.setRule(args.rule as string, patch, { by: resolveActor() });
+          const result = await svc.setRule(args.rule as string, patch, { by: resolveActor(undefined, inv.env, inv.cwd) });
           if (!result.ok) return reportFailure(result.error, args.json === true);
           if (args.json) {
             console.log(JSON.stringify({ ok: true, data: { rule: result.value.rule, leaf: result.value.doc.slug, version: result.value.doc.version } }, null, 2));

@@ -34,7 +34,7 @@
  */
 
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ok, err } from "@lore/core";
@@ -98,6 +98,7 @@ function makeContext(createImpl: ReturnType<typeof vi.fn>): GithubFilingContext 
     corpusService: makeCorpusService(createImpl),
     actor: "agent:test",
     actorSource: "explicit",
+    home: homedir(),
     env: process.env,
   };
 }

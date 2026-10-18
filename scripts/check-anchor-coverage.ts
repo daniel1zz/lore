@@ -678,7 +678,7 @@ const FINDING_KIND_ORDER: readonly AnchorCoverageFinding["kind"][] = [
  * `import.meta.main` block below is the only place that does, so this stays
  * directly callable.
  *
- * @param dbPathOverride - Corpus path; omitted → `findLoreDbPath()` from the cwd
+ * @param dbPathOverride - Corpus path; omitted → `findLoreDbPath({ cwd: process.cwd(), env: process.env })` from the cwd
  * @param repoRootOverride - Repo root holding the ledger; omitted → this script's own repo
  * @returns 0 clean, 1 repo-invariant failure, 2 scan failure (see the module header)
  * @throws {AnchorCoverageLedgerError} / {@link CorpusReadError} /
@@ -686,7 +686,7 @@ const FINDING_KIND_ORDER: readonly AnchorCoverageFinding["kind"][] = [
  */
 export async function main(dbPathOverride?: string, repoRootOverride?: string): Promise<number> {
   const repoRoot = repoRootOverride ?? REPO_ROOT;
-  const dbPath = dbPathOverride ?? findLoreDbPath();
+  const dbPath = dbPathOverride ?? findLoreDbPath({ cwd: process.cwd(), env: process.env });
   const app = createApp(dbPath);
   try {
     const ledger = loadLedgerFromDisk(repoRoot);

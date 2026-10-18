@@ -65,6 +65,7 @@ import {
   checkExemptAttestationArgs,
 } from "../plan-exempt-validation.js";
 import type { PlanExemptionService } from "../../../service/plan-exemption-service.js";
+import { invocationOf } from "../command-invocation.js";
 
 /**
  * `App.planExemptionService` is typed optional only to keep pre-existing
@@ -121,7 +122,9 @@ export default defineCommand({
           description: `Required exemption type: ${ATTESTATION_EXEMPT_KIND_VALUES.join(" | ")}`,
         },
       },
-      async run({ args }) {
+      async run(context) {
+        const { args } = context;
+        const inv = invocationOf(context);
         const checked = checkExemptAttestationArgs({ reason: args.reason, kind: args.kind });
         if (!checked.ok) {
           refuse(checked.message);
@@ -130,9 +133,9 @@ export default defineCommand({
 
         // Deferred on purpose — see this module's @invariant.
         const { loadLoreApp } = await import("../loader.js");
-        const { app } = loadLoreApp();
+        const { app } = loadLoreApp({ inv });
         try {
-          const by = resolveActor();
+          const by = resolveActor(undefined, inv.env, inv.cwd);
           const result = await requirePlanExemptionService(app).exemptAttestation(
             args.plan as string,
             { reason: checked.reason, kind: checked.kind, by },
@@ -167,7 +170,9 @@ export default defineCommand({
         description: "Record an audited exemption from the plan-close assessment-freshness predicate",
       },
       args: { ...sharedArgs },
-      async run({ args }) {
+      async run(context) {
+        const { args } = context;
+        const inv = invocationOf(context);
         const checked = checkExemptAssessmentFreshnessArgs({ reason: args.reason });
         if (!checked.ok) {
           refuse(checked.message);
@@ -175,9 +180,9 @@ export default defineCommand({
         }
 
         const { loadLoreApp } = await import("../loader.js");
-        const { app } = loadLoreApp();
+        const { app } = loadLoreApp({ inv });
         try {
-          const by = resolveActor();
+          const by = resolveActor(undefined, inv.env, inv.cwd);
           const result = await requirePlanExemptionService(app).exemptAssessmentFreshness(
             args.plan as string,
             { reason: checked.reason, by },

@@ -56,6 +56,7 @@ import { resolveClaimSessionId } from "../../../service/task-workflow-service.js
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatError } from "../utils.js";
 import { partitionTerritory, formatTerritoryHuman } from "../territory-partition.js";
+import { invocationOf } from "../command-invocation.js";
 
 export default defineCommand({
   meta: {
@@ -69,8 +70,10 @@ export default defineCommand({
       description: "Output the raw TerritoryPartition as JSON",
     },
   },
-  async run({ args }) {
-    const { app } = loadLoreApp();
+  async run(context) {
+    const { args } = context;
+    const inv = invocationOf(context);
+    const { app } = loadLoreApp({ inv });
     try {
       if (app.sessionService === undefined) {
         process.stderr.write("Error: SessionService not wired on this App instance.\n");
@@ -105,7 +108,7 @@ export default defineCommand({
       // reason: the SAME sanitized discriminator TaskWorkflowService.claim
       // captures into TaskClaim.session_id — read directly from process.env
       // here (the outermost CLI layer), never re-derived.
-      const sessionIdResult = resolveClaimSessionId(process.env);
+      const sessionIdResult = resolveClaimSessionId(inv.env);
       const currentSessionId = sessionIdResult.ok ? sessionIdResult.value : undefined;
 
       // reason: AC-OWN-1 remediation (task-thread-real-local-branch-

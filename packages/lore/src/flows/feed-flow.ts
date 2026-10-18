@@ -814,19 +814,19 @@ async function buildRuleDiffBlock(
  *
  * @param app - Wired `App` providing `sessionService`.
  * @param opts - `{plan?, handoff?, by?}`, forwarded to `SessionService.resume` untouched.
- * @param ambient - The invocation's `env` and `paths.tmpDir`, read only to locate the SessionStart marker
+ * @param ambient - The invocation's `env`, `paths.tmpDir` and `cwd`, read only to locate the SessionStart marker and resolve the actor
  *   (AS-26: this flow reads no ambient state itself).
  * @returns `ok(ResumeFeedOutcome)`, or `err(LoreError)` on an unresolvable target,
  *   a `SessionService.resume` store error, or a missing `sessionService` (an
  *   `App` test stub that omits it — see `app.ts`'s `sessionService?` JSDoc).
  * @example
- * const result = await buildResumeFeed(app, { plan: "plan-session-layer" }, { env: inv.env, tmpDir: inv.paths.tmpDir });
+ * const result = await buildResumeFeed(app, { plan: "plan-session-layer" }, { env: inv.env, tmpDir: inv.paths.tmpDir, cwd: inv.cwd });
  * if (result.ok) console.log(result.value.feed);
  */
 export async function buildResumeFeed(
   app: App,
   opts: { plan?: string; handoff?: string; by?: string },
-  ambient: { readonly env: Readonly<Record<string, string | undefined>>; readonly tmpDir: string },
+  ambient: { readonly env: Readonly<Record<string, string | undefined>>; readonly tmpDir: string; readonly cwd: string },
 ): Promise<Result<ResumeFeedOutcome, LoreError>> {
   if (app.sessionService === undefined) {
     return err({
@@ -843,7 +843,7 @@ export async function buildResumeFeed(
   let suppressFloor = false;
   let authorshipUndeterminedNote: string | undefined;
   if (resume.found && !resume.multi_actor && resume.handoff !== undefined) {
-    const currentActor = resolveActor(opts.by);
+    const currentActor = resolveActor(opts.by, ambient.env, ambient.cwd);
     const sessionStart = readSessionStartIso(ambient.env, ambient.tmpDir);
     const sessionStartIso = sessionStart.kind === "measured" ? sessionStart.startedAt : undefined;
     // Same call, same argument shape as before this task — the arming

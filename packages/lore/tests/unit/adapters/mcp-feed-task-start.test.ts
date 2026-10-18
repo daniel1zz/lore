@@ -110,7 +110,7 @@ function makeApp(): App {
   store = new InMemoryStore();
   corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
   const gateEnforcer = new GateEnforcer(undefined);
-  const phaseServices = buildPhaseServices(store, new NoOpTelemetry(), 120, gateEnforcer, corpusService);
+  const phaseServices = buildPhaseServices(store, new NoOpTelemetry(), 120, gateEnforcer, corpusService, process.env);
   const sessionService = new SessionService(store, {
     claimTtlMinutes: 120,
     handoffTtlMinutes: 10_080,

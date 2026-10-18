@@ -36,6 +36,7 @@ import { defineCommand } from "citty";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatError } from "../utils.js";
 import { buildSeatListJsonPayload, formatSeatList } from "../seat-render.js";
+import { invocationOf } from "../command-invocation.js";
 
 const RESERVED_SUBCOMMANDS = new Set(["list", "resume", "remove"]);
 
@@ -64,8 +65,10 @@ export default defineCommand({
       description: "Output result as JSON",
     },
   },
-  async run({ args }) {
-    const { app } = loadLoreApp();
+  async run(context) {
+    const { args } = context;
+    const inv = invocationOf(context);
+    const { app } = loadLoreApp({ inv });
     try {
       if (app.seatService === undefined) {
         process.stderr.write("Error: SeatService not wired on this App instance.\n");
@@ -133,7 +136,7 @@ export default defineCommand({
         // unreachable given the branches above, kept for exhaustiveness clarity.
         return;
       }
-      const result = await seatService.enter(target, { mainCwd: process.cwd() });
+      const result = await seatService.enter(target, { mainCwd: inv.cwd });
       if (!result.ok) {
         process.stderr.write(formatError(result.error) + "\n");
         process.exitCode = exitCode(result.error);

@@ -307,6 +307,7 @@ import {
   describeDerivedCdTarget,
 } from "../evidence-precheck.js";
 import { captureOracleCommand, type EvidenceProvenance } from "../../evidence-capture.js";
+import { invocationOf } from "../command-invocation.js";
 
 const VALID_RESULTS = ["pass", "fail", "expected-fail"] as const;
 
@@ -366,7 +367,9 @@ export default defineCommand({
       description: "Output result as JSON",
     },
   },
-  async run({ args }) {
+  async run(context) {
+    const { args } = context;
+    const inv = invocationOf(context);
     if (args["output-tail"] !== undefined && args["output-tail-file"] !== undefined) {
       process.stderr.write(
         "Error: --output-tail and --output-tail-file are mutually exclusive.\n",
@@ -441,10 +444,10 @@ export default defineCommand({
       // behavior for every non-`ai` config section (an explicit SPEC-030
       // non-goal); fixing it belongs there and would change every section's
       // semantics at once, not just this key's.
-      const captureTimeoutMs = resolveCaptureTimeoutMs(loadProjectConfig());
+      const captureTimeoutMs = resolveCaptureTimeoutMs(loadProjectConfig(inv));
       const captured = captureOracleCommand({
         command: args.command as string,
-        cwd: process.cwd(),
+        cwd: inv.cwd,
         declaredResult: args.result as string,
         timeoutMs: captureTimeoutMs,
       });
@@ -519,7 +522,7 @@ export default defineCommand({
       }
     }
 
-    const { app, dbPath } = loadLoreApp();
+    const { app, dbPath } = loadLoreApp({ inv });
     try {
       // reason: missing-oracle-file precheck (see module header) — only test/e2e
       // pass claims are checked; every other oracle/result combination is
@@ -529,7 +532,7 @@ export default defineCommand({
       // verbatim with the MCP adapter's lore_evidence_add handler, so the two
       // surfaces cannot drift on which calls are in scope.
       const precheckRoots = {
-        cwd: process.cwd(),
+        cwd: inv.cwd,
         // reason: dbPath is <corpusRoot>/.lore/lore.db — the corpus root is two
         // levels up. Distinct from cwd whenever the invocation runs from a
         // subdirectory of the corpus (or a linked worktree, SPEC-063).
@@ -626,7 +629,7 @@ export default defineCommand({
         return;
       }
 
-      const by = resolveActor();
+      const by = resolveActor(undefined, inv.env, inv.cwd);
       const evidenceInput = {
         // reason: cast — CLI arg strings are validated by evidenceEntrySchema server-side;
         // an invalid oracle/result value fails loud with VALIDATION_ERROR rather than
@@ -643,7 +646,7 @@ export default defineCommand({
         // A fresh subprocess per CLI invocation inherits the caller's real
         // shell cwd (same fact this file's own missing-oracle-file precheck
         // already documents), so this is always correct here.
-        callerCwd: process.cwd(),
+        callerCwd: inv.cwd,
         // reason: task-a-non-empty-output-tail-can-be-hand-authored-prose-and-the —
         // ALWAYS stamped, never omitted, never inferred from the tail's shape (see
         // this file's module header and TaskWorkflowService's own capture_source

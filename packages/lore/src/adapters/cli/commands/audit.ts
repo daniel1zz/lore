@@ -61,6 +61,7 @@ import { exitCode, formatError, formatTable, parsePositiveIntArg, resolveActor }
 import { parseAuditActor, type AuditEntry } from "@lore/core";
 import type { AuditFilters } from "../../../store/store-interface.js";
 import type { AuditAnchorRef, AuditMiss } from "../../../service/audit-service.js";
+import { invocationOf } from "../command-invocation.js";
 
 // ─── SPEC-079 G3 — `.lore/audit-anchor.json` file contract ─────────────────
 //
@@ -160,8 +161,10 @@ export default defineCommand({
       description: "Output as JSON",
     },
   },
-  async run({ args }) {
-    const { app } = loadLoreApp();
+  async run(context) {
+    const { args } = context;
+    const inv = invocationOf(context);
+    const { app } = loadLoreApp({ inv });
     try {
       // ── arm branch (positional value "arm", same dispatch as "anchor") ──
       if (args.doc === "arm") {
@@ -172,7 +175,7 @@ export default defineCommand({
           return;
         }
         const result = args.confirm
-          ? await stateBinding.arm({ actor: resolveActor(), nowIso: new Date().toISOString() })
+          ? await stateBinding.arm({ actor: resolveActor(undefined, inv.env, inv.cwd), nowIso: new Date().toISOString() })
           : await stateBinding.reportImpact();
         if (!result.ok) {
           process.stderr.write(formatError(result.error) + "\n");
@@ -225,7 +228,7 @@ export default defineCommand({
           entry_count: headResult.value.entry_count,
           anchored_at: new Date().toISOString(),
         };
-        const corpusRoot = resolveConsumerCorpusRoot();
+        const corpusRoot = resolveConsumerCorpusRoot(inv);
         writeFileSync(auditAnchorFilePath(corpusRoot), `${JSON.stringify(anchorFile, null, 2)}\n`, "utf8");
 
         if (args.json) {
@@ -241,7 +244,7 @@ export default defineCommand({
 
       // ── --verify branch ─────────────────────────────────────────────────
       if (args.verify) {
-        const corpusRoot = resolveConsumerCorpusRoot();
+        const corpusRoot = resolveConsumerCorpusRoot(inv);
         const { anchor, error: anchorFileError } = readAuditAnchorFile(corpusRoot);
         if (anchorFileError !== undefined) {
           process.stderr.write(`Error: ${anchorFileError}\n`);

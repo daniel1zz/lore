@@ -1131,7 +1131,7 @@ export default defineCommand({
     // standalone query over the same COUNT_FIELD_ENUMERATORS registry the
     // normal-status branch consumes below, never composed with --check-*.
     if (typeof args.enumerate === "string") {
-      const { app, dbPath } = loadLoreApp();
+      const { app, dbPath } = loadLoreApp({ inv });
       try {
         const enumerator = COUNT_FIELD_ENUMERATORS[args.enumerate];
         if (enumerator === undefined) {
@@ -1259,7 +1259,7 @@ export default defineCommand({
     // not be folded into the exit-3 drift tier of the app-backed family. Exit 1 (the STORE_ERROR/verify-assertion
     // number) on a break, naming the first broken row; 0 when intact or empty.
     if (args["check-decision-log"] === true) {
-      const { app, dbPath } = loadLoreApp();
+      const { app, dbPath } = loadLoreApp({ inv });
       try {
         const checked = await collectDecisionLogStatus(dbPath);
         if (!checked.ok) {
@@ -1289,7 +1289,7 @@ export default defineCommand({
       checkMemoryPointersRequested ||
       checkBaselineRequested
     ) {
-      const { app, config, dbPath } = loadLoreApp();
+      const { app, config, dbPath } = loadLoreApp({ inv });
       try {
         // ---- Tree section — value-returning, no early process.exit (D5) ----
         let treeData: Record<string, unknown> = {};
@@ -1697,7 +1697,7 @@ export default defineCommand({
     }
 
     // ── normal status branch ─────────────────────────────────────────────────
-    const { app, config, dbPath } = loadLoreApp();
+    const { app, config, dbPath } = loadLoreApp({ inv });
     try {
       const result = await app.corpusService.status();
 

@@ -154,6 +154,7 @@ import { requirePhaseWorkflowService } from "../phase-wiring.js";
 import { resolveCallerSession } from "../caller-session.js";
 import { formatDoneMessage, formatLastTaskAdvisory } from "../done-render.js";
 import { emitIssueCloseItems } from "../issue-close-output.js";
+import { invocationOf } from "../command-invocation.js";
 
 /**
  * Resolves `--override-attestation-cite <n>`'s citation into a self-contained
@@ -316,7 +317,9 @@ export default defineCommand({
       description: "Output result as JSON",
     },
   },
-  async run({ args }) {
+  async run(context) {
+    const { args } = context;
+    const inv = invocationOf(context);
     // reason: CLI usage-error validation (exit 2) — checked BEFORE loadLoreApp(), same
     // shape as commands/set.ts's `--refine` non-empty-prompt guard and commands/
     // outline.ts's `exempt --reason` guard. A PRESENT-but-blank value is rejected;
@@ -371,7 +374,7 @@ export default defineCommand({
       process.exit(2);
     }
 
-    const { app } = loadLoreApp();
+    const { app } = loadLoreApp({ inv });
     try {
       // reason: the citation's SEMANTIC checks need the task's stored evidence,
       // so they run here (after loadLoreApp) rather than in the syntax block
@@ -402,9 +405,9 @@ export default defineCommand({
         process.exitCode = exitCode(verifiedIdentity.error);
         return;
       }
-      const by = resolveActor();
+      const by = resolveActor(undefined, inv.env, inv.cwd);
       // reason: the worktree-removal test's "mine" side (D2) — raw session id, unknown stays absent.
-      const callerSession = resolveCallerSession(undefined, process.env);
+      const callerSession = resolveCallerSession(undefined, inv.env);
       const doneOpts = {
         by,
         harnessRun: verifiedIdentity?.value?.harnessRun ?? null,

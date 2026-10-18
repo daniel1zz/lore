@@ -31,6 +31,7 @@ import { createApp } from "../../../app.js";
 import { saveConfig } from "@lore/core/node";
 import { formatError, resolveActor } from "../utils.js";
 import { isInsideGitRepository } from "../../../service/git-state-stamp.js";
+import { invocationOf } from "../command-invocation.js";
 
 export default defineCommand({
   meta: {
@@ -52,8 +53,10 @@ export default defineCommand({
       description: "Output as JSON",
     },
   },
-  async run({ args }) {
-    const cwd = process.cwd();
+  async run(context) {
+    const { args } = context;
+    const inv = invocationOf(context);
+    const cwd = inv.cwd;
     const loreDir = join(cwd, ".lore");
 
     if (existsSync(loreDir)) {
@@ -107,7 +110,7 @@ export default defineCommand({
       ? "not_a_git_repo"
       : stateBinding === undefined
         ? undefined
-        : await stateBinding.arm({ actor: resolveActor(), nowIso: new Date().toISOString() });
+        : await stateBinding.arm({ actor: resolveActor(undefined, inv.env, inv.cwd), nowIso: new Date().toISOString() });
     app.close();
     if (armed === "not_a_git_repo") {
       const line = `state binding not armed: ${cwd} is not inside a git repository; run \`lore audit arm --confirm\` after placing the corpus in git`;

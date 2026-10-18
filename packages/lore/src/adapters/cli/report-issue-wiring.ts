@@ -126,7 +126,6 @@
  * spec-a-github-filed-defect-must-be-claimable-one-ingest-seam D8, D13.
  */
 
-import { currentHomeDir } from "@lore/core/node";
 import { basename, dirname, join } from "node:path";
 import {
   assembleIssueBody,
@@ -152,7 +151,7 @@ import { computeIssueResolution, hasIssueReport, type IssueResolution } from "..
 import { ReceiptLogV2, type ReceiptV2Entry } from "../../service/receipt-log-v2.js";
 import { readGithubIssueRef, type GithubIssueRef } from "../../service/resolution-projector.js";
 import { toIssueTaskInput } from "../../service/issue-task-shaping.js";
-import { findLoreDbPath } from "./utils.js";
+import { findLoreDbPath, type CorpusLocator } from "./corpus-resolution.js";
 
 /**
  * Resolves the CALLING corpus's own root — the directory containing
@@ -160,13 +159,14 @@ import { findLoreDbPath } from "./utils.js";
  * upstream corpus `lore report-issue` files a report INTO; it is where the
  * local receipt log (`<root>/.lore/issue-receipts.jsonl`) lives.
  *
+ * @param locator - the run's `cwd` + `env` (an `Invocation` works)
  * @returns absolute path to the consumer corpus root
  * @throws process.exit(1) via `findLoreDbPath` (unchanged CLI convention)
  *   when no `.lore/lore.db` is discoverable from `cwd` — see this module's
  *   header for why this is still safe to call from an MCP tool handler.
  */
-export function resolveConsumerCorpusRoot(): string {
-  const dbPath = findLoreDbPath();
+export function resolveConsumerCorpusRoot(locator: CorpusLocator): string {
+  const dbPath = findLoreDbPath(locator);
   return dirname(dirname(dbPath));
 }
 
@@ -412,10 +412,10 @@ export interface GithubIssueListing {
  */
 export async function resolveGithubIssueListing(
   cfg: GithubUpstreamCfg,
-  env: NodeJS.ProcessEnv,
+  locator: CorpusLocator,
 ): Promise<Result<GithubIssueListing, LoreError>> {
-  const receiptsPath = join(resolveConsumerCorpusRoot(), ".lore", RECEIPT_LOG_V2_FILENAME);
-  const runner = new GhRunner({ execFile: createNodeGhExecFile(), env });
+  const receiptsPath = join(resolveConsumerCorpusRoot(locator), ".lore", RECEIPT_LOG_V2_FILENAME);
+  const runner = new GhRunner({ execFile: createNodeGhExecFile(), env: locator.env });
   const port = new GitHubIntakePort({ runner, repo: cfg.repo, receiptsPath });
 
   const verifyResult = await port.verifyTarget();
@@ -454,7 +454,7 @@ export async function resolveGithubIssueListing(
  *   `fileGithubIssue`'s `ctx.corpusService` mints ingested tasks into, never
  *   a second one
  * @param cfg - the GitHub-shaped `feedback.upstream` config
- * @param env - the environment `gh` is spawned from (`Invocation.env`)
+ * @param locator - the run's `cwd` + `env` (an `Invocation`): `env` is what `gh` is spawned from, `cwd` locates the corpus
  * @returns `ok({repoId, rows})` — `rows` has exactly one entry per listed
  *   issue, in listing order ({@link joinListing}'s own contract); `err(...)`
  *   on the first failing `gh`/store call
@@ -462,9 +462,9 @@ export async function resolveGithubIssueListing(
 export async function resolveGithubJoinedRows(
   corpusService: CorpusService,
   cfg: GithubUpstreamCfg,
-  env: NodeJS.ProcessEnv,
+  locator: CorpusLocator,
 ): Promise<Result<{ repoId: number; rows: readonly GithubIssueRow[] }, LoreError>> {
-  const listingResult = await resolveGithubIssueListing(cfg, env);
+  const listingResult = await resolveGithubIssueListing(cfg, locator);
   if (!listingResult.ok) return listingResult;
   const { issues, repoId } = listingResult.value;
 
@@ -539,8 +539,8 @@ export interface GithubFilingContext {
   readonly actor: string;
   /** Which precedence tier produced `actor` — `"os-fallback"` is DROPPED entirely by `redactReporterIdentity` (Risk R1). */
   readonly actorSource: ReporterActorSource;
-  /** The ambient home directory, for redacting `reporter_corpus`'s path prefix. Defaults to `os.homedir()`. */
-  readonly home?: string;
+  /** The Invocation's home directory (`inv.paths.home`), for redacting `reporter_corpus`'s path prefix. No ambient default (AS-26). */
+  readonly home: string;
   /** The environment `gh` is spawned from (`Invocation.env`; no ambient default, AS-26). */
   readonly env: NodeJS.ProcessEnv;
 }
@@ -819,7 +819,7 @@ export async function fileGithubIssue(
 
   const identity: RawReporterIdentity = {
     corpusRoot: ctx.consumerCorpusRoot,
-    home: ctx.home ?? currentHomeDir(),
+    home: ctx.home,
     rootPrdId: rootPrd.slug,
     actor: ctx.actor,
     actorSource: ctx.actorSource,

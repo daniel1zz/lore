@@ -94,6 +94,7 @@ import {
 } from "../../../flows/staleness-flow.js";
 import { loadTreeBlueprint } from "../../../flows/blueprint-flow.js";
 import { ok, resolveStalenessDefaults, runDeterministicChecks } from "@lore/core";
+import type { Invocation } from "@lore/core";
 import type {
   CheckResult,
   LoreError,
@@ -105,6 +106,7 @@ import type {
 } from "@lore/core";
 import type { PendingDoc } from "../../../service/review-service.js";
 import type { StalenessBatchResult, StalenessProbeOutcome } from "../../../service/staleness-probe-service.js";
+import { invocationOf } from "../command-invocation.js";
 
 /** Structural type of the wired App, without importing app.ts's bun:sqlite-reachable module. */
 type App = ReturnType<typeof loadLoreApp>["app"];
@@ -116,8 +118,8 @@ type App = ReturnType<typeof loadLoreApp>["app"];
  * blueprint is a config error worth surfacing loudly, so the caller treats a
  * parse failure as fatal (mirrors `lore status --check-tree`).
  */
-function loadBlueprintOrExit(): TreeBlueprint | undefined {
-  const loaded = loadTreeBlueprint(process.cwd());
+function loadBlueprintOrExit(inv: Invocation): TreeBlueprint | undefined {
+  const loaded = loadTreeBlueprint(inv.cwd);
   if (loaded.status === "missing") return undefined;
   if (loaded.status === "invalid") {
     process.stderr.write(formatError(loaded.error) + "\n");
@@ -269,7 +271,9 @@ export default defineCommand({
       description: "Output the result as JSON",
     },
   },
-  async run({ args }) {
+  async run(context) {
+    const { args } = context;
+    const inv = invocationOf(context);
     // SPEC-103 §Mechanisms M2, §Design Decisions D3 — `lore review backfill-ledger`
     // reserved positional verb: idempotent one-shot ledger fast-track backfill,
     // entirely orthogonal to the AI-judge review/staleness-probe pipeline below (no
@@ -277,9 +281,9 @@ export default defineCommand({
     // checks (which would otherwise misinterpret "backfill-ledger" as a doc
     // id/slug and fall through to a DOC_NOT_FOUND resolution attempt).
     if (args.doc === "backfill-ledger") {
-      const { app } = loadLoreApp();
+      const { app } = loadLoreApp({ inv });
       try {
-        const actor = resolveActor();
+        const actor = resolveActor(undefined, inv.env, inv.cwd);
         const result = await app.reviewService.backfillLedger({ actor });
         if (!result.ok) {
           process.stderr.write(formatError(result.error) + "\n");
@@ -306,7 +310,7 @@ export default defineCommand({
     }
 
     // ─── Step 1: argument mutex checks (synchronous, before any IO) ───────────
-    const rawArgv = process.argv;
+    const rawArgv = inv.argv;
     const hasExplicitAi = rawArgv.includes("--ai");
     const hasExplicitNoAi = rawArgv.includes("--no-ai");
     const isStaleness = args.staleness === true;
@@ -338,7 +342,7 @@ export default defineCommand({
       process.exit(2);
     }
 
-    const { app, config } = loadLoreApp();
+    const { app, config } = loadLoreApp({ inv });
     try {
       // ─── Step 2: AI surface-brake check (SPEC-034 §4, mirrors assess §3 D5) ──
       // reason: like assess.ts, this braked check runs unconditionally BEFORE the
@@ -357,7 +361,7 @@ export default defineCommand({
         }
       }
 
-      const actor = resolveActor();
+      const actor = resolveActor(undefined, inv.env, inv.cwd);
 
       // ─── SPEC-044: staleness probing branch ─────────────────────────────────
       if (isStaleness) {
@@ -492,7 +496,7 @@ export default defineCommand({
       }
 
       // ─── Regular review path (SPEC-034, unchanged) ──────────────────────────
-      const blueprint = loadBlueprintOrExit();
+      const blueprint = loadBlueprintOrExit(inv);
 
       // ─── Batch mode: --pending ────────────────────────────────────────────────
       if (args.pending) {

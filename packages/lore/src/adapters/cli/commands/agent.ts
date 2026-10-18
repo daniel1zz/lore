@@ -7,6 +7,7 @@
 import { defineCommand } from "citty";
 import { loadLoreApp } from "../loader.js";
 import { formatTable } from "../utils.js";
+import { invocationOf } from "../command-invocation.js";
 
 const agentCreate = defineCommand({
   meta: {
@@ -29,8 +30,10 @@ const agentCreate = defineCommand({
       description: "Output as JSON",
     },
   },
-  async run({ args }) {
-    const { app } = loadLoreApp();
+  async run(context) {
+    const { args } = context;
+    const inv = invocationOf(context);
+    const { app } = loadLoreApp({ inv });
     try {
       const result = await app.apiKeyStore.create(args.name, args.owner ?? "admin");
 
@@ -79,8 +82,10 @@ const agentList = defineCommand({
       description: "Output as JSON",
     },
   },
-  run({ args }) {
-    const { app } = loadLoreApp();
+  run(context) {
+    const { args } = context;
+    const inv = invocationOf(context);
+    const { app } = loadLoreApp({ inv });
     try {
       const result = app.apiKeyStore.list();
 
@@ -136,8 +141,10 @@ const agentRevoke = defineCommand({
       description: "Output as JSON",
     },
   },
-  run({ args }) {
-    const { app } = loadLoreApp();
+  run(context) {
+    const { args } = context;
+    const inv = invocationOf(context);
+    const { app } = loadLoreApp({ inv });
     try {
       const result = app.apiKeyStore.revoke(args.name);
 

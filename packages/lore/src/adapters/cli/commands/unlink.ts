@@ -5,6 +5,7 @@
 import { defineCommand } from "citty";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatError, resolveActor } from "../utils.js";
+import { invocationOf } from "../command-invocation.js";
 
 export default defineCommand({
   meta: {
@@ -27,11 +28,13 @@ export default defineCommand({
       description: "Output as JSON",
     },
   },
-  async run({ args }) {
-    const { app } = loadLoreApp();
+  async run(context) {
+    const { args } = context;
+    const inv = invocationOf(context);
+    const { app } = loadLoreApp({ inv });
     try {
       const result = await app.corpusService.unlink(args.from, args.to, {
-        by: resolveActor(),
+        by: resolveActor(undefined, inv.env, inv.cwd),
       });
 
       if (!result.ok) {

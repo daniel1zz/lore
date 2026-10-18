@@ -27,6 +27,7 @@ import {
   runFtsRecall,
   runPlaceholderParse,
 } from "../../../eval/index.js";
+import { invocationOf } from "../command-invocation.js";
 
 // ─── migration subcommand ─────────────────────────────────────────────────────
 
@@ -50,13 +51,15 @@ const migrationCommand = defineCommand({
       description: "Output result as JSON",
     },
   },
-  async run({ args }) {
+  async run(context) {
+    const { args } = context;
+    const inv = invocationOf(context);
     if (!args.from) {
       process.stderr.write("Error: --from <dir> is required.\n");
       process.exit(2);
     }
 
-    const { app } = loadLoreApp();
+    const { app } = loadLoreApp({ inv });
 
     try {
       const result = await runMigrationCoverage(args.from, app);
@@ -108,8 +111,10 @@ const treeCommand = defineCommand({
       description: "Output result as JSON",
     },
   },
-  async run({ args }) {
-    const { app } = loadLoreApp();
+  async run(context) {
+    const { args } = context;
+    const inv = invocationOf(context);
+    const { app } = loadLoreApp({ inv });
 
     try {
       const result = await runTreeConsistency(app);
@@ -174,8 +179,10 @@ const linksCommand = defineCommand({
       description: "Output result as JSON",
     },
   },
-  async run({ args }) {
-    const { app } = loadLoreApp();
+  async run(context) {
+    const { args } = context;
+    const inv = invocationOf(context);
+    const { app } = loadLoreApp({ inv });
 
     try {
       const result = await runLinkIntegrity(app);
@@ -240,8 +247,10 @@ const typesCommand = defineCommand({
       description: "Output result as JSON",
     },
   },
-  async run({ args }) {
-    const { app } = loadLoreApp();
+  async run(context) {
+    const { args } = context;
+    const inv = invocationOf(context);
+    const { app } = loadLoreApp({ inv });
 
     try {
       // MVP: always runs with default thresholds.
@@ -297,8 +306,10 @@ const ftsCommand = defineCommand({
       description: "Output result as JSON",
     },
   },
-  async run({ args }) {
-    const { app } = loadLoreApp();
+  async run(context) {
+    const { args } = context;
+    const inv = invocationOf(context);
+    const { app } = loadLoreApp({ inv });
 
     try {
       // MVP: always runs with default queries and threshold.
@@ -350,8 +361,10 @@ const placeholdersCommand = defineCommand({
       description: "Output result as JSON",
     },
   },
-  async run({ args }) {
-    const { app } = loadLoreApp();
+  async run(context) {
+    const { args } = context;
+    const inv = invocationOf(context);
+    const { app } = loadLoreApp({ inv });
 
     try {
       const result = await runPlaceholderParse(app);

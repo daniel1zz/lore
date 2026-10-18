@@ -36,6 +36,7 @@ import { collectPendingDecisions, renderPendingDecisions } from "../pending-deci
 import { withValidityStatus } from "../../../service/validity-service.js";
 import type { DocType, ReviewJudgment } from "@lore/core";
 import type { PendingDoc } from "../../../service/review-service.js";
+import { invocationOf } from "../command-invocation.js";
 
 /** A fresh (non-stale) escalation: decision === "escalate" AND judgment.doc_version === doc.version. */
 function isFreshEscalation(judgment: ReviewJudgment | null, docVersion: number): boolean {
@@ -81,8 +82,10 @@ export default defineCommand({
       description: "Output as JSON",
     },
   },
-  async run({ args }) {
-    const { app, dbPath } = loadLoreApp();
+  async run(context) {
+    const { args } = context;
+    const inv = invocationOf(context);
+    const { app, dbPath } = loadLoreApp({ inv });
     try {
       // AC-AU-3: open autonomy decisions (escalations awaiting the human) are listed beside the pending docs,
       // in both output modes. A read failure is loud, never an empty list.

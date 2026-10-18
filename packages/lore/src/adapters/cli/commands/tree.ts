@@ -54,6 +54,7 @@ import {
 } from "../../../service/validity-service.js";
 import type { TreeBlueprint, PlanPhase, DocRecord } from "@lore/core";
 import type { TreeNode } from "../../../service/corpus-service.js";
+import { invocationOf } from "../command-invocation.js";
 
 // ─── Phase Grouping Helpers ───────────────────────────────────────────────────
 
@@ -231,8 +232,10 @@ export default defineCommand({
       description: "List orphan docs (parent_id=null and not root type, or dangling parent)",
     },
   },
-  async run({ args }) {
-    const { app } = loadLoreApp();
+  async run(context) {
+    const { args } = context;
+    const inv = invocationOf(context);
+    const { app } = loadLoreApp({ inv });
 
     try {
       // ── orphans branch ────────────────────────────────────────────────────

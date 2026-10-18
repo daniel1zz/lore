@@ -153,6 +153,7 @@ import {
 } from "../../../service/validity-service.js";
 import { deriveTypeMeta, KNOWLEDGE_SUB_TYPES, ok } from "@lore/core";
 import type { DocRecord, DocSummary, DocType, DocStatus, LoreError, Result } from "@lore/core";
+import { invocationOf } from "../command-invocation.js";
 
 /** A full corpus row as this command FETCHES it — every full record carries its
  *  evaluated validity verdict (SPEC-043 D3's data half; see this file's header).
@@ -321,8 +322,10 @@ export default defineCommand({
       description: "Output as JSON",
     },
   },
-  async run({ args }) {
-    const { app } = loadLoreApp();
+  async run(context) {
+    const { args } = context;
+    const inv = invocationOf(context);
+    const { app } = loadLoreApp({ inv });
     try {
       // reason: ONE wall-clock read for the whole command — every validity verdict,
       // badge and `checked_at` stamp below must agree on the same instant, and the

@@ -10,6 +10,7 @@
 import { defineCommand } from "citty";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatError, resolveActor } from "../utils.js";
+import { invocationOf } from "../command-invocation.js";
 
 export default defineCommand({
   meta: {
@@ -31,14 +32,16 @@ export default defineCommand({
       description: "Output as JSON",
     },
   },
-  async run({ args }) {
+  async run(context) {
+    const { args } = context;
+    const inv = invocationOf(context);
     if (typeof args.reason !== "string" || args.reason.trim() === "") {
       process.stderr.write("Error: --reason is required: lore reopen <spec> --reason \"<why>\"\n");
       process.exit(2);
     }
-    const { app } = loadLoreApp();
+    const { app } = loadLoreApp({ inv });
     try {
-      const reviewer = resolveActor();
+      const reviewer = resolveActor(undefined, inv.env, inv.cwd);
 
       const result = await app.reviewService.reopen(args.id, args.reason, { reviewer });
       if (!result.ok) {

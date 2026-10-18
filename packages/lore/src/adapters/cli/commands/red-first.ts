@@ -34,6 +34,7 @@
 import { defineCommand } from "citty";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatError, resolveActor } from "../utils.js";
+import { invocationOf } from "../command-invocation.js";
 
 export default defineCommand({
   meta: {
@@ -51,10 +52,12 @@ export default defineCommand({
       description: "Output result as JSON",
     },
   },
-  async run({ args }) {
-    const { app } = loadLoreApp();
+  async run(context) {
+    const { args } = context;
+    const inv = invocationOf(context);
+    const { app } = loadLoreApp({ inv });
     try {
-      const by = resolveActor();
+      const by = resolveActor(undefined, inv.env, inv.cwd);
       const result = await app.taskWorkflowService.declareRedFirst(args.task as string, {
         by,
         source: app.callerSurface,

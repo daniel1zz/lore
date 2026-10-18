@@ -20,7 +20,6 @@
 import { defineCommand } from "citty";
 import type { CommandContext, CommandDef } from "citty";
 import type { Invocation } from "@lore/core";
-import { runWithinInvocation } from "./invocation-scope.js";
 import { wrapCommandStrict } from "./strict-flags.js";
 
 /** A lazily imported command module, exactly what `import("./commands/x.js")` yields. */
@@ -45,9 +44,8 @@ async function resolveMaybe<T>(value: T | Promise<T> | (() => T | Promise<T>)): 
 }
 
 /**
- * Wrap every `run` in `cmd`'s tree (nested subCommands included) so it receives `inv` as `context.inv`.
- * The wrapped `run` also opens the transitional invocation scope (`invocation-scope.ts`) that `loadLoreApp`
- * reads until the command bodies are migrated to take `inv` themselves.
+ * Wrap every `run` in `cmd`'s tree (nested subCommands included) so it receives `inv` as `context.inv`;
+ * a command body reads it with `invocationOf(context)` and passes it on explicitly (`loadLoreApp({ inv })`).
  *
  * @param inv - the invocation to deliver, or `null` for the introspection-only tree
  * @param commandPath - `lore <path>` words, for the error of the `null` tree
@@ -67,7 +65,7 @@ async function deliverInvocation(cmd: CommandDef<any>, inv: Invocation | null, c
     const originalRun = cmd.run;
     delivered.run = (context: CommandContext) => {
       if (inv === null) throw new CommandTreeWithoutInvocationError(commandPath);
-      return runWithinInvocation(inv, () => originalRun({ ...context, inv } as CommandContext));
+      return originalRun({ ...context, inv } as CommandContext);
     };
   }
   return delivered;

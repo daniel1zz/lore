@@ -78,14 +78,14 @@
  *
  * ## Why `projectDir` is derived from THIS FILE's own path, never from the corpus DB's path
  *
- * `findLoreDbPath()` (this repo's shared DB-discovery helper) falls back to the MAIN checkout's
+ * `findLoreDbPath({ cwd: process.cwd(), env: process.env })` (this repo's shared DB-discovery helper) falls back to the MAIN checkout's
  * `.lore/lore.db` whenever the caller's cwd sits inside a LINKED git worktree with no local DB of
  * its own (worktree dispatch never copies the gitignored `.lore/lore.db` — SPEC M4). The existing
  * `lore export-docs` CLI command derives its write target (`projectDir`) from `dirname(dirname(dbPath))`
  * — so run from inside a linked worktree, it would silently write generated files into the MAIN
  * checkout's working tree, not the worktree that invoked it. This script instead computes its own
  * `REPO_ROOT` from `import.meta.url` — wherever THIS FILE is checked out is where its output goes —
- * decoupling "which corpus DB answers reads" (shared, cross-worktree, via `findLoreDbPath()`) from
+ * decoupling "which corpus DB answers reads" (shared, cross-worktree, via `findLoreDbPath({ cwd: process.cwd(), env: process.env })`) from
  * "which working tree receives writes" (always the one running this script). Mirrors the identical
  * `REPO_ROOT` derivation `scripts/check-ac-ref-integrity.ts` already uses for its ledger path.
  *
@@ -652,7 +652,7 @@ function requireVerdict<T>(
  *
  * ⛔ Argument parsing happens BEFORE the corpus is opened, so a usage error costs no corpus read
  * and can never be confused with a verdict about the mirror. It also happens before
- * `findLoreDbPath()`, whose own miss path calls `process.exit(1)` — a typo'd flag must not be
+ * `findLoreDbPath({ cwd: process.cwd(), env: process.env })`, whose own miss path calls `process.exit(1)` — a typo'd flag must not be
  * reported as "no corpus found".
  *
  * @param argv defaults to `process.argv.slice(2)`; `--check` selects the read-only drift check and
@@ -660,7 +660,7 @@ function requireVerdict<T>(
  *   {@link MIRROR_USAGE_EXIT_CODE}.
  * @param repoRootOverride defaults to {@link REPO_ROOT} (this file's own location) — tests pass a
  *   throwaway fixture root here.
- * @param dbPathOverride defaults to `findLoreDbPath()` — tests pass a throwaway `mkdtemp` +
+ * @param dbPathOverride defaults to `findLoreDbPath({ cwd: process.cwd(), env: process.env })` — tests pass a throwaway `mkdtemp` +
  *   `lore init` corpus path here, NEVER the repo's own `.lore/lore.db` for anything that writes.
  */
 export async function main(
@@ -677,7 +677,7 @@ export async function main(
   const { checkMode, types } = parsed.value;
 
   const repoRoot = repoRootOverride ?? REPO_ROOT;
-  const dbPath = dbPathOverride ?? findLoreDbPath();
+  const dbPath = dbPathOverride ?? findLoreDbPath({ cwd: process.cwd(), env: process.env });
   const app = createApp(dbPath);
   try {
     if (checkMode) {

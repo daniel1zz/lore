@@ -9,6 +9,7 @@ import type { DocId } from "@lore/core";
 import { SQLiteStore } from "../../../store/sqlite-store.js";
 import { resolveDocId } from "../../../service/resolve.js";
 import { formatAttributionLabels, loadVersionAttributions, type WriteAttribution } from "../../../service/attribution-report.js";
+import { invocationOf } from "../command-invocation.js";
 
 export default defineCommand({
   meta: {
@@ -31,8 +32,10 @@ export default defineCommand({
       description: "Output as JSON",
     },
   },
-  async run({ args }) {
-    const { app, dbPath } = loadLoreApp();
+  async run(context) {
+    const { args } = context;
+    const inv = invocationOf(context);
+    const { app, dbPath } = loadLoreApp({ inv });
     // reason: `App` does not expose its store; attribution (BR-1037) is a read-only projection over the same
     // file, the same second-handle pattern `lore status` uses.
     const attributionStore = new SQLiteStore(dbPath);

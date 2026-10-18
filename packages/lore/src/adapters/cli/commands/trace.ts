@@ -51,6 +51,7 @@ import type {
 } from "../../../service/trace-stats-service.js";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatError, formatTable } from "../utils.js";
+import { invocationOf } from "../command-invocation.js";
 
 /** Default `--since` when omitted — effectively "all time" (SPEC-102 names no pinned watermark). */
 const EPOCH_ISO = "1970-01-01T00:00:00.000Z";
@@ -162,8 +163,10 @@ export default defineCommand({
             "Enumerate the MEMBERS behind a *_count field the plain run reports (never_read_docs_count, zero_hit_search_count). Composes with --since/--raw-queries. Unknown field → exit 4, naming it and the known set.",
         },
       },
-      async run({ args }) {
-        const { app } = loadLoreApp();
+      async run(context) {
+        const { args } = context;
+        const inv = invocationOf(context);
+        const { app } = loadLoreApp({ inv });
         try {
           if (app.traceStatsService === undefined) {
             // reason: createApp ALWAYS wires this in production — an absent

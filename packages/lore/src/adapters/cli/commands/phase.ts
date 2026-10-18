@@ -42,6 +42,7 @@ import { exitCode, formatError, resolveActor } from "../utils.js";
 import { requirePhaseChecklistService, getPhaseStatus } from "../phase-wiring.js";
 import type { PlanPhase, ChecklistItem } from "@lore/core";
 import type { PhaseStatusPayload } from "../../../flows/phase-status-flow.js";
+import { invocationOf } from "../command-invocation.js";
 
 export default defineCommand({
   meta: {
@@ -71,8 +72,10 @@ export default defineCommand({
           description: "Output result as JSON",
         },
       },
-      async run({ args }) {
-        const { app } = loadLoreApp();
+      async run(context) {
+        const { args } = context;
+        const inv = invocationOf(context);
+        const { app } = loadLoreApp({ inv });
         try {
           // reason: required positional citty args are always string at runtime;
           // citty types them as string|boolean|string[]|undefined for generality.
@@ -114,8 +117,10 @@ export default defineCommand({
           description: "Output result as JSON",
         },
       },
-      async run({ args }) {
-        const { app } = loadLoreApp();
+      async run(context) {
+        const { args } = context;
+        const inv = invocationOf(context);
+        const { app } = loadLoreApp({ inv });
         try {
           // reason: required positional citty args are always string at runtime
           const result = await app.phaseService.listPhases(args.plan as string);
@@ -161,8 +166,10 @@ export default defineCommand({
           description: "Output result as JSON",
         },
       },
-      async run({ args }) {
-        const { app } = loadLoreApp();
+      async run(context) {
+        const { args } = context;
+        const inv = invocationOf(context);
+        const { app } = loadLoreApp({ inv });
         try {
           // reason: required positional citty args are always string at runtime
           const result = await app.phaseService.removePhase(args.plan as string, args.name as string);
@@ -216,8 +223,10 @@ export default defineCommand({
           description: "Output result as JSON",
         },
       },
-      async run({ args }) {
-        const { app } = loadLoreApp();
+      async run(context) {
+        const { args } = context;
+        const inv = invocationOf(context);
+        const { app } = loadLoreApp({ inv });
         try {
           // reason: required positional citty args are always string at runtime
           const result = await app.phaseService.renamePhase(
@@ -273,8 +282,10 @@ export default defineCommand({
        * still maps through the normal exitCode()/formatError() LoreError pipeline
        * (3/4/5), independent of the three codes above.
        */
-      async run({ args }) {
-        const { app } = loadLoreApp();
+      async run(context) {
+        const { args } = context;
+        const inv = invocationOf(context);
+        const { app } = loadLoreApp({ inv });
         try {
           const nowIso = new Date().toISOString();
           const result = await getPhaseStatus(app, args.phase as string, nowIso);
@@ -314,8 +325,10 @@ export default defineCommand({
             command: { type: "string", description: "Exact command that will be run (script bind only)" },
             json: { type: "boolean", description: "Output result as JSON" },
           },
-          async run({ args }) {
-            const { app } = loadLoreApp();
+          async run(context) {
+            const { args } = context;
+            const inv = invocationOf(context);
+            const { app } = loadLoreApp({ inv });
             try {
               const service = requirePhaseChecklistService(app);
               const bindKind = args.bind as string;
@@ -353,8 +366,10 @@ export default defineCommand({
             phase: { type: "positional", description: "Phase document ID or slug", required: true },
             json: { type: "boolean", description: "Output result as JSON" },
           },
-          async run({ args }) {
-            const { app } = loadLoreApp();
+          async run(context) {
+            const { args } = context;
+            const inv = invocationOf(context);
+            const { app } = loadLoreApp({ inv });
             try {
               const service = requirePhaseChecklistService(app);
               const result = await service.listChecklist(args.phase as string);
@@ -388,11 +403,13 @@ export default defineCommand({
             reason: { type: "string", description: "Why this item is being dropped (required)", required: true },
             json: { type: "boolean", description: "Output result as JSON" },
           },
-          async run({ args }) {
-            const { app } = loadLoreApp();
+          async run(context) {
+            const { args } = context;
+            const inv = invocationOf(context);
+            const { app } = loadLoreApp({ inv });
             try {
               const service = requirePhaseChecklistService(app);
-              const by = resolveActor();
+              const by = resolveActor(undefined, inv.env, inv.cwd);
               const result = await service.dropChecklistItem(args.phase as string, args.id as string, {
                 by,
                 reason: args.reason as string,
@@ -423,11 +440,13 @@ export default defineCommand({
             id: { type: "positional", description: "Checklist item id", required: true },
             json: { type: "boolean", description: "Output result as JSON" },
           },
-          async run({ args }) {
-            const { app } = loadLoreApp();
+          async run(context) {
+            const { args } = context;
+            const inv = invocationOf(context);
+            const { app } = loadLoreApp({ inv });
             try {
               const service = requirePhaseChecklistService(app);
-              const by = resolveActor();
+              const by = resolveActor(undefined, inv.env, inv.cwd);
               const result = await service.checkChecklistItem(args.phase as string, args.id as string, { by });
 
               if (!result.ok) {
@@ -456,8 +475,10 @@ export default defineCommand({
             statement: { type: "string", description: "New statement text", required: true },
             json: { type: "boolean", description: "Output result as JSON" },
           },
-          async run({ args }) {
-            const { app } = loadLoreApp();
+          async run(context) {
+            const { args } = context;
+            const inv = invocationOf(context);
+            const { app } = loadLoreApp({ inv });
             try {
               const service = requirePhaseChecklistService(app);
               const result = await service.editChecklistStatement(
@@ -501,11 +522,13 @@ export default defineCommand({
             note: { type: "string", description: "Note text", required: true },
             json: { type: "boolean", description: "Output result as JSON" },
           },
-          async run({ args }) {
-            const { app } = loadLoreApp();
+          async run(context) {
+            const { args } = context;
+            const inv = invocationOf(context);
+            const { app } = loadLoreApp({ inv });
             try {
               const service = requirePhaseChecklistService(app);
-              const by = resolveActor();
+              const by = resolveActor(undefined, inv.env, inv.cwd);
               const result = await service.addTrackNote(args.phase as string, {
                 id: ulid(),
                 note: args.note as string,
@@ -537,8 +560,10 @@ export default defineCommand({
             phase: { type: "positional", description: "Phase document ID or slug", required: true },
             json: { type: "boolean", description: "Output result as JSON" },
           },
-          async run({ args }) {
-            const { app } = loadLoreApp();
+          async run(context) {
+            const { args } = context;
+            const inv = invocationOf(context);
+            const { app } = loadLoreApp({ inv });
             try {
               const service = requirePhaseChecklistService(app);
               const result = await service.listTrack(args.phase as string);

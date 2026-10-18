@@ -6,6 +6,7 @@ import { defineCommand } from "citty";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatError } from "../utils.js";
 import type { DocId } from "@lore/core";
+import { invocationOf } from "../command-invocation.js";
 
 export default defineCommand({
   meta: {
@@ -32,14 +33,16 @@ export default defineCommand({
       description: "Output as JSON",
     },
   },
-  async run({ args }) {
+  async run(context) {
+    const { args } = context;
+    const inv = invocationOf(context);
     const versionNum = parseInt(args.version, 10);
     if (isNaN(versionNum) || versionNum < 1) {
       process.stderr.write("Error: version must be a positive integer.\n");
       process.exit(2);
     }
 
-    const { app } = loadLoreApp();
+    const { app } = loadLoreApp({ inv });
     try {
       const result = await app.versionService.restore(args.id as DocId, versionNum);
 

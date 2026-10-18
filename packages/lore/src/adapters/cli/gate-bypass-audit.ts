@@ -36,7 +36,7 @@
  * Source: SPEC-080 §Scope, §Design Decisions D1/D3; AC-080-2.
  */
 
-import { invocationInScope } from "./invocation-scope.js";
+import type { Invocation } from "@lore/core";
 import {
   buildGateSkipAuditEntry,
   describeLoreError,
@@ -71,11 +71,13 @@ export interface GateBypassAuditDeps {
  *
  * @param checkpoint - Which checkpoint's `LORE_GATE_BYPASS=1` short-circuit
  *   this call is auditing.
+ * @param inv - the running command's Invocation: its claimed name (resolved once at the entry) is the actor the
+ *   audit row is attributed to — never an independent resolution (AS-26)
  * @param deps - Injected port (real wiring: `commands/gate.ts` opens a
  *   `SQLiteStore` over the discovered `.lore/lore.db`; tests inject a fake
  *   resolving/rejecting/throwing stand-in).
  * @example
- * await runGateEnvBypassAudit("task-claim", {
+ * await runGateEnvBypassAudit("task-claim", inv, {
  *   openRecordGateSkip: async () => store.appendAuditEntry.bind(store),
  * });
  * // => writes one gate_skipped/env_bypass entry, or prints the NOT-audited
@@ -83,6 +85,7 @@ export interface GateBypassAuditDeps {
  */
 export async function runGateEnvBypassAudit(
   checkpoint: GateCheckpoint,
+  inv: Invocation,
   deps: GateBypassAuditDeps,
 ): Promise<void> {
   let recordGateSkip: RecordGateSkip | null;
@@ -100,14 +103,7 @@ export async function runGateEnvBypassAudit(
 
   const nowIso = new Date().toISOString();
   // reason: the invocation's claimed name (resolved once at the entry) — never an independent resolution.
-  const scopedInvocation = invocationInScope();
-  if (scopedInvocation === undefined) {
-    // reason: no delivered Invocation means no resolved name to attribute the row to, and a guessed one is worse than
-    // no row — the audit is best-effort by contract (D3), so say so loudly and let the gate proceed.
-    warnBypassNotAudited("no invocation in scope: cannot name the actor");
-    return;
-  }
-  const actor = scopedInvocation.identity.claimed;
+  const actor = inv.identity.claimed;
   const entry = buildGateSkipAuditEntry(checkpoint, "env_bypass", nowIso, actor);
 
   try {
