@@ -9,11 +9,12 @@
  * REGRESSION (package.json routes `test` through the runner, keeps the oracle lock, and lists the same steps).
  */
 import { spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { DEFAULT_STEPS, main, renderTable, runChain } from "../run-chain";
+import { DEFAULT_STEPS, deriveStaticSteps, main, renderTable, runChain, runStaticFloor } from "../run-chain";
 
 const ROOT = join(fileURLToPath(import.meta.url), "..", "..", "..");
 const fake = (codes: Record<string, number>) => {
@@ -80,6 +81,60 @@ describe("runChain", () => {
     expect(DEFAULT_STEPS).toContain("bun run test:vitest");
     expect(DEFAULT_STEPS).toContain("bun run check:evidence-identity-drop-set");
     expect(pkg.scripts["check:evidence-identity-drop-set"]).toBe("bun scripts/check-evidence-identity-drop-set.ts");
+  });
+});
+
+describe("check:static (deriveStaticSteps / runStaticFloor)", () => {
+  const scripts = { build: "x", typecheck: "y", test: "z", "check:a": "a", "check:spec-mirror": "m", "check:static": "s", "other:check:b": "b" };
+
+  it("HAPPY: derives build, typecheck, then every ^check: script, excluding itself", () => {
+    expect(deriveStaticSteps(scripts).steps).toEqual(["bun run build", "bun run typecheck", "bun run check:a", "bun run check:spec-mirror"]);
+  });
+
+  it("STATE: a newly added check:* script is picked up without editing the runner", () => {
+    expect(deriveStaticSteps({ ...scripts, "check:brand-new": "n" }).steps).toContain("bun run check:brand-new");
+  });
+
+  it("labels corpus-dependent steps in the table", () => {
+    const { steps, labels } = deriveStaticSteps(scripts);
+    const table = renderTable(runChain(steps, () => ({ exit: 0, seconds: 0 })), labels);
+    expect(table).toMatch(/check:spec-mirror\s+\[corpus-dependent/);
+    expect(table).not.toMatch(/check:a\s+\[/);
+  });
+
+  it("ERROR: missing build or typecheck throws", () => {
+    expect(() => deriveStaticSteps({ typecheck: "y", "check:a": "a" })).toThrow(/"build"/);
+    expect(() => deriveStaticSteps({ build: "x", "check:a": "a" })).toThrow(/"typecheck"/);
+  });
+
+  it("RED-FIRST: a fixture package.json with a failing check step exits non-zero naming it, and later steps still ran", () => {
+    const dir = mkdtempSync(join(tmpdir(), "static-floor-"));
+    try {
+      const pkg = join(dir, "package.json");
+      writeFileSync(pkg, JSON.stringify({ scripts: { build: "true", typecheck: "true", "check:bad": "false", "check:later": "true" } }));
+      const ran: string[] = [];
+      const logs: string[] = [];
+      const orig = console.log;
+      console.log = (m: string) => void logs.push(String(m));
+      let code: number;
+      try {
+        code = runStaticFloor(pkg, (s) => (ran.push(s), { exit: s === "bun run check:bad" ? 1 : 0, seconds: 0 }));
+      } finally {
+        console.log = orig;
+      }
+      expect(code).toBe(1);
+      expect(ran).toEqual(["bun run build", "bun run typecheck", "bun run check:bad", "bun run check:later"]);
+      expect(logs.join("\n")).toContain("1 of 4 steps FAILED: bun run check:bad");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("REGRESSION: package.json wires check:static to the runner and the derived list covers every real check:*", () => {
+    const real = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8")).scripts as Record<string, string>;
+    expect(real["check:static"]).toContain("run-chain.ts --static");
+    const { steps } = deriveStaticSteps(real);
+    for (const name of Object.keys(real).filter((n) => n.startsWith("check:") && n !== "check:static")) expect(steps).toContain(`bun run ${name}`);
   });
 });
 
