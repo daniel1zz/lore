@@ -1,4 +1,5 @@
 // @spawns packages/lore/src/index.ts
+// @reads assets/project/reference-transaction
 /**
  * AC-INT-1 oracle — `lore integrate <branch>`: concurrent integrations keep their own commits and never leave a
  * half state (spec-main-advances-only-through-lore-integrate-per-session, BR-1245).
