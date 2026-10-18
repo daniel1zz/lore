@@ -40,7 +40,7 @@ import {
   type WorktreeRemovalVerdict,
 } from "./worktree-removal-test.js";
 import {
-  ignoredPathsOutsideRegenerableSet,
+  ignoredPathsOutsideLossFreeSet,
   isFalsifierScratchPath,
   type ListedWorktree,
   type ScratchRemovalPort,
@@ -176,7 +176,7 @@ export class WorktreeRemovalService implements WorktreeRemovalFactsPort, Worktre
   private async decideRemoval(path: string): Promise<WorktreeRemovalGate> {
     const { probe } = this.deps;
     const ignored = probe.ignoredPaths(path);
-    const outside = ignored.ok ? ignoredPathsOutsideRegenerableSet(ignored.value) : [];
+    const outside = ignored.ok ? ignoredPathsOutsideLossFreeSet(probe, path, ignored.value) : [];
     const head = probe.headSha(path);
     // reason: the version carries the ignored-outside list, so removing the offending file produces a NEW subject and the
     // worktree can become auto — while the SAME listing can never be re-scored upward (AC-AU-2 worst-of per version).

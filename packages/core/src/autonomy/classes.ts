@@ -110,3 +110,25 @@ export const OPERATION_CLASS_REGISTRY: OperationClassRegistry = {
   "push-force": human,
   "archive-ref-prune": human,
 };
+
+/**
+ * The worktree-remove class's declared regenerable set: gitignore-style patterns for ignored paths that regenerate
+ * from tracked sources or the build, so removing them loses nothing (AC-AU-11, rule (b) of the ignored-file rule).
+ * Syntax: a trailing `/` matches a directory (and everything under it); a pattern without an inner `/` matches at
+ * any depth; otherwise it is anchored at the worktree root; `*` stays inside one path segment, `**` crosses them.
+ *
+ * reason: SEED DATA. AU-T9 moves this into the governed class record (loosening it is `governance-loosen`, human
+ * only); until then it lives beside the registry so the rule has one declared source, not a list inside the
+ * cleanup service. Widening it here is a governance-loosen change — do not add a path just to make a worktree pass.
+ * Source: task AU-T13; spec-autonomy-phase-1-decision-function-human-channel-lore AC-AU-11.
+ */
+export const WORKTREE_REMOVE_REGENERABLE_PATTERNS: readonly string[] = [
+  "node_modules/",
+  "dist/",
+  ".turbo/",
+  "coverage/",
+  "*.tsbuildinfo",
+  "packages/*/dist/",
+  "**/*.gen.ts",
+  "packages/lore/src/generated/**",
+];

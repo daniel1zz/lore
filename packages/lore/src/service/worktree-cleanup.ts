@@ -12,7 +12,8 @@
  *   - {@link evaluateRecordedWorktree}    — gather + decide
  *   - {@link applyWorktreeRemoval}        — `git worktree remove` then `git branch -d` (never forced)
  *   - {@link formatWorktreeOutcomeLine}   — the `worktree: ...` line `lore done` prints
- *   - {@link ignoredPathsOutsideRegenerableSet} / {@link WorktreeRemovalGatePort} — AC-AU-11: the ignored-file rule
+ *   - {@link ignoredPathsOutsideLossFreeSet} / {@link WorktreeRemovalGatePort} — AC-AU-11: the ignored-file rule
+ *     (loss-free = byte-identical to main's copy, OR in the class's declared regenerable set)
  *     and the decide(worktree-remove) gate every removal path runs AFTER the removal test says removable
  *   - {@link SCRATCH_OWNER_FILE} + scratch helpers — lore-attested-red-* falsifier scratch worktrees and their owner marker
  *
@@ -34,9 +35,9 @@
  */
 
 import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, readdirSync, readFileSync, readlinkSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
-import type { AuditEntry } from "@lore/core";
+import { WORKTREE_REMOVE_REGENERABLE_PATTERNS, type AuditEntry } from "@lore/core";
 import {
   decideWorktreeRemoval,
   type Measured,
@@ -86,6 +87,11 @@ export interface WorktreeGitProbe {
   deleteBranch(repoRoot: string, branch: string): ProbeResult<true>;
   /** `git status --ignored --porcelain` in `path`: every IGNORED path (as git printed it, `!! ` prefix stripped). */
   ignoredPaths(path: string): ProbeResult<readonly string[]>;
+  /**
+   * Whether the ignored path `relPath` of worktree `path` is byte-identical to the same path in the main checkout
+   * (the first entry of `git worktree list`). Optional: an absent method proves nothing, so the path stays listed.
+   */
+  ignoredPathIdenticalToMain?(path: string, relPath: string): ProbeResult<boolean>;
   /** The owner marker of the falsifier scratch worktree at `path`: `null` when the marker file is absent. */
   scratchOwner(path: string): ProbeResult<{ readonly pid: number } | null>;
   /** Whether process `pid` exists (signal 0). A pid that cannot be probed counts as alive (keep wins). */
@@ -123,27 +129,99 @@ export function writeScratchOwner(parentDir: string, pid: number): ProbeResult<t
 
 // ── The ignored-file rule (AC-AU-11) ────────────────────────────────────────
 
-/** Directory names whose ignored contents regenerate from tracked sources (the class's declared regenerable set). */
-export const REGENERABLE_IGNORED_NAMES: readonly string[] = ["node_modules", "dist", ".turbo", "coverage"];
-/** File suffixes of ignored build by-products (the declared regenerable set). */
-export const REGENERABLE_IGNORED_SUFFIXES: readonly string[] = [".tsbuildinfo"];
+/** Regex for one gitignore-style glob: `**` crosses segments, `*` and `?` stay inside one. */
+function globToRegExp(glob: string): RegExp {
+  let source = "";
+  for (let i = 0; i < glob.length; i++) {
+    const char = glob[i] as string;
+    if (char === "*") {
+      if (glob[i + 1] === "*") {
+        const slashFollows = glob[i + 2] === "/";
+        source += slashFollows ? "(?:.*/)?" : ".*";
+        i += slashFollows ? 2 : 1;
+      } else source += "[^/]*";
+    } else if (char === "?") source += "[^/]";
+    else source += char.replace(/[.+^${}()|[\]\\]/g, "\\$&");
+  }
+  return new RegExp(`^${source}$`);
+}
 
-function isRegenerableIgnoredPath(path: string): boolean {
+/** Whether `path` (as git printed it; a directory ends with `/`) is, or lies under, a path matching `pattern`. */
+function matchesRegenerablePattern(path: string, pattern: string): boolean {
+  const isDirectory = path.endsWith("/");
   const segments = path.split("/").filter((segment) => segment !== "");
-  if (segments.some((segment) => REGENERABLE_IGNORED_NAMES.includes(segment))) return true;
-  const leaf = segments[segments.length - 1] ?? "";
-  return REGENERABLE_IGNORED_SUFFIXES.some((suffix) => leaf.endsWith(suffix));
+  const directoryOnly = pattern.endsWith("/");
+  const body = directoryOnly ? pattern.slice(0, -1) : pattern;
+  const matcher = globToRegExp(body);
+  const unanchored = !body.includes("/");
+  // Candidates: every leading prefix of the path. A prefix shorter than the whole path is a directory by construction.
+  for (let length = 1; length <= segments.length; length++) {
+    const isWhole = length === segments.length;
+    if (directoryOnly && isWhole && !isDirectory) continue;
+    const candidate = unanchored ? (segments[length - 1] as string) : segments.slice(0, length).join("/");
+    if (matcher.test(candidate)) return true;
+    // `dir/**` must match the collapsed directory itself, which git prints as `dir/`.
+    if (isWhole && isDirectory && !unanchored && matcher.test(`${candidate}/`)) return true;
+  }
+  return false;
 }
 
 /**
- * The ignored paths NOT in the regenerable set — the paths whose removal would lose data nothing can rebuild.
+ * The ignored paths NOT in the declared regenerable set ({@link WORKTREE_REMOVE_REGENERABLE_PATTERNS}) — rule (b).
  *
  * @param ignored - ignored paths as `git status --ignored --porcelain` printed them (directories end with `/`)
  * @example
  * ignoredPathsOutsideRegenerableSet(["node_modules/", ".env", "packages/a/dist/"]) // [".env"]
  */
 export function ignoredPathsOutsideRegenerableSet(ignored: readonly string[]): string[] {
-  return ignored.filter((path) => !isRegenerableIgnoredPath(path));
+  return ignored.filter((path) => !WORKTREE_REMOVE_REGENERABLE_PATTERNS.some((pattern) => matchesRegenerablePattern(path, pattern)));
+}
+
+/**
+ * The ignored paths that are NEITHER regenerable (rule (b)) NOR byte-identical to the main checkout's copy (rule (a)).
+ * These are the only paths whose removal could lose data; a non-empty result escalates the removal.
+ * A probe that cannot prove identity (method absent, or `ok: false`) leaves the path listed — unproven is never loss-free.
+ */
+export function ignoredPathsOutsideLossFreeSet(
+  probe: Pick<WorktreeGitProbe, "ignoredPathIdenticalToMain">,
+  worktreePath: string,
+  ignored: readonly string[],
+): string[] {
+  return ignoredPathsOutsideRegenerableSet(ignored).filter((path) => {
+    const identical = probe.ignoredPathIdenticalToMain?.(worktreePath, path);
+    return !(identical?.ok === true && identical.value);
+  });
+}
+
+/**
+ * Whether `relPath` (a file, or a directory ending `/`) under `worktreeRoot` is byte-identical to the same path under
+ * `mainRoot`: a directory needs the same entry names with identical bytes; a path absent in main is NOT identical.
+ * Symlinks compare by target. Absence on either side is `false`, not an error.
+ */
+export function isPathIdenticalUnder(worktreeRoot: string, mainRoot: string, relPath: string): boolean {
+  const here = join(worktreeRoot, relPath);
+  const there = join(mainRoot, relPath);
+  let hereStat;
+  let thereStat;
+  try {
+    hereStat = lstatSync(here);
+    thereStat = lstatSync(there);
+  } catch {
+    // reason: a missing side means "not identical" (absent in main is never proof), not an error to surface.
+    return false;
+  }
+  if (hereStat.isSymbolicLink() || thereStat.isSymbolicLink()) {
+    return hereStat.isSymbolicLink() && thereStat.isSymbolicLink() && readlinkSync(here) === readlinkSync(there);
+  }
+  if (hereStat.isDirectory() || thereStat.isDirectory()) {
+    if (!(hereStat.isDirectory() && thereStat.isDirectory())) return false;
+    const names = readdirSync(here).sort();
+    const otherNames = readdirSync(there).sort();
+    if (names.length !== otherNames.length || names.some((name, index) => name !== otherNames[index])) return false;
+    return names.every((name) => isPathIdenticalUnder(worktreeRoot, mainRoot, join(relPath, name)));
+  }
+  if (!hereStat.isFile() || !thereStat.isFile() || hereStat.size !== thereStat.size) return false;
+  return readFileSync(here).equals(readFileSync(there));
 }
 
 /** What a removal path learns from the decide(worktree-remove) gate. */
@@ -587,6 +665,18 @@ export function createRealWorktreeProbe(): WorktreeGitProbe {
         .filter((line) => line.startsWith("!! "))
         .map((line) => line.slice(3).replace(/^"(.*)"$/, "$1"));
       return { ok: true, value: ignored };
+    },
+    ignoredPathIdenticalToMain: (path, relPath) => {
+      const listed = runGit(path, ["worktree", "list", "--porcelain"]);
+      if (!listed.ok) return listed;
+      const main = parseListPorcelain(listed.value)[0];
+      if (main === undefined) return { ok: false, reason: "git worktree list named no main checkout" };
+      if (resolve(main.path) === resolve(path)) return { ok: true, value: false };
+      try {
+        return { ok: true, value: isPathIdenticalUnder(path, main.path, relPath) };
+      } catch (cause) {
+        return { ok: false, reason: `identity compare failed: ${cause instanceof Error ? cause.message : String(cause)}` };
+      }
     },
     scratchOwner: (path) => {
       const markerPath = join(dirname(path), SCRATCH_OWNER_FILE);
