@@ -27,6 +27,7 @@ import type {
 } from "@lore/core";
 import type { LoreError, Result } from "@lore/core";
 import type { AuditChainEntry } from "./store-shared.js";
+import type { DecisionLogRow, DecisionRecordInput } from "./decision-log.js";
 
 /**
  * Re-exported for backward compatibility — every store + the service layer
@@ -44,6 +45,14 @@ export type { SearchHit };
  * the same module, mirroring the `SearchHit` precedent above.
  */
 export type { AuditChainEntry };
+
+/** One (class, subject, version) triple — the unit the effective decision verdict is computed over. */
+export interface DecisionSubjectKey {
+  readonly class: string;
+  readonly subject_id: string;
+  readonly subject_version: string;
+}
+export type { DecisionLogRow, DecisionRecordInput };
 
 // ─── Update Options ────────────────────────────────────────────────────────
 
@@ -1050,6 +1059,19 @@ export interface StoreInterface {
    * steady state (see migration-009.ts's module JSDoc).
    */
   listAuditChain(): Promise<Result<AuditChainEntry[], LoreError>>;
+
+  /**
+   * Append ONE autonomy decision record (AC-AU-2). The store reads the chain head and inserts the row inside
+   * ONE write transaction, so two processes appending at once both land and the chain stays intact; hashes are
+   * computed here, never supplied by the caller. Append-only: no update or delete method exists.
+   */
+  appendDecisionRecord(input: DecisionRecordInput): Promise<Result<DecisionLogRow, LoreError>>;
+
+  /**
+   * Decision-log rows in `id` ASC order, WITH hash fields. Optional `subject` narrows to one
+   * (class, subject_id, subject_version) — chain verification must call it WITHOUT a filter.
+   */
+  listDecisionLog(subject?: DecisionSubjectKey): Promise<Result<DecisionLogRow[], LoreError>>;
 
   /**
    * Every audit row whose `action` equals `action` (optionally only for one doc), in `id` ASC

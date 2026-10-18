@@ -152,6 +152,7 @@ import {
 } from "../../../flows/drift-flow.js";
 import { buildRealFsProbe } from "../../real-fs-probe.js";
 import { SQLiteStore } from "../../../store/sqlite-store.js";
+import { DECISION_LOG_BREAK_EXIT, collectDecisionLogStatus, renderDecisionLogLine } from "../status-decision-log.js";
 import { RuleStateService } from "../../../service/rule-state-service.js";
 import { SpawnGitPort, resolveGitRoot } from "../../../service/rule-state-git-port.js";
 import {
@@ -1018,6 +1019,11 @@ export default defineCommand({
       description:
         "Verify the product-baseline tree: registry <-> leaf rule ids agree, no rule sits on a non-leaf node, every depends_on names an existing rule. Any finding -> exit 3 (each is printed). Composes with --check-tree/--check-drift/--check-requirements/--check-prd-budget/--check-issues/--check-memory-pointers.",
     },
+    "check-decision-log": {
+      type: "boolean",
+      description:
+        "Verify the autonomy decision log's hash chain (AC-AU-2). Intact or empty -> exit 0; a tampered, deleted or reordered row -> exit 1, naming the first broken row. Standalone — runs alone when combined with the app-backed --check-* flags.",
+    },
     "check-fragments": {
       type: "boolean",
       description:
@@ -1202,6 +1208,31 @@ export default defineCommand({
     // finding; only the stdout/stderr rendering below is repeated (it is module-private there).
     if (args["check-fragments"] === true) {
       await runFragmentsCheckCommand(args, process.cwd(), "lore status --check-fragments");
+      return;
+    }
+
+    // ── check-decision-log branch (spec-autonomy-phase-1-decision-function-human-channel-lore, AC-AU-2) ──
+    // reason: standalone like --check-fragments — the decision log is its own hash chain, so its verdict must
+    // not be folded into the exit-3 drift tier of the app-backed family. Exit 1 (the STORE_ERROR/verify-assertion
+    // number) on a break, naming the first broken row; 0 when intact or empty.
+    if (args["check-decision-log"] === true) {
+      const { app, dbPath } = loadLoreApp();
+      try {
+        const checked = await collectDecisionLogStatus(dbPath);
+        if (!checked.ok) {
+          process.stderr.write(formatError(checked.error) + "\n");
+          process.exitCode = exitCode(checked.error);
+          return;
+        }
+        if (args.json) {
+          console.log(JSON.stringify({ ok: true, data: { decision_log: { ...checked.value.verify, head: checked.value.head } } }, null, 2));
+        } else {
+          console.log(renderDecisionLogLine(checked.value));
+        }
+        process.exitCode = checked.value.verify.clean ? 0 : DECISION_LOG_BREAK_EXIT;
+      } finally {
+        app.close();
+      }
       return;
     }
 
@@ -2056,6 +2087,18 @@ export default defineCommand({
             `live ${baselineStatus.rules_by_lifecycle.live}, deprecated ${baselineStatus.rules_by_lifecycle.deprecated}, retired ${baselineStatus.rules_by_lifecycle.retired}); ` +
             `${baselineStatus.debt_entries} AD debt entries not counted`,
         );
+      }
+
+      // AC-AU-2 — decision-log chain line, printed only when the log has records or is broken (a corpus with no
+      // decisions prints what it printed before). Report-only: the exit-1 oracle is `--check-decision-log`.
+      const decisionLogStatus = await collectDecisionLogStatus(dbPath);
+      if (!decisionLogStatus.ok) {
+        process.stderr.write(formatError(decisionLogStatus.error) + "\n");
+        process.exitCode = exitCode(decisionLogStatus.error);
+        return;
+      }
+      if (!decisionLogStatus.value.verify.clean || decisionLogStatus.value.head !== null) {
+        console.log(`\n${renderDecisionLogLine(decisionLogStatus.value)}`);
       }
 
       // baseline slice 1 §C7 — one line, only when a warning count is non-zero (report-only).

@@ -1,0 +1,176 @@
+/**
+ * DecisionService — the ONE adapter-facing path that runs decide() and records it.
+ *
+ * Purpose: every autonomy decision made through the service layer is appended to the hash-chained decision log,
+ * and the EFFECTIVE verdict of a (class, subject, version) is answered from that log, never from a re-score.
+ * Public surface: DecisionService.{decide, effectiveVerdict, verifyChain, chainHead, recordHumanTtyUngated},
+ *   DecisionSubject, DecideOutcome.
+ * Invariants:
+ *   - INV-2 (plan): no public method accepts caller-provided factor values. `decide` takes MEASURED FACTS
+ *     (autonomyFactsSchema) and the factor values are computed by @lore/core's decide(); a new method that
+ *     takes `factors`/`score`/`verdict` from a caller is a defect.
+ *   - Every `decide` call appends exactly one row (machine channel), including a `refuse` verdict from an
+ *     invariant violation; a store failure is returned, never swallowed, and the verdict is NOT handed out.
+ *   - The effective verdict rules live in store/decision-log.ts::effectiveDecisionVerdict (latest human-tty,
+ *     else worst machine); this service only fetches the subject's rows and applies them.
+ *   - A new `subject.version` is a new subject: re-scoring the same version with better facts cannot improve it.
+ * Side-effect class: IO (decision_log appends through the injected store; clock via the injected `now`).
+ *
+ * Source: spec-autonomy-phase-1-decision-function-human-channel-lore AC-AU-2;
+ *   adr-autonomy-is-decided-by-measured-facts-one-decision-function D5.
+ */
+import { decide, err, ok, type AutonomyDecision, type LoreError, type Result, type OperationClassRegistry } from "@lore/core";
+import {
+  decisionChainHead,
+  effectiveDecisionVerdict,
+  verifyDecisionChain,
+  type DecisionChainHead,
+  type DecisionChainVerifyResult,
+  type DecisionLogRow,
+  type DecisionRecordInput,
+  type EffectiveDecisionVerdict,
+} from "../store/decision-log.js";
+import type { StoreInterface } from "../store/store-interface.js";
+
+/** What a decision is about: a stable id plus the version (or sha) it was measured at. */
+export interface DecisionSubject {
+  readonly id: string;
+  readonly version: string;
+}
+
+export interface DecideOutcome {
+  /** The raw machine decision for THIS call's facts (may be better than the effective verdict). */
+  readonly decision: AutonomyDecision;
+  /** The appended record's id. */
+  readonly record_id: number;
+  /** What actually binds this subject version after this call. */
+  readonly effective: EffectiveDecisionVerdict;
+}
+
+export interface DecisionServiceDeps {
+  readonly store: StoreInterface;
+  /** Attested run id of the executing harness run, or null when the process has none. */
+  readonly executorRun: string | null;
+  /** Injected clock (ISO 8601). */
+  readonly now?: () => string;
+  /** Class registry override for tests; defaults to @lore/core's. */
+  readonly registry?: OperationClassRegistry;
+}
+
+/** JSON with object keys recursively sorted, so equal values serialise to equal text. */
+function canonicalJson(value: unknown): string {
+  const sort = (v: unknown): unknown => {
+    if (Array.isArray(v)) return v.map(sort);
+    if (v !== null && typeof v === "object") {
+      return Object.fromEntries(
+        Object.entries(v as Record<string, unknown>)
+          .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+          .map(([k, val]) => [k, sort(val)]),
+      );
+    }
+    return v;
+  };
+  return JSON.stringify(sort(value));
+}
+
+function validationError(field: string, message: string): LoreError {
+  return { code: "VALIDATION_ERROR", field, message };
+}
+
+export class DecisionService {
+  constructor(private readonly deps: DecisionServiceDeps) {}
+
+  private now(): string {
+    return (this.deps.now ?? (() => new Date().toISOString()))();
+  }
+
+  /**
+   * Run decide() over measured `facts`, append the machine-channel record, and return the decision together
+   * with the effective verdict of `(classId, subject.id, subject.version)`.
+   *
+   * @returns err(VALIDATION_ERROR) when `subject.version` is empty or `facts` is not JSON-serialisable (nothing
+   *   recorded); err(STORE_ERROR) when the append fails.
+   */
+  async decide(classId: string, subject: DecisionSubject, facts: unknown): Promise<Result<DecideOutcome, LoreError>> {
+    if (subject.version === "") return err(validationError("subject.version", "a decision subject needs a version or sha"));
+    let factsJson: string;
+    try {
+      factsJson = canonicalJson(facts === undefined ? {} : facts);
+    } catch (cause) {
+      return err(validationError("facts", `facts are not JSON-serialisable: ${String(cause)}`));
+    }
+    const decision = decide(classId, subject.id, facts, this.deps.registry);
+    const appended = await this.deps.store.appendDecisionRecord({
+      ts: this.now(),
+      class: classId,
+      subject_id: subject.id,
+      subject_version: subject.version,
+      facts: factsJson,
+      factors: canonicalJson(decision.factors),
+      score: decision.score,
+      threshold: decision.threshold,
+      verdict: decision.verdict,
+      reasons: canonicalJson(decision.reasons),
+      executor_run: this.deps.executorRun,
+      channel: "machine",
+    });
+    if (!appended.ok) return appended;
+    const effective = await this.effectiveVerdict(classId, subject);
+    if (!effective.ok) return effective;
+    if (effective.value === null) {
+      return err({ code: "STORE_ERROR", message: `decision_log has no effective verdict right after appending record ${appended.value.id}` });
+    }
+    return ok({ decision, record_id: appended.value.id, effective: effective.value });
+  }
+
+  /** Effective verdict for one subject version, or null when it has no decision yet. */
+  async effectiveVerdict(classId: string, subject: DecisionSubject): Promise<Result<EffectiveDecisionVerdict | null, LoreError>> {
+    const key = { class: classId, subject_id: subject.id, subject_version: subject.version };
+    const rows = await this.deps.store.listDecisionLog(key);
+    if (!rows.ok) return rows;
+    return ok(effectiveDecisionVerdict(rows.value, key));
+  }
+
+  /** Whole-chain verification (id ASC). Never filtered: a filtered walk cannot see a deleted row. */
+  async verifyChain(): Promise<Result<DecisionChainVerifyResult, LoreError>> {
+    const rows = await this.deps.store.listDecisionLog();
+    if (!rows.ok) return rows;
+    return ok(verifyDecisionChain(rows.value));
+  }
+
+  /** Current chain head (id, hash, row count), or null for an empty log. AU-T9 records it in mirror exports. */
+  async chainHead(): Promise<Result<DecisionChainHead | null, LoreError>> {
+    const rows = await this.deps.store.listDecisionLog();
+    if (!rows.ok) return rows;
+    return ok(decisionChainHead(rows.value));
+  }
+
+  /**
+   * ⛔ INTERNAL TEST SEAM — NOT THE HUMAN CHANNEL. Appends a `human-tty` record (verdict `auto` = accept,
+   * `refuse` = reject) with NO tty, nonce or agent-ancestry check. AU-T3 (human channel) replaces this with a
+   * gated writer and must delete or gate this method; until then NO adapter may call it. It still takes no
+   * factor values: the record carries the human's verdict and the subject's identity only.
+   */
+  async recordHumanTtyUngated(
+    classId: string,
+    subject: DecisionSubject,
+    verdict: "auto" | "refuse",
+  ): Promise<Result<DecisionLogRow, LoreError>> {
+    if (subject.version === "") return err(validationError("subject.version", "a decision subject needs a version or sha"));
+    const input: DecisionRecordInput = {
+      ts: this.now(),
+      class: classId,
+      subject_id: subject.id,
+      subject_version: subject.version,
+      facts: "{}",
+      factors: "{}",
+      score: verdict === "auto" ? 1 : 0,
+      threshold: null,
+      verdict,
+      reasons: canonicalJson([`human-tty ${verdict === "auto" ? "accept" : "reject"}`]),
+      executor_run: this.deps.executorRun,
+      channel: "human-tty",
+    };
+    return this.deps.store.appendDecisionRecord(input);
+  }
+}

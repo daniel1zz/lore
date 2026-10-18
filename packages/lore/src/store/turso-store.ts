@@ -45,6 +45,10 @@ import { MIGRATION_017_ADD_COLUMNS, MIGRATION_017_SQL } from "./migrations/migra
 import { MIGRATION_015_SQL } from "./migrations/migration-015.js";
 import { MIGRATION_018_SQL } from "./migrations/migration-018.js";
 import { MIGRATION_019_ADD_COLUMNS, MIGRATION_019_SQL } from "./migrations/migration-019.js";
+import { MIGRATION_020_SQL } from "./migrations/migration-020.js";
+import { DECISION_GENESIS_HASH, computeDecisionEntryHash } from "./decision-log.js";
+import type { DecisionLogRow, DecisionRecordInput } from "./decision-log.js";
+import type { DecisionSubjectKey } from "./store-interface.js";
 import type { RuleIdPrefix } from "@lore/core";
 import { listedRuleLifecycle } from "./index-rows.js";
 import type {
@@ -742,6 +746,11 @@ export class TursoStore implements StoreInterface {
           if (!info.rows.some((r) => rowStr(r, "name") === column)) await this.client.execute(ddl);
         }
         await this.client.executeMultiple(MIGRATION_019_SQL);
+      }
+
+      if (currentVersion < 20) {
+        // reason: migration-020 (decision_log + append-only triggers) is one idempotent BEGIN/COMMIT string.
+        await this.client.executeMultiple(MIGRATION_020_SQL);
       }
     })();
 
@@ -2499,6 +2508,101 @@ export class TursoStore implements StoreInterface {
       } finally {
         tx.close();
       }
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
+  // ── Decision log (migration-020, AC-AU-2) ──────────────────────────────
+
+  /**
+   * @see StoreInterface.appendDecisionRecord
+   *
+   * Head-read + insert through ONE `transaction("write")` (libsql serializes concurrent writers on it), same
+   * shape as {@link appendAuditEntryTx}.
+   */
+  async appendDecisionRecord(input: DecisionRecordInput): Promise<Result<DecisionLogRow, LoreError>> {
+    try {
+      await this.ensureReady();
+      const tx = await this.client.transaction("write");
+      try {
+        const headRs = await tx.execute("SELECT entry_hash FROM decision_log ORDER BY id DESC LIMIT 1");
+        const headRow = headRs.rows[0];
+        const prevHash = headRow ? rowStr(headRow, "entry_hash") : DECISION_GENESIS_HASH;
+        const entryHash = computeDecisionEntryHash(input, prevHash);
+        const rs = await tx.execute({
+          sql: `INSERT INTO decision_log
+                  (ts, class, subject_id, subject_version, facts, factors, score, threshold, verdict, reasons,
+                   executor_run, channel, prev_hash, entry_hash)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          args: [
+            input.ts,
+            input.class,
+            input.subject_id,
+            input.subject_version,
+            input.facts,
+            input.factors,
+            input.score,
+            input.threshold,
+            input.verdict,
+            input.reasons,
+            input.executor_run,
+            input.channel,
+            prevHash,
+            entryHash,
+          ] as InValue[],
+        });
+        await tx.commit();
+        return ok({ ...input, id: Number(rs.lastInsertRowid), prev_hash: prevHash, entry_hash: entryHash });
+      } catch (e) {
+        try {
+          await tx.rollback();
+        } catch {
+          // reason: rollback throws only when the transaction is already closed — `e` is what the caller needs.
+        }
+        throw e;
+      } finally {
+        tx.close();
+      }
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
+  /**
+   * @see StoreInterface.listDecisionLog
+   */
+  async listDecisionLog(subject?: DecisionSubjectKey): Promise<Result<DecisionLogRow[], LoreError>> {
+    try {
+      await this.ensureReady();
+      const rs =
+        subject === undefined
+          ? await this.client.execute("SELECT * FROM decision_log ORDER BY id ASC")
+          : await this.client.execute({
+              sql: "SELECT * FROM decision_log WHERE class = ? AND subject_id = ? AND subject_version = ? ORDER BY id ASC",
+              args: [subject.class, subject.subject_id, subject.subject_version],
+            });
+      return ok(
+        rs.rows.map(
+          (row): DecisionLogRow => ({
+            id: rowNum(row, "id"),
+            ts: rowStr(row, "ts"),
+            class: rowStr(row, "class"),
+            subject_id: rowStr(row, "subject_id"),
+            subject_version: rowStr(row, "subject_version"),
+            facts: rowStr(row, "facts"),
+            factors: rowStr(row, "factors"),
+            score: rowNum(row, "score"),
+            threshold: rowNumOrNull(row, "threshold"),
+            verdict: rowStr(row, "verdict") as DecisionLogRow["verdict"],
+            reasons: rowStr(row, "reasons"),
+            executor_run: rowStrOrNull(row, "executor_run"),
+            channel: rowStr(row, "channel") as DecisionLogRow["channel"],
+            prev_hash: rowStr(row, "prev_hash"),
+            entry_hash: rowStr(row, "entry_hash"),
+          }),
+        ),
+      );
     } catch (e) {
       return wrapStoreError(e);
     }

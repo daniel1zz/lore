@@ -73,6 +73,9 @@ import {
   withoutNullHarnessRun,
 } from "./store-shared.js";
 import { stampAuditSurface } from "./audit-surface.js";
+import { DECISION_GENESIS_HASH, computeDecisionEntryHash } from "./decision-log.js";
+import type { DecisionLogRow, DecisionRecordInput } from "./decision-log.js";
+import type { DecisionSubjectKey } from "./store-interface.js";
 import type { RuleIdPrefix } from "@lore/core";
 import { deriveAcCites, deriveRuleDepends, listedRuleLifecycle } from "./index-rows.js";
 
@@ -111,6 +114,9 @@ export class InMemoryStore implements StoreInterface {
    * exposes this array's chain fields.
    */
   private readonly auditChain: AuditChainEntry[] = [];
+
+  /** AC-AU-2 — mirrors `decision_log`; hash-chained, append-only (no mutator exists). */
+  private readonly decisionLog: DecisionLogRow[] = [];
   private readonly judgments: ReviewJudgment[] = [];
   private readonly calibrationRecords: CalibrationRecord[] = [];
   /** SPEC-102 — mirrors `trace_events`; never hash-chained, id is a plain 1-based sequence (insertion order). */
@@ -1252,6 +1258,36 @@ export class InMemoryStore implements StoreInterface {
     }
 
     return ok(results.map((e) => this.toPlainAuditEntry(e)));
+  }
+
+  /**
+   * @see StoreInterface.appendDecisionRecord — single-threaded, no await between head-read and push.
+   */
+  async appendDecisionRecord(input: DecisionRecordInput): Promise<Result<DecisionLogRow, LoreError>> {
+    const head = this.decisionLog[this.decisionLog.length - 1];
+    const prevHash = head?.entry_hash ?? DECISION_GENESIS_HASH;
+    const row: DecisionLogRow = {
+      ...input,
+      id: this.decisionLog.length + 1,
+      prev_hash: prevHash,
+      entry_hash: computeDecisionEntryHash(input, prevHash),
+    };
+    this.decisionLog.push(row);
+    return ok({ ...row });
+  }
+
+  /**
+   * @see StoreInterface.listDecisionLog
+   */
+  async listDecisionLog(subject?: DecisionSubjectKey): Promise<Result<DecisionLogRow[], LoreError>> {
+    const rows = this.decisionLog.filter(
+      (r) =>
+        subject === undefined ||
+        (r.class === subject.class &&
+          r.subject_id === subject.subject_id &&
+          r.subject_version === subject.subject_version),
+    );
+    return ok(rows.map((r) => ({ ...r })));
   }
 
   /**

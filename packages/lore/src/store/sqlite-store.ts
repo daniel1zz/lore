@@ -135,6 +135,10 @@ import {
   buildNonLiveRuleRefusal,
 } from "./store-shared.js";
 import { stampAuditSurface } from "./audit-surface.js";
+import { MIGRATION_020_SQL } from "./migrations/migration-020.js";
+import { DECISION_GENESIS_HASH, computeDecisionEntryHash } from "./decision-log.js";
+import type { DecisionLogRow, DecisionRecordInput } from "./decision-log.js";
+import type { DecisionSubjectKey } from "./store-interface.js";
 
 // ─── SQLiteStore ─────────────────────────────────────────────────────────────
 
@@ -655,6 +659,20 @@ export class SQLiteStore implements StoreInterface {
           if (!cols.some((c) => c.name === column)) this.db.exec(ddl);
         }
         this.db.exec(MIGRATION_019_SQL);
+      } catch (error) {
+        try {
+          this.db.exec("ROLLBACK;");
+        } catch {
+          // reason: same as migration-004/005/006 — safe to ignore, see above.
+        }
+        throw error;
+      }
+    }
+
+    if (currentVersion < 20) {
+      // reason: migration-020 (decision_log + append-only triggers) is one idempotent BEGIN/COMMIT string.
+      try {
+        this.db.exec(MIGRATION_020_SQL);
       } catch (error) {
         try {
           this.db.exec("ROLLBACK;");
@@ -2658,6 +2676,79 @@ export class SQLiteStore implements StoreInterface {
               .prepare("SELECT * FROM audit WHERE action = ? AND doc_id = ? ORDER BY id ASC")
               .all(action, docId) as AuditChainRow[]);
       return ok(rows.map(rowToAuditChainEntry));
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
+  /**
+   * @see StoreInterface.appendDecisionRecord
+   *
+   * Head-read + insert inside ONE `BEGIN IMMEDIATE` (same reasoning as {@link appendAuditEntry}): a second
+   * process's own `BEGIN IMMEDIATE` blocks on the native busy handler until this commits, so the chain cannot fork.
+   */
+  async appendDecisionRecord(input: DecisionRecordInput): Promise<Result<DecisionLogRow, LoreError>> {
+    try {
+      this.db.run("BEGIN IMMEDIATE");
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+    try {
+      const head = this.db.query("SELECT entry_hash FROM decision_log ORDER BY id DESC LIMIT 1").get() as
+        | { entry_hash: string }
+        | null;
+      const prevHash = head?.entry_hash ?? DECISION_GENESIS_HASH;
+      const entryHash = computeDecisionEntryHash(input, prevHash);
+      this.db
+        .prepare(
+          `INSERT INTO decision_log
+             (ts, class, subject_id, subject_version, facts, factors, score, threshold, verdict, reasons,
+              executor_run, channel, prev_hash, entry_hash)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .run(
+          input.ts,
+          input.class,
+          input.subject_id,
+          input.subject_version,
+          input.facts,
+          input.factors,
+          input.score,
+          input.threshold,
+          input.verdict,
+          input.reasons,
+          input.executor_run,
+          input.channel,
+          prevHash,
+          entryHash,
+        );
+      const idRow = this.db.query("SELECT last_insert_rowid() AS id").get() as { id: number };
+      this.db.run("COMMIT");
+      return ok({ ...input, id: Number(idRow.id), prev_hash: prevHash, entry_hash: entryHash });
+    } catch (e) {
+      try {
+        this.db.run("ROLLBACK");
+      } catch {
+        // reason: ROLLBACK throws only when no transaction is open — `e` is what the caller needs.
+      }
+      return wrapStoreError(e);
+    }
+  }
+
+  /**
+   * @see StoreInterface.listDecisionLog
+   */
+  async listDecisionLog(subject?: DecisionSubjectKey): Promise<Result<DecisionLogRow[], LoreError>> {
+    try {
+      const rows =
+        subject === undefined
+          ? (this.db.query("SELECT * FROM decision_log ORDER BY id ASC").all() as DecisionLogRow[])
+          : (this.db
+              .prepare(
+                "SELECT * FROM decision_log WHERE class = ? AND subject_id = ? AND subject_version = ? ORDER BY id ASC",
+              )
+              .all(subject.class, subject.subject_id, subject.subject_version) as DecisionLogRow[]);
+      return ok(rows.map((r) => ({ ...r, id: Number(r.id) })));
     } catch (e) {
       return wrapStoreError(e);
     }
