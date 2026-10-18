@@ -58,11 +58,5 @@
     "ac": "AC-AU-10",
     "reason": "oracle test not written yet (autonomy-sampling-floor.test.ts absent); owned by plan-autonomy-phase-1-decision-function-human-channel-lore",
     "owner_plan": "plan-autonomy-phase-1-decision-function-human-channel-lore"
-  },
-  {
-    "spec": "spec-autonomy-phase-1-decision-function-human-channel-lore",
-    "ac": "AC-AU-11",
-    "reason": "oracle test not written yet (autonomy-worktree-remove.test.ts absent); owned by plan-autonomy-phase-1-decision-function-human-channel-lore",
-    "owner_plan": "plan-autonomy-phase-1-decision-function-human-channel-lore"
   }
 ]

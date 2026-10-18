@@ -18,6 +18,8 @@ import {
   type WorktreeRemovalRunStore,
 } from "../../../src/service/worktree-removal-service.js";
 import type { ListedWorktree, ProbeResult, WorktreeGitProbe } from "../../../src/service/worktree-cleanup.js";
+import { DecisionService } from "../../../src/service/decision-service.js";
+import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import type { ProcessScanPort } from "../../../src/adapters/real-process-scan-port.js";
 
 const REPO = "/repo";
@@ -89,6 +91,10 @@ function build(over: Partial<World> = {}): { service: WorktreeRemovalService; wo
       world.calls.push(`branch -d ${root} ${b}`);
       return { ok: true, value: true };
     },
+    ignoredPaths: () => ({ ok: true, value: [] }),
+    scratchOwner: () => ({ ok: true, value: null }),
+    isPidAlive: () => false,
+    removeScratchWorktree: () => ({ ok: true, value: true }),
   };
   const processScan: ProcessScanPort = { processesInside: () => world.scan };
   const occupancy: RunOccupancyPort = { occupancy: async () => world.occupancy };
@@ -101,7 +107,7 @@ function build(over: Partial<World> = {}): { service: WorktreeRemovalService; wo
       ),
     getRunEnd: async (id: string) => ok(id in world.runEnds ? { endedAt: world.runEnds[id] ?? null } : null),
   } as unknown as WorktreeRemovalRunStore;
-  return { service: new WorktreeRemovalService({ probe, processScan, occupancy, runs }), world };
+  return { service: new WorktreeRemovalService({ probe, processScan, occupancy, runs, decisions: new DecisionService({ store: new InMemoryStore(), executorRun: null }) }), world };
 }
 
 describe("WorktreeRemovalService.check", () => {

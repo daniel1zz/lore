@@ -12,6 +12,9 @@
  *   - {@link evaluateRecordedWorktree}    — gather + decide
  *   - {@link applyWorktreeRemoval}        — `git worktree remove` then `git branch -d` (never forced)
  *   - {@link formatWorktreeOutcomeLine}   — the `worktree: ...` line `lore done` prints
+ *   - {@link ignoredPathsOutsideRegenerableSet} / {@link WorktreeRemovalGatePort} — AC-AU-11: the ignored-file rule
+ *     and the decide(worktree-remove) gate every removal path runs AFTER the removal test says removable
+ *   - {@link SCRATCH_OWNER_FILE} + scratch helpers — lore-attested-red-* falsifier scratch worktrees and their owner marker
  *
  * Invariants:
  *   - REMOVE only when ALL hold: the single worktree-removal test (`worktree-removal-test.ts`: linked, clean, merged,
@@ -31,8 +34,8 @@
  */
 
 import { spawnSync } from "node:child_process";
-import { existsSync, realpathSync } from "node:fs";
-import { isAbsolute, resolve } from "node:path";
+import { existsSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import type { AuditEntry } from "@lore/core";
 import {
   decideWorktreeRemoval,
@@ -81,6 +84,97 @@ export interface WorktreeGitProbe {
   removeWorktree(repoRoot: string, path: string): ProbeResult<true>;
   /** Plain `git branch -d <branch>` run from `repoRoot`. */
   deleteBranch(repoRoot: string, branch: string): ProbeResult<true>;
+  /** `git status --ignored --porcelain` in `path`: every IGNORED path (as git printed it, `!! ` prefix stripped). */
+  ignoredPaths(path: string): ProbeResult<readonly string[]>;
+  /** The owner marker of the falsifier scratch worktree at `path`: `null` when the marker file is absent. */
+  scratchOwner(path: string): ProbeResult<{ readonly pid: number } | null>;
+  /** Whether process `pid` exists (signal 0). A pid that cannot be probed counts as alive (keep wins). */
+  isPidAlive(pid: number): boolean;
+  /**
+   * `git worktree remove --force <path>` from `repoRoot`, then removal of the scratch parent directory. ONLY for a
+   * falsifier scratch worktree (see {@link isFalsifierScratchPath}); refuses any other path.
+   */
+  removeScratchWorktree(repoRoot: string, path: string): ProbeResult<true>;
+}
+
+// ── Falsifier scratch worktrees (lore-attested-red-*) ───────────────────────
+
+/** Prefix of the temp directory `createFalsifierScratchWorktree` makes; the worktree is its child `wt`. */
+export const SCRATCH_PARENT_PREFIX = "lore-attested-red-";
+/** Leaf directory name of the scratch worktree inside its parent. */
+export const SCRATCH_WORKTREE_LEAF = "wt";
+/** Owner marker written beside the scratch worktree (in its parent dir): `{"pid": <creating process>}`. */
+export const SCRATCH_OWNER_FILE = "owner.json";
+
+/** Whether `path` is the `wt` directory inside a `lore-attested-red-*` temp directory (a falsifier scratch worktree). */
+export function isFalsifierScratchPath(path: string): boolean {
+  return basename(path) === SCRATCH_WORKTREE_LEAF && basename(dirname(path)).startsWith(SCRATCH_PARENT_PREFIX);
+}
+
+/** Records the creating process in the scratch parent dir so a later sweep can prove its run ended. Never throws. */
+export function writeScratchOwner(parentDir: string, pid: number): ProbeResult<true> {
+  try {
+    writeFileSync(join(parentDir, SCRATCH_OWNER_FILE), JSON.stringify({ pid }));
+    return { ok: true, value: true };
+  } catch (cause) {
+    return { ok: false, reason: cause instanceof Error ? cause.message : String(cause) };
+  }
+}
+
+// ── The ignored-file rule (AC-AU-11) ────────────────────────────────────────
+
+/** Directory names whose ignored contents regenerate from tracked sources (the class's declared regenerable set). */
+export const REGENERABLE_IGNORED_NAMES: readonly string[] = ["node_modules", "dist", ".turbo", "coverage"];
+/** File suffixes of ignored build by-products (the declared regenerable set). */
+export const REGENERABLE_IGNORED_SUFFIXES: readonly string[] = [".tsbuildinfo"];
+
+function isRegenerableIgnoredPath(path: string): boolean {
+  const segments = path.split("/").filter((segment) => segment !== "");
+  if (segments.some((segment) => REGENERABLE_IGNORED_NAMES.includes(segment))) return true;
+  const leaf = segments[segments.length - 1] ?? "";
+  return REGENERABLE_IGNORED_SUFFIXES.some((suffix) => leaf.endsWith(suffix));
+}
+
+/**
+ * The ignored paths NOT in the regenerable set — the paths whose removal would lose data nothing can rebuild.
+ *
+ * @param ignored - ignored paths as `git status --ignored --porcelain` printed them (directories end with `/`)
+ * @example
+ * ignoredPathsOutsideRegenerableSet(["node_modules/", ".env", "packages/a/dist/"]) // [".env"]
+ */
+export function ignoredPathsOutsideRegenerableSet(ignored: readonly string[]): string[] {
+  return ignored.filter((path) => !isRegenerableIgnoredPath(path));
+}
+
+/** What a removal path learns from the decide(worktree-remove) gate. */
+export type WorktreeRemovalGate =
+  | { readonly allowed: true; readonly record_id: number }
+  | {
+      readonly allowed: false;
+      /** Printable reason naming the ignored paths and the decision record (`worktree: kept <path>: <reason>`). */
+      readonly reason: string;
+      readonly ignored_paths: readonly string[];
+      readonly record_id?: number;
+    };
+
+/**
+ * Port: the decide(worktree-remove) gate (AC-AU-11), run AFTER the removal test said removable. Implemented by
+ * `WorktreeRemovalService`; NEVER throws — an unmeasurable or failed decision is `allowed: false`.
+ */
+export interface WorktreeRemovalGatePort {
+  gateRemoval(path: string): Promise<WorktreeRemovalGate>;
+}
+
+/**
+ * Port: removes a falsifier scratch worktree through decide(worktree-remove) (AC-AU-11). `removed: false` carries the
+ * reason (an escalated decision keeps the worktree). NEVER throws.
+ */
+export interface ScratchRemovalPort {
+  removeScratchWorktree(repoRoot: string, worktreeDir: string): Promise<{ removed: boolean; reason?: string }>;
+}
+
+function isWorktreeRemovalGatePort(port: object): port is WorktreeRemovalGatePort {
+  return typeof (port as Partial<WorktreeRemovalGatePort>).gateRemoval === "function";
 }
 
 /** A worktree path some claim recorded, with the worktree HEAD captured at claim time when known. */
@@ -343,9 +437,17 @@ export async function evaluateRecordedWorktree(
 ): Promise<WorktreeEvaluation> {
   const gathered = await gatherWorktreeFacts(probe, removal, recorded, ctx.activeClaimedPaths, ctx.callerSession);
   const decision = decideWorktreeCleanup(gathered.facts);
+  const worktree = gathered.worktreePath ?? recorded.path;
+  // AC-AU-11: the removal test (above, unchanged) decides keep/removable first; only a `remove` reaches decide().
+  // reason: a port without `gateRemoval` is a bare unit construction (no autonomy wiring); every shipped
+  // composition root hands in `WorktreeRemovalService`, which has it.
+  if (decision.decision === "remove" && gathered.worktreePath !== undefined && isWorktreeRemovalGatePort(removal)) {
+    const gate = await removal.gateRemoval(gathered.worktreePath);
+    if (!gate.allowed) return { worktree, decision: "keep", reason: gate.reason };
+  }
   return {
     // the resolved directory when one was found, so removal and every printed line name the real path
-    worktree: gathered.worktreePath ?? recorded.path,
+    worktree,
     ...decision,
     ...(decision.decision === "remove" && gathered.repoRoot !== undefined && gathered.branch !== undefined
       ? { repoRoot: gathered.repoRoot, branch: gathered.branch }
@@ -475,6 +577,49 @@ export function createRealWorktreeProbe(): WorktreeGitProbe {
     },
     deleteBranch: (repoRoot, branch) => {
       const out = runGit(repoRoot, ["branch", "-d", branch]);
+      return out.ok ? { ok: true, value: true } : out;
+    },
+    ignoredPaths: (path) => {
+      const out = runGit(path, ["status", "--ignored", "--porcelain"]);
+      if (!out.ok) return out;
+      const ignored = out.value
+        .split("\n")
+        .filter((line) => line.startsWith("!! "))
+        .map((line) => line.slice(3).replace(/^"(.*)"$/, "$1"));
+      return { ok: true, value: ignored };
+    },
+    scratchOwner: (path) => {
+      const markerPath = join(dirname(path), SCRATCH_OWNER_FILE);
+      if (!existsSync(markerPath)) return { ok: true, value: null };
+      try {
+        const parsed: unknown = JSON.parse(readFileSync(markerPath, "utf8"));
+        const pid = (parsed as { pid?: unknown } | null)?.pid;
+        return typeof pid === "number" && Number.isInteger(pid) && pid > 0
+          ? { ok: true, value: { pid } }
+          : { ok: false, reason: `owner marker ${markerPath} carries no valid pid` };
+      } catch (cause) {
+        return { ok: false, reason: `owner marker ${markerPath} unreadable: ${cause instanceof Error ? cause.message : String(cause)}` };
+      }
+    },
+    isPidAlive: (pid) => {
+      try {
+        process.kill(pid, 0);
+        return true;
+      } catch (cause) {
+        // reason: ESRCH = no such process (dead); EPERM = exists but not ours (alive). Anything else is unprobeable -> alive.
+        return (cause as NodeJS.ErrnoException).code !== "ESRCH";
+      }
+    },
+    removeScratchWorktree: (repoRoot, path) => {
+      if (!isFalsifierScratchPath(path)) return { ok: false, reason: `${path} is not a falsifier scratch worktree path` };
+      // reason: --force is allowed ONLY here — a scratch worktree is dirty by construction (the declared mutation is
+      // applied inside it); the decide(worktree-remove) gate has already ruled on its ignored files.
+      const out = runGit(repoRoot, ["worktree", "remove", "--force", path]);
+      try {
+        rmSync(dirname(path), { recursive: true, force: true });
+      } catch (cause) {
+        return { ok: false, reason: `scratch dir not removed: ${cause instanceof Error ? cause.message : String(cause)}` };
+      }
       return out.ok ? { ok: true, value: true } : out;
     },
   };
