@@ -197,7 +197,7 @@ async function runSessionTrailReview(args: { turn?: unknown; json?: unknown }, i
     emit({ helpers: [], findings: [], not_measured: [], reason: "no .lore directory" });
     return;
   }
-  const { app } = loadLoreApp();
+  const { app } = loadLoreApp({ inv });
   try {
     const session = await resolveCallerSession(app, "trail-review");
     if (session === null) return;

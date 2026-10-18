@@ -25,12 +25,14 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { mkdtempSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
+import { liveInvocation } from "../../live-invocation.js";
+import type { Invocation } from "@lore/core";
 
 // ─── Command type with required run handler ────────────────────────────────────
 
 /** A CLI command shape where the run handler is guaranteed to be present. */
 type RunnableCommand = {
-  run: (ctx: { args: Record<string, unknown> }) => Promise<void>;
+  run: (ctx: { args: Record<string, unknown>; inv?: Invocation }) => Promise<void>;
 };
 
 // ─── Test helpers ──────────────────────────────────────────────────────────────
@@ -84,7 +86,7 @@ async function runCmd(
   if (!cmd.run) {
     throw new Error("Command is missing run handler");
   }
-  return cmd.run({ args });
+  return cmd.run({ args, inv: liveInvocation() });
 }
 
 async function importCreateCommand(): Promise<RunnableCommand> {

@@ -39,11 +39,13 @@ import { join, resolve } from "path";
 import { tmpdir } from "os";
 import { createApp } from "../../../src/app.js";
 import { saveConfig } from "@lore/core/node";
+import { liveInvocation } from "../../live-invocation.js";
+import type { Invocation } from "@lore/core";
 
 // ─── Command type ─────────────────────────────────────────────────────────────
 
 type RunnableCommand = {
-  run: (ctx: { args: Record<string, unknown> }) => Promise<void>;
+  run: (ctx: { args: Record<string, unknown>; inv?: Invocation }) => Promise<void>;
 };
 
 // ─── Output / exit capture ────────────────────────────────────────────────────
@@ -93,7 +95,7 @@ async function runCmd(
   args: Record<string, unknown>,
 ): Promise<void> {
   if (!cmd.run) throw new Error("Command is missing run handler");
-  return cmd.run({ args });
+  return cmd.run({ args, inv: liveInvocation() });
 }
 
 async function importCreateCommand(): Promise<RunnableCommand> {

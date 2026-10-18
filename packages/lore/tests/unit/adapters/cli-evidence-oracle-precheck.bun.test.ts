@@ -34,11 +34,13 @@ import { createApp } from "../../../src/app.js";
 import { TaskWorkflowService } from "../../../src/service/task-workflow-service.js";
 import type { EvidenceInput } from "../../../src/service/task-workflow-service.js";
 import type { CreateDocInput } from "@lore/core";
+import { liveInvocation } from "../../live-invocation.js";
+import type { Invocation } from "@lore/core";
 
 // ─── Command type ────────────────────────────────────────────────────────────
 
 type RunnableCommand = {
-  run: (ctx: { args: Record<string, unknown> }) => Promise<void>;
+  run: (ctx: { args: Record<string, unknown>; inv?: Invocation }) => Promise<void>;
 };
 
 async function importEvidenceCommand(): Promise<RunnableCommand> {
@@ -180,6 +182,7 @@ describe("lore evidence oracle precheck — HAPPY", () => {
           by: "alice",
           "output-tail": "ok",
         },
+ inv: liveInvocation(),
       });
 
       expect(spy.called()).toBe(true);
@@ -216,6 +219,7 @@ describe("lore evidence oracle precheck — NEGATIVE", () => {
           by: "alice",
           "output-tail": "ok",
         },
+ inv: liveInvocation(),
       });
 
       expect(spy.called()).toBe(true);
@@ -247,6 +251,7 @@ describe("lore evidence oracle precheck — BOUNDARY", () => {
           result: "pass",
           by: "alice",
         },
+ inv: liveInvocation(),
       });
 
       expect(process.exitCode).toBe(4);
@@ -271,6 +276,7 @@ describe("lore evidence oracle precheck — BOUNDARY", () => {
           result: "pass",
           by: "alice",
         },
+ inv: liveInvocation(),
       });
 
       expect(stderr.text()).toContain("packages/lore/tests/ghost.test.ts");
@@ -299,6 +305,7 @@ describe("lore evidence oracle precheck — ERROR", () => {
           result: "pass",
           by: "alice",
         },
+ inv: liveInvocation(),
       });
 
       expect(process.exitCode).toBe(4);
@@ -326,6 +333,7 @@ describe("lore evidence oracle precheck — STATE", () => {
           result: "pass",
           by: "alice",
         },
+ inv: liveInvocation(),
       });
       expect(process.exitCode).toBe(4);
 
@@ -363,6 +371,7 @@ describe("lore evidence oracle precheck — REGRESSION", () => {
           by: "alice",
           "output-tail": "ok",
         },
+ inv: liveInvocation(),
       });
 
       expect(spy.called()).toBe(true);
@@ -386,6 +395,7 @@ describe("lore evidence oracle precheck — REGRESSION", () => {
           by: "alice",
           "output-tail": "AssertionError: expected 1 to equal 2",
         },
+ inv: liveInvocation(),
       });
 
       expect(spy.called()).toBe(true);

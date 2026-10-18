@@ -30,11 +30,13 @@ import { createApp } from "../../../src/app.js";
 import { TaskWorkflowService } from "../../../src/service/task-workflow-service.js";
 import type { EvidenceInput } from "../../../src/service/task-workflow-service.js";
 import type { CreateDocInput } from "@lore/core";
+import { liveInvocation } from "../../live-invocation.js";
+import type { Invocation } from "@lore/core";
 
 // ─── Command type ─────────────────────────────────────────────────────────────
 
 type RunnableCommand = {
-  run: (ctx: { args: Record<string, unknown> }) => Promise<void>;
+  run: (ctx: { args: Record<string, unknown>; inv?: Invocation }) => Promise<void>;
 };
 
 async function importEvidenceCommand(): Promise<RunnableCommand> {
@@ -153,6 +155,7 @@ describe("lore evidence --ac — HAPPY", () => {
           by: "alice",
           ac: "AC-ACODE-8",
         },
+ inv: liveInvocation(),
       });
 
       expect(spy.captured()?.ac_ref).toBe("AC-ACODE-8");
@@ -179,6 +182,7 @@ describe("lore evidence --ac — REGRESSION", () => {
           result: "pass",
           by: "alice",
         },
+ inv: liveInvocation(),
       });
 
       const entry = spy.captured();

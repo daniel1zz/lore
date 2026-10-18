@@ -41,11 +41,13 @@ import { tmpdir } from "os";
 import { createApp } from "../../../src/app.js";
 import { evidenceBadge, formatReadyLine } from "../../../src/adapters/cli/commands/ready.js";
 import type { CreateDocInput, DocSummary, ReadyRecord } from "@lore/core";
+import { liveInvocation } from "../../live-invocation.js";
+import type { Invocation } from "@lore/core";
 
 // ─── Command type ─────────────────────────────────────────────────────────────
 
 type RunnableCommand = {
-  run: (ctx: { args: Record<string, unknown> }) => Promise<void>;
+  run: (ctx: { args: Record<string, unknown>; inv?: Invocation }) => Promise<void>;
 };
 
 async function importEvidenceCommand(): Promise<RunnableCommand> {
@@ -197,6 +199,7 @@ describe("lore evidence --result expected-fail rendering — HAPPY", () => {
           by: "alice",
           "output-tail": "AssertionError: expected 1 to equal 2",
         },
+ inv: liveInvocation(),
       });
 
       expect(process.exitCode).toBe(0);
@@ -227,6 +230,7 @@ describe("lore evidence --result expected-fail rendering — NEGATIVE", () => {
           by: "alice",
           "output-tail": "AssertionError: expected 1 to equal 2",
         },
+ inv: liveInvocation(),
       });
 
       const successLine = log.lines().find((l) => l.startsWith("Recorded")) ?? "";
@@ -262,6 +266,7 @@ describe("lore evidence --result rendering — REGRESSION", () => {
           by: "alice",
           "output-tail": "ok",
         },
+ inv: liveInvocation(),
       });
 
       const successLine = log.lines().find((l) => l.startsWith("Recorded"));
@@ -286,6 +291,7 @@ describe("lore evidence --result rendering — REGRESSION", () => {
           by: "alice",
           "output-tail": "AssertionError: expected 1 to equal 2",
         },
+ inv: liveInvocation(),
       });
 
       const successLine = log.lines().find((l) => l.startsWith("Recorded"));
@@ -428,13 +434,14 @@ describe("lore ready evidence badge — STATE", () => {
         "output-tail": "error TS2339: Property 'evidenceBadge' does not exist on type 'typeof import(\"./ready.js\")'.",
         by: "alice",
       },
+ inv: liveInvocation(),
     });
     expect(process.exitCode).toBe(0);
 
     const readyCmd = await importReadyCommand();
     const log = captureConsoleLog();
     try {
-      await readyCmd.run({ args: { plan: planSlug, json: false } });
+      await readyCmd.run({ args: { plan: planSlug, json: false }, inv: liveInvocation() });
       const taskLine = log.lines().find((l) => l.includes(taskSlug));
       expect(taskLine).toBeDefined();
       expect(taskLine).toContain("⚑R");

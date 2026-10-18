@@ -60,9 +60,11 @@ import {
   type CreateDocInput,
   type EvidenceEntry,
 } from "@lore/core";
+import { liveInvocation } from "../../live-invocation.js";
+import type { Invocation } from "@lore/core";
 
 type RunnableCommand = {
-  run: (ctx: { args: Record<string, unknown> }) => Promise<void>;
+  run: (ctx: { args: Record<string, unknown>; inv?: Invocation }) => Promise<void>;
 };
 
 async function importEvidenceCommand(): Promise<RunnableCommand> {
@@ -206,6 +208,7 @@ async function runCapture(
   try {
     await cmd.run({
       args: { task: taskSlug, oracle: "tsc", command, result, capture: true },
+ inv: liveInvocation(),
     });
     return { stderr: stderr.text(), stdout: logLines.join("\n"), exitCode: process.exitCode };
   } finally {
@@ -237,6 +240,7 @@ async function runSelfReport(taskSlug: string): Promise<string> {
         result: "pass",
         "output-tail": "0 errors",
       },
+ inv: liveInvocation(),
     });
     return logLines.join("\n");
   } finally {

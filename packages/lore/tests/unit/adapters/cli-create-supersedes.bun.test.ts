@@ -45,9 +45,11 @@ import { tmpdir } from "os";
 import { createApp } from "../../../src/app.js";
 import type { App } from "../../../src/app.js";
 import type { DocType } from "@lore/core";
+import { liveInvocation } from "../../live-invocation.js";
+import type { Invocation } from "@lore/core";
 
 type RunnableCommand = {
-  run: (ctx: { args: Record<string, unknown> }) => Promise<void>;
+  run: (ctx: { args: Record<string, unknown>; inv?: Invocation }) => Promise<void>;
 };
 
 function captureOutput() {
@@ -72,7 +74,7 @@ function captureOutput() {
 
 async function runCmd(cmd: RunnableCommand, args: Record<string, unknown>): Promise<void> {
   if (!cmd.run) throw new Error("Command is missing run handler");
-  return cmd.run({ args });
+  return cmd.run({ args, inv: liveInvocation() });
 }
 
 async function importCreateCommand(): Promise<RunnableCommand> {
