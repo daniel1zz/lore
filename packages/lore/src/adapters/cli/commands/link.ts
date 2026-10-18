@@ -82,7 +82,7 @@ export default defineCommand({
     try {
       // ─── AI inference path (SPEC-019 AC-LINK-AI-1) ────────────────────────────
       if (hasInfer) {
-        const showSpinner = process.stderr.isTTY && !args.json;
+        const showSpinner = inv.io.stderr.isTTY === true && !args.json;
 
         // Fetch both documents for AI context
         const fromResolve = await app.corpusService.resolve(args.from);

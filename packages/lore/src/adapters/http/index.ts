@@ -4,6 +4,8 @@
  *   SPEC-078 D4/D7/D8 (multi-project path shim + GET /api/projects)
  */
 
+import type { Invocation } from "@lore/core";
+import { warnSinkOf } from "../../service/warn-sink.js";
 import { randomUUID } from "node:crypto";
 
 import type { App } from "../../app.js";
@@ -39,6 +41,11 @@ function dispatchWithAuditSurface(
 export interface HttpConfig {
   port?: number;
   host?: string;
+  /**
+   * The writers of the run that started the server: the "running at" banner goes to `io.stdout`, an unhandled request
+   * error and the machine-auth advisories go to `io.stderr`. REQUIRED: the server never writes a process stream.
+   */
+  io: Invocation["io"];
   /**
    * Machine-scope auth stores (SPEC-078 D1) — tests inject one built over an `mkdtemp`
    * base dir; production callers (`lore dashboard`, `lore serve`) may pass one explicitly
@@ -272,7 +279,7 @@ async function dispatchProjectRequest(
  *                                          path is otherwise the pre-existing generic 404
  * Returns the server instance (Bun.Server).
  */
-export function startHttpServer(app: App, config: HttpConfig = {}): ReturnType<typeof Bun.serve> {
+export function startHttpServer(app: App, config: HttpConfig): ReturnType<typeof Bun.serve> {
   const port = config.port ?? 3456;
   const hostname = config.host ?? "localhost";
   const mountRegistry = config.mountRegistry;
@@ -305,7 +312,7 @@ export function startHttpServer(app: App, config: HttpConfig = {}): ReturnType<t
       if (config.machineAuthBaseDir === undefined) {
         throw new Error("startHttpServer: a request needs the machine auth stores but neither `machineAuth` nor `machineAuthBaseDir` was configured");
       }
-      machineAuth = createMachineAuthStores({ baseDir: config.machineAuthBaseDir });
+      machineAuth = createMachineAuthStores({ baseDir: config.machineAuthBaseDir, warn: warnSinkOf(config.io.stderr) });
     }
     return machineAuth;
   }
@@ -444,7 +451,7 @@ export function startHttpServer(app: App, config: HttpConfig = {}): ReturnType<t
     },
 
     error(err) {
-      process.stderr.write(`[http] Unhandled error: ${err instanceof Error ? err.message : String(err)}\n`);
+      config.io.stderr.write(`[http] Unhandled error: ${err instanceof Error ? err.message : String(err)}\n`);
       return new Response(JSON.stringify({ ok: false, error: { code: "INTERNAL_ERROR", message: "Internal server error" } }), {
         status: 500,
         headers: { "Content-Type": "application/json" },
@@ -452,8 +459,8 @@ export function startHttpServer(app: App, config: HttpConfig = {}): ReturnType<t
     },
   });
 
-  process.stdout.write(`Lore server running at http://${hostname}:${port}\n`);
-  process.stdout.write(`  API:  http://${hostname}:${port}/api/\n`);
+  config.io.stdout.write(`Lore server running at http://${hostname}:${port}\n`);
+  config.io.stdout.write(`  API:  http://${hostname}:${port}/api/\n`);
 
   return server;
 }

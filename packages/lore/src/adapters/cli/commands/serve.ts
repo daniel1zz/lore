@@ -46,7 +46,7 @@ export default defineCommand({
 
     const host = args.host ?? "localhost";
 
-    startHttpServer(app, { port, host, machineAuthBaseDir: resolveMachineAuthBaseDir(inv.env, inv.paths.home) });
+    startHttpServer(app, { port, host, io: inv.io, machineAuthBaseDir: resolveMachineAuthBaseDir(inv.env, inv.paths.home) });
 
     // The server runs in the background via the Bun event loop; this run stays open until SIGTERM / SIGINT, then
     // closes the app and returns 0, so the one entry (`src/index.ts`) ends the process (a returned run is a finished run).

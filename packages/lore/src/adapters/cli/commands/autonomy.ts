@@ -110,7 +110,7 @@ async function propose(inv: Invocation, opened: Opened, build: (current: Governe
   const outcome: Result<ProposeOutcome, LoreError> = await thresholds.propose(next.record, opened.service);
   if (!outcome.ok) return fail(inv, outcome.error);
   const rendered = renderOutcome(outcome.value);
-  (rendered.code === 0 ? process.stdout : process.stderr).write(`${rendered.text}\n`);
+  (rendered.code === 0 ? inv.io.stdout : inv.io.stderr).write(`${rendered.text}\n`);
   return rendered.code;
 }
 

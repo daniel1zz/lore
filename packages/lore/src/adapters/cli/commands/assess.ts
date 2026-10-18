@@ -357,7 +357,7 @@ export default defineCommand({
         }
       }
 
-      const showSpinner = process.stderr.isTTY && !args.json;
+      const showSpinner = inv.io.stderr.isTTY === true && !args.json;
       if (showSpinner) {
         inv.io.stderr.write(`⏳ Assessing via ${app.aiProviderService.activeProviderName}...\n`);
       }

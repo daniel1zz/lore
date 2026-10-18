@@ -857,7 +857,7 @@ export async function buildResumeFeed(
         // reason: a corrupt/wrong-typed marker is a real fault, not this
         // mechanism's normal (if inert) steady state — AC 3 requires this
         // to be loud on stderr, distinct from the advisory feed line above.
-        process.stderr.write(
+        ambient.io.stderr.write(
           `lore: session-start marker unreadable (${sessionStart.detail}) — same-session authorship ` +
             "could not be determined; the resume-ticket coverage floor will arm unconditionally.\n",
         );

@@ -477,7 +477,7 @@ export default defineCommand({
             }
           }
 
-          const showSpinner = process.stderr.isTTY && !args.json;
+          const showSpinner = inv.io.stderr.isTTY === true && !args.json;
           const aiService = app.aiProviderService;
           if (showSpinner) {
             inv.io.stderr.write(`⏳ Generating via ${aiService.activeProviderName}...\n`);

@@ -379,7 +379,7 @@ export default defineCommand({
           return exitCode(rewriteGate.error);
         }
 
-        const showSpinner = process.stderr.isTTY && !args.json;
+        const showSpinner = inv.io.stderr.isTTY === true && !args.json;
         const aiService = app.aiProviderService;
         let newContent: string;
         let durationMs: number;

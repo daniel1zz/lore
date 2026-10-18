@@ -24,6 +24,7 @@
  * Source: SPEC-018 §3
  */
 
+import { discardWarnings, type WarnSink } from "./warn-sink.js";
 import { readdirSync, readFileSync } from "fs";
 import { join } from "path";
 import { parse as parseYaml } from "yaml";
@@ -108,7 +109,11 @@ export class SyncDocsService {
   /**
    * @param corpus - CorpusService instance for all corpus read/write operations.
    */
-  constructor(private readonly corpus: CorpusService) {}
+  constructor(
+    private readonly corpus: CorpusService,
+    /** Where the one-line "ignoring frontmatter parent" note goes; absent (bare tests) -> not printed. */
+    private readonly warn: WarnSink = discardWarnings,
+  ) {}
 
   /**
    * Run the sync-docs reconciliation pass.
@@ -189,9 +194,9 @@ export class SyncDocsService {
       // No title match — this spec needs to be created, with NO parent (BR-789, BR-2).
       // A frontmatter `parent:` is a leftover of the retired PRD-parent model: say so once, then ignore it.
       if (!ignoredParentNoted && spec.ignored_parent_hint !== undefined) {
-        process.stderr.write(
+        this.warn(
           `note: ignoring frontmatter parent "${spec.ignored_parent_hint}" — a spec takes no parent; ` +
-            "it belongs to the product trees through its criteria's citations (`lore ac cite`)\n",
+            "it belongs to the product trees through its criteria's citations (`lore ac cite`)",
         );
         ignoredParentNoted = true;
       }

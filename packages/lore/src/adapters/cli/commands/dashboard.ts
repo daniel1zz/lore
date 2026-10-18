@@ -316,6 +316,7 @@ async function runPackagedMode(
   const server = startHttpServer(app, {
     port: apiPort,
     host: "127.0.0.1",
+    io: inv.io,
     machineAuth,
     allowedOrigins,
     ...(mountRegistry !== undefined ? { mountRegistry } : {}),
@@ -323,6 +324,7 @@ async function runPackagedMode(
       assets: () => resolveAssets(inv),
       nonces,
       machineAuth: () => machineAuth,
+      warn: app.warn,
     },
   });
 
@@ -513,6 +515,7 @@ async function runDevMode(
   const server = startHttpServer(app, {
     port: apiPort,
     host: "127.0.0.1",
+    io: inv.io,
     machineAuth,
     allowedOrigins,
     ...(mountRegistry !== undefined ? { mountRegistry } : {}),

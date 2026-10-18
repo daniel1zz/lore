@@ -48,6 +48,7 @@
  *   task-skill-implement-f5a-static-serving-nonce-endpoint-and.
  */
 
+import { discardWarnings, type WarnSink } from "../../service/warn-sink.js";
 import { randomUUID } from "node:crypto";
 
 import { buildSessionCookieHeader } from "./auth.js";
@@ -197,6 +198,8 @@ export interface DashboardServingConfig {
   /** Lazy resolver for the machine-scope auth stores, used ONLY to redeem a nonce into a
    * session (DD-2) — NEVER invoked for plain static/SPA-fallback serving. */
   machineAuth?: () => MachineAuthStores;
+  /** Where a missing embedded asset is reported (the run's stderr); absent -> not printed. */
+  warn?: WarnSink;
 }
 
 /** Returned by {@link createDashboardHandler} — the single per-server-instance entry
@@ -368,11 +371,11 @@ async function handleNonceBootstrap(
  * the recorded path answers a named `500` for THIS asset only, never an uncaught throw
  * that would fall through Bun.serve's generic error() handler for every other request.
  */
-async function serveManifestEntry(entry: DashboardAssetsManifestEntry): Promise<Response> {
+async function serveManifestEntry(entry: DashboardAssetsManifestEntry, warn: WarnSink): Promise<Response> {
   const file = Bun.file(entry.embedded);
   const exists = await file.exists();
   if (!exists) {
-    process.stderr.write(`[dashboard] embedded asset missing at "${entry.embedded}"\n`);
+    warn(`[dashboard] embedded asset missing at "${entry.embedded}"`);
     return jsonError(
       { code: "INTERNAL_ERROR", message: `Dashboard asset unavailable: ${entry.embedded}` },
       500,
@@ -400,6 +403,7 @@ async function serveManifestEntry(entry: DashboardAssetsManifestEntry): Promise<
  */
 export function createDashboardHandler(config: DashboardServingConfig): DashboardHandler {
   const nonces = resolveNonceStore(config);
+  const warn = config.warn ?? discardWarnings;
 
   return {
     async handle(req: Request, url: URL): Promise<Response | null> {
@@ -415,7 +419,7 @@ export function createDashboardHandler(config: DashboardServingConfig): Dashboar
 
       const { manifest } = assetsResult;
       const exact = manifest.entries[url.pathname];
-      if (exact !== undefined) return serveManifestEntry(exact);
+      if (exact !== undefined) return serveManifestEntry(exact, warn);
 
       const indexEntry = manifest.entries["/index.html"];
       if (indexEntry === undefined) {
@@ -424,7 +428,7 @@ export function createDashboardHandler(config: DashboardServingConfig): Dashboar
           500,
         );
       }
-      return serveManifestEntry(indexEntry);
+      return serveManifestEntry(indexEntry, warn);
     },
   };
 }

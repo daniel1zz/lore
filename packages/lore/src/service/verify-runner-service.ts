@@ -184,6 +184,7 @@
  *   (build-freshness precheck + -t matched-case count guard), AC-061-9
  */
 
+import { discardWarnings, type WarnSink } from "./warn-sink.js";
 import { existsSync, readdirSync, statSync, mkdtempSync, readFileSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
@@ -819,6 +820,8 @@ export class VerifyRunnerService {
       processEnv: Readonly<Record<string, string | undefined>>;
       /** The OS temp directory falsifier scratch worktrees are created under (`Invocation.paths.tmpDir`). */
       tmpDir: string;
+      /** Where the runner's advisories go (a kept falsifier scratch worktree); absent (bare tests) -> not printed. */
+      warn?: WarnSink;
     },
     private readonly checkBinaryFreshness?: () => BinaryFreshnessVerdict,
     /** Existence probe behind the AC-TG-6 missing-oracle-file check; real `node:fs` by default, a fake in unit tests. */
@@ -2225,7 +2228,7 @@ export class VerifyRunnerService {
         const removal = await this.scratchRemoval.removeScratchWorktree(repoRoot, scratch.worktreeDir);
         if (!removal.removed) {
           // reason: an escalated or failed removal keeps the scratch (never a silent leak): name it and why.
-          process.stderr.write(`[attested-red] scratch worktree kept: ${scratch.worktreeDir}: ${removal.reason ?? "not removed"}\n`);
+          (this.config.warn ?? discardWarnings)(`[attested-red] scratch worktree kept: ${scratch.worktreeDir}: ${removal.reason ?? "not removed"}`);
         }
       }
     }

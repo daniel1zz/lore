@@ -2016,7 +2016,7 @@ export function registerTools(
     // approve() bumps the version (identical to CLI approve.ts / HTTP dashboard
     // handleDashboardApprove's computation).
     await runCalibrationHook(
-      { judgmentService, telemetry: app.telemetry },
+      { judgmentService, telemetry: app.telemetry, warn: app.warn },
       {
         updatedDoc: result.value,
         actedOnVersion: result.value.version - 1,

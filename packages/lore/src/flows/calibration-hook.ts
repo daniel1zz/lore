@@ -51,6 +51,7 @@
  * Source: SPEC-035 §3 D3; SPEC-033 F1 (hoist to surface-neutral flows/)
  */
 
+import type { WarnSink } from "../service/warn-sink.js";
 import type { CalibrationOutcome, DocId, DocRecord, LoreError, ReviewDecision, Telemetry, TelemetryEvent } from "@lore/core";
 import type { JudgmentService } from "../service/judgment-service.js";
 import { formatError } from "../adapters/cli/utils.js";
@@ -67,6 +68,8 @@ export type HumanReviewAction = "approve" | "reject";
 export interface CalibrationHookDeps {
   judgmentService: JudgmentService;
   telemetry: Telemetry;
+  /** Where the partial-failure line `warning: <approved|rejected>, but calibration record failed: ...` goes (the run's stderr). */
+  warn: WarnSink;
   /**
    * Optional partial-failure observer (SPEC-033 F1) — called with the same
    * human-readable message that is printed to stderr, ONLY on a genuine IO
@@ -166,7 +169,7 @@ export async function runCalibrationHook(
  * branches in {@link runCalibrationHook}.
  */
 function warnCalibrationFailure(
-  deps: Pick<CalibrationHookDeps, "telemetry" | "onWarning">,
+  deps: Pick<CalibrationHookDeps, "telemetry" | "onWarning" | "warn">,
   humanAction: HumanReviewAction,
   error: LoreError,
 ): void {
@@ -176,7 +179,7 @@ function warnCalibrationFailure(
   // this module lives outside adapters/cli, because it is a pure formatting function with
   // no CLI-only side effects (no process.exit, no stdout write).
   const message = `${verb}, but calibration record failed: ${formatError(error)}`;
-  process.stderr.write(`warning: ${message}\n`);
+  deps.warn(`warning: ${message}`);
 
   const event: TelemetryEvent = {
     ts: new Date().toISOString(),

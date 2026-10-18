@@ -16,6 +16,7 @@
  * This ensures write operations never bypass the sync semantics silently.
  */
 
+import { warnSinkOf, type WarnSink } from "./service/warn-sink.js";
 import { Database } from "bun:sqlite";
 import { dirname } from "node:path";
 import { SQLiteStore } from "./store/sqlite-store.js";
@@ -141,6 +142,11 @@ import { IssueCloseOnArchive } from "./service/issue-close-on-archive.js";
 import { isGithubUpstreamCfg, resolveFeedbackUpstreamCfg } from "./adapters/cli/report-issue-wiring.js";
 
 export interface App {
+  /**
+   * Where this app's components (and the adapters that hold it) write advisory lines: the stderr writer of the run the
+   * composition was built for (`ambient.io.stderr`). A line has no trailing newline; the sink adds it.
+   */
+  warn: WarnSink;
   corpusService: CorpusService;
   reviewService: ReviewService;
   versionService: VersionService;
@@ -685,10 +691,6 @@ function buildStateBindingOccupancyPort(store: Pick<StoreInterface, "appendAudit
   };
 }
 
-function warnOnStderr(line: string): void {
-  process.stderr.write(`${line}\n`); // CLI surface
-}
-
 /**
  * Build an App backed by a SQLiteStore.
  * @param store - SQLiteStore instance
@@ -748,16 +750,18 @@ export interface AppAmbient {
   readonly tmpDir: string;
   /** The directory the entry ran in; git roots for the lazily-built git ports resolve from it. */
   readonly cwd: string;
+  /** The writers of the run: advisory lines of the components wired below go to `io.stderr`. */
+  readonly io: Invocation["io"];
 }
 
 /**
  * The {@link AppAmbient} of an entry's `Invocation`: the values the composition hands to the ports it wires.
  *
  * @param inv - the Invocation the entry resolved (or a test's `liveInvocation()`)
- * @returns `{ env, home, tmpDir, cwd }` copied from `inv`
+ * @returns `{ env, home, tmpDir, cwd, io }` copied from `inv`
  */
 export function ambientOfInvocation(inv: Invocation): AppAmbient {
-  return { env: inv.env, home: inv.paths.home, tmpDir: inv.paths.tmpDir, cwd: inv.cwd };
+  return { env: inv.env, home: inv.paths.home, tmpDir: inv.paths.tmpDir, cwd: inv.cwd, io: inv.io };
 }
 
 function buildAppFromSqlite(
@@ -925,6 +929,7 @@ function buildAppFromSqlite(
   const ruleChangeService = new RuleChangeService(store, recordLockService);
   corpusService.setRuleChangeLanding(ruleChangeService);
   return {
+    warn: warnSinkOf(ambient.io.stderr),
     corpusService,
     ...phaseServices,
     // reason: same resolved claimTtlMinutes as CorpusService above — one resolution
@@ -947,7 +952,7 @@ function buildAppFromSqlite(
     sessionStore: new SessionStore(db),
     aiProviderService,
     // reason: SyncDocsService depends only on CorpusService — no store access, no AI. SPEC-018 §3.6.
-    syncDocsService: new SyncDocsService(corpusService),
+    syncDocsService: new SyncDocsService(corpusService, warnSinkOf(ambient.io.stderr)),
     // reason: ExportDocsService needs to splice MDX placeholders into the exported body
     // (SPEC-032 §3.3 AC-4) — wired here as a narrow ResolveDocBody callback so
     // ExportDocsService itself never imports OutlineService (services don't cross-import).
@@ -955,7 +960,7 @@ function buildAppFromSqlite(
       const resolved = await outlineService.resolve(doc);
       if (!resolved.ok) return resolved;
       return ok(renderResolvedToMarkdown(resolved.value));
-    }),
+    }, warnSinkOf(ambient.io.stderr)),
     // reason: PhaseService depends only on StoreInterface — stateless, no AI, no telemetry. SPEC-023 §9.1.
     phaseService: new PhaseService(store, recordLockService),
     taskWorkflowService,
@@ -1077,6 +1082,7 @@ function buildAppFromSqlite(
         envPassthroughAll: verifyEnvConfig.passthrough_all,
         processEnv: ambient.env,
         tmpDir: ambient.tmpDir,
+        warn: warnSinkOf(ambient.io.stderr),
       },
       undefined,
       undefined,
@@ -1338,6 +1344,7 @@ function buildAppFromTurso(
   const ruleChangeService = new RuleChangeService(store, recordLockService);
   corpusService.setRuleChangeLanding(ruleChangeService);
   return {
+    warn: warnSinkOf(ambient.io.stderr),
     corpusService,
     ...phaseServices,
     // reason: same resolved claimTtlMinutes as CorpusService above — one resolution
@@ -1360,7 +1367,7 @@ function buildAppFromTurso(
     sessionStore: new SessionStore(apiKeyDb),
     aiProviderService,
     // reason: SyncDocsService depends only on CorpusService — no store access, no AI. SPEC-018 §3.6.
-    syncDocsService: new SyncDocsService(corpusService),
+    syncDocsService: new SyncDocsService(corpusService, warnSinkOf(ambient.io.stderr)),
     // reason: ExportDocsService needs to splice MDX placeholders into the exported body
     // (SPEC-032 §3.3 AC-4) — wired here as a narrow ResolveDocBody callback so
     // ExportDocsService itself never imports OutlineService (services don't cross-import).
@@ -1368,7 +1375,7 @@ function buildAppFromTurso(
       const resolved = await outlineService.resolve(doc);
       if (!resolved.ok) return resolved;
       return ok(renderResolvedToMarkdown(resolved.value));
-    }),
+    }, warnSinkOf(ambient.io.stderr)),
     // reason: PhaseService depends only on StoreInterface — stateless, no AI, no telemetry. SPEC-023 §9.1.
     phaseService: new PhaseService(store, recordLockService),
     taskWorkflowService,
@@ -1483,6 +1490,7 @@ function buildAppFromTurso(
         envPassthroughAll: verifyEnvConfig.passthrough_all,
         processEnv: ambient.env,
         tmpDir: ambient.tmpDir,
+        warn: warnSinkOf(ambient.io.stderr),
       },
       undefined,
       undefined,
@@ -1773,14 +1781,14 @@ function createAppUnscoped(
     const sqliteStore =
       writeContext === undefined
         ? baseSqliteStore
-        : (withVerifiedWriteContext(baseSqliteStore, writeContext.identity, writeContext.warn ?? warnOnStderr, writeContext.onVerified) as SQLiteStore);
+        : (withVerifiedWriteContext(baseSqliteStore, writeContext.identity, writeContext.warn ?? warnSinkOf(ambient.io.stderr), writeContext.onVerified) as SQLiteStore);
     // reason: SPEC-102 — local-only mode has no separate replica file; trace
     // writes route through the SAME sqliteStore every other corpus write
     // uses. `undefined` when trace.enabled resolves false — every
     // TraceRecorder call site (CorpusService/GateEnforcer) already treats
     // this as "untraced", byte-identical to pre-SPEC-102 behavior.
     const traceRecorder = traceEnabled
-      ? new TraceRecorder(sqliteStore.insertTraceEvent.bind(sqliteStore), () => surfaceBox.current)
+      ? new TraceRecorder(sqliteStore.insertTraceEvent.bind(sqliteStore), () => surfaceBox.current, warnSinkOf(ambient.io.stderr))
       : undefined;
     // reason: SPEC-102 §Migration Strategy — fire-and-forget from the
     // CALLER's perspective (loader.ts never awaits `pruneTrigger()`, so a
@@ -1819,6 +1827,7 @@ function createAppUnscoped(
       traceRecorder,
       () => resolveWriteActorFor(sqliteStore),
       ambient.env,
+      warnSinkOf(ambient.io.stderr),
     );
     const sqliteApp = buildAppFromSqlite(
       sqliteStore,
@@ -1891,7 +1900,7 @@ function createAppUnscoped(
     const store =
       writeContext === undefined
         ? baseTursoStore
-        : (withVerifiedWriteContext(baseTursoStore, writeContext.identity, writeContext.warn ?? warnOnStderr, writeContext.onVerified) as TursoStore);
+        : (withVerifiedWriteContext(baseTursoStore, writeContext.identity, writeContext.warn ?? warnSinkOf(ambient.io.stderr), writeContext.onVerified) as TursoStore);
     // reason: SPEC-102 D3 — trace writes in Turso mode go through a SEPARATE
     // local `bun:sqlite` handle on the SAME replica file `apiKeyDb`/
     // `sessionStore` already open (`buildAppFromTurso`'s identical
@@ -1907,7 +1916,7 @@ function createAppUnscoped(
     const localTraceStore = traceEnabled ? new SQLiteStore(dbPath) : undefined;
     const traceRecorder =
       localTraceStore !== undefined
-        ? new TraceRecorder(localTraceStore.insertTraceEvent.bind(localTraceStore), () => surfaceBox.current)
+        ? new TraceRecorder(localTraceStore.insertTraceEvent.bind(localTraceStore), () => surfaceBox.current, warnSinkOf(ambient.io.stderr))
         : undefined;
     // reason: SPEC-102 §Migration Strategy — same fire-and-forget-from-the-
     // CALLER's-perspective shape as the SQLite branch, bound to the SEPARATE
@@ -1928,7 +1937,7 @@ function createAppUnscoped(
     // TursoStore instance (also implements `StoreInterface.appendAuditEntry`).
     // 3rd arg wires SPEC-102's OPTIONAL TraceRecorder — see the SQLite branch's
     // identical comment.
-    const gateEnforcer = new GateEnforcer(config, store.appendAuditEntry.bind(store), traceRecorder, () => resolveWriteActorFor(store), ambient.env);
+    const gateEnforcer = new GateEnforcer(config, store.appendAuditEntry.bind(store), traceRecorder, () => resolveWriteActorFor(store), ambient.env, warnSinkOf(ambient.io.stderr));
     const tursoApp = buildAppFromTurso(
         store,
         dbPath,
