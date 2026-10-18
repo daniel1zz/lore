@@ -3,7 +3,7 @@
  * HAPPY: read-before-write is null, write then read round-trips the exact text. STATE: a second write replaces the
  * row (one row only). NEGATIVE: the CHECK refuses a second row id. REGRESSION: both stores answer the same.
  */
-import { describe, expect, it } from "bun:test";
+import { describe, expect, it } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";

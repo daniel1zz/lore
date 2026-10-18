@@ -665,7 +665,13 @@ export class AcService {
       plans.length > 0 || adhocTasks.length > 0 ? computeAcCoverage(criteria, tasks) : null;
     const coverage =
       baseCoverage !== null && pathContext !== undefined
-        ? annotateMissingOracleFiles(baseCoverage, criteria, tasks, pathContext)
+        ? annotateMissingOracleFiles(
+            baseCoverage,
+            criteria,
+            tasks,
+            pathContext,
+            new Set(extractAllowMissingPathDeclarations(spec).map((d) => d.ac_id)),
+          )
         : baseCoverage;
 
     const declaredIds = new Set(criteria.map((c) => c.id));
@@ -1472,6 +1478,8 @@ function buildSetChangeSummary(
  * @param criteria - the spec's declared criteria
  * @param tasks - the tasks whose evidence produced `coverage` (their rows give each pass's command / execution root)
  * @param pathContext - injected fs context (never a real filesystem read here)
+ * @param allowMissingAcIds - ids of the ACs declared with `--allow-missing-path` (red-first); stamped onto the fact as
+ *   `allow_missing_declared` so {@link deriveAcCoverageState} can apply its one missing-oracle rule
  * @returns new facts (inputs untouched); non-script criteria keep the field ABSENT
  */
 function annotateMissingOracleFiles(
@@ -1479,6 +1487,7 @@ function annotateMissingOracleFiles(
   criteria: AcceptanceCriterion[],
   tasks: DocRecord[],
   pathContext: OraclePathContext,
+  allowMissingAcIds: ReadonlySet<string>,
 ): AcListResult["coverage"] & object {
   const byId = new Map(criteria.map((c) => [c.id, c] as const));
   return coverage.map((fact) => {
@@ -1509,6 +1518,7 @@ function annotateMissingOracleFiles(
     return {
       ...fact,
       oracle_file_missing: missingPaths,
+      allow_missing_declared: allowMissingAcIds.has(fact.ac_id),
       passes_ran_missing_oracle: passesRanMissingOracle,
       oracle_paths_unchecked: findUncheckedOracleSegments(criterionCommand),
     };

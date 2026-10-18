@@ -597,6 +597,36 @@ describe("deriveAcCoverageState oracle_file_missing is not_measured whatever ear
     expect(deriveAcCoverageState({ ...base, pass: 0, oracle_file_missing: [], refs: [] })).toBe("none");
     expect(deriveAcCoverageState({ ...base, pass: 0, refs: [] })).toBe("none");
   });
+
+  it("BOUNDARY (AC-TG-6 vs AC-EI-2, one rule): declared --allow-missing-path + no pass on record is none; every other missing oracle is not_measured", () => {
+    // red-first: declared, oracle missing, nothing recorded -> none (does not block done)
+    expect(
+      deriveAcCoverageState({ ...base, pass: 0, oracle_file_missing: gone, allow_missing_declared: true, refs: [] }),
+    ).toBe("none");
+    // declared but a pass is on record (the oracle vanished, or the pass ran a different file) -> not_measured
+    expect(
+      deriveAcCoverageState({
+        ...base, pass: 1, oracle_file_missing: gone, allow_missing_declared: true, refs: [{ task_id: "t1", result: "pass" }],
+      }),
+    ).toBe("not_measured");
+    // declared, the only pass is an other-command row (pass counts 0, refs keeps it) -> still a pass on record -> not_measured
+    expect(
+      deriveAcCoverageState({
+        ...base, pass: 0, oracle_file_missing: gone, allow_missing_declared: true,
+        refs: [{ task_id: "t1", result: "pass", other_command: true }],
+      }),
+    ).toBe("not_measured");
+    // NOT declared, no evidence -> not_measured (EI-6 control for the same facts)
+    expect(
+      deriveAcCoverageState({ ...base, pass: 0, oracle_file_missing: gone, allow_missing_declared: false, refs: [] }),
+    ).toBe("not_measured");
+    // declared but a real fail still outranks
+    expect(
+      deriveAcCoverageState({
+        ...base, pass: 0, fail: 1, oracle_file_missing: gone, allow_missing_declared: true, refs: [{ task_id: "t1", result: "fail" }],
+      }),
+    ).toBe("fail");
+  });
 });
 
 // ─── AC-061-7 (spec-spec-061-attestation-completeness-guard): inconclusive counts in neither bucket ───

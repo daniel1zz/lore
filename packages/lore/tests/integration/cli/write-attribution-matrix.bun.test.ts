@@ -53,6 +53,7 @@ import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { SQLiteStore } from "../../../src/store/sqlite-store.js";
 import type { StoreInterface } from "../../../src/store/store-interface.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
+import { alwaysAutoOverridePort } from "../../helpers/always-auto-override-port.js";
 import { TaskWorkflowService } from "../../../src/service/task-workflow-service.js";
 import { AcService } from "../../../src/service/ac-service.js";
 import { RuleService } from "../../../src/service/rule-service.js";
@@ -134,9 +135,11 @@ function makeStore(kind: StoreKind): StoreHandle {
 
 function services(store: StoreInterface) {
   const corpus = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
+  const twf = new TaskWorkflowService(store, new NoOpTelemetry(), { claimTtlMinutes: 120 });
+  twf.setOverrideDecisionPort(alwaysAutoOverridePort()); // AU-T7: explicit test port; no port = override refused
   return {
     corpus,
-    twf: new TaskWorkflowService(store, new NoOpTelemetry(), { claimTtlMinutes: 120 }),
+    twf,
     ac: new AcService(store, new RecordLockService(store, new GateEnforcer(undefined))),
     rules: new RuleService(store, corpus.create.bind(corpus)),
     session: new SessionService(store, {

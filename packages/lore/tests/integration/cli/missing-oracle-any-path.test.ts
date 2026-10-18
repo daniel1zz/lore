@@ -247,10 +247,15 @@ describe("AC-EI-2 half 5 (REGRESSION): an unclassifiable segment is listed, neve
 
 describe("AC-EI-2 half 8 (NEGATIVE/BOUNDARY): a missing oracle is not measured even with ZERO evidence rows (EI-6)", () => {
   it("a test-path AC whose file is missing and that has no evidence renders not_measured naming the path (--json and text)", async () => {
+    // reason: NOT declared --allow-missing-path. AC-TG-6 reads a DECLARED red-first AC with no pass on record as none; this case is the
+    // undeclared one (EI-6), so the file exists when the AC is added and is deleted before it is read.
+    const oracle = join(dir, "never-written.test.ts");
+    writeFileSync(oracle, 'import { test, expect } from "bun:test";\ntest("n", () => expect(1).toBe(1));\n');
     await mustRun([
       "ac", "add", SPEC, "AC-EI2-N", "--statement", "Never-run criterion whose oracle file is missing.", "--mode", "script", "--oracle", "test",
-      "--command", "bun test never-written.test.ts", "--allow-missing-path", "oracle lands with the implementing task",
+      "--command", "bun test never-written.test.ts",
     ]);
+    rmSync(oracle);
     const fact = await coverageOf("AC-EI2-N");
     expect(fact.state).toBe("not_measured");
     expect(fact.oracle_file_missing).toEqual(["never-written.test.ts"]);
