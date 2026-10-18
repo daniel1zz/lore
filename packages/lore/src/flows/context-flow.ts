@@ -33,9 +33,12 @@
  *     (scope user). It NEVER splices a `fragments` section into CLAUDE.md (that code path was
  *     removed: `runContextInit` writes no fragment content at all). Per file: absent -> `created`;
  *     intact (fingerprint hash matches body) and different -> `updated`; identical -> `unchanged`;
- *     hand-edited / fingerprint-less -> `diverged_skip` (bytes untouched). `lore-*.md` files whose
- *     fragment is no longer selected are deleted (`pruned`); files without the `lore-` prefix are
- *     never read, written or deleted. Only PART of the fragment deps supplied = loud
+ *     hand-edited -> `diverged_skip` (bytes untouched). `lore-*.md` files whose fragment is no longer
+ *     selected are deleted (`pruned`) ONLY when ownership is proven (BR-1176, `rules-ownership.ts`):
+ *     scope user records the fragment source folder in the header and keeps + reports a file from
+ *     another source (`foreign_skip`) or without a source (`legacy_skip`; a selected, byte-equal legacy
+ *     file is adopted instead); scope project records no source and proves ownership by an intact
+ *     header. Files without the `lore-` prefix are never read, written or deleted. Only PART of the fragment deps supplied = loud
  *     VALIDATION_ERROR (never a silent skip); NONE supplied = legacy `{ fs }` callers, project
  *     scope, no rules files (scope "user" with none is an error). Scope "user" never touches any
  *     CLAUDE.md. Each rules file must pass the `context.memory_files.rules` budget or the whole
@@ -154,6 +157,7 @@ import {
   SKILL_DIR_PREFIX,
   SKILL_FILE_NAME,
 } from "../service/context-fragments/section.js";
+import { classifyExistingRulesFile, rulesSourceId } from "../service/context-fragments/rules-ownership.js";
 import { checkOverrides, selectFragments } from "../service/context-fragments/select.js";
 
 // ─── Constants ───────────────────────────────────────────────────────────────
@@ -269,7 +273,16 @@ export interface ContextInitReport {
 }
 
 /** What refresh did with one lore rules file (D15). */
-export type RulesFileState = "created" | "updated" | "unchanged" | "diverged_skip" | "pruned";
+export type RulesFileState =
+  | "created"
+  | "updated"
+  | "unchanged"
+  | "diverged_skip"
+  | "pruned"
+  /** Header records a different fragment source folder (BR-1176): kept untouched. */
+  | "foreign_skip"
+  /** No recorded source identity and not adoptable (BR-1176): kept untouched; delete by hand if it is yours. */
+  | "legacy_skip";
 
 /** Per-file outcome of the rules-file pass of one {@link runContextRefresh} call. */
 export interface RulesFileOutcome {
@@ -482,6 +495,18 @@ interface ScopeSelection {
   skills: Fragment[];
 }
 
+/** The three fragment folders one refresh reads; the SSOT for both discovery and the recorded source identity (BR-1176). */
+function fragmentRoots(fragmentDeps: FragmentRefreshDeps): { shipped: string; user: string; project: string } {
+  return {
+    shipped: joinPortPath(fragmentDeps.assetsRoot, "context"),
+    user: joinPortPath(
+      fragmentDeps.userConfigDir ?? resolveUserConfigDir({ XDG_CONFIG_HOME: fragmentDeps.xdgConfigHome }, fragmentDeps.home),
+      "context",
+    ),
+    project: PROJECT_FRAGMENTS_DIR,
+  };
+}
+
 /** discover -> checkOverrides -> select for the scope's rules outlet and skills outlet. */
 async function selectScopeFragments(
   fs: FsWritePort,
@@ -491,14 +516,7 @@ async function selectScopeFragments(
   const outlets: Record<keyof ScopeSelection, OutletId> =
     scope === "user" ? { rules: "rules:user", skills: "skills:user" } : { rules: "rules:project", skills: "skills:project" };
 
-  const discovered = await discoverFragments(fs, {
-    shipped: joinPortPath(fragmentDeps.assetsRoot, "context"),
-    user: joinPortPath(
-      fragmentDeps.userConfigDir ?? resolveUserConfigDir({ XDG_CONFIG_HOME: fragmentDeps.xdgConfigHome }, fragmentDeps.home),
-      "context",
-    ),
-    project: PROJECT_FRAGMENTS_DIR,
-  });
+  const discovered = await discoverFragments(fs, fragmentRoots(fragmentDeps));
   if (!discovered.ok) return discovered;
 
   const overrides = checkOverrides(discovered.value, { global: fragmentDeps.globalConfig, project: fragmentDeps.projectConfig });
@@ -546,12 +564,13 @@ async function planRulesFiles(
   rulesDir: string,
   selected: readonly Fragment[],
   budgets: MemoryFileBudgets,
+  sourceId: string | null,
 ): Promise<Result<RulesAction[], LoreError>> {
   const actions: RulesAction[] = [];
   const keep = new Set<string>();
 
   for (const fragment of selected) {
-    const rendered = renderRulesFile(fragment);
+    const rendered = renderRulesFile(fragment, sourceId ?? undefined);
     if (!rendered.ok) return rendered;
     const { id, fileName, content } = rendered.value;
     keep.add(fileName);
@@ -577,8 +596,22 @@ async function planRulesFiles(
       actions.push({ kind: "write", outcome: { id, path, state: "created" }, content, readBytes: null });
       continue;
     }
-    const parsed = parseRulesFile(existing);
-    if (parsed === null || !parsed.intact || parsed.id !== id) {
+    // reason: BR-1176 — ownership is the RECORDED source identity in the file's own header, not the file name;
+    // adoption compares against the legacy-shape render (no `source=`) so an old byte-equal file is claimed.
+    const legacyRender = renderRulesFile(fragment);
+    if (!legacyRender.ok) return legacyRender;
+    const verdict = classifyExistingRulesFile(existing, sourceId, legacyRender.value.content);
+    if (verdict.kind === "foreign") {
+      actions.push({ kind: "none", outcome: { id, path, state: "foreign_skip" } });
+    } else if (verdict.kind === "diverged") {
+      actions.push({ kind: "none", outcome: { id, path, state: "diverged_skip" } });
+    } else if (verdict.kind === "legacy") {
+      actions.push(
+        verdict.adoptable
+          ? { kind: "write", outcome: { id, path, state: "updated" }, content, readBytes: existing }
+          : { kind: "none", outcome: { id, path, state: "legacy_skip" } },
+      );
+    } else if (parseRulesFile(existing)?.id !== id) {
       actions.push({ kind: "none", outcome: { id, path, state: "diverged_skip" } });
     } else if (existing === content) {
       actions.push({ kind: "none", outcome: { id, path, state: "unchanged" } });
@@ -587,12 +620,20 @@ async function planRulesFiles(
     }
   }
 
-  // reason: prune deletes ONLY the lore-reserved namespace (`lore-*.md`); every other file in the
-  // rules dir belongs to the person and is never read, so it cannot be touched (D15 d).
+  // reason: prune deletes ONLY a `lore-*.md` this refresh can PROVE it owns (same recorded source, intact body);
+  // every other file in the rules dir is kept and reported, so a wrong target folder can never lose a file (BR-1176).
   const stale = (await deps.fs.listDir(rulesDir)).filter((name) => isLoreRulesFileName(name) && !keep.has(name)).sort();
   for (const name of stale) {
     const path = joinPortPath(rulesDir, name);
     const id = name.slice(RULES_FILE_PREFIX.length, name.length - RULES_FILE_SUFFIX.length);
+    const bytes = await deps.fs.readFile(path);
+    if (bytes === null) continue;
+    const verdict = classifyExistingRulesFile(bytes, sourceId, null);
+    if (verdict.kind !== "owned" || parseRulesFile(bytes)?.id !== id) {
+      const state = verdict.kind === "foreign" ? "foreign_skip" : verdict.kind === "legacy" ? "legacy_skip" : "diverged_skip";
+      actions.push({ kind: "none", outcome: { id, path, state } });
+      continue;
+    }
     if (deps.fs.deleteFile === undefined) {
       return err({
         code: "VALIDATION_ERROR",
@@ -601,7 +642,7 @@ async function planRulesFiles(
         value: path,
       });
     }
-    actions.push({ kind: "delete", outcome: { id, path, state: "pruned" }, readBytes: await deps.fs.readFile(path) });
+    actions.push({ kind: "delete", outcome: { id, path, state: "pruned" }, readBytes: bytes });
   }
   return ok(actions);
 }
@@ -797,7 +838,8 @@ export async function runContextRefresh(
   if (fragmentDeps !== null && rulesDir !== null) {
     const selected = await selectScopeFragments(deps.fs, fragmentDeps, scope);
     if (!selected.ok) return selected;
-    const planned = await planRulesFiles(deps, rulesDir, selected.value.rules, budgets);
+    const roots = fragmentRoots(fragmentDeps);
+    const planned = await planRulesFiles(deps, rulesDir, selected.value.rules, budgets, rulesSourceId(scope, roots.user));
     if (!planned.ok) return planned;
     ruleActions = planned.value;
 
