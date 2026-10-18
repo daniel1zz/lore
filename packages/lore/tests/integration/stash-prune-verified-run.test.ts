@@ -7,7 +7,7 @@
  * Throwaway repo + corpus (mkdtemp, `git init`, `lore init`), never the repo's own `.lore/` or stash stack.
  * Control: a REGISTERED run id must reach `executor_run` unchanged, so "always null" cannot pass this file.
  *
- * @spec_ref AC-IV-5
+ * @spec_ref BR-1035 (regression found in the IV-5 review of plan-ambient-state-read-once-at-the-entry-owned-only-prune-user)
  */
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { spawnSync } from "node:child_process";

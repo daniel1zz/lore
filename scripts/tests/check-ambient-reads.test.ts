@@ -1,7 +1,7 @@
 // @spawns scripts/check-ambient-reads.ts
-/** @spec_ref AC-IV-6 AC-IV-7 */
+/** @spec_ref AC-IV-6 */
 /**
- * @layer script-unit AC-IV-6 (check:ambient-reads refuses a planted read with [AS-26]; AC-IV-7 --ledger-empty)
+ * @layer script-unit AC-IV-6 (check:ambient-reads refuses a planted read with [AS-26]; also the --ledger-empty mode the plan's final ratchet step uses)
  * Tests for `scripts/check-ambient-reads.ts` (rule AS-26, spec D5).
  *
  * Six-dimension coverage:
@@ -119,7 +119,7 @@ describe("AC-IV-6 check:ambient-reads CLI", () => {
   });
 });
 
-describe("AC-IV-7 --ledger-empty", () => {
+describe("--ledger-empty mode", () => {
   it("exits 1 while the ledger has an entry, naming it", () => {
     const p = plant({}, { "packages/core/src/a.ts": 1 });
     const r = run(["--ledger-empty", "--ledger", p.ledger]);

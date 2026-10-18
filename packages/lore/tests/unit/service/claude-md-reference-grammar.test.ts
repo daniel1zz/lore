@@ -17,6 +17,7 @@
 // @reads dist-npm/**
 // @reads dist/**
 // @reads docs/**
+// @reads errors.js
 // @reads flows/context-flow.ts
 // @reads flows/phase-status-flow.ts
 // @reads flows/task-feed-flow.ts
@@ -29,6 +30,8 @@
 // @reads service
 // @reads service/CLAUDE.md
 // @reads service/anchor-resolution.ts
+// @reads service/decision-service.ts
+// @reads service/run-reap-service.ts
 // @reads service/validity-service.ts
 // @reads src
 // @reads src/api/mutations.ts
