@@ -64,8 +64,11 @@ const claims = (byAgent: Claims) => async (run: string) =>
 /** Open claims by the working copy their recorded worktree names (what `RunService.openClaimsOfWorkingCopy` reads). */
 type OpenClaims = Record<string, Array<{ slug: string; anchors: string[] }>>;
 
-const openClaimsOf = (byCopy: OpenClaims) => async (workingCopy: string) =>
-  ok((byCopy[workingCopy] ?? []).map((t) => ({ slug: t.slug, file_anchors: t.anchors }) as unknown as RunClaimedTask));
+const openClaimsOf = (byCopy: OpenClaims, notMeasured: string[] = []) => async (workingCopy: string) =>
+  ok({
+    tasks: (byCopy[workingCopy] ?? []).map((t) => ({ slug: t.slug, file_anchors: t.anchors }) as unknown as RunClaimedTask),
+    not_measured: notMeasured,
+  });
 
 async function review(trail: SessionTrail, byAgent: Claims, byCopy: OpenClaims = {}) {
   const r = await reviewHelperScope({
@@ -153,6 +156,18 @@ describe("AU-T22 open claim whose recorded worktree is the group's working copy"
   it("AU-T22 control: a helper in a working copy no open claim names is still no-claimed-task", async () => {
     const out = await review(trailOf([helper("inner", { files: FILES })]), {}, { "/wt/agent-other": OPEN[WC] ?? [] });
     expect(out.findings.map((f) => [f.kind, f.helper])).toEqual([["no-claimed-task", "inner"]]);
+  });
+
+  it("AU-T23 a not-measured claim resolution from the open-claim port surfaces in not_measured", async () => {
+    const r = await reviewHelperScope({
+      trail: trailOf([helper("inner", { files: FILES })]),
+      claimedTasks: claims({}),
+      openClaimsOfWorkingCopy: openClaimsOf({}, ["open claim of task-x: worktree b not resolved (git failed)"]),
+      projectRoot: "/proj",
+      realpath: (p) => p,
+    });
+    if (!r.ok) throw new Error("review failed");
+    expect(r.value.not_measured).toEqual(["open claim of task-x: worktree b not resolved (git failed)"]);
   });
 
   it("AU-T22 the open claim's anchors still bound the helper: a file outside them is outside-anchors", async () => {
