@@ -125,7 +125,7 @@ export interface ContextFacts {
   modulesWithoutMemoryFile: number;
   /** `true` iff the walk hit {@link MAX_MODULE_INDEX_ENTRIES} and stopped; rendered as a notice so nothing is dropped silently. */
   walkTruncated: boolean;
-  /** `root`'s `package.json` `scripts` map, or `{}` when absent/unreadable/schema-invalid. */
+  /** The scripts `root`'s `package.json` marks via `lore.documentedScripts` (name -> body), or `{}` when none/absent/unreadable/schema-invalid. */
   commands: Record<string, string>;
 }
 
@@ -156,11 +156,17 @@ const MAX_PURPOSE_CHARS = 160;
 /**
  * Boundary validation for a root `package.json`'s parsed JSON (SPEC boundary
  * rule: any `JSON.parse` result flows through a Zod parse before use).
- * `.passthrough()` — this module only ever reads `.scripts`, every other
+ * `.passthrough()` — this module only ever reads `.scripts` and
+ * `.lore.documentedScripts`, every other
  * `package.json` field is the caller's business, not a shape this module
  * enforces.
  */
-const rootPackageJsonSchema = z.object({ scripts: z.record(z.string()).optional() }).passthrough();
+const rootPackageJsonSchema = z
+  .object({
+    scripts: z.record(z.string()).optional(),
+    lore: z.object({ documentedScripts: z.array(z.string()).optional() }).passthrough().optional(),
+  })
+  .passthrough();
 
 // ─── Path helpers ────────────────────────────────────────────────────────────
 
@@ -199,21 +205,45 @@ function validateRoot(root: string): Result<void, LoreError> {
 
 // ─── Commands (package.json scripts) ────────────────────────────────────────
 
-/** Reads `root`'s `package.json` and extracts `.scripts`, degrading to `{}` on any absence/parse/schema failure (see module header). */
-async function readCommands(fs: FsReadPort, root: string): Promise<Record<string, string>> {
+/**
+ * Reads `root`'s `package.json` and returns ONLY the scripts the project marks as documented via
+ * `"lore": { "documentedScripts": [...] }` (name -> body, in marker order).
+ *
+ * reason: MI-T4 (task-skill-design-mi-t4-the-generated-command-table-in-claude). The command table in the
+ * managed zone is an orientation aid, not a mirror of package.json: copying every script duplicated the
+ * hand-written `## Commands` section, surfaced retirement stubs (`test:bun`), and made every package.json edit
+ * a CLAUDE.md edit. Opt-in keeps the table to what a project chose to document; with no marker it is empty and
+ * renders a pointer. A marker naming a script that does not exist fails loud (stale marker), never silently dropped.
+ * Absence/parse/schema failure still degrades to `{}` (see module header).
+ */
+async function readCommands(fs: FsReadPort, root: string): Promise<Result<Record<string, string>, LoreError>> {
   const raw = await fs.readFile(joinRepoPath(root, "package.json"));
-  if (raw === null) return {};
+  if (raw === null) return ok({});
 
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
   } catch {
-    return {};
+    return ok({});
   }
 
   const validated = rootPackageJsonSchema.safeParse(parsed);
-  if (!validated.success) return {};
-  return validated.data.scripts ?? {};
+  if (!validated.success) return ok({});
+  const scripts = validated.data.scripts ?? {};
+  const documented: Record<string, string> = {};
+  for (const name of validated.data.lore?.documentedScripts ?? []) {
+    const body = scripts[name];
+    if (body === undefined) {
+      return err({
+        code: "VALIDATION_ERROR",
+        field: "package.json lore.documentedScripts",
+        message: `lore.documentedScripts names "${name}" but package.json has no such script`,
+        value: name,
+      });
+    }
+    documented[name] = body;
+  }
+  return ok(documented);
 }
 
 // ─── Module index walk ───────────────────────────────────────────────────────
@@ -410,7 +440,9 @@ export async function collectContextFacts(
   const rootValidation = validateRoot(root);
   if (!rootValidation.ok) return rootValidation;
 
-  const commands = await readCommands(fs, root);
+  const commandsResult = await readCommands(fs, root);
+  if (!commandsResult.ok) return commandsResult;
+  const commands = commandsResult.value;
 
   const rootLayer = await loadGitignoreLayer(fs, root);
   const rootLayers = rootLayer !== null ? [rootLayer] : [];
