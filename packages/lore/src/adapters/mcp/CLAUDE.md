@@ -2,7 +2,7 @@
 
 ## Purpose
 
-MCP (Model Context Protocol) stdio adapter. Entered via `lore --mcp-server`
+MCP stdio server adapter: `lore_*` tools and fast-path registration. Entered via `lore --mcp-server`
 (top-level flag intercepted in `packages/lore/src/index.ts`) or `lore agent`.
 Registers the `lore_*` tools (count pinned by `tests/unit/adapters/mcp-tools.test.ts` — never restate it here) plus a small set of MCP resources against
 `@modelcontextprotocol/sdk`'s `McpServer`, connects over
