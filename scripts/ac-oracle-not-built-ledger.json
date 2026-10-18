@@ -91,12 +91,6 @@
   },
   {
     "spec": "spec-ambient-state-is-read-once-at-the-entry-owned-only-prune",
-    "ac": "AC-IV-3",
-    "reason": "oracle test not written yet (iv-user-state-guard.test.ts absent); owned by task-skill-implement-iv-2-user-level-state-guard-for-the-test",
-    "owner_plan": "plan-ambient-state-read-once-at-the-entry-owned-only-prune-user"
-  },
-  {
-    "spec": "spec-ambient-state-is-read-once-at-the-entry-owned-only-prune",
     "ac": "AC-IV-4",
     "reason": "oracle test not written yet (iv-rooted-fs-port.test.ts absent); owned by task-skill-implement-iv-3-rooted-write-port-roots-at",
     "owner_plan": "plan-ambient-state-read-once-at-the-entry-owned-only-prune-user"
