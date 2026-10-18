@@ -14,9 +14,19 @@
  * @invariant Services never cross-import: run occupancy arrives as the {@link RunOccupancyPort} (structurally
  *   `RunService.occupancy`), run/session liveness as a narrow store pick.
  * @invariant No method throws; every measurement failure is a `Measured` miss (-> `not-measured`, never `removable`).
+ * @invariant AC-AU-11: AFTER the removal test says removable, every removal this module performs or gates
+ *   ({@link WorktreeRemovalService.gateRemoval}, `sweep --apply`, {@link WorktreeRemovalService.removeScratchWorktree})
+ *   calls decide(`worktree-remove`) through the {@link RemovalDecisionPort}. R is `loss-free-by-proof` only when
+ *   `git status --ignored --porcelain` lists no ignored path outside the regenerable set, else `irreversible-local`
+ *   (-> escalate, paths named). The factors are measured here; C is the class prior from the registry (AU-T8 replaces
+ *   it); no caller supplies a factor.
+ * @invariant A `lore-attested-red-*` falsifier scratch worktree is dirty by construction, so for IT the removal test's
+ *   dirty / unmerged / run / claim / owner clauses are replaced by ownership proof: the creating pid (owner marker) is
+ *   dead, or there is no marker (made before the marker existed). Locked, caller-inside, process-inside still hold.
  */
+import { createHash } from "node:crypto";
 import { resolve } from "node:path";
-import { deriveRunId, err, ok, type LoreError, type Result, type RunId } from "@lore/core";
+import { deriveRunId, err, ok, OPERATION_CLASS_REGISTRY, type LoreError, type Result, type RunId } from "@lore/core";
 import type { ProcessScanPort } from "../adapters/real-process-scan-port.js";
 import type { StoreInterface } from "../store/store-interface.js";
 import {
@@ -29,7 +39,15 @@ import {
   type WorktreeRemovalFactsPort,
   type WorktreeRemovalVerdict,
 } from "./worktree-removal-test.js";
-import type { ListedWorktree, WorktreeGitProbe } from "./worktree-cleanup.js";
+import {
+  ignoredPathsOutsideRegenerableSet,
+  isFalsifierScratchPath,
+  type ListedWorktree,
+  type ScratchRemovalPort,
+  type WorktreeGitProbe,
+  type WorktreeRemovalGate,
+  type WorktreeRemovalGatePort,
+} from "./worktree-cleanup.js";
 
 /** Structurally `RunOccupancy` (run-service.ts) — the `lore run occupancy --json` data. */
 export interface OccupancyData {
@@ -51,7 +69,26 @@ export interface RunOccupancyPort {
 /** Run + run-end reads the owner-session lookup needs. */
 export type WorktreeRemovalRunStore = Pick<StoreInterface, "getRun" | "getRunEnd">;
 
+/** Structurally `DecisionService.decide` — the only autonomy surface this module consumes (no cross-service import). */
+export interface RemovalDecisionPort {
+  decide(
+    classId: string,
+    subject: { readonly id: string; readonly version: string },
+    facts: unknown,
+  ): Promise<
+    Result<
+      {
+        readonly decision: { readonly verdict: string; readonly reasons: readonly string[] };
+        readonly record_id: number;
+        readonly effective: { readonly verdict: string };
+      },
+      LoreError
+    >
+  >;
+}
+
 export interface WorktreeRemovalDeps {
+  readonly decisions: RemovalDecisionPort;
   readonly probe: WorktreeGitProbe;
   readonly processScan: ProcessScanPort;
   readonly occupancy: RunOccupancyPort;
@@ -71,6 +108,8 @@ export interface WorktreeCheck {
 /** One `lore worktree sweep --json` row: the check plus what `--apply` did. */
 export interface WorktreeSweepEntry extends WorktreeCheck {
   readonly removed?: boolean;
+  /** `--apply` kept a removable worktree because decide(worktree-remove) did not say auto (AC-AU-11). */
+  readonly escalated?: { readonly ignored_paths: readonly string[]; readonly record_id?: number };
   readonly hint?: string;
   /** `--apply` removal failure detail (the worktree was kept). */
   readonly error?: string;
@@ -85,7 +124,17 @@ interface Inspection {
   readonly owner: OwnerFact | null;
   readonly occupancy: OccupancyData | null;
   readonly processes: readonly ProcessInsideFact[];
+  /** A falsifier scratch worktree (facts already carry the scratch ownership proof). */
+  readonly scratch: boolean;
 }
+
+const WORKTREE_REMOVE_CLASS = "worktree-remove";
+
+/** C until AU-T8 measures it: the class prior from the registry; absent -> omitted -> decide() scores C as 0 (fail closed). */
+const WORKTREE_REMOVE_PRIOR_CONFIDENCE: number | undefined = (() => {
+  const operationClass = OPERATION_CLASS_REGISTRY[WORKTREE_REMOVE_CLASS];
+  return operationClass !== undefined && operationClass.tier === "normal" ? operationClass.priorConfidence : undefined;
+})();
 
 function miss<T>(reason: string): Measured<T> {
   return { ok: false, reason };
@@ -95,12 +144,64 @@ function isInside(child: string, parent: string): boolean {
   return child === parent || child.startsWith(parent.endsWith("/") ? parent : `${parent}/`);
 }
 
-export class WorktreeRemovalService implements WorktreeRemovalFactsPort {
+export class WorktreeRemovalService implements WorktreeRemovalFactsPort, WorktreeRemovalGatePort, ScratchRemovalPort {
   constructor(private readonly deps: WorktreeRemovalDeps) {}
 
   /** Facts for `lore done`'s cleanup (see {@link WorktreeRemovalFactsPort}). */
   async gatherRemovalFacts(path: string, callerSession: string | null): Promise<WorktreeRemovalFacts> {
     return (await this.inspect(path, callerSession)).facts;
+  }
+
+  /**
+   * AC-AU-11: the decide(worktree-remove) gate, for a worktree the removal test already called removable.
+   * Never throws; anything but an effective `auto` is `allowed: false` with a printable reason.
+   */
+  async gateRemoval(path: string): Promise<WorktreeRemovalGate> {
+    return this.decideRemoval(resolve(path));
+  }
+
+  /**
+   * Removes a falsifier scratch worktree (`verify --falsify`'s `finally`) through decide(worktree-remove).
+   * A path that is not the `wt` dir of a `lore-attested-red-*` temp dir is refused; an escalated decision keeps it.
+   */
+  async removeScratchWorktree(repoRoot: string, worktreeDir: string): Promise<{ removed: boolean; reason?: string }> {
+    const path = resolve(worktreeDir);
+    if (!isFalsifierScratchPath(path)) return { removed: false, reason: `${path} is not a falsifier scratch worktree path` };
+    const gate = await this.decideRemoval(path);
+    if (!gate.allowed) return { removed: false, reason: gate.reason };
+    const removed = this.deps.probe.removeScratchWorktree(repoRoot, path);
+    return removed.ok ? { removed: true } : { removed: false, reason: `remove-failed: ${removed.reason}` };
+  }
+
+  private async decideRemoval(path: string): Promise<WorktreeRemovalGate> {
+    const { probe } = this.deps;
+    const ignored = probe.ignoredPaths(path);
+    const outside = ignored.ok ? ignoredPathsOutsideRegenerableSet(ignored.value) : [];
+    const head = probe.headSha(path);
+    // reason: the version carries the ignored-outside list, so removing the offending file produces a NEW subject and the
+    // worktree can become auto — while the SAME listing can never be re-scored upward (AC-AU-2 worst-of per version).
+    const fingerprint = createHash("sha256").update(ignored.ok ? outside.join("\n") : "ignored-not-measured").digest("hex").slice(0, 12);
+    const version = `${head.ok ? head.value : "head-not-measured"}:${fingerprint}`;
+    const facts = {
+      ...(ignored.ok ? { recoverability: outside.length === 0 ? "loss-free-by-proof" : "irreversible-local" } : {}),
+      // reason: the removal test (owned-or-abandoned, no live run/claim/process) already established the blast radius.
+      blast: "own-or-ended-run",
+      evidence: "lore-evaluated",
+      ...(WORKTREE_REMOVE_PRIOR_CONFIDENCE !== undefined ? { confidence: WORKTREE_REMOVE_PRIOR_CONFIDENCE } : {}),
+    };
+    const outcome = await this.deps.decisions.decide(WORKTREE_REMOVE_CLASS, { id: path, version }, facts);
+    if (!outcome.ok) {
+      return { allowed: false, reason: `removal not decided (nothing removed): ${outcome.error.code}`, ignored_paths: outside };
+    }
+    if (outcome.value.effective.verdict === "auto") return { allowed: true, record_id: outcome.value.record_id };
+    const record = `decision record ${String(outcome.value.record_id)}`;
+    const reason =
+      outside.length > 0
+        ? `ignored data outside the regenerable set: ${outside.join(", ")} (${outcome.value.effective.verdict}, ${record})`
+        : !ignored.ok
+          ? `ignored paths not measured: ${ignored.reason} (${outcome.value.effective.verdict}, ${record})`
+          : `removal decision ${outcome.value.effective.verdict} (${record})`;
+    return { allowed: false, reason, ignored_paths: outside, record_id: outcome.value.record_id };
   }
 
   /**
@@ -125,10 +226,22 @@ export class WorktreeRemovalService implements WorktreeRemovalFactsPort {
     }
     const rows: WorktreeSweepEntry[] = [];
     for (const entry of listed.value.slice(1)) {
-      const inspection = await this.inspect(entry.path, opts.callerSession);
+      const inspection = isFalsifierScratchPath(resolve(entry.path))
+        ? this.asScratchInspection(await this.inspect(entry.path, opts.callerSession))
+        : await this.inspect(entry.path, opts.callerSession);
       const check = this.toCheck(inspection);
       const hint = this.runEndHint(check);
       if (opts.apply && check.verdict === "removable") {
+        const gate = await this.decideRemoval(inspection.path);
+        if (!gate.allowed) {
+          rows.push({
+            ...check,
+            verdict: "keep",
+            reasons: [gate.reason],
+            escalated: { ignored_paths: gate.ignored_paths, ...(gate.record_id !== undefined ? { record_id: gate.record_id } : {}) },
+          });
+          continue;
+        }
         const outcome = this.removeInspected(inspection);
         rows.push({ ...check, ...outcome, ...(hint !== undefined ? { hint } : {}) });
       } else {
@@ -158,8 +271,38 @@ export class WorktreeRemovalService implements WorktreeRemovalFactsPort {
     return `run ${runId} has no end recorded and no open task claim names this worktree; if its agent is gone: lore run end ${runId} --reason "<why>"`;
   }
 
+  /**
+   * Replaces the clauses a scratch worktree cannot satisfy by construction (its mutation makes it dirty; it has no
+   * branch, claim or agent run) with the scratch ownership proof: the creating pid is dead, or no marker exists.
+   * An unreadable marker stays a miss (-> not-measured). Unmeasured inspections are returned untouched.
+   */
+  private asScratchInspection(inspection: Inspection): Inspection {
+    if (inspection.repoRoot === undefined) return inspection;
+    const { probe } = this.deps;
+    const marker = probe.scratchOwner(inspection.path);
+    const agentRunLive: Measured<boolean> = marker.ok
+      ? { ok: true, value: marker.value !== null && probe.isPidAlive(marker.value.pid) }
+      : miss(marker.reason);
+    return {
+      ...inspection,
+      scratch: true,
+      facts: {
+        ...inspection.facts,
+        dirty: { ok: true, value: false },
+        unmerged: { ok: true, value: false },
+        agentRunLive,
+        openClaims: { ok: true, value: [] },
+        owner: { ok: true, value: null },
+      },
+    };
+  }
+
   private removeInspected(inspection: Inspection): { removed: boolean; error?: string } {
     if (inspection.repoRoot === undefined) return { removed: false, error: "repository root not measured" };
+    if (inspection.scratch) {
+      const scratchRemoved = this.deps.probe.removeScratchWorktree(inspection.repoRoot, inspection.path);
+      return scratchRemoved.ok ? { removed: true } : { removed: false, error: `remove-failed: ${scratchRemoved.reason}` };
+    }
     const removed = this.deps.probe.removeWorktree(inspection.repoRoot, inspection.path);
     if (!removed.ok) return { removed: false, error: `remove-failed: ${removed.reason}` };
     if (inspection.branch === undefined) return { removed: true };
@@ -188,6 +331,7 @@ export class WorktreeRemovalService implements WorktreeRemovalFactsPort {
       owner: null,
       occupancy: null,
       processes: [],
+      scratch: false,
     });
     if (!probe.pathExists(path)) return unmeasured("path does not exist");
 
@@ -239,6 +383,7 @@ export class WorktreeRemovalService implements WorktreeRemovalFactsPort {
       owner: owner.ok ? owner.value : null,
       occupancy,
       processes,
+      scratch: false,
     };
   }
 

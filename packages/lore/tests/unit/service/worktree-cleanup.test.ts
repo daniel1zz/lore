@@ -164,6 +164,10 @@ function fakeProbe(over: Partial<FakeState> = {}): { probe: WorktreeGitProbe; st
       state.calls.push(`branch -d ${root} ${b}`);
       return state.branchOk ? { ok: true, value: true } : { ok: false, reason: "not fully merged" };
     },
+    ignoredPaths: () => ({ ok: true, value: [] }),
+    scratchOwner: () => ({ ok: true, value: null }),
+    isPidAlive: () => false,
+    removeScratchWorktree: () => ({ ok: true, value: true }),
   };
   return { probe, state };
 }

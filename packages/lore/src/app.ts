@@ -84,6 +84,7 @@ import { SpawnGitPort, resolveGitRoot } from "./service/rule-state-git-port.js";
 import type { RadiusDiffPort } from "./service/stamp-binding-reader.js";
 import { RunService } from "./service/run-service.js";
 import { WorktreeRemovalService, type WorktreeRemovalRunStore } from "./service/worktree-removal-service.js";
+import { DecisionService } from "./service/decision-service.js";
 import { createRealWorktreeProbe } from "./service/worktree-cleanup.js";
 import { createRealProcessScanPort } from "./adapters/real-process-scan-port.js";
 import { ensureVerifiedIdentity, resolveWriteActorFor, withVerifiedWriteContext } from "./store/write-context-store.js";
@@ -1033,6 +1034,7 @@ function buildAppFromSqlite(
       undefined,
       undefined,
       buildStateBindingOccupancyPort(store),
+      worktreeRemovalService,
     ),
     // reason: ConfigService (SPEC-062 D1) — constructed over the SAME repoRoot
     // VerifyRunnerService/SeatService already receive (config lives at
@@ -1429,6 +1431,7 @@ function buildAppFromTurso(
       undefined,
       undefined,
       buildStateBindingOccupancyPort(store),
+      worktreeRemovalService,
     ),
     // reason: ConfigService (SPEC-062 D1) — see buildAppFromSqlite's identical comment.
     configService: new ConfigService(repoRoot, store.appendAuditEntry.bind(store)),
@@ -1910,8 +1913,13 @@ function createAppUnscoped(
  * Builds the worktree-removal service over `store`. Run occupancy comes from a CLAIM-PORT-LESS `RunService` (occupancy
  * reads only the store + realpath), which also avoids the TaskWorkflowService <-> RunService construction cycle.
  */
-function buildWorktreeRemovalService(store: ConstructorParameters<typeof RunService>[0] & WorktreeRemovalRunStore): WorktreeRemovalService {
+function buildWorktreeRemovalService(
+  store: ConstructorParameters<typeof RunService>[0] & WorktreeRemovalRunStore & StoreInterface,
+): WorktreeRemovalService {
   return new WorktreeRemovalService({
+    // reason: AC-AU-11 — every worktree removal asks decide(worktree-remove) through the decision log; `executorRun: null`
+    // because an in-process service has no attested run id of its own (AU-T9 stamps the executor on the CLI path).
+    decisions: new DecisionService({ store, executorRun: null }),
     probe: createRealWorktreeProbe(),
     processScan: createRealProcessScanPort(),
     occupancy: new RunService(store, undefined, undefined, realpathNative),

@@ -230,6 +230,7 @@ import {
 import type { VerifiedEvidenceInput } from "./task-workflow-service.js";
 import { buildStateBindingSkipAuditEntry } from "./state-binding-skip.js";
 import { materializeFalsifierDependencies } from "./falsifier-dep-materialization.js";
+import { writeScratchOwner, type ScratchRemovalPort } from "./worktree-cleanup.js";
 import { FALSIFIER_EXIT_CODE_MAX, FALSIFIER_EXIT_CODE_MIN, isValidFalsifierExitCode } from "./ac-write-chokepoint.js";
 // Probe + stamp decision live in ./git-state-stamp.js, shared with `lore evidence --capture`.
 import { probeGitState, decideStampOutcome, type StampOutcome } from "./git-state-stamp.js";
@@ -578,6 +579,20 @@ export function createFalsifierScratchWorktree(
       message: `attested-red runner could not create a scratch temp directory: ${error instanceof Error ? error.message : String(error)}`,
     });
   }
+  // AC-AU-11: the owner marker lets `lore worktree sweep --apply` prove this scratch's run ended (pid dead) if the
+  // process dies before its `finally`. Written BEFORE `git worktree add` so no registered scratch lacks it.
+  const owner = writeScratchOwner(parentDir, process.pid);
+  if (!owner.ok) {
+    try {
+      rmSync(parentDir, { recursive: true, force: true });
+    } catch {
+      /* best-effort cleanup of an empty scratch dir */
+    }
+    return err({
+      code: "STORE_ERROR",
+      message: `attested-red runner could not write the scratch owner marker in "${parentDir}": ${owner.reason}`,
+    });
+  }
   // reason: `git worktree add <path>` REQUIRES `<path>` to not already exist
   // — `mkdtempSync` already created `parentDir` itself, so the worktree
   // target is a NOT-YET-EXISTING child of it (`wt`), never `parentDir`
@@ -808,6 +823,12 @@ export class VerifyRunnerService {
      * continues (never blocks, never changes the verify result). Omitted -> no occupancy check.
      */
     private readonly stateBindingOccupancy?: StateBindingOccupancyPort,
+    /**
+     * AC-AU-11 — removes the falsifier scratch worktree through decide(worktree-remove) (ignored-file rule included).
+     * Omitted (bare unit constructions) -> the legacy unconditional {@link removeFalsifierScratchWorktree}; app.ts
+     * wires `WorktreeRemovalService` in both composition roots.
+     */
+    private readonly scratchRemoval?: ScratchRemovalPort,
   ) {}
 
   /**
@@ -2162,7 +2183,15 @@ export class VerifyRunnerService {
       // why the isolation guarantee never depends on this call succeeding
       // (or even running at all, on a genuine crash before this `finally`
       // itself gets to execute).
-      removeFalsifierScratchWorktree(repoRoot, scratch);
+      if (this.scratchRemoval === undefined) {
+        removeFalsifierScratchWorktree(repoRoot, scratch);
+      } else {
+        const removal = await this.scratchRemoval.removeScratchWorktree(repoRoot, scratch.worktreeDir);
+        if (!removal.removed) {
+          // reason: an escalated or failed removal keeps the scratch (never a silent leak): name it and why.
+          process.stderr.write(`[attested-red] scratch worktree kept: ${scratch.worktreeDir}: ${removal.reason ?? "not removed"}\n`);
+        }
+      }
     }
   }
 }
