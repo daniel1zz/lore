@@ -39,6 +39,7 @@ async function importOpenEditor(): Promise<
     defaults?: { editor?: string };
     env: NodeJS.ProcessEnv;
     tmpDir: string;
+    stdinIsTTY: boolean;
   }) => Promise<{ ok: boolean; value?: string; error?: { code: string; field?: string; message?: string } }>
 > {
   const mod = await import("../../../../src/adapters/cli/editor.js");
