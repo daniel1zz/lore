@@ -15,6 +15,7 @@
  */
 
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { loosenOverrideClasses } from "../fixtures/autonomy-override-helpers.js";
 const setDefaultTimeout = (ms: number): void => { vi.setConfig({ testTimeout: ms, hookTimeout: ms }); };
 import { execFileSync } from "node:child_process";
 import { mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
@@ -92,12 +93,15 @@ function addRule(statement: string): string {
   return id;
 }
 
-beforeAll(() => {
+beforeAll(async () => {
   dir = realpathSync(mkdtempSync(join(tmpdir(), "sac-")));
   if (dir.startsWith(REPO_ROOT)) throw new Error("fixture must live outside the repo");
   execFileSync("git", ["init", "-q", "-b", "main"], { cwd: dir });
   writeFileSync(join(dir, "README.md"), "fixture\n");
   mustRun(["init"], dir);
+  // AU-T7: `approve --override-no-judgment` is decided; this suite's subject is not the override, so the class is
+  // loosened the documented way (a human-tty governance decision on a throwaway corpus), never by a bypass in product code.
+  await loosenOverrideClasses(dir, ["override-judgment"]);
   prd = slugOf(mustRun(["create", "prd", "--title", "SAC PRD", "--content", "root", "--no-ai"], dir).stdout);
   const root = slugOf(mustRun(["baseline", "add", prd, "--node", "root", "--label", "Root", "--title", "SAC Root"], dir).stdout);
   const branch = slugOf(mustRun(["baseline", "add", root, "--node", "branch", "--label", "Branch", "--title", "SAC Branch"], dir).stdout);

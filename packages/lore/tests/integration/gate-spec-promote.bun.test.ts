@@ -39,6 +39,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { loosenOverrideClasses } from "./fixtures/autonomy-override-helpers.js";
 import { fileURLToPath } from "node:url";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "fs";
 import { join, resolve } from "path";
@@ -122,7 +123,7 @@ function seedLiveRule(): string {
   return seededRuleId;
 }
 
-beforeEach(() => {
+beforeEach(async () => {
   seededRuleId = undefined;
   process.exitCode = 0;
   originalEnv = process.env["LORE_GATE_BYPASS"];
@@ -133,6 +134,9 @@ beforeEach(() => {
 
   const app = createApp(join(loreDir, "lore.db"));
   app.close();
+  // AU-T7: `approve --override-no-judgment` is decided; this suite's subject is not the override, so the class is
+  // loosened the documented way (a human-tty governance decision on a throwaway corpus), never by a bypass in product code.
+  await loosenOverrideClasses(tmpDir, ["override-judgment"]);
 
   originalCwd = process.cwd();
   process.chdir(tmpDir);

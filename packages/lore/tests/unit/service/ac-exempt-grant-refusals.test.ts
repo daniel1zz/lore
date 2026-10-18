@@ -8,6 +8,7 @@
 import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
 import { describe, it, expect } from "vitest";
+import { alwaysAutoOverridePort } from "../../helpers/always-auto-override-port.js";
 import type { CreateDocInput, DocId } from "@lore/core";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
@@ -17,7 +18,7 @@ import { AcExemptionService } from "../../../src/service/ac-exemption-service.js
 const NOW = new Date("2030-01-01T00:00:00.000Z");
 const FUTURE = "2030-02-01T00:00:00.000Z";
 
-async function setup(liveCriteria: number) {
+async function setup(liveCriteria: number, wirePort = true) {
   const store = new InMemoryStore();
   const cs = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
   const ac = new AcService(store, new RecordLockService(store, new GateEnforcer(undefined)));
@@ -33,7 +34,7 @@ async function setup(liveCriteria: number) {
     });
     if (!r.ok) throw new Error(`seed ac ${i}: ${JSON.stringify(r.error)}`);
   }
-  const svc = new AcExemptionService(store, () => NOW);
+  const svc = new AcExemptionService(store, () => NOW, wirePort ? alwaysAutoOverridePort() : undefined); // AU-T7: explicit test port
   return { store, svc, specId: spec.value.id as DocId, prdId: prd.value.id as DocId };
 }
 
@@ -56,6 +57,15 @@ async function listed(svc: AcExemptionService) {
 }
 
 describe("BR-971 exemption grant refusals", () => {
+  it("override port required: a grant with NO override port wired is refused loudly (field autonomy) and stores nothing", async () => {
+    const { svc, specId } = await setup(10, false);
+    const r = await svc.grant(grantOf(specId, 1));
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toMatchObject({ code: "VALIDATION_ERROR", field: "autonomy" });
+    expect(msgOf(!r.ok ? r.error : null)).toMatch(/No OverrideDecisionPort is wired/);
+    expect(await listed(svc)).toEqual([]);
+  });
+
   it("refuses a non-spec target (a prd) and stores nothing", async () => {
     const { svc, prdId } = await setup(15);
     const r = await svc.grant(grantOf(prdId, 1));

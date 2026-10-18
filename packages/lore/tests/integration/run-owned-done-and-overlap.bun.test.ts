@@ -30,6 +30,7 @@ import { createApp } from "../../src/app.js";
 import type { App } from "../../src/app.js";
 import type { CreateDocInput, DocRecord, RunId } from "@lore/core";
 import { cleanupWorktrees, commitAll, makeWorktree } from "./support/run-end-fixture.js";
+import { loosenOverrideClasses } from "./fixtures/autonomy-override-helpers.js";
 
 setDefaultTimeout(120_000);
 
@@ -42,10 +43,13 @@ let tmpDir: string;
 let originalCwd: string;
 let sessionCounter = 0;
 
-beforeEach(() => {
+beforeEach(async () => {
   tmpDir = resolve(mkdtempSync(join(tmpdir(), "lore-run-owned-done-")));
   mkdirSync(join(tmpDir, ".lore"), { recursive: true });
   (createApp(dbPath()) as App).close();
+  // AU-T7: `done --override-attestation` is decided; this suite's subject is not the override, so the class is loosened
+  // the documented way (a human-tty governance decision on a throwaway corpus), never by a bypass in product code.
+  await loosenOverrideClasses(tmpDir, ["override-attestation"]);
   originalCwd = process.cwd();
   process.chdir(tmpDir);
 });

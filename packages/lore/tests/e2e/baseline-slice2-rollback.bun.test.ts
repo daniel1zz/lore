@@ -43,6 +43,7 @@
  */
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { loosenOverrideClasses } from "../integration/fixtures/autonomy-override-helpers.js";
 import { Database } from "bun:sqlite";
 import { appendFileSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { join } from "node:path";
@@ -397,11 +398,14 @@ const RULE_DIFF_HEADER = "Governing rules since claim";
 const RULES_UNCHANGED = "governing rules unchanged since claim";
 
 /** Claims the corpus' task and prints the session-resume feed for its plan. */
-function claimAndResume(c: Corpus, specCitesRule = false): RunResult {
+async function claimAndResume(c: Corpus, specCitesRule = false): Promise<RunResult> {
   // reason: BR-1007 - corpora A / A2 / B hold a spec that cites NO rule (that is the premise: no governing
   // rules, hence no rule-diff), and an uncited spec can no longer be approved through any verb. The approved
   // state is written directly, the shape a corpus holding a pre-BR-1007 approved spec has. E's spec cites a
   // live rule, so it goes through the real verb.
+  // AU-T7: `approve --override-no-judgment` is decided; this suite's subject is not the override, so the class is
+  // loosened the documented way (a human-tty governance decision on a throwaway corpus), never by a bypass in product code.
+  await loosenOverrideClasses(c.dir, ["override-judgment"]);
   if (specCitesRule) {
     mustRun(["approve", c.specSlug, "--override-no-judgment"], c.dir);
   } else {
@@ -424,13 +428,13 @@ describe("AC-BLS2-11 — BL-15: `feed session-resume` carries no rule-diff trace
   let E: Corpus;
   let resumeE: RunResult;
 
-  beforeAll(() => {
-    resumeA = claimAndResume(A);
-    resumeA2 = claimAndResume(A2);
-    resumeB = claimAndResume(B);
+  beforeAll(async () => {
+    resumeA = await claimAndResume(A);
+    resumeA2 = await claimAndResume(A2);
+    resumeB = await claimAndResume(B);
     E = buildCorpus("e-cited", { kind: "baseline", gate: "absent" });
     mustRun(["ac", "cite", E.specSlug, "AC-S2-1", E.ruleId as string], E.dir);
-    resumeE = claimAndResume(E, true);
+    resumeE = await claimAndResume(E, true);
   }, SETUP_TIMEOUT_MS);
 
   afterAll(() => {

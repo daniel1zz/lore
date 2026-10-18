@@ -41,6 +41,7 @@
 import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
 import { describe, it, expect } from "vitest";
+import { alwaysAutoOverridePort } from "../../helpers/always-auto-override-port.js";
 import type { CreateDocInput, DocId } from "@lore/core";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
@@ -90,11 +91,12 @@ async function makeService(store: InMemoryStore): Promise<ExemptionApi> {
   } catch (e) {
     throw new Error(`MISSING BEHAVIOUR: ac-exemption-service module not found (${String(e)})`);
   }
-  const Ctor = mod["AcExemptionService"] as (new (s: InMemoryStore) => ExemptionApi) | undefined;
+  const Ctor = mod["AcExemptionService"] as (new (s: InMemoryStore, clock?: () => Date, overrides?: unknown) => ExemptionApi) | undefined;
   if (typeof Ctor !== "function") {
     throw new Error("MISSING BEHAVIOUR: ac-exemption-service does not export AcExemptionService");
   }
-  return new Ctor(store);
+  // AU-T7: explicit test port (the grant is decided; no port = refused)
+  return new Ctor(store, undefined, alwaysAutoOverridePort());
 }
 
 function cappedStore(store: InMemoryStore): CappedStore {

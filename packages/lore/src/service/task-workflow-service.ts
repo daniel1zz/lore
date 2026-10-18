@@ -314,6 +314,7 @@
  *         silence/opt-in review this fix answers)
  */
 
+import { requireOverrideAuto, type OverrideDecisionPort } from "./override-decision.js";
 import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { z } from "zod";
@@ -2434,6 +2435,16 @@ export class TaskWorkflowService {
 
   private archiveIssueClosePort: ArchiveIssueClosePort | undefined;
 
+  /**
+   * Wires the decide() seam of `done --override-attestation(-cite)` (AC-AU-7). Set by the composition root;
+   * absent = a requested override is refused loudly (never granted).
+   */
+  setOverrideDecisionPort(port: OverrideDecisionPort): void {
+    this.overrideDecisions = port;
+  }
+
+  private overrideDecisions: OverrideDecisionPort | undefined;
+
   // ── addEvidence ───────────────────────────────────────────────────────────
 
   /**
@@ -3860,6 +3871,18 @@ export class TaskWorkflowService {
     if (!evaluated.ok) return evaluated;
     if (evaluated.value.refusal !== null) return err(evaluated.value.refusal.error);
     const { overrideReason, noNewTestsReason } = evaluated.value;
+
+    // reason: AC-AU-7 — the attestation override is DECIDED (class override-attestation), not granted. `overrideReason`
+    // is set here only when the attested-pass floor actually failed and the escape was consumed, so a task that
+    // already holds an attested pass never asks. Runs before any write; the refusal is exit 4 with a pending decision.
+    if (overrideReason !== undefined) {
+      const decided = await requireOverrideAuto(this.overrideDecisions, {
+        classId: "override-attestation",
+        subject: { id: task.slug, version: `v${task.version}` },
+        summary: `done ${task.slug} --override-attestation`,
+      });
+      if (!decided.ok) return decided;
+    }
 
     const missingOracle = await this.findMissingOracleFileFloor(task);
     if (!missingOracle.ok) return missingOracle;

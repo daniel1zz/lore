@@ -63,6 +63,7 @@ import { mkdtempSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import { runLoreInProcess } from "../../helpers/run-lore-in-process";
+import { loosenOverrideClasses } from "../../integration/fixtures/autonomy-override-helpers.js";
 
 setDefaultTimeout(60_000);
 
@@ -190,6 +191,9 @@ let tmpDir: string;
 beforeEach(async () => {
   tmpDir = mkdtempSync(join(tmpdir(), "lore-cli-done-cite-escape-hatch-"));
   await mustRun(["init"], tmpDir);
+  // AU-T7: `--override-attestation` is decided; this suite's subject is the audited escape, so the class is loosened
+  // the documented way (a human-tty governance decision), never by a bypass in product code.
+  await loosenOverrideClasses(tmpDir, ["override-attestation"]);
   // An --adhoc task parents to the corpus root PRD (CorpusService._createImpl) —
   // one must exist first, mirroring every other --adhoc fixture in this repo.
   await mustRun(["create", "prd", "--title", "Cite Escape Hatch Root", "--content", "## Overview\nroot", "--no-ai"], tmpDir);

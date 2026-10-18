@@ -28,6 +28,7 @@
  */
 
 import { recordLockGateOff } from "../../helpers/record-lock-gate-off.js";
+import { alwaysAutoOverridePort } from "../../helpers/always-auto-override-port.js";
 import { describe, it, expect, vi } from "vitest";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { LIVE_RULE_ID, seedLiveRule } from "../../helpers/live-rule-fixture.js";
@@ -123,7 +124,7 @@ const VALID_UAT_VERDICT = {
  * ungated bare-test path.
  */
 async function makeApp(
-  opts: { ledgerAutoApprove?: boolean; judgmentRequiredTypes?: readonly string[] } = {},
+  opts: { ledgerAutoApprove?: boolean; judgmentRequiredTypes?: readonly string[]; wireOverridePort?: boolean } = {},
 ) {
   const store = new InMemoryStore();
   await seedLiveRule(store);
@@ -144,6 +145,7 @@ async function makeApp(
     judgmentService,
     opts.judgmentRequiredTypes ?? ["spec", "adr"],
   );
+  if (opts.wireOverridePort !== false) reviewService.setOverrideDecisionPort(alwaysAutoOverridePort()); // AU-T7: explicit test port; no port = refused
   // AC-AP-3 (BR-1071): app.ts hands CorpusService the approve path as an injected port, so a
   // `set(..., { status: "approved" })` is judged exactly like `approve`. Wired here the same way.
   corpusService.setApprovalPort({ approve: (id, o) => reviewService.approve(id, o) });
@@ -540,6 +542,23 @@ describe("AC-TIER-5 zero-judgment reachable override (ReviewService.approve)", (
     expect(approveResult.ok).toBe(true);
     if (!approveResult.ok) return;
     expect(approveResult.value.status).toBe("approved");
+  });
+
+  it("override port required: an override requested while NO override port is wired is refused loudly and writes nothing (never ungated)", async () => {
+    const { corpusService, reviewService, store } = await makeApp({ judgmentRequiredTypes: ["spec"], wireOverridePort: false });
+    await mustCreate(corpusService, { type: "prd", title: "Root", content: "# PRD" } as CreateDocInput);
+    const spec = await mustCreate(corpusService, {
+      type: "spec",
+      title: "A spec",
+      content: "## Overview\n\nBody.",
+      extra: { spec_kind: "feature", acceptance_criteria: [SCRIPT_AC] },
+    } as CreateDocInput);
+    const refused = await reviewService.approve(spec.id, { overrideNoJudgment: true });
+    expect(refused.ok).toBe(false);
+    if (!refused.ok) expect(refused.error).toMatchObject({ code: "VALIDATION_ERROR", field: "autonomy" });
+    if (!refused.ok && refused.error.code === "VALIDATION_ERROR") expect(refused.error.message).toMatch(/No OverrideDecisionPort is wired/);
+    const after = await store.find(spec.id);
+    expect(after.ok && after.value?.status).toBe("draft");
   });
 
   it("overrideNoJudgment is rejected loud when the doc already has a judgment recorded", async () => {

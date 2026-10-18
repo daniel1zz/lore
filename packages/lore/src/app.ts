@@ -92,6 +92,7 @@ import type { RadiusDiffPort } from "./service/stamp-binding-reader.js";
 import { RunService } from "./service/run-service.js";
 import { WorktreeRemovalService, type WorktreeRemovalRunStore } from "./service/worktree-removal-service.js";
 import { DecisionService } from "./service/decision-service.js";
+import { createOverrideDecisionPort, type OverrideDecisionPort } from "./service/override-decision.js";
 import { createRealWorktreeProbe } from "./service/worktree-cleanup.js";
 import { createRealProcessScanPort } from "./adapters/real-process-scan-port.js";
 import { createRealProcessTablePort } from "./adapters/process-table-port.js";
@@ -917,6 +918,11 @@ function buildAppFromSqlite(
   );
   corpusService.setApprovalPort({ approve: (id, o) => reviewService.approve(id, o) });
   corpusService.setDoneFloorPort({ checkDoneFloors: (id) => taskWorkflowService.checkDoneFloors(id) });
+  // reason: AC-AU-7 — the self-grantable overrides (approve --override-*, done --override-attestation) ask decide();
+  // both composition roots wire it (a root that forgets leaves those overrides granted to whoever types them).
+  const overrideDecisionPort = buildOverrideDecisionPort(store);
+  reviewService.setOverrideDecisionPort(overrideDecisionPort);
+  taskWorkflowService.setOverrideDecisionPort(overrideDecisionPort);
   // reason: plan close and spec deprecation land / abandon a spec's rule change set through ONE writer
   // (D3, spec-a-spec-carries-its-rule-changes-the-baseline-takes-them); the instance is shared with the
   // `lore rule` verbs so a claim-scoped authoring guard armed on it covers both.
@@ -1080,7 +1086,7 @@ function buildAppFromSqlite(
       undefined,
       buildStateBindingOccupancyPort(store),
       worktreeRemovalService,
-    ),
+    ).setOverrideDecisionPort(overrideDecisionPort),
     // reason: ConfigService (SPEC-062 D1) — constructed over the SAME repoRoot
     // VerifyRunnerService/SeatService already receive (config lives at
     // "<repoRoot>/.lore/config.yaml"), not a store; the narrow appendAuditEntry
@@ -1325,6 +1331,11 @@ function buildAppFromTurso(
   );
   corpusService.setApprovalPort({ approve: (id, o) => reviewService.approve(id, o) });
   corpusService.setDoneFloorPort({ checkDoneFloors: (id) => taskWorkflowService.checkDoneFloors(id) });
+  // reason: AC-AU-7 — the self-grantable overrides (approve --override-*, done --override-attestation) ask decide();
+  // both composition roots wire it (a root that forgets leaves those overrides granted to whoever types them).
+  const overrideDecisionPort = buildOverrideDecisionPort(store);
+  reviewService.setOverrideDecisionPort(overrideDecisionPort);
+  taskWorkflowService.setOverrideDecisionPort(overrideDecisionPort);
   // reason: plan close and spec deprecation land / abandon a spec's rule change set through ONE writer
   // (D3, spec-a-spec-carries-its-rule-changes-the-baseline-takes-them); the instance is shared with the
   // `lore rule` verbs so a claim-scoped authoring guard armed on it covers both.
@@ -1481,7 +1492,7 @@ function buildAppFromTurso(
       undefined,
       buildStateBindingOccupancyPort(store),
       worktreeRemovalService,
-    ),
+    ).setOverrideDecisionPort(overrideDecisionPort),
     // reason: ConfigService (SPEC-062 D1) — see buildAppFromSqlite's identical comment.
     configService: new ConfigService(repoRoot, store.appendAuditEntry.bind(store)),
     // reason: GlobalConfigService (SPEC-064 D1) — see buildAppFromSqlite's identical comment.
@@ -1985,6 +1996,14 @@ function buildRunReapService(
     decisions: new DecisionService({ store, executorRun: null }),
     processes: createRealProcessTablePort(),
   });
+}
+
+/**
+ * Builds the decide() port the self-grantable overrides ask (AC-AU-7) over `store`'s decision log.
+ * reason: `executorRun: null` — same as the other in-process services here; the override rows are machine-channel.
+ */
+function buildOverrideDecisionPort(store: ConstructorParameters<typeof DecisionService>[0]["store"]): OverrideDecisionPort {
+  return createOverrideDecisionPort(new DecisionService({ store, executorRun: null }));
 }
 
 /**

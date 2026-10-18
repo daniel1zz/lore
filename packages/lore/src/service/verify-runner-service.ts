@@ -229,6 +229,8 @@ import {
 import type { VerifiedEvidenceInput } from "./task-workflow-service.js";
 import { buildStateBindingSkipAuditEntry } from "./state-binding-skip.js";
 import { materializeFalsifierDependencies } from "./falsifier-dep-materialization.js";
+import { createHash } from "node:crypto";
+import { requireOverrideAuto, type OverrideDecisionPort } from "./override-decision.js";
 import { writeScratchOwner, type ScratchRemovalPort } from "./worktree-cleanup.js";
 import { FALSIFIER_EXIT_CODE_MAX, FALSIFIER_EXIT_CODE_MIN, isValidFalsifierExitCode } from "./ac-write-chokepoint.js";
 // Probe + stamp decision live in ./git-state-stamp.js, shared with `lore evidence --capture`.
@@ -835,6 +837,17 @@ export class VerifyRunnerService {
   ) {}
 
   /**
+   * Wires the decide() seam of `--yes` / `allow_new_commands` for a command with no attested row on the task
+   * (AC-AU-7). Set by the composition root; absent = the blanket approval of an unapproved command is refused loudly.
+   */
+  setOverrideDecisionPort(port: OverrideDecisionPort): this {
+    this.overrideDecisions = port;
+    return this;
+  }
+
+  private overrideDecisions: OverrideDecisionPort | undefined;
+
+  /**
    * Recursively finds the newest `mtimeMs` among `.ts` files under `dir`
    * (returns `0` when `dir` doesn't exist or contains none) — the same
    * algorithm `tests/integration/helpers/assert-fresh-binary.ts::newestTsMtimeMs`
@@ -1081,6 +1094,25 @@ export class VerifyRunnerService {
       allowlist: this.config.envAllowlist,
       passthroughAll: this.config.envPassthroughAll,
     });
+
+    // reason: AC-AU-7 — `--yes` / `allow_new_commands` is a blanket self-approval, so each command it would approve (no
+    // attested row on this task, the SPEC-039 §M2 scope) is DECIDED first (class verify-new-command), BEFORE any
+    // command runs or any evidence row is written: an escalation aborts the whole run with nothing recorded (exit 4,
+    // pending decision named). Subject = task + AC, version = the command text, so a changed command is a new subject.
+    if (this.config.requireCommandApproval && opts.allowNewCommands === true) {
+      for (const criterion of scriptCriteria) {
+        if (isApprovedVerifyCommand(task, criterion.verify.command)) continue;
+        const decided = await requireOverrideAuto(this.overrideDecisions, {
+          classId: "verify-new-command",
+          subject: {
+            id: `${task.slug}#${criterion.id}`,
+            version: createHash("sha256").update(criterion.verify.command).digest("hex").slice(0, 16),
+          },
+          summary: `verify ${criterion.id} --yes on task ${task.slug} (command has no attested row on this task)`,
+        });
+        if (!decided.ok) return decided;
+      }
+    }
 
     // ③④ execute + record, one script-mode AC at a time
     const results: VerifyAcResult[] = [];
