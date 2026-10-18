@@ -88,7 +88,6 @@ import { DecisionService } from "./service/decision-service.js";
 import { createRealWorktreeProbe } from "./service/worktree-cleanup.js";
 import { createRealProcessScanPort } from "./adapters/real-process-scan-port.js";
 import { createRealProcessTablePort } from "./adapters/process-table-port.js";
-import { DecisionService } from "./service/decision-service.js";
 import { RunReapService } from "./service/run-reap-service.js";
 import { ensureVerifiedIdentity, resolveWriteActorFor, withVerifiedWriteContext } from "./store/write-context-store.js";
 import { PlanExemptionService } from "./service/plan-exemption-service.js";
