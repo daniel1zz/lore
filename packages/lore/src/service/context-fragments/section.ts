@@ -4,11 +4,11 @@
  * Spec: spec-context-fragments-config-driven-layered-rule-injection (D15, D4, D8).
  *
  * Public surface: `RULES_FILE_PREFIX`, `RULES_FILE_SUFFIX`, `rulesFileName`, `renderRulesFile`,
- * `parseRulesFile`, `stripRulesSource`, `isLoreRulesFileName`, `RulesFileRender`, `ParsedRulesFile`; skill files (BR-1064):
+ * `parseRulesFile`, `isLoreRulesFileName`, `RulesFileRender`, `ParsedRulesFile`; skill files (BR-1064):
  * `renderSkillFile`, `parseSkillFile`, `isLoreSkillFileBytes`, `isLoreSkillDir`, `skillDirName`, `SKILL_DIR_PREFIX`,
  * `SKILL_FILE_NAME`, `SkillFileRender`, `ParsedSkillFile`.
  * Invariants:
- *   - File = `<!-- lore:managed fragment=<id> hash=<8hex>[ source=<uri-encoded id>] -->\n` + rest; `rest` is the fragment
+ *   - File = `<!-- lore:managed fragment=<id> hash=<8hex> -->\n` + rest; `rest` is the fragment
  *     body with exactly one trailing "\n"; `hash` = first 8 hex of sha256(rest).
  *   - A file is INTACT iff its first line parses AND sha256(rest)[0..8] equals the recorded hash;
  *     anything else (hand edit, no fingerprint) is diverged and must never be overwritten.
@@ -30,8 +30,10 @@ export const RULES_FILE_SUFFIX = ".md";
 /** Ids usable as a file-name stem and inside the fingerprint comment. */
 const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9_-]*$/;
 
-// `source=` is the optional recorded fragment-source identity (BR-1176); absent on legacy files and on skill files.
-const FINGERPRINT_LINE = /^<!-- lore:managed fragment=(\S+) hash=([0-9a-f]{8})(?: source=(\S+))? -->$/;
+// reason: strict on purpose (BR-1176, spec-process-state-end-state D3) — ownership is the intact fingerprint alone.
+// A header with any extra token (the interim build wrote `source=`) does not parse, so such a file is never
+// treated as lore-owned and is kept, never overwritten or pruned.
+const FINGERPRINT_LINE = /^<!-- lore:managed fragment=(\S+) hash=([0-9a-f]{8}) -->$/;
 
 /** The only error `renderRulesFile` returns; narrowed so callers can read `message` (still a member of `LoreError`). */
 export type RulesFileIdError = Extract<LoreError, { code: "VALIDATION_ERROR" }>;
@@ -50,8 +52,6 @@ export interface ParsedRulesFile {
   readonly recordedHash: string;
   /** True iff sha256(rest)[0..8] equals `recordedHash`. */
   readonly intact: boolean;
-  /** Recorded fragment-source identity (already URI-decoded); `null` for a legacy file written before BR-1176. */
-  readonly sourceId: string | null;
 }
 
 function hashRest(rest: string): string {
@@ -71,11 +71,9 @@ export function isLoreRulesFileName(name: string): boolean {
 /**
  * Render one static main fragment as a lore rules file.
  *
- * @param sourceId Identity of the fragment source folders this refresh read (BR-1176); recorded in the header
- *   as `source=<uri-encoded>` so prune can prove ownership. Omit to render the legacy header (drift comparison only).
  * @returns ok(file) or VALIDATION_ERROR when the fragment id cannot be a file-name stem.
  */
-export function renderRulesFile(fragment: Fragment, sourceId?: string): Result<RulesFileRender, RulesFileIdError> {
+export function renderRulesFile(fragment: Fragment): Result<RulesFileRender, RulesFileIdError> {
   const id = fragment.frontmatter.id;
   if (!SAFE_ID.test(id)) {
     return err({
@@ -86,8 +84,7 @@ export function renderRulesFile(fragment: Fragment, sourceId?: string): Result<R
     });
   }
   const rest = fragment.body.endsWith("\n") ? fragment.body : `${fragment.body}\n`;
-  const sourceToken = sourceId === undefined ? "" : ` source=${encodeURIComponent(sourceId)}`;
-  const content = `<!-- lore:managed fragment=${id} hash=${hashRest(rest)}${sourceToken} -->\n${rest}`;
+  const content = `<!-- lore:managed fragment=${id} hash=${hashRest(rest)} -->\n${rest}`;
   return ok({ id, fileName: rulesFileName(id), content });
 }
 
@@ -103,13 +100,7 @@ export function parseRulesFile(content: string): ParsedRulesFile | null {
   if (match === null) return null;
   const id = match[1] as string;
   const recordedHash = match[2] as string;
-  const sourceId = match[3] === undefined ? null : decodeURIComponent(match[3]);
-  return { id, recordedHash, intact: hashRest(content.slice(newline + 1)) === recordedHash, sourceId };
-}
-
-/** Drops the `source=` token from a rules file's header line so two files can be compared on id + body alone. */
-export function stripRulesSource(content: string): string {
-  return content.replace(/^(<!-- lore:managed fragment=\S+ hash=[0-9a-f]{8}) source=\S+( -->\n)/, "$1$2");
+  return { id, recordedHash, intact: hashRest(content.slice(newline + 1)) === recordedHash };
 }
 
 // ---------------------------------------------------------------------------
