@@ -636,8 +636,7 @@ describe("AC-INT-2 (4) the shared checkout and other worktrees on main", () => {
     writeFileSync(join(fx.repo, "untracked.txt"), "never committed\n");
     writeFileSync(join(fx.repo, "staged.txt"), "staged\n");
     fx.git(["add", "staged.txt"]);
-    const mainBefore = fx.main();
-    const files = ["base.txt", "untracked.txt", "staged.txt"];
+    const files =["base.txt", "untracked.txt", "staged.txt"];
     const filesBefore = files.map((f) => readFileSync(join(fx.repo, f)));
     const statusBefore = fx.git(["status", "--porcelain=v1"]);
     expect(fx.git(["symbolic-ref", "-q", "HEAD"])).toBe("refs/heads/main");
@@ -646,7 +645,7 @@ describe("AC-INT-2 (4) the shared checkout and other worktrees on main", () => {
 
     expect(r.exitCode, r.out).toBe(0);
     expect(fx.gitStatus(["symbolic-ref", "-q", "HEAD"])).not.toBe(0); // detached now
-    expect(fx.git(["rev-parse", "HEAD"])).toBe(mainBefore); // the same commit it was on
+    expect(fx.git(["rev-parse", "HEAD"])).toBe(fx.main()); // the view follows the landed main (INT-T6); the edits survive it
     expect(files.map((f) => readFileSync(join(fx.repo, f)))).toEqual(filesBefore);
     expect(fx.git(["status", "--porcelain=v1"])).toBe(statusBefore);
     expect(fx.isAncestorOfMain(fx.git(["rev-parse", branch]))).toBe(true);
@@ -692,5 +691,81 @@ describe("AC-INT-2 (4) the shared checkout and other worktrees on main", () => {
     const landed = await fx.integrate(branch, "sess-haz");
     expect(landed.exitCode, landed.out).toBe(0);
     expect(fx.isAncestorOfMain(fx.git(["rev-parse", branch]))).toBe(true);
+  }, 120_000);
+});
+
+describe("INT-T6 the shared checkout's view of main follows an integrate", () => {
+  it("INT-T6 landing a branch moves the detached shared checkout to the new main and reports refreshed (text and --json)", async () => {
+    const fx = new Fixture("true");
+    const first = fx.makeBranch("refresh");
+    const second = fx.makeBranch("refresh");
+    const headBefore = fx.git(["rev-parse", "HEAD"]);
+    expect(headBefore).toBe(fx.main());
+
+    const r = await fx.integrate(first, "sess-t6a");
+
+    expect(r.exitCode, r.out).toBe(0);
+    expect(fx.main()).not.toBe(headBefore);
+    expect(fx.gitStatus(["symbolic-ref", "-q", "HEAD"])).not.toBe(0); // still detached
+    expect(fx.git(["rev-parse", "HEAD"])).toBe(fx.main());
+    expect(existsSync(join(fx.repo, `${first}.txt`))).toBe(true);
+    expect(r.stdout).toMatch(/shared checkout refreshed to main/);
+
+    const j = await fx.integrate(second, "sess-t6a", ["--json"]);
+    expect(j.exitCode, j.out).toBe(0);
+    const data = (JSON.parse(j.stdout.slice(j.stdout.indexOf("{"))) as { data: { shared_view: { state: string } } }).data;
+    expect(data.shared_view).toEqual({ state: "refreshed" });
+    expect(fx.git(["rev-parse", "HEAD"])).toBe(fx.main());
+  }, 120_000);
+
+  it("INT-T6 an already-integrated no-op also refreshes a view that fell behind main", async () => {
+    const fx = new Fixture("true");
+    const branch = fx.makeBranch("noop");
+    expect((await fx.integrate(branch, "sess-t6b")).exitCode).toBe(0);
+    fx.git(["checkout", "-q", "--detach", "HEAD~1"]); // the view fell behind main
+    expect(fx.git(["rev-parse", "HEAD"])).not.toBe(fx.main());
+
+    const r = await fx.integrate(branch, "sess-t6b");
+
+    expect(r.exitCode, r.out).toBe(0);
+    expect(r.out).toMatch(/already integrated/);
+    expect(fx.git(["rev-parse", "HEAD"])).toBe(fx.main());
+  }, 120_000);
+
+  it("INT-T6 control: an uncommitted edit the new main would overwrite is kept byte-identical and reported kept-dirty", async () => {
+    const fx = new Fixture("true");
+    fx.git(["checkout", "-q", "-b", "touch-base", "main"]);
+    writeFileSync(join(fx.repo, "base.txt"), "base\nchanged on the branch\n");
+    fx.git(["commit", "-q", "-am", "branch edits base.txt"]);
+    fx.git(["checkout", "-q", "--detach", "main"]);
+    writeFileSync(join(fx.repo, "base.txt"), "base\nhuman edit in the view\n");
+    const editBefore = readFileSync(join(fx.repo, "base.txt"));
+    const headBefore = fx.git(["rev-parse", "HEAD"]);
+
+    const r = await fx.integrate("touch-base", "sess-t6c", ["--json"]);
+
+    expect(r.exitCode, r.out).toBe(0);
+    expect(fx.isAncestorOfMain(fx.git(["rev-parse", "touch-base"]))).toBe(true);
+    expect(readFileSync(join(fx.repo, "base.txt"))).toEqual(editBefore);
+    expect(fx.git(["rev-parse", "HEAD"])).toBe(headBefore); // not moved
+    const data = (JSON.parse(r.stdout.slice(r.stdout.indexOf("{"))) as { data: { shared_view: { state: string; paths?: string[] } } }).data;
+    expect(data.shared_view).toEqual({ state: "kept_dirty", paths: ["base.txt"] });
+    expect(fx.git(["status", "--porcelain=v1"])).toBe("M base.txt");
+  }, 120_000);
+
+  it("INT-T6 a shared checkout on a branch is reported not-measured and left untouched", async () => {
+    const fx = new Fixture("true", { detached: false });
+    const wt = join(root, `t6-feat-${repoSeq}`);
+    fx.git(["worktree", "add", "-q", "-b", "t6feat", wt, "main"]);
+    writeFileSync(join(wt, "t6.txt"), "x\n");
+    fx.git(["add", "t6.txt"], wt);
+    fx.git(["commit", "-q", "-m", "t6 work"], wt);
+    fx.git(["checkout", "-q", "-b", "elsewhere"]); // not main: integrate has nothing to detach, refresh has nothing to follow
+
+    const r = await fx.integrate("t6feat", "sess-t6d");
+
+    expect(r.exitCode, r.out).toBe(0);
+    expect(r.stdout).toMatch(/shared checkout not-measured: .*refs\/heads\/elsewhere/);
+    expect(fx.git(["symbolic-ref", "-q", "HEAD"])).toBe("refs/heads/elsewhere");
   }, 120_000);
 });
