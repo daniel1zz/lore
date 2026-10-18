@@ -23,6 +23,7 @@
     "typecheck:dashboard-e2e": "tsc --noEmit -p packages/dashboard/tsconfig.e2e.json",
     "check:static": "bun scripts/run-chain.ts --static",
     "check:ordinal-sites": "node scripts/check-ordinal-write-sites.mjs",
+    "test:file": "bun scripts/test-file.ts",
     "check:test-budgets": "bun scripts/check-test-budgets.ts",
     "check:no-timer-retry": "bun scripts/check-no-timer-retry.ts",
     "check:ambient-reads": "bun scripts/check-ambient-reads.ts",
