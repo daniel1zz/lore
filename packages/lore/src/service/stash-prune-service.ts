@@ -26,7 +26,7 @@
  * Source: spec-autonomy-phase-1-decision-function-human-channel-lore AC-AU-4;
  *   adr-autonomy-is-decided-by-measured-facts-one-decision-function D4.
  */
-import { err, ok, OPERATION_CLASS_REGISTRY, type AutonomyFacts, type LoreError, type Result } from "@lore/core";
+import { err, ok, type AutonomyFacts, type LoreError, type Result } from "@lore/core";
 import type { RunId } from "@lore/core";
 import type { DecisionService } from "./decision-service.js";
 import type { StoreInterface } from "../store/store-interface.js";
@@ -162,7 +162,7 @@ export class StashPruneService {
   }
 
   private async decideAndMaybeDrop(facts: StashFacts, archiveRef: string): Promise<Result<StashOutcome, LoreError>> {
-    const measured = this.buildDecisionFacts(facts.attribution);
+    const measured = await this.buildDecisionFacts(facts.attribution);
     if (!measured.ok) return measured;
     const decided = await this.deps.decisions.decide(STASH_DROP_CLASS, { id: facts.sha, version: facts.sha }, measured.value);
     if (!decided.ok) return decided;
@@ -181,11 +181,13 @@ export class StashPruneService {
     return ok({ kind: "dropped", archive_ref: archiveRef, score: decision.score });
   }
 
-  /** Facts decide() may use: only what lore measured above. C is the registry prior until AU-T8. */
-  private buildDecisionFacts(attribution: StashAttribution): Result<AutonomyFacts, LoreError> {
-    const operationClass = OPERATION_CLASS_REGISTRY[STASH_DROP_CLASS];
+  /** Facts decide() may use: only what lore measured above. C is the GOVERNED class prior until AU-T8. */
+  private async buildDecisionFacts(attribution: StashAttribution): Promise<Result<AutonomyFacts, LoreError>> {
+    const governed = await this.deps.decisions.governed();
+    if (!governed.ok) return governed;
+    const operationClass = Object.hasOwn(governed.value.registry, STASH_DROP_CLASS) ? governed.value.registry[STASH_DROP_CLASS] : undefined;
     if (operationClass === undefined || operationClass.tier !== "normal") {
-      return err(storeError(`class ${STASH_DROP_CLASS} must be a normal class in the @lore/core registry`));
+      return err(storeError(`class ${STASH_DROP_CLASS} must be a normal class in the governed autonomy record`));
     }
     const blast =
       attribution.state === "live"

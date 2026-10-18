@@ -180,6 +180,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createApp, type App } from "../packages/lore/src/app.js";
 import { findLoreDbPath } from "../packages/lore/src/adapters/cli/utils.js";
+import { checkAutonomyMirror, exportAutonomyMirror } from "./export-autonomy-mirror.js";
 import {
   MIRROR_TYPES,
   mirrorDirRelative,
@@ -716,6 +717,16 @@ export async function main(
           blind = true;
         }
       }
+      // AC-AU-9: the governed threshold record's git-tracked mirror (a full scan only; a --type-narrowed run is
+      // about doc types and says nothing of it).
+      if (types.length === MIRROR_TYPES.length) {
+        const autonomy = await checkAutonomyMirror(dbPath, repoRoot);
+        if (autonomy.ok) console.log(autonomy.message);
+        else {
+          console.error(autonomy.message);
+          allOk = false;
+        }
+      }
       if (blind && !collisionReported) return MIRROR_ZERO_COMPARED_EXIT_CODE;
       return allOk ? 0 : MIRROR_DRIFT_EXIT_CODE;
     }
@@ -733,6 +744,14 @@ export async function main(
       if (!printParity("export", type, requireVerdict(parity.perType, type, "parity"))) allOk = false;
     }
     if (anyErrors) return MIRROR_HARD_FAILURE_EXIT_CODE;
+    if (types.length === MIRROR_TYPES.length) {
+      const autonomy = await exportAutonomyMirror(dbPath, repoRoot);
+      if (autonomy.ok) console.log(autonomy.message);
+      else {
+        console.error(autonomy.message);
+        return MIRROR_HARD_FAILURE_EXIT_CODE;
+      }
+    }
     return allOk ? 0 : MIRROR_DRIFT_EXIT_CODE;
   } finally {
     app.close();

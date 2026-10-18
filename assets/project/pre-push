@@ -114,4 +114,25 @@ if [ -f "$prose_pin_checker" ] && command -v bun >/dev/null 2>&1; then
       ;;
   esac
 fi
+
+# Autonomy threshold integrity (AC-AU-9, ADR D8). Two checks, both on the `lore` binary:
+#  1. the governed threshold record still matches its decision-log chain — an edit made outside lore makes every
+#     autonomy class escalate, and a push that ships that state is refused (`lore status --check-autonomy-thresholds`);
+#  2. the local decision log still REPRODUCES every chain head this machine already pushed. A database rewritten from
+#     scratch (record edited AND chain rebuilt to match) verifies clean on its own; it cannot reproduce a head that was
+#     hashed over the rows it no longer has. `--record` notes the current head as pushed after a clean check, in the
+#     machine-local ledger `.lore/autonomy-pushed-heads.json` (never git-tracked: another machine's log has another
+#     history). A lore binary that predates the verbs exits 2 on the unknown command, which blocks like any failure.
+lore status --check-autonomy-thresholds
+code=$?
+if [ "$code" -ne 0 ]; then
+  echo "pre-push: autonomy threshold integrity check failed (exit $code) — the threshold record was edited outside lore (lore status --check-autonomy-thresholds names it; a human restores trust with lore pending / lore decide), or push with --no-verify" >&2
+  exit 1
+fi
+lore autonomy verify-pushed-heads --record
+code=$?
+if [ "$code" -ne 0 ]; then
+  echo "pre-push: decision-log head check failed (exit $code) — the local decision log does not reproduce a chain head already pushed (the database was rewritten); diagnose with \`lore autonomy verify-pushed-heads\`, or push with --no-verify" >&2
+  exit 1
+fi
 exit 0

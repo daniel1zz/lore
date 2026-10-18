@@ -1095,6 +1095,19 @@ export interface StoreInterface {
   listDecisionLog(subject?: DecisionSubjectKey): Promise<Result<DecisionLogRow[], LoreError>>;
 
   /**
+   * The ONE governed autonomy threshold record (migration-022, AC-AU-9), or null when it was never written. `content`
+   * is the exact canonical JSON text that was hashed into the decision log; it is never re-serialised on read.
+   */
+  readAutonomyThresholds(): Promise<Result<{ readonly content: string; readonly updated_at: string } | null, LoreError>>;
+
+  /**
+   * Replace the governed record's text. ONLY service/autonomy-threshold-service.ts calls this, and only right after it
+   * appended the decision-log row that carries this content's hash — a caller that skips that step produces exactly
+   * the mismatch the integrity check reports.
+   */
+  writeAutonomyThresholds(content: string, updatedAt: string): Promise<Result<void, LoreError>>;
+
+  /**
    * Every audit row whose `action` equals `action` (optionally only for one doc), in `id` ASC
    * order, WITH its `id` — the read the state-binding arming cutoff and the per-row evidence
    * audit join are built on (SPEC-143 AC-CT-3). Narrow on purpose: {@link listAuditChain} reads

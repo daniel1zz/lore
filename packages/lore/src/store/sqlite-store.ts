@@ -142,6 +142,7 @@ import {
 import { stampAuditSurface } from "./audit-surface.js";
 import { MIGRATION_020_SQL } from "./migrations/migration-020.js";
 import { MIGRATION_021_ADD_COLUMNS, MIGRATION_021_SQL } from "./migrations/migration-021.js";
+import { MIGRATION_022_SQL } from "./migrations/migration-022.js";
 import { DECISION_GENESIS_HASH, computeDecisionEntryHash } from "./decision-log.js";
 import type { DecisionLogRow, DecisionRecordInput } from "./decision-log.js";
 import type { DecisionSubjectKey } from "./store-interface.js";
@@ -699,6 +700,20 @@ export class SQLiteStore implements StoreInterface {
           if (!cols.some((c) => c.name === column)) this.db.exec(ddl);
         }
         this.db.exec(MIGRATION_021_SQL);
+      } catch (error) {
+        try {
+          this.db.exec("ROLLBACK;");
+        } catch {
+          // reason: same as migration-004/005/006 — safe to ignore, see above.
+        }
+        throw error;
+      }
+    }
+
+    if (currentVersion < 22) {
+      // reason: migration-022 (autonomy_thresholds) is one idempotent BEGIN/COMMIT string.
+      try {
+        this.db.exec(MIGRATION_022_SQL);
       } catch (error) {
         try {
           this.db.exec("ROLLBACK;");
@@ -2775,6 +2790,36 @@ export class SQLiteStore implements StoreInterface {
               )
               .all(subject.class, subject.subject_id, subject.subject_version) as DecisionLogRow[]);
       return ok(rows.map((r) => ({ ...r, id: Number(r.id) })));
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
+  /**
+   * @see StoreInterface.readAutonomyThresholds
+   */
+  async readAutonomyThresholds(): Promise<Result<{ readonly content: string; readonly updated_at: string } | null, LoreError>> {
+    try {
+      const row = this.db.query("SELECT content, updated_at FROM autonomy_thresholds WHERE id = 1").get() as
+        | { content: string; updated_at: string }
+        | null;
+      return ok(row === null ? null : { content: row.content, updated_at: row.updated_at });
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
+  /**
+   * @see StoreInterface.writeAutonomyThresholds
+   */
+  async writeAutonomyThresholds(content: string, updatedAt: string): Promise<Result<void, LoreError>> {
+    try {
+      this.db
+        .prepare(
+          "INSERT INTO autonomy_thresholds (id, content, updated_at) VALUES (1, ?, ?) ON CONFLICT(id) DO UPDATE SET content = excluded.content, updated_at = excluded.updated_at",
+        )
+        .run(content, updatedAt);
+      return ok(undefined);
     } catch (e) {
       return wrapStoreError(e);
     }

@@ -4,3 +4,4 @@
  */
 export * from "./classes.js";
 export * from "./decide.js";
+export * from "./thresholds.js";

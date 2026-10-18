@@ -103,6 +103,9 @@ export const COMMAND_LOADERS: Readonly<Record<string, () => Promise<CommandModul
     unlink: () => import("./commands/unlink.js"),
     pending: () => import("./commands/pending.js"),
     decide: () => import("./commands/decide.js"),
+    // autonomy — the governed threshold record (`show|set|regenerable|verify-pushed-heads`, spec-autonomy-phase-1 AC-AU-9);
+    // see commands/autonomy.ts's header.
+    autonomy: () => import("./commands/autonomy.js"),
     approve: () => import("./commands/approve.js"),
     reject: () => import("./commands/reject.js"),
     reopen: () => import("./commands/reopen.js"),

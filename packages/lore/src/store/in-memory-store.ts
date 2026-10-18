@@ -119,6 +119,7 @@ export class InMemoryStore implements StoreInterface {
 
   /** AC-AU-2 — mirrors `decision_log`; hash-chained, append-only (no mutator exists). */
   private readonly decisionLog: DecisionLogRow[] = [];
+  private autonomyThresholds: { content: string; updated_at: string } | null = null;
   private readonly judgments: ReviewJudgment[] = [];
   private readonly calibrationRecords: CalibrationRecord[] = [];
   /** SPEC-102 — mirrors `trace_events`; never hash-chained, id is a plain 1-based sequence (insertion order). */
@@ -1291,6 +1292,21 @@ export class InMemoryStore implements StoreInterface {
           r.subject_version === subject.subject_version),
     );
     return ok(rows.map((r) => ({ ...r })));
+  }
+
+  /**
+   * @see StoreInterface.readAutonomyThresholds
+   */
+  async readAutonomyThresholds(): Promise<Result<{ readonly content: string; readonly updated_at: string } | null, LoreError>> {
+    return ok(this.autonomyThresholds === null ? null : { ...this.autonomyThresholds });
+  }
+
+  /**
+   * @see StoreInterface.writeAutonomyThresholds
+   */
+  async writeAutonomyThresholds(content: string, updatedAt: string): Promise<Result<void, LoreError>> {
+    this.autonomyThresholds = { content, updated_at: updatedAt };
+    return ok(undefined);
   }
 
   /**
