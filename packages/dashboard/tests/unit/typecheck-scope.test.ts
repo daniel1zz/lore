@@ -1,84 +1,51 @@
 // @reads package.json
-// @reads packages/dashboard/tests/typecheck-scope-probe-tmp/**
+// @reads packages/dashboard/tsconfig.json
+// @reads packages/dashboard/tsconfig.tests.json
+// @reads packages/dashboard/tests/**
+// @reads packages/dashboard/src/**
 /**
- * Tests for `packages/dashboard/tsconfig.tests.json`'s SCOPE — a direct probe of
- * the tsconfig fix this task's own defect report was wrong about (spec-oracle-
- * tier-falsifiability-a-criterion-never-observed-red M5, AC-FALS-22).
+ * Tests for `packages/dashboard/tsconfig.tests.json`'s SCOPE (spec-oracle-tier-
+ * falsifiability-a-criterion-never-observed-red M5, AC-FALS-22 / AC-FALS-24).
  *
- * The original defect report claimed `bunx tsc -p packages/dashboard/
- * tsconfig.tests.json --noEmit --listFilesOnly` already resolved 50 errors
- * including the dashboard test tree. Measured 2026-08-07 from the repo root:
- * that invocation resolved 648 files, ZERO of them under `packages/dashboard/
- * tests/`. The config declares `include: ["src/**\/*","tests/**\/*"]` but
- * `extends: "./tsconfig.json"`, and `extends` does NOT reset `exclude` — the
- * base config's `exclude: [...,"tests"]` is inherited, and `exclude` filters
- * `include`. Its exit 0 was the exit code of checking nothing. The fix (this
- * task, same anchor set) gives `tsconfig.tests.json` its OWN `exclude` that
- * does not swallow `tests`.
+ * The original defect: `tsconfig.tests.json` declares `include: ["src/**\/*","tests/**\/*"]`
+ * but `extends: "./tsconfig.json"`, and `extends` does NOT reset `exclude` — the base's
+ * `exclude: [...,"tests"]` was inherited, so the project resolved ZERO files under
+ * `packages/dashboard/tests/` and its exit 0 was the exit code of checking nothing.
  *
- * ⛔ The first two tests below prove the FIX, not the WIRING. As landed by phase
- * `derivation`, `bun run typecheck` did NOT invoke this project
- * (`packages/dashboard`'s own `typecheck` script runs bare `tsc --noEmit`, i.e.
- * `tsconfig.json`, never `tsconfig.tests.json`). The sibling task in phase
- * `typecheck-sweep` (AC-FALS-24) wires this project into that chain, clears the
- * 47 pre-existing strictness errors the un-excluded tree surfaces (all fixture
- * bugs, none production-type widenings), AND adds the third test below, which
- * proves the wiring itself — structurally, by parsing root `package.json`'s
- * `typecheck` chain rather than hardcoding the project path, so a future
- * regression that silently drops the invocation is caught.
+ * TG-50: this file used to spawn the real `tsc` three-plus times (61 s in a full parallel run
+ * against a 30 s timeout) — it measured the machine. The property under test is the SCOPE
+ * (which files the project resolves) and the WIRING (the root `typecheck` chain reaches it),
+ * both of which are static facts. They are asserted here by resolving the tsconfig's file list
+ * in-process with the TypeScript compiler API (`parseJsonConfigFileContent`: the same include /
+ * exclude / extends resolution `tsc -p` performs, with no type-check). The COST of an actual
+ * type-check is `bun run typecheck`'s job (`typecheck:dashboard-tests`), not a unit test's.
  *
- * All three tests spawn the REAL `tsc` binary (`node_modules/.bin/tsc`) against
- * REAL config — an external-oracle check, never a self-report about what a
- * config "should" do.
+ * Dropped from the unit lane (report to the orchestrator): AC-FALS-22's second half, "running
+ * that same project over a fixture whose AcCoverageFact omits `falsified` exits nonzero naming
+ * `falsified`", and AC-FALS-24's "that project reports zero errors under a real full type-check"
+ * both REQUIRE a real tsc run. The second is exactly what `bun run typecheck` already attests.
+ * The first has no remaining unit-lane oracle; the file list proves the fixture would be seen,
+ * and `typecheck:dashboard-tests` is what would reject it.
  *
  * Six-dimension coverage:
- *   HAPPY:      dashboard-tests-typechecked (AC-FALS-22) — the fixed project
- *               resolves SpecAcCoveragePanel.test.tsx into its file list, AND a
- *               deliberately-broken temp fixture (an AcCoverageFact literal
- *               omitting `falsified`) makes that SAME project exit nonzero with
- *               an error naming `falsified`
- *   NEGATIVE:   n/a — this file has no in-scope "should NOT resolve" case; the
- *               base tsconfig.json's own exclusion of `tests/` is asserted
- *               directly (REGRESSION below), which already covers the negative
- *               shape
- *   BOUNDARY:   the probe fixture is placed inside `tests/**` (never `src/**`)
- *               to prove the FIX covers the tests tree specifically, not an
- *               incidental side effect of `src/**` already being checked
- *   ERROR:      the fixture is ALWAYS removed (try/finally), even if an
- *               assertion throws mid-test — a failed run must not leave a
- *               permanently broken file inside the real `tests/` tree
- *   STATE:      n/a (each test spawns tsc fresh; no shared mutable state
- *               between tests beyond the filesystem cleanup contract above)
- *   REGRESSION: the ORIGINAL diagnosis (`tsconfig.json` alone, unpatched,
- *               excludes `tests/`) is re-asserted directly, so this file also
- *               pins the defect report's own measurement, not just the fix
- *
- * A third test, `typecheck-chain-covers-tests` (AC-FALS-24), covers the WIRING:
- *   HAPPY:      the `typecheck` chain declared in root `package.json`, resolved
- *               structurally (parsed, not hardcoded), reaches a `tsc -p <project>`
- *               invocation whose file list contains `packages/dashboard/tests/`
- *               files, AND that exact project reports zero errors under a real
- *               full type-check
- *   NEGATIVE:   n/a — covered by the two tests above (the unpatched base config
- *               excludes `tests/` outright)
- *   BOUNDARY:   parses `package.json` at read time rather than asserting a
- *               literal script string, so a future rename/reorder of the chain
- *               that still reaches the same project keeps passing
- *   ERROR:      n/a — no fixture is created; the test only spawns `tsc` in
- *               `--listFilesOnly`/`--noEmit` read-only modes
- *   STATE:      n/a (no shared mutable state)
- *   REGRESSION: fails loudly (not silently) if the chain ever stops reaching a
- *               project whose file list covers `packages/dashboard/tests/` —
- *               the exact defect this AC exists to catch (an oracle that was
- *               green before the fix measures nothing)
+ *   HAPPY:      dashboard-tests-typechecked (AC-FALS-22) — the tests project's resolved file
+ *               list contains SpecAcCoveragePanel.test.tsx
+ *   NEGATIVE:   the base tsconfig.json's resolved list contains no tests/ file
+ *   BOUNDARY:   tests/e2e stays out of the tests project (it has its own project); other
+ *               tests/ subtrees are in
+ *   ERROR:      a config that fails to parse throws loudly (never an empty list read as "ok")
+ *   STATE:      n/a (pure functions over files on disk)
+ *   REGRESSION: the ORIGINAL diagnosis (base config alone excludes tests/) is pinned directly,
+ *               and the `typecheck` chain wiring (AC-FALS-24) is parsed structurally, not
+ *               hardcoded, so silently dropping the invocation fails
  *
  * @spec_ref spec-oracle-tier-falsifiability-a-criterion-never-observed-red
  *   AC-FALS-22, AC-FALS-24
  */
 
-import { describe, it, expect, afterEach } from "vitest";
-import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { describe, it, expect } from "vitest";
+import ts from "typescript";
+import { readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -87,91 +54,52 @@ const THIS_DIR = dirname(fileURLToPath(import.meta.url));
 const DASHBOARD_ROOT = resolve(THIS_DIR, "..", "..");
 /** Repo root — two more levels up from `packages/dashboard`. */
 const REPO_ROOT = resolve(DASHBOARD_ROOT, "..", "..");
-const TSC_BIN = join(REPO_ROOT, "node_modules", ".bin", "tsc");
 const TSCONFIG_JSON = join(DASHBOARD_ROOT, "tsconfig.json");
 const TSCONFIG_TESTS_JSON = join(DASHBOARD_ROOT, "tsconfig.tests.json");
 const ROOT_PACKAGE_JSON = join(REPO_ROOT, "package.json");
+const DASHBOARD_TESTS_DIR = join(DASHBOARD_ROOT, "tests") + "/";
+const DASHBOARD_E2E_DIR = join(DASHBOARD_ROOT, "tests", "e2e") + "/";
+
 /**
- * Inside `tests/**` on purpose (BOUNDARY) — proves the fix covers the tests tree,
- * not src. ⛔ NEVER dot-prefixed: TypeScript's own file resolution silently
- * excludes dot-prefixed directories/files from a wildcard `include` glob (measured
- * directly — a `.typecheck-scope-probe` name made this exact fixture invisible to
- * `tsc`, a false green the first time this test was written), independent of this
- * config's own `exclude` list.
+ * The file list a `tsc -p <project>` run would load as ROOT files, resolved from the project's
+ * own include / exclude / extends — no type-check, no spawn. Throws on an unreadable or
+ * unparseable config (never returns an empty list for a broken config).
  */
-const PROBE_DIR = join(DASHBOARD_ROOT, "tests", "typecheck-scope-probe-tmp");
-const PROBE_FILE = join(PROBE_DIR, "broken-fact.probe.ts");
-
-/** Spawns `tsc` and returns its exit status + combined stdout/stderr — never throws on a nonzero exit (that is the signal under test, not an error condition). */
-function runTsc(args: readonly string[]): { status: number; output: string } {
-  try {
-    const output = execFileSync(TSC_BIN, [...args], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
-    return { status: 0, output };
-  } catch (error) {
-    const spawnError = error as { status?: number; stdout?: string; stderr?: string };
-    return {
-      status: spawnError.status ?? 1,
-      output: `${spawnError.stdout ?? ""}${spawnError.stderr ?? ""}`,
-    };
+function resolveProjectFiles(project: string): readonly string[] {
+  const read = ts.readConfigFile(project, ts.sys.readFile);
+  if (read.error) {
+    throw new Error(`cannot read ${project}: ${ts.flattenDiagnosticMessageText(read.error.messageText, "\n")}`);
   }
+  const parsed = ts.parseJsonConfigFileContent(read.config, ts.sys, dirname(project), undefined, project);
+  const fatal = parsed.errors.filter((d) => d.code !== 18003); // 18003 = "No inputs were found" — reported by the assertions below, not here
+  if (fatal.length > 0) {
+    throw new Error(`cannot parse ${project}: ${fatal.map((d) => ts.flattenDiagnosticMessageText(d.messageText, "\n")).join("; ")}`);
+  }
+  return parsed.fileNames;
 }
-
-function removeProbeFixture(): void {
-  if (existsSync(PROBE_DIR)) rmSync(PROBE_DIR, { recursive: true, force: true });
-}
-
-// ERROR dimension: the probe fixture is removed after EVERY test in this file,
-// not just the one that creates it — a thrown assertion must never leave a
-// permanently broken file inside the real tests/ tree.
-afterEach(() => {
-  removeProbeFixture();
-});
 
 describe("tsconfig.tests.json scope (AC-FALS-22)", () => {
-  it("HAPPY: dashboard-tests-typechecked — resolves SpecAcCoveragePanel.test.tsx, and a temp fixture missing falsified makes the SAME project exit nonzero naming falsified", () => {
-    // Part 1: the fixed project's file list includes the real test file the
-    // ORIGINAL defect report measured as absent (0 of 648 files under tests/).
-    const listing = runTsc(["-p", TSCONFIG_TESTS_JSON, "--noEmit", "--listFilesOnly"]);
-    expect(listing.status).toBe(0);
-    const resolvedTestFiles = listing.output.split("\n").filter((line) => line.includes("SpecAcCoveragePanel.test.tsx"));
-    expect(resolvedTestFiles.length).toBeGreaterThan(0);
-
-    // Part 2: a deliberately-broken temp fixture — an AcCoverageFact literal
-    // omitting the required `falsified` field — placed inside tests/** (never
-    // src/**, BOUNDARY) makes the SAME project's full type-check exit nonzero
-    // with an error that NAMES falsified, not merely "some error, somewhere".
-    mkdirSync(PROBE_DIR, { recursive: true });
-    writeFileSync(
-      PROBE_FILE,
-      [
-        'import type { AcCoverageFact } from "@lore/core";',
-        "",
-        "// Deliberately missing `falsified` — the exact M5 shape (a required field",
-        "// a hand-built fixture does not actually satisfy at compile time).",
-        "export const broken: AcCoverageFact = {",
-        '  ac_id: "AC-PROBE",',
-        '  mode: "script",',
-        "  pass: 1,",
-        "  fail: 0,",
-        "  refs: [],",
-        "  attested_pass: 0,",
-        "  attested_fail: 0,",
-        "};",
-        "",
-      ].join("\n"),
-      "utf8",
-    );
-
-    const checked = runTsc(["-p", TSCONFIG_TESTS_JSON, "--noEmit"]);
-    expect(checked.status).not.toBe(0);
-    expect(checked.output).toContain("falsified");
+  it("HAPPY: dashboard-tests-typechecked — the tests project's file list resolves SpecAcCoveragePanel.test.tsx, and covers the tests tree but not tests/e2e", () => {
+    const files = resolveProjectFiles(TSCONFIG_TESTS_JSON);
+    expect(files.filter((f) => f.endsWith("SpecAcCoveragePanel.test.tsx")).length).toBeGreaterThan(0);
+    const underTests = files.filter((f) => f.startsWith(DASHBOARD_TESTS_DIR));
+    expect(underTests.length).toBeGreaterThan(0);
+    // BOUNDARY: e2e has its own project (tsconfig.e2e.json); pulling it in re-introduces TS6059.
+    expect(underTests.filter((f) => f.startsWith(DASHBOARD_E2E_DIR))).toEqual([]);
+    // The fix gives the project its OWN exclude: it must not inherit the base's "tests".
+    const raw = ts.readConfigFile(TSCONFIG_TESTS_JSON, ts.sys.readFile).config as { exclude?: string[] };
+    expect(raw.exclude).toBeDefined();
+    expect(raw.exclude).not.toContain("tests");
   });
 
   it("REGRESSION: the unpatched base tsconfig.json alone still excludes tests/ — pins the ORIGINAL defect report's own measurement, not just the fix", () => {
-    const listing = runTsc(["-p", TSCONFIG_JSON, "--noEmit", "--listFilesOnly"]);
-    expect(listing.status).toBe(0);
-    const resolvedTestFiles = listing.output.split("\n").filter((line) => line.includes("/tests/"));
-    expect(resolvedTestFiles.length).toBe(0);
+    const files = resolveProjectFiles(TSCONFIG_JSON);
+    expect(files.length).toBeGreaterThan(0);
+    expect(files.filter((f) => f.includes("/tests/"))).toEqual([]);
+  });
+
+  it("ERROR: a missing config throws instead of resolving to an empty list", () => {
+    expect(() => resolveProjectFiles(join(DASHBOARD_ROOT, "tsconfig.does-not-exist.json"))).toThrow(/cannot read/);
   });
 });
 
@@ -222,7 +150,7 @@ function collectTscProjects(command: string, scripts: Readonly<Record<string, st
 }
 
 describe("typecheck chain wiring (AC-FALS-24)", () => {
-  it("typecheck-chain-covers-tests — the chain declared in root package.json invokes the project whose file list contains packages/dashboard/tests/ files, and that project reports zero errors", () => {
+  it("typecheck-chain-covers-tests — the chain declared in root package.json invokes a tsc project whose resolved file list contains packages/dashboard/tests/ files", () => {
     const rootPackageJson = JSON.parse(readFileSync(ROOT_PACKAGE_JSON, "utf8")) as {
       scripts: Record<string, string>;
     };
@@ -233,35 +161,19 @@ describe("typecheck chain wiring (AC-FALS-24)", () => {
     const tscProjects = collectTscProjects(typecheckChain, scripts, new Set());
     expect(tscProjects.length).toBeGreaterThan(0);
 
-    // Among every tsc project structurally reachable from the `typecheck`
-    // chain, find the one whose resolved file list contains
-    // packages/dashboard/tests/ files — the SAME project the HAPPY case above
-    // (AC-FALS-22) already proves is the fixed tsconfig.tests.json. Not
-    // hardcoded to that path: if the wiring moved to a differently-named
-    // project that still covers the tests tree, this must still find it; if
-    // NO reachable project covers the tests tree (today's un-wired state),
-    // this must find none.
-    let dashboardTestsProject: string | undefined;
-    for (const project of tscProjects) {
-      const listing = runTsc(["-p", project, "--noEmit", "--listFilesOnly"]);
-      expect(listing.status).toBe(0);
-      if (listing.output.split("\n").some((line) => line.includes("packages/dashboard/tests/"))) {
-        dashboardTestsProject = project;
-        break;
-      }
-    }
-    // `expect(...).toBeDefined()` does not narrow for TypeScript's control
-    // flow — `definedOrThrow` both asserts AND narrows, so the next line
-    // never needs an `as string`/`!` to silence the possibly-undefined type.
-    const foundProject = definedOrThrow(
-      dashboardTestsProject,
-      "no tsc project reachable from the typecheck chain has a file list covering packages/dashboard/tests/",
+    // Among every tsc project structurally reachable from the `typecheck` chain, find the one
+    // whose resolved file list contains packages/dashboard/tests/ files. Not hardcoded to a
+    // path: a rename that still covers the tests tree keeps passing; a chain that no longer
+    // reaches any such project finds none and fails loudly.
+    const covering = tscProjects.filter((project) =>
+      resolveProjectFiles(project).some((file) => file.startsWith(DASHBOARD_TESTS_DIR)),
     );
-
-    // That SAME project reports zero errors under a real, full type-check —
-    // not just "some project's file list happens to mention tests/", but
-    // "the project the chain actually runs is clean".
-    const checked = runTsc(["-p", foundProject, "--noEmit"]);
-    expect(checked.status).toBe(0);
+    expect(
+      covering,
+      "no tsc project reachable from the typecheck chain has a file list covering packages/dashboard/tests/",
+    ).not.toEqual([]);
+    // Today that project is the fixed tsconfig.tests.json; zero errors under a real run is
+    // `bun run typecheck`'s attestation (typecheck:dashboard-tests), not a unit test's.
+    expect(covering).toContain(TSCONFIG_TESTS_JSON);
   });
 });
