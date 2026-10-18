@@ -85,6 +85,27 @@ export interface RunEndState {
   readonly endReason: string | null;
 }
 
+/**
+ * The OS process a run lives in (migration-021). `pid` and `startTime` (ISO 8601, second precision, the pid-reuse
+ * defence) are both set or both null; `worktree` is the checkout directory the registering command ran in, or null.
+ */
+export interface RunProcessRecord {
+  readonly pid: number | null;
+  readonly startTime: string | null;
+  readonly worktree: string | null;
+}
+
+/** One run with everything `lore run reap` needs: identity, lifetime and recorded process. A legacy run has `process.pid === null`. */
+export interface RunLifecycle {
+  readonly id: RunId;
+  readonly registeredAt: string;
+  readonly endedAt: string | null;
+  readonly endReason: string | null;
+  readonly parentRunId: RunId | null;
+  readonly agentRef: string | null;
+  readonly process: RunProcessRecord;
+}
+
 /** Outcome of {@link StoreInterface.endRun}: `unknown-run` writes nothing; `already-ended` keeps the FIRST end. */
 export type RunEndOutcome = "ended" | "already-ended" | "unknown-run";
 
@@ -1272,6 +1293,15 @@ export interface StoreInterface {
 
   /** The run's end state, or `ok(null)` for an unregistered id. */
   getRunEnd(id: RunId): Promise<Result<RunEndState | null, LoreError>>;
+
+  /**
+   * Record the OS process a run lives in (migration-021). NEWEST WINS — unlike the identity columns, a resumed run
+   * lives in a NEW process, so a re-registration overwrites the previous pid. `ok(false)` for an unregistered id.
+   */
+  recordRunProcess(id: RunId, process: RunProcessRecord): Promise<Result<boolean, LoreError>>;
+
+  /** Every registered run, oldest `registered_at` first (ties by id), with its end state and recorded process. */
+  listRunLifecycles(): Promise<Result<RunLifecycle[], LoreError>>;
 
   /**
    * Count audit rows with `timestamp >= windowStart` (INCLUSIVE, ISO 8601) whose `action` is one of

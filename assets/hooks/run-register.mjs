@@ -14,7 +14,8 @@
  *
  *   1. stdin must be a JSON object with a string `session_id`, else report
  *      "malformed" (lore is not spawned: there is no session to register)
- *   2. spawn `lore run register --harness claude-code --session S`, plus
+ *   2. spawn `lore run register --harness claude-code --session S --harness-pid <ppid>`
+ *      (the harness process that spawned this hook; AC-AU-5), plus
  *      `--agent-id A --agent-type T` when the payload carries a string
  *      `agent_id` (SubagentStart)
  *   3. success -> print nothing; failure -> print ONE hook-JSON line whose
@@ -83,7 +84,10 @@ if (typeof payload.session_id !== 'string' || payload.session_id === '') {
   reportAndExit(eventName, 'malformed hook payload on stdin (no string session_id)');
 }
 
-const argv = ['run', 'register', '--harness', HARNESS, '--session', payload.session_id];
+// reason: process.ppid is the process that spawned this hook — the harness (AC-AU-5). It is forwarded as a bare
+// number: `lore run register` resolves it past a shell wrapper, probes its start time and records both, so that
+// `lore run reap` can prove the run dead. No decision is made here (D10).
+const argv = ['run', 'register', '--harness', HARNESS, '--session', payload.session_id, '--harness-pid', String(process.ppid)];
 if (typeof payload.agent_id === 'string') {
   argv.push('--agent-id', payload.agent_id);
   if (typeof payload.agent_type === 'string') argv.push('--agent-type', payload.agent_type);

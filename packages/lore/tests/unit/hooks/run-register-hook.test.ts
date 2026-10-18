@@ -153,14 +153,16 @@ describe("run-register.mjs — happy path spawns lore run register", () => {
     const run = runHook(sessionStart("sess-aaa"), stub.dir);
     expect(run.status).toBe(0);
     expect(stub.calls().map((c) => c.argv)).toEqual([
-      ["run", "register", "--harness", "claude-code", "--session", "sess-aaa"],
+      // AC-AU-5: the hook also forwards its parent (this test process) as the harness pid.
+      ["run", "register", "--harness", "claude-code", "--session", "sess-aaa", "--harness-pid", String(process.pid)],
     ]);
   });
 
   it("a different session id yields a different --session value (not hardcoded)", () => {
     const stub = makeStub();
     runHook(sessionStart("sess-bbb-2"), stub.dir);
-    expect(stub.first().argv.slice(-2)).toEqual(["--session", "sess-bbb-2"]);
+    const argv = stub.first().argv;
+    expect(argv.slice(argv.indexOf("--session"), argv.indexOf("--session") + 2)).toEqual(["--session", "sess-bbb-2"]);
   });
 
   it("SessionStart does not pass --agent-id or --agent-type (main run)", () => {
@@ -177,7 +179,7 @@ describe("run-register.mjs — happy path spawns lore run register", () => {
     expect(run.status).toBe(0);
     expect(stub.calls().map((c) => c.argv)).toEqual([
       [
-        "run", "register", "--harness", "claude-code", "--session", "sess-ddd",
+        "run", "register", "--harness", "claude-code", "--session", "sess-ddd", "--harness-pid", String(process.pid),
         "--agent-id", "agent-77", "--agent-type", "lore-implementer",
       ],
     ]);

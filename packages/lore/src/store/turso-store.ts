@@ -46,6 +46,7 @@ import { MIGRATION_015_SQL } from "./migrations/migration-015.js";
 import { MIGRATION_018_SQL } from "./migrations/migration-018.js";
 import { MIGRATION_019_ADD_COLUMNS, MIGRATION_019_SQL } from "./migrations/migration-019.js";
 import { MIGRATION_020_SQL } from "./migrations/migration-020.js";
+import { MIGRATION_021_ADD_COLUMNS, MIGRATION_021_SQL } from "./migrations/migration-021.js";
 import { DECISION_GENESIS_HASH, computeDecisionEntryHash } from "./decision-log.js";
 import type { DecisionLogRow, DecisionRecordInput } from "./decision-log.js";
 import type { DecisionSubjectKey } from "./store-interface.js";
@@ -105,6 +106,8 @@ import type {
   ProvenanceWriteExtras,
   RunEndOutcome,
   RunEndState,
+  RunLifecycle,
+  RunProcessRecord,
 } from "./store-interface.js";
 import {
   allocateWithBoundedRetry,
@@ -133,6 +136,9 @@ import {
   type LinkRow,
   type VersionRow,
   INSERT_RUN_SQL,
+  RUN_LIFECYCLE_SQL,
+  type RunLifecycleRow,
+  rowToRunLifecycle,
   type RunRow,
   countAttributedWritesSql,
   emptyKindsError,
@@ -751,6 +757,16 @@ export class TursoStore implements StoreInterface {
       if (currentVersion < 20) {
         // reason: migration-020 (decision_log + append-only triggers) is one idempotent BEGIN/COMMIT string.
         await this.client.executeMultiple(MIGRATION_020_SQL);
+      }
+
+      if (currentVersion < 21) {
+        // reason: migration-021 is two-phase like 017/019 (see migration-021.ts's module JSDoc): nullable
+        // `runs.harness_pid` / `.harness_pid_start` / `.worktree` added only where `PRAGMA table_info` lacks them.
+        for (const { table, column, ddl } of MIGRATION_021_ADD_COLUMNS) {
+          const info = await this.client.execute(`PRAGMA table_info(${table})`);
+          if (!info.rows.some((r) => rowStr(r, "name") === column)) await this.client.execute(ddl);
+        }
+        await this.client.executeMultiple(MIGRATION_021_SQL);
       }
     })();
 
@@ -3452,6 +3468,44 @@ export class TursoStore implements StoreInterface {
       const row = rs.rows[0];
       if (!row) return ok(null);
       return ok({ endedAt: rowStrOrNull(row, "ended_at"), endReason: rowStrOrNull(row, "end_reason") });
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
+  async recordRunProcess(id: RunId, proc: RunProcessRecord): Promise<Result<boolean, LoreError>> {
+    try {
+      await this.ensureReady();
+      // reason: the NEWEST registration wins here (unlike the identity columns): a resumed run lives in a new process.
+      const updated = await this.client.execute({
+        sql: "UPDATE runs SET harness_pid = ?, harness_pid_start = ?, worktree = ? WHERE id = ?",
+        args: [proc.pid, proc.startTime, proc.worktree, id],
+      });
+      return ok(updated.rowsAffected > 0);
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
+  async listRunLifecycles(): Promise<Result<RunLifecycle[], LoreError>> {
+    try {
+      await this.ensureReady();
+      const rs = await this.client.execute(RUN_LIFECYCLE_SQL);
+      return ok(
+        rs.rows.map((row) =>
+          rowToRunLifecycle({
+            id: rowStr(row, "id"),
+            registered_at: rowStr(row, "registered_at"),
+            ended_at: rowStrOrNull(row, "ended_at"),
+            end_reason: rowStrOrNull(row, "end_reason"),
+            parent_run_id: rowStrOrNull(row, "parent_run_id"),
+            agent_ref: rowStrOrNull(row, "agent_ref"),
+            harness_pid: rowNumOrNull(row, "harness_pid"),
+            harness_pid_start: rowStrOrNull(row, "harness_pid_start"),
+            worktree: rowStrOrNull(row, "worktree"),
+          } satisfies RunLifecycleRow),
+        ),
+      );
     } catch (e) {
       return wrapStoreError(e);
     }

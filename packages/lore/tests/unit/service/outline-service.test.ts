@@ -760,6 +760,9 @@ describe("OutlineService.resolve", () => {
         // reason: AC-AU-2 — new required StoreInterface methods (decision log).
         appendDecisionRecord: (input) => store.appendDecisionRecord(input),
         listDecisionLog: (subject) => store.listDecisionLog(subject),
+        // reason: AC-AU-5 — new required StoreInterface methods (run process record, run lifecycles).
+        recordRunProcess: (id, proc) => store.recordRunProcess(id, proc),
+        listRunLifecycles: () => store.listRunLifecycles(),
       };
 
       const brokenService = new OutlineService(brokenStore);

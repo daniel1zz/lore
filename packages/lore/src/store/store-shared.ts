@@ -43,6 +43,7 @@ import {
   type LoreError,
   type Result,
 } from "@lore/core";
+import type { RunLifecycle } from "./store-interface.js";
 
 // ─── Raw DB row types ──────────────────────────────────────────────────────
 
@@ -90,6 +91,40 @@ export function runRecordToParams(run: RunRecord): (string | null)[] {
     JSON.stringify(run.composition),
     run.registeredAt,
   ];
+}
+
+/** SELECT for {@link RunLifecycleRow}: every run, oldest first. */
+export const RUN_LIFECYCLE_SQL = `SELECT id, registered_at, ended_at, end_reason, parent_run_id, agent_ref,
+  harness_pid, harness_pid_start, worktree FROM runs ORDER BY registered_at ASC, id ASC`;
+
+/** Raw row of {@link RUN_LIFECYCLE_SQL}. `harness_pid` may arrive as bigint from libsql. */
+export interface RunLifecycleRow {
+  id: string;
+  registered_at: string;
+  ended_at: string | null;
+  end_reason: string | null;
+  parent_run_id: string | null;
+  agent_ref: string | null;
+  harness_pid: number | bigint | null;
+  harness_pid_start: string | null;
+  worktree: string | null;
+}
+
+/** {@link RunLifecycleRow} -> {@link RunLifecycle}. */
+export function rowToRunLifecycle(row: RunLifecycleRow): RunLifecycle {
+  return {
+    id: row.id as RunId,
+    registeredAt: row.registered_at,
+    endedAt: row.ended_at,
+    endReason: row.end_reason,
+    parentRunId: row.parent_run_id as RunId | null,
+    agentRef: row.agent_ref,
+    process: {
+      pid: row.harness_pid === null ? null : Number(row.harness_pid),
+      startTime: row.harness_pid_start,
+      worktree: row.worktree,
+    },
+  };
 }
 
 export const INSERT_RUN_SQL = `INSERT OR IGNORE INTO runs
