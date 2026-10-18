@@ -13,17 +13,20 @@
  * Output: the dot reporter keeps each runner's output short, so BOTH runner summaries
  * ("Test Files N passed (N)") stay inside the 4000-char evidence tail that
  * `lore verify` sums for its completeness check (a verbose per-test list pushed the first summary out: 1 of 3).
- * Side-effect class: IO (spawns vitest, writes a JSON report under node_modules/.cache).
+ * Where it runs: each runner starts in a private copy of the tree (scripts/private-tree-run.ts, TG-46), so the
+ * repo-write guard blames a run only for writes its own processes made, never for another session's edit.
+ * Side-effect class: IO (spawns vitest, writes a JSON report under node_modules/.cache, makes and removes a temp copy).
  *
  * Exit codes: 0 every path collected tests and every runner passed; 1 a runner failed or a path
  * collected nothing; 2 usage error (no test path given).
  */
-import { mkdirSync, readFileSync, rmSync } from "node:fs";
+import { mkdirSync, readFileSync, realpathSync, rmSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 import { z } from "zod";
 import { NODE_PROJECT_FILES } from "../vitest.node-files.js";
+import { createPrivateTree } from "./private-tree-run";
 
 const REPO_ROOT = join(fileURLToPath(import.meta.url), "..", "..");
 const TEST_PATH_RE = /\.(?:bun\.)?test\.tsx?$/;
@@ -90,18 +93,26 @@ export function judgeCollected(files: readonly string[], reportJson: string | nu
 export interface RunResult {
   readonly exit: number;
   readonly report: string | null;
+  /** Directory the report's test paths are relative to when the run was not in `root` (the private copy). */
+  readonly root?: string;
 }
 export type GroupRunner = (group: Group, reportFile: string) => RunResult;
 
 function spawnGroup(group: Group, reportFile: string): RunResult {
-  const r = spawnSync("bunx", [...group.argv], { cwd: REPO_ROOT, stdio: "inherit" });
-  let report: string | null = null;
+  const tree = createPrivateTree(REPO_ROOT);
   try {
-    report = readFileSync(reportFile, "utf8");
-  } catch {
-    report = null;
+    const r = spawnSync("bunx", [...group.argv], { cwd: tree.dir, stdio: "inherit" });
+    let report: string | null = null;
+    try {
+      report = readFileSync(reportFile, "utf8");
+    } catch {
+      report = null;
+    }
+    // reason: vitest reports the copy's real path (macOS: /private/var/... for /var/...), so judge against that.
+    return { exit: r.status ?? 1, report, root: realpathSync(tree.dir) };
+  } finally {
+    tree.dispose();
   }
-  return { exit: r.status ?? 1, report };
 }
 
 /** IO. Returns the exit code; never calls `process.exit`. */
@@ -123,7 +134,7 @@ export function main(
   for (const g of planGroups(paths, passthrough, nodeFiles, reportFile)) {
     rmSync(reportFile(g.runner), { force: true });
     const res = run(g, reportFile(g.runner));
-    const empty = judgeCollected(g.files, res.report, root);
+    const empty = judgeCollected(g.files, res.report, res.root ?? root);
     console.log(`test:file: ${g.runner} runner exit ${res.exit}; ${g.files.length - empty.length}/${g.files.length} path(s) collected tests`);
     if (res.exit !== 0) code = 1;
     for (const f of empty) {

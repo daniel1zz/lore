@@ -8,15 +8,18 @@
  * (scripts/check-test-file-census.ts). Exit 0 only when all three succeed.
  * With `--base <ref>` it then runs the selector cross-check (scripts/selector-miss-report.ts, AC-TG-8)
  * over `<ref>..HEAD` using those same reports, and that must succeed too.
+ * Both vitest invocations run from a private copy of the tree (scripts/private-tree-run.ts, TG-46) so another
+ * session's edit in the shared checkout is never blamed on the run by the repo-write guard.
  * Reports go to a throwaway directory under the OS temp dir, never into the repository tree.
  * Public surface: `runSuite` (also used by scripts/measure-test-wall.ts), `suiteExit`.
  * Side-effect class: IO (spawns the runners, writes reports to a temp dir).
  */
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { rebaseReport, runInPrivateTree } from "./private-tree-run";
 
 const ROOT = join(fileURLToPath(import.meta.url), "..", "..");
 
@@ -25,6 +28,19 @@ function run(label: string, cmd: string, args: string[], env: Record<string, str
   const r = spawnSync(cmd, args, { cwd: ROOT, stdio: "inherit", env: { ...process.env, ...env } });
   if (r.error !== undefined) throw new Error(`${label} failed to start: ${r.error.message}`);
   return r.status ?? 1;
+}
+
+/**
+ * A vitest invocation from a private copy of the tree (scripts/private-tree-run.ts, TG-46), so the repo-write
+ * guard blames the run only for writes its own processes made. The JSON report is rebased onto the real checkout
+ * afterwards: the census and the selector cross-check relativise its file names against ROOT.
+ */
+function runVitest(label: string, args: string[], report: string, env: Record<string, string> = {}): number {
+  console.log(`\n=== ${label}: bunx ${args.join(" ")}`);
+  return runInPrivateTree(ROOT, "bunx", args, { ...process.env, ...env }, (treeRoot) => {
+    // reason: a run that died before writing its report is the census's to name (it fails loud on a missing report).
+    if (existsSync(report)) rebaseReport(report, treeRoot, ROOT);
+  });
 }
 
 export interface SuiteOutcome {
@@ -48,11 +64,11 @@ export function runSuite(reportDir: string, baseRef?: string): SuiteOutcome {
   // invocations and only snapshots it for the no-test-writes-dist check.
   const build = run("build dist/lore (once)", "bun", ["run", "build"]);
   if (build !== 0) throw new Error(`run-tests: \`bun run build\` failed (exit ${build}); no test ran`);
-  const bun = run("vitest on the Bun runtime", "bunx", ["--bun", "vitest", "run", "--reporter=default", "--reporter=json", `--outputFile.json=${bunReport}`]);
-  const node = run(
+  const bun = runVitest("vitest on the Bun runtime", ["--bun", "vitest", "run", "--reporter=default", "--reporter=json", `--outputFile.json=${bunReport}`], bunReport);
+  const node = runVitest(
     "vitest on Node (files listed in vitest.node-files.ts)",
-    "bunx",
     ["vitest", "run", "-c", "vitest.node.config.ts", "--reporter=default", "--reporter=json", `--outputFile.json=${nodeReport}`],
+    nodeReport,
     { NODE_OPTIONS: "--max-old-space-size=2048" },
   );
   const census = run("census", "bun", ["scripts/check-test-file-census.ts", bunReport, nodeReport]);
