@@ -177,12 +177,13 @@ async function runScopeMutation(inv: Invocation,
 
   if (json) {
     printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { doc, ac_scope: acScope } }, null, 2));
-    return;
+    return 0;
   }
 
   const verb = op === "add" ? "Declared" : "Un-declared";
   printLine(inv.io.stdout, `${verb} ${acIds.length} ac_scope id(s) on ${doc.slug} (v${doc.version})`);
   renderScopeList(inv.io, acScope, true);
+  return 0;
 }
 
 export default defineLoreCommand({
@@ -291,7 +292,7 @@ export default defineLoreCommand({
           description: "Output result as JSON",
         },
       },
-      async run(context) {
+      async run(context): Promise<number> {
         const { args } = context;
         const inv = invocationOf(context);
         const { app } = loadLoreApp({ inv });
@@ -317,7 +318,7 @@ export default defineLoreCommand({
             printLine(inv.io.stdout, 
               JSON.stringify({ ok: true, data: { ac_scope: acScope, scope_declared: scopeDeclared } }, null, 2),
             );
-            return;
+            return 0;
           }
 
           printLine(inv.io.stdout, `Declared ac_scope for ${doc.slug}:`);
@@ -325,6 +326,7 @@ export default defineLoreCommand({
         } finally {
           app.close();
         }
+        return 0;
       },
     }),
   },

@@ -126,7 +126,7 @@ export default defineLoreCommand({
           description: `Required exemption type: ${ATTESTATION_EXEMPT_KIND_VALUES.join(" | ")}`,
         },
       },
-      async run(context) {
+      async run(context): Promise<number> {
         const { args } = context;
         const inv = invocationOf(context);
         const checked = checkExemptAttestationArgs({ reason: args.reason, kind: args.kind });
@@ -152,7 +152,7 @@ export default defineLoreCommand({
 
           if (args.json) {
             printLine(inv.io.stdout, JSON.stringify({ ok: true, data: result.value }, null, 2));
-            return;
+            return 0;
           }
 
           printLine(inv.io.stdout, 
@@ -163,6 +163,7 @@ export default defineLoreCommand({
         } finally {
           app.close();
         }
+        return 0;
       },
     }),
 
@@ -172,7 +173,7 @@ export default defineLoreCommand({
         description: "Record an audited exemption from the plan-close assessment-freshness predicate",
       },
       args: { ...sharedArgs },
-      async run(context) {
+      async run(context): Promise<number> {
         const { args } = context;
         const inv = invocationOf(context);
         const checked = checkExemptAssessmentFreshnessArgs({ reason: args.reason });
@@ -197,7 +198,7 @@ export default defineLoreCommand({
 
           if (args.json) {
             printLine(inv.io.stdout, JSON.stringify({ ok: true, data: result.value }, null, 2));
-            return;
+            return 0;
           }
 
           printLine(inv.io.stdout, 
@@ -208,6 +209,7 @@ export default defineLoreCommand({
         } finally {
           app.close();
         }
+        return 0;
       },
     }),
   },

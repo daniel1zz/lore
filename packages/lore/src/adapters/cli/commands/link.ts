@@ -72,7 +72,7 @@ export default defineLoreCommand({
       description: "Output as JSON",
     },
   },
-  async run(context) {
+  async run(context): Promise<number> {
     const { args } = context;
     const inv = invocationOf(context);
     const hasInfer = args.infer === true;
@@ -150,7 +150,7 @@ export default defineLoreCommand({
               `(${link.link_type}) [inferred]`,
           );
         }
-        return;
+        return 0;
       }
 
       // ─── Manual path (unchanged from pre-SPEC-019) ────────────────────────────
@@ -181,5 +181,6 @@ export default defineLoreCommand({
     } finally {
       app.close();
     }
+    return 0;
   },
 });

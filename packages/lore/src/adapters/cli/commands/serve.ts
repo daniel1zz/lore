@@ -25,7 +25,7 @@ export default defineLoreCommand({
       description: "Host to bind to (default: localhost)",
     },
   },
-  async run(context) {
+  async run(context): Promise<number> {
     const { args } = context;
     const inv = invocationOf(context);
     // reason: `{surface: "http"}` is load-bearing, not decorative — this boot
@@ -58,5 +58,6 @@ export default defineLoreCommand({
         });
       }
     });
+    return 0;
   },
 });

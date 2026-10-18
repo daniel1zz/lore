@@ -112,7 +112,7 @@ export default defineLoreCommand({
           description: "Output result as JSON",
         },
       },
-      async run(context) {
+      async run(context): Promise<number> {
         const { args } = context;
         const inv = invocationOf(context);
         const { app } = loadLoreApp({ inv });
@@ -127,18 +127,19 @@ export default defineLoreCommand({
 
           if (args.json) {
             printLine(inv.io.stdout, JSON.stringify({ ok: true, data: result.value }, null, 2));
-            return;
+            return 0;
           }
 
           if (result.value.length === 0) {
             printLine(inv.io.stdout, "No outline entries declared on this PRD.");
-            return;
+            return 0;
           }
 
           renderOutlineList(inv.io, result.value);
         } finally {
           app.close();
         }
+        return 0;
       },
     }),
 

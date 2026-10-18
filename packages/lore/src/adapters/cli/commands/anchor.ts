@@ -212,7 +212,7 @@ export default defineLoreCommand({
           description: "Output result as JSON",
         },
       },
-      async run(context) {
+      async run(context): Promise<number> {
         const { args } = context;
         const inv = invocationOf(context);
         const { app } = loadLoreApp({ inv });
@@ -243,7 +243,7 @@ export default defineLoreCommand({
             emitFileAnchorAdvisory(inv.io, anchors, result.value.slug, inv.cwd);
             if (args.json) {
               printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { doc: result.value, anchors } }, null, 2));
-              return;
+              return 0;
             }
 
             printLine(inv.io.stdout, `Added ${paths.length} anchor(s) to ${result.value.slug} (v${result.value.version})`);
@@ -263,7 +263,7 @@ export default defineLoreCommand({
             const anchors = result.value;
             if (args.json) {
               printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { anchors } }, null, 2));
-              return;
+              return 0;
             }
 
             printLine(inv.io.stdout, `Added ${paths.length} anchor(s) to ${target.slug}`);
@@ -276,6 +276,7 @@ export default defineLoreCommand({
         } finally {
           app.close();
         }
+        return 0;
       },
     }),
 
@@ -297,7 +298,7 @@ export default defineLoreCommand({
           description: "Output result as JSON",
         },
       },
-      async run(context) {
+      async run(context): Promise<number> {
         const { args } = context;
         const inv = invocationOf(context);
         const { app } = loadLoreApp({ inv });
@@ -327,7 +328,7 @@ export default defineLoreCommand({
             const anchors = (result.value.extra["file_anchors"] as string[] | undefined) ?? [];
             if (args.json) {
               printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { doc: result.value, anchors } }, null, 2));
-              return;
+              return 0;
             }
 
             printLine(inv.io.stdout, `Removed ${paths.length} anchor(s) from ${result.value.slug} (v${result.value.version})`);
@@ -347,7 +348,7 @@ export default defineLoreCommand({
             const anchors = result.value;
             if (args.json) {
               printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { anchors } }, null, 2));
-              return;
+              return 0;
             }
 
             printLine(inv.io.stdout, `Removed ${paths.length} anchor(s) from ${target.slug}`);
@@ -360,6 +361,7 @@ export default defineLoreCommand({
         } finally {
           app.close();
         }
+        return 0;
       },
     }),
 
@@ -376,7 +378,7 @@ export default defineLoreCommand({
           description: "Output result as JSON",
         },
       },
-      async run(context) {
+      async run(context): Promise<number> {
         const { args } = context;
         const inv = invocationOf(context);
         const { app } = loadLoreApp({ inv });
@@ -402,7 +404,7 @@ export default defineLoreCommand({
 
           if (args.json) {
             printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { anchors } }, null, 2));
-            return;
+            return 0;
           }
 
           printLine(inv.io.stdout, `${doc.type === "task" ? "File" : "Code"} anchors for ${doc.slug}:`);
@@ -410,6 +412,7 @@ export default defineLoreCommand({
         } finally {
           app.close();
         }
+        return 0;
       },
     }),
   },

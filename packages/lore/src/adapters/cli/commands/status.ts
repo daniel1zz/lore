@@ -1097,7 +1097,7 @@ export default defineLoreCommand({
         "Enumerate the MEMBERS behind a count field the plain run reports (e.g. pass_unfalsified_count, ac_other_command_count, ac_oracle_file_missing_count, unredeemed_allow_missing_path_count, capture_source_runner_count, capture_source_self_report_count, capture_source_runner_unattested_count, code_anchor_specs, adopted_abandoned_count). Unknown field → exit 4, naming it and the known set.",
     },
   },
-  async run(context) {
+  async run(context): Promise<number> {
     const { args } = context;
     const inv = invocationOf(context);
     // ── check-binary-provenance branch (spec-bootstrap-fixpoint-integrity-
@@ -1285,7 +1285,7 @@ export default defineLoreCommand({
       } finally {
         app.close();
       }
-      return;
+      return 0;
     }
 
     // ── check-autonomy-thresholds branch (spec-autonomy-phase-1 AC-AU-9) ──
@@ -1304,7 +1304,7 @@ export default defineLoreCommand({
       } finally {
         app.close();
       }
-      return;
+      return 0;
     }
 
     // ── check-tree / check-drift / check-requirements / check-prd-budget / check-issues / check-memory-pointers branch (D5 restructure + N14) ────
@@ -1990,7 +1990,7 @@ export default defineLoreCommand({
             2,
           ),
         );
-        return;
+        return 0;
       }
 
       printLine(inv.io.stdout, "Corpus Status");
@@ -2179,7 +2179,7 @@ export default defineLoreCommand({
         return exitCode(thresholdStatus.error);
       }
       if (thresholdStatus.value.state !== "unseeded") printLine(inv.io.stdout, `\n${renderAutonomyThresholdLine(thresholdStatus.value)}`);
-      const thresholdExit: ExitReport = isAutonomyThresholdBreak(thresholdStatus.value) ? AUTONOMY_THRESHOLD_BREAK_EXIT : undefined;
+      const thresholdExit: ExitReport = isAutonomyThresholdBreak(thresholdStatus.value) ? AUTONOMY_THRESHOLD_BREAK_EXIT : 0;
 
       // baseline slice 1 §C7 — one line, only when a warning count is non-zero (report-only).
       if (baselineStatus !== null && baselineWarningCount(baselineStatus) > 0) {

@@ -320,7 +320,7 @@ export default defineLoreCommand({
           description: "Output result as JSON",
         },
       },
-      async run(context) {
+      async run(context): Promise<number> {
         const { args } = context;
         const inv = invocationOf(context);
         const correctionRefusal = refuseCorrectionFlag(inv.io, args, "add");
@@ -348,7 +348,7 @@ export default defineLoreCommand({
 
           if (args.json) {
             printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { criteria: result.value } }, null, 2));
-            return;
+            return 0;
           }
 
           printLine(inv.io.stdout, `Added acceptance criterion "${args.id as string}" to spec ${args.spec as string}`);
@@ -356,6 +356,7 @@ export default defineLoreCommand({
         } finally {
           app.close();
         }
+        return 0;
       },
     }),
 
@@ -372,7 +373,7 @@ export default defineLoreCommand({
           description: "Output result as JSON",
         },
       },
-      async run(context) {
+      async run(context): Promise<number> {
         const { args } = context;
         const inv = invocationOf(context);
         const { app, dbPath } = loadLoreApp({ inv });
@@ -396,18 +397,19 @@ export default defineLoreCommand({
                 2,
               ),
             );
-            return;
+            return 0;
           }
 
           if (result.value.criteria.length === 0) {
             printLine(inv.io.stdout, "No acceptance criteria declared on this spec.");
-            return;
+            return 0;
           }
 
           renderCriteriaList(inv.io, result.value);
         } finally {
           app.close();
         }
+        return 0;
       },
     }),
 
@@ -424,7 +426,7 @@ export default defineLoreCommand({
         expires: { type: "string", description: "ISO 8601 date/time the exemption lapses; must be in the future (required)" },
         json: { type: "boolean", description: "Output result as JSON" },
       },
-      async run(context) {
+      async run(context): Promise<number> {
         const { args } = context;
         const inv = invocationOf(context);
         // reason: the exemption table is read/written through a second store handle because `App`
@@ -447,7 +449,7 @@ export default defineLoreCommand({
           }
           if (args.json) {
             printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { exemption: result.value } }, null, 2));
-            return;
+            return 0;
           }
           printLine(inv.io.stdout, 
             `Exempted ${args.id as string} on spec ${args.spec as string} until ${result.value.expires_at} (by ${result.value.granted_by})`,
@@ -456,6 +458,7 @@ export default defineLoreCommand({
           store.close();
           app.close();
         }
+        return 0;
       },
     }),
     cite: defineLoreCommand({
@@ -489,7 +492,7 @@ export default defineLoreCommand({
           description: "Output result as JSON",
         },
       },
-      async run(context) {
+      async run(context): Promise<number> {
         const { args } = context;
         const inv = invocationOf(context);
         // `args._` carries EVERY positional token (spec, id, then each rule id) — citty
@@ -520,7 +523,7 @@ export default defineLoreCommand({
                 2,
               ),
             );
-            return;
+            return 0;
           }
 
           const verb = args.remove === true ? "Removed citation(s) from" : "Cited";
@@ -532,6 +535,7 @@ export default defineLoreCommand({
         } finally {
           app.close();
         }
+        return 0;
       },
     }),
 
@@ -564,7 +568,7 @@ export default defineLoreCommand({
           description: "Output result as JSON",
         },
       },
-      async run(context) {
+      async run(context): Promise<number> {
         const { args } = context;
         const inv = invocationOf(context);
         const correctionRefusal = refuseCorrectionFlag(inv.io, args, "rm");
@@ -583,7 +587,7 @@ export default defineLoreCommand({
 
           if (args.json) {
             printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { criteria: result.value } }, null, 2));
-            return;
+            return 0;
           }
 
           printLine(inv.io.stdout, `Removed acceptance criterion "${args.id as string}" from spec ${args.spec as string}`);
@@ -595,6 +599,7 @@ export default defineLoreCommand({
         } finally {
           app.close();
         }
+        return 0;
       },
     }),
 
@@ -695,7 +700,7 @@ export default defineLoreCommand({
           description: "Output result as JSON",
         },
       },
-      async run(context) {
+      async run(context): Promise<number> {
         const { args } = context;
         const inv = invocationOf(context);
         // D1/D5a — argv-decidable, judged BEFORE the app/store is even opened:
@@ -758,7 +763,7 @@ export default defineLoreCommand({
 
           if (args.json) {
             printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { criteria: result.value } }, null, 2));
-            return;
+            return 0;
           }
 
           printLine(inv.io.stdout, `Updated acceptance criterion "${args.id as string}" on spec ${args.spec as string}`);
@@ -767,6 +772,7 @@ export default defineLoreCommand({
         } finally {
           app.close();
         }
+        return 0;
       },
     }),
   },
@@ -783,7 +789,7 @@ const printAdvisory = (io: CliIo, advisory: string): void => {
  *
  * @returns the refusal's exit code (2) when the call was refused (the caller must return it), else `undefined`.
  */
-function refuseCorrectionFlag(io: CliIo, args: Record<string, unknown>, verb: "add" | "rm"): ExitReport {
+function refuseCorrectionFlag(io: CliIo, args: Record<string, unknown>, verb: "add" | "rm"): number | undefined {
   if (args.correction === undefined) return undefined;
   io.stderr.write(
     `Error: lore ac ${verb} does not accept --correction — a ${verb === "add" ? "new" : "removed"} criterion is a ` +
@@ -805,7 +811,7 @@ function refuseCorrectionFlag(io: CliIo, args: Record<string, unknown>, verb: "a
  * @param verb - which subcommand is running (only `set` accepts the `''` clear sentinel)
  * @returns the refusal's exit code (4) when the command was refused (caller must return it), else `undefined`
  */
-function refuseBadTimeoutMs(io: CliIo, args: Record<string, unknown>, verb: "add" | "set"): ExitReport {
+function refuseBadTimeoutMs(io: CliIo, args: Record<string, unknown>, verb: "add" | "set"): number | undefined {
   const raw = args["timeout-ms"];
   if (raw === undefined) return undefined;
   const fail = (io: CliIo, why: string): number => {

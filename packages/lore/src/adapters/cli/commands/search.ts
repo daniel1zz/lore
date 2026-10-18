@@ -69,7 +69,7 @@ export default defineLoreCommand({
       description: "Include invalidated knowledge/adr/task docs (excluded by default). Source: SPEC-043 D3, task-a-task-cannot-be-retracted-supersedes-emits-a-repair.",
     },
   },
-  async run(context) {
+  async run(context): Promise<number> {
     const { args } = context;
     const inv = invocationOf(context);
     const { app } = loadLoreApp({ inv });
@@ -107,12 +107,12 @@ export default defineLoreCommand({
 
       if (args.json) {
         printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { results, total: results.length } }, null, 2));
-        return;
+        return 0;
       }
 
       if (results.length === 0) {
         printLine(inv.io.stdout, `No results for "${args.query}".`);
-        return;
+        return 0;
       }
 
       // SPEC-043 D3/D4 — [invalid] badge on rows surfaced only via --include-invalid
@@ -132,5 +132,6 @@ export default defineLoreCommand({
     } finally {
       app.close();
     }
+    return 0;
   },
 });

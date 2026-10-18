@@ -55,7 +55,7 @@ export default defineLoreCommand({
       description: "Output as JSON",
     },
   },
-  async run(context) {
+  async run(context): Promise<number> {
     const { args } = context;
     const inv = invocationOf(context);
     const cwd = inv.cwd;
@@ -136,7 +136,7 @@ export default defineLoreCommand({
         printLine(inv.io.stdout, "");
         printLine(inv.io.stdout, "Run `lore create prd --title \"My Project\"` to add your first document.");
       }
-      return;
+      return 0;
     }
     if (armed === undefined || !armed.ok) {
       const msg =
@@ -172,5 +172,6 @@ export default defineLoreCommand({
       printLine(inv.io.stdout, "");
       printLine(inv.io.stdout, "Run `lore create prd --title \"My Project\"` to add your first document.");
     }
+    return 0;
   },
 });

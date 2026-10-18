@@ -33,7 +33,7 @@ export default defineLoreCommand({
       description: "Output as JSON",
     },
   },
-  async run(context) {
+  async run(context): Promise<number> {
     const { args } = context;
     const inv = invocationOf(context);
     if (typeof args.reason !== "string" || args.reason.trim() === "") {
@@ -53,11 +53,12 @@ export default defineLoreCommand({
       const doc = result.value;
       if (args.json) {
         inv.io.stdout.write(JSON.stringify({ id: doc.id, slug: doc.slug, status: doc.status, version: doc.version }) + "\n");
-        return;
+        return 0;
       }
       inv.io.stdout.write(`Reopened ${doc.slug} (v${doc.version}): approved -> draft\n`);
     } finally {
       app.close();
     }
+    return 0;
   },
 });

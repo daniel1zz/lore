@@ -248,7 +248,7 @@ export default defineLoreCommand({
       description: "Output result as JSON",
     },
   },
-  async run(context) {
+  async run(context): Promise<number> {
     const { args } = context;
     const inv = invocationOf(context);
     // ─── Step 1: argument mutex + required-flag checks (synchronous, before any IO) ───
@@ -395,7 +395,7 @@ export default defineLoreCommand({
 
       if (args.json) {
         printLine(inv.io.stdout, JSON.stringify({ ok: true, data: githubResult.value }, null, 2));
-        return;
+        return 0;
       }
 
       printLine(inv.io.stdout, 
@@ -410,5 +410,6 @@ export default defineLoreCommand({
     } finally {
       app.close();
     }
+    return 0;
   },
 });

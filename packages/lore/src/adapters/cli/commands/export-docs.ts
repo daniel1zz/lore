@@ -56,7 +56,7 @@ export default defineLoreCommand({
       description: "Output ExportReport as JSON to stdout",
     },
   },
-  async run(context) {
+  async run(context): Promise<number> {
     const { args } = context;
     const inv = invocationOf(context);
     const dryRun = args["dry-run"] ?? false;
@@ -119,7 +119,7 @@ export default defineLoreCommand({
         if (report.errors.length > 0) {
           return 4;
         }
-        return;
+        return 0;
       }
 
       // ── Human-readable report ─────────────────────────────────────────────
@@ -204,5 +204,6 @@ export default defineLoreCommand({
     } finally {
       app.close();
     }
+    return 0;
   },
 });

@@ -84,7 +84,7 @@ export default defineLoreCommand({
       description: "Output as JSON",
     },
   },
-  async run(context) {
+  async run(context): Promise<number> {
     const { args } = context;
     const inv = invocationOf(context);
     const { app, dbPath } = loadLoreApp({ inv });
@@ -135,7 +135,7 @@ export default defineLoreCommand({
           printLine(inv.io.stdout, "No pending documents.");
           if (decisionsBlock !== "") printLine(inv.io.stdout, decisionsBlock);
         }
-        return;
+        return 0;
       }
 
       // reason: one latestFor call per pending doc — acceptable at CLI scale (same
@@ -174,13 +174,13 @@ export default defineLoreCommand({
             2,
           ),
         );
-        return;
+        return 0;
       }
 
       if (visibleDocs.length === 0) {
         printLine(inv.io.stdout, args.escalated ? "No escalated documents." : "No pending documents.");
         if (decisionsBlock !== "") printLine(inv.io.stdout, decisionsBlock);
-        return;
+        return 0;
       }
 
       printLine(inv.io.stdout, formatTable(PENDING_TABLE_HEADERS, buildPendingTableRows(visibleDocs, judgments)));
@@ -202,5 +202,6 @@ export default defineLoreCommand({
     } finally {
       app.close();
     }
+    return 0;
   },
 });

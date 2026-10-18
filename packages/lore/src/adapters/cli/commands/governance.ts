@@ -267,7 +267,7 @@ export default defineLoreCommand({
       default: false,
     },
   },
-  run(context) {
+  run(context): number {
     const { args } = context;
     const inv = invocationOf(context);
     const legacyFlag = args["seat-briefing"] === true;
@@ -305,7 +305,7 @@ export default defineLoreCommand({
     // flag only ever aliases `seat-briefing`.
     if (topic === "bootstrap-framing") {
       inv.io.stdout.write(BOOTSTRAP_FRAMING_LINE);
-      return;
+      return 0;
     }
 
     // Mirrors commands/setup.ts's own path-context resolution verbatim (see
@@ -333,5 +333,6 @@ export default defineLoreCommand({
     }
 
     inv.io.stdout.write(result.value);
+    return 0;
   },
 });

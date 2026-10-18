@@ -11,8 +11,8 @@
  *     (spec-ambient-state-is-read-once-at-the-entry-owned-only-prune D4, AC-IV-5).
  *   - `runCli` RETURNS the exit code and never calls `process.exit` or sets `process.exitCode`
  *     (spec-process-state-end-state-one-invocation-per-entry-returned D2, AC-ES-2). The code is, in order: what a command
- *     ended the run with (`exitCli(code)` throws `CliExit`), else what the command RETURNED (reported through
- *     `buildMain`'s `reportExit`), else 0, with ONE mapping (`exitCode(error)` in utils.ts). citty's own exits
+ *     ended the run with (`exitCli(code)` throws `CliExit`), else what the command RETURNED (a required number,
+ *     reported through `buildMain`'s `reportExit`), with ONE mapping (`exitCode(error)` in utils.ts). citty's own exits
  *     (`--help`, an unknown command, a thrown error) are decided by `dispatch` below with the codes `runMain` used
  *     (0, 1, 1), not by citty. `src/index.ts` is the only place that turns the code into `process.exit(code)`.
  *   - Nothing here reads or assigns a process global (`process.argv`, `process.exit`, `process.exitCode`,
@@ -121,25 +121,27 @@ async function resolveUsageTarget(
  * (0), `--version` prints the version (0), a thrown error prints itself and ends the run with 1 (a `CLIError` also
  * prints usage first). A `CliExit` a command threw is NOT an error: it is passed on to `runCli`, which returns its code.
  *
- * @returns 1 when citty's own error path ended the run, `undefined` otherwise
+ * @param reported - the code of the command that ran: 0 until the command's `run` returns, then the code it returned
+ * @returns the run's exit code: 1 when citty's own error path ended it, 0 for `--help` / `--version`, else the code the
+ *   command returned
  */
-async function dispatch(inv: Invocation, main: CommandDef<any>): Promise<ExitReport> {
+async function dispatch(inv: Invocation, main: CommandDef<any>, reported: { code: ExitReport }): Promise<ExitReport> {
   const { runCommand } = await import("citty");
   const { renderUsageDoubleDash } = await import("./usage-render.js");
   const rawArgs = inv.argv;
   try {
     if (rawArgs.includes("--help") || rawArgs.includes("-h")) {
       await renderUsageDoubleDash(inv.io, ...(await resolveUsageTarget(main, rawArgs)));
-      return undefined;
+      return 0;
     }
     if (rawArgs.length === 1 && rawArgs[0] === "--version") {
       const meta = await resolveMaybe(main.meta);
       if (meta?.version === undefined) throw Object.assign(new Error("No version specified"), { name: "CLIError", code: "E_NO_VERSION" });
       printLine(inv.io.stdout, meta.version);
-      return undefined;
+      return 0;
     }
     await runCommand(main, { rawArgs: [...rawArgs] });
-    return undefined;
+    return reported.code;
   } catch (error) {
     if (error instanceof CliExit) throw error;
     const isUsageError = error instanceof Error && error.name === "CLIError";
@@ -162,17 +164,16 @@ async function dispatch(inv: Invocation, main: CommandDef<any>): Promise<ExitRep
  * @returns the exit code of the run (see the module header for how it is decided)
  */
 export async function runCli(inv: Invocation, options: RunCliOptions = {}): Promise<number> {
-  let returned: number | undefined;
+  const reported: { code: ExitReport } = { code: 0 };
   const { buildMain } = await import("./index.js");
   const main = buildMain(inv, {
     ...(options.transformCommand === undefined ? {} : { transformCommand: options.transformCommand }),
     reportExit: (code) => {
-      returned = code;
+      reported.code = code;
     },
   });
   try {
-    const dispatched = await dispatch(inv, main);
-    return dispatched ?? returned ?? 0;
+    return await dispatch(inv, main, reported);
   } catch (error) {
     if (error instanceof CliExit) return error.code;
     throw error;

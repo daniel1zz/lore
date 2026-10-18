@@ -319,7 +319,7 @@ export default defineLoreCommand({
       description: "Output result as JSON",
     },
   },
-  async run(context) {
+  async run(context): Promise<number> {
     const { args } = context;
     const inv = invocationOf(context);
     // reason: CLI usage-error validation (exit 2) — checked BEFORE loadLoreApp(), same
@@ -464,7 +464,7 @@ export default defineLoreCommand({
           ),
         );
         emitIssueCloseItems(inv.io, result.value.issue_close, { json: true });
-        return;
+        return 0;
       }
 
       printLine(inv.io.stdout, formatDoneMessage(result.value));
@@ -472,5 +472,6 @@ export default defineLoreCommand({
     } finally {
       app.close();
     }
+    return 0;
   },
 });

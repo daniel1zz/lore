@@ -32,7 +32,7 @@ const agentCreate = defineLoreCommand({
       description: "Output as JSON",
     },
   },
-  async run(context) {
+  async run(context): Promise<number> {
     const { args } = context;
     const inv = invocationOf(context);
     const { app } = loadLoreApp({ inv });
@@ -54,7 +54,7 @@ const agentCreate = defineLoreCommand({
 
       if (args.json) {
         printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { name: record.name, api_key: rawKey, owner: record.owner } }));
-        return;
+        return 0;
       }
 
       printLine(inv.io.stdout, "Agent created:");
@@ -69,6 +69,7 @@ const agentCreate = defineLoreCommand({
     } finally {
       app.close();
     }
+    return 0;
   },
 });
 
@@ -83,7 +84,7 @@ const agentList = defineLoreCommand({
       description: "Output as JSON",
     },
   },
-  run(context) {
+  run(context): number {
     const { args } = context;
     const inv = invocationOf(context);
     const { app } = loadLoreApp({ inv });
@@ -103,12 +104,12 @@ const agentList = defineLoreCommand({
 
       if (args.json) {
         printLine(inv.io.stdout, JSON.stringify({ ok: true, data: keys }));
-        return;
+        return 0;
       }
 
       if (keys.length === 0) {
         printLine(inv.io.stdout, "No API keys found. Run `lore agent create --name <name>` to create one.");
-        return;
+        return 0;
       }
 
       const rows = keys.map((k) => [
@@ -122,6 +123,7 @@ const agentList = defineLoreCommand({
     } finally {
       app.close();
     }
+    return 0;
   },
 });
 
@@ -141,7 +143,7 @@ const agentRevoke = defineLoreCommand({
       description: "Output as JSON",
     },
   },
-  run(context) {
+  run(context): number {
     const { args } = context;
     const inv = invocationOf(context);
     const { app } = loadLoreApp({ inv });
@@ -159,13 +161,14 @@ const agentRevoke = defineLoreCommand({
 
       if (args.json) {
         printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { name: args.name, revoked: true } }));
-        return;
+        return 0;
       }
 
       printLine(inv.io.stdout, `Agent '${args.name}' API key revoked.`);
     } finally {
       app.close();
     }
+    return 0;
   },
 });
 

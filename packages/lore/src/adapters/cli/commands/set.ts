@@ -231,7 +231,7 @@ export default defineLoreCommand({
         "Explicitly enable AI for --regenerate/--refine (overrides surface default). Pass --no-ai to disable.",
     },
   },
-  async run(context) {
+  async run(context): Promise<number> {
     const { args } = context;
     const inv = invocationOf(context);
     // ─── Step 1: flag parsing and mutex checks ─────────────────────────────────
@@ -474,7 +474,7 @@ export default defineLoreCommand({
             printLine(inv.io.stdout, APPROVED_DEMOTION_ADVISORY);
           }
         }
-        return;
+        return 0;
       }
 
       // ─── Step 3: standard patch path (unchanged from pre-SPEC-019) ────────────
@@ -586,7 +586,7 @@ export default defineLoreCommand({
             );
             printLine(inv.io.stdout, "  (decision_status already 'accepted' — no change)");
           }
-          return;
+          return 0;
         }
 
         patch["extra"] = {
@@ -635,7 +635,7 @@ export default defineLoreCommand({
         // If the content is unchanged, skip the service call entirely (AC-SET-1)
         if (newContent === currentDoc.content) {
           inv.io.stdout.write("no changes\n");
-          return;
+          return 0;
         }
 
         patch["content"] = newContent;
@@ -739,5 +739,6 @@ export default defineLoreCommand({
     } finally {
       app.close();
     }
+    return 0;
   },
 });

@@ -97,7 +97,7 @@ export default defineLoreCommand({
       description: "Output as JSON",
     },
   },
-  async run(context) {
+  async run(context): Promise<number> {
     const { args } = context;
     const inv = invocationOf(context);
     if (
@@ -175,7 +175,7 @@ export default defineLoreCommand({
       } finally {
         app.close();
       }
-      return;
+      return 0;
     }
 
     // ── ordinals action ───────────────────────────────────────────────────
@@ -259,7 +259,7 @@ export default defineLoreCommand({
       } finally {
         app.close();
       }
-      return;
+      return 0;
     }
 
     // ── prd-to-outline action ─────────────────────────────────────────────
@@ -343,7 +343,7 @@ export default defineLoreCommand({
       } finally {
         app.close();
       }
-      return;
+      return 0;
     }
 
     // ── tasks-to-phases action ────────────────────────────────────────────
@@ -373,7 +373,7 @@ export default defineLoreCommand({
         const report = result.value;
         if (args.json) {
           printLine(inv.io.stdout, JSON.stringify({ ok: true, data: report }, null, 2));
-          return;
+          return 0;
         }
 
         const label = dryRun ? "Task→phase migration (dry-run)" : "Task→phase migration complete";
@@ -395,7 +395,7 @@ export default defineLoreCommand({
       } finally {
         app.close();
       }
-      return;
+      return 0;
     }
 
     // ── phases action ─────────────────────────────────────────────────────
@@ -413,7 +413,7 @@ export default defineLoreCommand({
         const report = result.value;
         if (args.json) {
           printLine(inv.io.stdout, JSON.stringify({ ok: true, data: report }, null, 2));
-          return;
+          return 0;
         }
 
         const label = dryRun ? "Phase migration (dry-run)" : "Phase migration complete";
@@ -427,7 +427,7 @@ export default defineLoreCommand({
       } finally {
         app.close();
       }
-      return;
+      return 0;
     }
 
     // ── spec-kind action ──────────────────────────────────────────────────
@@ -445,7 +445,7 @@ export default defineLoreCommand({
         const report = result.value;
         if (args.json) {
           printLine(inv.io.stdout, JSON.stringify({ ok: true, data: report }, null, 2));
-          return;
+          return 0;
         }
 
         const label = dryRun ? "Spec-kind audit (dry-run)" : "Spec-kind audit complete";
@@ -467,7 +467,7 @@ export default defineLoreCommand({
       } finally {
         app.close();
       }
-      return;
+      return 0;
     }
 
     // ── v1 action ─────────────────────────────────────────────────────────
@@ -491,7 +491,7 @@ export default defineLoreCommand({
         const report = analyzeResult.value;
         if (args.json) {
           printLine(inv.io.stdout, JSON.stringify({ ok: true, data: report }, null, 2));
-          return;
+          return 0;
         }
 
         printLine(inv.io.stdout, "Migration Analysis (dry-run)");
@@ -530,7 +530,7 @@ export default defineLoreCommand({
           }
         }
 
-        return;
+        return 0;
       }
 
       // Execute migration
@@ -548,7 +548,7 @@ export default defineLoreCommand({
       const migResult = executeResult.value;
       if (args.json) {
         printLine(inv.io.stdout, JSON.stringify({ ok: true, data: migResult }, null, 2));
-        return;
+        return 0;
       }
 
       printLine(inv.io.stdout, "Migration complete");
@@ -574,5 +574,6 @@ export default defineLoreCommand({
     } finally {
       app.close();
     }
+    return 0;
   },
 });

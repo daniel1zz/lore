@@ -216,7 +216,7 @@ export default defineLoreCommand({
         "--seat-branch is given alone.",
     },
   },
-  async run(context) {
+  async run(context): Promise<number> {
     const { args } = context;
     const inv = invocationOf(context);
     const { app, config } = loadLoreApp({ inv });
@@ -240,7 +240,7 @@ export default defineLoreCommand({
         }
         // Resolved BEFORE the main-checkout early-out so a retired knob is announced on every call (D5).
         const budgets = resolveBootstrapInjectionBudgets(config, warnSinkOf(inv.io.stderr));
-        if (seatBranch === undefined || seatWorktreeArg === undefined) return; // main checkout: print NOTHING (D2)
+        if (seatBranch === undefined || seatWorktreeArg === undefined) return 0; // main checkout: print NOTHING (D2)
 
         const injectionSeat = { branch: seatBranch, worktree: seatWorktreeArg };
         const injectionReport = await app.sessionService.bootstrap(by, undefined, injectionSeat);
@@ -265,7 +265,7 @@ export default defineLoreCommand({
           budgets,
         );
         if (json !== "") printLine(inv.io.stdout, json);
-        return;
+        return 0;
       }
 
       const seat =
@@ -322,5 +322,6 @@ export default defineLoreCommand({
     } finally {
       app.close();
     }
+    return 0;
   },
 });

@@ -61,7 +61,7 @@ export default defineLoreCommand({
       description: "Output as JSON",
     },
   },
-  async run(context) {
+  async run(context): Promise<number> {
     const { args } = context;
     const inv = invocationOf(context);
     if (!args.stats && !args.observe) {
@@ -78,7 +78,7 @@ export default defineLoreCommand({
       }
       if (!args.stats) {
         printLine(inv.io.stdout, autonomy.value.swept === null ? "" : `Observed ${autonomy.value.swept.reversed} reversed, ${autonomy.value.swept.stood} stood (${autonomy.value.swept.probed} decision(s) probed).`);
-        return;
+        return 0;
       }
       const filter: { doc_type?: DocType; prompt_version?: string } = {};
       if (typeof args["doc-type"] === "string") filter.doc_type = args["doc-type"] as DocType;
@@ -95,13 +95,13 @@ export default defineLoreCommand({
 
       if (args.json) {
         printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { stats, autonomy: autonomy.value.classes } }, null, 2));
-        return;
+        return 0;
       }
 
       if (stats.length === 0) {
         printLine(inv.io.stdout, "No calibration records found.");
         printLine(inv.io.stdout, renderAutonomyStats(autonomy.value.classes));
-        return;
+        return 0;
       }
 
       const headers = ["Doc Type", "Prompt Version", "N", "Agreement Rate", "Wilson LB", "Window"];
@@ -118,6 +118,7 @@ export default defineLoreCommand({
     } finally {
       app.close();
     }
+    return 0;
   },
 });
 

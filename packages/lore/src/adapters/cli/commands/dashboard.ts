@@ -728,13 +728,14 @@ export default defineLoreCommand({
       description: "Open the browser automatically (default: true; pass --no-open to skip)",
     },
   },
-  async run(context) {
+  async run(context): Promise<number> {
     const { args } = context;
     const inv = invocationOf(context);
     if (args.dev) {
       await runDevMode(args, inv);
-      return;
+      return 0;
     }
     await runPackagedMode(args, inv);
+    return 0;
   },
 });

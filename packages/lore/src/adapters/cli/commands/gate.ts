@@ -377,7 +377,7 @@ export default defineLoreCommand({
           required: true,
         },
       },
-      async run(context) {
+      async run(context): Promise<number> {
         const inv = invocationOf(context);
         const { args } = context;
         // LORE_GATE_BYPASS=1: exit 0 before ANY parsing or checking (module header;
@@ -408,7 +408,7 @@ export default defineLoreCommand({
 
         const { app, config } = loadLoreApp({ inv });
         try {
-          if (isGateDisabledByConfig(inv.io, "spec-create", config)) return;
+          if (isGateDisabledByConfig(inv.io, "spec-create", config)) return 0;
           return await runSpecCreateGate(app, parsed.data, config, inv);
         } finally {
           app.close();
@@ -431,7 +431,7 @@ export default defineLoreCommand({
           required: true,
         },
       },
-      async run(context) {
+      async run(context): Promise<number> {
         const inv = invocationOf(context);
         const { args } = context;
         // LORE_GATE_BYPASS=1: exit 0 before ANY parsing or checking (module header;
@@ -443,7 +443,7 @@ export default defineLoreCommand({
 
         const { app, config } = loadLoreApp({ inv });
         try {
-          if (isGateDisabledByConfig(inv.io, "spec-promote", config)) return;
+          if (isGateDisabledByConfig(inv.io, "spec-promote", config)) return 0;
           return await runSpecPromoteGate(app, args.spec as string, config, inv);
         } finally {
           app.close();
@@ -466,7 +466,7 @@ export default defineLoreCommand({
           required: true,
         },
       },
-      async run(context) {
+      async run(context): Promise<number> {
         const inv = invocationOf(context);
         const { args } = context;
         // LORE_GATE_BYPASS=1: exit 0 before ANY parsing or checking (module header;
@@ -478,7 +478,7 @@ export default defineLoreCommand({
 
         const { app, config } = loadLoreApp({ inv });
         try {
-          if (isGateDisabledByConfig(inv.io, "plan-promote", config)) return;
+          if (isGateDisabledByConfig(inv.io, "plan-promote", config)) return 0;
           return await runPlanPromoteGate(app, args.plan as string, config, inv);
         } finally {
           app.close();
@@ -503,7 +503,7 @@ export default defineLoreCommand({
           required: true,
         },
       },
-      async run(context) {
+      async run(context): Promise<number> {
         const inv = invocationOf(context);
         const { args } = context;
         // LORE_GATE_BYPASS=1: exit 0 before ANY parsing or checking (module header;
@@ -515,7 +515,7 @@ export default defineLoreCommand({
 
         const { app, config } = loadLoreApp({ inv });
         try {
-          if (isGateDisabledByConfig(inv.io, "task-claim", config)) return;
+          if (isGateDisabledByConfig(inv.io, "task-claim", config)) return 0;
           const by = resolveActor(inv.io, undefined, inv.env, inv.cwd, inv.user);
           return await runTaskClaimGate(app, args.task as string, by, config, inv);
         } finally {
@@ -542,7 +542,7 @@ export default defineLoreCommand({
           required: true,
         },
       },
-      async run(context) {
+      async run(context): Promise<number> {
         const inv = invocationOf(context);
         const { args } = context;
         // LORE_GATE_BYPASS=1: exit 0 before ANY parsing or checking (module header;
@@ -554,7 +554,7 @@ export default defineLoreCommand({
 
         const { app, config } = loadLoreApp({ inv });
         try {
-          if (isGateDisabledByConfig(inv.io, "phase-claim", config)) return;
+          if (isGateDisabledByConfig(inv.io, "phase-claim", config)) return 0;
           const by = resolveActor(inv.io, undefined, inv.env, inv.cwd, inv.user);
           return await runPhaseClaimGate(app, args.phase as string, by, config, inv);
         } finally {
@@ -586,7 +586,7 @@ export default defineLoreCommand({
           default: false,
         },
       },
-      async run(context) {
+      async run(context): Promise<number> {
     const inv = invocationOf(context);
         const { args } = context;
         // reason: unlike the five checkpoint subcommands above, this one never
@@ -605,6 +605,7 @@ export default defineLoreCommand({
         // other five subcommands' pass/feed output (`console.log`, not
         // `process.stdout.write`) — CLI surface.
         printLine(inv.io.stdout, renderPredicateContractsExplain("plan-close"));
+        return 0;
       },
     }),
   },
@@ -1262,6 +1263,7 @@ async function runSpecPromoteGate(
   // probabilistic-zone advisory (INV2). It writes only to stderr and never touches
   // process.exitCode, regardless of outcome.
   await emitJudgeAdvisory(inv, app, specIdOrSlug);
+  return 0;
 }
 
 /**

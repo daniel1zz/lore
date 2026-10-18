@@ -43,7 +43,7 @@ export default defineLoreCommand({
         "migrated-to": { type: "string", description: "Baseline rule id (BR-n, must be live) this requirement is migrated to" },
         json: { type: "boolean", description: "Output result as JSON" },
       },
-      async run(context) {
+      async run(context): Promise<number> {
         const { args } = context;
         const inv = invocationOf(context);
         const { app } = loadLoreApp({ inv });
@@ -71,6 +71,7 @@ export default defineLoreCommand({
         } finally {
           app.close();
         }
+        return 0;
       },
     }),
     migrate: defineLoreCommand({
@@ -81,7 +82,7 @@ export default defineLoreCommand({
         rule: { type: "positional", description: "Baseline rule id, e.g. BR-12 (must be live)", required: true },
         json: { type: "boolean", description: "Output result as JSON" },
       },
-      async run(context) {
+      async run(context): Promise<number> {
         const { args } = context;
         const inv = invocationOf(context);
         const { app } = loadLoreApp({ inv });
@@ -99,6 +100,7 @@ export default defineLoreCommand({
         } finally {
           app.close();
         }
+        return 0;
       },
     }),
     list: defineLoreCommand({
@@ -107,7 +109,7 @@ export default defineLoreCommand({
         prd: { type: "positional", description: "PRD document ID or slug", required: true },
         json: { type: "boolean", description: "Output result as JSON" },
       },
-      async run(context) {
+      async run(context): Promise<number> {
         const { args } = context;
         const inv = invocationOf(context);
         const { app } = loadLoreApp({ inv });
@@ -130,6 +132,7 @@ export default defineLoreCommand({
         } finally {
           app.close();
         }
+        return 0;
       },
     }),
     rm: defineLoreCommand({
@@ -140,7 +143,7 @@ export default defineLoreCommand({
         force: { type: "boolean", description: "Remove even if a spec AC still references it" },
         json: { type: "boolean", description: "Output result as JSON" },
       },
-      async run(context) {
+      async run(context): Promise<number> {
         const { args } = context;
         const inv = invocationOf(context);
         const { app } = loadLoreApp({ inv });
@@ -160,6 +163,7 @@ export default defineLoreCommand({
         } finally {
           app.close();
         }
+        return 0;
       },
     }),
   },

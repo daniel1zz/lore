@@ -657,7 +657,7 @@ export default defineLoreCommand({
 
       // reason: the later failure's code wins (the supersede orphan overrides a resolves failure), exactly as the
       // old "last recorded code" did; the run returns it after the advisories below.
-      let reported: ExitReport;
+      let reported: ExitReport = 0;
       for (const failure of resolvesFailures) {
         inv.io.stderr.write(
           `Error: ${doc.slug} was created but its resolves link to ${failure.slug} failed (${formatErrorFor(inv, failure.error)})\n` +

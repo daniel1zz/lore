@@ -161,7 +161,7 @@ export default defineLoreCommand({
       description: "Explicitly confirm AI use (rarely needed — assess defaults to AI on every surface). Pass --no-ai to abort (always exit 2 — assess has no non-AI mode).",
     },
   },
-  async run(context) {
+  async run(context): Promise<number> {
     const { args } = context;
     const inv = invocationOf(context);
     // ─── Step 1: argument mutex checks (synchronous, before any IO) ────────────
@@ -473,7 +473,7 @@ export default defineLoreCommand({
             2,
           ),
         );
-        return;
+        return 0;
       }
 
       printLine(inv.io.stdout, formatAssessmentSummary(result));
@@ -493,5 +493,6 @@ export default defineLoreCommand({
     } finally {
       app.close();
     }
+    return 0;
   },
 });

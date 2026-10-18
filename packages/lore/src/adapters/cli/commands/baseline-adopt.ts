@@ -187,7 +187,7 @@ async function runAdopt(args: Record<string, unknown>, inv: Invocation): Promise
       if (lastNew !== undefined && sameSettings(lastNew, next)) {
         if (json) printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { changed: false, old, new: next } }, null, 2));
         else printLine(inv.io.stdout, "no change");
-        return;
+        return 0;
       }
     }
 
@@ -224,6 +224,7 @@ async function runAdopt(args: Record<string, unknown>, inv: Invocation): Promise
     store.close();
     app.close();
   }
+  return 0;
 }
 
 /** The `lore baseline adopt` subcommand (registered by `commands/baseline.ts`). */

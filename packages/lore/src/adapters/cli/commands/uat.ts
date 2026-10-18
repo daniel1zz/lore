@@ -39,7 +39,7 @@ const recordCommand = defineLoreCommand({
     },
     json: { type: "boolean", description: "Output result as JSON" },
   },
-  async run(context) {
+  async run(context): Promise<number> {
     const { args } = context;
     const inv = invocationOf(context);
     const { app } = loadLoreApp({ inv });
@@ -73,6 +73,7 @@ const recordCommand = defineLoreCommand({
     } finally {
       app.close();
     }
+    return 0;
   },
 });
 
@@ -82,7 +83,7 @@ const showCommand = defineLoreCommand({
     plan: { type: "positional", description: "Plan doc id/slug (reads its latest informs-linked UAT verdict)" },
     json: { type: "boolean", description: "Output result as JSON" },
   },
-  async run(context) {
+  async run(context): Promise<number> {
     const { args } = context;
     const inv = invocationOf(context);
     const { app } = loadLoreApp({ inv });
@@ -98,11 +99,11 @@ const showCommand = defineLoreCommand({
       }
       if (args.json) {
         printLine(inv.io.stdout, JSON.stringify({ ok: true, data: result.value }, null, 2));
-        return;
+        return 0;
       }
       if (!result.value.present) {
         printLine(inv.io.stdout, `No UAT verdict linked to plan "${String(args.plan)}".`);
-        return;
+        return 0;
       }
       const v = result.value.verdict!;
       printLine(inv.io.stdout, `UAT verdict for ${result.value.docSlug}:`);
@@ -114,6 +115,7 @@ const showCommand = defineLoreCommand({
     } finally {
       app.close();
     }
+    return 0;
   },
 });
 

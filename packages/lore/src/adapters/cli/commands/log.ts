@@ -34,7 +34,7 @@ export default defineLoreCommand({
       description: "Output as JSON",
     },
   },
-  async run(context) {
+  async run(context): Promise<number> {
     const { args } = context;
     const inv = invocationOf(context);
     const { app, dbPath } = loadLoreApp({ inv });
@@ -76,12 +76,12 @@ export default defineLoreCommand({
 
       if (args.json) {
         printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { entries, total: entries.length } }, null, 2));
-        return;
+        return 0;
       }
 
       if (entries.length === 0) {
         printLine(inv.io.stdout, `No version history for ${args.id}.`);
-        return;
+        return 0;
       }
 
       // SPEC-072 D3 — Slug column renders the value when present; a legacy
@@ -103,5 +103,6 @@ export default defineLoreCommand({
       attributionStore.close();
       app.close();
     }
+    return 0;
   },
 });

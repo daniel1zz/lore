@@ -198,7 +198,7 @@ export default defineLoreCommand({
       description: "Output the full ReadyReport as JSON (see SPEC-042 §Design Decisions D7)",
     },
   },
-  async run(context) {
+  async run(context): Promise<number> {
     const { args } = context;
     const inv = invocationOf(context);
     const hasPlan = args.plan !== undefined && String(args.plan).trim() !== "";
@@ -225,7 +225,7 @@ export default defineLoreCommand({
 
         if (args.json) {
           printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { adhoc: { records } } }, null, 2));
-          return;
+          return 0;
         }
 
         if (records.length === 0) {
@@ -234,7 +234,7 @@ export default defineLoreCommand({
           printLine(inv.io.stdout, `Ad-hoc tasks (${records.length}):`);
           for (const record of records) printLine(inv.io.stdout, formatReadyLine(record));
         }
-        return;
+        return 0;
       }
 
       // task-a-mistyped-task-file-anchor-is-stored-and-consulted (Required #2):
@@ -258,7 +258,7 @@ export default defineLoreCommand({
 
       if (args.json) {
         printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { ready: report } }, null, 2));
-        return;
+        return 0;
       }
 
       if (records.length === 0) {
@@ -327,5 +327,6 @@ export default defineLoreCommand({
     } finally {
       app.close();
     }
+    return 0;
   },
 });

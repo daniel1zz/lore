@@ -54,7 +54,7 @@ export default defineLoreCommand({
       description: "Output result as JSON",
     },
   },
-  async run(context) {
+  async run(context): Promise<number> {
     const { args } = context;
     const inv = invocationOf(context);
     const { app } = loadLoreApp({ inv });
@@ -74,7 +74,7 @@ export default defineLoreCommand({
       const doc = result.value;
       if (args.json) {
         printLine(inv.io.stdout, JSON.stringify({ ok: true, data: doc }, null, 2));
-        return;
+        return 0;
       }
 
       printLine(inv.io.stdout, `Declared red-first test discipline on ${doc.slug} (v${doc.version})`);
@@ -85,5 +85,6 @@ export default defineLoreCommand({
     } finally {
       app.close();
     }
+    return 0;
   },
 });

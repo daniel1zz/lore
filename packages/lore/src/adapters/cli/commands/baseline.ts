@@ -148,22 +148,22 @@ async function runStatesTree(args: Record<string, unknown>, inv: Invocation): Pr
         : undefined;
       if (json) {
         printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { rule: entry, statement: statement ?? null, computed_from: full.value.computed_from, ambiguous_ac_ref: full.value.ambiguous_ac_ref } }, null, 2));
-        return;
+        return 0;
       }
       printLine(inv.io.stdout, `Leaf: ${entry.leaf}`);
       renderRuleState(inv.io, entry, "", typeof statement === "string" ? statement : undefined);
       renderComputedFrom(inv.io, full.value);
-      return;
+      return 0;
     }
 
     if (json) {
       const nodes = tree.value.map((n: BaselineTreeEntry) => ({ ...n, rule_states: byLeaf.get(n.slug) ?? [] }));
       printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { tree: nodes, computed_from: full.value.computed_from, ambiguous_ac_ref: full.value.ambiguous_ac_ref } }, null, 2));
-      return;
+      return 0;
     }
     if (tree.value.length === 0) {
       printLine(inv.io.stdout, "No baseline nodes.");
-      return;
+      return 0;
     }
     for (const entry of tree.value) {
       const indent = "  ".repeat(entry.depth);
@@ -176,6 +176,7 @@ async function runStatesTree(args: Record<string, unknown>, inv: Invocation): Pr
     store.close();
     app.close();
   }
+  return 0;
 }
 
 function requireCensusRoot(inv: Invocation): string {
@@ -284,6 +285,7 @@ async function runCoverage(target: string, json: boolean, inv: Invocation): Prom
     store.close();
     app.close();
   }
+  return 0;
 }
 
 /** `--seed` stays a number when it is a plain integer, so the record and title read `seed 42`, not `seed "42"`. */
@@ -365,7 +367,7 @@ async function runFidelityCommand(args: Record<string, unknown>, inv: Invocation
     if (!created.ok) return reportFidelityFailure(inv, created.error, json);
     if (json) {
       printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { record, doc: { id: created.value.id, slug: created.value.slug } } }, null, 2));
-      return;
+      return 0;
     }
     printLine(inv.io.stdout, `Stored ${created.value.slug}: ${share} of ${record.size} sampled (pool ${record.pool}, seed ${String(record.seed)}, ${record.judges} judge(s), ${record.disagreements.length} disagreement(s)).`);
     printLine(inv.io.stdout, `not_seen: ${record.not_seen}`);
@@ -378,6 +380,7 @@ async function runFidelityCommand(args: Record<string, unknown>, inv: Invocation
     store.close();
     app.close();
   }
+  return 0;
 }
 
 const commonArgs = {
@@ -401,7 +404,7 @@ export default defineLoreCommand({
       async run(context) {
         const { args } = context;
         const inv = invocationOf(context);
-        return await withRuleService(inv, async (svc) => {
+        return await withRuleService(inv, async (svc): Promise<number> => {
           if (args.tree !== undefined && !(BASELINE_TREES as readonly string[]).includes(args.tree as string)) {
             return reportFailure(inv, 
               { code: "VALIDATION_ERROR", field: "tree", message: `--tree must be one of ${BASELINE_TREES.join(" | ")} (got '${String(args.tree)}')`, value: args.tree },
@@ -431,6 +434,7 @@ export default defineLoreCommand({
           if (!result.ok) return reportFailure(inv, result.error, args.json === true);
           if (args.json) printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { id: result.value.id, slug: result.value.slug, node: input.node, tree } }, null, 2));
           else printLine(inv.io.stdout, `Created baseline ${input.node} ${result.value.slug} (${result.value.id}).`);
+          return 0;
         });
       },
     }),
@@ -444,11 +448,12 @@ export default defineLoreCommand({
       async run(context) {
         const { args } = context;
         const inv = invocationOf(context);
-        return await withRuleService(inv, async (svc) => {
+        return await withRuleService(inv, async (svc): Promise<number> => {
           const result = await svc.setLabel(args.node as string, args.label as string, { by: resolveActor(inv.io, undefined, inv.env, inv.cwd, inv.user) });
           if (!result.ok) return reportFailure(inv, result.error, args.json === true);
           if (args.json) printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { slug: result.value.slug, label: args.label } }, null, 2));
           else printLine(inv.io.stdout, `Label of ${result.value.slug} set to '${String(args.label)}'.`);
+          return 0;
         });
       },
     }),
@@ -463,7 +468,7 @@ export default defineLoreCommand({
       async run(context) {
         const { args } = context;
         const inv = invocationOf(context);
-        return await withRuleService(inv, async (svc) => {
+        return await withRuleService(inv, async (svc): Promise<number> => {
           const result = await svc.setDependsOn(
             args.leaf as string,
             { add: repeatable(args.add), remove: repeatable(args.remove) },
@@ -473,6 +478,7 @@ export default defineLoreCommand({
           const dependsOn = result.value.extra["depends_on"];
           if (args.json) printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { slug: result.value.slug, depends_on: dependsOn } }, null, 2));
           else printLine(inv.io.stdout, `${result.value.slug} depends_on: ${Array.isArray(dependsOn) && dependsOn.length > 0 ? dependsOn.join(", ") : "(none)"}`);
+          return 0;
         });
       },
     }),
@@ -491,7 +497,7 @@ export default defineLoreCommand({
           async run(context) {
             const { args } = context;
             const inv = invocationOf(context);
-            return await withRuleService(inv, async (svc) => {
+            return await withRuleService(inv, async (svc): Promise<number> => {
               const entry = {
                 term: args.term as string,
                 meaning: args.meaning as string,
@@ -501,6 +507,7 @@ export default defineLoreCommand({
               if (!result.ok) return reportFailure(inv, result.error, args.json === true);
               if (args.json) printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { slug: result.value.slug, term: entry.term } }, null, 2));
               else printLine(inv.io.stdout, `Defined '${entry.term}' on ${result.value.slug}.`);
+              return 0;
             });
           },
         }),
@@ -514,11 +521,12 @@ export default defineLoreCommand({
           async run(context) {
             const { args } = context;
             const inv = invocationOf(context);
-            return await withRuleService(inv, async (svc) => {
+            return await withRuleService(inv, async (svc): Promise<number> => {
               const result = await svc.glossaryRemove(args.node as string, args.term as string, { by: resolveActor(inv.io, undefined, inv.env, inv.cwd, inv.user) });
               if (!result.ok) return reportFailure(inv, result.error, args.json === true);
               if (args.json) printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { slug: result.value.slug, term: args.term } }, null, 2));
               else printLine(inv.io.stdout, `Removed '${String(args.term)}' from ${result.value.slug}.`);
+              return 0;
             });
           },
         }),
@@ -539,7 +547,7 @@ export default defineLoreCommand({
       async run(context) {
         const { args } = context;
         const inv = invocationOf(context);
-        return await withRuleService(inv, async (svc) => {
+        return await withRuleService(inv, async (svc): Promise<number> => {
           const json = args.json === true;
           const by = resolveActor(inv.io, undefined, inv.env, inv.cwd, inv.user);
           const site = typeof args.site === "string" ? args.site : undefined;
@@ -565,7 +573,7 @@ export default defineLoreCommand({
             const slug = authorized.value.slug;
             if (json) printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { slug, authorized: true, recorded: false } }, null, 2));
             else printLine(inv.io.stdout, `${slug}: site-map write authorized; nothing to record (pass --site/--command to change the map).`);
-            return;
+            return 0;
           }
           const result = await svc.setSiteMap(args.leaf as string, change, { by });
           if (!result.ok) return reportFailure(inv, result.error, json);
@@ -573,6 +581,7 @@ export default defineLoreCommand({
           const commands = (result.value.extra["commands"] ?? []) as string[];
           if (json) printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { slug: result.value.slug, site_map: siteMap, commands } }, null, 2));
           else printLine(inv.io.stdout, `${result.value.slug}: ${Object.keys(siteMap).length} site(s) mapped; commands: ${commands.length > 0 ? commands.join(", ") : "(none)"}`);
+          return 0;
         });
       },
     }),
@@ -582,7 +591,7 @@ export default defineLoreCommand({
         command: { type: "positional", description: "CLI command name, e.g. 'ac add' (or 'ac-add'); token 1 = commands/<token>.ts, further tokens = nested subcommands", required: true },
         json: { type: "boolean", description: "Output result as JSON" },
       },
-      async run(context) {
+      async run(context): Promise<number> {
         const { args } = context;
         const inv = invocationOf(context);
         const json = args.json === true;
@@ -594,7 +603,7 @@ export default defineLoreCommand({
           if (json) {
             printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { command, count: sites.length, not_measured: dynamicCount, unresolved_imports: sites.unresolvedImports, sites, bootstrap: sites.bootstrap } }, null, 2));
             if (sites.unresolvedImports.length > 0) return 1;
-            return;
+            return 0;
           }
           if (sites.unresolvedImports.length > 0) {
             for (const u of sites.unresolvedImports) printLine(inv.io.stdout, `unresolved import ${u.specifier} (from ${u.from}): census INCOMPLETE, sites behind it are not listed`);
@@ -602,7 +611,7 @@ export default defineLoreCommand({
           printLine(inv.io.stdout, `${command}: ${sites.length} site(s), ${dynamicCount} not_measured, ${sites.bootstrap.length} bootstrap`);
           for (const site of sites) printLine(inv.io.stdout, `${site.dynamic ? "~" : " "} ${site.key}`);
           for (const site of sites.bootstrap) printLine(inv.io.stdout, `  bootstrap ${site.key}`);
-          return sites.unresolvedImports.length > 0 ? 1 : undefined;
+          return sites.unresolvedImports.length > 0 ? 1 : 0;
         } catch (cause) {
           return reportCensusFailure(inv, cause, json);
         }
@@ -651,16 +660,16 @@ export default defineLoreCommand({
         if (args.states === true || args.rule !== undefined) {
           return await runStatesTree(args, inv);
         }
-        return await withRuleService(inv, async (svc) => {
+        return await withRuleService(inv, async (svc): Promise<number> => {
           const result = await svc.listBaselineTree(args.root as string | undefined);
           if (!result.ok) return reportFailure(inv, result.error, args.json === true);
           if (args.json) {
             printLine(inv.io.stdout, JSON.stringify({ ok: true, data: result.value }, null, 2));
-            return;
+            return 0;
           }
           if (result.value.length === 0) {
             printLine(inv.io.stdout, "No baseline nodes.");
-            return;
+            return 0;
           }
           for (const entry of result.value) {
             const counts = `live ${entry.rules.live} / deprecated ${entry.rules.deprecated} / retired ${entry.rules.retired}`;
@@ -671,6 +680,7 @@ export default defineLoreCommand({
             const kind = entry.tree === "architecture" ? `architecture ${entry.node}` : entry.node;
             printLine(inv.io.stdout, `${"  ".repeat(entry.depth)}${kind} ${entry.label ?? entry.title} (${entry.slug}, ${entry.status})${rules}`);
           }
+          return 0;
         });
       },
     }),

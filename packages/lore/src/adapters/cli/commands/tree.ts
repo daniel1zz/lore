@@ -234,7 +234,7 @@ export default defineLoreCommand({
       description: "List orphan docs (parent_id=null and not root type, or dangling parent)",
     },
   },
-  async run(context) {
+  async run(context): Promise<number> {
     const { args } = context;
     const inv = invocationOf(context);
     const { app } = loadLoreApp({ inv });
@@ -373,11 +373,11 @@ export default defineLoreCommand({
                   2,
                 ),
               );
-              return;
+              return 0;
             }
 
             printLine(inv.io.stdout, formatPhaseTree(plan, phases, allTasks, nowIso, ttlMinutes));
-            return;
+            return 0;
           }
 
           if (!args.json && allTasks.length > 0) {
@@ -389,7 +389,7 @@ export default defineLoreCommand({
               if (badge !== "") badges.set(task.id, (badges.get(task.id) ?? "") + badge);
             }
             printLine(inv.io.stdout, formatTree(result.value, "", badges));
-            return;
+            return 0;
           }
         }
       }
@@ -398,12 +398,13 @@ export default defineLoreCommand({
         printLine(inv.io.stdout, 
           JSON.stringify({ ok: true, data: withTreeValidity(result.value, validity.statusById) }, null, 2),
         );
-        return;
+        return 0;
       }
 
       printLine(inv.io.stdout, formatTree(result.value, "", validityBadges));
     } finally {
       app.close();
     }
+    return 0;
   },
 });

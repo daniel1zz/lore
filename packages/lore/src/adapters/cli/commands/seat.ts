@@ -67,7 +67,7 @@ export default defineLoreCommand({
       description: "Output result as JSON",
     },
   },
-  async run(context) {
+  async run(context): Promise<number> {
     const { args } = context;
     const inv = invocationOf(context);
     const { app } = loadLoreApp({ inv });
@@ -91,7 +91,7 @@ export default defineLoreCommand({
         } else {
           printLine(inv.io.stdout, formatSeatList(result.value));
         }
-        return;
+        return 0;
       }
 
       if (target === "resume" || target === "remove") {
@@ -111,7 +111,7 @@ export default defineLoreCommand({
           } else {
             printLine(inv.io.stdout, `Resumed seat for plan ${planArg}: ${result.value.path} (${result.value.branch})`);
           }
-          return;
+          return 0;
         }
 
         // target === "remove"
@@ -125,13 +125,13 @@ export default defineLoreCommand({
         } else {
           printLine(inv.io.stdout, `Removed seat for plan ${planArg}.`);
         }
-        return;
+        return 0;
       }
 
       // Bare positional (not a reserved subcommand name) — enter.
       if (RESERVED_SUBCOMMANDS.has(target)) {
         // unreachable given the branches above, kept for exhaustiveness clarity.
-        return;
+        return 0;
       }
       const result = await seatService.enter(target, { mainCwd: inv.cwd });
       if (!result.ok) {
@@ -146,5 +146,6 @@ export default defineLoreCommand({
     } finally {
       app.close();
     }
+    return 0;
   },
 });

@@ -68,7 +68,7 @@ export default defineLoreCommand({
         session: sessionArg,
         json: { type: "boolean", description: "Output { ok, data } as JSON" },
       },
-      async run(context) {
+      async run(context): Promise<number> {
         const { args } = context;
         const inv = invocationOf(context);
         const path = typeof args.path === "string" ? args.path : "";
@@ -87,6 +87,7 @@ export default defineLoreCommand({
         } finally {
           app.close();
         }
+        return 0;
       },
     }),
     sweep: defineLoreCommand({
@@ -99,7 +100,7 @@ export default defineLoreCommand({
         session: sessionArg,
         json: { type: "boolean", description: "Output { ok, data: { worktrees } } as JSON" },
       },
-      async run(context) {
+      async run(context): Promise<number> {
         const { args } = context;
         const inv = invocationOf(context);
         const callerSession = resolveCallerSession(typeof args.session === "string" ? args.session : undefined, inv.env) ?? null;
@@ -133,6 +134,7 @@ export default defineLoreCommand({
         } finally {
           app.close();
         }
+        return 0;
       },
     }),
   },

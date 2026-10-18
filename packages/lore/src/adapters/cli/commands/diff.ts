@@ -34,7 +34,7 @@ export default defineLoreCommand({
       description: "Output as JSON",
     },
   },
-  async run(context) {
+  async run(context): Promise<number> {
     const { args } = context;
     const inv = invocationOf(context);
     const { app } = loadLoreApp({ inv });
@@ -70,7 +70,7 @@ export default defineLoreCommand({
 
       if (args.json) {
         printLine(inv.io.stdout, JSON.stringify({ ok: true, data: diff }, null, 2));
-        return;
+        return 0;
       }
 
       printLine(inv.io.stdout, `Diff ${args.id}: v${diff.from_version} → v${diff.to_version}`);
@@ -104,5 +104,6 @@ export default defineLoreCommand({
     } finally {
       app.close();
     }
+    return 0;
   },
 });

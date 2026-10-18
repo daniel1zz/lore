@@ -77,7 +77,7 @@ export default defineLoreCommand({
       description: "Output result as JSON",
     },
   },
-  async run(context) {
+  async run(context): Promise<number> {
     const { args } = context;
     const inv = invocationOf(context);
     const { app } = loadLoreApp({ inv });
@@ -136,12 +136,13 @@ export default defineLoreCommand({
           data["warnings"] = warnings;
         }
         printLine(inv.io.stdout, JSON.stringify({ ok: true, data }, null, 2));
-        return;
+        return 0;
       }
 
       printLine(inv.io.stdout, `Released ${result.value.slug} by ${by} (v${result.value.version})`);
     } finally {
       app.close();
     }
+    return 0;
   },
 });

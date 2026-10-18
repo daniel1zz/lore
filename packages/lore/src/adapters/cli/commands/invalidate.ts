@@ -49,7 +49,7 @@ export default defineLoreCommand({
       description: "Output as JSON",
     },
   },
-  async run(context) {
+  async run(context): Promise<number> {
     const { args } = context;
     const inv = invocationOf(context);
     const { app } = loadLoreApp({ inv });
@@ -90,7 +90,7 @@ export default defineLoreCommand({
             2,
           ),
         );
-        return;
+        return 0;
       }
 
       if (args.undo === true) {
@@ -115,5 +115,6 @@ export default defineLoreCommand({
     } finally {
       app.close();
     }
+    return 0;
   },
 });

@@ -341,7 +341,7 @@ function renderOutcome(inv: Invocation,
 
   if (json) {
     printLine(inv.io.stdout, JSON.stringify({ ok: true, data: result.value }, null, 2));
-    return;
+    return 0;
   }
 
   const check = "check" in result.value ? result.value.check : null;
@@ -349,7 +349,7 @@ function renderOutcome(inv: Invocation,
     // --check: nothing was written; exit 1 names each file that would change and/or the ceiling breach (AC-MI-3).
     if (check.differing.length === 0 && check.findings.length === 0) {
       printLine(inv.io.stdout, "context refresh --check: every target is already refreshed and within its ceiling");
-      return;
+      return 0;
     }
     for (const path of check.differing) printLine(inv.io.stdout, `would change: ${path}`);
     for (const finding of check.findings) printLine(inv.io.stdout, `${finding.kind}: ${finding.message}`);
@@ -373,6 +373,7 @@ function renderOutcome(inv: Invocation,
       inv.io.stderr.write(`Advisory: ${finding.message}\n`);
     }
   }
+  return 0;
 }
 
 /** Raw text of one selection file; `null` when absent (legitimate); an unreadable file fails loud. */
@@ -499,7 +500,7 @@ export default defineLoreCommand({
       description: "Output result as JSON",
     },
   },
-  async run(context) {
+  async run(context): Promise<number> {
     const { args } = context;
     const inv = invocationOf(context);
     const topic = typeof args.topic === "string" ? args.topic : undefined;
@@ -618,12 +619,12 @@ export default defineLoreCommand({
         if (!listed.ok) return reportFailure(inv, listed.error);
         if (json) {
           printLine(inv.io.stdout, JSON.stringify({ ok: true, data: listed.value }, null, 2));
-          return;
+          return 0;
         }
         for (const row of listed.value) {
           printLine(inv.io.stdout, `${row.selected ? "on " : "off"}  ${row.id}  (${row.layer}, ${row.delivery}, ${row.size} chars)`);
         }
-        return;
+        return 0;
       }
 
       const id = typeof args.id === "string" ? args.id : "";
@@ -651,14 +652,14 @@ export default defineLoreCommand({
         printLine(inv.io.stdout, 
           JSON.stringify({ ok: true, data: { change: changed.value, refresh: refreshed === null ? null : refreshed.value } }, null, 2),
         );
-        return;
+        return 0;
       }
       const verb = topic === "remove" ? "Disabled" : "Enabled";
       printLine(inv.io.stdout, 
         `${verb} "${id}" in the ${scope} selection (${changed.value.path})${changed.value.changed ? "" : " — already so, nothing changed"}`,
       );
       if (refreshed !== null && refreshed.ok) return renderOutcome(inv, false, refreshed);
-      return;
+      return 0;
     }
 
     // topic === "init"

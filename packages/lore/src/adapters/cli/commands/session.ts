@@ -200,7 +200,7 @@ async function runSessionTrailReview(args: { turn?: unknown; json?: unknown }, i
   const dbPath = findLoreDbPathQuiet(inv.io, inv);
   if (dbPath === undefined) {
     emit({ helpers: [], findings: [], not_measured: [], reason: "no .lore directory" });
-    return;
+    return 0;
   }
   const { app } = loadLoreApp({ inv });
   try {
@@ -255,6 +255,7 @@ async function runSessionTrailReview(args: { turn?: unknown; json?: unknown }, i
   } finally {
     app.close();
   }
+  return 0;
 }
 
 /**
@@ -307,6 +308,7 @@ async function runSessionTrail(
   } else {
     printLine(inv.io.stdout, formatTrail(view));
   }
+  return 0;
 }
 
 /**
@@ -387,7 +389,7 @@ export default defineLoreCommand({
       description: "`trail` only: narrow to the files this run (cc:<session>[:<agent>]) changed",
     },
   },
-  async run(context) {
+  async run(context): Promise<number> {
     const { args } = context;
     const inv = invocationOf(context);
     // reason: trail-review decides whether a corpus exists itself (no `.lore/` is a clean "nothing to judge", not the
@@ -448,7 +450,7 @@ export default defineLoreCommand({
         } else {
           printLine(inv.io.stdout, formatSessionList(records));
         }
-        return;
+        return 0;
       }
 
       // target === "show"
@@ -470,5 +472,6 @@ export default defineLoreCommand({
     } finally {
       app.close();
     }
+    return 0;
   },
 });

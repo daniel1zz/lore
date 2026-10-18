@@ -469,7 +469,7 @@ export default defineLoreCommand({
           description: "Output result as JSON",
         },
       },
-      async run(context) {
+      async run(context): Promise<number> {
         const inv = invocationOf(context);
         const { args } = context;
         const rawNumber = readStringArg(args as unknown as Record<string, unknown>, "number");
@@ -579,7 +579,7 @@ export default defineLoreCommand({
                   `Already adopted GitHub issue #${issueNumber} as ${existing.slug} (adopted previously).`,
                 );
               }
-              return;
+              return 0;
             }
 
             inv.io.stderr.write(formatErrorFor(inv, createResult.error) + "\n");
@@ -595,6 +595,7 @@ export default defineLoreCommand({
         } finally {
           app.close();
         }
+        return 0;
       },
     }),
     resolve: defineLoreCommand({
@@ -639,7 +640,7 @@ export default defineLoreCommand({
           description: "Output result as JSON",
         },
       },
-      async run(context) {
+      async run(context): Promise<number> {
         const { args } = context;
         const inv = invocationOf(context);
         const state = typeof args.state === "string" ? args.state : undefined;
@@ -899,6 +900,7 @@ export default defineLoreCommand({
         } finally {
           app.close();
         }
+        return 0;
       },
     }),
   },

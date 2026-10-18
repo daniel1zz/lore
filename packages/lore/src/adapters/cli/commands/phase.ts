@@ -75,7 +75,7 @@ export default defineLoreCommand({
           description: "Output result as JSON",
         },
       },
-      async run(context) {
+      async run(context): Promise<number> {
         const { args } = context;
         const inv = invocationOf(context);
         const { app } = loadLoreApp({ inv });
@@ -95,7 +95,7 @@ export default defineLoreCommand({
 
           if (args.json) {
             printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { phases: result.value } }, null, 2));
-            return;
+            return 0;
           }
 
           printLine(inv.io.stdout, `Added phase "${args.name}" to plan ${args.plan}`);
@@ -103,6 +103,7 @@ export default defineLoreCommand({
         } finally {
           app.close();
         }
+        return 0;
       },
     }),
 
@@ -119,7 +120,7 @@ export default defineLoreCommand({
           description: "Output result as JSON",
         },
       },
-      async run(context) {
+      async run(context): Promise<number> {
         const { args } = context;
         const inv = invocationOf(context);
         const { app } = loadLoreApp({ inv });
@@ -134,18 +135,19 @@ export default defineLoreCommand({
 
           if (args.json) {
             printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { phases: result.value } }, null, 2));
-            return;
+            return 0;
           }
 
           if (result.value.length === 0) {
             printLine(inv.io.stdout, "No phases declared on this plan.");
-            return;
+            return 0;
           }
 
           renderPhaseList(inv.io, result.value);
         } finally {
           app.close();
         }
+        return 0;
       },
     }),
 
@@ -167,7 +169,7 @@ export default defineLoreCommand({
           description: "Output result as JSON",
         },
       },
-      async run(context) {
+      async run(context): Promise<number> {
         const { args } = context;
         const inv = invocationOf(context);
         const { app } = loadLoreApp({ inv });
@@ -182,7 +184,7 @@ export default defineLoreCommand({
 
           if (args.json) {
             printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { phases: result.value } }, null, 2));
-            return;
+            return 0;
           }
 
           printLine(inv.io.stdout, `Removed phase "${args.name as string}" from plan ${args.plan as string}`);
@@ -194,6 +196,7 @@ export default defineLoreCommand({
         } finally {
           app.close();
         }
+        return 0;
       },
     }),
 
@@ -223,7 +226,7 @@ export default defineLoreCommand({
           description: "Output result as JSON",
         },
       },
-      async run(context) {
+      async run(context): Promise<number> {
         const { args } = context;
         const inv = invocationOf(context);
         const { app } = loadLoreApp({ inv });
@@ -242,7 +245,7 @@ export default defineLoreCommand({
 
           if (args.json) {
             printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { phases: result.value } }, null, 2));
-            return;
+            return 0;
           }
 
           printLine(inv.io.stdout, `Renamed phase "${args.old as string}" → "${args.new as string}" on plan ${args.plan as string}`);
@@ -250,6 +253,7 @@ export default defineLoreCommand({
         } finally {
           app.close();
         }
+        return 0;
       },
     }),
 
@@ -323,7 +327,7 @@ export default defineLoreCommand({
             command: { type: "string", description: "Exact command that will be run (script bind only)" },
             json: { type: "boolean", description: "Output result as JSON" },
           },
-          async run(context) {
+          async run(context): Promise<number> {
             const { args } = context;
             const inv = invocationOf(context);
             const { app } = loadLoreApp({ inv });
@@ -347,13 +351,14 @@ export default defineLoreCommand({
 
               if (args.json) {
                 printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { checklist: result.value } }, null, 2));
-                return;
+                return 0;
               }
               printLine(inv.io.stdout, `Added checklist item "${args.id as string}" to phase ${args.phase as string}`);
               renderChecklist(inv.io, result.value);
             } finally {
               app.close();
             }
+            return 0;
           },
         }),
 
@@ -363,7 +368,7 @@ export default defineLoreCommand({
             phase: { type: "positional", description: "Phase document ID or slug", required: true },
             json: { type: "boolean", description: "Output result as JSON" },
           },
-          async run(context) {
+          async run(context): Promise<number> {
             const { args } = context;
             const inv = invocationOf(context);
             const { app } = loadLoreApp({ inv });
@@ -378,16 +383,17 @@ export default defineLoreCommand({
 
               if (args.json) {
                 printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { checklist: result.value } }, null, 2));
-                return;
+                return 0;
               }
               if (result.value.length === 0) {
                 printLine(inv.io.stdout, "No checklist items declared on this phase.");
-                return;
+                return 0;
               }
               renderChecklist(inv.io, result.value);
             } finally {
               app.close();
             }
+            return 0;
           },
         }),
 
@@ -399,7 +405,7 @@ export default defineLoreCommand({
             reason: { type: "string", description: "Why this item is being dropped (required)", required: true },
             json: { type: "boolean", description: "Output result as JSON" },
           },
-          async run(context) {
+          async run(context): Promise<number> {
             const { args } = context;
             const inv = invocationOf(context);
             const { app } = loadLoreApp({ inv });
@@ -418,13 +424,14 @@ export default defineLoreCommand({
 
               if (args.json) {
                 printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { checklist: result.value } }, null, 2));
-                return;
+                return 0;
               }
               printLine(inv.io.stdout, `Dropped checklist item "${args.id as string}" on phase ${args.phase as string}`);
               renderChecklist(inv.io, result.value);
             } finally {
               app.close();
             }
+            return 0;
           },
         }),
 
@@ -435,7 +442,7 @@ export default defineLoreCommand({
             id: { type: "positional", description: "Checklist item id", required: true },
             json: { type: "boolean", description: "Output result as JSON" },
           },
-          async run(context) {
+          async run(context): Promise<number> {
             const { args } = context;
             const inv = invocationOf(context);
             const { app } = loadLoreApp({ inv });
@@ -451,13 +458,14 @@ export default defineLoreCommand({
 
               if (args.json) {
                 printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { checklist: result.value } }, null, 2));
-                return;
+                return 0;
               }
               printLine(inv.io.stdout, `Checked checklist item "${args.id as string}" on phase ${args.phase as string} by ${by}`);
               renderChecklist(inv.io, result.value);
             } finally {
               app.close();
             }
+            return 0;
           },
         }),
 
@@ -469,7 +477,7 @@ export default defineLoreCommand({
             statement: { type: "string", description: "New statement text", required: true },
             json: { type: "boolean", description: "Output result as JSON" },
           },
-          async run(context) {
+          async run(context): Promise<number> {
             const { args } = context;
             const inv = invocationOf(context);
             const { app } = loadLoreApp({ inv });
@@ -488,13 +496,14 @@ export default defineLoreCommand({
 
               if (args.json) {
                 printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { checklist: result.value } }, null, 2));
-                return;
+                return 0;
               }
               printLine(inv.io.stdout, `Edited checklist item "${args.id as string}" statement on phase ${args.phase as string}`);
               renderChecklist(inv.io, result.value);
             } finally {
               app.close();
             }
+            return 0;
           },
         }),
       },
@@ -515,7 +524,7 @@ export default defineLoreCommand({
             note: { type: "string", description: "Note text", required: true },
             json: { type: "boolean", description: "Output result as JSON" },
           },
-          async run(context) {
+          async run(context): Promise<number> {
             const { args } = context;
             const inv = invocationOf(context);
             const { app } = loadLoreApp({ inv });
@@ -536,12 +545,13 @@ export default defineLoreCommand({
 
               if (args.json) {
                 printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { track: result.value } }, null, 2));
-                return;
+                return 0;
               }
               printLine(inv.io.stdout, `Added track note to phase ${args.phase as string}`);
             } finally {
               app.close();
             }
+            return 0;
           },
         }),
 
@@ -552,7 +562,7 @@ export default defineLoreCommand({
             phase: { type: "positional", description: "Phase document ID or slug", required: true },
             json: { type: "boolean", description: "Output result as JSON" },
           },
-          async run(context) {
+          async run(context): Promise<number> {
             const { args } = context;
             const inv = invocationOf(context);
             const { app } = loadLoreApp({ inv });
@@ -567,11 +577,11 @@ export default defineLoreCommand({
 
               if (args.json) {
                 printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { track: result.value } }, null, 2));
-                return;
+                return 0;
               }
               if (result.value.length === 0) {
                 printLine(inv.io.stdout, "No track notes on this phase.");
-                return;
+                return 0;
               }
               for (const item of result.value) {
                 printLine(inv.io.stdout, `  [${item.at}] ${item.by}: ${item.note}`);
@@ -579,6 +589,7 @@ export default defineLoreCommand({
             } finally {
               app.close();
             }
+            return 0;
           },
         }),
       },

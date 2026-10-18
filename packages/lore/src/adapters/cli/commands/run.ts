@@ -204,7 +204,7 @@ async function runRegister(args: Record<string, unknown>, inv: Invocation): Prom
   const runProcess = await measureRunProcess(inv.io, stringArg(args, "harness-pid"), inv.cwd, inv.env);
   if (runProcess !== undefined && "error" in runProcess) return usageError(inv.io, runProcess.error);
 
-  return await withRunService(inv, async (service) => {
+  return await withRunService(inv, async (service): Promise<number> => {
     const result = await service.register({
       harness,
       sessionId: session,
@@ -220,19 +220,21 @@ async function runRegister(args: Record<string, unknown>, inv: Invocation): Prom
       return exitCode(result.error);
     }
     inv.io.stdout.write(args["json"] === true ? `${JSON.stringify({ ok: true, data: result.value }, null, 2)}\n` : `${result.value.id}\n`);
+    return 0;
   });
 }
 
 async function runShow(args: Record<string, unknown>, inv: Invocation): Promise<ExitReport> {
   const id = stringArg(args, "id");
   if (id === undefined) return usageError(inv.io, "lore run show requires a run id");
-  return await withRunService(inv, async (service) => {
+  return await withRunService(inv, async (service): Promise<number> => {
     const result = await service.show(id);
     if (!result.ok) {
       inv.io.stderr.write(`${formatErrorFor(inv, result.error)}\n`);
       return exitCode(result.error);
     }
     inv.io.stdout.write(args["json"] === true ? `${JSON.stringify({ ok: true, data: result.value }, null, 2)}\n` : renderRunText(result.value));
+    return 0;
   });
 }
 
@@ -241,7 +243,7 @@ async function runEnd(args: Record<string, unknown>, inv: Invocation): Promise<E
   if (id === undefined) return usageError(inv.io, "lore run end requires a run id");
   const reason = stringArg(args, "reason");
   if (reason === undefined) return usageError(inv.io, "lore run end requires --reason <reason>");
-  return await withRunService(inv, async (service) => {
+  return await withRunService(inv, async (service): Promise<number> => {
     const result = await service.end(id, reason);
     if (!result.ok) {
       inv.io.stderr.write(`${formatErrorFor(inv, result.error)}\n`);
@@ -250,11 +252,11 @@ async function runEnd(args: Record<string, unknown>, inv: Invocation): Promise<E
     const ended = result.value;
     if (args["json"] === true) {
       inv.io.stdout.write(`${JSON.stringify({ ok: true, data: { run: id, ...ended } }, null, 2)}\n`);
-      return;
+      return 0;
     }
     if (ended.outcome === "unknown-run") {
       inv.io.stdout.write(`Run ${id} is not registered: nothing to end\n`);
-      return;
+      return 0;
     }
     const lines = [
       `Run ${id} ${ended.outcome === "ended" ? "ended" : "was already ended"} (${reason})`,
@@ -265,6 +267,7 @@ async function runEnd(args: Record<string, unknown>, inv: Invocation): Promise<E
       ),
     ];
     inv.io.stdout.write(`${lines.join("\n")}\n`);
+    return 0;
   });
 }
 
@@ -274,7 +277,7 @@ async function runOccupancy(args: Record<string, unknown>, inv: Invocation): Pro
   // reason: a claim may record the worktree's BRANCH instead of its path (issue #158); an unmeasurable branch
   // (absent directory, detached HEAD) leaves only the path comparison.
   const measured = await detectWorktreeBranch(worktree);
-  return await withRunService(inv, async (service) => {
+  return await withRunService(inv, async (service): Promise<number> => {
     const result = await service.occupancy({
       worktree,
       ...(measured.status === "measured" ? { branch: measured.branch } : {}),
@@ -286,7 +289,7 @@ async function runOccupancy(args: Record<string, unknown>, inv: Invocation): Pro
     const occupancy = result.value;
     if (args["json"] === true) {
       inv.io.stdout.write(`${JSON.stringify({ ok: true, data: occupancy }, null, 2)}\n`);
-      return;
+      return 0;
     }
     const run = occupancy.agent_run;
     const lines = [
@@ -300,13 +303,14 @@ async function runOccupancy(args: Record<string, unknown>, inv: Invocation): Pro
       `Occupied: ${occupancy.occupied ? "yes" : "no"}`,
     ];
     inv.io.stdout.write(`${lines.join("\n")}\n`);
+    return 0;
   });
 }
 
 async function runTasks(args: Record<string, unknown>, inv: Invocation): Promise<ExitReport> {
   const id = stringArg(args, "id");
   if (id === undefined) return usageError(inv.io, "lore run tasks requires a run id");
-  return await withRunService(inv, async (service) => {
+  return await withRunService(inv, async (service): Promise<number> => {
     const result = await service.tasks(id);
     if (!result.ok) {
       inv.io.stderr.write(`${formatErrorFor(inv, result.error)}\n`);
@@ -314,7 +318,7 @@ async function runTasks(args: Record<string, unknown>, inv: Invocation): Promise
     }
     if (args["json"] === true) {
       inv.io.stdout.write(`${JSON.stringify({ ok: true, data: result.value }, null, 2)}\n`);
-      return;
+      return 0;
     }
     const lines = [
       `Run: ${result.value.run}`,
@@ -323,6 +327,7 @@ async function runTasks(args: Record<string, unknown>, inv: Invocation): Promise
         : result.value.tasks.map((t) => `  ${t.slug} (${t.status}) anchors: ${t.file_anchors.join(", ") || "-"}`)),
     ];
     inv.io.stdout.write(`${lines.join("\n")}\n`);
+    return 0;
   });
 }
 
@@ -367,6 +372,7 @@ async function runReap(args: Record<string, unknown>, inv: Invocation): Promise<
   } finally {
     app.close();
   }
+  return 0;
 }
 
 const preToolUsePayloadSchema =z.object({
@@ -396,17 +402,26 @@ function computeUpdatedInput(raw: string): Record<string, unknown> | null {
   return rewritten === command ? null : { ...payload.tool_input, command: rewritten };
 }
 
-function runAttestInput(io: CliIo): void {
+/** Read the whole of `input` as UTF-8 text. */
+async function readAllText(input: Invocation["io"]["stdin"]): Promise<string> {
+  const decoder = new TextDecoder();
+  let text = "";
+  for await (const chunk of input) text += typeof chunk === "string" ? chunk : decoder.decode(chunk, { stream: true });
+  return text + decoder.decode();
+}
+
+async function runAttestInput(io: Invocation["io"]): Promise<number> {
   let raw: string;
   try {
-    raw = readFileSync(0, "utf8");
+    raw = await readAllText(io.stdin);
   } catch {
-    return; // reason: no stdin attached — nothing to attest, pass through
+    return 0; // reason: no stdin attached — nothing to attest, pass through
   }
   const updatedInput = computeUpdatedInput(raw);
-  if (updatedInput === null) return;
+  if (updatedInput === null) return 0;
   // ⛔ no `permissionDecision` key, ever (D12) — see module header.
   io.stdout.write(`${JSON.stringify({ hookSpecificOutput: { hookEventName: "PreToolUse", updatedInput } })}\n`);
+  return 0;
 }
 
 export default defineLoreCommand({
@@ -432,7 +447,7 @@ export default defineLoreCommand({
     worktree: { type: "string", description: "occupancy: worktree directory to measure (required)" },
     json: { type: "boolean", description: "Output JSON", default: false },
   },
-  async run(context) {
+  async run(context): Promise<number> {
     const { args } = context;
     const inv = invocationOf(context);
     const action = typeof args.action === "string" ? args.action : "";
@@ -452,7 +467,7 @@ export default defineLoreCommand({
       case "reap":
         return runReap(rest, inv);
       case "attest-input":
-        return runAttestInput(inv.io);
+        return await runAttestInput(inv.io);
       default: {
         const unreachable: never = action;
         throw new Error(`lore run: unhandled action ${String(unreachable)}`);

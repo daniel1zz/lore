@@ -273,7 +273,7 @@ export default defineLoreCommand({
       description: "Output the result as JSON",
     },
   },
-  async run(context) {
+  async run(context): Promise<number> {
     const { args } = context;
     const inv = invocationOf(context);
     // SPEC-103 §Mechanisms M2, §Design Decisions D3 — `lore review backfill-ledger`
@@ -304,7 +304,7 @@ export default defineLoreCommand({
         for (const failure of result.value.failed) {
           inv.io.stderr.write(`Warning: failed to fast-track ${failure.slug}: ${failure.reason}\n`);
         }
-        return;
+        return 0;
       } finally {
         app.close();
       }
@@ -378,12 +378,12 @@ export default defineLoreCommand({
 
           if (args.json) {
             printLine(inv.io.stdout, JSON.stringify({ ok: true, data: buildStalenessListJsonPayload(entries) }, null, 2));
-            return;
+            return 0;
           }
 
           if (entries.length === 0) {
             printLine(inv.io.stdout, "No open stale candidates.");
-            return;
+            return 0;
           }
 
           const rows = entries.map((e) => [
@@ -393,7 +393,7 @@ export default defineLoreCommand({
           ]);
           printLine(inv.io.stdout, formatTable(["Slug", "Title", "Badge"], rows));
           printLine(inv.io.stdout, `\n${entries.length} open stale candidate${entries.length === 1 ? "" : "s"}`);
-          return;
+          return 0;
         }
 
         if (app.stalenessProbeService === undefined) {
@@ -501,7 +501,7 @@ export default defineLoreCommand({
 
         if (docs.length === 0) {
           printLine(inv.io.stdout, "No pending documents.");
-          return;
+          return 0;
         }
 
         const outcomes: Array<{ doc: PendingDoc; result: Result<{ docSlug: string; judgment: ReviewJudgment }, LoreError> }> = [];
@@ -549,7 +549,7 @@ export default defineLoreCommand({
         if (failures.length === outcomes.length) {
           return 6;
         }
-        return;
+        return 0;
       }
 
       // ─── Single-doc mode ───────────────────────────────────────────────────────
@@ -566,7 +566,7 @@ export default defineLoreCommand({
 
       if (args.json) {
         printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { requested_by: actor, judgment } }, null, 2));
-        return;
+        return 0;
       }
 
       const nudgeBlock = await renderSupersededCandidateNudgeBlock(buildStalenessFlowDeps(app), docSlug, judgment);
@@ -574,5 +574,6 @@ export default defineLoreCommand({
     } finally {
       app.close();
     }
+    return 0;
   },
 });

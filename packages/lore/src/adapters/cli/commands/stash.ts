@@ -83,7 +83,7 @@ const prune = defineLoreCommand({
     apply: { type: "boolean", description: "Archive and drop stashes whose decision is auto (default: list only)" },
     json: { type: "boolean", description: "Output the report as JSON" },
   },
-  async run(context) {
+  async run(context): Promise<number> {
     const { args } = context;
     const inv = invocationOf(context);
     const { app, dbPath } = loadLoreApp({ inv });
@@ -119,6 +119,7 @@ const prune = defineLoreCommand({
       store?.close();
       app.close();
     }
+    return 0;
   },
 });
 

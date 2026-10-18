@@ -31,7 +31,7 @@
 import type { CommandDef } from "citty";
 import { Readable } from "node:stream";
 import { RunIdentityArgumentError } from "@lore/core/node";
-import type { Invocation } from "@lore/core";
+import type { Invocation, InvocationReader } from "@lore/core";
 import { runCli } from "../../src/adapters/cli/run-cli";
 import { buildTestInvocation } from "./test-invocation";
 
@@ -48,6 +48,10 @@ export interface InProcessRunOptions {
   readonly env?: InProcessEnv;
   /** Test seam, forwarded to `runCli`: rewrite each command tree before strict/delivery wrapping. */
   readonly transformCommand?: (name: string, command: CommandDef<any>) => CommandDef<any> | Promise<CommandDef<any>>;
+  /** The run's input (what a prompt reads); default: an empty stream. */
+  readonly stdin?: InvocationReader;
+  /** Whether the run's input is an interactive terminal; default: `false`, so a prompt command takes its non-interactive path. */
+  readonly stdinIsTTY?: boolean;
 }
 
 /** What a run produced; identical in shape to what the spawn-based helpers return. */
@@ -94,7 +98,7 @@ function buildRunEnv(requested: InProcessEnv | undefined, home: string): Record<
  * Run `lore <args>` in this process with `options.cwd` as its working directory and `options.home` as its home.
  *
  * @param args - argv after the program name, exactly what is typed after `lore` (`["get", slug, "--json"]`)
- * @param options - cwd and home (required), the whole env and a command-tree seam (optional)
+ * @param options - cwd and home (required), the whole env, a command-tree seam, stdin and stdinIsTTY (optional)
  * @returns captured stdout, stderr and the exit code `runCli` returned
  * @throws Error when `home` is missing or empty, or the sandbox marker is not armed
  * @example
@@ -116,7 +120,12 @@ export async function runLoreInProcess(args: readonly string[], options: InProce
       env,
       home,
       // reason: a run has no terminal and no input unless a test gives it one: an empty, non-TTY stdin.
-      io: { stdout: { write: (text) => out.push(text) }, stderr: { write: (text) => err.push(text) }, stdin: Readable.from([]), stdinIsTTY: false },
+      io: {
+        stdout: { write: (text) => out.push(text) },
+        stderr: { write: (text) => err.push(text) },
+        stdin: options.stdin ?? Readable.from([]),
+        stdinIsTTY: options.stdinIsTTY ?? false,
+      },
     });
   } catch (error) {
     if (!(error instanceof RunIdentityArgumentError)) throw error;

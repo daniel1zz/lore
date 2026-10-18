@@ -164,7 +164,7 @@ export default defineLoreCommand({
       description: "Output as JSON",
     },
   },
-  async run(context) {
+  async run(context): Promise<number> {
     const { args } = context;
     const inv = invocationOf(context);
     const { app } = loadLoreApp({ inv });
@@ -343,12 +343,12 @@ export default defineLoreCommand({
 
       if (args.json) {
         printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { entries, total: entries.length } }, null, 2));
-        return;
+        return 0;
       }
 
       if (entries.length === 0) {
         printLine(inv.io.stdout, "No audit entries found.");
-        return;
+        return 0;
       }
 
       const headers = ["Timestamp", "Actor", "Action", "Details"];
@@ -364,5 +364,6 @@ export default defineLoreCommand({
     } finally {
       app.close();
     }
+    return 0;
   },
 });

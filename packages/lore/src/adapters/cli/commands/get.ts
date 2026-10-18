@@ -194,7 +194,7 @@ export default defineLoreCommand({
       description: "Skip MDX resolution",
     },
   },
-  async run(context) {
+  async run(context): Promise<number> {
     const { args } = context;
     const inv = invocationOf(context);
     const { app, dbPath } = loadLoreApp({ inv });
@@ -294,7 +294,7 @@ export default defineLoreCommand({
           ? { ...result.value, validity_status: validityStatus, attribution, ...relations.value.json, resolved_components: resolvedComponents }
           : { ...result.value, validity_status: validityStatus, attribution, ...relations.value.json };
         printLine(inv.io.stdout, JSON.stringify({ ok: true, data }, null, 2));
-        return;
+        return 0;
       }
 
       // Human-readable display
@@ -335,5 +335,6 @@ export default defineLoreCommand({
       attributionStore.close();
       app.close();
     }
+    return 0;
   },
 });
