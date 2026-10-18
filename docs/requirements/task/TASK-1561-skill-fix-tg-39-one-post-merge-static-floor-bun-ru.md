@@ -3,7 +3,7 @@ id: TASK-1561
 type: task
 role: plan
 title: "[Skill:fix] TG-39 one post-merge static floor: bun run check:static runs build, typecheck and every check:* and prints one exit per step"
-status: draft
+status: archived
 priority: high
 phase: "Phase 3b: one runner"
 created: 2026-10-18

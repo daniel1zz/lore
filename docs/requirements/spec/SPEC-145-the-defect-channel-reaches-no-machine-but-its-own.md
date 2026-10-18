@@ -161,10 +161,11 @@ Structured criteria are declared via `lore ac add` and are the executable form; 
   script: test — bunx vitest run packages/lore/tests/unit/service/receipt-log-v2.test.ts && echo 'AC-GI-3 PASS: failed filing leaves intent without outcome'
   other_command=1
 - [⚑] [script] AC-GI-4: All 9 resolution states survive corpus to label to read-back unchanged
-  script: test — bunx vitest run packages/lore/tests/unit/service/resolution-projector.test.ts && echo 'AC-GI-4 PASS: 9 of 9 resolution states round-trip equal'
-  other_command=5
+  script: test — bun run test:file packages/lore/tests/unit/service/resolution-projector.test.ts && echo 'AC-GI-4 PASS: 9 of 9 resolution states round-trip equal'
+  other_command=6
 - [⚑] [script] AC-GI-5: A hand-edited resolution label does not change what lore issues reports, and lore issues --verify reports the divergence
-  script: test — bunx vitest run packages/lore/tests/unit/service/resolution-label-non-authority.test.ts && echo 'AC-GI-5 PASS: label edit does not move the reported state and --verify flags it'
+  script: test — bun run test:file packages/lore/tests/unit/service/resolution-label-non-authority.test.ts && echo 'AC-GI-5 PASS: label edit does not move the reported state and --verify flags it'
+  other_command=1
 - [⚑] [script] AC-GI-6: Body assembly leaks neither identity: a property test seeds a distinctive home path and a distinctive username, then asserts neither appears in the assembled body — seeded rather than ambient, so a CI account name cannot make it pass vacuously
   script: test — bunx vitest run packages/lore/tests/unit/service/issue-body-redaction.test.ts && echo 'AC-GI-6 PASS: assembled bodies carry no home path and no OS username'
   other_command=2
@@ -177,7 +178,8 @@ Structured criteria are declared via `lore ac add` and are the executable form; 
   script: e2e — bunx --bun vitest run packages/lore/tests/integration/cli/issue-migration.bun.test.ts && echo 'AC-GI-11 PASS: 12 issues, 2 closed with reason, front-matter equal field by field'
   other_command=2
 - [⚑] [script] AC-GI-12: No read surface issues one network call per issue: the call count for listing 50 issues equals the call count for listing 1
-  script: test — bunx vitest run packages/lore/tests/unit/service/issue-read-batching.test.ts && echo 'AC-GI-12 PASS: listing N issues costs O(1) calls, not O(N)'
+  script: test — bun run test:file packages/lore/tests/unit/service/issue-read-batching.test.ts && echo 'AC-GI-12 PASS: listing N issues costs O(1) calls, not O(N)'
+  other_command=1
 - [⚑] [script] AC-GI-13: A GitHub-side close-as-completed does NOT produce a corpus fixed resolution: computeIssueResolution still reports the pre-close state, and the only transition into fixed remains a resolves edge
   script: test — bunx vitest run packages/lore/tests/unit/service/github-close-not-fixed.test.ts && echo 'AC-GI-13 PASS: a GitHub close-as-completed yields no corpus fixed resolution'
   other_command=2

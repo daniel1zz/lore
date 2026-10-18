@@ -6,7 +6,7 @@ title: "A GitHub-filed defect must be claimable: one ingest seam turns a listed 
 status: approved
 priority: critical
 created: 2026-08-24
-updated: 2026-10-17
+updated: 2026-10-18
 tags: [defect-channel, github, intake, read-side, claimable]
 links:
   - {id: SPEC-145, type: relates-to}
@@ -215,8 +215,8 @@ Recorded per the discipline that a criterion changed after it was written must c
   script: test — bunx vitest run packages/lore/tests/unit/service/issue-task-shaping.test.ts 2>&1 && echo 'AC-GR-6 PASS: githubIssueTaskSlug is total against slugSchema and injective over (repo_id, number)'
   other_command=1
 - [⚑] [script] AC-GR-7: A partial success is named, never generic: when the corpus write fails after the GitHub filing already landed, the returned error message contains BOTH the filed issue number and its URL. Falsifier: emit a generic store-error message and the assertion on those two substrings fails.
-  script: test — bunx vitest run packages/lore/tests/unit/service/github-filing-split-write.test.ts 2>&1 && echo 'AC-GR-7 PASS: a corpus-write failure after a landed filing names the issue number and URL'
-  other_command=2
+  script: test — bun run test:file packages/lore/tests/unit/service/github-filing-split-write.test.ts 2>&1 && echo 'AC-GR-7 PASS: a corpus-write failure after a landed filing names the issue number and URL'
+  other_command=3
 - [⚑] [script] AC-GR-8: No refusal stub survives on any surface — TWO conjuncts, because the single-conjunct form was measured VACUOUS. (a) STRUCTURAL, unchanged: a CASE-SENSITIVE scan of packages/lore/src finds zero occurrences of 'is not yet supported' or 'a later phase of spec-the-defect-channel-reaches'. (b) BEHAVIOURAL, added 2026-08-25: against a GitHub-configured upstream with a payload gh stub, EACH of --open, --resolved, --all, --severity, --category and --verify makes 'lore issues' exit 0 — not 4. ⛔ WHY (b) EXISTS, recorded rather than quietly patched: conjunct (a) reported 0 while commands/issues.ts:482 still refused those six flags with exit 4. The surviving refusal reads 'are not yet supported by' (plural) and cites 'a later phase of spec-a-github-filed-defect-must-be-claimable' — a DIFFERENT spec — so it matched neither pinned needle. The AC's own residual note had anticipated the generic needle firing on unrelated future text; it did NOT anticipate a REWORDED refusal evading it, which is the direction that actually happened. ⛔ A substring scan can only ever falsify the wordings its author imagined; only a behavioural conjunct measures the property. ⛔ The refusal it missed cited a later phase of THIS spec, which declares no such phase — the exact falsehood this spec's Overview exists to condemn, reproduced by it.
   script: lint — f=$(mktemp); grep -rn --include='*.ts' -e 'is not yet supported' -e 'a later phase of spec-the-defect-channel-reaches' packages/lore/src > "$f"; test ! -s "$f" && bunx --bun vitest run packages/lore/tests/integration/cli/github-issue-read-surface.bun.test.ts -t 'AC-GR-8' 2>&1 && echo 'AC-GR-8 PASS: 0 refusal stubs by scan AND all six read flags exit 0 against a stubbed GitHub upstream'
   other_command=4
@@ -227,7 +227,8 @@ Recorded per the discipline that a criterion changed after it was written must c
   script: e2e — bunx --bun vitest run packages/lore/tests/integration/cli/github-issue-read-surface.bun.test.ts -t 'AC-GR-10' 2>&1 && echo 'AC-GR-10 PASS: the GitHub listing shows only the 3 GitHub issues and names the --local boundary'
   other_command=3
 - [⚑] [script] AC-GR-11: The MCP surface files and lands a claimable task: the test MUST obtain the handler by importing 'registerTools' (packages/lore/src/adapters/mcp/tools.ts:1434) and registering against a real McpServer — naming the symbol so a handler reconstructed from the same module cannot satisfy a literal reading — and the lore_report_issue handler then returns a success payload naming the created corpus task's slug under a GitHub-shaped feedback.upstream. Stated limit, not papered over: this drives the REGISTERED handler, not a spawned stdio server, because this repo has no MCP stdio harness (every tests/unit/adapters/mcp-*.test.ts calls handlers via registerTools). Falsifier: restore the isGithubUpstreamCfg refusal branch in adapters/mcp/tools.ts and the payload becomes the refusal error.
-  script: test — bunx vitest run packages/lore/tests/unit/adapters/mcp-github-filing.test.ts 2>&1 && echo 'AC-GR-11 PASS: the registered lore_report_issue handler files under the GitHub shape and names the created task slug'
+  script: test — bun run test:file packages/lore/tests/unit/adapters/mcp-github-filing.test.ts 2>&1 && echo 'AC-GR-11 PASS: the registered lore_report_issue handler files under the GitHub shape and names the created task slug'
+  other_command=4
 - [⚑] [script] AC-GR-12: The read path never writes (G4's oracle, absent until the review named the gap): against a corpus holding 3 un-ingested GitHub issues, the count of corpus tasks carrying extra.issue_report and the target docs' version-log row counts are BYTE-EQUAL before and after a real dist/lore 'issues' run. Covered by describe 'AC-GR-12: lore issues mutates nothing'. Falsifier: have the read path call CorpusService.create for an un-ingested row and the task count rises from 0 to 3.
   script: e2e — bunx --bun vitest run packages/lore/tests/integration/cli/github-issue-read-surface.bun.test.ts -t 'AC-GR-12' 2>&1 && echo 'AC-GR-12 PASS: a real lore issues run left the task count and every version log unchanged'
   other_command=3
