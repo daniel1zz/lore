@@ -147,7 +147,7 @@ describe("AC-RS-7 lore context list | add | remove", () => {
     const sb = await makeSandbox();
     const path = selectionFile(sb);
     const foreign = "schemaVersion: 1\ndisable:\n  - agent-rules\n";
-    const real = makeRealContextFsPort(sb.corpus);
+    const real = makeRealContextFsPort(sb.corpus, [sb.corpus]);
     let reads = 0;
     const racing: FsWritePort = {
       ...real,

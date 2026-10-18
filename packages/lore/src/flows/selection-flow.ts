@@ -177,6 +177,11 @@ export async function runSelectionChange(
       message: `refusing to write ${path} — it changed after it was read (another writer interleaved); nothing was written. Re-run the command.`,
     });
   }
-  await deps.fs.writeFile(path, content);
+  const written = await deps.fs.writeFile(path, content);
+  if (!written.ok) {
+    // reason: the rooted port refuses with VALIDATION_ERROR (BR-1177); any other code is a port-contract breach, surfaced as one.
+    const refusal = written.error;
+    return err(refusal.code === "VALIDATION_ERROR" ? refusal : validationError("path", `write of ${path} failed: ${refusal.code}`));
+  }
   return ok(outcome);
 }

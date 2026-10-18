@@ -665,7 +665,7 @@ async function runProjectContextProjection(opts: {
   if (!refreshDeps.ok) return refreshDeps;
   const refreshed = await runContextRefresh(
     {
-      fs: makeRealContextFsPort(opts.repoDir),
+      fs: makeRealContextFsPort(opts.repoDir, [opts.repoDir]),
       ...refreshDeps.value,
     },
     "",
@@ -689,14 +689,14 @@ async function runProjectContextProjection(opts: {
  * write decision are one code path, so they cannot disagree.
  */
 function makeReadOnlyContextFsPort(repoDir: string): FsWritePort {
-  const real = makeRealContextFsPort(repoDir);
+  const real = makeRealContextFsPort(repoDir, [repoDir]);
   return {
     exists: (path) => real.exists(path),
     readFile: (path) => real.readFile(path),
     listDir: (path) => real.listDir(path),
-    writeFile: async () => undefined,
-    deleteFile: async () => undefined,
-    removeDirIfEmpty: async () => undefined,
+    writeFile: async () => ok(undefined),
+    deleteFile: async () => ok(undefined),
+    removeDirIfEmpty: async () => ok(undefined),
   };
 }
 
