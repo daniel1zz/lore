@@ -3,7 +3,8 @@
  *
  * Purpose: a pending decision is not a separate table; it is a (class, subject, version) whose EFFECTIVE verdict
  * is a machine `escalate` (no human-tty record has answered it). This module derives that list from the log rows.
- * Public surface: derivePendingDecisions, recommendAnswer, PendingDecision, RECOMMEND_ACCEPT_MIN_SCORE.
+ * Public surface: derivePendingDecisions, deriveOpenEscalations, newerVersionSupersession, isSupersedeMarker,
+ *   SUPERSEDED_FACTS_KEY, HUMAN_ANSWER_ONLY_CLASSES, recommendAnswer, PendingDecision, SubjectExistenceProbe(s), RECOMMEND_ACCEPT_MIN_SCORE.
  * Invariants:
  *   - `id` is the id of the FIRST machine escalate row of the key, so it stays the same when the escalating
  *     operation is re-run and appends further escalate rows.
@@ -11,6 +12,13 @@
  *     invisible here, so it can neither resolve nor hide a pending decision.
  *   - The row's JSON columns were written by DecisionService; a column that no longer parses is returned as a
  *     STORE_ERROR, never defaulted.
+ *   - CLOSED (AU-T16): a decision stops being pending when (a) a later non-marker row of the same class and
+ *     subject id exists on ANOTHER subject version (the subject was re-measured; log order is the only version
+ *     order, hashes have none), or (b) a closing MARKER row (machine channel, verdict `superseded`, facts
+ *     `{superseded:{pending_id,cause,detail}}`) was appended after its latest escalate row because the subject no
+ *     longer exists. Markers are ordinary appended rows, never an edit or delete; a re-escalation appended after a
+ *     marker reopens the key. A marker is NOT a decision: effectiveDecisionVerdict ignores it, and AU-T8 calibration
+ *     / auto sampling must select `verdict = 'auto'` only, so they never see a marker.
  *   - Carries NO secret: the nonce is generated per `lore decide` invocation and exists nowhere in the log.
  * Side-effect class: pure.
  *
@@ -70,13 +78,42 @@ function parseColumn<T>(schema: z.ZodType<T>, text: string, row: DecisionLogRow,
   return ok(parsed.data);
 }
 
+/** facts key that marks a closing record; the value is {@link SupersedeMarkerFacts}. */
+export const SUPERSEDED_FACTS_KEY = "superseded";
+
+export type SupersedeCause = "newer-version" | "subject-gone";
+
+/** Existence of a decision's subject right now. `unknown` (the probe could not measure) NEVER closes a decision. */
+export type SubjectExistence = "present" | "absent" | "unknown";
+export type SubjectExistenceProbe = (subject: { readonly id: string; readonly version: string }) => Promise<SubjectExistence>;
+/** Class id -> existence probe. A class with no probe is only ever closed by a newer version. */
+export type SubjectExistenceProbes = Readonly<Record<string, SubjectExistenceProbe>>;
+
+/** True for a closing marker row appended by DecisionService: machine channel, verdict `superseded` (migration 023). */
+export function isSupersedeMarker(row: DecisionLogRow): boolean {
+  return row.channel === "machine" && row.verdict === "superseded";
+}
+
+type DecisionKey = { readonly class: string; readonly subject_id: string; readonly subject_version: string };
+
+function sameKey(row: DecisionLogRow, key: DecisionKey): boolean {
+  return row.class === key.class && row.subject_id === key.subject_id && row.subject_version === key.subject_version;
+}
+
+/** A pending decision plus the id of its latest escalate row (the marker / newer-version comparison point). */
+export interface OpenEscalation extends PendingDecision {
+  readonly latest_escalate_id: number;
+}
+
 /**
- * Open escalations over `rows` (any superset of the log, id ASC), ordered by id.
+ * Open escalations over `rows` (any superset of the log, id ASC), ordered by id, with closing markers applied but
+ * WITHOUT the newer-version rule: the candidates DecisionService probes and closes. Readers use
+ * {@link derivePendingDecisions}.
  *
  * @returns err(STORE_ERROR) when an escalating row's JSON columns do not parse.
  */
-export function derivePendingDecisions(rows: readonly DecisionLogRow[]): Result<PendingDecision[], LoreError> {
-  const keys = new Map<string, { class: string; subject_id: string; subject_version: string }>();
+export function deriveOpenEscalations(rows: readonly DecisionLogRow[]): Result<OpenEscalation[], LoreError> {
+  const keys = new Map<string, DecisionKey>();
   for (const row of rows) {
     if (row.channel !== "machine" || row.verdict !== "escalate") continue;
     keys.set(JSON.stringify([row.class, row.subject_id, row.subject_version]), {
@@ -85,21 +122,16 @@ export function derivePendingDecisions(rows: readonly DecisionLogRow[]): Result<
       subject_version: row.subject_version,
     });
   }
-  const pending: PendingDecision[] = [];
+  const pending: OpenEscalation[] = [];
   for (const key of keys.values()) {
     const effective = effectiveDecisionVerdict(rows, key);
     if (effective === null || effective.channel !== "machine" || effective.verdict !== "escalate") continue;
-    const escalations = rows.filter(
-      (r) =>
-        r.channel === "machine" &&
-        r.verdict === "escalate" &&
-        r.class === key.class &&
-        r.subject_id === key.subject_id &&
-        r.subject_version === key.subject_version,
-    );
+    const escalations = rows.filter((r) => r.channel === "machine" && r.verdict === "escalate" && sameKey(r, key));
     const first = escalations[0];
+    const latestEscalate = escalations[escalations.length - 1];
     const latest = rows.find((r) => r.id === effective.record_id);
-    if (first === undefined || latest === undefined) continue;
+    if (first === undefined || latestEscalate === undefined || latest === undefined) continue;
+    if (rows.some((r) => r.id > latestEscalate.id && sameKey(r, key) && isSupersedeMarker(r))) continue;
     const factors = parseColumn(factorsSchema, latest.factors, latest, "factors");
     if (!factors.ok) return factors;
     const reasons = parseColumn(reasonsSchema, latest.reasons, latest, "reasons");
@@ -117,7 +149,49 @@ export function derivePendingDecisions(rows: readonly DecisionLogRow[]): Result<
       reasons: reasons.value,
       recommended: recommendation.answer,
       recommended_reason: recommendation.reason,
+      latest_escalate_id: latestEscalate.id,
     });
   }
   return ok(pending.sort((a, b) => a.id - b.id));
+}
+
+/**
+ * Classes whose pending decision is ONLY ever answered by a human-tty record (AU-T9): their subject never "disappears"
+ * and a re-measurement on another version must not close the open question. The newer-version rule skips them and they
+ * have no existence probe. (Rows of class `autonomy-threshold-write` are not escalations, so they never become pending.)
+ */
+export const HUMAN_ANSWER_ONLY_CLASSES: readonly string[] = ["threshold-integrity"];
+
+/**
+ * The newest later row that supersedes `pending` by re-measuring the SAME class + subject id on ANOTHER version, or
+ * null. "Later" is log order (id above the pending key's latest escalate row); closing markers do not count.
+ */
+export function newerVersionSupersession(rows: readonly DecisionLogRow[], pending: OpenEscalation): DecisionLogRow | null {
+  if (HUMAN_ANSWER_ONLY_CLASSES.includes(pending.class)) return null;
+  let newest: DecisionLogRow | null = null;
+  for (const row of rows) {
+    if (row.id <= pending.latest_escalate_id) continue;
+    if (row.class !== pending.class || row.subject_id !== pending.subject_id) continue;
+    if (row.subject_version === pending.subject_version || isSupersedeMarker(row)) continue;
+    newest = row;
+  }
+  return newest;
+}
+
+/**
+ * Open escalations over `rows` (any superset of the log, id ASC), ordered by id: escalations no human answered, no
+ * marker closed and no newer subject version replaced.
+ *
+ * @returns err(STORE_ERROR) when an escalating row's JSON columns do not parse.
+ */
+export function derivePendingDecisions(rows: readonly DecisionLogRow[]): Result<PendingDecision[], LoreError> {
+  const open = deriveOpenEscalations(rows);
+  if (!open.ok) return open;
+  const pending: PendingDecision[] = [];
+  for (const candidate of open.value) {
+    if (newerVersionSupersession(rows, candidate) !== null) continue;
+    const { latest_escalate_id: _latest, ...visible } = candidate;
+    pending.push(visible);
+  }
+  return ok(pending);
 }

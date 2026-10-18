@@ -46,7 +46,17 @@ import {
 } from "../store/decision-log.js";
 import type { StoreInterface } from "../store/store-interface.js";
 import { isIssuedHumanChannelProof, type HumanChannelProof } from "./human-channel.js";
-import { derivePendingDecisions, type PendingDecision } from "./pending-decisions.js";
+import {
+  deriveOpenEscalations,
+  derivePendingDecisions,
+  HUMAN_ANSWER_ONLY_CLASSES,
+  newerVersionSupersession,
+  SUPERSEDED_FACTS_KEY,
+  type OpenEscalation,
+  type PendingDecision,
+  type SubjectExistenceProbes,
+  type SupersedeCause,
+} from "./pending-decisions.js";
 
 /** What a decision is about: a stable id plus the version (or sha) it was measured at. */
 export interface DecisionSubject {
@@ -71,6 +81,8 @@ export interface DecisionServiceDeps {
   readonly now?: () => string;
   /** Class registry override for tests; defaults to @lore/core's. */
   readonly registry?: OperationClassRegistry;
+  /** Class-specific subject existence probes used when listing pending decisions (AU-T16). Absent = newer-version rule only. */
+  readonly subjectProbes?: SubjectExistenceProbes;
 }
 
 function validationError(field: string, message: string): LoreError {
@@ -203,11 +215,75 @@ export class DecisionService {
     return ok(decisionChainHead(rows.value));
   }
 
-  /** Open escalations (effective verdict: machine escalate), ordered by id. See pending-decisions.ts. */
+  /**
+   * Open escalations (effective verdict: machine escalate), ordered by id. Listing first CLOSES the stale ones
+   * (AU-T16): an escalation whose subject was re-measured on a newer version, or whose subject a probe reports
+   * absent, gets one appended closing marker (see pending-decisions.ts); nothing is edited or deleted. Two
+   * concurrent listers may both append a marker for one decision; the derivation treats any marker after the latest
+   * escalate as closing, so duplicates never double-count, and each lister re-reads the log right before appending.
+   */
   async listPending(): Promise<Result<PendingDecision[], LoreError>> {
+    const closed = await this.closeStalePending();
+    if (!closed.ok) return closed;
     const rows = await this.deps.store.listDecisionLog();
     if (!rows.ok) return rows;
     return derivePendingDecisions(rows.value);
+  }
+
+  /** Appends a closing marker for every open escalation that is stale; returns how many markers were appended. */
+  private async closeStalePending(): Promise<Result<number, LoreError>> {
+    const rows = await this.deps.store.listDecisionLog();
+    if (!rows.ok) return rows;
+    const open = deriveOpenEscalations(rows.value);
+    if (!open.ok) return open;
+    let appended = 0;
+    for (const candidate of open.value) {
+      let cause: SupersedeCause | null = null;
+      let detail = "";
+      const newer = newerVersionSupersession(rows.value, candidate);
+      if (newer !== null) {
+        cause = "newer-version";
+        detail = `decision record ${newer.id} re-measured the subject at version ${newer.subject_version}`;
+      } else {
+        const probe = HUMAN_ANSWER_ONLY_CLASSES.includes(candidate.class) ? undefined : this.deps.subjectProbes?.[candidate.class];
+        if (probe !== undefined && (await probe({ id: candidate.subject_id, version: candidate.subject_version })) === "absent") {
+          cause = "subject-gone";
+          detail = `class ${candidate.class} existence probe: ${candidate.subject_id} no longer exists`;
+        }
+      }
+      if (cause === null) continue;
+      const written = await this.appendSupersedeMarker(candidate, cause, detail);
+      if (!written.ok) return written;
+      if (written.value) appended += 1;
+    }
+    return ok(appended);
+  }
+
+  /**
+   * Appends the closing marker unless the log (re-read now) already closed `candidate`: machine channel, verdict
+   * `superseded` (not a decision; see decision-log.ts invariants).
+   */
+  private async appendSupersedeMarker(candidate: OpenEscalation, cause: SupersedeCause, detail: string): Promise<Result<boolean, LoreError>> {
+    const fresh = await this.deps.store.listDecisionLog();
+    if (!fresh.ok) return fresh;
+    const stillOpen = deriveOpenEscalations(fresh.value);
+    if (!stillOpen.ok) return stillOpen;
+    if (!stillOpen.value.some((p) => p.id === candidate.id && p.latest_escalate_id === candidate.latest_escalate_id)) return ok(false);
+    const appended = await this.deps.store.appendDecisionRecord({
+      ts: this.now(),
+      class: candidate.class,
+      subject_id: candidate.subject_id,
+      subject_version: candidate.subject_version,
+      facts: canonicalJson({ [SUPERSEDED_FACTS_KEY]: { pending_id: candidate.id, cause, detail } }),
+      factors: "{}",
+      score: 0,
+      threshold: null,
+      verdict: "superseded",
+      reasons: canonicalJson([`superseded: ${detail}`]),
+      executor_run: this.deps.executorRun,
+      channel: "machine",
+    });
+    return appended.ok ? ok(true) : appended;
   }
 
   /** One open escalation by the id `lore decide` takes, or null when that id is not (or no longer) pending. */

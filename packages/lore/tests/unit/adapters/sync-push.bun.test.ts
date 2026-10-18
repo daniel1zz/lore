@@ -62,6 +62,7 @@ import { MIGRATION_019_ADD_COLUMNS, MIGRATION_019_SQL } from "../../../src/store
 import { MIGRATION_020_SQL } from "../../../src/store/migrations/migration-020.js";
 import { MIGRATION_021_ADD_COLUMNS, MIGRATION_021_SQL } from "../../../src/store/migrations/migration-021.js";
 import { MIGRATION_022_SQL } from "../../../src/store/migrations/migration-022.js";
+import { MIGRATION_023_SQL } from "../../../src/store/migrations/migration-023.js";
 import { computeFtsShadowValues, computeAuditEntryHash } from "../../../src/store/store-shared.js";
 
 // ─── Fixture Helpers ─────────────────────────────────────────────────────────
@@ -282,6 +283,8 @@ async function applyMigrationsToClient(client: Client, localStore: SQLiteStore):
   await client.executeMultiple(MIGRATION_021_SQL);
   // migration-022 (autonomy_thresholds) is one BEGIN/COMMIT string; local-only, mirrored for the parity guard.
   await client.executeMultiple(MIGRATION_022_SQL);
+  // migration-023 (decision_log verdict CHECK widened to admit superseded) is one BEGIN/COMMIT string; mirrored for the parity guard.
+  await client.executeMultiple(MIGRATION_023_SQL);
 
   // ─── Parity guard ────────────────────────────────────────────────────────
   // Assert the remote fixture's PRAGMA user_version matches the REAL

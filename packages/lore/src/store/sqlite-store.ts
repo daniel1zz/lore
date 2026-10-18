@@ -143,6 +143,7 @@ import { stampAuditSurface } from "./audit-surface.js";
 import { MIGRATION_020_SQL } from "./migrations/migration-020.js";
 import { MIGRATION_021_ADD_COLUMNS, MIGRATION_021_SQL } from "./migrations/migration-021.js";
 import { MIGRATION_022_SQL } from "./migrations/migration-022.js";
+import { MIGRATION_023_SQL } from "./migrations/migration-023.js";
 import { DECISION_GENESIS_HASH, computeDecisionEntryHash } from "./decision-log.js";
 import type { DecisionLogRow, DecisionRecordInput } from "./decision-log.js";
 import type { DecisionSubjectKey } from "./store-interface.js";
@@ -714,6 +715,20 @@ export class SQLiteStore implements StoreInterface {
       // reason: migration-022 (autonomy_thresholds) is one idempotent BEGIN/COMMIT string.
       try {
         this.db.exec(MIGRATION_022_SQL);
+      } catch (error) {
+        try {
+          this.db.exec("ROLLBACK;");
+        } catch {
+          // reason: same as migration-004/005/006 — safe to ignore, see above.
+        }
+        throw error;
+      }
+    }
+
+    if (currentVersion < 23) {
+      // reason: migration-023 rebuilds decision_log with the widened verdict CHECK in ONE BEGIN/COMMIT string.
+      try {
+        this.db.exec(MIGRATION_023_SQL);
       } catch (error) {
         try {
           this.db.exec("ROLLBACK;");

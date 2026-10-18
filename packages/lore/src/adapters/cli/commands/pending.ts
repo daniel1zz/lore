@@ -83,10 +83,11 @@ export default defineCommand({
   },
   async run({ args }) {
     const { app, dbPath } = loadLoreApp();
+    const { repoRoot } = app;
     try {
       // AC-AU-3: open autonomy decisions (escalations awaiting the human) are listed beside the pending docs,
       // in both output modes. A read failure is loud, never an empty list.
-      const decisionsResult = await collectPendingDecisions(dbPath);
+      const decisionsResult = await collectPendingDecisions(dbPath, repoRoot);
       if (!decisionsResult.ok) {
         process.stderr.write(formatError(decisionsResult.error) + "\n");
         process.exitCode = exitCode(decisionsResult.error);

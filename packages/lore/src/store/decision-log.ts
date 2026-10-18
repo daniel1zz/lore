@@ -11,7 +11,11 @@
  *   - `entry_hash` is computed store-side only, inside the transaction that reads the chain head; callers
  *     (DecisionRecordInput) cannot supply hashes.
  *   - Effective verdict: the latest `human-tty` record wins (auto = accept, refuse = reject); otherwise the WORST
- *     over `machine` records (refuse > escalate > auto). `agent-asserted` records never take part. A new
+ *     over `machine` records (refuse > escalate > auto). `agent-asserted` records never take part.
+ *   - `superseded` (migration 023, AU-T16) rows are CLOSING MARKERS of a pending decision whose subject is gone or was
+ *     re-decided on a newer version. They are not decisions: effectiveDecisionVerdict ignores them, and anything that
+ *     counts, calibrates or SAMPLES auto decisions (AU-T8 outcome calibration, 1-in-10 sampling) must select
+ *     `verdict = 'auto'` and therefore never sees them. Only service/pending-decisions.ts reads them. A new
  *     `subject_version` is a new subject: records of another version are never consulted.
  * Side-effect class: pure (node:crypto hashing only). Not in @lore/core's browser-safe barrel on purpose.
  *
@@ -20,7 +24,8 @@
  */
 import { createHash } from "node:crypto";
 
-export type DecisionVerdict = "auto" | "escalate" | "refuse";
+/** `superseded` (migration 023) is a CLOSING record, not a decision: see the invariants above. */
+export type DecisionVerdict = "auto" | "escalate" | "refuse" | "superseded";
 /** `human-tty` is produced only by the human channel (AU-T3); `agent-asserted` never takes precedence. */
 export type DecisionChannel = "machine" | "human-tty" | "agent-asserted";
 
@@ -111,14 +116,17 @@ export function decisionChainHead(rows: readonly DecisionLogRow[]): DecisionChai
   return last === undefined ? null : { head_id: last.id, head_hash: last.entry_hash, count: rows.length };
 }
 
+/** The verdicts that are decisions (everything but the closing marker). */
+export type DecidedVerdict = Exclude<DecisionVerdict, "superseded">;
+
 export interface EffectiveDecisionVerdict {
-  readonly verdict: DecisionVerdict;
+  readonly verdict: DecidedVerdict;
   readonly channel: "machine" | "human-tty";
   /** id of the record that decided it: the latest human-tty row, or the worst machine row (latest among ties). */
   readonly record_id: number;
 }
 
-const SEVERITY: Readonly<Record<DecisionVerdict, number>> = { auto: 0, escalate: 1, refuse: 2 };
+const SEVERITY: Readonly<Record<DecidedVerdict, number>> = { auto: 0, escalate: 1, refuse: 2 };
 
 /**
  * Effective verdict for one (class, subject_id, subject_version) over `rows` (any superset; other keys ignored).
@@ -128,15 +136,20 @@ export function effectiveDecisionVerdict(
   rows: readonly DecisionLogRow[],
   key: { readonly class: string; readonly subject_id: string; readonly subject_version: string },
 ): EffectiveDecisionVerdict | null {
+  // reason: `superseded` rows are closing markers, not decisions - they never take part in the effective verdict.
   const mine = rows.filter(
-    (r) => r.class === key.class && r.subject_id === key.subject_id && r.subject_version === key.subject_version,
+    (r) =>
+      r.class === key.class &&
+      r.subject_id === key.subject_id &&
+      r.subject_version === key.subject_version &&
+      r.verdict !== "superseded",
   );
   const human = mine.filter((r) => r.channel === "human-tty").sort((a, b) => b.id - a.id)[0];
-  if (human !== undefined) return { verdict: human.verdict, channel: "human-tty", record_id: human.id };
+  if (human !== undefined) return { verdict: human.verdict as DecidedVerdict, channel: "human-tty", record_id: human.id };
   let worst: DecisionLogRow | undefined;
   for (const r of mine) {
     if (r.channel !== "machine") continue;
-    if (worst === undefined || SEVERITY[r.verdict] >= SEVERITY[worst.verdict]) worst = r;
+    if (worst === undefined || SEVERITY[r.verdict as DecidedVerdict] >= SEVERITY[worst.verdict as DecidedVerdict]) worst = r;
   }
-  return worst === undefined ? null : { verdict: worst.verdict, channel: "machine", record_id: worst.id };
+  return worst === undefined ? null : { verdict: worst.verdict as DecidedVerdict, channel: "machine", record_id: worst.id };
 }
