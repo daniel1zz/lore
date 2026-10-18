@@ -66,6 +66,7 @@ import {
   type EvidenceInput,
 } from "../../../src/service/task-workflow-service.js";
 import type { CreateDocInput } from "@lore/core";
+import { actedStore } from "../../live-invocation.js";
 
 // ─── Real-git fixture helpers (no fakes — see module MOCK RISK note) ────────
 
@@ -114,7 +115,7 @@ afterEach(() => {
 // ─── Fixture helpers (mirror task-workflow-service.test.ts's own shape) ─────
 
 function makeServices() {
-  const store = new InMemoryStore();
+  const store = actedStore(new InMemoryStore());
   const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
   const taskWorkflowService = new TaskWorkflowService(store, undefined, { claimTtlMinutes: 120 });
   return { store, corpusService, taskWorkflowService };

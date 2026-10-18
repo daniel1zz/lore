@@ -21,22 +21,21 @@
  * `real-git-port.ts::writeClaimSessionMarker`'s identical convention).
  *
  * Public surface:
- *   - WriteSessionHeartbeat / writeSessionHeartbeat(sessionId, record) —
- *     best-effort write, NEVER throws (advisory only, mirrors
+ *   - WriteSessionHeartbeat / createWriteSessionHeartbeat(tmpDir) —
+ *     best-effort write (sessionId, record), NEVER throws (advisory only, mirrors
  *     `bindClaimSessionForTrailer`).
- *   - ReadSessionHeartbeat / readSessionHeartbeat(sessionId) — validates the
+ *   - ReadSessionHeartbeat / createReadSessionHeartbeat(tmpDir) — (sessionId) validates the
  *     read boundary via `sessionHeartbeatRecordSchema` (`session-liveness.ts`'s
  *     Zod SSOT); an absent file, an unreadable file, or a malformed/legacy
  *     payload ALL degrade uniformly to `undefined` ("no recorded heartbeat"),
  *     never a throw.
  *
- * Side-effect class: IO (filesystem read/write under `os.tmpdir()`).
+ * Side-effect class: IO (filesystem read/write under the temp directory the composition hands in).
  *
  * Source: spec-multi-session-concurrency-queryable-ownership-checkout §Scope L0, AC-OWN-5.
  */
 
 import { readFileSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { sessionHeartbeatRecordSchema, type SessionHeartbeatRecord } from "../service/session-liveness.js";
@@ -57,33 +56,40 @@ export type WriteSessionHeartbeat = (sessionId: string, record: SessionHeartbeat
 export type ReadSessionHeartbeat = (sessionId: string) => Promise<SessionHeartbeatRecord | undefined>;
 
 /**
- * @param sessionId - The session instance to record a heartbeat for.
- * @param record - The `{pid, started_at, machine?}` fact to persist.
- * @returns Always resolves — a filesystem fault is swallowed (advisory only,
+ * Build the write port over `tmpDir` (the invocation's `paths.tmpDir`).
+ *
+ * @param tmpDir - Directory the heartbeat files live in.
+ * @returns A port that always resolves — a filesystem fault is swallowed (advisory only,
  *   see this module's own header).
  */
-export const writeSessionHeartbeat: WriteSessionHeartbeat = async (sessionId, record) => {
+export function createWriteSessionHeartbeat(tmpDir: string): WriteSessionHeartbeat {
+  return async (sessionId, record) => {
   try {
-    writeFileSync(join(tmpdir(), heartbeatFilename(sessionId)), JSON.stringify(record), "utf8");
+    writeFileSync(join(tmpDir, heartbeatFilename(sessionId)), JSON.stringify(record), "utf8");
   } catch {
     // reason: advisory only — a tmpdir write fault must never fail the caller
     // (`SessionService.recordOwnHeartbeat`'s own doc), mirrors
     // `bindClaimSessionForTrailer`'s identical discard-and-continue shape.
   }
-};
+  };
+}
 
 /**
- * @param sessionId - The session instance to look up a heartbeat for.
- * @returns The validated `SessionHeartbeatRecord`, or `undefined` when no
+ * Build the read port over `tmpDir` (the invocation's `paths.tmpDir`).
+ *
+ * @param tmpDir - Directory the heartbeat files live in.
+ * @returns A port resolving the validated `SessionHeartbeatRecord`, or `undefined` when no
  *   heartbeat file exists, it is unreadable, or its content fails
  *   `sessionHeartbeatRecordSchema` validation.
  */
-export const readSessionHeartbeat: ReadSessionHeartbeat = async (sessionId) => {
+export function createReadSessionHeartbeat(tmpDir: string): ReadSessionHeartbeat {
+  return async (sessionId) => {
   try {
-    const raw = readFileSync(join(tmpdir(), heartbeatFilename(sessionId)), "utf8");
+    const raw = readFileSync(join(tmpDir, heartbeatFilename(sessionId)), "utf8");
     const parsed = sessionHeartbeatRecordSchema.safeParse(JSON.parse(raw));
     return parsed.success ? parsed.data : undefined;
   } catch {
     return undefined;
   }
-};
+  };
+}

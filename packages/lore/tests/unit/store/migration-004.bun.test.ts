@@ -41,6 +41,7 @@ import { MIGRATION_001_SQL } from "../../../src/store/migrations/migration-001.j
 import { MIGRATION_002_SQL } from "../../../src/store/migrations/migration-002.js";
 import { MIGRATION_003_SQL } from "../../../src/store/migrations/migration-003.js";
 import { MIGRATION_004_SQL } from "../../../src/store/migrations/migration-004.js";
+import { actedStore } from "../../live-invocation.js";
 
 function userVersion(db: Database): number {
   return (db.query("PRAGMA user_version").get() as { user_version: number }).user_version;
@@ -93,7 +94,7 @@ describe("migration-004 (widen links.link_type CHECK to accept 'governs') — at
   });
 
   it("HAPPY: a fresh SQLiteStore lands on user_version 4 and accepts a 'governs' link row", () => {
-    const store = new SQLiteStore(":memory:");
+    const store = actedStore(new SQLiteStore(":memory:"));
     const db = store.getDatabase();
 
     // reason: SPEC-044 T1 added migration-005 (review_judgments.kind +

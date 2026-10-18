@@ -61,7 +61,7 @@
  * repo's own `.lore/` corpus is never touched (root CLAUDE.md).
  */
 
-import { liveInvocation } from "../../live-invocation.js";
+import { liveInvocation, actedStore } from "../../live-invocation.js";
 import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -237,7 +237,7 @@ let app: App;
 let server: McpServer;
 
 beforeEach(() => {
-  store = new InMemoryStore();
+  store = actedStore(new InMemoryStore());
   app = makeApp(store);
   server = new McpServer({ name: "test", version: "0.0.0" });
   registerTools(server, app, undefined, liveInvocation());
@@ -373,7 +373,7 @@ describe("AC-CP-5(c) HTTP EXEMPTION — observed at the predicate boundary via a
     // wiring is now asserted where it actually lives — the composition root —
     // by `loader-foreign-write-surface.bun.test.ts` (behaviour) and by the
     // production-wiring census at the bottom of this file (call sites).
-    const httpStore = new InMemoryStore();
+    const httpStore = actedStore(new InMemoryStore());
     const httpCorpusService = new CorpusService(httpStore, new RecordLockService(httpStore, new GateEnforcer(undefined)));
 
     const actor: ActorContext = {
@@ -405,7 +405,7 @@ describe("AC-CP-5(c) HTTP EXEMPTION — observed at the predicate boundary via a
   });
 
   it("CONTROL — provenance:null is NOT indistinguishable from never-called: CorpusService.createHandoffDoc (a REAL write that deliberately bypasses this guard) succeeds while invoking the predicate ZERO times", async () => {
-    const controlStore = new InMemoryStore();
+    const controlStore = actedStore(new InMemoryStore());
     const controlCorpusService = new CorpusService(controlStore, new RecordLockService(controlStore, new GateEnforcer(undefined)));
 
     guardSpy.mockClear();

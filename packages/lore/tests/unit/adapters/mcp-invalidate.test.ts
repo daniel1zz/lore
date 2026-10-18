@@ -35,7 +35,7 @@
  * @spec_ref SPEC-043 §Acceptance Criteria AC-MH-9
  */
 
-import { liveInvocation } from "../../live-invocation.js";
+import { liveInvocation, actedStore } from "../../live-invocation.js";
 import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
 import { describe, it, expect } from "vitest";
@@ -65,7 +65,7 @@ let corpusService: CorpusService;
 let validityService: ValidityService;
 
 function makeApp(): App {
-  store = new InMemoryStore();
+  store = actedStore(new InMemoryStore());
   corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
   validityService = new ValidityService(store);
 

@@ -37,6 +37,7 @@ import { CorpusService } from "../../../src/service/corpus-service.js";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { InMemoryAIProvider } from "../../../src/ai/in-memory-provider.js";
 import type { AIProvider, CreateDocInput, DocRecord, StalenessBundle, Telemetry } from "@lore/core";
+import { actedStore } from "../../live-invocation.js";
 
 // ─── Test helpers ─────────────────────────────────────────────────────────────
 
@@ -97,7 +98,7 @@ const HOLDS_JSON = JSON.stringify({
 
 describe("probeStaleness — HAPPY", () => {
   it("prompt contains the doc's content, age_days, in-neighbor slugs, and validity state", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const doc = await makeKnowledgeDoc(store);
     const bundle = makeBundle(doc);
     const provider = new InMemoryAIProvider("in-memory", { kind: "ok", content: HOLDS_JSON });
@@ -113,7 +114,7 @@ describe("probeStaleness — HAPPY", () => {
   });
 
   it("a well-formed 'holds' response produces an ok judgment with kind='staleness', decision='approve'", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const doc = await makeKnowledgeDoc(store);
     const bundle = makeBundle(doc);
     const provider = new InMemoryAIProvider("in-memory", { kind: "ok", content: HOLDS_JSON });
@@ -128,7 +129,7 @@ describe("probeStaleness — HAPPY", () => {
   });
 
   it("a well-formed 'stale_candidate' response maps to decision='escalate' and carries blocking_questions", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const doc = await makeKnowledgeDoc(store);
     const bundle = makeBundle(doc);
     const staleJson = JSON.stringify({
@@ -152,7 +153,7 @@ describe("probeStaleness — HAPPY", () => {
 
 describe("probeStaleness — NEGATIVE: out-of-enum decision is a hard error with NO retry", () => {
   it("provider is called EXACTLY ONCE — the malformed-but-syntactically-valid response is never retried", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const doc = await makeKnowledgeDoc(store);
     const bundle = makeBundle(doc);
     const outOfEnumJson = JSON.stringify({
@@ -172,7 +173,7 @@ describe("probeStaleness — NEGATIVE: out-of-enum decision is a hard error with
   });
 
   it("no judgment is returned on an out-of-enum decision", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const doc = await makeKnowledgeDoc(store);
     const bundle = makeBundle(doc);
     const outOfEnumJson = JSON.stringify({
@@ -193,7 +194,7 @@ describe("probeStaleness — NEGATIVE: out-of-enum decision is a hard error with
 
 describe("probeStaleness — BOUNDARY: neighbor list capped at neighbor_limit with a LOUD '+n more' tail", () => {
   it("a neighbor list longer than neighbor_limit (3) shows only the first 3 plus a '+n more' line", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const doc = await makeKnowledgeDoc(store);
     const bundle = makeBundle(doc, {
       neighbors: [
@@ -218,7 +219,7 @@ describe("probeStaleness — BOUNDARY: neighbor list capped at neighbor_limit wi
   });
 
   it("a neighbor list at or under neighbor_limit shows NO '+n more' tail", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const doc = await makeKnowledgeDoc(store);
     const bundle = makeBundle(doc); // 2 neighbors, limit is 3
     const provider = new InMemoryAIProvider("in-memory", { kind: "ok", content: HOLDS_JSON });
@@ -234,7 +235,7 @@ describe("probeStaleness — BOUNDARY: neighbor list capped at neighbor_limit wi
 
 describe("probeStaleness — ERROR: double-malformed failure", () => {
   it("first malformed, second ALSO malformed -> AI_PROVIDER_ERROR with a <=500-char raw-output prefix, no judgment", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const doc = await makeKnowledgeDoc(store);
     const bundle = makeBundle(doc);
     const longGarbage = "not json ".repeat(200);
@@ -257,7 +258,7 @@ describe("probeStaleness — ERROR: double-malformed failure", () => {
 
 describe("probeStaleness — STATE: doc_version is the BUNDLE-ASSEMBLY-TIME version (T8)", () => {
   it("a concurrent edit to the doc AFTER bundle assembly does not change the returned judgment's doc_version", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const doc = await makeKnowledgeDoc(store);
     const bundle = makeBundle(doc); // pins doc.version at assembly time
 
@@ -278,7 +279,7 @@ describe("probeStaleness — STATE: doc_version is the BUNDLE-ASSEMBLY-TIME vers
 
 describe("probeStaleness — REGRESSION: corrective retry success mirrors judgeDoc's contract", () => {
   it("first malformed, second valid -> ok; the SECOND call's content wins", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const doc = await makeKnowledgeDoc(store);
     const bundle = makeBundle(doc);
     const secondJson = JSON.stringify({
@@ -302,7 +303,7 @@ describe("probeStaleness — REGRESSION: corrective retry success mirrors judgeD
   });
 
   it("the retry prompt embeds a correction notice", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const doc = await makeKnowledgeDoc(store);
     const bundle = makeBundle(doc);
     const provider = new InMemoryAIProvider("in-memory", {

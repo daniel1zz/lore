@@ -47,6 +47,7 @@ import { OutlineService } from "../../../src/service/outline-service.js";
 import { SessionService } from "../../../src/service/session-service.js";
 import { TaskWorkflowService } from "../../../src/service/task-workflow-service.js";
 import type { CreateDocInput, DocRecord, EvidenceEntry } from "@lore/core";
+import { actedStore } from "../../live-invocation.js";
 
 // ─── Shared fixture helpers ───────────────────────────────────────────────────
 
@@ -120,7 +121,7 @@ const AC1 = { id: "AC-1", statement: "some property holds", verify: { mode: "hum
 
 describe("AcService.findTasksUnderPlans (task-eight-more-plan-member-queries-still-key-on-parent-id)", () => {
   it("HAPPY (case H): a diverged P3 member (T6, filed at P4) counts toward P3's AC coverage", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
     const acService = new AcService(store, new RecordLockService(store, new GateEnforcer(undefined)));
     const prd = await createPrd(corpusService, "PRD Ac1");
@@ -154,7 +155,7 @@ describe("AcService.findTasksUnderPlans (task-eight-more-plan-member-queries-sti
   });
 
   it("CONTROL: a plain plan (parent_id === extra.plan_id everywhere) yields the byte-identical coverage the pre-fix parent_id-keyed query would have", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
     const acService = new AcService(store, new RecordLockService(store, new GateEnforcer(undefined)));
     const prd = await createPrd(corpusService, "PRD Ac Control");
@@ -171,7 +172,7 @@ describe("AcService.findTasksUnderPlans (task-eight-more-plan-member-queries-sti
   });
 
   it("CONTROL: an --adhoc task never counts toward a plan-scoped coverage aggregation via findTasksUnderPlans", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
     const acService = new AcService(store, new RecordLockService(store, new GateEnforcer(undefined)));
     const prd = await createPrd(corpusService, "PRD Ac Adhoc");
@@ -202,7 +203,7 @@ describe("AcService.findTasksUnderPlans (task-eight-more-plan-member-queries-sti
 
 describe("CorpusService.getAssessmentFreshness (task-eight-more-plan-member-queries-still-key-on-parent-id)", () => {
   it("HAPPY (case H): a diverged P3 member's (T6, filed at P4) recorded evidence activity IS reflected in newestTaskActivityAt", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
     const taskWorkflowService = new TaskWorkflowService(store, undefined, { claimTtlMinutes: 120 });
     const p3 = await createPlan(corpusService, null, "P3 Freshness");
@@ -233,7 +234,7 @@ describe("CorpusService.getAssessmentFreshness (task-eight-more-plan-member-quer
   });
 
   it("CONTROL: a plain plan (parent_id === extra.plan_id) with no task activity at all still reports newestTaskActivityAt as undefined", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
     const plan = await createPlan(corpusService, null, "Plain Freshness Plan");
     await createTask(corpusService, plan.id, plan.id, "T1");
@@ -249,7 +250,7 @@ describe("CorpusService.getAssessmentFreshness (task-eight-more-plan-member-quer
 
 describe("VerificationProjectionService.resolvePlanTasks (task-eight-more-plan-member-queries-still-key-on-parent-id)", () => {
   it("HAPPY (case H): the plan Evidence-tab panel's per-task attestation list includes the diverged P3 member (T6, filed at P4)", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
     const projectionService = new VerificationProjectionService(store, null);
     const p3 = await createPlan(corpusService, null, "P3 Panel");
@@ -269,7 +270,7 @@ describe("VerificationProjectionService.resolvePlanTasks (task-eight-more-plan-m
   });
 
   it("CONTROL: a task merely FILED at P3 but BELONGING to P4 is excluded from P3's panel", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
     const projectionService = new VerificationProjectionService(store, null);
     const p3 = await createPlan(corpusService, null, "P3 Panel Negative");
@@ -288,7 +289,7 @@ describe("VerificationProjectionService.resolvePlanTasks (task-eight-more-plan-m
 
 describe("PhaseService.findTasksByPhase (task-eight-more-plan-member-queries-still-key-on-parent-id)", () => {
   it("HAPPY (case H): removePhase is BLOCKED by a diverged P3 member (T6, filed at P4) still referencing the phase", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
     const phaseService = new PhaseService(store, new RecordLockService(store, new GateEnforcer(undefined)));
     const p3 = await createPlan(corpusService, null, "P3 Phase");
@@ -313,7 +314,7 @@ describe("PhaseService.findTasksByPhase (task-eight-more-plan-member-queries-sti
   });
 
   it("NEGATIVE (write-adjacent consequence): renamePhase updates the diverged member's extra.phase too, not just undiverged siblings", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
     const phaseService = new PhaseService(store, new RecordLockService(store, new GateEnforcer(undefined)));
     const p3 = await createPlan(corpusService, null, "P3 Phase Rename");
@@ -337,7 +338,7 @@ describe("PhaseService.findTasksByPhase (task-eight-more-plan-member-queries-sti
   });
 
   it("CONTROL: a task merely FILED at P3 but BELONGING to P4 never blocks P3's removePhase and is never touched by P3's renamePhase", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
     const phaseService = new PhaseService(store, new RecordLockService(store, new GateEnforcer(undefined)));
     const p3 = await createPlan(corpusService, null, "P3 Phase Negative");
@@ -368,7 +369,7 @@ describe("PhaseService.findTasksByPhase (task-eight-more-plan-member-queries-sti
 
 describe("OutlineService.resolveAcceptanceProjection (task-eight-more-plan-member-queries-still-key-on-parent-id)", () => {
   it("HAPPY (case H): the spec's rendered AC coverage counts the diverged P3 member (T6, filed at P4)", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
     const outlineService = new OutlineService(store);
     const prd = await createPrd(corpusService, "PRD Outline");
@@ -391,7 +392,7 @@ describe("OutlineService.resolveAcceptanceProjection (task-eight-more-plan-membe
   });
 
   it("CONTROL: a spec with zero plans yields an empty (never erroring) coverage", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
     const outlineService = new OutlineService(store);
     const prd = await createPrd(corpusService, "PRD Outline Control");
@@ -420,7 +421,7 @@ describe("SessionService.computeReadinessPointer (task-eight-more-plan-member-qu
   }
 
   it("HAPPY (case H): resume's readiness pointer for P3 counts BOTH the undiverged member AND the diverged member (T6, filed at P4)", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const { corpusService, sessionService } = makeSessionService(store);
     const p3 = await createPlan(corpusService, null, "P3 Resume");
     const p4 = await createPlan(corpusService, null, "P4 Resume");
@@ -449,7 +450,7 @@ describe("SessionService.computeReadinessPointer (task-eight-more-plan-member-qu
   });
 
   it("CONTROL: a plain plan (parent_id === extra.plan_id everywhere) yields the byte-identical readiness total the pre-fix parent_id-keyed query would have", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const { corpusService, sessionService } = makeSessionService(store);
     const plan = await createPlan(corpusService, null, "Plain Resume Plan");
     await createTask(corpusService, plan.id, plan.id, "T1");
@@ -473,7 +474,7 @@ describe("SessionService.computeReadinessPointer (task-eight-more-plan-member-qu
   });
 
   it("CONTROL: an --adhoc task (no plan_id) is never counted in any plan's readiness total", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const { corpusService, sessionService } = makeSessionService(store);
     await createPrd(corpusService, "Root PRD Adhoc Resume"); // --adhoc tasks auto-parent to the root PRD
     const plan = await createPlan(corpusService, null, "Adhoc Resume Plan");

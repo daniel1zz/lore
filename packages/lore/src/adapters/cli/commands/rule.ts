@@ -36,10 +36,11 @@
  * Source: spec-baseline-slice-1-rules-with-permanent-ids-ac-citations §C3.
  */
 
+import type { Invocation } from "@lore/core";
 import { defineCommand } from "citty";
 import type { LoreError } from "@lore/core";
 import { loadLoreApp } from "../loader.js";
-import { exitCode, formatError, resolveActor } from "../utils.js";
+import { exitCode, formatErrorFor, resolveActor } from "../utils.js";
 import type { App } from "../../../app.js";
 import type { AddRuleInput, SetRulePatch } from "../../../service/rule-service.js";
 import type { ProposeRuleChangeInput, RuleEnforcement } from "../../../service/rule-change-service.js";
@@ -51,9 +52,9 @@ function repeatable(value: unknown): string[] | undefined {
   return Array.isArray(value) ? value.map(String) : [String(value)];
 }
 
-function reportFailure(error: LoreError, json: boolean): void {
+function reportFailure(inv: Invocation, error: LoreError, json: boolean): void {
   if (json) console.log(JSON.stringify({ ok: false, error }, null, 2));
-  else process.stderr.write(formatError(error));
+  else process.stderr.write(formatErrorFor(inv, error));
   process.exitCode = exitCode(error);
 }
 
@@ -110,7 +111,7 @@ export default defineCommand({
         try {
           if (app.ruleReadService === undefined) return failUsage("RuleReadService is not available in this build.", args.json === true);
           const result = await app.ruleReadService.show(args.rule as string);
-          if (!result.ok) return reportFailure(result.error, args.json === true);
+          if (!result.ok) return reportFailure(inv, result.error, args.json === true);
           if (args.json) return void console.log(JSON.stringify({ ok: true, data: result.value }, null, 2));
           const v = result.value;
           if (v.state === "proposed") {
@@ -145,7 +146,7 @@ export default defineCommand({
           const query =
             typeof args.spec === "string" ? { spec: args.spec } : typeof args.file === "string" ? { file: args.file } : { text: args.text as string };
           const result = await app.ruleReadService.find(query, { includeTombstones: args["include-retired"] === true });
-          if (!result.ok) return reportFailure(result.error, args.json === true);
+          if (!result.ok) return reportFailure(inv, result.error, args.json === true);
           if (args.json) return void console.log(JSON.stringify({ ok: true, data: { rules: result.value } }, null, 2));
           console.log(result.value.length === 0 ? "No matching rules." : result.value.join("\n"));
         } finally {
@@ -166,7 +167,7 @@ export default defineCommand({
         try {
           if (app.impactService === undefined) return failUsage("ImpactService is not available in this build.", args.json === true);
           const result = await app.impactService.impact(args.rule as string);
-          if (!result.ok) return reportFailure(result.error, args.json === true);
+          if (!result.ok) return reportFailure(inv, result.error, args.json === true);
           if (args.json) return void console.log(JSON.stringify({ ok: true, data: result.value }, null, 2));
           const v = result.value;
           // Standing split (spec D7): Living (edited in place) before Records (locked once approved).
@@ -240,10 +241,10 @@ export default defineCommand({
         try {
           if (app.ruleChangeService === undefined) return failUsage("RuleChangeService is not available in this build.", json);
           const result = await app.ruleChangeService.propose(args.spec as string, input, {
-            by: resolveActor(undefined, inv.env, inv.cwd),
+            by: resolveActor(undefined, inv.env, inv.cwd, inv.user),
             ...(args.correction !== undefined ? { correction: { reason: args.correction as string } } : {}),
           });
-          if (!result.ok) return reportFailure(result.error, json);
+          if (!result.ok) return reportFailure(inv, result.error, json);
           const { change, doc } = result.value;
           if (json) return void console.log(JSON.stringify({ ok: true, data: { change, spec: doc.slug, version: doc.version } }, null, 2));
           console.log(
@@ -275,8 +276,8 @@ export default defineCommand({
         const { app } = loadLoreApp({ inv });
         try {
           if (app.ruleChangeService === undefined) return failUsage("RuleChangeService is not available in this build.", json);
-          const result = await app.ruleChangeService.apply(args.spec as string, { by: resolveActor(undefined, inv.env, inv.cwd) });
-          if (!result.ok) return reportFailure(result.error, json);
+          const result = await app.ruleChangeService.apply(args.spec as string, { by: resolveActor(undefined, inv.env, inv.cwd, inv.user) });
+          if (!result.ok) return reportFailure(inv, result.error, json);
           const outcome = result.value;
           if (json) return void console.log(JSON.stringify({ ok: true, data: outcome }, null, 2));
           if (outcome.kind === "noop") {
@@ -308,7 +309,7 @@ export default defineCommand({
         try {
           if (app.ruleChangeService === undefined) return failUsage("RuleChangeService is not available in this build.", args.json === true);
           const result = await app.ruleChangeService.changes(args.spec as string);
-          if (!result.ok) return reportFailure(result.error, args.json === true);
+          if (!result.ok) return reportFailure(inv, result.error, args.json === true);
           if (args.json) return void console.log(JSON.stringify({ ok: true, data: result.value }, null, 2));
           const { spec, changes } = result.value;
           if (changes.length === 0) return void console.log(`${spec}: no rule changes.`);
@@ -354,8 +355,8 @@ export default defineCommand({
             examples: repeatable(args.example) ?? [],
             ...four.parts,
           };
-          const result = await svc.addRule(args.leaf as string, input, { by: resolveActor(undefined, inv.env, inv.cwd) });
-          if (!result.ok) return reportFailure(result.error, args.json === true);
+          const result = await svc.addRule(args.leaf as string, input, { by: resolveActor(undefined, inv.env, inv.cwd, inv.user) });
+          if (!result.ok) return reportFailure(inv, result.error, args.json === true);
           if (args.json) {
             console.log(JSON.stringify({ ok: true, data: { ruleId: result.value.ruleId, leaf: result.value.doc.slug, version: result.value.doc.version } }, null, 2));
           } else {
@@ -404,8 +405,8 @@ export default defineCommand({
             ...(args["move-to"] !== undefined ? { moveTo: args["move-to"] as string } : {}),
             ...four.parts,
           };
-          const result = await svc.setRule(args.rule as string, patch, { by: resolveActor(undefined, inv.env, inv.cwd) });
-          if (!result.ok) return reportFailure(result.error, args.json === true);
+          const result = await svc.setRule(args.rule as string, patch, { by: resolveActor(undefined, inv.env, inv.cwd, inv.user) });
+          if (!result.ok) return reportFailure(inv, result.error, args.json === true);
           if (args.json) {
             console.log(JSON.stringify({ ok: true, data: { rule: result.value.rule, leaf: result.value.doc.slug, version: result.value.doc.version } }, null, 2));
           } else {

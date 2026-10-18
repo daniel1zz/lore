@@ -97,7 +97,7 @@
  *   AC-CP-9, AC-CP-10. Task task-t5-compiled-e2e-suite-proving-every-surface-from-a.
  */
 
-import { liveInvocation } from "../live-invocation.js";
+import { liveInvocation, liveAmbient, liveWriteContext } from "../live-invocation.js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
@@ -264,7 +264,7 @@ describe("AC-CP-4: resume ticket scope closure on BOTH the compiled CLI stdout a
     // Real SQLiteStore-backed App against the SAME db the compiled CLI just
     // wrote to — never InMemoryStore — so the MCP surface and the CLI stdout
     // above operate on genuinely shared, disk-backed state.
-    app = createApp(join(dir, ".lore", "lore.db"));
+    app = createApp(join(dir, ".lore", "lore.db"), undefined, liveAmbient(), liveWriteContext());
     server = new McpServer({ name: "t5-scope-closure", version: "0.0.0" });
     registerTools(server, app, undefined, liveInvocation());
   });

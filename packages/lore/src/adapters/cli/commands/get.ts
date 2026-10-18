@@ -83,7 +83,7 @@ import {
   formatImplementsLines,
 } from "../../../service/spec-relations.js";
 import { loadLoreApp } from "../loader.js";
-import { exitCode, formatError, formatNavigation, formatShortId } from "../utils.js";
+import { exitCode, formatErrorFor, formatNavigation, formatShortId } from "../utils.js";
 import { projectValidityStatus } from "../../../service/validity-service.js";
 import type { ResolvedComponent } from "../../../service/outline-service.js";
 import { renderDocBodyWithoutLossNotice } from "../../../flows/feed-flow.js";
@@ -203,7 +203,7 @@ export default defineCommand({
       const result = await app.corpusService.get(args.id);
 
       if (!result.ok) {
-        process.stderr.write(formatError(result.error) + "\n");
+        process.stderr.write(formatErrorFor(inv, result.error) + "\n");
         process.exitCode = exitCode(result.error);
         return;
       }
@@ -246,7 +246,7 @@ export default defineCommand({
       // row has no attested write: it reads `unattested` with its stored author.
       const latest = await loadVersionAttributions(attributionStore, doc.id, 1);
       if (!latest.ok) {
-        process.stderr.write(formatError(latest.error) + "\n");
+        process.stderr.write(formatErrorFor(inv, latest.error) + "\n");
         process.exitCode = exitCode(latest.error);
         return;
       }
@@ -255,7 +255,7 @@ export default defineCommand({
       // BR-1008 — Implements (spec) / Implemented by (baseline node), computed from citations on demand.
       const relations = await loadSpecRelations(app, doc);
       if (!relations.ok) {
-        process.stderr.write(formatError(relations.error) + "\n");
+        process.stderr.write(formatErrorFor(inv, relations.error) + "\n");
         process.exitCode = exitCode(relations.error);
         return;
       }
@@ -274,7 +274,7 @@ export default defineCommand({
         const later = await loadLaterChanges(attributionStore, doc);
         const failure = [lock, corrections, later].find((r) => !r.ok);
         if (failure !== undefined && !failure.ok) {
-          process.stderr.write(formatError(failure.error) + "\n");
+          process.stderr.write(formatErrorFor(inv, failure.error) + "\n");
           process.exitCode = exitCode(failure.error);
           return;
         }

@@ -22,12 +22,13 @@ import {
 } from "../../../src/eval/scenarios/placeholder-parse.js";
 import type { App } from "../../../src/app.js";
 import type { DocRecord } from "@lore/core";
+import { actedStore } from "../../live-invocation.js";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 /** Build a minimal App using InMemoryStore — no SQLite, no disk I/O. */
 function makeApp(store?: InMemoryStore): App {
-  const s = store ?? new InMemoryStore();
+  const s = store ?? actedStore(new InMemoryStore());
   const telemetry = new NoOpTelemetry();
   return {
     corpusService: new CorpusService(s, new RecordLockService(s, new GateEnforcer(undefined)), telemetry),
@@ -92,7 +93,7 @@ describe("HAPPY — corpus with only whitelisted resolved placeholders", () => {
   it("returns passed=true on corpus with a ChildrenOf whitelisted placeholder", async () => {
     // Spec: whitelisted components resolve successfully → passed=true, unknown_warnings=0
     // The ChildrenOf component queries children of the parent doc by type.
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     // Parent PRD with a ChildrenOf placeholder
     const prd = makeDoc({
       type: "prd",
@@ -124,7 +125,7 @@ describe("HAPPY — corpus with only whitelisted resolved placeholders", () => {
   it("returns passed=true on corpus with multiple distinct whitelisted placeholders", async () => {
     // Spec: all 7 whitelisted component types should resolve without warnings
     // Using RecentDecisions and HealthStats (no special setup required)
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const prd = makeDoc({
       type: "prd",
       content: "<RecentDecisions />\n<HealthStats />",
@@ -149,7 +150,7 @@ describe("HAPPY — corpus with only whitelisted resolved placeholders", () => {
 describe("NEGATIVE — corpus contains an unknown component", () => {
   it("returns passed=false when corpus contains an unknown component", async () => {
     // Spec: non-whitelisted component → stripped + warning → unknown_warnings >= 1, passed=false
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const prd = makeDoc({
       type: "prd",
       content: "Some text <UnknownComp />",
@@ -173,7 +174,7 @@ describe("NEGATIVE — corpus contains an unknown component", () => {
 
   it("returns passed=false even if mixed: one whitelisted + one unknown component", async () => {
     // Spec: ANY unknown warning flips passed to false
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const prd = makeDoc({
       type: "prd",
       content: "<HealthStats />\n<BogusWidget />",
@@ -215,7 +216,7 @@ describe("BOUNDARY — empty corpus", () => {
 describe("BOUNDARY — corpus with no placeholders", () => {
   it("returns passed=true on corpus with plain markdown content", async () => {
     // Spec: docs without MDX placeholder tags are skipped; scenario passes trivially
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     // Multiple docs with plain text — no self-closing MDX tags
     for (let i = 0; i < 5; i++) {
       await store.insert(makeDoc({
@@ -240,7 +241,7 @@ describe("BOUNDARY — corpus with no placeholders", () => {
   it("does not count lowercase self-closing tags as placeholders", async () => {
     // Spec: placeholder regex requires uppercase-first component name
     // <br /> and <hr /> should NOT be counted as MDX component placeholders
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     await store.insert(makeDoc({
       type: "prd",
       content: "Line one<br />Line two<hr />End",
@@ -261,7 +262,7 @@ describe("BOUNDARY — details.unknown_components capped at 10", () => {
   it("15 unique unknown placeholders → details.unknown_components has exactly 10 entries", async () => {
     // Spec: details.unknown_components is capped at top-10 by encounter order
     // The unknown_warnings COUNTER is unbounded; only the details array is capped
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     // Build content with 15 distinct unknown components
     const tags = Array.from({ length: 15 }, (_, i) => `<Unknown${String.fromCharCode(65 + i)} />`);
     const content = tags.join("\n");
@@ -288,7 +289,7 @@ describe("BOUNDARY — details.unknown_components capped at 10", () => {
 describe("ERROR — outlineService.resolve returns err for one doc", () => {
   it("resolution error is counted in resolution_errors and passed=false", async () => {
     // Spec: docs whose outlineService.resolve() returns an error → counted in resolution_errors
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const prd = makeDoc({
       type: "prd",
       content: "<HealthStats />",
@@ -345,7 +346,7 @@ describe("ERROR — corpusService.list returns err", () => {
 describe("ERROR — mass resolve failures do not cause runPlaceholderParse to throw", () => {
   it("all resolve() calls fail → resolves to valid result with passed=false", async () => {
     // Spec: never throws — all errors surface as passed=false
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     // 5 docs each with a placeholder → all resolves fail
     for (let i = 0; i < 5; i++) {
       await store.insert(makeDoc({
@@ -379,7 +380,7 @@ describe("ERROR — corpusService.get failure is non-fatal (doc is skipped)", ()
   it("get() failure causes the doc to be skipped, not counted as resolution_error", async () => {
     // Spec (invariant in source comment): a single doc fetch failure is non-fatal —
     // the doc is skipped and is NOT counted in resolution_errors (failure before resolve)
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const prd = makeDoc({ type: "prd", content: "<HealthStats />" });
     await store.insert(prd);
 
@@ -409,7 +410,7 @@ describe("ERROR — corpusService.get failure is non-fatal (doc is skipped)", ()
 describe("STATE — runPlaceholderParse does not mutate the corpus", () => {
   it("doc list before and after the scenario run is identical", async () => {
     // Spec: read-only on corpusService + outlineService; no corpus mutations
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const prd = makeDoc({ type: "prd", content: "<ChildrenOf />" });
     await store.insert(prd);
 
@@ -441,7 +442,7 @@ describe("STATE — runPlaceholderParse does not mutate the corpus", () => {
 describe("STATE — runPlaceholderParse is idempotent", () => {
   it("same corpus yields identical result fields across two consecutive runs", async () => {
     // Spec: idempotent — read-only on corpusService + outlineService
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const prd = makeDoc({
       type: "prd",
       content: "<RecentDecisions />\n<UnknownWidget />",
@@ -471,7 +472,7 @@ describe("STATE — runPlaceholderParse is idempotent", () => {
 describe("REGRESSION — result conforms to PlaceholderParseResultSchema", () => {
   it("Zod schema round-trip must not throw for any run result", async () => {
     // Spec: PlaceholderParseResultSchema is the SSOT for result shape
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const prd = makeDoc({
       type: "prd",
       content: "<HealthStats />\n<BadComp />",
@@ -504,7 +505,7 @@ describe("REGRESSION — result conforms to PlaceholderParseResultSchema", () =>
 describe("REGRESSION — skips soft-deleted docs", () => {
   it("soft-deleted doc with placeholder is not counted in scanned or placeholder totals", async () => {
     // Spec: list({}) excludes soft-deleted docs (store.findMany adds deleted_at IS NULL by default)
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const prd = makeDoc({
       type: "prd",
       content: "<UnknownWidget />",
@@ -532,7 +533,7 @@ describe("REGRESSION — skips soft-deleted docs", () => {
     // <RouterProvider /> / <Outlet /> example blocks) previously flipped
     // passed=false via spurious unknown_warnings — see outline-service.ts
     // extractComponentMatches / computeCodeRanges.
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const doc = makeDoc({
       type: "spec",
       content: [
@@ -566,7 +567,7 @@ describe("REGRESSION — skips soft-deleted docs", () => {
 
   it("live docs are still scanned after a sibling doc is soft-deleted", async () => {
     // Regression: soft-delete of one doc must not block scanning of sibling docs
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const deleted = makeDoc({ type: "prd", content: "<GoneComp />" });
     const live = makeDoc({ type: "prd", content: "<HealthStats />" });
     await store.insert(deleted);

@@ -114,6 +114,7 @@ import type {
 } from "../../../src/service/task-workflow-service.js";
 import { NoOpTelemetry } from "@lore/core";
 import type { DocRecord, DocType, Result, LoreError, Telemetry } from "@lore/core";
+import { actedStore } from "../../live-invocation.js";
 
 // packages/lore/tests/unit/service/ -> ../../../ -> packages/lore/ ->
 // src/service/phase-workflow-service.js (does not exist yet)
@@ -161,7 +162,7 @@ beforeAll(async () => {
 // ─── Fixtures (mirrors task-workflow-service.test.ts's makeServices shape) ───
 
 function makeServices(ttl = 120, gate?: GateDependencies) {
-  const store = new InMemoryStore();
+  const store = actedStore(new InMemoryStore());
   const service = new mod.PhaseWorkflowService(store, new NoOpTelemetry(), { claimTtlMinutes: ttl }, undefined, gate);
   return { store, service };
 }
@@ -501,7 +502,7 @@ describe("PhaseWorkflowService — plan membership: legacy task extra.plan_id vs
 
 describe("PhaseWorkflowService — REGRESSION §5: anchor-overlap gate field 'gate:phase-claim:anchor-overlap'", () => {
   it("a distinct-actor overlapping claim on phase docs is blocked with the renamed field", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
     const enforcer = new GateEnforcer(undefined);
     const service = new mod.PhaseWorkflowService(

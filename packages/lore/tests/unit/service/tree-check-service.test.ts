@@ -25,6 +25,7 @@ import { DOC_TYPE_ROLE_MAP } from "@lore/core";
 import type { TreeBlueprint } from "@lore/core";
 // RED SIGNAL: this import will fail with ERR_MODULE_NOT_FOUND until the impl lands
 import { TreeCheckService } from "../../../src/service/tree-check-service.js";
+import { actedStore } from "../../live-invocation.js";
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -119,7 +120,7 @@ function prdSpecPlanBlueprint(): TreeBlueprint {
 
 describe("TreeCheckService.checkTree — HAPPY", () => {
   it("AC-TREE-HAPPY-01: empty store with min=0 blueprint → consistent, drifts=[]", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const svc = new TreeCheckService(store);
     const blueprint: TreeBlueprint = {
       version: 1,
@@ -139,7 +140,7 @@ describe("TreeCheckService.checkTree — HAPPY", () => {
   });
 
   it("AC-TREE-HAPPY-02: prd root + a PARENTLESS spec matches the blueprint's spec slot → consistent (BR-2, BR-400)", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const svc = new TreeCheckService(store);
 
     const prdId = makeId("PRD001");
@@ -157,7 +158,7 @@ describe("TreeCheckService.checkTree — HAPPY", () => {
 
   it("AC-TREE-HAPPY-03: two different doc ids produce different drift reports", async () => {
     // Guard against hardcoded return — vary structure
-    const store1 = new InMemoryStore();
+    const store1 = actedStore(new InMemoryStore());
     const svc1 = new TreeCheckService(store1);
     await seedDoc(store1, { id: makeId("PRD001"), type: "prd" });
     const r1 = await svc1.checkTree(prdSpecBlueprint(1, null));
@@ -166,7 +167,7 @@ describe("TreeCheckService.checkTree — HAPPY", () => {
     // One prd, zero specs, min=1 → missing drift expected
     expect(r1.value.consistent).toBe(false);
 
-    const store2 = new InMemoryStore();
+    const store2 = actedStore(new InMemoryStore());
     const svc2 = new TreeCheckService(store2);
     await seedDoc(store2, { id: makeId("PRD002"), type: "prd" });
     await seedDoc(store2, { id: makeId("SPC002"), type: "spec" });
@@ -187,7 +188,7 @@ describe("TreeCheckService.checkTree — NEGATIVE", () => {
      * ONE misplaced drift, not also a "missing" drift for the spec slot under prd.
      * If both are reported, the implementation double-counts.
      */
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const svc = new TreeCheckService(store);
     const prdId = makeId("PRD001");
     const planId = makeId("PLN001");
@@ -227,7 +228,7 @@ describe("TreeCheckService.checkTree — NEGATIVE", () => {
   });
 
   it("AC-TREE-NEG-02: orphan doc with non-null parent_id pointing to unknown parent → orphan drift", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const svc = new TreeCheckService(store);
     const ghostParentId = makeId("GHOST01");
     const specId = makeId("SPC001");
@@ -247,7 +248,7 @@ describe("TreeCheckService.checkTree — NEGATIVE", () => {
   it("AC-TREE-NEG-03: root-level doc that is not a ROOT_TYPE → orphan drift", async () => {
     // re-baseline (BR-2): this used a spec; a parentless spec is legal now, so the control is a
     // knowledge doc with parent_id=null (not a root type, not a parentless type) — still an orphan.
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const svc = new TreeCheckService(store);
     await seedDoc(store, { id: makeId("KNW001"), type: "knowledge", parent_id: null });
 
@@ -260,7 +261,7 @@ describe("TreeCheckService.checkTree — NEGATIVE", () => {
   });
 
   it("AC-TREE-NEG-03b: a parentless spec is neither orphan nor misplaced; a parentless knowledge doc beside it still is an orphan (BR-400)", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const svc = new TreeCheckService(store);
     const specId = makeId("SPC001");
     const knowledgeId = makeId("KNW001");
@@ -279,7 +280,7 @@ describe("TreeCheckService.checkTree — NEGATIVE", () => {
   });
 
   it("AC-TREE-NEG-03c: a spec that still HAS a parent is misplaced, and fix() never re-parents it (BR-2)", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const svc = new TreeCheckService(store);
     const prdId = makeId("PRD001");
     const specId = makeId("SPC001");
@@ -310,7 +311,7 @@ describe("TreeCheckService.checkTree — NEGATIVE", () => {
      * permanent false positive that arms the pre-push gate
      * (`lore status --check-tree`) forever. This is the RED case.
      */
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const svc = new TreeCheckService(store);
     const prdId = makeId("PRD001");
     const adhocTaskId = makeId("ADH001");
@@ -345,7 +346,7 @@ describe("TreeCheckService.checkTree — NEGATIVE", () => {
      * directly under a prd is a genuine drift (e.g. a caller forcing
      * --parent to a PRD without --adhoc) and must keep tripping the gate.
      */
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const svc = new TreeCheckService(store);
     const prdId = makeId("PRD001");
     const strayTaskId = makeId("STR001");
@@ -375,7 +376,7 @@ describe("TreeCheckService.checkTree — NEGATIVE", () => {
      * scoped to task-under-prd only, not a general relaxation of the
      * misplaced check for unrelated type combinations.
      */
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const svc = new TreeCheckService(store);
     const prdId = makeId("PRD001");
     const planId = makeId("PLN001");
@@ -421,7 +422,7 @@ describe("TreeCheckService.checkTree — NEGATIVE", () => {
 
 describe("TreeCheckService.checkTree — BOUNDARY", () => {
   it("AC-TREE-BND-01: min=0 with no matching docs → no missing drift", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const svc = new TreeCheckService(store);
     const prdId = makeId("PRD001");
     await seedDoc(store, { id: prdId, type: "prd" });
@@ -435,7 +436,7 @@ describe("TreeCheckService.checkTree — BOUNDARY", () => {
   });
 
   it("AC-TREE-BND-02: max=null with many docs → no extra drift", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const svc = new TreeCheckService(store);
     const prdId = makeId("PRD001");
     await seedDoc(store, { id: prdId, type: "prd" });
@@ -452,7 +453,7 @@ describe("TreeCheckService.checkTree — BOUNDARY", () => {
   });
 
   it("AC-TREE-BND-03: max=2 with exactly 2 matched → no extra drift", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const svc = new TreeCheckService(store);
     const prdId = makeId("PRD001");
     await seedDoc(store, { id: prdId, type: "prd" });
@@ -467,7 +468,7 @@ describe("TreeCheckService.checkTree — BOUNDARY", () => {
   });
 
   it("AC-TREE-BND-04: max=2 with 3 matched → exactly 1 extra drift", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const svc = new TreeCheckService(store);
     const prdId = makeId("PRD001");
     await seedDoc(store, { id: prdId, type: "prd" });
@@ -492,7 +493,7 @@ describe("TreeCheckService.checkTree — ERROR", () => {
      * A soft-deleted parent is excluded from findMany(exclude_deleted=true),
      * so its id is absent from byId. Child must be reported as orphan, not misplaced.
      */
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const svc = new TreeCheckService(store);
     const prdId = makeId("PRD001");
     const specId = makeId("SPC001");
@@ -523,7 +524,7 @@ describe("TreeCheckService.checkTree — ERROR", () => {
      * drifts include `cycle` for each cycle.
      * Cyclic nodes must NOT appear as orphan or misplaced.
      */
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const svc = new TreeCheckService(store);
     const aId = makeId("AAAA001");
     const bId = makeId("BBBB001");
@@ -560,7 +561,7 @@ describe("TreeCheckService.checkTree — ERROR", () => {
 
 describe("TreeCheckService.fix — STATE", () => {
   it("AC-TREE-STATE-01: orphan with unique legal parent → fix returns FIXED, version incremented", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const svc = new TreeCheckService(store);
     const prdId = makeId("PRD001");
     const specId = makeId("ADR001");
@@ -586,7 +587,7 @@ describe("TreeCheckService.fix — STATE", () => {
   });
 
   it("AC-TREE-STATE-02: second fix call on already-fixed tree → all SKIPPED (idempotent)", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const svc = new TreeCheckService(store);
     const prdId = makeId("PRD001");
     const specId = makeId("ADR001");
@@ -620,7 +621,7 @@ describe("TreeCheckService.fix — STATE", () => {
      * Implementation note: fix() must detect would-create-cycle via ancestorChainWalk
      * BEFORE updating the store.
      */
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const svc = new TreeCheckService(store);
 
     // Build: prd → plan → spec
@@ -690,7 +691,7 @@ describe("TreeCheckService.fix — STATE", () => {
   });
 
   it("AC-TREE-STATE-04: orphan with zero legal parent candidates → SKIPPED reason=0-or-many candidates", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const svc = new TreeCheckService(store);
     const specId = makeId("ADR001");
     // adr with no parent, blueprint has no adr slot → 0 candidates
@@ -710,7 +711,7 @@ describe("TreeCheckService.fix — STATE", () => {
   });
 
   it("AC-TREE-STATE-05: orphan with multiple legal parent candidates → SKIPPED reason=0-or-many candidates", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const svc = new TreeCheckService(store);
     const prdId1 = makeId("PRD001");
     const prdId2 = makeId("PRD002");
@@ -746,7 +747,7 @@ describe("TreeCheckService.checkTree — REGRESSION", () => {
      * misSameType.length == 2 == deficit → missing count = max(deficit - misSameType, 0) = 0.
      * So: 2 misplaced drifts and 0 missing drifts (not 2+2=4).
      */
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const svc = new TreeCheckService(store);
     const prdId = makeId("PRD001");
     const planId = makeId("PLN001");
@@ -787,7 +788,7 @@ describe("TreeCheckService.checkTree — REGRESSION", () => {
 
   it("AC-TREE-REG-02: deleted parent → hanging child is orphan, NOT causing erroneous misplaced", async () => {
     // Regression guard for soft-deleted parent detection (separate from ERROR suite)
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const svc = new TreeCheckService(store);
     const deletedPrdId = makeId("PRD001");
     const specId = makeId("SPC001");
@@ -826,7 +827,7 @@ describe("TreeCheckService.reconcile — D-RECONCILE", () => {
      * but no link record of type 'parent' exists in the link table.
      * reconcile() must detect and report this.
      */
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const svc = new TreeCheckService(store);
     const prdId = makeId("PRD001");
     const specId = makeId("SPC001");
@@ -849,7 +850,7 @@ describe("TreeCheckService.reconcile — D-RECONCILE", () => {
   });
 
   it("AC-TREE-REC-02: link record exists but points to different parent than doc.parent_id → inconsistency", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const svc = new TreeCheckService(store);
     const prdId = makeId("PRD001");
     const prd2Id = makeId("PRD002");
@@ -881,7 +882,7 @@ describe("TreeCheckService.reconcile — D-RECONCILE", () => {
   });
 
   it("AC-TREE-REC-03: consistent doc (parent_id matches link record) → no inconsistency reported", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const svc = new TreeCheckService(store);
     const prdId = makeId("PRD001");
     const specId = makeId("SPC001");
@@ -911,7 +912,7 @@ describe("TreeCheckService.reconcile — D-RECONCILE", () => {
     /**
      * Spec: "link exists while parent_id null → inconsistency"
      */
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const svc = new TreeCheckService(store);
     const prdId = makeId("PRD001");
     const specId = makeId("SPC001");
@@ -953,7 +954,7 @@ describe("TreeCheckService.checkTree — plan-close hint wording", () => {
     // archived` unless a config explicitly disables it. The prior wording
     // ("The plan-close gate never evaluated it") was false under that
     // default and is the exact sentence B1.2 requires removed.
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const svc = new TreeCheckService(store);
 
     const prdId = makeId("PRD100");

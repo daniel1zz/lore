@@ -9,6 +9,7 @@ import { DOC_TYPE_ROLE_MAP } from "@lore/core";
 import type { DocId, DocRecord } from "@lore/core";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { RuleReadService } from "../../../src/service/rule-read-service.js";
+import { actedStore } from "../../live-invocation.js";
 
 async function put(store: InMemoryStore, type: "baseline" | "spec", slug: string, extra: Record<string, unknown>) {
   const now = new Date().toISOString();
@@ -35,7 +36,7 @@ async function put(store: InMemoryStore, type: "baseline" | "spec", slug: string
 
 describe("rule find by file with #Symbol anchors (AC-BLS2-6)", () => {
   it("matches an anchor carrying a #Symbol suffix, and ranks by citation count then id", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const rule = (id: string) => ({ id, statement: `s ${id}`, confidence: "established", enforced_by: "both", examples: ["e"], lifecycle: "live" });
     await put(store, "baseline", "leaf", { node: "leaf", rules: [rule("BR-2"), rule("BR-10")] });
     const ac = (id: string, cites: string[]) => ({ id, statement: id, verify: { mode: "script", oracle: "test", command: "x" }, cites });

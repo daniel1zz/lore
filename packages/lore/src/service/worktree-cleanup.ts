@@ -611,7 +611,10 @@ function parseListPorcelain(stdout: string): ListedWorktree[] {
 }
 
 /** The production {@link WorktreeGitProbe}: real `git` subprocesses (plain, never forced) and `node:fs`. */
-export function createRealWorktreeProbe(): WorktreeGitProbe {
+/**
+ * @param cwd - the directory the invocation runs in (`Invocation.cwd`), answered by `currentWorkingDirectory()`
+ */
+export function createRealWorktreeProbe(cwd: string): WorktreeGitProbe {
   return {
     pathExists: (path) => existsSync(path),
     realPath: (path) => {
@@ -623,7 +626,7 @@ export function createRealWorktreeProbe(): WorktreeGitProbe {
         return resolve(path);
       }
     },
-    currentWorkingDirectory: () => process.cwd(),
+    currentWorkingDirectory: () => cwd,
     listWorktrees: (cwd) => {
       const out = runGit(cwd, ["worktree", "list", "--porcelain"]);
       return out.ok ? { ok: true, value: parseListPorcelain(out.value) } : out;

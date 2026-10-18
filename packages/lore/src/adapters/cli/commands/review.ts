@@ -69,7 +69,7 @@ import { defineCommand } from "citty";
 import { loadLoreApp } from "../loader.js";
 import {
   exitCode,
-  formatError,
+  formatError, formatErrorFor,
   formatStalenessBadge,
   formatTable,
   parsePositiveIntArg,
@@ -122,7 +122,7 @@ function loadBlueprintOrExit(inv: Invocation): TreeBlueprint | undefined {
   const loaded = loadTreeBlueprint(inv.cwd);
   if (loaded.status === "missing") return undefined;
   if (loaded.status === "invalid") {
-    process.stderr.write(formatError(loaded.error) + "\n");
+    process.stderr.write(formatErrorFor(inv, loaded.error) + "\n");
     process.exit(4);
   }
   return loaded.blueprint;
@@ -193,12 +193,12 @@ async function reviewOneDoc(
 // calls, so AC-SP-7's "payload deep-equals CLI --json" holds by construction (D9/D10).
 
 /** Human-readable rendering of one probe outcome. */
-async function renderProbeText(flowDeps: StalenessFlowDeps, outcome: StalenessProbeOutcome): Promise<string> {
+async function renderProbeText(inv: Invocation, flowDeps: StalenessFlowDeps, outcome: StalenessProbeOutcome): Promise<string> {
   const lines: string[] = [];
   const header = `${outcome.doc.slug} (priority=${outcome.candidate.priority}, in_degree=${outcome.candidate.in_degree}, age_days=${outcome.candidate.age_days})`;
 
   if (!outcome.result.ok) {
-    lines.push(`${header}: ERROR — ${formatError(outcome.result.error).split("\n")[0] ?? ""}`);
+    lines.push(`${header}: ERROR — ${formatErrorFor(inv, outcome.result.error).split("\n")[0] ?? ""}`);
     return lines.join("\n");
   }
 
@@ -283,10 +283,10 @@ export default defineCommand({
     if (args.doc === "backfill-ledger") {
       const { app } = loadLoreApp({ inv });
       try {
-        const actor = resolveActor(undefined, inv.env, inv.cwd);
+        const actor = resolveActor(undefined, inv.env, inv.cwd, inv.user);
         const result = await app.reviewService.backfillLedger({ actor });
         if (!result.ok) {
-          process.stderr.write(formatError(result.error) + "\n");
+          process.stderr.write(formatErrorFor(inv, result.error) + "\n");
           process.exitCode = exitCode(result.error);
           return;
         }
@@ -361,7 +361,7 @@ export default defineCommand({
         }
       }
 
-      const actor = resolveActor(undefined, inv.env, inv.cwd);
+      const actor = resolveActor(undefined, inv.env, inv.cwd, inv.user);
 
       // ─── SPEC-044: staleness probing branch ─────────────────────────────────
       if (isStaleness) {
@@ -371,7 +371,7 @@ export default defineCommand({
         if (isList) {
           const listResult = await listFreshStalenessEscalates(flowDeps);
           if (!listResult.ok) {
-            process.stderr.write(formatError(listResult.error) + "\n");
+            process.stderr.write(formatErrorFor(inv, listResult.error) + "\n");
             process.exitCode = exitCode(listResult.error);
             return;
           }
@@ -439,7 +439,7 @@ export default defineCommand({
             source: app.callerSurface,
           });
           if (!outcomeResult.ok) {
-            process.stderr.write(formatError(outcomeResult.error) + "\n");
+            process.stderr.write(formatErrorFor(inv, outcomeResult.error) + "\n");
             process.exitCode = exitCode(outcomeResult.error);
             return;
           }
@@ -449,7 +449,7 @@ export default defineCommand({
             const payload = await buildStalenessSingleJsonPayload(flowDeps, outcome);
             console.log(JSON.stringify({ ok: true, data: payload }, null, 2));
           } else {
-            console.log(await renderProbeText(flowDeps, outcome));
+            console.log(await renderProbeText(inv, flowDeps, outcome));
           }
 
           process.exitCode = computeStalenessExitCode([outcome], failOnCandidate);
@@ -464,7 +464,7 @@ export default defineCommand({
           source: app.callerSurface,
         });
         if (!batchResult.ok) {
-          process.stderr.write(formatError(batchResult.error) + "\n");
+          process.stderr.write(formatErrorFor(inv, batchResult.error) + "\n");
           process.exitCode = exitCode(batchResult.error);
           return;
         }
@@ -481,7 +481,7 @@ export default defineCommand({
             );
           } else {
             for (const outcome of batch.probes) {
-              console.log(await renderProbeText(flowDeps, outcome));
+              console.log(await renderProbeText(inv, flowDeps, outcome));
               console.log("");
             }
             console.log(
@@ -502,7 +502,7 @@ export default defineCommand({
       if (args.pending) {
         const pendingResult = await app.reviewService.pending();
         if (!pendingResult.ok) {
-          process.stderr.write(formatError(pendingResult.error) + "\n");
+          process.stderr.write(formatErrorFor(inv, pendingResult.error) + "\n");
           process.exitCode = exitCode(pendingResult.error);
           return;
         }
@@ -546,7 +546,7 @@ export default defineCommand({
             o.doc.id.slice(0, 10),
             o.doc.title.slice(0, 32),
             o.result.ok ? o.result.value.judgment.decision : "ERROR",
-            o.result.ok ? o.result.value.judgment.confidence.toFixed(2) : (formatError(o.result.error).split("\n")[0] ?? ""),
+            o.result.ok ? o.result.value.judgment.confidence.toFixed(2) : (formatErrorFor(inv, o.result.error).split("\n")[0] ?? ""),
           ]);
           console.log(formatTable(["ID", "Title", "Decision", "Confidence/Error"], rows));
           console.log(`\n${outcomes.length} reviewed, ${failures.length} failed`);
@@ -568,7 +568,7 @@ export default defineCommand({
       const result = await reviewOneDoc(app, docIdOrSlug, blueprint);
 
       if (!result.ok) {
-        process.stderr.write(formatError(result.error, { aiHasNoFallback: true }) + "\n");
+        process.stderr.write(formatErrorFor(inv, result.error, { aiHasNoFallback: true }) + "\n");
         process.exitCode = exitCode(result.error);
         return;
       }

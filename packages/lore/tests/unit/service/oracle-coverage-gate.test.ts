@@ -38,6 +38,7 @@ import { ReviewService } from "../../../src/service/review-service.js";
 import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
 import { DOC_TYPE_ROLE_MAP } from "@lore/core";
 import type { CreateDocInput, DocId, DocRecord, LoreConfig } from "@lore/core";
+import { actedStore } from "../../live-invocation.js";
 
 // ─── Fixtures ────────────────────────────────────────────────────────────────
 
@@ -75,7 +76,7 @@ function configuredDesignConfig(overrides?: Record<string, unknown>): LoreConfig
 }
 
 function makeCorpusService(config?: LoreConfig) {
-  const store = new InMemoryStore();
+  const store = actedStore(new InMemoryStore());
   const enforcer = new GateEnforcer(config);
   const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)), undefined, undefined, enforcer);
   return { store, corpusService, enforcer };
@@ -162,7 +163,7 @@ describe("oracleCoverage — spec-promote matched pair (CorpusService.set)", () 
 
   // NEGATIVE (same blocking scenario, via ReviewService.approve — the OTHER spec-promote write path)
   it("ReviewService.approve blocks the same missing-e2e design spec", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
     const enforcer = new GateEnforcer(configuredDesignConfig());
     const reviewService = new ReviewService(store, new RecordLockService(store, new GateEnforcer(undefined)), undefined, {
@@ -256,7 +257,7 @@ describe("acCountMeetsFloor — spec-promote min_acs (CorpusService.set / Review
 
   // HAPPY — same scenario via ReviewService.approve, the OTHER spec-promote write path
   it("ReviewService.approve refuses the same AC-less domain-overview spec only for citing nothing (BR-1007), not on the floor", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
     const enforcer = new GateEnforcer(domainOverviewConfig());
     const reviewService = new ReviewService(store, new RecordLockService(store, new GateEnforcer(undefined)), undefined, {

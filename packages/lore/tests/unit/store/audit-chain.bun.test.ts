@@ -64,6 +64,7 @@ import {
   MIGRATION_008_FTS_REBUILD_SQL,
 } from "../../../src/store/migrations/migration-008.js";
 import type { StoreInterface } from "../../../src/store/store-interface.js";
+import { actedStore } from "../../live-invocation.js";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -182,13 +183,13 @@ interface StoreHandle {
 }
 
 function createSqliteHandle(): StoreHandle {
-  const store = new SQLiteStore(":memory:");
+  const store = actedStore(new SQLiteStore(":memory:"));
   return { store, destroy: () => store.close() };
 }
 
 function createTursoHandle(): StoreHandle {
   const tmpDir = mkdtempSync(join(tmpdir(), "lore-audit-chain-turso-"));
-  const store = new TursoStore({ localPath: join(tmpDir, "lore.db") });
+  const store = actedStore(new TursoStore({ localPath: join(tmpDir, "lore.db") }));
   return {
     store,
     destroy: () => {
@@ -403,7 +404,7 @@ describe("migration-009 (audit hash chain backfill)", () => {
   });
 
   it("HAPPY: a fresh :memory: DB migrates straight to the current head user_version with the chain columns present", () => {
-    const store = new SQLiteStore(":memory:");
+    const store = actedStore(new SQLiteStore(":memory:"));
     const db = store.getDatabase();
 
     // reason: migration-012 (spec-issue-closure-loop-computed-resolution-
@@ -480,7 +481,7 @@ describe("migration-009 (audit hash chain backfill)", () => {
     // apply migration-009 — never throw, never touch the pre-existing
     // rows' logical content, and produce a fully self-consistent chain over
     // exactly those 3 legacy rows.
-    const store = new SQLiteStore(dbPath);
+    const store = actedStore(new SQLiteStore(dbPath));
     const db = store.getDatabase();
 
     expect(userVersion(db)).toBe(23);
@@ -529,7 +530,7 @@ describe("migration-009 (audit hash chain backfill)", () => {
   });
 
   it("REGRESSION: reopening an already-migrated DB a second time is idempotent, and a live-appended row correctly continues the migrated chain", async () => {
-    const firstOpen = new SQLiteStore(dbPath);
+    const firstOpen = actedStore(new SQLiteStore(dbPath));
     const firstAppend = await firstOpen.appendAuditEntry(
       makeAudit({ action: "create", details: {} }),
     );
@@ -541,14 +542,14 @@ describe("migration-009 (audit hash chain backfill)", () => {
     firstOpen.close();
 
     expect(() => {
-      const secondOpen = new SQLiteStore(dbPath);
+      const secondOpen = actedStore(new SQLiteStore(dbPath));
       const db = secondOpen.getDatabase();
       expect(userVersion(db)).toBe(23);
       expect(tableColumnNames(db, "audit")).toContain("prev_hash");
       secondOpen.close();
     }).not.toThrow();
 
-    const thirdOpen = new SQLiteStore(dbPath);
+    const thirdOpen = actedStore(new SQLiteStore(dbPath));
     const secondAppend = await thirdOpen.appendAuditEntry(
       makeAudit({ action: "update", details: {} }),
     );

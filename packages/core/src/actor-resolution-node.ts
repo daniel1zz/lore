@@ -79,7 +79,7 @@ export interface ResolvedActor {
  * @param explicit - Explicit actor value (CLI `--by` / service `opts.by`), if supplied
  * @param env - Environment map to resolve session-id vars from (`Invocation.env`).
  *   Tests pass a literal object here instead of mutating `process.env`.
- * @param osUsername - Lazy OS-username source (`readOsUsername` from `invocation-node.ts` in
+ * @param osUsername - Lazy OS-username source (`Invocation.user` in
  *   production). A thunk, not a string: the OS lookup can throw and must stay unreached unless
  *   the os-fallback tier is actually taken.
  * @returns `{actor, source}` — `actor` is never empty (OS username is always available)

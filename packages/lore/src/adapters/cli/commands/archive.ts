@@ -36,7 +36,7 @@
 import { defineCommand } from "citty";
 import { computeArchiveCandidates, resolveClaimTtlMinutes, resolveHandoffTtlMinutes } from "@lore/core";
 import { loadLoreApp } from "../loader.js";
-import { exitCode, formatError, resolveActor } from "../utils.js";
+import { exitCode, formatErrorFor, resolveActor } from "../utils.js";
 import type { IssueCloseItem } from "../../../service/issue-close-on-archive.js";
 import { emitIssueCloseItems } from "../issue-close-output.js";
 import { invocationOf } from "../command-invocation.js";
@@ -90,7 +90,7 @@ export default defineCommand({
 
     const listResult = await app.corpusService.listFull({});
     if (!listResult.ok) {
-      process.stderr.write(formatError(listResult.error) + "\n");
+      process.stderr.write(formatErrorFor(inv, listResult.error) + "\n");
       process.exitCode = exitCode(listResult.error);
       return;
     }
@@ -108,7 +108,7 @@ export default defineCommand({
         if (doc === undefined) continue;
         const floorResult = await app.corpusService.checkSweepCandidateFloor(doc, c.rule);
         if (!floorResult.ok) {
-          process.stderr.write(formatError(floorResult.error) + "\n");
+          process.stderr.write(formatErrorFor(inv, floorResult.error) + "\n");
           process.exitCode = exitCode(floorResult.error);
           return;
         }
@@ -149,7 +149,7 @@ export default defineCommand({
     }
 
     // --apply
-    const by = resolveActor(undefined, inv.env, inv.cwd);
+    const by = resolveActor(undefined, inv.env, inv.cwd, inv.user);
     const docsById = new Map(listResult.value.docs.map((d) => [d.id, d] as const));
     const outcomes: Array<{ slug: string; ok: boolean; detail: string; skipped?: true; floor?: string }> = [];
     // spec-archiving-the-work-that-resolves-a-defect-report-closes D4 — the sweep is an archive path too.
@@ -169,7 +169,7 @@ export default defineCommand({
           outcomes.push({ slug: candidate.slug, ok: false, skipped: true, floor, detail: `refused by ${floor}` });
           continue;
         }
-        outcomes.push({ slug: candidate.slug, ok: false, detail: formatError(result.error) });
+        outcomes.push({ slug: candidate.slug, ok: false, detail: formatErrorFor(inv, result.error) });
         continue;
       }
       outcomes.push({ slug: candidate.slug, ok: true, detail: `archived → v${result.value.version}` });

@@ -28,6 +28,7 @@ import type { AuditEntry } from "@lore/core";
 import { SQLiteStore } from "../../../src/store/sqlite-store.js";
 import { loosenOverrideClasses } from "../fixtures/autonomy-override-helpers.js";
 import { sessionActorFor, sessionIdFor } from "../../helpers/session-actor";
+import { actedStore } from "../../live-invocation.js";
 
 setDefaultTimeout(300_000);
 
@@ -75,7 +76,7 @@ function newTask(title: string): string {
 }
 
 async function auditSince(since: string): Promise<AuditEntry[]> {
-  const store = new SQLiteStore(join(dir, ".lore", "lore.db"));
+  const store = actedStore(new SQLiteStore(join(dir, ".lore", "lore.db")));
   try {
     const r = await store.queryAudit({ limit: 100_000 });
     if (!r.ok) throw new Error(JSON.stringify(r.error));

@@ -10,6 +10,7 @@ import { DecisionService } from "../../../src/service/decision-service.js";
 import { createSubjectExistenceProbes, type SubjectProbePorts } from "../../../src/service/decision-subject-probes.js";
 import type { SubjectExistence, SubjectExistenceProbes } from "../../../src/service/pending-decisions.js";
 import { verifyDecisionChain } from "../../../src/store/decision-log.js";
+import { actedStore } from "../../live-invocation.js";
 
 const CLASS_ID = "stash-drop";
 /** Facts that make stash-drop escalate (weak evidence, mirrors autonomy-human-channel.test.ts). */
@@ -18,7 +19,7 @@ const ESCALATING = { recoverability: "loss-free-by-proof", blast: "calling-sessi
 const AUTO_FACTS = { recoverability: "loss-free-by-proof", blast: "calling-session", evidence: "lore-evaluated" } as const;
 
 function serviceWith(subjectProbes?: SubjectExistenceProbes) {
-  const store = new InMemoryStore();
+  const store = actedStore(new InMemoryStore());
   let tick = 0;
   const service = new DecisionService({
     store,

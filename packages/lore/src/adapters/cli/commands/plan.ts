@@ -57,7 +57,7 @@
  */
 
 import { defineCommand } from "citty";
-import { exitCode, formatError, resolveActor } from "../utils.js";
+import { exitCode, formatErrorFor, resolveActor } from "../utils.js";
 import {
   ATTESTATION_EXEMPT_KIND_VALUES,
   PLAN_EXEMPT_USAGE_EXIT_CODE,
@@ -135,7 +135,7 @@ export default defineCommand({
         const { loadLoreApp } = await import("../loader.js");
         const { app } = loadLoreApp({ inv });
         try {
-          const by = resolveActor(undefined, inv.env, inv.cwd);
+          const by = resolveActor(undefined, inv.env, inv.cwd, inv.user);
           const result = await requirePlanExemptionService(app).exemptAttestation(
             args.plan as string,
             { reason: checked.reason, kind: checked.kind, by },
@@ -143,7 +143,7 @@ export default defineCommand({
 
           if (!result.ok) {
             if (args.json) console.log(JSON.stringify({ ok: false, error: result.error }, null, 2));
-            else process.stderr.write(formatError(result.error) + "\n");
+            else process.stderr.write(formatErrorFor(inv, result.error) + "\n");
             process.exitCode = exitCode(result.error);
             return;
           }
@@ -182,7 +182,7 @@ export default defineCommand({
         const { loadLoreApp } = await import("../loader.js");
         const { app } = loadLoreApp({ inv });
         try {
-          const by = resolveActor(undefined, inv.env, inv.cwd);
+          const by = resolveActor(undefined, inv.env, inv.cwd, inv.user);
           const result = await requirePlanExemptionService(app).exemptAssessmentFreshness(
             args.plan as string,
             { reason: checked.reason, by },
@@ -190,7 +190,7 @@ export default defineCommand({
 
           if (!result.ok) {
             if (args.json) console.log(JSON.stringify({ ok: false, error: result.error }, null, 2));
-            else process.stderr.write(formatError(result.error) + "\n");
+            else process.stderr.write(formatErrorFor(inv, result.error) + "\n");
             process.exitCode = exitCode(result.error);
             return;
           }

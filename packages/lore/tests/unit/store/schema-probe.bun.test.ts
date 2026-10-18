@@ -59,6 +59,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { probeSchemaVersion } from "../../../src/store/schema-probe.js";
 import { SQLiteStore, LATEST_SCHEMA_VERSION } from "../../../src/store/sqlite-store.js";
+import { actedStore } from "../../live-invocation.js";
 
 /**
  * A stable marker hashed in place of a missing sidecar file (`-wal`/`-shm`
@@ -103,7 +104,7 @@ describe("probeSchemaVersion — readonly schema-version probe (SPEC-078 D2, ex-
     // reason: SQLiteStore's own init() sets `PRAGMA journal_mode = WAL`
     // (sqlite-store.ts) — constructing one is the simplest way to produce a
     // real WAL-mode db, without hand-rolling the migration chain.
-    const store = new SQLiteStore(dbPath);
+    const store = actedStore(new SQLiteStore(dbPath));
 
     const before = fingerprintDb(dbPath);
 

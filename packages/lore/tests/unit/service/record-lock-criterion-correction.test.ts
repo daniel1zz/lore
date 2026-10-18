@@ -22,6 +22,7 @@ import { CorpusService } from "../../../src/service/corpus-service.js";
 import { AcService } from "../../../src/service/ac-service.js";
 import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
+import { actedStore } from "../../live-invocation.js";
 
 interface Fixture {
   readonly store: InMemoryStore;
@@ -30,7 +31,7 @@ interface Fixture {
 }
 
 function makeFixture(): Fixture {
-  const store = new InMemoryStore();
+  const store = actedStore(new InMemoryStore());
   const lock = new RecordLockService(store, new GateEnforcer(undefined));
   return { store, corpus: new CorpusService(store, lock), ac: new AcService(store, lock) };
 }

@@ -112,7 +112,7 @@ import { isRegisteredCheckpoint } from "../../../service/checkpoint-registry.js"
 import { buildPhaseFeedFlowDeps } from "../phase-wiring.js";
 import { buildTaskFeedFlowDeps, resolveTaskStartBudgets } from "../task-feed-wiring.js";
 import { renderTaskStartPack } from "../task-feed-render.js";
-import { exitCode, formatError, resolveActor } from "../utils.js";
+import { exitCode, formatError, formatErrorFor, resolveActor } from "../utils.js";
 import { FEED_PHASE_START_MISSING_TARGET, FEED_TASK_START_MISSING_TARGET } from "../cli-refusal-messages.js";
 
 /** Loosely-typed view of the args this command's dispatch table needs — mirrors citty's parsed-args shape. */
@@ -152,11 +152,11 @@ async function handleSessionResume(app: App, args: FeedArgs, _config: LoreConfig
       ...(typeof args.handoff === "string" ? { handoff: args.handoff } : {}),
       ...(typeof args.by === "string" ? { by: args.by } : {}),
     },
-    { env: inv.env, tmpDir: inv.paths.tmpDir, cwd: inv.cwd },
+    { env: inv.env, tmpDir: inv.paths.tmpDir, cwd: inv.cwd, user: inv.user },
   );
 
   if (!result.ok) {
-    process.stderr.write(formatError(result.error) + "\n");
+    process.stderr.write(formatErrorFor(inv, result.error) + "\n");
     process.exitCode = exitCode(result.error);
     return;
   }
@@ -169,7 +169,7 @@ async function handleSessionResume(app: App, args: FeedArgs, _config: LoreConfig
   process.exitCode = 0;
 }
 
-async function handlePhaseStart(app: App, args: FeedArgs, _config: LoreConfig | undefined): Promise<void> {
+async function handlePhaseStart(app: App, args: FeedArgs, _config: LoreConfig | undefined, inv: Invocation): Promise<void> {
   if (typeof args.target !== "string" || args.target.length === 0) {
     process.stderr.write(
       `Error: \`lore feed phase-start <phase>\` ${FEED_PHASE_START_MISSING_TARGET}.\n`,
@@ -182,7 +182,7 @@ async function handlePhaseStart(app: App, args: FeedArgs, _config: LoreConfig | 
   const result = await buildPhaseStartPack(deps, args.target);
 
   if (!result.ok) {
-    process.stderr.write(formatError(result.error) + "\n");
+    process.stderr.write(formatErrorFor(inv, result.error) + "\n");
     process.exitCode = exitCode(result.error);
     return;
   }
@@ -195,7 +195,7 @@ async function handlePhaseStart(app: App, args: FeedArgs, _config: LoreConfig | 
   process.exitCode = 0;
 }
 
-async function handleTaskStart(app: App, args: FeedArgs, config: LoreConfig | undefined): Promise<void> {
+async function handleTaskStart(app: App, args: FeedArgs, config: LoreConfig | undefined, inv: Invocation): Promise<void> {
   if (typeof args.target !== "string" || args.target.length === 0) {
     process.stderr.write(
       `Error: \`lore feed task-start <task>\` ${FEED_TASK_START_MISSING_TARGET}.\n`,
@@ -209,7 +209,7 @@ async function handleTaskStart(app: App, args: FeedArgs, config: LoreConfig | un
   const result = await buildTaskStartPack(deps, args.target, budgets);
 
   if (!result.ok) {
-    process.stderr.write(formatError(result.error) + "\n");
+    process.stderr.write(formatErrorFor(inv, result.error) + "\n");
     process.exitCode = exitCode(result.error);
     return;
   }
@@ -245,7 +245,7 @@ const SPECIAL_CHECKPOINT_HANDLERS: Readonly<Record<string, CheckpointHandler>> =
  */
 function recordFeedTrace(app: App, inv: Invocation, checkpoint: string, docsServed: readonly string[]): void {
   if (app.traceRecorder === undefined) return;
-  app.traceRecorder.recordFeed(resolveActor(undefined, inv.env, inv.cwd), checkpoint, docsServed);
+  app.traceRecorder.recordFeed(resolveActor(undefined, inv.env, inv.cwd, inv.user), checkpoint, docsServed);
 }
 
 // SPEC-070 Fix F7: fail loud, at module init, if the shared SPECIAL_FEED_CHECKPOINTS

@@ -40,6 +40,7 @@ import { RuleService } from "../../../src/service/rule-service.js";
 import { TaskWorkflowService } from "../../../src/service/task-workflow-service.js";
 import type { CreateDocInput, DocRecord } from "@lore/core";
 import { makeRuleService } from "../../helpers/make-rule-service.js";
+import { actedStore } from "../../live-invocation.js";
 
 interface RuleChange { rule_id: string; kind: "statement" | "confidence" | "lifecycle"; old: string; new: string }
 interface RuleDiff { claimed_at: string; changes: RuleChange[]; retired: string[] }
@@ -174,7 +175,7 @@ async function diffOf(task: DocRecord): Promise<RuleDiff> {
 
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ["Date"] });
-  store = new InMemoryStore();
+  store = actedStore(new InMemoryStore());
   corpus = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
   rules = makeRuleService(store);
   workflow = new TaskWorkflowService(store, undefined, { claimTtlMinutes: 120 });

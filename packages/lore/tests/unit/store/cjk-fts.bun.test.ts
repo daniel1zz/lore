@@ -43,6 +43,7 @@ import {
   expandCjkForFts,
 } from "../../../src/store/store-shared.js";
 import { SNIPPET_MARK_CLOSE, SNIPPET_MARK_OPEN, type DocRecord } from "@lore/core";
+import { actedStore } from "../../live-invocation.js";
 
 // ─── Pure function tests: expandCjkForFts ──────────────────────────────────
 
@@ -302,7 +303,7 @@ describe("SQLiteStore.search — CJK bigram hits (store-level)", () => {
 
   beforeEach(() => {
     tempDir = mkdtempSync(join(tmpdir(), "lore-cjk-fts-"));
-    store = new SQLiteStore(join(tempDir, "test.db"));
+    store = actedStore(new SQLiteStore(join(tempDir, "test.db")));
   });
 
   afterEach(() => {

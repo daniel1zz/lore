@@ -31,11 +31,12 @@ import type { CreateDocInput } from "@lore/core";
 import type { DocId, DocRecord } from "@lore/core";
 import { DOC_TYPE_ROLE_MAP } from "@lore/core";
 import { ulid } from "ulidx";
+import { actedStore } from "../../live-invocation.js";
 
 // ─── Test helpers ─────────────────────────────────────────────────────────────
 
 function makeStore() {
-  return new InMemoryStore();
+  return actedStore(new InMemoryStore());
 }
 
 function makeService(store = makeStore()) {

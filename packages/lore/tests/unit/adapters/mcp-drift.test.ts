@@ -36,7 +36,7 @@
  *               pre-SPEC-045 behavior)
  */
 
-import { liveInvocation } from "../../live-invocation.js";
+import { liveInvocation, actedStore } from "../../live-invocation.js";
 import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
 import { describe, it, expect, beforeEach } from "vitest";
@@ -75,7 +75,7 @@ let driftCheckService: DriftCheckService;
 let app: App;
 
 function makeApp(): App {
-  store = new InMemoryStore();
+  store = actedStore(new InMemoryStore());
   corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
   const judgmentService = new JudgmentService(store, new NoOpTelemetry());
   const aiProvider = new InMemoryAIProvider("in-memory", { kind: "ok", content: "{}" });

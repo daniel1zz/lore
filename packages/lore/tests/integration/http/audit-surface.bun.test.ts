@@ -24,7 +24,7 @@
  * @spec_ref spec-baseline-close-out-fixes-audit-surface-node-validation AC-BLC-1
  */
 
-import { liveInvocation } from "../../live-invocation.js";
+import { liveInvocation, actedStore } from "../../live-invocation.js";
 import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
@@ -68,7 +68,7 @@ interface Rig {
 function makeRig(): Rig {
   const tmpDir = mkdtempSync(join(tmpdir(), "lore-audit-surface-"));
   mkdirSync(join(tmpDir, ".lore"), { recursive: true });
-  const store = new SQLiteStore(join(tmpDir, ".lore", "lore.db"));
+  const store = actedStore(new SQLiteStore(join(tmpDir, ".lore", "lore.db")));
   const db = store.getDatabase();
   const telemetry = new NoOpTelemetry();
   const app: App = {
@@ -145,7 +145,7 @@ describe("AC-BLC-1 CLI surface", () => {
     const approved = runLore(["approve", docId], dir);
     if (approved.exitCode !== 0) throw new Error(`approve failed: ${approved.stderr}${approved.stdout}`);
 
-    const store = new SQLiteStore(join(dir, ".lore", "lore.db"));
+    const store = actedStore(new SQLiteStore(join(dir, ".lore", "lore.db")));
     try {
       expectAllRowsOn(await auditFor(store, docId), "cli");
     } finally {
@@ -278,7 +278,7 @@ describe("AC-BLC-1 audit stamping rules", () => {
   beforeEach(() => clearProcessAuditSurface());
 
   it("a write with no adapter-declared surface records NO surface key, never a guessed one", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const svc = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
     const created = await svc.create({ type: "prd", title: "No Surface" });
     if (!created.ok) throw new Error("create failed");
@@ -288,7 +288,7 @@ describe("AC-BLC-1 audit stamping rules", () => {
   });
 
   it("an entry that already carries details.surface keeps it", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     await store.appendAuditEntry({
       timestamp: new Date().toISOString(),
       actor: "t",

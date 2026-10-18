@@ -12,13 +12,14 @@ import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
 import { TaskWorkflowService, type VerifiedEvidenceInput } from "../../../src/service/task-workflow-service.js";
 import type { CreateDocInput } from "@lore/core";
+import { actedStore } from "../../live-invocation.js";
 
 const ANCHOR = "packages/lore/tests/unit/x.bun.test.ts";
 
 const REPO_ROOT = "/work/repo";
 
 async function setup() {
-  const store = new InMemoryStore();
+  const store = actedStore(new InMemoryStore());
   const cs = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
   const svc = new TaskWorkflowService(store, undefined, { claimTtlMinutes: 120, repoRoot: REPO_ROOT });
   const plan = await cs.create({ type: "plan", title: "P", content: "b" } as CreateDocInput);

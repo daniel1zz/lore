@@ -7,6 +7,7 @@ import { defineCommand } from "citty";
 import { invocationOf } from "../command-invocation.js";
 import { loadLoreApp } from "../loader.js";
 import { startHttpServer } from "../../http/index.js";
+import { resolveMachineAuthBaseDir } from "../../http/machine-auth.js";
 
 export default defineCommand({
   meta: {
@@ -44,7 +45,7 @@ export default defineCommand({
 
     const host = args.host ?? "localhost";
 
-    startHttpServer(app, { port, host });
+    startHttpServer(app, { port, host, machineAuthBaseDir: resolveMachineAuthBaseDir(inv.env, inv.paths.home) });
 
     // Keep process alive; server runs in background via Bun event loop
     // Graceful shutdown on SIGTERM

@@ -22,6 +22,7 @@ import {
 } from "../../../src/eval/scenarios/type-distribution.js";
 import type { App } from "../../../src/app.js";
 import type { DocRecord } from "@lore/core";
+import { actedStore } from "../../live-invocation.js";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -29,7 +30,7 @@ let docCounter = 0;
 
 /** Build a minimal App using InMemoryStore. */
 function makeApp(store?: InMemoryStore): App {
-  const s = store ?? new InMemoryStore();
+  const s = store ?? actedStore(new InMemoryStore());
   const telemetry = new NoOpTelemetry();
   return {
     corpusService: new CorpusService(s, new RecordLockService(s, new GateEnforcer(undefined)), telemetry),
@@ -91,7 +92,7 @@ function makeDoc(overrides: Partial<DocRecord> & { type: DocRecord["type"] }): D
 
 describe("HAPPY — corpus meeting default thresholds passes", () => {
   it("1 prd + 1 spec → passed=true (meets min=1 for prd and spec)", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     await store.insert(makeDoc({ type: "prd" }));
     await store.insert(makeDoc({ type: "spec" }));
 
@@ -109,7 +110,7 @@ describe("HAPPY — corpus meeting default thresholds passes", () => {
 
 describe("HAPPY — custom threshold with exact boundary passes", () => {
   it("min=1 threshold with actual=1 → passed=true (boundary case)", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     await store.insert(makeDoc({ type: "prd" }));
 
     const app = makeApp(store);
@@ -127,7 +128,7 @@ describe("HAPPY — custom threshold with exact boundary passes", () => {
 
 describe("NEGATIVE — missing prd causes passed=false", () => {
   it("no prd in corpus → violations includes prd below_min, passed=false", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     // Only add spec, no prd
     await store.insert(makeDoc({ type: "spec" }));
 
@@ -148,7 +149,7 @@ describe("NEGATIVE — missing prd causes passed=false", () => {
 
 describe("NEGATIVE — default thresholds fail without prd", () => {
   it("corpus with only spec + knowledge → prd below_min violation", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     await store.insert(makeDoc({ type: "spec" }));
 
     const app = makeApp(store);
@@ -164,7 +165,7 @@ describe("NEGATIVE — default thresholds fail without prd", () => {
 
 describe("NEGATIVE — above_max violation causes passed=false", () => {
   it("3 prds with max=2 → above_max violation, passed=false", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     await store.insert(makeDoc({ type: "prd" }));
     await store.insert(makeDoc({ type: "prd" }));
     await store.insert(makeDoc({ type: "prd" }));
@@ -186,7 +187,7 @@ describe("NEGATIVE — above_max violation causes passed=false", () => {
 
 describe("BOUNDARY — min=1 actual=1 boundary passes", () => {
   it("exactly meets min threshold → passed=true", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     await store.insert(makeDoc({ type: "prd" }));
 
     const app = makeApp(store);
@@ -202,7 +203,7 @@ describe("BOUNDARY — min=1 actual=1 boundary passes", () => {
 
 describe("BOUNDARY — max=2 actual=2 boundary passes", () => {
   it("exactly at max threshold → passed=true", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     await store.insert(makeDoc({ type: "prd" }));
     await store.insert(makeDoc({ type: "prd" }));
 
@@ -221,7 +222,7 @@ describe("BOUNDARY — max=2 actual=2 boundary passes", () => {
 
 describe("ERROR — unknown type in custom thresholds fails loud", () => {
   it("unknown_type 'blueprint' in thresholds → violation with reason=unknown_type", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     await store.insert(makeDoc({ type: "prd" }));
 
     const app = makeApp(store);
@@ -241,7 +242,7 @@ describe("ERROR — unknown type in custom thresholds fails loud", () => {
 
 describe("ERROR — store failure returns passed=false without throwing", () => {
   it("corpusService.status failure → passed=false, no throw", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const app = makeApp(store);
 
     vi.spyOn(app.corpusService, "status").mockResolvedValueOnce({
@@ -264,7 +265,7 @@ describe("ERROR — store failure returns passed=false without throwing", () => 
 
 describe("STATE — runTypeDistribution is deterministic", () => {
   it("same corpus + same thresholds + two runs → identical results", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     await store.insert(makeDoc({ type: "prd" }));
     await store.insert(makeDoc({ type: "prd" }));
     await store.insert(makeDoc({ type: "spec" }));
@@ -284,7 +285,7 @@ describe("STATE — runTypeDistribution is deterministic", () => {
 
 describe("REGRESSION — default thresholds pass on a realistic corpus", () => {
   it("corpus with all doc types represented satisfies DEFAULT_THRESHOLDS", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     // Insert at least one of each type
     await store.insert(makeDoc({ type: "prd" }));
     await store.insert(makeDoc({ type: "spec" }));

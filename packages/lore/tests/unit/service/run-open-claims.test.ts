@@ -13,6 +13,7 @@ import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
+import { actedStore } from "../../live-invocation.js";
 import { RunService } from "../../../src/service/run-service.js";
 import type { WorktreeGitProbe } from "../../../src/service/worktree-cleanup.js";
 
@@ -24,8 +25,10 @@ function probeOf(listed: Listed): WorktreeGitProbe {
   return { pathExists: () => false, listWorktrees: () => listed } as unknown as WorktreeGitProbe;
 }
 
-async function setup(listed: Listed, claimedWorktree: string) {
-  const store = new InMemoryStore();
+const REPO = "/repo";
+
+async function setup(listed: Listed, claimedWorktree: string, probe: WorktreeGitProbe = probeOf(listed)) {
+  const store = actedStore(new InMemoryStore());
   const corpus = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
   const plan = await corpus.create({ type: "plan", title: "Plan A", content: "# A" } as CreateDocInput);
   if (!plan.ok) throw new Error(JSON.stringify(plan.error));
@@ -40,7 +43,7 @@ async function setup(listed: Listed, claimedWorktree: string) {
   const extra = { plan_id: plan.value.id, claim: { by: "agent:x", at: new Date().toISOString(), worktree: claimedWorktree } };
   const patched = await store.update(created.value.id, { extra, status: "approved" });
   if (!patched.ok) throw new Error(JSON.stringify(patched.error));
-  return new RunService(store, undefined, undefined, (p) => p, probeOf(listed));
+  return new RunService(store, undefined, undefined, (p) => p, REPO, probe);
 }
 
 const LISTED = {
@@ -82,5 +85,23 @@ describe("AU-T23 openClaimsOfWorkingCopy resolves branch-name claims", () => {
     const r = await service.openClaimsOfWorkingCopy(WC);
     if (!r.ok) throw new Error(JSON.stringify(r.error));
     expect(r.value.tasks).toHaveLength(1);
+  });
+
+  it("AU-T24 a deleted working copy: the worktree listing runs from the repository, so the branch claim resolves", async () => {
+    // reason: the fake mirrors the OS: spawning with a cwd that no longer exists fails ENOENT; only the repo root exists.
+    const probe = {
+      pathExists: () => false,
+      listWorktrees: (cwd: string) =>
+        cwd === REPO ? LISTED : { ok: false, reason: `ENOENT: no such file or directory, posix_spawn (cwd ${cwd})` },
+    } as unknown as WorktreeGitProbe;
+    const service = await setup(LISTED, "worktree-agent-w", probe);
+    const r = await service.openClaimsOfWorkingCopy(WC);
+    if (!r.ok) throw new Error(JSON.stringify(r.error));
+    expect(r.value.not_measured).toEqual([]);
+    expect(r.value.tasks).toHaveLength(1);
+  });
+
+  it("AU-T24 a RunService with no repository root is refused at construction", () => {
+    expect(() => new RunService(new InMemoryStore(), undefined, undefined, undefined, "")).toThrow(/repoRoot/);
   });
 });

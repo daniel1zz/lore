@@ -34,7 +34,7 @@ import { join, resolve } from "path";
 import { tmpdir } from "os";
 import { createApp } from "../../../src/app.js";
 import type { CreateDocInput, NewReviewJudgment } from "@lore/core";
-import { liveInvocation } from "../../live-invocation.js";
+import { liveInvocation, liveAmbient, liveWriteContext } from "../../live-invocation.js";
 import type { Invocation } from "@lore/core";
 
 // ─── Command type + output capture (mirrors assess-ai.bun.test.ts) ───────────
@@ -83,7 +83,7 @@ beforeEach(() => {
   const loreDir = join(tmpDir, ".lore");
   mkdirSync(loreDir, { recursive: true });
 
-  const app = createApp(join(loreDir, "lore.db"));
+  const app = createApp(join(loreDir, "lore.db"), undefined, liveAmbient(), liveWriteContext());
   app.close();
 
   originalCwd = process.cwd();
@@ -121,7 +121,7 @@ function baseNewJudgment(docId: string, docVersion: number): NewReviewJudgment {
 
 describe("lore pending — AI Judgment badge (HAPPY)", () => {
   it("a draft doc with no judgment renders '[unreviewed]'", async () => {
-    const app = createApp(join(tmpDir, ".lore", "lore.db"));
+    const app = createApp(join(tmpDir, ".lore", "lore.db"), undefined, liveAmbient(), liveWriteContext());
     try {
       const createResult = await app.corpusService.create({
         type: "prd",
@@ -145,7 +145,7 @@ describe("lore pending — AI Judgment badge (HAPPY)", () => {
   });
 
   it("a draft doc with a fresh approve judgment renders '[AI: approve 0.93]'", async () => {
-    const app = createApp(join(tmpDir, ".lore", "lore.db"));
+    const app = createApp(join(tmpDir, ".lore", "lore.db"), undefined, liveAmbient(), liveWriteContext());
     let docId: string;
     let docVersion: number;
     try {
@@ -180,7 +180,7 @@ describe("lore pending — AI Judgment badge (HAPPY)", () => {
   });
 
   it("--json includes the judgment object alongside each doc", async () => {
-    const app = createApp(join(tmpDir, ".lore", "lore.db"));
+    const app = createApp(join(tmpDir, ".lore", "lore.db"), undefined, liveAmbient(), liveWriteContext());
     let docId: string;
     try {
       const createResult = await app.corpusService.create({
@@ -220,7 +220,7 @@ describe("lore pending — AI Judgment badge (HAPPY)", () => {
 
 describe("lore pending --escalated — BOUNDARY (no escalations)", () => {
   it("prints 'No escalated documents.' when nothing is escalated", async () => {
-    const app = createApp(join(tmpDir, ".lore", "lore.db"));
+    const app = createApp(join(tmpDir, ".lore", "lore.db"), undefined, liveAmbient(), liveWriteContext());
     try {
       const createResult = await app.corpusService.create({
         type: "prd",
@@ -252,7 +252,7 @@ describe("lore pending --escalated — BOUNDARY (no escalations)", () => {
 
 describe("lore pending — STATE (stale judgment badge)", () => {
   it("a judgment recorded against an older doc_version renders '(stale)' after the doc is edited", async () => {
-    const app = createApp(join(tmpDir, ".lore", "lore.db"));
+    const app = createApp(join(tmpDir, ".lore", "lore.db"), undefined, liveAmbient(), liveWriteContext());
     try {
       const createResult = await app.corpusService.create({
         type: "prd",
@@ -290,7 +290,7 @@ describe("lore pending — STATE (stale judgment badge)", () => {
 
 describe("lore pending --escalated — REGRESSION (filter + blocking-question bullets)", () => {
   it("includes only the fresh escalate doc, printing its blocking_questions as bullets", async () => {
-    const app = createApp(join(tmpDir, ".lore", "lore.db"));
+    const app = createApp(join(tmpDir, ".lore", "lore.db"), undefined, liveAmbient(), liveWriteContext());
     try {
       // Doc A: fresh approve — must be EXCLUDED from --escalated.
       const approveDoc = await app.corpusService.create({

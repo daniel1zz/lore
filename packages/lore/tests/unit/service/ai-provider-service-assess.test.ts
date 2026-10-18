@@ -41,6 +41,7 @@ import { InMemoryAIProvider } from "../../../src/ai/in-memory-provider.js";
 import { ASSESS_PROMPT_VERSION, buildAssessPrompt, buildAssessRetryPrompt } from "../../../src/ai/assess-template.js";
 import type { Telemetry, TelemetryEvent, AiGenerationEvent, CreateDocInput, PlanBundle } from "@lore/core";
 import { renderAssessmentContent } from "@lore/core";
+import { actedStore } from "../../live-invocation.js";
 
 // ─── Test helpers ─────────────────────────────────────────────────────────────
 
@@ -310,7 +311,7 @@ async function makeAttestedStructuredAcBundle(store: InMemoryStore): Promise<Pla
 
 describe("assessPlan — corrective retry success (AC-ASSESS-3, D9)", () => {
   it("first malformed, second valid → ok with judgment.retried = true", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const bundle = await makeBundle(store);
     const provider = new InMemoryAIProvider("in-memory", {
       kind: "sequence",
@@ -325,7 +326,7 @@ describe("assessPlan — corrective retry success (AC-ASSESS-3, D9)", () => {
   });
 
   it("a same-attempt success (no malformed first response) has judgment.retried = false, not true by default", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const bundle = await makeBundle(store);
     const provider = new InMemoryAIProvider("in-memory", { kind: "ok", content: VALID_JSON });
     const { service } = makeAssessService({ provider });
@@ -337,7 +338,7 @@ describe("assessPlan — corrective retry success (AC-ASSESS-3, D9)", () => {
   });
 
   it("the retry prompt embeds the original prompt content plus a correction notice", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const bundle = await makeBundle(store);
     const provider = new InMemoryAIProvider("in-memory", {
       kind: "sequence",
@@ -354,7 +355,7 @@ describe("assessPlan — corrective retry success (AC-ASSESS-3, D9)", () => {
   });
 
   it("exactly 2 provider calls happen on the retry path, not 1 or 3", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const bundle = await makeBundle(store);
     const provider = new InMemoryAIProvider("in-memory", {
       kind: "sequence",
@@ -371,7 +372,7 @@ describe("assessPlan — corrective retry success (AC-ASSESS-3, D9)", () => {
 
 describe("assessPlan — double-malformed failure (AC-ASSESS-4)", () => {
   it("both responses malformed → AI_PROVIDER_ERROR", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const bundle = await makeBundle(store);
     const provider = new InMemoryAIProvider("in-memory", {
       kind: "sequence",
@@ -386,7 +387,7 @@ describe("assessPlan — double-malformed failure (AC-ASSESS-4)", () => {
   });
 
   it("error message's raw-output prefix is capped at 500 chars", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const bundle = await makeBundle(store);
     const longGarbage = "not json ".repeat(200); // 1800 chars, well over 500
     const provider = new InMemoryAIProvider("in-memory", {
@@ -404,7 +405,7 @@ describe("assessPlan — double-malformed failure (AC-ASSESS-4)", () => {
   });
 
   it("assessPlan never calls store.insert — double-malformed leaves the store's doc count unchanged", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const bundle = await makeBundle(store);
     const beforeResult = await store.findMany({});
     if (!beforeResult.ok) throw new Error("findMany failed");
@@ -423,7 +424,7 @@ describe("assessPlan — double-malformed failure (AC-ASSESS-4)", () => {
   });
 
   it("a transport-level provider error (not a parse failure) does NOT trigger a corrective retry", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const bundle = await makeBundle(store);
     const provider = new InMemoryAIProvider("in-memory", {
       kind: "err",
@@ -442,7 +443,7 @@ describe("assessPlan — double-malformed failure (AC-ASSESS-4)", () => {
 
 describe("assessPlan — telemetry exactly-once on every terminal outcome (D10)", () => {
   it("success via retry: emit is called exactly once, not once per attempt", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const bundle = await makeBundle(store);
     const provider = new InMemoryAIProvider("in-memory", {
       kind: "sequence",
@@ -455,7 +456,7 @@ describe("assessPlan — telemetry exactly-once on every terminal outcome (D10)"
   });
 
   it("double-malformed failure: emit is called exactly once, not zero and not twice", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const bundle = await makeBundle(store);
     const provider = new InMemoryAIProvider("in-memory", {
       kind: "sequence",
@@ -468,7 +469,7 @@ describe("assessPlan — telemetry exactly-once on every terminal outcome (D10)"
   });
 
   it("single-attempt success: emit is called exactly once", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const bundle = await makeBundle(store);
     const provider = new InMemoryAIProvider("in-memory", { kind: "ok", content: VALID_JSON });
     const { service, emitCalls } = makeAssessService({ provider });
@@ -478,7 +479,7 @@ describe("assessPlan — telemetry exactly-once on every terminal outcome (D10)"
   });
 
   it("emitted event's kind is 'assess' (not mistakenly tagged as create/regenerate)", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const bundle = await makeBundle(store);
     const provider = new InMemoryAIProvider("in-memory", { kind: "ok", content: VALID_JSON });
     const { service, emitCalls } = makeAssessService({ provider });
@@ -488,7 +489,7 @@ describe("assessPlan — telemetry exactly-once on every terminal outcome (D10)"
   });
 
   it("aiTelemetryEnabled=false silences emit entirely, even on the retry-success path", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const bundle = await makeBundle(store);
     const provider = new InMemoryAIProvider("in-memory", {
       kind: "sequence",
@@ -505,7 +506,7 @@ describe("assessPlan — telemetry exactly-once on every terminal outcome (D10)"
 
 describe("assessPlan — prompt content carries the plan bundle's materials (AC-ASSESS-2)", () => {
   it("prompt contains the plan title and content", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const bundle = await makeBundle(store);
     const provider = new InMemoryAIProvider("in-memory", { kind: "ok", content: VALID_JSON });
     const { service } = makeAssessService({ provider });
@@ -517,7 +518,7 @@ describe("assessPlan — prompt content carries the plan bundle's materials (AC-
   });
 
   it("prompt contains the linked spec's AC section verbatim", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const bundle = await makeBundle(store);
     const provider = new InMemoryAIProvider("in-memory", { kind: "ok", content: VALID_JSON });
     const { service } = makeAssessService({ provider });
@@ -529,7 +530,7 @@ describe("assessPlan — prompt content carries the plan bundle's materials (AC-
   });
 
   it("prompt contains the task's evidence trail: oracle, command, and result markers", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const bundle = await makeBundle(store);
     const provider = new InMemoryAIProvider("in-memory", { kind: "ok", content: VALID_JSON });
     const { service } = makeAssessService({ provider });
@@ -547,7 +548,7 @@ describe("assessPlan — prompt content carries the plan bundle's materials (AC-
   });
 
   it("prompt contains the task's title", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const bundle = await makeBundle(store);
     const provider = new InMemoryAIProvider("in-memory", { kind: "ok", content: VALID_JSON });
     const { service } = makeAssessService({ provider });
@@ -558,7 +559,7 @@ describe("assessPlan — prompt content carries the plan bundle's materials (AC-
   });
 
   it("diffText, when provided, appears in the prompt", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const bundle = await makeBundle(store);
     const provider = new InMemoryAIProvider("in-memory", { kind: "ok", content: VALID_JSON });
     const { service } = makeAssessService({ provider });
@@ -569,7 +570,7 @@ describe("assessPlan — prompt content carries the plan bundle's materials (AC-
   });
 
   it("a task with NO evidence renders '(no evidence recorded)', not a crash or blank section", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
     const planResult = await corpusService.create({ type: "plan", title: "No-Evidence Plan", content: "x" } as CreateDocInput);
     if (!planResult.ok) throw new Error("plan create failed");
@@ -596,7 +597,7 @@ describe("assessPlan — prompt content carries the plan bundle's materials (AC-
 
 describe("assessPlan — budget truncation is recorded in judgment.truncated (AC-ASSESS-7)", () => {
   it("a plan content over budget is truncated and 'plan' appears in judgment.truncated", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
     const longContent = "x".repeat(500);
     const planResult = await corpusService.create({ type: "plan", title: "Long Plan", content: longContent } as CreateDocInput);
@@ -625,7 +626,7 @@ describe("assessPlan — budget truncation is recorded in judgment.truncated (AC
   });
 
   it("when nothing exceeds budget, judgment.truncated is an empty array, not omitted or null", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const bundle = await makeBundle(store);
     const provider = new InMemoryAIProvider("in-memory", { kind: "ok", content: VALID_JSON });
     const { service } = makeAssessService({ provider });
@@ -637,7 +638,7 @@ describe("assessPlan — budget truncation is recorded in judgment.truncated (AC
   });
 
   it("a task content over its own (smaller) budget is truncated and named 'task:<slug>', distinct from the plan budget", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
     const planResult = await corpusService.create({ type: "plan", title: "Task Budget Plan", content: "short plan" } as CreateDocInput);
     if (!planResult.ok) throw new Error("plan create failed");
@@ -681,7 +682,7 @@ describe("assessPlan — diff-section truncation is file-boundary-aware (SPEC-02
   const docsDiffChunk = `diff --git a/docs/readme.md b/docs/readme.md\nindex 1..2 100644\n--- a/docs/readme.md\n+++ b/docs/readme.md\n@@ -1,1 +1,1 @@\n${"+".repeat(50)}`;
 
   it("an oversized diff records 'diff:<path>' entries for each dropped file, NOT the old bare 'diff' marker (AC-AE-3)", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const bundle = await makeBundle(store);
     const diffText = `${srcDiffChunk}\n${docsDiffChunk}`;
     // Budget fits the src/ chunk alone (higher priority) but not the docs chunk too.
@@ -705,7 +706,7 @@ describe("assessPlan — diff-section truncation is file-boundary-aware (SPEC-02
   });
 
   it("a diff within budget produces zero 'diff:*' entries in judgment.truncated (AC-AE-4 no-op)", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const bundle = await makeBundle(store);
     // Well within the default 24000-char max_diff_chars budget.
     const diffText = "diff --git a/foo.ts b/foo.ts\n+added line\n";
@@ -743,7 +744,7 @@ describe("buildAssessPrompt — diff-omission truncation manifest (bugfix F3)", 
     `+++ b/docs/readme.md\n@@ -1,1 +1,1 @@\n${"+".repeat(50)}`;
 
   it("an over-budget diff's prompt carries the manifest with every dropped file, grouped, plus the do-not-penalize instruction", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const bundle = await makeBundle(store);
     const diffText = `${srcChunk}\n${testChunk}\n${otherChunk}`;
     // Budget fits only the highest-priority (source) chunk — test + other chunks are dropped.
@@ -769,7 +770,7 @@ describe("buildAssessPrompt — diff-omission truncation manifest (bugfix F3)", 
   });
 
   it("a within-budget diff's prompt carries NO manifest section at all", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const bundle = await makeBundle(store);
     const diffText = "diff --git a/foo.ts b/foo.ts\n+added line\n"; // well under default 24000 budget
 
@@ -780,7 +781,7 @@ describe("buildAssessPrompt — diff-omission truncation manifest (bugfix F3)", 
   });
 
   it("regression: judgment.truncated still records per-file diff:<path> markers unchanged by the manifest addition (SPEC-028 AC-AE-3)", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const bundle = await makeBundle(store);
     const diffText = `${srcChunk}\n${testChunk}\n${otherChunk}`;
     const budgets = { ...DEFAULT_BUDGETS, max_diff_chars: srcChunk.length + 10 };
@@ -801,7 +802,7 @@ describe("buildAssessPrompt — diff-omission truncation manifest (bugfix F3)", 
 
 describe("buildAssessPrompt / buildAssessRetryPrompt — reasoning-limit statement (SPEC-029 AC-AR-1)", () => {
   it("the base judge prompt states the 300-char reasoning limit AND that overflow gets clipped", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const bundle = await makeBundle(store);
     const { prompt } = buildAssessPrompt(bundle, undefined, DEFAULT_BUDGETS);
     expect(prompt).toContain("300 characters");
@@ -809,7 +810,7 @@ describe("buildAssessPrompt / buildAssessRetryPrompt — reasoning-limit stateme
   });
 
   it("the corrective-retry prompt (built end-to-end from a real base prompt) ALSO states the limit — proves 'both prompts' holds, not just the retry-prompt docstring", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const bundle = await makeBundle(store);
     const { prompt: basePrompt } = buildAssessPrompt(bundle, undefined, DEFAULT_BUDGETS);
     const retryPrompt = buildAssessRetryPrompt(basePrompt, "Unexpected token at position 0");
@@ -823,7 +824,7 @@ describe("buildAssessPrompt / buildAssessRetryPrompt — reasoning-limit stateme
 
 describe("assessPlan — overlong-but-valid reasoning is clipped without a corrective retry (SPEC-029 AC-AR-2, AC-AR-6)", () => {
   it("a first response with an overlong ac_scores[0].reasoning succeeds in ONE provider call, clips the field, and records reasoning_clipped", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const bundle = await makeBundle(store);
 
     const overlongReasoning = "This AC is fully evidenced by the task's verification log. ".repeat(7); // > 300 chars
@@ -860,7 +861,7 @@ describe("assessPlan — overlong-but-valid reasoning is clipped without a corre
   });
 
   it("when nothing needed clipping, judgment.reasoning_clipped is OMITTED entirely (not present-but-empty)", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const bundle = await makeBundle(store);
     const provider = new InMemoryAIProvider("in-memory", { kind: "ok", content: VALID_JSON });
     const { service } = makeAssessService({ provider });
@@ -883,7 +884,7 @@ describe("assessPlan — overlong-but-valid reasoning is clipped without a corre
     // result from assessPlan(). This test closes that gap by feeding the actual returned
     // result.value through the actual rendering function used at persist time
     // (packages/lore/src/adapters/cli/commands/assess.ts:232 — `content: renderAssessmentContent(result)`).
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const bundle = await makeBundle(store);
 
     const overlongReasoning = "This AC is fully evidenced by the task's verification log. ".repeat(7); // > 300 chars
@@ -919,7 +920,7 @@ describe("assessPlan — overlong-but-valid reasoning is clipped without a corre
   });
 
   it("regression: when nothing was clipped, the rendered content does NOT contain 'Reasoning clipped' — proves the end-to-end path doesn't spuriously render the line", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const bundle = await makeBundle(store);
     const provider = new InMemoryAIProvider("in-memory", { kind: "ok", content: VALID_JSON });
     const { service } = makeAssessService({ provider });
@@ -940,7 +941,7 @@ describe("assessPlan — overlong-but-valid reasoning is clipped without a corre
 
 describe("buildAssessPrompt — structured acceptance criteria table (SPEC-038 AC-ACODE-4)", () => {
   it("a spec with declared extra.acceptance_criteria renders the structured table with both AC ids and a closed ac_id instruction", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const bundle = await makeStructuredAcBundle(store);
 
     const result = buildAssessPrompt(bundle, undefined, DEFAULT_BUDGETS);
@@ -969,7 +970,7 @@ describe("buildAssessPrompt — structured acceptance criteria table (SPEC-038 A
   });
 
   it("a full assessPlan() call against the structured-AC bundle carries prompt_version 8 (the active registry version, D1) in the persisted judgment", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const bundle = await makeStructuredAcBundle(store);
     const scriptedJson = JSON.stringify({
       verdict: "met",
@@ -993,7 +994,7 @@ describe("buildAssessPrompt — structured acceptance criteria table (SPEC-038 A
 
 describe("buildAssessPrompt — attested coverage annotation (SPEC-039 §2 D8, AC-VRF-9)", () => {
   it("a structured AC table with a mix of attested and self-reported evidence annotates only the attested side, per criterion", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const bundle = await makeAttestedStructuredAcBundle(store);
 
     const result = buildAssessPrompt(bundle, undefined, DEFAULT_BUDGETS);
@@ -1009,7 +1010,7 @@ describe("buildAssessPrompt — attested coverage annotation (SPEC-039 §2 D8, A
   });
 
   it("a criterion with zero evidence still renders the bare '0 pass, 0 fail' cell, no annotation", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const bundle = await makeStructuredAcBundle(store);
     // makeStructuredAcBundle's AC-X-2 has no evidence referencing it at all.
     const result = buildAssessPrompt(bundle, undefined, DEFAULT_BUDGETS);
@@ -1020,7 +1021,7 @@ describe("buildAssessPrompt — attested coverage annotation (SPEC-039 §2 D8, A
 
 describe("assessPlan — ac_id containment against declared structured criteria (SPEC-038 AC-ACODE-5)", () => {
   it("a judge response whose ac_scores[].ac_id are all within the declared set succeeds (ok)", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const bundle = await makeStructuredAcBundle(store);
     const scriptedJson = JSON.stringify({
       verdict: "met",
@@ -1040,7 +1041,7 @@ describe("assessPlan — ac_id containment against declared structured criteria 
   });
 
   it("a judge response with an ac_id NOT in the declared set fails with VALIDATION_ERROR naming the offending id", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const bundle = await makeStructuredAcBundle(store);
     const scriptedJson = JSON.stringify({
       verdict: "met",
@@ -1065,7 +1066,7 @@ describe("assessPlan — ac_id containment against declared structured criteria 
   });
 
   it("a containment failure creates no store side effect — doc count is unchanged before/after", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const bundle = await makeStructuredAcBundle(store);
     const beforeResult = await store.findMany({});
     if (!beforeResult.ok) throw new Error("findMany failed");
@@ -1090,7 +1091,7 @@ describe("assessPlan — ac_id containment against declared structured criteria 
 
 describe("buildAssessPrompt — legacy verbatim path is byte-identical for specs with no structured ACs (REGRESSION)", () => {
   it("the plain-prose makeBundle fixture renders the verbatim heading, the open-ended ac_id instruction, and an empty declaredAcIds", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const bundle = await makeBundle(store);
 
     const result = buildAssessPrompt(bundle, undefined, DEFAULT_BUDGETS);
@@ -1105,7 +1106,7 @@ describe("buildAssessPrompt — legacy verbatim path is byte-identical for specs
   });
 
   it("a full assessPlan() call against the legacy (no structured ACs) bundle also carries prompt_version 8 (the active registry version, D1) end-to-end", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const bundle = await makeBundle(store);
     const provider = new InMemoryAIProvider("in-memory", { kind: "ok", content: VALID_JSON });
     const { service } = makeAssessService({ provider });
@@ -1119,7 +1120,7 @@ describe("buildAssessPrompt — legacy verbatim path is byte-identical for specs
 
 describe("buildAssessPrompt — structured AC table truncation (BOUNDARY, SPEC-038)", () => {
   it("a structured-AC spec section over a tiny max_spec_chars budget is truncated and 'spec' appears in truncated[]", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const bundle = await makeStructuredAcBundle(store);
     const tightBudgets = { ...DEFAULT_BUDGETS, max_spec_chars: 50 };
 
@@ -1199,7 +1200,7 @@ function diffTouching(paths: string[]): string {
 
 describe("assessPlan — diff-range scope-mismatch warning (task-assess-diff-range-scope-mismatch-warning)", () => {
   it("HAPPY: a diff whose files all fall under the plan's task anchors → no warning", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const bundle = await makeBundleWithTaskAnchors(store, ["src/a.ts", "src/b.ts"]);
     const diffText = diffTouching(["src/a.ts", "src/b.ts"]);
     const provider = new InMemoryAIProvider("in-memory", { kind: "ok", content: VALID_JSON });
@@ -1212,7 +1213,7 @@ describe("assessPlan — diff-range scope-mismatch warning (task-assess-diff-ran
   });
 
   it("NEGATIVE/STATE: a diff dominated by files OUTSIDE the task anchors (< half intersect) → exactly one warning naming the counts", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const bundle = await makeBundleWithTaskAnchors(store, ["src/a.ts"]);
     // 1 of 3 files intersects — strictly fewer than half.
     const diffText = diffTouching(["src/a.ts", "docs/readme.md", "packages/dashboard/x.tsx"]);
@@ -1234,7 +1235,7 @@ describe("assessPlan — diff-range scope-mismatch warning (task-assess-diff-ran
   });
 
   it("HAPPY (production path, task-computescopemismatchwarning-cannot-distinguish-a-too-wide): a diff whose non-anchor files are all recognized co-located test siblings → no warning through the REAL assessPlan call", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const bundle = await makeBundleWithTaskAnchors(store, ["src/a.ts"]);
     // Only "src/a.ts" is a declared anchor; the other two files are its co-located test
     // siblings under THIS repo's own test-file convention (`deriveRepoTestedSourcePath`,
@@ -1254,7 +1255,7 @@ describe("assessPlan — diff-range scope-mismatch warning (task-assess-diff-ran
   });
 
   it("BOUNDARY: a plan with zero task anchors → check skipped entirely, no warning even though 0 files intersect", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const bundle = await makeBundleWithTaskAnchors(store, undefined); // no file_anchors declared at all
     const diffText = diffTouching(["docs/readme.md", "packages/dashboard/x.tsx"]);
     const provider = new InMemoryAIProvider("in-memory", { kind: "ok", content: VALID_JSON });
@@ -1267,7 +1268,7 @@ describe("assessPlan — diff-range scope-mismatch warning (task-assess-diff-ran
   });
 
   it("BOUNDARY: exactly half of the diff's files intersect → NOT a mismatch (a naive 'warn when any file is outside' rule would wrongly fire here)", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const bundle = await makeBundleWithTaskAnchors(store, ["src/a.ts"]);
     // 1 of 2 files intersects — exactly half, must NOT warn.
     const diffText = diffTouching(["src/a.ts", "docs/readme.md"]);
@@ -1281,9 +1282,9 @@ describe("assessPlan — diff-range scope-mismatch warning (task-assess-diff-ran
   });
 
   it("REGRESSION: verdict/overall_score/ac_scores/persistence-relevant fields are identical whether or not the warning fires", async () => {
-    const storeA = new InMemoryStore();
+    const storeA = actedStore(new InMemoryStore());
     const bundleNoWarning = await makeBundleWithTaskAnchors(storeA, ["src/a.ts"]);
-    const storeB = new InMemoryStore();
+    const storeB = actedStore(new InMemoryStore());
     const bundleWithWarning = await makeBundleWithTaskAnchors(storeB, ["src/a.ts"]);
 
     const providerA = new InMemoryAIProvider("in-memory", { kind: "ok", content: VALID_JSON });

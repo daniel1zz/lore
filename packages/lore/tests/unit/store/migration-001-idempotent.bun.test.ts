@@ -44,6 +44,7 @@ import { describe, expect, it } from "vitest";
 import { Database } from "bun:sqlite";
 import { SQLiteStore } from "../../../src/store/sqlite-store.js";
 import { MIGRATION_001_SQL } from "../../../src/store/migrations/migration-001.js";
+import { actedStore } from "../../live-invocation.js";
 
 function userVersion(db: Database): number {
   return (db.query("PRAGMA user_version").get() as { user_version: number }).user_version;
@@ -90,7 +91,7 @@ function insertDoc(db: Database, id: string, slug: string, title = "Migration 00
 
 describe("migration-001 (initial schema) — crash-safety / idempotency (Blocker B3)", () => {
   it("HAPPY: a fresh SQLiteStore applies migration-001 cleanly and lands on the current head user_version", () => {
-    const store = new SQLiteStore(":memory:");
+    const store = actedStore(new SQLiteStore(":memory:"));
     const db = store.getDatabase();
 
     // reason: mirrors migration-004.bun.test.ts's own comment — a fresh store
@@ -186,7 +187,7 @@ describe("migration-001 (initial schema) — crash-safety / idempotency (Blocker
   });
 
   it("REGRESSION: SQLiteStore.runMigrations() still produces a fully functional store post-fix (insert + FTS5 search)", async () => {
-    const store = new SQLiteStore(":memory:");
+    const store = actedStore(new SQLiteStore(":memory:"));
 
     // reason: goes through the REAL public insert() API (not raw SQL) — since
     // migration-008 added fts_title/fts_content/fts_tags shadow columns that

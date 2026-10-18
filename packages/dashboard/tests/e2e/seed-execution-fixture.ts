@@ -40,6 +40,7 @@
 import { RecordLockService } from "../../../lore/src/service/record-lock-service.js";
 import { GateEnforcer } from "../../../lore/src/service/gate-enforcer.js";
 import { SQLiteStore } from "../../../lore/src/store/sqlite-store.js";
+import { declareWriteActorForTests } from "../../../lore/src/store/write-context-store.js";
 import { CorpusService } from "../../../lore/src/service/corpus-service.js";
 import { TaskWorkflowService } from "../../../lore/src/service/task-workflow-service.js";
 import type { CreateDocInput, DocRecord, LoreError, Result } from "@lore/core";
@@ -59,7 +60,8 @@ async function main(): Promise<void> {
     throw new Error("Usage: bun seed-execution-fixture.ts <dbPath> <runId>");
   }
 
-  const store = new SQLiteStore(dbPath);
+  // reason: a fixed seeding author — this fixture script is its own entry and reads nothing from the process.
+  const store = declareWriteActorForTests(new SQLiteStore(dbPath), "e2e-seed");
   const corpus = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
   const taskWorkflow = new TaskWorkflowService(store, undefined, { claimTtlMinutes: 120 });
 

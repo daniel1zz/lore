@@ -45,13 +45,14 @@ import { AuditService } from "../../../src/service/audit-service.js";
 import type { CreateDocInput, DocId, DocRecord, LinkRecord, LoreError, Result, TreeBlueprint } from "@lore/core";
 import { DOC_TYPE_ROLE_MAP, err } from "@lore/core";
 import { ulid } from "ulidx";
+import { actedStore } from "../../live-invocation.js";
 
 const FAR_PAST = "2000-01-01T00:00:00.000Z"; // always before any doc created during a test run
 
 // ─── Fixture helpers ──────────────────────────────────────────────────────────
 
 function makeStore() {
-  return new InMemoryStore();
+  return actedStore(new InMemoryStore());
 }
 
 async function createPrd(cs: CorpusService, title: string): Promise<DocRecord> {
@@ -244,7 +245,7 @@ describe("ERROR — a failed store write never reaches the audit write", () => {
         return err({ code: "LINK_CYCLE", path: [] });
       }
     }
-    const store = new FailingLinkStore();
+    const store = actedStore(new FailingLinkStore());
     const cs = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
     const a = await createPrd(cs, "Fail A");
     const b = await createPrd(cs, "Fail B");
@@ -267,7 +268,7 @@ describe("ERROR — a failed store write never reaches the audit write", () => {
         return err({ code: "STORE_ERROR", message: "forced failure for test" });
       }
     }
-    const store = new FailingUpdateStore();
+    const store = actedStore(new FailingUpdateStore());
     const tcs = new TreeCheckService(store);
     await insertRawDoc(store, "prd", "Root", null);
     const plan = await insertRawDoc(store, "plan", "Orphan Plan", null);

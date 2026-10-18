@@ -15,7 +15,7 @@
 
 import { defineCommand } from "citty";
 import { loadLoreApp } from "../loader.js";
-import { exitCode, formatError } from "../utils.js";
+import { exitCode, formatErrorFor } from "../utils.js";
 import type { App } from "../../../app.js";
 import { invocationOf } from "../command-invocation.js";
 
@@ -61,7 +61,7 @@ export default defineCommand({
           );
           if (!result.ok) {
             if (args.json) console.log(JSON.stringify({ ok: false, error: result.error }, null, 2));
-            else process.stderr.write(formatError(result.error));
+            else process.stderr.write(formatErrorFor(inv, result.error));
             process.exitCode = exitCode(result.error);
             return;
           }
@@ -90,7 +90,7 @@ export default defineCommand({
           const result = await svc.migrateRequirement(args.prd as string, args.id as string, args.rule as string);
           if (!result.ok) {
             if (args.json) console.log(JSON.stringify({ ok: false, error: result.error }, null, 2));
-            else process.stderr.write(formatError(result.error));
+            else process.stderr.write(formatErrorFor(inv, result.error));
             process.exitCode = exitCode(result.error);
             return;
           }
@@ -117,7 +117,7 @@ export default defineCommand({
           const result = await svc.listRequirements(args.prd as string);
           if (!result.ok) {
             if (args.json) console.log(JSON.stringify({ ok: false, error: result.error }, null, 2));
-            else process.stderr.write(formatError(result.error));
+            else process.stderr.write(formatErrorFor(inv, result.error));
             process.exitCode = exitCode(result.error);
             return;
           }
@@ -153,7 +153,7 @@ export default defineCommand({
           });
           if (!result.ok) {
             if (args.json) console.log(JSON.stringify({ ok: false, error: result.error }, null, 2));
-            else process.stderr.write(formatError(result.error));
+            else process.stderr.write(formatErrorFor(inv, result.error));
             process.exitCode = exitCode(result.error);
             return;
           }

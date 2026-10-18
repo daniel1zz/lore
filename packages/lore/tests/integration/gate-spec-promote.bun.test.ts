@@ -52,7 +52,7 @@ import { execFileSync } from "node:child_process";
 import { UNCITED_SPEC_RULE } from "../../src/service/spec-approval-citation.js";
 import { ensureLiveRuleViaCli } from "../helpers/cli-live-rule.js";
 import type { CreateDocInput, DocId, LoreConfig } from "@lore/core";
-import { liveInvocation } from "../live-invocation.js";
+import { liveInvocation, liveAmbient, liveWriteContext, actedStore } from "../live-invocation.js";
 import type { Invocation } from "@lore/core";
 
 // ─── Command type (mirrors assess-ai.bun.test.ts) ────────────────────────────
@@ -132,7 +132,7 @@ beforeEach(async () => {
   const loreDir = join(tmpDir, ".lore");
   mkdirSync(loreDir, { recursive: true });
 
-  const app = createApp(join(loreDir, "lore.db"));
+  const app = createApp(join(loreDir, "lore.db"), undefined, liveAmbient(), liveWriteContext());
   app.close();
   // AU-T7: `approve --override-no-judgment` is decided; this suite's subject is not the override, so the class is
   // loosened the documented way (a human-tty governance decision on a throwaway corpus), never by a bypass in product code.
@@ -158,7 +158,7 @@ afterEach(() => {
 
 /** Create a PRD + child spec (no AC declared). Returns the spec's slug and id. */
 async function createSpec(): Promise<{ specId: string; specSlug: string }> {
-  const app = createApp(join(tmpDir, ".lore", "lore.db"));
+  const app = createApp(join(tmpDir, ".lore", "lore.db"), undefined, liveAmbient(), liveWriteContext());
   try {
     const prdResult = await app.corpusService.create({
       type: "prd",
@@ -182,7 +182,7 @@ async function createSpec(): Promise<{ specId: string; specSlug: string }> {
 
 /** Create a PRD (non-spec doc), returning its slug for the "not a spec" scenario. */
 async function createPrdOnly(): Promise<{ prdSlug: string }> {
-  const app = createApp(join(tmpDir, ".lore", "lore.db"));
+  const app = createApp(join(tmpDir, ".lore", "lore.db"), undefined, liveAmbient(), liveWriteContext());
   try {
     const prdResult = await app.corpusService.create({
       type: "prd",
@@ -203,7 +203,7 @@ async function createPrdOnly(): Promise<{ prdSlug: string }> {
  * implicitly exercises).
  */
 async function createSpecWithKind(kind: string): Promise<{ specId: string; specSlug: string }> {
-  const app = createApp(join(tmpDir, ".lore", "lore.db"));
+  const app = createApp(join(tmpDir, ".lore", "lore.db"), undefined, liveAmbient(), liveWriteContext());
   try {
     const prdResult = await app.corpusService.create({
       type: "prd",
@@ -228,7 +228,7 @@ async function createSpecWithKind(kind: string): Promise<{ specId: string; specS
 
 /** Add one structured acceptance criterion (verify.mode=human — simplest valid shape). */
 async function addAcceptanceCriterion(specId: string, id = "AC-PROMO-1", cite = true): Promise<void> {
-  const app = createApp(join(tmpDir, ".lore", "lore.db"));
+  const app = createApp(join(tmpDir, ".lore", "lore.db"), undefined, liveAmbient(), liveWriteContext());
   try {
     if (app.acService === undefined) throw new Error("AcService not wired");
     const result = await app.acService.addCriterion(specId, {
@@ -369,7 +369,7 @@ async function setAcceptanceCriteriaDirectly(specId: string, criteria: unknown[]
   // `CorpusService.set` that changes the criteria, so this fixture plants the legacy
   // "predates the gate" state straight through the store — the only remaining way to
   // simulate it.
-  const store = new SQLiteStore(join(tmpDir, ".lore", "lore.db"));
+  const store = actedStore(new SQLiteStore(join(tmpDir, ".lore", "lore.db")));
   try {
     const found = await store.find(specId as DocId);
     if (!found.ok || found.value === null) throw new Error(`find failed: ${specId}`);
@@ -721,7 +721,7 @@ describe("lore gate spec-promote — AC2 (parity fix): CLI resolves specKind + v
     // reason: BR-1007 - the AC-count floor is waived by the profile, but a spec with no criterion has
     // nothing to cite, so the service refuses it for THAT reason (field `acceptance_criteria`), never on
     // the spec-promote floor: the floor-level verdict still matches the CLI's.
-    const gatedApp = createApp(join(tmpDir, ".lore", "lore.db"), DOMAIN_OVERVIEW_PROFILE_CONFIG) as App;
+    const gatedApp = createApp(join(tmpDir, ".lore", "lore.db"), DOMAIN_OVERVIEW_PROFILE_CONFIG, liveAmbient(), liveWriteContext()) as App;
     try {
       const setResult = await gatedApp.corpusService.set(specId, { status: "approved" });
       expect(setResult.ok).toBe(false);
@@ -753,7 +753,7 @@ describe("lore gate spec-promote — AC2 (parity fix): CLI resolves specKind + v
 
     // ── Service-layer parity: the SAME 0-AC feature spec is ALSO denied by
     // CorpusService.set's spec-promote gate against the SAME config.
-    const gatedApp = createApp(join(tmpDir, ".lore", "lore.db"), DOMAIN_OVERVIEW_PROFILE_CONFIG) as App;
+    const gatedApp = createApp(join(tmpDir, ".lore", "lore.db"), DOMAIN_OVERVIEW_PROFILE_CONFIG, liveAmbient(), liveWriteContext()) as App;
     try {
       const setResult = await gatedApp.corpusService.set(specId, { status: "approved" });
       expect(setResult.ok).toBe(false);

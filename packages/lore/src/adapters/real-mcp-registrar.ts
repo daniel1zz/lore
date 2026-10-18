@@ -166,16 +166,15 @@ function runClaudeMcpCommand<T>(
 export class RealMcpRegistrar implements McpRegistrar {
   /**
    * @param env - Environment passed to the spawned `claude` process.
-   *   Defaults to the current process's own env (production use — `claude`
-   *   is resolved off the invoking user's real `PATH`). Overridable for
-   *   deterministic testing (`real-setup-ports.test.ts` injects a `PATH`
+   *   Required: production passes the invocation's `env` (`claude` is resolved
+   *   off the invoking user's real `PATH`); tests inject an env for deterministic testing (`real-setup-ports.test.ts` injects a `PATH`
    *   pointing at a recording shim, or an EMPTY `PATH` to force the ENOENT
    *   path) WITHOUT mutating the global `process.env` — vitest's worker
    *   pool can run other test files concurrently in the same process, and
    *   `process.env` is process-global, so a test-local mutate/restore of it
    *   would be a real cross-file race.
    */
-  constructor(private readonly env: NodeJS.ProcessEnv = process.env) {}
+  constructor(private readonly env: NodeJS.ProcessEnv) {}
 
   async add(binPath: string): Promise<Result<McpAddOutcome, LoreError>> {
     return runClaudeMcpCommand(buildMcpAddArgs(binPath), manualAddCommand(binPath), this.env, "added", (stderr) =>

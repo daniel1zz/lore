@@ -19,12 +19,13 @@ import { NoOpTelemetry } from "@lore/core";
 import { runTreeConsistency } from "../../../src/eval/scenarios/tree-consistency.js";
 import type { App } from "../../../src/app.js";
 import type { DocRecord } from "@lore/core";
+import { actedStore } from "../../live-invocation.js";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 /** Build a minimal App using InMemoryStore (no SQLite, no file I/O). */
 function makeApp(store?: InMemoryStore): App {
-  const s = store ?? new InMemoryStore();
+  const s = store ?? actedStore(new InMemoryStore());
   const telemetry = new NoOpTelemetry();
   return {
     corpusService: new CorpusService(s, new RecordLockService(s, new GateEnforcer(undefined)), telemetry),
@@ -93,7 +94,7 @@ function makeDoc(
 
 describe("HAPPY — healthy corpus passes tree-consistency", () => {
   it("prd root + a parentless spec → passed=true, all counts 0 (BR-572, BR-2)", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const prd = makeDoc({ type: "prd", parent_id: null });
     // re-baseline (BR-2): a spec takes no parent, so the healthy shape is a PARENTLESS spec
     const spec = makeDoc({ type: "spec", parent_id: null });
@@ -119,7 +120,7 @@ describe("NEGATIVE — orphan doc causes passed=false", () => {
   it("knowledge with no parent → orphan detected, passed=false", async () => {
     // re-baseline (BR-2): this used a spec; a parentless spec is legal now, so the control that
     // must still be an orphan is a doc of a type that DOES need a parent.
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const knowledge = makeDoc({ type: "knowledge", parent_id: null });
     await store.insert(knowledge);
 
@@ -133,7 +134,7 @@ describe("NEGATIVE — orphan doc causes passed=false", () => {
   });
 
   it("spec with no parent → NOT an orphan, passed=true (BR-572 agrees with BR-400)", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const spec = makeDoc({ type: "spec", parent_id: null });
     await store.insert(spec);
 
@@ -149,7 +150,7 @@ describe("NEGATIVE — orphan doc causes passed=false", () => {
 
 describe("NEGATIVE — invalid parent type causes passed=false", () => {
   it("spec under plan → invalid_parent_types > 0, passed=false", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const prd = makeDoc({ type: "prd", parent_id: null });
     // plan under prd is valid; spec under plan is NOT (spec only valid under prd)
     const plan = makeDoc({ type: "plan", parent_id: prd.id });
@@ -172,7 +173,7 @@ describe("NEGATIVE — invalid parent type causes passed=false", () => {
 
 describe("NEGATIVE — broken parent_id causes orphan", () => {
   it("doc with non-existent parent_id → orphan detected", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const spec = makeDoc({ type: "spec", parent_id: "01NONEXISTENTPARENT0000000" });
     await store.insert(spec);
 
@@ -207,7 +208,7 @@ describe("BOUNDARY — empty corpus passes", () => {
 
 describe("BOUNDARY — single prd root doc passes", () => {
   it("single prd with no parent → passed=true (root type)", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     await store.insert(makeDoc({ type: "prd", parent_id: null }));
 
     const app = makeApp(store);
@@ -224,7 +225,7 @@ describe("BOUNDARY — single prd root doc passes", () => {
 
 describe("ERROR — store failure returns passed=false without throwing", () => {
   it("checkTree store error → passed=false, no throw", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const app = makeApp(store);
 
     // Simulate store failure by replacing checkTree with one that returns an error
@@ -249,7 +250,7 @@ describe("ERROR — store failure returns passed=false without throwing", () => 
 
 describe("STATE — runTreeConsistency is deterministic", () => {
   it("same corpus + two runs → identical results", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const prd = makeDoc({ type: "prd", parent_id: null });
     const spec = makeDoc({ type: "spec", parent_id: null });
     await store.insert(prd);
@@ -272,7 +273,7 @@ describe("STATE — runTreeConsistency is deterministic", () => {
 
 describe("REGRESSION — 50+ doc corpus completes in <1s", () => {
   it("large corpus performance test", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
 
     // Create 10 PRDs each beside 4 parentless specs = 50 docs total
     const docs: DocRecord[] = [];

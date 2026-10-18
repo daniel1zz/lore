@@ -39,6 +39,7 @@ import { join } from "node:path";
 import type { AuditEntry, VersionRecord } from "@lore/core";
 import { SQLiteStore } from "../../../src/store/sqlite-store.js";
 import { loosenOverrideClasses } from "../fixtures/autonomy-override-helpers.js";
+import { actedStore } from "../../live-invocation.js";
 
 setDefaultTimeout(300_000);
 
@@ -102,7 +103,7 @@ function corpusDir(prefix: string): string {
 }
 
 function withStore<T>(dir: string, fn: (s: SQLiteStore) => Promise<T>): Promise<T> {
-  const store = new SQLiteStore(join(dir, ".lore", "lore.db"));
+  const store = actedStore(new SQLiteStore(join(dir, ".lore", "lore.db")));
   return fn(store).finally(() => store.close());
 }
 

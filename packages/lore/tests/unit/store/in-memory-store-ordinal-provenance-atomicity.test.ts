@@ -47,6 +47,7 @@ import { describe, expect, it } from "vitest";
 import type { AuditEntry, DocRecord, LoreError, Result, VersionRecord } from "@lore/core";
 import { err } from "@lore/core";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
+import { actedStore } from "../../live-invocation.js";
 
 // ─── Failure-injection test double ─────────────────────────────────────────
 
@@ -149,7 +150,7 @@ function makeAudit(doc: DocRecord, overrides: Partial<AuditEntry> = {}): AuditEn
 
 describe("InMemoryStore.insertWithAllocatedOrdinalAndProvenance — failure-injection atomicity", () => {
   it("ERROR — insertVersion forced to fail rolls back the already-successful ordinal-numbered doc insert", async () => {
-    const store = new FailInjectingStore();
+    const store = actedStore(new FailInjectingStore());
     const doc = makeDoc();
     store.armFailure("insertVersion");
 
@@ -177,7 +178,7 @@ describe("InMemoryStore.insertWithAllocatedOrdinalAndProvenance — failure-inje
   });
 
   it("ERROR — appendAuditEntry forced to fail rolls back BOTH the doc insert and the version insert", async () => {
-    const store = new FailInjectingStore();
+    const store = actedStore(new FailInjectingStore());
     const doc = makeDoc();
     store.armFailure("appendAuditEntry");
 
@@ -198,7 +199,7 @@ describe("InMemoryStore.insertWithAllocatedOrdinalAndProvenance — failure-inje
   });
 
   it("BOUNDARY — a forced failure is single-shot and never contaminates a subsequent successful call", async () => {
-    const store = new FailInjectingStore();
+    const store = actedStore(new FailInjectingStore());
     const failedDoc = makeDoc();
     store.armFailure("insertVersion");
     const failedResult = await store.insertWithAllocatedOrdinalAndProvenance(
@@ -226,7 +227,7 @@ describe("InMemoryStore.insertWithAllocatedOrdinalAndProvenance — failure-inje
   });
 
   it("REGRESSION — with no forced failure, FailInjectingStore behaves identically to bare InMemoryStore", async () => {
-    const store = new FailInjectingStore();
+    const store = actedStore(new FailInjectingStore());
     const doc = makeDoc();
     const result = await store.insertWithAllocatedOrdinalAndProvenance(doc, makeVersion(doc), makeAudit(doc));
     expect(result.ok).toBe(true);

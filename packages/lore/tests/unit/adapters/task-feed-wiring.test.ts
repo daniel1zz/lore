@@ -50,6 +50,7 @@ import type { App } from "../../../src/app.js";
 import type { ApiKeyStore } from "../../../src/adapters/http/auth.js";
 import type { CreateDocInput, DocRecord, AcCoverageFact } from "@lore/core";
 import type { RelatedKnowledgeRef } from "../../../src/flows/task-feed-flow.js";
+import { actedStore } from "../../live-invocation.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 // packages/lore/tests/unit/adapters/ -> ../../../src/adapters/cli/commands/ac.ts
@@ -63,7 +64,7 @@ let store: InMemoryStore;
 let corpusService: CorpusService;
 
 function makeApp(): App {
-  store = new InMemoryStore();
+  store = actedStore(new InMemoryStore());
   corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
   const sessionService = new SessionService(store, {
     claimTtlMinutes: 120,

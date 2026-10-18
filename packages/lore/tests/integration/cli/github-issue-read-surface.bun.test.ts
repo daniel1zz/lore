@@ -78,6 +78,7 @@ import { createApp, type App } from "../../../src/app.js";
 import { resolutionToLabel } from "../../../src/service/resolution-projector.js";
 import { assertFreshBinary } from "../helpers/assert-fresh-binary";
 import { cleanupPayloadGhStubDir, payloadGhStubDir, type PayloadGhStubIssue } from "../helpers/payload-gh-stub";
+import { liveAmbient, liveWriteContext } from "../../live-invocation.js";
 
 // ─── Worktree-anchored dist/lore binary (never the main checkout's) ─────────
 
@@ -137,7 +138,7 @@ function makeThrowawayCorpus(prefix: string): { app: App; corpusRoot: string } {
   const corpusRoot = mkdtempSync(join(TMP_ROOT, `lore-gr-read-${prefix}-`));
   const loreDir = join(corpusRoot, ".lore");
   mkdirSync(loreDir, { recursive: true });
-  const app = createApp(join(loreDir, "lore.db"));
+  const app = createApp(join(loreDir, "lore.db"), undefined, liveAmbient(), liveWriteContext());
   return { app, corpusRoot };
 }
 

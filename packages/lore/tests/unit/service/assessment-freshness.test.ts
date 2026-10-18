@@ -46,6 +46,7 @@ import {
 } from "../../../src/service/gate-predicates.js";
 import { DOC_TYPE_ROLE_MAP } from "@lore/core";
 import type { CreateDocInput, DocId, DocRecord, LoreConfig } from "@lore/core";
+import { actedStore } from "../../live-invocation.js";
 
 // ─── Pure predicate — direct unit tests (mirrors gate-predicates.test.ts's style) ──
 
@@ -81,7 +82,7 @@ describe("assessmentFreshness (pure predicate)", () => {
 // ─── Fixture helpers (mirrors attestation-floor.test.ts's harness shape) ──────
 
 function makeHarness(config?: LoreConfig) {
-  const store = new InMemoryStore();
+  const store = actedStore(new InMemoryStore());
   const enforcer = new GateEnforcer(config);
   const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)), undefined, undefined, enforcer);
   const taskWorkflow = new TaskWorkflowService(store, undefined, { claimTtlMinutes: 120 });

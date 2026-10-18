@@ -18,7 +18,7 @@
 import { resolve } from "path";
 import { defineCommand } from "citty";
 import { loadLoreApp } from "../loader.js";
-import { exitCode, formatError } from "../utils.js";
+import { exitCode, formatErrorFor } from "../utils.js";
 import { invocationOf } from "../command-invocation.js";
 
 const DEFAULT_SPEC_DIR = "docs/requirements/spec";
@@ -59,7 +59,7 @@ export default defineCommand({
         if (jsonMode) {
           process.stdout.write(JSON.stringify({ ok: false, error: syncResult.error }) + "\n");
         } else {
-          process.stderr.write(formatError(syncResult.error) + "\n");
+          process.stderr.write(formatErrorFor(inv, syncResult.error) + "\n");
         }
         process.exitCode = exitCode(syncResult.error);
         return;

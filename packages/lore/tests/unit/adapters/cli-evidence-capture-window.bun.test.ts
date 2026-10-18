@@ -60,7 +60,7 @@ import {
   type CreateDocInput,
   type EvidenceEntry,
 } from "@lore/core";
-import { liveInvocation } from "../../live-invocation.js";
+import { liveInvocation, liveAmbient, liveWriteContext } from "../../live-invocation.js";
 import type { Invocation } from "@lore/core";
 
 type RunnableCommand = {
@@ -81,7 +81,7 @@ beforeEach(() => {
   process.exitCode = 0;
   tmpDir = resolve(mkdtempSync(join(tmpdir(), "lore-cli-capture-window-test-")));
   mkdirSync(join(tmpDir, ".lore"), { recursive: true });
-  const app = createApp(join(tmpDir, ".lore", "lore.db"));
+  const app = createApp(join(tmpDir, ".lore", "lore.db"), undefined, liveAmbient(), liveWriteContext());
   app.close();
   originalCwd = process.cwd();
   process.chdir(tmpDir);
@@ -131,7 +131,7 @@ function configRoundTrips(expectedMs: number): boolean {
 }
 
 async function seedTask(): Promise<string> {
-  const app = createApp(join(tmpDir, ".lore", "lore.db"));
+  const app = createApp(join(tmpDir, ".lore", "lore.db"), undefined, liveAmbient(), liveWriteContext());
   try {
     const plan = await app.corpusService.create({
       type: "plan",
@@ -167,7 +167,7 @@ async function seedTask(): Promise<string> {
  * the property under test.
  */
 async function readEvidence(taskSlug: string): Promise<EvidenceEntry[]> {
-  const app = createApp(join(tmpDir, ".lore", "lore.db"));
+  const app = createApp(join(tmpDir, ".lore", "lore.db"), undefined, liveAmbient(), liveWriteContext());
   try {
     const got = await app.corpusService.get(taskSlug);
     if (!got.ok) throw new Error(`read task failed: ${JSON.stringify(got.error)}`);

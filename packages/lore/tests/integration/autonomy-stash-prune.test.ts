@@ -23,6 +23,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SQLiteStore } from "../../src/store/sqlite-store.js";
 import type { RunId } from "@lore/core";
+import { actedStore } from "../live-invocation.js";
 
 const PACKAGE_ROOT = new URL("../../", import.meta.url).pathname.replace(/\/$/, "");
 const REPO_ROOT = join(PACKAGE_ROOT, "..", "..");
@@ -67,7 +68,7 @@ function makeStash(branch: string, trackedContent: string): string {
 }
 
 async function registerRun(agentId: string, ended: boolean): Promise<void> {
-  const store = new SQLiteStore(dbPath);
+  const store = actedStore(new SQLiteStore(dbPath));
   try {
     const id = `cc:sess-${agentId}:${agentId}` as RunId;
     const inserted = await store.insertRun({
@@ -93,7 +94,7 @@ async function registerRun(agentId: string, ended: boolean): Promise<void> {
 }
 
 async function endRegisteredRun(agentId: string): Promise<void> {
-  const store = new SQLiteStore(dbPath);
+  const store = actedStore(new SQLiteStore(dbPath));
   try {
     const ended = await store.endRun(`cc:sess-${agentId}:${agentId}` as RunId, "2026-10-01T02:00:00.000Z", "test");
     if (!ended.ok) throw new Error(`endRun failed: ${JSON.stringify(ended.error)}`);

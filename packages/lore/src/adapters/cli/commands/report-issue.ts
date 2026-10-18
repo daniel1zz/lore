@@ -95,9 +95,8 @@ import {
   type Result,
 } from "@lore/core";
 import { resolveActorWithSource } from "@lore/core/node";
-import { readOsUsername } from "../../../os-username.js";
 import { loadLoreApp } from "../loader.js";
-import { exitCode, formatError, resolveActor } from "../utils.js";
+import { exitCode, formatError, formatErrorFor, resolveActor } from "../utils.js";
 import { classifyFeedbackUpstream, fileGithubIssue, resolveConsumerCorpusRoot } from "../report-issue-wiring.js";
 import { invocationOf } from "../command-invocation.js";
 
@@ -306,7 +305,7 @@ export default defineCommand({
 
       if (classification.kind === "unconfigured") {
         const unconfiguredError = buildUnconfiguredUpstreamRemedy();
-        process.stderr.write(formatError(unconfiguredError) + "\n");
+        process.stderr.write(formatErrorFor(inv, unconfiguredError) + "\n");
         process.exitCode = exitCode(unconfiguredError);
         return;
       }
@@ -317,7 +316,7 @@ export default defineCommand({
       // literal lives ONLY inside `classifyFeedbackUpstream` (spec D1) — this
       // command never holds its own copy.
       if (classification.kind === "retired") {
-        process.stderr.write(formatError(classification.error) + "\n");
+        process.stderr.write(formatErrorFor(inv, classification.error) + "\n");
         process.exitCode = exitCode(classification.error);
         return;
       }
@@ -340,7 +339,7 @@ export default defineCommand({
       // renders.
       if (isList) {
         const { runGithubIssuesListing } = await import("./issues.js");
-        await runGithubIssuesListing(app, effectiveCfg, corpusRoot, args.json === true, inv);
+        await runGithubIssuesListing(inv, app, effectiveCfg, corpusRoot, args.json === true, inv);
         return;
       }
 
@@ -365,7 +364,7 @@ export default defineCommand({
               .filter((tag) => tag.length > 0)
           : [];
 
-      const { actor, source: actorSource } = resolveActorWithSource(undefined, inv.env, readOsUsername);
+      const { actor, source: actorSource } = resolveActorWithSource(undefined, inv.env, () => inv.user);
       const reproCommand = args["repro-command"];
 
       const githubResult = await fileGithubIssue(
@@ -391,7 +390,7 @@ export default defineCommand({
       );
 
       if (!githubResult.ok) {
-        process.stderr.write(formatError(githubResult.error) + "\n");
+        process.stderr.write(formatErrorFor(inv, githubResult.error) + "\n");
         process.exitCode = exitCode(githubResult.error);
         return;
       }

@@ -21,6 +21,7 @@ import type { DecisionLogRow } from "../../src/store/decision-log.js";
 import { AUDIT_EVERY, OUTCOME_CLASS, deriveAuditQueue } from "../../src/service/autonomy-calibration-service.js";
 import { scriptedHumanPorts } from "./fixtures/scripted-human-ports.js";
 import { AUTO_FACTS, lore, newCorpus, observeReversal, readLog, removeCorpora, runDecide, seedDecisions, withService, type Corpus } from "./fixtures/autonomy-calibration-helpers.js";
+import { actedStore } from "../live-invocation.js";
 
 afterAll(removeCorpora);
 
@@ -235,7 +236,7 @@ describe("AC-AU-10 half 4: an agent-asserted audit answer changes nothing", () =
     expect(forged.ok).toBe(false);
     if (!forged.ok) expect(forged.error).toMatchObject({ code: "VALIDATION_ERROR", field: "proof" });
 
-    const store = new SQLiteStore(corpus.dbPath);
+    const store = actedStore(new SQLiteStore(corpus.dbPath));
     try {
       const appended = await store.appendDecisionRecord({
         ts: "2026-10-18T00:00:00.000Z",

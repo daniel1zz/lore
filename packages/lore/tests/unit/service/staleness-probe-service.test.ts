@@ -46,6 +46,7 @@ import { AuditService } from "../../../src/service/audit-service.js";
 import { StalenessProbeService, type ProbeStalenessPort } from "../../../src/service/staleness-probe-service.js";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import type { CreateDocInput } from "@lore/core";
+import { actedStore } from "../../live-invocation.js";
 
 // ─── Test Doubles ───────────────────────────────────────────────────────────
 
@@ -115,7 +116,7 @@ async function createAndBackdate(
 
 describe("HAPPY — probeBatch records one judgment + one audit row per candidate", () => {
   it("action='staleness_probe', actor=commissioning by, details.version present; candidate order matches the pure layer's sort", async () => {
-    const store = new CountingStore();
+    const store = actedStore(new CountingStore());
     const telemetry = makeNoOpTelemetry();
     const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
     const judgmentService = new JudgmentService(store, telemetry);
@@ -156,7 +157,7 @@ describe("HAPPY — probeBatch records one judgment + one audit row per candidat
 
 describe("NEGATIVE — no eligible docs returns an empty result, not an error", () => {
   it("an empty corpus produces probes=[] and total_candidates=0", async () => {
-    const store = new CountingStore();
+    const store = actedStore(new CountingStore());
     const telemetry = makeNoOpTelemetry();
     const judgmentService = new JudgmentService(store, telemetry);
     const svc = new StalenessProbeService(store, makeHoldsProbe(), judgmentService.record.bind(judgmentService));
@@ -173,7 +174,7 @@ describe("NEGATIVE — no eligible docs returns an empty result, not an error", 
 
 describe("BOUNDARY — assembly issues EXACTLY ONE countLinksByToIds + ONE latestJudgmentsByDocIds call per batch", () => {
   it("regardless of candidate count (3 candidates -> still exactly 1 + 1 calls)", async () => {
-    const store = new CountingStore();
+    const store = actedStore(new CountingStore());
     const telemetry = makeNoOpTelemetry();
     const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
     const judgmentService = new JudgmentService(store, telemetry);
@@ -197,7 +198,7 @@ describe("BOUNDARY — assembly issues EXACTLY ONE countLinksByToIds + ONE lates
 
 describe("ERROR — a per-candidate probeStaleness failure is collected, never aborts the batch", () => {
   it("a failing candidate's outcome carries the error; a SUBSEQUENT candidate still gets probed and recorded", async () => {
-    const store = new CountingStore();
+    const store = actedStore(new CountingStore());
     const telemetry = makeNoOpTelemetry();
     const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
     const judgmentService = new JudgmentService(store, telemetry);
@@ -226,7 +227,7 @@ describe("ERROR — a per-candidate probeStaleness failure is collected, never a
 
 describe("STATE — D13: the probed doc's version AND updated_at are byte-identical before/after a probe", () => {
   it("no version bump, no extra mutation, no status transition", async () => {
-    const store = new CountingStore();
+    const store = actedStore(new CountingStore());
     const telemetry = makeNoOpTelemetry();
     const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
     const judgmentService = new JudgmentService(store, telemetry);
@@ -254,7 +255,7 @@ describe("STATE — D13: the probed doc's version AND updated_at are byte-identi
 
 describe("REGRESSION — staleness_probe audit action is excluded from VERSION_ACTION_AUDIT_FAMILY", () => {
   it("AuditService.verify() stays clean despite a staleness_probe entry sharing (doc_id, version) with a real create versions row", async () => {
-    const store = new CountingStore();
+    const store = actedStore(new CountingStore());
     const telemetry = makeNoOpTelemetry();
     const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
     const judgmentService = new JudgmentService(store, telemetry);

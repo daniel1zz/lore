@@ -99,6 +99,7 @@ import { tmpdir } from "os";
 import { join } from "path";
 import { assertFreshBinary } from "./helpers/assert-fresh-binary";
 import { createApp } from "../../src/app.js";
+import { liveAmbient, liveWriteContext } from "../live-invocation.js";
 
 // ─── Paths ──────────────────────────────────────────────────────────────────
 
@@ -419,7 +420,7 @@ describe("spec-bootstrap-fixpoint-integrity-binary-provenance-an-anchor#AC-BFI-9
       env: { ...process.env, CLAUDECODE: "1" },
     });
 
-    const app = createApp(join(corpusRepo, ".lore", "lore.db"));
+    const app = createApp(join(corpusRepo, ".lore", "lore.db"), undefined, liveAmbient(), liveWriteContext());
     try {
       const prd = await app.corpusService.create({
         type: "prd",
@@ -755,7 +756,7 @@ describe("AC-BFI-15 fixture-forced-anchor-red: the anchor-value assertion is for
     // Never this repo's own `.lore/` — a fresh db file inside the throwaway
     // corpus this suite just initialized.
     fixtureDb = join(fixtureCorpusDir, ".lore", "lore.db");
-    const app = createApp(fixtureDb);
+    const app = createApp(fixtureDb, undefined, liveAmbient(), liveWriteContext());
     try {
       const prd = await app.corpusService.create({
         type: "prd",
@@ -810,7 +811,7 @@ describe("AC-BFI-15 fixture-forced-anchor-red: the anchor-value assertion is for
     // writer for `code_anchors` (the same seam `lore anchor set` uses),
     // never a hand-rolled `corpusService.set({ extra: ... })` wholesale
     // replace.
-    const app = createApp(fixtureDb);
+    const app = createApp(fixtureDb, undefined, liveAmbient(), liveWriteContext());
     let anchorsAfterRepoint: readonly string[];
     try {
       if (app.driftCheckService === undefined) {

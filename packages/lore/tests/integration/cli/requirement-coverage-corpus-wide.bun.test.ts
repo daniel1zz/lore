@@ -28,6 +28,7 @@ import { appendFileSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SQLiteStore } from "../../../src/store/sqlite-store.js";
+import { actedStore } from "../../live-invocation.js";
 
 setDefaultTimeout(300_000);
 
@@ -82,7 +83,7 @@ function declaredRequirementIds(): string[] {
 }
 
 async function archive(slug: string): Promise<void> {
-  const store = new SQLiteStore(join(dir, ".lore", "lore.db"));
+  const store = actedStore(new SQLiteStore(join(dir, ".lore", "lore.db")));
   try {
     const doc = await store.findBySlug(slug);
     if (!doc.ok || doc.value === null) throw new Error(`no doc ${slug}`);

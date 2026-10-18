@@ -23,6 +23,7 @@ import { CorpusService } from "../../../src/service/corpus-service.js";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { InMemoryAIProvider } from "../../../src/ai/in-memory-provider.js";
 import type { AIProvider, CreateDocInput, LlmAssessmentOutput, PlanBundle, Telemetry, TelemetryEvent } from "@lore/core";
+import { actedStore } from "../../live-invocation.js";
 
 const DEFAULT_BUDGETS = { max_plan_chars: 8000, max_spec_chars: 12000, max_task_chars: 4000, max_diff_chars: 24000 };
 
@@ -124,7 +125,7 @@ describe("computeGroundingWarnings — pure unit tests (AC-ADF-4)", () => {
 
 describe("assessPlan — ungrounded absence claims surface in rubric_warning, never fatal (AC-ADF-4)", () => {
   it("an ungrounded absence-based dimension score: assessPlan still succeeds and rubric_warning names the dimension", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const bundle = await makeBundle(store);
     const ungroundedJson = JSON.stringify({
       verdict: "partially_met",
@@ -147,7 +148,7 @@ describe("assessPlan — ungrounded absence claims surface in rubric_warning, ne
   });
 
   it("a GROUNDED absence claim (cites the dimension in unverifiable[]) produces no matching rubric_warning entry", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const bundle = await makeBundle(store);
     const groundedJson = JSON.stringify({
       verdict: "partially_met",

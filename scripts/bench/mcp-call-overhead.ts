@@ -16,7 +16,8 @@ import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { CreateDocInput } from "@lore/core";
-import { createApp } from "../../packages/lore/src/app.js";
+import { ambientOfInvocation, createApp } from "../../packages/lore/src/app.js";
+import { resolveEntryInvocation } from "../../packages/lore/src/adapters/cli/run-cli.js";
 import { McpCallScope } from "../../packages/lore/src/adapters/mcp/call-scope.js";
 import { SQLiteStore } from "../../packages/lore/src/store/sqlite-store.js";
 
@@ -37,11 +38,12 @@ const calls = flagNumber("--calls", 100);
 const maxDeltaMs = flagNumber("--max-delta-ms", 20);
 const RUN = "cc:bench-session";
 
+const inv = await resolveEntryInvocation(process.argv.slice(2));
 const root = mkdtempSync(join(tmpdir(), "lore-mcp-overhead-"));
 try {
   mkdirSync(join(root, ".lore"), { recursive: true });
   const dbPath = join(root, ".lore", "lore.db");
-  const app = createApp(dbPath);
+  const app = createApp(dbPath, undefined, ambientOfInvocation(inv), { identity: inv.identity });
   const created = await app.corpusService.create({ type: "plan", title: "Bench Plan", content: "# Plan" } as CreateDocInput);
   if (!created.ok) throw new Error(`seed doc: ${JSON.stringify(created.error)}`);
   const slug = created.value.slug;
@@ -65,7 +67,7 @@ try {
     seeder.close();
   }
 
-  const scope = new McpCallScope(app, process.env, (line) => {
+  const scope = new McpCallScope(app, inv, (line) => {
     throw new Error(`unexpected warning during bench: ${line}`);
   });
 

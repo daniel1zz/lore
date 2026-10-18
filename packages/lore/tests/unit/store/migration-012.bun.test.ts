@@ -44,6 +44,7 @@ import { MIGRATION_002_SQL } from "../../../src/store/migrations/migration-002.j
 import { MIGRATION_003_SQL } from "../../../src/store/migrations/migration-003.js";
 import { MIGRATION_004_SQL } from "../../../src/store/migrations/migration-004.js";
 import { MIGRATION_012_SQL } from "../../../src/store/migrations/migration-012.js";
+import { actedStore } from "../../live-invocation.js";
 
 function userVersion(db: Database): number {
   return (db.query("PRAGMA user_version").get() as { user_version: number }).user_version;
@@ -96,7 +97,7 @@ describe("migration-012 (widen links.link_type CHECK to accept 'resolves')", () 
   });
 
   it("HAPPY: a fresh SQLiteStore lands on user_version 22 and accepts a 'resolves' link row", () => {
-    const store = new SQLiteStore(":memory:");
+    const store = actedStore(new SQLiteStore(":memory:"));
     const db = store.getDatabase();
 
     expect(userVersion(db)).toBe(23);
@@ -306,7 +307,7 @@ describe("migration-012 (widen links.link_type CHECK to accept 'resolves')", () 
       .run("01HGOVERNSPRE00000001", "01HGOVERNSPRE00000002", "2026-07-29T00:00:00.000Z", "agent:test");
     rawDb.close();
 
-    const store = new SQLiteStore(dbPath);
+    const store = actedStore(new SQLiteStore(dbPath));
     const db = store.getDatabase();
 
     expect(userVersion(db)).toBe(23);

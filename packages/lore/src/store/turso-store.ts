@@ -232,14 +232,15 @@ function loadLibsqlClientModuleSync(): typeof import("@libsql/client") {
  * fallback, D-007's sibling invariant) — an unusable value is reported, never
  * repaired.
  *
+ * @param env - the invocation's environment (`Invocation.env`)
  * @returns `null` when TMPDIR is absent, empty, or a writable directory;
  *   otherwise a `STORE_ERROR` `LoreError` whose message's FIRST LINE names
  *   `TMPDIR` and the offending value verbatim, followed by a remediation line
  *   containing the literal substring `export TMPDIR=` (AC-LL-4's four
  *   substring rules).
  */
-export function probeTmpdirUsability(): LoreError | null {
-  const tmpdir = process.env.TMPDIR;
+export function probeTmpdirUsability(env: Readonly<Record<string, string | undefined>>): LoreError | null {
+  const tmpdir = env["TMPDIR"];
   if (tmpdir === undefined || tmpdir === "") return null;
   try {
     accessSync(tmpdir, fsConstants.W_OK);

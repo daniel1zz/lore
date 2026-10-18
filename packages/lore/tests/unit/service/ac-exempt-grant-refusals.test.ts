@@ -14,12 +14,13 @@ import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
 import { AcService } from "../../../src/service/ac-service.js";
 import { AcExemptionService } from "../../../src/service/ac-exemption-service.js";
+import { actedStore } from "../../live-invocation.js";
 
 const NOW = new Date("2030-01-01T00:00:00.000Z");
 const FUTURE = "2030-02-01T00:00:00.000Z";
 
 async function setup(liveCriteria: number, wirePort = true) {
-  const store = new InMemoryStore();
+  const store = actedStore(new InMemoryStore());
   const cs = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
   const ac = new AcService(store, new RecordLockService(store, new GateEnforcer(undefined)));
   const prd = await cs.create({ type: "prd", title: "P", content: "root" } as CreateDocInput);

@@ -16,9 +16,10 @@ import { CorpusService } from "../../../src/service/corpus-service.js";
 import { RequirementService } from "../../../src/service/requirement-service.js";
 import { AcService } from "../../../src/service/ac-service.js";
 import type { CreateDocInput, DocRecord } from "@lore/core";
+import { actedStore } from "../../live-invocation.js";
 
 function harness(requirementQuantifiableEnabled = true) {
-  const store = new InMemoryStore();
+  const store = actedStore(new InMemoryStore());
   const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
   const requirementService = new RequirementService(store, requirementQuantifiableEnabled);
   const acService = new AcService(store, new RecordLockService(store, new GateEnforcer(undefined)));

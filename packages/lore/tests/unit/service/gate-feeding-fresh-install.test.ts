@@ -76,6 +76,7 @@ import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
 import type { StoreFilters } from "../../../src/store/store-interface.js";
 import { err } from "@lore/core";
 import type { CreateDocInput, DocRecord, LoreConfig, LoreError, Result } from "@lore/core";
+import { actedStore } from "../../live-invocation.js";
 
 // tests/unit/service/ -> tests/unit/ -> tests/ -> packages/lore/
 const PACKAGE_ROOT = fileURLToPath(new URL("../../../", import.meta.url));
@@ -144,7 +145,7 @@ function seedWriteSpecRuleInto(corpusDir: string): void {
 
 // ─── Unit-level coverage (InMemoryStore, no subprocess) ──────────────────────
 
-function makeGatedService(store: InMemoryStore = new InMemoryStore()) {
+function makeGatedService(store: InMemoryStore = actedStore(new InMemoryStore())) {
   const gateEnforcer = new GateEnforcer(undefined);
   return { service: new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)), undefined, undefined, gateEnforcer), store };
 }
@@ -226,7 +227,7 @@ describe("CorpusService spec-create fallback — ERROR", () => {
       }
     }
 
-    const { service } = makeGatedService(new FindManyFailingStore());
+    const { service } = makeGatedService(actedStore(new FindManyFailingStore()));
     const prd = await createApprovedPrd(service, "Root PRD");
 
     const spec = await service.create({
@@ -250,7 +251,7 @@ describe("CorpusService spec-create fallback — STATE", () => {
       project: { name: "x", author: "owner" },
       workflow: { gates: { "spec-create": { enabled: false } } },
     } as unknown as LoreConfig);
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const service = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)), undefined, undefined, gateEnforcer);
     const prd = await createApprovedPrd(service, "Root PRD");
 

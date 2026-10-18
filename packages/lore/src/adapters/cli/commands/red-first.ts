@@ -33,7 +33,7 @@
 
 import { defineCommand } from "citty";
 import { loadLoreApp } from "../loader.js";
-import { exitCode, formatError, resolveActor } from "../utils.js";
+import { exitCode, formatErrorFor, resolveActor } from "../utils.js";
 import { invocationOf } from "../command-invocation.js";
 
 export default defineCommand({
@@ -57,7 +57,7 @@ export default defineCommand({
     const inv = invocationOf(context);
     const { app } = loadLoreApp({ inv });
     try {
-      const by = resolveActor(undefined, inv.env, inv.cwd);
+      const by = resolveActor(undefined, inv.env, inv.cwd, inv.user);
       const result = await app.taskWorkflowService.declareRedFirst(args.task as string, {
         by,
         source: app.callerSurface,
@@ -65,7 +65,7 @@ export default defineCommand({
 
       if (!result.ok) {
         if (args.json) console.log(JSON.stringify({ ok: false, error: result.error }, null, 2));
-        else process.stderr.write(formatError(result.error) + "\n");
+        else process.stderr.write(formatErrorFor(inv, result.error) + "\n");
         process.exitCode = exitCode(result.error);
         return;
       }

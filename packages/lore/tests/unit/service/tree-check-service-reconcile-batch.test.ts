@@ -25,6 +25,7 @@ import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { TreeCheckService } from "../../../src/service/tree-check-service.js";
 import type { DocId, DocRecord, DocType, LinkRecord } from "@lore/core";
 import { DOC_TYPE_ROLE_MAP } from "@lore/core";
+import { actedStore } from "../../live-invocation.js";
 
 /** Counting subclass — asserts batch-call-count invariants (mirrors StalenessProbeService's CountingStore precedent). */
 class CountingStore extends InMemoryStore {
@@ -82,7 +83,7 @@ function makeLink(fromId: DocId, toId: DocId, linkType: LinkRecord["link_type"] 
 
 describe("TreeCheckService.reconcile — BOUNDARY: batched findLinksByFromIds call count", () => {
   it("issues EXACTLY ONE findLinksByFromIds call across 4 docs, not 4", async () => {
-    const store = new CountingStore();
+    const store = actedStore(new CountingStore());
     const svc = new TreeCheckService(store);
 
     const prd = await seedDoc(store, { id: makeId("PRD001"), type: "prd" });
@@ -116,7 +117,7 @@ describe("TreeCheckService.reconcile — BOUNDARY: batched findLinksByFromIds ca
   });
 
   it("BOUNDARY: zero docs still issues exactly one (empty-batch) call and reports no inconsistencies", async () => {
-    const store = new CountingStore();
+    const store = actedStore(new CountingStore());
     const svc = new TreeCheckService(store);
 
     store.findLinksByFromIdsCallCount = 0;
@@ -130,7 +131,7 @@ describe("TreeCheckService.reconcile — BOUNDARY: batched findLinksByFromIds ca
   });
 
   it("HAPPY: field/link mismatch across 2 docs is detected identically to the per-doc loop", async () => {
-    const store = new CountingStore();
+    const store = actedStore(new CountingStore());
     const svc = new TreeCheckService(store);
 
     const prdA = await seedDoc(store, { id: makeId("PRDA01"), type: "prd" });
@@ -152,7 +153,7 @@ describe("TreeCheckService.reconcile — BOUNDARY: batched findLinksByFromIds ca
   });
 
   it("REGRESSION: a doc's own INCOMING link (it is to_id, not from_id) never leaks into its outgoing set", async () => {
-    const store = new CountingStore();
+    const store = actedStore(new CountingStore());
     const svc = new TreeCheckService(store);
 
     const prd = await seedDoc(store, { id: makeId("PRDINC"), type: "prd" });

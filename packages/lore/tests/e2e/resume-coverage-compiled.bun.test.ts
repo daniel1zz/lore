@@ -139,7 +139,7 @@
  *   AC-RC-13 (task task-t6-wire-the-stop-hook-into-settings-json-auto-registration).
  */
 
-import { liveInvocation } from "../live-invocation.js";
+import { liveInvocation, liveAmbient, liveWriteContext } from "../live-invocation.js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   appendFileSync,
@@ -460,7 +460,7 @@ describe("AC-RC-4: the coverage-floor grammar reaches BOTH shipping render surfa
     // just wrote to — never InMemoryStore — so the two surfaces below read
     // genuinely shared state rather than two independently-seeded fixtures
     // that happen to agree (context-provenance-compiled.bun.test.ts precedent).
-    app = createApp(join(dir, ".lore", "lore.db"));
+    app = createApp(join(dir, ".lore", "lore.db"), undefined, liveAmbient(), liveWriteContext());
     server = new McpServer({ name: "t4-resume-coverage", version: "0.0.0" });
     registerTools(server, app, undefined, liveInvocation());
   });

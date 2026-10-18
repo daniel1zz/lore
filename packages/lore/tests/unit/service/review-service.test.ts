@@ -39,6 +39,7 @@ import { ReviewService } from "../../../src/service/review-service.js";
 import type { DocRecord } from "@lore/core";
 import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
+import { actedStore } from "../../live-invocation.js";
 
 // ─── Factories ───────────────────────────────────────────────────────────────
 
@@ -80,7 +81,7 @@ describe("ReviewService", () => {
 
   beforeEach(() => {
     _seq = 0;
-    store = new InMemoryStore();
+    store = actedStore(new InMemoryStore());
     service = new ReviewService(store, new RecordLockService(store, new GateEnforcer(undefined)));
   });
 

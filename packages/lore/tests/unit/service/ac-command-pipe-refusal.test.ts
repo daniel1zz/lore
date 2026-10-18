@@ -43,6 +43,7 @@ import { CorpusService } from "../../../src/service/corpus-service.js";
 import { AcService } from "../../../src/service/ac-service.js";
 import { admitAcWrite } from "../../../src/service/ac-write-chokepoint.js";
 import { recordLockGateOff } from "../../helpers/record-lock-gate-off.js";
+import { actedStore } from "../../live-invocation.js";
 
 const PIPED = "false | tail -1 && echo PASS";
 const OTHER_PIPED = "grep -c x f | wc -l";
@@ -76,7 +77,7 @@ function spyOnWrites(store: InMemoryStore) {
 }
 
 async function setup() {
-  const store = new InMemoryStore();
+  const store = actedStore(new InMemoryStore());
   const cs = new CorpusService(store, recordLockGateOff(store));
   const ac = new AcService(store, recordLockGateOff(store));
   const prd = await cs.create({ type: "prd", title: "P", content: "root" } as CreateDocInput);

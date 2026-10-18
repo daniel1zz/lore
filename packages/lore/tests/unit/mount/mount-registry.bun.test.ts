@@ -53,6 +53,7 @@ import { LATEST_SCHEMA_VERSION } from "../../../src/store/sqlite-store.js";
 import { createMountRegistry } from "../../../src/mount/mount-registry.js";
 import type { MountRegistryDeps } from "../../../src/mount/types.js";
 import type { DashboardConfig } from "@lore/core";
+import { liveAmbient, liveWriteContext } from "../../live-invocation.js";
 
 const scratchDirs: string[] = [];
 
@@ -81,7 +82,7 @@ function makeRealCorpus(prefix: string): { root: string; dbPath: string } {
   scratchDirs.push(root);
   mkdirSync(join(root, ".lore"), { recursive: true });
   const dbPath = join(root, ".lore", "lore.db");
-  const app = createApp(dbPath);
+  const app = createApp(dbPath, undefined, liveAmbient(), liveWriteContext());
   app.close();
   return { root, dbPath };
 }
@@ -108,7 +109,7 @@ function realCreateAppDeps(): { deps: MountRegistryDeps<App>; callCount: () => n
     deps: {
       createApp: async (dbPath: string) => {
         calls++;
-        return createApp(dbPath);
+        return createApp(dbPath, undefined, liveAmbient(), liveWriteContext());
       },
     },
     callCount: () => calls,

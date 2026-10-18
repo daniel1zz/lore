@@ -28,7 +28,7 @@ import { CITE_GATE_MODES, err, ok } from "@lore/core";
 import type { CiteGateMode, Invocation, LoreError, Result } from "@lore/core";
 import { invocationOf } from "../command-invocation.js";
 import { loadLoreApp } from "../loader.js";
-import { exitCode, formatError, resolveActor } from "../utils.js";
+import { exitCode, formatError, formatErrorFor, resolveActor } from "../utils.js";
 import { resolveDoc } from "../../../service/resolve.js";
 import { SQLiteStore } from "../../../store/sqlite-store.js";
 import { readAcCiteStored, seedAcCiteModeIfAbsent, writeAcCiteStored } from "../../ac-cite-config-file.js";
@@ -76,7 +76,7 @@ export async function seedAcCiteModeAudited(repoDir: string, inv: Invocation): P
   try {
     const row = await appendAdoptAuditRow(
       store,
-      resolveActor(undefined, inv.env, inv.cwd),
+      resolveActor(undefined, inv.env, inv.cwd, inv.user),
       { mode: null, armed_branches: [] },
       { mode: "report", armed_branches: [] },
     );
@@ -92,9 +92,9 @@ function repeatable(value: unknown): string[] {
   return Array.isArray(value) ? value.map(String) : [String(value)];
 }
 
-function fail(error: LoreError, json: boolean, code: number): void {
+function fail(inv: Invocation, error: LoreError, json: boolean, code: number): void {
   if (json) console.log(JSON.stringify({ ok: false, error }, null, 2));
-  else process.stderr.write(formatError(error));
+  else process.stderr.write(formatErrorFor(inv, error));
   process.exitCode = code;
 }
 
@@ -134,14 +134,14 @@ async function runAdopt(args: Record<string, unknown>, inv: Invocation): Promise
   const modeArg = args.mode === undefined ? undefined : String(args.mode);
 
   if (modeArg === undefined && arm.length === 0 && disarm.length === 0) {
-    return fail(usageError("flags", "baseline adopt needs at least one of --mode, --arm, --disarm"), json, 2);
+    return fail(inv, usageError("flags", "baseline adopt needs at least one of --mode, --arm, --disarm"), json, 2);
   }
   if (modeArg !== undefined && !(ADOPT_MODES as readonly string[]).includes(modeArg)) {
-    return fail(usageError("mode", `--mode must be one of ${ADOPT_MODES.join(" | ")}`, modeArg), json, 2);
+    return fail(inv, usageError("mode", `--mode must be one of ${ADOPT_MODES.join(" | ")}`, modeArg), json, 2);
   }
   const both = arm.filter((s) => disarm.includes(s));
   if (both.length > 0) {
-    return fail(usageError("arm", `the same branch is both --arm and --disarm: ${both.join(", ")}`, both), json, 2);
+    return fail(inv, usageError("arm", `the same branch is both --arm and --disarm: ${both.join(", ")}`, both), json, 2);
   }
 
   const { app, dbPath } = loadLoreApp({ inv });
@@ -151,16 +151,16 @@ async function runAdopt(args: Record<string, unknown>, inv: Invocation): Promise
     const armedSlugs: string[] = [];
     for (const ref of arm) {
       const doc = await resolveDoc(store, ref);
-      if (!doc.ok) return fail(doc.error, json, exitCode(doc.error));
+      if (!doc.ok) return fail(inv, doc.error, json, exitCode(doc.error));
       if (doc.value.type !== "baseline" || doc.value.extra["node"] !== "branch") {
-        return fail(usageError("arm", `${ref} is not a baseline branch (armed_branches holds baseline branch slugs)`, ref), json, 4);
+        return fail(inv, usageError("arm", `${ref} is not a baseline branch (armed_branches holds baseline branch slugs)`, ref), json, 4);
       }
       armedSlugs.push(doc.value.slug);
     }
 
     const repoDir = dirname(dirname(dbPath));
     const stored = readAcCiteStored(repoDir);
-    if (!stored.ok) return fail(stored.error, json, exitCode(stored.error));
+    if (!stored.ok) return fail(inv, stored.error, json, exitCode(stored.error));
     const old = stored.value;
     const next = computeAdoptedSettings(old, {
       ...(modeArg !== undefined ? { mode: modeArg as CiteGateMode } : {}),
@@ -174,7 +174,7 @@ async function runAdopt(args: Record<string, unknown>, inv: Invocation): Promise
       // equals the request is not yet attested by any row, and recording it is what `adopt` is for (the status
       // provenance flips back to `audited`); only a repeat of the last adopted state is a true no-op.
       const lastRow = await store.queryAudit({ action: BASELINE_ADOPT_AUDIT_ACTION, limit: 1 });
-      if (!lastRow.ok) return fail(lastRow.error, json, exitCode(lastRow.error));
+      if (!lastRow.ok) return fail(inv, lastRow.error, json, exitCode(lastRow.error));
       const lastNew = readAdoptedSettings(lastRow.value[0]);
       if (lastNew !== undefined && sameSettings(lastNew, next)) {
         if (json) console.log(JSON.stringify({ ok: true, data: { changed: false, old, new: next } }, null, 2));
@@ -188,15 +188,15 @@ async function runAdopt(args: Record<string, unknown>, inv: Invocation): Promise
         ...(next.mode !== null ? { mode: next.mode } : {}),
         armed_branches: next.armed_branches,
       });
-      if (!written.ok) return fail(written.error, json, exitCode(written.error));
+      if (!written.ok) return fail(inv, written.error, json, exitCode(written.error));
     }
 
-    const audited = await appendAdoptAuditRow(store, resolveActor(undefined, inv.env, inv.cwd), old, next);
+    const audited = await appendAdoptAuditRow(store, resolveActor(undefined, inv.env, inv.cwd, inv.user), old, next);
     if (!audited.ok) {
-      return fail(
+      return fail(inv, 
         {
           code: "STORE_ERROR",
-          message: `config was changed but the audit row was NOT written (status will report the mode as unaudited): ${formatError(audited.error).trim()}`,
+          message: `config was changed but the audit row was NOT written (status will report the mode as unaudited): ${formatErrorFor(inv, audited.error).trim()}`,
         },
         json,
         exitCode(audited.error),

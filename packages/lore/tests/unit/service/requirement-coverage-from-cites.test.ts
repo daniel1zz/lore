@@ -49,6 +49,7 @@ import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
 import { AcService } from "../../../src/service/ac-service.js";
 import { RequirementService } from "../../../src/service/requirement-service.js";
+import { actedStore } from "../../live-invocation.js";
 
 // ─── Loosely typed view of the (not yet extended) pure API ────────────────────
 
@@ -196,7 +197,7 @@ const AC = (id: string, extra: Record<string, unknown> = {}) => ({
 });
 
 function harness() {
-  const store = new InMemoryStore();
+  const store = actedStore(new InMemoryStore());
   const cs = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
   const ac = new AcService(store, new RecordLockService(store, new GateEnforcer(undefined)));
   const reqs = new RequirementService(store, false);
@@ -447,6 +448,7 @@ describe("requirement coverage from citations (BL-6) — RequirementService", ()
 const PACKAGE_ROOT = new URL("../../../", import.meta.url).pathname.replace(/\/$/, "");
 const INDEX_TS = join(PACKAGE_ROOT, "src", "index.ts");
 const LOADER_TS = join(PACKAGE_ROOT, "src", "adapters", "cli", "loader.ts");
+const LIVE_TS = join(PACKAGE_ROOT, "tests", "live-invocation.ts");
 
 interface Run {
   stdout: string;
@@ -473,7 +475,8 @@ function mustRun(args: string[], cwd: string): Run {
 function seedRequirements(cwd: string, prdSlug: string, requirements: Req[]): void {
   const script = `
     import { loadLoreApp } from ${JSON.stringify(LOADER_TS)};
-    const { app } = loadLoreApp();
+    import { liveInvocation } from ${JSON.stringify(LIVE_TS)};
+    const { app } = loadLoreApp({ inv: liveInvocation() });
     try {
       const got = await app.corpusService.get(${JSON.stringify(prdSlug)});
       if (!got.ok) throw new Error(JSON.stringify(got.error));

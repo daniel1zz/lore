@@ -95,6 +95,7 @@ import type { DocRecord, ExportIndex, MirrorHumanId } from "@lore/core";
 import { assertIsMirrorHumanId } from "@lore/core";
 import { SQLiteStore } from "../../../src/store/sqlite-store.js";
 import { OrdinalMigrationService } from "../../../src/service/ordinal-migration-service.js";
+import { actedStore } from "../../live-invocation.js";
 
 // ─── Fixture factory ────────────────────────────────────────────────────────
 
@@ -165,7 +166,7 @@ describe("OrdinalMigrationService.migrateOrdinals (SPEC-084, AC-084-4)", () => {
   let specE: DocRecord; // declared SPEC-3, collision loser #2, approved status
 
   beforeEach(async () => {
-    store = new SQLiteStore(":memory:");
+    store = actedStore(new SQLiteStore(":memory:"));
     projectDir = mkdtempSync(join(tmpdir(), "lore-migrate-ordinals-"));
     service = new OrdinalMigrationService(store);
 
@@ -436,7 +437,7 @@ describe("OrdinalMigrationService.migrateOrdinals — declared-number claims pre
   let service: OrdinalMigrationService;
 
   beforeEach(() => {
-    store = new SQLiteStore(":memory:");
+    store = actedStore(new SQLiteStore(":memory:"));
     projectDir = mkdtempSync(join(tmpdir(), "lore-migrate-ordinals-claims-"));
     service = new OrdinalMigrationService(store);
   });

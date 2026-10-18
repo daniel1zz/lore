@@ -214,10 +214,10 @@ describe("buildRealFsProbe — repoRoot itself resolves through a symlink (REGRE
   });
 });
 
-// ─── Default repoRoot (process.cwd()) construction still works ────────────────
+// ─── The root is the caller's: nothing defaults to the process directory ──────
 
-describe("buildRealFsProbe — default repoRoot argument", () => {
-  it("constructs without throwing when repoRoot is omitted (defaults to process.cwd())", () => {
-    expect(() => buildRealFsProbe()).not.toThrow();
+describe("buildRealFsProbe — explicit repoRoot argument", () => {
+  it("constructs without throwing for the root it is handed", () => {
+    expect(() => buildRealFsProbe(process.cwd())).not.toThrow();
   });
 });

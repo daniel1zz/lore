@@ -64,6 +64,7 @@ import { MIGRATION_021_ADD_COLUMNS, MIGRATION_021_SQL } from "../../../src/store
 import { MIGRATION_022_SQL } from "../../../src/store/migrations/migration-022.js";
 import { MIGRATION_023_SQL } from "../../../src/store/migrations/migration-023.js";
 import { computeFtsShadowValues, computeAuditEntryHash } from "../../../src/store/store-shared.js";
+import { actedStore } from "../../live-invocation.js";
 
 // ─── Fixture Helpers ─────────────────────────────────────────────────────────
 
@@ -361,7 +362,7 @@ beforeAll(async () => {
   remoteDbPath = join(tmpDir, "remote.db");
 
   // Build local fixture DB using REAL SQLiteStore
-  localStore = new SQLiteStore(localDbPath);
+  localStore = actedStore(new SQLiteStore(localDbPath));
 
   const doc1 = makeDoc({ title: "Document Alpha", tags: ["alpha"] });
   const doc2 = makeDoc({ title: "Document Beta", tags: ["beta"] });
@@ -571,7 +572,7 @@ describe("syncPush — idempotency (SPEC-009 §3.3 state)", () => {
     idempotentLocalPath = join(idempotentTmpDir, "local.db");
     idempotentRemotePath = join(idempotentTmpDir, "remote.db");
 
-    idempotentLocalStore = new SQLiteStore(idempotentLocalPath);
+    idempotentLocalStore = actedStore(new SQLiteStore(idempotentLocalPath));
 
     // Seed 3 docs
     for (let i = 0; i < 3; i++) {
@@ -666,7 +667,7 @@ describe("syncPush — boundary values (empty local DB)", () => {
     boundaryRemotePath = join(boundaryTmpDir, "remote.db");
 
     // Empty DB — no rows in any table
-    boundaryLocalStore = new SQLiteStore(boundaryLocalPath);
+    boundaryLocalStore = actedStore(new SQLiteStore(boundaryLocalPath));
 
     boundaryRemoteClient = createClient({ url: `file:${boundaryRemotePath}` });
     await applyMigrationsToClient(boundaryRemoteClient, boundaryLocalStore);

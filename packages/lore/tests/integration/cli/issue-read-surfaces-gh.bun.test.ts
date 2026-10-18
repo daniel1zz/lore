@@ -67,6 +67,7 @@ import {
   setNextCreatedNumber,
   setStubIssues,
 } from "../helpers/recording-gh-stub";
+import { actedStore } from "../../live-invocation.js";
 
 const REPO = "acme-test/read-surfaces-defect-channel";
 const REPO_ID = 770_100;
@@ -150,7 +151,7 @@ function fileIngested(corpus: string, number: number, title: string, severity: s
 }
 
 async function seedArchivedFixingSpec(corpus: string): Promise<DocRecord> {
-  const store = new SQLiteStore(join(corpus, ".lore", "lore.db"));
+  const store = actedStore(new SQLiteStore(join(corpus, ".lore", "lore.db")));
   try {
     const cs = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
     const created = await cs.create({

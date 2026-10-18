@@ -57,6 +57,7 @@ import { MIGRATION_003_SQL } from "../../../src/store/migrations/migration-003.j
 import { MIGRATION_004_SQL } from "../../../src/store/migrations/migration-004.js";
 import { MIGRATION_005_SQL } from "../../../src/store/migrations/migration-005.js";
 import { MIGRATION_006_SQL } from "../../../src/store/migrations/migration-006.js";
+import { actedStore } from "../../live-invocation.js";
 
 function userVersion(db: Database): number {
   return (db.query("PRAGMA user_version").get() as { user_version: number }).user_version;
@@ -108,7 +109,7 @@ describe("migration-006 mid-transaction failure — PRAGMA foreign_keys restore 
   // ── HAPPY ──────────────────────────────────────────────────────────────
 
   it("HAPPY: a fresh SQLiteStore lands on the current head user_version with FK enforcement ON", () => {
-    const store = new SQLiteStore(":memory:");
+    const store = actedStore(new SQLiteStore(":memory:"));
     const db = store.getDatabase();
 
     // reason: migration-012 (spec-issue-closure-loop-computed-resolution-

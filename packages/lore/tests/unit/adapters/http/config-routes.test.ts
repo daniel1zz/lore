@@ -40,6 +40,7 @@ import { handleApiRoute } from "../../../../src/adapters/http/routes.js";
 import { handleDashboardRoute } from "../../../../src/adapters/http/dashboard-routes.js";
 import type { App } from "../../../../src/app.js";
 import type { ApiKeyStore, ActorContext } from "../../../../src/adapters/http/auth.js";
+import { actedStore } from "../../../live-invocation.js";
 
 // ─── Harness (mirrors config-service.test.ts) ──────────────────────────────────
 
@@ -208,7 +209,7 @@ function rawMachineConfigBytesOrNull(): string | null {
 beforeEach(() => {
   corpusDir = mkdtempSync(join(tmpdir(), "lore-config-routes-test-"));
   seedConfig(baseConfig());
-  store = new InMemoryStore();
+  store = actedStore(new InMemoryStore());
   configService = new ConfigService(corpusDir, store.appendAuditEntry.bind(store));
 
   // reason: a SEPARATE mkdtemp dir + InMemoryStore for the machine scope, never
@@ -217,7 +218,7 @@ beforeEach(() => {
   // error); individual tests call seedMachineConfig() when they need a starting file.
   machineWorkDir = mkdtempSync(join(tmpdir(), "lore-config-routes-machine-test-"));
   machineConfigPath = join(machineWorkDir, "config.yaml");
-  globalStore = new InMemoryStore();
+  globalStore = actedStore(new InMemoryStore());
   globalConfigService = new GlobalConfigService(machineConfigPath, globalStore.appendAuditEntry.bind(globalStore));
 
   app = makeApp(configService, globalConfigService);

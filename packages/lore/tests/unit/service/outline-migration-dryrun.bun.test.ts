@@ -76,6 +76,7 @@ import { ulid } from "ulidx";
 import { SQLiteStore } from "../../../src/store/sqlite-store.js";
 import type { StoreInterface, UpdateOpts } from "../../../src/store/store-interface.js";
 import type { DocRecord, LinkRecord, LoreError, Result } from "@lore/core";
+import { actedStore } from "../../live-invocation.js";
 
 // packages/lore/tests/unit/service/ -> ../../../ -> packages/lore/src/service/outline-migration-service.js
 const OUTLINE_MIGRATION_SERVICE_MODULE_PATH = [
@@ -356,7 +357,7 @@ async function freshSeededStore(): Promise<{
   incompleteChild: DocRecord;
   completeChild: DocRecord;
 }> {
-  const store = new SQLiteStore(dbPath);
+  const store = actedStore(new SQLiteStore(dbPath));
   const prd = buildFixturePrd();
   await mustInsert(store, prd);
 

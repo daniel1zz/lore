@@ -36,11 +36,12 @@ import {
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
 import { resolveDoc } from "../../../src/service/resolve.js";
+import { actedStore } from "../../live-invocation.js";
 
 // ─── Test helpers ───────────────────────────────────────────────────────────
 
 function makeStore() {
-  return new InMemoryStore();
+  return actedStore(new InMemoryStore());
 }
 
 function makeService(store = makeStore()) {

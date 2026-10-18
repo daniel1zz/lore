@@ -41,6 +41,7 @@ import {
   deriveDeclaredScopeCoverage,
   resolveAttestationMinRatio,
 } from "@lore/core";
+import { actedStore } from "../../live-invocation.js";
 
 // ─── Fixtures ────────────────────────────────────────────────────────────────
 
@@ -72,7 +73,7 @@ function attestedEntry(command: string, opts: Partial<EvidenceEntry> = {}): Evid
 }
 
 function makeHarness(config?: LoreConfig) {
-  const store = new InMemoryStore();
+  const store = actedStore(new InMemoryStore());
   const enforcer = new GateEnforcer(config);
   const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)), undefined, undefined, enforcer);
   return { store, corpusService };

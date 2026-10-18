@@ -4,7 +4,7 @@
 
 import { defineCommand } from "citty";
 import { loadLoreApp } from "../loader.js";
-import { exitCode, formatError, resolveActor } from "../utils.js";
+import { exitCode, formatErrorFor, resolveActor } from "../utils.js";
 import { invocationOf } from "../command-invocation.js";
 
 export default defineCommand({
@@ -33,11 +33,11 @@ export default defineCommand({
     const { app } = loadLoreApp({ inv });
     try {
       const result = await app.corpusService.delete(args.id, args.confirm ?? false, {
-        by: resolveActor(undefined, inv.env, inv.cwd),
+        by: resolveActor(undefined, inv.env, inv.cwd, inv.user),
       });
 
       if (!result.ok) {
-        process.stderr.write(formatError(result.error) + "\n");
+        process.stderr.write(formatErrorFor(inv, result.error) + "\n");
         process.exitCode = exitCode(result.error);
         return;
       }

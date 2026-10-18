@@ -9,7 +9,7 @@
  * @spec_ref AC-MCP-001
  */
 
-import { liveInvocation } from "../../live-invocation.js";
+import { liveInvocation, actedStore } from "../../live-invocation.js";
 import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
 import { describe, it, expect, beforeEach } from "vitest";
@@ -37,7 +37,7 @@ import { resolveDoc } from "../../../src/service/resolve.js";
 const stubApiKeyStore = {} as ApiKeyStore;
 
 function makeApp(): App {
-  const store = new InMemoryStore();
+  const store = actedStore(new InMemoryStore());
   return {
     corpusService: new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined))),
     reviewService: new ReviewService(store, new RecordLockService(store, new GateEnforcer(undefined))),
@@ -864,7 +864,7 @@ const UAT_ACCEPT_VERDICT: UatVerdict = {
 };
 
 function makeAppWithUatService(): { app: App; store: InMemoryStore } {
-  const store = new InMemoryStore();
+  const store = actedStore(new InMemoryStore());
   const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
   const uatService = new UatService({
     createUatDoc: corpusService.createUatDoc.bind(corpusService),

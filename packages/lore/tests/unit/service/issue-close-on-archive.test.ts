@@ -26,6 +26,7 @@ import type { GithubIssueRef } from "../../../src/service/resolution-projector.j
 import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { TaskWorkflowService } from "../../../src/service/task-workflow-service.js";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
+import { actedStore } from "../../live-invocation.js";
 
 const NOW = "2026-10-12T10:00:00.000Z";
 
@@ -81,7 +82,7 @@ async function must<T>(promise: Promise<Result<T, LoreError>>, what: string): Pr
 
 /** Builds services, a filed report for GitHub #7, and wires the step into BOTH services. */
 async function buildWorld(opts: { closer?: RecordingCloser | null; github?: boolean; explicit?: string } = {}): Promise<World> {
-  const store = new InMemoryStore();
+  const store = actedStore(new InMemoryStore());
   const cs = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
   const tw = new TaskWorkflowService(store, undefined, { claimTtlMinutes: 120 });
   const closer = opts.closer === null ? undefined : (opts.closer ?? new RecordingCloser());
@@ -413,7 +414,7 @@ describe("AC-IC-1 (i): only a report whose fix has LANDED (archived source) is c
 
 describe("AC-IC-1 REGRESSION: an App without the port behaves as before", () => {
   it("a bare CorpusService archives a plan with no issueClose field", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const cs = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
     const plan = await must(cs.create({ type: "plan", title: "Bare", content: "b" } as CreateDocInput), "plan");
     await must(cs.set(plan.id, { status: "approved" }), "approve");

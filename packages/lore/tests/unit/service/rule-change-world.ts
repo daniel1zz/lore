@@ -16,6 +16,7 @@ import { ImpactService } from "../../../src/service/impact-service.js";
 import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
 import { RuleChangeService } from "../../../src/service/rule-change-service.js";
+import { actedStore } from "../../live-invocation.js";
 
 export interface World {
   readonly store: InMemoryStore;
@@ -58,7 +59,7 @@ async function insertBaseline(store: InMemoryStore, slug: string, extra: Record<
 
 /** Build the world: branch-a (armed) > leaf-a holding the live rule BR-1. */
 export async function makeWorld(): Promise<World> {
-  const store = new InMemoryStore();
+  const store = actedStore(new InMemoryStore());
   const lock = new RecordLockService(store, new GateEnforcer(undefined));
   const corpus = new CorpusService(store, lock);
   const rules = new RuleService(store, corpus.create.bind(corpus));

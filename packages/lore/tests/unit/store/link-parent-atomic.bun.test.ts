@@ -26,6 +26,7 @@ import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { SQLiteStore } from "../../../src/store/sqlite-store.js";
 import type { StoreInterface } from "../../../src/store/store-interface.js";
 import { TursoStore } from "../../../src/store/turso-store.js";
+import { actedStore } from "../../live-invocation.js";
 
 async function must<T>(r: Result<T, LoreError>, what: string): Promise<T> {
   if (!r.ok) throw new Error(`fixture ${what} failed: ${JSON.stringify(r.error)}`);
@@ -112,7 +113,7 @@ const factories: Array<{ label: string; make: () => Promise<Fixture> }> = [
   {
     label: "SQLiteStore",
     make: async () => {
-      const store = new SQLiteStore(":memory:");
+      const store = actedStore(new SQLiteStore(":memory:"));
       cleanups.push(() => store.close());
       const db = store.getDatabase();
       return {
@@ -128,7 +129,7 @@ const factories: Array<{ label: string; make: () => Promise<Fixture> }> = [
     label: "TursoStore",
     make: async () => {
       const dir = mkdtempSync(join(tmpdir(), "lore-link-atomic-"));
-      const store = new TursoStore({ localPath: join(dir, "lore.db") });
+      const store = actedStore(new TursoStore({ localPath: join(dir, "lore.db") }));
       cleanups.push(() => {
         store.close();
         rmSync(dir, { recursive: true, force: true });
@@ -151,7 +152,7 @@ const factories: Array<{ label: string; make: () => Promise<Fixture> }> = [
   {
     label: "InMemoryStore",
     make: async () => {
-      const store = new FaultyMemoryStore();
+      const store = actedStore(new FaultyMemoryStore());
       return {
         ...(await seed(store)),
         store,

@@ -20,6 +20,7 @@ import { CorpusService } from "../../../src/service/corpus-service.js";
 import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
 import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
+import { actedStore } from "../../live-invocation.js";
 
 const NOW_MS = Date.parse("2026-10-12T00:00:00.000Z");
 const DAY_MS = 86_400_000;
@@ -32,7 +33,7 @@ async function must<T>(promise: Promise<Result<T, LoreError>>, what: string): Pr
 }
 
 async function buildWorld() {
-  const store = new InMemoryStore();
+  const store = actedStore(new InMemoryStore());
   const cs = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
   await must(cs.create({ type: "prd", title: "Root PRD", content: "root" } as CreateDocInput), "prd");
   return { store, cs };

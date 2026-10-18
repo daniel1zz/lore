@@ -23,7 +23,7 @@
  * @spec_ref AC-NOAI-4 AC-NOAI-5
  */
 
-import { liveInvocation } from "../../live-invocation.js";
+import { liveInvocation, actedStore } from "../../live-invocation.js";
 import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
 import { describe, it, expect, beforeEach } from "vitest";
@@ -57,7 +57,7 @@ const stubApiKeyStore = {} as ApiKeyStore;
  * explicit wins, else ai=false (mcp built-in default).
  */
 function makeApp(): { app: App; aiProvider: InMemoryAIProvider } {
-  const store = new InMemoryStore();
+  const store = actedStore(new InMemoryStore());
   const aiProvider = new InMemoryAIProvider("test-provider", { kind: "ok", content: "# AI Generated\n\nStub content from InMemoryAIProvider.\n" });
   // reason: ReadonlyMap<string, AIProvider> required by AIProviderService constructor
   const providers: ReadonlyMap<string, InstanceType<typeof InMemoryAIProvider>> = new Map([

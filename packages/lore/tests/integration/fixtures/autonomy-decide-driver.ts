@@ -39,6 +39,7 @@ const ports = createProductionHumanChannelPorts(liveInvocation(), {
 });
 
 const exit = await runDecideFlow(
+  liveInvocation(),
   { dbPath, id, accept: flag === "--accept", reject: flag === "--reject", ...(reason === undefined ? {} : { reason }) },
   ports,
 );

@@ -48,11 +48,12 @@ import {
   type DocRecord,
   type DocStatus,
 } from "@lore/core";
+import { actedStore } from "../../live-invocation.js";
 
 // ─── Test helpers ───────────────────────────────────────────────────────────
 
 function makeService() {
-  const store = new InMemoryStore();
+  const store = actedStore(new InMemoryStore());
   return { service: new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined))), store };
 }
 

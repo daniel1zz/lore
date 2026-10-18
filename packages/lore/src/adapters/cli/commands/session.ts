@@ -55,7 +55,7 @@ import {
 import { findLoreDbPathQuiet } from "../corpus-resolution.js";
 import { loadLoreApp } from "../loader.js";
 import { formatTrail, narrowTrail } from "../session-trail-render.js";
-import { exitCode, formatError } from "../utils.js";
+import { exitCode, formatError, formatErrorFor } from "../utils.js";
 
 const RESERVED_SUBCOMMANDS = new Set(["list", "show", "trail", "trail-review"]);
 
@@ -112,10 +112,10 @@ function refuseTrailAccess(verb: "trail" | "trail-review", reason: string): void
  * the identity error's own exit code when verification fails).
  * reason: the run is VERIFIED against the registry (unregistered -> null), so "attested" means attested, not merely claimed.
  */
-async function resolveCallerSession(app: Awaited<ReturnType<typeof loadLoreApp>>["app"], verb: "trail" | "trail-review"): Promise<string | null> {
+async function resolveCallerSession(inv: Invocation, app: Awaited<ReturnType<typeof loadLoreApp>>["app"], verb: "trail" | "trail-review"): Promise<string | null> {
   const verified = await app.verifiedInvocationIdentity?.();
   if (verified !== undefined && !verified.ok) {
-    process.stderr.write(formatError(verified.error) + "\n");
+    process.stderr.write(formatErrorFor(inv, verified.error) + "\n");
     process.exitCode = exitCode(verified.error);
     return null;
   }
@@ -199,7 +199,7 @@ async function runSessionTrailReview(args: { turn?: unknown; json?: unknown }, i
   }
   const { app } = loadLoreApp({ inv });
   try {
-    const session = await resolveCallerSession(app, "trail-review");
+    const session = await resolveCallerSession(inv, app, "trail-review");
     if (session === null) return;
     let trail: SessionTrail | null;
     try {
@@ -236,7 +236,7 @@ async function runSessionTrailReview(args: { turn?: unknown; json?: unknown }, i
       realpath: realpathSync,
     });
     if (!review.ok) {
-      process.stderr.write(formatError(review.error) + "\n");
+      process.stderr.write(formatErrorFor(inv, review.error) + "\n");
       process.exitCode = exitCode(review.error);
       return;
     }
@@ -264,7 +264,7 @@ async function runSessionTrail(
   inv: Invocation,
 ): Promise<void> {
   const refuse = (reason: string): void => refuseTrailAccess("trail", reason);
-  const session = await resolveCallerSession(app, "trail");
+  const session = await resolveCallerSession(inv, app, "trail");
   if (session === null) return;
   let runFilter: string | undefined;
   if (typeof args.run === "string") {
@@ -439,7 +439,7 @@ export default defineCommand({
 
       const activeSessionsResult = await sessionService.getActiveSessions();
       if (!activeSessionsResult.ok) {
-        process.stderr.write(formatError(activeSessionsResult.error) + "\n");
+        process.stderr.write(formatErrorFor(inv, activeSessionsResult.error) + "\n");
         process.exitCode = exitCode(activeSessionsResult.error);
         return;
       }

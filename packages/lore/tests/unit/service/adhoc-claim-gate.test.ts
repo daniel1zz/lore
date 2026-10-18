@@ -41,6 +41,7 @@ import { CorpusService } from "../../../src/service/corpus-service.js";
 import { TaskWorkflowService } from "../../../src/service/task-workflow-service.js";
 import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
 import type { CreateDocInput, DocRecord } from "@lore/core";
+import { actedStore } from "../../live-invocation.js";
 
 // ─── Fixtures (mirrors claim-anchor-gate.test.ts) ──────────────────────────
 
@@ -51,7 +52,7 @@ async function mustCreate(cs: CorpusService, input: CreateDocInput): Promise<Doc
 }
 
 function makeServices() {
-  const store = new InMemoryStore();
+  const store = actedStore(new InMemoryStore());
   const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
   const enforcer = new GateEnforcer(undefined);
   // reason: task-two-concurrent-orchestrators-both-resolve-to-agent-main — the 7th

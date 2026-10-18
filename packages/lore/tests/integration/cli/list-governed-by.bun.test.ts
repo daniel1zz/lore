@@ -32,7 +32,7 @@ import { tmpdir } from "os";
 import { createApp } from "../../../src/app.js";
 import type { CreateDocInput } from "@lore/core";
 import { LIST_GOVERNED_BY_CONFLICT } from "../../../src/adapters/cli/cli-refusal-messages.js";
-import { liveInvocation } from "../../live-invocation.js";
+import { liveInvocation, liveAmbient, liveWriteContext } from "../../live-invocation.js";
 import type { Invocation } from "@lore/core";
 
 // ─── Command type + output capture (mirrors pending-judgment-badges.bun.test.ts) ──
@@ -82,7 +82,7 @@ beforeEach(() => {
   const loreDir = join(tmpDir, ".lore");
   mkdirSync(loreDir, { recursive: true });
 
-  const app = createApp(join(loreDir, "lore.db"));
+  const app = createApp(join(loreDir, "lore.db"), undefined, liveAmbient(), liveWriteContext());
   app.close();
 
   originalCwd = process.cwd();
@@ -105,7 +105,7 @@ async function seedApprovedSkill(
   loreDir: string,
   opts: { title: string; appliesTo: string },
 ): Promise<{ id: string; slug: string }> {
-  const app = createApp(join(loreDir, "lore.db"));
+  const app = createApp(join(loreDir, "lore.db"), undefined, liveAmbient(), liveWriteContext());
   try {
     const created = await app.corpusService.create({
       type: "knowledge",
@@ -124,7 +124,7 @@ async function seedApprovedSkill(
 
 /** Create a prd -> spec pair, exercising the real writeProvenanceLink auto-write. */
 async function seedGovernedSpec(loreDir: string, specTitle: string): Promise<{ specId: string; specSlug: string }> {
-  const app = createApp(join(loreDir, "lore.db"));
+  const app = createApp(join(loreDir, "lore.db"), undefined, liveAmbient(), liveWriteContext());
   try {
     const prd = await app.corpusService.create({ type: "prd", title: "Root PRD" } as CreateDocInput);
     if (!prd.ok) throw new Error(`create prd failed: ${JSON.stringify(prd.error)}`);

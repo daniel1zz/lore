@@ -38,6 +38,7 @@ import {
 import { readLiveProcessTable } from "../../src/adapters/real-human-channel-port.js";
 import { LORE_MCP_TOOL_NAMES } from "../../src/adapters/mcp/tool-names.js";
 import { scriptedHumanPorts } from "./fixtures/scripted-human-ports.js";
+import { actedStore } from "../live-invocation.js";
 
 const PACKAGE_ROOT = new URL("../../", import.meta.url).pathname.replace(/\/$/, "");
 const REPO_ROOT = join(PACKAGE_ROOT, "..", "..");
@@ -95,7 +96,7 @@ async function ptyRun(cmd: string[], env: Record<string, string>, answer: (nonce
 }
 
 async function seed(subjectId: string, version = "v1"): Promise<number> {
-  const store = new SQLiteStore(dbPath);
+  const store = actedStore(new SQLiteStore(dbPath));
   try {
     const service = new DecisionService({ store, executorRun: null });
     const out = await service.decide(CLASS_ID, { id: subjectId, version }, WEAK);
@@ -112,7 +113,7 @@ async function seed(subjectId: string, version = "v1"): Promise<number> {
 }
 
 async function withService<T>(fn: (service: DecisionService) => Promise<T>): Promise<T> {
-  const store = new SQLiteStore(dbPath);
+  const store = actedStore(new SQLiteStore(dbPath));
   try {
     return await fn(new DecisionService({ store, executorRun: null }));
   } finally {
@@ -228,7 +229,7 @@ describe("AC-AU-3 human channel", () => {
 
   it("(5) an agent-asserted record does not resolve the pending decision", async () => {
     const id = await seed("half-5");
-    const store = new SQLiteStore(dbPath);
+    const store = actedStore(new SQLiteStore(dbPath));
     try {
       const appended = await store.appendDecisionRecord({
         ts: "2026-01-01T00:00:00.000Z",

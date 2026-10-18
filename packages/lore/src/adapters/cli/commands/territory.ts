@@ -54,7 +54,7 @@ import { defineCommand } from "citty";
 import { RealGitPort, listLocalBranches } from "../../real-git-port.js";
 import { resolveClaimSessionId } from "../../../service/task-workflow-service.js";
 import { loadLoreApp } from "../loader.js";
-import { exitCode, formatError } from "../utils.js";
+import { exitCode, formatErrorFor } from "../utils.js";
 import { partitionTerritory, formatTerritoryHuman } from "../territory-partition.js";
 import { invocationOf } from "../command-invocation.js";
 
@@ -93,14 +93,14 @@ export default defineCommand({
       const gitPort = new RealGitPort(app.repoRoot);
       const worktreeListResult = await gitPort.worktreeList();
       if (!worktreeListResult.ok) {
-        process.stderr.write(formatError(worktreeListResult.error) + "\n");
+        process.stderr.write(formatErrorFor(inv, worktreeListResult.error) + "\n");
         process.exitCode = exitCode(worktreeListResult.error);
         return;
       }
 
       const activeSessionsResult = await app.sessionService.getActiveSessions();
       if (!activeSessionsResult.ok) {
-        process.stderr.write(formatError(activeSessionsResult.error) + "\n");
+        process.stderr.write(formatErrorFor(inv, activeSessionsResult.error) + "\n");
         process.exitCode = exitCode(activeSessionsResult.error);
         return;
       }

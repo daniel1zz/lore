@@ -154,7 +154,7 @@
 
 import { defineCommand } from "citty";
 import { loadLoreApp } from "../loader.js";
-import { exitCode, formatError, resolveActor } from "../utils.js";
+import { exitCode, formatErrorFor, resolveActor } from "../utils.js";
 import {
   hasIssueReport,
   computeIssueResolution,
@@ -474,7 +474,7 @@ export default defineCommand({
         const issueNumber = Number(rawNumber);
         if (rawNumber.length === 0 || !Number.isInteger(issueNumber) || issueNumber <= 0) {
           const error = invalidIssueNumberError(rawNumber);
-          process.stderr.write(formatError(error) + "\n");
+          process.stderr.write(formatErrorFor(inv, error) + "\n");
           process.exitCode = exitCode(error);
           return;
         }
@@ -487,12 +487,12 @@ export default defineCommand({
           const classification = classifyFeedbackUpstream(config);
           if (classification.kind === "unconfigured") {
             const error = buildUnconfiguredUpstreamRemedy();
-            process.stderr.write(formatError(error) + "\n");
+            process.stderr.write(formatErrorFor(inv, error) + "\n");
             process.exitCode = exitCode(error);
             return;
           }
           if (classification.kind === "retired") {
-            process.stderr.write(formatError(classification.error) + "\n");
+            process.stderr.write(formatErrorFor(inv, classification.error) + "\n");
             process.exitCode = exitCode(classification.error);
             return;
           }
@@ -500,7 +500,7 @@ export default defineCommand({
 
           const listingResult = await resolveGithubIssueListing(cfg, invocationOf(context));
           if (!listingResult.ok) {
-            process.stderr.write(formatError(listingResult.error) + "\n");
+            process.stderr.write(formatErrorFor(inv, listingResult.error) + "\n");
             process.exitCode = exitCode(listingResult.error);
             return;
           }
@@ -509,7 +509,7 @@ export default defineCommand({
           const issue = issues.find((candidate) => candidate.number === issueNumber);
           if (issue === undefined) {
             const error = issueNotListedError(issueNumber, cfg.repo, issues.length);
-            process.stderr.write(formatError(error) + "\n");
+            process.stderr.write(formatErrorFor(inv, error) + "\n");
             process.exitCode = exitCode(error);
             return;
           }
@@ -519,14 +519,14 @@ export default defineCommand({
           // `report-issue-wiring.ts::resolveLocalRootPrd`'s identical shape.
           const rootPrdListResult = await app.corpusService.list({ type: "prd" });
           if (!rootPrdListResult.ok) {
-            process.stderr.write(formatError(rootPrdListResult.error) + "\n");
+            process.stderr.write(formatErrorFor(inv, rootPrdListResult.error) + "\n");
             process.exitCode = exitCode(rootPrdListResult.error);
             return;
           }
           const rootPrd = rootPrdListResult.value.docs[0];
           if (rootPrd === undefined) {
             const error = noRootPrdError();
-            process.stderr.write(formatError(error) + "\n");
+            process.stderr.write(formatErrorFor(inv, error) + "\n");
             process.exitCode = exitCode(error);
             return;
           }
@@ -534,12 +534,12 @@ export default defineCommand({
           const ref: GithubIssueRef = { repo: cfg.repo, issueNumber, repo_id: repoId };
           const taskInputResult = toIssueTaskInput(issue, ref, rootPrd.id);
           if (!taskInputResult.ok) {
-            process.stderr.write(formatError(taskInputResult.error) + "\n");
+            process.stderr.write(formatErrorFor(inv, taskInputResult.error) + "\n");
             process.exitCode = exitCode(taskInputResult.error);
             return;
           }
 
-          const by = resolveActor(undefined, inv.env, inv.cwd);
+          const by = resolveActor(undefined, inv.env, inv.cwd, inv.user);
           const createResult = await app.corpusService.create(taskInputResult.value, { by });
 
           if (!createResult.ok) {
@@ -572,7 +572,7 @@ export default defineCommand({
             if (createResult.error.code === "DUPLICATE_SLUG") {
               const existingResult = await app.corpusService.get(createResult.error.existing_id);
               if (!existingResult.ok) {
-                process.stderr.write(formatError(existingResult.error) + "\n");
+                process.stderr.write(formatErrorFor(inv, existingResult.error) + "\n");
                 process.exitCode = exitCode(existingResult.error);
                 return;
               }
@@ -589,7 +589,7 @@ export default defineCommand({
               return;
             }
 
-            process.stderr.write(formatError(createResult.error) + "\n");
+            process.stderr.write(formatErrorFor(inv, createResult.error) + "\n");
             process.exitCode = exitCode(createResult.error);
             return;
           }
@@ -656,14 +656,14 @@ export default defineCommand({
         // NOTHING, regardless of whether <issue> even exists.
         if (state === "fixed") {
           const error = fixedNotSettableError();
-          process.stderr.write(formatError(error) + "\n");
+          process.stderr.write(formatErrorFor(inv, error) + "\n");
           process.exitCode = exitCode(error);
           return;
         }
 
         if (state === undefined || !isExplicitResolutionState(state)) {
           const error = invalidStateError(state);
-          process.stderr.write(formatError(error) + "\n");
+          process.stderr.write(formatErrorFor(inv, error) + "\n");
           process.exitCode = exitCode(error);
           return;
         }
@@ -671,7 +671,7 @@ export default defineCommand({
         const reason = typeof args.reason === "string" ? args.reason.trim() : "";
         if (reason.length === 0) {
           const error = missingReasonError();
-          process.stderr.write(formatError(error) + "\n");
+          process.stderr.write(formatErrorFor(inv, error) + "\n");
           process.exitCode = exitCode(error);
           return;
         }
@@ -684,7 +684,7 @@ export default defineCommand({
         );
         if (strayPointer !== undefined) {
           const error = pointerForWrongStateError(strayPointer, state);
-          process.stderr.write(formatError(error) + "\n");
+          process.stderr.write(formatErrorFor(inv, error) + "\n");
           process.exitCode = exitCode(error);
           return;
         }
@@ -693,7 +693,7 @@ export default defineCommand({
         const pointerValue = requiredPointer === undefined ? "" : readStringArg(argRecord, requiredPointer.argName);
         if (requiredPointer !== undefined && pointerValue.length === 0) {
           const error = missingPointerError(requiredPointer);
-          process.stderr.write(formatError(error) + "\n");
+          process.stderr.write(formatErrorFor(inv, error) + "\n");
           process.exitCode = exitCode(error);
           return;
         }
@@ -703,7 +703,7 @@ export default defineCommand({
           const issueId = args.issue as string;
           const getResult = await app.corpusService.get(issueId);
           if (!getResult.ok) {
-            process.stderr.write(formatError(getResult.error) + "\n");
+            process.stderr.write(formatErrorFor(inv, getResult.error) + "\n");
             process.exitCode = exitCode(getResult.error);
             return;
           }
@@ -711,7 +711,7 @@ export default defineCommand({
 
           if (!hasIssueReport(issueDoc.extra)) {
             const error = notAnIssueError(issueDoc.slug);
-            process.stderr.write(formatError(error) + "\n");
+            process.stderr.write(formatErrorFor(inv, error) + "\n");
             process.exitCode = exitCode(error);
             return;
           }
@@ -761,7 +761,7 @@ export default defineCommand({
                 // caller input to accept quietly.
                 error = missingPointerError(requiredPointer);
               }
-              process.stderr.write(formatError(error) + "\n");
+              process.stderr.write(formatErrorFor(inv, error) + "\n");
               process.exitCode = exitCode(error);
               return;
             }
@@ -780,7 +780,7 @@ export default defineCommand({
             resolvedPointer = { [requiredPointer.extraKey]: pointerDoc.id };
           }
 
-          const by = resolveActor(undefined, inv.env, inv.cwd);
+          const by = resolveActor(undefined, inv.env, inv.cwd, inv.user);
           const nowIso = new Date().toISOString();
           const existingIssueReport = issueDoc.extra["issue_report"] as Record<string, unknown>;
           // reason: RMW merge — spread the FULL existing extra first so every
@@ -802,7 +802,7 @@ export default defineCommand({
 
           const setResult = await app.corpusService.set(issueId, { extra: newExtra }, { by });
           if (!setResult.ok) {
-            process.stderr.write(formatError(setResult.error) + "\n");
+            process.stderr.write(formatErrorFor(inv, setResult.error) + "\n");
             process.exitCode = exitCode(setResult.error);
             return;
           }
@@ -908,7 +908,7 @@ export default defineCommand({
               // happy-path exit above, and the underlying reason on stderr.
               process.stderr.write(
                 `Warning: resolution recorded in the corpus, but the GitHub label was not updated — ` +
-                  `${formatError(projectResult.error)}\n`,
+                  `${formatErrorFor(inv, projectResult.error)}\n`,
               );
               process.exitCode = exitCode(projectResult.error);
             }

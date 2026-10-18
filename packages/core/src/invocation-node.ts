@@ -5,7 +5,7 @@
  * (spec-ambient-state-is-read-once-at-the-entry-owned-only-prune D4/D5, rule AS-26).
  * Public surface: {@link resolveInvocation}, {@link InvocationResolvers}.
  * Invariants:
- *   - Reads env, cwd, home, tmp dir, host, exec path, `Bun.main` once per call; the returned Invocation
+ *   - Reads env, cwd, home, tmp dir, host, OS user, exec path, `Bun.main` once per call; the returned Invocation
  *     holds copies, so a later `process.env` change is not seen through it.
  *   - Policy lives in the injected {@link InvocationResolvers} (the lore package owns the BR-813 / BR-1012
  *     path rules and the working-copy actor probe); core imports nothing from lore.
@@ -35,18 +35,8 @@ export interface InvocationResolvers {
 }
 
 /**
- * The OS account name of the running process (the os-fallback tier of actor resolution). Module-private on purpose:
- * this file is allowlisted for ambient reads because the ENTRY reads here, so it exports nothing but
- * {@link resolveInvocation} — a helper exported from it would let any file read the process through it uncounted
- * (guard: `scripts/tests/invocation-node-exports.test.ts`).
- */
-function osUsername(): string {
-  return userInfo().username;
-}
-
-/**
  * `$HOME` wins over `os.homedir()`: under Bun, os.homedir() ignores a HOME assigned after startup
- * (measured 2026-10-17, see home-dir-node.ts), and the in-process test runner relies on the env value.
+ * (measured 2026-10-17), and the in-process test runner relies on the env value.
  */
 function homeFrom(env: EnvBag): string {
   const envHome = env["HOME"];
@@ -65,7 +55,8 @@ export function resolveInvocation(rawArgv: readonly string[], resolvers: Invocat
   const cwd = process.cwd();
   const env: EnvBag = Object.freeze({ ...process.env });
   const home = homeFrom(env);
-  const resolution = resolveInvocationIdentity(rawArgv, { ...env }, osUsername, () => resolvers.worktreeActor(cwd));
+  const user = userInfo().username;
+  const resolution = resolveInvocationIdentity(rawArgv, { ...env }, () => user, () => resolvers.worktreeActor(cwd));
   const argv: readonly string[] = Object.freeze([...resolution.argv]);
   const bunMain = (globalThis as { Bun?: { main?: string } }).Bun?.main;
   return Object.freeze({
@@ -80,6 +71,7 @@ export function resolveInvocation(rawArgv: readonly string[], resolvers: Invocat
       tmpDir: tmpdir(),
     }),
     host: hostname(),
+    user,
     execPath: process.execPath,
     isCompiled: bunMain !== undefined && bunMain.startsWith("/$bunfs/"),
     identity: resolution.identity,

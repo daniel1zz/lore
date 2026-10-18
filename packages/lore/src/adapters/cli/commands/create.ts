@@ -63,7 +63,7 @@
 import { readFileSync } from "node:fs";
 import { defineCommand } from "citty";
 import { loadLoreApp } from "../loader.js";
-import { exitCode, formatError, resolveActor } from "../utils.js";
+import { exitCode, formatErrorFor, resolveActor } from "../utils.js";
 import { openEditor } from "../editor.js";
 import type { DocRecord, DocType, JudgeIdentity, KnowledgeSubType, LoreError, Priority } from "@lore/core";
 import { KNOWLEDGE_SUB_TYPES, SPEC_KINDS, extractFileAnchors } from "@lore/core";
@@ -457,7 +457,7 @@ export default defineCommand({
           // No-AI path: fall back to editor (SPEC-003 §3.1 / AC-AI-2)
           const editorResult = await openEditor({ defaults, env: inv.env, tmpDir: inv.paths.tmpDir });
           if (!editorResult.ok) {
-            process.stderr.write(formatError(editorResult.error) + "\n");
+            process.stderr.write(formatErrorFor(inv, editorResult.error) + "\n");
             process.exitCode = exitCode(editorResult.error);
             return;
           }
@@ -492,7 +492,7 @@ export default defineCommand({
           });
 
           if (!aiResult.ok) {
-            process.stderr.write(formatError(aiResult.error) + "\n");
+            process.stderr.write(formatErrorFor(inv, aiResult.error) + "\n");
             process.exitCode = exitCode(aiResult.error);
             return;
           }
@@ -513,7 +513,7 @@ export default defineCommand({
       if (docType === "task" && args["plan-id"]) {
         const planResolve = await app.corpusService.resolve(args["plan-id"]);
         if (!planResolve.ok) {
-          process.stderr.write(formatError(planResolve.error) + "\n");
+          process.stderr.write(formatErrorFor(inv, planResolve.error) + "\n");
           process.exitCode = exitCode(planResolve.error);
           return;
         }
@@ -527,7 +527,7 @@ export default defineCommand({
       if (resolvesTokens.length > 0) {
         const resolved = await resolveResolvesTargets(app.corpusService, resolvesTokens);
         if (!resolved.ok) {
-          process.stderr.write(formatError(resolved.error) + "\n");
+          process.stderr.write(formatErrorFor(inv, resolved.error) + "\n");
           process.exitCode = exitCode(resolved.error);
           return;
         }
@@ -581,7 +581,7 @@ export default defineCommand({
       // SPEC-079 G2 — resolved once, reused as the create's own audit actor
       // (both branches below) and, when --supersedes is set, the invalidate
       // step's actor too.
-      const resolvedActor = resolveActor(undefined, inv.env, inv.cwd);
+      const resolvedActor = resolveActor(undefined, inv.env, inv.cwd, inv.user);
 
       if (args.supersedes !== undefined) {
         if (app.validityService === undefined) {
@@ -607,7 +607,7 @@ export default defineCommand({
           resolvedActor,
         );
         if (!orchResult.ok) {
-          process.stderr.write(formatError(orchResult.error) + "\n");
+          process.stderr.write(formatErrorFor(inv, orchResult.error) + "\n");
           process.exitCode = exitCode(orchResult.error);
           return;
         }
@@ -616,7 +616,7 @@ export default defineCommand({
       } else {
         const result = await app.corpusService.create(createInput, { by: resolvedActor });
         if (!result.ok) {
-          process.stderr.write(formatError(result.error) + "\n");
+          process.stderr.write(formatErrorFor(inv, result.error) + "\n");
           process.exitCode = exitCode(result.error);
           return;
         }
@@ -662,7 +662,7 @@ export default defineCommand({
 
       for (const failure of resolvesFailures) {
         process.stderr.write(
-          `Error: ${doc.slug} was created but its resolves link to ${failure.slug} failed (${formatError(failure.error)})\n` +
+          `Error: ${doc.slug} was created but its resolves link to ${failure.slug} failed (${formatErrorFor(inv, failure.error)})\n` +
             `  Repair: lore link ${doc.slug} ${failure.slug} --type resolves\n`,
         );
         process.exitCode = exitCode(failure.error);
@@ -673,7 +673,7 @@ export default defineCommand({
       // nonzero exit naming the EXACT repair command.
       if (supersedeError !== undefined) {
         const repairMsg = renderSupersedeRepairMessage(args.supersedes!, doc.slug);
-        process.stderr.write(`Error: ${repairMsg}\n  (invalidate failed: ${formatError(supersedeError)})\n`);
+        process.stderr.write(`Error: ${repairMsg}\n  (invalidate failed: ${formatErrorFor(inv, supersedeError)})\n`);
         process.exitCode = exitCode(supersedeError);
       }
 
@@ -705,7 +705,7 @@ export default defineCommand({
       // about to create (see collectFileAnchorResolution's module header).
       const declaredAnchors = extractFileAnchors(doc as DocRecord);
       if (declaredAnchors.length > 0) {
-        const report = collectFileAnchorResolution(declaredAnchors, buildFileAnchorProbeContext());
+        const report = collectFileAnchorResolution(declaredAnchors, buildFileAnchorProbeContext(inv.cwd));
         for (const line of renderFileAnchorAdvisory(report, { subject: doc.slug })) {
           process.stderr.write(line + "\n");
         }

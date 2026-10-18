@@ -64,6 +64,7 @@ import { MigrationService } from "../../../../src/service/migration-service.js";
 import { TreeCheckService } from "../../../../src/service/tree-check-service.js";
 import { NoOpTelemetry } from "@lore/core";
 import type { App } from "../../../../src/app.js";
+import { actedStore } from "../../../live-invocation.js";
 
 // ─── Setup ────────────────────────────────────────────────────────────────────
 
@@ -83,7 +84,7 @@ interface TestContext {
  */
 async function makeTestServer(allowedOrigins?: readonly string[]): Promise<TestContext> {
   const db = new Database(":memory:");
-  const docStore = new InMemoryStore();
+  const docStore = actedStore(new InMemoryStore());
 
   // reason: machineAuth is now the SOLE backer of cookie sessions + the bootstrap key
   // (SPEC-078 D1) — an mkdtemp baseDir keeps this test off the real XDG state path.

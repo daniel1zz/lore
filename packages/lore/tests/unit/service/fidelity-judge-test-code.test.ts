@@ -20,6 +20,7 @@ import { RuleService } from "../../../src/service/rule-service.js";
 import { AcService } from "../../../src/service/ac-service.js";
 import { runFidelity, TEST_SOURCE_MAX_CHARS } from "../../../src/service/fidelity-sample.js";
 import { makeRuleService } from "../../helpers/make-rule-service.js";
+import { actedStore } from "../../live-invocation.js";
 
 const SEEN_SOURCE = "it('SEEN-MARKER the rule holds', () => { expect(rule()).toBe(true); });";
 const SEEN_PATH = "tests/seen.test.ts";
@@ -44,7 +45,7 @@ async function mustCreate(corpus: CorpusService, input: CreateDocInput): Promise
 
 /** One live rule, one criterion per command (AC-F-<i+1>), each citing the rule. */
 async function world(commands: string[]): Promise<InMemoryStore> {
-  const store = new InMemoryStore();
+  const store = actedStore(new InMemoryStore());
   const corpus = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
   const rules = makeRuleService(store);
   const ac = new AcService(store, new RecordLockService(store, new GateEnforcer(undefined)));

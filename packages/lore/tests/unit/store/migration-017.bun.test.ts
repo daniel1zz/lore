@@ -21,6 +21,7 @@ import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { LATEST_SCHEMA_VERSION, SQLiteStore } from "../../../src/store/sqlite-store.js";
 import type { StoreInterface } from "../../../src/store/store-interface.js";
 import { TursoStore } from "../../../src/store/turso-store.js";
+import { actedStore } from "../../live-invocation.js";
 
 const RUN = "cc:m17-run" as RunId;
 const AT = "2026-10-11T10:00:00.000Z";
@@ -69,7 +70,7 @@ describe("migration-017 constants", () => {
 describe("migration-017 on a SQLite file", () => {
   /** A v16 file: a real current-schema file with the two columns dropped and user_version rewound. */
   function seedV16WithRun(path: string): void {
-    const fresh = new SQLiteStore(path);
+    const fresh = actedStore(new SQLiteStore(path));
     fresh.close();
     const raw = new Database(path);
     raw.exec("ALTER TABLE runs DROP COLUMN ended_at");
@@ -87,7 +88,7 @@ describe("migration-017 on a SQLite file", () => {
     const path = join(dir, "v16.db");
     seedV16WithRun(path);
 
-    const store = new SQLiteStore(path);
+    const store = actedStore(new SQLiteStore(path));
 
     expect(userVersion(store.getDatabase())).toBe(23);
     const end = await store.getRunEnd(RUN);
@@ -102,7 +103,7 @@ describe("migration-017 on a SQLite file", () => {
     raw.exec("ALTER TABLE runs ADD COLUMN ended_at TEXT");
     raw.close();
 
-    const store = new SQLiteStore(path);
+    const store = actedStore(new SQLiteStore(path));
 
     expect(userVersion(store.getDatabase())).toBe(23);
     const cols = (store.getDatabase().query("PRAGMA table_info(runs)").all() as { name: string }[]).map((c) => c.name);
@@ -113,12 +114,12 @@ describe("migration-017 on a SQLite file", () => {
 
   it("REGRESSION: reopening a migrated file is a no-op (version and run rows unchanged)", async () => {
     const path = join(dir, "again.db");
-    const first = new SQLiteStore(path);
+    const first = actedStore(new SQLiteStore(path));
     await first.insertRun(runRecord(RUN));
     await first.endRun(RUN, AT, "r");
     first.close();
 
-    const second = new SQLiteStore(path);
+    const second = actedStore(new SQLiteStore(path));
 
     expect(userVersion(second.getDatabase())).toBe(23);
     expect(await second.getRunEnd(RUN)).toEqual({ ok: true, value: { endedAt: AT, endReason: "r" } });
@@ -135,20 +136,20 @@ const STORE_CASES: readonly StoreCase[] = [
   {
     name: "SQLiteStore",
     open: async () => {
-      const store = new SQLiteStore(join(dir, "sqlite.db"));
+      const store = actedStore(new SQLiteStore(join(dir, "sqlite.db")));
       return { store, close: () => store.close() };
     },
   },
   {
     name: "TursoStore (local file)",
     open: async () => {
-      const store = new TursoStore({ localPath: join(dir, "turso.db") });
+      const store = actedStore(new TursoStore({ localPath: join(dir, "turso.db") }));
       return { store, close: () => void store.close() };
     },
   },
   {
     name: "InMemoryStore",
-    open: async () => ({ store: new InMemoryStore(), close: () => undefined }),
+    open: async () => ({ store: actedStore(new InMemoryStore()), close: () => undefined }),
   },
 ];
 

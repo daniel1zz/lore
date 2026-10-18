@@ -37,7 +37,8 @@
 
 import { join } from "node:path";
 
-import { createApp } from "../../../lore/src/app.js";
+import { ambientOfInvocation, createApp } from "../../../lore/src/app.js";
+import { resolveEntryInvocation } from "../../../lore/src/adapters/cli/run-cli.js";
 import type { App } from "../../../lore/src/app.js";
 import { startHttpServer } from "../../../lore/src/adapters/http/index.js";
 import { createMachineAuthStores } from "../../../lore/src/adapters/http/machine-auth.js";
@@ -75,14 +76,17 @@ async function main(): Promise<void> {
   const machineAuth = createMachineAuthStores({ baseDir: machineAuthBaseDir });
   const rawKey = await ensureLocalApiKey(machineAuth.apiKeyStore, machineAuth.baseDir);
 
-  const app: App = createApp(join(primaryProjectRoot, ".lore", "lore.db"));
+  // reason: this script is the e2e server's entry — it resolves the Invocation once and composes both apps from it.
+  const inv = await resolveEntryInvocation(process.argv.slice(2));
+  const ambient = ambientOfInvocation(inv);
+  const app: App = createApp(join(primaryProjectRoot, ".lore", "lore.db"), undefined, ambient, { identity: inv.identity });
 
   let mountRegistry: MountRegistry<App> | undefined;
   if (registryProjects.length > 0) {
     mountRegistry = createMountRegistry<App>();
     await mountRegistry.init(
       { projects: registryProjects },
-      { createApp: async (dbPath: string) => createApp(dbPath) },
+      { createApp: async (dbPath: string) => createApp(dbPath, undefined, ambient, { identity: inv.identity }) },
     );
   }
 

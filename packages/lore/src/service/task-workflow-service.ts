@@ -378,7 +378,6 @@ import {
   applyWorktreeRemoval,
   buildActiveClaimedPathSet,
   collectRecordedWorktrees,
-  createRealWorktreeProbe,
   evaluateRecordedWorktree,
   resolveClaimHead,
   type RecordedWorktree,
@@ -2217,6 +2216,9 @@ function buildNoWorktreeMismatchRefusal(opts: {
 
 // ─── TaskWorkflowService ───────────────────────────────────────────────────
 
+/** Why a worktree measurement is absent on a service built without a probe (bare test construction). */
+const NO_WORKTREE_PROBE_REASON = "no worktree probe is wired into this TaskWorkflowService";
+
 export class TaskWorkflowService {
   private readonly telemetry: Telemetry;
   /**
@@ -2406,9 +2408,10 @@ export class TaskWorkflowService {
       worktree: string,
       sessionId: string,
     ) => Promise<void> = unbindClaimSessionForTrailer,
-    // reason: issue #106 — the git/fs probe behind `done()`'s worktree cleanup; defaults to real git so every shipped surface cleans up without
-    // `app.ts` wiring (same leaf-IO-port precedent as `detectBranch` above).
-    private readonly worktreeProbe: WorktreeGitProbe = createRealWorktreeProbe(),
+    // reason: issue #106 — the git/fs probe behind `done()`'s worktree cleanup, built by `app.ts` over the invocation's cwd. ABSENT =>
+    // the claim-time base and the done-time commit range read `not-measured`, and the cleanup (which also needs `worktreeRemoval`) is
+    // unreachable — never a probe over the process's own directory.
+    private readonly worktreeProbe?: WorktreeGitProbe,
     // reason: the single worktree-removal test's facts (spec-one-worktree-removal-test-for-the-guard-lore-done-and-a);
     // wired by `app.ts` (a service never imports another service). ABSENT => `done`'s cleanup reports every recorded
     // worktree `not-measured`, never removes — no silent "safe" default.
@@ -3053,7 +3056,9 @@ export class TaskWorkflowService {
     // so the base is resolved by `resolveClaimHead`, never by `headSha` alone (issue #180 retry).
     const claimBaseResolved =
       opts.worktree !== undefined
-        ? resolveClaimHead(this.worktreeProbe, opts.worktree, this.worktreeProbe.currentWorkingDirectory())
+        ? this.worktreeProbe === undefined
+          ? ({ ok: false, reason: NO_WORKTREE_PROBE_REASON } as const)
+          : resolveClaimHead(this.worktreeProbe, opts.worktree, this.worktreeProbe.currentWorkingDirectory())
         : undefined;
     const claimBase =
       claimBaseResolved === undefined
@@ -4015,7 +4020,10 @@ export class TaskWorkflowService {
       if (recorded === undefined) {
         range = notMeasured("no claim recorded a worktree, so there is no HEAD to measure");
       } else {
-        const head = resolveClaimHead(this.worktreeProbe, recorded.path, this.worktreeProbe.currentWorkingDirectory());
+        const head =
+          this.worktreeProbe === undefined
+            ? ({ ok: false, reason: NO_WORKTREE_PROBE_REASON } as const)
+            : resolveClaimHead(this.worktreeProbe, recorded.path, this.worktreeProbe.currentWorkingDirectory());
         range = head.ok
           ? {
               state: "recorded",
@@ -4043,6 +4051,12 @@ export class TaskWorkflowService {
 
   // ── Worktree cleanup (issue #106, BR-961 / BR-962) ──────────────────────────
 
+  /** The probe, or a loud wiring error: cleanup needs `worktreeRemoval` AND this probe, both wired by `app.ts`. */
+  private requireWorktreeProbe(): WorktreeGitProbe {
+    if (this.worktreeProbe === undefined) throw new Error(`TaskWorkflowService: ${NO_WORKTREE_PROBE_REASON}`);
+    return this.worktreeProbe;
+  }
+
   /**
    * Normalized paths recorded by the CURRENT claim of every task that is not yet terminal. A worktree
    * still named by such a claim belongs to live work (one orchestrator worktree is routinely claimed by
@@ -4057,7 +4071,7 @@ export class TaskWorkflowService {
       const worktree = readClaim(candidate)?.worktree;
       if (worktree !== undefined) paths.push(worktree);
     }
-    return ok(buildActiveClaimedPathSet(this.worktreeProbe, paths));
+    return ok(buildActiveClaimedPathSet(this.requireWorktreeProbe(), paths));
   }
 
   /** Worktrees `task`'s claims recorded (claim audit history, which survives release, + current claim). */
@@ -4116,11 +4130,12 @@ export class TaskWorkflowService {
 
     const outcomes: WorktreeOutcome[] = [];
     for (const recorded of recordedResult.value) {
-      const evaluation = await evaluateRecordedWorktree(this.worktreeProbe, removal, recorded, {
+      const probe = this.requireWorktreeProbe();
+      const evaluation = await evaluateRecordedWorktree(probe, removal, recorded, {
         callerSession,
         activeClaimedPaths: activeResult.value,
       });
-      outcomes.push(applyWorktreeRemoval(this.worktreeProbe, evaluation));
+      outcomes.push(applyWorktreeRemoval(probe, evaluation));
     }
     const auditResult = await this.recordWorktreeCleanupAudit(task, by, nowIso, "done", outcomes);
     if (!auditResult.ok) {

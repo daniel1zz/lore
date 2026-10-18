@@ -169,7 +169,7 @@ async function withApp<T>(dir: string, fn: (app: App) => Promise<T>): Promise<T>
   const prevHome = process.env["HOME"];
   process.chdir(dir);
   process.env["HOME"] = dir;
-  const { app } = loadLoreApp({ surface: "http" });
+  const { app } = loadLoreApp({ surface: "http", inv: liveInvocation() });
   try {
     return await fn(app);
   } finally {

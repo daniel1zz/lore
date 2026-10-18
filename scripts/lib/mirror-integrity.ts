@@ -23,6 +23,7 @@ import { fileURLToPath } from "node:url";
 import { NoOpTelemetry } from "@lore/core";
 import { mirrorDirRelative, MIRROR_TYPES, scriptChainReachesTarget, type MirrorDocType } from "../export-spec-mirror-core.js";
 import { InMemoryStore } from "../../packages/lore/src/store/in-memory-store.js";
+import { withWriteContext } from "../../packages/lore/src/store/write-context-store.js";
 import { CorpusService } from "../../packages/lore/src/service/corpus-service.js";
 import { MigrationService } from "../../packages/lore/src/service/migration-service.js";
 import { ReviewService } from "../../packages/lore/src/service/review-service.js";
@@ -196,7 +197,8 @@ export function measureAllTypesParity(root: string, corpusCwd: string): AllTypes
  * corpus: `MigrationService`/`InMemoryStore` operate entirely in memory.
  */
 function makeThrowawayApp(): App {
-  const store = new InMemoryStore();
+  // reason: the throwaway app's writes (migration) need an author; it is a fixed label, never a process read.
+  const store = withWriteContext(new InMemoryStore(), { identity: { harnessRun: null, claimed: "mirror-integrity", claimedSource: "flag" } });
   const telemetry = new NoOpTelemetry();
   return {
     corpusService: new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)), telemetry),

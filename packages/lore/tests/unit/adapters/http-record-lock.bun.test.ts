@@ -36,6 +36,7 @@ import { TreeCheckService } from "../../../src/service/tree-check-service.js";
 import { JudgmentService } from "../../../src/service/judgment-service.js";
 import { AuditService } from "../../../src/service/audit-service.js";
 import type { App } from "../../../src/app.js";
+import { actedStore } from "../../live-invocation.js";
 
 const FAR_PAST = "2000-01-01T00:00:00.000Z";
 
@@ -54,7 +55,7 @@ async function makeTestServer(): Promise<TestContext> {
   const tmpDir = mkdtempSync(join(tmpdir(), "lore-http-record-lock-"));
   const loreDir = join(tmpDir, ".lore");
   mkdirSync(loreDir, { recursive: true });
-  const store = new SQLiteStore(join(loreDir, "lore.db"));
+  const store = actedStore(new SQLiteStore(join(loreDir, "lore.db")));
   const db = store.getDatabase();
   const telemetry = new NoOpTelemetry();
   const recordLock = new RecordLockService(store, new GateEnforcer(undefined));

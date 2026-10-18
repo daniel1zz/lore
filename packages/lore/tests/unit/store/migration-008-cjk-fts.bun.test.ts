@@ -41,6 +41,7 @@ import { MIGRATION_004_SQL } from "../../../src/store/migrations/migration-004.j
 import { MIGRATION_005_SQL } from "../../../src/store/migrations/migration-005.js";
 import { MIGRATION_006_SQL } from "../../../src/store/migrations/migration-006.js";
 import { MIGRATION_007_SQL } from "../../../src/store/migrations/migration-007.js";
+import { actedStore } from "../../live-invocation.js";
 
 function userVersion(db: Database): number {
   return (db.query("PRAGMA user_version").get() as { user_version: number }).user_version;
@@ -98,7 +99,7 @@ describe("migration-008 (CJK bigram shadow columns for FTS5)", () => {
   });
 
   it("HAPPY: a fresh :memory: DB migrates straight to user_version 11 (migration-011 is now the head) with the shadow columns present", () => {
-    const store = new SQLiteStore(":memory:");
+    const store = actedStore(new SQLiteStore(":memory:"));
     const db = store.getDatabase();
 
     // reason: migration-012 (spec-issue-closure-loop-computed-resolution-
@@ -160,7 +161,7 @@ describe("migration-008 (CJK bigram shadow columns for FTS5)", () => {
     // row's title/content, and make it CJK-searchable via the store's real
     // search() (not raw SQL) — proving the shadow columns AND the query-side
     // expansion in escapeFtsQuery both work end to end.
-    const store = new SQLiteStore(dbPath);
+    const store = actedStore(new SQLiteStore(dbPath));
     const db = store.getDatabase();
 
     expect(userVersion(db)).toBe(23);
@@ -195,11 +196,11 @@ describe("migration-008 (CJK bigram shadow columns for FTS5)", () => {
   });
 
   it("REGRESSION: reopening an already-migrated (latest version) file-backed DB a second time is idempotent — no throw, shadow columns unchanged", () => {
-    const firstOpen = new SQLiteStore(dbPath);
+    const firstOpen = actedStore(new SQLiteStore(dbPath));
     firstOpen.close();
 
     expect(() => {
-      const secondOpen = new SQLiteStore(dbPath);
+      const secondOpen = actedStore(new SQLiteStore(dbPath));
       const db = secondOpen.getDatabase();
       expect(userVersion(db)).toBe(23);
       expect(tableColumnNames(db, "docs")).toContain("fts_title");

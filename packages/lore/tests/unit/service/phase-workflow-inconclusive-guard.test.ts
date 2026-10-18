@@ -51,6 +51,7 @@ import { PhaseWorkflowService } from "../../../src/service/phase-workflow-servic
 import { TaskWorkflowService, type EvidenceInput } from "../../../src/service/task-workflow-service.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
 import { exitCode } from "../../../src/adapters/cli/utils.js";
+import { actedStore } from "../../live-invocation.js";
 
 // ─── Fixtures (mirrors phase-workflow-service.test.ts's raw-insert pattern —
 // `type: "phase"` is migration-created only, D6a, never via CorpusService.create) ──
@@ -119,7 +120,7 @@ function evidence(overrides: Partial<EvidenceInput> = {}): EvidenceInput {
 }
 
 async function makePhaseServices() {
-  const store = new InMemoryStore();
+  const store = actedStore(new InMemoryStore());
   const service = new PhaseWorkflowService(store, new NoOpTelemetry(), { claimTtlMinutes: 120 });
   await mustInsert(store, makePlanRecord());
   const phase = await mustInsert(store, makePhaseRecord());
@@ -204,7 +205,7 @@ describe("PhaseWorkflowService inconclusive guard — STATE (parity with TaskWor
     const phaseResult = await phaseService.addEvidence(phase.slug, phaseSmuggled);
 
     // Task-path rejection (mirrors verify-completeness.test.ts's own fixture)
-    const taskStore = new InMemoryStore();
+    const taskStore = actedStore(new InMemoryStore());
     const corpusService = new CorpusService(taskStore, new RecordLockService(taskStore, new GateEnforcer(undefined)));
     const taskWorkflowService = new TaskWorkflowService(taskStore, undefined, { claimTtlMinutes: 120 });
     const planResult = await corpusService.create({

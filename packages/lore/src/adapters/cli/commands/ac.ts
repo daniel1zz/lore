@@ -192,7 +192,7 @@ import { SQLiteStore } from "../../../store/sqlite-store.js";
 import { AcExemptionService } from "../../../service/ac-exemption-service.js";
 import { DecisionService } from "../../../service/decision-service.js";
 import { createOverrideDecisionPort } from "../../../service/override-decision.js";
-import { exitCode, formatError, resolveActor } from "../utils.js";
+import { exitCode, formatError, formatErrorFor, resolveActor } from "../utils.js";
 import { deriveAcCoverageState, getAllowedTransitions, ok } from "@lore/core";
 import type { AcceptanceCriterion, AcCoverageFact, Invocation, LoreError, Result } from "@lore/core";
 import type { AcService, AcListResult, DeclarePathOpts, SetCriterionOpts, SetCriterionPatch } from "../../../service/ac-service.js";
@@ -333,13 +333,13 @@ export default defineCommand({
           );
 
           if (!result.ok) {
-            process.stderr.write(formatError(result.error) + "\n");
+            process.stderr.write(formatErrorFor(inv, result.error) + "\n");
             process.exitCode = exitCode(result.error);
             return;
           }
 
           await reportDemotionIfAny(app, args.spec as string, beforeStatus);
-          await reportCiteFeedbackOnAdd(requireAcService(app), args.spec as string, args.id as string, criterion);
+          await reportCiteFeedbackOnAdd(inv, requireAcService(app), args.spec as string, args.id as string, criterion);
 
           if (args.json) {
             console.log(JSON.stringify({ ok: true, data: { criteria: result.value } }, null, 2));
@@ -379,7 +379,7 @@ export default defineCommand({
           });
 
           if (!result.ok) {
-            process.stderr.write(formatError(result.error) + "\n");
+            process.stderr.write(formatErrorFor(inv, result.error) + "\n");
             process.exitCode = exitCode(result.error);
             return;
           }
@@ -435,10 +435,10 @@ export default defineCommand({
             acId: args.id as string,
             reason: args.reason as string,
             expiresAt: args.expires as string,
-            by: resolveActor(undefined, inv.env, inv.cwd),
+            by: resolveActor(undefined, inv.env, inv.cwd, inv.user),
           });
           if (!result.ok) {
-            process.stderr.write(formatError(result.error) + "\n");
+            process.stderr.write(formatErrorFor(inv, result.error) + "\n");
             process.exitCode = exitCode(result.error);
             return;
           }
@@ -499,11 +499,11 @@ export default defineCommand({
             args.id as string,
             ruleIds,
             { remove: args.remove === true },
-            { by: resolveActor(undefined, inv.env, inv.cwd) },
+            { by: resolveActor(undefined, inv.env, inv.cwd, inv.user) },
           );
 
           if (!result.ok) {
-            process.stderr.write(formatError(result.error) + "\n");
+            process.stderr.write(formatErrorFor(inv, result.error) + "\n");
             process.exitCode = exitCode(result.error);
             return;
           }
@@ -570,11 +570,11 @@ export default defineCommand({
         try {
           const result = await requireAcService(app).removeCriterion(args.spec as string, args.id as string, {
             force: args.force === true,
-            by: resolveActor(undefined, inv.env, inv.cwd),
+            by: resolveActor(undefined, inv.env, inv.cwd, inv.user),
           });
 
           if (!result.ok) {
-            process.stderr.write(formatError(result.error) + "\n");
+            process.stderr.write(formatErrorFor(inv, result.error) + "\n");
             process.exitCode = exitCode(result.error);
             return;
           }
@@ -749,13 +749,13 @@ export default defineCommand({
           );
 
           if (!result.ok) {
-            process.stderr.write(formatError(result.error) + "\n");
+            process.stderr.write(formatErrorFor(inv, result.error) + "\n");
             process.exitCode = exitCode(result.error);
             return;
           }
 
           await reportDemotionIfAny(app, args.spec as string, beforeStatus);
-          if (patch.cites !== undefined) await reportCiteWarnings(requireAcService(app), patch.cites, args.spec as string);
+          if (patch.cites !== undefined) await reportCiteWarnings(inv, requireAcService(app), patch.cites, args.spec as string);
 
           if (args.json) {
             console.log(JSON.stringify({ ok: true, data: { criteria: result.value } }, null, 2));
@@ -965,7 +965,7 @@ function buildFalsifierCandidate(args: Record<string, unknown>): unknown {
 function buildDeclarePathOpts(args: Record<string, unknown>, dbPath: string, inv: Invocation): DeclarePathOpts {
   const reason = args["allow-missing-path"];
   return {
-    by: resolveActor(undefined, inv.env, inv.cwd),
+    by: resolveActor(undefined, inv.env, inv.cwd, inv.user),
     pathContext: {
       fileExists: existsSync,
       cwd: inv.cwd,
@@ -1050,11 +1050,11 @@ function printCiteWarnings(warnings: readonly CiteWarning[]): void {
 }
 
 /** Judge `ids` against the baseline and print the warnings; a failed lookup is reported, never swallowed. */
-async function reportCiteWarnings(ac: AcService, ids: readonly string[], spec: string): Promise<void> {
+async function reportCiteWarnings(inv: Invocation, ac: AcService, ids: readonly string[], spec: string): Promise<void> {
   if (ids.length === 0) return;
   const checked = await ac.checkCites(ids, spec);
   if (!checked.ok) {
-    process.stderr.write(`Warning: could not check cited rules against the baseline: ${formatError(checked.error)}\n`);
+    process.stderr.write(`Warning: could not check cited rules against the baseline: ${formatErrorFor(inv, checked.error)}\n`);
     return;
   }
   printCiteWarnings(checked.value);
@@ -1065,7 +1065,7 @@ async function reportCiteWarnings(ac: AcService, ids: readonly string[], spec: s
  * baseline doc — a one-line hint that the AC cites no rule. A corpus with no baseline prints
  * exactly what it printed before (rollback invariant AC-BLS1-8).
  */
-async function reportCiteFeedbackOnAdd(
+async function reportCiteFeedbackOnAdd(inv: Invocation, 
   ac: AcService,
   spec: string,
   acId: string,
@@ -1073,7 +1073,7 @@ async function reportCiteFeedbackOnAdd(
 ): Promise<void> {
   const cites = (candidate as { cites?: string[] }).cites ?? [];
   if (cites.length > 0) {
-    await reportCiteWarnings(ac, cites, spec);
+    await reportCiteWarnings(inv, ac, cites, spec);
     return;
   }
   const has = await ac.hasBaselineDocs();

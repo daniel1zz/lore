@@ -85,6 +85,7 @@ import {
   walkAuditChain,
   type AuditChainVerifyResult,
 } from "../../../src/service/audit-service.js";
+import { actedStore } from "../../live-invocation.js";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -157,7 +158,7 @@ interface FileStoreHandle {
 function openFileStore(): FileStoreHandle {
   const tempDir = mkdtempSync(join(tmpdir(), "lore-audit-tamper-"));
   const dbPath = join(tempDir, "test.db");
-  const store = new SQLiteStore(dbPath);
+  const store = actedStore(new SQLiteStore(dbPath));
   return { store, dbPath, tempDir };
 }
 
@@ -197,7 +198,7 @@ function rawAuditRows(dbPath: string): RawAuditRow[] {
  * a permissive watermark so every versions/audit row in the fixture is in
  * scope for the completeness join. */
 function openAuditService(dbPath: string): { store: SQLiteStore; audit: AuditService } {
-  const store = new SQLiteStore(dbPath);
+  const store = actedStore(new SQLiteStore(dbPath));
   const audit = new AuditService(store, { verifySince: "2000-01-01T00:00:00.000Z" });
   return { store, audit };
 }
@@ -635,7 +636,7 @@ describe("audit hash chain — adversarial tamper detection (SPEC-079 G3)", () =
     // Reopen and append MORE legitimate rows on top of the now-tampered
     // prefix — a real operator continuing to use the corpus after an
     // undetected tamper.
-    const reopened = new SQLiteStore(handle.dbPath);
+    const reopened = actedStore(new SQLiteStore(handle.dbPath));
     const appendA = await reopened.appendAuditEntry(makeAudit({ action: "link" }));
     expect(appendA.ok).toBe(true);
     const appendB = await reopened.appendAuditEntry(makeAudit({ action: "unlink" }));

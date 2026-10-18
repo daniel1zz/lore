@@ -28,6 +28,7 @@ import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { OutlineService } from "../../../src/service/outline-service.js";
 import type { DocRecord } from "@lore/core";
 import type { StoreInterface } from "../../../src/store/store-interface.js";
+import { actedStore } from "../../live-invocation.js";
 
 const NOW = "2026-06-08T00:00:00.000Z";
 const OLDER = "2026-05-01T00:00:00.000Z";
@@ -82,7 +83,7 @@ async function resolveComponent(
 
 describe("HAPPY — RecentDecisions filters BEFORE slice so next-most-recent backfills the limit", () => {
   it("an invalidated NEWEST ADR is skipped, and the next-most-recent valid ADR fills the limit slot", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const service = new OutlineService(store);
     const adr1 = makeDoc({ id: "adr-001", title: "Newest (invalidated)", updated_at: NOW, extra: invalidatedExtra() });
     const adr2 = makeDoc({ id: "adr-002", title: "Second", updated_at: OLDER });
@@ -100,7 +101,7 @@ describe("HAPPY — RecentDecisions filters BEFORE slice so next-most-recent bac
   });
 
   it("includeInvalid restores the invalidated ADR to the result", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const service = new OutlineService(store);
     const adr1 = makeDoc({ id: "adr-001", title: "Newest (invalidated)", updated_at: NOW, extra: invalidatedExtra() });
     const adr2 = makeDoc({ id: "adr-002", title: "Second", updated_at: OLDER });
@@ -122,7 +123,7 @@ describe("HAPPY — RecentDecisions filters BEFORE slice so next-most-recent bac
 
 describe("BOUNDARY — ALL candidates invalidated yields an empty list, not an error", () => {
   it("RecentDecisions with every ADR invalidated returns an empty decisions array", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const service = new OutlineService(store);
     const adr1 = makeDoc({ id: "adr-001", title: "A", updated_at: NOW, extra: invalidatedExtra() });
     const adr2 = makeDoc({ id: "adr-002", title: "B", updated_at: OLDER, extra: invalidatedExtra() });
@@ -143,7 +144,7 @@ describe("BOUNDARY — ALL candidates invalidated yields an empty list, not an e
 
 describe("HAPPY — RelatedOf skips invalidated targets by default; includeInvalid restores", () => {
   it("an invalidated linked target is excluded from RelatedOf by default", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const service = new OutlineService(store);
     const host = makeDoc({ id: "host-001", type: "spec", title: "Host", content: "<RelatedOf />" });
     const validTarget = makeDoc({ id: "target-001", type: "knowledge", role: "knowledge", title: "Valid target" });
@@ -165,7 +166,7 @@ describe("HAPPY — RelatedOf skips invalidated targets by default; includeInval
   });
 
   it("includeInvalid restores the invalidated target to RelatedOf", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const service = new OutlineService(store);
     const host = makeDoc({ id: "host-001", type: "spec", title: "Host", content: "<RelatedOf includeInvalid={true} />" });
     const invalidTarget = makeDoc({
@@ -188,7 +189,7 @@ describe("HAPPY — RelatedOf skips invalidated targets by default; includeInval
 
 describe("HAPPY — Embed degrades to the skip-note by default; includeInvalid embeds WITH a banner", () => {
   it("an invalidated embed target degrades to invalidatedSkip data (not the spliced content)", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const service = new OutlineService(store);
     const target = makeDoc({
       id: "target-001",
@@ -211,7 +212,7 @@ describe("HAPPY — Embed degrades to the skip-note by default; includeInvalid e
   });
 
   it("includeInvalid embeds the invalidated doc WITH an inline banner line prepended", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const service = new OutlineService(store);
     const target = makeDoc({
       id: "target-001",
@@ -237,7 +238,7 @@ describe("HAPPY — Embed degrades to the skip-note by default; includeInvalid e
   });
 
   it("a VALID embed target is spliced verbatim with no banner (REGRESSION)", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const service = new OutlineService(store);
     const target = makeDoc({ id: "target-001", type: "knowledge", role: "knowledge", title: "Fresh doc", content: "fresh body" });
     const host = makeDoc({ id: "host-001", type: "spec", title: "Host", content: `<Embed id="${target.id}" />` });
@@ -254,7 +255,7 @@ describe("HAPPY — Embed degrades to the skip-note by default; includeInvalid e
 
 describe("REGRESSION — ChildrenOf/ActivePlans/ModuleTree/HealthStats stay unfiltered structural navigation", () => {
   it("ChildrenOf includes an invalidated child (pointers, not content splices)", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const service = new OutlineService(store);
     const parent = makeDoc({ id: "parent-001", type: "prd", title: "Parent", content: "<ChildrenOf />" });
     const child = makeDoc({ id: "child-001", type: "knowledge", role: "knowledge", title: "Invalidated child", parent_id: parent.id, extra: invalidatedExtra() });
@@ -266,7 +267,7 @@ describe("REGRESSION — ChildrenOf/ActivePlans/ModuleTree/HealthStats stay unfi
   });
 
   it("ActivePlans includes an invalidated-extra plan (validity has no meaning on plans, but the resolver never checks it)", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const service = new OutlineService(store);
     const plan = makeDoc({ id: "plan-001", type: "plan", role: "plan", title: "Plan", status: "active", extra: invalidatedExtra() });
     await insertAll(store, [plan]);
@@ -278,7 +279,7 @@ describe("REGRESSION — ChildrenOf/ActivePlans/ModuleTree/HealthStats stay unfi
   });
 
   it("ModuleTree includes an invalidated-extra node", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const service = new OutlineService(store);
     const root = makeDoc({ id: "root-001", type: "prd", title: "Root", content: "<ModuleTree />", extra: invalidatedExtra() });
     const child = makeDoc({ id: "child-001", type: "spec", title: "Child", parent_id: root.id });
@@ -291,7 +292,7 @@ describe("REGRESSION — ChildrenOf/ActivePlans/ModuleTree/HealthStats stay unfi
   });
 
   it("HealthStats counts an invalidated doc the same as any other (structural aggregate, not filtered)", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const service = new OutlineService(store);
     const k = makeDoc({ id: "k-001", type: "knowledge", role: "knowledge", title: "K", extra: invalidatedExtra() });
     await insertAll(store, [k]);

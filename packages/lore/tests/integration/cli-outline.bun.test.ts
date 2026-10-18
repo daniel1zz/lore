@@ -26,6 +26,7 @@ import { join } from "path";
 import { tmpdir } from "os";
 import { createApp } from "../../src/app.js";
 import type { DocPatch } from "@lore/core";
+import { liveAmbient, liveWriteContext } from "../live-invocation.js";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -180,7 +181,7 @@ describe("ERROR — a direct CorpusService.set patch touching extra.outline is r
   it("returns VALIDATION_ERROR naming the retirement and `lore baseline add`, never silently accepted", async () => {
     const prdSlug = createPrd(tmpDir);
 
-    const app = createApp(dbPath(tmpDir));
+    const app = createApp(dbPath(tmpDir), undefined, liveAmbient(), liveWriteContext());
     try {
       const getResult = await app.corpusService.get(prdSlug);
       if (!getResult.ok) throw new Error(`prd get failed: ${JSON.stringify(getResult.error)}`);

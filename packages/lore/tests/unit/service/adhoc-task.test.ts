@@ -44,11 +44,12 @@ import {
 } from "../../../src/adapters/cli/create-task-validation.js";
 import { computeAssessmentFacts } from "@lore/core";
 import type { CreateDocInput, PlanBundle } from "@lore/core";
+import { actedStore } from "../../live-invocation.js";
 
 // ─── Fixture helpers ────────────────────────────────────────────────────────
 
 function makeServices(ttl = 120) {
-  const store = new InMemoryStore();
+  const store = actedStore(new InMemoryStore());
   const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
   const taskWorkflowService = new TaskWorkflowService(store, undefined, { claimTtlMinutes: ttl });
   return { store, corpusService, taskWorkflowService };

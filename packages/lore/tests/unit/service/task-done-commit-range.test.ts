@@ -24,6 +24,7 @@ import { createRealWorktreeProbe } from "../../../src/service/worktree-cleanup.j
 import { collectRecordedRanges, readMeasuredCommitRange } from "../../../src/service/task-commit-range.js";
 import { deriveCommitSetForPlan } from "../../../src/adapters/cli/assess-commit-derivation.js";
 import type { CreateDocInput } from "@lore/core";
+import { actedStore } from "../../live-invocation.js";
 
 const GIT_ENV = {
   ...process.env,
@@ -54,9 +55,13 @@ function commit(dir: string, file: string, message: string): string {
 }
 
 async function makeArchivableTask(): Promise<{ svc: TaskWorkflowService; taskId: string }> {
-  const store = new InMemoryStore();
+  const store = actedStore(new InMemoryStore());
   const cs = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
-  const svc = new TaskWorkflowService(store, undefined, { claimTtlMinutes: 120 });
+  const svc = new TaskWorkflowService(
+    store, undefined, { claimTtlMinutes: 120 },
+    undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined,
+    createRealWorktreeProbe(process.cwd()),
+  );
   const plan = await cs.create({ type: "plan", title: "Range plan", content: "body" } as CreateDocInput);
   if (!plan.ok) throw new Error("plan");
   const task = await cs.create({
@@ -92,8 +97,8 @@ describe("lore done under the dispatch protocol: --worktree is a branch NAME (is
     run(repo, "checkout", "-q", "-b", "agent-branch-x");
 
     // `.claude/rules/lore-worktree-dispatch.md`: implementers claim with the branch NAME.
-    const probe = { ...createRealWorktreeProbe(), currentWorkingDirectory: () => repo };
-    const store = new InMemoryStore();
+    const probe = createRealWorktreeProbe(repo);
+    const store = actedStore(new InMemoryStore());
     const cs = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
     const svc = new TaskWorkflowService(
       store, undefined, { claimTtlMinutes: 120 },

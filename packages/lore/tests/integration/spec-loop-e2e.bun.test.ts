@@ -49,7 +49,7 @@ import { saveConfig } from "@lore/core/node";
 import { checkRepoPollution } from "../../src/repo-pollution-guard.js";
 import { citeSpecViaCli, type LoreRunner } from "../helpers/cli-live-rule.js";
 import type { CreateDocInput } from "@lore/core";
-import { liveInvocation } from "../live-invocation.js";
+import { liveInvocation, liveAmbient, liveWriteContext } from "../live-invocation.js";
 import type { Invocation } from "@lore/core";
 
 /**
@@ -177,7 +177,7 @@ beforeEach(() => {
   mkdirSync(loreDir, { recursive: true });
   dbPath = join(loreDir, "lore.db");
 
-  const app = createApp(dbPath);
+  const app = createApp(dbPath, undefined, liveAmbient(), liveWriteContext());
   app.close();
 
   originalCwd = process.cwd();
@@ -203,7 +203,7 @@ const COMPLIANT_CONTENT =
 
 /** Create a PRD (legal spec parent), returning its slug. */
 async function createPrd(title: string): Promise<string> {
-  const app = createApp(dbPath);
+  const app = createApp(dbPath, undefined, liveAmbient(), liveWriteContext());
   try {
     const result = await app.corpusService.create({
       type: "prd",
@@ -262,7 +262,7 @@ async function runGateSpecPromote(specIdOrSlug: string) {
 
 /** Actually create the spec (step 3 of the loop — not a gate call, the real creation). */
 async function createSpec(parentSlug: string): Promise<{ specId: string; specSlug: string }> {
-  const app = createApp(dbPath);
+  const app = createApp(dbPath, undefined, liveAmbient(), liveWriteContext());
   try {
     const result = await app.corpusService.create(compliantPayload(parentSlug) as CreateDocInput);
     if (!result.ok) throw new Error(`spec create failed: ${JSON.stringify(result.error)}`);
@@ -292,7 +292,7 @@ function citeLiveRule(prdSlug: string, specId: string, acId: string): void {
 }
 
 async function addAcceptanceCriterion(specId: string): Promise<void> {
-  const app = createApp(dbPath);
+  const app = createApp(dbPath, undefined, liveAmbient(), liveWriteContext());
   try {
     if (app.acService === undefined) throw new Error("AcService not wired");
     const result = await app.acService.addCriterion(specId, {
@@ -326,7 +326,7 @@ function suppressJudgeAdvisory(): void {
 }
 
 async function countDocs(): Promise<number> {
-  const app = createApp(dbPath);
+  const app = createApp(dbPath, undefined, liveAmbient(), liveWriteContext());
   try {
     const result = await app.corpusService.list({ type: "spec" });
     if (!result.ok) throw new Error(`list failed: ${JSON.stringify(result.error)}`);
@@ -341,7 +341,7 @@ async function countDocs(): Promise<number> {
 describe("spec-production IoC closed loop (tech-spec §9 AC6)", () => {
   it("gate-blocked create -> corrected create -> gate-blocked promote -> AC added -> gate-passed promote", async () => {
     // ── setup: seed the write-spec rule doc + a legal PRD parent ──
-    const app = createApp(dbPath);
+    const app = createApp(dbPath, undefined, liveAmbient(), liveWriteContext());
     await seedWriteSpecRule(app);
     app.close();
     const prdSlug = await createPrd("spec-loop-e2e PRD");

@@ -17,9 +17,10 @@ import { describe, it, expect } from "vitest";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
 import { canonicaliseBody } from "@lore/core";
+import { actedStore } from "../../live-invocation.js";
 
 function makeService() {
-  const store = new InMemoryStore();
+  const store = actedStore(new InMemoryStore());
   const service = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
   return { service, store };
 }

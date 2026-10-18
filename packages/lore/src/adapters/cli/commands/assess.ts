@@ -81,7 +81,7 @@ import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { defineCommand } from "citty";
 import { loadLoreApp } from "../loader.js";
-import { exitCode, formatError } from "../utils.js";
+import { exitCode, formatErrorFor } from "../utils.js";
 import { ASSESS_NEWER_TASK_ACTIVITY, ASSESS_NO_COMMITS_DERIVED } from "../cli-refusal-messages.js";
 import { isAssessAiBraked } from "../../../ai/resolve-ai.js";
 import { renderAssessmentContent } from "@lore/core";
@@ -188,7 +188,7 @@ export default defineCommand({
       // ─── Step 2: resolve plan + assemble bundle ───────────────────────────────
       const bundleResult = await app.corpusService.getPlanBundle(args.plan);
       if (!bundleResult.ok) {
-        process.stderr.write(formatError(bundleResult.error) + "\n");
+        process.stderr.write(formatErrorFor(inv, bundleResult.error) + "\n");
         process.exitCode = exitCode(bundleResult.error);
         return;
       }
@@ -201,7 +201,7 @@ export default defineCommand({
           field: "tasks",
           message: `Plan '${bundle.plan.slug}' has zero child tasks — nothing to assess.`,
         };
-        process.stderr.write(formatError(noTasksError) + "\n");
+        process.stderr.write(formatErrorFor(inv, noTasksError) + "\n");
         process.exitCode = exitCode(noTasksError);
         return;
       }
@@ -216,7 +216,7 @@ export default defineCommand({
       // failure handling, not a staleness gate) — it never silently swallows.
       const freshnessResult = await app.corpusService.getAssessmentFreshness(bundle.plan.id);
       if (!freshnessResult.ok) {
-        process.stderr.write(formatError(freshnessResult.error) + "\n");
+        process.stderr.write(formatErrorFor(inv, freshnessResult.error) + "\n");
         process.exitCode = exitCode(freshnessResult.error);
         return;
       }
@@ -396,7 +396,7 @@ export default defineCommand({
         // reason: assess has no non-AI mode (SPEC-026 §3 D5) — the shared AI_PROVIDER_ERROR
         // hint's default "Retry with --no-ai" is actively misleading here (SPEC-029 AC-AR-5,
         // AC-AR-4 preserves the underlying error shape/exit code unchanged).
-        process.stderr.write(formatError(assessResult.error, { aiHasNoFallback: true }) + "\n");
+        process.stderr.write(formatErrorFor(inv, assessResult.error, { aiHasNoFallback: true }) + "\n");
         process.exitCode = exitCode(assessResult.error);
         return;
       }
@@ -416,7 +416,7 @@ export default defineCommand({
       // exported predicate `lore status` also renders; reported alongside, never merged into capture_source.
       const stampVerdictResult = await app.corpusService.stampVerdictDistribution(bundle.tasks);
       if (!stampVerdictResult.ok) {
-        process.stderr.write(formatError(stampVerdictResult.error) + "\n");
+        process.stderr.write(formatErrorFor(inv, stampVerdictResult.error) + "\n");
         process.exitCode = exitCode(stampVerdictResult.error);
         return;
       }
@@ -436,7 +436,7 @@ export default defineCommand({
         content: renderAssessmentContent(result),
       });
       if (!createResult.ok) {
-        process.stderr.write(formatError(createResult.error) + "\n");
+        process.stderr.write(formatErrorFor(inv, createResult.error) + "\n");
         process.exitCode = exitCode(createResult.error);
         return;
       }
@@ -444,7 +444,7 @@ export default defineCommand({
 
       const linkResult = await app.corpusService.link(assessmentDoc.id, bundle.plan.id, "informs");
       if (!linkResult.ok) {
-        process.stderr.write(formatError(linkResult.error) + "\n");
+        process.stderr.write(formatErrorFor(inv, linkResult.error) + "\n");
         process.exitCode = exitCode(linkResult.error);
         return;
       }

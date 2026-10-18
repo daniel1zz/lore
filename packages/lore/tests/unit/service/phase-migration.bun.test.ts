@@ -65,6 +65,7 @@ import { fileURLToPath } from "node:url";
 import { SQLiteStore } from "../../../src/store/sqlite-store.js";
 import type { StoreInterface } from "../../../src/store/store-interface.js";
 import type { DocRecord, EvidenceEntry, LoreError, Result, TaskClaim } from "@lore/core";
+import { actedStore } from "../../live-invocation.js";
 
 // packages/lore/tests/unit/service/ -> ../../../ -> packages/lore/src/service/phase-migration-service.js
 const PHASE_MIGRATION_SERVICE_MODULE_PATH = [
@@ -335,7 +336,7 @@ afterEach(() => {
 
 async function freshSeededStore(): Promise<{ store: SQLiteStore; fixture: FixtureSeed }> {
   const fixture = loadFixture();
-  const store = new SQLiteStore(dbPath);
+  const store = actedStore(new SQLiteStore(dbPath));
   await seedFixtureStore(store, fixture);
   return { store, fixture };
 }

@@ -46,6 +46,7 @@ import { renderDocMarkdown } from "../../../src/flows/feed-flow.js";
 import { ok, DOC_TYPE_ROLE_MAP, NoOpTelemetry } from "@lore/core";
 import type { App } from "../../../src/app.js";
 import type { DocRecord, Slug } from "@lore/core";
+import { actedStore } from "../../live-invocation.js";
 
 const NOW_ISO = "2026-07-11T00:00:00.000Z";
 const PAST_ISO = "2026-07-01T00:00:00.000Z";
@@ -143,7 +144,7 @@ function extractBody(mdContent: string): string {
 
 describe("renderDocMarkdown — HAPPY (reason + resolvable successor)", () => {
   it("banner carries both the successor slug and the reason, no dangling separators", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
     const outlineService = new OutlineService(store);
     const app = makeApp(corpusService, outlineService);
@@ -176,7 +177,7 @@ describe("renderDocMarkdown — HAPPY (reason + resolvable successor)", () => {
 
 describe("renderDocMarkdown — NEGATIVE (unresolvable successor)", () => {
   it("invalidated_by pointing to a nonexistent doc omits the superseded-by clause, never throws", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
     const outlineService = new OutlineService(store);
     const app = makeApp(corpusService, outlineService);
@@ -202,7 +203,7 @@ describe("renderDocMarkdown — NEGATIVE (unresolvable successor)", () => {
 
 describe("renderDocMarkdown — BOUNDARY (bare banner)", () => {
   it("no reason and no successor → bare banner line, no dangling separator", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
     const outlineService = new OutlineService(store);
     const app = makeApp(corpusService, outlineService);
@@ -230,7 +231,7 @@ describe("renderDocMarkdown — BOUNDARY (bare banner)", () => {
 
 describe("renderDocMarkdown — ERROR (malformed extra.validity)", () => {
   it("a wrong-typed invalid_at fails schema parsing and degrades to 'not invalidated' — no banner, no throw", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
     const outlineService = new OutlineService(store);
     const app = makeApp(corpusService, outlineService);
@@ -267,7 +268,7 @@ describe("renderDocMarkdown — ERROR (malformed extra.validity)", () => {
 
 describe("renderDocMarkdown — STATE (soft-deleted successor)", () => {
   it("a soft-deleted successor still resolves to its slug, with a (deleted) suffix", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
     const outlineService = new OutlineService(store);
     const app = makeApp(corpusService, outlineService);
@@ -302,7 +303,7 @@ describe("renderDocMarkdown — STATE (soft-deleted successor)", () => {
 
 describe("renderDocMarkdown — REGRESSION (valid doc)", () => {
   it("a doc with no extra.validity at all renders unchanged, no banner", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
     const outlineService = new OutlineService(store);
     const app = makeApp(corpusService, outlineService);
@@ -318,7 +319,7 @@ describe("renderDocMarkdown — REGRESSION (valid doc)", () => {
   });
 
   it("a FUTURE valid_at (not yet invalid) still renders unchanged — only invalid_at gates the banner", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
     const outlineService = new OutlineService(store);
     const app = makeApp(corpusService, outlineService);
@@ -349,7 +350,7 @@ describe("renderDocMarkdown — REGRESSION (valid doc)", () => {
 
 describe("ExportDocsService — HAPPY (invalidated doc's written body carries the banner)", () => {
   it("the banner is prepended to the on-disk .md file body", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const service = makeExportService(store);
     const projectDir = makeTempProjectDir();
 
@@ -380,7 +381,7 @@ describe("ExportDocsService — HAPPY (invalidated doc's written body carries th
 
 describe("ExportDocsService — REGRESSION (valid doc → no banner, idempotent re-run)", () => {
   it("a currently-valid doc's written body carries no banner, and a second run reports skipped_clean", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const service = makeExportService(store);
     const projectDir = makeTempProjectDir();
 

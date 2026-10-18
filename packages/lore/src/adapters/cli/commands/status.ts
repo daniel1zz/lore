@@ -135,7 +135,7 @@ import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadLoreApp } from "../loader.js";
-import { exitCode, formatError } from "../utils.js";
+import { exitCode, formatErrorFor } from "../utils.js";
 import type { AcService } from "../../../service/ac-service.js";
 import { buildStalenessFlowDeps, listFreshStalenessEscalates } from "../../../flows/staleness-flow.js";
 import { loadTreeBlueprint } from "../../../flows/blueprint-flow.js";
@@ -1154,13 +1154,13 @@ export default defineCommand({
             message: `no enumerator registered for count field "${args.enumerate}" — known fields: ${knownFields}`,
             value: args.enumerate,
           };
-          process.stderr.write(formatError(error) + "\n");
+          process.stderr.write(formatErrorFor(inv, error) + "\n");
           process.exitCode = exitCode(error);
           return;
         }
         const membersResult = await enumerator(app, dbPath, inv.cwd);
         if (!membersResult.ok) {
-          process.stderr.write(formatError(membersResult.error) + "\n");
+          process.stderr.write(formatErrorFor(inv, membersResult.error) + "\n");
           process.exitCode = exitCode(membersResult.error);
           return;
         }
@@ -1275,7 +1275,7 @@ export default defineCommand({
       try {
         const checked = await collectDecisionLogStatus(dbPath);
         if (!checked.ok) {
-          process.stderr.write(formatError(checked.error) + "\n");
+          process.stderr.write(formatErrorFor(inv, checked.error) + "\n");
           process.exitCode = exitCode(checked.error);
           return;
         }
@@ -1294,11 +1294,11 @@ export default defineCommand({
     // ── check-autonomy-thresholds branch (spec-autonomy-phase-1 AC-AU-9) ──
     // reason: standalone like --check-decision-log; exit 1 on a mismatched, unconfirmed record, naming the break.
     if (args["check-autonomy-thresholds"] === true) {
-      const { app, dbPath } = loadLoreApp();
+      const { app, dbPath } = loadLoreApp({ inv });
       try {
         const checked = await collectAutonomyThresholdStatus(dbPath);
         if (!checked.ok) {
-          process.stderr.write(formatError(checked.error) + "\n");
+          process.stderr.write(formatErrorFor(inv, checked.error) + "\n");
           process.exitCode = exitCode(checked.error);
           return;
         }
@@ -1338,7 +1338,7 @@ export default defineCommand({
             treeErrorLines.push(`No lore.tree.yaml blueprint found at ${loaded.path}`);
           } else if (loaded.status === "invalid") {
             blueprintUnarmable = true;
-            treeErrorLines.push(formatError(loaded.error));
+            treeErrorLines.push(formatErrorFor(inv, loaded.error));
           } else {
             // Normalize root min to 1: a declared blueprint root is always required
             // (min 1). Ensures an empty corpus is detected as inconsistent if root
@@ -1355,14 +1355,14 @@ export default defineCommand({
               // Run fix first, then re-check
               const fixR = await app.treeCheckService.fix(blueprint);
               if (!fixR.ok) {
-                process.stderr.write(formatError(fixR.error) + "\n");
+                process.stderr.write(formatErrorFor(inv, fixR.error) + "\n");
                 process.exitCode = exitCode(fixR.error);
                 return;
               }
 
               const checkR = await app.treeCheckService.checkTree(blueprint);
               if (!checkR.ok) {
-                process.stderr.write(formatError(checkR.error) + "\n");
+                process.stderr.write(formatErrorFor(inv, checkR.error) + "\n");
                 process.exitCode = exitCode(checkR.error);
                 return;
               }
@@ -1417,7 +1417,7 @@ export default defineCommand({
               // Check-only
               const checkR = await app.treeCheckService.checkTree(blueprint);
               if (!checkR.ok) {
-                process.stderr.write(formatError(checkR.error) + "\n");
+                process.stderr.write(formatErrorFor(inv, checkR.error) + "\n");
                 process.exitCode = exitCode(checkR.error);
                 return;
               }
@@ -1452,7 +1452,7 @@ export default defineCommand({
             const probe = buildRealFsProbe(inv.cwd);
             const driftResult = await runDrift(deps, probe);
             if (!driftResult.ok) {
-              process.stderr.write(formatError(driftResult.error) + "\n");
+              process.stderr.write(formatErrorFor(inv, driftResult.error) + "\n");
               process.exitCode = exitCode(driftResult.error);
               return;
             }
@@ -1474,7 +1474,7 @@ export default defineCommand({
         if (checkRequirementsRequested) {
           const prdsResult = await app.corpusService.list({ type: "prd" });
           if (!prdsResult.ok) {
-            process.stderr.write(formatError(prdsResult.error) + "\n");
+            process.stderr.write(formatErrorFor(inv, prdsResult.error) + "\n");
             process.exitCode = exitCode(prdsResult.error);
             return;
           }
@@ -1482,7 +1482,7 @@ export default defineCommand({
           for (const prd of prdsResult.value.docs) {
             const covResult = await app.corpusService.computeRequirementCoverageForPrd(prd.id);
             if (!covResult.ok) {
-              process.stderr.write(formatError(covResult.error) + "\n");
+              process.stderr.write(formatErrorFor(inv, covResult.error) + "\n");
               process.exitCode = exitCode(covResult.error);
               return;
             }
@@ -1513,7 +1513,7 @@ export default defineCommand({
         if (checkPrdBudgetRequested) {
           const prdsResult = await app.corpusService.list({ type: "prd" });
           if (!prdsResult.ok) {
-            process.stderr.write(formatError(prdsResult.error) + "\n");
+            process.stderr.write(formatErrorFor(inv, prdsResult.error) + "\n");
             process.exitCode = exitCode(prdsResult.error);
             return;
           }
@@ -1521,7 +1521,7 @@ export default defineCommand({
           for (const prdSummary of prdsResult.value.docs) {
             const getResult = await app.corpusService.get(prdSummary.id);
             if (!getResult.ok) {
-              process.stderr.write(formatError(getResult.error) + "\n");
+              process.stderr.write(formatErrorFor(inv, getResult.error) + "\n");
               process.exitCode = exitCode(getResult.error);
               return;
             }
@@ -1558,7 +1558,7 @@ export default defineCommand({
           try {
             const nodesResult = await budgetStore.findMany({ type: "baseline" });
             if (!nodesResult.ok) {
-              process.stderr.write(formatError(nodesResult.error) + "\n");
+              process.stderr.write(formatErrorFor(inv, nodesResult.error) + "\n");
               process.exitCode = exitCode(nodesResult.error);
               return;
             }
@@ -1580,7 +1580,7 @@ export default defineCommand({
           const staleAfterDays = resolveStaleAfterDays(config);
           const issuesResult = await computeIssueCheck(app.corpusService, staleAfterDays);
           if (!issuesResult.ok) {
-            process.stderr.write(formatError(issuesResult.error) + "\n");
+            process.stderr.write(formatErrorFor(inv, issuesResult.error) + "\n");
             process.exitCode = exitCode(issuesResult.error);
             return;
           }
@@ -1603,7 +1603,7 @@ export default defineCommand({
 
           const allDocsResult = await app.corpusService.list({});
           if (!allDocsResult.ok) {
-            process.stderr.write(formatError(allDocsResult.error) + "\n");
+            process.stderr.write(formatErrorFor(inv, allDocsResult.error) + "\n");
             process.exitCode = exitCode(allDocsResult.error);
             return;
           }
@@ -1636,7 +1636,7 @@ export default defineCommand({
           try {
             const findingsResult = await findBaselineIntegrityFindings(baselineStore);
             if (!findingsResult.ok) {
-              process.stderr.write(formatError(findingsResult.error) + "\n");
+              process.stderr.write(formatErrorFor(inv, findingsResult.error) + "\n");
               process.exitCode = exitCode(findingsResult.error);
               return;
             }
@@ -1734,7 +1734,7 @@ export default defineCommand({
       const result = await app.corpusService.status();
 
       if (!result.ok) {
-        process.stderr.write(formatError(result.error) + "\n");
+        process.stderr.write(formatErrorFor(inv, result.error) + "\n");
         process.exitCode = exitCode(result.error);
         return;
       }
@@ -1746,7 +1746,7 @@ export default defineCommand({
       // SPEC-143 AC-CT-8 — state-binding checks `lore verify` SKIPPED because a peer held the oracle lock.
       const stateBindingSkipsResult = await collectStateBindingSkips(app);
       if (!stateBindingSkipsResult.ok) {
-        process.stderr.write(formatError(stateBindingSkipsResult.error) + "\n");
+        process.stderr.write(formatErrorFor(inv, stateBindingSkipsResult.error) + "\n");
         process.exitCode = exitCode(stateBindingSkipsResult.error);
         return;
       }
@@ -1758,7 +1758,7 @@ export default defineCommand({
       // computeArmedGates precedent).
       const staleListResult = await listFreshStalenessEscalates(buildStalenessFlowDeps(app));
       if (!staleListResult.ok) {
-        process.stderr.write(formatError(staleListResult.error) + "\n");
+        process.stderr.write(formatErrorFor(inv, staleListResult.error) + "\n");
         process.exitCode = exitCode(staleListResult.error);
         return;
       }
@@ -1776,7 +1776,7 @@ export default defineCommand({
       // this one in silence).
       const codeAnchorSpecMembersResult = await collectCodeAnchorSpecMembers(app);
       if (!codeAnchorSpecMembersResult.ok) {
-        process.stderr.write(formatError(codeAnchorSpecMembersResult.error) + "\n");
+        process.stderr.write(formatErrorFor(inv, codeAnchorSpecMembersResult.error) + "\n");
         process.exitCode = exitCode(codeAnchorSpecMembersResult.error);
         return;
       }
@@ -1792,7 +1792,7 @@ export default defineCommand({
       // exemption, never by a synthesized red run.
       const falsifiabilitySignalsResult = await collectFalsifiabilitySignals(app, dbPath, inv.cwd);
       if (!falsifiabilitySignalsResult.ok) {
-        process.stderr.write(formatError(falsifiabilitySignalsResult.error) + "\n");
+        process.stderr.write(formatErrorFor(inv, falsifiabilitySignalsResult.error) + "\n");
         process.exitCode = exitCode(falsifiabilitySignalsResult.error);
         return;
       }
@@ -1815,7 +1815,7 @@ export default defineCommand({
       // corpus-integrity breach the CI gate should block on.
       const unredeemedResult = await listUnredeemedAllowMissingPathDeclarations(app, dbPath, inv.cwd);
       if (!unredeemedResult.ok) {
-        process.stderr.write(formatError(unredeemedResult.error) + "\n");
+        process.stderr.write(formatErrorFor(inv, unredeemedResult.error) + "\n");
         process.exitCode = exitCode(unredeemedResult.error);
         return;
       }
@@ -1830,14 +1830,14 @@ export default defineCommand({
       // collectCaptureSourceMembers's member lists' lengths.
       const captureSourceMembersResult = await collectCaptureSourceMembers(app);
       if (!captureSourceMembersResult.ok) {
-        process.stderr.write(formatError(captureSourceMembersResult.error) + "\n");
+        process.stderr.write(formatErrorFor(inv, captureSourceMembersResult.error) + "\n");
         process.exitCode = exitCode(captureSourceMembersResult.error);
         return;
       }
       // reason: SPEC-143 AC-CT-9(d) — report-only, alongside (never merged into) the capture_source counts.
       const stampVerdictResult = await collectStampVerdictDistribution(app);
       if (!stampVerdictResult.ok) {
-        process.stderr.write(formatError(stampVerdictResult.error) + "\n");
+        process.stderr.write(formatErrorFor(inv, stampVerdictResult.error) + "\n");
         process.exitCode = exitCode(stampVerdictResult.error);
         return;
       }
@@ -1851,7 +1851,7 @@ export default defineCommand({
       }
       const stateBindingResult = await app.stateBindingService.readState(dirname(dirname(dbPath)));
       if (!stateBindingResult.ok) {
-        process.stderr.write(formatError(stateBindingResult.error) + "\n");
+        process.stderr.write(formatErrorFor(inv, stateBindingResult.error) + "\n");
         process.exitCode = exitCode(stateBindingResult.error);
         return;
       }
@@ -1867,7 +1867,7 @@ export default defineCommand({
       // list's `.length`, never a separately-tallied counter (AC-FR-5).
       const adoptedAbandonedMembersResult = await collectAdoptedAbandonedMembers(app);
       if (!adoptedAbandonedMembersResult.ok) {
-        process.stderr.write(formatError(adoptedAbandonedMembersResult.error) + "\n");
+        process.stderr.write(formatErrorFor(inv, adoptedAbandonedMembersResult.error) + "\n");
         process.exitCode = exitCode(adoptedAbandonedMembersResult.error);
         return;
       }
@@ -1899,7 +1899,7 @@ export default defineCommand({
           (path) => existsSync(join(repoRoot, path)),
         );
         if (!baselineResult.ok) {
-          process.stderr.write(formatError(baselineResult.error) + "\n");
+          process.stderr.write(formatErrorFor(inv, baselineResult.error) + "\n");
           process.exitCode = exitCode(baselineResult.error);
           return;
         }
@@ -1910,7 +1910,7 @@ export default defineCommand({
         // BR-1039 — claims, evidence and handoffs of the last ATTRIBUTION_WINDOW_DAYS days and how many carry an attested run.
         const shareResult = await new AttributionReport(baselineStore).share(ATTRIBUTION_WINDOW_DAYS, () => new Date());
         if (!shareResult.ok) {
-          process.stderr.write(formatError(shareResult.error) + "\n");
+          process.stderr.write(formatErrorFor(inv, shareResult.error) + "\n");
           process.exitCode = exitCode(shareResult.error);
           return;
         }
@@ -1920,14 +1920,14 @@ export default defineCommand({
         const attributionReport = new AttributionReport(baselineStore);
         const sourcesResult = await attributionReport.identitySources(ATTRIBUTION_WINDOW_DAYS, () => new Date());
         if (!sourcesResult.ok) {
-          process.stderr.write(formatError(sourcesResult.error) + "\n");
+          process.stderr.write(formatErrorFor(inv, sourcesResult.error) + "\n");
           process.exitCode = exitCode(sourcesResult.error);
           return;
         }
         identitySources = sourcesResult.value;
         const orphanedResult = await attributionReport.orphanedDirty(() => new Date());
         if (!orphanedResult.ok) {
-          process.stderr.write(formatError(orphanedResult.error) + "\n");
+          process.stderr.write(formatErrorFor(inv, orphanedResult.error) + "\n");
           process.exitCode = exitCode(orphanedResult.error);
           return;
         }
@@ -1935,14 +1935,14 @@ export default defineCommand({
 
         const censusBaseline = await baselineStore.findMany({ type: "baseline" });
         if (!censusBaseline.ok) {
-          process.stderr.write(formatError(censusBaseline.error) + "\n");
+          process.stderr.write(formatErrorFor(inv, censusBaseline.error) + "\n");
           process.exitCode = exitCode(censusBaseline.error);
           return;
         }
         if (censusBaseline.value.length > 0) {
           const censusSpecs = await baselineStore.findMany({ type: "spec" });
           if (!censusSpecs.ok) {
-            process.stderr.write(formatError(censusSpecs.error) + "\n");
+            process.stderr.write(formatErrorFor(inv, censusSpecs.error) + "\n");
             process.exitCode = exitCode(censusSpecs.error);
             return;
           }
@@ -1953,13 +1953,13 @@ export default defineCommand({
         const rawGate = resolveCiteGateRaw(config);
         const effective = await resolveCiteGateFor(baselineStore, rawGate);
         if (!effective.ok) {
-          process.stderr.write(formatError(effective.error) + "\n");
+          process.stderr.write(formatErrorFor(inv, effective.error) + "\n");
           process.exitCode = exitCode(effective.error);
           return;
         }
         const adoptRows = await app.auditService.query({ action: BASELINE_ADOPT_AUDIT_ACTION, limit: 1 });
         if (!adoptRows.ok) {
-          process.stderr.write(formatError(adoptRows.error) + "\n");
+          process.stderr.write(formatErrorFor(inv, adoptRows.error) + "\n");
           process.exitCode = exitCode(adoptRows.error);
           return;
         }
@@ -1979,7 +1979,7 @@ export default defineCommand({
       // AC-INT-1 (5) — branches that keep losing the race for main (`lore integrate` exit 75), listed until they land.
       const integrateLosses = collectIntegrateLosses(dbPath);
       if (!integrateLosses.ok) {
-        process.stderr.write(formatError(integrateLosses.error) + "\n");
+        process.stderr.write(formatErrorFor(inv, integrateLosses.error) + "\n");
         process.exitCode = exitCode(integrateLosses.error);
         return;
       }
@@ -2199,7 +2199,7 @@ export default defineCommand({
       // decisions prints what it printed before). Report-only: the exit-1 oracle is `--check-decision-log`.
       const decisionLogStatus = await collectDecisionLogStatus(dbPath);
       if (!decisionLogStatus.ok) {
-        process.stderr.write(formatError(decisionLogStatus.error) + "\n");
+        process.stderr.write(formatErrorFor(inv, decisionLogStatus.error) + "\n");
         process.exitCode = exitCode(decisionLogStatus.error);
         return;
       }
@@ -2214,7 +2214,7 @@ export default defineCommand({
       // class is escalating, which a status that exits 0 would hide. Other states print one informational line.
       const thresholdStatus = await collectAutonomyThresholdStatus(dbPath);
       if (!thresholdStatus.ok) {
-        process.stderr.write(formatError(thresholdStatus.error) + "\n");
+        process.stderr.write(formatErrorFor(inv, thresholdStatus.error) + "\n");
         process.exitCode = exitCode(thresholdStatus.error);
         return;
       }

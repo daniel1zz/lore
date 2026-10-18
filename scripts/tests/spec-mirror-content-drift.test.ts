@@ -81,6 +81,7 @@ const LORE_ENTRY = join(REPO_ROOT, "packages", "lore", "src", "index.ts");
 // `.js` specifier — Bun resolves this to the sibling `.ts` source (project CLAUDE.md "Import style").
 const MIRROR_SCRIPT_JS_SPECIFIER = join(REPO_ROOT, "scripts", "export-spec-mirror.js");
 const APP_JS_SPECIFIER = join(REPO_ROOT, "packages", "lore", "src", "app.js");
+const LIVE_INVOCATION_JS_SPECIFIER = join(REPO_ROOT, "packages", "lore", "tests", "live-invocation.js");
 
 /** Appended to a mirror file's BODY to make it diverge from the corpus projection. */
 const BODY_MUTATION_LINE = "\nThis sentence exists only on disk and never in the corpus document.\n";
@@ -141,6 +142,7 @@ function writeDriver(dir: string): string {
   const source = `
 import { main, MIRROR_TYPES } from ${JSON.stringify(MIRROR_SCRIPT_JS_SPECIFIER)};
 import { createApp } from ${JSON.stringify(APP_JS_SPECIFIER)};
+import { liveAmbient, liveWriteContext } from ${JSON.stringify(LIVE_INVOCATION_JS_SPECIFIER)};
 
 const [, , mode, dbPath, repoRoot] = process.argv;
 
@@ -151,7 +153,7 @@ async function run() {
     process.exit(exitCode);
   }
   if (mode === "export-force") {
-    const app = createApp(dbPath);
+    const app = createApp(dbPath, undefined, liveAmbient(), liveWriteContext());
     try {
       for (const type of MIRROR_TYPES) {
         const result = await app.exportDocsService.exportDocs({

@@ -22,12 +22,13 @@ import { TreeCheckService } from "../../../src/service/tree-check-service.js";
 import { NoOpTelemetry } from "@lore/core";
 import { runMigrationCoverage } from "../../../src/eval/scenarios/migration-coverage.js";
 import type { App } from "../../../src/app.js";
+import { actedStore } from "../../live-invocation.js";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 /** Build a minimal App using InMemoryStore (no SQLite, no file I/O). */
 function makeApp(): App {
-  const store = new InMemoryStore();
+  const store = actedStore(new InMemoryStore());
   const telemetry = new NoOpTelemetry();
   return {
     corpusService: new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)), telemetry),

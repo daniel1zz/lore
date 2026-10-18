@@ -61,6 +61,7 @@ import { CorpusService } from "../../../src/service/corpus-service.js";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { InMemoryAIProvider } from "../../../src/ai/in-memory-provider.js";
 import type { AIProvider, CreateDocInput, PlanBundle, Telemetry, TelemetryEvent } from "@lore/core";
+import { actedStore } from "../../live-invocation.js";
 
 const DEFAULT_BUDGETS = { max_plan_chars: 8000, max_spec_chars: 12000, max_task_chars: 4000, max_diff_chars: 24000 };
 
@@ -146,7 +147,7 @@ describe("AC-JV-1: assess findings are path-verified against the ASSESSED commit
     // worktree BEFORE assessPlan ever runs. Never committed as a deletion.
     unlinkSync(join(repoRoot, "kept.ts"));
 
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const bundle = await makeBundle(store);
     const provider = new InMemoryAIProvider("in-memory", {
       kind: "sequence",
@@ -199,7 +200,7 @@ describe("AC-JV-1: assess findings are path-verified against the ASSESSED commit
 
   it("NEGATIVE: an unresolvable assessed commit fails LOUD naming the commit — never silently read as an absent path", async () => {
     const bogusCommit = "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef";
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const bundle = await makeBundle(store);
     const provider = new InMemoryAIProvider("in-memory", {
       kind: "sequence",
@@ -232,7 +233,7 @@ describe("AC-JV-1: assess findings are path-verified against the ASSESSED commit
   });
 
   it("BOUNDARY: a finding declaring TWO paths (one absent, one present at the commit) is withdrawn WHOLESALE; failing_path is the FIRST absent path in encounter order; both paths are tallied individually", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const bundle = await makeBundle(store);
     const provider = new InMemoryAIProvider("in-memory", {
       kind: "sequence",
@@ -269,7 +270,7 @@ describe("AC-JV-1: assess findings are path-verified against the ASSESSED commit
   });
 
   it("ERROR: a finding declaring NO path at all (paths: []) is always kept and contributes nothing to any tally", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const bundle = await makeBundle(store);
     const provider = new InMemoryAIProvider("in-memory", {
       kind: "sequence",
@@ -298,7 +299,7 @@ describe("AC-JV-1: assess findings are path-verified against the ASSESSED commit
   });
 
   it("STATE: no diffSource supplied at all — TODAY's actual production wiring (neither commands/assess.ts nor MCP tools.ts thread it through yet) — every declared path is recorded 'unchecked', never silently 'verified', and nothing is withdrawn", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const bundle = await makeBundle(store);
     const provider = new InMemoryAIProvider("in-memory", {
       kind: "sequence",
@@ -326,7 +327,7 @@ describe("AC-JV-1: assess findings are path-verified against the ASSESSED commit
   });
 
   it("REGRESSION (clause c, restated with an unmistakable score value): overall_score survives BYTE-IDENTICAL across two withdrawn-plus-kept findings — never recomputed from the surviving count", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const bundle = await makeBundle(store);
     const provider = new InMemoryAIProvider("in-memory", {
       kind: "sequence",

@@ -45,6 +45,7 @@ import { CorpusService } from "../../../src/service/corpus-service.js";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { InMemoryAIProvider } from "../../../src/ai/in-memory-provider.js";
 import type { AIProvider, CreateDocInput, PlanBundle, Telemetry, TelemetryEvent } from "@lore/core";
+import { actedStore } from "../../live-invocation.js";
 
 const DEFAULT_BUDGETS = { max_plan_chars: 8000, max_spec_chars: 12000, max_task_chars: 4000, max_diff_chars: 24000 };
 
@@ -95,7 +96,7 @@ function hunk(path: string, oldLine: string, newLine: string): string {
 }
 
 async function runAssessAndGetPrompt(diffText: string | undefined): Promise<string> {
-  const store = new InMemoryStore();
+  const store = actedStore(new InMemoryStore());
   const bundle = await makeBundle(store);
   const provider = new InMemoryAIProvider("in-memory", {
     kind: "sequence",

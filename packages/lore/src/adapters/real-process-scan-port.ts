@@ -24,8 +24,8 @@ export interface ProcessScanPort {
 export interface RealProcessScanOptions {
   /** Directory of `<pid>/cwd` links (`/proc` on Linux); used only when `lsof` is not installed. */
   readonly procDir?: string;
-  /** Working directory for the `lsof` child. */
-  readonly cwd?: string;
+  /** Working directory for the `lsof` child (the invocation's `cwd`). */
+  readonly cwd: string;
 }
 
 const MAX_LSOF_BYTES = 64 * 1024 * 1024;
@@ -58,14 +58,14 @@ function commandOfPid(pid: number): string {
 }
 
 /** The production {@link ProcessScanPort}: `lsof -d cwd`, else the `/proc` cwd links. */
-export function createRealProcessScanPort(options: RealProcessScanOptions = {}): ProcessScanPort {
+export function createRealProcessScanPort(options: RealProcessScanOptions): ProcessScanPort {
   const procDir = options.procDir ?? "/proc";
   return {
     processesInside: (roots) => {
       const excluded = ownAncestryPids();
       const found = new Set<number>();
       const lsof = spawnSync("lsof", ["-n", "-d", "cwd", "-F", "pn"], {
-        cwd: options.cwd ?? process.cwd(),
+        cwd: options.cwd,
         encoding: "utf8",
         maxBuffer: MAX_LSOF_BYTES,
       });

@@ -54,6 +54,7 @@ import type {
   Telemetry,
   TelemetryEvent,
 } from "@lore/core";
+import { actedStore } from "../../live-invocation.js";
 
 // ─── Test helpers ─────────────────────────────────────────────────────────────
 
@@ -80,7 +81,7 @@ function makeMockTelemetry() {
  * or the service's own instrumentation pollutes the assertion.
  */
 function makeService() {
-  const store = new InMemoryStore();
+  const store = actedStore(new InMemoryStore());
   const serviceTelemetry = makeMockTelemetry().telemetry;
   return { service: new JudgmentService(store, serviceTelemetry), store };
 }
@@ -305,7 +306,7 @@ describe("runCalibrationHook — ERROR (calibration write failure warns but neve
   });
 
   it("approve: write failure -> stderr contains 'warning: approved, but calibration record failed:' + one telemetry.record(ok:false)", async () => {
-    const store = new FailingCalibrationStore();
+    const store = actedStore(new FailingCalibrationStore());
     // reason: separate telemetry doubles — one wired into JudgmentService's own
     // constructor (its internal record()/recordCalibration() instrumentation is
     // irrelevant noise here), one passed as the hook's deps.telemetry (the only
@@ -344,7 +345,7 @@ describe("runCalibrationHook — ERROR (calibration write failure warns but neve
   });
 
   it("reject: write failure -> stderr contains 'warning: rejected, but calibration record failed:'", async () => {
-    const store = new FailingCalibrationStore();
+    const store = actedStore(new FailingCalibrationStore());
     const serviceTelemetry = makeMockTelemetry().telemetry;
     const service = new JudgmentService(store, serviceTelemetry);
     const { telemetry: hookTelemetry, records } = makeMockTelemetry();

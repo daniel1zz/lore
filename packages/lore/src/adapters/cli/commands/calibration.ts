@@ -27,7 +27,7 @@ import { createAuditReversalProbe, createGitReversalProbes, type ClassCalibratio
 import { DecisionService } from "../../../service/decision-service.js";
 import { SQLiteStore } from "../../../store/sqlite-store.js";
 import { loadLoreApp } from "../loader.js";
-import { exitCode, formatError, formatTable } from "../utils.js";
+import { exitCode, formatErrorFor, formatTable } from "../utils.js";
 import { ok, type DocType, type LoreError, type Result } from "@lore/core";
 import { wrapStoreError } from "../../../store/store-shared.js";
 import { invocationOf } from "../command-invocation.js";
@@ -72,7 +72,7 @@ export default defineCommand({
     try {
       const autonomy = await collectAutonomyStats(dbPath, app.repoRoot, args.observe === true);
       if (!autonomy.ok) {
-        process.stderr.write(formatError(autonomy.error) + "\n");
+        process.stderr.write(formatErrorFor(inv, autonomy.error) + "\n");
         process.exitCode = exitCode(autonomy.error);
         return;
       }
@@ -87,7 +87,7 @@ export default defineCommand({
       const result = await app.judgmentService.computeCalibrationStats(filter);
 
       if (!result.ok) {
-        process.stderr.write(formatError(result.error) + "\n");
+        process.stderr.write(formatErrorFor(inv, result.error) + "\n");
         process.exitCode = exitCode(result.error);
         return;
       }

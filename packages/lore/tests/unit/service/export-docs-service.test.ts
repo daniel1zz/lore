@@ -28,6 +28,7 @@ import { ExportDocsService, type ResolveDocBody } from "../../../src/service/exp
 import { OutlineService, renderResolvedToMarkdown } from "../../../src/service/outline-service.js";
 import { canonicaliseBody, ok, DOC_TYPE_ROLE_MAP } from "@lore/core";
 import type { DocRecord, Slug } from "@lore/core";
+import { actedStore } from "../../live-invocation.js";
 
 /**
  * Build the real ResolveDocBody wiring (OutlineService.resolve + renderResolvedToMarkdown)
@@ -153,7 +154,7 @@ function parseFrontmatterScalars(mdContent: string): Record<string, string> {
 
 describe("HAPPY — empty store produces empty report (AC-EXPORT-1)", () => {
   it("returns ok(report) with all arrays empty", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const service = makeExportService(store);
     const projectDir = makeTempProjectDir();
 
@@ -173,7 +174,7 @@ describe("HAPPY — empty store produces empty report (AC-EXPORT-1)", () => {
 
 describe("HAPPY — single spec doc exported with SPEC-001 human ID (AC-EXPORT-2)", () => {
   it("creates file at docs/requirements/spec/SPEC-001-<kebab>.md", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const service = makeExportService(store);
     const projectDir = makeTempProjectDir();
 
@@ -199,7 +200,7 @@ describe("HAPPY — single spec doc exported with SPEC-001 human ID (AC-EXPORT-2
   });
 
   it("frontmatter id field is the human ID SPEC-001, NOT the ULID", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const service = makeExportService(store);
     const projectDir = makeTempProjectDir();
 
@@ -226,7 +227,7 @@ describe("HAPPY — single spec doc exported with SPEC-001 human ID (AC-EXPORT-2
   });
 
   it("frontmatter type and role fields are correct", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const service = makeExportService(store);
     const projectDir = makeTempProjectDir();
 
@@ -250,7 +251,7 @@ describe("HAPPY — single spec doc exported with SPEC-001 human ID (AC-EXPORT-2
   });
 
   it("frontmatter title is double-quoted", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const service = makeExportService(store);
     const projectDir = makeTempProjectDir();
 
@@ -272,7 +273,7 @@ describe("HAPPY — single spec doc exported with SPEC-001 human ID (AC-EXPORT-2
   });
 
   it("frontmatter tags: [] is always present even when doc has no tags", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const service = makeExportService(store);
     const projectDir = makeTempProjectDir();
 
@@ -299,7 +300,7 @@ describe("HAPPY — single spec doc exported with SPEC-001 human ID (AC-EXPORT-2
 
 describe("BOUNDARY — title with special YAML characters is escaped (AC-EXPORT-2)", () => {
   it("double quotes in title are backslash-escaped in frontmatter", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const service = makeExportService(store);
     const projectDir = makeTempProjectDir();
 
@@ -321,7 +322,7 @@ describe("BOUNDARY — title with special YAML characters is escaped (AC-EXPORT-
   });
 
   it("title with hyphens produces valid filename without double-hyphens", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const service = makeExportService(store);
     const projectDir = makeTempProjectDir();
 
@@ -347,7 +348,7 @@ describe("BOUNDARY — title with special YAML characters is escaped (AC-EXPORT-
 
 describe("HAPPY — plan + task: task frontmatter references plan by human ID (AC-EXPORT-5)", () => {
   it("task frontmatter has parent: PLAN-001 and plan: PLAN-001", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const service = makeExportService(store);
     const projectDir = makeTempProjectDir();
 
@@ -395,7 +396,7 @@ describe("HAPPY — plan + task: task frontmatter references plan by human ID (A
 
 describe("STATE — idempotency: second run produces skipped_clean, not created (AC-EXPORT-3)", () => {
   it("running export twice with unchanged corpus: second run reports all files as skipped_clean", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const service = makeExportService(store);
     const projectDir = makeTempProjectDir();
 
@@ -435,7 +436,7 @@ describe("REGRESSION — a spec with declared acceptance criteria exports withou
     // a pure function of (doc.extra.acceptance_criteria, plan/task evidence state) — if it
     // were non-deterministic (e.g. Map iteration order, wall-clock), a second run against
     // the SAME corpus state would report false drift.
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const service = makeExportService(store);
     const projectDir = makeTempProjectDir();
 
@@ -530,7 +531,7 @@ describe("REGRESSION — a spec with declared acceptance criteria exports withou
 
 describe("HAPPY — --type filter exports only matching doc type (AC-EXPORT-8)", () => {
   it("--type spec only exports spec docs; plan docs are not exported", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const service = makeExportService(store);
     const projectDir = makeTempProjectDir();
 
@@ -567,7 +568,7 @@ describe("HAPPY — --type filter exports only matching doc type (AC-EXPORT-8)",
 
 describe("NEGATIVE — parent excluded by type filter: parent: field omitted silently (AC-EXPORT-8)", () => {
   it("spec child with plan parent: when plan excluded by type filter, parent: not in frontmatter", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const service = makeExportService(store);
     const projectDir = makeTempProjectDir();
 
@@ -608,7 +609,7 @@ describe("NEGATIVE — parent excluded by type filter: parent: field omitted sil
 
 describe("HAPPY — force: true overwrites a drifted (hand-edited) file (AC-EXPORT-9 / Amendment A2)", () => {
   it("drifted file is overwritten, reported in overwritten[] not drift[], content matches corpus", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const service = makeExportService(store);
     const projectDir = makeTempProjectDir();
 
@@ -652,7 +653,7 @@ describe("HAPPY — force: true overwrites a drifted (hand-edited) file (AC-EXPO
   });
 
   it("after a force overwrite, a subsequent plain export reports skipped_clean (convergence)", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const service = makeExportService(store);
     const projectDir = makeTempProjectDir();
 
@@ -688,7 +689,7 @@ describe("HAPPY — force: true overwrites a drifted (hand-edited) file (AC-EXPO
 
 describe("BOUNDARY — force: true on an already-clean file is a no-op (AC-EXPORT-9)", () => {
   it("clean file stays skipped_clean, overwritten[] empty, file bytes untouched", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const service = makeExportService(store);
     const projectDir = makeTempProjectDir();
 
@@ -720,7 +721,7 @@ describe("BOUNDARY — force: true on an already-clean file is a no-op (AC-EXPOR
 
 describe("STATE — force: true + dryRun: true reports overwritten[] but writes nothing (AC-EXPORT-7 x A2)", () => {
   it("drifted file is left untouched on disk, but reported as would-be-overwritten", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const service = makeExportService(store);
     const projectDir = makeTempProjectDir();
 
@@ -757,7 +758,7 @@ describe("STATE — force: true + dryRun: true reports overwritten[] but writes 
 
 describe("NEGATIVE — file on disk differs from corpus → drift[], file NOT overwritten (AC-EXPORT-4)", () => {
   it("pre-existing file with different body added to drift[], original file content preserved", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const service = makeExportService(store);
     const projectDir = makeTempProjectDir();
 
@@ -804,7 +805,7 @@ describe("NEGATIVE — file on disk differs from corpus → drift[], file NOT ov
   });
 
   it("drift check uses canonicalised comparison (CRLF on disk vs LF in corpus = no false drift)", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const service = makeExportService(store);
     const projectDir = makeTempProjectDir();
 
@@ -844,7 +845,7 @@ describe("NEGATIVE — file on disk differs from corpus → drift[], file NOT ov
 
 describe("HAPPY — dryRun:true reports created[] but writes no files (AC-EXPORT-7)", () => {
   it("dryRun: true fills created[] but files do not exist on disk", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const service = makeExportService(store);
     const projectDir = makeTempProjectDir();
 
@@ -867,7 +868,7 @@ describe("HAPPY — dryRun:true reports created[] but writes no files (AC-EXPORT
   });
 
   it("dryRun: true with empty corpus returns empty created[] (no phantom entries)", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const service = makeExportService(store);
     const projectDir = makeTempProjectDir();
 
@@ -880,7 +881,7 @@ describe("HAPPY — dryRun:true reports created[] but writes no files (AC-EXPORT
   });
 
   it("dryRun: true does NOT write .lore/export-index.json", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const service = makeExportService(store);
     const projectDir = makeTempProjectDir();
 
@@ -903,7 +904,7 @@ describe("HAPPY — dryRun:true reports created[] but writes no files (AC-EXPORT
 
 describe("BOUNDARY — human IDs are sequential and zero-padded to 3 digits (AC-EXPORT-2)", () => {
   it("two spec docs get SPEC-001 and SPEC-002 (not SPEC-1 or SPEC-2)", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const service = makeExportService(store);
     const projectDir = makeTempProjectDir();
 
@@ -947,7 +948,7 @@ describe("BOUNDARY — human IDs are sequential and zero-padded to 3 digits (AC-
   });
 
   it("different types have independent counters: first spec = SPEC-001, first plan = PLAN-001", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const service = makeExportService(store);
     const projectDir = makeTempProjectDir();
 
@@ -986,7 +987,7 @@ describe("BOUNDARY — human IDs are sequential and zero-padded to 3 digits (AC-
 
 describe("BOUNDARY — export index is written to .lore/export-index.json (AC-EXPORT-6)", () => {
   it("after export, index file exists and contains the mapping entry", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const service = makeExportService(store);
     const projectDir = makeTempProjectDir();
 
@@ -1022,7 +1023,7 @@ describe("BOUNDARY — export index is written to .lore/export-index.json (AC-EX
 
 describe("REGRESSION — file body equals canonicaliseBody(doc.content) (AC-EXPORT-4)", () => {
   it("body in written file matches canonicaliseBody of the original doc content", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const service = makeExportService(store);
     const projectDir = makeTempProjectDir();
 
@@ -1048,7 +1049,7 @@ describe("REGRESSION — file body equals canonicaliseBody(doc.content) (AC-EXPO
   });
 
   it("CRLF doc content is normalised to LF in the written file", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const service = makeExportService(store);
     const projectDir = makeTempProjectDir();
 
@@ -1098,7 +1099,7 @@ describe("REGRESSION — file body equals canonicaliseBody(doc.content) (AC-EXPO
 
 describe("ERROR — per-doc errors do not abort the run (AC-EXPORT-3)", () => {
   it("multiple independent docs all export; errors in one do not block others", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const service = makeExportService(store);
     const projectDir = makeTempProjectDir();
 
@@ -1133,7 +1134,7 @@ describe("ERROR — per-doc errors do not abort the run (AC-EXPORT-3)", () => {
 
 describe("HAPPY — exported body has MDX placeholders spliced, not raw tags (AC-4)", () => {
   it("written file body contains the rendered child list, not the literal <ChildrenOf /> tag", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const service = makeExportService(store);
     const projectDir = makeTempProjectDir();
 
@@ -1172,7 +1173,7 @@ describe("STATE — re-exporting a placeholder-bearing doc reports clean, not pe
     // doc.content against a file that was written spliced (or vice versa), a doc with any
     // whitelisted placeholder would report drift on EVERY subsequent run, forever — no
     // number of re-exports could ever converge. This test proves convergence.
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const service = makeExportService(store);
     const projectDir = makeTempProjectDir();
 
@@ -1207,7 +1208,7 @@ describe("STATE — corpus children change under a placeholder doc → drift IS 
     // differently), the on-disk file genuinely IS a stale projection of the CURRENT
     // corpus state. This is a TRUE positive, not the permanent-false-positive bug —
     // the file legitimately differs from what export would write today.
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const service = makeExportService(store);
     const projectDir = makeTempProjectDir();
 
@@ -1317,7 +1318,7 @@ function writeExportIndex(projectDir: string, index: TestExportIndex): void {
 
 describe("HAPPY — title-declared number is adopted for an unmapped doc (AC-A1-1)", () => {
   it("spec titled 'SPEC-040 — X' allocates human_id SPEC-040 / filename SPEC-040-...", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const service = makeExportService(store);
     const projectDir = makeTempProjectDir();
 
@@ -1341,7 +1342,7 @@ describe("HAPPY — title-declared number is adopted for an unmapped doc (AC-A1-
 
 describe("BOUNDARY — two unmapped docs both title-claim the same number (AC-A1-2)", () => {
   it("first in iteration order claims SPEC-040, second falls back to sequential — no duplicate", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const service = makeExportService(store);
     const projectDir = makeTempProjectDir();
 
@@ -1379,7 +1380,7 @@ describe("BOUNDARY — two unmapped docs both title-claim the same number (AC-A1
 
 describe("NEGATIVE — title-declared number already claimed in the index (AC-A1-3)", () => {
   it("falls back to sequential allocation when SPEC-040 is already mapped to a different doc", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const service = makeExportService(store);
     const projectDir = makeTempProjectDir();
 
@@ -1419,7 +1420,7 @@ describe("NEGATIVE — title-declared number already claimed in the index (AC-A1
 
 describe("BOUNDARY — sequential fallback skips a forward title-claimed number (AC-A1-4)", () => {
   it("title-claim of SPEC-036 while counter sits at 035 → next sequential allocation is SPEC-037", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const service = makeExportService(store);
     const projectDir = makeTempProjectDir();
 
@@ -1468,7 +1469,7 @@ describe("BOUNDARY — sequential fallback skips a forward title-claimed number 
 
 describe("BOUNDARY — title-declared number normalizes to canonical padded form (AC-A1-5)", () => {
   it("title 'SPEC-7 — X' normalizes to SPEC-007", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const service = makeExportService(store);
     const projectDir = makeTempProjectDir();
 
@@ -1491,7 +1492,7 @@ describe("BOUNDARY — title-declared number normalizes to canonical padded form
 
 describe("REGRESSION — titles with no self-declared number or a foreign prefix stay pure sequential (AC-A1-6)", () => {
   it("title with no leading {PREFIX}-{N} allocates the plain sequential number", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const service = makeExportService(store);
     const projectDir = makeTempProjectDir();
 
@@ -1512,7 +1513,7 @@ describe("REGRESSION — titles with no self-declared number or a foreign prefix
   });
 
   it("a plan titled 'SPEC-035 implementation — X' can never claim a SPEC number (foreign prefix)", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const service = makeExportService(store);
     const projectDir = makeTempProjectDir();
 
@@ -1566,7 +1567,7 @@ describe("REGRESSION — titles with no self-declared number or a foreign prefix
 
 describe("HAPPY — numbered-type doc with an allocated ordinal uses the column, not the legacy allocator (AC-084-6 T5-1)", () => {
   it("spec with ordinal=84 exports human_id SPEC-084 (zero-padded, matches the legacy allocator's own convention) and a matching file_path", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const service = makeExportService(store);
     const projectDir = makeTempProjectDir();
 
@@ -1600,7 +1601,7 @@ describe("HAPPY — numbered-type doc with an allocated ordinal uses the column,
   });
 
   it("adr with ordinal=3 exports human_id ADR-003 (zero-padded) via the same column-derived branch", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const service = makeExportService(store);
     const projectDir = makeTempProjectDir();
 
@@ -1625,7 +1626,7 @@ describe("HAPPY — numbered-type doc with an allocated ordinal uses the column,
   });
 
   it("re-exporting an ordinal-derived doc twice converges (idempotent, skipped_clean second run)", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const service = makeExportService(store);
     const projectDir = makeTempProjectDir();
 
@@ -1657,7 +1658,7 @@ describe("HAPPY — numbered-type doc with an allocated ordinal uses the column,
 
 describe("NEGATIVE — numbered-type doc with a NULL ordinal falls back to the legacy path with a loud report warning (AC-084-6 T5-2)", () => {
   it("spec with no ordinal column value gets the legacy zero-padded id AND a named ordinal_warnings entry", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const service = makeExportService(store);
     const projectDir = makeTempProjectDir();
 
@@ -1687,7 +1688,7 @@ describe("NEGATIVE — numbered-type doc with a NULL ordinal falls back to the l
   });
 
   it("adr with no ordinal column value also warns (adr has no kind-exemption at all)", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const service = makeExportService(store);
     const projectDir = makeTempProjectDir();
 
@@ -1712,7 +1713,7 @@ describe("NEGATIVE — numbered-type doc with a NULL ordinal falls back to the l
 
 describe("BOUNDARY — a permanently kind-exempt numbered-type doc (domain-overview) never warns (AC-084-6 T5-3)", () => {
   it("a domain-overview spec with a NULL ordinal takes the legacy path silently — no ordinal_warnings entry", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const service = makeExportService(store);
     const projectDir = makeTempProjectDir();
 
@@ -1742,7 +1743,7 @@ describe("BOUNDARY — a permanently kind-exempt numbered-type doc (domain-overv
 
 describe("REGRESSION — a non-numbered type is byte-identical even if an ordinal-shaped field is present (AC-084-6 T5-4)", () => {
   it("a plan doc (not in ORDINAL_REGISTRY) with an ordinal value set is completely ignored by both new branches", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const service = makeExportService(store);
     const projectDir = makeTempProjectDir();
 
@@ -1772,7 +1773,7 @@ describe("REGRESSION — a non-numbered type is byte-identical even if an ordina
 
 describe("STATE — an existing export-index mapping for a numbered doc reconciles to the column on the next export run (AC-084-6 T5-5)", () => {
   it("a doc previously exported under a legacy allocation, now carrying an allocated ordinal, is reconciled + logged in repaired[]", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const service = makeExportService(store);
     const projectDir = makeTempProjectDir();
 
@@ -1849,7 +1850,7 @@ describe("STATE — an existing export-index mapping for a numbered doc reconcil
 
 describe("STATE — a reconciled mapping that recomputes the SAME file_path as its stale entry is unconditionally rewritten (identity_repaired, not skipped_clean)", () => {
   it("frontmatter id: refreshes from the stale unpadded form to the padded one, even though the file already existed at the correct path", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const service = makeExportService(store);
     const projectDir = makeTempProjectDir();
 
@@ -1928,7 +1929,7 @@ describe("STATE — a reconciled mapping that recomputes the SAME file_path as i
   });
 
   it("catches the SAME staleness even with NO reconcile this run — the index already agrees with the column, only the on-disk file lags (measured on the live corpus: an earlier run's reconcile had already corrected the index, but the file was never revisited)", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const service = makeExportService(store);
     const projectDir = makeTempProjectDir();
 
@@ -1974,7 +1975,7 @@ describe("STATE — a reconciled mapping that recomputes the SAME file_path as i
   });
 
   it("catches CITING-side staleness too: doc B's own id/body never changed, but its links: entry still names doc A's OLD id string after A's own id was corrected (the exact class of bug that left cross-type links_broken non-zero on the live corpus)", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const service = makeExportService(store);
     const projectDir = makeTempProjectDir();
 
@@ -2050,7 +2051,7 @@ describe("STATE — a reconciled mapping that recomputes the SAME file_path as i
 
 describe("REGRESSION — a raw NUL byte in a doc's body is sanitized in the exported mirror, never in the corpus (task-unify-mirror-identifiers-on-zero-padded-form-export-all)", () => {
   it("a doc whose content contains a literal NUL character exports with the byte replaced by the visible \\u0000 escape, and the export never touches doc.content itself", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const service = makeExportService(store);
     const projectDir = makeTempProjectDir();
 
@@ -2091,7 +2092,7 @@ describe("REGRESSION — a raw NUL byte in a doc's body is sanitized in the expo
   });
 
   it("re-exporting an already-sanitized file converges (idempotent, skipped_clean second run) — the drift comparison uses the SAME sanitized value both sides", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const service = makeExportService(store);
     const projectDir = makeTempProjectDir();
 

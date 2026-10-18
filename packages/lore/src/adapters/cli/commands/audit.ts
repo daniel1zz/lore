@@ -57,7 +57,7 @@ import { z } from "zod";
 import { defineCommand } from "citty";
 import { loadLoreApp } from "../loader.js";
 import { resolveConsumerCorpusRoot } from "../report-issue-wiring.js";
-import { exitCode, formatError, formatTable, parsePositiveIntArg, resolveActor } from "../utils.js";
+import { exitCode, formatErrorFor, formatTable, parsePositiveIntArg, resolveActor } from "../utils.js";
 import { parseAuditActor, type AuditEntry } from "@lore/core";
 import type { AuditFilters } from "../../../store/store-interface.js";
 import type { AuditAnchorRef, AuditMiss } from "../../../service/audit-service.js";
@@ -176,10 +176,10 @@ export default defineCommand({
           return;
         }
         const result = args.confirm
-          ? await stateBinding.arm({ actor: resolveActor(undefined, inv.env, inv.cwd), nowIso: new Date().toISOString() })
+          ? await stateBinding.arm({ actor: resolveActor(undefined, inv.env, inv.cwd, inv.user), nowIso: new Date().toISOString() })
           : await stateBinding.reportImpact();
         if (!result.ok) {
-          process.stderr.write(formatError(result.error) + "\n");
+          process.stderr.write(formatErrorFor(inv, result.error) + "\n");
           process.exitCode = exitCode(result.error);
           return;
         }
@@ -218,7 +218,7 @@ export default defineCommand({
       if (args.doc === "anchor") {
         const headResult = await app.auditService.getChainHead();
         if (!headResult.ok) {
-          process.stderr.write(formatError(headResult.error) + "\n");
+          process.stderr.write(formatErrorFor(inv, headResult.error) + "\n");
           process.exitCode = exitCode(headResult.error);
           return;
         }
@@ -233,7 +233,7 @@ export default defineCommand({
         // chain head itself was read from the shared corpus above.
         const anchorRoot = resolveTrackedWriteRoot(inv.cwd, resolveConsumerCorpusRoot(inv));
         if (!anchorRoot.ok) {
-          process.stderr.write(formatError(anchorRoot.error) + "\n");
+          process.stderr.write(formatErrorFor(inv, anchorRoot.error) + "\n");
           process.exitCode = exitCode(anchorRoot.error);
           return;
         }
@@ -255,7 +255,7 @@ export default defineCommand({
         // reason: INT-T5 — the anchor file is tracked, so it is read from the same invoking working tree it is written to.
         const anchorRoot = resolveTrackedWriteRoot(inv.cwd, resolveConsumerCorpusRoot(inv));
         if (!anchorRoot.ok) {
-          process.stderr.write(formatError(anchorRoot.error) + "\n");
+          process.stderr.write(formatErrorFor(inv, anchorRoot.error) + "\n");
           process.exitCode = exitCode(anchorRoot.error);
           return;
         }
@@ -271,7 +271,7 @@ export default defineCommand({
           ...(anchor !== undefined ? { anchor } : {}),
         });
         if (!result.ok) {
-          process.stderr.write(formatError(result.error) + "\n");
+          process.stderr.write(formatErrorFor(inv, result.error) + "\n");
           process.exitCode = exitCode(result.error);
           return;
         }
@@ -339,7 +339,7 @@ export default defineCommand({
       if (args.doc !== undefined) {
         const resolveResult = await app.corpusService.resolve(args.doc);
         if (!resolveResult.ok) {
-          process.stderr.write(formatError(resolveResult.error) + "\n");
+          process.stderr.write(formatErrorFor(inv, resolveResult.error) + "\n");
           process.exitCode = exitCode(resolveResult.error);
           return;
         }
@@ -348,7 +348,7 @@ export default defineCommand({
 
       const result = await app.auditService.query(filters);
       if (!result.ok) {
-        process.stderr.write(formatError(result.error) + "\n");
+        process.stderr.write(formatErrorFor(inv, result.error) + "\n");
         process.exitCode = exitCode(result.error);
         return;
       }
