@@ -66,7 +66,7 @@ Everything else (test failures, gate denials, ≤3 blocked tasks, claim conflict
 Partition ready tasks by declared `extra.file_anchors` (from `lore ready --json` / `lore get <task>`):
 
 - **Non-overlapping anchors → concurrent wave.** Dispatch together.
-- **Overlapping anchors → serialize.** Queue behind the first; dispatch the next only after the previous branch is merged back to main.
+- **Overlapping anchors → serialize.** Queue behind the first; dispatch the next only after the previous branch has landed through `lore integrate`.
 - **Task with NO declared anchors → serialize with everything** (the claim gate can only see declared anchors; an undeclared conflict is invisible to it — orchestrator queueing is the defense-in-depth).
 
 ## Phase 3 — Dispatch (per task)
@@ -87,7 +87,7 @@ Identity needs no export: it comes from the agent integration, which registers e
 
 **The implementer claims from INSIDE its worktree** — `lore claim <task> --worktree <branch>` — never pre-claimed by the orchestrator. It then implements, runs oracles, records `lore evidence` (result from the oracle's exit status, never self-asserted), and `lore release`.
 
-⛔ **Dispatch bundles MUST scope the implementer's oracles** — AC test files (`-t "AC-…"` with matched-count assertion), `bunx vitest run --changed <merge-base>`, anchor-matching `.bun.test.ts` files, and `bun run typecheck` — NEVER the full suite. The full suite runs ONCE, on main, by the orchestrator after merge (Phase 4 step 2). N worktrees × full suite on one machine starves subprocess-spawning tests into 30s-timeout cascades that present as fake regressions (2026-07-23: load 150, 70+ phantom failures across two agents).
+⛔ **Dispatch bundles MUST scope the implementer's oracles** — AC test files (`-t "AC-…"` with matched-count assertion), `bunx vitest run --changed <merge-base>`, anchor-matching `.bun.test.ts` files, and `bun run typecheck` — NEVER the full suite. The full suite runs ONCE, by the orchestrator from its own worktree after `lore integrate` lands (never in the shared checkout; Phase 4 step 2). N worktrees × full suite on one machine starves subprocess-spawning tests into 30s-timeout cascades that present as fake regressions (2026-07-23: load 150, 70+ phantom failures across two agents).
 
 Enforced by the task-claim gate (identity and claim placement):
 
@@ -116,10 +116,10 @@ retry the claim. ⛔ NEVER set `LORE_GATE_BYPASS=1` — gate escape is user-only
 
 On each implementer return:
 
-1. **Merge immediately** — `git merge <branch> --no-ff`; never batch merges. ⛔ GATE every downstream step (archive, readiness re-check, next dispatch) on the merge's EXIT CODE — an `&&`-chain or explicit check, never an unconditional command sequence (live incident 2026-07-19: 'strategy ort failed' on untracked-file collision + unconditional archive chain → task archived while its code was NOT on main). Untracked-file collision → diff the copies first; identical → remove the stale untracked copy and re-merge. Conflict → dispatch a fresh subagent to resolve. After merge confirmed (`git branch --merged main`), run `lore done <task>`: it resolves the branch-name claim to its worktree and removes the worktree itself, then prints one line: `worktree: removed <path>` (done), `worktree: gone ...` (already absent, nothing to do) or `worktree: kept <path>: <reason>`. On `kept`, follow the named reason (commit or merge what it names, or wait for the live session inside) and re-run; ⛔ never `--force` and never remove the worktree by hand.
+1. **Land immediately** — `lore integrate <branch>` from your session's worktree, the only way main advances; never batch landings. It runs the configured floor (`workflow.integrate.floor_command`) and moves main by compare-and-swap. ⛔ Never `git merge`, run tests or edit files in the shared checkout (a read-only view of main); `lore done` and other corpus commands (`verify`, `evidence`, `create`, `ac`) do run there. ⛔ GATE every downstream step (archive, readiness re-check, next dispatch) on integrate's EXIT CODE — an `&&`-chain or explicit check, never an unconditional command sequence (live incident 2026-07-19: a failed merge + unconditional archive chain → task archived while its code was NOT on main). Exit 1 (floor failed) → Fix Loop; exit 4 (conflict) → dispatch a fresh subagent to merge main into the branch, then re-run; exit 75 (lost races) → re-run. After landing confirmed (`git branch --merged main`), run `lore done <task>`: it resolves the branch-name claim to its worktree and removes the worktree itself, then prints one line: `worktree: removed <path>` (done), `worktree: gone ...` (already absent, nothing to do) or `worktree: kept <path>: <reason>`. On `kept`, follow the named reason (commit or merge what it names, or wait for the live session inside) and re-run; ⛔ never `--force` and never remove the worktree by hand.
    **Orphan-branch sweep — `lore territory --json`, never `git branch -a`.** A subagent's own internal re-dispatch can open a branch this round's return never mentions, so the sweep runs every round, not only when a return looks incomplete. Partition its output and act ONLY on `mine` (yours — merge/clean up per the paragraph above) and `unowned` (no session claims it — safe to inspect, and remove if genuinely stray) entries. ⛔ NEVER touch a `foreign` entry — its `holder.session_id`/`by`/`worktree` name a LIVE peer session; git topology alone carries no ownership, and reading a peer's in-flight branch as an orphan via raw `git branch -a` + `git log main..<branch>` is the exact 2026-08-11 incident this replaces. A branch reported `unmeasured` (ownership could not be determined) is NOT `unowned` — never act on it; name it in the round report instead.
 2. **Check evidence** — `lore get <task> --json` → `extra.verification_evidence` must carry passing oracle entries for the task's ACs. Missing/failing evidence → failure loop below.
-3. **Attested verification** — after merging, run the trusted runner on main:
+3. **Attested verification** — after landing, run the trusted runner (a corpus command, so from the shared checkout):
    ```
    lore verify <plan> --task <task> --allow-new-commands
    ```
@@ -138,7 +138,7 @@ On each implementer return:
 When `lore ready <plan>` returns no ready tasks and nothing is in flight:
 
 1. **Full-plan attested run**: `lore verify <plan> --allow-new-commands` (all script-mode ACs). FAIL → Fix Loop.
-2. **Project oracles** on main: typecheck + full test suite (whatever the repo's CLAUDE.md names). FAIL → Fix Loop.
+2. **Project oracles** from your own worktree at main's tip (never the shared checkout): typecheck + full test suite (whatever the repo's CLAUDE.md names). FAIL → Fix Loop.
 3. **LLM-as-judge closure — batched** (`~/.claude/skills/shared/batched-governance.md` § Execution and closure): if other plans of the same initiative still have ready/in-flight tasks, DEFER assess and report it as `deferred to initiative end`. When this is the initiative's LAST plan to drain, run `lore assess <plan> [--diff <merge-base>..HEAD]` for EVERY plan of the initiative in parallel and triage all findings in one pass. Exception: a pilot plan that a pre-registered branch reads as its trigger is assessed as it closes. Exit 6 (AI provider error) → retry once, then report assess as skipped with the error; do not block completion on it.
 4. **Final report**:
    ```
@@ -166,5 +166,5 @@ When `lore ready <plan>` returns no ready tasks and nothing is in flight:
 - ⛔ Evidence comes from oracle exit codes; `lore verify` attests script ACs — never self-report pass.
 - ⛔ Never `--steal`, never `lore release --force` foreign fresh claims, never `LORE_GATE_BYPASS` — user say-so only (M2).
 - ⛔ Overlapping or undeclared anchors → serialize; each concurrent agent is a separate attested run (identity comes from the agent integration).
-- ⛔ Merge returned branches immediately; clean up merged worktrees; never leave orphans. Sweep every round with `lore territory --json` — act only on `mine`/`unowned`, never `foreign`, escalate `unmeasured` by name.
+- ⛔ Land returned branches immediately with `lore integrate <branch>` (never `git merge` in the shared checkout); clean up merged worktrees; never leave orphans. Sweep every round with `lore territory --json` — act only on `mine`/`unowned`, never `foreign`, escalate `unmeasured` by name.
 - ⛔ Do not stop between tasks; only M1–M5 escalate.

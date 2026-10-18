@@ -33,7 +33,12 @@
  *   (4) the shared checkout on a dirty main is detached at the same commit with every edit byte-identical; a checkout
  *       that cannot be detached, or any other worktree holding main, exits 4 naming it before anything moves.
  *
- * @spec_ref AC-INT-1, AC-INT-2
+ * AC-INT-3 (a session's test run never sees another session's edits, and the shipped workflow says so):
+ *   (1) `bun run test:file` in session A's worktree exits 0 while process B edits a tracked file in the shared checkout;
+ *   (2) `lore setup` (global and --project) into a throwaway HOME installs worktree-dispatch, the autopilot skill and the
+ *       project rule text naming `lore integrate` as the only way to land a branch; literal scan: zero merge-no-ff lines.
+ *
+ * @spec_ref AC-INT-1, AC-INT-2, AC-INT-3
  */
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { spawn, spawnSync } from "node:child_process";
@@ -768,4 +773,83 @@ describe("INT-T6 the shared checkout's view of main follows an integrate", () =>
     expect(r.stdout).toMatch(/shared checkout not-measured: .*refs\/heads\/elsewhere/);
     expect(fx.git(["symbolic-ref", "-q", "HEAD"])).toBe("refs/heads/elsewhere");
   }, 120_000);
+});
+
+const TEST_FILE_SCRIPT = `
+import { readFileSync } from "node:fs";
+// stands in for a test run: it holds the checkout open, then asserts the tracked file still has its committed bytes
+await new Promise((r) => setTimeout(r, 1500));
+const seen = readFileSync("tracked.txt", "utf8");
+if (seen !== "committed\\n") { console.error("saw foreign edit: " + JSON.stringify(seen)); process.exit(1); }
+console.log("test:file saw committed bytes");
+`;
+
+/** Every regular file under `dir` (follows no symlinks), as absolute paths. */
+function listFilesRecursive(dir: string): string[] {
+  if (!existsSync(dir)) return [];
+  const found: string[] = [];
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const full = join(dir, entry.name);
+    if (entry.isDirectory()) found.push(...listFilesRecursive(full));
+    else if (entry.isFile()) found.push(full);
+  }
+  return found;
+}
+
+describe("AC-INT-3 (1) a test run in a session worktree never sees an edit in the shared checkout", () => {
+  it("AC-INT-3 bun run test:file in session A's worktree exits 0 while process B edits a tracked file in the shared checkout", async () => {
+    const fx = new Fixture("true", { detached: false });
+    writeFileSync(join(fx.repo, "tracked.txt"), "committed\n");
+    writeFileSync(join(fx.repo, "check.mjs"), TEST_FILE_SCRIPT);
+    writeFileSync(join(fx.repo, "package.json"), JSON.stringify({ name: "fixture", private: true, scripts: { "test:file": "node check.mjs" } }));
+    fx.git(["add", "tracked.txt", "check.mjs", "package.json"]);
+    fx.git(["commit", "-q", "-m", "tracked fixture"]);
+    const worktreeA = join(root, `session-a-${repoSeq}`);
+    fx.git(["worktree", "add", "-q", "-b", "session-a", worktreeA, "main"]);
+
+    const run = new Promise<RunResult>((resolve) => {
+      const child = spawn("bun", ["run", "test:file"], { cwd: worktreeA, env: fx.env("sess-a") });
+      let out = "";
+      child.stdout.on("data", (c: Buffer) => (out += c.toString()));
+      child.stderr.on("data", (c: Buffer) => (out += c.toString()));
+      child.on("close", (code) => resolve({ stdout: out, stderr: "", out, exitCode: code ?? 1 }));
+    });
+    // process B: edits the tracked file in the shared checkout while A's run is in flight
+    await new Promise((r) => setTimeout(r, 400));
+    writeFileSync(join(fx.repo, "tracked.txt"), "process B was here\n");
+    const result = await run;
+
+    expect(readFileSync(join(fx.repo, "tracked.txt"), "utf8")).toBe("process B was here\n"); // B really edited
+    expect(result.exitCode, result.out).toBe(0);
+    expect(result.out).toContain("test:file saw committed bytes");
+  }, 120_000);
+});
+
+describe("AC-INT-3 (2) lore setup installs a workflow that lands branches only through lore integrate", () => {
+  it("AC-INT-3 fresh install into a throwaway HOME: dispatch rule, autopilot skill and project rule name lore integrate; zero merge --no-ff instructions", () => {
+    const home = mkdtempSync(join(tmpdir(), "lore-int3-home-"));
+    try {
+      const fx = new Fixture("true");
+      const env = { ...fx.env(undefined, { HOME: home }), PATH: process.env.PATH ?? "" };
+      for (const args of [["setup", "--yes"], ["setup", "--project", "--yes"]]) {
+        const r = spawnSync("bun", ["run", INDEX_TS, ...args], { cwd: fx.repo, env, encoding: "utf8" });
+        expect(r.status, `${args.join(" ")}: ${r.stdout}${r.stderr}`).toBe(0);
+      }
+      const installed = [...listFilesRecursive(join(home, ".claude")), ...listFilesRecursive(join(fx.repo, ".claude"))];
+      const byName = (needle: string): string[] => installed.filter((f) => f.includes(needle));
+      const dispatchRule = byName("lore-worktree-dispatch.md");
+      const autopilot = byName(join("skills", "lore-autopilot", "SKILL.md"));
+      expect(dispatchRule.length, installed.join("\n")).toBeGreaterThan(0);
+      expect(autopilot.length, installed.join("\n")).toBeGreaterThan(0);
+      for (const file of [...dispatchRule, ...autopilot]) {
+        const text = readFileSync(file, "utf8");
+        expect(text, file).toContain("lore integrate");
+        expect(text, file).toMatch(/never[^\n]*git merge/i);
+      }
+      const forbidden = installed.filter((f) => /merge\s+<branch>\s+--no-ff/.test(readFileSync(f, "utf8")));
+      expect(forbidden, "files still instructing the merge-no-ff form").toEqual([]);
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  }, 180_000);
 });
