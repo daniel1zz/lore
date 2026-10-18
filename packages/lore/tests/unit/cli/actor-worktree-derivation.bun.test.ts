@@ -62,6 +62,7 @@ import {
   resolveActorWithSource,
 } from "../../../src/adapters/cli/utils.js";
 import { liveInvocation } from "../../live-invocation.js";
+import type { Invocation } from "@lore/core";
 
 // ─── Git fixture helpers ────────────────────────────────────────────────────
 
@@ -138,13 +139,13 @@ function captureOutput() {
 }
 
 async function importClaimCommand(): Promise<{
-  run: (ctx: { args: Record<string, unknown> }) => Promise<void>;
+  run: (ctx: { args: Record<string, unknown>; inv?: Invocation }) => Promise<void>;
 }> {
   const mod = await import("../../../src/adapters/cli/commands/claim.js");
-  const cmd = (mod as { default?: { run?: (ctx: { args: Record<string, unknown> }) => Promise<void> } })
+  const cmd = (mod as { default?: { run?: (ctx: { args: Record<string, unknown>; inv?: Invocation }) => Promise<void> } })
     .default;
   if (cmd?.run === undefined) throw new Error("claim command has no default run() export");
-  return cmd as { run: (ctx: { args: Record<string, unknown> }) => Promise<void> };
+  return cmd as { run: (ctx: { args: Record<string, unknown>; inv?: Invocation }) => Promise<void> };
 }
 
 // ─── Fixture lifecycle ──────────────────────────────────────────────────────

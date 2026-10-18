@@ -50,6 +50,7 @@ import { checkRepoPollution } from "../../src/repo-pollution-guard.js";
 import { citeSpecViaCli, type LoreRunner } from "../helpers/cli-live-rule.js";
 import type { CreateDocInput } from "@lore/core";
 import { liveInvocation } from "../live-invocation.js";
+import type { Invocation } from "@lore/core";
 
 /**
  * `scripts/` lives outside `packages/lore/tsconfig.tests.json`'s `rootDir` (scoped to
@@ -78,7 +79,7 @@ const { seedWriteSpecRule } = (await import(SEED_SCRIPT_PATH)) as unknown as See
 
 // ─── Command type + importer (mirrors gate-spec-promote.bun.test.ts) ─────────
 
-type RunnableCommand = { run: (ctx: { args: Record<string, unknown> }) => Promise<void> };
+type RunnableCommand = { run: (ctx: { args: Record<string, unknown>; inv?: Invocation }) => Promise<void> };
 
 async function importGateCommand(
   sub: "spec-create" | "spec-promote",

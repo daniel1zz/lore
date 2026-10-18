@@ -52,10 +52,11 @@ import { UNCITED_SPEC_RULE } from "../../src/service/spec-approval-citation.js";
 import { ensureLiveRuleViaCli } from "../helpers/cli-live-rule.js";
 import type { CreateDocInput, DocId, LoreConfig } from "@lore/core";
 import { liveInvocation } from "../live-invocation.js";
+import type { Invocation } from "@lore/core";
 
 // ─── Command type (mirrors assess-ai.bun.test.ts) ────────────────────────────
 
-type RunnableCommand = { run: (ctx: { args: Record<string, unknown> }) => Promise<void> };
+type RunnableCommand = { run: (ctx: { args: Record<string, unknown>; inv?: Invocation }) => Promise<void> };
 
 async function importGateSpecPromoteCommand(): Promise<RunnableCommand> {
   const mod = await import("../../src/adapters/cli/commands/gate.js");

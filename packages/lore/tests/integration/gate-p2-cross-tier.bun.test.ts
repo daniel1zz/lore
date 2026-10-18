@@ -40,6 +40,7 @@ import type { CreateDocInput, LoreConfig } from "@lore/core";
 import { asSessionActor } from "../helpers/session-actor";
 import { resolveActor } from "../../src/adapters/cli/utils.js";
 import { liveInvocation } from "../live-invocation.js";
+import type { Invocation } from "@lore/core";
 
 /**
  * Constructs a fixture-only App with ALL FOUR `lore gate` service-layer checkpoints
@@ -87,7 +88,7 @@ function createFixtureApp(path: string): App {
 
 // ─── Command type (mirrors gate-spec-promote.bun.test.ts) ────────────────────
 
-type RunnableCommand = { run: (ctx: { args: Record<string, unknown> }) => Promise<void> };
+type RunnableCommand = { run: (ctx: { args: Record<string, unknown>; inv?: Invocation }) => Promise<void> };
 
 async function importGateSubCommand(name: "plan-promote" | "task-claim"): Promise<RunnableCommand> {
   const mod = await import("../../src/adapters/cli/commands/gate.js");

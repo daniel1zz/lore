@@ -55,11 +55,12 @@ import { SQLiteStore } from "../../../src/store/sqlite-store.js";
 import type { App } from "../../../src/app.js";
 import type { DocRecord } from "@lore/core";
 import { liveInvocation } from "../../live-invocation.js";
+import type { Invocation } from "@lore/core";
 
 // ─── Command type + in-process importers ────────────────────────────────────
 
 type RunnableCommand = {
-  run: (ctx: { args: Record<string, unknown> }) => Promise<void>;
+  run: (ctx: { args: Record<string, unknown>; inv?: Invocation }) => Promise<void>;
 };
 
 async function importAcListCommand(): Promise<RunnableCommand> {

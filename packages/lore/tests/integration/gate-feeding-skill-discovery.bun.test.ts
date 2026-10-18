@@ -34,10 +34,11 @@ import { tmpdir } from "os";
 import { createApp, type App } from "../../src/app.js";
 import type { CreateDocInput } from "@lore/core";
 import { liveInvocation } from "../live-invocation.js";
+import type { Invocation } from "@lore/core";
 
 // ─── Command type + importer (mirrors spec-loop-e2e.bun.test.ts) ────────────
 
-type RunnableCommand = { run: (ctx: { args: Record<string, unknown> }) => Promise<void> };
+type RunnableCommand = { run: (ctx: { args: Record<string, unknown>; inv?: Invocation }) => Promise<void> };
 
 async function importGateSpecCreate(): Promise<RunnableCommand> {
   const mod = await import("../../src/adapters/cli/commands/gate.js");
