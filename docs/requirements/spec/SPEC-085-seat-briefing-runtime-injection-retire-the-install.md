@@ -9,7 +9,7 @@ created: 2026-07-26
 updated: 2026-10-17
 tags: []
 links:
-  - {id: SPEC-201, type: implements}
+  - {id: SPEC-211, type: implements}
   - {id: SPEC-083, type: supersedes}
 ---
 # SPEC-085 — Seat-briefing runtime injection: retire the installed seat-briefing.md (SPEC-083 follow-up)

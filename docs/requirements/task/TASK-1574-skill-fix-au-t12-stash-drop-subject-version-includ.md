@@ -3,7 +3,7 @@ id: TASK-1574
 type: task
 role: plan
 title: "[Skill:fix] AU-T12 stash-drop subject version includes the attribution state, so an escalation made while the owner was live is re-decided once it ends"
-status: draft
+status: archived
 priority: medium
 phase: "Phase 1d: apply on main"
 created: 2026-10-18

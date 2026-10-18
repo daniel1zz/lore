@@ -3,7 +3,7 @@ id: TASK-1584
 type: task
 role: plan
 title: "[Skill:baseline] EI-5 add the 'filing is never refused for the number of open reports' rule so AC-GI-9 cites it before its exemption lapses (2026-11-18)"
-status: draft
+status: archived
 priority: medium
 phase: "Phase 1: rule and re-verification"
 created: 2026-10-18

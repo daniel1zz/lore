@@ -3,7 +3,7 @@ id: TASK-1545
 type: task
 role: plan
 title: "[Skill:implement] AU-T8 outcome calibration, governance-loosen and the sampling floor"
-status: draft
+status: archived
 priority: high
 phase: "Phase 1c: overrides, calibration, integrity"
 created: 2026-10-18

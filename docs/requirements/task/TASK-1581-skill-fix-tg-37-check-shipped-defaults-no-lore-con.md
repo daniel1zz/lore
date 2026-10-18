@@ -3,7 +3,7 @@ id: TASK-1581
 type: task
 role: plan
 title: "[Skill:fix] TG-37 check-shipped-defaults 'no .lore/config.yaml exits exactly 4' fails only inside agent worktrees"
-status: draft
+status: archived
 priority: low
 phase: "Phase 3b: one runner"
 created: 2026-10-18

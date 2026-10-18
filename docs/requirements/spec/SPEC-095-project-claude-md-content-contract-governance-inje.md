@@ -12,7 +12,7 @@ links:
   - {id: TASK-632, type: supersedes}
   - {id: ADR-004, type: implements}
   - {id: KN-409, type: relates-to}
-  - {id: SPEC-201, type: relates-to}
+  - {id: SPEC-211, type: relates-to}
 ---
 ## Overview/Goal
 

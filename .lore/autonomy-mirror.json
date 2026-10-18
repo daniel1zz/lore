@@ -91,8 +91,8 @@
   "thresholds_hash": "fbfe96b61ef3c26965cf236b8aeaf1fed98555f45e0e4fea581cda75f103c573",
   "integrity": "intact",
   "decision_chain_head": {
-    "head_id": 40,
-    "head_hash": "b5096cf4b54e91548d0a6b61a63f512e6e34f862fc798b7fa057f1294d6435a4",
-    "count": 40
+    "head_id": 43,
+    "head_hash": "8e62e2e25f5d351a1500c26c3142fa017738d3272db51de899e7970a8620fa81",
+    "count": 43
   }
 }

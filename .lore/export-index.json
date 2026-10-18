@@ -11017,10 +11017,6 @@
       "human_id": "SPEC-194",
       "file_path": "docs/requirements/spec/SPEC-194-round-0-main-is-green-every-red-test-on-e1878626-t.md"
     },
-    "01KYEN7XX5J25PEY9X11SH836G": {
-      "human_id": "SPEC-201",
-      "file_path": "docs/requirements/spec/SPEC-201-distribution-adoption-phased-spike-gated-one-step.md"
-    },
     "01KYEN80YH9F95KVTEPMJKHRBX": {
       "human_id": "SPEC-202",
       "file_path": "docs/requirements/spec/SPEC-202-extension-hooks-system-direction-pointer-only-no.md"
@@ -11672,6 +11668,50 @@
     "01M57ECE3MJ8Q2J10TB6NPBY96": {
       "human_id": "TASK-1594",
       "file_path": "docs/requirements/task/TASK-1594-skill-fix-au-t17-autonomy-run-reap-test-1-failed-o.md"
+    },
+    "01M57EXHDBMHF5PBH4MQGMYA01": {
+      "human_id": "SPEC-201",
+      "file_path": "docs/requirements/spec/SPEC-201-design-necessity-rule-v5-separate-what-a-design-ne.md"
+    },
+    "01M57F6HPPWY47XN0HP3H057D9": {
+      "human_id": "PLAN-210",
+      "file_path": "docs/requirements/plan/PLAN-210-design-necessity-rule-v5.md"
+    },
+    "01M57GPGFPTRRD1WM58YPAS2N0": {
+      "human_id": "TASK-1595",
+      "file_path": "docs/requirements/task/TASK-1595-skill-fix-tg-45-a-script-criterion-whose-command-t.md"
+    },
+    "01M57GS6PJRNH70EQHAGKT53TH": {
+      "human_id": "TASK-1596",
+      "file_path": "docs/requirements/task/TASK-1596-skill-fix-bl-d4-plan-close-with-no-linked-assessme.md"
+    },
+    "01M57GS4E7A08WJZF81RNS3RRJ": {
+      "human_id": "TASK-1597",
+      "file_path": "docs/requirements/task/TASK-1597-skill-fix-bl-d3-the-cited-rule-check-at-plan-close.md"
+    },
+    "01M57GS27H8TSE7KJ2J465J0B0": {
+      "human_id": "TASK-1598",
+      "file_path": "docs/requirements/task/TASK-1598-skill-fix-bl-d2-one-time-migration-retires-the-leg.md"
+    },
+    "01M57GS03MWMTNH1PDZ51S0CN7": {
+      "human_id": "TASK-1599",
+      "file_path": "docs/requirements/task/TASK-1599-skill-fix-bl-d1-coverage-census-measures-a-cross-c.md"
+    },
+    "01M57FAG8JHJHF3HV74TDQR3YQ": {
+      "human_id": "TASK-1600",
+      "file_path": "docs/requirements/task/TASK-1600-skill-fix-tg-44-an-exemption-whose-criterion-now-c.md"
+    },
+    "01M57F6TXW3V149M8N67DYYTB3": {
+      "human_id": "TASK-1601",
+      "file_path": "docs/requirements/task/TASK-1601-skill-implement-dn5-1-review-prompt-v5-refined-des.md"
+    },
+    "01M57F6VK865MWMPAXQ9Q8Z3AT": {
+      "human_id": "TASK-1602",
+      "file_path": "docs/requirements/task/TASK-1602-skill-implement-dn5-2-lore-rule-propose-amend-rewo.md"
+    },
+    "01KYEN7XX5J25PEY9X11SH836G": {
+      "human_id": "SPEC-211",
+      "file_path": "docs/requirements/spec/SPEC-211-distribution-adoption-phased-spike-gated-one-step.md"
     }
   }
 }
