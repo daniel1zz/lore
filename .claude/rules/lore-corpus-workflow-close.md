@@ -1,9 +1,10 @@
-<!-- lore:managed fragment=corpus-workflow-close hash=2004140c -->
+<!-- lore:managed fragment=corpus-workflow-close hash=91f72746 -->
 ## CLOSE — feedback loop + memory hygiene
 
 - Plan fully done → `lore assess <plan>`.
 - Spec implementation landed → `lore anchor add <spec> <impl-path[#Symbol]>` (a test file also takes `<test-path>#"describe or it title"`); declare anchors after landing, not during planning.
 - Superseded knowledge → `lore invalidate <doc> --superseded-by <new> --reason "<why>"`; never leave it stale.
+- A lesson (an incident, a correction, a near miss) is finished only when it changes a mechanism: in the same turn, create or link the spec, plan, task or rule whose end-state design makes it unable to recur — not a guard on the old design — or say why none fits. "Noted for next time" is not a disposition, and a retro is not one either (it is read only when searched). Whether you do this is not enforced; the design you produce is (the approval judge's design_necessity).
 - Session interrupted or ending with open work → `lore handoff [--plan <plan>] --decision "<judgment>[@confidence]" --next "<next step>"`, NOT `lore create knowledge --sub-type handoff`.
 - After writing a handoff, ALWAYS report its ticket to the user: the handoff slug plus the paste-ready resume command `lore feed session-resume --handoff <slug>`. This ticket is the ONLY sanctioned resumption path.
 - Maintenance cadence: `lore pending` (review queue) / `lore review --staleness --list` (stale candidates) / `lore status --check-tree --check-drift` (structure and code-anchor drift) / `lore archive --sweep` (execution-scoped docs due for archival; apply with `lore archive --apply`).
