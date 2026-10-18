@@ -92,6 +92,16 @@ async function registerRun(agentId: string, ended: boolean): Promise<void> {
   }
 }
 
+async function endRegisteredRun(agentId: string): Promise<void> {
+  const store = new SQLiteStore(dbPath);
+  try {
+    const ended = await store.endRun(`cc:sess-${agentId}:${agentId}` as RunId, "2026-10-01T02:00:00.000Z", "test");
+    if (!ended.ok) throw new Error(`endRun failed: ${JSON.stringify(ended.error)}`);
+  } finally {
+    store.close();
+  }
+}
+
 function archiveRef(sha: string): string {
   return `refs/lore/archive/stash/${sha}`;
 }
@@ -168,6 +178,26 @@ describe("AC-AU-4 lore stash prune", () => {
     expect(archiveResolves(liveSha)).toBe(true); // archived first even when not dropped
     expect(archiveResolves(endedSha)).toBe(true);
   }, { timeout: 60_000 });
+
+  it("AU-T12: a stash escalated while its owner was live is re-decided (auto, dropped) once the run ends; unchanged facts keep the version", async () => {
+    await registerRun("flipagent", false);
+    const sha = makeStash("worktree-agent-flipagent", "flip work\n");
+
+    const first = runLore(["stash", "prune", "--apply"]);
+    expect(first.exitCode).toBe(0);
+    expect(first.stdout).toMatch(/escalated.*live run/s);
+    // control: facts unchanged -> same version -> still escalated, nothing dropped
+    const again = runLore(["stash", "prune", "--apply"]);
+    expect(again.stdout).toMatch(/dropped 0, kept 0, escalated 1/);
+    expect(stashShas()).toEqual([sha]);
+
+    await endRegisteredRun("flipagent");
+    const after = runLore(["stash", "prune", "--apply"]);
+    expect(after.exitCode).toBe(0);
+    expect(after.stdout).toMatch(/dropped 1, kept 0, escalated 0/);
+    expect(stashShas()).toEqual([]);
+    expect(archiveResolves(sha)).toBe(true);
+  }, { timeout: 90_000 });
 
   it("(3) an archive write failure drops nothing and exits 1", () => {
     const sha = makeStash("main", "unarchivable\n");
