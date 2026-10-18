@@ -71,7 +71,7 @@ Folders with their own memory file — read it before working there:
 - [`packages/dashboard`](packages/dashboard/CLAUDE.md) — Vite + React + shadcn local-dev web UI: read views plus the SPEC-022 write surface.
 
 201 folders have no memory file and are not listed.
-<!-- lore:managed section=command-table hash=e2c77e02 -->
+<!-- lore:managed section=command-table hash=f44bb6fc -->
 Commands (from package.json scripts):
 - `dev`: `bun run packages/lore/src/index.ts`
 - `build`: `bun run scripts/build.ts`
@@ -89,11 +89,11 @@ Commands (from package.json scripts):
 - `typecheck:dashboard-tests`: `bun --cwd=packages/dashboard run prebuild && tsc --noEmit -p packages/dashboard/tsconfig.tests.json`
 - `typecheck:dashboard-e2e`: `tsc --noEmit -p packages/dashboard/tsconfig.e2e.json`
 - `check:static`: `bun scripts/run-chain.ts --static`
+- `check:floor`: `bun scripts/run-chain.ts --floor`
 - `check:ordinal-sites`: `node scripts/check-ordinal-write-sites.mjs`
 - `test:file`: `bun scripts/test-file.ts`
 - `check:test-budgets`: `bun scripts/check-test-budgets.ts`
 - `check:no-timer-retry`: `bun scripts/check-no-timer-retry.ts`
-- `check:ambient-reads`: `bun scripts/check-ambient-reads.ts`
 - `check:ac-ref-integrity`: `bun scripts/check-ac-ref-integrity.ts`
 - `check:no-nul-bytes`: `bun scripts/check-no-nul-bytes.ts`
 - `check:agent-hygiene`: `bun scripts/check-agent-hygiene.ts`
