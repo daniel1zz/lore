@@ -52,6 +52,7 @@
  */
 
 import { RecordLockService } from "../../../src/service/record-lock-service.js";
+import { alwaysAutoOverridePort } from "../../helpers/always-auto-override-port.js";
 import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
 import { describe, it, expect } from "vitest";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
@@ -70,6 +71,7 @@ function makeServices() {
   const store = new InMemoryStore();
   const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
   const taskWorkflowService = new TaskWorkflowService(store, undefined, { claimTtlMinutes: 120 });
+  taskWorkflowService.setOverrideDecisionPort(alwaysAutoOverridePort()); // AU-T7: explicit test port; no port = refused
   return { store, corpusService, taskWorkflowService };
 }
 

@@ -230,7 +230,7 @@ import type { VerifiedEvidenceInput } from "./task-workflow-service.js";
 import { buildStateBindingSkipAuditEntry } from "./state-binding-skip.js";
 import { materializeFalsifierDependencies } from "./falsifier-dep-materialization.js";
 import { createHash } from "node:crypto";
-import type { OverrideDecisionPort } from "./override-decision.js";
+import { requireOverrideAuto, type OverrideDecisionPort } from "./override-decision.js";
 import { writeScratchOwner, type ScratchRemovalPort } from "./worktree-cleanup.js";
 import { FALSIFIER_EXIT_CODE_MAX, FALSIFIER_EXIT_CODE_MIN, isValidFalsifierExitCode } from "./ac-write-chokepoint.js";
 // Probe + stamp decision live in ./git-state-stamp.js, shared with `lore evidence --capture`.
@@ -838,7 +838,7 @@ export class VerifyRunnerService {
 
   /**
    * Wires the decide() seam of `--yes` / `allow_new_commands` for a command with no attested row on the task
-   * (AC-AU-7). Set by the composition root; absent in bare unit constructions = the blanket approval is ungated.
+   * (AC-AU-7). Set by the composition root; absent = the blanket approval of an unapproved command is refused loudly.
    */
   setOverrideDecisionPort(port: OverrideDecisionPort): this {
     this.overrideDecisions = port;
@@ -1099,10 +1099,10 @@ export class VerifyRunnerService {
     // attested row on this task, the SPEC-039 §M2 scope) is DECIDED first (class verify-new-command), BEFORE any
     // command runs or any evidence row is written: an escalation aborts the whole run with nothing recorded (exit 4,
     // pending decision named). Subject = task + AC, version = the command text, so a changed command is a new subject.
-    if (this.overrideDecisions !== undefined && this.config.requireCommandApproval && opts.allowNewCommands === true) {
+    if (this.config.requireCommandApproval && opts.allowNewCommands === true) {
       for (const criterion of scriptCriteria) {
         if (isApprovedVerifyCommand(task, criterion.verify.command)) continue;
-        const decided = await this.overrideDecisions.requireAuto({
+        const decided = await requireOverrideAuto(this.overrideDecisions, {
           classId: "verify-new-command",
           subject: {
             id: `${task.slug}#${criterion.id}`,

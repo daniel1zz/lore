@@ -98,7 +98,7 @@ beforeAll(async () => {
   git(["commit", "-q", "-m", "init"]);
   mustLore(["init"], dir, SETUP);
   mustLore(["create", "prd", "--title", "Deprecation Root", "--content", "root", "--no-ai"], dir, SETUP);
-  // AC-AU-7: `done --override-attestation` is decided; this suite's subject is not the override, so the class is loosened
+  // AU-T7: `done --override-attestation` is decided; this suite's subject is not the override, so the class is loosened
   // the documented way (a human-tty governance decision on a throwaway corpus), never by a bypass in product code.
   await loosenOverrideClasses(dir, ["override-attestation"]);
 });

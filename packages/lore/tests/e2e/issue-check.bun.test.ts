@@ -121,7 +121,7 @@ async function initCorpus(tmpDir: string): Promise<void> {
   if (result.exitCode !== 0) {
     throw new Error(`lore init failed: ${result.stderr}`);
   }
-  // AC-AU-7: `approve --override-no-judgment` is decided; this suite's subject is not the override, so the class is
+  // AU-T7: `approve --override-no-judgment` is decided; this suite's subject is not the override, so the class is
   // loosened the documented way (a human-tty governance decision on a throwaway corpus), never by a bypass in product code.
   await loosenOverrideClasses(tmpDir, ["override-judgment"]);
 }

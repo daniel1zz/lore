@@ -99,7 +99,7 @@ beforeAll(async () => {
   execFileSync("git", ["init", "-q", "-b", "main"], { cwd: dir });
   writeFileSync(join(dir, "README.md"), "fixture\n");
   mustRun(["init"], dir);
-  // AC-AU-7: `approve --override-no-judgment` is decided; this suite's subject is not the override, so the class is
+  // AU-T7: `approve --override-no-judgment` is decided; this suite's subject is not the override, so the class is
   // loosened the documented way (a human-tty governance decision on a throwaway corpus), never by a bypass in product code.
   await loosenOverrideClasses(dir, ["override-judgment"]);
   prd = slugOf(mustRun(["create", "prd", "--title", "SAC PRD", "--content", "root", "--no-ai"], dir).stdout);

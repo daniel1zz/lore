@@ -86,6 +86,7 @@
  */
 
 import { tmpdir } from "node:os";
+import { alwaysAutoOverridePort } from "../../helpers/always-auto-override-port.js";
 import { describe, it, expect } from "vitest";
 import { ok, err } from "@lore/core";
 import type { AcceptanceCriterion, DocRecord, LoreError, PlanBundle, Result } from "@lore/core";
@@ -635,7 +636,7 @@ describe("§M2 HAPPY — allowNewCommands: true approves a brand-new command aut
     const { fn: getPlanBundle } = makeGetPlanBundle(bundle);
     const executor = makeExecutor([ok({ exitCode: 0, outputTail: "", durationMs: 5, timedOut: false })]);
     const recorder = makeRecordVerifiedEvidence([ok(makeTask("task-1", { version: 2 }))]);
-    const service = new VerifyRunnerService(getPlanBundle, recorder.fn, executor.fn, gatedConfig);
+    const service = new VerifyRunnerService(getPlanBundle, recorder.fn, executor.fn, gatedConfig).setOverrideDecisionPort(alwaysAutoOverridePort());
 
     const result = await service.verifyPlan("plan-1", {
       by: "runner",
@@ -781,7 +782,7 @@ describe("§M2 STATE — resolved env is threaded onto every executor call's spa
       envPassthroughAll: false,
       processEnv: { PATH: "/bin", CI_TOKEN: "abc", LORE_SYNC_TOKEN: "secret" },
     };
-    const service = new VerifyRunnerService(getPlanBundle, recorder.fn, executor.fn, envConfig);
+    const service = new VerifyRunnerService(getPlanBundle, recorder.fn, executor.fn, envConfig).setOverrideDecisionPort(alwaysAutoOverridePort());
 
     const result = await service.verifyPlan("plan-1", { by: "runner", nowIso: NOW, allowNewCommands: true });
     expect(result.ok).toBe(true);
@@ -1151,6 +1152,19 @@ describe("verify --yes (class verify-new-command) asks decide() for a command wi
     if (!result.ok) expect(result.error).toEqual(refusal);
     expect(override.asked).toHaveLength(1);
     expect(override.asked[0]).toMatchObject({ classId: "verify-new-command", subjectId: "task-1#AC-1" });
+    expect(executor.callCount).toBe(0);
+    expect(recorder.callCount).toBe(0);
+  });
+
+  it("NEGATIVE: --yes with NO override port wired is refused loudly (field autonomy) before any command runs", async () => {
+    const spec = makeSpec([scriptAc("AC-1", "bun test")]);
+    const bundle: PlanBundle = { plan: makePlan(), spec, tasks: [taskWithFreshClaim("task-1")] };
+    const executor = makeExecutor([]);
+    const recorder = makeRecordVerifiedEvidence([]);
+    const service = new VerifyRunnerService(makeGetPlanBundle(bundle).fn, recorder.fn, executor.fn, gatedConfig);
+    const result = await service.verifyPlan("plan-1", { by: "runner", nowIso: NOW, allowNewCommands: true });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toMatchObject({ code: "VALIDATION_ERROR", field: "autonomy" });
     expect(executor.callCount).toBe(0);
     expect(recorder.callCount).toBe(0);
   });

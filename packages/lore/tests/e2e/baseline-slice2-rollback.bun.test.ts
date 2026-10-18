@@ -403,7 +403,7 @@ async function claimAndResume(c: Corpus, specCitesRule = false): Promise<RunResu
   // rules, hence no rule-diff), and an uncited spec can no longer be approved through any verb. The approved
   // state is written directly, the shape a corpus holding a pre-BR-1007 approved spec has. E's spec cites a
   // live rule, so it goes through the real verb.
-  // AC-AU-7: `approve --override-no-judgment` is decided; this suite's subject is not the override, so the class is
+  // AU-T7: `approve --override-no-judgment` is decided; this suite's subject is not the override, so the class is
   // loosened the documented way (a human-tty governance decision on a throwaway corpus), never by a bypass in product code.
   await loosenOverrideClasses(c.dir, ["override-judgment"]);
   if (specCitesRule) {

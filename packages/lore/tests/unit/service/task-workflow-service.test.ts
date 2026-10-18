@@ -33,6 +33,7 @@
  */
 
 import { RecordLockService } from "../../../src/service/record-lock-service.js";
+import { alwaysAutoOverridePort } from "../../helpers/always-auto-override-port.js";
 import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
 import { describe, it, expect } from "vitest";
 import { AC_REF_NOT_ON_RESOLVED_GOVERNING_SPEC } from "../../../src/service/ac-ref-messages.js";
@@ -85,6 +86,7 @@ function makeServices(ttl = 120) {
   const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
   const telemetry = new CapturingTelemetry();
   const taskWorkflowService = new TaskWorkflowService(store, telemetry, { claimTtlMinutes: ttl });
+  taskWorkflowService.setOverrideDecisionPort(alwaysAutoOverridePort()); // AU-T7: explicit test port; no port = refused
   return { store, corpusService, taskWorkflowService, telemetry };
 }
 
@@ -108,6 +110,7 @@ function makeServicesWithAcPort(
     return resolveDeclaredAcIds(planId);
   };
   const taskWorkflowService = new TaskWorkflowService(store, telemetry, { claimTtlMinutes: ttl }, spiedPort);
+  taskWorkflowService.setOverrideDecisionPort(alwaysAutoOverridePort()); // AU-T7: explicit test port; no port = refused
   return {
     store,
     corpusService,
@@ -1131,6 +1134,7 @@ function makeServicesWithRealAcPorts(ttl = 120) {
     undefined,
     corpusService.resolveDeclaredAcIdsForAdhocTask.bind(corpusService),
   );
+  taskWorkflowService.setOverrideDecisionPort(alwaysAutoOverridePort()); // AU-T7: explicit test port; no port = refused
   return { store, corpusService, acService, taskWorkflowService, telemetry };
 }
 

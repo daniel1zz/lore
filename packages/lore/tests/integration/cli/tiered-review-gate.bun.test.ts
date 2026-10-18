@@ -319,7 +319,7 @@ describe("AC-TIER-5 anti-lottery worst-decision-wins", () => {
   it("--override-judgment approves with an audit row recording the overridden judgment id", async () => {
     tmpDir = mkdtempSync(join(tmpdir(), "lore-tiered-review-ac5c-"));
     await initCorpus(tmpDir);
-    // AC-AU-7: the override is decided; this test's subject is the audited escape, so the class is loosened the
+    // AU-T7: the override is decided; this test's subject is the audited escape, so the class is loosened the
     // documented way (human-tty governance decision), never by a bypass in product code.
     await loosenOverrideClasses(tmpDir, ["override-judgment"]);
     const prd = await createPrd(tmpDir);
@@ -352,7 +352,7 @@ describe("AC-TIER-5 anti-lottery worst-decision-wins", () => {
   it("--override-no-judgment approves a doc that has never been judged, with an audit row recording it", async () => {
     tmpDir = mkdtempSync(join(tmpdir(), "lore-tiered-review-ac5d-"));
     await initCorpus(tmpDir);
-    // AC-AU-7: the override is decided; this test's subject is the audited escape, so the class is loosened the
+    // AU-T7: the override is decided; this test's subject is the audited escape, so the class is loosened the
     // documented way (human-tty governance decision), never by a bypass in product code.
     await loosenOverrideClasses(tmpDir, ["override-judgment"]);
     const prd = await createPrd(tmpDir);

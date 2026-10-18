@@ -47,7 +47,7 @@ beforeEach(async () => {
   tmpDir = resolve(mkdtempSync(join(tmpdir(), "lore-run-owned-done-")));
   mkdirSync(join(tmpDir, ".lore"), { recursive: true });
   (createApp(dbPath()) as App).close();
-  // AC-AU-7: `done --override-attestation` is decided; this suite's subject is not the override, so the class is loosened
+  // AU-T7: `done --override-attestation` is decided; this suite's subject is not the override, so the class is loosened
   // the documented way (a human-tty governance decision on a throwaway corpus), never by a bypass in product code.
   await loosenOverrideClasses(tmpDir, ["override-attestation"]);
   originalCwd = process.cwd();

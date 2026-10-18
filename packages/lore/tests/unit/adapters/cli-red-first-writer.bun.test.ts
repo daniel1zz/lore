@@ -132,7 +132,7 @@ let tmpDir: string;
 beforeEach(async () => {
   tmpDir = mkdtempSync(join(tmpdir(), "lore-cli-red-first-"));
   await mustRun(["init"], tmpDir);
-  // AC-AU-7: `--override-attestation` is decided; this suite's subject is the audited escape, so the class is loosened
+  // AU-T7: `--override-attestation` is decided; this suite's subject is the audited escape, so the class is loosened
   // the documented way (a human-tty governance decision), never by a bypass in product code.
   await loosenOverrideClasses(tmpDir, ["override-attestation"]);
   // An --adhoc task parents to the corpus root PRD (CorpusService._createImpl) —

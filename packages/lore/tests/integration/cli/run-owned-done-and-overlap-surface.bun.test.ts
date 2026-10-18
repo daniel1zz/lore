@@ -42,7 +42,7 @@ let gated: Corpus;
 beforeAll(async () => {
   plain = await createCorpus();
   gated = await createCorpus({ claimGates: "enabled" });
-  // AC-AU-7: `done --override-attestation` is decided; this suite's subject is not the override, so the class is loosened
+  // AU-T7: `done --override-attestation` is decided; this suite's subject is not the override, so the class is loosened
   // the documented way (a human-tty governance decision on a throwaway corpus), never by a bypass in product code.
   await loosenOverrideClasses(plain.dir, ["override-attestation"]);
   await loosenOverrideClasses(gated.dir, ["override-attestation"]);

@@ -2,7 +2,7 @@
  * Helper for tests whose subject is NOT the autonomy gate but which exercise a self-grantable override
  * (`approve --override-*`, `done --override-attestation`, `ac exempt`, `verify --yes`).
  *
- * Those overrides are decided (AC-AU-7): with the seeded prior 0.5 they escalate. A test that needs the override to
+ * Those overrides are decided (AU-T7): with the seeded prior 0.5 they escalate. A test that needs the override to
  * APPLY gets the documented human path: a throwaway corpus whose override classes were loosened through a human-tty
  * governance-loosen decision (`lore autonomy set <class> --prior`, the pending decision answered by the real
  * `lore decide` flow with scripted human-channel ports). There is NO bypass flag or env var in product code.
@@ -51,7 +51,7 @@ export async function loosenOverrideClassesViaCli(
  * The same human path as {@link loosenOverrideClassesViaCli}, in-process (one SQLite handle instead of ~3 CLI spawns
  * per class): the loosening is proposed through AutonomyThresholdService, escalates as governance-loosen, is answered
  * by the real `lore decide` flow (scripted human-channel ports, the AC-AU-8 seam) and re-proposed to apply.
- * For tests whose subject is not the autonomy gate; the AC-AU-7 oracle itself drives the CLI variant.
+ * For tests whose subject is not the autonomy gate; the AU-T7 oracle itself drives the CLI variant.
  *
  * @throws Error when any step does not behave as the human path documents
  */

@@ -6,14 +6,17 @@
  *   Each now asks DecisionService.decide() for its registered class and proceeds only on an effective `auto`;
  *   anything else is refused with exit 4 (VALIDATION_ERROR), writes nothing else, and names the pending decision
  *   and the `lore decide <id>` line a human answers it with (never a nonce).
- * Public surface: OverrideClassId, OverrideRequest, OverrideDecisionPort, createOverrideDecisionPort, OVERRIDE_MEASURED_FACTS.
+ * Public surface: OverrideClassId, OverrideRequest, OverrideDecisionPort, createOverrideDecisionPort, requireOverrideAuto,
+ *   OVERRIDE_MEASURED_FACTS.
  * Invariants:
  *   - INV-2: the facts are what lore itself measured (an override is reversible; the caller is the calling session;
  *     lore evaluated the precondition). No factor and NO confidence is caller-supplied; C is computed inside
  *     DecisionService from the class's recorded outcomes.
  *   - INV-5: this is the only permission rule for the four paths; a service holds the port and applies the verdict,
- *     it never re-derives one. An absent port (bare unit constructions) means the path is ungated, exactly like the
- *     other optional DI ports of these services; `app.ts` and the CLI composition wire the real one.
+ *     it never re-derives one. A service whose override is REQUESTED while no port is wired refuses loudly
+ *     ({@link requireOverrideAuto} -> VALIDATION_ERROR naming the missing port): there is no ungated fallback, so a
+ *     composition root that forgets the port turns the override into an error, never into a grant. `app.ts` and the
+ *     CLI composition wire the real one; a unit test that needs an override to apply passes an explicit test port.
  *   - The subject `(id, version)` is stable across a re-run of the same command (nothing was written), so the same
  *     pending decision is found again and a human-tty accept of it turns the re-run into `auto`.
  * Side-effect class: IO (appends one decision-log row per ask through DecisionService; never writes the guarded object).
@@ -55,6 +58,25 @@ export const OVERRIDE_MEASURED_FACTS: AutonomyFacts = {
   blast: "calling-session",
   evidence: "lore-evaluated",
 };
+
+/**
+ * The ONE call every override site makes: asks `port`, or refuses loudly when none is wired.
+ *
+ * @returns err(VALIDATION_ERROR, field "autonomy") when `port` is undefined (nothing was written), else the port's answer
+ */
+export async function requireOverrideAuto(port: OverrideDecisionPort | undefined, request: OverrideRequest): Promise<Result<void, LoreError>> {
+  if (port === undefined) {
+    return err({
+      code: "VALIDATION_ERROR",
+      field: "autonomy",
+      message:
+        `Override not granted: ${request.summary}. No OverrideDecisionPort is wired on this service, so the override cannot be decided ` +
+        `(class ${request.classId}); it is refused rather than granted. The composition root must call setOverrideDecisionPort / pass the port.`,
+      value: { class: request.classId, subject: request.subject, verdict: "no-port" },
+    });
+  }
+  return port.requireAuto(request);
+}
 
 function refused(summary: string, message: string, value: unknown): LoreError {
   return { code: "VALIDATION_ERROR", field: "autonomy", message: `Override not granted: ${summary}.\n${message}`, value };

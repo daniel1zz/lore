@@ -21,6 +21,7 @@
  */
 
 import { describe, it, expect } from "vitest";
+import { alwaysAutoOverridePort } from "../../helpers/always-auto-override-port.js";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
 import { RecordLockService } from "../../../src/service/record-lock-service.js";
@@ -39,10 +40,11 @@ interface WithCheckDoneFloors {
   checkDoneFloors(taskIdOrSlug: string): Promise<Result<{ floor: DoneFloorId; error: LoreError } | null, LoreError>>;
 }
 
-function makeServices() {
+function makeServices(wireOverridePort = true) {
   const store = new InMemoryStore();
   const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
   const taskWorkflowService = new TaskWorkflowService(store, undefined, { claimTtlMinutes: 120 });
+  if (wireOverridePort) taskWorkflowService.setOverrideDecisionPort(alwaysAutoOverridePort()); // AU-T7: explicit test port; no port = refused
   const floors = taskWorkflowService as unknown as WithCheckDoneFloors;
   return { store, corpusService, taskWorkflowService, floors };
 }
@@ -185,6 +187,17 @@ describe("AC-AP-9 checkDoneFloors contract and byte-identical done refusals", ()
     expect(done.ok).toBe(true);
     if (!done.ok) return;
     expect(done.value.transitions).toEqual(["approved", "active", "archived"]);
+  });
+
+  it("override port required: --override-attestation with NO override port wired is refused loudly and nothing is archived", async () => {
+    const s = makeServices(false);
+    const taskId = await createTask(s, "Floor F no port");
+    await addEvidence(s, taskId, runnerCapturedPass());
+    const done = await s.taskWorkflowService.done(taskId, { by: "alice", overrideReason: "manual browser check: verified in staging" });
+    expect(done.ok).toBe(false);
+    if (!done.ok) expect(done.error).toMatchObject({ code: "VALIDATION_ERROR", field: "autonomy" });
+    const after = await s.store.find(taskId as never);
+    expect(after.ok && after.value?.status).not.toBe("archived");
   });
 
   it("(f) REGRESSION: --override-attestation with a reason still archives an unattested task with the audited reason", async () => {

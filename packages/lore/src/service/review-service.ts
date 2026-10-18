@@ -4,7 +4,7 @@
  * Source: SPEC-005 §3, SPEC-001 §3.2
  */
 
-import type { OverrideDecisionPort } from "./override-decision.js";
+import { requireOverrideAuto, type OverrideDecisionPort } from "./override-decision.js";
 import type {
   AuditEntry,
   DocId,
@@ -248,7 +248,7 @@ export class ReviewService {
 
   /**
    * Wires the decide() seam of the two self-grantable approval overrides (AC-AU-7). Set by the composition root
-   * (a service never imports another service); absent in bare unit constructions = overrides ungated.
+   * (a service never imports another service); absent = a requested override is refused loudly (never granted).
    */
   setOverrideDecisionPort(port: OverrideDecisionPort): void {
     this.overrideDecisions = port;
@@ -797,8 +797,8 @@ export class ReviewService {
     // reason: AC-AU-7 — an override the actor can set is DECIDED, not granted: class override-judgment through decide()
     // BEFORE the gate is skipped or anything is written. The subject version names the doc version AND which escape,
     // so a re-run of the same command finds the same pending decision (nothing was written by the refusal).
-    if (this.overrideDecisions !== undefined && (overriddenJudgmentId !== undefined || overrodeNoJudgment)) {
-      const decided = await this.overrideDecisions.requireAuto({
+    if (overriddenJudgmentId !== undefined || overrodeNoJudgment) {
+      const decided = await requireOverrideAuto(this.overrideDecisions, {
         classId: "override-judgment",
         subject: {
           id: doc.slug,
