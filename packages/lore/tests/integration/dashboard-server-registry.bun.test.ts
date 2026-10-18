@@ -158,12 +158,14 @@ describe("AC-HR-5 live server registry", () => {
       "src/adapters/cli/pending-decisions-render.ts",
     ];
     const pattern = /:(8787|3456|5173)\b|localhost:\d/;
+    let scanned = 0;
     for (const rel of files) {
       const path = join(PKG_ROOT, rel);
-      // reason: decide-flow / human-channel / pending-decisions-render are owned by later tasks (T7);
-      // a not-yet-existing file has no hardcoded port to find.
-      if (!existsSync(path)) continue;
+      // A missing target fails loud: a scan that skips it would pass vacuously.
+      if (!existsSync(path)) throw new Error(`scan target missing: ${path}`);
       expect({ file: rel, hit: pattern.test(readFileSync(path, "utf8")) }).toEqual({ file: rel, hit: false });
+      scanned += 1;
     }
+    expect(scanned).toBe(4);
   });
 });
