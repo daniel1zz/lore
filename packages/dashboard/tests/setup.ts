@@ -1,10 +1,17 @@
-import "@testing-library/jest-dom/vitest";
 import { afterEach } from "vitest";
-import { cleanup } from "@testing-library/react";
 
-// reason: vitest globals:false means @testing-library/react cannot detect afterEach as a global
-// and thus cannot auto-register cleanup. We wire it explicitly here so each test gets a fresh DOM.
-afterEach(cleanup);
+// reason: this file is a global setupFile of the ONE runner (vitest.shared.ts), so it runs before all
+// ~1070 test files, but only the jsdom ones (`// @vitest-environment jsdom`) have a DOM to match or clean.
+// Loading jest-dom + @testing-library/react measured ~120 ms of CPU per file under Bun (AC-TG-11: the
+// per-file setup+collect overhead is ~70 s of the 8-worker wall), so the imports are lazy and DOM-only.
+// Both Node-environment dashboard files and every non-dashboard file skip them; a DOM file gets them.
+if (typeof document !== "undefined") {
+  await import("@testing-library/jest-dom/vitest");
+  const { cleanup } = await import("@testing-library/react");
+  // reason: vitest globals:false means @testing-library/react cannot detect afterEach as a global
+  // and thus cannot auto-register cleanup. We wire it explicitly here so each test gets a fresh DOM.
+  afterEach(cleanup);
+}
 
 // reason: Node >=22 defines its OWN localStorage/sessionStorage accessors on globalThis
 // (undefined unless --localstorage-file is passed), and vitest's populateGlobal only
