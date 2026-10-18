@@ -1,23 +1,5 @@
 [
   {
-    "spec": "spec-main-advances-only-through-lore-integrate-per-session",
-    "ac": "AC-INT-1",
-    "reason": "oracle test not written yet (lore-integrate.test.ts absent); owned by task-skill-implement-int-t1-lore-integrate-per-session",
-    "owner_plan": "plan-main-advances-only-through-lore-integrate"
-  },
-  {
-    "spec": "spec-main-advances-only-through-lore-integrate-per-session",
-    "ac": "AC-INT-2",
-    "reason": "oracle test not written yet (lore-integrate.test.ts absent); owned by task-skill-implement-int-t2-main-ref-hook-installed-by-lore",
-    "owner_plan": "plan-main-advances-only-through-lore-integrate"
-  },
-  {
-    "spec": "spec-main-advances-only-through-lore-integrate-per-session",
-    "ac": "AC-INT-3",
-    "reason": "oracle test not written yet (lore-integrate.test.ts absent); owned by task-skill-docs-int-t3-shipped-workflow-integrates-only-through",
-    "owner_plan": "plan-main-advances-only-through-lore-integrate"
-  },
-  {
     "spec": "spec-process-state-end-state-one-invocation-per-entry-returned",
     "ac": "AC-ES-1",
     "reason": "oracle test not written yet (es-run-lore-in-process.test.ts absent); owned by the implementing task of this spec's plan",
