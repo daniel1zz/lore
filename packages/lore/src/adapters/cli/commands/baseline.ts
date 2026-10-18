@@ -44,6 +44,7 @@
  */
 
 import { readFileSync } from "node:fs";
+import { setExitCode } from "../run-scope.js";
 import { defineCommand } from "citty";
 import { AiConfigSchema, BASELINE_TREES, ruleIdPrefixOfNode } from "@lore/core";
 import type { AIProvider, BaselineTree, DocRecord, Invocation, LoreError } from "@lore/core";
@@ -74,13 +75,13 @@ function repeatable(value: unknown): string[] {
 function reportFailure(inv: Invocation, error: LoreError, json: boolean): void {
   if (json) console.log(JSON.stringify({ ok: false, error }, null, 2));
   else process.stderr.write(formatErrorFor(inv, error));
-  process.exitCode = exitCode(error);
+  setExitCode(exitCode(error));
 }
 
 function requireRuleService(app: App) {
   if (app.ruleService === undefined) {
     process.stderr.write("Error: RuleService is not available in this build.\n");
-    process.exitCode = 1;
+    setExitCode(1);
     return undefined;
   }
   return app.ruleService;
@@ -274,7 +275,7 @@ async function runCoverage(target: string, json: boolean, inv: Invocation): Prom
         for (const key of r.bootstrap) console.log(`  bootstrap    ${key}`);
       }
     }
-    if (!ok) process.exitCode = 1;
+    if (!ok) setExitCode(1);
   } catch (cause) {
     reportCensusFailure(inv, cause, json);
   } finally {
@@ -318,7 +319,7 @@ function renderFidelityContent(record: FidelityRecord): string {
  */
 function reportFidelityFailure(inv: Invocation, error: LoreError, json: boolean): void {
   reportFailure(inv, error, json);
-  if (error.code === "VALIDATION_ERROR") process.exitCode = 2;
+  if (error.code === "VALIDATION_ERROR") setExitCode(2);
 }
 
 /** `fidelity`: validate flags, resolve the AI provider (never skipping the judge), run, store, print. */
@@ -592,12 +593,12 @@ export default defineCommand({
           const dynamicCount = sites.filter((s) => s.dynamic).length;
           if (json) {
             console.log(JSON.stringify({ ok: true, data: { command, count: sites.length, not_measured: dynamicCount, unresolved_imports: sites.unresolvedImports, sites, bootstrap: sites.bootstrap } }, null, 2));
-            if (sites.unresolvedImports.length > 0) process.exitCode = 1;
+            if (sites.unresolvedImports.length > 0) setExitCode(1);
             return;
           }
           if (sites.unresolvedImports.length > 0) {
             for (const u of sites.unresolvedImports) console.log(`unresolved import ${u.specifier} (from ${u.from}): census INCOMPLETE, sites behind it are not listed`);
-            process.exitCode = 1;
+            setExitCode(1);
           }
           console.log(`${command}: ${sites.length} site(s), ${dynamicCount} not_measured, ${sites.bootstrap.length} bootstrap`);
           for (const site of sites) console.log(`${site.dynamic ? "~" : " "} ${site.key}`);

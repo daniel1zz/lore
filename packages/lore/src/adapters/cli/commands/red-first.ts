@@ -32,6 +32,7 @@
  */
 
 import { defineCommand } from "citty";
+import { setExitCode } from "../run-scope.js";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatErrorFor, resolveActor } from "../utils.js";
 import { invocationOf } from "../command-invocation.js";
@@ -66,7 +67,7 @@ export default defineCommand({
       if (!result.ok) {
         if (args.json) console.log(JSON.stringify({ ok: false, error: result.error }, null, 2));
         else process.stderr.write(formatErrorFor(inv, result.error) + "\n");
-        process.exitCode = exitCode(result.error);
+        setExitCode(exitCode(result.error));
         return;
       }
 

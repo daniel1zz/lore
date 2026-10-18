@@ -75,7 +75,7 @@ function exec(cmd: string[], cwd: string, session = "caller-0"): Run {
 }
 
 async function lore(args: string[], session = "caller-0", cwd = repo): Promise<Run> {
-  const result = await runLoreInProcess(args, { cwd, env: envFor(session) });
+  const result = await runLoreInProcess(args, { cwd, home: parent, env: envFor(session) });
   return { status: result.exitCode, stdout: result.stdout, stderr: result.stderr };
 }
 const git = (cwd: string, ...args: string[]): Run => exec(["git", ...args], cwd);

@@ -56,7 +56,7 @@ function childEnv(): NodeJS.ProcessEnv {
 }
 
 async function lore(args: string[]): Promise<Out> {
-  return await runLoreInProcess(args, { cwd: corpus, env: childEnv() });
+  return await runLoreInProcess(args, { cwd: corpus, home: join(root, "home"), env: childEnv() });
 }
 
 async function mustLore(args: string[]): Promise<Out> {

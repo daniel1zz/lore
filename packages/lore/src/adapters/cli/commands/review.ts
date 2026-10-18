@@ -66,6 +66,7 @@
  */
 
 import { defineCommand } from "citty";
+import { exitCli, setExitCode } from "../run-scope.js";
 import { loadLoreApp } from "../loader.js";
 import {
   exitCode,
@@ -123,7 +124,7 @@ function loadBlueprintOrExit(inv: Invocation): TreeBlueprint | undefined {
   if (loaded.status === "missing") return undefined;
   if (loaded.status === "invalid") {
     process.stderr.write(formatErrorFor(inv, loaded.error) + "\n");
-    process.exit(4);
+    exitCli(4);
   }
   return loaded.blueprint;
 }
@@ -287,7 +288,7 @@ export default defineCommand({
         const result = await app.reviewService.backfillLedger({ actor });
         if (!result.ok) {
           process.stderr.write(formatErrorFor(inv, result.error) + "\n");
-          process.exitCode = exitCode(result.error);
+          setExitCode(exitCode(result.error));
           return;
         }
         if (args.json) {
@@ -321,25 +322,25 @@ export default defineCommand({
 
     if (hasExplicitAi && hasExplicitNoAi) {
       process.stderr.write("Error: --ai and --no-ai are mutually exclusive. Pass only one.\n");
-      process.exit(2);
+      exitCli(2);
     }
     // reason: D9 review U6 — --pending and --staleness address disjoint populations
     // (draft docs awaiting first review vs approved/active staleness candidates);
     // combining them is a usage error, checked before any IO (review U11).
     if (args.pending && isStaleness) {
       process.stderr.write("Error: --pending and --staleness are mutually exclusive (disjoint populations).\n");
-      process.exit(2);
+      exitCli(2);
     }
     if (hasExplicitNoAi && !isStalenessListMode) {
       // reason: review (and staleness probing) has no non-AI mode (mirrors SPEC-026 §3
       // D5 assess exactly) — the command name IS the AI intent, so --no-ai is always a
       // contradiction EXCEPT the --staleness --list read-only path (D7/D9).
       process.stderr.write("Error: lore review requires AI; --no-ai is a contradiction. Omit the flag to proceed.\n");
-      process.exit(2);
+      exitCli(2);
     }
     if (!args.pending && !isStaleness && (args.doc === undefined || args.doc === "")) {
       process.stderr.write("Error: a document ID or slug is required unless --pending or batch --staleness is passed.\n");
-      process.exit(2);
+      exitCli(2);
     }
 
     const { app, config } = loadLoreApp({ inv });
@@ -356,7 +357,7 @@ export default defineCommand({
             "Error: AI is required for `lore review` but is disabled for this surface by " +
               "config.ai.default_per_surface. Pass --ai to override.\n",
           );
-          process.exitCode = 2;
+          setExitCode(2);
           return;
         }
       }
@@ -372,7 +373,7 @@ export default defineCommand({
           const listResult = await listFreshStalenessEscalates(flowDeps);
           if (!listResult.ok) {
             process.stderr.write(formatErrorFor(inv, listResult.error) + "\n");
-            process.exitCode = exitCode(listResult.error);
+            setExitCode(exitCode(listResult.error));
             return;
           }
           const entries = listResult.value;
@@ -399,7 +400,7 @@ export default defineCommand({
 
         if (app.stalenessProbeService === undefined) {
           process.stderr.write("Error: StalenessProbeService not wired on this App instance.\n");
-          process.exitCode = 1;
+          setExitCode(1);
           return;
         }
 
@@ -413,7 +414,7 @@ export default defineCommand({
           const limitResult = parsePositiveIntArg(args.limit, "--limit", { min: 1 });
           if (!limitResult.ok) {
             process.stderr.write(limitResult.message + "\n");
-            process.exitCode = 2;
+            setExitCode(2);
             return;
           }
           limit = limitResult.value;
@@ -424,7 +425,7 @@ export default defineCommand({
           const minAgeDaysResult = parsePositiveIntArg(args["min-age-days"], "--min-age-days", { min: 0 });
           if (!minAgeDaysResult.ok) {
             process.stderr.write(minAgeDaysResult.message + "\n");
-            process.exitCode = 2;
+            setExitCode(2);
             return;
           }
           minAgeDays = minAgeDaysResult.value;
@@ -440,7 +441,7 @@ export default defineCommand({
           });
           if (!outcomeResult.ok) {
             process.stderr.write(formatErrorFor(inv, outcomeResult.error) + "\n");
-            process.exitCode = exitCode(outcomeResult.error);
+            setExitCode(exitCode(outcomeResult.error));
             return;
           }
           const outcome = outcomeResult.value;
@@ -452,7 +453,7 @@ export default defineCommand({
             console.log(await renderProbeText(inv, flowDeps, outcome));
           }
 
-          process.exitCode = computeStalenessExitCode([outcome], failOnCandidate);
+          setExitCode(computeStalenessExitCode([outcome], failOnCandidate));
           return;
         }
 
@@ -465,7 +466,7 @@ export default defineCommand({
         });
         if (!batchResult.ok) {
           process.stderr.write(formatErrorFor(inv, batchResult.error) + "\n");
-          process.exitCode = exitCode(batchResult.error);
+          setExitCode(exitCode(batchResult.error));
           return;
         }
         const batch: StalenessBatchResult = batchResult.value;
@@ -491,7 +492,7 @@ export default defineCommand({
           }
         }
 
-        process.exitCode = computeStalenessExitCode(batch.probes, failOnCandidate);
+        setExitCode(computeStalenessExitCode(batch.probes, failOnCandidate));
         return;
       }
 
@@ -503,7 +504,7 @@ export default defineCommand({
         const pendingResult = await app.reviewService.pending();
         if (!pendingResult.ok) {
           process.stderr.write(formatErrorFor(inv, pendingResult.error) + "\n");
-          process.exitCode = exitCode(pendingResult.error);
+          setExitCode(exitCode(pendingResult.error));
           return;
         }
         const docs: PendingDoc[] = pendingResult.value;
@@ -556,7 +557,7 @@ export default defineCommand({
           process.stderr.write(`Warning: ${failures.length}/${outcomes.length} doc(s) failed review.\n`);
         }
         if (failures.length === outcomes.length) {
-          process.exitCode = 6;
+          setExitCode(6);
         }
         return;
       }
@@ -569,7 +570,7 @@ export default defineCommand({
 
       if (!result.ok) {
         process.stderr.write(formatErrorFor(inv, result.error, { aiHasNoFallback: true }) + "\n");
-        process.exitCode = exitCode(result.error);
+        setExitCode(exitCode(result.error));
         return;
       }
       const { docSlug, judgment } = result.value;

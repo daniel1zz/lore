@@ -15,6 +15,7 @@
  * Source: spec-autonomy-phase-1-decision-function-human-channel-lore AC-AU-9.
  */
 import { applyClassEdit, type ClassEdit, type GovernedThresholds, type Invocation, type LoreError, type Result, RECOVERABILITY_SCORE } from "@lore/core";
+import { setExitCode } from "../run-scope.js";
 import { defineCommand } from "citty";
 import { DecisionService } from "../../../service/decision-service.js";
 import type { GovernedAutonomy, ProposeOutcome } from "../../../service/autonomy-threshold-service.js";
@@ -40,11 +41,11 @@ async function withDecisions(inv: Invocation, fn: (opened: Opened) => Promise<nu
     const identity = await app.verifiedInvocationIdentity?.();
     if (identity !== undefined && !identity.ok) {
       process.stderr.write(`${formatErrorFor(inv, identity.error)}\n`);
-      process.exitCode = exitCode(identity.error);
+      setExitCode(exitCode(identity.error));
       return;
     }
     store = new SQLiteStore(dbPath);
-    process.exitCode = await fn({ service: new DecisionService({ store, executorRun: identity?.value?.harnessRun ?? null }), dbPath });
+    setExitCode(await fn({ service: new DecisionService({ store, executorRun: identity?.value?.harnessRun ?? null }), dbPath }));
   } finally {
     store?.close();
     app.close();
@@ -170,7 +171,7 @@ const set = defineCommand({
     if (problems.length === 0 && Object.keys(edit).length === 0) problems.push("nothing to change: pass at least one of --tier --threshold --prior --recoverability --judge");
     if (problems.length > 0) {
       process.stderr.write(`Error: ${problems.join("; ")}\n`);
-      process.exitCode = 4;
+      setExitCode(4);
       return;
     }
     await withDecisions(inv, (opened) => propose(inv, opened, (current) => applyClassEdit(current, String(args.class), edit)));

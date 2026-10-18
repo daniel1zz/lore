@@ -80,7 +80,7 @@
  * Invariants:
  *   - `resolveConsumerCorpusRoot` is safe to call from a long-lived MCP
  *     handler despite internally calling `findLoreDbPath` (which
- *     `process.exit(1)`s on a miss) — `loadLoreApp()` already called it once,
+ *     `exitCli(1)`s on a miss) — `loadLoreApp()` already called it once,
  *     successfully, at MCP server STARTUP (`index.ts`'s `--mcp-server`
  *     branch), and `process.cwd()` does not change over the server's
  *     lifetime, so a per-call re-walk from the same cwd cannot newly fail.
@@ -127,6 +127,7 @@
  */
 
 import { basename, dirname, join } from "node:path";
+import { exitCli } from "./run-scope.js";
 import {
   assembleIssueBody,
   err,
@@ -161,7 +162,7 @@ import { findLoreDbPath, type CorpusLocator } from "./corpus-resolution.js";
  *
  * @param locator - the run's `cwd` + `env` (an `Invocation` works)
  * @returns absolute path to the consumer corpus root
- * @throws process.exit(1) via `findLoreDbPath` (unchanged CLI convention)
+ * @throws exitCli(1) via `findLoreDbPath` (unchanged CLI convention)
  *   when no `.lore/lore.db` is discoverable from `cwd` — see this module's
  *   header for why this is still safe to call from an MCP tool handler.
  */

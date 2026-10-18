@@ -69,6 +69,7 @@ const PROJECT_ROOT = new URL("../../../../", import.meta.url).pathname.replace(/
 async function runLore(args: string[], cwd: string): Promise<RunResult> {
   const proc = await runLoreInProcess(args, {
     cwd,
+    home: cwd,
     env: { ...process.env, HOME: cwd, LORE_ACTOR: "agent:plan-close-reachability-test" },
   });
   return {

@@ -131,6 +131,7 @@
  */
 
 import { defineCommand } from "citty";
+import { exitCli, setExitCode } from "../run-scope.js";
 import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -1134,7 +1135,7 @@ export default defineCommand({
         for (const line of rendered.lines) console.log(line);
       }
 
-      process.exitCode = BINARY_PROVENANCE_EXIT_CODES[verdict.kind];
+      setExitCode(BINARY_PROVENANCE_EXIT_CODES[verdict.kind]);
       return;
     }
 
@@ -1155,13 +1156,13 @@ export default defineCommand({
             value: args.enumerate,
           };
           process.stderr.write(formatErrorFor(inv, error) + "\n");
-          process.exitCode = exitCode(error);
+          setExitCode(exitCode(error));
           return;
         }
         const membersResult = await enumerator(app, dbPath, inv.cwd);
         if (!membersResult.ok) {
           process.stderr.write(formatErrorFor(inv, membersResult.error) + "\n");
-          process.exitCode = exitCode(membersResult.error);
+          setExitCode(exitCode(membersResult.error));
           return;
         }
         const members = membersResult.value;
@@ -1177,7 +1178,7 @@ export default defineCommand({
           console.log(`${args.enumerate}: ${members.length} member(s)`);
           for (const member of members) console.log(`  - ${member}`);
         }
-        process.exitCode = 0;
+        setExitCode(0);
         return;
       } finally {
         app.close();
@@ -1252,7 +1253,7 @@ export default defineCommand({
         for (const line of formatCheckClaudeMdHuman(renderInput)) console.log(line);
       }
 
-      process.exitCode = findings.length > 0 ? 3 : 0;
+      setExitCode(findings.length > 0 ? 3 : 0);
       return;
     }
 
@@ -1276,7 +1277,7 @@ export default defineCommand({
         const checked = await collectDecisionLogStatus(dbPath);
         if (!checked.ok) {
           process.stderr.write(formatErrorFor(inv, checked.error) + "\n");
-          process.exitCode = exitCode(checked.error);
+          setExitCode(exitCode(checked.error));
           return;
         }
         if (args.json) {
@@ -1284,7 +1285,7 @@ export default defineCommand({
         } else {
           console.log(renderDecisionLogLine(checked.value));
         }
-        process.exitCode = checked.value.verify.clean ? 0 : DECISION_LOG_BREAK_EXIT;
+        setExitCode(checked.value.verify.clean ? 0 : DECISION_LOG_BREAK_EXIT);
       } finally {
         app.close();
       }
@@ -1299,12 +1300,12 @@ export default defineCommand({
         const checked = await collectAutonomyThresholdStatus(dbPath);
         if (!checked.ok) {
           process.stderr.write(formatErrorFor(inv, checked.error) + "\n");
-          process.exitCode = exitCode(checked.error);
+          setExitCode(exitCode(checked.error));
           return;
         }
         if (args.json) console.log(JSON.stringify({ ok: true, data: { autonomy_thresholds: checked.value } }, null, 2));
         else console.log(renderAutonomyThresholdLine(checked.value));
-        process.exitCode = isAutonomyThresholdBreak(checked.value) ? AUTONOMY_THRESHOLD_BREAK_EXIT : 0;
+        setExitCode(isAutonomyThresholdBreak(checked.value) ? AUTONOMY_THRESHOLD_BREAK_EXIT : 0);
       } finally {
         app.close();
       }
@@ -1356,14 +1357,14 @@ export default defineCommand({
               const fixR = await app.treeCheckService.fix(blueprint);
               if (!fixR.ok) {
                 process.stderr.write(formatErrorFor(inv, fixR.error) + "\n");
-                process.exitCode = exitCode(fixR.error);
+                setExitCode(exitCode(fixR.error));
                 return;
               }
 
               const checkR = await app.treeCheckService.checkTree(blueprint);
               if (!checkR.ok) {
                 process.stderr.write(formatErrorFor(inv, checkR.error) + "\n");
-                process.exitCode = exitCode(checkR.error);
+                setExitCode(exitCode(checkR.error));
                 return;
               }
 
@@ -1418,7 +1419,7 @@ export default defineCommand({
               const checkR = await app.treeCheckService.checkTree(blueprint);
               if (!checkR.ok) {
                 process.stderr.write(formatErrorFor(inv, checkR.error) + "\n");
-                process.exitCode = exitCode(checkR.error);
+                setExitCode(exitCode(checkR.error));
                 return;
               }
 
@@ -1445,7 +1446,7 @@ export default defineCommand({
             driftPayload = disabledCodeDriftPayload();
           } else if (app.driftCheckService === undefined) {
             process.stderr.write("Error: DriftCheckService not wired on this App instance.\n");
-            process.exitCode = 1;
+            setExitCode(1);
             return;
           } else {
             const deps = buildDriftFlowDeps(app, app.driftCheckService);
@@ -1453,7 +1454,7 @@ export default defineCommand({
             const driftResult = await runDrift(deps, probe);
             if (!driftResult.ok) {
               process.stderr.write(formatErrorFor(inv, driftResult.error) + "\n");
-              process.exitCode = exitCode(driftResult.error);
+              setExitCode(exitCode(driftResult.error));
               return;
             }
             driftPayload = driftResult.value;
@@ -1475,7 +1476,7 @@ export default defineCommand({
           const prdsResult = await app.corpusService.list({ type: "prd" });
           if (!prdsResult.ok) {
             process.stderr.write(formatErrorFor(inv, prdsResult.error) + "\n");
-            process.exitCode = exitCode(prdsResult.error);
+            setExitCode(exitCode(prdsResult.error));
             return;
           }
           const prds: Array<{ slug: string; total: number; uncovered: string[]; uncovered_p0: string[]; migrated: string[]; unmigrated: string[] }> = [];
@@ -1483,7 +1484,7 @@ export default defineCommand({
             const covResult = await app.corpusService.computeRequirementCoverageForPrd(prd.id);
             if (!covResult.ok) {
               process.stderr.write(formatErrorFor(inv, covResult.error) + "\n");
-              process.exitCode = exitCode(covResult.error);
+              setExitCode(exitCode(covResult.error));
               return;
             }
             const cov = covResult.value;
@@ -1514,7 +1515,7 @@ export default defineCommand({
           const prdsResult = await app.corpusService.list({ type: "prd" });
           if (!prdsResult.ok) {
             process.stderr.write(formatErrorFor(inv, prdsResult.error) + "\n");
-            process.exitCode = exitCode(prdsResult.error);
+            setExitCode(exitCode(prdsResult.error));
             return;
           }
           const prds: Array<{ slug: string; whole_doc_chars: number; breaches: PrdBudgetBreach[] }> = [];
@@ -1522,7 +1523,7 @@ export default defineCommand({
             const getResult = await app.corpusService.get(prdSummary.id);
             if (!getResult.ok) {
               process.stderr.write(formatErrorFor(inv, getResult.error) + "\n");
-              process.exitCode = exitCode(getResult.error);
+              setExitCode(exitCode(getResult.error));
               return;
             }
             const doc = getResult.value.doc;
@@ -1559,7 +1560,7 @@ export default defineCommand({
             const nodesResult = await budgetStore.findMany({ type: "baseline" });
             if (!nodesResult.ok) {
               process.stderr.write(formatErrorFor(inv, nodesResult.error) + "\n");
-              process.exitCode = exitCode(nodesResult.error);
+              setExitCode(exitCode(nodesResult.error));
               return;
             }
             const nodes = nodesResult.value.flatMap((doc) => checkBaselineNodeBudget(doc, budgets));
@@ -1581,7 +1582,7 @@ export default defineCommand({
           const issuesResult = await computeIssueCheck(app.corpusService, staleAfterDays);
           if (!issuesResult.ok) {
             process.stderr.write(formatErrorFor(inv, issuesResult.error) + "\n");
-            process.exitCode = exitCode(issuesResult.error);
+            setExitCode(exitCode(issuesResult.error));
             return;
           }
           issuesPayload = issuesResult.value;
@@ -1604,7 +1605,7 @@ export default defineCommand({
           const allDocsResult = await app.corpusService.list({});
           if (!allDocsResult.ok) {
             process.stderr.write(formatErrorFor(inv, allDocsResult.error) + "\n");
-            process.exitCode = exitCode(allDocsResult.error);
+            setExitCode(exitCode(allDocsResult.error));
             return;
           }
           const knownSlugs = new Set(allDocsResult.value.docs.map((d) => d.slug));
@@ -1637,7 +1638,7 @@ export default defineCommand({
             const findingsResult = await findBaselineIntegrityFindings(baselineStore);
             if (!findingsResult.ok) {
               process.stderr.write(formatErrorFor(inv, findingsResult.error) + "\n");
-              process.exitCode = exitCode(findingsResult.error);
+              setExitCode(exitCode(findingsResult.error));
               return;
             }
             baselinePayload = { checked: true, consistent: findingsResult.value.length === 0, findings: findingsResult.value };
@@ -1670,7 +1671,7 @@ export default defineCommand({
         // reason: blueprint-missing/invalid stderr lines are written UNCONDITIONALLY
         // (regardless of --json) — matches the pre-D5-restructure behavior, which
         // wrote this message before --json was ever consulted (it used to
-        // process.exit(4) immediately on a missing/invalid blueprint).
+        // exitCli(4) immediately on a missing/invalid blueprint).
         for (const line of treeErrorLines) process.stderr.write(line + "\n");
 
         if (args.json) {
@@ -1721,7 +1722,7 @@ export default defineCommand({
           }
         }
 
-        process.exitCode = finalExit;
+        setExitCode(finalExit);
         return;
       } finally {
         app.close();
@@ -1735,7 +1736,7 @@ export default defineCommand({
 
       if (!result.ok) {
         process.stderr.write(formatErrorFor(inv, result.error) + "\n");
-        process.exitCode = exitCode(result.error);
+        setExitCode(exitCode(result.error));
         return;
       }
 
@@ -1747,7 +1748,7 @@ export default defineCommand({
       const stateBindingSkipsResult = await collectStateBindingSkips(app);
       if (!stateBindingSkipsResult.ok) {
         process.stderr.write(formatErrorFor(inv, stateBindingSkipsResult.error) + "\n");
-        process.exitCode = exitCode(stateBindingSkipsResult.error);
+        setExitCode(exitCode(stateBindingSkipsResult.error));
         return;
       }
       const stateBindingSkips = stateBindingSkipsResult.value;
@@ -1759,7 +1760,7 @@ export default defineCommand({
       const staleListResult = await listFreshStalenessEscalates(buildStalenessFlowDeps(app));
       if (!staleListResult.ok) {
         process.stderr.write(formatErrorFor(inv, staleListResult.error) + "\n");
-        process.exitCode = exitCode(staleListResult.error);
+        setExitCode(exitCode(staleListResult.error));
         return;
       }
       const openStaleCandidates = staleListResult.value.length;
@@ -1777,7 +1778,7 @@ export default defineCommand({
       const codeAnchorSpecMembersResult = await collectCodeAnchorSpecMembers(app);
       if (!codeAnchorSpecMembersResult.ok) {
         process.stderr.write(formatErrorFor(inv, codeAnchorSpecMembersResult.error) + "\n");
-        process.exitCode = exitCode(codeAnchorSpecMembersResult.error);
+        setExitCode(exitCode(codeAnchorSpecMembersResult.error));
         return;
       }
       const codeAnchorSpecs = codeAnchorSpecMembersResult.value.length;
@@ -1793,7 +1794,7 @@ export default defineCommand({
       const falsifiabilitySignalsResult = await collectFalsifiabilitySignals(app, dbPath, inv.cwd);
       if (!falsifiabilitySignalsResult.ok) {
         process.stderr.write(formatErrorFor(inv, falsifiabilitySignalsResult.error) + "\n");
-        process.exitCode = exitCode(falsifiabilitySignalsResult.error);
+        setExitCode(exitCode(falsifiabilitySignalsResult.error));
         return;
       }
       // reason: AC-FR-5 — the count is DERIVED from the member list's length,
@@ -1816,7 +1817,7 @@ export default defineCommand({
       const unredeemedResult = await listUnredeemedAllowMissingPathDeclarations(app, dbPath, inv.cwd);
       if (!unredeemedResult.ok) {
         process.stderr.write(formatErrorFor(inv, unredeemedResult.error) + "\n");
-        process.exitCode = exitCode(unredeemedResult.error);
+        setExitCode(exitCode(unredeemedResult.error));
         return;
       }
       // reason: AC-FR-5 — same derive-from-member-list discipline as
@@ -1831,14 +1832,14 @@ export default defineCommand({
       const captureSourceMembersResult = await collectCaptureSourceMembers(app);
       if (!captureSourceMembersResult.ok) {
         process.stderr.write(formatErrorFor(inv, captureSourceMembersResult.error) + "\n");
-        process.exitCode = exitCode(captureSourceMembersResult.error);
+        setExitCode(exitCode(captureSourceMembersResult.error));
         return;
       }
       // reason: SPEC-143 AC-CT-9(d) — report-only, alongside (never merged into) the capture_source counts.
       const stampVerdictResult = await collectStampVerdictDistribution(app);
       if (!stampVerdictResult.ok) {
         process.stderr.write(formatErrorFor(inv, stampVerdictResult.error) + "\n");
-        process.exitCode = exitCode(stampVerdictResult.error);
+        setExitCode(exitCode(stampVerdictResult.error));
         return;
       }
       const stampVerdicts = stampVerdictResult.value;
@@ -1846,13 +1847,13 @@ export default defineCommand({
       // left unarmed (outside git, or an existing corpus not yet armed) cannot read as "fine".
       if (app.stateBindingService === undefined) {
         process.stderr.write("Error: stateBindingService is not wired on this App (internal wiring error)\n");
-        process.exitCode = 1;
+        setExitCode(1);
         return;
       }
       const stateBindingResult = await app.stateBindingService.readState(dirname(dirname(dbPath)));
       if (!stateBindingResult.ok) {
         process.stderr.write(formatErrorFor(inv, stateBindingResult.error) + "\n");
-        process.exitCode = exitCode(stateBindingResult.error);
+        setExitCode(exitCode(stateBindingResult.error));
         return;
       }
       const stateBindingState = stateBindingResult.value;
@@ -1868,7 +1869,7 @@ export default defineCommand({
       const adoptedAbandonedMembersResult = await collectAdoptedAbandonedMembers(app);
       if (!adoptedAbandonedMembersResult.ok) {
         process.stderr.write(formatErrorFor(inv, adoptedAbandonedMembersResult.error) + "\n");
-        process.exitCode = exitCode(adoptedAbandonedMembersResult.error);
+        setExitCode(exitCode(adoptedAbandonedMembersResult.error));
         return;
       }
       const adoptedAbandonedCount = adoptedAbandonedMembersResult.value.length;
@@ -1900,7 +1901,7 @@ export default defineCommand({
         );
         if (!baselineResult.ok) {
           process.stderr.write(formatErrorFor(inv, baselineResult.error) + "\n");
-          process.exitCode = exitCode(baselineResult.error);
+          setExitCode(exitCode(baselineResult.error));
           return;
         }
         baselineStatus = baselineResult.value;
@@ -1911,7 +1912,7 @@ export default defineCommand({
         const shareResult = await new AttributionReport(baselineStore).share(ATTRIBUTION_WINDOW_DAYS, () => new Date());
         if (!shareResult.ok) {
           process.stderr.write(formatErrorFor(inv, shareResult.error) + "\n");
-          process.exitCode = exitCode(shareResult.error);
+          setExitCode(exitCode(shareResult.error));
           return;
         }
         attributionShare = shareResult.value;
@@ -1921,14 +1922,14 @@ export default defineCommand({
         const sourcesResult = await attributionReport.identitySources(ATTRIBUTION_WINDOW_DAYS, () => new Date());
         if (!sourcesResult.ok) {
           process.stderr.write(formatErrorFor(inv, sourcesResult.error) + "\n");
-          process.exitCode = exitCode(sourcesResult.error);
+          setExitCode(exitCode(sourcesResult.error));
           return;
         }
         identitySources = sourcesResult.value;
         const orphanedResult = await attributionReport.orphanedDirty(() => new Date());
         if (!orphanedResult.ok) {
           process.stderr.write(formatErrorFor(inv, orphanedResult.error) + "\n");
-          process.exitCode = exitCode(orphanedResult.error);
+          setExitCode(exitCode(orphanedResult.error));
           return;
         }
         orphanedDirty = orphanedResult.value;
@@ -1936,14 +1937,14 @@ export default defineCommand({
         const censusBaseline = await baselineStore.findMany({ type: "baseline" });
         if (!censusBaseline.ok) {
           process.stderr.write(formatErrorFor(inv, censusBaseline.error) + "\n");
-          process.exitCode = exitCode(censusBaseline.error);
+          setExitCode(exitCode(censusBaseline.error));
           return;
         }
         if (censusBaseline.value.length > 0) {
           const censusSpecs = await baselineStore.findMany({ type: "spec" });
           if (!censusSpecs.ok) {
             process.stderr.write(formatErrorFor(inv, censusSpecs.error) + "\n");
-            process.exitCode = exitCode(censusSpecs.error);
+            setExitCode(exitCode(censusSpecs.error));
             return;
           }
           specCitationCensus = computeSpecCitationCensus(censusSpecs.value, censusBaseline.value);
@@ -1954,13 +1955,13 @@ export default defineCommand({
         const effective = await resolveCiteGateFor(baselineStore, rawGate);
         if (!effective.ok) {
           process.stderr.write(formatErrorFor(inv, effective.error) + "\n");
-          process.exitCode = exitCode(effective.error);
+          setExitCode(exitCode(effective.error));
           return;
         }
         const adoptRows = await app.auditService.query({ action: BASELINE_ADOPT_AUDIT_ACTION, limit: 1 });
         if (!adoptRows.ok) {
           process.stderr.write(formatErrorFor(inv, adoptRows.error) + "\n");
-          process.exitCode = exitCode(adoptRows.error);
+          setExitCode(exitCode(adoptRows.error));
           return;
         }
         const storedMode = typeof rawGate?.mode === "string" ? rawGate.mode : null;
@@ -1980,7 +1981,7 @@ export default defineCommand({
       const integrateLosses = collectIntegrateLosses(dbPath);
       if (!integrateLosses.ok) {
         process.stderr.write(formatErrorFor(inv, integrateLosses.error) + "\n");
-        process.exitCode = exitCode(integrateLosses.error);
+        setExitCode(exitCode(integrateLosses.error));
         return;
       }
 
@@ -2200,7 +2201,7 @@ export default defineCommand({
       const decisionLogStatus = await collectDecisionLogStatus(dbPath);
       if (!decisionLogStatus.ok) {
         process.stderr.write(formatErrorFor(inv, decisionLogStatus.error) + "\n");
-        process.exitCode = exitCode(decisionLogStatus.error);
+        setExitCode(exitCode(decisionLogStatus.error));
         return;
       }
       if (!decisionLogStatus.value.verify.clean || decisionLogStatus.value.head !== null) {
@@ -2215,11 +2216,11 @@ export default defineCommand({
       const thresholdStatus = await collectAutonomyThresholdStatus(dbPath);
       if (!thresholdStatus.ok) {
         process.stderr.write(formatErrorFor(inv, thresholdStatus.error) + "\n");
-        process.exitCode = exitCode(thresholdStatus.error);
+        setExitCode(exitCode(thresholdStatus.error));
         return;
       }
       if (thresholdStatus.value.state !== "unseeded") console.log(`\n${renderAutonomyThresholdLine(thresholdStatus.value)}`);
-      if (isAutonomyThresholdBreak(thresholdStatus.value)) process.exitCode = AUTONOMY_THRESHOLD_BREAK_EXIT;
+      if (isAutonomyThresholdBreak(thresholdStatus.value)) setExitCode(AUTONOMY_THRESHOLD_BREAK_EXIT);
 
       // baseline slice 1 §C7 — one line, only when a warning count is non-zero (report-only).
       if (baselineStatus !== null && baselineWarningCount(baselineStatus) > 0) {

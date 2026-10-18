@@ -39,7 +39,7 @@
  *     best-effort SPEC-073 report-issue hint via `safeInternalErrorHint` when the
  *     consumer has `feedback.upstream` configured.
  *
- * Side-effect class: IO (file reads, process.exit(1) on missing DB, unknown ai.provider,
+ * Side-effect class: IO (file reads, exitCli(1) on missing DB, unknown ai.provider,
  *   or an unexpected App-construction throw (SPEC-073); process.exit on invalid `ai`
  *   config block (AC-HJ-3), console.error for warnings)
  *
@@ -54,6 +54,7 @@
  */
 
 import { dirname } from "path";
+import { exitCli } from "./run-scope.js";
 import { mergeDefaults, isAiConfigValidationError, extractClaim, resolveClaimTtlMinutes, resolveForeignCorpusWriteGateEnabled } from "@lore/core";
 import type {
   Invocation,
@@ -393,7 +394,7 @@ export function loadLoreApp(opts: LoadLoreAppOptions): {
     // reason: formatError renders "Validation failed on field …" without the code; the code is appended so
     // a script can grep the machine-readable class (exit 4 alone is shared by every validation refusal).
     console.error(`${formatErrorFor(opts.inv, refusal)} [${refusal.code}]`); // CLI surface
-    process.exit(exitCode(refusal));
+    exitCli(exitCode(refusal));
   }
   const configResult = resolveProjectConfigResult(dbPath);
   let rawConfig: LoreConfig | undefined;
@@ -405,7 +406,7 @@ export function loadLoreApp(opts: LoadLoreAppOptions): {
     // `ai.cli` key silently reverting BOTH `ai.assess.max_diff_chars` and every
     // `ai.providers.<name>.timeout_ms` override to built-in defaults with zero warning).
     console.error(formatErrorFor(opts.inv, configResult.error)); // CLI surface
-    process.exit(exitCode(configResult.error));
+    exitCli(exitCode(configResult.error));
   } else {
     // reason: all OTHER config parse failures (malformed YAML, invalid sync/telemetry/
     // workflow section, unknown top-level key) keep the historical silent fallback —
@@ -476,7 +477,7 @@ export function loadLoreApp(opts: LoadLoreAppOptions): {
     console.error(`Error: Storage failure: ${message}`); // CLI surface
     const hint = safeInternalErrorHint(rawConfig);
     if (hint !== null) console.error(hint); // CLI surface
-    process.exit(1);
+    exitCli(1);
   }
   let app: App;
   if ("ok" in appOrResult) {
@@ -485,7 +486,7 @@ export function loadLoreApp(opts: LoadLoreAppOptions): {
       console.error(formatErrorFor(opts.inv, appOrResult.error)); // CLI surface
       const hint = safeInternalErrorHint(rawConfig);
       if (hint !== null) console.error(hint); // CLI surface
-      process.exit(1);
+      exitCli(1);
     }
     app = appOrResult.value;
   } else {

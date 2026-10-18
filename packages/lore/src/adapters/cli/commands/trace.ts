@@ -42,6 +42,7 @@
  */
 
 import { defineCommand } from "citty";
+import { setExitCode } from "../run-scope.js";
 import type { LoreError, Result } from "@lore/core";
 import type {
   TraceStatsCountField,
@@ -174,7 +175,7 @@ export default defineCommand({
             // command, not a real corpus. Fail loud rather than crash on
             // `undefined.stats(...)`.
             process.stderr.write("Error: trace stats unavailable (traceStatsService not wired)\n");
-            process.exitCode = 1;
+            setExitCode(1);
             return;
           }
 
@@ -203,14 +204,14 @@ export default defineCommand({
                 value: args.enumerate,
               };
               process.stderr.write(formatErrorFor(inv, error) + "\n");
-              process.exitCode = exitCode(error);
+              setExitCode(exitCode(error));
               return;
             }
 
             const enumerationResult = await enumerator(app.traceStatsService, statsOpts);
             if (!enumerationResult.ok) {
               process.stderr.write(formatErrorFor(inv, enumerationResult.error) + "\n");
-              process.exitCode = exitCode(enumerationResult.error);
+              setExitCode(exitCode(enumerationResult.error));
               return;
             }
 
@@ -236,7 +237,7 @@ export default defineCommand({
               console.log(`${enumeration.field}: ${enumeration.count} member(s)`);
               for (const line of formatEnumerationMembers(enumeration)) console.log(`  - ${line}`);
             }
-            process.exitCode = 0;
+            setExitCode(0);
             return;
           }
 
@@ -244,7 +245,7 @@ export default defineCommand({
 
           if (!result.ok) {
             process.stderr.write(formatErrorFor(inv, result.error) + "\n");
-            process.exitCode = exitCode(result.error);
+            setExitCode(exitCode(result.error));
             return;
           }
 
@@ -252,7 +253,7 @@ export default defineCommand({
 
           if (args.json) {
             console.log(JSON.stringify({ ok: true, data: report }, null, 2));
-            process.exitCode = 0;
+            setExitCode(0);
             return;
           }
 
@@ -285,7 +286,7 @@ export default defineCommand({
             console.log(rawRows.length > 0 ? formatTable(["Timestamp", "Actor", "Query"], rawRows) : "  (none)");
           }
 
-          process.exitCode = 0;
+          setExitCode(0);
         } finally {
           app.close();
         }

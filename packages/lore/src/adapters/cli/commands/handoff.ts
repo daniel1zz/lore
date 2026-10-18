@@ -81,6 +81,7 @@
  */
 
 import { readFileSync } from "fs";
+import { setExitCode } from "../run-scope.js";
 import { defineCommand } from "citty";
 import {
   handoffExtraSchema,
@@ -1051,7 +1052,7 @@ export default defineCommand({
       process.stderr.write(
         `Error: unknown \`lore handoff\` subcommand "${subcommand}" (expected: ${COVERAGE_CHECK_SUBCOMMAND}, or omit for the default write path)\n`,
       );
-      process.exitCode = 2;
+      setExitCode(2);
       return;
     }
 
@@ -1063,7 +1064,7 @@ export default defineCommand({
       process.stderr.write(
         `Error: --json-file is mutually exclusive with ${conflictingFlags.map((f) => `--${f}`).join(", ")}.\n`,
       );
-      process.exitCode = 2;
+      setExitCode(2);
       return;
     }
 
@@ -1079,7 +1080,7 @@ export default defineCommand({
         process.stderr.write(
           `Error: cannot read --json-file '${args["json-file"] as string}': ${e instanceof Error ? e.message : String(e)}\n`,
         );
-        process.exitCode = 2;
+        setExitCode(2);
         return;
       }
 
@@ -1090,7 +1091,7 @@ export default defineCommand({
       });
       if (!parsed.ok) {
         process.stderr.write(`Error: ${parsed.error}\n`);
-        process.exitCode = 2;
+        setExitCode(2);
         return;
       }
       candidate = parsed.value;
@@ -1101,7 +1102,7 @@ export default defineCommand({
         process.stderr.write(
           "Error: --failing-command and --failing-tail-file must be passed together.\n",
         );
-        process.exitCode = 2;
+        setExitCode(2);
         return;
       }
 
@@ -1113,7 +1114,7 @@ export default defineCommand({
           process.stderr.write(
             `Error: cannot read --failing-tail-file '${args["failing-tail-file"] as string}': ${e instanceof Error ? e.message : String(e)}\n`,
           );
-          process.exitCode = 2;
+          setExitCode(2);
           return;
         }
       }
@@ -1134,7 +1135,7 @@ export default defineCommand({
         process.stderr.write(
           `Error: invalid handoff payload — field '${issue !== undefined ? issue.path.join(".") : "(root)"}': ${issue?.message ?? "validation failed"}\n`,
         );
-        process.exitCode = 2;
+        setExitCode(2);
         return;
       }
       candidate = validated.data;
@@ -1144,7 +1145,7 @@ export default defineCommand({
     try {
       if (app.sessionService === undefined) {
         process.stderr.write("Error: SessionService not wired on this App instance.\n");
-        process.exitCode = 1;
+        setExitCode(1);
         return;
       }
 
@@ -1153,7 +1154,7 @@ export default defineCommand({
       const identity = await app.verifiedInvocationIdentity?.();
       if (identity !== undefined && !identity.ok) {
         process.stderr.write(formatErrorFor(inv, identity.error) + "\n");
-        process.exitCode = exitCode(identity.error);
+        setExitCode(exitCode(identity.error));
         return;
       }
       const run = identity?.value?.harnessRun ?? null;
@@ -1161,7 +1162,7 @@ export default defineCommand({
       const result = await app.sessionService.writeHandoff(candidate, undefined, { run });
       if (!result.ok) {
         process.stderr.write(formatErrorFor(inv, result.error) + "\n");
-        process.exitCode = exitCode(result.error);
+        setExitCode(exitCode(result.error));
         return;
       }
 

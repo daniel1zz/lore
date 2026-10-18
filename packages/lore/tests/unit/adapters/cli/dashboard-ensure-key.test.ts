@@ -137,30 +137,24 @@ describe("ensureLocalApiKey — boundary values", () => {
 
 describe("ensureLocalApiKey — error cases", () => {
   let tmpDir: string;
-  let originalExit: typeof process.exit;
 
   beforeEach(() => {
     tmpDir = makeTmpDir();
-    originalExit = process.exit;
-    // Mock process.exit to prevent test process from terminating
-    process.exit = vi.fn() as never;
   });
 
   afterEach(() => {
-    process.exit = originalExit;
     rmSync(tmpDir, { recursive: true, force: true });
     vi.restoreAllMocks();
   });
 
-  it("calls process.exit(1) when store.create returns err", async () => {
+  it("ends the run with exit 1 (CliExit) when store.create returns err", async () => {
     const store = makeFailStore("VALIDATION_ERROR", "already exists");
-    await ensureLocalApiKey(store, tmpDir);
-    expect(process.exit).toHaveBeenCalledWith(1);
+    await expect(ensureLocalApiKey(store, tmpDir)).rejects.toMatchObject({ name: "CliExit", code: 1 });
   });
 
   it("does not create local-key file when store.create fails", async () => {
     const store = makeFailStore();
-    await ensureLocalApiKey(store, tmpDir);
+    await expect(ensureLocalApiKey(store, tmpDir)).rejects.toMatchObject({ name: "CliExit", code: 1 });
     const filePath = join(tmpDir, "local-key");
     expect(existsSync(filePath)).toBe(false);
   });

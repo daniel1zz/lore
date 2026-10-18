@@ -5,7 +5,7 @@ export {};
 
 // Detect --mcp-server flag before handing off to citty.
 // citty doesn't support top-level flags alongside subcommands,
-// so we intercept here before calling runMain().
+// so we intercept here before dispatching the command tree.
 if (process.argv.includes("--mcp-server")) {
   const { startMcpServer } = await import("./adapters/mcp/index.js");
   const { loadLoreApp, loadProjectConfig } = await import("./adapters/cli/loader.js");
@@ -20,13 +20,23 @@ if (process.argv.includes("--mcp-server")) {
   // reason: the MCP server is an entry like the CLI: it resolves ONE Invocation at start (AS-26) and hands it to the
   // app composition and to the tools, which read ambient facts from it instead of the process.
   const { resolveEntryInvocation } = await import("./adapters/cli/run-cli.js");
-  const inv = await resolveEntryInvocation(process.argv.slice(2));
-  const { app } = loadLoreApp({ inv });
-  await startMcpServer(app, () => loadProjectConfig(inv), inv);
+  const { CliExit } = await import("./adapters/cli/run-scope.js");
+  try {
+    const inv = await resolveEntryInvocation(process.argv.slice(2));
+    const { app } = loadLoreApp({ inv });
+    await startMcpServer(app, () => loadProjectConfig(inv), inv);
+  } catch (error) {
+    // reason: startup helpers shared with the CLI end a failed start with `exitCli(code)` (a thrown CliExit); this
+    // entry is where that becomes the process code, exactly as the CLI branch below does for a returned run.
+    if (!(error instanceof CliExit)) throw error;
+    process.exit(error.code);
+  }
 } else {
   // reason: the CLI branch lives in adapters/cli/run-cli.ts so the in-process test runner executes the
-  // SAME startup sequence (identity resolution, strict usage renderer, runMain exit mapping) as the binary
-  // instead of a copy of it. The real process keeps the synchronous stdio console ON.
+  // SAME startup sequence (identity resolution, strict usage renderer, exit-code mapping) as the binary
+  // instead of a copy of it. The real process keeps the synchronous stdio console ON. `runCliFromProcess`
+  // RETURNS the exit code of the run; this is the ONE place the program turns it into `process.exit(code)`
+  // (spec-process-state-end-state-one-invocation-per-entry-returned D2).
   const { runCliFromProcess } = await import("./adapters/cli/run-cli.js");
-  void runCliFromProcess({ installSyncStdout: true });
+  process.exit(await runCliFromProcess({ installSyncStdout: true }));
 }

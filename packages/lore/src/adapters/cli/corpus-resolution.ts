@@ -17,7 +17,7 @@
  *   - findLoreDbPath() / findLoreDbPathQuiet() — ≤3-line wrappers over
  *     `resolveCorpus()` preserving their EXACT pre-existing terminal
  *     contracts: the loud one still prints the original message and
- *     `process.exit(1)`s on a miss, the quiet one still returns `undefined`.
+ *     `exitCli(1)`s on a miss, the quiet one still returns `undefined`.
  *     Both treat `provenance: "undetermined"` as a miss — see the note on
  *     `definiteCorpusPath` below for why that is a mechanism, not a
  *     convention left to each call site.
@@ -58,6 +58,7 @@
  */
 
 import { existsSync, realpathSync } from "node:fs";
+import { exitCli } from "./run-scope.js";
 import { dirname, isAbsolute, join, resolve as resolvePath, sep } from "node:path";
 import { spawnSync } from "node:child_process";
 import { resolveCorpusProvenance } from "@lore/core";
@@ -325,7 +326,7 @@ export function resolveCorpus(cwd: string, env: NodeJS.ProcessEnv): ResolvedCorp
     const refusal = findSandboxRefusal(resolved.path, env);
     if (refusal !== undefined) {
       process.stderr.write(refusal);
-      process.exit(SANDBOX_REFUSAL_EXIT_CODE);
+      exitCli(SANDBOX_REFUSAL_EXIT_CODE);
     }
   }
   return resolved;
@@ -363,14 +364,14 @@ export function findLoreDbPath(locator: CorpusLocator): string {
   const path = definiteCorpusPath(locator);
   if (path === undefined) {
     process.stderr.write(NO_DB_MESSAGE);
-    process.exit(1);
+    exitCli(1);
   }
   return path;
 }
 
 /**
  * `findLoreDbPath`'s quiet sibling (§D3) — same resolution, `undefined` on a
- * miss instead of a loud `process.exit(1)`. Relocated here from
+ * miss instead of a loud `exitCli(1)`. Relocated here from
  * `gate-bypass-audit.ts` (which now only re-exports this name, so
  * `commands/gate.ts`'s existing import site is untouched) — see this
  * module's own header for why that relocation matters on its own, not just

@@ -37,6 +37,7 @@
  */
 
 import { dirname } from "path";
+import { exitCli, setExitCode } from "../run-scope.js";
 import { defineCommand } from "citty";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatError, formatErrorFor } from "../utils.js";
@@ -110,21 +111,21 @@ export default defineCommand({
       process.stderr.write(
         `Error: Unknown migration action '${args.version}'. Supported: v1, phases, spec-kind, tasks-to-phases, prd-to-outline, ordinals, spec-parents.\n`,
       );
-      process.exit(2);
+      exitCli(2);
     }
 
     // ── spec-parents action ───────────────────────────────────────────────
     if (args.version === "spec-parents") {
       if (args.apply === true && args.revert === true) {
         process.stderr.write("Error: --apply and --revert are mutually exclusive for `migrate spec-parents`.\n");
-        process.exit(2);
+        exitCli(2);
       }
       const { app } = loadLoreApp({ inv });
       try {
         const service = app.specParentMigrationService;
         if (service === undefined) {
           process.stderr.write("Internal error: SpecParentMigrationService not wired on App\n");
-          process.exitCode = 1;
+          setExitCode(1);
           return;
         }
         const mode = args.revert === true ? "revert" : args.apply === true ? "apply" : "preview";
@@ -136,7 +137,7 @@ export default defineCommand({
           } else {
             process.stderr.write(formatErrorFor(inv, result.error) + "\n");
           }
-          process.exitCode = exitCode(result.error);
+          setExitCode(exitCode(result.error));
           return;
         }
         const report = result.value;
@@ -159,7 +160,7 @@ export default defineCommand({
               2,
             ),
           );
-          process.exitCode = failed ? 4 : 0;
+          setExitCode(failed ? 4 : 0);
           return;
         }
         const label =
@@ -172,7 +173,7 @@ export default defineCommand({
         for (const skip of report.skipped) console.log(`  skipped ${skip.slug}: ${skip.reason}`);
         for (const e of report.errors) console.log(`  error ${e}`);
         if (mode === "preview") console.log("\nRe-run with --apply to execute, --revert to undo a previous apply.");
-        process.exitCode = failed ? 4 : 0;
+        setExitCode(failed ? 4 : 0);
       } finally {
         app.close();
       }
@@ -190,14 +191,14 @@ export default defineCommand({
       if (!projectDirResolved.ok) {
         app.close();
         process.stderr.write(formatError(projectDirResolved.error) + "\n");
-        process.exitCode = exitCode(projectDirResolved.error);
+        setExitCode(exitCode(projectDirResolved.error));
         return;
       }
       const projectDir = projectDirResolved.value;
       try {
         if (app.ordinalMigrationService === undefined) {
           process.stderr.write("Internal error: OrdinalMigrationService not wired on App\n");
-          process.exitCode = 1;
+          setExitCode(1);
           return;
         }
 
@@ -208,14 +209,14 @@ export default defineCommand({
           } else {
             process.stderr.write(formatErrorFor(inv, result.error) + "\n");
           }
-          process.exitCode = exitCode(result.error);
+          setExitCode(exitCode(result.error));
           return;
         }
 
         const report = result.value;
         if (args.json) {
           console.log(JSON.stringify({ ok: true, data: report }, null, 2));
-          process.exitCode = report.errors.length > 0 ? 4 : 0;
+          setExitCode(report.errors.length > 0 ? 4 : 0);
           return;
         }
 
@@ -260,7 +261,7 @@ export default defineCommand({
         if (dryRun) {
           console.log("\nRe-run with --apply to execute.");
         }
-        process.exitCode = report.errors.length > 0 ? 4 : 0;
+        setExitCode(report.errors.length > 0 ? 4 : 0);
       } finally {
         app.close();
       }
@@ -271,7 +272,7 @@ export default defineCommand({
     if (args.version === "prd-to-outline") {
       if (!args.prd) {
         process.stderr.write("Error: --prd <id-or-slug> is required for `migrate prd-to-outline`.\n");
-        process.exit(2);
+        exitCli(2);
       }
 
       const dryRun = args["dry-run"] ?? false;
@@ -279,7 +280,7 @@ export default defineCommand({
       try {
         if (app.outlineMigrationService === undefined) {
           process.stderr.write("Internal error: OutlineMigrationService not wired on App\n");
-          process.exitCode = 1;
+          setExitCode(1);
           return;
         }
         const service = app.outlineMigrationService;
@@ -287,7 +288,7 @@ export default defineCommand({
         const prdResult = await app.corpusService.get(args.prd);
         if (!prdResult.ok) {
           process.stderr.write(formatErrorFor(inv, prdResult.error) + "\n");
-          process.exitCode = exitCode(prdResult.error);
+          setExitCode(exitCode(prdResult.error));
           return;
         }
         const prd = prdResult.value.doc;
@@ -302,7 +303,7 @@ export default defineCommand({
           process.stderr.write(
             "Error: at least one --section <key> is required for `migrate prd-to-outline` (no auto-discovery — declare which sections to migrate).\n",
           );
-          process.exit(2);
+          exitCli(2);
         }
 
         const verdicts: SectionMigrationVerdict[] = [];
@@ -324,7 +325,7 @@ export default defineCommand({
 
         if (args.json) {
           console.log(JSON.stringify({ ok: refused === undefined, data: { verdicts, refused } }, null, 2));
-          process.exitCode = refused === undefined ? 0 : 4;
+          setExitCode(refused === undefined ? 0 : 4);
           return;
         }
 
@@ -347,7 +348,7 @@ export default defineCommand({
         if (dryRun && refused === undefined) {
           console.log("\nRe-run without --dry-run to apply changes.");
         }
-        process.exitCode = refused === undefined ? 0 : 4;
+        setExitCode(refused === undefined ? 0 : 4);
       } finally {
         app.close();
       }
@@ -375,7 +376,7 @@ export default defineCommand({
             `${partial.phases_created} phases created / ${partial.tasks_archived} tasks archived / ` +
               `${partial.evidence_merged} evidence merged before failure — safe to re-run (idempotent)\n`,
           );
-          process.exitCode = exitCode(cause);
+          setExitCode(exitCode(cause));
           return;
         }
 
@@ -416,7 +417,7 @@ export default defineCommand({
 
         if (!result.ok) {
           process.stderr.write(formatErrorFor(inv, result.error) + "\n");
-          process.exitCode = exitCode(result.error);
+          setExitCode(exitCode(result.error));
           return;
         }
 
@@ -449,7 +450,7 @@ export default defineCommand({
 
         if (!result.ok) {
           process.stderr.write(formatErrorFor(inv, result.error) + "\n");
-          process.exitCode = exitCode(result.error);
+          setExitCode(exitCode(result.error));
           return;
         }
 
@@ -484,7 +485,7 @@ export default defineCommand({
     // ── v1 action ─────────────────────────────────────────────────────────
     if (!args.from) {
       process.stderr.write("Error: --from <path> is required for `migrate v1`.\n");
-      process.exit(2);
+      exitCli(2);
     }
 
     const dryRun = args["dry-run"] ?? false;
@@ -496,7 +497,7 @@ export default defineCommand({
         const analyzeResult = app.migrationService.analyze(args.from);
         if (!analyzeResult.ok) {
           process.stderr.write(formatErrorFor(inv, analyzeResult.error) + "\n");
-          process.exitCode = exitCode(analyzeResult.error);
+          setExitCode(exitCode(analyzeResult.error));
           return;
         }
 
@@ -554,7 +555,7 @@ export default defineCommand({
 
       if (!executeResult.ok) {
         process.stderr.write(formatErrorFor(inv, executeResult.error) + "\n");
-        process.exitCode = exitCode(executeResult.error);
+        setExitCode(exitCode(executeResult.error));
         return;
       }
 

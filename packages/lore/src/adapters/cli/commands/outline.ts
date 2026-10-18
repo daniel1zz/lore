@@ -22,6 +22,7 @@
  */
 
 import type { Invocation } from "@lore/core";
+import { setExitCode } from "../run-scope.js";
 import { defineCommand } from "citty";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatError, formatErrorFor } from "../utils.js";
@@ -64,7 +65,7 @@ function refuseRetiredWrite(inv: Invocation, verb: string, json: unknown): void 
   const error = retiredOutlineWrite(verb);
   if (json === true) console.log(JSON.stringify({ ok: false, error }, null, 2));
   else process.stderr.write(formatErrorFor(inv, error) + "\n");
-  process.exitCode = exitCode(error);
+  setExitCode(exitCode(error));
 }
 
 export default defineCommand({
@@ -118,7 +119,7 @@ export default defineCommand({
           if (!result.ok) {
             if (args.json) console.log(JSON.stringify({ ok: false, error: result.error }, null, 2));
             else process.stderr.write(formatErrorFor(inv, result.error) + "\n");
-            process.exitCode = exitCode(result.error);
+            setExitCode(exitCode(result.error));
             return;
           }
 

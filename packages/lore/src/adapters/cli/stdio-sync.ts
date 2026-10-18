@@ -80,6 +80,7 @@
 
 import { writeSync } from "node:fs";
 import { format } from "node:util";
+import { activeScopeWriter } from "./run-scope.js";
 
 /** Milliseconds to block before retrying a write that hit EAGAIN (pipe buffer full). */
 const EAGAIN_RETRY_DELAY_MS = 5;
@@ -125,23 +126,6 @@ function sleepSyncMs(ms: number): void {
   Atomics.wait(sharedFlag, 0, 0, ms);
 }
 
-/** Receives every `writeAllSync` write instead of the real fd (see {@link setStdioInterceptor}). */
-export type StdioInterceptor = (fd: 1 | 2, text: string) => void;
-
-let stdioInterceptor: StdioInterceptor | null = null;
-
-/**
- * Route every `writeAllSync` write to `interceptor` (or back to the real fds with `null`).
- *
- * reason: the in-process test runner (tests/helpers/run-lore-in-process.ts, adr-tg-1 option b) runs a
- * command inside the test process and must capture what it prints. Commands that call `writeAllSync`
- * directly (governance, fragments) bypass `console` and `process.stdout`, so this is the one seam that
- * catches them. Production never installs an interceptor.
- */
-export function setStdioInterceptor(interceptor: StdioInterceptor | null): void {
-  stdioInterceptor = interceptor;
-}
-
 /**
  * Write the FULL utf8-encoded `text` to `fd`, looping through short writes
  * and EAGAIN retries until every byte is delivered — the fix for the
@@ -156,8 +140,12 @@ export function setStdioInterceptor(interceptor: StdioInterceptor | null): void 
  *   writeAllSync(1, JSON.stringify(bigPayload) + "\n");
  */
 export function writeAllSync(fd: 1 | 2, text: string): void {
-  if (stdioInterceptor !== null) {
-    stdioInterceptor(fd, text);
+  // reason: a run whose io is not the process streams (the in-process test runner) owns its output; commands that call
+  // `writeAllSync` directly (governance, fragments) bypass `console` and `process.stdout`, so this is the seam that
+  // catches them. The real binary's io IS the process streams, so it falls through to the fd write below.
+  const scoped = activeScopeWriter(fd);
+  if (scoped !== null) {
+    scoped.write(text);
     return;
   }
   const buffer = Buffer.from(text, "utf8");
@@ -183,6 +171,9 @@ export function writeAllSync(fd: 1 | 2, text: string): void {
  * internals) but write via `writeAllSync` — immune to the non-blocking-fd1
  * truncation defect this module's header documents.
  *
+ * It also routes `process.stdout.write` / `process.stderr.write` through `writeAllSync`, so no direct write is
+ * still unsent when the entry ends the process after a returned run.
+ *
  * Call exactly once, at CLI process startup, BEFORE any command output is
  * produced (see `../../index.ts`'s CLI branch). Do NOT call this on the MCP
  * server branch — stdout is the MCP JSON-RPC transport there.
@@ -196,4 +187,15 @@ export function installSyncStdio(): void {
   console.debug = (...args: unknown[]): void => writeLine(1, args);
   console.warn = (...args: unknown[]): void => writeLine(2, args);
   console.error = (...args: unknown[]): void => writeLine(2, args);
+  // reason: `runCli` now RETURNS and the entry ends the process with the code right after, where a successful run used
+  // to end by the event loop draining. A direct `process.stdout.write` (consola's reporter, ~600 command sites) on a
+  // non-blocking pipe can still hold unsent bytes at that moment, so those writes go through `writeAllSync` too.
+  for (const [stream, fd] of [[process.stdout, 1], [process.stderr, 2]] as const) {
+    stream.write = ((chunk: string | Uint8Array, encodingOrCallback?: unknown, callback?: unknown): boolean => {
+      writeAllSync(fd, typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8"));
+      const done = typeof encodingOrCallback === "function" ? encodingOrCallback : callback;
+      if (typeof done === "function") (done as () => void)();
+      return true;
+    }) as typeof stream.write;
+  }
 }

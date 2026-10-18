@@ -50,7 +50,7 @@ import { createApp } from "../../src/app.js";
 import type { App } from "../../src/app.js";
 import type { CreateDocInput, DocRecord, TaskClaim } from "@lore/core";
 import { resolveActor } from "../../src/adapters/cli/utils.js";
-import { liveInvocation, liveAmbient, liveWriteContext } from "../live-invocation.js";
+import { liveInvocation, liveAmbient, liveWriteContext, runHandlerForExit } from "../live-invocation.js";
 import type { Invocation } from "@lore/core";
 
 /**
@@ -70,7 +70,6 @@ const originalSessionEnv = new Map<string, string | undefined>();
 let originalBypass: string | undefined;
 
 beforeEach(() => {
-  process.exitCode = 0;
   originalBypass = process.env["LORE_GATE_BYPASS"];
   delete process.env["LORE_GATE_BYPASS"];
   for (const name of SESSION_ENV_VARS) originalSessionEnv.set(name, process.env[name]);
@@ -83,7 +82,6 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  process.exitCode = 0;
   if (originalBypass === undefined) delete process.env["LORE_GATE_BYPASS"];
   else process.env["LORE_GATE_BYPASS"] = originalBypass;
   for (const name of SESSION_ENV_VARS) {
@@ -202,14 +200,12 @@ function captureOutput() {
 async function runPreflight(phaseSlug: string): Promise<{ exitCode: number; stdout: string }> {
   const cmd = await importPhaseClaimGate();
   const output = captureOutput();
-  process.exitCode = 0;
+  let code: number;
   try {
-    await cmd.run({ args: { phase: phaseSlug }, inv: liveInvocation() });
+    code = await runHandlerForExit(() => cmd.run({ args: { phase: phaseSlug }, inv: liveInvocation() }));
   } finally {
     output.restore();
   }
-  const code = typeof process.exitCode === "number" ? process.exitCode : 0;
-  process.exitCode = 0;
   return { exitCode: code, stdout: output.stdout.join("\n") };
 }
 

@@ -14,6 +14,7 @@
  */
 
 import { defineCommand } from "citty";
+import { setExitCode } from "../run-scope.js";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatErrorFor } from "../utils.js";
 import type { App } from "../../../app.js";
@@ -22,7 +23,7 @@ import { invocationOf } from "../command-invocation.js";
 function requireRequirementService(app: App) {
   if (app.requirementService === undefined) {
     process.stderr.write("Error: RequirementService is not available in this build.\n");
-    process.exitCode = 1;
+    setExitCode(1);
     return undefined;
   }
   return app.requirementService;
@@ -62,7 +63,7 @@ export default defineCommand({
           if (!result.ok) {
             if (args.json) console.log(JSON.stringify({ ok: false, error: result.error }, null, 2));
             else process.stderr.write(formatErrorFor(inv, result.error));
-            process.exitCode = exitCode(result.error);
+            setExitCode(exitCode(result.error));
             return;
           }
           if (args.json) console.log(JSON.stringify({ ok: true, data: result.value }, null, 2));
@@ -91,7 +92,7 @@ export default defineCommand({
           if (!result.ok) {
             if (args.json) console.log(JSON.stringify({ ok: false, error: result.error }, null, 2));
             else process.stderr.write(formatErrorFor(inv, result.error));
-            process.exitCode = exitCode(result.error);
+            setExitCode(exitCode(result.error));
             return;
           }
           if (args.json) console.log(JSON.stringify({ ok: true, data: result.value }, null, 2));
@@ -118,7 +119,7 @@ export default defineCommand({
           if (!result.ok) {
             if (args.json) console.log(JSON.stringify({ ok: false, error: result.error }, null, 2));
             else process.stderr.write(formatErrorFor(inv, result.error));
-            process.exitCode = exitCode(result.error);
+            setExitCode(exitCode(result.error));
             return;
           }
           if (args.json) {
@@ -154,7 +155,7 @@ export default defineCommand({
           if (!result.ok) {
             if (args.json) console.log(JSON.stringify({ ok: false, error: result.error }, null, 2));
             else process.stderr.write(formatErrorFor(inv, result.error));
-            process.exitCode = exitCode(result.error);
+            setExitCode(exitCode(result.error));
             return;
           }
           if (args.json) console.log(JSON.stringify({ ok: true, data: result.value }, null, 2));

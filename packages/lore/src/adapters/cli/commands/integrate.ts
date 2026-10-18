@@ -25,6 +25,7 @@
  * Side-effect class: IO (git subprocesses, the floor command, the corpus directory's loss ledger).
  */
 import { spawnSync } from "node:child_process";
+import { exitCli, setExitCode } from "../run-scope.js";
 import { dirname, resolve as resolvePath } from "node:path";
 import { defineCommand } from "citty";
 import { invocationOf } from "../command-invocation.js";
@@ -139,7 +140,7 @@ export default defineCommand({
     const branch = typeof args.branch === "string" ? args.branch : "";
     if (branch === "") {
       process.stderr.write("Error: lore integrate requires a <branch>\n");
-      process.exit(2);
+      exitCli(2);
     }
     const { app, dbPath, config } = loadLoreApp({ inv });
     try {
@@ -148,7 +149,7 @@ export default defineCommand({
       const mainRoot = mainCheckoutRoot(runGit, projectRoot);
       if (mainRoot === undefined) {
         process.stderr.write(`Error: ${projectRoot} is not inside a non-bare git repository whose common dir is <root>/.git\n`);
-        process.exitCode = 1;
+        setExitCode(1);
         return;
       }
       const service = new IntegrateService({
@@ -168,14 +169,14 @@ export default defineCommand({
       });
       if (!result.ok) {
         process.stderr.write(`${formatError(result.error)}\n`);
-        process.exitCode = exitCode(result.error);
+        setExitCode(exitCode(result.error));
         return;
       }
       const rendered = renderOutcome(result.value);
       if (args.json === true) process.stdout.write(`${JSON.stringify({ ok: true, data: result.value }, null, 2)}\n`);
       else if (rendered.out !== undefined) process.stdout.write(`${rendered.out}\n`);
       if (rendered.err !== undefined) process.stderr.write(`${rendered.err}\n`);
-      process.exitCode = integrateExitCode(result.value);
+      setExitCode(integrateExitCode(result.value));
     } finally {
       app.close();
     }

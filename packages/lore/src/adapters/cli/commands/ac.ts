@@ -185,6 +185,7 @@
  */
 
 import { defineCommand } from "citty";
+import { setExitCode } from "../run-scope.js";
 import { existsSync } from "fs";
 import { dirname } from "path";
 import { loadLoreApp } from "../loader.js";
@@ -334,7 +335,7 @@ export default defineCommand({
 
           if (!result.ok) {
             process.stderr.write(formatErrorFor(inv, result.error) + "\n");
-            process.exitCode = exitCode(result.error);
+            setExitCode(exitCode(result.error));
             return;
           }
 
@@ -380,7 +381,7 @@ export default defineCommand({
 
           if (!result.ok) {
             process.stderr.write(formatErrorFor(inv, result.error) + "\n");
-            process.exitCode = exitCode(result.error);
+            setExitCode(exitCode(result.error));
             return;
           }
 
@@ -439,7 +440,7 @@ export default defineCommand({
           });
           if (!result.ok) {
             process.stderr.write(formatErrorFor(inv, result.error) + "\n");
-            process.exitCode = exitCode(result.error);
+            setExitCode(exitCode(result.error));
             return;
           }
           if (args.json) {
@@ -504,7 +505,7 @@ export default defineCommand({
 
           if (!result.ok) {
             process.stderr.write(formatErrorFor(inv, result.error) + "\n");
-            process.exitCode = exitCode(result.error);
+            setExitCode(exitCode(result.error));
             return;
           }
 
@@ -575,7 +576,7 @@ export default defineCommand({
 
           if (!result.ok) {
             process.stderr.write(formatErrorFor(inv, result.error) + "\n");
-            process.exitCode = exitCode(result.error);
+            setExitCode(exitCode(result.error));
             return;
           }
 
@@ -704,7 +705,7 @@ export default defineCommand({
               "evidence row attributed to this id. Use `lore ac rm --force <spec> <id>` then " +
               "`lore ac add <spec> <id> --mode <new-mode> ...` instead.\n",
           );
-          process.exitCode = 2;
+          setExitCode(2);
           return;
         }
 
@@ -715,7 +716,7 @@ export default defineCommand({
             "Error: lore ac set requires at least one field to change: --statement, --oracle, --command, " +
               "--timeout-ms, --rubric, --note, --covers, --cite, --falsifier-path/-find/-replace/-exit-code\n",
           );
-          process.exitCode = 2;
+          setExitCode(2);
           return;
         }
 
@@ -726,7 +727,7 @@ export default defineCommand({
           const reason = typeof args.correction === "string" ? args.correction.trim() : "";
           if (reason === "") {
             process.stderr.write('Error: --correction requires a non-empty reason (--correction "<why this is a fix>").\n');
-            process.exitCode = 2;
+            setExitCode(2);
             return;
           }
           correctionOpt = { reason };
@@ -750,7 +751,7 @@ export default defineCommand({
 
           if (!result.ok) {
             process.stderr.write(formatErrorFor(inv, result.error) + "\n");
-            process.exitCode = exitCode(result.error);
+            setExitCode(exitCode(result.error));
             return;
           }
 
@@ -790,7 +791,7 @@ function refuseCorrectionFlag(args: Record<string, unknown>, verb: "add" | "rm")
     `Error: lore ac ${verb} does not accept --correction — a ${verb === "add" ? "new" : "removed"} criterion is a ` +
       "new decision, not a fix. The only criterion correction is `lore ac set --correction \"<reason>\"` on ONE existing criterion.\n",
   );
-  process.exitCode = 2;
+  setExitCode(2);
   return true;
 }
 
@@ -812,7 +813,7 @@ function refuseBadTimeoutMs(args: Record<string, unknown>, verb: "add" | "set"):
   if (raw === undefined) return false;
   const fail = (why: string): true => {
     process.stderr.write(`Error: --timeout-ms ${why}\n`);
-    process.exitCode = 4;
+    setExitCode(4);
     return true;
   };
   if (typeof raw !== "string") return fail("must be a positive integer number of milliseconds");

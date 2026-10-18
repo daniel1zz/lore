@@ -5,7 +5,7 @@
  *
  * Strategy:
  *   - For validation tests (before DB is touched), call cmd.run({ args }) directly with
- *     process.exit mocked to throw (preventing test runner from dying).
+ *     the run's exit code read from `runHandlerForExit` (commands return it; none calls `process.exit`).
  *   - For happy-path tests that create actual documents, set up a real .lore/lore.db
  *     using createApp + SQLiteStore in a temp dir and call cmd.run() directly.
  *     Note: SQLiteStore uses bun:sqlite which vitest treats as external (SSR). The
@@ -25,7 +25,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { mkdtempSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
-import { liveInvocation } from "../../live-invocation.js";
+import { liveInvocation, runHandlerForExit } from "../../live-invocation.js";
 import type { Invocation } from "@lore/core";
 
 // ─── Command type with required run handler ────────────────────────────────────
@@ -59,17 +59,15 @@ function captureOutput() {
   };
 }
 
+/** The exit code the most recent run ended with (see {@link runCmd}); commands return it, they never call `process.exit`. */
+let lastExitCode = 0;
+
+/** Reads the last run's code: `undefined` when the run ended 0 (what "process.exit was never called" used to assert). */
 function captureExit() {
-  let capturedCode: number | undefined;
-  const spy = vi.spyOn(process, "exit").mockImplementation((code?: string | number | null | undefined): never => {
-    capturedCode = typeof code === "number" ? code : 0;
-    throw new Error(`process.exit(${code})`);
-  });
   return {
-    get code() {
-      return capturedCode;
+    get code(): number | undefined {
+      return lastExitCode === 0 ? undefined : lastExitCode;
     },
-    spy,
   };
 }
 
@@ -86,7 +84,8 @@ async function runCmd(
   if (!cmd.run) {
     throw new Error("Command is missing run handler");
   }
-  return cmd.run({ args, inv: liveInvocation() });
+  const run = cmd.run;
+  lastExitCode = await runHandlerForExit(() => run({ args, inv: liveInvocation() }));
 }
 
 async function importCreateCommand(): Promise<RunnableCommand> {
@@ -111,9 +110,7 @@ let originalCwd: string;
 let savedEditor: string | undefined;
 
 beforeEach(() => {
-  // reason: process.exitCode set by CLI commands (FU#4 refactor) leaks between in-process
-  // test invocations under bun test. Reset to 0 here to guarantee clean state each test.
-  process.exitCode = 0;
+  lastExitCode = 0;
 
   tmpDir = mkdtempSync(join(tmpdir(), "lore-cli-create-test-"));
   originalCwd = process.cwd();
@@ -135,8 +132,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  // reason: explicit 0 (not undefined) to reliably clear exitCode in all Bun versions.
-  process.exitCode = 0;
+  lastExitCode = 0;
 
   process.chdir(originalCwd);
   // Restore EDITOR env var
@@ -167,9 +163,7 @@ async function initLoreDb(): Promise<void> {
   const exit = captureExit();
   try {
     await runCmd(initCmd, { name: "test-corpus", description: "" });
-  } catch (e: unknown) {
-    if (!(e instanceof Error) || !e.message.startsWith("process.exit(")) throw e;
-    if (exit.code !== 0) throw new Error(`init exited with code ${exit.code}`);
+    if (lastExitCode !== 0) throw new Error(`init exited with code ${lastExitCode}`);
   } finally {
     output.restore();
   }
@@ -665,9 +659,7 @@ describe("lore create — error handling", () => {
     await initLoreDb();
     const cmd = await importCreateCommand();
     const output = captureOutput();
-    // reason: FU#4 refactored post-app exits to process.exitCode = N; return; so the spy
-    // is never triggered for service-layer errors. Reset exitCode before + read it after.
-    process.exitCode = 0;
+    lastExitCode = 0;
 
     try {
       // reason: --no-ai bypasses AI generation (SPEC-017) to reach the service layer where
@@ -684,10 +676,8 @@ describe("lore create — error handling", () => {
     }
 
     // Should exit with a non-zero code (3 = DOC_NOT_FOUND or 4 = validation)
-    expect(process.exitCode).toBeDefined();
-    expect(process.exitCode).not.toBe(0);
+    expect(lastExitCode).not.toBe(0);
     expect(output.stderr.join("\n")).toMatch(/not found|Error/i);
-    process.exitCode = 0; // reset for subsequent tests
   });
 
   it("exits 2 for invalid doc type", async () => {
@@ -998,8 +988,6 @@ describe("lore create — state verification", () => {
     // superRefine and surfaces as VALIDATION_ERROR mapped to exit 4 (SPEC-032 §3.1). No --parent
     // is supplied (a spec takes no parent, BR-2) so the parent refusal (also exit 4, but the wrong
     // reason) cannot mask the assertion under test.
-    process.exitCode = 0;
-
     try {
       await runCmd(cmd, {
         type: "spec",
@@ -1011,9 +999,8 @@ describe("lore create — state verification", () => {
       output.restore();
     }
 
-    expect(process.exitCode).toBe(4);
+    expect(lastExitCode).toBe(4);
     expect(output.stderr.join("\n")).toMatch(/spec_kind|bogus/i);
-    process.exitCode = 0; // reset for subsequent tests
   });
 
   it("exits 2 when --kind is passed for prd (type-flag mismatch)", async () => {
@@ -1330,9 +1317,6 @@ describe("lore create — regression guards", () => {
     expect(prdSlug).toBeTruthy();
 
     const output = captureOutput();
-    // reason: FU#4 refactored post-app exits to process.exitCode = N; return; so
-    // service-layer errors no longer trigger the process.exit spy. Read exitCode directly.
-    process.exitCode = 0;
     try {
       await runCmd(cmd, {
         type: "spec",
@@ -1345,9 +1329,8 @@ describe("lore create — regression guards", () => {
       output.restore();
     }
 
-    expect(process.exitCode).toBe(4);
+    expect(lastExitCode).toBe(4);
     expect(output.stderr.join("")).toContain("lore ac cite");
-    process.exitCode = 0; // reset for subsequent tests
   });
 
   // N/A: no other known historical regressions beyond what spec/plan coverage above provides

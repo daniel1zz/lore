@@ -130,6 +130,7 @@
  */
 
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { getExitCode, setExitCode } from "../run-scope.js";
 import { spawnSync } from "node:child_process";
 import { resolveGlobalConfigPath } from "@lore/core/node";
 import type { Invocation } from "@lore/core";
@@ -290,7 +291,7 @@ async function confirmOrReport(opts: {
     process.stderr.write(
       `Error: refusing to ${opts.verb} without confirmation in a non-interactive session — pass --yes.\n`,
     );
-    process.exitCode = 2;
+    setExitCode(2);
     return false;
   }
 
@@ -299,7 +300,7 @@ async function confirmOrReport(opts: {
     const confirmed = await promptYesNo("Proceed? [y/N] ");
     if (!confirmed) {
       console.log("Aborted — no changes made.");
-      process.exitCode = 0;
+      setExitCode(0);
       return false;
     }
   }
@@ -620,7 +621,7 @@ function applyLanguageProjections(plan: readonly LanguageProjection[]): Result<v
 /** Reports a LoreError on stderr and sets the mapped exit code. */
 function failWith(inv: Invocation, error: LoreError): void {
   process.stderr.write(formatErrorFor(inv, error) + "\n");
-  process.exitCode = exitCode(error);
+  setExitCode(exitCode(error));
 }
 
 /**
@@ -867,7 +868,7 @@ async function runProjectScaffold(opts: {
   const result = await service.scaffold(repoDir);
   if (!result.ok) {
     process.stderr.write(formatErrorFor(opts.inv, result.error) + "\n");
-    process.exitCode = exitCode(result.error);
+    setExitCode(exitCode(result.error));
     return;
   }
 
@@ -888,7 +889,7 @@ async function runProjectScaffold(opts: {
   } else {
     console.log(renderProjectScaffoldReceipt(receipt, { targetDir: repoDir, binPath: opts.binPath }));
   }
-  process.exitCode = scaffoldReportFailed(result.value) ? 1 : 0;
+  setExitCode(scaffoldReportFailed(result.value) ? 1 : 0);
 
   // reason: runs only after a scaffold that did not itself fail — a failed scaffold may lack the
   // CLAUDE.md / config the refresh flow reads, and its own non-zero exit already reports the run.
@@ -922,7 +923,7 @@ async function runProjectUninstall(opts: { json: boolean; yes: boolean; inv: Inv
   const result = await uninstallProject(makeRealProjectRemoveFs(), { repoDir });
   if (!result.ok) {
     process.stderr.write(formatErrorFor(opts.inv, result.error) + "\n");
-    process.exitCode = exitCode(result.error);
+    setExitCode(exitCode(result.error));
     return;
   }
 
@@ -931,14 +932,14 @@ async function runProjectUninstall(opts: { json: boolean; yes: boolean; inv: Inv
   } else {
     console.log(renderProjectUninstallReport(repoDir, result.value));
   }
-  process.exitCode = 0;
+  setExitCode(0);
 }
 
 async function runDryRun(inv: Invocation, service: SetupService, targetDir: string, binPath: string, json: boolean): Promise<void> {
   const planResult = await service.planInstall({ targetDir });
   if (!planResult.ok) {
     process.stderr.write(formatErrorFor(inv, planResult.error) + "\n");
-    process.exitCode = exitCode(planResult.error);
+    setExitCode(exitCode(planResult.error));
     return;
   }
 
@@ -947,7 +948,7 @@ async function runDryRun(inv: Invocation, service: SetupService, targetDir: stri
   } else {
     console.log(renderInstallPlan(planResult.value, { targetDir, binPath }));
   }
-  process.exitCode = 0;
+  setExitCode(0);
 }
 
 /**
@@ -1012,7 +1013,7 @@ async function runInstall(inv: Invocation,
   });
   if (!result.ok) {
     process.stderr.write(formatErrorFor(inv, result.error) + "\n");
-    process.exitCode = exitCode(result.error);
+    setExitCode(exitCode(result.error));
     return;
   }
 
@@ -1023,7 +1024,7 @@ async function runInstall(inv: Invocation,
     console.log(renderInstallReceipt(result.value, ctx));
     renderDivergedSkipSection(result.value.skippedDiverged);
   }
-  process.exitCode = mcpOutcomeExitCode(result.value);
+  setExitCode(mcpOutcomeExitCode(result.value));
 
   const projected = applyLanguageProjections(languagePlan.value);
   if (!projected.ok) failWith(opts.inv, projected.error);
@@ -1046,7 +1047,7 @@ async function runUninstall(inv: Invocation,
   const result = await service.uninstall({ targetDir: opts.targetDir });
   if (!result.ok) {
     process.stderr.write(formatErrorFor(inv, result.error) + "\n");
-    process.exitCode = exitCode(result.error);
+    setExitCode(exitCode(result.error));
     return;
   }
 
@@ -1056,7 +1057,7 @@ async function runUninstall(inv: Invocation,
   } else {
     console.log(renderUninstallReceipt(result.value, ctx));
   }
-  process.exitCode = mcpOutcomeExitCode(result.value);
+  setExitCode(mcpOutcomeExitCode(result.value));
 }
 
 /**
@@ -1098,8 +1099,8 @@ async function runGitHubChannelHealthCheck(opts: { json: boolean; inv: Invocatio
     process.stderr.write(`✗ GitHub feedback channel unavailable: ${report.message}\n`);
   }
 
-  if (!report.ok && (process.exitCode === 0 || process.exitCode === undefined)) {
-    process.exitCode = ghHealthExitCode(report.condition);
+  if (!report.ok && getExitCode() === 0) {
+    setExitCode(ghHealthExitCode(report.condition));
   }
 }
 
@@ -1136,7 +1137,7 @@ async function runCheckDispatch(opts: { targetDir: string; json: boolean; inv: I
   const freshnessResult = await computeSetupCheckReport({ targetDir: opts.targetDir, cwd: opts.inv.cwd });
   if (!freshnessResult.ok) {
     process.stderr.write(formatErrorFor(opts.inv, freshnessResult.error) + "\n");
-    process.exitCode = exitCode(freshnessResult.error);
+    setExitCode(exitCode(freshnessResult.error));
     await runGitHubChannelHealthCheck({ json: true, inv: opts.inv });
     return;
   }
@@ -1147,9 +1148,9 @@ async function runCheckDispatch(opts: { targetDir: string; json: boolean; inv: I
 
   console.log(JSON.stringify({ ok: true, data: { ...report, github_channel: channelReport } }, null, 2));
 
-  process.exitCode = report.summary === "sync" ? 0 : 3;
-  if (!channelReport.ok && process.exitCode === 0) {
-    process.exitCode = ghHealthExitCode(channelReport.condition);
+  setExitCode(report.summary === "sync" ? 0 : 3);
+  if (!channelReport.ok && getExitCode() === 0) {
+    setExitCode(ghHealthExitCode(channelReport.condition));
   }
 }
 
@@ -1231,7 +1232,7 @@ export default defineCommand({
         process.stderr.write(
           `Error: --check cannot be combined with ${mutexFlag} — a read-only check has no separate mutate mode.\n`,
         );
-        process.exitCode = 2;
+        setExitCode(2);
         return;
       }
       if (args.project === true) {
@@ -1239,7 +1240,7 @@ export default defineCommand({
         // exactly as `--project` alone refuses it: the project scaffold has no machine target to redirect.
         if (claudeDirFlag !== undefined) {
           process.stderr.write("Error: --check --project cannot be combined with --claude-dir — the project check reads only the current repo.\n");
-          process.exitCode = 2;
+          setExitCode(2);
           return;
         }
         await runProjectCheck({ json, assetsRoot: resolveAssetsRoot(buildSetupPathContext(inv)), inv });
@@ -1262,7 +1263,7 @@ export default defineCommand({
     });
     if (!validated.ok) {
       process.stderr.write(`Error: ${validated.message}\n`);
-      process.exitCode = 2;
+      setExitCode(2);
       return;
     }
 

@@ -5,6 +5,7 @@
  */
 
 import { defineCommand } from "citty";
+import { exitCli } from "../run-scope.js";
 import { join, dirname } from "path";
 import { existsSync } from "fs";
 import { resolveSyncCredentials } from "@lore/core";
@@ -143,7 +144,7 @@ const syncSetup = defineCommand({
       } else {
         process.stderr.write(`Error: ${msg}\n`);
       }
-      process.exit(1);
+      exitCli(1);
     }
 
     // Validate --url must start with libsql://
@@ -154,7 +155,7 @@ const syncSetup = defineCommand({
       } else {
         process.stderr.write(`Error: ${msg}\n`);
       }
-      process.exit(1);
+      exitCli(1);
     }
 
     const loreDir = findLoreDir(inv.cwd);
@@ -165,7 +166,7 @@ const syncSetup = defineCommand({
       } else {
         process.stderr.write(`Error: ${msg}\n`);
       }
-      process.exit(1);
+      exitCli(1);
     }
 
     // Load existing config (may not have sync section)
@@ -177,7 +178,7 @@ const syncSetup = defineCommand({
       } else {
         process.stderr.write(`Error: ${msg}\n`);
       }
-      process.exit(1);
+      exitCli(1);
     }
 
     const tokenEnv = (args["token-env"] as string | undefined) ?? "LORE_SYNC_TOKEN";
@@ -203,7 +204,7 @@ const syncSetup = defineCommand({
       } else {
         process.stderr.write(`Error: ${msg}\n`);
       }
-      process.exit(1);
+      exitCli(1);
     }
 
     if (args.json) {
@@ -226,7 +227,7 @@ const syncSetup = defineCommand({
       console.log(`  Config:        ${join(loreDir, ".lore", "config.yaml")}`);
     }
 
-    process.exit(0);
+    exitCli(0);
   },
 });
 
@@ -254,7 +255,7 @@ const syncStatus = defineCommand({
       } else {
         process.stderr.write(`Error: ${msg}\n`);
       }
-      process.exit(1);
+      exitCli(1);
     }
 
     const configResult = loadConfig(loreDir);
@@ -265,7 +266,7 @@ const syncStatus = defineCommand({
       } else {
         process.stderr.write(`Error: ${msg}\n`);
       }
-      process.exit(1);
+      exitCli(1);
     }
 
     const config = configResult.value;
@@ -279,7 +280,7 @@ const syncStatus = defineCommand({
         console.log("Sync is not configured (local-only mode).");
         console.log("Run `lore sync setup --url libsql://...` to configure remote sync.");
       }
-      process.exit(0);
+      exitCli(0);
     }
 
     if (!syncSection.enabled) {
@@ -303,7 +304,7 @@ const syncStatus = defineCommand({
         console.log(`  Token env var: ${syncSection.auth_token_env}`);
         console.log(`  Interval:      ${syncSection.interval}s`);
       }
-      process.exit(0);
+      exitCli(0);
     }
 
     // Sync is enabled
@@ -328,7 +329,7 @@ const syncStatus = defineCommand({
       console.log(`  Interval:      ${syncSection.interval}s`);
     }
 
-    process.exit(0);
+    exitCli(0);
   },
 });
 
@@ -356,7 +357,7 @@ const syncPushCmd = defineCommand({
       } else {
         process.stderr.write(`Error: ${msg}\n`);
       }
-      process.exit(1);
+      exitCli(1);
     }
 
     const configResult = loadConfig(loreDir);
@@ -367,7 +368,7 @@ const syncPushCmd = defineCommand({
       } else {
         process.stderr.write(`Error: ${msg}\n`);
       }
-      process.exit(1);
+      exitCli(1);
     }
 
     const credResult = resolveSyncCredentials(configResult.value, invocationOf(context).env);
@@ -381,7 +382,7 @@ const syncPushCmd = defineCommand({
       } else {
         process.stderr.write(`Error: ${msg}\n`);
       }
-      process.exit(1);
+      exitCli(1);
     }
 
     const localDbPath = join(loreDir, ".lore", "lore.db");
@@ -394,7 +395,7 @@ const syncPushCmd = defineCommand({
       } else {
         process.stderr.write(`Error: ${msg}\n`);
       }
-      process.exit(1);
+      exitCli(1);
     }
 
     const report = pushResult.value;
@@ -409,7 +410,7 @@ const syncPushCmd = defineCommand({
       console.log(`  Total: ${report.total_rows} rows`);
     }
 
-    process.exit(0);
+    exitCli(0);
   },
 });
 
@@ -437,7 +438,7 @@ const syncPullCmd = defineCommand({
       } else {
         process.stderr.write(`Error: ${msg}\n`);
       }
-      process.exit(1);
+      exitCli(1);
     }
 
     const configResult = loadConfig(loreDir);
@@ -448,7 +449,7 @@ const syncPullCmd = defineCommand({
       } else {
         process.stderr.write(`Error: ${msg}\n`);
       }
-      process.exit(1);
+      exitCli(1);
     }
 
     const credResult = resolveSyncCredentials(configResult.value, invocationOf(context).env);
@@ -462,7 +463,7 @@ const syncPullCmd = defineCommand({
       } else {
         process.stderr.write(`Error: ${msg}\n`);
       }
-      process.exit(1);
+      exitCli(1);
     }
 
     const localDbPath = join(loreDir, ".lore", "lore.db");
@@ -475,7 +476,7 @@ const syncPullCmd = defineCommand({
       } else {
         process.stderr.write(`Error: ${msg}\n`);
       }
-      process.exit(1);
+      exitCli(1);
     }
 
     const syncInfo = pullResult.value;
@@ -489,7 +490,7 @@ const syncPullCmd = defineCommand({
       }
     }
 
-    process.exit(0);
+    exitCli(0);
   },
 });
 

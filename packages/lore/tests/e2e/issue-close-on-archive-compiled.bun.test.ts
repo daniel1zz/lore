@@ -101,6 +101,7 @@ exit 99
 async function runLore(corpus: Corpus, args: string[]): Promise<RunResult> {
   const proc = await runLoreInProcess(args, {
     cwd: corpus.dir,
+    home: corpus.dir,
     env: {
       ...process.env,
       HOME: corpus.dir,

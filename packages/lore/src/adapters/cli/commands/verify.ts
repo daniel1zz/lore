@@ -181,6 +181,7 @@
  */
 
 import { spawnSync } from "node:child_process";
+import { setExitCode } from "../run-scope.js";
 import { resolve as resolvePath } from "node:path";
 import { createInterface } from "node:readline/promises";
 import { defineCommand } from "citty";
@@ -502,7 +503,7 @@ export default defineCommand({
             "Error: --falsify requires the PLAN positional (the attested-red runner is not " +
               "reachable from the ad-hoc --task path).\n",
           );
-          process.exitCode = 2;
+          setExitCode(2);
           return;
         }
         const falsifyResult = await requireVerifyRunnerService(app).verifyFalsifier(planArg, falsifyAcId, {
@@ -513,7 +514,7 @@ export default defineCommand({
         });
         if (!falsifyResult.ok) {
           process.stderr.write(formatErrorFor(inv, falsifyResult.error) + "\n");
-          process.exitCode = exitCode(falsifyResult.error);
+          setExitCode(exitCode(falsifyResult.error));
           return;
         }
         const {
@@ -570,7 +571,7 @@ export default defineCommand({
         // least one executed AC's ... guard downgraded its result to
         // inconclusive") rather than inventing a second meaning for 3 on this
         // branch: an inconclusive green control is never a silent success.
-        process.exitCode = falsifyOutcome === "inconclusive" ? 3 : 0;
+        setExitCode(falsifyOutcome === "inconclusive" ? 3 : 0);
         return;
       }
 
@@ -600,7 +601,7 @@ export default defineCommand({
             "Error: PLAN positional is required unless --task names a SPEC-069 --adhoc task " +
               "(the ad-hoc runner path omits PLAN entirely; see 'lore verify --help').\n",
           );
-          process.exitCode = 2;
+          setExitCode(2);
           return;
         }
 
@@ -610,14 +611,14 @@ export default defineCommand({
         const taskResult = await app.corpusService.get(taskArg);
         if (!taskResult.ok) {
           process.stderr.write(formatErrorFor(inv, taskResult.error) + "\n");
-          process.exitCode = exitCode(taskResult.error);
+          setExitCode(exitCode(taskResult.error));
           return;
         }
 
         const specsResult = await app.corpusService.listFull({ type: "spec" });
         if (!specsResult.ok) {
           process.stderr.write(formatErrorFor(inv, specsResult.error) + "\n");
-          process.exitCode = exitCode(specsResult.error);
+          setExitCode(exitCode(specsResult.error));
           return;
         }
 
@@ -638,7 +639,7 @@ export default defineCommand({
 
       if (!result.ok) {
         process.stderr.write(formatErrorFor(inv, result.error) + "\n");
-        process.exitCode = exitCode(result.error);
+        setExitCode(exitCode(result.error));
         return;
       }
 
@@ -680,7 +681,7 @@ export default defineCommand({
             2,
           ),
         );
-        process.exitCode = verifyExitCode;
+        setExitCode(verifyExitCode);
         return;
       }
 
@@ -715,7 +716,7 @@ export default defineCommand({
       const inconclusiveSuffix = inconclusiveCount > 0 ? `, ${inconclusiveCount} inconclusive` : "";
       console.log(`${passedCount} passed, ${failedCount} failed${inconclusiveSuffix}.`);
 
-      process.exitCode = verifyExitCode;
+      setExitCode(verifyExitCode);
     } finally {
       app.close();
     }

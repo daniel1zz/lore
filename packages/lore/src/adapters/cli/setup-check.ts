@@ -106,7 +106,7 @@
  *     §C6 D5) reads `setup.check_reminder` from the TEAM `.lore/config.yaml`
  *     — walked up from `opts.cwd` (default `process.cwd()`), the same
  *     "nearest ancestor `.lore/`" convention `loader.ts::findLoreDbPath`
- *     uses, but WITHOUT that helper's `process.exit(1)` on a miss: `--check`
+ *     uses, but WITHOUT that helper's `exitCli(1)` on a miss: `--check`
  *     must keep working (default enabled) outside any project, and this
  *     module already forgoes `loadLoreApp()` entirely (see the "bootstrap-
  *     stage" invariant above). No `.lore/config.yaml` found, or found but
@@ -123,6 +123,7 @@
  */
 
 import { createHash } from "node:crypto";
+import { exitCli, setExitCode } from "./run-scope.js";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
@@ -638,7 +639,7 @@ export async function runSetupCheck(opts: {
   const result = await computeSetupCheckReport(opts);
   if (!result.ok) {
     process.stderr.write(formatErrorFor(opts.inv, result.error) + "\n");
-    process.exitCode = exitCode(result.error);
+    setExitCode(exitCode(result.error));
     return;
   }
   const report = result.value;
@@ -648,7 +649,7 @@ export async function runSetupCheck(opts: {
   } else {
     console.log(renderSetupCheckReport(report, opts.targetDir));
   }
-  process.exitCode = report.summary === "sync" ? 0 : 3;
+  setExitCode(report.summary === "sync" ? 0 : 3);
 }
 
 // ─── Project check (BR-1085): collected by the caller, finished here ────────
@@ -697,7 +698,7 @@ export async function finishProjectSetupCheck(opts: {
     );
   } catch (cause) {
     process.stderr.write(`Error: lore setup --project --check could not write its cache at ${cachePath}: ${describeCaught(cause)}\n`);
-    process.exitCode = 1;
+    setExitCode(1);
     return;
   }
 
@@ -706,5 +707,5 @@ export async function finishProjectSetupCheck(opts: {
   } else {
     console.log(renderSetupCheckReport(report, opts.repoDir, "project"));
   }
-  process.exitCode = inSync ? 0 : 3;
+  setExitCode(inSync ? 0 : 3);
 }

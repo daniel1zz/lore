@@ -7,7 +7,7 @@
  *   - `<baseDir>/local-key` is written with mode 0600 (owner-readable only).
  *   - Existing file is reused without rotation.
  *   - Missing file triggers api key creation via the injected creator.
- *   - Failure to create is fatal (process.exit(1)) — no silent fallback.
+ *   - Failure to create is fatal (exitCli(1)) — no silent fallback.
  *   - SPEC-078 D1: `baseDir` is now the MACHINE-scope auth store's own base directory
  *     (`MachineAuthStores.baseDir`, i.e. `createMachineAuthStores()`'s resolved XDG state
  *     dir), never this project's `.lore/` — the "dashboard-local" key is machine-wide
@@ -25,6 +25,7 @@
  */
 
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { exitCli } from "./run-scope.js";
 import { join } from "node:path";
 
 // ─── DI interface ───────────────────────────────────────────────────────────────
@@ -55,7 +56,7 @@ export interface LocalApiKeyCreator {
  *   pass the machine-scope auth store's own base dir (`MachineAuthStores.baseDir`), not
  *   this project's `.lore/` — see this module's header for why.
  * @returns The raw API key string (never hashed, caller must keep it secret).
- * @throws process.exit(1) if key creation fails.
+ * @throws exitCli(1) if key creation fails.
  * @example
  *   const rawKey = await ensureLocalApiKey(machineAuth.apiKeyStore, machineAuth.baseDir);
  */
@@ -87,9 +88,9 @@ export async function ensureLocalApiKey(
       `Hint: Run 'lore agent revoke dashboard-local' then delete '${keyPath}' and retry.\n`,
     );
   }
-  // reason: process.exit(1) is mocked in vitest tests; the return guards against
+  // reason: exitCli(1) is mocked in vitest tests; the return guards against
   // falling through into result.value access when ok=false. In production, process.exit
   // terminates the process so the return is never reached.
-  process.exit(1);
+  exitCli(1);
   return "" as never;
 }

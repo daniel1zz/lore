@@ -23,6 +23,7 @@
  */
 
 import { dirname, join } from "node:path";
+import { setExitCode } from "../run-scope.js";
 import { defineCommand } from "citty";
 import { CITE_GATE_MODES, err, ok } from "@lore/core";
 import type { CiteGateMode, Invocation, LoreError, Result } from "@lore/core";
@@ -96,7 +97,7 @@ function repeatable(value: unknown): string[] {
 function fail(inv: Invocation, error: LoreError, json: boolean, code: number): void {
   if (json) console.log(JSON.stringify({ ok: false, error }, null, 2));
   else process.stderr.write(formatErrorFor(inv, error));
-  process.exitCode = code;
+  setExitCode(code);
 }
 
 function usageError(field: string, message: string, value?: unknown): LoreError {

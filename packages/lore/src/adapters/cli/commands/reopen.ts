@@ -8,6 +8,7 @@
  */
 
 import { defineCommand } from "citty";
+import { exitCli, setExitCode } from "../run-scope.js";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatErrorFor, resolveActor } from "../utils.js";
 import { invocationOf } from "../command-invocation.js";
@@ -37,7 +38,7 @@ export default defineCommand({
     const inv = invocationOf(context);
     if (typeof args.reason !== "string" || args.reason.trim() === "") {
       process.stderr.write("Error: --reason is required: lore reopen <spec> --reason \"<why>\"\n");
-      process.exit(2);
+      exitCli(2);
     }
     const { app } = loadLoreApp({ inv });
     try {
@@ -46,7 +47,7 @@ export default defineCommand({
       const result = await app.reviewService.reopen(args.id, args.reason, { reviewer });
       if (!result.ok) {
         process.stderr.write(formatErrorFor(inv, result.error) + "\n");
-        process.exitCode = exitCode(result.error);
+        setExitCode(exitCode(result.error));
         return;
       }
 

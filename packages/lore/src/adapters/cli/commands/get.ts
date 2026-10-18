@@ -74,6 +74,7 @@
  */
 
 import { defineCommand } from "citty";
+import { setExitCode } from "../run-scope.js";
 import { ok, ruleIdPrefixOfNode } from "@lore/core";
 import type { DocRecord, LoreError, Result } from "@lore/core";
 import {
@@ -204,7 +205,7 @@ export default defineCommand({
 
       if (!result.ok) {
         process.stderr.write(formatErrorFor(inv, result.error) + "\n");
-        process.exitCode = exitCode(result.error);
+        setExitCode(exitCode(result.error));
         return;
       }
 
@@ -247,7 +248,7 @@ export default defineCommand({
       const latest = await loadVersionAttributions(attributionStore, doc.id, 1);
       if (!latest.ok) {
         process.stderr.write(formatErrorFor(inv, latest.error) + "\n");
-        process.exitCode = exitCode(latest.error);
+        setExitCode(exitCode(latest.error));
         return;
       }
       const attribution: WriteAttribution = latest.value[0]?.attribution ?? { attested: UNATTESTED, claimed: doc.created_by };
@@ -256,7 +257,7 @@ export default defineCommand({
       const relations = await loadSpecRelations(app, doc);
       if (!relations.ok) {
         process.stderr.write(formatErrorFor(inv, relations.error) + "\n");
-        process.exitCode = exitCode(relations.error);
+        setExitCode(exitCode(relations.error));
         return;
       }
 
@@ -266,7 +267,7 @@ export default defineCommand({
       if (!args.json) {
         if (app.recordLockService === undefined) {
           process.stderr.write("Error: RecordLockService is not wired on App; cannot resolve Standing.\n");
-          process.exitCode = 1;
+          setExitCode(1);
           return;
         }
         const lock = await app.recordLockService.resolve(doc);
@@ -275,7 +276,7 @@ export default defineCommand({
         const failure = [lock, corrections, later].find((r) => !r.ok);
         if (failure !== undefined && !failure.ok) {
           process.stderr.write(formatErrorFor(inv, failure.error) + "\n");
-          process.exitCode = exitCode(failure.error);
+          setExitCode(exitCode(failure.error));
           return;
         }
         if (lock.ok && corrections.ok && later.ok) {

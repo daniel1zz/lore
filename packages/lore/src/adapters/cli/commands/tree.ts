@@ -39,6 +39,7 @@
  */
 
 import { defineCommand } from "citty";
+import { setExitCode } from "../run-scope.js";
 import { loadLoreApp } from "../loader.js";
 import {
   exitCode,
@@ -245,7 +246,7 @@ export default defineCommand({
         );
         if (!checkR.ok) {
           process.stderr.write(formatErrorFor(inv, checkR.error) + "\n");
-          process.exitCode = exitCode(checkR.error);
+          setExitCode(exitCode(checkR.error));
           return;
         }
 
@@ -282,7 +283,7 @@ export default defineCommand({
           }
         }
 
-        process.exitCode = orphanDrifts.length > 0 ? 3 : 0;
+        setExitCode(orphanDrifts.length > 0 ? 3 : 0);
         return;
       }
 
@@ -293,7 +294,7 @@ export default defineCommand({
       const depthResult = parsePositiveIntArg(args.depth ?? "3", "--depth", { min: 1 });
       if (!depthResult.ok) {
         process.stderr.write(depthResult.message + "\n");
-        process.exitCode = 2;
+        setExitCode(2);
         return;
       }
       const result = await app.corpusService.tree(args.root, { depth: depthResult.value });
@@ -308,11 +309,11 @@ export default defineCommand({
           process.stderr.write(
             "No PRD documents found. Create a PRD first with `lore create prd --title <name>`.\n",
           );
-          process.exitCode = 3;
+          setExitCode(3);
           return;
         }
         process.stderr.write(formatErrorFor(inv, result.error) + "\n");
-        process.exitCode = exitCode(result.error);
+        setExitCode(exitCode(result.error));
         return;
       }
 

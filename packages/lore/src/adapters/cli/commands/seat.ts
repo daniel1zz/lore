@@ -33,6 +33,7 @@
  */
 
 import { defineCommand } from "citty";
+import { setExitCode } from "../run-scope.js";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatErrorFor } from "../utils.js";
 import { buildSeatListJsonPayload, formatSeatList } from "../seat-render.js";
@@ -72,7 +73,7 @@ export default defineCommand({
     try {
       if (app.seatService === undefined) {
         process.stderr.write("Error: SeatService not wired on this App instance.\n");
-        process.exitCode = 1;
+        setExitCode(1);
         return;
       }
       const seatService = app.seatService;
@@ -83,7 +84,7 @@ export default defineCommand({
         const result = await seatService.list();
         if (!result.ok) {
           process.stderr.write(formatErrorFor(inv, result.error) + "\n");
-          process.exitCode = exitCode(result.error);
+          setExitCode(exitCode(result.error));
           return;
         }
         if (args.json) {
@@ -97,7 +98,7 @@ export default defineCommand({
       if (target === "resume" || target === "remove") {
         if (planArg === undefined || planArg.length === 0) {
           process.stderr.write(`Error: \`lore seat ${target}\` requires a plan id/slug: lore seat ${target} <plan>\n`);
-          process.exitCode = 2;
+          setExitCode(2);
           return;
         }
 
@@ -105,7 +106,7 @@ export default defineCommand({
           const result = await seatService.resume(planArg);
           if (!result.ok) {
             process.stderr.write(formatErrorFor(inv, result.error) + "\n");
-            process.exitCode = exitCode(result.error);
+            setExitCode(exitCode(result.error));
             return;
           }
           if (args.json) {
@@ -120,7 +121,7 @@ export default defineCommand({
         const result = await seatService.remove(planArg, { force: args.force === true });
         if (!result.ok) {
           process.stderr.write(formatErrorFor(inv, result.error) + "\n");
-          process.exitCode = exitCode(result.error);
+          setExitCode(exitCode(result.error));
           return;
         }
         if (args.json) {
@@ -139,7 +140,7 @@ export default defineCommand({
       const result = await seatService.enter(target, { mainCwd: inv.cwd });
       if (!result.ok) {
         process.stderr.write(formatErrorFor(inv, result.error) + "\n");
-        process.exitCode = exitCode(result.error);
+        setExitCode(exitCode(result.error));
         return;
       }
       if (args.json) {

@@ -35,6 +35,7 @@
  */
 
 import { readFileSync, realpathSync } from "node:fs";
+import { setExitCode } from "../run-scope.js";
 import { dirname } from "node:path";
 import { defineCommand } from "citty";
 import type { Invocation } from "@lore/core";
@@ -104,7 +105,7 @@ function formatTrailReview(view: TrailReviewView): string {
 /** Refuses a trail verb (`trail` | `trail-review`): exit 4 naming the trail-access rule. */
 function refuseTrailAccess(verb: "trail" | "trail-review", reason: string): void {
   process.stderr.write(`Error: ${reason} (${TRAIL_ACCESS_RULE}: \`lore session ${verb}\` reads only the calling run's own session trail)\n`);
-  process.exitCode = 4;
+  setExitCode(4);
 }
 
 /**
@@ -116,7 +117,7 @@ async function resolveCallerSession(inv: Invocation, app: Awaited<ReturnType<typ
   const verified = await app.verifiedInvocationIdentity?.();
   if (verified !== undefined && !verified.ok) {
     process.stderr.write(formatErrorFor(inv, verified.error) + "\n");
-    process.exitCode = exitCode(verified.error);
+    setExitCode(exitCode(verified.error));
     return null;
   }
   const callerRun = verified?.value?.harnessRun ?? null;
@@ -207,7 +208,7 @@ async function runSessionTrailReview(args: { turn?: unknown; json?: unknown }, i
     } catch (err) {
       if (err instanceof TrailFileInvalidError) {
         process.stderr.write(`Error: ${err.message}\n`);
-        process.exitCode = 1;
+        setExitCode(1);
         return;
       }
       throw err;
@@ -219,13 +220,13 @@ async function runSessionTrailReview(args: { turn?: unknown; json?: unknown }, i
     const turn = typeof args.turn === "string" ? args.turn : undefined;
     if (turn !== undefined && !trail.turns.some((t) => t.turn === turn)) {
       process.stderr.write(`Error: session ${session} has no turn "${turn}".\n`);
-      process.exitCode = 3;
+      setExitCode(3);
       return;
     }
     const runService = app.runService;
     if (runService === undefined) {
       process.stderr.write("Error: RunService not wired on this App instance.\n");
-      process.exitCode = 1;
+      setExitCode(1);
       return;
     }
     const projectRoot = dirname(dirname(dbPath));
@@ -240,7 +241,7 @@ async function runSessionTrailReview(args: { turn?: unknown; json?: unknown }, i
     });
     if (!review.ok) {
       process.stderr.write(formatErrorFor(inv, review.error) + "\n");
-      process.exitCode = exitCode(review.error);
+      setExitCode(exitCode(review.error));
       return;
     }
     const coChange = judgeCoChange({ rules: coChangeRules, trail, turn, session, helperReview: review.value });
@@ -288,7 +289,7 @@ async function runSessionTrail(
   } catch (err) {
     if (err instanceof TrailFileInvalidError) {
       process.stderr.write(`Error: ${err.message}\n`);
-      process.exitCode = 1;
+      setExitCode(1);
       return;
     }
     throw err;
@@ -300,7 +301,7 @@ async function runSessionTrail(
   const turn = typeof args.turn === "string" ? args.turn : undefined;
   if (turn !== undefined && !trail.turns.some((t) => t.turn === turn)) {
     process.stderr.write(`Error: session ${session} has no turn "${turn}".\n`);
-    process.exitCode = 3;
+    setExitCode(3);
     return;
   }
   const view = narrowTrail(trail, { ...(turn !== undefined ? { turn } : {}), ...(runFilter !== undefined ? { run: runFilter } : {}) });
@@ -406,7 +407,7 @@ export default defineCommand({
       }
       if (app.sessionService === undefined) {
         process.stderr.write("Error: SessionService not wired on this App instance.\n");
-        process.exitCode = 1;
+        setExitCode(1);
         return;
       }
       const sessionService = app.sessionService;
@@ -414,7 +415,7 @@ export default defineCommand({
       const target = String(args.target);
       if (!RESERVED_SUBCOMMANDS.has(target)) {
         process.stderr.write(`Error: unknown \`lore session\` subcommand "${target}" — expected "list" or "show".\n`);
-        process.exitCode = 2;
+        setExitCode(2);
         return;
       }
 
@@ -443,7 +444,7 @@ export default defineCommand({
       const activeSessionsResult = await sessionService.getActiveSessions();
       if (!activeSessionsResult.ok) {
         process.stderr.write(formatErrorFor(inv, activeSessionsResult.error) + "\n");
-        process.exitCode = exitCode(activeSessionsResult.error);
+        setExitCode(exitCode(activeSessionsResult.error));
         return;
       }
 
@@ -462,13 +463,13 @@ export default defineCommand({
       const id = typeof args.id === "string" ? args.id : undefined;
       if (id === undefined || id.length === 0) {
         process.stderr.write("Error: `lore session show` requires a session id: lore session show <id>\n");
-        process.exitCode = 2;
+        setExitCode(2);
         return;
       }
       const match = records.find((r) => r.session_id === id) ?? records.find((r) => r.by === id);
       if (match === undefined) {
         process.stderr.write(`Error: no session matching "${id}" found.\n`);
-        process.exitCode = 3;
+        setExitCode(3);
         return;
       }
       if (args.json) {

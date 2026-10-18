@@ -72,6 +72,7 @@ class World {
     for (const [k, v] of Object.entries(process.env)) if (typeof v === "string") env[k] = v;
     const proc = await runLoreInProcess(args, {
       cwd: this.dir,
+      home: this.dir,
       env: { ...env, HOME: this.dir, CLAUDECODE: "1", CLAUDE_CODE_SESSION_ID: "c53e57e1-aaaa-bbbb-cccc-444444444444" },
     });
     return { stdout: proc.stdout, stderr: proc.stderr, exitCode: proc.exitCode };

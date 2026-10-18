@@ -52,6 +52,7 @@
  */
 
 import { existsSync, readFileSync, writeFileSync } from "fs";
+import { setExitCode } from "../run-scope.js";
 import { join } from "path";
 import { z } from "zod";
 import { defineCommand } from "citty";
@@ -172,7 +173,7 @@ export default defineCommand({
         const stateBinding = app.stateBindingService;
         if (stateBinding === undefined) {
           process.stderr.write("Error: stateBindingService is not wired on this App (internal wiring error)\n");
-          process.exitCode = 1;
+          setExitCode(1);
           return;
         }
         const result = args.confirm
@@ -180,18 +181,18 @@ export default defineCommand({
           : await stateBinding.reportImpact();
         if (!result.ok) {
           process.stderr.write(formatErrorFor(inv, result.error) + "\n");
-          process.exitCode = exitCode(result.error);
+          setExitCode(exitCode(result.error));
           return;
         }
         if (args.json) {
           console.log(JSON.stringify({ ok: true, data: result.value }, null, 2));
-          process.exitCode = 0;
+          setExitCode(0);
           return;
         }
         const value = result.value;
         if ("status" in value && value.status === "already_armed") {
           console.log(`State binding already armed (audit row id ${value.arming_rev}); nothing written.`);
-          process.exitCode = 0;
+          setExitCode(0);
           return;
         }
         const report = "status" in value ? value.report : value;
@@ -209,7 +210,7 @@ export default defineCommand({
         } else {
           console.log("Report only — nothing written. Re-run with --confirm to arm this corpus.");
         }
-        process.exitCode = 0;
+        setExitCode(0);
         return;
       }
 
@@ -219,7 +220,7 @@ export default defineCommand({
         const headResult = await app.auditService.getChainHead();
         if (!headResult.ok) {
           process.stderr.write(formatErrorFor(inv, headResult.error) + "\n");
-          process.exitCode = exitCode(headResult.error);
+          setExitCode(exitCode(headResult.error));
           return;
         }
 
@@ -234,7 +235,7 @@ export default defineCommand({
         const anchorRoot = resolveTrackedWriteRoot(inv.cwd, resolveConsumerCorpusRoot(inv));
         if (!anchorRoot.ok) {
           process.stderr.write(formatErrorFor(inv, anchorRoot.error) + "\n");
-          process.exitCode = exitCode(anchorRoot.error);
+          setExitCode(exitCode(anchorRoot.error));
           return;
         }
         writeFileSync(auditAnchorFilePath(anchorRoot.value),`${JSON.stringify(anchorFile, null, 2)}\n`, "utf8");
@@ -246,7 +247,7 @@ export default defineCommand({
             `Anchored audit chain head (id ${anchorFile.head_id}, ${anchorFile.entry_count} entr${anchorFile.entry_count === 1 ? "y" : "ies"}) → .lore/audit-anchor.json`,
           );
         }
-        process.exitCode = 0;
+        setExitCode(0);
         return;
       }
 
@@ -256,13 +257,13 @@ export default defineCommand({
         const anchorRoot = resolveTrackedWriteRoot(inv.cwd, resolveConsumerCorpusRoot(inv));
         if (!anchorRoot.ok) {
           process.stderr.write(formatErrorFor(inv, anchorRoot.error) + "\n");
-          process.exitCode = exitCode(anchorRoot.error);
+          setExitCode(exitCode(anchorRoot.error));
           return;
         }
         const { anchor, error: anchorFileError } = readAuditAnchorFile(anchorRoot.value);
         if (anchorFileError !== undefined) {
           process.stderr.write(`Error: ${anchorFileError}\n`);
-          process.exitCode = 4;
+          setExitCode(4);
           return;
         }
 
@@ -272,7 +273,7 @@ export default defineCommand({
         });
         if (!result.ok) {
           process.stderr.write(formatErrorFor(inv, result.error) + "\n");
-          process.exitCode = exitCode(result.error);
+          setExitCode(exitCode(result.error));
           return;
         }
 
@@ -280,7 +281,7 @@ export default defineCommand({
 
         if (args.json) {
           console.log(JSON.stringify({ ok: true, data: { clean, misses, since, chain, anchor: anchorResult } }, null, 2));
-          process.exitCode = clean ? 0 : 4;
+          setExitCode(clean ? 0 : 4);
           return;
         }
 
@@ -311,7 +312,7 @@ export default defineCommand({
           );
         }
 
-        process.exitCode = clean ? 0 : 4;
+        setExitCode(clean ? 0 : 4);
         return;
       }
 
@@ -323,7 +324,7 @@ export default defineCommand({
         const limitResult = parsePositiveIntArg(args.limit, "--limit", { min: 1 });
         if (!limitResult.ok) {
           process.stderr.write(limitResult.message + "\n");
-          process.exitCode = 2;
+          setExitCode(2);
           return;
         }
         limitValue = limitResult.value;
@@ -340,7 +341,7 @@ export default defineCommand({
         const resolveResult = await app.corpusService.resolve(args.doc);
         if (!resolveResult.ok) {
           process.stderr.write(formatErrorFor(inv, resolveResult.error) + "\n");
-          process.exitCode = exitCode(resolveResult.error);
+          setExitCode(exitCode(resolveResult.error));
           return;
         }
         filters.doc_id = resolveResult.value;
@@ -349,7 +350,7 @@ export default defineCommand({
       const result = await app.auditService.query(filters);
       if (!result.ok) {
         process.stderr.write(formatErrorFor(inv, result.error) + "\n");
-        process.exitCode = exitCode(result.error);
+        setExitCode(exitCode(result.error));
         return;
       }
 
