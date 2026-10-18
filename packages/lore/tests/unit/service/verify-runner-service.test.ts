@@ -1120,7 +1120,7 @@ describe("ERROR — ac_scope matching MULTIPLE candidate specs is ambiguous and 
   });
 });
 
-// ─── AC-AU-7 — `--yes` / allowNewCommands is DECIDED (class verify-new-command), not granted ─────────────────
+// ─── AU-T7 (autonomy overrides) — `--yes` / allowNewCommands is DECIDED (class verify-new-command), not granted ─────────────────
 
 /** A hand-written OverrideDecisionPort: records every ask and answers from a script. */
 function makeOverridePort(answer: (classId: string, subjectId: string) => Result<void, LoreError>) {
@@ -1136,7 +1136,7 @@ function makeOverridePort(answer: (classId: string, subjectId: string) => Result
   };
 }
 
-describe("AC-AU-7 verify --yes asks decide() for a command with no attested row on the task", () => {
+describe("verify --yes (class verify-new-command) asks decide() for a command with no attested row on the task", () => {
   it("NEGATIVE: an escalation aborts BEFORE any command runs or evidence is written; the error is returned verbatim", async () => {
     const spec = makeSpec([scriptAc("AC-1", "bun test")]);
     const bundle: PlanBundle = { plan: makePlan(), spec, tasks: [taskWithFreshClaim("task-1")] }; // zero evidence: every command is new
