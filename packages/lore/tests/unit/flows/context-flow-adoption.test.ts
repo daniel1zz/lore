@@ -45,6 +45,13 @@ function budgetsWith(adoption: "enforce" | "warn"): MemoryFileBudgets {
 
 const without = (name: string): string[] => ALL_SECTIONS.filter((s) => s !== name);
 
+/**
+ * The hand-written (Z2) required sections: `## Module Index` and `## Finding Live Project State` are emitted by the
+ * managed zone itself (spec-module-index-lists-only-folders-with-a-memory-file-managed, AC-MI-2), so a candidate that
+ * also hand-writes them would carry each twice (`section_duplicate`).
+ */
+const HAND_WRITTEN_SECTIONS = ALL_SECTIONS.filter((s) => s !== "Module Index" && s !== "Finding Live Project State");
+
 describe("lore context write gate honours adoption (AC-STR-6)", () => {
   describe("adoption enforce", () => {
     it("NEGATIVE: refuses a candidate missing '## Commands' with an error naming section_missing", async () => {
@@ -94,7 +101,7 @@ describe("lore context write gate honours adoption (AC-STR-6)", () => {
     });
 
     it("CONTROL: a fully conforming candidate is still written under enforce (the gate is not a blanket refusal)", async () => {
-      const original = rootFile(ALL_SECTIONS);
+      const original = rootFile(HAND_WRITTEN_SECTIONS);
       const fs = new InMemoryFsPort({ "CLAUDE.md": original });
       const result = await runContextRefresh({ fs, budgets: budgetsWith("enforce") }, "");
       expect(result.ok).toBe(true);
@@ -123,7 +130,7 @@ describe("lore context write gate honours adoption (AC-STR-6)", () => {
     });
 
     it("HAPPY: a conforming file reports no downgraded finding in warn mode", async () => {
-      const conforming = new InMemoryFsPort({ "CLAUDE.md": rootFile(ALL_SECTIONS) });
+      const conforming = new InMemoryFsPort({ "CLAUDE.md": rootFile(HAND_WRITTEN_SECTIONS) });
       const okResult = await runContextRefresh({ fs: conforming, budgets: budgetsWith("warn") }, "");
       expect(okResult.ok).toBe(true);
       if (!okResult.ok) return;
