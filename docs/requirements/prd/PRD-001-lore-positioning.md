@@ -11,7 +11,7 @@ tags: [product-overview, L0, lore, mvp, internal-first, ai-native, protocol-awar
 links:
   - {id: SPEC-199, type: relates-to}
   - {id: SPEC-094, type: relates-to}
-  - {id: SPEC-197, type: relates-to}
+  - {id: SPEC-207, type: relates-to}
   - {id: SPEC-201, type: relates-to}
   - {id: SPEC-198, type: relates-to}
   - {id: SPEC-202, type: relates-to}
@@ -108,6 +108,7 @@ This PRD is the tree root. Each module is a child spec (kind=feature/tech/design
 
 The module tree below is rendered live from the corpus (SPEC-004 placeholder resolution) — a hand-maintained list demonstrably drifts (this section was 8 specs stale at v0.5, stopping at SPEC-011 while the corpus reached SPEC-031):
 
+- [adr] Autonomy is decided by measured facts: one decision function, human only below threshold or for human-always classes (approved)
 - [adr] TG-1 test runner decision: measured comparison of bun-only, vitest-on-Bun and a storage seam, plus compiled-binary test audit (approved)
 - [task] lore done's test-anchor refusal demands an ATTESTED unfiltered pass, but its predicate never checks attestation — an unattested --capture row satisfies it (draft)
 - [task] One unknown key discards the whole .lore/config.yaml and the error then claims nothing was configured: silence, not the non-abort, is the defect (draft)

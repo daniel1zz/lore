@@ -11017,10 +11017,6 @@
       "human_id": "SPEC-194",
       "file_path": "docs/requirements/spec/SPEC-194-round-0-main-is-green-every-red-test-on-e1878626-t.md"
     },
-    "01KYEN7WD20P4EV6ZHKTZD60JP": {
-      "human_id": "SPEC-197",
-      "file_path": "docs/requirements/spec/SPEC-197-session-layer-multi-session-collaboration-context.md"
-    },
     "01KYEN7ZDFF9CEE6ZN6J48BXM2": {
       "human_id": "SPEC-198",
       "file_path": "docs/requirements/spec/SPEC-198-phase-execution-model-plan-phase-checklist-superse.md"
@@ -11400,6 +11396,90 @@
     "01KYEN82CATW2VDHSB9RR9XTQG": {
       "human_id": "SPEC-206",
       "file_path": "docs/requirements/spec/SPEC-206-upstream-issue-feedback-loop-consumer-reported-def.md"
+    },
+    "01M56MXNS4956Q34VFX959CMCC": {
+      "human_id": "SPEC-197",
+      "file_path": "docs/requirements/spec/SPEC-197-autonomy-phase-1-decision-function-human-channel-l.md"
+    },
+    "01M56MWRWWPEBH512F6K3JKZHX": {
+      "human_id": "ADR-049",
+      "file_path": "docs/requirements/adr/ADR-049-autonomy-is-decided-by-measured-facts-one-decision.md"
+    },
+    "01M56NKBV4271D199SM94GEAFA": {
+      "human_id": "PLAN-204",
+      "file_path": "docs/requirements/plan/PLAN-204-autonomy-phase-1-decision-function-human-channel-l.md"
+    },
+    "01M56HZ8X9TGSQ56PFAHDGBWV5": {
+      "human_id": "PLAN-205",
+      "file_path": "docs/requirements/plan/PLAN-205-cleanup-closes-itself-lore-done-removes-agent-work.md"
+    },
+    "01M56NMSEW876B6A895VF7H4K9": {
+      "human_id": "TASK-1543",
+      "file_path": "docs/requirements/task/TASK-1543-skill-test-au-t11-apply-the-new-verbs-to-existing.md"
+    },
+    "01M56NMRRNN8BCP496E2735BP6": {
+      "human_id": "TASK-1544",
+      "file_path": "docs/requirements/task/TASK-1544-skill-implement-au-t9-threshold-record-integrity-f.md"
+    },
+    "01M56NMR4N7G3DJD1ERE8MNEJK": {
+      "human_id": "TASK-1545",
+      "file_path": "docs/requirements/task/TASK-1545-skill-implement-au-t8-outcome-calibration-governan.md"
+    },
+    "01M56NMQHQ45DEENQKKRA2CD9S": {
+      "human_id": "TASK-1546",
+      "file_path": "docs/requirements/task/TASK-1546-skill-implement-au-t7-self-grantable-overrides-cal.md"
+    },
+    "01M56NMPYRN8E8HFCAZXBRAXB2": {
+      "human_id": "TASK-1547",
+      "file_path": "docs/requirements/task/TASK-1547-skill-implement-au-t10-worktree-removal-through-de.md"
+    },
+    "01M56NMPCK2HCKKSR12353B10W": {
+      "human_id": "TASK-1548",
+      "file_path": "docs/requirements/task/TASK-1548-skill-implement-au-t5-runs-record-pid-and-start-ti.md"
+    },
+    "01M56NMNRP4ZPEFGZ5WFAYA0FB": {
+      "human_id": "TASK-1549",
+      "file_path": "docs/requirements/task/TASK-1549-skill-implement-au-t4-lore-stash-prune-archive-und.md"
+    },
+    "01M56NMN6J8KGV0A2RTHRESWB3": {
+      "human_id": "TASK-1550",
+      "file_path": "docs/requirements/task/TASK-1550-skill-implement-au-t3-human-channel-lore-decide-wi.md"
+    },
+    "01M56NMMMMQ8SXVRPK2EYAPE91": {
+      "human_id": "TASK-1551",
+      "file_path": "docs/requirements/task/TASK-1551-skill-fix-au-t6-agent-hygiene-no-stash-steer-no-se.md"
+    },
+    "01M56NMM2BZVY7GN68G7XJCAK3": {
+      "human_id": "TASK-1552",
+      "file_path": "docs/requirements/task/TASK-1552-skill-implement-au-t2-decision-log-append-only-has.md"
+    },
+    "01M56NMK7WWCA3N35YE4W8J62K": {
+      "human_id": "TASK-1553",
+      "file_path": "docs/requirements/task/TASK-1553-skill-implement-au-t1-decide-and-the-operation-cla.md"
+    },
+    "01M56J00E1CHBZ31THGGMCZFY1": {
+      "human_id": "TASK-1554",
+      "file_path": "docs/requirements/task/TASK-1554-skill-fix-cl-1-lore-done-resolves-a-branch-name-cl.md"
+    },
+    "01M56J03HYR2PHEJHZTBJWQXEG": {
+      "human_id": "TASK-1555",
+      "file_path": "docs/requirements/task/TASK-1555-skill-fix-cl-4-autopilot-trusts-lore-done-s-remova.md"
+    },
+    "01M56J02KSHZ8MVC3BK5S420WN": {
+      "human_id": "TASK-1556",
+      "file_path": "docs/requirements/task/TASK-1556-skill-fix-cl-3-no-self-matching-waits-test-helpers.md"
+    },
+    "01M56J01QTBBJJ617FBPK149Y1": {
+      "human_id": "TASK-1557",
+      "file_path": "docs/requirements/task/TASK-1557-skill-fix-cl-2-agents-stop-producing-stashes-track.md"
+    },
+    "01KYEN7WD20P4EV6ZHKTZD60JP": {
+      "human_id": "SPEC-207",
+      "file_path": "docs/requirements/spec/SPEC-207-session-layer-multi-session-collaboration-context.md"
+    },
+    "01M56NZ5XJ4MY3FV6XC66Z2K0J": {
+      "human_id": "PLAN-206",
+      "file_path": "docs/requirements/plan/PLAN-206-baseline-completeness-restoration-every-verb-decla.md"
     }
   }
 }

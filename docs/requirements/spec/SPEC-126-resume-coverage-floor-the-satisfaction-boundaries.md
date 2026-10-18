@@ -12,7 +12,7 @@ links:
   - {id: SPEC-123, type: relates-to}
   - {id: ADR-025, type: relates-to}
   - {id: KN-241, type: relates-to}
-  - {id: SPEC-197, type: implements}
+  - {id: SPEC-207, type: implements}
 ---
 # Resume-coverage floor — the satisfaction boundaries: a deferral must carry its reason, and a sidechain chain cannot discharge
 

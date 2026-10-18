@@ -1,5 +1,86 @@
 [
-  {"spec": "spec-evidence-identity-an-attested-row-counts-only-for-the", "ac": "AC-EI-1", "reason": "oracle test not written yet (ac-coverage-command-identity.test.ts absent); owned by task-skill-implement-ei-1-coverage-counts-only-equal-command", "owner_plan": "plan-evidence-identity-count-only-equal-command-attested-rows"},
-  {"spec": "spec-evidence-identity-an-attested-row-counts-only-for-the", "ac": "AC-EI-2", "reason": "oracle test not written yet (missing-oracle-any-path.test.ts absent); owned by task-skill-implement-ei-2-missing-oracle-detection-covers", "owner_plan": "plan-evidence-identity-count-only-equal-command-attested-rows"},
-  {"spec": "spec-evidence-identity-an-attested-row-counts-only-for-the", "ac": "AC-EI-3", "reason": "oracle script not written yet (scripts/check-evidence-identity-drop-set.ts absent); owned by task-skill-test-ei-3-drop-set-snapshot-and-check-evidence", "owner_plan": "plan-evidence-identity-count-only-equal-command-attested-rows"}
+  {
+    "spec": "spec-evidence-identity-an-attested-row-counts-only-for-the",
+    "ac": "AC-EI-1",
+    "reason": "oracle test not written yet (ac-coverage-command-identity.test.ts absent); owned by task-skill-implement-ei-1-coverage-counts-only-equal-command",
+    "owner_plan": "plan-evidence-identity-count-only-equal-command-attested-rows"
+  },
+  {
+    "spec": "spec-evidence-identity-an-attested-row-counts-only-for-the",
+    "ac": "AC-EI-2",
+    "reason": "oracle test not written yet (missing-oracle-any-path.test.ts absent); owned by task-skill-implement-ei-2-missing-oracle-detection-covers",
+    "owner_plan": "plan-evidence-identity-count-only-equal-command-attested-rows"
+  },
+  {
+    "spec": "spec-evidence-identity-an-attested-row-counts-only-for-the",
+    "ac": "AC-EI-3",
+    "reason": "oracle script not written yet (scripts/check-evidence-identity-drop-set.ts absent); owned by task-skill-test-ei-3-drop-set-snapshot-and-check-evidence",
+    "owner_plan": "plan-evidence-identity-count-only-equal-command-attested-rows"
+  },
+  {
+    "spec": "spec-autonomy-phase-1-decision-function-human-channel-lore",
+    "ac": "AC-AU-1",
+    "reason": "oracle test not written yet (packages/core/tests/unit/autonomy-decide.test.ts absent); owned by plan-autonomy-phase-1-decision-function-human-channel-lore",
+    "owner_plan": "plan-autonomy-phase-1-decision-function-human-channel-lore"
+  },
+  {
+    "spec": "spec-autonomy-phase-1-decision-function-human-channel-lore",
+    "ac": "AC-AU-2",
+    "reason": "oracle test not written yet (autonomy-decision-log.test.ts absent); owned by plan-autonomy-phase-1-decision-function-human-channel-lore",
+    "owner_plan": "plan-autonomy-phase-1-decision-function-human-channel-lore"
+  },
+  {
+    "spec": "spec-autonomy-phase-1-decision-function-human-channel-lore",
+    "ac": "AC-AU-3",
+    "reason": "oracle test not written yet (autonomy-human-channel.test.ts absent); owned by plan-autonomy-phase-1-decision-function-human-channel-lore",
+    "owner_plan": "plan-autonomy-phase-1-decision-function-human-channel-lore"
+  },
+  {
+    "spec": "spec-autonomy-phase-1-decision-function-human-channel-lore",
+    "ac": "AC-AU-4",
+    "reason": "oracle test not written yet (autonomy-stash-prune.test.ts absent); owned by plan-autonomy-phase-1-decision-function-human-channel-lore",
+    "owner_plan": "plan-autonomy-phase-1-decision-function-human-channel-lore"
+  },
+  {
+    "spec": "spec-autonomy-phase-1-decision-function-human-channel-lore",
+    "ac": "AC-AU-5",
+    "reason": "oracle test not written yet (autonomy-run-reap.test.ts absent); owned by plan-autonomy-phase-1-decision-function-human-channel-lore",
+    "owner_plan": "plan-autonomy-phase-1-decision-function-human-channel-lore"
+  },
+  {
+    "spec": "spec-autonomy-phase-1-decision-function-human-channel-lore",
+    "ac": "AC-AU-6",
+    "reason": "oracle test not written yet (scripts/tests/agent-hygiene.test.ts absent); owned by plan-autonomy-phase-1-decision-function-human-channel-lore",
+    "owner_plan": "plan-autonomy-phase-1-decision-function-human-channel-lore"
+  },
+  {
+    "spec": "spec-autonomy-phase-1-decision-function-human-channel-lore",
+    "ac": "AC-AU-7",
+    "reason": "oracle test not written yet (autonomy-overrides-escalate.test.ts absent); owned by plan-autonomy-phase-1-decision-function-human-channel-lore",
+    "owner_plan": "plan-autonomy-phase-1-decision-function-human-channel-lore"
+  },
+  {
+    "spec": "spec-autonomy-phase-1-decision-function-human-channel-lore",
+    "ac": "AC-AU-8",
+    "reason": "oracle test not written yet (autonomy-calibration.test.ts absent); owned by plan-autonomy-phase-1-decision-function-human-channel-lore",
+    "owner_plan": "plan-autonomy-phase-1-decision-function-human-channel-lore"
+  },
+  {
+    "spec": "spec-autonomy-phase-1-decision-function-human-channel-lore",
+    "ac": "AC-AU-9",
+    "reason": "oracle test not written yet (autonomy-threshold-integrity.test.ts absent); owned by plan-autonomy-phase-1-decision-function-human-channel-lore",
+    "owner_plan": "plan-autonomy-phase-1-decision-function-human-channel-lore"
+  },
+  {
+    "spec": "spec-autonomy-phase-1-decision-function-human-channel-lore",
+    "ac": "AC-AU-10",
+    "reason": "oracle test not written yet (autonomy-sampling-floor.test.ts absent); owned by plan-autonomy-phase-1-decision-function-human-channel-lore",
+    "owner_plan": "plan-autonomy-phase-1-decision-function-human-channel-lore"
+  },
+  {
+    "spec": "spec-autonomy-phase-1-decision-function-human-channel-lore",
+    "ac": "AC-AU-11",
+    "reason": "oracle test not written yet (autonomy-worktree-remove.test.ts absent); owned by plan-autonomy-phase-1-decision-function-human-channel-lore",
+    "owner_plan": "plan-autonomy-phase-1-decision-function-human-channel-lore"
+  }
 ]
