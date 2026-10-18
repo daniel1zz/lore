@@ -63,9 +63,12 @@ export function renderTable(results: readonly StepResult[], labels: ReadonlyMap<
   return ["", "=== run-chain: per-step exit table", ...rows, verdict].join("\n");
 }
 
-/** The check:* scripts that read a fresh spec-mirror export, so they are red until `bun scripts/export-spec-mirror.ts` ran. */
-export const CORPUS_DEPENDENT_CHECKS: ReadonlySet<string> = new Set(["check:spec-mirror", "check:live-repo-state"]);
-export const CORPUS_DEPENDENT_LABEL = "corpus-dependent: needs a fresh mirror export";
+/**
+ * The check:* scripts whose verdict depends on live corpus / mirror state rather than on the code alone:
+ * the first two are red until `bun scripts/export-spec-mirror.ts` ran, the census reads recorded AC states.
+ */
+export const CORPUS_DEPENDENT_CHECKS: ReadonlySet<string> = new Set(["check:spec-mirror", "check:live-repo-state", "check:corpus-fail-census"]);
+export const CORPUS_DEPENDENT_LABEL = "corpus-dependent: needs a fresh mirror export / live corpus state";
 
 /** The aggregate script itself: excluded from its own step list, or the floor would recurse into itself. */
 const STATIC_FLOOR_SCRIPT = "check:static";
