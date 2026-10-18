@@ -256,7 +256,7 @@ import { resolveCorpus } from "../cli/corpus-resolution.js";
 // only, no bun:sqlite) — safe to import here without breaking this file's
 // vitest-reachability (mirrors this module's own precedent of lazy-importing
 // ONLY bun:sqlite-tainted deps, not every Node-adjacent one).
-import { resolveActorWithSource } from "@lore/core/node";
+import { readProcessAmbient, resolveActorFromProcess } from "@lore/core/node";
 import { computeValidityState } from "../../flows/validity-state.js";
 import {
   buildStalenessBatchJsonPayload,
@@ -2063,7 +2063,7 @@ export function registerTools(server: McpServer, baseApp: App, getConfig?: () =>
     // from the kind="get" row `corpusService.get` above already fired
     // (a different consumption pattern — the whole navigation bundle, not a
     // single doc read). A no-op when trace.enabled resolves false.
-    app.traceRecorder?.recordContextBundle(resolveActorWithSource(undefined, process.env).actor);
+    app.traceRecorder?.recordContextBundle(resolveActorFromProcess().actor);
 
     return textContent({ target: doc, linked_specs: linkedSpecs, related_adrs: relatedAdrs, active_plans: activePlans });
   });
@@ -2602,6 +2602,10 @@ export function registerTools(server: McpServer, baseApp: App, getConfig?: () =>
       // requiring the caller to assemble a diff themselves.
       let diffText: string | undefined = args.diff_text;
       let diffSource: DiffSourceRecord;
+      // reason: the MCP server has no Invocation; its cwd is the one `assessPlan` verifies finding paths
+      // against (formerly `assessPlan`'s own `opts.repoRoot ?? process.cwd()` default). Read once here,
+      // reused by the derivation below, so this handler's cwd read count does not rise (AS-26 ratchet).
+      const assessRepoRoot = process.cwd();
       // reason: task-the-mcp-assess-adapter-still-calls-derivecommitsetforplan —
       // mirrors `commands/assess.ts`'s own `commitDerivationUnverifiable` local exactly:
       // set ONLY by the auto-derived branch below when the derivation reports
@@ -2625,7 +2629,7 @@ export function registerTools(server: McpServer, baseApp: App, getConfig?: () =>
         // so this computation cannot be omitted and still compile.
         const allTasksArchived = bundle.tasks.every((t) => t.status === "archived");
         const derivation = deriveCommitSetForPlan(
-          process.cwd(),
+          assessRepoRoot,
           bundle.tasks.map((t) => t.slug),
           allTasksArchived,
           collectRecordedRanges(bundle.tasks),
@@ -2650,6 +2654,7 @@ export function registerTools(server: McpServer, baseApp: App, getConfig?: () =>
         source: app.callerSurface,
         commitDerivationUnverifiable,
         diffSource,
+        repoRoot: assessRepoRoot,
       });
       if (!assessResult.ok) return errorContent(assessResult.error);
 
@@ -2914,11 +2919,15 @@ export function registerTools(server: McpServer, baseApp: App, getConfig?: () =>
       // stdout print. Do not re-append or re-derive the closure text here —
       // that would let this surface silently diverge from the CLI's.
       if (args.checkpoint === SESSION_RESUME_CHECKPOINT) {
-        const result = await buildResumeFeed(app, {
-          ...(args.plan !== undefined ? { plan: args.plan } : {}),
-          ...(args.handoff !== undefined ? { handoff: args.handoff } : {}),
-          ...(args.by !== undefined ? { by: args.by } : {}),
-        });
+        const result = await buildResumeFeed(
+          app,
+          {
+            ...(args.plan !== undefined ? { plan: args.plan } : {}),
+            ...(args.handoff !== undefined ? { handoff: args.handoff } : {}),
+            ...(args.by !== undefined ? { by: args.by } : {}),
+          },
+          readProcessAmbient(),
+        );
         if (!result.ok) return errorContent(result.error);
         return textContent(result.value);
       }
@@ -3384,6 +3393,7 @@ export function registerTools(server: McpServer, baseApp: App, getConfig?: () =>
             corpusService: app.corpusService,
             actor,
             actorSource,
+            env: readProcessAmbient().env,
           },
         );
         if (!fileResult.ok) return errorContent(fileResult.error);

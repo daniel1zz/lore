@@ -36,7 +36,6 @@
 import yaml from "yaml";
 import { readFileSync, writeFileSync, mkdirSync, existsSync, renameSync } from "fs";
 import { join, dirname } from "path";
-import { currentHomeDir } from "./home-dir-node.js";
 import { ok, err } from "./errors.js";
 import type { Result, LoreError } from "./errors.js";
 import {
@@ -45,6 +44,9 @@ import {
   type LoreConfig,
   type GlobalLoreConfig,
 } from "./config.js";
+
+/** The invocation environment the global-config path resolvers read (`Invocation.env`). */
+export type ConfigEnv = Readonly<Record<string, string | undefined>>;
 
 // ─── Project Config I/O ───────────────────────────────────────────────────────
 
@@ -121,22 +123,25 @@ export function saveConfig(
  * isolated XDG root (2026-07-25 incident: leaked into test isolation).
  *
  * Returns undefined when no file exists at any applicable candidate path.
- * Pure side-effect: reads env vars + existsSync only. Never writes.
+ * Pure side-effect: existsSync only. Never writes; reads no ambient state —
+ * `env` and `home` are the invocation's resolved values (AS-26).
  *
+ * @param env - the invocation environment (`Invocation.env`)
+ * @param home - the user's home directory (`Invocation.paths.home`)
  * @example
- *   const path = resolveGlobalConfigPath();
+ *   const path = resolveGlobalConfigPath(inv.env, inv.paths.home);
  *   // "/home/alice/.config/lore/config.yaml" | undefined
  */
-export function resolveGlobalConfigPath(): string | undefined {
+export function resolveGlobalConfigPath(env: ConfigEnv, home: string): string | undefined {
   // 1. $LORE_CONFIG_HOME/config.yaml — app-specific escape hatch (highest precedence)
-  const loreConfigHome = process.env["LORE_CONFIG_HOME"];
+  const loreConfigHome = env["LORE_CONFIG_HOME"];
   if (loreConfigHome) {
     const candidate = join(loreConfigHome, "config.yaml");
     if (existsSync(candidate)) return candidate;
   }
 
   // 2. $XDG_CONFIG_HOME/lore/config.yaml — XDG explicit
-  const xdgConfigHome = process.env["XDG_CONFIG_HOME"];
+  const xdgConfigHome = env["XDG_CONFIG_HOME"];
   if (xdgConfigHome) {
     const candidate = join(xdgConfigHome, "lore", "config.yaml");
     if (existsSync(candidate)) return candidate;
@@ -148,7 +153,7 @@ export function resolveGlobalConfigPath(): string | undefined {
   //    reaching this branch with $XDG_CONFIG_HOME set would silently leak the
   //    real machine-wide config into a caller that asked for an isolated XDG root.
   if (!xdgConfigHome) {
-    const defaultCandidate = join(currentHomeDir(), ".config", "lore", "config.yaml");
+    const defaultCandidate = join(home, ".config", "lore", "config.yaml");
     if (existsSync(defaultCandidate)) return defaultCandidate;
   }
 
@@ -165,20 +170,21 @@ export function resolveGlobalConfigPath(): string | undefined {
  *   - Unknown top-level keys (incl. project/sync/telemetry) → err(VALIDATION_ERROR)
  *   - Valid schema → ok(parsed)
  *
- * @param configPath Optional explicit path; when omitted, resolveGlobalConfigPath() is called.
- *   Pass the result of resolveGlobalConfigPath() when you already have it (avoids a double stat).
+ * @param configPath The path to read — normally the result of
+ *   `resolveGlobalConfigPath(env, home)`; `undefined` (no file resolved) → ok({}). This function
+ *   resolves nothing itself: it reads no ambient state (AS-26).
  * @returns Result<GlobalLoreConfig, LoreError> — never throws.
  * @example
- *   const path = resolveGlobalConfigPath();
+ *   const path = resolveGlobalConfigPath(inv.env, inv.paths.home);
  *   if (path) {
  *     const result = loadGlobalConfig(path);
  *     if (!result.ok) console.error(`Warning: global config at ${path} ignored`);
  *   }
  */
 export function loadGlobalConfig(
-  configPath?: string,
+  configPath: string | undefined,
 ): Result<GlobalLoreConfig, LoreError> {
-  const resolvedPath = configPath ?? resolveGlobalConfigPath();
+  const resolvedPath = configPath;
 
   // Missing file → ok({}) — global config is always optional
   if (resolvedPath === undefined) {
@@ -256,22 +262,24 @@ export function loadGlobalConfig(
  * the two functions' precedence stays provably in sync on future edits.
  *
  * Callers that want read-or-create semantics compose:
- *   `resolveGlobalConfigPath() ?? resolveGlobalConfigWritePath()`.
+ *   `resolveGlobalConfigPath(env, home) ?? resolveGlobalConfigWritePath(env, home)`.
  *
- * Pure side-effect: reads env vars + `currentHomeDir()` only. Never touches the filesystem.
+ * Pure: reads only its arguments. Never touches the filesystem.
  *
+ * @param env - the invocation environment (`Invocation.env`)
+ * @param home - the user's home directory (`Invocation.paths.home`)
  * @example
- *   const path = resolveGlobalConfigPath() ?? resolveGlobalConfigWritePath();
+ *   const path = resolveGlobalConfigPath(inv.env, inv.paths.home) ?? resolveGlobalConfigWritePath(inv.env, inv.paths.home);
  *   saveGlobalConfig(newConfig, path);
  */
-export function resolveGlobalConfigWritePath(): string {
-  const loreConfigHome = process.env["LORE_CONFIG_HOME"];
+export function resolveGlobalConfigWritePath(env: ConfigEnv, home: string): string {
+  const loreConfigHome = env["LORE_CONFIG_HOME"];
   if (loreConfigHome) return join(loreConfigHome, "config.yaml");
 
-  const xdgConfigHome = process.env["XDG_CONFIG_HOME"];
+  const xdgConfigHome = env["XDG_CONFIG_HOME"];
   if (xdgConfigHome) return join(xdgConfigHome, "lore", "config.yaml");
 
-  return join(currentHomeDir(), ".config", "lore", "config.yaml");
+  return join(home, ".config", "lore", "config.yaml");
 }
 
 /**
@@ -281,18 +289,15 @@ export function resolveGlobalConfigWritePath(): string {
  *   1. Validate `config` against {@link GlobalLoreConfigSchema} — a schema
  *      violation returns `err(VALIDATION_ERROR)` before any filesystem access
  *      (zero bytes written, any pre-existing file left byte-identical).
- *   2. Resolve the target path (`path` if given, else
- *      {@link resolveGlobalConfigWritePath}) and `mkdirSync(..., {recursive: true})`
- *      its parent directory — creates every missing directory component.
+ *   2. `mkdirSync(..., {recursive: true})` the parent directory of `path` — creates every missing directory component.
  *   3. Write to a sibling temp file, then `renameSync` it onto the target path —
  *      atomic: a crash mid-write never leaves a partially-written config.yaml, and
  *      a concurrent reader either sees the old file in full or the new file in
  *      full, never a torn write.
  *
  * @param config - Candidate GlobalLoreConfig, validated BEFORE any IO
- * @param path - Optional explicit target path (tests should always pass one,
- *   pointing at a throwaway `mkdtemp` directory — never the real XDG path).
- *   Omitted → {@link resolveGlobalConfigWritePath}.
+ * @param path - Target path: `resolveGlobalConfigWritePath(env, home)` in production, a throwaway
+ *   `mkdtemp` file in tests (never the real XDG path). Required — this function reads no ambient state.
  * @returns `Result<void, LoreError>` — never throws. Schema violation →
  *   `VALIDATION_ERROR`; any IO failure (permission denied, disk full, ...) →
  *   `STORE_ERROR`.
@@ -303,7 +308,7 @@ export function resolveGlobalConfigWritePath(): string {
  */
 export function saveGlobalConfig(
   config: GlobalLoreConfig,
-  path?: string,
+  path: string,
 ): Result<void, LoreError> {
   const parsed = GlobalLoreConfigSchema.safeParse(config);
   if (!parsed.success) {
@@ -320,7 +325,7 @@ export function saveGlobalConfig(
     } satisfies LoreError);
   }
 
-  const targetPath = path ?? resolveGlobalConfigWritePath();
+  const targetPath = path;
 
   try {
     mkdirSync(dirname(targetPath), { recursive: true });

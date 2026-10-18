@@ -14,7 +14,7 @@
  *   working copy > OS user (D11), reusing {@link resolveActorWithSource}. The
  *   environment never supplies a name (BR-1055).
  *
- * Side-effect class: IO (`os.userInfo()` via the shared tier chain). Lives under
+ * Side-effect class: pure given its arguments (env, OS-username thunk, worktree probe are supplied). Lives under
  * `@lore/core/node` for the same barrel-isolation reason as actor-resolution-node.ts.
  */
 
@@ -71,21 +71,24 @@ function readFlagAt(argv: readonly string[], index: number, flag: string): { val
  * Resolve the identity of one lore invocation.
  *
  * @param argv - Command-line tokens after the program name; not mutated.
- * @param env - Environment to read session ids from (default `process.env`).
- * @param detectWorktree - Working-copy tier probe `(cwd) => "agent:<branch>" | undefined`.
- *   `detectWorktreeDerivedActor` lives in packages/lore (adapters/cli/utils.ts), which core cannot
- *   import, so the CLI injects it; when omitted that tier is skipped.
+ * @param env - Environment to read session ids from (`Invocation.env`).
+ * @param osUsername - Lazy OS-username source for the os-fallback tier (see `resolveActorWithSource`).
+ * @param detectWorktree - Working-copy tier probe `() => "agent:<branch>" | undefined`, closed over
+ *   the invocation cwd by the caller. `detectWorktreeDerivedActor` lives in packages/lore
+ *   (adapters/cli/utils.ts), which core cannot import, so the CLI injects it; when omitted that
+ *   tier is skipped.
  * @returns the identity and argv with `--harness-run <id>` removed.
  * @throws {RunIdentityArgumentError} when `--by` / `--harness-run` has no value or an empty value
  *   (an empty `--by` must not silently fall through to a lower tier).
  * @example
- *   resolveInvocationIdentity(["claim", "t", "--harness-run", "cc:S1", "--by", "x"], {})
+ *   resolveInvocationIdentity(["claim", "t", "--harness-run", "cc:S1", "--by", "x"], {}, () => "os-user")
  *   // => { identity: { harnessRun: "cc:S1", claimed: "x", claimedSource: "flag" }, argv: ["claim", "t", "--by", "x"] }
  */
 export function resolveInvocationIdentity(
   argv: readonly string[],
-  env: Record<string, string | undefined> = process.env,
-  detectWorktree?: (cwd: string) => string | undefined,
+  env: Readonly<Record<string, string | undefined>>,
+  osUsername: () => string,
+  detectWorktree?: () => string | undefined,
 ): InvocationResolution {
   const remaining: string[] = [];
   let harnessRun: string | null = null;
@@ -109,11 +112,11 @@ export function resolveInvocationIdentity(
     i++;
   }
 
-  const resolved = resolveActorWithSource(by, env);
+  const resolved = resolveActorWithSource(by, env, osUsername);
   let claimed = resolved.actor;
   let claimedSource: NameSource;
   if (resolved.source === "os-fallback") {
-    const worktreeActor = detectWorktree?.(process.cwd());
+    const worktreeActor = detectWorktree?.();
     if (worktreeActor !== undefined && worktreeActor !== "") {
       claimed = worktreeActor;
       claimedSource = "worktree";

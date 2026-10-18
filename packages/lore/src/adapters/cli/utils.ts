@@ -62,7 +62,7 @@ import {
   isClaimStale,
   isInvalidated,
 } from "@lore/core";
-import { resolveActorWithSource as resolveActorWithSourceCore } from "@lore/core/node";
+import { readOsUsername, resolveActorWithSource as resolveActorWithSourceCore } from "@lore/core/node";
 import type { ActorSource as CoreActorSource } from "@lore/core/node";
 import type { DocRecord, LoreError, ReviewJudgment, ValidityCarrier } from "@lore/core";
 import type { TreeNode } from "../../service/corpus-service.js";
@@ -565,7 +565,7 @@ export function resolveActorWithSource(
   env: Record<string, string | undefined> = process.env,
   cwd: string = process.cwd(),
 ): ResolvedActor {
-  const core = resolveActorWithSourceCore(explicit, env);
+  const core = resolveActorWithSourceCore(explicit, env, readOsUsername);
   if (core.source !== "os-fallback") {
     return core;
   }

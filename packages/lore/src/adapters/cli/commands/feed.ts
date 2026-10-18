@@ -94,9 +94,10 @@
  */
 
 import { defineCommand } from "citty";
-import type { LoreConfig } from "@lore/core";
+import type { Invocation, LoreConfig } from "@lore/core";
 import type { App } from "../../../app.js";
 import { loadLoreApp } from "../loader.js";
+import { invocationOf } from "../command-invocation.js";
 import {
   buildFeed,
   buildResumeFeed,
@@ -133,7 +134,7 @@ interface FeedArgs {
  * `resolveTaskStartBudgets`) but a uniform signature lets `SPECIAL_CHECKPOINT_HANDLERS`
  * be a single module-scope table instead of a per-invocation closure-building step.
  */
-type CheckpointHandler = (app: App, args: FeedArgs, config: LoreConfig | undefined) => Promise<void>;
+type CheckpointHandler = (app: App, args: FeedArgs, config: LoreConfig | undefined, inv: Invocation) => Promise<void>;
 
 // reason: `result.value.feed` already carries the `RESUME_SCOPE_CLOSURE`
 // boundary block (spec-context-provenance-injected-corpus-global-state-and-a
@@ -143,12 +144,16 @@ type CheckpointHandler = (app: App, args: FeedArgs, config: LoreConfig | undefin
 // re-derive or re-append the closure text here — that would be the exact
 // dual-write drift the spec exists to close (`adapters/mcp/tools.ts`'s
 // session-resume branch inherits it the same way, via the same call).
-async function handleSessionResume(app: App, args: FeedArgs, _config: LoreConfig | undefined): Promise<void> {
-  const result = await buildResumeFeed(app, {
-    ...(typeof args.plan === "string" ? { plan: args.plan } : {}),
-    ...(typeof args.handoff === "string" ? { handoff: args.handoff } : {}),
-    ...(typeof args.by === "string" ? { by: args.by } : {}),
-  });
+async function handleSessionResume(app: App, args: FeedArgs, _config: LoreConfig | undefined, inv: Invocation): Promise<void> {
+  const result = await buildResumeFeed(
+    app,
+    {
+      ...(typeof args.plan === "string" ? { plan: args.plan } : {}),
+      ...(typeof args.handoff === "string" ? { handoff: args.handoff } : {}),
+      ...(typeof args.by === "string" ? { by: args.by } : {}),
+    },
+    { env: inv.env, tmpDir: inv.paths.tmpDir },
+  );
 
   if (!result.ok) {
     process.stderr.write(formatError(result.error) + "\n");
@@ -289,13 +294,15 @@ export default defineCommand({
       description: "Output as JSON",
     },
   },
-  async run({ args }) {
+  async run(context) {
+    const { args } = context;
+    const inv = invocationOf(context);
     const { app, config } = loadLoreApp();
     try {
       const checkpointName = typeof args.checkpoint === "string" ? args.checkpoint : String(args.checkpoint);
       const handler = SPECIAL_CHECKPOINT_HANDLERS[args.checkpoint as string];
       if (handler !== undefined) {
-        await handler(app, args, config);
+        await handler(app, args, config, inv);
         // reason: SPEC-102 hardening (T4 item 1) — only trace a SUCCESSFUL
         // serve. Node's OWN default for `process.exitCode` is `undefined`,
         // never `0` — a strict `=== 0` check is a latent trap for any FUTURE

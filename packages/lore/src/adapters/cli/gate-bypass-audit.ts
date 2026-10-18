@@ -36,7 +36,7 @@
  * Source: SPEC-080 §Scope, §Design Decisions D1/D3; AC-080-2.
  */
 
-import { resolveActorWithSource } from "@lore/core/node";
+import { resolveActorFromProcess } from "@lore/core/node";
 import { invocationInScope } from "./invocation-scope.js";
 import {
   buildGateSkipAuditEntry,
@@ -101,7 +101,7 @@ export async function runGateEnvBypassAudit(
 
   const nowIso = new Date().toISOString();
   // reason: the invocation's claimed name (resolved once at the entry) — never an independent resolution.
-  const actor = invocationInScope()?.identity.claimed ?? resolveActorWithSource(undefined, process.env).actor;
+  const actor = invocationInScope()?.identity.claimed ?? resolveActorFromProcess().actor;
   const entry = buildGateSkipAuditEntry(checkpoint, "env_bypass", nowIso, actor);
 
   try {

@@ -84,7 +84,7 @@ import { spawn } from "node:child_process";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { defineCommand } from "citty";
-import { loadGlobalConfig } from "@lore/core/node";
+import { loadGlobalConfig, resolveGlobalConfigPath } from "@lore/core/node";
 import { loadLoreApp } from "../loader.js";
 import { createApp } from "../../../app.js";
 import type { App } from "../../../app.js";
@@ -98,6 +98,8 @@ import { ensureLocalApiKey } from "../local-key.js";
 import { createMountRegistry } from "../../../mount/mount-registry.js";
 import type { MountRegistry } from "../../../mount/types.js";
 import { createDashboardTeardown, registerDashboardShutdownSignals, type KillableChild } from "../dashboard-lifecycle.js";
+import type { Invocation } from "@lore/core";
+import { invocationOf } from "../command-invocation.js";
 
 // Re-export for tests that import from this module path.
 export { ensureLocalApiKey } from "../local-key.js";
@@ -137,8 +139,8 @@ function parsePort(rawValue: string | undefined, flagName: string, fallback: str
  * inert). `loadGlobalConfig` failures (malformed YAML, etc.) degrade to "no registry"
  * rather than aborting the whole `lore dashboard` run.
  */
-async function buildMountRegistry(): Promise<MountRegistry<App> | undefined> {
-  const globalConfigResult = loadGlobalConfig();
+async function buildMountRegistry(inv: Invocation): Promise<MountRegistry<App> | undefined> {
+  const globalConfigResult = loadGlobalConfig(resolveGlobalConfigPath(inv.env, inv.paths.home));
   const registeredProjects = globalConfigResult.ok ? (globalConfigResult.value.dashboard?.projects ?? []) : [];
   if (registeredProjects.length === 0) return undefined;
 
@@ -267,10 +269,13 @@ async function resolveAssets(): Promise<DashboardAssetsResult> {
  *
  * @returns Never resolves — every exit path is `process.exit`.
  */
-async function runPackagedMode(args: {
-  "api-port"?: string;
-  open?: boolean;
-}): Promise<never> {
+async function runPackagedMode(
+  args: {
+    "api-port"?: string;
+    open?: boolean;
+  },
+  inv: Invocation,
+): Promise<never> {
   // DD-5 / Failure Modes table: this guard is the FIRST thing packaged mode does — no
   // corpus load, no store open, no port parsed, no listener bound — so an unavailable-
   // assets exit has zero side effects and never mentions Vite (packaged mode never
@@ -300,7 +305,7 @@ async function runPackagedMode(args: {
   // discarded — packaged mode's nonce flow never reads or serves it (DD-2 unchanged).
   await ensureLocalApiKey(machineAuth.apiKeyStore, machineAuth.baseDir);
 
-  const mountRegistry = await buildMountRegistry();
+  const mountRegistry = await buildMountRegistry(inv);
 
   // DD-3: packaged mode is single-origin — the api origin only, never a dashboard-port
   // pair (there is no second process/port in this topology).
@@ -448,11 +453,14 @@ function killableProcessGroup(child: ReturnType<typeof spawn>): KillableChild {
  *
  * @returns Never resolves — every exit path is `process.exit`.
  */
-async function runDevMode(args: {
-  "api-port"?: string;
-  "dashboard-port"?: string;
-  open?: boolean;
-}): Promise<never> {
+async function runDevMode(
+  args: {
+    "api-port"?: string;
+    "dashboard-port"?: string;
+    open?: boolean;
+  },
+  inv: Invocation,
+): Promise<never> {
   // reason: `{surface: "http"}` — see runPackagedMode's identical call site;
   // the dev topology mounts the same long-lived HTTP server (§D5).
   const { app, dbPath } = loadLoreApp({ surface: "http" });
@@ -476,7 +484,7 @@ async function runDevMode(args: {
   // nonce flow never mints or reads this key — see this file's header.
   const localKey = await ensureLocalApiKey(machineAuth.apiKeyStore, machineAuth.baseDir);
 
-  const mountRegistry = await buildMountRegistry();
+  const mountRegistry = await buildMountRegistry(inv);
 
   const apiPort = parsePort(args["api-port"], "api-port", "8787");
   const dashPort = parsePort(args["dashboard-port"], "dashboard-port", "5173");
@@ -716,11 +724,13 @@ export default defineCommand({
       description: "Open the browser automatically (default: true; pass --no-open to skip)",
     },
   },
-  async run({ args }) {
+  async run(context) {
+    const { args } = context;
+    const inv = invocationOf(context);
     if (args.dev) {
-      await runDevMode(args);
+      await runDevMode(args, inv);
       return;
     }
-    await runPackagedMode(args);
+    await runPackagedMode(args, inv);
   },
 });

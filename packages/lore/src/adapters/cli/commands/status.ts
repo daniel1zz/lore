@@ -140,6 +140,7 @@ import type { AcService } from "../../../service/ac-service.js";
 import { buildStalenessFlowDeps, listFreshStalenessEscalates } from "../../../flows/staleness-flow.js";
 import { loadTreeBlueprint } from "../../../flows/blueprint-flow.js";
 import { runCheck as runFragmentsCheckCommand } from "./fragments.js";
+import { invocationOf } from "../command-invocation.js";
 import {
   buildDriftFlowDeps,
   buildListSpecs,
@@ -1076,7 +1077,8 @@ export default defineCommand({
         "Enumerate the MEMBERS behind a count field the plain run reports (e.g. pass_unfalsified_count, ac_other_command_count, ac_oracle_file_missing_count, unredeemed_allow_missing_path_count, capture_source_runner_count, capture_source_self_report_count, capture_source_runner_unattested_count, code_anchor_specs, adopted_abandoned_count). Unknown field → exit 4, naming it and the known set.",
     },
   },
-  async run({ args }) {
+  async run(context) {
+    const { args } = context;
     // ── check-binary-provenance branch (spec-bootstrap-fixpoint-integrity-
     // binary-provenance-an-anchor, AC-BFI-2) ────────────────────────────────
     // reason: dispatched FIRST, ahead of --enumerate and --check-claude-md.
@@ -1243,7 +1245,7 @@ export default defineCommand({
     // check are the ones `lore fragments check` uses, so the two commands cannot disagree on a
     // finding; only the stdout/stderr rendering below is repeated (it is module-private there).
     if (args["check-fragments"] === true) {
-      await runFragmentsCheckCommand(args, process.cwd(), "lore status --check-fragments");
+      await runFragmentsCheckCommand(args, process.cwd(), invocationOf(context), "lore status --check-fragments");
       return;
     }
 

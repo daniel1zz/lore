@@ -24,7 +24,6 @@
  */
 import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
-import { currentHomeDir } from "@lore/core/node";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { defineCommand } from "citty";
@@ -53,6 +52,8 @@ import { SELECTION_FILE } from "../../../service/context-fragments/selection.js"
 import { resolveUserConfigDir } from "../../../service/context-fragments/user-config-dir.js";
 import { resolveAssetsRoot, resolveTargetDir, type SetupPathContext } from "../setup-args.js";
 import { writeAllSync } from "../stdio-sync.js";
+import type { Invocation } from "@lore/core";
+import { invocationOf } from "../command-invocation.js";
 
 const ACTIONS = ["render", "check", "pointers"] as const;
 type Action = (typeof ACTIONS)[number];
@@ -167,15 +168,15 @@ function loadContextLayer(path: string | undefined, schema: z.ZodTypeAny): Layer
 
 export type DepsResult = { ok: true; value: FragmentsFlowDeps } | { ok: false; error: FragmentsFlowError };
 
-export function buildFlowDeps(cwd: string): DepsResult {
+export function buildFlowDeps(cwd: string, inv: Invocation): DepsResult {
   const projectRoot = resolveProjectRoot(cwd);
-  const global = loadContextLayer(resolveGlobalConfigPath(), ContextFragmentsSettingsSchema);
+  const global = loadContextLayer(resolveGlobalConfigPath(inv.env, inv.paths.home), ContextFragmentsSettingsSchema);
   if (!global.ok) return global;
   const project = loadContextLayer(join(projectRoot, ".lore", "config.yaml"), contextConfigSchema);
   if (!project.ok) return project;
   const assetsRoot = resolveAssets();
-  const claudeDir = resolveTargetDir({ env: process.env, homeDir: currentHomeDir() });
-  const userConfigDir = resolveUserConfigDir(process.env, currentHomeDir());
+  const claudeDir = resolveTargetDir({ env: inv.env, homeDir: inv.paths.home });
+  const userConfigDir = resolveUserConfigDir(inv.env, inv.paths.home);
   const userSelection = readSelectionText(join(userConfigDir, SELECTION_FILE.user));
   if (!userSelection.ok) return userSelection;
   const projectSelection = readSelectionText(join(projectRoot, SELECTION_FILE.project));
@@ -222,7 +223,7 @@ function emitHookJson(outlet: HookOutlet, additionalContext: string): void {
   );
 }
 
-async function runRender(args: Record<string, unknown>, cwd: string): Promise<void> {
+async function runRender(args: Record<string, unknown>, cwd: string, inv: Invocation): Promise<void> {
   const outlet = typeof args["outlet"] === "string" ? args["outlet"] : "";
   if (outlet === RETIRED_SESSION_START_OUTLET) {
     usageError(
@@ -237,7 +238,7 @@ async function runRender(args: Record<string, unknown>, cwd: string): Promise<vo
   }
   const agentType = typeof args["agent-type"] === "string" && args["agent-type"] !== "" ? args["agent-type"] : undefined;
 
-  const deps = buildFlowDeps(cwd);
+  const deps = buildFlowDeps(cwd, inv);
   const result = deps.ok
     ? await runFragmentsRender(deps.value, { outlet, ...(agentType !== undefined ? { agentType } : {}) })
     : deps;
@@ -258,9 +259,9 @@ async function runRender(args: Record<string, unknown>, cwd: string): Promise<vo
  * setting the exit code. `label` names the invoking command in the human lines; shared with
  * `lore status --check-fragments` so the two cannot render a finding differently.
  */
-export async function runCheck(args: Record<string, unknown>, cwd: string, label = "lore fragments check"): Promise<void> {
+export async function runCheck(args: Record<string, unknown>, cwd: string, inv: Invocation, label = "lore fragments check"): Promise<void> {
   const json = args["json"] === true;
-  const deps = buildFlowDeps(cwd);
+  const deps = buildFlowDeps(cwd, inv);
   if (!deps.ok) {
     if (json) writeAllSync(1, `${JSON.stringify({ ok: false, error: deps.error })}\n`);
     process.stderr.write(`${label}: ${deps.error.code}: ${deps.error.message}\n`);
@@ -322,19 +323,21 @@ export default defineCommand({
     explain: { type: "boolean", description: "render: print per-fragment id/layer/chars to stderr", default: false },
     json: { type: "boolean", description: "check: print the report as JSON", default: false },
   },
-  async run({ args }) {
+  async run(context) {
+    const { args } = context;
+    const inv = invocationOf(context);
     const action = typeof args.action === "string" ? args.action : "";
     if (!isAction(action)) {
       usageError(`lore fragments requires an action: ${ACTIONS.join(" | ")} (got "${action}")`);
       return;
     }
-    const cwd = typeof args.cwd === "string" && args.cwd !== "" ? resolve(args.cwd) : process.cwd();
+    const cwd = typeof args.cwd === "string" && args.cwd !== "" ? resolve(args.cwd) : inv.cwd;
     const rest = args as Record<string, unknown>;
     switch (action) {
       case "render":
-        return runRender(rest, cwd);
+        return runRender(rest, cwd, inv);
       case "check":
-        return runCheck(rest, cwd);
+        return runCheck(rest, cwd, inv);
       case "pointers":
         return runPointers(cwd);
       default: {

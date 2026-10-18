@@ -154,8 +154,8 @@ export type GhExecFile = (
 export interface GhRunnerOptions {
   /** REQUIRED — see {@link GhExecFile}'s own doc comment for why this has no internal default. */
   execFile: GhExecFile;
-  /** Parent env `gh` is spawned from, BEFORE risk-R2 scrubbing. Defaults to `process.env`. */
-  env?: NodeJS.ProcessEnv;
+  /** REQUIRED — parent env `gh` is spawned from, BEFORE risk-R2 scrubbing (`Invocation.env`; no ambient default, AS-26). */
+  env: NodeJS.ProcessEnv;
 }
 
 /** The rejection shape both `util.promisify(child_process.execFile)` and this module's test doubles produce. */
@@ -273,7 +273,7 @@ export class GhRunner {
 
   constructor(options: GhRunnerOptions) {
     this.execFile = options.execFile;
-    this.env = options.env ?? process.env;
+    this.env = options.env;
   }
 
   /**

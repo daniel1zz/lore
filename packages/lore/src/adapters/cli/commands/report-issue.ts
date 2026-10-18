@@ -94,10 +94,11 @@ import {
   type LoreError,
   type Result,
 } from "@lore/core";
-import { resolveActorWithSource } from "@lore/core/node";
+import { readOsUsername, resolveActorWithSource } from "@lore/core/node";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatError, resolveActor } from "../utils.js";
 import { classifyFeedbackUpstream, fileGithubIssue, resolveConsumerCorpusRoot } from "../report-issue-wiring.js";
+import { invocationOf } from "../command-invocation.js";
 
 /**
  * The report-filing flags — mutually exclusive with `--list` (checked as a group).
@@ -245,7 +246,9 @@ export default defineCommand({
       description: "Output result as JSON",
     },
   },
-  async run({ args }) {
+  async run(context) {
+    const { args } = context;
+    const inv = invocationOf(context);
     // ─── Step 1: argument mutex + required-flag checks (synchronous, before any IO) ───
     const isList = args.list === true;
     const reportFlagsPresent = REPORT_FLAGS.filter((flag) => typeof args[flag] === "string");
@@ -336,7 +339,7 @@ export default defineCommand({
       // renders.
       if (isList) {
         const { runGithubIssuesListing } = await import("./issues.js");
-        await runGithubIssuesListing(app, effectiveCfg, corpusRoot, args.json === true);
+        await runGithubIssuesListing(app, effectiveCfg, corpusRoot, args.json === true, inv.env);
         return;
       }
 
@@ -361,7 +364,7 @@ export default defineCommand({
               .filter((tag) => tag.length > 0)
           : [];
 
-      const { actor, source: actorSource } = resolveActorWithSource(undefined, process.env);
+      const { actor, source: actorSource } = resolveActorWithSource(undefined, inv.env, readOsUsername);
       const reproCommand = args["repro-command"];
 
       const githubResult = await fileGithubIssue(
@@ -381,6 +384,7 @@ export default defineCommand({
           corpusService: app.corpusService,
           actor,
           actorSource,
+          env: inv.env,
         },
       );
 

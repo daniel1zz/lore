@@ -31,7 +31,7 @@
  */
 
 import { ok, type LoreError, type Result } from "@lore/core";
-import { resolveActorWithSource } from "@lore/core/node";
+import { resolveActorFromProcess } from "@lore/core/node";
 import { verifyInvocationIdentity } from "../service/run-identity-verify.js";
 import type { AuditEntry, InvocationIdentity, VersionRecord } from "@lore/core";
 
@@ -93,8 +93,8 @@ export function readWriteContext(store: StoreInterface): StampingContext | undef
  * read the OS user next to a `--by` claim).
  */
 export function resolveWriteActorFor(store: StoreInterface, by?: string): string {
-  if (by !== undefined) return resolveActorWithSource(by, process.env).actor;
-  return readWriteContext(store)?.identity.claimed ?? resolveActorWithSource(undefined, process.env).actor;
+  if (by !== undefined) return resolveActorFromProcess(by).actor;
+  return readWriteContext(store)?.identity.claimed ?? resolveActorFromProcess().actor;
 }
 
 function stampRecord<T extends object>(record: T, stamp: Stamp): T {

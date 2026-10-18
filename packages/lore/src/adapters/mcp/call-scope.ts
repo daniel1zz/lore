@@ -25,7 +25,7 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { err, ok, type InvocationIdentity, type LoreError, type NameSource, type Result } from "@lore/core";
-import { RunIdentityArgumentError, resolveInvocationIdentity, type ActorSource } from "@lore/core/node";
+import { RunIdentityArgumentError, readOsUsername, resolveInvocationIdentity, type ActorSource } from "@lore/core/node";
 import type { App } from "../../app.js";
 
 /** What the running call exposes to its handler. */
@@ -59,7 +59,7 @@ function errorResult(error: LoreError): CallToolResult {
 export function buildCallIdentity(input: CallAttestation): Result<InvocationIdentity, LoreError> {
   const argv = input.harness_run !== undefined ? ["--harness-run", input.harness_run] : [];
   try {
-    const { identity } = resolveInvocationIdentity(argv, process.env);
+    const { identity } = resolveInvocationIdentity(argv, process.env, readOsUsername);
     return ok(identity);
   } catch (e) {
     if (e instanceof RunIdentityArgumentError) {

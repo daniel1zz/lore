@@ -80,7 +80,6 @@ import {
 } from "@lore/core";
 import {
   parseRunId,
-  readSessionTrail,
   type SessionTrail,
 } from "@lore/core/node";
 import { claimNamesWorktree, makeDirectoryResolver } from "./seat-claim-match.js";
@@ -131,8 +130,22 @@ export interface HandoffCaller {
  */
 export type ReadHandoffTrail = (sessionId: string) => SessionTrail | null;
 
-/** Default port: the real filesystem reader over the resolved state base (`CLAUDE_STATE_BASE_OVERRIDE` or `~/.claude/session-state`). */
-const readHandoffTrailFromDisk: ReadHandoffTrail = (sessionId) => readSessionTrail(sessionId);
+/** Thrown by the default trail port: no state base was wired, so no trail can be read. */
+export class TrailPortNotWiredError extends Error {
+  constructor(readonly sessionId: string) {
+    super(`no session-trail reader wired (SessionServiceDeps.readTrail) — cannot read the trail of session ${sessionId}`);
+    this.name = "TrailPortNotWiredError";
+  }
+}
+
+/**
+ * Default port: nothing wired. The real reader needs the state base (`stateBase(env, home)`, which this service must
+ * not read from the process, AS-26), so `app.ts` supplies it as `SessionServiceDeps.readTrail`; a bare construction
+ * gets this typed refusal, which `withTrailChangedFiles` reports as "not measured" with the reason — never a guess.
+ */
+const readHandoffTrailUnwired: ReadHandoffTrail = (sessionId) => {
+  throw new TrailPortNotWiredError(sessionId);
+};
 
 /** Truncates `title` to at most `maxChars`, appending an ellipsis marker when cut. */
 function truncateTitle(title: string, maxChars = 120): string {
@@ -201,6 +214,8 @@ export interface SessionServiceDeps {
   readonly createHandoffDoc: (input: CreateDocInput) => Promise<Result<DocRecord, LoreError>>;
   /** Per-checkpoint gate enablement port — `GateEnforcer.isEnabled`, bound. See module invariants. */
   readonly isCheckpointEnabled?: (checkpoint: GateCheckpoint) => boolean;
+  /** Session-trail reader over the invocation's state base (`app.ts` wires `readSessionTrail(id, stateBase(env, home))`); absent -> {@link TrailPortNotWiredError}. */
+  readonly readTrail?: ReadHandoffTrail;
 }
 
 /** One resolved handoff, as `resume` returns it — pointer fields plus the full rendered content (the one deliberate pointers-only exception, D5). */
@@ -280,7 +295,7 @@ export class SessionService {
     private readonly writeHeartbeatPort: WriteSessionHeartbeat = writeSessionHeartbeat,
     private readonly readHeartbeatPort: ReadSessionHeartbeat = readSessionHeartbeat,
     private readonly realpathPort: RealpathPort = realpathNative,
-    private readonly readTrailPort: ReadHandoffTrail = readHandoffTrailFromDisk,
+    private readonly readTrailPort: ReadHandoffTrail = deps.readTrail ?? readHandoffTrailUnwired,
   ) {}
 
   // ── Seat claims (session-start injection) ─────────────────────────────────

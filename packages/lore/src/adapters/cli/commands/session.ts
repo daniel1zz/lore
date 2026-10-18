@@ -35,9 +35,10 @@
  */
 
 import { readFileSync, realpathSync } from "node:fs";
-import { hostname } from "node:os";
 import { dirname } from "node:path";
 import { defineCommand } from "citty";
+import type { Invocation } from "@lore/core";
+import { invocationOf } from "../command-invocation.js";
 import { loadCoChangeRules, reviewCoChange, type CoChangeFinding, type CoChangeGroup, type GlobMatchFn } from "../../../service/co-change-review.js";
 import { reviewHelperScope } from "../../../service/helper-scope-review.js";
 import type { SessionLivenessRecord } from "../../../service/session-service.js";
@@ -186,7 +187,7 @@ function judgeCoChange(input: {
  * judge against, checked BEFORE the corpus is opened); 3 unknown `--turn`; 4 no attested run / no trail; otherwise the
  * service error's code (the hook turns any non-zero exit into a not-measured line).
  */
-async function runSessionTrailReview(args: { turn?: unknown; json?: unknown }): Promise<void> {
+async function runSessionTrailReview(args: { turn?: unknown; json?: unknown }, inv: Invocation): Promise<void> {
   const emit = (data: Record<string, unknown>): void => {
     if (args.json) console.log(JSON.stringify({ ok: true, data }, null, 2));
     else console.log(formatTrailReview(data as unknown as TrailReviewView));
@@ -202,7 +203,7 @@ async function runSessionTrailReview(args: { turn?: unknown; json?: unknown }): 
     if (session === null) return;
     let trail: SessionTrail | null;
     try {
-      trail = readSessionTrail(session);
+      trail = readSessionTrail(session, stateBase(inv.env, inv.paths.home));
     } catch (err) {
       if (err instanceof TrailFileInvalidError) {
         process.stderr.write(`Error: ${err.message}\n`);
@@ -212,7 +213,7 @@ async function runSessionTrailReview(args: { turn?: unknown; json?: unknown }): 
       throw err;
     }
     if (trail === null) {
-      refuseTrailAccess("trail-review", `no session trail for session ${session} under ${stateBase()}`);
+      refuseTrailAccess("trail-review", `no session trail for session ${session} under ${stateBase(inv.env, inv.paths.home)}`);
       return;
     }
     const turn = typeof args.turn === "string" ? args.turn : undefined;
@@ -259,6 +260,7 @@ async function runSessionTrailReview(args: { turn?: unknown; json?: unknown }): 
 async function runSessionTrail(
   app: Awaited<ReturnType<typeof loadLoreApp>>["app"],
   args: { turn?: unknown; run?: unknown; json?: unknown },
+  inv: Invocation,
 ): Promise<void> {
   const refuse = (reason: string): void => refuseTrailAccess("trail", reason);
   const session = await resolveCallerSession(app, "trail");
@@ -278,7 +280,7 @@ async function runSessionTrail(
   }
   let trail: SessionTrail | null;
   try {
-    trail = readSessionTrail(session);
+    trail = readSessionTrail(session, stateBase(inv.env, inv.paths.home));
   } catch (err) {
     if (err instanceof TrailFileInvalidError) {
       process.stderr.write(`Error: ${err.message}\n`);
@@ -288,7 +290,7 @@ async function runSessionTrail(
     throw err;
   }
   if (trail === null) {
-    refuse(`no session trail for session ${session} under ${stateBase()}`);
+    refuse(`no session trail for session ${session} under ${stateBase(inv.env, inv.paths.home)}`);
     return;
   }
   const turn = typeof args.turn === "string" ? args.turn : undefined;
@@ -383,17 +385,19 @@ export default defineCommand({
       description: "`trail` only: narrow to the files this run (cc:<session>[:<agent>]) changed",
     },
   },
-  async run({ args }) {
+  async run(context) {
+    const { args } = context;
+    const inv = invocationOf(context);
     // reason: trail-review decides whether a corpus exists itself (no `.lore/` is a clean "nothing to judge", not the
     // loader's exit 1), so it must run before `loadLoreApp`.
     if (String(args.target) === "trail-review") {
-      await runSessionTrailReview(args);
+      await runSessionTrailReview(args, inv);
       return;
     }
     const { app } = loadLoreApp();
     try {
       if (String(args.target) === "trail") {
-        await runSessionTrail(app, args);
+        await runSessionTrail(app, args, inv);
         return;
       }
       if (app.sessionService === undefined) {
@@ -410,7 +414,7 @@ export default defineCommand({
         return;
       }
 
-      const currentMachine = hostname();
+      const currentMachine = inv.host;
 
       // reason: self-registration (module header) — best-effort, skipped
       // entirely when this caller has no measurable session id (e.g. MCP/HTTP
@@ -427,7 +431,7 @@ export default defineCommand({
       // this task's scope stops at "measurably better than the CLI's own
       // pid", full orchestrator-pid capture is P2's session-lease mechanism,
       // out of this plan).
-      const sessionIdResult = resolveClaimSessionId(process.env);
+      const sessionIdResult = resolveClaimSessionId(inv.env);
       if (sessionIdResult.ok && sessionIdResult.value !== undefined) {
         await sessionService.recordOwnHeartbeat(sessionIdResult.value, process.ppid, currentMachine);
       }

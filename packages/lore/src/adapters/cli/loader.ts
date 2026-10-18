@@ -69,6 +69,7 @@ import type {
 import {
   loadConfig,
   loadGlobalConfig,
+  readProcessAmbient,
   resolveGlobalConfigPath,
 } from "@lore/core/node";
 import { createApp, createAppWithWriteContext, type App } from "../../app.js";
@@ -419,7 +420,14 @@ export function loadLoreApp(opts: LoadLoreAppOptions = {}): {
 
   // ─── Global config + defaults merge ─────────────────────────────────────────
   // reason: SPEC-003 §6.2 — resolve once here so we have the path for the warning message.
-  const globalConfigPath = resolveGlobalConfigPath();
+  // reason: transitional (until loadLoreApp takes `inv` itself): the running command's Invocation when the delivery
+  // scope is open, else the process snapshot an Invocation-less entry (MCP/HTTP/tests) would resolve at startup.
+  const scopedInvocation = invocationInScope();
+  const globalConfigAmbient =
+    scopedInvocation !== undefined
+      ? { env: scopedInvocation.env, home: scopedInvocation.paths.home }
+      : readProcessAmbient();
+  const globalConfigPath = resolveGlobalConfigPath(globalConfigAmbient.env, globalConfigAmbient.home);
   let globalDefaults: LoreDefaults | undefined;
   if (globalConfigPath !== undefined) {
     const globalResult = loadGlobalConfig(globalConfigPath);

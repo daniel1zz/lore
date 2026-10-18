@@ -201,6 +201,7 @@ import {
   type IssueResolution,
 } from "../../../service/issue-resolution.js";
 import { GhRunner, createNodeGhExecFile } from "../../../service/gh-runner.js";
+import { invocationOf } from "../command-invocation.js";
 import { readGithubIssueRef, labelToResolution, type GithubIssueRef } from "../../../service/resolution-projector.js";
 import type { GithubIssueRow } from "../../../service/github-issue-listing.js";
 
@@ -416,6 +417,7 @@ function includedByGithubMode(mode: "open" | "resolved" | "all", resolution: Iss
  * @param corpusPath - the local corpus root, printed/reported exactly like
  *   the local branch's `Corpus: ` line (§M4's declared render contract)
  * @param json - whether `--json` was passed
+ * @param env - the environment `gh` is spawned from (`Invocation.env`)
  * @param filters - the mode/severity/category filter to apply; omitted by
  *   a caller that wants the unfiltered listing (see above)
  */
@@ -424,13 +426,14 @@ export async function runGithubIssuesListing(
   cfg: GithubUpstreamCfg,
   corpusPath: string,
   json: boolean,
+  env: NodeJS.ProcessEnv,
   filters: {
     readonly mode: "open" | "resolved" | "all";
     readonly severity?: IssueSeverity;
     readonly category?: string;
   } = { mode: "all" },
 ): Promise<void> {
-  const joinedResult = await resolveGithubJoinedRows(app.corpusService, cfg);
+  const joinedResult = await resolveGithubJoinedRows(app.corpusService, cfg, env);
   if (!joinedResult.ok) {
     process.stderr.write(formatError(joinedResult.error) + "\n");
     process.exitCode = exitCode(joinedResult.error);
@@ -510,8 +513,9 @@ async function runGithubVerify(
   cfg: GithubUpstreamCfg,
   corpusPath: string,
   json: boolean,
+  env: NodeJS.ProcessEnv,
 ): Promise<void> {
-  const joinedResult = await resolveGithubJoinedRows(app.corpusService, cfg);
+  const joinedResult = await resolveGithubJoinedRows(app.corpusService, cfg, env);
   if (!joinedResult.ok) {
     process.stderr.write(formatError(joinedResult.error) + "\n");
     process.exitCode = exitCode(joinedResult.error);
@@ -590,7 +594,8 @@ export default defineCommand({
       description: "Output as JSON",
     },
   },
-  async run({ args }) {
+  async run(context) {
+    const { args } = context;
     // spec-archiving-the-work-that-resolves-a-defect-report-closes D3 — --sync is its own operation
     // (never a narrowing of the listing); --apply means nothing alone. Usage errors exit 2 BEFORE the
     // corpus is opened.
@@ -670,10 +675,10 @@ export default defineCommand({
       // function already derived for the local branch above.
       if (args.local !== true && classification.kind === "github") {
         if (args.verify === true) {
-          await runGithubVerify(app, classification.cfg, dirname(dirname(dbPath)), args.json === true);
+          await runGithubVerify(app, classification.cfg, dirname(dirname(dbPath)), args.json === true, invocationOf(context).env);
           return;
         }
-        await runGithubIssuesListing(app, classification.cfg, dirname(dirname(dbPath)), args.json === true, {
+        await runGithubIssuesListing(app, classification.cfg, dirname(dirname(dbPath)), args.json === true, invocationOf(context).env, {
           mode,
           ...(severityFilter !== undefined ? { severity: severityFilter } : {}),
           ...(categoryFilter !== undefined ? { category: categoryFilter } : {}),
@@ -705,7 +710,7 @@ export default defineCommand({
       // BEFORE the mode-filtered read, so it never inherits --open/--resolved/
       // --all's filter and never touches --severity/--category.
       if (args.verify === true) {
-        await runVerify(app, source, args.json === true);
+        await runVerify(app, source, args.json === true, invocationOf(context).env);
         return;
       }
 
@@ -1016,8 +1021,9 @@ async function collectLocalVerifyTargets(app: ReturnType<typeof loadLoreApp>["ap
  */
 async function fetchGithubLabelResolutions(
   targets: readonly VerifyTarget[],
+  env: NodeJS.ProcessEnv,
 ): Promise<Result<Map<string, IssueResolution | undefined>, LoreError>> {
-  const runner = new GhRunner({ execFile: createNodeGhExecFile() });
+  const runner = new GhRunner({ execFile: createNodeGhExecFile(), env });
 
   const targetsByRepo = new Map<string, VerifyTarget[]>();
   for (const target of targets) {
@@ -1140,7 +1146,7 @@ function renderVerifyResult(corpusPath: string, divergences: readonly Resolution
  * that DOES have targets, since that path always calls
  * {@link fetchGithubLabelResolutions}).
  */
-async function runVerify(app: ReturnType<typeof loadLoreApp>["app"], source: IssueReadSource, json: boolean): Promise<void> {
+async function runVerify(app: ReturnType<typeof loadLoreApp>["app"], source: IssueReadSource, json: boolean, env: NodeJS.ProcessEnv): Promise<void> {
   // reason: `source.kind === "upstream"` is structurally unreachable from
   // this file's own `resolveIssueReadSource` call site — see `run()`'s
   // comment there. Handled as a real error, not `assertUnreachable`, for the
@@ -1159,7 +1165,7 @@ async function runVerify(app: ReturnType<typeof loadLoreApp>["app"], source: Iss
     return;
   }
 
-  const labelsResult = await fetchGithubLabelResolutions(targets);
+  const labelsResult = await fetchGithubLabelResolutions(targets, env);
   if (!labelsResult.ok) {
     process.stderr.write(formatError(labelsResult.error) + "\n");
     process.exitCode = exitCode(labelsResult.error);

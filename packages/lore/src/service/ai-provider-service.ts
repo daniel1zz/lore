@@ -80,7 +80,7 @@
  *     `assessPlan`'s own `scopeWarning` local for the narrowing that keeps this field's
  *     persisted contract exactly as it was before that task).
  *   - assessPlan (D2/D3, spec-judgment-surfaces-must-verify-before-they-certify-machine)
- *     resolves `repoRoot` (`opts.repoRoot ?? process.cwd()`) ONCE and passes it, plus
+ *     resolves `repoRoot` (`opts.repoRoot`, required) ONCE and passes it, plus
  *     `opts.diffSource` verbatim, into `_finalizeAssessment`, which runs `verifyFindingPaths`
  *     on the (grounding-)suppressed `typedGaps` — withdrawing any finding with an absent
  *     declared path into `unverifiable_findings[]`, tallying `paths_verified`, and NEVER
@@ -1226,8 +1226,9 @@ export class AIProviderService {
    *   The verification pass, its wiring into `_finalizeAssessment`, and its unit coverage
    *   are fully live (e.g. every test in `assess-path-verification.bun.test.ts`).
    *   Currency is pinned by `ai-provider-service-comment-currency.test.ts` (AC-JV-6).
-   * @param opts.repoRoot - OPTIONAL — directory `git cat-file -e` runs in when verifying
-   *   finding paths. Defaults to `process.cwd()`; tests pass a throwaway git fixture.
+   * @param opts.repoRoot - REQUIRED — directory `git cat-file -e` runs in when verifying
+   *   finding paths. The CLI passes `inv.cwd`; the MCP adapter its startup cwd; tests a throwaway git
+   *   fixture. No default: this service reads no ambient state (AS-26).
    * @returns Result<AssessmentResult, LoreError> — never throws. Returns
    *   `err(VALIDATION_ERROR)` naming the commit when `opts.diffSource` resolves to a commit
    *   that `git cat-file -e` cannot find (shallow clone / pruned range) — D2 fails LOUD
@@ -1265,7 +1266,7 @@ export class AIProviderService {
       // by either production caller" state and why `undefined` is a SAFE default, not a
       // silent capability gap.
       diffSource?: AssessDiffSource | undefined;
-      repoRoot?: string | undefined;
+      repoRoot: string;
     },
   ): Promise<Result<AssessmentResult, LoreError>> {
     const t0 = performance.now();
@@ -1273,7 +1274,7 @@ export class AIProviderService {
     // reason: D2 (spec-judgment-surfaces-must-verify-before-they-certify-machine) — resolved
     // ONCE here (never re-derived per finalization branch below) so both the first-attempt
     // and corrective-retry success paths verify finding paths against the SAME root.
-    const repoRoot = opts.repoRoot ?? process.cwd();
+    const repoRoot = opts.repoRoot;
 
     // reason: D4 (spec-judgment-surfaces-must-verify-before-they-certify-machine) — the
     // generated docs/requirements/** mirror is stripped EXACTLY ONCE here, before ANY

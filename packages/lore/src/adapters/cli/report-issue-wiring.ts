@@ -412,9 +412,10 @@ export interface GithubIssueListing {
  */
 export async function resolveGithubIssueListing(
   cfg: GithubUpstreamCfg,
+  env: NodeJS.ProcessEnv,
 ): Promise<Result<GithubIssueListing, LoreError>> {
   const receiptsPath = join(resolveConsumerCorpusRoot(), ".lore", RECEIPT_LOG_V2_FILENAME);
-  const runner = new GhRunner({ execFile: createNodeGhExecFile() });
+  const runner = new GhRunner({ execFile: createNodeGhExecFile(), env });
   const port = new GitHubIntakePort({ runner, repo: cfg.repo, receiptsPath });
 
   const verifyResult = await port.verifyTarget();
@@ -453,6 +454,7 @@ export async function resolveGithubIssueListing(
  *   `fileGithubIssue`'s `ctx.corpusService` mints ingested tasks into, never
  *   a second one
  * @param cfg - the GitHub-shaped `feedback.upstream` config
+ * @param env - the environment `gh` is spawned from (`Invocation.env`)
  * @returns `ok({repoId, rows})` — `rows` has exactly one entry per listed
  *   issue, in listing order ({@link joinListing}'s own contract); `err(...)`
  *   on the first failing `gh`/store call
@@ -460,8 +462,9 @@ export async function resolveGithubIssueListing(
 export async function resolveGithubJoinedRows(
   corpusService: CorpusService,
   cfg: GithubUpstreamCfg,
+  env: NodeJS.ProcessEnv,
 ): Promise<Result<{ repoId: number; rows: readonly GithubIssueRow[] }, LoreError>> {
-  const listingResult = await resolveGithubIssueListing(cfg);
+  const listingResult = await resolveGithubIssueListing(cfg, env);
   if (!listingResult.ok) return listingResult;
   const { issues, repoId } = listingResult.value;
 
@@ -538,6 +541,8 @@ export interface GithubFilingContext {
   readonly actorSource: ReporterActorSource;
   /** The ambient home directory, for redacting `reporter_corpus`'s path prefix. Defaults to `os.homedir()`. */
   readonly home?: string;
+  /** The environment `gh` is spawned from (`Invocation.env`; no ambient default, AS-26). */
+  readonly env: NodeJS.ProcessEnv;
 }
 
 /** Successful outcome of {@link fileGithubIssue}. */
@@ -783,7 +788,7 @@ export async function fileGithubIssue(
     }
   }
 
-  const runner = new GhRunner({ execFile: createNodeGhExecFile() });
+  const runner = new GhRunner({ execFile: createNodeGhExecFile(), env: ctx.env });
   const port = new GitHubIntakePort({ runner, repo: cfg.repo, receiptsPath });
 
   const verifyResult = await port.verifyTarget();

@@ -67,6 +67,8 @@ import { createRealProcessTablePort } from "../../process-table-port.js";
 import { runFragmentsRender } from "../../../flows/fragments-flow.js";
 import { detectWorktreeBranch } from "../../real-git-port.js";
 import { buildFlowDeps } from "./fragments.js";
+import type { Invocation } from "@lore/core";
+import { invocationOf } from "../command-invocation.js";
 
 const ACTIONS = ["register", "show", "end", "occupancy", "tasks", "reap", "attest-input"] as const;
 type Action = (typeof ACTIONS)[number];
@@ -102,9 +104,9 @@ function stringArg(args: Record<string, unknown>, key: string): string | undefin
  * (BR-912), so claiming fragments for it would record content the session never received. Static main
  * fragments reach the session through rules files/skills, which this record has never covered.
  */
-async function computeComposition(agentType: string | undefined): Promise<CompositionRecord | { error: string }> {
+async function computeComposition(agentType: string | undefined, inv: Invocation): Promise<CompositionRecord | { error: string }> {
   if (agentType === undefined) return { schemaVersion: 1, fragments: [] };
-  const deps = buildFlowDeps(process.cwd());
+  const deps = buildFlowDeps(inv.cwd, inv);
   if (!deps.ok) return { error: `${deps.error.code}: ${deps.error.message}` };
   const rendered = await runFragmentsRender(deps.value, { outlet: "hook:subagent-start", agentType });
   if (!rendered.ok) return { error: `${rendered.error.code}: ${rendered.error.message}` };
@@ -123,7 +125,7 @@ async function computeComposition(agentType: string | undefined): Promise<Compos
  * command ran in. `undefined` when the caller named no pid (nothing is measured, nothing is overwritten); a pid that
  * cannot be probed records a null pair (a legacy-style run) with a stderr note — registration itself never fails on it.
  */
-async function measureRunProcess(rawPid: string | undefined): Promise<RunProcessRecord | undefined | { error: string }> {
+async function measureRunProcess(rawPid: string | undefined, cwd: string): Promise<RunProcessRecord | undefined | { error: string }> {
   if (rawPid === undefined) return undefined;
   if (!/^[0-9]+$/.test(rawPid)) return { error: `--harness-pid must be a positive integer (got "${rawPid}")` };
   const port = createRealProcessTablePort();
@@ -136,7 +138,7 @@ async function measureRunProcess(rawPid: string | undefined): Promise<RunProcess
   return {
     pid: pid !== null && startTime !== null ? pid : null,
     startTime: pid !== null && startTime !== null ? startTime : null,
-    worktree: detectCheckoutRoot(process.cwd()),
+    worktree: detectCheckoutRoot(cwd),
   };
 }
 
@@ -181,7 +183,7 @@ async function withRunService(body: (service: RunService) => Promise<void>): Pro
   }
 }
 
-async function runRegister(args: Record<string, unknown>): Promise<void> {
+async function runRegister(args: Record<string, unknown>, inv: Invocation): Promise<void> {
   const harness = stringArg(args, "harness");
   const session = stringArg(args, "session");
   if (harness === undefined) return usageError("lore run register requires --harness <name>");
@@ -191,13 +193,13 @@ async function runRegister(args: Record<string, unknown>): Promise<void> {
   const parent = stringArg(args, "parent");
   const branch = stringArg(args, "branch");
 
-  const composition = await computeComposition(agentId !== undefined ? agentType : undefined);
+  const composition = await computeComposition(agentId !== undefined ? agentType : undefined, inv);
   if ("error" in composition) {
     process.stderr.write(`Error: cannot compute the run composition: ${composition.error}\n`);
     process.exitCode = VALIDATION_EXIT;
     return;
   }
-  const runProcess = await measureRunProcess(stringArg(args, "harness-pid"));
+  const runProcess = await measureRunProcess(stringArg(args, "harness-pid"), inv.cwd);
   if (runProcess !== undefined && "error" in runProcess) return usageError(runProcess.error);
 
   await withRunService(async (service) => {
@@ -434,13 +436,15 @@ export default defineCommand({
     worktree: { type: "string", description: "occupancy: worktree directory to measure (required)" },
     json: { type: "boolean", description: "Output JSON", default: false },
   },
-  async run({ args }) {
+  async run(context) {
+    const { args } = context;
+    const inv = invocationOf(context);
     const action = typeof args.action === "string" ? args.action : "";
     if (!isAction(action)) return usageError(`lore run requires an action: ${ACTIONS.join(" | ")} (got "${action}")`);
     const rest = args as Record<string, unknown>;
     switch (action) {
       case "register":
-        return runRegister(rest);
+        return runRegister(rest, inv);
       case "show":
         return runShow(rest);
       case "end":

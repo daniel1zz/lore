@@ -405,9 +405,9 @@ export interface RunFidelityInput {
   nonce?: string;
   /**
    * Directory the cited test paths are resolved against (verify's precheck roots are derived from it).
-   * Defaults to the process cwd, which is where `lore baseline fidelity` runs from.
+   * REQUIRED: `lore baseline fidelity` passes `inv.cwd`; this service reads no ambient state (AS-26).
    */
-  repoRoot?: string;
+  repoRoot: string;
 }
 
 /**
@@ -418,7 +418,7 @@ export interface RunFidelityInput {
  */
 export async function runFidelity(input: RunFidelityInput): Promise<Result<FidelityRecord, LoreError>> {
   const nonce = input.nonce ?? randomBytes(6).toString("hex");
-  const repoRoot = input.repoRoot ?? process.cwd();
+  const repoRoot = input.repoRoot;
   let pool: Array<{ key: string; read: () => { body: string; unseen: string[] } }>;
   let catchAll: CatchAllRule[] = [];
   let instructions: string;

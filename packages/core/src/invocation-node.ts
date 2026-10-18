@@ -16,7 +16,8 @@
  * reason: lives under `@lore/core/node` (not the default barrel) because it imports `node:os`.
  */
 
-import { homedir, hostname, tmpdir } from "node:os";
+import { homedir, hostname, tmpdir, userInfo } from "node:os";
+import { resolveActorWithSource, type ResolvedActor } from "./actor-resolution-node.js";
 import type { Invocation } from "./invocation.js";
 import { resolveInvocationIdentity } from "./run-identity-node.js";
 
@@ -35,6 +36,58 @@ export interface InvocationResolvers {
 }
 
 /**
+ * The OS account name of the running process (the os-fallback tier of actor resolution).
+ * Lives here, with the other ambient reads, so `resolveActorWithSource` / `resolveInvocationIdentity`
+ * stay pure; pass it as their `osUsername` thunk.
+ *
+ * @returns the OS username
+ * @throws when the OS has no passwd entry for the current uid (`os.userInfo` semantics)
+ */
+export function readOsUsername(): string {
+  return userInfo().username;
+}
+
+/** What an entry WITHOUT an {@link Invocation} (MCP / HTTP server startup, library use) reads from its process. */
+export interface ProcessAmbient {
+  readonly env: EnvBag;
+  readonly home: string;
+  readonly tmpDir: string;
+}
+
+/**
+ * `$HOME` wins over `os.homedir()`: under Bun, os.homedir() ignores a HOME assigned after startup
+ * (measured 2026-10-17, see home-dir-node.ts), and the in-process test runner relies on the env value.
+ */
+function homeFrom(env: EnvBag): string {
+  const envHome = env["HOME"];
+  return envHome !== undefined && envHome !== "" ? envHome : homedir();
+}
+
+/**
+ * Snapshot the ambient process state for an entry that has no {@link Invocation} (the MCP and HTTP servers
+ * build theirs at startup). Same copies-not-views semantics as {@link resolveInvocation}. Command code that
+ * holds `inv` never calls this.
+ *
+ * @returns a frozen copy of the environment plus the resolved home and temp directories
+ */
+export function readProcessAmbient(): ProcessAmbient {
+  const env: EnvBag = Object.freeze({ ...process.env });
+  return Object.freeze({ env, home: homeFrom(env), tmpDir: tmpdir() });
+}
+
+/**
+ * Resolve an actor from the running process's own environment, for the entries that have no
+ * {@link Invocation} (MCP / HTTP servers, library use): `resolveActorWithSource` over `process.env`
+ * and the OS username. Command code that holds `inv` uses `inv.identity.claimed` instead.
+ *
+ * @param explicit - explicit actor (`--by` / `opts.by`), if supplied
+ * @returns the resolved actor and which tier produced it
+ */
+export function resolveActorFromProcess(explicit?: string): ResolvedActor {
+  return resolveActorWithSource(explicit, process.env, readOsUsername);
+}
+
+/**
  * Resolve the invocation of the running process.
  *
  * @param rawArgv - arguments after the program name, as typed (still containing `--harness-run`)
@@ -45,11 +98,8 @@ export interface InvocationResolvers {
 export function resolveInvocation(rawArgv: readonly string[], resolvers: InvocationResolvers): Invocation {
   const cwd = process.cwd();
   const env: EnvBag = Object.freeze({ ...process.env });
-  // reason: `$HOME` wins over `os.homedir()`: under Bun, os.homedir() ignores a HOME assigned after startup
-  // (measured 2026-10-17, see home-dir-node.ts), and the in-process test runner relies on the env value.
-  const envHome = env["HOME"];
-  const home = envHome !== undefined && envHome !== "" ? envHome : homedir();
-  const resolution = resolveInvocationIdentity(rawArgv, { ...env }, (dir) => resolvers.worktreeActor(dir));
+  const home = homeFrom(env);
+  const resolution = resolveInvocationIdentity(rawArgv, { ...env }, readOsUsername, () => resolvers.worktreeActor(cwd));
   const argv: readonly string[] = Object.freeze([...resolution.argv]);
   const bunMain = (globalThis as { Bun?: { main?: string } }).Bun?.main;
   return Object.freeze({
