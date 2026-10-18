@@ -1,4 +1,5 @@
 /** @spec_ref AC-IV-7 */
+/** @reads packages/core/src/invocation-node.ts */
 /**
  * @layer script-unit AS-26 guard — the allowlisted entry file `packages/core/src/invocation-node.ts` exports
  * nothing that reads ambient process state for someone else.
@@ -11,7 +12,7 @@
  *   HAPPY:      the real file's export list equals the explicit allow-set.
  *   NEGATIVE:   a planted `export function readOsUsername` is reported by the export parser (the guard can fail).
  *   BOUNDARY:   `export type`, `export interface`, `export async function`, `export const` and `export { a, b as c }` forms.
- *   ERROR:      an unreadable file path throws (never an empty, passing export list).
+ *   ERROR:      an empty parse never passes: the real file must still yield `resolveInvocation`.
  *   STATE:      none (pure text parse).
  *   REGRESSION: the helpers `readProcessAmbient`, `readOsUsername`, `resolveActorFromProcess` stay out.
  */
@@ -60,7 +61,8 @@ describe("invocation-node.ts export surface (AS-26 guard)", () => {
     expect(exportedNames(planted)).toEqual(["readOsUsername", "readLater", "readProcessAmbient", "ProcessAmbient", "Foo", "Baz"]);
   });
 
-  it("ERROR: a missing file throws instead of yielding an empty (passing) export list", () => {
-    expect(() => readFileSync(`${FILE}.does-not-exist`, "utf8")).toThrow();
+  it("ERROR: an empty parse is not a pass — the real-file test also requires resolveInvocation to be found", () => {
+    expect(exportedNames("")).toEqual([]);
+    expect(exportedNames(readFileSync(FILE, "utf8"))).toContain("resolveInvocation");
   });
 });
