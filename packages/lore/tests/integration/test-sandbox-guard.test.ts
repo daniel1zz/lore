@@ -1,4 +1,5 @@
 // @spawns packages/lore/src/index.ts
+// @reads scripts/test-isolation-env.ts
 /**
  * AC-TG-2: with LORE_TEST_SANDBOX=1, resolving a corpus whose lore.db lies inside this
  * repository fails with exit 4 naming LORE_TEST_SANDBOX and the refused path (read and
@@ -18,6 +19,7 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { childSandboxVerdict } from "../../../../scripts/test-isolation-env";
 
 const CLI = resolve(fileURLToPath(new URL("../../src/index.ts", import.meta.url)));
 const REPO_ROOT = resolve(fileURLToPath(new URL("../../../../", import.meta.url)));
@@ -66,12 +68,15 @@ describe("AC-TG-2 LORE_TEST_SANDBOX refuses this repository's corpus", () => {
   });
 
   it("AC-TG-2 REGRESSION: a node child spawned with NO explicit env from a vitest worker inherits the marker", () => {
-    const out = spawnSync("sh", ["-c", 'printf "%s|%s" "$LORE_TEST_SANDBOX" "$LORE_TEST_SANDBOX_REPO"'], {
-      encoding: "utf8",
-    }).stdout;
-    const [marker, repo] = out.split("|");
-    expect(marker).toBe("1");
-    expect(realpathSync(repo!)).toBe(realpathSync(REPO_ROOT));
+    // reason: the verdict is the child's exit status (TG-51), never its stdout.
+    const verdict = childSandboxVerdict(process.env["LORE_TEST_SANDBOX_REPO"] ?? "", (cmd, args) =>
+      spawnSync(cmd, args, { encoding: "utf8" }),
+    );
+    expect(verdict).toBe("armed");
+  });
+
+  it("TG-51 a child that exited 0 with its stdout LOST (Bun spawnSync flake) is read as armed, never as an unarmed marker", () => {
+    expect(childSandboxVerdict("/any/repo", () => ({ status: 0, stdout: "", error: undefined }))).toBe("armed");
   });
 
   it("AC-TG-2 NEGATIVE: a read resolving the repo's own db exits 4 naming the variable and the path", () => {
