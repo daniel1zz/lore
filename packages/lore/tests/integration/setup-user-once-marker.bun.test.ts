@@ -63,6 +63,7 @@ const REPO_DIR = "/repo";
 
 const HOOK_ASSET_CONTENTS: Record<string, string> = {
   "pre-push": "#!/usr/bin/env bash\necho pre-push\n",
+  "reference-transaction": "#!/bin/sh\necho reference-transaction\n",
 };
 const TREE_YAML_CONTENT = "root: prd\n";
 const GITIGNORE_BLOCK = "# --- lore ---\n.DS_Store\nnode_modules/\ndist/\ncoverage/\n.agent-worktree-marker\n.lore/lore.db*\n";
