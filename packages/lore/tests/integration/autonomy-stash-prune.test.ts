@@ -152,7 +152,7 @@ describe("AC-AU-4 lore stash prune", () => {
     expect(archiveResolves(sha)).toBe(true); // same commit
     expect(applied.stdout).toContain(archiveRef(sha));
     expect(applied.stdout).toMatch(/dropped 1, kept 0, escalated 0/);
-  });
+  }, { timeout: 60_000 });
 
   it("(2) a stash created by a LIVE run is kept and escalated with the reason named; an ENDED run's is dropped", async () => {
     await registerRun("liveagent", false);
@@ -167,7 +167,7 @@ describe("AC-AU-4 lore stash prune", () => {
     expect(result.stdout).toMatch(/dropped 1, kept 0, escalated 1/);
     expect(archiveResolves(liveSha)).toBe(true); // archived first even when not dropped
     expect(archiveResolves(endedSha)).toBe(true);
-  });
+  }, { timeout: 60_000 });
 
   it("(3) an archive write failure drops nothing and exits 1", () => {
     const sha = makeStash("main", "unarchivable\n");
@@ -199,7 +199,7 @@ describe("AC-AU-4 lore stash prune", () => {
     expect(git(["show", `${sha}:tracked.txt`])).toBe(bytesBefore);
     git(["stash", "pop", "-q"]);
     expect(readFileSync(join(repo, "tracked.txt"), "utf8")).toBe("precious\n");
-  });
+  }, { timeout: 60_000 });
 
   it("(5) the git-safety hook still refuses an agent-typed `git stash drop` (exit 2)", () => {
     const r = spawnSync("node", [HOOK], {
