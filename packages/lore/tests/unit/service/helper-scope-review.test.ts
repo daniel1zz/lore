@@ -126,6 +126,6 @@ describe("AC-ST-8 session scratchpad", () => {
       ],
     );
     const out = await review(trail, PARENT_CLAIM);
-    expect(out.findings.map((f) => [f.kind, f.files])).toEqual([["outside-working-copy", [other, "/tmp/elsewhere.txt", `${scratch}-not/b.txt`]]]);
+    expect(out.findings.map((f) => [f.kind, f.files])).toEqual([["outside-working-copy", [other, `${scratch}-not/b.txt`, "/tmp/elsewhere.txt"]]]);
   });
 });
