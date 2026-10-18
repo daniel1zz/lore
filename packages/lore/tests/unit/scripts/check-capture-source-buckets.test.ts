@@ -3,7 +3,6 @@
 // @reads scripts/check-capture-source-buckets.ts -- the pin test imports scanTree in-process
 // @reads packages/** -- the real-tree cases walk every package src directory
 // @reads package.json -- the wiring case reads the test chain
-// @reads scripts/ac-oracle-not-built-ledger.json -- the ledger case pins AC-CT-10's row as gone
 // @layer script-unit AC-CT-10 (fixture-tree falsifier suite; the AC's own oracle is the scan itself, `bun scripts/check-capture-source-buckets.ts`)
 /**
  * Site-scan suite for `scripts/check-capture-source-buckets.ts` — SPEC-143 AC-CT-10 (R13), task
@@ -40,7 +39,7 @@
  *               straight to the classifier is not one either; (b) and (c).
  *   ERROR:      exit EXACTLY 2 for empty tree / missing classifier / zero sites / empty env var.
  *   STATE:      one tree per case, removed in `afterEach`.
- *   REGRESSION: the real tree's site set is pinned; AC-CT-10's not-built ledger row is gone.
+ *   REGRESSION: the real tree's site set is pinned.
  *
  * @spec_ref spec-corpus-truthfulness-a-verdict-must-carry-the-state-it#AC-CT-10
  */
@@ -534,12 +533,5 @@ describe("AC-CT-10 wiring", () => {
     expect(pkg.scripts["check:capture-source-buckets"]).toBe("bun scripts/check-capture-source-buckets.ts");
     expect(pkg.scripts["test"]).toContain("scripts/run-chain.ts");
     expect(DEFAULT_STEPS).toContain("bun run check:capture-source-buckets");
-  });
-
-  it("AC-CT-10: the not-built ledger no longer carries AC-CT-10 (the oracle is built)", () => {
-    const ledger = JSON.parse(readFileSync(join(REPO_ROOT, "scripts", "ac-oracle-not-built-ledger.json"), "utf8")) as {
-      ac: string;
-    }[];
-    expect(ledger.filter((row) => row.ac === "AC-CT-10")).toEqual([]);
   });
 });

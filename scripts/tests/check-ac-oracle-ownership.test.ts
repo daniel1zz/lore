@@ -10,12 +10,12 @@
  */
 import { describe, expect, it } from "vitest";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { applyNotBuiltLedger, collectScriptAcs, evaluateOwnership, extractAcReferences } from "../check-ac-oracle-ownership.js";
+import { collectScriptAcs, evaluateOwnership, extractAcReferences } from "../check-ac-oracle-ownership.js";
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const LORE_ENTRY = join(REPO_ROOT, "packages", "lore", "src", "index.ts");
@@ -164,32 +164,48 @@ describe("check-ac-oracle-ownership — deprecated specs are skipped, counted an
   });
 });
 
-describe("check-ac-oracle-ownership — AC-TG-5/AC-TG-9 not-built ledger (pure)", () => {
-  const acs = [{ spec: "spec-a", id: "AC-A-1", command: cmd("scripts/tests/gone.test.ts") }];
-  const finding = { rule: "missing-owner-file" as const, spec: "spec-a", acId: "AC-A-1", path: "scripts/tests/gone.test.ts" };
-  const row = { spec: "spec-a", ac: "AC-A-1", reason: "oracle never written", owner_plan: "plan-x" };
+describe("check-ac-oracle-ownership — red-first declarations from the corpus (pure classifier)", () => {
+  const gone = cmd("scripts/tests/gone.test.ts");
 
-  it("HAPPY: a ledgered missing-owner-file finding is removed from findings and reported as ledgered", () => {
-    const r = applyNotBuiltLedger([finding], [row], acs, exists());
+  it("AC-a: missing owner file + live allow-missing-path declaration -> ledgered with the reason, no finding", () => {
+    const r = evaluateOwnership([{ spec: "spec-a", id: "AC-A-1", command: gone, allowMissingReason: "oracle not written yet" }], [], exists());
     expect(r.findings).toEqual([]);
-    expect(r.ledgered).toEqual([row]);
-    expect(r.staleRows).toEqual([]);
+    expect(r.ledgered).toEqual([{ spec: "spec-a", acId: "AC-A-1", path: "scripts/tests/gone.test.ts", reason: "oracle not written yet" }]);
   });
 
-  it("NEGATIVE: a row whose owner file now exists is stale (the oracle was built; delete the row)", () => {
-    const r = applyNotBuiltLedger([], [row], acs, exists("scripts/tests/gone.test.ts"));
-    expect(r.staleRows).toEqual([{ row, why: "owner file exists" }]);
+  it("AC-b: missing owner file, no declaration -> missing-owner-file finding (exit 1 path)", () => {
+    const r = evaluateOwnership([{ spec: "spec-a", id: "AC-A-1", command: gone }], [], exists());
+    expect(r.findings).toEqual([{ rule: "missing-owner-file", spec: "spec-a", acId: "AC-A-1", path: "scripts/tests/gone.test.ts" }]);
+    expect(r.ledgered).toEqual([]);
   });
 
-  it("NEGATIVE: a row naming an AC that is not a live script AC is stale", () => {
-    const r = applyNotBuiltLedger([], [{ ...row, ac: "AC-A-9" }], acs, exists());
-    expect(r.staleRows.map((s) => s.why)).toEqual(["no live script AC"]);
+  it("BOUNDARY: a declaration whose owner file now exists is not ledgered (a redeemed declaration needs nothing)", () => {
+    const r = evaluateOwnership(
+      [{ spec: "spec-a", id: "AC-A-1", command: gone, allowMissingReason: "was red-first" }],
+      [{ path: "scripts/tests/gone.test.ts", content: 'it("AC-A-1 holds", () => {});' }],
+      exists("scripts/tests/gone.test.ts"),
+    );
+    expect(r.findings).toEqual([]);
+    expect(r.ledgered).toEqual([]);
   });
 
-  it("BOUNDARY: a ledger row never hides an unowned-ac-reference or ambiguous finding", () => {
-    const other = { rule: "unowned-ac-reference" as const, spec: "spec-a", acId: "AC-A-1", path: "x.test.ts" };
-    const r = applyNotBuiltLedger([other], [row], acs, exists());
-    expect(r.findings).toEqual([other]);
+  it("BOUNDARY: a declaration never hides an unowned-ac-reference", () => {
+    const r = evaluateOwnership(
+      [
+        { spec: "spec-a", id: "AC-A-1", command: gone, allowMissingReason: "red-first" },
+        { spec: "spec-a", id: "AC-A-2", command: cmd("scripts/tests/b.test.ts") },
+      ],
+      [{ path: "scripts/tests/b.test.ts", content: 'it("AC-A-1 holds", () => {});' }],
+      exists("scripts/tests/b.test.ts"),
+    );
+    expect(r.findings.map((f) => f.rule)).toEqual(["unowned-ac-reference"]);
+  });
+
+  it("AC-c: the JSON ledger file is gone and no script or test reads it", () => {
+    const name = ["ac-oracle", "not-built", "ledger.json"].join("-");
+    expect(existsSync(join(REPO_ROOT, "scripts", name))).toBe(false);
+    const sources = [join(REPO_ROOT, "scripts", "check-ac-oracle-ownership.ts"), join(REPO_ROOT, "package.json")];
+    for (const f of sources) expect(readFileSync(f, "utf8")).not.toContain(name);
   });
 });
 
@@ -218,12 +234,12 @@ function fixtureCorpus(): string {
 
 const SPEC_BODY = "## Overview/Goal\n\nFixture.\n\n## Scope\n\nFixture.\n\n## Acceptance Criteria\n\nSee ac list.\n";
 
-function addSpec(dir: string, title: string, acId: string, command: string): string {
+function addSpec(dir: string, title: string, acId: string, command: string, declare = true): string {
   const created = lore(["create", "spec", "--title", title, "--content", SPEC_BODY, "--json"], dir);
   if (created.status !== 0) throw new Error(`fixture: create spec: ${created.stderr}${created.stdout}`);
   const slug = (JSON.parse(created.stdout) as { data: { slug: string } }).data.slug;
   mustLore(
-    ["ac", "add", slug, acId, "--statement", "The fixture command exits with code 0", "--mode", "script", "--oracle", "test", "--command", command, "--allow-missing-path", "fixture: path may be absent", "--json"],
+    ["ac", "add", slug, acId, "--statement", "The fixture command exits with code 0", "--mode", "script", "--oracle", "test", "--command", command, ...(declare ? ["--allow-missing-path", "fixture: path may be absent"] : []), "--json"],
     dir,
   );
   return slug;
@@ -248,7 +264,11 @@ describe("check-ac-oracle-ownership — AC-TG-5 end to end (mkdtemp + lore init)
   it("NEGATIVE: a script AC naming a missing test file exits exactly 1 naming rule, spec, AC id and path", () => {
     const dir = fixtureCorpus();
     try {
-      const slug = addSpec(dir, "Ownership fixture missing", "AC-FX-1", cmd("scripts/tests/absent.test.ts"));
+      const absent = "scripts/tests/absent.test.ts";
+      mkdirSync(join(dir, "scripts", "tests"), { recursive: true });
+      writeFileSync(join(dir, absent), 'it("AC-FX-1 holds", () => {});\n', "utf8");
+      const slug = addSpec(dir, "Ownership fixture missing", "AC-FX-1", cmd(absent), false);
+      rmSync(join(dir, absent)); // no declaration was made, and the file is now gone
       const r = runMainAt(dir);
       expect(r.status).toBe(1);
       expect(r.out).toContain("rule=missing-owner-file");
@@ -307,26 +327,20 @@ describe("check-ac-oracle-ownership — AC-TG-5 end to end (mkdtemp + lore init)
 });
 
 describe("check-ac-oracle-ownership — deprecated specs and ledger end to end", () => {
-  it("ledger: a ledgered row passes and is named; after the file exists the row is stale and exits 1", () => {
+  it("declaration: a red-first AC passes and is named with its reason; once the file exists it needs nothing", () => {
     const dir = fixtureCorpus();
     try {
       const rel = "scripts/tests/later.test.ts";
-      const slug = addSpec(dir, "Ownership fixture ledger", "AC-FX-6", cmd(rel));
-      mkdirSync(join(dir, "scripts"), { recursive: true });
-      writeFileSync(
-        join(dir, "scripts", "ac-oracle-not-built-ledger.json"),
-        JSON.stringify([{ spec: slug, ac: "AC-FX-6", reason: "oracle not written yet", owner_plan: "plan-fixture" }]),
-        "utf8",
-      );
+      const slug = addSpec(dir, "Ownership fixture declared", "AC-FX-6", cmd(rel));
       const before = runMainAt(dir);
-      expect(before.out).toContain("not-built ledger: 1 row(s)");
-      expect(before.out).toContain("AC-FX-6");
+      expect(before.out).toContain(`ledgered spec=${slug} ac=AC-FX-6`);
+      expect(before.out).toContain("reason=fixture: path may be absent");
       expect(before.status).toBe(0);
       mkdirSync(join(dir, "scripts", "tests"), { recursive: true });
       writeFileSync(join(dir, rel), 'it("AC-FX-6 holds", () => {});\n', "utf8");
       const after = runMainAt(dir);
-      expect(after.out).toContain("rule=stale-ledger-row");
-      expect(after.status).toBe(1);
+      expect(after.out).not.toContain("ledgered spec=");
+      expect(after.status).toBe(0);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

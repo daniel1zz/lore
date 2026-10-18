@@ -670,7 +670,7 @@ export class AcService {
             criteria,
             tasks,
             pathContext,
-            new Set(extractAllowMissingPathDeclarations(spec).map((d) => d.ac_id)),
+            new Map(extractAllowMissingPathDeclarations(spec).map((d) => [d.ac_id, d.reason] as const)),
           )
         : baseCoverage;
 
@@ -1478,8 +1478,8 @@ function buildSetChangeSummary(
  * @param criteria - the spec's declared criteria
  * @param tasks - the tasks whose evidence produced `coverage` (their rows give each pass's command / execution root)
  * @param pathContext - injected fs context (never a real filesystem read here)
- * @param allowMissingAcIds - ids of the ACs declared with `--allow-missing-path` (red-first); stamped onto the fact as
- *   `allow_missing_declared` so {@link deriveAcCoverageState} can apply its one missing-oracle rule
+ * @param allowMissingAcIds - ac id -> reason of the ACs declared with `--allow-missing-path` (red-first); stamped onto the fact as
+ *   `allow_missing_declared` (+ `allow_missing_reason`, read by scripts/check-ac-oracle-ownership.ts) so {@link deriveAcCoverageState} can apply its one missing-oracle rule
  * @returns new facts (inputs untouched); non-script criteria keep the field ABSENT
  */
 function annotateMissingOracleFiles(
@@ -1487,7 +1487,7 @@ function annotateMissingOracleFiles(
   criteria: AcceptanceCriterion[],
   tasks: DocRecord[],
   pathContext: OraclePathContext,
-  allowMissingAcIds: ReadonlySet<string>,
+  allowMissingAcIds: ReadonlyMap<string, string>,
 ): AcListResult["coverage"] & object {
   const byId = new Map(criteria.map((c) => [c.id, c] as const));
   return coverage.map((fact) => {
@@ -1519,6 +1519,7 @@ function annotateMissingOracleFiles(
       ...fact,
       oracle_file_missing: missingPaths,
       allow_missing_declared: allowMissingAcIds.has(fact.ac_id),
+      ...(allowMissingAcIds.has(fact.ac_id) ? { allow_missing_reason: allowMissingAcIds.get(fact.ac_id) as string } : {}),
       passes_ran_missing_oracle: passesRanMissingOracle,
       oracle_paths_unchecked: findUncheckedOracleSegments(criterionCommand),
     };

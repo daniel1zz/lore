@@ -3,7 +3,6 @@
 // @reads package.json
 // @reads scripts/prose-pin-ledger.json
 // @reads scripts/test-isolation-ledger.json
-// @reads scripts/ac-oracle-not-built-ledger.json
 // @reads packages/lore/tests/unit/store/in-memory-store.test.ts
 // @reads packages/lore/tests/unit/store/sqlite-store.bun.test.ts
 // @reads packages/lore/tests/unit/store/turso-store.bun.test.ts
@@ -178,10 +177,6 @@ describe("AC-TG-9 — every ledger row states why", () => {
     const path = join(REPO_ROOT, "scripts/test-isolation-ledger.json");
     if (!existsSync(path)) return;
     expect(ledgerRowProblems(JSON.parse(readFileSync(path, "utf8")), false)).toEqual([]);
-  });
-
-  it("scripts/ac-oracle-not-built-ledger.json: every row has a non-empty reason", () => {
-    expect(ledgerRowProblems(JSON.parse(read("scripts/ac-oracle-not-built-ledger.json")), false)).toEqual([]);
   });
 });
 
