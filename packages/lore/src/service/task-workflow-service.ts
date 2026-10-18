@@ -317,7 +317,7 @@
 import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { z } from "zod";
-import { err, ok, classifyEvidenceStamps, findMissingOracleFiles, evidenceRanMissingOracle, extractDeclaredPhases, hasClaimConflict, type ClaimHolder, type ClaimParty, type RunId, type Result } from "@lore/core";
+import { err, ok, classifyEvidenceStamps, findMissingOracleFiles, hasPassOnRecord, extractDeclaredPhases, hasClaimConflict, type ClaimHolder, type ClaimParty, type RunId, type Result } from "@lore/core";
 import type { LoreError } from "@lore/core";
 import type { ActorSource } from "@lore/core/node";
 import {
@@ -3809,18 +3809,10 @@ export class TaskWorkflowService {
       if (missing.length === 0) continue;
       // reason: a red-first AC declared with `--allow-missing-path` whose file a LATER task writes is not a lie —
       // nothing was ever attested against it. It is refused only once a pass OF THAT FILE is on record (the file then
-      // vanished); a pass tagged with the AC whose command ran other files (TG-22) is not a pass of the missing file.
-      const hasPassOnRecord = evidence.some(
-        (e) =>
-          e.ac_ref === criterion.id &&
-          e.result === "pass" &&
-          evidenceRanMissingOracle(
-            { command: e.command, ...(e.attestation?.execution_root !== undefined ? { executionRoot: e.attestation.execution_root } : {}) },
-            { command: criterionCommand, missingPaths: missing },
-            { cwd: repoRoot },
-          ),
-      );
-      if (declaredMissingOk.value.has(criterion.id) && !hasPassOnRecord) continue;
+      // vanished). AC-TG-6's text has no "ran the missing file" narrowing and AC-EI-2 removed TG-22's: ANY pass tagged
+      // with the AC counts, via the same `hasPassOnRecord` predicate `deriveAcCoverageState` uses.
+      const acHasPass = hasPassOnRecord(evidence.filter((e) => e.ac_ref === criterion.id));
+      if (declaredMissingOk.value.has(criterion.id) && !acHasPass) continue;
       findings.push(`${criterion.id} (${missing.join(", ")})`);
     }
     if (findings.length === 0) return ok(null);

@@ -782,6 +782,22 @@ export function computeAcCoverage(
  * deriveAcCoverageState({ ac_id: "AC-5", mode: "script", pass: 1, fail: 0, refs: [], attested_pass: 0, attested_fail: 0, falsified: undefined as unknown as number });
  * // => "not_measured" (M5) — falsified fails runtime well-formedness despite the type claim
  */
+/**
+ * The ONE predicate for "this criterion has a pass on record" under a missing oracle (AC-EI-2): ANY `pass` row,
+ * whatever command it ran or how that command spelled its paths. Shared by {@link deriveAcCoverageState} (rows =
+ * `fact.refs`) and `lore done`'s missing-oracle floor (rows = the task's evidence tagged with the AC), so the
+ * state a reader sees and the archive refusal can never disagree about what "earlier pass" means.
+ *
+ * @param rows - evidence rows or refs of ONE criterion; only `result` is read
+ * @returns `true` when any row's `result` is `"pass"`
+ * @example
+ *   hasPassOnRecord([{ result: "fail" }, { result: "pass" }]) // => true
+ *   hasPassOnRecord([]) // => false
+ */
+export function hasPassOnRecord(rows: ReadonlyArray<{ readonly result: string }>): boolean {
+  return rows.some((row) => row.result === "pass");
+}
+
 export function deriveAcCoverageState(fact: AcCoverageFact): AcCoverageState {
   if (fact.fail > 0) {
     return isSupersededByNewerAttestedPass(fact.refs) ? "fail_superseded" : "fail";
@@ -791,7 +807,7 @@ export function deriveAcCoverageState(fact: AcCoverageFact): AcCoverageState {
   const missing = fact.oracle_file_missing;
   // reason: `refs` carries EVERY row (EI-1 keeps other-command rows in it), so a pass recorded under a spelling or command that
   // differs from the declared one still counts as "a pass on record"; only a criterion with NO pass at all stays `none`.
-  if (missing !== undefined && missing.length > 0 && (fact.pass > 0 || fact.refs.some((r) => r.result === "pass"))) {
+  if (missing !== undefined && missing.length > 0 && (fact.pass > 0 || hasPassOnRecord(fact.refs))) {
     return "not_measured";
   }
   if (fact.attested_pass > 0) return "attested_pass";

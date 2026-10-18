@@ -18,6 +18,8 @@
  *       file deleted, the surviving one still exists) also renders not_measured (the TG-22 case);
  *   (4) `lore ac add` with a missing script path and no --allow-missing-path exits 4 naming the path (control:
  *       with the escape it exits 0);
+ *   (6) `lore verify` of a missing script or test path exits 3 naming it and records inconclusive;
+ *   (7) `lore status` (--json, text, --enumerate) names each missing-oracle AC with its path;
  *   (5) a segment the extractor cannot classify is listed in --json as oracle_paths_unchecked and counted on
  *       the text line as "N segment(s) not checked"; a fully classified command shows neither.
  *
@@ -72,6 +74,14 @@ async function coverageOf(acId: string): Promise<CoverageFactJson> {
   const fact = data.coverage?.find((f) => f.ac_id === acId);
   if (fact === undefined) throw new Error(`no coverage fact for ${acId}`);
   return fact;
+}
+
+async function lastEvidenceResult(): Promise<string | undefined> {
+  const result = await runLore(["get", TASK, "--json"]);
+  expect(result.exitCode, result.stderr).toBe(0);
+  const rows = (JSON.parse(result.stdout) as { data: { doc: { extra: { verification_evidence?: Array<{ result: string }> } } } }).data.doc.extra
+    .verification_evidence ?? [];
+  return rows[rows.length - 1]?.result;
 }
 
 async function textLineOf(acId: string): Promise<string> {
@@ -166,6 +176,45 @@ describe("AC-EI-2 half 3 (NEGATIVE/BOUNDARY): a missing test file is not measure
     const fact = await coverageOf("AC-EI2-C");
     expect(fact.state).toBe("not_measured");
     expect(fact.oracle_file_missing).toEqual(["b.test.ts"]);
+  });
+});
+
+describe("AC-EI-2 half 6 (STATE): lore verify records not-measured for a missing script or test path, never pass/fail", () => {
+  it("verify of AC-EI2-A (script gone) exits 3, names scripts/ok-one.sh, and the last recorded result is inconclusive", async () => {
+    const verified = await verifyAc("AC-EI2-A");
+    expect(verified.exitCode, verified.stdout + verified.stderr).toBe(3);
+    expect(verified.stdout + verified.stderr).toContain("scripts/ok-one.sh");
+    expect(verified.stdout + verified.stderr).toContain("NOT MEASURED");
+    expect(await lastEvidenceResult()).toBe("inconclusive");
+    expect((await coverageOf("AC-EI2-A")).state).toBe("not_measured");
+  });
+
+  it("verify of AC-EI2-C (test path b.test.ts gone) exits 3 naming b.test.ts and records inconclusive", async () => {
+    const verified = await verifyAc("AC-EI2-C");
+    expect(verified.exitCode, verified.stdout + verified.stderr).toBe(3);
+    expect(verified.stdout + verified.stderr).toContain("b.test.ts");
+    expect(await lastEvidenceResult()).toBe("inconclusive");
+  });
+});
+
+describe("AC-EI-2 half 7 (REGRESSION): lore status names each AC with a missing oracle path", () => {
+  it("status --json lists both missing-oracle ACs with their paths and counts them; the text report names them too", async () => {
+    const json = await runLore(["status", "--json"]);
+    expect(json.exitCode, json.stderr).toBe(0);
+    const data = (JSON.parse(json.stdout) as { data: { ac_oracle_file_missing_count: number; ac_oracle_file_missing: string[] } }).data;
+    expect(data.ac_oracle_file_missing).toContain(`${SPEC}#AC-EI2-A: scripts/ok-one.sh`);
+    expect(data.ac_oracle_file_missing).toContain(`${SPEC}#AC-EI2-C: b.test.ts`);
+    expect(data.ac_oracle_file_missing_count).toBe(data.ac_oracle_file_missing.length);
+    expect(data.ac_oracle_file_missing.some((m) => m.startsWith(`${SPEC}#AC-EI2-B`))).toBe(false);
+
+    const text = await runLore(["status"]);
+    expect(text.exitCode, text.stderr).toBe(0);
+    expect(text.stdout).toContain("Criteria with a missing oracle file:");
+    expect(text.stdout).toContain(`${SPEC}#AC-EI2-A: scripts/ok-one.sh`);
+
+    const enumerated = await runLore(["status", "--enumerate", "ac_oracle_file_missing_count"]);
+    expect(enumerated.exitCode, enumerated.stderr).toBe(0);
+    expect(enumerated.stdout).toContain("scripts/ok-one.sh");
   });
 });
 
