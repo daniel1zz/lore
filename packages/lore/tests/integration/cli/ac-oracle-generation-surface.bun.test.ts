@@ -391,8 +391,14 @@ describe("lore ac list — the split is additive presentation only (AC-DC-10, RE
     // green badge were produced by an oracle that no longer exists. The badge is
     // deliberately UNCHANGED (`deriveAcCoverageState` gains no eighth state); the
     // marker beside it is what carries the distinction.
+    //
+    // AC-EI-1 CORRECTION OF THIS EXPECTATION (was `✔(2/0)`): that count included a pass of the RETIRED oracle
+    // `grep -rq MARKER .` — the exact opposite of the current `! grep -rq MARKER .` — which is F3's defect
+    // itself. Under the evidence-identity rule only the row that ran the CURRENT command is tallied, so the
+    // badge is `✔(1/0)` and the two rows of the retired oracle show as `other_command=2` beside it.
     const line = lineFor(obs.afterHuman, "AC-GEN-1");
-    expect(line).toContain("✔(2/0)");
+    expect(line).toContain("✔(1/0)");
+    expect(line).toContain("other_command=2");
     expect(factFor(obs.afterJson, "AC-GEN-1").state).toBe("pass");
   });
 

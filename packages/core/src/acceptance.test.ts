@@ -381,7 +381,7 @@ describe("computeAcCoverage", () => {
 
     const coverage = computeAcCoverage(criteria, [task]);
     expect(coverage).toEqual([
-      { ac_id: "AC-1", mode: "script", pass: 0, fail: 0, refs: [], attested_pass: 0, attested_fail: 0, falsified: 0, oracle_generation: { current: 1, current_refs: 0, prior_refs: 0 } },
+      { ac_id: "AC-1", mode: "script", pass: 0, fail: 0, refs: [], attested_pass: 0, attested_fail: 0, falsified: 0, oracle_generation: { current: 1, current_refs: 0, prior_refs: 0 }, other_command: 0 },
     ]);
   });
 
@@ -389,8 +389,8 @@ describe("computeAcCoverage", () => {
     const criteria = [scriptAc("AC-1"), scriptAc("AC-2")];
     const coverage = computeAcCoverage(criteria, []);
     expect(coverage).toEqual([
-      { ac_id: "AC-1", mode: "script", pass: 0, fail: 0, refs: [], attested_pass: 0, attested_fail: 0, falsified: 0, oracle_generation: { current: 1, current_refs: 0, prior_refs: 0 } },
-      { ac_id: "AC-2", mode: "script", pass: 0, fail: 0, refs: [], attested_pass: 0, attested_fail: 0, falsified: 0, oracle_generation: { current: 1, current_refs: 0, prior_refs: 0 } },
+      { ac_id: "AC-1", mode: "script", pass: 0, fail: 0, refs: [], attested_pass: 0, attested_fail: 0, falsified: 0, oracle_generation: { current: 1, current_refs: 0, prior_refs: 0 }, other_command: 0 },
+      { ac_id: "AC-2", mode: "script", pass: 0, fail: 0, refs: [], attested_pass: 0, attested_fail: 0, falsified: 0, oracle_generation: { current: 1, current_refs: 0, prior_refs: 0 }, other_command: 0 },
     ]);
   });
 
@@ -413,7 +413,7 @@ describe("computeAcCoverage", () => {
 
     expect(() => computeAcCoverage(criteria, [malformedArray, malformedExtra])).not.toThrow();
     expect(computeAcCoverage(criteria, [malformedArray, malformedExtra])).toEqual([
-      { ac_id: "AC-1", mode: "script", pass: 0, fail: 0, refs: [], attested_pass: 0, attested_fail: 0, falsified: 0, oracle_generation: { current: 1, current_refs: 0, prior_refs: 0 } },
+      { ac_id: "AC-1", mode: "script", pass: 0, fail: 0, refs: [], attested_pass: 0, attested_fail: 0, falsified: 0, oracle_generation: { current: 1, current_refs: 0, prior_refs: 0 }, other_command: 0 },
     ]);
   });
 
