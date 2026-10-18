@@ -32,7 +32,7 @@ import { defineCommand } from "citty";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatError, formatTable } from "../utils.js";
 import { PENDING_TABLE_HEADERS, buildPendingTableRows } from "../pending-render.js";
-import { collectPendingDecisions, renderPendingDecisions } from "../pending-decisions-render.js";
+import { collectAuditItems, collectPendingDecisions, renderAuditItems, renderPendingDecisions } from "../pending-decisions-render.js";
 import { withValidityStatus } from "../../../service/validity-service.js";
 import type { DocType, ReviewJudgment } from "@lore/core";
 import type { PendingDoc } from "../../../service/review-service.js";
@@ -93,7 +93,15 @@ export default defineCommand({
         return;
       }
       const decisions = decisionsResult.value;
-      const decisionsBlock = renderPendingDecisions(decisions);
+      // AC-AU-10: the sampling floor's audit queue is listed SEPARATELY from the blocking escalations.
+      const auditResult = await collectAuditItems(dbPath);
+      if (!auditResult.ok) {
+        process.stderr.write(formatError(auditResult.error) + "\n");
+        process.exitCode = exitCode(auditResult.error);
+        return;
+      }
+      const audit = auditResult.value;
+      const decisionsBlock = renderPendingDecisions(decisions) + renderAuditItems(audit);
 
       const filters: Record<string, unknown> = {};
       if (args.author !== undefined) filters["author"] = args.author;
@@ -119,7 +127,7 @@ export default defineCommand({
       // post-filter empty check below).
       if (docs.length === 0) {
         if (args.json) {
-          console.log(JSON.stringify({ ok: true, data: { docs: [], total: 0, decisions } }, null, 2));
+          console.log(JSON.stringify({ ok: true, data: { docs: [], total: 0, decisions, audit } }, null, 2));
         } else {
           console.log("No pending documents.");
           if (decisionsBlock !== "") console.log(decisionsBlock);
@@ -157,6 +165,7 @@ export default defineCommand({
                 docs: withValidity.map((d) => ({ ...d, judgment: judgments.get(d.id) ?? null })),
                 total: withValidity.length,
                 decisions,
+                audit,
               },
             },
             null,

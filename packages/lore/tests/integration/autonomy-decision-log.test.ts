@@ -36,8 +36,8 @@ const SERVICE_PATH = join(PACKAGE_ROOT, "src", "service", "decision-service.ts")
 /** A class from @lore/core's registry; read from the registry itself so the test cannot drift from it. */
 const CLASS_ID = "stash-drop";
 
-const WEAK = { recoverability: "loss-free-by-proof", blast: "calling-session", evidence: "none", confidence: 0.95 } as const;
-const STRONG = { recoverability: "loss-free-by-proof", blast: "own-or-ended-run", evidence: "lore-evaluated", confidence: 0.95 } as const;
+const WEAK = { recoverability: "loss-free-by-proof", blast: "calling-session", evidence: "none" } as const;
+const STRONG = { recoverability: "loss-free-by-proof", blast: "own-or-ended-run", evidence: "lore-evaluated" } as const;
 
 let corpus = "";
 let dbPath = "";
@@ -111,7 +111,7 @@ describe("AC-AU-2 decision log", () => {
         executor_run: "run-test",
         channel: "machine",
       });
-      expect(JSON.parse(row.facts)).toEqual(STRONG);
+      expect(JSON.parse(row.facts)).toEqual({ ...STRONG, confidence: 0.851409 }); // C is computed: fresh stash-drop class, prior 0.95, Wilson LB over 50 pseudo-outcomes
       expect(JSON.parse(row.factors)).toEqual(out.value.decision.factors);
       expect(row.prev_hash).toBe(before.value[before.value.length - 1]?.entry_hash ?? "");
     } finally {
@@ -231,7 +231,7 @@ describe("AC-AU-2 decision log", () => {
         `const store = new SQLiteStore(dbFile);`,
         `const service = new DecisionService({ store, executorRun: "child-" + tag });`,
         `for (let i = 0; i < 15; i++) {`,
-        `  const r = await service.decide("stash-drop", { id: "concurrent-subject", version: "v1" }, { recoverability: "loss-free-by-proof", blast: "own-or-ended-run", evidence: "lore-evaluated", confidence: 0.95 });`,
+        `  const r = await service.decide("stash-drop", { id: "concurrent-subject", version: "v1" }, { recoverability: "loss-free-by-proof", blast: "own-or-ended-run", evidence: "lore-evaluated" });`,
         `  if (!r.ok) { console.error(JSON.stringify(r.error)); process.exit(1); }`,
         `}`,
         `store.close();`,

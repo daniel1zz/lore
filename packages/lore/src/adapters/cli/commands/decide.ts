@@ -20,8 +20,8 @@ export default defineCommand({
   },
   args: {
     id: { type: "positional", description: "Pending decision id (see `lore pending`)", required: false },
-    accept: { type: "boolean", description: "Accept: the operation may proceed when re-run" },
-    reject: { type: "boolean", description: "Reject: the operation stays refused" },
+    accept: { type: "boolean", description: "Accept: the operation may proceed when re-run (audit item: the auto decision was RIGHT)" },
+    reject: { type: "boolean", description: "Reject: the operation stays refused (audit item: the auto decision was WRONG)" },
     reason: { type: "string", description: "Why (recorded with the answer)" },
   },
   async run({ args }) {

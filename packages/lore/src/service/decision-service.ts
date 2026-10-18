@@ -4,7 +4,8 @@
  * Purpose: every autonomy decision made through the service layer is appended to the hash-chained decision log,
  * and the EFFECTIVE verdict of a (class, subject, version) is answered from that log, never from a re-score.
  * Public surface: DecisionService.{decide, effectiveVerdict, verifyChain, chainHead, listPending, getPending,
- *   resolvePending, governed}, DecisionSubject, DecideOutcome.
+ *   resolvePending, governed, preview, calibration, listAudit, getAudit, resolveAudit, calibrationStats}, DecisionSubject,
+ *   DecideOutcome.
  * Invariants:
  *   - INV-2 (plan): no public method accepts caller-provided factor values. `decide` takes MEASURED FACTS
  *     (autonomyFactsSchema) and the factor values are computed by @lore/core's decide(); a new method that
@@ -20,12 +21,24 @@
  *     record fails its integrity check, EVERY class escalates (reason `threshold-integrity`) and one pending
  *     `threshold-integrity` decision is opened; only a human-tty accept of that decision restores scoring.
  *     A `registry` override (tests) bypasses the governed record entirely — production never passes one.
+ *   - AC-AU-8: C is COMPUTED here from the class's recorded outcomes (Wilson bound over the last 50 observed
+ *     outcomes + 50 pseudo-outcomes at the governed prior) and written into the recorded facts. A caller that passes
+ *     `facts.confidence` is refused (VALIDATION_ERROR): there is no caller-supplied C anywhere.
+ *   - AC-AU-10: `listAudit` / `resolveAudit` expose the sampling floor's queue; `resolveAudit` is the only writer
+ *     of human-tty audit outcomes and demands a HumanChannelProof.
  * Side-effect class: IO (decision_log appends through the injected store; clock via the injected `now`).
  *
  * Source: spec-autonomy-phase-1-decision-function-human-channel-lore AC-AU-2, AC-AU-3;
  *   adr-autonomy-is-decided-by-measured-facts-one-decision-function D5.
  */
 import { decide, err, ok, type AutonomyDecision, type LoreError, type Result, type OperationClassRegistry } from "@lore/core";
+import {
+  AutonomyCalibrationService,
+  classConfidence,
+  type AuditItem,
+  type ClassCalibrationStats,
+  type ReversalProbe,
+} from "./autonomy-calibration-service.js";
 import {
   AutonomyThresholdService,
   THRESHOLD_INTEGRITY_CLASS,
@@ -71,6 +84,8 @@ export interface DecisionServiceDeps {
   readonly now?: () => string;
   /** Class registry override for tests; defaults to @lore/core's. */
   readonly registry?: OperationClassRegistry;
+  /** Reversal probes: when present, every decide() first sweeps new outcomes of earlier auto decisions. */
+  readonly reversalProbes?: readonly ReversalProbe[];
 }
 
 function validationError(field: string, message: string): LoreError {
@@ -93,27 +108,10 @@ export class DecisionService {
    */
   async decide(classId: string, subject: DecisionSubject, facts: unknown): Promise<Result<DecideOutcome, LoreError>> {
     if (subject.version === "") return err(validationError("subject.version", "a decision subject needs a version or sha"));
-    let factsJson: string;
-    try {
-      factsJson = canonicalJson(facts === undefined ? {} : facts);
-    } catch (cause) {
-      return err(validationError("facts", `facts are not JSON-serialisable: ${String(cause)}`));
-    }
-    const governed = this.deps.registry === undefined ? await this.governed() : null;
-    if (governed !== null && !governed.ok) return governed;
-    const integrity = governed === null ? null : governed.value.integrity;
-    let decision = decide(classId, subject.id, facts, this.deps.registry ?? governed?.value.registry);
+    const scored = await this.scoreDecision(classId, subject.id, facts);
+    if (!scored.ok) return scored;
+    const { decision, factsJson, integrity } = scored.value;
     if (integrity !== null && integrity.state === "broken") {
-      // reason: a mismatched record means NO threshold can be trusted -> every factor is unmeasured -> escalate
-      // (AC-AU-9). A refuse (invariant violation) stays a refuse: it never runs anything either.
-      if (decision.verdict !== "refuse") {
-        decision = {
-          ...decision,
-          verdict: "escalate",
-          score: 0,
-          reasons: [`threshold-integrity: ${integrity.reason} — ${integrity.detail}; every class escalates until the human accepts the threshold-integrity decision (lore pending)`, ...decision.reasons],
-        };
-      }
       const opened = await this.openIntegrityDecision(integrity);
       if (!opened.ok) return opened;
     }
@@ -138,6 +136,117 @@ export class DecisionService {
       return err({ code: "STORE_ERROR", message: `decision_log has no effective verdict right after appending record ${appended.value.id}` });
     }
     return ok({ decision, record_id: appended.value.id, effective: effective.value });
+  }
+
+  /**
+   * Scores `facts` exactly as `decide` would, WITHOUT recording anything: a dry run's verdict is the same verdict
+   * the recorded call would produce (calibrated C, governed thresholds, integrity fail-safe included).
+   *
+   * @returns err(VALIDATION_ERROR) for non-serialisable facts or a caller-supplied `confidence`.
+   */
+  async preview(classId: string, subjectId: string, facts: unknown): Promise<Result<AutonomyDecision, LoreError>> {
+    const scored = await this.scoreDecision(classId, subjectId, facts);
+    return scored.ok ? ok(scored.value.decision) : scored;
+  }
+
+  /** The ONE scoring path of `decide` and `preview`: refuse caller C, calibrate C, run decide(), apply the integrity fail-safe. */
+  private async scoreDecision(
+    classId: string,
+    subjectId: string,
+    suppliedFacts: unknown,
+  ): Promise<Result<{ decision: AutonomyDecision; factsJson: string; integrity: GovernedAutonomy["integrity"] | null }, LoreError>> {
+    if (typeof suppliedFacts === "object" && suppliedFacts !== null && !Array.isArray(suppliedFacts) && (suppliedFacts as Record<string, unknown>)["confidence"] !== undefined) {
+      return err(validationError("facts.confidence", "C is computed by lore from the class's recorded outcomes (AC-AU-8); a caller cannot supply it"));
+    }
+    const governed = this.deps.registry === undefined ? await this.governed() : null;
+    if (governed !== null && !governed.ok) return governed;
+    const integrity = governed === null ? null : governed.value.integrity;
+    const registry = this.deps.registry ?? governed?.value.registry;
+    // reason: exactly one of `deps.registry` / the governed record is set above; the code seed is never consulted here.
+    if (registry === undefined) return err({ code: "STORE_ERROR", message: "no class registry: neither an injected one nor the governed record" });
+    const calibrated = await this.withCalibratedConfidence(classId, suppliedFacts, registry);
+    if (!calibrated.ok) return calibrated;
+    const facts = calibrated.value.facts;
+    let factsJson: string;
+    try {
+      factsJson = canonicalJson(facts === undefined ? {} : facts);
+    } catch (cause) {
+      return err(validationError("facts", `facts are not JSON-serialisable: ${String(cause)}`));
+    }
+    let decision = decide(classId, subjectId, facts, registry);
+    if (calibrated.value.note !== null) decision = { ...decision, reasons: [calibrated.value.note, ...decision.reasons] };
+    if (integrity !== null && integrity.state === "broken" && decision.verdict !== "refuse") {
+      // reason: a mismatched record means NO threshold can be trusted -> every factor is unmeasured -> escalate
+      // (AC-AU-9). A refuse (invariant violation) stays a refuse: it never runs anything either.
+      decision = {
+        ...decision,
+        verdict: "escalate",
+        score: 0,
+        reasons: [`threshold-integrity: ${integrity.reason} — ${integrity.detail}; every class escalates until the human accepts the threshold-integrity decision (lore pending)`, ...decision.reasons],
+      };
+    }
+    return ok({ decision, factsJson, integrity });
+  }
+
+  /**
+   * `facts` plus the class's calibrated C (a normal-tier class only; human-always and unknown classes are left for
+   * decide() to rule on). Runs the observation sweep first when probes are configured.
+   */
+  private async withCalibratedConfidence(
+    classId: string,
+    facts: unknown,
+    registry: OperationClassRegistry,
+  ): Promise<Result<{ facts: unknown; note: string | null }, LoreError>> {
+    const operationClass = Object.hasOwn(registry, classId) ? registry[classId] : undefined;
+    if (operationClass === undefined || operationClass.tier !== "normal") return ok({ facts, note: null });
+    if (facts !== undefined && (typeof facts !== "object" || facts === null || Array.isArray(facts))) return ok({ facts, note: null }); // malformed: decide() refuses it
+    if (this.deps.reversalProbes !== undefined) {
+      const swept = await this.calibration().observe();
+      if (!swept.ok) return swept;
+    }
+    const rows = await this.deps.store.listDecisionLog();
+    if (!rows.ok) return rows;
+    const c = classConfidence(rows.value, classId, operationClass.priorConfidence);
+    if (!c.ok) return c;
+    const note = `calibration: C=${c.value.confidence} (Wilson LB over ${c.value.window} observed outcome(s): ${c.value.stood} stood / ${c.value.reversed} reversed, plus ${c.value.pseudo} pseudo-outcomes at prior ${c.value.prior})`;
+    return ok({ facts: { ...(facts ?? {}), confidence: c.value.confidence }, note });
+  }
+
+  /** The outcome/calibration service over this service's store, clock and run. */
+  calibration(): AutonomyCalibrationService {
+    return new AutonomyCalibrationService({
+      store: this.deps.store,
+      executorRun: this.deps.executorRun,
+      now: () => this.now(),
+      ...(this.deps.reversalProbes === undefined ? {} : { probes: this.deps.reversalProbes }),
+    });
+  }
+
+  /** The audit queue (1 in 10 auto decisions per class), separate from the blocking escalations of `listPending`. */
+  async listAudit(): Promise<Result<AuditItem[], LoreError>> {
+    return this.calibration().auditQueue();
+  }
+
+  /** One audit item by the decision id `lore decide` takes, or null. */
+  async getAudit(decisionId: number): Promise<Result<AuditItem | null, LoreError>> {
+    return this.calibration().getAuditItem(decisionId);
+  }
+
+  /** Human-tty audit answer: `right` -> stood, `wrong` -> reversed. Demands a HumanChannelProof. */
+  async resolveAudit(decisionId: number, answer: "right" | "wrong", reason: string | undefined, proof: HumanChannelProof): Promise<Result<DecisionLogRow, LoreError>> {
+    return this.calibration().recordAudit(decisionId, answer, reason, proof);
+  }
+
+  /** Outcome-based counts per class (BR-1005), computed against the GOVERNED registry. */
+  async calibrationStats(): Promise<Result<ClassCalibrationStats[], LoreError>> {
+    const registry = this.deps.registry === undefined ? await this.governedRegistry() : ok(this.deps.registry);
+    if (!registry.ok) return registry;
+    return this.calibration().stats(registry.value);
+  }
+
+  private async governedRegistry(): Promise<Result<OperationClassRegistry, LoreError>> {
+    const governed = await this.governed();
+    return governed.ok ? ok(governed.value.registry) : governed;
   }
 
   /**

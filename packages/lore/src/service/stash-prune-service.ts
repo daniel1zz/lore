@@ -10,8 +10,8 @@
  *     the very same commit sha. An archive failure aborts the whole apply (nothing further is dropped) and is
  *     returned as err(STORE_ERROR) — never swallowed, never turned into a "kept" row.
  *   - Factors come from facts lore measured in THIS call (INV-2): R = loss-free-by-proof only after the archive
- *     ref was verified; B from run attribution; E = lore-evaluated; C = the class prior from the registry
- *     (AU-T8 will replace it with the outcome-calibrated bound; no caller can supply a value).
+ *     ref was verified; B from run attribution; E = lore-evaluated; C = computed by DecisionService
+ *     from the class's recorded outcomes (AC-AU-8; no caller can supply a value).
  *   - Attribution: the branch in the stash message ("On <branch>:" / "WIP on <branch>:") ->
  *     `worktree-agent-<agentId>` -> runs whose agent_ref is <agentId> (any run not ended = live), plus open task
  *     claims that record that branch (a claim whose run is not provably ended = live). A named branch with no
@@ -181,14 +181,8 @@ export class StashPruneService {
     return ok({ kind: "dropped", archive_ref: archiveRef, score: decision.score });
   }
 
-  /** Facts decide() may use: only what lore measured above. C is the GOVERNED class prior until AU-T8. */
+  /** Facts decide() may use: only what lore measured above. C is NOT among them: DecisionService computes it (AC-AU-8). */
   private async buildDecisionFacts(attribution: StashAttribution): Promise<Result<AutonomyFacts, LoreError>> {
-    const governed = await this.deps.decisions.governed();
-    if (!governed.ok) return governed;
-    const operationClass = Object.hasOwn(governed.value.registry, STASH_DROP_CLASS) ? governed.value.registry[STASH_DROP_CLASS] : undefined;
-    if (operationClass === undefined || operationClass.tier !== "normal") {
-      return err(storeError(`class ${STASH_DROP_CLASS} must be a normal class in the governed autonomy record`));
-    }
     const blast =
       attribution.state === "live"
         ? ("other-live-actor" as const)
@@ -200,7 +194,6 @@ export class StashPruneService {
     return ok({
       recoverability: "loss-free-by-proof",
       evidence: "lore-evaluated",
-      confidence: operationClass.priorConfidence,
       ...(blast !== undefined ? { blast } : {}),
     });
   }

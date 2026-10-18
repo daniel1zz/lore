@@ -46,7 +46,7 @@ const DRIVER_TS = join(PACKAGE_ROOT, "tests", "integration", "fixtures", "autono
 const HOOK = join(REPO_ROOT, "assets", "hooks", "pre-bash-git-safety-gate.mjs");
 
 const CLASS_ID = "stash-drop";
-const WEAK = { recoverability: "loss-free-by-proof", blast: "calling-session", evidence: "none", confidence: 0.95 } as const;
+const WEAK = { recoverability: "loss-free-by-proof", blast: "calling-session", evidence: "none" } as const;
 const NONCE_RE = /Confirmation code: ([A-Z0-9]{8})/;
 
 let corpus = "";
