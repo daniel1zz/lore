@@ -18,8 +18,7 @@
  * Exit codes: 0 = any verdict; 1 = an `--apply` removal failed; 2 = usage; other codes per `utils.ts::exitCode`.
  */
 
-import { defineLoreCommand } from "../cli-exit.js";
-import { exitCli } from "../cli-exit.js";
+import { defineLoreCommand, exitCli } from "../cli-exit.js";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatErrorFor } from "../utils.js";
 import { resolveCallerSession } from "../caller-session.js";

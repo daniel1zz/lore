@@ -103,8 +103,7 @@
  */
 
 import { readFileSync } from "node:fs";
-import { exitCli } from "../cli-exit.js";
-import { defineLoreCommand } from "../cli-exit.js";
+import { defineLoreCommand, exitCli } from "../cli-exit.js";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatErrorFor, resolveActor } from "../utils.js";
 import { openEditor } from "../editor.js";

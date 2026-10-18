@@ -54,8 +54,7 @@
  */
 
 import { invocationOf } from "../command-invocation.js";
-import { exitCli } from "../cli-exit.js";
-import { defineLoreCommand } from "../cli-exit.js";
+import { defineLoreCommand, exitCli } from "../cli-exit.js";
 import { taskClaimSchema } from "@lore/core";
 import type { ActorSource } from "@lore/core/node";
 import { loadLoreApp } from "../loader.js";

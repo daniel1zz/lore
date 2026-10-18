@@ -65,8 +65,7 @@
  * Source: SPEC-034 §1, §4, §6; SPEC-044 §Design Decisions D6, D7, D9, D11
  */
 
-import { defineLoreCommand } from "../cli-exit.js";
-import { exitCli } from "../cli-exit.js";
+import { defineLoreCommand, exitCli } from "../cli-exit.js";
 import { loadLoreApp } from "../loader.js";
 import {
   exitCode,

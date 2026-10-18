@@ -78,9 +78,8 @@
  */
 
 import { spawnSync } from "node:child_process";
-import { exitCli } from "../cli-exit.js";
 import { readFileSync } from "node:fs";
-import { defineLoreCommand } from "../cli-exit.js";
+import { defineLoreCommand, exitCli } from "../cli-exit.js";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatErrorFor } from "../utils.js";
 import { ASSESS_NEWER_TASK_ACTIVITY, ASSESS_NO_COMMITS_DERIVED } from "../cli-refusal-messages.js";

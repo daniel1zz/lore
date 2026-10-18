@@ -186,8 +186,7 @@
  *         ("gate plan-close --explain")
  */
 
-import { defineLoreCommand } from "../cli-exit.js";
-import { exitCli } from "../cli-exit.js";
+import { defineLoreCommand, exitCli } from "../cli-exit.js";
 import { z } from "zod";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatError, formatErrorFor, resolveActor } from "../utils.js";

@@ -18,8 +18,7 @@
  *   Valid link type returned but link would cycle → exit 4 (CorpusService.link enforces).
  */
 
-import { defineLoreCommand } from "../cli-exit.js";
-import { exitCli } from "../cli-exit.js";
+import { defineLoreCommand, exitCli } from "../cli-exit.js";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatErrorFor, formatShortId, resolveActor } from "../utils.js";
 import { linkTypeSchema } from "@lore/core";

@@ -130,8 +130,7 @@
  * `tests/integration/binary-provenance-check.test.ts`.
  */
 
-import { defineLoreCommand } from "../cli-exit.js";
-import { exitCli } from "../cli-exit.js";
+import { defineLoreCommand, exitCli } from "../cli-exit.js";
 import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";

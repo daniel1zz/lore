@@ -37,8 +37,7 @@
  */
 
 import { dirname } from "path";
-import { exitCli } from "../cli-exit.js";
-import { defineLoreCommand } from "../cli-exit.js";
+import { defineLoreCommand, exitCli } from "../cli-exit.js";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatError, formatErrorFor } from "../utils.js";
 import { resolveTrackedWriteRoot } from "../working-tree-root.js";

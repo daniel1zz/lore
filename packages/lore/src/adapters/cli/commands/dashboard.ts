@@ -80,10 +80,9 @@
  */
 
 import { dirname, join } from "node:path";
-import { exitCli } from "../cli-exit.js";
 import { spawn } from "node:child_process";
 import { mkdtempSync, writeFileSync } from "node:fs";
-import { defineLoreCommand } from "../cli-exit.js";
+import { defineLoreCommand, exitCli } from "../cli-exit.js";
 import { loadGlobalConfig, resolveGlobalConfigPath } from "@lore/core/node";
 import { loadLoreApp } from "../loader.js";
 import { ambientOfInvocation, createApp } from "../../../app.js";

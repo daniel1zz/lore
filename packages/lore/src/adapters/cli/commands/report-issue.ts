@@ -82,8 +82,7 @@
  * spec-the-defect-channel-reaches-no-machine-but-its-own-github P2/P4.
  */
 
-import { defineLoreCommand } from "../cli-exit.js";
-import { exitCli } from "../cli-exit.js";
+import { defineLoreCommand, exitCli } from "../cli-exit.js";
 import {
   buildUnconfiguredUpstreamRemedy,
   err,

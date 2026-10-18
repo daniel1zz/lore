@@ -17,8 +17,7 @@
  * Source: SPEC-013 §3
  */
 
-import { defineLoreCommand } from "../cli-exit.js";
-import { exitCli } from "../cli-exit.js";
+import { defineLoreCommand, exitCli } from "../cli-exit.js";
 import { loadLoreApp } from "../loader.js";
 import {
   runMigrationCoverage,

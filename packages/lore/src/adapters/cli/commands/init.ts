@@ -22,8 +22,7 @@
  * command deliberately does NOT invoke.
  */
 
-import { defineLoreCommand } from "../cli-exit.js";
-import { exitCli } from "../cli-exit.js";
+import { defineLoreCommand, exitCli } from "../cli-exit.js";
 import { existsSync, mkdirSync, writeFileSync } from "fs";
 import { join } from "path";
 import { ambientOfInvocation, createApp } from "../../../app.js";

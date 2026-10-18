@@ -25,9 +25,8 @@
  * Side-effect class: IO (git subprocesses, the floor command, the corpus directory's loss ledger).
  */
 import { spawnSync } from "node:child_process";
-import { exitCli } from "../cli-exit.js";
 import { dirname, resolve as resolvePath } from "node:path";
-import { defineLoreCommand } from "../cli-exit.js";
+import { defineLoreCommand, exitCli } from "../cli-exit.js";
 import { invocationOf } from "../command-invocation.js";
 import { loadLoreApp } from "../loader.js";
 import { resolveCallerSession } from "../caller-session.js";

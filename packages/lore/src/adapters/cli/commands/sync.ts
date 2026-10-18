@@ -4,8 +4,7 @@
  * Source: SPEC-009 §5, D-004 (auth_token_env stores NAME only, never plaintext token)
  */
 
-import { defineLoreCommand } from "../cli-exit.js";
-import { exitCli } from "../cli-exit.js";
+import { defineLoreCommand, exitCli } from "../cli-exit.js";
 import { join, dirname } from "path";
 import { existsSync } from "fs";
 import { resolveSyncCredentials } from "@lore/core";

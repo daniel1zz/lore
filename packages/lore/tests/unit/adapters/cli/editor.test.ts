@@ -26,7 +26,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, writeFileSync, chmodSync, existsSync, readdirSync } from "fs";
+import { mkdtempSync, writeFileSync, chmodSync, existsSync, readdirSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 
@@ -63,9 +63,6 @@ let scriptDir: string;
 
 beforeEach(() => {
   scriptDir = mkdtempSync(join(tmpdir(), "lore-editor-test-scripts-"));
-  // Simulate interactive TTY — vitest runs with stdin redirected, so isTTY would be undefined
-  // and openEditor would early-return without invoking the editor. Force TTY for these tests.
-  Object.defineProperty(process.stdin, "isTTY", { value: true, configurable: true, writable: true });
 });
 
 afterEach(() => {
@@ -84,7 +81,7 @@ describe("openEditor — AC-ED-1: blank initial content, editor writes content",
     const openEditor = await importOpenEditor();
     const writerScript = writeScript(scriptDir, "writer.sh", `printf "hello world" > "$1"`);
 
-    const result = await openEditor({ env: process.env, tmpDir: tmpdir(), defaults: { editor: writerScript } });
+    const result = await openEditor({ stdinIsTTY: true, env: process.env, tmpDir: tmpdir(), defaults: { editor: writerScript } });
 
     expect(result.ok).toBe(true);
     if (result.ok) {
@@ -106,6 +103,7 @@ describe("openEditor — AC-ED-2: initialContent pre-populated in temp file", ()
     );
 
     const result = await openEditor({
+      stdinIsTTY: true,
       env: process.env, tmpDir: tmpdir(),
       initialContent: "initial text",
       defaults: { editor: appendScript },
@@ -123,6 +121,7 @@ describe("openEditor — AC-ED-2: initialContent pre-populated in temp file", ()
     const noopScript = writeScript(scriptDir, "noop.sh", `exit 0`);
 
     const result = await openEditor({
+      stdinIsTTY: true,
       env: process.env, tmpDir: tmpdir(),
       initialContent: "preserved content",
       defaults: { editor: noopScript },
@@ -146,7 +145,7 @@ describe("openEditor — AC-ED-3: editor resolution chain", () => {
     const savedEditor = process.env["EDITOR"];
     process.env["EDITOR"] = envScript;
     try {
-      const result = await openEditor({ env: process.env, tmpDir: tmpdir(), defaults: { editor: defaultsScript } });
+      const result = await openEditor({ stdinIsTTY: true, env: process.env, tmpDir: tmpdir(), defaults: { editor: defaultsScript } });
       expect(result.ok).toBe(true);
       if (result.ok) {
         expect(result.value).toBe("from-defaults");
@@ -167,7 +166,7 @@ describe("openEditor — AC-ED-3: editor resolution chain", () => {
     const savedEditor = process.env["EDITOR"];
     process.env["EDITOR"] = envScript;
     try {
-      const result = await openEditor({ env: process.env, tmpDir: tmpdir(), defaults: {} });
+      const result = await openEditor({ stdinIsTTY: true, env: process.env, tmpDir: tmpdir(), defaults: {} });
       expect(result.ok).toBe(true);
       if (result.ok) {
         expect(result.value).toBe("from-env");
@@ -194,7 +193,7 @@ describe("openEditor — AC-ED-3: editor resolution chain", () => {
       // In most test environments vi IS present. We replace it with a nonexistent binary
       // by using a path-less name that doesn't exist. Instead, verify the resolution
       // by calling openEditor with an explicit ENOENT-inducing defaults.editor.
-      const result = await openEditor({ env: process.env, tmpDir: tmpdir(), defaults: { editor: "/nonexistent/binary/vi-fake" } });
+      const result = await openEditor({ stdinIsTTY: true, env: process.env, tmpDir: tmpdir(), defaults: { editor: "/nonexistent/binary/vi-fake" } });
       expect(result.ok).toBe(false);
       if (!result.ok) {
         expect(result.error?.message).toContain("vi-fake");
@@ -214,6 +213,7 @@ describe("openEditor — AC-ED-4: editor binary not found", () => {
     const openEditor = await importOpenEditor();
 
     const result = await openEditor({
+      stdinIsTTY: true,
       env: process.env, tmpDir: tmpdir(),
       defaults: { editor: "/nonexistent/path/my-custom-editor" },
     });
@@ -231,6 +231,7 @@ describe("openEditor — AC-ED-4: editor binary not found", () => {
     const openEditor = await importOpenEditor();
 
     const result = await openEditor({
+      stdinIsTTY: true,
       env: process.env, tmpDir: tmpdir(),
       defaults: { editor: "totally-nonexistent-bin-xyz" },
     });
@@ -251,7 +252,7 @@ describe("openEditor — AC-ED-5: editor exits non-zero", () => {
     const openEditor = await importOpenEditor();
     const failScript = writeScript(scriptDir, "fail.sh", `exit 42`);
 
-    const result = await openEditor({ env: process.env, tmpDir: tmpdir(), defaults: { editor: failScript } });
+    const result = await openEditor({ stdinIsTTY: true, env: process.env, tmpDir: tmpdir(), defaults: { editor: failScript } });
 
     expect(result.ok).toBe(false);
     if (!result.ok) {
@@ -266,7 +267,7 @@ describe("openEditor — AC-ED-5: editor exits non-zero", () => {
     const openEditor = await importOpenEditor();
     const failScript = writeScript(scriptDir, "fail1.sh", `exit 1`);
 
-    const result = await openEditor({ env: process.env, tmpDir: tmpdir(), defaults: { editor: failScript } });
+    const result = await openEditor({ stdinIsTTY: true, env: process.env, tmpDir: tmpdir(), defaults: { editor: failScript } });
 
     expect(result.ok).toBe(false);
     if (!result.ok) {
@@ -283,7 +284,7 @@ describe("openEditor — AC-ED-6: empty content treated as cancel", () => {
     // Script that empties the file
     const eraserScript = writeScript(scriptDir, "eraser.sh", `: > "$1"`);
 
-    const result = await openEditor({ env: process.env, tmpDir: tmpdir(), defaults: { editor: eraserScript } });
+    const result = await openEditor({ stdinIsTTY: true, env: process.env, tmpDir: tmpdir(), defaults: { editor: eraserScript } });
 
     expect(result.ok).toBe(false);
     if (!result.ok) {
@@ -299,7 +300,7 @@ describe("openEditor — AC-ED-6: empty content treated as cancel", () => {
     // Write only whitespace
     const whitespaceScript = writeScript(scriptDir, "whitespace.sh", `printf "   \\n  " > "$1"`);
 
-    const result = await openEditor({ env: process.env, tmpDir: tmpdir(), defaults: { editor: whitespaceScript } });
+    const result = await openEditor({ stdinIsTTY: true, env: process.env, tmpDir: tmpdir(), defaults: { editor: whitespaceScript } });
 
     expect(result.ok).toBe(false);
     if (!result.ok) {
@@ -318,7 +319,7 @@ describe("openEditor — AC-ED-7: temp dir cleanup", () => {
     // Track tmp dir count before
     const tmpBefore = readdirSync(tmpdir()).filter((f) => f.startsWith("lore-editor-"));
 
-    await openEditor({ env: process.env, tmpDir: tmpdir(), defaults: { editor: writerScript } });
+    await openEditor({ stdinIsTTY: true, env: process.env, tmpDir: tmpdir(), defaults: { editor: writerScript } });
 
     const tmpAfter = readdirSync(tmpdir()).filter((f) => f.startsWith("lore-editor-"));
     // All lore-editor-* dirs should be cleaned up (count should not increase)
@@ -330,7 +331,7 @@ describe("openEditor — AC-ED-7: temp dir cleanup", () => {
 
     const tmpBefore = readdirSync(tmpdir()).filter((f) => f.startsWith("lore-editor-"));
 
-    await openEditor({ env: process.env, tmpDir: tmpdir(), defaults: { editor: "/nonexistent/garbage/editor-xyz" } });
+    await openEditor({ stdinIsTTY: true, env: process.env, tmpDir: tmpdir(), defaults: { editor: "/nonexistent/garbage/editor-xyz" } });
 
     const tmpAfter = readdirSync(tmpdir()).filter((f) => f.startsWith("lore-editor-"));
     expect(tmpAfter.length).toBeLessThanOrEqual(tmpBefore.length);
@@ -342,7 +343,7 @@ describe("openEditor — AC-ED-7: temp dir cleanup", () => {
 
     const tmpBefore = readdirSync(tmpdir()).filter((f) => f.startsWith("lore-editor-"));
 
-    await openEditor({ env: process.env, tmpDir: tmpdir(), defaults: { editor: failScript } });
+    await openEditor({ stdinIsTTY: true, env: process.env, tmpDir: tmpdir(), defaults: { editor: failScript } });
 
     const tmpAfter = readdirSync(tmpdir()).filter((f) => f.startsWith("lore-editor-"));
     expect(tmpAfter.length).toBeLessThanOrEqual(tmpBefore.length);
@@ -364,7 +365,7 @@ describe("openEditor — AC-ED-8: temp file has .md extension", () => {
       `printf "%s" "$1" > "$1.path" && printf "content" > "$1"`,
     );
 
-    await openEditor({ env: process.env, tmpDir: tmpdir(), defaults: { editor: nameScript } });
+    await openEditor({ stdinIsTTY: true, env: process.env, tmpDir: tmpdir(), defaults: { editor: nameScript } });
 
     // The script also wrote the path to $1.path — find it
     const pathFiles = readdirSync(tmpdir()).filter((f) => f.endsWith(".path"));
@@ -380,7 +381,7 @@ describe("openEditor — AC-ED-8: temp file has .md extension", () => {
       `case "$1" in *.md) printf "got-md" > "$1" ;; *) exit 99 ;; esac`,
     );
 
-    const result = await openEditor({ env: process.env, tmpDir: tmpdir(), defaults: { editor: checkExtScript } });
+    const result = await openEditor({ stdinIsTTY: true, env: process.env, tmpDir: tmpdir(), defaults: { editor: checkExtScript } });
     // If extension check fails, exit 99 → err(VALIDATION_ERROR) with "99"
     expect(result.ok).toBe(true);
     if (result.ok) {
@@ -399,6 +400,7 @@ describe("openEditor — REGRESSION: editor command with embedded args", () => {
 
     // Pass script as "path/to/flag.sh --ignored-flag" — should split and work
     const result = await openEditor({
+      stdinIsTTY: true,
       env: process.env, tmpDir: tmpdir(),
       defaults: { editor: `${flagScript} --ignored-flag` },
     });
@@ -406,6 +408,24 @@ describe("openEditor — REGRESSION: editor command with embedded args", () => {
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.value).toBe("got-flag");
+    }
+  });
+});
+
+// ─── Non-interactive: no terminal on the Invocation's stdin ────────────────────
+
+describe("openEditor without a terminal (inv.io.stdinIsTTY false)", () => {
+  it("skips the editor and keeps the caller's initial content", async () => {
+    const openEditor = await importOpenEditor();
+    const dir = mkdtempSync(join(tmpdir(), "lore-editor-notty-"));
+    try {
+      const marker = join(dir, "editor-ran");
+      const script = writeScript(dir, "editor.sh", `touch "${marker}"\nprintf 'edited' > "$1"`);
+      const result = await openEditor({ stdinIsTTY: false, env: process.env, tmpDir: tmpdir(), initialContent: "kept", defaults: { editor: script } });
+      expect(result).toEqual({ ok: true, value: "kept" });
+      expect(existsSync(marker)).toBe(false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
     }
   });
 });
