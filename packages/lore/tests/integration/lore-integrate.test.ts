@@ -558,6 +558,37 @@ describe("AC-INT-2 (2) the main-ref hook installed by lore setup", () => {
   }, 120_000);
 });
 
+describe("INT-T8 the main-ref hook runs in a consumer's linked worktree when hooks/ is untracked", () => {
+  it("INT-T8 a commit on main from a linked worktree is refused; integrate's CAS still passes there", async () => {
+    const fx = new Fixture("true");
+    const setup = fx.setupProject();
+    expect(setup.exitCode, setup.out).toBe(0);
+    // the consumer never committed hooks/: the linked worktree has no hooks/ of its own
+    expect(fx.git(["ls-files", "hooks"])).toBe("");
+    const branch = fx.makeBranch("t8");
+    const before = fx.main();
+
+    const wtMain = join(root, `wt-main-${repoSeq}`);
+    fx.git(["worktree", "add", "-q", wtMain, "main"]);
+    expect(existsSync(join(wtMain, "hooks"))).toBe(false);
+    writeFileSync(join(wtMain, "stray.txt"), "stray\n");
+    fx.git(["add", "stray.txt"], wtMain);
+    const commit = fx.gitRaw(["commit", "-q", "-m", "stray commit on main from a linked worktree"], wtMain);
+    expect(commit.status, commit.out).not.toBe(0);
+    expect(commit.out).toContain("ref updates aborted by hook");
+    expect(fx.main()).toBe(before);
+    fx.git(["worktree", "remove", "--force", wtMain]);
+
+    // control: integrate's CAS carries the marker and lands from another linked worktree
+    const wtIntegrate = join(root, `wt-int-${repoSeq}`);
+    fx.git(["worktree", "add", "-q", "--detach", wtIntegrate, "main"]);
+    const landed = await fx.integrate(branch, "sess-t8", [], wtIntegrate);
+    expect(landed.exitCode, landed.out).toBe(0);
+    expect(fx.main()).not.toBe(before);
+    expect(fx.isAncestorOfMain(fx.git(["rev-parse", branch]))).toBe(true);
+  }, 180_000);
+});
+
 describe("AC-INT-2 (3) integrate origin/main", () => {
   function remoteFor(fx: Fixture): { bare: string; peer: string } {
     const bare = join(root, `remote-${repoSeq}.git`);
