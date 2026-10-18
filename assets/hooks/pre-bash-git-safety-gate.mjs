@@ -52,7 +52,7 @@
  *   git reflog delete / expire --expire=now
  *
  * Allowed (safe variants, never matched):
- *   git reset --soft/--mixed · git restore --staged · git stash push/pop
+ *   git reset --soft/--mixed · git restore --staged · git stash (non-destructive verbs)
  *   git clean -n · git branch -d (merged-only)
  *
  * `git worktree remove` WITHOUT --force is now MATCHED (2026-08-02 fix) and
@@ -588,19 +588,19 @@ const RULES = [
   {
     pat: /\bgit\s+reset\s+(--hard|--keep|--merge)\b/,
     why: 'git reset --hard/--keep/--merge discards working-tree changes',
-    safe: 'Use `git stash push -m "wip"` first, or `git reset --soft` (HEAD only).',
+    safe: 'Commit the work first (a WIP commit on your own branch), or use `git reset --soft` (HEAD only).',
     probe: probeDirtyTree,
   },
   {
     pat: /\bgit\s+checkout\s+(--\s+\S|\.(\s|$)|HEAD(\s|$)|HEAD\s+--\s)/,
     why: 'git checkout -- <path> / . / HEAD discards working-tree changes',
-    safe: 'Use `git stash` if you want to compare, or read files explicitly.',
+    safe: 'Commit first if you want to compare, or read files explicitly.',
     probe: probePathArg,
   },
   {
     pat: /\bgit\s+restore\b(?!.*--staged\b)/,
     why: 'git restore (default --worktree) discards working-tree changes',
-    safe: 'Use `git restore --staged <path>` to unstage only, or `git stash` to save.',
+    safe: 'Use `git restore --staged <path>` to unstage only, or commit to save.',
     probe: probePathArg,
   },
   {
