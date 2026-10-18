@@ -13,13 +13,19 @@
  */
 import type { LoreError, Result } from "@lore/core";
 import { DecisionService } from "../../service/decision-service.js";
+import { createSubjectExistenceProbes } from "../../service/decision-subject-probes.js";
 import type { PendingDecision } from "../../service/pending-decisions.js";
+import { createRealSubjectProbePorts } from "../real-subject-probe-ports.js";
 import { SQLiteStore } from "../../store/sqlite-store.js";
 import { wrapStoreError } from "../../store/store-shared.js";
 import { formatTable } from "./utils.js";
 
-/** Open escalations of the corpus DB at `dbPath`, ordered by id. */
-export async function collectPendingDecisions(dbPath: string): Promise<Result<PendingDecision[], LoreError>> {
+/**
+ * Open escalations of the corpus DB at `dbPath`, ordered by id. Listing closes stale ones first (AU-T16): with
+ * `repoRoot` the class-specific existence probes run (worktree / stash / process / run); without it only the
+ * newer-version rule applies.
+ */
+export async function collectPendingDecisions(dbPath: string, repoRoot?: string): Promise<Result<PendingDecision[], LoreError>> {
   let store: SQLiteStore;
   try {
     store = new SQLiteStore(dbPath);
@@ -27,7 +33,8 @@ export async function collectPendingDecisions(dbPath: string): Promise<Result<Pe
     return wrapStoreError(cause);
   }
   try {
-    return await new DecisionService({ store, executorRun: null }).listPending();
+    const subjectProbes = repoRoot === undefined ? undefined : createSubjectExistenceProbes(createRealSubjectProbePorts(repoRoot, store));
+    return await new DecisionService({ store, executorRun: null, ...(subjectProbes !== undefined ? { subjectProbes } : {}) }).listPending();
   } finally {
     store.close();
   }
