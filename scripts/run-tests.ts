@@ -12,8 +12,8 @@
  * Public surface: `runSuite` (also used by scripts/measure-test-wall.ts), `suiteExit`.
  * Side-effect class: IO (spawns the runners, writes reports to a temp dir).
  */
-import { spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { spawn, spawnSync } from "node:child_process";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -48,13 +48,23 @@ export function runSuite(reportDir: string, baseRef?: string): SuiteOutcome {
   // invocations and only snapshots it for the no-test-writes-dist check.
   const build = run("build dist/lore (once)", "bun", ["run", "build"]);
   if (build !== 0) throw new Error(`run-tests: \`bun run build\` failed (exit ${build}); no test ran`);
+  // reason: the Node project (20 files, ~15 s alone) runs CONCURRENTLY with the Bun project instead of after it:
+  // run serially it was 15 s of the 600 s budget (measured 574-603 s wall on this machine). It is started detached
+  // with its output in a log file and its exit status in a status file; both are collected after the Bun run ends.
+  const nodeLog = join(reportDir, "node.log");
+  const nodeStatus = join(reportDir, "node.status");
+  console.log("\n=== vitest on Node (files listed in vitest.node-files.ts): started concurrently, output follows the Bun run");
+  const nodeCmd = `bunx vitest run -c vitest.node.config.ts --reporter=default --reporter=json --outputFile.json=${JSON.stringify(nodeReport)} > ${JSON.stringify(nodeLog)} 2>&1; echo $? > ${JSON.stringify(nodeStatus)}`;
+  const nodeChild = spawn("sh", ["-c", nodeCmd], { cwd: ROOT, stdio: "ignore", detached: true, env: { ...process.env, NODE_OPTIONS: "--max-old-space-size=2048" } });
+  nodeChild.unref();
   const bun = run("vitest on the Bun runtime", "bunx", ["--bun", "vitest", "run", "--reporter=default", "--reporter=json", `--outputFile.json=${bunReport}`]);
-  const node = run(
-    "vitest on Node (files listed in vitest.node-files.ts)",
-    "bunx",
-    ["vitest", "run", "-c", "vitest.node.config.ts", "--reporter=default", "--reporter=json", `--outputFile.json=${nodeReport}`],
-    { NODE_OPTIONS: "--max-old-space-size=2048" },
-  );
+  const nodeDeadline = Date.now() + 600_000;
+  while (!existsSync(nodeStatus)) {
+    if (Date.now() > nodeDeadline) throw new Error("run-tests: the Node-project run did not finish within 600 s after the Bun run ended");
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 250);
+  }
+  console.log(`\n=== vitest on Node output\n${readFileSync(nodeLog, "utf8")}`);
+  const node = Number(readFileSync(nodeStatus, "utf8").trim());
   const census = run("census", "bun", ["scripts/check-test-file-census.ts", bunReport, nodeReport]);
   // AC-TG-8: with a base ref, cross-check the selector against this run's own reports.
   const miss = baseRef === undefined ? 0 : run("selector cross-check", "bun", ["scripts/selector-miss-report.ts", `${baseRef}..HEAD`, bunReport, nodeReport]);
