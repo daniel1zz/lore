@@ -19,7 +19,7 @@
  */
 
 import { defineCommand } from "citty";
-import { exitCli, setExitCode } from "../run-scope.js";
+import { exitCli } from "../cli-exit.js";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatErrorFor } from "../utils.js";
 import { resolveCallerSession } from "../caller-session.js";
@@ -79,8 +79,7 @@ export default defineCommand({
           const service = app.worktreeRemovalService;
           if (service === undefined) {
             inv.io.stderr.write("Error: this App was built without a worktree-removal service\n");
-            setExitCode(1);
-            return;
+            return 1;
           }
           const check = await service.check(path, callerSession);
           if (args.json) printLine(inv.io.stdout, JSON.stringify({ ok: true, data: check }, null, 2));
@@ -109,14 +108,12 @@ export default defineCommand({
           const service = app.worktreeRemovalService;
           if (service === undefined) {
             inv.io.stderr.write("Error: this App was built without a worktree-removal service\n");
-            setExitCode(1);
-            return;
+            return 1;
           }
           const result = await service.sweep({ apply: args.apply === true, callerSession, cwd: inv.cwd });
           if (!result.ok) {
             inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
-            setExitCode(exitCode(result.error));
-            return;
+            return exitCode(result.error);
           }
           const rows: WorktreeSweepEntry[] = result.value;
           if (args.json) {
@@ -132,7 +129,7 @@ export default defineCommand({
               if (row.error !== undefined) printLine(inv.io.stdout, `  error: ${row.error}`);
             }
           }
-          if (rows.some((row) => row.removed === false)) setExitCode(1);
+          if (rows.some((row) => row.removed === false)) return 1;
         } finally {
           app.close();
         }

@@ -14,7 +14,7 @@
  */
 
 import { defineCommand } from "citty";
-import { setExitCode } from "../run-scope.js";
+
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatErrorFor } from "../utils.js";
 import type { App } from "../../../app.js";
@@ -65,8 +65,7 @@ export default defineCommand({
           if (!result.ok) {
             if (args.json) printLine(inv.io.stdout, JSON.stringify({ ok: false, error: result.error }, null, 2));
             else inv.io.stderr.write(formatErrorFor(inv, result.error));
-            setExitCode(exitCode(result.error));
-            return;
+            return exitCode(result.error);
           }
           if (args.json) printLine(inv.io.stdout, JSON.stringify({ ok: true, data: result.value }, null, 2));
           else printLine(inv.io.stdout, `Added requirement ${args.id} (${result.value.length} total).`);
@@ -94,8 +93,7 @@ export default defineCommand({
           if (!result.ok) {
             if (args.json) printLine(inv.io.stdout, JSON.stringify({ ok: false, error: result.error }, null, 2));
             else inv.io.stderr.write(formatErrorFor(inv, result.error));
-            setExitCode(exitCode(result.error));
-            return;
+            return exitCode(result.error);
           }
           if (args.json) printLine(inv.io.stdout, JSON.stringify({ ok: true, data: result.value }, null, 2));
           else printLine(inv.io.stdout, `Migrated requirement ${args.id} to ${args.rule}.`);
@@ -121,8 +119,7 @@ export default defineCommand({
           if (!result.ok) {
             if (args.json) printLine(inv.io.stdout, JSON.stringify({ ok: false, error: result.error }, null, 2));
             else inv.io.stderr.write(formatErrorFor(inv, result.error));
-            setExitCode(exitCode(result.error));
-            return;
+            return exitCode(result.error);
           }
           if (args.json) {
             printLine(inv.io.stdout, JSON.stringify({ ok: true, data: result.value }, null, 2));
@@ -157,8 +154,7 @@ export default defineCommand({
           if (!result.ok) {
             if (args.json) printLine(inv.io.stdout, JSON.stringify({ ok: false, error: result.error }, null, 2));
             else inv.io.stderr.write(formatErrorFor(inv, result.error));
-            setExitCode(exitCode(result.error));
-            return;
+            return exitCode(result.error);
           }
           if (args.json) printLine(inv.io.stdout, JSON.stringify({ ok: true, data: result.value }, null, 2));
           else printLine(inv.io.stdout, `Removed requirement ${args.id} (${result.value.length} remain).`);

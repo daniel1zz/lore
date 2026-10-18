@@ -123,7 +123,7 @@
  */
 
 import { createHash } from "node:crypto";
-import { exitCli, setExitCode } from "./run-scope.js";
+import { exitCli } from "./cli-exit.js";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
@@ -149,6 +149,7 @@ import { exitCode, formatErrorFor } from "./utils.js";
 import type { Invocation } from "@lore/core";
 import { printLine } from "./output.js";
 import type { CliIo } from "./output.js";
+import type { ExitReport } from "./cli-exit.js";
 
 // ─── On-disk artifact filenames ─────────────────────────────────────────────
 
@@ -637,12 +638,11 @@ export async function runSetupCheck(opts: {
   now?: () => string;
   cwd: string;
   inv: Invocation;
-}): Promise<void> {
+}): Promise<ExitReport> {
   const result = await computeSetupCheckReport(opts);
   if (!result.ok) {
     opts.inv.io.stderr.write(formatErrorFor(opts.inv, result.error) + "\n");
-    setExitCode(exitCode(result.error));
-    return;
+    return exitCode(result.error);
   }
   const report = result.value;
 
@@ -651,7 +651,7 @@ export async function runSetupCheck(opts: {
   } else {
     printLine(opts.inv.io.stdout, renderSetupCheckReport(report, opts.targetDir));
   }
-  setExitCode(report.summary === "sync" ? 0 : 3);
+  return report.summary === "sync" ? 0 : 3;
 }
 
 // ─── Project check (BR-1085): collected by the caller, finished here ────────
@@ -674,7 +674,7 @@ export async function finishProjectSetupCheck(io: CliIo, opts: {
   files: SetupCheckFiles;
   json: boolean;
   now?: () => string;
-}): Promise<void> {
+}): Promise<ExitReport> {
   const tidy = (paths: string[]): string[] => [...new Set(paths)].sort();
   const files: SetupCheckFiles = {
     outdated: tidy(opts.files.outdated),
@@ -700,8 +700,7 @@ export async function finishProjectSetupCheck(io: CliIo, opts: {
     );
   } catch (cause) {
     io.stderr.write(`Error: lore setup --project --check could not write its cache at ${cachePath}: ${describeCaught(cause)}\n`);
-    setExitCode(1);
-    return;
+    return 1;
   }
 
   if (opts.json) {
@@ -709,5 +708,5 @@ export async function finishProjectSetupCheck(io: CliIo, opts: {
   } else {
     printLine(io.stdout, renderSetupCheckReport(report, opts.repoDir, "project"));
   }
-  setExitCode(inSync ? 0 : 3);
+  return inSync ? 0 : 3;
 }

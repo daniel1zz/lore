@@ -19,7 +19,7 @@
  */
 
 import { defineCommand } from "citty";
-import { exitCli, setExitCode } from "../run-scope.js";
+import { exitCli } from "../cli-exit.js";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatErrorFor, formatShortId, resolveActor } from "../utils.js";
 import { linkTypeSchema } from "@lore/core";
@@ -88,28 +88,24 @@ export default defineCommand({
         const fromResolve = await app.corpusService.resolve(args.from);
         if (!fromResolve.ok) {
           inv.io.stderr.write(formatErrorFor(inv, fromResolve.error) + "\n");
-          setExitCode(exitCode(fromResolve.error));
-          return;
+          return exitCode(fromResolve.error);
         }
         const fromGet = await app.corpusService.get(fromResolve.value);
         if (!fromGet.ok) {
           inv.io.stderr.write(formatErrorFor(inv, fromGet.error) + "\n");
-          setExitCode(exitCode(fromGet.error));
-          return;
+          return exitCode(fromGet.error);
         }
         const fromDoc = fromGet.value.doc;
 
         const toResolve = await app.corpusService.resolve(args.to);
         if (!toResolve.ok) {
           inv.io.stderr.write(formatErrorFor(inv, toResolve.error) + "\n");
-          setExitCode(exitCode(toResolve.error));
-          return;
+          return exitCode(toResolve.error);
         }
         const toGet = await app.corpusService.get(toResolve.value);
         if (!toGet.ok) {
           inv.io.stderr.write(formatErrorFor(inv, toGet.error) + "\n");
-          setExitCode(exitCode(toGet.error));
-          return;
+          return exitCode(toGet.error);
         }
         const toDoc = toGet.value.doc;
 
@@ -127,8 +123,7 @@ export default defineCommand({
           // reason: invalid link type or provider error → exit 6 (AI_PROVIDER_ERROR),
           // consistent with AC-LINK-AI-2 and AC-AI-FAIL-1. No link is created.
           inv.io.stderr.write(formatErrorFor(inv, inferResult.error) + "\n");
-          setExitCode(exitCode(inferResult.error));
-          return;
+          return exitCode(inferResult.error);
         }
 
         const inferredType = inferResult.value.linkType;
@@ -143,8 +138,7 @@ export default defineCommand({
         });
         if (!linkResult.ok) {
           inv.io.stderr.write(formatErrorFor(inv, linkResult.error) + "\n");
-          setExitCode(exitCode(linkResult.error));
-          return;
+          return exitCode(linkResult.error);
         }
 
         const link = linkResult.value;
@@ -175,8 +169,7 @@ export default defineCommand({
 
       if (!result.ok) {
         inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
-        setExitCode(exitCode(result.error));
-        return;
+        return exitCode(result.error);
       }
 
       const link = result.value;

@@ -23,7 +23,7 @@
  */
 
 import { defineCommand } from "citty";
-import { exitCli } from "../run-scope.js";
+import { exitCli } from "../cli-exit.js";
 import { existsSync, mkdirSync, writeFileSync } from "fs";
 import { join } from "path";
 import { ambientOfInvocation, createApp } from "../../../app.js";

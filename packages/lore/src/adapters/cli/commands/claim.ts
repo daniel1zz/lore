@@ -54,7 +54,7 @@
  */
 
 import { invocationOf } from "../command-invocation.js";
-import { exitCli, setExitCode } from "../run-scope.js";
+import { exitCli } from "../cli-exit.js";
 import { defineCommand } from "citty";
 import { taskClaimSchema } from "@lore/core";
 import type { ActorSource } from "@lore/core/node";
@@ -157,16 +157,14 @@ export default defineCommand({
         // passing it on would silently drop an authority the caller believes they were granted.
         if (claimOpts.corpusScope !== undefined) {
           inv.io.stderr.write("Error: --corpus-scope applies to task claims only; this target is a phase\n");
-          setExitCode(2);
-          return;
+          return 2;
         }
         result = await requirePhaseWorkflowService(app).claim(args.task as string, claimOpts);
       }
 
       if (!result.ok) {
         inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
-        setExitCode(exitCode(result.error));
-        return;
+        return exitCode(result.error);
       }
 
       if (args.json) {

@@ -23,7 +23,7 @@
  * Side-effect class: IO (file reads, one `lore bootstrap` spawn for `pointers`, stdout/stderr writes).
  */
 import { spawnSync } from "node:child_process";
-import { setExitCode } from "../run-scope.js";
+
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -56,6 +56,7 @@ import { writeAllSync } from "../stdio-sync.js";
 import type { Invocation } from "@lore/core";
 import { invocationOf } from "../command-invocation.js";
 import type { CliIo } from "../output.js";
+import type { ExitReport } from "../cli-exit.js";
 
 const ACTIONS = ["render", "check", "pointers"] as const;
 type Action = (typeof ACTIONS)[number];
@@ -213,9 +214,9 @@ function isAction(value: string): value is Action {
   return (ACTIONS as readonly string[]).includes(value);
 }
 
-function usageError(io: CliIo, message: string): void {
+function usageError(io: CliIo, message: string): ExitReport {
   io.stderr.write(`Error: ${message}\n`);
-  setExitCode(USAGE_EXIT);
+  return USAGE_EXIT;
 }
 
 function emitHookJson(io: CliIo, outlet: HookOutlet, additionalContext: string): void {
@@ -223,18 +224,16 @@ function emitHookJson(io: CliIo, outlet: HookOutlet, additionalContext: string):
   );
 }
 
-async function runRender(args: Record<string, unknown>, cwd: string, inv: Invocation): Promise<void> {
+async function runRender(args: Record<string, unknown>, cwd: string, inv: Invocation): Promise<ExitReport> {
   const outlet = typeof args["outlet"] === "string" ? args["outlet"] : "";
   if (outlet === RETIRED_SESSION_START_OUTLET) {
-    usageError(inv.io, 
+    return usageError(inv.io, 
       `lore fragments render: outlet ${RETIRED_SESSION_START_OUTLET} is retired; the only render target is ${HOOK_OUTLETS.join("|")}. ` +
         "Session-start upgrade advice comes from the session-start-resume hook, and dynamic main fragments are refused by `lore fragments check`.",
     );
-    return;
   }
   if (!isHookOutlet(outlet)) {
-    usageError(inv.io, `lore fragments render requires --outlet <${HOOK_OUTLETS.join("|")}> (got "${outlet}"; known outlets: ${OUTLET_IDS.join(", ")})`);
-    return;
+    return usageError(inv.io, `lore fragments render requires --outlet <${HOOK_OUTLETS.join("|")}> (got "${outlet}"; known outlets: ${OUTLET_IDS.join(", ")})`);
   }
   const agentType = typeof args["agent-type"] === "string" && args["agent-type"] !== "" ? args["agent-type"] : undefined;
 
@@ -259,14 +258,13 @@ async function runRender(args: Record<string, unknown>, cwd: string, inv: Invoca
  * setting the exit code. `label` names the invoking command in the human lines; shared with
  * `lore status --check-fragments` so the two cannot render a finding differently.
  */
-export async function runCheck(args: Record<string, unknown>, cwd: string, inv: Invocation, label = "lore fragments check"): Promise<void> {
+export async function runCheck(args: Record<string, unknown>, cwd: string, inv: Invocation, label = "lore fragments check"): Promise<ExitReport> {
   const json = args["json"] === true;
   const deps = buildFlowDeps(cwd, inv);
   if (!deps.ok) {
     if (json) inv.io.stdout.write(`${JSON.stringify({ ok: false, error: deps.error })}\n`);
     inv.io.stderr.write(`${label}: ${deps.error.code}: ${deps.error.message}\n`);
-    setExitCode(CHECK_FAILED_EXIT);
-    return;
+    return CHECK_FAILED_EXIT;
   }
   const report = await runFragmentsCheck(deps.value);
   if (json) {
@@ -279,7 +277,7 @@ export async function runCheck(args: Record<string, unknown>, cwd: string, inv: 
   for (const finding of report.findings) {
     inv.io.stderr.write(`[${finding.kind}] ${finding.code}: ${finding.message}\n`);
   }
-  if (!report.ok) setExitCode(CHECK_FAILED_EXIT);
+  if (!report.ok) return CHECK_FAILED_EXIT;
 }
 
 async function runPointers(cwd: string, inv: Invocation): Promise<void> {
@@ -327,8 +325,7 @@ export default defineCommand({
     const inv = invocationOf(context);
     const action = typeof args.action === "string" ? args.action : "";
     if (!isAction(action)) {
-      usageError(inv.io, `lore fragments requires an action: ${ACTIONS.join(" | ")} (got "${action}")`);
-      return;
+      return usageError(inv.io, `lore fragments requires an action: ${ACTIONS.join(" | ")} (got "${action}")`);
     }
     const cwd = typeof args.cwd === "string" && args.cwd !== "" ? resolve(args.cwd) : inv.cwd;
     const rest = args as Record<string, unknown>;

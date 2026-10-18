@@ -81,7 +81,7 @@
  */
 
 import { readFileSync } from "fs";
-import { setExitCode } from "../run-scope.js";
+
 import { defineCommand } from "citty";
 import {
   handoffExtraSchema,
@@ -1054,8 +1054,7 @@ export default defineCommand({
       inv.io.stderr.write(
         `Error: unknown \`lore handoff\` subcommand "${subcommand}" (expected: ${COVERAGE_CHECK_SUBCOMMAND}, or omit for the default write path)\n`,
       );
-      setExitCode(2);
-      return;
+      return 2;
     }
 
     const rawArgv = inv.argv;
@@ -1066,8 +1065,7 @@ export default defineCommand({
       inv.io.stderr.write(
         `Error: --json-file is mutually exclusive with ${conflictingFlags.map((f) => `--${f}`).join(", ")}.\n`,
       );
-      setExitCode(2);
-      return;
+      return 2;
     }
 
     const explicitPlan = typeof args.plan === "string" && args.plan.trim() !== "" ? args.plan : undefined;
@@ -1082,8 +1080,7 @@ export default defineCommand({
         inv.io.stderr.write(
           `Error: cannot read --json-file '${args["json-file"] as string}': ${e instanceof Error ? e.message : String(e)}\n`,
         );
-        setExitCode(2);
-        return;
+        return 2;
       }
 
       const parsed = parseHandoffJsonFile(raw, {
@@ -1093,8 +1090,7 @@ export default defineCommand({
       });
       if (!parsed.ok) {
         inv.io.stderr.write(`Error: ${parsed.error}\n`);
-        setExitCode(2);
-        return;
+        return 2;
       }
       candidate = parsed.value;
     } else {
@@ -1104,8 +1100,7 @@ export default defineCommand({
         inv.io.stderr.write(
           "Error: --failing-command and --failing-tail-file must be passed together.\n",
         );
-        setExitCode(2);
-        return;
+        return 2;
       }
 
       let failingTail: string | undefined;
@@ -1116,8 +1111,7 @@ export default defineCommand({
           inv.io.stderr.write(
             `Error: cannot read --failing-tail-file '${args["failing-tail-file"] as string}': ${e instanceof Error ? e.message : String(e)}\n`,
           );
-          setExitCode(2);
-          return;
+          return 2;
         }
       }
 
@@ -1137,8 +1131,7 @@ export default defineCommand({
         inv.io.stderr.write(
           `Error: invalid handoff payload — field '${issue !== undefined ? issue.path.join(".") : "(root)"}': ${issue?.message ?? "validation failed"}\n`,
         );
-        setExitCode(2);
-        return;
+        return 2;
       }
       candidate = validated.data;
     }
@@ -1147,8 +1140,7 @@ export default defineCommand({
     try {
       if (app.sessionService === undefined) {
         inv.io.stderr.write("Error: SessionService not wired on this App instance.\n");
-        setExitCode(1);
-        return;
+        return 1;
       }
 
       // reason: session-trail D16 — the trail read is keyed by the run lore VERIFIED (an unregistered or absent
@@ -1156,16 +1148,14 @@ export default defineCommand({
       const identity = await app.verifiedInvocationIdentity?.();
       if (identity !== undefined && !identity.ok) {
         inv.io.stderr.write(formatErrorFor(inv, identity.error) + "\n");
-        setExitCode(exitCode(identity.error));
-        return;
+        return exitCode(identity.error);
       }
       const run = identity?.value?.harnessRun ?? null;
 
       const result = await app.sessionService.writeHandoff(candidate, undefined, { run });
       if (!result.ok) {
         inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
-        setExitCode(exitCode(result.error));
-        return;
+        return exitCode(result.error);
       }
 
       const doc = result.value;

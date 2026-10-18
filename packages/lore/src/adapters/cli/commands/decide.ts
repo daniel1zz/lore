@@ -9,7 +9,7 @@
  * Source: spec-autonomy-phase-1-decision-function-human-channel-lore AC-AU-3.
  */
 import { defineCommand } from "citty";
-import { setExitCode } from "../run-scope.js";
+
 import { findLoreDbPath } from "../utils.js";
 import { runDecideFlow } from "../decide-flow.js";
 import { invocationOf } from "../command-invocation.js";
@@ -41,6 +41,6 @@ export default defineCommand({
       },
       createProductionHumanChannelPorts(inv),
     );
-    setExitCode(code);
+    return code;
   },
 });

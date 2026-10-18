@@ -66,7 +66,7 @@
  */
 
 import { defineCommand } from "citty";
-import { exitCli, setExitCode } from "../run-scope.js";
+import { exitCli } from "../cli-exit.js";
 import { loadLoreApp } from "../loader.js";
 import {
   exitCode,
@@ -289,8 +289,7 @@ export default defineCommand({
         const result = await app.reviewService.backfillLedger({ actor });
         if (!result.ok) {
           inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
-          setExitCode(exitCode(result.error));
-          return;
+          return exitCode(result.error);
         }
         if (args.json) {
           printLine(inv.io.stdout, JSON.stringify({ ok: true, data: result.value }, null, 2));
@@ -358,8 +357,7 @@ export default defineCommand({
             "Error: AI is required for `lore review` but is disabled for this surface by " +
               "config.ai.default_per_surface. Pass --ai to override.\n",
           );
-          setExitCode(2);
-          return;
+          return 2;
         }
       }
 
@@ -374,8 +372,7 @@ export default defineCommand({
           const listResult = await listFreshStalenessEscalates(flowDeps);
           if (!listResult.ok) {
             inv.io.stderr.write(formatErrorFor(inv, listResult.error) + "\n");
-            setExitCode(exitCode(listResult.error));
-            return;
+            return exitCode(listResult.error);
           }
           const entries = listResult.value;
 
@@ -401,8 +398,7 @@ export default defineCommand({
 
         if (app.stalenessProbeService === undefined) {
           inv.io.stderr.write("Error: StalenessProbeService not wired on this App instance.\n");
-          setExitCode(1);
-          return;
+          return 1;
         }
 
         const defaults = resolveStalenessDefaults(config);
@@ -415,8 +411,7 @@ export default defineCommand({
           const limitResult = parsePositiveIntArg(args.limit, "--limit", { min: 1 });
           if (!limitResult.ok) {
             inv.io.stderr.write(limitResult.message + "\n");
-            setExitCode(2);
-            return;
+            return 2;
           }
           limit = limitResult.value;
         }
@@ -426,8 +421,7 @@ export default defineCommand({
           const minAgeDaysResult = parsePositiveIntArg(args["min-age-days"], "--min-age-days", { min: 0 });
           if (!minAgeDaysResult.ok) {
             inv.io.stderr.write(minAgeDaysResult.message + "\n");
-            setExitCode(2);
-            return;
+            return 2;
           }
           minAgeDays = minAgeDaysResult.value;
         }
@@ -442,8 +436,7 @@ export default defineCommand({
           });
           if (!outcomeResult.ok) {
             inv.io.stderr.write(formatErrorFor(inv, outcomeResult.error) + "\n");
-            setExitCode(exitCode(outcomeResult.error));
-            return;
+            return exitCode(outcomeResult.error);
           }
           const outcome = outcomeResult.value;
 
@@ -454,8 +447,7 @@ export default defineCommand({
             printLine(inv.io.stdout, await renderProbeText(inv, flowDeps, outcome));
           }
 
-          setExitCode(computeStalenessExitCode([outcome], failOnCandidate));
-          return;
+          return computeStalenessExitCode([outcome], failOnCandidate);
         }
 
         // ── batch mode: lore review --staleness [--limit] [--min-age-days] ──
@@ -467,8 +459,7 @@ export default defineCommand({
         });
         if (!batchResult.ok) {
           inv.io.stderr.write(formatErrorFor(inv, batchResult.error) + "\n");
-          setExitCode(exitCode(batchResult.error));
-          return;
+          return exitCode(batchResult.error);
         }
         const batch: StalenessBatchResult = batchResult.value;
 
@@ -493,8 +484,7 @@ export default defineCommand({
           }
         }
 
-        setExitCode(computeStalenessExitCode(batch.probes, failOnCandidate));
-        return;
+        return computeStalenessExitCode(batch.probes, failOnCandidate);
       }
 
       // ─── Regular review path (SPEC-034, unchanged) ──────────────────────────
@@ -505,8 +495,7 @@ export default defineCommand({
         const pendingResult = await app.reviewService.pending();
         if (!pendingResult.ok) {
           inv.io.stderr.write(formatErrorFor(inv, pendingResult.error) + "\n");
-          setExitCode(exitCode(pendingResult.error));
-          return;
+          return exitCode(pendingResult.error);
         }
         const docs: PendingDoc[] = pendingResult.value;
 
@@ -558,7 +547,7 @@ export default defineCommand({
           inv.io.stderr.write(`Warning: ${failures.length}/${outcomes.length} doc(s) failed review.\n`);
         }
         if (failures.length === outcomes.length) {
-          setExitCode(6);
+          return 6;
         }
         return;
       }
@@ -571,8 +560,7 @@ export default defineCommand({
 
       if (!result.ok) {
         inv.io.stderr.write(formatErrorFor(inv, result.error, { aiHasNoFallback: true }) + "\n");
-        setExitCode(exitCode(result.error));
-        return;
+        return exitCode(result.error);
       }
       const { docSlug, judgment } = result.value;
 

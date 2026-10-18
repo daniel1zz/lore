@@ -74,7 +74,7 @@
  */
 
 import { defineCommand } from "citty";
-import { setExitCode } from "../run-scope.js";
+
 import { ok, ruleIdPrefixOfNode } from "@lore/core";
 import type { DocRecord, LoreError, Result } from "@lore/core";
 import {
@@ -206,8 +206,7 @@ export default defineCommand({
 
       if (!result.ok) {
         inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
-        setExitCode(exitCode(result.error));
-        return;
+        return exitCode(result.error);
       }
 
       const { doc, navigation } = result.value;
@@ -249,8 +248,7 @@ export default defineCommand({
       const latest = await loadVersionAttributions(attributionStore, doc.id, 1);
       if (!latest.ok) {
         inv.io.stderr.write(formatErrorFor(inv, latest.error) + "\n");
-        setExitCode(exitCode(latest.error));
-        return;
+        return exitCode(latest.error);
       }
       const attribution: WriteAttribution = latest.value[0]?.attribution ?? { attested: UNATTESTED, claimed: doc.created_by };
 
@@ -258,8 +256,7 @@ export default defineCommand({
       const relations = await loadSpecRelations(app, doc);
       if (!relations.ok) {
         inv.io.stderr.write(formatErrorFor(inv, relations.error) + "\n");
-        setExitCode(exitCode(relations.error));
-        return;
+        return exitCode(relations.error);
       }
 
       // Standing / Corrections / Later changed by — human view only (the --json payload is unchanged). Standing
@@ -268,8 +265,7 @@ export default defineCommand({
       if (!args.json) {
         if (app.recordLockService === undefined) {
           inv.io.stderr.write("Error: RecordLockService is not wired on App; cannot resolve Standing.\n");
-          setExitCode(1);
-          return;
+          return 1;
         }
         const lock = await app.recordLockService.resolve(doc);
         const corrections = await countCorrections(attributionStore, doc.id);
@@ -277,8 +273,7 @@ export default defineCommand({
         const failure = [lock, corrections, later].find((r) => !r.ok);
         if (failure !== undefined && !failure.ok) {
           inv.io.stderr.write(formatErrorFor(inv, failure.error) + "\n");
-          setExitCode(exitCode(failure.error));
-          return;
+          return exitCode(failure.error);
         }
         if (lock.ok && corrections.ok && later.ok) {
           humanStanding = [formatStandingLine(lock.value)];

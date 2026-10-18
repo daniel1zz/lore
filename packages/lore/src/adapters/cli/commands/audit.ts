@@ -52,7 +52,7 @@
  */
 
 import { existsSync, readFileSync, writeFileSync } from "fs";
-import { setExitCode } from "../run-scope.js";
+
 import { join } from "path";
 import { z } from "zod";
 import { defineCommand } from "citty";
@@ -174,27 +174,23 @@ export default defineCommand({
         const stateBinding = app.stateBindingService;
         if (stateBinding === undefined) {
           inv.io.stderr.write("Error: stateBindingService is not wired on this App (internal wiring error)\n");
-          setExitCode(1);
-          return;
+          return 1;
         }
         const result = args.confirm
           ? await stateBinding.arm({ actor: resolveActor(inv.io, undefined, inv.env, inv.cwd, inv.user), nowIso: new Date().toISOString() })
           : await stateBinding.reportImpact();
         if (!result.ok) {
           inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
-          setExitCode(exitCode(result.error));
-          return;
+          return exitCode(result.error);
         }
         if (args.json) {
           printLine(inv.io.stdout, JSON.stringify({ ok: true, data: result.value }, null, 2));
-          setExitCode(0);
-          return;
+          return 0;
         }
         const value = result.value;
         if ("status" in value && value.status === "already_armed") {
           printLine(inv.io.stdout, `State binding already armed (audit row id ${value.arming_rev}); nothing written.`);
-          setExitCode(0);
-          return;
+          return 0;
         }
         const report = "status" in value ? value.report : value;
         printLine(inv.io.stdout, 
@@ -211,8 +207,7 @@ export default defineCommand({
         } else {
           printLine(inv.io.stdout, "Report only — nothing written. Re-run with --confirm to arm this corpus.");
         }
-        setExitCode(0);
-        return;
+        return 0;
       }
 
       // ── anchor branch (positional value "anchor" — see module header for
@@ -221,8 +216,7 @@ export default defineCommand({
         const headResult = await app.auditService.getChainHead();
         if (!headResult.ok) {
           inv.io.stderr.write(formatErrorFor(inv, headResult.error) + "\n");
-          setExitCode(exitCode(headResult.error));
-          return;
+          return exitCode(headResult.error);
         }
 
         const anchorFile: AuditAnchorFile = {
@@ -236,8 +230,7 @@ export default defineCommand({
         const anchorRoot = resolveTrackedWriteRoot(inv.cwd, resolveConsumerCorpusRoot(inv.io, inv));
         if (!anchorRoot.ok) {
           inv.io.stderr.write(formatErrorFor(inv, anchorRoot.error) + "\n");
-          setExitCode(exitCode(anchorRoot.error));
-          return;
+          return exitCode(anchorRoot.error);
         }
         writeFileSync(auditAnchorFilePath(anchorRoot.value),`${JSON.stringify(anchorFile, null, 2)}\n`, "utf8");
 
@@ -248,8 +241,7 @@ export default defineCommand({
             `Anchored audit chain head (id ${anchorFile.head_id}, ${anchorFile.entry_count} entr${anchorFile.entry_count === 1 ? "y" : "ies"}) → .lore/audit-anchor.json`,
           );
         }
-        setExitCode(0);
-        return;
+        return 0;
       }
 
       // ── --verify branch ─────────────────────────────────────────────────
@@ -258,14 +250,12 @@ export default defineCommand({
         const anchorRoot = resolveTrackedWriteRoot(inv.cwd, resolveConsumerCorpusRoot(inv.io, inv));
         if (!anchorRoot.ok) {
           inv.io.stderr.write(formatErrorFor(inv, anchorRoot.error) + "\n");
-          setExitCode(exitCode(anchorRoot.error));
-          return;
+          return exitCode(anchorRoot.error);
         }
         const { anchor, error: anchorFileError } = readAuditAnchorFile(anchorRoot.value);
         if (anchorFileError !== undefined) {
           inv.io.stderr.write(`Error: ${anchorFileError}\n`);
-          setExitCode(4);
-          return;
+          return 4;
         }
 
         const result = await app.auditService.verify({
@@ -274,16 +264,14 @@ export default defineCommand({
         });
         if (!result.ok) {
           inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
-          setExitCode(exitCode(result.error));
-          return;
+          return exitCode(result.error);
         }
 
         const { clean, misses, since, chain, anchor: anchorResult } = result.value;
 
         if (args.json) {
           printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { clean, misses, since, chain, anchor: anchorResult } }, null, 2));
-          setExitCode(clean ? 0 : 4);
-          return;
+          return clean ? 0 : 4;
         }
 
         if (misses.length === 0) {
@@ -313,8 +301,7 @@ export default defineCommand({
           );
         }
 
-        setExitCode(clean ? 0 : 4);
-        return;
+        return clean ? 0 : 4;
       }
 
       // ── query branch ─────────────────────────────────────────────────────
@@ -325,8 +312,7 @@ export default defineCommand({
         const limitResult = parsePositiveIntArg(args.limit, "--limit", { min: 1 });
         if (!limitResult.ok) {
           inv.io.stderr.write(limitResult.message + "\n");
-          setExitCode(2);
-          return;
+          return 2;
         }
         limitValue = limitResult.value;
       }
@@ -342,8 +328,7 @@ export default defineCommand({
         const resolveResult = await app.corpusService.resolve(args.doc);
         if (!resolveResult.ok) {
           inv.io.stderr.write(formatErrorFor(inv, resolveResult.error) + "\n");
-          setExitCode(exitCode(resolveResult.error));
-          return;
+          return exitCode(resolveResult.error);
         }
         filters.doc_id = resolveResult.value;
       }
@@ -351,8 +336,7 @@ export default defineCommand({
       const result = await app.auditService.query(filters);
       if (!result.ok) {
         inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
-        setExitCode(exitCode(result.error));
-        return;
+        return exitCode(result.error);
       }
 
       const entries = result.value;

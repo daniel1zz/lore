@@ -130,7 +130,7 @@
  */
 
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
-import { getExitCode, setExitCode } from "../run-scope.js";
+
 import { spawnSync } from "node:child_process";
 import { resolveGlobalConfigPath } from "@lore/core/node";
 import type { Invocation } from "@lore/core";
@@ -195,6 +195,7 @@ import { createNodeGhExecFile, GhRunner } from "../../../service/gh-runner.js";
 import { createGhRunnerHealthProbe, ghHealthExitCode, runGitHubHealthCheck } from "../setup-github-health.js";
 import { printLine } from "../output.js";
 import type { CliIo } from "../output.js";
+import type { ExitReport } from "../cli-exit.js";
 
 // ─── Repo-root resolution (dev mode only — see setup-args.ts's module doc) ──
 // packages/lore/src/adapters/cli/commands/setup.ts -> repo root is 6 levels up.
@@ -621,9 +622,9 @@ function applyLanguageProjections(plan: readonly LanguageProjection[]): Result<v
 }
 
 /** Reports a LoreError on stderr and sets the mapped exit code. */
-function failWith(inv: Invocation, error: LoreError): void {
+function failWith(inv: Invocation, error: LoreError): ExitReport {
   inv.io.stderr.write(formatErrorFor(inv, error) + "\n");
-  setExitCode(exitCode(error));
+  return exitCode(error);
 }
 
 /**
@@ -788,7 +789,7 @@ function classifyProjectSettingsEntries(repoDir: string, inv: Invocation): Resul
  * skill, lore rules files and fragment skills, lore entries in the project settings file), writes ONLY the
  * project check cache, exits 0 in sync / 3 otherwise (4 on an unreadable ledger or settings file).
  */
-async function runProjectCheck(opts: { json: boolean; assetsRoot: string; inv: Invocation }): Promise<void> {
+async function runProjectCheck(opts: { json: boolean; assetsRoot: string; inv: Invocation }): Promise<ExitReport> {
   const repoDirResolved = resolveTrackedWriteRoot(opts.inv.cwd, opts.inv.cwd);
   if (!repoDirResolved.ok) return failWith(opts.inv, repoDirResolved.error);
   const repoDir = repoDirResolved.value;
@@ -807,7 +808,7 @@ async function runProjectCheck(opts: { json: boolean; assetsRoot: string; inv: I
   if (!settings.ok) return failWith(opts.inv, settings.error);
 
   const parts = [ledger.value, rules.value, settings.value];
-  await finishProjectSetupCheck(opts.inv.io, {
+  return await finishProjectSetupCheck(opts.inv.io, {
     repoDir,
     json: opts.json,
     files: {
@@ -826,7 +827,7 @@ async function runProjectScaffold(opts: {
   binPath: string;
   claudeDir: string;
   inv: Invocation;
-}): Promise<void> {
+}): Promise<ExitReport> {
   const repoDirResolved = resolveTrackedWriteRoot(opts.inv.cwd, opts.inv.cwd);
   if (!repoDirResolved.ok) return failWith(opts.inv, repoDirResolved.error);
   const repoDir = repoDirResolved.value;
@@ -870,8 +871,7 @@ async function runProjectScaffold(opts: {
   const result = await service.scaffold(repoDir);
   if (!result.ok) {
     opts.inv.io.stderr.write(formatErrorFor(opts.inv, result.error) + "\n");
-    setExitCode(exitCode(result.error));
-    return;
+    return exitCode(result.error);
   }
 
   // reason: report.backups/manifest.detail are repo-RELATIVE paths (see
@@ -897,7 +897,7 @@ async function runProjectScaffold(opts: {
   // CLAUDE.md / config the refresh flow reads, and its own non-zero exit already reports the run.
   if (scaffoldReportFailed(result.value)) return;
   const projected = await runProjectContextProjection({ repoDir, assetsRoot: opts.assetsRoot, claudeDir: opts.claudeDir, inv: opts.inv });
-  if (!projected.ok) failWith(opts.inv, projected.error);
+  if (!projected.ok) return failWith(opts.inv, projected.error);
 }
 
 /**
@@ -907,7 +907,7 @@ async function runProjectScaffold(opts: {
  * SEPARATE global `~/.claude` installer `lore setup --uninstall` alone
  * targets). Thin pipe over `flows/setup-project-uninstall.ts::uninstallProject`.
  */
-async function runProjectUninstall(opts: { json: boolean; yes: boolean; inv: Invocation }): Promise<void> {
+async function runProjectUninstall(opts: { json: boolean; yes: boolean; inv: Invocation }): Promise<ExitReport> {
   const repoDirResolved = resolveTrackedWriteRoot(opts.inv.cwd, opts.inv.cwd);
   if (!repoDirResolved.ok) return failWith(opts.inv, repoDirResolved.error);
   const repoDir = repoDirResolved.value;
@@ -925,8 +925,7 @@ async function runProjectUninstall(opts: { json: boolean; yes: boolean; inv: Inv
   const result = await uninstallProject(makeRealProjectRemoveFs(), { repoDir });
   if (!result.ok) {
     opts.inv.io.stderr.write(formatErrorFor(opts.inv, result.error) + "\n");
-    setExitCode(exitCode(result.error));
-    return;
+    return exitCode(result.error);
   }
 
   if (opts.json) {
@@ -934,15 +933,14 @@ async function runProjectUninstall(opts: { json: boolean; yes: boolean; inv: Inv
   } else {
     printLine(opts.inv.io.stdout, renderProjectUninstallReport(repoDir, result.value));
   }
-  setExitCode(0);
+  return 0;
 }
 
-async function runDryRun(inv: Invocation, service: SetupService, targetDir: string, binPath: string, json: boolean): Promise<void> {
+async function runDryRun(inv: Invocation, service: SetupService, targetDir: string, binPath: string, json: boolean): Promise<ExitReport> {
   const planResult = await service.planInstall({ targetDir });
   if (!planResult.ok) {
     inv.io.stderr.write(formatErrorFor(inv, planResult.error) + "\n");
-    setExitCode(exitCode(planResult.error));
-    return;
+    return exitCode(planResult.error);
   }
 
   if (json) {
@@ -950,7 +948,7 @@ async function runDryRun(inv: Invocation, service: SetupService, targetDir: stri
   } else {
     printLine(inv.io.stdout, renderInstallPlan(planResult.value, { targetDir, binPath }));
   }
-  setExitCode(0);
+  return 0;
 }
 
 /**
@@ -975,13 +973,12 @@ async function runInstall(inv: Invocation,
   service: SetupService,
   mcpRegistrar: CapturingMcpRegistrar,
   opts: { targetDir: string; binPath: string; json: boolean; yes: boolean; forceDiverged: boolean; inv: Invocation },
-): Promise<void> {
+): Promise<ExitReport> {
   // reason: resolved BEFORE the confirm prompt and any write — an unknown context.language code
   // (AC-CF-18) must refuse the whole run with nothing installed, not leave a half-applied setup.
   const languagePlan = planLanguageProjections(opts.targetDir, opts.inv.cwd, opts.inv);
   if (!languagePlan.ok) {
-    failWith(inv, languagePlan.error);
-    return;
+    return failWith(inv, languagePlan.error);
   }
 
   const proceed = await confirmOrReport(inv.io, {
@@ -1015,8 +1012,7 @@ async function runInstall(inv: Invocation,
   });
   if (!result.ok) {
     inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
-    setExitCode(exitCode(result.error));
-    return;
+    return exitCode(result.error);
   }
 
   const ctx = renderCtx(opts.targetDir, opts.binPath, mcpRegistrar.lastError);
@@ -1029,14 +1025,14 @@ async function runInstall(inv: Invocation,
   setExitCode(mcpOutcomeExitCode(result.value));
 
   const projected = applyLanguageProjections(languagePlan.value);
-  if (!projected.ok) failWith(opts.inv, projected.error);
+  if (!projected.ok) return failWith(opts.inv, projected.error);
 }
 
 async function runUninstall(inv: Invocation, 
   service: SetupService,
   mcpRegistrar: CapturingMcpRegistrar,
   opts: { targetDir: string; binPath: string; json: boolean; yes: boolean },
-): Promise<void> {
+): Promise<ExitReport> {
   const proceed = await confirmOrReport(inv.io, {
     yes: opts.yes,
     json: opts.json,
@@ -1049,8 +1045,7 @@ async function runUninstall(inv: Invocation,
   const result = await service.uninstall({ targetDir: opts.targetDir });
   if (!result.ok) {
     inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
-    setExitCode(exitCode(result.error));
-    return;
+    return exitCode(result.error);
   }
 
   const ctx = renderCtx(opts.targetDir, opts.binPath, mcpRegistrar.lastError);
@@ -1059,7 +1054,7 @@ async function runUninstall(inv: Invocation,
   } else {
     printLine(inv.io.stdout, renderUninstallReceipt(result.value, ctx));
   }
-  setExitCode(mcpOutcomeExitCode(result.value));
+  return mcpOutcomeExitCode(result.value);
 }
 
 /**
@@ -1089,7 +1084,7 @@ function mcpOutcomeExitCode(receipt: SetupReceipt): number {
  * stays the one a caller's `$?` reports; a clean asset check (`0`) is the
  * only state this is allowed to override.
  */
-async function runGitHubChannelHealthCheck(opts: { json: boolean; inv: Invocation }): Promise<void> {
+async function runGitHubChannelHealthCheck(opts: { json: boolean; inv: Invocation }): Promise<ExitReport> {
   const runner = createGhRunnerHealthProbe(new GhRunner({ execFile: createNodeGhExecFile(), env: opts.inv.env }));
   const report = await runGitHubHealthCheck({ runner });
 
@@ -1102,7 +1097,7 @@ async function runGitHubChannelHealthCheck(opts: { json: boolean; inv: Invocatio
   }
 
   if (!report.ok && getExitCode() === 0) {
-    setExitCode(ghHealthExitCode(report.condition));
+    return ghHealthExitCode(report.condition);
   }
 }
 
@@ -1129,19 +1124,17 @@ async function runGitHubChannelHealthCheck(opts: { json: boolean; inv: Invocatio
  * codes"): the channel probe never downgrades an already-nonzero freshness
  * exit, and may only override a clean `0`.
  */
-async function runCheckDispatch(opts: { targetDir: string; json: boolean; inv: Invocation }): Promise<void> {
+async function runCheckDispatch(opts: { targetDir: string; json: boolean; inv: Invocation }): Promise<ExitReport> {
   if (!opts.json) {
     await runSetupCheck({ targetDir: opts.targetDir, json: false, cwd: opts.inv.cwd, inv: opts.inv });
-    await runGitHubChannelHealthCheck({ json: false, inv: opts.inv });
-    return;
+    return await runGitHubChannelHealthCheck({ json: false, inv: opts.inv });
   }
 
   const freshnessResult = await computeSetupCheckReport({ targetDir: opts.targetDir, cwd: opts.inv.cwd });
   if (!freshnessResult.ok) {
     opts.inv.io.stderr.write(formatErrorFor(opts.inv, freshnessResult.error) + "\n");
     setExitCode(exitCode(freshnessResult.error));
-    await runGitHubChannelHealthCheck({ json: true, inv: opts.inv });
-    return;
+    return await runGitHubChannelHealthCheck({ json: true, inv: opts.inv });
   }
   const report = freshnessResult.value;
 
@@ -1152,7 +1145,7 @@ async function runCheckDispatch(opts: { targetDir: string; json: boolean; inv: I
 
   setExitCode(report.summary === "sync" ? 0 : 3);
   if (!channelReport.ok && getExitCode() === 0) {
-    setExitCode(ghHealthExitCode(channelReport.condition));
+    return ghHealthExitCode(channelReport.condition);
   }
 }
 
@@ -1234,27 +1227,23 @@ export default defineCommand({
         inv.io.stderr.write(
           `Error: --check cannot be combined with ${mutexFlag} — a read-only check has no separate mutate mode.\n`,
         );
-        setExitCode(2);
-        return;
+        return 2;
       }
       if (args.project === true) {
         // reason: BR-849 — `--check --project` checks the PROJECT install (BR-1085). `--claude-dir` stays refused
         // exactly as `--project` alone refuses it: the project scaffold has no machine target to redirect.
         if (claudeDirFlag !== undefined) {
           inv.io.stderr.write("Error: --check --project cannot be combined with --claude-dir — the project check reads only the current repo.\n");
-          setExitCode(2);
-          return;
+          return 2;
         }
-        await runProjectCheck({ json, assetsRoot: resolveAssetsRoot(buildSetupPathContext(inv)), inv });
-        return;
+        return await runProjectCheck({ json, assetsRoot: resolveAssetsRoot(buildSetupPathContext(inv)), inv });
       }
       const checkTargetDir = resolveTargetDir({
         ...(claudeDirFlag !== undefined ? { claudeDirFlag } : {}),
         env: inv.env,
         homeDir: inv.paths.home,
       });
-      await runCheckDispatch({ targetDir: checkTargetDir, json, inv });
-      return;
+      return await runCheckDispatch({ targetDir: checkTargetDir, json, inv });
     }
 
     const validated = validateSetupFlags({
@@ -1265,8 +1254,7 @@ export default defineCommand({
     });
     if (!validated.ok) {
       inv.io.stderr.write(`Error: ${validated.message}\n`);
-      setExitCode(2);
-      return;
+      return 2;
     }
 
     // reason: SetupService.assertSafeTargetDir refuses a targetDir that IS/nests the REAL
@@ -1289,12 +1277,10 @@ export default defineCommand({
         env: inv.env,
         homeDir: inv.paths.home,
       });
-      await runProjectScaffold({ json, yes: args.yes === true, assetsRoot, binPath, claudeDir, inv });
-      return;
+      return await runProjectScaffold({ json, yes: args.yes === true, assetsRoot, binPath, claudeDir, inv });
     }
     if (validated.mode === "project-uninstall") {
-      await runProjectUninstall({ json, yes: args.yes === true, inv });
-      return;
+      return await runProjectUninstall({ json, yes: args.yes === true, inv });
     }
 
     const targetDir = resolveTargetDir({
@@ -1315,14 +1301,12 @@ export default defineCommand({
     );
 
     if (validated.mode === "dry-run") {
-      await runDryRun(inv, service, targetDir, binPath, json);
-      return;
+      return await runDryRun(inv, service, targetDir, binPath, json);
     }
     if (validated.mode === "uninstall") {
-      await runUninstall(inv, service, mcpRegistrar, { targetDir, binPath, json, yes: args.yes === true });
-      return;
+      return await runUninstall(inv, service, mcpRegistrar, { targetDir, binPath, json, yes: args.yes === true });
     }
-    await runInstall(inv, service, mcpRegistrar, {
+    return await runInstall(inv, service, mcpRegistrar, {
       targetDir,
       binPath,
       json,

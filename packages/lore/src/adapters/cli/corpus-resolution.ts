@@ -58,7 +58,7 @@
  */
 
 import { existsSync, realpathSync } from "node:fs";
-import { exitCli } from "./run-scope.js";
+import { exitCli } from "./cli-exit.js";
 import { dirname, isAbsolute, join, resolve as resolvePath, sep } from "node:path";
 import { spawnSync } from "node:child_process";
 import { resolveCorpusProvenance } from "@lore/core";

@@ -185,7 +185,7 @@
  */
 
 import { defineCommand } from "citty";
-import { setExitCode } from "../run-scope.js";
+
 import { existsSync } from "fs";
 import { dirname } from "path";
 import { loadLoreApp } from "../loader.js";
@@ -337,8 +337,7 @@ export default defineCommand({
 
           if (!result.ok) {
             inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
-            setExitCode(exitCode(result.error));
-            return;
+            return exitCode(result.error);
           }
 
           await reportDemotionIfAny(inv.io, app, args.spec as string, beforeStatus);
@@ -383,8 +382,7 @@ export default defineCommand({
 
           if (!result.ok) {
             inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
-            setExitCode(exitCode(result.error));
-            return;
+            return exitCode(result.error);
           }
 
           if (args.json) {
@@ -442,8 +440,7 @@ export default defineCommand({
           });
           if (!result.ok) {
             inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
-            setExitCode(exitCode(result.error));
-            return;
+            return exitCode(result.error);
           }
           if (args.json) {
             printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { exemption: result.value } }, null, 2));
@@ -507,8 +504,7 @@ export default defineCommand({
 
           if (!result.ok) {
             inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
-            setExitCode(exitCode(result.error));
-            return;
+            return exitCode(result.error);
           }
 
           printCiteWarnings(inv.io, result.value.warnings);
@@ -578,8 +574,7 @@ export default defineCommand({
 
           if (!result.ok) {
             inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
-            setExitCode(exitCode(result.error));
-            return;
+            return exitCode(result.error);
           }
 
           if (args.json) {
@@ -707,8 +702,7 @@ export default defineCommand({
               "evidence row attributed to this id. Use `lore ac rm --force <spec> <id>` then " +
               "`lore ac add <spec> <id> --mode <new-mode> ...` instead.\n",
           );
-          setExitCode(2);
-          return;
+          return 2;
         }
 
         if (refuseBadTimeoutMs(inv.io, args, "set")) return;
@@ -718,8 +712,7 @@ export default defineCommand({
             "Error: lore ac set requires at least one field to change: --statement, --oracle, --command, " +
               "--timeout-ms, --rubric, --note, --covers, --cite, --falsifier-path/-find/-replace/-exit-code\n",
           );
-          setExitCode(2);
-          return;
+          return 2;
         }
 
         // --correction needs a non-empty reason: argv-decidable, so exit 2 BEFORE the app loads or anything
@@ -729,8 +722,7 @@ export default defineCommand({
           const reason = typeof args.correction === "string" ? args.correction.trim() : "";
           if (reason === "") {
             inv.io.stderr.write('Error: --correction requires a non-empty reason (--correction "<why this is a fix>").\n');
-            setExitCode(2);
-            return;
+            return 2;
           }
           correctionOpt = { reason };
         }
@@ -753,8 +745,7 @@ export default defineCommand({
 
           if (!result.ok) {
             inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
-            setExitCode(exitCode(result.error));
-            return;
+            return exitCode(result.error);
           }
 
           await reportDemotionIfAny(inv.io, app, args.spec as string, beforeStatus);

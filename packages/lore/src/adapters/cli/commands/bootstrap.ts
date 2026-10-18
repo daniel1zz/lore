@@ -45,7 +45,7 @@
  */
 
 import { defineCommand } from "citty";
-import { setExitCode } from "../run-scope.js";
+
 import type { BootstrapReport } from "@lore/core";
 import { buildBootstrapInjection, resolveBootstrapInjectionBudgets } from "@lore/core";
 import { loadLoreApp } from "../loader.js";
@@ -222,8 +222,7 @@ export default defineCommand({
     try {
       if (app.sessionService === undefined) {
         inv.io.stderr.write("Error: SessionService not wired on this App instance.\n");
-        setExitCode(1);
-        return;
+        return 1;
       }
 
       const by = resolveActor(inv.io, typeof args.by === "string" ? args.by : undefined, inv.env, inv.cwd, inv.user);
@@ -236,8 +235,7 @@ export default defineCommand({
           inv.io.stderr.write(
             "Error: --seat-branch and --seat-worktree must be given together with --injection.\n",
           );
-          setExitCode(2);
-          return;
+          return 2;
         }
         // Resolved BEFORE the main-checkout early-out so a retired knob is announced on every call (D5).
         const budgets = resolveBootstrapInjectionBudgets(config);
@@ -247,14 +245,12 @@ export default defineCommand({
         const injectionReport = await app.sessionService.bootstrap(by, undefined, injectionSeat);
         if (!injectionReport.ok) {
           inv.io.stderr.write(formatErrorFor(inv, injectionReport.error) + "\n");
-          setExitCode(exitCode(injectionReport.error));
-          return;
+          return exitCode(injectionReport.error);
         }
         const seatClaims = await app.sessionService.seatClaims(injectionSeat);
         if (!seatClaims.ok) {
           inv.io.stderr.write(formatErrorFor(inv, seatClaims.error) + "\n");
-          setExitCode(exitCode(seatClaims.error));
-          return;
+          return exitCode(seatClaims.error);
         }
         const { json } = buildBootstrapInjection(
           {
@@ -279,8 +275,7 @@ export default defineCommand({
 
       if (!result.ok) {
         inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
-        setExitCode(exitCode(result.error));
-        return;
+        return exitCode(result.error);
       }
 
       // SPEC-044 §Design Decisions D14 — open_stale_candidates, computed by the SAME
@@ -291,8 +286,7 @@ export default defineCommand({
       const staleListResult = await listFreshStalenessEscalates(buildStalenessFlowDeps(app));
       if (!staleListResult.ok) {
         inv.io.stderr.write(formatErrorFor(inv, staleListResult.error) + "\n");
-        setExitCode(exitCode(staleListResult.error));
-        return;
+        return exitCode(staleListResult.error);
       }
 
       // SPEC-045 §Design Decisions D5, D7 — store-only "declared code_anchors" count,
@@ -301,8 +295,7 @@ export default defineCommand({
       const armedSpecsResult = await countArmedSpecs(buildListSpecs(app));
       if (!armedSpecsResult.ok) {
         inv.io.stderr.write(formatErrorFor(inv, armedSpecsResult.error) + "\n");
-        setExitCode(exitCode(armedSpecsResult.error));
-        return;
+        return exitCode(armedSpecsResult.error);
       }
 
       // spec-claude-md-root-section-structure-check-and-adoption-mode D8 — root

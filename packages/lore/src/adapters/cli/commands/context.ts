@@ -79,7 +79,7 @@
  */
 
 import type { Invocation } from "@lore/core";
-import { setExitCode } from "../run-scope.js";
+
 import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, readlinkSync, realpathSync, rmSync, rmdirSync, writeFileSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -119,6 +119,7 @@ import { resolveUserConfigDir } from "../../../service/context-fragments/user-co
 import { listShippedSkillNames } from "./fragments.js";
 import { printLine } from "../output.js";
 import type { CliIo } from "../output.js";
+import type { ExitReport } from "../cli-exit.js";
 
 /** The registered `lore context` topics: the CLAUDE.md pair (init, refresh) and the selection trio (list, add, remove). */
 type ContextTopic = "init" | "refresh" | "list" | "add" | "remove";
@@ -332,11 +333,10 @@ function renderSections(io: CliIo, sections: ReadonlyArray<{ id: string; state: 
 function renderOutcome(inv: Invocation, 
   json: boolean,
   result: { ok: true; value: ContextInitReport | ContextRefreshReport } | { ok: false; error: LoreError },
-): void {
+): ExitReport {
   if (!result.ok) {
     inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
-    setExitCode(exitCode(result.error));
-    return;
+    return exitCode(result.error);
   }
 
   if (json) {
@@ -353,8 +353,7 @@ function renderOutcome(inv: Invocation,
     }
     for (const path of check.differing) printLine(inv.io.stdout, `would change: ${path}`);
     for (const finding of check.findings) printLine(inv.io.stdout, `${finding.kind}: ${finding.message}`);
-    setExitCode(1);
-    return;
+    return 1;
   }
 
   const narrativeSuffix = "narrative" in result.value ? ` (narrative: ${result.value.narrative})` : "";
@@ -454,9 +453,9 @@ export function buildRefreshFragmentDeps(opts: {
   });
 }
 
-function reportFailure(inv: Invocation, error: LoreError): void {
+function reportFailure(inv: Invocation, error: LoreError): ExitReport {
   inv.io.stderr.write(formatErrorFor(inv, error) + "\n");
-  setExitCode(exitCode(error));
+  return exitCode(error);
 }
 
 export default defineCommand({
@@ -507,13 +506,11 @@ export default defineCommand({
 
     if (topic === undefined) {
       inv.io.stderr.write(`Error: lore context requires a topic (expected: ${KNOWN_TOPICS.join(" | ")})\n`);
-      setExitCode(2);
-      return;
+      return 2;
     }
     if (!KNOWN_TOPICS.includes(topic as ContextTopic)) {
       inv.io.stderr.write(`Error: unknown context topic "${topic}" (expected: ${KNOWN_TOPICS.join(" | ")})\n`);
-      setExitCode(2);
-      return;
+      return 2;
     }
 
     const scopeArg = typeof args.scope === "string" ? args.scope : undefined;
@@ -523,14 +520,12 @@ export default defineCommand({
           ? "--scope applies to `refresh`, `add` and `remove` only"
           : `unknown --scope "${scopeArg}" (expected: ${KNOWN_SCOPES.join(" | ")})`;
       inv.io.stderr.write(`Error: ${reason}\n`);
-      setExitCode(2);
-      return;
+      return 2;
     }
 
     if (args.check === true && topic !== "refresh") {
       inv.io.stderr.write("Error: --check applies to `refresh` only\n");
-      setExitCode(2);
-      return;
+      return 2;
     }
 
     const dbPath = findLoreDbPath(inv.io, inv);
@@ -563,8 +558,7 @@ export default defineCommand({
     const globalConfigResult = loadGlobalConfig(resolveGlobalConfigPath(inv.env, home));
     if (!globalConfigResult.ok) {
       inv.io.stderr.write(formatErrorFor(inv, globalConfigResult.error) + "\n");
-      setExitCode(exitCode(globalConfigResult.error));
-      return;
+      return exitCode(globalConfigResult.error);
     }
     const userConfigDir = resolveUserConfigDir(inv.env, home);
     // reason: BR-1177 — writes may land only in the project, the agent settings folder (rules, skills) and
@@ -600,7 +594,7 @@ export default defineCommand({
       // exit-1 contract for a drifted/over-ceiling --check is applied here for both output modes.
       if (args.check === true && result.ok && result.value.check !== null) {
         const { differing, findings } = result.value.check;
-        if (differing.length > 0 || findings.length > 0) setExitCode(1);
+        if (differing.length > 0 || findings.length > 0) return 1;
       }
       return;
     }
@@ -635,8 +629,7 @@ export default defineCommand({
       const id = typeof args.id === "string" ? args.id : "";
       if (id === "") {
         inv.io.stderr.write(`Error: lore context ${topic} requires a fragment id (lore context ${topic} <id> [--scope project|user])\n`);
-        setExitCode(2);
-        return;
+        return 2;
       }
       const changed = await runSelectionChange(selectionDeps, { action: topic, id, scope });
       if (!changed.ok) return reportFailure(inv, changed.error);
@@ -664,7 +657,7 @@ export default defineCommand({
       printLine(inv.io.stdout, 
         `${verb} "${id}" in the ${scope} selection (${changed.value.path})${changed.value.changed ? "" : " — already so, nothing changed"}`,
       );
-      if (refreshed !== null && refreshed.ok) renderOutcome(inv, false, refreshed);
+      if (refreshed !== null && refreshed.ok) return renderOutcome(inv, false, refreshed);
       return;
     }
 
@@ -674,8 +667,7 @@ export default defineCommand({
     const hasExplicitNoAi = rawArgv.includes("--no-ai");
     if (hasExplicitAi && hasExplicitNoAi) {
       inv.io.stderr.write("Error: --ai and --no-ai are mutually exclusive. Pass only one.\n");
-      setExitCode(2);
-      return;
+      return 2;
     }
     const explicitAi: boolean | undefined = hasExplicitAi
       ? true
@@ -701,6 +693,6 @@ export default defineCommand({
       "",
       narrative !== undefined ? { narrative, force: args.force === true } : { force: args.force === true },
     );
-    renderOutcome(inv, json, result);
+    return renderOutcome(inv, json, result);
   },
 });

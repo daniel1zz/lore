@@ -25,7 +25,7 @@
  * Side-effect class: IO (git subprocesses, the floor command, the corpus directory's loss ledger).
  */
 import { spawnSync } from "node:child_process";
-import { exitCli, setExitCode } from "../run-scope.js";
+import { exitCli } from "../cli-exit.js";
 import { dirname, resolve as resolvePath } from "node:path";
 import { defineCommand } from "citty";
 import { invocationOf } from "../command-invocation.js";
@@ -149,8 +149,7 @@ export default defineCommand({
       const mainRoot = mainCheckoutRoot(runGit, projectRoot);
       if (mainRoot === undefined) {
         inv.io.stderr.write(`Error: ${projectRoot} is not inside a non-bare git repository whose common dir is <root>/.git\n`);
-        setExitCode(1);
-        return;
+        return 1;
       }
       const service = new IntegrateService({
         git: runGit,
@@ -169,14 +168,13 @@ export default defineCommand({
       });
       if (!result.ok) {
         inv.io.stderr.write(`${formatError(result.error)}\n`);
-        setExitCode(exitCode(result.error));
-        return;
+        return exitCode(result.error);
       }
       const rendered = renderOutcome(result.value);
       if (args.json === true) inv.io.stdout.write(`${JSON.stringify({ ok: true, data: result.value }, null, 2)}\n`);
       else if (rendered.out !== undefined) inv.io.stdout.write(`${rendered.out}\n`);
       if (rendered.err !== undefined) inv.io.stderr.write(`${rendered.err}\n`);
-      setExitCode(integrateExitCode(result.value));
+      return integrateExitCode(result.value);
     } finally {
       app.close();
     }

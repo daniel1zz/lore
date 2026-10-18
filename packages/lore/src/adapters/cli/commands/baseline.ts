@@ -44,7 +44,7 @@
  */
 
 import { readFileSync } from "node:fs";
-import { setExitCode } from "../run-scope.js";
+
 import { defineCommand } from "citty";
 import { AiConfigSchema, BASELINE_TREES, ruleIdPrefixOfNode } from "@lore/core";
 import type { AIProvider, BaselineTree, DocRecord, Invocation, LoreError } from "@lore/core";
@@ -68,16 +68,17 @@ import { runFidelity } from "../../../service/fidelity-sample.js";
 import type { FidelityRecord } from "../../../service/fidelity-sample.js";
 import { printLine } from "../output.js";
 import type { CliIo } from "../output.js";
+import type { ExitReport } from "../cli-exit.js";
 
 function repeatable(value: unknown): string[] {
   if (value === undefined) return [];
   return Array.isArray(value) ? value.map(String) : [String(value)];
 }
 
-function reportFailure(inv: Invocation, error: LoreError, json: boolean): void {
+function reportFailure(inv: Invocation, error: LoreError, json: boolean): ExitReport {
   if (json) printLine(inv.io.stdout, JSON.stringify({ ok: false, error }, null, 2));
   else inv.io.stderr.write(formatErrorFor(inv, error));
-  setExitCode(exitCode(error));
+  return exitCode(error);
 }
 
 function requireRuleService(io: CliIo, app: App) {
@@ -122,7 +123,7 @@ function renderComputedFrom(io: CliIo, full: RuleStateFull): void {
 }
 
 /** `tree --states` / `tree --rule`: the only baseline verbs that consult git, via a read-only second store handle. */
-async function runStatesTree(args: Record<string, unknown>, inv: Invocation): Promise<void> {
+async function runStatesTree(args: Record<string, unknown>, inv: Invocation): Promise<ExitReport> {
   const json = args.json === true;
   const { app, dbPath } = loadLoreApp({ inv });
   const store = new SQLiteStore(dbPath);
@@ -189,9 +190,9 @@ function requireCensusRoot(inv: Invocation): string {
   return root;
 }
 
-function reportCensusFailure(inv: Invocation, cause: unknown, json: boolean): void {
+function reportCensusFailure(inv: Invocation, cause: unknown, json: boolean): ExitReport {
   if (!(cause instanceof SiteCensusError)) throw cause;
-  reportFailure(inv, { code: "VALIDATION_ERROR", field: `census:${cause.reason}`, message: cause.message }, json);
+  return reportFailure(inv, { code: "VALIDATION_ERROR", field: `census:${cause.reason}`, message: cause.message }, json);
 }
 
 interface LeafCoverageReport {
@@ -210,7 +211,7 @@ interface LeafCoverageReport {
  * `coverage <leaf|branch>`: census each leaf's declared `commands`, compare with its `site_map`.
  * A leaf declaring no command is NOT ok — completeness of an unmeasured leaf is unproven.
  */
-async function runCoverage(target: string, json: boolean, inv: Invocation): Promise<void> {
+async function runCoverage(target: string, json: boolean, inv: Invocation): Promise<ExitReport> {
   const { app, dbPath } = loadLoreApp({ inv });
   const store = new SQLiteStore(dbPath);
   try {
@@ -277,9 +278,9 @@ async function runCoverage(target: string, json: boolean, inv: Invocation): Prom
         for (const key of r.bootstrap) printLine(inv.io.stdout, `  bootstrap    ${key}`);
       }
     }
-    if (!ok) setExitCode(1);
+    if (!ok) return 1;
   } catch (cause) {
-    reportCensusFailure(inv, cause, json);
+    return reportCensusFailure(inv, cause, json);
   } finally {
     store.close();
     app.close();
@@ -319,13 +320,13 @@ function renderFidelityContent(record: FidelityRecord): string {
  * whereas `exitCode()` maps VALIDATION_ERROR to 4 - so VALIDATION_ERROR is pinned to 2 here and every other
  * error keeps its `exitCode()` (AI_PROVIDER_ERROR -> 6).
  */
-function reportFidelityFailure(inv: Invocation, error: LoreError, json: boolean): void {
+function reportFidelityFailure(inv: Invocation, error: LoreError, json: boolean): ExitReport {
   reportFailure(inv, error, json);
-  if (error.code === "VALIDATION_ERROR") setExitCode(2);
+  if (error.code === "VALIDATION_ERROR") return 2;
 }
 
 /** `fidelity`: validate flags, resolve the AI provider (never skipping the judge), run, store, print. */
-async function runFidelityCommand(args: Record<string, unknown>, inv: Invocation): Promise<void> {
+async function runFidelityCommand(args: Record<string, unknown>, inv: Invocation): Promise<ExitReport> {
   const json = args.json === true;
   const fail = (field: string, message: string): void => reportFidelityFailure(inv, { code: "VALIDATION_ERROR", field, message }, json);
   const rawArgv = inv.argv;
@@ -403,22 +404,20 @@ export default defineCommand({
         const inv = invocationOf(context);
         await withRuleService(inv, async (svc) => {
           if (args.tree !== undefined && !(BASELINE_TREES as readonly string[]).includes(args.tree as string)) {
-            reportFailure(inv, 
+            return reportFailure(inv, 
               { code: "VALIDATION_ERROR", field: "tree", message: `--tree must be one of ${BASELINE_TREES.join(" | ")} (got '${String(args.tree)}')`, value: args.tree },
               args.json === true,
             );
-            return;
           }
           let content = "";
           if (args["content-file"] !== undefined) {
             try {
               content = readFileSync(args["content-file"] as string, "utf8");
             } catch (cause) {
-              reportFailure(inv, 
+              return reportFailure(inv, 
                 { code: "VALIDATION_ERROR", field: "content-file", message: `cannot read ${String(args["content-file"])}: ${cause instanceof Error ? cause.message : String(cause)}` },
                 args.json === true,
               );
-              return;
             }
           }
           const tree = (args.tree as BaselineTree | undefined) ?? "business";
@@ -595,7 +594,7 @@ export default defineCommand({
           const dynamicCount = sites.filter((s) => s.dynamic).length;
           if (json) {
             printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { command, count: sites.length, not_measured: dynamicCount, unresolved_imports: sites.unresolvedImports, sites, bootstrap: sites.bootstrap } }, null, 2));
-            if (sites.unresolvedImports.length > 0) setExitCode(1);
+            if (sites.unresolvedImports.length > 0) return 1;
             return;
           }
           if (sites.unresolvedImports.length > 0) {
@@ -606,7 +605,7 @@ export default defineCommand({
           for (const site of sites) printLine(inv.io.stdout, `${site.dynamic ? "~" : " "} ${site.key}`);
           for (const site of sites.bootstrap) printLine(inv.io.stdout, `  bootstrap ${site.key}`);
         } catch (cause) {
-          reportCensusFailure(inv, cause, json);
+          return reportCensusFailure(inv, cause, json);
         }
       },
     }),
@@ -619,7 +618,7 @@ export default defineCommand({
       async run(context) {
         const { args } = context;
         const inv = invocationOf(context);
-        await runCoverage(args.target as string, args.json === true, inv);
+        return await runCoverage(args.target as string, args.json === true, inv);
       },
     }),
     fidelity: defineCommand({
@@ -635,7 +634,7 @@ export default defineCommand({
       async run(context) {
         const { args } = context;
         const inv = invocationOf(context);
-        await runFidelityCommand(args, inv);
+        return await runFidelityCommand(args, inv);
       },
     }),
     adopt: adoptCommand,
@@ -651,8 +650,7 @@ export default defineCommand({
         const { args } = context;
         const inv = invocationOf(context);
         if (args.states === true || args.rule !== undefined) {
-          await runStatesTree(args, inv);
-          return;
+          return await runStatesTree(args, inv);
         }
         await withRuleService(inv, async (svc) => {
           const result = await svc.listBaselineTree(args.root as string | undefined);

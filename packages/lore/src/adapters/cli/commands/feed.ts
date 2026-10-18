@@ -94,7 +94,7 @@
  */
 
 import { defineCommand } from "citty";
-import { getExitCode, setExitCode } from "../run-scope.js";
+
 import type { Invocation, LoreConfig } from "@lore/core";
 import type { App } from "../../../app.js";
 import { loadLoreApp } from "../loader.js";
@@ -117,6 +117,7 @@ import { exitCode, formatError, formatErrorFor, resolveActor } from "../utils.js
 import { FEED_PHASE_START_MISSING_TARGET, FEED_TASK_START_MISSING_TARGET } from "../cli-refusal-messages.js";
 import { printLine } from "../output.js";
 import type { CliIo } from "../output.js";
+import type { ExitReport } from "../cli-exit.js";
 
 /** Loosely-typed view of the args this command's dispatch table needs — mirrors citty's parsed-args shape. */
 interface FeedArgs {
@@ -147,7 +148,7 @@ type CheckpointHandler = (app: App, args: FeedArgs, config: LoreConfig | undefin
 // re-derive or re-append the closure text here — that would be the exact
 // dual-write drift the spec exists to close (`adapters/mcp/tools.ts`'s
 // session-resume branch inherits it the same way, via the same call).
-async function handleSessionResume(app: App, args: FeedArgs, _config: LoreConfig | undefined, inv: Invocation): Promise<void> {
+async function handleSessionResume(app: App, args: FeedArgs, _config: LoreConfig | undefined, inv: Invocation): Promise<ExitReport> {
   const result = await buildResumeFeed(
     app,
     {
@@ -160,8 +161,7 @@ async function handleSessionResume(app: App, args: FeedArgs, _config: LoreConfig
 
   if (!result.ok) {
     inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
-    setExitCode(exitCode(result.error));
-    return;
+    return exitCode(result.error);
   }
 
   if (args.json) {
@@ -169,16 +169,15 @@ async function handleSessionResume(app: App, args: FeedArgs, _config: LoreConfig
   } else {
     printLine(inv.io.stdout, result.value.feed);
   }
-  setExitCode(0);
+  return 0;
 }
 
-async function handlePhaseStart(app: App, args: FeedArgs, _config: LoreConfig | undefined, inv: Invocation): Promise<void> {
+async function handlePhaseStart(app: App, args: FeedArgs, _config: LoreConfig | undefined, inv: Invocation): Promise<ExitReport> {
   if (typeof args.target !== "string" || args.target.length === 0) {
     inv.io.stderr.write(
       `Error: \`lore feed phase-start <phase>\` ${FEED_PHASE_START_MISSING_TARGET}.\n`,
     );
-    setExitCode(2);
-    return;
+    return 2;
   }
 
   const deps = buildPhaseFeedFlowDeps(app);
@@ -186,8 +185,7 @@ async function handlePhaseStart(app: App, args: FeedArgs, _config: LoreConfig | 
 
   if (!result.ok) {
     inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
-    setExitCode(exitCode(result.error));
-    return;
+    return exitCode(result.error);
   }
 
   if (args.json) {
@@ -195,16 +193,15 @@ async function handlePhaseStart(app: App, args: FeedArgs, _config: LoreConfig | 
   } else {
     renderPhaseStartPackText(inv.io, result.value);
   }
-  setExitCode(0);
+  return 0;
 }
 
-async function handleTaskStart(app: App, args: FeedArgs, config: LoreConfig | undefined, inv: Invocation): Promise<void> {
+async function handleTaskStart(app: App, args: FeedArgs, config: LoreConfig | undefined, inv: Invocation): Promise<ExitReport> {
   if (typeof args.target !== "string" || args.target.length === 0) {
     inv.io.stderr.write(
       `Error: \`lore feed task-start <task>\` ${FEED_TASK_START_MISSING_TARGET}.\n`,
     );
-    setExitCode(2);
-    return;
+    return 2;
   }
 
   const deps = buildTaskFeedFlowDeps(app);
@@ -213,8 +210,7 @@ async function handleTaskStart(app: App, args: FeedArgs, config: LoreConfig | un
 
   if (!result.ok) {
     inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
-    setExitCode(exitCode(result.error));
-    return;
+    return exitCode(result.error);
   }
 
   if (args.json) {
@@ -222,7 +218,7 @@ async function handleTaskStart(app: App, args: FeedArgs, config: LoreConfig | un
   } else {
     printLine(inv.io.stdout, renderTaskStartPack(result.value));
   }
-  setExitCode(0);
+  return 0;
 }
 
 /**
@@ -334,8 +330,7 @@ export default defineCommand({
       // second hand-maintained list of valid names.
       if (!isRegisteredCheckpoint(checkpointName)) {
         inv.io.stderr.write(`Error: unknown checkpoint "${checkpointName}" — not registered as a lore gate checkpoint.\n`);
-        setExitCode(2);
-        return;
+        return 2;
       }
 
       const outcome = await buildFeed(

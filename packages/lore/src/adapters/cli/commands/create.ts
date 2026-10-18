@@ -61,7 +61,7 @@
  */
 
 import { readFileSync } from "node:fs";
-import { exitCli, setExitCode } from "../run-scope.js";
+import { exitCli } from "../cli-exit.js";
 import { defineCommand } from "citty";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatErrorFor, resolveActor } from "../utils.js";
@@ -447,8 +447,7 @@ export default defineCommand({
           inv.io.stderr.write(
             `Error: cannot read --content-file '${args["content-file"]}': ${e instanceof Error ? e.message : String(e)}\n`,
           );
-          setExitCode(4);
-          return;
+          return 4;
         }
       }
       if (resolvedContent === undefined) {
@@ -460,8 +459,7 @@ export default defineCommand({
           const editorResult = await openEditor({ defaults, env: inv.env, tmpDir: inv.paths.tmpDir });
           if (!editorResult.ok) {
             inv.io.stderr.write(formatErrorFor(inv, editorResult.error) + "\n");
-            setExitCode(exitCode(editorResult.error));
-            return;
+            return exitCode(editorResult.error);
           }
           resolvedContent = editorResult.value;
         } else {
@@ -495,8 +493,7 @@ export default defineCommand({
 
           if (!aiResult.ok) {
             inv.io.stderr.write(formatErrorFor(inv, aiResult.error) + "\n");
-            setExitCode(exitCode(aiResult.error));
-            return;
+            return exitCode(aiResult.error);
           }
 
           resolvedContent = aiResult.value.content;
@@ -516,8 +513,7 @@ export default defineCommand({
         const planResolve = await app.corpusService.resolve(args["plan-id"]);
         if (!planResolve.ok) {
           inv.io.stderr.write(formatErrorFor(inv, planResolve.error) + "\n");
-          setExitCode(exitCode(planResolve.error));
-          return;
+          return exitCode(planResolve.error);
         }
         resolvedPlanId = planResolve.value;
       }
@@ -530,8 +526,7 @@ export default defineCommand({
         const resolved = await resolveResolvesTargets(app.corpusService, resolvesTokens);
         if (!resolved.ok) {
           inv.io.stderr.write(formatErrorFor(inv, resolved.error) + "\n");
-          setExitCode(exitCode(resolved.error));
-          return;
+          return exitCode(resolved.error);
         }
         resolvesTargets = resolved.value;
       }
@@ -588,8 +583,7 @@ export default defineCommand({
       if (args.supersedes !== undefined) {
         if (app.validityService === undefined) {
           inv.io.stderr.write("Error: ValidityService not wired on this App instance.\n");
-          setExitCode(1);
-          return;
+          return 1;
         }
 
         // task-mcp-lore-create-supersedes-still-creates-then-fails-the: the target-type
@@ -610,8 +604,7 @@ export default defineCommand({
         );
         if (!orchResult.ok) {
           inv.io.stderr.write(formatErrorFor(inv, orchResult.error) + "\n");
-          setExitCode(exitCode(orchResult.error));
-          return;
+          return exitCode(orchResult.error);
         }
         doc = orchResult.value.doc;
         supersedeError = orchResult.value.supersedeError;
@@ -619,8 +612,7 @@ export default defineCommand({
         const result = await app.corpusService.create(createInput, { by: resolvedActor });
         if (!result.ok) {
           inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
-          setExitCode(exitCode(result.error));
-          return;
+          return exitCode(result.error);
         }
         doc = result.value;
       }

@@ -37,7 +37,7 @@
  */
 
 import type { Invocation } from "@lore/core";
-import { setExitCode } from "../run-scope.js";
+
 import { defineCommand } from "citty";
 import type { LoreError } from "@lore/core";
 import { loadLoreApp } from "../loader.js";
@@ -48,6 +48,7 @@ import type { ProposeRuleChangeInput, RuleEnforcement } from "../../../service/r
 import { invocationOf } from "../command-invocation.js";
 import { printLine } from "../output.js";
 import type { CliIo } from "../output.js";
+import type { ExitReport } from "../cli-exit.js";
 
 /** citty/mri yields one string for a single occurrence of a repeatable flag, an array for >= 2, `undefined` for none. */
 function repeatable(value: unknown): string[] | undefined {
@@ -55,10 +56,10 @@ function repeatable(value: unknown): string[] | undefined {
   return Array.isArray(value) ? value.map(String) : [String(value)];
 }
 
-function reportFailure(inv: Invocation, error: LoreError, json: boolean): void {
+function reportFailure(inv: Invocation, error: LoreError, json: boolean): ExitReport {
   if (json) printLine(inv.io.stdout, JSON.stringify({ ok: false, error }, null, 2));
   else inv.io.stderr.write(formatErrorFor(inv, error));
-  setExitCode(exitCode(error));
+  return exitCode(error);
 }
 
 function requireRuleService(io: CliIo, app: App) {
@@ -92,10 +93,10 @@ function fourPartFromArgs(args: Record<string, unknown>): { ok: true; parts: Fou
 
 type FourPartFlags = Pick<AddRuleInput, "current_reality" | "target_rule" | "current_exceptions" | "migration">;
 
-function failUsage(io: CliIo, message: string, json: boolean): void {
+function failUsage(io: CliIo, message: string, json: boolean): ExitReport {
   if (json) printLine(io.stdout, JSON.stringify({ ok: false, error: { code: "VALIDATION_ERROR", field: "args", message } }, null, 2));
   else io.stderr.write(`Error: ${message}\n`);
-  setExitCode(2);
+  return 2;
 }
 
 export default defineCommand({

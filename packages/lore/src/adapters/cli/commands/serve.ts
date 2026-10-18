@@ -4,7 +4,7 @@
  */
 
 import { defineCommand } from "citty";
-import { exitCli } from "../run-scope.js";
+import { exitCli } from "../cli-exit.js";
 import { invocationOf } from "../command-invocation.js";
 import { loadLoreApp } from "../loader.js";
 import { startHttpServer } from "../../http/index.js";

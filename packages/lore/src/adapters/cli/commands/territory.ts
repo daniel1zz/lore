@@ -51,7 +51,7 @@
  */
 
 import { defineCommand } from "citty";
-import { setExitCode } from "../run-scope.js";
+
 import { RealGitPort, listLocalBranches } from "../../real-git-port.js";
 import { resolveClaimSessionId } from "../../../service/task-workflow-service.js";
 import { loadLoreApp } from "../loader.js";
@@ -79,8 +79,7 @@ export default defineCommand({
     try {
       if (app.sessionService === undefined) {
         inv.io.stderr.write("Error: SessionService not wired on this App instance.\n");
-        setExitCode(1);
-        return;
+        return 1;
       }
       // reason: fail loud rather than silently substituting process.cwd()
       // — see this module's own header for why. `app.repoRoot` is ALWAYS
@@ -88,23 +87,20 @@ export default defineCommand({
       // mis-constructed, not that process.cwd() is a safe stand-in.
       if (app.repoRoot === undefined) {
         inv.io.stderr.write("Error: repoRoot not set on this App instance.\n");
-        setExitCode(1);
-        return;
+        return 1;
       }
 
       const gitPort = new RealGitPort(app.repoRoot);
       const worktreeListResult = await gitPort.worktreeList();
       if (!worktreeListResult.ok) {
         inv.io.stderr.write(formatErrorFor(inv, worktreeListResult.error) + "\n");
-        setExitCode(exitCode(worktreeListResult.error));
-        return;
+        return exitCode(worktreeListResult.error);
       }
 
       const activeSessionsResult = await app.sessionService.getActiveSessions();
       if (!activeSessionsResult.ok) {
         inv.io.stderr.write(formatErrorFor(inv, activeSessionsResult.error) + "\n");
-        setExitCode(exitCode(activeSessionsResult.error));
-        return;
+        return exitCode(activeSessionsResult.error);
       }
 
       // reason: the SAME sanitized discriminator TaskWorkflowService.claim

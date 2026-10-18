@@ -282,7 +282,7 @@
  */
 
 import { existsSync, readFileSync } from "fs";
-import { setExitCode } from "../run-scope.js";
+
 import { dirname } from "path";
 import { defineCommand } from "citty";
 import {
@@ -376,8 +376,7 @@ export default defineCommand({
       inv.io.stderr.write(
         "Error: --output-tail and --output-tail-file are mutually exclusive.\n",
       );
-      setExitCode(2);
-      return;
+      return 2;
     }
 
     const captureRequested = args.capture === true;
@@ -394,8 +393,7 @@ export default defineCommand({
     });
     if (captureConflict !== null) {
       inv.io.stderr.write(formatErrorFor(inv, captureConflict) + "\n");
-      setExitCode(exitCode(captureConflict));
-      return;
+      return exitCode(captureConflict);
     }
 
     let outputTail: string | undefined;
@@ -455,8 +453,7 @@ export default defineCommand({
       });
       if (!captured.ok) {
         inv.io.stderr.write(formatErrorFor(inv, captured.error) + "\n");
-        setExitCode(exitCode(captured.error));
-        return;
+        return exitCode(captured.error);
       }
       outputTail = captured.value.outputTail;
       // reason: the WHOLE pair, assigned as one value — never destructured into a
@@ -495,8 +492,7 @@ export default defineCommand({
       });
       if (capturedDiscoveryRefusal !== null) {
         inv.io.stderr.write(formatErrorFor(inv, capturedDiscoveryRefusal) + "\n");
-        setExitCode(exitCode(capturedDiscoveryRefusal));
-        return;
+        return exitCode(capturedDiscoveryRefusal);
       }
       // reason: captured-red proof (#53, D8-D10) — same shared guard as MCP.
       const capturedRedProofGap = findCapturedRedProofGap({
@@ -508,8 +504,7 @@ export default defineCommand({
       });
       if (capturedRedProofGap !== null) {
         inv.io.stderr.write(formatErrorFor(inv, capturedRedProofGap) + "\n");
-        setExitCode(exitCode(capturedRedProofGap));
-        return;
+        return exitCode(capturedRedProofGap);
       }
     } else if (typeof args["output-tail"] === "string") {
       outputTail = tailChars(args["output-tail"], CAPTURE_TAIL_CHARS);
@@ -519,8 +514,7 @@ export default defineCommand({
       } catch (e) {
         const message = e instanceof Error ? e.message : "unknown error";
         inv.io.stderr.write(`Error: could not read --output-tail-file: ${message}\n`);
-        setExitCode(2);
-        return;
+        return 2;
       }
     }
 
@@ -566,8 +560,7 @@ export default defineCommand({
           value: args.command,
         };
         inv.io.stderr.write(formatErrorFor(inv, precheckError) + "\n");
-        setExitCode(exitCode(precheckError));
-        return;
+        return exitCode(precheckError);
       }
 
       // reason: pipe-refusal guard (see module header; SPEC oracle-tier-
@@ -590,8 +583,7 @@ export default defineCommand({
       });
       if (pipeRefusal !== null) {
         inv.io.stderr.write(formatErrorFor(inv, pipeRefusal) + "\n");
-        setExitCode(exitCode(pipeRefusal));
-        return;
+        return exitCode(pipeRefusal);
       }
 
       // reason: filtered-pass matched-count guard (see module header) — runs
@@ -608,8 +600,7 @@ export default defineCommand({
       });
       if (filteredPassRefusal !== null) {
         inv.io.stderr.write(formatErrorFor(inv, filteredPassRefusal) + "\n");
-        setExitCode(exitCode(filteredPassRefusal));
-        return;
+        return exitCode(filteredPassRefusal);
       }
 
       // reason: dropped-file guard (see module header; task-skill-implement-
@@ -627,8 +618,7 @@ export default defineCommand({
       });
       if (underMatchedRefusal !== null) {
         inv.io.stderr.write(formatErrorFor(inv, underMatchedRefusal) + "\n");
-        setExitCode(exitCode(underMatchedRefusal));
-        return;
+        return exitCode(underMatchedRefusal);
       }
 
       const by = resolveActor(inv.io, undefined, inv.env, inv.cwd, inv.user);
@@ -681,8 +671,7 @@ export default defineCommand({
 
       if (!result.ok) {
         inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
-        setExitCode(exitCode(result.error));
-        return;
+        return exitCode(result.error);
       }
 
       if (args.json) {

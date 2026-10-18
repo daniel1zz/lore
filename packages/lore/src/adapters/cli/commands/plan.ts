@@ -57,7 +57,7 @@
  */
 
 import { defineCommand } from "citty";
-import { setExitCode } from "../run-scope.js";
+
 import { exitCode, formatErrorFor, resolveActor } from "../utils.js";
 import {
   ATTESTATION_EXEMPT_KIND_VALUES,
@@ -69,6 +69,7 @@ import type { PlanExemptionService } from "../../../service/plan-exemption-servi
 import { invocationOf } from "../command-invocation.js";
 import { printLine } from "../output.js";
 import type { CliIo } from "../output.js";
+import type { ExitReport } from "../cli-exit.js";
 
 /**
  * `App.planExemptionService` is typed optional only to keep pre-existing
@@ -86,9 +87,9 @@ function requirePlanExemptionService(app: { planExemptionService?: PlanExemption
 }
 
 /** Writes a usage refusal to stderr and sets the SPEC-003 §5 usage exit code. */
-function refuse(io: CliIo, message: string): void {
+function refuse(io: CliIo, message: string): ExitReport {
   io.stderr.write(message + "\n");
-  setExitCode(PLAN_EXEMPT_USAGE_EXIT_CODE);
+  return PLAN_EXEMPT_USAGE_EXIT_CODE;
 }
 
 const sharedArgs = {
@@ -130,8 +131,7 @@ export default defineCommand({
         const inv = invocationOf(context);
         const checked = checkExemptAttestationArgs({ reason: args.reason, kind: args.kind });
         if (!checked.ok) {
-          refuse(inv.io, checked.message);
-          return;
+          return refuse(inv.io, checked.message);
         }
 
         // Deferred on purpose — see this module's @invariant.
@@ -147,8 +147,7 @@ export default defineCommand({
           if (!result.ok) {
             if (args.json) printLine(inv.io.stdout, JSON.stringify({ ok: false, error: result.error }, null, 2));
             else inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
-            setExitCode(exitCode(result.error));
-            return;
+            return exitCode(result.error);
           }
 
           if (args.json) {
@@ -178,8 +177,7 @@ export default defineCommand({
         const inv = invocationOf(context);
         const checked = checkExemptAssessmentFreshnessArgs({ reason: args.reason });
         if (!checked.ok) {
-          refuse(inv.io, checked.message);
-          return;
+          return refuse(inv.io, checked.message);
         }
 
         const { loadLoreApp } = await import("../loader.js");
@@ -194,8 +192,7 @@ export default defineCommand({
           if (!result.ok) {
             if (args.json) printLine(inv.io.stdout, JSON.stringify({ ok: false, error: result.error }, null, 2));
             else inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
-            setExitCode(exitCode(result.error));
-            return;
+            return exitCode(result.error);
           }
 
           if (args.json) {

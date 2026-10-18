@@ -80,7 +80,7 @@
 
 import { writeSync } from "node:fs";
 import { format } from "node:util";
-import { activeScopeWriter } from "./run-scope.js";
+
 
 /** Milliseconds to block before retrying a write that hit EAGAIN (pipe buffer full). */
 const EAGAIN_RETRY_DELAY_MS = 5;
@@ -140,14 +140,6 @@ function sleepSyncMs(ms: number): void {
  *   writeAllSync(1, JSON.stringify(bigPayload) + "\n");
  */
 export function writeAllSync(fd: 1 | 2, text: string): void {
-  // reason: a run whose io is not the process streams (the in-process test runner) owns its output; commands that call
-  // `writeAllSync` directly (governance, fragments) bypass `console` and `process.stdout`, so this is the seam that
-  // catches them. The real binary's io IS the process streams, so it falls through to the fd write below.
-  const scoped = activeScopeWriter(fd);
-  if (scoped !== null) {
-    scoped.write(text);
-    return;
-  }
   const buffer = Buffer.from(text, "utf8");
   let offset = 0;
   while (offset < buffer.length) {

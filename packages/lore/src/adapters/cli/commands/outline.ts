@@ -22,7 +22,7 @@
  */
 
 import type { Invocation } from "@lore/core";
-import { setExitCode } from "../run-scope.js";
+
 import { defineCommand } from "citty";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatError, formatErrorFor } from "../utils.js";
@@ -32,6 +32,7 @@ import type { App } from "../../../app.js";
 import { invocationOf } from "../command-invocation.js";
 import { printLine } from "../output.js";
 import type { CliIo } from "../output.js";
+import type { ExitReport } from "../cli-exit.js";
 
 /**
  * `App.prdOutlineService` is typed optional only to keep pre-existing
@@ -63,11 +64,11 @@ function retiredOutlineWrite(verb: string): LoreError {
 }
 
 /** Prints the refusal (text or `--json` envelope) and sets exit code 4. Writes nothing. */
-function refuseRetiredWrite(inv: Invocation, verb: string, json: unknown): void {
+function refuseRetiredWrite(inv: Invocation, verb: string, json: unknown): ExitReport {
   const error = retiredOutlineWrite(verb);
   if (json === true) printLine(inv.io.stdout, JSON.stringify({ ok: false, error }, null, 2));
   else inv.io.stderr.write(formatErrorFor(inv, error) + "\n");
-  setExitCode(exitCode(error));
+  return exitCode(error);
 }
 
 export default defineCommand({
@@ -94,7 +95,7 @@ export default defineCommand({
       },
       run(context) {
         const { args } = context;
-        refuseRetiredWrite(invocationOf(context), "set", args.json);
+        return refuseRetiredWrite(invocationOf(context), "set", args.json);
       },
     }),
 
@@ -121,8 +122,7 @@ export default defineCommand({
           if (!result.ok) {
             if (args.json) printLine(inv.io.stdout, JSON.stringify({ ok: false, error: result.error }, null, 2));
             else inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
-            setExitCode(exitCode(result.error));
-            return;
+            return exitCode(result.error);
           }
 
           if (args.json) {
@@ -154,7 +154,7 @@ export default defineCommand({
       },
       run(context) {
         const { args } = context;
-        refuseRetiredWrite(invocationOf(context), "rm", args.json);
+        return refuseRetiredWrite(invocationOf(context), "rm", args.json);
       },
     }),
 
@@ -170,7 +170,7 @@ export default defineCommand({
       },
       run(context) {
         const { args } = context;
-        refuseRetiredWrite(invocationOf(context), "exempt", args.json);
+        return refuseRetiredWrite(invocationOf(context), "exempt", args.json);
       },
     }),
   },

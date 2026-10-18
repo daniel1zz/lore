@@ -42,7 +42,7 @@
  */
 
 import { defineCommand } from "citty";
-import { setExitCode } from "../run-scope.js";
+
 import type { LoreError, Result } from "@lore/core";
 import type {
   TraceStatsCountField,
@@ -176,8 +176,7 @@ export default defineCommand({
             // command, not a real corpus. Fail loud rather than crash on
             // `undefined.stats(...)`.
             inv.io.stderr.write("Error: trace stats unavailable (traceStatsService not wired)\n");
-            setExitCode(1);
-            return;
+            return 1;
           }
 
           // reason: citty's inferred `args.since` type is broader than plain
@@ -205,15 +204,13 @@ export default defineCommand({
                 value: args.enumerate,
               };
               inv.io.stderr.write(formatErrorFor(inv, error) + "\n");
-              setExitCode(exitCode(error));
-              return;
+              return exitCode(error);
             }
 
             const enumerationResult = await enumerator(app.traceStatsService, statsOpts);
             if (!enumerationResult.ok) {
               inv.io.stderr.write(formatErrorFor(inv, enumerationResult.error) + "\n");
-              setExitCode(exitCode(enumerationResult.error));
-              return;
+              return exitCode(enumerationResult.error);
             }
 
             const enumeration = enumerationResult.value;
@@ -238,24 +235,21 @@ export default defineCommand({
               printLine(inv.io.stdout, `${enumeration.field}: ${enumeration.count} member(s)`);
               for (const line of formatEnumerationMembers(enumeration)) printLine(inv.io.stdout, `  - ${line}`);
             }
-            setExitCode(0);
-            return;
+            return 0;
           }
 
           const result = await app.traceStatsService.stats(statsOpts);
 
           if (!result.ok) {
             inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
-            setExitCode(exitCode(result.error));
-            return;
+            return exitCode(result.error);
           }
 
           const report = result.value;
 
           if (args.json) {
             printLine(inv.io.stdout, JSON.stringify({ ok: true, data: report }, null, 2));
-            setExitCode(0);
-            return;
+            return 0;
           }
 
           printLine(inv.io.stdout, `Trace stats since ${report.since}:`);
@@ -287,7 +281,7 @@ export default defineCommand({
             printLine(inv.io.stdout, rawRows.length > 0 ? formatTable(["Timestamp", "Actor", "Query"], rawRows) : "  (none)");
           }
 
-          setExitCode(0);
+          return 0;
         } finally {
           app.close();
         }

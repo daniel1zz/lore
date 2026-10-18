@@ -23,7 +23,7 @@
  */
 
 import { dirname, join } from "node:path";
-import { setExitCode } from "../run-scope.js";
+
 import { defineCommand } from "citty";
 import { CITE_GATE_MODES, err, ok } from "@lore/core";
 import type { CiteGateMode, Invocation, LoreError, Result } from "@lore/core";
@@ -37,6 +37,7 @@ import { readAcCiteStored, seedAcCiteModeIfAbsent, writeAcCiteStored } from "../
 import type { AcCiteSeedOutcome, AcCiteStored } from "../../ac-cite-config-file.js";
 import { ENFORCE_REFUSES_NOTHING_WARNING, isEnforceRefusingNothing } from "../../../service/ac-cite-status.js";
 import { printLine } from "../output.js";
+import type { ExitReport } from "../cli-exit.js";
 
 /** The audit `action` of an adopt row; `lore status` provenance reads it back. SSOT for both sides. */
 export const BASELINE_ADOPT_AUDIT_ACTION = "baseline_adopt";
@@ -95,10 +96,10 @@ function repeatable(value: unknown): string[] {
   return Array.isArray(value) ? value.map(String) : [String(value)];
 }
 
-function fail(inv: Invocation, error: LoreError, json: boolean, code: number): void {
+function fail(inv: Invocation, error: LoreError, json: boolean, code: number): ExitReport {
   if (json) printLine(inv.io.stdout, JSON.stringify({ ok: false, error }, null, 2));
   else inv.io.stderr.write(formatErrorFor(inv, error));
-  setExitCode(code);
+  return code;
 }
 
 function usageError(field: string, message: string, value?: unknown): LoreError {
@@ -130,7 +131,7 @@ export function computeAdoptedSettings(
   return { mode: change.mode ?? old.mode, armed_branches: armed.filter((s) => !change.disarm.includes(s)) };
 }
 
-async function runAdopt(args: Record<string, unknown>, inv: Invocation): Promise<void> {
+async function runAdopt(args: Record<string, unknown>, inv: Invocation): Promise<ExitReport> {
   const json = args.json === true;
   const arm = repeatable(args.arm);
   const disarm = repeatable(args.disarm);
@@ -235,6 +236,6 @@ export const adoptCommand = defineCommand({
     json: { type: "boolean", description: "Output result as JSON" },
   },
   async run(context) {
-    await runAdopt(context.args as Record<string, unknown>, invocationOf(context));
+    return await runAdopt(context.args as Record<string, unknown>, invocationOf(context));
   },
 });

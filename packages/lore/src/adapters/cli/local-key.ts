@@ -25,7 +25,7 @@
  */
 
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { exitCli } from "./run-scope.js";
+import { exitCli } from "./cli-exit.js";
 import { join } from "node:path";
 import type { CliIo } from "./output.js";
 

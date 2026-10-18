@@ -83,7 +83,7 @@
  */
 
 import { defineCommand } from "citty";
-import { exitCli, setExitCode } from "../run-scope.js";
+import { exitCli } from "../cli-exit.js";
 import {
   buildUnconfiguredUpstreamRemedy,
   err,
@@ -308,8 +308,7 @@ export default defineCommand({
       if (classification.kind === "unconfigured") {
         const unconfiguredError = buildUnconfiguredUpstreamRemedy();
         inv.io.stderr.write(formatErrorFor(inv, unconfiguredError) + "\n");
-        setExitCode(exitCode(unconfiguredError));
-        return;
+        return exitCode(unconfiguredError);
       }
 
       // ─── Legacy SQLite-shaped upstream: retired, refused loudly (P4) — see
@@ -319,8 +318,7 @@ export default defineCommand({
       // command never holds its own copy.
       if (classification.kind === "retired") {
         inv.io.stderr.write(formatErrorFor(inv, classification.error) + "\n");
-        setExitCode(exitCode(classification.error));
-        return;
+        return exitCode(classification.error);
       }
 
       // `classification.kind === "github"` from here on.
@@ -393,8 +391,7 @@ export default defineCommand({
 
       if (!githubResult.ok) {
         inv.io.stderr.write(formatErrorFor(inv, githubResult.error) + "\n");
-        setExitCode(exitCode(githubResult.error));
-        return;
+        return exitCode(githubResult.error);
       }
 
       if (args.json) {

@@ -75,7 +75,7 @@
  */
 
 import { defineCommand } from "citty";
-import { setExitCode } from "../run-scope.js";
+
 import type { DocRecord, DocType, LoreError, Result } from "@lore/core";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatErrorFor, resolveActor } from "../utils.js";
@@ -223,8 +223,7 @@ export default defineCommand({
           const targetResult = await resolveAnchorTarget(app, targetId);
           if (!targetResult.ok) {
             inv.io.stderr.write(formatErrorFor(inv, targetResult.error) + "\n");
-            setExitCode(exitCode(targetResult.error));
-            return;
+            return exitCode(targetResult.error);
           }
           const target = targetResult.value;
 
@@ -237,8 +236,7 @@ export default defineCommand({
 
             if (!result.ok) {
               inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
-              setExitCode(exitCode(result.error));
-              return;
+              return exitCode(result.error);
             }
 
             const anchors = (result.value.extra["file_anchors"] as string[] | undefined) ?? [];
@@ -253,15 +251,13 @@ export default defineCommand({
           } else if (isCodeAnchorTarget(target.type)) {
             if (app.driftCheckService === undefined) {
               inv.io.stderr.write("Error: DriftCheckService not wired on this App instance.\n");
-              setExitCode(1);
-              return;
+              return 1;
             }
             const result = await app.driftCheckService.addCodeAnchors(targetId, paths);
 
             if (!result.ok) {
               inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
-              setExitCode(exitCode(result.error));
-              return;
+              return exitCode(result.error);
             }
 
             const anchors = result.value;
@@ -275,7 +271,7 @@ export default defineCommand({
           } else {
             const error = unsupportedTargetTypeError(target.type);
             inv.io.stderr.write(formatErrorFor(inv, error) + "\n");
-            setExitCode(exitCode(error));
+            return exitCode(error);
           }
         } finally {
           app.close();
@@ -312,8 +308,7 @@ export default defineCommand({
           const targetResult = await resolveAnchorTarget(app, targetId);
           if (!targetResult.ok) {
             inv.io.stderr.write(formatErrorFor(inv, targetResult.error) + "\n");
-            setExitCode(exitCode(targetResult.error));
-            return;
+            return exitCode(targetResult.error);
           }
           const target = targetResult.value;
 
@@ -326,8 +321,7 @@ export default defineCommand({
 
             if (!result.ok) {
               inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
-              setExitCode(exitCode(result.error));
-              return;
+              return exitCode(result.error);
             }
 
             const anchors = (result.value.extra["file_anchors"] as string[] | undefined) ?? [];
@@ -341,15 +335,13 @@ export default defineCommand({
           } else if (isCodeAnchorTarget(target.type)) {
             if (app.driftCheckService === undefined) {
               inv.io.stderr.write("Error: DriftCheckService not wired on this App instance.\n");
-              setExitCode(1);
-              return;
+              return 1;
             }
             const result = await app.driftCheckService.removeCodeAnchors(targetId, paths);
 
             if (!result.ok) {
               inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
-              setExitCode(exitCode(result.error));
-              return;
+              return exitCode(result.error);
             }
 
             const anchors = result.value;
@@ -363,7 +355,7 @@ export default defineCommand({
           } else {
             const error = unsupportedTargetTypeError(target.type);
             inv.io.stderr.write(formatErrorFor(inv, error) + "\n");
-            setExitCode(exitCode(error));
+            return exitCode(error);
           }
         } finally {
           app.close();
@@ -393,8 +385,7 @@ export default defineCommand({
 
           if (!targetResult.ok) {
             inv.io.stderr.write(formatErrorFor(inv, targetResult.error) + "\n");
-            setExitCode(exitCode(targetResult.error));
-            return;
+            return exitCode(targetResult.error);
           }
 
           const doc = targetResult.value;
@@ -406,8 +397,7 @@ export default defineCommand({
           } else {
             const error = unsupportedTargetTypeError(doc.type);
             inv.io.stderr.write(formatErrorFor(inv, error) + "\n");
-            setExitCode(exitCode(error));
-            return;
+            return exitCode(error);
           }
 
           if (args.json) {

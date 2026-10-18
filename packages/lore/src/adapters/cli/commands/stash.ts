@@ -15,7 +15,7 @@
  * Side-effect class: IO (git subprocesses in the repo root, corpus DB reads and decision_log appends).
  */
 import { spawnSync } from "node:child_process";
-import { setExitCode } from "../run-scope.js";
+
 import { defineCommand } from "citty";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatErrorFor } from "../utils.js";
@@ -91,16 +91,14 @@ const prune = defineCommand({
     try {
       if (app.repoRoot === undefined) {
         inv.io.stderr.write("Error: repoRoot not set on this App instance.\n");
-        setExitCode(1);
-        return;
+        return 1;
       }
       // reason: the decision record must carry the run the store wrapper stamps onto rows (BR-1035,
       // run-identity-verify.ts): verify once through the app's wrapped store; an unregistered id is null.
       const verifiedIdentity = await app.verifiedInvocationIdentity?.();
       if (verifiedIdentity !== undefined && !verifiedIdentity.ok) {
         inv.io.stderr.write(`${formatErrorFor(inv, verifiedIdentity.error)}\n`);
-        setExitCode(exitCode(verifiedIdentity.error));
-        return;
+        return exitCode(verifiedIdentity.error);
       }
       store = new SQLiteStore(dbPath);
       const git = gitRunnerFor(app.repoRoot);
@@ -114,8 +112,7 @@ const prune = defineCommand({
       const result = args.apply === true ? await service.apply() : await dryRun(service);
       if (!result.ok) {
         inv.io.stderr.write(`${formatErrorFor(inv, result.error)}\n`);
-        setExitCode(exitCode(result.error));
-        return;
+        return exitCode(result.error);
       }
       inv.io.stdout.write(`${args.json === true ? JSON.stringify({ ok: true, data: result.value }, null, 2) : renderReport(result.value)}\n`);
     } finally {

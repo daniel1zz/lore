@@ -5,7 +5,7 @@
  */
 
 import { defineCommand } from "citty";
-import { setExitCode } from "../run-scope.js";
+
 import { loadLoreApp } from "../loader.js";
 import { formatTable } from "../utils.js";
 import { invocationOf } from "../command-invocation.js";
@@ -47,8 +47,7 @@ const agentCreate = defineCommand({
             "message" in result.error ? result.error.message : JSON.stringify(result.error)
           }\n`);
         }
-        setExitCode(1);
-        return;
+        return 1;
       }
 
       const { rawKey, record } = result.value;
@@ -97,8 +96,7 @@ const agentList = defineCommand({
         } else {
           inv.io.stderr.write(`Error: ${"message" in result.error ? result.error.message : result.error.code}\n`);
         }
-        setExitCode(1);
-        return;
+        return 1;
       }
 
       const keys = result.value;
@@ -156,8 +154,7 @@ const agentRevoke = defineCommand({
         } else {
           inv.io.stderr.write(`Error: ${"message" in result.error ? result.error.message : result.error.code}\n`);
         }
-        setExitCode(1);
-        return;
+        return 1;
       }
 
       if (args.json) {

@@ -29,7 +29,7 @@
  */
 
 import { defineCommand } from "citty";
-import { setExitCode } from "../run-scope.js";
+
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatErrorFor, formatTable } from "../utils.js";
 import { PENDING_TABLE_HEADERS, buildPendingTableRows } from "../pending-render.js";
@@ -95,16 +95,14 @@ export default defineCommand({
       const decisionsResult = await collectPendingDecisions(dbPath, inv.env, repoRoot);
       if (!decisionsResult.ok) {
         inv.io.stderr.write(formatErrorFor(inv, decisionsResult.error) + "\n");
-        setExitCode(exitCode(decisionsResult.error));
-        return;
+        return exitCode(decisionsResult.error);
       }
       const decisions = decisionsResult.value;
       // AC-AU-10: the sampling floor's audit queue is listed SEPARATELY from the blocking escalations.
       const auditResult = await collectAuditItems(dbPath);
       if (!auditResult.ok) {
         inv.io.stderr.write(formatErrorFor(inv, auditResult.error) + "\n");
-        setExitCode(exitCode(auditResult.error));
-        return;
+        return exitCode(auditResult.error);
       }
       const audit = auditResult.value;
       const decisionsBlock = renderPendingDecisions(decisions) + renderAuditItems(audit);
@@ -120,8 +118,7 @@ export default defineCommand({
 
       if (!result.ok) {
         inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
-        setExitCode(exitCode(result.error));
-        return;
+        return exitCode(result.error);
       }
 
       const docs: PendingDoc[] = result.value;
@@ -148,8 +145,7 @@ export default defineCommand({
         const judgmentResult = await app.judgmentService.latestFor(doc.id);
         if (!judgmentResult.ok) {
           inv.io.stderr.write(formatErrorFor(inv, judgmentResult.error) + "\n");
-          setExitCode(exitCode(judgmentResult.error));
-          return;
+          return exitCode(judgmentResult.error);
         }
         judgments.set(doc.id, judgmentResult.value);
       }

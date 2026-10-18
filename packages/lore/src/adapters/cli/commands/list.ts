@@ -132,7 +132,7 @@
  */
 
 import { defineCommand } from "citty";
-import { setExitCode } from "../run-scope.js";
+
 import { loadLoreApp } from "../loader.js";
 import {
   exitCode,
@@ -352,8 +352,7 @@ export default defineCommand({
         const limitResult = parsePositiveIntArg(args.limit, "--limit", { min: 0 });
         if (!limitResult.ok) {
           inv.io.stderr.write(limitResult.message + "\n");
-          setExitCode(2);
-          return;
+          return 2;
         }
         limit = limitResult.value;
       }
@@ -363,8 +362,7 @@ export default defineCommand({
         const offsetResult = parsePositiveIntArg(args.offset, "--offset", { min: 0 });
         if (!offsetResult.ok) {
           inv.io.stderr.write(offsetResult.message + "\n");
-          setExitCode(2);
-          return;
+          return 2;
         }
         offset = offsetResult.value;
       }
@@ -419,8 +417,7 @@ export default defineCommand({
           inv.io.stderr.write(
             `Error: ${LIST_GOVERNED_BY_CONFLICT} ${conflicting.map((k) => `--${k}`).join(", ")}.\n`,
           );
-          setExitCode(2);
-          return;
+          return 2;
         }
 
         // reason: `include_invalid` is FORWARDED, never applied here — the service method
@@ -432,8 +429,7 @@ export default defineCommand({
         });
         if (!governedResult.ok) {
           inv.io.stderr.write(formatErrorFor(inv, governedResult.error) + "\n");
-          setExitCode(exitCode(governedResult.error));
-          return;
+          return exitCode(governedResult.error);
         }
         // reason: listGovernedBy has no store-level limit/offset param — page the
         // already-fetched result in-memory (see header comment's (b) stance).
@@ -473,8 +469,7 @@ export default defineCommand({
       const subTypeResolution = resolveSubTypeFilter(args["sub-type"], args.type);
       if (!subTypeResolution.ok) {
         inv.io.stderr.write(subTypeResolution.message + "\n");
-        setExitCode(2);
-        return;
+        return 2;
       }
 
       const filters: Record<string, unknown> = {};
@@ -499,8 +494,7 @@ export default defineCommand({
         const resolveResult = await app.corpusService.resolve(args["plan-id"]);
         if (!resolveResult.ok) {
           inv.io.stderr.write(formatErrorFor(inv, resolveResult.error) + "\n");
-          setExitCode(exitCode(resolveResult.error));
-          return;
+          return exitCode(resolveResult.error);
         }
         planMemberId = resolveResult.value;
       }
@@ -558,8 +552,7 @@ export default defineCommand({
         const gatedResult = await fetchGatedFullDocs();
         if (!gatedResult.ok) {
           inv.io.stderr.write(formatErrorFor(inv, gatedResult.error) + "\n");
-          setExitCode(exitCode(gatedResult.error));
-          return;
+          return exitCode(gatedResult.error);
         }
         // reason: extra.phase AND --plan-id's membership filter (see file header) are
         // both client-side, as is the validity exclusion already applied above —
@@ -607,8 +600,7 @@ export default defineCommand({
         const fullResult = await fetchListing();
         if (!fullResult.ok) {
           inv.io.stderr.write(formatErrorFor(inv, fullResult.error) + "\n");
-          setExitCode(exitCode(fullResult.error));
-          return;
+          return exitCode(fullResult.error);
         }
         const { docs: fullDocs, total: fullTotal } = fullResult.value;
 
@@ -659,8 +651,7 @@ export default defineCommand({
         const fullResult = await fetchListing();
         if (!fullResult.ok) {
           inv.io.stderr.write(formatErrorFor(inv, fullResult.error) + "\n");
-          setExitCode(exitCode(fullResult.error));
-          return;
+          return exitCode(fullResult.error);
         }
         const { docs: fullDocs, total: fullTotal } = fullResult.value;
 
@@ -705,8 +696,7 @@ export default defineCommand({
         const fullResult = await fetchListing();
         if (!fullResult.ok) {
           inv.io.stderr.write(formatErrorFor(inv, fullResult.error) + "\n");
-          setExitCode(exitCode(fullResult.error));
-          return;
+          return exitCode(fullResult.error);
         }
         const { docs: fullDocs, total: fullTotal } = fullResult.value;
 
@@ -756,8 +746,7 @@ export default defineCommand({
 
       if (!result.ok) {
         inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
-        setExitCode(exitCode(result.error));
-        return;
+        return exitCode(result.error);
       }
 
       const { docs, total, omitted_invalid: omittedInvalidDefault } = result.value;

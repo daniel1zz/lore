@@ -3,7 +3,7 @@
  */
 
 import { defineCommand } from "citty";
-import { setExitCode } from "../run-scope.js";
+
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatErrorFor, formatTable, parsePositiveIntArg } from "../utils.js";
 import type { DocId } from "@lore/core";
@@ -47,28 +47,24 @@ export default defineCommand({
       const limitResult = parsePositiveIntArg(args.limit ?? "20", "--limit", { min: 1 });
       if (!limitResult.ok) {
         inv.io.stderr.write(limitResult.message + "\n");
-        setExitCode(2);
-        return;
+        return 2;
       }
       const result = await app.versionService.log(args.id as DocId, { limit: limitResult.value });
 
       if (!result.ok) {
         inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
-        setExitCode(exitCode(result.error));
-        return;
+        return exitCode(result.error);
       }
 
       const resolved = await resolveDocId(attributionStore, args.id);
       if (!resolved.ok) {
         inv.io.stderr.write(formatErrorFor(inv, resolved.error) + "\n");
-        setExitCode(exitCode(resolved.error));
-        return;
+        return exitCode(resolved.error);
       }
       const loaded = await loadVersionAttributions(attributionStore, resolved.value, limitResult.value);
       if (!loaded.ok) {
         inv.io.stderr.write(formatErrorFor(inv, loaded.error) + "\n");
-        setExitCode(exitCode(loaded.error));
-        return;
+        return exitCode(loaded.error);
       }
       const attributionByVersion = new Map<number, WriteAttribution>(loaded.value.map((l) => [l.version.version, l.attribution]));
       const attributionOf = (version: number): WriteAttribution => {

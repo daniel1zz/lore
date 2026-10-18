@@ -187,7 +187,7 @@
  */
 
 import { defineCommand } from "citty";
-import { exitCli, setExitCode } from "../run-scope.js";
+import { exitCli } from "../cli-exit.js";
 import { z } from "zod";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatError, formatErrorFor, resolveActor } from "../utils.js";
@@ -242,6 +242,7 @@ import { invocationOf } from "../command-invocation.js";
 import { renderPredicateContractsExplain } from "../../../service/predicate-contracts.js";
 import { printLine } from "../output.js";
 import type { CliIo } from "../output.js";
+import type { ExitReport } from "../cli-exit.js";
 
 /**
  * Real `GateBypassAuditDeps.openRecordGateSkip` wiring for the `LORE_GATE_BYPASS=1`
@@ -383,8 +384,7 @@ export default defineCommand({
         // SPEC-080 G4 — best-effort env_bypass audit trace, exit-0 unconditional).
         if (invocationOf(context).env["LORE_GATE_BYPASS"] === "1") {
           await auditGateBypass("spec-create", invocationOf(context));
-          setExitCode(0);
-          return;
+          return 0;
         }
 
         const rawInputJson = args["input-json"];
@@ -394,8 +394,7 @@ export default defineCommand({
         } catch (e) {
           const message = e instanceof Error ? e.message : String(e);
           inv.io.stderr.write(`Error: --input-json is not valid JSON: ${message}\n`);
-          setExitCode(2);
-          return;
+          return 2;
         }
 
         const parsed = gateSpecCreateInputSchema.safeParse(candidate);
@@ -404,14 +403,13 @@ export default defineCommand({
           inv.io.stderr.write(
             `Error: --input-json does not match the expected shape: ${issue?.message ?? "invalid input"}\n`,
           );
-          setExitCode(2);
-          return;
+          return 2;
         }
 
         const { app, config } = loadLoreApp({ inv });
         try {
           if (isGateDisabledByConfig(inv.io, "spec-create", config)) return;
-          await runSpecCreateGate(app, parsed.data, config, inv);
+          return await runSpecCreateGate(app, parsed.data, config, inv);
         } finally {
           app.close();
         }
@@ -440,14 +438,13 @@ export default defineCommand({
         // SPEC-080 G4 — best-effort env_bypass audit trace, exit-0 unconditional).
         if (invocationOf(context).env["LORE_GATE_BYPASS"] === "1") {
           await auditGateBypass("spec-promote", invocationOf(context));
-          setExitCode(0);
-          return;
+          return 0;
         }
 
         const { app, config } = loadLoreApp({ inv });
         try {
           if (isGateDisabledByConfig(inv.io, "spec-promote", config)) return;
-          await runSpecPromoteGate(app, args.spec as string, config, inv);
+          return await runSpecPromoteGate(app, args.spec as string, config, inv);
         } finally {
           app.close();
         }
@@ -476,14 +473,13 @@ export default defineCommand({
         // SPEC-080 G4 — best-effort env_bypass audit trace, exit-0 unconditional).
         if (invocationOf(context).env["LORE_GATE_BYPASS"] === "1") {
           await auditGateBypass("plan-promote", invocationOf(context));
-          setExitCode(0);
-          return;
+          return 0;
         }
 
         const { app, config } = loadLoreApp({ inv });
         try {
           if (isGateDisabledByConfig(inv.io, "plan-promote", config)) return;
-          await runPlanPromoteGate(app, args.plan as string, config, inv);
+          return await runPlanPromoteGate(app, args.plan as string, config, inv);
         } finally {
           app.close();
         }
@@ -514,15 +510,14 @@ export default defineCommand({
         // SPEC-080 G4 — best-effort env_bypass audit trace, exit-0 unconditional).
         if (invocationOf(context).env["LORE_GATE_BYPASS"] === "1") {
           await auditGateBypass("task-claim", invocationOf(context));
-          setExitCode(0);
-          return;
+          return 0;
         }
 
         const { app, config } = loadLoreApp({ inv });
         try {
           if (isGateDisabledByConfig(inv.io, "task-claim", config)) return;
           const by = resolveActor(inv.io, undefined, inv.env, inv.cwd, inv.user);
-          await runTaskClaimGate(app, args.task as string, by, config, inv);
+          return await runTaskClaimGate(app, args.task as string, by, config, inv);
         } finally {
           app.close();
         }
@@ -554,15 +549,14 @@ export default defineCommand({
         // SPEC-080 G4 — best-effort env_bypass audit trace, exit-0 unconditional).
         if (invocationOf(context).env["LORE_GATE_BYPASS"] === "1") {
           await auditGateBypass("phase-claim", invocationOf(context));
-          setExitCode(0);
-          return;
+          return 0;
         }
 
         const { app, config } = loadLoreApp({ inv });
         try {
           if (isGateDisabledByConfig(inv.io, "phase-claim", config)) return;
           const by = resolveActor(inv.io, undefined, inv.env, inv.cwd, inv.user);
-          await runPhaseClaimGate(app, args.phase as string, by, config, inv);
+          return await runPhaseClaimGate(app, args.phase as string, by, config, inv);
         } finally {
           app.close();
         }
@@ -605,8 +599,7 @@ export default defineCommand({
               "(plan-close has no other CLI pre-flight check yet — its real gate runs " +
               "at `lore set`'s archival transition).\n",
           );
-          setExitCode(2);
-          return;
+          return 2;
         }
         // reason: matches this file's established stdout convention for the
         // other five subcommands' pass/feed output (`console.log`, not
@@ -670,7 +663,7 @@ async function runSpecCreateGate(
   input: GateSpecCreateInput,
   config: LoreConfig | undefined,
   inv: Invocation,
-): Promise<void> {
+): Promise<ExitReport> {
   const parentDoc = await resolveParentDoc(app, input.parent_id);
   const checkpoint = requireCheckpoint("spec-create");
 
@@ -706,8 +699,7 @@ async function runSpecCreateGate(
   // `tests/integration/p4-e2e-feed-provenance-loop.bun.test.ts`.
   if (!isCheckpointBlocked(results)) {
     printLine(inv.io.stdout, "gate: pass");
-    setExitCode(0);
-    return;
+    return 0;
   }
 
   const rule = await findFeedingSkill(app, SPEC_CREATE_PRODUCED_TYPE);
@@ -725,7 +717,7 @@ async function runSpecCreateGate(
   printLine(inv.io.stdout, checkpoint.feed(feedCtx, failures));
   emitGateReportIssueHint(inv.io, config);
   recordHookGateDeny(app, "spec-create", failures, undefined, inv);
-  setExitCode(4);
+  return 4;
 }
 
 /**
@@ -835,12 +827,11 @@ async function runPlanPromoteGate(
   planIdOrSlug: string,
   config: LoreConfig | undefined,
   inv: Invocation,
-): Promise<void> {
+): Promise<ExitReport> {
   const bundleResult = await app.corpusService.getPlanBundle(planIdOrSlug);
   if (!bundleResult.ok) {
     inv.io.stderr.write(formatErrorFor(inv, bundleResult.error) + "\n");
-    setExitCode(exitCode(bundleResult.error));
-    return;
+    return exitCode(bundleResult.error);
   }
 
   const checkpoint = requireCheckpoint("plan-promote");
@@ -855,12 +846,11 @@ async function runPlanPromoteGate(
     printLine(inv.io.stdout, checkpoint.feed(ctx, failures));
     emitGateReportIssueHint(inv.io, config);
     recordHookGateDeny(app, "plan-promote", failures, planIdOrSlug, inv);
-    setExitCode(4);
-    return;
+    return 4;
   }
 
   printLine(inv.io.stdout, "gate: pass");
-  setExitCode(0);
+  return 0;
 }
 
 /**
@@ -927,12 +917,11 @@ async function runTaskClaimGate(
   by: string,
   config: LoreConfig | undefined,
   inv: Invocation,
-): Promise<void> {
+): Promise<ExitReport> {
   const taskResult = await app.corpusService.get(taskIdOrSlug);
   if (!taskResult.ok) {
     inv.io.stderr.write(formatErrorFor(inv, taskResult.error) + "\n");
-    setExitCode(exitCode(taskResult.error));
-    return;
+    return exitCode(taskResult.error);
   }
 
   const task = taskResult.value.doc;
@@ -944,8 +933,7 @@ async function runTaskClaimGate(
       value: task.type,
     };
     inv.io.stderr.write(formatErrorFor(inv, error) + "\n");
-    setExitCode(exitCode(error));
-    return;
+    return exitCode(error);
   }
 
   const checkpoint = requireCheckpoint("task-claim");
@@ -963,8 +951,7 @@ async function runTaskClaimGate(
   const sessionIdResult = resolveClaimSessionId(inv.env);
   if (!sessionIdResult.ok) {
     inv.io.stderr.write(formatErrorFor(inv, sessionIdResult.error) + "\n");
-    setExitCode(exitCode(sessionIdResult.error));
-    return;
+    return exitCode(sessionIdResult.error);
   }
   const candidateSessionId = sessionIdResult.value;
 
@@ -973,8 +960,7 @@ async function runTaskClaimGate(
   const verifiedIdentity = await app.verifiedInvocationIdentity?.();
   if (verifiedIdentity !== undefined && !verifiedIdentity.ok) {
     inv.io.stderr.write(formatErrorFor(inv, verifiedIdentity.error) + "\n");
-    setExitCode(exitCode(verifiedIdentity.error));
-    return;
+    return exitCode(verifiedIdentity.error);
   }
   const candidateRun = verifiedIdentity?.value?.harnessRun ?? null;
 
@@ -1019,14 +1005,12 @@ async function runTaskClaimGate(
       // store error) still exits loud, unchanged.
       if (!isNonPlanParentError(bundleResult.error)) {
         inv.io.stderr.write(formatErrorFor(inv, bundleResult.error) + "\n");
-        setExitCode(exitCode(bundleResult.error));
-        return;
+        return exitCode(bundleResult.error);
       }
       const siblingsResult = await app.taskWorkflowService.findAdhocSiblingTasks();
       if (!siblingsResult.ok) {
         inv.io.stderr.write(formatErrorFor(inv, siblingsResult.error) + "\n");
-        setExitCode(exitCode(siblingsResult.error));
-        return;
+        return exitCode(siblingsResult.error);
       }
       ctx = {
         ...buildUpstreamSpecContext(undefined),
@@ -1053,12 +1037,11 @@ async function runTaskClaimGate(
     printLine(inv.io.stdout, checkpoint.feed(ctx, failures));
     emitGateReportIssueHint(inv.io, config);
     recordHookGateDeny(app, "task-claim", failures, taskIdOrSlug, inv, by);
-    setExitCode(4);
-    return;
+    return 4;
   }
 
   printLine(inv.io.stdout, "gate: pass");
-  setExitCode(0);
+  return 0;
 }
 
 /**
@@ -1099,12 +1082,11 @@ async function runPhaseClaimGate(
   by: string,
   config: LoreConfig | undefined,
   inv: Invocation,
-): Promise<void> {
+): Promise<ExitReport> {
   const phaseResult = await app.corpusService.get(phaseIdOrSlug);
   if (!phaseResult.ok) {
     inv.io.stderr.write(formatErrorFor(inv, phaseResult.error) + "\n");
-    setExitCode(exitCode(phaseResult.error));
-    return;
+    return exitCode(phaseResult.error);
   }
 
   const phase = phaseResult.value.doc;
@@ -1116,8 +1098,7 @@ async function runPhaseClaimGate(
       value: phase.type,
     };
     inv.io.stderr.write(formatErrorFor(inv, error) + "\n");
-    setExitCode(exitCode(error));
-    return;
+    return exitCode(error);
   }
 
   const checkpoint = requireCheckpoint("phase-claim");
@@ -1132,8 +1113,7 @@ async function runPhaseClaimGate(
   const sessionIdResult = resolveClaimSessionId(inv.env);
   if (!sessionIdResult.ok) {
     inv.io.stderr.write(formatErrorFor(inv, sessionIdResult.error) + "\n");
-    setExitCode(exitCode(sessionIdResult.error));
-    return;
+    return exitCode(sessionIdResult.error);
   }
   const candidateSessionId = sessionIdResult.value;
 
@@ -1153,8 +1133,7 @@ async function runPhaseClaimGate(
     const bundleResult = await app.corpusService.getPlanBundle(phase.parent_id);
     if (!bundleResult.ok) {
       inv.io.stderr.write(formatErrorFor(inv, bundleResult.error) + "\n");
-      setExitCode(exitCode(bundleResult.error));
-      return;
+      return exitCode(bundleResult.error);
     }
     ctx = {
       ...buildUpstreamSpecContext(bundleResult.value.spec),
@@ -1171,12 +1150,11 @@ async function runPhaseClaimGate(
     printLine(inv.io.stdout, checkpoint.feed(ctx, failures));
     emitGateReportIssueHint(inv.io, config);
     recordHookGateDeny(app, "phase-claim", failures, phaseIdOrSlug, inv, by);
-    setExitCode(4);
-    return;
+    return 4;
   }
 
   printLine(inv.io.stdout, "gate: pass");
-  setExitCode(0);
+  return 0;
 }
 
 /**
@@ -1224,12 +1202,11 @@ async function runSpecPromoteGate(
   specIdOrSlug: string,
   config: LoreConfig | undefined,
   inv: Invocation,
-): Promise<void> {
+): Promise<ExitReport> {
   const listResult = await requireAcService(app).listCriteria(specIdOrSlug);
   if (!listResult.ok) {
     inv.io.stderr.write(formatErrorFor(inv, listResult.error) + "\n");
-    setExitCode(exitCode(listResult.error));
-    return;
+    return exitCode(listResult.error);
   }
 
   // reason: task-lore-gate-spec-promote-cli-pre-flight-is-not-spec-kind — the
@@ -1239,8 +1216,7 @@ async function runSpecPromoteGate(
   const specResult = await app.corpusService.get(specIdOrSlug);
   if (!specResult.ok) {
     inv.io.stderr.write(formatErrorFor(inv, specResult.error) + "\n");
-    setExitCode(exitCode(specResult.error));
-    return;
+    return exitCode(specResult.error);
   }
   const rawSpecKind = specResult.value.doc.extra["spec_kind"];
   const specKind: SpecKind =
@@ -1256,8 +1232,7 @@ async function runSpecPromoteGate(
   const citesResult = await app.corpusService.specCitesLiveRule(specResult.value.doc.extra);
   if (!citesResult.ok) {
     inv.io.stderr.write(formatErrorFor(inv, citesResult.error) + "\n");
-    setExitCode(exitCode(citesResult.error));
-    return;
+    return exitCode(citesResult.error);
   }
 
   const { criteria } = listResult.value;
@@ -1279,8 +1254,7 @@ async function runSpecPromoteGate(
     inv.io.stderr.write(checkpoint.feed(ctx, failures));
     emitGateReportIssueHint(inv.io, config);
     recordHookGateDeny(app, "spec-promote", failures, specIdOrSlug, inv);
-    setExitCode(4);
-    return;
+    return 4;
   }
 
   printLine(inv.io.stdout, `gate: pass (${criteria.length} acceptance criteria declared)`);

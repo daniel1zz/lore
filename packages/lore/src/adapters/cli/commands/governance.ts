@@ -101,7 +101,7 @@
  */
 
 import { readFileSync } from "node:fs";
-import { setExitCode } from "../run-scope.js";
+
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { defineCommand } from "citty";
@@ -278,16 +278,14 @@ export default defineCommand({
       inv.io.stderr.write(
         `Error: lore governance accepts at most one topic (requested: ${distinctTopics.join(", ")})\n`,
       );
-      setExitCode(2);
-      return;
+      return 2;
     }
 
     const requestedTopic = distinctTopics[0];
     let topic: GovernanceTopic;
     if (requestedTopic === undefined || requestedTopic === RETIRED_GOVERNANCE_TOPIC) {
       inv.io.stderr.write(RETIRED_TOPIC_MESSAGE);
-      setExitCode(2);
-      return;
+      return 2;
     } else if (isKnownGovernanceTopic(requestedTopic)) {
       topic = requestedTopic;
     } else {
@@ -295,8 +293,7 @@ export default defineCommand({
       inv.io.stderr.write(
         `Error: unknown governance topic "${requestedTopic}" (known topics: ${knownTopics})\n`,
       );
-      setExitCode(2);
-      return;
+      return 2;
     }
 
     // spec-context-provenance-injected-corpus-global-state-and-a D2 —
@@ -324,8 +321,7 @@ export default defineCommand({
     const result = readGovernanceAsset(assetsRoot, GOVERNANCE_TOPIC_ASSETS[topic]);
     if (!result.ok) {
       inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
-      setExitCode(exitCode(result.error));
-      return;
+      return exitCode(result.error);
     }
 
     // The deprecation line is written AFTER a successful read (never on a

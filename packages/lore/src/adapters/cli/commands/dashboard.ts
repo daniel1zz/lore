@@ -80,7 +80,7 @@
  */
 
 import { dirname, join } from "node:path";
-import { exitCli } from "../run-scope.js";
+import { exitCli } from "../cli-exit.js";
 import { spawn } from "node:child_process";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { defineCommand } from "citty";

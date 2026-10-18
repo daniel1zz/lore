@@ -76,7 +76,7 @@
  */
 
 import type { ArgsDef, CommandContext, CommandDef, Resolvable } from "citty";
-import { exitCli } from "./run-scope.js";
+import { exitCli } from "./cli-exit.js";
 import { invocationOf } from "./command-invocation.js";
 
 // ─── Declared-flag derivation (mirrors citty's own resolveArgs) ────────────

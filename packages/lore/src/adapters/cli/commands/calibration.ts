@@ -22,7 +22,7 @@
  */
 
 import { spawnSync } from "node:child_process";
-import { setExitCode } from "../run-scope.js";
+
 import { defineCommand } from "citty";
 import { createAuditReversalProbe, createGitReversalProbes, type ClassCalibrationStats } from "../../../service/autonomy-calibration-service.js";
 import { DecisionService } from "../../../service/decision-service.js";
@@ -66,8 +66,7 @@ export default defineCommand({
     const inv = invocationOf(context);
     if (!args.stats && !args.observe) {
       inv.io.stderr.write("Error: `lore calibration` requires --stats or --observe.\n");
-      setExitCode(2);
-      return;
+      return 2;
     }
 
     const { app, dbPath } = loadLoreApp({ inv });
@@ -75,8 +74,7 @@ export default defineCommand({
       const autonomy = await collectAutonomyStats(dbPath, app.repoRoot, args.observe === true);
       if (!autonomy.ok) {
         inv.io.stderr.write(formatErrorFor(inv, autonomy.error) + "\n");
-        setExitCode(exitCode(autonomy.error));
-        return;
+        return exitCode(autonomy.error);
       }
       if (!args.stats) {
         printLine(inv.io.stdout, autonomy.value.swept === null ? "" : `Observed ${autonomy.value.swept.reversed} reversed, ${autonomy.value.swept.stood} stood (${autonomy.value.swept.probed} decision(s) probed).`);
@@ -90,8 +88,7 @@ export default defineCommand({
 
       if (!result.ok) {
         inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
-        setExitCode(exitCode(result.error));
-        return;
+        return exitCode(result.error);
       }
 
       const stats = result.value;

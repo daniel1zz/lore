@@ -18,7 +18,7 @@
  */
 
 import { defineCommand } from "citty";
-import { exitCli, setExitCode } from "../run-scope.js";
+import { exitCli } from "../cli-exit.js";
 import { loadLoreApp } from "../loader.js";
 import {
   runMigrationCoverage,
@@ -69,8 +69,7 @@ const migrationCommand = defineCommand({
       if (args.json) {
         // CLI surface — console.log is intentional output here
         printLine(inv.io.stdout, JSON.stringify({ ok: result.passed, data: result }, null, 2)); // CLI surface
-        setExitCode(result.passed ? 0 : 1);
-        return;
+        return result.passed ? 0 : 1;
       }
 
       // Human-readable output
@@ -92,8 +91,7 @@ const migrationCommand = defineCommand({
       }
 
       printLine(inv.io.stdout, `\nResult:        ${result.passed ? "PASSED" : "FAILED"}`); // CLI surface
-      setExitCode(result.passed ? 0 : 1);
-      return;
+      return result.passed ? 0 : 1;
     } finally {
       app.close();
     }
@@ -123,8 +121,7 @@ const treeCommand = defineCommand({
 
       if (args.json) {
         printLine(inv.io.stdout, JSON.stringify({ ok: result.passed, data: result }, null, 2)); // CLI surface
-        setExitCode(result.passed ? 0 : 1);
-        return;
+        return result.passed ? 0 : 1;
       }
 
       // Human-readable output
@@ -160,8 +157,7 @@ const treeCommand = defineCommand({
       }
 
       printLine(inv.io.stdout, `\nResult: ${result.passed ? "PASSED" : "FAILED"}`); // CLI surface
-      setExitCode(result.passed ? 0 : 1);
-      return;
+      return result.passed ? 0 : 1;
     } finally {
       app.close();
     }
@@ -191,8 +187,7 @@ const linksCommand = defineCommand({
 
       if (args.json) {
         printLine(inv.io.stdout, JSON.stringify({ ok: result.passed, data: result }, null, 2)); // CLI surface
-        setExitCode(result.passed ? 0 : 1);
-        return;
+        return result.passed ? 0 : 1;
       }
 
       // Human-readable output
@@ -228,8 +223,7 @@ const linksCommand = defineCommand({
       }
 
       printLine(inv.io.stdout, `\nResult: ${result.passed ? "PASSED" : "FAILED"}`); // CLI surface
-      setExitCode(result.passed ? 0 : 1);
-      return;
+      return result.passed ? 0 : 1;
     } finally {
       app.close();
     }
@@ -262,8 +256,7 @@ const typesCommand = defineCommand({
 
       if (args.json) {
         printLine(inv.io.stdout, JSON.stringify({ ok: result.passed, data: result }, null, 2)); // CLI surface
-        setExitCode(result.passed ? 0 : 1);
-        return;
+        return result.passed ? 0 : 1;
       }
 
       // Human-readable output
@@ -287,8 +280,7 @@ const typesCommand = defineCommand({
       }
 
       printLine(inv.io.stdout, `\nResult: ${result.passed ? "PASSED" : "FAILED"}`); // CLI surface
-      setExitCode(result.passed ? 0 : 1);
-      return;
+      return result.passed ? 0 : 1;
     } finally {
       app.close();
     }
@@ -320,8 +312,7 @@ const ftsCommand = defineCommand({
 
       if (args.json) {
         printLine(inv.io.stdout, JSON.stringify({ ok: result.passed, data: result }, null, 2)); // CLI surface
-        setExitCode(result.passed ? 0 : 1);
-        return;
+        return result.passed ? 0 : 1;
       }
 
       // Human-readable output
@@ -342,8 +333,7 @@ const ftsCommand = defineCommand({
       }
 
       printLine(inv.io.stdout, `\nResult: ${result.passed ? "PASSED" : "FAILED"}`); // CLI surface
-      setExitCode(result.passed ? 0 : 1);
-      return;
+      return result.passed ? 0 : 1;
     } finally {
       app.close();
     }
@@ -373,8 +363,7 @@ const placeholdersCommand = defineCommand({
 
       if (args.json) {
         printLine(inv.io.stdout, JSON.stringify({ ok: result.passed, data: result }, null, 2)); // CLI surface
-        setExitCode(result.passed ? 0 : 1);
-        return;
+        return result.passed ? 0 : 1;
       }
 
       // Human-readable output
@@ -403,8 +392,7 @@ const placeholdersCommand = defineCommand({
       }
 
       printLine(inv.io.stdout, `\nResult: ${result.passed ? "PASSED" : "FAILED"}`); // CLI surface
-      setExitCode(result.passed ? 0 : 1);
-      return;
+      return result.passed ? 0 : 1;
     } finally {
       app.close();
     }

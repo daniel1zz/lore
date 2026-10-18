@@ -78,7 +78,7 @@
  */
 
 import { spawnSync } from "node:child_process";
-import { exitCli, setExitCode } from "../run-scope.js";
+import { exitCli } from "../cli-exit.js";
 import { readFileSync } from "node:fs";
 import { defineCommand } from "citty";
 import { loadLoreApp } from "../loader.js";
@@ -191,8 +191,7 @@ export default defineCommand({
       const bundleResult = await app.corpusService.getPlanBundle(args.plan);
       if (!bundleResult.ok) {
         inv.io.stderr.write(formatErrorFor(inv, bundleResult.error) + "\n");
-        setExitCode(exitCode(bundleResult.error));
-        return;
+        return exitCode(bundleResult.error);
       }
       const bundle = bundleResult.value;
 
@@ -204,8 +203,7 @@ export default defineCommand({
           message: `Plan '${bundle.plan.slug}' has zero child tasks — nothing to assess.`,
         };
         inv.io.stderr.write(formatErrorFor(inv, noTasksError) + "\n");
-        setExitCode(exitCode(noTasksError));
-        return;
+        return exitCode(noTasksError);
       }
 
       // ─── Step 2.5: staleness advisory (SPEC-106 §Design Decisions D3) ─────────
@@ -219,8 +217,7 @@ export default defineCommand({
       const freshnessResult = await app.corpusService.getAssessmentFreshness(bundle.plan.id);
       if (!freshnessResult.ok) {
         inv.io.stderr.write(formatErrorFor(inv, freshnessResult.error) + "\n");
-        setExitCode(exitCode(freshnessResult.error));
-        return;
+        return exitCode(freshnessResult.error);
       }
       const freshness = freshnessResult.value;
       const freshnessCheck = assessmentFreshness(freshness.newestAssessmentAt, freshness.newestTaskActivityAt);
@@ -261,13 +258,11 @@ export default defineCommand({
           // operator to look at git (AC-2, same task).
           if (gitResult.error && (gitResult.error as NodeJS.ErrnoException).code === "ENOBUFS") {
             inv.io.stderr.write(formatGitDiffEnobufsMessage(args.diff, maxBuffer, maxDiffChars) + "\n");
-            setExitCode(2);
-            return;
+            return 2;
           }
           const reason = gitResult.error?.message ?? gitResult.stderr?.trim() ?? `git exited ${gitResult.status}`;
           inv.io.stderr.write(`Error: git diff ${args.diff} failed: ${reason}\n`);
-          setExitCode(2);
-          return;
+          return 2;
         }
         diffText = gitResult.stdout;
         diffSource = { mode: "explicit_diff", range: args.diff };
@@ -277,8 +272,7 @@ export default defineCommand({
         } catch (e) {
           const message = e instanceof Error ? e.message : "unknown error";
           inv.io.stderr.write(`Error: could not read --diff-file: ${message}\n`);
-          setExitCode(2);
-          return;
+          return 2;
         }
         diffSource = { mode: "explicit_diff_file", path: args["diff-file"] };
       } else {
@@ -359,8 +353,7 @@ export default defineCommand({
             "Error: AI is required for `lore assess` but is disabled for this surface by " +
               "config.ai.default_per_surface. Pass --ai to override.\n",
           );
-          setExitCode(2);
-          return;
+          return 2;
         }
       }
 
@@ -399,8 +392,7 @@ export default defineCommand({
         // hint's default "Retry with --no-ai" is actively misleading here (SPEC-029 AC-AR-5,
         // AC-AR-4 preserves the underlying error shape/exit code unchanged).
         inv.io.stderr.write(formatErrorFor(inv, assessResult.error, { aiHasNoFallback: true }) + "\n");
-        setExitCode(exitCode(assessResult.error));
-        return;
+        return exitCode(assessResult.error);
       }
       const result = assessResult.value;
 
@@ -419,8 +411,7 @@ export default defineCommand({
       const stampVerdictResult = await app.corpusService.stampVerdictDistribution(bundle.tasks);
       if (!stampVerdictResult.ok) {
         inv.io.stderr.write(formatErrorFor(inv, stampVerdictResult.error) + "\n");
-        setExitCode(exitCode(stampVerdictResult.error));
-        return;
+        return exitCode(stampVerdictResult.error);
       }
       const stampVerdictDistribution = stampVerdictResult.value;
 
@@ -439,16 +430,14 @@ export default defineCommand({
       });
       if (!createResult.ok) {
         inv.io.stderr.write(formatErrorFor(inv, createResult.error) + "\n");
-        setExitCode(exitCode(createResult.error));
-        return;
+        return exitCode(createResult.error);
       }
       const assessmentDoc = createResult.value;
 
       const linkResult = await app.corpusService.link(assessmentDoc.id, bundle.plan.id, "informs");
       if (!linkResult.ok) {
         inv.io.stderr.write(formatErrorFor(inv, linkResult.error) + "\n");
-        setExitCode(exitCode(linkResult.error));
-        return;
+        return exitCode(linkResult.error);
       }
 
       // ─── Step 7: render ─────────────────────────────────────────────────────────

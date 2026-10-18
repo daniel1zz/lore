@@ -33,7 +33,7 @@
  */
 
 import { defineCommand } from "citty";
-import { setExitCode } from "../run-scope.js";
+
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatErrorFor } from "../utils.js";
 import { buildSeatListJsonPayload, formatSeatList } from "../seat-render.js";
@@ -74,8 +74,7 @@ export default defineCommand({
     try {
       if (app.seatService === undefined) {
         inv.io.stderr.write("Error: SeatService not wired on this App instance.\n");
-        setExitCode(1);
-        return;
+        return 1;
       }
       const seatService = app.seatService;
       const target = String(args.target);
@@ -85,8 +84,7 @@ export default defineCommand({
         const result = await seatService.list();
         if (!result.ok) {
           inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
-          setExitCode(exitCode(result.error));
-          return;
+          return exitCode(result.error);
         }
         if (args.json) {
           printLine(inv.io.stdout, JSON.stringify(buildSeatListJsonPayload(result.value), null, 2));
@@ -99,16 +97,14 @@ export default defineCommand({
       if (target === "resume" || target === "remove") {
         if (planArg === undefined || planArg.length === 0) {
           inv.io.stderr.write(`Error: \`lore seat ${target}\` requires a plan id/slug: lore seat ${target} <plan>\n`);
-          setExitCode(2);
-          return;
+          return 2;
         }
 
         if (target === "resume") {
           const result = await seatService.resume(planArg);
           if (!result.ok) {
             inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
-            setExitCode(exitCode(result.error));
-            return;
+            return exitCode(result.error);
           }
           if (args.json) {
             printLine(inv.io.stdout, JSON.stringify({ ok: true, data: result.value }, null, 2));
@@ -122,8 +118,7 @@ export default defineCommand({
         const result = await seatService.remove(planArg, { force: args.force === true });
         if (!result.ok) {
           inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
-          setExitCode(exitCode(result.error));
-          return;
+          return exitCode(result.error);
         }
         if (args.json) {
           printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { removed: planArg } }, null, 2));
@@ -141,8 +136,7 @@ export default defineCommand({
       const result = await seatService.enter(target, { mainCwd: inv.cwd });
       if (!result.ok) {
         inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
-        setExitCode(exitCode(result.error));
-        return;
+        return exitCode(result.error);
       }
       if (args.json) {
         printLine(inv.io.stdout, JSON.stringify({ ok: true, data: result.value }, null, 2));

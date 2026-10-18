@@ -181,7 +181,7 @@
  */
 
 import { spawnSync } from "node:child_process";
-import { setExitCode } from "../run-scope.js";
+
 import { resolve as resolvePath } from "node:path";
 import { createInterface } from "node:readline/promises";
 import { defineCommand } from "citty";
@@ -504,8 +504,7 @@ export default defineCommand({
             "Error: --falsify requires the PLAN positional (the attested-red runner is not " +
               "reachable from the ad-hoc --task path).\n",
           );
-          setExitCode(2);
-          return;
+          return 2;
         }
         const falsifyResult = await requireVerifyRunnerService(app).verifyFalsifier(planArg, falsifyAcId, {
           ...(taskArg !== undefined ? { explicitTaskIdOrSlug: taskArg } : {}),
@@ -515,8 +514,7 @@ export default defineCommand({
         });
         if (!falsifyResult.ok) {
           inv.io.stderr.write(formatErrorFor(inv, falsifyResult.error) + "\n");
-          setExitCode(exitCode(falsifyResult.error));
-          return;
+          return exitCode(falsifyResult.error);
         }
         const {
           task,
@@ -572,8 +570,7 @@ export default defineCommand({
         // least one executed AC's ... guard downgraded its result to
         // inconclusive") rather than inventing a second meaning for 3 on this
         // branch: an inconclusive green control is never a silent success.
-        setExitCode(falsifyOutcome === "inconclusive" ? 3 : 0);
-        return;
+        return falsifyOutcome === "inconclusive" ? 3 : 0;
       }
 
       let result: Result<VerifyPlanResult, LoreError>;
@@ -602,8 +599,7 @@ export default defineCommand({
             "Error: PLAN positional is required unless --task names a SPEC-069 --adhoc task " +
               "(the ad-hoc runner path omits PLAN entirely; see 'lore verify --help').\n",
           );
-          setExitCode(2);
-          return;
+          return 2;
         }
 
         // Resolved directly via app.corpusService (no new VerifyRunnerService
@@ -612,15 +608,13 @@ export default defineCommand({
         const taskResult = await app.corpusService.get(taskArg);
         if (!taskResult.ok) {
           inv.io.stderr.write(formatErrorFor(inv, taskResult.error) + "\n");
-          setExitCode(exitCode(taskResult.error));
-          return;
+          return exitCode(taskResult.error);
         }
 
         const specsResult = await app.corpusService.listFull({ type: "spec" });
         if (!specsResult.ok) {
           inv.io.stderr.write(formatErrorFor(inv, specsResult.error) + "\n");
-          setExitCode(exitCode(specsResult.error));
-          return;
+          return exitCode(specsResult.error);
         }
 
         result = await requireVerifyRunnerService(app).verifyAdhocTask(
@@ -640,8 +634,7 @@ export default defineCommand({
 
       if (!result.ok) {
         inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
-        setExitCode(exitCode(result.error));
-        return;
+        return exitCode(result.error);
       }
 
       const { task, results, skipped, warnings } = result.value;
@@ -682,8 +675,7 @@ export default defineCommand({
             2,
           ),
         );
-        setExitCode(verifyExitCode);
-        return;
+        return verifyExitCode;
       }
 
       // SPEC-063 §Design Decisions D2/D4 — the execution-root line (when
@@ -717,7 +709,7 @@ export default defineCommand({
       const inconclusiveSuffix = inconclusiveCount > 0 ? `, ${inconclusiveCount} inconclusive` : "";
       printLine(inv.io.stdout, `${passedCount} passed, ${failedCount} failed${inconclusiveSuffix}.`);
 
-      setExitCode(verifyExitCode);
+      return verifyExitCode;
     } finally {
       app.close();
     }

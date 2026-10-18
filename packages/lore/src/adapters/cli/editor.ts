@@ -19,7 +19,7 @@
  */
 
 import { spawnSync } from "child_process";
-import { exitCli } from "./run-scope.js";
+import { exitCli } from "./cli-exit.js";
 import { mkdtempSync, writeFileSync, readFileSync, rmSync } from "fs";
 import { join } from "path";
 import { ok, err } from "@lore/core";

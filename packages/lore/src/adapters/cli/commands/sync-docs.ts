@@ -16,7 +16,7 @@
  */
 
 import { resolve } from "path";
-import { setExitCode } from "../run-scope.js";
+
 import { defineCommand } from "citty";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatErrorFor } from "../utils.js";
@@ -62,8 +62,7 @@ export default defineCommand({
         } else {
           inv.io.stderr.write(formatErrorFor(inv, syncResult.error) + "\n");
         }
-        setExitCode(exitCode(syncResult.error));
-        return;
+        return exitCode(syncResult.error);
       }
 
       const report = syncResult.value;
@@ -72,7 +71,7 @@ export default defineCommand({
         inv.io.stdout.write(JSON.stringify({ ok: true, data: report }, null, 2) + "\n");
         // Exit with 4 if there are per-file errors even in JSON mode (AC-SD-9/10)
         if (report.errors.length > 0) {
-          setExitCode(4);
+          return 4;
         }
         return;
       }
@@ -128,8 +127,7 @@ export default defineCommand({
           inv.io.stderr.write(`    ${filename}: ${entry.error}\n`);
         }
         // Exit 4 for any per-file VALIDATION_ERROR (AC-SD-9, AC-SD-10)
-        setExitCode(4);
-        return;
+        return 4;
       }
     } finally {
       app.close();

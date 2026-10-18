@@ -54,7 +54,7 @@
  */
 
 import { dirname } from "path";
-import { exitCli } from "./run-scope.js";
+import { exitCli } from "./cli-exit.js";
 import { mergeDefaults, isAiConfigValidationError, extractClaim, resolveClaimTtlMinutes, resolveForeignCorpusWriteGateEnabled } from "@lore/core";
 import type {
   Invocation,

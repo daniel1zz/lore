@@ -37,7 +37,7 @@
  */
 
 import { dirname } from "path";
-import { exitCli, setExitCode } from "../run-scope.js";
+import { exitCli } from "../cli-exit.js";
 import { defineCommand } from "citty";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatError, formatErrorFor } from "../utils.js";
@@ -126,8 +126,7 @@ export default defineCommand({
         const service = app.specParentMigrationService;
         if (service === undefined) {
           inv.io.stderr.write("Internal error: SpecParentMigrationService not wired on App\n");
-          setExitCode(1);
-          return;
+          return 1;
         }
         const mode = args.revert === true ? "revert" : args.apply === true ? "apply" : "preview";
         const result =
@@ -138,8 +137,7 @@ export default defineCommand({
           } else {
             inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
           }
-          setExitCode(exitCode(result.error));
-          return;
+          return exitCode(result.error);
         }
         const report = result.value;
         const failed = report.errors.length > 0;
@@ -161,8 +159,7 @@ export default defineCommand({
               2,
             ),
           );
-          setExitCode(failed ? 4 : 0);
-          return;
+          return failed ? 4 : 0;
         }
         const label =
           mode === "revert" ? "Spec-parent revert complete" : mode === "apply" ? "Spec-parent migration complete" : "Spec-parent migration (preview)";
@@ -174,7 +171,7 @@ export default defineCommand({
         for (const skip of report.skipped) printLine(inv.io.stdout, `  skipped ${skip.slug}: ${skip.reason}`);
         for (const e of report.errors) printLine(inv.io.stdout, `  error ${e}`);
         if (mode === "preview") printLine(inv.io.stdout, "\nRe-run with --apply to execute, --revert to undo a previous apply.");
-        setExitCode(failed ? 4 : 0);
+        return failed ? 4 : 0;
       } finally {
         app.close();
       }
@@ -192,15 +189,13 @@ export default defineCommand({
       if (!projectDirResolved.ok) {
         app.close();
         inv.io.stderr.write(formatError(projectDirResolved.error) + "\n");
-        setExitCode(exitCode(projectDirResolved.error));
-        return;
+        return exitCode(projectDirResolved.error);
       }
       const projectDir = projectDirResolved.value;
       try {
         if (app.ordinalMigrationService === undefined) {
           inv.io.stderr.write("Internal error: OrdinalMigrationService not wired on App\n");
-          setExitCode(1);
-          return;
+          return 1;
         }
 
         const result = await app.ordinalMigrationService.migrateOrdinals({ dryRun, projectDir });
@@ -210,15 +205,13 @@ export default defineCommand({
           } else {
             inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
           }
-          setExitCode(exitCode(result.error));
-          return;
+          return exitCode(result.error);
         }
 
         const report = result.value;
         if (args.json) {
           printLine(inv.io.stdout, JSON.stringify({ ok: true, data: report }, null, 2));
-          setExitCode(report.errors.length > 0 ? 4 : 0);
-          return;
+          return report.errors.length > 0 ? 4 : 0;
         }
 
         const label = dryRun ? "Ordinal migration (dry-run)" : "Ordinal migration complete";
@@ -262,7 +255,7 @@ export default defineCommand({
         if (dryRun) {
           printLine(inv.io.stdout, "\nRe-run with --apply to execute.");
         }
-        setExitCode(report.errors.length > 0 ? 4 : 0);
+        return report.errors.length > 0 ? 4 : 0;
       } finally {
         app.close();
       }
@@ -281,16 +274,14 @@ export default defineCommand({
       try {
         if (app.outlineMigrationService === undefined) {
           inv.io.stderr.write("Internal error: OutlineMigrationService not wired on App\n");
-          setExitCode(1);
-          return;
+          return 1;
         }
         const service = app.outlineMigrationService;
 
         const prdResult = await app.corpusService.get(args.prd);
         if (!prdResult.ok) {
           inv.io.stderr.write(formatErrorFor(inv, prdResult.error) + "\n");
-          setExitCode(exitCode(prdResult.error));
-          return;
+          return exitCode(prdResult.error);
         }
         const prd = prdResult.value.doc;
 
@@ -326,8 +317,7 @@ export default defineCommand({
 
         if (args.json) {
           printLine(inv.io.stdout, JSON.stringify({ ok: refused === undefined, data: { verdicts, refused } }, null, 2));
-          setExitCode(refused === undefined ? 0 : 4);
-          return;
+          return refused === undefined ? 0 : 4;
         }
 
         const label = dryRun ? "PRD→outline migration (dry-run)" : "PRD→outline migration";
@@ -349,7 +339,7 @@ export default defineCommand({
         if (dryRun && refused === undefined) {
           printLine(inv.io.stdout, "\nRe-run without --dry-run to apply changes.");
         }
-        setExitCode(refused === undefined ? 0 : 4);
+        return refused === undefined ? 0 : 4;
       } finally {
         app.close();
       }
@@ -377,8 +367,7 @@ export default defineCommand({
             `${partial.phases_created} phases created / ${partial.tasks_archived} tasks archived / ` +
               `${partial.evidence_merged} evidence merged before failure — safe to re-run (idempotent)\n`,
           );
-          setExitCode(exitCode(cause));
-          return;
+          return exitCode(cause);
         }
 
         const report = result.value;
@@ -418,8 +407,7 @@ export default defineCommand({
 
         if (!result.ok) {
           inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
-          setExitCode(exitCode(result.error));
-          return;
+          return exitCode(result.error);
         }
 
         const report = result.value;
@@ -451,8 +439,7 @@ export default defineCommand({
 
         if (!result.ok) {
           inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
-          setExitCode(exitCode(result.error));
-          return;
+          return exitCode(result.error);
         }
 
         const report = result.value;
@@ -498,8 +485,7 @@ export default defineCommand({
         const analyzeResult = app.migrationService.analyze(args.from);
         if (!analyzeResult.ok) {
           inv.io.stderr.write(formatErrorFor(inv, analyzeResult.error) + "\n");
-          setExitCode(exitCode(analyzeResult.error));
-          return;
+          return exitCode(analyzeResult.error);
         }
 
         const report = analyzeResult.value;
@@ -556,8 +542,7 @@ export default defineCommand({
 
       if (!executeResult.ok) {
         inv.io.stderr.write(formatErrorFor(inv, executeResult.error) + "\n");
-        setExitCode(exitCode(executeResult.error));
-        return;
+        return exitCode(executeResult.error);
       }
 
       const migResult = executeResult.value;

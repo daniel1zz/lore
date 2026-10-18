@@ -34,7 +34,7 @@
  */
 
 import { defineCommand } from "citty";
-import { setExitCode } from "../run-scope.js";
+
 import { computeArchiveCandidates, resolveClaimTtlMinutes, resolveHandoffTtlMinutes } from "@lore/core";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatErrorFor, resolveActor } from "../utils.js";
@@ -80,8 +80,7 @@ export default defineCommand({
       // reason: both false (neither flag) and both true (both flags) collapse to
       // the same usage-error branch — exactly one of --sweep/--apply is required.
       inv.io.stderr.write("Exactly one of --sweep or --apply is required.\n");
-      setExitCode(2);
-      return;
+      return 2;
     }
 
     const { app, config } = loadLoreApp({ inv });
@@ -93,8 +92,7 @@ export default defineCommand({
     const listResult = await app.corpusService.listFull({});
     if (!listResult.ok) {
       inv.io.stderr.write(formatErrorFor(inv, listResult.error) + "\n");
-      setExitCode(exitCode(listResult.error));
-      return;
+      return exitCode(listResult.error);
     }
 
     const nowIso = new Date().toISOString();
@@ -111,8 +109,7 @@ export default defineCommand({
         const floorResult = await app.corpusService.checkSweepCandidateFloor(doc, c.rule);
         if (!floorResult.ok) {
           inv.io.stderr.write(formatErrorFor(inv, floorResult.error) + "\n");
-          setExitCode(exitCode(floorResult.error));
-          return;
+          return exitCode(floorResult.error);
         }
         if (floorResult.value !== null) refusingFloors.set(c.doc_id, floorResult.value.floor);
       }
@@ -146,8 +143,7 @@ export default defineCommand({
           );
         }
       }
-      setExitCode(candidates.length === 0 ? 0 : 3);
-      return;
+      return candidates.length === 0 ? 0 : 3;
     }
 
     // --apply
@@ -188,6 +184,6 @@ export default defineCommand({
       }
     }
     emitIssueCloseItems(inv.io, issueCloseItems, { json: args.json === true });
-    setExitCode(0);
+    return 0;
   },
 });

@@ -131,7 +131,7 @@
  */
 
 import { defineCommand } from "citty";
-import { exitCli, setExitCode } from "../run-scope.js";
+import { exitCli } from "../cli-exit.js";
 import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -1137,8 +1137,7 @@ export default defineCommand({
         for (const line of rendered.lines) printLine(inv.io.stdout, line);
       }
 
-      setExitCode(BINARY_PROVENANCE_EXIT_CODES[verdict.kind]);
-      return;
+      return BINARY_PROVENANCE_EXIT_CODES[verdict.kind];
     }
 
     // reason: AC-FR-5 (task-raise-the-evidence-tail-guard-s-predicate-to-its-
@@ -1158,14 +1157,12 @@ export default defineCommand({
             value: args.enumerate,
           };
           inv.io.stderr.write(formatErrorFor(inv, error) + "\n");
-          setExitCode(exitCode(error));
-          return;
+          return exitCode(error);
         }
         const membersResult = await enumerator(app, dbPath, inv.cwd);
         if (!membersResult.ok) {
           inv.io.stderr.write(formatErrorFor(inv, membersResult.error) + "\n");
-          setExitCode(exitCode(membersResult.error));
-          return;
+          return exitCode(membersResult.error);
         }
         const members = membersResult.value;
         if (args.json) {
@@ -1180,8 +1177,7 @@ export default defineCommand({
           printLine(inv.io.stdout, `${args.enumerate}: ${members.length} member(s)`);
           for (const member of members) printLine(inv.io.stdout, `  - ${member}`);
         }
-        setExitCode(0);
-        return;
+        return 0;
       } finally {
         app.close();
       }
@@ -1255,8 +1251,7 @@ export default defineCommand({
         for (const line of formatCheckClaudeMdHuman(renderInput)) printLine(inv.io.stdout, line);
       }
 
-      setExitCode(findings.length > 0 ? 3 : 0);
-      return;
+      return findings.length > 0 ? 3 : 0;
     }
 
     // ── check-fragments branch (spec-rule-store-git-tracked-fragment-selection-on-demand-skill, AC-RS-9) ──
@@ -1265,8 +1260,7 @@ export default defineCommand({
     // check are the ones `lore fragments check` uses, so the two commands cannot disagree on a
     // finding; only the stdout/stderr rendering below is repeated (it is module-private there).
     if (args["check-fragments"] === true) {
-      await runFragmentsCheckCommand(args, inv.cwd, inv, "lore status --check-fragments");
-      return;
+      return await runFragmentsCheckCommand(args, inv.cwd, inv, "lore status --check-fragments");
     }
 
     // ── check-decision-log branch (spec-autonomy-phase-1-decision-function-human-channel-lore, AC-AU-2) ──
@@ -1279,15 +1273,14 @@ export default defineCommand({
         const checked = await collectDecisionLogStatus(dbPath);
         if (!checked.ok) {
           inv.io.stderr.write(formatErrorFor(inv, checked.error) + "\n");
-          setExitCode(exitCode(checked.error));
-          return;
+          return exitCode(checked.error);
         }
         if (args.json) {
           printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { decision_log: { ...checked.value.verify, head: checked.value.head } } }, null, 2));
         } else {
           printLine(inv.io.stdout, renderDecisionLogLine(checked.value));
         }
-        setExitCode(checked.value.verify.clean ? 0 : DECISION_LOG_BREAK_EXIT);
+        return checked.value.verify.clean ? 0 : DECISION_LOG_BREAK_EXIT;
       } finally {
         app.close();
       }
@@ -1302,12 +1295,11 @@ export default defineCommand({
         const checked = await collectAutonomyThresholdStatus(dbPath);
         if (!checked.ok) {
           inv.io.stderr.write(formatErrorFor(inv, checked.error) + "\n");
-          setExitCode(exitCode(checked.error));
-          return;
+          return exitCode(checked.error);
         }
         if (args.json) printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { autonomy_thresholds: checked.value } }, null, 2));
         else printLine(inv.io.stdout, renderAutonomyThresholdLine(checked.value));
-        setExitCode(isAutonomyThresholdBreak(checked.value) ? AUTONOMY_THRESHOLD_BREAK_EXIT : 0);
+        return isAutonomyThresholdBreak(checked.value) ? AUTONOMY_THRESHOLD_BREAK_EXIT : 0;
       } finally {
         app.close();
       }
@@ -1359,15 +1351,13 @@ export default defineCommand({
               const fixR = await app.treeCheckService.fix(blueprint);
               if (!fixR.ok) {
                 inv.io.stderr.write(formatErrorFor(inv, fixR.error) + "\n");
-                setExitCode(exitCode(fixR.error));
-                return;
+                return exitCode(fixR.error);
               }
 
               const checkR = await app.treeCheckService.checkTree(blueprint);
               if (!checkR.ok) {
                 inv.io.stderr.write(formatErrorFor(inv, checkR.error) + "\n");
-                setExitCode(exitCode(checkR.error));
-                return;
+                return exitCode(checkR.error);
               }
 
               treeData = { fix: fixR.value, check: checkR.value };
@@ -1421,8 +1411,7 @@ export default defineCommand({
               const checkR = await app.treeCheckService.checkTree(blueprint);
               if (!checkR.ok) {
                 inv.io.stderr.write(formatErrorFor(inv, checkR.error) + "\n");
-                setExitCode(exitCode(checkR.error));
-                return;
+                return exitCode(checkR.error);
               }
 
               treeData = checkR.value as unknown as Record<string, unknown>;
@@ -1448,16 +1437,14 @@ export default defineCommand({
             driftPayload = disabledCodeDriftPayload();
           } else if (app.driftCheckService === undefined) {
             inv.io.stderr.write("Error: DriftCheckService not wired on this App instance.\n");
-            setExitCode(1);
-            return;
+            return 1;
           } else {
             const deps = buildDriftFlowDeps(app, app.driftCheckService);
             const probe = buildRealFsProbe(inv.cwd);
             const driftResult = await runDrift(deps, probe);
             if (!driftResult.ok) {
               inv.io.stderr.write(formatErrorFor(inv, driftResult.error) + "\n");
-              setExitCode(exitCode(driftResult.error));
-              return;
+              return exitCode(driftResult.error);
             }
             driftPayload = driftResult.value;
           }
@@ -1478,16 +1465,14 @@ export default defineCommand({
           const prdsResult = await app.corpusService.list({ type: "prd" });
           if (!prdsResult.ok) {
             inv.io.stderr.write(formatErrorFor(inv, prdsResult.error) + "\n");
-            setExitCode(exitCode(prdsResult.error));
-            return;
+            return exitCode(prdsResult.error);
           }
           const prds: Array<{ slug: string; total: number; uncovered: string[]; uncovered_p0: string[]; migrated: string[]; unmigrated: string[] }> = [];
           for (const prd of prdsResult.value.docs) {
             const covResult = await app.corpusService.computeRequirementCoverageForPrd(prd.id);
             if (!covResult.ok) {
               inv.io.stderr.write(formatErrorFor(inv, covResult.error) + "\n");
-              setExitCode(exitCode(covResult.error));
-              return;
+              return exitCode(covResult.error);
             }
             const cov = covResult.value;
             prds.push({ slug: prd.slug, total: cov.total, uncovered: cov.uncovered, uncovered_p0: cov.uncovered_p0, migrated: cov.migrated, unmigrated: cov.unmigrated });
@@ -1517,16 +1502,14 @@ export default defineCommand({
           const prdsResult = await app.corpusService.list({ type: "prd" });
           if (!prdsResult.ok) {
             inv.io.stderr.write(formatErrorFor(inv, prdsResult.error) + "\n");
-            setExitCode(exitCode(prdsResult.error));
-            return;
+            return exitCode(prdsResult.error);
           }
           const prds: Array<{ slug: string; whole_doc_chars: number; breaches: PrdBudgetBreach[] }> = [];
           for (const prdSummary of prdsResult.value.docs) {
             const getResult = await app.corpusService.get(prdSummary.id);
             if (!getResult.ok) {
               inv.io.stderr.write(formatErrorFor(inv, getResult.error) + "\n");
-              setExitCode(exitCode(getResult.error));
-              return;
+              return exitCode(getResult.error);
             }
             const doc = getResult.value.doc;
 
@@ -1562,8 +1545,7 @@ export default defineCommand({
             const nodesResult = await budgetStore.findMany({ type: "baseline" });
             if (!nodesResult.ok) {
               inv.io.stderr.write(formatErrorFor(inv, nodesResult.error) + "\n");
-              setExitCode(exitCode(nodesResult.error));
-              return;
+              return exitCode(nodesResult.error);
             }
             const nodes = nodesResult.value.flatMap((doc) => checkBaselineNodeBudget(doc, budgets));
             baselineBudgetInconsistent = nodes.length > 0;
@@ -1584,8 +1566,7 @@ export default defineCommand({
           const issuesResult = await computeIssueCheck(app.corpusService, staleAfterDays);
           if (!issuesResult.ok) {
             inv.io.stderr.write(formatErrorFor(inv, issuesResult.error) + "\n");
-            setExitCode(exitCode(issuesResult.error));
-            return;
+            return exitCode(issuesResult.error);
           }
           issuesPayload = issuesResult.value;
           issuesInconsistent = !issuesPayload.consistent;
@@ -1607,8 +1588,7 @@ export default defineCommand({
           const allDocsResult = await app.corpusService.list({});
           if (!allDocsResult.ok) {
             inv.io.stderr.write(formatErrorFor(inv, allDocsResult.error) + "\n");
-            setExitCode(exitCode(allDocsResult.error));
-            return;
+            return exitCode(allDocsResult.error);
           }
           const knownSlugs = new Set(allDocsResult.value.docs.map((d) => d.slug));
 
@@ -1640,8 +1620,7 @@ export default defineCommand({
             const findingsResult = await findBaselineIntegrityFindings(baselineStore);
             if (!findingsResult.ok) {
               inv.io.stderr.write(formatErrorFor(inv, findingsResult.error) + "\n");
-              setExitCode(exitCode(findingsResult.error));
-              return;
+              return exitCode(findingsResult.error);
             }
             baselinePayload = { checked: true, consistent: findingsResult.value.length === 0, findings: findingsResult.value };
             baselineInconsistent = findingsResult.value.length > 0;
@@ -1724,8 +1703,7 @@ export default defineCommand({
           }
         }
 
-        setExitCode(finalExit);
-        return;
+        return finalExit;
       } finally {
         app.close();
       }
@@ -1738,8 +1716,7 @@ export default defineCommand({
 
       if (!result.ok) {
         inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
-        setExitCode(exitCode(result.error));
-        return;
+        return exitCode(result.error);
       }
 
       const status = result.value;
@@ -1750,8 +1727,7 @@ export default defineCommand({
       const stateBindingSkipsResult = await collectStateBindingSkips(app);
       if (!stateBindingSkipsResult.ok) {
         inv.io.stderr.write(formatErrorFor(inv, stateBindingSkipsResult.error) + "\n");
-        setExitCode(exitCode(stateBindingSkipsResult.error));
-        return;
+        return exitCode(stateBindingSkipsResult.error);
       }
       const stateBindingSkips = stateBindingSkipsResult.value;
 
@@ -1762,8 +1738,7 @@ export default defineCommand({
       const staleListResult = await listFreshStalenessEscalates(buildStalenessFlowDeps(app));
       if (!staleListResult.ok) {
         inv.io.stderr.write(formatErrorFor(inv, staleListResult.error) + "\n");
-        setExitCode(exitCode(staleListResult.error));
-        return;
+        return exitCode(staleListResult.error);
       }
       const openStaleCandidates = staleListResult.value.length;
 
@@ -1780,8 +1755,7 @@ export default defineCommand({
       const codeAnchorSpecMembersResult = await collectCodeAnchorSpecMembers(app);
       if (!codeAnchorSpecMembersResult.ok) {
         inv.io.stderr.write(formatErrorFor(inv, codeAnchorSpecMembersResult.error) + "\n");
-        setExitCode(exitCode(codeAnchorSpecMembersResult.error));
-        return;
+        return exitCode(codeAnchorSpecMembersResult.error);
       }
       const codeAnchorSpecs = codeAnchorSpecMembersResult.value.length;
 
@@ -1796,8 +1770,7 @@ export default defineCommand({
       const falsifiabilitySignalsResult = await collectFalsifiabilitySignals(app, dbPath, inv.cwd);
       if (!falsifiabilitySignalsResult.ok) {
         inv.io.stderr.write(formatErrorFor(inv, falsifiabilitySignalsResult.error) + "\n");
-        setExitCode(exitCode(falsifiabilitySignalsResult.error));
-        return;
+        return exitCode(falsifiabilitySignalsResult.error);
       }
       // reason: AC-FR-5 — the count is DERIVED from the member list's length,
       // never a separately-tallied counter (see collectFalsifiabilitySignals's
@@ -1819,8 +1792,7 @@ export default defineCommand({
       const unredeemedResult = await listUnredeemedAllowMissingPathDeclarations(app, dbPath, inv.cwd);
       if (!unredeemedResult.ok) {
         inv.io.stderr.write(formatErrorFor(inv, unredeemedResult.error) + "\n");
-        setExitCode(exitCode(unredeemedResult.error));
-        return;
+        return exitCode(unredeemedResult.error);
       }
       // reason: AC-FR-5 — same derive-from-member-list discipline as
       // passUnfalsifiedCount immediately above.
@@ -1834,29 +1806,25 @@ export default defineCommand({
       const captureSourceMembersResult = await collectCaptureSourceMembers(app);
       if (!captureSourceMembersResult.ok) {
         inv.io.stderr.write(formatErrorFor(inv, captureSourceMembersResult.error) + "\n");
-        setExitCode(exitCode(captureSourceMembersResult.error));
-        return;
+        return exitCode(captureSourceMembersResult.error);
       }
       // reason: SPEC-143 AC-CT-9(d) — report-only, alongside (never merged into) the capture_source counts.
       const stampVerdictResult = await collectStampVerdictDistribution(app);
       if (!stampVerdictResult.ok) {
         inv.io.stderr.write(formatErrorFor(inv, stampVerdictResult.error) + "\n");
-        setExitCode(exitCode(stampVerdictResult.error));
-        return;
+        return exitCode(stampVerdictResult.error);
       }
       const stampVerdicts = stampVerdictResult.value;
       // reason: SPEC-143 AC-CT-3b — the arming state is ALWAYS reported (never absent), so a corpus
       // left unarmed (outside git, or an existing corpus not yet armed) cannot read as "fine".
       if (app.stateBindingService === undefined) {
         inv.io.stderr.write("Error: stateBindingService is not wired on this App (internal wiring error)\n");
-        setExitCode(1);
-        return;
+        return 1;
       }
       const stateBindingResult = await app.stateBindingService.readState(dirname(dirname(dbPath)));
       if (!stateBindingResult.ok) {
         inv.io.stderr.write(formatErrorFor(inv, stateBindingResult.error) + "\n");
-        setExitCode(exitCode(stateBindingResult.error));
-        return;
+        return exitCode(stateBindingResult.error);
       }
       const stateBindingState = stateBindingResult.value;
       const captureSourceRunnerCount = captureSourceMembersResult.value.runner.length;
@@ -1871,8 +1839,7 @@ export default defineCommand({
       const adoptedAbandonedMembersResult = await collectAdoptedAbandonedMembers(app);
       if (!adoptedAbandonedMembersResult.ok) {
         inv.io.stderr.write(formatErrorFor(inv, adoptedAbandonedMembersResult.error) + "\n");
-        setExitCode(exitCode(adoptedAbandonedMembersResult.error));
-        return;
+        return exitCode(adoptedAbandonedMembersResult.error);
       }
       const adoptedAbandonedCount = adoptedAbandonedMembersResult.value.length;
 
@@ -1903,8 +1870,7 @@ export default defineCommand({
         );
         if (!baselineResult.ok) {
           inv.io.stderr.write(formatErrorFor(inv, baselineResult.error) + "\n");
-          setExitCode(exitCode(baselineResult.error));
-          return;
+          return exitCode(baselineResult.error);
         }
         baselineStatus = baselineResult.value;
 
@@ -1914,8 +1880,7 @@ export default defineCommand({
         const shareResult = await new AttributionReport(baselineStore).share(ATTRIBUTION_WINDOW_DAYS, () => new Date());
         if (!shareResult.ok) {
           inv.io.stderr.write(formatErrorFor(inv, shareResult.error) + "\n");
-          setExitCode(exitCode(shareResult.error));
-          return;
+          return exitCode(shareResult.error);
         }
         attributionShare = shareResult.value;
 
@@ -1924,30 +1889,26 @@ export default defineCommand({
         const sourcesResult = await attributionReport.identitySources(ATTRIBUTION_WINDOW_DAYS, () => new Date());
         if (!sourcesResult.ok) {
           inv.io.stderr.write(formatErrorFor(inv, sourcesResult.error) + "\n");
-          setExitCode(exitCode(sourcesResult.error));
-          return;
+          return exitCode(sourcesResult.error);
         }
         identitySources = sourcesResult.value;
         const orphanedResult = await attributionReport.orphanedDirty(() => new Date());
         if (!orphanedResult.ok) {
           inv.io.stderr.write(formatErrorFor(inv, orphanedResult.error) + "\n");
-          setExitCode(exitCode(orphanedResult.error));
-          return;
+          return exitCode(orphanedResult.error);
         }
         orphanedDirty = orphanedResult.value;
 
         const censusBaseline = await baselineStore.findMany({ type: "baseline" });
         if (!censusBaseline.ok) {
           inv.io.stderr.write(formatErrorFor(inv, censusBaseline.error) + "\n");
-          setExitCode(exitCode(censusBaseline.error));
-          return;
+          return exitCode(censusBaseline.error);
         }
         if (censusBaseline.value.length > 0) {
           const censusSpecs = await baselineStore.findMany({ type: "spec" });
           if (!censusSpecs.ok) {
             inv.io.stderr.write(formatErrorFor(inv, censusSpecs.error) + "\n");
-            setExitCode(exitCode(censusSpecs.error));
-            return;
+            return exitCode(censusSpecs.error);
           }
           specCitationCensus = computeSpecCitationCensus(censusSpecs.value, censusBaseline.value);
         }
@@ -1957,14 +1918,12 @@ export default defineCommand({
         const effective = await resolveCiteGateFor(baselineStore, rawGate);
         if (!effective.ok) {
           inv.io.stderr.write(formatErrorFor(inv, effective.error) + "\n");
-          setExitCode(exitCode(effective.error));
-          return;
+          return exitCode(effective.error);
         }
         const adoptRows = await app.auditService.query({ action: BASELINE_ADOPT_AUDIT_ACTION, limit: 1 });
         if (!adoptRows.ok) {
           inv.io.stderr.write(formatErrorFor(inv, adoptRows.error) + "\n");
-          setExitCode(exitCode(adoptRows.error));
-          return;
+          return exitCode(adoptRows.error);
         }
         const storedMode = typeof rawGate?.mode === "string" ? rawGate.mode : null;
         if (baselineStatus !== null || storedMode !== null) {
@@ -1983,8 +1942,7 @@ export default defineCommand({
       const integrateLosses = collectIntegrateLosses(dbPath);
       if (!integrateLosses.ok) {
         inv.io.stderr.write(formatErrorFor(inv, integrateLosses.error) + "\n");
-        setExitCode(exitCode(integrateLosses.error));
-        return;
+        return exitCode(integrateLosses.error);
       }
 
       if (args.json) {
@@ -2203,8 +2161,7 @@ export default defineCommand({
       const decisionLogStatus = await collectDecisionLogStatus(dbPath);
       if (!decisionLogStatus.ok) {
         inv.io.stderr.write(formatErrorFor(inv, decisionLogStatus.error) + "\n");
-        setExitCode(exitCode(decisionLogStatus.error));
-        return;
+        return exitCode(decisionLogStatus.error);
       }
       if (!decisionLogStatus.value.verify.clean || decisionLogStatus.value.head !== null) {
         printLine(inv.io.stdout, `\n${renderDecisionLogLine(decisionLogStatus.value)}`);
@@ -2218,8 +2175,7 @@ export default defineCommand({
       const thresholdStatus = await collectAutonomyThresholdStatus(dbPath);
       if (!thresholdStatus.ok) {
         inv.io.stderr.write(formatErrorFor(inv, thresholdStatus.error) + "\n");
-        setExitCode(exitCode(thresholdStatus.error));
-        return;
+        return exitCode(thresholdStatus.error);
       }
       if (thresholdStatus.value.state !== "unseeded") printLine(inv.io.stdout, `\n${renderAutonomyThresholdLine(thresholdStatus.value)}`);
       if (isAutonomyThresholdBreak(thresholdStatus.value)) setExitCode(AUTONOMY_THRESHOLD_BREAK_EXIT);

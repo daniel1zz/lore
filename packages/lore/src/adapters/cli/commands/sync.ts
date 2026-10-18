@@ -5,7 +5,7 @@
  */
 
 import { defineCommand } from "citty";
-import { exitCli } from "../run-scope.js";
+import { exitCli } from "../cli-exit.js";
 import { join, dirname } from "path";
 import { existsSync } from "fs";
 import { resolveSyncCredentials } from "@lore/core";

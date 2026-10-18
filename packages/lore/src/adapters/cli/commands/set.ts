@@ -103,7 +103,7 @@
  */
 
 import { readFileSync } from "node:fs";
-import { exitCli, setExitCode } from "../run-scope.js";
+import { exitCli } from "../cli-exit.js";
 import { defineCommand } from "citty";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatErrorFor, resolveActor } from "../utils.js";
@@ -355,22 +355,19 @@ export default defineCommand({
             "Error: AI is required for --regenerate/--refine/--refine-stdin but is disabled " +
               "for this surface. Pass --ai to enable.\n",
           );
-          setExitCode(2);
-          return;
+          return 2;
         }
 
         // Fetch the document to be mutated
         const resolveResult = await app.corpusService.resolve(args.id);
         if (!resolveResult.ok) {
           inv.io.stderr.write(formatErrorFor(inv, resolveResult.error) + "\n");
-          setExitCode(exitCode(resolveResult.error));
-          return;
+          return exitCode(resolveResult.error);
         }
         const getResult = await app.corpusService.get(resolveResult.value);
         if (!getResult.ok) {
           inv.io.stderr.write(formatErrorFor(inv, getResult.error) + "\n");
-          setExitCode(exitCode(getResult.error));
-          return;
+          return exitCode(getResult.error);
         }
         const doc = getResult.value.doc;
 
@@ -379,8 +376,7 @@ export default defineCommand({
         const rewriteGate = await app.corpusService.assertAiRewriteAllowed(doc);
         if (!rewriteGate.ok) {
           inv.io.stderr.write(formatErrorFor(inv, rewriteGate.error) + "\n");
-          setExitCode(exitCode(rewriteGate.error));
-          return;
+          return exitCode(rewriteGate.error);
         }
 
         const showSpinner = process.stderr.isTTY && !args.json;
@@ -412,8 +408,7 @@ export default defineCommand({
 
           if (!aiResult.ok) {
             inv.io.stderr.write(formatErrorFor(inv, aiResult.error) + "\n");
-            setExitCode(exitCode(aiResult.error));
-            return;
+            return exitCode(aiResult.error);
           }
 
           newContent = aiResult.value.content;
@@ -442,8 +437,7 @@ export default defineCommand({
 
           if (!aiResult.ok) {
             inv.io.stderr.write(formatErrorFor(inv, aiResult.error) + "\n");
-            setExitCode(exitCode(aiResult.error));
-            return;
+            return exitCode(aiResult.error);
           }
 
           newContent = aiResult.value.content;
@@ -468,8 +462,7 @@ export default defineCommand({
 
         if (!setResult.ok) {
           inv.io.stderr.write(formatErrorFor(inv, setResult.error) + "\n");
-          setExitCode(exitCode(setResult.error));
-          return;
+          return exitCode(setResult.error);
         }
 
         const updatedDoc = setResult.value;
@@ -499,8 +492,7 @@ export default defineCommand({
           inv.io.stderr.write(
             `Error: cannot read --content-file '${args["content-file"]}': ${e instanceof Error ? e.message : String(e)}\n`,
           );
-          setExitCode(4);
-          return;
+          return 4;
         }
         patch["content"] = fileContent;
       }
@@ -518,14 +510,12 @@ export default defineCommand({
         const resolveForKind = await app.corpusService.resolve(args.id);
         if (!resolveForKind.ok) {
           inv.io.stderr.write(formatErrorFor(inv, resolveForKind.error) + "\n");
-          setExitCode(exitCode(resolveForKind.error));
-          return;
+          return exitCode(resolveForKind.error);
         }
         const getForKind = await app.corpusService.get(resolveForKind.value);
         if (!getForKind.ok) {
           inv.io.stderr.write(formatErrorFor(inv, getForKind.error) + "\n");
-          setExitCode(exitCode(getForKind.error));
-          return;
+          return exitCode(getForKind.error);
         }
         const targetDoc = getForKind.value.doc;
 
@@ -541,8 +531,7 @@ export default defineCommand({
             `Error: Invalid --kind '${args.kind}'.\n` +
               `  Valid values: ${SPEC_KINDS.join(" | ")}\n`,
           );
-          setExitCode(4);
-          return;
+          return 4;
         }
 
         patch["extra"] = { ...targetDoc.extra, spec_kind: args.kind };
@@ -563,14 +552,12 @@ export default defineCommand({
         const resolveForDecisionStatus = await app.corpusService.resolve(args.id);
         if (!resolveForDecisionStatus.ok) {
           inv.io.stderr.write(formatErrorFor(inv, resolveForDecisionStatus.error) + "\n");
-          setExitCode(exitCode(resolveForDecisionStatus.error));
-          return;
+          return exitCode(resolveForDecisionStatus.error);
         }
         const getForDecisionStatus = await app.corpusService.get(resolveForDecisionStatus.value);
         if (!getForDecisionStatus.ok) {
           inv.io.stderr.write(formatErrorFor(inv, getForDecisionStatus.error) + "\n");
-          setExitCode(exitCode(getForDecisionStatus.error));
-          return;
+          return exitCode(getForDecisionStatus.error);
         }
         const targetDocForDecisionStatus = getForDecisionStatus.value.doc;
 
@@ -578,8 +565,7 @@ export default defineCommand({
           inv.io.stderr.write(
             `Error: --decision-status is only valid for type 'adr' (got '${targetDocForDecisionStatus.type}').\n`,
           );
-          setExitCode(4);
-          return;
+          return 4;
         }
 
         // Idempotence (D5, AC-DS-6): accepting an already-accepted ADR is a no-op — exit 0,
@@ -621,14 +607,12 @@ export default defineCommand({
         const resolvedId = await app.corpusService.resolve(args.id);
         if (!resolvedId.ok) {
           inv.io.stderr.write(formatErrorFor(inv, resolvedId.error) + "\n");
-          setExitCode(exitCode(resolvedId.error));
-          return;
+          return exitCode(resolvedId.error);
         }
         const getResult = await app.corpusService.get(resolvedId.value);
         if (!getResult.ok) {
           inv.io.stderr.write(formatErrorFor(inv, getResult.error) + "\n");
-          setExitCode(exitCode(getResult.error));
-          return;
+          return exitCode(getResult.error);
         }
         const currentDoc = getResult.value.doc;
         priorStatusForDemotionAdvisory = currentDoc.status;
@@ -641,8 +625,7 @@ export default defineCommand({
         });
         if (!editorResult.ok) {
           inv.io.stderr.write(formatErrorFor(inv, editorResult.error) + "\n");
-          setExitCode(exitCode(editorResult.error));
-          return;
+          return exitCode(editorResult.error);
         }
 
         const newContent = editorResult.value;
@@ -668,14 +651,12 @@ export default defineCommand({
         const resolveForDemotion = await app.corpusService.resolve(args.id);
         if (!resolveForDemotion.ok) {
           inv.io.stderr.write(formatErrorFor(inv, resolveForDemotion.error) + "\n");
-          setExitCode(exitCode(resolveForDemotion.error));
-          return;
+          return exitCode(resolveForDemotion.error);
         }
         const getForDemotion = await app.corpusService.get(resolveForDemotion.value);
         if (!getForDemotion.ok) {
           inv.io.stderr.write(formatErrorFor(inv, getForDemotion.error) + "\n");
-          setExitCode(exitCode(getForDemotion.error));
-          return;
+          return exitCode(getForDemotion.error);
         }
         priorStatusForDemotionAdvisory = getForDemotion.value.doc.status;
       }
@@ -687,8 +668,7 @@ export default defineCommand({
 
       if (!result.ok) {
         inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
-        setExitCode(exitCode(result.error));
-        return;
+        return exitCode(result.error);
       }
 
       const doc = result.value;

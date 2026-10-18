@@ -21,7 +21,7 @@
  */
 
 import { defineCommand } from "citty";
-import { setExitCode } from "../run-scope.js";
+
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatErrorFor, formatTable, formatValidityBadge, parsePositiveIntArg } from "../utils.js";
 import { resolveSubTypeFilter } from "../../../service/corpus-service.js";
@@ -79,8 +79,7 @@ export default defineCommand({
       const limitResult = parsePositiveIntArg(args.limit ?? "10", "--limit", { min: 1 });
       if (!limitResult.ok) {
         inv.io.stderr.write(limitResult.message + "\n");
-        setExitCode(2);
-        return;
+        return 2;
       }
 
       // reason: ONE shared seam with `lore list` and both MCP read tools (see this
@@ -89,8 +88,7 @@ export default defineCommand({
       const subTypeResolution = resolveSubTypeFilter(args["sub-type"], args.type);
       if (!subTypeResolution.ok) {
         inv.io.stderr.write(subTypeResolution.message + "\n");
-        setExitCode(2);
-        return;
+        return 2;
       }
 
       const filters: Record<string, unknown> = {};
@@ -102,8 +100,7 @@ export default defineCommand({
 
       if (!result.ok) {
         inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
-        setExitCode(exitCode(result.error));
-        return;
+        return exitCode(result.error);
       }
 
       const results = result.value.results.slice(0, limitResult.value);

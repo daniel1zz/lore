@@ -15,7 +15,7 @@
  */
 
 import { readFileSync } from "fs";
-import { setExitCode } from "../run-scope.js";
+
 import { defineCommand } from "citty";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatErrorFor, resolveActor } from "../utils.js";
@@ -46,16 +46,14 @@ const recordCommand = defineCommand({
     try {
       if (app.uatService === undefined) {
         inv.io.stderr.write("Error: UAT service is not available in this build.\n");
-        setExitCode(1);
-        return;
+        return 1;
       }
       let payload: unknown;
       try {
         payload = JSON.parse(readFileSync(args["json-file"] as string, "utf8"));
       } catch (e) {
         inv.io.stderr.write(`Error: could not read/parse --json-file: ${(e as Error).message}\n`);
-        setExitCode(2);
-        return;
+        return 2;
       }
       const by = resolveActor(inv.io, undefined, inv.env, inv.cwd, inv.user);
       const result = await app.uatService.record(String(args.plan), payload, { by });
@@ -65,8 +63,7 @@ const recordCommand = defineCommand({
         } else {
           inv.io.stderr.write(formatErrorFor(inv, result.error));
         }
-        setExitCode(exitCode(result.error));
-        return;
+        return exitCode(result.error);
       }
       if (args.json) {
         printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { slug: result.value.doc.slug } }, null, 2));
@@ -97,8 +94,7 @@ const showCommand = defineCommand({
         } else {
           inv.io.stderr.write(formatErrorFor(inv, result.error));
         }
-        setExitCode(exitCode(result.error));
-        return;
+        return exitCode(result.error);
       }
       if (args.json) {
         printLine(inv.io.stdout, JSON.stringify({ ok: true, data: result.value }, null, 2));

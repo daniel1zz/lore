@@ -153,7 +153,7 @@
  */
 
 import { defineCommand } from "citty";
-import { setExitCode } from "../run-scope.js";
+
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatErrorFor, resolveActor } from "../utils.js";
 import {
@@ -477,8 +477,7 @@ export default defineCommand({
         if (rawNumber.length === 0 || !Number.isInteger(issueNumber) || issueNumber <= 0) {
           const error = invalidIssueNumberError(rawNumber);
           inv.io.stderr.write(formatErrorFor(inv, error) + "\n");
-          setExitCode(exitCode(error));
-          return;
+          return exitCode(error);
         }
 
         const { app, config } = loadLoreApp({ inv });
@@ -490,21 +489,18 @@ export default defineCommand({
           if (classification.kind === "unconfigured") {
             const error = buildUnconfiguredUpstreamRemedy();
             inv.io.stderr.write(formatErrorFor(inv, error) + "\n");
-            setExitCode(exitCode(error));
-            return;
+            return exitCode(error);
           }
           if (classification.kind === "retired") {
             inv.io.stderr.write(formatErrorFor(inv, classification.error) + "\n");
-            setExitCode(exitCode(classification.error));
-            return;
+            return exitCode(classification.error);
           }
           const cfg = classification.cfg;
 
           const listingResult = await resolveGithubIssueListing(inv.io, cfg, invocationOf(context));
           if (!listingResult.ok) {
             inv.io.stderr.write(formatErrorFor(inv, listingResult.error) + "\n");
-            setExitCode(exitCode(listingResult.error));
-            return;
+            return exitCode(listingResult.error);
           }
           const { issues, repoId } = listingResult.value;
 
@@ -512,8 +508,7 @@ export default defineCommand({
           if (issue === undefined) {
             const error = issueNotListedError(issueNumber, cfg.repo, issues.length);
             inv.io.stderr.write(formatErrorFor(inv, error) + "\n");
-            setExitCode(exitCode(error));
-            return;
+            return exitCode(error);
           }
 
           // D13 precondition (toIssueTaskInput's own doc) — this module is
@@ -522,23 +517,20 @@ export default defineCommand({
           const rootPrdListResult = await app.corpusService.list({ type: "prd" });
           if (!rootPrdListResult.ok) {
             inv.io.stderr.write(formatErrorFor(inv, rootPrdListResult.error) + "\n");
-            setExitCode(exitCode(rootPrdListResult.error));
-            return;
+            return exitCode(rootPrdListResult.error);
           }
           const rootPrd = rootPrdListResult.value.docs[0];
           if (rootPrd === undefined) {
             const error = noRootPrdError();
             inv.io.stderr.write(formatErrorFor(inv, error) + "\n");
-            setExitCode(exitCode(error));
-            return;
+            return exitCode(error);
           }
 
           const ref: GithubIssueRef = { repo: cfg.repo, issueNumber, repo_id: repoId };
           const taskInputResult = toIssueTaskInput(issue, ref, rootPrd.id);
           if (!taskInputResult.ok) {
             inv.io.stderr.write(formatErrorFor(inv, taskInputResult.error) + "\n");
-            setExitCode(exitCode(taskInputResult.error));
-            return;
+            return exitCode(taskInputResult.error);
           }
 
           const by = resolveActor(inv.io, undefined, inv.env, inv.cwd, inv.user);
@@ -575,8 +567,7 @@ export default defineCommand({
               const existingResult = await app.corpusService.get(createResult.error.existing_id);
               if (!existingResult.ok) {
                 inv.io.stderr.write(formatErrorFor(inv, existingResult.error) + "\n");
-                setExitCode(exitCode(existingResult.error));
-                return;
+                return exitCode(existingResult.error);
               }
               const existing = existingResult.value.doc;
               if (args.json) {
@@ -592,8 +583,7 @@ export default defineCommand({
             }
 
             inv.io.stderr.write(formatErrorFor(inv, createResult.error) + "\n");
-            setExitCode(exitCode(createResult.error));
-            return;
+            return exitCode(createResult.error);
           }
 
           const created = createResult.value;
@@ -659,23 +649,20 @@ export default defineCommand({
         if (state === "fixed") {
           const error = fixedNotSettableError();
           inv.io.stderr.write(formatErrorFor(inv, error) + "\n");
-          setExitCode(exitCode(error));
-          return;
+          return exitCode(error);
         }
 
         if (state === undefined || !isExplicitResolutionState(state)) {
           const error = invalidStateError(state);
           inv.io.stderr.write(formatErrorFor(inv, error) + "\n");
-          setExitCode(exitCode(error));
-          return;
+          return exitCode(error);
         }
 
         const reason = typeof args.reason === "string" ? args.reason.trim() : "";
         if (reason.length === 0) {
           const error = missingReasonError();
           inv.io.stderr.write(formatErrorFor(inv, error) + "\n");
-          setExitCode(exitCode(error));
-          return;
+          return exitCode(error);
         }
 
         // §M3 pointer contract, checked BEFORE loadLoreApp() — both halves are
@@ -687,8 +674,7 @@ export default defineCommand({
         if (strayPointer !== undefined) {
           const error = pointerForWrongStateError(strayPointer, state);
           inv.io.stderr.write(formatErrorFor(inv, error) + "\n");
-          setExitCode(exitCode(error));
-          return;
+          return exitCode(error);
         }
 
         const requiredPointer = POINTER_FLAG_BINDINGS.find((binding) => binding.state === state);
@@ -696,8 +682,7 @@ export default defineCommand({
         if (requiredPointer !== undefined && pointerValue.length === 0) {
           const error = missingPointerError(requiredPointer);
           inv.io.stderr.write(formatErrorFor(inv, error) + "\n");
-          setExitCode(exitCode(error));
-          return;
+          return exitCode(error);
         }
 
         const { app, config } = loadLoreApp({ inv });
@@ -706,16 +691,14 @@ export default defineCommand({
           const getResult = await app.corpusService.get(issueId);
           if (!getResult.ok) {
             inv.io.stderr.write(formatErrorFor(inv, getResult.error) + "\n");
-            setExitCode(exitCode(getResult.error));
-            return;
+            return exitCode(getResult.error);
           }
           const issueDoc = getResult.value.doc;
 
           if (!hasIssueReport(issueDoc.extra)) {
             const error = notAnIssueError(issueDoc.slug);
             inv.io.stderr.write(formatErrorFor(inv, error) + "\n");
-            setExitCode(exitCode(error));
-            return;
+            return exitCode(error);
           }
 
           // §M3/§M7 — resolve the REQUIRED pointer against the live corpus
@@ -764,8 +747,7 @@ export default defineCommand({
                 error = missingPointerError(requiredPointer);
               }
               inv.io.stderr.write(formatErrorFor(inv, error) + "\n");
-              setExitCode(exitCode(error));
-              return;
+              return exitCode(error);
             }
 
             // reason: `verdict.ok` guarantees `resolvedTarget !== undefined`,
@@ -805,8 +787,7 @@ export default defineCommand({
           const setResult = await app.corpusService.set(issueId, { extra: newExtra }, { by });
           if (!setResult.ok) {
             inv.io.stderr.write(formatErrorFor(inv, setResult.error) + "\n");
-            setExitCode(exitCode(setResult.error));
-            return;
+            return exitCode(setResult.error);
           }
 
           const updated = setResult.value;
@@ -912,7 +893,7 @@ export default defineCommand({
                 `Warning: resolution recorded in the corpus, but the GitHub label was not updated — ` +
                   `${formatErrorFor(inv, projectResult.error)}\n`,
               );
-              setExitCode(exitCode(projectResult.error));
+              return exitCode(projectResult.error);
             }
           }
         } finally {

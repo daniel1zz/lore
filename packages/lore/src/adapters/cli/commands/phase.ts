@@ -36,7 +36,7 @@
  */
 
 import { ulid } from "ulidx";
-import { setExitCode } from "../run-scope.js";
+
 import { defineCommand } from "citty";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatError, formatErrorFor, resolveActor } from "../utils.js";
@@ -90,8 +90,7 @@ export default defineCommand({
 
           if (!result.ok) {
             inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
-            setExitCode(exitCode(result.error));
-            return;
+            return exitCode(result.error);
           }
 
           if (args.json) {
@@ -130,8 +129,7 @@ export default defineCommand({
 
           if (!result.ok) {
             inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
-            setExitCode(exitCode(result.error));
-            return;
+            return exitCode(result.error);
           }
 
           if (args.json) {
@@ -179,8 +177,7 @@ export default defineCommand({
 
           if (!result.ok) {
             inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
-            setExitCode(exitCode(result.error));
-            return;
+            return exitCode(result.error);
           }
 
           if (args.json) {
@@ -240,8 +237,7 @@ export default defineCommand({
 
           if (!result.ok) {
             inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
-            setExitCode(exitCode(result.error));
-            return;
+            return exitCode(result.error);
           }
 
           if (args.json) {
@@ -295,8 +291,7 @@ export default defineCommand({
 
           if (!result.ok) {
             inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
-            setExitCode(exitCode(result.error));
-            return;
+            return exitCode(result.error);
           }
 
           if (args.json) {
@@ -304,7 +299,7 @@ export default defineCommand({
           } else {
             renderPhaseStatus(inv.io, result.value);
           }
-          setExitCode(result.value.exit_code);
+          return result.value.exit_code;
         } finally {
           app.close();
         }
@@ -347,8 +342,7 @@ export default defineCommand({
 
               if (!result.ok) {
                 inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
-                setExitCode(exitCode(result.error));
-                return;
+                return exitCode(result.error);
               }
 
               if (args.json) {
@@ -379,8 +373,7 @@ export default defineCommand({
 
               if (!result.ok) {
                 inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
-                setExitCode(exitCode(result.error));
-                return;
+                return exitCode(result.error);
               }
 
               if (args.json) {
@@ -420,8 +413,7 @@ export default defineCommand({
 
               if (!result.ok) {
                 inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
-                setExitCode(exitCode(result.error));
-                return;
+                return exitCode(result.error);
               }
 
               if (args.json) {
@@ -454,8 +446,7 @@ export default defineCommand({
 
               if (!result.ok) {
                 inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
-                setExitCode(exitCode(result.error));
-                return;
+                return exitCode(result.error);
               }
 
               if (args.json) {
@@ -492,8 +483,7 @@ export default defineCommand({
 
               if (!result.ok) {
                 inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
-                setExitCode(exitCode(result.error));
-                return;
+                return exitCode(result.error);
               }
 
               if (args.json) {
@@ -541,8 +531,7 @@ export default defineCommand({
 
               if (!result.ok) {
                 inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
-                setExitCode(exitCode(result.error));
-                return;
+                return exitCode(result.error);
               }
 
               if (args.json) {
@@ -573,8 +562,7 @@ export default defineCommand({
 
               if (!result.ok) {
                 inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
-                setExitCode(exitCode(result.error));
-                return;
+                return exitCode(result.error);
               }
 
               if (args.json) {

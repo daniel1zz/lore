@@ -21,7 +21,7 @@
  */
 
 import { dirname } from "path";
-import { setExitCode } from "../run-scope.js";
+
 import { defineCommand } from "citty";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatError, formatErrorFor } from "../utils.js";
@@ -72,8 +72,7 @@ export default defineCommand({
         inv.io.stderr.write(
           `Error: --type '${typeArg}' is not a valid doc type. Valid types: ${VALID_TYPES.join(", ")}\n`,
         );
-        setExitCode(2);
-        return;
+        return 2;
       }
       typeFilter = parsed.data;
     }
@@ -88,8 +87,7 @@ export default defineCommand({
     if (!projectDirResolved.ok) {
       app.close();
       inv.io.stderr.write(formatError(projectDirResolved.error) + "\n");
-      setExitCode(exitCode(projectDirResolved.error));
-      return;
+      return exitCode(projectDirResolved.error);
     }
     const projectDir = projectDirResolved.value;
 
@@ -111,8 +109,7 @@ export default defineCommand({
         } else {
           inv.io.stderr.write(formatErrorFor(inv, exportResult.error) + "\n");
         }
-        setExitCode(exitCode(exportResult.error));
-        return;
+        return exitCode(exportResult.error);
       }
 
       const report = exportResult.value;
@@ -120,7 +117,7 @@ export default defineCommand({
       if (jsonMode) {
         inv.io.stdout.write(JSON.stringify({ ok: true, data: report }, null, 2) + "\n");
         if (report.errors.length > 0) {
-          setExitCode(4);
+          return 4;
         }
         return;
       }
@@ -202,8 +199,7 @@ export default defineCommand({
         for (const errMsg of report.errors) {
           inv.io.stderr.write(`    ${errMsg}\n`);
         }
-        setExitCode(4);
-        return;
+        return 4;
       }
     } finally {
       app.close();

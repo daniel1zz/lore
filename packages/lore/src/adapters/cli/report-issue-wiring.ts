@@ -127,7 +127,7 @@
  */
 
 import { basename, dirname, join } from "node:path";
-import { exitCli } from "./run-scope.js";
+import { exitCli } from "./cli-exit.js";
 import {
   assembleIssueBody,
   err,

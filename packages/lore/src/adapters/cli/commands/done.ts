@@ -146,7 +146,7 @@
  */
 
 import { defineCommand } from "citty";
-import { exitCli, setExitCode } from "../run-scope.js";
+import { exitCli } from "../cli-exit.js";
 import { err, extractEvidence, ok } from "@lore/core";
 import type { DocRecord, EvidenceEntry, LoreError, Result } from "@lore/core";
 import { loadLoreApp } from "../loader.js";
@@ -393,8 +393,7 @@ export default defineCommand({
         );
         if (!citeResult.ok) {
           inv.io.stderr.write(formatErrorFor(inv, citeResult.error) + "\n");
-          setExitCode(exitCode(citeResult.error));
-          return;
+          return exitCode(citeResult.error);
         }
         citedOverrideReason = citeResult.value;
       }
@@ -404,8 +403,7 @@ export default defineCommand({
       const verifiedIdentity = await app.verifiedInvocationIdentity?.();
       if (verifiedIdentity !== undefined && !verifiedIdentity.ok) {
         inv.io.stderr.write(formatErrorFor(inv, verifiedIdentity.error) + "\n");
-        setExitCode(exitCode(verifiedIdentity.error));
-        return;
+        return exitCode(verifiedIdentity.error);
       }
       const by = resolveActor(inv.io, undefined, inv.env, inv.cwd, inv.user);
       // reason: the worktree-removal test's "mine" side (D2) — raw session id, unknown stays absent.
@@ -435,8 +433,7 @@ export default defineCommand({
 
       if (!result.ok) {
         inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
-        setExitCode(exitCode(result.error));
-        return;
+        return exitCode(result.error);
       }
 
       // reason: DD-2 last-task advisory (spec-plan-closure-must-be-loud-terminality-

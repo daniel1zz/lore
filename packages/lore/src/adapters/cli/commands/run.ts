@@ -45,7 +45,7 @@
  * Side-effect class: IO (corpus DB write for register, file reads, stdin/stdout).
  */
 import { createHash } from "node:crypto";
-import { setExitCode } from "../run-scope.js";
+
 import { spawnSync } from "node:child_process";
 import { readFileSync, realpathSync } from "node:fs";
 import { defineCommand } from "citty";
@@ -71,6 +71,7 @@ import { buildFlowDeps } from "./fragments.js";
 import type { Invocation } from "@lore/core";
 import { invocationOf } from "../command-invocation.js";
 import type { CliIo } from "../output.js";
+import type { ExitReport } from "../cli-exit.js";
 
 const ACTIONS = ["register", "show", "end", "occupancy", "tasks", "reap", "attest-input"] as const;
 type Action = (typeof ACTIONS)[number];
@@ -90,9 +91,9 @@ function isAction(value: string): value is Action {
   return (ACTIONS as readonly string[]).includes(value);
 }
 
-function usageError(io: CliIo, message: string): void {
+function usageError(io: CliIo, message: string): ExitReport {
   io.stderr.write(`Error: ${message}\n`);
-  setExitCode(USAGE_EXIT);
+  return USAGE_EXIT;
 }
 
 function stringArg(args: Record<string, unknown>, key: string): string | undefined {
@@ -185,7 +186,7 @@ async function withRunService(inv: Invocation, body: (service: RunService) => Pr
   }
 }
 
-async function runRegister(args: Record<string, unknown>, inv: Invocation): Promise<void> {
+async function runRegister(args: Record<string, unknown>, inv: Invocation): Promise<ExitReport> {
   const harness = stringArg(args, "harness");
   const session = stringArg(args, "session");
   if (harness === undefined) return usageError(inv.io, "lore run register requires --harness <name>");
@@ -198,8 +199,7 @@ async function runRegister(args: Record<string, unknown>, inv: Invocation): Prom
   const composition = await computeComposition(agentId !== undefined ? agentType : undefined, inv);
   if ("error" in composition) {
     inv.io.stderr.write(`Error: cannot compute the run composition: ${composition.error}\n`);
-    setExitCode(VALIDATION_EXIT);
-    return;
+    return VALIDATION_EXIT;
   }
   const runProcess = await measureRunProcess(inv.io, stringArg(args, "harness-pid"), inv.cwd, inv.env);
   if (runProcess !== undefined && "error" in runProcess) return usageError(inv.io, runProcess.error);
@@ -217,28 +217,26 @@ async function runRegister(args: Record<string, unknown>, inv: Invocation): Prom
     });
     if (!result.ok) {
       inv.io.stderr.write(`${formatErrorFor(inv, result.error)}\n`);
-      setExitCode(exitCode(result.error));
-      return;
+      return exitCode(result.error);
     }
     inv.io.stdout.write(args["json"] === true ? `${JSON.stringify({ ok: true, data: result.value }, null, 2)}\n` : `${result.value.id}\n`);
   });
 }
 
-async function runShow(args: Record<string, unknown>, inv: Invocation): Promise<void> {
+async function runShow(args: Record<string, unknown>, inv: Invocation): Promise<ExitReport> {
   const id = stringArg(args, "id");
   if (id === undefined) return usageError(inv.io, "lore run show requires a run id");
   await withRunService(inv, async (service) => {
     const result = await service.show(id);
     if (!result.ok) {
       inv.io.stderr.write(`${formatErrorFor(inv, result.error)}\n`);
-      setExitCode(exitCode(result.error));
-      return;
+      return exitCode(result.error);
     }
     inv.io.stdout.write(args["json"] === true ? `${JSON.stringify({ ok: true, data: result.value }, null, 2)}\n` : renderRunText(result.value));
   });
 }
 
-async function runEnd(args: Record<string, unknown>, inv: Invocation): Promise<void> {
+async function runEnd(args: Record<string, unknown>, inv: Invocation): Promise<ExitReport> {
   const id = stringArg(args, "id");
   if (id === undefined) return usageError(inv.io, "lore run end requires a run id");
   const reason = stringArg(args, "reason");
@@ -247,8 +245,7 @@ async function runEnd(args: Record<string, unknown>, inv: Invocation): Promise<v
     const result = await service.end(id, reason);
     if (!result.ok) {
       inv.io.stderr.write(`${formatErrorFor(inv, result.error)}\n`);
-      setExitCode(exitCode(result.error));
-      return;
+      return exitCode(result.error);
     }
     const ended = result.value;
     if (args["json"] === true) {
@@ -271,7 +268,7 @@ async function runEnd(args: Record<string, unknown>, inv: Invocation): Promise<v
   });
 }
 
-async function runOccupancy(args: Record<string, unknown>, inv: Invocation): Promise<void> {
+async function runOccupancy(args: Record<string, unknown>, inv: Invocation): Promise<ExitReport> {
   const worktree = stringArg(args, "worktree");
   if (worktree === undefined) return usageError(inv.io, "lore run occupancy requires --worktree <path>");
   // reason: a claim may record the worktree's BRANCH instead of its path (issue #158); an unmeasurable branch
@@ -284,8 +281,7 @@ async function runOccupancy(args: Record<string, unknown>, inv: Invocation): Pro
     });
     if (!result.ok) {
       inv.io.stderr.write(`${formatErrorFor(inv, result.error)}\n`);
-      setExitCode(exitCode(result.error));
-      return;
+      return exitCode(result.error);
     }
     const occupancy = result.value;
     if (args["json"] === true) {
@@ -307,15 +303,14 @@ async function runOccupancy(args: Record<string, unknown>, inv: Invocation): Pro
   });
 }
 
-async function runTasks(args: Record<string, unknown>, inv: Invocation): Promise<void> {
+async function runTasks(args: Record<string, unknown>, inv: Invocation): Promise<ExitReport> {
   const id = stringArg(args, "id");
   if (id === undefined) return usageError(inv.io, "lore run tasks requires a run id");
   await withRunService(inv, async (service) => {
     const result = await service.tasks(id);
     if (!result.ok) {
       inv.io.stderr.write(`${formatErrorFor(inv, result.error)}\n`);
-      setExitCode(exitCode(result.error));
-      return;
+      return exitCode(result.error);
     }
     if (args["json"] === true) {
       inv.io.stdout.write(`${JSON.stringify({ ok: true, data: result.value }, null, 2)}\n`);
@@ -356,20 +351,19 @@ function renderReapText(report: ReapReport): string {
  * 1 when the process table cannot be measured, a decision cannot be recorded, a signal is denied, or a reaped
  * process survived SIGKILL. Writes nothing without --apply.
  */
-async function runReap(args: Record<string, unknown>, inv: Invocation): Promise<void> {
+async function runReap(args: Record<string, unknown>, inv: Invocation): Promise<ExitReport> {
   const { app } = loadLoreApp({ inv });
   try {
     if (app.runReapService === undefined) throw new Error("App was built without a runReapService");
     const result = await app.runReapService.reap({ apply: args["apply"] === true });
     if (!result.ok) {
       inv.io.stderr.write(`${formatErrorFor(inv, result.error)}\n`);
-      setExitCode(REAP_FAILURE_EXIT);
-      return;
+      return REAP_FAILURE_EXIT;
     }
     const report = result.value;
     inv.io.stdout.write(args["json"] === true ? `${JSON.stringify({ ok: true, data: report }, null, 2)}\n` : renderReapText(report));
     const failed = report.processes.some((entry) => entry.action === "denied" || entry.action === "survived");
-    if (failed || report.runs.some((entry) => entry.action === "end-failed")) setExitCode(REAP_FAILURE_EXIT);
+    if (failed || report.runs.some((entry) => entry.action === "end-failed")) return REAP_FAILURE_EXIT;
   } finally {
     app.close();
   }

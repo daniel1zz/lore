@@ -39,7 +39,7 @@
  */
 
 import { defineCommand } from "citty";
-import { setExitCode } from "../run-scope.js";
+
 import { loadLoreApp } from "../loader.js";
 import {
   exitCode,
@@ -247,8 +247,7 @@ export default defineCommand({
         );
         if (!checkR.ok) {
           inv.io.stderr.write(formatErrorFor(inv, checkR.error) + "\n");
-          setExitCode(exitCode(checkR.error));
-          return;
+          return exitCode(checkR.error);
         }
 
         const orphanDrifts = checkR.value.drifts.filter(
@@ -284,8 +283,7 @@ export default defineCommand({
           }
         }
 
-        setExitCode(orphanDrifts.length > 0 ? 3 : 0);
-        return;
+        return orphanDrifts.length > 0 ? 3 : 0;
       }
 
       // ── normal tree branch ────────────────────────────────────────────────
@@ -295,8 +293,7 @@ export default defineCommand({
       const depthResult = parsePositiveIntArg(args.depth ?? "3", "--depth", { min: 1 });
       if (!depthResult.ok) {
         inv.io.stderr.write(depthResult.message + "\n");
-        setExitCode(2);
-        return;
+        return 2;
       }
       const result = await app.corpusService.tree(args.root, { depth: depthResult.value });
 
@@ -310,12 +307,10 @@ export default defineCommand({
           inv.io.stderr.write(
             "No PRD documents found. Create a PRD first with `lore create prd --title <name>`.\n",
           );
-          setExitCode(3);
-          return;
+          return 3;
         }
         inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
-        setExitCode(exitCode(result.error));
-        return;
+        return exitCode(result.error);
       }
 
       // ── Phase grouping (SPEC-023 AC-PHASE-5, AC-PHASE-6) ─────────────────
