@@ -1495,14 +1495,14 @@ function registerToolImpl<T>(
 // ─── SPEC-034 §4 review orchestration (lore_review) ─────────────────────────
 
 /**
- * Load `lore.tree.yaml` from cwd if present — the MCP-surface equivalent of the CLI
+ * Load `lore.tree.yaml` from `cwd` (the server's `inv.cwd`) if present — the MCP-surface equivalent of the CLI
  * `lore review`'s blueprint loader. Returns `{ok: true, blueprint: undefined}` when the
  * file is absent (the tree_position check degrades to "skipped", never a silent pass);
  * a PRESENT-but-invalid blueprint is a config error, returned as an err() so the tool
  * handler can respond with `isError: true` (an MCP tool must never call process.exit).
  */
-function loadBlueprintForMcp(): Result<TreeBlueprint | undefined, LoreError> {
-  const loaded = loadTreeBlueprint(process.cwd());
+function loadBlueprintForMcp(cwd: string): Result<TreeBlueprint | undefined, LoreError> {
+  const loaded = loadTreeBlueprint(cwd);
   if (loaded.status === "missing") return { ok: true, value: undefined };
   if (loaded.status === "invalid") return { ok: false, error: loaded.error };
   return { ok: true, value: loaded.blueprint };
@@ -2747,7 +2747,7 @@ export function registerTools(
         });
       }
 
-      const blueprintResult = loadBlueprintForMcp();
+      const blueprintResult = loadBlueprintForMcp(inv.cwd);
       if (!blueprintResult.ok) return errorContent(blueprintResult.error);
 
       const reviewResult = await reviewDocViaMcp(app, args.id_or_slug, blueprintResult.value);

@@ -527,11 +527,12 @@ function requireAcServiceForStatus(app: ReturnType<typeof loadLoreApp>["app"]): 
 async function listUnredeemedAllowMissingPathDeclarations(
   app: ReturnType<typeof loadLoreApp>["app"],
   dbPath: string,
+  cwd: string,
 ): Promise<Result<string[], LoreError>> {
   const acService = requireAcServiceForStatus(app);
   return acService.listUnredeemedAllowMissingPath({
     fileExists: existsSync,
-    cwd: process.cwd(),
+    cwd,
     corpusRoot: dirname(dirname(dbPath)),
   });
 }
@@ -565,6 +566,7 @@ async function listUnredeemedAllowMissingPathDeclarations(
 async function collectFalsifiabilitySignals(
   app: ReturnType<typeof loadLoreApp>["app"],
   dbPath: string,
+  cwd: string,
 ): Promise<
   Result<
     {
@@ -593,7 +595,7 @@ async function collectFalsifiabilitySignals(
   for (const specSummary of specsResult.value.docs) {
     const listResult = await acService.listCriteria(specSummary.slug, {
       fileExists: existsSync,
-      cwd: process.cwd(),
+      cwd,
       corpusRoot: dirname(dirname(dbPath)),
     });
     if (!listResult.ok) return listResult;
@@ -855,25 +857,25 @@ async function collectAdoptedAbandonedMembers(
  */
 const COUNT_FIELD_ENUMERATORS: Record<
   string,
-  (app: ReturnType<typeof loadLoreApp>["app"], dbPath: string) => Promise<Result<string[], LoreError>>
+  (app: ReturnType<typeof loadLoreApp>["app"], dbPath: string, cwd: string) => Promise<Result<string[], LoreError>>
 > = {
-  pass_unfalsified_count: async (app, dbPath) => {
-    const signalsResult = await collectFalsifiabilitySignals(app, dbPath);
+  pass_unfalsified_count: async (app, dbPath, cwd) => {
+    const signalsResult = await collectFalsifiabilitySignals(app, dbPath, cwd);
     if (!signalsResult.ok) return signalsResult;
     return ok(signalsResult.value.passUnfalsifiedMembers);
   },
-  ac_other_command_count: async (app, dbPath) => {
-    const signalsResult = await collectFalsifiabilitySignals(app, dbPath);
+  ac_other_command_count: async (app, dbPath, cwd) => {
+    const signalsResult = await collectFalsifiabilitySignals(app, dbPath, cwd);
     if (!signalsResult.ok) return signalsResult;
     return ok(signalsResult.value.otherCommandMembers);
   },
-  ac_oracle_file_missing_count: async (app, dbPath) => {
-    const signalsResult = await collectFalsifiabilitySignals(app, dbPath);
+  ac_oracle_file_missing_count: async (app, dbPath, cwd) => {
+    const signalsResult = await collectFalsifiabilitySignals(app, dbPath, cwd);
     if (!signalsResult.ok) return signalsResult;
     return ok(signalsResult.value.oracleFileMissingMembers);
   },
-  unredeemed_allow_missing_path_count: async (app, dbPath) =>
-    listUnredeemedAllowMissingPathDeclarations(app, dbPath),
+  unredeemed_allow_missing_path_count: async (app, dbPath, cwd) =>
+    listUnredeemedAllowMissingPathDeclarations(app, dbPath, cwd),
   capture_source_runner_count: async (app) => {
     const membersResult = await collectCaptureSourceMembers(app);
     if (!membersResult.ok) return membersResult;
@@ -933,12 +935,12 @@ type UnclaimedOracleCheckModule = {
  * THIS repo's OWN `packages/*\/tests/**` convention), opt-in by presence, never a
  * hard requirement for `lore status` to run.
  */
-function resolveUnclaimedOracleScriptPath(): string | undefined {
+function resolveUnclaimedOracleScriptPath(execPath: string): string | undefined {
   const here = dirname(fileURLToPath(import.meta.url));
   const sourceCandidate = join(here, "..", "..", "..", "..", "..", "..", "scripts", "check-unclaimed-oracle.ts");
   if (existsSync(sourceCandidate)) return sourceCandidate;
 
-  const compiledCandidate = join(dirname(dirname(process.execPath)), "scripts", "check-unclaimed-oracle.ts");
+  const compiledCandidate = join(dirname(dirname(execPath)), "scripts", "check-unclaimed-oracle.ts");
   if (existsSync(compiledCandidate)) return compiledCandidate;
 
   return undefined;
@@ -976,8 +978,10 @@ interface UnclaimedOracleStatusPayload {
  */
 async function runUnclaimedOracleCheck(
   declaredScriptCommands: readonly string[],
+  cwd: string,
+  execPath: string,
 ): Promise<UnclaimedOracleStatusPayload> {
-  const scriptPath = resolveUnclaimedOracleScriptPath();
+  const scriptPath = resolveUnclaimedOracleScriptPath(execPath);
   if (scriptPath === undefined) {
     return {
       available: false,
@@ -990,7 +994,7 @@ async function runUnclaimedOracleCheck(
   }
 
   const mod = (await import(scriptPath)) as UnclaimedOracleCheckModule;
-  const testFiles = mod.collectRepoTestFiles(process.cwd());
+  const testFiles = mod.collectRepoTestFiles(cwd);
   const report = mod.findUnclaimedOracleValues(testFiles, declaredScriptCommands);
 
   return {
@@ -1079,6 +1083,7 @@ export default defineCommand({
   },
   async run(context) {
     const { args } = context;
+    const inv = invocationOf(context);
     // ── check-binary-provenance branch (spec-bootstrap-fixpoint-integrity-
     // binary-provenance-an-anchor, AC-BFI-2) ────────────────────────────────
     // reason: dispatched FIRST, ahead of --enumerate and --check-claude-md.
@@ -1095,8 +1100,8 @@ export default defineCommand({
       const verdict = classifyBinaryProvenance(
         gatherBinaryProvenanceFacts({
           embedded,
-          is_compiled: isCompiledBinary(Bun.main),
-          cwd: process.cwd(),
+          is_compiled: inv.isCompiled,
+          cwd: inv.cwd,
           probe: createRealGitProvenanceProbe(),
         }),
       );
@@ -1141,7 +1146,7 @@ export default defineCommand({
           process.exitCode = exitCode(error);
           return;
         }
-        const membersResult = await enumerator(app, dbPath);
+        const membersResult = await enumerator(app, dbPath, inv.cwd);
         if (!membersResult.ok) {
           process.stderr.write(formatError(membersResult.error) + "\n");
           process.exitCode = exitCode(membersResult.error);
@@ -1186,17 +1191,17 @@ export default defineCommand({
     // check-tree/check-drift/check-requirements/check-prd-budget/check-issues
     // branch and returns before that branch is ever reached.
     if (checkClaudeMdRequested) {
-      const budgetResolution = resolveClaudeMdBudgets(process.cwd());
+      const budgetResolution = resolveClaudeMdBudgets(inv.cwd);
       const budgets = budgetResolution.budgets;
       // reason: emitted BEFORE any measurement is printed, so an operator
       // reading the numbers below already knows whose ceilings they are. On
       // stderr (never stdout) so it cannot corrupt the --json payload, which
       // carries the same fact in `budget_source`/`budget_substitution` for
       // consumers that never see stderr.
-      const substitutionNotice = formatMemoryFileBudgetSubstitution(budgetResolution, process.cwd());
+      const substitutionNotice = formatMemoryFileBudgetSubstitution(budgetResolution, inv.cwd);
       if (substitutionNotice !== undefined) process.stderr.write(substitutionNotice + "\n");
 
-      const files = discoverMemoryFiles(process.cwd(), budgets.filenames);
+      const files = discoverMemoryFiles(inv.cwd, budgets.filenames);
       // reason: runMemoryFileChecks (service/claude-md-admission.ts) is the
       // SOLE composition entry both this branch and flows/context-flow.ts
       // route through (AC-COMPOSE-1) — neither calls an individual metric
@@ -1216,7 +1221,7 @@ export default defineCommand({
         warnings,
         adoption,
       } = runMemoryFileChecks(files, budgets, {
-        fileExists: (p) => existsSync(join(process.cwd(), p)),
+        fileExists: (p) => existsSync(join(inv.cwd, p)),
         docExists: () => true,
       });
 
@@ -1245,7 +1250,7 @@ export default defineCommand({
     // check are the ones `lore fragments check` uses, so the two commands cannot disagree on a
     // finding; only the stdout/stderr rendering below is repeated (it is module-private there).
     if (args["check-fragments"] === true) {
-      await runFragmentsCheckCommand(args, process.cwd(), invocationOf(context), "lore status --check-fragments");
+      await runFragmentsCheckCommand(args, inv.cwd, inv, "lore status --check-fragments");
       return;
     }
 
@@ -1294,7 +1299,7 @@ export default defineCommand({
         const treeErrorLines: string[] = [];
 
         if (checkTreeRequested) {
-          const loaded = loadTreeBlueprint(process.cwd());
+          const loaded = loadTreeBlueprint(inv.cwd);
 
           if (loaded.status === "missing") {
             blueprintUnarmable = true;
@@ -1412,7 +1417,7 @@ export default defineCommand({
             return;
           } else {
             const deps = buildDriftFlowDeps(app, app.driftCheckService);
-            const probe = buildRealFsProbe(process.cwd());
+            const probe = buildRealFsProbe(inv.cwd);
             const driftResult = await runDrift(deps, probe);
             if (!driftResult.ok) {
               process.stderr.write(formatError(driftResult.error) + "\n");
@@ -1562,7 +1567,7 @@ export default defineCommand({
         let memoryPointersInconsistent = false;
         if (checkMemoryPointersRequested) {
           const budgets = resolveMemoryFileBudgets(config);
-          const files = discoverMemoryFiles(process.cwd(), budgets.filenames);
+          const files = discoverMemoryFiles(inv.cwd, budgets.filenames);
 
           const allDocsResult = await app.corpusService.list({});
           if (!allDocsResult.ok) {
@@ -1577,7 +1582,7 @@ export default defineCommand({
             advisory: memoryPointerAdvisory,
             adoption: memoryPointerAdoption,
           } = runMemoryFileChecks(files, budgets, {
-            fileExists: (p) => existsSync(join(process.cwd(), p)),
+            fileExists: (p) => existsSync(join(inv.cwd, p)),
             docExists: (slug) => knownSlugs.has(slug),
           });
           memoryPointersPayload = {
@@ -1753,7 +1758,7 @@ export default defineCommand({
       // report. REPORT-ONLY: neither number below may influence process.exitCode —
       // 574/700 existing criteria are grandfathered by the governing spec's WRITTEN
       // exemption, never by a synthesized red run.
-      const falsifiabilitySignalsResult = await collectFalsifiabilitySignals(app, dbPath);
+      const falsifiabilitySignalsResult = await collectFalsifiabilitySignals(app, dbPath, inv.cwd);
       if (!falsifiabilitySignalsResult.ok) {
         process.stderr.write(formatError(falsifiabilitySignalsResult.error) + "\n");
         process.exitCode = exitCode(falsifiabilitySignalsResult.error);
@@ -1767,7 +1772,7 @@ export default defineCommand({
       const passUnfalsifiedCount = passUnfalsifiedMembers.length;
       const acOtherCommandCount = otherCommandMembers.length;
       const acOracleFileMissingCount = oracleFileMissingMembers.length;
-      const unclaimedOracle = await runUnclaimedOracleCheck(declaredScriptCommands);
+      const unclaimedOracle = await runUnclaimedOracleCheck(declaredScriptCommands, inv.cwd, inv.execPath);
 
       // spec-oracle-executability-a-runner-s-discovery-refusal-is-not-a §D8,
       // task-wire-allow-missing-path-and-the-unredeemed-declaration (AC-OX-10) —
@@ -1776,7 +1781,7 @@ export default defineCommand({
       // `pass_unfalsified_count`/`unclaimed_oracle` above: never influences
       // `process.exitCode` — a dangling declaration is a promise to redeem, not a
       // corpus-integrity breach the CI gate should block on.
-      const unredeemedResult = await listUnredeemedAllowMissingPathDeclarations(app, dbPath);
+      const unredeemedResult = await listUnredeemedAllowMissingPathDeclarations(app, dbPath, inv.cwd);
       if (!unredeemedResult.ok) {
         process.stderr.write(formatError(unredeemedResult.error) + "\n");
         process.exitCode = exitCode(unredeemedResult.error);
@@ -1855,7 +1860,7 @@ export default defineCommand({
       let orphanedDirty: OrphanedDirtySummary;
       let specCitationCensus: SpecCitationCensus | null = null;
       try {
-        const repoRoot = resolveGitRoot(process.cwd());
+        const repoRoot = resolveGitRoot(inv.cwd);
         const baselineResult = await computeBaselineStatus(
           baselineStore,
           new RuleStateService(baselineStore, new SpawnGitPort(repoRoot)),

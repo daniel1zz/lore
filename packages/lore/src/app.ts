@@ -663,11 +663,11 @@ export interface AppWriteContext {
  * The diff port the attestation floor's radius axis measures through (SPEC-143 AC-CT-9): a `SpawnGitPort`
  * whose repository root is resolved on FIRST use, so an app that never reads a stamped row never spawns the VCS.
  */
-function lazyRadiusDiffPort(): RadiusDiffPort {
+function lazyRadiusDiffPort(cwd: string): RadiusDiffPort {
   let port: SpawnGitPort | undefined;
   return {
     changedSince(sha, paths) {
-      port ??= new SpawnGitPort(resolveGitRoot(process.cwd()));
+      port ??= new SpawnGitPort(resolveGitRoot(cwd));
       return port.changedSince(sha, paths);
     },
   };
@@ -738,14 +738,16 @@ function warnOnStderr(line: string): void {
  */
 /**
  * The ambient process facts the composition root hands to the ports it wires: the environment, the user's home
- * directory and the OS temp directory. Built from the entry's `Invocation` where there is one
- * (`{ env: inv.env, home: inv.paths.home, tmpDir: inv.paths.tmpDir }`), else from the process by
+ * directory, the OS temp directory and the working directory. Built from the entry's `Invocation` where there is one
+ * (`{ env: inv.env, home: inv.paths.home, tmpDir: inv.paths.tmpDir, cwd: inv.cwd }`), else from the process by
  * {@link ambientFromProcess}.
  */
 export interface AppAmbient {
   readonly env: Readonly<Record<string, string | undefined>>;
   readonly home: string;
   readonly tmpDir: string;
+  /** The directory the entry ran in; git roots for the lazily-built git ports resolve from it. */
+  readonly cwd: string;
 }
 
 /**
@@ -758,27 +760,27 @@ export interface AppAmbient {
 export function ambientFromProcess(): AppAmbient {
   const env = process.env;
   const envHome = env["HOME"];
-  return { env, home: envHome !== undefined && envHome !== "" ? envHome : homedir(), tmpDir: tmpdir() };
+  return { env, home: envHome !== undefined && envHome !== "" ? envHome : homedir(), tmpDir: tmpdir(), cwd: process.cwd() };
 }
 
 function buildAppFromSqlite(
   store: SQLiteStore,
   telemetry: Telemetry = new NoOpTelemetry(),
   aiProviderService: AIProviderService,
-  aiDefaultPerSurface?: AiDefaultPerSurface,
+  aiDefaultPerSurface: AiDefaultPerSurface | undefined,
   claimTtlMinutes: number = 120,
   handoffTtlMinutes: number = 10_080,
   auditVerifySince: string = "2026-07-06T00:00:00Z",
   verifyDefaultTimeoutMs: number = 300_000,
   verifyEnvConfig: VerifyEnvConfig = { allowlist: [], passthrough_all: false },
   verifyRequireCommandApproval: boolean = true,
-  repoRoot: string = process.cwd(),
+  repoRoot: string,
   gateEnforcer: GateEnforcer = new GateEnforcer(undefined),
   requirementQuantifiableEnabled: boolean = true,
   attestationMinRatio: number | null = resolveAttestationMinRatio(undefined),
-  traceRecorder?: TraceRecorder,
+  traceRecorder: TraceRecorder | undefined,
   surfaceBox: { current: CallerSurface } = { current: "cli" },
-  pruneTrigger?: () => void,
+  pruneTrigger: (() => void) | undefined,
   // SPEC-103 §Mechanisms M1/M2 — resolved config values (`resolveLedgerAutoApprove`/
   // `resolveJudgmentRequiredTypes`, `@lore/core`), threaded the SAME way every other
   // resolved-config-value param above is (`claimTtlMinutes` precedent) — never a raw
@@ -795,13 +797,13 @@ function buildAppFromSqlite(
   // pre-existing bare test construction that omits it (nothing to wait for
   // — `close()` falls back to closing immediately, byte-identical to
   // pre-hardening behavior).
-  pruneState?: { inFlight?: Promise<void> },
+  pruneState: { inFlight?: Promise<void> } | undefined,
   // spec-baseline-slice-2 §C4 — the raw `workflow.gates."ac-cite"` entry (`resolveCiteGateRaw`, `@lore/core`),
   // validated per write by the AC write chokepoint. The composition root ALWAYS arms the citation gate
   // (even with `undefined`): it then resolves to its default — off without baseline docs, report with
   // them. Only a bare `new AcService(store)` / `new CorpusService(store)` is ungated.
-  citeGateRaw?: unknown,
-  ambient: AppAmbient = ambientFromProcess(),
+  citeGateRaw: unknown,
+  ambient: AppAmbient,
 ): App {
   const db = store.getDatabase();
   // reason: claimTtlMinutes flows into DocSummary.meta's task.claim_stale (SPEC-036 §2
@@ -828,11 +830,11 @@ function buildAppFromSqlite(
   // reason: BR-984 — plan-close's cited-rule-state predicate reads rule state through the real git port.
   // Built lazily (git root resolved on first use) so an app that never closes a plan never spawns git.
   corpusService.setRuleStateService({
-    full: () => new RuleStateService(store, new SpawnGitPort(resolveGitRoot(process.cwd()))).full(),
+    full: () => new RuleStateService(store, new SpawnGitPort(resolveGitRoot(ambient.cwd))).full(),
   });
   // reason: AC-CT-9 — the attestation floor's radius axis diffs through the SAME lazy git port shape (git root
   // resolved on first measurement, so an app that never reads a stamped row never spawns git).
-  const stampRadiusDiff = lazyRadiusDiffPort();
+  const stampRadiusDiff = lazyRadiusDiffPort(ambient.cwd);
   corpusService.setStampRadiusDiff(stampRadiusDiff);
   const outlineService = new OutlineService(store);
   // reason: own telemetry wiring restores parity with CorpusService (D8) — TaskWorkflowService
@@ -1198,21 +1200,21 @@ function buildAppFromTurso(
   dbPath: string,
   telemetry: Telemetry = new NoOpTelemetry(),
   aiProviderService: AIProviderService,
-  aiDefaultPerSurface?: AiDefaultPerSurface,
+  aiDefaultPerSurface: AiDefaultPerSurface | undefined,
   claimTtlMinutes: number = 120,
   handoffTtlMinutes: number = 10_080,
   auditVerifySince: string = "2026-07-06T00:00:00Z",
   verifyDefaultTimeoutMs: number = 300_000,
   verifyEnvConfig: VerifyEnvConfig = { allowlist: [], passthrough_all: false },
   verifyRequireCommandApproval: boolean = true,
-  repoRoot: string = process.cwd(),
+  repoRoot: string,
   gateEnforcer: GateEnforcer = new GateEnforcer(undefined),
   requirementQuantifiableEnabled: boolean = true,
   attestationMinRatio: number | null = resolveAttestationMinRatio(undefined),
-  traceRecorder?: TraceRecorder,
+  traceRecorder: TraceRecorder | undefined,
   surfaceBox: { current: CallerSurface } = { current: "cli" },
-  localTraceStore?: SQLiteStore,
-  pruneTrigger?: () => void,
+  localTraceStore: SQLiteStore | undefined,
+  pruneTrigger: (() => void) | undefined,
   // SPEC-103 §Mechanisms M1/M2 — resolved config values (`resolveLedgerAutoApprove`/
   // `resolveJudgmentRequiredTypes`, `@lore/core`), threaded the SAME way every other
   // resolved-config-value param above is (`claimTtlMinutes` precedent) — never a raw
@@ -1224,10 +1226,10 @@ function buildAppFromTurso(
   // SPEC-102 hardening (T4 item 4) — see `buildAppFromSqlite`'s identical
   // parameter JSDoc; the SAME mutable box `pruneTrigger` (above) writes its
   // in-flight promise into, read by `close()` below.
-  pruneState?: { inFlight?: Promise<void> },
+  pruneState: { inFlight?: Promise<void> } | undefined,
   // See buildAppFromSqlite's identical parameter JSDoc.
-  citeGateRaw?: unknown,
-  ambient: AppAmbient = ambientFromProcess(),
+  citeGateRaw: unknown,
+  ambient: AppAmbient,
 ): App {
   const apiKeyDb = new Database(dbPath);
   // reason: claimTtlMinutes flows into DocSummary.meta's task.claim_stale (SPEC-036 §2
@@ -1253,11 +1255,11 @@ function buildAppFromTurso(
   // reason: BR-984 — plan-close's cited-rule-state predicate reads rule state through the real git port.
   // Built lazily (git root resolved on first use) so an app that never closes a plan never spawns git.
   corpusService.setRuleStateService({
-    full: () => new RuleStateService(store, new SpawnGitPort(resolveGitRoot(process.cwd()))).full(),
+    full: () => new RuleStateService(store, new SpawnGitPort(resolveGitRoot(ambient.cwd))).full(),
   });
   // reason: AC-CT-9 — the attestation floor's radius axis diffs through the SAME lazy git port shape (git root
   // resolved on first measurement, so an app that never reads a stamped row never spawns git).
-  const stampRadiusDiff = lazyRadiusDiffPort();
+  const stampRadiusDiff = lazyRadiusDiffPort(ambient.cwd);
   corpusService.setStampRadiusDiff(stampRadiusDiff);
   const outlineService = new OutlineService(store);
   // reason: extracted to a local (see buildAppFromSqlite's identical comment) so

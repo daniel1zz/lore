@@ -82,7 +82,6 @@
 import { dirname, join } from "node:path";
 import { spawn } from "node:child_process";
 import { mkdtempSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
 import { defineCommand } from "citty";
 import { loadGlobalConfig, resolveGlobalConfigPath } from "@lore/core/node";
 import { loadLoreApp } from "../loader.js";
@@ -192,9 +191,9 @@ let fixtureManifest: DashboardAssetsManifest | undefined;
  * `mkdtemp` dir so a request against this fixture still gets real bytes back, matching the
  * production manifest's own "never serve a dangling path" discipline.
  */
-function resolveFixtureManifest(): DashboardAssetsManifest {
+function resolveFixtureManifest(tmpDir: string): DashboardAssetsManifest {
   if (fixtureManifest !== undefined) return fixtureManifest;
-  const dir = mkdtempSync(join(tmpdir(), "lore-dashboard-assets-fixture-"));
+  const dir = mkdtempSync(join(tmpDir, "lore-dashboard-assets-fixture-"));
   const indexPath = join(dir, "index.html");
   writeFileSync(indexPath, "<!doctype html><title>lore dashboard (fixture)</title>\n");
   fixtureManifest = {
@@ -241,11 +240,11 @@ const FORCE_UNAVAILABLE_REASON =
  * @returns `{ available: false, reason }` naming `bun run build` / `--dev` on any failure,
  *   never a thrown error.
  */
-async function resolveAssets(): Promise<DashboardAssetsResult> {
-  if (process.env.LORE_DASHBOARD_ASSETS_FIXTURE === "1") {
-    return { available: true, manifest: resolveFixtureManifest() };
+async function resolveAssets(inv: Invocation): Promise<DashboardAssetsResult> {
+  if (inv.env.LORE_DASHBOARD_ASSETS_FIXTURE === "1") {
+    return { available: true, manifest: resolveFixtureManifest(inv.paths.tmpDir) };
   }
-  if (process.env.LORE_DASHBOARD_ASSETS_FIXTURE === "0") {
+  if (inv.env.LORE_DASHBOARD_ASSETS_FIXTURE === "0") {
     return { available: false, reason: FORCE_UNAVAILABLE_REASON };
   }
   const loaded = await loadDashboardAssets();
@@ -280,7 +279,7 @@ async function runPackagedMode(
   // corpus load, no store open, no port parsed, no listener bound — so an unavailable-
   // assets exit has zero side effects and never mentions Vite (packaged mode never
   // attempts that topology at all).
-  const assetsResult = await resolveAssets();
+  const assetsResult = await resolveAssets(inv);
   if (!assetsResult.available) {
     process.stderr.write(
       `Error: Dashboard assets are not built (${assetsResult.reason})\n` +
@@ -319,7 +318,7 @@ async function runPackagedMode(
     allowedOrigins,
     ...(mountRegistry !== undefined ? { mountRegistry } : {}),
     dashboard: {
-      assets: resolveAssets,
+      assets: () => resolveAssets(inv),
       nonces,
       machineAuth: () => machineAuth,
     },
@@ -498,7 +497,7 @@ async function runDevMode(
   // DD-3 debug seam: prints the REAL --dashboard-port-derived allowlist before the Vite
   // child is spawned, so the paired RED suite can assert the actual port appears (and the
   // retired 5173 hardcode never does) without a live network probe.
-  if (process.env.LORE_DASHBOARD_DEBUG_ALLOWLIST === "1") {
+  if (inv.env.LORE_DASHBOARD_DEBUG_ALLOWLIST === "1") {
     process.stdout.write(`LORE_DASHBOARD_ALLOWLIST=${JSON.stringify(allowedOrigins)}\n`);
   }
 
@@ -545,7 +544,7 @@ async function runDevMode(
     {
       stdio: "inherit",
       cwd: projectRoot,
-      env: { ...process.env, VITE_LORE_BOOTSTRAP_TOKEN: localKey },
+      env: { ...inv.env, VITE_LORE_BOOTSTRAP_TOKEN: localKey },
       detached: process.platform !== "win32",
     },
   );

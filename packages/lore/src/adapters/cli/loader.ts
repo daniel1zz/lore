@@ -105,14 +105,11 @@ import { resolveFeedbackUpstreamCfg } from "./report-issue-wiring.js";
  * reason: env vars read at process startup (before any command dispatch) ensure surface
  * is stable for the entire request. MCP/HTTP use in-process flags instead — see SPEC-024 §9.2.
  *
+ * @param env - the entry's environment (`ambient.env`)
  * @returns CallerSurface — "cli" or "agent"
  */
-function detectCliSurface(): CallerSurface {
-  if (
-    process.env["LORE_AI_DEFAULT"] === "off" ||
-    process.env["CLAUDECODE"] === "1" ||
-    process.env["CI"] === "true"
-  ) {
+function detectCliSurface(env: Readonly<Record<string, string | undefined>>): CallerSurface {
+  if (env["LORE_AI_DEFAULT"] === "off" || env["CLAUDECODE"] === "1" || env["CI"] === "true") {
     return "agent";
   }
   return "cli";
@@ -208,6 +205,7 @@ export interface LoadLoreAppOptions {
  * change, not a refactor.
  *
  * @param bootSurface - See {@link LoreAppBootSurface}.
+ * @param cwd - the entry's working directory (`ambient.cwd`).
  * @returns `null` for a surface with no per-call caller directory (always
  *   inert in `checkForeignCorpusWrite`); otherwise the provenance
  *   `resolveCorpus` derives from this process's cwd. `undefined` from
@@ -218,12 +216,12 @@ export interface LoadLoreAppOptions {
  *   resolveForeignWriteProvenance("http") // => null, wherever the server was started
  *   resolveForeignWriteProvenance("cli")  // => "own" | "git_common_dir" | "undetermined" | null
  */
-function resolveForeignWriteProvenance(bootSurface: LoreAppBootSurface): CorpusProvenance | null {
+function resolveForeignWriteProvenance(bootSurface: LoreAppBootSurface, cwd: string): CorpusProvenance | null {
   switch (bootSurface) {
     case "http":
       return null;
     case "cli":
-      return resolveCorpus(process.cwd())?.provenance ?? null;
+      return resolveCorpus(cwd)?.provenance ?? null;
     default: {
       // Exhaustive check — a new LoreAppBootSurface must decide explicitly.
       // reason: the fallback is the CLI branch, not `null`: an unhandled
@@ -231,7 +229,7 @@ function resolveForeignWriteProvenance(bootSurface: LoreAppBootSurface): CorpusP
       // disable it for a whole adapter.
       const _exhaustive: never = bootSurface;
       void _exhaustive;
-      return resolveCorpus(process.cwd())?.provenance ?? null;
+      return resolveCorpus(cwd)?.provenance ?? null;
     }
   }
 }
@@ -431,7 +429,12 @@ export function loadLoreApp(opts: LoadLoreAppOptions = {}): {
   const composedInvocation = opts.inv ?? invocationInScope();
   const ambient: AppAmbient =
     composedInvocation !== undefined
-      ? { env: composedInvocation.env, home: composedInvocation.paths.home, tmpDir: composedInvocation.paths.tmpDir }
+      ? {
+          env: composedInvocation.env,
+          home: composedInvocation.paths.home,
+          tmpDir: composedInvocation.paths.tmpDir,
+          cwd: composedInvocation.cwd,
+        }
       : ambientFromProcess();
   const globalConfigPath = resolveGlobalConfigPath(ambient.env, ambient.home);
   let globalDefaults: LoreDefaults | undefined;
@@ -482,7 +485,7 @@ export function loadLoreApp(opts: LoadLoreAppOptions = {}): {
     const invocationIdentity = invocationInScope()?.identity;
     appOrResult =
       invocationIdentity === undefined
-        ? createApp(dbPath, telemetryOnlyConfig)
+        ? createApp(dbPath, telemetryOnlyConfig, undefined, ambient)
         : createAppWithWriteContext(dbPath, telemetryOnlyConfig, { identity: invocationIdentity }, ambient);
   } catch (thrown) {
     const message = thrown instanceof Error ? thrown.message : String(thrown);
@@ -509,7 +512,7 @@ export function loadLoreApp(opts: LoadLoreAppOptions = {}): {
   // reason: must happen here (not inside each command) so the surface is stable
   // for the entire CLI invocation. MCP sets "mcp" in adapters/mcp/index.ts; HTTP
   // resolves per-request in ActorContext — see SPEC-024 §9.2.
-  app.callerSurface = detectCliSurface();
+  app.callerSurface = detectCliSurface(ambient.env);
   setProcessAuditSurface(app.callerSurface);
 
   // spec-corpus-resolution-carries-provenance-and-a-foreign-write §D5 — the
@@ -531,7 +534,7 @@ export function loadLoreApp(opts: LoadLoreAppOptions = {}): {
   // computed, and `corpus-resolution.ts`'s own module header names exactly
   // this guard as the caller that needs `resolveCorpus()` directly instead.
   const foreignWriteContext: ForeignCorpusWriteContext = {
-    provenance: resolveForeignWriteProvenance(bootSurface),
+    provenance: resolveForeignWriteProvenance(bootSurface, ambient.cwd),
     enabled: resolveForeignCorpusWriteGateEnabled(telemetryOnlyConfig),
   };
   app.corpusService.setForeignCorpusWriteContext(foreignWriteContext);
@@ -545,7 +548,7 @@ export function loadLoreApp(opts: LoadLoreAppOptions = {}): {
   // CorpusService), so they consult the SAME context + the caller's claim lease themselves.
   const corpusWriteAuthority = {
     foreign: foreignWriteContext,
-    callerDir: process.cwd(),
+    callerDir: ambient.cwd,
     claimTtlMinutes: resolveClaimTtlMinutes(telemetryOnlyConfig),
   };
   app.ruleService?.setCorpusWriteContext(corpusWriteAuthority);
