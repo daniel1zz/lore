@@ -263,7 +263,7 @@ export class GitIgnoreQueryError extends Error {
  * undeclared read still fails. Exit 0 = some ignored, 1 = none, anything else = git cannot answer: throw.
  */
 export function findGitIgnoredPaths(paths: readonly string[], spawn: GitSpawn = realChildProcess.spawnSync): Set<string> {
-  const ignoredByRule = new Set(runGit(["check-ignore", "--stdin", "-z"], paths, `${paths.join("\0")}\0`, [1], spawn));
+  const ignoredByRule = new Set(runGit(["check-ignore", "--stdin", "-z"], paths, `${paths.join("\0")}\0`, [1], spawn, true));
   // reason: a directory holding only ignored files (`.lore-safety-backups/x.db` under `*.db`) has no ignore rule of
   // its own, yet git tracks and diffs nothing in it. It counts as ignored when no tracked or non-ignored untracked
   // file lives under it. Missing paths are not directories, so a read of a missing file is still undeclared.
@@ -282,12 +282,19 @@ function runGit(
   input: string | undefined,
   tolerated: readonly number[],
   spawn: GitSpawn,
+  answerRequiredOnSuccess = false,
 ): string[] {
   const result = spawn("git", args, { cwd: REPO_ROOT, input: input ?? "", encoding: "utf8", maxBuffer: 16 * 1024 * 1024 });
   if (result.error !== undefined) throw new GitIgnoreQueryError(REPO_ROOT, paths, result.error.message);
   if (result.status !== null && tolerated.includes(result.status)) return [];
   if (result.status !== 0) throw new GitIgnoreQueryError(REPO_ROOT, paths, `exit ${String(result.status)}: ${result.stderr.trim()}`);
-  return result.stdout.split("\0").filter((p) => p !== "");
+  const records = result.stdout.split("\0").filter((p) => p !== "");
+  // reason: Bun spawnSync can return status 0 with EMPTY stdout (TG-49/TG-51). Where exit 0 itself means "there is an
+  // answer" (check-ignore: some path is ignored), an empty answer is a lost one: not measured, fail loud, no retry.
+  if (answerRequiredOnSuccess && records.length === 0) {
+    throw new GitIgnoreQueryError(REPO_ROOT, paths, "git exited with status 0 with empty stdout, but status 0 means a path was reported (the answer was lost)");
+  }
+  return records;
 }
 
 /** One group of undeclared accesses, keyed by the label (test name) they were recorded under. */
