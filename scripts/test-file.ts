@@ -10,6 +10,9 @@
  * Invariants: only non-empty groups run; non-path args (`-t <name>`, flags) pass through to both;
  * exit is non-zero when either runner fails OR any given path collected no passed/failed test
  * ("No test files found" and an all-filtered file are failures, never a silent pass).
+ * Output: the dot reporter keeps each runner's output short, so BOTH runner summaries
+ * ("Test Files N passed (N)") stay inside the 4000-char evidence tail that
+ * `lore verify` sums for its completeness check (a verbose per-test list pushed the first summary out: 1 of 3).
  * Side-effect class: IO (spawns vitest, writes a JSON report under node_modules/.cache).
  *
  * Exit codes: 0 every path collected tests and every runner passed; 1 a runner failed or a path
@@ -53,7 +56,7 @@ export function planGroups(
   reportFile: (r: Runner) => string,
 ): Group[] {
   const { bun, node } = splitByRunner(paths, nodeFiles);
-  const report = (r: Runner): string[] => ["--reporter=default", "--reporter=json", `--outputFile.json=${reportFile(r)}`];
+  const report = (r: Runner): string[] => ["--reporter=dot", "--reporter=json", `--outputFile.json=${reportFile(r)}`];
   const groups: Group[] = [];
   if (bun.length > 0) groups.push({ runner: "bun", files: bun, argv: ["--bun", "vitest", "run", ...report("bun"), ...passthrough, ...bun] });
   if (node.length > 0) {
