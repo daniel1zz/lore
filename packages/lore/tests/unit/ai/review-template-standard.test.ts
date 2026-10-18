@@ -113,8 +113,8 @@ describe("AC-BLC-5 — prompt version freeze", () => {
   const frozenV2 = REVIEW_TEMPLATES["v2"]!;
   const v3 = REVIEW_TEMPLATES["v3"]!;
 
-  it("STATE: the active version is v3", () => {
-    expect(REVIEW_PROMPT_VERSION).toBe("v3");
+  it("STATE: the active version is v4", () => {
+    expect(REVIEW_PROMPT_VERSION).toBe("v4");
   });
 
   it("REGRESSION: v2 output for a standard node is byte-identical to its pre-fix render (no four parts)", () => {

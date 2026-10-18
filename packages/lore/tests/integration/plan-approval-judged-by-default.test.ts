@@ -118,6 +118,7 @@ describe("plans are judged by default", () => {
     const result = await runLore(["approve", plan.slug], dir);
     expect(result.exitCode).toBe(4);
     expect(result.stderr).toContain("review-judgment");
+    expect(result.stderr).toContain("JUDGMENT_REJECTED");
     expect((await getDoc(dir, plan.slug)).status).toBe("draft");
   });
 
@@ -149,7 +150,6 @@ describe("plans are judged by default", () => {
     const dir = await freshCorpus("lore-plan-judged-approve-");
     const plan = await createDraftPlan(dir);
     insertRawJudgment(dir, plan.id, plan.version, "approve");
-
     const result = await runLore(["approve", plan.slug], dir);
     expect(result.exitCode).toBe(0);
     expect((await getDoc(dir, plan.slug)).status).toBe("approved");

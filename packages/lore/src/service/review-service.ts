@@ -856,9 +856,11 @@ export class ReviewService {
     // `skipJudgmentGate` mirrors the pre-write call's own override state — an
     // override decision doesn't change between the pre- and post-write checks.
     if (this.gate !== undefined && doc.type === "plan") {
-      const postGateResult = await this.enforceApprovalGate(updatedDoc, {
-        skipJudgmentGate: overriddenJudgmentId !== undefined || overrodeNoJudgment,
-      });
+      // reason: the judgment was already enforced against the version being approved, above. This
+      // re-check exists for the ancestor spec's prerequisites; running the judgment gate on
+      // `updatedDoc` would measure the just-written version N+1, which no judgment can yet cover,
+      // and so refuse EVERY judged plan (plans became judged by default, BR-281 / BR-1237).
+      const postGateResult = await this.enforceApprovalGate(updatedDoc, { skipJudgmentGate: true });
       if (!postGateResult.ok) {
         const rollbackResult = await this.rollbackApproval(updatedDoc, doc.status, reviewer);
         if (!rollbackResult.ok) {

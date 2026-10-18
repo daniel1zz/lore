@@ -45,7 +45,7 @@ export const LORE_BINARY_VERSION = "0.1.0" as const;
 
 export const EMBEDDED_ASSETS_MANIFEST: EmbeddedAssetsManifest = {
   binary_version: LORE_BINARY_VERSION,
-  tree_digest: "5d2ea8c2071209afca34d9c65979c86a06f1a0e6418c6f7405cf700a59b4d9ed",
+  tree_digest: "7a4c91cdab5ac996b03fabb46a9b3fac5fd8b9dbb7581c83c164f450c191cd54",
   entries: [
   { path: "agents/lore-implementer.md", kind: "agent", ownership: "managed", sha256: "8b063e990dea63597d6728495ec0925bb15b4f2a3d1933ca11bd53abe9d70da7" },
   { path: "agents/lore-reader.md", kind: "agent", ownership: "managed", sha256: "336b2da60cfe9afae51f17ac8f6f9f33e7c67b2f3639874795e22a0e257e8696" },
@@ -53,7 +53,7 @@ export const EMBEDDED_ASSETS_MANIFEST: EmbeddedAssetsManifest = {
   { path: "context/agent-rules.md", kind: "context", ownership: "managed", sha256: "976b665a0f1596f718d33f34533c01dae49f702c0aca9bda45b573b7368660e7" },
   { path: "context/corpus-workflow-0-overview.md", kind: "context", ownership: "managed", sha256: "3163c206001e85333f8963e86e1ce057609a8ed2a1e8a290ec30a8d5811ba124" },
   { path: "context/corpus-workflow-1-feed.md", kind: "context", ownership: "managed", sha256: "9ffda72eb264f2ec358a1631ff6716f34a0d5279a47c48930ae677bccc0194a4" },
-  { path: "context/corpus-workflow-2-produce.md", kind: "context", ownership: "managed", sha256: "25f65a6338ebabfef3c8b9a53e8ffd8e0408f8a0a531ca205366872dcca2f76e" },
+  { path: "context/corpus-workflow-2-produce.md", kind: "context", ownership: "managed", sha256: "c97c3731947951c869ca4541f21548ffc8fecf936129bbe14c2f19d2b07f3116" },
   { path: "context/corpus-workflow-3-execute.md", kind: "context", ownership: "managed", sha256: "78c1039bcaa7082ec38f611d7eebc48de399994123740bfeed6946b40b72fb70" },
   { path: "context/corpus-workflow-4-close.md", kind: "context", ownership: "managed", sha256: "f1cd5c71464c0ce1cc914c8c3bebf7b5da746923a521b8ba2c56d27cc9b019dc" },
   { path: "context/dispatch-bundle.md", kind: "context", ownership: "managed", sha256: "fad2df8beb68f36fd591290ec8d91bbec836eeaf149708d8b6ec263b869cac39" },
