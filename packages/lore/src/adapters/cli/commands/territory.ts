@@ -51,12 +51,14 @@
  */
 
 import { defineCommand } from "citty";
+
 import { RealGitPort, listLocalBranches } from "../../real-git-port.js";
 import { resolveClaimSessionId } from "../../../service/task-workflow-service.js";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatErrorFor } from "../utils.js";
 import { partitionTerritory, formatTerritoryHuman } from "../territory-partition.js";
 import { invocationOf } from "../command-invocation.js";
+import { printLine } from "../output.js";
 
 export default defineCommand({
   meta: {
@@ -76,33 +78,29 @@ export default defineCommand({
     const { app } = loadLoreApp({ inv });
     try {
       if (app.sessionService === undefined) {
-        process.stderr.write("Error: SessionService not wired on this App instance.\n");
-        process.exitCode = 1;
-        return;
+        inv.io.stderr.write("Error: SessionService not wired on this App instance.\n");
+        return 1;
       }
       // reason: fail loud rather than silently substituting process.cwd()
       // — see this module's own header for why. `app.repoRoot` is ALWAYS
       // set for a real CLI boot; a missing value here means the App was
       // mis-constructed, not that process.cwd() is a safe stand-in.
       if (app.repoRoot === undefined) {
-        process.stderr.write("Error: repoRoot not set on this App instance.\n");
-        process.exitCode = 1;
-        return;
+        inv.io.stderr.write("Error: repoRoot not set on this App instance.\n");
+        return 1;
       }
 
       const gitPort = new RealGitPort(app.repoRoot);
       const worktreeListResult = await gitPort.worktreeList();
       if (!worktreeListResult.ok) {
-        process.stderr.write(formatErrorFor(inv, worktreeListResult.error) + "\n");
-        process.exitCode = exitCode(worktreeListResult.error);
-        return;
+        inv.io.stderr.write(formatErrorFor(inv, worktreeListResult.error) + "\n");
+        return exitCode(worktreeListResult.error);
       }
 
       const activeSessionsResult = await app.sessionService.getActiveSessions();
       if (!activeSessionsResult.ok) {
-        process.stderr.write(formatErrorFor(inv, activeSessionsResult.error) + "\n");
-        process.exitCode = exitCode(activeSessionsResult.error);
-        return;
+        inv.io.stderr.write(formatErrorFor(inv, activeSessionsResult.error) + "\n");
+        return exitCode(activeSessionsResult.error);
       }
 
       // reason: the SAME sanitized discriminator TaskWorkflowService.claim
@@ -127,9 +125,9 @@ export default defineCommand({
       );
 
       if (args.json) {
-        console.log(JSON.stringify({ ok: true, data: partition }, null, 2));
+        printLine(inv.io.stdout, JSON.stringify({ ok: true, data: partition }, null, 2));
       } else {
-        console.log(formatTerritoryHuman(partition));
+        printLine(inv.io.stdout, formatTerritoryHuman(partition));
       }
     } finally {
       app.close();

@@ -34,7 +34,10 @@ import { join, resolve } from "path";
 import { tmpdir } from "os";
 import { createApp, type App } from "../../src/app.js";
 import type { CreateDocInput } from "@lore/core";
-import { liveInvocation, liveAmbient, liveWriteContext } from "../live-invocation.js";
+import { liveInvocation, liveAmbient, liveWriteContext, runHandlerForExit } from "../live-invocation.js";
+
+/** The exit code the most recent command call ended with (commands return it; none sets `process.exitCode`). */
+let lastExitCode = 0;
 import type { Invocation } from "@lore/core";
 
 // ─── Command type + importer (mirrors gate-feeding-skill-discovery.bun.test.ts) ────
@@ -51,14 +54,17 @@ async function importGateSpecCreate(): Promise<RunnableCommand> {
 
 function captureOutput() {
   const stdout: string[] = [];
-  const origConsoleLog = console.log.bind(console);
-  console.log = (...args: unknown[]) => {
+  const origConsoleLog = process.stdout.write;
+  process.stdout.write = (((chunk: unknown) => {
+    const args: unknown[] = [String(chunk).replace(/\n$/, "")];
     stdout.push(args.join(" "));
-  };
+  
+    return true;
+  }) as typeof process.stdout.write);
   return {
     stdout,
     restore: () => {
-      console.log = origConsoleLog;
+      process.stdout.write = origConsoleLog;
     },
   };
 }
@@ -67,11 +73,11 @@ async function runGateSpecCreate(payload: Record<string, unknown>) {
   const cmd = await importGateSpecCreate();
   const output = captureOutput();
   try {
-    await cmd.run({ args: { "input-json": JSON.stringify(payload) }, inv: liveInvocation() });
+    lastExitCode = await runHandlerForExit(() => cmd.run({ args: { "input-json": JSON.stringify(payload) }, inv: liveInvocation() }));
   } finally {
     output.restore();
   }
-  return { exitCode: process.exitCode, stdout: output.stdout.join("\n") };
+  return { exitCode: lastExitCode, stdout: output.stdout.join("\n") };
 }
 
 // ─── Repo `.lore` pollution guard (project CLAUDE.md hard rule) ───────────────────
@@ -95,7 +101,6 @@ let statusBefore: string;
 beforeAll(() => {
   statusBefore = repoLoreGitStatus();
 
-  process.exitCode = 0;
   tmpDir = resolve(mkdtempSync(join(tmpdir(), "lore-p1-asset-loop-test-")));
   const loreDir = join(tmpDir, ".lore");
   mkdirSync(loreDir, { recursive: true });
@@ -109,7 +114,6 @@ beforeAll(() => {
 });
 
 afterAll(() => {
-  process.exitCode = 0;
   process.chdir(originalCwd);
   try {
     rmSync(tmpDir, { recursive: true, force: true });

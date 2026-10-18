@@ -3,10 +3,12 @@
  */
 
 import { defineCommand } from "citty";
+
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatErrorFor, parsePositiveIntArg } from "../utils.js";
 import type { DocId } from "@lore/core";
 import { invocationOf } from "../command-invocation.js";
+import { printLine } from "../output.js";
 
 export default defineCommand({
   meta: {
@@ -43,18 +45,16 @@ export default defineCommand({
       if (args.from !== undefined) {
         const fromResult = parsePositiveIntArg(args.from, "--from", { min: 1 });
         if (!fromResult.ok) {
-          process.stderr.write(fromResult.message + "\n");
-          process.exitCode = 2;
-          return;
+          inv.io.stderr.write(fromResult.message + "\n");
+          return 2;
         }
         opts.from = fromResult.value;
       }
       if (args.to !== undefined) {
         const toResult = parsePositiveIntArg(args.to, "--to", { min: 1 });
         if (!toResult.ok) {
-          process.stderr.write(toResult.message + "\n");
-          process.exitCode = 2;
-          return;
+          inv.io.stderr.write(toResult.message + "\n");
+          return 2;
         }
         opts.to = toResult.value;
       }
@@ -62,45 +62,44 @@ export default defineCommand({
       const result = await app.versionService.diff(args.id as DocId, opts);
 
       if (!result.ok) {
-        process.stderr.write(formatErrorFor(inv, result.error) + "\n");
-        process.exitCode = exitCode(result.error);
-        return;
+        inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
+        return exitCode(result.error);
       }
 
       const diff = result.value;
 
       if (args.json) {
-        console.log(JSON.stringify({ ok: true, data: diff }, null, 2));
+        printLine(inv.io.stdout, JSON.stringify({ ok: true, data: diff }, null, 2));
         return;
       }
 
-      console.log(`Diff ${args.id}: v${diff.from_version} → v${diff.to_version}`);
+      printLine(inv.io.stdout, `Diff ${args.id}: v${diff.from_version} → v${diff.to_version}`);
 
       if (diff.status_change) {
-        console.log(`Status: ${diff.status_change.from} → ${diff.status_change.to}`);
+        printLine(inv.io.stdout, `Status: ${diff.status_change.from} → ${diff.status_change.to}`);
       }
 
       if (diff.frontmatter_changes.length > 0) {
-        console.log("\nFrontmatter changes:");
+        printLine(inv.io.stdout, "\nFrontmatter changes:");
         for (const fc of diff.frontmatter_changes) {
-          console.log(`  ${fc.field}: ${JSON.stringify(fc.old_value)} → ${JSON.stringify(fc.new_value)}`);
+          printLine(inv.io.stdout, `  ${fc.field}: ${JSON.stringify(fc.old_value)} → ${JSON.stringify(fc.new_value)}`);
         }
       }
 
       if (diff.content_diff) {
-        console.log("\nContent diff:");
+        printLine(inv.io.stdout, "\nContent diff:");
         // Colorise added/removed lines if terminal supports it
         for (const line of diff.content_diff.split("\n")) {
           if (line.startsWith("+") && !line.startsWith("+++")) {
-            process.stdout.write("\x1b[32m" + line + "\x1b[0m\n");
+            inv.io.stdout.write("\x1b[32m" + line + "\x1b[0m\n");
           } else if (line.startsWith("-") && !line.startsWith("---")) {
-            process.stdout.write("\x1b[31m" + line + "\x1b[0m\n");
+            inv.io.stdout.write("\x1b[31m" + line + "\x1b[0m\n");
           } else {
-            console.log(line);
+            printLine(inv.io.stdout, line);
           }
         }
       } else {
-        console.log("(no content changes)");
+        printLine(inv.io.stdout, "(no content changes)");
       }
     } finally {
       app.close();

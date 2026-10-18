@@ -44,7 +44,7 @@ afterAll(() => {
 });
 
 async function lore(sb: Sandbox, ...args: string[]): Promise<Run> {
-  const proc = await runLoreInProcess(args, { cwd: sb.corpus, env: sb.env });
+  const proc = await runLoreInProcess(args, { cwd: sb.corpus, home: sb.home, env: sb.env });
   return { code: proc.exitCode, stdout: proc.stdout, stderr: proc.stderr };
 }
 

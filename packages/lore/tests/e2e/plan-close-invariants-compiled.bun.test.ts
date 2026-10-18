@@ -122,6 +122,7 @@ interface RunResult {
 async function runLore(args: string[], cwd: string, envOverrides: Record<string, string> = {}): Promise<RunResult> {
   const proc = await runLoreInProcess(args, {
     cwd,
+    home: FIXTURE_HOME_OUTSIDE_REPO,
     env: {
       ...process.env,
       HOME: FIXTURE_HOME_OUTSIDE_REPO,

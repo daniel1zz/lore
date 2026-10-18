@@ -39,6 +39,7 @@
  */
 
 import { defineCommand } from "citty";
+
 import { loadLoreApp } from "../loader.js";
 import {
   exitCode,
@@ -55,6 +56,7 @@ import {
 import type { TreeBlueprint, PlanPhase, DocRecord } from "@lore/core";
 import type { TreeNode } from "../../../service/corpus-service.js";
 import { invocationOf } from "../command-invocation.js";
+import { printLine } from "../output.js";
 
 // ─── Phase Grouping Helpers ───────────────────────────────────────────────────
 
@@ -244,9 +246,8 @@ export default defineCommand({
           ORPHAN_DETECTION_BLUEPRINT,
         );
         if (!checkR.ok) {
-          process.stderr.write(formatErrorFor(inv, checkR.error) + "\n");
-          process.exitCode = exitCode(checkR.error);
-          return;
+          inv.io.stderr.write(formatErrorFor(inv, checkR.error) + "\n");
+          return exitCode(checkR.error);
         }
 
         const orphanDrifts = checkR.value.drifts.filter(
@@ -254,7 +255,7 @@ export default defineCommand({
         );
 
         if (args.json) {
-          console.log(
+          printLine(inv.io.stdout, 
             JSON.stringify(
               {
                 ok: true,
@@ -272,18 +273,17 @@ export default defineCommand({
             ),
           );
         } else if (orphanDrifts.length === 0) {
-          console.log("No orphan documents.");
+          printLine(inv.io.stdout, "No orphan documents.");
         } else {
-          console.log(`${orphanDrifts.length} orphan doc(s):`);
+          printLine(inv.io.stdout, `${orphanDrifts.length} orphan doc(s):`);
           for (const d of orphanDrifts) {
-            console.log(
+            printLine(inv.io.stdout, 
               `  - ${d.actual!.slug} (${d.actual!.type}, parent_id=${d.actual!.parent_id ?? "null"})`,
             );
           }
         }
 
-        process.exitCode = orphanDrifts.length > 0 ? 3 : 0;
-        return;
+        return orphanDrifts.length > 0 ? 3 : 0;
       }
 
       // ── normal tree branch ────────────────────────────────────────────────
@@ -292,9 +292,8 @@ export default defineCommand({
       // depth cap silently never triggers. Validate before it reaches the service.
       const depthResult = parsePositiveIntArg(args.depth ?? "3", "--depth", { min: 1 });
       if (!depthResult.ok) {
-        process.stderr.write(depthResult.message + "\n");
-        process.exitCode = 2;
-        return;
+        inv.io.stderr.write(depthResult.message + "\n");
+        return 2;
       }
       const result = await app.corpusService.tree(args.root, { depth: depthResult.value });
 
@@ -305,15 +304,13 @@ export default defineCommand({
           result.error.code === "DOC_NOT_FOUND" &&
           result.error.id === "prd"
         ) {
-          process.stderr.write(
+          inv.io.stderr.write(
             "No PRD documents found. Create a PRD first with `lore create prd --title <name>`.\n",
           );
-          process.exitCode = 3;
-          return;
+          return 3;
         }
-        process.stderr.write(formatErrorFor(inv, result.error) + "\n");
-        process.exitCode = exitCode(result.error);
-        return;
+        inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
+        return exitCode(result.error);
       }
 
       // ── Phase grouping (SPEC-023 AC-PHASE-5, AC-PHASE-6) ─────────────────
@@ -345,7 +342,7 @@ export default defineCommand({
 
           if (phases.length > 0) {
             if (args.json) {
-              console.log(
+              printLine(inv.io.stdout, 
                 JSON.stringify(
                   {
                     ok: true,
@@ -379,7 +376,7 @@ export default defineCommand({
               return;
             }
 
-            console.log(formatPhaseTree(plan, phases, allTasks, nowIso, ttlMinutes));
+            printLine(inv.io.stdout, formatPhaseTree(plan, phases, allTasks, nowIso, ttlMinutes));
             return;
           }
 
@@ -391,20 +388,20 @@ export default defineCommand({
               const badge = formatWorkflowBadge(task, nowIso, ttlMinutes);
               if (badge !== "") badges.set(task.id, (badges.get(task.id) ?? "") + badge);
             }
-            console.log(formatTree(result.value, "", badges));
+            printLine(inv.io.stdout, formatTree(result.value, "", badges));
             return;
           }
         }
       }
 
       if (args.json) {
-        console.log(
+        printLine(inv.io.stdout, 
           JSON.stringify({ ok: true, data: withTreeValidity(result.value, validity.statusById) }, null, 2),
         );
         return;
       }
 
-      console.log(formatTree(result.value, "", validityBadges));
+      printLine(inv.io.stdout, formatTree(result.value, "", validityBadges));
     } finally {
       app.close();
     }

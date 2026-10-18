@@ -72,6 +72,7 @@ function makeApp(): App {
   const gateEnforcer = new GateEnforcer(undefined);
   const phaseServices = buildPhaseServices(store, new NoOpTelemetry(), 120, gateEnforcer, corpusService, process.env);
   return {
+    warn: () => undefined,
     corpusService,
     ...phaseServices,
     reviewService: new ReviewService(store, new RecordLockService(store, new GateEnforcer(undefined))),

@@ -83,6 +83,7 @@
  */
 
 import { defineCommand } from "citty";
+import { exitCli } from "../cli-exit.js";
 import {
   buildUnconfiguredUpstreamRemedy,
   err,
@@ -99,6 +100,7 @@ import { loadLoreApp } from "../loader.js";
 import { exitCode, formatError, formatErrorFor, resolveActor } from "../utils.js";
 import { classifyFeedbackUpstream, fileGithubIssue, resolveConsumerCorpusRoot } from "../report-issue-wiring.js";
 import { invocationOf } from "../command-invocation.js";
+import { printLine } from "../output.js";
 
 /**
  * The report-filing flags — mutually exclusive with `--list` (checked as a group).
@@ -254,10 +256,10 @@ export default defineCommand({
     const reportFlagsPresent = REPORT_FLAGS.filter((flag) => typeof args[flag] === "string");
 
     if (isList && reportFlagsPresent.length > 0) {
-      process.stderr.write(
+      inv.io.stderr.write(
         `Usage error: --list cannot be combined with ${reportFlagsPresent.map((f) => `--${f}`).join(", ")}.\n`,
       );
-      process.exit(2);
+      exitCli(2);
     }
 
     if (!isList) {
@@ -265,10 +267,10 @@ export default defineCommand({
         (flag) => typeof args[flag] !== "string" || args[flag].length === 0,
       );
       if (missing.length > 0) {
-        process.stderr.write(
+        inv.io.stderr.write(
           `Usage error: missing required flag(s): ${missing.map((f) => `--${f}`).join(", ")}.\n`,
         );
-        process.exit(2);
+        exitCli(2);
       }
     }
 
@@ -288,14 +290,14 @@ export default defineCommand({
     );
     if (!triageResult.ok) {
       const detail = "message" in triageResult.error ? triageResult.error.message : triageResult.error.code;
-      process.stderr.write(`Usage error: ${detail}\n`);
-      process.exit(2);
+      inv.io.stderr.write(`Usage error: ${detail}\n`);
+      exitCli(2);
     }
     const triageLabels = triageResult.value;
 
     const { app, config } = loadLoreApp({ inv });
     try {
-      const corpusRoot = resolveConsumerCorpusRoot(inv);
+      const corpusRoot = resolveConsumerCorpusRoot(inv.io, inv);
 
       // reason: ONE shared classifier (spec-lore-issues-falls-through-to-the-
       // local-corpus-on-a-retired D1) — `commands/issues.ts` consumes the
@@ -305,9 +307,8 @@ export default defineCommand({
 
       if (classification.kind === "unconfigured") {
         const unconfiguredError = buildUnconfiguredUpstreamRemedy();
-        process.stderr.write(formatErrorFor(inv, unconfiguredError) + "\n");
-        process.exitCode = exitCode(unconfiguredError);
-        return;
+        inv.io.stderr.write(formatErrorFor(inv, unconfiguredError) + "\n");
+        return exitCode(unconfiguredError);
       }
 
       // ─── Legacy SQLite-shaped upstream: retired, refused loudly (P4) — see
@@ -316,9 +317,8 @@ export default defineCommand({
       // literal lives ONLY inside `classifyFeedbackUpstream` (spec D1) — this
       // command never holds its own copy.
       if (classification.kind === "retired") {
-        process.stderr.write(formatErrorFor(inv, classification.error) + "\n");
-        process.exitCode = exitCode(classification.error);
-        return;
+        inv.io.stderr.write(formatErrorFor(inv, classification.error) + "\n");
+        return exitCode(classification.error);
       }
 
       // `classification.kind === "github"` from here on.
@@ -339,8 +339,7 @@ export default defineCommand({
       // renders.
       if (isList) {
         const { runGithubIssuesListing } = await import("./issues.js");
-        await runGithubIssuesListing(inv, app, effectiveCfg, corpusRoot, args.json === true, inv);
-        return;
+        return await runGithubIssuesListing(inv, app, effectiveCfg, corpusRoot, args.json === true, inv);
       }
 
       if (triageLabels.severity === undefined || triageLabels.category === undefined) {
@@ -348,11 +347,11 @@ export default defineCommand({
           triageLabels.severity === undefined ? "--severity" : undefined,
           triageLabels.category === undefined ? "--category" : undefined,
         ].filter((flag): flag is string => flag !== undefined);
-        process.stderr.write(
+        inv.io.stderr.write(
           `Usage error: filing into a GitHub-configured feedback.upstream requires ` +
             `${missingFlags.join(" and ")} (the front-matter schema's severity/category fields are not optional).\n`,
         );
-        process.exit(2);
+        exitCli(2);
       }
 
       const tagsArg = args.tags;
@@ -390,24 +389,23 @@ export default defineCommand({
       );
 
       if (!githubResult.ok) {
-        process.stderr.write(formatErrorFor(inv, githubResult.error) + "\n");
-        process.exitCode = exitCode(githubResult.error);
-        return;
+        inv.io.stderr.write(formatErrorFor(inv, githubResult.error) + "\n");
+        return exitCode(githubResult.error);
       }
 
       if (args.json) {
-        console.log(JSON.stringify({ ok: true, data: githubResult.value }, null, 2));
+        printLine(inv.io.stdout, JSON.stringify({ ok: true, data: githubResult.value }, null, 2));
         return;
       }
 
-      console.log(
+      printLine(inv.io.stdout, 
         `${githubResult.value.retried ? "Already filed" : "Filed"} as issue #${githubResult.value.number} (${githubResult.value.url})`,
       );
       if (githubResult.value.dedup_degraded) {
-        console.log("Warning: duplicate-report check degraded (advisory search failed) — filed anyway.");
+        printLine(inv.io.stdout, "Warning: duplicate-report check degraded (advisory search failed) — filed anyway.");
       }
       if (githubResult.value.possible_duplicates.length > 0) {
-        console.log(`Possible duplicates: ${githubResult.value.possible_duplicates.join(", ")}`);
+        printLine(inv.io.stdout, `Possible duplicates: ${githubResult.value.possible_duplicates.join(", ")}`);
       }
     } finally {
       app.close();

@@ -34,8 +34,11 @@ import { createApp } from "../../../src/app.js";
 import { TaskWorkflowService } from "../../../src/service/task-workflow-service.js";
 import type { EvidenceInput } from "../../../src/service/task-workflow-service.js";
 import type { CreateDocInput } from "@lore/core";
-import { liveInvocation, liveAmbient, liveWriteContext } from "../../live-invocation.js";
+import { liveInvocation, liveAmbient, liveWriteContext, runHandlerForExit } from "../../live-invocation.js";
 import type { Invocation } from "@lore/core";
+
+/** The exit code the most recent `cmd.run` ended with (commands return it; none sets `process.exitCode`). */
+let lastExitCode = 0;
 
 // ─── Command type ────────────────────────────────────────────────────────────
 
@@ -56,8 +59,7 @@ let tmpDir: string;
 let originalCwd: string;
 
 beforeEach(() => {
-  process.exitCode = 0;
-
+  lastExitCode = 0;
   tmpDir = resolve(mkdtempSync(join(tmpdir(), "lore-cli-evidence-precheck-test-")));
   const loreDir = join(tmpDir, ".lore");
   mkdirSync(loreDir, { recursive: true });
@@ -70,7 +72,6 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  process.exitCode = 0;
   process.chdir(originalCwd);
   try {
     rmSync(tmpDir, { recursive: true, force: true });
@@ -173,7 +174,7 @@ describe("lore evidence oracle precheck — HAPPY", () => {
     const spy = spyOnAddEvidence();
     const stderr = captureStderr();
     try {
-      await cmd.run({
+      lastExitCode = await runHandlerForExit(() => cmd.run({
         args: {
           task: taskSlug,
           oracle: "test",
@@ -183,16 +184,15 @@ describe("lore evidence oracle precheck — HAPPY", () => {
           "output-tail": "ok",
         },
  inv: liveInvocation(),
-      });
+      }));
 
       expect(spy.called()).toBe(true);
-      expect(process.exitCode).toBe(4);
+      expect(lastExitCode).toBe(4);
       expect(stderr.text()).toContain("--capture");
       expect(stderr.text()).not.toContain("not found");
     } finally {
       spy.restore();
       stderr.restore();
-      process.exitCode = undefined;
     }
   });
 });
@@ -210,7 +210,7 @@ describe("lore evidence oracle precheck — NEGATIVE", () => {
     const spy = spyOnAddEvidence();
     const stderr = captureStderr();
     try {
-      await cmd.run({
+      lastExitCode = await runHandlerForExit(() => cmd.run({
         args: {
           task: taskSlug,
           oracle: "test",
@@ -220,16 +220,15 @@ describe("lore evidence oracle precheck — NEGATIVE", () => {
           "output-tail": "ok",
         },
  inv: liveInvocation(),
-      });
+      }));
 
       expect(spy.called()).toBe(true);
-      expect(process.exitCode).toBe(4);
+      expect(lastExitCode).toBe(4);
       expect(stderr.text()).toContain("--capture");
       expect(stderr.text()).not.toContain("not found");
     } finally {
       spy.restore();
       stderr.restore();
-      process.exitCode = undefined;
     }
   });
 });
@@ -243,7 +242,7 @@ describe("lore evidence oracle precheck — BOUNDARY", () => {
     const spy = spyOnAddEvidence();
     const stderr = captureStderr();
     try {
-      await cmd.run({
+      lastExitCode = await runHandlerForExit(() => cmd.run({
         args: {
           task: taskSlug,
           oracle: "e2e",
@@ -252,9 +251,9 @@ describe("lore evidence oracle precheck — BOUNDARY", () => {
           by: "alice",
         },
  inv: liveInvocation(),
-      });
+      }));
 
-      expect(process.exitCode).toBe(4);
+      expect(lastExitCode).toBe(4);
       expect(spy.called()).toBe(false);
     } finally {
       spy.restore();
@@ -268,7 +267,7 @@ describe("lore evidence oracle precheck — BOUNDARY", () => {
     const spy = spyOnAddEvidence();
     const stderr = captureStderr();
     try {
-      await cmd.run({
+      lastExitCode = await runHandlerForExit(() => cmd.run({
         args: {
           task: taskSlug,
           oracle: "test",
@@ -277,7 +276,7 @@ describe("lore evidence oracle precheck — BOUNDARY", () => {
           by: "alice",
         },
  inv: liveInvocation(),
-      });
+      }));
 
       expect(stderr.text()).toContain("packages/lore/tests/ghost.test.ts");
       expect(stderr.text()).toContain("--oracle manual");
@@ -297,7 +296,7 @@ describe("lore evidence oracle precheck — ERROR", () => {
     const spy = spyOnAddEvidence();
     const stderr = captureStderr();
     try {
-      await cmd.run({
+      lastExitCode = await runHandlerForExit(() => cmd.run({
         args: {
           task: taskSlug,
           oracle: "test",
@@ -306,9 +305,9 @@ describe("lore evidence oracle precheck — ERROR", () => {
           by: "alice",
         },
  inv: liveInvocation(),
-      });
+      }));
 
-      expect(process.exitCode).toBe(4);
+      expect(lastExitCode).toBe(4);
       expect(spy.called()).toBe(false);
     } finally {
       spy.restore();
@@ -325,7 +324,7 @@ describe("lore evidence oracle precheck — STATE", () => {
     const cmd = await importEvidenceCommand();
     const stderr = captureStderr();
     try {
-      await cmd.run({
+      lastExitCode = await runHandlerForExit(() => cmd.run({
         args: {
           task: taskSlug,
           oracle: "test",
@@ -334,8 +333,8 @@ describe("lore evidence oracle precheck — STATE", () => {
           by: "alice",
         },
  inv: liveInvocation(),
-      });
-      expect(process.exitCode).toBe(4);
+      }));
+      expect(lastExitCode).toBe(4);
 
       const app = createApp(join(tmpDir, ".lore", "lore.db"), undefined, liveAmbient(), liveWriteContext());
       try {
@@ -362,7 +361,7 @@ describe("lore evidence oracle precheck — REGRESSION", () => {
     const cmd = await importEvidenceCommand();
     const spy = spyOnAddEvidence();
     try {
-      await cmd.run({
+      lastExitCode = await runHandlerForExit(() => cmd.run({
         args: {
           task: taskSlug,
           oracle: "manual",
@@ -372,10 +371,10 @@ describe("lore evidence oracle precheck — REGRESSION", () => {
           "output-tail": "ok",
         },
  inv: liveInvocation(),
-      });
+      }));
 
       expect(spy.called()).toBe(true);
-      expect(process.exitCode === 0 || process.exitCode === undefined).toBe(true);
+      expect(lastExitCode === 0).toBe(true);
     } finally {
       spy.restore();
     }
@@ -386,7 +385,7 @@ describe("lore evidence oracle precheck — REGRESSION", () => {
     const cmd = await importEvidenceCommand();
     const spy = spyOnAddEvidence();
     try {
-      await cmd.run({
+      lastExitCode = await runHandlerForExit(() => cmd.run({
         args: {
           task: taskSlug,
           oracle: "test",
@@ -396,10 +395,10 @@ describe("lore evidence oracle precheck — REGRESSION", () => {
           "output-tail": "AssertionError: expected 1 to equal 2",
         },
  inv: liveInvocation(),
-      });
+      }));
 
       expect(spy.called()).toBe(true);
-      expect(process.exitCode === 0 || process.exitCode === undefined).toBe(true);
+      expect(lastExitCode === 0).toBe(true);
     } finally {
       spy.restore();
     }

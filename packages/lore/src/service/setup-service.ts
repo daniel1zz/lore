@@ -178,6 +178,7 @@
  *   task-skill-implement-t7-mergesettings-orphan-pruning-backup.
  */
 
+import { discardWarnings, type WarnSink } from "./warn-sink.js";
 import { createHash } from "node:crypto";
 import path from "node:path";
 import os from "node:os";
@@ -493,6 +494,8 @@ export class SetupService {
     private readonly mcpRegistrar: McpRegistrar,
     /** REQUIRED — feeds the real-`~/.claude` guard; a missing value must not weaken it (AS-26). */
     private readonly userState: SetupUserState,
+    /** Where the install's best-effort advisories go (a failed backup prune); absent (bare tests) -> not printed. */
+    private readonly warn: WarnSink = discardWarnings,
   ) {}
 
   /**
@@ -672,9 +675,7 @@ export class SetupService {
     try {
       await this.pruneBackupRuns(opts.targetDir);
     } catch (cause) {
-      process.stderr.write(
-        `lore setup install: warning — failed to prune old .lore-backups run directories: ${describeCaught(cause)}\n`,
-      );
+      this.warn(`lore setup install: warning — failed to prune old .lore-backups run directories: ${describeCaught(cause)}`);
     }
 
     // ── MCP registration (never aborts the run — see module invariants) ────

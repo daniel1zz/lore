@@ -4,6 +4,7 @@
  */
 
 import { defineCommand } from "citty";
+import { exitCli } from "../cli-exit.js";
 import { invocationOf } from "../command-invocation.js";
 import { loadLoreApp } from "../loader.js";
 import { startHttpServer } from "../../http/index.js";
@@ -24,7 +25,7 @@ export default defineCommand({
       description: "Host to bind to (default: localhost)",
     },
   },
-  run(context) {
+  async run(context) {
     const { args } = context;
     const inv = invocationOf(context);
     // reason: `{surface: "http"}` is load-bearing, not decorative — this boot
@@ -39,24 +40,23 @@ export default defineCommand({
 
     const port = args.port !== undefined ? parseInt(args.port, 10) : 3456;
     if (isNaN(port) || port < 1 || port > 65535) {
-      process.stderr.write("Error: --port must be a valid port number (1–65535)\n");
-      process.exit(1);
+      inv.io.stderr.write("Error: --port must be a valid port number (1–65535)\n");
+      exitCli(1);
     }
 
     const host = args.host ?? "localhost";
 
-    startHttpServer(app, { port, host, machineAuthBaseDir: resolveMachineAuthBaseDir(inv.env, inv.paths.home) });
+    startHttpServer(app, { port, host, io: inv.io, machineAuthBaseDir: resolveMachineAuthBaseDir(inv.env, inv.paths.home) });
 
-    // Keep process alive; server runs in background via Bun event loop
-    // Graceful shutdown on SIGTERM
-    process.on("SIGTERM", () => {
-      app.close();
-      process.exit(0);
-    });
-
-    process.on("SIGINT", () => {
-      app.close();
-      process.exit(0);
+    // The server runs in the background via the Bun event loop; this run stays open until SIGTERM / SIGINT, then
+    // closes the app and returns 0, so the one entry (`src/index.ts`) ends the process (a returned run is a finished run).
+    await new Promise<void>((resolve) => {
+      for (const signal of ["SIGTERM", "SIGINT"] as const) {
+        process.once(signal, () => {
+          app.close();
+          resolve();
+        });
+      }
     });
   },
 });

@@ -32,6 +32,7 @@
  * @see SPEC-102 §Design Decisions D5, §Schema
  */
 
+import { discardWarnings, type WarnSink } from "./warn-sink.js";
 import {
   traceEventInputSchema,
   type CallerSurface,
@@ -75,6 +76,8 @@ export class TraceRecorder {
   constructor(
     private readonly insert: InsertTraceEvent,
     private readonly getSurface: () => CallerSurface,
+    /** Where a failed best-effort write is reported; absent (bare test construction) -> not printed anywhere. */
+    private readonly warnSink: WarnSink = discardWarnings,
   ) {}
 
   /** Records a doc read (SPEC-102 §Scope — `CorpusService.get`). */
@@ -203,6 +206,6 @@ export class TraceRecorder {
 
   /** Single stderr-warning formatter — every failure branch in `fire()` prints the identical shape. */
   private warn(kind: string, reason: string): void {
-    process.stderr.write(`trace event not recorded (kind "${kind}"): ${reason}\n`);
+    this.warnSink(`trace event not recorded (kind "${kind}"): ${reason}`);
   }
 }

@@ -65,6 +65,7 @@ const EXEMPT_KIND = "red-tdd";
 async function runLore(args: string[], cwd: string): Promise<RunResult> {
   const proc = await runLoreInProcess(args, {
     cwd,
+    home: cwd,
     env: { ...process.env, HOME: cwd, CLAUDE_CODE_SESSION_ID: "a77e57e1-aaaa-bbbb-cccc-111111111111" },
   });
   return {

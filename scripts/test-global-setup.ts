@@ -6,8 +6,9 @@
  * AND every `.ts` mtime under packages/{lore,core}/src; at teardown it fails the run loud if either
  * moved (scripts/dist-write-guard.ts). It also snapshots every non-ignored dirty path of the repository tree
  * (scripts/tree-snapshot-guard.ts, AC-TG-3) and fails the run unless the only changes are rows of
- * scripts/test-isolation-ledger.json. It also fingerprints the lore-owned paths of the starting HOME
- * (scripts/test-user-state-guard.ts, AC-IV-3 / AS-27) and fails the run if any changed. While tests run it also polls both and remembers when each
+ * scripts/test-isolation-ledger.json. The developer's real HOME is not watched: the run's HOME is a throwaway
+ * directory set at config load (vitest.shared.ts, AS-27), so the real home is unreachable by construction.
+ * While tests run it also polls both binary and sources and remembers when each
  * change was FIRST seen, so the failure names the moment, not only the end state.
  * Public surface: default export `setup()` returning the teardown function.
  * Invariants: a failed build throws before any test starts; no test may write dist/ or any package's src dir;
@@ -16,7 +17,6 @@
  */
 
 import { spawnSync } from "node:child_process";
-import { homedir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -37,12 +37,6 @@ import {
   snapshotBinary,
   snapshotSourceTree,
 } from "./dist-write-guard";
-import {
-  UserStateWrittenDuringRunError,
-  assertUserStateUnchanged,
-  resolveUserStateRoots,
-  snapshotUserState,
-} from "./test-user-state-guard";
 
 const ROOT = join(fileURLToPath(import.meta.url), "..", "..");
 const DIST_LORE = join(ROOT, "dist", "lore");
@@ -73,10 +67,6 @@ export default function setup(): () => void {
   const sourceBefore = snapshotSourceTree(SOURCE_DIRS);
   // reason: taken AFTER the one build so what the build wrote is baseline, not a test write.
   const treeBefore = snapshotRepoTree(ROOT);
-  // reason: AS-27 / AC-IV-3. The STARTING home (config load has not changed HOME) is fingerprinted on its
-  // lore-owned paths only; the repo-tree guard above cannot see outside the repository.
-  const userStateRoots = resolveUserStateRoots(process.env["HOME"] ?? homedir(), process.env);
-  const userStateBefore = snapshotUserState(userStateRoots);
 
   const firstSeen: string[] = [];
   let reported = false;
@@ -115,12 +105,6 @@ export default function setup(): () => void {
       assertRepoTreeUnchanged(treeBefore, ROOT, readIsolationLedger(ISOLATION_LEDGER), ISOLATION_LEDGER);
     } catch (caught) {
       if (caught instanceof TreeWrittenDuringRunError || caught instanceof IsolationLedgerError) problems.push(caught.message);
-      else throw caught;
-    }
-    try {
-      assertUserStateUnchanged(userStateBefore, userStateRoots);
-    } catch (caught) {
-      if (caught instanceof UserStateWrittenDuringRunError) problems.push(caught.message);
       else throw caught;
     }
     if (problems.length > 0) {

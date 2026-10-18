@@ -230,9 +230,12 @@ describe("loadLoreApp — global config ERROR (AC-GC-5)", () => {
     process.env["LORE_CONFIG_HOME"] = globalDir;
 
     const stderrMessages: string[] = [];
-    const spy = spyOn(console, "error").mockImplementation((...args: unknown[]) => {
+    const spy = spyOn(process.stderr, "write").mockImplementation((((chunk: unknown) => {
+    const args: unknown[] = [String(chunk).replace(/\n$/, "")];
       stderrMessages.push(args.join(" "));
-    });
+    
+    return true;
+  }) as never));
 
     process.chdir(projectDir);
     let app;
@@ -264,9 +267,12 @@ describe("loadLoreApp — global config ERROR (AC-GC-5)", () => {
     process.env["LORE_CONFIG_HOME"] = globalDir;
 
     const stderrMessages: string[] = [];
-    const spy = spyOn(console, "error").mockImplementation((...args: unknown[]) => {
+    const spy = spyOn(process.stderr, "write").mockImplementation((((chunk: unknown) => {
+    const args: unknown[] = [String(chunk).replace(/\n$/, "")];
       stderrMessages.push(args.join(" "));
-    });
+    
+    return true;
+  }) as never));
 
     process.chdir(projectDir);
     let app;

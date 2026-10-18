@@ -50,7 +50,7 @@ import { AuditService } from "../../../../src/service/audit-service.js";
 import { NoOpTelemetry, err } from "@lore/core";
 import type { App } from "../../../../src/app.js";
 import type { CalibrationRecord, LoreError, Result } from "@lore/core";
-import { actedStore } from "../../../live-invocation.js";
+import { actedStore, liveIo } from "../../../live-invocation.js";
 
 const FAR_PAST = "2000-01-01T00:00:00.000Z";
 
@@ -92,6 +92,7 @@ async function makeTestServer(useFailingStore: boolean): Promise<TestContext> {
   const telemetry = new NoOpTelemetry();
 
   const app: App = {
+    warn: () => undefined,
     corpusService: new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)), telemetry),
     reviewService: new ReviewService(store, new RecordLockService(store, new GateEnforcer(undefined))),
     versionService: new VersionService(store, new RecordLockService(store, new GateEnforcer(undefined))),
@@ -122,7 +123,8 @@ async function makeTestServer(useFailingStore: boolean): Promise<TestContext> {
   if (!createResult.ok) throw new Error("Failed to create API key");
   const rawKey = createResult.value.rawKey;
 
-  const server = startHttpServer(app, { port: 0, host: "127.0.0.1", machineAuth });
+  const server = startHttpServer(app, {
+    io: liveIo(), port: 0, host: "127.0.0.1", machineAuth });
   const baseUrl = `http://127.0.0.1:${server.port}`;
 
   return { server, app, store, rawKey, machineAuth, baseUrl, tmpDir };

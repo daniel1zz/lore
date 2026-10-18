@@ -9,6 +9,7 @@
  * Source: spec-autonomy-phase-1-decision-function-human-channel-lore AC-AU-3.
  */
 import { defineCommand } from "citty";
+
 import { findLoreDbPath } from "../utils.js";
 import { runDecideFlow } from "../decide-flow.js";
 import { invocationOf } from "../command-invocation.js";
@@ -28,8 +29,8 @@ export default defineCommand({
   async run(context) {
     const { args } = context;
     const inv = invocationOf(context);
-    const dbPath = findLoreDbPath(inv);
-    process.exitCode = await runDecideFlow(
+    const dbPath = findLoreDbPath(inv.io, inv);
+    const code = await runDecideFlow(
       inv,
       {
         dbPath,
@@ -40,5 +41,6 @@ export default defineCommand({
       },
       createProductionHumanChannelPorts(inv),
     );
+    return code;
   },
 });

@@ -36,7 +36,7 @@ import { TreeCheckService } from "../../../src/service/tree-check-service.js";
 import { JudgmentService } from "../../../src/service/judgment-service.js";
 import { AuditService } from "../../../src/service/audit-service.js";
 import type { App } from "../../../src/app.js";
-import { actedStore } from "../../live-invocation.js";
+import { actedStore, liveIo } from "../../live-invocation.js";
 
 const FAR_PAST = "2000-01-01T00:00:00.000Z";
 
@@ -61,6 +61,7 @@ async function makeTestServer(): Promise<TestContext> {
   const recordLock = new RecordLockService(store, new GateEnforcer(undefined));
 
   const app: App = {
+    warn: () => undefined,
     corpusService: new CorpusService(store, recordLock, telemetry),
     reviewService: new ReviewService(store, new RecordLockService(store, new GateEnforcer(undefined))),
     versionService: new VersionService(store, recordLock),
@@ -94,7 +95,8 @@ async function makeTestServer(): Promise<TestContext> {
   const dashboardKey = await machineAuth.apiKeyStore.create("dashboard-local", "admin");
   if (!dashboardKey.ok) throw new Error("failed to create dashboard key");
 
-  const server = startHttpServer(app, { port: 0, host: "127.0.0.1", machineAuth });
+  const server = startHttpServer(app, {
+    io: liveIo(), port: 0, host: "127.0.0.1", machineAuth });
   const baseUrl = `http://127.0.0.1:${server.port}`;
 
   const bootstrap = await fetch(`${baseUrl}/api/auth/local-bootstrap`, {

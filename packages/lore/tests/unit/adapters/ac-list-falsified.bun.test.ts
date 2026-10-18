@@ -80,15 +80,18 @@ async function importStatusCommand(): Promise<RunnableCommand> {
 
 /** Captures every `console.log` call's raw first-argument string, in order, for the duration of one command invocation. */
 function captureConsoleLog(): { lines: () => string[]; restore: () => void } {
-  const original = console.log;
+  const original = process.stdout.write;
   const lines: string[] = [];
-  console.log = ((...args: unknown[]) => {
+  process.stdout.write = (((chunk: unknown) => {
+    const args: unknown[] = [String(chunk).replace(/\n$/, "")];
     lines.push(args.length === 1 ? String(args[0]) : args.map((a) => String(a)).join(" "));
-  }) as typeof console.log;
+  
+    return true;
+  }) as typeof process.stdout.write);
   return {
     lines: () => lines,
     restore: () => {
-      console.log = original;
+      process.stdout.write = original;
     },
   };
 }

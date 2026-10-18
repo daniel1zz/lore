@@ -450,6 +450,9 @@ export function decideWorktreeCleanup(facts: WorktreeFacts): WorktreeDecision {
 function normalizedForms(probe: WorktreeGitProbe, value: string): string[] {
   const resolution = resolveClaimWorktree(probe, value, probe.currentWorkingDirectory());
   const path = resolution.kind === "resolved" ? resolution.path : value;
+  // reason: an unresolved recorded value that is not absolute is a branch name; it has no directory form, and
+  // resolving it lexically or on disk would read the process's working directory.
+  if (!isAbsolute(path)) return [path];
   const forms = new Set<string>([resolve(path)]);
   if (probe.pathExists(path)) forms.add(probe.realPath(path));
   return [...forms];
@@ -616,8 +619,11 @@ function parseListPorcelain(stdout: string): ListedWorktree[] {
  */
 export function createRealWorktreeProbe(cwd: string): WorktreeGitProbe {
   return {
-    pathExists: (path) => existsSync(path),
+    // reason: a relative path is resolved by the OS against the process's working directory; a recorded value that is
+    // not absolute is a branch name, never a place on disk (resolveClaimWorktree states the same rule).
+    pathExists: (path) => isAbsolute(path) && existsSync(path),
     realPath: (path) => {
+      if (!isAbsolute(path)) return path;
       try {
         return realpathSync(path);
       } catch {

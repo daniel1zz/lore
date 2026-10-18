@@ -59,9 +59,6 @@ import {
   type SelectionScope,
 } from "../service/context-fragments/selection.js";
 
-/** A sentinel layer root that resolves to an empty layer on every FsReadPort. */
-const EMPTY_LAYER_ROOT = "\u0000lore-no-layer";
-
 /** Hook outlets `render` serves (`hook:session-start` is retired, BR-912). */
 export const HOOK_OUTLETS = ["hook:subagent-start"] as const;
 export type HookOutlet = (typeof HOOK_OUTLETS)[number];
@@ -168,12 +165,7 @@ const LAYERS = ["shipped", "user", "project"] as const;
 async function discoverAllLayers(deps: FragmentsFlowDeps): Promise<FlowResult<Fragment[]>> {
   const all: Fragment[] = [];
   for (const layer of LAYERS) {
-    const roots: FragmentRoots = {
-      shipped: EMPTY_LAYER_ROOT,
-      user: EMPTY_LAYER_ROOT,
-      project: EMPTY_LAYER_ROOT,
-      [layer]: deps.roots[layer],
-    };
+    const roots: FragmentRoots = { [layer]: deps.roots[layer] };
     const found = await discoverFragments(deps.fs, roots);
     if (!found.ok) return { ok: false, error: { code: "VALIDATION_ERROR", message: found.error.message } };
     all.push(...found.value);

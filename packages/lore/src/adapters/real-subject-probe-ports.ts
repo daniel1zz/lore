@@ -28,7 +28,7 @@ export function createRealSubjectProbePorts(
   store: Pick<StoreInterface, "listRunLifecycles">,
   env: Readonly<Record<string, string | undefined>>,
 ): SubjectProbePorts {
-  const processes = createRealProcessTablePort({ env });
+  const processes = createRealProcessTablePort({ env, cwd: repoRoot });
   return {
     listWorktreePaths: () => {
       const out = runGit(repoRoot, ["worktree", "list", "--porcelain"]);

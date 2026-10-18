@@ -36,11 +36,11 @@ function isInside(cwdOfProcess: string, roots: readonly string[]): boolean {
 }
 
 /** This process and its parent chain. */
-function ownAncestryPids(): Set<number> {
+function ownAncestryPids(cwd: string): Set<number> {
   const pids = new Set<number>([process.pid, process.ppid]);
   let current = process.ppid;
   for (let depth = 0; depth < MAX_ANCESTRY_DEPTH && current > 1; depth++) {
-    const run = spawnSync("ps", ["-o", "ppid=", "-p", String(current)], { encoding: "utf8" });
+    const run = spawnSync("ps", ["-o", "ppid=", "-p", String(current)], { cwd, encoding: "utf8" });
     if (run.error !== undefined || run.status !== 0) break;
     const parent = Number.parseInt((run.stdout ?? "").trim(), 10);
     if (!Number.isInteger(parent) || parent <= 0 || pids.has(parent)) break;
@@ -51,8 +51,8 @@ function ownAncestryPids(): Set<number> {
 }
 
 /** Best-effort command name, for the refusal text only. */
-function commandOfPid(pid: number): string {
-  const run = spawnSync("ps", ["-o", "comm=", "-p", String(pid)], { encoding: "utf8" });
+function commandOfPid(pid: number, cwd: string): string {
+  const run = spawnSync("ps", ["-o", "comm=", "-p", String(pid)], { cwd, encoding: "utf8" });
   const name = run.error !== undefined || run.status !== 0 ? "" : (run.stdout ?? "").trim();
   return name === "" ? "(command unknown)" : name;
 }
@@ -62,7 +62,7 @@ export function createRealProcessScanPort(options: RealProcessScanOptions): Proc
   const procDir = options.procDir ?? "/proc";
   return {
     processesInside: (roots) => {
-      const excluded = ownAncestryPids();
+      const excluded = ownAncestryPids(options.cwd);
       const found = new Set<number>();
       const lsof = spawnSync("lsof", ["-n", "-d", "cwd", "-F", "pn"], {
         cwd: options.cwd,
@@ -111,7 +111,7 @@ export function createRealProcessScanPort(options: RealProcessScanOptions): Proc
       }
       return {
         ok: true,
-        value: [...found].sort((a, b) => a - b).map((pid) => ({ pid, command: commandOfPid(pid) })),
+        value: [...found].sort((a, b) => a - b).map((pid) => ({ pid, command: commandOfPid(pid, options.cwd) })),
       };
     },
   };

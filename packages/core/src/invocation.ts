@@ -20,6 +20,8 @@ import type { InvocationIdentity } from "./run-identity.js";
 /** The part of a writable stream a command needs: write one string. `process.stdout` satisfies it. */
 export interface InvocationWriter {
   write(text: string): unknown;
+  /** `true` when the writer is an interactive terminal (a command may then show a progress spinner); absent otherwise. */
+  readonly isTTY?: boolean | undefined;
 }
 
 /** Directories of one invocation, all absolute. */

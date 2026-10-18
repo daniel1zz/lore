@@ -18,7 +18,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { AIProviderService } from "../../../src/service/ai-provider-service.js";
-import { liveInvocation } from "../../live-invocation.js";
+import { liveInvocation, runHandlerForExit } from "../../live-invocation.js";
 import type { Invocation } from "@lore/core";
 
 type RunnableCommand = { run: (ctx: { args: Record<string, unknown>; inv?: Invocation }) => Promise<void> };
@@ -40,7 +40,7 @@ function silence(): { stderr: string[]; restore: () => void } {
     stderr.push(String(chunk));
     return true;
   });
-  const l = vi.spyOn(console, "log").mockImplementation(() => undefined);
+  const l = vi.spyOn(process.stdout, "write").mockImplementation((() => true) as never);
   return {
     stderr,
     restore: () => {
@@ -64,25 +64,14 @@ async function importCmd(file: keyof typeof COMMAND_LOADERS): Promise<RunnableCo
   return mod.default;
 }
 
-class ExitSignal extends Error {
-  constructor(readonly code: number) {
-    super(`process.exit(${code})`);
-  }
-}
+/** The exit code the most recent `run` ended with (set.ts reports it to the run; it never exits the process). */
+let lastExitCode = 0;
 
 async function run(cmd: RunnableCommand, args: Record<string, unknown>): Promise<string> {
   const out = silence();
-  // reason: set.ts reports usage errors with process.exit(2); surface it as the exit code instead of killing the runner.
-  const exit = vi.spyOn(process, "exit").mockImplementation((code?: string | number | null): never => {
-    throw new ExitSignal(typeof code === "number" ? code : 0);
-  });
   try {
-    await cmd.run({ args, inv: liveInvocation() });
-  } catch (e: unknown) {
-    if (!(e instanceof ExitSignal)) throw e;
-    process.exitCode = e.code;
+    lastExitCode = await runHandlerForExit(() => cmd.run({ args, inv: liveInvocation() }));
   } finally {
-    exit.mockRestore();
     out.restore();
   }
   return out.stderr.join("");
@@ -91,9 +80,12 @@ async function run(cmd: RunnableCommand, args: Record<string, unknown>): Promise
 async function createDoc(args: Record<string, unknown>): Promise<string> {
   const create = await importCmd("create");
   const lines: string[] = [];
-  const l = vi.spyOn(console, "log").mockImplementation((...a: unknown[]) => {
+  const l = vi.spyOn(process.stdout, "write").mockImplementation((((chunk: unknown) => {
+    const a: unknown[] = [String(chunk).replace(/\n$/, "")];
     lines.push(a.join(" "));
-  });
+  
+    return true;
+  }) as never));
   const e = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
   try {
     await create.run({ args: { ai: false, ...args }, inv: liveInvocation() });
@@ -107,7 +99,6 @@ async function createDoc(args: Record<string, unknown>): Promise<string> {
 }
 
 beforeEach(async () => {
-  process.exitCode = 0;
   tmpDir = mkdtempSync(join(tmpdir(), "lore-cli-set-preflight-"));
   originalCwd = process.cwd();
   originalArgv = process.argv;
@@ -123,7 +114,6 @@ beforeEach(async () => {
 });
 
 afterEach(() => {
-  process.exitCode = 0;
   process.argv = originalArgv;
   process.chdir(originalCwd);
   rmSync(tmpDir, { recursive: true, force: true });
@@ -139,7 +129,7 @@ describe("lore set AI rewrite on a locked record", () => {
     const stderr = await run(set, { id: slug, refine: "make it shorter" });
 
     expect(refine).not.toHaveBeenCalled();
-    expect(process.exitCode).toBe(4);
+    expect(lastExitCode).toBe(4);
     expect(stderr).toContain("locked record");
   });
 
@@ -153,7 +143,7 @@ describe("lore set AI rewrite on a locked record", () => {
     await run(set, { id: slug, regenerate: true });
 
     expect(regen).not.toHaveBeenCalled();
-    expect(process.exitCode).toBe(4);
+    expect(lastExitCode).toBe(4);
   });
 
   it("ERROR: --correction + --refine is a usage error (exit 2) naming both flags, AI seam never invoked", async () => {
@@ -164,7 +154,7 @@ describe("lore set AI rewrite on a locked record", () => {
     const stderr = await run(set, { id: slug, refine: "shorter", correction: "typo" });
 
     expect(refine).not.toHaveBeenCalled();
-    expect(process.exitCode).toBe(2);
+    expect(lastExitCode).toBe(2);
     expect(stderr).toContain("--correction");
     expect(stderr).toContain("--refine");
   });

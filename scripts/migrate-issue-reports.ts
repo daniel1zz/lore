@@ -526,7 +526,8 @@ async function gatherMigrationCandidates(
  */
 async function runCli(): Promise<number> {
   const live = process.argv.includes("--live");
-  const corpusRoot = resolveConsumerCorpusRoot({ cwd: process.cwd(), env: process.env });
+  const inv = await resolveEntryInvocation(process.argv.slice(2));
+  const corpusRoot = resolveConsumerCorpusRoot(inv.io, inv);
 
   const configResult = loadConfig(corpusRoot);
   if (!configResult.ok) {
@@ -542,8 +543,6 @@ async function runCli(): Promise<number> {
     return 1;
   }
   const targetRepo = upstreamCfg.repo;
-
-  const inv = await resolveEntryInvocation(process.argv.slice(2));
 
   const app = createApp(join(corpusRoot, ".lore", "lore.db"), undefined, ambientOfInvocation(inv), { identity: inv.identity });
   try {
@@ -563,7 +562,7 @@ async function runCli(): Promise<number> {
       targetRepo,
       concurrency: MIGRATION_CONCURRENCY,
       dryRun: !live,
-      ghRunner: new GhRunner({ execFile: createNodeGhExecFile(), env: process.env }),
+      ghRunner: new GhRunner({ execFile: createNodeGhExecFile(inv.cwd), env: inv.env }),
       receiptLogPath,
     });
 

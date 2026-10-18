@@ -30,6 +30,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { ensureLocalApiKey } from "../../../../src/adapters/cli/local-key.js";
 import type { LocalApiKeyCreator } from "../../../../src/adapters/cli/local-key.js";
+import { liveIo } from "../../../live-invocation.js";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -73,14 +74,14 @@ describe("ensureLocalApiKey — happy path", () => {
   it("creates .lore/local-key when absent and returns the raw key (AC-A-C1)", async () => {
     const expectedKey = "lore_ak_" + "b".repeat(64);
     const store = makeSuccessStore(expectedKey);
-    const result = await ensureLocalApiKey(store, tmpDir);
+    const result = await ensureLocalApiKey(liveIo(), store, tmpDir);
     expect(result).toBe(expectedKey);
   });
 
   it("writes the raw key to .lore/local-key file", async () => {
     const expectedKey = "lore_ak_" + "c".repeat(64);
     const store = makeSuccessStore(expectedKey);
-    await ensureLocalApiKey(store, tmpDir);
+    await ensureLocalApiKey(liveIo(), store, tmpDir);
     const filePath = join(tmpDir, "local-key");
     expect(existsSync(filePath)).toBe(true);
     expect(readFileSync(filePath, "utf8")).toBe(expectedKey);
@@ -88,7 +89,7 @@ describe("ensureLocalApiKey — happy path", () => {
 
   it("calls store.create with name='dashboard-local' and owner='admin'", async () => {
     const store = makeSuccessStore();
-    await ensureLocalApiKey(store, tmpDir);
+    await ensureLocalApiKey(liveIo(), store, tmpDir);
     expect(store.create).toHaveBeenCalledWith("dashboard-local", "admin");
     expect(store.create).toHaveBeenCalledTimes(1);
   });
@@ -116,7 +117,7 @@ describe("ensureLocalApiKey — boundary values", () => {
     writeFileSync(filePath, existingKey, { mode: 0o600 });
 
     const store = makeSuccessStore();
-    const result = await ensureLocalApiKey(store, tmpDir);
+    const result = await ensureLocalApiKey(liveIo(), store, tmpDir);
     expect(result).toBe(existingKey);
     expect(store.create).not.toHaveBeenCalled();
   });
@@ -128,7 +129,7 @@ describe("ensureLocalApiKey — boundary values", () => {
     writeFileSync(filePath, `  ${existingKey}\n`, { mode: 0o600 });
 
     const store = makeSuccessStore();
-    const result = await ensureLocalApiKey(store, tmpDir);
+    const result = await ensureLocalApiKey(liveIo(), store, tmpDir);
     expect(result).toBe(existingKey);
   });
 });
@@ -137,30 +138,24 @@ describe("ensureLocalApiKey — boundary values", () => {
 
 describe("ensureLocalApiKey — error cases", () => {
   let tmpDir: string;
-  let originalExit: typeof process.exit;
 
   beforeEach(() => {
     tmpDir = makeTmpDir();
-    originalExit = process.exit;
-    // Mock process.exit to prevent test process from terminating
-    process.exit = vi.fn() as never;
   });
 
   afterEach(() => {
-    process.exit = originalExit;
     rmSync(tmpDir, { recursive: true, force: true });
     vi.restoreAllMocks();
   });
 
-  it("calls process.exit(1) when store.create returns err", async () => {
+  it("ends the run with exit 1 (CliExit) when store.create returns err", async () => {
     const store = makeFailStore("VALIDATION_ERROR", "already exists");
-    await ensureLocalApiKey(store, tmpDir);
-    expect(process.exit).toHaveBeenCalledWith(1);
+    await expect(ensureLocalApiKey(liveIo(), store, tmpDir)).rejects.toMatchObject({ name: "CliExit", code: 1 });
   });
 
   it("does not create local-key file when store.create fails", async () => {
     const store = makeFailStore();
-    await ensureLocalApiKey(store, tmpDir);
+    await expect(ensureLocalApiKey(liveIo(), store, tmpDir)).rejects.toMatchObject({ name: "CliExit", code: 1 });
     const filePath = join(tmpDir, "local-key");
     expect(existsSync(filePath)).toBe(false);
   });
@@ -182,12 +177,12 @@ describe("ensureLocalApiKey — state transitions", () => {
   it("first call creates file; second call reads file without calling store", async () => {
     const firstKey = "lore_ak_" + "1".repeat(64);
     const store1 = makeSuccessStore(firstKey);
-    await ensureLocalApiKey(store1, tmpDir);
+    await ensureLocalApiKey(liveIo(), store1, tmpDir);
     expect(store1.create).toHaveBeenCalledTimes(1);
 
     // Second call should read existing file
     const store2 = makeSuccessStore("lore_ak_" + "2".repeat(64));
-    const result2 = await ensureLocalApiKey(store2, tmpDir);
+    const result2 = await ensureLocalApiKey(liveIo(), store2, tmpDir);
     expect(store2.create).not.toHaveBeenCalled();
     expect(result2).toBe(firstKey);
   });
@@ -209,7 +204,7 @@ describe("ensureLocalApiKey — regression", () => {
   it("returned key matches file contents exactly", async () => {
     const expectedKey = "lore_ak_" + "a".repeat(64);
     const store = makeSuccessStore(expectedKey);
-    const returnedKey = await ensureLocalApiKey(store, tmpDir);
+    const returnedKey = await ensureLocalApiKey(liveIo(), store, tmpDir);
     const fileContent = readFileSync(join(tmpDir, "local-key"), "utf8");
     expect(returnedKey).toBe(fileContent);
     expect(returnedKey).toBe(expectedKey);

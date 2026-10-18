@@ -105,6 +105,7 @@
  * Source: SPEC-021 §9, SPEC-032 §3.3
  */
 
+import { discardWarnings, type WarnSink } from "./warn-sink.js";
 import {
   readFileSync,
   writeFileSync,
@@ -384,6 +385,8 @@ export class ExportDocsService {
   constructor(
     private readonly store: StoreInterface,
     private readonly resolveDocBody: ResolveDocBody,
+    /** Where the exporter's advisory lines go (drift, self-heal, ordinal fallback); absent -> none are printed. */
+    private readonly warn: WarnSink = discardWarnings,
   ) {}
 
   /**
@@ -451,7 +454,7 @@ export class ExportDocsService {
     if (!everKnownDocsResult.ok) return everKnownDocsResult;
     const everKnownDocIds = new Set(everKnownDocsResult.value.map((d) => d.id));
 
-    const indexResult = await buildOrExtendIndex(indexPath, docsBaseDir, allDocs, opts.projectDir, everKnownDocIds);
+    const indexResult = await buildOrExtendIndex(this.warn, indexPath, docsBaseDir, allDocs, opts.projectDir, everKnownDocIds);
     if (!indexResult.ok) return indexResult;
     const { index, repaired, ordinalWarnings, reconciledDocIds } = indexResult.value;
 
@@ -663,7 +666,7 @@ export class ExportDocsService {
         // the file untouched (reason: never auto-resolved without explicit opt-in).
         if (!opts.force) {
           report.drift.push(mapping.file_path);
-          process.stderr.write(`⚠ drift: ${mapping.file_path}\n`);
+          this.warn(`⚠ drift: ${mapping.file_path}`);
           if (scalarStale) {
             // Frontmatter is ALSO stale, but fixing it here would require rewriting the body
             // too (buildFileContent regenerates the whole file) — not an approved action
@@ -725,7 +728,7 @@ export class ExportDocsService {
  * @param indexPath - Absolute path to .lore/export-index.json.
  * @returns Loaded or fresh ExportIndex (never fails — corrupted index → start fresh).
  */
-function loadIndex(indexPath: string): ExportIndex {
+function loadIndex(warn: WarnSink, indexPath: string): ExportIndex {
   if (!existsSync(indexPath)) {
     return { version: 1, mappings: {} };
   }
@@ -735,14 +738,10 @@ function loadIndex(indexPath: string): ExportIndex {
     if (parsed.success) return parsed.data;
     // Corrupted but parseable JSON — start fresh with warning suppressed (non-fatal).
     // reason: corrupted index is rebuilt by reconciliation; no data is lost (files stay on disk).
-    process.stderr.write(
-      `Warning: .lore/export-index.json failed schema validation — rebuilding from scratch.\n`,
-    );
+    warn(`Warning: .lore/export-index.json failed schema validation — rebuilding from scratch.`);
     return { version: 1, mappings: {} };
   } catch {
-    process.stderr.write(
-      `Warning: .lore/export-index.json unreadable — rebuilding from scratch.\n`,
-    );
+    warn(`Warning: .lore/export-index.json unreadable — rebuilding from scratch.`);
     return { version: 1, mappings: {} };
   }
 }
@@ -865,6 +864,7 @@ function maxNumberForPrefix(prefix: string, humanIds: string[]): number {
  *   allocation exhaustion or store failure.
  */
 async function buildOrExtendIndex(
+  warn: WarnSink,
   indexPath: string,
   docsBaseDir: string,
   docs: DocRecord[],
@@ -876,17 +876,17 @@ async function buildOrExtendIndex(
     LoreError
   >
 > {
-  const index = loadIndex(indexPath);
+  const index = loadIndex(warn, indexPath);
 
   // Self-heal BEFORE seeding counters/usedFilePaths so repaired (stripped) doc ids are
   // treated as brand-new allocations below, and the counter/collision state reflects
   // only the surviving, consistent mappings.
-  const repaired = repairCollisions(index, projectDir, docs);
+  const repaired = repairCollisions(warn, index, projectDir, docs);
   // SPEC-084 T5 — same "strip stale mapping, let it be freshly reallocated" strategy, for
   // numbered-type docs whose column has since diverged from their recorded human_id. Runs
   // AFTER collision self-heal (operates on whatever mappings survived that pass) and BEFORE
   // the counter/usedFilePaths seeding below, so a reconciled doc is treated as unmapped.
-  const ordinalReconcile = reconcileOrdinalMappings(index, docs);
+  const ordinalReconcile = reconcileOrdinalMappings(warn, index, docs);
   repaired.push(...ordinalReconcile.repairLog);
   const reconciledDocIds = ordinalReconcile.reconciledDocIds;
 
@@ -898,7 +898,7 @@ async function buildOrExtendIndex(
   // itself was fetched with (see `exportDocs`'s own comment on that fetch), so a per-type
   // call can never mistake an OTHER type's mapping for a genuine orphan — that mapping's
   // docId simply never appears in a type-narrowed `everKnownDocIds` at all.
-  repaired.push(...retireDeletedDocMappings(index, docs, everKnownDocIds));
+  repaired.push(...retireDeletedDocMappings(warn, index, docs, everKnownDocIds));
 
   const ordinalWarnings: string[] = [];
 
@@ -980,7 +980,7 @@ async function buildOrExtendIndex(
         `ordinal yet — falling back to legacy title/sequential human_id allocation for this ` +
         `export run. Run \`lore migrate ordinals\` to backfill its ordinal.`;
       ordinalWarnings.push(warning);
-      process.stderr.write(`⚠ ordinal-fallback: ${warning}\n`);
+      warn(`⚠ ordinal-fallback: ${warning}`);
     }
 
     const typeTitleMap = titleMaps.get(doc.type);
@@ -1157,6 +1157,7 @@ function isOrdinalExemptKind(doc: DocRecord): boolean {
  *   rewrite for every one of these, never trusting the body-only drift check for them).
  */
 function reconcileOrdinalMappings(
+  warn: WarnSink,
   index: ExportIndex,
   docs: DocRecord[],
 ): { repairLog: string[]; reconciledDocIds: Set<string> } {
@@ -1182,7 +1183,7 @@ function reconcileOrdinalMappings(
       `(the file at the recomputed path — same path or a fresh one — will be unconditionally ` +
       `rewritten this run, see ExportReport.identity_repaired)`;
     repairLog.push(line);
-    process.stderr.write(`⚠ export-index ordinal-reconcile: ${line}\n`);
+    warn(`⚠ export-index ordinal-reconcile: ${line}`);
   }
 
   return { repairLog, reconciledDocIds };
@@ -1249,6 +1250,7 @@ function reconcileOrdinalMappings(
  *   already populate, so a caller sees this action without a new report field to consume.
  */
 function retireDeletedDocMappings(
+  warn: WarnSink,
   index: ExportIndex,
   docs: DocRecord[],
   everKnownDocIds: ReadonlySet<string>,
@@ -1269,7 +1271,7 @@ function retireDeletedDocMappings(
       `but resolves to a SOFT-DELETED corpus doc — retiring the mapping; the orphaned mirror ` +
       `file itself is left for pruneOrphanMirrorFiles to remove`;
     repairLog.push(line);
-    process.stderr.write(`⚠ export-index deleted-doc-retire: ${line}\n`);
+    warn(`⚠ export-index deleted-doc-retire: ${line}`);
   }
 
   return repairLog;
@@ -1300,7 +1302,7 @@ function retireDeletedDocMappings(
  * @param docs - All active corpus docs currently being reconciled.
  * @returns Human-readable repair log lines (empty when no collision was found).
  */
-function repairCollisions(index: ExportIndex, projectDir: string, docs: DocRecord[]): string[] {
+function repairCollisions(warn: WarnSink, index: ExportIndex, projectDir: string, docs: DocRecord[]): string[] {
   const repairLog: string[] = [];
   const docById = new Map(docs.map((d) => [d.id, d]));
 
@@ -1346,11 +1348,11 @@ function repairCollisions(index: ExportIndex, projectDir: string, docs: DocRecor
           `${lostMapping?.human_id ?? "?"} / ${filePath} (collided with doc ${canonicalId}) — ` +
           `reallocating a new human_id + file_path`,
       );
-      process.stderr.write(`⚠ export-index self-heal: ${repairLog[repairLog.length - 1]}\n`);
+      warn(`⚠ export-index self-heal: ${repairLog[repairLog.length - 1]}`);
     }
   }
 
-  repairLog.push(...repairDuplicateHumanIds(index, docById));
+  repairLog.push(...repairDuplicateHumanIds(warn, index, docById));
 
   return repairLog;
 }
@@ -1367,7 +1369,7 @@ function repairCollisions(index: ExportIndex, projectDir: string, docs: DocRecor
  * human_id + file_path (the caller's `usedHumanIds` guard stops it re-inheriting the old id from
  * its on-disk file). Logged, never silent.
  */
-function repairDuplicateHumanIds(index: ExportIndex, docById: ReadonlyMap<string, DocRecord>): string[] {
+function repairDuplicateHumanIds(warn: WarnSink, index: ExportIndex, docById: ReadonlyMap<string, DocRecord>): string[] {
   const repairLog: string[] = [];
   const claimantsByHumanId = new Map<string, string[]>();
   for (const [docId, mapping] of Object.entries(index.mappings)) {
@@ -1393,7 +1395,7 @@ function repairDuplicateHumanIds(index: ExportIndex, docById: ReadonlyMap<string
         `duplicate-human-id: doc ${id} ("${docById.get(id)!.title}") shared ${humanId} with doc ` +
         `${canonicalId} (was ${lost?.file_path ?? "?"}) — reallocating a new human_id + file_path`;
       repairLog.push(line);
-      process.stderr.write(`⚠ export-index duplicate-human-id: ${line}\n`);
+      warn(`⚠ export-index duplicate-human-id: ${line}`);
     }
   }
   return repairLog;

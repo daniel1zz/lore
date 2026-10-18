@@ -7,7 +7,7 @@
  *   - Create a real .lore/lore.db in a temp dir via createApp()
  *   - Write .lore/config.yaml pointing to a well-known system binary (cat/true/false)
  *     for reliable cross-platform execution without PATH manipulation
- *   - Call cmd.run() directly (same process) with mocked process.exit/stderr
+ *   - Call cmd.run() directly (same process) as one run (runHandlerForExit) with mocked stderr
  *
  * Provider commands used:
  *   /bin/cat     — reads stdin, echoes to stdout (success path: non-empty content)
@@ -39,7 +39,7 @@ import { join, resolve } from "path";
 import { tmpdir } from "os";
 import { createApp } from "../../../src/app.js";
 import { saveConfig } from "@lore/core/node";
-import { liveInvocation, liveAmbient, liveWriteContext } from "../../live-invocation.js";
+import { liveInvocation, liveAmbient, liveWriteContext, runHandlerForExit } from "../../live-invocation.js";
 import type { Invocation } from "@lore/core";
 
 // ─── Command type ─────────────────────────────────────────────────────────────
@@ -55,38 +55,39 @@ function captureOutput() {
   const stderr: string[] = [];
 
   const origStderrWrite = process.stderr.write.bind(process.stderr);
-  const origConsoleLog = console.log.bind(console);
+  const origConsoleLog = process.stdout.write;
 
   (process.stderr as unknown as { write: (chunk: unknown) => boolean }).write = (chunk: unknown) => {
     stderr.push(String(chunk));
     return true;
   };
-  console.log = (...args: unknown[]) => {
+  process.stdout.write = (((chunk: unknown) => {
+    const args: unknown[] = [String(chunk).replace(/\n$/, "")];
     stdout.push(args.join(" "));
-  };
+  
+    return true;
+  }) as typeof process.stdout.write);
 
   return {
     stdout,
     stderr,
     restore: () => {
       (process.stderr as unknown as { write: typeof origStderrWrite }).write = origStderrWrite;
-      console.log = origConsoleLog;
+      process.stdout.write = origConsoleLog;
     },
   };
 }
 
+/** The exit code the most recent run ended with (see {@link runCmd}); commands return it, they never call `process.exit`. */
+let lastExitCode = 0;
+
+/** Reads the last run's code: `undefined` when the run ended 0 (what "process.exit was never called" used to assert). */
 function captureExit() {
-  let capturedCode: number | undefined;
-  const origExit = process.exit.bind(process);
-  (process as unknown as { exit: (code?: number) => never }).exit = (code?: number): never => {
-    capturedCode = code ?? 0;
-    throw new Error(`process.exit(${code})`);
-  };
   return {
-    get code() { return capturedCode; },
-    restore: () => {
-      (process as unknown as { exit: typeof origExit }).exit = origExit;
+    get code(): number | undefined {
+      return lastExitCode === 0 ? undefined : lastExitCode;
     },
+    restore(): void {},
   };
 }
 
@@ -95,7 +96,8 @@ async function runCmd(
   args: Record<string, unknown>,
 ): Promise<void> {
   if (!cmd.run) throw new Error("Command is missing run handler");
-  return cmd.run({ args, inv: liveInvocation() });
+  const run = cmd.run;
+  lastExitCode = await runHandlerForExit(() => run({ args, inv: liveInvocation() }));
 }
 
 async function importCreateCommand(): Promise<RunnableCommand> {
@@ -114,8 +116,6 @@ let savedEditor: string | undefined;
 beforeEach(() => {
   // reason: process.exitCode set by CLI commands (FU#4 refactor) leaks between in-process
   // test invocations under bun test. Reset to 0 here to guarantee clean state each test.
-  process.exitCode = 0;
-
   tmpDir = resolve(mkdtempSync(join(tmpdir(), "lore-cli-ai-test-")));
   const loreDir = join(tmpDir, ".lore");
   mkdirSync(loreDir, { recursive: true });
@@ -140,8 +140,6 @@ beforeEach(() => {
 
 afterEach(() => {
   // reason: explicit 0 (not undefined) to reliably clear exitCode in all Bun versions.
-  process.exitCode = 0;
-
   process.chdir(originalCwd);
   if (savedEditor !== undefined) {
     process.env["EDITOR"] = savedEditor;
@@ -185,8 +183,6 @@ describe("lore create prd — AI default path (AC-AI-1)", () => {
     const exit = captureExit();
     try {
       await runCmd(cmd, { type: "prd", title: "AI Generated PRD", ai: true });
-    } catch (e: unknown) {
-      if (!(e instanceof Error) || !e.message.startsWith("process.exit(")) throw e;
     } finally {
       output.restore();
       exit.restore();
@@ -208,8 +204,6 @@ describe("lore create prd — AI default path (AC-AI-1)", () => {
     const exit = captureExit();
     try {
       await runCmd(cmd, { type: "prd", title: "Draft Status PRD", ai: true });
-    } catch (e: unknown) {
-      if (!(e instanceof Error) || !e.message.startsWith("process.exit(")) throw e;
     } finally {
       output.restore();
       exit.restore();
@@ -240,8 +234,6 @@ describe("lore create prd — --content flag skips AI (AC-AI-3)", () => {
         content: "# My Manual Content\n",
         ai: true, // ai=true but content is provided → AI is bypassed
       });
-    } catch (e: unknown) {
-      if (!(e instanceof Error) || !e.message.startsWith("process.exit(")) throw e;
     } finally {
       output.restore();
       exit.restore();
@@ -269,8 +261,6 @@ describe("lore create prd — --no-ai flag (AC-AI-2)", () => {
         content: "# From Editor\n",
         ai: false, // --no-ai
       });
-    } catch (e: unknown) {
-      if (!(e instanceof Error) || !e.message.startsWith("process.exit(")) throw e;
     } finally {
       output.restore();
       exit.restore();
@@ -293,15 +283,13 @@ describe("lore create prd — missing binary (AC-AI-5)", () => {
     const output = captureOutput();
     // reason: FU#4 refactored post-app exits to process.exitCode = N; return; — read exitCode directly.
     // Cast defeats TypeScript's property narrowing after the explicit = undefined assignment above.
-    process.exitCode = 0;
     try {
       await runCmd(cmd, { type: "prd", title: "Missing Binary PRD", ai: true });
     } finally {
       output.restore();
     }
 
-    expect(process.exitCode as number | undefined).toBe(6);
-    process.exitCode = 0; // reset for subsequent tests
+    expect(lastExitCode).toBe(6);
   });
 
   /**
@@ -326,8 +314,6 @@ describe("lore create prd — missing binary (AC-AI-5)", () => {
     const exit = captureExit();
     try {
       await runCmd(cmd, { type: "prd", title: "Missing Binary PRD", ai: true });
-    } catch (e: unknown) {
-      if (!(e instanceof Error) || !e.message.startsWith("process.exit(")) throw e;
     } finally {
       output.restore();
       exit.restore();
@@ -347,8 +333,6 @@ describe("lore create prd — missing binary (AC-AI-5)", () => {
     const exit = captureExit();
     try {
       await runCmd(cmd, { type: "prd", title: "Missing Binary PRD", ai: true });
-    } catch (e: unknown) {
-      if (!(e instanceof Error) || !e.message.startsWith("process.exit(")) throw e;
     } finally {
       output.restore();
       exit.restore();
@@ -368,15 +352,13 @@ describe("lore create prd — binary exits non-zero (AC-AI-6)", () => {
     const cmd = await importCreateCommand();
     const output = captureOutput();
     // reason: FU#4 refactored post-app exits to process.exitCode = N; return; — read exitCode directly.
-    process.exitCode = 0;
     try {
       await runCmd(cmd, { type: "prd", title: "Failing Binary PRD", ai: true });
     } finally {
       output.restore();
     }
 
-    expect(process.exitCode as number | undefined).toBe(6);
-    process.exitCode = 0; // reset for subsequent tests
+    expect(lastExitCode).toBe(6);
   });
 
   it("stderr contains --no-ai hint when binary exits non-zero", async () => {
@@ -387,8 +369,6 @@ describe("lore create prd — binary exits non-zero (AC-AI-6)", () => {
     const exit = captureExit();
     try {
       await runCmd(cmd, { type: "prd", title: "Failing Binary PRD", ai: true });
-    } catch (e: unknown) {
-      if (!(e instanceof Error) || !e.message.startsWith("process.exit(")) throw e;
     } finally {
       output.restore();
       exit.restore();
@@ -408,15 +388,13 @@ describe("lore create prd — empty output (AC-AI-7)", () => {
     const cmd = await importCreateCommand();
     const output = captureOutput();
     // reason: FU#4 refactored post-app exits to process.exitCode = N; return; — read exitCode directly.
-    process.exitCode = 0;
     try {
       await runCmd(cmd, { type: "prd", title: "Empty Output PRD", ai: true });
     } finally {
       output.restore();
     }
 
-    expect(process.exitCode as number | undefined).toBe(6);
-    process.exitCode = 0; // reset for subsequent tests
+    expect(lastExitCode).toBe(6);
   });
 
   it("stderr contains error message and --no-ai hint on empty output", async () => {
@@ -427,8 +405,6 @@ describe("lore create prd — empty output (AC-AI-7)", () => {
     const exit = captureExit();
     try {
       await runCmd(cmd, { type: "prd", title: "Empty Output PRD", ai: true });
-    } catch (e: unknown) {
-      if (!(e instanceof Error) || !e.message.startsWith("process.exit(")) throw e;
     } finally {
       output.restore();
       exit.restore();

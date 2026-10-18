@@ -16,7 +16,7 @@
  *   REGRESSION: (g) constants wording + closed key allowlist
  */
 
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect } from "vitest";
 import { resolveBootstrapInjectionBudgets, type LoreConfig } from "../../src/config.js";
 import {
   BOOTSTRAP_CORPUS_GLOBAL_KEYS,
@@ -183,31 +183,31 @@ describe("AC-SI-1 buildBootstrapInjection — seat-only projection", () => {
 });
 
 describe("AC-SI-4 retired bootstrap_injection knobs (D5)", () => {
-  it("ERROR: each SET retired key warns exactly once per process; char_budget is the only live knob; an unset key never warns", () => {
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
-    try {
-      // reason: the resolver reads only `workflow.bootstrap_injection`; a partial cast avoids a full config fixture.
-      const config = {
-        workflow: { bootstrap_injection: { max_active_plans: 2, max_handoffs: 1, char_budget: 4000 } },
-      } as unknown as LoreConfig;
-      expect(resolveBootstrapInjectionBudgets(config)).toEqual({ charBudget: 4000 });
-      expect(resolveBootstrapInjectionBudgets(config)).toEqual({ charBudget: 4000 });
-      const lines = warn.mock.calls.map((c) => String(c[0]));
-      expect(lines.filter((l) => l.includes("max_active_plans"))).toHaveLength(1);
-      expect(lines.filter((l) => l.includes("max_handoffs"))).toHaveLength(1);
-      expect(lines.filter((l) => l.includes("max_pending_slugs"))).toHaveLength(0);
-    } finally {
-      warn.mockRestore();
-    }
+  it("ERROR: each SET retired key warns once per call to the given sink; char_budget is the only live knob; an unset key never warns", () => {
+    const lines: string[] = [];
+    // reason: the resolver reads only `workflow.bootstrap_injection`; a partial cast avoids a full config fixture.
+    const config = {
+      workflow: { bootstrap_injection: { max_active_plans: 2, max_handoffs: 1, char_budget: 4000 } },
+    } as unknown as LoreConfig;
+    expect(resolveBootstrapInjectionBudgets(config, (line) => lines.push(line))).toEqual({ charBudget: 4000 });
+    expect(lines.filter((l) => l.includes("max_active_plans"))).toHaveLength(1);
+    expect(lines.filter((l) => l.includes("max_handoffs"))).toHaveLength(1);
+    expect(lines.filter((l) => l.includes("max_pending_slugs"))).toHaveLength(0);
+  });
+
+  it("STATE: two runs with their own sinks each get their own line (no process-wide once-set)", () => {
+    const config = { workflow: { bootstrap_injection: { max_handoffs: 1, char_budget: 4000 } } } as unknown as LoreConfig;
+    const first: string[] = [];
+    const second: string[] = [];
+    resolveBootstrapInjectionBudgets(config, (line) => first.push(line));
+    resolveBootstrapInjectionBudgets(config, (line) => second.push(line));
+    expect(first).toHaveLength(1);
+    expect(second).toHaveLength(1);
   });
 
   it("BOUNDARY: no config at all resolves the schema default and never warns", () => {
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
-    try {
-      expect(resolveBootstrapInjectionBudgets(undefined)).toEqual({ charBudget: 8000 });
-      expect(warn).not.toHaveBeenCalled();
-    } finally {
-      warn.mockRestore();
-    }
+    const lines: string[] = [];
+    expect(resolveBootstrapInjectionBudgets(undefined, (line) => lines.push(line))).toEqual({ charBudget: 8000 });
+    expect(lines).toEqual([]);
   });
 });

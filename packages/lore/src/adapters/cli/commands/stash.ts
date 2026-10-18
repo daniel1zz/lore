@@ -15,6 +15,7 @@
  * Side-effect class: IO (git subprocesses in the repo root, corpus DB reads and decision_log appends).
  */
 import { spawnSync } from "node:child_process";
+
 import { defineCommand } from "citty";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatErrorFor } from "../utils.js";
@@ -89,17 +90,15 @@ const prune = defineCommand({
     let store: SQLiteStore | undefined;
     try {
       if (app.repoRoot === undefined) {
-        process.stderr.write("Error: repoRoot not set on this App instance.\n");
-        process.exitCode = 1;
-        return;
+        inv.io.stderr.write("Error: repoRoot not set on this App instance.\n");
+        return 1;
       }
       // reason: the decision record must carry the run the store wrapper stamps onto rows (BR-1035,
       // run-identity-verify.ts): verify once through the app's wrapped store; an unregistered id is null.
       const verifiedIdentity = await app.verifiedInvocationIdentity?.();
       if (verifiedIdentity !== undefined && !verifiedIdentity.ok) {
-        process.stderr.write(`${formatErrorFor(inv, verifiedIdentity.error)}\n`);
-        process.exitCode = exitCode(verifiedIdentity.error);
-        return;
+        inv.io.stderr.write(`${formatErrorFor(inv, verifiedIdentity.error)}\n`);
+        return exitCode(verifiedIdentity.error);
       }
       store = new SQLiteStore(dbPath);
       const git = gitRunnerFor(app.repoRoot);
@@ -112,11 +111,10 @@ const prune = defineCommand({
       const service = new StashPruneService({ git, store, decisions });
       const result = args.apply === true ? await service.apply() : await dryRun(service);
       if (!result.ok) {
-        process.stderr.write(`${formatErrorFor(inv, result.error)}\n`);
-        process.exitCode = exitCode(result.error);
-        return;
+        inv.io.stderr.write(`${formatErrorFor(inv, result.error)}\n`);
+        return exitCode(result.error);
       }
-      process.stdout.write(`${args.json === true ? JSON.stringify({ ok: true, data: result.value }, null, 2) : renderReport(result.value)}\n`);
+      inv.io.stdout.write(`${args.json === true ? JSON.stringify({ ok: true, data: result.value }, null, 2) : renderReport(result.value)}\n`);
     } finally {
       store?.close();
       app.close();

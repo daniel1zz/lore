@@ -111,6 +111,7 @@ async function runLore(corpus: Corpus, session: string, args: string[]): Promise
   }
   const proc = await runLoreInProcess(args, {
     cwd: corpus.dir,
+    home: FIXTURE_HOME_OUTSIDE_REPO,
     env: {
       ...env,
       HOME: FIXTURE_HOME_OUTSIDE_REPO,

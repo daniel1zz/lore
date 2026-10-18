@@ -1,3 +1,4 @@
+import type { CliIo } from "./output.js";
 /**
  * `lore dashboard` process lifecycle — one shared teardown wired to BOTH SIGINT and SIGTERM.
  * Purpose: fix the leaked-Vite-child defect where only SIGINT was handled — SIGTERM (the
@@ -54,7 +55,7 @@ export interface DashboardShutdownDeps {
   readonly mountRegistry?: ClosableMountRegistry;
   readonly app: ClosableApp;
   readonly machineAuthDb: ClosableDb;
-  /** Injectable for tests; defaults to `process.stdout.write`. */
+  /** Injectable for tests; defaults to the run's stdout writer (`io.stdout`). */
   readonly log?: (line: string) => void;
 }
 
@@ -72,9 +73,9 @@ export interface DashboardShutdownDeps {
  *   const teardown = createDashboardTeardown({ vite, server, app, machineAuthDb: machineAuth.db });
  *   registerDashboardShutdownSignals(teardown, () => process.exit(0));
  */
-export function createDashboardTeardown(deps: DashboardShutdownDeps): (signal: string) => Promise<void> {
+export function createDashboardTeardown(io: CliIo, deps: DashboardShutdownDeps): (signal: string) => Promise<void> {
   let ran = false;
-  const log = deps.log ?? ((line: string) => { process.stdout.write(line); });
+  const log = deps.log ?? ((line: string) => { io.stdout.write(line); });
 
   return async (signal: string): Promise<void> => {
     if (ran) return;

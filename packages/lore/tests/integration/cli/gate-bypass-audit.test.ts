@@ -13,7 +13,7 @@
  * @spec_ref SPEC-080 §Scope, §Design Decisions D1/D3; AC-080-2
  */
 
-import { liveInvocation } from "../../live-invocation.js";
+import { liveInvocation, liveIo } from "../../live-invocation.js";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -187,7 +187,7 @@ describe("findLoreDbPathQuiet (safe .lore/lore.db discovery, never process.exit)
   // NEGATIVE — no .lore anywhere up the tree: returns undefined, never process.exit.
   it("returns undefined (never exits) when no .lore/lore.db is discoverable", () => {
     process.chdir(tmpDir);
-    expect(findLoreDbPathQuiet({ cwd: process.cwd(), env: process.env })).toBeUndefined();
+    expect(findLoreDbPathQuiet(liveIo(), { cwd: process.cwd(), env: process.env })).toBeUndefined();
   });
 
   // HAPPY — .lore/lore.db present in cwd.
@@ -198,7 +198,7 @@ describe("findLoreDbPathQuiet (safe .lore/lore.db discovery, never process.exit)
     writeFileSync(join(tmpDir, ".lore", "lore.db"), "");
     process.chdir(tmpDir);
 
-    expect(findLoreDbPathQuiet({ cwd: process.cwd(), env: process.env })).toBe(join(tmpDir, ".lore", "lore.db"));
+    expect(findLoreDbPathQuiet(liveIo(), { cwd: process.cwd(), env: process.env })).toBe(join(tmpDir, ".lore", "lore.db"));
   });
 
   // BOUNDARY — .lore/lore.db exists in an ANCESTOR directory, cwd is a nested subdir.
@@ -209,6 +209,6 @@ describe("findLoreDbPathQuiet (safe .lore/lore.db discovery, never process.exit)
     mkdirSync(nested, { recursive: true });
     process.chdir(nested);
 
-    expect(findLoreDbPathQuiet({ cwd: process.cwd(), env: process.env })).toBe(join(tmpDir, ".lore", "lore.db"));
+    expect(findLoreDbPathQuiet(liveIo(), { cwd: process.cwd(), env: process.env })).toBe(join(tmpDir, ".lore", "lore.db"));
   });
 });

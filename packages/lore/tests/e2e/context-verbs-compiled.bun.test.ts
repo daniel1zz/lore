@@ -130,7 +130,7 @@ async function runLore(args: string[], cwd: string): Promise<RunResult> {
   delete env["ANTHROPIC_API_KEY"];
   delete env["OPENAI_API_KEY"];
   delete env["LORE_AI_DEFAULT"];
-  const proc = await runLoreInProcess(args, { cwd, env });
+  const proc = await runLoreInProcess(args, { cwd, home: cwd, env });
   return {
     stdout: proc.stdout,
     stderr: proc.stderr,

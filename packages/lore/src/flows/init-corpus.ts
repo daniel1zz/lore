@@ -131,7 +131,7 @@ export async function initCorpusAt(
       // reason: a malformed shipped template is a packaging defect, not a reason to
       // fail `lore init`/`lore setup --project` outright (see this module's own
       // invariants above, SPEC-058 D1's "non-breaking" ethos).
-      process.stderr.write(
+      ambient.io.stderr.write(
         `Warning: ignoring malformed config template overlay: ${describeConfigTemplateError(overlayResult.error)}\n`,
       );
     }

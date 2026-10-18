@@ -172,6 +172,7 @@
  */
 
 import type { Invocation } from "@lore/core";
+
 import { dirname } from "node:path";
 import { defineCommand } from "citty";
 import { z } from "zod";
@@ -206,6 +207,9 @@ import { GhRunner, createNodeGhExecFile } from "../../../service/gh-runner.js";
 import { invocationOf } from "../command-invocation.js";
 import { readGithubIssueRef, labelToResolution, type GithubIssueRef } from "../../../service/resolution-projector.js";
 import type { GithubIssueRow } from "../../../service/github-issue-listing.js";
+import { printLine } from "../output.js";
+import type { CliIo } from "../output.js";
+import type { ExitReport } from "../cli-exit.js";
 
 /**
  * One rendered row — the fields D4 names (title, slug, reporter_project,
@@ -434,12 +438,11 @@ export async function runGithubIssuesListing(inv: Invocation,
     readonly severity?: IssueSeverity;
     readonly category?: string;
   } = { mode: "all" },
-): Promise<void> {
-  const joinedResult = await resolveGithubJoinedRows(app.corpusService, cfg, locator);
+): Promise<ExitReport> {
+  const joinedResult = await resolveGithubJoinedRows(inv.io, app.corpusService, cfg, locator);
   if (!joinedResult.ok) {
-    process.stderr.write(formatErrorFor(inv, joinedResult.error) + "\n");
-    process.exitCode = exitCode(joinedResult.error);
-    return;
+    inv.io.stderr.write(formatErrorFor(inv, joinedResult.error) + "\n");
+    return exitCode(joinedResult.error);
   }
 
   const projected = joinedResult.value.rows.map(projectGithubRow);
@@ -447,7 +450,7 @@ export async function runGithubIssuesListing(inv: Invocation,
   const filtered = filterIssueRows(modeFiltered, filters.severity, filters.category);
 
   if (json) {
-    console.log( // CLI surface
+    printLine(inv.io.stdout,  // CLI surface
       JSON.stringify(
         {
           ok: true,
@@ -468,11 +471,11 @@ export async function runGithubIssuesListing(inv: Invocation,
     return;
   }
 
-  console.log(formatIssueCorpusLine(corpusPath)); // CLI surface
+  printLine(inv.io.stdout, formatIssueCorpusLine(corpusPath)); // CLI surface
   if (filtered.length === 0) {
-    console.log(`(no ${filters.mode} GitHub issue reports)`); // CLI surface
+    printLine(inv.io.stdout, `(no ${filters.mode} GitHub issue reports)`); // CLI surface
   } else {
-    console.log(`GitHub issue reports (${cfg.repo}) (${filtered.length}):`); // CLI surface
+    printLine(inv.io.stdout, `GitHub issue reports (${cfg.repo}) (${filtered.length}):`); // CLI surface
     const headers = ["Number", "Title", "State", "Resolution", "Slug", "Severity", "Category"];
     const tableRows = filtered.map((r) => [
       String(r.number),
@@ -483,9 +486,9 @@ export async function runGithubIssuesListing(inv: Invocation,
       r.severity ?? "",
       r.category ?? "",
     ]);
-    console.log(formatTable(headers, tableRows)); // CLI surface
+    printLine(inv.io.stdout, formatTable(headers, tableRows)); // CLI surface
   }
-  console.log(GITHUB_LISTING_LOCAL_BOUNDARY_NOTE); // CLI surface
+  printLine(inv.io.stdout, GITHUB_LISTING_LOCAL_BOUNDARY_NOTE); // CLI surface
 }
 
 /**
@@ -516,12 +519,11 @@ async function runGithubVerify(inv: Invocation,
   corpusPath: string,
   json: boolean,
   locator: CorpusLocator,
-): Promise<void> {
-  const joinedResult = await resolveGithubJoinedRows(app.corpusService, cfg, locator);
+): Promise<ExitReport> {
+  const joinedResult = await resolveGithubJoinedRows(inv.io, app.corpusService, cfg, locator);
   if (!joinedResult.ok) {
-    process.stderr.write(formatErrorFor(inv, joinedResult.error) + "\n");
-    process.exitCode = exitCode(joinedResult.error);
-    return;
+    inv.io.stderr.write(formatErrorFor(inv, joinedResult.error) + "\n");
+    return exitCode(joinedResult.error);
   }
 
   const divergences: ResolutionDivergence[] = [];
@@ -539,7 +541,7 @@ async function runGithubVerify(inv: Invocation,
     });
   }
 
-  renderVerifyResult(corpusPath, divergences, json);
+  return renderVerifyResult(inv.io, corpusPath, divergences, json);
 }
 
 export default defineCommand({
@@ -603,19 +605,17 @@ export default defineCommand({
     // (never a narrowing of the listing); --apply means nothing alone. Usage errors exit 2 BEFORE the
     // corpus is opened.
     if (args.apply === true && args.sync !== true) {
-      process.stderr.write("Error: --apply is only meaningful with --sync.\n");
-      process.exitCode = 2;
-      return;
+      inv.io.stderr.write("Error: --apply is only meaningful with --sync.\n");
+      return 2;
     }
     if (args.sync === true && (args.verify === true || args.open === true || args.resolved === true || args.all === true || args.local === true)) {
-      process.stderr.write("Error: --sync cannot be combined with --verify, --open, --resolved, --all or --local.\n");
-      process.exitCode = 2;
-      return;
+      inv.io.stderr.write("Error: --sync cannot be combined with --verify, --open, --resolved, --all or --local.\n");
+      return 2;
     }
     if (args.sync === true) {
       const { app: syncApp } = loadLoreApp({ inv });
       try {
-        process.exitCode = await runIssuesSync(inv, syncApp.issueClose, { apply: args.apply === true, json: args.json === true });
+        return await runIssuesSync(inv, syncApp.issueClose, { apply: args.apply === true, json: args.json === true });
       } finally {
         syncApp.close();
       }
@@ -625,9 +625,8 @@ export default defineCommand({
       Boolean,
     ).length;
     if (modeFlagsSet > 1) {
-      process.stderr.write("Error: --open, --resolved, and --all are mutually exclusive.\n");
-      process.exitCode = 2;
-      return;
+      inv.io.stderr.write("Error: --open, --resolved, and --all are mutually exclusive.\n");
+      return 2;
     }
     const mode: "open" | "resolved" | "all" =
       args.all === true ? "all" : args.resolved === true ? "resolved" : "open";
@@ -638,9 +637,8 @@ export default defineCommand({
     // and fail loud only after.
     const severityFilter = typeof args.severity === "string" ? args.severity : undefined;
     if (severityFilter !== undefined && !isIssueSeverity(severityFilter)) {
-      process.stderr.write(`Error: --severity must be one of ${ISSUE_SEVERITIES.join("/")}.\n`);
-      process.exitCode = 2;
-      return;
+      inv.io.stderr.write(`Error: --severity must be one of ${ISSUE_SEVERITIES.join("/")}.\n`);
+      return 2;
     }
     const categoryFilter = typeof args.category === "string" ? args.category : undefined;
 
@@ -665,9 +663,8 @@ export default defineCommand({
       // ingest-seam, AC-GR-1/2/10/12: `runGithubIssuesListing` reads live via
       // `report-issue-wiring.ts::resolveGithubJoinedRows`).
       if (args.local !== true && classification.kind === "retired") {
-        process.stderr.write(formatErrorFor(inv, classification.error) + "\n");
-        process.exitCode = exitCode(classification.error);
-        return;
+        inv.io.stderr.write(formatErrorFor(inv, classification.error) + "\n");
+        return exitCode(classification.error);
       }
       // reason: the GitHub read surface (AC-GR-1/2/10/12, AC-GR-8) applies
       // ALL SIX flags — `--verify` is a different operation dispatched
@@ -678,15 +675,13 @@ export default defineCommand({
       // function already derived for the local branch above.
       if (args.local !== true && classification.kind === "github") {
         if (args.verify === true) {
-          await runGithubVerify(inv, app, classification.cfg, dirname(dirname(dbPath)), args.json === true, inv);
-          return;
+          return await runGithubVerify(inv, app, classification.cfg, dirname(dirname(dbPath)), args.json === true, inv);
         }
-        await runGithubIssuesListing(inv, app, classification.cfg, dirname(dirname(dbPath)), args.json === true, inv, {
+        return await runGithubIssuesListing(inv, app, classification.cfg, dirname(dirname(dbPath)), args.json === true, inv, {
           mode,
           ...(severityFilter !== undefined ? { severity: severityFilter } : {}),
           ...(categoryFilter !== undefined ? { category: categoryFilter } : {}),
         });
-        return;
       }
       // reason: `upstreamCorpusPath` is ALWAYS undefined here (P4,
       // spec-the-defect-channel-reaches-no-machine-but-its-own-github) — the
@@ -713,16 +708,14 @@ export default defineCommand({
       // BEFORE the mode-filtered read, so it never inherits --open/--resolved/
       // --all's filter and never touches --severity/--category.
       if (args.verify === true) {
-        await runVerify(inv, app, source, args.json === true, invocationOf(context).env);
-        return;
+        return await runVerify(inv, app, source, args.json === true, invocationOf(context).env);
       }
 
       const rowsResult =
         source.kind === "upstream" ? unsupportedUpstreamReadError<IssueRow[]>() : await readLocalRows(app, mode);
       if (!rowsResult.ok) {
-        process.stderr.write(formatErrorFor(inv, rowsResult.error) + "\n");
-        process.exitCode = exitCode(rowsResult.error);
-        return;
+        inv.io.stderr.write(formatErrorFor(inv, rowsResult.error) + "\n");
+        return exitCode(rowsResult.error);
       }
       // reason: filtering happens HERE, before renderRows computes `total`
       // off the resulting array's length — so a filtered run's `data.total`
@@ -730,7 +723,7 @@ export default defineCommand({
       // header names the census defect a self-consistent-but-unfiltered
       // total would reproduce).
       const filteredRows = filterIssueRows(rowsResult.value, severityFilter, categoryFilter);
-      renderRows(filteredRows, mode, source, args.json === true);
+      renderRows(inv.io, filteredRows, mode, source, args.json === true);
     } finally {
       app.close();
     }
@@ -830,14 +823,14 @@ async function readLocalRows(
  * @param source - which corpus was read and why (both fields reach `--json`)
  * @param json - whether `--json` was passed
  */
-function renderRows(
+function renderRows(io: CliIo, 
   rows: IssueRow[],
   mode: "open" | "resolved" | "all",
   source: IssueReadSource,
   json: boolean,
 ): void {
   if (json) {
-    console.log( // CLI surface
+    printLine(io.stdout,  // CLI surface
       JSON.stringify(
         {
           ok: true,
@@ -857,13 +850,13 @@ function renderRows(
     return;
   }
 
-  console.log(formatIssueCorpusLine(source.corpus_path)); // CLI surface
+  printLine(io.stdout, formatIssueCorpusLine(source.corpus_path)); // CLI surface
   if (rows.length === 0) {
-    console.log(`(no ${mode} issue reports)`); // CLI surface
+    printLine(io.stdout, `(no ${mode} issue reports)`); // CLI surface
     return;
   }
 
-  console.log(`${mode} issue reports (${rows.length}):`); // CLI surface
+  printLine(io.stdout, `${mode} issue reports (${rows.length}):`); // CLI surface
   const headers = ["Title", "Slug", "Reporter", "Reported", "Age", "Resolution", "Severity", "Category"];
   const tableRows = rows.map((r) => [
     r.title,
@@ -875,7 +868,7 @@ function renderRows(
     r.severity ?? "",
     r.category ?? "",
   ]);
-  console.log(formatTable(headers, tableRows)); // CLI surface
+  printLine(io.stdout, formatTable(headers, tableRows)); // CLI surface
 }
 
 /**
@@ -1024,9 +1017,10 @@ async function collectLocalVerifyTargets(app: ReturnType<typeof loadLoreApp>["ap
  */
 async function fetchGithubLabelResolutions(
   targets: readonly VerifyTarget[],
+  cwd: string,
   env: NodeJS.ProcessEnv,
 ): Promise<Result<Map<string, IssueResolution | undefined>, LoreError>> {
-  const runner = new GhRunner({ execFile: createNodeGhExecFile(), env });
+  const runner = new GhRunner({ execFile: createNodeGhExecFile(cwd), env });
 
   const targetsByRepo = new Map<string, VerifyTarget[]>();
   for (const target of targets) {
@@ -1104,11 +1098,11 @@ function computeDivergences(
  *   structurally unreachable) does not have to construct a fake one just
  *   to satisfy this function's signature.
  */
-function renderVerifyResult(corpusPath: string, divergences: readonly ResolutionDivergence[], json: boolean): void {
+function renderVerifyResult(io: CliIo, corpusPath: string, divergences: readonly ResolutionDivergence[], json: boolean): ExitReport {
   const clean = divergences.length === 0;
 
   if (json) {
-    console.log( // CLI surface
+    printLine(io.stdout,  // CLI surface
       JSON.stringify(
         {
           ok: true,
@@ -1124,19 +1118,19 @@ function renderVerifyResult(corpusPath: string, divergences: readonly Resolution
       ),
     );
   } else {
-    console.log(formatIssueCorpusLine(corpusPath)); // CLI surface
+    printLine(io.stdout, formatIssueCorpusLine(corpusPath)); // CLI surface
     if (clean) {
-      console.log("verify: clean — no resolution-label divergences found."); // CLI surface
+      printLine(io.stdout, "verify: clean — no resolution-label divergences found."); // CLI surface
     } else {
-      console.log(`verify: ${divergences.length} divergence(s) found:`); // CLI surface
+      printLine(io.stdout, `verify: ${divergences.length} divergence(s) found:`); // CLI surface
       for (const divergence of divergences) {
-        console.log(`  ${divergence.slug}: corpus=${divergence.corpus_resolution} github=${divergence.github_label_resolution}`); // CLI surface
+        printLine(io.stdout, `  ${divergence.slug}: corpus=${divergence.corpus_resolution} github=${divergence.github_label_resolution}`); // CLI surface
       }
     }
   }
 
   if (!clean) {
-    process.exitCode = VERIFY_DIVERGENCE_EXIT_CODE;
+    return VERIFY_DIVERGENCE_EXIT_CODE;
   }
 }
 
@@ -1149,7 +1143,7 @@ function renderVerifyResult(corpusPath: string, divergences: readonly Resolution
  * that DOES have targets, since that path always calls
  * {@link fetchGithubLabelResolutions}).
  */
-async function runVerify(inv: Invocation, app: ReturnType<typeof loadLoreApp>["app"], source: IssueReadSource, json: boolean, env: NodeJS.ProcessEnv): Promise<void> {
+async function runVerify(inv: Invocation, app: ReturnType<typeof loadLoreApp>["app"], source: IssueReadSource, json: boolean, env: NodeJS.ProcessEnv): Promise<ExitReport> {
   // reason: `source.kind === "upstream"` is structurally unreachable from
   // this file's own `resolveIssueReadSource` call site — see `run()`'s
   // comment there. Handled as a real error, not `assertUnreachable`, for the
@@ -1157,23 +1151,20 @@ async function runVerify(inv: Invocation, app: ReturnType<typeof loadLoreApp>["a
   const targetsResult =
     source.kind === "upstream" ? unsupportedUpstreamReadError<VerifyTarget[]>() : await collectLocalVerifyTargets(app);
   if (!targetsResult.ok) {
-    process.stderr.write(formatErrorFor(inv, targetsResult.error) + "\n");
-    process.exitCode = exitCode(targetsResult.error);
-    return;
+    inv.io.stderr.write(formatErrorFor(inv, targetsResult.error) + "\n");
+    return exitCode(targetsResult.error);
   }
 
   const targets = targetsResult.value;
   if (targets.length === 0) {
-    renderVerifyResult(source.corpus_path, [], json);
-    return;
+    return renderVerifyResult(inv.io, source.corpus_path, [], json);
   }
 
-  const labelsResult = await fetchGithubLabelResolutions(targets, env);
+  const labelsResult = await fetchGithubLabelResolutions(targets, inv.cwd, env);
   if (!labelsResult.ok) {
-    process.stderr.write(formatErrorFor(inv, labelsResult.error) + "\n");
-    process.exitCode = exitCode(labelsResult.error);
-    return;
+    inv.io.stderr.write(formatErrorFor(inv, labelsResult.error) + "\n");
+    return exitCode(labelsResult.error);
   }
 
-  renderVerifyResult(source.corpus_path, computeDivergences(targets, labelsResult.value), json);
+  return renderVerifyResult(inv.io, source.corpus_path, computeDivergences(targets, labelsResult.value), json);
 }

@@ -23,6 +23,7 @@
  */
 
 import { dirname, join } from "node:path";
+
 import { defineCommand } from "citty";
 import { CITE_GATE_MODES, err, ok } from "@lore/core";
 import type { CiteGateMode, Invocation, LoreError, Result } from "@lore/core";
@@ -35,6 +36,8 @@ import { SQLiteStore } from "../../../store/sqlite-store.js";
 import { readAcCiteStored, seedAcCiteModeIfAbsent, writeAcCiteStored } from "../../ac-cite-config-file.js";
 import type { AcCiteSeedOutcome, AcCiteStored } from "../../ac-cite-config-file.js";
 import { ENFORCE_REFUSES_NOTHING_WARNING, isEnforceRefusingNothing } from "../../../service/ac-cite-status.js";
+import { printLine } from "../output.js";
+import type { ExitReport } from "../cli-exit.js";
 
 /** The audit `action` of an adopt row; `lore status` provenance reads it back. SSOT for both sides. */
 export const BASELINE_ADOPT_AUDIT_ACTION = "baseline_adopt";
@@ -77,7 +80,7 @@ export async function seedAcCiteModeAudited(repoDir: string, inv: Invocation): P
   try {
     const row = await appendAdoptAuditRow(
       store,
-      resolveActor(undefined, inv.env, inv.cwd, inv.user),
+      resolveActor(inv.io, undefined, inv.env, inv.cwd, inv.user),
       { mode: null, armed_branches: [] },
       { mode: "report", armed_branches: [] },
     );
@@ -93,10 +96,10 @@ function repeatable(value: unknown): string[] {
   return Array.isArray(value) ? value.map(String) : [String(value)];
 }
 
-function fail(inv: Invocation, error: LoreError, json: boolean, code: number): void {
-  if (json) console.log(JSON.stringify({ ok: false, error }, null, 2));
-  else process.stderr.write(formatErrorFor(inv, error));
-  process.exitCode = code;
+function fail(inv: Invocation, error: LoreError, json: boolean, code: number): ExitReport {
+  if (json) printLine(inv.io.stdout, JSON.stringify({ ok: false, error }, null, 2));
+  else inv.io.stderr.write(formatErrorFor(inv, error));
+  return code;
 }
 
 function usageError(field: string, message: string, value?: unknown): LoreError {
@@ -128,7 +131,7 @@ export function computeAdoptedSettings(
   return { mode: change.mode ?? old.mode, armed_branches: armed.filter((s) => !change.disarm.includes(s)) };
 }
 
-async function runAdopt(args: Record<string, unknown>, inv: Invocation): Promise<void> {
+async function runAdopt(args: Record<string, unknown>, inv: Invocation): Promise<ExitReport> {
   const json = args.json === true;
   const arm = repeatable(args.arm);
   const disarm = repeatable(args.disarm);
@@ -182,8 +185,8 @@ async function runAdopt(args: Record<string, unknown>, inv: Invocation): Promise
       if (!lastRow.ok) return fail(inv, lastRow.error, json, exitCode(lastRow.error));
       const lastNew = readAdoptedSettings(lastRow.value[0]);
       if (lastNew !== undefined && sameSettings(lastNew, next)) {
-        if (json) console.log(JSON.stringify({ ok: true, data: { changed: false, old, new: next } }, null, 2));
-        else console.log("no change");
+        if (json) printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { changed: false, old, new: next } }, null, 2));
+        else printLine(inv.io.stdout, "no change");
         return;
       }
     }
@@ -196,7 +199,7 @@ async function runAdopt(args: Record<string, unknown>, inv: Invocation): Promise
       if (!written.ok) return fail(inv, written.error, json, exitCode(written.error));
     }
 
-    const audited = await appendAdoptAuditRow(store, resolveActor(undefined, inv.env, inv.cwd, inv.user), old, next);
+    const audited = await appendAdoptAuditRow(store, resolveActor(inv.io, undefined, inv.env, inv.cwd, inv.user), old, next);
     if (!audited.ok) {
       return fail(inv, 
         {
@@ -212,10 +215,10 @@ async function runAdopt(args: Record<string, unknown>, inv: Invocation): Promise
     const refusesNothing = next.mode !== null && isEnforceRefusingNothing(next.mode, next.armed_branches);
     if (json) {
       const warnings = refusesNothing ? { warnings: [ENFORCE_REFUSES_NOTHING_WARNING] } : {};
-      console.log(JSON.stringify({ ok: true, data: { changed: true, old, new: next, ...warnings } }, null, 2));
+      printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { changed: true, old, new: next, ...warnings } }, null, 2));
     } else {
-      console.log(`Adopted: mode ${old.mode ?? "(unset)"} -> ${next.mode ?? "(unset)"}; armed branches [${next.armed_branches.join(", ")}]`);
-      if (refusesNothing) process.stderr.write(`Warning: ${ENFORCE_REFUSES_NOTHING_WARNING}\n`);
+      printLine(inv.io.stdout, `Adopted: mode ${old.mode ?? "(unset)"} -> ${next.mode ?? "(unset)"}; armed branches [${next.armed_branches.join(", ")}]`);
+      if (refusesNothing) inv.io.stderr.write(`Warning: ${ENFORCE_REFUSES_NOTHING_WARNING}\n`);
     }
   } finally {
     store.close();
@@ -233,6 +236,6 @@ export const adoptCommand = defineCommand({
     json: { type: "boolean", description: "Output result as JSON" },
   },
   async run(context) {
-    await runAdopt(context.args as Record<string, unknown>, invocationOf(context));
+    return await runAdopt(context.args as Record<string, unknown>, invocationOf(context));
   },
 });

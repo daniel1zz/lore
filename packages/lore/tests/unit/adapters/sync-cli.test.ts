@@ -25,8 +25,9 @@
  *      handler functions directly.
  *
  * We mock process.stdout / process.stderr using vi.spyOn to capture output
- * without actually writing to the terminal.  We mock process.exit using
- * vi.spyOn + mockImplementation to prevent test process from terminating.
+ * without actually writing to the terminal.  Each handler call runs as ONE run
+ * (`runHandlerForExit`) and the exit code it ended with is read from there:
+ * commands return their code, none calls `process.exit`.
  *
  * We write YAML-based config.yaml files in temp dirs so the handler can call
  * loadConfig(dir) under test — no sqlite DB required for sync status/setup.
@@ -43,7 +44,7 @@
  *   REGRESSION: sync setup url stored as remote_url (not plaintext token)
  */
 
-import { liveInvocation } from "../../live-invocation.js";
+import { liveInvocation, runHandlerForExit } from "../../live-invocation.js";
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { mkdtempSync, mkdirSync, writeFileSync, existsSync } from "fs";
 import { join } from "path";
@@ -130,9 +131,12 @@ function captureOutput() {
     return true;
   });
   // console.log also captures output
-  const logSpy = vi.spyOn(console, "log").mockImplementation((...args: any[]) => {
+  const logSpy = vi.spyOn(process.stdout, "write").mockImplementation((((chunk: unknown) => {
+    const args: any[] = [String(chunk).replace(/\n$/, "")];
     stdout.push(args.join(" "));
-  });
+  
+    return true;
+  }) as never));
 
   return {
     stdout,
@@ -148,15 +152,11 @@ function captureOutput() {
   };
 }
 
+/** The exit code the most recent `*.run` ended with: `exitCli(code)` or a normal return (0); no command calls `process.exit`. */
+let lastExitCode = 0;
+
 function captureExit() {
-  const captured: { exitCode: number | undefined } = { exitCode: undefined };
-  const spy = vi.spyOn(process, "exit").mockImplementation(
-    (code?: string | number | null | undefined): never => {
-      captured.exitCode = typeof code === "number" ? code : 0;
-      throw new Error(`process.exit(${code}) called`);
-    },
-  );
-  return { spy, get exitCode() { return captured.exitCode; } };
+  return { get exitCode(): number { return lastExitCode; } };
 }
 
 // ─── Setup: create a .lore/lore.db stub (SQLite not needed for config-only ops)
@@ -185,10 +185,7 @@ describe("lore sync status — happy path (SPEC-009 §5)", () => {
     const exitCapture = captureExit();
 
     try {
-      await status.run({ args: { json: false }, inv: liveInvocation() });
-    } catch (e: any) {
-      // process.exit throws — check it was exit(0)
-      if (!e.message?.includes("process.exit")) throw e;
+      lastExitCode = await runHandlerForExit(() => status.run({ args: { json: false }, inv: liveInvocation() }));
     } finally {
       output.restore();
     }
@@ -217,9 +214,7 @@ describe("lore sync status — happy path (SPEC-009 §5)", () => {
     const exitCapture = captureExit();
 
     try {
-      await status.run({ args: { json: true }, inv: liveInvocation() });
-    } catch (e: any) {
-      if (!e.message?.includes("process.exit")) throw e;
+      lastExitCode = await runHandlerForExit(() => status.run({ args: { json: true }, inv: liveInvocation() }));
     } finally {
       output.restore();
     }
@@ -245,16 +240,14 @@ describe("lore sync setup — happy path (SPEC-009 §5)", () => {
     const exitCapture = captureExit();
 
     try {
-      await setup.run({
+      lastExitCode = await runHandlerForExit(() => setup.run({
         args: {
           url: "libsql://setup-test.turso.io",
           "token-env": undefined, // use default LORE_SYNC_TOKEN
           json: false,
         },
         inv: liveInvocation(),
-      });
-    } catch (e: any) {
-      if (!e.message?.includes("process.exit")) throw e;
+      }));
     } finally {
       output.restore();
     }
@@ -281,16 +274,14 @@ describe("lore sync setup — happy path (SPEC-009 §5)", () => {
     const output = captureOutput();
 
     try {
-      await setup.run({
+      lastExitCode = await runHandlerForExit(() => setup.run({
         args: {
           url: "libsql://token-test.turso.io",
           "token-env": "LORE_SYNC_TOKEN",
           json: false,
         },
         inv: liveInvocation(),
-      });
-    } catch (e: any) {
-      if (!e.message?.includes("process.exit")) throw e;
+      }));
     } finally {
       output.restore();
       delete process.env["LORE_SYNC_TOKEN"];
@@ -317,9 +308,7 @@ describe("lore sync push — negative cases (SPEC-009 §5)", () => {
     const exitCapture = captureExit();
 
     try {
-      await push.run({ args: { json: false }, inv: liveInvocation() });
-    } catch (e: any) {
-      if (!e.message?.includes("process.exit")) throw e;
+      lastExitCode = await runHandlerForExit(() => push.run({ args: { json: false }, inv: liveInvocation() }));
     } finally {
       output.restore();
     }
@@ -350,9 +339,7 @@ describe("lore sync push — negative cases (SPEC-009 §5)", () => {
     const exitCapture = captureExit();
 
     try {
-      await push.run({ args: { json: false }, inv: liveInvocation() });
-    } catch (e: any) {
-      if (!e.message?.includes("process.exit")) throw e;
+      lastExitCode = await runHandlerForExit(() => push.run({ args: { json: false }, inv: liveInvocation() }));
     } finally {
       output.restore();
     }
@@ -372,9 +359,7 @@ describe("lore sync pull — negative cases (SPEC-009 §5)", () => {
     const exitCapture = captureExit();
 
     try {
-      await pull.run({ args: { json: false }, inv: liveInvocation() });
-    } catch (e: any) {
-      if (!e.message?.includes("process.exit")) throw e;
+      lastExitCode = await runHandlerForExit(() => pull.run({ args: { json: false }, inv: liveInvocation() }));
     } finally {
       output.restore();
     }
@@ -396,9 +381,7 @@ describe("lore sync setup — negative cases (SPEC-009 §5)", () => {
     const exitCapture = captureExit();
 
     try {
-      await setup.run({ args: { url: undefined, json: false }, inv: liveInvocation() });
-    } catch (e: any) {
-      if (!e.message?.includes("process.exit")) throw e;
+      lastExitCode = await runHandlerForExit(() => setup.run({ args: { url: undefined, json: false }, inv: liveInvocation() }));
     } finally {
       output.restore();
     }
@@ -415,15 +398,13 @@ describe("lore sync setup — negative cases (SPEC-009 §5)", () => {
     const exitCapture = captureExit();
 
     try {
-      await setup.run({
+      lastExitCode = await runHandlerForExit(() => setup.run({
         args: {
           url: "https://not-a-libsql-url.example.com",
           json: false,
         },
         inv: liveInvocation(),
-      });
-    } catch (e: any) {
-      if (!e.message?.includes("process.exit")) throw e;
+      }));
     } finally {
       output.restore();
     }
@@ -449,9 +430,7 @@ describe("lore sync status — boundary values (SPEC-009 §5)", () => {
     const exitCapture = captureExit();
 
     try {
-      await status.run({ args: { json: false }, inv: liveInvocation() });
-    } catch (e: any) {
-      if (!e.message?.includes("process.exit")) throw e;
+      lastExitCode = await runHandlerForExit(() => status.run({ args: { json: false }, inv: liveInvocation() }));
     } finally {
       output.restore();
     }
@@ -480,9 +459,7 @@ describe("lore sync setup — boundary values", () => {
     const output1 = captureOutput();
     const exit1 = captureExit();
     try {
-      await setup.run({ args: { url: "libsql://idempotent.turso.io", json: false }, inv: liveInvocation() });
-    } catch (e: any) {
-      if (!e.message?.includes("process.exit")) throw e;
+      lastExitCode = await runHandlerForExit(() => setup.run({ args: { url: "libsql://idempotent.turso.io", json: false }, inv: liveInvocation() }));
     } finally {
       output1.restore();
     }
@@ -492,9 +469,7 @@ describe("lore sync setup — boundary values", () => {
     const output2 = captureOutput();
     const exit2 = captureExit();
     try {
-      await setup.run({ args: { url: "libsql://idempotent.turso.io", json: false }, inv: liveInvocation() });
-    } catch (e: any) {
-      if (!e.message?.includes("process.exit")) throw e;
+      lastExitCode = await runHandlerForExit(() => setup.run({ args: { url: "libsql://idempotent.turso.io", json: false }, inv: liveInvocation() }));
     } finally {
       output2.restore();
     }
@@ -533,9 +508,7 @@ describe("lore sync setup — state transitions", () => {
     const setupOutput = captureOutput();
     const setupExit = captureExit();
     try {
-      await setup.run({ args: { url: "libsql://state-test.turso.io", json: false }, inv: liveInvocation() });
-    } catch (e: any) {
-      if (!e.message?.includes("process.exit")) throw e;
+      lastExitCode = await runHandlerForExit(() => setup.run({ args: { url: "libsql://state-test.turso.io", json: false }, inv: liveInvocation() }));
     } finally {
       setupOutput.restore();
     }
@@ -545,9 +518,7 @@ describe("lore sync setup — state transitions", () => {
     const statusOutput = captureOutput();
     const statusExit = captureExit();
     try {
-      await status.run({ args: { json: false }, inv: liveInvocation() });
-    } catch (e: any) {
-      if (!e.message?.includes("process.exit")) throw e;
+      lastExitCode = await runHandlerForExit(() => status.run({ args: { json: false }, inv: liveInvocation() }));
     } finally {
       statusOutput.restore();
       delete process.env["LORE_SYNC_TOKEN"];
@@ -594,9 +565,7 @@ describe("REGRESSION Fix6 — push/pull --json flag consistency (SPEC-009 §5)",
     const exitCapture = captureExit();
 
     try {
-      await push.run({ args: { json: true }, inv: liveInvocation() });
-    } catch (e: any) {
-      if (!e.message?.includes("process.exit")) throw e;
+      lastExitCode = await runHandlerForExit(() => push.run({ args: { json: true }, inv: liveInvocation() }));
     } finally {
       output.restore();
     }
@@ -621,9 +590,7 @@ describe("REGRESSION Fix6 — push/pull --json flag consistency (SPEC-009 §5)",
     const exitCapture = captureExit();
 
     try {
-      await pull.run({ args: { json: true }, inv: liveInvocation() });
-    } catch (e: any) {
-      if (!e.message?.includes("process.exit")) throw e;
+      lastExitCode = await runHandlerForExit(() => pull.run({ args: { json: true }, inv: liveInvocation() }));
     } finally {
       output.restore();
     }
@@ -650,9 +617,7 @@ describe("REGRESSION — sync push/pull error message quality (SPEC-009 §5)", (
     const exitCapture = captureExit();
 
     try {
-      await push.run({ args: { json: false }, inv: liveInvocation() });
-    } catch (e: any) {
-      if (!e.message?.includes("process.exit")) throw e;
+      lastExitCode = await runHandlerForExit(() => push.run({ args: { json: false }, inv: liveInvocation() }));
     } finally {
       output.restore();
     }
@@ -672,9 +637,7 @@ describe("REGRESSION — sync push/pull error message quality (SPEC-009 §5)", (
     const exitCapture = captureExit();
 
     try {
-      await pull.run({ args: { json: false }, inv: liveInvocation() });
-    } catch (e: any) {
-      if (!e.message?.includes("process.exit")) throw e;
+      lastExitCode = await runHandlerForExit(() => pull.run({ args: { json: false }, inv: liveInvocation() }));
     } finally {
       output.restore();
     }

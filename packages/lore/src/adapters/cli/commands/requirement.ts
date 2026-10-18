@@ -14,15 +14,17 @@
  */
 
 import { defineCommand } from "citty";
+
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatErrorFor } from "../utils.js";
 import type { App } from "../../../app.js";
 import { invocationOf } from "../command-invocation.js";
+import { printLine } from "../output.js";
+import type { CliIo } from "../output.js";
 
-function requireRequirementService(app: App) {
+function requireRequirementService(io: CliIo, app: App) {
   if (app.requirementService === undefined) {
-    process.stderr.write("Error: RequirementService is not available in this build.\n");
-    process.exitCode = 1;
+    io.stderr.write("Error: RequirementService is not available in this build.\n");
     return undefined;
   }
   return app.requirementService;
@@ -46,8 +48,8 @@ export default defineCommand({
         const inv = invocationOf(context);
         const { app } = loadLoreApp({ inv });
         try {
-          const svc = requireRequirementService(app);
-          if (svc === undefined) return;
+          const svc = requireRequirementService(inv.io, app);
+          if (svc === undefined) return 1;
           const migratedTo = args["migrated-to"] as string | undefined;
           const result = await svc.addRequirement(
             args.prd as string,
@@ -60,13 +62,12 @@ export default defineCommand({
             { requireLiveRule: true },
           );
           if (!result.ok) {
-            if (args.json) console.log(JSON.stringify({ ok: false, error: result.error }, null, 2));
-            else process.stderr.write(formatErrorFor(inv, result.error));
-            process.exitCode = exitCode(result.error);
-            return;
+            if (args.json) printLine(inv.io.stdout, JSON.stringify({ ok: false, error: result.error }, null, 2));
+            else inv.io.stderr.write(formatErrorFor(inv, result.error));
+            return exitCode(result.error);
           }
-          if (args.json) console.log(JSON.stringify({ ok: true, data: result.value }, null, 2));
-          else console.log(`Added requirement ${args.id} (${result.value.length} total).`);
+          if (args.json) printLine(inv.io.stdout, JSON.stringify({ ok: true, data: result.value }, null, 2));
+          else printLine(inv.io.stdout, `Added requirement ${args.id} (${result.value.length} total).`);
         } finally {
           app.close();
         }
@@ -85,17 +86,16 @@ export default defineCommand({
         const inv = invocationOf(context);
         const { app } = loadLoreApp({ inv });
         try {
-          const svc = requireRequirementService(app);
-          if (svc === undefined) return;
+          const svc = requireRequirementService(inv.io, app);
+          if (svc === undefined) return 1;
           const result = await svc.migrateRequirement(args.prd as string, args.id as string, args.rule as string);
           if (!result.ok) {
-            if (args.json) console.log(JSON.stringify({ ok: false, error: result.error }, null, 2));
-            else process.stderr.write(formatErrorFor(inv, result.error));
-            process.exitCode = exitCode(result.error);
-            return;
+            if (args.json) printLine(inv.io.stdout, JSON.stringify({ ok: false, error: result.error }, null, 2));
+            else inv.io.stderr.write(formatErrorFor(inv, result.error));
+            return exitCode(result.error);
           }
-          if (args.json) console.log(JSON.stringify({ ok: true, data: result.value }, null, 2));
-          else console.log(`Migrated requirement ${args.id} to ${args.rule}.`);
+          if (args.json) printLine(inv.io.stdout, JSON.stringify({ ok: true, data: result.value }, null, 2));
+          else printLine(inv.io.stdout, `Migrated requirement ${args.id} to ${args.rule}.`);
         } finally {
           app.close();
         }
@@ -112,21 +112,20 @@ export default defineCommand({
         const inv = invocationOf(context);
         const { app } = loadLoreApp({ inv });
         try {
-          const svc = requireRequirementService(app);
-          if (svc === undefined) return;
+          const svc = requireRequirementService(inv.io, app);
+          if (svc === undefined) return 1;
           const result = await svc.listRequirements(args.prd as string);
           if (!result.ok) {
-            if (args.json) console.log(JSON.stringify({ ok: false, error: result.error }, null, 2));
-            else process.stderr.write(formatErrorFor(inv, result.error));
-            process.exitCode = exitCode(result.error);
-            return;
+            if (args.json) printLine(inv.io.stdout, JSON.stringify({ ok: false, error: result.error }, null, 2));
+            else inv.io.stderr.write(formatErrorFor(inv, result.error));
+            return exitCode(result.error);
           }
           if (args.json) {
-            console.log(JSON.stringify({ ok: true, data: result.value }, null, 2));
+            printLine(inv.io.stdout, JSON.stringify({ ok: true, data: result.value }, null, 2));
           } else if (result.value.length === 0) {
-            console.log("No requirements declared on this PRD.");
+            printLine(inv.io.stdout, "No requirements declared on this PRD.");
           } else {
-            for (const r of result.value) console.log(`  [${r.priority}] ${r.id}${r.migrated_to !== undefined ? ` -> ${r.migrated_to}` : ""} — ${r.statement}`);
+            for (const r of result.value) printLine(inv.io.stdout, `  [${r.priority}] ${r.id}${r.migrated_to !== undefined ? ` -> ${r.migrated_to}` : ""} — ${r.statement}`);
           }
         } finally {
           app.close();
@@ -146,19 +145,18 @@ export default defineCommand({
         const inv = invocationOf(context);
         const { app } = loadLoreApp({ inv });
         try {
-          const svc = requireRequirementService(app);
-          if (svc === undefined) return;
+          const svc = requireRequirementService(inv.io, app);
+          if (svc === undefined) return 1;
           const result = await svc.removeRequirement(args.prd as string, args.id as string, {
             force: args.force === true,
           });
           if (!result.ok) {
-            if (args.json) console.log(JSON.stringify({ ok: false, error: result.error }, null, 2));
-            else process.stderr.write(formatErrorFor(inv, result.error));
-            process.exitCode = exitCode(result.error);
-            return;
+            if (args.json) printLine(inv.io.stdout, JSON.stringify({ ok: false, error: result.error }, null, 2));
+            else inv.io.stderr.write(formatErrorFor(inv, result.error));
+            return exitCode(result.error);
           }
-          if (args.json) console.log(JSON.stringify({ ok: true, data: result.value }, null, 2));
-          else console.log(`Removed requirement ${args.id} (${result.value.length} remain).`);
+          if (args.json) printLine(inv.io.stdout, JSON.stringify({ ok: true, data: result.value }, null, 2));
+          else printLine(inv.io.stdout, `Removed requirement ${args.id} (${result.value.length} remain).`);
         } finally {
           app.close();
         }

@@ -44,6 +44,7 @@
  */
 
 import { readFileSync } from "node:fs";
+
 import { defineCommand } from "citty";
 import { AiConfigSchema, BASELINE_TREES, ruleIdPrefixOfNode } from "@lore/core";
 import type { AIProvider, BaselineTree, DocRecord, Invocation, LoreError } from "@lore/core";
@@ -65,67 +66,69 @@ import { buildProviderRegistry } from "../../../ai/registry.js";
 import { adoptCommand } from "./baseline-adopt.js";
 import { runFidelity } from "../../../service/fidelity-sample.js";
 import type { FidelityRecord } from "../../../service/fidelity-sample.js";
+import { printLine } from "../output.js";
+import type { CliIo } from "../output.js";
+import type { ExitReport } from "../cli-exit.js";
 
 function repeatable(value: unknown): string[] {
   if (value === undefined) return [];
   return Array.isArray(value) ? value.map(String) : [String(value)];
 }
 
-function reportFailure(inv: Invocation, error: LoreError, json: boolean): void {
-  if (json) console.log(JSON.stringify({ ok: false, error }, null, 2));
-  else process.stderr.write(formatErrorFor(inv, error));
-  process.exitCode = exitCode(error);
+function reportFailure(inv: Invocation, error: LoreError, json: boolean): ExitReport {
+  if (json) printLine(inv.io.stdout, JSON.stringify({ ok: false, error }, null, 2));
+  else inv.io.stderr.write(formatErrorFor(inv, error));
+  return exitCode(error);
 }
 
-function requireRuleService(app: App) {
+function requireRuleService(io: CliIo, app: App) {
   if (app.ruleService === undefined) {
-    process.stderr.write("Error: RuleService is not available in this build.\n");
-    process.exitCode = 1;
+    io.stderr.write("Error: RuleService is not available in this build.\n");
     return undefined;
   }
   return app.ruleService;
 }
 
 /** Shared by every verb: open the app, run `body` with the service, always close. */
-async function withRuleService(inv: Invocation, body: (svc: NonNullable<App["ruleService"]>) => Promise<void>): Promise<void> {
+async function withRuleService(inv: Invocation, body: (svc: NonNullable<App["ruleService"]>) => Promise<ExitReport>): Promise<ExitReport> {
   const { app } = loadLoreApp({ inv });
   try {
-    const svc = requireRuleService(app);
-    if (svc === undefined) return;
-    await body(svc);
+    const svc = requireRuleService(inv.io, app);
+    if (svc === undefined) return 1;
+    return await body(svc);
   } finally {
     app.close();
   }
 }
 
-function renderRuleState(rule: RuleStateEntry, indent: string, statement?: string): void {
+function renderRuleState(io: CliIo, rule: RuleStateEntry, indent: string, statement?: string): void {
   const reason = rule.unknown_reason !== undefined ? ` (${rule.unknown_reason})` : "";
   const lifecycle = rule.lifecycle === "live" ? "" : ` [${rule.lifecycle}]`;
-  console.log(`${indent}${rule.rule_id} ${rule.state}${reason}${lifecycle}${statement !== undefined ? ` - ${statement}` : ""}`);
-  if (rule.inputs.length === 0) console.log(`${indent}  (no citing script-mode AC)`);
+  printLine(io.stdout, `${indent}${rule.rule_id} ${rule.state}${reason}${lifecycle}${statement !== undefined ? ` - ${statement}` : ""}`);
+  if (rule.inputs.length === 0) printLine(io.stdout, `${indent}  (no citing script-mode AC)`);
   for (const input of rule.inputs) {
     const run =
       input.evidence_result === null
         ? "no attested run"
         : `${input.evidence_result} @ ${input.evidence_recorded_at ?? "?"} sha ${input.head_sha?.slice(0, 12) ?? "none"}`;
-    console.log(`${indent}  ${input.spec}#${input.ac_id}: ${run}; anchors: ${input.anchor_paths.length === 0 ? "none" : input.anchor_paths.join(", ")}`);
+    printLine(io.stdout, `${indent}  ${input.spec}#${input.ac_id}: ${run}; anchors: ${input.anchor_paths.length === 0 ? "none" : input.anchor_paths.join(", ")}`);
   }
 }
 
-function renderComputedFrom(full: RuleStateFull): void {
-  console.log(
+function renderComputedFrom(io: CliIo, full: RuleStateFull): void {
+  printLine(io.stdout, 
     `computed_from: head ${full.computed_from.head_sha ?? "unavailable (git)"}, corpus version ${full.computed_from.corpus_version}; ambiguous_ac_ref ${full.ambiguous_ac_ref}`,
   );
 }
 
 /** `tree --states` / `tree --rule`: the only baseline verbs that consult git, via a read-only second store handle. */
-async function runStatesTree(args: Record<string, unknown>, inv: Invocation): Promise<void> {
+async function runStatesTree(args: Record<string, unknown>, inv: Invocation): Promise<ExitReport> {
   const json = args.json === true;
   const { app, dbPath } = loadLoreApp({ inv });
   const store = new SQLiteStore(dbPath);
   try {
-    const svc = requireRuleService(app);
-    if (svc === undefined) return;
+    const svc = requireRuleService(inv.io, app);
+    if (svc === undefined) return 1;
     const stateService = new RuleStateService(store, new SpawnGitPort(resolveGitRoot(inv.cwd)));
     const rule = typeof args.rule === "string" ? args.rule : undefined;
     const full = await stateService.full(rule !== undefined ? { rule } : undefined);
@@ -144,31 +147,31 @@ async function runStatesTree(args: Record<string, unknown>, inv: Invocation): Pr
         ? (rules as Array<{ id?: unknown; statement?: unknown }>).find((r) => r.id === rule)?.statement
         : undefined;
       if (json) {
-        console.log(JSON.stringify({ ok: true, data: { rule: entry, statement: statement ?? null, computed_from: full.value.computed_from, ambiguous_ac_ref: full.value.ambiguous_ac_ref } }, null, 2));
+        printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { rule: entry, statement: statement ?? null, computed_from: full.value.computed_from, ambiguous_ac_ref: full.value.ambiguous_ac_ref } }, null, 2));
         return;
       }
-      console.log(`Leaf: ${entry.leaf}`);
-      renderRuleState(entry, "", typeof statement === "string" ? statement : undefined);
-      renderComputedFrom(full.value);
+      printLine(inv.io.stdout, `Leaf: ${entry.leaf}`);
+      renderRuleState(inv.io, entry, "", typeof statement === "string" ? statement : undefined);
+      renderComputedFrom(inv.io, full.value);
       return;
     }
 
     if (json) {
       const nodes = tree.value.map((n: BaselineTreeEntry) => ({ ...n, rule_states: byLeaf.get(n.slug) ?? [] }));
-      console.log(JSON.stringify({ ok: true, data: { tree: nodes, computed_from: full.value.computed_from, ambiguous_ac_ref: full.value.ambiguous_ac_ref } }, null, 2));
+      printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { tree: nodes, computed_from: full.value.computed_from, ambiguous_ac_ref: full.value.ambiguous_ac_ref } }, null, 2));
       return;
     }
     if (tree.value.length === 0) {
-      console.log("No baseline nodes.");
+      printLine(inv.io.stdout, "No baseline nodes.");
       return;
     }
     for (const entry of tree.value) {
       const indent = "  ".repeat(entry.depth);
-      console.log(`${indent}${entry.node} ${entry.label ?? entry.title} (${entry.slug}, ${entry.status})`);
+      printLine(inv.io.stdout, `${indent}${entry.node} ${entry.label ?? entry.title} (${entry.slug}, ${entry.status})`);
       // reason: byLeaf is keyed by the rule-holding doc (business leaf or architecture standard, BR-670); any other node has no entry.
-      for (const r of byLeaf.get(entry.slug) ?? []) renderRuleState(r, `${indent}  `);
+      for (const r of byLeaf.get(entry.slug) ?? []) renderRuleState(inv.io, r, `${indent}  `);
     }
-    renderComputedFrom(full.value);
+    renderComputedFrom(inv.io, full.value);
   } finally {
     store.close();
     app.close();
@@ -186,9 +189,9 @@ function requireCensusRoot(inv: Invocation): string {
   return root;
 }
 
-function reportCensusFailure(inv: Invocation, cause: unknown, json: boolean): void {
+function reportCensusFailure(inv: Invocation, cause: unknown, json: boolean): ExitReport {
   if (!(cause instanceof SiteCensusError)) throw cause;
-  reportFailure(inv, { code: "VALIDATION_ERROR", field: `census:${cause.reason}`, message: cause.message }, json);
+  return reportFailure(inv, { code: "VALIDATION_ERROR", field: `census:${cause.reason}`, message: cause.message }, json);
 }
 
 interface LeafCoverageReport {
@@ -207,7 +210,7 @@ interface LeafCoverageReport {
  * `coverage <leaf|branch>`: census each leaf's declared `commands`, compare with its `site_map`.
  * A leaf declaring no command is NOT ok — completeness of an unmeasured leaf is unproven.
  */
-async function runCoverage(target: string, json: boolean, inv: Invocation): Promise<void> {
+async function runCoverage(target: string, json: boolean, inv: Invocation): Promise<ExitReport> {
   const { app, dbPath } = loadLoreApp({ inv });
   const store = new SQLiteStore(dbPath);
   try {
@@ -262,21 +265,21 @@ async function runCoverage(target: string, json: boolean, inv: Invocation): Prom
     });
     const ok = reports.length > 0 && reports.every((r) => r.ok);
     if (json) {
-      console.log(JSON.stringify({ ok: true, data: { target: resolved.value.slug, complete: ok, leaves: reports } }, null, 2));
+      printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { target: resolved.value.slug, complete: ok, leaves: reports } }, null, 2));
     } else {
-      if (reports.length === 0) console.log(`${resolved.value.slug}: no leaves under this node.`);
+      if (reports.length === 0) printLine(inv.io.stdout, `${resolved.value.slug}: no leaves under this node.`);
       for (const r of reports) {
         const state = r.commands.length === 0 ? "UNMEASURED (no commands declared; use `lore baseline map --command`)" : r.ok ? "complete" : "INCOMPLETE";
-        console.log(`${r.slug}: ${state} - ${r.sites} site(s), ${r.gaps.length} gap(s), ${r.not_measured.length} not_measured, ${r.unresolved_imports.length} unresolved import(s), ${r.bootstrap.length} bootstrap (not counted as gaps)`);
-        for (const key of r.unresolved_imports) console.log(`  unresolved  ${key} (census incomplete: sites behind this import are not listed)`);
-        for (const key of r.gaps) console.log(`  gap          ${key}`);
-        for (const key of r.not_measured) console.log(`  not_measured ${key}`);
-        for (const key of r.bootstrap) console.log(`  bootstrap    ${key}`);
+        printLine(inv.io.stdout, `${r.slug}: ${state} - ${r.sites} site(s), ${r.gaps.length} gap(s), ${r.not_measured.length} not_measured, ${r.unresolved_imports.length} unresolved import(s), ${r.bootstrap.length} bootstrap (not counted as gaps)`);
+        for (const key of r.unresolved_imports) printLine(inv.io.stdout, `  unresolved  ${key} (census incomplete: sites behind this import are not listed)`);
+        for (const key of r.gaps) printLine(inv.io.stdout, `  gap          ${key}`);
+        for (const key of r.not_measured) printLine(inv.io.stdout, `  not_measured ${key}`);
+        for (const key of r.bootstrap) printLine(inv.io.stdout, `  bootstrap    ${key}`);
       }
     }
-    if (!ok) process.exitCode = 1;
+    if (!ok) return 1;
   } catch (cause) {
-    reportCensusFailure(inv, cause, json);
+    return reportCensusFailure(inv, cause, json);
   } finally {
     store.close();
     app.close();
@@ -316,15 +319,15 @@ function renderFidelityContent(record: FidelityRecord): string {
  * whereas `exitCode()` maps VALIDATION_ERROR to 4 - so VALIDATION_ERROR is pinned to 2 here and every other
  * error keeps its `exitCode()` (AI_PROVIDER_ERROR -> 6).
  */
-function reportFidelityFailure(inv: Invocation, error: LoreError, json: boolean): void {
-  reportFailure(inv, error, json);
-  if (error.code === "VALIDATION_ERROR") process.exitCode = 2;
+function reportFidelityFailure(inv: Invocation, error: LoreError, json: boolean): ExitReport {
+  const code = reportFailure(inv, error, json);
+  return error.code === "VALIDATION_ERROR" ? 2 : code;
 }
 
 /** `fidelity`: validate flags, resolve the AI provider (never skipping the judge), run, store, print. */
-async function runFidelityCommand(args: Record<string, unknown>, inv: Invocation): Promise<void> {
+async function runFidelityCommand(args: Record<string, unknown>, inv: Invocation): Promise<ExitReport> {
   const json = args.json === true;
-  const fail = (field: string, message: string): void => reportFidelityFailure(inv, { code: "VALIDATION_ERROR", field, message }, json);
+  const fail = (field: string, message: string): ExitReport => reportFidelityFailure(inv, { code: "VALIDATION_ERROR", field, message }, json);
   const rawArgv = inv.argv;
   // reason: SPEC-024 tri-state AI flag - citty collapses --ai/--no-ai, so detect them in argv like assess.ts does.
   const hasExplicitAi = rawArgv.includes("--ai");
@@ -361,16 +364,16 @@ async function runFidelityCommand(args: Record<string, unknown>, inv: Invocation
     });
     if (!created.ok) return reportFidelityFailure(inv, created.error, json);
     if (json) {
-      console.log(JSON.stringify({ ok: true, data: { record, doc: { id: created.value.id, slug: created.value.slug } } }, null, 2));
+      printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { record, doc: { id: created.value.id, slug: created.value.slug } } }, null, 2));
       return;
     }
-    console.log(`Stored ${created.value.slug}: ${share} of ${record.size} sampled (pool ${record.pool}, seed ${String(record.seed)}, ${record.judges} judge(s), ${record.disagreements.length} disagreement(s)).`);
-    console.log(`not_seen: ${record.not_seen}`);
+    printLine(inv.io.stdout, `Stored ${created.value.slug}: ${share} of ${record.size} sampled (pool ${record.pool}, seed ${String(record.seed)}, ${record.judges} judge(s), ${record.disagreements.length} disagreement(s)).`);
+    printLine(inv.io.stdout, `not_seen: ${record.not_seen}`);
     for (const v of record.verdicts) {
-      if (v.verdict === "not_seen") console.log(`  ${v.n}. NOT SEEN ${(v.unseen_paths ?? []).join(", ")} - ${v.key} - ${v.reason}`);
-      else console.log(`  ${v.n}. ${v.verdict === "faithful" ? "ok " : "BAD"} ${v.key} - ${v.reason}`);
+      if (v.verdict === "not_seen") printLine(inv.io.stdout, `  ${v.n}. NOT SEEN ${(v.unseen_paths ?? []).join(", ")} - ${v.key} - ${v.reason}`);
+      else printLine(inv.io.stdout, `  ${v.n}. ${v.verdict === "faithful" ? "ok " : "BAD"} ${v.key} - ${v.reason}`);
     }
-    for (const c of record.catch_all) console.log(`  catch-all ${c.rule_id}: cited by ${c.citing_criteria.length} criteria`);
+    for (const c of record.catch_all) printLine(inv.io.stdout, `  catch-all ${c.rule_id}: cited by ${c.citing_criteria.length} criteria`);
   } finally {
     store.close();
     app.close();
@@ -398,24 +401,22 @@ export default defineCommand({
       async run(context) {
         const { args } = context;
         const inv = invocationOf(context);
-        await withRuleService(inv, async (svc) => {
+        return await withRuleService(inv, async (svc) => {
           if (args.tree !== undefined && !(BASELINE_TREES as readonly string[]).includes(args.tree as string)) {
-            reportFailure(inv, 
+            return reportFailure(inv, 
               { code: "VALIDATION_ERROR", field: "tree", message: `--tree must be one of ${BASELINE_TREES.join(" | ")} (got '${String(args.tree)}')`, value: args.tree },
               args.json === true,
             );
-            return;
           }
           let content = "";
           if (args["content-file"] !== undefined) {
             try {
               content = readFileSync(args["content-file"] as string, "utf8");
             } catch (cause) {
-              reportFailure(inv, 
+              return reportFailure(inv, 
                 { code: "VALIDATION_ERROR", field: "content-file", message: `cannot read ${String(args["content-file"])}: ${cause instanceof Error ? cause.message : String(cause)}` },
                 args.json === true,
               );
-              return;
             }
           }
           const tree = (args.tree as BaselineTree | undefined) ?? "business";
@@ -426,10 +427,10 @@ export default defineCommand({
             title: args.title as string,
             content,
           };
-          const result = await svc.addNode(args.parent as string, input, { by: resolveActor(undefined, inv.env, inv.cwd, inv.user) });
+          const result = await svc.addNode(args.parent as string, input, { by: resolveActor(inv.io, undefined, inv.env, inv.cwd, inv.user) });
           if (!result.ok) return reportFailure(inv, result.error, args.json === true);
-          if (args.json) console.log(JSON.stringify({ ok: true, data: { id: result.value.id, slug: result.value.slug, node: input.node, tree } }, null, 2));
-          else console.log(`Created baseline ${input.node} ${result.value.slug} (${result.value.id}).`);
+          if (args.json) printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { id: result.value.id, slug: result.value.slug, node: input.node, tree } }, null, 2));
+          else printLine(inv.io.stdout, `Created baseline ${input.node} ${result.value.slug} (${result.value.id}).`);
         });
       },
     }),
@@ -443,11 +444,11 @@ export default defineCommand({
       async run(context) {
         const { args } = context;
         const inv = invocationOf(context);
-        await withRuleService(inv, async (svc) => {
-          const result = await svc.setLabel(args.node as string, args.label as string, { by: resolveActor(undefined, inv.env, inv.cwd, inv.user) });
+        return await withRuleService(inv, async (svc) => {
+          const result = await svc.setLabel(args.node as string, args.label as string, { by: resolveActor(inv.io, undefined, inv.env, inv.cwd, inv.user) });
           if (!result.ok) return reportFailure(inv, result.error, args.json === true);
-          if (args.json) console.log(JSON.stringify({ ok: true, data: { slug: result.value.slug, label: args.label } }, null, 2));
-          else console.log(`Label of ${result.value.slug} set to '${String(args.label)}'.`);
+          if (args.json) printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { slug: result.value.slug, label: args.label } }, null, 2));
+          else printLine(inv.io.stdout, `Label of ${result.value.slug} set to '${String(args.label)}'.`);
         });
       },
     }),
@@ -462,16 +463,16 @@ export default defineCommand({
       async run(context) {
         const { args } = context;
         const inv = invocationOf(context);
-        await withRuleService(inv, async (svc) => {
+        return await withRuleService(inv, async (svc) => {
           const result = await svc.setDependsOn(
             args.leaf as string,
             { add: repeatable(args.add), remove: repeatable(args.remove) },
-            { by: resolveActor(undefined, inv.env, inv.cwd, inv.user) },
+            { by: resolveActor(inv.io, undefined, inv.env, inv.cwd, inv.user) },
           );
           if (!result.ok) return reportFailure(inv, result.error, args.json === true);
           const dependsOn = result.value.extra["depends_on"];
-          if (args.json) console.log(JSON.stringify({ ok: true, data: { slug: result.value.slug, depends_on: dependsOn } }, null, 2));
-          else console.log(`${result.value.slug} depends_on: ${Array.isArray(dependsOn) && dependsOn.length > 0 ? dependsOn.join(", ") : "(none)"}`);
+          if (args.json) printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { slug: result.value.slug, depends_on: dependsOn } }, null, 2));
+          else printLine(inv.io.stdout, `${result.value.slug} depends_on: ${Array.isArray(dependsOn) && dependsOn.length > 0 ? dependsOn.join(", ") : "(none)"}`);
         });
       },
     }),
@@ -490,16 +491,16 @@ export default defineCommand({
           async run(context) {
             const { args } = context;
             const inv = invocationOf(context);
-            await withRuleService(inv, async (svc) => {
+            return await withRuleService(inv, async (svc) => {
               const entry = {
                 term: args.term as string,
                 meaning: args.meaning as string,
                 ...(args.note !== undefined ? { note: args.note as string } : {}),
               };
-              const result = await svc.glossaryAdd(args.node as string, entry, { by: resolveActor(undefined, inv.env, inv.cwd, inv.user) });
+              const result = await svc.glossaryAdd(args.node as string, entry, { by: resolveActor(inv.io, undefined, inv.env, inv.cwd, inv.user) });
               if (!result.ok) return reportFailure(inv, result.error, args.json === true);
-              if (args.json) console.log(JSON.stringify({ ok: true, data: { slug: result.value.slug, term: entry.term } }, null, 2));
-              else console.log(`Defined '${entry.term}' on ${result.value.slug}.`);
+              if (args.json) printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { slug: result.value.slug, term: entry.term } }, null, 2));
+              else printLine(inv.io.stdout, `Defined '${entry.term}' on ${result.value.slug}.`);
             });
           },
         }),
@@ -513,11 +514,11 @@ export default defineCommand({
           async run(context) {
             const { args } = context;
             const inv = invocationOf(context);
-            await withRuleService(inv, async (svc) => {
-              const result = await svc.glossaryRemove(args.node as string, args.term as string, { by: resolveActor(undefined, inv.env, inv.cwd, inv.user) });
+            return await withRuleService(inv, async (svc) => {
+              const result = await svc.glossaryRemove(args.node as string, args.term as string, { by: resolveActor(inv.io, undefined, inv.env, inv.cwd, inv.user) });
               if (!result.ok) return reportFailure(inv, result.error, args.json === true);
-              if (args.json) console.log(JSON.stringify({ ok: true, data: { slug: result.value.slug, term: args.term } }, null, 2));
-              else console.log(`Removed '${String(args.term)}' from ${result.value.slug}.`);
+              if (args.json) printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { slug: result.value.slug, term: args.term } }, null, 2));
+              else printLine(inv.io.stdout, `Removed '${String(args.term)}' from ${result.value.slug}.`);
             });
           },
         }),
@@ -538,9 +539,9 @@ export default defineCommand({
       async run(context) {
         const { args } = context;
         const inv = invocationOf(context);
-        await withRuleService(inv, async (svc) => {
+        return await withRuleService(inv, async (svc) => {
           const json = args.json === true;
-          const by = resolveActor(undefined, inv.env, inv.cwd, inv.user);
+          const by = resolveActor(inv.io, undefined, inv.env, inv.cwd, inv.user);
           const site = typeof args.site === "string" ? args.site : undefined;
           const rules = repeatable(args.rule);
           const reason = typeof args["non-business"] === "string" ? args["non-business"] : undefined;
@@ -562,16 +563,16 @@ export default defineCommand({
             const authorized = await svc.authorizeNodeWrite(args.leaf as string, "baseline-map", by);
             if (!authorized.ok) return reportFailure(inv, authorized.error, json);
             const slug = authorized.value.slug;
-            if (json) console.log(JSON.stringify({ ok: true, data: { slug, authorized: true, recorded: false } }, null, 2));
-            else console.log(`${slug}: site-map write authorized; nothing to record (pass --site/--command to change the map).`);
+            if (json) printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { slug, authorized: true, recorded: false } }, null, 2));
+            else printLine(inv.io.stdout, `${slug}: site-map write authorized; nothing to record (pass --site/--command to change the map).`);
             return;
           }
           const result = await svc.setSiteMap(args.leaf as string, change, { by });
           if (!result.ok) return reportFailure(inv, result.error, json);
           const siteMap = (result.value.extra["site_map"] ?? {}) as Record<string, string[]>;
           const commands = (result.value.extra["commands"] ?? []) as string[];
-          if (json) console.log(JSON.stringify({ ok: true, data: { slug: result.value.slug, site_map: siteMap, commands } }, null, 2));
-          else console.log(`${result.value.slug}: ${Object.keys(siteMap).length} site(s) mapped; commands: ${commands.length > 0 ? commands.join(", ") : "(none)"}`);
+          if (json) printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { slug: result.value.slug, site_map: siteMap, commands } }, null, 2));
+          else printLine(inv.io.stdout, `${result.value.slug}: ${Object.keys(siteMap).length} site(s) mapped; commands: ${commands.length > 0 ? commands.join(", ") : "(none)"}`);
         });
       },
     }),
@@ -591,19 +592,19 @@ export default defineCommand({
           const sites = listSites({ rootDir, entry: resolveCommandEntry({ rootDir, command }) });
           const dynamicCount = sites.filter((s) => s.dynamic).length;
           if (json) {
-            console.log(JSON.stringify({ ok: true, data: { command, count: sites.length, not_measured: dynamicCount, unresolved_imports: sites.unresolvedImports, sites, bootstrap: sites.bootstrap } }, null, 2));
-            if (sites.unresolvedImports.length > 0) process.exitCode = 1;
+            printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { command, count: sites.length, not_measured: dynamicCount, unresolved_imports: sites.unresolvedImports, sites, bootstrap: sites.bootstrap } }, null, 2));
+            if (sites.unresolvedImports.length > 0) return 1;
             return;
           }
           if (sites.unresolvedImports.length > 0) {
-            for (const u of sites.unresolvedImports) console.log(`unresolved import ${u.specifier} (from ${u.from}): census INCOMPLETE, sites behind it are not listed`);
-            process.exitCode = 1;
+            for (const u of sites.unresolvedImports) printLine(inv.io.stdout, `unresolved import ${u.specifier} (from ${u.from}): census INCOMPLETE, sites behind it are not listed`);
           }
-          console.log(`${command}: ${sites.length} site(s), ${dynamicCount} not_measured, ${sites.bootstrap.length} bootstrap`);
-          for (const site of sites) console.log(`${site.dynamic ? "~" : " "} ${site.key}`);
-          for (const site of sites.bootstrap) console.log(`  bootstrap ${site.key}`);
+          printLine(inv.io.stdout, `${command}: ${sites.length} site(s), ${dynamicCount} not_measured, ${sites.bootstrap.length} bootstrap`);
+          for (const site of sites) printLine(inv.io.stdout, `${site.dynamic ? "~" : " "} ${site.key}`);
+          for (const site of sites.bootstrap) printLine(inv.io.stdout, `  bootstrap ${site.key}`);
+          return sites.unresolvedImports.length > 0 ? 1 : undefined;
         } catch (cause) {
-          reportCensusFailure(inv, cause, json);
+          return reportCensusFailure(inv, cause, json);
         }
       },
     }),
@@ -616,7 +617,7 @@ export default defineCommand({
       async run(context) {
         const { args } = context;
         const inv = invocationOf(context);
-        await runCoverage(args.target as string, args.json === true, inv);
+        return await runCoverage(args.target as string, args.json === true, inv);
       },
     }),
     fidelity: defineCommand({
@@ -632,7 +633,7 @@ export default defineCommand({
       async run(context) {
         const { args } = context;
         const inv = invocationOf(context);
-        await runFidelityCommand(args, inv);
+        return await runFidelityCommand(args, inv);
       },
     }),
     adopt: adoptCommand,
@@ -648,18 +649,17 @@ export default defineCommand({
         const { args } = context;
         const inv = invocationOf(context);
         if (args.states === true || args.rule !== undefined) {
-          await runStatesTree(args, inv);
-          return;
+          return await runStatesTree(args, inv);
         }
-        await withRuleService(inv, async (svc) => {
+        return await withRuleService(inv, async (svc) => {
           const result = await svc.listBaselineTree(args.root as string | undefined);
           if (!result.ok) return reportFailure(inv, result.error, args.json === true);
           if (args.json) {
-            console.log(JSON.stringify({ ok: true, data: result.value }, null, 2));
+            printLine(inv.io.stdout, JSON.stringify({ ok: true, data: result.value }, null, 2));
             return;
           }
           if (result.value.length === 0) {
-            console.log("No baseline nodes.");
+            printLine(inv.io.stdout, "No baseline nodes.");
             return;
           }
           for (const entry of result.value) {
@@ -669,7 +669,7 @@ export default defineCommand({
             const holdsRules = ruleIdPrefixOfNode({ tree: entry.tree, node: entry.node }) !== undefined;
             const rules = holdsRules ? `  [rules: ${counts}]` : "";
             const kind = entry.tree === "architecture" ? `architecture ${entry.node}` : entry.node;
-            console.log(`${"  ".repeat(entry.depth)}${kind} ${entry.label ?? entry.title} (${entry.slug}, ${entry.status})${rules}`);
+            printLine(inv.io.stdout, `${"  ".repeat(entry.depth)}${kind} ${entry.label ?? entry.title} (${entry.slug}, ${entry.status})${rules}`);
           }
         });
       },

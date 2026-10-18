@@ -34,7 +34,7 @@ async function runLore(args: string[], cwd: string) {
   delete env["ANTHROPIC_API_KEY"];
   delete env["OPENAI_API_KEY"];
   delete env["LORE_AI_DEFAULT"];
-  return runLoreInProcess(args, { cwd, env });
+  return runLoreInProcess(args, { cwd, home: cwd, env });
 }
 
 function put(dir: string, rel: string, content: string): void {

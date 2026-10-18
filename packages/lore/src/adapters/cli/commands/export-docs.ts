@@ -21,6 +21,7 @@
  */
 
 import { dirname } from "path";
+
 import { defineCommand } from "citty";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatError, formatErrorFor } from "../utils.js";
@@ -68,11 +69,10 @@ export default defineCommand({
     if (typeArg !== undefined) {
       const parsed = docTypeSchema.safeParse(typeArg);
       if (!parsed.success) {
-        process.stderr.write(
+        inv.io.stderr.write(
           `Error: --type '${typeArg}' is not a valid doc type. Valid types: ${VALID_TYPES.join(", ")}\n`,
         );
-        process.exitCode = 2;
-        return;
+        return 2;
       }
       typeFilter = parsed.data;
     }
@@ -86,9 +86,8 @@ export default defineCommand({
     const projectDirResolved = resolveTrackedWriteRoot(inv.cwd, dirname(dirname(dbPath)));
     if (!projectDirResolved.ok) {
       app.close();
-      process.stderr.write(formatError(projectDirResolved.error) + "\n");
-      process.exitCode = exitCode(projectDirResolved.error);
-      return;
+      inv.io.stderr.write(formatError(projectDirResolved.error) + "\n");
+      return exitCode(projectDirResolved.error);
     }
     const projectDir = projectDirResolved.value;
 
@@ -104,29 +103,28 @@ export default defineCommand({
 
       if (!exportResult.ok) {
         if (jsonMode) {
-          process.stdout.write(
+          inv.io.stdout.write(
             JSON.stringify({ ok: false, error: exportResult.error }) + "\n",
           );
         } else {
-          process.stderr.write(formatErrorFor(inv, exportResult.error) + "\n");
+          inv.io.stderr.write(formatErrorFor(inv, exportResult.error) + "\n");
         }
-        process.exitCode = exitCode(exportResult.error);
-        return;
+        return exitCode(exportResult.error);
       }
 
       const report = exportResult.value;
 
       if (jsonMode) {
-        process.stdout.write(JSON.stringify({ ok: true, data: report }, null, 2) + "\n");
+        inv.io.stdout.write(JSON.stringify({ ok: true, data: report }, null, 2) + "\n");
         if (report.errors.length > 0) {
-          process.exitCode = 4;
+          return 4;
         }
         return;
       }
 
       // ── Human-readable report ─────────────────────────────────────────────
       if (dryRun) {
-        process.stdout.write("(dry-run: no files written)\n");
+        inv.io.stdout.write("(dry-run: no files written)\n");
       }
 
       const totalDocs =
@@ -136,47 +134,47 @@ export default defineCommand({
         report.overwritten.length +
         report.errors.length;
 
-      process.stdout.write(`Corpus docs scanned: ${totalDocs}\n`);
+      inv.io.stdout.write(`Corpus docs scanned: ${totalDocs}\n`);
 
       if (report.created.length > 0) {
         const verb = dryRun ? "Would create" : "Created";
-        process.stdout.write(
+        inv.io.stdout.write(
           `✓ ${verb} ${report.created.length} file${report.created.length === 1 ? "" : "s"}:\n`,
         );
         for (const filePath of report.created) {
           const fileName = filePath.split("/").pop() ?? filePath;
-          process.stdout.write(`    ${fileName}\n`);
+          inv.io.stdout.write(`    ${fileName}\n`);
         }
       } else {
-        process.stdout.write(`✓ ${dryRun ? "Would create" : "Created"} 0 new files\n`);
+        inv.io.stdout.write(`✓ ${dryRun ? "Would create" : "Created"} 0 new files\n`);
       }
 
       if (report.skipped_clean.length > 0) {
-        process.stdout.write(
+        inv.io.stdout.write(
           `✓ ${report.skipped_clean.length} file${report.skipped_clean.length === 1 ? "" : "s"} already match corpus (clean)\n`,
         );
       }
 
       if (report.overwritten.length > 0) {
         const verb = dryRun ? "Would overwrite" : "Overwrote";
-        process.stdout.write(
+        inv.io.stdout.write(
           `⚠ ${verb} ${report.overwritten.length} drifted file${report.overwritten.length === 1 ? "" : "s"} (--force):\n`,
         );
         for (const filePath of report.overwritten) {
           const fileName = filePath.split("/").pop() ?? filePath;
-          process.stdout.write(`    ${fileName}\n`);
+          inv.io.stdout.write(`    ${fileName}\n`);
         }
       }
 
       if (report.drift.length > 0) {
-        process.stdout.write(
+        inv.io.stdout.write(
           `⚠ ${report.drift.length} file${report.drift.length === 1 ? "" : "s"} differ from the current corpus projection (drift — not overwritten):\n`,
         );
         for (const filePath of report.drift) {
           const fileName = filePath.split("/").pop() ?? filePath;
-          process.stdout.write(`    ${fileName}\n`);
+          inv.io.stdout.write(`    ${fileName}\n`);
         }
-        process.stdout.write(
+        inv.io.stdout.write(
           `  This file was either hand-edited, or (for docs with MDX placeholders) it is a\n` +
           `  stale projection now that referenced content changed elsewhere in the corpus.\n` +
           `  Re-run with --force to overwrite with the current corpus projection, or reconcile\n` +
@@ -186,23 +184,22 @@ export default defineCommand({
       }
 
       if (report.repaired.length > 0) {
-        process.stdout.write(
+        inv.io.stdout.write(
           `⚠ ${report.repaired.length} export-index self-heal repair${report.repaired.length === 1 ? "" : "s"}:\n`,
         );
         for (const line of report.repaired) {
-          process.stdout.write(`    ${line}\n`);
+          inv.io.stdout.write(`    ${line}\n`);
         }
       }
 
       if (report.errors.length > 0) {
-        process.stderr.write(
+        inv.io.stderr.write(
           `⚠ ${report.errors.length} error${report.errors.length === 1 ? "" : "s"}:\n`,
         );
         for (const errMsg of report.errors) {
-          process.stderr.write(`    ${errMsg}\n`);
+          inv.io.stderr.write(`    ${errMsg}\n`);
         }
-        process.exitCode = 4;
-        return;
+        return 4;
       }
     } finally {
       app.close();

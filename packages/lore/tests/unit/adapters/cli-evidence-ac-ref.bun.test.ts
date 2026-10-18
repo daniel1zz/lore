@@ -30,7 +30,7 @@ import { createApp } from "../../../src/app.js";
 import { TaskWorkflowService } from "../../../src/service/task-workflow-service.js";
 import type { EvidenceInput } from "../../../src/service/task-workflow-service.js";
 import type { CreateDocInput } from "@lore/core";
-import { liveInvocation, liveAmbient, liveWriteContext } from "../../live-invocation.js";
+import { liveInvocation, liveAmbient, liveWriteContext, runHandlerForExit } from "../../live-invocation.js";
 import type { Invocation } from "@lore/core";
 
 // ─── Command type ─────────────────────────────────────────────────────────────
@@ -53,8 +53,6 @@ let originalCwd: string;
 let taskSlug: string;
 
 beforeEach(() => {
-  process.exitCode = 0;
-
   tmpDir = resolve(mkdtempSync(join(tmpdir(), "lore-cli-evidence-ac-test-")));
   const loreDir = join(tmpDir, ".lore");
   mkdirSync(loreDir, { recursive: true });
@@ -68,7 +66,6 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  process.exitCode = 0;
   process.chdir(originalCwd);
   try {
     const { rmSync } = require("fs") as { rmSync: (p: string, opts: object) => void };
@@ -146,7 +143,7 @@ describe("lore evidence --ac — HAPPY", () => {
     const spy = spyOnAddEvidence();
 
     try {
-      await cmd.run({
+      await runHandlerForExit(() => cmd.run({
         args: {
           task: taskSlug,
           oracle: "tsc",
@@ -156,7 +153,7 @@ describe("lore evidence --ac — HAPPY", () => {
           ac: "AC-ACODE-8",
         },
  inv: liveInvocation(),
-      });
+      }));
 
       expect(spy.captured()?.ac_ref).toBe("AC-ACODE-8");
     } finally {
@@ -174,7 +171,7 @@ describe("lore evidence --ac — REGRESSION", () => {
     const spy = spyOnAddEvidence();
 
     try {
-      await cmd.run({
+      await runHandlerForExit(() => cmd.run({
         args: {
           task: taskSlug,
           oracle: "tsc",
@@ -183,7 +180,7 @@ describe("lore evidence --ac — REGRESSION", () => {
           by: "alice",
         },
  inv: liveInvocation(),
-      });
+      }));
 
       const entry = spy.captured();
       expect(entry).toBeDefined();

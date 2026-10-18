@@ -201,6 +201,7 @@ function makeThrowawayApp(): App {
   const store = withWriteContext(new InMemoryStore(), { identity: { harnessRun: null, claimed: "mirror-integrity", claimedSource: "flag" } });
   const telemetry = new NoOpTelemetry();
   return {
+    warn: () => undefined,
     corpusService: new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)), telemetry),
     reviewService: new ReviewService(store, new RecordLockService(store, new GateEnforcer(undefined))),
     versionService: new VersionService(store, new RecordLockService(store, new GateEnforcer(undefined))),

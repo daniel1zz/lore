@@ -52,7 +52,10 @@ import { execFileSync } from "node:child_process";
 import { UNCITED_SPEC_RULE } from "../../src/service/spec-approval-citation.js";
 import { ensureLiveRuleViaCli } from "../helpers/cli-live-rule.js";
 import type { CreateDocInput, DocId, LoreConfig } from "@lore/core";
-import { liveInvocation, liveAmbient, liveWriteContext, actedStore } from "../live-invocation.js";
+import { liveInvocation, liveAmbient, liveWriteContext, actedStore, runHandlerForExit } from "../live-invocation.js";
+
+/** The exit code the most recent command call ended with (commands return it; none sets `process.exitCode`). */
+let lastExitCode = 0;
 import type { Invocation } from "@lore/core";
 
 // ─── Command type (mirrors assess-ai.bun.test.ts) ────────────────────────────
@@ -73,22 +76,25 @@ function captureOutput() {
   const stdout: string[] = [];
   const stderr: string[] = [];
   const origStderrWrite = process.stderr.write.bind(process.stderr);
-  const origConsoleLog = console.log.bind(console);
+  const origConsoleLog = process.stdout.write;
 
   (process.stderr as unknown as { write: (chunk: unknown) => boolean }).write = (chunk: unknown) => {
     stderr.push(String(chunk));
     return true;
   };
-  console.log = (...args: unknown[]) => {
+  process.stdout.write = (((chunk: unknown) => {
+    const args: unknown[] = [String(chunk).replace(/\n$/, "")];
     stdout.push(args.join(" "));
-  };
+  
+    return true;
+  }) as typeof process.stdout.write);
 
   return {
     stdout,
     stderr,
     restore: () => {
       (process.stderr as unknown as { write: typeof origStderrWrite }).write = origStderrWrite;
-      console.log = origConsoleLog;
+      process.stdout.write = origConsoleLog;
     },
   };
 }
@@ -125,7 +131,6 @@ function seedLiveRule(): string {
 
 beforeEach(async () => {
   seededRuleId = undefined;
-  process.exitCode = 0;
   originalEnv = process.env["LORE_GATE_BYPASS"];
   delete process.env["LORE_GATE_BYPASS"];
   tmpDir = resolve(mkdtempSync(join(tmpdir(), "lore-gate-spec-promote-test-")));
@@ -143,7 +148,6 @@ beforeEach(async () => {
 });
 
 afterEach(() => {
-  process.exitCode = 0;
   if (originalEnv === undefined) delete process.env["LORE_GATE_BYPASS"];
   else process.env["LORE_GATE_BYPASS"] = originalEnv;
   process.chdir(originalCwd);
@@ -398,12 +402,12 @@ describe("lore gate spec-promote — AC3: no acceptance criteria (deterministic 
     const cmd = await importGateSpecPromoteCommand();
     const output = captureOutput();
     try {
-      await cmd.run({ args: { spec: specSlug }, inv: liveInvocation() });
+      lastExitCode = await runHandlerForExit(() => cmd.run({ args: { spec: specSlug }, inv: liveInvocation() }));
     } finally {
       output.restore();
     }
 
-    expect(process.exitCode).toBe(4);
+    expect(lastExitCode).toBe(4);
     const stderrText = output.stderr.join("");
     expect(stderrText).toContain("no structured acceptance criteria");
     expect(stderrText).toContain("lore ac add");
@@ -427,12 +431,12 @@ describe("lore gate spec-promote — AC4: acceptance criteria present (exit 0) +
     const cmd = await importGateSpecPromoteCommand();
     const output = captureOutput();
     try {
-      await cmd.run({ args: { spec: specSlug }, inv: liveInvocation() });
+      lastExitCode = await runHandlerForExit(() => cmd.run({ args: { spec: specSlug }, inv: liveInvocation() }));
     } finally {
       output.restore();
     }
 
-    expect(process.exitCode).toBe(0);
+    expect(lastExitCode).toBe(0);
     const stdoutText = output.stdout.join("\n");
     expect(stdoutText).toContain("gate: pass");
   });
@@ -445,12 +449,12 @@ describe("lore gate spec-promote — AC4: acceptance criteria present (exit 0) +
     const cmd = await importGateSpecPromoteCommand();
     const output = captureOutput();
     try {
-      await cmd.run({ args: { spec: specSlug }, inv: liveInvocation() });
+      lastExitCode = await runHandlerForExit(() => cmd.run({ args: { spec: specSlug }, inv: liveInvocation() }));
     } finally {
       output.restore();
     }
 
-    expect(process.exitCode).toBe(0);
+    expect(lastExitCode).toBe(0);
   });
 
   it("prints the AI judge's decision/confidence advisory to stderr, and exit stays 0 (INV2)", async () => {
@@ -461,13 +465,13 @@ describe("lore gate spec-promote — AC4: acceptance criteria present (exit 0) +
     const cmd = await importGateSpecPromoteCommand();
     const output = captureOutput();
     try {
-      await cmd.run({ args: { spec: specSlug }, inv: liveInvocation() });
+      lastExitCode = await runHandlerForExit(() => cmd.run({ args: { spec: specSlug }, inv: liveInvocation() }));
     } finally {
       output.restore();
     }
 
     // ── The load-bearing assertion: judge advisory lands on stderr, exit is unchanged. ──
-    expect(process.exitCode).toBe(0);
+    expect(lastExitCode).toBe(0);
     const stderrText = output.stderr.join("");
     expect(stderrText).toContain("gate: judge advisory");
     expect(stderrText).toContain("decision=approve");
@@ -487,12 +491,12 @@ describe("lore gate spec-promote — AC4: acceptance criteria present (exit 0) +
     const cmd = await importGateSpecPromoteCommand();
     const output = captureOutput();
     try {
-      await cmd.run({ args: { spec: specSlug }, inv: liveInvocation() });
+      lastExitCode = await runHandlerForExit(() => cmd.run({ args: { spec: specSlug }, inv: liveInvocation() }));
     } finally {
       output.restore();
     }
 
-    expect(process.exitCode).toBe(0);
+    expect(lastExitCode).toBe(0);
     const stderrText = output.stderr.join("");
     expect(stderrText).toContain("decision=escalate");
     expect(stderrText).toContain("Is section 3 in scope?");
@@ -506,12 +510,12 @@ describe("lore gate spec-promote — AC4: acceptance criteria present (exit 0) +
     const cmd = await importGateSpecPromoteCommand();
     const output = captureOutput();
     try {
-      await cmd.run({ args: { spec: specSlug }, inv: liveInvocation() });
+      lastExitCode = await runHandlerForExit(() => cmd.run({ args: { spec: specSlug }, inv: liveInvocation() }));
     } finally {
       output.restore();
     }
 
-    expect(process.exitCode).toBe(0);
+    expect(lastExitCode).toBe(0);
     const stderrText = output.stderr.join("");
     expect(stderrText).toContain("judge advisory unavailable");
   });
@@ -524,12 +528,12 @@ describe("lore gate spec-promote — AC4: acceptance criteria present (exit 0) +
     const cmd = await importGateSpecPromoteCommand();
     const output = captureOutput();
     try {
-      await cmd.run({ args: { spec: specSlug }, inv: liveInvocation() });
+      lastExitCode = await runHandlerForExit(() => cmd.run({ args: { spec: specSlug }, inv: liveInvocation() }));
     } finally {
       output.restore();
     }
 
-    expect(process.exitCode).toBe(0);
+    expect(lastExitCode).toBe(0);
     const stderrText = output.stderr.join("");
     expect(stderrText).toContain("gate: judge advisory unavailable");
   });
@@ -547,12 +551,12 @@ describe("lore gate spec-promote — AC-Quantifiability Gate CLI parity", () => 
     const cmd = await importGateSpecPromoteCommand();
     const output = captureOutput();
     try {
-      await cmd.run({ args: { spec: specSlug }, inv: liveInvocation() });
+      lastExitCode = await runHandlerForExit(() => cmd.run({ args: { spec: specSlug }, inv: liveInvocation() }));
     } finally {
       output.restore();
     }
 
-    expect(process.exitCode).toBe(4);
+    expect(lastExitCode).toBe(4);
     const stderrText = output.stderr.join("");
     expect(stderrText).toContain("unquantified acceptance criterion");
     expect(stderrText).toContain("AC-BAD-1");
@@ -568,12 +572,12 @@ describe("lore gate spec-promote — AC-Quantifiability Gate CLI parity", () => 
     const cmd = await importGateSpecPromoteCommand();
     const output = captureOutput();
     try {
-      await cmd.run({ args: { spec: specSlug }, inv: liveInvocation() });
+      lastExitCode = await runHandlerForExit(() => cmd.run({ args: { spec: specSlug }, inv: liveInvocation() }));
     } finally {
       output.restore();
     }
 
-    expect(process.exitCode).toBe(0);
+    expect(lastExitCode).toBe(0);
     const stdoutText = output.stdout.join("\n");
     expect(stdoutText).toContain("gate: pass");
     expect(stdoutText).not.toContain("AC_NOT_QUANTIFIABLE");
@@ -589,12 +593,12 @@ describe("lore gate spec-promote — AC-Quantifiability Gate CLI parity", () => 
     const cmd = await importGateSpecPromoteCommand();
     const output = captureOutput();
     try {
-      await cmd.run({ args: { spec: specSlug }, inv: liveInvocation() });
+      lastExitCode = await runHandlerForExit(() => cmd.run({ args: { spec: specSlug }, inv: liveInvocation() }));
     } finally {
       output.restore();
     }
 
-    expect(process.exitCode).toBe(0);
+    expect(lastExitCode).toBe(0);
     const stdoutText = output.stdout.join("\n");
     expect(stdoutText).toContain("gate: pass");
   });
@@ -608,13 +612,13 @@ describe("lore gate spec-promote — AC-Quantifiability Gate CLI parity", () => 
     const cmd = await importGateSpecPromoteCommand();
     const output = captureOutput();
     try {
-      await cmd.run({ args: { spec: specSlug }, inv: liveInvocation() });
+      lastExitCode = await runHandlerForExit(() => cmd.run({ args: { spec: specSlug }, inv: liveInvocation() }));
     } finally {
       output.restore();
       delete process.env["LORE_GATE_BYPASS"];
     }
 
-    expect(process.exitCode).toBe(0);
+    expect(lastExitCode).toBe(0);
   });
 });
 
@@ -627,12 +631,12 @@ describe("lore gate spec-promote — doc resolution failures", () => {
     const cmd = await importGateSpecPromoteCommand();
     const output = captureOutput();
     try {
-      await cmd.run({ args: { spec: "does-not-exist-slug" }, inv: liveInvocation() });
+      lastExitCode = await runHandlerForExit(() => cmd.run({ args: { spec: "does-not-exist-slug" }, inv: liveInvocation() }));
     } finally {
       output.restore();
     }
 
-    expect(process.exitCode).toBe(3);
+    expect(lastExitCode).toBe(3);
   });
 
   it("NEGATIVE: exits 4 (VALIDATION_ERROR) when the target doc is not a spec", async () => {
@@ -641,12 +645,12 @@ describe("lore gate spec-promote — doc resolution failures", () => {
     const cmd = await importGateSpecPromoteCommand();
     const output = captureOutput();
     try {
-      await cmd.run({ args: { spec: prdSlug }, inv: liveInvocation() });
+      lastExitCode = await runHandlerForExit(() => cmd.run({ args: { spec: prdSlug }, inv: liveInvocation() }));
     } finally {
       output.restore();
     }
 
-    expect(process.exitCode).toBe(4);
+    expect(lastExitCode).toBe(4);
   });
 });
 
@@ -660,13 +664,13 @@ describe("lore gate spec-promote — STATE: LORE_GATE_BYPASS=1", () => {
     const cmd = await importGateSpecPromoteCommand();
     const output = captureOutput();
     try {
-      await cmd.run({ args: { spec: specSlug }, inv: liveInvocation() });
+      lastExitCode = await runHandlerForExit(() => cmd.run({ args: { spec: specSlug }, inv: liveInvocation() }));
     } finally {
       output.restore();
       delete process.env["LORE_GATE_BYPASS"];
     }
 
-    expect(process.exitCode).toBe(0);
+    expect(lastExitCode).toBe(0);
   });
 
   it("exits 0 even when the spec does not exist at all, when bypassed", async () => {
@@ -675,13 +679,13 @@ describe("lore gate spec-promote — STATE: LORE_GATE_BYPASS=1", () => {
     const cmd = await importGateSpecPromoteCommand();
     const output = captureOutput();
     try {
-      await cmd.run({ args: { spec: "totally-nonexistent" }, inv: liveInvocation() });
+      lastExitCode = await runHandlerForExit(() => cmd.run({ args: { spec: "totally-nonexistent" }, inv: liveInvocation() }));
     } finally {
       output.restore();
       delete process.env["LORE_GATE_BYPASS"];
     }
 
-    expect(process.exitCode).toBe(0);
+    expect(lastExitCode).toBe(0);
   });
 });
 
@@ -702,7 +706,7 @@ describe("lore gate spec-promote — AC2 (parity fix): CLI resolves specKind + v
     const cmd = await importGateSpecPromoteCommand();
     const output = captureOutput();
     try {
-      await cmd.run({ args: { spec: specSlug }, inv: liveInvocation() });
+      lastExitCode = await runHandlerForExit(() => cmd.run({ args: { spec: specSlug }, inv: liveInvocation() }));
     } finally {
       output.restore();
     }
@@ -710,7 +714,7 @@ describe("lore gate spec-promote — AC2 (parity fix): CLI resolves specKind + v
     // re-baseline (BR-1007, issue #137): this used to pass — the CLI never measured citations, so it said
     // "pass" for a spec the approval then refused. The waived floor is still honoured (no "needs >= N"
     // text); the refusal is the citation one, naming `lore ac cite`.
-    expect(process.exitCode).toBe(4);
+    expect(lastExitCode).toBe(4);
     const refusal = output.stderr.join("");
     expect(refusal).not.toContain("needs >=");
     expect(refusal).toContain("lore ac cite");
@@ -741,12 +745,12 @@ describe("lore gate spec-promote — AC2 (parity fix): CLI resolves specKind + v
     const cmd = await importGateSpecPromoteCommand();
     const output = captureOutput();
     try {
-      await cmd.run({ args: { spec: specSlug }, inv: liveInvocation() });
+      lastExitCode = await runHandlerForExit(() => cmd.run({ args: { spec: specSlug }, inv: liveInvocation() }));
     } finally {
       output.restore();
     }
 
-    expect(process.exitCode).toBe(4);
+    expect(lastExitCode).toBe(4);
     const stderrText = output.stderr.join("");
     expect(stderrText).toContain("needs >= 1");
     expect(stderrText).toContain('spec_kind "feature"');
@@ -773,12 +777,12 @@ describe("lore gate spec-promote — AC2 (parity fix): CLI resolves specKind + v
     const cmd = await importGateSpecPromoteCommand();
     const output = captureOutput();
     try {
-      await cmd.run({ args: { spec: specSlug }, inv: liveInvocation() });
+      lastExitCode = await runHandlerForExit(() => cmd.run({ args: { spec: specSlug }, inv: liveInvocation() }));
     } finally {
       output.restore();
     }
 
-    expect(process.exitCode).toBe(0);
+    expect(lastExitCode).toBe(0);
   });
 
   it("REGRESSION: with no verification_profiles config at all, a feature-kind spec with 0 ACs is still denied with the pre-existing message", async () => {
@@ -788,12 +792,12 @@ describe("lore gate spec-promote — AC2 (parity fix): CLI resolves specKind + v
     const cmd = await importGateSpecPromoteCommand();
     const output = captureOutput();
     try {
-      await cmd.run({ args: { spec: specSlug }, inv: liveInvocation() });
+      lastExitCode = await runHandlerForExit(() => cmd.run({ args: { spec: specSlug }, inv: liveInvocation() }));
     } finally {
       output.restore();
     }
 
-    expect(process.exitCode).toBe(4);
+    expect(lastExitCode).toBe(4);
     const stderrText = output.stderr.join("");
     expect(stderrText).toContain("no structured acceptance criteria");
     expect(stderrText).toContain('spec_kind "feature"');
@@ -811,11 +815,11 @@ describe("lore gate spec-promote — BR-1007 parity with `lore approve` (issue #
     const cmd = await importGateSpecPromoteCommand();
     const output = captureOutput();
     try {
-      await cmd.run({ args: { spec: specSlug }, inv: liveInvocation() });
+      lastExitCode = await runHandlerForExit(() => cmd.run({ args: { spec: specSlug }, inv: liveInvocation() }));
     } finally {
       output.restore();
     }
-    expect(process.exitCode).toBe(4);
+    expect(lastExitCode).toBe(4);
     const gateRefusal = output.stderr.join("");
     expect(gateRefusal).toContain("lore ac cite");
     expect(gateRefusal).toContain(specSlug);
@@ -839,11 +843,11 @@ describe("lore gate spec-promote — BR-1007 parity with `lore approve` (issue #
     const cmd = await importGateSpecPromoteCommand();
     const output = captureOutput();
     try {
-      await cmd.run({ args: { spec: specSlug }, inv: liveInvocation() });
+      lastExitCode = await runHandlerForExit(() => cmd.run({ args: { spec: specSlug }, inv: liveInvocation() }));
     } finally {
       output.restore();
     }
-    expect(process.exitCode).toBe(0);
+    expect(lastExitCode).toBe(0);
     expect(output.stdout.join("\n")).toContain("gate: pass");
     expect(loreCli(["approve", specSlug, "--override-no-judgment"])).toContain("approved");
   }, 30_000);
@@ -859,11 +863,11 @@ describe("lore gate spec-promote — BR-1007 parity with `lore approve` (issue #
     const cmd = await importGateSpecPromoteCommand();
     const output = captureOutput();
     try {
-      await cmd.run({ args: { spec: specSlug }, inv: liveInvocation() });
+      lastExitCode = await runHandlerForExit(() => cmd.run({ args: { spec: specSlug }, inv: liveInvocation() }));
     } finally {
       output.restore();
     }
-    expect(process.exitCode).toBe(4);
+    expect(lastExitCode).toBe(4);
     expect(output.stderr.join("")).toContain("lore ac cite");
   }, 30_000);
 
@@ -875,11 +879,11 @@ describe("lore gate spec-promote — BR-1007 parity with `lore approve` (issue #
     const cmd = await importGateSpecPromoteCommand();
     const output = captureOutput();
     try {
-      await cmd.run({ args: { spec: specSlug }, inv: liveInvocation() });
+      lastExitCode = await runHandlerForExit(() => cmd.run({ args: { spec: specSlug }, inv: liveInvocation() }));
     } finally {
       output.restore();
     }
-    expect(process.exitCode).toBe(4);
+    expect(lastExitCode).toBe(4);
     const text = output.stderr.join("");
     expect(text).toContain("AC-BAD-1");
     expect(text).toContain("lore ac cite");

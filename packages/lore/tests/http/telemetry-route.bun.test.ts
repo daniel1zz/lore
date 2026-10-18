@@ -40,7 +40,7 @@ import { createMachineAuthStores, type MachineAuthStores } from "../../src/adapt
 import { createApp } from "../../src/app.js";
 import type { App } from "../../src/app.js";
 import type { LoreConfig, Telemetry, TelemetryEvent } from "@lore/core";
-import { liveAmbient, liveWriteContext } from "../live-invocation.js";
+import { liveAmbient, liveWriteContext, liveIo } from "../live-invocation.js";
 
 interface TestContext {
   server: ReturnType<typeof Bun.serve>;
@@ -91,7 +91,8 @@ async function makeTestServer(telemetryEnabled: boolean): Promise<TestContext> {
   const machineKeyResult = await machineAuth.apiKeyStore.create("dashboard-local", "admin");
   if (!machineKeyResult.ok) throw new Error("Failed to create machine API key");
 
-  const server = startHttpServer(app, { port: 0, host: "127.0.0.1", machineAuth });
+  const server = startHttpServer(app, {
+    io: liveIo(), port: 0, host: "127.0.0.1", machineAuth });
   const baseUrl = `http://127.0.0.1:${server.port}`;
 
   return {
@@ -244,19 +245,14 @@ describe("POST /api/dashboard/telemetry/route-view — ERROR: throwing sink (AC-
     };
     ctx.app.telemetry = throwingTelemetry;
 
-    const originalConsoleError = console.error;
+    // reason: the route reports a failing sink through the app's advisory sink (`app.warn`), never a process stream.
     const errorCalls: unknown[][] = [];
-    console.error = (...args: unknown[]) => {
-      errorCalls.push(args);
+    ctx.app.warn = (line: string) => {
+      errorCalls.push([line]);
     };
 
-    let res: Response;
-    try {
-      const sessionId = await bootstrapCookie(ctx);
-      res = await postRouteView(ctx, { route_id: "/docs" }, { cookie: sessionId, origin: ALLOWED_ORIGIN });
-    } finally {
-      console.error = originalConsoleError;
-    }
+    const sessionId = await bootstrapCookie(ctx);
+    const res = await postRouteView(ctx, { route_id: "/docs" }, { cookie: sessionId, origin: ALLOWED_ORIGIN });
 
     expect(res.status).toBe(204);
     const bodyText = await res.text();

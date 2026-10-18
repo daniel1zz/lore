@@ -1,4 +1,7 @@
 import { defineConfig } from "vitest/config";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
+import { join } from "node:path";
 import { fileURLToPath, URL } from "node:url";
 import { workspaceAliases } from "./workspace-aliases";
 import { resolveMaxWorkers } from "./scripts/test-max-workers";
@@ -10,6 +13,40 @@ import { readRecorderAliases, readRecorderMockRedirect } from "./scripts/test-re
 // a child spawned without an explicit `env` inherits under the Bun runtime. A setupFiles mutation
 // would arm the worker but not its children; scripts/test-isolation-setup.ts measures the result.
 armSandboxEnv(fileURLToPath(new URL(".", import.meta.url)));
+
+/** Env var naming the throwaway HOME of this run (lets a nested run reuse its parent's and the teardown remove it). */
+export const THROWAWAY_HOME_ENV = "LORE_TEST_THROWAWAY_HOME";
+
+/**
+ * Give the test run a throwaway HOME (AS-27, spec-process-state-end-state-one-invocation-per-entry-returned Goal 5): the
+ * isolation test must not damage the developer's data on the day it fails, so the real home is unreachable by
+ * construction instead of fingerprinted before and after. Armed HERE, at config load in the runner's main process, for
+ * the same reason as the sandbox marker: workers are forked with this environment as their startup environment, and under
+ * the Bun runtime a child spawned without an explicit `env` inherits only that.
+ *
+ * What the tools need from the real home, set explicitly and nothing else:
+ *   - `BUN_INSTALL_CACHE_DIR`: bun's package cache lives under `$HOME/.bun` by default; without this every `bun`
+ *     the run starts (the one `bun run build`, the oracle subprocesses) would re-download packages into the empty home.
+ *   - source-control identity: written as `.gitconfig` inside the throwaway home, so a test that commits in a fixture
+ *     repository needs no developer configuration (the tool finds it through `$HOME`, no further variable needed).
+ * The claude CLI is not needed: tests that exercise the AI path use scripts of their own (tests/helpers/stub-claude.ts).
+ * A nested run (vitest started by a test) inherits its parent's throwaway home unchanged.
+ */
+function armThrowawayHome(env: Record<string, string | undefined> = process.env): void {
+  if (env[THROWAWAY_HOME_ENV] !== undefined) return;
+  const realHome = env["HOME"] !== undefined && env["HOME"] !== "" ? env["HOME"] : homedir();
+  if (env["BUN_INSTALL_CACHE_DIR"] === undefined) {
+    env["BUN_INSTALL_CACHE_DIR"] = join(env["BUN_INSTALL"] ?? join(realHome, ".bun"), "install", "cache");
+  }
+  const home = mkdtempSync(join(tmpdir(), "lore-test-home-"));
+  writeFileSync(join(home, ".gitconfig"), "[user]\n\tname = Lore Test\n\temail = lore-test@example.invalid\n");
+  env["HOME"] = home;
+  env[THROWAWAY_HOME_ENV] = home;
+  // reason: the process that created the home removes it when it ends (also for `vitest list`, which loads this config
+  // and runs no teardown); a nested run created nothing and removes nothing.
+  process.once("exit", () => rmSync(home, { recursive: true, force: true }));
+}
+armThrowawayHome();
 
 // reason: under the Bun runtime the vitest MAIN process can exit 0 in the middle of a run: Bun ends a
 // process whose event loop is empty even while the run still awaits worker results, so vitest never prints

@@ -43,10 +43,13 @@ export interface DecideFlowIo {
   stderr(text: string): void;
 }
 
-const processIo: DecideFlowIo = {
-  stdout: (text) => void process.stdout.write(text), // CLI surface
-  stderr: (text) => void process.stderr.write(text), // CLI surface
-};
+/** The flow's text sinks over the run's own writers (`inv.io`), never the process streams. */
+function decideIoOf(io: Invocation["io"]): DecideFlowIo {
+  return {
+    stdout: (text) => void io.stdout.write(text),
+    stderr: (text) => void io.stderr.write(text),
+  };
+}
 
 function usageRefusal(io: DecideFlowIo, message: string): number {
   io.stderr(`Error: ${message}\n`);
@@ -54,7 +57,7 @@ function usageRefusal(io: DecideFlowIo, message: string): number {
 }
 
 /** Runs the flow and returns the process exit code (0 resolved, 4 refused or rejected input, store codes otherwise). */
-export async function runDecideFlow(inv: Invocation, input: DecideFlowInput, ports: HumanChannelPorts, io: DecideFlowIo = processIo): Promise<number> {
+export async function runDecideFlow(inv: Invocation, input: DecideFlowInput, ports: HumanChannelPorts, io: DecideFlowIo = decideIoOf(inv.io)): Promise<number> {
   if (input.accept === input.reject) return usageRefusal(io, "lore decide needs exactly one of --accept or --reject");
   const pendingId = input.id !== undefined && /^[1-9]\d*$/.test(input.id) ? Number(input.id) : null;
   if (pendingId === null) return usageRefusal(io, "lore decide needs the numeric id of a pending decision (see `lore pending`)");

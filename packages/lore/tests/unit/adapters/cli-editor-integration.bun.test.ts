@@ -24,7 +24,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { mkdtempSync, writeFileSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
-import { liveInvocation } from "../../live-invocation.js";
+import { liveInvocation, runHandlerForExit } from "../../live-invocation.js";
 import type { Invocation } from "@lore/core";
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
@@ -49,9 +49,12 @@ function captureOutput() {
     stdout.push(String(chunk));
     return true;
   });
-  const logSpy = vi.spyOn(console, "log").mockImplementation((...args: unknown[]) => {
+  const logSpy = vi.spyOn(process.stdout, "write").mockImplementation((((chunk: unknown) => {
+    const args: unknown[] = [String(chunk).replace(/\n$/, "")];
     stdout.push(args.join(" "));
-  });
+  
+    return true;
+  }) as never));
 
   return {
     stdout,
@@ -64,14 +67,16 @@ function captureOutput() {
   };
 }
 
+/** The exit code the most recent run ended with (see {@link runCmd}); commands return it, they never call `process.exit`. */
+let lastExitCode = 0;
+
+/** Reads the last run's code: `undefined` when the run ended 0 (what "process.exit was never called" used to assert). */
 function captureExit() {
-  let capturedCode: number | undefined;
-  vi.spyOn(process, "exit").mockImplementation((code?: string | number | null | undefined): never => {
-    capturedCode = typeof code === "number" ? code : 0;
-    throw new Error(`process.exit(${code})`);
-  });
   return {
-    get code() { return capturedCode; },
+    get code(): number | undefined {
+      return lastExitCode === 0 ? undefined : lastExitCode;
+    },
+    restore(): void {},
   };
 }
 
@@ -80,7 +85,8 @@ async function runCmd(
   args: Record<string, unknown>,
 ): Promise<void> {
   if (!cmd.run) throw new Error("Command is missing run handler");
-  return cmd.run({ args, inv: liveInvocation() });
+  const run = cmd.run;
+  lastExitCode = await runHandlerForExit(() => run({ args, inv: liveInvocation() }));
 }
 
 /**
@@ -104,8 +110,6 @@ let savedEditor: string | undefined;
 beforeEach(() => {
   // reason: process.exitCode set by CLI commands (FU#4 refactor) leaks between in-process
   // test invocations under bun test. Reset to 0 here to guarantee clean state each test.
-  process.exitCode = 0;
-
   tmpDir = mkdtempSync(join(tmpdir(), "lore-editor-integration-test-"));
   scriptDir = mkdtempSync(join(tmpdir(), "lore-editor-scripts-"));
   originalCwd = process.cwd();
@@ -119,8 +123,6 @@ beforeEach(() => {
 
 afterEach(() => {
   // reason: explicit 0 (not undefined) to reliably clear exitCode in all Bun versions.
-  process.exitCode = 0;
-
   process.chdir(originalCwd);
   // Restore EDITOR env var
   if (savedEditor !== undefined) {
@@ -175,8 +177,6 @@ describe("lore create — AC-CR-1: editor opens when --content is absent", () =>
     try {
       // reason: --no-ai bypasses AI generation (SPEC-017 default) to exercise the editor path.
       await runCmd(cmd, { type: "prd", title: "My PRD From Editor", ai: false });
-    } catch (e: unknown) {
-      if (!(e instanceof Error) || !e.message.startsWith("process.exit(")) throw e;
     } finally {
       output.restore();
     }
@@ -210,8 +210,6 @@ describe("lore create — AC-CR-2: --content flag bypasses editor", () => {
         title: "Explicit Content PRD",
         content: "my explicit content",
       });
-    } catch (e: unknown) {
-      if (!(e instanceof Error) || !e.message.startsWith("process.exit(")) throw e;
     } finally {
       output.restore();
     }
@@ -239,7 +237,6 @@ describe("lore create — AC-CR-3: editor error produces exit code 4", () => {
 
     const output = captureOutput();
     // reason: FU#4 refactored post-app exits to process.exitCode = N; return; — read exitCode directly.
-    process.exitCode = 0;
     try {
       // reason: --no-ai bypasses AI generation (SPEC-017 default) to exercise the editor error path.
       await runCmd(cmd, { type: "prd", title: "PRD With Editor Fail", ai: false });
@@ -247,9 +244,8 @@ describe("lore create — AC-CR-3: editor error produces exit code 4", () => {
       output.restore();
     }
 
-    expect(process.exitCode).toBe(4); // VALIDATION_ERROR → exit 4
+    expect(lastExitCode).toBe(4); // VALIDATION_ERROR → exit 4
     expect(output.stderr.join("\n")).toMatch(/exited with code|editor/i);
-    process.exitCode = 0; // reset for subsequent tests
   });
 
   it.skipIf(isWindows)("exits with code 4 when editor writes empty content", async () => {
@@ -265,7 +261,6 @@ describe("lore create — AC-CR-3: editor error produces exit code 4", () => {
 
     const output = captureOutput();
     // reason: FU#4 refactored post-app exits to process.exitCode = N; return; — read exitCode directly.
-    process.exitCode = 0;
     try {
       // reason: --no-ai bypasses AI generation (SPEC-017 default) to exercise the empty-content editor path.
       await runCmd(cmd, { type: "prd", title: "PRD Empty Content", ai: false });
@@ -273,9 +268,8 @@ describe("lore create — AC-CR-3: editor error produces exit code 4", () => {
       output.restore();
     }
 
-    expect(process.exitCode).toBe(4);
+    expect(lastExitCode).toBe(4);
     expect(output.stderr.join("\n")).toMatch(/content is empty/i);
-    process.exitCode = 0; // reset for subsequent tests
   });
 });
 
@@ -296,8 +290,6 @@ describe("lore create — AC-CR-4: --json mode + editor flow", () => {
     try {
       // reason: --no-ai bypasses AI generation (SPEC-017 default) to exercise the editor + JSON path.
       await runCmd(cmd, { type: "prd", title: "JSON Mode PRD", json: true, ai: false });
-    } catch (e: unknown) {
-      if (!(e instanceof Error) || !e.message.startsWith("process.exit(")) throw e;
     } finally {
       output.restore();
     }
@@ -328,8 +320,6 @@ describe("lore set — AC-SET-1: editor opens when no flags provided", () => {
         title: "Set Test PRD",
         content: "original content",
       });
-    } catch (e: unknown) {
-      if (!(e instanceof Error) || !e.message.startsWith("process.exit(")) throw e;
     } finally {
       out1.restore();
     }
@@ -357,8 +347,6 @@ describe("lore set — AC-SET-1: editor opens when no flags provided", () => {
     const exit2 = captureExit();
     try {
       await runCmd(setCmd, { id: slug });
-    } catch (e: unknown) {
-      if (!(e instanceof Error) || !e.message.startsWith("process.exit(")) throw e;
     } finally {
       out2.restore();
     }
@@ -383,8 +371,6 @@ describe("lore set — AC-SET-1: editor opens when no flags provided", () => {
         title: "Version Bump PRD",
         content: "original body",
       });
-    } catch (e: unknown) {
-      if (!(e instanceof Error) || !e.message.startsWith("process.exit(")) throw e;
     } finally {
       out1.restore();
     }
@@ -410,8 +396,6 @@ describe("lore set — AC-SET-1: editor opens when no flags provided", () => {
     const exit2 = captureExit();
     try {
       await runCmd(setCmd, { id: slug });
-    } catch (e: unknown) {
-      if (!(e instanceof Error) || !e.message.startsWith("process.exit(")) throw e;
     } finally {
       out2.restore();
     }
@@ -440,8 +424,6 @@ describe("lore set — AC-SET-2: any flag bypasses editor", () => {
         title: "Title Only PRD",
         content: "body",
       });
-    } catch (e: unknown) {
-      if (!(e instanceof Error) || !e.message.startsWith("process.exit(")) throw e;
     } finally {
       out1.restore();
     }
@@ -470,8 +452,6 @@ describe("lore set — AC-SET-2: any flag bypasses editor", () => {
     try {
       // --title flag present → editor must NOT open
       await runCmd(setCmd, { id: slug, title: "New Title" });
-    } catch (e: unknown) {
-      if (!(e instanceof Error) || !e.message.startsWith("process.exit(")) throw e;
     } finally {
       out2.restore();
     }
@@ -499,8 +479,6 @@ describe("lore set — AC-SET-3: editor error produces exit code 4", () => {
         title: "Set Error PRD",
         content: "body",
       });
-    } catch (e: unknown) {
-      if (!(e instanceof Error) || !e.message.startsWith("process.exit(")) throw e;
     } finally {
       out1.restore();
     }
@@ -525,15 +503,13 @@ describe("lore set — AC-SET-3: editor error produces exit code 4", () => {
 
     const out2 = captureOutput();
     // reason: FU#4 refactored post-app exits to process.exitCode = N; return; — read exitCode directly.
-    process.exitCode = 0;
     try {
       await runCmd(setCmd, { id: slug });
     } finally {
       out2.restore();
     }
 
-    expect(process.exitCode).toBe(4);
+    expect(lastExitCode).toBe(4);
     expect(out2.stderr.join("\n")).toMatch(/exited with code|editor/i);
-    process.exitCode = 0; // reset for subsequent tests
   });
 });

@@ -78,6 +78,7 @@
  */
 
 import { spawnSync } from "node:child_process";
+import { exitCli } from "../cli-exit.js";
 import { readFileSync } from "node:fs";
 import { defineCommand } from "citty";
 import { loadLoreApp } from "../loader.js";
@@ -97,6 +98,7 @@ import { assessmentFreshness } from "../../../service/gate-predicates.js";
 import { deriveCommitSetForPlan, type DiffSourceRecord } from "../assess-commit-derivation.js";
 import { collectRecordedRanges } from "../../../service/task-commit-range.js";
 import { invocationOf } from "../command-invocation.js";
+import { printLine } from "../output.js";
 
 /** One-line stderr/text summary of how this run's diff (if any) was obtained. */
 function formatDiffSourceLine(source: DiffSourceRecord): string {
@@ -168,19 +170,19 @@ export default defineCommand({
     const hasExplicitNoAi = rawArgv.includes("--no-ai");
 
     if (hasExplicitAi && hasExplicitNoAi) {
-      process.stderr.write("Error: --ai and --no-ai are mutually exclusive. Pass only one.\n");
-      process.exit(2);
+      inv.io.stderr.write("Error: --ai and --no-ai are mutually exclusive. Pass only one.\n");
+      exitCli(2);
     }
     if (hasExplicitNoAi) {
       // reason: assess has no non-AI mode (SPEC-026 §3 D5) — the command name IS the AI
       // intent, so --no-ai is always a contradiction, unlike `set --regenerate`'s optional
       // AI path.
-      process.stderr.write("Error: lore assess requires AI; --no-ai is a contradiction. Omit the flag to proceed.\n");
-      process.exit(2);
+      inv.io.stderr.write("Error: lore assess requires AI; --no-ai is a contradiction. Omit the flag to proceed.\n");
+      exitCli(2);
     }
     if (args.diff !== undefined && args["diff-file"] !== undefined) {
-      process.stderr.write("Error: --diff and --diff-file are mutually exclusive.\n");
-      process.exit(2);
+      inv.io.stderr.write("Error: --diff and --diff-file are mutually exclusive.\n");
+      exitCli(2);
     }
 
     const { app } = loadLoreApp({ inv });
@@ -188,9 +190,8 @@ export default defineCommand({
       // ─── Step 2: resolve plan + assemble bundle ───────────────────────────────
       const bundleResult = await app.corpusService.getPlanBundle(args.plan);
       if (!bundleResult.ok) {
-        process.stderr.write(formatErrorFor(inv, bundleResult.error) + "\n");
-        process.exitCode = exitCode(bundleResult.error);
-        return;
+        inv.io.stderr.write(formatErrorFor(inv, bundleResult.error) + "\n");
+        return exitCode(bundleResult.error);
       }
       const bundle = bundleResult.value;
 
@@ -201,9 +202,8 @@ export default defineCommand({
           field: "tasks",
           message: `Plan '${bundle.plan.slug}' has zero child tasks — nothing to assess.`,
         };
-        process.stderr.write(formatErrorFor(inv, noTasksError) + "\n");
-        process.exitCode = exitCode(noTasksError);
-        return;
+        inv.io.stderr.write(formatErrorFor(inv, noTasksError) + "\n");
+        return exitCode(noTasksError);
       }
 
       // ─── Step 2.5: staleness advisory (SPEC-106 §Design Decisions D3) ─────────
@@ -216,14 +216,13 @@ export default defineCommand({
       // failure handling, not a staleness gate) — it never silently swallows.
       const freshnessResult = await app.corpusService.getAssessmentFreshness(bundle.plan.id);
       if (!freshnessResult.ok) {
-        process.stderr.write(formatErrorFor(inv, freshnessResult.error) + "\n");
-        process.exitCode = exitCode(freshnessResult.error);
-        return;
+        inv.io.stderr.write(formatErrorFor(inv, freshnessResult.error) + "\n");
+        return exitCode(freshnessResult.error);
       }
       const freshness = freshnessResult.value;
       const freshnessCheck = assessmentFreshness(freshness.newestAssessmentAt, freshness.newestTaskActivityAt);
       if (!freshnessCheck.ok) {
-        process.stderr.write(
+        inv.io.stderr.write(
           `Warning: the stored assessment for '${bundle.plan.slug}' (recorded ${freshness.newestAssessmentAt}) ` +
             `is already stale — ${ASSESS_NEWER_TASK_ACTIVITY} ${freshness.newestTaskActivityAt}. This run ` +
             `will still produce and save a fresh assessment (\`lore assess\` never refuses; it is the remedy).\n`,
@@ -251,21 +250,19 @@ export default defineCommand({
         // ai.assess.max_diff_chars instead (task-lore-assess-diff-spawnsync-sets-no-
         // maxbuffer-a-diff-over-1, AC-1).
         const maxBuffer = computeGitDiffMaxBuffer(maxDiffChars);
-        const gitResult = spawnSync("git", ["diff", args.diff], { encoding: "utf8", maxBuffer });
+        const gitResult = spawnSync("git", ["diff", args.diff], { cwd: inv.cwd, encoding: "utf8", maxBuffer });
         if (gitResult.error || gitResult.status !== 0) {
           // reason: ENOBUFS is THIS call site's own buffer ceiling, not a git failure —
           // name the buffer + the ai.assess.max_diff_chars knob instead of rendering the
           // generic "git diff ... failed: spawnSync ENOBUFS" message, which sends an
           // operator to look at git (AC-2, same task).
           if (gitResult.error && (gitResult.error as NodeJS.ErrnoException).code === "ENOBUFS") {
-            process.stderr.write(formatGitDiffEnobufsMessage(args.diff, maxBuffer, maxDiffChars) + "\n");
-            process.exitCode = 2;
-            return;
+            inv.io.stderr.write(formatGitDiffEnobufsMessage(args.diff, maxBuffer, maxDiffChars) + "\n");
+            return 2;
           }
           const reason = gitResult.error?.message ?? gitResult.stderr?.trim() ?? `git exited ${gitResult.status}`;
-          process.stderr.write(`Error: git diff ${args.diff} failed: ${reason}\n`);
-          process.exitCode = 2;
-          return;
+          inv.io.stderr.write(`Error: git diff ${args.diff} failed: ${reason}\n`);
+          return 2;
         }
         diffText = gitResult.stdout;
         diffSource = { mode: "explicit_diff", range: args.diff };
@@ -274,9 +271,8 @@ export default defineCommand({
           diffText = readFileSync(args["diff-file"], "utf8");
         } catch (e) {
           const message = e instanceof Error ? e.message : "unknown error";
-          process.stderr.write(`Error: could not read --diff-file: ${message}\n`);
-          process.exitCode = 2;
-          return;
+          inv.io.stderr.write(`Error: could not read --diff-file: ${message}\n`);
+          return 2;
         }
         diffSource = { mode: "explicit_diff_file", path: args["diff-file"] };
       } else {
@@ -309,12 +305,12 @@ export default defineCommand({
             (derivation.tasks_without_commits.length > derivation.tasks_not_measured.length
               ? ` (${String(derivation.tasks_without_commits.length - derivation.tasks_not_measured.length)} task(s) recorded an empty commit range)`
               : "");
-          process.stderr.write(
+          inv.io.stderr.write(
             `Derived diff from ${String(derivation.commits.length)} commit(s) across this plan's tasks${gapNote}.\n`,
           );
         } else if (derivation.status === "unverifiable_convention_mismatch") {
           commitDerivationUnverifiable = true;
-          process.stderr.write(
+          inv.io.stderr.write(
             `Warning: every one of this plan's ${String(bundle.tasks.length)} task(s) is already archived ` +
               "(merged work exists by definition) but no commit mentions any of their slugs — this is a " +
               "commit-message CONVENTION MISMATCH, not evidence of missing work. The scope_fidelity dimension " +
@@ -322,7 +318,7 @@ export default defineCommand({
               "supply a diff explicitly.\n",
           );
         } else {
-          process.stderr.write(
+          inv.io.stderr.write(
             `Warning: ${ASSESS_NO_COMMITS_DERIVED} for this plan's ${String(bundle.tasks.length)} task(s) — ` +
               "proceeding without a diff. This can mean the plan has no merged code changes yet, or its commit " +
               "history was squashed/rewritten and no longer references the task slugs. Pass --diff/--diff-file " +
@@ -337,7 +333,7 @@ export default defineCommand({
       // later inside buildAssessPrompt via truncateDiffByFile — this is advance notice.
       if (diffText !== undefined) {
         if (diffText.length > maxDiffChars) {
-          process.stderr.write(
+          inv.io.stderr.write(
             `Warning: diff is ${diffText.length} chars, exceeding the configured ai.assess.max_diff_chars ` +
               `budget of ${maxDiffChars}. It will be truncated by file (production source kept first, then ` +
               `tests, then everything else — no file is cut in half). To include the full diff, curate a ` +
@@ -353,18 +349,17 @@ export default defineCommand({
       if (!hasExplicitAi) {
         const resolved = app.resolveAiDefault(undefined);
         if (isAssessAiBraked(resolved)) {
-          process.stderr.write(
+          inv.io.stderr.write(
             "Error: AI is required for `lore assess` but is disabled for this surface by " +
               "config.ai.default_per_surface. Pass --ai to override.\n",
           );
-          process.exitCode = 2;
-          return;
+          return 2;
         }
       }
 
-      const showSpinner = process.stderr.isTTY && !args.json;
+      const showSpinner = inv.io.stderr.isTTY === true && !args.json;
       if (showSpinner) {
-        process.stderr.write(`⏳ Assessing via ${app.aiProviderService.activeProviderName}...\n`);
+        inv.io.stderr.write(`⏳ Assessing via ${app.aiProviderService.activeProviderName}...\n`);
       }
 
       // ─── Step 5: invoke the judge ──────────────────────────────────────────────
@@ -396,16 +391,15 @@ export default defineCommand({
         // reason: assess has no non-AI mode (SPEC-026 §3 D5) — the shared AI_PROVIDER_ERROR
         // hint's default "Retry with --no-ai" is actively misleading here (SPEC-029 AC-AR-5,
         // AC-AR-4 preserves the underlying error shape/exit code unchanged).
-        process.stderr.write(formatErrorFor(inv, assessResult.error, { aiHasNoFallback: true }) + "\n");
-        process.exitCode = exitCode(assessResult.error);
-        return;
+        inv.io.stderr.write(formatErrorFor(inv, assessResult.error, { aiHasNoFallback: true }) + "\n");
+        return exitCode(assessResult.error);
       }
       const result = assessResult.value;
 
       if (showSpinner) {
         // SPEC-067 D4: overall_score is omitted at 100% task-truncation coverage.
         const scoreLabel = result.overall_score !== undefined ? `${result.overall_score}/100` : "N/A (fully truncated)";
-        process.stderr.write(`✓ Assessment complete: ${result.verdict} (${scoreLabel})\n`);
+        inv.io.stderr.write(`✓ Assessment complete: ${result.verdict} (${scoreLabel})\n`);
       }
 
       // ─── Step 5.5: capture_source distribution (AC-FR-5, G4) ──────────────────
@@ -416,9 +410,8 @@ export default defineCommand({
       // exported predicate `lore status` also renders; reported alongside, never merged into capture_source.
       const stampVerdictResult = await app.corpusService.stampVerdictDistribution(bundle.tasks);
       if (!stampVerdictResult.ok) {
-        process.stderr.write(formatErrorFor(inv, stampVerdictResult.error) + "\n");
-        process.exitCode = exitCode(stampVerdictResult.error);
-        return;
+        inv.io.stderr.write(formatErrorFor(inv, stampVerdictResult.error) + "\n");
+        return exitCode(stampVerdictResult.error);
       }
       const stampVerdictDistribution = stampVerdictResult.value;
 
@@ -436,17 +429,15 @@ export default defineCommand({
         content: renderAssessmentContent(result),
       });
       if (!createResult.ok) {
-        process.stderr.write(formatErrorFor(inv, createResult.error) + "\n");
-        process.exitCode = exitCode(createResult.error);
-        return;
+        inv.io.stderr.write(formatErrorFor(inv, createResult.error) + "\n");
+        return exitCode(createResult.error);
       }
       const assessmentDoc = createResult.value;
 
       const linkResult = await app.corpusService.link(assessmentDoc.id, bundle.plan.id, "informs");
       if (!linkResult.ok) {
-        process.stderr.write(formatErrorFor(inv, linkResult.error) + "\n");
-        process.exitCode = exitCode(linkResult.error);
-        return;
+        inv.io.stderr.write(formatErrorFor(inv, linkResult.error) + "\n");
+        return exitCode(linkResult.error);
       }
 
       // ─── Step 7: render ─────────────────────────────────────────────────────────
@@ -456,7 +447,7 @@ export default defineCommand({
       // inside `data.result`) so a caller doesn't need to know it lives nested — `undefined`
       // is dropped by JSON.stringify, so the key is simply absent when no warning fired.
       if (args.json) {
-        console.log(
+        printLine(inv.io.stdout, 
           JSON.stringify(
             {
               ok: true,
@@ -485,20 +476,20 @@ export default defineCommand({
         return;
       }
 
-      console.log(formatAssessmentSummary(result));
+      printLine(inv.io.stdout, formatAssessmentSummary(result));
       if (result.scope_warning) {
-        console.log("");
-        console.log(result.scope_warning.message);
+        printLine(inv.io.stdout, "");
+        printLine(inv.io.stdout, result.scope_warning.message);
       }
-      console.log("");
+      printLine(inv.io.stdout, "");
       // reason: AC-FR-5/G4 — printed alongside result.facts.regression
       // .attested_evidence_ratio, when present (a legacy pre-SPEC-040 result
       // would carry no `facts` at all — additive, never a thrown error).
       const attestedRatio = result.facts?.regression.attested_evidence_ratio;
-      console.log(formatCaptureSourceLine(captureSourceDistribution, attestedRatio));
-      console.log(formatStampVerdictLine(stampVerdictDistribution));
-      console.log(formatDiffSourceLine(diffSource));
-      console.log(`Saved as ${assessmentDoc.slug} (linked to ${bundle.plan.slug} via informs)`);
+      printLine(inv.io.stdout, formatCaptureSourceLine(captureSourceDistribution, attestedRatio));
+      printLine(inv.io.stdout, formatStampVerdictLine(stampVerdictDistribution));
+      printLine(inv.io.stdout, formatDiffSourceLine(diffSource));
+      printLine(inv.io.stdout, `Saved as ${assessmentDoc.slug} (linked to ${bundle.plan.slug} via informs)`);
     } finally {
       app.close();
     }

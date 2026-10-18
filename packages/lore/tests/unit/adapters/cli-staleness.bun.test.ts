@@ -58,6 +58,7 @@ interface RunResult {
 async function runLore(args: string[], cwd: string): Promise<RunResult> {
   const proc = await runLoreInProcess(args, {
     cwd,
+    home: cwd,
     env: { ...process.env, HOME: cwd, EDITOR: "true" },
   });
   return {

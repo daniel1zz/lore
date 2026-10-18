@@ -22,6 +22,7 @@
  */
 
 import type { Invocation } from "@lore/core";
+
 import { defineCommand } from "citty";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatError, formatErrorFor } from "../utils.js";
@@ -29,6 +30,9 @@ import type { LoreError, OutlineEntry } from "@lore/core";
 import type { PrdOutlineService } from "../../../service/prd-outline-service.js";
 import type { App } from "../../../app.js";
 import { invocationOf } from "../command-invocation.js";
+import { printLine } from "../output.js";
+import type { CliIo } from "../output.js";
+import type { ExitReport } from "../cli-exit.js";
 
 /**
  * `App.prdOutlineService` is typed optional only to keep pre-existing
@@ -60,11 +64,11 @@ function retiredOutlineWrite(verb: string): LoreError {
 }
 
 /** Prints the refusal (text or `--json` envelope) and sets exit code 4. Writes nothing. */
-function refuseRetiredWrite(inv: Invocation, verb: string, json: unknown): void {
+function refuseRetiredWrite(inv: Invocation, verb: string, json: unknown): ExitReport {
   const error = retiredOutlineWrite(verb);
-  if (json === true) console.log(JSON.stringify({ ok: false, error }, null, 2));
-  else process.stderr.write(formatErrorFor(inv, error) + "\n");
-  process.exitCode = exitCode(error);
+  if (json === true) printLine(inv.io.stdout, JSON.stringify({ ok: false, error }, null, 2));
+  else inv.io.stderr.write(formatErrorFor(inv, error) + "\n");
+  return exitCode(error);
 }
 
 export default defineCommand({
@@ -91,7 +95,7 @@ export default defineCommand({
       },
       run(context) {
         const { args } = context;
-        refuseRetiredWrite(invocationOf(context), "set", args.json);
+        return refuseRetiredWrite(invocationOf(context), "set", args.json);
       },
     }),
 
@@ -116,23 +120,22 @@ export default defineCommand({
           const result = await requireOutlineService(app).outlineList(args.prd as string);
 
           if (!result.ok) {
-            if (args.json) console.log(JSON.stringify({ ok: false, error: result.error }, null, 2));
-            else process.stderr.write(formatErrorFor(inv, result.error) + "\n");
-            process.exitCode = exitCode(result.error);
-            return;
+            if (args.json) printLine(inv.io.stdout, JSON.stringify({ ok: false, error: result.error }, null, 2));
+            else inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
+            return exitCode(result.error);
           }
 
           if (args.json) {
-            console.log(JSON.stringify({ ok: true, data: result.value }, null, 2));
+            printLine(inv.io.stdout, JSON.stringify({ ok: true, data: result.value }, null, 2));
             return;
           }
 
           if (result.value.length === 0) {
-            console.log("No outline entries declared on this PRD.");
+            printLine(inv.io.stdout, "No outline entries declared on this PRD.");
             return;
           }
 
-          renderOutlineList(result.value);
+          renderOutlineList(inv.io, result.value);
         } finally {
           app.close();
         }
@@ -151,7 +154,7 @@ export default defineCommand({
       },
       run(context) {
         const { args } = context;
-        refuseRetiredWrite(invocationOf(context), "rm", args.json);
+        return refuseRetiredWrite(invocationOf(context), "rm", args.json);
       },
     }),
 
@@ -167,7 +170,7 @@ export default defineCommand({
       },
       run(context) {
         const { args } = context;
-        refuseRetiredWrite(invocationOf(context), "exempt", args.json);
+        return refuseRetiredWrite(invocationOf(context), "exempt", args.json);
       },
     }),
   },
@@ -175,8 +178,8 @@ export default defineCommand({
 
 // ─── Output Helpers ──────────────────────────────────────────────────────────
 
-function renderOutlineList(entries: OutlineEntry[]): void {
+function renderOutlineList(io: CliIo, entries: OutlineEntry[]): void {
   for (const entry of entries) {
-    console.log(`  ${entry.section} — ${entry.title} [${entry.tier}]`);
+    printLine(io.stdout, `  ${entry.section} — ${entry.title} [${entry.tier}]`);
   }
 }

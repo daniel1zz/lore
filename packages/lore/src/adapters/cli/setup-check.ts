@@ -106,7 +106,7 @@
  *     §C6 D5) reads `setup.check_reminder` from the TEAM `.lore/config.yaml`
  *     — walked up from `opts.cwd` (default `process.cwd()`), the same
  *     "nearest ancestor `.lore/`" convention `loader.ts::findLoreDbPath`
- *     uses, but WITHOUT that helper's `process.exit(1)` on a miss: `--check`
+ *     uses, but WITHOUT that helper's `exitCli(1)` on a miss: `--check`
  *     must keep working (default enabled) outside any project, and this
  *     module already forgoes `loadLoreApp()` entirely (see the "bootstrap-
  *     stage" invariant above). No `.lore/config.yaml` found, or found but
@@ -123,6 +123,7 @@
  */
 
 import { createHash } from "node:crypto";
+import { exitCli } from "./cli-exit.js";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
@@ -146,6 +147,9 @@ import { detectDoubleRegistrations } from "./setup-hook-double-registration.js";
 import type { DoubleRegistration } from "./setup-hook-double-registration.js";
 import { exitCode, formatErrorFor } from "./utils.js";
 import type { Invocation } from "@lore/core";
+import { printLine } from "./output.js";
+import type { CliIo } from "./output.js";
+import type { ExitReport } from "./cli-exit.js";
 
 // ─── On-disk artifact filenames ─────────────────────────────────────────────
 
@@ -634,21 +638,20 @@ export async function runSetupCheck(opts: {
   now?: () => string;
   cwd: string;
   inv: Invocation;
-}): Promise<void> {
+}): Promise<ExitReport> {
   const result = await computeSetupCheckReport(opts);
   if (!result.ok) {
-    process.stderr.write(formatErrorFor(opts.inv, result.error) + "\n");
-    process.exitCode = exitCode(result.error);
-    return;
+    opts.inv.io.stderr.write(formatErrorFor(opts.inv, result.error) + "\n");
+    return exitCode(result.error);
   }
   const report = result.value;
 
   if (opts.json) {
-    console.log(JSON.stringify({ ok: true, data: report }, null, 2));
+    printLine(opts.inv.io.stdout, JSON.stringify({ ok: true, data: report }, null, 2));
   } else {
-    console.log(renderSetupCheckReport(report, opts.targetDir));
+    printLine(opts.inv.io.stdout, renderSetupCheckReport(report, opts.targetDir));
   }
-  process.exitCode = report.summary === "sync" ? 0 : 3;
+  return report.summary === "sync" ? 0 : 3;
 }
 
 // ─── Project check (BR-1085): collected by the caller, finished here ────────
@@ -666,12 +669,12 @@ export async function runSetupCheck(opts: {
  * @param opts.now - Time seam for the cache's `checked_at`.
  * @throws Never — a cache write failure is printed to stderr with exit 1.
  */
-export async function finishProjectSetupCheck(opts: {
+export async function finishProjectSetupCheck(io: CliIo, opts: {
   repoDir: string;
   files: SetupCheckFiles;
   json: boolean;
   now?: () => string;
-}): Promise<void> {
+}): Promise<ExitReport> {
   const tidy = (paths: string[]): string[] => [...new Set(paths)].sort();
   const files: SetupCheckFiles = {
     outdated: tidy(opts.files.outdated),
@@ -696,15 +699,14 @@ export async function finishProjectSetupCheck(opts: {
       resolveCheckReminderEnabled(opts.repoDir),
     );
   } catch (cause) {
-    process.stderr.write(`Error: lore setup --project --check could not write its cache at ${cachePath}: ${describeCaught(cause)}\n`);
-    process.exitCode = 1;
-    return;
+    io.stderr.write(`Error: lore setup --project --check could not write its cache at ${cachePath}: ${describeCaught(cause)}\n`);
+    return 1;
   }
 
   if (opts.json) {
-    console.log(JSON.stringify({ ok: true, data: report }, null, 2));
+    printLine(io.stdout, JSON.stringify({ ok: true, data: report }, null, 2));
   } else {
-    console.log(renderSetupCheckReport(report, opts.repoDir, "project"));
+    printLine(io.stdout, renderSetupCheckReport(report, opts.repoDir, "project"));
   }
-  process.exitCode = inSync ? 0 : 3;
+  return inSync ? 0 : 3;
 }

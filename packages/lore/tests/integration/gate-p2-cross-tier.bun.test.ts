@@ -39,7 +39,10 @@ import { SQLiteStore } from "../../src/store/sqlite-store.js";
 import type { CreateDocInput, LoreConfig } from "@lore/core";
 import { asSessionActor } from "../helpers/session-actor";
 import { resolveActor } from "../../src/adapters/cli/utils.js";
-import { liveInvocation, liveAmbient, liveWriteContext, actedStore } from "../live-invocation.js";
+import { liveInvocation, liveAmbient, liveWriteContext, actedStore, runHandlerForExit, liveIo } from "../live-invocation.js";
+
+/** The exit code the most recent command call ended with (commands return it; none sets `process.exitCode`). */
+let lastExitCode = 0;
 import type { Invocation } from "@lore/core";
 
 /**
@@ -104,22 +107,25 @@ function captureOutput() {
   const stdout: string[] = [];
   const stderr: string[] = [];
   const origStderrWrite = process.stderr.write.bind(process.stderr);
-  const origConsoleLog = console.log.bind(console);
+  const origConsoleLog = process.stdout.write;
 
   (process.stderr as unknown as { write: (chunk: unknown) => boolean }).write = (chunk: unknown) => {
     stderr.push(String(chunk));
     return true;
   };
-  console.log = (...args: unknown[]) => {
+  process.stdout.write = (((chunk: unknown) => {
+    const args: unknown[] = [String(chunk).replace(/\n$/, "")];
     stdout.push(args.join(" "));
-  };
+  
+    return true;
+  }) as typeof process.stdout.write);
 
   return {
     stdout,
     stderr,
     restore: () => {
       (process.stderr as unknown as { write: typeof origStderrWrite }).write = origStderrWrite;
-      console.log = origConsoleLog;
+      process.stdout.write = origConsoleLog;
     },
   };
 }
@@ -155,7 +161,6 @@ function setSessionEnv(variable: (typeof SESSION_ENV_VARS)[number] | null, value
 }
 
 beforeEach(() => {
-  process.exitCode = 0;
   originalEnv = process.env["LORE_GATE_BYPASS"];
   delete process.env["LORE_GATE_BYPASS"];
   for (const name of SESSION_ENV_VARS) originalSessionEnv.set(name, process.env[name]);
@@ -172,7 +177,6 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  process.exitCode = 0;
   if (originalEnv === undefined) delete process.env["LORE_GATE_BYPASS"];
   else process.env["LORE_GATE_BYPASS"] = originalEnv;
   for (const name of SESSION_ENV_VARS) {
@@ -410,12 +414,12 @@ describe("lore gate plan-promote — AC-P2-2: ancestor spec not approved", () =>
     const cmd = await importGateSubCommand("plan-promote");
     const output = captureOutput();
     try {
-      await cmd.run({ args: { plan: planSlug }, inv: liveInvocation() });
+      lastExitCode = await runHandlerForExit(() => cmd.run({ args: { plan: planSlug }, inv: liveInvocation() }));
     } finally {
       output.restore();
     }
 
-    expect(process.exitCode).toBe(4);
+    expect(lastExitCode).toBe(4);
     const stdoutText = output.stdout.join("\n");
     expect(stdoutText).toContain("UPSTREAM_NOT_APPROVED");
     expect(stdoutText.toLowerCase()).toContain("approved");
@@ -432,12 +436,12 @@ describe("lore gate plan-promote — AC-P2-3: ancestor spec approved but 0 accep
     const cmd = await importGateSubCommand("plan-promote");
     const output = captureOutput();
     try {
-      await cmd.run({ args: { plan: planSlug }, inv: liveInvocation() });
+      lastExitCode = await runHandlerForExit(() => cmd.run({ args: { plan: planSlug }, inv: liveInvocation() }));
     } finally {
       output.restore();
     }
 
-    expect(process.exitCode).toBe(4);
+    expect(lastExitCode).toBe(4);
     const stdoutText = output.stdout.join("\n");
     expect(stdoutText).toContain("UPSTREAM_NO_AC");
   });
@@ -455,12 +459,12 @@ describe("lore gate plan-promote — AC-P2-4: ancestor spec approved with ≥1 a
     const cmd = await importGateSubCommand("plan-promote");
     const output = captureOutput();
     try {
-      await cmd.run({ args: { plan: planSlug }, inv: liveInvocation() });
+      lastExitCode = await runHandlerForExit(() => cmd.run({ args: { plan: planSlug }, inv: liveInvocation() }));
     } finally {
       output.restore();
     }
 
-    expect(process.exitCode).toBe(0);
+    expect(lastExitCode).toBe(0);
     const stdoutText = output.stdout.join("\n");
     expect(stdoutText).toContain("gate: pass");
   });
@@ -476,12 +480,12 @@ describe("lore gate task-claim — AC-P2-5: plan's ancestor spec approval status
     const cmd = await importGateSubCommand("task-claim");
     const output = captureOutput();
     try {
-      await cmd.run({ args: { task: taskSlug }, inv: liveInvocation() });
+      lastExitCode = await runHandlerForExit(() => cmd.run({ args: { task: taskSlug }, inv: liveInvocation() }));
     } finally {
       output.restore();
     }
 
-    expect(process.exitCode).toBe(4);
+    expect(lastExitCode).toBe(4);
     const stdoutText = output.stdout.join("\n");
     expect(stdoutText).toContain("UPSTREAM_NOT_APPROVED");
   });
@@ -494,12 +498,12 @@ describe("lore gate task-claim — AC-P2-5: plan's ancestor spec approval status
     const cmd = await importGateSubCommand("task-claim");
     const output = captureOutput();
     try {
-      await cmd.run({ args: { task: taskSlug }, inv: liveInvocation() });
+      lastExitCode = await runHandlerForExit(() => cmd.run({ args: { task: taskSlug }, inv: liveInvocation() }));
     } finally {
       output.restore();
     }
 
-    expect(process.exitCode).toBe(0);
+    expect(lastExitCode).toBe(0);
     const stdoutText = output.stdout.join("\n");
     expect(stdoutText).toContain("gate: pass");
   });
@@ -514,12 +518,12 @@ describe("lore gate — AC-P2-6: no spec-tier ancestor passes vacuously", () => 
     const cmd = await importGateSubCommand("plan-promote");
     const output = captureOutput();
     try {
-      await cmd.run({ args: { plan: planSlug }, inv: liveInvocation() });
+      lastExitCode = await runHandlerForExit(() => cmd.run({ args: { plan: planSlug }, inv: liveInvocation() }));
     } finally {
       output.restore();
     }
 
-    expect(process.exitCode).toBe(0);
+    expect(lastExitCode).toBe(0);
     expect(output.stdout.join("\n")).toContain("gate: pass");
   });
 
@@ -530,12 +534,12 @@ describe("lore gate — AC-P2-6: no spec-tier ancestor passes vacuously", () => 
     const cmd = await importGateSubCommand("task-claim");
     const output = captureOutput();
     try {
-      await cmd.run({ args: { task: taskSlug }, inv: liveInvocation() });
+      lastExitCode = await runHandlerForExit(() => cmd.run({ args: { task: taskSlug }, inv: liveInvocation() }));
     } finally {
       output.restore();
     }
 
-    expect(process.exitCode).toBe(0);
+    expect(lastExitCode).toBe(0);
     expect(output.stdout.join("\n")).toContain("gate: pass");
   });
 });
@@ -549,12 +553,12 @@ describe("lore gate plan-promote / task-claim — doc resolution failures", () =
     const cmd = await importGateSubCommand("plan-promote");
     const output = captureOutput();
     try {
-      await cmd.run({ args: { plan: "does-not-exist-slug" }, inv: liveInvocation() });
+      lastExitCode = await runHandlerForExit(() => cmd.run({ args: { plan: "does-not-exist-slug" }, inv: liveInvocation() }));
     } finally {
       output.restore();
     }
 
-    expect(process.exitCode).toBe(3);
+    expect(lastExitCode).toBe(3);
   });
 
   it("NEGATIVE: plan-promote exits 4 (VALIDATION_ERROR) when the target is not a plan", async () => {
@@ -563,12 +567,12 @@ describe("lore gate plan-promote / task-claim — doc resolution failures", () =
     const cmd = await importGateSubCommand("plan-promote");
     const output = captureOutput();
     try {
-      await cmd.run({ args: { plan: specSlug }, inv: liveInvocation() });
+      lastExitCode = await runHandlerForExit(() => cmd.run({ args: { plan: specSlug }, inv: liveInvocation() }));
     } finally {
       output.restore();
     }
 
-    expect(process.exitCode).toBe(4);
+    expect(lastExitCode).toBe(4);
   });
 
   it("ERROR: task-claim exits 3 (DOC_NOT_FOUND) when the task does not resolve", async () => {
@@ -578,12 +582,12 @@ describe("lore gate plan-promote / task-claim — doc resolution failures", () =
     const cmd = await importGateSubCommand("task-claim");
     const output = captureOutput();
     try {
-      await cmd.run({ args: { task: "does-not-exist-slug" }, inv: liveInvocation() });
+      lastExitCode = await runHandlerForExit(() => cmd.run({ args: { task: "does-not-exist-slug" }, inv: liveInvocation() }));
     } finally {
       output.restore();
     }
 
-    expect(process.exitCode).toBe(3);
+    expect(lastExitCode).toBe(3);
   });
 
   it("NEGATIVE: task-claim exits 4 (VALIDATION_ERROR) when the target is not a task", async () => {
@@ -592,12 +596,12 @@ describe("lore gate plan-promote / task-claim — doc resolution failures", () =
     const cmd = await importGateSubCommand("task-claim");
     const output = captureOutput();
     try {
-      await cmd.run({ args: { task: planSlug }, inv: liveInvocation() });
+      lastExitCode = await runHandlerForExit(() => cmd.run({ args: { task: planSlug }, inv: liveInvocation() }));
     } finally {
       output.restore();
     }
 
-    expect(process.exitCode).toBe(4);
+    expect(lastExitCode).toBe(4);
   });
 });
 
@@ -611,13 +615,13 @@ describe("lore gate plan-promote / task-claim — STATE: LORE_GATE_BYPASS=1", ()
     const cmd = await importGateSubCommand("plan-promote");
     const output = captureOutput();
     try {
-      await cmd.run({ args: { plan: planSlug }, inv: liveInvocation() });
+      lastExitCode = await runHandlerForExit(() => cmd.run({ args: { plan: planSlug }, inv: liveInvocation() }));
     } finally {
       output.restore();
       delete process.env["LORE_GATE_BYPASS"];
     }
 
-    expect(process.exitCode).toBe(0);
+    expect(lastExitCode).toBe(0);
   });
 
   it("task-claim exits 0 even with an unapproved ancestor spec, when bypassed", async () => {
@@ -628,13 +632,13 @@ describe("lore gate plan-promote / task-claim — STATE: LORE_GATE_BYPASS=1", ()
     const cmd = await importGateSubCommand("task-claim");
     const output = captureOutput();
     try {
-      await cmd.run({ args: { task: taskSlug }, inv: liveInvocation() });
+      lastExitCode = await runHandlerForExit(() => cmd.run({ args: { task: taskSlug }, inv: liveInvocation() }));
     } finally {
       output.restore();
       delete process.env["LORE_GATE_BYPASS"];
     }
 
-    expect(process.exitCode).toBe(0);
+    expect(lastExitCode).toBe(0);
   });
 });
 
@@ -653,23 +657,23 @@ describe("lore gate plan-promote / task-claim — AC-P2-SOFTDEL: soft-deleted an
     const preCmd = await importGateSubCommand("plan-promote");
     let output = captureOutput();
     try {
-      await preCmd.run({ args: { plan: planSlug }, inv: liveInvocation() });
+      lastExitCode = await runHandlerForExit(() => preCmd.run({ args: { plan: planSlug }, inv: liveInvocation() }));
     } finally {
       output.restore();
     }
-    expect(process.exitCode).toBe(0);
+    expect(lastExitCode).toBe(0);
 
     await softDeleteDoc(specId);
 
     const cmd = await importGateSubCommand("plan-promote");
     output = captureOutput();
     try {
-      await cmd.run({ args: { plan: planSlug }, inv: liveInvocation() });
+      lastExitCode = await runHandlerForExit(() => cmd.run({ args: { plan: planSlug }, inv: liveInvocation() }));
     } finally {
       output.restore();
     }
 
-    expect(process.exitCode).toBe(4);
+    expect(lastExitCode).toBe(4);
     const stdoutText = output.stdout.join("\n");
     expect(stdoutText).toContain("UPSTREAM_DELETED");
   });
@@ -684,23 +688,23 @@ describe("lore gate plan-promote / task-claim — AC-P2-SOFTDEL: soft-deleted an
     const preCmd = await importGateSubCommand("task-claim");
     let output = captureOutput();
     try {
-      await preCmd.run({ args: { task: taskSlug }, inv: liveInvocation() });
+      lastExitCode = await runHandlerForExit(() => preCmd.run({ args: { task: taskSlug }, inv: liveInvocation() }));
     } finally {
       output.restore();
     }
-    expect(process.exitCode).toBe(0);
+    expect(lastExitCode).toBe(0);
 
     await softDeleteDoc(specId);
 
     const cmd = await importGateSubCommand("task-claim");
     output = captureOutput();
     try {
-      await cmd.run({ args: { task: taskSlug }, inv: liveInvocation() });
+      lastExitCode = await runHandlerForExit(() => cmd.run({ args: { task: taskSlug }, inv: liveInvocation() }));
     } finally {
       output.restore();
     }
 
-    expect(process.exitCode).toBe(4);
+    expect(lastExitCode).toBe(4);
     const stdoutText = output.stdout.join("\n");
     expect(stdoutText).toContain("UPSTREAM_DELETED");
   });
@@ -717,13 +721,13 @@ describe("lore gate plan-promote / task-claim — AC-P2-SOFTDEL: soft-deleted an
     const cmd = await importGateSubCommand("plan-promote");
     const output = captureOutput();
     try {
-      await cmd.run({ args: { plan: planSlug }, inv: liveInvocation() });
+      lastExitCode = await runHandlerForExit(() => cmd.run({ args: { plan: planSlug }, inv: liveInvocation() }));
     } finally {
       output.restore();
     }
 
-    expect(process.exitCode).not.toBe(0);
-    expect(process.exitCode).toBe(4);
+    expect(lastExitCode).not.toBe(0);
+    expect(lastExitCode).toBe(4);
   });
 });
 
@@ -740,19 +744,19 @@ describe("lore gate — REGRESSION: plan-promote and task-claim agree on the sam
     // -- both blocked while draft --
     let output = captureOutput();
     try {
-      await planCmd.run({ args: { plan: planSlug }, inv: liveInvocation() });
+      lastExitCode = await runHandlerForExit(() => planCmd.run({ args: { plan: planSlug }, inv: liveInvocation() }));
     } finally {
       output.restore();
     }
-    expect(process.exitCode).toBe(4);
+    expect(lastExitCode).toBe(4);
 
     output = captureOutput();
     try {
-      await taskCmd.run({ args: { task: taskSlug }, inv: liveInvocation() });
+      lastExitCode = await runHandlerForExit(() => taskCmd.run({ args: { task: taskSlug }, inv: liveInvocation() }));
     } finally {
       output.restore();
     }
-    expect(process.exitCode).toBe(4);
+    expect(lastExitCode).toBe(4);
 
     // -- approve the spec + add AC: plan-promote passes, task-claim passes --
     // The criterion goes in BEFORE the approval: ac add on an approved spec is refused (record-edit gate).
@@ -761,19 +765,19 @@ describe("lore gate — REGRESSION: plan-promote and task-claim agree on the sam
 
     output = captureOutput();
     try {
-      await planCmd.run({ args: { plan: planSlug }, inv: liveInvocation() });
+      lastExitCode = await runHandlerForExit(() => planCmd.run({ args: { plan: planSlug }, inv: liveInvocation() }));
     } finally {
       output.restore();
     }
-    expect(process.exitCode).toBe(0);
+    expect(lastExitCode).toBe(0);
 
     output = captureOutput();
     try {
-      await taskCmd.run({ args: { task: taskSlug }, inv: liveInvocation() });
+      lastExitCode = await runHandlerForExit(() => taskCmd.run({ args: { task: taskSlug }, inv: liveInvocation() }));
     } finally {
       output.restore();
     }
-    expect(process.exitCode).toBe(0);
+    expect(lastExitCode).toBe(0);
   });
 });
 
@@ -807,12 +811,12 @@ describe("lore gate task-claim — AC-P2-ANCHOR: anchor-overlap parity with `lor
     const cmd = await importGateSubCommand("task-claim");
     const output = captureOutput();
     try {
-      await asSessionActor("agent:b", () => cmd.run({ args: { task: taskBSlug }, inv: liveInvocation() }));
+      lastExitCode = await asSessionActor("agent:b", () => runHandlerForExit(() => cmd.run({ args: { task: taskBSlug }, inv: liveInvocation() })));
     } finally {
       output.restore();
     }
 
-    expect(process.exitCode).toBe(4);
+    expect(lastExitCode).toBe(4);
     const stdoutText = output.stdout.join("\n");
     expect(stdoutText).toContain("ANCHOR_OVERLAP");
     expect(stdoutText).toContain(taskASlug);
@@ -837,11 +841,11 @@ describe("lore gate task-claim — AC-P2-ANCHOR: anchor-overlap parity with `lor
     // -- blocked while task A's claim is live --
     let output = captureOutput();
     try {
-      await asSessionActor("agent:b", () => cmd.run({ args: { task: taskBSlug }, inv: liveInvocation() }));
+      lastExitCode = await asSessionActor("agent:b", () => runHandlerForExit(() => cmd.run({ args: { task: taskBSlug }, inv: liveInvocation() })));
     } finally {
       output.restore();
     }
-    expect(process.exitCode).toBe(4);
+    expect(lastExitCode).toBe(4);
 
     // -- release task A's claim --
     await releaseTask(taskAId, "agent:a");
@@ -849,13 +853,13 @@ describe("lore gate task-claim — AC-P2-ANCHOR: anchor-overlap parity with `lor
     // -- the SAME gate call now passes --
     output = captureOutput();
     try {
-      await asSessionActor("agent:b", () => cmd.run({ args: { task: taskBSlug }, inv: liveInvocation() }));
+      lastExitCode = await asSessionActor("agent:b", () => runHandlerForExit(() => cmd.run({ args: { task: taskBSlug }, inv: liveInvocation() })));
     } finally {
       output.restore();
     }
-    expect(process.exitCode).toBe(0);
+    expect(lastExitCode).toBe(0);
     expect(output.stdout.join("\n")).toContain("gate: pass");
-    expect(process.exitCode).not.toBe(4);
+    expect(lastExitCode).not.toBe(4);
   });
 
   // The following pair replaces a single test that asserted only the exempt branch —
@@ -891,12 +895,12 @@ describe("lore gate task-claim — AC-P2-ANCHOR: anchor-overlap parity with `lor
     setSessionEnv("CLAUDE_CODE_SESSION_ID", "3de02220-same-session");
     const output = captureOutput();
     try {
-      await cmd.run({ args: { task: taskBSlug }, inv: liveInvocation() });
+      lastExitCode = await runHandlerForExit(() => cmd.run({ args: { task: taskBSlug }, inv: liveInvocation() }));
     } finally {
       output.restore();
     }
 
-    expect(process.exitCode).toBe(0);
+    expect(lastExitCode).toBe(0);
     expect(output.stdout.join("\n")).toContain("gate: pass");
   });
 
@@ -918,18 +922,18 @@ describe("lore gate task-claim — AC-P2-ANCHOR: anchor-overlap parity with `lor
     // No session on either side: the name the gate resolves is the fallback tier's (OS user / worktree
     // name), so the holder is recorded under exactly that name — same actor, nothing measured.
     setSessionEnv(null);
-    await claimTask(taskAId, resolveActor(undefined, process.env, process.cwd(), liveInvocation().user));
+    await claimTask(taskAId, resolveActor(liveIo(), undefined, process.env, process.cwd(), liveInvocation().user));
 
     const cmd = await importGateSubCommand("task-claim");
     setSessionEnv(null);
     const output = captureOutput();
     try {
-      await cmd.run({ args: { task: taskBSlug }, inv: liveInvocation() });
+      lastExitCode = await runHandlerForExit(() => cmd.run({ args: { task: taskBSlug }, inv: liveInvocation() }));
     } finally {
       output.restore();
     }
 
-    expect(process.exitCode).toBe(4);
+    expect(lastExitCode).toBe(4);
     expect(output.stdout.join("\n")).toContain("ANCHOR_OVERLAP_SESSION_UNMEASURED");
   });
 
@@ -947,12 +951,12 @@ describe("lore gate task-claim — AC-P2-ANCHOR: anchor-overlap parity with `lor
     const cmd = await importGateSubCommand("task-claim");
     const output = captureOutput();
     try {
-      await asSessionActor("agent:b", () => cmd.run({ args: { task: taskBSlug }, inv: liveInvocation() }));
+      lastExitCode = await asSessionActor("agent:b", () => runHandlerForExit(() => cmd.run({ args: { task: taskBSlug }, inv: liveInvocation() })));
     } finally {
       output.restore();
     }
 
-    expect(process.exitCode).toBe(0);
+    expect(lastExitCode).toBe(0);
   });
 
   it("STATE: candidate task itself declares no anchors → vacuous pass regardless of a conflicting-looking sibling", async () => {
@@ -971,11 +975,11 @@ describe("lore gate task-claim — AC-P2-ANCHOR: anchor-overlap parity with `lor
     const cmd = await importGateSubCommand("task-claim");
     const output = captureOutput();
     try {
-      await asSessionActor("agent:b", () => cmd.run({ args: { task: taskBSlug }, inv: liveInvocation() }));
+      lastExitCode = await asSessionActor("agent:b", () => runHandlerForExit(() => cmd.run({ args: { task: taskBSlug }, inv: liveInvocation() })));
     } finally {
       output.restore();
     }
 
-    expect(process.exitCode).toBe(0);
+    expect(lastExitCode).toBe(0);
   });
 });

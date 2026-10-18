@@ -74,6 +74,7 @@
  */
 
 import { defineCommand } from "citty";
+
 import { ok, ruleIdPrefixOfNode } from "@lore/core";
 import type { DocRecord, LoreError, Result } from "@lore/core";
 import {
@@ -98,6 +99,7 @@ import { composeWithStructuredExtraNotice, type RenderedBodyFacts } from "../get
 import type { LockState } from "@lore/core";
 import type { StoreInterface } from "../../../store/store-interface.js";
 import { invocationOf } from "../command-invocation.js";
+import { printLine } from "../output.js";
 
 /**
  * BR-1008 relation view for `doc`: `implements` for a spec, `implemented_by` for a baseline node
@@ -203,9 +205,8 @@ export default defineCommand({
       const result = await app.corpusService.get(args.id);
 
       if (!result.ok) {
-        process.stderr.write(formatErrorFor(inv, result.error) + "\n");
-        process.exitCode = exitCode(result.error);
-        return;
+        inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
+        return exitCode(result.error);
       }
 
       const { doc, navigation } = result.value;
@@ -228,7 +229,7 @@ export default defineCommand({
           acceptanceCriteriaProjected = resolveResult.value.acceptanceCriteria !== undefined;
           codeAnchorsProjected = resolveResult.value.codeAnchors !== undefined;
           for (const warning of resolveResult.value.warnings) {
-            process.stderr.write(`Warning: ${warning.message}\n`);
+            inv.io.stderr.write(`Warning: ${warning.message}\n`);
           }
         }
         // SPEC-043 D4 — banner-prefixed, MDX-spliced body from the SAME shared seam
@@ -246,18 +247,16 @@ export default defineCommand({
       // row has no attested write: it reads `unattested` with its stored author.
       const latest = await loadVersionAttributions(attributionStore, doc.id, 1);
       if (!latest.ok) {
-        process.stderr.write(formatErrorFor(inv, latest.error) + "\n");
-        process.exitCode = exitCode(latest.error);
-        return;
+        inv.io.stderr.write(formatErrorFor(inv, latest.error) + "\n");
+        return exitCode(latest.error);
       }
       const attribution: WriteAttribution = latest.value[0]?.attribution ?? { attested: UNATTESTED, claimed: doc.created_by };
 
       // BR-1008 — Implements (spec) / Implemented by (baseline node), computed from citations on demand.
       const relations = await loadSpecRelations(app, doc);
       if (!relations.ok) {
-        process.stderr.write(formatErrorFor(inv, relations.error) + "\n");
-        process.exitCode = exitCode(relations.error);
-        return;
+        inv.io.stderr.write(formatErrorFor(inv, relations.error) + "\n");
+        return exitCode(relations.error);
       }
 
       // Standing / Corrections / Later changed by — human view only (the --json payload is unchanged). Standing
@@ -265,18 +264,16 @@ export default defineCommand({
       let humanStanding: string[] = [];
       if (!args.json) {
         if (app.recordLockService === undefined) {
-          process.stderr.write("Error: RecordLockService is not wired on App; cannot resolve Standing.\n");
-          process.exitCode = 1;
-          return;
+          inv.io.stderr.write("Error: RecordLockService is not wired on App; cannot resolve Standing.\n");
+          return 1;
         }
         const lock = await app.recordLockService.resolve(doc);
         const corrections = await countCorrections(attributionStore, doc.id);
         const later = await loadLaterChanges(attributionStore, doc);
         const failure = [lock, corrections, later].find((r) => !r.ok);
         if (failure !== undefined && !failure.ok) {
-          process.stderr.write(formatErrorFor(inv, failure.error) + "\n");
-          process.exitCode = exitCode(failure.error);
-          return;
+          inv.io.stderr.write(formatErrorFor(inv, failure.error) + "\n");
+          return exitCode(failure.error);
         }
         if (lock.ok && corrections.ok && later.ok) {
           humanStanding = [formatStandingLine(lock.value)];
@@ -296,25 +293,25 @@ export default defineCommand({
         const data = resolvedComponents !== undefined
           ? { ...result.value, validity_status: validityStatus, attribution, ...relations.value.json, resolved_components: resolvedComponents }
           : { ...result.value, validity_status: validityStatus, attribution, ...relations.value.json };
-        console.log(JSON.stringify({ ok: true, data }, null, 2));
+        printLine(inv.io.stdout, JSON.stringify({ ok: true, data }, null, 2));
         return;
       }
 
       // Human-readable display
       const divider = "─".repeat(60);
-      console.log(`── ${formatShortId(doc.id)} ${doc.title} ${divider.slice(0, 40)}`);
-      console.log(
+      printLine(inv.io.stdout, `── ${formatShortId(doc.id)} ${doc.title} ${divider.slice(0, 40)}`);
+      printLine(inv.io.stdout, 
         `Type: ${doc.type} | Status: ${doc.status} | Priority: ${doc.priority} | v${doc.version}`,
       );
-      console.log(
+      printLine(inv.io.stdout, 
         `Created: ${doc.created_at.slice(0, 10)} by ${doc.created_by} | Updated: ${doc.updated_at.slice(0, 10)}`,
       );
-      console.log(`Last write: ${formatAttributionLabels(attribution)}`);
-      for (const line of humanStanding) console.log(line);
+      printLine(inv.io.stdout, `Last write: ${formatAttributionLabels(attribution)}`);
+      for (const line of humanStanding) printLine(inv.io.stdout, line);
       if (doc.tags.length > 0) {
-        console.log(`Tags: ${doc.tags.join(", ")}`);
+        printLine(inv.io.stdout, `Tags: ${doc.tags.join(", ")}`);
       }
-      console.log("");
+      printLine(inv.io.stdout, "");
       // Loss notice (placement rules 1-3 in the module header): reached only on the human
       // path, never gated on --raw, welded directly onto the body it describes via the
       // SHARED joiner. `(no content)` is substituted BEFORE the weld, so an empty-bodied
@@ -325,15 +322,15 @@ export default defineCommand({
         codeAnchorsProjected,
         nowIso: new Date().toISOString(),
       };
-      console.log(
+      printLine(inv.io.stdout, 
         composeWithStructuredExtraNotice(displayBody || "(no content)", doc, renderedBodyFacts, "below-body"),
       );
-      console.log("");
+      printLine(inv.io.stdout, "");
       if (relations.value.lines.length > 0) {
-        console.log(relations.value.lines.join("\n"));
-        console.log("");
+        printLine(inv.io.stdout, relations.value.lines.join("\n"));
+        printLine(inv.io.stdout, "");
       }
-      console.log(formatNavigation(navigation));
+      printLine(inv.io.stdout, formatNavigation(navigation));
     } finally {
       attributionStore.close();
       app.close();

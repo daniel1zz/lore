@@ -25,7 +25,7 @@ import type { App } from "../../../src/app.js";
 import type { CreateDocInput, DocRecord } from "@lore/core";
 import { RESUME_SCOPE_CLOSURE } from "@lore/core";
 import { makeRuleService } from "../../helpers/make-rule-service.js";
-import { actedStore } from "../../live-invocation.js";
+import { actedStore, liveIo } from "../../live-invocation.js";
 
 const T_SETUP = "2026-03-01T08:00:00.000Z";
 const T_CLAIM = "2026-03-01T10:00:00.000Z";
@@ -93,7 +93,8 @@ async function claimAt(task: DocRecord, iso: string): Promise<void> {
 }
 
 async function feedFor(plan: DocRecord): Promise<string> {
-  const r = await buildResumeFeed(app, { plan: plan.slug }, { env: process.env, tmpDir: tmpdir(), cwd: process.cwd(), user: userInfo().username });
+  const r = await buildResumeFeed(app, { plan: plan.slug }, {
+    io: liveIo(), env: process.env, tmpDir: tmpdir(), cwd: process.cwd(), user: userInfo().username });
   if (!r.ok) throw new Error(`buildResumeFeed failed: ${JSON.stringify(r.error)}`);
   return r.value.feed;
 }
@@ -151,7 +152,8 @@ describe("lore feed session-resume prints the BL-15 rule diff", () => {
 
   it("an unknown --plan fails the feed instead of printing nothing", async () => {
     await makeFixture();
-    const r = await buildResumeFeed(app, { plan: "no-such-plan" }, { env: process.env, tmpDir: tmpdir(), cwd: process.cwd(), user: userInfo().username });
+    const r = await buildResumeFeed(app, { plan: "no-such-plan" }, {
+    io: liveIo(), env: process.env, tmpDir: tmpdir(), cwd: process.cwd(), user: userInfo().username });
     expect(r.ok).toBe(false);
   });
 });

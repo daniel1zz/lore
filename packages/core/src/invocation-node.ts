@@ -25,7 +25,7 @@ type EnvBag = Readonly<Record<string, string | undefined>>;
 /** Policy the lore entry injects; each takes already-read values and reads no ambient state itself. */
 export interface InvocationResolvers {
   /** BR-813: `--claude-dir` (found in `argv`) > `CLAUDE_CONFIG_DIR` > `<home>/.claude`. */
-  readonly claudeDir: (input: { argv: readonly string[]; env: EnvBag; home: string }) => string;
+  readonly claudeDir: (input: { argv: readonly string[]; env: EnvBag; home: string; cwd: string }) => string;
   /** BR-1012/BR-1065. */
   readonly userConfigDir: (env: EnvBag, home: string) => string;
   /** Linked-worktree name tier of the claimed identity; `undefined` when `cwd` is not a linked worktree. */
@@ -65,7 +65,7 @@ export function resolveInvocation(rawArgv: readonly string[], resolvers: Invocat
     argv,
     paths: Object.freeze({
       home,
-      claudeDir: resolvers.claudeDir({ argv, env, home }),
+      claudeDir: resolvers.claudeDir({ argv, env, home, cwd }),
       userConfigDir: resolvers.userConfigDir(env, home),
       projectRoot: resolvers.projectRoot(cwd),
       tmpDir: tmpdir(),

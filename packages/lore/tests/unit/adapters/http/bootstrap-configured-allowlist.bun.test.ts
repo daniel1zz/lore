@@ -64,7 +64,7 @@ import { MigrationService } from "../../../../src/service/migration-service.js";
 import { TreeCheckService } from "../../../../src/service/tree-check-service.js";
 import { NoOpTelemetry } from "@lore/core";
 import type { App } from "../../../../src/app.js";
-import { actedStore } from "../../../live-invocation.js";
+import { actedStore, liveIo } from "../../../live-invocation.js";
 
 // ─── Setup ────────────────────────────────────────────────────────────────────
 
@@ -92,6 +92,7 @@ async function makeTestServer(allowedOrigins?: readonly string[]): Promise<TestC
   const machineAuth = createMachineAuthStores({ baseDir: machineAuthTmpDir });
 
   const app: App = {
+    warn: () => undefined,
     corpusService: new CorpusService(docStore, new RecordLockService(docStore, new GateEnforcer(undefined))),
     reviewService: new ReviewService(docStore, new RecordLockService(docStore, new GateEnforcer(undefined))),
     versionService: new VersionService(docStore, new RecordLockService(docStore, new GateEnforcer(undefined))),
@@ -124,6 +125,7 @@ async function makeTestServer(allowedOrigins?: readonly string[]): Promise<TestC
   // Port 0 → OS assigns a free port. `machineAuth` injected explicitly so the lazy
   // XDG-path resolution in index.ts is never triggered.
   const server = startHttpServer(app, {
+    io: liveIo(),
     port: 0,
     host: "127.0.0.1",
     machineAuth,

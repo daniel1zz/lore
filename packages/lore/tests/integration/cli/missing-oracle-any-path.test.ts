@@ -48,6 +48,7 @@ interface RunResult {
 async function runLore(args: string[]): Promise<RunResult> {
   const proc = await runLoreInProcess(args, {
     cwd: dir,
+    home: dir,
     env: { ...process.env, HOME: dir, EDITOR: "true", LORE_ACTOR: "agent:missing-oracle-any-path-test" },
   });
   return { stdout: proc.stdout, stderr: proc.stderr, exitCode: proc.exitCode };

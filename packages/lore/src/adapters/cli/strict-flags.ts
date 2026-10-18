@@ -49,7 +49,7 @@
  * Side-effect class: `findUnknownFlag` and `findSingleDashViolation` are pure
  * (no IO). `wrapCommandStrict` is pure with respect to its OWN inputs
  * (returns a new object, never mutates `cmd`), but the `run` function it
- * PRODUCES calls `process.stderr.write` + `process.exit(2)` on a violation —
+ * PRODUCES calls `process.stderr.write` + `exitCli(2)` on a violation —
  * that IO is the composition site's job (there is no other place to put it:
  * citty commands are the only thing that runs before a service call).
  *
@@ -62,12 +62,12 @@
  * Exit-code note: SPEC-051's Design section describes this as "exit 2
  * (usage-error code, same as citty's own missing-required-argument
  * failures)". Empirically, citty's OWN missing-required-argument path exits
- * with code 1 (`runMain`'s catch-all always calls `process.exit(1)`,
+ * with code 1 (`runMain`'s catch-all always calls `exitCli(1)`,
  * regardless of `CLIError` — verified by running `lore create` with no
  * `<TYPE>` positional). The ACTUAL existing "usage error" convention this
  * codebase follows for CLI-level input contradictions (`--ai`/`--no-ai`
  * mutex in `assess.ts`, `--diff`/`--diff-file` mutex, etc.) is a manual
- * `process.stderr.write(...)` + `process.exit(2)` — exit 2 is also SPEC-051's
+ * `process.stderr.write(...)` + `exitCli(2)` — exit 2 is also SPEC-051's
  * own explicit, AC-tested requirement (AC-051-4, D3's `link ... --kind
  * blocks` fixture). This module follows THAT established exit-2 convention,
  * not citty's internal (and differently-coded) CLIError path.
@@ -76,6 +76,8 @@
  */
 
 import type { ArgsDef, CommandContext, CommandDef, Resolvable } from "citty";
+import { exitCli } from "./cli-exit.js";
+import { invocationOf } from "./command-invocation.js";
 
 // ─── Declared-flag derivation (mirrors citty's own resolveArgs) ────────────
 
@@ -393,13 +395,15 @@ export async function wrapCommandStrict(cmd: CommandDef<any>, commandPath: strin
   if (typeof cmd.run === "function") {
     const originalRun = cmd.run;
     wrapped.run = async (context: CommandContext) => {
+      // reason: `deliverInvocation` (index.ts) wraps OUTSIDE this wrapper, so the context here already carries `inv`.
+      const { io } = invocationOf(context);
       const argsDef = (await resolveMaybe(context.cmd.args)) ?? {};
       const unknownFlag = findUnknownFlag(context.rawArgs, argsDef);
       if (unknownFlag !== null) {
-        process.stderr.write(
+        io.stderr.write(
           `Error: Unknown option: ${unknownFlag}\n` + `  Run \`${commandPath} --help\` to see valid options.\n`,
         );
-        process.exit(2);
+        exitCli(2);
       }
       // SPEC-073 D1: single-dash multi-char tokens (`-json`, `-yes`) silently
       // mis-parse under citty's vendored non-strict parser (this module's
@@ -409,12 +413,12 @@ export async function wrapCommandStrict(cmd: CommandDef<any>, commandPath: strin
       if (singleDashViolation !== null) {
         const suggestionLine =
           singleDashViolation.suggestion !== null ? `  Did you mean ${singleDashViolation.suggestion}?\n` : "";
-        process.stderr.write(
+        io.stderr.write(
           `Error: Unknown option: ${singleDashViolation.token}\n` +
             suggestionLine +
             `  Run \`${commandPath} --help\` to see valid options.\n`,
         );
-        process.exit(2);
+        exitCli(2);
       }
       return originalRun(context);
     };

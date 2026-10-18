@@ -194,7 +194,7 @@ beforeEach(() => {
   originalExitCode = process.exitCode;
   process.exitCode = undefined;
   stderrSpy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
-  logSpy = vi.spyOn(console, "log").mockImplementation(() => undefined);
+  logSpy = vi.spyOn(process.stdout, "write").mockImplementation((() => true) as never);
 
   listMock.mockReset();
   getMock.mockReset();

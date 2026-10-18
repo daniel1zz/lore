@@ -51,6 +51,7 @@ import {
   registerDashboardShutdownSignals,
   type DashboardShutdownDeps,
 } from "../../../../src/adapters/cli/dashboard-lifecycle.js";
+import { liveIo } from "../../../live-invocation.js";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -85,7 +86,7 @@ describe("createDashboardTeardown", () => {
   describe("happy path", () => {
     it("runs every teardown step exactly once", async () => {
       const { deps, calls } = makeDeps();
-      const teardown = createDashboardTeardown(deps);
+      const teardown = createDashboardTeardown(liveIo(), deps);
       await teardown("SIGTERM");
 
       expect(calls.vite).toBe(1);
@@ -102,7 +103,7 @@ describe("createDashboardTeardown", () => {
     it("mountRegistry omitted (undefined) — teardown completes, never calls closeAll", async () => {
       const { deps: fullDeps, calls } = makeDeps();
       const { mountRegistry: _unused, ...depsWithoutRegistry } = fullDeps;
-      const teardown = createDashboardTeardown(depsWithoutRegistry);
+      const teardown = createDashboardTeardown(liveIo(), depsWithoutRegistry);
       await teardown("SIGTERM");
 
       expect(calls.mountRegistry).toBe(0);
@@ -118,7 +119,7 @@ describe("createDashboardTeardown", () => {
       const { deps, calls } = makeDeps({
         vite: { kill: vi.fn(() => { throw new Error("already exited"); }) },
       });
-      const teardown = createDashboardTeardown(deps);
+      const teardown = createDashboardTeardown(liveIo(), deps);
       await teardown("SIGTERM");
 
       expect(calls.server).toBe(1);
@@ -131,7 +132,7 @@ describe("createDashboardTeardown", () => {
       const { deps, calls } = makeDeps({
         mountRegistry: { closeAll: vi.fn(async () => { throw new Error("close failed"); }) },
       });
-      const teardown = createDashboardTeardown(deps);
+      const teardown = createDashboardTeardown(liveIo(), deps);
       await teardown("SIGTERM");
 
       expect(calls.app).toBe(1);
@@ -144,7 +145,7 @@ describe("createDashboardTeardown", () => {
       const { deps, calls } = makeDeps({
         server: { stop: vi.fn(() => { throw new Error("already stopped"); }) },
       });
-      const teardown = createDashboardTeardown(deps);
+      const teardown = createDashboardTeardown(liveIo(), deps);
       await teardown("SIGTERM");
 
       expect(calls.mountRegistry).toBe(1);
@@ -156,7 +157,7 @@ describe("createDashboardTeardown", () => {
   describe("state transitions", () => {
     it("calling the same teardown twice is a no-op the second time", async () => {
       const { deps, calls } = makeDeps();
-      const teardown = createDashboardTeardown(deps);
+      const teardown = createDashboardTeardown(liveIo(), deps);
       await teardown("SIGTERM");
       await teardown("SIGINT");
 
@@ -175,7 +176,7 @@ describe("registerDashboardShutdownSignals", () => {
   describe("happy path — SIGTERM (AC-1)", () => {
     it("emitting SIGTERM runs the full teardown exactly once and calls onDone", async () => {
       const { deps, calls } = makeDeps();
-      const teardown = createDashboardTeardown(deps);
+      const teardown = createDashboardTeardown(liveIo(), deps);
       const onDone = vi.fn();
       registerDashboardShutdownSignals(teardown, onDone);
 
@@ -194,7 +195,7 @@ describe("registerDashboardShutdownSignals", () => {
   describe("regression — SIGINT produces the identical call pattern (AC-2)", () => {
     it("emitting SIGINT alone runs the exact same teardown steps SIGTERM does", async () => {
       const { deps, calls } = makeDeps();
-      const teardown = createDashboardTeardown(deps);
+      const teardown = createDashboardTeardown(liveIo(), deps);
       const onDone = vi.fn();
       registerDashboardShutdownSignals(teardown, onDone);
 
@@ -211,7 +212,7 @@ describe("registerDashboardShutdownSignals", () => {
 
     it("SIGINT and SIGTERM are wired to the SAME teardown reference — whichever fires first tears down; the other is a no-op (idempotency guard, not a second run)", async () => {
       const { deps, calls } = makeDeps();
-      const teardown = createDashboardTeardown(deps);
+      const teardown = createDashboardTeardown(liveIo(), deps);
       const onDone = vi.fn();
       registerDashboardShutdownSignals(teardown, onDone);
 

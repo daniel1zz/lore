@@ -35,6 +35,7 @@
  */
 
 import { readFileSync, realpathSync } from "node:fs";
+
 import { dirname } from "node:path";
 import { defineCommand } from "citty";
 import type { Invocation } from "@lore/core";
@@ -56,6 +57,9 @@ import { findLoreDbPathQuiet } from "../corpus-resolution.js";
 import { loadLoreApp } from "../loader.js";
 import { formatTrail, narrowTrail } from "../session-trail-render.js";
 import { exitCode, formatError, formatErrorFor } from "../utils.js";
+import { printLine } from "../output.js";
+import type { CliIo } from "../output.js";
+import type { ExitReport } from "../cli-exit.js";
 
 const RESERVED_SUBCOMMANDS = new Set(["list", "show", "trail", "trail-review"]);
 
@@ -102,34 +106,35 @@ function formatTrailReview(view: TrailReviewView): string {
 }
 
 /** Refuses a trail verb (`trail` | `trail-review`): exit 4 naming the trail-access rule. */
-function refuseTrailAccess(verb: "trail" | "trail-review", reason: string): void {
-  process.stderr.write(`Error: ${reason} (${TRAIL_ACCESS_RULE}: \`lore session ${verb}\` reads only the calling run's own session trail)\n`);
-  process.exitCode = 4;
+function refuseTrailAccess(io: CliIo, verb: "trail" | "trail-review", reason: string): number {
+  io.stderr.write(`Error: ${reason} (${TRAIL_ACCESS_RULE}: \`lore session ${verb}\` reads only the calling run's own session trail)\n`);
+  return 4;
 }
 
 /**
- * The session of the caller's VERIFIED attested run, or null after writing the refusal (exit 4 no run / non-`cc:` run;
- * the identity error's own exit code when verification fails).
+ * The session of the caller's VERIFIED attested run, or the exit code of the refusal it already wrote (4 no run /
+ * non-`cc:` run; the identity error's own exit code when verification fails).
  * reason: the run is VERIFIED against the registry (unregistered -> null), so "attested" means attested, not merely claimed.
  */
-async function resolveCallerSession(inv: Invocation, app: Awaited<ReturnType<typeof loadLoreApp>>["app"], verb: "trail" | "trail-review"): Promise<string | null> {
+async function resolveCallerSession(
+  inv: Invocation,
+  app: Awaited<ReturnType<typeof loadLoreApp>>["app"],
+  verb: "trail" | "trail-review",
+): Promise<{ readonly ok: true; readonly session: string } | { readonly ok: false; readonly code: number }> {
   const verified = await app.verifiedInvocationIdentity?.();
   if (verified !== undefined && !verified.ok) {
-    process.stderr.write(formatErrorFor(inv, verified.error) + "\n");
-    process.exitCode = exitCode(verified.error);
-    return null;
+    inv.io.stderr.write(formatErrorFor(inv, verified.error) + "\n");
+    return { ok: false, code: exitCode(verified.error) };
   }
   const callerRun = verified?.value?.harnessRun ?? null;
   if (callerRun === null) {
-    refuseTrailAccess(verb, "no attested run: pass --harness-run or call from an attested harness");
-    return null;
+    return { ok: false, code: refuseTrailAccess(inv.io, verb, "no attested run: pass --harness-run or call from an attested harness") };
   }
   try {
-    return sessionOfRun(callerRun);
+    return { ok: true, session: sessionOfRun(callerRun) };
   } catch (err) {
     if (err instanceof TrailRunIdInvalidError) {
-      refuseTrailAccess(verb, `run ${callerRun} is not a claude-code run (cc:<session>[:<agent>])`);
-      return null;
+      return { ok: false, code: refuseTrailAccess(inv.io, verb, `run ${callerRun} is not a claude-code run (cc:<session>[:<agent>])`) };
     }
     throw err;
   }
@@ -187,46 +192,43 @@ function judgeCoChange(input: {
  * judge against, checked BEFORE the corpus is opened); 3 unknown `--turn`; 4 no attested run / no trail; otherwise the
  * service error's code (the hook turns any non-zero exit into a not-measured line).
  */
-async function runSessionTrailReview(args: { turn?: unknown; json?: unknown }, inv: Invocation): Promise<void> {
+async function runSessionTrailReview(args: { turn?: unknown; json?: unknown }, inv: Invocation): Promise<ExitReport> {
   const emit = (data: Record<string, unknown>): void => {
-    if (args.json) console.log(JSON.stringify({ ok: true, data }, null, 2));
-    else console.log(formatTrailReview(data as unknown as TrailReviewView));
+    if (args.json) printLine(inv.io.stdout, JSON.stringify({ ok: true, data }, null, 2));
+    else printLine(inv.io.stdout, formatTrailReview(data as unknown as TrailReviewView));
   };
-  const dbPath = findLoreDbPathQuiet(inv);
+  const dbPath = findLoreDbPathQuiet(inv.io, inv);
   if (dbPath === undefined) {
     emit({ helpers: [], findings: [], not_measured: [], reason: "no .lore directory" });
     return;
   }
   const { app } = loadLoreApp({ inv });
   try {
-    const session = await resolveCallerSession(inv, app, "trail-review");
-    if (session === null) return;
+    const caller = await resolveCallerSession(inv, app, "trail-review");
+    if (!caller.ok) return caller.code;
+    const session = caller.session;
     let trail: SessionTrail | null;
     try {
       trail = readSessionTrail(session, stateBase(inv.env, inv.paths.home));
     } catch (err) {
       if (err instanceof TrailFileInvalidError) {
-        process.stderr.write(`Error: ${err.message}\n`);
-        process.exitCode = 1;
-        return;
+        inv.io.stderr.write(`Error: ${err.message}\n`);
+        return 1;
       }
       throw err;
     }
     if (trail === null) {
-      refuseTrailAccess("trail-review", `no session trail for session ${session} under ${stateBase(inv.env, inv.paths.home)}`);
-      return;
+      return refuseTrailAccess(inv.io, "trail-review", `no session trail for session ${session} under ${stateBase(inv.env, inv.paths.home)}`);
     }
     const turn = typeof args.turn === "string" ? args.turn : undefined;
     if (turn !== undefined && !trail.turns.some((t) => t.turn === turn)) {
-      process.stderr.write(`Error: session ${session} has no turn "${turn}".\n`);
-      process.exitCode = 3;
-      return;
+      inv.io.stderr.write(`Error: session ${session} has no turn "${turn}".\n`);
+      return 3;
     }
     const runService = app.runService;
     if (runService === undefined) {
-      process.stderr.write("Error: RunService not wired on this App instance.\n");
-      process.exitCode = 1;
-      return;
+      inv.io.stderr.write("Error: RunService not wired on this App instance.\n");
+      return 1;
     }
     const projectRoot = dirname(dirname(dbPath));
     const coChangeRules = loadCoChangeRules(projectRoot, readFileOrNull);
@@ -239,9 +241,8 @@ async function runSessionTrailReview(args: { turn?: unknown; json?: unknown }, i
       ...(coChangeRules.measured ? { coChange: { rules: coChangeRules.rules, matches: createGlobMatcher() } } : {}),
     });
     if (!review.ok) {
-      process.stderr.write(formatErrorFor(inv, review.error) + "\n");
-      process.exitCode = exitCode(review.error);
-      return;
+      inv.io.stderr.write(formatErrorFor(inv, review.error) + "\n");
+      return exitCode(review.error);
     }
     const coChange = judgeCoChange({ rules: coChangeRules, trail, turn, session, helperReview: review.value });
     emit({
@@ -265,18 +266,18 @@ async function runSessionTrail(
   app: Awaited<ReturnType<typeof loadLoreApp>>["app"],
   args: { turn?: unknown; run?: unknown; json?: unknown },
   inv: Invocation,
-): Promise<void> {
-  const refuse = (reason: string): void => refuseTrailAccess("trail", reason);
-  const session = await resolveCallerSession(inv, app, "trail");
-  if (session === null) return;
+): Promise<ExitReport> {
+  const refuse = (reason: string): number => refuseTrailAccess(inv.io, "trail", reason);
+  const caller = await resolveCallerSession(inv, app, "trail");
+  if (!caller.ok) return caller.code;
+  const session = caller.session;
   let runFilter: string | undefined;
   if (typeof args.run === "string") {
     try {
       parseRunId(args.run);
     } catch (err) {
       if (err instanceof TrailRunIdInvalidError) {
-        refuse(`--run ${args.run} is not a claude-code run (cc:<session>[:<agent>])`);
-        return;
+        return refuse(`--run ${args.run} is not a claude-code run (cc:<session>[:<agent>])`);
       }
       throw err;
     }
@@ -287,27 +288,24 @@ async function runSessionTrail(
     trail = readSessionTrail(session, stateBase(inv.env, inv.paths.home));
   } catch (err) {
     if (err instanceof TrailFileInvalidError) {
-      process.stderr.write(`Error: ${err.message}\n`);
-      process.exitCode = 1;
-      return;
+      inv.io.stderr.write(`Error: ${err.message}\n`);
+      return 1;
     }
     throw err;
   }
   if (trail === null) {
-    refuse(`no session trail for session ${session} under ${stateBase(inv.env, inv.paths.home)}`);
-    return;
+    return refuse(`no session trail for session ${session} under ${stateBase(inv.env, inv.paths.home)}`);
   }
   const turn = typeof args.turn === "string" ? args.turn : undefined;
   if (turn !== undefined && !trail.turns.some((t) => t.turn === turn)) {
-    process.stderr.write(`Error: session ${session} has no turn "${turn}".\n`);
-    process.exitCode = 3;
-    return;
+    inv.io.stderr.write(`Error: session ${session} has no turn "${turn}".\n`);
+    return 3;
   }
   const view = narrowTrail(trail, { ...(turn !== undefined ? { turn } : {}), ...(runFilter !== undefined ? { run: runFilter } : {}) });
   if (args.json) {
-    console.log(JSON.stringify({ ok: true, data: view }, null, 2));
+    printLine(inv.io.stdout, JSON.stringify({ ok: true, data: view }, null, 2));
   } else {
-    console.log(formatTrail(view));
+    printLine(inv.io.stdout, formatTrail(view));
   }
 }
 
@@ -395,27 +393,23 @@ export default defineCommand({
     // reason: trail-review decides whether a corpus exists itself (no `.lore/` is a clean "nothing to judge", not the
     // loader's exit 1), so it must run before `loadLoreApp`.
     if (String(args.target) === "trail-review") {
-      await runSessionTrailReview(args, inv);
-      return;
+      return await runSessionTrailReview(args, inv);
     }
     const { app } = loadLoreApp({ inv });
     try {
       if (String(args.target) === "trail") {
-        await runSessionTrail(app, args, inv);
-        return;
+        return await runSessionTrail(app, args, inv);
       }
       if (app.sessionService === undefined) {
-        process.stderr.write("Error: SessionService not wired on this App instance.\n");
-        process.exitCode = 1;
-        return;
+        inv.io.stderr.write("Error: SessionService not wired on this App instance.\n");
+        return 1;
       }
       const sessionService = app.sessionService;
 
       const target = String(args.target);
       if (!RESERVED_SUBCOMMANDS.has(target)) {
-        process.stderr.write(`Error: unknown \`lore session\` subcommand "${target}" — expected "list" or "show".\n`);
-        process.exitCode = 2;
-        return;
+        inv.io.stderr.write(`Error: unknown \`lore session\` subcommand "${target}" — expected "list" or "show".\n`);
+        return 2;
       }
 
       const currentMachine = inv.host;
@@ -442,18 +436,17 @@ export default defineCommand({
 
       const activeSessionsResult = await sessionService.getActiveSessions();
       if (!activeSessionsResult.ok) {
-        process.stderr.write(formatErrorFor(inv, activeSessionsResult.error) + "\n");
-        process.exitCode = exitCode(activeSessionsResult.error);
-        return;
+        inv.io.stderr.write(formatErrorFor(inv, activeSessionsResult.error) + "\n");
+        return exitCode(activeSessionsResult.error);
       }
 
       const records = await sessionService.deriveSessionLiveness(activeSessionsResult.value, currentMachine);
 
       if (target === "list") {
         if (args.json) {
-          console.log(JSON.stringify({ ok: true, data: { sessions: records } }, null, 2));
+          printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { sessions: records } }, null, 2));
         } else {
-          console.log(formatSessionList(records));
+          printLine(inv.io.stdout, formatSessionList(records));
         }
         return;
       }
@@ -461,20 +454,18 @@ export default defineCommand({
       // target === "show"
       const id = typeof args.id === "string" ? args.id : undefined;
       if (id === undefined || id.length === 0) {
-        process.stderr.write("Error: `lore session show` requires a session id: lore session show <id>\n");
-        process.exitCode = 2;
-        return;
+        inv.io.stderr.write("Error: `lore session show` requires a session id: lore session show <id>\n");
+        return 2;
       }
       const match = records.find((r) => r.session_id === id) ?? records.find((r) => r.by === id);
       if (match === undefined) {
-        process.stderr.write(`Error: no session matching "${id}" found.\n`);
-        process.exitCode = 3;
-        return;
+        inv.io.stderr.write(`Error: no session matching "${id}" found.\n`);
+        return 3;
       }
       if (args.json) {
-        console.log(JSON.stringify({ ok: true, data: match }, null, 2));
+        printLine(inv.io.stdout, JSON.stringify({ ok: true, data: match }, null, 2));
       } else {
-        console.log(formatSessionRecord(match));
+        printLine(inv.io.stdout, formatSessionRecord(match));
       }
     } finally {
       app.close();

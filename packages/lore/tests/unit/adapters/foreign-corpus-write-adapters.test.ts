@@ -126,6 +126,7 @@ const stubApiKeyStore = {} as ApiKeyStore;
 
 function makeApp(store: InMemoryStore): App {
   return {
+    warn: () => undefined,
     corpusService: new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined))),
     reviewService: new ReviewService(store, new RecordLockService(store, new GateEnforcer(undefined))),
     versionService: new VersionService(store, new RecordLockService(store, new GateEnforcer(undefined))),
@@ -351,7 +352,7 @@ describe("BOUNDARY — absent caller_cwd is treated exactly like HTTP's null exe
     await call({ type: "prd", title: "AC-CP-5 boundary control", caller_cwd: ownRoot });
 
     expect(resolveCorpusSpy).toHaveBeenCalledTimes(1);
-    expect(resolveCorpusSpy).toHaveBeenCalledWith(ownRoot, expect.anything());
+    expect(resolveCorpusSpy).toHaveBeenCalledWith(expect.anything(), ownRoot, expect.anything());
   });
 });
 

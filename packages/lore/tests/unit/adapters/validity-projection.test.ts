@@ -85,6 +85,7 @@ async function insertDoc(store: InMemoryStore, doc: DocRecord): Promise<DocRecor
  *  validity-feed-and-judge.test.ts's makeApp). */
 function makeApp(corpusService: CorpusService, outlineService: OutlineService): App {
   return {
+    warn: () => undefined,
     corpusService,
     reviewService: null as unknown as App["reviewService"],
     versionService: null as unknown as App["versionService"],

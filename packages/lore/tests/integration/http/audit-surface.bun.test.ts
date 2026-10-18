@@ -24,7 +24,7 @@
  * @spec_ref spec-baseline-close-out-fixes-audit-surface-node-validation AC-BLC-1
  */
 
-import { liveInvocation, actedStore } from "../../live-invocation.js";
+import { liveInvocation, actedStore, liveIo } from "../../live-invocation.js";
 import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
@@ -72,6 +72,7 @@ function makeRig(): Rig {
   const db = store.getDatabase();
   const telemetry = new NoOpTelemetry();
   const app: App = {
+    warn: () => undefined,
     corpusService: new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)), telemetry),
     reviewService: new ReviewService(store, new RecordLockService(store, new GateEnforcer(undefined))),
     versionService: new VersionService(store, new RecordLockService(store, new GateEnforcer(undefined))),
@@ -215,7 +216,8 @@ describe("AC-BLC-1 HTTP surfaces", () => {
     const bearer = await rig.app.apiKeyStore.create("agent-key", "agent");
     if (!bearer.ok) throw new Error("bearer key creation failed");
     bearerKey = bearer.value.rawKey;
-    server = startHttpServer(rig.app, { port: 0, host: "127.0.0.1", machineAuth });
+    server = startHttpServer(rig.app, {
+    io: liveIo(), port: 0, host: "127.0.0.1", machineAuth });
     baseUrl = `http://127.0.0.1:${server.port}`;
   });
   afterAll(() => {

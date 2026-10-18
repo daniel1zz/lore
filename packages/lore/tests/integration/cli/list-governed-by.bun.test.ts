@@ -32,7 +32,10 @@ import { tmpdir } from "os";
 import { createApp } from "../../../src/app.js";
 import type { CreateDocInput } from "@lore/core";
 import { LIST_GOVERNED_BY_CONFLICT } from "../../../src/adapters/cli/cli-refusal-messages.js";
-import { liveInvocation, liveAmbient, liveWriteContext } from "../../live-invocation.js";
+import { liveInvocation, liveAmbient, liveWriteContext, runHandlerForExit } from "../../live-invocation.js";
+
+/** The exit code the most recent command call ended with (commands return it; none sets `process.exitCode`). */
+let lastExitCode = 0;
 import type { Invocation } from "@lore/core";
 
 // ─── Command type + output capture (mirrors pending-judgment-badges.bun.test.ts) ──
@@ -43,22 +46,25 @@ function captureOutput() {
   const stdout: string[] = [];
   const stderr: string[] = [];
   const origStderrWrite = process.stderr.write.bind(process.stderr);
-  const origConsoleLog = console.log.bind(console);
+  const origConsoleLog = process.stdout.write;
 
   (process.stderr as unknown as { write: (chunk: unknown) => boolean }).write = (chunk: unknown) => {
     stderr.push(String(chunk));
     return true;
   };
-  console.log = (...args: unknown[]) => {
+  process.stdout.write = (((chunk: unknown) => {
+    const args: unknown[] = [String(chunk).replace(/\n$/, "")];
     stdout.push(args.join(" "));
-  };
+  
+    return true;
+  }) as typeof process.stdout.write);
 
   return {
     stdout,
     stderr,
     restore: () => {
       (process.stderr as unknown as { write: typeof origStderrWrite }).write = origStderrWrite;
-      console.log = origConsoleLog;
+      process.stdout.write = origConsoleLog;
     },
   };
 }
@@ -74,10 +80,8 @@ async function importListCommand(): Promise<RunnableCommand> {
 
 let tmpDir: string;
 let originalCwd: string;
-let originalExitCode: number | undefined;
 
 beforeEach(() => {
-  process.exitCode = 0;
   tmpDir = resolve(mkdtempSync(join(tmpdir(), "lore-cli-list-governed-by-test-")));
   const loreDir = join(tmpDir, ".lore");
   mkdirSync(loreDir, { recursive: true });
@@ -86,12 +90,10 @@ beforeEach(() => {
   app.close();
 
   originalCwd = process.cwd();
-  originalExitCode = process.exitCode;
   process.chdir(tmpDir);
 });
 
 afterEach(() => {
-  process.exitCode = originalExitCode ?? 0;
   process.chdir(originalCwd);
   try {
     rmSync(tmpDir, { recursive: true, force: true });
@@ -153,12 +155,12 @@ describe("lore list --governed-by — HAPPY", () => {
     const cmd = await importListCommand();
     const output = captureOutput();
     try {
-      await cmd.run({ args: { "governed-by": skill.id, json: true }, inv: liveInvocation() });
+      lastExitCode = await runHandlerForExit(() => cmd.run({ args: { "governed-by": skill.id, json: true }, inv: liveInvocation() }));
     } finally {
       output.restore();
     }
 
-    expect(process.exitCode ?? 0).toBe(0);
+    expect(lastExitCode).toBe(0);
     const parsed = JSON.parse(output.stdout.join("\n")) as {
       ok: boolean;
       data: { docs: Array<{ id: string }>; total: number };
@@ -176,7 +178,7 @@ describe("lore list --governed-by — HAPPY", () => {
     const cmd = await importListCommand();
     const output = captureOutput();
     try {
-      await cmd.run({ args: { "governed-by": skill.slug }, inv: liveInvocation() });
+      lastExitCode = await runHandlerForExit(() => cmd.run({ args: { "governed-by": skill.slug }, inv: liveInvocation() }));
     } finally {
       output.restore();
     }
@@ -198,7 +200,7 @@ describe("lore list --governed-by — NEGATIVE", () => {
     const cmd = await importListCommand();
     const output = captureOutput();
     try {
-      await cmd.run({ args: { "governed-by": skill.id }, inv: liveInvocation() });
+      lastExitCode = await runHandlerForExit(() => cmd.run({ args: { "governed-by": skill.id }, inv: liveInvocation() }));
     } finally {
       output.restore();
     }
@@ -218,12 +220,12 @@ describe("lore list --governed-by — BOUNDARY", () => {
     const cmd = await importListCommand();
     const output = captureOutput();
     try {
-      await cmd.run({ args: { "governed-by": skill.id, type: "task", json: true }, inv: liveInvocation() });
+      lastExitCode = await runHandlerForExit(() => cmd.run({ args: { "governed-by": skill.id, type: "task", json: true }, inv: liveInvocation() }));
     } finally {
       output.restore();
     }
 
-    expect(process.exitCode).toBe(2);
+    expect(lastExitCode).toBe(2);
     expect(output.stdout.join("\n")).toBe(""); // no silent success output
     const stderr = output.stderr.join("\n");
     expect(stderr).toContain(LIST_GOVERNED_BY_CONFLICT);
@@ -237,12 +239,12 @@ describe("lore list --governed-by — BOUNDARY", () => {
     const cmd = await importListCommand();
     const output = captureOutput();
     try {
-      await cmd.run({ args: { "governed-by": skill.id, status: "active", tag: "foo" }, inv: liveInvocation() });
+      lastExitCode = await runHandlerForExit(() => cmd.run({ args: { "governed-by": skill.id, status: "active", tag: "foo" }, inv: liveInvocation() }));
     } finally {
       output.restore();
     }
 
-    expect(process.exitCode).toBe(2);
+    expect(lastExitCode).toBe(2);
     const stderr = output.stderr.join("\n");
     expect(stderr).toContain("--status");
     expect(stderr).toContain("--tag");
@@ -256,12 +258,12 @@ describe("lore list --governed-by — BOUNDARY", () => {
     const cmd = await importListCommand();
     const output = captureOutput();
     try {
-      await cmd.run({ args: { "governed-by": skill.id, json: true }, inv: liveInvocation() });
+      lastExitCode = await runHandlerForExit(() => cmd.run({ args: { "governed-by": skill.id, json: true }, inv: liveInvocation() }));
     } finally {
       output.restore();
     }
 
-    expect(process.exitCode ?? 0).toBe(0);
+    expect(lastExitCode).toBe(0);
     const parsed = JSON.parse(output.stdout.join("\n")) as { data: { docs: Array<{ id: string }> } };
     expect(parsed.data.docs.some((d) => d.id === specId)).toBe(true);
   });
@@ -274,12 +276,12 @@ describe("lore list --governed-by — ERROR", () => {
     const cmd = await importListCommand();
     const output = captureOutput();
     try {
-      await cmd.run({ args: { "governed-by": "knowledge-totally-nonexistent-slug" }, inv: liveInvocation() });
+      lastExitCode = await runHandlerForExit(() => cmd.run({ args: { "governed-by": "knowledge-totally-nonexistent-slug" }, inv: liveInvocation() }));
     } finally {
       output.restore();
     }
 
-    expect(process.exitCode).not.toBe(0);
+    expect(lastExitCode).not.toBe(0);
     expect(output.stderr.join("\n").length).toBeGreaterThan(0);
   });
 });
@@ -294,12 +296,12 @@ describe("lore list — REGRESSION (no --governed-by)", () => {
     const cmd = await importListCommand();
     const output = captureOutput();
     try {
-      await cmd.run({ args: { type: "task", json: true }, inv: liveInvocation() });
+      lastExitCode = await runHandlerForExit(() => cmd.run({ args: { type: "task", json: true }, inv: liveInvocation() }));
     } finally {
       output.restore();
     }
 
-    expect(process.exitCode ?? 0).toBe(0);
+    expect(lastExitCode).toBe(0);
     const parsed = JSON.parse(output.stdout.join("\n")) as { data: { docs: unknown[]; total: number } };
     expect(parsed.data.total).toBe(0); // no tasks seeded in this corpus
   });

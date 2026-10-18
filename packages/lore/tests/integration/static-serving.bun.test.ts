@@ -96,7 +96,7 @@ import type { MachineAuthStores } from "../../src/adapters/http/machine-auth.js"
 import { createApp } from "../../src/app.js";
 import type { App } from "../../src/app.js";
 import type { LoreConfig } from "@lore/core";
-import { liveAmbient, liveWriteContext } from "../live-invocation.js";
+import { liveAmbient, liveWriteContext, liveIo } from "../live-invocation.js";
 
 // ─── Future contract types (this file's own DashboardServingConfig — see header) ─────
 
@@ -198,6 +198,7 @@ async function makeServer(dashboard?: DashboardServingConfig): Promise<ServerCtx
 
   // reason: `port: 0` → OS assigns a free ephemeral port, guaranteed never 8787.
   const futureConfig: FutureHttpConfig = {
+    io: liveIo(),
     port: 0,
     host: "127.0.0.1",
     ...(dashboard !== undefined ? { dashboard } : {}),

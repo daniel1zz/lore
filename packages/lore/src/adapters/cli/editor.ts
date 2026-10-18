@@ -19,6 +19,7 @@
  */
 
 import { spawnSync } from "child_process";
+import { exitCli } from "./cli-exit.js";
 import { mkdtempSync, writeFileSync, readFileSync, rmSync } from "fs";
 import { join } from "path";
 import { ok, err } from "@lore/core";
@@ -52,6 +53,8 @@ export interface OpenEditorOptions {
   env: NodeJS.ProcessEnv;
   /** The Invocation's temp directory (`inv.paths.tmpDir`): where the per-invocation edit dir is created. */
   tmpDir: string;
+  /** The Invocation's working directory (`inv.cwd`): the editor child starts there. */
+  cwd: string;
 }
 
 // ─── Editor resolution ────────────────────────────────────────────────────────
@@ -105,7 +108,7 @@ function resolveEditorCommand(env: NodeJS.ProcessEnv, defaults?: LoreDefaults): 
  *   const editorResult = await openEditor({ defaults, env: inv.env, tmpDir: inv.paths.tmpDir });
  *   if (!editorResult.ok) {
  *     process.stderr.write(formatError(editorResult.error) + "\n");
- *     process.exit(exitCode(editorResult.error));
+ *     exitCli(exitCode(editorResult.error));
  *   }
  *   const content = editorResult.value;
  */
@@ -142,6 +145,7 @@ export async function openEditor(
     // spawnSync blocks until the editor process exits.
     // stdio: 'inherit' gives the editor full terminal control (critical for vi/nano/emacs).
     const spawnResult = spawnSync(editorBin, [...editorArgs, tempFile], {
+      cwd: opts.cwd,
       stdio: "inherit",
     });
 

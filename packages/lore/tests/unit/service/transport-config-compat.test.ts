@@ -55,7 +55,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { parseConfig } from "@lore/core";
+import { parseConfig, retiredConfigKeyNotices } from "@lore/core";
 
 /** Minimal valid top-level config — `project` is the only required section. */
 function baseConfig() {
@@ -64,9 +64,9 @@ function baseConfig() {
   };
 }
 
-/** Flattens every `console.warn` call made during a test into one searchable string. */
-function warnedText(spy: ReturnType<typeof vi.spyOn>): string {
-  return spy.mock.calls.map((call) => call.join(" ")).join("\n");
+/** The by-name notices a raw config earns, as one searchable string (the schema itself prints nothing). */
+function warnedText(raw: unknown): string {
+  return retiredConfigKeyNotices(raw).join("\n");
 }
 
 describe("retired transport keys parse with warnings while strict mode holds (AC-GI-14)", () => {
@@ -94,7 +94,7 @@ describe("retired transport keys parse with warnings while strict mode holds (AC
     const result = parseConfig(raw);
 
     expect(result.ok).toBe(true);
-    expect(warnedText(warnSpy)).toContain("corpus_path");
+    expect(warnedText(raw)).toContain("corpus_path");
   });
 
   it("HAPPY: a config carrying the retired transport key parses successfully and a warning names transport", () => {
@@ -111,7 +111,7 @@ describe("retired transport keys parse with warnings while strict mode holds (AC
     const result = parseConfig(raw);
 
     expect(result.ok).toBe(true);
-    expect(warnedText(warnSpy)).toContain("transport");
+    expect(warnedText(raw)).toContain("transport");
   });
 
   it("HAPPY: a config carrying BOTH retired transport keys names both in warnings — not just the first", () => {
@@ -129,7 +129,7 @@ describe("retired transport keys parse with warnings while strict mode holds (AC
     const result = parseConfig(raw);
 
     expect(result.ok).toBe(true);
-    const text = warnedText(warnSpy);
+    const text = warnedText(raw);
     expect(text).toContain("corpus_path");
     expect(text).toContain("transport");
   });

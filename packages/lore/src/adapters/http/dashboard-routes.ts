@@ -55,6 +55,7 @@
  * Source: SPEC-022 §9.1, §9.3, §9.4, §9.5, §9.6; SPEC-027 AC-DH-6, AC-DH-7, AC-DH-11; SPEC-033 F1
  */
 
+import type { WarnSink } from "../../service/warn-sink.js";
 import { z } from "zod";
 import type { App } from "../../app.js";
 import type { ActorContext } from "./auth.js";
@@ -388,7 +389,7 @@ async function handleDashboardApprove(
   // would be pinned to) is one less than the returned doc's version. Mirrors CLI
   // approve.ts's identical `doc.version - 1` computation exactly.
   await runCalibrationHook(
-    { judgmentService: app.judgmentService, telemetry: app.telemetry, onWarning: (message: string) => warnings.push(message) },
+    { judgmentService: app.judgmentService, telemetry: app.telemetry, warn: app.warn, onWarning: (message: string) => warnings.push(message) },
     {
       updatedDoc: result.value,
       actedOnVersion: result.value.version - 1,
@@ -431,7 +432,7 @@ async function handleDashboardReject(
   // the version the human was reviewing IS the returned doc's version. Mirrors CLI
   // reject.ts's identical (unchanged) version computation exactly.
   await runCalibrationHook(
-    { judgmentService: app.judgmentService, telemetry: app.telemetry, onWarning: (message: string) => warnings.push(message) },
+    { judgmentService: app.judgmentService, telemetry: app.telemetry, warn: app.warn, onWarning: (message: string) => warnings.push(message) },
     {
       updatedDoc: result.value,
       actedOnVersion: result.value.version,
@@ -600,6 +601,7 @@ const routeViewBodySchema = z.object({
 async function handleDashboardRouteViewTelemetry(
   req: Request,
   telemetry: Telemetry,
+  warn: WarnSink,
 ): Promise<Response> {
   const body = await parseJsonBody(req);
   const parsed = routeViewBodySchema.safeParse(body);
@@ -633,7 +635,7 @@ async function handleDashboardRouteViewTelemetry(
     // never surface to the dashboard UI (mirrors emitDashboardTelemetry's silent
     // catch), but a totally silent swallow would make the sink's brokenness
     // undiagnosable. One structured server-side log line, no user-visible error.
-    console.error("dashboard telemetry route_view sink write failed:", e);
+    warn(`dashboard telemetry route_view sink write failed: ${e instanceof Error ? e.message : String(e)}`);
   }
 
   return new Response(null, { status: 204 });
@@ -699,6 +701,6 @@ export async function handleDashboardRoute(
     case "machineConfigPatch":
       return handleDashboardMachineConfigPatch(req, app, actor);
     case "routeViewTelemetry":
-      return handleDashboardRouteViewTelemetry(req, app.telemetry);
+      return handleDashboardRouteViewTelemetry(req, app.telemetry, app.warn);
   }
 }

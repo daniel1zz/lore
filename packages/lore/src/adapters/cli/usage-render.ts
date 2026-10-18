@@ -41,6 +41,8 @@
 
 import { renderUsage } from "citty";
 import type { CommandDef } from "citty";
+import { printLine } from "./output.js";
+import type { CliIo } from "./output.js";
 
 /**
  * Rewrite every single-dash, 2+-character token citty's `renderUsage`
@@ -81,11 +83,11 @@ export function fixSingleDashAliasRendering(usageText: string): string {
  * @param parent - the resolved parent CommandDef, if any (nested subcommand
  *   help, e.g. `lore phase add --help`)
  */
-export async function renderUsageDoubleDash(cmd: CommandDef<any>, parent?: CommandDef<any>): Promise<void> {
+export async function renderUsageDoubleDash(io: CliIo, cmd: CommandDef<any>, parent?: CommandDef<any>): Promise<void> {
   const text = await renderUsage(cmd, parent);
   // reason: this module's SOLE sanctioned CLI-surface console use — mirrors
   // citty's own built-in `showUsage`'s `consola.log(text + "\n")` call
   // exactly (see this file's header); it is not a debug/log statement, it
   // IS the `--help` output.
-  console.log(fixSingleDashAliasRendering(text) + "\n");
+  printLine(io.stdout, fixSingleDashAliasRendering(text) + "\n");
 }

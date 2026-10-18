@@ -52,6 +52,7 @@ interface RunResult {
 async function runLore(args: string[], cwd: string): Promise<RunResult> {
   const proc = await runLoreInProcess(args, {
     cwd,
+    home: cwd,
     env: { ...process.env, HOME: cwd, EDITOR: "true", LORE_ACTOR: "agent:ac-command-identity-test" },
   });
   return { stdout: proc.stdout, stderr: proc.stderr, exitCode: proc.exitCode };

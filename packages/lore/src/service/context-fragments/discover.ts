@@ -35,10 +35,11 @@ import {
 /** Every discovery failure is a VALIDATION_ERROR carrying the offending path(s) in `message`. */
 export type DiscoverError = Extract<LoreError, { code: "VALIDATION_ERROR" }>;
 
+/** The layer root directories to read. A layer left out is not read at all (no placeholder path reaches the fs port). */
 export interface FragmentRoots {
-  readonly shipped: string;
-  readonly user: string;
-  readonly project: string;
+  readonly shipped?: string;
+  readonly user?: string;
+  readonly project?: string;
 }
 
 /** Lowest to highest precedence: later layers override earlier ones by frontmatter id. */
@@ -104,6 +105,7 @@ export async function discoverFragments(
 
   for (const layer of LAYER_ORDER) {
     const root = roots[layer];
+    if (root === undefined) continue;
     const names = (await fs.listDir(root)).filter((n) => n.endsWith(".md")).sort();
     const seenInLayer = new Map<string, string>();
 

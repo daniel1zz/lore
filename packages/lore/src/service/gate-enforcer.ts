@@ -98,6 +98,7 @@
  *         task-lore-gate-bypass-honored-by-lore-gate-subcommands-but (Option B).
  */
 
+import { discardWarnings, type WarnSink } from "./warn-sink.js";
 import {
   err,
   ok,
@@ -579,6 +580,8 @@ export class GateEnforcer {
      * can only withhold an advisory note, never change a verdict.
      */
     private readonly env: Readonly<Record<string, string | undefined>> = {},
+    /** Where the enforcer's advisories (a failed audit write, a vacuous checkpoint) go; absent (bare tests) -> not printed. */
+    private readonly warnSink: WarnSink = discardWarnings,
   ) {}
 
   private resolveActor(): string {
@@ -914,9 +917,7 @@ export class GateEnforcer {
     auditKind: "gate-skip" | "gate-not-applicable" | "gate-pass",
     reason: string,
   ): void {
-    process.stderr.write(
-      `${auditKind} audit not recorded for checkpoint "${checkpoint}": ${reason}\n`,
-    );
+    this.warnSink(`${auditKind} audit not recorded for checkpoint "${checkpoint}": ${reason}`);
   }
 
   /**
@@ -942,7 +943,7 @@ export class GateEnforcer {
   ): void {
     const notice = describeCheckpointVacuity(checkpoint, results);
     if (notice === null) return;
-    process.stderr.write(`${notice}\n`);
+    this.warnSink(notice);
   }
 
   /**

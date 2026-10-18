@@ -50,7 +50,7 @@ import { createApp } from "../../src/app.js";
 import type { App } from "../../src/app.js";
 import type { CreateDocInput, DocRecord, TaskClaim } from "@lore/core";
 import { resolveActor } from "../../src/adapters/cli/utils.js";
-import { liveInvocation, liveAmbient, liveWriteContext } from "../live-invocation.js";
+import { liveInvocation, liveAmbient, liveWriteContext, runHandlerForExit, liveIo } from "../live-invocation.js";
 import type { Invocation } from "@lore/core";
 
 /**
@@ -59,7 +59,7 @@ import type { Invocation } from "@lore/core";
  * test sets its session env, never captured at module load.
  */
 function currentActor(): string {
-  return resolveActor(undefined, process.env, process.cwd(), liveInvocation().user);
+  return resolveActor(liveIo(), undefined, process.env, process.cwd(), liveInvocation().user);
 }
 const SHARED_ANCHOR = "packages/core/src/session.ts";
 const SESSION_ENV_VARS = ["CLAUDE_CODE_SESSION_ID", "CLAUDE_SESSION_ID"] as const;
@@ -70,7 +70,6 @@ const originalSessionEnv = new Map<string, string | undefined>();
 let originalBypass: string | undefined;
 
 beforeEach(() => {
-  process.exitCode = 0;
   originalBypass = process.env["LORE_GATE_BYPASS"];
   delete process.env["LORE_GATE_BYPASS"];
   for (const name of SESSION_ENV_VARS) originalSessionEnv.set(name, process.env[name]);
@@ -83,7 +82,6 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  process.exitCode = 0;
   if (originalBypass === undefined) delete process.env["LORE_GATE_BYPASS"];
   else process.env["LORE_GATE_BYPASS"] = originalBypass;
   for (const name of SESSION_ENV_VARS) {
@@ -178,22 +176,25 @@ function captureOutput() {
   const stdout: string[] = [];
   const stderr: string[] = [];
   const origStderrWrite = process.stderr.write.bind(process.stderr);
-  const origConsoleLog = console.log.bind(console);
+  const origConsoleLog = process.stdout.write;
 
   (process.stderr as unknown as { write: (chunk: unknown) => boolean }).write = (chunk: unknown) => {
     stderr.push(String(chunk));
     return true;
   };
-  console.log = (...args: unknown[]) => {
+  process.stdout.write = (((chunk: unknown) => {
+    const args: unknown[] = [String(chunk).replace(/\n$/, "")];
     stdout.push(args.join(" "));
-  };
+  
+    return true;
+  }) as typeof process.stdout.write);
 
   return {
     stdout,
     stderr,
     restore: () => {
       (process.stderr as unknown as { write: typeof origStderrWrite }).write = origStderrWrite;
-      console.log = origConsoleLog;
+      process.stdout.write = origConsoleLog;
     },
   };
 }
@@ -202,14 +203,12 @@ function captureOutput() {
 async function runPreflight(phaseSlug: string): Promise<{ exitCode: number; stdout: string }> {
   const cmd = await importPhaseClaimGate();
   const output = captureOutput();
-  process.exitCode = 0;
+  let code: number;
   try {
-    await cmd.run({ args: { phase: phaseSlug }, inv: liveInvocation() });
+    code = await runHandlerForExit(() => cmd.run({ args: { phase: phaseSlug }, inv: liveInvocation() }));
   } finally {
     output.restore();
   }
-  const code = typeof process.exitCode === "number" ? process.exitCode : 0;
-  process.exitCode = 0;
   return { exitCode: code, stdout: output.stdout.join("\n") };
 }
 

@@ -834,7 +834,7 @@ describe("RealMcpRegistrar — HAPPY (recording shim)", () => {
     const recorderPath = join(root, "recorded-argv.txt");
     writeClaudeRecorderShim(root, recorderPath);
 
-    const registrar = new RealMcpRegistrar({ ...process.env, PATH: `${root}:${process.env["PATH"] ?? ""}` });
+    const registrar = new RealMcpRegistrar({ ...process.env, PATH: `${root}:${process.env["PATH"] ?? ""}` }, root);
     const binPath = "/usr/local/bin/lore";
     const result = await registrar.add(binPath);
 
@@ -848,7 +848,7 @@ describe("RealMcpRegistrar — HAPPY (recording shim)", () => {
     const recorderPath = join(root, "recorded-argv.txt");
     writeClaudeRecorderShim(root, recorderPath);
 
-    const registrar = new RealMcpRegistrar({ ...process.env, PATH: `${root}:${process.env["PATH"] ?? ""}` });
+    const registrar = new RealMcpRegistrar({ ...process.env, PATH: `${root}:${process.env["PATH"] ?? ""}` }, root);
     const result = await registrar.remove();
 
     expect(result.ok).toBe(true);
@@ -858,7 +858,7 @@ describe("RealMcpRegistrar — HAPPY (recording shim)", () => {
 
 describe("RealMcpRegistrar — NEGATIVE (claude absent from PATH)", () => {
   it("add() returns err naming the exact manual command, never throws", async () => {
-    const registrar = new RealMcpRegistrar({ ...process.env, PATH: "" });
+    const registrar = new RealMcpRegistrar({ ...process.env, PATH: "" }, makeScratchDir("mcp-registrar-no-claude-"));
     const binPath = "/usr/local/bin/lore";
 
     // reason: see the AssetSource ERROR test above for why `expect(fn).not.toThrow()` cannot
@@ -874,7 +874,7 @@ describe("RealMcpRegistrar — NEGATIVE (claude absent from PATH)", () => {
   });
 
   it("remove() returns err naming the exact manual command, never throws", async () => {
-    const registrar = new RealMcpRegistrar({ ...process.env, PATH: "" });
+    const registrar = new RealMcpRegistrar({ ...process.env, PATH: "" }, makeScratchDir("mcp-registrar-no-claude-"));
 
     const { value: result, thrown } = await awaitNeverThrows(() => registrar.remove());
 
@@ -904,7 +904,7 @@ describe("RealMcpRegistrar — add() idempotency (task-lore-setup-mcp-add-step-i
     const root = makeScratchDir("mcp-registrar-already-exists-");
     writeClaudeFailingShim(root, 1, "MCP server lore already exists in user config");
 
-    const registrar = new RealMcpRegistrar({ ...process.env, PATH: `${root}:${process.env["PATH"] ?? ""}` });
+    const registrar = new RealMcpRegistrar({ ...process.env, PATH: `${root}:${process.env["PATH"] ?? ""}` }, root);
     const result = await registrar.add("/usr/local/bin/lore");
 
     expect(result.ok).toBe(true);
@@ -915,7 +915,7 @@ describe("RealMcpRegistrar — add() idempotency (task-lore-setup-mcp-add-step-i
     const root = makeScratchDir("mcp-registrar-genuine-failure-");
     writeClaudeFailingShim(root, 1, "permission denied writing user config");
 
-    const registrar = new RealMcpRegistrar({ ...process.env, PATH: `${root}:${process.env["PATH"] ?? ""}` });
+    const registrar = new RealMcpRegistrar({ ...process.env, PATH: `${root}:${process.env["PATH"] ?? ""}` }, root);
     const { value: result, thrown } = await awaitNeverThrows(() => registrar.add("/usr/local/bin/lore"));
 
     expect(thrown).toBeUndefined();
@@ -930,7 +930,7 @@ describe("RealMcpRegistrar — add() idempotency (task-lore-setup-mcp-add-step-i
     const root = makeScratchDir("mcp-registrar-already-exists-caps-");
     writeClaudeFailingShim(root, 1, "Error: MCP server lore ALREADY EXISTS in user config");
 
-    const registrar = new RealMcpRegistrar({ ...process.env, PATH: `${root}:${process.env["PATH"] ?? ""}` });
+    const registrar = new RealMcpRegistrar({ ...process.env, PATH: `${root}:${process.env["PATH"] ?? ""}` }, root);
     const result = await registrar.add("/usr/local/bin/lore");
 
     expect(result.ok).toBe(true);

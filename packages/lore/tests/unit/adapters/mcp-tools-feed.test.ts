@@ -55,6 +55,7 @@ function makeApp(): App {
   corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
 
   const app: App = {
+    warn: () => undefined,
     corpusService,
     reviewService: new ReviewService(store, new RecordLockService(store, new GateEnforcer(undefined))),
     versionService: new VersionService(store, new RecordLockService(store, new GateEnforcer(undefined))),

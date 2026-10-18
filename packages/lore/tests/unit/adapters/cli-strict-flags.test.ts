@@ -30,6 +30,7 @@
 
 import { describe, it, expect, vi, afterEach } from "vitest";
 import type { ArgsDef, CommandContext, CommandDef } from "citty";
+import { liveInvocation } from "../../live-invocation.js";
 import { findUnknownFlag, wrapCommandStrict } from "../../../src/adapters/cli/strict-flags.js";
 
 // ─── findUnknownFlag ────────────────────────────────────────────────────────
@@ -98,6 +99,11 @@ describe("findUnknownFlag", () => {
   });
 });
 
+/** The run context `deliverInvocation` adds in production: the wrapper reads its writers from `context.inv`. */
+function liveInv(): object {
+  return { inv: liveInvocation() };
+}
+
 // ─── wrapCommandStrict ──────────────────────────────────────────────────────
 
 describe("wrapCommandStrict", () => {
@@ -124,9 +130,6 @@ describe("wrapCommandStrict", () => {
       { type: { type: "string" } },
       runSpy as unknown as (ctx: CommandContext) => unknown,
     );
-    const exitSpy = vi.spyOn(process, "exit").mockImplementation(((code?: number) => {
-      throw new Error(`exit:${code}`);
-    }) as never);
     const stderrSpy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
 
     const wrapped = await wrapCommandStrict(leaf, "lore link");
@@ -134,11 +137,10 @@ describe("wrapCommandStrict", () => {
       wrapped.run?.({
         rawArgs: ["A", "B", "--kind", "blocks"],
         args: {} as never,
-        cmd: wrapped,
+        cmd: wrapped, ...liveInv(),
       }),
-    ).rejects.toThrow("exit:2");
+    ).rejects.toMatchObject({ name: "CliExit", code: 2 });
 
-    expect(exitSpy).toHaveBeenCalledWith(2);
     expect(runSpy).not.toHaveBeenCalled();
     expect(stderrSpy.mock.calls.join("\n")).toContain("Unknown option: --kind");
     expect(stderrSpy.mock.calls.join("\n")).toContain("lore link --help");
@@ -155,7 +157,7 @@ describe("wrapCommandStrict", () => {
     const context = {
       rawArgs: ["A", "B", "--type", "blocks"],
       args: {} as never,
-      cmd: wrapped,
+      cmd: wrapped, ...liveInv(),
     };
     await wrapped.run?.(context);
 
@@ -175,9 +177,6 @@ describe("wrapCommandStrict", () => {
         },
       },
     };
-    const exitSpy = vi.spyOn(process, "exit").mockImplementation(((code?: number) => {
-      throw new Error(`exit:${code}`);
-    }) as never);
     const stderrSpy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
 
     const wrapped = await wrapCommandStrict(group, "lore phase");
@@ -189,8 +188,9 @@ describe("wrapCommandStrict", () => {
         rawArgs: ["plan-1", "phase-1", "--bogus"],
         args: {} as never,
         cmd: addCmd as CommandDef,
+        ...liveInv(),
       }),
-    ).rejects.toThrow("exit:2");
+    ).rejects.toMatchObject({ name: "CliExit", code: 2 });
     expect(addRun).not.toHaveBeenCalled();
     expect(stderrSpy.mock.calls.join("\n")).toContain("Unknown option: --bogus");
     expect(stderrSpy.mock.calls.join("\n")).toContain("lore phase add --help");
@@ -215,6 +215,7 @@ describe("wrapCommandStrict", () => {
       rawArgs: ["plan-1", "phase-1"],
       args: {} as never,
       cmd: addCmd as CommandDef,
+      ...liveInv(),
     });
 
     expect(addRun).toHaveBeenCalledTimes(1);

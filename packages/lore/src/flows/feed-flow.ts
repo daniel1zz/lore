@@ -162,7 +162,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { App } from "../app.js";
-import type { DocRecord, LoreError, Result } from "@lore/core";
+import type { DocRecord, Invocation, LoreError, Result } from "@lore/core";
 import {
   err,
   ok,
@@ -826,7 +826,7 @@ async function buildRuleDiffBlock(
 export async function buildResumeFeed(
   app: App,
   opts: { plan?: string; handoff?: string; by?: string },
-  ambient: { readonly env: Readonly<Record<string, string | undefined>>; readonly tmpDir: string; readonly cwd: string; readonly user: string },
+  ambient: { readonly env: Readonly<Record<string, string | undefined>>; readonly tmpDir: string; readonly cwd: string; readonly user: string; readonly io: Invocation["io"] },
 ): Promise<Result<ResumeFeedOutcome, LoreError>> {
   if (app.sessionService === undefined) {
     return err({
@@ -843,7 +843,7 @@ export async function buildResumeFeed(
   let suppressFloor = false;
   let authorshipUndeterminedNote: string | undefined;
   if (resume.found && !resume.multi_actor && resume.handoff !== undefined) {
-    const currentActor = resolveActor(opts.by, ambient.env, ambient.cwd, ambient.user);
+    const currentActor = resolveActor(ambient.io, opts.by, ambient.env, ambient.cwd, ambient.user);
     const sessionStart = readSessionStartIso(ambient.env, ambient.tmpDir);
     const sessionStartIso = sessionStart.kind === "measured" ? sessionStart.startedAt : undefined;
     // Same call, same argument shape as before this task — the arming
@@ -857,7 +857,7 @@ export async function buildResumeFeed(
         // reason: a corrupt/wrong-typed marker is a real fault, not this
         // mechanism's normal (if inert) steady state — AC 3 requires this
         // to be loud on stderr, distinct from the advisory feed line above.
-        process.stderr.write(
+        ambient.io.stderr.write(
           `lore: session-start marker unreadable (${sessionStart.detail}) — same-session authorship ` +
             "could not be determined; the resume-ticket coverage floor will arm unconditionally.\n",
         );

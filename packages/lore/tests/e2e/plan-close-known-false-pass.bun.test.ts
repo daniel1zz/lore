@@ -95,6 +95,7 @@ beforeAll(async () => {
   cleanupDirs.push(dir);
   const proc = await runLoreInProcess(["gate", "plan-close", "--explain"], {
     cwd: dir,
+    home: dir,
     env: { ...process.env, HOME: dir, CLAUDECODE: "1" },
   });
   explainStdout = proc.stdout;

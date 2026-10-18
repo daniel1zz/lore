@@ -48,7 +48,7 @@ const runBinary: Runner = async (args, cwd) => {
   return { stdout: proc.stdout.toString(), stderr: proc.stderr.toString(), exitCode: proc.exitCode ?? 1 };
 };
 
-const runInProcess: Runner = (args, cwd) => runLoreInProcess(args, { cwd, env: envFor(cwd) });
+const runInProcess: Runner = (args, cwd) => runLoreInProcess(args, { cwd, home: cwd, env: envFor(cwd) });
 
 /** Replace what differs between two corpora by construction: ids, times, the directory. */
 function normalise(text: string, dir: string): string {
@@ -157,7 +157,7 @@ describe("AC-TG-11 in-process helper parity with dist/lore", () => {
     const armed = process.env.LORE_TEST_SANDBOX;
     delete process.env.LORE_TEST_SANDBOX;
     try {
-      await expect(runLoreInProcess(["list"], { cwd: freshDir() })).rejects.toThrow(/LORE_TEST_SANDBOX is not armed/);
+      await expect(runLoreInProcess(["list"], { cwd: freshDir(), home: freshDir() })).rejects.toThrow(/LORE_TEST_SANDBOX is not armed/);
     } finally {
       process.env.LORE_TEST_SANDBOX = armed;
     }

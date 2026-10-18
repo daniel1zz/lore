@@ -55,6 +55,7 @@ function makeCorpusServices() {
 /** Minimal App stub — only the fields `buildFeed` actually touches are real. */
 function makeApp(corpusService: CorpusService, outlineService: OutlineService): App {
   return {
+    warn: () => undefined,
     corpusService,
     reviewService: null as unknown as App["reviewService"],
     versionService: null as unknown as App["versionService"],

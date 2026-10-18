@@ -46,7 +46,7 @@ import { createMachineAuthStores, type MachineAuthStores } from "../../../src/ad
 import { createMountRegistry } from "../../../src/mount/mount-registry.js";
 import type { MountRegistryDeps } from "../../../src/mount/types.js";
 import type { DashboardConfig } from "@lore/core";
-import { liveAmbient, liveWriteContext } from "../../live-invocation.js";
+import { liveAmbient, liveWriteContext, liveIo } from "../../live-invocation.js";
 
 const scratchDirs: string[] = [];
 
@@ -138,6 +138,7 @@ async function makeTestServer(): Promise<TestContext> {
   if (!healthyKeyResult.ok) throw new Error("Failed to create healthy API key");
 
   const server = startHttpServer(healthyApp, {
+    io: liveIo(),
     port: 0,
     host: "127.0.0.1",
     machineAuth,

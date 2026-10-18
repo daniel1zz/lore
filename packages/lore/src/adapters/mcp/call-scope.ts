@@ -22,6 +22,7 @@
  * Side-effect class: IO (opens and closes one store connection per attested call) + injected warn sink.
  */
 
+import { warnSinkOf } from "../../service/warn-sink.js";
 import { AsyncLocalStorage } from "node:async_hooks";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { err, ok, type Invocation, type InvocationIdentity, type LoreError, type NameSource, type Result } from "@lore/core";
@@ -39,11 +40,6 @@ export interface CallContext {
 /** The per-call attestation argument every attested tool accepts. The name is never an argument (BR-1055). */
 export interface CallAttestation {
   readonly harness_run?: string | undefined;
-}
-
-function stderrWarn(line: string): void {
-  // MCP stdout is the protocol channel; a warning must go to stderr. MCP surface.
-  process.stderr.write(`${line}\n`);
 }
 
 function errorResult(error: LoreError): CallToolResult {
@@ -114,8 +110,9 @@ export class McpCallScope {
   constructor(
     readonly base: App,
     /** The server's environment and OS user (`Invocation` of the MCP entry): the session and OS tiers of every call's name. */
-    private readonly server: Pick<Invocation, "env" | "user">,
-    private readonly warn: (line: string) => void = stderrWarn,
+    private readonly server: Pick<Invocation, "env" | "user" | "io">,
+    // reason: MCP stdout is the protocol channel; a warning goes to the server's stderr writer (`inv.io.stderr`).
+    private readonly warn: (line: string) => void = warnSinkOf(server.io.stderr),
   ) {
     const resolve = (): App => this.store.getStore()?.app ?? this.base;
     this.view = new Proxy(base, {

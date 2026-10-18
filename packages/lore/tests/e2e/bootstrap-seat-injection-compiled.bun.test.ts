@@ -44,7 +44,7 @@ async function runLore(args: string[], cwd: string, session: string = BASE_SESSI
   delete env["CLAUDE_SESSION_ID"];
   delete env["LORE_ACTOR"];
   env["CLAUDE_CODE_SESSION_ID"] = session;
-  const proc = await runLoreInProcess(args, { cwd, env });
+  const proc = await runLoreInProcess(args, { cwd, home: FIXTURE_HOME_OUTSIDE_REPO, env });
   return { stdout: proc.stdout, stderr: proc.stderr, exitCode: proc.exitCode };
 }
 

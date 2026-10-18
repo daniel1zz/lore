@@ -33,6 +33,12 @@ import { parseArgs, renderUsage } from "citty";
 import type { ArgsDef, CommandContext, CommandDef } from "citty";
 import { findSingleDashViolation, findUnknownFlag, wrapCommandStrict } from "../../../src/adapters/cli/strict-flags.js";
 import { fixSingleDashAliasRendering, renderUsageDoubleDash } from "../../../src/adapters/cli/usage-render.js";
+import { liveInvocation, liveIo } from "../../live-invocation.js";
+
+/** The run context `deliverInvocation` adds in production: the wrapper reads its writers from `context.inv`. */
+function liveInv(): object {
+  return { inv: liveInvocation() };
+}
 
 // Mirrors commands/list.ts's declared args at time of writing — enough of
 // the shape to exercise the --json flag AC-073-1 names.
@@ -238,17 +244,13 @@ describe("wrapCommandStrict single-dash rejection (ERROR, STATE)", () => {
   it("AC-073-1: ERROR — lore list -json exits 2 BEFORE calling the real run, naming -json and suggesting --json", async () => {
     const runSpy = vi.fn();
     const leaf = makeLeaf(LIST_ARGS, runSpy as unknown as (ctx: CommandContext) => unknown);
-    const exitSpy = vi.spyOn(process, "exit").mockImplementation(((code?: number) => {
-      throw new Error(`exit:${code}`);
-    }) as never);
     const stderrSpy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
 
     const wrapped = await wrapCommandStrict(leaf, "lore list");
     await expect(
-      wrapped.run?.({ rawArgs: ["-json"], args: {} as never, cmd: wrapped }),
-    ).rejects.toThrow("exit:2");
+      wrapped.run?.({ rawArgs: ["-json"], args: {} as never, cmd: wrapped, ...liveInv() }),
+    ).rejects.toMatchObject({ name: "CliExit", code: 2 });
 
-    expect(exitSpy).toHaveBeenCalledWith(2);
     expect(runSpy).not.toHaveBeenCalled();
     const stderrOutput = stderrSpy.mock.calls.join("\n");
     expect(stderrOutput).toContain("Unknown option: -json");
@@ -259,17 +261,13 @@ describe("wrapCommandStrict single-dash rejection (ERROR, STATE)", () => {
   it("AC-073-2: ERROR — lore verify -yes exits 2 suggesting --yes", async () => {
     const runSpy = vi.fn();
     const leaf = makeLeaf(VERIFY_ALLOW_NEW_COMMANDS_ARGS, runSpy as unknown as (ctx: CommandContext) => unknown);
-    const exitSpy = vi.spyOn(process, "exit").mockImplementation(((code?: number) => {
-      throw new Error(`exit:${code}`);
-    }) as never);
     const stderrSpy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
 
     const wrapped = await wrapCommandStrict(leaf, "lore verify");
     await expect(
-      wrapped.run?.({ rawArgs: ["plan-1", "-yes"], args: {} as never, cmd: wrapped }),
-    ).rejects.toThrow("exit:2");
+      wrapped.run?.({ rawArgs: ["plan-1", "-yes"], args: {} as never, cmd: wrapped, ...liveInv() }),
+    ).rejects.toMatchObject({ name: "CliExit", code: 2 });
 
-    expect(exitSpy).toHaveBeenCalledWith(2);
     expect(runSpy).not.toHaveBeenCalled();
     const stderrOutput = stderrSpy.mock.calls.join("\n");
     expect(stderrOutput).toContain("Unknown option: -yes");
@@ -282,7 +280,7 @@ describe("wrapCommandStrict single-dash rejection (ERROR, STATE)", () => {
     const leaf = makeLeaf(args, runSpy as unknown as (ctx: CommandContext) => unknown);
 
     const wrapped = await wrapCommandStrict(leaf, "lore leaf");
-    const context = { rawArgs: ["-y"], args: {} as never, cmd: wrapped };
+    const context = { rawArgs: ["-y"], args: {} as never, cmd: wrapped, ...liveInv() };
     await wrapped.run?.(context);
 
     expect(runSpy).toHaveBeenCalledTimes(1);
@@ -295,7 +293,7 @@ describe("wrapCommandStrict single-dash rejection (ERROR, STATE)", () => {
     const leaf = makeLeaf(args, runSpy as unknown as (ctx: CommandContext) => unknown);
 
     const wrapped = await wrapCommandStrict(leaf, "lore leaf");
-    const context = { rawArgs: ["-5"], args: {} as never, cmd: wrapped };
+    const context = { rawArgs: ["-5"], args: {} as never, cmd: wrapped, ...liveInv() };
     await wrapped.run?.(context);
 
     expect(runSpy).toHaveBeenCalledTimes(1);
@@ -306,7 +304,7 @@ describe("wrapCommandStrict single-dash rejection (ERROR, STATE)", () => {
     const leaf = makeLeaf({}, runSpy as unknown as (ctx: CommandContext) => unknown);
 
     const wrapped = await wrapCommandStrict(leaf, "lore leaf");
-    const context = { rawArgs: ["--", "-json", "-yes"], args: {} as never, cmd: wrapped };
+    const context = { rawArgs: ["--", "-json", "-yes"], args: {} as never, cmd: wrapped, ...liveInv() };
     await wrapped.run?.(context);
 
     expect(runSpy).toHaveBeenCalledTimes(1);
@@ -315,15 +313,12 @@ describe("wrapCommandStrict single-dash rejection (ERROR, STATE)", () => {
   it("STATE: a double-dash violation is reported before a single-dash one when both are present", async () => {
     const runSpy = vi.fn();
     const leaf = makeLeaf(LIST_ARGS, runSpy as unknown as (ctx: CommandContext) => unknown);
-    vi.spyOn(process, "exit").mockImplementation(((code?: number) => {
-      throw new Error(`exit:${code}`);
-    }) as never);
     const stderrSpy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
 
     const wrapped = await wrapCommandStrict(leaf, "lore list");
     await expect(
-      wrapped.run?.({ rawArgs: ["--kind", "blocks", "-json"], args: {} as never, cmd: wrapped }),
-    ).rejects.toThrow("exit:2");
+      wrapped.run?.({ rawArgs: ["--kind", "blocks", "-json"], args: {} as never, cmd: wrapped, ...liveInv() }),
+    ).rejects.toMatchObject({ name: "CliExit", code: 2 });
 
     const stderrOutput = stderrSpy.mock.calls.join("\n");
     expect(stderrOutput).toContain("Unknown option: --kind");
@@ -377,13 +372,13 @@ describe("renderUsageDoubleDash (SPEC-073 D2 composition-site wrapper)", () => {
   });
 
   it("AC-073-4: HAPPY — prints the fixed (double-dash) usage text via console.log", async () => {
-    const logSpy = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    const logSpy = vi.spyOn(process.stdout, "write").mockImplementation((() => true) as never);
     const cmd: CommandDef = {
       meta: { name: "verify", description: "Execute a plan's script-mode acceptance criteria" },
       args: VERIFY_ALLOW_NEW_COMMANDS_ARGS,
     };
 
-    await renderUsageDoubleDash(cmd);
+    await renderUsageDoubleDash(liveIo(), cmd);
 
     expect(logSpy).toHaveBeenCalledTimes(1);
     const printed = logSpy.mock.calls[0]?.[0] as string;

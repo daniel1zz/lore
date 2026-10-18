@@ -81,6 +81,7 @@ function makeApp(): App {
     createHandoffDoc: corpus.createHandoffDoc.bind(corpus),
   });
   return {
+    warn: () => undefined,
     corpusService: corpus,
     reviewService: new ReviewService(store, new RecordLockService(store, new GateEnforcer(undefined))),
     versionService: new VersionService(store, new RecordLockService(store, new GateEnforcer(undefined))),

@@ -42,6 +42,7 @@
  */
 import { createHash } from "node:crypto";
 import { realpathSync } from "node:fs";
+import { isAbsolute } from "node:path";
 import {
   err,
   ok,
@@ -331,7 +332,9 @@ export class RunReapService {
       lifecycles.map((run) => {
         const roots = new Set<string>();
         if (run.process.worktree !== null) roots.add(resolve(run.process.worktree));
-        for (const path of claimRoots.get(run.id) ?? []) roots.add(resolve(path));
+        // reason: a claim records a branch name or an absolute path; only a path is a root a process can sit inside, and
+        // resolving a bare branch name would read the process's working directory.
+        for (const path of claimRoots.get(run.id) ?? []) if (isAbsolute(path)) roots.add(resolve(path));
         return { run, liveness: livenessOf(run, byPid), roots: [...roots] };
       }),
     );

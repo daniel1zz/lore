@@ -34,12 +34,14 @@
  */
 
 import { defineCommand } from "citty";
+
 import { computeArchiveCandidates, resolveClaimTtlMinutes, resolveHandoffTtlMinutes } from "@lore/core";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatErrorFor, resolveActor } from "../utils.js";
 import type { IssueCloseItem } from "../../../service/issue-close-on-archive.js";
 import { emitIssueCloseItems } from "../issue-close-output.js";
 import { invocationOf } from "../command-invocation.js";
+import { printLine } from "../output.js";
 
 /**
  * The literal, copy-pasteable repair command printed for every `--sweep`
@@ -77,9 +79,8 @@ export default defineCommand({
     if (sweepRequested === applyRequested) {
       // reason: both false (neither flag) and both true (both flags) collapse to
       // the same usage-error branch — exactly one of --sweep/--apply is required.
-      process.stderr.write("Exactly one of --sweep or --apply is required.\n");
-      process.exitCode = 2;
-      return;
+      inv.io.stderr.write("Exactly one of --sweep or --apply is required.\n");
+      return 2;
     }
 
     const { app, config } = loadLoreApp({ inv });
@@ -90,9 +91,8 @@ export default defineCommand({
 
     const listResult = await app.corpusService.listFull({});
     if (!listResult.ok) {
-      process.stderr.write(formatErrorFor(inv, listResult.error) + "\n");
-      process.exitCode = exitCode(listResult.error);
-      return;
+      inv.io.stderr.write(formatErrorFor(inv, listResult.error) + "\n");
+      return exitCode(listResult.error);
     }
 
     const nowIso = new Date().toISOString();
@@ -108,14 +108,13 @@ export default defineCommand({
         if (doc === undefined) continue;
         const floorResult = await app.corpusService.checkSweepCandidateFloor(doc, c.rule);
         if (!floorResult.ok) {
-          process.stderr.write(formatErrorFor(inv, floorResult.error) + "\n");
-          process.exitCode = exitCode(floorResult.error);
-          return;
+          inv.io.stderr.write(formatErrorFor(inv, floorResult.error) + "\n");
+          return exitCode(floorResult.error);
         }
         if (floorResult.value !== null) refusingFloors.set(c.doc_id, floorResult.value.floor);
       }
       if (args.json) {
-        console.log(
+        printLine(inv.io.stdout, 
           JSON.stringify(
             {
               ok: true,
@@ -131,25 +130,24 @@ export default defineCommand({
           ),
         );
       } else if (candidates.length === 0) {
-        console.log("No archive candidates.");
+        printLine(inv.io.stdout, "No archive candidates.");
       } else {
-        console.log(`${candidates.length} archive candidate(s):`);
+        printLine(inv.io.stdout, `${candidates.length} archive candidate(s):`);
         for (const c of candidates) {
           const floor = refusingFloors.get(c.doc_id);
-          console.log(`  [${c.rule}] ${c.slug} — ${c.reason}`);
-          console.log(
+          printLine(inv.io.stdout, `  [${c.rule}] ${c.slug} — ${c.reason}`);
+          printLine(inv.io.stdout, 
             floor === undefined
               ? `    repair: ${REPAIR_COMMAND}`
               : `    refused by ${floor}: --apply will skip it until the floor is cleared (see \`lore done ${c.slug}\`)`,
           );
         }
       }
-      process.exitCode = candidates.length === 0 ? 0 : 3;
-      return;
+      return candidates.length === 0 ? 0 : 3;
     }
 
     // --apply
-    const by = resolveActor(undefined, inv.env, inv.cwd, inv.user);
+    const by = resolveActor(inv.io, undefined, inv.env, inv.cwd, inv.user);
     const docsById = new Map(listResult.value.docs.map((d) => [d.id, d] as const));
     const outcomes: Array<{ slug: string; ok: boolean; detail: string; skipped?: true; floor?: string }> = [];
     // spec-archiving-the-work-that-resolves-a-defect-report-closes D4 — the sweep is an archive path too.
@@ -177,15 +175,15 @@ export default defineCommand({
     }
 
     if (args.json) {
-      console.log(JSON.stringify({ ok: true, data: { outcomes } }, null, 2));
+      printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { outcomes } }, null, 2));
     } else if (outcomes.length === 0) {
-      console.log("No archive candidates to apply.");
+      printLine(inv.io.stdout, "No archive candidates to apply.");
     } else {
       for (const o of outcomes) {
-        console.log(`  [${o.ok ? "OK" : o.skipped === true ? "SKIPPED" : "FAILED"}] ${o.slug} — ${o.detail}`);
+        printLine(inv.io.stdout, `  [${o.ok ? "OK" : o.skipped === true ? "SKIPPED" : "FAILED"}] ${o.slug} — ${o.detail}`);
       }
     }
-    emitIssueCloseItems(issueCloseItems, { json: args.json === true });
-    process.exitCode = 0;
+    emitIssueCloseItems(inv.io, issueCloseItems, { json: args.json === true });
+    return 0;
   },
 });

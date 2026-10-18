@@ -26,6 +26,7 @@
  * Source: SPEC-078 §Design Decisions D1
  */
 
+import { discardWarnings, type WarnSink } from "../../service/warn-sink.js";
 import { Database } from "bun:sqlite";
 import { chmodSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
@@ -61,6 +62,8 @@ export interface CreateMachineAuthStoresOptions {
    * the real `~/.local/state` and never the repo's own `.lore/` (root CLAUDE.md 2026-07-07 pollution-incident rule).
    */
   baseDir: string;
+  /** Where the best-effort `chmod 0600` note goes (the run's stderr); absent -> not printed. */
+  warn?: WarnSink;
 }
 
 /**
@@ -118,8 +121,8 @@ export function createMachineAuthStores(opts: CreateMachineAuthStoresOptions): M
     // reason: Scope-Alt (dispatch bundle, SPEC-078 T7) — 0600 enforcement on non-POSIX
     // platforms (e.g. Windows, where chmod bit semantics differ) degrades to best-effort
     // with a stderr note, never a hard failure — the auth store must still function.
-    process.stderr.write(
-      `Warning: could not set file mode 0600 on ${dbPath}: ${e instanceof Error ? e.message : String(e)}\n`,
+    (opts.warn ?? discardWarnings)(
+      `Warning: could not set file mode 0600 on ${dbPath}: ${e instanceof Error ? e.message : String(e)}`,
     );
   }
 

@@ -22,6 +22,7 @@
  */
 
 import { spawnSync } from "node:child_process";
+
 import { defineCommand } from "citty";
 import { createAuditReversalProbe, createGitReversalProbes, type ClassCalibrationStats } from "../../../service/autonomy-calibration-service.js";
 import { DecisionService } from "../../../service/decision-service.js";
@@ -31,6 +32,7 @@ import { exitCode, formatErrorFor, formatTable } from "../utils.js";
 import { ok, type DocType, type LoreError, type Result } from "@lore/core";
 import { wrapStoreError } from "../../../store/store-shared.js";
 import { invocationOf } from "../command-invocation.js";
+import { printLine } from "../output.js";
 
 export default defineCommand({
   meta: {
@@ -63,21 +65,19 @@ export default defineCommand({
     const { args } = context;
     const inv = invocationOf(context);
     if (!args.stats && !args.observe) {
-      process.stderr.write("Error: `lore calibration` requires --stats or --observe.\n");
-      process.exitCode = 2;
-      return;
+      inv.io.stderr.write("Error: `lore calibration` requires --stats or --observe.\n");
+      return 2;
     }
 
     const { app, dbPath } = loadLoreApp({ inv });
     try {
       const autonomy = await collectAutonomyStats(dbPath, app.repoRoot, args.observe === true);
       if (!autonomy.ok) {
-        process.stderr.write(formatErrorFor(inv, autonomy.error) + "\n");
-        process.exitCode = exitCode(autonomy.error);
-        return;
+        inv.io.stderr.write(formatErrorFor(inv, autonomy.error) + "\n");
+        return exitCode(autonomy.error);
       }
       if (!args.stats) {
-        console.log(autonomy.value.swept === null ? "" : `Observed ${autonomy.value.swept.reversed} reversed, ${autonomy.value.swept.stood} stood (${autonomy.value.swept.probed} decision(s) probed).`);
+        printLine(inv.io.stdout, autonomy.value.swept === null ? "" : `Observed ${autonomy.value.swept.reversed} reversed, ${autonomy.value.swept.stood} stood (${autonomy.value.swept.probed} decision(s) probed).`);
         return;
       }
       const filter: { doc_type?: DocType; prompt_version?: string } = {};
@@ -87,21 +87,20 @@ export default defineCommand({
       const result = await app.judgmentService.computeCalibrationStats(filter);
 
       if (!result.ok) {
-        process.stderr.write(formatErrorFor(inv, result.error) + "\n");
-        process.exitCode = exitCode(result.error);
-        return;
+        inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
+        return exitCode(result.error);
       }
 
       const stats = result.value;
 
       if (args.json) {
-        console.log(JSON.stringify({ ok: true, data: { stats, autonomy: autonomy.value.classes } }, null, 2));
+        printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { stats, autonomy: autonomy.value.classes } }, null, 2));
         return;
       }
 
       if (stats.length === 0) {
-        console.log("No calibration records found.");
-        console.log(renderAutonomyStats(autonomy.value.classes));
+        printLine(inv.io.stdout, "No calibration records found.");
+        printLine(inv.io.stdout, renderAutonomyStats(autonomy.value.classes));
         return;
       }
 
@@ -114,8 +113,8 @@ export default defineCommand({
         s.wilson_lower_bound.toFixed(3),
         String(s.window_limit),
       ]);
-      console.log(formatTable(headers, rows));
-      console.log(renderAutonomyStats(autonomy.value.classes));
+      printLine(inv.io.stdout, formatTable(headers, rows));
+      printLine(inv.io.stdout, renderAutonomyStats(autonomy.value.classes));
     } finally {
       app.close();
     }

@@ -23,6 +23,7 @@
  */
 
 import { defineCommand } from "citty";
+import { exitCli } from "../cli-exit.js";
 import { existsSync, mkdirSync, writeFileSync } from "fs";
 import { join } from "path";
 import { ambientOfInvocation, createApp } from "../../../app.js";
@@ -32,6 +33,7 @@ import { saveConfig } from "@lore/core/node";
 import { formatErrorFor, resolveActor } from "../utils.js";
 import { isInsideGitRepository } from "../../../service/git-state-stamp.js";
 import { invocationOf } from "../command-invocation.js";
+import { printLine } from "../output.js";
 
 export default defineCommand({
   meta: {
@@ -62,11 +64,11 @@ export default defineCommand({
     if (existsSync(loreDir)) {
       const msg = "Lore project already initialised in this directory.";
       if (args.json) {
-        console.log(JSON.stringify({ ok: false, error: msg }));
+        printLine(inv.io.stdout, JSON.stringify({ ok: false, error: msg }));
       } else {
-        process.stderr.write(`Error: ${msg}\n`);
+        inv.io.stderr.write(`Error: ${msg}\n`);
       }
-      process.exit(1);
+      exitCli(1);
     }
 
     mkdirSync(loreDir, { recursive: true });
@@ -85,11 +87,11 @@ export default defineCommand({
     if (!saveResult.ok) {
       const msg = `Failed to write config: ${formatErrorFor(inv, saveResult.error)}`;
       if (args.json) {
-        console.log(JSON.stringify({ ok: false, error: msg }));
+        printLine(inv.io.stdout, JSON.stringify({ ok: false, error: msg }));
       } else {
-        process.stderr.write(`Error: ${msg}\n`);
+        inv.io.stderr.write(`Error: ${msg}\n`);
       }
-      process.exit(1);
+      exitCli(1);
     }
 
     // Initialise the SQLite DB (SQLiteStore constructor runs migrations)
@@ -110,12 +112,12 @@ export default defineCommand({
       ? "not_a_git_repo"
       : stateBinding === undefined
         ? undefined
-        : await stateBinding.arm({ actor: resolveActor(undefined, inv.env, inv.cwd, inv.user), nowIso: new Date().toISOString() });
+        : await stateBinding.arm({ actor: resolveActor(inv.io, undefined, inv.env, inv.cwd, inv.user), nowIso: new Date().toISOString() });
     app.close();
     if (armed === "not_a_git_repo") {
       const line = `state binding not armed: ${cwd} is not inside a git repository; run \`lore audit arm --confirm\` after placing the corpus in git`;
       if (args.json) {
-        console.log(
+        printLine(inv.io.stdout, 
           JSON.stringify({
             ok: true,
             data: {
@@ -127,12 +129,12 @@ export default defineCommand({
           }),
         );
       } else {
-        console.log(line);
-        console.log(`Initialised Lore project "${projectName}"`);
-        console.log(`  Database: ${join(loreDir, "lore.db")}`);
-        console.log(`  Config:   ${join(loreDir, "config.yaml")}`);
-        console.log("");
-        console.log("Run `lore create prd --title \"My Project\"` to add your first document.");
+        printLine(inv.io.stdout, line);
+        printLine(inv.io.stdout, `Initialised Lore project "${projectName}"`);
+        printLine(inv.io.stdout, `  Database: ${join(loreDir, "lore.db")}`);
+        printLine(inv.io.stdout, `  Config:   ${join(loreDir, "config.yaml")}`);
+        printLine(inv.io.stdout, "");
+        printLine(inv.io.stdout, "Run `lore create prd --title \"My Project\"` to add your first document.");
       }
       return;
     }
@@ -142,16 +144,16 @@ export default defineCommand({
           ? "stateBindingService is not wired on this App (internal wiring error)"
           : `Failed to arm state binding: ${formatErrorFor(inv, armed.error)}`;
       if (args.json) {
-        console.log(JSON.stringify({ ok: false, error: msg }));
+        printLine(inv.io.stdout, JSON.stringify({ ok: false, error: msg }));
       } else {
-        process.stderr.write(`Error: ${msg}\n`);
+        inv.io.stderr.write(`Error: ${msg}\n`);
       }
-      process.exit(1);
+      exitCli(1);
     }
     const armedRows = armed.value.status === "armed" ? armed.value.report.would_become_unbound_rows : 0;
 
     if (args.json) {
-      console.log(
+      printLine(inv.io.stdout, 
         JSON.stringify({
           ok: true,
           data: {
@@ -163,12 +165,12 @@ export default defineCommand({
         }),
       );
     } else {
-      console.log(`State binding armed (audit row id ${armed.value.arming_rev}); ${armedRows} existing rows affected.`);
-      console.log(`Initialised Lore project "${projectName}"`);
-      console.log(`  Database: ${join(loreDir, "lore.db")}`);
-      console.log(`  Config:   ${join(loreDir, "config.yaml")}`);
-      console.log("");
-      console.log("Run `lore create prd --title \"My Project\"` to add your first document.");
+      printLine(inv.io.stdout, `State binding armed (audit row id ${armed.value.arming_rev}); ${armedRows} existing rows affected.`);
+      printLine(inv.io.stdout, `Initialised Lore project "${projectName}"`);
+      printLine(inv.io.stdout, `  Database: ${join(loreDir, "lore.db")}`);
+      printLine(inv.io.stdout, `  Config:   ${join(loreDir, "config.yaml")}`);
+      printLine(inv.io.stdout, "");
+      printLine(inv.io.stdout, "Run `lore create prd --title \"My Project\"` to add your first document.");
     }
   },
 });

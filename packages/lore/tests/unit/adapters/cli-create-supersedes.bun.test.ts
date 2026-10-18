@@ -45,7 +45,7 @@ import { tmpdir } from "os";
 import { createApp } from "../../../src/app.js";
 import type { App } from "../../../src/app.js";
 import type { DocType } from "@lore/core";
-import { liveInvocation, liveAmbient, liveWriteContext } from "../../live-invocation.js";
+import { liveInvocation, liveAmbient, liveWriteContext, runHandlerForExit } from "../../live-invocation.js";
 import type { Invocation } from "@lore/core";
 
 type RunnableCommand = {
@@ -59,9 +59,12 @@ function captureOutput() {
     stderr.push(String(chunk));
     return true;
   });
-  const logSpy = vi.spyOn(console, "log").mockImplementation((...args: unknown[]) => {
+  const logSpy = vi.spyOn(process.stdout, "write").mockImplementation((((chunk: unknown) => {
+    const args: unknown[] = [String(chunk).replace(/\n$/, "")];
     stdout.push(args.join(" "));
-  });
+  
+    return true;
+  }) as never));
   return {
     stdout,
     stderr,
@@ -72,9 +75,12 @@ function captureOutput() {
   };
 }
 
+/** The exit code the most recent run ended with; commands return it, they never set `process.exitCode`. */
+let lastExitCode = 0;
+
 async function runCmd(cmd: RunnableCommand, args: Record<string, unknown>): Promise<void> {
   if (!cmd.run) throw new Error("Command is missing run handler");
-  return cmd.run({ args, inv: liveInvocation() });
+  lastExitCode = await runHandlerForExit(() => cmd.run({ args, inv: liveInvocation() }));
 }
 
 async function importCreateCommand(): Promise<RunnableCommand> {
@@ -102,7 +108,6 @@ function setupTmpCorpus(): void {
 }
 
 function teardownTmpCorpus(): void {
-  process.exitCode = 0;
   process.chdir(originalCwd);
   if (savedEditor !== undefined) {
     process.env["EDITOR"] = savedEditor;
@@ -158,7 +163,6 @@ async function createTitledDoc(
   cmd: RunnableCommand,
   args: Record<string, unknown>,
 ): Promise<{ slug: string; exitCode: number | undefined }> {
-  process.exitCode = 0;
   const output = captureOutput();
   try {
     await runCmd(cmd, { ...args, ai: false });
@@ -167,7 +171,7 @@ async function createTitledDoc(
   }
   const typePrefix = String(args["type"]);
   const slug = output.stdout.find((l) => l.includes(`${typePrefix}-`))?.match(new RegExp(`${typePrefix}-[\\w-]+`))?.[0];
-  return { slug: slug ?? "", exitCode: process.exitCode };
+  return { slug: slug ?? "", exitCode: lastExitCode };
 }
 
 describe("lore create --supersedes — up-front target-type precondition (Defect 1)", () => {
@@ -193,8 +197,6 @@ describe("lore create --supersedes — up-front target-type precondition (Defect
       expect(task.slug).toBeTruthy();
 
       const knowledgeCountBefore = await countDocsOfType("knowledge", true);
-
-      process.exitCode = 0;
       const output = captureOutput();
       try {
         await runCmd(cmd, {
@@ -208,14 +210,13 @@ describe("lore create --supersedes — up-front target-type precondition (Defect
         output.restore();
       }
 
-      expect(process.exitCode).toBe(4);
+      expect(lastExitCode).toBe(4);
       expect(output.stderr.join("\n")).toMatch(/task/i);
       expect(output.stderr.join("\n")).toMatch(/supersede/i);
 
       // The exact oracle the task requires: doc count is UNCHANGED.
       const knowledgeCountAfter = await countDocsOfType("knowledge", true);
       expect(knowledgeCountAfter).toBe(knowledgeCountBefore);
-      process.exitCode = 0;
     } finally {
       teardownTmpCorpus();
     }
@@ -227,8 +228,6 @@ describe("lore create --supersedes — up-front target-type precondition (Defect
       await initLoreDb();
       const cmd = await importCreateCommand();
       const knowledgeCountBefore = await countDocsOfType("knowledge", true);
-
-      process.exitCode = 0;
       const output = captureOutput();
       try {
         await runCmd(cmd, {
@@ -242,10 +241,9 @@ describe("lore create --supersedes — up-front target-type precondition (Defect
         output.restore();
       }
 
-      expect(process.exitCode).toBe(3);
+      expect(lastExitCode).toBe(3);
       const knowledgeCountAfter = await countDocsOfType("knowledge", true);
       expect(knowledgeCountAfter).toBe(knowledgeCountBefore);
-      process.exitCode = 0;
     } finally {
       teardownTmpCorpus();
     }
@@ -266,8 +264,6 @@ describe("lore create --supersedes — up-front target-type precondition (Defect
       expect(oldKnowledge.slug).toBeTruthy();
 
       const knowledgeCountBefore = await countDocsOfType("knowledge", true);
-
-      process.exitCode = 0;
       const output = captureOutput();
       try {
         await runCmd(cmd, {
@@ -281,7 +277,7 @@ describe("lore create --supersedes — up-front target-type precondition (Defect
         output.restore();
       }
 
-      expect(process.exitCode).toBe(0);
+      expect(lastExitCode).toBe(0);
       expect(output.stdout.join("\n")).toContain("Created knowledge document");
 
       // A new doc WAS created this time.
@@ -316,8 +312,6 @@ describe("lore create --supersedes — up-front target-type precondition (Defect
       });
       expect(oldAdr.exitCode).toBe(0);
       expect(oldAdr.slug).toBeTruthy();
-
-      process.exitCode = 0;
       const output = captureOutput();
       try {
         await runCmd(cmd, {
@@ -331,7 +325,7 @@ describe("lore create --supersedes — up-front target-type precondition (Defect
         output.restore();
       }
 
-      expect(process.exitCode).toBe(0);
+      expect(lastExitCode).toBe(0);
       expect(output.stdout.join("\n")).toContain("Created adr document");
 
       const app = openDbApp();

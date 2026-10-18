@@ -30,7 +30,7 @@ import { mkdtempSync, writeFileSync } from "fs";
 import { readFileSync } from "node:fs";
 import { join } from "path";
 import { tmpdir } from "os";
-import { liveInvocation } from "../../live-invocation.js";
+import { liveInvocation, runHandlerForExit } from "../../live-invocation.js";
 import type { Invocation } from "@lore/core";
 
 type RunnableCommand = {
@@ -45,9 +45,12 @@ function captureOutput() {
     stderr.push(String(chunk));
     return true;
   });
-  const logSpy = vi.spyOn(console, "log").mockImplementation((...args: unknown[]) => {
+  const logSpy = vi.spyOn(process.stdout, "write").mockImplementation((((chunk: unknown) => {
+    const args: unknown[] = [String(chunk).replace(/\n$/, "")];
     stdout.push(args.join(" "));
-  });
+  
+    return true;
+  }) as never));
 
   return {
     stdout,
@@ -59,17 +62,16 @@ function captureOutput() {
   };
 }
 
+/** The exit code the most recent run ended with (see {@link runCmd}); commands return it, they never call `process.exit`. */
+let lastExitCode = 0;
+
+/** Reads the last run's code: `undefined` when the run ended 0 (what "process.exit was never called" used to assert). */
 function captureExit() {
-  let capturedCode: number | undefined;
-  const spy = vi.spyOn(process, "exit").mockImplementation((code?: string | number | null | undefined): never => {
-    capturedCode = typeof code === "number" ? code : 0;
-    throw new Error(`process.exit(${code})`);
-  });
   return {
-    get code() {
-      return capturedCode;
+    get code(): number | undefined {
+      return lastExitCode === 0 ? undefined : lastExitCode;
     },
-    spy,
+    restore(): void {},
   };
 }
 
@@ -80,7 +82,8 @@ async function runCmd(
   if (!cmd.run) {
     throw new Error("Command is missing run handler");
   }
-  return cmd.run({ args, inv: liveInvocation() });
+  const run = cmd.run;
+  lastExitCode = await runHandlerForExit(() => run({ args, inv: liveInvocation() }));
 }
 
 async function importCreateCommand(): Promise<RunnableCommand> {
@@ -125,14 +128,12 @@ let tmpDir: string;
 let originalCwd: string;
 
 beforeEach(() => {
-  process.exitCode = 0;
   tmpDir = mkdtempSync(join(tmpdir(), "lore-cli-set-demotion-advisory-test-"));
   originalCwd = process.cwd();
   process.chdir(tmpDir);
 });
 
 afterEach(() => {
-  process.exitCode = 0;
   process.chdir(originalCwd);
   try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -171,8 +172,6 @@ async function createDraftPrd(createCmd: RunnableCommand, title: string): Promis
       content: "## Overview\n\nbody",
       ai: false,
     });
-  } catch (e: unknown) {
-    if (!(e instanceof Error) || !e.message.startsWith("process.exit(")) throw e;
   } finally {
     out.restore();
   }
@@ -187,8 +186,6 @@ async function setStatus(setCmd: RunnableCommand, id: string, status: string): P
   const exit = captureExit();
   try {
     await runCmd(setCmd, { id, status });
-  } catch (e: unknown) {
-    if (!(e instanceof Error) || !e.message.startsWith("process.exit(")) throw e;
   } finally {
     out.restore();
   }
@@ -201,8 +198,6 @@ async function getDocStatus(getCmd: RunnableCommand, id: string): Promise<string
   const out = captureOutput();
   try {
     await runCmd(getCmd, { id, json: true });
-  } catch (e: unknown) {
-    if (!(e instanceof Error) || !e.message.startsWith("process.exit(")) throw e;
   } finally {
     out.restore();
   }
@@ -230,8 +225,6 @@ describe("lore set — approved→draft demotion advisory on the standard patch 
     const exit = captureExit();
     try {
       await runCmd(setCmd, { id: slug, "content-file": contentFile });
-    } catch (e: unknown) {
-      if (!(e instanceof Error) || !e.message.startsWith("process.exit(")) throw e;
     } finally {
       out.restore();
     }
@@ -257,8 +250,6 @@ describe("lore set — approved→draft demotion advisory on the standard patch 
     const exit = captureExit();
     try {
       await runCmd(setCmd, { id: slug, "content-file": contentFile });
-    } catch (e: unknown) {
-      if (!(e instanceof Error) || !e.message.startsWith("process.exit(")) throw e;
     } finally {
       out.restore();
     }
@@ -282,8 +273,6 @@ describe("lore set — approved→draft demotion advisory on the standard patch 
     const exit = captureExit();
     try {
       await runCmd(setCmd, { id: slug, priority: "high" });
-    } catch (e: unknown) {
-      if (!(e instanceof Error) || !e.message.startsWith("process.exit(")) throw e;
     } finally {
       out.restore();
     }
@@ -309,13 +298,11 @@ describe("lore set — approved→draft demotion advisory on the standard patch 
     // assertion reads `process.exitCode` itself, not a `process.exit()` spy.
     try {
       await runCmd(setCmd, { id: "prd-does-not-exist", "content-file": contentFile });
-    } catch (e: unknown) {
-      if (!(e instanceof Error) || !e.message.startsWith("process.exit(")) throw e;
     } finally {
       out.restore();
     }
 
-    expect(process.exitCode).toBe(3);
+    expect(lastExitCode).toBe(3);
   });
 
   it("REGRESSION: the AI-mutation branch and the standard patch branch share ONE exported advisory constant, never a duplicated literal", async () => {
@@ -339,9 +326,9 @@ describe("lore set — approved→draft demotion advisory on the standard patch 
     // Both the AI-mutation branch and the standard patch branch must reference the
     // exported identifier by name.
     const identifierOccurrences = source.split("APPROVED_DEMOTION_ADVISORY").length - 1;
-    // 1 export declaration + JSDoc mentions + >=2 console.log call sites.
+    // 1 export declaration + JSDoc mentions + >=2 printLine call sites.
     expect(identifierOccurrences).toBeGreaterThanOrEqual(3);
-    const consoleLogUsages = (source.match(/console\.log\(APPROVED_DEMOTION_ADVISORY\)/g) ?? []).length;
+    const consoleLogUsages = (source.match(/printLine\(inv\.io\.stdout, APPROVED_DEMOTION_ADVISORY\)/g) ?? []).length;
     expect(consoleLogUsages).toBe(2);
   });
 });

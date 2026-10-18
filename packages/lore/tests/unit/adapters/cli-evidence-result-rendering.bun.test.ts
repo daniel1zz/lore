@@ -172,9 +172,12 @@ function buildReadyRecord(overrides: Partial<ReadyRecord> = {}): ReadyRecord {
 /** Captures every `console.log` call's first argument as a string; restore via `.restore()`. */
 function captureConsoleLog(): { lines: () => string[]; restore: () => void } {
   const lines: string[] = [];
-  const spy = spyOn(console, "log").mockImplementation((...args: unknown[]) => {
+  const spy = spyOn(process.stdout, "write").mockImplementation((((chunk: unknown) => {
+    const args: unknown[] = [String(chunk).replace(/\n$/, "")];
     lines.push(String(args[0]));
-  });
+  
+    return true;
+  }) as never));
   return {
     lines: () => lines,
     restore: () => spy.mockRestore(),

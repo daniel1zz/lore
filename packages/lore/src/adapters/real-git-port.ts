@@ -139,7 +139,7 @@
 
 import { execFileSync, spawn } from "node:child_process";
 import { chmodSync, mkdirSync, readFileSync, realpathSync, statSync, unlinkSync, writeFileSync } from "node:fs";
-import { join, resolve, sep } from "node:path";
+import { isAbsolute, join, resolve, sep } from "node:path";
 
 import { err, ok } from "@lore/core";
 import type { LoreError, Result } from "@lore/core";
@@ -161,6 +161,11 @@ interface GitRunResult {
  * method can uniformly inspect `exitCode` without a separate try/catch.
  */
 function runGit(cwd: string, args: string[]): Promise<GitRunResult> {
+  // reason: a RELATIVE cwd is resolved by the OS against the process's working directory, which nothing below an entry
+  // may read (AS-26). A recorded claim worktree can be a bare branch name ("feat-a"); it is not a place git can run in.
+  if (!isAbsolute(cwd)) {
+    return Promise.resolve({ exitCode: -1, stdout: "", stderr: `refusing a relative cwd "${cwd}": no base directory to resolve it against` });
+  }
   return new Promise((resolve) => {
     const child = spawn(GIT_COMMAND, args, { cwd, stdio: ["ignore", "pipe", "pipe"] });
 
@@ -487,6 +492,7 @@ async function writeClaimSessionMarker(cwd: string, sessionId: string): Promise<
  *   different actor).
  */
 export async function unbindClaimSessionForTrailer(cwd: string, sessionId: string): Promise<void> {
+  if (!isAbsolute(cwd)) return; // reason: see bindClaimSessionForTrailer — a branch name is not a directory
   const gitDirResult = await resolveGitDir(cwd);
   if (!gitDirResult.ok) return;
   const markerPath = join(gitDirResult.value, CLAIM_SESSION_MARKER_FILENAME);
@@ -723,6 +729,9 @@ async function ensureSessionTrailerHookInstalled(
  * @param sessionId - The claim's captured (sanitized) session instance.
  */
 export async function bindClaimSessionForTrailer(worktree: string, sessionId: string): Promise<void> {
+  // reason: a claim may record a bare branch name; that is not a directory a hook can be installed in, and a relative
+  // path would be resolved against the process's working directory (AS-26). Same no-op as a missing worktree.
+  if (!isAbsolute(worktree)) return;
   await writeClaimSessionMarker(worktree, sessionId);
   await ensureSessionTrailerHookInstalled(worktree);
 }

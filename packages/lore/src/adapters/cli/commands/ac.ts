@@ -185,6 +185,7 @@
  */
 
 import { defineCommand } from "citty";
+
 import { existsSync } from "fs";
 import { dirname } from "path";
 import { loadLoreApp } from "../loader.js";
@@ -204,6 +205,9 @@ import type { CiteWarning } from "../../../service/ac-citations.js";
 // forbid editing — see {@link countBlockedDescendantTasks}.
 import { isPlanMember } from "../../../service/plan-membership.js";
 import { invocationOf } from "../command-invocation.js";
+import { printLine } from "../output.js";
+import type { CliIo } from "../output.js";
+import type { ExitReport } from "../cli-exit.js";
 
 /**
  * `App.acService` is typed optional only to keep pre-existing hand-built App test
@@ -319,8 +323,10 @@ export default defineCommand({
       async run(context) {
         const { args } = context;
         const inv = invocationOf(context);
-        if (refuseCorrectionFlag(args, "add")) return;
-        if (refuseBadTimeoutMs(args, "add")) return;
+        const correctionRefusal = refuseCorrectionFlag(inv.io, args, "add");
+        if (correctionRefusal !== undefined) return correctionRefusal;
+        const timeoutRefusal = refuseBadTimeoutMs(inv.io, args, "add");
+        if (timeoutRefusal !== undefined) return timeoutRefusal;
         const { app, dbPath } = loadLoreApp({ inv });
         try {
           const beforeStatus = await fetchSpecStatus(app, args.spec as string);
@@ -329,25 +335,24 @@ export default defineCommand({
           const result = await requireAcService(app).addCriterion(
             args.spec as string,
             criterion,
-            { ...buildDeclarePathOpts(args, dbPath, inv), onAdvisory: printAdvisory },
+            { ...buildDeclarePathOpts(args, dbPath, inv), onAdvisory: (advisory: string): void => printAdvisory(inv.io, advisory) },
           );
 
           if (!result.ok) {
-            process.stderr.write(formatErrorFor(inv, result.error) + "\n");
-            process.exitCode = exitCode(result.error);
-            return;
+            inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
+            return exitCode(result.error);
           }
 
-          await reportDemotionIfAny(app, args.spec as string, beforeStatus);
+          await reportDemotionIfAny(inv.io, app, args.spec as string, beforeStatus);
           await reportCiteFeedbackOnAdd(inv, requireAcService(app), args.spec as string, args.id as string, criterion);
 
           if (args.json) {
-            console.log(JSON.stringify({ ok: true, data: { criteria: result.value } }, null, 2));
+            printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { criteria: result.value } }, null, 2));
             return;
           }
 
-          console.log(`Added acceptance criterion "${args.id as string}" to spec ${args.spec as string}`);
-          renderCriteriaList({ criteria: result.value, coverage: null, dangling: [] });
+          printLine(inv.io.stdout, `Added acceptance criterion "${args.id as string}" to spec ${args.spec as string}`);
+          renderCriteriaList(inv.io, { criteria: result.value, coverage: null, dangling: [] });
         } finally {
           app.close();
         }
@@ -379,13 +384,12 @@ export default defineCommand({
           });
 
           if (!result.ok) {
-            process.stderr.write(formatErrorFor(inv, result.error) + "\n");
-            process.exitCode = exitCode(result.error);
-            return;
+            inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
+            return exitCode(result.error);
           }
 
           if (args.json) {
-            console.log(
+            printLine(inv.io.stdout, 
               JSON.stringify(
                 { ok: true, data: { ...result.value, coverage: withCoverageState(result.value.coverage) } },
                 null,
@@ -396,11 +400,11 @@ export default defineCommand({
           }
 
           if (result.value.criteria.length === 0) {
-            console.log("No acceptance criteria declared on this spec.");
+            printLine(inv.io.stdout, "No acceptance criteria declared on this spec.");
             return;
           }
 
-          renderCriteriaList(result.value);
+          renderCriteriaList(inv.io, result.value);
         } finally {
           app.close();
         }
@@ -435,18 +439,17 @@ export default defineCommand({
             acId: args.id as string,
             reason: args.reason as string,
             expiresAt: args.expires as string,
-            by: resolveActor(undefined, inv.env, inv.cwd, inv.user),
+            by: resolveActor(inv.io, undefined, inv.env, inv.cwd, inv.user),
           });
           if (!result.ok) {
-            process.stderr.write(formatErrorFor(inv, result.error) + "\n");
-            process.exitCode = exitCode(result.error);
-            return;
+            inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
+            return exitCode(result.error);
           }
           if (args.json) {
-            console.log(JSON.stringify({ ok: true, data: { exemption: result.value } }, null, 2));
+            printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { exemption: result.value } }, null, 2));
             return;
           }
-          console.log(
+          printLine(inv.io.stdout, 
             `Exempted ${args.id as string} on spec ${args.spec as string} until ${result.value.expires_at} (by ${result.value.granted_by})`,
           );
         } finally {
@@ -499,19 +502,18 @@ export default defineCommand({
             args.id as string,
             ruleIds,
             { remove: args.remove === true },
-            { by: resolveActor(undefined, inv.env, inv.cwd, inv.user) },
+            { by: resolveActor(inv.io, undefined, inv.env, inv.cwd, inv.user) },
           );
 
           if (!result.ok) {
-            process.stderr.write(formatErrorFor(inv, result.error) + "\n");
-            process.exitCode = exitCode(result.error);
-            return;
+            inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
+            return exitCode(result.error);
           }
 
-          printCiteWarnings(result.value.warnings);
+          printCiteWarnings(inv.io, result.value.warnings);
 
           if (args.json) {
-            console.log(
+            printLine(inv.io.stdout, 
               JSON.stringify(
                 { ok: true, data: { criteria: result.value.criteria, warnings: result.value.warnings } },
                 null,
@@ -523,7 +525,7 @@ export default defineCommand({
 
           const verb = args.remove === true ? "Removed citation(s) from" : "Cited";
           const cites = result.value.criteria.find((c) => c.id === (args.id as string))?.cites ?? [];
-          console.log(
+          printLine(inv.io.stdout, 
             `${verb} acceptance criterion "${args.id as string}" on spec ${args.spec as string} — ` +
               `cites: ${cites.length > 0 ? cites.join(", ") : "(none)"}`,
           );
@@ -565,30 +567,30 @@ export default defineCommand({
       async run(context) {
         const { args } = context;
         const inv = invocationOf(context);
-        if (refuseCorrectionFlag(args, "rm")) return;
+        const correctionRefusal = refuseCorrectionFlag(inv.io, args, "rm");
+        if (correctionRefusal !== undefined) return correctionRefusal;
         const { app } = loadLoreApp({ inv });
         try {
           const result = await requireAcService(app).removeCriterion(args.spec as string, args.id as string, {
             force: args.force === true,
-            by: resolveActor(undefined, inv.env, inv.cwd, inv.user),
+            by: resolveActor(inv.io, undefined, inv.env, inv.cwd, inv.user),
           });
 
           if (!result.ok) {
-            process.stderr.write(formatErrorFor(inv, result.error) + "\n");
-            process.exitCode = exitCode(result.error);
-            return;
+            inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
+            return exitCode(result.error);
           }
 
           if (args.json) {
-            console.log(JSON.stringify({ ok: true, data: { criteria: result.value } }, null, 2));
+            printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { criteria: result.value } }, null, 2));
             return;
           }
 
-          console.log(`Removed acceptance criterion "${args.id as string}" from spec ${args.spec as string}`);
+          printLine(inv.io.stdout, `Removed acceptance criterion "${args.id as string}" from spec ${args.spec as string}`);
           if (result.value.length > 0) {
-            renderCriteriaList({ criteria: result.value, coverage: null, dangling: [] });
+            renderCriteriaList(inv.io, { criteria: result.value, coverage: null, dangling: [] });
           } else {
-            console.log("No acceptance criteria remaining.");
+            printLine(inv.io.stdout, "No acceptance criteria remaining.");
           }
         } finally {
           app.close();
@@ -699,24 +701,23 @@ export default defineCommand({
         // D1/D5a — argv-decidable, judged BEFORE the app/store is even opened:
         // `--mode` names a rule the command line alone already violates.
         if (typeof args.mode === "string") {
-          process.stderr.write(
+          inv.io.stderr.write(
             "Error: --mode cannot be changed via `lore ac set` — mode reinterprets every historical " +
               "evidence row attributed to this id. Use `lore ac rm --force <spec> <id>` then " +
               "`lore ac add <spec> <id> --mode <new-mode> ...` instead.\n",
           );
-          process.exitCode = 2;
-          return;
+          return 2;
         }
 
-        if (refuseBadTimeoutMs(args, "set")) return;
+        const timeoutRefusal = refuseBadTimeoutMs(inv.io, args, "set");
+        if (timeoutRefusal !== undefined) return timeoutRefusal;
         const patch = buildSetPatch(args);
         if (patch === null) {
-          process.stderr.write(
+          inv.io.stderr.write(
             "Error: lore ac set requires at least one field to change: --statement, --oracle, --command, " +
               "--timeout-ms, --rubric, --note, --covers, --cite, --falsifier-path/-find/-replace/-exit-code\n",
           );
-          process.exitCode = 2;
-          return;
+          return 2;
         }
 
         // --correction needs a non-empty reason: argv-decidable, so exit 2 BEFORE the app loads or anything
@@ -725,9 +726,8 @@ export default defineCommand({
         if (args.correction !== undefined) {
           const reason = typeof args.correction === "string" ? args.correction.trim() : "";
           if (reason === "") {
-            process.stderr.write('Error: --correction requires a non-empty reason (--correction "<why this is a fix>").\n');
-            process.exitCode = 2;
-            return;
+            inv.io.stderr.write('Error: --correction requires a non-empty reason (--correction "<why this is a fix>").\n');
+            return 2;
           }
           correctionOpt = { reason };
         }
@@ -738,7 +738,7 @@ export default defineCommand({
 
           const setOpts: SetCriterionOpts = {
             ...buildDeclarePathOpts(args, dbPath, inv),
-            onAdvisory: printAdvisory,
+            onAdvisory: (advisory: string): void => printAdvisory(inv.io, advisory),
             ...(correctionOpt !== undefined ? { correction: correctionOpt } : {}),
           };
           const result = await requireAcService(app).setCriterion(
@@ -749,22 +749,21 @@ export default defineCommand({
           );
 
           if (!result.ok) {
-            process.stderr.write(formatErrorFor(inv, result.error) + "\n");
-            process.exitCode = exitCode(result.error);
-            return;
+            inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
+            return exitCode(result.error);
           }
 
-          await reportDemotionIfAny(app, args.spec as string, beforeStatus);
+          await reportDemotionIfAny(inv.io, app, args.spec as string, beforeStatus);
           if (patch.cites !== undefined) await reportCiteWarnings(inv, requireAcService(app), patch.cites, args.spec as string);
 
           if (args.json) {
-            console.log(JSON.stringify({ ok: true, data: { criteria: result.value } }, null, 2));
+            printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { criteria: result.value } }, null, 2));
             return;
           }
 
-          console.log(`Updated acceptance criterion "${args.id as string}" on spec ${args.spec as string}`);
-          if (correctionOpt !== undefined) console.log(`  (correction recorded: ${correctionOpt.reason})`);
-          renderCriteriaList({ criteria: result.value, coverage: null, dangling: [] });
+          printLine(inv.io.stdout, `Updated acceptance criterion "${args.id as string}" on spec ${args.spec as string}`);
+          if (correctionOpt !== undefined) printLine(inv.io.stdout, `  (correction recorded: ${correctionOpt.reason})`);
+          renderCriteriaList(inv.io, { criteria: result.value, coverage: null, dangling: [] });
         } finally {
           app.close();
         }
@@ -773,8 +772,8 @@ export default defineCommand({
   },
 });
 
-const printAdvisory = (advisory: string): void => {
-  process.stderr.write(advisory + "\n");
+const printAdvisory = (io: CliIo, advisory: string): void => {
+  io.stderr.write(advisory + "\n");
 };
 
 /**
@@ -782,16 +781,15 @@ const printAdvisory = (advisory: string): void => {
  * fix. When `--correction` is on the command line, write the refusal naming the only criterion correction
  * and set exit 2 — argv-decidable, so this runs BEFORE the app loads.
  *
- * @returns `true` when the call was refused (the caller must return).
+ * @returns the refusal's exit code (2) when the call was refused (the caller must return it), else `undefined`.
  */
-function refuseCorrectionFlag(args: Record<string, unknown>, verb: "add" | "rm"): boolean {
-  if (args.correction === undefined) return false;
-  process.stderr.write(
+function refuseCorrectionFlag(io: CliIo, args: Record<string, unknown>, verb: "add" | "rm"): ExitReport {
+  if (args.correction === undefined) return undefined;
+  io.stderr.write(
     `Error: lore ac ${verb} does not accept --correction — a ${verb === "add" ? "new" : "removed"} criterion is a ` +
       "new decision, not a fix. The only criterion correction is `lore ac set --correction \"<reason>\"` on ONE existing criterion.\n",
   );
-  process.exitCode = 2;
-  return true;
+  return 2;
 }
 
 // ─── --timeout-ms validation ─────────────────────────────────────────────────
@@ -799,29 +797,28 @@ function refuseCorrectionFlag(args: Record<string, unknown>, verb: "add" | "rm")
 /**
  * Argv-decidable guard for `--timeout-ms` (AC-level `verify.timeout_ms`): the value must be a
  * positive integer made only of digits. `ac set` additionally accepts `''` (removes the field).
- * Violation writes a stderr line, sets exit 4 (validation) and returns true so the caller stops
+ * Violation writes a stderr line and returns exit 4 (validation) so the caller stops
  * BEFORE the app/store is opened. `ac add --mode <non-script> --timeout-ms` is refused the same way
  * (script mode only); `ac set` on a non-script criterion is refused by `AcService.setCriterion`.
  *
  * @param args - raw citty args
  * @param verb - which subcommand is running (only `set` accepts the `''` clear sentinel)
- * @returns true when the command was refused (caller must return)
+ * @returns the refusal's exit code (4) when the command was refused (caller must return it), else `undefined`
  */
-function refuseBadTimeoutMs(args: Record<string, unknown>, verb: "add" | "set"): boolean {
+function refuseBadTimeoutMs(io: CliIo, args: Record<string, unknown>, verb: "add" | "set"): ExitReport {
   const raw = args["timeout-ms"];
-  if (raw === undefined) return false;
-  const fail = (why: string): true => {
-    process.stderr.write(`Error: --timeout-ms ${why}\n`);
-    process.exitCode = 4;
-    return true;
+  if (raw === undefined) return undefined;
+  const fail = (io: CliIo, why: string): number => {
+    io.stderr.write(`Error: --timeout-ms ${why}\n`);
+    return 4;
   };
-  if (typeof raw !== "string") return fail("must be a positive integer number of milliseconds");
-  if (verb === "set" && raw === "") return false;
+  if (typeof raw !== "string") return fail(io, "must be a positive integer number of milliseconds");
+  if (verb === "set" && raw === "") return undefined;
   if (!/^[0-9]+$/.test(raw) || !Number.isSafeInteger(Number(raw)) || Number(raw) <= 0) {
-    return fail(`must be a positive integer number of milliseconds (got "${raw}")`);
+    return fail(io, `must be a positive integer number of milliseconds (got "${raw}")`);
   }
-  if (verb === "add" && args.mode !== "script") return fail("applies to --mode script only");
-  return false;
+  if (verb === "add" && args.mode !== "script") return fail(io, "applies to --mode script only");
+  return undefined;
 }
 
 // ─── Input Assembly ──────────────────────────────────────────────────────────
@@ -965,7 +962,7 @@ function buildFalsifierCandidate(args: Record<string, unknown>): unknown {
 function buildDeclarePathOpts(args: Record<string, unknown>, dbPath: string, inv: Invocation): DeclarePathOpts {
   const reason = args["allow-missing-path"];
   return {
-    by: resolveActor(undefined, inv.env, inv.cwd, inv.user),
+    by: resolveActor(inv.io, undefined, inv.env, inv.cwd, inv.user),
     pathContext: {
       fileExists: existsSync,
       cwd: inv.cwd,
@@ -1039,9 +1036,9 @@ function normalizeCiteFlag(raw: unknown): string[] | undefined {
 }
 
 /** One stderr line per dangling / inactive id (stderr: advisory, never pollutes `--json`). */
-function printCiteWarnings(warnings: readonly CiteWarning[]): void {
+function printCiteWarnings(io: CliIo, warnings: readonly CiteWarning[]): void {
   for (const w of warnings) {
-    process.stderr.write(
+    io.stderr.write(
       w.kind === "dangling"
         ? `Warning: cited rule ${w.id} does not exist in any baseline leaf (dangling) — stored anyway\n`
         : `Warning: cited rule ${w.id} is deprecated or retired (inactive) — stored anyway\n`,
@@ -1054,10 +1051,10 @@ async function reportCiteWarnings(inv: Invocation, ac: AcService, ids: readonly 
   if (ids.length === 0) return;
   const checked = await ac.checkCites(ids, spec);
   if (!checked.ok) {
-    process.stderr.write(`Warning: could not check cited rules against the baseline: ${formatErrorFor(inv, checked.error)}\n`);
+    inv.io.stderr.write(`Warning: could not check cited rules against the baseline: ${formatErrorFor(inv, checked.error)}\n`);
     return;
   }
-  printCiteWarnings(checked.value);
+  printCiteWarnings(inv.io, checked.value);
 }
 
 /**
@@ -1078,7 +1075,7 @@ async function reportCiteFeedbackOnAdd(inv: Invocation,
   }
   const has = await ac.hasBaselineDocs();
   if (has.ok && has.value) {
-    process.stderr.write(
+    inv.io.stderr.write(
       `Hint: ${acId} cites no baseline rule — attach one with \`lore ac cite ${spec} ${acId} BR-<n>\`\n`,
     );
   }
@@ -1131,7 +1128,7 @@ async function fetchSpecStatus(app: App, specIdOrSlug: string): Promise<string |
  *   demotion check short-circuits immediately in that case, since a lookup
  *   failure carries no evidence of a prior "approved" state.
  */
-async function reportDemotionIfAny(
+async function reportDemotionIfAny(io: CliIo, 
   app: App,
   specIdOrSlug: string,
   beforeStatus: string | undefined,
@@ -1146,7 +1143,7 @@ async function reportDemotionIfAny(
     ? `${blockedResult.value} descendant task claim(s)`
     : `an unknown number of descendant task claims (blast-radius count unavailable: ${blockedResult.error.code})`;
 
-  process.stderr.write(
+  io.stderr.write(
     `Notice: this edit demoted spec "${afterResult.value.doc.slug}" from approved to draft ` +
       "(correct lifecycle behavior — an approved spec's governing contract just changed, " +
       `resolveStatusAfterContractEdit in @lore/core). It now blocks ${blastRadius} until the ` +
@@ -1212,19 +1209,19 @@ async function countBlockedDescendantTasks(app: App, specId: string): Promise<Re
  * ` [pass_unfalsified]` line marker (see {@link passUnfalsifiedMarker}) — the badge
  * itself is untouched (stays plain `✔`, see {@link coverageBadge}'s own JSDoc for why).
  */
-function renderCriteriaList(result: AcListResult): void {
+function renderCriteriaList(io: CliIo, result: AcListResult): void {
   for (const criterion of result.criteria) {
     const badge = result.coverage !== null ? `${coverageBadge(result.coverage, criterion.id)} ` : "";
     const marker = passUnfalsifiedMarker(result.coverage, criterion.id);
     const retiredOracle = retiredOracleMarker(result.coverage, criterion.id);
     const otherCommand = otherCommandMarker(result.coverage, criterion.id);
     const oracleFiles = oracleFileMarkers(result.coverage, criterion.id);
-    console.log(
+    printLine(io.stdout, 
       `  ${badge}${criterion.id} — ${criterion.statement} [${describeVerify(criterion.verify)}]${marker}${retiredOracle}${otherCommand}${oracleFiles}`,
     );
   }
   if (result.dangling.length > 0) {
-    console.log(
+    printLine(io.stdout, 
       `\nDangling ac_ref (evidence references ids no longer declared): ${result.dangling.join(", ")}`,
     );
   }

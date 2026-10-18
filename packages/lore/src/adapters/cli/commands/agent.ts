@@ -5,9 +5,11 @@
  */
 
 import { defineCommand } from "citty";
+
 import { loadLoreApp } from "../loader.js";
 import { formatTable } from "../utils.js";
 import { invocationOf } from "../command-invocation.js";
+import { printLine } from "../output.js";
 
 const agentCreate = defineCommand({
   meta: {
@@ -39,32 +41,31 @@ const agentCreate = defineCommand({
 
       if (!result.ok) {
         if (args.json) {
-          console.log(JSON.stringify({ ok: false, error: result.error }));
+          printLine(inv.io.stdout, JSON.stringify({ ok: false, error: result.error }));
         } else {
-          process.stderr.write(`Error: ${result.error.code} — ${
+          inv.io.stderr.write(`Error: ${result.error.code} — ${
             "message" in result.error ? result.error.message : JSON.stringify(result.error)
           }\n`);
         }
-        process.exitCode = 1;
-        return;
+        return 1;
       }
 
       const { rawKey, record } = result.value;
 
       if (args.json) {
-        console.log(JSON.stringify({ ok: true, data: { name: record.name, api_key: rawKey, owner: record.owner } }));
+        printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { name: record.name, api_key: rawKey, owner: record.owner } }));
         return;
       }
 
-      console.log("Agent created:");
-      console.log(`  Name:    ${record.name}`);
-      console.log(`  API Key: ${rawKey}`);
-      console.log(`  Owner:   ${record.owner}`);
-      console.log("");
-      console.log("Configure in .mcp.json:");
-      console.log(`  "env": { "LORE_API_KEY": "${rawKey}" }`);
-      console.log("");
-      console.log("Store this key securely — it cannot be retrieved again.");
+      printLine(inv.io.stdout, "Agent created:");
+      printLine(inv.io.stdout, `  Name:    ${record.name}`);
+      printLine(inv.io.stdout, `  API Key: ${rawKey}`);
+      printLine(inv.io.stdout, `  Owner:   ${record.owner}`);
+      printLine(inv.io.stdout, "");
+      printLine(inv.io.stdout, "Configure in .mcp.json:");
+      printLine(inv.io.stdout, `  "env": { "LORE_API_KEY": "${rawKey}" }`);
+      printLine(inv.io.stdout, "");
+      printLine(inv.io.stdout, "Store this key securely — it cannot be retrieved again.");
     } finally {
       app.close();
     }
@@ -91,23 +92,22 @@ const agentList = defineCommand({
 
       if (!result.ok) {
         if (args.json) {
-          console.log(JSON.stringify({ ok: false, error: result.error }));
+          printLine(inv.io.stdout, JSON.stringify({ ok: false, error: result.error }));
         } else {
-          process.stderr.write(`Error: ${"message" in result.error ? result.error.message : result.error.code}\n`);
+          inv.io.stderr.write(`Error: ${"message" in result.error ? result.error.message : result.error.code}\n`);
         }
-        process.exitCode = 1;
-        return;
+        return 1;
       }
 
       const keys = result.value;
 
       if (args.json) {
-        console.log(JSON.stringify({ ok: true, data: keys }));
+        printLine(inv.io.stdout, JSON.stringify({ ok: true, data: keys }));
         return;
       }
 
       if (keys.length === 0) {
-        console.log("No API keys found. Run `lore agent create --name <name>` to create one.");
+        printLine(inv.io.stdout, "No API keys found. Run `lore agent create --name <name>` to create one.");
         return;
       }
 
@@ -118,7 +118,7 @@ const agentList = defineCommand({
         k.created_at.slice(0, 19).replace("T", " "),
       ]);
 
-      console.log(formatTable(["Name", "Owner", "Status", "Created"], rows));
+      printLine(inv.io.stdout, formatTable(["Name", "Owner", "Status", "Created"], rows));
     } finally {
       app.close();
     }
@@ -150,20 +150,19 @@ const agentRevoke = defineCommand({
 
       if (!result.ok) {
         if (args.json) {
-          console.log(JSON.stringify({ ok: false, error: result.error }));
+          printLine(inv.io.stdout, JSON.stringify({ ok: false, error: result.error }));
         } else {
-          process.stderr.write(`Error: ${"message" in result.error ? result.error.message : result.error.code}\n`);
+          inv.io.stderr.write(`Error: ${"message" in result.error ? result.error.message : result.error.code}\n`);
         }
-        process.exitCode = 1;
-        return;
+        return 1;
       }
 
       if (args.json) {
-        console.log(JSON.stringify({ ok: true, data: { name: args.name, revoked: true } }));
+        printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { name: args.name, revoked: true } }));
         return;
       }
 
-      console.log(`Agent '${args.name}' API key revoked.`);
+      printLine(inv.io.stdout, `Agent '${args.name}' API key revoked.`);
     } finally {
       app.close();
     }

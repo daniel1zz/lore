@@ -74,7 +74,7 @@ async function main(): Promise<void> {
   // path). This is what `handleLocalBootstrap` checks the VITE_LORE_BOOTSTRAP_TOKEN
   // against, and what the caller's per-project bearer keys are independent of.
   const machineAuth = createMachineAuthStores({ baseDir: machineAuthBaseDir });
-  const rawKey = await ensureLocalApiKey(machineAuth.apiKeyStore, machineAuth.baseDir);
+  const rawKey = await ensureLocalApiKey({ stdout: process.stdout, stderr: process.stderr }, machineAuth.apiKeyStore, machineAuth.baseDir);
 
   // reason: this script is the e2e server's entry — it resolves the Invocation once and composes both apps from it.
   const inv = await resolveEntryInvocation(process.argv.slice(2));
@@ -93,6 +93,7 @@ async function main(): Promise<void> {
   const server = startHttpServer(app, {
     port,
     host,
+    io: inv.io,
     machineAuth,
     ...(mountRegistry !== undefined ? { mountRegistry } : {}),
   });

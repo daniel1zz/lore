@@ -61,7 +61,7 @@ import {
   resolveActorWithIdentitySource,
   resolveActorWithSource,
 } from "../../../src/adapters/cli/utils.js";
-import { liveInvocation, liveAmbient, liveWriteContext } from "../../live-invocation.js";
+import { liveInvocation, liveAmbient, liveWriteContext, liveIo } from "../../live-invocation.js";
 import type { Invocation } from "@lore/core";
 
 // ─── Git fixture helpers ────────────────────────────────────────────────────
@@ -120,20 +120,23 @@ function captureOutput() {
   const stdout: string[] = [];
   const stderr: string[] = [];
   const origWrite = process.stderr.write.bind(process.stderr);
-  const origLog = console.log.bind(console);
+  const origLog = process.stdout.write;
   (process.stderr as unknown as { write: (chunk: unknown) => boolean }).write = (chunk: unknown) => {
     stderr.push(String(chunk));
     return true;
   };
-  console.log = (...args: unknown[]) => {
+  process.stdout.write = (((chunk: unknown) => {
+    const args: unknown[] = [String(chunk).replace(/\n$/, "")];
     stdout.push(args.join(" "));
-  };
+  
+    return true;
+  }) as typeof process.stdout.write);
   return {
     stdout,
     stderr,
     restore: () => {
       (process.stderr as unknown as { write: typeof origWrite }).write = origWrite;
-      console.log = origLog;
+      process.stdout.write = origLog;
     },
   };
 }
@@ -194,7 +197,7 @@ describe("SPEC-104 AC-ACTOR-1 — linked worktree, no identity, resolves worktre
 
     let result: { actor: string; source: string } | undefined;
     const stderr = captureStderr(() => {
-      result = resolveActorWithIdentitySource(undefined, {}, wt, liveInvocation().user);
+      result = resolveActorWithIdentitySource(liveIo(), undefined, {}, wt, liveInvocation().user);
     });
 
     expect(result).toEqual({ actor: "agent:no-warning-branch", source: "worktree-derived" });
@@ -251,7 +254,7 @@ describe("SPEC-104 AC-ACTOR-2 — explicit --by / $LORE_ACTOR win over worktree 
     addWorktree(mainRepo, wt, "no-warn-explicit-branch");
 
     const stderr = captureStderr(() => {
-      resolveActorWithIdentitySource("alice", {}, wt, liveInvocation().user);
+      resolveActorWithIdentitySource(liveIo(), "alice", {}, wt, liveInvocation().user);
     });
 
     expect(stderr).toBe("");
@@ -270,7 +273,7 @@ describe("SPEC-104 AC-ACTOR-3 — main checkout resolves OS username, byte-ident
   it("resolveActorWithIdentitySource prints the EXACT pre-existing os-fallback warning text", () => {
     let result: { actor: string; source: string } | undefined;
     const stderr = captureStderr(() => {
-      result = resolveActorWithIdentitySource(undefined, {}, mainRepo, liveInvocation().user);
+      result = resolveActorWithIdentitySource(liveIo(), undefined, {}, mainRepo, liveInvocation().user);
     });
 
     const username = userInfo().username;
@@ -284,10 +287,10 @@ describe("SPEC-104 AC-ACTOR-3 — main checkout resolves OS username, byte-ident
 
   it("warns only ONCE per process even across repeated main-checkout resolutions", () => {
     const first = captureStderr(() => {
-      resolveActorWithIdentitySource(undefined, {}, mainRepo, liveInvocation().user);
+      resolveActorWithIdentitySource(liveIo(), undefined, {}, mainRepo, liveInvocation().user);
     });
     const second = captureStderr(() => {
-      resolveActorWithIdentitySource(undefined, {}, mainRepo, liveInvocation().user);
+      resolveActorWithIdentitySource(liveIo(), undefined, {}, mainRepo, liveInvocation().user);
     });
 
     expect(first).not.toBe("");
@@ -444,7 +447,7 @@ describe("SPEC-104 AC-ACTOR-5 — lore claim from a linked worktree records agen
 
       // Bonus REGRESSION: resolveActor's plain-string surface agrees too,
       // at the SAME real cwd claim.ts itself resolved against.
-      expect(resolveActor(undefined, process.env, process.cwd(), liveInvocation().user)).toBe(`agent:${branch}`);
+      expect(resolveActor(liveIo(), undefined, process.env, process.cwd(), liveInvocation().user)).toBe(`agent:${branch}`);
     }
   });
 });

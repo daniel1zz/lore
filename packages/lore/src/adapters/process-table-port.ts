@@ -91,9 +91,9 @@ function psEnv(env: Readonly<Record<string, string | undefined>>): NodeJS.Proces
 }
 
 /** pid -> cwd for every readable process: `lsof -d cwd`, else `/proc`. */
-function readCwdTable(procDir: string): Measured<Map<number, string>> {
+function readCwdTable(procDir: string, cwd: string): Measured<Map<number, string>> {
   const table = new Map<number, string>();
-  const lsof = spawnSync("lsof", ["-n", "-d", "cwd", "-F", "pn"], { encoding: "utf8", maxBuffer: MAX_OUTPUT_BYTES });
+  const lsof = spawnSync("lsof", ["-n", "-d", "cwd", "-F", "pn"], { cwd, encoding: "utf8", maxBuffer: MAX_OUTPUT_BYTES });
   if (lsof.error === undefined) {
     const out = lsof.stdout ?? "";
     // reason: a non-zero lsof exit WITH a listing is the normal "some processes were not inspectable" case; only a
@@ -132,6 +132,8 @@ export interface RealProcessTableOptions {
   readonly procDir?: string;
   /** Environment the `ps` children inherit (the invocation's `env`). */
   readonly env: Readonly<Record<string, string | undefined>>;
+  /** Working directory of every `ps` / `lsof` child (the invocation's `cwd`): no child inherits the process's. */
+  readonly cwd: string;
 }
 
 /** The production {@link ProcessTablePort}. */
@@ -140,7 +142,7 @@ export function createRealProcessTablePort(options: RealProcessTableOptions): Pr
 
   const inspect = async (pid: number): Promise<ProcessInspection | null> => {
     if (!Number.isInteger(pid) || pid <= 0) return null;
-    const run = spawnSync("ps", ["-o", "stat=,lstart=", "-p", String(pid)], { encoding: "utf8", env: psEnv(options.env) });
+    const run = spawnSync("ps", ["-o", "stat=,lstart=", "-p", String(pid)], { cwd: options.cwd, encoding: "utf8", env: psEnv(options.env) });
     if (run.error !== undefined || run.status !== 0) return null;
     const text = (run.stdout ?? "").trim();
     const match = /^(\S+)\s+(.*)$/.exec(text);
@@ -151,6 +153,7 @@ export function createRealProcessTablePort(options: RealProcessTableOptions): Pr
   return {
     async snapshot() {
       const ps = spawnSync("ps", ["-axo", "pid=,ppid=,stat=,lstart=,command="], {
+        cwd: options.cwd,
         encoding: "utf8",
         env: psEnv(options.env),
         maxBuffer: MAX_OUTPUT_BYTES,
@@ -163,7 +166,7 @@ export function createRealProcessTablePort(options: RealProcessTableOptions): Pr
         if (entry !== null) entries.push(entry);
       }
       if (entries.length === 0) return { ok: false, reason: "ps listed no processes" };
-      const cwds = readCwdTable(procDir);
+      const cwds = readCwdTable(procDir, options.cwd);
       if (!cwds.ok) return cwds;
       return { ok: true, value: { entries, cwdByPid: cwds.value } };
     },
@@ -184,7 +187,7 @@ export function createRealProcessTablePort(options: RealProcessTableOptions): Pr
       let current = pid;
       for (let hop = 0; hop <= MAX_SHELL_HOPS; hop++) {
         if (!Number.isInteger(current) || current <= 1) return null;
-        const run = spawnSync("ps", ["-o", "ppid=,comm=", "-p", String(current)], { encoding: "utf8", env: psEnv(options.env) });
+        const run = spawnSync("ps", ["-o", "ppid=,comm=", "-p", String(current)], { cwd: options.cwd, encoding: "utf8", env: psEnv(options.env) });
         if (run.error !== undefined || run.status !== 0) return null;
         const match = /^\s*(\d+)\s+(.*)$/.exec((run.stdout ?? "").trim());
         if (match === null) return null;

@@ -37,6 +37,7 @@
  */
 
 import { dirname } from "path";
+import { exitCli } from "../cli-exit.js";
 import { defineCommand } from "citty";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatError, formatErrorFor } from "../utils.js";
@@ -44,6 +45,7 @@ import { resolveTrackedWriteRoot } from "../working-tree-root.js";
 import { requirePhaseMigrationService } from "../phase-wiring.js";
 import type { SectionMigrationVerdict } from "../../../service/outline-migration-service.js";
 import { invocationOf } from "../command-invocation.js";
+import { printLine } from "../output.js";
 
 export default defineCommand({
   meta: {
@@ -107,42 +109,40 @@ export default defineCommand({
       args.version !== "ordinals" &&
       args.version !== "spec-parents"
     ) {
-      process.stderr.write(
+      inv.io.stderr.write(
         `Error: Unknown migration action '${args.version}'. Supported: v1, phases, spec-kind, tasks-to-phases, prd-to-outline, ordinals, spec-parents.\n`,
       );
-      process.exit(2);
+      exitCli(2);
     }
 
     // ── spec-parents action ───────────────────────────────────────────────
     if (args.version === "spec-parents") {
       if (args.apply === true && args.revert === true) {
-        process.stderr.write("Error: --apply and --revert are mutually exclusive for `migrate spec-parents`.\n");
-        process.exit(2);
+        inv.io.stderr.write("Error: --apply and --revert are mutually exclusive for `migrate spec-parents`.\n");
+        exitCli(2);
       }
       const { app } = loadLoreApp({ inv });
       try {
         const service = app.specParentMigrationService;
         if (service === undefined) {
-          process.stderr.write("Internal error: SpecParentMigrationService not wired on App\n");
-          process.exitCode = 1;
-          return;
+          inv.io.stderr.write("Internal error: SpecParentMigrationService not wired on App\n");
+          return 1;
         }
         const mode = args.revert === true ? "revert" : args.apply === true ? "apply" : "preview";
         const result =
           mode === "revert" ? await service.revert() : mode === "apply" ? await service.apply() : await service.preview();
         if (!result.ok) {
           if (args.json) {
-            console.log(JSON.stringify({ ok: false, error: result.error }, null, 2));
+            printLine(inv.io.stdout, JSON.stringify({ ok: false, error: result.error }, null, 2));
           } else {
-            process.stderr.write(formatErrorFor(inv, result.error) + "\n");
+            inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
           }
-          process.exitCode = exitCode(result.error);
-          return;
+          return exitCode(result.error);
         }
         const report = result.value;
         const failed = report.errors.length > 0;
         if (args.json) {
-          console.log(
+          printLine(inv.io.stdout, 
             JSON.stringify(
               {
                 ok: !failed,
@@ -159,20 +159,19 @@ export default defineCommand({
               2,
             ),
           );
-          process.exitCode = failed ? 4 : 0;
-          return;
+          return failed ? 4 : 0;
         }
         const label =
           mode === "revert" ? "Spec-parent revert complete" : mode === "apply" ? "Spec-parent migration complete" : "Spec-parent migration (preview)";
-        console.log(label);
-        console.log("─".repeat(40));
+        printLine(inv.io.stdout, label);
+        printLine(inv.io.stdout, "─".repeat(40));
         const noun = mode === "revert" ? "restored" : mode === "apply" ? "cleared" : "would clear";
-        console.log(`Specs ${noun}: ${report.count}`);
-        for (const row of report.rows) console.log(`  ${row.slug}`);
-        for (const skip of report.skipped) console.log(`  skipped ${skip.slug}: ${skip.reason}`);
-        for (const e of report.errors) console.log(`  error ${e}`);
-        if (mode === "preview") console.log("\nRe-run with --apply to execute, --revert to undo a previous apply.");
-        process.exitCode = failed ? 4 : 0;
+        printLine(inv.io.stdout, `Specs ${noun}: ${report.count}`);
+        for (const row of report.rows) printLine(inv.io.stdout, `  ${row.slug}`);
+        for (const skip of report.skipped) printLine(inv.io.stdout, `  skipped ${skip.slug}: ${skip.reason}`);
+        for (const e of report.errors) printLine(inv.io.stdout, `  error ${e}`);
+        if (mode === "preview") printLine(inv.io.stdout, "\nRe-run with --apply to execute, --revert to undo a previous apply.");
+        return failed ? 4 : 0;
       } finally {
         app.close();
       }
@@ -189,78 +188,74 @@ export default defineCommand({
       const projectDirResolved = resolveTrackedWriteRoot(inv.cwd, dirname(dirname(dbPath)));
       if (!projectDirResolved.ok) {
         app.close();
-        process.stderr.write(formatError(projectDirResolved.error) + "\n");
-        process.exitCode = exitCode(projectDirResolved.error);
-        return;
+        inv.io.stderr.write(formatError(projectDirResolved.error) + "\n");
+        return exitCode(projectDirResolved.error);
       }
       const projectDir = projectDirResolved.value;
       try {
         if (app.ordinalMigrationService === undefined) {
-          process.stderr.write("Internal error: OrdinalMigrationService not wired on App\n");
-          process.exitCode = 1;
-          return;
+          inv.io.stderr.write("Internal error: OrdinalMigrationService not wired on App\n");
+          return 1;
         }
 
         const result = await app.ordinalMigrationService.migrateOrdinals({ dryRun, projectDir });
         if (!result.ok) {
           if (args.json) {
-            console.log(JSON.stringify({ ok: false, error: result.error }, null, 2));
+            printLine(inv.io.stdout, JSON.stringify({ ok: false, error: result.error }, null, 2));
           } else {
-            process.stderr.write(formatErrorFor(inv, result.error) + "\n");
+            inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
           }
-          process.exitCode = exitCode(result.error);
-          return;
+          return exitCode(result.error);
         }
 
         const report = result.value;
         if (args.json) {
-          console.log(JSON.stringify({ ok: true, data: report }, null, 2));
-          process.exitCode = report.errors.length > 0 ? 4 : 0;
-          return;
+          printLine(inv.io.stdout, JSON.stringify({ ok: true, data: report }, null, 2));
+          return report.errors.length > 0 ? 4 : 0;
         }
 
         const label = dryRun ? "Ordinal migration (dry-run)" : "Ordinal migration complete";
-        console.log(label);
-        console.log("─".repeat(40));
-        console.log(`Numbered docs:        ${report.numbered_doc_count}`);
-        console.log(`Bijective:            ${report.bijective ? "yes" : "NO — see errors below"}`);
-        console.log(`Writes performed:     ${report.writes_performed}`);
+        printLine(inv.io.stdout, label);
+        printLine(inv.io.stdout, "─".repeat(40));
+        printLine(inv.io.stdout, `Numbered docs:        ${report.numbered_doc_count}`);
+        printLine(inv.io.stdout, `Bijective:            ${report.bijective ? "yes" : "NO — see errors below"}`);
+        printLine(inv.io.stdout, `Writes performed:     ${report.writes_performed}`);
 
         if (report.reassignments.length > 0) {
-          console.log("\nOrdinal assignments (old → new):");
+          printLine(inv.io.stdout, "\nOrdinal assignments (old → new):");
           for (const r of report.reassignments) {
             const oldLabel = r.old_display ?? "(no declared number)";
             const marker = r.changed ? "CHANGED" : "kept";
-            console.log(`  [${marker}] ${r.doc_id}  ${oldLabel} → ${r.new_display}  "${r.title}"`);
+            printLine(inv.io.stdout, `  [${marker}] ${r.doc_id}  ${oldLabel} → ${r.new_display}  "${r.title}"`);
           }
         }
 
         if (report.title_strips.length > 0) {
-          console.log("\nTitle prefix strips:");
+          printLine(inv.io.stdout, "\nTitle prefix strips:");
           for (const t of report.title_strips) {
-            console.log(`  ${t.doc_id}  "${t.old_title}" → "${t.new_title}" (status: ${t.status_before})`);
+            printLine(inv.io.stdout, `  ${t.doc_id}  "${t.old_title}" → "${t.new_title}" (status: ${t.status_before})`);
           }
         }
 
         if (report.export_index_reconciles.length > 0) {
-          console.log("\nExport-index human_id reconciles (file renames NOT executed — review and apply):");
+          printLine(inv.io.stdout, "\nExport-index human_id reconciles (file renames NOT executed — review and apply):");
           for (const e of report.export_index_reconciles) {
-            console.log(`  ${e.doc_id}  ${e.old_human_id} → ${e.new_human_id}`);
-            console.log(`    ${e.rename_command}`);
+            printLine(inv.io.stdout, `  ${e.doc_id}  ${e.old_human_id} → ${e.new_human_id}`);
+            printLine(inv.io.stdout, `    ${e.rename_command}`);
           }
         }
 
         if (report.errors.length > 0) {
-          console.log("\nErrors:");
+          printLine(inv.io.stdout, "\nErrors:");
           for (const e of report.errors) {
-            console.log(`  ${e}`);
+            printLine(inv.io.stdout, `  ${e}`);
           }
         }
 
         if (dryRun) {
-          console.log("\nRe-run with --apply to execute.");
+          printLine(inv.io.stdout, "\nRe-run with --apply to execute.");
         }
-        process.exitCode = report.errors.length > 0 ? 4 : 0;
+        return report.errors.length > 0 ? 4 : 0;
       } finally {
         app.close();
       }
@@ -270,25 +265,23 @@ export default defineCommand({
     // ── prd-to-outline action ─────────────────────────────────────────────
     if (args.version === "prd-to-outline") {
       if (!args.prd) {
-        process.stderr.write("Error: --prd <id-or-slug> is required for `migrate prd-to-outline`.\n");
-        process.exit(2);
+        inv.io.stderr.write("Error: --prd <id-or-slug> is required for `migrate prd-to-outline`.\n");
+        exitCli(2);
       }
 
       const dryRun = args["dry-run"] ?? false;
       const { app } = loadLoreApp({ inv });
       try {
         if (app.outlineMigrationService === undefined) {
-          process.stderr.write("Internal error: OutlineMigrationService not wired on App\n");
-          process.exitCode = 1;
-          return;
+          inv.io.stderr.write("Internal error: OutlineMigrationService not wired on App\n");
+          return 1;
         }
         const service = app.outlineMigrationService;
 
         const prdResult = await app.corpusService.get(args.prd);
         if (!prdResult.ok) {
-          process.stderr.write(formatErrorFor(inv, prdResult.error) + "\n");
-          process.exitCode = exitCode(prdResult.error);
-          return;
+          inv.io.stderr.write(formatErrorFor(inv, prdResult.error) + "\n");
+          return exitCode(prdResult.error);
         }
         const prd = prdResult.value.doc;
 
@@ -299,10 +292,10 @@ export default defineCommand({
           args.section === undefined ? [] : Array.isArray(args.section) ? args.section : [args.section];
 
         if (requestedSections.length === 0) {
-          process.stderr.write(
+          inv.io.stderr.write(
             "Error: at least one --section <key> is required for `migrate prd-to-outline` (no auto-discovery — declare which sections to migrate).\n",
           );
-          process.exit(2);
+          exitCli(2);
         }
 
         const verdicts: SectionMigrationVerdict[] = [];
@@ -323,31 +316,30 @@ export default defineCommand({
         }
 
         if (args.json) {
-          console.log(JSON.stringify({ ok: refused === undefined, data: { verdicts, refused } }, null, 2));
-          process.exitCode = refused === undefined ? 0 : 4;
-          return;
+          printLine(inv.io.stdout, JSON.stringify({ ok: refused === undefined, data: { verdicts, refused } }, null, 2));
+          return refused === undefined ? 0 : 4;
         }
 
         const label = dryRun ? "PRD→outline migration (dry-run)" : "PRD→outline migration";
-        console.log(`${label} — ${prd.slug}`);
-        console.log("─".repeat(40));
+        printLine(inv.io.stdout, `${label} — ${prd.slug}`);
+        printLine(inv.io.stdout, "─".repeat(40));
         for (const verdict of verdicts) {
           const statusLabel = verdict.already_migrated ? "already migrated" : verdict.passed ? "migrated" : "FAILED";
-          console.log(`[${statusLabel}] ${verdict.section} (writes: ${verdict.writes_performed})`);
+          printLine(inv.io.stdout, `[${statusLabel}] ${verdict.section} (writes: ${verdict.writes_performed})`);
           if (verdict.failed_invariants.length > 0) {
-            console.log(`  failed invariants: ${verdict.failed_invariants.join(", ")}`);
+            printLine(inv.io.stdout, `  failed invariants: ${verdict.failed_invariants.join(", ")}`);
           }
         }
         if (refused !== undefined) {
-          console.log(`\nRefused on section '${refused.section}': ${refused.code} — ${refused.message}`);
+          printLine(inv.io.stdout, `\nRefused on section '${refused.section}': ${refused.code} — ${refused.message}`);
           if (refused.failed_invariants.length > 0) {
-            console.log(`  failed invariants: ${refused.failed_invariants.join(", ")}`);
+            printLine(inv.io.stdout, `  failed invariants: ${refused.failed_invariants.join(", ")}`);
           }
         }
         if (dryRun && refused === undefined) {
-          console.log("\nRe-run without --dry-run to apply changes.");
+          printLine(inv.io.stdout, "\nRe-run without --dry-run to apply changes.");
         }
-        process.exitCode = refused === undefined ? 0 : 4;
+        return refused === undefined ? 0 : 4;
       } finally {
         app.close();
       }
@@ -370,36 +362,35 @@ export default defineCommand({
           // (migrateTasks IS idempotent — see phase-migration-service.ts's own
           // module header invariants #1/#2).
           const { cause, partial } = result.error;
-          process.stderr.write(formatErrorFor(inv, cause) + "\n");
-          process.stderr.write(
+          inv.io.stderr.write(formatErrorFor(inv, cause) + "\n");
+          inv.io.stderr.write(
             `${partial.phases_created} phases created / ${partial.tasks_archived} tasks archived / ` +
               `${partial.evidence_merged} evidence merged before failure — safe to re-run (idempotent)\n`,
           );
-          process.exitCode = exitCode(cause);
-          return;
+          return exitCode(cause);
         }
 
         const report = result.value;
         if (args.json) {
-          console.log(JSON.stringify({ ok: true, data: report }, null, 2));
+          printLine(inv.io.stdout, JSON.stringify({ ok: true, data: report }, null, 2));
           return;
         }
 
         const label = dryRun ? "Task→phase migration (dry-run)" : "Task→phase migration complete";
-        console.log(label);
-        console.log("─".repeat(40));
-        console.log(`Phases created:  ${report.phases_created}`);
-        console.log(`Tasks archived:  ${report.tasks_archived}`);
-        console.log(`Evidence merged: ${report.evidence_merged}`);
+        printLine(inv.io.stdout, label);
+        printLine(inv.io.stdout, "─".repeat(40));
+        printLine(inv.io.stdout, `Phases created:  ${report.phases_created}`);
+        printLine(inv.io.stdout, `Tasks archived:  ${report.tasks_archived}`);
+        printLine(inv.io.stdout, `Evidence merged: ${report.evidence_merged}`);
 
         if (report.warnings.length > 0) {
-          console.log("\nWarnings:");
+          printLine(inv.io.stdout, "\nWarnings:");
           for (const w of report.warnings) {
-            console.log(`  ${w}`);
+            printLine(inv.io.stdout, `  ${w}`);
           }
         }
         if (dryRun) {
-          console.log("\nRe-run without --dry-run to apply changes.");
+          printLine(inv.io.stdout, "\nRe-run without --dry-run to apply changes.");
         }
       } finally {
         app.close();
@@ -415,24 +406,23 @@ export default defineCommand({
         const result = await app.phaseService.migratePhases({ dryRun });
 
         if (!result.ok) {
-          process.stderr.write(formatErrorFor(inv, result.error) + "\n");
-          process.exitCode = exitCode(result.error);
-          return;
+          inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
+          return exitCode(result.error);
         }
 
         const report = result.value;
         if (args.json) {
-          console.log(JSON.stringify({ ok: true, data: report }, null, 2));
+          printLine(inv.io.stdout, JSON.stringify({ ok: true, data: report }, null, 2));
           return;
         }
 
         const label = dryRun ? "Phase migration (dry-run)" : "Phase migration complete";
-        console.log(label);
-        console.log("─".repeat(40));
-        console.log(`Plans touched:  ${report.touched}`);
-        console.log(`Plans skipped:  ${report.skipped}`);
+        printLine(inv.io.stdout, label);
+        printLine(inv.io.stdout, "─".repeat(40));
+        printLine(inv.io.stdout, `Plans touched:  ${report.touched}`);
+        printLine(inv.io.stdout, `Plans skipped:  ${report.skipped}`);
         if (dryRun) {
-          console.log("\nRe-run without --dry-run to apply changes.");
+          printLine(inv.io.stdout, "\nRe-run without --dry-run to apply changes.");
         }
       } finally {
         app.close();
@@ -448,32 +438,31 @@ export default defineCommand({
         const result = await app.specKindService.migrateSpecKind({ dryRun });
 
         if (!result.ok) {
-          process.stderr.write(formatErrorFor(inv, result.error) + "\n");
-          process.exitCode = exitCode(result.error);
-          return;
+          inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
+          return exitCode(result.error);
         }
 
         const report = result.value;
         if (args.json) {
-          console.log(JSON.stringify({ ok: true, data: report }, null, 2));
+          printLine(inv.io.stdout, JSON.stringify({ ok: true, data: report }, null, 2));
           return;
         }
 
         const label = dryRun ? "Spec-kind audit (dry-run)" : "Spec-kind audit complete";
-        console.log(label);
-        console.log("─".repeat(40));
-        console.log(`Specs touched:  ${report.touched}`);
-        console.log(`Specs skipped:  ${report.skipped}`);
+        printLine(inv.io.stdout, label);
+        printLine(inv.io.stdout, "─".repeat(40));
+        printLine(inv.io.stdout, `Specs touched:  ${report.touched}`);
+        printLine(inv.io.stdout, `Specs skipped:  ${report.skipped}`);
 
         if (report.candidates.length > 0) {
-          console.log("\nCandidates:");
+          printLine(inv.io.stdout, "\nCandidates:");
           for (const c of report.candidates) {
-            console.log(`  ${c.slug}  "${c.title}"`);
-            console.log(`    ${c.from} → ${c.to}  (signal: "${c.signal}" in ${c.matchedIn})`);
+            printLine(inv.io.stdout, `  ${c.slug}  "${c.title}"`);
+            printLine(inv.io.stdout, `    ${c.from} → ${c.to}  (signal: "${c.signal}" in ${c.matchedIn})`);
           }
         }
         if (dryRun) {
-          console.log("\nRe-run without --dry-run to apply changes.");
+          printLine(inv.io.stdout, "\nRe-run without --dry-run to apply changes.");
         }
       } finally {
         app.close();
@@ -483,8 +472,8 @@ export default defineCommand({
 
     // ── v1 action ─────────────────────────────────────────────────────────
     if (!args.from) {
-      process.stderr.write("Error: --from <path> is required for `migrate v1`.\n");
-      process.exit(2);
+      inv.io.stderr.write("Error: --from <path> is required for `migrate v1`.\n");
+      exitCli(2);
     }
 
     const dryRun = args["dry-run"] ?? false;
@@ -495,50 +484,49 @@ export default defineCommand({
         // Analysis only
         const analyzeResult = app.migrationService.analyze(args.from);
         if (!analyzeResult.ok) {
-          process.stderr.write(formatErrorFor(inv, analyzeResult.error) + "\n");
-          process.exitCode = exitCode(analyzeResult.error);
-          return;
+          inv.io.stderr.write(formatErrorFor(inv, analyzeResult.error) + "\n");
+          return exitCode(analyzeResult.error);
         }
 
         const report = analyzeResult.value;
         if (args.json) {
-          console.log(JSON.stringify({ ok: true, data: report }, null, 2));
+          printLine(inv.io.stdout, JSON.stringify({ ok: true, data: report }, null, 2));
           return;
         }
 
-        console.log("Migration Analysis (dry-run)");
-        console.log("─".repeat(40));
-        console.log(`Source:       ${report.source_path}`);
-        console.log(`Total files:  ${report.total_files}`);
-        console.log(`Parseable:    ${report.parseable}`);
-        console.log(`Unparseable:  ${report.unparseable.length}`);
-        console.log(`Corpus size:  ${report.estimated_corpus_size}`);
+        printLine(inv.io.stdout, "Migration Analysis (dry-run)");
+        printLine(inv.io.stdout, "─".repeat(40));
+        printLine(inv.io.stdout, `Source:       ${report.source_path}`);
+        printLine(inv.io.stdout, `Total files:  ${report.total_files}`);
+        printLine(inv.io.stdout, `Parseable:    ${report.parseable}`);
+        printLine(inv.io.stdout, `Unparseable:  ${report.unparseable.length}`);
+        printLine(inv.io.stdout, `Corpus size:  ${report.estimated_corpus_size}`);
 
         if (report.type_mapping.length > 0) {
-          console.log("\nType mapping:");
+          printLine(inv.io.stdout, "\nType mapping:");
           for (const m of report.type_mapping) {
-            console.log(`  ${m.v1Type.padEnd(16)} → ${m.v2Type.padEnd(12)} (${m.count} docs)`);
+            printLine(inv.io.stdout, `  ${m.v1Type.padEnd(16)} → ${m.v2Type.padEnd(12)} (${m.count} docs)`);
           }
         }
 
         const lm = report.link_mapping;
-        console.log(`\nLinks: ${lm.total} total, ${lm.resolvable} resolvable, ${lm.broken} broken`);
+        printLine(inv.io.stdout, `\nLinks: ${lm.total} total, ${lm.resolvable} resolvable, ${lm.broken} broken`);
 
         if (report.secret_warnings.length > 0) {
-          console.log(`\n⚠  ${report.secret_warnings.length} potential secret(s) detected:`);
+          printLine(inv.io.stdout, `\n⚠  ${report.secret_warnings.length} potential secret(s) detected:`);
           for (const w of report.secret_warnings.slice(0, 10)) {
-            console.log(`  ${w.file}:${w.line} — ${w.pattern}`);
-            console.log(`    ${w.snippet}`);
+            printLine(inv.io.stdout, `  ${w.file}:${w.line} — ${w.pattern}`);
+            printLine(inv.io.stdout, `    ${w.snippet}`);
           }
           if (report.secret_warnings.length > 10) {
-            console.log(`  ... and ${report.secret_warnings.length - 10} more`);
+            printLine(inv.io.stdout, `  ... and ${report.secret_warnings.length - 10} more`);
           }
         }
 
         if (report.unparseable.length > 0) {
-          console.log("\nUnparseable files:");
+          printLine(inv.io.stdout, "\nUnparseable files:");
           for (const e of report.unparseable.slice(0, 10)) {
-            console.log(`  ${e.file}: ${e.error}`);
+            printLine(inv.io.stdout, `  ${e.file}: ${e.error}`);
           }
         }
 
@@ -553,35 +541,34 @@ export default defineCommand({
       });
 
       if (!executeResult.ok) {
-        process.stderr.write(formatErrorFor(inv, executeResult.error) + "\n");
-        process.exitCode = exitCode(executeResult.error);
-        return;
+        inv.io.stderr.write(formatErrorFor(inv, executeResult.error) + "\n");
+        return exitCode(executeResult.error);
       }
 
       const migResult = executeResult.value;
       if (args.json) {
-        console.log(JSON.stringify({ ok: true, data: migResult }, null, 2));
+        printLine(inv.io.stdout, JSON.stringify({ ok: true, data: migResult }, null, 2));
         return;
       }
 
-      console.log("Migration complete");
-      console.log("─".repeat(40));
-      console.log(`Imported:        ${migResult.imported}`);
-      console.log(`Already existed: ${migResult.already_existed}`);
-      console.log(`Errors:          ${migResult.errors.length}`);
-      console.log(`Links created:   ${migResult.link_resolution.created}`);
-      console.log(`Links broken:    ${migResult.link_resolution.broken}`);
+      printLine(inv.io.stdout, "Migration complete");
+      printLine(inv.io.stdout, "─".repeat(40));
+      printLine(inv.io.stdout, `Imported:        ${migResult.imported}`);
+      printLine(inv.io.stdout, `Already existed: ${migResult.already_existed}`);
+      printLine(inv.io.stdout, `Errors:          ${migResult.errors.length}`);
+      printLine(inv.io.stdout, `Links created:   ${migResult.link_resolution.created}`);
+      printLine(inv.io.stdout, `Links broken:    ${migResult.link_resolution.broken}`);
 
       if (migResult.warnings.length > 0) {
-        console.log("\nWarnings:");
+        printLine(inv.io.stdout, "\nWarnings:");
         for (const w of migResult.warnings) {
-          console.log(`  ${w}`);
+          printLine(inv.io.stdout, `  ${w}`);
         }
       }
       if (migResult.errors.length > 0) {
-        console.log("\nErrors:");
+        printLine(inv.io.stdout, "\nErrors:");
         for (const e of migResult.errors.slice(0, 10)) {
-          console.log(`  ${e.file}: ${e.error}`);
+          printLine(inv.io.stdout, `  ${e.file}: ${e.error}`);
         }
       }
     } finally {

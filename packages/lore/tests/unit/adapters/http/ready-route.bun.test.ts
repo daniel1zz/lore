@@ -45,7 +45,7 @@ import { NoOpTelemetry } from "@lore/core";
 import type { CreateDocInput } from "@lore/core";
 import { MIGRATION_002_SQL } from "../../../../src/store/migrations/migration-002.js";
 import type { App } from "../../../../src/app.js";
-import { actedStore } from "../../../live-invocation.js";
+import { actedStore, liveIo } from "../../../live-invocation.js";
 
 const FAR_PAST = "2000-01-01T00:00:00.000Z";
 
@@ -74,6 +74,7 @@ async function makeTestServer(): Promise<TestContext> {
   const docStore = actedStore(new InMemoryStore());
 
   const app: App = {
+    warn: () => undefined,
     corpusService: new CorpusService(docStore, new RecordLockService(docStore, new GateEnforcer(undefined))),
     reviewService: new ReviewService(docStore, new RecordLockService(docStore, new GateEnforcer(undefined))),
     versionService: new VersionService(docStore, new RecordLockService(docStore, new GateEnforcer(undefined))),
@@ -122,7 +123,8 @@ async function makeTestServer(): Promise<TestContext> {
   if (!taskResult.ok) throw new Error("Failed to create seed task");
 
   // Port 0 → OS assigns a free port
-  const server = startHttpServer(app, { port: 0, host: "127.0.0.1", machineAuth });
+  const server = startHttpServer(app, {
+    io: liveIo(), port: 0, host: "127.0.0.1", machineAuth });
   const baseUrl = `http://127.0.0.1:${server.port}`;
 
   return {

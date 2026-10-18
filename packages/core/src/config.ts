@@ -833,46 +833,6 @@ export type BaselineNodeBudgets = z.infer<typeof BaselineBudgetSchema>;
 // ─── Feedback Section Schema ────────────────────────────────────────────────
 
 /**
- * The by-name deprecation warning for a config still carrying
- * `feedback.inbound.open_report_cap` (spec-the-defect-channel-reaches-no-
- * machine-but-its-own-github P1, AC-GI-10) — the ONE deliberate side effect
- * (`console.warn`) this otherwise pure module makes, fired from inside
- * `FeedbackConfigSchema.inbound`'s `.transform()` whenever a parsed config
- * carries a present value for the retired key.
- *
- * Deliberately NOT throttled the way `resolveGateEnabled`'s legacy-alias
- * warning is (that one's `phaseClaimAliasWarned` WeakSet exists because a
- * single command execution calls it ~6 times against the SAME config object,
- * for different checkpoints): schema PARSING happens once per config load,
- * so there is no equivalent repeat-call spam to suppress here.
- */
-function warnRetiredOpenReportCapKey(): void {
-  console.warn(
-    "lore: feedback.inbound.open_report_cap is retired and no longer enforced " +
-      "(the open-report rate cap it configured was removed) — the value parses but is ignored.",
-  );
-}
-
-/**
- * The by-name deprecation warning for a config still carrying
- * `feedback.upstream.corpus_path` or the retired `transport` seam
- * (spec-the-defect-channel-reaches-no-machine-but-its-own-github P4,
- * AC-GI-14) — fired from `FeedbackConfigSchema`'s legacy `upstream` branch for
- * EACH present retired key (never just the first — a config carrying both
- * gets two calls, one per key, so an else-if bug that only ever names one
- * cannot hide behind this function's own signature).
- *
- * @param key - the retired key this call is naming (`"corpus_path"` or `"transport"`)
- */
-function warnRetiredUpstreamTransportKey(key: "corpus_path" | "transport"): void {
-  console.warn(
-    `lore: feedback.upstream.${key} is retired and no longer consumed (the SQLite upstream ` +
-      "transport it configured was removed) — the value parses but is ignored. Configure " +
-      "feedback.upstream.repo (GitHub) to file/read issue reports.",
-  );
-}
-
-/**
  * Upstream issue-reporting configuration (SPEC-072 §4 Public Interface) —
  * consent to file `lore report-issue` reports into a configured upstream.
  * Mirrors `SyncConfigSchema`'s nesting shape (a `.strict()` object nested one
@@ -950,8 +910,8 @@ function warnRetiredUpstreamTransportKey(key: "corpus_path" | "transport"): void
  *   gitignored, so a config still carrying either key from a pre-P4 binary
  *   would otherwise fail to parse machine-wide with no rollback path. A
  *   present value still PARSES (never a fail-loud refusal for these keys
- *   alone) but is warned-on BY NAME via `console.warn`
- *   (`warnRetiredUpstreamTransportKey` below). No code path may act on
+ *   alone) but is named to the person at load time
+ *   (`retiredConfigKeyNotices`). No code path may act on
  *   either field; they exist only so an old config file keeps parsing.
  * @invariant `root_prd` (legacy shape only) accepts EITHER the upstream root
  *   PRD's slug or its id (see `issue-report.ts::matchRootPrd`) — deliberately
@@ -1027,20 +987,7 @@ export const FeedbackConfigSchema = z
              */
             write_wait_ms: z.number().int().nonnegative().optional(),
           })
-          .strict()
-          .superRefine((val) => {
-            // reason: a side-effecting refinement, not a shape check — mirrors
-            // `inbound`'s own `.transform()` precedent (see
-            // `warnRetiredOpenReportCapKey`) but deliberately does NOT drop the
-            // retired fields from the parsed value the way that transform does:
-            // dropping them would narrow this branch's inferred TS type to a
-            // literal `corpus_path: undefined`/`transport: undefined`, which
-            // gains nothing (no code path reads either field after P4 regardless
-            // of whether the parsed value still carries it) and would gratuitously
-            // break assignability for any future literal of this branch's shape.
-            if (val.corpus_path !== undefined) warnRetiredUpstreamTransportKey("corpus_path");
-            if (val.transport !== undefined) warnRetiredUpstreamTransportKey("transport");
-          }),
+          .strict(),
         z
           .object({
             /**
@@ -1106,8 +1053,8 @@ export const FeedbackConfigSchema = z
          * key from a pre-P1 binary would otherwise fail to parse on THIS
          * MACHINE with no rollback path (a decision recorded in that spec's
          * Scope → Out, not a deferral). A present value still PARSES (never a
-         * fail-loud refusal for this key alone) but is warned-on BY NAME via
-         * `console.warn` (`warnRetiredOpenReportCapKey` below) and then DROPPED
+         * fail-loud refusal for this key alone) but is named to the person at
+         * load time (`retiredConfigKeyNotices`) and then DROPPED
          * — see the `inbound` object's own `.transform()` immediately below —
          * before the resolved config ever reaches a reader. No code path may
          * act on this field; it exists only so an old config file keeps
@@ -1116,16 +1063,9 @@ export const FeedbackConfigSchema = z
         open_report_cap: z.number().int().positive().optional(),
       })
       .strict()
-      .transform((val) => {
-        // reason: the ONE deliberate side effect (console.warn) in this
-        // otherwise pure module — see `warnRetiredOpenReportCapKey`'s own
-        // JSDoc and the field's above for why this key must warn-then-drop
-        // rather than fail-loud or silently keep working.
-        if (val.open_report_cap !== undefined) {
-          warnRetiredOpenReportCapKey();
-        }
-        return { ...val, open_report_cap: undefined };
-      })
+      // reason: the retired key is DROPPED from the parsed value; naming it to the person is
+      // `retiredConfigKeyNotices`'s job at load time (this module prints nothing).
+      .transform((val) => ({ ...val, open_report_cap: undefined }))
       .default({}),
   })
   .strict();
@@ -1642,25 +1582,6 @@ export function resolveJudgmentRequiredTypes(config: LoreConfig | undefined): st
  *     "task-claim",
  *   ) // => false
  */
-/**
- * Module-level "have we already warned about THIS legacy config object" set
- * for the `phase-claim` legacy-key alias (SPEC-056 §Design Decisions D7) —
- * deliberately NOT a per-call flag (repeated calls resolving the SAME legacy
- * config object emit the deprecation notice only once), but also NOT a single
- * eternal boolean (a DIFFERENT legacy config object — e.g. a distinct
- * `.lore/config.yaml` load, or a distinct test fixture — gets its own one-time
- * warning; a process/test file that legitimately resolves several distinct
- * legacy configs is not silently muted after the very first one). Keyed on
- * the resolved `gates."task-claim"` sub-object's REFERENCE (not a structural
- * hash) — the cheapest identity that's stable across repeated calls with the
- * same config, keyed via `WeakSet` so it never leaks memory for a config
- * object no longer referenced elsewhere. This is `resolveGateEnabled`'s ONE
- * narrow, deliberate exception to this module's otherwise side-effect-free
- * contract (see that function's own JSDoc) — the alternative (threading a
- * warning collector through every one of its ~6 unrelated call sites) is the
- * "scattered" shape D7 explicitly rejects.
- */
-const phaseClaimAliasWarned = new WeakSet<object>();
 
 export function resolveGateEnabled(
   config: LoreConfig | undefined,
@@ -1676,16 +1597,6 @@ export function resolveGateEnabled(
   if (checkpoint === "phase-claim" && gates?.["phase-claim"] === undefined) {
     const legacy = gates?.["task-claim"];
     if (legacy !== undefined) {
-      if (!phaseClaimAliasWarned.has(legacy)) {
-        phaseClaimAliasWarned.add(legacy);
-        // reason: side-effect explicitly documented on `phaseClaimAliasWarned`'s
-        // own JSDoc above — this is the ONE dual-read site D7 calls for, not a
-        // pattern to replicate elsewhere in this module.
-        console.warn(
-          'lore: workflow.gates."task-claim" is deprecated for the phase doc type — ' +
-            'rename to workflow.gates."phase-claim" in .lore/config.yaml (SPEC-056).',
-        );
-      }
       return legacy.enabled !== false;
     }
   }
@@ -2249,12 +2160,6 @@ export function resolveSetupCheckReminderEnabled(config: LoreConfig | undefined)
  */
 const RETIRED_BOOTSTRAP_INJECTION_KEYS = ["max_active_plans", "max_handoffs", "max_pending_slugs"] as const;
 
-/**
- * Module-level "already warned about this retired key" set — once PER KEY per
- * PROCESS (D5). Deliberately not keyed on the config object: the spec's
- * contract is "one stderr line per set key, once per process".
- */
-const retiredBootstrapKeyWarned = new Set<string>();
 
 /**
  * Resolve the effective `workflow.bootstrap_injection.*` budget as a
@@ -2268,6 +2173,7 @@ const retiredBootstrapKeyWarned = new Set<string>();
  * values themselves are never used.
  *
  * @param config - Parsed LoreConfig, or undefined when no config file was loaded
+ * @param warn - receives one deprecation line (no trailing newline) per set retired key
  * @returns `{charBudget}` — the exact shape `buildBootstrapInjection` accepts
  * @example
  *   resolveBootstrapInjectionBudgets(undefined)
@@ -2275,15 +2181,17 @@ const retiredBootstrapKeyWarned = new Set<string>();
  *   resolveBootstrapInjectionBudgets({ ..., workflow: { bootstrap_injection: { char_budget: 4000 } } })
  *   // => { charBudget: 4000 }
  */
-export function resolveBootstrapInjectionBudgets(config: LoreConfig | undefined): BootstrapInjectionBudgets {
+export function resolveBootstrapInjectionBudgets(
+  config: LoreConfig | undefined,
+  warn: (line: string) => void,
+): BootstrapInjectionBudgets {
   const section = (config?.workflow ?? WorkflowConfigSchema.parse({})).bootstrap_injection;
   for (const key of RETIRED_BOOTSTRAP_INJECTION_KEYS) {
-    if (section[key] === undefined || retiredBootstrapKeyWarned.has(key)) continue;
-    retiredBootstrapKeyWarned.add(key);
-    // reason: the documented ONE side effect of this resolver (D5) — a retired
-    // knob must be announced, never silently accepted. stderr only: stdout is
-    // the hook's blind pipe.
-    console.warn(
+    if (section[key] === undefined) continue;
+    // reason: the documented ONE side effect of this resolver (D5) — a retired knob must be announced, never
+    // silently accepted. It goes to the caller's sink (stderr of the run): stdout is the hook's blind pipe. One line
+    // per set key per call; the bootstrap verb resolves once per run.
+    warn(
       `lore: workflow.bootstrap_injection.${key} is deprecated and ignored — the session-start injection ` +
         "no longer carries that field; remove it from .lore/config.yaml.",
     );
@@ -2654,6 +2562,7 @@ export function parseConfig(raw: unknown): Result<LoreConfig, LoreError> {
  */
 export function loadConfigFromString(
   yamlText: string,
+  warn?: (line: string) => void,
 ): Result<LoreConfig, LoreError> {
   let parsed: unknown;
   try {
@@ -2676,7 +2585,53 @@ export function loadConfigFromString(
     } satisfies LoreError);
   }
 
-  return parseConfig(parsed);
+  const result = parseConfig(parsed);
+  if (result.ok && warn !== undefined) {
+    for (const line of retiredConfigKeyNotices(parsed)) warn(line);
+  }
+  return result;
+}
+
+/**
+ * The by-name deprecation lines for retired keys a RAW config object still carries: `feedback.inbound.open_report_cap`,
+ * `feedback.upstream.corpus_path` / `.transport` (legacy shape) and the legacy `workflow.gates."task-claim"` alias read
+ * for the phase doc type. The schema still PARSES each (a hard failure would break old gitignored configs); naming them
+ * is this function's job, and printing is the caller's (the module writes to no stream).
+ *
+ * @param raw - the YAML-parsed object, before schema parsing
+ * @returns one line per retired key present (no trailing newline), in a stable order
+ * @example
+ *   retiredConfigKeyNotices({ feedback: { inbound: { open_report_cap: 5 } } }); // => ["lore: feedback.inbound.open_report_cap is retired ..."]
+ */
+export function retiredConfigKeyNotices(raw: unknown): string[] {
+  const lines: string[] = [];
+  const at = (value: unknown, key: string): unknown =>
+    typeof value === "object" && value !== null ? (value as Record<string, unknown>)[key] : undefined;
+  const feedback = at(raw, "feedback");
+  if (at(at(feedback, "inbound"), "open_report_cap") !== undefined) {
+    lines.push(
+      "lore: feedback.inbound.open_report_cap is retired and no longer enforced " +
+        "(the open-report rate cap it configured was removed) — the value parses but is ignored.",
+    );
+  }
+  const upstream = at(feedback, "upstream");
+  for (const key of ["corpus_path", "transport"] as const) {
+    if (at(upstream, key) !== undefined) {
+      lines.push(
+        `lore: feedback.upstream.${key} is retired and no longer consumed (the SQLite upstream ` +
+          "transport it configured was removed) — the value parses but is ignored. Configure " +
+          "feedback.upstream.repo (GitHub) to file/read issue reports.",
+      );
+    }
+  }
+  const gates = at(at(raw, "workflow"), "gates");
+  if (at(gates, "task-claim") !== undefined && at(gates, "phase-claim") === undefined) {
+    lines.push(
+      'lore: workflow.gates."task-claim" is deprecated for the phase doc type — ' +
+        'rename to workflow.gates."phase-claim" in .lore/config.yaml (SPEC-056).',
+    );
+  }
+  return lines;
 }
 
 // reason: File-IO helpers (loadConfig, saveConfig, resolveGlobalConfigPath,

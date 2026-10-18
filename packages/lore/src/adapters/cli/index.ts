@@ -28,6 +28,12 @@ export type CommandModule = { default: CommandDef<any> };
 /** Test seam of {@link buildMain}: rewrite a freshly imported command tree before strict/delivery wrapping. */
 export interface BuildMainOptions {
   readonly transformCommand?: (name: string, command: CommandDef<any>) => CommandDef<any> | Promise<CommandDef<any>>;
+  /**
+   * Receives the exit code a command RETURNED (a number; `undefined` is success and is not reported). citty drops the
+   * result of a nested subcommand, so this explicit callback, owned by the one `runCli` call that built the tree, is
+   * how a returned code leaves the tree (no scope, no process global).
+   */
+  readonly reportExit?: (code: number) => void;
 }
 
 /** Thrown when a leaf of the introspection-only tree (`default` export, built without an Invocation) is run. */
@@ -50,22 +56,31 @@ async function resolveMaybe<T>(value: T | Promise<T> | (() => T | Promise<T>)): 
  * @param inv - the invocation to deliver, or `null` for the introspection-only tree
  * @param commandPath - `lore <path>` words, for the error of the `null` tree
  */
-async function deliverInvocation(cmd: CommandDef<any>, inv: Invocation | null, commandPath: string): Promise<CommandDef> {
+async function deliverInvocation(
+  cmd: CommandDef<any>,
+  inv: Invocation | null,
+  commandPath: string,
+  reportExit: ((code: number) => void) | undefined,
+): Promise<CommandDef> {
   const delivered: CommandDef = { ...cmd };
   const subCommandsDef = cmd.subCommands === undefined ? undefined : await resolveMaybe(cmd.subCommands);
   if (subCommandsDef !== undefined) {
     const nested: Record<string, CommandDef> = {};
     for (const [name, sub] of Object.entries(subCommandsDef)) {
       const resolved = await resolveMaybe(sub);
-      nested[name] = await deliverInvocation(resolved, inv, `${commandPath} ${name}`);
+      nested[name] = await deliverInvocation(resolved, inv, `${commandPath} ${name}`, reportExit);
     }
     delivered.subCommands = nested;
   }
   if (typeof cmd.run === "function") {
     const originalRun = cmd.run;
+    // reason: NOT `async`: the introspection-only tree must refuse a leaf with a synchronous throw, not a rejected promise.
     delivered.run = (context: CommandContext) => {
       if (inv === null) throw new CommandTreeWithoutInvocationError(commandPath);
-      return originalRun({ ...context, inv } as CommandContext);
+      return Promise.resolve(originalRun({ ...context, inv } as CommandContext)).then((returned: unknown) => {
+        if (typeof returned === "number") reportExit?.(returned);
+        return returned;
+      });
     };
   }
   return delivered;
@@ -80,7 +95,7 @@ function wrapDefault(name: string, inv: Invocation | null, options: BuildMainOpt
   return async (m) => {
     const command = options.transformCommand === undefined ? m.default : await options.transformCommand(name, m.default);
     const strict = await wrapCommandStrict(command, `lore ${name}`);
-    return deliverInvocation(strict, inv, name);
+    return deliverInvocation(strict, inv, name, options.reportExit);
   };
 }
 

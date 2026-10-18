@@ -58,6 +58,7 @@ import { resolveCorpus } from "../../../src/adapters/cli/corpus-resolution.js";
 // (that function is the independent witness AC-BFI-10 bought; see its header).
 import { isSpecAnchored } from "../../../src/flows/drift-flow.js";
 import type { DocRecord } from "@lore/core";
+import { liveIo } from "../../live-invocation.js";
 
 // ─── Paths ──────────────────────────────────────────────────────────────────
 
@@ -557,7 +558,7 @@ function classifyExtraAsAnchoredByWitness(extra: unknown): boolean {
 }
 
 function measureUnanchoredLiveSpecSlugsIndependently(repoRoot: string): Set<string> {
-  const resolved = resolveCorpus(repoRoot, process.env);
+  const resolved = resolveCorpus(liveIo(), repoRoot, process.env);
   if (resolved === undefined || resolved.provenance === "undetermined") {
     throw new Error(
       `AC-BFI-10 independent measurement: could not resolve a real corpus db from ${repoRoot} ` +

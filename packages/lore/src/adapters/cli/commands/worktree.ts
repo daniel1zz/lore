@@ -19,11 +19,14 @@
  */
 
 import { defineCommand } from "citty";
+import { exitCli } from "../cli-exit.js";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatErrorFor } from "../utils.js";
 import { resolveCallerSession } from "../caller-session.js";
 import type { WorktreeCheck, WorktreeSweepEntry } from "../../../service/worktree-removal-service.js";
 import { invocationOf } from "../command-invocation.js";
+import { printLine } from "../output.js";
+import type { CliIo } from "../output.js";
 
 /** Human rendering of one check. */
 function formatCheckLines(check: WorktreeCheck): string[] {
@@ -39,9 +42,9 @@ function formatCheckLines(check: WorktreeCheck): string[] {
   return lines;
 }
 
-function usageError(message: string): never {
-  process.stderr.write(`Error: ${message}\n`);
-  process.exit(2);
+function usageError(io: CliIo, message: string): never {
+  io.stderr.write(`Error: ${message}\n`);
+  exitCli(2);
 }
 
 const sessionArg = {
@@ -69,19 +72,18 @@ export default defineCommand({
         const { args } = context;
         const inv = invocationOf(context);
         const path = typeof args.path === "string" ? args.path : "";
-        if (path === "") return usageError("lore worktree check requires a <path>");
+        if (path === "") return usageError(inv.io, "lore worktree check requires a <path>");
         const callerSession = resolveCallerSession(typeof args.session === "string" ? args.session : undefined, inv.env) ?? null;
         const { app } = loadLoreApp({ inv });
         try {
           const service = app.worktreeRemovalService;
           if (service === undefined) {
-            process.stderr.write("Error: this App was built without a worktree-removal service\n");
-            process.exitCode = 1;
-            return;
+            inv.io.stderr.write("Error: this App was built without a worktree-removal service\n");
+            return 1;
           }
           const check = await service.check(path, callerSession);
-          if (args.json) console.log(JSON.stringify({ ok: true, data: check }, null, 2));
-          else for (const line of formatCheckLines(check)) console.log(line);
+          if (args.json) printLine(inv.io.stdout, JSON.stringify({ ok: true, data: check }, null, 2));
+          else for (const line of formatCheckLines(check)) printLine(inv.io.stdout, line);
         } finally {
           app.close();
         }
@@ -105,31 +107,29 @@ export default defineCommand({
         try {
           const service = app.worktreeRemovalService;
           if (service === undefined) {
-            process.stderr.write("Error: this App was built without a worktree-removal service\n");
-            process.exitCode = 1;
-            return;
+            inv.io.stderr.write("Error: this App was built without a worktree-removal service\n");
+            return 1;
           }
           const result = await service.sweep({ apply: args.apply === true, callerSession, cwd: inv.cwd });
           if (!result.ok) {
-            process.stderr.write(formatErrorFor(inv, result.error) + "\n");
-            process.exitCode = exitCode(result.error);
-            return;
+            inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
+            return exitCode(result.error);
           }
           const rows: WorktreeSweepEntry[] = result.value;
           if (args.json) {
-            console.log(JSON.stringify({ ok: true, data: { worktrees: rows } }, null, 2));
+            printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { worktrees: rows } }, null, 2));
           } else if (rows.length === 0) {
-            console.log("no linked worktrees");
+            printLine(inv.io.stdout, "no linked worktrees");
           } else {
             for (const row of rows) {
               const [first, ...rest] = formatCheckLines(row);
-              console.log(row.removed === true ? (first ?? "").replace(/^removable /, "removed ") : first);
-              for (const line of rest) console.log(line);
-              if (row.hint !== undefined) console.log(`  hint: ${row.hint}`);
-              if (row.error !== undefined) console.log(`  error: ${row.error}`);
+              printLine(inv.io.stdout, row.removed === true ? (first ?? "").replace(/^removable /, "removed ") : first);
+              for (const line of rest) printLine(inv.io.stdout, line);
+              if (row.hint !== undefined) printLine(inv.io.stdout, `  hint: ${row.hint}`);
+              if (row.error !== undefined) printLine(inv.io.stdout, `  error: ${row.error}`);
             }
           }
-          if (rows.some((row) => row.removed === false)) process.exitCode = 1;
+          if (rows.some((row) => row.removed === false)) return 1;
         } finally {
           app.close();
         }

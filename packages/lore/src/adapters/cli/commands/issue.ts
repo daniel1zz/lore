@@ -153,6 +153,7 @@
  */
 
 import { defineCommand } from "citty";
+
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatErrorFor, resolveActor } from "../utils.js";
 import {
@@ -172,6 +173,7 @@ import { toIssueTaskInput } from "../../../service/issue-task-shaping.js";
 import { classifyFeedbackUpstream, resolveGithubIssueListing } from "../report-issue-wiring.js";
 import { invocationOf } from "../command-invocation.js";
 import { buildUnconfiguredUpstreamRemedy, type LoreError } from "@lore/core";
+import { printLine } from "../output.js";
 
 /**
  * The states this command may persist — CONSUMED from
@@ -474,9 +476,8 @@ export default defineCommand({
         const issueNumber = Number(rawNumber);
         if (rawNumber.length === 0 || !Number.isInteger(issueNumber) || issueNumber <= 0) {
           const error = invalidIssueNumberError(rawNumber);
-          process.stderr.write(formatErrorFor(inv, error) + "\n");
-          process.exitCode = exitCode(error);
-          return;
+          inv.io.stderr.write(formatErrorFor(inv, error) + "\n");
+          return exitCode(error);
         }
 
         const { app, config } = loadLoreApp({ inv });
@@ -487,31 +488,27 @@ export default defineCommand({
           const classification = classifyFeedbackUpstream(config);
           if (classification.kind === "unconfigured") {
             const error = buildUnconfiguredUpstreamRemedy();
-            process.stderr.write(formatErrorFor(inv, error) + "\n");
-            process.exitCode = exitCode(error);
-            return;
+            inv.io.stderr.write(formatErrorFor(inv, error) + "\n");
+            return exitCode(error);
           }
           if (classification.kind === "retired") {
-            process.stderr.write(formatErrorFor(inv, classification.error) + "\n");
-            process.exitCode = exitCode(classification.error);
-            return;
+            inv.io.stderr.write(formatErrorFor(inv, classification.error) + "\n");
+            return exitCode(classification.error);
           }
           const cfg = classification.cfg;
 
-          const listingResult = await resolveGithubIssueListing(cfg, invocationOf(context));
+          const listingResult = await resolveGithubIssueListing(inv.io, cfg, invocationOf(context));
           if (!listingResult.ok) {
-            process.stderr.write(formatErrorFor(inv, listingResult.error) + "\n");
-            process.exitCode = exitCode(listingResult.error);
-            return;
+            inv.io.stderr.write(formatErrorFor(inv, listingResult.error) + "\n");
+            return exitCode(listingResult.error);
           }
           const { issues, repoId } = listingResult.value;
 
           const issue = issues.find((candidate) => candidate.number === issueNumber);
           if (issue === undefined) {
             const error = issueNotListedError(issueNumber, cfg.repo, issues.length);
-            process.stderr.write(formatErrorFor(inv, error) + "\n");
-            process.exitCode = exitCode(error);
-            return;
+            inv.io.stderr.write(formatErrorFor(inv, error) + "\n");
+            return exitCode(error);
           }
 
           // D13 precondition (toIssueTaskInput's own doc) — this module is
@@ -519,27 +516,24 @@ export default defineCommand({
           // `report-issue-wiring.ts::resolveLocalRootPrd`'s identical shape.
           const rootPrdListResult = await app.corpusService.list({ type: "prd" });
           if (!rootPrdListResult.ok) {
-            process.stderr.write(formatErrorFor(inv, rootPrdListResult.error) + "\n");
-            process.exitCode = exitCode(rootPrdListResult.error);
-            return;
+            inv.io.stderr.write(formatErrorFor(inv, rootPrdListResult.error) + "\n");
+            return exitCode(rootPrdListResult.error);
           }
           const rootPrd = rootPrdListResult.value.docs[0];
           if (rootPrd === undefined) {
             const error = noRootPrdError();
-            process.stderr.write(formatErrorFor(inv, error) + "\n");
-            process.exitCode = exitCode(error);
-            return;
+            inv.io.stderr.write(formatErrorFor(inv, error) + "\n");
+            return exitCode(error);
           }
 
           const ref: GithubIssueRef = { repo: cfg.repo, issueNumber, repo_id: repoId };
           const taskInputResult = toIssueTaskInput(issue, ref, rootPrd.id);
           if (!taskInputResult.ok) {
-            process.stderr.write(formatErrorFor(inv, taskInputResult.error) + "\n");
-            process.exitCode = exitCode(taskInputResult.error);
-            return;
+            inv.io.stderr.write(formatErrorFor(inv, taskInputResult.error) + "\n");
+            return exitCode(taskInputResult.error);
           }
 
-          const by = resolveActor(undefined, inv.env, inv.cwd, inv.user);
+          const by = resolveActor(inv.io, undefined, inv.env, inv.cwd, inv.user);
           const createResult = await app.corpusService.create(taskInputResult.value, { by });
 
           if (!createResult.ok) {
@@ -572,33 +566,31 @@ export default defineCommand({
             if (createResult.error.code === "DUPLICATE_SLUG") {
               const existingResult = await app.corpusService.get(createResult.error.existing_id);
               if (!existingResult.ok) {
-                process.stderr.write(formatErrorFor(inv, existingResult.error) + "\n");
-                process.exitCode = exitCode(existingResult.error);
-                return;
+                inv.io.stderr.write(formatErrorFor(inv, existingResult.error) + "\n");
+                return exitCode(existingResult.error);
               }
               const existing = existingResult.value.doc;
               if (args.json) {
-                console.log(
+                printLine(inv.io.stdout, 
                   JSON.stringify({ ok: true, data: { doc: existing, already_adopted: true } }, null, 2),
                 );
               } else {
-                console.log(
+                printLine(inv.io.stdout, 
                   `Already adopted GitHub issue #${issueNumber} as ${existing.slug} (adopted previously).`,
                 );
               }
               return;
             }
 
-            process.stderr.write(formatErrorFor(inv, createResult.error) + "\n");
-            process.exitCode = exitCode(createResult.error);
-            return;
+            inv.io.stderr.write(formatErrorFor(inv, createResult.error) + "\n");
+            return exitCode(createResult.error);
           }
 
           const created = createResult.value;
           if (args.json) {
-            console.log(JSON.stringify({ ok: true, data: { doc: created, already_adopted: false } }, null, 2));
+            printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { doc: created, already_adopted: false } }, null, 2));
           } else {
-            console.log(`Adopted GitHub issue #${issueNumber} as ${created.slug}.`);
+            printLine(inv.io.stdout, `Adopted GitHub issue #${issueNumber} as ${created.slug}.`);
           }
         } finally {
           app.close();
@@ -656,24 +648,21 @@ export default defineCommand({
         // NOTHING, regardless of whether <issue> even exists.
         if (state === "fixed") {
           const error = fixedNotSettableError();
-          process.stderr.write(formatErrorFor(inv, error) + "\n");
-          process.exitCode = exitCode(error);
-          return;
+          inv.io.stderr.write(formatErrorFor(inv, error) + "\n");
+          return exitCode(error);
         }
 
         if (state === undefined || !isExplicitResolutionState(state)) {
           const error = invalidStateError(state);
-          process.stderr.write(formatErrorFor(inv, error) + "\n");
-          process.exitCode = exitCode(error);
-          return;
+          inv.io.stderr.write(formatErrorFor(inv, error) + "\n");
+          return exitCode(error);
         }
 
         const reason = typeof args.reason === "string" ? args.reason.trim() : "";
         if (reason.length === 0) {
           const error = missingReasonError();
-          process.stderr.write(formatErrorFor(inv, error) + "\n");
-          process.exitCode = exitCode(error);
-          return;
+          inv.io.stderr.write(formatErrorFor(inv, error) + "\n");
+          return exitCode(error);
         }
 
         // §M3 pointer contract, checked BEFORE loadLoreApp() — both halves are
@@ -684,18 +673,16 @@ export default defineCommand({
         );
         if (strayPointer !== undefined) {
           const error = pointerForWrongStateError(strayPointer, state);
-          process.stderr.write(formatErrorFor(inv, error) + "\n");
-          process.exitCode = exitCode(error);
-          return;
+          inv.io.stderr.write(formatErrorFor(inv, error) + "\n");
+          return exitCode(error);
         }
 
         const requiredPointer = POINTER_FLAG_BINDINGS.find((binding) => binding.state === state);
         const pointerValue = requiredPointer === undefined ? "" : readStringArg(argRecord, requiredPointer.argName);
         if (requiredPointer !== undefined && pointerValue.length === 0) {
           const error = missingPointerError(requiredPointer);
-          process.stderr.write(formatErrorFor(inv, error) + "\n");
-          process.exitCode = exitCode(error);
-          return;
+          inv.io.stderr.write(formatErrorFor(inv, error) + "\n");
+          return exitCode(error);
         }
 
         const { app, config } = loadLoreApp({ inv });
@@ -703,17 +690,15 @@ export default defineCommand({
           const issueId = args.issue as string;
           const getResult = await app.corpusService.get(issueId);
           if (!getResult.ok) {
-            process.stderr.write(formatErrorFor(inv, getResult.error) + "\n");
-            process.exitCode = exitCode(getResult.error);
-            return;
+            inv.io.stderr.write(formatErrorFor(inv, getResult.error) + "\n");
+            return exitCode(getResult.error);
           }
           const issueDoc = getResult.value.doc;
 
           if (!hasIssueReport(issueDoc.extra)) {
             const error = notAnIssueError(issueDoc.slug);
-            process.stderr.write(formatErrorFor(inv, error) + "\n");
-            process.exitCode = exitCode(error);
-            return;
+            inv.io.stderr.write(formatErrorFor(inv, error) + "\n");
+            return exitCode(error);
           }
 
           // §M3/§M7 — resolve the REQUIRED pointer against the live corpus
@@ -761,9 +746,8 @@ export default defineCommand({
                 // caller input to accept quietly.
                 error = missingPointerError(requiredPointer);
               }
-              process.stderr.write(formatErrorFor(inv, error) + "\n");
-              process.exitCode = exitCode(error);
-              return;
+              inv.io.stderr.write(formatErrorFor(inv, error) + "\n");
+              return exitCode(error);
             }
 
             // reason: `verdict.ok` guarantees `resolvedTarget !== undefined`,
@@ -780,7 +764,7 @@ export default defineCommand({
             resolvedPointer = { [requiredPointer.extraKey]: pointerDoc.id };
           }
 
-          const by = resolveActor(undefined, inv.env, inv.cwd, inv.user);
+          const by = resolveActor(inv.io, undefined, inv.env, inv.cwd, inv.user);
           const nowIso = new Date().toISOString();
           const existingIssueReport = issueDoc.extra["issue_report"] as Record<string, unknown>;
           // reason: RMW merge — spread the FULL existing extra first so every
@@ -802,9 +786,8 @@ export default defineCommand({
 
           const setResult = await app.corpusService.set(issueId, { extra: newExtra }, { by });
           if (!setResult.ok) {
-            process.stderr.write(formatErrorFor(inv, setResult.error) + "\n");
-            process.exitCode = exitCode(setResult.error);
-            return;
+            inv.io.stderr.write(formatErrorFor(inv, setResult.error) + "\n");
+            return exitCode(setResult.error);
           }
 
           const updated = setResult.value;
@@ -834,13 +817,13 @@ export default defineCommand({
           );
 
           if (args.json) {
-            console.log(
+            printLine(inv.io.stdout, 
               JSON.stringify({ ok: true, data: { doc: updated, resolution: computed } }, null, 2),
             );
           } else {
             const pointerNote =
               requiredPointer === undefined ? "" : ` ${requiredPointer.flag} ${resolvedPointer[requiredPointer.extraKey]}`;
-            console.log(
+            printLine(inv.io.stdout, 
               `Resolved ${updated.slug} as '${state}'${pointerNote} (${reason}) — resolution: ${computed}`,
             );
           }
@@ -906,11 +889,11 @@ export default defineCommand({
               // already did, above) and the failure is reported loudly,
               // never swallowed: nonzero exit, distinct from the clean
               // happy-path exit above, and the underlying reason on stderr.
-              process.stderr.write(
+              inv.io.stderr.write(
                 `Warning: resolution recorded in the corpus, but the GitHub label was not updated — ` +
                   `${formatErrorFor(inv, projectResult.error)}\n`,
               );
-              process.exitCode = exitCode(projectResult.error);
+              return exitCode(projectResult.error);
             }
           }
         } finally {

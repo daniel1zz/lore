@@ -60,6 +60,7 @@ interface RunResult {
 async function runLore(args: string[], cwd: string): Promise<RunResult> {
   const proc = await runLoreInProcess(args, {
     cwd,
+    home: cwd,
     // Hermetic actor identity: without it, environments that strip CLAUDECODE
     // (e.g. `lore verify`'s env allowlist) fall to the OS username and emit an
     // unrelated actor-traceability warning on stderr, breaking the exact

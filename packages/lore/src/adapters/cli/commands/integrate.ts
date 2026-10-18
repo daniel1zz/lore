@@ -25,6 +25,7 @@
  * Side-effect class: IO (git subprocesses, the floor command, the corpus directory's loss ledger).
  */
 import { spawnSync } from "node:child_process";
+import { exitCli } from "../cli-exit.js";
 import { dirname, resolve as resolvePath } from "node:path";
 import { defineCommand } from "citty";
 import { invocationOf } from "../command-invocation.js";
@@ -138,8 +139,8 @@ export default defineCommand({
     const runGit = gitRunnerFor(inv.env);
     const branch = typeof args.branch === "string" ? args.branch : "";
     if (branch === "") {
-      process.stderr.write("Error: lore integrate requires a <branch>\n");
-      process.exit(2);
+      inv.io.stderr.write("Error: lore integrate requires a <branch>\n");
+      exitCli(2);
     }
     const { app, dbPath, config } = loadLoreApp({ inv });
     try {
@@ -147,9 +148,8 @@ export default defineCommand({
       const projectRoot = dirname(corpusDir);
       const mainRoot = mainCheckoutRoot(runGit, projectRoot);
       if (mainRoot === undefined) {
-        process.stderr.write(`Error: ${projectRoot} is not inside a non-bare git repository whose common dir is <root>/.git\n`);
-        process.exitCode = 1;
-        return;
+        inv.io.stderr.write(`Error: ${projectRoot} is not inside a non-bare git repository whose common dir is <root>/.git\n`);
+        return 1;
       }
       const service = new IntegrateService({
         git: runGit,
@@ -157,7 +157,7 @@ export default defineCommand({
         ledger: new IntegrateLossLedger(corpusDir),
         projectRoot,
         worktreesRoot: resolvePath(mainRoot, ".claude", "worktrees"),
-        log: (line) => process.stdout.write(`${line}\n`),
+        log: (line) => inv.io.stdout.write(`${line}\n`),
       });
       const result = await service.integrate({
         branch,
@@ -167,15 +167,14 @@ export default defineCommand({
         ...(typeof args.message === "string" && args.message !== "" ? { message: args.message } : {}),
       });
       if (!result.ok) {
-        process.stderr.write(`${formatError(result.error)}\n`);
-        process.exitCode = exitCode(result.error);
-        return;
+        inv.io.stderr.write(`${formatError(result.error)}\n`);
+        return exitCode(result.error);
       }
       const rendered = renderOutcome(result.value);
-      if (args.json === true) process.stdout.write(`${JSON.stringify({ ok: true, data: result.value }, null, 2)}\n`);
-      else if (rendered.out !== undefined) process.stdout.write(`${rendered.out}\n`);
-      if (rendered.err !== undefined) process.stderr.write(`${rendered.err}\n`);
-      process.exitCode = integrateExitCode(result.value);
+      if (args.json === true) inv.io.stdout.write(`${JSON.stringify({ ok: true, data: result.value }, null, 2)}\n`);
+      else if (rendered.out !== undefined) inv.io.stdout.write(`${rendered.out}\n`);
+      if (rendered.err !== undefined) inv.io.stderr.write(`${rendered.err}\n`);
+      return integrateExitCode(result.value);
     } finally {
       app.close();
     }

@@ -86,6 +86,7 @@ const stubApiKeyStore = {} as ApiKeyStore;
 function makeApp(): App {
   const store = actedStore(new InMemoryStore());
   return {
+    warn: () => undefined,
     corpusService: new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined))),
     reviewService: new ReviewService(store, new RecordLockService(store, new GateEnforcer(undefined))),
     versionService: new VersionService(store, new RecordLockService(store, new GateEnforcer(undefined))),

@@ -24,6 +24,7 @@
  * Source: SPEC-018 §3
  */
 
+import { discardWarnings, type WarnSink } from "./warn-sink.js";
 import { readdirSync, readFileSync } from "fs";
 import { join } from "path";
 import { parse as parseYaml } from "yaml";
@@ -50,6 +51,8 @@ export interface SyncDocsOptions {
    * Default at the CLI adapter level is false (applies creates by default).
    */
   dryRun: boolean;
+  /** Where the one-line "ignoring frontmatter parent" note goes (the run's stderr); absent -> not printed. */
+  warn?: WarnSink;
 }
 
 /**
@@ -189,9 +192,9 @@ export class SyncDocsService {
       // No title match — this spec needs to be created, with NO parent (BR-789, BR-2).
       // A frontmatter `parent:` is a leftover of the retired PRD-parent model: say so once, then ignore it.
       if (!ignoredParentNoted && spec.ignored_parent_hint !== undefined) {
-        process.stderr.write(
+        (opts.warn ?? discardWarnings)(
           `note: ignoring frontmatter parent "${spec.ignored_parent_hint}" — a spec takes no parent; ` +
-            "it belongs to the product trees through its criteria's citations (`lore ac cite`)\n",
+            "it belongs to the product trees through its criteria's citations (`lore ac cite`)",
         );
         ignoredParentNoted = true;
       }

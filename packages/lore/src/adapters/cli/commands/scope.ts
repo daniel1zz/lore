@@ -52,12 +52,16 @@
  */
 
 import type { Invocation } from "@lore/core";
+
 import { defineCommand } from "citty";
 import type { DocRecord, LoreError, Result } from "@lore/core";
 import { extractDeclaredAcScope } from "@lore/core";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatError, formatErrorFor, resolveActor } from "../utils.js";
 import { invocationOf } from "../command-invocation.js";
+import { printLine } from "../output.js";
+import type { CliIo } from "../output.js";
+import type { ExitReport } from "../cli-exit.js";
 
 /**
  * Reads every trailing positional argument beyond the `skip` leading ones
@@ -82,13 +86,13 @@ function collectVariadicPositionals(args: Record<string, unknown>, skip: number)
 }
 
 /** Render a numbered list of declared AC ids, distinguishing absent from explicitly-empty. */
-function renderScopeList(acScope: string[], declared: boolean): void {
+function renderScopeList(io: CliIo, acScope: string[], declared: boolean): void {
   if (acScope.length === 0) {
-    console.log(declared ? "  (scope declared EMPTY — claims no criterion)" : "  (no ac_scope declared)");
+    printLine(io.stdout, declared ? "  (scope declared EMPTY — claims no criterion)" : "  (no ac_scope declared)");
     return;
   }
   for (let i = 0; i < acScope.length; i++) {
-    console.log(`  ${i + 1}. ${acScope[i]}`);
+    printLine(io.stdout, `  ${i + 1}. ${acScope[i]}`);
   }
 }
 
@@ -138,7 +142,7 @@ async function runScopeMutation(inv: Invocation,
   acIds: string[],
   by: string,
   json: boolean,
-): Promise<void> {
+): Promise<ExitReport> {
   let result: Result<DocRecord, LoreError>;
 
   if (target.type === "task") {
@@ -148,9 +152,8 @@ async function runScopeMutation(inv: Invocation,
         : await app.taskWorkflowService.removeAcScope(targetId, acIds, { by, source: app.callerSurface });
   } else if (target.type === "phase") {
     if (app.phaseWorkflowService === undefined) {
-      process.stderr.write(phaseServiceMissingMessage());
-      process.exitCode = 1;
-      return;
+      inv.io.stderr.write(phaseServiceMissingMessage());
+      return 1;
     }
     result =
       op === "add"
@@ -158,15 +161,13 @@ async function runScopeMutation(inv: Invocation,
         : await app.phaseWorkflowService.removeAcScope(targetId, acIds, { by, source: app.callerSurface });
   } else {
     const error = unsupportedTargetTypeError(target.type);
-    process.stderr.write(formatErrorFor(inv, error) + "\n");
-    process.exitCode = exitCode(error);
-    return;
+    inv.io.stderr.write(formatErrorFor(inv, error) + "\n");
+    return exitCode(error);
   }
 
   if (!result.ok) {
-    process.stderr.write(formatErrorFor(inv, result.error) + "\n");
-    process.exitCode = exitCode(result.error);
-    return;
+    inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
+    return exitCode(result.error);
   }
 
   const doc = result.value;
@@ -175,13 +176,13 @@ async function runScopeMutation(inv: Invocation,
   const acScope = extractDeclaredAcScope(doc) ?? [];
 
   if (json) {
-    console.log(JSON.stringify({ ok: true, data: { doc, ac_scope: acScope } }, null, 2));
+    printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { doc, ac_scope: acScope } }, null, 2));
     return;
   }
 
   const verb = op === "add" ? "Declared" : "Un-declared";
-  console.log(`${verb} ${acIds.length} ac_scope id(s) on ${doc.slug} (v${doc.version})`);
-  renderScopeList(acScope, true);
+  printLine(inv.io.stdout, `${verb} ${acIds.length} ac_scope id(s) on ${doc.slug} (v${doc.version})`);
+  renderScopeList(inv.io, acScope, true);
 }
 
 export default defineCommand({
@@ -221,13 +222,12 @@ export default defineCommand({
 
           const targetResult = await resolveScopeTarget(app, targetId);
           if (!targetResult.ok) {
-            process.stderr.write(formatErrorFor(inv, targetResult.error) + "\n");
-            process.exitCode = exitCode(targetResult.error);
-            return;
+            inv.io.stderr.write(formatErrorFor(inv, targetResult.error) + "\n");
+            return exitCode(targetResult.error);
           }
 
-          const by = resolveActor(undefined, inv.env, inv.cwd, inv.user);
-          await runScopeMutation(inv, app, targetResult.value, "add", targetId, acIds, by, args.json === true);
+          const by = resolveActor(inv.io, undefined, inv.env, inv.cwd, inv.user);
+          return await runScopeMutation(inv, app, targetResult.value, "add", targetId, acIds, by, args.json === true);
         } finally {
           app.close();
         }
@@ -266,13 +266,12 @@ export default defineCommand({
 
           const targetResult = await resolveScopeTarget(app, targetId);
           if (!targetResult.ok) {
-            process.stderr.write(formatErrorFor(inv, targetResult.error) + "\n");
-            process.exitCode = exitCode(targetResult.error);
-            return;
+            inv.io.stderr.write(formatErrorFor(inv, targetResult.error) + "\n");
+            return exitCode(targetResult.error);
           }
 
-          const by = resolveActor(undefined, inv.env, inv.cwd, inv.user);
-          await runScopeMutation(inv, app, targetResult.value, "rm", targetId, acIds, by, args.json === true);
+          const by = resolveActor(inv.io, undefined, inv.env, inv.cwd, inv.user);
+          return await runScopeMutation(inv, app, targetResult.value, "rm", targetId, acIds, by, args.json === true);
         } finally {
           app.close();
         }
@@ -299,17 +298,15 @@ export default defineCommand({
         try {
           const targetResult = await resolveScopeTarget(app, args.target as string);
           if (!targetResult.ok) {
-            process.stderr.write(formatErrorFor(inv, targetResult.error) + "\n");
-            process.exitCode = exitCode(targetResult.error);
-            return;
+            inv.io.stderr.write(formatErrorFor(inv, targetResult.error) + "\n");
+            return exitCode(targetResult.error);
           }
 
           const doc = targetResult.value;
           if (doc.type !== "task" && doc.type !== "phase") {
             const error = unsupportedTargetTypeError(doc.type);
-            process.stderr.write(formatErrorFor(inv, error) + "\n");
-            process.exitCode = exitCode(error);
-            return;
+            inv.io.stderr.write(formatErrorFor(inv, error) + "\n");
+            return exitCode(error);
           }
 
           const declaredScope = extractDeclaredAcScope(doc);
@@ -317,14 +314,14 @@ export default defineCommand({
           const scopeDeclared = declaredScope !== undefined;
 
           if (args.json) {
-            console.log(
+            printLine(inv.io.stdout, 
               JSON.stringify({ ok: true, data: { ac_scope: acScope, scope_declared: scopeDeclared } }, null, 2),
             );
             return;
           }
 
-          console.log(`Declared ac_scope for ${doc.slug}:`);
-          renderScopeList(acScope, scopeDeclared);
+          printLine(inv.io.stdout, `Declared ac_scope for ${doc.slug}:`);
+          renderScopeList(inv.io, acScope, scopeDeclared);
         } finally {
           app.close();
         }

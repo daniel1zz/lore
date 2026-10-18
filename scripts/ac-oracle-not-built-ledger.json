@@ -1,14 +1,1 @@
-[
-  {
-    "spec": "spec-process-state-end-state-one-invocation-per-entry-returned",
-    "ac": "AC-ES-1",
-    "reason": "oracle test not written yet (es-run-lore-in-process.test.ts absent); owned by the implementing task of this spec's plan",
-    "owner_plan": "plan-process-state-end-state"
-  },
-  {
-    "spec": "spec-process-state-end-state-one-invocation-per-entry-returned",
-    "ac": "AC-ES-2",
-    "reason": "oracle test not written yet (es-run-cli-exit-code.test.ts absent); owned by the implementing task of this spec's plan",
-    "owner_plan": "plan-process-state-end-state"
-  }
-]
+[]

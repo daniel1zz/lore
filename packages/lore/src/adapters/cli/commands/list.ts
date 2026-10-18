@@ -132,6 +132,7 @@
  */
 
 import { defineCommand } from "citty";
+
 import { loadLoreApp } from "../loader.js";
 import {
   exitCode,
@@ -154,6 +155,7 @@ import {
 import { deriveTypeMeta, KNOWLEDGE_SUB_TYPES, ok } from "@lore/core";
 import type { DocRecord, DocSummary, DocType, DocStatus, LoreError, Result } from "@lore/core";
 import { invocationOf } from "../command-invocation.js";
+import { printLine } from "../output.js";
 
 /** A full corpus row as this command FETCHES it — every full record carries its
  *  evaluated validity verdict (SPEC-043 D3's data half; see this file's header).
@@ -349,9 +351,8 @@ export default defineCommand({
       if (args.limit !== undefined) {
         const limitResult = parsePositiveIntArg(args.limit, "--limit", { min: 0 });
         if (!limitResult.ok) {
-          process.stderr.write(limitResult.message + "\n");
-          process.exitCode = 2;
-          return;
+          inv.io.stderr.write(limitResult.message + "\n");
+          return 2;
         }
         limit = limitResult.value;
       }
@@ -360,9 +361,8 @@ export default defineCommand({
       if (args.offset !== undefined) {
         const offsetResult = parsePositiveIntArg(args.offset, "--offset", { min: 0 });
         if (!offsetResult.ok) {
-          process.stderr.write(offsetResult.message + "\n");
-          process.exitCode = 2;
-          return;
+          inv.io.stderr.write(offsetResult.message + "\n");
+          return 2;
         }
         offset = offsetResult.value;
       }
@@ -414,11 +414,10 @@ export default defineCommand({
         const otherFilterKeys = ["type", "status", "author", "since", "tag", "plan-id", "phase", "sub-type"] as const;
         const conflicting = otherFilterKeys.filter((k) => args[k] !== undefined);
         if (conflicting.length > 0) {
-          process.stderr.write(
+          inv.io.stderr.write(
             `Error: ${LIST_GOVERNED_BY_CONFLICT} ${conflicting.map((k) => `--${k}`).join(", ")}.\n`,
           );
-          process.exitCode = 2;
-          return;
+          return 2;
         }
 
         // reason: `include_invalid` is FORWARDED, never applied here — the service method
@@ -429,9 +428,8 @@ export default defineCommand({
           include_invalid: includeInvalid,
         });
         if (!governedResult.ok) {
-          process.stderr.write(formatErrorFor(inv, governedResult.error) + "\n");
-          process.exitCode = exitCode(governedResult.error);
-          return;
+          inv.io.stderr.write(formatErrorFor(inv, governedResult.error) + "\n");
+          return exitCode(governedResult.error);
         }
         // reason: listGovernedBy has no store-level limit/offset param — page the
         // already-fetched result in-memory (see header comment's (b) stance).
@@ -439,13 +437,13 @@ export default defineCommand({
         const total = docs.length;
 
         if (args.json) {
-          console.log(
+          printLine(inv.io.stdout, 
             JSON.stringify({ ok: true, data: { docs: toListJsonRows(docs, claimTtlMinutes), total } }, null, 2),
           );
           return;
         }
         if (total === 0) {
-          console.log(`No documents governed by "${args["governed-by"]}".`);
+          printLine(inv.io.stdout, `No documents governed by "${args["governed-by"]}".`);
           return;
         }
         const headers = ["ID", "Type", "Title", "Status", ...validityHeaders(), "Updated"];
@@ -457,8 +455,8 @@ export default defineCommand({
           ...validityCells(d),
           relativeTime(d.updated_at),
         ]);
-        console.log(formatTable(headers, rows));
-        console.log(`\n${total} document${total === 1 ? "" : "s"} (filter: --governed-by ${args["governed-by"]})`);
+        printLine(inv.io.stdout, formatTable(headers, rows));
+        printLine(inv.io.stdout, `\n${total} document${total === 1 ? "" : "s"} (filter: --governed-by ${args["governed-by"]})`);
         return;
       }
 
@@ -470,9 +468,8 @@ export default defineCommand({
       // re-derived here. Exit 2 = CLI usage error (utils.ts::exitCode).
       const subTypeResolution = resolveSubTypeFilter(args["sub-type"], args.type);
       if (!subTypeResolution.ok) {
-        process.stderr.write(subTypeResolution.message + "\n");
-        process.exitCode = 2;
-        return;
+        inv.io.stderr.write(subTypeResolution.message + "\n");
+        return 2;
       }
 
       const filters: Record<string, unknown> = {};
@@ -496,9 +493,8 @@ export default defineCommand({
       if (args["plan-id"] !== undefined) {
         const resolveResult = await app.corpusService.resolve(args["plan-id"]);
         if (!resolveResult.ok) {
-          process.stderr.write(formatErrorFor(inv, resolveResult.error) + "\n");
-          process.exitCode = exitCode(resolveResult.error);
-          return;
+          inv.io.stderr.write(formatErrorFor(inv, resolveResult.error) + "\n");
+          return exitCode(resolveResult.error);
         }
         planMemberId = resolveResult.value;
       }
@@ -555,9 +551,8 @@ export default defineCommand({
       if (phaseFilter !== undefined) {
         const gatedResult = await fetchGatedFullDocs();
         if (!gatedResult.ok) {
-          process.stderr.write(formatErrorFor(inv, gatedResult.error) + "\n");
-          process.exitCode = exitCode(gatedResult.error);
-          return;
+          inv.io.stderr.write(formatErrorFor(inv, gatedResult.error) + "\n");
+          return exitCode(gatedResult.error);
         }
         // reason: extra.phase AND --plan-id's membership filter (see file header) are
         // both client-side, as is the validity exclusion already applied above —
@@ -570,13 +565,13 @@ export default defineCommand({
         const total = filtered.length;
 
         if (args.json) {
-          console.log(
+          printLine(inv.io.stdout, 
             JSON.stringify({ ok: true, data: { docs: toListJsonRows(filtered, claimTtlMinutes), total, omitted_invalid: omittedInvalid } }, null, 2),
           );
           return;
         }
         if (total === 0) {
-          console.log(`No documents found with phase "${phaseFilter}".`);
+          printLine(inv.io.stdout, `No documents found with phase "${phaseFilter}".`);
           return;
         }
         // reason: workflow badge (claim/evidence, AC-WF-9) is only meaningful for task
@@ -593,8 +588,8 @@ export default defineCommand({
           String(d.extra["phase"] ?? ""),
           relativeTime(d.updated_at),
         ]);
-        console.log(formatTable(headers, rows));
-        console.log(`\n${total} document${total === 1 ? "" : "s"} (filter: --phase ${phaseFilter}${planFilterDesc()})${hiddenNote()}`);
+        printLine(inv.io.stdout, formatTable(headers, rows));
+        printLine(inv.io.stdout, `\n${total} document${total === 1 ? "" : "s"} (filter: --phase ${phaseFilter}${planFilterDesc()})${hiddenNote()}`);
         return;
       }
 
@@ -604,14 +599,13 @@ export default defineCommand({
       if (filters["type"] === "task") {
         const fullResult = await fetchListing();
         if (!fullResult.ok) {
-          process.stderr.write(formatErrorFor(inv, fullResult.error) + "\n");
-          process.exitCode = exitCode(fullResult.error);
-          return;
+          inv.io.stderr.write(formatErrorFor(inv, fullResult.error) + "\n");
+          return exitCode(fullResult.error);
         }
         const { docs: fullDocs, total: fullTotal } = fullResult.value;
 
         if (args.json) {
-          console.log(
+          printLine(inv.io.stdout, 
             JSON.stringify(
               { ok: true, data: { docs: toListJsonRows(fullDocs, claimTtlMinutes), total: fullTotal, omitted_invalid: omittedInvalid } },
               null,
@@ -621,7 +615,7 @@ export default defineCommand({
           return;
         }
         if (fullTotal === 0) {
-          console.log("No documents found.");
+          printLine(inv.io.stdout, "No documents found.");
           return;
         }
 
@@ -640,9 +634,9 @@ export default defineCommand({
           ...validityCells(d),
           relativeTime(d.updated_at),
         ]);
-        console.log(formatTable(headers, rows));
+        printLine(inv.io.stdout, formatTable(headers, rows));
         const taskFilterDesc = includeInvalid ? " --include-invalid" : "";
-        console.log(
+        printLine(inv.io.stdout, 
           `\n${fullTotal} document${fullTotal === 1 ? "" : "s"} ` +
             `(filter: --type task${planFilterDesc()}${taskFilterDesc})${hiddenNote()}`,
         );
@@ -656,14 +650,13 @@ export default defineCommand({
       if (includeInvalid) {
         const fullResult = await fetchListing();
         if (!fullResult.ok) {
-          process.stderr.write(formatErrorFor(inv, fullResult.error) + "\n");
-          process.exitCode = exitCode(fullResult.error);
-          return;
+          inv.io.stderr.write(formatErrorFor(inv, fullResult.error) + "\n");
+          return exitCode(fullResult.error);
         }
         const { docs: fullDocs, total: fullTotal } = fullResult.value;
 
         if (args.json) {
-          console.log(
+          printLine(inv.io.stdout, 
             JSON.stringify(
               { ok: true, data: { docs: toListJsonRows(fullDocs, claimTtlMinutes), total: fullTotal, omitted_invalid: omittedInvalid } },
               null,
@@ -673,7 +666,7 @@ export default defineCommand({
           return;
         }
         if (fullTotal === 0) {
-          console.log("No documents found.");
+          printLine(inv.io.stdout, "No documents found.");
           return;
         }
 
@@ -686,8 +679,8 @@ export default defineCommand({
           ...validityCells(d),
           relativeTime(d.updated_at),
         ]);
-        console.log(formatTable(headers, rows));
-        console.log(
+        printLine(inv.io.stdout, formatTable(headers, rows));
+        printLine(inv.io.stdout, 
           `\n${fullTotal} document${fullTotal === 1 ? "" : "s"} (filter: --include-invalid${planFilterDesc()})`,
         );
         return;
@@ -702,14 +695,13 @@ export default defineCommand({
       if (planMemberId !== undefined) {
         const fullResult = await fetchListing();
         if (!fullResult.ok) {
-          process.stderr.write(formatErrorFor(inv, fullResult.error) + "\n");
-          process.exitCode = exitCode(fullResult.error);
-          return;
+          inv.io.stderr.write(formatErrorFor(inv, fullResult.error) + "\n");
+          return exitCode(fullResult.error);
         }
         const { docs: fullDocs, total: fullTotal } = fullResult.value;
 
         if (args.json) {
-          console.log(
+          printLine(inv.io.stdout, 
             JSON.stringify(
               { ok: true, data: { docs: toListJsonRows(fullDocs, claimTtlMinutes), total: fullTotal, omitted_invalid: omittedInvalid } },
               null,
@@ -719,7 +711,7 @@ export default defineCommand({
           return;
         }
         if (fullTotal === 0) {
-          console.log(`No documents found with plan membership "${args["plan-id"]}".`);
+          printLine(inv.io.stdout, `No documents found with plan membership "${args["plan-id"]}".`);
           return;
         }
 
@@ -732,11 +724,11 @@ export default defineCommand({
           ...validityCells(d),
           relativeTime(d.updated_at),
         ]);
-        console.log(formatTable(headers, rows));
+        printLine(inv.io.stdout, formatTable(headers, rows));
         const otherFilterDesc = Object.entries(filters)
           .map(([k, v]) => `--${k} ${Array.isArray(v) ? v.join(",") : String(v)}`)
           .join(" ");
-        console.log(
+        printLine(inv.io.stdout, 
           `\n${fullTotal} document${fullTotal === 1 ? "" : "s"} (filter:${planFilterDesc()}` +
             `${otherFilterDesc ? ` ${otherFilterDesc}` : ""})${hiddenNote()}`,
         );
@@ -753,9 +745,8 @@ export default defineCommand({
       const result = await app.corpusService.list(withPaging(filters), () => nowIso);
 
       if (!result.ok) {
-        process.stderr.write(formatErrorFor(inv, result.error) + "\n");
-        process.exitCode = exitCode(result.error);
-        return;
+        inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
+        return exitCode(result.error);
       }
 
       const { docs, total, omitted_invalid: omittedInvalidDefault } = result.value;
@@ -766,12 +757,12 @@ export default defineCommand({
         // absent-metadata grounds even if the exclusion above had regressed. The
         // pre-gated stamp names that dependency at the call site instead; see
         // `withPreGatedLiveStatus`'s JSDoc for the contract it rests on.
-        console.log(JSON.stringify({ ok: true, data: { docs: withPreGatedLiveStatus(docs), total, omitted_invalid: omittedInvalidDefault } }, null, 2));
+        printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { docs: withPreGatedLiveStatus(docs), total, omitted_invalid: omittedInvalidDefault } }, null, 2));
         return;
       }
 
       if (total === 0) {
-        console.log("No documents found.");
+        printLine(inv.io.stdout, "No documents found.");
         return;
       }
 
@@ -784,7 +775,7 @@ export default defineCommand({
         relativeTime(d.updated_at),
       ]);
 
-      console.log(formatTable(headers, rows));
+      printLine(inv.io.stdout, formatTable(headers, rows));
 
       // reason: this echo is keyed on the STORE filter names, not the CLI flag
       // spellings, so `--author` renders as `--created_by`, `--tag` as `--tags`
@@ -797,7 +788,7 @@ export default defineCommand({
         .join(" ");
       const defaultHiddenNote =
         omittedInvalidDefault > 0 ? ` (+${omittedInvalidDefault} invalidated hidden; --include-invalid)` : "";
-      console.log(
+      printLine(inv.io.stdout, 
         `\n${total} document${total === 1 ? "" : "s"}${filterDesc ? ` (filter: ${filterDesc})` : ""}${defaultHiddenNote}`,
       );
     } finally {

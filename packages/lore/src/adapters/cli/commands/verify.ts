@@ -181,6 +181,7 @@
  */
 
 import { spawnSync } from "node:child_process";
+
 import { resolve as resolvePath } from "node:path";
 import { createInterface } from "node:readline/promises";
 import { defineCommand } from "citty";
@@ -193,6 +194,7 @@ import type { VerifyGitFacts, VerifyExecutionRootResolution, LoreError, Result }
 import type { VerifyRunnerService, VerifyPlanResult } from "../../../service/verify-runner-service.js";
 import type { App } from "../../../app.js";
 import { invocationOf } from "../command-invocation.js";
+import { printLine } from "../output.js";
 
 /**
  * `App.verifyRunnerService` is typed optional only to keep pre-existing
@@ -321,7 +323,7 @@ function resolveCliExecutionRoot(
   cwd: string,
 ): { resolution: VerifyExecutionRootResolution; explicitOverride: boolean } {
   if (explicitRootArg !== undefined) {
-    const explicitRoot = resolvePath(explicitRootArg);
+    const explicitRoot = resolvePath(cwd, explicitRootArg);
     return {
       resolution: resolveVerifyExecutionRoot({
         corpusRoot,
@@ -416,7 +418,7 @@ export default defineCommand({
     const { app } = loadLoreApp({ inv });
     try {
       const acIds = normalizeRepeatableFlag(args.ac);
-      const by = resolveActor(undefined, inv.env, inv.cwd, inv.user);
+      const by = resolveActor(inv.io, undefined, inv.env, inv.cwd, inv.user);
       const allowNewCommands = args["allow-new-commands"] === true;
 
       // reason: SPEC-039 §M2 trust-hardening advisory — `lore verify` shells out to
@@ -433,7 +435,7 @@ export default defineCommand({
       // line (would be noise for a multi-AC plan) and NEVER written to stdout — `--json`'s
       // stdout stays a clean, parseable envelope, same split the pre-existing `warnings`
       // loop below already uses.
-      process.stderr.write(
+      inv.io.stderr.write(
         "Warning: lore verify executes this plan's declared script-mode acceptance-criteria " +
           "commands (npm-scripts trust tier, no sandbox). Env passthrough is allowlisted by " +
           "default and new/changed commands require approval — see SPEC-039 §M2.\n",
@@ -498,12 +500,11 @@ export default defineCommand({
       const falsifyAcId = typeof args.falsify === "string" ? args.falsify : undefined;
       if (falsifyAcId !== undefined) {
         if (planArg === undefined) {
-          process.stderr.write(
+          inv.io.stderr.write(
             "Error: --falsify requires the PLAN positional (the attested-red runner is not " +
               "reachable from the ad-hoc --task path).\n",
           );
-          process.exitCode = 2;
-          return;
+          return 2;
         }
         const falsifyResult = await requireVerifyRunnerService(app).verifyFalsifier(planArg, falsifyAcId, {
           ...(taskArg !== undefined ? { explicitTaskIdOrSlug: taskArg } : {}),
@@ -512,9 +513,8 @@ export default defineCommand({
           executionRoot,
         });
         if (!falsifyResult.ok) {
-          process.stderr.write(formatErrorFor(inv, falsifyResult.error) + "\n");
-          process.exitCode = exitCode(falsifyResult.error);
-          return;
+          inv.io.stderr.write(formatErrorFor(inv, falsifyResult.error) + "\n");
+          return exitCode(falsifyResult.error);
         }
         const {
           task,
@@ -525,7 +525,7 @@ export default defineCommand({
           result: falsifyOutcome,
         } = falsifyResult.value;
         if (args.json) {
-          console.log(
+          printLine(inv.io.stdout, 
             JSON.stringify(
               {
                 ok: true,
@@ -550,7 +550,7 @@ export default defineCommand({
           // a legitimate determination, not a launch error — but the wording
           // and the non-zero exit code below both make unmistakably clear
           // this is NOT a proven red.
-          console.log(
+          printLine(inv.io.stdout, 
             `Green control failed for ${ac_id} (task ${task.slug}): the UNMUTATED command ` +
               // reason: -1 is the runner's sentinel for a LAUNCH failure (no process ever
               // exited), so rendering it as an exit status would read as a real verdict.
@@ -560,7 +560,7 @@ export default defineCommand({
               "(node_modules / untracked files / dist/lore) or the AC's command, then retry.",
           );
         } else {
-          console.log(
+          printLine(inv.io.stdout, 
             `Attested red recorded for ${ac_id} (task ${task.slug}): exit ${observedExitCode} ` +
               `(declared ${expected_exit_code}) — result:expected-fail, capture_source:runner.`,
           );
@@ -570,8 +570,7 @@ export default defineCommand({
         // least one executed AC's ... guard downgraded its result to
         // inconclusive") rather than inventing a second meaning for 3 on this
         // branch: an inconclusive green control is never a silent success.
-        process.exitCode = falsifyOutcome === "inconclusive" ? 3 : 0;
-        return;
+        return falsifyOutcome === "inconclusive" ? 3 : 0;
       }
 
       let result: Result<VerifyPlanResult, LoreError>;
@@ -596,12 +595,11 @@ export default defineCommand({
         // explicitly via --task (there is no plan-wide claim state to resolve
         // against for a single ad-hoc task, so --task is not optional here).
         if (taskArg === undefined) {
-          process.stderr.write(
+          inv.io.stderr.write(
             "Error: PLAN positional is required unless --task names a SPEC-069 --adhoc task " +
               "(the ad-hoc runner path omits PLAN entirely; see 'lore verify --help').\n",
           );
-          process.exitCode = 2;
-          return;
+          return 2;
         }
 
         // Resolved directly via app.corpusService (no new VerifyRunnerService
@@ -609,16 +607,14 @@ export default defineCommand({
         // corpusService reads elsewhere (e.g. task-feed-wiring.ts, gate.ts).
         const taskResult = await app.corpusService.get(taskArg);
         if (!taskResult.ok) {
-          process.stderr.write(formatErrorFor(inv, taskResult.error) + "\n");
-          process.exitCode = exitCode(taskResult.error);
-          return;
+          inv.io.stderr.write(formatErrorFor(inv, taskResult.error) + "\n");
+          return exitCode(taskResult.error);
         }
 
         const specsResult = await app.corpusService.listFull({ type: "spec" });
         if (!specsResult.ok) {
-          process.stderr.write(formatErrorFor(inv, specsResult.error) + "\n");
-          process.exitCode = exitCode(specsResult.error);
-          return;
+          inv.io.stderr.write(formatErrorFor(inv, specsResult.error) + "\n");
+          return exitCode(specsResult.error);
         }
 
         result = await requireVerifyRunnerService(app).verifyAdhocTask(
@@ -637,9 +633,8 @@ export default defineCommand({
       }
 
       if (!result.ok) {
-        process.stderr.write(formatErrorFor(inv, result.error) + "\n");
-        process.exitCode = exitCode(result.error);
-        return;
+        inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
+        return exitCode(result.error);
       }
 
       const { task, results, skipped, warnings } = result.value;
@@ -656,11 +651,11 @@ export default defineCommand({
       // the advisory is still surfaced. The warning is ALSO included in the --json
       // payload below (`data.warnings`) for machine consumers that don't read stderr.
       for (const warning of warnings) {
-        process.stderr.write(`Warning: ${warning}\n`);
+        inv.io.stderr.write(`Warning: ${warning}\n`);
       }
 
       if (args.json) {
-        console.log(
+        printLine(inv.io.stdout, 
           JSON.stringify(
             {
               ok: true,
@@ -680,8 +675,7 @@ export default defineCommand({
             2,
           ),
         );
-        process.exitCode = verifyExitCode;
-        return;
+        return verifyExitCode;
       }
 
       // SPEC-063 §Design Decisions D2/D4 — the execution-root line (when
@@ -694,28 +688,28 @@ export default defineCommand({
         planArg: planArgForHeader,
         taskSlug: task.slug,
       })) {
-        console.log(line);
+        printLine(inv.io.stdout, line);
       }
 
       if (results.length === 0 && skipped.length === 0) {
-        console.log("  (no declared acceptance criteria matched the selection)");
+        printLine(inv.io.stdout, "  (no declared acceptance criteria matched the selection)");
       } else if (results.length === 0) {
-        console.log(`  ${VERIFY_NO_SCRIPT_ACS} (all declared ACs are ai/human-mode).`);
+        printLine(inv.io.stdout, `  ${VERIFY_NO_SCRIPT_ACS} (all declared ACs are ai/human-mode).`);
       } else {
-        for (const r of results) console.log(formatAcResultLine(r));
+        for (const r of results) printLine(inv.io.stdout, formatAcResultLine(r));
       }
 
       if (skipped.length > 0) {
-        console.log(
+        printLine(inv.io.stdout, 
           `  Skipped (non-script): ${skipped.map((s) => `${s.ac_id} (${s.mode})`).join(", ")}`,
         );
       }
 
       const passedCount = results.length - failedCount - inconclusiveCount;
       const inconclusiveSuffix = inconclusiveCount > 0 ? `, ${inconclusiveCount} inconclusive` : "";
-      console.log(`${passedCount} passed, ${failedCount} failed${inconclusiveSuffix}.`);
+      printLine(inv.io.stdout, `${passedCount} passed, ${failedCount} failed${inconclusiveSuffix}.`);
 
-      process.exitCode = verifyExitCode;
+      return verifyExitCode;
     } finally {
       app.close();
     }

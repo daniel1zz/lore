@@ -85,6 +85,7 @@ async function runLore(args: string[], cwd: string): Promise<RunResult> {
     // reason: HOME is redirected into the throwaway corpus so no global lore
     // config on the developer's machine can influence the run.
     cwd,
+    home: cwd,
     env: { ...process.env, HOME: cwd, EDITOR: "true", LORE_ACTOR: "agent:ac-gen-surface-test" },
   });
   return {

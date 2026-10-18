@@ -32,6 +32,7 @@ interface DocEnvelope {
 async function runLore(args: string[], cwd: string) {
   const proc = await runLoreInProcess(args, {
     cwd,
+    home: cwd,
     env: { ...process.env, HOME: cwd, EDITOR: "true", CLAUDECODE: "1" },
   });
   return { stdout: proc.stdout, stderr: proc.stderr, exitCode: proc.exitCode };

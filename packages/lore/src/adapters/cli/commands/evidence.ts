@@ -282,6 +282,7 @@
  */
 
 import { existsSync, readFileSync } from "fs";
+
 import { dirname } from "path";
 import { defineCommand } from "citty";
 import {
@@ -308,6 +309,7 @@ import {
 } from "../evidence-precheck.js";
 import { captureOracleCommand, type EvidenceProvenance } from "../../evidence-capture.js";
 import { invocationOf } from "../command-invocation.js";
+import { printLine } from "../output.js";
 
 const VALID_RESULTS = ["pass", "fail", "expected-fail"] as const;
 
@@ -371,11 +373,10 @@ export default defineCommand({
     const { args } = context;
     const inv = invocationOf(context);
     if (args["output-tail"] !== undefined && args["output-tail-file"] !== undefined) {
-      process.stderr.write(
+      inv.io.stderr.write(
         "Error: --output-tail and --output-tail-file are mutually exclusive.\n",
       );
-      process.exitCode = 2;
-      return;
+      return 2;
     }
 
     const captureRequested = args.capture === true;
@@ -391,9 +392,8 @@ export default defineCommand({
       ...(typeof args["output-tail-file"] === "string" ? { outputTailFile: args["output-tail-file"] } : {}),
     });
     if (captureConflict !== null) {
-      process.stderr.write(formatErrorFor(inv, captureConflict) + "\n");
-      process.exitCode = exitCode(captureConflict);
-      return;
+      inv.io.stderr.write(formatErrorFor(inv, captureConflict) + "\n");
+      return exitCode(captureConflict);
     }
 
     let outputTail: string | undefined;
@@ -444,7 +444,7 @@ export default defineCommand({
       // behavior for every non-`ai` config section (an explicit SPEC-030
       // non-goal); fixing it belongs there and would change every section's
       // semantics at once, not just this key's.
-      const captureTimeoutMs = resolveCaptureTimeoutMs(loadProjectConfig(inv));
+      const captureTimeoutMs = resolveCaptureTimeoutMs(loadProjectConfig(inv.io, inv));
       const captured = captureOracleCommand({
         command: args.command as string,
         cwd: inv.cwd,
@@ -452,9 +452,8 @@ export default defineCommand({
         timeoutMs: captureTimeoutMs,
       });
       if (!captured.ok) {
-        process.stderr.write(formatErrorFor(inv, captured.error) + "\n");
-        process.exitCode = exitCode(captured.error);
-        return;
+        inv.io.stderr.write(formatErrorFor(inv, captured.error) + "\n");
+        return exitCode(captured.error);
       }
       outputTail = captured.value.outputTail;
       // reason: the WHOLE pair, assigned as one value — never destructured into a
@@ -492,9 +491,8 @@ export default defineCommand({
         outputTail,
       });
       if (capturedDiscoveryRefusal !== null) {
-        process.stderr.write(formatErrorFor(inv, capturedDiscoveryRefusal) + "\n");
-        process.exitCode = exitCode(capturedDiscoveryRefusal);
-        return;
+        inv.io.stderr.write(formatErrorFor(inv, capturedDiscoveryRefusal) + "\n");
+        return exitCode(capturedDiscoveryRefusal);
       }
       // reason: captured-red proof (#53, D8-D10) — same shared guard as MCP.
       const capturedRedProofGap = findCapturedRedProofGap({
@@ -505,9 +503,8 @@ export default defineCommand({
         outputTail,
       });
       if (capturedRedProofGap !== null) {
-        process.stderr.write(formatErrorFor(inv, capturedRedProofGap) + "\n");
-        process.exitCode = exitCode(capturedRedProofGap);
-        return;
+        inv.io.stderr.write(formatErrorFor(inv, capturedRedProofGap) + "\n");
+        return exitCode(capturedRedProofGap);
       }
     } else if (typeof args["output-tail"] === "string") {
       outputTail = tailChars(args["output-tail"], CAPTURE_TAIL_CHARS);
@@ -516,9 +513,8 @@ export default defineCommand({
         outputTail = tailChars(readFileSync(args["output-tail-file"], "utf8"), CAPTURE_TAIL_CHARS);
       } catch (e) {
         const message = e instanceof Error ? e.message : "unknown error";
-        process.stderr.write(`Error: could not read --output-tail-file: ${message}\n`);
-        process.exitCode = 2;
-        return;
+        inv.io.stderr.write(`Error: could not read --output-tail-file: ${message}\n`);
+        return 2;
       }
     }
 
@@ -563,9 +559,8 @@ export default defineCommand({
             "use --oracle manual for genuinely manual checks.",
           value: args.command,
         };
-        process.stderr.write(formatErrorFor(inv, precheckError) + "\n");
-        process.exitCode = exitCode(precheckError);
-        return;
+        inv.io.stderr.write(formatErrorFor(inv, precheckError) + "\n");
+        return exitCode(precheckError);
       }
 
       // reason: pipe-refusal guard (see module header; SPEC oracle-tier-
@@ -587,9 +582,8 @@ export default defineCommand({
         capture: captureRequested,
       });
       if (pipeRefusal !== null) {
-        process.stderr.write(formatErrorFor(inv, pipeRefusal) + "\n");
-        process.exitCode = exitCode(pipeRefusal);
-        return;
+        inv.io.stderr.write(formatErrorFor(inv, pipeRefusal) + "\n");
+        return exitCode(pipeRefusal);
       }
 
       // reason: filtered-pass matched-count guard (see module header) — runs
@@ -605,9 +599,8 @@ export default defineCommand({
         ...(outputTail !== undefined ? { outputTail } : {}),
       });
       if (filteredPassRefusal !== null) {
-        process.stderr.write(formatErrorFor(inv, filteredPassRefusal) + "\n");
-        process.exitCode = exitCode(filteredPassRefusal);
-        return;
+        inv.io.stderr.write(formatErrorFor(inv, filteredPassRefusal) + "\n");
+        return exitCode(filteredPassRefusal);
       }
 
       // reason: dropped-file guard (see module header; task-skill-implement-
@@ -624,12 +617,11 @@ export default defineCommand({
         ...(outputTail !== undefined ? { outputTail } : {}),
       });
       if (underMatchedRefusal !== null) {
-        process.stderr.write(formatErrorFor(inv, underMatchedRefusal) + "\n");
-        process.exitCode = exitCode(underMatchedRefusal);
-        return;
+        inv.io.stderr.write(formatErrorFor(inv, underMatchedRefusal) + "\n");
+        return exitCode(underMatchedRefusal);
       }
 
-      const by = resolveActor(undefined, inv.env, inv.cwd, inv.user);
+      const by = resolveActor(inv.io, undefined, inv.env, inv.cwd, inv.user);
       const evidenceInput = {
         // reason: cast — CLI arg strings are validated by evidenceEntrySchema server-side;
         // an invalid oracle/result value fails loud with VALIDATION_ERROR rather than
@@ -678,17 +670,16 @@ export default defineCommand({
       }
 
       if (!result.ok) {
-        process.stderr.write(formatErrorFor(inv, result.error) + "\n");
-        process.exitCode = exitCode(result.error);
-        return;
+        inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
+        return exitCode(result.error);
       }
 
       if (args.json) {
-        console.log(JSON.stringify({ ok: true, data: { doc: result.value } }, null, 2));
+        printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { doc: result.value } }, null, 2));
         return;
       }
 
-      console.log(
+      printLine(inv.io.stdout, 
         `Recorded ${args.oracle as string} evidence (${args.result as string}) on ${result.value.slug} (v${result.value.version})${captureMargin}`,
       );
     } finally {
