@@ -14,6 +14,9 @@
  *
  *   propose <spec> add --leaf <leaf> --statement <s> --example <e>... --enforced-by <v>
  *   propose <spec> modify <BR-n> [--statement <s>] [--example <e>...] [--enforced-by <v>]
+ *   propose <spec> amend <BR-n> [--statement <s>] [--example <e>...] [--enforced-by <v>]
+ *       Rewrite THIS spec's own proposed `add` in place (same id and leaf; --example replaces wholesale; must change
+ *       something). Refused (exit 4, naming the id) for a live id or one another spec proposes.
  *   propose <spec> retire <BR-n> --note <why>             [--correction "<why>" on a locked spec, BR-1069]
  *       Write the spec's rule change set (`extra.rule_changes`); `add` reserves the next BR-n as `proposed` and
  *       touches no leaf. The baseline takes the change only when the spec lands.
@@ -174,12 +177,12 @@ export default defineCommand({
       meta: {
         name: "propose",
         description:
-          "Add an entry to a spec's rule change set: `add` reserves the next BR-n (proposed, not in the baseline), `modify` / `retire` name a live rule",
+          "Add an entry to a spec's rule change set: `add` reserves the next BR-n (proposed, not in the baseline), `modify` / `retire` name a live rule, `amend` rewrites a proposed entry of this spec",
       },
       args: {
         spec: { type: "positional", description: "Spec document ID or slug", required: true },
-        op: { type: "positional", description: "add | modify | retire", required: true },
-        rule: { type: "positional", description: "Rule id BR-n (modify | retire only)", required: false },
+        op: { type: "positional", description: "add | modify | retire | amend", required: true },
+        rule: { type: "positional", description: "Rule id BR-n (modify | retire | amend; amend names an id this spec proposed)", required: false },
         leaf: { type: "string", description: "[add] Baseline leaf the rule will land on (ID or slug)" },
         statement: { type: "string", description: "[add | modify] The behavioural rule, <= 500 chars" },
         example: { type: "string", description: "[add | modify, repeatable, 1-3] A concrete example, <= 300 chars" },
@@ -205,14 +208,14 @@ export default defineCommand({
             examples: examples ?? [],
             enforced_by: args["enforced-by"] as RuleEnforcement,
           };
-        } else if (op === "modify" || op === "retire") {
+        } else if (op === "modify" || op === "retire" || op === "amend") {
           if (args.rule === undefined) return failUsage(`\`${op}\` requires the rule id: lore rule propose <spec> ${op} <BR-n> ...`, json);
           if (op === "retire") {
             if (args.note === undefined) return failUsage("`retire` requires --note <why>", json);
             input = { op: "retire", id: args.rule as string, note: args.note as string };
           } else {
             input = {
-              op: "modify",
+              op,
               id: args.rule as string,
               ...(args.statement !== undefined ? { statement: args.statement as string } : {}),
               ...(examples !== undefined ? { examples } : {}),
@@ -222,7 +225,7 @@ export default defineCommand({
             };
           }
         } else {
-          return failUsage(`op must be add, modify or retire (got '${op}')`, json);
+          return failUsage(`op must be add, modify, retire or amend (got '${op}')`, json);
         }
         const { app } = loadLoreApp();
         try {
@@ -237,6 +240,8 @@ export default defineCommand({
           console.log(
             change.op === "add"
               ? `Reserved ${change.id} (proposed, not in the baseline) for ${change.leaf} in ${doc.slug} (v${doc.version}).`
+              : args.op === "amend"
+              ? `Amended ${change.id} (proposed, not in the baseline) in ${doc.slug} (v${doc.version}); id and leaf unchanged.`
               : `Recorded ${change.op} of ${change.id} in ${doc.slug} (v${doc.version}); the baseline is unchanged until the spec lands.`,
           );
         } finally {

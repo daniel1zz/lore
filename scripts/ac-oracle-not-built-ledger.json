@@ -28,11 +28,5 @@
     "ac": "AC-DN5-1",
     "reason": "oracle test not written yet (review-template-v5.test.ts absent); owned by the implementing task of this spec's plan",
     "owner_plan": "plan-design-necessity-rule-v5"
-  },
-  {
-    "spec": "spec-design-necessity-rule-v5-separate-what-a-design-needs-from",
-    "ac": "AC-DN5-3",
-    "reason": "oracle test not written yet (rule-propose-amend.test.ts absent); owned by the implementing task of this spec's plan",
-    "owner_plan": "plan-design-necessity-rule-v5"
   }
 ]

@@ -75,7 +75,11 @@ const PREVALIDATION_ID = "BR-999999999";
 export type ProposeRuleChangeInput =
   | { op: "add"; leaf: string; statement: string; examples: string[]; enforced_by: RuleEnforcement }
   | { op: "modify"; id: string; statement?: string; examples?: string[]; enforced_by?: RuleEnforcement }
-  | { op: "retire"; id: string; note: string };
+  | { op: "retire"; id: string; note: string }
+  | { op: "amend"; id: string; statement?: string; examples?: string[]; enforced_by?: RuleEnforcement };
+
+/** The `amend` member of {@link ProposeRuleChangeInput}: rewrites THIS spec's own proposed `add` entry in place. */
+type AmendInput = Extract<ProposeRuleChangeInput, { op: "amend" }>;
 
 /** Options of {@link RuleChangeService.propose}. */
 export interface ProposeOpts {
@@ -142,8 +146,9 @@ export class RuleChangeService implements RuleChangeLandingPort {
    * Add one entry to a spec's change set.
    *
    * @param specRef - Spec id or slug; a non-spec doc → VALIDATION_ERROR.
-   * @param input - `add` (reserves the next BR id, `proposed`), `modify` (a live id; at least one field) or
-   *   `retire` (a live id; a non-blank note).
+   * @param input - `add` (reserves the next BR id, `proposed`), `modify` (a live id; at least one field),
+   *   `retire` (a live id; a non-blank note) or `amend` (an id THIS spec proposed and has not landed; at least one
+   *   field that differs; rewrites that `add` entry in place, keeping its id and leaf; `examples` replace wholesale).
    * @param opts.correction - required on a LOCKED spec; a blank reason → VALIDATION_ERROR `correction.reason`.
    * @returns `{ change, doc }` — the stored entry (an `add` carries its reserved id) and the updated spec.
    *   VALIDATION_ERROR for an invalid input, an unknown / non-live id, a rule another spec already changes
@@ -158,6 +163,7 @@ export class RuleChangeService implements RuleChangeLandingPort {
     opts: ProposeOpts = {},
   ): Promise<Result<{ change: RuleChange; doc: DocRecord }, LoreError>> {
     const actor = resolveWriteActorFor(this.store, opts.by);
+    if (input.op === "amend") return this.proposeAmendOfProposal(specRef, input, opts, actor);
     const shaped = shapeInput(input);
     if (!shaped.ok) return shaped;
     const specResult = await this.resolveSpec(specRef);
@@ -493,6 +499,22 @@ export class RuleChangeService implements RuleChangeLandingPort {
     const existing = ruleChangesOf(spec.extra);
     const replaced = existing.some((c) => c.id === change.id);
     const next = replaced ? existing.map((c) => (c.id === change.id ? change : c)) : [...existing, change];
+    return this.writeChangeSet(spec, next, change, status, summary, actor, correctionReason);
+  }
+
+  /**
+   * Persist `next` as the spec's change set: ONE version (status as given), one audit row carrying the
+   * correction reason when there is one. Shared by `modify` / `retire` and by `amend`.
+   */
+  private async writeChangeSet(
+    spec: DocRecord,
+    next: RuleChange[],
+    change: RuleChange,
+    status: DocStatus,
+    summary: string,
+    actor: string,
+    correctionReason: string | undefined,
+  ): Promise<Result<{ change: RuleChange; doc: DocRecord }, LoreError>> {
     const extra = { ...spec.extra, rule_changes: next };
     const now = new Date().toISOString();
     const version = spec.version + 1;
@@ -532,6 +554,78 @@ export class RuleChangeService implements RuleChangeLandingPort {
     );
     if (!written.ok) return written;
     return ok({ change, doc: written.value });
+  }
+
+  /**
+   * `amend`: rewrite this spec's own proposed `add` entry in place (same id, same leaf). The locked-spec exit is the
+   * unchanged BR-1069 correction ({@link resolveLockExit}); the entry is re-read on every CAS attempt.
+   * @returns VALIDATION_ERROR naming the id when it is not an unlanded `add` of THIS spec (live, proposed by
+   *   another spec, unknown, a modify/retire of this spec, landed) or when the amend changes nothing.
+   */
+  private async proposeAmendOfProposal(
+    specRef: string,
+    input: AmendInput,
+    opts: ProposeOpts,
+    actor: string,
+  ): Promise<Result<{ change: RuleChange; doc: DocRecord }, LoreError>> {
+    const fields = shapeAmend(input);
+    if (!fields.ok) return fields;
+    const specResult = await this.resolveSpec(specRef);
+    if (!specResult.ok) return specResult;
+    const exit = await this.resolveLockExit(specResult.value, opts.correction);
+    if (!exit.ok) return exit;
+    const correctionReason = exit.value.correctionReason;
+
+    let lastStale: LoreError | undefined;
+    for (let attempt = 0; attempt <= MAX_CAS_REAPPLIES; attempt += 1) {
+      const fresh = await this.readDoc(specResult.value.id);
+      if (!fresh.ok) return fresh;
+      const spec = fresh.value;
+      const entry = await this.findOwnProposedAdd(spec, fields.value.id);
+      if (!entry.ok) return entry;
+      const leaf = await resolveDoc(this.store, entry.value.leaf);
+      if (!leaf.ok) return leaf;
+      if (this.writeAuthority !== undefined) {
+        const verdict = await this.writeAuthority.authorize([leaf.value], "rule-propose", actor);
+        if (!verdict.ok) return verdict;
+      }
+      const amended: Extract<RuleChange, { op: "add" }> = {
+        ...entry.value,
+        ...(fields.value.statement !== undefined ? { statement: fields.value.statement } : {}),
+        ...(fields.value.examples !== undefined ? { examples: fields.value.examples } : {}),
+        ...(fields.value.enforced_by !== undefined ? { enforced_by: fields.value.enforced_by } : {}),
+      };
+      if (JSON.stringify(amended) === JSON.stringify(entry.value)) {
+        return err(validationError("change", `an amend must change something: ${entry.value.id} already has exactly this statement, examples and enforced_by`, entry.value.id));
+      }
+      const next = ruleChangesOf(spec.extra).map((c) => (c.id === amended.id ? amended : c));
+      const status = exit.value.keepStatus ? spec.status : resolveStatusAfterContractEdit(spec.status, true);
+      const summary = correctionReason !== undefined
+        ? `Correction: ${correctionReason}`
+        : `Rule change proposed: amend ${amended.id}`;
+      const written = await this.writeChangeSet(spec, next, amended, status, summary, actor, correctionReason);
+      if (!written.ok && written.error.code === "STALE_VERSION") { lastStale = written.error; continue; }
+      return written;
+    }
+    return err(lastStale ?? staleExhausted(specResult.value.id as string));
+  }
+
+  /** The unlanded `add` entry `ruleId` of `spec`; otherwise a VALIDATION_ERROR naming the id and why it is not amendable. */
+  private async findOwnProposedAdd(spec: DocRecord, ruleId: string): Promise<Result<Extract<RuleChange, { op: "add" }>, LoreError>> {
+    const own = ruleChangesOf(spec.extra).find((c) => c.id === ruleId);
+    if (own !== undefined && own.op === "add" && !isLanded(own)) return ok(own);
+    const refuse = (why: string) => err(validationError("id", `an amend rewrites a proposed entry of ${spec.slug}: ${ruleId} ${why}`, ruleId));
+    if (own !== undefined && isLanded(own)) return refuse("already landed; a landed entry is history");
+    if (own !== undefined) return refuse(`is a ${own.op} of this spec, not a proposed add (re-propose the ${own.op} instead)`);
+    const specs = await this.store.findMany({ type: "spec" });
+    if (!specs.ok) return specs;
+    const proposal = findProposal(ruleId, specs.value);
+    if (proposal !== undefined) return refuse(`is proposed by ${proposal.spec.slug}, not by this spec`);
+    const baseline = await this.store.findMany({ type: "baseline" });
+    if (!baseline.ok) return baseline;
+    return collectLeafRules(baseline.value).has(ruleId)
+      ? refuse("is a live rule of the baseline (use modify)")
+      : refuse("is not proposed by any spec");
   }
 
   /**
@@ -746,10 +840,42 @@ function planLeaf(
 }
 
 /**
+ * Validate an `amend`'s fields with the stored-shape schema (the same statement / example / enforced_by bounds an
+ * `add` and a `modify` obey) and require at least one of them, like `modify`.
+ */
+function shapeAmend(input: AmendInput): Result<AmendInput, LoreError> {
+  const parsed = ruleChangeSchema.safeParse({
+    op: "modify",
+    id: input.id,
+    ...(input.statement !== undefined ? { statement: input.statement } : {}),
+    ...(input.examples !== undefined ? { examples: input.examples } : {}),
+    ...(input.enforced_by !== undefined ? { enforced_by: input.enforced_by } : {}),
+  });
+  if (!parsed.success || parsed.data.op !== "modify") {
+    const issue = parsed.success ? undefined : parsed.error.issues[0];
+    return err(validationError(
+      issue !== undefined && issue.path.length > 0 ? String(issue.path[0]) : "change",
+      issue !== undefined ? issue.message : "invalid rule change",
+    ));
+  }
+  const { statement, examples, enforced_by } = parsed.data;
+  if (statement === undefined && examples === undefined && enforced_by === undefined) {
+    return err(validationError("change", "an amend must change at least one of statement, examples, enforced_by"));
+  }
+  return ok({
+    op: "amend",
+    id: parsed.data.id,
+    ...(statement !== undefined ? { statement } : {}),
+    ...(examples !== undefined ? { examples } : {}),
+    ...(enforced_by !== undefined ? { enforced_by } : {}),
+  });
+}
+
+/**
  * Validate a caller's input with the stored-shape schema (`add` against a placeholder id) so a refusal burns no
  * id and the CLI cannot write a shape the reader would later drop.
  */
-function shapeInput(input: ProposeRuleChangeInput): Result<RuleChange, LoreError> {
+function shapeInput(input: Exclude<ProposeRuleChangeInput, { op: "amend" }>): Result<RuleChange, LoreError> {
   const candidate =
     input.op === "add" ? { ...input, id: PREVALIDATION_ID } : input.op === "retire" ? { ...input, note: input.note.trim() } : input;
   const parsed = ruleChangeSchema.safeParse(candidate);
