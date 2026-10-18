@@ -37,6 +37,16 @@
  * The reference-transaction hook that refuses every other move of main ships as assets/project/reference-transaction
  * and is installed by `lore setup --project`; it recognises INTEGRATE_MARKER_ENV on the CAS.
  *
+ * After the shared view is `refreshed` (INT-T11), `workflow.integrate.post_refresh_command` (this repo: `bun run
+ * build`) runs in the shared checkout so its build artifacts (dist/lore, which ~/.local/bin/lore links to) match main.
+ * Decision, (a) project config command in the view vs (b) install the floor's artifact from the integration worktree:
+ * (a) chosen. The floor here is `check:floor` (checks, not a build) so (b) would still need a second build, and it would
+ * need a per-project "which artifacts, copied where" key plus knowledge of the build's layout; (a) is one command the
+ * project already owns, builds exactly once per landing (the floor does not build the shipped binary), and a build
+ * writes only untracked/ignored output. Tracked changes left by the build are measured (`git status --untracked-files=no`)
+ * and reported, never reverted. Outcome `rebuild`: rebuilt | rebuild_failed <exit> | skipped <reason> (key unset, or the
+ * view was not `refreshed`); a failed rebuild is reported only: main has already moved and is never un-landed.
+ *
  * Source: spec-main-advances-only-through-lore-integrate-per-session AC-INT-1, AC-INT-2, BR-1245, BR-1246.
  */
 import { existsSync, realpathSync } from "node:fs";
@@ -92,6 +102,8 @@ export interface IntegrateRequest {
   readonly sessionId: string;
   /** `workflow.integrate.floor_command`; `undefined` = not configured. */
   readonly floorCommand: string | undefined;
+  /** `workflow.integrate.post_refresh_command`; `undefined` = not configured (the rebuild is reported skipped). */
+  readonly postRefreshCommand?: string | undefined;
   /** Merge commit message; default `merge(<branch>): <tip subject>`. */
   readonly message?: string;
 }
@@ -106,9 +118,18 @@ export type SharedViewRefresh =
   | { readonly state: "kept_dirty"; readonly paths: readonly string[] }
   | { readonly state: "not_measured"; readonly reason: string };
 
+/**
+ * What happened to the shared checkout's build artifacts (INT-T11): `rebuilt` (with `tracked_changes` when the build
+ * left tracked files modified), `rebuild_failed` (the command's exit status; main stays landed), or `skipped` (`reason`).
+ */
+export type SharedViewRebuild =
+  | { readonly state: "rebuilt"; readonly tracked_changes?: readonly string[] }
+  | { readonly state: "rebuild_failed"; readonly exit_status: number; readonly output_tail: string }
+  | { readonly state: "skipped"; readonly reason: string };
+
 export type IntegrateOutcome =
-  | { readonly kind: "landed"; readonly branch: string; readonly sha: string; readonly base: string; readonly attempts: number; readonly worktree: string; readonly shared_view: SharedViewRefresh }
-  | { readonly kind: "already_integrated"; readonly branch: string; readonly main: string; readonly shared_view: SharedViewRefresh }
+  | { readonly kind: "landed"; readonly branch: string; readonly sha: string; readonly base: string; readonly attempts: number; readonly worktree: string; readonly shared_view: SharedViewRefresh; readonly rebuild: SharedViewRebuild }
+  | { readonly kind: "already_integrated"; readonly branch: string; readonly main: string; readonly shared_view: SharedViewRefresh; readonly rebuild: SharedViewRebuild }
   | { readonly kind: "floor_failed"; readonly branch: string; readonly attempts: number; readonly exit_status: number; readonly output_tail: string }
   | { readonly kind: "conflict"; readonly branch: string; readonly paths: readonly string[] }
   | {
@@ -203,7 +224,8 @@ export class IntegrateService {
       if (git(projectRoot, ["merge-base", "--is-ancestor", tip, base.value]).status === 0) {
         const cleared = ledger.clear(request.branch);
         if (!cleared.ok) return cleared;
-        return ok({ kind: "already_integrated", branch: request.branch, main: base.value, shared_view: this.refreshSharedView() });
+        const view = this.refreshSharedView();
+        return ok({ kind: "already_integrated", branch: request.branch, main: base.value, shared_view: view, rebuild: this.rebuildSharedView(view, request.postRefreshCommand) });
       }
       log(`integrate: ${request.branch} attempt ${attempt}/${INTEGRATE_MAX_ATTEMPTS} on ${short(base.value)}`);
 
@@ -227,7 +249,8 @@ export class IntegrateService {
       if (swapped.status === 0) {
         const cleared = ledger.clear(request.branch);
         if (!cleared.ok) return cleared;
-        return ok({ kind: "landed", branch: request.branch, sha: merge, base: base.value, attempts: attempt, worktree: wt, shared_view: this.refreshSharedView() });
+        const view = this.refreshSharedView();
+        return ok({ kind: "landed", branch: request.branch, sha: merge, base: base.value, attempts: attempt, worktree: wt, shared_view: view, rebuild: this.rebuildSharedView(view, request.postRefreshCommand) });
       }
 
       const now = this.resolveCommit(TARGET_REF);
@@ -346,6 +369,22 @@ export class IntegrateService {
     // git lists each blocking path on its own tab-indented line
     const paths = text.split("\n").filter((l) => l.startsWith("\t")).map((l) => l.trim());
     return { state: "kept_dirty", paths };
+  }
+
+  /**
+   * Runs the project's post-refresh command in the shared checkout when its view is `refreshed`. Never fails the
+   * integration: every non-rebuild is reported. A build that leaves tracked changes is reported with the paths.
+   */
+  private rebuildSharedView(view: SharedViewRefresh, command: string | undefined): SharedViewRebuild {
+    if (command === undefined || command.trim() === "") return { state: "skipped", reason: "workflow.integrate.post_refresh_command is not set" };
+    if (view.state !== "refreshed") return { state: "skipped", reason: `the shared checkout view is ${view.state}, not refreshed` };
+    const { projectRoot, runFloor, git, log } = this.deps;
+    log(`integrate: rebuilding the shared checkout ${projectRoot}: ${command}`);
+    const ran = runFloor(command, projectRoot);
+    if (ran.status !== 0) return { state: "rebuild_failed", exit_status: ran.status, output_tail: ran.output.slice(-FLOOR_TAIL_CHARS) };
+    const status = git(projectRoot, ["status", "--porcelain=v1", "--untracked-files=no"]);
+    const tracked = status.status === 0 ? status.stdout.split("\n").filter((l) => l.trim() !== "").map((l) => l.slice(3)) : [];
+    return tracked.length === 0 ? { state: "rebuilt" } : { state: "rebuilt", tracked_changes: tracked };
   }
 
   /** The multi-step operation a checkout is in the middle of (it blocks a detach), or `undefined`. */

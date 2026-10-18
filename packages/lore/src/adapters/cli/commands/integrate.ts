@@ -19,6 +19,8 @@
  *
  * After landing (and on an already-integrated no-op) the shared checkout's detached view is moved to main with a plain
  * `git checkout --detach main`; the outcome carries `shared_view` = refreshed | kept_dirty <paths> | not_measured <reason>.
+ * With `workflow.integrate.post_refresh_command` set, a `refreshed` view is then rebuilt (INT-T11); the outcome carries
+ * `rebuild` = rebuilt | rebuild_failed <exit> | skipped <reason>, never silent (a failed rebuild never un-lands main).
  * Output: progress and the result on stdout/stderr as text; `--json` prints `{ ok: true, data: <outcome> }` on stdout.
  * Side-effect class: IO (git subprocesses, the floor command, the corpus directory's loss ledger).
  */
@@ -36,6 +38,7 @@ import {
   type FloorRunner,
   type IntegrateGit,
   type IntegrateOutcome,
+  type SharedViewRebuild,
   type SharedViewRefresh,
 } from "../../../service/integrate-service.js";
 
@@ -78,12 +81,24 @@ function renderSharedView(view: SharedViewRefresh): string {
   }
 }
 
+/** One line (plus the failing output) naming what happened to the shared checkout's build artifacts. */
+function renderRebuild(rebuild: SharedViewRebuild): string {
+  switch (rebuild.state) {
+    case "rebuilt":
+      return `integrate: shared checkout rebuild: rebuilt${rebuild.tracked_changes === undefined ? "" : ` (WARNING: the build left tracked changes: ${rebuild.tracked_changes.join(" ")})`}`;
+    case "rebuild_failed":
+      return `integrate: shared checkout rebuild: rebuild-failed ${rebuild.exit_status} (main stays landed; rebuild by hand)\n${rebuild.output_tail.trimEnd()}`;
+    case "skipped":
+      return `integrate: shared checkout rebuild: skipped (${rebuild.reason})`;
+  }
+}
+
 function renderOutcome(outcome: IntegrateOutcome): { out?: string; err?: string } {
   switch (outcome.kind) {
     case "landed":
-      return { out: `integrate: landed ${outcome.branch} on main as ${outcome.sha.slice(0, 12)} after ${outcome.attempts} attempt(s)\n${renderSharedView(outcome.shared_view)}` };
+      return { out: `integrate: landed ${outcome.branch} on main as ${outcome.sha.slice(0, 12)} after ${outcome.attempts} attempt(s)\n${renderSharedView(outcome.shared_view)}\n${renderRebuild(outcome.rebuild)}` };
     case "already_integrated":
-      return { out: `integrate: ${outcome.branch} is already integrated into main (${outcome.main.slice(0, 12)}); nothing to do\n${renderSharedView(outcome.shared_view)}` };
+      return { out: `integrate: ${outcome.branch} is already integrated into main (${outcome.main.slice(0, 12)}); nothing to do\n${renderSharedView(outcome.shared_view)}\n${renderRebuild(outcome.rebuild)}` };
     case "floor_failed":
       return {
         err:
@@ -148,6 +163,7 @@ export default defineCommand({
         branch,
         sessionId: resolveCallerSession(typeof args.session === "string" ? args.session : undefined, inv.env) ?? "",
         floorCommand: config?.workflow?.integrate?.floor_command,
+        postRefreshCommand: config?.workflow?.integrate?.post_refresh_command,
         ...(typeof args.message === "string" && args.message !== "" ? { message: args.message } : {}),
       });
       if (!result.ok) {

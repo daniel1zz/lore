@@ -193,6 +193,10 @@ export const PROJECT_SPECIFIC_KEYS: readonly ProjectSpecificKeyEntry[] = [
     rationale: "The post-merge floor lore integrate runs is the project's own build/check command; it has no meaningful shipped default and integrate refuses when it is absent (adr-main-advances-only-by-lore-integrate-per-session).",
   },
   {
+    key: "workflow.integrate.post_refresh_command",
+    rationale: "The command that rebuilds the shared checkout's build artifacts after lore integrate refreshed its view (this repo: bun run build) is the project's own build; it has no meaningful shipped default and integrate reports 'skipped' when it is absent.",
+  },
+  {
     key: "project.author",
     rationale: "Identifies the default author identity for THIS project; inherently per-installation, never shared.",
   },
