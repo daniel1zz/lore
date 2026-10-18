@@ -52,6 +52,7 @@ import { exitCode, formatError, resolveActor } from "../utils.js";
 import type { App } from "../../../app.js";
 import type { AddNodeInput, BaselineTreeEntry, SiteMapChange } from "../../../service/rule-service.js";
 import { NON_BUSINESS_PREFIX, computeLeafCoverage } from "../../../service/leaf-coverage.js";
+import { buildOwnerLeafIndex } from "../../../service/owned-by.js";
 import { resolveDoc } from "../../../service/resolve.js";
 import { SiteCensusError, type UnresolvedImport, findCensusRoot, listSites, resolveCommandEntry } from "../../../service/site-census.js";
 import type { Site } from "../../../service/site-census.js";
@@ -224,6 +225,7 @@ async function runCoverage(target: string, json: boolean): Promise<void> {
       if (doc.extra["node"] === "leaf") leaves.push(doc);
       else queue.push(...all.value.filter((d) => d.parent_id === doc.id));
     }
+    const ownerLeaves = buildOwnerLeafIndex(all.value);
     leaves.sort((a, b) => (a.slug < b.slug ? -1 : a.slug > b.slug ? 1 : 0));
     const reports: LeafCoverageReport[] = leaves.map((leaf) => {
       const commands = Array.isArray(leaf.extra["commands"]) ? (leaf.extra["commands"] as string[]) : [];
@@ -244,6 +246,7 @@ async function runCoverage(target: string, json: boolean): Promise<void> {
         unresolvedImports: [...unresolvedByKey.values()],
         siteMap,
         liveRuleIds: rules.filter((r) => r.lifecycle === "live").map((r) => r.id),
+        ownerLeaves,
       });
       return {
         slug: leaf.slug,
