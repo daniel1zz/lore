@@ -14,7 +14,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { DEFAULT_STEPS, deriveStaticSteps, main, renderTable, runChain, runStaticFloor } from "../run-chain";
+import { CORPUS_DEPENDENT_CHECKS, DEFAULT_STEPS, deriveFloorSteps, deriveStaticSteps, main, renderTable, runChain, runStaticFloor } from "../run-chain";
 
 const ROOT = join(fileURLToPath(import.meta.url), "..", "..", "..");
 const fake = (codes: Record<string, number>) => {
@@ -134,7 +134,7 @@ describe("check:static (deriveStaticSteps / runStaticFloor)", () => {
     const real = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8")).scripts as Record<string, string>;
     expect(real["check:static"]).toContain("run-chain.ts --static");
     const { steps } = deriveStaticSteps(real);
-    for (const name of Object.keys(real).filter((n) => n.startsWith("check:") && n !== "check:static")) expect(steps).toContain(`bun run ${name}`);
+    for (const name of Object.keys(real).filter((n) => n.startsWith("check:") && n !== "check:static" && n !== "check:floor")) expect(steps).toContain(`bun run ${name}`);
   });
 });
 
@@ -146,3 +146,56 @@ function vi_silence(): () => void {
     console.log = orig;
   };
 }
+
+describe("check:floor (deriveFloorSteps)", () => {
+  const fixture = {
+    build: "b",
+    typecheck: "t",
+    "check:a": "a",
+    "check:spec-mirror": "m",
+    "check:live-repo-state": "l",
+    "check:corpus-fail-census": "c",
+    "check:z": "z",
+    "check:static": "bun scripts/run-chain.ts --static",
+    "check:floor": "bun scripts/run-chain.ts --floor",
+  };
+
+  it("is build, typecheck, every check:* minus the corpus-dependent set and the aggregate scripts", () => {
+    expect(deriveFloorSteps(fixture)).toEqual(["bun run build", "bun run typecheck", "bun run check:a", "bun run check:z"]);
+  });
+
+  it("picks up a brand-new check:* without an edit, and never names check:floor or check:static (no recursion)", () => {
+    const steps = deriveFloorSteps({ ...fixture, "check:brand-new": "n" });
+    expect(steps).toContain("bun run check:brand-new");
+    expect(steps).not.toContain("bun run check:floor");
+    expect(steps).not.toContain("bun run check:static");
+    expect(deriveStaticSteps(fixture).steps).not.toContain("bun run check:floor");
+  });
+
+  it("excludes exactly the CORPUS_DEPENDENT_CHECKS source set", () => {
+    const steps = deriveFloorSteps(fixture);
+    for (const name of CORPUS_DEPENDENT_CHECKS) expect(steps).not.toContain(`bun run ${name}`);
+  });
+
+  it("classifies by what a check judges: corpus-state checks are out of the floor, the tree-judging ac-oracle-ownership stays in", () => {
+    expect(CORPUS_DEPENDENT_CHECKS.has("check:evidence-identity-drop-set")).toBe(true);
+    expect(CORPUS_DEPENDENT_CHECKS.has("check:ac-ref-integrity")).toBe(true);
+    expect(CORPUS_DEPENDENT_CHECKS.has("check:ac-oracle-ownership")).toBe(false);
+    const real = (JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8")) as { scripts: Record<string, string> }).scripts;
+    const steps = deriveFloorSteps(real);
+    expect(steps).toContain("bun run check:ac-oracle-ownership");
+    expect(steps).not.toContain("bun run check:evidence-identity-drop-set");
+    expect(steps).not.toContain("bun run check:ac-ref-integrity");
+  });
+
+  it("fails loud without build or typecheck", () => {
+    expect(() => deriveFloorSteps({ typecheck: "y", "check:a": "a" })).toThrow(/"build"/);
+  });
+
+  it("the real package.json declares check:floor and the floor lists every non-corpus check", () => {
+    const real = (JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8")) as { scripts: Record<string, string> }).scripts;
+    expect(real["check:floor"]).toBe("bun scripts/run-chain.ts --floor");
+    const expected = Object.keys(real).filter((n) => /^check:/.test(n) && n !== "check:static" && n !== "check:floor" && !CORPUS_DEPENDENT_CHECKS.has(n));
+    expect(deriveFloorSteps(real)).toEqual(["bun run build", "bun run typecheck", ...expected.map((n) => `bun run ${n}`)]);
+  });
+});
