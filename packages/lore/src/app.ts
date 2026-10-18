@@ -863,7 +863,7 @@ function buildAppFromSqlite(
   // generation-carrying siblings of the 4th/6th args — `resolveDeclaredAcCriteria`/
   // `resolveDeclaredAcCriteriaForAdhocTask` return the full criterion (not just its id),
   // which `resolveAcOracleGeneration` needs and a bare id set structurally cannot supply.
-  const worktreeRemovalService = buildWorktreeRemovalService(store);
+  const worktreeRemovalService = buildWorktreeRemovalService(store, repoRoot);
   const taskWorkflowService = new TaskWorkflowService(
     store,
     telemetry,
@@ -964,8 +964,8 @@ function buildAppFromSqlite(
     phaseService: new PhaseService(store, recordLockService),
     taskWorkflowService,
     sessionService,
-    runService: new RunService(store, undefined, taskWorkflowService, realpathNative),
-    runReapService: buildRunReapService(store, taskWorkflowService),
+    runService: new RunService(store, undefined, taskWorkflowService, realpathNative, repoRoot),
+    runReapService: buildRunReapService(store, taskWorkflowService, repoRoot),
     worktreeRemovalService,
     verifiedInvocationIdentity: () => ensureVerifiedIdentity(store),
     // reason: ValidityService owns extra.validity (bi-temporal invalidation) — store +
@@ -1280,7 +1280,7 @@ function buildAppFromTurso(
   // reason: 8th/9th args — see buildAppFromSqlite's identical comment (both
   // composition roots must wire the generation-carrying siblings, or the
   // Turso-backed surface silently stamps no `ac_oracle_generation`).
-  const worktreeRemovalService = buildWorktreeRemovalService(store);
+  const worktreeRemovalService = buildWorktreeRemovalService(store, repoRoot);
   const taskWorkflowService = new TaskWorkflowService(
     store,
     telemetry,
@@ -1377,8 +1377,8 @@ function buildAppFromTurso(
     phaseService: new PhaseService(store, recordLockService),
     taskWorkflowService,
     sessionService,
-    runService: new RunService(store, undefined, taskWorkflowService, realpathNative),
-    runReapService: buildRunReapService(store, taskWorkflowService),
+    runService: new RunService(store, undefined, taskWorkflowService, realpathNative, repoRoot),
+    runReapService: buildRunReapService(store, taskWorkflowService, repoRoot),
     worktreeRemovalService,
     verifiedInvocationIdentity: () => ensureVerifiedIdentity(store),
     // reason: ValidityService owns extra.validity (bi-temporal invalidation) — store +
@@ -1989,10 +1989,11 @@ function createAppUnscoped(
 function buildRunReapService(
   store: ConstructorParameters<typeof DecisionService>[0]["store"],
   taskWorkflowService: TaskWorkflowService,
+  repoRoot: string,
 ): RunReapService {
   return new RunReapService({
     store,
-    runs: new RunService(store, undefined, taskWorkflowService, realpathNative),
+    runs: new RunService(store, undefined, taskWorkflowService, realpathNative, repoRoot),
     decisions: new DecisionService({ store, executorRun: null }),
     processes: createRealProcessTablePort(),
   });
@@ -2012,6 +2013,7 @@ function buildOverrideDecisionPort(store: ConstructorParameters<typeof DecisionS
  */
 function buildWorktreeRemovalService(
   store: ConstructorParameters<typeof RunService>[0] & WorktreeRemovalRunStore & StoreInterface,
+  repoRoot: string,
 ): WorktreeRemovalService {
   return new WorktreeRemovalService({
     // reason: AC-AU-11 — every worktree removal asks decide(worktree-remove) through the decision log; `executorRun: null`
@@ -2019,7 +2021,7 @@ function buildWorktreeRemovalService(
     decisions: new DecisionService({ store, executorRun: null }),
     probe: createRealWorktreeProbe(),
     processScan: createRealProcessScanPort(),
-    occupancy: new RunService(store, undefined, undefined, realpathNative),
+    occupancy: new RunService(store, undefined, undefined, realpathNative, repoRoot),
     runs: store,
   });
 }
