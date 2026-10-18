@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Async persistence abstraction: `StoreInterface` with SQLite / Turso / InMemory implementations and FTS5 escape. `StoreInterface` is the single contract every service depends on. Three implementations:
+Async persistence abstraction: `StoreInterface` with SQLite / Turso / InMemory implementations and FTS5 escape. Services depend on this one contract, never on a concrete store:
 
 - `SQLiteStore` (`bun:sqlite`) — production local-only.
 - `TursoStore` (`@libsql/client`) — embedded replica for `sync.enabled` mode.
@@ -14,7 +14,7 @@ Full pre-eviction file (per-invariant empirical measurements, incident chains, p
 
 ## Key Invariants
 
-- **All `StoreInterface` methods are async** — they return `Promise<Result<T, LoreError>>`. `SQLiteStore` wraps synchronous `bun:sqlite` calls; `TursoStore` is natively async. Services depend on the interface, never on a concrete store.
+- **All `StoreInterface` methods are async** — they return `Promise<Result<T, LoreError>>`. `SQLiteStore` wraps synchronous `bun:sqlite` calls; `TursoStore` is natively async.
 - **`@libsql/client` is loaded LAZILY, only via a literal-specifier dynamic `import()`** (`turso-store.ts::loadLibsqlClientModule`). Rules: (a) ⛔ never replace it with `createRequire`/`import.meta.require` (broken in a compiled binary); (b) `TursoStore`'s constructor takes an optional pre-resolved `injectedClient`, which `commands/sync.ts` injects; (c) `app.ts`'s synchronous `createRequire` fallback is source-mode only, guarded by `AC-LL-8` + `AC-LL-10` (⛔ `createAppWithWriteContext` is outside that scan, guarded by its `sync?: never` type); ⛔ a caller needing one is fixed by finishing the async conversion, never by a scan exception; (d) `probeTmpdirUsability()` runs after credential validation and before any native load. ⛔ Never restore an eager load or add delay. Mechanism and history: `knowledge-evicted-from-the-store-module-doc-lazy-libsql-load`. SSOT: `spec-eager-libsql-load-makes-every-command-depend-on-a-healthy`.
 - **Single SQL migration set** — `migrations/migration-001` … `023` (022 = autonomy_thresholds, 023 = decision_log `superseded` verdict rebuild), inlined constants both stores apply; `LATEST_SCHEMA_VERSION` moves with each new migration. ⛔ **Never edit a shipped migration in place** — add a new one.
 - **`decision_log` (migration-020, AC-AU-2) is the append-only, hash-chained autonomy decision log** — rows written ONLY via `appendDecisionRecord` (head-read + insert in ONE write transaction in all three stores; hashes computed store-side by `decision-log.ts::computeDecisionEntryHash`, never caller-supplied), BEFORE UPDATE/DELETE triggers refuse in-product rewrites, and `verifyDecisionChain` names the first broken row. Local-only, never replicated. Effective verdict rules (latest human-tty, else worst machine) live in `decision-log.ts`; the only adapter-facing writer is `service/decision-service.ts`.

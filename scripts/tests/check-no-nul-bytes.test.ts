@@ -128,7 +128,7 @@
 // @reads docs/planning/plans/PLAN-01KV4WHJGNDEYB4D8Z3JBDKF8G-.md
 // @reads docs/planning/retrospectives/RETRO-01KTTHD4F3F6S40C1XQGN85WAS-docman-frontmatter-orphan-root-cause-lore-docs-index-repair.md
 // @reads docs/requirements/**
-// @reads hooks/pre-push
+// @reads hooks/**
 // @reads lore.tree.yaml
 // @reads lore.tree.yaml.example
 // @reads npm-pkg/postinstall.mjs

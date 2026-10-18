@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Business logic layer: stateless services, all returning `Promise<Result<T, LoreError>>`. ~25 stateless services orchestrate `StoreInterface` calls and apply domain rules (lifecycle, parent-type validation, MDX placeholders, version snapshots, drift checks, AI generation, file-to-corpus sync, task/phase execution workflow, structured acceptance criteria, audit). All public methods return `Promise<Result<T, LoreError>>` — no thrown exceptions cross this boundary. `GateEnforcer` (`gate-enforcer.ts`) is a cross-cutting, non-store-holding module — see Patterns below for its checkpoint contract.
+Business logic layer: stateless services, all returning `Promise<Result<T, LoreError>>`. ~25 services orchestrate `StoreInterface` calls and apply domain rules (lifecycle, parent-type validation, MDX placeholders, version snapshots, drift checks, AI generation, file-to-corpus sync, task/phase execution workflow, structured acceptance criteria, audit). No thrown exceptions cross this boundary. `GateEnforcer` (`gate-enforcer.ts`) is a cross-cutting, non-store-holding module — see Patterns below for its checkpoint contract.
 
 Full pre-eviction file (mechanism walkthroughs, per-spec design decisions, empirical measurements) is archived verbatim: `lore get knowledge-module-claude-md-snapshot-packages-lore-src-service-2`; the earlier pre-compression state: `knowledge-module-claude-md-snapshot-packages-lore-src-service`.
 

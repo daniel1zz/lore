@@ -189,7 +189,9 @@ function withInjectedBackupFailure(base: InMemoryProjectFs, failOnSrc: string): 
 
 function makeExec(): ExecPort {
   return {
-    async run() {
+    async run(argv: string[]) {
+      // `scaffoldProject` reads `git --version` to gate the reference-transaction hook (git >= 2.28).
+      if (argv[1] === "--version") return { code: 0, stdout: "git version 2.45.0\n", stderr: "" };
       return { code: 0, stdout: "", stderr: "" };
     },
   };
