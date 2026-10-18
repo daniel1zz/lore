@@ -37,7 +37,7 @@
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { anchorsOverlap, err, ok, type LoreError, type Result } from "@lore/core";
 import type { SessionTrail, TrailHelper } from "@lore/core/node";
-import type { RunClaimedTask } from "./run-service.js";
+import type { OpenClaimsOfWorkingCopy, RunClaimedTask } from "./run-service.js";
 
 /** Resolves the tasks a run claimed (`RunService.claimedTasks`, injected so this module stays store-free). */
 export type ClaimedTasksPort = (run: string) => Promise<Result<readonly RunClaimedTask[], LoreError>>;
@@ -46,7 +46,7 @@ export type ClaimedTasksPort = (run: string) => Promise<Result<readonly RunClaim
  * Resolves the OPEN claims whose recorded worktree is the given working-copy directory
  * (`RunService.openClaimsOfWorkingCopy`, injected). Covers a claiming run that has no end record yet.
  */
-export type OpenClaimsOfWorkingCopyPort = (workingCopy: string) => Promise<Result<readonly RunClaimedTask[], LoreError>>;
+export type OpenClaimsOfWorkingCopyPort = (workingCopy: string) => Promise<Result<OpenClaimsOfWorkingCopy, LoreError>>;
 
 /** `realpath` of an existing path; throws ENOENT otherwise (`fs.realpathSync` shape). */
 export type RealpathFn = (path: string) => string;
@@ -199,7 +199,10 @@ export async function reviewHelperScope(input: ReviewHelperScopeInput): Promise<
     if (!own.ok) return err(own.error);
     const openInCopy = await input.openClaimsOfWorkingCopy(workingCopy);
     if (!openInCopy.ok) return err(openInCopy.error);
-    const judgedUnder = [...own.value, ...openInCopy.value];
+    for (const note of openInCopy.value.not_measured) {
+      if (!notMeasured.includes(note)) notMeasured.push(note);
+    }
+    const judgedUnder = [...own.value, ...openInCopy.value.tasks];
     const slugs = [...new Set(judgedUnder.map((t) => t.slug))];
     const anchors = judgedUnder.flatMap((t) => [...t.file_anchors]);
     const add = (kind: HelperScopeFindingKind, list: readonly string[], message: string, tasks: readonly string[]): void => {

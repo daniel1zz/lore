@@ -36,6 +36,7 @@ import {
 } from "@lore/core";
 import type { RunProcessRecord, StoreInterface } from "../store/store-interface.js";
 import { claimNamesWorktree, makeDirectoryResolver, type RealpathFn } from "./seat-claim-match.js";
+import { createRealWorktreeProbe, resolveClaimWorktree, type WorktreeGitProbe } from "./worktree-cleanup.js";
 
 export type RunStore = Pick<
   StoreInterface,
@@ -140,6 +141,12 @@ function validationError(field: string, message: string, value?: unknown): LoreE
   return { code: "VALIDATION_ERROR", field, message, ...(value !== undefined ? { value } : {}) };
 }
 
+/** The open claims naming a working copy, plus the claims whose recorded worktree could not be resolved. */
+export interface OpenClaimsOfWorkingCopy {
+  readonly tasks: readonly RunClaimedTask[];
+  readonly not_measured: readonly string[];
+}
+
 export class RunService {
   constructor(
     private readonly store: RunStore,
@@ -147,6 +154,8 @@ export class RunService {
     private readonly claims?: RunClaimEnder,
     /** Required by {@link RunService.occupancy} only (the claim path comparison); wired by `app.ts`. */
     private readonly realpathPort?: RealpathFn,
+    /** Resolves a branch-name claim to its directory ({@link RunService.openClaimsOfWorkingCopy}); git runs only then. */
+    private readonly worktreeProbe: WorktreeGitProbe = createRealWorktreeProbe(),
   ) {}
 
   /**
@@ -353,15 +362,18 @@ export class RunService {
 
   /**
    * Every OPEN claim (a non-archived, non-deprecated task still carrying `extra.claim`) whose recorded worktree is
-   * the directory `workingCopy`, as the claimed task with its CURRENT `file_anchors`. Path comparison only: a claim
-   * recording a branch name or a relative value never matches (no inference from names; AU-T22). Unlike
+   * the directory `workingCopy`, as the claimed task with its CURRENT `file_anchors`. The recorded value is a path
+   * OR a branch name (lore's dispatch protocol records the branch): a path naming the copy matches directly, any
+   * other value is resolved through {@link resolveClaimWorktree} (the one branch-to-directory resolver) and its
+   * directory compared by realpath. An unresolved value never matches; a resolution that could not be measured
+   * (`git worktree list` failed) is returned in `not_measured`, never dropped (AU-T23). Unlike
    * {@link RunService.claimedTasks} it needs no run id, so it sees a claim whose run has no end record yet.
    *
    * @param workingCopy - absolute directory of the working copy (need not exist: ENOENT falls back to `path.resolve`).
-   * @returns ok(tasks sorted by slug, possibly empty); VALIDATION_ERROR for a blank path or a service built without
+   * @returns ok({tasks sorted by slug, not_measured}); VALIDATION_ERROR for a blank path or a service built without
    *   a realpath port; STORE_ERROR from the store or a non-ENOENT realpath failure.
    */
-  async openClaimsOfWorkingCopy(workingCopy: string): Promise<Result<RunClaimedTask[], LoreError>> {
+  async openClaimsOfWorkingCopy(workingCopy: string): Promise<Result<OpenClaimsOfWorkingCopy, LoreError>> {
     if (workingCopy === "") return err(validationError("working-copy", "a working copy path is required", workingCopy));
     if (this.realpathPort === undefined) {
       return err(validationError("realpath", "RunService was built without a realpath port; cannot compare worktrees"));
@@ -369,6 +381,7 @@ export class RunService {
     const tasks = await this.store.findMany({ type: "task" });
     if (!tasks.ok) return tasks;
     const open: RunClaimedTask[] = [];
+    const notMeasured: string[] = [];
     try {
       const resolveDirectory = makeDirectoryResolver(this.realpathPort);
       const resolvedDirectory = resolveDirectory(workingCopy);
@@ -376,8 +389,15 @@ export class RunService {
         if (task.status === "archived" || task.status === "deprecated") continue;
         const claim = extractClaim(task);
         if (claim === undefined) continue;
-        if (!claimNamesWorktree(claim.worktree, { branch: undefined, resolvedDirectory }, resolveDirectory)) continue;
-        open.push({ slug: task.slug, status: task.status, file_anchors: extractFileAnchors(task) });
+        let matches = claimNamesWorktree(claim.worktree, { branch: undefined, resolvedDirectory }, resolveDirectory);
+        if (!matches && claim.worktree !== undefined) {
+          const resolution = resolveClaimWorktree(this.worktreeProbe, claim.worktree, workingCopy);
+          if (resolution.kind === "resolved") matches = resolveDirectory(resolution.path) === resolvedDirectory;
+          else if (resolution.kind === "not-measured") {
+            notMeasured.push(`open claim of ${task.slug}: worktree ${claim.worktree} not resolved (${resolution.reason})`);
+          }
+        }
+        if (matches) open.push({ slug: task.slug, status: task.status, file_anchors: extractFileAnchors(task) });
       }
     } catch (cause) {
       return err({
@@ -386,7 +406,7 @@ export class RunService {
         ...(cause instanceof Error ? { cause } : {}),
       });
     }
-    return ok(open.sort((a, b) => a.slug.localeCompare(b.slug)));
+    return ok({ tasks: open.sort((a, b) => a.slug.localeCompare(b.slug)), not_measured: notMeasured });
   }
 
   /**
