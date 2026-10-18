@@ -16,6 +16,11 @@
  *       (B) its PPID is 1, its start time lies in [registration floored to the second, end], NO OTHER run whose
  *           worktree contains the cwd has a lifetime overlapping that start time, and the start time re-read at
  *           kill time equals the one read at decision time (pid-reuse defence, checked in {@link terminate}).
+ *     (C) (AU-T14, subagent runs) the ended run's recorded pid is still ALIVE because subagent runs record the SHARED
+ *       main-session harness pid, so A/B can never apply; the process's cwd is inside a worktree whose EVERY recorded
+ *       holder (deepest-root rule) is ended, and its start time lies in [registration floored, end] of an ended holder.
+ *       Ancestry reaching that shared pid is NOT a live owner here (it reaches every subagent's tools); ancestry to any
+ *       other live run's pid still is. A cwd in main's checkout (held by the live main run) never reaches C.
  *     Anything else is `irreversible-local` -> decide() escalates; nothing is signalled.
  *   - "Worktree contains the cwd" uses the DEEPEST known worktree root, so a linked worktree nested under a main
  *     checkout belongs to its own runs, not to every session of the checkout around it.
@@ -99,7 +104,7 @@ export interface ProcessReapEntry {
   readonly start_time: string | null;
   /** Ended runs whose worktree contains the cwd. */
   readonly owner_runs: readonly string[];
-  readonly proof: "ancestry" | "orphan-in-lifetime" | "none";
+  readonly proof: "ancestry" | "orphan-in-lifetime" | "exclusive-worktree" | "none";
   readonly action: ProcessReapAction;
   readonly reasons: readonly string[];
   readonly signals: readonly ("SIGTERM" | "SIGKILL")[];
@@ -359,8 +364,18 @@ export class RunReapService {
         owner_runs: endedHolders.map((view) => view.run.id),
       };
 
+      // reason: AU-T14 — when the worktree is exclusively ended runs', a live run that merely shares an ended holder's
+      // recorded pid (the main session's pid, recorded by every subagent) is not an owner of this cwd; do not remove.
+      const exclusive = holders.length === endedHolders.length;
+      const sharedPids = new Set(
+        endedHolders.filter((view) => isRecordedProcessAlive(view.run, byPid)).map((view) => view.run.process.pid),
+      );
       const liveOwner = views.find(
-        (view) => view.liveness === "live" && view.run.process.pid !== null && ancestry.has(view.run.process.pid),
+        (view) =>
+          view.liveness === "live" &&
+          view.run.process.pid !== null &&
+          ancestry.has(view.run.process.pid) &&
+          !(exclusive && sharedPids.has(view.run.process.pid)),
       );
       if (liveOwner !== undefined) {
         entries.push({
@@ -373,7 +388,9 @@ export class RunReapService {
         continue;
       }
 
-      const proof = proveOwnership(candidate, ancestry, byPid, endedHolders, holders);
+      const classic = proveOwnership(candidate, ancestry, byPid, endedHolders, holders);
+      const proof =
+        classic.kind === "none" && exclusive ? proveExclusiveWorktree(candidate, byPid, endedHolders, classic) : classic;
       const facts: AutonomyFacts = {
         recoverability: proof.kind === "none" ? "irreversible-local" : "loss-free-by-proof",
         blast: proof.overlappingLiveRun ? "other-live-actor" : "own-or-ended-run",
@@ -512,7 +529,7 @@ function ancestryOf(start: ProcessEntry, byPid: ReadonlyMap<number, ProcessEntry
 }
 
 type OwnershipProof =
-  | { kind: "ancestry" | "orphan-in-lifetime"; reasons: string[]; overlappingLiveRun: boolean }
+  | { kind: "ancestry" | "orphan-in-lifetime" | "exclusive-worktree"; reasons: string[]; overlappingLiveRun: boolean }
   | { kind: "none"; reasons: string[]; overlappingLiveRun: boolean };
 
 /** The proof table of AC-AU-5 over measured facts only. Pure. */
@@ -573,4 +590,38 @@ function proveOwnership(
     };
   }
   return { kind: "none", reasons, overlappingLiveRun };
+}
+
+/**
+ * Proof C (AU-T14): the ended runs that hold this worktree exclusively recorded a pid that is still alive (the shared
+ * main-session harness pid), so A and B cannot apply. Provable when the process started inside such a run's lifetime.
+ * Pure; the caller has already established that every holder of the owning root is ended.
+ *
+ * @returns the proof, or `fallback` with the reasons why no sharing-pid ended holder's lifetime contains the start.
+ */
+function proveExclusiveWorktree(
+  candidate: ProcessEntry,
+  byPid: ReadonlyMap<number, ProcessEntry>,
+  endedHolders: readonly RunView[],
+  fallback: OwnershipProof,
+): OwnershipProof {
+  const sharing = endedHolders.filter((view) => view.run.process.pid !== null && isRecordedProcessAlive(view.run, byPid));
+  if (sharing.length === 0) return fallback; // dead-pid holders stay under A/B only
+  if (candidate.startTime === null) return { ...fallback, reasons: [...fallback.reasons, "process start time is not measurable"] };
+  const start = Date.parse(candidate.startTime);
+  const reasons = [...fallback.reasons];
+  for (const view of sharing) {
+    const lower = floorToSecond(view.run.registeredAt);
+    const upper = view.run.endedAt === null ? Number.POSITIVE_INFINITY : Date.parse(view.run.endedAt);
+    if (start < lower || start > upper) {
+      reasons.push(`started ${candidate.startTime}, outside run ${view.run.id} lifetime [${view.run.registeredAt}, ${view.run.endedAt ?? "open"}]`);
+      continue;
+    }
+    return {
+      kind: "exclusive-worktree",
+      reasons: [`inside the worktree held only by ended run ${view.run.id} (shared pid ${String(view.run.process.pid)} alive); started within its lifetime`],
+      overlappingLiveRun: false,
+    };
+  }
+  return { kind: "none", reasons, overlappingLiveRun: false };
 }
