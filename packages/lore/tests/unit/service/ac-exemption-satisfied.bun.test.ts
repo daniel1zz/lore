@@ -1,6 +1,4 @@
 /**
- * @spec_ref AC-BLS2-10
- *
  * Rule BR-959 (task TG-44): an exemption excuses an UNCITED criterion, so it is active iff it is unexpired AND
  * its criterion cites no LIVE rule. Once the criterion cites a live rule the exemption is `satisfied`: it no
  * longer counts as active, no longer takes cap headroom, and a new grant may use the freed slot. A cite of a
