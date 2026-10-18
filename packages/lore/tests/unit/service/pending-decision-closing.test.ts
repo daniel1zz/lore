@@ -67,6 +67,9 @@ describe("AU-T16 pending closes stale escalations", () => {
     const marker = after.value[after.value.length - 1];
     expect(marker?.subject_version).toBe("v1");
     expect(marker?.channel).toBe("machine");
+    expect(marker?.verdict).toBe("superseded");
+    // a marker is not an auto decision: nothing that selects verdict = 'auto' sees it
+    expect(after.value.filter((r) => r.verdict === "auto").map((r) => r.subject_version)).toEqual(["v2"]);
     expect(JSON.parse(marker?.facts ?? "{}")).toEqual({
       superseded: { pending_id: 1, cause: "newer-version", detail: expect.stringContaining("version v2") },
     });
@@ -124,7 +127,7 @@ describe("AU-T16 pending closes stale escalations", () => {
     expect(pending.ok && pending.value.length).toBe(1);
   });
 
-  it("a marker never turns the closed key into an approval", async () => {
+  it("a marker is ignored by the effective verdict (the key stays escalate)", async () => {
     const { service } = serviceWith({ [CLASS_ID]: async () => "absent" });
     await service.decide(CLASS_ID, { id: "wt-1", version: "v1" }, ESCALATING);
     await service.listPending();

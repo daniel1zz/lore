@@ -12,14 +12,13 @@
  *     invisible here, so it can neither resolve nor hide a pending decision.
  *   - The row's JSON columns were written by DecisionService; a column that no longer parses is returned as a
  *     STORE_ERROR, never defaulted.
- *   - CLOSED (AU-T16): a decision stops being pending when (a) a later non-marker row of the same class and subject id
- *     exists on ANOTHER subject version (the subject was re-measured; log order is the only version order, hashes
- *     have none), or (b) a closing MARKER row (machine channel, facts `{superseded:{...}}`) was appended after its
- *     latest escalate row because the subject no longer exists. Markers are ordinary appended rows, never an edit or
- *     delete; a re-escalation appended after a marker reopens the key. The marker rides the machine channel with
- *     verdict `auto` because decision_log's verdict CHECK admits only auto|escalate|refuse (a `superseded` verdict
- *     needs a table-rebuild migration) and effectiveDecisionVerdict takes the WORST machine row, so a marker can
- *     never turn an escalate into an approval; only this module reads the marker.
+ *   - CLOSED (AU-T16): a decision stops being pending when (a) a later non-marker row of the same class and
+ *     subject id exists on ANOTHER subject version (the subject was re-measured; log order is the only version
+ *     order, hashes have none), or (b) a closing MARKER row (machine channel, verdict `superseded`, facts
+ *     `{superseded:{pending_id,cause,detail}}`) was appended after its latest escalate row because the subject no
+ *     longer exists. Markers are ordinary appended rows, never an edit or delete; a re-escalation appended after a
+ *     marker reopens the key. A marker is NOT a decision: effectiveDecisionVerdict ignores it, and AU-T8 calibration
+ *     / auto sampling must select `verdict = 'auto'` only, so they never see a marker.
  *   - Carries NO secret: the nonce is generated per `lore decide` invocation and exists nowhere in the log.
  * Side-effect class: pure.
  *
@@ -84,32 +83,15 @@ export const SUPERSEDED_FACTS_KEY = "superseded";
 
 export type SupersedeCause = "newer-version" | "subject-gone";
 
-const supersedeMarkerSchema = z.object({
-  [SUPERSEDED_FACTS_KEY]: z.object({
-    pending_id: z.number().int(),
-    cause: z.enum(["newer-version", "subject-gone"]),
-    detail: z.string(),
-  }),
-});
-export type SupersedeMarkerFacts = z.infer<typeof supersedeMarkerSchema>;
-
 /** Existence of a decision's subject right now. `unknown` (the probe could not measure) NEVER closes a decision. */
 export type SubjectExistence = "present" | "absent" | "unknown";
 export type SubjectExistenceProbe = (subject: { readonly id: string; readonly version: string }) => Promise<SubjectExistence>;
 /** Class id -> existence probe. A class with no probe is only ever closed by a newer version. */
 export type SubjectExistenceProbes = Readonly<Record<string, SubjectExistenceProbe>>;
 
-/** True for a closing marker row appended by DecisionService (machine channel, facts carry the marker). */
+/** True for a closing marker row appended by DecisionService: machine channel, verdict `superseded` (migration 022). */
 export function isSupersedeMarker(row: DecisionLogRow): boolean {
-  if (row.channel !== "machine" || !row.facts.includes(`"${SUPERSEDED_FACTS_KEY}"`)) return false;
-  let json: unknown;
-  try {
-    json = JSON.parse(row.facts);
-  } catch {
-    // reason: facts of rows written by DecisionService are canonical JSON; text that does not parse is not a marker.
-    return false;
-  }
-  return supersedeMarkerSchema.safeParse(json).success;
+  return row.channel === "machine" && row.verdict === "superseded";
 }
 
 type DecisionKey = { readonly class: string; readonly subject_id: string; readonly subject_version: string };

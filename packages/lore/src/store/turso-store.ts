@@ -47,6 +47,7 @@ import { MIGRATION_018_SQL } from "./migrations/migration-018.js";
 import { MIGRATION_019_ADD_COLUMNS, MIGRATION_019_SQL } from "./migrations/migration-019.js";
 import { MIGRATION_020_SQL } from "./migrations/migration-020.js";
 import { MIGRATION_021_ADD_COLUMNS, MIGRATION_021_SQL } from "./migrations/migration-021.js";
+import { MIGRATION_022_SQL } from "./migrations/migration-022.js";
 import { DECISION_GENESIS_HASH, computeDecisionEntryHash } from "./decision-log.js";
 import type { DecisionLogRow, DecisionRecordInput } from "./decision-log.js";
 import type { DecisionSubjectKey } from "./store-interface.js";
@@ -767,6 +768,11 @@ export class TursoStore implements StoreInterface {
           if (!info.rows.some((r) => rowStr(r, "name") === column)) await this.client.execute(ddl);
         }
         await this.client.executeMultiple(MIGRATION_021_SQL);
+      }
+
+      if (currentVersion < 22) {
+        // reason: migration-022 rebuilds decision_log with the widened verdict CHECK in ONE BEGIN/COMMIT string.
+        await this.client.executeMultiple(MIGRATION_022_SQL);
       }
     })();
 

@@ -251,7 +251,7 @@ describe("migration-018 (SQLite)", () => {
       { id: "BR-2", lifecycle: "retired" },
     ]);
     expect(() => insertRow(upgraded.getDatabase(), "BR-3", 3, "proposed")).not.toThrow();
-    expect((upgraded.getDatabase().query("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(21);
+    expect((upgraded.getDatabase().query("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(22);
     upgraded.close();
   });
 

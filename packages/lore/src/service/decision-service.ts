@@ -205,8 +205,8 @@ export class DecisionService {
   }
 
   /**
-   * Appends the closing marker unless the log (re-read now) already closed `candidate`. Machine channel, verdict
-   * `auto`: decision_log's CHECK has no `superseded`, and the worst-machine rule keeps the key's escalate as it was.
+   * Appends the closing marker unless the log (re-read now) already closed `candidate`: machine channel, verdict
+   * `superseded` (not a decision; see decision-log.ts invariants).
    */
   private async appendSupersedeMarker(candidate: OpenEscalation, cause: SupersedeCause, detail: string): Promise<Result<boolean, LoreError>> {
     const fresh = await this.deps.store.listDecisionLog();
@@ -223,7 +223,7 @@ export class DecisionService {
       factors: "{}",
       score: 0,
       threshold: null,
-      verdict: "auto",
+      verdict: "superseded",
       reasons: canonicalJson([`superseded: ${detail}`]),
       executor_run: this.deps.executorRun,
       channel: "machine",
