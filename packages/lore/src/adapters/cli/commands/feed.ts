@@ -169,7 +169,7 @@ async function handleSessionResume(app: App, args: FeedArgs, _config: LoreConfig
   process.exitCode = 0;
 }
 
-async function handlePhaseStart(app: App, args: FeedArgs, _config: LoreConfig | undefined): Promise<void> {
+async function handlePhaseStart(app: App, args: FeedArgs, _config: LoreConfig | undefined, inv: Invocation): Promise<void> {
   if (typeof args.target !== "string" || args.target.length === 0) {
     process.stderr.write(
       `Error: \`lore feed phase-start <phase>\` ${FEED_PHASE_START_MISSING_TARGET}.\n`,
@@ -182,7 +182,7 @@ async function handlePhaseStart(app: App, args: FeedArgs, _config: LoreConfig | 
   const result = await buildPhaseStartPack(deps, args.target);
 
   if (!result.ok) {
-    process.stderr.write(formatError(result.error) + "\n");
+    process.stderr.write(formatErrorFor(inv, result.error) + "\n");
     process.exitCode = exitCode(result.error);
     return;
   }
@@ -195,7 +195,7 @@ async function handlePhaseStart(app: App, args: FeedArgs, _config: LoreConfig | 
   process.exitCode = 0;
 }
 
-async function handleTaskStart(app: App, args: FeedArgs, config: LoreConfig | undefined): Promise<void> {
+async function handleTaskStart(app: App, args: FeedArgs, config: LoreConfig | undefined, inv: Invocation): Promise<void> {
   if (typeof args.target !== "string" || args.target.length === 0) {
     process.stderr.write(
       `Error: \`lore feed task-start <task>\` ${FEED_TASK_START_MISSING_TARGET}.\n`,
@@ -209,7 +209,7 @@ async function handleTaskStart(app: App, args: FeedArgs, config: LoreConfig | un
   const result = await buildTaskStartPack(deps, args.target, budgets);
 
   if (!result.ok) {
-    process.stderr.write(formatError(result.error) + "\n");
+    process.stderr.write(formatErrorFor(inv, result.error) + "\n");
     process.exitCode = exitCode(result.error);
     return;
   }

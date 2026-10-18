@@ -30,6 +30,7 @@ export default defineCommand({
     const inv = invocationOf(context);
     const dbPath = findLoreDbPath(inv);
     process.exitCode = await runDecideFlow(
+      inv,
       {
         dbPath,
         id: args.id === undefined ? undefined : String(args.id),

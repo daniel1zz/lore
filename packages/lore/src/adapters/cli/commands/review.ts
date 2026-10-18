@@ -193,12 +193,12 @@ async function reviewOneDoc(
 // calls, so AC-SP-7's "payload deep-equals CLI --json" holds by construction (D9/D10).
 
 /** Human-readable rendering of one probe outcome. */
-async function renderProbeText(flowDeps: StalenessFlowDeps, outcome: StalenessProbeOutcome): Promise<string> {
+async function renderProbeText(inv: Invocation, flowDeps: StalenessFlowDeps, outcome: StalenessProbeOutcome): Promise<string> {
   const lines: string[] = [];
   const header = `${outcome.doc.slug} (priority=${outcome.candidate.priority}, in_degree=${outcome.candidate.in_degree}, age_days=${outcome.candidate.age_days})`;
 
   if (!outcome.result.ok) {
-    lines.push(`${header}: ERROR — ${formatError(outcome.result.error).split("\n")[0] ?? ""}`);
+    lines.push(`${header}: ERROR — ${formatErrorFor(inv, outcome.result.error).split("\n")[0] ?? ""}`);
     return lines.join("\n");
   }
 
@@ -449,7 +449,7 @@ export default defineCommand({
             const payload = await buildStalenessSingleJsonPayload(flowDeps, outcome);
             console.log(JSON.stringify({ ok: true, data: payload }, null, 2));
           } else {
-            console.log(await renderProbeText(flowDeps, outcome));
+            console.log(await renderProbeText(inv, flowDeps, outcome));
           }
 
           process.exitCode = computeStalenessExitCode([outcome], failOnCandidate);
@@ -481,7 +481,7 @@ export default defineCommand({
             );
           } else {
             for (const outcome of batch.probes) {
-              console.log(await renderProbeText(flowDeps, outcome));
+              console.log(await renderProbeText(inv, flowDeps, outcome));
               console.log("");
             }
             console.log(

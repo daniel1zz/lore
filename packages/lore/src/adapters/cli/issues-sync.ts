@@ -14,17 +14,20 @@
  */
 
 import type { IssueCloseOnArchive, IssueSyncOutcome } from "../../service/issue-close-on-archive.js";
-import { exitCode, formatError } from "./utils.js";
+import { exitCode, formatErrorFor } from "./utils.js";
+import type { Invocation } from "@lore/core";
 
 /** Minimal shape of the step this module drives — keeps the unit test free of a real store. */
 export type IssueSyncDriver = Pick<IssueCloseOnArchive, "planSync" | "applySync">;
 
 /**
+ * @param inv - the command's Invocation (the error line names its exact retry command)
  * @param driver - the App's post-archive step (`app.issueClose`)
  * @param opts - `apply`: repair drift (otherwise report only); `json`: machine-readable stdout
  * @returns the process exit code the caller should set
  */
 export async function runIssuesSync(
+  inv: Invocation,
   driver: IssueSyncDriver | undefined,
   opts: { apply: boolean; json: boolean },
 ): Promise<number> {
@@ -39,7 +42,7 @@ export async function runIssuesSync(
     return 1;
   }
   if (outcome.kind === "store_error") {
-    process.stderr.write(formatError(outcome.error) + "\n");
+    process.stderr.write(formatErrorFor(inv, outcome.error) + "\n");
     return exitCode(outcome.error);
   }
 

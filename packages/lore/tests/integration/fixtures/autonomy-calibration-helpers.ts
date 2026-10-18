@@ -14,7 +14,7 @@ import type { DecisionLogRow } from "../../../src/store/decision-log.js";
 import { runDecideFlow } from "../../../src/adapters/cli/decide-flow.js";
 import type { HumanChannelPorts } from "../../../src/service/human-channel.js";
 import { scriptedHumanPorts } from "./scripted-human-ports.js";
-import { actedStore } from "../../live-invocation.js";
+import { actedStore, liveInvocation } from "../../live-invocation.js";
 
 const PACKAGE_ROOT = new URL("../../../", import.meta.url).pathname.replace(/\/$/, "");
 const INDEX_TS = join(PACKAGE_ROOT, "src", "index.ts");
@@ -120,6 +120,7 @@ export async function runDecide(corpus: Corpus, id: number, answer: "accept" | "
   const out: string[] = [];
   const err: string[] = [];
   const code = await runDecideFlow(
+    liveInvocation(),
     { dbPath: corpus.dbPath, id: String(id), accept: answer === "accept", reject: answer === "reject" },
     ports,
     { stdout: (t) => void out.push(t), stderr: (t) => void err.push(t) },

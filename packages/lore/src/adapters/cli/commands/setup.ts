@@ -186,7 +186,7 @@ import {
   validateSetupFlags,
   type SetupPathContext,
 } from "../setup-args.js";
-import { exitCode, formatError } from "../utils.js";
+import { exitCode, formatError, formatErrorFor } from "../utils.js";
 import { computeSetupCheckReport, finishProjectSetupCheck, runSetupCheck } from "../setup-check.js";
 import type { SetupCheckFiles } from "../setup-check.js";
 import { createNodeGhExecFile, GhRunner } from "../../../service/gh-runner.js";
@@ -617,8 +617,8 @@ function applyLanguageProjections(plan: readonly LanguageProjection[]): Result<v
 }
 
 /** Reports a LoreError on stderr and sets the mapped exit code. */
-function failWith(error: LoreError): void {
-  process.stderr.write(formatError(error) + "\n");
+function failWith(inv: Invocation, error: LoreError): void {
+  process.stderr.write(formatErrorFor(inv, error) + "\n");
   process.exitCode = exitCode(error);
 }
 
@@ -794,11 +794,11 @@ async function runProjectCheck(opts: { json: boolean; assetsRoot: string; inv: I
     },
     repoDir,
   );
-  if (!ledger.ok) return failWith(ledger.error);
+  if (!ledger.ok) return failWith(opts.inv, ledger.error);
   const rules = await classifyProjectRulesFiles({ repoDir, assetsRoot: opts.assetsRoot, inv: opts.inv });
-  if (!rules.ok) return failWith(rules.error);
+  if (!rules.ok) return failWith(opts.inv, rules.error);
   const settings = classifyProjectSettingsEntries(repoDir, opts.inv);
-  if (!settings.ok) return failWith(settings.error);
+  if (!settings.ok) return failWith(opts.inv, settings.error);
 
   const parts = [ledger.value, rules.value, settings.value];
   await finishProjectSetupCheck({
@@ -861,7 +861,7 @@ async function runProjectScaffold(opts: {
 
   const result = await service.scaffold(repoDir);
   if (!result.ok) {
-    process.stderr.write(formatError(result.error) + "\n");
+    process.stderr.write(formatErrorFor(opts.inv, result.error) + "\n");
     process.exitCode = exitCode(result.error);
     return;
   }
@@ -889,7 +889,7 @@ async function runProjectScaffold(opts: {
   // CLAUDE.md / config the refresh flow reads, and its own non-zero exit already reports the run.
   if (scaffoldReportFailed(result.value)) return;
   const projected = await runProjectContextProjection({ repoDir, assetsRoot: opts.assetsRoot, claudeDir: opts.claudeDir, inv: opts.inv });
-  if (!projected.ok) failWith(projected.error);
+  if (!projected.ok) failWith(opts.inv, projected.error);
 }
 
 /**
@@ -914,7 +914,7 @@ async function runProjectUninstall(opts: { json: boolean; yes: boolean; inv: Inv
 
   const result = await uninstallProject(makeRealProjectRemoveFs(), { repoDir });
   if (!result.ok) {
-    process.stderr.write(formatError(result.error) + "\n");
+    process.stderr.write(formatErrorFor(opts.inv, result.error) + "\n");
     process.exitCode = exitCode(result.error);
     return;
   }
@@ -927,10 +927,10 @@ async function runProjectUninstall(opts: { json: boolean; yes: boolean; inv: Inv
   process.exitCode = 0;
 }
 
-async function runDryRun(service: SetupService, targetDir: string, binPath: string, json: boolean): Promise<void> {
+async function runDryRun(inv: Invocation, service: SetupService, targetDir: string, binPath: string, json: boolean): Promise<void> {
   const planResult = await service.planInstall({ targetDir });
   if (!planResult.ok) {
-    process.stderr.write(formatError(planResult.error) + "\n");
+    process.stderr.write(formatErrorFor(inv, planResult.error) + "\n");
     process.exitCode = exitCode(planResult.error);
     return;
   }
@@ -961,7 +961,7 @@ function renderDivergedSkipSection(skippedDiverged: string[]): void {
   }
 }
 
-async function runInstall(
+async function runInstall(inv: Invocation, 
   service: SetupService,
   mcpRegistrar: CapturingMcpRegistrar,
   opts: { targetDir: string; binPath: string; json: boolean; yes: boolean; forceDiverged: boolean; inv: Invocation },
@@ -970,7 +970,7 @@ async function runInstall(
   // (AC-CF-18) must refuse the whole run with nothing installed, not leave a half-applied setup.
   const languagePlan = planLanguageProjections(opts.targetDir, opts.inv.cwd, opts.inv);
   if (!languagePlan.ok) {
-    failWith(languagePlan.error);
+    failWith(inv, languagePlan.error);
     return;
   }
 
@@ -1004,7 +1004,7 @@ async function runInstall(
     ...(settingsLanguage !== undefined ? { settingsLanguage } : {}),
   });
   if (!result.ok) {
-    process.stderr.write(formatError(result.error) + "\n");
+    process.stderr.write(formatErrorFor(inv, result.error) + "\n");
     process.exitCode = exitCode(result.error);
     return;
   }
@@ -1019,10 +1019,10 @@ async function runInstall(
   process.exitCode = mcpOutcomeExitCode(result.value);
 
   const projected = applyLanguageProjections(languagePlan.value);
-  if (!projected.ok) failWith(projected.error);
+  if (!projected.ok) failWith(opts.inv, projected.error);
 }
 
-async function runUninstall(
+async function runUninstall(inv: Invocation, 
   service: SetupService,
   mcpRegistrar: CapturingMcpRegistrar,
   opts: { targetDir: string; binPath: string; json: boolean; yes: boolean },
@@ -1038,7 +1038,7 @@ async function runUninstall(
 
   const result = await service.uninstall({ targetDir: opts.targetDir });
   if (!result.ok) {
-    process.stderr.write(formatError(result.error) + "\n");
+    process.stderr.write(formatErrorFor(inv, result.error) + "\n");
     process.exitCode = exitCode(result.error);
     return;
   }
@@ -1121,14 +1121,14 @@ async function runGitHubChannelHealthCheck(opts: { json: boolean; inv: Invocatio
  */
 async function runCheckDispatch(opts: { targetDir: string; json: boolean; inv: Invocation }): Promise<void> {
   if (!opts.json) {
-    await runSetupCheck({ targetDir: opts.targetDir, json: false, cwd: opts.inv.cwd });
+    await runSetupCheck({ targetDir: opts.targetDir, json: false, cwd: opts.inv.cwd, inv: opts.inv });
     await runGitHubChannelHealthCheck({ json: false, inv: opts.inv });
     return;
   }
 
   const freshnessResult = await computeSetupCheckReport({ targetDir: opts.targetDir, cwd: opts.inv.cwd });
   if (!freshnessResult.ok) {
-    process.stderr.write(formatError(freshnessResult.error) + "\n");
+    process.stderr.write(formatErrorFor(opts.inv, freshnessResult.error) + "\n");
     process.exitCode = exitCode(freshnessResult.error);
     await runGitHubChannelHealthCheck({ json: true, inv: opts.inv });
     return;
@@ -1305,14 +1305,14 @@ export default defineCommand({
     );
 
     if (validated.mode === "dry-run") {
-      await runDryRun(service, targetDir, binPath, json);
+      await runDryRun(inv, service, targetDir, binPath, json);
       return;
     }
     if (validated.mode === "uninstall") {
-      await runUninstall(service, mcpRegistrar, { targetDir, binPath, json, yes: args.yes === true });
+      await runUninstall(inv, service, mcpRegistrar, { targetDir, binPath, json, yes: args.yes === true });
       return;
     }
-    await runInstall(service, mcpRegistrar, {
+    await runInstall(inv, service, mcpRegistrar, {
       targetDir,
       binPath,
       json,

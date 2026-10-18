@@ -112,10 +112,10 @@ function refuseTrailAccess(verb: "trail" | "trail-review", reason: string): void
  * the identity error's own exit code when verification fails).
  * reason: the run is VERIFIED against the registry (unregistered -> null), so "attested" means attested, not merely claimed.
  */
-async function resolveCallerSession(app: Awaited<ReturnType<typeof loadLoreApp>>["app"], verb: "trail" | "trail-review"): Promise<string | null> {
+async function resolveCallerSession(inv: Invocation, app: Awaited<ReturnType<typeof loadLoreApp>>["app"], verb: "trail" | "trail-review"): Promise<string | null> {
   const verified = await app.verifiedInvocationIdentity?.();
   if (verified !== undefined && !verified.ok) {
-    process.stderr.write(formatError(verified.error) + "\n");
+    process.stderr.write(formatErrorFor(inv, verified.error) + "\n");
     process.exitCode = exitCode(verified.error);
     return null;
   }
@@ -199,7 +199,7 @@ async function runSessionTrailReview(args: { turn?: unknown; json?: unknown }, i
   }
   const { app } = loadLoreApp({ inv });
   try {
-    const session = await resolveCallerSession(app, "trail-review");
+    const session = await resolveCallerSession(inv, app, "trail-review");
     if (session === null) return;
     let trail: SessionTrail | null;
     try {
@@ -263,7 +263,7 @@ async function runSessionTrail(
   inv: Invocation,
 ): Promise<void> {
   const refuse = (reason: string): void => refuseTrailAccess("trail", reason);
-  const session = await resolveCallerSession(app, "trail");
+  const session = await resolveCallerSession(inv, app, "trail");
   if (session === null) return;
   let runFilter: string | undefined;
   if (typeof args.run === "string") {

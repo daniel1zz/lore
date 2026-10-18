@@ -51,8 +51,8 @@ async function withDecisions(inv: Invocation, fn: (opened: Opened) => Promise<nu
   }
 }
 
-function fail(error: LoreError): number {
-  process.stderr.write(`${formatError(error)}\n`);
+function fail(inv: Invocation, error: LoreError): number {
+  process.stderr.write(`${formatErrorFor(inv, error)}\n`);
   return exitCode(error);
 }
 
@@ -97,17 +97,17 @@ function renderOutcome(outcome: ProposeOutcome): { text: string; code: number } 
   }
 }
 
-async function propose(opened: Opened, build: (current: GovernedThresholds) => { ok: true; record: GovernedThresholds } | { ok: false; message: string }): Promise<number> {
+async function propose(inv: Invocation, opened: Opened, build: (current: GovernedThresholds) => { ok: true; record: GovernedThresholds } | { ok: false; message: string }): Promise<number> {
   const thresholds = opened.service.thresholds();
   const seeded = await thresholds.ensureSeeded();
-  if (!seeded.ok) return fail(seeded.error);
+  if (!seeded.ok) return fail(inv, seeded.error);
   const next = build(seeded.value.record);
   if (!next.ok) {
     process.stderr.write(`Error: ${next.message}\n`);
     return 4;
   }
   const outcome: Result<ProposeOutcome, LoreError> = await thresholds.propose(next.record, opened.service);
-  if (!outcome.ok) return fail(outcome.error);
+  if (!outcome.ok) return fail(inv, outcome.error);
   const rendered = renderOutcome(outcome.value);
   (rendered.code === 0 ? process.stdout : process.stderr).write(`${rendered.text}\n`);
   return rendered.code;
@@ -126,7 +126,7 @@ const show = defineCommand({
     const inv = invocationOf(context);
     await withDecisions(inv, async ({ service }) => {
       const seeded = await service.thresholds().ensureSeeded();
-      if (!seeded.ok) return fail(seeded.error);
+      if (!seeded.ok) return fail(inv, seeded.error);
       process.stdout.write(`${args.json === true ? JSON.stringify({ ok: true, data: { record: seeded.value.record, regenerable: seeded.value.regenerablePatterns, integrity: seeded.value.integrity } }, null, 2) : renderGoverned(seeded.value)}\n`);
       return 0;
     });
@@ -173,7 +173,7 @@ const set = defineCommand({
       process.exitCode = 4;
       return;
     }
-    await withDecisions(inv, (opened) => propose(opened, (current) => applyClassEdit(current, String(args.class), edit)));
+    await withDecisions(inv, (opened) => propose(inv, opened, (current) => applyClassEdit(current, String(args.class), edit)));
   },
 });
 
@@ -186,7 +186,7 @@ function regenerableVerb(name: "add" | "rm") {
     const inv = invocationOf(context);
       const pattern = String(args.pattern);
       await withDecisions(inv, (opened) =>
-        propose(opened, (current) => {
+        propose(inv, opened, (current) => {
           const has = current.worktreeRemoveRegenerable.includes(pattern);
           if (name === "add" && has) return { ok: true, record: current };
           if (name === "rm" && !has) return { ok: false, message: `pattern "${pattern}" is not in the regenerable set` };
@@ -214,9 +214,9 @@ const verifyPushedHeadsCommand = defineCommand({
     await withDecisions(inv, async ({ service, dbPath }) => {
       const ledger = pushedHeadsPath(dbPath);
       const heads = readPushedHeads(ledger);
-      if (!heads.ok) return fail(heads.error);
+      if (!heads.ok) return fail(inv, heads.error);
       const rows = await service.chainRows();
-      if (!rows.ok) return fail(rows.error);
+      if (!rows.ok) return fail(inv, rows.error);
       const verdict = verifyPushedHeads(rows.value, heads.value);
       if (!verdict.clean) {
         process.stderr.write(`Decision log does NOT reproduce ${verdict.failures.length} head(s) already pushed — the local database was rewritten:\n`);
@@ -225,10 +225,10 @@ const verifyPushedHeadsCommand = defineCommand({
       }
       if (args.record === true) {
         const head = await service.chainHead();
-        if (!head.ok) return fail(head.error);
+        if (!head.ok) return fail(inv, head.error);
         if (head.value !== null) {
           const recorded = recordPushedHead(ledger, head.value, new Date().toISOString());
-          if (!recorded.ok) return fail(recorded.error);
+          if (!recorded.ok) return fail(inv, recorded.error);
         }
       }
       process.stdout.write(`Decision log reproduces all ${verdict.checked} pushed head(s).\n`);

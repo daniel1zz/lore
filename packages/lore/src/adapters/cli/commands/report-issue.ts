@@ -339,7 +339,7 @@ export default defineCommand({
       // renders.
       if (isList) {
         const { runGithubIssuesListing } = await import("./issues.js");
-        await runGithubIssuesListing(app, effectiveCfg, corpusRoot, args.json === true, inv);
+        await runGithubIssuesListing(inv, app, effectiveCfg, corpusRoot, args.json === true, inv);
         return;
       }
 

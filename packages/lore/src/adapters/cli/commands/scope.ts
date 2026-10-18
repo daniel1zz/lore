@@ -51,6 +51,7 @@
  *         SPEC-056 §Design Decisions D4 (`assertScopeFreeze`)
  */
 
+import type { Invocation } from "@lore/core";
 import { defineCommand } from "citty";
 import type { DocRecord, LoreError, Result } from "@lore/core";
 import { extractDeclaredAcScope } from "@lore/core";
@@ -129,7 +130,7 @@ function phaseServiceMissingMessage(): string {
  * renders the shared success output. Keeps `add` and `rm` from duplicating the
  * four-way (task|phase) × (text|json) rendering matrix.
  */
-async function runScopeMutation(
+async function runScopeMutation(inv: Invocation, 
   app: ReturnType<typeof loadLoreApp>["app"],
   target: DocRecord,
   op: "add" | "rm",
@@ -157,13 +158,13 @@ async function runScopeMutation(
         : await app.phaseWorkflowService.removeAcScope(targetId, acIds, { by, source: app.callerSurface });
   } else {
     const error = unsupportedTargetTypeError(target.type);
-    process.stderr.write(formatError(error) + "\n");
+    process.stderr.write(formatErrorFor(inv, error) + "\n");
     process.exitCode = exitCode(error);
     return;
   }
 
   if (!result.ok) {
-    process.stderr.write(formatError(result.error) + "\n");
+    process.stderr.write(formatErrorFor(inv, result.error) + "\n");
     process.exitCode = exitCode(result.error);
     return;
   }
@@ -226,7 +227,7 @@ export default defineCommand({
           }
 
           const by = resolveActor(undefined, inv.env, inv.cwd, inv.user);
-          await runScopeMutation(app, targetResult.value, "add", targetId, acIds, by, args.json === true);
+          await runScopeMutation(inv, app, targetResult.value, "add", targetId, acIds, by, args.json === true);
         } finally {
           app.close();
         }
@@ -271,7 +272,7 @@ export default defineCommand({
           }
 
           const by = resolveActor(undefined, inv.env, inv.cwd, inv.user);
-          await runScopeMutation(app, targetResult.value, "rm", targetId, acIds, by, args.json === true);
+          await runScopeMutation(inv, app, targetResult.value, "rm", targetId, acIds, by, args.json === true);
         } finally {
           app.close();
         }

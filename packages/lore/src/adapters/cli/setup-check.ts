@@ -144,7 +144,8 @@ import { isRetiredFromInstall } from "../real-asset-source.js";
 import { MANIFEST_FILENAME } from "../../service/setup-service.js";
 import { detectDoubleRegistrations } from "./setup-hook-double-registration.js";
 import type { DoubleRegistration } from "./setup-hook-double-registration.js";
-import { exitCode, formatError } from "./utils.js";
+import { exitCode, formatErrorFor } from "./utils.js";
+import type { Invocation } from "@lore/core";
 
 // ─── On-disk artifact filenames ─────────────────────────────────────────────
 
@@ -632,10 +633,11 @@ export async function runSetupCheck(opts: {
   json: boolean;
   now?: () => string;
   cwd: string;
+  inv: Invocation;
 }): Promise<void> {
   const result = await computeSetupCheckReport(opts);
   if (!result.ok) {
-    process.stderr.write(formatError(result.error) + "\n");
+    process.stderr.write(formatErrorFor(opts.inv, result.error) + "\n");
     process.exitCode = exitCode(result.error);
     return;
   }

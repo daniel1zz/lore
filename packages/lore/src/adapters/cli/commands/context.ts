@@ -78,6 +78,7 @@
  *   §Public Interface, §Design Decisions D2/D3; AC-CTX-3.
  */
 
+import type { Invocation } from "@lore/core";
 import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, readlinkSync, realpathSync, rmSync, rmdirSync, writeFileSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -324,12 +325,12 @@ function renderSections(sections: ReadonlyArray<{ id: string; state: string }>):
 }
 
 /** Writes the final error/success result of an init/refresh run and sets `process.exitCode` — shared by both topics. */
-function renderOutcome(
+function renderOutcome(inv: Invocation, 
   json: boolean,
   result: { ok: true; value: ContextInitReport | ContextRefreshReport } | { ok: false; error: LoreError },
 ): void {
   if (!result.ok) {
-    process.stderr.write(formatError(result.error) + "\n");
+    process.stderr.write(formatErrorFor(inv, result.error) + "\n");
     process.exitCode = exitCode(result.error);
     return;
   }
@@ -433,8 +434,8 @@ export function buildRefreshFragmentDeps(opts: {
   });
 }
 
-function reportFailure(error: LoreError): void {
-  process.stderr.write(formatError(error) + "\n");
+function reportFailure(inv: Invocation, error: LoreError): void {
+  process.stderr.write(formatErrorFor(inv, error) + "\n");
   process.exitCode = exitCode(error);
 }
 
@@ -556,9 +557,9 @@ export default defineCommand({
 
     if (topic === "refresh") {
       const fragmentDeps = buildFragmentDeps();
-      if (!fragmentDeps.ok) return reportFailure(fragmentDeps.error);
+      if (!fragmentDeps.ok) return reportFailure(inv, fragmentDeps.error);
       const result = await runContextRefresh({ fs: fsPort, budgets, ...fragmentDeps.value }, "", { scope });
-      renderOutcome(json, result);
+      renderOutcome(inv, json, result);
       return;
     }
 
@@ -578,7 +579,7 @@ export default defineCommand({
 
       if (topic === "list") {
         const listed = await runSelectionList(selectionDeps);
-        if (!listed.ok) return reportFailure(listed.error);
+        if (!listed.ok) return reportFailure(inv, listed.error);
         if (json) {
           console.log(JSON.stringify({ ok: true, data: listed.value }, null, 2));
           return;
@@ -596,20 +597,20 @@ export default defineCommand({
         return;
       }
       const changed = await runSelectionChange(selectionDeps, { action: topic, id, scope });
-      if (!changed.ok) return reportFailure(changed.error);
+      if (!changed.ok) return reportFailure(inv, changed.error);
 
       // reason: a no-op change (the file already held the resulting bytes) skips the refresh, so a
       // repeat `remove` leaves every file byte-identical (BR-1063 idempotence).
       let refreshed: Awaited<ReturnType<typeof runContextRefresh>> | null = null;
       if (changed.value.changed) {
         const fragmentDeps = buildFragmentDeps();
-        if (!fragmentDeps.ok) return reportFailure(fragmentDeps.error);
+        if (!fragmentDeps.ok) return reportFailure(inv, fragmentDeps.error);
         refreshed = await runContextRefresh({ fs: fsPort, budgets, ...fragmentDeps.value }, "", { scope });
       }
       if (refreshed !== null && !refreshed.ok) {
         // The selection write already landed; say so before the refresh error so a retry is obvious.
         process.stderr.write(`Recorded ${changed.value.path}, but the refresh failed:\n`);
-        return reportFailure(refreshed.error);
+        return reportFailure(inv, refreshed.error);
       }
       if (json) {
         console.log(
@@ -621,7 +622,7 @@ export default defineCommand({
       console.log(
         `${verb} "${id}" in the ${scope} selection (${changed.value.path})${changed.value.changed ? "" : " — already so, nothing changed"}`,
       );
-      if (refreshed !== null && refreshed.ok) renderOutcome(false, refreshed);
+      if (refreshed !== null && refreshed.ok) renderOutcome(inv, false, refreshed);
       return;
     }
 
@@ -652,12 +653,12 @@ export default defineCommand({
     }
 
     const initDeps = buildFragmentDeps();
-    if (!initDeps.ok) return reportFailure(initDeps.error);
+    if (!initDeps.ok) return reportFailure(inv, initDeps.error);
     const result = await runContextInit(
       { fs: fsPort, budgets, ...initDeps.value },
       "",
       narrative !== undefined ? { narrative, force: args.force === true } : { force: args.force === true },
     );
-    renderOutcome(json, result);
+    renderOutcome(inv, json, result);
   },
 });

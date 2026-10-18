@@ -171,6 +171,7 @@
  *   AC-GI-12.
  */
 
+import type { Invocation } from "@lore/core";
 import { dirname } from "node:path";
 import { defineCommand } from "citty";
 import { z } from "zod";
@@ -422,7 +423,7 @@ function includedByGithubMode(mode: "open" | "resolved" | "all", resolution: Iss
  * @param filters - the mode/severity/category filter to apply; omitted by
  *   a caller that wants the unfiltered listing (see above)
  */
-export async function runGithubIssuesListing(
+export async function runGithubIssuesListing(inv: Invocation, 
   app: ReturnType<typeof loadLoreApp>["app"],
   cfg: GithubUpstreamCfg,
   corpusPath: string,
@@ -436,7 +437,7 @@ export async function runGithubIssuesListing(
 ): Promise<void> {
   const joinedResult = await resolveGithubJoinedRows(app.corpusService, cfg, locator);
   if (!joinedResult.ok) {
-    process.stderr.write(formatError(joinedResult.error) + "\n");
+    process.stderr.write(formatErrorFor(inv, joinedResult.error) + "\n");
     process.exitCode = exitCode(joinedResult.error);
     return;
   }
@@ -509,7 +510,7 @@ export async function runGithubIssuesListing(
  * @param corpusPath - the local corpus root (§M4's declared render contract)
  * @param json - whether `--json` was passed
  */
-async function runGithubVerify(
+async function runGithubVerify(inv: Invocation, 
   app: ReturnType<typeof loadLoreApp>["app"],
   cfg: GithubUpstreamCfg,
   corpusPath: string,
@@ -518,7 +519,7 @@ async function runGithubVerify(
 ): Promise<void> {
   const joinedResult = await resolveGithubJoinedRows(app.corpusService, cfg, locator);
   if (!joinedResult.ok) {
-    process.stderr.write(formatError(joinedResult.error) + "\n");
+    process.stderr.write(formatErrorFor(inv, joinedResult.error) + "\n");
     process.exitCode = exitCode(joinedResult.error);
     return;
   }
@@ -614,7 +615,7 @@ export default defineCommand({
     if (args.sync === true) {
       const { app: syncApp } = loadLoreApp({ inv });
       try {
-        process.exitCode = await runIssuesSync(syncApp.issueClose, { apply: args.apply === true, json: args.json === true });
+        process.exitCode = await runIssuesSync(inv, syncApp.issueClose, { apply: args.apply === true, json: args.json === true });
       } finally {
         syncApp.close();
       }
@@ -677,10 +678,10 @@ export default defineCommand({
       // function already derived for the local branch above.
       if (args.local !== true && classification.kind === "github") {
         if (args.verify === true) {
-          await runGithubVerify(app, classification.cfg, dirname(dirname(dbPath)), args.json === true, inv);
+          await runGithubVerify(inv, app, classification.cfg, dirname(dirname(dbPath)), args.json === true, inv);
           return;
         }
-        await runGithubIssuesListing(app, classification.cfg, dirname(dirname(dbPath)), args.json === true, inv, {
+        await runGithubIssuesListing(inv, app, classification.cfg, dirname(dirname(dbPath)), args.json === true, inv, {
           mode,
           ...(severityFilter !== undefined ? { severity: severityFilter } : {}),
           ...(categoryFilter !== undefined ? { category: categoryFilter } : {}),
@@ -712,7 +713,7 @@ export default defineCommand({
       // BEFORE the mode-filtered read, so it never inherits --open/--resolved/
       // --all's filter and never touches --severity/--category.
       if (args.verify === true) {
-        await runVerify(app, source, args.json === true, invocationOf(context).env);
+        await runVerify(inv, app, source, args.json === true, invocationOf(context).env);
         return;
       }
 
@@ -1148,7 +1149,7 @@ function renderVerifyResult(corpusPath: string, divergences: readonly Resolution
  * that DOES have targets, since that path always calls
  * {@link fetchGithubLabelResolutions}).
  */
-async function runVerify(app: ReturnType<typeof loadLoreApp>["app"], source: IssueReadSource, json: boolean, env: NodeJS.ProcessEnv): Promise<void> {
+async function runVerify(inv: Invocation, app: ReturnType<typeof loadLoreApp>["app"], source: IssueReadSource, json: boolean, env: NodeJS.ProcessEnv): Promise<void> {
   // reason: `source.kind === "upstream"` is structurally unreachable from
   // this file's own `resolveIssueReadSource` call site — see `run()`'s
   // comment there. Handled as a real error, not `assertUnreachable`, for the
@@ -1156,7 +1157,7 @@ async function runVerify(app: ReturnType<typeof loadLoreApp>["app"], source: Iss
   const targetsResult =
     source.kind === "upstream" ? unsupportedUpstreamReadError<VerifyTarget[]>() : await collectLocalVerifyTargets(app);
   if (!targetsResult.ok) {
-    process.stderr.write(formatError(targetsResult.error) + "\n");
+    process.stderr.write(formatErrorFor(inv, targetsResult.error) + "\n");
     process.exitCode = exitCode(targetsResult.error);
     return;
   }
@@ -1169,7 +1170,7 @@ async function runVerify(app: ReturnType<typeof loadLoreApp>["app"], source: Iss
 
   const labelsResult = await fetchGithubLabelResolutions(targets, env);
   if (!labelsResult.ok) {
-    process.stderr.write(formatError(labelsResult.error) + "\n");
+    process.stderr.write(formatErrorFor(inv, labelsResult.error) + "\n");
     process.exitCode = exitCode(labelsResult.error);
     return;
   }

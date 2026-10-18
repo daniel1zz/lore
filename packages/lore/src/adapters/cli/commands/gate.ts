@@ -1284,7 +1284,7 @@ async function runSpecPromoteGate(
   // reason: the deterministic verdict above is final — everything from here on is the
   // probabilistic-zone advisory (INV2). It writes only to stderr and never touches
   // process.exitCode, regardless of outcome.
-  await emitJudgeAdvisory(app, specIdOrSlug);
+  await emitJudgeAdvisory(inv, app, specIdOrSlug);
 }
 
 /**
@@ -1297,10 +1297,10 @@ async function runSpecPromoteGate(
  * `review_judgments` row is persisted; this is a disposable in-band advisory, not a
  * `lore review` invocation.
  */
-async function emitJudgeAdvisory(app: App, specIdOrSlug: string): Promise<void> {
+async function emitJudgeAdvisory(inv: Invocation, app: App, specIdOrSlug: string): Promise<void> {
   const bundleResult = await app.corpusService.getReviewBundle(specIdOrSlug);
   if (!bundleResult.ok) {
-    process.stderr.write(`gate: judge advisory unavailable — ${formatError(bundleResult.error)}\n`);
+    process.stderr.write(`gate: judge advisory unavailable — ${formatErrorFor(inv, bundleResult.error)}\n`);
     return;
   }
 
@@ -1310,7 +1310,7 @@ async function emitJudgeAdvisory(app: App, specIdOrSlug: string): Promise<void> 
   });
   if (!judgeResult.ok) {
     process.stderr.write(
-      `gate: judge advisory unavailable — ${formatError(judgeResult.error, { aiHasNoFallback: true })}\n`,
+      `gate: judge advisory unavailable — ${formatErrorFor(inv, judgeResult.error, { aiHasNoFallback: true })}\n`,
     );
     return;
   }

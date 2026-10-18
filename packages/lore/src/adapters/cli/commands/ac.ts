@@ -339,7 +339,7 @@ export default defineCommand({
           }
 
           await reportDemotionIfAny(app, args.spec as string, beforeStatus);
-          await reportCiteFeedbackOnAdd(requireAcService(app), args.spec as string, args.id as string, criterion);
+          await reportCiteFeedbackOnAdd(inv, requireAcService(app), args.spec as string, args.id as string, criterion);
 
           if (args.json) {
             console.log(JSON.stringify({ ok: true, data: { criteria: result.value } }, null, 2));
@@ -755,7 +755,7 @@ export default defineCommand({
           }
 
           await reportDemotionIfAny(app, args.spec as string, beforeStatus);
-          if (patch.cites !== undefined) await reportCiteWarnings(requireAcService(app), patch.cites, args.spec as string);
+          if (patch.cites !== undefined) await reportCiteWarnings(inv, requireAcService(app), patch.cites, args.spec as string);
 
           if (args.json) {
             console.log(JSON.stringify({ ok: true, data: { criteria: result.value } }, null, 2));
@@ -1050,11 +1050,11 @@ function printCiteWarnings(warnings: readonly CiteWarning[]): void {
 }
 
 /** Judge `ids` against the baseline and print the warnings; a failed lookup is reported, never swallowed. */
-async function reportCiteWarnings(ac: AcService, ids: readonly string[], spec: string): Promise<void> {
+async function reportCiteWarnings(inv: Invocation, ac: AcService, ids: readonly string[], spec: string): Promise<void> {
   if (ids.length === 0) return;
   const checked = await ac.checkCites(ids, spec);
   if (!checked.ok) {
-    process.stderr.write(`Warning: could not check cited rules against the baseline: ${formatError(checked.error)}\n`);
+    process.stderr.write(`Warning: could not check cited rules against the baseline: ${formatErrorFor(inv, checked.error)}\n`);
     return;
   }
   printCiteWarnings(checked.value);
@@ -1065,7 +1065,7 @@ async function reportCiteWarnings(ac: AcService, ids: readonly string[], spec: s
  * baseline doc — a one-line hint that the AC cites no rule. A corpus with no baseline prints
  * exactly what it printed before (rollback invariant AC-BLS1-8).
  */
-async function reportCiteFeedbackOnAdd(
+async function reportCiteFeedbackOnAdd(inv: Invocation, 
   ac: AcService,
   spec: string,
   acId: string,
@@ -1073,7 +1073,7 @@ async function reportCiteFeedbackOnAdd(
 ): Promise<void> {
   const cites = (candidate as { cites?: string[] }).cites ?? [];
   if (cites.length > 0) {
-    await reportCiteWarnings(ac, cites, spec);
+    await reportCiteWarnings(inv, ac, cites, spec);
     return;
   }
   const has = await ac.hasBaselineDocs();
