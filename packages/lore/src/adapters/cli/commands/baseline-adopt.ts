@@ -29,6 +29,7 @@ import type { CiteGateMode, Invocation, LoreError, Result } from "@lore/core";
 import { invocationOf } from "../command-invocation.js";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatError, formatErrorFor, resolveActor } from "../utils.js";
+import { resolveTrackedWriteRoot } from "../working-tree-root.js";
 import { resolveDoc } from "../../../service/resolve.js";
 import { SQLiteStore } from "../../../store/sqlite-store.js";
 import { readAcCiteStored, seedAcCiteModeIfAbsent, writeAcCiteStored } from "../../ac-cite-config-file.js";
@@ -158,7 +159,11 @@ async function runAdopt(args: Record<string, unknown>, inv: Invocation): Promise
       armedSlugs.push(doc.value.slug);
     }
 
-    const repoDir = dirname(dirname(dbPath));
+    // reason: INT-T10 — .lore/config.yaml is tracked, so it is read-modified-written in the invoking working
+    // tree (same file for the read and the write), not the corpus checkout; the audit row stays in the corpus DB.
+    const rootResolved = resolveTrackedWriteRoot(inv.cwd, dirname(dirname(dbPath)));
+    if (!rootResolved.ok) return fail(inv, rootResolved.error, json, exitCode(rootResolved.error));
+    const repoDir = rootResolved.value;
     const stored = readAcCiteStored(repoDir);
     if (!stored.ok) return fail(inv, stored.error, json, exitCode(stored.error));
     const old = stored.value;

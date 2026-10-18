@@ -178,6 +178,19 @@ describe("INT-T5 tracked-file writes land in the invoking working tree", () => {
     expect(snapshot(main)).toEqual(before);
   }, 120_000);
 
+  it("INT-T10 baseline adopt from a linked worktree rewrites the worktree .lore/config.yaml and leaves the main checkout identical", async () => {
+    const { home, main, worktree } = await makeFixture();
+    const before = snapshot(main);
+    const worktreeConfigBefore = readFileSync(join(worktree, ".lore", "config.yaml"), "utf8");
+
+    const adopted = await runLore(["baseline", "adopt", "--mode", "enforce"], worktree, home);
+    expect(adopted.exitCode, adopted.stderr).toBe(0);
+
+    expect(readFileSync(join(worktree, ".lore", "config.yaml"), "utf8")).not.toBe(worktreeConfigBefore);
+    expect(readFileSync(join(worktree, ".lore", "config.yaml"), "utf8")).toContain("enforce");
+    expect(snapshot(main)).toEqual(before);
+  }, 60_000);
+
   it("INT-T5 outside any git working tree the tracked-file root stays the corpus root", async () => {
     const home = mkdtempSync(join(tmpdir(), "lore-int-t5-nogit-"));
     scratch.push(home);
