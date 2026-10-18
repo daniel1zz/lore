@@ -149,7 +149,7 @@ import { defineCommand } from "citty";
 import { err, extractEvidence, ok } from "@lore/core";
 import type { DocRecord, EvidenceEntry, LoreError, Result } from "@lore/core";
 import { loadLoreApp } from "../loader.js";
-import { exitCode, formatError, resolveActor } from "../utils.js";
+import { exitCode, formatErrorFor, resolveActor } from "../utils.js";
 import { requirePhaseWorkflowService } from "../phase-wiring.js";
 import { resolveCallerSession } from "../caller-session.js";
 import { formatDoneMessage, formatLastTaskAdvisory } from "../done-render.js";
@@ -390,7 +390,7 @@ export default defineCommand({
           overrideAttestationCiteIndex,
         );
         if (!citeResult.ok) {
-          process.stderr.write(formatError(citeResult.error) + "\n");
+          process.stderr.write(formatErrorFor(inv, citeResult.error) + "\n");
           process.exitCode = exitCode(citeResult.error);
           return;
         }
@@ -401,11 +401,11 @@ export default defineCommand({
       // (unregistered -> null + one warning), resolved once and passed EXPLICITLY like `claim`/`release` do.
       const verifiedIdentity = await app.verifiedInvocationIdentity?.();
       if (verifiedIdentity !== undefined && !verifiedIdentity.ok) {
-        process.stderr.write(formatError(verifiedIdentity.error) + "\n");
+        process.stderr.write(formatErrorFor(inv, verifiedIdentity.error) + "\n");
         process.exitCode = exitCode(verifiedIdentity.error);
         return;
       }
-      const by = resolveActor(undefined, inv.env, inv.cwd);
+      const by = resolveActor(undefined, inv.env, inv.cwd, inv.user);
       // reason: the worktree-removal test's "mine" side (D2) — raw session id, unknown stays absent.
       const callerSession = resolveCallerSession(undefined, inv.env);
       const doneOpts = {
@@ -432,7 +432,7 @@ export default defineCommand({
       }
 
       if (!result.ok) {
-        process.stderr.write(formatError(result.error) + "\n");
+        process.stderr.write(formatErrorFor(inv, result.error) + "\n");
         process.exitCode = exitCode(result.error);
         return;
       }

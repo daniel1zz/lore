@@ -91,6 +91,7 @@ import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
 import type { StoreInterface } from "../../../src/store/store-interface.js";
 import type { CreateDocInput } from "@lore/core";
+import { actedStore } from "../../live-invocation.js";
 
 // packages/lore/tests/unit/service/ -> ../../../ -> packages/lore/ -> src/service/phase-checklist-service.js
 const PHASE_CHECKLIST_SERVICE_MODULE_PATH = [
@@ -160,7 +161,7 @@ function scriptItem(id: string, overrides: Record<string, unknown> = {}): Record
 }
 
 async function makeServices() {
-  const store = new InMemoryStore();
+  const store = actedStore(new InMemoryStore());
   const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
   const phaseChecklistService = new PhaseChecklistService(store);
   return { store, corpusService, phaseChecklistService };

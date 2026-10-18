@@ -17,6 +17,7 @@ import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
 import { SessionService } from "../../../src/service/session-service.js";
 import type { CreateDocInput, DocRecord } from "@lore/core";
+import { actedStore } from "../../live-invocation.js";
 
 /** Fake realpath: `links` maps symlink -> real target; anything else not in `existing` throws ENOENT. */
 function fakeRealpath(links: Record<string, string>, existing: string[]) {
@@ -35,7 +36,7 @@ const LINK = "/tmp/seat-x";
 const PORT = fakeRealpath({ [LINK]: REAL, "/tmp/seat-x/": REAL }, [REAL, "/other/dir"]);
 
 async function setup(realpath = PORT) {
-  const store = new InMemoryStore();
+  const store = actedStore(new InMemoryStore());
   const corpus = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
   const service = new SessionService(
     store,

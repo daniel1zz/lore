@@ -4,7 +4,7 @@
 
 import { defineCommand } from "citty";
 import { loadLoreApp } from "../loader.js";
-import { exitCode, formatError } from "../utils.js";
+import { exitCode, formatErrorFor } from "../utils.js";
 import type { DocId } from "@lore/core";
 import { invocationOf } from "../command-invocation.js";
 
@@ -47,7 +47,7 @@ export default defineCommand({
       const result = await app.versionService.restore(args.id as DocId, versionNum);
 
       if (!result.ok) {
-        process.stderr.write(formatError(result.error) + "\n");
+        process.stderr.write(formatErrorFor(inv, result.error) + "\n");
         process.exitCode = exitCode(result.error);
         return;
       }

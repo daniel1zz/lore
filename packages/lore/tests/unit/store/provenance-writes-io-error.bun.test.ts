@@ -89,6 +89,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { AuditEntry, DocRecord, VersionRecord } from "@lore/core";
 import { SQLiteStore } from "../../../src/store/sqlite-store.js";
+import { actedStore } from "../../live-invocation.js";
 
 // ─── Factories ───────────────────────────────────────────────────────────────
 
@@ -227,7 +228,7 @@ describe("SQLiteStore — insertWithProvenance/updateWithProvenance never throw 
   beforeEach(() => {
     tmpDir = mkdtempSync(join(tmpdir(), "lore-io-error-"));
     dbPath = join(tmpDir, "lore.db");
-    store = new SQLiteStore(dbPath);
+    store = actedStore(new SQLiteStore(dbPath));
   });
 
   afterEach(() => {

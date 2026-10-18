@@ -14,6 +14,7 @@ import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
 import { type Telemetry, type TelemetryEvent, type AiGenerationEvent } from "@lore/core";
 import type { CreateDocInput } from "@lore/core";
+import { actedStore } from "../../live-invocation.js";
 
 // ─── Capturing telemetry spy ─────────────────────────────────────────────────
 
@@ -46,7 +47,7 @@ class CapturingTelemetry implements Telemetry {
 // ─── Test helpers ─────────────────────────────────────────────────────────────
 
 function makeServiceWithCapture() {
-  const store = new InMemoryStore();
+  const store = actedStore(new InMemoryStore());
   const telemetry = new CapturingTelemetry();
   const service = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)), telemetry);
   return { service, telemetry, store };

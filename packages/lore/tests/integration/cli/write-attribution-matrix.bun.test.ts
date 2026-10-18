@@ -59,6 +59,7 @@ import { AcService } from "../../../src/service/ac-service.js";
 import { RuleService } from "../../../src/service/rule-service.js";
 import { SessionService } from "../../../src/service/session-service.js";
 import { sessionActorFor, sessionEnvFor } from "../../helpers/session-actor";
+import { actedStore } from "../../live-invocation.js";
 
 setDefaultTimeout(300_000);
 
@@ -122,12 +123,12 @@ type StoreKind = "SQLiteStore" | "InMemoryStore";
 
 function makeStore(kind: StoreKind): StoreHandle {
   if (kind === "InMemoryStore") {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     return { store, dispose: () => undefined };
   }
   const dir = realpathSync(mkdtempSync(join(tmpdir(), "attr-matrix-sqlite-")));
   scratch.push(dir);
-  const store = new SQLiteStore(join(dir, "lore.db"));
+  const store = actedStore(new SQLiteStore(join(dir, "lore.db")));
   return { store, dispose: () => store.close() };
 }
 
@@ -537,7 +538,7 @@ function corpusDir(prefix: string): string {
 }
 
 async function registerInCorpus(dir: string, identity: Identity): Promise<void> {
-  const store = new SQLiteStore(join(dir, ".lore", "lore.db"));
+  const store = actedStore(new SQLiteStore(join(dir, ".lore", "lore.db")));
   try {
     await registerRun(store, identity);
   } finally {
@@ -546,7 +547,7 @@ async function registerInCorpus(dir: string, identity: Identity): Promise<void> 
 }
 
 async function auditSince(dir: string, since: string): Promise<AuditEntry[]> {
-  const store = new SQLiteStore(join(dir, ".lore", "lore.db"));
+  const store = actedStore(new SQLiteStore(join(dir, ".lore", "lore.db")));
   try {
     return (await auditRows(store)).filter((r) => r.timestamp >= since);
   } finally {
@@ -602,7 +603,7 @@ describe("CLI chokepoint: `lore --harness-run R <write>` (name N from the sessio
     const rows = (await auditSince(dir, since)).filter((r) => r.actor === NAME_A);
     expect(rows.length).toBeGreaterThan(0);
     for (const row of rows) expect(harnessRunOf(row)).toBe(ID_A.harnessRun);
-    const store = new SQLiteStore(join(dir, ".lore", "lore.db"));
+    const store = actedStore(new SQLiteStore(join(dir, ".lore", "lore.db")));
     try {
       const versions = (await versionRows(store)).filter((v) => v.created_by === NAME_A && v.created_at >= since);
       expect(versions.length).toBeGreaterThan(0);

@@ -16,6 +16,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SQLiteStore } from "../../src/store/sqlite-store.js";
 import type { RunId } from "@lore/core";
+import { actedStore } from "../live-invocation.js";
 
 const PACKAGE_ROOT = new URL("../../", import.meta.url).pathname.replace(/\/$/, "");
 const INDEX_TS = join(PACKAGE_ROOT, "src", "index.ts");
@@ -50,7 +51,7 @@ function makeContainedStash(): void {
 }
 
 async function decisionExecutorRuns(): Promise<Array<string | null>> {
-  const store = new SQLiteStore(dbPath);
+  const store = actedStore(new SQLiteStore(dbPath));
   try {
     const rows = await store.listDecisionLog();
     if (!rows.ok) throw new Error(`listDecisionLog failed: ${JSON.stringify(rows.error)}`);
@@ -61,7 +62,7 @@ async function decisionExecutorRuns(): Promise<Array<string | null>> {
 }
 
 async function registerRun(id: RunId): Promise<void> {
-  const store = new SQLiteStore(dbPath);
+  const store = actedStore(new SQLiteStore(dbPath));
   try {
     const inserted = await store.insertRun({
       id,

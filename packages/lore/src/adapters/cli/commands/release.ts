@@ -46,7 +46,7 @@
 
 import { defineCommand } from "citty";
 import { loadLoreApp } from "../loader.js";
-import { exitCode, formatError, resolveActor } from "../utils.js";
+import { exitCode, formatErrorFor, resolveActor } from "../utils.js";
 import { requirePhaseWorkflowService } from "../phase-wiring.js";
 import { hasZeroReleaseEvidence, ZERO_EVIDENCE_RELEASE_WARNING } from "../../../service/task-workflow-service.js";
 import { invocationOf } from "../command-invocation.js";
@@ -84,11 +84,11 @@ export default defineCommand({
       // below and the stamped rows then agree (BR-1035, spec-run-identity-slice-1 D7).
       const verifiedIdentity = await app.verifiedInvocationIdentity?.();
       if (verifiedIdentity !== undefined && !verifiedIdentity.ok) {
-        console.error(formatError(verifiedIdentity.error)); // CLI surface
+        console.error(formatErrorFor(inv, verifiedIdentity.error)); // CLI surface
         process.exit(exitCode(verifiedIdentity.error));
       }
       const verifiedRun = verifiedIdentity?.value?.harnessRun ?? null;
-      const by = resolveActor(undefined, inv.env, inv.cwd);
+      const by = resolveActor(undefined, inv.env, inv.cwd, inv.user);
       const releaseOpts = {
         by,
         // reason: spec-run-identity-slice-1 D6/BR-1043 — see commands/claim.ts: the releasing run is explicit.
@@ -114,7 +114,7 @@ export default defineCommand({
       }
 
       if (!result.ok) {
-        process.stderr.write(formatError(result.error) + "\n");
+        process.stderr.write(formatErrorFor(inv, result.error) + "\n");
         process.exitCode = exitCode(result.error);
         return;
       }

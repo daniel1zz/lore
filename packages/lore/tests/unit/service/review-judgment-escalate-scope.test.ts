@@ -50,6 +50,7 @@ import type {
   ReviewJudgment,
   Telemetry,
 } from "@lore/core";
+import { actedStore } from "../../live-invocation.js";
 
 // ─── Test helpers ─────────────────────────────────────────────────────────────
 
@@ -63,7 +64,7 @@ function makeTelemetry(): Telemetry {
  * path rather than the ungated bare-construction default the constructors document.
  */
 async function makeApp(opts: { judgmentRequiredTypes?: readonly string[] } = {}) {
-  const store = new InMemoryStore();
+  const store = actedStore(new InMemoryStore());
   await seedLiveRule(store);
   const telemetry = makeTelemetry();
   const enforcer = new GateEnforcer(undefined);

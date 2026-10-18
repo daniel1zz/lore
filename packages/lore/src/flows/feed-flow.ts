@@ -814,7 +814,7 @@ async function buildRuleDiffBlock(
  *
  * @param app - Wired `App` providing `sessionService`.
  * @param opts - `{plan?, handoff?, by?}`, forwarded to `SessionService.resume` untouched.
- * @param ambient - The invocation's `env`, `paths.tmpDir` and `cwd`, read only to locate the SessionStart marker and resolve the actor
+ * @param ambient - The invocation's `env`, `paths.tmpDir`, `cwd` and `user`, read only to locate the SessionStart marker and resolve the actor
  *   (AS-26: this flow reads no ambient state itself).
  * @returns `ok(ResumeFeedOutcome)`, or `err(LoreError)` on an unresolvable target,
  *   a `SessionService.resume` store error, or a missing `sessionService` (an
@@ -826,7 +826,7 @@ async function buildRuleDiffBlock(
 export async function buildResumeFeed(
   app: App,
   opts: { plan?: string; handoff?: string; by?: string },
-  ambient: { readonly env: Readonly<Record<string, string | undefined>>; readonly tmpDir: string; readonly cwd: string },
+  ambient: { readonly env: Readonly<Record<string, string | undefined>>; readonly tmpDir: string; readonly cwd: string; readonly user: string },
 ): Promise<Result<ResumeFeedOutcome, LoreError>> {
   if (app.sessionService === undefined) {
     return err({
@@ -843,7 +843,7 @@ export async function buildResumeFeed(
   let suppressFloor = false;
   let authorshipUndeterminedNote: string | undefined;
   if (resume.found && !resume.multi_actor && resume.handoff !== undefined) {
-    const currentActor = resolveActor(opts.by, ambient.env, ambient.cwd);
+    const currentActor = resolveActor(opts.by, ambient.env, ambient.cwd, ambient.user);
     const sessionStart = readSessionStartIso(ambient.env, ambient.tmpDir);
     const sessionStartIso = sessionStart.kind === "measured" ? sessionStart.startedAt : undefined;
     // Same call, same argument shape as before this task — the arming

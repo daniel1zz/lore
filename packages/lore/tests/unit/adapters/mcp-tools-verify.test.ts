@@ -40,7 +40,7 @@
  * @spec_ref AC-VRF-10 AC-VRF-2; SPEC-039 §M2
  */
 
-import { liveInvocation } from "../../live-invocation.js";
+import { liveInvocation, actedStore } from "../../live-invocation.js";
 import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
 import { describe, it, expect, beforeEach } from "vitest";
@@ -83,7 +83,7 @@ function makeApp(opts: {
   ) => Promise<{ ok: true; value: VerifyPlanResult } | { ok: false; error: LoreError }>;
   omitVerifyRunnerService?: boolean;
 } = {}): { app: App; calls: VerifyPlanCall[] } {
-  store = new InMemoryStore();
+  store = actedStore(new InMemoryStore());
   corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
   const calls: VerifyPlanCall[] = [];
 

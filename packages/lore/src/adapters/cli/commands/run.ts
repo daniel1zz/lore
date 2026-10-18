@@ -58,7 +58,7 @@ import {
   type RunRecord,
 } from "@lore/core";
 import { loadLoreApp } from "../loader.js";
-import { exitCode, formatError } from "../utils.js";
+import { exitCode, formatErrorFor } from "../utils.js";
 import { writeAllSync } from "../stdio-sync.js";
 import type { RunService } from "../../../service/run-service.js";
 import type { ReapReport } from "../../../service/run-reap-service.js";
@@ -125,10 +125,10 @@ async function computeComposition(agentType: string | undefined, inv: Invocation
  * command ran in. `undefined` when the caller named no pid (nothing is measured, nothing is overwritten); a pid that
  * cannot be probed records a null pair (a legacy-style run) with a stderr note — registration itself never fails on it.
  */
-async function measureRunProcess(rawPid: string | undefined, cwd: string): Promise<RunProcessRecord | undefined | { error: string }> {
+async function measureRunProcess(rawPid: string | undefined, cwd: string, env: Invocation["env"]): Promise<RunProcessRecord | undefined | { error: string }> {
   if (rawPid === undefined) return undefined;
   if (!/^[0-9]+$/.test(rawPid)) return { error: `--harness-pid must be a positive integer (got "${rawPid}")` };
-  const port = createRealProcessTablePort();
+  const port = createRealProcessTablePort({ env });
   const pid = await port.resolveHarnessPid(Number.parseInt(rawPid, 10));
   const inspected = pid === null ? null : await port.inspect(pid);
   const startTime = inspected === null || inspected.zombie ? null : inspected.startTime;
@@ -199,7 +199,7 @@ async function runRegister(args: Record<string, unknown>, inv: Invocation): Prom
     process.exitCode = VALIDATION_EXIT;
     return;
   }
-  const runProcess = await measureRunProcess(stringArg(args, "harness-pid"), inv.cwd);
+  const runProcess = await measureRunProcess(stringArg(args, "harness-pid"), inv.cwd, inv.env);
   if (runProcess !== undefined && "error" in runProcess) return usageError(runProcess.error);
 
   await withRunService(inv, async (service) => {
@@ -214,7 +214,7 @@ async function runRegister(args: Record<string, unknown>, inv: Invocation): Prom
       ...(runProcess !== undefined ? { process: runProcess } : {}),
     });
     if (!result.ok) {
-      process.stderr.write(`${formatError(result.error)}\n`);
+      process.stderr.write(`${formatErrorFor(inv, result.error)}\n`);
       process.exitCode = exitCode(result.error);
       return;
     }
@@ -228,7 +228,7 @@ async function runShow(args: Record<string, unknown>, inv: Invocation): Promise<
   await withRunService(inv, async (service) => {
     const result = await service.show(id);
     if (!result.ok) {
-      process.stderr.write(`${formatError(result.error)}\n`);
+      process.stderr.write(`${formatErrorFor(inv, result.error)}\n`);
       process.exitCode = exitCode(result.error);
       return;
     }
@@ -244,7 +244,7 @@ async function runEnd(args: Record<string, unknown>, inv: Invocation): Promise<v
   await withRunService(inv, async (service) => {
     const result = await service.end(id, reason);
     if (!result.ok) {
-      process.stderr.write(`${formatError(result.error)}\n`);
+      process.stderr.write(`${formatErrorFor(inv, result.error)}\n`);
       process.exitCode = exitCode(result.error);
       return;
     }
@@ -281,7 +281,7 @@ async function runOccupancy(args: Record<string, unknown>, inv: Invocation): Pro
       ...(measured.status === "measured" ? { branch: measured.branch } : {}),
     });
     if (!result.ok) {
-      process.stderr.write(`${formatError(result.error)}\n`);
+      process.stderr.write(`${formatErrorFor(inv, result.error)}\n`);
       process.exitCode = exitCode(result.error);
       return;
     }
@@ -311,7 +311,7 @@ async function runTasks(args: Record<string, unknown>, inv: Invocation): Promise
   await withRunService(inv, async (service) => {
     const result = await service.tasks(id);
     if (!result.ok) {
-      process.stderr.write(`${formatError(result.error)}\n`);
+      process.stderr.write(`${formatErrorFor(inv, result.error)}\n`);
       process.exitCode = exitCode(result.error);
       return;
     }
@@ -360,7 +360,7 @@ async function runReap(args: Record<string, unknown>, inv: Invocation): Promise<
     if (app.runReapService === undefined) throw new Error("App was built without a runReapService");
     const result = await app.runReapService.reap({ apply: args["apply"] === true });
     if (!result.ok) {
-      process.stderr.write(`${formatError(result.error)}\n`);
+      process.stderr.write(`${formatErrorFor(inv, result.error)}\n`);
       process.exitCode = REAP_FAILURE_EXIT;
       return;
     }

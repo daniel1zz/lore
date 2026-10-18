@@ -28,7 +28,6 @@
  * Source: SPEC-017 §3.7, SPEC-030 AC-HJ-1/AC-HJ-2/AC-HJ-4
  */
 
-import { tmpdir } from "node:os";
 import { ok, err } from "@lore/core";
 import type { AIProvider, AiProviderConfig, GenerateInput, GenerateOutput, LoreError } from "@lore/core";
 import type { Result } from "@lore/core";
@@ -102,6 +101,8 @@ export class ClaudeCliProvider implements AIProvider {
     public readonly name: string,
     /** Provider config from the merged registry (built-in defaults or user override) */
     private readonly cfg: AiProviderConfig,
+    /** The invocation's environment and temp directory the hermetic spawn spec is built from. */
+    private readonly runtime: { readonly env: Readonly<Record<string, string | undefined>>; readonly tmpDir: string },
   ) {}
 
   /**
@@ -121,7 +122,7 @@ export class ClaudeCliProvider implements AIProvider {
 
     // SPEC-030 AC-HJ-1: spawn params (command/args/cwd/env) come from the pure builder —
     // this callsite never inlines cwd/env logic so that logic stays vitest-testable.
-    const spawnSpec = buildHermeticSpawnSpec(this.cfg, { sourceEnv: process.env, tmpDir: tmpdir() });
+    const spawnSpec = buildHermeticSpawnSpec(this.cfg, { sourceEnv: this.runtime.env, tmpDir: this.runtime.tmpDir });
 
     // Attempt to spawn — catches ENOENT (binary not on PATH)
     let proc: ReturnType<typeof Bun.spawn>;

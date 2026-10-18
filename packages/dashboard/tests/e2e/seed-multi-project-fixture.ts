@@ -21,6 +21,7 @@
  */
 import { RecordLockService } from "../../../lore/src/service/record-lock-service.js";
 import { GateEnforcer } from "../../../lore/src/service/gate-enforcer.js";
+import { declareWriteActorForTests } from "../../../lore/src/store/write-context-store.js";
 import { SQLiteStore } from "../../../lore/src/store/sqlite-store.js";
 import { CorpusService } from "../../../lore/src/service/corpus-service.js";
 import { formatJudgeActor, type CreateDocInput, type LoreError, type Result, type ReviewJudgment } from "@lore/core";
@@ -48,7 +49,7 @@ interface ProjectASeed extends ProjectSeed {
 }
 
 async function seedProject(dbPath: string, label: "A" | "B", runId: string): Promise<ProjectSeed> {
-  const store = new SQLiteStore(dbPath);
+  const store = declareWriteActorForTests(new SQLiteStore(dbPath), "e2e-seed");
   const corpus = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
 
   const prdTitle = `E2E Multi-Project Root PRD ${label} ${runId}`;
@@ -105,7 +106,7 @@ async function main(): Promise<void> {
   // create-time gate reads `hasSkeleton`, and this doc is inserted directly via the
   // ungated bare CorpusService construction (see this file's header), so no gate ever
   // runs against it here; it exists purely for the UI-driven approve+edit exercise.
-  const storeA = new SQLiteStore(dbPathA);
+  const storeA = declareWriteActorForTests(new SQLiteStore(dbPathA), "e2e-seed");
   const corpusA = new CorpusService(storeA, new RecordLockService(storeA, new GateEnforcer(undefined)));
   const draftSpecTitle = `E2E Approve Target A ${runId}`;
   const draftSpec = await unwrap(

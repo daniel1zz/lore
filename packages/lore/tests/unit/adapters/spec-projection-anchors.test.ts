@@ -38,6 +38,7 @@ import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { OutlineService, renderResolvedToMarkdown } from "../../../src/service/outline-service.js";
 import { DOC_TYPE_ROLE_MAP } from "@lore/core";
 import type { DocRecord, Slug } from "@lore/core";
+import { actedStore } from "../../live-invocation.js";
 
 const PAST_ISO = "2026-07-01T00:00:00.000Z";
 
@@ -65,7 +66,7 @@ function makeDoc(overrides: Partial<DocRecord> & { id: string; type: DocRecord["
 }
 
 function makeOutlineService(): OutlineService {
-  return new OutlineService(new InMemoryStore());
+  return new OutlineService(actedStore(new InMemoryStore()));
 }
 
 // ─── HAPPY: 2 declared anchors → "## Code anchors" section, declaration order ─

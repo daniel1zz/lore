@@ -33,11 +33,12 @@ import { PhaseWorkflowService } from "../../../src/service/phase-workflow-servic
 import type { EvidenceInput } from "../../../src/service/task-workflow-service.js";
 import { NoOpTelemetry } from "@lore/core";
 import type { DocRecord, DocType, AuditEntry } from "@lore/core";
+import { actedStore } from "../../live-invocation.js";
 
 // ─── Fixtures (mirrors phase-workflow-service.test.ts's makeServices shape) ──
 
 function makeServices(ttl = 120) {
-  const store = new InMemoryStore();
+  const store = actedStore(new InMemoryStore());
   const service = new PhaseWorkflowService(store, new NoOpTelemetry(), { claimTtlMinutes: ttl });
   return { store, service };
 }

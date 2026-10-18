@@ -49,6 +49,7 @@ import { AuditService } from "../../../../src/service/audit-service.js";
 import { NoOpTelemetry } from "@lore/core";
 import { MIGRATION_002_SQL } from "../../../../src/store/migrations/migration-002.js";
 import type { App } from "../../../../src/app.js";
+import { actedStore } from "../../../live-invocation.js";
 
 const FAR_PAST = "2000-01-01T00:00:00.000Z";
 
@@ -74,7 +75,7 @@ async function makeTestServer(): Promise<TestContext> {
 
   const apiKeyStore = new ApiKeyStore(db);
   const sessionStore = new SessionStore(db);
-  const docStore = new InMemoryStore();
+  const docStore = actedStore(new InMemoryStore());
 
   const app: App = {
     corpusService: new CorpusService(docStore, new RecordLockService(docStore, new GateEnforcer(undefined))),

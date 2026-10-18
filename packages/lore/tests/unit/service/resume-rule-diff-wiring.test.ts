@@ -13,7 +13,7 @@
 
 import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
-import { tmpdir } from "node:os";
+import { tmpdir, userInfo } from "node:os";
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
@@ -25,6 +25,7 @@ import type { App } from "../../../src/app.js";
 import type { CreateDocInput, DocRecord } from "@lore/core";
 import { RESUME_SCOPE_CLOSURE } from "@lore/core";
 import { makeRuleService } from "../../helpers/make-rule-service.js";
+import { actedStore } from "../../live-invocation.js";
 
 const T_SETUP = "2026-03-01T08:00:00.000Z";
 const T_CLAIM = "2026-03-01T10:00:00.000Z";
@@ -92,14 +93,14 @@ async function claimAt(task: DocRecord, iso: string): Promise<void> {
 }
 
 async function feedFor(plan: DocRecord): Promise<string> {
-  const r = await buildResumeFeed(app, { plan: plan.slug }, { env: process.env, tmpDir: tmpdir(), cwd: process.cwd() });
+  const r = await buildResumeFeed(app, { plan: plan.slug }, { env: process.env, tmpDir: tmpdir(), cwd: process.cwd(), user: userInfo().username });
   if (!r.ok) throw new Error(`buildResumeFeed failed: ${JSON.stringify(r.error)}`);
   return r.value.feed;
 }
 
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ["Date"] });
-  store = new InMemoryStore();
+  store = actedStore(new InMemoryStore());
   corpus = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
   rules = makeRuleService(store);
   workflow = new TaskWorkflowService(store, undefined, { claimTtlMinutes: 120 });
@@ -150,7 +151,7 @@ describe("lore feed session-resume prints the BL-15 rule diff", () => {
 
   it("an unknown --plan fails the feed instead of printing nothing", async () => {
     await makeFixture();
-    const r = await buildResumeFeed(app, { plan: "no-such-plan" }, { env: process.env, tmpDir: tmpdir(), cwd: process.cwd() });
+    const r = await buildResumeFeed(app, { plan: "no-such-plan" }, { env: process.env, tmpDir: tmpdir(), cwd: process.cwd(), user: userInfo().username });
     expect(r.ok).toBe(false);
   });
 });

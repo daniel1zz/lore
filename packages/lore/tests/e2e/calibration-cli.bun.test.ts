@@ -44,6 +44,7 @@ import { join } from "path";
 import { tmpdir } from "os";
 import { SQLiteStore } from "../../src/store/sqlite-store.js";
 import type { CalibrationOutcome, CalibrationRecord, DocRecord, DocType, ReviewJudgment } from "@lore/core";
+import { actedStore } from "../live-invocation.js";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -180,7 +181,7 @@ interface CalibrationSeedEntry {
  */
 async function seedCalibrationScenario(tmpDir: string, entries: CalibrationSeedEntry[]): Promise<void> {
   const dbPath = join(tmpDir, ".lore", "lore.db");
-  const store = new SQLiteStore(dbPath);
+  const store = actedStore(new SQLiteStore(dbPath));
   try {
     for (const entry of entries) {
       const doc = makeDocRecord({ type: entry.doc_type });

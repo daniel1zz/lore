@@ -31,6 +31,7 @@ import {
   ORDINAL_ALLOCATION_CASES,
   type OrdinalAllocationCase,
 } from "./ordinal-allocation-cases.js";
+import { actedStore } from "../../live-invocation.js";
 
 // ─── Factories ───────────────────────────────────────────────────────────────
 
@@ -88,7 +89,7 @@ describe("SQLiteStore — ordinal-allocation contract (SPEC-084)", () => {
   let store: SQLiteStore;
 
   beforeEach(() => {
-    store = new SQLiteStore(":memory:");
+    store = actedStore(new SQLiteStore(":memory:"));
   });
 
   afterEach(() => {

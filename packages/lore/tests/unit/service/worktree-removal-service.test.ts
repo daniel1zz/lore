@@ -21,6 +21,7 @@ import type { ListedWorktree, ProbeResult, WorktreeGitProbe } from "../../../src
 import { DecisionService } from "../../../src/service/decision-service.js";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import type { ProcessScanPort } from "../../../src/adapters/real-process-scan-port.js";
+import { actedStore } from "../../live-invocation.js";
 
 const REPO = "/repo";
 const WT = "/wt/agent-AAA";
@@ -107,7 +108,7 @@ function build(over: Partial<World> = {}): { service: WorktreeRemovalService; wo
       ),
     getRunEnd: async (id: string) => ok(id in world.runEnds ? { endedAt: world.runEnds[id] ?? null } : null),
   } as unknown as WorktreeRemovalRunStore;
-  return { service: new WorktreeRemovalService({ probe, processScan, occupancy, runs, decisions: new DecisionService({ store: new InMemoryStore(), executorRun: null }) }), world };
+  return { service: new WorktreeRemovalService({ probe, processScan, occupancy, runs, decisions: new DecisionService({ store: actedStore(new InMemoryStore()), executorRun: null }) }), world };
 }
 
 describe("WorktreeRemovalService.check", () => {

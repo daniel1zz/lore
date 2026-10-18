@@ -43,9 +43,10 @@ import { VersionService } from "../../../src/service/version-service.js";
 import { ReviewService } from "../../../src/service/review-service.js";
 import { TaskWorkflowService } from "../../../src/service/task-workflow-service.js";
 import type { CreateDocInput, DocRecord, VersionRecord } from "@lore/core";
+import { actedStore } from "../../live-invocation.js";
 
 function makeServices() {
-  const store = new InMemoryStore();
+  const store = actedStore(new InMemoryStore());
   return {
     store,
     corpusService: new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined))),
@@ -142,7 +143,7 @@ describe("VersionRecord.slug capture (SPEC-072)", () => {
     // it end-to-end via a REAL non-corpus-service write, for the two most
     // commonly exercised of those services.
     it("AC-072-1: ReviewService.approve's version row carries the doc's slug (non-corpus-service write path)", async () => {
-      const store = new InMemoryStore();
+      const store = actedStore(new InMemoryStore());
       const reviewService = new ReviewService(store, new RecordLockService(store, new GateEnforcer(undefined)));
       // reason: `ReviewService.approve` resolves via `resolveDoc`'s ULID_REGEX
       // (`^[0-9A-HJKMNP-TV-Z]{26}$/i` — Crockford Base32, excludes I/L/O/U), so
@@ -183,7 +184,7 @@ describe("VersionRecord.slug capture (SPEC-072)", () => {
     });
 
     it("AC-072-1: TaskWorkflowService.addEvidence's version row carries the task's slug (non-corpus-service write path)", async () => {
-      const store = new InMemoryStore();
+      const store = actedStore(new InMemoryStore());
       const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
       const taskWorkflowService = new TaskWorkflowService(store, undefined, { claimTtlMinutes: 120 });
 

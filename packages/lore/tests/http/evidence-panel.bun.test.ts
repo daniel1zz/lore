@@ -31,6 +31,7 @@ import { createMachineAuthStores, type MachineAuthStores } from "../../src/adapt
 import { createApp } from "../../src/app.js";
 import type { App } from "../../src/app.js";
 import type { CreateDocInput } from "@lore/core";
+import { liveAmbient, liveWriteContext } from "../live-invocation.js";
 
 interface TestContext {
   server: ReturnType<typeof Bun.serve>;
@@ -56,7 +57,7 @@ async function makeTestServer(): Promise<TestContext> {
   // root's simplest overload — SQLiteStore, NoOpTelemetry, every service
   // (including verificationProjectionService) wired exactly as `lore serve`
   // wires it. No hand-built App stub for this test (SPEC-075 D8).
-  const app = createApp(dbPath);
+  const app = createApp(dbPath, undefined, liveAmbient(), liveWriteContext());
 
   // reason: SPEC-078 D1 — this key is used ONLY for the bearer-token tests below;
   // "dashboard-local" for the cookie-bootstrap regression test lives on machineAuth.

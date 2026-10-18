@@ -4,7 +4,7 @@
 
 import { defineCommand } from "citty";
 import { loadLoreApp } from "../loader.js";
-import { exitCode, formatError, formatTable, parsePositiveIntArg } from "../utils.js";
+import { exitCode, formatErrorFor, formatTable, parsePositiveIntArg } from "../utils.js";
 import type { DocId } from "@lore/core";
 import { SQLiteStore } from "../../../store/sqlite-store.js";
 import { resolveDocId } from "../../../service/resolve.js";
@@ -51,20 +51,20 @@ export default defineCommand({
       const result = await app.versionService.log(args.id as DocId, { limit: limitResult.value });
 
       if (!result.ok) {
-        process.stderr.write(formatError(result.error) + "\n");
+        process.stderr.write(formatErrorFor(inv, result.error) + "\n");
         process.exitCode = exitCode(result.error);
         return;
       }
 
       const resolved = await resolveDocId(attributionStore, args.id);
       if (!resolved.ok) {
-        process.stderr.write(formatError(resolved.error) + "\n");
+        process.stderr.write(formatErrorFor(inv, resolved.error) + "\n");
         process.exitCode = exitCode(resolved.error);
         return;
       }
       const loaded = await loadVersionAttributions(attributionStore, resolved.value, limitResult.value);
       if (!loaded.ok) {
-        process.stderr.write(formatError(loaded.error) + "\n");
+        process.stderr.write(formatErrorFor(inv, loaded.error) + "\n");
         process.exitCode = exitCode(loaded.error);
         return;
       }

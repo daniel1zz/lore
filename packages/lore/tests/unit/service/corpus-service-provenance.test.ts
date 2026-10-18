@@ -50,6 +50,7 @@ import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
 import type { CreateDocInput, LinkRecord, LoreError, Result, Telemetry, TelemetryEvent } from "@lore/core";
 import { err } from "@lore/core";
+import { actedStore } from "../../live-invocation.js";
 
 // ─── Capturing telemetry spy (mirrors corpus-service-telemetry.test.ts) ───────
 
@@ -83,7 +84,7 @@ class FailingLinkStore extends InMemoryStore {
 
 // ─── Test helpers ──────────────────────────────────────────────────────────────
 
-function makeService(store: InMemoryStore = new InMemoryStore()) {
+function makeService(store: InMemoryStore = actedStore(new InMemoryStore())) {
   const telemetry = new CapturingTelemetry();
   const service = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)), telemetry);
   return { service, store, telemetry };
@@ -189,7 +190,7 @@ describe("CorpusService.create() provenance auto-write — HAPPY", () => {
 
 describe("CorpusService.create() provenance auto-write — ERROR (fail-soft)", () => {
   it("AC-P4-4: a forced store.addLink failure during provenance write never surfaces as create()'s error", async () => {
-    const failingStore = new FailingLinkStore();
+    const failingStore = actedStore(new FailingLinkStore());
     const { service, telemetry } = makeService(failingStore);
 
     const skill = await createApprovedSkillDoc(service, { title: "Write-spec rules", appliesTo: "spec" });
@@ -215,7 +216,7 @@ describe("CorpusService.create() provenance auto-write — ERROR (fail-soft)", (
   });
 
   it("AC-P4-4: create() itself never throws when the provenance store call fails", async () => {
-    const failingStore = new FailingLinkStore();
+    const failingStore = actedStore(new FailingLinkStore());
     const { service } = makeService(failingStore);
     await createApprovedSkillDoc(service, { title: "Write-spec rules", appliesTo: "spec" });
 

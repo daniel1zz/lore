@@ -12,6 +12,7 @@ import { applyClassEdit } from "@lore/core";
 import { SQLiteStore } from "../../../src/store/sqlite-store.js";
 import { DecisionService } from "../../../src/service/decision-service.js";
 import { lore, runDecide, type Corpus } from "./autonomy-calibration-helpers.js";
+import { actedStore } from "../../live-invocation.js";
 
 /** The self-grantable override classes whose seeded prior escalates (verify-new-command's prior is already 0.95). */
 export const OVERRIDE_CLASSES_AT_LOW_PRIOR = ["override-judgment", "override-attestation", "ac-exempt"] as const;
@@ -61,7 +62,7 @@ export async function loosenOverrideClasses(
   prior = 0.95,
 ): Promise<void> {
   const corpus = corpusAt(dir);
-  const store = new SQLiteStore(corpus.dbPath);
+  const store = actedStore(new SQLiteStore(corpus.dbPath));
   try {
     const service = new DecisionService({ store, executorRun: null });
     const thresholds = service.thresholds();

@@ -22,6 +22,7 @@ import { AcExemptionService } from "../../../src/service/ac-exemption-service.js
 import { alwaysAutoOverridePort } from "../../helpers/always-auto-override-port.js";
 import { exemptionHeadroom, indexBaseline, satisfiedExemptionKeys } from "../../../src/service/ac-cite-gate.js";
 import { exemptionState } from "../../../src/store/store-shared.js";
+import { liveAmbient, liveWriteContext, actedStore } from "../../live-invocation.js";
 
 const SKELETON = "## Overview/Goal\n\nx\n\n## Scope\n\nx\n\n## Acceptance Criteria\n\nx";
 const DAY = 86_400_000;
@@ -41,10 +42,10 @@ let specId: string;
 beforeEach(async () => {
   dir = mkdtempSync(join(tmpdir(), "ac-exempt-satisfied-"));
   const config = LoreConfigSchema.parse({ project: { name: "exempt-sat", author: "tester" } });
-  const made = createApp(join(dir, "c.db"), config);
+  const made = createApp(join(dir, "c.db"), config, liveAmbient(), liveWriteContext());
   if ("ok" in made) throw new Error(`createApp failed: ${JSON.stringify(made)}`);
   app = made;
-  side = new SQLiteStore(join(dir, "c.db"));
+  side = actedStore(new SQLiteStore(join(dir, "c.db")));
   svc = new AcExemptionService(side, () => new Date(), alwaysAutoOverridePort()); // AU-T7: explicit test port; no port = refused
   const cs = app.corpusService;
   const rs = app.ruleService!;

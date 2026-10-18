@@ -64,11 +64,12 @@ import {
 } from "../../../src/service/task-workflow-service.js";
 import { NoOpTelemetry } from "@lore/core";
 import type { CreateDocInput, DocRecord } from "@lore/core";
+import { actedStore } from "../../live-invocation.js";
 
 // ─── Fixtures (mirror task-workflow-service.test.ts's shapes exactly) ────────
 
 function makeServices() {
-  const store = new InMemoryStore();
+  const store = actedStore(new InMemoryStore());
   const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
   const taskWorkflowService = new TaskWorkflowService(store, new NoOpTelemetry(), {
     claimTtlMinutes: 120,

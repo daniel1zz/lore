@@ -31,6 +31,7 @@ import { JudgmentService } from "../../../src/service/judgment-service.js";
 import { StalenessProbeService, type ProbeStalenessPort } from "../../../src/service/staleness-probe-service.js";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { renderStalenessRepairCommand, type StalenessFlowDeps } from "../../../src/flows/staleness-flow.js";
+import { actedStore } from "../../live-invocation.js";
 
 function makeNoOpTelemetry(): Telemetry {
   return { record: vi.fn(), emit: vi.fn(), close: vi.fn() };
@@ -56,7 +57,7 @@ function buildTestFlowDeps(corpusService: CorpusService, judgmentService: Judgme
 }
 
 async function setup() {
-  const store = new InMemoryStore();
+  const store = actedStore(new InMemoryStore());
   const telemetry = makeNoOpTelemetry();
   const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
   const judgmentService = new JudgmentService(store, telemetry);

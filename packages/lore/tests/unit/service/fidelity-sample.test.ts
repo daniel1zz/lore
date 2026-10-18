@@ -33,6 +33,7 @@ import { RuleService } from "../../../src/service/rule-service.js";
 import { AcService } from "../../../src/service/ac-service.js";
 import { InMemoryAIProvider } from "../../../src/ai/in-memory-provider.js";
 import { makeRuleService } from "../../helpers/make-rule-service.js";
+import { actedStore } from "../../live-invocation.js";
 
 // ─── Module loader (module does not exist yet; keep the file loadable + typecheck at 0) ───────────
 
@@ -102,7 +103,7 @@ async function world(
   ruleDefs: Array<{ statement: string; lifecycle?: "deprecated" }>,
   acCites: Array<Array<number | string>>,
 ): Promise<World> {
-  const store = new InMemoryStore();
+  const store = actedStore(new InMemoryStore());
   const corpus = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
   const rules = makeRuleService(store);
   const ac = new AcService(store, new RecordLockService(store, new GateEnforcer(undefined)));

@@ -28,6 +28,7 @@ import { InMemoryAIProvider } from "../../../src/ai/in-memory-provider.js";
 import { buildAssessDiffMeta, extractDeclaredAcceptanceCriteria } from "../../../src/ai/assess-template.js";
 import type { AIProvider, CreateDocInput, PlanBundle, Telemetry, TelemetryEvent } from "@lore/core";
 import { computeAssessmentFacts } from "@lore/core";
+import { actedStore } from "../../live-invocation.js";
 
 const DEFAULT_BUDGETS = { max_plan_chars: 8000, max_spec_chars: 12000, max_task_chars: 4000, max_diff_chars: 24000 };
 
@@ -116,7 +117,7 @@ async function makeIncompleteEvidenceBundle(store: InMemoryStore): Promise<PlanB
 
 describe("assessPlan — facts are creation-time-frozen, immune to a contradictory judge (AC-ADF-1, SPEC-040 D1/D2)", () => {
   it("persisted facts deep-equal the independently-computed facts, DESPITE a scripted judge response that claims full coverage on both ACs", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const bundle = await makeIncompleteEvidenceBundle(store);
 
     // reason: compute the EXPECTED facts ourselves, BEFORE calling assessPlan at all —
@@ -167,7 +168,7 @@ describe("assessPlan — facts are creation-time-frozen, immune to a contradicto
   });
 
   it("source_versions pins {doc_id, version} for the plan, the linked spec, and every task", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const bundle = await makeIncompleteEvidenceBundle(store);
     const provider = new InMemoryAIProvider("in-memory", {
       kind: "ok",

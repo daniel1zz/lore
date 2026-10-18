@@ -68,7 +68,7 @@
  * @spec_ref task-lore-evidence-add-and-lore-release-over-mcp-get-no
  */
 
-import { liveInvocation } from "../../live-invocation.js";
+import { liveInvocation, actedStore } from "../../live-invocation.js";
 import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
 import { describe, it, expect, afterEach, beforeEach } from "vitest";
@@ -145,7 +145,7 @@ let store: InMemoryStore;
 let corpusService: CorpusService;
 
 function makeApp(): App {
-  store = new InMemoryStore();
+  store = actedStore(new InMemoryStore());
   corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
   return {
     corpusService,

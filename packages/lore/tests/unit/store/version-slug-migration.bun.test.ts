@@ -38,6 +38,7 @@ import { MIGRATION_004_SQL } from "../../../src/store/migrations/migration-004.j
 import { MIGRATION_005_SQL } from "../../../src/store/migrations/migration-005.js";
 import { MIGRATION_006_SQL } from "../../../src/store/migrations/migration-006.js";
 import type { DocRecord, VersionRecord } from "@lore/core";
+import { actedStore } from "../../live-invocation.js";
 
 function userVersion(db: Database): number {
   return (db.query("PRAGMA user_version").get() as { user_version: number }).user_version;
@@ -111,7 +112,7 @@ describe("migration-007 (versions.slug nullable column)", () => {
   });
 
   it("HAPPY: a fresh :memory: DB migrates straight to the current head user_version with versions.slug present", () => {
-    const store = new SQLiteStore(":memory:");
+    const store = actedStore(new SQLiteStore(":memory:"));
     const db = store.getDatabase();
 
     // reason: migration-012 (spec-issue-closure-loop-computed-resolution-
@@ -126,7 +127,7 @@ describe("migration-007 (versions.slug nullable column)", () => {
   });
 
   it("HAPPY: SQLiteStore.insertVersion persists and reads back a slug value", async () => {
-    const store = new SQLiteStore(":memory:");
+    const store = actedStore(new SQLiteStore(":memory:"));
     const doc = makeDoc();
 
     const insertResult = await store.insert(doc);
@@ -157,7 +158,7 @@ describe("migration-007 (versions.slug nullable column)", () => {
   });
 
   it("HAPPY: a version row inserted WITHOUT a slug (legacy shape) reads back with slug simply absent, not NULL/placeholder", async () => {
-    const store = new SQLiteStore(":memory:");
+    const store = actedStore(new SQLiteStore(":memory:"));
     const doc = makeDoc({ id: "01HVSLUGDOC0000000000002", slug: "prd-legacy-shape-doc" });
 
     await store.insert(doc);
@@ -229,7 +230,7 @@ describe("migration-007 (versions.slug nullable column)", () => {
     // migration-009 (SPEC-079 G3 audit hash chain, currentVersion 8 < 9),
     // then migration-010 (SPEC-084 docs.ordinal, currentVersion 9 < 10) —
     // never throw, never touch the pre-existing rows.
-    const store = new SQLiteStore(dbPath);
+    const store = actedStore(new SQLiteStore(dbPath));
     const db = store.getDatabase();
 
     expect(userVersion(db)).toBe(23);
@@ -252,11 +253,11 @@ describe("migration-007 (versions.slug nullable column)", () => {
   });
 
   it("REGRESSION: reopening an already-migrated (latest version) file-backed DB a second time is idempotent — no throw, versions.slug unchanged", () => {
-    const firstOpen = new SQLiteStore(dbPath);
+    const firstOpen = actedStore(new SQLiteStore(dbPath));
     firstOpen.close();
 
     expect(() => {
-      const secondOpen = new SQLiteStore(dbPath);
+      const secondOpen = actedStore(new SQLiteStore(dbPath));
       const db = secondOpen.getDatabase();
       expect(userVersion(db)).toBe(23);
       expect(tableColumnNames(db, "versions")).toContain("slug");

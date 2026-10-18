@@ -34,6 +34,7 @@ import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
 import { err, ok } from "@lore/core";
 import type { CreateDocInput, DocRecord, LoreError, Result } from "@lore/core";
+import { actedStore } from "../../live-invocation.js";
 
 /**
  * RE-BASELINED by spec-approval-and-plan-closure-go-through-the-same-checks-on
@@ -70,7 +71,7 @@ function wireDoneFloorPort(cs: CorpusService, port: StubDoneFloorPort): void {
 }
 
 function makeServices(port?: StubDoneFloorPort) {
-  const store = new InMemoryStore();
+  const store = actedStore(new InMemoryStore());
   const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
   if (port !== undefined) wireDoneFloorPort(corpusService, port);
   return { store, corpusService };

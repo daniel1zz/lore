@@ -37,6 +37,7 @@ import { CorpusService } from "../../../src/service/corpus-service.js";
 import { TaskWorkflowService } from "../../../src/service/task-workflow-service.js";
 import type { DoneResult, EvidenceInput, VerifiedEvidenceInput } from "../../../src/service/task-workflow-service.js";
 import type { DocRecord, CreateDocInput } from "@lore/core";
+import { actedStore } from "../../live-invocation.js";
 
 function makeTaskDoc(overrides: Partial<DocRecord> = {}): DocRecord {
   return {
@@ -218,7 +219,7 @@ describe("lore done — last non-terminal task advisory (AC-CLOSURE-3, DD-2)", (
   // ── Harness (real service, InMemoryStore — mirrors task-workflow-service.test.ts) ──
 
   function makeServices() {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
     const taskWorkflowService = new TaskWorkflowService(store, undefined, { claimTtlMinutes: 120 });
     return { store, corpusService, taskWorkflowService };

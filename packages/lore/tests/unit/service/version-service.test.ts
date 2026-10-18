@@ -27,6 +27,7 @@ import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { VersionService } from "../../../src/service/version-service.js";
 import { err } from "@lore/core";
 import type { DocRecord, VersionRecord } from "@lore/core";
+import { actedStore } from "../../live-invocation.js";
 
 // ─── Factories ────────────────────────────────────────────────────────────────
 
@@ -85,7 +86,7 @@ let service: VersionService;
 
 beforeEach(() => {
   _seq = 0;
-  store = new InMemoryStore();
+  store = actedStore(new InMemoryStore());
   service = new VersionService(store, new RecordLockService(store, new GateEnforcer(undefined)));
 });
 
@@ -657,7 +658,7 @@ describe("VersionService.restore — atomic CAS write ordering (M4)", () => {
   }
 
   it("ERROR/STATE: concurrent version bump → CAS update fails with STALE_VERSION, NO versions/audit rows written", async () => {
-    const staleStore = new StaleOnceStore();
+    const staleStore = actedStore(new StaleOnceStore());
     const staleService = new VersionService(staleStore, new RecordLockService(staleStore, new GateEnforcer(undefined)));
 
     const doc = makeDoc({ version: 2 });

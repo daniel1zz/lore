@@ -64,11 +64,12 @@ import {
 } from "../../../src/service/task-workflow-service.js";
 import { exitCode } from "../../../src/adapters/cli/utils.js";
 import type { CreateDocInput, LoreError } from "@lore/core";
+import { actedStore } from "../../live-invocation.js";
 
 // ─── Harness ────────────────────────────────────────────────────────────────
 
 function makeServices() {
-  const store = new InMemoryStore();
+  const store = actedStore(new InMemoryStore());
   const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
   const taskWorkflowService = new TaskWorkflowService(store, undefined, { claimTtlMinutes: 120 });
   taskWorkflowService.setOverrideDecisionPort(alwaysAutoOverridePort()); // AU-T7: explicit test port; no port = refused

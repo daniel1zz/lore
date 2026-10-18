@@ -36,7 +36,7 @@ import {
 } from "@lore/core";
 import type { RunProcessRecord, StoreInterface } from "../store/store-interface.js";
 import { claimNamesWorktree, makeDirectoryResolver, type RealpathFn } from "./seat-claim-match.js";
-import { createRealWorktreeProbe, resolveClaimWorktree, type WorktreeGitProbe } from "./worktree-cleanup.js";
+import { resolveClaimWorktree, type WorktreeGitProbe } from "./worktree-cleanup.js";
 
 export type RunStore = Pick<
   StoreInterface,
@@ -154,8 +154,8 @@ export class RunService {
     private readonly claims?: RunClaimEnder,
     /** Required by {@link RunService.occupancy} only (the claim path comparison); wired by `app.ts`. */
     private readonly realpathPort?: RealpathFn,
-    /** Resolves a branch-name claim to its directory ({@link RunService.openClaimsOfWorkingCopy}); git runs only then. */
-    private readonly worktreeProbe: WorktreeGitProbe = createRealWorktreeProbe(),
+    /** Resolves a branch-name claim to its directory ({@link RunService.openClaimsOfWorkingCopy}); git runs only then. Wired by `app.ts` from the invocation's cwd. */
+    private readonly worktreeProbe?: WorktreeGitProbe,
   ) {}
 
   /**
@@ -391,6 +391,10 @@ export class RunService {
         if (claim === undefined) continue;
         let matches = claimNamesWorktree(claim.worktree, { branch: undefined, resolvedDirectory }, resolveDirectory);
         if (!matches && claim.worktree !== undefined) {
+          if (this.worktreeProbe === undefined) {
+            notMeasured.push(`open claim of ${task.slug}: worktree ${claim.worktree} not resolved (no worktree probe wired)`);
+            continue;
+          }
           const resolution = resolveClaimWorktree(this.worktreeProbe, claim.worktree, workingCopy);
           if (resolution.kind === "resolved") matches = resolveDirectory(resolution.path) === resolvedDirectory;
           else if (resolution.kind === "not-measured") {

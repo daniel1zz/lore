@@ -126,7 +126,7 @@ export default defineCommand({
       process.stderr.write("Error: lore integrate requires a <branch>\n");
       process.exit(2);
     }
-    const { app, dbPath, config } = loadLoreApp();
+    const { app, dbPath, config } = loadLoreApp({ inv });
     try {
       const corpusDir = dirname(resolvePath(dbPath));
       const projectRoot = dirname(corpusDir);

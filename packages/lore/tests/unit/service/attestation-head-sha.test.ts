@@ -41,6 +41,7 @@ import { TaskWorkflowService } from "../../../src/service/task-workflow-service.
 import type { EvidenceInput, VerifiedEvidenceInput } from "../../../src/service/task-workflow-service.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
+import { actedStore } from "../../live-invocation.js";
 
 // ─── temp git fixtures (mkdtemp only — never the repo's own tree) ───────────
 
@@ -242,7 +243,7 @@ describe("runner attestation head_sha / worktree_dirty (C5)", () => {
 
 describe("self-reported evidence never carries head_sha / worktree_dirty (C5)", () => {
   async function makeTask(): Promise<{ svc: TaskWorkflowService; store: InMemoryStore; taskId: string }> {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const corpus = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
     const svc = new TaskWorkflowService(store, new NoOpTelemetry(), { claimTtlMinutes: 120 });
     const plan = await corpus.create({ type: "plan", title: "P", content: "b" } as CreateDocInput);

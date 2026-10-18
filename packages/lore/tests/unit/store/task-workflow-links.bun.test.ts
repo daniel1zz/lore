@@ -20,6 +20,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { SQLiteStore } from "../../../src/store/sqlite-store.js";
 import type { DocRecord, LinkRecord } from "@lore/core";
+import { actedStore } from "../../live-invocation.js";
 
 // ─── Factories ───────────────────────────────────────────────────────────────
 
@@ -71,7 +72,7 @@ describe("SQLiteStore.findLinksByToIds", () => {
   let store: SQLiteStore;
 
   beforeEach(() => {
-    store = new SQLiteStore(":memory:");
+    store = actedStore(new SQLiteStore(":memory:"));
   });
 
   afterEach(() => {

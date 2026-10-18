@@ -77,7 +77,7 @@
 import { defineCommand } from "citty";
 import type { DocRecord, DocType, LoreError, Result } from "@lore/core";
 import { loadLoreApp } from "../loader.js";
-import { exitCode, formatError, resolveActor } from "../utils.js";
+import { exitCode, formatErrorFor, resolveActor } from "../utils.js";
 import { collectFileAnchorResolution, renderFileAnchorAdvisory } from "../../../service/anchor-resolution.js";
 import { ANCHOR_SCANNED_DOC_TYPES } from "../../../service/drift-check-service.js";
 import { buildFileAnchorProbeContext } from "../../real-fs-probe.js";
@@ -119,10 +119,11 @@ function collectVariadicPositionals(args: Record<string, unknown>, skip: number)
  *
  * @param anchors - The task's resulting `extra.file_anchors` (already normalized).
  * @param subject - The task slug, rendered into the advisory header.
+ * @param cwd - The invocation's working directory the anchors are probed against.
  */
-function emitFileAnchorAdvisory(anchors: string[], subject: string): void {
+function emitFileAnchorAdvisory(anchors: string[], subject: string, cwd: string): void {
   if (anchors.length === 0) return;
-  const report = collectFileAnchorResolution(anchors, buildFileAnchorProbeContext());
+  const report = collectFileAnchorResolution(anchors, buildFileAnchorProbeContext(cwd));
   for (const line of renderFileAnchorAdvisory(report, { subject })) {
     process.stderr.write(line + "\n");
   }
@@ -218,27 +219,27 @@ export default defineCommand({
 
           const targetResult = await resolveAnchorTarget(app, targetId);
           if (!targetResult.ok) {
-            process.stderr.write(formatError(targetResult.error) + "\n");
+            process.stderr.write(formatErrorFor(inv, targetResult.error) + "\n");
             process.exitCode = exitCode(targetResult.error);
             return;
           }
           const target = targetResult.value;
 
           if (target.type === "task") {
-            const by = resolveActor(undefined, inv.env, inv.cwd);
+            const by = resolveActor(undefined, inv.env, inv.cwd, inv.user);
             const result = await app.taskWorkflowService.addAnchors(targetId, paths, {
               by,
               source: app.callerSurface,
             });
 
             if (!result.ok) {
-              process.stderr.write(formatError(result.error) + "\n");
+              process.stderr.write(formatErrorFor(inv, result.error) + "\n");
               process.exitCode = exitCode(result.error);
               return;
             }
 
             const anchors = (result.value.extra["file_anchors"] as string[] | undefined) ?? [];
-            emitFileAnchorAdvisory(anchors, result.value.slug);
+            emitFileAnchorAdvisory(anchors, result.value.slug, inv.cwd);
             if (args.json) {
               console.log(JSON.stringify({ ok: true, data: { doc: result.value, anchors } }, null, 2));
               return;
@@ -255,7 +256,7 @@ export default defineCommand({
             const result = await app.driftCheckService.addCodeAnchors(targetId, paths);
 
             if (!result.ok) {
-              process.stderr.write(formatError(result.error) + "\n");
+              process.stderr.write(formatErrorFor(inv, result.error) + "\n");
               process.exitCode = exitCode(result.error);
               return;
             }
@@ -270,7 +271,7 @@ export default defineCommand({
             renderAnchorList(anchors);
           } else {
             const error = unsupportedTargetTypeError(target.type);
-            process.stderr.write(formatError(error) + "\n");
+            process.stderr.write(formatErrorFor(inv, error) + "\n");
             process.exitCode = exitCode(error);
           }
         } finally {
@@ -307,21 +308,21 @@ export default defineCommand({
 
           const targetResult = await resolveAnchorTarget(app, targetId);
           if (!targetResult.ok) {
-            process.stderr.write(formatError(targetResult.error) + "\n");
+            process.stderr.write(formatErrorFor(inv, targetResult.error) + "\n");
             process.exitCode = exitCode(targetResult.error);
             return;
           }
           const target = targetResult.value;
 
           if (target.type === "task") {
-            const by = resolveActor(undefined, inv.env, inv.cwd);
+            const by = resolveActor(undefined, inv.env, inv.cwd, inv.user);
             const result = await app.taskWorkflowService.removeAnchors(targetId, paths, {
               by,
               source: app.callerSurface,
             });
 
             if (!result.ok) {
-              process.stderr.write(formatError(result.error) + "\n");
+              process.stderr.write(formatErrorFor(inv, result.error) + "\n");
               process.exitCode = exitCode(result.error);
               return;
             }
@@ -343,7 +344,7 @@ export default defineCommand({
             const result = await app.driftCheckService.removeCodeAnchors(targetId, paths);
 
             if (!result.ok) {
-              process.stderr.write(formatError(result.error) + "\n");
+              process.stderr.write(formatErrorFor(inv, result.error) + "\n");
               process.exitCode = exitCode(result.error);
               return;
             }
@@ -358,7 +359,7 @@ export default defineCommand({
             renderAnchorList(anchors);
           } else {
             const error = unsupportedTargetTypeError(target.type);
-            process.stderr.write(formatError(error) + "\n");
+            process.stderr.write(formatErrorFor(inv, error) + "\n");
             process.exitCode = exitCode(error);
           }
         } finally {
@@ -388,7 +389,7 @@ export default defineCommand({
           const targetResult = await resolveAnchorTarget(app, args.target as string);
 
           if (!targetResult.ok) {
-            process.stderr.write(formatError(targetResult.error) + "\n");
+            process.stderr.write(formatErrorFor(inv, targetResult.error) + "\n");
             process.exitCode = exitCode(targetResult.error);
             return;
           }
@@ -401,7 +402,7 @@ export default defineCommand({
             anchors = (doc.extra["code_anchors"] as string[] | undefined) ?? [];
           } else {
             const error = unsupportedTargetTypeError(doc.type);
-            process.stderr.write(formatError(error) + "\n");
+            process.stderr.write(formatErrorFor(inv, error) + "\n");
             process.exitCode = exitCode(error);
             return;
           }

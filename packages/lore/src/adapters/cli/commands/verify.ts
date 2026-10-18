@@ -185,7 +185,7 @@ import { resolve as resolvePath } from "node:path";
 import { createInterface } from "node:readline/promises";
 import { defineCommand } from "citty";
 import { loadLoreApp } from "../loader.js";
-import { exitCode, formatError, resolveActor } from "../utils.js";
+import { exitCode, formatErrorFor, resolveActor } from "../utils.js";
 import { VERIFY_NO_SCRIPT_ACS } from "../cli-refusal-messages.js";
 import { formatAcResultLine, buildVerifyHeaderLines } from "../verify-render.js";
 import { resolveVerifyExecutionRoot } from "@lore/core";
@@ -416,7 +416,7 @@ export default defineCommand({
     const { app } = loadLoreApp({ inv });
     try {
       const acIds = normalizeRepeatableFlag(args.ac);
-      const by = resolveActor(undefined, inv.env, inv.cwd);
+      const by = resolveActor(undefined, inv.env, inv.cwd, inv.user);
       const allowNewCommands = args["allow-new-commands"] === true;
 
       // reason: SPEC-039 §M2 trust-hardening advisory — `lore verify` shells out to
@@ -512,7 +512,7 @@ export default defineCommand({
           executionRoot,
         });
         if (!falsifyResult.ok) {
-          process.stderr.write(formatError(falsifyResult.error) + "\n");
+          process.stderr.write(formatErrorFor(inv, falsifyResult.error) + "\n");
           process.exitCode = exitCode(falsifyResult.error);
           return;
         }
@@ -609,14 +609,14 @@ export default defineCommand({
         // corpusService reads elsewhere (e.g. task-feed-wiring.ts, gate.ts).
         const taskResult = await app.corpusService.get(taskArg);
         if (!taskResult.ok) {
-          process.stderr.write(formatError(taskResult.error) + "\n");
+          process.stderr.write(formatErrorFor(inv, taskResult.error) + "\n");
           process.exitCode = exitCode(taskResult.error);
           return;
         }
 
         const specsResult = await app.corpusService.listFull({ type: "spec" });
         if (!specsResult.ok) {
-          process.stderr.write(formatError(specsResult.error) + "\n");
+          process.stderr.write(formatErrorFor(inv, specsResult.error) + "\n");
           process.exitCode = exitCode(specsResult.error);
           return;
         }
@@ -637,7 +637,7 @@ export default defineCommand({
       }
 
       if (!result.ok) {
-        process.stderr.write(formatError(result.error) + "\n");
+        process.stderr.write(formatErrorFor(inv, result.error) + "\n");
         process.exitCode = exitCode(result.error);
         return;
       }

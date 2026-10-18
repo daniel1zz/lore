@@ -18,10 +18,10 @@
  * this correction closes).
  *
  * Public surface:
- *   - exitCode() / formatError() — error presentation
+ *   - exitCode() / formatError() / formatErrorFor() — error presentation
  *   - buildRetryCommandLine() — the `Retry:` line of the declared write-contention
- *     message, built from the Invocation's argv by the caller and passed to
- *     formatError as `opts.retryCommand`
+ *     message, built from the Invocation (`argv`, `execPath`, `isCompiled`) by the caller;
+ *     `formatErrorFor(inv, error)` passes it to formatError as `opts.retryCommand`
  *   - resolveActor() / resolveActorWithSource() / resolveActorWithIdentitySource()
  *     / detectWorktreeDerivedActor() — actor-identity
  *     resolution (SPEC-051, SPEC-104)
@@ -62,9 +62,8 @@ import {
   isInvalidated,
 } from "@lore/core";
 import { resolveActorWithSource as resolveActorWithSourceCore } from "@lore/core/node";
-import { readOsUsername } from "../../os-username.js";
 import type { ActorSource as CoreActorSource } from "@lore/core/node";
-import type { DocRecord, LoreError, ReviewJudgment, ValidityCarrier } from "@lore/core";
+import type { DocRecord, Invocation, LoreError, ReviewJudgment, ValidityCarrier } from "@lore/core";
 import type { TreeNode } from "../../service/corpus-service.js";
 import type { DocWithNavigation } from "../../service/corpus-service.js";
 
@@ -169,6 +168,19 @@ export function exitCode(error: LoreError): number {
       return 1;
     }
   }
+}
+
+/**
+ * {@link formatError} for a command that holds its Invocation: the write-contention `Retry:` line names the exact
+ * command this process was started with ({@link buildRetryCommandLine}).
+ *
+ * @param inv - the command's Invocation
+ * @param error - LoreError from a service call
+ * @param opts - as {@link formatError}, minus `retryCommand` (taken from `inv`)
+ * @returns formatted string for stderr output
+ */
+export function formatErrorFor(inv: Invocation, error: LoreError, opts?: { aiHasNoFallback?: boolean }): string {
+  return formatError(error, { ...opts, retryCommand: buildRetryCommandLine(inv) });
 }
 
 /**
@@ -300,9 +312,9 @@ export function formatError(error: LoreError, opts?: { aiHasNoFallback?: boolean
         boundMs: error.bound_ms,
         source: error.source,
         // reason: the retry line is this process's own argv, which only the entry knows (AS-26): a caller that holds the
-        // Invocation passes `buildRetryCommandLine(...)` as `opts.retryCommand`. No `WRITE_CONTENTION` producer exists in
-        // `src/` today (the code is only rendered), so no caller supplies it yet; when none does the line names the
-        // action instead of an argv this module may not read.
+        // Invocation renders through `formatErrorFor(inv, error)`, which passes `buildRetryCommandLine(inv)` as
+        // `opts.retryCommand`. A caller with no Invocation in scope gets a line that names the action instead of an argv
+        // this module may not read.
         retryCommand: opts?.retryCommand ?? WRITE_CONTENTION_GENERIC_RETRY,
       });
     case "CLAIM_CONFLICT":
@@ -398,20 +410,18 @@ function shellQuoteArg(arg: string): string {
  *     can never supply the program name; `process.execPath` IS the compiled
  *     binary's own path, so its basename is the installed command name.
  *
- * @param argv - `process.argv`
- * @param execPath - `process.execPath`
+ * @param inv - the Invocation's `argv` (arguments after the program name), `execPath` and `isCompiled`
  * @returns e.g. `lore report-issue --title 'a b'`. Running from SOURCE (no
  *   `/$bunfs/` entry) renders the canonical `lore` name rather than `bun`,
  *   because the retry advice must name the command a caller can actually
  *   re-run, not this process's dev-mode launcher.
  * @example
- *   buildRetryCommandLine(["bun", "/$bunfs/root/index.js", "report-issue"], "/usr/local/bin/lore")
+ *   buildRetryCommandLine({ argv: ["report-issue"], execPath: "/usr/local/bin/lore", isCompiled: true })
  *   // "lore report-issue"
  */
-export function buildRetryCommandLine(argv: readonly string[], execPath: string): string {
-  const isCompiledBinary = argv[1]?.startsWith("/$bunfs/") === true;
-  const programName = isCompiledBinary ? basename(execPath) : "lore";
-  const userArgs = argv.slice(2).map(shellQuoteArg);
+export function buildRetryCommandLine(inv: Pick<Invocation, "argv" | "execPath" | "isCompiled">): string {
+  const programName = inv.isCompiled ? basename(inv.execPath) : "lore";
+  const userArgs = inv.argv.map(shellQuoteArg);
   return [programName, ...userArgs].join(" ");
 }
 
@@ -545,6 +555,7 @@ export function detectWorktreeDerivedActor(startDir: string): string | undefined
  * @param cwd - Directory to detect worktree membership from (the
  *   invocation's `cwd`); tests pass a fixture directory instead of mutating
  *   global cwd
+ * @param user - The OS account name (the invocation's `user`): the os-fallback tier's value
  * @returns `{actor, source}` — `source: "worktree-derived"` only when every
  *   named tier was exhausted AND `cwd` resolved to a linked worktree with a
  *   resolvable branch HEAD
@@ -559,8 +570,9 @@ export function resolveActorWithSource(
   explicit: string | undefined,
   env: Readonly<Record<string, string | undefined>>,
   cwd: string,
+  user: string,
 ): ResolvedActor {
-  const core = resolveActorWithSourceCore(explicit, env, readOsUsername);
+  const core = resolveActorWithSourceCore(explicit, env, () => user);
   if (core.source !== "os-fallback") {
     return core;
   }
@@ -611,13 +623,14 @@ export function resetActorFallbackWarningForTests(): void {
  * @param explicit - Value of the --by flag, if the user passed one
  * @param env - the Invocation's environment (`inv.env`)
  * @param cwd - the Invocation's working directory (`inv.cwd`)
+ * @param user - the Invocation's OS account name (`inv.user`)
  * @returns Resolved actor identity string (never empty — OS username is always available)
  * @example
- *   resolveActor(undefined, inv.env, inv.cwd) // => session actor, worktree-derived agent:<branch>, or OS username
- *   resolveActor("alice", inv.env, inv.cwd) // => "alice" (never warns)
+ *   resolveActor(undefined, inv.env, inv.cwd, inv.user) // => session actor, worktree-derived agent:<branch>, or OS username
+ *   resolveActor("alice", inv.env, inv.cwd, inv.user) // => "alice" (never warns)
  */
-export function resolveActor(explicit: string | undefined, env: Readonly<Record<string, string | undefined>>, cwd: string): string {
-  return resolveActorWithIdentitySource(explicit, env, cwd).actor;
+export function resolveActor(explicit: string | undefined, env: Readonly<Record<string, string | undefined>>, cwd: string, user: string): string {
+  return resolveActorWithIdentitySource(explicit, env, cwd, user).actor;
 }
 
 /**
@@ -644,8 +657,9 @@ export function resolveActorWithIdentitySource(
   explicit: string | undefined,
   env: Readonly<Record<string, string | undefined>>,
   cwd: string,
+  user: string,
 ): ResolvedActor {
-  const resolved = resolveActorWithSource(explicit, env, cwd);
+  const resolved = resolveActorWithSource(explicit, env, cwd, user);
   if (resolved.source === "os-fallback" && !warnedActorFallback) {
     warnedActorFallback = true;
     process.stderr.write(

@@ -72,11 +72,12 @@ import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
 import { DriftCheckService, type FsProbe } from "../../../src/service/drift-check-service.js";
 import { renderDriftRepairHint, renderDriftSectionLines, runDrift } from "../../../src/flows/drift-flow.js";
+import { actedStore } from "../../live-invocation.js";
 
 // ─── Fixture helpers (mirrors drift-population-reporting.test.ts's AC-RR-8 shape) ──
 
 function makeServices() {
-  const store = new InMemoryStore();
+  const store = actedStore(new InMemoryStore());
   return { corpusService: new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined))), driftCheckService: new DriftCheckService(store) };
 }
 

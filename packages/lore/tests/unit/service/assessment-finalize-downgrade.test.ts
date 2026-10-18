@@ -41,6 +41,7 @@ import { CorpusService } from "../../../src/service/corpus-service.js";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { InMemoryAIProvider } from "../../../src/ai/in-memory-provider.js";
 import type { AIProvider, CreateDocInput, PlanBundle, Telemetry, TelemetryEvent } from "@lore/core";
+import { actedStore } from "../../live-invocation.js";
 
 // ─── Fixtures ────────────────────────────────────────────────────────────────
 
@@ -61,7 +62,7 @@ function makeAssessService(provider: InMemoryAIProvider, budgets = DEFAULT_BUDGE
 
 /** Creates a plan with `taskContents.length` tasks, one per content string. */
 async function makeBundleWithTasks(taskContents: string[]): Promise<PlanBundle> {
-  const store = new InMemoryStore();
+  const store = actedStore(new InMemoryStore());
   const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
   const planResult = await corpusService.create({
     type: "plan",

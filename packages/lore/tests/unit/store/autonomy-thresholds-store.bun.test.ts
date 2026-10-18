@@ -10,6 +10,7 @@ import { join } from "node:path";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { SQLiteStore, LATEST_SCHEMA_VERSION } from "../../../src/store/sqlite-store.js";
 import type { StoreInterface } from "../../../src/store/store-interface.js";
+import { actedStore } from "../../live-invocation.js";
 
 async function roundTrip(store: StoreInterface): Promise<void> {
   const empty = await store.readAutonomyThresholds();
@@ -22,13 +23,13 @@ async function roundTrip(store: StoreInterface): Promise<void> {
 
 describe("autonomy_thresholds store contract (migration-022)", () => {
   it("InMemoryStore round-trips the exact text and replaces on rewrite", async () => {
-    await roundTrip(new InMemoryStore());
+    await roundTrip(actedStore(new InMemoryStore()));
   });
 
   it("SQLiteStore round-trips the exact text, keeps exactly one row, and refuses a second row id", async () => {
     const dir = mkdtempSync(join(tmpdir(), "lore-au9-store-"));
     try {
-      const store = new SQLiteStore(join(dir, "lore.db"));
+      const store = actedStore(new SQLiteStore(join(dir, "lore.db")));
       try {
         expect(LATEST_SCHEMA_VERSION).toBe(23);
         await roundTrip(store);

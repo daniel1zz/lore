@@ -43,6 +43,7 @@ import { CorpusService } from "../../../src/service/corpus-service.js";
 import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
 import { DOC_TYPE_ROLE_MAP, err, ok } from "@lore/core";
 import type { AcceptanceCriterion, DocRecord, DocType, EvidenceEntry, LoreConfig, LoreError, Result } from "@lore/core";
+import { actedStore } from "../../live-invocation.js";
 
 // ─── fake git port (shape pinned by rule-state-service.test.ts) ─────────────────────────────
 
@@ -175,7 +176,7 @@ interface World {
  * domain-document-edit requirement is gone.
  */
 async function world(opts: { enabled: boolean; rules: Record<string, string[]>; specAcs: AcceptanceCriterion[] }): Promise<World> {
-  const store = new InMemoryStore();
+  const store = actedStore(new InMemoryStore());
   const cs = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)), undefined, undefined, new GateEnforcer(config(opts.enabled)));
   const git = new FakeGit();
   const prd = await put(store, rawDoc("prd", "root-prd", {}, null));

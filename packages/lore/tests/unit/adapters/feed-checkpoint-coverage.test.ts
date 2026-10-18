@@ -78,6 +78,7 @@ import { CHECKPOINT_PRODUCED_TYPE } from "../../../src/flows/feed-flow.js";
 const PACKAGE_ROOT = fileURLToPath(new URL("../../../", import.meta.url));
 const INDEX_TS = join(PACKAGE_ROOT, "src", "index.ts");
 const APP_TS = join(PACKAGE_ROOT, "src", "app.ts");
+const LIVE_TS = join(PACKAGE_ROOT, "tests", "live-invocation.ts");
 
 interface RunResult {
   readonly stdout: string;
@@ -137,11 +138,12 @@ function seedSkillDocs(dbPath: string, scriptDir: string, specs: readonly SeedSp
   const scriptPath = join(scriptDir, "seed-skills.ts");
   const scriptSource = `
 import { createApp } from ${JSON.stringify(APP_TS)};
+import { liveAmbient, liveWriteContext } from ${JSON.stringify(LIVE_TS)};
 
 const dbPath = process.argv[2];
 const specs = JSON.parse(process.argv[3]);
 
-const app = createApp(dbPath);
+const app = createApp(dbPath, undefined, liveAmbient(), liveWriteContext());
 try {
   for (const spec of specs) {
     const createResult = await app.corpusService.create({

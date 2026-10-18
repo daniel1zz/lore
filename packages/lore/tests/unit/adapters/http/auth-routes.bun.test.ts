@@ -56,6 +56,7 @@ import { TreeCheckService } from "../../../../src/service/tree-check-service.js"
 import { NoOpTelemetry } from "@lore/core";
 import { MIGRATION_002_SQL } from "../../../../src/store/migrations/migration-002.js";
 import type { App } from "../../../../src/app.js";
+import { actedStore } from "../../../live-invocation.js";
 
 // ─── Setup ────────────────────────────────────────────────────────────────────
 
@@ -81,7 +82,7 @@ async function makeTestServer(): Promise<TestContext> {
 
   const apiKeyStore = new ApiKeyStore(db);
   const sessionStore = new SessionStore(db);
-  const docStore = new InMemoryStore();
+  const docStore = actedStore(new InMemoryStore());
   // reason: SPEC-078 D1 — mkdtemp per test, never the real XDG state path (root
   // CLAUDE.md 2026-07-07 pollution-incident rule).
   const machineAuth = createMachineAuthStores({ baseDir: mkdtempSync(join(tmpdir(), "lore-auth-routes-test-")) });

@@ -32,11 +32,12 @@ import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
 import { PhaseService } from "../../../src/service/phase-service.js";
 import type { CreateDocInput, DocPatch } from "@lore/core";
+import { actedStore } from "../../live-invocation.js";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function makeServices() {
-  const store = new InMemoryStore();
+  const store = actedStore(new InMemoryStore());
   return { store, corpusService: new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined))), phaseService: new PhaseService(store, new RecordLockService(store, new GateEnforcer(undefined))) };
 }
 

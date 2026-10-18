@@ -33,6 +33,7 @@ import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { formatJudgmentSummary, renderSupersededCandidateNudgeBlock } from "../../../src/adapters/cli/review-render.js";
 import type { StalenessFlowDeps } from "../../../src/flows/staleness-flow.js";
 import { ok } from "@lore/core";
+import { actedStore } from "../../live-invocation.js";
 
 function buildTestFlowDeps(corpusService: CorpusService, judgmentService: JudgmentService): StalenessFlowDeps {
   return {
@@ -49,7 +50,7 @@ function buildTestFlowDeps(corpusService: CorpusService, judgmentService: Judgme
 }
 
 async function setup() {
-  const store = new InMemoryStore();
+  const store = actedStore(new InMemoryStore());
   const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
   const judgmentService = new JudgmentService(store, new NoOpTelemetry());
   return { store, corpusService, judgmentService };

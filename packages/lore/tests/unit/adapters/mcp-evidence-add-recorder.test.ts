@@ -10,7 +10,7 @@
  * records the call's own resolved name) / REGRESSION (a `recorded_by` that reaches the handler anyway is not recorded).
  */
 
-import { liveInvocation } from "../../live-invocation.js";
+import { liveInvocation, actedStore } from "../../live-invocation.js";
 import { describe, it, expect, beforeEach } from "vitest";
 import type { z } from "zod";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -36,7 +36,7 @@ let store: InMemoryStore;
 let corpusService: CorpusService;
 
 function makeApp(): App {
-  store = new InMemoryStore();
+  store = actedStore(new InMemoryStore());
   const lock = new RecordLockService(store, new GateEnforcer(undefined));
   corpusService = new CorpusService(store, lock);
   return {

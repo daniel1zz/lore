@@ -29,9 +29,10 @@ import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
 import { AcService } from "../../../src/service/ac-service.js";
 import { RequirementService } from "../../../src/service/requirement-service.js";
+import { actedStore } from "../../live-invocation.js";
 
 function harness() {
-  const store = new InMemoryStore();
+  const store = actedStore(new InMemoryStore());
   return {
     store,
     cs: new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined))),

@@ -71,6 +71,7 @@ import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { SQLiteStore } from "../../../src/store/sqlite-store.js";
 import type { StoreInterface } from "../../../src/store/store-interface.js";
 import { TursoStore } from "../../../src/store/turso-store.js";
+import { actedStore } from "../../live-invocation.js";
 
 // ─── Contract shapes (local until B2 lands them on StoreInterface) ──────────
 
@@ -497,7 +498,7 @@ function tmpDb(prefix: string): { dir: string; path: string } {
 runSuite({
   label: "InMemoryStore",
   realPk: false,
-  create: () => ({ store: new InMemoryStore(), cleanup: () => undefined }),
+  create: () => ({ store: actedStore(new InMemoryStore()), cleanup: () => undefined }),
 });
 
 {
@@ -509,7 +510,7 @@ runSuite({
     create: () => {
       current = tmpDb("lore-rule-registry-sqlite-");
       const dir = current.dir;
-      const store = new SQLiteStore(current.path);
+      const store = actedStore(new SQLiteStore(current.path));
       return {
         store,
         cleanup: () => {
@@ -520,7 +521,7 @@ runSuite({
     },
     second: () => {
       if (current === undefined) throw new Error("second() called before create()");
-      const store = new SQLiteStore(current.path);
+      const store = actedStore(new SQLiteStore(current.path));
       return { store, cleanup: () => store.close() };
     },
   });
@@ -531,7 +532,7 @@ runSuite({
   realPk: true,
   create: () => {
     const { dir, path } = tmpDb("lore-rule-registry-turso-");
-    const store = new TursoStore({ localPath: path });
+    const store = actedStore(new TursoStore({ localPath: path }));
     return {
       store,
       cleanup: () => {

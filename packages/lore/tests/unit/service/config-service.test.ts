@@ -23,6 +23,7 @@ import yaml from "yaml";
 import { ConfigService, computeConfigHash } from "../../../src/service/config-service.js";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import type { LoreConfig } from "@lore/core";
+import { actedStore } from "../../live-invocation.js";
 
 // ─── Harness ──────────────────────────────────────────────────────────────────
 
@@ -51,7 +52,7 @@ function sha256(text: string): string {
 }
 
 function harness() {
-  const store = new InMemoryStore();
+  const store = actedStore(new InMemoryStore());
   const configService = new ConfigService(corpusDir, store.appendAuditEntry.bind(store));
   return { store, configService };
 }

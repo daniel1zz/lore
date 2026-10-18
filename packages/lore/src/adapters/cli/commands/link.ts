@@ -20,7 +20,7 @@
 
 import { defineCommand } from "citty";
 import { loadLoreApp } from "../loader.js";
-import { exitCode, formatError, formatShortId, resolveActor } from "../utils.js";
+import { exitCode, formatErrorFor, formatShortId, resolveActor } from "../utils.js";
 import { linkTypeSchema } from "@lore/core";
 import type { LinkType } from "@lore/core";
 import { invocationOf } from "../command-invocation.js";
@@ -74,7 +74,7 @@ export default defineCommand({
     const { args } = context;
     const inv = invocationOf(context);
     const hasInfer = args.infer === true;
-    const resolvedActor = resolveActor(undefined, inv.env, inv.cwd);
+    const resolvedActor = resolveActor(undefined, inv.env, inv.cwd, inv.user);
 
     const { app } = loadLoreApp({ inv });
     try {
@@ -85,13 +85,13 @@ export default defineCommand({
         // Fetch both documents for AI context
         const fromResolve = await app.corpusService.resolve(args.from);
         if (!fromResolve.ok) {
-          process.stderr.write(formatError(fromResolve.error) + "\n");
+          process.stderr.write(formatErrorFor(inv, fromResolve.error) + "\n");
           process.exitCode = exitCode(fromResolve.error);
           return;
         }
         const fromGet = await app.corpusService.get(fromResolve.value);
         if (!fromGet.ok) {
-          process.stderr.write(formatError(fromGet.error) + "\n");
+          process.stderr.write(formatErrorFor(inv, fromGet.error) + "\n");
           process.exitCode = exitCode(fromGet.error);
           return;
         }
@@ -99,13 +99,13 @@ export default defineCommand({
 
         const toResolve = await app.corpusService.resolve(args.to);
         if (!toResolve.ok) {
-          process.stderr.write(formatError(toResolve.error) + "\n");
+          process.stderr.write(formatErrorFor(inv, toResolve.error) + "\n");
           process.exitCode = exitCode(toResolve.error);
           return;
         }
         const toGet = await app.corpusService.get(toResolve.value);
         if (!toGet.ok) {
-          process.stderr.write(formatError(toGet.error) + "\n");
+          process.stderr.write(formatErrorFor(inv, toGet.error) + "\n");
           process.exitCode = exitCode(toGet.error);
           return;
         }
@@ -124,7 +124,7 @@ export default defineCommand({
         if (!inferResult.ok) {
           // reason: invalid link type or provider error → exit 6 (AI_PROVIDER_ERROR),
           // consistent with AC-LINK-AI-2 and AC-AI-FAIL-1. No link is created.
-          process.stderr.write(formatError(inferResult.error) + "\n");
+          process.stderr.write(formatErrorFor(inv, inferResult.error) + "\n");
           process.exitCode = exitCode(inferResult.error);
           return;
         }
@@ -140,7 +140,7 @@ export default defineCommand({
           by: resolvedActor,
         });
         if (!linkResult.ok) {
-          process.stderr.write(formatError(linkResult.error) + "\n");
+          process.stderr.write(formatErrorFor(inv, linkResult.error) + "\n");
           process.exitCode = exitCode(linkResult.error);
           return;
         }
@@ -172,7 +172,7 @@ export default defineCommand({
       });
 
       if (!result.ok) {
-        process.stderr.write(formatError(result.error) + "\n");
+        process.stderr.write(formatErrorFor(inv, result.error) + "\n");
         process.exitCode = exitCode(result.error);
         return;
       }

@@ -24,8 +24,7 @@
 
 import { AsyncLocalStorage } from "node:async_hooks";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
-import { err, ok, type InvocationIdentity, type LoreError, type NameSource, type Result } from "@lore/core";
-import { readOsUsername } from "../../os-username.js";
+import { err, ok, type Invocation, type InvocationIdentity, type LoreError, type NameSource, type Result } from "@lore/core";
 import { RunIdentityArgumentError, resolveInvocationIdentity, type ActorSource } from "@lore/core/node";
 import type { App } from "../../app.js";
 
@@ -57,10 +56,10 @@ function errorResult(error: LoreError): CallToolResult {
  * the name source stays honest (`session`/`os`), and the working-copy tier is skipped (the server's cwd says
  * nothing about the caller).
  */
-export function buildCallIdentity(input: CallAttestation, env: Readonly<Record<string, string | undefined>>): Result<InvocationIdentity, LoreError> {
+export function buildCallIdentity(input: CallAttestation, server: Pick<Invocation, "env" | "user">): Result<InvocationIdentity, LoreError> {
   const argv = input.harness_run !== undefined ? ["--harness-run", input.harness_run] : [];
   try {
-    const { identity } = resolveInvocationIdentity(argv, env, readOsUsername);
+    const { identity } = resolveInvocationIdentity(argv, server.env, () => server.user);
     return ok(identity);
   } catch (e) {
     if (e instanceof RunIdentityArgumentError) {
@@ -114,8 +113,8 @@ export class McpCallScope {
 
   constructor(
     readonly base: App,
-    /** The server's environment (`Invocation.env` of the MCP entry): the session tier of every call's name. */
-    private readonly env: Readonly<Record<string, string | undefined>>,
+    /** The server's environment and OS user (`Invocation` of the MCP entry): the session and OS tiers of every call's name. */
+    private readonly server: Pick<Invocation, "env" | "user">,
     private readonly warn: (line: string) => void = stderrWarn,
   ) {
     const resolve = (): App => this.store.getStore()?.app ?? this.base;
@@ -161,7 +160,7 @@ export class McpCallScope {
    * @returns the body's result, or an error result when the identity/App could not be established.
    */
   async run(input: CallAttestation, body: (context: CallContext) => Promise<CallToolResult>): Promise<CallToolResult> {
-    const built = buildCallIdentity(input, this.env);
+    const built = buildCallIdentity(input, this.server);
     if (!built.ok) return errorResult(built.error);
     const identity = built.value;
 

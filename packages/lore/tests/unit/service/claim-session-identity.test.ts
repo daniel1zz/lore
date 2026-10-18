@@ -69,6 +69,7 @@ import {
 } from "../../../src/service/gate-predicates.js";
 import { deriveSessions, taskClaimSchema } from "@lore/core";
 import type { CreateDocInput, DocRecord } from "@lore/core";
+import { actedStore } from "../../live-invocation.js";
 
 // ─── Fixtures ────────────────────────────────────────────────────────────────
 
@@ -129,7 +130,7 @@ async function mustCreate(cs: CorpusService, input: CreateDocInput): Promise<Doc
  * `process.env` to the single production instance.
  */
 function makeStoreAndCorpus() {
-  const store = new InMemoryStore();
+  const store = actedStore(new InMemoryStore());
   const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
   return { store, corpusService };
 }

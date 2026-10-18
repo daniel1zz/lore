@@ -21,6 +21,7 @@ import type { CreateDocInput, DocId, DocRecord } from "@lore/core";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
 import { AcService } from "../../../src/service/ac-service.js";
+import { actedStore } from "../../live-invocation.js";
 
 const WOULD_REFUSE = "cite_gate_would_refuse";
 
@@ -52,7 +53,7 @@ function gated(store: InMemoryStore, cfg: Cfg | undefined): AcService {
 
 /** alpha (BR-1, BR-2 live) + beta (BR-20 live) branches; one spec citing alpha, one citing beta, one citing nothing. */
 async function world() {
-  const store = new InMemoryStore();
+  const store = actedStore(new InMemoryStore());
   const cs = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
   const plain = new AcService(store, new RecordLockService(store, new GateEnforcer(undefined)));
   const root = await insertBaseline(store, "baseline-root", { node: "root" }, null);

@@ -16,10 +16,11 @@ import { join } from "node:path";
 import { SQLiteStore } from "../../../src/store/sqlite-store.js";
 import { TursoStore } from "../../../src/store/turso-store.js";
 import { runBatchStoreMethodsSuite } from "./batch-methods.shared.js";
+import { actedStore } from "../../live-invocation.js";
 
 runBatchStoreMethodsSuite({
   label: "SQLiteStore",
-  createStore: () => new SQLiteStore(":memory:"),
+  createStore: () => actedStore(new SQLiteStore(":memory:")),
   destroyStore: (store) => {
     (store as SQLiteStore).close();
   },
@@ -30,7 +31,7 @@ runBatchStoreMethodsSuite({
   createStore: () => {
     const tmpDir = mkdtempSync(join(tmpdir(), "lore-turso-batch-methods-"));
     const dbPath = join(tmpDir, "lore.db");
-    const store = new TursoStore({ localPath: dbPath });
+    const store = actedStore(new TursoStore({ localPath: dbPath }));
     // reason: stash tmpDir on the instance so destroyStore can clean it up —
     // mirrors turso-store.bun.test.ts's beforeEach/afterEach tmpDir pairing,
     // just folded into this suite-factory's single createStore/destroyStore

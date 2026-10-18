@@ -17,7 +17,7 @@
 import { readFileSync } from "fs";
 import { defineCommand } from "citty";
 import { loadLoreApp } from "../loader.js";
-import { exitCode, formatError, resolveActor } from "../utils.js";
+import { exitCode, formatErrorFor, resolveActor } from "../utils.js";
 import { invocationOf } from "../command-invocation.js";
 
 const recordCommand = defineCommand({
@@ -55,13 +55,13 @@ const recordCommand = defineCommand({
         process.exitCode = 2;
         return;
       }
-      const by = resolveActor(undefined, inv.env, inv.cwd);
+      const by = resolveActor(undefined, inv.env, inv.cwd, inv.user);
       const result = await app.uatService.record(String(args.plan), payload, { by });
       if (!result.ok) {
         if (args.json) {
           console.log(JSON.stringify({ ok: false, error: result.error }, null, 2));
         } else {
-          process.stderr.write(formatError(result.error));
+          process.stderr.write(formatErrorFor(inv, result.error));
         }
         process.exitCode = exitCode(result.error);
         return;
@@ -93,7 +93,7 @@ const showCommand = defineCommand({
         if (args.json) {
           console.log(JSON.stringify({ ok: false, error: result.error }, null, 2));
         } else {
-          process.stderr.write(formatError(result.error));
+          process.stderr.write(formatErrorFor(inv, result.error));
         }
         process.exitCode = exitCode(result.error);
         return;

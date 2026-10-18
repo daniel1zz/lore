@@ -20,6 +20,7 @@ import type { DocRecord, DocType } from "@lore/core";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { PhaseWorkflowService } from "../../../src/service/phase-workflow-service.js";
 import { rejectCallerGitStamp, type EvidenceInput } from "../../../src/service/task-workflow-service.js";
+import { actedStore } from "../../live-invocation.js";
 
 const PLAN_ID = "01HPLAN000000000000000GIT";
 const PHASE_ID = "01HPHASEGITSTAMP00000001";
@@ -79,7 +80,7 @@ function evidence(extra: Record<string, unknown> = {}): EvidenceInput {
 }
 
 async function setup() {
-  const store = new InMemoryStore();
+  const store = actedStore(new InMemoryStore());
   const service = new PhaseWorkflowService(store, new NoOpTelemetry(), { claimTtlMinutes: 120 });
   for (const doc of [planRecord(), phaseRecord()]) {
     const r = await store.insert(doc);

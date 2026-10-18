@@ -18,6 +18,7 @@ import { InMemoryAIProvider } from "../../../src/ai/in-memory-provider.js";
 import { renderTruncationBlock } from "../../../src/adapters/cli/review-render.js";
 import { runDeterministicChecks, NoOpTelemetry } from "@lore/core";
 import type { AIProvider, CreateDocInput, Telemetry, TelemetryEvent } from "@lore/core";
+import { actedStore } from "../../live-invocation.js";
 
 const VALID_REVIEW_JSON = JSON.stringify({
   decision: "approve",
@@ -58,7 +59,7 @@ async function makeBundle(store: InMemoryStore, parentContent: string, specConte
 }
 
 async function judgeAndRecord(parentContent: string, specContent: string) {
-  const store = new InMemoryStore();
+  const store = actedStore(new InMemoryStore());
   const bundle = await makeBundle(store, parentContent, specContent);
   const provider = new InMemoryAIProvider("in-memory", { kind: "ok", content: VALID_REVIEW_JSON });
   const judged = await makeReviewService(provider).judgeDoc(bundle, runDeterministicChecks(bundle), {});

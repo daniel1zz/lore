@@ -28,6 +28,7 @@ import type { DocRecord, LoreError, Result } from "@lore/core";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import type { StoreFilters } from "../../../src/store/store-interface.js";
 import { MigrationService } from "../../../src/service/migration-service.js";
+import { actedStore } from "../../live-invocation.js";
 
 /**
  * Wraps InMemoryStore's `findMany` to always fail — used to test M3's ERROR-dimension
@@ -173,7 +174,7 @@ describe("MigrationService", () => {
 
   beforeEach(() => {
     tempDir = mkdtempSync(join(tmpdir(), "lore-migration-test-"));
-    store = new InMemoryStore();
+    store = actedStore(new InMemoryStore());
     service = new MigrationService(store);
   });
 
@@ -792,7 +793,7 @@ Example key AKIAIOSFODNN7EXAMPLE was changed to [REDACTED].
         writeFileSync(join(tempDir, "prd.md"), makePrdFile("PRD-001", "My PRD"));
         writeFileSync(join(tempDir, "spec.md"), makeSpecFile("SPEC-001", "Auth Spec", "PRD-001"));
 
-        const failingStore = new FailingFindManyStore();
+        const failingStore = actedStore(new FailingFindManyStore());
         const failingService = new MigrationService(failingStore);
 
         const result = await failingService.execute(tempDir, defaultOpts);

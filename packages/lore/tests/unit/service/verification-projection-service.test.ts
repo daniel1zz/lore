@@ -36,6 +36,7 @@ import { CorpusService } from "../../../src/service/corpus-service.js";
 import { VerificationProjectionService } from "../../../src/service/verification-projection-service.js";
 import { computeAcCoverage, deriveClaimedAcCoverage } from "@lore/core";
 import type { AcceptanceCriterion, CreateDocInput, DocRecord, EvidenceEntry } from "@lore/core";
+import { actedStore } from "../../live-invocation.js";
 
 // ─── Fixtures ────────────────────────────────────────────────────────────────
 
@@ -65,7 +66,7 @@ function attestedEntry(command: string, opts: Partial<EvidenceEntry> = {}): Evid
 }
 
 function makeHarness() {
-  const store = new InMemoryStore();
+  const store = actedStore(new InMemoryStore());
   const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
   const projectionService = new VerificationProjectionService(store, 0.5);
   return { store, corpusService, projectionService };

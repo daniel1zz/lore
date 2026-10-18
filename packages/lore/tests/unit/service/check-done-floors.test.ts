@@ -32,6 +32,7 @@ import {
   type VerifiedEvidenceInput,
 } from "../../../src/service/task-workflow-service.js";
 import type { CreateDocInput, LoreError, Result } from "@lore/core";
+import { actedStore } from "../../live-invocation.js";
 
 type DoneFloorId = "attested-pass" | "red-first" | "no-new-tests" | "unfiltered-test-file";
 
@@ -41,7 +42,7 @@ interface WithCheckDoneFloors {
 }
 
 function makeServices(wireOverridePort = true) {
-  const store = new InMemoryStore();
+  const store = actedStore(new InMemoryStore());
   const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
   const taskWorkflowService = new TaskWorkflowService(store, undefined, { claimTtlMinutes: 120 });
   if (wireOverridePort) taskWorkflowService.setOverrideDecisionPort(alwaysAutoOverridePort()); // AU-T7: explicit test port; no port = refused

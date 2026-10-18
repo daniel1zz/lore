@@ -45,6 +45,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SQLiteStore } from "../../../src/store/sqlite-store.js";
+import { actedStore } from "../../live-invocation.js";
 
 // A standalone child-process script. Deliberately self-contained (raw
 // bun:sqlite only, no import of our own source) so a spawned process has zero
@@ -123,7 +124,7 @@ describe("SQLiteStore busy_timeout pragma (AC-078-2)", () => {
     // Migrate the corpus schema and create the probe table BEFORE any lock
     // contention exists, via a real SQLiteStore (proves the fix lands on the
     // production init() path, not a hand-rolled connection).
-    const setupStore = new SQLiteStore(dbPath);
+    const setupStore = actedStore(new SQLiteStore(dbPath));
     setupStore
       .getDatabase()
       .exec("CREATE TABLE IF NOT EXISTS busy_timeout_probe (id INTEGER PRIMARY KEY)");
@@ -137,7 +138,7 @@ describe("SQLiteStore busy_timeout pragma (AC-078-2)", () => {
   });
 
   it("HAPPY: a fresh SQLiteStore connection reports PRAGMA busy_timeout = 2000", () => {
-    const store = new SQLiteStore(dbPath);
+    const store = actedStore(new SQLiteStore(dbPath));
     const row = store.getDatabase().query("PRAGMA busy_timeout").get() as {
       timeout: number;
     };
@@ -153,7 +154,7 @@ describe("SQLiteStore busy_timeout pragma (AC-078-2)", () => {
 
     await waitForMarker(markerPath);
 
-    const writer = new SQLiteStore(dbPath);
+    const writer = actedStore(new SQLiteStore(dbPath));
     const t0 = performance.now();
     let threw: unknown;
     try {
@@ -247,7 +248,7 @@ describe("SQLiteStore busy_timeout pragma (AC-078-2)", () => {
     const dir = mkdtempSync(join(tmpdir(), "lore-busy-timeout-rollback-"));
     ownedTempDirs.push(dir);
     const path = join(dir, "corpus.db");
-    const setup = new SQLiteStore(path);
+    const setup = actedStore(new SQLiteStore(path));
     const mode = (
       setup.getDatabase().query("PRAGMA journal_mode = DELETE").get() as { journal_mode: string }
     ).journal_mode;
@@ -274,7 +275,7 @@ describe("SQLiteStore busy_timeout pragma (AC-078-2)", () => {
     const t0 = performance.now();
     let threw: unknown;
     try {
-      new SQLiteStore(rollbackDbPath, { writeWaitMs: DECLARED_BOUND_MS }).close();
+      actedStore(new SQLiteStore(rollbackDbPath, { writeWaitMs: DECLARED_BOUND_MS })).close();
     } catch (error) {
       threw = error;
     }
@@ -293,7 +294,7 @@ describe("SQLiteStore busy_timeout pragma (AC-078-2)", () => {
   it("CONTROL: the identical construction against the identical fixture with NO holder succeeds immediately — the wait above is the holder's doing, not a fixed cost of opening a store", () => {
     const rollbackDbPath = makeRollbackJournalCorpus();
     const t0 = performance.now();
-    const store = new SQLiteStore(rollbackDbPath, { writeWaitMs: DECLARED_BOUND_MS });
+    const store = actedStore(new SQLiteStore(rollbackDbPath, { writeWaitMs: DECLARED_BOUND_MS }));
     const elapsed = performance.now() - t0;
     expect(store.getDatabase().query("PRAGMA busy_timeout").get()).toEqual({
       timeout: DECLARED_BOUND_MS,

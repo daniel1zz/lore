@@ -22,7 +22,7 @@
 
 import { defineCommand } from "citty";
 import { loadLoreApp } from "../loader.js";
-import { exitCode, formatError, formatTable, formatValidityBadge, parsePositiveIntArg } from "../utils.js";
+import { exitCode, formatErrorFor, formatTable, formatValidityBadge, parsePositiveIntArg } from "../utils.js";
 import { resolveSubTypeFilter } from "../../../service/corpus-service.js";
 import { KNOWLEDGE_SUB_TYPES } from "@lore/core";
 import type { DocType } from "@lore/core";
@@ -99,7 +99,7 @@ export default defineCommand({
       const result = await app.corpusService.search(args.query, filters);
 
       if (!result.ok) {
-        process.stderr.write(formatError(result.error) + "\n");
+        process.stderr.write(formatErrorFor(inv, result.error) + "\n");
         process.exitCode = exitCode(result.error);
         return;
       }

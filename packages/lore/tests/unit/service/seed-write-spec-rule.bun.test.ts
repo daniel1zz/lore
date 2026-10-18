@@ -17,6 +17,7 @@ import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createApp, type App } from "../../../src/app.js";
+import { liveAmbient, liveWriteContext } from "../../live-invocation.js";
 
 /**
  * `scripts/` lives outside `packages/lore/tsconfig.tests.json`'s `rootDir` (which is
@@ -68,7 +69,7 @@ let app: App;
 function openThrowawayApp(): App {
   const loreDir = join(tmpDir, ".lore");
   mkdirSync(loreDir, { recursive: true });
-  return createApp(join(loreDir, "lore.db"));
+  return createApp(join(loreDir, "lore.db"), undefined, liveAmbient(), liveWriteContext());
 }
 
 beforeEach(() => {

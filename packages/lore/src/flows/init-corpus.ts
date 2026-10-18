@@ -59,7 +59,7 @@ import type { LoreConfig, LoreError, Result } from "@lore/core";
 // reason: saveConfig writes .lore/config.yaml via Node fs — only reachable via
 // the @lore/core/node subpath (browser-safety split, packages/core/src/CLAUDE.md).
 import { saveConfig } from "@lore/core/node";
-import { createApp } from "../app.js";
+import { createApp, type AppAmbient } from "../app.js";
 import { describeConfigTemplateError, mergeConfigWithOverlay, parseConfigTemplateOverlay } from "./config-template.js";
 
 /** Optional overrides for {@link initCorpusAt} — both default to `commands/init.ts`'s own defaults. */
@@ -91,6 +91,7 @@ function describeCaught(caught: unknown): string {
  * off `process.cwd()` onto a caller-supplied `repoDir`.
  *
  * @param repoDir - Absolute path to the target repository root.
+ * @param ambient - The entry's composition values (`ambientOfInvocation(inv)`).
  * @param opts - Optional `{name, author}` overrides.
  * @returns `ok(undefined)` on success, `err(STORE_ERROR)` naming the failing
  *   step on any fs/config/DB failure.
@@ -101,6 +102,7 @@ function describeCaught(caught: unknown): string {
  */
 export async function initCorpusAt(
   repoDir: string,
+  ambient: AppAmbient,
   opts: InitCorpusOptions = {},
 ): Promise<Result<void, LoreError>> {
   const loreDir = join(repoDir, ".lore");
@@ -140,7 +142,7 @@ export async function initCorpusAt(
 
   try {
     const dbPath = join(loreDir, "lore.db");
-    const app = createApp(dbPath);
+    const app = createApp(dbPath, undefined, ambient);
     app.close();
   } catch (cause) {
     return err({

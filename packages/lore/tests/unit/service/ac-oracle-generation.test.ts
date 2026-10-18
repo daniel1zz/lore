@@ -63,6 +63,7 @@ import {
   type EvidenceInput,
   type VerifiedEvidenceInput,
 } from "../../../src/service/task-workflow-service.js";
+import { actedStore } from "../../live-invocation.js";
 
 // ─── Fixtures ───────────────────────────────────────────────────────────────
 
@@ -88,7 +89,7 @@ function makeServices(): {
   acService: AcService;
   taskWorkflowService: TaskWorkflowService;
 } {
-  const store = new InMemoryStore();
+  const store = actedStore(new InMemoryStore());
   const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
   const acService = new AcService(store, new RecordLockService(store, new GateEnforcer(undefined)));
   const taskWorkflowService = new TaskWorkflowService(

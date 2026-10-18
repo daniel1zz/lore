@@ -86,8 +86,8 @@ export function parsePsLine(line: string): ProcessEntry | null {
   };
 }
 
-function psEnv(): NodeJS.ProcessEnv {
-  return { ...process.env, LC_ALL: "C" };
+function psEnv(env: Readonly<Record<string, string | undefined>>): NodeJS.ProcessEnv {
+  return { ...env, LC_ALL: "C" };
 }
 
 /** pid -> cwd for every readable process: `lsof -d cwd`, else `/proc`. */
@@ -130,15 +130,17 @@ function readCwdTable(procDir: string): Measured<Map<number, string>> {
 export interface RealProcessTableOptions {
   /** Directory of `<pid>/cwd` links used only when `lsof` is not installed. */
   readonly procDir?: string;
+  /** Environment the `ps` children inherit (the invocation's `env`). */
+  readonly env: Readonly<Record<string, string | undefined>>;
 }
 
 /** The production {@link ProcessTablePort}. */
-export function createRealProcessTablePort(options: RealProcessTableOptions = {}): ProcessTablePort {
+export function createRealProcessTablePort(options: RealProcessTableOptions): ProcessTablePort {
   const procDir = options.procDir ?? "/proc";
 
   const inspect = async (pid: number): Promise<ProcessInspection | null> => {
     if (!Number.isInteger(pid) || pid <= 0) return null;
-    const run = spawnSync("ps", ["-o", "stat=,lstart=", "-p", String(pid)], { encoding: "utf8", env: psEnv() });
+    const run = spawnSync("ps", ["-o", "stat=,lstart=", "-p", String(pid)], { encoding: "utf8", env: psEnv(options.env) });
     if (run.error !== undefined || run.status !== 0) return null;
     const text = (run.stdout ?? "").trim();
     const match = /^(\S+)\s+(.*)$/.exec(text);
@@ -150,7 +152,7 @@ export function createRealProcessTablePort(options: RealProcessTableOptions = {}
     async snapshot() {
       const ps = spawnSync("ps", ["-axo", "pid=,ppid=,stat=,lstart=,command="], {
         encoding: "utf8",
-        env: psEnv(),
+        env: psEnv(options.env),
         maxBuffer: MAX_OUTPUT_BYTES,
       });
       if (ps.error !== undefined) return { ok: false, reason: `ps could not run (${ps.error.message})` };
@@ -182,7 +184,7 @@ export function createRealProcessTablePort(options: RealProcessTableOptions = {}
       let current = pid;
       for (let hop = 0; hop <= MAX_SHELL_HOPS; hop++) {
         if (!Number.isInteger(current) || current <= 1) return null;
-        const run = spawnSync("ps", ["-o", "ppid=,comm=", "-p", String(current)], { encoding: "utf8", env: psEnv() });
+        const run = spawnSync("ps", ["-o", "ppid=,comm=", "-p", String(current)], { encoding: "utf8", env: psEnv(options.env) });
         if (run.error !== undefined || run.status !== 0) return null;
         const match = /^\s*(\d+)\s+(.*)$/.exec((run.stdout ?? "").trim());
         if (match === null) return null;

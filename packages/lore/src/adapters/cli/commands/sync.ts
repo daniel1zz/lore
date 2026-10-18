@@ -16,7 +16,7 @@ import { err, ok } from "@lore/core";
 // packages/core/src/CLAUDE.md).
 import { loadConfig, saveConfig } from "@lore/core/node";
 import { invocationOf } from "../command-invocation.js";
-import { formatError } from "../utils.js";
+import { formatErrorFor } from "../utils.js";
 import { syncPush, type PushReport } from "../../http/sync-push.js";
 import {
   TursoStore,
@@ -35,13 +35,14 @@ export async function performPush(
   localPath: string,
   remoteUrl: string,
   authToken: string,
+  env: Readonly<Record<string, string | undefined>>,
 ): Promise<Result<PushReport, LoreError>> {
   // reason: spec-eager-libsql-load-makes-every-command-depend-on-a-healthy
   // AC-LL-4 — callers (`syncPushCmd.run()`) already resolve credentials
   // before calling this function; the TMPDIR probe runs SECOND, here, right
   // before the native load `createClient` triggers (THIRD) — never a raw
   // dlopen trace.
-  const tmpdirError = probeTmpdirUsability();
+  const tmpdirError = probeTmpdirUsability(env);
   if (tmpdirError !== null) return err(tmpdirError);
 
   const { createClient } = await loadLibsqlClientModule();
@@ -62,10 +63,11 @@ export async function performPull(
   localPath: string,
   remoteUrl: string,
   authToken: string,
+  env: Readonly<Record<string, string | undefined>>,
 ): Promise<Result<{ frameNo: number; framesSynced: number } | void, LoreError>> {
   // reason: same ordering as performPush above — credential validation
   // already ran in the caller, TMPDIR probe here, native load only after.
-  const tmpdirError = probeTmpdirUsability();
+  const tmpdirError = probeTmpdirUsability(env);
   if (tmpdirError !== null) return err(tmpdirError);
 
   const tursoConfig = { localPath, remoteUrl, authToken };
@@ -195,7 +197,7 @@ const syncSetup = defineCommand({
 
     const saveResult = saveConfig(loreDir, updatedConfig);
     if (!saveResult.ok) {
-      const msg = `Failed to save config: ${formatError(saveResult.error)}`;
+      const msg = `Failed to save config: ${formatErrorFor(inv, saveResult.error)}`;
       if (args.json) {
         console.log(JSON.stringify({ ok: false, error: msg }));
       } else {
@@ -373,7 +375,7 @@ const syncPushCmd = defineCommand({
       const msg =
         credResult.error.code === "VALIDATION_ERROR" && credResult.error.field === "sync"
           ? "Sync is not configured. Run `lore sync setup --url libsql://...` first."
-          : `Sync credentials unavailable: ${formatError(credResult.error)}`;
+          : `Sync credentials unavailable: ${formatErrorFor(inv, credResult.error)}`;
       if (args.json) {
         console.log(JSON.stringify({ ok: false, error: msg }));
       } else {
@@ -383,10 +385,10 @@ const syncPushCmd = defineCommand({
     }
 
     const localDbPath = join(loreDir, ".lore", "lore.db");
-    const pushResult = await performPush(localDbPath, credResult.value.url, credResult.value.token);
+    const pushResult = await performPush(localDbPath, credResult.value.url, credResult.value.token, inv.env);
 
     if (!pushResult.ok) {
-      const msg = formatError(pushResult.error);
+      const msg = formatErrorFor(inv, pushResult.error);
       if (args.json) {
         console.log(JSON.stringify({ ok: false, error: msg }));
       } else {
@@ -454,7 +456,7 @@ const syncPullCmd = defineCommand({
       const msg =
         credResult.error.code === "VALIDATION_ERROR" && credResult.error.field === "sync"
           ? "Sync is not configured. Run `lore sync setup --url libsql://...` first."
-          : `Sync credentials unavailable: ${formatError(credResult.error)}`;
+          : `Sync credentials unavailable: ${formatErrorFor(inv, credResult.error)}`;
       if (args.json) {
         console.log(JSON.stringify({ ok: false, error: msg }));
       } else {
@@ -464,10 +466,10 @@ const syncPullCmd = defineCommand({
     }
 
     const localDbPath = join(loreDir, ".lore", "lore.db");
-    const pullResult = await performPull(localDbPath, credResult.value.url, credResult.value.token);
+    const pullResult = await performPull(localDbPath, credResult.value.url, credResult.value.token, inv.env);
 
     if (!pullResult.ok) {
-      const msg = formatError(pullResult.error);
+      const msg = formatErrorFor(inv, pullResult.error);
       if (args.json) {
         console.log(JSON.stringify({ ok: false, error: msg }));
       } else {

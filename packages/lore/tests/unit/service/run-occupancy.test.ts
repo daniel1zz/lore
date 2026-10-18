@@ -18,6 +18,7 @@ import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { RunService, type RunOccupancy } from "../../../src/service/run-service.js";
+import { actedStore } from "../../live-invocation.js";
 
 const COMPOSITION = { schemaVersion: 1 as const, fragments: [] };
 const REAL = "/private/tmp/occ/agent-X1";
@@ -25,7 +26,7 @@ const LINK = "/tmp/occ/agent-X1";
 const LINKS: Record<string, string> = { [LINK]: REAL };
 
 async function setup() {
-  const store = new InMemoryStore();
+  const store = actedStore(new InMemoryStore());
   let tick = 0;
   // reason: registered_at orders two runs of one agent (f); a strictly increasing clock makes "newer" unambiguous.
   const now = () => new Date(Date.UTC(2026, 9, 12, 5, 0, tick++));
@@ -183,7 +184,7 @@ describe("AC-WL-1 RunService.occupancy", () => {
     const t = await setup();
     const blank = await t.service.occupancy({ worktree: "" });
     expect(blank.ok).toBe(false);
-    const bare = await new RunService(new InMemoryStore()).occupancy({ worktree: "/w/agent-X1" });
+    const bare = await new RunService(actedStore(new InMemoryStore())).occupancy({ worktree: "/w/agent-X1" });
     expect(bare.ok).toBe(false);
   });
 

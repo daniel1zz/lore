@@ -40,11 +40,12 @@ import type { App } from "../../../src/app.js";
 import type { CreateDocInput, DocRecord, ReviewBundle } from "@lore/core";
 import { buildFeed } from "../../../src/flows/feed-flow.js";
 import { REVIEW_TEMPLATES, REVIEW_PROMPT_VERSION } from "../../../src/ai/review-template.js";
+import { actedStore } from "../../live-invocation.js";
 
 // ─── Fixtures ───────────────────────────────────────────────────────────────
 
 function makeCorpusServices() {
-  const store = new InMemoryStore();
+  const store = actedStore(new InMemoryStore());
   const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
   const validityService = new ValidityService(store);
   const outlineService = new OutlineService(store);

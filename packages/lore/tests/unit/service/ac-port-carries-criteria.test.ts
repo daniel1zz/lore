@@ -42,6 +42,7 @@ import type { AcceptanceCriterion, CreateDocInput, DocRecord, LoreError, Result 
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
 import { TaskWorkflowService } from "../../../src/service/task-workflow-service.js";
+import { actedStore } from "../../live-invocation.js";
 
 // ─── (a) BEHAVIOUR fixtures ─────────────────────────────────────────────────
 
@@ -91,7 +92,7 @@ async function readEvidenceRows(store: InMemoryStore, taskId: string): Promise<R
 describe("AC-DC-13 · the injected declared-AC port carries criteria", () => {
   describe("(a) behaviour: the evidence stamp follows the PORT, never a store walk", () => {
     it("plan-owned task: a port criterion whose oracle_generation DIFFERS from the store's wins", async () => {
-      const store = new InMemoryStore();
+      const store = actedStore(new InMemoryStore());
       const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
 
       const prdId = await createDoc(corpusService, {
@@ -163,7 +164,7 @@ describe("AC-DC-13 · the injected declared-AC port carries criteria", () => {
     });
 
     it("--adhoc task: a port criterion whose oracle_generation DIFFERS from the store's wins", async () => {
-      const store = new InMemoryStore();
+      const store = actedStore(new InMemoryStore());
       const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
 
       const prdId = await createDoc(corpusService, {

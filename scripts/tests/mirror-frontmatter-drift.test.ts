@@ -61,6 +61,7 @@ import { loadMirrorMappings } from "../export-spec-mirror-core.js";
 import { InMemoryStore } from "../../packages/lore/src/store/in-memory-store.js";
 import { ExportDocsService, type ResolveDocBody } from "../../packages/lore/src/service/export-docs-service.js";
 import { OutlineService, renderResolvedToMarkdown } from "../../packages/lore/src/service/outline-service.js";
+import { actedStore } from "../../packages/lore/tests/live-invocation.js";
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
 const REPO_ROOT = join(__dirname, "..", "..");
@@ -69,6 +70,7 @@ const LORE_ENTRY = join(REPO_ROOT, "packages", "lore", "src", "index.ts");
 // own relative imports already use (project CLAUDE.md "Import style").
 const MIRROR_SCRIPT_JS_SPECIFIER = join(REPO_ROOT, "scripts", "export-spec-mirror.js");
 const APP_JS_SPECIFIER = join(REPO_ROOT, "packages", "lore", "src", "app.js");
+const LIVE_INVOCATION_JS_SPECIFIER = join(REPO_ROOT, "packages", "lore", "tests", "live-invocation.js");
 
 // ─── Throwaway real-corpus lifecycle (never this repo's own .lore/) ─────────────
 
@@ -130,6 +132,7 @@ function writeDriver(dir: string): string {
   const source = `
 import { main } from ${JSON.stringify(MIRROR_SCRIPT_JS_SPECIFIER)};
 import { createApp } from ${JSON.stringify(APP_JS_SPECIFIER)};
+import { liveAmbient, liveWriteContext } from ${JSON.stringify(LIVE_INVOCATION_JS_SPECIFIER)};
 
 const [, , mode, dbPath, repoRoot, typeArg] = process.argv;
 
@@ -140,7 +143,7 @@ async function run() {
     process.exit(exitCode);
   }
   if (mode === "detect") {
-    const app = createApp(dbPath);
+    const app = createApp(dbPath, undefined, liveAmbient(), liveWriteContext());
     try {
       const result = await app.exportDocsService.exportDocs({
         projectDir: repoRoot,
@@ -377,7 +380,7 @@ async function insertDoc(store: InMemoryStore, doc: DocRecord): Promise<DocRecor
 
 describe("AC-OX-5 (c) — honest decline: a repair the mechanism cannot safely perform is NAMED, never silently folded into skipped_clean", () => {
   it("NEGATIVE: on-disk frontmatter with the status: line stripped (body otherwise clean) is UNDECIDABLE — declined, not reported clean", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const service = makeExportService(store);
     const projectDir = makeInMemoryProjectDir();
 
@@ -419,7 +422,7 @@ describe("AC-OX-5 (c) — honest decline: a repair the mechanism cannot safely p
   });
 
   it("NEGATIVE: body AND frontmatter both drifted, without --force — declined explicitly (in addition to the existing drift[] entry), file left untouched", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const service = makeExportService(store);
     const projectDir = makeInMemoryProjectDir();
 

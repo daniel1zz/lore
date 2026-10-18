@@ -27,7 +27,7 @@
  * @spec_ref AC-BLS2-1
  */
 
-import { liveInvocation } from "../../live-invocation.js";
+import { liveInvocation, actedStore } from "../../live-invocation.js";
 import { recordLockGateOff } from "../../helpers/record-lock-gate-off.js";
 import { describe, it, expect } from "vitest";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -61,7 +61,7 @@ const AC = (id: string, statement = "Does the thing") => ({
 // ─── Fixtures ────────────────────────────────────────────────────────────────
 
 async function setup() {
-  const store = new InMemoryStore();
+  const store = actedStore(new InMemoryStore());
   const cs = new CorpusService(store, recordLockGateOff(store));
   const ac = new AcService(store, recordLockGateOff(store));
   const prd = await cs.create({ type: "prd", title: "P", content: "root" } as CreateDocInput);
@@ -224,7 +224,7 @@ describe("AC write chokepoint — refusals (AC-BLS2-1)", () => {
   });
 
   it("CorpusService.create with a vague human-mode criterion is refused by the spec-create wording check (the gate is live through the chokepoint)", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const cs = new CorpusService(store, recordLockGateOff(store), undefined, undefined, new GateEnforcer(undefined));
     const prd = await cs.create({ type: "prd", title: "P4", content: "root" } as CreateDocInput);
     if (!prd.ok) throw new Error("prd");
@@ -417,7 +417,7 @@ describe("AC write chokepoint — restore and import are sanctioned, validated p
         join(dir, "a.md"),
         `---\nid: "v1-a"\ntype: prd\nstatus: published\npriority: high\ncreated: "2025-01-01"\nupdated: "2025-06-01"\ntags: []\nlinks: []\nacceptance_criteria:\n  - id: AC-X-1\n    statement: smuggled\n---\n\n# Smuggle\n`,
       );
-      const store = new InMemoryStore();
+      const store = actedStore(new InMemoryStore());
       const res = await new MigrationService(store).execute(dir, { dryRun: false, skipSecretScan: true } as never);
       expect(res.ok).toBe(true);
       const all = await store.findMany({});

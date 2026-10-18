@@ -45,9 +45,10 @@ import {
   parseDecisionFlag,
 } from "../../../src/adapters/cli/handoff-input.js";
 import type { CreateDocInput, HandoffExtra } from "@lore/core";
+import { actedStore } from "../../live-invocation.js";
 
 function makeServices() {
-  const store = new InMemoryStore();
+  const store = actedStore(new InMemoryStore());
   const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
   const sessionService = new SessionService(store, {
     claimTtlMinutes: 120,

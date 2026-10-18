@@ -30,15 +30,15 @@ import { CorpusService } from "../../../src/service/corpus-service.js";
 import { TaskWorkflowService } from "../../../src/service/task-workflow-service.js";
 import { AuditService } from "../../../src/service/audit-service.js";
 import { resolveActorWithSource } from "@lore/core/node";
-import { readOsUsername } from "../../../src/os-username.js";
 import type { CreateDocInput, VersionRecord, AuditEntry } from "@lore/core";
+import { liveInvocation, actedStore } from "../../live-invocation.js";
 
 // ─── Fixture helpers ──────────────────────────────────────────────────────────
 
 const FAR_PAST = "2000-01-01T00:00:00.000Z"; // always before any doc created during a test run
 
 function makeStore() {
-  const store = new InMemoryStore();
+  const store = actedStore(new InMemoryStore());
   const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
   return { store, corpusService };
 }
@@ -110,7 +110,7 @@ describe("HAPPY — a CorpusService.create() write satisfies verify() out of the
     // test time (this test never mutates process.env, so it's stable within
     // a single run — see audit-actor-fidelity.test.ts for the full env-chain
     // coverage this asymmetry is dedicated to).
-    expect(entry.actor).toBe(resolveActorWithSource(undefined, process.env, readOsUsername).actor);
+    expect(entry.actor).toBe(resolveActorWithSource(undefined, process.env, () => liveInvocation().user).actor);
     expect(entry.details?.["version"]).toBe(1);
   });
 
@@ -211,7 +211,7 @@ describe("BOUNDARY — exact (doc_id, version) join, not a fuzzy/adjacent match"
 
 describe("STATE — verify()'s `since` genuinely reads from the constructor default when opts is omitted", () => {
   it("two AuditService instances with different constructor verifySince values disagree on the same store state", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
     const planId = await createPlan(corpusService);
 
@@ -238,7 +238,7 @@ describe("STATE — verify()'s `since` genuinely reads from the constructor defa
   });
 
   it("a per-call opts.since overrides the constructor default", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
     const planId = await createPlan(corpusService);
 

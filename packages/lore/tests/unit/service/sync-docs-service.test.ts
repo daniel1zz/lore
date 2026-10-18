@@ -19,11 +19,12 @@ import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
 import { SyncDocsService } from "../../../src/service/sync-docs-service.js";
 import type { CreateDocInput } from "@lore/core";
+import { actedStore } from "../../live-invocation.js";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function makeServices() {
-  const store = new InMemoryStore();
+  const store = actedStore(new InMemoryStore());
   const corpus = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
   const sync = new SyncDocsService(corpus);
   return { store, corpus, sync };
@@ -513,7 +514,7 @@ describe("spec-lore-sync-docs-backfill-new-spec-files-into-corpus#AC-SD-13 ERROR
 
 describe("spec-lore-sync-docs-backfill-new-spec-files-into-corpus#AC-SD-14 BOUNDARY — SyncDocsService accepts only CorpusService", () => {
   it("constructor has exactly one parameter: CorpusService", () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const corpus = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
     // If this compiles and constructs, the invariant holds
     const service = new SyncDocsService(corpus);

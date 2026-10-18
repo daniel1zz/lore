@@ -26,6 +26,7 @@ import type { DocRecord, CreateDocInput } from "@lore/core";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
 import { SessionService } from "../../../src/service/session-service.js";
+import { actedStore } from "../../live-invocation.js";
 
 /** Minimal valid DocRecord fixture — every field the schema/derivation touches is real. */
 function makeDoc(overrides: Partial<DocRecord> & { updated_at: string }): DocRecord {
@@ -127,7 +128,7 @@ describe("deriveLastActivityAt — BOUNDARY (AC-069-6)", () => {
 
 describe("SessionService.bootstrap — active_plans[].last_activity_at (HAPPY, AC-069-6)", () => {
   it("every active_plans entry carries last_activity_at equal to the known max of the seeded docs", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
     const sessionService = new SessionService(store, {
       claimTtlMinutes: 120,
@@ -167,7 +168,7 @@ describe("SessionService.bootstrap — active_plans[].last_activity_at (HAPPY, A
   });
 
   it("a plan with zero tasks reports the plan's own updated_at (totality, no tasks in the corpus at all)", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
     const sessionService = new SessionService(store, {
       claimTtlMinutes: 120,

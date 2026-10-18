@@ -38,7 +38,7 @@
 import { ulid } from "ulidx";
 import { defineCommand } from "citty";
 import { loadLoreApp } from "../loader.js";
-import { exitCode, formatError, resolveActor } from "../utils.js";
+import { exitCode, formatError, formatErrorFor, resolveActor } from "../utils.js";
 import { requirePhaseChecklistService, getPhaseStatus } from "../phase-wiring.js";
 import type { PlanPhase, ChecklistItem } from "@lore/core";
 import type { PhaseStatusPayload } from "../../../flows/phase-status-flow.js";
@@ -86,7 +86,7 @@ export default defineCommand({
           );
 
           if (!result.ok) {
-            process.stderr.write(formatError(result.error) + "\n");
+            process.stderr.write(formatErrorFor(inv, result.error) + "\n");
             process.exitCode = exitCode(result.error);
             return;
           }
@@ -126,7 +126,7 @@ export default defineCommand({
           const result = await app.phaseService.listPhases(args.plan as string);
 
           if (!result.ok) {
-            process.stderr.write(formatError(result.error) + "\n");
+            process.stderr.write(formatErrorFor(inv, result.error) + "\n");
             process.exitCode = exitCode(result.error);
             return;
           }
@@ -175,7 +175,7 @@ export default defineCommand({
           const result = await app.phaseService.removePhase(args.plan as string, args.name as string);
 
           if (!result.ok) {
-            process.stderr.write(formatError(result.error) + "\n");
+            process.stderr.write(formatErrorFor(inv, result.error) + "\n");
             process.exitCode = exitCode(result.error);
             return;
           }
@@ -236,7 +236,7 @@ export default defineCommand({
           );
 
           if (!result.ok) {
-            process.stderr.write(formatError(result.error) + "\n");
+            process.stderr.write(formatErrorFor(inv, result.error) + "\n");
             process.exitCode = exitCode(result.error);
             return;
           }
@@ -291,7 +291,7 @@ export default defineCommand({
           const result = await getPhaseStatus(app, args.phase as string, nowIso);
 
           if (!result.ok) {
-            process.stderr.write(formatError(result.error) + "\n");
+            process.stderr.write(formatErrorFor(inv, result.error) + "\n");
             process.exitCode = exitCode(result.error);
             return;
           }
@@ -343,7 +343,7 @@ export default defineCommand({
               });
 
               if (!result.ok) {
-                process.stderr.write(formatError(result.error) + "\n");
+                process.stderr.write(formatErrorFor(inv, result.error) + "\n");
                 process.exitCode = exitCode(result.error);
                 return;
               }
@@ -375,7 +375,7 @@ export default defineCommand({
               const result = await service.listChecklist(args.phase as string);
 
               if (!result.ok) {
-                process.stderr.write(formatError(result.error) + "\n");
+                process.stderr.write(formatErrorFor(inv, result.error) + "\n");
                 process.exitCode = exitCode(result.error);
                 return;
               }
@@ -409,14 +409,14 @@ export default defineCommand({
             const { app } = loadLoreApp({ inv });
             try {
               const service = requirePhaseChecklistService(app);
-              const by = resolveActor(undefined, inv.env, inv.cwd);
+              const by = resolveActor(undefined, inv.env, inv.cwd, inv.user);
               const result = await service.dropChecklistItem(args.phase as string, args.id as string, {
                 by,
                 reason: args.reason as string,
               });
 
               if (!result.ok) {
-                process.stderr.write(formatError(result.error) + "\n");
+                process.stderr.write(formatErrorFor(inv, result.error) + "\n");
                 process.exitCode = exitCode(result.error);
                 return;
               }
@@ -446,11 +446,11 @@ export default defineCommand({
             const { app } = loadLoreApp({ inv });
             try {
               const service = requirePhaseChecklistService(app);
-              const by = resolveActor(undefined, inv.env, inv.cwd);
+              const by = resolveActor(undefined, inv.env, inv.cwd, inv.user);
               const result = await service.checkChecklistItem(args.phase as string, args.id as string, { by });
 
               if (!result.ok) {
-                process.stderr.write(formatError(result.error) + "\n");
+                process.stderr.write(formatErrorFor(inv, result.error) + "\n");
                 process.exitCode = exitCode(result.error);
                 return;
               }
@@ -488,7 +488,7 @@ export default defineCommand({
               );
 
               if (!result.ok) {
-                process.stderr.write(formatError(result.error) + "\n");
+                process.stderr.write(formatErrorFor(inv, result.error) + "\n");
                 process.exitCode = exitCode(result.error);
                 return;
               }
@@ -528,7 +528,7 @@ export default defineCommand({
             const { app } = loadLoreApp({ inv });
             try {
               const service = requirePhaseChecklistService(app);
-              const by = resolveActor(undefined, inv.env, inv.cwd);
+              const by = resolveActor(undefined, inv.env, inv.cwd, inv.user);
               const result = await service.addTrackNote(args.phase as string, {
                 id: ulid(),
                 note: args.note as string,
@@ -537,7 +537,7 @@ export default defineCommand({
               });
 
               if (!result.ok) {
-                process.stderr.write(formatError(result.error) + "\n");
+                process.stderr.write(formatErrorFor(inv, result.error) + "\n");
                 process.exitCode = exitCode(result.error);
                 return;
               }
@@ -569,7 +569,7 @@ export default defineCommand({
               const result = await service.listTrack(args.phase as string);
 
               if (!result.ok) {
-                process.stderr.write(formatError(result.error) + "\n");
+                process.stderr.write(formatErrorFor(inv, result.error) + "\n");
                 process.exitCode = exitCode(result.error);
                 return;
               }

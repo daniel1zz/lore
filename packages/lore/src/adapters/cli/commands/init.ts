@@ -25,11 +25,11 @@
 import { defineCommand } from "citty";
 import { existsSync, mkdirSync, writeFileSync } from "fs";
 import { join } from "path";
-import { createApp } from "../../../app.js";
+import { ambientOfInvocation, createApp } from "../../../app.js";
 // reason: saveConfig writes .lore/config.yaml via Node fs — only reachable via
 // the @lore/core/node subpath (browser-safety split, packages/core/src/CLAUDE.md).
 import { saveConfig } from "@lore/core/node";
-import { formatError, resolveActor } from "../utils.js";
+import { formatErrorFor, resolveActor } from "../utils.js";
 import { isInsideGitRepository } from "../../../service/git-state-stamp.js";
 import { invocationOf } from "../command-invocation.js";
 
@@ -83,7 +83,7 @@ export default defineCommand({
     // Write config.yaml via SSOT saveConfig (no hand-assembled yaml)
     const saveResult = saveConfig(cwd, { project: { name: projectName, author: args.author } });
     if (!saveResult.ok) {
-      const msg = `Failed to write config: ${formatError(saveResult.error)}`;
+      const msg = `Failed to write config: ${formatErrorFor(inv, saveResult.error)}`;
       if (args.json) {
         console.log(JSON.stringify({ ok: false, error: msg }));
       } else {
@@ -94,7 +94,7 @@ export default defineCommand({
 
     // Initialise the SQLite DB (SQLiteStore constructor runs migrations)
     const dbPath = join(loreDir, "lore.db");
-    const app = createApp(dbPath);
+    const app = createApp(dbPath, undefined, ambientOfInvocation(inv), { identity: inv.identity });
     // reason: SPEC-143 AC-CT-3 — a fresh corpus is armed at init: nothing predates the cutoff, so
     // the R13 impact report is zero rows by construction, and both write paths (`lore verify`,
     // `lore evidence --capture`) now stamp state. Existing corpora keep the explicit
@@ -110,7 +110,7 @@ export default defineCommand({
       ? "not_a_git_repo"
       : stateBinding === undefined
         ? undefined
-        : await stateBinding.arm({ actor: resolveActor(undefined, inv.env, inv.cwd), nowIso: new Date().toISOString() });
+        : await stateBinding.arm({ actor: resolveActor(undefined, inv.env, inv.cwd, inv.user), nowIso: new Date().toISOString() });
     app.close();
     if (armed === "not_a_git_repo") {
       const line = `state binding not armed: ${cwd} is not inside a git repository; run \`lore audit arm --confirm\` after placing the corpus in git`;
@@ -140,7 +140,7 @@ export default defineCommand({
       const msg =
         armed === undefined
           ? "stateBindingService is not wired on this App (internal wiring error)"
-          : `Failed to arm state binding: ${formatError(armed.error)}`;
+          : `Failed to arm state binding: ${formatErrorFor(inv, armed.error)}`;
       if (args.json) {
         console.log(JSON.stringify({ ok: false, error: msg }));
       } else {

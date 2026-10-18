@@ -31,6 +31,7 @@ import { DecisionService } from "../../src/service/decision-service.js";
 import { computeDecisionEntryHash, type DecisionLogRow } from "../../src/store/decision-log.js";
 import { ignoredPathsOutsideRegenerableSet } from "../../src/service/worktree-cleanup.js";
 import { checkAutonomyMirror, exportAutonomyMirror } from "../../../../scripts/export-autonomy-mirror.js";
+import { actedStore } from "../live-invocation.js";
 
 const PACKAGE_ROOT = new URL("../../", import.meta.url).pathname.replace(/\/$/, "");
 const REPO_ROOT = join(PACKAGE_ROOT, "..", "..");
@@ -81,7 +82,7 @@ function newCorpus(seeded = true): Corpus {
 }
 
 async function withService<T>(corpus: Corpus, fn: (service: DecisionService) => Promise<T>): Promise<T> {
-  const store = new SQLiteStore(corpus.dbPath);
+  const store = actedStore(new SQLiteStore(corpus.dbPath));
   try {
     return await fn(new DecisionService({ store, executorRun: null }));
   } finally {

@@ -24,6 +24,7 @@ import { CorpusService } from "../../../src/service/corpus-service.js";
 import { SessionService } from "../../../src/service/session-service.js";
 import type { GateCheckpoint } from "../../../src/service/checkpoint-registry.js";
 import type { CreateDocInput } from "@lore/core";
+import { actedStore } from "../../live-invocation.js";
 
 function makeSessionService(store: InMemoryStore, isCheckpointEnabled?: (cp: GateCheckpoint) => boolean) {
   const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
@@ -44,7 +45,7 @@ async function mustCreate(cs: CorpusService, input: CreateDocInput) {
 
 describe("SessionService.bootstrap — HAPPY (AC-SL-1)", () => {
   it("assembles a correct pointer-set from a realistic corpus", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const { corpusService, sessionService } = makeSessionService(store);
 
     const prd = await mustCreate(corpusService, {
@@ -205,7 +206,7 @@ describe("SessionService.bootstrap — HAPPY (AC-SL-1)", () => {
 
 describe("SessionService.bootstrap — BOUNDARY (AC-SL-10)", () => {
   it("empty corpus returns ok with every documented empty shape", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const { sessionService } = makeSessionService(store);
 
     const result = await sessionService.bootstrap("alice");
@@ -229,7 +230,7 @@ describe("SessionService.bootstrap — BOUNDARY (AC-SL-10)", () => {
 
 describe("SessionService.bootstrap — STATE: multi-PRD root + gate config disable", () => {
   it("deterministically picks the earliest-created PRD as root when >1 PRDs exist", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const { corpusService, sessionService } = makeSessionService(store);
 
     const first = await mustCreate(corpusService, { type: "prd", title: "First PRD", content: "# 1" } as CreateDocInput);
@@ -246,7 +247,7 @@ describe("SessionService.bootstrap — STATE: multi-PRD root + gate config disab
   });
 
   it("a checkpoint disabled via the isCheckpointEnabled port is omitted from armed_gates", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const { sessionService } = makeSessionService(store, (cp) => cp !== "task-claim");
 
     const result = await sessionService.bootstrap("alice");

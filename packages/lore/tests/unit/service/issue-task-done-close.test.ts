@@ -23,6 +23,7 @@ import type { GithubIssueRef } from "../../../src/service/resolution-projector.j
 import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { TaskWorkflowService } from "../../../src/service/task-workflow-service.js";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
+import { actedStore } from "../../live-invocation.js";
 
 const NOW = "2026-10-12T10:00:00.000Z";
 
@@ -77,7 +78,7 @@ interface World {
 }
 
 async function buildWorld(): Promise<World> {
-  const store = new InMemoryStore();
+  const store = actedStore(new InMemoryStore());
   const cs = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
   const tw = new TaskWorkflowService(store, undefined, { claimTtlMinutes: 120 });
   const closer = new RecordingCloser();

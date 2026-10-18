@@ -17,6 +17,7 @@ import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { SQLiteStore } from "../../../src/store/sqlite-store.js";
 import type { StoreInterface } from "../../../src/store/store-interface.js";
 import { TursoStore } from "../../../src/store/turso-store.js";
+import { actedStore } from "../../live-invocation.js";
 
 function subagent(session: string, agent: string, registeredAt: string): RunRecord {
   return {
@@ -60,18 +61,18 @@ const STORE_CASES: ReadonlyArray<{ name: string; open: () => Promise<{ store: St
   {
     name: "SQLiteStore",
     open: async () => {
-      const store = new SQLiteStore(join(dir, "sqlite.db"));
+      const store = actedStore(new SQLiteStore(join(dir, "sqlite.db")));
       return { store, close: () => store.close() };
     },
   },
   {
     name: "TursoStore (local file)",
     open: async () => {
-      const store = new TursoStore({ localPath: join(dir, "turso.db") });
+      const store = actedStore(new TursoStore({ localPath: join(dir, "turso.db") }));
       return { store, close: () => void store.close() };
     },
   },
-  { name: "InMemoryStore", open: async () => ({ store: new InMemoryStore(), close: () => undefined }) },
+  { name: "InMemoryStore", open: async () => ({ store: actedStore(new InMemoryStore()), close: () => undefined }) },
 ];
 
 describe.each([...STORE_CASES])("listRunsByAgentRef store contract — $name", (storeCase) => {

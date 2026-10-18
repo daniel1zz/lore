@@ -45,11 +45,12 @@ import type { CreateDocInput } from "@lore/core";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { PhaseWorkflowService, type PhaseScorecard, type DeclaredPhaseScorecard } from "../../../src/service/phase-workflow-service.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
+import { actedStore } from "../../live-invocation.js";
 
 // ─── Fixtures ─────────────────────────────────────────────────────────────
 
 async function makeFixture() {
-  const store = new InMemoryStore();
+  const store = actedStore(new InMemoryStore());
   const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)), new NoOpTelemetry());
   const service = new PhaseWorkflowService(store, new NoOpTelemetry(), { claimTtlMinutes: 120 });
 

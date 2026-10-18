@@ -28,6 +28,7 @@ import { ValidityService } from "../../../src/service/validity-service.js";
 import { DriftCheckService } from "../../../src/service/drift-check-service.js";
 import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
+import { actedStore } from "../../live-invocation.js";
 
 interface Fixture {
   readonly store: InMemoryStore;
@@ -38,7 +39,7 @@ interface Fixture {
 }
 
 function makeFixture(gateEnforcer?: GateEnforcer): Fixture {
-  const store = new InMemoryStore();
+  const store = actedStore(new InMemoryStore());
   const lock = new RecordLockService(store, gateEnforcer ?? new GateEnforcer(undefined));
   return {
     store,
@@ -206,7 +207,7 @@ describe("record-edit gate on AcService (AC-DR-3)", () => {
   });
 
   it("STATE: with the gate disabled, ac add on an approved spec goes through", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const config = LoreConfigSchema.parse({
       project: { name: "test-project", author: "alice" },
       workflow: { gates: { "record-edit": { enabled: false } } },
@@ -358,7 +359,7 @@ describe("non-rewrite writes on locked records are not refused (AC-DR-3 REGRESSI
 
 describe("required dependency (AC-DR-3, D17)", () => {
   it("the four rewrite-path services do not construct without a RecordLockService", () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     // @ts-expect-error — recordLock is a REQUIRED second constructor argument
     const corpus = () => new CorpusService(store);
     // @ts-expect-error — recordLock is a REQUIRED second constructor argument

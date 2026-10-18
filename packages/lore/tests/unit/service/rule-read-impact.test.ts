@@ -37,6 +37,7 @@ import { ulid } from "ulidx";
 import { DOC_TYPE_ROLE_MAP } from "@lore/core";
 import type { DocId, DocRecord } from "@lore/core";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
+import { actedStore } from "../../live-invocation.js";
 
 type Cite = { spec: string; ac: string };
 type Res<T> = { ok: true; value: T } | { ok: false; error: { code: string } };
@@ -134,7 +135,7 @@ const spec = (
 const sorted = (c: Cite[]) => [...c].sort((a, b) => `${a.spec}/${a.ac}`.localeCompare(`${b.spec}/${b.ac}`));
 
 async function world() {
-  const store = new InMemoryStore();
+  const store = actedStore(new InMemoryStore());
   await leaf(store, "leaf-a", [
     rule("BR-x", "Orders must be idempotent", "established"),
     rule("BR-y", "Refunds require approval", "provisional"),
@@ -244,7 +245,7 @@ describe("rule impact (AC-BLS2-6)", () => {
   });
 
   it("reports a 3-leaf depends_on cycle with its 3 members and terminates in < 1 s", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     await leaf(store, "leaf-1", [rule("BR-1", "one")], ["BR-3"]);
     await leaf(store, "leaf-2", [rule("BR-2", "two")], ["BR-1"]);
     await leaf(store, "leaf-3", [rule("BR-3", "three")], ["BR-2"]);

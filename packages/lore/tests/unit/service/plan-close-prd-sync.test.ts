@@ -22,11 +22,12 @@ import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
 import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
 import type { CreateDocInput, DocRecord, LoreConfig } from "@lore/core";
+import { actedStore } from "../../live-invocation.js";
 
 const PAST_CLAIM_AT = "2020-01-01T00:00:00.000Z";
 
 function makeHarness(config?: LoreConfig) {
-  const store = new InMemoryStore();
+  const store = actedStore(new InMemoryStore());
   const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)), undefined, undefined, new GateEnforcer(config));
   return { store, corpusService };
 }

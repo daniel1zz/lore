@@ -53,7 +53,7 @@
 
 import { defineCommand } from "citty";
 import { loadLoreApp } from "../loader.js";
-import { exitCode, formatError } from "../utils.js";
+import { exitCode, formatErrorFor } from "../utils.js";
 import type { ReadyRecord, ReadySession } from "@lore/core";
 import type { AnchorConflict } from "../../../service/task-workflow-service.js";
 import { renderFileAnchorAdvisory } from "../../../service/anchor-resolution.js";
@@ -218,7 +218,7 @@ export default defineCommand({
       if (hasAdhoc) {
         const adhocResult = await app.taskWorkflowService.readyAdhoc();
         if (!adhocResult.ok) {
-          process.stderr.write(formatError(adhocResult.error) + "\n");
+          process.stderr.write(formatErrorFor(inv, adhocResult.error) + "\n");
           process.exitCode = exitCode(adhocResult.error);
           return;
         }
@@ -246,11 +246,11 @@ export default defineCommand({
       const result = await app.taskWorkflowService.ready(
         args.plan as string,
         undefined,
-        buildFileAnchorProbeContext(),
+        buildFileAnchorProbeContext(inv.cwd),
       );
 
       if (!result.ok) {
-        process.stderr.write(formatError(result.error) + "\n");
+        process.stderr.write(formatErrorFor(inv, result.error) + "\n");
         process.exitCode = exitCode(result.error);
         return;
       }

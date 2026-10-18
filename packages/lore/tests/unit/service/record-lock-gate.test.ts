@@ -24,6 +24,7 @@ import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
 import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
+import { actedStore } from "../../live-invocation.js";
 
 interface Fixture {
   readonly store: InMemoryStore;
@@ -32,7 +33,7 @@ interface Fixture {
 
 /** `ledgerAutoApprove: true` is the production default — needed so a retro edit would write TWO versions without the correction exit. */
 function makeFixture(gateEnforcer?: GateEnforcer): Fixture {
-  const store = new InMemoryStore();
+  const store = actedStore(new InMemoryStore());
   const lock = new RecordLockService(store, gateEnforcer ?? new GateEnforcer(undefined));
   const service = new CorpusService(store, lock, undefined, undefined, undefined, undefined, true);
   return { store, service };
@@ -406,7 +407,7 @@ describe("record-edit gate on CorpusService.set (AC-DR-2)", () => {
 
   describe("STATE — the gate knob (D11, BR-1053)", () => {
     it("with the gate disabled, an approved spec edit follows BR-722 and leaves exactly one config_disabled skip audit naming the doc", async () => {
-      const store = new InMemoryStore();
+      const store = actedStore(new InMemoryStore());
       const config = LoreConfigSchema.parse({
         project: { name: "test-project", author: "alice" },
         workflow: { gates: { "record-edit": { enabled: false } } },
@@ -430,7 +431,7 @@ describe("record-edit gate on CorpusService.set (AC-DR-2)", () => {
     });
 
     it("a passing evaluation (an unlocked doc rewritten) leaves a gate_passed trace naming the doc, and a metadata-only save leaves none", async () => {
-      const store = new InMemoryStore();
+      const store = actedStore(new InMemoryStore());
       const enforcer = new GateEnforcer(undefined, store.appendAuditEntry.bind(store), undefined, () => "test-actor");
       const service = new CorpusService(store, new RecordLockService(store, enforcer));
       const spec = await mustCreate(service, { type: "spec", title: "Draft", content: "v1" });

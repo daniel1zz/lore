@@ -63,6 +63,7 @@ import { TreeCheckService } from "../../../../src/service/tree-check-service.js"
 import { NoOpTelemetry } from "@lore/core";
 import { MIGRATION_002_SQL } from "../../../../src/store/migrations/migration-002.js";
 import type { App } from "../../../../src/app.js";
+import { actedStore } from "../../../live-invocation.js";
 
 // ─── Setup ────────────────────────────────────────────────────────────────────
 
@@ -83,7 +84,7 @@ async function makeTestServer(): Promise<TestContext> {
 
   const apiKeyStore = new ApiKeyStore(db);
   const sessionStore = new SessionStore(db);
-  const docStore = new InMemoryStore();
+  const docStore = actedStore(new InMemoryStore());
 
   const app: App = {
     corpusService: new CorpusService(docStore, new RecordLockService(docStore, new GateEnforcer(undefined))),

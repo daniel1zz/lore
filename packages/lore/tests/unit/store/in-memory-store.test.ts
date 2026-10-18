@@ -30,6 +30,7 @@ import { makeDoc, makeLink, resetCounter, runStoreCoreSuite } from "./store-core
 import { runStoreJudgmentsSuite } from "./store-judgments.shared.js";
 import type { DocRecord } from "@lore/core";
 import { SNIPPET_MARK_CLOSE, SNIPPET_MARK_OPEN } from "@lore/core";
+import { actedStore } from "../../live-invocation.js";
 
 // ─── Suite ───────────────────────────────────────────────────────────────────
 
@@ -38,7 +39,7 @@ describe("InMemoryStore", () => {
 
   beforeEach(() => {
     resetCounter();
-    store = new InMemoryStore();
+    store = actedStore(new InMemoryStore());
   });
 
   // ── Happy Path ─────────────────────────────────────────────────────────────
@@ -235,13 +236,13 @@ describe("InMemoryStore", () => {
 
 runStoreCoreSuite({
   label: "InMemoryStore",
-  createStore: () => new InMemoryStore(),
+  createStore: () => actedStore(new InMemoryStore()),
   destroyStore: (store) => store.close(),
 });
 
 runStoreJudgmentsSuite({
   label: "InMemoryStore",
-  createStore: () => new InMemoryStore(),
+  createStore: () => actedStore(new InMemoryStore()),
   destroyStore: (store) => store.close(),
   // N/A: InMemoryStore has no FK constraints; the orphan reference surfaces at query time.
   enforcesForeignKeys: false,

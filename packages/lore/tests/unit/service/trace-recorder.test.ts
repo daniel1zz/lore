@@ -35,9 +35,10 @@ import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
 import { TraceRecorder } from "../../../src/service/trace-recorder.js";
 import type { TraceEventInput } from "../../../src/store/store-interface.js";
 import type { LoreError, Result } from "@lore/core";
+import { actedStore } from "../../live-invocation.js";
 
 function makeStore() {
-  return new InMemoryStore();
+  return actedStore(new InMemoryStore());
 }
 
 /**

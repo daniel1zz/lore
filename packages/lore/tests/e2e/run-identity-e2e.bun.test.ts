@@ -34,6 +34,7 @@ import { delimiter, dirname, join } from "node:path";
 import type { AuditEntry } from "@lore/core";
 import { SQLiteStore } from "../../src/store/sqlite-store.js";
 import { assertFreshBinary } from "../integration/helpers/assert-fresh-binary";
+import { actedStore } from "../live-invocation.js";
 
 setDefaultTimeout(180_000);
 
@@ -123,7 +124,7 @@ function newTask(title: string): string {
 const docIds = new Map<string, string>();
 
 async function evidenceAuditRows(): Promise<AuditEntry[]> {
-  const store = new SQLiteStore(join(corpus, ".lore", "lore.db"));
+  const store = actedStore(new SQLiteStore(join(corpus, ".lore", "lore.db")));
   try {
     const r = await store.queryAudit({ limit: 100_000 });
     if (!r.ok) throw new Error(JSON.stringify(r.error));

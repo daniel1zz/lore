@@ -43,6 +43,7 @@ import { ReviewService } from "../../../src/service/review-service.js";
 import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
 import type { StoreInterface, UpdateOpts } from "../../../src/store/store-interface.js";
 import type { CreateDocInput, DocRecord, LoreError, Result } from "@lore/core";
+import { actedStore } from "../../live-invocation.js";
 
 // ─── Fixtures ────────────────────────────────────────────────────────────────
 
@@ -104,7 +105,7 @@ async function setupApprovedSpecAndDraftPlan(): Promise<{
   spec: DocRecord;
   plan: DocRecord;
 }> {
-  const store = new InMemoryStore();
+  const store = actedStore(new InMemoryStore());
   await seedLiveRule(store);
   const enforcer = new GateEnforcer(undefined);
   const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)), undefined, undefined, enforcer);
@@ -216,7 +217,7 @@ describe("ASYNC2-002 — ReviewService.approve plan-promote TOCTOU", () => {
 
   // ── REGRESSION: a spec approval is unaffected — no ancestor to race against ──
   it("REGRESSION: a spec's own approve() never invokes getPlanBundle (spec-promote reads only its own row)", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     await seedLiveRule(store);
     const enforcer = new GateEnforcer(undefined);
     const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)), undefined, undefined, enforcer);

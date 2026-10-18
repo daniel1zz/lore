@@ -13,6 +13,7 @@ import { DOC_TYPE_ROLE_MAP } from "@lore/core";
 import type { DocId, DocRecord } from "@lore/core";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { ImpactService } from "../../../src/service/impact-service.js";
+import { actedStore } from "../../live-invocation.js";
 
 function rule(id: string, statement: string) {
   return { id, statement, confidence: "established", enforced_by: "both", examples: ["example"], lifecycle: "live" };
@@ -60,7 +61,7 @@ const spec = (store: InMemoryStore, slug: string, acId: string, cites: string[])
   });
 
 async function fixture(): Promise<InMemoryStore> {
-  const store = new InMemoryStore();
+  const store = actedStore(new InMemoryStore());
   await leaf(store, "leaf-a", [rule("BR-x", "Orders must be idempotent")]);
   await leaf(store, "leaf-b", [rule("BR-b", "B rule")], ["BR-x"]);
   await spec(store, "spec-one", "AC-1", ["BR-x"]);
@@ -94,7 +95,7 @@ describe("ImpactService standing split (AC-DR-6)", () => {
   });
 
   it("AC-DR-6 an uncited rule with no dependents has living = [its leaf] and records = []", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     await leaf(store, "solo", [rule("BR-s", "Solo rule")]);
     const r = await new ImpactService(store).impact("BR-s");
     expect(r.ok && r.value.living).toEqual(["solo"]);

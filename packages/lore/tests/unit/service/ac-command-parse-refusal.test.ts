@@ -18,6 +18,7 @@ import { CorpusService } from "../../../src/service/corpus-service.js";
 import { AcService } from "../../../src/service/ac-service.js";
 import { applyAcChange } from "../../../src/service/ac-write-chokepoint.js";
 import { recordLockGateOff } from "../../helpers/record-lock-gate-off.js";
+import { actedStore } from "../../live-invocation.js";
 
 const UNBALANCED = "echo 'X PASS: its class's calibration'";
 const DOUBLE_QUOTED = `echo "X PASS: its class's calibration"`;
@@ -40,7 +41,7 @@ const WRITE_METHODS = [
 ] as const;
 
 async function setup() {
-  const store = new InMemoryStore();
+  const store = actedStore(new InMemoryStore());
   const cs = new CorpusService(store, recordLockGateOff(store));
   const ac = new AcService(store, recordLockGateOff(store));
   const prd = await cs.create({ type: "prd", title: "P", content: "root" } as CreateDocInput);

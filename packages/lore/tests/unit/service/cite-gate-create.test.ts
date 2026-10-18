@@ -19,6 +19,7 @@ import { DOC_TYPE_ROLE_MAP } from "@lore/core";
 import type { CreateDocInput, DocId, DocRecord } from "@lore/core";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
+import { actedStore } from "../../live-invocation.js";
 
 const AC = (id: string, extra: Record<string, unknown> = {}) => ({
   id,
@@ -41,7 +42,7 @@ async function insertBaseline(store: InMemoryStore, slug: string, extra: Record<
 }
 
 async function world(gate: { mode: "off" | "report" | "enforce"; armed_branches: string[] } | "bare") {
-  const store = new InMemoryStore();
+  const store = actedStore(new InMemoryStore());
   const cs = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
   if (gate !== "bare") cs.setCiteGate(gate);
   const root = await insertBaseline(store, "baseline-root", { node: "root" }, null);

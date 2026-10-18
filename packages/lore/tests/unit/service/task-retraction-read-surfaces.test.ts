@@ -39,11 +39,12 @@ import { ValidityService } from "../../../src/service/validity-service.js";
 import { TaskWorkflowService } from "../../../src/service/task-workflow-service.js";
 import { resolveValidityBanner } from "../../../src/service/outline-service.js";
 import type { CreateDocInput } from "@lore/core";
+import { actedStore } from "../../live-invocation.js";
 
 // ─── Fixtures ───────────────────────────────────────────────────────────────
 
 function makeServices(ttl = 120) {
-  const store = new InMemoryStore();
+  const store = actedStore(new InMemoryStore());
   const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
   const validityService = new ValidityService(store);
   const taskWorkflowService = new TaskWorkflowService(store, undefined, { claimTtlMinutes: ttl });
@@ -125,7 +126,7 @@ describe("HAPPY — a retracted task disappears from list/search/ready by defaul
 
 describe("STATE — readyAdhoc() excludes a retracted ad-hoc task the same way", () => {
   it("an --adhoc task retracted via invalidate is absent from readyAdhoc()", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
     const validityService = new ValidityService(store);
     const taskWorkflowService = new TaskWorkflowService(store, undefined, { claimTtlMinutes: 120 });

@@ -39,7 +39,7 @@
 import { dirname } from "path";
 import { defineCommand } from "citty";
 import { loadLoreApp } from "../loader.js";
-import { exitCode, formatError } from "../utils.js";
+import { exitCode, formatError, formatErrorFor } from "../utils.js";
 import { resolveTrackedWriteRoot } from "../working-tree-root.js";
 import { requirePhaseMigrationService } from "../phase-wiring.js";
 import type { SectionMigrationVerdict } from "../../../service/outline-migration-service.js";
@@ -134,7 +134,7 @@ export default defineCommand({
           if (args.json) {
             console.log(JSON.stringify({ ok: false, error: result.error }, null, 2));
           } else {
-            process.stderr.write(formatError(result.error) + "\n");
+            process.stderr.write(formatErrorFor(inv, result.error) + "\n");
           }
           process.exitCode = exitCode(result.error);
           return;
@@ -206,7 +206,7 @@ export default defineCommand({
           if (args.json) {
             console.log(JSON.stringify({ ok: false, error: result.error }, null, 2));
           } else {
-            process.stderr.write(formatError(result.error) + "\n");
+            process.stderr.write(formatErrorFor(inv, result.error) + "\n");
           }
           process.exitCode = exitCode(result.error);
           return;
@@ -286,7 +286,7 @@ export default defineCommand({
 
         const prdResult = await app.corpusService.get(args.prd);
         if (!prdResult.ok) {
-          process.stderr.write(formatError(prdResult.error) + "\n");
+          process.stderr.write(formatErrorFor(inv, prdResult.error) + "\n");
           process.exitCode = exitCode(prdResult.error);
           return;
         }
@@ -370,7 +370,7 @@ export default defineCommand({
           // (migrateTasks IS idempotent — see phase-migration-service.ts's own
           // module header invariants #1/#2).
           const { cause, partial } = result.error;
-          process.stderr.write(formatError(cause) + "\n");
+          process.stderr.write(formatErrorFor(inv, cause) + "\n");
           process.stderr.write(
             `${partial.phases_created} phases created / ${partial.tasks_archived} tasks archived / ` +
               `${partial.evidence_merged} evidence merged before failure — safe to re-run (idempotent)\n`,
@@ -415,7 +415,7 @@ export default defineCommand({
         const result = await app.phaseService.migratePhases({ dryRun });
 
         if (!result.ok) {
-          process.stderr.write(formatError(result.error) + "\n");
+          process.stderr.write(formatErrorFor(inv, result.error) + "\n");
           process.exitCode = exitCode(result.error);
           return;
         }
@@ -448,7 +448,7 @@ export default defineCommand({
         const result = await app.specKindService.migrateSpecKind({ dryRun });
 
         if (!result.ok) {
-          process.stderr.write(formatError(result.error) + "\n");
+          process.stderr.write(formatErrorFor(inv, result.error) + "\n");
           process.exitCode = exitCode(result.error);
           return;
         }
@@ -495,7 +495,7 @@ export default defineCommand({
         // Analysis only
         const analyzeResult = app.migrationService.analyze(args.from);
         if (!analyzeResult.ok) {
-          process.stderr.write(formatError(analyzeResult.error) + "\n");
+          process.stderr.write(formatErrorFor(inv, analyzeResult.error) + "\n");
           process.exitCode = exitCode(analyzeResult.error);
           return;
         }
@@ -553,7 +553,7 @@ export default defineCommand({
       });
 
       if (!executeResult.ok) {
-        process.stderr.write(formatError(executeResult.error) + "\n");
+        process.stderr.write(formatErrorFor(inv, executeResult.error) + "\n");
         process.exitCode = exitCode(executeResult.error);
         return;
       }

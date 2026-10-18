@@ -29,6 +29,7 @@ import { join } from "node:path";
 import { createApp, type App } from "../../src/app.js";
 import type { LoreConfig } from "@lore/core";
 import type { Result, LoreError } from "@lore/core";
+import { liveAmbient, liveWriteContext } from "../live-invocation.js";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -108,7 +109,7 @@ describe("createApp — no sync config (regression lock, SPEC-009 §3.3 invarian
 
   it("createApp(dbPath) without config param succeeds and returns a working App", () => {
     const dbPath = join(tmpDir, "lore.db");
-    const app = createApp(dbPath);
+    const app = createApp(dbPath, undefined, liveAmbient(), liveWriteContext());
 
     // Must return an App-shaped object (not a Result with ok:false)
     expect(app).toBeDefined();
@@ -127,7 +128,7 @@ describe("createApp — no sync config (regression lock, SPEC-009 §3.3 invarian
 
   it("createApp(dbPath) local-only creates a usable corpus service (can insert and retrieve)", async () => {
     const dbPath = join(tmpDir, "lore2.db");
-    const app = createApp(dbPath);
+    const app = createApp(dbPath, undefined, liveAmbient(), liveWriteContext());
 
     // Behavioral check: SQLiteStore-backed app must be able to insert and list docs
     const insertResult = await app.corpusService.create({
@@ -179,7 +180,7 @@ describe("createApp — sync config + token env set + unreachable remote (SPEC-0
     const dbPath = join(tmpDir, "lore.db");
     const config = makeSyncConfig(TEST_TOKEN_ENV);
 
-    const appOrResult = createApp(dbPath, config);
+    const appOrResult = createApp(dbPath, config, liveAmbient(), liveWriteContext());
 
     // Must be a Result (not a raw App) — sync-path always returns Result
     expect(isResult(appOrResult)).toBe(true);
@@ -203,7 +204,7 @@ describe("createApp — sync config + token env set + unreachable remote (SPEC-0
     const dbPath = join(tmpDir, "lore2.db");
     const config = makeSyncConfig(TEST_TOKEN_ENV);
 
-    const appOrResult = createApp(dbPath, config);
+    const appOrResult = createApp(dbPath, config, liveAmbient(), liveWriteContext());
 
     // If it returned a raw App (not wrapped in Result), that's a D-007 violation
     if (!isResult(appOrResult)) {
@@ -239,7 +240,7 @@ describe("createApp — sync config + token env set + unreachable remote (SPEC-0
     const dbPath = join(tmpDir, "lore3.db");
     const config = makeSyncConfig(TEST_TOKEN_ENV); // token IS set — credentials are valid
 
-    const appOrResult = createApp(dbPath, config);
+    const appOrResult = createApp(dbPath, config, liveAmbient(), liveWriteContext());
 
     expect(isResult(appOrResult)).toBe(true);
     if (isResult(appOrResult) && !appOrResult.ok) {
@@ -277,7 +278,7 @@ describe("createApp — sync enabled + token env MISSING → fail loud (D-007)",
     //   (b) createApp throws an Error
     // MUST NOT silently succeed and fall back to SQLiteStore.
 
-    const appOrResult = createApp(dbPath, config);
+    const appOrResult = createApp(dbPath, config, liveAmbient(), liveWriteContext());
 
     if (isResult(appOrResult)) {
       // Option A: Result pattern
@@ -308,7 +309,7 @@ describe("createApp — sync enabled + token env MISSING → fail loud (D-007)",
     // Set env var to empty string — must also fail (not treat empty as valid token)
     process.env[TEST_TOKEN_ENV] = "";
 
-    const appOrResult = createApp(dbPath, config);
+    const appOrResult = createApp(dbPath, config, liveAmbient(), liveWriteContext());
 
     if (isResult(appOrResult)) {
       expect(appOrResult.ok).toBe(false);
@@ -330,7 +331,7 @@ describe("createApp — sync enabled + token env MISSING → fail loud (D-007)",
     const dbPath = join(tmpDir, "lore3.db");
     const config = makeSyncConfig(TEST_TOKEN_ENV);
 
-    const appOrResult = createApp(dbPath, config);
+    const appOrResult = createApp(dbPath, config, liveAmbient(), liveWriteContext());
 
     expect(isResult(appOrResult)).toBe(true);
     if (isResult(appOrResult) && !appOrResult.ok) {
@@ -496,7 +497,7 @@ describe("createApp — boundary values", () => {
 
   it("createApp(dbPath, undefined) is equivalent to createApp(dbPath) — uses SQLiteStore", () => {
     const dbPath = join(tmpDir, "lore.db");
-    const appOrResult = createApp(dbPath, undefined);
+    const appOrResult = createApp(dbPath, undefined, liveAmbient(), liveWriteContext());
 
     // Passing explicit undefined must behave like no config — SQLiteStore, local-only
     if (isResult(appOrResult)) {
@@ -531,7 +532,7 @@ describe("createApp — regression (existing API must not break)", () => {
     const dbPath = join(tmpDir, "lore.db");
 
     // This call MUST keep working — it's the existing public API used by all CLI commands
-    const app = createApp(dbPath);
+    const app = createApp(dbPath, undefined, liveAmbient(), liveWriteContext());
 
     expect(app.corpusService).toBeDefined();
     expect(app.reviewService).toBeDefined();

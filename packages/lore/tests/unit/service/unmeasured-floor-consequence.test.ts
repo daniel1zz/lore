@@ -66,6 +66,7 @@ import {
   computeCaptureSourceDistribution,
   formatStampVerdictLine,
 } from "../../../src/adapters/cli/assess-render.js";
+import { actedStore } from "../../live-invocation.js";
 
 // ─── Harness ────────────────────────────────────────────────────────────────
 
@@ -74,7 +75,7 @@ const HEAD = "7ab1d742c0f9e1b6a3d5c8e2f4b7a9d0c1e3f5a7";
 const REFUSED = { ok: false, reason: ATTESTATION_FLOOR_REASON, field: ATTESTATION_FLOOR_FIELD };
 
 function makeCorpus() {
-  const store = new InMemoryStore();
+  const store = actedStore(new InMemoryStore());
   const corpus = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
   const tasks = new TaskWorkflowService(store, undefined, { claimTtlMinutes: 120 });
   const binding = new StateBindingService(store);

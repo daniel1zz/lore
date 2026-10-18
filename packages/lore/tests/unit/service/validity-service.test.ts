@@ -43,11 +43,12 @@ import { CorpusService } from "../../../src/service/corpus-service.js";
 import { ValidityService, type StalenessCalibrationPort } from "../../../src/service/validity-service.js";
 import { err, ok } from "@lore/core";
 import type { CreateDocInput, DocRecord, LinkRecord, LoreError, ReviewJudgment, Result } from "@lore/core";
+import { actedStore } from "../../live-invocation.js";
 
 // ─── Fixtures ───────────────────────────────────────────────────────────────
 
 function makeServices() {
-  const store = new InMemoryStore();
+  const store = actedStore(new InMemoryStore());
   const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
   const validityService = new ValidityService(store);
   return { store, corpusService, validityService };
@@ -486,7 +487,7 @@ describe("BOUNDARY — retracting an already-terminal task / a task claimed by a
 
 describe("STATE — partial-failure recovery: doc half committed, re-run repairs the missing link", () => {
   it("a forced addLink failure still commits the doc half; re-running the SAME invalidate repairs the link", async () => {
-    const store = new FlakyLinkStore(1);
+    const store = actedStore(new FlakyLinkStore(1));
     const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
     const validityService = new ValidityService(store);
 
@@ -691,7 +692,7 @@ describe("AC-SP-9 — ValidityService optional stalenessCalibration port (SPEC-0
   }
 
   it("HAPPY: wired port + latest 'escalate' staleness judgment -> invalidate writes ONE calibration record FK'd to that judgment", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
     const k1 = await createKnowledge(corpusService, "K1 staleness-flagged");
     const judgment = makeStalenessJudgment({ doc_id: k1.id, doc_version: k1.version });
@@ -715,7 +716,7 @@ describe("AC-SP-9 — ValidityService optional stalenessCalibration port (SPEC-0
   });
 
   it("STATE: no prior probe (latestStalenessJudgment returns null) -> recordCalibration is never called", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
     const k1 = await createKnowledge(corpusService, "K1 never probed");
     const { port, recordCalibrationCalls } = makeFakePort(null);
@@ -727,7 +728,7 @@ describe("AC-SP-9 — ValidityService optional stalenessCalibration port (SPEC-0
   });
 
   it("STATE: a 'holds' (decision='approve') latest staleness judgment -> recordCalibration is never called (D12 — no observable outcome for holds)", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
     const k1 = await createKnowledge(corpusService, "K1 holds verdict");
     const holdsJudgment = makeStalenessJudgment({ doc_id: k1.id, doc_version: k1.version, decision: "approve" });
@@ -740,7 +741,7 @@ describe("AC-SP-9 — ValidityService optional stalenessCalibration port (SPEC-0
   });
 
   it("STATE: --undo never triggers a calibration write, even with a wired port + an escalate judgment", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
     const k1 = await createKnowledge(corpusService, "K1 undo case");
 
@@ -760,7 +761,7 @@ describe("AC-SP-9 — ValidityService optional stalenessCalibration port (SPEC-0
   });
 
   it("REGRESSION: bare `new ValidityService(store)` (no port) writes NONE and does not error", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
     const k1 = await createKnowledge(corpusService, "K1 bare construction");
     const validityService = new ValidityService(store); // no telemetry, no port — mirrors every pre-SPEC-044 test in this file

@@ -101,6 +101,7 @@ import type { DocRecord, ExportIndex, MirrorHumanId } from "@lore/core";
 import { assertIsMirrorHumanId, SELF_DECLARED_ORDINAL_TITLE_REFUSAL } from "@lore/core";
 import { SQLiteStore } from "../../src/store/sqlite-store.js";
 import { runLoreInProcess } from "../helpers/run-lore-in-process";
+import { actedStore } from "../live-invocation.js";
 
 /**
  * Narrows a raw human_id string literal to the branded {@link MirrorHumanId} for fixture
@@ -309,7 +310,7 @@ describe("AC-084-5: compiled dist/lore migrate ordinals — dry-run/apply/idempo
     // Direct store writes (bypass CorpusService/the CLI entirely) — the ONLY
     // way to construct pre-existing self-declared-number titles now that the
     // SPEC-084 schema guard forbids creating them through any public surface.
-    const seedStore = new SQLiteStore(dbPath);
+    const seedStore = actedStore(new SQLiteStore(dbPath));
     specA = makeDoc({
       type: "spec",
       slug: "spec-t7-alpha-decision",

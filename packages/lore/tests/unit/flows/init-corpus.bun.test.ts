@@ -32,6 +32,7 @@ import { tmpdir } from "node:os";
 import { parse as parseYaml } from "yaml";
 
 import { initCorpusAt } from "../../../src/flows/init-corpus.js";
+import { liveAmbient } from "../../live-invocation.js";
 
 const scratchDirs: string[] = [];
 
@@ -59,7 +60,7 @@ describe("initCorpusAt — HAPPY", () => {
   it("bootstraps a fresh repoDir: config.yaml, .gitignore, migrated lore.db", async () => {
     const repoDir = makeScratchDir("init-corpus-happy-");
 
-    const result = await initCorpusAt(repoDir);
+    const result = await initCorpusAt(repoDir, liveAmbient());
 
     expect(result.ok).toBe(true);
     expect(existsSync(join(repoDir, ".lore", "config.yaml"))).toBe(true);
@@ -74,7 +75,7 @@ describe("initCorpusAt — HAPPY", () => {
   it("honors custom {name, author} opts over the defaults", async () => {
     const repoDir = makeScratchDir("init-corpus-custom-");
 
-    const result = await initCorpusAt(repoDir, { name: "my-custom-project", author: "zheng" });
+    const result = await initCorpusAt(repoDir, liveAmbient(), { name: "my-custom-project", author: "zheng" });
 
     expect(result.ok).toBe(true);
     const configText = readFileSync(join(repoDir, ".lore", "config.yaml"), "utf8");
@@ -91,7 +92,7 @@ describe("initCorpusAt — BOUNDARY", () => {
     const scratch = makeScratchDir("init-corpus-nested-");
     const repoDir = join(scratch, "a", "b", "c", "repo");
 
-    const result = await initCorpusAt(repoDir);
+    const result = await initCorpusAt(repoDir, liveAmbient());
 
     expect(result.ok).toBe(true);
     expect(existsSync(join(repoDir, ".lore", "lore.db"))).toBe(true);
@@ -107,7 +108,7 @@ describe("initCorpusAt — ERROR", () => {
     writeFileSync(blockingFilePath, "i am a file, not a directory");
     const repoDir = join(blockingFilePath, "repo");
 
-    const result = await initCorpusAt(repoDir);
+    const result = await initCorpusAt(repoDir, liveAmbient());
 
     expect(result.ok).toBe(false);
     if (!result.ok) {
@@ -122,8 +123,8 @@ describe("initCorpusAt — STATE", () => {
   it("calling initCorpusAt twice against the SAME repoDir succeeds both times", async () => {
     const repoDir = makeScratchDir("init-corpus-repeat-");
 
-    const first = await initCorpusAt(repoDir);
-    const second = await initCorpusAt(repoDir);
+    const first = await initCorpusAt(repoDir, liveAmbient());
+    const second = await initCorpusAt(repoDir, liveAmbient());
 
     expect(first.ok).toBe(true);
     expect(second.ok).toBe(true);
@@ -139,7 +140,7 @@ describe("initCorpusAt — REGRESSION", () => {
     const repoDir = join(scratch, "my-repo-basename");
     mkdirSync(repoDir, { recursive: true });
 
-    const result = await initCorpusAt(repoDir);
+    const result = await initCorpusAt(repoDir, liveAmbient());
 
     expect(result.ok).toBe(true);
     const configText = readFileSync(join(repoDir, ".lore", "config.yaml"), "utf8");

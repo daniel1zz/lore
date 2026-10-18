@@ -34,7 +34,7 @@ import { join, resolve } from "path";
 import { tmpdir } from "os";
 import { createApp, type App } from "../../src/app.js";
 import type { CreateDocInput } from "@lore/core";
-import { liveInvocation } from "../live-invocation.js";
+import { liveInvocation, liveAmbient, liveWriteContext } from "../live-invocation.js";
 import type { Invocation } from "@lore/core";
 
 // ─── Command type + importer (mirrors gate-feeding-skill-discovery.bun.test.ts) ────
@@ -101,7 +101,7 @@ beforeAll(() => {
   mkdirSync(loreDir, { recursive: true });
   dbPath = join(loreDir, "lore.db");
 
-  const bootstrap = createApp(dbPath);
+  const bootstrap = createApp(dbPath, undefined, liveAmbient(), liveWriteContext());
   bootstrap.close();
 
   originalCwd = process.cwd();
@@ -122,7 +122,7 @@ afterAll(() => {
 });
 
 async function withApp<T>(fn: (app: App) => Promise<T>): Promise<T> {
-  const app = createApp(dbPath);
+  const app = createApp(dbPath, undefined, liveAmbient(), liveWriteContext());
   try {
     return await fn(app);
   } finally {

@@ -28,6 +28,7 @@ import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
 import { ok, err } from "@lore/core";
 import type { CreateDocInput, DocRecord, LoreError, Result } from "@lore/core";
+import { actedStore } from "../../live-invocation.js";
 
 // packages/lore/tests/unit/service/ -> ../../../ -> packages/lore/src/service/seat-service.js
 const SEAT_SERVICE_MODULE_PATH = ["..", "..", "..", "src", "service", "seat-service.js"].join("/");
@@ -145,7 +146,7 @@ function readyReport(): SeatReadyReportLike {
 describe("SeatService.enter — sequence order (HAPPY)", () => {
   it("calls isDirty -> rebaseFromMain -> getReadyReport -> worktreeAdd, in that exact order", async () => {
     const SeatService = await loadSeatServiceCtor();
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
     const plan = await mustCreatePlan(corpusService, "Session Plan");
 
@@ -175,7 +176,7 @@ describe("SeatService.enter — sequence order (HAPPY)", () => {
 
   it("dirty main aborts before rebase/readiness/worktreeAdd, with a typed err", async () => {
     const SeatService = await loadSeatServiceCtor();
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
     const plan = await mustCreatePlan(corpusService, "Dirty Main Plan");
 
@@ -201,7 +202,7 @@ describe("SeatService.enter — sequence order (HAPPY)", () => {
 describe("SeatService.enter — mid-sequence failure + retry (NEGATIVE / STATE)", () => {
   it("worktreeAdd failing after a successful rebase errs naming the worktreeAdd step, and a second enter call succeeds", async () => {
     const SeatService = await loadSeatServiceCtor();
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
     const plan = await mustCreatePlan(corpusService, "Retry Plan");
 
@@ -240,7 +241,7 @@ describe("SeatService.remove — unmerged/merged matched pair", () => {
   let plan: DocRecord;
 
   beforeEach(async () => {
-    store = new InMemoryStore();
+    store = actedStore(new InMemoryStore());
     corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
     plan = await mustCreatePlan(corpusService, "Remove-Target Plan");
   });
@@ -292,7 +293,7 @@ describe("SeatService.remove — unmerged/merged matched pair", () => {
 describe("SeatService.list — G13 cost counter-metric data surface (AC-S-7)", () => {
   it("emits branch, created_at, and merged per seat on a fake-GitPort fixture", async () => {
     const SeatService = await loadSeatServiceCtor();
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
 
     const gitPort = new FakeGitPort();
     gitPort.worktreeListResult = [
@@ -322,7 +323,7 @@ describe("SeatService.list — G13 cost counter-metric data surface (AC-S-7)", (
 
   it("an empty worktree list produces an empty seat list, not an error", async () => {
     const SeatService = await loadSeatServiceCtor();
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const gitPort = new FakeGitPort();
     const getReadyReport = async (): Promise<SeatReadyReportLike> => readyReport();
 
@@ -339,7 +340,7 @@ describe("SeatService.list — G13 cost counter-metric data surface (AC-S-7)", (
 describe("SeatService.resume", () => {
   it("resumes an existing seat worktree by locating it via worktreeList", async () => {
     const SeatService = await loadSeatServiceCtor();
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
     const plan = await mustCreatePlan(corpusService, "Resume Plan");
 
@@ -357,7 +358,7 @@ describe("SeatService.resume", () => {
 
   it("resuming a plan with no matching seat worktree errs rather than silently creating one", async () => {
     const SeatService = await loadSeatServiceCtor();
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
     const plan = await mustCreatePlan(corpusService, "No Seat Yet Plan");
 

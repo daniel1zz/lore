@@ -17,7 +17,6 @@
  */
 
 import { Database } from "bun:sqlite";
-import { homedir, tmpdir } from "node:os";
 import { dirname } from "node:path";
 import { SQLiteStore } from "./store/sqlite-store.js";
 import { assertNoForeignSchemaMigration } from "./store/foreign-schema-guard.js";
@@ -51,7 +50,7 @@ import {
   AiConfigSchema,
 } from "@lore/core";
 import { err, ok, type Result, type LoreError } from "@lore/core";
-import type { CallerSurface, AiDefaultSource, InvocationIdentity } from "@lore/core";
+import type { CallerSurface, AiDefaultSource, InvocationIdentity, Invocation } from "@lore/core";
 import type { AiDefaultPerSurface } from "@lore/core";
 import { resolveAiDefault } from "./ai/resolve-ai.js";
 import { NoOpTelemetry, type Telemetry } from "@lore/core";
@@ -94,6 +93,7 @@ import { WorktreeRemovalService, type WorktreeRemovalRunStore } from "./service/
 import { DecisionService } from "./service/decision-service.js";
 import { createOverrideDecisionPort, type OverrideDecisionPort } from "./service/override-decision.js";
 import { createRealWorktreeProbe } from "./service/worktree-cleanup.js";
+import { createReadSessionHeartbeat, createWriteSessionHeartbeat } from "./adapters/session-heartbeat-port.js";
 import { createRealProcessScanPort } from "./adapters/real-process-scan-port.js";
 import { createRealProcessTablePort } from "./adapters/process-table-port.js";
 import { RunReapService } from "./service/run-reap-service.js";
@@ -740,8 +740,7 @@ function warnOnStderr(line: string): void {
 /**
  * The ambient process facts the composition root hands to the ports it wires: the environment, the user's home
  * directory, the OS temp directory and the working directory. Built from the entry's `Invocation` where there is one
- * (`{ env: inv.env, home: inv.paths.home, tmpDir: inv.paths.tmpDir, cwd: inv.cwd }`), else from the process by
- * {@link ambientFromProcess}.
+ * (`ambientOfInvocation(inv)`); every caller supplies one — there is no process-reading fallback.
  */
 export interface AppAmbient {
   readonly env: Readonly<Record<string, string | undefined>>;
@@ -752,16 +751,13 @@ export interface AppAmbient {
 }
 
 /**
- * Read the running process for an {@link AppAmbient}: the composition root's ONE fallback for callers with no
- * Invocation (tests, scripts, library use). Visible here so `check:ambient-reads` counts it against this file.
- * `$HOME` wins over `os.homedir()` for the reason documented at `home-dir-node.ts`.
+ * The {@link AppAmbient} of an entry's `Invocation`: the values the composition hands to the ports it wires.
  *
- * @returns the live `process.env` object plus the resolved home and temp directories
+ * @param inv - the Invocation the entry resolved (or a test's `liveInvocation()`)
+ * @returns `{ env, home, tmpDir, cwd }` copied from `inv`
  */
-export function ambientFromProcess(): AppAmbient {
-  const env = process.env;
-  const envHome = env["HOME"];
-  return { env, home: envHome !== undefined && envHome !== "" ? envHome : homedir(), tmpDir: tmpdir(), cwd: process.cwd() };
+export function ambientOfInvocation(inv: Invocation): AppAmbient {
+  return { env: inv.env, home: inv.paths.home, tmpDir: inv.paths.tmpDir, cwd: inv.cwd };
 }
 
 function buildAppFromSqlite(
@@ -863,7 +859,7 @@ function buildAppFromSqlite(
   // generation-carrying siblings of the 4th/6th args — `resolveDeclaredAcCriteria`/
   // `resolveDeclaredAcCriteriaForAdhocTask` return the full criterion (not just its id),
   // which `resolveAcOracleGeneration` needs and a bare id set structurally cannot supply.
-  const worktreeRemovalService = buildWorktreeRemovalService(store);
+  const worktreeRemovalService = buildWorktreeRemovalService(store, ambient);
   const taskWorkflowService = new TaskWorkflowService(
     store,
     telemetry,
@@ -879,7 +875,7 @@ function buildAppFromSqlite(
     undefined,
     undefined,
     undefined,
-    undefined,
+    createRealWorktreeProbe(ambient.cwd),
     worktreeRemovalService,
   );
   // reason: SessionService (SPEC-041 §3 D1) — createHandoffDoc is CorpusService's
@@ -893,7 +889,7 @@ function buildAppFromSqlite(
     createHandoffDoc: corpusService.createHandoffDoc.bind(corpusService),
     isCheckpointEnabled: gateEnforcer.isEnabled.bind(gateEnforcer),
     readTrail: (sessionId) => readSessionTrail(sessionId, stateBase(ambient.env, ambient.home)),
-  });
+  }, undefined, createWriteSessionHeartbeat(ambient.tmpDir), createReadSessionHeartbeat(ambient.tmpDir));
   // reason: extracted to a local (mirrors taskWorkflowService/sessionService above) so
   // both the `judgmentService:` field AND `validityService`'s SPEC-044 D12 calibration
   // port AND `stalenessProbeService`'s recordJudgment port can bind to the SAME instance
@@ -964,8 +960,8 @@ function buildAppFromSqlite(
     phaseService: new PhaseService(store, recordLockService),
     taskWorkflowService,
     sessionService,
-    runService: new RunService(store, undefined, taskWorkflowService, realpathNative),
-    runReapService: buildRunReapService(store, taskWorkflowService),
+    runService: new RunService(store, undefined, taskWorkflowService, realpathNative, createRealWorktreeProbe(ambient.cwd)),
+    runReapService: buildRunReapService(store, taskWorkflowService, ambient),
     worktreeRemovalService,
     verifiedInvocationIdentity: () => ensureVerifiedIdentity(store),
     // reason: ValidityService owns extra.validity (bi-temporal invalidation) — store +
@@ -1280,7 +1276,7 @@ function buildAppFromTurso(
   // reason: 8th/9th args — see buildAppFromSqlite's identical comment (both
   // composition roots must wire the generation-carrying siblings, or the
   // Turso-backed surface silently stamps no `ac_oracle_generation`).
-  const worktreeRemovalService = buildWorktreeRemovalService(store);
+  const worktreeRemovalService = buildWorktreeRemovalService(store, ambient);
   const taskWorkflowService = new TaskWorkflowService(
     store,
     telemetry,
@@ -1296,7 +1292,7 @@ function buildAppFromTurso(
     undefined,
     undefined,
     undefined,
-    undefined,
+    createRealWorktreeProbe(ambient.cwd),
     worktreeRemovalService,
   );
   // reason: SessionService (SPEC-041 §3 D1) — createHandoffDoc is CorpusService's
@@ -1310,7 +1306,7 @@ function buildAppFromTurso(
     createHandoffDoc: corpusService.createHandoffDoc.bind(corpusService),
     isCheckpointEnabled: gateEnforcer.isEnabled.bind(gateEnforcer),
     readTrail: (sessionId) => readSessionTrail(sessionId, stateBase(ambient.env, ambient.home)),
-  });
+  }, undefined, createWriteSessionHeartbeat(ambient.tmpDir), createReadSessionHeartbeat(ambient.tmpDir));
   // reason: extracted to a local (mirrors buildAppFromSqlite's identical comment) so both
   // the `judgmentService:` field AND `validityService`'s SPEC-044 D12 calibration port
   // AND `stalenessProbeService`'s recordJudgment port can bind to the SAME instance.
@@ -1377,8 +1373,8 @@ function buildAppFromTurso(
     phaseService: new PhaseService(store, recordLockService),
     taskWorkflowService,
     sessionService,
-    runService: new RunService(store, undefined, taskWorkflowService, realpathNative),
-    runReapService: buildRunReapService(store, taskWorkflowService),
+    runService: new RunService(store, undefined, taskWorkflowService, realpathNative, createRealWorktreeProbe(ambient.cwd)),
+    runReapService: buildRunReapService(store, taskWorkflowService, ambient),
     worktreeRemovalService,
     verifiedInvocationIdentity: () => ensureVerifiedIdentity(store),
     // reason: ValidityService owns extra.validity (bi-temporal invalidation) — store +
@@ -1592,27 +1588,27 @@ function wireIssueCloseOnArchive(app: App, store: StoreInterface, config: LoreCo
   app.issueClose = step;
 }
 
-export function createApp(dbPath: string): App;
+export function createApp(dbPath: string, config: undefined, ambient: AppAmbient, writeContext?: AppWriteContext): App;
 export function createApp(
   dbPath: string,
   config: LoreConfig | undefined,
+  ambient: AppAmbient,
   writeContext?: AppWriteContext,
-  ambient?: AppAmbient,
 ): App | Result<App, LoreError>;
 export function createApp(
   dbPath: string,
-  config?: LoreConfig,
+  config: LoreConfig | undefined,
+  ambient: AppAmbient,
   writeContext?: AppWriteContext,
-  ambient?: AppAmbient,
 ): App | Result<App, LoreError> {
-  const built = createAppUnscoped(dbPath, config, writeContext, ambient);
+  const built = createAppUnscoped(dbPath, config, ambient, writeContext);
   const app = "corpusService" in built ? built : built.ok ? built.value : undefined;
   if (app === undefined) return built;
   // reason: spec-run-identity-slice-1 D3 — an MCP server is one long-lived App serving many callers, each call
   // carrying its own identity. The call-scoped App is built by the SAME composition path (same store selection,
   // same wrapping chokepoint) over the same corpus file, so no service can write outside the call's context.
   app.forWriteContext = (callContext) => {
-    const scoped = createApp(dbPath, config, callContext, ambient);
+    const scoped = createApp(dbPath, config, ambient, callContext);
     return "corpusService" in scoped ? ok(scoped) : scoped;
   };
   return built;
@@ -1634,26 +1630,22 @@ export function createApp(
 export function createAppWithWriteContext(
   dbPath: string,
   config: (LoreConfig & { sync?: never }) | undefined,
+  ambient: AppAmbient,
   writeContext: AppWriteContext,
-  ambient?: AppAmbient,
 ): App | Result<App, LoreError> {
-  return createApp(dbPath, config, writeContext, ambient);
+  return createApp(dbPath, config, ambient, writeContext);
 }
 
 function createAppUnscoped(
   dbPath: string,
-  config?: LoreConfig,
+  config: LoreConfig | undefined,
+  ambient: AppAmbient,
   writeContext?: AppWriteContext,
-  ambientIn?: AppAmbient,
 ): App | Result<App, LoreError> {
   // reason: spec-close-the-eight-verified-critical-defects F5 (AC-CRIT-7) — the composition root is the one
   // place scripts/tests calling createApp(findLoreDbPath()) directly pass through; a linked worktree must
   // never let `new SQLiteStore` migrate the MAIN checkout's behind corpus. Throws ForeignSchemaMigrationRefusedError.
-  assertNoForeignSchemaMigration(dbPath);
-  // reason: ambient process state for the ports below (AS-26): the entry's Invocation values when the caller passed
-  // them (CLI loader, MCP server), else the process snapshot — which tests and scripts calling `createApp(dbPath)`
-  // directly have no Invocation to supply. Resolved once per composition.
-  const ambient = ambientIn ?? ambientFromProcess();
+  assertNoForeignSchemaMigration(dbPath, ambient.cwd);
   // Resolve telemetry from config — defaults to NoOp when telemetry section is absent.
   // reason: AC-C3 — createApp default behavior MUST NOT produce file side effects.
   // Users must explicitly set telemetry.enabled=true in config.yaml to opt in.
@@ -1665,7 +1657,7 @@ function createAppUnscoped(
   // never fails when config is absent. Failure only occurs when user sets ai.provider to an
   // unknown name — which is caught here and surfaces as exit 1 (AC-AI-11).
   const aiConfig = config?.ai ?? AiConfigSchema.parse({});
-  const registryResult = buildProviderRegistry(aiConfig);
+  const registryResult = buildProviderRegistry(aiConfig, { env: ambient.env, tmpDir: ambient.tmpDir });
   if (!registryResult.ok) {
     telemetry.close();
     // Folds into the existing Result<App> path (SPEC-017 §3.12)
@@ -1875,7 +1867,7 @@ function createAppUnscoped(
   // with the invariant matters for any future direct caller (this is also
   // where `AC-LL-5`/`AC-LL-7(c)`'s in-process tests exercise `createApp`
   // directly, bypassing `loader.ts`).
-  const tmpdirError = probeTmpdirUsability();
+  const tmpdirError = probeTmpdirUsability(ambient.env);
   if (tmpdirError !== null) {
     telemetry.close();
     return err(tmpdirError);
@@ -1989,12 +1981,13 @@ function createAppUnscoped(
 function buildRunReapService(
   store: ConstructorParameters<typeof DecisionService>[0]["store"],
   taskWorkflowService: TaskWorkflowService,
+  ambient: AppAmbient,
 ): RunReapService {
   return new RunReapService({
     store,
-    runs: new RunService(store, undefined, taskWorkflowService, realpathNative),
+    runs: new RunService(store, undefined, taskWorkflowService, realpathNative, createRealWorktreeProbe(ambient.cwd)),
     decisions: new DecisionService({ store, executorRun: null }),
-    processes: createRealProcessTablePort(),
+    processes: createRealProcessTablePort({ env: ambient.env }),
   });
 }
 
@@ -2012,14 +2005,15 @@ function buildOverrideDecisionPort(store: ConstructorParameters<typeof DecisionS
  */
 function buildWorktreeRemovalService(
   store: ConstructorParameters<typeof RunService>[0] & WorktreeRemovalRunStore & StoreInterface,
+  ambient: AppAmbient,
 ): WorktreeRemovalService {
   return new WorktreeRemovalService({
     // reason: AC-AU-11 — every worktree removal asks decide(worktree-remove) through the decision log; `executorRun: null`
     // because an in-process service has no attested run id of its own (AU-T9 stamps the executor on the CLI path).
     decisions: new DecisionService({ store, executorRun: null }),
-    probe: createRealWorktreeProbe(),
-    processScan: createRealProcessScanPort(),
-    occupancy: new RunService(store, undefined, undefined, realpathNative),
+    probe: createRealWorktreeProbe(ambient.cwd),
+    processScan: createRealProcessScanPort({ cwd: ambient.cwd }),
+    occupancy: new RunService(store, undefined, undefined, realpathNative, createRealWorktreeProbe(ambient.cwd)),
     runs: store,
   });
 }

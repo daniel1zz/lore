@@ -31,9 +31,10 @@ import { CorpusService } from "../../../src/service/corpus-service.js";
 import { PhaseService } from "../../../src/service/phase-service.js";
 import { TaskWorkflowService } from "../../../src/service/task-workflow-service.js";
 import type { CreateDocInput } from "@lore/core";
+import { actedStore } from "../../live-invocation.js";
 
 function makeServices() {
-  const store = new InMemoryStore();
+  const store = actedStore(new InMemoryStore());
   const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
   const phaseService = new PhaseService(store, new RecordLockService(store, new GateEnforcer(undefined)));
   const taskWorkflowService = new TaskWorkflowService(store, undefined, { claimTtlMinutes: 120 });

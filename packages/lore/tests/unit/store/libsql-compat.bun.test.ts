@@ -26,6 +26,7 @@ import { join } from "node:path";
 import { createClient, type Client } from "@libsql/client";
 import { SQLiteStore } from "../../../src/store/sqlite-store.js";
 import type { DocRecord, LinkRecord, VersionRecord } from "@lore/core";
+import { actedStore } from "../../live-invocation.js";
 
 // ─── Fixture Helpers ─────────────────────────────────────────────────────────
 
@@ -78,7 +79,7 @@ describe("R1 Spike — libsql/bun:sqlite WAL interop", () => {
     dbPath = join(tmpDir, "lore.db");
 
     // Build fixture using REAL SQLiteStore (full schema + migrations + WAL)
-    const store = new SQLiteStore(dbPath);
+    const store = actedStore(new SQLiteStore(dbPath));
 
     // Insert representative docs — one with content specifically for FTS search
     const doc1 = makeDoc({

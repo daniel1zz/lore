@@ -15,6 +15,7 @@ import { RuleStateService } from "../../../src/service/rule-state-service.js";
 import type { GitPort } from "../../../src/service/rule-state-service.js";
 import { DOC_TYPE_ROLE_MAP, ok } from "@lore/core";
 import type { DocRecord, DocType, EvidenceEntry } from "@lore/core";
+import { actedStore } from "../../live-invocation.js";
 
 const OLD = "a".repeat(40);
 const HEAD = "f".repeat(40);
@@ -80,7 +81,7 @@ interface SpecSetup {
 }
 
 async function build(specs: SpecSetup[]): Promise<InMemoryStore> {
-  const store = new InMemoryStore();
+  const store = actedStore(new InMemoryStore());
   const put = async (d: DocRecord): Promise<DocRecord> => {
     const r = await store.insert(d);
     if (!r.ok) throw new Error(JSON.stringify(r.error));

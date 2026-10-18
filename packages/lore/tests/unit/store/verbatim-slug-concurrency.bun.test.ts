@@ -53,6 +53,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SQLiteStore } from "../../../src/store/sqlite-store.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
+import { actedStore } from "../../live-invocation.js";
 
 /**
  * A standalone child-process worker. It MUST be written to a file inside
@@ -77,6 +78,7 @@ import { SQLiteStore } from "../../../src/store/sqlite-store.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
 import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
+import { declareWriteActorForTests } from "../../../src/store/write-context-store.js";
 
 const [, , dbPath, readyPath, barrierPath, slug, resultPath] = process.argv;
 
@@ -90,7 +92,7 @@ async function waitFor(path, timeoutMs) {
   }
 }
 
-const store = new SQLiteStore(dbPath);
+const store = declareWriteActorForTests(new SQLiteStore(dbPath), "slug-race-worker");
 const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
 
 // Signal "open and about to wait" BEFORE polling the barrier, so the parent
@@ -148,7 +150,7 @@ describe("CorpusService.create verbatim slug is the sole identity arbiter (D2, A
     // ever opens this db file, so the race under test is a SLUG-UNIQUENESS
     // race between two writers — never a first-ever-migration race between
     // the two child connections (an orthogonal concern this AC does not own).
-    const setup = new SQLiteStore(dbPath);
+    const setup = actedStore(new SQLiteStore(dbPath));
     setup.close();
   });
 
@@ -226,7 +228,7 @@ describe("CorpusService.create verbatim slug is the sole identity arbiter (D2, A
         // `DocRecord | null` return type is capped at 1 by construction and
         // so cannot itself catch a constraint that silently failed to
         // apply) is the actual falsifiable check.
-        const verifyStore = new SQLiteStore(dbPath);
+        const verifyStore = actedStore(new SQLiteStore(dbPath));
         const row = verifyStore
           .getDatabase()
           .query("SELECT COUNT(*) as n FROM docs WHERE slug = ?")
@@ -239,7 +241,7 @@ describe("CorpusService.create verbatim slug is the sole identity arbiter (D2, A
   );
 
   it("REGRESSION: create() with NO slug still generates a collision-suffixed '-2' slug on a genuine title collision — the verbatim path left this behavior byte-identical", async () => {
-    const store = new SQLiteStore(dbPath);
+    const store = actedStore(new SQLiteStore(dbPath));
     const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
 
     const title = "Verbatim Slug Regression Probe";

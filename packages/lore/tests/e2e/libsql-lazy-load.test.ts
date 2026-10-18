@@ -362,10 +362,12 @@ describe("libsql lazy load — compiled binary e2e (spec-eager-libsql-load-makes
 // branch unreachable, and AC-LL-8 (a behavioural run) proves only that
 // `loader.ts` still strips `config.sync` — a different proposition.
 //
-// Classification (the spec's two permitted classes, everything else fails):
-//   (a) exactly ONE argument — the `createApp(dbPath)` overload, which cannot
-//       reach the Turso branch at all;
-//   (b) TWO arguments whose second is the literal `undefined`, or a bare
+// Classification (the spec's two permitted classes, everything else fails). `createApp` takes the entry's
+// ambient as a REQUIRED third argument (`createApp(dbPath, config, ambient, writeContext?)`; the one-argument
+// overload is gone with the process-reading fallback), so a direct call carries 3 or 4 arguments:
+//   (a) exactly ONE argument — only the injected-port shape `deps.createApp(dbPath)` (mount-registry.ts), whose
+//       implementation is supplied by a caller that is itself scanned at its own 3/4-argument site;
+//   (b) THREE or FOUR arguments whose second is the literal `undefined`, or a bare
 //       identifier the SAME FILE binds from a rest-destructure discarding
 //       `sync` (`const { sync: _sync, ...configWithoutSync } = rawConfig`),
 //       including the alias hop `telemetryOnlyConfig = configWithoutSync as
@@ -535,7 +537,7 @@ const APP_MODULE_SPECIFIER = /(?:^|\/)app\.js$/;
  * IS (that is `mount-registry.ts`'s injected-port shape).
  */
 function collectCreateAppLocalNames(sourceFile: ts.SourceFile): Set<string> {
-  const names = new Set<string>(["createApp"]);
+  const names = new Set<string>(["createApp", "createAppWithWriteContext"]);
   for (const statement of sourceFile.statements) {
     if (!ts.isImportDeclaration(statement)) continue;
     const specifier = statement.moduleSpecifier;
@@ -543,7 +545,9 @@ function collectCreateAppLocalNames(sourceFile: ts.SourceFile): Set<string> {
     const namedBindings = statement.importClause?.namedBindings;
     if (namedBindings === undefined || !ts.isNamedImports(namedBindings)) continue;
     for (const element of namedBindings.elements) {
-      if (element.propertyName?.text === "createApp") names.add(element.name.text);
+      if (element.propertyName?.text === "createApp" || element.propertyName?.text === "createAppWithWriteContext") {
+        names.add(element.name.text);
+      }
     }
   }
   return names;
@@ -585,7 +589,7 @@ export function analyzeCreateAppCallSites(content: string, relPath: string): Cre
       if (args.length === 1) {
         classification = "single-arg";
         reason = "class (a): exactly one argument — the createApp(dbPath) overload, which never reaches the Turso branch";
-      } else if (args.length === 2 && secondArg !== undefined) {
+      } else if ((args.length === 3 || args.length === 4) && secondArg !== undefined) {
         if (ts.isIdentifier(secondArg) && secondArg.text === "undefined") {
           classification = "sync-stripped";
           reason = "class (b): second argument is the literal `undefined`";
@@ -604,7 +608,7 @@ export function analyzeCreateAppCallSites(content: string, relPath: string): Cre
         }
       } else {
         classification = "violation";
-        reason = `unexpected argument count ${String(args.length)} — createApp takes 1 or 2 arguments`;
+        reason = `unexpected argument count ${String(args.length)} — createApp takes (dbPath, config, ambient, writeContext?)`;
       }
 
       sites.push({
@@ -665,6 +669,7 @@ const MULTILINE_SYNC_BEARING_FIXTURE = [
   "  const appOrResult = createApp(",
   "    dbPath,",
   "    rawConfig,",
+  "    ambient,",
   "  );",
   "  return appOrResult as App;",
   "}",
@@ -681,6 +686,7 @@ const MULTILINE_SYNC_STRIPPED_FIXTURE = [
   "  const appOrResult = createApp(",
   "    dbPath,",
   "    telemetryOnlyConfig,",
+  "    ambient,",
   "  );",
   "  return appOrResult as App;",
   "}",
@@ -692,7 +698,7 @@ const ALIASED_IMPORT_FIXTURE = [
   'import { createApp as buildApp } from "../app.js";',
   "",
   "export function aliasedFutureCaller(dbPath: string, rawConfig: LoreConfig): App {",
-  "  return buildApp(dbPath, rawConfig) as App;",
+  "  return buildApp(dbPath, rawConfig, ambient) as App;",
   "}",
   "",
 ].join("\n");
@@ -739,10 +745,10 @@ describe("AC-LL-10 — no createApp call site passes a sync-bearing config (sour
     const loaderSite = syncStripped.find((s) => s.file.endsWith("packages/lore/src/adapters/cli/loader.ts"));
     expect(
       loaderSite,
-      "AC-LL-10 expected adapters/cli/loader.ts's `createApp(dbPath, telemetryOnlyConfig)` to be recognised as " +
+      "AC-LL-10 expected adapters/cli/loader.ts's `createAppWithWriteContext(dbPath, telemetryOnlyConfig, ambient, …)` to be recognised as " +
         `provably sync-stripped (the loader.ts:240-241 rest-destructure + alias hop). Sites found:\n${formatSites(sites)}`,
     ).toBeDefined();
-    expect(loaderSite?.argCount).toBe(2);
+    expect(loaderSite?.argCount).toBe(4);
     expect(loaderSite?.secondArgText).toBe("telemetryOnlyConfig");
   });
 
@@ -751,7 +757,7 @@ describe("AC-LL-10 — no createApp call site passes a sync-bearing config (sour
     expect(sites.length, `expected exactly 1 call site in the fixture, got:\n${formatSites(sites)}`).toBe(1);
     const site = sites[0];
     expect(site?.classification).toBe("violation");
-    expect(site?.argCount).toBe(2);
+    expect(site?.argCount).toBe(3);
     expect(site?.secondArgText).toBe("rawConfig");
     // The call's `createApp(` token is on fixture line 6; its arguments are on 7 and 8 —
     // matching across line breaks is what makes this a violation rather than a miss.

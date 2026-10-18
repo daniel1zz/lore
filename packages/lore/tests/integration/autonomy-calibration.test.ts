@@ -34,6 +34,7 @@ import {
 import { DecisionService } from "../../src/service/decision-service.js";
 import { scriptedHumanPorts } from "./fixtures/scripted-human-ports.js";
 import { AUTO_FACTS, lore, newCorpus, observeReversal, readLog, removeCorpora, runDecide, seedDecisions, withService } from "./fixtures/autonomy-calibration-helpers.js";
+import { actedStore } from "../live-invocation.js";
 
 const PACKAGE_ROOT = new URL("../../", import.meta.url).pathname.replace(/\/$/, "");
 
@@ -353,7 +354,7 @@ describe("AC-AU-8 the outcome observers", () => {
     expect(created.exitCode, created.stderr).toBe(0);
     const docId = (JSON.parse(created.stdout) as { data: { id: string } }).data.id;
 
-    const store = new SQLiteStore(corpus.dbPath);
+    const store = actedStore(new SQLiteStore(corpus.dbPath));
     try {
       // decisions at t0 (clock in the past), audit evidence after, sweep at t0 + 8 days
       const t0 = "2026-01-01T00:00:00.000Z";
@@ -390,7 +391,7 @@ describe("AC-AU-8 the outcome observers", () => {
     const corpus = newCorpus("lore-au8-kinds-");
     const created = lore(corpus, ["create", "knowledge", "--sub-type", "reference", "--title", "Kinds subject", "--content", "x", "--json"]);
     const docId = (JSON.parse(created.stdout) as { data: { id: string } }).data.id;
-    const store = new SQLiteStore(corpus.dbPath);
+    const store = actedStore(new SQLiteStore(corpus.dbPath));
     try {
       const probe = createAuditReversalProbe(store);
       const decision = row({ id: 1, class: "stash-drop", subject_id: docId, ts: "2026-02-01T00:00:00.000Z" });
@@ -409,7 +410,7 @@ describe("AC-AU-8 the outcome observers", () => {
       ] as const) {
         const fresh = newCorpus("lore-au8-kind-");
         const doc = (JSON.parse(lore(fresh, ["create", "knowledge", "--sub-type", "reference", "--title", `K ${source}`, "--content", "x", "--json"]).stdout) as { data: { id: string } }).data.id;
-        const s2 = new SQLiteStore(fresh.dbPath);
+        const s2 = actedStore(new SQLiteStore(fresh.dbPath));
         try {
           await s2.appendAuditEntry({ timestamp: "2026-03-01T00:00:00.000Z", actor: "t", session_id: "s", action, doc_id: doc as never, details });
           const found = await createAuditReversalProbe(s2).check(row({ id: 1, class: "stash-drop", subject_id: doc, ts: "2026-02-01T00:00:00.000Z" }));

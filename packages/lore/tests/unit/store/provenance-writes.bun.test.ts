@@ -19,10 +19,11 @@ import { join } from "node:path";
 import { SQLiteStore } from "../../../src/store/sqlite-store.js";
 import { TursoStore } from "../../../src/store/turso-store.js";
 import { runProvenanceWritesSuite } from "./provenance-writes.shared.js";
+import { actedStore } from "../../live-invocation.js";
 
 runProvenanceWritesSuite({
   label: "SQLiteStore",
-  createStore: () => new SQLiteStore(":memory:"),
+  createStore: () => actedStore(new SQLiteStore(":memory:")),
   destroyStore: (store) => {
     (store as SQLiteStore).close();
   },
@@ -33,7 +34,7 @@ runProvenanceWritesSuite({
   createStore: () => {
     const tmpDir = mkdtempSync(join(tmpdir(), "lore-turso-provenance-writes-"));
     const dbPath = join(tmpDir, "lore.db");
-    const store = new TursoStore({ localPath: dbPath });
+    const store = actedStore(new TursoStore({ localPath: dbPath }));
     // reason: stash tmpDir on the instance so destroyStore can clean it up —
     // mirrors batch-methods.bun.test.ts's identical suite-factory pairing.
     (store as TursoStore & { __tmpDir?: string }).__tmpDir = tmpDir;

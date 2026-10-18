@@ -72,6 +72,7 @@ import {
   type SessionHeartbeatRecord,
 } from "../../../src/service/session-liveness.js";
 import { runLoreInProcess } from "../../helpers/run-lore-in-process";
+import { actedStore } from "../../live-invocation.js";
 
 // tests/unit/service/ -> tests/unit/ -> tests/ -> packages/lore/ -> packages/ -> repo root (5 levels up).
 const REPO_ROOT = new URL("../../../../../", import.meta.url).pathname.replace(/\/$/, "");
@@ -128,7 +129,7 @@ interface FakePorts {
 
 function makeService(): { service: SessionService; ports: FakePorts } {
   const ports: FakePorts = { probePid: new Map(), heartbeats: new Map() };
-  const store = new InMemoryStore();
+  const store = actedStore(new InMemoryStore());
   const service = new SessionService(
     store,
     { claimTtlMinutes: 120, handoffTtlMinutes: 10080, createHandoffDoc: stubCreateHandoffDoc },

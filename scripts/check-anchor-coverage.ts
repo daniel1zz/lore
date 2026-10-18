@@ -100,7 +100,8 @@ import { fileURLToPath } from "node:url";
 import { join } from "node:path";
 import { z } from "zod";
 import { ok, type DocRecord, type LoreError } from "@lore/core";
-import { createApp, type App } from "../packages/lore/src/app.js";
+import { ambientOfInvocation, createApp, type App } from "../packages/lore/src/app.js";
+import { resolveEntryInvocation } from "../packages/lore/src/adapters/cli/run-cli.js";
 import { findLoreDbPath } from "../packages/lore/src/adapters/cli/utils.js";
 import { countArmedSpecs, isSpecAnchored } from "../packages/lore/src/flows/drift-flow.js";
 
@@ -687,7 +688,8 @@ const FINDING_KIND_ORDER: readonly AnchorCoverageFinding["kind"][] = [
 export async function main(dbPathOverride?: string, repoRootOverride?: string): Promise<number> {
   const repoRoot = repoRootOverride ?? REPO_ROOT;
   const dbPath = dbPathOverride ?? findLoreDbPath({ cwd: process.cwd(), env: process.env });
-  const app = createApp(dbPath);
+  const inv = await resolveEntryInvocation(process.argv.slice(2));
+  const app = createApp(dbPath, undefined, ambientOfInvocation(inv), { identity: inv.identity });
   try {
     const ledger = loadLedgerFromDisk(repoRoot);
     const report = await runCheck(app, ledger);

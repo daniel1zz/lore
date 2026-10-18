@@ -27,6 +27,7 @@ import type { StoreInterface } from "../../src/store/store-interface.js";
 import { verifyDecisionChain } from "../../src/store/decision-log.js";
 import { proveHumanChannel } from "../../src/service/human-channel.js";
 import { scriptedHumanPorts } from "./fixtures/scripted-human-ports.js";
+import { actedStore } from "../live-invocation.js";
 
 const PACKAGE_ROOT = new URL("../../", import.meta.url).pathname.replace(/\/$/, "");
 const INDEX_TS = join(PACKAGE_ROOT, "src", "index.ts");
@@ -52,7 +53,7 @@ function runLore(args: string[]): { stdout: string; stderr: string; exitCode: nu
 }
 
 function freshService(file: string): { service: DecisionService; store: SQLiteStore } {
-  const store = new SQLiteStore(file);
+  const store = actedStore(new SQLiteStore(file));
   return { service: new DecisionService({ store, executorRun: "run-test" }), store };
 }
 
@@ -179,7 +180,7 @@ describe("AC-AU-2 decision log", () => {
   });
 
   it("an agent-asserted record never takes precedence", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const service = new DecisionService({ store: store as StoreInterface, executorRun: null });
     const subject = { id: "agent-subject", version: "v1" };
     await service.decide(CLASS_ID, subject, WEAK);
@@ -202,7 +203,7 @@ describe("AC-AU-2 decision log", () => {
   });
 
   it("InMemoryStore chains identically (verifyDecisionChain clean over its rows)", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const service = new DecisionService({ store: store as StoreInterface, executorRun: null });
     await service.decide(CLASS_ID, { id: "m", version: "v1" }, WEAK);
     await service.decide(CLASS_ID, { id: "m", version: "v1" }, STRONG);

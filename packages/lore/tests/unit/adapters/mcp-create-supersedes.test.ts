@@ -36,7 +36,7 @@
  *   creates-then-fails-the
  */
 
-import { liveInvocation } from "../../live-invocation.js";
+import { liveInvocation, actedStore } from "../../live-invocation.js";
 import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
 import { describe, it, expect } from "vitest";
@@ -65,7 +65,7 @@ let corpusService: CorpusService;
 let validityService: ValidityService;
 
 function makeApp(): App {
-  store = new InMemoryStore();
+  store = actedStore(new InMemoryStore());
   // reason: bare `new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)))` (no gate-enforcer args) stays UNGATED —
   // this test exercises the supersede precheck, not the task-create gate.
   corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));

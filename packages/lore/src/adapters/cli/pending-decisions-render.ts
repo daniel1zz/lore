@@ -26,7 +26,11 @@ import { formatTable } from "./utils.js";
  * `repoRoot` the class-specific existence probes run (worktree / stash / process / run); without it only the
  * newer-version rule applies.
  */
-export async function collectPendingDecisions(dbPath: string, repoRoot?: string): Promise<Result<PendingDecision[], LoreError>> {
+export async function collectPendingDecisions(
+  dbPath: string,
+  env: Readonly<Record<string, string | undefined>>,
+  repoRoot?: string,
+): Promise<Result<PendingDecision[], LoreError>> {
   let store: SQLiteStore;
   try {
     store = new SQLiteStore(dbPath);
@@ -34,7 +38,7 @@ export async function collectPendingDecisions(dbPath: string, repoRoot?: string)
     return wrapStoreError(cause);
   }
   try {
-    const subjectProbes = repoRoot === undefined ? undefined : createSubjectExistenceProbes(createRealSubjectProbePorts(repoRoot, store));
+    const subjectProbes = repoRoot === undefined ? undefined : createSubjectExistenceProbes(createRealSubjectProbePorts(repoRoot, store, env));
     return await new DecisionService({ store, executorRun: null, ...(subjectProbes !== undefined ? { subjectProbes } : {}) }).listPending();
   } finally {
     store.close();

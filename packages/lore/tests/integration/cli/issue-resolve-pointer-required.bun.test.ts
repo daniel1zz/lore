@@ -68,6 +68,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { SQLiteStore } from "../../../src/store/sqlite-store.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
+import { actedStore } from "../../live-invocation.js";
 
 /** packages/lore/tests/integration/cli -> this worktree's root (5 levels up). */
 const WORKTREE_ROOT = resolve(fileURLToPath(new URL(".", import.meta.url)), "..", "..", "..", "..", "..");
@@ -172,7 +173,7 @@ function makeFixture(prefix: string): Fixture {
  * CLI filing path.
  */
 async function fileReport(fixture: Fixture, title: string): Promise<string> {
-  const store = new SQLiteStore(join(fixture.upstreamRoot, ".lore", "lore.db"));
+  const store = actedStore(new SQLiteStore(join(fixture.upstreamRoot, ".lore", "lore.db")));
   const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
   try {
     const result = await corpusService.create({

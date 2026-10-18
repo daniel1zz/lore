@@ -31,6 +31,7 @@ import { AcService } from "../../../src/service/ac-service.js";
 import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
 import { DOC_TYPE_ROLE_MAP } from "@lore/core";
 import type { CreateDocInput, DocId, DocRecord, LoreConfig } from "@lore/core";
+import { actedStore } from "../../live-invocation.js";
 
 // ─── Fixtures ────────────────────────────────────────────────────────────────
 
@@ -59,7 +60,7 @@ const GOOD_AC_2 = {
 };
 
 async function makeCorpusService(config?: LoreConfig) {
-  const store = new InMemoryStore();
+  const store = actedStore(new InMemoryStore());
   await seedLiveRule(store);
   const enforcer = new GateEnforcer(config);
   const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)), undefined, undefined, enforcer);
@@ -196,7 +197,7 @@ describe("acQuantifiable — spec-create (CorpusService.create)", () => {
 
   // REGRESSION — an ungated CorpusService (no GateEnforcer wired) never blocks, byte-identical to pre-gate behavior
   it("does not block when the service was constructed with NO GateEnforcer (bare unit-test shape)", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     await seedLiveRule(store);
     const bareCorpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
     const prd = await mustCreate(bareCorpusService, { type: "prd", title: "PRD", content: "# PRD" } as CreateDocInput);
@@ -209,7 +210,7 @@ describe("acQuantifiable — spec-create (CorpusService.create)", () => {
 
 describe("acQuantifiable — AcService.addCriterion (immediate-feedback layer)", () => {
   async function makeSpec(): Promise<{ corpusService: CorpusService; spec: DocRecord; acService: AcService }> {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     await seedLiveRule(store);
     const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
     const prd = await mustCreate(corpusService, { type: "prd", title: "PRD", content: "# PRD" } as CreateDocInput);
@@ -283,7 +284,7 @@ describe("acQuantifiable — spec-promote (CorpusService.set + ReviewService.app
   });
 
   it("ReviewService.approve blocks the same unquantified-AC spec via the plan-promote-shaped GateDependencies bundle", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     await seedLiveRule(store);
     const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
     const enforcer = new GateEnforcer(undefined);

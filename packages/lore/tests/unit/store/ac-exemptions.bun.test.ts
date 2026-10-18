@@ -16,6 +16,7 @@ import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { SQLiteStore } from "../../../src/store/sqlite-store.js";
 import type { AcExemptionRow, StoreInterface } from "../../../src/store/store-interface.js";
 import { TursoStore } from "../../../src/store/turso-store.js";
+import { actedStore } from "../../live-invocation.js";
 
 const NOW = "2026-10-08T00:00:00.000Z";
 const FUTURE = "2026-12-01T00:00:00.000Z";
@@ -123,13 +124,13 @@ function runSuite(label: string, create: () => Harness): void {
   });
 }
 
-runSuite("InMemoryStore", () => ({ store: new InMemoryStore(), close: () => undefined }));
+runSuite("InMemoryStore", () => ({ store: actedStore(new InMemoryStore()), close: () => undefined }));
 
 runSuite("SQLiteStore", () => {
   const dir = mkdtempSync(join(tmpdir(), "lore-acex-sqlite-"));
   const path = join(dir, "lore.db");
-  const a = new SQLiteStore(path);
-  const b = new SQLiteStore(path);
+  const a = actedStore(new SQLiteStore(path));
+  const b = actedStore(new SQLiteStore(path));
   return {
     store: a,
     second: b,
@@ -143,7 +144,7 @@ runSuite("SQLiteStore", () => {
 
 runSuite("TursoStore", () => {
   const dir = mkdtempSync(join(tmpdir(), "lore-acex-turso-"));
-  const store = new TursoStore({ localPath: join(dir, "lore.db") });
+  const store = actedStore(new TursoStore({ localPath: join(dir, "lore.db") }));
   return {
     store,
     close: () => {

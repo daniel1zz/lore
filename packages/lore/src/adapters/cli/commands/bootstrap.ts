@@ -48,7 +48,7 @@ import { defineCommand } from "citty";
 import type { BootstrapReport } from "@lore/core";
 import { buildBootstrapInjection, resolveBootstrapInjectionBudgets } from "@lore/core";
 import { loadLoreApp } from "../loader.js";
-import { exitCode, formatError, relativeTime, resolveActor } from "../utils.js";
+import { exitCode, formatErrorFor, relativeTime, resolveActor } from "../utils.js";
 import { buildStalenessFlowDeps, listFreshStalenessEscalates } from "../../../flows/staleness-flow.js";
 import { buildListSpecs, countArmedSpecs } from "../../../flows/drift-flow.js";
 import { computeMemoryFileHealth, formatMemoryFileHealthLine } from "../memory-file-health.js";
@@ -224,7 +224,7 @@ export default defineCommand({
         return;
       }
 
-      const by = resolveActor(typeof args.by === "string" ? args.by : undefined, inv.env, inv.cwd);
+      const by = resolveActor(typeof args.by === "string" ? args.by : undefined, inv.env, inv.cwd, inv.user);
       const seatBranch = typeof args["seat-branch"] === "string" ? args["seat-branch"] : undefined;
       const seatWorktreeArg = typeof args["seat-worktree"] === "string" ? args["seat-worktree"] : undefined;
 
@@ -244,13 +244,13 @@ export default defineCommand({
         const injectionSeat = { branch: seatBranch, worktree: seatWorktreeArg };
         const injectionReport = await app.sessionService.bootstrap(by, undefined, injectionSeat);
         if (!injectionReport.ok) {
-          process.stderr.write(formatError(injectionReport.error) + "\n");
+          process.stderr.write(formatErrorFor(inv, injectionReport.error) + "\n");
           process.exitCode = exitCode(injectionReport.error);
           return;
         }
         const seatClaims = await app.sessionService.seatClaims(injectionSeat);
         if (!seatClaims.ok) {
-          process.stderr.write(formatError(seatClaims.error) + "\n");
+          process.stderr.write(formatErrorFor(inv, seatClaims.error) + "\n");
           process.exitCode = exitCode(seatClaims.error);
           return;
         }
@@ -276,7 +276,7 @@ export default defineCommand({
       const result = await app.sessionService.bootstrap(by, undefined, seat);
 
       if (!result.ok) {
-        process.stderr.write(formatError(result.error) + "\n");
+        process.stderr.write(formatErrorFor(inv, result.error) + "\n");
         process.exitCode = exitCode(result.error);
         return;
       }
@@ -288,7 +288,7 @@ export default defineCommand({
       // service file outside this task's file anchors).
       const staleListResult = await listFreshStalenessEscalates(buildStalenessFlowDeps(app));
       if (!staleListResult.ok) {
-        process.stderr.write(formatError(staleListResult.error) + "\n");
+        process.stderr.write(formatErrorFor(inv, staleListResult.error) + "\n");
         process.exitCode = exitCode(staleListResult.error);
         return;
       }
@@ -298,7 +298,7 @@ export default defineCommand({
       // branch uses).
       const armedSpecsResult = await countArmedSpecs(buildListSpecs(app));
       if (!armedSpecsResult.ok) {
-        process.stderr.write(formatError(armedSpecsResult.error) + "\n");
+        process.stderr.write(formatErrorFor(inv, armedSpecsResult.error) + "\n");
         process.exitCode = exitCode(armedSpecsResult.error);
         return;
       }

@@ -25,9 +25,10 @@ import { AcService } from "../../../src/service/ac-service.js";
 import { ReviewService } from "../../../src/service/review-service.js";
 import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
+import { actedStore } from "../../live-invocation.js";
 
 function makeFixture() {
-  const store = new InMemoryStore();
+  const store = actedStore(new InMemoryStore());
   const lock = new RecordLockService(store, new GateEnforcer(undefined));
   const corpus = new CorpusService(store, lock);
   const ac = new AcService(store, lock);

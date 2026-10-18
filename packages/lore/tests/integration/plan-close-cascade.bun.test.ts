@@ -55,6 +55,7 @@ import { createApp, type App } from "../../src/app.js";
 import type { CreateDocInput, DocRecord, LoreConfig } from "@lore/core";
 import type { VerifiedEvidenceInput } from "../../src/service/task-workflow-service.js";
 import type { PlanCloseCascadeResult } from "../../src/service/corpus-service.js";
+import { liveAmbient, liveWriteContext } from "../live-invocation.js";
 
 let tmpDir: string;
 
@@ -62,7 +63,7 @@ beforeEach(() => {
   tmpDir = resolve(mkdtempSync(join(tmpdir(), "lore-plan-close-cascade-test-")));
   const loreDir = join(tmpDir, ".lore");
   mkdirSync(loreDir, { recursive: true });
-  const app = createApp(join(loreDir, "lore.db"));
+  const app = createApp(join(loreDir, "lore.db"), undefined, liveAmbient(), liveWriteContext());
   app.close();
 });
 
@@ -88,7 +89,7 @@ function openApp(extra: Record<string, unknown> = {}): App {
     ...extra,
     workflow: { review: { judgment_required_types: [] }, ...extraWorkflow },
   } as unknown as LoreConfig;
-  return createApp(dbPath(), config) as App;
+  return createApp(dbPath(), config, liveAmbient(), liveWriteContext()) as App;
 }
 
 /** A runner-attested pass — the only shape that clears `lore done`'s attested-pass floor. */

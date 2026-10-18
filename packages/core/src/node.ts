@@ -47,7 +47,6 @@ export * from "./slugify-node.js";
 export * from "./actor-resolution-node.js";
 export * from "./run-identity-node.js";
 export * from "./invocation-node.js";
-export * from "./home-dir-node.js";
 // Session trail (spec-session-trail-a-session-local-record-of-what-each-run-4): schemas,
 // parseRunId/sessionOfRun and buildSessionTrail (pure, session-trail.ts) plus stateBase and the
 // fs reader readSessionTrail (session-trail-node.ts). Exposed only here, not via the default barrel.

@@ -57,8 +57,9 @@ import { SessionService } from "../../../src/service/session-service.js";
 import { deriveSessions } from "@lore/core";
 import type { CreateDocInput, DocRecord, ReadySession } from "@lore/core";
 import type { StoreInterface } from "../../../src/store/store-interface.js";
+import { actedStore } from "../../live-invocation.js";
 
-function makeServices(store: StoreInterface = new InMemoryStore()) {
+function makeServices(store: StoreInterface = actedStore(new InMemoryStore())) {
   const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
   const taskWorkflowService = new TaskWorkflowService(store, undefined, { claimTtlMinutes: 120 });
   taskWorkflowService.setOverrideDecisionPort(alwaysAutoOverridePort()); // AU-T7: explicit test port; no port = refused

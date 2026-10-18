@@ -28,7 +28,6 @@
 
 import { Database } from "bun:sqlite";
 import { chmodSync, mkdirSync } from "node:fs";
-import { currentHomeDir } from "@lore/core/node";
 import { join } from "node:path";
 
 import { ApiKeyStore } from "./auth.js";
@@ -57,12 +56,11 @@ export interface MachineAuthStores {
 /** Options for {@link createMachineAuthStores}. */
 export interface CreateMachineAuthStoresOptions {
   /**
-   * Injectable base directory — tests only. When provided, the auth db is created at
-   * `<baseDir>/dashboard-auth.db` instead of resolving the real XDG state path. Tests
-   * MUST pass an `mkdtemp` directory here — never the real `~/.local/state` and never
-   * the repo's own `.lore/` (root CLAUDE.md 2026-07-07 pollution-incident rule).
+   * Base directory the auth db is created in (`<baseDir>/dashboard-auth.db`). Production resolves it once at
+   * its entry with {@link resolveMachineAuthBaseDir}; tests MUST pass an `mkdtemp` directory here — never
+   * the real `~/.local/state` and never the repo's own `.lore/` (root CLAUDE.md 2026-07-07 pollution-incident rule).
    */
-  baseDir?: string;
+  baseDir: string;
 }
 
 /**
@@ -76,16 +74,16 @@ export interface CreateMachineAuthStoresOptions {
  *   2. `$XDG_STATE_HOME/lore` — XDG explicit
  *   3. `~/.local/state/lore` — XDG default
  *
- * Pure side-effect: reads env vars + `currentHomeDir()` only. Never touches the filesystem.
+ * Pure: computes from the values it is given (the invocation's `env` and `paths.home`). Never touches the filesystem.
  */
-function resolveMachineAuthBaseDir(): string {
-  const loreStateHome = process.env["LORE_STATE_HOME"];
+export function resolveMachineAuthBaseDir(env: Readonly<Record<string, string | undefined>>, home: string): string {
+  const loreStateHome = env["LORE_STATE_HOME"];
   if (loreStateHome) return loreStateHome;
 
-  const xdgStateHome = process.env["XDG_STATE_HOME"];
+  const xdgStateHome = env["XDG_STATE_HOME"];
   if (xdgStateHome) return join(xdgStateHome, "lore");
 
-  return join(currentHomeDir(), ".local", "state", "lore");
+  return join(home, ".local", "state", "lore");
 }
 
 /**
@@ -96,15 +94,14 @@ function resolveMachineAuthBaseDir(): string {
  * over it (SessionStore's own constructor creates the sessions table), and hardens the
  * file to mode 0600.
  *
- * @param opts.baseDir - injectable seam (tests only); omit for production (real XDG
- *   state dir via {@link resolveMachineAuthBaseDir}).
+ * @param opts.baseDir - the directory to open the db in (production: {@link resolveMachineAuthBaseDir}).
  * @returns The shared `db` handle, both stores, and the resolved paths.
  * @example
- *   const stores = createMachineAuthStores(); // production: ~/.local/state/lore/dashboard-auth.db
+ *   const stores = createMachineAuthStores({ baseDir: resolveMachineAuthBaseDir(inv.env, inv.paths.home) });
  *   const testStores = createMachineAuthStores({ baseDir: mkdtempSync(...) }); // tests
  */
-export function createMachineAuthStores(opts: CreateMachineAuthStoresOptions = {}): MachineAuthStores {
-  const baseDir = opts.baseDir ?? resolveMachineAuthBaseDir();
+export function createMachineAuthStores(opts: CreateMachineAuthStoresOptions): MachineAuthStores {
+  const baseDir = opts.baseDir;
   mkdirSync(baseDir, { recursive: true });
 
   const dbPath = join(baseDir, DB_FILENAME);

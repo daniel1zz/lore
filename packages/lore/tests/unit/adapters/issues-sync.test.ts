@@ -24,6 +24,7 @@ import type { GithubIssueSnapshot, IssueCloser } from "../../../src/service/issu
 import type { GithubIssueRef } from "../../../src/service/resolution-projector.js";
 import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
+import { actedStore, liveInvocation } from "../../live-invocation.js";
 
 interface FakeIssue {
   state: "open" | "closed";
@@ -77,7 +78,7 @@ interface World {
 }
 
 async function buildWorld(configured = true): Promise<World> {
-  const store = new InMemoryStore();
+  const store = actedStore(new InMemoryStore());
   const cs = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
   const github = new FakeGithub();
   // reason: the step is deliberately NOT wired into `cs` — the drift this command repairs is exactly what
@@ -151,7 +152,7 @@ interface SyncJson {
 
 async function syncJson(w: World, apply: boolean): Promise<{ exit: number; json: SyncJson }> {
   logged = [];
-  const exit = await runIssuesSync(w.step, { apply, json: true });
+  const exit = await runIssuesSync(liveInvocation(), w.step, { apply, json: true });
   return { exit, json: JSON.parse(logged.join("\n")) as SyncJson };
 }
 
@@ -197,7 +198,7 @@ describe("AC-IC-4: drift detection", () => {
     const r = await fileReport(w, 3, { state: "closed", labels: ["resolution:fixed"] });
     await resolver(w, r, "Fixer", "archived");
 
-    const exit = await runIssuesSync(w.step, { apply: false, json: false });
+    const exit = await runIssuesSync(liveInvocation(), w.step, { apply: false, json: false });
 
     expect(exit).toBe(0);
     expect(logged.join("\n")).toContain("clean");
@@ -263,13 +264,13 @@ describe("AC-IC-4: ERROR — no GitHub closer configured", () => {
   it("--sync exits 1 and says so on stderr (never a silent clean)", async () => {
     const w = await buildWorld(false);
 
-    const exit = await runIssuesSync(w.step, { apply: false, json: false });
+    const exit = await runIssuesSync(liveInvocation(), w.step, { apply: false, json: false });
 
     expect(exit).toBe(1);
     expect(logged.join("\n")).not.toContain("clean");
   });
 
   it("an App with no step at all exits 1", async () => {
-    expect(await runIssuesSync(undefined, { apply: false, json: false })).toBe(1);
+    expect(await runIssuesSync(liveInvocation(), undefined, { apply: false, json: false })).toBe(1);
   });
 });

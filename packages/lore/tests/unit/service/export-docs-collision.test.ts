@@ -49,6 +49,7 @@ import { ExportDocsService, type ResolveDocBody } from "../../../src/service/exp
 import { OutlineService, renderResolvedToMarkdown } from "../../../src/service/outline-service.js";
 import { canonicaliseBody, ok, DOC_TYPE_ROLE_MAP, assertIsMirrorHumanId } from "@lore/core";
 import type { DocRecord, ExportIndex, MirrorHumanId, Slug } from "@lore/core";
+import { actedStore } from "../../live-invocation.js";
 
 /**
  * Narrows a raw human_id string literal to the branded {@link MirrorHumanId} for fixture
@@ -174,7 +175,7 @@ function writeExportedFile(
 
 describe("HAPPY — two same-titled docs in a single export run get distinct human_ids + paths", () => {
   it("both docs export cleanly with different human_id and file_path", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const service = makeExportService(store);
     const projectDir = makeTempProjectDir();
 
@@ -218,7 +219,7 @@ describe("HAPPY — two same-titled docs in a single export run get distinct hum
   });
 
   it("second run on the same unchanged corpus is idempotent-clean (no re-create, no drift)", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const service = makeExportService(store);
     const projectDir = makeTempProjectDir();
 
@@ -258,7 +259,7 @@ describe("HAPPY — two same-titled docs in a single export run get distinct hum
 
 describe("NEGATIVE/STATE — same-titled docs across two export runs must not collide (the SPEC-021 incident shape)", () => {
   it("a second, later-created doc with the same title as an already-exported doc gets its OWN human_id + file, and does not corrupt the first doc's file into false drift", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const service = makeExportService(store);
     const projectDir = makeTempProjectDir();
 
@@ -333,7 +334,7 @@ describe("NEGATIVE/STATE — same-titled docs across two export runs must not co
 
 describe("Self-heal — corrupted index (two doc ids -> one file_path), unambiguous content match wins", () => {
   it("repaired[] has exactly one entry; the content-matching doc keeps the mapping; the other is reallocated + its file written; the matching doc's file is untouched", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const service = makeExportService(store);
     const projectDir = makeTempProjectDir();
 
@@ -400,7 +401,7 @@ describe("Self-heal — corrupted index (two doc ids -> one file_path), unambigu
   });
 
   it("a follow-up run after self-heal is fully clean: repaired[] is empty, both docs skipped_clean", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const service = makeExportService(store);
     const projectDir = makeTempProjectDir();
 
@@ -456,7 +457,7 @@ describe("Self-heal — corrupted index (two doc ids -> one file_path), unambigu
 
 describe("Self-heal — ambiguous collision (on-disk file matches neither claimant, or is absent): earliest created_at wins", () => {
   it("when no on-disk file resolves the collision, the claimant with the earliest created_at is kept as canonical, regardless of index key order", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const service = makeExportService(store);
     const projectDir = makeTempProjectDir();
 
@@ -528,7 +529,7 @@ describe("BOUNDARY — allocateUniqueFilePath dedupes a computed file_path with 
     // orphan entries per the documented self-heal contract (repairCollisions
     // only treats a file_path as colliding when >=2 claimant ids exist as
     // ACTIVE corpus docs).
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const service = makeExportService(store);
     const projectDir = makeTempProjectDir();
 
@@ -577,7 +578,7 @@ describe("BOUNDARY — allocateUniqueFilePath dedupes a computed file_path with 
 
 describe("ERROR — allocateUniqueFilePath fails loud (VALIDATION_ERROR) after 999 exhausted attempts", () => {
   it("when every candidate slot from base through -999 is already claimed, exportDocs returns err(VALIDATION_ERROR) naming 'file_path', and writes nothing", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const service = makeExportService(store);
     const projectDir = makeTempProjectDir();
 
@@ -628,7 +629,7 @@ describe("ERROR — allocateUniqueFilePath fails loud (VALIDATION_ERROR) after 9
 
 describe("REGRESSION — clean corpus still exports clean; real body drift still fires (unaffected by the collision fix)", () => {
   it("a corpus with no title duplicates and no index corruption exports with zero repaired entries", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const service = makeExportService(store);
     const projectDir = makeTempProjectDir();
 
@@ -656,7 +657,7 @@ describe("REGRESSION — clean corpus still exports clean; real body drift still
   });
 
   it("real body drift (on-disk file hand-edited to differ from corpus) still reports drift[] — not masked or auto-repaired by the collision fix", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const service = makeExportService(store);
     const projectDir = makeTempProjectDir();
 

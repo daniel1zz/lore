@@ -31,6 +31,7 @@ import { RuleService } from "../../../src/service/rule-service.js";
 import { SQLiteStore } from "../../../src/store/sqlite-store.js";
 import type { StoreFilters } from "../../../src/store/store-interface.js";
 import { makeRuleService } from "../../helpers/make-rule-service.js";
+import { actedStore } from "../../live-invocation.js";
 
 const BRANCH_SLUG = "baseline-window-branch";
 const AC_ID = "AC-W-1";
@@ -73,7 +74,7 @@ interface Fixture {
 
 async function seed(dir: string): Promise<Fixture> {
   const dbPath = join(dir, "corpus.db");
-  const store = new SQLiteStore(dbPath);
+  const store = actedStore(new SQLiteStore(dbPath));
   const cs = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
   const rules = makeRuleService(store);
   const ac = new AcService(store, new RecordLockService(store, new GateEnforcer(undefined)));
@@ -110,7 +111,7 @@ async function seed(dir: string): Promise<Fixture> {
 }
 
 async function retireOnSecondConnection(dbPath: string): Promise<void> {
-  const other = new SQLiteStore(dbPath);
+  const other = actedStore(new SQLiteStore(dbPath));
   try {
     await must(await makeRuleService(other).setRule("BR-1", { lifecycle: "retired", note: "retired inside the window" }, { by: "agent:retirer" }), "retire");
   } finally {
@@ -123,7 +124,7 @@ function gatedService(store: WindowStore, armed: string[]): AcService {
 }
 
 async function spec(dbPath: string, id: string): Promise<{ doc: DocRecord; versions: number; audit: number }> {
-  const store = new SQLiteStore(dbPath);
+  const store = actedStore(new SQLiteStore(dbPath));
   try {
     const d = await must(await store.find(id as never), "find");
     const v = await must(await store.findVersions(id as never), "versions");
@@ -145,7 +146,7 @@ afterEach(() => {
 describe("liveness is re-read inside the citing write's transaction (D6)", () => {
   it("a live rule on an armed branch is cited and the write lands (control)", async () => {
     const fx = await seed(dir);
-    const store = new WindowStore(fx.dbPath);
+    const store = actedStore(new WindowStore(fx.dbPath));
     const res = await gatedService(store, [BRANCH_SLUG]).citeCriterion(fx.specId, AC_ID, ["BR-1"], {}, { by: "agent:citer" });
     store.close();
     expect(res.ok).toBe(true);
@@ -153,7 +154,7 @@ describe("liveness is re-read inside the citing write's transaction (D6)", () =>
 
   it("a retire committed between the early read and the write is refused with the gate's code", async () => {
     const fx = await seed(dir);
-    const store = new WindowStore(fx.dbPath);
+    const store = actedStore(new WindowStore(fx.dbPath));
     store.hook = () => retireOnSecondConnection(fx.dbPath);
     const res = await gatedService(store, [BRANCH_SLUG]).citeCriterion(fx.specId, AC_ID, ["BR-1"], {}, { by: "agent:citer" });
     store.close();
@@ -170,7 +171,7 @@ describe("liveness is re-read inside the citing write's transaction (D6)", () =>
   it("the refused write leaves the spec's extra, version log and audit untouched", async () => {
     const fx = await seed(dir);
     const before = await spec(fx.dbPath, fx.specId);
-    const store = new WindowStore(fx.dbPath);
+    const store = actedStore(new WindowStore(fx.dbPath));
     store.hook = () => retireOnSecondConnection(fx.dbPath);
     await gatedService(store, [BRANCH_SLUG]).citeCriterion(fx.specId, AC_ID, ["BR-1"], {}, { by: "agent:citer" });
     store.close();
@@ -182,7 +183,7 @@ describe("liveness is re-read inside the citing write's transaction (D6)", () =>
 
   it("the same window on a branch that is NOT armed lets the cite land (gate scope is per armed branch)", async () => {
     const fx = await seed(dir);
-    const store = new WindowStore(fx.dbPath);
+    const store = actedStore(new WindowStore(fx.dbPath));
     store.hook = () => retireOnSecondConnection(fx.dbPath);
     const res = await gatedService(store, ["some-other-branch"]).citeCriterion(fx.specId, AC_ID, ["BR-1"], {}, { by: "agent:citer" });
     store.close();

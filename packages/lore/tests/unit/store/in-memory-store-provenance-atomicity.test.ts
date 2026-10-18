@@ -41,6 +41,7 @@ import { describe, expect, it } from "vitest";
 import type { AuditEntry, DocRecord, LoreError, Result, VersionRecord } from "@lore/core";
 import { err } from "@lore/core";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
+import { actedStore } from "../../live-invocation.js";
 
 // ─── Failure-injection test double ─────────────────────────────────────────
 
@@ -137,7 +138,7 @@ function makeAudit(doc: DocRecord, overrides: Partial<AuditEntry> = {}): AuditEn
 
 describe("InMemoryStore.insertWithProvenance — failure-injection atomicity", () => {
   it("ERROR — insertVersion forced to fail rolls back the already-successful doc insert", async () => {
-    const store = new FailInjectingStore();
+    const store = actedStore(new FailInjectingStore());
     const doc = makeDoc();
     store.armFailure("insertVersion");
 
@@ -153,7 +154,7 @@ describe("InMemoryStore.insertWithProvenance — failure-injection atomicity", (
   });
 
   it("ERROR — appendAuditEntry forced to fail rolls back BOTH the doc insert and the version insert", async () => {
-    const store = new FailInjectingStore();
+    const store = actedStore(new FailInjectingStore());
     const doc = makeDoc();
     store.armFailure("appendAuditEntry");
 
@@ -174,7 +175,7 @@ describe("InMemoryStore.insertWithProvenance — failure-injection atomicity", (
   });
 
   it("BOUNDARY — a forced failure is single-shot and never contaminates a subsequent successful call", async () => {
-    const store = new FailInjectingStore();
+    const store = actedStore(new FailInjectingStore());
     const failedDoc = makeDoc();
     store.armFailure("insertVersion");
     const failedResult = await store.insertWithProvenance(
@@ -196,7 +197,7 @@ describe("InMemoryStore.insertWithProvenance — failure-injection atomicity", (
   });
 
   it("REGRESSION — with no forced failure, FailInjectingStore behaves identically to bare InMemoryStore", async () => {
-    const store = new FailInjectingStore();
+    const store = actedStore(new FailInjectingStore());
     const doc = makeDoc();
     const result = await store.insertWithProvenance(doc, makeVersion(doc), makeAudit(doc));
     expect(result.ok).toBe(true);
@@ -224,7 +225,7 @@ describe("InMemoryStore.updateWithProvenance — failure-injection atomicity", (
   }
 
   it("STATE — insertVersion forced to fail reverts an already-successful doc UPDATE to its pre-call snapshot", async () => {
-    const store = new FailInjectingStore();
+    const store = actedStore(new FailInjectingStore());
     const doc = await seedDoc(store);
 
     store.armFailure("insertVersion");
@@ -244,7 +245,7 @@ describe("InMemoryStore.updateWithProvenance — failure-injection atomicity", (
   });
 
   it("STATE — appendAuditEntry forced to fail reverts an already-successful doc UPDATE and drops the version row it wrote", async () => {
-    const store = new FailInjectingStore();
+    const store = actedStore(new FailInjectingStore());
     const doc = await seedDoc(store);
 
     store.armFailure("appendAuditEntry");
@@ -272,7 +273,7 @@ describe("InMemoryStore.updateWithProvenance — failure-injection atomicity", (
 
 describe("InMemoryStore.softDeleteWithProvenance — failure-injection atomicity", () => {
   it("STATE — insertVersion forced to fail reverts an already-successful soft-delete (deleted_at back to null)", async () => {
-    const store = new FailInjectingStore();
+    const store = actedStore(new FailInjectingStore());
     const doc = makeDoc();
     const seedResult = await store.insertWithProvenance(doc, makeVersion(doc), makeAudit(doc));
     expect(seedResult.ok).toBe(true);

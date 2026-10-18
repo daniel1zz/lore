@@ -90,6 +90,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 
 import { createApp } from "../../../src/app.js";
+import { liveAmbient, liveWriteContext } from "../../live-invocation.js";
 
 const RACE_CEILING_MS = 5000;
 
@@ -100,7 +101,7 @@ function makeScratchCorpus(prefix: string) {
   scratchDirs.push(dir);
   mkdirSync(join(dir, ".lore"), { recursive: true });
   const dbPath = join(dir, ".lore", "lore.db");
-  const app = createApp(dbPath);
+  const app = createApp(dbPath, undefined, liveAmbient(), liveWriteContext());
   return { dir, dbPath, app };
 }
 

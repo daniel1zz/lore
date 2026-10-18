@@ -23,7 +23,7 @@
 import { dirname } from "path";
 import { defineCommand } from "citty";
 import { loadLoreApp } from "../loader.js";
-import { exitCode, formatError } from "../utils.js";
+import { exitCode, formatError, formatErrorFor } from "../utils.js";
 import { resolveTrackedWriteRoot } from "../working-tree-root.js";
 import type { DocType } from "@lore/core";
 import { docTypeSchema } from "@lore/core";
@@ -108,7 +108,7 @@ export default defineCommand({
             JSON.stringify({ ok: false, error: exportResult.error }) + "\n",
           );
         } else {
-          process.stderr.write(formatError(exportResult.error) + "\n");
+          process.stderr.write(formatErrorFor(inv, exportResult.error) + "\n");
         }
         process.exitCode = exitCode(exportResult.error);
         return;

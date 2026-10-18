@@ -59,7 +59,7 @@
  * @spec_ref AC-JV-5, spec-judgment-surfaces-must-verify-before-they-certify-machine D6
  */
 
-import { liveInvocation } from "../../live-invocation.js";
+import { liveInvocation, actedStore } from "../../live-invocation.js";
 import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
@@ -306,7 +306,7 @@ let app: App;
 let server: McpServer;
 
 function makeApp(): App {
-  store = new InMemoryStore();
+  store = actedStore(new InMemoryStore());
   corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
   aiProvider = new InMemoryAIProvider("in-memory", { kind: "ok", content: JUDGE_JSON_PRESENT_AND_ABSENT });
   const providers = new Map([["in-memory", aiProvider]]) as unknown as ReadonlyMap<string, import("@lore/core").AIProvider>;

@@ -23,8 +23,12 @@ function runGit(repoRoot: string, args: readonly string[]): string | null {
 }
 
 /** Real ports bound to `repoRoot` and the corpus `store` (read-only use of `listRunLifecycles`). */
-export function createRealSubjectProbePorts(repoRoot: string, store: Pick<StoreInterface, "listRunLifecycles">): SubjectProbePorts {
-  const processes = createRealProcessTablePort();
+export function createRealSubjectProbePorts(
+  repoRoot: string,
+  store: Pick<StoreInterface, "listRunLifecycles">,
+  env: Readonly<Record<string, string | undefined>>,
+): SubjectProbePorts {
+  const processes = createRealProcessTablePort({ env });
   return {
     listWorktreePaths: () => {
       const out = runGit(repoRoot, ["worktree", "list", "--porcelain"]);

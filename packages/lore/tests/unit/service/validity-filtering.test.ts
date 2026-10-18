@@ -28,9 +28,10 @@ import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
 import { ValidityService } from "../../../src/service/validity-service.js";
 import type { CreateDocInput, DocRecord } from "@lore/core";
+import { actedStore } from "../../live-invocation.js";
 
 function makeServices() {
-  const store = new InMemoryStore();
+  const store = actedStore(new InMemoryStore());
   const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
   const validityService = new ValidityService(store);
   return { store, corpusService, validityService };
@@ -204,7 +205,7 @@ describe("REGRESSION — non-knowledge/adr docs are never filtered; store errors
   });
 
   it("a store error from findMany still propagates through list()", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
     // reason: force a store error by monkey-patching findMany on this instance only.
     store.findMany = async () => ({ ok: false, error: { code: "STORE_ERROR", message: "boom" } });

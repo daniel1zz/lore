@@ -17,7 +17,7 @@
 import { spawnSync } from "node:child_process";
 import { defineCommand } from "citty";
 import { loadLoreApp } from "../loader.js";
-import { exitCode, formatError } from "../utils.js";
+import { exitCode, formatErrorFor } from "../utils.js";
 import { SQLiteStore } from "../../../store/sqlite-store.js";
 import { createAuditReversalProbe, createGitReversalProbes } from "../../../service/autonomy-calibration-service.js";
 import { DecisionService } from "../../../service/decision-service.js";
@@ -97,7 +97,7 @@ const prune = defineCommand({
       // run-identity-verify.ts): verify once through the app's wrapped store; an unregistered id is null.
       const verifiedIdentity = await app.verifiedInvocationIdentity?.();
       if (verifiedIdentity !== undefined && !verifiedIdentity.ok) {
-        process.stderr.write(`${formatError(verifiedIdentity.error)}\n`);
+        process.stderr.write(`${formatErrorFor(inv, verifiedIdentity.error)}\n`);
         process.exitCode = exitCode(verifiedIdentity.error);
         return;
       }
@@ -112,7 +112,7 @@ const prune = defineCommand({
       const service = new StashPruneService({ git, store, decisions });
       const result = args.apply === true ? await service.apply() : await dryRun(service);
       if (!result.ok) {
-        process.stderr.write(`${formatError(result.error)}\n`);
+        process.stderr.write(`${formatErrorFor(inv, result.error)}\n`);
         process.exitCode = exitCode(result.error);
         return;
       }

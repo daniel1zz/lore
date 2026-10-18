@@ -19,6 +19,7 @@ import { NoOpTelemetry } from "@lore/core";
 import { runLinkIntegrity } from "../../../src/eval/scenarios/link-integrity.js";
 import type { App } from "../../../src/app.js";
 import type { DocRecord, LinkRecord } from "@lore/core";
+import { actedStore } from "../../live-invocation.js";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -26,7 +27,7 @@ let docCounter = 0;
 
 /** Build a minimal App using InMemoryStore. */
 function makeApp(store?: InMemoryStore): App {
-  const s = store ?? new InMemoryStore();
+  const s = store ?? actedStore(new InMemoryStore());
   const telemetry = new NoOpTelemetry();
   return {
     corpusService: new CorpusService(s, new RecordLockService(s, new GateEnforcer(undefined)), telemetry),
@@ -99,7 +100,7 @@ function makeLink(fromId: string, toId: string, type: LinkRecord["link_type"] = 
 
 describe("HAPPY — all links point to live docs", () => {
   it("two docs with a relates-to link → passed=true, all counts 0", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const prd1 = makeDoc({ type: "prd" });
     const prd2 = makeDoc({ type: "prd" });
     await store.insert(prd1);
@@ -121,7 +122,7 @@ describe("HAPPY — all links point to live docs", () => {
 
 describe("HAPPY — corpus with no links at all", () => {
   it("docs with no links → passed=true, total_links=0", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     await store.insert(makeDoc({ type: "prd" }));
     await store.insert(makeDoc({ type: "prd" }));
 
@@ -138,7 +139,7 @@ describe("HAPPY — corpus with no links at all", () => {
 
 describe("NEGATIVE — self-loop link causes passed=false", () => {
   it("doc with relates-to link to itself → self_loops>0, passed=false", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const prd = makeDoc({ type: "prd" });
     await store.insert(prd);
     // Insert a self-loop directly (bypassing service validation which would prevent this)
@@ -163,7 +164,7 @@ describe("NEGATIVE — self-loop link causes passed=false", () => {
 
 describe("NEGATIVE — link to soft-deleted doc causes passed=false", () => {
   it("link targeting a soft-deleted doc → to_deleted>0, passed=false", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const prd1 = makeDoc({ type: "prd" });
     const prd2 = makeDoc({ type: "prd" });
     await store.insert(prd1);
@@ -205,7 +206,7 @@ describe("BOUNDARY — empty corpus passes", () => {
 
 describe("BOUNDARY — corpus with docs but no links passes", () => {
   it("10 docs, 0 links → passed=true", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     for (let i = 0; i < 10; i++) {
       await store.insert(makeDoc({ type: "prd" }));
     }
@@ -223,7 +224,7 @@ describe("BOUNDARY — corpus with docs but no links passes", () => {
 
 describe("ERROR — store failure returns passed=false without throwing", () => {
   it("corpusService.list failure → passed=false, no throw", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const app = makeApp(store);
 
     // Simulate list failure
@@ -247,7 +248,7 @@ describe("ERROR — store failure returns passed=false without throwing", () => 
 
 describe("STATE — runLinkIntegrity is deterministic", () => {
   it("same corpus + two runs → identical results", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const prd1 = makeDoc({ type: "prd" });
     const prd2 = makeDoc({ type: "prd" });
     await store.insert(prd1);
@@ -271,7 +272,7 @@ describe("STATE — runLinkIntegrity is deterministic", () => {
 
 describe("REGRESSION — 50+ doc corpus with links completes in reasonable time", () => {
   it("50 docs each with one outgoing link → passed=true, performance reasonable", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const docs: DocRecord[] = [];
 
     for (let i = 0; i < 50; i++) {

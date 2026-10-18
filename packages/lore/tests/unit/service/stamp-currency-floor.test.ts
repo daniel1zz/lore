@@ -60,6 +60,7 @@ import {
   stampCurrency,
 } from "../../../src/service/gate-predicates.js";
 import { exitCode } from "../../../src/adapters/cli/utils.js";
+import { actedStore } from "../../live-invocation.js";
 
 // ─── Harness ────────────────────────────────────────────────────────────────
 
@@ -67,7 +68,7 @@ const NOW = "2026-10-17T10:00:00.000Z";
 const HEAD = "7ab1d742c0f9e1b6a3d5c8e2f4b7a9d0c1e3f5a7";
 
 function makeCorpus() {
-  const store = new InMemoryStore();
+  const store = actedStore(new InMemoryStore());
   const corpus = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
   const tasks = new TaskWorkflowService(store, undefined, { claimTtlMinutes: 120 });
   const binding = new StateBindingService(store);
