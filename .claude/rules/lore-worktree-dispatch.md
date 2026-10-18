@@ -1,4 +1,4 @@
-<!-- lore:managed fragment=worktree-dispatch hash=f8de5773 -->
+<!-- lore:managed fragment=worktree-dispatch hash=574b30ad -->
 ## Worktree dispatch
 
 - Actor discipline: identity is per run (`lore run show <id>`); the implementer claims inside its own worktree, the main agent never claims on its behalf; claim conflicts are judged per run (BR-1040), not by name.
