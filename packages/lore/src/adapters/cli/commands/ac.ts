@@ -190,6 +190,8 @@ import { dirname } from "path";
 import { loadLoreApp } from "../loader.js";
 import { SQLiteStore } from "../../../store/sqlite-store.js";
 import { AcExemptionService } from "../../../service/ac-exemption-service.js";
+import { DecisionService } from "../../../service/decision-service.js";
+import { createOverrideDecisionPort } from "../../../service/override-decision.js";
 import { exitCode, formatError, resolveActor } from "../utils.js";
 import { deriveAcCoverageState, getAllowedTransitions, ok } from "@lore/core";
 import type { AcceptanceCriterion, AcCoverageFact, LoreError, Result } from "@lore/core";
@@ -419,7 +421,9 @@ export default defineCommand({
         const { app, dbPath } = loadLoreApp();
         const store = new SQLiteStore(dbPath);
         try {
-          const result = await new AcExemptionService(store).grant({
+          // reason: AC-AU-7 — the grant asks decide() (class ac-exempt) through the decision log on this same store.
+          const overrides = createOverrideDecisionPort(new DecisionService({ store, executorRun: null }));
+          const result = await new AcExemptionService(store, undefined, overrides).grant({
             specIdOrSlug: args.spec as string,
             acId: args.id as string,
             reason: args.reason as string,

@@ -1119,3 +1119,100 @@ describe("ERROR — ac_scope matching MULTIPLE candidate specs is ambiguous and 
     expect(executor.callCount).toBe(0);
   });
 });
+
+// ─── AC-AU-7 — `--yes` / allowNewCommands is DECIDED (class verify-new-command), not granted ─────────────────
+
+/** A hand-written OverrideDecisionPort: records every ask and answers from a script. */
+function makeOverridePort(answer: (classId: string, subjectId: string) => Result<void, LoreError>) {
+  const asked: Array<{ classId: string; subjectId: string; version: string }> = [];
+  return {
+    asked,
+    port: {
+      requireAuto: async (request: { classId: string; subject: { id: string; version: string } }) => {
+        asked.push({ classId: request.classId, subjectId: request.subject.id, version: request.subject.version });
+        return answer(request.classId, request.subject.id);
+      },
+    },
+  };
+}
+
+describe("AC-AU-7 verify --yes asks decide() for a command with no attested row on the task", () => {
+  it("NEGATIVE: an escalation aborts BEFORE any command runs or evidence is written; the error is returned verbatim", async () => {
+    const spec = makeSpec([scriptAc("AC-1", "bun test")]);
+    const bundle: PlanBundle = { plan: makePlan(), spec, tasks: [taskWithFreshClaim("task-1")] }; // zero evidence: every command is new
+    const executor = makeExecutor([]);
+    const recorder = makeRecordVerifiedEvidence([]);
+    const refusal: LoreError = { code: "VALIDATION_ERROR", field: "autonomy", message: "Pending decision 7 created" };
+    const override = makeOverridePort(() => err(refusal));
+    const service = new VerifyRunnerService(makeGetPlanBundle(bundle).fn, recorder.fn, executor.fn, gatedConfig).setOverrideDecisionPort(override.port);
+
+    const result = await service.verifyPlan("plan-1", { by: "runner", nowIso: NOW, allowNewCommands: true });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toEqual(refusal);
+    expect(override.asked).toHaveLength(1);
+    expect(override.asked[0]).toMatchObject({ classId: "verify-new-command", subjectId: "task-1#AC-1" });
+    expect(executor.callCount).toBe(0);
+    expect(recorder.callCount).toBe(0);
+  });
+
+  it("HAPPY: an auto verdict lets the run proceed exactly as before", async () => {
+    const spec = makeSpec([scriptAc("AC-1", "bun test")]);
+    const bundle: PlanBundle = { plan: makePlan(), spec, tasks: [taskWithFreshClaim("task-1")] };
+    const executor = makeExecutor([ok({ exitCode: 0, outputTail: "", durationMs: 5, timedOut: false })]);
+    const recorder = makeRecordVerifiedEvidence([ok(makeTask("task-1", { version: 2 }))]);
+    const override = makeOverridePort(() => ok(undefined));
+    const service = new VerifyRunnerService(makeGetPlanBundle(bundle).fn, recorder.fn, executor.fn, gatedConfig).setOverrideDecisionPort(override.port);
+
+    const result = await service.verifyPlan("plan-1", { by: "runner", nowIso: NOW, allowNewCommands: true });
+    expect(result.ok).toBe(true);
+    expect(override.asked).toHaveLength(1);
+    expect(executor.callCount).toBe(1);
+    expect(recorder.callCount).toBe(1);
+  });
+
+  it("BOUNDARY: a command already attested on the task is never asked about (the SPEC-039 M2 scope is unchanged)", async () => {
+    const spec = makeSpec([scriptAc("AC-1", "bun test")]);
+    const bundle: PlanBundle = { plan: makePlan(), spec, tasks: [taskWithFreshClaimAndEvidence("task-1", "bun test")] };
+    const executor = makeExecutor([ok({ exitCode: 0, outputTail: "", durationMs: 5, timedOut: false })]);
+    const recorder = makeRecordVerifiedEvidence([ok(makeTask("task-1", { version: 2 }))]);
+    const override = makeOverridePort(() => err({ code: "VALIDATION_ERROR", field: "autonomy", message: "must not be asked" }));
+    const service = new VerifyRunnerService(makeGetPlanBundle(bundle).fn, recorder.fn, executor.fn, gatedConfig).setOverrideDecisionPort(override.port);
+
+    const result = await service.verifyPlan("plan-1", { by: "runner", nowIso: NOW, allowNewCommands: true });
+    expect(result.ok).toBe(true);
+    expect(override.asked).toEqual([]);
+  });
+
+  it("STATE: without allowNewCommands nothing is asked (NEEDS_APPROVAL path untouched); a second new command escalating means the first AC never ran", async () => {
+    const spec = makeSpec([scriptAc("AC-1", "cmd-1"), scriptAc("AC-2", "cmd-2")]);
+    const bundle: PlanBundle = { plan: makePlan(), spec, tasks: [taskWithFreshClaim("task-1")] };
+
+    const plain = makeOverridePort(() => ok(undefined));
+    const plainService = new VerifyRunnerService(makeGetPlanBundle(bundle).fn, makeRecordVerifiedEvidence([]).fn, makeExecutor([]).fn, gatedConfig).setOverrideDecisionPort(plain.port);
+    const needs = await plainService.verifyPlan("plan-1", { by: "runner", nowIso: NOW });
+    expect(needs.ok === false && needs.error.code).toBe("NEEDS_APPROVAL");
+    expect(plain.asked).toEqual([]);
+
+    const executor = makeExecutor([]);
+    const recorder = makeRecordVerifiedEvidence([]);
+    const second = makeOverridePort((_c, subjectId) => (subjectId.endsWith("AC-2") ? err({ code: "VALIDATION_ERROR", field: "autonomy", message: "escalated" }) : ok(undefined)));
+    const service = new VerifyRunnerService(makeGetPlanBundle(bundle).fn, recorder.fn, executor.fn, gatedConfig).setOverrideDecisionPort(second.port);
+    const result = await service.verifyPlan("plan-1", { by: "runner", nowIso: NOW, allowNewCommands: true });
+    expect(result.ok).toBe(false);
+    expect(second.asked.map((a) => a.subjectId)).toEqual(["task-1#AC-1", "task-1#AC-2"]);
+    expect(executor.callCount, "all decisions precede every execution, so AC-1 never ran").toBe(0);
+    expect(recorder.callCount).toBe(0);
+  });
+
+  it("REGRESSION: with requireCommandApproval=false (gate off) nothing is asked", async () => {
+    const spec = makeSpec([scriptAc("AC-1", "bun test")]);
+    const bundle: PlanBundle = { plan: makePlan(), spec, tasks: [taskWithFreshClaim("task-1")] };
+    const executor = makeExecutor([ok({ exitCode: 0, outputTail: "", durationMs: 5, timedOut: false })]);
+    const recorder = makeRecordVerifiedEvidence([ok(makeTask("task-1", { version: 2 }))]);
+    const override = makeOverridePort(() => err({ code: "VALIDATION_ERROR", field: "autonomy", message: "must not be asked" }));
+    const service = new VerifyRunnerService(makeGetPlanBundle(bundle).fn, recorder.fn, executor.fn, { ...gatedConfig, requireCommandApproval: false }).setOverrideDecisionPort(override.port);
+    const result = await service.verifyPlan("plan-1", { by: "runner", nowIso: NOW, allowNewCommands: true });
+    expect(result.ok).toBe(true);
+    expect(override.asked).toEqual([]);
+  });
+});

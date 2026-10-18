@@ -17,7 +17,9 @@
 import { err, ok, specAcceptanceCriteriaSchema } from "@lore/core";
 import type { DocRecord, LoreError, Result } from "@lore/core";
 import type { AcExemptionRow, StoreInterface } from "../store/store-interface.js";
+import { createHash } from "node:crypto";
 import { resolveDoc } from "./resolve.js";
+import type { OverrideDecisionPort } from "./override-decision.js";
 
 // reason: the 10% budget has ONE home, `ac-cite-gate.ts`, because the citation gate's feeding pack reports
 // the remaining headroom and must never disagree with what `grant` enforces. Re-exported so every existing
@@ -88,6 +90,8 @@ export class AcExemptionService {
   constructor(
     private readonly store: StoreInterface,
     private readonly clock: () => Date = () => new Date(),
+    /** AC-AU-7: decide() seam of the grant; absent (bare unit constructions) = ungated. */
+    private readonly overrideDecisions?: OverrideDecisionPort,
   ) {}
 
   /**
@@ -121,6 +125,20 @@ export class AcExemptionService {
     }
     if (!criteriaOf(spec.value).some((c) => c.id === input.acId)) {
       return err(validationError("ac_id", `Spec ${spec.value.slug} declares no criterion "${input.acId}".`, input.acId));
+    }
+
+    // reason: AC-AU-7 — granting an exemption is DECIDED (class ac-exempt), not self-granted; after every input check,
+    // before the capped insert. The subject version binds reason + expiry so a human accepts THIS exemption.
+    if (this.overrideDecisions !== undefined) {
+      const decided = await this.overrideDecisions.requireAuto({
+        classId: "ac-exempt",
+        subject: {
+          id: `${spec.value.slug}#${input.acId}`,
+          version: createHash("sha256").update(`${reason}\n${new Date(expiresMs).toISOString()}`).digest("hex").slice(0, 16),
+        },
+        summary: `ac exempt ${spec.value.slug} ${input.acId}`,
+      });
+      if (!decided.ok) return decided;
     }
 
     const live = await this.countLiveCriteria();
