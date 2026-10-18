@@ -19,6 +19,7 @@ import { resolve } from "path";
 import { defineCommand } from "citty";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatError } from "../utils.js";
+import { invocationOf } from "../command-invocation.js";
 
 const DEFAULT_SPEC_DIR = "docs/requirements/spec";
 
@@ -41,13 +42,15 @@ export default defineCommand({
       description: "Output SyncReport as JSON to stdout",
     },
   },
-  async run({ args }) {
+  async run(context) {
+    const { args } = context;
+    const inv = invocationOf(context);
     // Resolve fromDir at run() time (not module-load time) so cwd is correct (SPEC-018 §3.1)
-    const fromDir = resolve(process.cwd(), args.from ?? DEFAULT_SPEC_DIR);
+    const fromDir = resolve(inv.cwd, args.from ?? DEFAULT_SPEC_DIR);
     const dryRun = args["dry-run"] ?? false;
     const jsonMode = args.json ?? false;
 
-    const { app } = loadLoreApp();
+    const { app } = loadLoreApp({ inv });
 
     try {
       const syncResult = await app.syncDocsService.run({ fromDir, dryRun });

@@ -183,7 +183,7 @@ export default defineCommand({
       process.exit(2);
     }
 
-    const { app } = loadLoreApp();
+    const { app } = loadLoreApp({ inv });
     try {
       // ─── Step 2: resolve plan + assemble bundle ───────────────────────────────
       const bundleResult = await app.corpusService.getPlanBundle(args.plan);

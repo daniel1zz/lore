@@ -101,6 +101,7 @@ import { SESSION_RESUME_CHECKPOINT } from "../../../flows/feed-flow.js";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatError, resolveActor } from "../utils.js";
 import { assembleHandoffInput, parseHandoffJsonFile } from "../handoff-input.js";
+import { invocationOf } from "../command-invocation.js";
 
 /** Field flags mutually exclusive with `--json-file` (D6) — `--plan` is NOT in this list; it works with both paths. */
 const FIELD_FLAGS = ["file", "decision", "next", "failing-command", "failing-tail-file"] as const;
@@ -1038,7 +1039,9 @@ export default defineCommand({
       description: "Output result as JSON",
     },
   },
-  async run({ args }) {
+  async run(context) {
+    const { args } = context;
+    const inv = invocationOf(context);
     const subcommand = typeof args.subcommand === "string" ? args.subcommand : undefined;
     if (subcommand === COVERAGE_CHECK_SUBCOMMAND) {
       runCoverageCheck();
@@ -1052,7 +1055,7 @@ export default defineCommand({
       return;
     }
 
-    const rawArgv = process.argv.slice(2);
+    const rawArgv = inv.argv;
     const jsonFilePassed = typeof args["json-file"] === "string";
     const conflictingFlags = FIELD_FLAGS.filter((f) => rawArgv.includes(`--${f}`));
 
@@ -1082,7 +1085,7 @@ export default defineCommand({
 
       const parsed = parseHandoffJsonFile(raw, {
         // reason: the writer is the invoking run alone — a payload-supplied `by` is overridden, never trusted.
-        by: resolveActor(),
+        by: resolveActor(undefined, inv.env, inv.cwd),
         ...(explicitPlan !== undefined ? { plan: explicitPlan } : {}),
       });
       if (!parsed.ok) {
@@ -1116,7 +1119,7 @@ export default defineCommand({
       }
 
       const assembled = assembleHandoffInput({
-        by: resolveActor(),
+        by: resolveActor(undefined, inv.env, inv.cwd),
         ...(explicitPlan !== undefined ? { plan: explicitPlan } : {}),
         files: normalizeRepeatable(args.file),
         decisions: normalizeRepeatable(args.decision),
@@ -1137,7 +1140,7 @@ export default defineCommand({
       candidate = validated.data;
     }
 
-    const { app } = loadLoreApp();
+    const { app } = loadLoreApp({ inv });
     try {
       if (app.sessionService === undefined) {
         process.stderr.write("Error: SessionService not wired on this App instance.\n");

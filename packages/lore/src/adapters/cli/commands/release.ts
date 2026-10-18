@@ -49,6 +49,7 @@ import { loadLoreApp } from "../loader.js";
 import { exitCode, formatError, resolveActor } from "../utils.js";
 import { requirePhaseWorkflowService } from "../phase-wiring.js";
 import { hasZeroReleaseEvidence, ZERO_EVIDENCE_RELEASE_WARNING } from "../../../service/task-workflow-service.js";
+import { invocationOf } from "../command-invocation.js";
 
 export default defineCommand({
   meta: {
@@ -74,8 +75,10 @@ export default defineCommand({
       description: "Output result as JSON",
     },
   },
-  async run({ args }) {
-    const { app } = loadLoreApp();
+  async run(context) {
+    const { args } = context;
+    const inv = invocationOf(context);
+    const { app } = loadLoreApp({ inv });
     try {
       // reason: the run is verified ONCE against the registry (unregistered -> null + one warning); the decision
       // below and the stamped rows then agree (BR-1035, spec-run-identity-slice-1 D7).
@@ -85,7 +88,7 @@ export default defineCommand({
         process.exit(exitCode(verifiedIdentity.error));
       }
       const verifiedRun = verifiedIdentity?.value?.harnessRun ?? null;
-      const by = resolveActor();
+      const by = resolveActor(undefined, inv.env, inv.cwd);
       const releaseOpts = {
         by,
         // reason: spec-run-identity-slice-1 D6/BR-1043 — see commands/claim.ts: the releasing run is explicit.
@@ -97,7 +100,7 @@ export default defineCommand({
         // from — see module header's "Uncommitted-worktree attestation guard"
         // paragraph. A fresh subprocess per CLI invocation inherits the
         // caller's real shell cwd.
-        callerCwd: process.cwd(),
+        callerCwd: inv.cwd,
       };
 
       let result = await app.taskWorkflowService.release(args.task as string, releaseOpts);

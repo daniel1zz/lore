@@ -26,6 +26,7 @@ import { loadLoreApp } from "../loader.js";
 import { exitCode, formatError } from "../utils.js";
 import type { DocType } from "@lore/core";
 import { docTypeSchema } from "@lore/core";
+import { invocationOf } from "../command-invocation.js";
 
 /** Valid DocType values for --type validation. */
 const VALID_TYPES = docTypeSchema.options;
@@ -53,7 +54,9 @@ export default defineCommand({
       description: "Output ExportReport as JSON to stdout",
     },
   },
-  async run({ args }) {
+  async run(context) {
+    const { args } = context;
+    const inv = invocationOf(context);
     const dryRun = args["dry-run"] ?? false;
     const jsonMode = args.json ?? false;
     const typeArg = args.type;
@@ -73,7 +76,7 @@ export default defineCommand({
       typeFilter = parsed.data;
     }
 
-    const { app, dbPath } = loadLoreApp();
+    const { app, dbPath } = loadLoreApp({ inv });
     // Derive project root from the lore DB path: dbPath = <projectDir>/.lore/lore.db.
     // reason: all docs and the export-index live relative to the project root, not cwd.
     // This mirrors the convention used by MigrationService and loader.ts itself.

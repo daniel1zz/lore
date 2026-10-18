@@ -294,9 +294,9 @@ export default defineCommand({
     }
     const triageLabels = triageResult.value;
 
-    const { app, config } = loadLoreApp();
+    const { app, config } = loadLoreApp({ inv });
     try {
-      const corpusRoot = resolveConsumerCorpusRoot();
+      const corpusRoot = resolveConsumerCorpusRoot(inv);
 
       // reason: ONE shared classifier (spec-lore-issues-falls-through-to-the-
       // local-corpus-on-a-retired D1) — `commands/issues.ts` consumes the
@@ -340,7 +340,7 @@ export default defineCommand({
       // renders.
       if (isList) {
         const { runGithubIssuesListing } = await import("./issues.js");
-        await runGithubIssuesListing(app, effectiveCfg, corpusRoot, args.json === true, inv.env);
+        await runGithubIssuesListing(app, effectiveCfg, corpusRoot, args.json === true, inv);
         return;
       }
 
@@ -385,6 +385,7 @@ export default defineCommand({
           corpusService: app.corpusService,
           actor,
           actorSource,
+          home: inv.paths.home,
           env: inv.env,
         },
       );

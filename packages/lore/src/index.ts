@@ -22,7 +22,7 @@ if (process.argv.includes("--mcp-server")) {
   const { resolveEntryInvocation } = await import("./adapters/cli/run-cli.js");
   const inv = await resolveEntryInvocation(process.argv.slice(2));
   const { app } = loadLoreApp({ inv });
-  await startMcpServer(app, loadProjectConfig, inv);
+  await startMcpServer(app, () => loadProjectConfig(inv), inv);
 } else {
   // reason: the CLI branch lives in adapters/cli/run-cli.ts so the in-process test runner executes the
   // SAME startup sequence (identity resolution, strict usage renderer, runMain exit mapping) as the binary

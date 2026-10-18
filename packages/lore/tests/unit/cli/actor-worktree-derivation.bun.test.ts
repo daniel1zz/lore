@@ -444,7 +444,7 @@ describe("SPEC-104 AC-ACTOR-5 — lore claim from a linked worktree records agen
 
       // Bonus REGRESSION: resolveActor's plain-string surface agrees too,
       // at the SAME real cwd claim.ts itself resolved against.
-      expect(resolveActor(undefined)).toBe(`agent:${branch}`);
+      expect(resolveActor(undefined, process.env, process.cwd())).toBe(`agent:${branch}`);
     }
   });
 });

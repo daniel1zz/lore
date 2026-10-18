@@ -52,6 +52,8 @@ import {
 } from "../../../src/adapters/cli/plan-exempt-validation.js";
 import planCommand from "../../../src/adapters/cli/commands/plan.js";
 import { findUnknownFlag } from "../../../src/adapters/cli/strict-flags.js";
+import { liveInvocation } from "../../live-invocation.js";
+import type { Invocation } from "@lore/core";
 
 // ─── Fixtures ────────────────────────────────────────────────────────────────
 
@@ -269,13 +271,13 @@ describe("AC-069-9 — an exemption with no justification, or an untyped one, is
   });
 
   /** The real citty subcommand object — not a re-implementation of its logic. */
-  function subcommand(name: string): { run: (ctx: { args: Record<string, unknown> }) => unknown } {
+  function subcommand(name: string): { run: (ctx: { args: Record<string, unknown>; inv?: Invocation }) => unknown } {
     const subs = planCommand.subCommands as Record<string, unknown> | undefined;
-    const cmd = subs?.[name] as { run?: (ctx: { args: Record<string, unknown> }) => unknown } | undefined;
+    const cmd = subs?.[name] as { run?: (ctx: { args: Record<string, unknown>; inv?: Invocation }) => unknown } | undefined;
     if (cmd?.run === undefined) {
       throw new Error(`lore plan has no "${name}" subcommand with a run handler`);
     }
-    return cmd as { run: (ctx: { args: Record<string, unknown> }) => unknown };
+    return cmd as { run: (ctx: { args: Record<string, unknown>; inv?: Invocation }) => unknown };
   }
 
   // ── BOUNDARY / NEGATIVE — the pure classifier ──────────────────────────
@@ -341,6 +343,7 @@ describe("AC-069-9 — an exemption with no justification, or an untyped one, is
     expect(process.exitCode).toBeUndefined();
     await subcommand("exempt-attestation").run({
       args: { plan: "plan-exempt-fixture", reason: "   ", kind: "red-tdd" },
+ inv: liveInvocation(),
     });
     expect(process.exitCode).toBe(PLAN_EXEMPT_USAGE_EXIT_CODE);
     expect(PLAN_EXEMPT_USAGE_EXIT_CODE).toBe(2);
@@ -350,6 +353,7 @@ describe("AC-069-9 — an exemption with no justification, or an untyped one, is
     expect(process.exitCode).toBeUndefined();
     await subcommand("exempt-attestation").run({
       args: { plan: "plan-exempt-fixture", reason: "a real justification", kind: "bogus-kind" },
+ inv: liveInvocation(),
     });
     expect(process.exitCode).toBe(2);
   });
@@ -358,6 +362,7 @@ describe("AC-069-9 — an exemption with no justification, or an untyped one, is
     expect(process.exitCode).toBeUndefined();
     await subcommand("exempt-assessment-freshness").run({
       args: { plan: "plan-exempt-fixture", reason: "" },
+ inv: liveInvocation(),
     });
     expect(process.exitCode).toBe(2);
   });
@@ -376,6 +381,7 @@ describe("AC-069-9 — an exemption with no justification, or an untyped one, is
     try {
       await subcommand("exempt-attestation").run({
         args: { plan: "plan-exempt-fixture", reason: "a real justification", kind: "red-tdd" },
+ inv: liveInvocation(),
       });
     } catch {
       // Reaching the loader (and failing there, corpus-less) is the POINT:

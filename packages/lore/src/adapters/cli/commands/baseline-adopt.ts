@@ -25,7 +25,8 @@
 import { dirname, join } from "node:path";
 import { defineCommand } from "citty";
 import { CITE_GATE_MODES, err, ok } from "@lore/core";
-import type { CiteGateMode, LoreError, Result } from "@lore/core";
+import type { CiteGateMode, Invocation, LoreError, Result } from "@lore/core";
+import { invocationOf } from "../command-invocation.js";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatError, resolveActor } from "../utils.js";
 import { resolveDoc } from "../../../service/resolve.js";
@@ -66,15 +67,16 @@ async function appendAdoptAuditRow(
  * A kept explicit mode writes no row. A failed row append is returned loudly (the config was already seeded).
  *
  * @param repoDir - the repo whose `.lore/` setup just initialised (the DB exists: init runs before the seed)
+ * @param inv - the running command's Invocation (env + cwd for the audit row's actor)
  */
-export async function seedAcCiteModeAudited(repoDir: string): Promise<Result<AcCiteSeedOutcome, LoreError>> {
+export async function seedAcCiteModeAudited(repoDir: string, inv: Invocation): Promise<Result<AcCiteSeedOutcome, LoreError>> {
   const seeded = seedAcCiteModeIfAbsent(repoDir);
   if (!seeded.ok || seeded.value.status !== "written") return seeded;
   const store = new SQLiteStore(join(repoDir, ".lore", "lore.db"));
   try {
     const row = await appendAdoptAuditRow(
       store,
-      resolveActor(undefined),
+      resolveActor(undefined, inv.env, inv.cwd),
       { mode: null, armed_branches: [] },
       { mode: "report", armed_branches: [] },
     );
@@ -125,7 +127,7 @@ export function computeAdoptedSettings(
   return { mode: change.mode ?? old.mode, armed_branches: armed.filter((s) => !change.disarm.includes(s)) };
 }
 
-async function runAdopt(args: Record<string, unknown>): Promise<void> {
+async function runAdopt(args: Record<string, unknown>, inv: Invocation): Promise<void> {
   const json = args.json === true;
   const arm = repeatable(args.arm);
   const disarm = repeatable(args.disarm);
@@ -142,7 +144,7 @@ async function runAdopt(args: Record<string, unknown>): Promise<void> {
     return fail(usageError("arm", `the same branch is both --arm and --disarm: ${both.join(", ")}`, both), json, 2);
   }
 
-  const { app, dbPath } = loadLoreApp();
+  const { app, dbPath } = loadLoreApp({ inv });
   const store = new SQLiteStore(dbPath);
   try {
     // reason: --arm slugs are validated against the corpus BEFORE anything is written (all-or-nothing).
@@ -189,7 +191,7 @@ async function runAdopt(args: Record<string, unknown>): Promise<void> {
       if (!written.ok) return fail(written.error, json, exitCode(written.error));
     }
 
-    const audited = await appendAdoptAuditRow(store, resolveActor(), old, next);
+    const audited = await appendAdoptAuditRow(store, resolveActor(undefined, inv.env, inv.cwd), old, next);
     if (!audited.ok) {
       return fail(
         {
@@ -225,7 +227,7 @@ export const adoptCommand = defineCommand({
     disarm: { type: "string", description: "Disarm a branch slug (repeatable)" },
     json: { type: "boolean", description: "Output result as JSON" },
   },
-  async run({ args }) {
-    await runAdopt(args as Record<string, unknown>);
+  async run(context) {
+    await runAdopt(context.args as Record<string, unknown>, invocationOf(context));
   },
 });

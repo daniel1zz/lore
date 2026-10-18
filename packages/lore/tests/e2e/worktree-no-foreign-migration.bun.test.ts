@@ -102,7 +102,7 @@ describe("AC-CRIT-7: a linked worktree never migrates the main checkout's corpus
     const previousCwd = process.cwd();
     process.chdir(worktreeDir);
     try {
-      expect(() => createApp(findLoreDbPath())).toThrow(/schema mismatch/);
+      expect(() => createApp(findLoreDbPath({ cwd: process.cwd(), env: process.env }))).toThrow(/schema mismatch/);
     } finally {
       process.chdir(previousCwd);
     }

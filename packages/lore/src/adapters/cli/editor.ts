@@ -21,7 +21,6 @@
 import { spawnSync } from "child_process";
 import { mkdtempSync, writeFileSync, readFileSync, rmSync } from "fs";
 import { join } from "path";
-import { tmpdir } from "os";
 import { ok, err } from "@lore/core";
 import type { Result, LoreError } from "@lore/core";
 import type { LoreDefaults } from "@lore/core";
@@ -33,10 +32,10 @@ import type { LoreDefaults } from "@lore/core";
  *
  * @example
  *   // No initial content — blank temp file (AC-ED-1)
- *   openEditor({})
+ *   openEditor({ env: inv.env, tmpDir: inv.paths.tmpDir })
  *
  *   // Pre-populate with existing doc body for in-place editing (AC-ED-2)
- *   openEditor({ initialContent: doc.content, defaults })
+ *   openEditor({ initialContent: doc.content, defaults, env: inv.env, tmpDir: inv.paths.tmpDir })
  */
 export interface OpenEditorOptions {
   /**
@@ -49,6 +48,10 @@ export interface OpenEditorOptions {
    * When absent, falls back to $EDITOR env var, then vi/notepad (AC-ED-3).
    */
   defaults?: LoreDefaults;
+  /** The Invocation's environment (`inv.env`): the `$EDITOR` source. No ambient default (AS-26). */
+  env: NodeJS.ProcessEnv;
+  /** The Invocation's temp directory (`inv.paths.tmpDir`): where the per-invocation edit dir is created. */
+  tmpDir: string;
 }
 
 // ─── Editor resolution ────────────────────────────────────────────────────────
@@ -62,11 +65,13 @@ export interface OpenEditorOptions {
  *   3. "vi" / "notepad"  — platform default (vi on POSIX, notepad on win32)
  *
  * @param defaults - Merged LoreDefaults from loadLoreApp()
+ * @param env - the Invocation's environment (`inv.env`) — `$EDITOR` source
  * @returns editor command string (may include flags, e.g. "code --wait")
  */
-function resolveEditorCommand(defaults?: LoreDefaults): string {
+function resolveEditorCommand(env: NodeJS.ProcessEnv, defaults?: LoreDefaults): string {
   if (defaults?.editor) return defaults.editor;
-  if (process.env["EDITOR"]) return process.env["EDITOR"];
+  const fromEnv = env["EDITOR"];
+  if (fromEnv) return fromEnv;
   // reason: notepad is the only GUI editor available by default on win32.
   // vi is POSIX-standard on macOS/Linux/BSD. (SPEC-003 §6.2)
   return process.platform === "win32" ? "notepad" : "vi";
@@ -97,7 +102,7 @@ function resolveEditorCommand(defaults?: LoreDefaults): string {
  *
  * @example
  *   // In a CLI command handler:
- *   const editorResult = await openEditor({ defaults });
+ *   const editorResult = await openEditor({ defaults, env: inv.env, tmpDir: inv.paths.tmpDir });
  *   if (!editorResult.ok) {
  *     process.stderr.write(formatError(editorResult.error) + "\n");
  *     process.exit(exitCode(editorResult.error));
@@ -105,13 +110,13 @@ function resolveEditorCommand(defaults?: LoreDefaults): string {
  *   const content = editorResult.value;
  */
 export async function openEditor(
-  opts: OpenEditorOptions = {},
+  opts: OpenEditorOptions,
 ): Promise<Result<string, LoreError>> {
   // Non-interactive (piped / CI / spawned subprocess) — skip editor, keep caller's initialContent.
   // Matches git/npm/bun behaviour: editor steps only fire in a TTY. Lets `lore create --title X` work
   // headless without --content (content stays empty, same as pre-editor behaviour).
   if (!process.stdin.isTTY) return ok(opts.initialContent ?? "");
-  const editorCommand = resolveEditorCommand(opts.defaults);
+  const editorCommand = resolveEditorCommand(opts.env, opts.defaults);
 
   // reason: split on whitespace to support commands like "code --wait" or "subl -w".
   // Do NOT use shell: true — that would allow injection if defaults.editor is untrusted.
@@ -127,7 +132,7 @@ export async function openEditor(
   }
 
   // Create a per-invocation temp dir — mkdtempSync appends random suffix (AC-ED-8)
-  const tempDir = mkdtempSync(join(tmpdir(), "lore-editor-"));
+  const tempDir = mkdtempSync(join(opts.tmpDir, "lore-editor-"));
   const tempFile = join(tempDir, "content.md");
 
   try {

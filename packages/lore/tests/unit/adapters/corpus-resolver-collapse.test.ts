@@ -476,8 +476,8 @@ describe("AC-CP-2(a) BEHAVIOUR — both wrappers delegate to ONE shared resolver
     const dbPath = makeCorpus(repo);
     process.chdir(repo);
 
-    expect(findLoreDbPathQuiet()).toBe(dbPath);
-    expect(findLoreDbPath()).toBe(dbPath);
+    expect(findLoreDbPathQuiet({ cwd: process.cwd(), env: process.env })).toBe(dbPath);
+    expect(findLoreDbPath({ cwd: process.cwd(), env: process.env })).toBe(dbPath);
   });
 
   it("NEGATIVE: the loud wrapper exits EXACTLY 1 with the pre-change stderr message, byte-identical, when no corpus exists anywhere", () => {
@@ -488,7 +488,7 @@ describe("AC-CP-2(a) BEHAVIOUR — both wrappers delegate to ONE shared resolver
     const exitSpy = mockProcessExit();
     const stderrSpy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
 
-    expect(() => findLoreDbPath()).toThrow(ProcessExitSignal);
+    expect(() => findLoreDbPath({ cwd: process.cwd(), env: process.env })).toThrow(ProcessExitSignal);
     expect(exitSpy).toHaveBeenCalledTimes(1);
     expect(exitSpy).toHaveBeenCalledWith(1);
     expect(stderrSpy.mock.calls.map((c) => String(c[0])).join("")).toBe(PRE_CHANGE_NO_DB_STDERR_MESSAGE);
@@ -499,7 +499,7 @@ describe("AC-CP-2(a) BEHAVIOUR — both wrappers delegate to ONE shared resolver
     initGitRepo(repo);
     process.chdir(repo);
 
-    expect(findLoreDbPathQuiet()).toBeUndefined();
+    expect(findLoreDbPathQuiet({ cwd: process.cwd(), env: process.env })).toBeUndefined();
   });
 
   it("MECHANISM: findLoreDbPath's and findLoreDbPathQuiet's function bodies call a SHARED symbol (checker identity, not text)", () => {
@@ -554,14 +554,14 @@ describe("§5.2 — provenance: undetermined never surfaces its own cwd path", (
     const dir = mkScratchDir("ac-cp-2-undetermined-resolve-");
     // Deliberately NOT a git repo at all -- gatherCorpusGitFacts's rev-parse probes
     // both fail, and there is no `.lore/lore.db` anywhere in dir's ancestor chain.
-    const resolved = resolveCorpus(dir);
+    const resolved = resolveCorpus(dir, process.env);
     expect(resolved).toEqual({ path: dir, provenance: "undetermined" });
   });
 
   it("findLoreDbPathQuiet returns undefined for that SAME fixture, never the directory path", () => {
     const dir = mkScratchDir("ac-cp-2-undetermined-quiet-");
     process.chdir(dir);
-    const result = findLoreDbPathQuiet();
+    const result = findLoreDbPathQuiet({ cwd: process.cwd(), env: process.env });
     expect(result).toBeUndefined();
     expect(result).not.toBe(dir);
   });
@@ -573,7 +573,7 @@ describe("§5.2 — provenance: undetermined never surfaces its own cwd path", (
     const exitSpy = mockProcessExit();
     const stderrSpy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
 
-    expect(() => findLoreDbPath()).toThrow(ProcessExitSignal);
+    expect(() => findLoreDbPath({ cwd: process.cwd(), env: process.env })).toThrow(ProcessExitSignal);
     expect(exitSpy).toHaveBeenCalledWith(1);
     expect(stderrSpy.mock.calls.map((c) => String(c[0])).join("")).toBe(PRE_CHANGE_NO_DB_STDERR_MESSAGE);
   });

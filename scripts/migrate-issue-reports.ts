@@ -525,7 +525,7 @@ async function gatherMigrationCandidates(
  */
 async function runCli(): Promise<number> {
   const live = process.argv.includes("--live");
-  const corpusRoot = resolveConsumerCorpusRoot();
+  const corpusRoot = resolveConsumerCorpusRoot({ cwd: process.cwd(), env: process.env });
 
   const configResult = loadConfig(corpusRoot);
   if (!configResult.ok) {

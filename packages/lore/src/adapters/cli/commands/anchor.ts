@@ -81,6 +81,7 @@ import { exitCode, formatError, resolveActor } from "../utils.js";
 import { collectFileAnchorResolution, renderFileAnchorAdvisory } from "../../../service/anchor-resolution.js";
 import { ANCHOR_SCANNED_DOC_TYPES } from "../../../service/drift-check-service.js";
 import { buildFileAnchorProbeContext } from "../../real-fs-probe.js";
+import { invocationOf } from "../command-invocation.js";
 
 /**
  * Reads every trailing positional argument beyond the `skip` leading ones
@@ -207,8 +208,10 @@ export default defineCommand({
           description: "Output result as JSON",
         },
       },
-      async run({ args }) {
-        const { app } = loadLoreApp();
+      async run(context) {
+        const { args } = context;
+        const inv = invocationOf(context);
+        const { app } = loadLoreApp({ inv });
         try {
           const targetId = args.target as string;
           const paths = collectVariadicPositionals(args, 1);
@@ -222,7 +225,7 @@ export default defineCommand({
           const target = targetResult.value;
 
           if (target.type === "task") {
-            const by = resolveActor();
+            const by = resolveActor(undefined, inv.env, inv.cwd);
             const result = await app.taskWorkflowService.addAnchors(targetId, paths, {
               by,
               source: app.callerSurface,
@@ -294,8 +297,10 @@ export default defineCommand({
           description: "Output result as JSON",
         },
       },
-      async run({ args }) {
-        const { app } = loadLoreApp();
+      async run(context) {
+        const { args } = context;
+        const inv = invocationOf(context);
+        const { app } = loadLoreApp({ inv });
         try {
           const targetId = args.target as string;
           const paths = collectVariadicPositionals(args, 1);
@@ -309,7 +314,7 @@ export default defineCommand({
           const target = targetResult.value;
 
           if (target.type === "task") {
-            const by = resolveActor();
+            const by = resolveActor(undefined, inv.env, inv.cwd);
             const result = await app.taskWorkflowService.removeAnchors(targetId, paths, {
               by,
               source: app.callerSurface,
@@ -375,8 +380,10 @@ export default defineCommand({
           description: "Output result as JSON",
         },
       },
-      async run({ args }) {
-        const { app } = loadLoreApp();
+      async run(context) {
+        const { args } = context;
+        const inv = invocationOf(context);
+        const { app } = loadLoreApp({ inv });
         try {
           const targetResult = await resolveAnchorTarget(app, args.target as string);
 

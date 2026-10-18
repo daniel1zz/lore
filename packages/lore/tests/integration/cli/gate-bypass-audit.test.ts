@@ -13,7 +13,6 @@
  * @spec_ref SPEC-080 §Scope, §Design Decisions D1/D3; AC-080-2
  */
 
-import { runWithinInvocation } from "../../../src/adapters/cli/invocation-scope.js";
 import { liveInvocation } from "../../live-invocation.js";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync, realpathSync } from "node:fs";
@@ -29,9 +28,9 @@ import { ok, err } from "@lore/core";
 import type { LoreError, Result } from "@lore/core";
 
 /** Spies on `process.stderr.write` (swallowing real output), restored via `vi.restoreAllMocks()`. */
-/** The audit names its actor from the delivered Invocation (no process fallback), so run it inside a scope like the CLI does. */
+/** The audit names its actor from the Invocation it is handed (no process fallback), as the CLI delivers it. */
 function auditInScope(checkpoint: Parameters<typeof runGateEnvBypassAudit>[0], deps: GateBypassAuditDeps): Promise<void> {
-  return runWithinInvocation(liveInvocation(), () => runGateEnvBypassAudit(checkpoint, deps));
+  return runGateEnvBypassAudit(checkpoint, liveInvocation(), deps);
 }
 
 function spyStderr() {
@@ -188,7 +187,7 @@ describe("findLoreDbPathQuiet (safe .lore/lore.db discovery, never process.exit)
   // NEGATIVE — no .lore anywhere up the tree: returns undefined, never process.exit.
   it("returns undefined (never exits) when no .lore/lore.db is discoverable", () => {
     process.chdir(tmpDir);
-    expect(findLoreDbPathQuiet()).toBeUndefined();
+    expect(findLoreDbPathQuiet({ cwd: process.cwd(), env: process.env })).toBeUndefined();
   });
 
   // HAPPY — .lore/lore.db present in cwd.
@@ -199,7 +198,7 @@ describe("findLoreDbPathQuiet (safe .lore/lore.db discovery, never process.exit)
     writeFileSync(join(tmpDir, ".lore", "lore.db"), "");
     process.chdir(tmpDir);
 
-    expect(findLoreDbPathQuiet()).toBe(join(tmpDir, ".lore", "lore.db"));
+    expect(findLoreDbPathQuiet({ cwd: process.cwd(), env: process.env })).toBe(join(tmpDir, ".lore", "lore.db"));
   });
 
   // BOUNDARY — .lore/lore.db exists in an ANCESTOR directory, cwd is a nested subdir.
@@ -210,16 +209,6 @@ describe("findLoreDbPathQuiet (safe .lore/lore.db discovery, never process.exit)
     mkdirSync(nested, { recursive: true });
     process.chdir(nested);
 
-    expect(findLoreDbPathQuiet()).toBe(join(tmpDir, ".lore", "lore.db"));
-  });
-
-  // NEGATIVE — outside any delivered Invocation there is no resolved name: no row is written, one loud line is printed.
-  it("without an Invocation in scope: writes NO row and prints the NOT-audited line naming the missing invocation", async () => {
-    const stderrSpy = spyStderr();
-    const recordGateSkip = vi.fn<RecordGateSkip>().mockResolvedValue(ok(undefined));
-    await runGateEnvBypassAudit("task-claim", { openRecordGateSkip: vi.fn().mockResolvedValue(recordGateSkip) });
-    expect(recordGateSkip).not.toHaveBeenCalled();
-    expect(stderrSpy).toHaveBeenCalledTimes(1);
-    expect(String(stderrSpy.mock.calls[0]![0])).toContain("no invocation in scope");
+    expect(findLoreDbPathQuiet({ cwd: process.cwd(), env: process.env })).toBe(join(tmpDir, ".lore", "lore.db"));
   });
 });

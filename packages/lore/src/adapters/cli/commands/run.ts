@@ -171,10 +171,10 @@ function renderRunText(run: RunRecord): string {
   return `${lines.join("\n")}\n`;
 }
 
-async function withRunService(body: (service: RunService) => Promise<void>): Promise<void> {
+async function withRunService(inv: Invocation, body: (service: RunService) => Promise<void>): Promise<void> {
   // reason: RunService comes from the App so it sits on the store `createApp` selected (sync.enabled -> TursoStore,
   // root CLAUDE.md D-007) rather than a private SQLiteStore handle that would bypass store selection.
-  const { app } = loadLoreApp();
+  const { app } = loadLoreApp({ inv });
   try {
     if (app.runService === undefined) throw new Error("App was built without a runService");
     await body(app.runService);
@@ -202,7 +202,7 @@ async function runRegister(args: Record<string, unknown>, inv: Invocation): Prom
   const runProcess = await measureRunProcess(stringArg(args, "harness-pid"), inv.cwd);
   if (runProcess !== undefined && "error" in runProcess) return usageError(runProcess.error);
 
-  await withRunService(async (service) => {
+  await withRunService(inv, async (service) => {
     const result = await service.register({
       harness,
       sessionId: session,
@@ -222,10 +222,10 @@ async function runRegister(args: Record<string, unknown>, inv: Invocation): Prom
   });
 }
 
-async function runShow(args: Record<string, unknown>): Promise<void> {
+async function runShow(args: Record<string, unknown>, inv: Invocation): Promise<void> {
   const id = stringArg(args, "id");
   if (id === undefined) return usageError("lore run show requires a run id");
-  await withRunService(async (service) => {
+  await withRunService(inv, async (service) => {
     const result = await service.show(id);
     if (!result.ok) {
       process.stderr.write(`${formatError(result.error)}\n`);
@@ -236,12 +236,12 @@ async function runShow(args: Record<string, unknown>): Promise<void> {
   });
 }
 
-async function runEnd(args: Record<string, unknown>): Promise<void> {
+async function runEnd(args: Record<string, unknown>, inv: Invocation): Promise<void> {
   const id = stringArg(args, "id");
   if (id === undefined) return usageError("lore run end requires a run id");
   const reason = stringArg(args, "reason");
   if (reason === undefined) return usageError("lore run end requires --reason <reason>");
-  await withRunService(async (service) => {
+  await withRunService(inv, async (service) => {
     const result = await service.end(id, reason);
     if (!result.ok) {
       process.stderr.write(`${formatError(result.error)}\n`);
@@ -269,13 +269,13 @@ async function runEnd(args: Record<string, unknown>): Promise<void> {
   });
 }
 
-async function runOccupancy(args: Record<string, unknown>): Promise<void> {
+async function runOccupancy(args: Record<string, unknown>, inv: Invocation): Promise<void> {
   const worktree = stringArg(args, "worktree");
   if (worktree === undefined) return usageError("lore run occupancy requires --worktree <path>");
   // reason: a claim may record the worktree's BRANCH instead of its path (issue #158); an unmeasurable branch
   // (absent directory, detached HEAD) leaves only the path comparison.
   const measured = await detectWorktreeBranch(worktree);
-  await withRunService(async (service) => {
+  await withRunService(inv, async (service) => {
     const result = await service.occupancy({
       worktree,
       ...(measured.status === "measured" ? { branch: measured.branch } : {}),
@@ -305,10 +305,10 @@ async function runOccupancy(args: Record<string, unknown>): Promise<void> {
   });
 }
 
-async function runTasks(args: Record<string, unknown>): Promise<void> {
+async function runTasks(args: Record<string, unknown>, inv: Invocation): Promise<void> {
   const id = stringArg(args, "id");
   if (id === undefined) return usageError("lore run tasks requires a run id");
-  await withRunService(async (service) => {
+  await withRunService(inv, async (service) => {
     const result = await service.tasks(id);
     if (!result.ok) {
       process.stderr.write(`${formatError(result.error)}\n`);
@@ -354,8 +354,8 @@ function renderReapText(report: ReapReport): string {
  * 1 when the process table cannot be measured, a decision cannot be recorded, a signal is denied, or a reaped
  * process survived SIGKILL. Writes nothing without --apply.
  */
-async function runReap(args: Record<string, unknown>): Promise<void> {
-  const { app } = loadLoreApp();
+async function runReap(args: Record<string, unknown>, inv: Invocation): Promise<void> {
+  const { app } = loadLoreApp({ inv });
   try {
     if (app.runReapService === undefined) throw new Error("App was built without a runReapService");
     const result = await app.runReapService.reap({ apply: args["apply"] === true });
@@ -446,15 +446,15 @@ export default defineCommand({
       case "register":
         return runRegister(rest, inv);
       case "show":
-        return runShow(rest);
+        return runShow(rest, inv);
       case "end":
-        return runEnd(rest);
+        return runEnd(rest, inv);
       case "occupancy":
-        return runOccupancy(rest);
+        return runOccupancy(rest, inv);
       case "tasks":
-        return runTasks(rest);
+        return runTasks(rest, inv);
       case "reap":
-        return runReap(rest);
+        return runReap(rest, inv);
       case "attest-input":
         return runAttestInput();
       default: {

@@ -548,17 +548,17 @@ function renderSetupCheckReport(
  *   codebase-wide `now: () => string` convention, e.g. `SetupService.install`)
  *   — defaults to `() => new Date().toISOString()`.
  * @param opts.cwd - Directory to start the `setup.check_reminder` team-config
- *   lookup from (walked upward — see `resolveCheckReminderEnabled`). Defaults
- *   to `process.cwd()`. Test seam, mirrors `opts.now`.
+ *   lookup from (walked upward — see `resolveCheckReminderEnabled`): the
+ *   Invocation's `cwd`, required (AS-26).
  * @throws Never.
  */
 export async function computeSetupCheckReport(opts: {
   targetDir: string;
   now?: () => string;
-  cwd?: string;
+  cwd: string;
 }): Promise<Result<SetupCheckReport, LoreError>> {
   const now = opts.now ?? (() => new Date().toISOString());
-  const cwd = opts.cwd ?? process.cwd();
+  const cwd = opts.cwd;
 
   const manifestResult = readInstalledManifest(opts.targetDir);
   if (!manifestResult.ok) return manifestResult;
@@ -623,15 +623,15 @@ export async function computeSetupCheckReport(opts: {
  *   codebase-wide `now: () => string` convention, e.g. `SetupService.install`)
  *   — defaults to `() => new Date().toISOString()`.
  * @param opts.cwd - Directory to start the `setup.check_reminder` team-config
- *   lookup from (walked upward — see `resolveCheckReminderEnabled`). Defaults
- *   to `process.cwd()`. Test seam, mirrors `opts.now`.
+ *   lookup from (walked upward — see `resolveCheckReminderEnabled`): the
+ *   Invocation's `cwd`, required (AS-26).
  * @throws Never.
  */
 export async function runSetupCheck(opts: {
   targetDir: string;
   json: boolean;
   now?: () => string;
-  cwd?: string;
+  cwd: string;
 }): Promise<void> {
   const result = await computeSetupCheckReport(opts);
   if (!result.ok) {

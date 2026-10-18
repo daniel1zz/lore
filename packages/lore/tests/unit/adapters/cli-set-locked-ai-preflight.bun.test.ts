@@ -18,8 +18,10 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { AIProviderService } from "../../../src/service/ai-provider-service.js";
+import { liveInvocation } from "../../live-invocation.js";
+import type { Invocation } from "@lore/core";
 
-type RunnableCommand = { run: (ctx: { args: Record<string, unknown> }) => Promise<void> };
+type RunnableCommand = { run: (ctx: { args: Record<string, unknown>; inv?: Invocation }) => Promise<void> };
 
 /** The AI seam answers with an error so a (wrongly) reached call never hangs on a real provider. */
 const AI_STUB_ERROR = { ok: false, error: { code: "STORE_ERROR", message: "stubbed ai" } };
@@ -75,7 +77,7 @@ async function run(cmd: RunnableCommand, args: Record<string, unknown>): Promise
     throw new ExitSignal(typeof code === "number" ? code : 0);
   });
   try {
-    await cmd.run({ args });
+    await cmd.run({ args, inv: liveInvocation() });
   } catch (e: unknown) {
     if (!(e instanceof ExitSignal)) throw e;
     process.exitCode = e.code;
@@ -94,7 +96,7 @@ async function createDoc(args: Record<string, unknown>): Promise<string> {
   });
   const e = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
   try {
-    await create.run({ args: { ai: false, ...args } });
+    await create.run({ args: { ai: false, ...args }, inv: liveInvocation() });
   } finally {
     l.mockRestore();
     e.mockRestore();
@@ -114,7 +116,7 @@ beforeEach(async () => {
   const init = await importCmd("init");
   const out = silence();
   try {
-    await init.run({ args: { name: "preflight-corpus", description: "" } });
+    await init.run({ args: { name: "preflight-corpus", description: "" }, inv: liveInvocation() });
   } finally {
     out.restore();
   }

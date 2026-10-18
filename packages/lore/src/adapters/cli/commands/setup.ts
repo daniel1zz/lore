@@ -854,7 +854,7 @@ async function runProjectScaffold(opts: {
     writeAdoptionMode: writeAdoptionModeToConfig,
     resolveMemoryFileBudgets: resolveRepoMemoryFileBudgets,
     skillAssets: makeRealProjectSkillSource(opts.assetsRoot),
-    seedAcCiteMode: seedAcCiteModeAudited,
+    seedAcCiteMode: (dir) => seedAcCiteModeAudited(dir, opts.inv),
   });
 
   const result = await service.scaffold(repoDir);
@@ -1119,12 +1119,12 @@ async function runGitHubChannelHealthCheck(opts: { json: boolean; inv: Invocatio
  */
 async function runCheckDispatch(opts: { targetDir: string; json: boolean; inv: Invocation }): Promise<void> {
   if (!opts.json) {
-    await runSetupCheck({ targetDir: opts.targetDir, json: false });
+    await runSetupCheck({ targetDir: opts.targetDir, json: false, cwd: opts.inv.cwd });
     await runGitHubChannelHealthCheck({ json: false, inv: opts.inv });
     return;
   }
 
-  const freshnessResult = await computeSetupCheckReport({ targetDir: opts.targetDir });
+  const freshnessResult = await computeSetupCheckReport({ targetDir: opts.targetDir, cwd: opts.inv.cwd });
   if (!freshnessResult.ok) {
     process.stderr.write(formatError(freshnessResult.error) + "\n");
     process.exitCode = exitCode(freshnessResult.error);

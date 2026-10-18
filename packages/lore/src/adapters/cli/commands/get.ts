@@ -97,6 +97,7 @@ import {
 import { composeWithStructuredExtraNotice, type RenderedBodyFacts } from "../get-render.js";
 import type { LockState } from "@lore/core";
 import type { StoreInterface } from "../../../store/store-interface.js";
+import { invocationOf } from "../command-invocation.js";
 
 /**
  * BR-1008 relation view for `doc`: `implements` for a spec, `implemented_by` for a baseline node
@@ -191,8 +192,10 @@ export default defineCommand({
       description: "Skip MDX resolution",
     },
   },
-  async run({ args }) {
-    const { app, dbPath } = loadLoreApp();
+  async run(context) {
+    const { args } = context;
+    const inv = invocationOf(context);
+    const { app, dbPath } = loadLoreApp({ inv });
     // reason: `App` does not expose its store; the attribution read (BR-1037) is a read-only projection over the
     // same file — the second-handle pattern `lore status` already uses.
     const attributionStore = new SQLiteStore(dbPath);

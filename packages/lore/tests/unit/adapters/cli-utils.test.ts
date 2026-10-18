@@ -765,7 +765,7 @@ describe("resolveActorWithSource", () => {
       delete process.env["LORE_ACTOR"];
       resetActorFallbackWarningForTests();
       const stderrSpy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
-      expect(resolveActor("grace")).toBe(resolveActorWithSource("grace", process.env, process.cwd()).actor);
+      expect(resolveActor("grace", process.env, process.cwd())).toBe(resolveActorWithSource("grace", process.env, process.cwd()).actor);
       stderrSpy.mockRestore();
     });
 
@@ -773,8 +773,8 @@ describe("resolveActorWithSource", () => {
       process.env["LORE_ACTOR"] = "agent:heidi";
       resetActorFallbackWarningForTests();
       const stderrSpy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
-      expect(resolveActor(undefined)).toBe(resolveActorWithSource(undefined, process.env, process.cwd()).actor);
-      expect(resolveActor(undefined)).not.toBe("agent:heidi");
+      expect(resolveActor(undefined, process.env, process.cwd())).toBe(resolveActorWithSource(undefined, process.env, process.cwd()).actor);
+      expect(resolveActor(undefined, process.env, process.cwd())).not.toBe("agent:heidi");
       stderrSpy.mockRestore();
     });
 
@@ -782,7 +782,7 @@ describe("resolveActorWithSource", () => {
       delete process.env["LORE_ACTOR"];
       resetActorFallbackWarningForTests();
       const stderrSpy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
-      expect(resolveActor(undefined)).toBe(resolveActorWithSource(undefined, process.env, process.cwd()).actor);
+      expect(resolveActor(undefined, process.env, process.cwd())).toBe(resolveActorWithSource(undefined, process.env, process.cwd()).actor);
       stderrSpy.mockRestore();
     });
   });
@@ -859,21 +859,21 @@ describe("resolveActor — OS-fallback advisory side effect (AC-AUDIT-ACTOR-1)",
   // fallback-only signal implemented here.)
   it("PRECISE SIGNAL: an explicit --by human-looking name emits 0 stderr lines", () => {
     delete process.env["LORE_ACTOR"];
-    const actor = resolveActor("daniel");
+    const actor = resolveActor("daniel", process.env, process.cwd());
     expect(actor).toBe("daniel");
     expect(stderrSpy).not.toHaveBeenCalled();
   });
 
   it("PRECISE SIGNAL: a set $LORE_ACTOR no longer silences the advisory (it is not read)", () => {
     process.env["LORE_ACTOR"] = "daniel";
-    const actor = resolveActor(undefined);
+    const actor = resolveActor(undefined, process.env, process.cwd());
     expect(actor).not.toBe("daniel");
     expect(stderrSpy).toHaveBeenCalledTimes(1);
   });
 
   it("OS-fallback (no --by, no $LORE_ACTOR) emits exactly 1 stderr line matching /OS username/", () => {
     delete process.env["LORE_ACTOR"];
-    const actor = resolveActor(undefined);
+    const actor = resolveActor(undefined, process.env, process.cwd());
     expect(actor).toBe(userInfo().username);
     expect(stderrSpy).toHaveBeenCalledTimes(1);
     const [firstCallArg] = stderrSpy.mock.calls[0] as [string];
@@ -882,26 +882,26 @@ describe("resolveActor — OS-fallback advisory side effect (AC-AUDIT-ACTOR-1)",
 
   it("once-per-process guard: a SECOND OS-fallback call in the same process writes 0 additional lines", () => {
     delete process.env["LORE_ACTOR"];
-    resolveActor(undefined);
+    resolveActor(undefined, process.env, process.cwd());
     expect(stderrSpy).toHaveBeenCalledTimes(1);
     stderrSpy.mockClear();
-    resolveActor(undefined);
+    resolveActor(undefined, process.env, process.cwd());
     expect(stderrSpy).not.toHaveBeenCalled();
   });
 
   it("the guard resets when resetActorFallbackWarningForTests() is called (test-only escape)", () => {
     delete process.env["LORE_ACTOR"];
-    resolveActor(undefined);
+    resolveActor(undefined, process.env, process.cwd());
     expect(stderrSpy).toHaveBeenCalledTimes(1);
     stderrSpy.mockClear();
     resetActorFallbackWarningForTests();
-    resolveActor(undefined);
+    resolveActor(undefined, process.env, process.cwd());
     expect(stderrSpy).toHaveBeenCalledTimes(1);
   });
 
   it("explicit --by still returns the unchanged actor value alongside 0 advisory lines", () => {
     process.env["LORE_ACTOR"] = "agent:ignored-because-explicit-wins";
-    expect(resolveActor("alice")).toBe("alice");
+    expect(resolveActor("alice", process.env, process.cwd())).toBe("alice");
     expect(stderrSpy).not.toHaveBeenCalled();
   });
 });

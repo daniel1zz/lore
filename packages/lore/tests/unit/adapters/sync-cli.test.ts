@@ -185,7 +185,7 @@ describe("lore sync status — happy path (SPEC-009 §5)", () => {
     const exitCapture = captureExit();
 
     try {
-      await status.run({ args: { json: false } });
+      await status.run({ args: { json: false }, inv: liveInvocation() });
     } catch (e: any) {
       // process.exit throws — check it was exit(0)
       if (!e.message?.includes("process.exit")) throw e;
@@ -217,7 +217,7 @@ describe("lore sync status — happy path (SPEC-009 §5)", () => {
     const exitCapture = captureExit();
 
     try {
-      await status.run({ args: { json: true } });
+      await status.run({ args: { json: true }, inv: liveInvocation() });
     } catch (e: any) {
       if (!e.message?.includes("process.exit")) throw e;
     } finally {
@@ -251,6 +251,7 @@ describe("lore sync setup — happy path (SPEC-009 §5)", () => {
           "token-env": undefined, // use default LORE_SYNC_TOKEN
           json: false,
         },
+        inv: liveInvocation(),
       });
     } catch (e: any) {
       if (!e.message?.includes("process.exit")) throw e;
@@ -286,6 +287,7 @@ describe("lore sync setup — happy path (SPEC-009 §5)", () => {
           "token-env": "LORE_SYNC_TOKEN",
           json: false,
         },
+        inv: liveInvocation(),
       });
     } catch (e: any) {
       if (!e.message?.includes("process.exit")) throw e;
@@ -394,7 +396,7 @@ describe("lore sync setup — negative cases (SPEC-009 §5)", () => {
     const exitCapture = captureExit();
 
     try {
-      await setup.run({ args: { url: undefined, json: false } });
+      await setup.run({ args: { url: undefined, json: false }, inv: liveInvocation() });
     } catch (e: any) {
       if (!e.message?.includes("process.exit")) throw e;
     } finally {
@@ -418,6 +420,7 @@ describe("lore sync setup — negative cases (SPEC-009 §5)", () => {
           url: "https://not-a-libsql-url.example.com",
           json: false,
         },
+        inv: liveInvocation(),
       });
     } catch (e: any) {
       if (!e.message?.includes("process.exit")) throw e;
@@ -446,7 +449,7 @@ describe("lore sync status — boundary values (SPEC-009 §5)", () => {
     const exitCapture = captureExit();
 
     try {
-      await status.run({ args: { json: false } });
+      await status.run({ args: { json: false }, inv: liveInvocation() });
     } catch (e: any) {
       if (!e.message?.includes("process.exit")) throw e;
     } finally {
@@ -477,7 +480,7 @@ describe("lore sync setup — boundary values", () => {
     const output1 = captureOutput();
     const exit1 = captureExit();
     try {
-      await setup.run({ args: { url: "libsql://idempotent.turso.io", json: false } });
+      await setup.run({ args: { url: "libsql://idempotent.turso.io", json: false }, inv: liveInvocation() });
     } catch (e: any) {
       if (!e.message?.includes("process.exit")) throw e;
     } finally {
@@ -489,7 +492,7 @@ describe("lore sync setup — boundary values", () => {
     const output2 = captureOutput();
     const exit2 = captureExit();
     try {
-      await setup.run({ args: { url: "libsql://idempotent.turso.io", json: false } });
+      await setup.run({ args: { url: "libsql://idempotent.turso.io", json: false }, inv: liveInvocation() });
     } catch (e: any) {
       if (!e.message?.includes("process.exit")) throw e;
     } finally {
@@ -530,7 +533,7 @@ describe("lore sync setup — state transitions", () => {
     const setupOutput = captureOutput();
     const setupExit = captureExit();
     try {
-      await setup.run({ args: { url: "libsql://state-test.turso.io", json: false } });
+      await setup.run({ args: { url: "libsql://state-test.turso.io", json: false }, inv: liveInvocation() });
     } catch (e: any) {
       if (!e.message?.includes("process.exit")) throw e;
     } finally {
@@ -542,7 +545,7 @@ describe("lore sync setup — state transitions", () => {
     const statusOutput = captureOutput();
     const statusExit = captureExit();
     try {
-      await status.run({ args: { json: false } });
+      await status.run({ args: { json: false }, inv: liveInvocation() });
     } catch (e: any) {
       if (!e.message?.includes("process.exit")) throw e;
     } finally {

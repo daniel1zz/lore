@@ -26,6 +26,7 @@ import { exitCode, formatError, formatTable, formatValidityBadge, parsePositiveI
 import { resolveSubTypeFilter } from "../../../service/corpus-service.js";
 import { KNOWLEDGE_SUB_TYPES } from "@lore/core";
 import type { DocType } from "@lore/core";
+import { invocationOf } from "../command-invocation.js";
 
 export default defineCommand({
   meta: {
@@ -66,8 +67,10 @@ export default defineCommand({
       description: "Include invalidated knowledge/adr/task docs (excluded by default). Source: SPEC-043 D3, task-a-task-cannot-be-retracted-supersedes-emits-a-repair.",
     },
   },
-  async run({ args }) {
-    const { app } = loadLoreApp();
+  async run(context) {
+    const { args } = context;
+    const inv = invocationOf(context);
+    const { app } = loadLoreApp({ inv });
     try {
       // BUG-006 audit: validate --limit BEFORE it can silently drive
       // `.slice(0, NaN)` → an always-empty result set masquerading as "no matches".

@@ -95,6 +95,8 @@ vi.mock("../../../src/adapters/cli/loader.js", () => ({
 // Imported AFTER the mock above so `../loader.js` inside this module resolves
 // to the mocked factory, never the real one.
 import issueCommand from "../../../src/adapters/cli/commands/issue.js";
+import type { Invocation } from "@lore/core";
+import { liveInvocation } from "../../live-invocation.js";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Scenario 1 — HAPPY / BOUNDARY / NEGATIVE: pure 9-state round trip
@@ -209,11 +211,13 @@ function makeIssueDoc(overrides: Partial<DocRecord> = {}): DocRecord {
 /** The real citty subcommand object for `lore issue resolve` — never a reimplementation. */
 function resolveRun(): (ctx: { args: Record<string, unknown> }) => Promise<unknown> {
   const subs = issueCommand.subCommands as Record<string, unknown> | undefined;
-  const cmd = subs?.["resolve"] as { run?: (ctx: { args: Record<string, unknown> }) => Promise<unknown> } | undefined;
+  const cmd = subs?.["resolve"] as { run?: (ctx: { args: Record<string, unknown>; inv: Invocation }) => Promise<unknown> } | undefined;
   if (cmd?.run === undefined) {
     throw new Error('lore issue has no "resolve" subcommand with a run handler');
   }
-  return cmd.run;
+  const run = cmd.run;
+  // reason: the command reads its Invocation from `ctx.inv` (AS-26); the real entry delivers it, so the test does too.
+  return (ctx) => run({ ...ctx, inv: liveInvocation() });
 }
 
 const BASE_RESOLVE_ARGS = {

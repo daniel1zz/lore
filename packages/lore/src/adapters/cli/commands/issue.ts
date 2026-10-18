@@ -468,6 +468,7 @@ export default defineCommand({
         },
       },
       async run(context) {
+        const inv = invocationOf(context);
         const { args } = context;
         const rawNumber = readStringArg(args as unknown as Record<string, unknown>, "number");
         const issueNumber = Number(rawNumber);
@@ -478,7 +479,7 @@ export default defineCommand({
           return;
         }
 
-        const { app, config } = loadLoreApp();
+        const { app, config } = loadLoreApp({ inv });
         try {
           // ONE shared shape-policy classifier (report-issue-wiring.ts's own
           // header) — never a second, independently-derived verdict on
@@ -497,7 +498,7 @@ export default defineCommand({
           }
           const cfg = classification.cfg;
 
-          const listingResult = await resolveGithubIssueListing(cfg, invocationOf(context).env);
+          const listingResult = await resolveGithubIssueListing(cfg, invocationOf(context));
           if (!listingResult.ok) {
             process.stderr.write(formatError(listingResult.error) + "\n");
             process.exitCode = exitCode(listingResult.error);
@@ -538,7 +539,7 @@ export default defineCommand({
             return;
           }
 
-          const by = resolveActor();
+          const by = resolveActor(undefined, inv.env, inv.cwd);
           const createResult = await app.corpusService.create(taskInputResult.value, { by });
 
           if (!createResult.ok) {
@@ -646,7 +647,9 @@ export default defineCommand({
           description: "Output result as JSON",
         },
       },
-      async run({ args }) {
+      async run(context) {
+        const { args } = context;
+        const inv = invocationOf(context);
         const state = typeof args.state === "string" ? args.state : undefined;
 
         // AC-ICL-3 — checked BEFORE loadLoreApp()/any doc resolution: writes
@@ -695,7 +698,7 @@ export default defineCommand({
           return;
         }
 
-        const { app, config } = loadLoreApp();
+        const { app, config } = loadLoreApp({ inv });
         try {
           const issueId = args.issue as string;
           const getResult = await app.corpusService.get(issueId);
@@ -777,7 +780,7 @@ export default defineCommand({
             resolvedPointer = { [requiredPointer.extraKey]: pointerDoc.id };
           }
 
-          const by = resolveActor();
+          const by = resolveActor(undefined, inv.env, inv.cwd);
           const nowIso = new Date().toISOString();
           const existingIssueReport = issueDoc.extra["issue_report"] as Record<string, unknown>;
           // reason: RMW merge — spread the FULL existing extra first so every

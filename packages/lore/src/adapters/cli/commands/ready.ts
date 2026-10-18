@@ -58,6 +58,7 @@ import type { ReadyRecord, ReadySession } from "@lore/core";
 import type { AnchorConflict } from "../../../service/task-workflow-service.js";
 import { renderFileAnchorAdvisory } from "../../../service/anchor-resolution.js";
 import { buildFileAnchorProbeContext } from "../../real-fs-probe.js";
+import { invocationOf } from "../command-invocation.js";
 
 /** The literal set `ReadyRecord.latest_evidence.result` can hold (@lore/core task-workflow.ts). */
 type EvidenceResult = NonNullable<ReadyRecord["latest_evidence"]>["result"];
@@ -195,7 +196,9 @@ export default defineCommand({
       description: "Output the full ReadyReport as JSON (see SPEC-042 §Design Decisions D7)",
     },
   },
-  async run({ args }) {
+  async run(context) {
+    const { args } = context;
+    const inv = invocationOf(context);
     const hasPlan = args.plan !== undefined && String(args.plan).trim() !== "";
     const hasAdhoc = args.adhoc === true;
 
@@ -210,7 +213,7 @@ export default defineCommand({
       return;
     }
 
-    const { app } = loadLoreApp();
+    const { app } = loadLoreApp({ inv });
     try {
       if (hasAdhoc) {
         const adhocResult = await app.taskWorkflowService.readyAdhoc();

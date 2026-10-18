@@ -74,11 +74,11 @@ const BOOTSTRAP_TIMEOUT_MS = 5000;
 const MODULE_DIR = fileURLToPath(new URL(".", import.meta.url));
 const REPO_ROOT = join(MODULE_DIR, "..", "..", "..", "..", "..", "..");
 
-function resolveAssets(): string {
+function resolveAssets(inv: Invocation): string {
   const ctx: SetupPathContext = {
     repoRoot: REPO_ROOT,
-    isCompiled: Bun.main.startsWith("/$bunfs/"),
-    execPath: process.execPath,
+    isCompiled: inv.isCompiled,
+    execPath: inv.execPath,
   };
   return resolveAssetsRoot(ctx);
 }
@@ -174,7 +174,7 @@ export function buildFlowDeps(cwd: string, inv: Invocation): DepsResult {
   if (!global.ok) return global;
   const project = loadContextLayer(join(projectRoot, ".lore", "config.yaml"), contextConfigSchema);
   if (!project.ok) return project;
-  const assetsRoot = resolveAssets();
+  const assetsRoot = resolveAssets(inv);
   const claudeDir = resolveTargetDir({ env: inv.env, homeDir: inv.paths.home });
   const userConfigDir = resolveUserConfigDir(inv.env, inv.paths.home);
   const userSelection = readSelectionText(join(userConfigDir, SELECTION_FILE.user));
@@ -284,10 +284,11 @@ export async function runCheck(args: Record<string, unknown>, cwd: string, inv: 
   if (!report.ok) process.exitCode = CHECK_FAILED_EXIT;
 }
 
-async function runPointers(cwd: string): Promise<void> {
+async function runPointers(cwd: string, inv: Invocation): Promise<void> {
   const projectRoot = resolveProjectRoot(cwd);
-  const isCompiled = Bun.main.startsWith("/$bunfs/");
-  const loreArgv = isCompiled ? [process.execPath] : [process.execPath, Bun.main];
+  // reason: from source the re-run is `bun <source entry>`; the Invocation carries no entry-script path, and the
+  // entry (`packages/lore/src/index.ts`, the `bin` of packages/lore) is fixed relative to this module.
+  const loreArgv = inv.isCompiled ? [inv.execPath] : [inv.execPath, join(REPO_ROOT, "packages", "lore", "src", "index.ts")];
   const result = await buildProjectPointers({
     hasCorpus: () => existsSync(join(projectRoot, ".lore")),
     runBootstrap: async () => {
@@ -295,7 +296,7 @@ async function runPointers(cwd: string): Promise<void> {
         cwd: projectRoot,
         encoding: "utf8",
         timeout: BOOTSTRAP_TIMEOUT_MS,
-        env: { ...process.env, CLAUDECODE: "1" },
+        env: { ...inv.env, CLAUDECODE: "1" },
       });
       return { status: spawned.status, stdout: spawned.stdout ?? "" };
     },
@@ -339,7 +340,7 @@ export default defineCommand({
       case "check":
         return runCheck(rest, cwd, inv);
       case "pointers":
-        return runPointers(cwd);
+        return runPointers(cwd, inv);
       default: {
         const unreachable: never = action;
         throw new Error(`lore fragments: unhandled action ${String(unreachable)}`);

@@ -557,7 +557,7 @@ function classifyExtraAsAnchoredByWitness(extra: unknown): boolean {
 }
 
 function measureUnanchoredLiveSpecSlugsIndependently(repoRoot: string): Set<string> {
-  const resolved = resolveCorpus(repoRoot);
+  const resolved = resolveCorpus(repoRoot, process.env);
   if (resolved === undefined || resolved.provenance === "undetermined") {
     throw new Error(
       `AC-BFI-10 independent measurement: could not resolve a real corpus db from ${repoRoot} ` +

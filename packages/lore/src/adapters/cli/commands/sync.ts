@@ -91,8 +91,8 @@ export async function performPull(
  * Discover the lore project directory by walking up from cwd.
  * Returns the directory containing .lore/, or null if not found.
  */
-function findLoreDir(): string | null {
-  let dir = process.cwd();
+function findLoreDir(cwd: string): string | null {
+  let dir = cwd;
   while (true) {
     const candidate = join(dir, ".lore", "lore.db");
     if (existsSync(candidate)) {
@@ -130,7 +130,9 @@ const syncSetup = defineCommand({
       description: "Output as JSON",
     },
   },
-  async run({ args }) {
+  async run(context) {
+    const { args } = context;
+    const inv = invocationOf(context);
     // Validate --url is present
     if (!args.url) {
       const msg = "Missing required option --url (libsql://...)";
@@ -153,7 +155,7 @@ const syncSetup = defineCommand({
       process.exit(1);
     }
 
-    const loreDir = findLoreDir();
+    const loreDir = findLoreDir(inv.cwd);
     if (loreDir === null) {
       const msg = "No Lore project found. Run `lore init` first.";
       if (args.json) {
@@ -240,8 +242,9 @@ const syncStatus = defineCommand({
     },
   },
   async run(context) {
+    const inv = invocationOf(context);
     const { args } = context;
-    const loreDir = findLoreDir();
+    const loreDir = findLoreDir(inv.cwd);
     if (loreDir === null) {
       const msg = "No Lore project found. Run `lore init` first.";
       if (args.json) {
@@ -341,8 +344,9 @@ const syncPushCmd = defineCommand({
     },
   },
   async run(context) {
+    const inv = invocationOf(context);
     const { args } = context;
-    const loreDir = findLoreDir();
+    const loreDir = findLoreDir(inv.cwd);
     if (loreDir === null) {
       const msg = "No Lore project found. Run `lore init` first.";
       if (args.json) {
@@ -421,8 +425,9 @@ const syncPullCmd = defineCommand({
     },
   },
   async run(context) {
+    const inv = invocationOf(context);
     const { args } = context;
-    const loreDir = findLoreDir();
+    const loreDir = findLoreDir(inv.cwd);
     if (loreDir === null) {
       const msg = "No Lore project found. Run `lore init` first.";
       if (args.json) {

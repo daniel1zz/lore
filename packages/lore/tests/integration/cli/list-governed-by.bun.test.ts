@@ -32,10 +32,12 @@ import { tmpdir } from "os";
 import { createApp } from "../../../src/app.js";
 import type { CreateDocInput } from "@lore/core";
 import { LIST_GOVERNED_BY_CONFLICT } from "../../../src/adapters/cli/cli-refusal-messages.js";
+import { liveInvocation } from "../../live-invocation.js";
+import type { Invocation } from "@lore/core";
 
 // ─── Command type + output capture (mirrors pending-judgment-badges.bun.test.ts) ──
 
-type RunnableCommand = { run: (ctx: { args: Record<string, unknown> }) => Promise<void> };
+type RunnableCommand = { run: (ctx: { args: Record<string, unknown>; inv?: Invocation }) => Promise<void> };
 
 function captureOutput() {
   const stdout: string[] = [];
@@ -151,7 +153,7 @@ describe("lore list --governed-by — HAPPY", () => {
     const cmd = await importListCommand();
     const output = captureOutput();
     try {
-      await cmd.run({ args: { "governed-by": skill.id, json: true } });
+      await cmd.run({ args: { "governed-by": skill.id, json: true }, inv: liveInvocation() });
     } finally {
       output.restore();
     }
@@ -174,7 +176,7 @@ describe("lore list --governed-by — HAPPY", () => {
     const cmd = await importListCommand();
     const output = captureOutput();
     try {
-      await cmd.run({ args: { "governed-by": skill.slug } });
+      await cmd.run({ args: { "governed-by": skill.slug }, inv: liveInvocation() });
     } finally {
       output.restore();
     }
@@ -196,7 +198,7 @@ describe("lore list --governed-by — NEGATIVE", () => {
     const cmd = await importListCommand();
     const output = captureOutput();
     try {
-      await cmd.run({ args: { "governed-by": skill.id } });
+      await cmd.run({ args: { "governed-by": skill.id }, inv: liveInvocation() });
     } finally {
       output.restore();
     }
@@ -216,7 +218,7 @@ describe("lore list --governed-by — BOUNDARY", () => {
     const cmd = await importListCommand();
     const output = captureOutput();
     try {
-      await cmd.run({ args: { "governed-by": skill.id, type: "task", json: true } });
+      await cmd.run({ args: { "governed-by": skill.id, type: "task", json: true }, inv: liveInvocation() });
     } finally {
       output.restore();
     }
@@ -235,7 +237,7 @@ describe("lore list --governed-by — BOUNDARY", () => {
     const cmd = await importListCommand();
     const output = captureOutput();
     try {
-      await cmd.run({ args: { "governed-by": skill.id, status: "active", tag: "foo" } });
+      await cmd.run({ args: { "governed-by": skill.id, status: "active", tag: "foo" }, inv: liveInvocation() });
     } finally {
       output.restore();
     }
@@ -254,7 +256,7 @@ describe("lore list --governed-by — BOUNDARY", () => {
     const cmd = await importListCommand();
     const output = captureOutput();
     try {
-      await cmd.run({ args: { "governed-by": skill.id, json: true } });
+      await cmd.run({ args: { "governed-by": skill.id, json: true }, inv: liveInvocation() });
     } finally {
       output.restore();
     }
@@ -272,7 +274,7 @@ describe("lore list --governed-by — ERROR", () => {
     const cmd = await importListCommand();
     const output = captureOutput();
     try {
-      await cmd.run({ args: { "governed-by": "knowledge-totally-nonexistent-slug" } });
+      await cmd.run({ args: { "governed-by": "knowledge-totally-nonexistent-slug" }, inv: liveInvocation() });
     } finally {
       output.restore();
     }
@@ -292,7 +294,7 @@ describe("lore list — REGRESSION (no --governed-by)", () => {
     const cmd = await importListCommand();
     const output = captureOutput();
     try {
-      await cmd.run({ args: { type: "task", json: true } });
+      await cmd.run({ args: { type: "task", json: true }, inv: liveInvocation() });
     } finally {
       output.restore();
     }

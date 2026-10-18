@@ -101,6 +101,8 @@ import {
   type TerritoryPartition,
   type TerritoryWorktree,
 } from "../../../../src/adapters/cli/territory-partition.js";
+import { liveInvocation } from "../../../live-invocation.js";
+import type { Invocation } from "@lore/core";
 
 const CURRENT_SESSION_ID = "aaaa1111";
 
@@ -635,10 +637,10 @@ describe("commands/territory.ts's production run() — the live call site (AC-OW
     try {
       const mod = await import("../../../../src/adapters/cli/commands/territory.js");
       const territoryCommand = (
-        mod as { default?: { run?: (ctx: { args: Record<string, unknown> }) => Promise<void> } }
+        mod as { default?: { run?: (ctx: { args: Record<string, unknown>; inv?: Invocation }) => Promise<void> } }
       ).default;
       if (!territoryCommand?.run) throw new Error("territory command not exported");
-      await territoryCommand.run({ args: { json: true } });
+      await territoryCommand.run({ args: { json: true }, inv: liveInvocation() });
     } finally {
       process.chdir(originalCwd);
       logSpy.mockRestore();

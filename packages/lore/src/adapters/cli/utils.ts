@@ -19,9 +19,9 @@
  *
  * Public surface:
  *   - exitCode() / formatError() — error presentation
- *   - buildRetryCommandLine() / currentRetryCommandLine() — the `Retry:` line of
- *     the declared write-contention message (the only ambient `process.argv`
- *     read in the error path; the reconstruction itself is pure)
+ *   - buildRetryCommandLine() — the `Retry:` line of the declared write-contention
+ *     message, built from the Invocation's argv by the caller and passed to
+ *     formatError as `opts.retryCommand`
  *   - resolveActor() / resolveActorWithSource() / resolveActorWithIdentitySource()
  *     / detectWorktreeDerivedActor() — actor-identity
  *     resolution (SPEC-051, SPEC-104)
@@ -45,8 +45,7 @@
  * Side-effect class: MIXED, not pure — most of this module (the format-
  * prefixed renderers, relativeTime, exitCode, formatError) is pure
  * presentation, but actor resolution performs real filesystem IO and stderr
- * advisories (see above), and `currentRetryCommandLine` reads ambient
- * `process.argv`/`process.execPath`. No `process.exit` anywhere in this
+ * advisories (see above). No `process.exit` anywhere in this
  * file — that left with DB discovery.
  *
  * Source: SPEC-003 §5, SPEC-051, SPEC-104
@@ -68,6 +67,9 @@ import type { ActorSource as CoreActorSource } from "@lore/core/node";
 import type { DocRecord, LoreError, ReviewJudgment, ValidityCarrier } from "@lore/core";
 import type { TreeNode } from "../../service/corpus-service.js";
 import type { DocWithNavigation } from "../../service/corpus-service.js";
+
+/** `Retry:` line of the write-contention message when the caller supplied none: names the action, reads nothing ambient. */
+const WRITE_CONTENTION_GENERIC_RETRY = "re-run the same lore command";
 
 const evidenceArraySchema = z.array(evidenceEntrySchema);
 
@@ -181,7 +183,7 @@ export function exitCode(error: LoreError): number {
  *   fallback, so they omit this option and keep the original hint.
  * @returns formatted string for stderr output
  */
-export function formatError(error: LoreError, opts?: { aiHasNoFallback?: boolean }): string {
+export function formatError(error: LoreError, opts?: { aiHasNoFallback?: boolean; retryCommand?: string }): string {
   switch (error.code) {
     case "DOC_NOT_FOUND": {
       const lines = [`Error: Document not found: ${error.id}`];
@@ -297,7 +299,11 @@ export function formatError(error: LoreError, opts?: { aiHasNoFallback?: boolean
         corpusPath: error.corpus_path,
         boundMs: error.bound_ms,
         source: error.source,
-        retryCommand: currentRetryCommandLine(),
+        // reason: the retry line is this process's own argv, which only the entry knows (AS-26): a caller that holds the
+        // Invocation passes `buildRetryCommandLine(...)` as `opts.retryCommand`. No `WRITE_CONTENTION` producer exists in
+        // `src/` today (the code is only rendered), so no caller supplies it yet; when none does the line names the
+        // action instead of an argv this module may not read.
+        retryCommand: opts?.retryCommand ?? WRITE_CONTENTION_GENERIC_RETRY,
       });
     case "CLAIM_CONFLICT":
       return (
@@ -407,17 +413,6 @@ export function buildRetryCommandLine(argv: readonly string[], execPath: string)
   const programName = isCompiledBinary ? basename(execPath) : "lore";
   const userArgs = argv.slice(2).map(shellQuoteArg);
   return [programName, ...userArgs].join(" ");
-}
-
-/**
- * {@link buildRetryCommandLine} applied to THIS process's ambient argv — the
- * single ambient read in this module's error-formatting path, isolated here so
- * the reconstruction logic itself stays directly unit-testable.
- *
- * @returns this invocation's retry command line
- */
-export function currentRetryCommandLine(): string {
-  return buildRetryCommandLine(process.argv, process.execPath);
 }
 
 // ─── Actor Resolution ───────────────────────────────────────────────────────
@@ -614,16 +609,15 @@ export function resetActorFallbackWarningForTests(): void {
  * code are unaffected.
  *
  * @param explicit - Value of the --by flag, if the user passed one
+ * @param env - the Invocation's environment (`inv.env`)
+ * @param cwd - the Invocation's working directory (`inv.cwd`)
  * @returns Resolved actor identity string (never empty — OS username is always available)
  * @example
- *   resolveActor(undefined) // => session actor, worktree-derived agent:<branch>, or OS username
- *   resolveActor("alice")   // => "alice" (never warns)
+ *   resolveActor(undefined, inv.env, inv.cwd) // => session actor, worktree-derived agent:<branch>, or OS username
+ *   resolveActor("alice", inv.env, inv.cwd) // => "alice" (never warns)
  */
-export function resolveActor(explicit?: string): string {
-  // reason: the one remaining ambient read of the actor chain — ~40 command bodies call `resolveActor(by)` with no
-  // Invocation in hand; each moves to `resolveActorWithIdentitySource(by, inv.env, inv.cwd)` with its own migration
-  // step (ledger ratchet, AS-26), and this fallback goes with the last of them.
-  return resolveActorWithIdentitySource(explicit, process.env, process.cwd()).actor;
+export function resolveActor(explicit: string | undefined, env: Readonly<Record<string, string | undefined>>, cwd: string): string {
+  return resolveActorWithIdentitySource(explicit, env, cwd).actor;
 }
 
 /**

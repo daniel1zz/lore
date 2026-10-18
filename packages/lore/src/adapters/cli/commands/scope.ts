@@ -56,6 +56,7 @@ import type { DocRecord, LoreError, Result } from "@lore/core";
 import { extractDeclaredAcScope } from "@lore/core";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatError, resolveActor } from "../utils.js";
+import { invocationOf } from "../command-invocation.js";
 
 /**
  * Reads every trailing positional argument beyond the `skip` leading ones
@@ -209,8 +210,10 @@ export default defineCommand({
           description: "Output result as JSON",
         },
       },
-      async run({ args }) {
-        const { app } = loadLoreApp();
+      async run(context) {
+        const { args } = context;
+        const inv = invocationOf(context);
+        const { app } = loadLoreApp({ inv });
         try {
           const targetId = args.target as string;
           const acIds = collectVariadicPositionals(args, 1);
@@ -222,7 +225,7 @@ export default defineCommand({
             return;
           }
 
-          const by = resolveActor();
+          const by = resolveActor(undefined, inv.env, inv.cwd);
           await runScopeMutation(app, targetResult.value, "add", targetId, acIds, by, args.json === true);
         } finally {
           app.close();
@@ -252,8 +255,10 @@ export default defineCommand({
           description: "Output result as JSON",
         },
       },
-      async run({ args }) {
-        const { app } = loadLoreApp();
+      async run(context) {
+        const { args } = context;
+        const inv = invocationOf(context);
+        const { app } = loadLoreApp({ inv });
         try {
           const targetId = args.target as string;
           const acIds = collectVariadicPositionals(args, 1);
@@ -265,7 +270,7 @@ export default defineCommand({
             return;
           }
 
-          const by = resolveActor();
+          const by = resolveActor(undefined, inv.env, inv.cwd);
           await runScopeMutation(app, targetResult.value, "rm", targetId, acIds, by, args.json === true);
         } finally {
           app.close();
@@ -286,8 +291,10 @@ export default defineCommand({
           description: "Output result as JSON",
         },
       },
-      async run({ args }) {
-        const { app } = loadLoreApp();
+      async run(context) {
+        const { args } = context;
+        const inv = invocationOf(context);
+        const { app } = loadLoreApp({ inv });
         try {
           const targetResult = await resolveScopeTarget(app, args.target as string);
           if (!targetResult.ok) {

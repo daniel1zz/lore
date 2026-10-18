@@ -194,6 +194,7 @@ import { loadLoreApp } from "../loader.js";
 import { runIssuesSync } from "../issues-sync.js";
 import { relativeTime, formatTable, exitCode, formatError } from "../utils.js";
 import { classifyFeedbackUpstream, resolveGithubJoinedRows, type GithubUpstreamCfg } from "../report-issue-wiring.js";
+import type { CorpusLocator } from "../corpus-resolution.js";
 import {
   hasIssueReport,
   computeIssueResolution,
@@ -417,7 +418,7 @@ function includedByGithubMode(mode: "open" | "resolved" | "all", resolution: Iss
  * @param corpusPath - the local corpus root, printed/reported exactly like
  *   the local branch's `Corpus: ` line (§M4's declared render contract)
  * @param json - whether `--json` was passed
- * @param env - the environment `gh` is spawned from (`Invocation.env`)
+ * @param locator - the run's `cwd` + `env` (an `Invocation`)
  * @param filters - the mode/severity/category filter to apply; omitted by
  *   a caller that wants the unfiltered listing (see above)
  */
@@ -426,14 +427,14 @@ export async function runGithubIssuesListing(
   cfg: GithubUpstreamCfg,
   corpusPath: string,
   json: boolean,
-  env: NodeJS.ProcessEnv,
+  locator: CorpusLocator,
   filters: {
     readonly mode: "open" | "resolved" | "all";
     readonly severity?: IssueSeverity;
     readonly category?: string;
   } = { mode: "all" },
 ): Promise<void> {
-  const joinedResult = await resolveGithubJoinedRows(app.corpusService, cfg, env);
+  const joinedResult = await resolveGithubJoinedRows(app.corpusService, cfg, locator);
   if (!joinedResult.ok) {
     process.stderr.write(formatError(joinedResult.error) + "\n");
     process.exitCode = exitCode(joinedResult.error);
@@ -513,9 +514,9 @@ async function runGithubVerify(
   cfg: GithubUpstreamCfg,
   corpusPath: string,
   json: boolean,
-  env: NodeJS.ProcessEnv,
+  locator: CorpusLocator,
 ): Promise<void> {
-  const joinedResult = await resolveGithubJoinedRows(app.corpusService, cfg, env);
+  const joinedResult = await resolveGithubJoinedRows(app.corpusService, cfg, locator);
   if (!joinedResult.ok) {
     process.stderr.write(formatError(joinedResult.error) + "\n");
     process.exitCode = exitCode(joinedResult.error);
@@ -595,6 +596,7 @@ export default defineCommand({
     },
   },
   async run(context) {
+    const inv = invocationOf(context);
     const { args } = context;
     // spec-archiving-the-work-that-resolves-a-defect-report-closes D3 — --sync is its own operation
     // (never a narrowing of the listing); --apply means nothing alone. Usage errors exit 2 BEFORE the
@@ -610,7 +612,7 @@ export default defineCommand({
       return;
     }
     if (args.sync === true) {
-      const { app: syncApp } = loadLoreApp();
+      const { app: syncApp } = loadLoreApp({ inv });
       try {
         process.exitCode = await runIssuesSync(syncApp.issueClose, { apply: args.apply === true, json: args.json === true });
       } finally {
@@ -646,7 +648,7 @@ export default defineCommand({
     // and it is also the established choke point for the missing-
     // `.lore/lore.db` exit and the telemetry/callerSurface wiring every CLI
     // command shares.
-    const { app, dbPath, config } = loadLoreApp();
+    const { app, dbPath, config } = loadLoreApp({ inv });
     try {
       // reason: ONE shared classifier (spec-lore-issues-falls-through-to-the-
       // local-corpus-on-a-retired D1) — `commands/report-issue.ts` consumes
@@ -675,10 +677,10 @@ export default defineCommand({
       // function already derived for the local branch above.
       if (args.local !== true && classification.kind === "github") {
         if (args.verify === true) {
-          await runGithubVerify(app, classification.cfg, dirname(dirname(dbPath)), args.json === true, invocationOf(context).env);
+          await runGithubVerify(app, classification.cfg, dirname(dirname(dbPath)), args.json === true, inv);
           return;
         }
-        await runGithubIssuesListing(app, classification.cfg, dirname(dirname(dbPath)), args.json === true, invocationOf(context).env, {
+        await runGithubIssuesListing(app, classification.cfg, dirname(dirname(dbPath)), args.json === true, inv, {
           mode,
           ...(severityFilter !== undefined ? { severity: severityFilter } : {}),
           ...(categoryFilter !== undefined ? { category: categoryFilter } : {}),

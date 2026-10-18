@@ -192,12 +192,12 @@ async function runSessionTrailReview(args: { turn?: unknown; json?: unknown }, i
     if (args.json) console.log(JSON.stringify({ ok: true, data }, null, 2));
     else console.log(formatTrailReview(data as unknown as TrailReviewView));
   };
-  const dbPath = findLoreDbPathQuiet();
+  const dbPath = findLoreDbPathQuiet(inv);
   if (dbPath === undefined) {
     emit({ helpers: [], findings: [], not_measured: [], reason: "no .lore directory" });
     return;
   }
-  const { app } = loadLoreApp();
+  const { app } = loadLoreApp({ inv });
   try {
     const session = await resolveCallerSession(app, "trail-review");
     if (session === null) return;
@@ -394,7 +394,7 @@ export default defineCommand({
       await runSessionTrailReview(args, inv);
       return;
     }
-    const { app } = loadLoreApp();
+    const { app } = loadLoreApp({ inv });
     try {
       if (String(args.target) === "trail") {
         await runSessionTrail(app, args, inv);

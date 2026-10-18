@@ -194,7 +194,7 @@ import { DecisionService } from "../../../service/decision-service.js";
 import { createOverrideDecisionPort } from "../../../service/override-decision.js";
 import { exitCode, formatError, resolveActor } from "../utils.js";
 import { deriveAcCoverageState, getAllowedTransitions, ok } from "@lore/core";
-import type { AcceptanceCriterion, AcCoverageFact, LoreError, Result } from "@lore/core";
+import type { AcceptanceCriterion, AcCoverageFact, Invocation, LoreError, Result } from "@lore/core";
 import type { AcService, AcListResult, DeclarePathOpts, SetCriterionOpts, SetCriterionPatch } from "../../../service/ac-service.js";
 import type { App } from "../../../app.js";
 import type { CiteWarning } from "../../../service/ac-citations.js";
@@ -203,6 +203,7 @@ import type { CiteWarning } from "../../../service/ac-citations.js";
 // exists to permit"), not the sibling `ac-service.ts` this task's file anchors
 // forbid editing — see {@link countBlockedDescendantTasks}.
 import { isPlanMember } from "../../../service/plan-membership.js";
+import { invocationOf } from "../command-invocation.js";
 
 /**
  * `App.acService` is typed optional only to keep pre-existing hand-built App test
@@ -315,10 +316,12 @@ export default defineCommand({
           description: "Output result as JSON",
         },
       },
-      async run({ args }) {
+      async run(context) {
+        const { args } = context;
+        const inv = invocationOf(context);
         if (refuseCorrectionFlag(args, "add")) return;
         if (refuseBadTimeoutMs(args, "add")) return;
-        const { app, dbPath } = loadLoreApp();
+        const { app, dbPath } = loadLoreApp({ inv });
         try {
           const beforeStatus = await fetchSpecStatus(app, args.spec as string);
 
@@ -326,7 +329,7 @@ export default defineCommand({
           const result = await requireAcService(app).addCriterion(
             args.spec as string,
             criterion,
-            { ...buildDeclarePathOpts(args, dbPath), onAdvisory: printAdvisory },
+            { ...buildDeclarePathOpts(args, dbPath, inv), onAdvisory: printAdvisory },
           );
 
           if (!result.ok) {
@@ -364,12 +367,14 @@ export default defineCommand({
           description: "Output result as JSON",
         },
       },
-      async run({ args }) {
-        const { app, dbPath } = loadLoreApp();
+      async run(context) {
+        const { args } = context;
+        const inv = invocationOf(context);
+        const { app, dbPath } = loadLoreApp({ inv });
         try {
           const result = await requireAcService(app).listCriteria(args.spec as string, {
             fileExists: existsSync,
-            cwd: process.cwd(),
+            cwd: inv.cwd,
             corpusRoot: dirname(dirname(dbPath)),
           });
 
@@ -415,10 +420,12 @@ export default defineCommand({
         expires: { type: "string", description: "ISO 8601 date/time the exemption lapses; must be in the future (required)" },
         json: { type: "boolean", description: "Output result as JSON" },
       },
-      async run({ args }) {
+      async run(context) {
+        const { args } = context;
+        const inv = invocationOf(context);
         // reason: the exemption table is read/written through a second store handle because `App`
         // does not expose its store (same precedent as `lore status`'s baseline block).
-        const { app, dbPath } = loadLoreApp();
+        const { app, dbPath } = loadLoreApp({ inv });
         const store = new SQLiteStore(dbPath);
         try {
           // reason: AC-AU-7 — the grant asks decide() (class ac-exempt) through the decision log on this same store.
@@ -428,7 +435,7 @@ export default defineCommand({
             acId: args.id as string,
             reason: args.reason as string,
             expiresAt: args.expires as string,
-            by: resolveActor(),
+            by: resolveActor(undefined, inv.env, inv.cwd),
           });
           if (!result.ok) {
             process.stderr.write(formatError(result.error) + "\n");
@@ -479,18 +486,20 @@ export default defineCommand({
           description: "Output result as JSON",
         },
       },
-      async run({ args }) {
+      async run(context) {
+        const { args } = context;
+        const inv = invocationOf(context);
         // `args._` carries EVERY positional token (spec, id, then each rule id) — citty
         // declares only the first `rule`; the rest survive on `_` (see anchor.ts's note).
         const ruleIds = ((args._ ?? []) as string[]).slice(2);
-        const { app } = loadLoreApp();
+        const { app } = loadLoreApp({ inv });
         try {
           const result = await requireAcService(app).citeCriterion(
             args.spec as string,
             args.id as string,
             ruleIds,
             { remove: args.remove === true },
-            { by: resolveActor() },
+            { by: resolveActor(undefined, inv.env, inv.cwd) },
           );
 
           if (!result.ok) {
@@ -553,13 +562,15 @@ export default defineCommand({
           description: "Output result as JSON",
         },
       },
-      async run({ args }) {
+      async run(context) {
+        const { args } = context;
+        const inv = invocationOf(context);
         if (refuseCorrectionFlag(args, "rm")) return;
-        const { app } = loadLoreApp();
+        const { app } = loadLoreApp({ inv });
         try {
           const result = await requireAcService(app).removeCriterion(args.spec as string, args.id as string, {
             force: args.force === true,
-            by: resolveActor(),
+            by: resolveActor(undefined, inv.env, inv.cwd),
           });
 
           if (!result.ok) {
@@ -682,7 +693,9 @@ export default defineCommand({
           description: "Output result as JSON",
         },
       },
-      async run({ args }) {
+      async run(context) {
+        const { args } = context;
+        const inv = invocationOf(context);
         // D1/D5a — argv-decidable, judged BEFORE the app/store is even opened:
         // `--mode` names a rule the command line alone already violates.
         if (typeof args.mode === "string") {
@@ -719,12 +732,12 @@ export default defineCommand({
           correctionOpt = { reason };
         }
 
-        const { app, dbPath } = loadLoreApp();
+        const { app, dbPath } = loadLoreApp({ inv });
         try {
           const beforeStatus = await fetchSpecStatus(app, args.spec as string);
 
           const setOpts: SetCriterionOpts = {
-            ...buildDeclarePathOpts(args, dbPath),
+            ...buildDeclarePathOpts(args, dbPath, inv),
             onAdvisory: printAdvisory,
             ...(correctionOpt !== undefined ? { correction: correctionOpt } : {}),
           };
@@ -947,14 +960,15 @@ function buildFalsifierCandidate(args: Record<string, unknown>): unknown {
  * @param args - raw citty args (the same untyped `Record<string, unknown>`
  *   shape {@link buildCriterionCandidate}/`buildSetPatch` already accept)
  * @param dbPath - the discovered `.lore/lore.db` path `loadLoreApp()` returns
+ * @param inv - the running command's Invocation (cwd for the path context, env + cwd for the actor)
  */
-function buildDeclarePathOpts(args: Record<string, unknown>, dbPath: string): DeclarePathOpts {
+function buildDeclarePathOpts(args: Record<string, unknown>, dbPath: string, inv: Invocation): DeclarePathOpts {
   const reason = args["allow-missing-path"];
   return {
-    by: resolveActor(),
+    by: resolveActor(undefined, inv.env, inv.cwd),
     pathContext: {
       fileExists: existsSync,
-      cwd: process.cwd(),
+      cwd: inv.cwd,
       corpusRoot: dirname(dirname(dbPath)),
     },
     ...(typeof reason === "string" ? { allowMissingPath: reason } : {}),

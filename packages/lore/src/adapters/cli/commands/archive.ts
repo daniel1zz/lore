@@ -39,6 +39,7 @@ import { loadLoreApp } from "../loader.js";
 import { exitCode, formatError, resolveActor } from "../utils.js";
 import type { IssueCloseItem } from "../../../service/issue-close-on-archive.js";
 import { emitIssueCloseItems } from "../issue-close-output.js";
+import { invocationOf } from "../command-invocation.js";
 
 /**
  * The literal, copy-pasteable repair command printed for every `--sweep`
@@ -67,7 +68,9 @@ export default defineCommand({
       description: "Output result as JSON",
     },
   },
-  async run({ args }) {
+  async run(context) {
+    const { args } = context;
+    const inv = invocationOf(context);
     const sweepRequested = args.sweep === true;
     const applyRequested = args.apply === true;
 
@@ -79,7 +82,7 @@ export default defineCommand({
       return;
     }
 
-    const { app, config } = loadLoreApp();
+    const { app, config } = loadLoreApp({ inv });
     const ttl = {
       handoffTtlMinutes: resolveHandoffTtlMinutes(config),
       claimTtlMinutes: resolveClaimTtlMinutes(config),
@@ -146,7 +149,7 @@ export default defineCommand({
     }
 
     // --apply
-    const by = resolveActor();
+    const by = resolveActor(undefined, inv.env, inv.cwd);
     const docsById = new Map(listResult.value.docs.map((d) => [d.id, d] as const));
     const outcomes: Array<{ slug: string; ok: boolean; detail: string; skipped?: true; floor?: string }> = [];
     // spec-archiving-the-work-that-resolves-a-defect-report-closes D4 — the sweep is an archive path too.

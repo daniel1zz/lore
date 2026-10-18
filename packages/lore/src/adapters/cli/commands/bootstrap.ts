@@ -52,6 +52,7 @@ import { exitCode, formatError, relativeTime, resolveActor } from "../utils.js";
 import { buildStalenessFlowDeps, listFreshStalenessEscalates } from "../../../flows/staleness-flow.js";
 import { buildListSpecs, countArmedSpecs } from "../../../flows/drift-flow.js";
 import { computeMemoryFileHealth, formatMemoryFileHealthLine } from "../memory-file-health.js";
+import { invocationOf } from "../command-invocation.js";
 
 /**
  * `BootstrapReport` widened with the SPEC-044 §Design Decisions D14
@@ -212,8 +213,10 @@ export default defineCommand({
         "--seat-branch is given alone.",
     },
   },
-  async run({ args }) {
-    const { app, config } = loadLoreApp();
+  async run(context) {
+    const { args } = context;
+    const inv = invocationOf(context);
+    const { app, config } = loadLoreApp({ inv });
     try {
       if (app.sessionService === undefined) {
         process.stderr.write("Error: SessionService not wired on this App instance.\n");
@@ -221,7 +224,7 @@ export default defineCommand({
         return;
       }
 
-      const by = resolveActor(typeof args.by === "string" ? args.by : undefined);
+      const by = resolveActor(typeof args.by === "string" ? args.by : undefined, inv.env, inv.cwd);
       const seatBranch = typeof args["seat-branch"] === "string" ? args["seat-branch"] : undefined;
       const seatWorktreeArg = typeof args["seat-worktree"] === "string" ? args["seat-worktree"] : undefined;
 
@@ -268,7 +271,7 @@ export default defineCommand({
 
       const seat =
         seatBranch !== undefined
-          ? { branch: seatBranch, worktree: seatWorktreeArg ?? process.cwd() }
+          ? { branch: seatBranch, worktree: seatWorktreeArg ?? inv.cwd }
           : undefined;
       const result = await app.sessionService.bootstrap(by, undefined, seat);
 
@@ -303,7 +306,7 @@ export default defineCommand({
       // spec-claude-md-root-section-structure-check-and-adoption-mode D8 — root
       // memory-file health, computed HERE (SessionService is fs-free) from the SAME
       // `config` loadLoreApp() already parsed. Absent (not null) when nothing to report.
-      const memoryFileHealth = computeMemoryFileHealth(process.cwd(), config);
+      const memoryFileHealth = computeMemoryFileHealth(inv.cwd, config);
 
       const reportWithStaleness: BootstrapReportWithStaleness = {
         ...result.value,

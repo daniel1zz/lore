@@ -236,6 +236,7 @@ import { resolveFeedbackUpstreamCfg } from "../report-issue-wiring.js";
 import { SQLiteStore } from "../../../store/sqlite-store.js";
 import { assertNoForeignSchemaMigration } from "../../../store/foreign-schema-guard.js";
 import { findLoreDbPathQuiet, runGateEnvBypassAudit } from "../gate-bypass-audit.js";
+import type { Invocation } from "@lore/core";
 import { invocationOf } from "../command-invocation.js";
 import { renderPredicateContractsExplain } from "../../../service/predicate-contracts.js";
 
@@ -258,8 +259,8 @@ import { renderPredicateContractsExplain } from "../../../service/predicate-cont
  * awaited by `runGateEnvBypassAudit` before that exit, so no data loss window
  * exists.
  */
-async function openBypassRecordGateSkip(): Promise<RecordGateSkip | null> {
-  const dbPath = findLoreDbPathQuiet();
+async function openBypassRecordGateSkip(inv: Invocation): Promise<RecordGateSkip | null> {
+  const dbPath = findLoreDbPathQuiet(inv);
   if (dbPath === undefined) return null;
   // reason: F5 (AC-CRIT-7) — a bypass audit from a linked worktree must not migrate main's behind corpus.
   // Thrown BEFORE the catch below on purpose: runGateEnvBypassAudit turns the throw into its single
@@ -279,8 +280,8 @@ async function openBypassRecordGateSkip(): Promise<RecordGateSkip | null> {
  * `LORE_GATE_BYPASS=1` branches calls this instead of repeating the deps object
  * literal five times.
  */
-async function auditGateBypass(checkpoint: GateCheckpoint): Promise<void> {
-  await runGateEnvBypassAudit(checkpoint, { openRecordGateSkip: openBypassRecordGateSkip });
+async function auditGateBypass(checkpoint: GateCheckpoint, inv: Invocation): Promise<void> {
+  await runGateEnvBypassAudit(checkpoint, inv, { openRecordGateSkip: () => openBypassRecordGateSkip(inv) });
 }
 
 /**
@@ -373,11 +374,12 @@ export default defineCommand({
         },
       },
       async run(context) {
+        const inv = invocationOf(context);
         const { args } = context;
         // LORE_GATE_BYPASS=1: exit 0 before ANY parsing or checking (module header;
         // SPEC-080 G4 — best-effort env_bypass audit trace, exit-0 unconditional).
         if (invocationOf(context).env["LORE_GATE_BYPASS"] === "1") {
-          await auditGateBypass("spec-create");
+          await auditGateBypass("spec-create", invocationOf(context));
           process.exitCode = 0;
           return;
         }
@@ -403,10 +405,10 @@ export default defineCommand({
           return;
         }
 
-        const { app, config } = loadLoreApp();
+        const { app, config } = loadLoreApp({ inv });
         try {
           if (isGateDisabledByConfig("spec-create", config)) return;
-          await runSpecCreateGate(app, parsed.data, config);
+          await runSpecCreateGate(app, parsed.data, config, inv);
         } finally {
           app.close();
         }
@@ -429,19 +431,20 @@ export default defineCommand({
         },
       },
       async run(context) {
+        const inv = invocationOf(context);
         const { args } = context;
         // LORE_GATE_BYPASS=1: exit 0 before ANY parsing or checking (module header;
         // SPEC-080 G4 — best-effort env_bypass audit trace, exit-0 unconditional).
         if (invocationOf(context).env["LORE_GATE_BYPASS"] === "1") {
-          await auditGateBypass("spec-promote");
+          await auditGateBypass("spec-promote", invocationOf(context));
           process.exitCode = 0;
           return;
         }
 
-        const { app, config } = loadLoreApp();
+        const { app, config } = loadLoreApp({ inv });
         try {
           if (isGateDisabledByConfig("spec-promote", config)) return;
-          await runSpecPromoteGate(app, args.spec as string, config);
+          await runSpecPromoteGate(app, args.spec as string, config, inv);
         } finally {
           app.close();
         }
@@ -464,19 +467,20 @@ export default defineCommand({
         },
       },
       async run(context) {
+        const inv = invocationOf(context);
         const { args } = context;
         // LORE_GATE_BYPASS=1: exit 0 before ANY parsing or checking (module header;
         // SPEC-080 G4 — best-effort env_bypass audit trace, exit-0 unconditional).
         if (invocationOf(context).env["LORE_GATE_BYPASS"] === "1") {
-          await auditGateBypass("plan-promote");
+          await auditGateBypass("plan-promote", invocationOf(context));
           process.exitCode = 0;
           return;
         }
 
-        const { app, config } = loadLoreApp();
+        const { app, config } = loadLoreApp({ inv });
         try {
           if (isGateDisabledByConfig("plan-promote", config)) return;
-          await runPlanPromoteGate(app, args.plan as string, config);
+          await runPlanPromoteGate(app, args.plan as string, config, inv);
         } finally {
           app.close();
         }
@@ -501,20 +505,21 @@ export default defineCommand({
         },
       },
       async run(context) {
+        const inv = invocationOf(context);
         const { args } = context;
         // LORE_GATE_BYPASS=1: exit 0 before ANY parsing or checking (module header;
         // SPEC-080 G4 — best-effort env_bypass audit trace, exit-0 unconditional).
         if (invocationOf(context).env["LORE_GATE_BYPASS"] === "1") {
-          await auditGateBypass("task-claim");
+          await auditGateBypass("task-claim", invocationOf(context));
           process.exitCode = 0;
           return;
         }
 
-        const { app, config } = loadLoreApp();
+        const { app, config } = loadLoreApp({ inv });
         try {
           if (isGateDisabledByConfig("task-claim", config)) return;
-          const by = resolveActor();
-          await runTaskClaimGate(app, args.task as string, by, config, invocationOf(context).env);
+          const by = resolveActor(undefined, inv.env, inv.cwd);
+          await runTaskClaimGate(app, args.task as string, by, config, inv);
         } finally {
           app.close();
         }
@@ -540,20 +545,21 @@ export default defineCommand({
         },
       },
       async run(context) {
+        const inv = invocationOf(context);
         const { args } = context;
         // LORE_GATE_BYPASS=1: exit 0 before ANY parsing or checking (module header;
         // SPEC-080 G4 — best-effort env_bypass audit trace, exit-0 unconditional).
         if (invocationOf(context).env["LORE_GATE_BYPASS"] === "1") {
-          await auditGateBypass("phase-claim");
+          await auditGateBypass("phase-claim", invocationOf(context));
           process.exitCode = 0;
           return;
         }
 
-        const { app, config } = loadLoreApp();
+        const { app, config } = loadLoreApp({ inv });
         try {
           if (isGateDisabledByConfig("phase-claim", config)) return;
-          const by = resolveActor();
-          await runPhaseClaimGate(app, args.phase as string, by, config, invocationOf(context).env);
+          const by = resolveActor(undefined, inv.env, inv.cwd);
+          await runPhaseClaimGate(app, args.phase as string, by, config, inv);
         } finally {
           app.close();
         }
@@ -658,6 +664,7 @@ async function runSpecCreateGate(
   app: App,
   input: GateSpecCreateInput,
   config: LoreConfig | undefined,
+  inv: Invocation,
 ): Promise<void> {
   const parentDoc = await resolveParentDoc(app, input.parent_id);
   const checkpoint = requireCheckpoint("spec-create");
@@ -712,7 +719,7 @@ async function runSpecCreateGate(
   const failures = selectFailures(results);
   console.log(checkpoint.feed(feedCtx, failures));
   emitGateReportIssueHint(config);
-  recordHookGateDeny(app, "spec-create", failures, undefined);
+  recordHookGateDeny(app, "spec-create", failures, undefined, inv);
   process.exitCode = 4;
 }
 
@@ -753,9 +760,10 @@ function requireCheckpoint(cp: GateCheckpoint): CheckpointDef {
  * the SAME event). A no-op when `app.traceRecorder` is absent (trace.enabled
  * resolves false) — mirrors every other optional-DI trace call site.
  *
+ * @param inv - the running command's Invocation (env + cwd for the actor fallback)
  * @param actor - Explicit actor when this checkpoint's runner already has one
  *   (`task-claim`/`phase-claim`'s `by` param); `undefined` falls back to
- *   `resolveActor()`'s own resolution — the SAME
+ *   `resolveActor()`'s own resolution (from `inv`) — the SAME
  *   resolution every other actor-needing call in this file already uses.
  */
 function recordHookGateDeny(
@@ -763,10 +771,11 @@ function recordHookGateDeny(
   checkpoint: GateCheckpoint,
   failures: ReturnType<typeof selectFailures>,
   targetIdOrSlug: string | undefined,
+  inv: Invocation,
   actor?: string,
 ): void {
   if (app.traceRecorder === undefined) return;
-  const resolvedActor = actor ?? resolveActor();
+  const resolvedActor = actor ?? resolveActor(undefined, inv.env, inv.cwd);
   app.traceRecorder.recordGateDeny(
     resolvedActor,
     checkpoint,
@@ -820,6 +829,7 @@ async function runPlanPromoteGate(
   app: App,
   planIdOrSlug: string,
   config: LoreConfig | undefined,
+  inv: Invocation,
 ): Promise<void> {
   const bundleResult = await app.corpusService.getPlanBundle(planIdOrSlug);
   if (!bundleResult.ok) {
@@ -839,7 +849,7 @@ async function runPlanPromoteGate(
     const failures = selectFailures(results);
     console.log(checkpoint.feed(ctx, failures));
     emitGateReportIssueHint(config);
-    recordHookGateDeny(app, "plan-promote", failures, planIdOrSlug);
+    recordHookGateDeny(app, "plan-promote", failures, planIdOrSlug, inv);
     process.exitCode = 4;
     return;
   }
@@ -911,7 +921,7 @@ async function runTaskClaimGate(
   taskIdOrSlug: string,
   by: string,
   config: LoreConfig | undefined,
-  env: Readonly<Record<string, string | undefined>>,
+  inv: Invocation,
 ): Promise<void> {
   const taskResult = await app.corpusService.get(taskIdOrSlug);
   if (!taskResult.ok) {
@@ -945,7 +955,7 @@ async function runTaskClaimGate(
   // print a refusal the real claim does not produce — a pre-flight that
   // contradicts the command it previews is worse than no pre-flight. An unusable
   // session id is surfaced here exactly as `claim()` surfaces it, never ignored.
-  const sessionIdResult = resolveClaimSessionId(env);
+  const sessionIdResult = resolveClaimSessionId(inv.env);
   if (!sessionIdResult.ok) {
     process.stderr.write(formatError(sessionIdResult.error) + "\n");
     process.exitCode = exitCode(sessionIdResult.error);
@@ -1037,7 +1047,7 @@ async function runTaskClaimGate(
     const failures = selectFailures(results);
     console.log(checkpoint.feed(ctx, failures));
     emitGateReportIssueHint(config);
-    recordHookGateDeny(app, "task-claim", failures, taskIdOrSlug, by);
+    recordHookGateDeny(app, "task-claim", failures, taskIdOrSlug, inv, by);
     process.exitCode = 4;
     return;
   }
@@ -1083,7 +1093,7 @@ async function runPhaseClaimGate(
   phaseIdOrSlug: string,
   by: string,
   config: LoreConfig | undefined,
-  env: Readonly<Record<string, string | undefined>>,
+  inv: Invocation,
 ): Promise<void> {
   const phaseResult = await app.corpusService.get(phaseIdOrSlug);
   if (!phaseResult.ok) {
@@ -1114,7 +1124,7 @@ async function runPhaseClaimGate(
   // `process.env` and feeds it to `noAnchorOverlap`
   // (task-phaseworkflowservice-claim-captures-no-session-id-so-every). Identical read,
   // identical surfacing of an unusable id, as `runTaskClaimGate` above.
-  const sessionIdResult = resolveClaimSessionId(env);
+  const sessionIdResult = resolveClaimSessionId(inv.env);
   if (!sessionIdResult.ok) {
     process.stderr.write(formatError(sessionIdResult.error) + "\n");
     process.exitCode = exitCode(sessionIdResult.error);
@@ -1155,7 +1165,7 @@ async function runPhaseClaimGate(
     const failures = selectFailures(results);
     console.log(checkpoint.feed(ctx, failures));
     emitGateReportIssueHint(config);
-    recordHookGateDeny(app, "phase-claim", failures, phaseIdOrSlug, by);
+    recordHookGateDeny(app, "phase-claim", failures, phaseIdOrSlug, inv, by);
     process.exitCode = 4;
     return;
   }
@@ -1208,6 +1218,7 @@ async function runSpecPromoteGate(
   app: App,
   specIdOrSlug: string,
   config: LoreConfig | undefined,
+  inv: Invocation,
 ): Promise<void> {
   const listResult = await requireAcService(app).listCriteria(specIdOrSlug);
   if (!listResult.ok) {
@@ -1262,7 +1273,7 @@ async function runSpecPromoteGate(
     const failures = selectFailures(results);
     process.stderr.write(checkpoint.feed(ctx, failures));
     emitGateReportIssueHint(config);
-    recordHookGateDeny(app, "spec-promote", failures, specIdOrSlug);
+    recordHookGateDeny(app, "spec-promote", failures, specIdOrSlug, inv);
     process.exitCode = 4;
     return;
   }

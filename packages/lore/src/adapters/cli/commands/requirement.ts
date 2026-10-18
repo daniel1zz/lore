@@ -17,6 +17,7 @@ import { defineCommand } from "citty";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatError } from "../utils.js";
 import type { App } from "../../../app.js";
+import { invocationOf } from "../command-invocation.js";
 
 function requireRequirementService(app: App) {
   if (app.requirementService === undefined) {
@@ -40,8 +41,10 @@ export default defineCommand({
         "migrated-to": { type: "string", description: "Baseline rule id (BR-n, must be live) this requirement is migrated to" },
         json: { type: "boolean", description: "Output result as JSON" },
       },
-      async run({ args }) {
-        const { app } = loadLoreApp();
+      async run(context) {
+        const { args } = context;
+        const inv = invocationOf(context);
+        const { app } = loadLoreApp({ inv });
         try {
           const svc = requireRequirementService(app);
           if (svc === undefined) return;
@@ -77,8 +80,10 @@ export default defineCommand({
         rule: { type: "positional", description: "Baseline rule id, e.g. BR-12 (must be live)", required: true },
         json: { type: "boolean", description: "Output result as JSON" },
       },
-      async run({ args }) {
-        const { app } = loadLoreApp();
+      async run(context) {
+        const { args } = context;
+        const inv = invocationOf(context);
+        const { app } = loadLoreApp({ inv });
         try {
           const svc = requireRequirementService(app);
           if (svc === undefined) return;
@@ -102,8 +107,10 @@ export default defineCommand({
         prd: { type: "positional", description: "PRD document ID or slug", required: true },
         json: { type: "boolean", description: "Output result as JSON" },
       },
-      async run({ args }) {
-        const { app } = loadLoreApp();
+      async run(context) {
+        const { args } = context;
+        const inv = invocationOf(context);
+        const { app } = loadLoreApp({ inv });
         try {
           const svc = requireRequirementService(app);
           if (svc === undefined) return;
@@ -134,8 +141,10 @@ export default defineCommand({
         force: { type: "boolean", description: "Remove even if a spec AC still references it" },
         json: { type: "boolean", description: "Output result as JSON" },
       },
-      async run({ args }) {
-        const { app } = loadLoreApp();
+      async run(context) {
+        const { args } = context;
+        const inv = invocationOf(context);
+        const { app } = loadLoreApp({ inv });
         try {
           const svc = requireRequirementService(app);
           if (svc === undefined) return;

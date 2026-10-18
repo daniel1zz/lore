@@ -152,7 +152,7 @@ async function handleSessionResume(app: App, args: FeedArgs, _config: LoreConfig
       ...(typeof args.handoff === "string" ? { handoff: args.handoff } : {}),
       ...(typeof args.by === "string" ? { by: args.by } : {}),
     },
-    { env: inv.env, tmpDir: inv.paths.tmpDir },
+    { env: inv.env, tmpDir: inv.paths.tmpDir, cwd: inv.cwd },
   );
 
   if (!result.ok) {
@@ -243,9 +243,9 @@ const SPECIAL_CHECKPOINT_HANDLERS: Readonly<Record<string, CheckpointHandler>> =
  * documented non-goal, not a correctness gap. A no-op when
  * `app.traceRecorder` is absent (trace.enabled resolves false).
  */
-function recordFeedTrace(app: App, checkpoint: string, docsServed: readonly string[]): void {
+function recordFeedTrace(app: App, inv: Invocation, checkpoint: string, docsServed: readonly string[]): void {
   if (app.traceRecorder === undefined) return;
-  app.traceRecorder.recordFeed(resolveActor(), checkpoint, docsServed);
+  app.traceRecorder.recordFeed(resolveActor(undefined, inv.env, inv.cwd), checkpoint, docsServed);
 }
 
 // SPEC-070 Fix F7: fail loud, at module init, if the shared SPECIAL_FEED_CHECKPOINTS
@@ -297,7 +297,7 @@ export default defineCommand({
   async run(context) {
     const { args } = context;
     const inv = invocationOf(context);
-    const { app, config } = loadLoreApp();
+    const { app, config } = loadLoreApp({ inv });
     try {
       const checkpointName = typeof args.checkpoint === "string" ? args.checkpoint : String(args.checkpoint);
       const handler = SPECIAL_CHECKPOINT_HANDLERS[args.checkpoint as string];
@@ -315,7 +315,7 @@ export default defineCommand({
         // "was 0 literally assigned", so unset must read as success.
         if ((process.exitCode ?? 0) === 0) {
           const target = typeof args.target === "string" ? [args.target] : [];
-          recordFeedTrace(app, checkpointName, target);
+          recordFeedTrace(app, inv, checkpointName, target);
         }
         return;
       }
@@ -351,7 +351,7 @@ export default defineCommand({
       // whether a governing skill was found (module header).
       process.exitCode = 0;
       const docsServed = typeof args.parent === "string" ? [args.parent] : [];
-      recordFeedTrace(app, checkpointName, docsServed);
+      recordFeedTrace(app, inv, checkpointName, docsServed);
     } finally {
       app.close();
     }

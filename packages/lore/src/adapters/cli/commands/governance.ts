@@ -108,6 +108,7 @@ import { BOOTSTRAP_FRAMING_LINE, type LoreError } from "@lore/core";
 import { resolveAssetsRoot, type SetupPathContext } from "../setup-args.js";
 import { exitCode, formatError } from "../utils.js";
 import { writeAllSync } from "../stdio-sync.js";
+import { invocationOf } from "../command-invocation.js";
 
 /** A registered `lore governance` topic name. */
 type GovernanceTopic = "seat-briefing" | "claude-md" | "bootstrap-framing";
@@ -265,7 +266,9 @@ export default defineCommand({
       default: false,
     },
   },
-  run({ args }) {
+  run(context) {
+    const { args } = context;
+    const inv = invocationOf(context);
     const legacyFlag = args["seat-briefing"] === true;
     const positionalTopics = collectPositionalTopics(args);
     const distinctTopics = resolveDistinctTopicsRequested(positionalTopics, legacyFlag);
@@ -312,8 +315,8 @@ export default defineCommand({
     // this command and `lore setup` must resolve the SAME assets/ tree.
     const pathCtx: SetupPathContext = {
       repoRoot: REPO_ROOT,
-      isCompiled: Bun.main.startsWith("/$bunfs/"),
-      execPath: process.execPath,
+      isCompiled: inv.isCompiled,
+      execPath: inv.execPath,
     };
     const assetsRoot = resolveAssetsRoot(pathCtx);
 

@@ -904,7 +904,7 @@ function buildAppFromSqlite(
   // DI shape as taskWorkflowService: own telemetry, resolveDeclaredAcIds port,
   // {enforcer, getPlanBundle} gate bundle gating "phase-claim" rather than "task-claim")
   // so this file's own composition bodies stay minimal — see that module's header.
-  const phaseServices = buildPhaseServices(store, telemetry, claimTtlMinutes, gateEnforcer, corpusService);
+  const phaseServices = buildPhaseServices(store, telemetry, claimTtlMinutes, gateEnforcer, corpusService, ambient.env);
   // reason: hoisted to a local so the SAME ReviewService instance is both the App's `reviewService` and
   // the approval path CorpusService.set(status: "approved") delegates to (BR-1071, issues #65 #50) —
   // services never import each other, so the port is wired here, never inside CorpusService.
@@ -1317,7 +1317,7 @@ function buildAppFromTurso(
   const judgmentService = new JudgmentService(store, telemetry);
   // reason: SPEC-056 phase execution model (PhaseWorkflowService + PhaseChecklistService)
   // — see buildAppFromSqlite's identical comment.
-  const phaseServices = buildPhaseServices(store, telemetry, claimTtlMinutes, gateEnforcer, corpusService);
+  const phaseServices = buildPhaseServices(store, telemetry, claimTtlMinutes, gateEnforcer, corpusService, ambient.env);
   // reason: hoisted to a local so the SAME ReviewService instance is both the App's `reviewService` and
   // the approval path CorpusService.set(status: "approved") delegates to (BR-1071, issues #65 #50) —
   // services never import each other, so the port is wired here, never inside CorpusService.

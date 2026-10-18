@@ -266,10 +266,13 @@ function realPathOrSelf(p: string): string {
  * main checkout (a worktree resolves the main `.lore/` via the git-common-dir route).
  *
  * @param dbPath - the resolved corpus db path
- * @param env - environment to read (defaults to `process.env`)
+ * @param env - the Invocation's environment (`inv.env`; no ambient default, AS-26)
  * @returns the refusal message, or `undefined` when the path is allowed / guard unarmed
  */
-export function findSandboxRefusal(dbPath: string, env: NodeJS.ProcessEnv = process.env): string | undefined {
+/** The two facts corpus discovery reads from the run: where it stands and which environment guards it (an `Invocation` satisfies this). */
+export type CorpusLocator = Readonly<{ cwd: string; env: NodeJS.ProcessEnv }>;
+
+export function findSandboxRefusal(dbPath: string, env: NodeJS.ProcessEnv): string | undefined {
   if (env[TEST_SANDBOX_ENV] !== "1") return undefined;
   const repo = env[TEST_SANDBOX_REPO_ENV];
   if (repo === undefined || repo === "" || !isAbsolute(repo)) {
@@ -306,11 +309,12 @@ export function findSandboxRefusal(dbPath: string, env: NodeJS.ProcessEnv = proc
  * guard this spec's later tasks add) calls this directly instead of either
  * wrapper.
  *
- * @param cwd - defaults to `process.cwd()`; tests pass a fixture directory
+ * @param cwd - the directory to resolve from (`inv.cwd`; tests pass a fixture directory)
+ * @param env - the Invocation's environment, read by the test-sandbox refusal (`inv.env`)
  * @returns `@lore/core`'s `ResolvedCorpus` (path + provenance), or
  *   `undefined` when no corpus exists on any route this module knows about
  */
-export function resolveCorpus(cwd: string = process.cwd()): ResolvedCorpus | undefined {
+export function resolveCorpus(cwd: string, env: NodeJS.ProcessEnv): ResolvedCorpus | undefined {
   const resolved = resolveCorpusProvenance({
     cwd,
     probeExists: existsSync,
@@ -318,7 +322,7 @@ export function resolveCorpus(cwd: string = process.cwd()): ResolvedCorpus | und
   });
   // "undetermined" carries a bare cwd directory, not a corpus file — nothing to refuse.
   if (resolved !== undefined && resolved.provenance !== "undetermined") {
-    const refusal = findSandboxRefusal(resolved.path);
+    const refusal = findSandboxRefusal(resolved.path, env);
     if (refusal !== undefined) {
       process.stderr.write(refusal);
       process.exit(SANDBOX_REFUSAL_EXIT_CODE);
@@ -339,8 +343,8 @@ export function resolveCorpus(cwd: string = process.cwd()): ResolvedCorpus | und
  * — is what makes it a mechanism instead of a convention two call sites could
  * independently forget.
  */
-function definiteCorpusPath(cwd?: string): string | undefined {
-  const resolved = resolveCorpus(cwd);
+function definiteCorpusPath(locator: CorpusLocator): string | undefined {
+  const resolved = resolveCorpus(locator.cwd, locator.env);
   return resolved !== undefined && resolved.provenance !== "undetermined" ? resolved.path : undefined;
 }
 
@@ -352,10 +356,11 @@ function definiteCorpusPath(cwd?: string): string | undefined {
  * question — see {@link definiteCorpusPath}'s doc for why the latter counts
  * as a miss here too).
  *
+ * @param locator - the run's `cwd` + `env` (an `Invocation` works)
  * @returns absolute path to the lore.db file
  */
-export function findLoreDbPath(): string {
-  const path = definiteCorpusPath();
+export function findLoreDbPath(locator: CorpusLocator): string {
+  const path = definiteCorpusPath(locator);
   if (path === undefined) {
     process.stderr.write(NO_DB_MESSAGE);
     process.exit(1);
@@ -371,9 +376,10 @@ export function findLoreDbPath(): string {
  * module's own header for why that relocation matters on its own, not just
  * as a side effect of the resolver collapse.
  *
+ * @param locator - the run's `cwd` + `env` (an `Invocation` works)
  * @returns The discovered `.lore/lore.db` absolute path, or `undefined` when
- *   no corpus can be confirmed from `process.cwd()`.
+ *   no corpus can be confirmed from `locator.cwd`.
  */
-export function findLoreDbPathQuiet(): string | undefined {
-  return definiteCorpusPath();
+export function findLoreDbPathQuiet(locator: CorpusLocator): string | undefined {
+  return definiteCorpusPath(locator);
 }

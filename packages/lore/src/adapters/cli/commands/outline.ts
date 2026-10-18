@@ -27,6 +27,7 @@ import { exitCode, formatError } from "../utils.js";
 import type { LoreError, OutlineEntry } from "@lore/core";
 import type { PrdOutlineService } from "../../../service/prd-outline-service.js";
 import type { App } from "../../../app.js";
+import { invocationOf } from "../command-invocation.js";
 
 /**
  * `App.prdOutlineService` is typed optional only to keep pre-existing
@@ -105,8 +106,10 @@ export default defineCommand({
           description: "Output result as JSON",
         },
       },
-      async run({ args }) {
-        const { app } = loadLoreApp();
+      async run(context) {
+        const { args } = context;
+        const inv = invocationOf(context);
+        const { app } = loadLoreApp({ inv });
         try {
           const result = await requireOutlineService(app).outlineList(args.prd as string);
 

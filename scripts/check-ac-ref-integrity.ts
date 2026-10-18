@@ -173,7 +173,7 @@ export async function runCheck(app: App, ledger: AcRefLedgerFile): Promise<AcRef
 // ─── CLI / IO shell ─────────────────────────────────────────────────────────
 
 /**
- * Resolves the corpus (`findLoreDbPath()`, unless `dbPathOverride` is given — tests
+ * Resolves the corpus (`findLoreDbPath({ cwd: process.cwd(), env: process.env })`, unless `dbPathOverride` is given — tests
  * pass a throwaway `mkdtemp` + `lore init` corpus path here, NEVER the repo's own
  * `.lore/`) and the ledger (`<repoRoot>/${LEDGER_RELATIVE_PATH}`, unless
  * `repoRootOverride` is given), runs {@link runCheck}, prints a human-readable
@@ -183,7 +183,7 @@ export async function runCheck(app: App, ledger: AcRefLedgerFile): Promise<AcRef
  */
 export async function main(dbPathOverride?: string, repoRootOverride?: string): Promise<number> {
   const repoRoot = repoRootOverride ?? REPO_ROOT;
-  const dbPath = dbPathOverride ?? findLoreDbPath();
+  const dbPath = dbPathOverride ?? findLoreDbPath({ cwd: process.cwd(), env: process.env });
   const app = createApp(dbPath);
   try {
     const ledger = loadLedgerFromDisk(repoRoot);

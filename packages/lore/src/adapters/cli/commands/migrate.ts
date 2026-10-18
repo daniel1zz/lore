@@ -42,6 +42,7 @@ import { loadLoreApp } from "../loader.js";
 import { exitCode, formatError } from "../utils.js";
 import { requirePhaseMigrationService } from "../phase-wiring.js";
 import type { SectionMigrationVerdict } from "../../../service/outline-migration-service.js";
+import { invocationOf } from "../command-invocation.js";
 
 export default defineCommand({
   meta: {
@@ -93,7 +94,9 @@ export default defineCommand({
       description: "Output as JSON",
     },
   },
-  async run({ args }) {
+  async run(context) {
+    const { args } = context;
+    const inv = invocationOf(context);
     if (
       args.version !== "v1" &&
       args.version !== "phases" &&
@@ -115,7 +118,7 @@ export default defineCommand({
         process.stderr.write("Error: --apply and --revert are mutually exclusive for `migrate spec-parents`.\n");
         process.exit(2);
       }
-      const { app } = loadLoreApp();
+      const { app } = loadLoreApp({ inv });
       try {
         const service = app.specParentMigrationService;
         if (service === undefined) {
@@ -178,7 +181,7 @@ export default defineCommand({
     // ── ordinals action ───────────────────────────────────────────────────
     if (args.version === "ordinals") {
       const dryRun = !(args.apply ?? false);
-      const { app, dbPath } = loadLoreApp();
+      const { app, dbPath } = loadLoreApp({ inv });
       // reason: export-index.json lives at <projectDir>/.lore/export-index.json —
       // same derivation ExportDocsService's own CLI command uses (dbPath = <projectDir>/.lore/lore.db).
       const projectDir = dirname(dirname(dbPath));
@@ -263,7 +266,7 @@ export default defineCommand({
       }
 
       const dryRun = args["dry-run"] ?? false;
-      const { app } = loadLoreApp();
+      const { app } = loadLoreApp({ inv });
       try {
         if (app.outlineMigrationService === undefined) {
           process.stderr.write("Internal error: OutlineMigrationService not wired on App\n");
@@ -345,7 +348,7 @@ export default defineCommand({
     // ── tasks-to-phases action ────────────────────────────────────────────
     if (args.version === "tasks-to-phases") {
       const dryRun = args["dry-run"] ?? false;
-      const { app } = loadLoreApp();
+      const { app } = loadLoreApp({ inv });
       try {
         const service = requirePhaseMigrationService(app);
         const result = await service.migrateTasks({ dryRun });
@@ -398,7 +401,7 @@ export default defineCommand({
     // ── phases action ─────────────────────────────────────────────────────
     if (args.version === "phases") {
       const dryRun = args["dry-run"] ?? false;
-      const { app } = loadLoreApp();
+      const { app } = loadLoreApp({ inv });
       try {
         const result = await app.phaseService.migratePhases({ dryRun });
 
@@ -431,7 +434,7 @@ export default defineCommand({
     // ── spec-kind action ──────────────────────────────────────────────────
     if (args.version === "spec-kind") {
       const dryRun = args["dry-run"] ?? false;
-      const { app } = loadLoreApp();
+      const { app } = loadLoreApp({ inv });
       try {
         const result = await app.specKindService.migrateSpecKind({ dryRun });
 
@@ -476,7 +479,7 @@ export default defineCommand({
     }
 
     const dryRun = args["dry-run"] ?? false;
-    const { app } = loadLoreApp();
+    const { app } = loadLoreApp({ inv });
 
     try {
       if (dryRun) {

@@ -81,6 +81,7 @@ export interface PhaseServiceBundle {
  *   `PhaseWorkflowService.claim` runs the ADDITIVE `phase-claim` checkpoint through it
  * @param corpusService - Already-constructed `CorpusService` — `resolveDeclaredAcIds`
  *   and `getPlanBundle` are bound FROM it (never imported/re-derived)
+ * @param env - the invocation's environment (`AppAmbient.env`): the session-id source for phase claims (AS-26)
  */
 export function buildPhaseServices(
   store: StoreInterface,
@@ -88,6 +89,7 @@ export function buildPhaseServices(
   claimTtlMinutes: number,
   gateEnforcer: GateEnforcer,
   corpusService: CorpusService,
+  env: Readonly<Record<string, string | undefined>>,
 ): PhaseServiceBundle {
   const phaseWorkflowService = new PhaseWorkflowService(
     store,
@@ -108,7 +110,7 @@ export function buildPhaseServices(
     // anchor mutex would degrade to the retired same-actor proxy) while every unit
     // test stayed green — hence its own distribution oracle,
     // `tests/integration/phase-claim-session-parity.bun.test.ts`.
-    process.env,
+    env,
   );
   const phaseChecklistService = new PhaseChecklistService(store);
   const phaseMigrationService = new PhaseMigrationService(store);

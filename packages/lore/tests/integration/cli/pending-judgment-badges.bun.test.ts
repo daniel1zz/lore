@@ -34,10 +34,12 @@ import { join, resolve } from "path";
 import { tmpdir } from "os";
 import { createApp } from "../../../src/app.js";
 import type { CreateDocInput, NewReviewJudgment } from "@lore/core";
+import { liveInvocation } from "../../live-invocation.js";
+import type { Invocation } from "@lore/core";
 
 // ─── Command type + output capture (mirrors assess-ai.bun.test.ts) ───────────
 
-type RunnableCommand = { run: (ctx: { args: Record<string, unknown> }) => Promise<void> };
+type RunnableCommand = { run: (ctx: { args: Record<string, unknown>; inv?: Invocation }) => Promise<void> };
 
 function captureOutput() {
   const stdout: string[] = [];
@@ -134,7 +136,7 @@ describe("lore pending — AI Judgment badge (HAPPY)", () => {
     const cmd = await importPendingCommand();
     const output = captureOutput();
     try {
-      await cmd.run({ args: {} });
+      await cmd.run({ args: {}, inv: liveInvocation() });
     } finally {
       output.restore();
     }
@@ -169,7 +171,7 @@ describe("lore pending — AI Judgment badge (HAPPY)", () => {
     const cmd = await importPendingCommand();
     const output = captureOutput();
     try {
-      await cmd.run({ args: {} });
+      await cmd.run({ args: {}, inv: liveInvocation() });
     } finally {
       output.restore();
     }
@@ -200,7 +202,7 @@ describe("lore pending — AI Judgment badge (HAPPY)", () => {
     const cmd = await importPendingCommand();
     const output = captureOutput();
     try {
-      await cmd.run({ args: { json: true } });
+      await cmd.run({ args: { json: true }, inv: liveInvocation() });
     } finally {
       output.restore();
     }
@@ -237,7 +239,7 @@ describe("lore pending --escalated — BOUNDARY (no escalations)", () => {
     const cmd = await importPendingCommand();
     const output = captureOutput();
     try {
-      await cmd.run({ args: { escalated: true } });
+      await cmd.run({ args: { escalated: true }, inv: liveInvocation() });
     } finally {
       output.restore();
     }
@@ -275,7 +277,7 @@ describe("lore pending — STATE (stale judgment badge)", () => {
     const cmd = await importPendingCommand();
     const output = captureOutput();
     try {
-      await cmd.run({ args: {} });
+      await cmd.run({ args: {}, inv: liveInvocation() });
     } finally {
       output.restore();
     }
@@ -341,7 +343,7 @@ describe("lore pending --escalated — REGRESSION (filter + blocking-question bu
     const cmd = await importPendingCommand();
     const output = captureOutput();
     try {
-      await cmd.run({ args: { escalated: true } });
+      await cmd.run({ args: { escalated: true }, inv: liveInvocation() });
     } finally {
       output.restore();
     }

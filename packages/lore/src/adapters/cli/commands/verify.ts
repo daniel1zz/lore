@@ -192,6 +192,7 @@ import { resolveVerifyExecutionRoot } from "@lore/core";
 import type { VerifyGitFacts, VerifyExecutionRootResolution, LoreError, Result } from "@lore/core";
 import type { VerifyRunnerService, VerifyPlanResult } from "../../../service/verify-runner-service.js";
 import type { App } from "../../../app.js";
+import { invocationOf } from "../command-invocation.js";
 
 /**
  * `App.verifyRunnerService` is typed optional only to keep pre-existing
@@ -317,6 +318,7 @@ function gatherVerifyGitFacts(cwd: string): VerifyGitFacts {
 function resolveCliExecutionRoot(
   corpusRoot: string,
   explicitRootArg: string | undefined,
+  cwd: string,
 ): { resolution: VerifyExecutionRootResolution; explicitOverride: boolean } {
   if (explicitRootArg !== undefined) {
     const explicitRoot = resolvePath(explicitRootArg);
@@ -330,7 +332,7 @@ function resolveCliExecutionRoot(
     };
   }
 
-  const callerCwd = process.cwd();
+  const callerCwd = cwd;
   return {
     resolution: resolveVerifyExecutionRoot({
       corpusRoot,
@@ -408,11 +410,13 @@ export default defineCommand({
         "AC that actually declares a falsifier (see `lore ac add --falsifier-*`).",
     },
   },
-  async run({ args }) {
-    const { app } = loadLoreApp();
+  async run(context) {
+    const { args } = context;
+    const inv = invocationOf(context);
+    const { app } = loadLoreApp({ inv });
     try {
       const acIds = normalizeRepeatableFlag(args.ac);
-      const by = resolveActor();
+      const by = resolveActor(undefined, inv.env, inv.cwd);
       const allowNewCommands = args["allow-new-commands"] === true;
 
       // reason: SPEC-039 §M2 trust-hardening advisory — `lore verify` shells out to
@@ -455,6 +459,7 @@ export default defineCommand({
       const { resolution: executionRoot, explicitOverride } = resolveCliExecutionRoot(
         requireRepoRoot(app),
         explicitExecutionRootArg,
+        inv.cwd,
       );
 
       // SPEC-069 ad-hoc-task runner path (module header) — the PLAN positional is

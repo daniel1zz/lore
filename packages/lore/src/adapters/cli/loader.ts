@@ -75,8 +75,7 @@ import {
 import { ambientFromProcess, createApp, createAppWithWriteContext, type App, type AppAmbient } from "../../app.js";
 import { findLoreDbPath, formatError, exitCode } from "./utils.js";
 import { findForeignBehindSchema } from "../../store/foreign-schema-guard.js";
-import { invocationInScope } from "./invocation-scope.js";
-import { resolveCorpus } from "./corpus-resolution.js";
+import { resolveCorpus, type CorpusLocator } from "./corpus-resolution.js";
 import {
   guardTaskLifecycleWrites,
   type ForeignCorpusWriteContext,
@@ -157,9 +156,9 @@ export interface LoadLoreAppOptions {
    */
   readonly surface?: LoreAppBootSurface;
   /**
-   * The Invocation to compose against (env, home, temp dir, identity) — the MCP server passes the one it resolved at
-   * start. Omitted → the running command's delivered Invocation (transitional scope), else the process snapshot
-   * (tests and scripts calling `loadLoreApp()` directly have none).
+   * The Invocation to compose against (env, home, temp dir, identity): a CLI command passes `invocationOf(context)`,
+   * the MCP server the one it resolved at start. Omitted (tests and scripts calling `loadLoreApp()` directly) → the
+   * process snapshot and an unwrapped store.
    */
   readonly inv?: Invocation;
 }
@@ -216,12 +215,12 @@ export interface LoadLoreAppOptions {
  *   resolveForeignWriteProvenance("http") // => null, wherever the server was started
  *   resolveForeignWriteProvenance("cli")  // => "own" | "git_common_dir" | "undetermined" | null
  */
-function resolveForeignWriteProvenance(bootSurface: LoreAppBootSurface, cwd: string): CorpusProvenance | null {
+function resolveForeignWriteProvenance(bootSurface: LoreAppBootSurface, cwd: string, env: NodeJS.ProcessEnv): CorpusProvenance | null {
   switch (bootSurface) {
     case "http":
       return null;
     case "cli":
-      return resolveCorpus(cwd)?.provenance ?? null;
+      return resolveCorpus(cwd, env)?.provenance ?? null;
     default: {
       // Exhaustive check — a new LoreAppBootSurface must decide explicitly.
       // reason: the fallback is the CLI branch, not `null`: an unhandled
@@ -229,7 +228,7 @@ function resolveForeignWriteProvenance(bootSurface: LoreAppBootSurface, cwd: str
       // disable it for a whole adapter.
       const _exhaustive: never = bootSurface;
       void _exhaustive;
-      return resolveCorpus(cwd)?.provenance ?? null;
+      return resolveCorpus(cwd, env)?.provenance ?? null;
     }
   }
 }
@@ -314,8 +313,8 @@ function safeInternalErrorHint(rawConfig: LoreConfig | undefined): string | null
  *   `.lore/lore.db` is discoverable from `cwd`, or the config file is
  *   missing/malformed.
  */
-export function loadProjectConfig(): LoreConfig | undefined {
-  const dbPath = findLoreDbPath();
+export function loadProjectConfig(locator: CorpusLocator): LoreConfig | undefined {
+  const dbPath = findLoreDbPath(locator);
   const configResult = resolveProjectConfigResult(dbPath);
   if (!configResult.ok) return undefined;
   const { sync: _sync, ...configWithoutSync } = configResult.value;
@@ -385,7 +384,7 @@ export function loadLoreApp(opts: LoadLoreAppOptions = {}): {
   // for why "cli" is both the overwhelming majority case and the fail-closed
   // direction.
   const bootSurface: LoreAppBootSurface = opts.surface ?? "cli";
-  const dbPath = findLoreDbPath();
+  const dbPath = findLoreDbPath(opts.inv ?? ambientFromProcess());
   // reason: F5 (AC-CRIT-7) — refuse BEFORE createApp so a worktree never migrates main's corpus; the
   // createApp try/catch below would downgrade this to a generic exit-1 "Storage failure".
   const foreignBehind = findForeignBehindSchema(dbPath);
@@ -424,9 +423,9 @@ export function loadLoreApp(opts: LoadLoreAppOptions = {}): {
 
   // ─── Global config + defaults merge ─────────────────────────────────────────
   // reason: SPEC-003 §6.2 — resolve once here so we have the path for the warning message.
-  // reason: transitional (until loadLoreApp takes `inv` itself): the running command's Invocation when the delivery
-  // scope is open, else the process snapshot an Invocation-less entry (MCP/HTTP/tests) would resolve at startup.
-  const composedInvocation = opts.inv ?? invocationInScope();
+  // reason: the caller's Invocation when it passed one, else the process snapshot an Invocation-less entry
+  // (HTTP/tests/scripts) would resolve at startup.
+  const composedInvocation = opts.inv;
   const ambient: AppAmbient =
     composedInvocation !== undefined
       ? {
@@ -478,11 +477,11 @@ export function loadLoreApp(opts: LoadLoreAppOptions = {}): {
   // "internal unexpected throw" errClass (SPEC-073 §Design) actually reachable.
   let appOrResult: App | Result<App, LoreError>;
   try {
-    // reason: the identity of the Invocation the CLI entry resolved and `deliverInvocation` handed to this
-    // command wraps the store inside createApp (spec-run-identity-slice-1 D3); undefined for MCP/HTTP/tests,
-    // which run outside a delivered command. The verified identity is the store's fact
-    // (`ensureVerifiedIdentity(store)`), so there is no `onVerified` write-back into a process slot.
-    const invocationIdentity = invocationInScope()?.identity;
+    // reason: the identity of the Invocation the CLI entry resolved and the command handed in as `opts.inv` wraps the
+    // store inside createApp (spec-run-identity-slice-1 D3); undefined for HTTP/tests/scripts, which pass none. The
+    // verified identity is the store's fact (`ensureVerifiedIdentity(store)`), so there is no `onVerified`
+    // write-back into a process slot.
+    const invocationIdentity = composedInvocation?.identity;
     appOrResult =
       invocationIdentity === undefined
         ? createApp(dbPath, telemetryOnlyConfig)
@@ -534,7 +533,7 @@ export function loadLoreApp(opts: LoadLoreAppOptions = {}): {
   // computed, and `corpus-resolution.ts`'s own module header names exactly
   // this guard as the caller that needs `resolveCorpus()` directly instead.
   const foreignWriteContext: ForeignCorpusWriteContext = {
-    provenance: resolveForeignWriteProvenance(bootSurface, ambient.cwd),
+    provenance: resolveForeignWriteProvenance(bootSurface, ambient.cwd, ambient.env),
     enabled: resolveForeignCorpusWriteGateEnabled(telemetryOnlyConfig),
   };
   app.corpusService.setForeignCorpusWriteContext(foreignWriteContext);

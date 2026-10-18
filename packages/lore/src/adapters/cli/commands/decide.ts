@@ -11,6 +11,7 @@
 import { defineCommand } from "citty";
 import { findLoreDbPath } from "../utils.js";
 import { runDecideFlow } from "../decide-flow.js";
+import { invocationOf } from "../command-invocation.js";
 import { createProductionHumanChannelPorts } from "../../real-human-channel-port.js";
 
 export default defineCommand({
@@ -24,8 +25,10 @@ export default defineCommand({
     reject: { type: "boolean", description: "Reject: the operation stays refused (audit item: the auto decision was WRONG)" },
     reason: { type: "string", description: "Why (recorded with the answer)" },
   },
-  async run({ args }) {
-    const dbPath = findLoreDbPath();
+  async run(context) {
+    const { args } = context;
+    const inv = invocationOf(context);
+    const dbPath = findLoreDbPath(inv);
     process.exitCode = await runDecideFlow(
       {
         dbPath,
@@ -34,7 +37,7 @@ export default defineCommand({
         reject: args.reject === true,
         ...(args.reason === undefined ? {} : { reason: String(args.reason) }),
       },
-      createProductionHumanChannelPorts(),
+      createProductionHumanChannelPorts(inv),
     );
   },
 });

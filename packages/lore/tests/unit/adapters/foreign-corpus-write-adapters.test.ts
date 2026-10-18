@@ -351,7 +351,7 @@ describe("BOUNDARY — absent caller_cwd is treated exactly like HTTP's null exe
     await call({ type: "prd", title: "AC-CP-5 boundary control", caller_cwd: ownRoot });
 
     expect(resolveCorpusSpy).toHaveBeenCalledTimes(1);
-    expect(resolveCorpusSpy).toHaveBeenCalledWith(ownRoot);
+    expect(resolveCorpusSpy).toHaveBeenCalledWith(ownRoot, expect.anything());
   });
 });
 
@@ -447,7 +447,8 @@ function findNonHttpLoaderCalls(source: string): string[] {
   const calls: string[] = [];
   for (const match of source.matchAll(/loadLoreApp\(([^)]*)\)/g)) {
     const args = (match[1] ?? "").replace(/\s+/g, "");
-    if (args !== '{surface:"http"}') calls.push(match[0]);
+    // reason: `inv` is the Invocation the command hands the loader (AS-26); the HTTP surface is still the load-bearing key.
+    if (args !== '{surface:"http"}' && args !== '{surface:"http",inv}') calls.push(match[0]);
   }
   return calls;
 }
