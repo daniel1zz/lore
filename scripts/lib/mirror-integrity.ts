@@ -21,7 +21,7 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { NoOpTelemetry } from "@lore/core";
-import { mirrorDirRelative, MIRROR_TYPES, type MirrorDocType } from "../export-spec-mirror-core.js";
+import { mirrorDirRelative, MIRROR_TYPES, scriptChainReachesTarget, type MirrorDocType } from "../export-spec-mirror-core.js";
 import { InMemoryStore } from "../../packages/lore/src/store/in-memory-store.js";
 import { CorpusService } from "../../packages/lore/src/service/corpus-service.js";
 import { MigrationService } from "../../packages/lore/src/service/migration-service.js";
@@ -36,6 +36,25 @@ import type { App } from "../../packages/lore/src/app.js";
 
 const LIB_REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const LORE_ENTRY = join(LIB_REPO_ROOT, "packages", "lore", "src", "index.ts");
+
+/** AC-FR-6(a) message — shared by the live check and its tests. */
+export const CHAIN_NOT_WIRED_VIOLATION =
+  "AC-FR-6(a): package.json's test chain does not reach export-spec-mirror.ts — the export script is not wired";
+
+/**
+ * AC-FR-6(a): does the test chain reach `export-spec-mirror.ts`? The chain is the runner's step list
+ * (`DEFAULT_STEPS` of `scripts/run-chain.ts`, passed in — never copied here), each step followed through
+ * `bun run <name>` references in package.json `scripts`. The `test` script must also still invoke
+ * `run-chain.ts`, otherwise the step list is not what `bun run test` runs. Pure; returns violations.
+ */
+export function chainWiredViolations(scripts: Readonly<Record<string, string>>, steps: readonly string[]): string[] {
+  const CHAIN_KEY = "\0run-chain-steps";
+  if (!scriptChainReachesTarget(scripts, "test", "run-chain.ts")) {
+    return ["AC-FR-6(a): package.json's test script does not invoke run-chain.ts — the step list is not what `bun run test` runs"];
+  }
+  const withChain = { ...scripts, [CHAIN_KEY]: steps.join(" && ") };
+  return scriptChainReachesTarget(withChain, CHAIN_KEY, "export-spec-mirror.ts") ? [] : [CHAIN_NOT_WIRED_VIOLATION];
+}
 
 /** One live-corpus doc, as `lore list --json` reports it. */
 export interface CorpusDoc {

@@ -4,7 +4,7 @@
  * `spec-falsifiability-reachability-a-feedable-checkpoint-an` (`bun scripts/check-live-mirror-integrity.ts`).
  *
  * PURPOSE: assert, against THIS repository's PRODUCTION corpus and mirror (never a seeded fixture):
- *   AC-FR-6  (a) root package.json's `test` script chain reaches `export-spec-mirror.ts` — WIRED, not
+ *   AC-FR-6  (a) the test chain (`DEFAULT_STEPS` of scripts/run-chain.ts, followed through package.json `bun run` references) reaches `export-spec-mirror.ts` — WIRED, not
  *                merely present;
  *            (b) the read-only `export-spec-mirror.ts --check` exits a code the script DOCUMENTS
  *                (0 or MIRROR_DRIFT_EXIT_CODE — never a crash) and prints its spec-scoped OK line,
@@ -41,10 +41,10 @@ import {
   countMdFilesFlat,
   loadMirrorMappings,
   MIRROR_DRIFT_EXIT_CODE,
-  scriptChainReachesTarget,
   SPEC_MIRROR_DIR_RELATIVE,
 } from "./export-spec-mirror-core.js";
-import { measureAllTypesParity, measureLinksBrokenAt, runLoreList } from "./lib/mirror-integrity.js";
+import { chainWiredViolations, measureAllTypesParity, measureLinksBrokenAt, runLoreList } from "./lib/mirror-integrity.js";
+import { DEFAULT_STEPS } from "./run-chain.js";
 
 const SCRIPT_REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -60,14 +60,12 @@ function parseRoot(argv: readonly string[]): string {
 /** The spec-scoped line `--check` prints when every corpus spec has a mirror file. */
 const SPEC_OK_LINE = "OK — every corpus spec has a mirror file (count and slug parity; file CONTENT is not compared).";
 
-/** AC-FR-6(a): the root's package.json's `test` chain reaches the export script. */
+/** AC-FR-6(a): the test chain (run-chain.ts DEFAULT_STEPS, followed through package.json scripts) reaches the export script. */
 function checkChainWired(root: string): string[] {
   const raw = readFileSync(join(root, "package.json"), "utf8");
   const scripts = (JSON.parse(raw) as { scripts?: Record<string, string> }).scripts;
   if (scripts === undefined) throw new Error("package.json has no \"scripts\" section");
-  return scriptChainReachesTarget(scripts, "test", "export-spec-mirror.ts")
-    ? []
-    : ["AC-FR-6(a): package.json's test chain does not reach export-spec-mirror.ts — the export script is not wired"];
+  return chainWiredViolations(scripts, DEFAULT_STEPS);
 }
 
 /** AC-FR-6(b): one real read-only `--check` pass plus an independent parity re-derivation. */
