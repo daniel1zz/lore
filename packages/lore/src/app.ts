@@ -788,7 +788,7 @@ function buildAppFromSqlite(
   // schema's own defaults so a caller that omits them (bare test construction) still
   // gets the SAME "default" reading `resolveLedgerAutoApprove(undefined)` would.
   ledgerAutoApprove: boolean = true,
-  judgmentRequiredTypes: readonly string[] = ["spec", "adr"],
+  judgmentRequiredTypes: readonly string[] = resolveJudgmentRequiredTypes(undefined),
   // SPEC-102 hardening (T4 item 4) — the SAME mutable box `pruneTrigger`
   // (above) writes its in-flight promise into; `close()` below reads it so
   // an in-flight prune batch is waited out before the store handle it uses
@@ -1222,7 +1222,7 @@ function buildAppFromTurso(
   // schema's own defaults so a caller that omits them (bare test construction) still
   // gets the SAME "default" reading `resolveLedgerAutoApprove(undefined)` would.
   ledgerAutoApprove: boolean = true,
-  judgmentRequiredTypes: readonly string[] = ["spec", "adr"],
+  judgmentRequiredTypes: readonly string[] = resolveJudgmentRequiredTypes(undefined),
   // SPEC-102 hardening (T4 item 4) — see `buildAppFromSqlite`'s identical
   // parameter JSDoc; the SAME mutable box `pruneTrigger` (above) writes its
   // in-flight promise into, read by `close()` below.
@@ -1717,7 +1717,7 @@ function createAppUnscoped(
   const attestationMinRatio = resolveAttestationMinRatio(config);
 
   // Tiered-review config (SPEC-103 §Mechanisms M1/M2) — defaults to `true` /
-  // `["spec","adr"]` when config/workflow/review section absent.
+  // the Zod schema defaults (resolveJudgmentRequiredTypes: ["spec","adr","plan"]) when the section is absent.
   const ledgerAutoApprove = resolveLedgerAutoApprove(config);
   const judgmentRequiredTypes = resolveJudgmentRequiredTypes(config);
 
