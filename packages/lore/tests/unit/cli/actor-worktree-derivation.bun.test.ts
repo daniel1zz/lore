@@ -61,6 +61,7 @@ import {
   resolveActorWithIdentitySource,
   resolveActorWithSource,
 } from "../../../src/adapters/cli/utils.js";
+import { liveInvocation } from "../../live-invocation.js";
 
 // ─── Git fixture helpers ────────────────────────────────────────────────────
 
@@ -423,7 +424,7 @@ describe("SPEC-104 AC-ACTOR-5 — lore claim from a linked worktree records agen
       const claimCmd = await importClaimCommand();
       const output = captureOutput();
       try {
-        await claimCmd.run({ args: { task: taskResult.value.slug } });
+        await claimCmd.run({ args: { task: taskResult.value.slug }, inv: liveInvocation() });
       } finally {
         output.restore();
       }

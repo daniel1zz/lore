@@ -54,6 +54,7 @@ import { createApp } from "../../../src/app.js";
 import { SQLiteStore } from "../../../src/store/sqlite-store.js";
 import type { App } from "../../../src/app.js";
 import type { DocRecord } from "@lore/core";
+import { liveInvocation } from "../../live-invocation.js";
 
 // ─── Command type + in-process importers ────────────────────────────────────
 
@@ -273,7 +274,7 @@ describe("lore ac list --json — falsified + coverage state (AC-FALS-4)", () =>
     const listCmd = await importAcListCommand();
     const capture = captureConsoleLog();
     try {
-      await listCmd.run({ args: { spec: specSlug, json: true } });
+      await listCmd.run({ args: { spec: specSlug, json: true }, inv: liveInvocation() });
     } finally {
       capture.restore();
     }
@@ -312,7 +313,7 @@ describe("lore ac list --json — falsified + coverage state (AC-FALS-4)", () =>
     const listCmd = await importAcListCommand();
     const capture = captureConsoleLog();
     try {
-      await listCmd.run({ args: { spec: specSlug, json: true } });
+      await listCmd.run({ args: { spec: specSlug, json: true }, inv: liveInvocation() });
     } finally {
       capture.restore();
     }
@@ -380,7 +381,7 @@ describe("lore ac list human table — pass_unfalsified marker (AC-FALS-5)", () 
     const listCmd = await importAcListCommand();
     const capture = captureConsoleLog();
     try {
-      await listCmd.run({ args: { spec: specSlug } });
+      await listCmd.run({ args: { spec: specSlug }, inv: liveInvocation() });
     } finally {
       capture.restore();
     }
@@ -407,7 +408,7 @@ describe("lore ac list human table — pass_unfalsified marker (AC-FALS-5)", () 
     const listCmd = await importAcListCommand();
     const capture = captureConsoleLog();
     try {
-      await listCmd.run({ args: { spec: specSlug } });
+      await listCmd.run({ args: { spec: specSlug }, inv: liveInvocation() });
     } finally {
       capture.restore();
     }
@@ -452,7 +453,7 @@ describe("lore status --json — corpus-wide pass_unfalsified count (AC-FALS-6)"
     const statusCmd = await importStatusCommand();
     const capture1 = captureConsoleLog();
     try {
-      await statusCmd.run({ args: { json: true } });
+      await statusCmd.run({ args: { json: true }, inv: liveInvocation() });
     } finally {
       capture1.restore();
     }
@@ -487,7 +488,7 @@ describe("lore status --json — corpus-wide pass_unfalsified count (AC-FALS-6)"
 
     const capture2 = captureConsoleLog();
     try {
-      await statusCmd.run({ args: { json: true } });
+      await statusCmd.run({ args: { json: true }, inv: liveInvocation() });
     } finally {
       capture2.restore();
     }
@@ -501,7 +502,7 @@ describe("lore status --json — corpus-wide pass_unfalsified count (AC-FALS-6)"
     const statusCmd = await importStatusCommand();
     const capture = captureConsoleLog();
     try {
-      await statusCmd.run({ args: { json: true } });
+      await statusCmd.run({ args: { json: true }, inv: liveInvocation() });
     } finally {
       capture.restore();
     }
@@ -515,7 +516,7 @@ describe("lore status --json — corpus-wide pass_unfalsified count (AC-FALS-6)"
     const statusCmd = await importStatusCommand();
     const capture = captureConsoleLog();
     try {
-      await statusCmd.run({ args: { json: true } });
+      await statusCmd.run({ args: { json: true }, inv: liveInvocation() });
     } finally {
       capture.restore();
     }
@@ -560,7 +561,7 @@ describe("lore status --json — unclaimed-oracle findings (AC-FALS-10)", () => 
     const statusCmd = await importStatusCommand();
     const capture = captureConsoleLog();
     try {
-      await statusCmd.run({ args: { json: true } });
+      await statusCmd.run({ args: { json: true }, inv: liveInvocation() });
     } finally {
       capture.restore();
     }
@@ -584,7 +585,7 @@ describe("lore status --json — unclaimed-oracle findings (AC-FALS-10)", () => 
     const statusCmd = await importStatusCommand();
     const capture = captureConsoleLog();
     try {
-      await statusCmd.run({ args: { json: true } });
+      await statusCmd.run({ args: { json: true }, inv: liveInvocation() });
     } finally {
       capture.restore();
     }

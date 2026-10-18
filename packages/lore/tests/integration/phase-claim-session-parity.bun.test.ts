@@ -50,6 +50,7 @@ import { createApp } from "../../src/app.js";
 import type { App } from "../../src/app.js";
 import type { CreateDocInput, DocRecord, TaskClaim } from "@lore/core";
 import { resolveActor } from "../../src/adapters/cli/utils.js";
+import { liveInvocation } from "../live-invocation.js";
 
 /**
  * The name the CURRENT process environment resolves to (session tier, else the fallback tiers). No surface takes a
@@ -202,7 +203,7 @@ async function runPreflight(phaseSlug: string): Promise<{ exitCode: number; stdo
   const output = captureOutput();
   process.exitCode = 0;
   try {
-    await cmd.run({ args: { phase: phaseSlug } });
+    await cmd.run({ args: { phase: phaseSlug }, inv: liveInvocation() });
   } finally {
     output.restore();
   }

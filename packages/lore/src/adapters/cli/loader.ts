@@ -485,7 +485,7 @@ export function loadLoreApp(opts: LoadLoreAppOptions = {}): {
     const invocationIdentity = invocationInScope()?.identity;
     appOrResult =
       invocationIdentity === undefined
-        ? createApp(dbPath, telemetryOnlyConfig, undefined, ambient)
+        ? createApp(dbPath, telemetryOnlyConfig)
         : createAppWithWriteContext(dbPath, telemetryOnlyConfig, { identity: invocationIdentity }, ambient);
   } catch (thrown) {
     const message = thrown instanceof Error ? thrown.message : String(thrown);

@@ -51,6 +51,7 @@ import { execFileSync } from "node:child_process";
 import { UNCITED_SPEC_RULE } from "../../src/service/spec-approval-citation.js";
 import { ensureLiveRuleViaCli } from "../helpers/cli-live-rule.js";
 import type { CreateDocInput, DocId, LoreConfig } from "@lore/core";
+import { liveInvocation } from "../live-invocation.js";
 
 // ─── Command type (mirrors assess-ai.bun.test.ts) ────────────────────────────
 
@@ -392,7 +393,7 @@ describe("lore gate spec-promote — AC3: no acceptance criteria (deterministic 
     const cmd = await importGateSpecPromoteCommand();
     const output = captureOutput();
     try {
-      await cmd.run({ args: { spec: specSlug } });
+      await cmd.run({ args: { spec: specSlug }, inv: liveInvocation() });
     } finally {
       output.restore();
     }
@@ -421,7 +422,7 @@ describe("lore gate spec-promote — AC4: acceptance criteria present (exit 0) +
     const cmd = await importGateSpecPromoteCommand();
     const output = captureOutput();
     try {
-      await cmd.run({ args: { spec: specSlug } });
+      await cmd.run({ args: { spec: specSlug }, inv: liveInvocation() });
     } finally {
       output.restore();
     }
@@ -439,7 +440,7 @@ describe("lore gate spec-promote — AC4: acceptance criteria present (exit 0) +
     const cmd = await importGateSpecPromoteCommand();
     const output = captureOutput();
     try {
-      await cmd.run({ args: { spec: specSlug } });
+      await cmd.run({ args: { spec: specSlug }, inv: liveInvocation() });
     } finally {
       output.restore();
     }
@@ -455,7 +456,7 @@ describe("lore gate spec-promote — AC4: acceptance criteria present (exit 0) +
     const cmd = await importGateSpecPromoteCommand();
     const output = captureOutput();
     try {
-      await cmd.run({ args: { spec: specSlug } });
+      await cmd.run({ args: { spec: specSlug }, inv: liveInvocation() });
     } finally {
       output.restore();
     }
@@ -481,7 +482,7 @@ describe("lore gate spec-promote — AC4: acceptance criteria present (exit 0) +
     const cmd = await importGateSpecPromoteCommand();
     const output = captureOutput();
     try {
-      await cmd.run({ args: { spec: specSlug } });
+      await cmd.run({ args: { spec: specSlug }, inv: liveInvocation() });
     } finally {
       output.restore();
     }
@@ -500,7 +501,7 @@ describe("lore gate spec-promote — AC4: acceptance criteria present (exit 0) +
     const cmd = await importGateSpecPromoteCommand();
     const output = captureOutput();
     try {
-      await cmd.run({ args: { spec: specSlug } });
+      await cmd.run({ args: { spec: specSlug }, inv: liveInvocation() });
     } finally {
       output.restore();
     }
@@ -518,7 +519,7 @@ describe("lore gate spec-promote — AC4: acceptance criteria present (exit 0) +
     const cmd = await importGateSpecPromoteCommand();
     const output = captureOutput();
     try {
-      await cmd.run({ args: { spec: specSlug } });
+      await cmd.run({ args: { spec: specSlug }, inv: liveInvocation() });
     } finally {
       output.restore();
     }
@@ -541,7 +542,7 @@ describe("lore gate spec-promote — AC-Quantifiability Gate CLI parity", () => 
     const cmd = await importGateSpecPromoteCommand();
     const output = captureOutput();
     try {
-      await cmd.run({ args: { spec: specSlug } });
+      await cmd.run({ args: { spec: specSlug }, inv: liveInvocation() });
     } finally {
       output.restore();
     }
@@ -562,7 +563,7 @@ describe("lore gate spec-promote — AC-Quantifiability Gate CLI parity", () => 
     const cmd = await importGateSpecPromoteCommand();
     const output = captureOutput();
     try {
-      await cmd.run({ args: { spec: specSlug } });
+      await cmd.run({ args: { spec: specSlug }, inv: liveInvocation() });
     } finally {
       output.restore();
     }
@@ -583,7 +584,7 @@ describe("lore gate spec-promote — AC-Quantifiability Gate CLI parity", () => 
     const cmd = await importGateSpecPromoteCommand();
     const output = captureOutput();
     try {
-      await cmd.run({ args: { spec: specSlug } });
+      await cmd.run({ args: { spec: specSlug }, inv: liveInvocation() });
     } finally {
       output.restore();
     }
@@ -602,7 +603,7 @@ describe("lore gate spec-promote — AC-Quantifiability Gate CLI parity", () => 
     const cmd = await importGateSpecPromoteCommand();
     const output = captureOutput();
     try {
-      await cmd.run({ args: { spec: specSlug } });
+      await cmd.run({ args: { spec: specSlug }, inv: liveInvocation() });
     } finally {
       output.restore();
       delete process.env["LORE_GATE_BYPASS"];
@@ -621,7 +622,7 @@ describe("lore gate spec-promote — doc resolution failures", () => {
     const cmd = await importGateSpecPromoteCommand();
     const output = captureOutput();
     try {
-      await cmd.run({ args: { spec: "does-not-exist-slug" } });
+      await cmd.run({ args: { spec: "does-not-exist-slug" }, inv: liveInvocation() });
     } finally {
       output.restore();
     }
@@ -635,7 +636,7 @@ describe("lore gate spec-promote — doc resolution failures", () => {
     const cmd = await importGateSpecPromoteCommand();
     const output = captureOutput();
     try {
-      await cmd.run({ args: { spec: prdSlug } });
+      await cmd.run({ args: { spec: prdSlug }, inv: liveInvocation() });
     } finally {
       output.restore();
     }
@@ -654,7 +655,7 @@ describe("lore gate spec-promote — STATE: LORE_GATE_BYPASS=1", () => {
     const cmd = await importGateSpecPromoteCommand();
     const output = captureOutput();
     try {
-      await cmd.run({ args: { spec: specSlug } });
+      await cmd.run({ args: { spec: specSlug }, inv: liveInvocation() });
     } finally {
       output.restore();
       delete process.env["LORE_GATE_BYPASS"];
@@ -669,7 +670,7 @@ describe("lore gate spec-promote — STATE: LORE_GATE_BYPASS=1", () => {
     const cmd = await importGateSpecPromoteCommand();
     const output = captureOutput();
     try {
-      await cmd.run({ args: { spec: "totally-nonexistent" } });
+      await cmd.run({ args: { spec: "totally-nonexistent" }, inv: liveInvocation() });
     } finally {
       output.restore();
       delete process.env["LORE_GATE_BYPASS"];
@@ -696,7 +697,7 @@ describe("lore gate spec-promote — AC2 (parity fix): CLI resolves specKind + v
     const cmd = await importGateSpecPromoteCommand();
     const output = captureOutput();
     try {
-      await cmd.run({ args: { spec: specSlug } });
+      await cmd.run({ args: { spec: specSlug }, inv: liveInvocation() });
     } finally {
       output.restore();
     }
@@ -735,7 +736,7 @@ describe("lore gate spec-promote — AC2 (parity fix): CLI resolves specKind + v
     const cmd = await importGateSpecPromoteCommand();
     const output = captureOutput();
     try {
-      await cmd.run({ args: { spec: specSlug } });
+      await cmd.run({ args: { spec: specSlug }, inv: liveInvocation() });
     } finally {
       output.restore();
     }
@@ -767,7 +768,7 @@ describe("lore gate spec-promote — AC2 (parity fix): CLI resolves specKind + v
     const cmd = await importGateSpecPromoteCommand();
     const output = captureOutput();
     try {
-      await cmd.run({ args: { spec: specSlug } });
+      await cmd.run({ args: { spec: specSlug }, inv: liveInvocation() });
     } finally {
       output.restore();
     }
@@ -782,7 +783,7 @@ describe("lore gate spec-promote — AC2 (parity fix): CLI resolves specKind + v
     const cmd = await importGateSpecPromoteCommand();
     const output = captureOutput();
     try {
-      await cmd.run({ args: { spec: specSlug } });
+      await cmd.run({ args: { spec: specSlug }, inv: liveInvocation() });
     } finally {
       output.restore();
     }
@@ -805,7 +806,7 @@ describe("lore gate spec-promote — BR-1007 parity with `lore approve` (issue #
     const cmd = await importGateSpecPromoteCommand();
     const output = captureOutput();
     try {
-      await cmd.run({ args: { spec: specSlug } });
+      await cmd.run({ args: { spec: specSlug }, inv: liveInvocation() });
     } finally {
       output.restore();
     }
@@ -833,7 +834,7 @@ describe("lore gate spec-promote — BR-1007 parity with `lore approve` (issue #
     const cmd = await importGateSpecPromoteCommand();
     const output = captureOutput();
     try {
-      await cmd.run({ args: { spec: specSlug } });
+      await cmd.run({ args: { spec: specSlug }, inv: liveInvocation() });
     } finally {
       output.restore();
     }
@@ -853,7 +854,7 @@ describe("lore gate spec-promote — BR-1007 parity with `lore approve` (issue #
     const cmd = await importGateSpecPromoteCommand();
     const output = captureOutput();
     try {
-      await cmd.run({ args: { spec: specSlug } });
+      await cmd.run({ args: { spec: specSlug }, inv: liveInvocation() });
     } finally {
       output.restore();
     }
@@ -869,7 +870,7 @@ describe("lore gate spec-promote — BR-1007 parity with `lore approve` (issue #
     const cmd = await importGateSpecPromoteCommand();
     const output = captureOutput();
     try {
-      await cmd.run({ args: { spec: specSlug } });
+      await cmd.run({ args: { spec: specSlug }, inv: liveInvocation() });
     } finally {
       output.restore();
     }

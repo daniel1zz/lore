@@ -33,6 +33,7 @@ import { join, resolve } from "path";
 import { tmpdir } from "os";
 import { createApp, type App } from "../../src/app.js";
 import type { CreateDocInput } from "@lore/core";
+import { liveInvocation } from "../live-invocation.js";
 
 // ─── Command type + importer (mirrors spec-loop-e2e.bun.test.ts) ────────────
 
@@ -160,7 +161,7 @@ async function runGateSpecCreate(payload: Record<string, unknown>) {
   const cmd = await importGateSpecCreate();
   const output = captureOutput();
   try {
-    await cmd.run({ args: { "input-json": JSON.stringify(payload) } });
+    await cmd.run({ args: { "input-json": JSON.stringify(payload) }, inv: liveInvocation() });
   } finally {
     output.restore();
   }

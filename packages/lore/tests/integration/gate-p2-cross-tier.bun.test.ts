@@ -39,6 +39,7 @@ import { SQLiteStore } from "../../src/store/sqlite-store.js";
 import type { CreateDocInput, LoreConfig } from "@lore/core";
 import { asSessionActor } from "../helpers/session-actor";
 import { resolveActor } from "../../src/adapters/cli/utils.js";
+import { liveInvocation } from "../live-invocation.js";
 
 /**
  * Constructs a fixture-only App with ALL FOUR `lore gate` service-layer checkpoints
@@ -408,7 +409,7 @@ describe("lore gate plan-promote — AC-P2-2: ancestor spec not approved", () =>
     const cmd = await importGateSubCommand("plan-promote");
     const output = captureOutput();
     try {
-      await cmd.run({ args: { plan: planSlug } });
+      await cmd.run({ args: { plan: planSlug }, inv: liveInvocation() });
     } finally {
       output.restore();
     }
@@ -430,7 +431,7 @@ describe("lore gate plan-promote — AC-P2-3: ancestor spec approved but 0 accep
     const cmd = await importGateSubCommand("plan-promote");
     const output = captureOutput();
     try {
-      await cmd.run({ args: { plan: planSlug } });
+      await cmd.run({ args: { plan: planSlug }, inv: liveInvocation() });
     } finally {
       output.restore();
     }
@@ -453,7 +454,7 @@ describe("lore gate plan-promote — AC-P2-4: ancestor spec approved with ≥1 a
     const cmd = await importGateSubCommand("plan-promote");
     const output = captureOutput();
     try {
-      await cmd.run({ args: { plan: planSlug } });
+      await cmd.run({ args: { plan: planSlug }, inv: liveInvocation() });
     } finally {
       output.restore();
     }
@@ -474,7 +475,7 @@ describe("lore gate task-claim — AC-P2-5: plan's ancestor spec approval status
     const cmd = await importGateSubCommand("task-claim");
     const output = captureOutput();
     try {
-      await cmd.run({ args: { task: taskSlug } });
+      await cmd.run({ args: { task: taskSlug }, inv: liveInvocation() });
     } finally {
       output.restore();
     }
@@ -492,7 +493,7 @@ describe("lore gate task-claim — AC-P2-5: plan's ancestor spec approval status
     const cmd = await importGateSubCommand("task-claim");
     const output = captureOutput();
     try {
-      await cmd.run({ args: { task: taskSlug } });
+      await cmd.run({ args: { task: taskSlug }, inv: liveInvocation() });
     } finally {
       output.restore();
     }
@@ -512,7 +513,7 @@ describe("lore gate — AC-P2-6: no spec-tier ancestor passes vacuously", () => 
     const cmd = await importGateSubCommand("plan-promote");
     const output = captureOutput();
     try {
-      await cmd.run({ args: { plan: planSlug } });
+      await cmd.run({ args: { plan: planSlug }, inv: liveInvocation() });
     } finally {
       output.restore();
     }
@@ -528,7 +529,7 @@ describe("lore gate — AC-P2-6: no spec-tier ancestor passes vacuously", () => 
     const cmd = await importGateSubCommand("task-claim");
     const output = captureOutput();
     try {
-      await cmd.run({ args: { task: taskSlug } });
+      await cmd.run({ args: { task: taskSlug }, inv: liveInvocation() });
     } finally {
       output.restore();
     }
@@ -547,7 +548,7 @@ describe("lore gate plan-promote / task-claim — doc resolution failures", () =
     const cmd = await importGateSubCommand("plan-promote");
     const output = captureOutput();
     try {
-      await cmd.run({ args: { plan: "does-not-exist-slug" } });
+      await cmd.run({ args: { plan: "does-not-exist-slug" }, inv: liveInvocation() });
     } finally {
       output.restore();
     }
@@ -561,7 +562,7 @@ describe("lore gate plan-promote / task-claim — doc resolution failures", () =
     const cmd = await importGateSubCommand("plan-promote");
     const output = captureOutput();
     try {
-      await cmd.run({ args: { plan: specSlug } });
+      await cmd.run({ args: { plan: specSlug }, inv: liveInvocation() });
     } finally {
       output.restore();
     }
@@ -576,7 +577,7 @@ describe("lore gate plan-promote / task-claim — doc resolution failures", () =
     const cmd = await importGateSubCommand("task-claim");
     const output = captureOutput();
     try {
-      await cmd.run({ args: { task: "does-not-exist-slug" } });
+      await cmd.run({ args: { task: "does-not-exist-slug" }, inv: liveInvocation() });
     } finally {
       output.restore();
     }
@@ -590,7 +591,7 @@ describe("lore gate plan-promote / task-claim — doc resolution failures", () =
     const cmd = await importGateSubCommand("task-claim");
     const output = captureOutput();
     try {
-      await cmd.run({ args: { task: planSlug } });
+      await cmd.run({ args: { task: planSlug }, inv: liveInvocation() });
     } finally {
       output.restore();
     }
@@ -609,7 +610,7 @@ describe("lore gate plan-promote / task-claim — STATE: LORE_GATE_BYPASS=1", ()
     const cmd = await importGateSubCommand("plan-promote");
     const output = captureOutput();
     try {
-      await cmd.run({ args: { plan: planSlug } });
+      await cmd.run({ args: { plan: planSlug }, inv: liveInvocation() });
     } finally {
       output.restore();
       delete process.env["LORE_GATE_BYPASS"];
@@ -626,7 +627,7 @@ describe("lore gate plan-promote / task-claim — STATE: LORE_GATE_BYPASS=1", ()
     const cmd = await importGateSubCommand("task-claim");
     const output = captureOutput();
     try {
-      await cmd.run({ args: { task: taskSlug } });
+      await cmd.run({ args: { task: taskSlug }, inv: liveInvocation() });
     } finally {
       output.restore();
       delete process.env["LORE_GATE_BYPASS"];
@@ -651,7 +652,7 @@ describe("lore gate plan-promote / task-claim — AC-P2-SOFTDEL: soft-deleted an
     const preCmd = await importGateSubCommand("plan-promote");
     let output = captureOutput();
     try {
-      await preCmd.run({ args: { plan: planSlug } });
+      await preCmd.run({ args: { plan: planSlug }, inv: liveInvocation() });
     } finally {
       output.restore();
     }
@@ -662,7 +663,7 @@ describe("lore gate plan-promote / task-claim — AC-P2-SOFTDEL: soft-deleted an
     const cmd = await importGateSubCommand("plan-promote");
     output = captureOutput();
     try {
-      await cmd.run({ args: { plan: planSlug } });
+      await cmd.run({ args: { plan: planSlug }, inv: liveInvocation() });
     } finally {
       output.restore();
     }
@@ -682,7 +683,7 @@ describe("lore gate plan-promote / task-claim — AC-P2-SOFTDEL: soft-deleted an
     const preCmd = await importGateSubCommand("task-claim");
     let output = captureOutput();
     try {
-      await preCmd.run({ args: { task: taskSlug } });
+      await preCmd.run({ args: { task: taskSlug }, inv: liveInvocation() });
     } finally {
       output.restore();
     }
@@ -693,7 +694,7 @@ describe("lore gate plan-promote / task-claim — AC-P2-SOFTDEL: soft-deleted an
     const cmd = await importGateSubCommand("task-claim");
     output = captureOutput();
     try {
-      await cmd.run({ args: { task: taskSlug } });
+      await cmd.run({ args: { task: taskSlug }, inv: liveInvocation() });
     } finally {
       output.restore();
     }
@@ -715,7 +716,7 @@ describe("lore gate plan-promote / task-claim — AC-P2-SOFTDEL: soft-deleted an
     const cmd = await importGateSubCommand("plan-promote");
     const output = captureOutput();
     try {
-      await cmd.run({ args: { plan: planSlug } });
+      await cmd.run({ args: { plan: planSlug }, inv: liveInvocation() });
     } finally {
       output.restore();
     }
@@ -738,7 +739,7 @@ describe("lore gate — REGRESSION: plan-promote and task-claim agree on the sam
     // -- both blocked while draft --
     let output = captureOutput();
     try {
-      await planCmd.run({ args: { plan: planSlug } });
+      await planCmd.run({ args: { plan: planSlug }, inv: liveInvocation() });
     } finally {
       output.restore();
     }
@@ -746,7 +747,7 @@ describe("lore gate — REGRESSION: plan-promote and task-claim agree on the sam
 
     output = captureOutput();
     try {
-      await taskCmd.run({ args: { task: taskSlug } });
+      await taskCmd.run({ args: { task: taskSlug }, inv: liveInvocation() });
     } finally {
       output.restore();
     }
@@ -759,7 +760,7 @@ describe("lore gate — REGRESSION: plan-promote and task-claim agree on the sam
 
     output = captureOutput();
     try {
-      await planCmd.run({ args: { plan: planSlug } });
+      await planCmd.run({ args: { plan: planSlug }, inv: liveInvocation() });
     } finally {
       output.restore();
     }
@@ -767,7 +768,7 @@ describe("lore gate — REGRESSION: plan-promote and task-claim agree on the sam
 
     output = captureOutput();
     try {
-      await taskCmd.run({ args: { task: taskSlug } });
+      await taskCmd.run({ args: { task: taskSlug }, inv: liveInvocation() });
     } finally {
       output.restore();
     }
@@ -805,7 +806,7 @@ describe("lore gate task-claim — AC-P2-ANCHOR: anchor-overlap parity with `lor
     const cmd = await importGateSubCommand("task-claim");
     const output = captureOutput();
     try {
-      await asSessionActor("agent:b", () => cmd.run({ args: { task: taskBSlug } }));
+      await asSessionActor("agent:b", () => cmd.run({ args: { task: taskBSlug }, inv: liveInvocation() }));
     } finally {
       output.restore();
     }
@@ -835,7 +836,7 @@ describe("lore gate task-claim — AC-P2-ANCHOR: anchor-overlap parity with `lor
     // -- blocked while task A's claim is live --
     let output = captureOutput();
     try {
-      await asSessionActor("agent:b", () => cmd.run({ args: { task: taskBSlug } }));
+      await asSessionActor("agent:b", () => cmd.run({ args: { task: taskBSlug }, inv: liveInvocation() }));
     } finally {
       output.restore();
     }
@@ -847,7 +848,7 @@ describe("lore gate task-claim — AC-P2-ANCHOR: anchor-overlap parity with `lor
     // -- the SAME gate call now passes --
     output = captureOutput();
     try {
-      await asSessionActor("agent:b", () => cmd.run({ args: { task: taskBSlug } }));
+      await asSessionActor("agent:b", () => cmd.run({ args: { task: taskBSlug }, inv: liveInvocation() }));
     } finally {
       output.restore();
     }
@@ -889,7 +890,7 @@ describe("lore gate task-claim — AC-P2-ANCHOR: anchor-overlap parity with `lor
     setSessionEnv("CLAUDE_CODE_SESSION_ID", "3de02220-same-session");
     const output = captureOutput();
     try {
-      await cmd.run({ args: { task: taskBSlug } });
+      await cmd.run({ args: { task: taskBSlug }, inv: liveInvocation() });
     } finally {
       output.restore();
     }
@@ -922,7 +923,7 @@ describe("lore gate task-claim — AC-P2-ANCHOR: anchor-overlap parity with `lor
     setSessionEnv(null);
     const output = captureOutput();
     try {
-      await cmd.run({ args: { task: taskBSlug } });
+      await cmd.run({ args: { task: taskBSlug }, inv: liveInvocation() });
     } finally {
       output.restore();
     }
@@ -945,7 +946,7 @@ describe("lore gate task-claim — AC-P2-ANCHOR: anchor-overlap parity with `lor
     const cmd = await importGateSubCommand("task-claim");
     const output = captureOutput();
     try {
-      await asSessionActor("agent:b", () => cmd.run({ args: { task: taskBSlug } }));
+      await asSessionActor("agent:b", () => cmd.run({ args: { task: taskBSlug }, inv: liveInvocation() }));
     } finally {
       output.restore();
     }
@@ -969,7 +970,7 @@ describe("lore gate task-claim — AC-P2-ANCHOR: anchor-overlap parity with `lor
     const cmd = await importGateSubCommand("task-claim");
     const output = captureOutput();
     try {
-      await asSessionActor("agent:b", () => cmd.run({ args: { task: taskBSlug } }));
+      await asSessionActor("agent:b", () => cmd.run({ args: { task: taskBSlug }, inv: liveInvocation() }));
     } finally {
       output.restore();
     }

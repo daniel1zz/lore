@@ -49,6 +49,7 @@ import { saveConfig } from "@lore/core/node";
 import { checkRepoPollution } from "../../src/repo-pollution-guard.js";
 import { citeSpecViaCli, type LoreRunner } from "../helpers/cli-live-rule.js";
 import type { CreateDocInput } from "@lore/core";
+import { liveInvocation } from "../live-invocation.js";
 
 /**
  * `scripts/` lives outside `packages/lore/tsconfig.tests.json`'s `rootDir` (scoped to
@@ -240,7 +241,7 @@ async function runGateSpecCreate(payload: Record<string, unknown>) {
   const cmd = await importGateCommand("spec-create");
   const output = captureOutput();
   try {
-    await cmd.run({ args: { "input-json": JSON.stringify(payload) } });
+    await cmd.run({ args: { "input-json": JSON.stringify(payload) }, inv: liveInvocation() });
   } finally {
     output.restore();
   }
@@ -251,7 +252,7 @@ async function runGateSpecPromote(specIdOrSlug: string) {
   const cmd = await importGateCommand("spec-promote");
   const output = captureOutput();
   try {
-    await cmd.run({ args: { spec: specIdOrSlug } });
+    await cmd.run({ args: { spec: specIdOrSlug }, inv: liveInvocation() });
   } finally {
     output.restore();
   }
