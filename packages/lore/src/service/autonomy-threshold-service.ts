@@ -80,6 +80,27 @@ export function canonicalJson(value: unknown): string {
   return JSON.stringify(sort(value));
 }
 
+/** `subject_id` of a governance-loosen decision: names every loosened edit (`<class>.<field>: a -> b`). */
+export function loosenSubjectId(loosened: readonly string[]): string {
+  return `${THRESHOLD_SUBJECT_ID}: ${loosened.join("; ")}`;
+}
+
+/**
+ * The class ids a governance-loosen `subject_id` (see {@link loosenSubjectId}) loosens. Calibration uses it to
+ * empty exactly those classes' real-outcome windows when the human accepts (AC-AU-8 half 3b). The regenerable-set
+ * edits are not a class and are skipped.
+ */
+export function loosenedClassIdsOf(subjectId: string): string[] {
+  const prefix = `${THRESHOLD_SUBJECT_ID}: `;
+  if (!subjectId.startsWith(prefix)) return [];
+  const ids = subjectId
+    .slice(prefix.length)
+    .split("; ")
+    .map((line) => /^([^.:\s]+)[.:]/.exec(line)?.[1])
+    .filter((id): id is string => id !== undefined && id !== "worktreeRemoveRegenerable");
+  return [...new Set(ids)];
+}
+
 /** sha256 hex of `text` — the hash the write rows carry. */
 export function contentHashOf(text: string): string {
   return createHash("sha256").update(text).digest("hex");
@@ -219,7 +240,7 @@ export class AutonomyThresholdService {
       return ok({ kind: "applied", change, write_record_id: written.value.id, approved_by_record: null });
     }
 
-    const subject = { id: `${THRESHOLD_SUBJECT_ID}: ${change.loosened.join("; ")}`, version: contentHashOf(canonicalJson(checked.data)) };
+    const subject = { id: loosenSubjectId(change.loosened), version: contentHashOf(canonicalJson(checked.data)) };
     const effective = await decisions.effectiveVerdict(GOVERNANCE_LOOSEN_CLASS, subject);
     if (!effective.ok) return effective;
     if (effective.value !== null && effective.value.channel === "human-tty" && effective.value.verdict === "auto") {

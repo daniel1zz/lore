@@ -39,7 +39,7 @@ const DRIVER_TS = join(PACKAGE_ROOT, "tests", "integration", "fixtures", "autono
 const NONCE_RE = /Confirmation code: ([A-Z0-9]{8})/;
 
 /** Facts that score 0.9 for stash-drop (min of R 0.9, B 1, E 1, C 0.97) — auto against the seeded 0.8 threshold. */
-const AUTO_FACTS = { recoverability: "loss-free-by-proof", blast: "own-or-ended-run", evidence: "lore-evaluated", confidence: 0.97 } as const;
+const AUTO_FACTS = { recoverability: "loss-free-by-proof", blast: "own-or-ended-run", evidence: "lore-evaluated" } as const;
 
 const created: string[] = [];
 afterAll(() => {
@@ -196,7 +196,7 @@ describe("AC-AU-9 thresholds are governed data and fail safe", () => {
 
     // every class, not only the edited one: worktree-remove with its own auto-grade facts
     const other = await withService(corpus, async (service) => {
-      const out = await service.decide("worktree-remove", { id: "/tmp/wt", version: "v1" }, { ...AUTO_FACTS, confidence: 0.97 });
+      const out = await service.decide("worktree-remove", { id: "/tmp/wt", version: "v1" }, { ...AUTO_FACTS });
       if (!out.ok) throw new Error("decide failed");
       return out.value;
     });

@@ -30,6 +30,7 @@
 // @reads service
 // @reads service/CLAUDE.md
 // @reads service/anchor-resolution.ts
+// @reads service/autonomy-threshold-service.ts
 // @reads service/decision-service.ts
 // @reads service/run-reap-service.ts
 // @reads service/validity-service.ts

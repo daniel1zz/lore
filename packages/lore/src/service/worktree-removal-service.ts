@@ -18,8 +18,8 @@
  *   ({@link WorktreeRemovalService.gateRemoval}, `sweep --apply`, {@link WorktreeRemovalService.removeScratchWorktree})
  *   calls decide(`worktree-remove`) through the {@link RemovalDecisionPort}. R is `loss-free-by-proof` only when
  *   `git status --ignored --porcelain` lists no ignored path outside the regenerable set, else `irreversible-local`
- *   (-> escalate, paths named). The factors are measured here; C is the class prior from the registry (AU-T8 replaces
- *   it); no caller supplies a factor.
+ *   (-> escalate, paths named). The factors are measured here; C is computed by DecisionService
+ *   from the class's recorded outcomes (AC-AU-8); no caller supplies a factor.
  * @invariant A `lore-attested-red-*` falsifier scratch worktree is dirty by construction, so for IT the removal test's
  *   dirty / unmerged / run / claim / owner clauses are replaced by ownership proof: the creating pid (owner marker) is
  *   dead, or there is no marker (made before the marker existed). Locked, caller-inside, process-inside still hold.
@@ -132,12 +132,6 @@ interface Inspection {
 
 const WORKTREE_REMOVE_CLASS = "worktree-remove";
 
-/** C until AU-T8 measures it: the GOVERNED class prior; absent -> omitted -> decide() scores C as 0 (fail closed). */
-function priorConfidenceOf(registry: OperationClassRegistry): number | undefined {
-  const operationClass = Object.hasOwn(registry, WORKTREE_REMOVE_CLASS) ? registry[WORKTREE_REMOVE_CLASS] : undefined;
-  return operationClass !== undefined && operationClass.tier === "normal" ? operationClass.priorConfidence : undefined;
-}
-
 function miss<T>(reason: string): Measured<T> {
   return { ok: false, reason };
 }
@@ -181,7 +175,6 @@ export class WorktreeRemovalService implements WorktreeRemovalFactsPort, Worktre
     if (!governed.ok) return { allowed: false, reason: `removal not decided (nothing removed): governed thresholds unreadable: ${governed.error.code}`, ignored_paths: [] };
     const ignored = probe.ignoredPaths(path);
     const outside = ignored.ok ? ignoredPathsOutsideLossFreeSet(probe, path, ignored.value, governed.value.regenerablePatterns) : [];
-    const prior = priorConfidenceOf(governed.value.registry);
     const head = probe.headSha(path);
     // reason: the version carries the ignored-outside list, so removing the offending file produces a NEW subject and the
     // worktree can become auto — while the SAME listing can never be re-scored upward (AC-AU-2 worst-of per version).
@@ -192,7 +185,6 @@ export class WorktreeRemovalService implements WorktreeRemovalFactsPort, Worktre
       // reason: the removal test (owned-or-abandoned, no live run/claim/process) already established the blast radius.
       blast: "own-or-ended-run",
       evidence: "lore-evaluated",
-      ...(prior !== undefined ? { confidence: prior } : {}),
     };
     const outcome = await this.deps.decisions.decide(WORKTREE_REMOVE_CLASS, { id: path, version }, facts);
     if (!outcome.ok) {

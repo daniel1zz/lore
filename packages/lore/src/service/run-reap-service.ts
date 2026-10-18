@@ -26,9 +26,9 @@
  *     checkout belongs to its own runs, not to every session of the checkout around it.
  *   - Start times are `ps lstart` (second precision, truncated), so the window's lower bound is floored to the second.
  *   - Escalation reasons are facts, never caller input (INV-2): this service passes MEASURED FACTS to decide(); the C
- *     factor is the class prior from the registry until AU-T8 computes it from outcomes (documented, not a fallback:
- *     a class without a prior fails loud).
- *   - Dry run (`apply: false`) writes nothing: it scores with the pure core decide() and records no decision row.
+ *     factor is computed by DecisionService from the class's recorded outcomes (AC-AU-8), never supplied here.
+ *   - Dry run (`apply: false`) writes nothing: it scores with DecisionService.preview() (same C, same thresholds) and
+ *     records no decision row.
  *   - Kill procedure: SIGTERM; SIGKILL only if the SAME process (same start time) is still alive after the grace
  *     period; a final rescan lists survivors. ESRCH at any signal = `already-gone` (a concurrent reap won), not a failure.
  *   - A run with no end whose recorded pid is dead (start time checked) is ended through decide('run-end-stale') with
@@ -43,7 +43,6 @@
 import { createHash } from "node:crypto";
 import { realpathSync } from "node:fs";
 import {
-  decide,
   err,
   ok,
   type AutonomyFacts,
@@ -70,7 +69,7 @@ export type RunReapStore = Pick<StoreInterface, "listRunLifecycles" | "queryAudi
 export interface RunEnder {
   end(runId: string, reason: string): Promise<Result<RunEndResult, LoreError>>;
 }
-export type RunReapDecisions = Pick<DecisionService, "decide" | "effectiveVerdict" | "governed">;
+export type RunReapDecisions = Pick<DecisionService, "decide" | "preview" | "effectiveVerdict" | "governed">;
 
 export interface RunReapDeps {
   readonly store: RunReapStore;
@@ -156,11 +155,6 @@ function contains(root: string, path: string): boolean {
   return path === root || path.startsWith(root.endsWith("/") ? root : `${root}/`);
 }
 
-function priorConfidenceOf(registry: OperationClassRegistry, classId: string): number | null {
-  const operationClass = Object.hasOwn(registry, classId) ? registry[classId] : undefined;
-  return operationClass !== undefined && operationClass.tier === "normal" ? operationClass.priorConfidence : null;
-}
-
 export class RunReapService {
   /** The class table of the sweep in progress (set at the top of `reap`). */
   private sweepRegistry: OperationClassRegistry | undefined;
@@ -183,18 +177,18 @@ export class RunReapService {
     } else {
       this.sweepRegistry = this.deps.registry;
     }
-    const registry = this.sweepRegistry;
-    const processPrior = priorConfidenceOf(registry, PROCESS_CLASS);
-    const stalePrior = priorConfidenceOf(registry, STALE_RUN_CLASS);
-    if (processPrior === null || stalePrior === null) {
-      return err(storeError(`classes ${PROCESS_CLASS} / ${STALE_RUN_CLASS} must be normal-tier classes with a prior confidence`));
+    for (const classId of [PROCESS_CLASS, STALE_RUN_CLASS]) {
+      const operationClass = Object.hasOwn(this.sweepRegistry, classId) ? this.sweepRegistry[classId] : undefined;
+      if (operationClass === undefined || operationClass.tier !== "normal") {
+        return err(storeError(`classes ${PROCESS_CLASS} / ${STALE_RUN_CLASS} must be normal-tier classes (C is calibrated from their outcomes)`));
+      }
     }
 
     const measured = await this.measure();
     if (!measured.ok) return measured;
     let { snapshot, lifecycles } = measured.value;
 
-    const runEnds = await this.endStaleRuns(options.apply, lifecycles, snapshot, stalePrior);
+    const runEnds = await this.endStaleRuns(options.apply, lifecycles, snapshot);
     if (!runEnds.ok) return runEnds;
     if (options.apply && runEnds.value.entries.some((entry) => entry.action === "ended")) {
       // reason: runs ended just now are ENDED for the process proof below (their orphans become provable in the
@@ -206,7 +200,7 @@ export class RunReapService {
 
     const views = await this.buildRunViews(lifecycles, snapshot);
     if (!views.ok) return views;
-    const processes = await this.reapProcesses(options.apply, views.value, snapshot, processPrior);
+    const processes = await this.reapProcesses(options.apply, views.value, snapshot);
     if (!processes.ok) return processes;
     return ok({
       apply: options.apply,
@@ -231,7 +225,6 @@ export class RunReapService {
     apply: boolean,
     lifecycles: readonly RunLifecycle[],
     snapshot: ProcessSnapshot,
-    prior: number,
   ): Promise<Result<{ entries: RunEndEntry[]; legacy: LegacyRunsEntry | null }, LoreError>> {
     const byPid = new Map(snapshot.entries.map((entry) => [entry.pid, entry] as const));
     const entries: RunEndEntry[] = [];
@@ -247,7 +240,7 @@ export class RunReapService {
         continue;
       }
       // Dead pid (absent, zombie, or reused by a different process). Facts are measured, never supplied.
-      const facts: AutonomyFacts = { recoverability: "reversible", blast: "own-or-ended-run", evidence: "lore-evaluated", confidence: prior };
+      const facts: AutonomyFacts = { recoverability: "reversible", blast: "own-or-ended-run", evidence: "lore-evaluated" };
       const verdict = await this.verdictFor(apply, STALE_RUN_CLASS, { id: run.id, version: run.process.startTime }, facts);
       if (!verdict.ok) return verdict;
       if (verdict.value.verdict !== "auto") {
@@ -266,7 +259,7 @@ export class RunReapService {
         decision: verdict.value,
       });
     }
-    const legacy = await this.decideLegacyRuns(apply, legacyIds.sort(), prior);
+    const legacy = await this.decideLegacyRuns(apply, legacyIds.sort());
     if (!legacy.ok) return legacy;
     return ok({ entries, legacy: legacy.value });
   }
@@ -275,17 +268,17 @@ export class RunReapService {
   private async decideLegacyRuns(
     apply: boolean,
     runIds: readonly string[],
-    prior: number,
   ): Promise<Result<LegacyRunsEntry | null, LoreError>> {
     if (runIds.length === 0) return ok(null);
     const version = createHash("sha256").update(runIds.join("\n")).digest("hex").slice(0, 16);
     // reason: blast is deliberately OMITTED — a run with no recorded pid has no measurable owner, so B is unmeasured -> 0
     // (spec AC-AU-5 half 6); do not "complete" it to make the legacy runs end themselves.
-    const facts: AutonomyFacts = { recoverability: "reversible", evidence: "lore-evaluated", confidence: prior };
+    const facts: AutonomyFacts = { recoverability: "reversible", evidence: "lore-evaluated" };
     const subject = { id: LEGACY_SUBJECT_ID, version };
     if (!apply) {
-      const verdict = decide(STALE_RUN_CLASS, LEGACY_SUBJECT_ID, facts, this.sweepRegistry);
-      return ok({ run_ids: runIds, subject_version: version, verdict: verdict.verdict, already_pending: false });
+      const verdict = await this.deps.decisions.preview(STALE_RUN_CLASS, LEGACY_SUBJECT_ID, facts);
+      if (!verdict.ok) return verdict;
+      return ok({ run_ids: runIds, subject_version: version, verdict: verdict.value.verdict, already_pending: false });
     }
     const existing = await this.deps.decisions.effectiveVerdict(STALE_RUN_CLASS, subject);
     if (!existing.ok) return existing;
@@ -348,7 +341,6 @@ export class RunReapService {
     apply: boolean,
     views: readonly RunView[],
     snapshot: ProcessSnapshot,
-    prior: number,
   ): Promise<Result<{ entries: ProcessReapEntry[]; survivors: number[] }, LoreError>> {
     const byPid = new Map(snapshot.entries.map((entry) => [entry.pid, entry] as const));
     const selfPid = this.deps.selfPid ?? process.pid;
@@ -406,7 +398,6 @@ export class RunReapService {
         recoverability: proof.kind === "none" ? "irreversible-local" : "loss-free-by-proof",
         blast: proof.overlappingLiveRun ? "other-live-actor" : "own-or-ended-run",
         evidence: "lore-evaluated",
-        confidence: prior,
       };
       const subject = { id: `pid:${candidate.pid}`, version: candidate.startTime ?? "start-time-unmeasured" };
       const verdict = await this.verdictFor(apply, PROCESS_CLASS, subject, facts);
@@ -496,7 +487,7 @@ export class RunReapService {
     return !(await isAlive());
   }
 
-  /** decide(): the service (recorded in decision_log) on apply, the pure core function on a dry run (nothing recorded). */
+  /** decide(): the service (recorded in decision_log) on apply, DecisionService.preview on a dry run (nothing recorded). */
   private async verdictFor(
     apply: boolean,
     classId: string,
@@ -504,8 +495,9 @@ export class RunReapService {
     facts: AutonomyFacts,
   ): Promise<Result<{ verdict: string; score: number; record_id?: number }, LoreError>> {
     if (!apply) {
-      const decision = decide(classId, subject.id, facts, this.sweepRegistry);
-      return ok({ verdict: decision.verdict, score: decision.score });
+      const decision = await this.deps.decisions.preview(classId, subject.id, facts);
+      if (!decision.ok) return decision;
+      return ok({ verdict: decision.value.verdict, score: decision.value.score });
     }
     const outcome = await this.deps.decisions.decide(classId, subject, facts);
     if (!outcome.ok) return outcome;

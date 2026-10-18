@@ -19,6 +19,7 @@ import { defineCommand } from "citty";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatError } from "../utils.js";
 import { SQLiteStore } from "../../../store/sqlite-store.js";
+import { createAuditReversalProbe, createGitReversalProbes } from "../../../service/autonomy-calibration-service.js";
 import { DecisionService } from "../../../service/decision-service.js";
 import {
   StashPruneService,
@@ -98,8 +99,14 @@ const prune = defineCommand({
         return;
       }
       store = new SQLiteStore(dbPath);
-      const decisions = new DecisionService({ store, executorRun: verifiedIdentity?.value?.harnessRun ?? null });
-      const service = new StashPruneService({ git: gitRunnerFor(app.repoRoot), store, decisions });
+      const git = gitRunnerFor(app.repoRoot);
+      // reason: AC-AU-8 — before scoring, decide() sweeps new outcomes of earlier stash drops (a stash restored from its archive ref is a reversal).
+      const decisions = new DecisionService({
+        store,
+        executorRun: verifiedIdentity?.value?.harnessRun ?? null,
+        reversalProbes: [createAuditReversalProbe(store), ...createGitReversalProbes(git)],
+      });
+      const service = new StashPruneService({ git, store, decisions });
       const result = args.apply === true ? await service.apply() : await dryRun(service);
       if (!result.ok) {
         process.stderr.write(`${formatError(result.error)}\n`);
