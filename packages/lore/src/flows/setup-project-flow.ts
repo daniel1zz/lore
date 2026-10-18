@@ -487,7 +487,23 @@ export interface ProjectScaffoldReport {
 /** The `assets/project/*` hook filenames copied verbatim into `<repo>/hooks/`. */
 export const HOOK_ASSET_NAMES = [
   "pre-push",
+  // The main-ref guard (spec-main-advances-only-through-lore-integrate-per-session, BR-1246): refuses every move of
+  // refs/heads/main that does not carry the `lore integrate` marker. Needs git >= 2.28 (see MIN_GIT_FOR_MAIN_REF_HOOK).
+  "reference-transaction",
 ] as const;
+
+/** The oldest git that runs the `reference-transaction` hook: 2.28. */
+export const MIN_GIT_FOR_MAIN_REF_HOOK = { major: 2, minor: 28 } as const;
+
+/**
+ * Reads `git version 2.39.3 (Apple Git-145)` into `{ major: 2, minor: 39 }`; `undefined` when the text is not a git
+ * version line (the caller refuses: an unreadable version cannot be proven to support the main-ref hook).
+ */
+export function parseGitVersion(text: string): { major: number; minor: number; raw: string } | undefined {
+  const match = /git version (\d+)\.(\d+)/.exec(text);
+  if (match === null) return undefined;
+  return { major: Number(match[1]), minor: Number(match[2]), raw: text.trim() };
+}
 
 /** Hook scripts must remain executable after copy (SPEC-046 §Design "execute bits preserved"). */
 const HOOK_FILE_MODE = 0o755;
@@ -1247,6 +1263,28 @@ async function runAcCiteSeedStep(deps: ProjectScaffoldFlowDeps, repoDir: string)
     : { status: "skipped", detail: `kept existing mode ${seeded.value.existing}` };
 }
 
+/** A refusal naming the git version when it cannot run the `reference-transaction` hook; `undefined` when it can. */
+async function checkGitSupportsMainRefHook(deps: ProjectScaffoldFlowDeps, repoDir: string): Promise<LoreError | undefined> {
+  const { major, minor } = MIN_GIT_FOR_MAIN_REF_HOOK;
+  const needed = `${major}.${minor}`;
+  const result = await deps.exec.run(["git", "--version"], repoDir);
+  const version = result.code === 0 ? parseGitVersion(result.stdout) : undefined;
+  if (version === undefined) {
+    return {
+      code: "VALIDATION_ERROR",
+      field: "git",
+      message: `lore setup --project needs git >= ${needed} (the main-ref guard is a reference-transaction hook) but could not read the installed version from \`git --version\` (exit ${result.code}: ${(result.stdout + result.stderr).trim() || "no output"}).`,
+    };
+  }
+  if (version.major > major || (version.major === major && version.minor >= minor)) return undefined;
+  return {
+    code: "VALIDATION_ERROR",
+    field: "git",
+    message: `lore setup --project refuses: ${version.raw} is older than git ${needed}, which the reference-transaction hook (the guard that keeps main moving only through lore integrate) needs. Upgrade git to ${needed} or newer and re-run.`,
+    value: version.raw,
+  };
+}
+
 async function runGitHooksPathStep(deps: ProjectScaffoldFlowDeps, repoDir: string): Promise<GitHooksPathResult> {
   try {
     const getResult = await deps.exec.run(["git", "config", "--get", "core.hooksPath"], repoDir);
@@ -1318,6 +1356,11 @@ export async function scaffoldProject(
       value: repoDir,
     });
   }
+
+  // reason: checked BEFORE any write — the main-ref hook is part of the scaffold and git < 2.28 cannot run it, so a
+  // scaffold that installed everything else would leave main unguarded while looking set up (BR-1246).
+  const gitVersionRefusal = await checkGitSupportsMainRefHook(deps, repoDir);
+  if (gitVersionRefusal !== undefined) return err(gitVersionRefusal);
 
   const init = await runInitStep(deps, repoDir);
 

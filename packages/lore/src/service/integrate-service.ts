@@ -26,11 +26,18 @@
  * Side-effect class: IO (git subprocesses through the injected IntegrateGit, the floor through FloorRunner, the loss
  *   ledger's files, creation of one worktree directory).
  *
- * Seams for INT-T2 (not built here): the hook install (consumes INTEGRATE_MARKER_ENV), `origin/main` as a branch
- * argument (fetch before resolving), and detaching/refreshing the shared checkout after a landing (the `landed`
- * outcome is where a caller hooks that).
+ * Before anything moves (after the request is validated, before the integration worktree exists):
+ *   - a remote-tracking argument (`origin/main`: its first segment names a configured remote) is fetched first and is
+ *     merged with fast-forward allowed, so inbound commits land as the remote's own commits when main has not diverged;
+ *   - ANY worktree other than the shared checkout that has `refs/heads/main` checked out is refused (E3: a ref moving
+ *     under a checked-out branch stages the inverse diff in that tree);
+ *   - a shared checkout still on branch main is detached at main (`git checkout --detach main`: same commit, so edits
+ *     and untracked files stay byte-identical); one that cannot be (merge/rebase/cherry-pick/revert in progress) is
+ *     refused naming it. Both refusals are `err(VALIDATION_ERROR, field "worktree")`, exit 4.
+ * The reference-transaction hook that refuses every other move of main ships as assets/project/reference-transaction
+ * and is installed by `lore setup --project`; it recognises INTEGRATE_MARKER_ENV on the CAS.
  *
- * Source: spec-main-advances-only-through-lore-integrate-per-session AC-INT-1, BR-1245.
+ * Source: spec-main-advances-only-through-lore-integrate-per-session AC-INT-1, AC-INT-2, BR-1245, BR-1246.
  */
 import { existsSync, realpathSync } from "node:fs";
 import { join } from "node:path";
@@ -162,14 +169,20 @@ export class IntegrateService {
           "workflow.integrate.floor_command is not set in .lore/config.yaml (or the file failed to parse): lore integrate will not advance main on a tree whose floor was never named",
       });
     }
+    const fetched = this.fetchRemoteTracking(request.branch);
+    if (!fetched.ok) return fetched;
     const tipResult = this.resolveCommit(request.branch);
     if (!tipResult.ok) return tipResult;
     const tip = tipResult.value;
+
+    const prepared = this.prepareSharedCheckout();
+    if (!prepared.ok) return prepared;
 
     const worktree = this.ensureWorktree(request.sessionId);
     if (!worktree.ok) return worktree;
     const wt = worktree.value;
 
+    const fromRemote = this.remoteOf(request.branch) !== undefined;
     const message = request.message ?? this.defaultMessage(request.branch, tip);
     const movedBy: string[] = [];
     let lastConsecutiveLosses = 0;
@@ -186,7 +199,8 @@ export class IntegrateService {
 
       const reset = this.resetWorktree(wt, base.value);
       if (!reset.ok) return reset;
-      const merged = git(wt, ["merge", "--no-ff", "-m", message, tip], { GIT_MERGE_AUTOEDIT: "no" });
+      // an upstream ref may fast-forward (the remote's commits land as they are); a local branch always gets its own merge commit
+      const merged = git(wt, ["merge", fromRemote ? "--ff" : "--no-ff", "-m", message, tip], { GIT_MERGE_AUTOEDIT: "no" });
       if (merged.status !== 0) return this.afterFailedMerge(request.branch, wt, base.value, merged);
 
       const floor = this.deps.runFloor(request.floorCommand, wt);
@@ -222,6 +236,90 @@ export class IntegrateService {
     const back = this.resetWorktree(wt, final.value);
     if (!back.ok) return back;
     return ok({ kind: "lost_races", branch: request.branch, attempts: INTEGRATE_MAX_ATTEMPTS, moved_by: movedBy, consecutive_losses: lastConsecutiveLosses });
+  }
+
+  /** The configured remote named by the first path segment of `rev` (`origin/main` -> `origin`), else `undefined`. */
+  private remoteOf(rev: string): string | undefined {
+    const slash = rev.indexOf("/");
+    if (slash <= 0) return undefined;
+    const candidate = rev.slice(0, slash);
+    const remotes = this.deps.git(this.deps.projectRoot, ["remote"]);
+    if (remotes.status !== 0) return undefined;
+    return remotes.stdout.split("\n").map((r) => r.trim()).includes(candidate) ? candidate : undefined;
+  }
+
+  /** Fetches the remote of a remote-tracking argument so the rev resolves to the remote's current tip. */
+  private fetchRemoteTracking(rev: string): Result<void, LoreError> {
+    const remote = this.remoteOf(rev);
+    if (remote === undefined) return ok(undefined);
+    this.deps.log(`integrate: fetching ${remote}`);
+    const out = this.deps.git(this.deps.projectRoot, ["fetch", "-q", remote]);
+    return out.status === 0 ? ok(undefined) : err(gitFailure(`git fetch ${remote}`, out));
+  }
+
+  /**
+   * Refuses a repository where a ref move would stage a reverse diff in a checked-out tree, and detaches the shared
+   * checkout when it is still on branch main (E3, E5; the ADR's Installation and migration).
+   */
+  private prepareSharedCheckout(): Result<void, LoreError> {
+    const { git, projectRoot } = this.deps;
+    const listed = git(projectRoot, ["worktree", "list", "--porcelain"]);
+    if (listed.status !== 0) return err(gitFailure("git worktree list", listed));
+    const shared = realpathSync(projectRoot);
+    const isShared = (p: string): boolean => p === shared || (existsSync(p) && realpathSync(p) === shared);
+    const onMain: string[] = [];
+    for (const block of listed.stdout.split("\n\n")) {
+      const lines = block.split("\n");
+      const path = lines.find((l) => l.startsWith("worktree "))?.slice("worktree ".length);
+      if (path !== undefined && lines.includes(`branch ${TARGET_REF}`)) onMain.push(path);
+    }
+    const others = onMain.filter((p) => !isShared(p));
+    if (others.length > 0) {
+      return err({
+        code: "VALIDATION_ERROR",
+        field: "worktree",
+        message: `integrate: ${others.join(", ")} has ${TARGET_NAME} checked out; moving ${TARGET_NAME} under a checked-out branch stages a reverse diff there. Detach it (git -C <path> checkout --detach ${TARGET_NAME}) or switch it to another branch, then re-run. Nothing was changed`,
+        value: others.join(", "),
+      });
+    }
+    if (!onMain.some(isShared)) return ok(undefined);
+
+    const inProgress = this.operationInProgress(shared);
+    if (inProgress !== undefined) {
+      return err({
+        code: "VALIDATION_ERROR",
+        field: "worktree",
+        message: `integrate: the shared checkout ${shared} is on branch ${TARGET_NAME} with a ${inProgress} in progress and cannot be detached; finish or abort it (git -C ${shared} ${inProgress} --abort), then re-run. Nothing was changed`,
+        value: shared,
+      });
+    }
+    const detached = git(shared, ["checkout", "-q", "--detach", TARGET_NAME]);
+    if (detached.status !== 0) {
+      return err({
+        code: "VALIDATION_ERROR",
+        field: "worktree",
+        message: `integrate: the shared checkout ${shared} is on branch ${TARGET_NAME} and could not be detached (git exit ${detached.status}): ${(detached.stderr || detached.stdout).trim()}. Nothing was changed`,
+        value: shared,
+      });
+    }
+    this.deps.log(`integrate: detached the shared checkout ${shared} at ${TARGET_NAME} (its edits are untouched)`);
+    return ok(undefined);
+  }
+
+  /** The multi-step operation a checkout is in the middle of (it blocks a detach), or `undefined`. */
+  private operationInProgress(checkout: string): "merge" | "rebase" | "cherry-pick" | "revert" | undefined {
+    const states: ReadonlyArray<readonly [string, "merge" | "rebase" | "cherry-pick" | "revert"]> = [
+      ["MERGE_HEAD", "merge"],
+      ["rebase-merge", "rebase"],
+      ["rebase-apply", "rebase"],
+      ["CHERRY_PICK_HEAD", "cherry-pick"],
+      ["REVERT_HEAD", "revert"],
+    ];
+    for (const [name, label] of states) {
+      const located = this.deps.git(checkout, ["rev-parse", "--path-format=absolute", "--git-path", name]);
+      if (located.status === 0 && existsSync(located.stdout.trim())) return label;
+    }
+    return undefined;
   }
 
   /** `rev` as a full commit sha, or a refusal naming the rev. */
