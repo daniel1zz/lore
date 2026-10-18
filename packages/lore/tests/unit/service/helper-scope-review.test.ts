@@ -85,6 +85,39 @@ async function review(trail: SessionTrail, byAgent: Claims, byCopy: OpenClaims =
 const FILES = ["src/a.ts", "src/b.ts", "tests/a.test.ts"];
 const PARENT_CLAIM: Claims = { parent: [{ slug: "task-x", anchors: ["src/", "tests/"] }] };
 
+describe("AU-T27 a file a co_change rule requires is covered by the anchor that triggered the rule", () => {
+  const MANIFEST = "packages/lore/src/generated/assets-manifest.ts";
+  const RULES = [{ name: "assets-manifest", when: ["assets/**"], require: [MANIFEST] }];
+  const matches = (pattern: string, path: string): boolean => (pattern.endsWith("/**") ? path.startsWith(pattern.slice(0, -2)) : pattern === path);
+  const reviewWith = async (files: string[], anchors: string[]) => {
+    const r = await reviewHelperScope({
+      trail: trailOf([helper("parent", { files })]),
+      claimedTasks: claims({ parent: [{ slug: "task-x", anchors }] }),
+      openClaimsOfWorkingCopy: openClaimsOf({}),
+      projectRoot: "/proj",
+      realpath: (p) => p,
+      coChange: { rules: RULES, matches },
+    });
+    if (!r.ok) throw new Error("review failed");
+    return r.value;
+  };
+
+  it("AU-T27 anchored assets/x.md + changed manifest yields no outside-anchors finding", async () => {
+    const out = await reviewWith(["assets/x.md", MANIFEST], ["assets/x.md"]);
+    expect(out.findings).toEqual([]);
+  });
+
+  it("AU-T27 control: manifest changed with no anchored file matching a when glob is still outside-anchors", async () => {
+    const out = await reviewWith(["src/a.ts", MANIFEST], ["src/a.ts"]);
+    expect(out.findings.map((f) => [f.kind, f.files])).toEqual([["outside-anchors", [MANIFEST]]]);
+  });
+
+  it("AU-T27 control: an assets file that is itself outside the anchors does not unlock the manifest", async () => {
+    const out = await reviewWith(["assets/y.md", MANIFEST], ["src/a.ts"]);
+    expect(out.findings.map((f) => [f.kind, f.files])).toEqual([["outside-anchors", ["assets/y.md", MANIFEST]]]);
+  });
+});
+
 describe("AU-T19 nested helper in a claiming run's working copy", () => {
   it("AU-T19 yields no finding for the parent's files on a harness-internal zero-duration helper", async () => {
     const out = await review(trailOf([helper("parent", { files: FILES }), helper("inner", { files: FILES })]), PARENT_CLAIM);
