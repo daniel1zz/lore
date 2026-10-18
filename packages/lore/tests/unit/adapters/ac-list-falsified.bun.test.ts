@@ -429,6 +429,9 @@ describe("lore status --json — corpus-wide pass_unfalsified count (AC-FALS-6)"
         statement: "a first never-red criterion contributes one pass_unfalsified count",
         verify: { mode: "script", oracle: "test", command: "bunx vitest run fixture-first.test.ts" },
       });
+      // reason: AC-EI-2 — a pass on a script AC whose oracle file does not exist is `not_measured`, not `pass_unfalsified`;
+      // this test counts pass_unfalsified, so the declared oracle file must exist (cwd is the throwaway corpus).
+      writeFileSync("fixture-first.test.ts", "// fixture oracle file\n");
       // reason: SUPERSEDED oracle (task-raise-the-evidence-tail-guard-s-
       // predicate-to-its-own) — "test" self-report is now refused regardless
       // of tail content; "manual" is the one oracle that still lets a
@@ -466,6 +469,9 @@ describe("lore status --json — corpus-wide pass_unfalsified count (AC-FALS-6)"
         statement: "a second never-red criterion contributes a second pass_unfalsified count",
         verify: { mode: "script", oracle: "test", command: "bunx vitest run fixture-second.test.ts" },
       });
+      // reason: AC-EI-2 — a pass on a script AC whose oracle file does not exist is `not_measured`, not `pass_unfalsified`;
+      // this test counts pass_unfalsified, so the declared oracle file must exist (cwd is the throwaway corpus).
+      writeFileSync("fixture-second.test.ts", "// fixture oracle file\n");
       // reason: SUPERSEDED oracle (task-raise-the-evidence-tail-guard-s-
       // predicate-to-its-own) — see this test's first evidence call above.
       await app.taskWorkflowService.addEvidence(taskId, {
