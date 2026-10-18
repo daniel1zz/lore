@@ -7,6 +7,7 @@ import { defineCommand } from "citty";
 import { exitCli } from "../cli-exit.js";
 import { invocationOf } from "../command-invocation.js";
 import { loadLoreApp } from "../loader.js";
+import { registerServerForInvocation } from "../live-server-registry.js";
 import { startHttpServer } from "../../http/index.js";
 import { resolveMachineAuthBaseDir } from "../../http/machine-auth.js";
 
@@ -46,13 +47,16 @@ export default defineCommand({
 
     const host = args.host ?? "localhost";
 
-    startHttpServer(app, { port, host, io: inv.io, machineAuthBaseDir: resolveMachineAuthBaseDir(inv.env, inv.paths.home) });
+    const server = startHttpServer(app, { port, host, io: inv.io, machineAuthBaseDir: resolveMachineAuthBaseDir(inv.env, inv.paths.home) });
+    // AC-HR-5: record the live base URL for this corpus; removed on the signal path below.
+    const unregisterLiveServer = registerServerForInvocation(inv, `http://${host}:${server.port}`);
 
     // The server runs in the background via the Bun event loop; this run stays open until SIGTERM / SIGINT, then
     // closes the app and returns 0, so the one entry (`src/index.ts`) ends the process (a returned run is a finished run).
     await new Promise<void>((resolve) => {
       for (const signal of ["SIGTERM", "SIGINT"] as const) {
         process.once(signal, () => {
+          unregisterLiveServer();
           app.close();
           resolve();
         });
