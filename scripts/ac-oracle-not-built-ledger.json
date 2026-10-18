@@ -10,5 +10,23 @@
     "ac": "AC-IV-8",
     "reason": "oracle test not written yet (iv-run-lore-in-process.test.ts absent); owned by task-skill-refactor-iv-9-runloreinprocess-builds-an-invocation",
     "owner_plan": "plan-ambient-state-read-once-at-the-entry-owned-only-prune-user"
+  },
+  {
+    "spec": "spec-a-retro-lesson-names-the-mechanism-that-stops-it-recurring",
+    "ac": "AC-RM-1",
+    "reason": "oracle test not written yet (retro-lesson-disposition.test.ts absent); owned by the implementing task of this spec's plan",
+    "owner_plan": "plan-a-retro-lesson-names-its-mechanism"
+  },
+  {
+    "spec": "spec-a-retro-lesson-names-the-mechanism-that-stops-it-recurring",
+    "ac": "AC-RM-2",
+    "reason": "oracle test not written yet (retro-lesson-disposition.test.ts absent); owned by the implementing task of this spec's plan",
+    "owner_plan": "plan-a-retro-lesson-names-its-mechanism"
+  },
+  {
+    "spec": "spec-a-retro-lesson-names-the-mechanism-that-stops-it-recurring",
+    "ac": "AC-RM-3",
+    "reason": "oracle test not written yet (retro-lesson-disposition.test.ts absent); owned by the implementing task of this spec's plan",
+    "owner_plan": "plan-a-retro-lesson-names-its-mechanism"
   }
 ]
