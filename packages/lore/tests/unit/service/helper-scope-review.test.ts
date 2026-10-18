@@ -61,8 +61,20 @@ function trailOf(helpers: TrailHelper[], edits: Array<{ agent: string; file: str
 const claims = (byAgent: Claims) => async (run: string) =>
   ok((byAgent[run.split(":").pop() ?? ""] ?? []).map((t) => ({ slug: t.slug, file_anchors: t.anchors }) as unknown as RunClaimedTask));
 
-async function review(trail: SessionTrail, byAgent: Claims) {
-  const r = await reviewHelperScope({ trail, claimedTasks: claims(byAgent), projectRoot: "/proj", realpath: (p) => p });
+/** Open claims by the working copy their recorded worktree names (what `RunService.openClaimsOfWorkingCopy` reads). */
+type OpenClaims = Record<string, Array<{ slug: string; anchors: string[] }>>;
+
+const openClaimsOf = (byCopy: OpenClaims) => async (workingCopy: string) =>
+  ok((byCopy[workingCopy] ?? []).map((t) => ({ slug: t.slug, file_anchors: t.anchors }) as unknown as RunClaimedTask));
+
+async function review(trail: SessionTrail, byAgent: Claims, byCopy: OpenClaims = {}) {
+  const r = await reviewHelperScope({
+    trail,
+    claimedTasks: claims(byAgent),
+    openClaimsOfWorkingCopy: openClaimsOf(byCopy),
+    projectRoot: "/proj",
+    realpath: (p) => p,
+  });
   if (!r.ok) throw new Error("review failed");
   return r.value;
 }
@@ -127,5 +139,24 @@ describe("AU-T19 session scratchpad", () => {
     );
     const out = await review(trail, PARENT_CLAIM);
     expect(out.findings.map((f) => [f.kind, f.files])).toEqual([["outside-working-copy", [other, `${scratch}-not/b.txt`, "/tmp/elsewhere.txt"]]]);
+  });
+});
+
+describe("AU-T22 open claim whose recorded worktree is the group's working copy", () => {
+  const OPEN: OpenClaims = { [WC]: [{ slug: "task-open", anchors: ["src/", "tests/"] }] };
+
+  it("AU-T22 a zero-duration helper in a working copy named by an open claim (no end record for the claiming run) yields no finding", async () => {
+    const out = await review(trailOf([helper("inner", { files: FILES })]), {}, OPEN);
+    expect(out.findings).toEqual([]);
+  });
+
+  it("AU-T22 control: a helper in a working copy no open claim names is still no-claimed-task", async () => {
+    const out = await review(trailOf([helper("inner", { files: FILES })]), {}, { "/wt/agent-other": OPEN[WC] ?? [] });
+    expect(out.findings.map((f) => [f.kind, f.helper])).toEqual([["no-claimed-task", "inner"]]);
+  });
+
+  it("AU-T22 the open claim's anchors still bound the helper: a file outside them is outside-anchors", async () => {
+    const out = await review(trailOf([helper("inner", { files: [...FILES, "docs/x.md"] })]), {}, OPEN);
+    expect(out.findings.map((f) => [f.kind, f.files])).toEqual([["outside-anchors", ["docs/x.md"]]]);
   });
 });
