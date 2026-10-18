@@ -133,7 +133,7 @@ async function recordEvidenceDirect(
           : []),
         {
           oracle: "test",
-          command: "bunx vitest run x.test.ts",
+          command: "bun test x",
           result,
           recorded_at: new Date().toISOString(),
           recorded_by: "tester",
@@ -515,7 +515,7 @@ describe("STATE — expected-fail evidence never counted as passing by AC-covera
         verification_evidence: [
           {
             oracle: "test",
-            command: "bunx vitest run red.test.ts",
+            command: "bun test x",
             result: "expected-fail",
             recorded_at: new Date().toISOString(),
             recorded_by: "tester",
@@ -553,7 +553,7 @@ describe("STATE — expected-fail evidence never counted as passing by AC-covera
         verification_evidence: [
           {
             oracle: "test",
-            command: "bunx vitest run x.test.ts",
+            command: "bun test x",
             result: "pass",
             recorded_at: new Date().toISOString(),
             recorded_by: "tester",
@@ -561,7 +561,7 @@ describe("STATE — expected-fail evidence never counted as passing by AC-covera
           },
           {
             oracle: "test",
-            command: "bunx vitest run red.test.ts",
+            command: "bun test x",
             result: "expected-fail",
             recorded_at: new Date().toISOString(),
             recorded_by: "tester",

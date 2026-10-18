@@ -96,7 +96,8 @@ async function createTaskInPhase(
 ): Promise<void> {
   const verification_evidence = evidence.map((e, i) => ({
     oracle: "test",
-    command: `bun test ${i}`,
+    // AC-EI-1: a row tagged with an AC counts only when it ran that AC's declared command ("bun test").
+    command: e.ac_ref !== undefined ? "bun test" : `bun test ${i}`,
     result: e.result,
     recorded_at: "2026-07-26T00:00:00.000Z",
     recorded_by: "agent:t",

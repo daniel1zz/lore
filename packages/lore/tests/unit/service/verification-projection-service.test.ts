@@ -208,10 +208,10 @@ describe("VerificationProjectionService — HAPPY (AC-075-2)", () => {
     const spec = await makeSpec(corpusService, prd, [AC_1, AC_2]);
     const planA = await makePlan(corpusService, spec);
     const planB = await makePlan(corpusService, spec);
-    await makeTask(corpusService, planA, "Task A", [selfReportedEntry("bun test a", { ac_ref: "AC-1" })]);
+    await makeTask(corpusService, planA, "Task A", [selfReportedEntry("bun test", { ac_ref: "AC-1" })]);
     await makeTask(corpusService, planB, "Task B", [
-      attestedEntry("bun test b", { ac_ref: "AC-1" }),
-      selfReportedEntry("bun test c", { ac_ref: "AC-2", result: "fail" }),
+      attestedEntry("bun test", { ac_ref: "AC-1" }),
+      selfReportedEntry("bun test", { ac_ref: "AC-2", result: "fail" }),
     ]);
 
     const result = await projectionService.evidencePanel(spec.slug);
