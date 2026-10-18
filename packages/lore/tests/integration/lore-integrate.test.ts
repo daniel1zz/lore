@@ -166,9 +166,10 @@ class Fixture {
     return spawnSync("git", args, { cwd, encoding: "utf8" }).status ?? -1;
   }
 
-  setFloor(floorCommand: string | null): void {
+  setFloor(floorCommand: string | null, postRefreshCommand?: string): void {
     const base = readFileSync(join(this.repo, ".lore", "config.yaml"), "utf8").split("\nworkflow:")[0] ?? "";
-    const block = floorCommand === null ? "" : `\nworkflow:\n  integrate:\n    floor_command: ${JSON.stringify(floorCommand)}\n`;
+    const post = postRefreshCommand === undefined ? "" : `    post_refresh_command: ${JSON.stringify(postRefreshCommand)}\n`;
+    const block = floorCommand === null ? "" : `\nworkflow:\n  integrate:\n    floor_command: ${JSON.stringify(floorCommand)}\n${post}`;
     writeFileSync(join(this.repo, ".lore", "config.yaml"), `${base.trimEnd()}\n${block}`);
   }
 
@@ -883,4 +884,87 @@ describe("AC-INT-3 (2) lore setup installs a workflow that lands branches only t
       rmSync(home, { recursive: true, force: true });
     }
   }, 180_000);
+});
+
+const FAKE_BUILD = "mkdir -p dist && git rev-parse HEAD > dist/marker";
+type RebuildJson = { data: { shared_view: { state: string }; rebuild: { state: string; exit_status?: number; reason?: string; tracked_changes?: string[] } } };
+
+describe("INT-T11 the shared checkout's build artifacts follow the refreshed view", () => {
+  it("INT-T11 after landing, post_refresh_command runs in the view: its marker equals the new main (text and --json)", async () => {
+    const fx = new Fixture("true");
+    appendFileSync(join(fx.repo, ".git", "info", "exclude"), "dist/\n");
+    fx.setFloor("true", FAKE_BUILD);
+    const first = fx.makeBranch("rebuild");
+    const second = fx.makeBranch("rebuild");
+
+    const r = await fx.integrate(first, "sess-t11a");
+
+    expect(r.exitCode, r.out).toBe(0);
+    expect(readFileSync(join(fx.repo, "dist", "marker"), "utf8").trim()).toBe(fx.main());
+    expect(r.stdout).toMatch(/shared checkout rebuild: rebuilt/);
+    expect(fx.git(["status", "--porcelain=v1", "--untracked-files=no"])).toBe("");
+
+    const j = await fx.integrate(second, "sess-t11a", ["--json"]);
+    expect(j.exitCode, j.out).toBe(0);
+    const data = (JSON.parse(j.stdout.slice(j.stdout.indexOf("{"))) as RebuildJson).data;
+    expect(data.rebuild).toEqual({ state: "rebuilt" });
+    expect(readFileSync(join(fx.repo, "dist", "marker"), "utf8").trim()).toBe(fx.main());
+  }, 120_000);
+
+  it("INT-T11 a kept-dirty view is not rebuilt: skipped and reported, no marker written", async () => {
+    const fx = new Fixture("true");
+    fx.setFloor("true", FAKE_BUILD);
+    fx.git(["checkout", "-q", "-b", "touch-base", "main"]);
+    writeFileSync(join(fx.repo, "base.txt"), "base\nchanged on the branch\n");
+    fx.git(["commit", "-q", "-am", "branch edits base.txt"]);
+    fx.git(["checkout", "-q", "--detach", "main"]);
+    writeFileSync(join(fx.repo, "base.txt"), "base\nhuman edit in the view\n");
+
+    const r = await fx.integrate("touch-base", "sess-t11b", ["--json"]);
+
+    expect(r.exitCode, r.out).toBe(0);
+    const data = (JSON.parse(r.stdout.slice(r.stdout.indexOf("{"))) as RebuildJson).data;
+    expect(data.shared_view.state).toBe("kept_dirty");
+    expect(data.rebuild.state).toBe("skipped");
+    expect(data.rebuild.reason).toMatch(/kept_dirty/);
+    expect(existsSync(join(fx.repo, "dist", "marker"))).toBe(false);
+  }, 120_000);
+
+  it("INT-T11 control: no post_refresh_command is reported as skipped, never silent", async () => {
+    const fx = new Fixture("true");
+    const branch = fx.makeBranch("norebuild");
+
+    const r = await fx.integrate(branch, "sess-t11c");
+
+    expect(r.exitCode, r.out).toBe(0);
+    expect(r.stdout).toMatch(/shared checkout rebuild: skipped \(workflow\.integrate\.post_refresh_command is not set\)/);
+    expect(existsSync(join(fx.repo, "dist", "marker"))).toBe(false);
+  }, 120_000);
+
+  it("INT-T11 a failing rebuild is reported rebuild-failed <exit> and never un-lands main", async () => {
+    const fx = new Fixture("true");
+    fx.setFloor("true", "exit 7");
+    const branch = fx.makeBranch("badbuild");
+
+    const r = await fx.integrate(branch, "sess-t11d", ["--json"]);
+
+    expect(r.exitCode, r.out).toBe(0);
+    expect(fx.isAncestorOfMain(fx.git(["rev-parse", branch]))).toBe(true);
+    const data = (JSON.parse(r.stdout.slice(r.stdout.indexOf("{"))) as RebuildJson).data;
+    expect(data.rebuild).toMatchObject({ state: "rebuild_failed", exit_status: 7 });
+    const text = await fx.integrate(branch, "sess-t11d");
+    expect(text.stdout).toMatch(/shared checkout rebuild: rebuild-failed 7/);
+  }, 120_000);
+
+  it("INT-T11 a build that leaves a tracked change in the view is reported with the paths", async () => {
+    const fx = new Fixture("true");
+    fx.setFloor("true", "echo dirty >> base.txt");
+    const branch = fx.makeBranch("dirtybuild");
+
+    const r = await fx.integrate(branch, "sess-t11e", ["--json"]);
+
+    expect(r.exitCode, r.out).toBe(0);
+    const data = (JSON.parse(r.stdout.slice(r.stdout.indexOf("{"))) as RebuildJson).data;
+    expect(data.rebuild).toEqual({ state: "rebuilt", tracked_changes: ["base.txt"] });
+  }, 120_000);
 });
