@@ -55,7 +55,7 @@ export interface DashboardShutdownDeps {
   readonly mountRegistry?: ClosableMountRegistry;
   readonly app: ClosableApp;
   readonly machineAuthDb: ClosableDb;
-  /** Injectable for tests; defaults to `process.stdout.write`. */
+  /** Injectable for tests; defaults to the run's stdout writer (`io.stdout`). */
   readonly log?: (line: string) => void;
 }
 

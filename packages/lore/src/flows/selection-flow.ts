@@ -76,8 +76,6 @@ export interface SelectionChangeOutcome {
 }
 
 const LAYERS = ["shipped", "user", "project"] as const;
-/** A root that resolves to an empty layer on every FsReadPort. */
-const EMPTY_LAYER_ROOT = "\u0000lore-no-layer";
 
 /** sha256 of file bytes; an absent file hashes to a sentinel no real content equals. */
 function hashFileBytes(content: string | null): string {
@@ -92,7 +90,7 @@ function validationError(field: string, message: string): SelectionFlowError {
 async function discoverUnmerged(deps: SelectionFlowDeps): Promise<Result<Fragment[], SelectionFlowError>> {
   const all: Fragment[] = [];
   for (const layer of LAYERS) {
-    const roots: FragmentRoots = { shipped: EMPTY_LAYER_ROOT, user: EMPTY_LAYER_ROOT, project: EMPTY_LAYER_ROOT, [layer]: deps.roots[layer] };
+    const roots: FragmentRoots = { [layer]: deps.roots[layer] };
     const found = await discoverFragments(deps.fs, roots);
     if (!found.ok) return err(validationError("fragments", found.error.message));
     all.push(...found.value);
