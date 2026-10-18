@@ -180,8 +180,10 @@ Naming: lore's own branch formerly called "baseline" is named `product-baseline`
 
 - [⚑] [script] AC-BLS1-1: QA-1: with 8 or more concurrent rule allocations across one or several leaves, 0 rule ids are issued twice, and an id stays unissued after deprecate, retire or leaf deletion
   script: test — bunx --bun vitest run packages/lore/tests/unit/store/rule-registry.bun.test.ts
+  other_command=3
 - [⚑] [script] AC-BLS1-2: QA-2: a wholesale set touching node, rules, depends_on, glossary or label on a baseline doc is refused in the service layer naming the dedicated verb, for the CLI, MCP and HTTP entry points
   script: test — bunx vitest run packages/lore/tests/unit/service/rule-service.test.ts
+  other_command=1
 - [⚑] [script] AC-BLS1-3: QA-3: the status counts mode returns rule counts by verification state with 0 git spawns, reports stale as not_computed with a reason, and completes with p95 at most 1.5 s over 20 runs on a 1000-doc fixture corpus
   script: test — bunx vitest run packages/lore/tests/unit/service/rule-state-service.test.ts
 - [⚑] [script] AC-BLS1-4: QA-4: full mode applies precedence contradicted > stale > verified > unverified, returns inputs per state, spawns at most 1 git process per distinct evidence commit, gives identical output for a fixed HEAD and corpus version, and returns unknown with a reason when head_sha is absent, the run was dirty, the sha is not an ancestor or git is unavailable
@@ -190,10 +192,13 @@ Naming: lore's own branch formerly called "baseline" is named `product-baseline`
   script: test — bunx vitest run packages/lore/tests/unit/service/rule-state-service.test.ts
 - [⚑] [script] AC-BLS1-6: QA-6: citing a missing, deprecated or retired rule id writes the citation, prints 1 warning and increments cites_dangling or cites_to_inactive; ac cite logs 1 version and does not demote an approved spec
   script: test — bunx vitest run packages/lore/tests/unit/service/ac-cite.test.ts
+  other_command=1
 - [⚑] [script] AC-BLS1-7: QA-7: the rule-statement lint flags every forbidden token in its fixture (existing repo path, #Symbol, call parens, --flag, UPPER_SNAKE=, 3-segment config key) and 0 tokens in the allowed fixture
   script: test — bunx vitest run packages/lore/tests/unit/core/baseline.test.ts
+  other_command=1
 - [⚑] [script] AC-BLS1-8: QA-8: after soft-deleting every baseline doc and removing every AC citation in a throwaway corpus, the outputs of status, tree, list and ac list are byte-identical to a pre-slice control run
   script: test — bunx --bun vitest run packages/lore/tests/e2e/baseline-rollback.bun.test.ts
+  other_command=2
 - [⚑] [script] AC-BLS1-9: Schema invariants: rules on a non-leaf node are refused, lifecycle never moves back to live, a retired rule without a note is refused, and moving a rule between leaves keeps its id
   script: test — bunx vitest run packages/lore/tests/unit/core/baseline.test.ts
 - [·] [ai] AC-BLS1-11: Pilot exit: adjudicated mapping disagreements are at most 30% of the specification-branch ACs, and an independent blind reader scores at least 9/10 with 0 confident-wrong answers on a probe set frozen before the leaves were revised

@@ -82,7 +82,10 @@ Declared structurally via `lore ac add` (AC-TC-1..3). Each carries a named way t
 
 - [⚑] [script] AC-TC-1: A CHECKED-IN test asserts BOTH: (a) root package.json's typecheck chain contains typecheck:dashboard-e2e — proving the project is WIRED INTO production, not merely present — and (b) tsc -p packages/dashboard/tsconfig.e2e.json --listFilesOnly resolves at least 27 files under tests/e2e/. RED for (a): remove typecheck:dashboard-e2e from the chain and the test must fail. RED for (b): point include at a directory resolving zero e2e files and it must fail. ⛔ Re-baselined 2026-08-10 after lore assess rated the prior version a MAJOR outcome gap: the original command (bunx tsc -p ... --listFilesOnly piped to a grep -c ≥27 test) interrogated the project DIRECTLY and passed attested at exit 0 with 27 files — an honest run, but structurally blind to chain membership, so deleting the script from package.json would have left it green while the blind spot reopened. The ≥27 floor is unchanged and nothing was removed; assertion (a) is purely additive.
   script: test — bunx vitest run scripts/tests/typecheck-chain-contract.test.ts -t e2e-project-wired
+  other_command=4
 - [⚑] [script] AC-TC-2: packages/dashboard/tsconfig.tests.json no longer claims the residual is two helper files; the corrected text states the measured count and remains greppable. RED: the assertion fails while the phrase asserting two files is still present.
   script: other — test $(grep -c 'those two helper' packages/dashboard/tsconfig.tests.json) -eq 0
+  other_command=1
 - [⚑] [script] AC-TC-3: With packages/dashboard/src/routeTree.gen.ts absent, bun run typecheck:dashboard-tests does NOT emit the 24 misleading type errors: it either generates the file itself or fails with an exit code and a message naming the recovery command. The test restores the file and asserts it is byte-identical afterwards. RED: this is the ready-made red — the pre-fix run exits 2 with 24 errors (21 TS2345, 2 TS7006, 1 TS2307), measured 2026-08-10.
   script: test — bunx vitest run scripts/tests/typecheck-script-contract.test.ts -t routetree-prerequisite
+  other_command=1

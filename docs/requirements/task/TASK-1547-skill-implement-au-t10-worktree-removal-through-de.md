@@ -3,7 +3,7 @@ id: TASK-1547
 type: task
 role: plan
 title: "[Skill:implement] AU-T10 worktree removal through decide(worktree-remove) with the ignored-file rule"
-status: draft
+status: archived
 priority: high
 phase: "Phase 1b: human channel and verbs"
 created: 2026-10-18

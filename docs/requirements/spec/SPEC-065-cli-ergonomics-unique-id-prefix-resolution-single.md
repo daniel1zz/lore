@@ -92,15 +92,22 @@ mode, vitest/bun-test files):
 
 - [⚑] [script] AC-065-1: A unique 10-char ID prefix resolves via resolveDoc: get and approve succeed when exactly one doc matches the prefix
   script: test — bunx vitest run packages/lore/tests/unit/service/resolve-prefix.test.ts -t "AC-065-1"
+  other_command=1
 - [⚑] [script] AC-065-2: An ambiguous ID prefix returns VALIDATION_ERROR (exit 4) listing every candidate's full ID and slug
   script: test — bunx vitest run packages/lore/tests/unit/service/resolve-prefix.test.ts -t "AC-065-2"
+  other_command=1
 - [⚑] [script] AC-065-3: A non-matching truncated-ID-shaped input returns NOT_FOUND with a truncation diagnostic naming 26-char full IDs
   script: test — bunx vitest run packages/lore/tests/unit/service/resolve-prefix.test.ts -t "AC-065-3"
+  other_command=1
 - [⚑] [script] AC-065-4: lore pending table output contains the slug of every pending doc
   script: test — bunx vitest run packages/lore/tests/unit/cli/pending-output.test.ts -t "AC-065-4"
+  other_command=1
 - [⚑] [script] AC-065-5: create task with --plan-id and no --parent creates the task with parent_id equal to the plan id
   script: test — bunx vitest run packages/lore/tests/unit/cli/create-task-validation.test.ts -t "AC-065-5"
+  other_command=1
 - [⚑] [script] AC-065-6: create task with neither --plan-id nor --parent exits 2 with a single message naming both flags
   script: test — bunx vitest run packages/lore/tests/unit/cli/create-task-validation.test.ts -t "AC-065-6"
+  other_command=1
 - [⚑] [script] AC-065-7: Prefix resolution works at service level through resolveDoc with InMemoryStore (MCP path inherits it)
   script: test — bunx vitest run packages/lore/tests/unit/service/resolve-prefix.test.ts -t "AC-065-7"
+  other_command=1

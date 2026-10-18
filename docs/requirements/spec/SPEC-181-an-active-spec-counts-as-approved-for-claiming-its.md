@@ -38,8 +38,10 @@ Declared with `lore ac add` (AC-ACT-*).
 
 - [⚑] [script] AC-ACT-1: In a throwaway corpus with a spec moved approved -> active: lore claim on a task of a plan under it is not refused for its upstream, lore approve of a new plan under it is not refused for its upstream, and lore ready shows no unapproved-spec warning flag on its tasks; with the same spec reopened to draft, the claim and the plan approval are refused with UPSTREAM_NOT_APPROVED (exit 4) and the flag returns; in-review is refused the same way.
   script: test — out=$(mktemp) && bunx --bun vitest run packages/lore/tests/integration/gates/active-spec-counts-as-approved.bun.test.ts > "$out" 2>&1; ec=$?; cat "$out"; n=$(sed -nE 's/^ *Tests +([0-9]+) passed.*/\1/p' "$out"); [ "$ec" -eq 0 ] && [ "${n:-0}" -ge 6 ] && echo 'AC-ACT-1 PASS: active clears claim, plan approval and the readiness flag; draft and in-review still refuse with UPSTREAM_NOT_APPROVED'
+  other_command=5
 - [⚑] [script] AC-ACT-2: UPSTREAM_APPROVED_STATUSES contains exactly approved and active, and gate-predicates.ts and task-feed-wiring.ts import it instead of building their own status set.
   script: test — cd /Users/apple/Projects/zz/lore && grep -nE "UPSTREAM_APPROVED_STATUSES[^=]*= new Set\(\[\"approved\", \"active\"\]\)" packages/core/src/task-workflow.ts && ! grep -rnE "new Set\(\[\"approved\"\]\)" packages/lore/src/service/gate-predicates.ts packages/lore/src/adapters/cli/task-feed-wiring.ts && grep -q "UPSTREAM_APPROVED_STATUSES" packages/lore/src/service/gate-predicates.ts && grep -q "UPSTREAM_APPROVED_STATUSES" packages/lore/src/adapters/cli/task-feed-wiring.ts && echo "AC-ACT-2 PASS: one status set {approved, active} shared by the claim gate and the readiness feed"
+  other_command=1
 
 ## Code anchors
 

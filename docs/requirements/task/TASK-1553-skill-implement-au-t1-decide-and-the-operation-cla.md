@@ -3,7 +3,7 @@ id: TASK-1553
 type: task
 role: plan
 title: "[Skill:implement] AU-T1 decide() and the operation-class registry in @lore/core"
-status: draft
+status: archived
 priority: critical
 phase: "Phase 1a: core"
 created: 2026-10-18

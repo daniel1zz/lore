@@ -196,6 +196,7 @@ InMemoryStore (MCP handlers invoked in-process via `_registeredTools` — the ex
   human: Operator supplies no project facts beyond the two documented commands (bootstrap + feed session-resume)
 - [⚑] [script] AC-SL-9: Spawned CLI: missing --next exits 2; --failing-command without --failing-tail-file (and inverse) exits 2; --json-file combined with any field flag exits 2
   script: test — bunx --bun vitest run packages/lore/tests/unit/adapters/cli-handoff.bun.test.ts
+  other_command=1
 - [⚑] [script] AC-SL-10: Bootstrap on an empty corpus returns root null with empty arrays and succeeds (exit 0 semantics at service level: ok result, no throw)
   script: test — bunx vitest run packages/lore/tests/unit/service/session-bootstrap.test.ts
 - [⚑] [script] AC-SL-11: Two handoffs for the same plan and actor resolve newest-wins; --by isolates actors; --by omitted with two actors returns newest per actor under a multi-actor header

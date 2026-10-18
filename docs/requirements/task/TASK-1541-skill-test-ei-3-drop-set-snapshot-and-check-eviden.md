@@ -3,7 +3,7 @@ id: TASK-1541
 type: task
 role: plan
 title: "[Skill:test] EI-3 drop-set snapshot and check-evidence-identity-drop-set script"
-status: draft
+status: archived
 priority: high
 phase: "Phase 1: rule and re-verification"
 created: 2026-10-18

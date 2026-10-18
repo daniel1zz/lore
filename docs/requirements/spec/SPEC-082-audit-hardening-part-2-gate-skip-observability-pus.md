@@ -117,6 +117,7 @@ Structured ACs via `lore ac add` (all script-mode); canonical test paths are con
   script: test — bunx vitest run packages/lore/tests/unit/assets/pre-push-parity.test.ts
 - [⚑] [script] AC-080-4: tamper suite gains the genesis-row deletion pin (new first row reports prev_link_mismatch) and the whole suite passes
   script: test — bunx --bun vitest run packages/lore/tests/unit/store/audit-tamper.bun.test.ts
+  other_command=2
 - [⚑] [script] AC-080-5: full regression passes: typecheck and both test runners exit 0
   script: build — bun run typecheck && bun run test
 

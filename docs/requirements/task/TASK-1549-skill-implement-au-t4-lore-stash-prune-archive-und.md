@@ -3,7 +3,7 @@ id: TASK-1549
 type: task
 role: plan
 title: "[Skill:implement] AU-T4 lore stash prune: archive under refs/lore/archive/stash, attribute, decide(stash-drop)"
-status: draft
+status: archived
 priority: high
 phase: "Phase 1b: human channel and verbs"
 created: 2026-10-18

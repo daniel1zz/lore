@@ -24,9 +24,13 @@ Parent: SPEC-157. Owner request 2026-10-18: "按建议顺序补齐 baseline 缺�
 - `lore baseline coverage baseline-root --json`: complete=false; 114 leaves, 105 declared commands; 91 distinct unmapped sites (3141 leaf×site pairs); 87 distinct not_measured sites; 5 leaves ok.
 - ~33 of the 91 sites are reached by 65-98 leaves (census over-approximation through app wiring: approve STALE_VERSION/override, evaluateDoneFloors, schema-probe, createAppUnscoped, store update STALE_VERSION). Each needs ONE owner leaf + rule; every other leaf maps it `non-business:owned-by <leaf> BR-n — reached only through the census over-approximation` (the convention already in use).
 - Verbs declared by no leaf: `run` (register/show/end/occupancy/tasks/attest-input), `worktree check|sweep`, `red-first`, `plan exempt-attestation|exempt-assessment-freshness`, `phase list|status|checklist|track`, `rule propose|apply|changes`, `ac list|exempt`, `anchor list`, `scope list`, `audit` chain-head anchoring, `migrate` sub-modes other than v1/in-place upgrade.
-- Leaf `baseline-write-an-outline-section` declares `outline set|rm|exempt`, retired in the CLI (only `outline list` remains).
+- Leaf `baseline-write-an-outline-section` declares `outline set|rm|exempt`: correct — it records that those retired writes are refused (BR-985); it only needs re-approval. (Corrects the audit's first reading.)
+- Missed by the first audit: `reopen` is also declared by no leaf (18 verbs, not 17).
 - 11 draft leaves (demoted by rule edits of other sessions): CXSL, CXIN, CXRL, DSCK, ARCT, BRLC, BRAD, BOUT, SUBM, SNAT, SNSE.
 - AC-BLS2-12 (specification + execution at 0 gaps) is red on main.
+
+## Dependency
+P1 is blocked by plan-site-map-maintenance-keeps-approval-owned-by-is-checked (owner choice 2026-10-18 "先改机制再写入"): after it lands, a site-only `baseline map` keeps an approved leaf approved and owned-by exclusions are checked (adr-mapping-a-census-site-does-not-demote-a-baseline-leaf-an). Excavation results for P1 (91 sites: 46 rule / 10 new-rule / 3 modify / 32 non-business) and P2 (18 verbs: 7 new leaves, 37 new rules, 6 modifies) are complete and kept for the apply step; P4 inventory: knowledge-non-cli-entry-points-mapped-to-baseline-leaves-by (45 MCP tools, 45 HTTP routes, 27 dashboard entries, 5 proposed leaves, 13 divergences for owner decision).
 
 ## Phases
 - P1 Owners: classify each of the 91 sites (owner leaf + existing rule / new rule / infrastructure), apply, map the over-reach pairs by script. Exit: per-branch `lore baseline coverage <branch>` exit 0 for the 12 business branches with the 105 already-declared commands; AC-BLS2-12 green.

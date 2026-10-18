@@ -46,9 +46,13 @@ AC-072-1 originally said the row carries the "pre-change" slug. Implementation f
 
 - [⚑] [script] AC-072-1: A lore set --slug rename writes a version row whose snapshot carries the doc's pre-change slug value; lore log --json for that doc exposes slug per version
   script: test — bunx vitest run packages/lore/tests/unit/service/version-slug.test.ts -t 'AC-072-1'
+  other_command=2
 - [⚑] [script] AC-072-2: Legacy version rows without slug parse and render without error or placeholder noise (absence-tolerant consumers)
   script: test — bunx vitest run packages/lore/tests/unit/service/version-slug.test.ts -t 'AC-072-2'
+  other_command=1
 - [⚑] [script] AC-072-3: lore restore to a version whose row carries a different slug leaves the doc's current slug untouched
   script: test — bunx vitest run packages/lore/tests/unit/service/version-slug.test.ts -t 'AC-072-3'
-- [⚑] [script] AC-072-4: SQLite store migration adds nullable slug column; pre-migration db opens cleanly post-migration and new version inserts persist slug (bun:sqlite runner)
+  other_command=1
+- [·] [script] AC-072-4: SQLite store migration adds nullable slug column; pre-migration db opens cleanly post-migration and new version inserts persist slug (bun:sqlite runner)
   script: test — bunx --bun vitest run packages/lore/tests/unit/store/version-slug-migration.bun.test.ts
+  other_command=4

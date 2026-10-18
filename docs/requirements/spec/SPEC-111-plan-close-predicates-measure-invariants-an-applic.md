@@ -165,16 +165,19 @@ Structured criteria are authored via `lore ac add` (below); the prose here is a 
   script: test — bunx vitest run packages/lore/tests/unit/service/plan-close-prd-sync.test.ts -t 'attribution'
 - [⚑] [script] AC-PCI-11: PREDICATE_CONTRACTS declares an entry for every field checkPlanClose can emit (asserted by comparing the table's key set against the emitted-field constants), and lore gate --explain plan-close prints each predicate's invariant, measured proxy, and known_false_pass/known_false_block entries.
   script: test — bunx vitest run packages/lore/tests/unit/service/predicate-contracts.test.ts -t 'contract table'
-- [⚑] [script] AC-PCI-12: From a throwaway corpus driven by the compiled dist/lore binary: a plan whose single claimed AC carries attested evidence, whose ancestor spec has no domain doc, and whose config sets no min_ratio, archives at exit 0 with the not-applicable advisory printed; a sibling plan with an unattested claimed AC exits 4 with that AC id in the output.
+- [·] [script] AC-PCI-12: From a throwaway corpus driven by the compiled dist/lore binary: a plan whose single claimed AC carries attested evidence, whose ancestor spec has no domain doc, and whose config sets no min_ratio, archives at exit 0 with the not-applicable advisory printed; a sibling plan with an unattested claimed AC exits 4 with that AC id in the output.
   script: e2e — bunx --bun vitest run packages/lore/tests/e2e/plan-close-invariants-compiled.bun.test.ts -t 'compiled close'
+  other_command=9
 - [⚑] [script] AC-PCI-9: The attestation-floor feeding pack names every unattested claimed AC id; it contains the literal substring 'attested ratio' when min_ratio is explicitly configured and does NOT contain that substring when min_ratio is unconfigured; feed-attestation-reachability.test.ts's byte-pinned Recovery tail still passes unchanged.
   script: test — bunx vitest run packages/lore/tests/unit/service/feed-attestation-ac-diagnostics.test.ts packages/lore/tests/unit/service/feed-attestation-reachability.test.ts -t 'unattested naming'
 - [⚑] [script] AC-PCI-13: VerificationProjectionService's plan panel passes a null min_ratio through verbatim (never coerced to 0 or a numeric default) and its claimed-AC coverage field equals deriveClaimedAcCoverage over computeAcCoverage's own output for the same fixture, so the panel and the gate cannot disagree.
   script: test — bunx vitest run packages/lore/tests/unit/service/verification-projection-service.test.ts -t 'ratio disabled render'
-- [⚑] [script] AC-PCI-14: PlanAttestationPanel renders the literal text 'ratio conjunct disabled' when min_ratio is null and renders the numeric floor when it is set; the null case's rendered output contains neither '0%' nor '50%'.
+- [·] [script] AC-PCI-14: PlanAttestationPanel renders the literal text 'ratio conjunct disabled' when min_ratio is null and renders the numeric floor when it is set; the null case's rendered output contains neither '0%' nor '50%'.
   script: test — bunx --bun vitest run packages/dashboard/tests/component/PlanAttestationPanel.test.tsx -t 'ratio disabled render'
+  other_command=9
 - [⚑] [script] AC-PCI-15: The upstream ADR carries its revision clause: lore get adr-plan-close-predicates-must-measure-invariants-not-proxies emits a line starting with '## Revision 2026-07-30', so the corrected decision cannot land without the ADR that states it.
   script: other — lore get adr-plan-close-predicates-must-measure-invariants-not-proxies | grep -q '^## Revision 2026-07-30'
+  other_command=1
 - [⚑] [script] AC-PCI-16: lore approve prints every prd_sync_advisories entry to stderr (never stdout) with an unchanged exit code 0, keeps that rendering distinct from the reachability_advisories loop, and prints nothing when both fields are absent.
   script: test — bunx vitest run packages/lore/tests/unit/cli/approve-advisory-render.test.ts -t 'advisory render'
 - [·] [script] AC-PCI-17: checkPlanClose emits a BLOCKING failure (not an advisory) for a plan-close ctx whose declared-scope coverage conjunct is notApplicable('scope-undeclared') while at least one of the plan's tasks carries verification evidence — the exact input shape that archived four plans at exit 0 on 2026-07-31

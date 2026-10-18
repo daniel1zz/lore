@@ -139,12 +139,16 @@ Cut from v1 (P5 admission rule self-applied): `lintChecklistQuantifiability` —
   script: test — bunx vitest run packages/lore/tests/unit/core/phase-scope-freeze.test.ts
 - [⚑] [script] AC-P-3: phase-claim gate passes the IMPORTED SPEC-042 anchor-overlap fixture on phase docs, includes same-actor NEGATIVE case (not rejected), and task-claim config alias emits exactly 1 deprecation warning, 0 failures
   script: test — bunx vitest run packages/lore/tests/unit/service/phase-claim-gate.test.ts
+  other_command=2
 - [⚑] [script] AC-P-4: buildPhaseStartPack seeded fixture: T1 sections complete, T3 excludes invalidated docs, over-budget sections recorded in truncated[], zero-phase plan returns typed err, CLI and MCP payloads deep-equal, 0 failures
   script: test — bunx vitest run packages/lore/tests/unit/flows/phase-feed-flow.test.ts
-- [⚑] [script] AC-P-5: migration fixture (>=8 tasks, 3 plans, legacy_phase residue, multi-claim group, >50 merged evidence, empty declared phase): aggregate reconciliation diff 0, per-field fidelity asserted on >=2 phases, second run performs 0 new writes
+  other_command=3
+- [·] [script] AC-P-5: migration fixture (>=8 tasks, 3 plans, legacy_phase residue, multi-claim group, >50 merged evidence, empty declared phase): aggregate reconciliation diff 0, per-field fidelity asserted on >=2 phases, second run performs 0 new writes
   script: test — bunx --bun vitest run packages/lore/tests/unit/service/phase-migration.bun.test.ts
+  other_command=5
 - [⚑] [script] AC-P-6: full both-runner regression green (vitest + bun test exit 0) plus dedicated legacy-read fixture rendering task badges with 0 migrations run
   script: test — bun run test
+  other_command=7
 - [⚑] [script] AC-P-7: bun run typecheck exits 0 across all packages
   script: build — bun run typecheck
 

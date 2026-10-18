@@ -91,3 +91,4 @@ After truncating to 64 chars, cut back to the last complete hyphen-separated tok
   script: test — bunx vitest run packages/lore/tests/unit/core/slugify-cjk.test.ts -t 'AC-068-9'
 - [⚑] [script] AC-068-10: Compiled-binary e2e: freshly built dist/lore, run from a temp corpus OUTSIDE the repo (no node_modules), creates an all-CJK-title doc whose slug is pinyin (starts with the type prefix + first pinyin token), exit 0
   script: test — bunx --bun vitest run packages/lore/tests/integration/cli/slugify-compiled.bun.test.ts
+  other_command=3

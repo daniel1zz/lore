@@ -77,26 +77,36 @@ Structured criteria live in `extra.acceptance_criteria` (`lore ac list <this spe
 
 ## Acceptance Criteria (structured)
 
-- [⚑] [script] AC-ROI-1: Every CLI write command and every MCP write tool rejects a caller-supplied identity: no write command declares a by/--by argument and no MCP write tool schema has a by property; the read-side --by filters are exactly the pinned allowlist.
+- [·] [script] AC-ROI-1: Every CLI write command and every MCP write tool rejects a caller-supplied identity: no write command declares a by/--by argument and no MCP write tool schema has a by property; the read-side --by filters are exactly the pinned allowlist.
   script: test — o=$(mktemp); bunx vitest run packages/lore/tests/unit/cli/write-commands-take-no-by.test.ts > $o 2>&1; rc=$?; tail -4 $o; [ $rc -eq 0 ] && grep -qE 'Tests +[0-9]+ passed' $o && echo 'AC-ROI-1 PASS: no write surface accepts a caller identity'
-- [⚑] [script] AC-ROI-2: With LORE_ACTOR set in the environment, actor resolution never returns it and never reports source env, in both the core and the CLI resolver; with no run the resolved source follows session, then worktree, then os, in that order.
+  other_command=2
+- [·] [script] AC-ROI-2: With LORE_ACTOR set in the environment, actor resolution never returns it and never reports source env, in both the core and the CLI resolver; with no run the resolved source follows session, then worktree, then os, in that order.
   script: test — o=$(mktemp); bunx vitest run packages/lore/tests/unit/core/actor-resolution-ignores-lore-actor.test.ts > $o 2>&1; rc=$?; tail -4 $o; [ $rc -eq 0 ] && grep -qE 'Tests +[0-9]+ passed' $o && echo 'AC-ROI-2 PASS: LORE_ACTOR has no effect on identity'
-- [⚑] [script] AC-ROI-3: lore done and the lore ready overlap test identify the holder by run: a fresh claim by run A refuses lore done from run B carrying the same derived name, naming run A; overlap between two runs with one name is reported as two holders; a claimant without a run against a holder with a run is a conflict.
+  other_command=4
+- [·] [script] AC-ROI-3: lore done and the lore ready overlap test identify the holder by run: a fresh claim by run A refuses lore done from run B carrying the same derived name, naming run A; overlap between two runs with one name is reported as two holders; a claimant without a run against a holder with a run is a conflict.
   script: test — o=$(mktemp); (bunx --bun vitest run packages/lore/tests/integration/run-owned-done-and-overlap.bun.test.ts) > $o 2>&1; rc=$?; tail -4 $o; [ $rc -eq 0 ] && grep -qE '^ *Tests +[1-9][0-9]* passed' $o && ! grep -qE '^ *(Tests|Test Files) .*[0-9]+ failed' $o && echo 'AC-ROI-3 PASS: done and overlap decide by run'
-- [⚑] [script] AC-ROI-4: lore run end releases every clean claim of the run, marks a claim orphaned_dirty naming its worktree when that worktree has uncommitted changes, releases a claim with no recorded worktree recording worktree not-measured, and exits 0 writing nothing for an unknown run id.
+  other_command=5
+- [·] [script] AC-ROI-4: lore run end releases every clean claim of the run, marks a claim orphaned_dirty naming its worktree when that worktree has uncommitted changes, releases a claim with no recorded worktree recording worktree not-measured, and exits 0 writing nothing for an unknown run id.
   script: test — o=$(mktemp); (bunx --bun vitest run packages/lore/tests/integration/run-end-releases-claims.bun.test.ts) > $o 2>&1; rc=$?; tail -4 $o; [ $rc -eq 0 ] && grep -qE '^ *Tests +[1-9][0-9]* passed' $o && ! grep -qE '^ *(Tests|Test Files) .*[0-9]+ failed' $o && echo 'AC-ROI-4 PASS: run end releases clean claims and keeps dirty ones'
-- [⚑] [script] AC-ROI-5: A claim of an ended run with a clean worktree is taken by a plain claim at once; an orphaned_dirty claim older than claim_ttl_minutes refuses a plain claim, yields to --steal whose output names the dirty worktree, and becomes stale once its worktree is clean.
+  other_command=2
+- [·] [script] AC-ROI-5: A claim of an ended run with a clean worktree is taken by a plain claim at once; an orphaned_dirty claim older than claim_ttl_minutes refuses a plain claim, yields to --steal whose output names the dirty worktree, and becomes stale once its worktree is clean.
   script: test — o=$(mktemp); (bunx --bun vitest run packages/lore/tests/integration/run-end-staleness.bun.test.ts) > $o 2>&1; rc=$?; tail -4 $o; [ $rc -eq 0 ] && grep -qE '^ *Tests +[1-9][0-9]* passed' $o && ! grep -qE '^ *(Tests|Test Files) .*[0-9]+ failed' $o && echo 'AC-ROI-5 PASS: ended-run and orphaned_dirty staleness hold'
-- [⚑] [script] AC-ROI-6: Registering a run that has ended (a resumed helper) reopens it: ended_at is cleared and later claims by that run are owned by it.
+  other_command=2
+- [·] [script] AC-ROI-6: Registering a run that has ended (a resumed helper) reopens it: ended_at is cleared and later claims by that run are owned by it.
   script: test — o=$(mktemp); (bunx --bun vitest run packages/lore/tests/integration/run-end-reopen.bun.test.ts) > $o 2>&1; rc=$?; tail -4 $o; [ $rc -eq 0 ] && grep -qE '^ *Tests +[1-9][0-9]* passed' $o && ! grep -qE '^ *(Tests|Test Files) .*[0-9]+ failed' $o && echo 'AC-ROI-6 PASS: a resumed helper reopens its run'
-- [⚑] [script] AC-ROI-7: HOOK_REGISTRATIONS registers assets/hooks/run-end.mjs on SessionEnd and SubagentStop with timeout >= 10; given a SessionEnd payload the hook ends run cc:<session_id>, given a SubagentStop payload it ends the run of agent_id, and it exits 0 when lore fails.
+  other_command=2
+- [·] [script] AC-ROI-7: HOOK_REGISTRATIONS registers assets/hooks/run-end.mjs on SessionEnd and SubagentStop with timeout >= 10; given a SessionEnd payload the hook ends run cc:<session_id>, given a SubagentStop payload it ends the run of agent_id, and it exits 0 when lore fails.
   script: test — o=$(mktemp); bunx vitest run packages/lore/tests/unit/hooks/run-end-hook.test.ts > $o 2>&1; rc=$?; tail -4 $o; [ $rc -eq 0 ] && grep -qE 'Tests +[0-9]+ passed' $o && echo 'AC-ROI-7 PASS: run-end hook is registered and ends the right run'
-- [⚑] [script] AC-ROI-8: No shipped surface names LORE_ACTOR: CLI help strings, the OS-fallback warning, the anchor-overlap recovery hint, assets/** and repo CLAUDE.md; the OS-fallback warning and the recovery hint name the agent-integration run path instead.
+  other_command=2
+- [·] [script] AC-ROI-8: No shipped surface names LORE_ACTOR: CLI help strings, the OS-fallback warning, the anchor-overlap recovery hint, assets/** and repo CLAUDE.md; the OS-fallback warning and the recovery hint name the agent-integration run path instead.
   script: test — o=$(mktemp); bunx vitest run packages/lore/tests/unit/distribution/no-lore-actor-in-shipped-text.test.ts > $o 2>&1; rc=$?; tail -4 $o; [ $rc -eq 0 ] && grep -qE 'Tests +[0-9]+ passed' $o && echo 'AC-ROI-8 PASS: shipped text names only the run path'
-- [⚑] [script] AC-ROI-9: lore's internal writers keep their code-set identities: an AI-judge review row records ai:claude-cli:* and a system write records system, with no caller input involved.
+  other_command=2
+- [·] [script] AC-ROI-9: lore's internal writers keep their code-set identities: an AI-judge review row records ai:claude-cli:* and a system write records system, with no caller input involved.
   script: test — o=$(mktemp); (bunx --bun vitest run packages/lore/tests/integration/run-only-internal-writers.bun.test.ts) > $o 2>&1; rc=$?; tail -4 $o; [ $rc -eq 0 ] && grep -qE '^ *Tests +[1-9][0-9]* passed' $o && ! grep -qE '^ *(Tests|Test Files) .*[0-9]+ failed' $o && echo 'AC-ROI-9 PASS: internal writer identities preserved'
-- [⚑] [script] AC-ROI-10: lore status --json reports, for writes in the status window, a count per identity source (run, session, worktree, os) and the count and oldest age of orphaned_dirty claims.
+  other_command=1
+- [·] [script] AC-ROI-10: lore status --json reports, for writes in the status window, a count per identity source (run, session, worktree, os) and the count and oldest age of orphaned_dirty claims.
   script: test — o=$(mktemp); (bunx --bun vitest run packages/lore/tests/integration/status-identity-source-counts.bun.test.ts) > $o 2>&1; rc=$?; tail -4 $o; [ $rc -eq 0 ] && grep -qE '^ *Tests +[1-9][0-9]* passed' $o && ! grep -qE '^ *(Tests|Test Files) .*[0-9]+ failed' $o && echo 'AC-ROI-10 PASS: status reports identity sources and orphaned_dirty'
+  other_command=2
 - [·] [human] AC-ROI-11: Live probe in a real Claude Code session, recorded as manual evidence with the observed runs rows: (a) a background (async_launched) subagent's SubagentStop ends its run; (b) /clear yields a new session_id and so a new main run.
   human: Settles the two harness behaviours the hooks docs leave unstated; AC-ROI-7 relies on it.
 

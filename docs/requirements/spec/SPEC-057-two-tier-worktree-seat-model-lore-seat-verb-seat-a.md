@@ -126,6 +126,7 @@ graph LR
   script: test — bunx vitest run packages/lore/tests/integration/real-git-port.test.ts
 - [⚑] [script] AC-S-7: seat list --json emits branch, created_at and merged fields per seat on a fake-GitPort fixture (G13 cost counter-metric data surface), 0 failures
   script: test — bunx vitest run packages/lore/tests/unit/cli/seat-list.test.ts
+  other_command=1
 - [⚑] [script] AC-S-8: bun run typecheck exits 0 across all packages
   script: build — bun run typecheck
 

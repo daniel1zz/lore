@@ -3,7 +3,7 @@ id: TASK-1550
 type: task
 role: plan
 title: "[Skill:implement] AU-T3 human channel: lore decide with TTY, nonce and agent-ancestry refusal; lore pending lists decisions"
-status: draft
+status: archived
 priority: critical
 phase: "Phase 1b: human channel and verbs"
 created: 2026-10-18

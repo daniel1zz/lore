@@ -133,10 +133,13 @@ are part of the contract — implementers create exactly these paths:
   script: test — bunx vitest run packages/lore/tests/unit/service/audit-actor-fidelity.test.ts
 - [⚑] [script] AC-079-3: chain construction suite passes: every audit insert path extends the hash chain; migration-009 backfills a legacy fixture DB into a verifiable chain; a fresh corpus verifies clean
   script: test — bunx --bun vitest run packages/lore/tests/unit/store/audit-chain.bun.test.ts
+  other_command=3
 - [⚑] [script] AC-079-4: tamper detection suite passes: in-place UPDATE of one audit row yields hash_mismatch at that id; paired DELETE of versions+audit rows yields a chain break; a forged appended row yields prev_link_mismatch
   script: test — bunx --bun vitest run packages/lore/tests/unit/store/audit-tamper.bun.test.ts
+  other_command=3
 - [⚑] [script] AC-079-5: anchor roundtrip suite passes: lore audit anchor writes .lore/audit-anchor.json; verify consumes it; a rewritten chain is reported as anchor_mismatch
   script: test — bunx --bun vitest run packages/lore/tests/integration/audit-anchor.bun.test.ts
+  other_command=3
 - [⚑] [script] AC-079-6: InMemoryStore chain parity suite passes: the in-memory store produces the identical chain semantics for all audit write paths
   script: test — bunx vitest run packages/lore/tests/unit/store/in-memory-audit-chain.test.ts
 - [⚑] [script] AC-079-7: full regression passes: typecheck and both test runners exit 0

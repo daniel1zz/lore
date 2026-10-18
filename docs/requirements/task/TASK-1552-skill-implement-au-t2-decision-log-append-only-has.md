@@ -3,7 +3,7 @@ id: TASK-1552
 type: task
 role: plan
 title: "[Skill:implement] AU-T2 decision log: append-only, hash-chained, worst-of, human precedence"
-status: draft
+status: archived
 priority: critical
 phase: "Phase 1a: core"
 created: 2026-10-18

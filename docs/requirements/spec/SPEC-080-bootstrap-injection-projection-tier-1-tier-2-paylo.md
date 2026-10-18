@@ -111,16 +111,22 @@ Design produced via lore-design module mode: 4-perspective parallel review (coup
 
 - [⚑] [script] AC-080-1: buildBootstrapInjection contract suite passes: key order scope_declaration, resume_hint, seat_claims, budget_exceeded last; exact char-budget boundary (at the cap sets no flag, one below sets budget_exceeded with the payload intact; an oversized single field stays intact); legacy count knobs (maxActivePlans: 0) change nothing; an empty-corpus report and a main checkout inject nothing; an unknown report field is never injected; schema round-trip incl. strip-hazard negative (an extra key throws, is not stripped)
   script: test — bunx --bun vitest run packages/core/tests/unit/bootstrap-injection-contract.test.ts
+  other_command=9
 - [⚑] [script] AC-080-2: SPEC-057 frozen baseline stays green untouched AND active_sessions derives corpus-wide from fresh claims, independent of any plan list or injection projection (CORRECTED 2026-10-17, TG-31: the original fixture of 3 actionable plans with maxActivePlans=2 tested a count cap that seat-only injection (4b515543) retired, and the omitted-plan case was deleted in 1b642623; no plan cap exists now, so the surviving contract is that derivation never depends on a plan list: a claim under an active plan, an archived plan, or an --adhoc task with no plan still appears)
   script: test — bunx --bun vitest run packages/lore/tests/unit/service/session-service.test.ts packages/lore/tests/unit/service/session-active-sessions-corpus-wide.test.ts
+  other_command=8
 - [⚑] [script] AC-080-4: Embedded assets manifest is fresh after the session-start-resume.mjs hook edit: embed-assets-manifest --check exits 0 (exit 3 = stale manifest fails this AC)
   script: build — bun scripts/embed-assets-manifest.mjs --check
+  other_command=9
 - [⊘] [script] AC-080-5: Monorepo typecheck passes with the new BootstrapInjection types and config schema extension: tsc --noEmit exits 0 across all packages and scripts
   script: tsc — bun run typecheck
+  other_command=2
 - [⚑] [script] AC-080-3: Compiled-binary e2e: dist/lore bootstrap --json on a seeded throwaway corpus has exactly the literal 10-key BootstrapReport set pinned in the test (root, active_plans, pending_reviews, my_claims, armed_gates, latest_handoffs, resume_hint, corpus, active_sessions, archive_candidates) with no omitted ledger; --injectoin (typo) exits 2 naming the unknown option; --injection --json combined is byte-identical to --injection alone (CORRECTED 2026-10-17, TG-31: the original criterion pinned the tier-1 injection key order and omitted ledger, which seat-only injection (4b515543) retired; the seat-only payload is asserted by AC-SI-2)
   script: e2e — bunx --bun vitest run packages/lore/tests/e2e/bootstrap-injection-compiled.bun.test.ts
+  other_command=9
 - [⚑] [script] AC-080-6: Config knobs are never decorative end-to-end (CORRECTED 2026-10-17, TG-31): the compiled-binary e2e seeds a throwaway corpus whose .lore/config.yaml sets the retired workflow.bootstrap_injection count knobs (max_active_plans, max_handoffs, max_pending_slugs) and asserts bootstrap --injection exits 0 and warns exactly once per set retired key as deprecated, with a config setting none emitting no deprecation line; and char_budget=50 with a seat claim yields budget_exceeded true with a payload that still parses as JSON and keeps its seat claim (never sliced). The original count-cap halves (1 plan + omitted count, 1 handoff, 1 pending slug) were retired by seat-only injection (4b515543)
   script: e2e — bunx --bun vitest run packages/lore/tests/e2e/bootstrap-seat-injection-compiled.bun.test.ts -t 'AC-SI-4'
+  other_command=9
 
 ## Code anchors
 

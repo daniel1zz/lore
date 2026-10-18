@@ -57,10 +57,13 @@ Every in-flight change to a criterion, with the original, the failure it produce
 
 - [⊘] [script] AC-RW-1: lore fragments check exits 0 and packages/lore/tests/unit/assets-ssot.test.ts passes (Tests N passed): the fragments still form a valid set and the assets manifest is fresh.
   script: test — FILES="assets/context/ac-design.md assets/context/corpus-workflow-0-overview.md assets/context/corpus-workflow-1-feed.md assets/context/corpus-workflow-2-produce.md assets/context/corpus-workflow-3-execute.md assets/context/corpus-workflow-4-close.md assets/context/dispatch-bundle.md assets/context/evidence-attestation.md assets/context/worktree-dispatch.md .lore/context/scoped-oracles-in-worktrees.md"; o=$(mktemp); lore fragments check > "$o" 2>&1; r=$?; bunx vitest run packages/lore/tests/unit/assets-ssot.test.ts > "$o.v" 2>&1; v=$?; tail -1 "$o"; grep -E "Tests " "$o.v"; [ $r -eq 0 ] && [ $v -eq 0 ] && grep -qE "Tests +[0-9]+ passed" "$o.v" && echo "AC-RW-1 PASS: lore fragments check exits 0 and assets-ssot passes (manifest fresh)"
+  other_command=6
 - [⚑] [script] AC-RW-2: The always-loaded project rules (cat .claude/rules/lore-*.md) do not grow over their size at b049f0ab (14328 bytes); the measured total is printed and reported.
   script: other — FILES="assets/context/ac-design.md assets/context/corpus-workflow-0-overview.md assets/context/corpus-workflow-1-feed.md assets/context/corpus-workflow-2-produce.md assets/context/corpus-workflow-3-execute.md assets/context/corpus-workflow-4-close.md assets/context/dispatch-bundle.md assets/context/evidence-attestation.md assets/context/worktree-dispatch.md .lore/context/scoped-oracles-in-worktrees.md"; b=$(cat .claude/rules/lore-*.md | LC_ALL=C wc -c | tr -d ' '); echo "always-loaded project rules: $b B"; [ "$b" -le 14328 ] && echo "AC-RW-2 PASS: always-loaded project rules total $b B (no growth over 14328 at b049f0ab; measured value reported)"
+  other_command=7
 - [⚑] [script] AC-RW-4: No line in the ten fragments matches the extended regex 'measured [0-9]{4}-|\(measured|once sat on|once absorbed|[0-9]+ lines of tests' (dated measurement or incident narrative).
   script: other — FILES="assets/context/ac-design.md assets/context/corpus-workflow-0-overview.md assets/context/corpus-workflow-1-feed.md assets/context/corpus-workflow-2-produce.md assets/context/corpus-workflow-3-execute.md assets/context/corpus-workflow-4-close.md assets/context/dispatch-bundle.md assets/context/evidence-attestation.md assets/context/worktree-dispatch.md .lore/context/scoped-oracles-in-worktrees.md"; ! grep -nE 'measured [0-9]{4}-|\(measured|once sat on|once absorbed|[0-9]+ lines of tests' $FILES && echo "AC-RW-4 PASS: no dated measurement or incident narrative remains in the 10 always-loaded fragments"
+  other_command=1
 - [⚑] [ai] AC-RW-5: Every item the traceability table marks DROPPED is explanation (history, incident, dated measurement, mechanism walkthrough, duplicate, common knowledge), judged per item by a grader independent of the editor.
   ai: Read the traceability table knowledge-traceability-table-always-loaded-lore-fragments. Grade ONLY its DROPPED items. For
 - [⚑] [script] AC-RW-3: The traceability table knowledge-traceability-table-always-loaded-lore-fragments covers all ten fragments; every KEPT/MERGED phrase appears (whitespace-normalized) in its fragment; every DROPPED item carries a reason; and every lore command named in a fragment at b049f0ab is still named in it.
@@ -74,6 +77,7 @@ F={i['file'] for i in T}
 p=re.compile(chr(96)+'(lore [a-z][a-z-]*(?: [a-z][a-z-]*)?)');v=lambda x:set(p.findall(x))
 E+=[f+':'+x for f in F for x in v(g(['git','show','b049f0ab:'+f]))-v(open(f).read())]
 print(len(T),'items',len(F),'files',E or 'ok');raise SystemExit(E!=[] or len(F)!=10)" && echo 'AC-RW-3 PASS: table covers ten fragments, KEPT/MERGED phrases present, DROPPED reasons given, no lore command lost'
+  other_command=12
 
 ## Code anchors
 

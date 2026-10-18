@@ -33,12 +33,16 @@ Structured via `lore ac add` (AC-073-1..4), all script-mode.
 
 - [⚑] [script] AC-073-1: Configured consumer (feedback.upstream set): a gate-denial invocation's stderr contains exactly 1 hint line naming lore report-issue with the re-verify-first clause; the same denial in an unconfigured consumer is byte-identical to the pre-SPEC-073 baseline (0 hint lines).
   script: test — bunx --bun vitest run packages/lore/tests/unit/adapters/report-issue-hint.bun.test.ts -t 'AC-073-1'
+  other_command=2
 - [⚑] [script] AC-073-2: Hint scoping negatives: a usage error (exit 2, unknown flag) and a plain VALIDATION_ERROR (non-gate, e.g. bad status transition) carry 0 hint lines even when feedback.upstream is configured.
   script: test — bunx --bun vitest run packages/lore/tests/unit/adapters/report-issue-hint.bun.test.ts -t 'AC-073-2'
+  other_command=2
 - [⚑] [script] AC-073-3: Internal-error path: with feedback.upstream configured and a corrupted .lore/lore.db, the failing command's stderr carries exactly 1 hint line; unconfigured carries 0.
   script: test — bunx --bun vitest run packages/lore/tests/unit/adapters/report-issue-hint.bun.test.ts -t 'AC-073-3'
+  other_command=2
 - [⚑] [script] AC-073-4: Vendored stanza: the assets corpus-workflow snippet SSOT contains the reporting-discipline stanza (token assertions: 'report-issue' + re-verify clause), and the existing assets-conformance oracle passes with the stanza present (parity cannot vacuously pass with it absent from both copies).
   script: test — bunx --bun vitest run packages/lore/tests/unit/assets-ssot.test.ts -t 'AC-073-4'
+  other_command=3
 
 ## Code anchors
 

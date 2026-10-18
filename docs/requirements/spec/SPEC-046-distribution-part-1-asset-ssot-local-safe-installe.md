@@ -82,12 +82,14 @@ Thin glue over existing conventions: services return `Result`, ports injected (F
   script: build — bun run typecheck && bun run test
 - [·] [human] AC-046-F: Sandbox smoke on owner machine: lore setup --claude-dir $(mktemp -d) → receipt correct → re-run all-skipped → --uninstall returns dir to pre-install state
   human: Never run against the real ~/.claude; mktemp sandbox only
-- [○] [script] AC-046-SG1: lore setup --dry-run --json output contains exactly 1 hook-file write entry with path ending 'subagent-stop-commit-guard.mjs' AND exactly 1 SubagentStop settings.json hook-command entry containing 'subagent-stop-commit-guard.mjs'
+- [·] [script] AC-046-SG1: lore setup --dry-run --json output contains exactly 1 hook-file write entry with path ending 'subagent-stop-commit-guard.mjs' AND exactly 1 SubagentStop settings.json hook-command entry containing 'subagent-stop-commit-guard.mjs'
   script: other — bun run dev -- setup --dry-run --json --claude-dir /tmp/fake-claude-dir-sg
+  other_command=1
 - [○] [script] AC-046-SG2: bunx vitest run packages/lore/tests/unit/assets-ssot.test.ts packages/lore/tests/unit/adapters/real-setup-ports.test.ts reports 'Test Files 2 passed (2)' with 0 failures after subagent-stop-commit-guard.mjs is added to both manifests
   script: test — bunx vitest run packages/lore/tests/unit/assets-ssot.test.ts packages/lore/tests/unit/adapters/real-setup-ports.test.ts
-- [○] [script] AC-046-SG3: sha256 of assets/hooks/subagent-stop-commit-guard.mjs equals sha256 of ~/.claude/hooks/subagent-stop-commit-guard.mjs, 0 byte diff
+- [·] [script] AC-046-SG3: sha256 of assets/hooks/subagent-stop-commit-guard.mjs equals sha256 of ~/.claude/hooks/subagent-stop-commit-guard.mjs, 0 byte diff
   script: other — diff <(shasum -a 256 assets/hooks/subagent-stop-commit-guard.mjs | cut -d' ' -f1) <(shasum -a 256 ~/.claude/hooks/subagent-stop-commit-guard.mjs | cut -d' ' -f1)
+  other_command=1
 
 ## Code anchors
 

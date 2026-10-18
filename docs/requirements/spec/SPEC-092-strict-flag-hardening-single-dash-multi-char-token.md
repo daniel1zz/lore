@@ -39,9 +39,13 @@ All existing CLI flag tests pass; every command still accepts its documented dou
 
 - [⚑] [script] AC-073-1: lore list -json exits 2 with a message naming -json as unknown and suggesting --json
   script: test — bunx vitest run packages/lore/tests/unit/adapters/strict-flag-single-dash.test.ts -t 'AC-073-1'
+  other_command=1
 - [⚑] [script] AC-073-2: lore verify -yes exits 2 suggesting --yes; --yes maps to allow-new-commands=true at the parse seam (no live verify execution needed)
   script: test — bunx vitest run packages/lore/tests/unit/adapters/strict-flag-single-dash.test.ts -t 'AC-073-2'
+  other_command=1
 - [⚑] [script] AC-073-3: Declared single-char aliases and negative-number positionals still parse; tokens after -- terminator are never rejected
   script: test — bunx vitest run packages/lore/tests/unit/adapters/strict-flag-single-dash.test.ts -t 'AC-073-3'
+  other_command=1
 - [⚑] [script] AC-073-4: Help/usage output for verify renders the alias as --yes (double dash); no single-dash multi-char alias rendering remains in any command's usage output
   script: test — bunx vitest run packages/lore/tests/unit/adapters/strict-flag-single-dash.test.ts -t 'AC-073-4'
+  other_command=1

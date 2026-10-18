@@ -327,6 +327,7 @@ three lenses independently returned revise-then-approve; v2 incorporates:
 - [○] [human] AC-S3-12: Live dual-session script: session A claims task-a with --by agent:a --branch wt-a; session B claims anchor-overlapping task-b with --by agent:b --branch wt-b and gets nonzero exit with stderr naming task-a, agent:a, the paths and the recovery command; lore ready during both shows two sessions; after lore release task-a --by agent:a the identical retry succeeds
 - [⚑] [script] AC-S3-7: Spawned CLI on throwaway corpus: create task --anchor repeatable persists; lore anchor add/rm/list round-trip; invalid anchor exits 4 (VALIDATION_ERROR pipeline — validation lives solely in normalizeFileAnchors per D3, no duplicated CLI pre-check; cli-handoff exit-4 precedent, AC corrected with evidence pre-verify per SPEC-041 retro learning 3); claim --machine override beats auto-capture; auto-captured machine equals os.hostname() computed in the test file at run time; omitted --worktree yields no worktree field (no cwd capture); anchor-overlap claim block exits 4 with stderr carrying the gate:task-claim:anchor-overlap discriminator and ANCHOR_OVERLAP reason — the rich feeding pack (conflicting slug/holder/paths + literal recovery command) is the lore gate task-claim pre-flight surface, asserted by the gate-parity regression suite and AC-S3-2 at the registry layer
   script: test — bunx --bun vitest run packages/lore/tests/unit/adapters/cli-claim-anchors.bun.test.ts
+  other_command=1
 
 ## Code anchors
 

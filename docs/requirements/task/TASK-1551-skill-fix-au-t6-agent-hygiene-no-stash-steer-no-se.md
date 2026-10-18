@@ -3,7 +3,7 @@ id: TASK-1551
 type: task
 role: plan
 title: "[Skill:fix] AU-T6 agent hygiene: no stash steer, no self-matching waits, helpers reap on signals, tracked files stay clean"
-status: draft
+status: archived
 priority: high
 phase: "Phase 1a: core"
 created: 2026-10-18

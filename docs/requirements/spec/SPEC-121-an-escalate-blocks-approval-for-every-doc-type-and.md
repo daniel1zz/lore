@@ -163,6 +163,7 @@ scoping is preserved, not quietly universalised), and that an empty
   script: test — bunx vitest run packages/lore/tests/unit/service/review-judgment-escalate-scope.test.ts -t 'config invariant prose matches the shipped scoping'
 - [⚑] [script] AC-ESC-9: D5: an escalate PRESENT blocks an ungated type even when a reject accompanies it on the same version. The pre-existing BOUNDARY test asserting that this pair APPROVES must be inverted — it currently pins the defect. Paired with two controls that must stay green: a gated type with the same pair still blocks on the reject (worst-decision-wins intact where it is correct), and an empty judgment_required_types still approves the pair (D3 kill switch short-circuits first).
   script: test — bunx vitest run packages/lore/tests/unit/service/review-judgment-escalate-scope.test.ts -t 'escalate present blocks even alongside a reject'
+  other_command=1
 
 ## Code anchors
 

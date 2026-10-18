@@ -3,7 +3,7 @@ id: TASK-1548
 type: task
 role: plan
 title: "[Skill:implement] AU-T5 runs record pid and start time; lore run reap with ownership proof"
-status: draft
+status: archived
 priority: high
 phase: "Phase 1b: human channel and verbs"
 created: 2026-10-18

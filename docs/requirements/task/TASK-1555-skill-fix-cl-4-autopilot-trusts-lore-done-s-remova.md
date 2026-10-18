@@ -3,7 +3,7 @@ id: TASK-1555
 type: task
 role: plan
 title: "[Skill:fix] CL-4 autopilot trusts lore done's removal and sweeps at round end"
-status: draft
+status: archived
 priority: medium
 phase: "Phase 1: cleanup without a human"
 created: 2026-10-18

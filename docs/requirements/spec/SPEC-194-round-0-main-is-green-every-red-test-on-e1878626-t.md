@@ -44,5 +44,6 @@ AC-R0-1..5 (`lore ac add`). AC-R0-1/2 are the round's exit; AC-R0-3..5 pin the t
   script: test — bunx vitest run packages/lore/tests/integration/cli/setup-language-manifest-sha.test.ts
 - [⚑] [script] AC-R0-4: An ac_scope id declared on one deprecated and one approved spec resolves to the approved spec only; declared on two live specs it is still reported ambiguous; when the only candidate is deprecated it is reported unresolved
   script: test — bunx vitest run packages/core/tests/unit/ac-scope-deprecated-spec.test.ts
+  other_command=1
 - [⚑] [script] AC-R0-5: In a throwaway corpus where two live docs map to the same mirror human_id, the mirror --check exits exactly 2 and names both docs and the shared human_id; after the exporter's repair no two live docs share a human_id and --check exits 0
   script: test — bunx vitest run scripts/tests/mirror-human-id-collision.test.ts

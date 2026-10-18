@@ -42,6 +42,7 @@ Structured via `lore ac add` (AC-074-1..5): 4 Playwright e2e + 1 route-auth test
   script: e2e — cd packages/dashboard && bunx playwright test tests/e2e/issues.spec.ts -g 'AC-074-4'
 - [⚑] [script] AC-074-5: GET /api/issue-reports auth matrix: cookie session 200, bearer token 200 (read-only), no auth 401; response rows carry the 8 declared fields plus open_count, and a corpus with 0 reports returns open_count 0 with an empty rows array (not an error).
   script: test — bunx vitest run packages/lore/tests/unit/adapters/http-issue-reports.test.ts -t 'AC-074-5'
+  other_command=1
 
 ## Code anchors
 

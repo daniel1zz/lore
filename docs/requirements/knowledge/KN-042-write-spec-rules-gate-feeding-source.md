@@ -160,6 +160,8 @@ links:
   - {id: SPEC-195, type: governs}
   - {id: SPEC-196, type: governs}
   - {id: SPEC-197, type: governs}
+  - {id: SPEC-198, type: governs}
+  - {id: SPEC-199, type: governs}
 ---
 ## Overview
 

@@ -92,36 +92,51 @@ Structured criteria: `lore ac list <this spec>`, AC-RS-1 to AC-RS-15. Each cites
 
 ## Acceptance Criteria (structured)
 
-- [⚑] [script] AC-RS-1: Fragment frontmatter: delivery skill without description, with a 1537-char description, with mode dynamic, or with a non-[main] audience is a schema error; a 1536-char description passes; absent delivery parses as rules.
+- [·] [script] AC-RS-1: Fragment frontmatter: delivery skill without description, with a 1537-char description, with mode dynamic, or with a non-[main] audience is a schema error; a 1536-char description passes; absent delivery parses as rules.
   script: test — o=$(mktemp); bunx vitest run packages/core/tests/unit/rs-frontmatter-delivery.test.ts > $o 2>&1; rc=$?; tail -4 $o; [ $rc -eq 0 ] && grep -qE 'Tests +[0-9]+ passed' $o && echo 'AC-RS-1 PASS: skill delivery schema bounds'
-- [⚑] [script] AC-RS-2: A skill-delivery fragment appears in no rules:* and no hook:* outlet and in exactly one of skills:project / skills:user according to its layer.
+  other_command=2
+- [·] [script] AC-RS-2: A skill-delivery fragment appears in no rules:* and no hook:* outlet and in exactly one of skills:project / skills:user according to its layer.
   script: test — o=$(mktemp); bunx vitest run packages/lore/tests/unit/context-fragments/rs-select-skill-routing.test.ts > $o 2>&1; rc=$?; tail -4 $o; [ $rc -eq 0 ] && grep -qE 'Tests +[0-9]+ passed' $o && echo 'AC-RS-2 PASS: skill fragments leave rules and hooks'
-- [⚑] [script] AC-RS-3: Selection add/remove are idempotent (byte-equal on repeat); an unknown id is refused; a project selection disabling a user static-main fragment is refused; a config-file fragments.disable is refused naming selection.yaml.
+  other_command=2
+- [·] [script] AC-RS-3: Selection add/remove are idempotent (byte-equal on repeat); an unknown id is refused; a project selection disabling a user static-main fragment is refused; a config-file fragments.disable is refused naming selection.yaml.
   script: test — o=$(mktemp); bunx vitest run packages/lore/tests/unit/context-fragments/rs-selection.test.ts > $o 2>&1; rc=$?; tail -4 $o; [ $rc -eq 0 ] && grep -qE 'Tests +[0-9]+ passed' $o && echo 'AC-RS-3 PASS: selection ops idempotent and refusals'
-- [⚑] [script] AC-RS-4: Duplicate detection: an exact and a whitespace-variant duplicate across two fragments read by one main session give 2 findings naming both paths; a repeat inside one fragment, headings and blank lines give 0; a line shared only by two different helper types' fragments gives 0.
+  other_command=3
+- [·] [script] AC-RS-4: Duplicate detection: an exact and a whitespace-variant duplicate across two fragments read by one main session give 2 findings naming both paths; a repeat inside one fragment, headings and blank lines give 0; a line shared only by two different helper types' fragments gives 0.
   script: test — o=$(mktemp); bunx vitest run packages/lore/tests/unit/context-fragments/rs-duplicates.test.ts > $o 2>&1; rc=$?; tail -4 $o; [ $rc -eq 0 ] && grep -qE 'Tests +[0-9]+ passed' $o && echo 'AC-RS-4 PASS: duplicate-line detection exact and normalized'
-- [⚑] [script] AC-RS-5: Refresh writes lore-<id>/SKILL.md with description frontmatter and fingerprint, prunes a fingerprinted skill dir whose fragment is gone, leaves a fingerprint-less lore-plan/ byte-unchanged, and refuses fragment id plan with zero writes.
+  other_command=3
+- [·] [script] AC-RS-5: Refresh writes lore-<id>/SKILL.md with description frontmatter and fingerprint, prunes a fingerprinted skill dir whose fragment is gone, leaves a fingerprint-less lore-plan/ byte-unchanged, and refuses fragment id plan with zero writes.
   script: test — o=$(mktemp); bunx vitest run packages/lore/tests/unit/context-fragments/rs-refresh-skills.test.ts > $o 2>&1; rc=$?; tail -4 $o; [ $rc -eq 0 ] && grep -qE 'Tests +[0-9]+ passed' $o && echo 'AC-RS-5 PASS: skill write prune and collision refusal'
-- [⚑] [script] AC-RS-6: A selection write interleaved by another write between read and write returns CONFLICT and leaves the file equal to the interleaved bytes.
+  other_command=8
+- [·] [script] AC-RS-6: A selection write interleaved by another write between read and write returns CONFLICT and leaves the file equal to the interleaved bytes.
   script: test — o=$(mktemp); bunx vitest run packages/lore/tests/unit/flows/rs-selection-cas.test.ts > $o 2>&1; rc=$?; tail -4 $o; [ $rc -eq 0 ] && grep -qE 'Tests +[0-9]+ passed' $o && echo 'AC-RS-6 PASS: selection write refuses lost update'
-- [⚑] [script] AC-RS-7: Spawned lore in a temp HOME and lore-init corpus: context list --json lists every fragment with layer, delivery and selected; context remove corpus-workflow-close records it in selection.yaml and deletes .claude/rules/lore-corpus-workflow-close.md; a repeat exits 0 leaving the file byte-equal; add restores the rules file; remove of an unknown name exits 4.
+  other_command=2
+- [·] [script] AC-RS-7: Spawned lore in a temp HOME and lore-init corpus: context list --json lists every fragment with layer, delivery and selected; context remove corpus-workflow-close records it in selection.yaml and deletes .claude/rules/lore-corpus-workflow-close.md; a repeat exits 0 leaving the file byte-equal; add restores the rules file; remove of an unknown name exits 4.
   script: e2e — o=$(mktemp); bun run build > $o.b 2>&1 || { tail -5 $o.b; false; } && { bunx --bun vitest run packages/lore/tests/e2e/rs-context-selection-cli.bun.test.ts > $o 2>&1; rc=$?; tail -4 $o; [ $rc -eq 0 ] && grep -qE '^ *Tests +[1-9][0-9]* passed' $o && ! grep -qE '^ *(Tests|Test Files) .*[0-9]+ failed' $o && echo 'AC-RS-7 PASS: context list add remove drive the selection'; }
-- [⚑] [script] AC-RS-8: Spawned lore fragments check: a cross-layer whitespace-normalized duplicate exits 4 with [duplicate_line] naming both files on stderr, and exits 0 once removed; a .lore/config.yaml carrying context.fragments.disable exits 4 naming selection.yaml.
+  other_command=2
+- [·] [script] AC-RS-8: Spawned lore fragments check: a cross-layer whitespace-normalized duplicate exits 4 with [duplicate_line] naming both files on stderr, and exits 0 once removed; a .lore/config.yaml carrying context.fragments.disable exits 4 naming selection.yaml.
   script: e2e — o=$(mktemp); bun run build > $o.b 2>&1 || { tail -5 $o.b; false; } && { bunx --bun vitest run packages/lore/tests/e2e/rs-fragments-check-duplicates.bun.test.ts > $o 2>&1; rc=$?; tail -4 $o; [ $rc -eq 0 ] && grep -qE '^ *Tests +[1-9][0-9]* passed' $o && ! grep -qE '^ *(Tests|Test Files) .*[0-9]+ failed' $o && echo 'AC-RS-8 PASS: check fails exit 4 on duplicate line'; }
-- [⚑] [script] AC-RS-9: Spawned lore status --check-fragments on the AC-RS-8 duplicate fixture exits 4 with the same duplicate_line finding, and exits 0 on a clean fixture.
+  other_command=4
+- [·] [script] AC-RS-9: Spawned lore status --check-fragments on the AC-RS-8 duplicate fixture exits 4 with the same duplicate_line finding, and exits 0 on a clean fixture.
   script: e2e — o=$(mktemp); bun run build > $o.b 2>&1 || { tail -5 $o.b; false; } && { bunx --bun vitest run packages/lore/tests/e2e/rs-status-check-fragments.bun.test.ts > $o 2>&1; rc=$?; tail -4 $o; [ $rc -eq 0 ] && grep -qE '^ *Tests +[1-9][0-9]* passed' $o && ! grep -qE '^ *(Tests|Test Files) .*[0-9]+ failed' $o && echo 'AC-RS-9 PASS: status runs the fragments check'; }
-- [⚑] [script] AC-RS-10: Spawned lore: a user fragment with delivery skill carrying a nonce makes context refresh --scope user write HOME/.claude/skills/lore-<id>/SKILL.md and no HOME/.claude/rules/lore-<id>.md, and the nonce is absent from fragments render of hook:session-start and of hook:subagent-start for lore-implementer.
+  other_command=2
+- [·] [script] AC-RS-10: Spawned lore: a user fragment with delivery skill carrying a nonce makes context refresh --scope user write HOME/.claude/skills/lore-<id>/SKILL.md and no HOME/.claude/rules/lore-<id>.md, and the nonce is absent from fragments render of hook:session-start and of hook:subagent-start for lore-implementer.
   script: e2e — o=$(mktemp); bun run build > $o.b 2>&1 || { tail -5 $o.b; false; } && { bunx --bun vitest run packages/lore/tests/e2e/rs-skill-delivery-cli.bun.test.ts > $o 2>&1; rc=$?; tail -4 $o; [ $rc -eq 0 ] && grep -qE '^ *Tests +[1-9][0-9]* passed' $o && ! grep -qE '^ *(Tests|Test Files) .*[0-9]+ failed' $o && echo 'AC-RS-10 PASS: skill fragment renders as skill only'; }
-- [⚑] [script] AC-RS-11: rules:project and skills:project renders are byte-equal across two runs that differ only in user layer, user selection and global config.
+  other_command=2
+- [·] [script] AC-RS-11: rules:project and skills:project renders are byte-equal across two runs that differ only in user layer, user selection and global config.
   script: test — o=$(mktemp); bunx vitest run packages/lore/tests/unit/context-fragments/rs-selection-determinism.test.ts > $o 2>&1; rc=$?; tail -4 $o; [ $rc -eq 0 ] && grep -qE 'Tests +[0-9]+ passed' $o && echo 'AC-RS-11 PASS: project render identical across teammates'
-- [⚑] [script] AC-RS-12: RETIRED HOOK, surviving half: the pre-subagent-gate.mjs edit-notice hook was retired in ee114c62; pre-no-general-agent-gate.mjs refuses a general-purpose dispatch with exit 2 and its message lists exactly lore-reader and lore-implementer, never tester
+  other_command=4
+- [·] [script] AC-RS-12: RETIRED HOOK, surviving half: the pre-subagent-gate.mjs edit-notice hook was retired in ee114c62; pre-no-general-agent-gate.mjs refuses a general-purpose dispatch with exit 2 and its message lists exactly lore-reader and lore-implementer, never tester
   script: test — bunx --bun vitest run packages/lore/tests/unit/hooks/pre-no-general-agent-gate-message.test.ts
-- [⚑] [script] AC-RS-13: Spawned lore with the shipped catalog in a temp HOME: fragments check --json exits 0; shipped ids include ac-design, evidence-attestation, dispatch-bundle and worktree-dispatch; agent-rules keeps only its non-overlapping line; the hook:subagent-start lore-implementer render is at most 9400 chars; this repo's rules:project includes the scoped-oracles fragment.
+  other_command=2
+- [·] [script] AC-RS-13: Spawned lore with the shipped catalog in a temp HOME: fragments check --json exits 0; shipped ids include ac-design, evidence-attestation, dispatch-bundle and worktree-dispatch; agent-rules keeps only its non-overlapping line; the hook:subagent-start lore-implementer render is at most 9400 chars; this repo's rules:project includes the scoped-oracles fragment.
   script: e2e — o=$(mktemp); bun run build > $o.b 2>&1 || { tail -5 $o.b; false; } && { bunx --bun vitest run packages/lore/tests/e2e/rs-shipped-catalog.bun.test.ts > $o 2>&1; rc=$?; tail -4 $o; [ $rc -eq 0 ] && grep -qE '^ *Tests +[1-9][0-9]* passed' $o && ! grep -qE '^ *(Tests|Test Files) .*[0-9]+ failed' $o && echo 'AC-RS-13 PASS: shipped catalog passes check within caps'; }
-- [⚑] [script] AC-RS-15: With LORE_CONFIG_HOME set, context refresh --scope user and fragments check both read that folder's context/ fragments and context/selection.yaml (spawned lore, temp HOME).
+  other_command=3
+- [·] [script] AC-RS-15: With LORE_CONFIG_HOME set, context refresh --scope user and fragments check both read that folder's context/ fragments and context/selection.yaml (spawned lore, temp HOME).
   script: e2e — o=$(mktemp); bun run build > $o.b 2>&1 || { tail -5 $o.b; false; } && { bunx --bun vitest run packages/lore/tests/e2e/rs-user-config-resolver.bun.test.ts > $o 2>&1; rc=$?; tail -4 $o; [ $rc -eq 0 ] && grep -qE '^ *Tests +[1-9][0-9]* passed' $o && ! grep -qE '^ *(Tests|Test Files) .*[0-9]+ failed' $o && echo 'AC-RS-15 PASS: refresh and check share one user config dir'; }
+  other_command=2
 - [⚑] [script] AC-RS-14: On this machine after the user-layer migration, the main session's static rules (.claude/rules/lore-*.md plus ~/.claude/rules/lore-*.md) hold 0 whitespace-normalized duplicate non-heading lines, total at most 33818 bytes (39441 minus the measured 5623 duplicate bytes), and lore fragments check exits 0.
   script: other — cd /Users/apple/Projects/zz/lore && f=".claude/rules/lore-*.md $HOME/.claude/rules/lore-*.md"; d=$(cat $f | grep -v "^<!-- lore:managed" | sed -E "s/[[:space:]]+/ /g;s/^ //;s/ \$//" | grep -vE "^\$|^#{1,6} |^\`\`\`|^---\$" | sort | uniq -d | wc -l | tr -d " "); b=$(LC_ALL=C cat $f | wc -c | tr -d " "); lore fragments check > /dev/null 2>&1; rc=$?; echo "dups=$d bytes=$b check=$rc"; [ "$d" -eq 0 ] && [ "$b" -le 33818 ] && [ $rc -eq 0 ] && echo "AC-RS-14 PASS: main static rules $b B, 0 duplicate lines"
+  other_command=1
 
 ## Code anchors
 

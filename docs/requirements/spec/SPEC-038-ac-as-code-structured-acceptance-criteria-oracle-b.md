@@ -173,12 +173,14 @@ export function computeAcCoverage(
   script: test — bunx vitest run packages/core/src/acceptance.test.ts
 - [○] [script] AC-ACODE-7: lore ac add/list/rm roundtrip; rm refused while evidence references the id; --force overrides leaving dangling ref visible in list
   script: test — bunx vitest run packages/lore/tests/unit/service/ac-service.test.ts
-- [○] [script] AC-ACODE-8: oracle enum kinds defined exactly once (task-workflow.ts ORACLE_KINDS); both adapters reference the SSOT
+- [·] [script] AC-ACODE-8: oracle enum kinds defined exactly once (task-workflow.ts ORACLE_KINDS); both adapters reference the SSOT
   script: other — test $(grep -rln 'z.enum(\[.tsc.,' packages/lore/src/adapters/ | wc -l) -eq 0
+  other_command=1
 - [○] [script] AC-ACODE-9: text projection renders structured AC checklist in get non-raw and export-docs body; raw output untouched. AMENDED 2026-08-23 BY SPEC-143 D7, IN THE SAME COMMIT AS THE RENDERER FIX: the coverage prefix is NO LONGER the three-glyph `✔/✘/·` rule this criterion used to imply. `outline-service.ts::acCoveragePrefix` now DELEGATES to `packages/core/src/acceptance.ts::projectAcCoverageGlyph` over `deriveAcCoverageState`, so all SEVEN coverage states render PAIRWISE-DISTINCT glyphs and the renderer holds no glyph and no precedence rule of its own. ⛔ The authoritative glyph list is that function’s own `switch`, never a transcription here or in the spec body — SPEC-143 AC-CT-1 measures its injectivity (seven states → set size 7, eighth state a compile error) and `scripts/check-ac-state-renderers.ts --rule glyph-projection` refuses any second projection outside `acceptance.ts`. Why amended rather than left alone: fixing the renderer alone would have turned this criterion into a corpus falsehood the mirror check then enshrines. BODY AMENDED IN THE SAME SESSION (v22, agent:main-orchestrator): the 文本投影 bullet now names `projectAcCoverageGlyph` as the single projection instead of transcribing glyphs, closing the residual the implementing agent could only report. ⛔ Mechanically checkable, not prose: `lore get SPEC-038 --json | jq -r .data.doc.content | grep -c '✔/✘/·'` MUST print 0.
   script: test — bunx vitest run packages/lore/tests/unit/service/outline-render.test.ts packages/lore/tests/unit/service/outline-service.test.ts
-- [○] [script] AC-ACODE-10: full existing suites pass on both runners (enum extraction + evidenceEntrySchema blast radius)
+- [·] [script] AC-ACODE-10: full existing suites pass on both runners (enum extraction + evidenceEntrySchema blast radius)
   script: test — bun run test
+  other_command=2
 - [○] [script] AC-ACODE-11: monorepo typecheck passes
   script: tsc — bun run typecheck
 

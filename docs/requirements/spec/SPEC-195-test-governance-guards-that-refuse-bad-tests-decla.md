@@ -51,24 +51,32 @@ AC-TG-1..11 (`lore ac add`). AC-TG-1 is the user-facing runner decision; AC-TG-2
 - [⚑] [human] AC-TG-1: An ADR records the measured comparison of three runner options (bun test only with our own selection; vitest under the Bun runtime; a storage seam letting most tests run in vitest on the in-memory store) and of in-process vs compiled-binary execution for the binary-spawning tests: for each option the count of test files failing unchanged, the wall time of the full suite on this machine, and the count of test files that must change; the user picks one option and the ADR is approved
 - [⚑] [script] AC-TG-2: With LORE_TEST_SANDBOX=1, resolving a corpus whose lore.db lies inside this repository's own .lore/ fails with exit code 4 and a message naming LORE_TEST_SANDBOX and the refused path, for a read and a write; a throwaway corpus under mkdtemp resolves normally; vitest setupFiles and the bun preload both set the variable (asserted from inside each runner)
   script: test — bunx vitest run packages/lore/tests/integration/test-sandbox-guard.test.ts
+  other_command=5
 - [⚑] [script] AC-TG-3: A runner invocation whose tests create or modify any file in the repository tree (tracked or untracked, gitignored build output excluded) fails with exit code 1 and names each such path, unless scripts/test-isolation-ledger.json lists that path with a reason; a run that writes only under mkdtemp passes
   script: test — bunx vitest run scripts/tests/test-tree-snapshot-guard.test.ts
+  other_command=2
 - [⚑] [script] AC-TG-5: bun run check:ac-oracle-ownership exits exactly 1 naming the spec, the AC id and the path when a live script AC's command names a test file that does not exist, and when two live ACs name the same AC id inside one test file without a spec-qualified reference; it exits 0 when every script AC has exactly one existing owning test file
   script: test — bunx vitest run scripts/tests/check-ac-oracle-ownership.test.ts
-- [⚑] [script] AC-TG-6: In a throwaway corpus, lore verify on a script AC whose command names a missing test file records the AC as not measured with the missing path in its output (never pass or fail), lore ac list no longer renders an earlier attested pass for it as passing, and lore done on a task covering that AC exits 4 naming the AC until its command is repointed to an existing file
+- [·] [script] AC-TG-6: In a throwaway corpus, lore verify on a script AC whose command names a missing test file records the AC as not measured with the missing path in its output (never pass or fail), lore ac list no longer renders an earlier attested pass for it as passing, and lore done on a task covering that AC exits 4 naming the AC until its command is repointed to an existing file
   script: test — bunx vitest run packages/lore/tests/integration/cli/verify-missing-oracle-file.test.ts
+  other_command=5
 - [⚑] [script] AC-TG-7: In a fixture repository, test:changed selects a test for a changed non-imported file exactly when the test declares that file (or a glob covering it) as an input; a test declaring nothing is selected only through static imports; no selection reason tree-scan-oracle exists; a test that reads a repository file at run time without declaring it makes the run fail naming the test and the path
   script: test — bunx vitest run scripts/tests/changed-tests-declared-inputs.test.ts
+  other_command=2
 - [⚑] [script] AC-TG-8: Given a full-suite result file and a commit range, the selector cross-check exits exactly 1 and names each test that failed in the full run but would not have been selected for that range, and exits 0 when every failing test would have been selected
   script: test — bunx vitest run scripts/tests/selector-miss-report.test.ts
-- [⚑] [script] AC-TG-4: bun scripts/check-prose-pins.ts exits exactly 1 and prints file:line for a test asserting a string or regex literal of 5 or more words that also occurs in a shipped or governing prose file (the set: assets/**/*.md, **/CLAUDE.md, **/SKILL.md, .claude/rules/*.md, docs/**/*.md except the generated corpus mirror docs/requirements/**), unless scripts/prose-pin-ledger.json names that test, a non-empty consumer and a non-empty reason; negated assertions, imported constants and markdown headings are not flagged; it exits 0 on a fixture without such a pin; hooks/pre-push and assets/project/pre-push both run it
+  other_command=2
+- [·] [script] AC-TG-4: bun scripts/check-prose-pins.ts exits exactly 1 and prints file:line for a test asserting a string or regex literal of 5 or more words that also occurs in a shipped or governing prose file (the set: assets/**/*.md, **/CLAUDE.md, **/SKILL.md, .claude/rules/*.md, docs/**/*.md except the generated corpus mirror docs/requirements/**), unless scripts/prose-pin-ledger.json names that test, a non-empty consumer and a non-empty reason; negated assertions, imported constants and markdown headings are not flagged; it exits 0 on a fixture without such a pin; hooks/pre-push and assets/project/pre-push both run it
   script: test — bunx vitest run scripts/tests/check-prose-pins.test.ts
+  other_command=1
 - [⚑] [script] AC-TG-9: On main after the cleanup phase: check-prose-pins and check:ac-oracle-ownership exit 0 against the real tree; every entry of scripts/test-isolation-ledger.json and scripts/prose-pin-ledger.json has a non-empty reason (and, for prose pins, a non-empty consumer); the four tombstone files (setup-retires-session-start-fragments, init-context-skill-retirement, setup-retired-agent-types, and the retirement cases of setup-governance-retirement) are gone and one retirement registry test exists; no it() body appears in two of in-memory-store.test.ts, sqlite-store.bun.test.ts and turso-store.bun.test.ts after whitespace normalisation (shared cases live in *.shared.ts)
   script: test — bun run check:ac-oracle-ownership && bunx --bun vitest run scripts/tests/test-cleanup-exit.test.ts
+  other_command=28
 - [·] [script] AC-TG-10: On main after the plan's last merge, with dist/lore rebuilt and both runner guards active, bun run test exits exactly 0
   script: test — bun run test
 - [✘] [script] AC-TG-11: On the development machine this plan is run on (Apple Silicon M1 Pro, 8 CPUs, darwin; baseline: two runners, vitest ~282-300 s plus bun 1235-1753 s serial, measured 2026-10-16), the one-runner full run (vitest on the Bun runtime, ADR tg-1 option b, including the explicit Node project) finishes in 600 seconds or less of wall time with exit 0; the script prints the measured seconds, the worker count, the file count run and the machine (os, arch, cpu count), and exits 1 above the limit or when the file count run is lower than the test files on disk
   script: test — bun scripts/measure-test-wall.ts --max-seconds 600
+  other_command=8
 
 ## Code anchors
 

@@ -43,12 +43,16 @@ Declared after landing.
   script: test — bunx vitest run packages/lore/tests/unit/assets/spec-parent-distribution-wide.test.ts && echo 'AC-FIP-2 PASS: shipped skills carry the no-parent contract everywhere'
 - [⚑] [script] AC-FIP-3: After lore setup --project in a fresh corpus, lore status --json reports ac_cite provenance 'audited' (not unaudited) for the seeded mode; after lore baseline adopt --mode enforce with no armed branch, status lists armed branches [] and reports that enforce refuses nothing, and adopt prints that warning — asserted by ac-cite-provenance-fresh.bun.test.ts
   script: test — bunx --bun vitest run --testTimeout=120000 --hookTimeout=120000 packages/lore/tests/integration/cli/ac-cite-provenance-fresh.bun.test.ts && echo 'AC-FIP-3 PASS: seeded mode audited; empty-armed enforce is visible'
+  other_command=2
 - [⚑] [script] AC-FIP-4: lore status --json baseline rule totals (rules_total, rules_by_lifecycle, rules_by_verification) count architecture standard (AS) rules as well as business leaf (BR) rules: a corpus with 2 BR and 1 AS live rule reports rules_total 3 — asserted by status-rule-totals-both-trees.bun.test.ts
   script: test — bunx --bun vitest run --testTimeout=120000 --hookTimeout=120000 packages/lore/tests/integration/cli/status-rule-totals-both-trees.bun.test.ts && echo 'AC-FIP-4 PASS: AS rules counted'
+  other_command=2
 - [⚑] [script] AC-FIP-5: An enforce-mode AC_CITE_REQUIRED refusal of lore ac add suggests 'lore ac add ... --cite <rule>' and never 'lore ac cite' for the unwritten criterion; lore tree --help names the business baseline root as the default root; lore tree <prd> draws depth-3 connectors with the same prefix rules as depth 1-2 (golden output) — asserted by cite-hint-and-tree-render.bun.test.ts
   script: test — bunx --bun vitest run --testTimeout=120000 --hookTimeout=120000 packages/lore/tests/integration/cli/cite-hint-and-tree-render.bun.test.ts && echo 'AC-FIP-5 PASS: hint and tree render'
+  other_command=2
 - [⊘] [script] AC-FIP-6: scripts/fresh-install-probe.ts, given a compiled lore binary path, runs init, setup --project, baseline business+architecture trees, a rule, a parentless spec with a cited criterion, review, approve, an uncited spec's approval refused (exit 4), Implements/Implemented by, census, migrate spec-parents preview, bootstrap/tree default root, in a mkdtemp project, printing one PASS/FAIL line per step, and exits 0 iff every step meets its expectation
   script: test — bun run build > /dev/null 2>&1 && bun scripts/fresh-install-probe.ts --bin dist/lore && echo 'AC-FIP-6 PASS: fresh consumer runs the whole baseline loop'
+  other_command=1
 
 ## Code anchors
 

@@ -79,20 +79,28 @@ Prose form; the machine-checkable set is added with `lore ac add` and is what `l
 
 - [⚑] [script] AC-DS-1: create an adr with decision_status proposed, run the accept writer, then lore get --json reports extra.decision_status === accepted
   script: e2e — bunx --bun vitest run packages/lore/tests/unit/adapters/cli-adr-decision-status.bun.test.ts -t 'accept end-to-end'
+  other_command=2
 - [⚑] [script] AC-DS-2: the accept writer against a non-adr document exits 4 and stderr names the target's actual type
   script: e2e — bunx --bun vitest run packages/lore/tests/unit/adapters/cli-adr-decision-status.bun.test.ts -t 'non-adr target'
+  other_command=2
 - [⚑] [script] AC-DS-3: aiming the writer at deprecated or superseded exits 2 and stderr names lore invalidate
   script: e2e — bunx --bun vitest run packages/lore/tests/unit/adapters/cli-adr-decision-status.bun.test.ts -t 'names lore invalidate'
+  other_command=2
 - [⚑] [script] AC-DS-4: accepting an adr whose status is approved leaves status approved with no draft demotion
   script: e2e — bunx --bun vitest run packages/lore/tests/unit/adapters/cli-adr-decision-status.bun.test.ts -t 'no draft demotion'
+  other_command=2
 - [⚑] [script] AC-DS-5: an adr carrying an additional unrelated extra key still has that key byte-identical after the accept
   script: e2e — bunx --bun vitest run packages/lore/tests/unit/adapters/cli-adr-decision-status.bun.test.ts -t 'unrelated extra key survives'
+  other_command=2
 - [⚑] [script] AC-DS-6: two consecutive accepts both exit 0 and the document version advances exactly once in total
   script: e2e — bunx --bun vitest run packages/lore/tests/unit/adapters/cli-adr-decision-status.bun.test.ts -t 'idempotent second accept'
+  other_command=2
 - [⚑] [script] AC-DS-7: an unrecognised decision-status value exits 2 and stderr lists the accepted value
   script: e2e — bunx --bun vitest run packages/lore/tests/unit/adapters/cli-adr-decision-status.bun.test.ts -t 'unknown decision-status value'
+  other_command=2
 - [⚑] [script] AC-DS-8: the pure value-restriction module accepts the value accepted, refuses deprecated and superseded with a message naming lore invalidate, and refuses an unrecognised value listing the accepted value, all as a unit test with no store and no spawn
   script: test — bunx vitest run packages/lore/tests/unit/cli/decision-status-validation.test.ts -t 'closed value set'
+  other_command=1
 
 ## Code anchors
 

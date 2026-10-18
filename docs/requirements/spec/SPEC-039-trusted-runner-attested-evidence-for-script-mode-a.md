@@ -146,8 +146,10 @@ HAPPY: VRF-3/4/8/10;NEGATIVE: VRF-2/6/7(歧义);BOUNDARY: timeout_ms 边界、�
   script: test — bunx vitest run packages/lore/tests/unit/service/verify-spawn.test.ts
 - [⚑] [script] AC-VRF-5: timeout delivers SIGTERM to the process group; a TERM-trapping survivor is SIGKILLed after the grace period; evidence records fail with timed_out true
   script: test — bunx --bun vitest run packages/lore/tests/integration/verify-executor.bun.test.ts
-- [⚑] [script] AC-VRF-6: spawn launch failure (ENOENT) returns err and records no evidence
+  other_command=1
+- [·] [script] AC-VRF-6: spawn launch failure (ENOENT) returns err and records no evidence
   script: test — bunx --bun vitest run packages/lore/tests/integration/verify-executor.bun.test.ts
+  other_command=1
 - [⚑] [script] AC-VRF-7: resolveTargetTask matrix: zero/one/many fresh claims, stale claim excluded, explicit task override wins, ambiguity fails loud listing candidates
   script: test — bunx vitest run packages/core/src/task-workflow.test.ts
 - [⚑] [script] AC-VRF-8: computeAcCoverage carries attested counts as the single derivation point; ac list renders attested-pass prefix
@@ -158,6 +160,7 @@ HAPPY: VRF-3/4/8/10;NEGATIVE: VRF-2/6/7(歧义);BOUNDARY: timeout_ms 边界、�
   script: test — bunx vitest run packages/lore/tests/integration/cli/verify.test.ts
 - [⚑] [script] AC-VRF-11: full suites pass on both runners with zero regressions
   script: test — bun run test
+  other_command=1
 - [⚑] [script] AC-VRF-12: monorepo typecheck passes
   script: tsc — bun run typecheck
 

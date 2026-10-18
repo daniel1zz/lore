@@ -91,12 +91,16 @@ authority. Prose restatement here is a reader's summary only.
 
 - [⚑] [script] AC-AEP-1: renderTaskEvidence emits one line per evidence row carrying oracle, ac_ref, result, command and a tail_bytes count; a row whose output_tail is absent or empty renders tail_bytes=0 rather than omitting the field.
   script: test — bunx vitest run packages/lore/tests/unit/ai/assess-evidence-projection.test.ts -t 'AC-AEP-1'
+  other_command=1
 - [⚑] [script] AC-AEP-2: CORRECTED 2026-08-01 (the original statement's premise was unsatisfiable and its green was false): truncateSection measures task.content ALONE against max_task_chars (assess-template.ts:548,818) and the rendered evidence block is appended OUTSIDE that budget, so projecting evidence rows can never move a task out of truncated[]. What is actually verified, and what the passing test measures, is a SIZE fact on the assembled evidence block for a 10-row task — the projection bounds an otherwise unbudgeted section. The original truncated[] clause was withdrawn, not satisfied.
   script: test — bunx vitest run packages/lore/tests/unit/ai/assess-evidence-projection.test.ts -t 'AC-AEP-2'
+  other_command=1
 - [⚑] [script] AC-AEP-3: REGRESSION GUARD for D2: when a task block still exceeds its budget after projection, the emitted truncated[] entry is exactly the string 'task:' + slug, byte-identical to the pre-change vocabulary, so computeTaskTruncationRatio and the grounding substring match are unaffected.
   script: test — bunx vitest run packages/lore/tests/unit/ai/assess-evidence-projection.test.ts -t 'AC-AEP-3'
+  other_command=1
 - [⚑] [script] AC-AEP-4: Both prompt builders are covered: buildAssessPrompt (v5) and buildAssessPromptV6 emit the same projected evidence shape for the same input task.
   script: test — bunx vitest run packages/lore/tests/unit/ai/assess-evidence-projection.test.ts -t 'AC-AEP-4'
+  other_command=1
 - [⚑] [script] AC-AEP-5: A dimension_scores entry with based_on='absence' whose material matches a truncated[] entry is REMOVED from the persisted assessment's dimension findings, and a corresponding unverifiable[] entry naming that material is present in its place.
   script: test — bunx vitest run packages/lore/tests/unit/service/assess-absence-suppression.test.ts -t 'AC-AEP-5'
 - [⚑] [script] AC-AEP-6: CONTROL: a based_on='evidence' entry is never suppressed, and a based_on='absence' entry whose material matches NO truncated[] entry is never suppressed — suppression is scoped to the ungrounded-and-truncated intersection only.
@@ -107,8 +111,10 @@ authority. Prose restatement here is a reader's summary only.
   script: test — bunx vitest run packages/lore/tests/unit/service/assess-absence-suppression.test.ts -t 'AC-AEP-8'
 - [⚑] [script] AC-AEP-9: ASSESS_PROMPT_VERSION is 7, and getAssessTemplate(6) still renders a task's evidence rows in the PRE-projection shape — byte-identical to the v6 output captured before the projection landed, so an assessment stamped prompt_version=6 remains reproducible.
   script: test — bunx vitest run packages/lore/tests/unit/ai/assess-prompt-version-freeze.test.ts -t 'AC-AEP-9'
+  other_command=1
 - [⚑] [script] AC-AEP-10: getAssessTemplate(7) renders the projected (oracle, ac_ref, result, command, tail_bytes) shape, and the renderer is injected into the shared builder rather than duplicated — one builder body serves both versions.
   script: test — bunx vitest run packages/lore/tests/unit/ai/assess-prompt-version-freeze.test.ts -t 'AC-AEP-10'
+  other_command=1
 - [⚑] [script] AC-AEP-11: A suppressed ungrounded absence dimension's matching typed_gaps entries are also removed, and the legacy gaps[] projection derived from them no longer contains the suppressed gap's text — the unverifiable[] entry's own claim ('rather than published as a finding') becomes true.
   script: test — bunx vitest run packages/lore/tests/unit/service/assess-absence-suppression.test.ts -t 'AC-AEP-11'
 - [⚑] [script] AC-AEP-12: CONTROL: a GROUNDED absence dimension keeps BOTH its dimension_scores row and its typed_gaps entry; based_on='evidence' dimensions and their typed gaps are untouched; and suppression emptying typed_gaps does not yield a verdict or summary asserting the work is clean.

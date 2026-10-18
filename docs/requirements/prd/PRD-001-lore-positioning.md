@@ -108,6 +108,8 @@ This PRD is the tree root. Each module is a child spec (kind=feature/tech/design
 
 The module tree below is rendered live from the corpus (SPEC-004 placeholder resolution) — a hand-maintained list demonstrably drifts (this section was 8 specs stale at v0.5, stopping at SPEC-011 while the corpus reached SPEC-031):
 
+- [adr] Ambient process state is read once at the entry: one resolved Invocation, rooted writes, owned-only prune (approved)
+- [adr] Mapping a census site does not demote a baseline leaf; an owned-by exclusion is a checked reference (approved)
 - [adr] Autonomy is decided by measured facts: one decision function, human only below threshold or for human-always classes (approved)
 - [adr] TG-1 test runner decision: measured comparison of bun-only, vitest-on-Bun and a storage seam, plus compiled-binary test audit (approved)
 - [task] lore done's test-anchor refusal demands an ATTESTED unfiltered pass, but its predicate never checks attestation — an unattested --capture row satisfies it (draft)

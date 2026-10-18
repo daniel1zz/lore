@@ -32,6 +32,7 @@ See `lore ac list` (AC-RJI-1).
 
 - [⚑] [script] AC-RJI-1: With a stub judge that records its input (describe 'review judge sees structured parts (#107)'): reviewing a baseline leaf puts every rule id and statement, the glossary terms and depends_on ids in the judge input; reviewing a plan puts every acceptance criterion id and statement of its parent spec in the input, including one added after the spec body was written; a criterion or rule omitted by a size cap is counted in the input, never silently dropped
   script: test — bunx vitest run packages/lore/tests/unit/service/review-judge-structured-input.test.ts && echo 'AC-RJI-1 PASS: judge input carries baseline rules/glossary/depends_on and the parent spec criteria'
+  other_command=3
 
 ## Code anchors
 

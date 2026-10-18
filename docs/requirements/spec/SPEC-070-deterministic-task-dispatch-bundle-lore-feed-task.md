@@ -184,6 +184,7 @@ the thick-bundle property).
 
 - [⚑] [script] AC-070-1: buildTaskStartPack called twice with identical fake deps returns deep-equal packs, and the flow module's import graph contains no domain-derivation functions (computeAcCoverage/extractClaim/isClaimStale/extractEvidence)
   script: test — bunx vitest run packages/lore/tests/unit/flows/task-feed-flow.test.ts -t "AC-070-1"
+  other_command=1
 - [⚑] [script] AC-070-2: getTaskBundle error propagates verbatim as the flow result; each aux port (planStateForTask, listLinkedKnowledgePointers, latestHandoffForPlan) failing degrades only its own section to a one-line note while the other 7 sections render
   script: test — bunx vitest run packages/lore/tests/unit/flows/task-feed-flow.test.ts -t "AC-070-2"
 - [⚑] [script] AC-070-3: acceptance view matrix: zero declared ACs renders an explicit no-ACs note; with ac_scope present non-scoped criteria are marked and a dangling scoped id renders a loud row; script-mode rows include their command strings
@@ -196,28 +197,37 @@ the thick-bundle property).
   script: test — bunx vitest run packages/lore/tests/unit/flows/task-feed-flow.test.ts -t "AC-070-6"
 - [⚑] [script] AC-070-7: CLI lore feed task-start <task> prints all 8 section headers; --json emits the pack object; unresolvable task exits 3; missing positional exits 2; spec-create/session-resume/phase-start outputs unchanged after the table-driven dispatch refactor
   script: test — bunx --bun vitest run packages/lore/tests/integration/cli-feed-task-start.bun.test.ts
+  other_command=4
 - [⚑] [script] AC-070-8: MCP lore_feed checkpoint=task-start returns a pack deep-equal to the CLI --json pack for the same corpus state, and checkpoint=phase-start returns the real buildPhaseStartPack pack instead of the generic buildFeed note
   script: test — bunx vitest run packages/lore/tests/unit/adapters/mcp-feed-task-start.test.ts
+  other_command=2
 - [⚑] [script] AC-070-9: MCP lore_feed task-start resolves workflow.task_feed.* config budgets identically to the CLI path: with a non-default budget set in config, the MCP pack's truncated[] and section clipping deep-equal the CLI --json pack for the same corpus state
   script: test — bunx vitest run packages/lore/tests/unit/adapters/mcp-feed-task-start.test.ts -t "AC-070-9"
 - [⚑] [script] AC-070-10: prior-failure output_tail clipping is surrogate-safe: an astral-plane (emoji/CJK-B) fixture clipped at the 500-char boundary yields no unpaired UTF-16 surrogate in the pack (headChars from @lore/core, no bare String.slice in task-feed-wiring)
   script: test — bunx vitest run packages/lore/tests/unit/adapters/task-feed-wiring.test.ts -t "AC-070-10"
+  other_command=1
 - [⚑] [script] AC-070-11: constraints evidence extraction is per-entry tolerant: a task with 2 parseable fail entries plus 1 malformed entry renders both failures AND an explicit degraded line naming 1 unparseable entry; a non-empty raw evidence array never silently renders the no-prior-failures line
   script: test — bunx vitest run packages/lore/tests/unit/adapters/task-feed-wiring.test.ts -t "AC-070-11"
+  other_command=1
 - [⚑] [script] AC-070-12: AC coverage precedence is a single shared @lore/core helper with fail-first ordering: a criterion with pass>0 AND fail>0 labels fail in the task-start pack, and lore ac list's badge consumes the same helper (no second precedence implementation in commands/ac.ts)
   script: test — bunx vitest run packages/lore/tests/unit/adapters/task-feed-wiring.test.ts -t "AC-070-12"
+  other_command=1
 - [⚑] [script] AC-070-13: a present-but-schema-invalid plan.extra.ac_scope makes getTaskBundle return VALIDATION_ERROR naming plan.extra.ac_scope (never silently treated as absent scope)
   script: test — bunx vitest run packages/lore/tests/unit/adapters/task-feed-wiring.test.ts -t "AC-070-13"
+  other_command=1
 - [⚑] [script] AC-070-14: aux port internal refetch failures propagate as err so the section degrades loudly: a forced pointer-refetch failure yields the knowledge-pointers unavailable note (never invalidated:false rows), and a forced handoff-doc lookup failure yields the handoff unavailable note (never title=slug rows)
   script: test — bunx vitest run packages/lore/tests/unit/adapters/task-feed-wiring.test.ts -t "AC-070-14"
+  other_command=1
 - [⚑] [script] AC-070-15: MCP lore_feed task-start resolves budgets per call from a config getter: changing workflow.task_feed between two lore_feed calls on the same server instance changes the second pack's truncated[] without restart
   script: test — bunx vitest run packages/lore/tests/unit/adapters/mcp-feed-task-start.test.ts -t "AC-070-15"
 - [⚑] [script] AC-070-16: special-checkpoint membership and required-arg name live in ONE exported descriptor map consumed by both the CLI dispatch table and the MCP branches, and MCP lore_feed rejects contradictory field combos (task-start with phase, phase-start with task, generic checkpoint with task or phase) with VALIDATION_ERROR
   script: test — bunx vitest run packages/lore/tests/unit/adapters/mcp-feed-task-start.test.ts -t "AC-070-16"
 - [⚑] [script] AC-070-17: pack assembly issues no duplicate store reads: the task doc is fetched exactly once (navigation threaded from the first fetch, call-count-asserted via fakes) and computeAcCoverage parses each task's evidence exactly once via single-pass bucketing with output equal to the previous implementation on mixed fixtures
   script: test — bunx vitest run packages/lore/tests/unit/adapters/task-feed-wiring.test.ts -t "AC-070-17"
+  other_command=1
 - [⚑] [script] AC-070-18: phase-start CLI happy-path four-section render text is regression-pinned with a full-output assertion in the integration suite (previously only its error paths were pinned)
   script: test — bunx --bun vitest run packages/lore/tests/integration/cli-feed-task-start.bun.test.ts
+  other_command=3
 
 ## Code anchors
 

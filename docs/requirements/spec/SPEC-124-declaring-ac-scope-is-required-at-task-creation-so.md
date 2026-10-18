@@ -134,5 +134,7 @@ reviewer's reading.
   script: test — bunx vitest run packages/lore/tests/integration/cli/create-task-ac-scope.test.ts
 - [⚑] [script] AC-ACS-6: REGRESSION: lore verify with an ABSENT ac_scope plus an explicit --ac still runs the named ids and still writes runner-attested evidence, keeping the back-catalogue recovery path open.
   script: e2e — bunx --bun vitest run packages/lore/tests/integration/cli/create-task-ac-scope-e2e.bun.test.ts
+  other_command=2
 - [⚑] [script] AC-ACS-8: End-to-end: a task created under this rule is verified by lore verify and the resulting STORED evidence entry carries an attestation block, asserted on the entry itself rather than on a zero exit code.
   script: e2e — bunx --bun vitest run packages/lore/tests/integration/cli/create-task-ac-scope-e2e.bun.test.ts
+  other_command=2

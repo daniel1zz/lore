@@ -55,10 +55,13 @@ Pure additive: one asset file, one hook enhancement, two test files. No service/
 
 - [⚑] [script] AC-047-A: assets SSOT conformance green incl. seat-briefing.md manifest entry + placeholder-set assertions
   script: test — bunx vitest run packages/lore/tests/unit/assets-ssot.test.ts
+  other_command=1
 - [⚑] [script] AC-047-B: hook seat-injection behavior green: linked worktree injects agent:<branch> block; main checkout byte-unchanged; missing briefing file fail-open exit 0
   script: test — bunx vitest run packages/lore/tests/unit/hooks/session-seat-injection.test.ts
+  other_command=1
 - [⊘] [script] AC-047-C: full regression green (typecheck + both runners)
   script: build — bun run typecheck && bun run test
+  other_command=1
 - [○] [human] AC-047-D: real-machine spot check: scratch worktree session injects seat block with correct actor/main-checkout; main-checkout session unchanged
   human: owner or orchestrator-with-delegation; scratch worktree only
 

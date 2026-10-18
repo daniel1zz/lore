@@ -145,34 +145,45 @@ Structured criteria are declared via `lore ac add` and are the executable form; 
 
 ## Acceptance Criteria (structured)
 
-- [⚑] [script] AC-GI-7: gh is spawned from exactly one module, measured as TWO conjuncts: (a) gh-runner.ts exists AND imports node:child_process, and (b) no other .ts source under packages/lore/src both names a gh subcommand AND imports child_process. ⛔ Known boundary, recorded rather than papered over: a module that builds the literal at runtime by concatenation AND spawns its own child would evade conjunct (b)'s literal half — measured 2026-08-23 when setup-github-health.ts legitimately concatenated the remedy hint to emit AC-GI-2's wording without tripping the older literal-only scan. That module was verified to import zero child_process and to route every invocation through GhRunner, so the property held; the older oracle simply measured a proxy.
+- [·] [script] AC-GI-7: gh is spawned from exactly one module, measured as TWO conjuncts: (a) gh-runner.ts exists AND imports node:child_process, and (b) no other .ts source under packages/lore/src both names a gh subcommand AND imports child_process. ⛔ Known boundary, recorded rather than papered over: a module that builds the literal at runtime by concatenation AND spawns its own child would evade conjunct (b)'s literal half — measured 2026-08-23 when setup-github-health.ts legitimately concatenated the remedy hint to emit AC-GI-2's wording without tripping the older literal-only scan. That module was verified to import zero child_process and to route every invocation through GhRunner, so the property held; the older oracle simply measured a proxy.
   script: lint — test -f packages/lore/src/service/gh-runner.ts && grep -q "node:child_process" packages/lore/src/service/gh-runner.ts && v=0; for f in $(grep -rl --include="*.ts" -e "gh api" -e "gh issue" -e "gh auth" -e "gh repo" packages/lore/src | grep -v "service/gh-runner.ts"); do grep -qE "^import.*child_process" "$f" && v=$((v+1)); done; test "$v" = "0" && echo "AC-GI-7 PASS: gh-runner.ts both spawns and names gh, and no other module does both"
-- [⚑] [script] AC-GI-9: Cap removal is complete: a CASE-SENSITIVE literal scan of .ts sources finds no surviving reference to the six deleted cap symbols — case sensitivity is load-bearing because open_report_cap, the config key AC-GI-10 requires to survive, is a case variant of OPEN_REPORT_CAP
+  other_command=2
+- [·] [script] AC-GI-9: Cap removal is complete: a CASE-SENSITIVE literal scan of .ts sources finds no surviving reference to the six deleted cap symbols — case sensitivity is load-bearing because open_report_cap, the config key AC-GI-10 requires to survive, is a case variant of OPEN_REPORT_CAP
   script: lint — c=$(grep -rn --include="*.ts" -e "OPEN_REPORT_CAP" -e "resolveOpenReportCap" -e "countOpenReports" -e "OpenReportCapRefusal" -e "QUOTA_FREEING_RESOLUTIONS" -e "listOpenAdhocDrafts" packages/ | wc -l | tr -d " "); test "$c" = "0" && echo "AC-GI-9 PASS: 0 case-sensitive matches for the six deleted cap symbols"
-- [⚑] [script] AC-GI-1: Filing succeeds from a working directory that is not, and contains no, clone of the upstream repo
+  other_command=4
+- [·] [script] AC-GI-1: Filing succeeds from a working directory that is not, and contains no, clone of the upstream repo
   script: e2e — bunx --bun vitest run packages/lore/tests/integration/cli/github-intake-reach.bun.test.ts && echo 'AC-GI-1 PASS: report filed from a directory holding no clone of the upstream repo'
+  other_command=5
 - [⚑] [script] AC-GI-2: gh absent or unauthenticated exits with the AUTH_REQUIRED code, never the generic 1, and stderr carries the matching remedy literal: cli.github.com when the binary is missing, 'gh auth login' when present but unauthenticated
   script: test — bunx vitest run packages/lore/tests/unit/service/gh-runner-auth.test.ts && echo 'AC-GI-2 PASS: both auth-absent paths exit AUTH_REQUIRED with a named remedy'
-- [⚑] [script] AC-GI-3: A filing whose network call fails leaves an intent receipt line and no outcome line for the same idempotency key
+  other_command=1
+- [·] [script] AC-GI-3: A filing whose network call fails leaves an intent receipt line and no outcome line for the same idempotency key
   script: test — bunx vitest run packages/lore/tests/unit/service/receipt-log-v2.test.ts && echo 'AC-GI-3 PASS: failed filing leaves intent without outcome'
+  other_command=1
 - [⚑] [script] AC-GI-4: All 9 resolution states survive corpus to label to read-back unchanged
   script: test — bunx vitest run packages/lore/tests/unit/service/resolution-projector.test.ts && echo 'AC-GI-4 PASS: 9 of 9 resolution states round-trip equal'
+  other_command=5
 - [⚑] [script] AC-GI-5: A hand-edited resolution label does not change what lore issues reports, and lore issues --verify reports the divergence
   script: test — bunx vitest run packages/lore/tests/unit/service/resolution-label-non-authority.test.ts && echo 'AC-GI-5 PASS: label edit does not move the reported state and --verify flags it'
-- [⚑] [script] AC-GI-6: Body assembly leaks neither identity: a property test seeds a distinctive home path and a distinctive username, then asserts neither appears in the assembled body — seeded rather than ambient, so a CI account name cannot make it pass vacuously
+- [·] [script] AC-GI-6: Body assembly leaks neither identity: a property test seeds a distinctive home path and a distinctive username, then asserts neither appears in the assembled body — seeded rather than ambient, so a CI account name cannot make it pass vacuously
   script: test — bunx vitest run packages/lore/tests/unit/service/issue-body-redaction.test.ts && echo 'AC-GI-6 PASS: assembled bodies carry no home path and no OS username'
+  other_command=2
 - [⚑] [script] AC-GI-8: Every gh invocation runs with GH_REPO, GH_HOST, GH_CONFIG_DIR and GH_ENTERPRISE_TOKEN absent from its environment
   script: test — bunx vitest run packages/lore/tests/unit/service/gh-runner-env-scrub.test.ts && echo 'AC-GI-8 PASS: all four GH_* vars absent from every invocation env'
-- [⚑] [script] AC-GI-10: A config carrying feedback.inbound.open_report_cap parses successfully and emits a warning naming the key (the permanence of that behaviour is policy in Scope, not part of this oracle)
+- [·] [script] AC-GI-10: A config carrying feedback.inbound.open_report_cap parses successfully and emits a warning naming the key (the permanence of that behaviour is policy in Scope, not part of this oracle)
   script: test — bunx vitest run packages/lore/tests/unit/service/feedback-config-compat.test.ts && echo 'AC-GI-10 PASS: legacy cap key parses and warns by name'
-- [⚑] [script] AC-GI-11: Migration lands 12 issues, exactly 2 closed with a state_reason, and each of the six closed front-matter fields (severity, category, tags, idempotency_key, reporter_corpus, reporter_root_prd) equals its corpus source
+  other_command=2
+- [·] [script] AC-GI-11: Migration lands 12 issues, exactly 2 closed with a state_reason, and each of the six closed front-matter fields (severity, category, tags, idempotency_key, reporter_corpus, reporter_root_prd) equals its corpus source
   script: e2e — bunx --bun vitest run packages/lore/tests/integration/cli/issue-migration.bun.test.ts && echo 'AC-GI-11 PASS: 12 issues, 2 closed with reason, front-matter equal field by field'
+  other_command=2
 - [⚑] [script] AC-GI-12: No read surface issues one network call per issue: the call count for listing 50 issues equals the call count for listing 1
   script: test — bunx vitest run packages/lore/tests/unit/service/issue-read-batching.test.ts && echo 'AC-GI-12 PASS: listing N issues costs O(1) calls, not O(N)'
-- [⚑] [script] AC-GI-13: A GitHub-side close-as-completed does NOT produce a corpus fixed resolution: computeIssueResolution still reports the pre-close state, and the only transition into fixed remains a resolves edge
+- [·] [script] AC-GI-13: A GitHub-side close-as-completed does NOT produce a corpus fixed resolution: computeIssueResolution still reports the pre-close state, and the only transition into fixed remains a resolves edge
   script: test — bunx vitest run packages/lore/tests/unit/service/github-close-not-fixed.test.ts && echo 'AC-GI-13 PASS: a GitHub close-as-completed yields no corpus fixed resolution'
-- [⚑] [script] AC-GI-14: A config carrying feedback.upstream.corpus_path and/or the retired transport key parses successfully after P4 and emits a warning naming each retired key — same invariant as AC-GI-10 for the cap key, held separately so P1 and P4 gate independently
+  other_command=2
+- [·] [script] AC-GI-14: A config carrying feedback.upstream.corpus_path and/or the retired transport key parses successfully after P4 and emits a warning naming each retired key — same invariant as AC-GI-10 for the cap key, held separately so P1 and P4 gate independently
   script: test — bunx vitest run packages/lore/tests/unit/service/transport-config-compat.test.ts && echo 'AC-GI-14 PASS: retired transport keys parse and each is named in a warning'
+  other_command=2
 
 ## Code anchors
 

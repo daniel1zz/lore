@@ -170,16 +170,21 @@ One direction only: core ← service ← flows ← adapters. No cycles.
 
 - [⚑] [script] AC-CTX-1: Projection/splice unit suite passes: five-state transitions including diverged_skip on fingerprint hash mismatch, splice idempotency (second apply of identical sections is byte-identical), and Z2 byte-preservation on every code path
   script: test — bunx vitest run packages/lore/tests/unit/service/context-projection.test.ts
+  other_command=1
 - [⚑] [script] AC-CTX-2: Admission-check unit suite passes: reference_missing findings fire for backtick-quoted repo-relative paths that do not exist and stay silent for existing paths and URL-scheme tokens; detectNarrativeSmells findings are emitted as advisory and never alter the deterministic finding set or exit-relevant output
   script: test — bunx vitest run packages/lore/tests/unit/service/claude-md-admission.test.ts
-- [⊘] [script] AC-CTX-3: Compiled-binary e2e passes in a temp repo: lore context init without a usable AI provider exits 0, writes a skeleton, and prints a warning on stderr; an immediately following lore context refresh is byte-identical (idempotent); a hand-edit inside a managed section makes the next refresh report diverged_skip and leave the file bytes untouched
+- [·] [script] AC-CTX-3: Compiled-binary e2e passes in a temp repo: lore context init without a usable AI provider exits 0, writes a skeleton, and prints a warning on stderr; an immediately following lore context refresh is byte-identical (idempotent); a hand-edit inside a managed section makes the next refresh report diverged_skip and leave the file bytes untouched
   script: e2e — bunx --bun vitest run packages/lore/tests/e2e/context-verbs-compiled.bun.test.ts
+  other_command=6
 - [⊘] [script] AC-CTX-4: Splice SSOT holds: setup-project-flow imports spliceManagedSections from context-projection (grep-pin asserts no second marker-splice implementation remains) and the existing setup e2e suite stays green
   script: test — bunx vitest run packages/lore/tests/unit/flows/setup-splice-ssot.test.ts
-- [⊘] [script] AC-CTX-5: RETIRED HOOK, current mechanism: the claude-md-guard PostToolUse hook was retired in ee114c62; its check now runs at turn end in stop-turn-review.mjs, which blocks a turn that edited a CLAUDE.md past its ceiling, carrying the 'lore status --check-claude-md' report; a CLAUDE.md edited within budget is silent, and an over-budget file the turn did not touch is not re-reported
+  other_command=4
+- [·] [script] AC-CTX-5: RETIRED HOOK, current mechanism: the claude-md-guard PostToolUse hook was retired in ee114c62; its check now runs at turn end in stop-turn-review.mjs, which blocks a turn that edited a CLAUDE.md past its ceiling, carrying the 'lore status --check-claude-md' report; a CLAUDE.md edited within budget is silent, and an over-budget file the turn did not touch is not re-reported
   script: e2e — bunx --bun vitest run packages/lore/tests/integration/hooks/stop-turn-review-drift-budget.test.ts -t 'CLAUDE.md budget'
-- [⊘] [script] AC-CTX-6: Skill retirement completes end-to-end: on a fixture with a previously-installed lore-init-context skill, lore setup removes the installed copy, and the embedded assets manifest check exits 0
+  other_command=7
+- [·] [script] AC-CTX-6: Skill retirement completes end-to-end: on a fixture with a previously-installed lore-init-context skill, lore setup removes the installed copy, and the embedded assets manifest check exits 0
   script: e2e — bunx --bun vitest run --testTimeout=30000 --hookTimeout=30000 packages/lore/tests/integration/retirement-registry.bun.test.ts -t 'install-skill-lore-init-context|an emptied skill directory' && bun scripts/embed-assets-manifest.mjs --check
+  other_command=7
 - [⚑] [script] AC-CTX-7: Full gates pass: bun run typecheck exits 0 and both test runners (vitest suite and bun test suite) exit 0
   script: test — bun run typecheck && bun run test
 - [⚑] [script] AC-CTX-8: Refresh pre-write admission: contextRefresh runs the claude-md ceiling admission check (same max_lines/max_bytes source as lore status --check-claude-md) on the SPLICED candidate BEFORE writing; a would-be breach performs NO write and returns a loud non-ok Result naming the findings; a within-budget splice writes as before (byte-identical to pre-change behavior)
