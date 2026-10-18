@@ -45,9 +45,9 @@ export const LORE_BINARY_VERSION = "0.1.0" as const;
 
 export const EMBEDDED_ASSETS_MANIFEST: EmbeddedAssetsManifest = {
   binary_version: LORE_BINARY_VERSION,
-  tree_digest: "4bb35d1a814e20b6cd9bc0b42ab28883c1b43c6a98bf91962e098e154375f85c",
+  tree_digest: "0d2f8c9bf15a1a022687a8f1f5954197319f4e6747e8ecad8500bb8759a234a9",
   entries: [
-  { path: "agents/lore-implementer.md", kind: "agent", ownership: "managed", sha256: "8b063e990dea63597d6728495ec0925bb15b4f2a3d1933ca11bd53abe9d70da7" },
+  { path: "agents/lore-implementer.md", kind: "agent", ownership: "managed", sha256: "f9a171e11ccbe81be5a3fcd93b7192a954c97e7a12129430a50b8dde846727e2" },
   { path: "agents/lore-reader.md", kind: "agent", ownership: "managed", sha256: "336b2da60cfe9afae51f17ac8f6f9f33e7c67b2f3639874795e22a0e257e8696" },
   { path: "context/ac-design.md", kind: "context", ownership: "managed", sha256: "cb99bd0d8cb444da4eb362d9954213ee1294145db84628acbf12642393359d67" },
   { path: "context/agent-rules.md", kind: "context", ownership: "managed", sha256: "976b665a0f1596f718d33f34533c01dae49f702c0aca9bda45b573b7368660e7" },
@@ -58,7 +58,7 @@ export const EMBEDDED_ASSETS_MANIFEST: EmbeddedAssetsManifest = {
   { path: "context/corpus-workflow-4-close.md", kind: "context", ownership: "managed", sha256: "ff7fb4844547648f1da95b9a2451e3ebcbbaec0037cdb514b02ace35ab49760f" },
   { path: "context/dispatch-bundle.md", kind: "context", ownership: "managed", sha256: "fad2df8beb68f36fd591290ec8d91bbec836eeaf149708d8b6ec263b869cac39" },
   { path: "context/evidence-attestation.md", kind: "context", ownership: "managed", sha256: "1202d4007575d28a3403245b6d797771b3f0a9bc0b66d75830b028ab22d6c79d" },
-  { path: "context/worktree-dispatch.md", kind: "context", ownership: "managed", sha256: "62af7c1649e1524f64198524fd1cc048fce715b0c61f5d7ecfe43cf83835d438" },
+  { path: "context/worktree-dispatch.md", kind: "context", ownership: "managed", sha256: "ca9b2336eabf4a1c7a8e0cba2611b3fc4f32e099ee6b1a1c8834113a72e00e20" },
   { path: "governance/claude-md-contract.md", kind: "governance", ownership: "managed", sha256: "d10ddb7362141cea37279a7e81264f56041efefed9d36c43b618944e8ef24819" },
   { path: "governance/seat-briefing.md", kind: "governance", ownership: "managed", sha256: "62d33fe1d7f5124e74247fb0491ef65600e11ff8179ba77efc29bbb130ad1894" },
   { path: "hooks/lib/run-id.mjs", kind: "hook", ownership: "managed", sha256: "d19c976ed1819180c4654587f4c839d02ad2a1f87f49517928a780602024a773" },
@@ -114,7 +114,7 @@ export const EMBEDDED_ASSETS_MANIFEST: EmbeddedAssetsManifest = {
   { path: "skills/lore-auto-wire/references/tools/selfhosted-pg.md", kind: "skill", ownership: "managed", sha256: "ed7af13b5ef6eb53ca7b61ef2df6a4e20ad99bd3d4a674b74b922a4fc57a7d3f" },
   { path: "skills/lore-auto-wire/scripts/check-tools.sh", kind: "skill", ownership: "managed", sha256: "9be51f9df4717b93f50bd024440db60edd60f7d326a3c960cd72e0169c9d25bf" },
   { path: "skills/lore-auto-wire/scripts/fix-path.sh", kind: "skill", ownership: "managed", sha256: "76828df5440be276233fbd147f28bfeac00e91f73815ca9e85dc3911c436932f" },
-  { path: "skills/lore-autopilot/SKILL.md", kind: "skill", ownership: "managed", sha256: "852d46226eec0ca99b6f668321027cdf24c4a947b7277fc3a367320139ce2ab0" },
+  { path: "skills/lore-autopilot/SKILL.md", kind: "skill", ownership: "managed", sha256: "2c57e9595eadde9685da3471e39eb00cd520b886ca6b70b19fb7c3f25a818c71" },
   { path: "skills/lore-baseline/SKILL.md", kind: "skill", ownership: "managed", sha256: "5c5a14d003c93eb636a3d0601ee335cf8a745f5d6187a99da00e81baeda8639b" },
   { path: "skills/lore-baseline/templates/branch.md", kind: "skill", ownership: "managed", sha256: "0db3c50293303cb7f879f0df0001d33a582f598f3d0a5f47151f99ce2e106049" },
   { path: "skills/lore-baseline/templates/leaf.md", kind: "skill", ownership: "managed", sha256: "b01451b45fe0b59d16a77df35a8575c105716ad60802d6bb9b2090cd52da237d" },
