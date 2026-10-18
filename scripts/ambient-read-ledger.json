@@ -37,7 +37,6 @@
   "packages/lore/src/adapters/cli/corpus-resolution.ts": 2,
   "packages/lore/src/adapters/cli/editor.ts": 3,
   "packages/lore/src/adapters/cli/gate-bypass-audit.ts": 1,
-  "packages/lore/src/adapters/cli/invocation-identity.ts": 1,
   "packages/lore/src/adapters/cli/loader.ts": 6,
   "packages/lore/src/adapters/cli/phase-wiring.ts": 1,
   "packages/lore/src/adapters/cli/report-issue-wiring.ts": 1,

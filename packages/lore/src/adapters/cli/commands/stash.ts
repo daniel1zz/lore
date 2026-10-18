@@ -18,7 +18,6 @@ import { spawnSync } from "node:child_process";
 import { defineCommand } from "citty";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatError } from "../utils.js";
-import { getInvocationIdentity } from "../invocation-identity.js";
 import { SQLiteStore } from "../../../store/sqlite-store.js";
 import { DecisionService } from "../../../service/decision-service.js";
 import {
@@ -90,8 +89,16 @@ const prune = defineCommand({
         process.exitCode = 1;
         return;
       }
+      // reason: the decision record must carry the run the store wrapper stamps onto rows (BR-1035,
+      // run-identity-verify.ts): verify once through the app's wrapped store; an unregistered id is null.
+      const verifiedIdentity = await app.verifiedInvocationIdentity?.();
+      if (verifiedIdentity !== undefined && !verifiedIdentity.ok) {
+        process.stderr.write(`${formatError(verifiedIdentity.error)}\n`);
+        process.exitCode = exitCode(verifiedIdentity.error);
+        return;
+      }
       store = new SQLiteStore(dbPath);
-      const decisions = new DecisionService({ store, executorRun: getInvocationIdentity()?.harnessRun ?? null });
+      const decisions = new DecisionService({ store, executorRun: verifiedIdentity?.value?.harnessRun ?? null });
       const service = new StashPruneService({ git: gitRunnerFor(app.repoRoot), store, decisions });
       const result = args.apply === true ? await service.apply() : await dryRun(service);
       if (!result.ok) {

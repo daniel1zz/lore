@@ -18,7 +18,7 @@
 import { spawnSync } from "node:child_process";
 import { closeSync, openSync, readSync, writeSync } from "node:fs";
 import { isatty } from "node:tty";
-import { getInvocationIdentity } from "./cli/invocation-identity.js";
+import { invocationInScope } from "./cli/invocation-scope.js";
 import { generateNonce, type HumanChannelOutcome, type HumanChannelPorts, type HumanTerminal, type ProcessEntry } from "../service/human-channel.js";
 
 const MAX_PS_BYTES = 64 * 1024 * 1024;
@@ -97,7 +97,9 @@ export function createProductionHumanChannelPorts(overrides: Partial<HumanChanne
       // reason: run-cli strips `--harness-run <id>` from process.argv and keeps it in the invocation identity;
       // an agent run identity must still be visible to the channel check, so it is re-surfaced here.
       const args = process.argv.slice(2);
-      return getInvocationIdentity()?.harnessRun != null ? [...args, "--harness-run", String(getInvocationIdentity()?.harnessRun)] : args;
+      // reason: the UNVERIFIED id is deliberate here; surfacing an unregistered run makes the channel refuse, the safe direction (BR-1035).
+      const harnessRun = invocationInScope()?.identity.harnessRun;
+      return harnessRun != null ? [...args, "--harness-run", String(harnessRun)] : args;
     },
     selfPid: () => process.pid,
     readProcessTable: readLiveProcessTable,

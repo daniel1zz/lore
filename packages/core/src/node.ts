@@ -24,6 +24,8 @@
  *     here for the SAME reason (its OS-fallback tier calls `os.userInfo()`).
  *   - resolveInvocationIdentity / RunIdentityArgumentError (run-identity-node.ts,
  *     run-identity-slice-1 D1/D8/D11) — per-invocation harness run + claimed name.
+ *   - resolveInvocation / InvocationResolvers (invocation-node.ts, spec-ambient-state-is-read-once-at-the-entry-owned-only-prune
+ *     D4) — the ONE core file allowed to read ambient process state; builds the `Invocation` type of invocation.ts.
  *
  * Invariants:
  *   - Import via `@lore/core/node`, never via relative path into another package.
@@ -44,6 +46,7 @@ export * from "./telemetry-node.js";
 export * from "./slugify-node.js";
 export * from "./actor-resolution-node.js";
 export * from "./run-identity-node.js";
+export * from "./invocation-node.js";
 export * from "./home-dir-node.js";
 // Session trail (spec-session-trail-a-session-local-record-of-what-each-run-4): schemas,
 // parseRunId/sessionOfRun and buildSessionTrail (pure, session-trail.ts) plus stateBase and the

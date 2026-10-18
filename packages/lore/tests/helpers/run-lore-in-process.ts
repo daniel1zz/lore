@@ -11,7 +11,7 @@
  * Public surface: `runLoreInProcess(args, options)` and the `InProcessRunResult` it resolves to.
  *
  * Invariants:
- *   - Same startup sequence and same exit-code mapping as the binary: it calls `runCli`
+ *   - Same startup sequence and same exit-code mapping as the binary: it calls `runCliFromProcess`
  *     (`src/adapters/cli/run-cli.ts`), the function `src/index.ts` itself calls, and observes the code the
  *     command passes to `process.exit` (`exitCode()` in `utils.ts`, or citty's `runMain` catch-all). A run
  *     that never calls `process.exit` exits 0. There is no mapping in this file.
@@ -35,8 +35,7 @@
 
 import { format } from "node:util";
 import { setStdioInterceptor } from "../../src/adapters/cli/stdio-sync";
-import { runCli } from "../../src/adapters/cli/run-cli";
-import { resetInvocationIdentityForNextRun } from "../../src/adapters/cli/invocation-identity";
+import { runCliFromProcess } from "../../src/adapters/cli/run-cli";
 
 /** Environment bag, same shape as `process.env`. */
 export type InProcessEnv = Readonly<Record<string, string | undefined>>;
@@ -150,10 +149,9 @@ async function executeRun(args: readonly string[], options: InProcessRunOptions)
     console.warn = captureConsole(2);
     console.error = captureConsole(2);
     setStdioInterceptor(capture);
-    resetInvocationIdentityForNextRun();
 
     try {
-      await runCli({ installSyncStdout: false });
+      await runCliFromProcess({ installSyncStdout: false });
     } catch (error) {
       if (!(error instanceof InProcessExit)) {
         // reason: an exception that escaped runCli is a defect in the command or the helper; show it, never swallow it.
@@ -164,7 +162,6 @@ async function executeRun(args: readonly string[], options: InProcessRunOptions)
     const naturalExit = typeof process.exitCode === "number" ? process.exitCode : 0;
     return { stdout: out.join(""), stderr: err.join(""), exitCode: exitCode ?? naturalExit };
   } finally {
-    resetInvocationIdentityForNextRun();
     setStdioInterceptor(null);
     Object.assign(console, savedConsole);
     process.stdout.write = savedStdoutWrite;

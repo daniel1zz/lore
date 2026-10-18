@@ -74,7 +74,7 @@ import {
 import { createApp, createAppWithWriteContext, type App } from "../../app.js";
 import { findLoreDbPath, formatError, exitCode } from "./utils.js";
 import { findForeignBehindSchema } from "../../store/foreign-schema-guard.js";
-import { getInvocationIdentity, replaceInvocationIdentity } from "./invocation-identity.js";
+import { invocationInScope } from "./invocation-scope.js";
 import { resolveCorpus } from "./corpus-resolution.js";
 import {
   guardTaskLifecycleWrites,
@@ -461,16 +461,15 @@ export function loadLoreApp(opts: LoadLoreAppOptions = {}): {
   // "internal unexpected throw" errClass (SPEC-073 §Design) actually reachable.
   let appOrResult: App | Result<App, LoreError>;
   try {
-    // reason: the identity the CLI entry resolved (index.ts) wraps the store inside createApp
-    // (spec-run-identity-slice-1 D3); undefined for MCP/HTTP/tests, which never set one.
-    const invocationIdentity = getInvocationIdentity();
+    // reason: the identity of the Invocation the CLI entry resolved and `deliverInvocation` handed to this
+    // command wraps the store inside createApp (spec-run-identity-slice-1 D3); undefined for MCP/HTTP/tests,
+    // which run outside a delivered command. The verified identity is the store's fact
+    // (`ensureVerifiedIdentity(store)`), so there is no `onVerified` write-back into a process slot.
+    const invocationIdentity = invocationInScope()?.identity;
     appOrResult =
       invocationIdentity === undefined
         ? createApp(dbPath, telemetryOnlyConfig)
-        : createAppWithWriteContext(dbPath, telemetryOnlyConfig, {
-            identity: invocationIdentity,
-            onVerified: replaceInvocationIdentity,
-          });
+        : createAppWithWriteContext(dbPath, telemetryOnlyConfig, { identity: invocationIdentity });
   } catch (thrown) {
     const message = thrown instanceof Error ? thrown.message : String(thrown);
     console.error(`Error: Storage failure: ${message}`); // CLI surface
