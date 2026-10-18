@@ -27,14 +27,20 @@ export type RulesOwnership =
   | { readonly kind: "legacy"; readonly adoptable: boolean };
 
 /**
- * Identity of the fragment source folders one refresh read: the shipped and the user-layer `context/` folders.
+ * Identity of the fragment source one refresh read, recorded in each rules file header.
  *
- * @param shippedDir Port path of `<assetsRoot>/context`.
- * @param userDir Port path of `<userConfigDir>/context`.
- * @returns A stable string recorded in each rules file header.
+ * reason: user scope draws ONLY from the user layer (select.ts LAYERS_BY_OUTLET), so its identity is the user
+ * `context/` folder. Project scope files are committed to the repo and must stay byte-identical across machines
+ * and HOMEs (AC-CV-3, AC-ISCOPE-1(b), `setup --project --check`), so no folder path may enter their bytes:
+ * project scope records NO source (`null`) and keeps the intact-header ownership test; its target folder is
+ * repo-relative, so the wrong-folder incident class (a resolved HOME) cannot occur there.
+ *
+ * @param scope Which memory scope this refresh renders.
+ * @param userDir Port path of `<userConfigDir>/context` (used only for scope "user").
+ * @returns The string recorded in each rules file header, or `null` when the scope records none.
  */
-export function rulesSourceId(shippedDir: string, userDir: string): string {
-  return `shipped=${shippedDir};user=${userDir}`;
+export function rulesSourceId(scope: "project" | "user", userDir: string): string | null {
+  return scope === "user" ? `user=${userDir}` : null;
 }
 
 /**
@@ -45,9 +51,14 @@ export function rulesSourceId(shippedDir: string, userDir: string): string {
  * @param legacyRender For a selected fragment, the legacy-shape (no `source=`) render of what this refresh
  *   would write; a legacy file byte-equal to it is adoptable. `null` for a deselected file (never adoptable).
  */
-export function classifyExistingRulesFile(existing: string, sourceId: string, legacyRender: string | null): RulesOwnership {
+export function classifyExistingRulesFile(existing: string, sourceId: string | null, legacyRender: string | null): RulesOwnership {
   const parsed = parseRulesFile(existing);
   if (parsed === null) return { kind: "legacy", adoptable: false };
+  if (sourceId === null) {
+    // Scope records no source: a file that DOES name one was written by another scope's refresh.
+    if (parsed.sourceId !== null) return { kind: "foreign" };
+    return parsed.intact ? { kind: "owned" } : { kind: "diverged" };
+  }
   if (parsed.sourceId === null) return { kind: "legacy", adoptable: legacyRender !== null && existing === legacyRender };
   if (parsed.sourceId !== sourceId) return { kind: "foreign" };
   return parsed.intact ? { kind: "owned" } : { kind: "diverged" };

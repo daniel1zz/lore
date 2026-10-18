@@ -110,6 +110,39 @@ describe("AC-IV-2 a hand-edited, deselected file is kept", () => {
   });
 });
 
+describe("AC-IV-1 / AC-IV-2 project scope (records no source; intact header is the ownership proof)", () => {
+  async function refreshProject(fs: InMemoryFsPort) {
+    const result = await runContextRefresh(
+      { ...depsFor(fs, "/cfgA"), assetsRoot: "assets" } as never,
+      "",
+      { scope: "project", rulesOnly: true } as never,
+    );
+    if (!result.ok) throw new Error(`refresh failed: ${JSON.stringify(result.error)}`);
+    return result.value;
+  }
+
+  it("AC-IV-1 project: project rules bytes carry no source token (machine-independent, committed to the repo)", async () => {
+    const fs = new InMemoryFsPort({ "assets/context/alpha.md": fragmentMd("alpha", "ALPHA-BODY") });
+    await refreshProject(fs);
+    expect(await fs.readFile(".claude/rules/lore-alpha.md")).toMatch(/^<!-- lore:managed fragment=alpha hash=[0-9a-f]{8} -->\n/);
+  });
+
+  it("AC-IV-2 project: a stale untouched file is pruned, a stale hand-edited one is kept as diverged_skip, a headerless one as legacy_skip", async () => {
+    const fs = new InMemoryFsPort({ "assets/context/alpha.md": fragmentMd("alpha", "ALPHA-BODY") });
+    await refreshProject(fs);
+    const clean = legacyBytes("clean", "CLEAN-BODY");
+    const edited = `${legacyBytes("edited", "EDITED-BODY")}MY NOTE\n`;
+    await fs.writeFile(".claude/rules/lore-clean.md", clean);
+    await fs.writeFile(".claude/rules/lore-edited.md", edited);
+    await fs.writeFile(".claude/rules/lore-mine.md", "# mine\n");
+    const report = await refreshProject(fs);
+    expect(await fs.readFile(".claude/rules/lore-clean.md")).toBeNull();
+    expect(await fs.readFile(".claude/rules/lore-edited.md")).toBe(edited);
+    expect(await fs.readFile(".claude/rules/lore-mine.md")).toBe("# mine\n");
+    expect(states(report)).toMatchObject({ clean: "pruned", edited: "diverged_skip", mine: "legacy_skip", alpha: "unchanged" });
+  });
+});
+
 describe("AC-IV-1 / AC-IV-2 legacy files (no source identity)", () => {
   it("AC-IV-1 legacy: selected and byte-equal to this refresh's render -> adopted (rewritten with source identity)", async () => {
     const fs = new InMemoryFsPort({
