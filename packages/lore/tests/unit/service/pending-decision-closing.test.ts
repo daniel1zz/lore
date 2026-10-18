@@ -13,9 +13,9 @@ import { verifyDecisionChain } from "../../../src/store/decision-log.js";
 
 const CLASS_ID = "stash-drop";
 /** Facts that make stash-drop escalate (weak evidence, mirrors autonomy-human-channel.test.ts). */
-const ESCALATING = { recoverability: "loss-free-by-proof", blast: "calling-session", evidence: "none", confidence: 0.95 } as const;
-/** Facts that make stash-drop decide `auto` (same as the escalating ones with strong evidence). */
-const AUTO_FACTS = { recoverability: "loss-free-by-proof", blast: "calling-session", evidence: "lore-evaluated", confidence: 0.99 } as const;
+const ESCALATING = { recoverability: "loss-free-by-proof", blast: "calling-session", evidence: "none" } as const;
+/** Facts that make stash-drop decide `auto` (same as the escalating ones with strong evidence); C is computed by DecisionService (AU-T8), never supplied. */
+const AUTO_FACTS = { recoverability: "loss-free-by-proof", blast: "calling-session", evidence: "lore-evaluated" } as const;
 
 function serviceWith(subjectProbes?: SubjectExistenceProbes) {
   const store = new InMemoryStore();
