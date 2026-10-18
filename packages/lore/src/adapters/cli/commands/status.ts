@@ -254,6 +254,7 @@ import {
 } from "../claude-md-render.js";
 import { printLine } from "../output.js";
 import type { CliIo } from "../output.js";
+import type { ExitReport } from "../cli-exit.js";
 
 /** All CallerSurface values in a stable display order. */
 /** BR-1039 — the stated period of the attribution share, in days ending now. */
@@ -2178,7 +2179,7 @@ export default defineCommand({
         return exitCode(thresholdStatus.error);
       }
       if (thresholdStatus.value.state !== "unseeded") printLine(inv.io.stdout, `\n${renderAutonomyThresholdLine(thresholdStatus.value)}`);
-      if (isAutonomyThresholdBreak(thresholdStatus.value)) setExitCode(AUTONOMY_THRESHOLD_BREAK_EXIT);
+      const thresholdExit: ExitReport = isAutonomyThresholdBreak(thresholdStatus.value) ? AUTONOMY_THRESHOLD_BREAK_EXIT : undefined;
 
       // baseline slice 1 §C7 — one line, only when a warning count is non-zero (report-only).
       if (baselineStatus !== null && baselineWarningCount(baselineStatus) > 0) {
@@ -2251,6 +2252,7 @@ export default defineCommand({
         printLine(inv.io.stdout, `  ${surface.padEnd(14)} ${aiOn ? "on" : "off"}${current}`);
       }
       printLine(inv.io.stdout, "  (override via --ai / --no-ai, or LORE_AI_DEFAULT=off, or ai.default_per_surface in config)");
+      return thresholdExit;
     } finally {
       app.close();
     }

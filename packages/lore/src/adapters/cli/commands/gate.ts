@@ -630,7 +630,6 @@ function isGateDisabledByConfig(io: CliIo,
     return false;
   }
   io.stderr.write(`gate: ${checkpoint} disabled by config\n`);
-  setExitCode(0);
   return true;
 }
 
@@ -1258,7 +1257,6 @@ async function runSpecPromoteGate(
   }
 
   printLine(inv.io.stdout, `gate: pass (${criteria.length} acceptance criteria declared)`);
-  setExitCode(0);
 
   // reason: the deterministic verdict above is final — everything from here on is the
   // probabilistic-zone advisory (INV2). It writes only to stderr and never touches

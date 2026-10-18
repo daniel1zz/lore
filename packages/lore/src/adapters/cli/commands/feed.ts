@@ -138,7 +138,7 @@ interface FeedArgs {
  * `resolveTaskStartBudgets`) but a uniform signature lets `SPECIAL_CHECKPOINT_HANDLERS`
  * be a single module-scope table instead of a per-invocation closure-building step.
  */
-type CheckpointHandler = (app: App, args: FeedArgs, config: LoreConfig | undefined, inv: Invocation) => Promise<void>;
+type CheckpointHandler = (app: App, args: FeedArgs, config: LoreConfig | undefined, inv: Invocation) => Promise<ExitReport>;
 
 // reason: `result.value.feed` already carries the `RESUME_SCOPE_CLOSURE`
 // boundary block (spec-context-provenance-injected-corpus-global-state-and-a
@@ -301,22 +301,14 @@ export default defineCommand({
       const checkpointName = typeof args.checkpoint === "string" ? args.checkpoint : String(args.checkpoint);
       const handler = SPECIAL_CHECKPOINT_HANDLERS[args.checkpoint as string];
       if (handler !== undefined) {
-        await handler(app, args, config, inv);
-        // reason: SPEC-102 hardening (T4 item 1) — only trace a SUCCESSFUL
-        // serve. Node's OWN default for `process.exitCode` is `undefined`,
-        // never `0` — a strict `=== 0` check is a latent trap for any FUTURE
-        // handler added to `SPECIAL_CHECKPOINT_HANDLERS` that succeeds
-        // without explicitly assigning `process.exitCode = 0` (the natural
-        // way to write a success path). Every CURRENT handler
-        // (`handleSessionResume`/`handlePhaseStart`/`handleTaskStart`) DOES
-        // assign 0 explicitly, so this was never a live bug — but the
-        // invariant this predicate must enforce is "did NOT fail", not
-        // "was 0 literally assigned", so unset must read as success.
-        if (getExitCode() === 0) {
+        const handlerExit = await handler(app, args, config, inv);
+        // reason: SPEC-102 hardening (T4 item 1) — only trace a SUCCESSFUL serve. A handler that succeeds returns
+        // `undefined` or 0 (never a nonzero code), so the predicate is "did NOT fail", not "returned 0 literally".
+        if (handlerExit === undefined || handlerExit === 0) {
           const target = typeof args.target === "string" ? [args.target] : [];
           recordFeedTrace(app, inv, checkpointName, target);
         }
-        return;
+        return handlerExit;
       }
 
       // D1/AC-FR-1 (task-derive-lore-feed-s-checkpoint-set-from-the-registry-make):
@@ -347,7 +339,6 @@ export default defineCommand({
 
       // reason: feed is advisory context, never a gate — exit 0 always, regardless of
       // whether a governing skill was found (module header).
-      setExitCode(0);
       const docsServed = typeof args.parent === "string" ? [args.parent] : [];
       recordFeedTrace(app, inv, checkpointName, docsServed);
     } finally {

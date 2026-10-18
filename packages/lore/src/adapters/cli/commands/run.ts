@@ -174,13 +174,13 @@ function renderRunText(run: RunRecord): string {
   return `${lines.join("\n")}\n`;
 }
 
-async function withRunService(inv: Invocation, body: (service: RunService) => Promise<void>): Promise<void> {
+async function withRunService(inv: Invocation, body: (service: RunService) => Promise<ExitReport>): Promise<ExitReport> {
   // reason: RunService comes from the App so it sits on the store `createApp` selected (sync.enabled -> TursoStore,
   // root CLAUDE.md D-007) rather than a private SQLiteStore handle that would bypass store selection.
   const { app } = loadLoreApp({ inv });
   try {
     if (app.runService === undefined) throw new Error("App was built without a runService");
-    await body(app.runService);
+    return await body(app.runService);
   } finally {
     app.close();
   }
@@ -204,7 +204,7 @@ async function runRegister(args: Record<string, unknown>, inv: Invocation): Prom
   const runProcess = await measureRunProcess(inv.io, stringArg(args, "harness-pid"), inv.cwd, inv.env);
   if (runProcess !== undefined && "error" in runProcess) return usageError(inv.io, runProcess.error);
 
-  await withRunService(inv, async (service) => {
+  return await withRunService(inv, async (service) => {
     const result = await service.register({
       harness,
       sessionId: session,
@@ -226,7 +226,7 @@ async function runRegister(args: Record<string, unknown>, inv: Invocation): Prom
 async function runShow(args: Record<string, unknown>, inv: Invocation): Promise<ExitReport> {
   const id = stringArg(args, "id");
   if (id === undefined) return usageError(inv.io, "lore run show requires a run id");
-  await withRunService(inv, async (service) => {
+  return await withRunService(inv, async (service) => {
     const result = await service.show(id);
     if (!result.ok) {
       inv.io.stderr.write(`${formatErrorFor(inv, result.error)}\n`);
@@ -241,7 +241,7 @@ async function runEnd(args: Record<string, unknown>, inv: Invocation): Promise<E
   if (id === undefined) return usageError(inv.io, "lore run end requires a run id");
   const reason = stringArg(args, "reason");
   if (reason === undefined) return usageError(inv.io, "lore run end requires --reason <reason>");
-  await withRunService(inv, async (service) => {
+  return await withRunService(inv, async (service) => {
     const result = await service.end(id, reason);
     if (!result.ok) {
       inv.io.stderr.write(`${formatErrorFor(inv, result.error)}\n`);
@@ -274,7 +274,7 @@ async function runOccupancy(args: Record<string, unknown>, inv: Invocation): Pro
   // reason: a claim may record the worktree's BRANCH instead of its path (issue #158); an unmeasurable branch
   // (absent directory, detached HEAD) leaves only the path comparison.
   const measured = await detectWorktreeBranch(worktree);
-  await withRunService(inv, async (service) => {
+  return await withRunService(inv, async (service) => {
     const result = await service.occupancy({
       worktree,
       ...(measured.status === "measured" ? { branch: measured.branch } : {}),
@@ -306,7 +306,7 @@ async function runOccupancy(args: Record<string, unknown>, inv: Invocation): Pro
 async function runTasks(args: Record<string, unknown>, inv: Invocation): Promise<ExitReport> {
   const id = stringArg(args, "id");
   if (id === undefined) return usageError(inv.io, "lore run tasks requires a run id");
-  await withRunService(inv, async (service) => {
+  return await withRunService(inv, async (service) => {
     const result = await service.tasks(id);
     if (!result.ok) {
       inv.io.stderr.write(`${formatErrorFor(inv, result.error)}\n`);

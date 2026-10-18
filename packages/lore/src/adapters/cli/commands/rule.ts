@@ -65,7 +65,6 @@ function reportFailure(inv: Invocation, error: LoreError, json: boolean): ExitRe
 function requireRuleService(io: CliIo, app: App) {
   if (app.ruleService === undefined) {
     io.stderr.write("Error: RuleService is not available in this build.\n");
-    setExitCode(1);
     return undefined;
   }
   return app.ruleService;
@@ -349,7 +348,7 @@ export default defineCommand({
         const { app } = loadLoreApp({ inv });
         try {
           const svc = requireRuleService(inv.io, app);
-          if (svc === undefined) return;
+          if (svc === undefined) return 1;
           const four = fourPartFromArgs(args);
           if (!four.ok) return failUsage(inv.io, four.message, args.json === true);
           const input: AddRuleInput = {
@@ -395,7 +394,7 @@ export default defineCommand({
         const { app } = loadLoreApp({ inv });
         try {
           const svc = requireRuleService(inv.io, app);
-          if (svc === undefined) return;
+          if (svc === undefined) return 1;
           const examples = repeatable(args.example);
           const four = fourPartFromArgs(args);
           if (!four.ok) return failUsage(inv.io, four.message, args.json === true);

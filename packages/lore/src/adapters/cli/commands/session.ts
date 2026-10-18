@@ -106,34 +106,35 @@ function formatTrailReview(view: TrailReviewView): string {
 }
 
 /** Refuses a trail verb (`trail` | `trail-review`): exit 4 naming the trail-access rule. */
-function refuseTrailAccess(io: CliIo, verb: "trail" | "trail-review", reason: string): ExitReport {
+function refuseTrailAccess(io: CliIo, verb: "trail" | "trail-review", reason: string): number {
   io.stderr.write(`Error: ${reason} (${TRAIL_ACCESS_RULE}: \`lore session ${verb}\` reads only the calling run's own session trail)\n`);
   return 4;
 }
 
 /**
- * The session of the caller's VERIFIED attested run, or null after writing the refusal (exit 4 no run / non-`cc:` run;
- * the identity error's own exit code when verification fails).
+ * The session of the caller's VERIFIED attested run, or the exit code of the refusal it already wrote (4 no run /
+ * non-`cc:` run; the identity error's own exit code when verification fails).
  * reason: the run is VERIFIED against the registry (unregistered -> null), so "attested" means attested, not merely claimed.
  */
-async function resolveCallerSession(inv: Invocation, app: Awaited<ReturnType<typeof loadLoreApp>>["app"], verb: "trail" | "trail-review"): Promise<string | null> {
+async function resolveCallerSession(
+  inv: Invocation,
+  app: Awaited<ReturnType<typeof loadLoreApp>>["app"],
+  verb: "trail" | "trail-review",
+): Promise<{ readonly ok: true; readonly session: string } | { readonly ok: false; readonly code: number }> {
   const verified = await app.verifiedInvocationIdentity?.();
   if (verified !== undefined && !verified.ok) {
     inv.io.stderr.write(formatErrorFor(inv, verified.error) + "\n");
-    setExitCode(exitCode(verified.error));
-    return null;
+    return { ok: false, code: exitCode(verified.error) };
   }
   const callerRun = verified?.value?.harnessRun ?? null;
   if (callerRun === null) {
-    refuseTrailAccess(inv.io, verb, "no attested run: pass --harness-run or call from an attested harness");
-    return null;
+    return { ok: false, code: refuseTrailAccess(inv.io, verb, "no attested run: pass --harness-run or call from an attested harness") };
   }
   try {
-    return sessionOfRun(callerRun);
+    return { ok: true, session: sessionOfRun(callerRun) };
   } catch (err) {
     if (err instanceof TrailRunIdInvalidError) {
-      refuseTrailAccess(inv.io, verb, `run ${callerRun} is not a claude-code run (cc:<session>[:<agent>])`);
-      return null;
+      return { ok: false, code: refuseTrailAccess(inv.io, verb, `run ${callerRun} is not a claude-code run (cc:<session>[:<agent>])`) };
     }
     throw err;
   }
@@ -203,8 +204,9 @@ async function runSessionTrailReview(args: { turn?: unknown; json?: unknown }, i
   }
   const { app } = loadLoreApp({ inv });
   try {
-    const session = await resolveCallerSession(inv, app, "trail-review");
-    if (session === null) return;
+    const caller = await resolveCallerSession(inv, app, "trail-review");
+    if (!caller.ok) return caller.code;
+    const session = caller.session;
     let trail: SessionTrail | null;
     try {
       trail = readSessionTrail(session, stateBase(inv.env, inv.paths.home));
@@ -265,17 +267,17 @@ async function runSessionTrail(
   args: { turn?: unknown; run?: unknown; json?: unknown },
   inv: Invocation,
 ): Promise<ExitReport> {
-  const refuse = (reason: string): void => refuseTrailAccess(inv.io, "trail", reason);
-  const session = await resolveCallerSession(inv, app, "trail");
-  if (session === null) return;
+  const refuse = (reason: string): number => refuseTrailAccess(inv.io, "trail", reason);
+  const caller = await resolveCallerSession(inv, app, "trail");
+  if (!caller.ok) return caller.code;
+  const session = caller.session;
   let runFilter: string | undefined;
   if (typeof args.run === "string") {
     try {
       parseRunId(args.run);
     } catch (err) {
       if (err instanceof TrailRunIdInvalidError) {
-        refuse(`--run ${args.run} is not a claude-code run (cc:<session>[:<agent>])`);
-        return;
+        return refuse(`--run ${args.run} is not a claude-code run (cc:<session>[:<agent>])`);
       }
       throw err;
     }
@@ -292,8 +294,7 @@ async function runSessionTrail(
     throw err;
   }
   if (trail === null) {
-    refuse(`no session trail for session ${session} under ${stateBase(inv.env, inv.paths.home)}`);
-    return;
+    return refuse(`no session trail for session ${session} under ${stateBase(inv.env, inv.paths.home)}`);
   }
   const turn = typeof args.turn === "string" ? args.turn : undefined;
   if (turn !== undefined && !trail.turns.some((t) => t.turn === turn)) {

@@ -589,14 +589,14 @@ export default defineCommand({
       const fragmentDeps = buildFragmentDeps();
       if (!fragmentDeps.ok) return reportFailure(inv, fragmentDeps.error);
       const result = await runContextRefresh({ fs: fsPort, budgets, ...fragmentDeps.value }, "", { scope, check: args.check === true });
-      renderOutcome(inv, json, result);
+      const outcomeExit = renderOutcome(inv, json, result);
       // reason: --json prints the report (incl. `check`) and returns before the plain-text exit mapping, so the
       // exit-1 contract for a drifted/over-ceiling --check is applied here for both output modes.
       if (args.check === true && result.ok && result.value.check !== null) {
         const { differing, findings } = result.value.check;
         if (differing.length > 0 || findings.length > 0) return 1;
       }
-      return;
+      return outcomeExit;
     }
 
     if (topic === "list" || topic === "add" || topic === "remove") {

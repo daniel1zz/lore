@@ -207,6 +207,7 @@ import { isPlanMember } from "../../../service/plan-membership.js";
 import { invocationOf } from "../command-invocation.js";
 import { printLine } from "../output.js";
 import type { CliIo } from "../output.js";
+import type { ExitReport } from "../cli-exit.js";
 
 /**
  * `App.acService` is typed optional only to keep pre-existing hand-built App test
@@ -322,8 +323,10 @@ export default defineCommand({
       async run(context) {
         const { args } = context;
         const inv = invocationOf(context);
-        if (refuseCorrectionFlag(inv.io, args, "add")) return;
-        if (refuseBadTimeoutMs(inv.io, args, "add")) return;
+        const correctionRefusal = refuseCorrectionFlag(inv.io, args, "add");
+        if (correctionRefusal !== undefined) return correctionRefusal;
+        const timeoutRefusal = refuseBadTimeoutMs(inv.io, args, "add");
+        if (timeoutRefusal !== undefined) return timeoutRefusal;
         const { app, dbPath } = loadLoreApp({ inv });
         try {
           const beforeStatus = await fetchSpecStatus(app, args.spec as string);
@@ -564,7 +567,8 @@ export default defineCommand({
       async run(context) {
         const { args } = context;
         const inv = invocationOf(context);
-        if (refuseCorrectionFlag(inv.io, args, "rm")) return;
+        const correctionRefusal = refuseCorrectionFlag(inv.io, args, "rm");
+        if (correctionRefusal !== undefined) return correctionRefusal;
         const { app } = loadLoreApp({ inv });
         try {
           const result = await requireAcService(app).removeCriterion(args.spec as string, args.id as string, {
@@ -705,7 +709,8 @@ export default defineCommand({
           return 2;
         }
 
-        if (refuseBadTimeoutMs(inv.io, args, "set")) return;
+        const timeoutRefusal = refuseBadTimeoutMs(inv.io, args, "set");
+        if (timeoutRefusal !== undefined) return timeoutRefusal;
         const patch = buildSetPatch(args);
         if (patch === null) {
           inv.io.stderr.write(
@@ -776,16 +781,15 @@ const printAdvisory = (io: CliIo, advisory: string): void => {
  * fix. When `--correction` is on the command line, write the refusal naming the only criterion correction
  * and set exit 2 — argv-decidable, so this runs BEFORE the app loads.
  *
- * @returns `true` when the call was refused (the caller must return).
+ * @returns the refusal's exit code (2) when the call was refused (the caller must return it), else `undefined`.
  */
-function refuseCorrectionFlag(io: CliIo, args: Record<string, unknown>, verb: "add" | "rm"): boolean {
-  if (args.correction === undefined) return false;
+function refuseCorrectionFlag(io: CliIo, args: Record<string, unknown>, verb: "add" | "rm"): ExitReport {
+  if (args.correction === undefined) return undefined;
   io.stderr.write(
     `Error: lore ac ${verb} does not accept --correction — a ${verb === "add" ? "new" : "removed"} criterion is a ` +
       "new decision, not a fix. The only criterion correction is `lore ac set --correction \"<reason>\"` on ONE existing criterion.\n",
   );
-  setExitCode(2);
-  return true;
+  return 2;
 }
 
 // ─── --timeout-ms validation ─────────────────────────────────────────────────
@@ -793,29 +797,28 @@ function refuseCorrectionFlag(io: CliIo, args: Record<string, unknown>, verb: "a
 /**
  * Argv-decidable guard for `--timeout-ms` (AC-level `verify.timeout_ms`): the value must be a
  * positive integer made only of digits. `ac set` additionally accepts `''` (removes the field).
- * Violation writes a stderr line, sets exit 4 (validation) and returns true so the caller stops
+ * Violation writes a stderr line and returns exit 4 (validation) so the caller stops
  * BEFORE the app/store is opened. `ac add --mode <non-script> --timeout-ms` is refused the same way
  * (script mode only); `ac set` on a non-script criterion is refused by `AcService.setCriterion`.
  *
  * @param args - raw citty args
  * @param verb - which subcommand is running (only `set` accepts the `''` clear sentinel)
- * @returns true when the command was refused (caller must return)
+ * @returns the refusal's exit code (4) when the command was refused (caller must return it), else `undefined`
  */
-function refuseBadTimeoutMs(io: CliIo, args: Record<string, unknown>, verb: "add" | "set"): boolean {
+function refuseBadTimeoutMs(io: CliIo, args: Record<string, unknown>, verb: "add" | "set"): ExitReport {
   const raw = args["timeout-ms"];
-  if (raw === undefined) return false;
-  const fail = (io: CliIo, why: string): true => {
+  if (raw === undefined) return undefined;
+  const fail = (io: CliIo, why: string): number => {
     io.stderr.write(`Error: --timeout-ms ${why}\n`);
-    setExitCode(4);
-    return true;
+    return 4;
   };
   if (typeof raw !== "string") return fail(io, "must be a positive integer number of milliseconds");
-  if (verb === "set" && raw === "") return false;
+  if (verb === "set" && raw === "") return undefined;
   if (!/^[0-9]+$/.test(raw) || !Number.isSafeInteger(Number(raw)) || Number(raw) <= 0) {
     return fail(io, `must be a positive integer number of milliseconds (got "${raw}")`);
   }
   if (verb === "add" && args.mode !== "script") return fail(io, "applies to --mode script only");
-  return false;
+  return undefined;
 }
 
 // ─── Input Assembly ──────────────────────────────────────────────────────────

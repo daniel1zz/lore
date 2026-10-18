@@ -85,6 +85,7 @@ import {
 } from "../create-task-validation.js";
 import { invocationOf } from "../command-invocation.js";
 import { printLine } from "../output.js";
+import type { ExitReport } from "../cli-exit.js";
 
 const VALID_TYPES: DocType[] = ["prd", "spec", "adr", "plan", "knowledge", "task"];
 
@@ -654,12 +655,15 @@ export default defineCommand({
         printLine(inv.io.stdout, `\nRun \`lore get ${doc.slug}\` to view the document.`);
       }
 
+      // reason: the later failure's code wins (the supersede orphan overrides a resolves failure), exactly as the
+      // old "last recorded code" did; the run returns it after the advisories below.
+      let reported: ExitReport;
       for (const failure of resolvesFailures) {
         inv.io.stderr.write(
           `Error: ${doc.slug} was created but its resolves link to ${failure.slug} failed (${formatErrorFor(inv, failure.error)})\n` +
             `  Repair: lore link ${doc.slug} ${failure.slug} --type resolves\n`,
         );
-        setExitCode(exitCode(failure.error));
+        reported = exitCode(failure.error);
       }
 
       // Loud orphan (D11, never silent) — create succeeded but the follow-up
@@ -668,7 +672,7 @@ export default defineCommand({
       if (supersedeError !== undefined) {
         const repairMsg = renderSupersedeRepairMessage(args.supersedes!, doc.slug);
         inv.io.stderr.write(`Error: ${repairMsg}\n  (invalidate failed: ${formatErrorFor(inv, supersedeError)})\n`);
-        setExitCode(exitCode(supersedeError));
+        reported = exitCode(supersedeError);
       }
 
       // Create-time orphan advisory (task-create-time-orphan-advisory-warn-or-default-
@@ -704,6 +708,7 @@ export default defineCommand({
           inv.io.stderr.write(line + "\n");
         }
       }
+      return reported;
     } finally {
       app.close();
     }

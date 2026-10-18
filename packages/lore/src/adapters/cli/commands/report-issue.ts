@@ -339,8 +339,7 @@ export default defineCommand({
       // renders.
       if (isList) {
         const { runGithubIssuesListing } = await import("./issues.js");
-        await runGithubIssuesListing(inv, app, effectiveCfg, corpusRoot, args.json === true, inv);
-        return;
+        return await runGithubIssuesListing(inv, app, effectiveCfg, corpusRoot, args.json === true, inv);
       }
 
       if (triageLabels.severity === undefined || triageLabels.category === undefined) {
