@@ -147,7 +147,7 @@ HAPPY: VRF-3/4/8/10;NEGATIVE: VRF-2/6/7(歧义);BOUNDARY: timeout_ms 边界、�
 - [⚑] [script] AC-VRF-5: timeout delivers SIGTERM to the process group; a TERM-trapping survivor is SIGKILLed after the grace period; evidence records fail with timed_out true
   script: test — bunx --bun vitest run packages/lore/tests/integration/verify-executor.bun.test.ts
   other_command=1
-- [·] [script] AC-VRF-6: spawn launch failure (ENOENT) returns err and records no evidence
+- [⚑] [script] AC-VRF-6: spawn launch failure (ENOENT) returns err and records no evidence
   script: test — bunx --bun vitest run packages/lore/tests/integration/verify-executor.bun.test.ts
   other_command=1
 - [⚑] [script] AC-VRF-7: resolveTargetTask matrix: zero/one/many fresh claims, stale claim excluded, explicit task override wins, ambiguity fails loud listing candidates

@@ -11017,14 +11017,6 @@
       "human_id": "SPEC-194",
       "file_path": "docs/requirements/spec/SPEC-194-round-0-main-is-green-every-red-test-on-e1878626-t.md"
     },
-    "01KYEN7ZDFF9CEE6ZN6J48BXM2": {
-      "human_id": "SPEC-198",
-      "file_path": "docs/requirements/spec/SPEC-198-phase-execution-model-plan-phase-checklist-superse.md"
-    },
-    "01KYEN3EX8HRGQG24HM8QZ2ETY": {
-      "human_id": "SPEC-199",
-      "file_path": "docs/requirements/spec/SPEC-199-memory-hygiene-knowledge-trustworthiness-over-time.md"
-    },
     "01KYENED6N2NT4Y5GQT67ECBY5": {
       "human_id": "SPEC-200",
       "file_path": "docs/requirements/spec/SPEC-200-output-contract-document-taxonomy-domain-overview.md"
@@ -11612,6 +11604,38 @@
     "01M56PEFKCMXJS1CW6RQP07D0K": {
       "human_id": "TASK-1581",
       "file_path": "docs/requirements/task/TASK-1581-skill-fix-tg-37-check-shipped-defaults-no-lore-con.md"
+    },
+    "01KYEN7ZDFF9CEE6ZN6J48BXM2": {
+      "human_id": "SPEC-208",
+      "file_path": "docs/requirements/spec/SPEC-208-phase-execution-model-plan-phase-checklist-superse.md"
+    },
+    "01KYEN3EX8HRGQG24HM8QZ2ETY": {
+      "human_id": "SPEC-209",
+      "file_path": "docs/requirements/spec/SPEC-209-memory-hygiene-knowledge-trustworthiness-over-time.md"
+    },
+    "01M5727QNBNXT24V92FA5YK930": {
+      "human_id": "TASK-1582",
+      "file_path": "docs/requirements/task/TASK-1582-skill-refactor-iv-8a-remaining-cli-command-and-hel.md"
+    },
+    "01M578BJCWZD3ZQ8R8ZMATCS5H": {
+      "human_id": "TASK-1583",
+      "file_path": "docs/requirements/task/TASK-1583-web-api-approve-and-reject-record-no-reviewer-and.md"
+    },
+    "01M578AFX3J9QEVP53EPAXSY7B": {
+      "human_id": "TASK-1584",
+      "file_path": "docs/requirements/task/TASK-1584-skill-baseline-ei-5-add-the-filing-is-never-refuse.md"
+    },
+    "01M5789ZJ1DV652M64VB9TYWJT": {
+      "human_id": "TASK-1585",
+      "file_path": "docs/requirements/task/TASK-1585-lore-seat-accepts-any-document-as-target-it-must-r.md"
+    },
+    "01M5707X8QQNQCMQ0BM573XG4K": {
+      "human_id": "TASK-1586",
+      "file_path": "docs/requirements/task/TASK-1586-skill-fix-iv-10-check-ambient-reads-tokenizes-with.md"
+    },
+    "01M56YWY9J3T9DM3MDX3HWA3HS": {
+      "human_id": "TASK-1587",
+      "file_path": "docs/requirements/task/TASK-1587-skill-fix-au-t16-lore-pending-lists-escalations-wh.md"
     }
   }
 }

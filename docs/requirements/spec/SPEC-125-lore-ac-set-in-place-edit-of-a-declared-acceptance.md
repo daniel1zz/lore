@@ -275,7 +275,7 @@ Declared after landing, per CLOSE-phase discipline — not here.
 
 ## Acceptance Criteria (structured)
 
-- [·] [script] AC-ACS-1: lore ac set <spec> <id> --statement <new> exits 0
+- [⚑] [script] AC-ACS-1: lore ac set <spec> <id> --statement <new> exits 0
   script: test — bunx vitest run packages/lore/tests/unit/service/ac-set.test.ts -t 'setCriterion returns ok on a valid edit'
   other_command=2
 - [⚑] [script] AC-ACS-2: lore ac set against an id absent from extra.acceptance_criteria exits 4 and stderr enumerates the ids that are declared on that spec

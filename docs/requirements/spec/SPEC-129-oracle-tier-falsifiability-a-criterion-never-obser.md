@@ -210,25 +210,25 @@ exists.
   script: test — bunx vitest run packages/core/tests/unit/ac-falsifiability.test.ts -t coverage-state
 - [⚑] [script] AC-FALS-3: deriveAcCoverageState still returns attested_pass for a fact with attested_pass greater than 0 and falsified equal to 0, so pass_unfalsified never outranks an attested pass
   script: test — bunx vitest run packages/core/tests/unit/ac-falsifiability.test.ts -t precedence-regression
-- [·] [script] AC-FALS-4: lore ac list --json emits an integer falsified field and a coverage state string per criterion, and that state reads pass_unfalsified for a criterion with pass greater than 0 and falsified equal to 0
+- [⚑] [script] AC-FALS-4: lore ac list --json emits an integer falsified field and a coverage state string per criterion, and that state reads pass_unfalsified for a criterion with pass greater than 0 and falsified equal to 0
   script: test — bunx --bun vitest run packages/lore/tests/unit/adapters/ac-list-falsified.bun.test.ts --test-name-pattern json-surfacing
   other_command=3
-- [·] [script] AC-FALS-5: lore ac list human table output carries a pass_unfalsified marker for a criterion never observed red, and that same marker is absent for a criterion with one expected-fail ref
+- [⚑] [script] AC-FALS-5: lore ac list human table output carries a pass_unfalsified marker for a criterion never observed red, and that same marker is absent for a criterion with one expected-fail ref
   script: test — bunx --bun vitest run packages/lore/tests/unit/adapters/ac-list-falsified.bun.test.ts --test-name-pattern human-render
   other_command=3
-- [·] [script] AC-FALS-6: lore status --json reports an integer count of corpus-wide pass_unfalsified criteria, and that count rises by exactly 1 when one more never-red criterion is declared
+- [⊘] [script] AC-FALS-6: lore status --json reports an integer count of corpus-wide pass_unfalsified criteria, and that count rises by exactly 1 when one more never-red criterion is declared
   script: test — bunx --bun vitest run packages/lore/tests/unit/adapters/ac-list-falsified.bun.test.ts --test-name-pattern status-count
   other_command=3
-- [·] [script] AC-FALS-7: findPipeRefusal returns a refusal for a self-reported piped command whose oracle and result are in scope, and returns null for the identical piped command when capture is requested
+- [⚑] [script] AC-FALS-7: findPipeRefusal returns a refusal for a self-reported piped command whose oracle and result are in scope, and returns null for the identical piped command when capture is requested
   script: test — bunx --bun vitest run packages/lore/tests/unit/adapters/evidence-pipe-refusal.bun.test.ts --test-name-pattern pipe-refusal
   other_command=4
 - [⚑] [script] AC-FALS-8: the unclaimed-oracle check reports a test-name-pattern value present in a repo test file that no declared AC binds, and reports zero findings for a value that a declared AC does bind
   script: test — bunx vitest run packages/lore/tests/unit/service/unclaimed-oracle.test.ts -t unclaimed-oracle
   other_command=1
-- [·] [script] AC-FALS-9: a real lore evidence process invoked with a piped --command and without --capture terminates with exit status 4, and the same process invoked with --capture terminates with exit status 0
+- [⚑] [script] AC-FALS-9: a real lore evidence process invoked with a piped --command and without --capture terminates with exit status 4, and the same process invoked with --capture terminates with exit status 0
   script: test — bunx --bun vitest run packages/lore/tests/unit/adapters/evidence-pipe-wiring.bun.test.ts --test-name-pattern pipe-wiring
   other_command=4
-- [·] [script] AC-FALS-10: lore status --json reports a nonzero unclaimed-oracle finding count for a fixture corpus holding a test-name-pattern value bound by no criterion, and reports zero for a fixture where that value is bound
+- [⚑] [script] AC-FALS-10: lore status --json reports a nonzero unclaimed-oracle finding count for a fixture corpus holding a test-name-pattern value bound by no criterion, and reports zero for a fixture where that value is bound
   script: test — bunx --bun vitest run packages/lore/tests/unit/adapters/ac-list-falsified.bun.test.ts --test-name-pattern unclaimed-wiring
   other_command=3
 - [⊘] [script] AC-FALS-11: with falsified present as a required field on AcCoverageFact, bun run typecheck terminates with exit status 0 across every workspace sub-step
@@ -249,7 +249,7 @@ exists.
   script: test — bunx vitest run packages/core/tests/unit/ac-falsifiability.test.ts -t absent-falsified
 - [⚑] [script] AC-FALS-18: with falsified undefined a fact with fail greater than 0 still yields fail, a fact with attested_pass greater than 0 and no fail still yields attested_pass, and a fact with no evidence still yields none, so not_measured replaces only the branch that consults falsified and shadows no other branch
   script: test — bunx vitest run packages/core/tests/unit/ac-falsifiability.test.ts -t falsified-branch-scope
-- [·] [script] AC-FALS-19: commands/ac.ts coverageBadge returns one marker for a fail_superseded fact and another for a not_measured fact that are distinct from each other and from the inconclusive and expected-fail residual markers, so neither new state falls through the if-chain to a residual reading
+- [⚑] [script] AC-FALS-19: commands/ac.ts coverageBadge returns one marker for a fail_superseded fact and another for a not_measured fact that are distinct from each other and from the inconclusive and expected-fail residual markers, so neither new state falls through the if-chain to a residual reading
   script: test — bunx --bun vitest run packages/lore/tests/unit/adapters/cli-ac-coverage-badge.bun.test.ts --test-name-pattern badge-new-states
   other_command=3
 - [⚑] [script] AC-FALS-20: SpecAcCoveragePanel renders a fail_superseded row and a not_measured row whose badge variants differ from each other and from the pass_unfalsified row rendered in the same test, and its CoverageState type is the return type of deriveAcCoverageState rather than a locally re-declared union

@@ -3,7 +3,7 @@ id: TASK-1576
 type: task
 role: plan
 title: "[Skill:refactor] IV-7 remove ambient reads from adapter batch A (status, setup, gate, context, mcp tools, loader, utils, dashboard)"
-status: draft
+status: archived
 priority: medium
 phase: "P4 migration"
 created: 2026-10-18

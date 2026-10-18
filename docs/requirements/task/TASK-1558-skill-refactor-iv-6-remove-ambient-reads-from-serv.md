@@ -3,7 +3,7 @@ id: TASK-1558
 type: task
 role: plan
 title: "[Skill:refactor] IV-6 remove ambient reads from service, flow and core layers; lower the ledger"
-status: draft
+status: archived
 priority: medium
 phase: "P4 migration"
 created: 2026-10-18

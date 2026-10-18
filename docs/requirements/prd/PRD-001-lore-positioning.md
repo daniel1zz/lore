@@ -9,11 +9,11 @@ created: 2026-06-07
 updated: 2026-10-10
 tags: [product-overview, L0, lore, mvp, internal-first, ai-native, protocol-aware]
 links:
-  - {id: SPEC-199, type: relates-to}
+  - {id: SPEC-209, type: relates-to}
   - {id: SPEC-094, type: relates-to}
   - {id: SPEC-207, type: relates-to}
   - {id: SPEC-201, type: relates-to}
-  - {id: SPEC-198, type: relates-to}
+  - {id: SPEC-208, type: relates-to}
   - {id: SPEC-202, type: relates-to}
   - {id: SPEC-206, type: relates-to}
   - {id: SPEC-204, type: relates-to}
@@ -108,6 +108,8 @@ This PRD is the tree root. Each module is a child spec (kind=feature/tech/design
 
 The module tree below is rendered live from the corpus (SPEC-004 placeholder resolution) — a hand-maintained list demonstrably drifts (this section was 8 specs stale at v0.5, stopping at SPEC-011 while the corpus reached SPEC-031):
 
+- [task] Hotfix F1 review tree_position rejects every parentless spec (archived)
+- [task] The handoff and UAT carve-out in the foreign-write guard is unnamed in the spec and unasserted by any AC (archived)
 - [adr] Ambient process state is read once at the entry: one resolved Invocation, rooted writes, owned-only prune (approved)
 - [adr] Mapping a census site does not demote a baseline leaf; an owned-by exclusion is a checked reference (approved)
 - [adr] Autonomy is decided by measured facts: one decision function, human only below threshold or for human-always classes (approved)
@@ -410,7 +412,6 @@ The module tree below is rendered live from the corpus (SPEC-004 placeholder res
 - [task] stale-managed-context notice re-injects the full fresh section while Claude Code still loads the stale rules file, so the model gets two versions of the same rule (draft)
 - [task] session-start-fragments injects a false 'render failed' banner every session when hook:session-start has zero fragments (draft)
 - [task] pre-subagent-gate warns only on stderr with exit 0, which Claude Code never shows the model, so the 'main agent must not write code' gate reaches nobody (draft)
-- [task] Hotfix F1 review tree_position rejects every parentless spec (archived)
 - [knowledge] Write-spec rules (gate feeding source) (approved)
 - [baseline] Lore architecture (approved)
 - [task] Baseline root resolver treats an architecture root as the product root (draft)
@@ -558,7 +559,6 @@ The module tree below is rendered live from the corpus (SPEC-004 placeholder res
 - [knowledge] Eight findings from resuming the corpus-provenance follow-ups: a handoff item that was already half-fixed, and a mirror whose update path never ran (approved)
 - [task] The clean-tree floor and the repo's own test selection contradict each other, and five agents independently stashed to escape it (draft)
 - [task] The mirror export silently skips a changed knowledge doc and every parity check reports OK (draft)
-- [task] The handoff and UAT carve-out in the foreign-write guard is unnamed in the spec and unasserted by any AC (archived)
 - [task] A captured evidence row observes the exit code, validates against it, then discards it — so runner-captured passes cannot archive their own task (draft)
 - [task] verify-execution-root carries a byte-identical copy of the isWithin bare-root defect just fixed in the shared resolver (draft)
 - [task] The undetermined provenance value has no policy: fail-open vs fail-closed on detector disagreement is unoracled (draft)

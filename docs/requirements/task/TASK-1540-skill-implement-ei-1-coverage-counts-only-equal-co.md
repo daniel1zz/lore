@@ -3,7 +3,7 @@ id: TASK-1540
 type: task
 role: plan
 title: "[Skill:implement] EI-1 coverage counts only equal-command attested rows; other_command tally on every surface"
-status: draft
+status: archived
 priority: critical
 phase: "Phase 1: rule and re-verification"
 created: 2026-10-18

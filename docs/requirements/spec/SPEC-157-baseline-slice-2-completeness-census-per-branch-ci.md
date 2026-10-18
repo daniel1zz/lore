@@ -275,7 +275,7 @@ sequenceDiagram
 - [⚑] [script] AC-BLS2-10: A criterion exemption requires a reason, an expiry and an actor; a grant that would exceed 10% of live criteria is refused, also when 8 grants race
   script: test — bunx vitest run packages/lore/tests/unit/service/ac-exempt.test.ts && echo 'AC-BLS2-10 PASS: exemptions need reason+expiry; 10% cap holds under 8-way race'
   other_command=1
-- [✘] [script] AC-BLS2-11: With no baseline documents, every pre-existing command output is byte-identical to slice 1; with baseline documents and gate mode off, the gate has no effect at all (0 refusals, 0 would-refuse audit rows, ac add/set/get/feed outputs identical to the no-baseline control apart from slice-1 baseline hints) and the status baseline block differs only by the C4/C5 fields index_mismatch and exemptions_*
+- [⊘] [script] AC-BLS2-11: With no baseline documents, every pre-existing command output is byte-identical to slice 1; with baseline documents and gate mode off, the gate has no effect at all (0 refusals, 0 would-refuse audit rows, ac add/set/get/feed outputs identical to the no-baseline control apart from slice-1 baseline hints) and the status baseline block differs only by the C4/C5 fields index_mismatch and exemptions_*
   script: test — bunx --bun vitest run packages/lore/tests/e2e/baseline-slice2-rollback.bun.test.ts && echo 'AC-BLS2-11 PASS: mode off / no baseline docs: outputs byte-identical to slice 1'
   other_command=6
 - [⊘] [script] AC-BLS2-12: After the completeness backfill, the specification and execution branches each report 0 coverage gaps and 0 unaccounted not_measured sites on the live corpus (read-only check)

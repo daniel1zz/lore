@@ -9,7 +9,7 @@ created: 2026-07-28
 updated: 2026-10-17
 tags: [governance, plan-close, gates]
 links:
-  - {id: SPEC-198, type: implements}
+  - {id: SPEC-208, type: implements}
 ---
 # Spec: Plan closure must be loud — terminality divergence, silent demotion, and absence-as-assertion
 
@@ -84,7 +84,7 @@ Two-part, both required:
 
 ## Acceptance Criteria (structured)
 
-- [·] [script] AC-CLOSURE-1: TreeCheckService reports a plan-terminality drift when a plan is non-terminal and has >=1 child task with ALL child tasks terminal; and reports NO drift for (a) a plan with zero tasks, (b) a plan with any non-terminal task, (c) an already-archived plan
+- [⚑] [script] AC-CLOSURE-1: TreeCheckService reports a plan-terminality drift when a plan is non-terminal and has >=1 child task with ALL child tasks terminal; and reports NO drift for (a) a plan with zero tasks, (b) a plan with any non-terminal task, (c) an already-archived plan
   script: test — bunx --bun vitest run packages/lore/tests/unit/service/tree-check-service.bun.test.ts -t "plan-terminality"
   other_command=11
 - [⊘] [script] AC-CLOSURE-2: lore status --check-tree surfaces plan-terminality drift with a nonzero exit, and lore status --check-tree --fix leaves it UNFIXED (auto-transitioning a plan would fire plan-close from inside a repair command)

@@ -3,7 +3,7 @@ id: TASK-1538
 type: task
 role: plan
 title: "[Skill:implement] EI-2 missing-oracle detection covers script paths; not_measured regardless of prior passes"
-status: draft
+status: archived
 priority: high
 phase: "Phase 1: rule and re-verification"
 created: 2026-10-18

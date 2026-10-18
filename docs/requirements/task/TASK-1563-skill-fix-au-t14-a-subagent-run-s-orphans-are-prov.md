@@ -3,7 +3,7 @@ id: TASK-1563
 type: task
 role: plan
 title: "[Skill:fix] AU-T14 a subagent run's orphans are proven by its exclusive worktree, not by a dead pid it shares with the main session"
-status: draft
+status: archived
 priority: high
 phase: "Phase 1d: apply on main"
 created: 2026-10-18

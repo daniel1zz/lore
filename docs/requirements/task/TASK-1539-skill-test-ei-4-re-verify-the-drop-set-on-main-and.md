@@ -3,7 +3,7 @@ id: TASK-1539
 type: task
 role: plan
 title: "[Skill:test] EI-4 re-verify the drop set on main and triage every remaining red"
-status: draft
+status: archived
 priority: high
 phase: "Phase 1: rule and re-verification"
 created: 2026-10-18

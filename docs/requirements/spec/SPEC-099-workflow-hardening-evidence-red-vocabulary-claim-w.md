@@ -100,7 +100,7 @@ prose summary:
 - [⚑] [script] AC-WH-1: expected-fail evidence result accepted end-to-end (Zod schema, CLI --result, MCP tool), stored verbatim, and never counted as green: verify summaries, assess evidence facts, AC-coverage aggregation, adjudication-bar math, and the list/tree workflow badge all classify expected-fail as non-passing (vitest suites assert acceptance and classification at every enumerated read site)
   script: test — bunx vitest run packages/lore/tests/unit/service/task-workflow-service.test.ts packages/lore/tests/unit/service/ac-service.test.ts packages/core/src/evidence-panel.test.ts packages/lore/tests/unit/adapters/tree-claim-badge.test.ts
   other_command=6
-- [·] [script] AC-WH-1B: expected-fail DISTINCT rendering at the CLI surfaces: ac coverage badge renders expected-fail-only as its own glyph distinct from never-verified and inconclusive, and the evidence success line prints the value verbatim (bun-runner suites)
+- [⚑] [script] AC-WH-1B: expected-fail DISTINCT rendering at the CLI surfaces: ac coverage badge renders expected-fail-only as its own glyph distinct from never-verified and inconclusive, and the evidence success line prints the value verbatim (bun-runner suites)
   script: test — bunx --bun vitest run packages/lore/tests/unit/adapters/cli-ac-coverage-badge.bun.test.ts packages/lore/tests/unit/adapters/cli-evidence-result-rendering.bun.test.ts
   other_command=2
 
