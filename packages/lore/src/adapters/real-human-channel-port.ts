@@ -97,6 +97,7 @@ export function createProductionHumanChannelPorts(overrides: Partial<HumanChanne
       // reason: run-cli strips `--harness-run <id>` from process.argv and keeps it in the invocation identity;
       // an agent run identity must still be visible to the channel check, so it is re-surfaced here.
       const args = process.argv.slice(2);
+      // reason: the UNVERIFIED id is deliberate here; surfacing an unregistered run makes the channel refuse, the safe direction (BR-1035).
       const harnessRun = invocationInScope()?.identity.harnessRun;
       return harnessRun != null ? [...args, "--harness-run", String(harnessRun)] : args;
     },
