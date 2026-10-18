@@ -22,7 +22,13 @@ function stub(result: { status: number | null; stdout?: string; error?: Error })
 describe("assertChildrenInheritSandbox: the verdict is the child's exit status, not its stdout", () => {
   it("REGRESSION: a child that exited 0 with its stdout LOST (the measured Bun spawnSync failure) is not an unarmed environment", () => {
     expect(armed).toBeTruthy();
-    expect(() => assertChildrenInheritSandbox(stub({ status: 0, stdout: "" }))).not.toThrow();
+    let spawned = 0;
+    const lost: ProbeSpawn = () => {
+      spawned += 1;
+      return { status: 0, stdout: "", error: undefined };
+    };
+    expect(() => assertChildrenInheritSandbox(lost)).not.toThrow();
+    expect(spawned).toBe(1);
   });
 
   it("HAPPY: the real spawn (no stub) passes in this armed worker", () => {
