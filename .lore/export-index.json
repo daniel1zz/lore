@@ -11017,10 +11017,6 @@
       "human_id": "SPEC-194",
       "file_path": "docs/requirements/spec/SPEC-194-round-0-main-is-green-every-red-test-on-e1878626-t.md"
     },
-    "01KYEN82CATW2VDHSB9RR9XTQG": {
-      "human_id": "SPEC-196",
-      "file_path": "docs/requirements/spec/SPEC-196-upstream-issue-feedback-loop-consumer-reported-def.md"
-    },
     "01KYEN7WD20P4EV6ZHKTZD60JP": {
       "human_id": "SPEC-197",
       "file_path": "docs/requirements/spec/SPEC-197-session-layer-multi-session-collaboration-context.md"
@@ -11400,6 +11396,10 @@
     "01M553VY6JXVCJ6A7GS6MVX2D6": {
       "human_id": "TASK-1542",
       "file_path": "docs/requirements/task/TASK-1542-skill-fix-tg-35-two-new-test-files-reference-ac-ct.md"
+    },
+    "01KYEN82CATW2VDHSB9RR9XTQG": {
+      "human_id": "SPEC-206",
+      "file_path": "docs/requirements/spec/SPEC-206-upstream-issue-feedback-loop-consumer-reported-def.md"
     }
   }
 }

@@ -10,7 +10,7 @@ updated: 2026-10-17
 tags: [feedback-loop, distribution-first, dogfood]
 links:
   - {id: SPEC-073, type: relates-to}
-  - {id: SPEC-196, type: implements}
+  - {id: SPEC-206, type: implements}
   - {id: TASK-536, type: resolves}
 ---
 # Out-of-box reporting channel — `report-issue` self-provisions its upstream config

@@ -15,7 +15,7 @@ links:
   - {id: SPEC-201, type: relates-to}
   - {id: SPEC-198, type: relates-to}
   - {id: SPEC-202, type: relates-to}
-  - {id: SPEC-196, type: relates-to}
+  - {id: SPEC-206, type: relates-to}
   - {id: SPEC-204, type: relates-to}
   - {id: SPEC-203, type: relates-to}
   - {id: SPEC-093, type: relates-to}
