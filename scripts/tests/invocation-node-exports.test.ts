@@ -1,4 +1,4 @@
-/** @spec_ref AC-IV-7 */
+/** @spec_ref AS-26 */
 /** @reads packages/core/src/invocation-node.ts */
 /**
  * @layer script-unit AS-26 guard — the allowlisted entry file `packages/core/src/invocation-node.ts` exports
@@ -6,7 +6,7 @@
  *
  * Why: the ambient-read check exempts that file ("the entry reads"). If it also exported `readFoo()` helpers,
  * every caller could read the process through them and the check would count none of it, which empties the
- * AC-IV-7 ledger without removing a single read. Only `resolveInvocation` (and the types it takes) may be exported.
+ * ambient-read ledger without removing a single read. Only `resolveInvocation` (and the types it takes) may be exported.
  *
  * Six-dimension coverage:
  *   HAPPY:      the real file's export list equals the explicit allow-set.
