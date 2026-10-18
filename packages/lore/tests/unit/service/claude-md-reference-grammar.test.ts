@@ -34,10 +34,12 @@
 // @reads service/decision-service.ts
 // @reads service/run-reap-service.ts
 // @reads service/validity-service.ts
+// @reads service/warn-sink.ts
 // @reads src
 // @reads src/api/mutations.ts
 // @reads src/components/ui
 // @reads src/index.css
+// @reads src/index.ts
 // @reads src/lib/api.ts
 // @reads src/lib/type-accent.ts
 // @reads src/routes

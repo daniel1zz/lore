@@ -631,9 +631,12 @@ describe("commands/territory.ts's production run() — the live call site (AC-OW
     // captureConsoleLog`) instead pushes into its OWN closure array from
     // inside `mockImplementation` itself, which does work. Mirrored here.
     const printedLines: string[] = [];
-    const logSpy = spyOn(console, "log").mockImplementation((...logArgs: unknown[]) => {
+    const logSpy = spyOn(process.stdout, "write").mockImplementation((((chunk: unknown) => {
+    const logArgs: unknown[] = [String(chunk).replace(/\n$/, "")];
       printedLines.push(String(logArgs[0]));
-    });
+    
+    return true;
+  }) as never));
     try {
       const mod = await import("../../../../src/adapters/cli/commands/territory.js");
       const territoryCommand = (

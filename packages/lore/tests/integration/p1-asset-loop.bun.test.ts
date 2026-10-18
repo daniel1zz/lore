@@ -54,14 +54,17 @@ async function importGateSpecCreate(): Promise<RunnableCommand> {
 
 function captureOutput() {
   const stdout: string[] = [];
-  const origConsoleLog = console.log.bind(console);
-  console.log = (...args: unknown[]) => {
+  const origConsoleLog = process.stdout.write;
+  process.stdout.write = (((chunk: unknown) => {
+    const args: unknown[] = [String(chunk).replace(/\n$/, "")];
     stdout.push(args.join(" "));
-  };
+  
+    return true;
+  }) as typeof process.stdout.write);
   return {
     stdout,
     restore: () => {
-      console.log = origConsoleLog;
+      process.stdout.write = origConsoleLog;
     },
   };
 }

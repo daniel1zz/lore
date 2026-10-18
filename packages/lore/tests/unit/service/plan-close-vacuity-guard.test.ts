@@ -53,6 +53,7 @@ import {
   type GateContext,
 } from "../../../src/service/checkpoint-registry.js";
 import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
+import { liveWarn } from "../../live-invocation.js";
 
 const planClose = checkpointRegistry["plan-close"];
 if (planClose === undefined) {
@@ -433,7 +434,7 @@ describe("an all-inapplicable checkpoint run reports its own vacuity (PCI-20)", 
         return true;
       });
     try {
-      const enforcer = new GateEnforcer(undefined);
+      const enforcer = new GateEnforcer(undefined, undefined, undefined, undefined, {}, liveWarn());
       const result = enforcer.enforce("plan-close", fullyInapplicableCtx());
 
       // A not-applicable verdict NEVER denies — the notice is an observation.
@@ -457,7 +458,7 @@ describe("an all-inapplicable checkpoint run reports its own vacuity (PCI-20)", 
         return true;
       });
     try {
-      const enforcer = new GateEnforcer(undefined);
+      const enforcer = new GateEnforcer(undefined, undefined, undefined, undefined, {}, liveWarn());
       enforcer.enforce("plan-close", undeclaredScopeCtx());
 
       expect(written.some((line) => line.includes(VACUOUS_CHECKPOINT_NOTICE_PREFIX))).toBe(false);

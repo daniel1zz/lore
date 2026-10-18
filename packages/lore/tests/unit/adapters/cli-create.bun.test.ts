@@ -45,9 +45,12 @@ function captureOutput() {
     stderr.push(String(chunk));
     return true;
   });
-  const logSpy = vi.spyOn(console, "log").mockImplementation((...args: unknown[]) => {
+  const logSpy = vi.spyOn(process.stdout, "write").mockImplementation((((chunk: unknown) => {
+    const args: unknown[] = [String(chunk).replace(/\n$/, "")];
     stdout.push(args.join(" "));
-  });
+  
+    return true;
+  }) as never));
 
   return {
     stdout,

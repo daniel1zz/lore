@@ -19,6 +19,7 @@ import {
 } from "../../../src/service/gate-enforcer.js";
 import type { AuditEntry, LoreConfig, LoreError, Result } from "@lore/core";
 import { ok, err } from "@lore/core";
+import { liveWarn } from "../../live-invocation.js";
 
 /** Flushes pending microtasks (promise `.then`/`.catch` chains) without advancing macrotasks. */
 async function flushMicrotasks(): Promise<void> {
@@ -70,7 +71,7 @@ describe("GateEnforcer — SPEC-080 G4 gate-skip audit (recordGateSkip port)", (
     const stderrSpy = spyStderr();
     const recordGateSkip = vi.fn<RecordGateSkip>().mockResolvedValue(ok(undefined));
     // the session tier of the port-less actor fallback reads the injected env (5th arg), not the process
-    const enforcer = new GateEnforcer(DISABLED_SPEC_PROMOTE_CONFIG, recordGateSkip, undefined, undefined, process.env);
+    const enforcer = new GateEnforcer(DISABLED_SPEC_PROMOTE_CONFIG, recordGateSkip, undefined, undefined, process.env, liveWarn());
 
     const result = enforcer.enforce("spec-promote", {
       acceptanceCriteriaCount: 0,
@@ -114,7 +115,7 @@ describe("GateEnforcer — SPEC-080 G4 gate-skip audit (recordGateSkip port)", (
       workflow: { claim_ttl_minutes: 120, gates: { "task-claim": { enabled: false } } },
     } as unknown as LoreConfig;
     const recordGateSkip = vi.fn<RecordGateSkip>().mockResolvedValue(ok(undefined));
-    const enforcer = new GateEnforcer(config, recordGateSkip, undefined, () => "test-actor");
+    const enforcer = new GateEnforcer(config, recordGateSkip, undefined, () => "test-actor", {}, liveWarn());
 
     enforcer.enforce("task-claim", {
       hasSpecParent: false,
@@ -136,7 +137,7 @@ describe("GateEnforcer — SPEC-080 G4 gate-skip audit (recordGateSkip port)", (
       workflow: { claim_ttl_minutes: 120, gates: { "spec-create": { enabled: false } } },
     } as unknown as LoreConfig;
     const recordGateSkip = vi.fn<RecordGateSkip>().mockResolvedValue(ok(undefined));
-    const enforcer = new GateEnforcer(config, recordGateSkip, undefined, () => "test-actor");
+    const enforcer = new GateEnforcer(config, recordGateSkip, undefined, () => "test-actor", {}, liveWarn());
 
     enforcer.enforce("spec-create", { parentType: "prd", content: "" });
 
@@ -170,7 +171,7 @@ describe("GateEnforcer — SPEC-080 G4 gate-skip audit (recordGateSkip port)", (
     const stderrSpy = spyStderr();
     const failure: LoreError = { code: "STORE_ERROR", message: "disk full" };
     const recordGateSkip = vi.fn<RecordGateSkip>().mockResolvedValue(err(failure) as Result<void, LoreError>);
-    const enforcer = new GateEnforcer(DISABLED_SPEC_PROMOTE_CONFIG, recordGateSkip, undefined, () => "test-actor");
+    const enforcer = new GateEnforcer(DISABLED_SPEC_PROMOTE_CONFIG, recordGateSkip, undefined, () => "test-actor", {}, liveWarn());
 
     const result = enforcer.enforce("spec-promote", {
       acceptanceCriteriaCount: 0,
@@ -190,7 +191,7 @@ describe("GateEnforcer — SPEC-080 G4 gate-skip audit (recordGateSkip port)", (
   it("a rejecting port: skip still succeeds, one stderr warning is printed", async () => {
     const stderrSpy = spyStderr();
     const recordGateSkip = vi.fn<RecordGateSkip>().mockRejectedValue(new Error("network down"));
-    const enforcer = new GateEnforcer(DISABLED_SPEC_PROMOTE_CONFIG, recordGateSkip, undefined, () => "test-actor");
+    const enforcer = new GateEnforcer(DISABLED_SPEC_PROMOTE_CONFIG, recordGateSkip, undefined, () => "test-actor", {}, liveWarn());
 
     const result = enforcer.enforce("spec-promote", {
       acceptanceCriteriaCount: 0,
@@ -212,7 +213,7 @@ describe("GateEnforcer — SPEC-080 G4 gate-skip audit (recordGateSkip port)", (
     const recordGateSkip: RecordGateSkip = vi.fn(() => {
       throw new Error("boom");
     }) as unknown as RecordGateSkip;
-    const enforcer = new GateEnforcer(DISABLED_SPEC_PROMOTE_CONFIG, recordGateSkip, undefined, () => "test-actor");
+    const enforcer = new GateEnforcer(DISABLED_SPEC_PROMOTE_CONFIG, recordGateSkip, undefined, () => "test-actor", {}, liveWarn());
 
     const result = enforcer.enforce("spec-promote", {
       acceptanceCriteriaCount: 0,
@@ -231,7 +232,7 @@ describe("GateEnforcer — SPEC-080 G4 gate-skip audit (recordGateSkip port)", (
   // is that a genuinely passing evaluation is no longer silent.
   it("calls recordGateSkip with a gate_passed (never gate_skipped) entry when the checkpoint is enabled and passes", () => {
     const recordGateSkip = vi.fn<RecordGateSkip>().mockResolvedValue(ok(undefined));
-    const enforcer = new GateEnforcer(undefined, recordGateSkip, undefined, () => "test-actor");
+    const enforcer = new GateEnforcer(undefined, recordGateSkip, undefined, () => "test-actor", {}, liveWarn());
 
     const result = enforcer.enforce("plan-promote", { hasSpecParent: false });
 
@@ -246,7 +247,7 @@ describe("GateEnforcer — SPEC-080 G4 gate-skip audit (recordGateSkip port)", (
   // predicate failure is not a "skip" — the checkpoint ran, it just failed).
   it("does not call recordGateSkip when the checkpoint is enabled and blocks", () => {
     const recordGateSkip = vi.fn<RecordGateSkip>().mockResolvedValue(ok(undefined));
-    const enforcer = new GateEnforcer(undefined, recordGateSkip, undefined, () => "test-actor");
+    const enforcer = new GateEnforcer(undefined, recordGateSkip, undefined, () => "test-actor", {}, liveWarn());
 
     const result = enforcer.enforce("spec-create", { parentType: "task", content: "" });
 

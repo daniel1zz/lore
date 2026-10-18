@@ -952,7 +952,7 @@ function buildAppFromSqlite(
     sessionStore: new SessionStore(db),
     aiProviderService,
     // reason: SyncDocsService depends only on CorpusService — no store access, no AI. SPEC-018 §3.6.
-    syncDocsService: new SyncDocsService(corpusService, warnSinkOf(ambient.io.stderr)),
+    syncDocsService: new SyncDocsService(corpusService),
     // reason: ExportDocsService needs to splice MDX placeholders into the exported body
     // (SPEC-032 §3.3 AC-4) — wired here as a narrow ResolveDocBody callback so
     // ExportDocsService itself never imports OutlineService (services don't cross-import).
@@ -1367,7 +1367,7 @@ function buildAppFromTurso(
     sessionStore: new SessionStore(apiKeyDb),
     aiProviderService,
     // reason: SyncDocsService depends only on CorpusService — no store access, no AI. SPEC-018 §3.6.
-    syncDocsService: new SyncDocsService(corpusService, warnSinkOf(ambient.io.stderr)),
+    syncDocsService: new SyncDocsService(corpusService),
     // reason: ExportDocsService needs to splice MDX placeholders into the exported body
     // (SPEC-032 §3.3 AC-4) — wired here as a narrow ResolveDocBody callback so
     // ExportDocsService itself never imports OutlineService (services don't cross-import).

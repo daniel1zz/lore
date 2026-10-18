@@ -21,6 +21,7 @@ import { defineCommand } from "citty";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatErrorFor } from "../utils.js";
 import { invocationOf } from "../command-invocation.js";
+import { warnSinkOf } from "../../../service/warn-sink.js";
 
 const DEFAULT_SPEC_DIR = "docs/requirements/spec";
 
@@ -54,7 +55,7 @@ export default defineCommand({
     const { app } = loadLoreApp({ inv });
 
     try {
-      const syncResult = await app.syncDocsService.run({ fromDir, dryRun });
+      const syncResult = await app.syncDocsService.run({ fromDir, dryRun, warn: warnSinkOf(inv.io.stderr) });
 
       if (!syncResult.ok) {
         if (jsonMode) {

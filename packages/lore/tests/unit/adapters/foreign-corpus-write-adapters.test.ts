@@ -352,7 +352,7 @@ describe("BOUNDARY — absent caller_cwd is treated exactly like HTTP's null exe
     await call({ type: "prd", title: "AC-CP-5 boundary control", caller_cwd: ownRoot });
 
     expect(resolveCorpusSpy).toHaveBeenCalledTimes(1);
-    expect(resolveCorpusSpy).toHaveBeenCalledWith(ownRoot, expect.anything());
+    expect(resolveCorpusSpy).toHaveBeenCalledWith(expect.anything(), ownRoot, expect.anything());
   });
 });
 

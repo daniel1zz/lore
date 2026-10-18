@@ -33,7 +33,12 @@ import { parseArgs, renderUsage } from "citty";
 import type { ArgsDef, CommandContext, CommandDef } from "citty";
 import { findSingleDashViolation, findUnknownFlag, wrapCommandStrict } from "../../../src/adapters/cli/strict-flags.js";
 import { fixSingleDashAliasRendering, renderUsageDoubleDash } from "../../../src/adapters/cli/usage-render.js";
-import { liveIo } from "../../live-invocation.js";
+import { liveInvocation, liveIo } from "../../live-invocation.js";
+
+/** The run context `deliverInvocation` adds in production: the wrapper reads its writers from `context.inv`. */
+function liveInv(): object {
+  return { inv: liveInvocation() };
+}
 
 // Mirrors commands/list.ts's declared args at time of writing — enough of
 // the shape to exercise the --json flag AC-073-1 names.
@@ -243,7 +248,7 @@ describe("wrapCommandStrict single-dash rejection (ERROR, STATE)", () => {
 
     const wrapped = await wrapCommandStrict(leaf, "lore list");
     await expect(
-      wrapped.run?.({ rawArgs: ["-json"], args: {} as never, cmd: wrapped }),
+      wrapped.run?.({ rawArgs: ["-json"], args: {} as never, cmd: wrapped, ...liveInv() }),
     ).rejects.toMatchObject({ name: "CliExit", code: 2 });
 
     expect(runSpy).not.toHaveBeenCalled();
@@ -260,7 +265,7 @@ describe("wrapCommandStrict single-dash rejection (ERROR, STATE)", () => {
 
     const wrapped = await wrapCommandStrict(leaf, "lore verify");
     await expect(
-      wrapped.run?.({ rawArgs: ["plan-1", "-yes"], args: {} as never, cmd: wrapped }),
+      wrapped.run?.({ rawArgs: ["plan-1", "-yes"], args: {} as never, cmd: wrapped, ...liveInv() }),
     ).rejects.toMatchObject({ name: "CliExit", code: 2 });
 
     expect(runSpy).not.toHaveBeenCalled();
@@ -275,7 +280,7 @@ describe("wrapCommandStrict single-dash rejection (ERROR, STATE)", () => {
     const leaf = makeLeaf(args, runSpy as unknown as (ctx: CommandContext) => unknown);
 
     const wrapped = await wrapCommandStrict(leaf, "lore leaf");
-    const context = { rawArgs: ["-y"], args: {} as never, cmd: wrapped };
+    const context = { rawArgs: ["-y"], args: {} as never, cmd: wrapped, ...liveInv() };
     await wrapped.run?.(context);
 
     expect(runSpy).toHaveBeenCalledTimes(1);
@@ -288,7 +293,7 @@ describe("wrapCommandStrict single-dash rejection (ERROR, STATE)", () => {
     const leaf = makeLeaf(args, runSpy as unknown as (ctx: CommandContext) => unknown);
 
     const wrapped = await wrapCommandStrict(leaf, "lore leaf");
-    const context = { rawArgs: ["-5"], args: {} as never, cmd: wrapped };
+    const context = { rawArgs: ["-5"], args: {} as never, cmd: wrapped, ...liveInv() };
     await wrapped.run?.(context);
 
     expect(runSpy).toHaveBeenCalledTimes(1);
@@ -299,7 +304,7 @@ describe("wrapCommandStrict single-dash rejection (ERROR, STATE)", () => {
     const leaf = makeLeaf({}, runSpy as unknown as (ctx: CommandContext) => unknown);
 
     const wrapped = await wrapCommandStrict(leaf, "lore leaf");
-    const context = { rawArgs: ["--", "-json", "-yes"], args: {} as never, cmd: wrapped };
+    const context = { rawArgs: ["--", "-json", "-yes"], args: {} as never, cmd: wrapped, ...liveInv() };
     await wrapped.run?.(context);
 
     expect(runSpy).toHaveBeenCalledTimes(1);
@@ -312,7 +317,7 @@ describe("wrapCommandStrict single-dash rejection (ERROR, STATE)", () => {
 
     const wrapped = await wrapCommandStrict(leaf, "lore list");
     await expect(
-      wrapped.run?.({ rawArgs: ["--kind", "blocks", "-json"], args: {} as never, cmd: wrapped }),
+      wrapped.run?.({ rawArgs: ["--kind", "blocks", "-json"], args: {} as never, cmd: wrapped, ...liveInv() }),
     ).rejects.toMatchObject({ name: "CliExit", code: 2 });
 
     const stderrOutput = stderrSpy.mock.calls.join("\n");
@@ -367,7 +372,7 @@ describe("renderUsageDoubleDash (SPEC-073 D2 composition-site wrapper)", () => {
   });
 
   it("AC-073-4: HAPPY — prints the fixed (double-dash) usage text via console.log", async () => {
-    const logSpy = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    const logSpy = vi.spyOn(process.stdout, "write").mockImplementation((() => true) as never);
     const cmd: CommandDef = {
       meta: { name: "verify", description: "Execute a plan's script-mode acceptance criteria" },
       args: VERIFY_ALLOW_NEW_COMMANDS_ARGS,

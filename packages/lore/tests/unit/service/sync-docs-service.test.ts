@@ -19,7 +19,7 @@ import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
 import { SyncDocsService } from "../../../src/service/sync-docs-service.js";
 import type { CreateDocInput } from "@lore/core";
-import { actedStore } from "../../live-invocation.js";
+import { actedStore, liveWarn } from "../../live-invocation.js";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -359,7 +359,7 @@ describe("spec-lore-sync-docs-backfill-new-spec-files-into-corpus#AC-SD-8 HAPPY 
     }) as typeof process.stderr.write;
     let result;
     try {
-      result = await sync.run({ fromDir: dir, dryRun: false });
+      result = await sync.run({ fromDir: dir, dryRun: false, warn: liveWarn() });
     } finally {
       process.stderr.write = realWrite;
     }

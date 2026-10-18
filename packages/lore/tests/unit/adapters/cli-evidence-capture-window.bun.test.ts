@@ -200,9 +200,12 @@ async function runCapture(
   const cmd = await importEvidenceCommand();
   const stderr = captureStderr();
   const logLines: string[] = [];
-  const logSpy = spyOn(console, "log").mockImplementation((...args: unknown[]) => {
+  const logSpy = spyOn(process.stdout, "write").mockImplementation((((chunk: unknown) => {
+    const args: unknown[] = [String(chunk).replace(/\n$/, "")];
     logLines.push(String(args[0]));
-  });
+  
+    return true;
+  }) as never));
   try {
     const exitCode = await runHandlerForExit(() => cmd.run({
       args: { task: taskSlug, oracle: "tsc", command, result, capture: true },
@@ -226,9 +229,12 @@ async function runCapture(
 async function runSelfReport(taskSlug: string): Promise<string> {
   const cmd = await importEvidenceCommand();
   const logLines: string[] = [];
-  const logSpy = spyOn(console, "log").mockImplementation((...args: unknown[]) => {
+  const logSpy = spyOn(process.stdout, "write").mockImplementation((((chunk: unknown) => {
+    const args: unknown[] = [String(chunk).replace(/\n$/, "")];
     logLines.push(String(args[0]));
-  });
+  
+    return true;
+  }) as never));
   try {
     await runHandlerForExit(() => cmd.run({
       args: {

@@ -120,20 +120,23 @@ function captureOutput() {
   const stdout: string[] = [];
   const stderr: string[] = [];
   const origWrite = process.stderr.write.bind(process.stderr);
-  const origLog = console.log.bind(console);
+  const origLog = process.stdout.write;
   (process.stderr as unknown as { write: (chunk: unknown) => boolean }).write = (chunk: unknown) => {
     stderr.push(String(chunk));
     return true;
   };
-  console.log = (...args: unknown[]) => {
+  process.stdout.write = (((chunk: unknown) => {
+    const args: unknown[] = [String(chunk).replace(/\n$/, "")];
     stdout.push(args.join(" "));
-  };
+  
+    return true;
+  }) as typeof process.stdout.write);
   return {
     stdout,
     stderr,
     restore: () => {
       (process.stderr as unknown as { write: typeof origWrite }).write = origWrite;
-      console.log = origLog;
+      process.stdout.write = origLog;
     },
   };
 }

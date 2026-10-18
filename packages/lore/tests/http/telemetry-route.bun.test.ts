@@ -245,19 +245,14 @@ describe("POST /api/dashboard/telemetry/route-view — ERROR: throwing sink (AC-
     };
     ctx.app.telemetry = throwingTelemetry;
 
-    const originalConsoleError = console.error;
+    // reason: the route reports a failing sink through the app's advisory sink (`app.warn`), never a process stream.
     const errorCalls: unknown[][] = [];
-    console.error = (...args: unknown[]) => {
-      errorCalls.push(args);
+    ctx.app.warn = (line: string) => {
+      errorCalls.push([line]);
     };
 
-    let res: Response;
-    try {
-      const sessionId = await bootstrapCookie(ctx);
-      res = await postRouteView(ctx, { route_id: "/docs" }, { cookie: sessionId, origin: ALLOWED_ORIGIN });
-    } finally {
-      console.error = originalConsoleError;
-    }
+    const sessionId = await bootstrapCookie(ctx);
+    const res = await postRouteView(ctx, { route_id: "/docs" }, { cookie: sessionId, origin: ALLOWED_ORIGIN });
 
     expect(res.status).toBe(204);
     const bodyText = await res.text();

@@ -40,7 +40,7 @@ function silence(): { stderr: string[]; restore: () => void } {
     stderr.push(String(chunk));
     return true;
   });
-  const l = vi.spyOn(console, "log").mockImplementation(() => undefined);
+  const l = vi.spyOn(process.stdout, "write").mockImplementation((() => true) as never);
   return {
     stderr,
     restore: () => {
@@ -80,9 +80,12 @@ async function run(cmd: RunnableCommand, args: Record<string, unknown>): Promise
 async function createDoc(args: Record<string, unknown>): Promise<string> {
   const create = await importCmd("create");
   const lines: string[] = [];
-  const l = vi.spyOn(console, "log").mockImplementation((...a: unknown[]) => {
+  const l = vi.spyOn(process.stdout, "write").mockImplementation((((chunk: unknown) => {
+    const a: unknown[] = [String(chunk).replace(/\n$/, "")];
     lines.push(a.join(" "));
-  });
+  
+    return true;
+  }) as never));
   const e = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
   try {
     await create.run({ args: { ai: false, ...args }, inv: liveInvocation() });

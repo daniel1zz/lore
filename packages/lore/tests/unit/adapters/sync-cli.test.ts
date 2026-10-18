@@ -131,9 +131,12 @@ function captureOutput() {
     return true;
   });
   // console.log also captures output
-  const logSpy = vi.spyOn(console, "log").mockImplementation((...args: any[]) => {
+  const logSpy = vi.spyOn(process.stdout, "write").mockImplementation((((chunk: unknown) => {
+    const args: any[] = [String(chunk).replace(/\n$/, "")];
     stdout.push(args.join(" "));
-  });
+  
+    return true;
+  }) as never));
 
   return {
     stdout,

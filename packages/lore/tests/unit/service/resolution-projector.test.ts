@@ -245,7 +245,7 @@ describe("AC-GI-4 scenario 3 — lore issue resolve calls the injected Resolutio
 
   beforeEach(() => {
     stderrSpy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
-    logSpy = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    logSpy = vi.spyOn(process.stdout, "write").mockImplementation((() => true) as never) as unknown as typeof logSpy;
 
     getMock.mockReset();
     setMock.mockReset();
@@ -388,7 +388,7 @@ describe("AC-GI-4 scenario 5 — a projection (network) failure never swallows t
 
   beforeEach(() => {
     stderrSpy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
-    logSpy = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    logSpy = vi.spyOn(process.stdout, "write").mockImplementation((() => true) as never) as unknown as typeof logSpy;
 
     getMock.mockReset();
     setMock.mockReset();

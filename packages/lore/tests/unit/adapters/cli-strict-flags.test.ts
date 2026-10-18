@@ -30,6 +30,7 @@
 
 import { describe, it, expect, vi, afterEach } from "vitest";
 import type { ArgsDef, CommandContext, CommandDef } from "citty";
+import { liveInvocation } from "../../live-invocation.js";
 import { findUnknownFlag, wrapCommandStrict } from "../../../src/adapters/cli/strict-flags.js";
 
 // ─── findUnknownFlag ────────────────────────────────────────────────────────
@@ -98,6 +99,11 @@ describe("findUnknownFlag", () => {
   });
 });
 
+/** The run context `deliverInvocation` adds in production: the wrapper reads its writers from `context.inv`. */
+function liveInv(): object {
+  return { inv: liveInvocation() };
+}
+
 // ─── wrapCommandStrict ──────────────────────────────────────────────────────
 
 describe("wrapCommandStrict", () => {
@@ -131,7 +137,7 @@ describe("wrapCommandStrict", () => {
       wrapped.run?.({
         rawArgs: ["A", "B", "--kind", "blocks"],
         args: {} as never,
-        cmd: wrapped,
+        cmd: wrapped, ...liveInv(),
       }),
     ).rejects.toMatchObject({ name: "CliExit", code: 2 });
 
@@ -151,7 +157,7 @@ describe("wrapCommandStrict", () => {
     const context = {
       rawArgs: ["A", "B", "--type", "blocks"],
       args: {} as never,
-      cmd: wrapped,
+      cmd: wrapped, ...liveInv(),
     };
     await wrapped.run?.(context);
 

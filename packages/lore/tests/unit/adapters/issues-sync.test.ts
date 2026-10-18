@@ -135,9 +135,10 @@ async function resolver(w: World, report: DocRecord, title: string, status: DocS
 let logged: string[] = [];
 beforeEach(() => {
   logged = [];
-  vi.spyOn(console, "log").mockImplementation((line: unknown) => {
-    logged.push(String(line));
-  });
+  vi.spyOn(process.stdout, "write").mockImplementation(((chunk: unknown) => {
+    logged.push(String(chunk).replace(/\n$/, ""));
+    return true;
+  }) as never);
   vi.spyOn(process.stderr, "write").mockImplementation(() => true);
 });
 afterEach(() => vi.restoreAllMocks());

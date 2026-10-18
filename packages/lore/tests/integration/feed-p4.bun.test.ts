@@ -75,11 +75,14 @@ async function importGateSpecCreate(): Promise<RunnableCommand> {
 function captureOutput() {
   const stdout: string[] = [];
   const stderr: string[] = [];
-  const origConsoleLog = console.log.bind(console);
+  const origConsoleLog = process.stdout.write;
   const origStderrWrite = process.stderr.write.bind(process.stderr);
-  console.log = (...args: unknown[]) => {
+  process.stdout.write = (((chunk: unknown) => {
+    const args: unknown[] = [String(chunk).replace(/\n$/, "")];
     stdout.push(args.join(" "));
-  };
+  
+    return true;
+  }) as typeof process.stdout.write);
   // reason: AC-FR-1's unregistered-checkpoint refusal (commands/feed.ts) writes
   // directly to `process.stderr`, never through `console.log` — this capture
   // must intercept BOTH channels or a stderr-only refusal reads as silent.
@@ -91,7 +94,7 @@ function captureOutput() {
     stdout,
     stderr,
     restore: () => {
-      console.log = origConsoleLog;
+      process.stdout.write = origConsoleLog;
       process.stderr.write = origStderrWrite;
     },
   };

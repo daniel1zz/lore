@@ -74,11 +74,13 @@ async function deliverInvocation(
   }
   if (typeof cmd.run === "function") {
     const originalRun = cmd.run;
-    delivered.run = async (context: CommandContext) => {
+    // reason: NOT `async`: the introspection-only tree must refuse a leaf with a synchronous throw, not a rejected promise.
+    delivered.run = (context: CommandContext) => {
       if (inv === null) throw new CommandTreeWithoutInvocationError(commandPath);
-      const returned: unknown = await originalRun({ ...context, inv } as CommandContext);
-      if (typeof returned === "number") reportExit?.(returned);
-      return returned;
+      return Promise.resolve(originalRun({ ...context, inv } as CommandContext)).then((returned: unknown) => {
+        if (typeof returned === "number") reportExit?.(returned);
+        return returned;
+      });
     };
   }
   return delivered;
