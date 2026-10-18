@@ -706,10 +706,9 @@ export function computeAcCoverage(
  * | 7 | `"none"` | `pass === 0` AND `fail === 0` |
  *
  * **AC-TG-6 / AC-EI-2 — missing oracle file (between rows 2 and 3)**: when {@link AcCoverageFact.oracle_file_missing}
- * is non-empty and `fail === 0` and the criterion has ANY pass on record (`pass > 0` or a `pass` ref, whatever its command), the state is
- * `"not_measured"` BEFORE rows 3-6 are tried — whichever files the earlier passes ran (TG-22's "passes that
- * ran the missing file" narrowing is removed: AC-TG-6's text never had it). A real `fail` still outranks it
- * (rows 1-2); a criterion with no pass on record stays `"none"` (row 7).
+ * is non-empty and `fail === 0`, the state is `"not_measured"` BEFORE rows 3-7 are tried — whether the criterion has passes
+ * (whichever files they ran; TG-22's narrowing is removed) or NO evidence at all (EI-6: "whenever" means whenever). A real `fail`
+ * still outranks it (rows 1-2); a criterion whose oracle files all exist and has no evidence stays `"none"` (row 7).
  *
  * This is the COMPLETE return set — `"inconclusive"`/`"expected-fail"` are
  * badge-layer residuals `commands/ac.ts::coverageBadge` derives from `fact.refs`
@@ -784,9 +783,9 @@ export function computeAcCoverage(
  */
 /**
  * The ONE predicate for "this criterion has a pass on record" under a missing oracle (AC-EI-2): ANY `pass` row,
- * whatever command it ran or how that command spelled its paths. Shared by {@link deriveAcCoverageState} (rows =
- * `fact.refs`) and `lore done`'s missing-oracle floor (rows = the task's evidence tagged with the AC), so the
- * state a reader sees and the archive refusal can never disagree about what "earlier pass" means.
+ * whatever command it ran or how that command spelled its paths. Used by `lore done`'s missing-oracle floor (rows = the
+ * task's evidence tagged with the AC). {@link deriveAcCoverageState} no longer needs it (EI-6: a missing oracle is
+ * not_measured with or without a pass), so the display state is a superset of the archive refusal, never narrower.
  *
  * @param rows - evidence rows or refs of ONE criterion; only `result` is read
  * @returns `true` when any row's `result` is `"pass"`
@@ -805,9 +804,10 @@ export function deriveAcCoverageState(fact: AcCoverageFact): AcCoverageState {
   // AC-TG-6: the oracle file is gone, so no earlier pass (attested or not) may render as passing.
   // AC-EI-2: regardless of which files earlier passes ran (TG-22's narrowing removed; passes_ran_missing_oracle is information only).
   const missing = fact.oracle_file_missing;
-  // reason: `refs` carries EVERY row (EI-1 keeps other-command rows in it), so a pass recorded under a spelling or command that
-  // differs from the declared one still counts as "a pass on record"; only a criterion with NO pass at all stays `none`.
-  if (missing !== undefined && missing.length > 0 && (fact.pass > 0 || hasPassOnRecord(fact.refs))) {
+  // reason: EI-6 — AC-EI-2 says "whenever any extracted path is missing", so the check does NOT depend on evidence: a criterion with
+  // zero rows and a missing oracle is not measured too (it was `none`, which read as "nothing wrong"). A PRESENT oracle with no
+  // evidence still falls through to `none`. A real `fail` already returned above.
+  if (missing !== undefined && missing.length > 0) {
     return "not_measured";
   }
   if (fact.attested_pass > 0) return "attested_pass";
