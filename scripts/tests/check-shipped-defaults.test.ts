@@ -43,7 +43,7 @@
 import { describe, it, expect, afterEach, vi } from "vitest";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { resolveCaptureTimeoutMs, AiConfigSchema } from "@lore/core";
 import { loadConfig } from "@lore/core/node";
@@ -66,6 +66,17 @@ import {
 } from "../check-shipped-defaults.js";
 
 const REPO_ROOT = join(__dirname, "..", "..");
+/** Nearest ancestor `node_modules` (from `start`) that contains `@lore/core` — the real dependency install. */
+function findInstalledNodeModules(start: string): string {
+  let dir = start;
+  for (;;) {
+    const candidate = join(dir, "node_modules");
+    if (existsSync(join(candidate, "@lore", "core"))) return candidate;
+    const parent = dirname(dir);
+    if (parent === dir) throw new Error(`no node_modules containing @lore/core at or above ${start}`);
+    dir = parent;
+  }
+}
 const LORE_ENTRY = join(REPO_ROOT, "packages", "lore", "src", "index.ts");
 
 /** Real repo template content, verbatim, so fixture-based tests never read this repo's own file. */
@@ -492,7 +503,9 @@ describe("main(): ERROR — a scan failure is never reported as clean", () => {
     const scriptSrc = readFileSync(join(REPO_ROOT, "scripts", "check-shipped-defaults.ts"), "utf8");
     writeFileSync(join(root, "scripts", "check-shipped-defaults.ts"), scriptSrc, "utf8");
     // Resolve @lore/core from the real repo: symlink its node_modules.
-    symlinkSync(join(REPO_ROOT, "node_modules"), join(root, "node_modules"));
+    // In an agent worktree REPO_ROOT/node_modules holds only caches; the install lives in an ancestor,
+    // so link the node_modules directory that actually contains @lore/core (found by walking up).
+    symlinkSync(findInstalledNodeModules(REPO_ROOT), join(root, "node_modules"));
     const result = spawnSync("bun", [join(root, "scripts", "check-shipped-defaults.ts")], {
       cwd: root,
       encoding: "utf8",
