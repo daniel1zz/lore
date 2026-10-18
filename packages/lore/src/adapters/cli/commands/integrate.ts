@@ -23,6 +23,7 @@
 import { spawnSync } from "node:child_process";
 import { dirname, resolve as resolvePath } from "node:path";
 import { defineCommand } from "citty";
+import { invocationOf } from "../command-invocation.js";
 import { loadLoreApp } from "../loader.js";
 import { resolveCallerSession } from "../caller-session.js";
 import { exitCode, formatError } from "../utils.js";
@@ -35,21 +36,27 @@ import {
   type IntegrateOutcome,
 } from "../../../service/integrate-service.js";
 
-/** Git runner: never throws; a spawn failure is status 1 with the message on stderr. */
-const runGit: IntegrateGit = (cwd, args, env) => {
-  const result = spawnSync("git", [...args], { cwd, encoding: "utf8", env: { ...process.env, ...env } });
-  return { status: result.status ?? 1, stdout: result.stdout ?? "", stderr: result.stderr ?? result.error?.message ?? "" };
-};
+type AmbientEnv = Readonly<Record<string, string | undefined>>;
+
+/** Runner over the invocation's environment: never throws; a spawn failure is status 1 with the message on stderr. */
+function gitRunnerFor(ambient: AmbientEnv): IntegrateGit {
+  return (cwd, args, env) => {
+    const result = spawnSync("git", [...args], { cwd, encoding: "utf8", env: { ...ambient, ...env } });
+    return { status: result.status ?? 1, stdout: result.stdout ?? "", stderr: result.stderr ?? result.error?.message ?? "" };
+  };
+}
 
 /** Floor runner: `sh -c <command>` in the integration worktree; output is stdout+stderr as one string. */
-const runFloor: FloorRunner = (command, cwd) => {
-  const result = spawnSync("sh", ["-c", command], { cwd, encoding: "utf8", maxBuffer: 256 * 1024 * 1024 });
-  const output = `${result.stdout ?? ""}${result.stderr ?? ""}${result.error !== undefined ? `\n${result.error.message}` : ""}`;
-  return { status: result.status ?? 1, output };
-};
+function floorRunnerFor(ambient: AmbientEnv): FloorRunner {
+  return (command, cwd) => {
+    const result = spawnSync("sh", ["-c", command], { cwd, encoding: "utf8", env: { ...ambient }, maxBuffer: 256 * 1024 * 1024 });
+    const output = `${result.stdout ?? ""}${result.stderr ?? ""}${result.error !== undefined ? `\n${result.error.message}` : ""}`;
+    return { status: result.status ?? 1, output };
+  };
+}
 
 /** The main checkout's root, from the git common dir of `cwd` (so a linked session worktree still names the one main checkout). */
-function mainCheckoutRoot(cwd: string): string | undefined {
+function mainCheckoutRoot(runGit: IntegrateGit, cwd: string): string | undefined {
   const out = runGit(cwd, ["rev-parse", "--path-format=absolute", "--git-common-dir"]);
   const commonDir = out.stdout.trim();
   if (out.status !== 0 || commonDir === "" || !commonDir.endsWith("/.git")) return undefined;
@@ -95,7 +102,10 @@ export default defineCommand({
     message: { type: "string", alias: "m", description: "Merge commit message (default: merge(<branch>): <tip subject>)" },
     json: { type: "boolean", description: "Output { ok, data } as JSON" },
   },
-  async run({ args }) {
+  async run(context) {
+    const { args } = context;
+    const inv = invocationOf(context);
+    const runGit = gitRunnerFor(inv.env);
     const branch = typeof args.branch === "string" ? args.branch : "";
     if (branch === "") {
       process.stderr.write("Error: lore integrate requires a <branch>\n");
@@ -105,7 +115,7 @@ export default defineCommand({
     try {
       const corpusDir = dirname(resolvePath(dbPath));
       const projectRoot = dirname(corpusDir);
-      const mainRoot = mainCheckoutRoot(projectRoot);
+      const mainRoot = mainCheckoutRoot(runGit, projectRoot);
       if (mainRoot === undefined) {
         process.stderr.write(`Error: ${projectRoot} is not inside a non-bare git repository whose common dir is <root>/.git\n`);
         process.exitCode = 1;
@@ -113,7 +123,7 @@ export default defineCommand({
       }
       const service = new IntegrateService({
         git: runGit,
-        runFloor,
+        runFloor: floorRunnerFor(inv.env),
         ledger: new IntegrateLossLedger(corpusDir),
         projectRoot,
         worktreesRoot: resolvePath(mainRoot, ".claude", "worktrees"),
@@ -121,7 +131,7 @@ export default defineCommand({
       });
       const result = await service.integrate({
         branch,
-        sessionId: resolveCallerSession(typeof args.session === "string" ? args.session : undefined, process.env) ?? "",
+        sessionId: resolveCallerSession(typeof args.session === "string" ? args.session : undefined, inv.env) ?? "",
         floorCommand: config?.workflow?.integrate?.floor_command,
         ...(typeof args.message === "string" && args.message !== "" ? { message: args.message } : {}),
       });
