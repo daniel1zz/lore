@@ -70,52 +70,52 @@ async function review(trail: SessionTrail, byAgent: Claims) {
 const FILES = ["src/a.ts", "src/b.ts", "tests/a.test.ts"];
 const PARENT_CLAIM: Claims = { parent: [{ slug: "task-x", anchors: ["src/", "tests/"] }] };
 
-describe("AC-ST-8 nested helper in a claiming run's working copy", () => {
-  it("AC-ST-8 yields no finding for the parent's files on a harness-internal zero-duration helper", async () => {
+describe("AU-T19 nested helper in a claiming run's working copy", () => {
+  it("AU-T19 yields no finding for the parent's files on a harness-internal zero-duration helper", async () => {
     const out = await review(trailOf([helper("parent", { files: FILES }), helper("inner", { files: FILES })]), PARENT_CLAIM);
     expect(out.findings).toEqual([]);
   });
 
-  it("AC-ST-8 still judges the claiming run itself: files outside its anchors are one outside-anchors finding", async () => {
+  it("AU-T19 still judges the claiming run itself: files outside its anchors are one outside-anchors finding", async () => {
     const files = [...FILES, "docs/x.md"];
     const out = await review(trailOf([helper("parent", { files }), helper("inner", { files })]), PARENT_CLAIM);
     expect(out.findings.map((f) => [f.kind, f.helper, f.files])).toEqual([["outside-anchors", "parent", ["docs/x.md"]]]);
   });
 
-  it("AC-ST-8 a shared working copy where nobody claimed a task yields ONE no-claimed-task finding, not one per helper", async () => {
+  it("AU-T19 a shared working copy where nobody claimed a task yields ONE no-claimed-task finding, not one per helper", async () => {
     const out = await review(trailOf([helper("one", { files: FILES }), helper("two", { files: FILES })]), {});
     expect(out.findings.map((f) => [f.kind, f.helper])).toEqual([["no-claimed-task", "one"]]);
   });
 
-  it("AC-ST-8 judges the nested helper when the claiming run's end was already judged", async () => {
+  it("AU-T19 judges the nested helper when the claiming run's end was already judged", async () => {
     const out = await review(trailOf([helper("parent", { files: FILES, judged: 1 }), helper("inner", { files: FILES })]), PARENT_CLAIM);
     expect(out.findings).toEqual([]);
     expect(out.helpers.map((h) => h.agent_id)).toEqual(["inner"]);
   });
 
-  it("AC-ST-8 control: a nested helper's OWN edit outside the group's anchors is still outside-anchors", async () => {
+  it("AU-T19 control: a nested helper's OWN edit outside the group's anchors is still outside-anchors", async () => {
     const trail = trailOf([helper("parent", { files: FILES }), helper("inner", { files: FILES })], [{ agent: "inner", file: "/wt/agent-parent/docs/own.md" }]);
     const out = await review(trail, PARENT_CLAIM);
     expect(out.findings.map((f) => [f.kind, f.helper, f.files])).toEqual([["outside-anchors", "inner", ["docs/own.md"]]]);
   });
 
-  it("AC-ST-8 control: helpers in different working copies stay independent", async () => {
+  it("AU-T19 control: helpers in different working copies stay independent", async () => {
     const trail = trailOf([helper("parent", { files: FILES }), helper("other", { files: FILES, workingCopy: "/wt/agent-other" })]);
     const out = await review(trail, PARENT_CLAIM);
     expect(out.findings.map((f) => [f.kind, f.helper])).toEqual([["no-claimed-task", "other"]]);
   });
 });
 
-describe("AC-ST-8 session scratchpad", () => {
+describe("AU-T19 session scratchpad", () => {
   const scratch = `/private/tmp/claude-501/-Users-x-proj/${SESSION}/scratchpad`;
 
-  it("AC-ST-8 a write into this session's scratchpad is not outside-working-copy", async () => {
+  it("AU-T19 a write into this session's scratchpad is not outside-working-copy", async () => {
     const trail = trailOf([helper("parent", { files: [] })], [{ agent: "parent", file: `${scratch}/notes.txt` }]);
     const out = await review(trail, PARENT_CLAIM);
     expect(out.findings).toEqual([]);
   });
 
-  it("AC-ST-8 control: another session's scratchpad, a plain /tmp path and a lookalike dir are still outside-working-copy", async () => {
+  it("AU-T19 control: another session's scratchpad, a plain /tmp path and a lookalike dir are still outside-working-copy", async () => {
     const other = "/private/tmp/claude-501/-Users-x-proj/other-session/scratchpad/a.txt";
     const trail = trailOf(
       [helper("parent", { files: [] })],
