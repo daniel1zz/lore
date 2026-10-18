@@ -80,6 +80,7 @@ describe("review prompt v5", () => {
     expect(prompt).toContain("Only then decide");
     expect(prompt).toContain("end-state alternative");
     expect(prompt).toContain('you MUST return decision "reject"');
+    expect(prompt).toContain('MUST contain NO entry with dimension "design_necessity"');
   });
 
   it.each(["v1", "v2", "v3", "v4"])("NEGATIVE: the %s prompt has no v5 classification wording", (version) => {

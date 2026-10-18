@@ -752,7 +752,10 @@ export const DESIGN_NECESSITY_RULE_V5 =
   `  An item the document justifies under (i)-(iv) is not raised unless that justification is ` +
   `false. If any item is classified (a)-(d), you MUST return decision "reject" with a reasons ` +
   `entry whose dimension is "design_necessity" that names each such item, its class, and the ` +
-  `end-state alternative. If no item is classified (a)-(d), raise no design_necessity reason.\n`;
+  `end-state alternative. A reasons entry with dimension "design_necessity" exists ONLY to report ` +
+  `findings: if no item is classified (a)-(d), the reasons array MUST contain NO entry with ` +
+  `dimension "design_necessity" (do not add one to say that nothing was found, and do not use ` +
+  `one to restate the classification of the non-findings).\n`;
 
 /**
  * v5 review judge prompt — v3 plus {@link DESIGN_NECESSITY_RULE_V5} as the final RULES entry
