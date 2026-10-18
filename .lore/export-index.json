@@ -11636,6 +11636,10 @@
     "01M56YWY9J3T9DM3MDX3HWA3HS": {
       "human_id": "TASK-1587",
       "file_path": "docs/requirements/task/TASK-1587-skill-fix-au-t16-lore-pending-lists-escalations-wh.md"
+    },
+    "01M579WS5Z8R9DE9P4WYY5EFW8": {
+      "human_id": "TASK-1588",
+      "file_path": "docs/requirements/task/TASK-1588-39-rule-ids-are-registered-to-session-leaves-that.md"
     }
   }
 }
