@@ -37,7 +37,7 @@
 import { readFileSync, realpathSync } from "node:fs";
 
 import { dirname } from "node:path";
-import { defineCommand } from "citty";
+import { defineLoreCommand } from "../cli-exit.js";
 import type { Invocation } from "@lore/core";
 import { invocationOf } from "../command-invocation.js";
 import { loadCoChangeRules, reviewCoChange, type CoChangeFinding, type CoChangeRulesLoad, type CoChangeGroup, type GlobMatchFn } from "../../../service/co-change-review.js";
@@ -356,7 +356,7 @@ function formatSessionLine(record: SessionLivenessRecord): string {
   return `  - ${record.by} (${idPart}${worktreePart}${branchesPart}) — liveness: ${livenessPart}${stalePart}`;
 }
 
-export default defineCommand({
+export default defineLoreCommand({
   meta: {
     name: "session",
     description:

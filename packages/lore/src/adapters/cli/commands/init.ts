@@ -22,7 +22,7 @@
  * command deliberately does NOT invoke.
  */
 
-import { defineCommand } from "citty";
+import { defineLoreCommand } from "../cli-exit.js";
 import { exitCli } from "../cli-exit.js";
 import { existsSync, mkdirSync, writeFileSync } from "fs";
 import { join } from "path";
@@ -35,7 +35,7 @@ import { isInsideGitRepository } from "../../../service/git-state-stamp.js";
 import { invocationOf } from "../command-invocation.js";
 import { printLine } from "../output.js";
 
-export default defineCommand({
+export default defineLoreCommand({
   meta: {
     name: "init",
     description: "Initialise a new Lore project in the current directory",

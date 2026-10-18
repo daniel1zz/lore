@@ -83,7 +83,7 @@ import { dirname, join } from "node:path";
 import { exitCli } from "../cli-exit.js";
 import { spawn } from "node:child_process";
 import { mkdtempSync, writeFileSync } from "node:fs";
-import { defineCommand } from "citty";
+import { defineLoreCommand } from "../cli-exit.js";
 import { loadGlobalConfig, resolveGlobalConfigPath } from "@lore/core/node";
 import { loadLoreApp } from "../loader.js";
 import { ambientOfInvocation, createApp } from "../../../app.js";
@@ -684,7 +684,7 @@ async function runDevMode(
 
 // ─── Command ───────────────────────────────────────────────────────────────────
 
-export default defineCommand({
+export default defineLoreCommand({
   meta: {
     name: "dashboard",
     description:

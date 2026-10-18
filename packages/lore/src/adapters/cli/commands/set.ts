@@ -104,7 +104,7 @@
 
 import { readFileSync } from "node:fs";
 import { exitCli } from "../cli-exit.js";
-import { defineCommand } from "citty";
+import { defineLoreCommand } from "../cli-exit.js";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatErrorFor, resolveActor } from "../utils.js";
 import { openEditor } from "../editor.js";
@@ -141,7 +141,7 @@ import { printLine } from "../output.js";
 export const APPROVED_DEMOTION_ADVISORY =
   "  (approved doc demoted to draft because content changed)";
 
-export default defineCommand({
+export default defineLoreCommand({
   meta: {
     name: "set",
     description: "Update specific fields on a document",

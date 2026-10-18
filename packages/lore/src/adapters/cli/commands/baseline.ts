@@ -45,7 +45,7 @@
 
 import { readFileSync } from "node:fs";
 
-import { defineCommand } from "citty";
+import { defineLoreCommand } from "../cli-exit.js";
 import { AiConfigSchema, BASELINE_TREES, ruleIdPrefixOfNode } from "@lore/core";
 import type { AIProvider, BaselineTree, DocRecord, Invocation, LoreError } from "@lore/core";
 import { invocationOf } from "../command-invocation.js";
@@ -384,10 +384,10 @@ const commonArgs = {
   json: { type: "boolean", description: "Output result as JSON" },
 } as const;
 
-export default defineCommand({
+export default defineLoreCommand({
   meta: { name: "baseline", description: "Build and edit the product-baseline tree (root / branch / leaf nodes)" },
   subCommands: {
-    add: defineCommand({
+    add: defineLoreCommand({
       meta: { name: "add", description: "Create a baseline node under a parent" },
       args: {
         parent: { type: "positional", description: "Parent: a PRD (for --node root) or a baseline root|branch (ID or slug)", required: true },
@@ -434,7 +434,7 @@ export default defineCommand({
         });
       },
     }),
-    "set-label": defineCommand({
+    "set-label": defineLoreCommand({
       meta: { name: "set-label", description: "Set a baseline node's display label" },
       args: {
         node: { type: "positional", description: "Baseline node ID or slug", required: true },
@@ -452,7 +452,7 @@ export default defineCommand({
         });
       },
     }),
-    depends: defineCommand({
+    depends: defineLoreCommand({
       meta: { name: "depends", description: "Add / remove depends_on rule ids on a baseline leaf" },
       args: {
         leaf: { type: "positional", description: "Baseline leaf ID or slug", required: true },
@@ -476,10 +476,10 @@ export default defineCommand({
         });
       },
     }),
-    glossary: defineCommand({
+    glossary: defineLoreCommand({
       meta: { name: "glossary", description: "Add / remove glossary terms on a baseline root|branch" },
       subCommands: {
-        add: defineCommand({
+        add: defineLoreCommand({
           meta: { name: "add", description: "Define a term on a baseline root|branch" },
           args: {
             node: { type: "positional", description: "Baseline root|branch ID or slug", required: true },
@@ -504,7 +504,7 @@ export default defineCommand({
             });
           },
         }),
-        rm: defineCommand({
+        rm: defineLoreCommand({
           meta: { name: "rm", description: "Remove a glossary term" },
           args: {
             node: { type: "positional", description: "Baseline root|branch ID or slug", required: true },
@@ -524,7 +524,7 @@ export default defineCommand({
         }),
       },
     }),
-    map: defineCommand({
+    map: defineLoreCommand({
       meta: { name: "map", description: "Map census sites of a baseline leaf to rules (or non-business reasons) and declare its commands" },
       args: {
         leaf: { type: "positional", description: "Baseline leaf ID or slug", required: true },
@@ -576,7 +576,7 @@ export default defineCommand({
         });
       },
     }),
-    sites: defineCommand({
+    sites: defineLoreCommand({
       meta: { name: "sites", description: "List the failure sites a CLI command can reach (static census, TypeScript compiler API)" },
       args: {
         command: { type: "positional", description: "CLI command name, e.g. 'ac add' (or 'ac-add'); token 1 = commands/<token>.ts, further tokens = nested subcommands", required: true },
@@ -608,7 +608,7 @@ export default defineCommand({
         }
       },
     }),
-    coverage: defineCommand({
+    coverage: defineLoreCommand({
       meta: { name: "coverage", description: "Check that a baseline leaf (or every leaf under a branch) accounts for every census site; exit 0 only when complete" },
       args: {
         target: { type: "positional", description: "Baseline leaf or branch|root ID or slug", required: true },
@@ -620,7 +620,7 @@ export default defineCommand({
         return await runCoverage(args.target as string, args.json === true, inv);
       },
     }),
-    fidelity: defineCommand({
+    fidelity: defineLoreCommand({
       meta: { name: "fidelity", description: "Judge a seeded sample of citations (or non-business exclusions) with the AI provider and store the record (read-only on the baseline)" },
       args: {
         size: { type: "string", description: "Sample size N (refused when larger than the pool)", required: true },
@@ -637,7 +637,7 @@ export default defineCommand({
       },
     }),
     adopt: adoptCommand,
-    tree: defineCommand({
+    tree: defineLoreCommand({
       meta: { name: "tree", description: "List the baseline tree (kind, label, status, rule counts)" },
       args: {
         root: { type: "positional", description: "Optional baseline node ID or slug to list only its subtree", required: false },

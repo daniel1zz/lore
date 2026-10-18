@@ -4,14 +4,14 @@
  * Source: SPEC-010 §3.2, §6
  */
 
-import { defineCommand } from "citty";
+import { defineLoreCommand } from "../cli-exit.js";
 
 import { loadLoreApp } from "../loader.js";
 import { formatTable } from "../utils.js";
 import { invocationOf } from "../command-invocation.js";
 import { printLine } from "../output.js";
 
-const agentCreate = defineCommand({
+const agentCreate = defineLoreCommand({
   meta: {
     name: "create",
     description: "Create a new API key for an agent",
@@ -72,7 +72,7 @@ const agentCreate = defineCommand({
   },
 });
 
-const agentList = defineCommand({
+const agentList = defineLoreCommand({
   meta: {
     name: "list",
     description: "List all API keys",
@@ -125,7 +125,7 @@ const agentList = defineCommand({
   },
 });
 
-const agentRevoke = defineCommand({
+const agentRevoke = defineLoreCommand({
   meta: {
     name: "revoke",
     description: "Revoke an agent's API key",
@@ -169,7 +169,7 @@ const agentRevoke = defineCommand({
   },
 });
 
-export default defineCommand({
+export default defineLoreCommand({
   meta: {
     name: "agent",
     description: "Manage API keys for AI agents",

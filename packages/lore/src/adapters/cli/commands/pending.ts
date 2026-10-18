@@ -28,7 +28,7 @@
  * restored retracted doc as live.
  */
 
-import { defineCommand } from "citty";
+import { defineLoreCommand } from "../cli-exit.js";
 
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatErrorFor, formatTable } from "../utils.js";
@@ -46,7 +46,7 @@ function isFreshEscalation(judgment: ReviewJudgment | null, docVersion: number):
   return judgment.decision === "escalate" && judgment.doc_version === docVersion;
 }
 
-export default defineCommand({
+export default defineLoreCommand({
   meta: {
     name: "pending",
     description: "List documents in draft status (pending review)",

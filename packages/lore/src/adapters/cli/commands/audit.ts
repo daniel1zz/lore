@@ -55,7 +55,7 @@ import { existsSync, readFileSync, writeFileSync } from "fs";
 
 import { join } from "path";
 import { z } from "zod";
-import { defineCommand } from "citty";
+import { defineLoreCommand } from "../cli-exit.js";
 import { loadLoreApp } from "../loader.js";
 import { resolveConsumerCorpusRoot } from "../report-issue-wiring.js";
 import { exitCode, formatErrorFor, formatTable, parsePositiveIntArg, resolveActor } from "../utils.js";
@@ -124,7 +124,7 @@ function summarizeDetails(entry: AuditEntry): string {
   return json.length > 60 ? `${json.slice(0, 57)}...` : json;
 }
 
-export default defineCommand({
+export default defineLoreCommand({
   meta: {
     name: "audit",
     description: "Query the audit trail, verify its completeness/chain-integrity, or anchor the chain head",

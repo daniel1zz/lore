@@ -2,7 +2,7 @@
  * lore restore <doc-id> <version> — restore a document to a previous version.
  */
 
-import { defineCommand } from "citty";
+import { defineLoreCommand } from "../cli-exit.js";
 import { exitCli } from "../cli-exit.js";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatErrorFor } from "../utils.js";
@@ -10,7 +10,7 @@ import type { DocId } from "@lore/core";
 import { invocationOf } from "../command-invocation.js";
 import { printLine } from "../output.js";
 
-export default defineCommand({
+export default defineLoreCommand({
   meta: {
     name: "restore",
     description:

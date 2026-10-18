@@ -48,7 +48,7 @@ import { createHash } from "node:crypto";
 
 import { spawnSync } from "node:child_process";
 import { readFileSync, realpathSync } from "node:fs";
-import { defineCommand } from "citty";
+import { defineLoreCommand } from "../cli-exit.js";
 import { z } from "zod";
 import {
   deriveRunId,
@@ -409,7 +409,7 @@ function runAttestInput(io: CliIo): void {
   io.stdout.write(`${JSON.stringify({ hookSpecificOutput: { hookEventName: "PreToolUse", updatedInput } })}\n`);
 }
 
-export default defineCommand({
+export default defineLoreCommand({
   meta: {
     name: "run",
     description:

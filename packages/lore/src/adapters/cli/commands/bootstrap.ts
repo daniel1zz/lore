@@ -44,7 +44,7 @@
  * §Module Boundary, D1-D3, D11
  */
 
-import { defineCommand } from "citty";
+import { defineLoreCommand } from "../cli-exit.js";
 
 import type { BootstrapReport } from "@lore/core";
 import { warnSinkOf } from "../../../service/warn-sink.js";
@@ -177,7 +177,7 @@ export function formatBootstrapReport(report: BootstrapReportWithStaleness, by: 
   return lines.join("\n");
 }
 
-export default defineCommand({
+export default defineLoreCommand({
   meta: {
     name: "bootstrap",
     description: "SPEC-041 S1 volatile session pointer-set (plans, claims, queue, gates, handoffs) — read-only",

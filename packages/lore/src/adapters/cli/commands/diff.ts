@@ -2,7 +2,7 @@
  * lore diff <doc-id> [v1 v2] — show diff between two versions of a document.
  */
 
-import { defineCommand } from "citty";
+import { defineLoreCommand } from "../cli-exit.js";
 
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatErrorFor, parsePositiveIntArg } from "../utils.js";
@@ -10,7 +10,7 @@ import type { DocId } from "@lore/core";
 import { invocationOf } from "../command-invocation.js";
 import { printLine } from "../output.js";
 
-export default defineCommand({
+export default defineLoreCommand({
   meta: {
     name: "diff",
     description: "Show diff between two versions of a document",

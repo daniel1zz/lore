@@ -74,7 +74,7 @@
  *         SPEC-045 §Design Decisions D6, §Acceptance Criteria AC-DR-4
  */
 
-import { defineCommand } from "citty";
+import { defineLoreCommand } from "../cli-exit.js";
 
 import type { DocRecord, DocType, LoreError, Result } from "@lore/core";
 import { loadLoreApp } from "../loader.js";
@@ -187,13 +187,13 @@ function isCodeAnchorTarget(docType: DocType): boolean {
   return ANCHOR_SCANNED_DOC_TYPES.includes(docType);
 }
 
-export default defineCommand({
+export default defineLoreCommand({
   meta: {
     name: "anchor",
     description: "Manage a task's file_anchors or a spec's / knowledge doc's code_anchors (add / rm / list)",
   },
   subCommands: {
-    add: defineCommand({
+    add: defineLoreCommand({
       meta: { name: "add", description: "Add one or more anchors to a task, spec, or knowledge doc (union with existing)" },
       args: {
         target: {
@@ -279,7 +279,7 @@ export default defineCommand({
       },
     }),
 
-    rm: defineCommand({
+    rm: defineLoreCommand({
       meta: { name: "rm", description: "Remove one or more anchors from a task, spec, or knowledge doc" },
       args: {
         target: {
@@ -363,7 +363,7 @@ export default defineCommand({
       },
     }),
 
-    list: defineCommand({
+    list: defineLoreCommand({
       meta: { name: "list", description: "List a task's file_anchors or a spec's / knowledge doc's code_anchors" },
       args: {
         target: {

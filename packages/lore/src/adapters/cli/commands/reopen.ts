@@ -7,13 +7,13 @@
  * (refusal = the shared `exitCode` mapping for VALIDATION_ERROR, usage error = 2).
  */
 
-import { defineCommand } from "citty";
+import { defineLoreCommand } from "../cli-exit.js";
 import { exitCli } from "../cli-exit.js";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatErrorFor, resolveActor } from "../utils.js";
 import { invocationOf } from "../command-invocation.js";
 
-export default defineCommand({
+export default defineLoreCommand({
   meta: {
     name: "reopen",
     description: "Reopen an approved spec that has no evidence yet (approved -> draft) so it can be edited",

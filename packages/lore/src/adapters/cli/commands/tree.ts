@@ -38,7 +38,7 @@
  *   --orphans: 0 = no orphans, 3 = orphans found
  */
 
-import { defineCommand } from "citty";
+import { defineLoreCommand } from "../cli-exit.js";
 
 import { loadLoreApp } from "../loader.js";
 import {
@@ -209,7 +209,7 @@ function withTreeValidity(
   };
 }
 
-export default defineCommand({
+export default defineLoreCommand({
   meta: {
     name: "tree",
     description: "Display document hierarchy as a tree",

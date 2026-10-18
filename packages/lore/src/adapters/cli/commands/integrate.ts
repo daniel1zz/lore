@@ -27,7 +27,7 @@
 import { spawnSync } from "node:child_process";
 import { exitCli } from "../cli-exit.js";
 import { dirname, resolve as resolvePath } from "node:path";
-import { defineCommand } from "citty";
+import { defineLoreCommand } from "../cli-exit.js";
 import { invocationOf } from "../command-invocation.js";
 import { loadLoreApp } from "../loader.js";
 import { resolveCallerSession } from "../caller-session.js";
@@ -122,7 +122,7 @@ function renderOutcome(outcome: IntegrateOutcome): { out?: string; err?: string 
   }
 }
 
-export default defineCommand({
+export default defineLoreCommand({
   meta: {
     name: "integrate",
     description: "Land a branch on main: merge in your integration worktree, run the post-merge floor, advance main by compare-and-swap (max 3 attempts; exit 75 = lost 3 races)",

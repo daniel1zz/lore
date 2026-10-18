@@ -3,14 +3,14 @@
  * Source: SPEC-011 §6
  */
 
-import { defineCommand } from "citty";
+import { defineLoreCommand } from "../cli-exit.js";
 import { exitCli } from "../cli-exit.js";
 import { invocationOf } from "../command-invocation.js";
 import { loadLoreApp } from "../loader.js";
 import { startHttpServer } from "../../http/index.js";
 import { resolveMachineAuthBaseDir } from "../../http/machine-auth.js";
 
-export default defineCommand({
+export default defineLoreCommand({
   meta: {
     name: "serve",
     description: "Start the Lore HTTP API server",

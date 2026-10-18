@@ -16,7 +16,7 @@
  */
 import { applyClassEdit, type ClassEdit, type GovernedThresholds, type Invocation, type LoreError, type Result, RECOVERABILITY_SCORE } from "@lore/core";
 
-import { defineCommand } from "citty";
+import { defineLoreCommand } from "../cli-exit.js";
 import { DecisionService } from "../../../service/decision-service.js";
 import type { GovernedAutonomy, ProposeOutcome } from "../../../service/autonomy-threshold-service.js";
 import { SQLiteStore } from "../../../store/sqlite-store.js";
@@ -119,7 +119,7 @@ function numberArg(name: string, value: unknown): number | string {
   return Number.isFinite(parsed) ? parsed : `--${name} needs a number, got "${String(value)}"`;
 }
 
-const show = defineCommand({
+const show = defineLoreCommand({
   meta: { name: "show", description: "Show the governed class table, regenerable patterns and the record's integrity" },
   args: { json: { type: "boolean", description: "Output as JSON" } },
   async run(context) {
@@ -134,7 +134,7 @@ const show = defineCommand({
   },
 });
 
-const set = defineCommand({
+const set = defineLoreCommand({
   meta: { name: "set", description: "Edit one class's governed values; tightening applies, loosening escalates to the human" },
   args: {
     class: { type: "positional", description: "Operation class id (see `lore autonomy show`)", required: true },
@@ -178,7 +178,7 @@ const set = defineCommand({
 });
 
 function regenerableVerb(name: "add" | "rm") {
-  return defineCommand({
+  return defineLoreCommand({
     meta: { name, description: name === "add" ? "Add a worktree-remove regenerable pattern (LOOSENING: human-only)" : "Remove a worktree-remove regenerable pattern (tightening)" },
     args: { pattern: { type: "positional", description: "gitignore-style pattern, e.g. dist-npm/", required: true } },
     async run(context) {
@@ -200,12 +200,12 @@ function regenerableVerb(name: "add" | "rm") {
   });
 }
 
-const regenerable = defineCommand({
+const regenerable = defineLoreCommand({
   meta: { name: "regenerable", description: "Edit the worktree-remove regenerable pattern set" },
   subCommands: { add: regenerableVerb("add"), rm: regenerableVerb("rm") },
 });
 
-const verifyPushedHeadsCommand = defineCommand({
+const verifyPushedHeadsCommand = defineLoreCommand({
   meta: { name: "verify-pushed-heads", description: "Check the local decision log reproduces every chain head already pushed (hooks/pre-push)" },
   args: { record: { type: "boolean", description: "After a clean check, record the current head as pushed" } },
   async run(context) {
@@ -237,7 +237,7 @@ const verifyPushedHeadsCommand = defineCommand({
   },
 });
 
-export default defineCommand({
+export default defineLoreCommand({
   meta: { name: "autonomy", description: "Governed autonomy thresholds: show, set (tighten applies, loosen escalates), regenerable add|rm, verify-pushed-heads (AC-AU-9)" },
   subCommands: { show, set, regenerable, "verify-pushed-heads": verifyPushedHeadsCommand },
 });

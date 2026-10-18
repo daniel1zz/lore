@@ -55,7 +55,7 @@
 
 import { invocationOf } from "../command-invocation.js";
 import { exitCli } from "../cli-exit.js";
-import { defineCommand } from "citty";
+import { defineLoreCommand } from "../cli-exit.js";
 import { taskClaimSchema } from "@lore/core";
 import type { ActorSource } from "@lore/core/node";
 import { loadLoreApp } from "../loader.js";
@@ -63,7 +63,7 @@ import { exitCode, formatErrorFor, resolveActorWithIdentitySource } from "../uti
 import { requirePhaseWorkflowService } from "../phase-wiring.js";
 import { printLine } from "../output.js";
 
-export default defineCommand({
+export default defineLoreCommand({
   meta: {
     name: "claim",
     description: "Acquire an advisory execution lease on a task",

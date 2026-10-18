@@ -131,7 +131,7 @@
  * directly re-splits the contract; route it through `toListJsonRows` like the rest.
  */
 
-import { defineCommand } from "citty";
+import { defineLoreCommand } from "../cli-exit.js";
 
 import { loadLoreApp } from "../loader.js";
 import {
@@ -256,7 +256,7 @@ function toListJsonRows(docs: readonly ListedDoc[], claimTtlMinutes: number): Li
   });
 }
 
-export default defineCommand({
+export default defineLoreCommand({
   meta: {
     name: "list",
     description: "List documents with optional filters",

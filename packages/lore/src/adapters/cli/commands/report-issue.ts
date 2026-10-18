@@ -82,7 +82,7 @@
  * spec-the-defect-channel-reaches-no-machine-but-its-own-github P2/P4.
  */
 
-import { defineCommand } from "citty";
+import { defineLoreCommand } from "../cli-exit.js";
 import { exitCli } from "../cli-exit.js";
 import {
   buildUnconfiguredUpstreamRemedy,
@@ -191,7 +191,7 @@ function validateTriageLabels(
   });
 }
 
-export default defineCommand({
+export default defineLoreCommand({
   meta: {
     name: "report-issue",
     description:

@@ -18,7 +18,7 @@
  *   Valid link type returned but link would cycle → exit 4 (CorpusService.link enforces).
  */
 
-import { defineCommand } from "citty";
+import { defineLoreCommand } from "../cli-exit.js";
 import { exitCli } from "../cli-exit.js";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatErrorFor, formatShortId, resolveActor } from "../utils.js";
@@ -39,7 +39,7 @@ import { printLine } from "../output.js";
  */
 const VALID_LINK_TYPES: readonly LinkType[] = linkTypeSchema.options;
 
-export default defineCommand({
+export default defineLoreCommand({
   meta: {
     name: "link",
     description: "Create a link between two documents",

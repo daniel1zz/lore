@@ -27,7 +27,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { defineCommand } from "citty";
+import { defineLoreCommand } from "../cli-exit.js";
 import { parse as parseYaml } from "yaml";
 import { z } from "zod";
 import {
@@ -303,7 +303,7 @@ async function runPointers(cwd: string, inv: Invocation): Promise<void> {
   if (result.text.length > 0) inv.io.stdout.write(result.text);
 }
 
-export default defineCommand({
+export default defineLoreCommand({
   meta: {
     name: "fragments",
     description:

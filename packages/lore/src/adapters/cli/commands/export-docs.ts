@@ -22,7 +22,7 @@
 
 import { dirname } from "path";
 
-import { defineCommand } from "citty";
+import { defineLoreCommand } from "../cli-exit.js";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatError, formatErrorFor } from "../utils.js";
 import { resolveTrackedWriteRoot } from "../working-tree-root.js";
@@ -33,7 +33,7 @@ import { invocationOf } from "../command-invocation.js";
 /** Valid DocType values for --type validation. */
 const VALID_TYPES = docTypeSchema.options;
 
-export default defineCommand({
+export default defineLoreCommand({
   meta: {
     name: "export-docs",
     description: "Reverse-sync corpus docs to per-doc .md files under docs/requirements/<type>/",

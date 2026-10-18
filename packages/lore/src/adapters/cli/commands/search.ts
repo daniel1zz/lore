@@ -20,7 +20,7 @@
  * consume identically — ⛔ never re-derive it here.
  */
 
-import { defineCommand } from "citty";
+import { defineLoreCommand } from "../cli-exit.js";
 
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatErrorFor, formatTable, formatValidityBadge, parsePositiveIntArg } from "../utils.js";
@@ -30,7 +30,7 @@ import type { DocType } from "@lore/core";
 import { invocationOf } from "../command-invocation.js";
 import { printLine } from "../output.js";
 
-export default defineCommand({
+export default defineLoreCommand({
   meta: {
     name: "search",
     description: "Full-text search across documents",

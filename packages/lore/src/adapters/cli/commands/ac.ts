@@ -184,7 +184,7 @@
  *   whether or not any renderer reads the field)
  */
 
-import { defineCommand } from "citty";
+import { defineLoreCommand } from "../cli-exit.js";
 
 import { existsSync } from "fs";
 import { dirname } from "path";
@@ -222,13 +222,13 @@ function requireAcService(app: App): AcService {
   return app.acService;
 }
 
-export default defineCommand({
+export default defineLoreCommand({
   meta: {
     name: "ac",
     description: "Manage structured acceptance criteria on a spec (add / list / rm / set)",
   },
   subCommands: {
-    add: defineCommand({
+    add: defineLoreCommand({
       meta: { name: "add", description: "Append a new acceptance criterion to a spec" },
       args: {
         spec: {
@@ -359,7 +359,7 @@ export default defineCommand({
       },
     }),
 
-    list: defineCommand({
+    list: defineLoreCommand({
       meta: { name: "list", description: "List declared acceptance criteria for a spec" },
       args: {
         spec: {
@@ -411,7 +411,7 @@ export default defineCommand({
       },
     }),
 
-    exempt: defineCommand({
+    exempt: defineLoreCommand({
       meta: {
         name: "exempt",
         description:
@@ -458,7 +458,7 @@ export default defineCommand({
         }
       },
     }),
-    cite: defineCommand({
+    cite: defineLoreCommand({
       meta: {
         name: "cite",
         description:
@@ -535,7 +535,7 @@ export default defineCommand({
       },
     }),
 
-    rm: defineCommand({
+    rm: defineLoreCommand({
       meta: {
         name: "rm",
         description: "Remove a declared acceptance criterion (fails if evidence still references it)",
@@ -598,7 +598,7 @@ export default defineCommand({
       },
     }),
 
-    set: defineCommand({
+    set: defineLoreCommand({
       meta: {
         name: "set",
         description: "Edit one declared acceptance criterion in place (id/mode are NOT editable)",

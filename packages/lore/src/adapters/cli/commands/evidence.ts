@@ -284,7 +284,7 @@
 import { existsSync, readFileSync } from "fs";
 
 import { dirname } from "path";
-import { defineCommand } from "citty";
+import { defineLoreCommand } from "../cli-exit.js";
 import {
   CAPTURE_TAIL_CHARS,
   ORACLE_KINDS,
@@ -313,7 +313,7 @@ import { printLine } from "../output.js";
 
 const VALID_RESULTS = ["pass", "fail", "expected-fail"] as const;
 
-export default defineCommand({
+export default defineLoreCommand({
   meta: {
     name: "evidence",
     description: "Append an oracle verification record to a task",

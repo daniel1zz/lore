@@ -44,7 +44,7 @@
  *   task-lore-evidence-and-lore-release-accept-an-attestation-from
  */
 
-import { defineCommand } from "citty";
+import { defineLoreCommand } from "../cli-exit.js";
 import { exitCli } from "../cli-exit.js";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatErrorFor, resolveActor } from "../utils.js";
@@ -53,7 +53,7 @@ import { hasZeroReleaseEvidence, ZERO_EVIDENCE_RELEASE_WARNING } from "../../../
 import { invocationOf } from "../command-invocation.js";
 import { printLine } from "../output.js";
 
-export default defineCommand({
+export default defineLoreCommand({
   meta: {
     name: "release",
     description: "Clear the advisory execution lease on a task",

@@ -41,7 +41,7 @@
  * Source: SPEC-102 §Acceptance Criteria AC-TRACE-4/5/6.
  */
 
-import { defineCommand } from "citty";
+import { defineLoreCommand } from "../cli-exit.js";
 
 import type { LoreError, Result } from "@lore/core";
 import type {
@@ -134,13 +134,13 @@ function formatEnumerationMembers(enumeration: TraceStatsEnumeration): string[] 
   }
 }
 
-export default defineCommand({
+export default defineLoreCommand({
   meta: {
     name: "trace",
     description: "Read/deny observability over the trace_events table (SPEC-102)",
   },
   subCommands: {
-    stats: defineCommand({
+    stats: defineLoreCommand({
       meta: {
         name: "stats",
         description:

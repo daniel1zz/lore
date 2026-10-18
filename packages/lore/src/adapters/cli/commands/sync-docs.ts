@@ -17,7 +17,7 @@
 
 import { resolve } from "path";
 
-import { defineCommand } from "citty";
+import { defineLoreCommand } from "../cli-exit.js";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatErrorFor } from "../utils.js";
 import { invocationOf } from "../command-invocation.js";
@@ -25,7 +25,7 @@ import { warnSinkOf } from "../../../service/warn-sink.js";
 
 const DEFAULT_SPEC_DIR = "docs/requirements/spec";
 
-export default defineCommand({
+export default defineLoreCommand({
   meta: {
     name: "sync-docs",
     description: "Backfill new spec files from disk into the Lore corpus",

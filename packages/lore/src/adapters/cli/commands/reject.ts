@@ -9,7 +9,7 @@
  * still exits 0 (see `../../../flows/calibration-hook.ts`).
  */
 
-import { defineCommand } from "citty";
+import { defineLoreCommand } from "../cli-exit.js";
 
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatErrorFor, resolveActor } from "../utils.js";
@@ -18,7 +18,7 @@ import type { DocId } from "@lore/core";
 import { invocationOf } from "../command-invocation.js";
 import { printLine } from "../output.js";
 
-export default defineCommand({
+export default defineLoreCommand({
   meta: {
     name: "reject",
     description: "Reject a draft document (records reason in audit)",

@@ -37,7 +37,7 @@
 
 import { ulid } from "ulidx";
 
-import { defineCommand } from "citty";
+import { defineLoreCommand } from "../cli-exit.js";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatError, formatErrorFor, resolveActor } from "../utils.js";
 import { requirePhaseChecklistService, getPhaseStatus } from "../phase-wiring.js";
@@ -47,13 +47,13 @@ import { invocationOf } from "../command-invocation.js";
 import { printLine } from "../output.js";
 import type { CliIo } from "../output.js";
 
-export default defineCommand({
+export default defineLoreCommand({
   meta: {
     name: "phase",
     description: "Manage declared phases on a plan (add / list / rm / rename)",
   },
   subCommands: {
-    add: defineCommand({
+    add: defineLoreCommand({
       meta: { name: "add", description: "Append a new phase to a plan" },
       args: {
         plan: {
@@ -106,7 +106,7 @@ export default defineCommand({
       },
     }),
 
-    list: defineCommand({
+    list: defineLoreCommand({
       meta: { name: "list", description: "List declared phases for a plan" },
       args: {
         plan: {
@@ -149,7 +149,7 @@ export default defineCommand({
       },
     }),
 
-    rm: defineCommand({
+    rm: defineLoreCommand({
       meta: { name: "rm", description: "Remove a declared phase (fails if tasks still reference it)" },
       args: {
         plan: {
@@ -197,7 +197,7 @@ export default defineCommand({
       },
     }),
 
-    rename: defineCommand({
+    rename: defineLoreCommand({
       meta: {
         name: "rename",
         description: "Rename a phase in the plan and all referencing tasks",
@@ -255,7 +255,7 @@ export default defineCommand({
 
     // ── SPEC-056 phase execution model ───────────────────────────────────
 
-    status: defineCommand({
+    status: defineLoreCommand({
       meta: {
         name: "status",
         description: "Computed completion scorecard for a phase document (SPEC-056)",
@@ -306,13 +306,13 @@ export default defineCommand({
       },
     }),
 
-    checklist: defineCommand({
+    checklist: defineLoreCommand({
       meta: {
         name: "checklist",
         description: "Manage a phase document's checklist items (add / list / drop / check / edit)",
       },
       subCommands: {
-        add: defineCommand({
+        add: defineLoreCommand({
           meta: { name: "add", description: "Append a new checklist item to a phase" },
           args: {
             phase: { type: "positional", description: "Phase document ID or slug", required: true },
@@ -357,7 +357,7 @@ export default defineCommand({
           },
         }),
 
-        list: defineCommand({
+        list: defineLoreCommand({
           meta: { name: "list", description: "List a phase's declared checklist items" },
           args: {
             phase: { type: "positional", description: "Phase document ID or slug", required: true },
@@ -391,7 +391,7 @@ export default defineCommand({
           },
         }),
 
-        drop: defineCommand({
+        drop: defineLoreCommand({
           meta: { name: "drop", description: "Mark a checklist item as dropped (requires --reason)" },
           args: {
             phase: { type: "positional", description: "Phase document ID or slug", required: true },
@@ -428,7 +428,7 @@ export default defineCommand({
           },
         }),
 
-        check: defineCommand({
+        check: defineLoreCommand({
           meta: { name: "check", description: "Self-attest a manual-bind checklist item as checked" },
           args: {
             phase: { type: "positional", description: "Phase document ID or slug", required: true },
@@ -461,7 +461,7 @@ export default defineCommand({
           },
         }),
 
-        edit: defineCommand({
+        edit: defineLoreCommand({
           meta: { name: "edit", description: "Edit a checklist item's statement (voids any existing self-attestation)" },
           args: {
             phase: { type: "positional", description: "Phase document ID or slug", required: true },
@@ -500,7 +500,7 @@ export default defineCommand({
       },
     }),
 
-    track: defineCommand({
+    track: defineLoreCommand({
       meta: {
         name: "track",
         // reason: Scope-Alt (task-skill-implement-cli-mcp-surfaces-checklist-ref-evidence)
@@ -508,7 +508,7 @@ export default defineCommand({
         description: "Manage a phase document's informational work-log entries (add / list)",
       },
       subCommands: {
-        add: defineCommand({
+        add: defineLoreCommand({
           meta: { name: "add", description: "Append a new track note to a phase" },
           args: {
             phase: { type: "positional", description: "Phase document ID or slug", required: true },
@@ -546,7 +546,7 @@ export default defineCommand({
         }),
 
         // reason: minimal (plain-text, no badges) — Scope-Alt above.
-        list: defineCommand({
+        list: defineLoreCommand({
           meta: { name: "list", description: "List a phase's track notes (minimal rendering)" },
           args: {
             phase: { type: "positional", description: "Phase document ID or slug", required: true },

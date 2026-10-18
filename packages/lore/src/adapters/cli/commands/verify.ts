@@ -184,7 +184,7 @@ import { spawnSync } from "node:child_process";
 
 import { resolve as resolvePath } from "node:path";
 import { promptYesNo } from "../prompt.js";
-import { defineCommand } from "citty";
+import { defineLoreCommand } from "../cli-exit.js";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatErrorFor, resolveActor } from "../utils.js";
 import { VERIFY_NO_SCRIPT_ACS } from "../cli-refusal-messages.js";
@@ -345,7 +345,7 @@ function resolveCliExecutionRoot(
   };
 }
 
-export default defineCommand({
+export default defineLoreCommand({
   meta: {
     name: "verify",
     description: "Execute a plan's script-mode acceptance criteria for real and record attested evidence",

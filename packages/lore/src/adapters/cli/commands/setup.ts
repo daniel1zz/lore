@@ -139,7 +139,7 @@ import { promptYesNo } from "../prompt.js";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { defineCommand } from "citty";
+import { defineLoreCommand } from "../cli-exit.js";
 import { seedAcCiteModeAudited } from "./baseline-adopt.js";
 import { parseDocument } from "yaml";
 import { resolveTrackedWriteRoot } from "../working-tree-root.js";
@@ -1153,7 +1153,7 @@ function buildSetupPathContext(inv: Invocation): SetupPathContext {
 
 // ─── Command ─────────────────────────────────────────────────────────────────
 
-export default defineCommand({
+export default defineLoreCommand({
   meta: {
     name: "setup",
     description:

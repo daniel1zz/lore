@@ -16,13 +16,13 @@
 
 import { readFileSync } from "fs";
 
-import { defineCommand } from "citty";
+import { defineLoreCommand } from "../cli-exit.js";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatErrorFor, resolveActor } from "../utils.js";
 import { invocationOf } from "../command-invocation.js";
 import { printLine } from "../output.js";
 
-const recordCommand = defineCommand({
+const recordCommand = defineLoreCommand({
   meta: { name: "record", description: "Record a structured UAT verdict for a plan (SPEC-054)" },
   args: {
     plan: {
@@ -76,7 +76,7 @@ const recordCommand = defineCommand({
   },
 });
 
-const showCommand = defineCommand({
+const showCommand = defineLoreCommand({
   meta: { name: "show", description: "Show a plan's latest linked UAT verdict (SPEC-054)" },
   args: {
     plan: { type: "positional", description: "Plan doc id/slug (reads its latest informs-linked UAT verdict)" },
@@ -117,7 +117,7 @@ const showCommand = defineCommand({
   },
 });
 
-export default defineCommand({
+export default defineLoreCommand({
   meta: { name: "uat", description: "Structured UAT verdict record/show (SPEC-054)" },
   subCommands: { record: recordCommand, show: showCommand },
 });

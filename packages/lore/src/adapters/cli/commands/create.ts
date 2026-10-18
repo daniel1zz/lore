@@ -62,7 +62,7 @@
 
 import { readFileSync } from "node:fs";
 import { exitCli } from "../cli-exit.js";
-import { defineCommand } from "citty";
+import { defineLoreCommand } from "../cli-exit.js";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatErrorFor, resolveActor } from "../utils.js";
 import { openEditor } from "../editor.js";
@@ -141,7 +141,7 @@ function normalizeRepeatable(value: unknown): string[] {
   return [String(value)];
 }
 
-export default defineCommand({
+export default defineLoreCommand({
   meta: {
     name: "create",
     description: "Create a new document",

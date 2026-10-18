@@ -145,7 +145,7 @@
  *   task-lore-done-override-attestation-demands-fresh-prose-that (--override-attestation-cite)
  */
 
-import { defineCommand } from "citty";
+import { defineLoreCommand } from "../cli-exit.js";
 import { exitCli } from "../cli-exit.js";
 import { err, extractEvidence, ok } from "@lore/core";
 import type { DocRecord, EvidenceEntry, LoreError, Result } from "@lore/core";
@@ -272,7 +272,7 @@ async function resolveEvidenceCitation(
   );
 }
 
-export default defineCommand({
+export default defineLoreCommand({
   meta: {
     name: "done",
     description:

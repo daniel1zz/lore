@@ -65,7 +65,7 @@
  * Source: SPEC-034 §1, §4, §6; SPEC-044 §Design Decisions D6, D7, D9, D11
  */
 
-import { defineCommand } from "citty";
+import { defineLoreCommand } from "../cli-exit.js";
 import { exitCli } from "../cli-exit.js";
 import { loadLoreApp } from "../loader.js";
 import {
@@ -228,7 +228,7 @@ function computeStalenessExitCode(outcomes: StalenessProbeOutcome[], failOnCandi
   return 0;
 }
 
-export default defineCommand({
+export default defineLoreCommand({
   meta: {
     name: "review",
     description: "Structured AI review judgment — judge a document against deterministic checks + an LLM judge; --staleness probes high-value knowledge/adr docs for silent staleness",

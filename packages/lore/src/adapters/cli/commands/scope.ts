@@ -53,7 +53,7 @@
 
 import type { Invocation } from "@lore/core";
 
-import { defineCommand } from "citty";
+import { defineLoreCommand } from "../cli-exit.js";
 import type { DocRecord, LoreError, Result } from "@lore/core";
 import { extractDeclaredAcScope } from "@lore/core";
 import { loadLoreApp } from "../loader.js";
@@ -185,13 +185,13 @@ async function runScopeMutation(inv: Invocation,
   renderScopeList(inv.io, acScope, true);
 }
 
-export default defineCommand({
+export default defineLoreCommand({
   meta: {
     name: "scope",
     description: "Manage a task's or phase's declared ac_scope — the AC ids it claims (add / rm / list)",
   },
   subCommands: {
-    add: defineCommand({
+    add: defineLoreCommand({
       meta: {
         name: "add",
         description: "Declare one or more acceptance-criterion ids on a task or phase (union with existing)",
@@ -234,7 +234,7 @@ export default defineCommand({
       },
     }),
 
-    rm: defineCommand({
+    rm: defineLoreCommand({
       meta: {
         name: "rm",
         description:
@@ -278,7 +278,7 @@ export default defineCommand({
       },
     }),
 
-    list: defineCommand({
+    list: defineLoreCommand({
       meta: { name: "list", description: "List a task's or phase's declared ac_scope" },
       args: {
         target: {

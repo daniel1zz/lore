@@ -18,7 +18,7 @@
  * Exit codes: 0 = any verdict; 1 = an `--apply` removal failed; 2 = usage; other codes per `utils.ts::exitCode`.
  */
 
-import { defineCommand } from "citty";
+import { defineLoreCommand } from "../cli-exit.js";
 import { exitCli } from "../cli-exit.js";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatErrorFor } from "../utils.js";
@@ -52,13 +52,13 @@ const sessionArg = {
   description: "The caller's harness session id (default: CLAUDE_CODE_SESSION_ID / CLAUDE_SESSION_ID); unknown never owns a worktree",
 } as const;
 
-export default defineCommand({
+export default defineLoreCommand({
   meta: {
     name: "worktree",
     description: "May a worktree be removed now? check one, sweep all (one test for the hook, lore done and the sweep)",
   },
   subCommands: {
-    check: defineCommand({
+    check: defineLoreCommand({
       meta: {
         name: "check",
         description: "Verdict for one worktree: removable | keep | not-measured, with a reason per failing clause",
@@ -89,7 +89,7 @@ export default defineCommand({
         }
       },
     }),
-    sweep: defineCommand({
+    sweep: defineLoreCommand({
       meta: {
         name: "sweep",
         description: "Check every linked worktree of this repository; --apply removes exactly the removable ones (never forced)",

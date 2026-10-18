@@ -38,7 +38,7 @@
 
 import type { Invocation } from "@lore/core";
 
-import { defineCommand } from "citty";
+import { defineLoreCommand } from "../cli-exit.js";
 import type { LoreError } from "@lore/core";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatErrorFor, resolveActor } from "../utils.js";
@@ -98,10 +98,10 @@ function failUsage(io: CliIo, message: string, json: boolean): ExitReport {
   return 2;
 }
 
-export default defineCommand({
+export default defineLoreCommand({
   meta: { name: "rule", description: "Add, edit and read baseline rules (permanent BR-n ids)" },
   subCommands: {
-    show: defineCommand({
+    show: defineLoreCommand({
       meta: { name: "show", description: "Show a rule: statement, leaf, confidence, state and every citing criterion" },
       args: {
         rule: { type: "positional", description: "Rule id, e.g. BR-12", required: true },
@@ -129,7 +129,7 @@ export default defineCommand({
         }
       },
     }),
-    find: defineCommand({
+    find: defineLoreCommand({
       meta: { name: "find", description: "Find rule ids by --spec <slug>, --file <path> or --text <q> (exactly one)" },
       args: {
         spec: { type: "string", description: "Rules cited by this spec (slug or id)" },
@@ -157,7 +157,7 @@ export default defineCommand({
         }
       },
     }),
-    impact: defineCommand({
+    impact: defineLoreCommand({
       meta: { name: "impact", description: "Impact of changing or retiring a rule: citing criteria, dependent leaves, cycles" },
       args: {
         rule: { type: "positional", description: "Rule id, e.g. BR-12", required: true },
@@ -184,7 +184,7 @@ export default defineCommand({
         }
       },
     }),
-    propose: defineCommand({
+    propose: defineLoreCommand({
       meta: {
         name: "propose",
         description:
@@ -262,7 +262,7 @@ export default defineCommand({
         }
       },
     }),
-    apply: defineCommand({
+    apply: defineLoreCommand({
       meta: {
         name: "apply",
         description:
@@ -299,7 +299,7 @@ export default defineCommand({
         }
       },
     }),
-    changes: defineCommand({
+    changes: defineLoreCommand({
       meta: { name: "changes", description: "List a spec's rule change set (what it proposes, modifies and retires)" },
       args: {
         spec: { type: "positional", description: "Spec document ID or slug", required: true },
@@ -327,7 +327,7 @@ export default defineCommand({
         }
       },
     }),
-    add: defineCommand({
+    add: defineLoreCommand({
       meta: { name: "add", description: "Append a new live rule to a baseline leaf; prints the allocated BR-n id" },
       args: {
         leaf: { type: "positional", description: "Baseline leaf document ID or slug", required: true },
@@ -370,7 +370,7 @@ export default defineCommand({
         }
       },
     }),
-    set: defineCommand({
+    set: defineLoreCommand({
       meta: { name: "set", description: "Edit a rule, advance its lifecycle (forward-only) or move it to another leaf" },
       args: {
         rule: { type: "positional", description: "Rule id, e.g. BR-12", required: true },

@@ -51,7 +51,7 @@
  *         SPEC-069 §Design Decisions D2, AC-069-7
  */
 
-import { defineCommand } from "citty";
+import { defineLoreCommand } from "../cli-exit.js";
 
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatErrorFor } from "../utils.js";
@@ -177,7 +177,7 @@ function formatAnchorConflictLine(conflict: AnchorConflict): string {
   return `  - ${conflict.task_slug} conflicts with ${conflict.holder}${session} on: ${conflict.paths.join(", ")}`;
 }
 
-export default defineCommand({
+export default defineLoreCommand({
   meta: {
     name: "ready",
     description: "Computed readiness report over a plan's tasks (never stored)",

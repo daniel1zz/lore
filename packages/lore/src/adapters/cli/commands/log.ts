@@ -2,7 +2,7 @@
  * lore log [<doc-id>] — version history for a document or recent audit entries.
  */
 
-import { defineCommand } from "citty";
+import { defineLoreCommand } from "../cli-exit.js";
 
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatErrorFor, formatTable, parsePositiveIntArg } from "../utils.js";
@@ -13,7 +13,7 @@ import { formatAttributionLabels, loadVersionAttributions, type WriteAttribution
 import { invocationOf } from "../command-invocation.js";
 import { printLine } from "../output.js";
 
-export default defineCommand({
+export default defineLoreCommand({
   meta: {
     name: "log",
     description: "Show version history for a document",

@@ -104,7 +104,7 @@ import { readFileSync } from "node:fs";
 
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { defineCommand } from "citty";
+import { defineLoreCommand } from "../cli-exit.js";
 import { BOOTSTRAP_FRAMING_LINE, type LoreError } from "@lore/core";
 import { resolveAssetsRoot, type SetupPathContext } from "../setup-args.js";
 import { exitCode, formatError, formatErrorFor } from "../utils.js";
@@ -243,7 +243,7 @@ export function readGovernanceAsset(
   }
 }
 
-export default defineCommand({
+export default defineLoreCommand({
   meta: {
     name: "governance",
     description:

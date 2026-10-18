@@ -186,7 +186,7 @@
  *         ("gate plan-close --explain")
  */
 
-import { defineCommand } from "citty";
+import { defineLoreCommand } from "../cli-exit.js";
 import { exitCli } from "../cli-exit.js";
 import { z } from "zod";
 import { loadLoreApp } from "../loader.js";
@@ -357,13 +357,13 @@ const gateSpecCreateInputSchema = z
 
 type GateSpecCreateInput = z.infer<typeof gateSpecCreateInputSchema>;
 
-export default defineCommand({
+export default defineLoreCommand({
   meta: {
     name: "gate",
     description: "Corpus-governed creation-time interception gates (deterministic zone)",
   },
   subCommands: {
-    "spec-create": defineCommand({
+    "spec-create": defineLoreCommand({
       meta: {
         name: "spec-create",
         description:
@@ -416,7 +416,7 @@ export default defineCommand({
       },
     }),
 
-    "spec-promote": defineCommand({
+    "spec-promote": defineLoreCommand({
       meta: {
         name: "spec-promote",
         description:
@@ -451,7 +451,7 @@ export default defineCommand({
       },
     }),
 
-    "plan-promote": defineCommand({
+    "plan-promote": defineLoreCommand({
       meta: {
         name: "plan-promote",
         description:
@@ -486,7 +486,7 @@ export default defineCommand({
       },
     }),
 
-    "task-claim": defineCommand({
+    "task-claim": defineLoreCommand({
       meta: {
         name: "task-claim",
         description:
@@ -524,7 +524,7 @@ export default defineCommand({
       },
     }),
 
-    "phase-claim": defineCommand({
+    "phase-claim": defineLoreCommand({
       meta: {
         name: "phase-claim",
         description:
@@ -563,7 +563,7 @@ export default defineCommand({
       },
     }),
 
-    "plan-close": defineCommand({
+    "plan-close": defineLoreCommand({
       meta: {
         name: "plan-close",
         description:

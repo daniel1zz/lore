@@ -31,14 +31,14 @@
  * Source: task-red-first-discipline-is-asked-for-in-prose-but-never
  */
 
-import { defineCommand } from "citty";
+import { defineLoreCommand } from "../cli-exit.js";
 
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatErrorFor, resolveActor } from "../utils.js";
 import { invocationOf } from "../command-invocation.js";
 import { printLine } from "../output.js";
 
-export default defineCommand({
+export default defineLoreCommand({
   meta: {
     name: "red-first",
     description: "Declare that a task's tests were written red-first (sets extra.red_first: true)",

@@ -174,7 +174,7 @@
 import type { Invocation } from "@lore/core";
 
 import { dirname } from "node:path";
-import { defineCommand } from "citty";
+import { defineLoreCommand } from "../cli-exit.js";
 import { z } from "zod";
 import {
   err,
@@ -544,7 +544,7 @@ async function runGithubVerify(inv: Invocation,
   return renderVerifyResult(inv.io, corpusPath, divergences, json);
 }
 
-export default defineCommand({
+export default defineLoreCommand({
   meta: {
     name: "issues",
     description:

@@ -32,7 +32,7 @@
  * Source: SPEC-057 §Module Boundary, §Public Interface, §Acceptance Criteria AC-S-7.
  */
 
-import { defineCommand } from "citty";
+import { defineLoreCommand } from "../cli-exit.js";
 
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatErrorFor } from "../utils.js";
@@ -42,7 +42,7 @@ import { printLine } from "../output.js";
 
 const RESERVED_SUBCOMMANDS = new Set(["list", "resume", "remove"]);
 
-export default defineCommand({
+export default defineLoreCommand({
   meta: {
     name: "seat",
     description: "Plan-bound worktree seat lifecycle: enter (bare <plan>) / list / resume / remove (SPEC-057)",

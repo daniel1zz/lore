@@ -23,7 +23,7 @@
 
 import { spawnSync } from "node:child_process";
 
-import { defineCommand } from "citty";
+import { defineLoreCommand } from "../cli-exit.js";
 import { createAuditReversalProbe, createGitReversalProbes, type ClassCalibrationStats } from "../../../service/autonomy-calibration-service.js";
 import { DecisionService } from "../../../service/decision-service.js";
 import { SQLiteStore } from "../../../store/sqlite-store.js";
@@ -34,7 +34,7 @@ import { wrapStoreError } from "../../../store/store-shared.js";
 import { invocationOf } from "../command-invocation.js";
 import { printLine } from "../output.js";
 
-export default defineCommand({
+export default defineLoreCommand({
   meta: {
     name: "calibration",
     description: "Human-vs-AI review calibration stats (Wilson lower bound)",

@@ -130,7 +130,7 @@
  * `tests/integration/binary-provenance-check.test.ts`.
  */
 
-import { defineCommand } from "citty";
+import { defineLoreCommand } from "../cli-exit.js";
 import { exitCli } from "../cli-exit.js";
 import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -1018,7 +1018,7 @@ async function runUnclaimedOracleCheck(
   };
 }
 
-export default defineCommand({
+export default defineLoreCommand({
   meta: {
     name: "status",
     description: "Repository and corpus statistics and health check",

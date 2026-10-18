@@ -82,7 +82,7 @@
 
 import { readFileSync } from "fs";
 
-import { defineCommand } from "citty";
+import { defineLoreCommand } from "../cli-exit.js";
 import {
   handoffExtraSchema,
   tailChars,
@@ -995,7 +995,7 @@ function normalizeRepeatable(value: unknown): string[] {
   return [String(value)];
 }
 
-export default defineCommand({
+export default defineLoreCommand({
   meta: {
     name: "handoff",
     description: "Write a lossless session-continuity handoff document (SPEC-041 S2); or `coverage-check` (Stop-time resume-ticket coverage verb)",

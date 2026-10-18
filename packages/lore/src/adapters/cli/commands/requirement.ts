@@ -13,7 +13,7 @@
  * Source: SPEC-055 §Scope.
  */
 
-import { defineCommand } from "citty";
+import { defineLoreCommand } from "../cli-exit.js";
 
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatErrorFor } from "../utils.js";
@@ -30,10 +30,10 @@ function requireRequirementService(io: CliIo, app: App) {
   return app.requirementService;
 }
 
-export default defineCommand({
+export default defineLoreCommand({
   meta: { name: "requirement", description: "Manage a PRD's structured requirement inventory (SPEC-055)" },
   subCommands: {
-    add: defineCommand({
+    add: defineLoreCommand({
       meta: { name: "add", description: "Append a numbered requirement to a PRD" },
       args: {
         prd: { type: "positional", description: "PRD document ID or slug", required: true },
@@ -73,7 +73,7 @@ export default defineCommand({
         }
       },
     }),
-    migrate: defineCommand({
+    migrate: defineLoreCommand({
       meta: { name: "migrate", description: "Mark a requirement as migrated to a live baseline rule (coverage then derives from citations)" },
       args: {
         prd: { type: "positional", description: "PRD document ID or slug", required: true },
@@ -101,7 +101,7 @@ export default defineCommand({
         }
       },
     }),
-    list: defineCommand({
+    list: defineLoreCommand({
       meta: { name: "list", description: "List a PRD's declared requirements" },
       args: {
         prd: { type: "positional", description: "PRD document ID or slug", required: true },
@@ -132,7 +132,7 @@ export default defineCommand({
         }
       },
     }),
-    rm: defineCommand({
+    rm: defineLoreCommand({
       meta: { name: "rm", description: "Remove a requirement from a PRD" },
       args: {
         prd: { type: "positional", description: "PRD document ID or slug", required: true },

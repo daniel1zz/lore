@@ -38,7 +38,7 @@
 
 import { dirname } from "path";
 import { exitCli } from "../cli-exit.js";
-import { defineCommand } from "citty";
+import { defineLoreCommand } from "../cli-exit.js";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatError, formatErrorFor } from "../utils.js";
 import { resolveTrackedWriteRoot } from "../working-tree-root.js";
@@ -47,7 +47,7 @@ import type { SectionMigrationVerdict } from "../../../service/outline-migration
 import { invocationOf } from "../command-invocation.js";
 import { printLine } from "../output.js";
 
-export default defineCommand({
+export default defineLoreCommand({
   meta: {
     name: "migrate",
     description:

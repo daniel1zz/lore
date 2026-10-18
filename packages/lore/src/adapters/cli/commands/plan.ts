@@ -56,7 +56,7 @@
  *         early-warning §Scope M3; SPEC-106 §Design Decisions D4
  */
 
-import { defineCommand } from "citty";
+import { defineLoreCommand } from "../cli-exit.js";
 
 import { exitCode, formatErrorFor, resolveActor } from "../utils.js";
 import {
@@ -108,13 +108,13 @@ const sharedArgs = {
   },
 };
 
-export default defineCommand({
+export default defineLoreCommand({
   meta: {
     name: "plan",
     description: "Plan-level writers (audited plan-close exemptions)",
   },
   subCommands: {
-    "exempt-attestation": defineCommand({
+    "exempt-attestation": defineLoreCommand({
       meta: {
         name: "exempt-attestation",
         description: "Record an audited, typed exemption from the plan-close attestation floor",
@@ -166,7 +166,7 @@ export default defineCommand({
       },
     }),
 
-    "exempt-assessment-freshness": defineCommand({
+    "exempt-assessment-freshness": defineLoreCommand({
       meta: {
         name: "exempt-assessment-freshness",
         description: "Record an audited exemption from the plan-close assessment-freshness predicate",

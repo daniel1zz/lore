@@ -83,7 +83,7 @@ import type { Invocation } from "@lore/core";
 import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, readlinkSync, realpathSync, rmSync, rmdirSync, writeFileSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { defineCommand } from "citty";
+import { defineLoreCommand } from "../cli-exit.js";
 import {
   AiConfigSchema,
   formatMemoryFileBudgetSubstitution,
@@ -458,7 +458,7 @@ function reportFailure(inv: Invocation, error: LoreError): ExitReport {
   return exitCode(error);
 }
 
-export default defineCommand({
+export default defineLoreCommand({
   meta: {
     name: "context",
     description: "Manage the two-zone project CLAUDE.md (init | refresh) — SPEC-context-verb-family",

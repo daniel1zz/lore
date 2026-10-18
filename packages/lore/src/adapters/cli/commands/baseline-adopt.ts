@@ -24,7 +24,7 @@
 
 import { dirname, join } from "node:path";
 
-import { defineCommand } from "citty";
+import { defineLoreCommand } from "../cli-exit.js";
 import { CITE_GATE_MODES, err, ok } from "@lore/core";
 import type { CiteGateMode, Invocation, LoreError, Result } from "@lore/core";
 import { invocationOf } from "../command-invocation.js";
@@ -227,7 +227,7 @@ async function runAdopt(args: Record<string, unknown>, inv: Invocation): Promise
 }
 
 /** The `lore baseline adopt` subcommand (registered by `commands/baseline.ts`). */
-export const adoptCommand = defineCommand({
+export const adoptCommand = defineLoreCommand({
   meta: { name: "adopt", description: "Set the AC citation gate's mode and armed branches (audited; one audit row per change)" },
   args: {
     mode: { type: "string", description: "report | enforce" },

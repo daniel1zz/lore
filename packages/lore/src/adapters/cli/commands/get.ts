@@ -73,7 +73,7 @@
  *      say about whether a machine may know the doc is retracted.
  */
 
-import { defineCommand } from "citty";
+import { defineLoreCommand } from "../cli-exit.js";
 
 import { ok, ruleIdPrefixOfNode } from "@lore/core";
 import type { DocRecord, LoreError, Result } from "@lore/core";
@@ -174,7 +174,7 @@ async function loadLaterChanges(store: StoreInterface, doc: DocRecord): Promise<
   return ok(out.map(({ slug, linkType }) => ({ slug, linkType })));
 }
 
-export default defineCommand({
+export default defineLoreCommand({
   meta: {
     name: "get",
     description: "Get a document by ID or slug",
