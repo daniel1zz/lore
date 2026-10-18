@@ -74,13 +74,13 @@ const CHECKS: CheckResult[] = [{ check: "schema", outcome: "pass" }];
 // ─── AC-053-1: version + registry ─────────────────────────────────────────────
 
 describe("SPEC-053 AC-053-1 — active version + registry shape", () => {
-  it("STATE: REVIEW_PROMPT_VERSION is 'v4' (v2 is frozen)", () => {
-    expect(REVIEW_PROMPT_VERSION).toBe("v4");
+  it("STATE: REVIEW_PROMPT_VERSION is 'v5' (v2 is frozen)", () => {
+    expect(REVIEW_PROMPT_VERSION).toBe("v5");
   });
 
-  it("STATE: REVIEW_TEMPLATES has exactly the keys v1, v2, v3 and v4", () => {
-    expect(Object.keys(REVIEW_TEMPLATES).sort()).toEqual(["v1", "v2", "v3", "v4"]);
-    expect(Object.keys(REVIEW_TEMPLATES)).toHaveLength(4);
+  it("STATE: REVIEW_TEMPLATES has exactly the keys v1 to v5", () => {
+    expect(Object.keys(REVIEW_TEMPLATES).sort()).toEqual(["v1", "v2", "v3", "v4", "v5"]);
+    expect(Object.keys(REVIEW_TEMPLATES)).toHaveLength(5);
   });
 
   it("STATE: the active version resolves to a live template fn", () => {
