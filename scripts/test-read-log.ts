@@ -238,6 +238,13 @@ function binaryBuildInputs(declared: DeclaredInputs): readonly string[] {
     : [];
 }
 
+/** The slice of `spawnSync` the git queries read; injectable so the verdict logic is testable without a real git child. */
+export type GitSpawn = (
+  command: string,
+  args: readonly string[],
+  options: { cwd: string; input: string; encoding: "utf8"; maxBuffer: number },
+) => { status: number | null; stdout: string; stderr: string; error?: Error };
+
 /** Typed failure: git could not say which paths are ignored, so an undeclared read cannot be classified. */
 export class GitIgnoreQueryError extends Error {
   constructor(
@@ -255,22 +262,28 @@ export class GitIgnoreQueryError extends Error {
  * `git check-ignore --stdin -z` call; tracked files are never reported (git's own rule), so a tracked
  * undeclared read still fails. Exit 0 = some ignored, 1 = none, anything else = git cannot answer: throw.
  */
-function findGitIgnoredPaths(paths: readonly string[]): Set<string> {
-  const ignoredByRule = new Set(runGit(["check-ignore", "--stdin", "-z"], paths, `${paths.join("\0")}\0`, [1]));
+export function findGitIgnoredPaths(paths: readonly string[], spawn: GitSpawn = realChildProcess.spawnSync): Set<string> {
+  const ignoredByRule = new Set(runGit(["check-ignore", "--stdin", "-z"], paths, `${paths.join("\0")}\0`, [1], spawn));
   // reason: a directory holding only ignored files (`.lore-safety-backups/x.db` under `*.db`) has no ignore rule of
   // its own, yet git tracks and diffs nothing in it. It counts as ignored when no tracked or non-ignored untracked
   // file lives under it. Missing paths are not directories, so a read of a missing file is still undeclared.
   const bareDirs = paths.filter((p) => !ignoredByRule.has(p) && realFs.statSync(resolve(REPO_ROOT, p), { throwIfNoEntry: false })?.isDirectory() === true);
   if (bareDirs.length > 0) {
-    const visible = runGit(["ls-files", "-z", "--cached", "--others", "--exclude-standard", "--", ...bareDirs], bareDirs, undefined, []);
+    const visible = runGit(["ls-files", "-z", "--cached", "--others", "--exclude-standard", "--", ...bareDirs], bareDirs, undefined, [], spawn);
     for (const dir of bareDirs) if (!visible.some((file) => file.startsWith(`${dir}/`))) ignoredByRule.add(dir);
   }
   return ignoredByRule;
 }
 
 /** Run git in REPO_ROOT and return its NUL-separated stdout; exit codes in `tolerated` mean "empty answer", any other non-zero exit throws. */
-function runGit(args: readonly string[], paths: readonly string[], input: string | undefined, tolerated: readonly number[]): string[] {
-  const result = realChildProcess.spawnSync("git", args, { cwd: REPO_ROOT, input: input ?? "", encoding: "utf8", maxBuffer: 16 * 1024 * 1024 });
+function runGit(
+  args: readonly string[],
+  paths: readonly string[],
+  input: string | undefined,
+  tolerated: readonly number[],
+  spawn: GitSpawn,
+): string[] {
+  const result = spawn("git", args, { cwd: REPO_ROOT, input: input ?? "", encoding: "utf8", maxBuffer: 16 * 1024 * 1024 });
   if (result.error !== undefined) throw new GitIgnoreQueryError(REPO_ROOT, paths, result.error.message);
   if (result.status !== null && tolerated.includes(result.status)) return [];
   if (result.status !== 0) throw new GitIgnoreQueryError(REPO_ROOT, paths, `exit ${String(result.status)}: ${result.stderr.trim()}`);

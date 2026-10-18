@@ -21,35 +21,55 @@ import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { childSandboxVerdict, type ProbeSpawn } from "../../../../scripts/test-isolation-env";
 
 const REPO = realpathSync(resolve(fileURLToPath(new URL(".", import.meta.url)), "../../../.."));
-const PROBE = ["sh", "-c", 'printf "%s|%s" "$LORE_TEST_SANDBOX" "$LORE_TEST_SANDBOX_REPO"'] as const;
-
-function expectArmed(out: string): void {
-  const [marker, repo] = out.split("|");
-  expect(marker).toBe("1");
-  expect(realpathSync(repo!)).toBe(REPO);
-}
+const PROBE_REPO = process.env["LORE_TEST_SANDBOX_REPO"] ?? "";
 
 test("AC-TG-2 vitest worker has the marker and this checkout recorded", () => {
   expect(process.env["LORE_TEST_SANDBOX"]).toBe("1");
   expect(realpathSync(process.env["LORE_TEST_SANDBOX_REPO"]!)).toBe(REPO);
 });
 
+// reason: every verdict below is the probe child's EXIT STATUS (TG-51): Bun spawnSync can return status 0 with
+// empty stdout (TG-49), so a stdout-parsed marker flakes. Each spawn form is adapted to the ProbeSpawn shape.
 test("AC-TG-2 child via node:child_process.spawnSync with NO explicit env sees the marker", () => {
-  expectArmed(spawnSync(PROBE[0], PROBE.slice(1), { encoding: "utf8" }).stdout);
+  expect(childSandboxVerdict(PROBE_REPO, (cmd, args) => spawnSync(cmd, args, { encoding: "utf8" }))).toBe("armed");
 });
 
 test("AC-TG-2 child via node:child_process.execFileSync with NO explicit env sees the marker", () => {
-  expectArmed(execFileSync(PROBE[0], PROBE.slice(1), { encoding: "utf8" }));
+  const viaExecFileSync: ProbeSpawn = (cmd, args) => {
+    try {
+      execFileSync(cmd, args, { encoding: "utf8" });
+      return { status: 0 };
+    } catch (error) {
+      // reason: execFileSync throws on a non-zero exit; the status on the error is the verdict.
+      const status = (error as { status?: number | null }).status;
+      if (typeof status === "number") return { status };
+      return { status: null, error: error instanceof Error ? error : new Error(String(error)) };
+    }
+  };
+  expect(childSandboxVerdict(PROBE_REPO, viaExecFileSync)).toBe("armed");
 });
 
 test("AC-TG-2 child via Bun.spawnSync with NO explicit env sees the marker (under the Bun runtime)", () => {
   // reason: Bun.spawnSync exists only under the Bun runtime; the file is listed nowhere as Node-only,
   // so a Node run of it would be a defect and must fail loud rather than skip.
   expect(typeof (globalThis as { Bun?: unknown }).Bun).toBe("object");
-  const Bun = (globalThis as unknown as { Bun: { spawnSync(cmd: string[]): { stdout: { toString(): string } } } }).Bun;
-  expectArmed(Bun.spawnSync([...PROBE]).stdout.toString());
+  const Bun = (globalThis as unknown as { Bun: { spawnSync(cmd: string[]): { exitCode: number | null } } }).Bun;
+  expect(childSandboxVerdict(PROBE_REPO, (cmd, args) => ({ status: Bun.spawnSync([cmd, ...args]).exitCode }))).toBe("armed");
+});
+
+test("TG-51 a probe child that exited 0 with its stdout LOST is read as armed in every spawn form's adapter shape", () => {
+  expect(childSandboxVerdict(PROBE_REPO, () => ({ status: 0, stdout: "", error: undefined }))).toBe("armed");
+  expect(childSandboxVerdict(PROBE_REPO, () => ({ status: 0, stdout: null }))).toBe("armed");
+});
+
+test("TG-51 an unarmed marker (exit 3) and a repo mismatch (exit 4) are distinct verdicts, and a spawn error fails loud", () => {
+  expect(childSandboxVerdict(PROBE_REPO, () => ({ status: 3 }))).toBe("marker-unarmed");
+  expect(childSandboxVerdict(PROBE_REPO, () => ({ status: 4 }))).toBe("repo-mismatch");
+  expect(() => childSandboxVerdict(PROBE_REPO, () => ({ status: null, error: new Error("spawn sh ENOENT") }))).toThrow(/ENOENT/);
+  expect(() => childSandboxVerdict(PROBE_REPO, () => ({ status: 127 }))).toThrow(/exit 127/);
 });
 
 // ─── consistency rule (nested checkouts, unarmed config) ────────────────────
@@ -75,11 +95,12 @@ function makeFixtureCheckout(config: string): string {
   writeFileSync(
     join(root, "inner.test.ts"),
     `import { spawnSync } from "node:child_process";
+import { childSandboxVerdict } from "./scripts/test-isolation-env";
 test("inner", () => {
   expect(process.env["LORE_TEST_SANDBOX"]).toBe("1");
   console.log("INNER_REPO=" + process.env["LORE_TEST_SANDBOX_REPO"]);
-  const child = spawnSync("sh", ["-c", 'printf "%s" "$LORE_TEST_SANDBOX_REPO"'], { encoding: "utf8" }).stdout;
-  console.log("INNER_CHILD_REPO=" + child);
+  const verdict = childSandboxVerdict(process.env["LORE_TEST_SANDBOX_REPO"] ?? "", (cmd, args) => spawnSync(cmd, args, { encoding: "utf8" }));
+  console.log("INNER_CHILD_VERDICT=" + verdict);
 });
 `,
   );
@@ -100,7 +121,7 @@ test("AC-TG-2 nested checkout: an inherited OUTER repo is accepted and kept, in 
   try {
     const r = runInner(root, { LORE_TEST_SANDBOX: "1", LORE_TEST_SANDBOX_REPO: REPO });
     expect(r.out).toContain(`INNER_REPO=${REPO}`);
-    expect(r.out).toContain(`INNER_CHILD_REPO=${REPO}`);
+    expect(r.out).toContain("INNER_CHILD_VERDICT=armed");
     expect(r.out).not.toContain(`INNER_REPO=${root}`);
     expect(r.status).toBe(0);
   } finally {
@@ -113,7 +134,7 @@ test("AC-TG-2 an un-nested run protects its own checkout, in the runner and in i
   try {
     const r = runInner(root, {});
     expect(r.out).toContain(`INNER_REPO=${root}`);
-    expect(r.out).toContain(`INNER_CHILD_REPO=${root}`);
+    expect(r.out).toContain("INNER_CHILD_VERDICT=armed");
     expect(r.status).toBe(0);
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -124,7 +145,7 @@ test("AC-TG-2 an inherited marker that is not \"1\" is overwritten (the marker i
   const root = makeFixtureCheckout(ARMED_CONFIG);
   try {
     const r = runInner(root, { LORE_TEST_SANDBOX: "0" });
-    expect(r.out).toContain(`INNER_CHILD_REPO=${root}`);
+    expect(r.out).toContain("INNER_CHILD_VERDICT=armed");
     expect(r.status).toBe(0);
   } finally {
     rmSync(root, { recursive: true, force: true });
