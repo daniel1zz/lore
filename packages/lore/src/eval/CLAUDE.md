@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Read-only evaluation scenarios that measure corpus health and search quality. Six scenarios are re-exported from `index.ts` and consumed by `lore eval`. Each scenario is pure-ish: input + App state → structured result; never mutates the corpus. Source: SPEC-013.
+Six read-only evaluation scenarios under `lore eval`, measuring corpus health and search quality. They are re-exported from `index.ts` and consumed by `lore eval`. Each scenario is pure-ish: input + App state → structured result; never mutates the corpus. Source: SPEC-013.
 
 ## Key Invariants
 

@@ -44,6 +44,7 @@ Repo-wide invariants. The why, the layer stack, the service table and per-module
 - Gates run in the service layer, so CLI, MCP and HTTP writes are gated identically.
 - Lifecycle: `VALID_TRANSITIONS` in `packages/core/src/schemas.ts` is the only authority. Editing an approved living doc resets it to `draft`; a locked record refuses body/title/criteria rewrites (exit 4) — use `lore set --correction`, `lore reopen`, or a new linked record. `lore phase add|rm` does NOT demote but LOGS a version.
 - ⛔ A listed doc is not proven live; validity is authoritative only by direct address.
+- ⛔ The corpus is the ONLY spec index: read the governing spec (`lore get SPEC-0NN`, or `lore search`) before changing a module; exported mirrors live under `docs/requirements/{prd,spec,adr,knowledge,plan,task}/`, zero-padded 3-digit ids (`bun run mirror:export` / `check:spec-mirror`).
 
 ## Dogfooding
 
@@ -53,26 +54,65 @@ Repo-wide invariants. The why, the layer stack, the service table and per-module
 - ⛔ Never `lore report-issue` from this repo — the issue channel is for consumers of lore. A lore defect found here is fixed now when simple (≤2 files, an existing oracle proves the fix, no approved-spec behaviour changes), else recorded as a task in a plan (BR-1153).
 - Standing lessons (oracle design, mirror export, test selection, governance tooling quirks) and their slugs: `knowledge-root-claude-md-tier-2-text-verbatim-body-before-the`.
 
-<!-- auto:module-index -->
+# ─── lore governance (managed) ───
+<!-- lore:managed section=module-index hash=5cd0a95e -->
 ## Module Index
 
-Module-specific context lives alongside the code:
+Folders with their own memory file — read it before working there:
 
-- [`@lore/core`](packages/core/src/CLAUDE.md) — types, Result/LoreError, Zod schemas, lifecycle rules, config, telemetry
-- [`packages/lore/src/service`](packages/lore/src/service/CLAUDE.md) — six stateless services, all return `Promise<Result<T, LoreError>>`
-- [`packages/lore/src/store`](packages/lore/src/store/CLAUDE.md) — async StoreInterface + SQLite / Turso / InMemory + FTS5 escape
-- [`packages/lore/src/adapters/cli`](packages/lore/src/adapters/cli/CLAUDE.md) — citty CLI, lazy command registry, exit-code mapping
-- [`packages/lore/src/adapters/mcp`](packages/lore/src/adapters/mcp/CLAUDE.md) — MCP stdio server, `lore_*` tools, fast-path registration
-- [`packages/lore/src/adapters/http`](packages/lore/src/adapters/http/CLAUDE.md) — Bun.serve API, bearer-token auth, sync-push
-- [`packages/lore/src/eval`](packages/lore/src/eval/CLAUDE.md) — six read-only evaluation scenarios under `lore eval`
-- [`@lore/dashboard`](packages/dashboard/CLAUDE.md) — Vite + React + shadcn local-dev web UI (read views + SPEC-022 write surface)
-<!-- /auto:module-index -->
+- [`packages/core/src`](packages/core/src/CLAUDE.md) — Foundational types, Result/LoreError, Zod schemas, lifecycle rules, config, and telemetry.
+- [`packages/lore/src/adapters/mcp`](packages/lore/src/adapters/mcp/CLAUDE.md) — MCP stdio server adapter: `lore_*` tools and fast-path registration.
+- [`packages/lore/src/adapters/cli`](packages/lore/src/adapters/cli/CLAUDE.md) — citty CLI adapter: lazy command registry and exit-code mapping.
+- [`packages/lore/src/adapters/http`](packages/lore/src/adapters/http/CLAUDE.md) — `Bun.serve` HTTP API adapter: bearer-token auth and sync-push.
+- [`packages/lore/src/ai`](packages/lore/src/ai/CLAUDE.md) — Runtime AI provider implementations, registry builder, template engine, assess/review judge prompt builders, AI-default resolution, and in-memory test double.
+- [`packages/lore/src/eval`](packages/lore/src/eval/CLAUDE.md) — Six read-only evaluation scenarios under `lore eval`, measuring corpus health and search quality.
+- [`packages/lore/src/service`](packages/lore/src/service/CLAUDE.md) — Business logic layer: stateless services, all returning `Promise<Result<T, LoreError>>`.
+- [`packages/lore/src/store`](packages/lore/src/store/CLAUDE.md) — Async persistence abstraction: `StoreInterface` with SQLite / Turso / InMemory implementations and FTS5 escape.
+- [`packages/dashboard`](packages/dashboard/CLAUDE.md) — Vite + React + shadcn local-dev web UI: read views plus the SPEC-022 write surface.
 
-<!-- auto:dynamic-context -->
+201 folders have no memory file and are not listed.
+<!-- lore:managed section=command-table hash=e2c77e02 -->
+Commands (from package.json scripts):
+- `dev`: `bun run packages/lore/src/index.ts`
+- `build`: `bun run scripts/build.ts`
+- `test`: `bun scripts/oracle-lock.ts bun scripts/run-chain.ts`
+- `test:vitest`: `bun scripts/run-tests.ts`
+- `test:bun`: `echo 'test:bun is retired (task-skill-implement-tg-23): one runner. Run a file with: bunx --bun vitest run <file> [-t <name>]; run everything with: bun run test' >&2; exit 1`
+- `test:changed`: `bun scripts/changed-tests.ts`
+- `test:watch`: `bunx --bun vitest`
+- `typecheck`: `bun run typecheck:core && bun run typecheck:lore && bun run typecheck:lore-tests && bun run typecheck:scripts && bun run typecheck:dashboard && bun run typecheck:dashboard-tests && bun run typecheck:dashboard-e2e`
+- `typecheck:core`: `tsc --noEmit -p packages/core/tsconfig.json`
+- `typecheck:lore`: `tsc --noEmit -p packages/lore/tsconfig.json`
+- `typecheck:lore-tests`: `tsc --noEmit -p packages/lore/tsconfig.tests.json`
+- `typecheck:scripts`: `tsc --noEmit -p tsconfig.json`
+- `typecheck:dashboard`: `bun run --filter '@lore/dashboard' typecheck`
+- `typecheck:dashboard-tests`: `bun --cwd=packages/dashboard run prebuild && tsc --noEmit -p packages/dashboard/tsconfig.tests.json`
+- `typecheck:dashboard-e2e`: `tsc --noEmit -p packages/dashboard/tsconfig.e2e.json`
+- `check:static`: `bun scripts/run-chain.ts --static`
+- `check:ordinal-sites`: `node scripts/check-ordinal-write-sites.mjs`
+- `test:file`: `bun scripts/test-file.ts`
+- `check:test-budgets`: `bun scripts/check-test-budgets.ts`
+- `check:no-timer-retry`: `bun scripts/check-no-timer-retry.ts`
+- `check:ambient-reads`: `bun scripts/check-ambient-reads.ts`
+- `check:ac-ref-integrity`: `bun scripts/check-ac-ref-integrity.ts`
+- `check:no-nul-bytes`: `bun scripts/check-no-nul-bytes.ts`
+- `check:agent-hygiene`: `bun scripts/check-agent-hygiene.ts`
+- `check:plan-member-sites`: `bun scripts/check-plan-membership-sites.ts`
+- `check:ac-state-renderers`: `bun scripts/check-ac-state-renderers.ts`
+- `check:prose-pins`: `bun scripts/check-prose-pins.ts`
+- `check:shipped-defaults`: `bun scripts/check-shipped-defaults.ts`
+- `check:ac-oracle-ownership`: `bun scripts/check-ac-oracle-ownership.ts`
+- `check:evidence-identity-drop-set`: `bun scripts/check-evidence-identity-drop-set.ts`
+- `check:capture-source-buckets`: `bun scripts/check-capture-source-buckets.ts`
+- `check:spec-mirror`: `bun scripts/export-spec-mirror.ts --check`
+- `check:corpus-fail-census`: `bun scripts/check-corpus-fail-census.ts`
+- `check:live-repo-state`: `bun scripts/check-claude-md-live-sweep.ts && bun scripts/check-list-json-real-corpus-buffer.ts && bun scripts/check-phase-write-live-state.ts && bun scripts/check-live-mirror-integrity.ts && bun scripts/check-live-corpus-detectors.ts`
+- `mirror:export`: `bun scripts/export-spec-mirror.ts`
+<!-- lore:managed section=governance-pointer hash=760d2396 -->
 ## Finding Live Project State
 
-Lore is itself the knowledge store — query it through its own CLI rather than reading docs by path:
+Run `lore governance claude-md` for this project's memory-file content contract. The standing corpus-workflow discipline lives in the lore-owned `.claude/rules/lore-*.md` files (written by `lore context refresh`; inspect them with `lore fragments`).
+<!-- lore:managed section=spec-discovery-pointer hash=4f2ed6d6 -->
+Specs are not filed in this document — discover them via `lore search "<topic>"`, `lore tree`, or `lore get <spec-slug>`.
+# ─── end lore governance ───
 
-- `search` (FTS5) / `get` (`--resolve-mdx` expands placeholders) / `list --type` / `tree` / `pending` / `log` + `diff --from N --to M` / `status`. Flags: `--help` on each — never transcribed here.
-- ⛔ The corpus is the ONLY spec index — read the governing spec (`lore get SPEC-0NN`, or `lore search`) before changing a module; exported mirrors live under `docs/requirements/{prd,spec,adr,knowledge,plan,task}/`, zero-padded 3-digit ids (`bun run mirror:export` / `check:spec-mirror`).
-<!-- /auto:dynamic-context -->

@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Async persistence abstraction. `StoreInterface` is the single contract every service depends on. Three implementations:
+Async persistence abstraction: `StoreInterface` with SQLite / Turso / InMemory implementations and FTS5 escape. `StoreInterface` is the single contract every service depends on. Three implementations:
 
 - `SQLiteStore` (`bun:sqlite`) — production local-only.
 - `TursoStore` (`@libsql/client`) — embedded replica for `sync.enabled` mode.

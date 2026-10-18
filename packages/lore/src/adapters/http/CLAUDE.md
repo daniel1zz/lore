@@ -2,7 +2,7 @@
 
 ## Purpose
 
-`Bun.serve` HTTP adapter. Mounts `/health` (unauthenticated) and `/api/*` (bearer-token authenticated) routes. Also hosts `sync-push.ts`, the manual logical-replication helper `lore sync push` uses to replicate the 5 core tables into a remote libsql. Optionally (`HttpConfig.dashboard`) serves the packaged production dashboard SPA — static assets + a one-time nonce auth endpoint — so `lore dashboard` runs as a single process with no vite child (`static-serving.ts` + `dashboard-assets-loader.ts`).
+`Bun.serve` HTTP API adapter: bearer-token auth and sync-push. Mounts `/health` (unauthenticated) and `/api/*` (bearer-token authenticated) routes. Also hosts `sync-push.ts`, the manual logical-replication helper `lore sync push` uses to replicate the 5 core tables into a remote libsql. Optionally (`HttpConfig.dashboard`) serves the packaged production dashboard SPA — static assets + a one-time nonce auth endpoint — so `lore dashboard` runs as a single process with no vite child (`static-serving.ts` + `dashboard-assets-loader.ts`).
 
 Full pre-eviction file (per-route mechanism walkthroughs, rejected-alternative rationale, per-spec design decisions) is archived verbatim: `lore get knowledge-module-claude-md-snapshot-packages-lore-src-adapters-3`.
 

@@ -2,7 +2,7 @@
 
 ## Purpose
 
-citty-based CLI adapter. Every subcommand lives in its own `commands/<name>.ts`, lazily imported by `index.ts` — that registry is the only count that stays true; ⛔ never restate the number here. Thin adapter only — no business logic; every command resolves args, calls a service via the App composition root, formats the result, and exits.
+citty CLI adapter: lazy command registry and exit-code mapping. Every subcommand lives in its own `commands/<name>.ts`, lazily imported by `index.ts` — that registry is the only count that stays true; ⛔ never restate the number here. Thin adapter only — no business logic; every command resolves args, calls a service via the App composition root, formats the result, and exits.
 
 Full pre-eviction file (per-command mechanism walkthroughs, per-spec design decisions, rejected alternatives) is archived verbatim: `lore get knowledge-module-claude-md-snapshot-cli-adapter-pre-eviction`; the earlier pre-compression state: `knowledge-module-claude-md-snapshot-packages-lore-src-adapters`.
 
