@@ -175,3 +175,34 @@ describe("AU-T22 open claim whose recorded worktree is the group's working copy"
     expect(out.findings.map((f) => [f.kind, f.files])).toEqual([["outside-anchors", ["docs/x.md"]]]);
   });
 });
+
+describe("AU-T25 an edit already covered by a judged end is not charged again", () => {
+  const OUTSIDE_OLD = "/private/tmp/claude-501/-Users-apple/Projects/zz/lore/placeholder";
+  const OUTSIDE_NEW = "/tmp/second-probe.txt";
+  const CLAIM_A1: Claims = { A1: [{ slug: "task-y", anchors: ["src/"] }] };
+
+  /** A helper on its 2nd end whose end 1 was judged at `judgedAt`; edits at the given timestamps. */
+  function twiceEnded(judgedAt: number | undefined, edits: Array<{ file: string; ts: number }>): SessionTrail {
+    const h = { ...helper("A1", { files: [], judged: 1 }), end_count: 2, ...(judgedAt === undefined ? {} : { judged_at_ms: judgedAt }) } as TrailHelper;
+    const trail = trailOf([h]);
+    return {
+      ...trail,
+      turns: [{ ...trail.turns[0], edits: { measured: true, value: edits.map((e) => ({ file: e.file, run: h.run, ts: e.ts })) } }],
+    } as unknown as SessionTrail;
+  }
+
+  it("AU-T25 an outside edit recorded at or before the helper's judged_at_ms yields no finding on its next end", async () => {
+    const out = await review(twiceEnded(1000, [{ file: OUTSIDE_OLD, ts: 900 }]), CLAIM_A1);
+    expect(out.findings).toEqual([]);
+  });
+
+  it("AU-T25 control: an outside edit recorded after judged_at_ms is still outside-working-copy", async () => {
+    const out = await review(twiceEnded(1000, [{ file: OUTSIDE_OLD, ts: 900 }, { file: OUTSIDE_NEW, ts: 1001 }]), CLAIM_A1);
+    expect(out.findings.map((f) => [f.kind, f.files])).toEqual([["outside-working-copy", [OUTSIDE_NEW]]]);
+  });
+
+  it("AU-T25 control: a judged file without judged_at_ms (legacy) keeps the old behaviour and judges every edit", async () => {
+    const out = await review(twiceEnded(undefined, [{ file: OUTSIDE_OLD, ts: 900 }]), CLAIM_A1);
+    expect(out.findings.map((f) => f.kind)).toEqual(["outside-working-copy"]);
+  });
+});

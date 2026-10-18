@@ -10,8 +10,9 @@
  */
 import { afterEach, describe, expect, it } from "vitest";
 import { rmSync } from "node:fs";
+import { readSessionTrail } from "@lore/core/node";
 import { makeFixture, numberedLines, parseBlock, startTurn, writeRepoFile, writeTurnEndSetting, type TurnFixture } from "./turn-review-harness";
-import { EMPTY_REVIEW, makeLoreStub, readJudged, stopTurnWithStub, writeHelperEnd, type LoreStub } from "./trail-review-stub";
+import { EMPTY_REVIEW, makeLoreStub, readJudged, readJudgedAt, stopTurnWithStub, writeHelperEnd, type LoreStub } from "./trail-review-stub";
 
 const cleanup: string[] = [];
 afterEach(() => {
@@ -155,5 +156,22 @@ describe("AC-ST-9 each helper end is judged by exactly one completed review", ()
     expect(quiet.stdout).toBe("");
     expect(stub.reviewCalls()).toHaveLength(0);
     expect(readJudged(f, "A1")).toBeNull();
+  });
+});
+
+describe("AU-T25 the review stamps when it judged a helper end", () => {
+  it("AU-T25 judged.json carries judged_at_ms taken no earlier than the review started, and the core reader returns it", () => {
+    const { f, stub } = setup();
+    writeHelperEnd(f, "A1", 1);
+    stub.reply({ stdout: EMPTY_REVIEW });
+    const before = Date.now();
+    const r = turn(f, stub);
+    expect(r.status).toBe(0);
+    const stamp = readJudgedAt(f, "A1");
+    expect(stamp).not.toBeNull();
+    expect(stamp!).toBeGreaterThanOrEqual(before);
+    expect(stamp!).toBeLessThanOrEqual(Date.now());
+    const trail = readSessionTrail(f.sid, f.base);
+    expect(trail?.helpers.find((h) => h.agent_id === "A1")?.judged_at_ms).toBe(stamp);
   });
 });
