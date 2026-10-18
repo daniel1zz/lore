@@ -256,7 +256,7 @@ describe("AC-TG-6 — red-first (--allow-missing-path) ACs: no evidence stays no
     expect(done.stderr).toContain("vanish.test.ts");
   });
 
-  it("REGRESSION (TG-22): a declared red-first AC with a pass tagged to it that ran a DIFFERENT existing file is not a pass on its missing oracle -> done allowed, state not not_measured", { timeout: 180_000 }, () => {
+  it("REGRESSION (TG-22 narrowing removed by AC-EI-2; AC-TG-6 text): a declared red-first AC with a pass tagged to it that ran a DIFFERENT existing file renders not_measured; the done floor is unchanged (allowed)", { timeout: 180_000 }, () => {
     const verified = runLore(["verify", plan, "--task", taskDifferentFile, "--ac", "AC-OK", "--yes"], dir);
     expect(verified.exitCode, verified.stdout + verified.stderr).toBe(0);
     // A pass tagged AC-DIFF whose command runs other.bun.test.ts (exists), never never-written.test.ts (the AC's oracle).
@@ -267,7 +267,9 @@ describe("AC-TG-6 — red-first (--allow-missing-path) ACs: no evidence stays no
     );
     expect(recorded.exitCode, recorded.stdout + recorded.stderr).toBe(0);
 
-    expect(stateOf("AC-DIFF")).not.toBe("not_measured");
+    // AC-EI-2: a missing oracle is not measured whichever files earlier passes ran (TG-22's "passes that ran the
+    // missing file" narrowing is gone; spec-test-governance-guards-that-refuse-bad-tests-declared AC-TG-6 text never had it).
+    expect(stateOf("AC-DIFF")).toBe("not_measured");
     const done = runLore(["done", taskDifferentFile, "--declare-no-new-tests", "fixture"], dir);
     expect(done.exitCode, done.stdout + done.stderr).toBe(0);
   });

@@ -706,10 +706,10 @@ export function computeAcCoverage(
  * | 7 | `"none"` | `pass === 0` AND `fail === 0` |
  *
  * **AC-TG-6 / AC-EI-2 — missing oracle file (between rows 2 and 3)**: when {@link AcCoverageFact.oracle_file_missing}
- * is non-empty and `fail === 0` and the criterion has any counted pass (`pass > 0`), the state is
+ * is non-empty and `fail === 0` and the criterion has ANY pass on record (`pass > 0` or a `pass` ref, whatever its command), the state is
  * `"not_measured"` BEFORE rows 3-6 are tried — whichever files the earlier passes ran (TG-22's "passes that
  * ran the missing file" narrowing is removed: AC-TG-6's text never had it). A real `fail` still outranks it
- * (rows 1-2); a criterion with no counted pass stays `"none"` (row 7).
+ * (rows 1-2); a criterion with no pass on record stays `"none"` (row 7).
  *
  * This is the COMPLETE return set — `"inconclusive"`/`"expected-fail"` are
  * badge-layer residuals `commands/ac.ts::coverageBadge` derives from `fact.refs`
@@ -789,7 +789,9 @@ export function deriveAcCoverageState(fact: AcCoverageFact): AcCoverageState {
   // AC-TG-6: the oracle file is gone, so no earlier pass (attested or not) may render as passing.
   // AC-EI-2: regardless of which files earlier passes ran (TG-22's narrowing removed; passes_ran_missing_oracle is information only).
   const missing = fact.oracle_file_missing;
-  if (missing !== undefined && missing.length > 0 && fact.pass > 0) {
+  // reason: `refs` carries EVERY row (EI-1 keeps other-command rows in it), so a pass recorded under a spelling or command that
+  // differs from the declared one still counts as "a pass on record"; only a criterion with NO pass at all stays `none`.
+  if (missing !== undefined && missing.length > 0 && (fact.pass > 0 || fact.refs.some((r) => r.result === "pass"))) {
     return "not_measured";
   }
   if (fact.attested_pass > 0) return "attested_pass";
