@@ -15,6 +15,7 @@
  */
 
 import { readFileSync } from "fs";
+import { setExitCode } from "../run-scope.js";
 import { defineCommand } from "citty";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatErrorFor, resolveActor } from "../utils.js";
@@ -44,7 +45,7 @@ const recordCommand = defineCommand({
     try {
       if (app.uatService === undefined) {
         process.stderr.write("Error: UAT service is not available in this build.\n");
-        process.exitCode = 1;
+        setExitCode(1);
         return;
       }
       let payload: unknown;
@@ -52,7 +53,7 @@ const recordCommand = defineCommand({
         payload = JSON.parse(readFileSync(args["json-file"] as string, "utf8"));
       } catch (e) {
         process.stderr.write(`Error: could not read/parse --json-file: ${(e as Error).message}\n`);
-        process.exitCode = 2;
+        setExitCode(2);
         return;
       }
       const by = resolveActor(undefined, inv.env, inv.cwd, inv.user);
@@ -63,7 +64,7 @@ const recordCommand = defineCommand({
         } else {
           process.stderr.write(formatErrorFor(inv, result.error));
         }
-        process.exitCode = exitCode(result.error);
+        setExitCode(exitCode(result.error));
         return;
       }
       if (args.json) {
@@ -95,7 +96,7 @@ const showCommand = defineCommand({
         } else {
           process.stderr.write(formatErrorFor(inv, result.error));
         }
-        process.exitCode = exitCode(result.error);
+        setExitCode(exitCode(result.error));
         return;
       }
       if (args.json) {

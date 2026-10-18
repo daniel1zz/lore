@@ -23,6 +23,7 @@
  */
 
 import { defineCommand } from "citty";
+import { exitCli } from "../run-scope.js";
 import { existsSync, mkdirSync, writeFileSync } from "fs";
 import { join } from "path";
 import { ambientOfInvocation, createApp } from "../../../app.js";
@@ -66,7 +67,7 @@ export default defineCommand({
       } else {
         process.stderr.write(`Error: ${msg}\n`);
       }
-      process.exit(1);
+      exitCli(1);
     }
 
     mkdirSync(loreDir, { recursive: true });
@@ -89,7 +90,7 @@ export default defineCommand({
       } else {
         process.stderr.write(`Error: ${msg}\n`);
       }
-      process.exit(1);
+      exitCli(1);
     }
 
     // Initialise the SQLite DB (SQLiteStore constructor runs migrations)
@@ -146,7 +147,7 @@ export default defineCommand({
       } else {
         process.stderr.write(`Error: ${msg}\n`);
       }
-      process.exit(1);
+      exitCli(1);
     }
     const armedRows = armed.value.status === "armed" ? armed.value.report.would_become_unbound_rows : 0;
 

@@ -280,6 +280,7 @@ interface CliRunResult {
 async function runLoreCmd(args: string[], cwd: string, extraEnv: Record<string, string | undefined> = {}): Promise<CliRunResult> {
   const proc = await runLoreInProcess(args, {
     cwd,
+    home: cwd,
     env: { ...process.env, HOME: cwd, EDITOR: "true", ...extraEnv },
   });
   return {

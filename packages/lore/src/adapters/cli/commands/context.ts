@@ -79,6 +79,7 @@
  */
 
 import type { Invocation } from "@lore/core";
+import { setExitCode } from "../run-scope.js";
 import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, readlinkSync, realpathSync, rmSync, rmdirSync, writeFileSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -325,14 +326,14 @@ function renderSections(sections: ReadonlyArray<{ id: string; state: string }>):
   }
 }
 
-/** Writes the final error/success result of an init/refresh run and sets `process.exitCode` — shared by both topics. */
+/** Writes the final error/success result of an init/refresh run and sets the run's exit code — shared by both topics. */
 function renderOutcome(inv: Invocation, 
   json: boolean,
   result: { ok: true; value: ContextInitReport | ContextRefreshReport } | { ok: false; error: LoreError },
 ): void {
   if (!result.ok) {
     process.stderr.write(formatErrorFor(inv, result.error) + "\n");
-    process.exitCode = exitCode(result.error);
+    setExitCode(exitCode(result.error));
     return;
   }
 
@@ -350,7 +351,7 @@ function renderOutcome(inv: Invocation,
     }
     for (const path of check.differing) console.log(`would change: ${path}`);
     for (const finding of check.findings) console.log(`${finding.kind}: ${finding.message}`);
-    process.exitCode = 1;
+    setExitCode(1);
     return;
   }
 
@@ -453,7 +454,7 @@ export function buildRefreshFragmentDeps(opts: {
 
 function reportFailure(inv: Invocation, error: LoreError): void {
   process.stderr.write(formatErrorFor(inv, error) + "\n");
-  process.exitCode = exitCode(error);
+  setExitCode(exitCode(error));
 }
 
 export default defineCommand({
@@ -504,12 +505,12 @@ export default defineCommand({
 
     if (topic === undefined) {
       process.stderr.write(`Error: lore context requires a topic (expected: ${KNOWN_TOPICS.join(" | ")})\n`);
-      process.exitCode = 2;
+      setExitCode(2);
       return;
     }
     if (!KNOWN_TOPICS.includes(topic as ContextTopic)) {
       process.stderr.write(`Error: unknown context topic "${topic}" (expected: ${KNOWN_TOPICS.join(" | ")})\n`);
-      process.exitCode = 2;
+      setExitCode(2);
       return;
     }
 
@@ -520,13 +521,13 @@ export default defineCommand({
           ? "--scope applies to `refresh`, `add` and `remove` only"
           : `unknown --scope "${scopeArg}" (expected: ${KNOWN_SCOPES.join(" | ")})`;
       process.stderr.write(`Error: ${reason}\n`);
-      process.exitCode = 2;
+      setExitCode(2);
       return;
     }
 
     if (args.check === true && topic !== "refresh") {
       process.stderr.write("Error: --check applies to `refresh` only\n");
-      process.exitCode = 2;
+      setExitCode(2);
       return;
     }
 
@@ -560,7 +561,7 @@ export default defineCommand({
     const globalConfigResult = loadGlobalConfig(resolveGlobalConfigPath(inv.env, home));
     if (!globalConfigResult.ok) {
       process.stderr.write(formatErrorFor(inv, globalConfigResult.error) + "\n");
-      process.exitCode = exitCode(globalConfigResult.error);
+      setExitCode(exitCode(globalConfigResult.error));
       return;
     }
     const userConfigDir = resolveUserConfigDir(inv.env, home);
@@ -597,7 +598,7 @@ export default defineCommand({
       // exit-1 contract for a drifted/over-ceiling --check is applied here for both output modes.
       if (args.check === true && result.ok && result.value.check !== null) {
         const { differing, findings } = result.value.check;
-        if (differing.length > 0 || findings.length > 0) process.exitCode = 1;
+        if (differing.length > 0 || findings.length > 0) setExitCode(1);
       }
       return;
     }
@@ -632,7 +633,7 @@ export default defineCommand({
       const id = typeof args.id === "string" ? args.id : "";
       if (id === "") {
         process.stderr.write(`Error: lore context ${topic} requires a fragment id (lore context ${topic} <id> [--scope project|user])\n`);
-        process.exitCode = 2;
+        setExitCode(2);
         return;
       }
       const changed = await runSelectionChange(selectionDeps, { action: topic, id, scope });
@@ -671,7 +672,7 @@ export default defineCommand({
     const hasExplicitNoAi = rawArgv.includes("--no-ai");
     if (hasExplicitAi && hasExplicitNoAi) {
       process.stderr.write("Error: --ai and --no-ai are mutually exclusive. Pass only one.\n");
-      process.exitCode = 2;
+      setExitCode(2);
       return;
     }
     const explicitAi: boolean | undefined = hasExplicitAi

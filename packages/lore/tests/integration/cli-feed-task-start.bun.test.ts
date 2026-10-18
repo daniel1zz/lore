@@ -91,6 +91,7 @@ const PROJECT_ROOT = new URL("../../../../", import.meta.url).pathname.replace(/
 async function runLore(args: string[], cwd: string, actor: string | null = "cli-feed-task-start-test"): Promise<RunResult> {
   const proc = await runLoreInProcess(args, {
     cwd,
+    home: cwd,
     env: withSessionIdentity({ ...process.env, HOME: cwd }, actor) as Record<string, string>,
   });
   return {

@@ -19,6 +19,7 @@
  */
 
 import { spawnSync } from "child_process";
+import { exitCli } from "./run-scope.js";
 import { mkdtempSync, writeFileSync, readFileSync, rmSync } from "fs";
 import { join } from "path";
 import { ok, err } from "@lore/core";
@@ -105,7 +106,7 @@ function resolveEditorCommand(env: NodeJS.ProcessEnv, defaults?: LoreDefaults): 
  *   const editorResult = await openEditor({ defaults, env: inv.env, tmpDir: inv.paths.tmpDir });
  *   if (!editorResult.ok) {
  *     process.stderr.write(formatError(editorResult.error) + "\n");
- *     process.exit(exitCode(editorResult.error));
+ *     exitCli(exitCode(editorResult.error));
  *   }
  *   const content = editorResult.value;
  */

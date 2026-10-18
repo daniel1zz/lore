@@ -146,6 +146,7 @@
  */
 
 import { defineCommand } from "citty";
+import { exitCli, setExitCode } from "../run-scope.js";
 import { err, extractEvidence, ok } from "@lore/core";
 import type { DocRecord, EvidenceEntry, LoreError, Result } from "@lore/core";
 import { loadLoreApp } from "../loader.js";
@@ -330,7 +331,7 @@ export default defineCommand({
       process.stderr.write(
         "Error: --override-attestation requires a non-empty, non-whitespace reason.\n",
       );
-      process.exit(2);
+      exitCli(2);
     }
 
     // reason: task-lore-done-override-attestation-demands-fresh-prose-that —
@@ -349,7 +350,7 @@ export default defineCommand({
         "Error: --override-attestation and --override-attestation-cite are mutually exclusive " +
           "— pass a free-text reason OR cite an existing evidence row, not both.\n",
       );
-      process.exit(2);
+      exitCli(2);
     }
     let overrideAttestationCiteIndex: number | undefined;
     if (hasOverrideAttestationCite) {
@@ -359,7 +360,7 @@ export default defineCommand({
           "Error: --override-attestation-cite requires a positive 1-based integer row index, " +
             `got "${overrideAttestationCiteRaw}".\n`,
         );
-        process.exit(2);
+        exitCli(2);
       }
       overrideAttestationCiteIndex = Number(trimmedCite);
     }
@@ -371,7 +372,7 @@ export default defineCommand({
     const hasNoNewTests = typeof noNewTestsRaw === "string";
     if (hasNoNewTests && noNewTestsRaw.trim() === "") {
       process.stderr.write("Error: --declare-no-new-tests requires a non-empty, non-whitespace reason.\n");
-      process.exit(2);
+      exitCli(2);
     }
 
     const { app } = loadLoreApp({ inv });
@@ -391,7 +392,7 @@ export default defineCommand({
         );
         if (!citeResult.ok) {
           process.stderr.write(formatErrorFor(inv, citeResult.error) + "\n");
-          process.exitCode = exitCode(citeResult.error);
+          setExitCode(exitCode(citeResult.error));
           return;
         }
         citedOverrideReason = citeResult.value;
@@ -402,7 +403,7 @@ export default defineCommand({
       const verifiedIdentity = await app.verifiedInvocationIdentity?.();
       if (verifiedIdentity !== undefined && !verifiedIdentity.ok) {
         process.stderr.write(formatErrorFor(inv, verifiedIdentity.error) + "\n");
-        process.exitCode = exitCode(verifiedIdentity.error);
+        setExitCode(exitCode(verifiedIdentity.error));
         return;
       }
       const by = resolveActor(undefined, inv.env, inv.cwd, inv.user);
@@ -433,7 +434,7 @@ export default defineCommand({
 
       if (!result.ok) {
         process.stderr.write(formatErrorFor(inv, result.error) + "\n");
-        process.exitCode = exitCode(result.error);
+        setExitCode(exitCode(result.error));
         return;
       }
 

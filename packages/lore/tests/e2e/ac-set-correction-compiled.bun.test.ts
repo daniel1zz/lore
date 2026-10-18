@@ -53,7 +53,7 @@ function cleanEnv(): Record<string, string> {
 }
 
 async function runLore(args: string[], cwd: string = dir): Promise<RunResult> {
-  const proc = await runLoreInProcess(args, { cwd, env: cleanEnv() });
+  const proc = await runLoreInProcess(args, { cwd, home: dir, env: cleanEnv() });
   return { stdout: proc.stdout, stderr: proc.stderr, exitCode: proc.exitCode };
 }
 

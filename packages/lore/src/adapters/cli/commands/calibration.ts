@@ -22,6 +22,7 @@
  */
 
 import { spawnSync } from "node:child_process";
+import { setExitCode } from "../run-scope.js";
 import { defineCommand } from "citty";
 import { createAuditReversalProbe, createGitReversalProbes, type ClassCalibrationStats } from "../../../service/autonomy-calibration-service.js";
 import { DecisionService } from "../../../service/decision-service.js";
@@ -64,7 +65,7 @@ export default defineCommand({
     const inv = invocationOf(context);
     if (!args.stats && !args.observe) {
       process.stderr.write("Error: `lore calibration` requires --stats or --observe.\n");
-      process.exitCode = 2;
+      setExitCode(2);
       return;
     }
 
@@ -73,7 +74,7 @@ export default defineCommand({
       const autonomy = await collectAutonomyStats(dbPath, app.repoRoot, args.observe === true);
       if (!autonomy.ok) {
         process.stderr.write(formatErrorFor(inv, autonomy.error) + "\n");
-        process.exitCode = exitCode(autonomy.error);
+        setExitCode(exitCode(autonomy.error));
         return;
       }
       if (!args.stats) {
@@ -88,7 +89,7 @@ export default defineCommand({
 
       if (!result.ok) {
         process.stderr.write(formatErrorFor(inv, result.error) + "\n");
-        process.exitCode = exitCode(result.error);
+        setExitCode(exitCode(result.error));
         return;
       }
 

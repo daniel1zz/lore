@@ -83,6 +83,7 @@
  */
 
 import { defineCommand } from "citty";
+import { exitCli, setExitCode } from "../run-scope.js";
 import {
   buildUnconfiguredUpstreamRemedy,
   err,
@@ -257,7 +258,7 @@ export default defineCommand({
       process.stderr.write(
         `Usage error: --list cannot be combined with ${reportFlagsPresent.map((f) => `--${f}`).join(", ")}.\n`,
       );
-      process.exit(2);
+      exitCli(2);
     }
 
     if (!isList) {
@@ -268,7 +269,7 @@ export default defineCommand({
         process.stderr.write(
           `Usage error: missing required flag(s): ${missing.map((f) => `--${f}`).join(", ")}.\n`,
         );
-        process.exit(2);
+        exitCli(2);
       }
     }
 
@@ -289,7 +290,7 @@ export default defineCommand({
     if (!triageResult.ok) {
       const detail = "message" in triageResult.error ? triageResult.error.message : triageResult.error.code;
       process.stderr.write(`Usage error: ${detail}\n`);
-      process.exit(2);
+      exitCli(2);
     }
     const triageLabels = triageResult.value;
 
@@ -306,7 +307,7 @@ export default defineCommand({
       if (classification.kind === "unconfigured") {
         const unconfiguredError = buildUnconfiguredUpstreamRemedy();
         process.stderr.write(formatErrorFor(inv, unconfiguredError) + "\n");
-        process.exitCode = exitCode(unconfiguredError);
+        setExitCode(exitCode(unconfiguredError));
         return;
       }
 
@@ -317,7 +318,7 @@ export default defineCommand({
       // command never holds its own copy.
       if (classification.kind === "retired") {
         process.stderr.write(formatErrorFor(inv, classification.error) + "\n");
-        process.exitCode = exitCode(classification.error);
+        setExitCode(exitCode(classification.error));
         return;
       }
 
@@ -352,7 +353,7 @@ export default defineCommand({
           `Usage error: filing into a GitHub-configured feedback.upstream requires ` +
             `${missingFlags.join(" and ")} (the front-matter schema's severity/category fields are not optional).\n`,
         );
-        process.exit(2);
+        exitCli(2);
       }
 
       const tagsArg = args.tags;
@@ -391,7 +392,7 @@ export default defineCommand({
 
       if (!githubResult.ok) {
         process.stderr.write(formatErrorFor(inv, githubResult.error) + "\n");
-        process.exitCode = exitCode(githubResult.error);
+        setExitCode(exitCode(githubResult.error));
         return;
       }
 

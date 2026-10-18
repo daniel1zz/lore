@@ -14,6 +14,7 @@
  */
 
 import { defineCommand } from "citty";
+import { setExitCode } from "../run-scope.js";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatErrorFor, resolveActor } from "../utils.js";
 import type { InvalidateOpts } from "../../../service/validity-service.js";
@@ -54,7 +55,7 @@ export default defineCommand({
     try {
       if (app.validityService === undefined) {
         process.stderr.write("Error: ValidityService not wired on this App instance.\n");
-        process.exitCode = 1;
+        setExitCode(1);
         return;
       }
 
@@ -68,7 +69,7 @@ export default defineCommand({
 
       if (!result.ok) {
         process.stderr.write(formatErrorFor(inv, result.error) + "\n");
-        process.exitCode = exitCode(result.error);
+        setExitCode(exitCode(result.error));
         return;
       }
 

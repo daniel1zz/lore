@@ -132,6 +132,7 @@
  */
 
 import { defineCommand } from "citty";
+import { setExitCode } from "../run-scope.js";
 import { loadLoreApp } from "../loader.js";
 import {
   exitCode,
@@ -350,7 +351,7 @@ export default defineCommand({
         const limitResult = parsePositiveIntArg(args.limit, "--limit", { min: 0 });
         if (!limitResult.ok) {
           process.stderr.write(limitResult.message + "\n");
-          process.exitCode = 2;
+          setExitCode(2);
           return;
         }
         limit = limitResult.value;
@@ -361,7 +362,7 @@ export default defineCommand({
         const offsetResult = parsePositiveIntArg(args.offset, "--offset", { min: 0 });
         if (!offsetResult.ok) {
           process.stderr.write(offsetResult.message + "\n");
-          process.exitCode = 2;
+          setExitCode(2);
           return;
         }
         offset = offsetResult.value;
@@ -417,7 +418,7 @@ export default defineCommand({
           process.stderr.write(
             `Error: ${LIST_GOVERNED_BY_CONFLICT} ${conflicting.map((k) => `--${k}`).join(", ")}.\n`,
           );
-          process.exitCode = 2;
+          setExitCode(2);
           return;
         }
 
@@ -430,7 +431,7 @@ export default defineCommand({
         });
         if (!governedResult.ok) {
           process.stderr.write(formatErrorFor(inv, governedResult.error) + "\n");
-          process.exitCode = exitCode(governedResult.error);
+          setExitCode(exitCode(governedResult.error));
           return;
         }
         // reason: listGovernedBy has no store-level limit/offset param — page the
@@ -471,7 +472,7 @@ export default defineCommand({
       const subTypeResolution = resolveSubTypeFilter(args["sub-type"], args.type);
       if (!subTypeResolution.ok) {
         process.stderr.write(subTypeResolution.message + "\n");
-        process.exitCode = 2;
+        setExitCode(2);
         return;
       }
 
@@ -497,7 +498,7 @@ export default defineCommand({
         const resolveResult = await app.corpusService.resolve(args["plan-id"]);
         if (!resolveResult.ok) {
           process.stderr.write(formatErrorFor(inv, resolveResult.error) + "\n");
-          process.exitCode = exitCode(resolveResult.error);
+          setExitCode(exitCode(resolveResult.error));
           return;
         }
         planMemberId = resolveResult.value;
@@ -556,7 +557,7 @@ export default defineCommand({
         const gatedResult = await fetchGatedFullDocs();
         if (!gatedResult.ok) {
           process.stderr.write(formatErrorFor(inv, gatedResult.error) + "\n");
-          process.exitCode = exitCode(gatedResult.error);
+          setExitCode(exitCode(gatedResult.error));
           return;
         }
         // reason: extra.phase AND --plan-id's membership filter (see file header) are
@@ -605,7 +606,7 @@ export default defineCommand({
         const fullResult = await fetchListing();
         if (!fullResult.ok) {
           process.stderr.write(formatErrorFor(inv, fullResult.error) + "\n");
-          process.exitCode = exitCode(fullResult.error);
+          setExitCode(exitCode(fullResult.error));
           return;
         }
         const { docs: fullDocs, total: fullTotal } = fullResult.value;
@@ -657,7 +658,7 @@ export default defineCommand({
         const fullResult = await fetchListing();
         if (!fullResult.ok) {
           process.stderr.write(formatErrorFor(inv, fullResult.error) + "\n");
-          process.exitCode = exitCode(fullResult.error);
+          setExitCode(exitCode(fullResult.error));
           return;
         }
         const { docs: fullDocs, total: fullTotal } = fullResult.value;
@@ -703,7 +704,7 @@ export default defineCommand({
         const fullResult = await fetchListing();
         if (!fullResult.ok) {
           process.stderr.write(formatErrorFor(inv, fullResult.error) + "\n");
-          process.exitCode = exitCode(fullResult.error);
+          setExitCode(exitCode(fullResult.error));
           return;
         }
         const { docs: fullDocs, total: fullTotal } = fullResult.value;
@@ -754,7 +755,7 @@ export default defineCommand({
 
       if (!result.ok) {
         process.stderr.write(formatErrorFor(inv, result.error) + "\n");
-        process.exitCode = exitCode(result.error);
+        setExitCode(exitCode(result.error));
         return;
       }
 

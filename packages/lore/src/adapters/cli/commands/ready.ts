@@ -52,6 +52,7 @@
  */
 
 import { defineCommand } from "citty";
+import { setExitCode } from "../run-scope.js";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatErrorFor } from "../utils.js";
 import type { ReadyRecord, ReadySession } from "@lore/core";
@@ -204,12 +205,12 @@ export default defineCommand({
 
     if (hasPlan && hasAdhoc) {
       process.stderr.write("Error: <plan> and --adhoc are mutually exclusive. Pass only one.\n");
-      process.exitCode = 2;
+      setExitCode(2);
       return;
     }
     if (!hasPlan && !hasAdhoc) {
       process.stderr.write("Error: a plan document ID or slug is required unless --adhoc is passed.\n");
-      process.exitCode = 2;
+      setExitCode(2);
       return;
     }
 
@@ -219,7 +220,7 @@ export default defineCommand({
         const adhocResult = await app.taskWorkflowService.readyAdhoc();
         if (!adhocResult.ok) {
           process.stderr.write(formatErrorFor(inv, adhocResult.error) + "\n");
-          process.exitCode = exitCode(adhocResult.error);
+          setExitCode(exitCode(adhocResult.error));
           return;
         }
         const records = adhocResult.value;
@@ -251,7 +252,7 @@ export default defineCommand({
 
       if (!result.ok) {
         process.stderr.write(formatErrorFor(inv, result.error) + "\n");
-        process.exitCode = exitCode(result.error);
+        setExitCode(exitCode(result.error));
         return;
       }
 

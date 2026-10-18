@@ -93,7 +93,7 @@ interface RunResult {
  * no global lore config on the developer's machine can influence a run.
  */
 async function runLore(args: readonly string[], cwd: string): Promise<RunResult> {
-  return await runLoreInProcess(args, { cwd, env: { ...process.env, HOME: cwd, EDITOR: "true" } });
+  return await runLoreInProcess(args, { cwd, home: cwd, env: { ...process.env, HOME: cwd, EDITOR: "true" } });
 }
 
 /** `lore status --json`'s `code_anchor_specs`, read off the real envelope. */

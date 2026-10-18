@@ -282,6 +282,7 @@
  */
 
 import { existsSync, readFileSync } from "fs";
+import { setExitCode } from "../run-scope.js";
 import { dirname } from "path";
 import { defineCommand } from "citty";
 import {
@@ -374,7 +375,7 @@ export default defineCommand({
       process.stderr.write(
         "Error: --output-tail and --output-tail-file are mutually exclusive.\n",
       );
-      process.exitCode = 2;
+      setExitCode(2);
       return;
     }
 
@@ -392,7 +393,7 @@ export default defineCommand({
     });
     if (captureConflict !== null) {
       process.stderr.write(formatErrorFor(inv, captureConflict) + "\n");
-      process.exitCode = exitCode(captureConflict);
+      setExitCode(exitCode(captureConflict));
       return;
     }
 
@@ -453,7 +454,7 @@ export default defineCommand({
       });
       if (!captured.ok) {
         process.stderr.write(formatErrorFor(inv, captured.error) + "\n");
-        process.exitCode = exitCode(captured.error);
+        setExitCode(exitCode(captured.error));
         return;
       }
       outputTail = captured.value.outputTail;
@@ -493,7 +494,7 @@ export default defineCommand({
       });
       if (capturedDiscoveryRefusal !== null) {
         process.stderr.write(formatErrorFor(inv, capturedDiscoveryRefusal) + "\n");
-        process.exitCode = exitCode(capturedDiscoveryRefusal);
+        setExitCode(exitCode(capturedDiscoveryRefusal));
         return;
       }
       // reason: captured-red proof (#53, D8-D10) — same shared guard as MCP.
@@ -506,7 +507,7 @@ export default defineCommand({
       });
       if (capturedRedProofGap !== null) {
         process.stderr.write(formatErrorFor(inv, capturedRedProofGap) + "\n");
-        process.exitCode = exitCode(capturedRedProofGap);
+        setExitCode(exitCode(capturedRedProofGap));
         return;
       }
     } else if (typeof args["output-tail"] === "string") {
@@ -517,7 +518,7 @@ export default defineCommand({
       } catch (e) {
         const message = e instanceof Error ? e.message : "unknown error";
         process.stderr.write(`Error: could not read --output-tail-file: ${message}\n`);
-        process.exitCode = 2;
+        setExitCode(2);
         return;
       }
     }
@@ -564,7 +565,7 @@ export default defineCommand({
           value: args.command,
         };
         process.stderr.write(formatErrorFor(inv, precheckError) + "\n");
-        process.exitCode = exitCode(precheckError);
+        setExitCode(exitCode(precheckError));
         return;
       }
 
@@ -588,7 +589,7 @@ export default defineCommand({
       });
       if (pipeRefusal !== null) {
         process.stderr.write(formatErrorFor(inv, pipeRefusal) + "\n");
-        process.exitCode = exitCode(pipeRefusal);
+        setExitCode(exitCode(pipeRefusal));
         return;
       }
 
@@ -606,7 +607,7 @@ export default defineCommand({
       });
       if (filteredPassRefusal !== null) {
         process.stderr.write(formatErrorFor(inv, filteredPassRefusal) + "\n");
-        process.exitCode = exitCode(filteredPassRefusal);
+        setExitCode(exitCode(filteredPassRefusal));
         return;
       }
 
@@ -625,7 +626,7 @@ export default defineCommand({
       });
       if (underMatchedRefusal !== null) {
         process.stderr.write(formatErrorFor(inv, underMatchedRefusal) + "\n");
-        process.exitCode = exitCode(underMatchedRefusal);
+        setExitCode(exitCode(underMatchedRefusal));
         return;
       }
 
@@ -679,7 +680,7 @@ export default defineCommand({
 
       if (!result.ok) {
         process.stderr.write(formatErrorFor(inv, result.error) + "\n");
-        process.exitCode = exitCode(result.error);
+        setExitCode(exitCode(result.error));
         return;
       }
 

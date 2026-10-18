@@ -103,6 +103,7 @@
  */
 
 import { readFileSync } from "node:fs";
+import { exitCli, setExitCode } from "../run-scope.js";
 import { defineCommand } from "citty";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatErrorFor, resolveActor } from "../utils.js";
@@ -247,7 +248,7 @@ export default defineCommand({
     // Mutex: --ai + --no-ai
     if (_hasExplicitAi && _hasExplicitNoAi) {
       process.stderr.write("Error: --ai and --no-ai are mutually exclusive. Pass only one.\n");
-      process.exit(2);
+      exitCli(2);
     }
 
     // Mutex: --no-ai + any AI mutation flag (contradiction: "regenerate but don't use AI")
@@ -255,7 +256,7 @@ export default defineCommand({
       process.stderr.write(
         "Error: --no-ai cannot be combined with --regenerate, --refine, or --refine-stdin.\n",
       );
-      process.exit(2);
+      exitCli(2);
     }
 
     // Mutex: more than one AI mutation mode
@@ -264,7 +265,7 @@ export default defineCommand({
       process.stderr.write(
         "Error: --regenerate, --refine, and --refine-stdin are mutually exclusive. Pass only one.\n",
       );
-      process.exit(2);
+      exitCli(2);
     }
 
     // Mutex: AI mutation flags cannot be combined with manual content flags
@@ -272,7 +273,7 @@ export default defineCommand({
       process.stderr.write(
         "Error: --regenerate/--refine/--refine-stdin cannot be combined with --content or --content-file.\n",
       );
-      process.exit(2);
+      exitCli(2);
     }
 
     // Mutex: existing --content + --content-file guard (exit 2 per Bug A spec).
@@ -280,13 +281,13 @@ export default defineCommand({
       process.stderr.write(
         "Error: --content and --content-file are mutually exclusive. Pass only one.\n",
       );
-      process.exit(2);
+      exitCli(2);
     }
 
     // Validate --refine inline prompt is non-empty
     if (hasRefine && args.refine!.trim() === "") {
       process.stderr.write("Error: --refine requires a non-empty prompt string.\n");
-      process.exit(2);
+      exitCli(2);
     }
 
     // Read stdin for --refine-stdin (synchronous, before loading app)
@@ -302,12 +303,12 @@ export default defineCommand({
         process.stderr.write(
           `Error: failed to read stdin: ${e instanceof Error ? e.message : String(e)}\n`,
         );
-        process.exit(2);
+        exitCli(2);
       }
       stdinPrompt = raw.trim();
       if (!stdinPrompt) {
         process.stderr.write("Error: --refine-stdin requires non-empty stdin input.\n");
-        process.exit(2);
+        exitCli(2);
       }
     }
 
@@ -318,7 +319,7 @@ export default defineCommand({
       const reason = typeof args.correction === "string" ? args.correction.trim() : "";
       if (reason === "") {
         process.stderr.write('Error: --correction requires a non-empty reason (--correction "<why this is a fix>").\n');
-        process.exit(2);
+        exitCli(2);
       }
       correctionOpt = { reason };
       // reason: BR-1050 — a correction is a hand-written small fix; an AI rewrite is the opposite of that, so the
@@ -332,7 +333,7 @@ export default defineCommand({
         process.stderr.write(
           `Error: --correction cannot be combined with ${aiFlags.join(" / ")} — a correction is a hand-written small fix, not an AI rewrite.\n`,
         );
-        process.exit(2);
+        exitCli(2);
       }
     }
 
@@ -353,7 +354,7 @@ export default defineCommand({
             "Error: AI is required for --regenerate/--refine/--refine-stdin but is disabled " +
               "for this surface. Pass --ai to enable.\n",
           );
-          process.exitCode = 2;
+          setExitCode(2);
           return;
         }
 
@@ -361,13 +362,13 @@ export default defineCommand({
         const resolveResult = await app.corpusService.resolve(args.id);
         if (!resolveResult.ok) {
           process.stderr.write(formatErrorFor(inv, resolveResult.error) + "\n");
-          process.exitCode = exitCode(resolveResult.error);
+          setExitCode(exitCode(resolveResult.error));
           return;
         }
         const getResult = await app.corpusService.get(resolveResult.value);
         if (!getResult.ok) {
           process.stderr.write(formatErrorFor(inv, getResult.error) + "\n");
-          process.exitCode = exitCode(getResult.error);
+          setExitCode(exitCode(getResult.error));
           return;
         }
         const doc = getResult.value.doc;
@@ -377,7 +378,7 @@ export default defineCommand({
         const rewriteGate = await app.corpusService.assertAiRewriteAllowed(doc);
         if (!rewriteGate.ok) {
           process.stderr.write(formatErrorFor(inv, rewriteGate.error) + "\n");
-          process.exitCode = exitCode(rewriteGate.error);
+          setExitCode(exitCode(rewriteGate.error));
           return;
         }
 
@@ -410,7 +411,7 @@ export default defineCommand({
 
           if (!aiResult.ok) {
             process.stderr.write(formatErrorFor(inv, aiResult.error) + "\n");
-            process.exitCode = exitCode(aiResult.error);
+            setExitCode(exitCode(aiResult.error));
             return;
           }
 
@@ -440,7 +441,7 @@ export default defineCommand({
 
           if (!aiResult.ok) {
             process.stderr.write(formatErrorFor(inv, aiResult.error) + "\n");
-            process.exitCode = exitCode(aiResult.error);
+            setExitCode(exitCode(aiResult.error));
             return;
           }
 
@@ -466,7 +467,7 @@ export default defineCommand({
 
         if (!setResult.ok) {
           process.stderr.write(formatErrorFor(inv, setResult.error) + "\n");
-          process.exitCode = exitCode(setResult.error);
+          setExitCode(exitCode(setResult.error));
           return;
         }
 
@@ -497,7 +498,7 @@ export default defineCommand({
           process.stderr.write(
             `Error: cannot read --content-file '${args["content-file"]}': ${e instanceof Error ? e.message : String(e)}\n`,
           );
-          process.exitCode = 4;
+          setExitCode(4);
           return;
         }
         patch["content"] = fileContent;
@@ -516,13 +517,13 @@ export default defineCommand({
         const resolveForKind = await app.corpusService.resolve(args.id);
         if (!resolveForKind.ok) {
           process.stderr.write(formatErrorFor(inv, resolveForKind.error) + "\n");
-          process.exitCode = exitCode(resolveForKind.error);
+          setExitCode(exitCode(resolveForKind.error));
           return;
         }
         const getForKind = await app.corpusService.get(resolveForKind.value);
         if (!getForKind.ok) {
           process.stderr.write(formatErrorFor(inv, getForKind.error) + "\n");
-          process.exitCode = exitCode(getForKind.error);
+          setExitCode(exitCode(getForKind.error));
           return;
         }
         const targetDoc = getForKind.value.doc;
@@ -531,7 +532,7 @@ export default defineCommand({
           process.stderr.write(
             `Error: --kind is only valid for type 'spec' (got '${targetDoc.type}').\n`,
           );
-          process.exit(2);
+          exitCli(2);
         }
 
         if (!SPEC_KINDS.includes(args.kind as SpecKind)) {
@@ -539,7 +540,7 @@ export default defineCommand({
             `Error: Invalid --kind '${args.kind}'.\n` +
               `  Valid values: ${SPEC_KINDS.join(" | ")}\n`,
           );
-          process.exitCode = 4;
+          setExitCode(4);
           return;
         }
 
@@ -555,19 +556,19 @@ export default defineCommand({
         const checkResult = checkDecisionStatusValue(args["decision-status"]);
         if (checkResult.kind === "refused") {
           process.stderr.write(formatDecisionStatusRefusal(checkResult) + "\n");
-          process.exit(2);
+          exitCli(2);
         }
 
         const resolveForDecisionStatus = await app.corpusService.resolve(args.id);
         if (!resolveForDecisionStatus.ok) {
           process.stderr.write(formatErrorFor(inv, resolveForDecisionStatus.error) + "\n");
-          process.exitCode = exitCode(resolveForDecisionStatus.error);
+          setExitCode(exitCode(resolveForDecisionStatus.error));
           return;
         }
         const getForDecisionStatus = await app.corpusService.get(resolveForDecisionStatus.value);
         if (!getForDecisionStatus.ok) {
           process.stderr.write(formatErrorFor(inv, getForDecisionStatus.error) + "\n");
-          process.exitCode = exitCode(getForDecisionStatus.error);
+          setExitCode(exitCode(getForDecisionStatus.error));
           return;
         }
         const targetDocForDecisionStatus = getForDecisionStatus.value.doc;
@@ -576,7 +577,7 @@ export default defineCommand({
           process.stderr.write(
             `Error: --decision-status is only valid for type 'adr' (got '${targetDocForDecisionStatus.type}').\n`,
           );
-          process.exitCode = 4;
+          setExitCode(4);
           return;
         }
 
@@ -619,13 +620,13 @@ export default defineCommand({
         const resolvedId = await app.corpusService.resolve(args.id);
         if (!resolvedId.ok) {
           process.stderr.write(formatErrorFor(inv, resolvedId.error) + "\n");
-          process.exitCode = exitCode(resolvedId.error);
+          setExitCode(exitCode(resolvedId.error));
           return;
         }
         const getResult = await app.corpusService.get(resolvedId.value);
         if (!getResult.ok) {
           process.stderr.write(formatErrorFor(inv, getResult.error) + "\n");
-          process.exitCode = exitCode(getResult.error);
+          setExitCode(exitCode(getResult.error));
           return;
         }
         const currentDoc = getResult.value.doc;
@@ -639,7 +640,7 @@ export default defineCommand({
         });
         if (!editorResult.ok) {
           process.stderr.write(formatErrorFor(inv, editorResult.error) + "\n");
-          process.exitCode = exitCode(editorResult.error);
+          setExitCode(exitCode(editorResult.error));
           return;
         }
 
@@ -666,13 +667,13 @@ export default defineCommand({
         const resolveForDemotion = await app.corpusService.resolve(args.id);
         if (!resolveForDemotion.ok) {
           process.stderr.write(formatErrorFor(inv, resolveForDemotion.error) + "\n");
-          process.exitCode = exitCode(resolveForDemotion.error);
+          setExitCode(exitCode(resolveForDemotion.error));
           return;
         }
         const getForDemotion = await app.corpusService.get(resolveForDemotion.value);
         if (!getForDemotion.ok) {
           process.stderr.write(formatErrorFor(inv, getForDemotion.error) + "\n");
-          process.exitCode = exitCode(getForDemotion.error);
+          setExitCode(exitCode(getForDemotion.error));
           return;
         }
         priorStatusForDemotionAdvisory = getForDemotion.value.doc.status;
@@ -685,7 +686,7 @@ export default defineCommand({
 
       if (!result.ok) {
         process.stderr.write(formatErrorFor(inv, result.error) + "\n");
-        process.exitCode = exitCode(result.error);
+        setExitCode(exitCode(result.error));
         return;
       }
 

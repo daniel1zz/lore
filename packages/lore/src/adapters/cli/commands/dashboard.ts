@@ -80,6 +80,7 @@
  */
 
 import { dirname, join } from "node:path";
+import { exitCli } from "../run-scope.js";
 import { spawn } from "node:child_process";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { defineCommand } from "citty";
@@ -126,7 +127,7 @@ function parsePort(rawValue: string | undefined, flagName: string, fallback: str
   const port = parseInt(rawValue ?? fallback, 10);
   if (isNaN(port) || port < 1 || port > 65535) {
     process.stderr.write(`Error: --${flagName} must be a valid port (1–65535)\n`);
-    process.exit(1);
+    exitCli(1);
   }
   return port;
 }
@@ -286,7 +287,7 @@ async function runPackagedMode(
         `Run 'bun run build' to build them for packaged mode, or run 'lore dashboard --dev' ` +
         `to use the development topology instead.\n`,
     );
-    process.exit(1);
+    exitCli(1);
   }
 
   const apiPort = parsePort(args["api-port"], "api-port", "8787");
@@ -362,7 +363,7 @@ async function runPackagedMode(
 
   // Block until SIGINT (Ctrl+C) OR SIGTERM (kill/pkill default).
   await shutdownPromise;
-  process.exit(0);
+  exitCli(0);
 }
 
 // ─── Dev mode (--dev; pre-existing two-process Vite topology) ──────────────────
@@ -637,7 +638,7 @@ async function runDevMode(
     // or open a browser for a run that is already shutting down; just wait for the
     // in-flight teardown to finish and exit cleanly.
     await shutdownPromise;
-    process.exit(0);
+    exitCli(0);
   }
 
   if (startupOutcome.kind === "exited") {
@@ -650,7 +651,7 @@ async function runDevMode(
         `and retry.\n`,
     );
     await teardown("startup-failure");
-    process.exit(1);
+    exitCli(1);
   } else if (startupOutcome.kind === "timeout") {
     process.stderr.write(
       `[dashboard] Warning: Vite did not respond on port ${dashPort} in time — continuing anyway (may still be starting up).\n`,
@@ -674,7 +675,7 @@ async function runDevMode(
   // where neither exit path above already fired.
   await shutdownPromise;
 
-  process.exit(0);
+  exitCli(0);
 }
 
 // ─── Command ───────────────────────────────────────────────────────────────────

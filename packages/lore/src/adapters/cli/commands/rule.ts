@@ -37,6 +37,7 @@
  */
 
 import type { Invocation } from "@lore/core";
+import { setExitCode } from "../run-scope.js";
 import { defineCommand } from "citty";
 import type { LoreError } from "@lore/core";
 import { loadLoreApp } from "../loader.js";
@@ -55,13 +56,13 @@ function repeatable(value: unknown): string[] | undefined {
 function reportFailure(inv: Invocation, error: LoreError, json: boolean): void {
   if (json) console.log(JSON.stringify({ ok: false, error }, null, 2));
   else process.stderr.write(formatErrorFor(inv, error));
-  process.exitCode = exitCode(error);
+  setExitCode(exitCode(error));
 }
 
 function requireRuleService(app: App) {
   if (app.ruleService === undefined) {
     process.stderr.write("Error: RuleService is not available in this build.\n");
-    process.exitCode = 1;
+    setExitCode(1);
     return undefined;
   }
   return app.ruleService;
@@ -92,7 +93,7 @@ type FourPartFlags = Pick<AddRuleInput, "current_reality" | "target_rule" | "cur
 function failUsage(message: string, json: boolean): void {
   if (json) console.log(JSON.stringify({ ok: false, error: { code: "VALIDATION_ERROR", field: "args", message } }, null, 2));
   else process.stderr.write(`Error: ${message}\n`);
-  process.exitCode = 2;
+  setExitCode(2);
 }
 
 export default defineCommand({

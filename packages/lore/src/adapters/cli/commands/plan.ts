@@ -57,6 +57,7 @@
  */
 
 import { defineCommand } from "citty";
+import { setExitCode } from "../run-scope.js";
 import { exitCode, formatErrorFor, resolveActor } from "../utils.js";
 import {
   ATTESTATION_EXEMPT_KIND_VALUES,
@@ -85,7 +86,7 @@ function requirePlanExemptionService(app: { planExemptionService?: PlanExemption
 /** Writes a usage refusal to stderr and sets the SPEC-003 §5 usage exit code. */
 function refuse(message: string): void {
   process.stderr.write(message + "\n");
-  process.exitCode = PLAN_EXEMPT_USAGE_EXIT_CODE;
+  setExitCode(PLAN_EXEMPT_USAGE_EXIT_CODE);
 }
 
 const sharedArgs = {
@@ -144,7 +145,7 @@ export default defineCommand({
           if (!result.ok) {
             if (args.json) console.log(JSON.stringify({ ok: false, error: result.error }, null, 2));
             else process.stderr.write(formatErrorFor(inv, result.error) + "\n");
-            process.exitCode = exitCode(result.error);
+            setExitCode(exitCode(result.error));
             return;
           }
 
@@ -191,7 +192,7 @@ export default defineCommand({
           if (!result.ok) {
             if (args.json) console.log(JSON.stringify({ ok: false, error: result.error }, null, 2));
             else process.stderr.write(formatErrorFor(inv, result.error) + "\n");
-            process.exitCode = exitCode(result.error);
+            setExitCode(exitCode(result.error));
             return;
           }
 

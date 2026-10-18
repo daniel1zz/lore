@@ -3,6 +3,7 @@
  */
 
 import { defineCommand } from "citty";
+import { exitCli, setExitCode } from "../run-scope.js";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatErrorFor } from "../utils.js";
 import type { DocId } from "@lore/core";
@@ -39,7 +40,7 @@ export default defineCommand({
     const versionNum = parseInt(args.version, 10);
     if (isNaN(versionNum) || versionNum < 1) {
       process.stderr.write("Error: version must be a positive integer.\n");
-      process.exit(2);
+      exitCli(2);
     }
 
     const { app } = loadLoreApp({ inv });
@@ -48,7 +49,7 @@ export default defineCommand({
 
       if (!result.ok) {
         process.stderr.write(formatErrorFor(inv, result.error) + "\n");
-        process.exitCode = exitCode(result.error);
+        setExitCode(exitCode(result.error));
         return;
       }
 

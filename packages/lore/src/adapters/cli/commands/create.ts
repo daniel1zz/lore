@@ -61,6 +61,7 @@
  */
 
 import { readFileSync } from "node:fs";
+import { exitCli, setExitCode } from "../run-scope.js";
 import { defineCommand } from "citty";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatErrorFor, resolveActor } from "../utils.js";
@@ -261,12 +262,12 @@ export default defineCommand({
       process.stderr.write(
         `Error: Invalid type '${args.type}'. Valid types: ${VALID_TYPES.join(", ")}\n`,
       );
-      process.exit(2);
+      exitCli(2);
     }
 
     if (!args.title) {
       process.stderr.write("Error: --title is required.\n");
-      process.exit(2);
+      exitCli(2);
     }
 
     // Reject empty string passed explicitly to --parent (citty parses "" as string "").
@@ -274,7 +275,7 @@ export default defineCommand({
       process.stderr.write(
         "Error: --parent received empty string. Pass a valid document ID or slug, or omit the flag.\n",
       );
-      process.exit(2);
+      exitCli(2);
     }
 
     // Reject type-flag mismatches: e.g. `lore create prd --decision-status accepted`
@@ -284,7 +285,7 @@ export default defineCommand({
         process.stderr.write(
           `Error: --${flag} is only valid for type(s): ${allowedTypes.join(", ")} (got '${docType}').\n`,
         );
-        process.exit(2);
+        exitCli(2);
       }
     }
 
@@ -296,14 +297,14 @@ export default defineCommand({
           `Error: --decision-status is required for type 'adr'.\n` +
             `  Valid values: ${ADR_DECISION_STATUSES.join(" | ")}\n`,
         );
-        process.exit(2);
+        exitCli(2);
       }
       if (!ADR_DECISION_STATUSES.includes(ds as AdrDecisionStatus)) {
         process.stderr.write(
           `Error: Invalid --decision-status '${ds}'.\n` +
             `  Valid values: ${ADR_DECISION_STATUSES.join(" | ")}\n`,
         );
-        process.exit(2);
+        exitCli(2);
       }
     }
 
@@ -314,14 +315,14 @@ export default defineCommand({
           `Error: --sub-type is required for type 'knowledge'.\n` +
             `  Valid values: ${KNOWLEDGE_SUB_TYPES.join(" | ")}\n`,
         );
-        process.exit(2);
+        exitCli(2);
       }
       if (!KNOWLEDGE_SUB_TYPES.includes(st as KnowledgeSubType)) {
         process.stderr.write(
           `Error: Invalid --sub-type '${st}'.\n` +
             `  Valid values: ${KNOWLEDGE_SUB_TYPES.join(" | ")}\n`,
         );
-        process.exit(2);
+        exitCli(2);
       }
     }
 
@@ -348,12 +349,12 @@ export default defineCommand({
       const adhocConflicts = checkTaskCreateAdhocConflicts(taskCreateFlags);
       if (adhocConflicts.length > 0) {
         process.stderr.write(formatTaskCreateAdhocConflictError(adhocConflicts) + "\n");
-        process.exit(2);
+        exitCli(2);
       }
       const missingTaskFlags = checkTaskCreateRequiredFlags(taskCreateFlags);
       if (missingTaskFlags.length > 0) {
         process.stderr.write(formatTaskCreateMissingFlagsError(missingTaskFlags) + "\n");
-        process.exit(2);
+        exitCli(2);
       }
       // The ad-hoc branch of --ac-scope requiredness (task-an-ad-hoc-task-can-
       // never-reach-the-attestation-path-that). Checked AFTER the two exit-2
@@ -367,7 +368,7 @@ export default defineCommand({
       // ac-scope requiredness refusal.
       if (isAdhocAcScopeDeclarationMissing(taskCreateFlags, acScope.passed)) {
         process.stderr.write(formatAdhocAcScopeMissingError() + "\n");
-        process.exit(4);
+        exitCli(4);
       }
     }
 
@@ -391,7 +392,7 @@ export default defineCommand({
       process.stderr.write(
         "Error: --ai and --no-ai are mutually exclusive. Pass only one.\n",
       );
-      process.exit(2);
+      exitCli(2);
     }
 
     const explicitAi: boolean | undefined = _hasExplicitAi
@@ -416,7 +417,7 @@ export default defineCommand({
         process.stderr.write(
           "Error: --content and --content-file are mutually exclusive. Pass only one.\n",
         );
-        process.exit(2);
+        exitCli(2);
       }
 
       // Content decision tree (SPEC-017 §3.11, amended by SPEC-024):
@@ -445,7 +446,7 @@ export default defineCommand({
           process.stderr.write(
             `Error: cannot read --content-file '${args["content-file"]}': ${e instanceof Error ? e.message : String(e)}\n`,
           );
-          process.exitCode = 4;
+          setExitCode(4);
           return;
         }
       }
@@ -458,7 +459,7 @@ export default defineCommand({
           const editorResult = await openEditor({ defaults, env: inv.env, tmpDir: inv.paths.tmpDir });
           if (!editorResult.ok) {
             process.stderr.write(formatErrorFor(inv, editorResult.error) + "\n");
-            process.exitCode = exitCode(editorResult.error);
+            setExitCode(exitCode(editorResult.error));
             return;
           }
           resolvedContent = editorResult.value;
@@ -493,7 +494,7 @@ export default defineCommand({
 
           if (!aiResult.ok) {
             process.stderr.write(formatErrorFor(inv, aiResult.error) + "\n");
-            process.exitCode = exitCode(aiResult.error);
+            setExitCode(exitCode(aiResult.error));
             return;
           }
 
@@ -514,7 +515,7 @@ export default defineCommand({
         const planResolve = await app.corpusService.resolve(args["plan-id"]);
         if (!planResolve.ok) {
           process.stderr.write(formatErrorFor(inv, planResolve.error) + "\n");
-          process.exitCode = exitCode(planResolve.error);
+          setExitCode(exitCode(planResolve.error));
           return;
         }
         resolvedPlanId = planResolve.value;
@@ -528,7 +529,7 @@ export default defineCommand({
         const resolved = await resolveResolvesTargets(app.corpusService, resolvesTokens);
         if (!resolved.ok) {
           process.stderr.write(formatErrorFor(inv, resolved.error) + "\n");
-          process.exitCode = exitCode(resolved.error);
+          setExitCode(exitCode(resolved.error));
           return;
         }
         resolvesTargets = resolved.value;
@@ -586,7 +587,7 @@ export default defineCommand({
       if (args.supersedes !== undefined) {
         if (app.validityService === undefined) {
           process.stderr.write("Error: ValidityService not wired on this App instance.\n");
-          process.exitCode = 1;
+          setExitCode(1);
           return;
         }
 
@@ -608,7 +609,7 @@ export default defineCommand({
         );
         if (!orchResult.ok) {
           process.stderr.write(formatErrorFor(inv, orchResult.error) + "\n");
-          process.exitCode = exitCode(orchResult.error);
+          setExitCode(exitCode(orchResult.error));
           return;
         }
         doc = orchResult.value.doc;
@@ -617,7 +618,7 @@ export default defineCommand({
         const result = await app.corpusService.create(createInput, { by: resolvedActor });
         if (!result.ok) {
           process.stderr.write(formatErrorFor(inv, result.error) + "\n");
-          process.exitCode = exitCode(result.error);
+          setExitCode(exitCode(result.error));
           return;
         }
         doc = result.value;
@@ -665,7 +666,7 @@ export default defineCommand({
           `Error: ${doc.slug} was created but its resolves link to ${failure.slug} failed (${formatErrorFor(inv, failure.error)})\n` +
             `  Repair: lore link ${doc.slug} ${failure.slug} --type resolves\n`,
         );
-        process.exitCode = exitCode(failure.error);
+        setExitCode(exitCode(failure.error));
       }
 
       // Loud orphan (D11, never silent) — create succeeded but the follow-up
@@ -674,7 +675,7 @@ export default defineCommand({
       if (supersedeError !== undefined) {
         const repairMsg = renderSupersedeRepairMessage(args.supersedes!, doc.slug);
         process.stderr.write(`Error: ${repairMsg}\n  (invalidate failed: ${formatErrorFor(inv, supersedeError)})\n`);
-        process.exitCode = exitCode(supersedeError);
+        setExitCode(exitCode(supersedeError));
       }
 
       // Create-time orphan advisory (task-create-time-orphan-advisory-warn-or-default-

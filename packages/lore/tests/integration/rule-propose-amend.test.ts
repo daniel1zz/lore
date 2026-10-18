@@ -32,7 +32,7 @@ let leafSlug = "";
 let liveRuleId = "";
 
 async function lore(args: readonly string[]): Promise<RunResult> {
-  return await runLoreInProcess(args, { cwd: dir, env: { ...process.env, HOME: dir, EDITOR: "true" } });
+  return await runLoreInProcess(args, { cwd: dir, home: dir, env: { ...process.env, HOME: dir, EDITOR: "true" } });
 }
 
 async function loreOk(args: readonly string[]): Promise<string> {
@@ -113,7 +113,7 @@ beforeAll(async () => {
   );
   const prd = slugOf(await loreOk(["create", "prd", "--title", "Fixture PRD", "--no-ai", "--content", "## Overview\n\nFixture body.", "--json"]));
   liveRuleId = await ensureLiveRuleViaAsyncCli(
-    asyncLoreRunnerFor(async (args, cwd) => await runLoreInProcess(args, { cwd, env: { ...process.env, HOME: cwd, EDITOR: "true" } }), dir),
+    asyncLoreRunnerFor(async (args, cwd) => await runLoreInProcess(args, { cwd, home: cwd, env: { ...process.env, HOME: cwd, EDITOR: "true" } }), dir),
     dir,
     prd,
   );

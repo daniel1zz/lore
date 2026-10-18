@@ -18,6 +18,7 @@
  */
 
 import { defineCommand } from "citty";
+import { exitCli, setExitCode } from "../run-scope.js";
 import { loadLoreApp } from "../loader.js";
 import {
   runMigrationCoverage,
@@ -56,7 +57,7 @@ const migrationCommand = defineCommand({
     const inv = invocationOf(context);
     if (!args.from) {
       process.stderr.write("Error: --from <dir> is required.\n");
-      process.exit(2);
+      exitCli(2);
     }
 
     const { app } = loadLoreApp({ inv });
@@ -67,7 +68,7 @@ const migrationCommand = defineCommand({
       if (args.json) {
         // CLI surface — console.log is intentional output here
         console.log(JSON.stringify({ ok: result.passed, data: result }, null, 2)); // CLI surface
-        process.exitCode = result.passed ? 0 : 1;
+        setExitCode(result.passed ? 0 : 1);
         return;
       }
 
@@ -90,7 +91,7 @@ const migrationCommand = defineCommand({
       }
 
       console.log(`\nResult:        ${result.passed ? "PASSED" : "FAILED"}`); // CLI surface
-      process.exitCode = result.passed ? 0 : 1;
+      setExitCode(result.passed ? 0 : 1);
       return;
     } finally {
       app.close();
@@ -121,7 +122,7 @@ const treeCommand = defineCommand({
 
       if (args.json) {
         console.log(JSON.stringify({ ok: result.passed, data: result }, null, 2)); // CLI surface
-        process.exitCode = result.passed ? 0 : 1;
+        setExitCode(result.passed ? 0 : 1);
         return;
       }
 
@@ -158,7 +159,7 @@ const treeCommand = defineCommand({
       }
 
       console.log(`\nResult: ${result.passed ? "PASSED" : "FAILED"}`); // CLI surface
-      process.exitCode = result.passed ? 0 : 1;
+      setExitCode(result.passed ? 0 : 1);
       return;
     } finally {
       app.close();
@@ -189,7 +190,7 @@ const linksCommand = defineCommand({
 
       if (args.json) {
         console.log(JSON.stringify({ ok: result.passed, data: result }, null, 2)); // CLI surface
-        process.exitCode = result.passed ? 0 : 1;
+        setExitCode(result.passed ? 0 : 1);
         return;
       }
 
@@ -226,7 +227,7 @@ const linksCommand = defineCommand({
       }
 
       console.log(`\nResult: ${result.passed ? "PASSED" : "FAILED"}`); // CLI surface
-      process.exitCode = result.passed ? 0 : 1;
+      setExitCode(result.passed ? 0 : 1);
       return;
     } finally {
       app.close();
@@ -260,7 +261,7 @@ const typesCommand = defineCommand({
 
       if (args.json) {
         console.log(JSON.stringify({ ok: result.passed, data: result }, null, 2)); // CLI surface
-        process.exitCode = result.passed ? 0 : 1;
+        setExitCode(result.passed ? 0 : 1);
         return;
       }
 
@@ -285,7 +286,7 @@ const typesCommand = defineCommand({
       }
 
       console.log(`\nResult: ${result.passed ? "PASSED" : "FAILED"}`); // CLI surface
-      process.exitCode = result.passed ? 0 : 1;
+      setExitCode(result.passed ? 0 : 1);
       return;
     } finally {
       app.close();
@@ -318,7 +319,7 @@ const ftsCommand = defineCommand({
 
       if (args.json) {
         console.log(JSON.stringify({ ok: result.passed, data: result }, null, 2)); // CLI surface
-        process.exitCode = result.passed ? 0 : 1;
+        setExitCode(result.passed ? 0 : 1);
         return;
       }
 
@@ -340,7 +341,7 @@ const ftsCommand = defineCommand({
       }
 
       console.log(`\nResult: ${result.passed ? "PASSED" : "FAILED"}`); // CLI surface
-      process.exitCode = result.passed ? 0 : 1;
+      setExitCode(result.passed ? 0 : 1);
       return;
     } finally {
       app.close();
@@ -371,7 +372,7 @@ const placeholdersCommand = defineCommand({
 
       if (args.json) {
         console.log(JSON.stringify({ ok: result.passed, data: result }, null, 2)); // CLI surface
-        process.exitCode = result.passed ? 0 : 1;
+        setExitCode(result.passed ? 0 : 1);
         return;
       }
 
@@ -401,7 +402,7 @@ const placeholdersCommand = defineCommand({
       }
 
       console.log(`\nResult: ${result.passed ? "PASSED" : "FAILED"}`); // CLI surface
-      process.exitCode = result.passed ? 0 : 1;
+      setExitCode(result.passed ? 0 : 1);
       return;
     } finally {
       app.close();

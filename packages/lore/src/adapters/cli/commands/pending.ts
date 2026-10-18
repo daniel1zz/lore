@@ -29,6 +29,7 @@
  */
 
 import { defineCommand } from "citty";
+import { setExitCode } from "../run-scope.js";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatErrorFor, formatTable } from "../utils.js";
 import { PENDING_TABLE_HEADERS, buildPendingTableRows } from "../pending-render.js";
@@ -93,7 +94,7 @@ export default defineCommand({
       const decisionsResult = await collectPendingDecisions(dbPath, inv.env, repoRoot);
       if (!decisionsResult.ok) {
         process.stderr.write(formatErrorFor(inv, decisionsResult.error) + "\n");
-        process.exitCode = exitCode(decisionsResult.error);
+        setExitCode(exitCode(decisionsResult.error));
         return;
       }
       const decisions = decisionsResult.value;
@@ -101,7 +102,7 @@ export default defineCommand({
       const auditResult = await collectAuditItems(dbPath);
       if (!auditResult.ok) {
         process.stderr.write(formatErrorFor(inv, auditResult.error) + "\n");
-        process.exitCode = exitCode(auditResult.error);
+        setExitCode(exitCode(auditResult.error));
         return;
       }
       const audit = auditResult.value;
@@ -118,7 +119,7 @@ export default defineCommand({
 
       if (!result.ok) {
         process.stderr.write(formatErrorFor(inv, result.error) + "\n");
-        process.exitCode = exitCode(result.error);
+        setExitCode(exitCode(result.error));
         return;
       }
 
@@ -146,7 +147,7 @@ export default defineCommand({
         const judgmentResult = await app.judgmentService.latestFor(doc.id);
         if (!judgmentResult.ok) {
           process.stderr.write(formatErrorFor(inv, judgmentResult.error) + "\n");
-          process.exitCode = exitCode(judgmentResult.error);
+          setExitCode(exitCode(judgmentResult.error));
           return;
         }
         judgments.set(doc.id, judgmentResult.value);

@@ -54,6 +54,7 @@
  */
 
 import { invocationOf } from "../command-invocation.js";
+import { exitCli, setExitCode } from "../run-scope.js";
 import { defineCommand } from "citty";
 import { taskClaimSchema } from "@lore/core";
 import type { ActorSource } from "@lore/core/node";
@@ -108,7 +109,7 @@ export default defineCommand({
       const verifiedIdentity = await app.verifiedInvocationIdentity?.();
       if (verifiedIdentity !== undefined && !verifiedIdentity.ok) {
         console.error(formatErrorFor(inv, verifiedIdentity.error)); // CLI surface
-        process.exit(exitCode(verifiedIdentity.error));
+        exitCli(exitCode(verifiedIdentity.error));
       }
       const verifiedRun = verifiedIdentity?.value?.harnessRun ?? null;
       const resolvedActor = resolveActorWithIdentitySource(undefined, inv.env, inv.cwd, inv.user);
@@ -155,7 +156,7 @@ export default defineCommand({
         // passing it on would silently drop an authority the caller believes they were granted.
         if (claimOpts.corpusScope !== undefined) {
           process.stderr.write("Error: --corpus-scope applies to task claims only; this target is a phase\n");
-          process.exitCode = 2;
+          setExitCode(2);
           return;
         }
         result = await requirePhaseWorkflowService(app).claim(args.task as string, claimOpts);
@@ -163,7 +164,7 @@ export default defineCommand({
 
       if (!result.ok) {
         process.stderr.write(formatErrorFor(inv, result.error) + "\n");
-        process.exitCode = exitCode(result.error);
+        setExitCode(exitCode(result.error));
         return;
       }
 

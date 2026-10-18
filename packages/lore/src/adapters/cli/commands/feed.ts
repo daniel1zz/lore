@@ -94,6 +94,7 @@
  */
 
 import { defineCommand } from "citty";
+import { getExitCode, setExitCode } from "../run-scope.js";
 import type { Invocation, LoreConfig } from "@lore/core";
 import type { App } from "../../../app.js";
 import { loadLoreApp } from "../loader.js";
@@ -157,7 +158,7 @@ async function handleSessionResume(app: App, args: FeedArgs, _config: LoreConfig
 
   if (!result.ok) {
     process.stderr.write(formatErrorFor(inv, result.error) + "\n");
-    process.exitCode = exitCode(result.error);
+    setExitCode(exitCode(result.error));
     return;
   }
 
@@ -166,7 +167,7 @@ async function handleSessionResume(app: App, args: FeedArgs, _config: LoreConfig
   } else {
     console.log(result.value.feed);
   }
-  process.exitCode = 0;
+  setExitCode(0);
 }
 
 async function handlePhaseStart(app: App, args: FeedArgs, _config: LoreConfig | undefined, inv: Invocation): Promise<void> {
@@ -174,7 +175,7 @@ async function handlePhaseStart(app: App, args: FeedArgs, _config: LoreConfig | 
     process.stderr.write(
       `Error: \`lore feed phase-start <phase>\` ${FEED_PHASE_START_MISSING_TARGET}.\n`,
     );
-    process.exitCode = 2;
+    setExitCode(2);
     return;
   }
 
@@ -183,7 +184,7 @@ async function handlePhaseStart(app: App, args: FeedArgs, _config: LoreConfig | 
 
   if (!result.ok) {
     process.stderr.write(formatErrorFor(inv, result.error) + "\n");
-    process.exitCode = exitCode(result.error);
+    setExitCode(exitCode(result.error));
     return;
   }
 
@@ -192,7 +193,7 @@ async function handlePhaseStart(app: App, args: FeedArgs, _config: LoreConfig | 
   } else {
     renderPhaseStartPackText(result.value);
   }
-  process.exitCode = 0;
+  setExitCode(0);
 }
 
 async function handleTaskStart(app: App, args: FeedArgs, config: LoreConfig | undefined, inv: Invocation): Promise<void> {
@@ -200,7 +201,7 @@ async function handleTaskStart(app: App, args: FeedArgs, config: LoreConfig | un
     process.stderr.write(
       `Error: \`lore feed task-start <task>\` ${FEED_TASK_START_MISSING_TARGET}.\n`,
     );
-    process.exitCode = 2;
+    setExitCode(2);
     return;
   }
 
@@ -210,7 +211,7 @@ async function handleTaskStart(app: App, args: FeedArgs, config: LoreConfig | un
 
   if (!result.ok) {
     process.stderr.write(formatErrorFor(inv, result.error) + "\n");
-    process.exitCode = exitCode(result.error);
+    setExitCode(exitCode(result.error));
     return;
   }
 
@@ -219,7 +220,7 @@ async function handleTaskStart(app: App, args: FeedArgs, config: LoreConfig | un
   } else {
     console.log(renderTaskStartPack(result.value));
   }
-  process.exitCode = 0;
+  setExitCode(0);
 }
 
 /**
@@ -313,7 +314,7 @@ export default defineCommand({
         // assign 0 explicitly, so this was never a live bug — but the
         // invariant this predicate must enforce is "did NOT fail", not
         // "was 0 literally assigned", so unset must read as success.
-        if ((process.exitCode ?? 0) === 0) {
+        if (getExitCode() === 0) {
           const target = typeof args.target === "string" ? [args.target] : [];
           recordFeedTrace(app, inv, checkpointName, target);
         }
@@ -331,7 +332,7 @@ export default defineCommand({
       // second hand-maintained list of valid names.
       if (!isRegisteredCheckpoint(checkpointName)) {
         process.stderr.write(`Error: unknown checkpoint "${checkpointName}" — not registered as a lore gate checkpoint.\n`);
-        process.exitCode = 2;
+        setExitCode(2);
         return;
       }
 
@@ -349,7 +350,7 @@ export default defineCommand({
 
       // reason: feed is advisory context, never a gate — exit 0 always, regardless of
       // whether a governing skill was found (module header).
-      process.exitCode = 0;
+      setExitCode(0);
       const docsServed = typeof args.parent === "string" ? [args.parent] : [];
       recordFeedTrace(app, inv, checkpointName, docsServed);
     } finally {

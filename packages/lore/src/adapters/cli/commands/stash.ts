@@ -15,6 +15,7 @@
  * Side-effect class: IO (git subprocesses in the repo root, corpus DB reads and decision_log appends).
  */
 import { spawnSync } from "node:child_process";
+import { setExitCode } from "../run-scope.js";
 import { defineCommand } from "citty";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatErrorFor } from "../utils.js";
@@ -90,7 +91,7 @@ const prune = defineCommand({
     try {
       if (app.repoRoot === undefined) {
         process.stderr.write("Error: repoRoot not set on this App instance.\n");
-        process.exitCode = 1;
+        setExitCode(1);
         return;
       }
       // reason: the decision record must carry the run the store wrapper stamps onto rows (BR-1035,
@@ -98,7 +99,7 @@ const prune = defineCommand({
       const verifiedIdentity = await app.verifiedInvocationIdentity?.();
       if (verifiedIdentity !== undefined && !verifiedIdentity.ok) {
         process.stderr.write(`${formatErrorFor(inv, verifiedIdentity.error)}\n`);
-        process.exitCode = exitCode(verifiedIdentity.error);
+        setExitCode(exitCode(verifiedIdentity.error));
         return;
       }
       store = new SQLiteStore(dbPath);
@@ -113,7 +114,7 @@ const prune = defineCommand({
       const result = args.apply === true ? await service.apply() : await dryRun(service);
       if (!result.ok) {
         process.stderr.write(`${formatErrorFor(inv, result.error)}\n`);
-        process.exitCode = exitCode(result.error);
+        setExitCode(exitCode(result.error));
         return;
       }
       process.stdout.write(`${args.json === true ? JSON.stringify({ ok: true, data: result.value }, null, 2) : renderReport(result.value)}\n`);

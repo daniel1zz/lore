@@ -23,6 +23,7 @@
  * Side-effect class: IO (file reads, one `lore bootstrap` spawn for `pointers`, stdout/stderr writes).
  */
 import { spawnSync } from "node:child_process";
+import { setExitCode } from "../run-scope.js";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -213,7 +214,7 @@ function isAction(value: string): value is Action {
 
 function usageError(message: string): void {
   process.stderr.write(`Error: ${message}\n`);
-  process.exitCode = USAGE_EXIT;
+  setExitCode(USAGE_EXIT);
 }
 
 function emitHookJson(outlet: HookOutlet, additionalContext: string): void {
@@ -265,7 +266,7 @@ export async function runCheck(args: Record<string, unknown>, cwd: string, inv: 
   if (!deps.ok) {
     if (json) writeAllSync(1, `${JSON.stringify({ ok: false, error: deps.error })}\n`);
     process.stderr.write(`${label}: ${deps.error.code}: ${deps.error.message}\n`);
-    process.exitCode = CHECK_FAILED_EXIT;
+    setExitCode(CHECK_FAILED_EXIT);
     return;
   }
   const report = await runFragmentsCheck(deps.value);
@@ -281,7 +282,7 @@ export async function runCheck(args: Record<string, unknown>, cwd: string, inv: 
   for (const finding of report.findings) {
     process.stderr.write(`[${finding.kind}] ${finding.code}: ${finding.message}\n`);
   }
-  if (!report.ok) process.exitCode = CHECK_FAILED_EXIT;
+  if (!report.ok) setExitCode(CHECK_FAILED_EXIT);
 }
 
 async function runPointers(cwd: string, inv: Invocation): Promise<void> {

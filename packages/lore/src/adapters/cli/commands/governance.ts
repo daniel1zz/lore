@@ -101,6 +101,7 @@
  */
 
 import { readFileSync } from "node:fs";
+import { setExitCode } from "../run-scope.js";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { defineCommand } from "citty";
@@ -277,7 +278,7 @@ export default defineCommand({
       process.stderr.write(
         `Error: lore governance accepts at most one topic (requested: ${distinctTopics.join(", ")})\n`,
       );
-      process.exitCode = 2;
+      setExitCode(2);
       return;
     }
 
@@ -285,7 +286,7 @@ export default defineCommand({
     let topic: GovernanceTopic;
     if (requestedTopic === undefined || requestedTopic === RETIRED_GOVERNANCE_TOPIC) {
       process.stderr.write(RETIRED_TOPIC_MESSAGE);
-      process.exitCode = 2;
+      setExitCode(2);
       return;
     } else if (isKnownGovernanceTopic(requestedTopic)) {
       topic = requestedTopic;
@@ -294,7 +295,7 @@ export default defineCommand({
       process.stderr.write(
         `Error: unknown governance topic "${requestedTopic}" (known topics: ${knownTopics})\n`,
       );
-      process.exitCode = 2;
+      setExitCode(2);
       return;
     }
 
@@ -323,7 +324,7 @@ export default defineCommand({
     const result = readGovernanceAsset(assetsRoot, GOVERNANCE_TOPIC_ASSETS[topic]);
     if (!result.ok) {
       process.stderr.write(formatErrorFor(inv, result.error) + "\n");
-      process.exitCode = exitCode(result.error);
+      setExitCode(exitCode(result.error));
       return;
     }
 

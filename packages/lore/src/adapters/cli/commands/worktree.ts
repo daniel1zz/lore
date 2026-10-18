@@ -19,6 +19,7 @@
  */
 
 import { defineCommand } from "citty";
+import { exitCli, setExitCode } from "../run-scope.js";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatErrorFor } from "../utils.js";
 import { resolveCallerSession } from "../caller-session.js";
@@ -41,7 +42,7 @@ function formatCheckLines(check: WorktreeCheck): string[] {
 
 function usageError(message: string): never {
   process.stderr.write(`Error: ${message}\n`);
-  process.exit(2);
+  exitCli(2);
 }
 
 const sessionArg = {
@@ -76,7 +77,7 @@ export default defineCommand({
           const service = app.worktreeRemovalService;
           if (service === undefined) {
             process.stderr.write("Error: this App was built without a worktree-removal service\n");
-            process.exitCode = 1;
+            setExitCode(1);
             return;
           }
           const check = await service.check(path, callerSession);
@@ -106,13 +107,13 @@ export default defineCommand({
           const service = app.worktreeRemovalService;
           if (service === undefined) {
             process.stderr.write("Error: this App was built without a worktree-removal service\n");
-            process.exitCode = 1;
+            setExitCode(1);
             return;
           }
           const result = await service.sweep({ apply: args.apply === true, callerSession, cwd: inv.cwd });
           if (!result.ok) {
             process.stderr.write(formatErrorFor(inv, result.error) + "\n");
-            process.exitCode = exitCode(result.error);
+            setExitCode(exitCode(result.error));
             return;
           }
           const rows: WorktreeSweepEntry[] = result.value;
@@ -129,7 +130,7 @@ export default defineCommand({
               if (row.error !== undefined) console.log(`  error: ${row.error}`);
             }
           }
-          if (rows.some((row) => row.removed === false)) process.exitCode = 1;
+          if (rows.some((row) => row.removed === false)) setExitCode(1);
         } finally {
           app.close();
         }

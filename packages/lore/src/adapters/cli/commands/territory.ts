@@ -51,6 +51,7 @@
  */
 
 import { defineCommand } from "citty";
+import { setExitCode } from "../run-scope.js";
 import { RealGitPort, listLocalBranches } from "../../real-git-port.js";
 import { resolveClaimSessionId } from "../../../service/task-workflow-service.js";
 import { loadLoreApp } from "../loader.js";
@@ -77,7 +78,7 @@ export default defineCommand({
     try {
       if (app.sessionService === undefined) {
         process.stderr.write("Error: SessionService not wired on this App instance.\n");
-        process.exitCode = 1;
+        setExitCode(1);
         return;
       }
       // reason: fail loud rather than silently substituting process.cwd()
@@ -86,7 +87,7 @@ export default defineCommand({
       // mis-constructed, not that process.cwd() is a safe stand-in.
       if (app.repoRoot === undefined) {
         process.stderr.write("Error: repoRoot not set on this App instance.\n");
-        process.exitCode = 1;
+        setExitCode(1);
         return;
       }
 
@@ -94,14 +95,14 @@ export default defineCommand({
       const worktreeListResult = await gitPort.worktreeList();
       if (!worktreeListResult.ok) {
         process.stderr.write(formatErrorFor(inv, worktreeListResult.error) + "\n");
-        process.exitCode = exitCode(worktreeListResult.error);
+        setExitCode(exitCode(worktreeListResult.error));
         return;
       }
 
       const activeSessionsResult = await app.sessionService.getActiveSessions();
       if (!activeSessionsResult.ok) {
         process.stderr.write(formatErrorFor(inv, activeSessionsResult.error) + "\n");
-        process.exitCode = exitCode(activeSessionsResult.error);
+        setExitCode(exitCode(activeSessionsResult.error));
         return;
       }
 

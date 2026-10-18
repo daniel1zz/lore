@@ -115,7 +115,7 @@ describe("AC-ES-1 concurrent in-process runs are isolated", () => {
           await new Promise((resolve) => setTimeout(resolve, 20));
           console.log(`stdout-after-wait ${label}`);
         },
-      } as CommandDef<any>;
+      } as unknown as CommandDef<any>;
     };
 
     const sandbox: Record<string, string> = {};

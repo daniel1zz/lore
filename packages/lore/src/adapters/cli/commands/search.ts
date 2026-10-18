@@ -21,6 +21,7 @@
  */
 
 import { defineCommand } from "citty";
+import { setExitCode } from "../run-scope.js";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatErrorFor, formatTable, formatValidityBadge, parsePositiveIntArg } from "../utils.js";
 import { resolveSubTypeFilter } from "../../../service/corpus-service.js";
@@ -77,7 +78,7 @@ export default defineCommand({
       const limitResult = parsePositiveIntArg(args.limit ?? "10", "--limit", { min: 1 });
       if (!limitResult.ok) {
         process.stderr.write(limitResult.message + "\n");
-        process.exitCode = 2;
+        setExitCode(2);
         return;
       }
 
@@ -87,7 +88,7 @@ export default defineCommand({
       const subTypeResolution = resolveSubTypeFilter(args["sub-type"], args.type);
       if (!subTypeResolution.ok) {
         process.stderr.write(subTypeResolution.message + "\n");
-        process.exitCode = 2;
+        setExitCode(2);
         return;
       }
 
@@ -100,7 +101,7 @@ export default defineCommand({
 
       if (!result.ok) {
         process.stderr.write(formatErrorFor(inv, result.error) + "\n");
-        process.exitCode = exitCode(result.error);
+        setExitCode(exitCode(result.error));
         return;
       }
 

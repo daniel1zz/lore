@@ -14,6 +14,7 @@ import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import type { MockInstance } from "vitest";
 import { runCli } from "../../../src/adapters/cli/run-cli";
 import { buildTestInvocation } from "../../helpers/test-invocation";
 
@@ -23,7 +24,7 @@ let cwd: string;
 
 /** The environment a run needs: PATH for git, the sandbox marker the corpus guard reads, and the throwaway HOME. */
 function runEnv(): Record<string, string> {
-  const env: Record<string, string> = { HOME: home, PATH: process.env["PATH"] ?? "" };
+  const env: Record<string, string> = { EDITOR: "true", HOME: home, PATH: process.env["PATH"] ?? "" };
   for (const key of ["LORE_TEST_SANDBOX", "LORE_TEST_SANDBOX_REPO"] as const) {
     const armed = process.env[key];
     if (armed !== undefined) env[key] = armed;
@@ -46,7 +47,7 @@ async function run(args: readonly string[]): Promise<{ code: number; stdout: str
   return { code, stdout: out.join(""), stderr: err.join("") };
 }
 
-let exitSpy: ReturnType<typeof vi.spyOn>;
+let exitSpy: MockInstance<typeof process.exit>;
 
 beforeAll(() => {
   root = mkdtempSync(join(tmpdir(), "lore-es-exit-code-"));
@@ -80,7 +81,11 @@ describe("AC-ES-2 runCli returns the exit code", () => {
     const list = await run(["list", "--json"]);
     expect(list.code).toBe(0);
 
-    const refused = await run(["create", "not-a-doc-type", "--title", "x"]);
+    const created = await run(["create", "plan", "--title", "Plan one", "--no-ai"]);
+    expect(created.code).toBe(0);
+
+    // `done` of a plan is a validation refusal ("Expected a task document"), not a usage error
+    const refused = await run(["done", "plan-one"]);
     expect(refused.code).toBe(4);
     expect(refused.stderr.length).toBeGreaterThan(0);
 

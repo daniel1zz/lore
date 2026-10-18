@@ -78,6 +78,7 @@
  */
 
 import { spawnSync } from "node:child_process";
+import { exitCli, setExitCode } from "../run-scope.js";
 import { readFileSync } from "node:fs";
 import { defineCommand } from "citty";
 import { loadLoreApp } from "../loader.js";
@@ -169,18 +170,18 @@ export default defineCommand({
 
     if (hasExplicitAi && hasExplicitNoAi) {
       process.stderr.write("Error: --ai and --no-ai are mutually exclusive. Pass only one.\n");
-      process.exit(2);
+      exitCli(2);
     }
     if (hasExplicitNoAi) {
       // reason: assess has no non-AI mode (SPEC-026 §3 D5) — the command name IS the AI
       // intent, so --no-ai is always a contradiction, unlike `set --regenerate`'s optional
       // AI path.
       process.stderr.write("Error: lore assess requires AI; --no-ai is a contradiction. Omit the flag to proceed.\n");
-      process.exit(2);
+      exitCli(2);
     }
     if (args.diff !== undefined && args["diff-file"] !== undefined) {
       process.stderr.write("Error: --diff and --diff-file are mutually exclusive.\n");
-      process.exit(2);
+      exitCli(2);
     }
 
     const { app } = loadLoreApp({ inv });
@@ -189,7 +190,7 @@ export default defineCommand({
       const bundleResult = await app.corpusService.getPlanBundle(args.plan);
       if (!bundleResult.ok) {
         process.stderr.write(formatErrorFor(inv, bundleResult.error) + "\n");
-        process.exitCode = exitCode(bundleResult.error);
+        setExitCode(exitCode(bundleResult.error));
         return;
       }
       const bundle = bundleResult.value;
@@ -202,7 +203,7 @@ export default defineCommand({
           message: `Plan '${bundle.plan.slug}' has zero child tasks — nothing to assess.`,
         };
         process.stderr.write(formatErrorFor(inv, noTasksError) + "\n");
-        process.exitCode = exitCode(noTasksError);
+        setExitCode(exitCode(noTasksError));
         return;
       }
 
@@ -217,7 +218,7 @@ export default defineCommand({
       const freshnessResult = await app.corpusService.getAssessmentFreshness(bundle.plan.id);
       if (!freshnessResult.ok) {
         process.stderr.write(formatErrorFor(inv, freshnessResult.error) + "\n");
-        process.exitCode = exitCode(freshnessResult.error);
+        setExitCode(exitCode(freshnessResult.error));
         return;
       }
       const freshness = freshnessResult.value;
@@ -259,12 +260,12 @@ export default defineCommand({
           // operator to look at git (AC-2, same task).
           if (gitResult.error && (gitResult.error as NodeJS.ErrnoException).code === "ENOBUFS") {
             process.stderr.write(formatGitDiffEnobufsMessage(args.diff, maxBuffer, maxDiffChars) + "\n");
-            process.exitCode = 2;
+            setExitCode(2);
             return;
           }
           const reason = gitResult.error?.message ?? gitResult.stderr?.trim() ?? `git exited ${gitResult.status}`;
           process.stderr.write(`Error: git diff ${args.diff} failed: ${reason}\n`);
-          process.exitCode = 2;
+          setExitCode(2);
           return;
         }
         diffText = gitResult.stdout;
@@ -275,7 +276,7 @@ export default defineCommand({
         } catch (e) {
           const message = e instanceof Error ? e.message : "unknown error";
           process.stderr.write(`Error: could not read --diff-file: ${message}\n`);
-          process.exitCode = 2;
+          setExitCode(2);
           return;
         }
         diffSource = { mode: "explicit_diff_file", path: args["diff-file"] };
@@ -357,7 +358,7 @@ export default defineCommand({
             "Error: AI is required for `lore assess` but is disabled for this surface by " +
               "config.ai.default_per_surface. Pass --ai to override.\n",
           );
-          process.exitCode = 2;
+          setExitCode(2);
           return;
         }
       }
@@ -397,7 +398,7 @@ export default defineCommand({
         // hint's default "Retry with --no-ai" is actively misleading here (SPEC-029 AC-AR-5,
         // AC-AR-4 preserves the underlying error shape/exit code unchanged).
         process.stderr.write(formatErrorFor(inv, assessResult.error, { aiHasNoFallback: true }) + "\n");
-        process.exitCode = exitCode(assessResult.error);
+        setExitCode(exitCode(assessResult.error));
         return;
       }
       const result = assessResult.value;
@@ -417,7 +418,7 @@ export default defineCommand({
       const stampVerdictResult = await app.corpusService.stampVerdictDistribution(bundle.tasks);
       if (!stampVerdictResult.ok) {
         process.stderr.write(formatErrorFor(inv, stampVerdictResult.error) + "\n");
-        process.exitCode = exitCode(stampVerdictResult.error);
+        setExitCode(exitCode(stampVerdictResult.error));
         return;
       }
       const stampVerdictDistribution = stampVerdictResult.value;
@@ -437,7 +438,7 @@ export default defineCommand({
       });
       if (!createResult.ok) {
         process.stderr.write(formatErrorFor(inv, createResult.error) + "\n");
-        process.exitCode = exitCode(createResult.error);
+        setExitCode(exitCode(createResult.error));
         return;
       }
       const assessmentDoc = createResult.value;
@@ -445,7 +446,7 @@ export default defineCommand({
       const linkResult = await app.corpusService.link(assessmentDoc.id, bundle.plan.id, "informs");
       if (!linkResult.ok) {
         process.stderr.write(formatErrorFor(inv, linkResult.error) + "\n");
-        process.exitCode = exitCode(linkResult.error);
+        setExitCode(exitCode(linkResult.error));
         return;
       }
 

@@ -52,6 +52,7 @@
  */
 
 import type { Invocation } from "@lore/core";
+import { setExitCode } from "../run-scope.js";
 import { defineCommand } from "citty";
 import type { DocRecord, LoreError, Result } from "@lore/core";
 import { extractDeclaredAcScope } from "@lore/core";
@@ -149,7 +150,7 @@ async function runScopeMutation(inv: Invocation,
   } else if (target.type === "phase") {
     if (app.phaseWorkflowService === undefined) {
       process.stderr.write(phaseServiceMissingMessage());
-      process.exitCode = 1;
+      setExitCode(1);
       return;
     }
     result =
@@ -159,13 +160,13 @@ async function runScopeMutation(inv: Invocation,
   } else {
     const error = unsupportedTargetTypeError(target.type);
     process.stderr.write(formatErrorFor(inv, error) + "\n");
-    process.exitCode = exitCode(error);
+    setExitCode(exitCode(error));
     return;
   }
 
   if (!result.ok) {
     process.stderr.write(formatErrorFor(inv, result.error) + "\n");
-    process.exitCode = exitCode(result.error);
+    setExitCode(exitCode(result.error));
     return;
   }
 
@@ -222,7 +223,7 @@ export default defineCommand({
           const targetResult = await resolveScopeTarget(app, targetId);
           if (!targetResult.ok) {
             process.stderr.write(formatErrorFor(inv, targetResult.error) + "\n");
-            process.exitCode = exitCode(targetResult.error);
+            setExitCode(exitCode(targetResult.error));
             return;
           }
 
@@ -267,7 +268,7 @@ export default defineCommand({
           const targetResult = await resolveScopeTarget(app, targetId);
           if (!targetResult.ok) {
             process.stderr.write(formatErrorFor(inv, targetResult.error) + "\n");
-            process.exitCode = exitCode(targetResult.error);
+            setExitCode(exitCode(targetResult.error));
             return;
           }
 
@@ -300,7 +301,7 @@ export default defineCommand({
           const targetResult = await resolveScopeTarget(app, args.target as string);
           if (!targetResult.ok) {
             process.stderr.write(formatErrorFor(inv, targetResult.error) + "\n");
-            process.exitCode = exitCode(targetResult.error);
+            setExitCode(exitCode(targetResult.error));
             return;
           }
 
@@ -308,7 +309,7 @@ export default defineCommand({
           if (doc.type !== "task" && doc.type !== "phase") {
             const error = unsupportedTargetTypeError(doc.type);
             process.stderr.write(formatErrorFor(inv, error) + "\n");
-            process.exitCode = exitCode(error);
+            setExitCode(exitCode(error));
             return;
           }
 

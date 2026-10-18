@@ -3,6 +3,7 @@
  */
 
 import { defineCommand } from "citty";
+import { setExitCode } from "../run-scope.js";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatErrorFor, parsePositiveIntArg } from "../utils.js";
 import type { DocId } from "@lore/core";
@@ -44,7 +45,7 @@ export default defineCommand({
         const fromResult = parsePositiveIntArg(args.from, "--from", { min: 1 });
         if (!fromResult.ok) {
           process.stderr.write(fromResult.message + "\n");
-          process.exitCode = 2;
+          setExitCode(2);
           return;
         }
         opts.from = fromResult.value;
@@ -53,7 +54,7 @@ export default defineCommand({
         const toResult = parsePositiveIntArg(args.to, "--to", { min: 1 });
         if (!toResult.ok) {
           process.stderr.write(toResult.message + "\n");
-          process.exitCode = 2;
+          setExitCode(2);
           return;
         }
         opts.to = toResult.value;
@@ -63,7 +64,7 @@ export default defineCommand({
 
       if (!result.ok) {
         process.stderr.write(formatErrorFor(inv, result.error) + "\n");
-        process.exitCode = exitCode(result.error);
+        setExitCode(exitCode(result.error));
         return;
       }
 

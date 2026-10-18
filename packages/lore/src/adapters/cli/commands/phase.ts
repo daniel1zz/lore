@@ -36,6 +36,7 @@
  */
 
 import { ulid } from "ulidx";
+import { setExitCode } from "../run-scope.js";
 import { defineCommand } from "citty";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatError, formatErrorFor, resolveActor } from "../utils.js";
@@ -87,7 +88,7 @@ export default defineCommand({
 
           if (!result.ok) {
             process.stderr.write(formatErrorFor(inv, result.error) + "\n");
-            process.exitCode = exitCode(result.error);
+            setExitCode(exitCode(result.error));
             return;
           }
 
@@ -127,7 +128,7 @@ export default defineCommand({
 
           if (!result.ok) {
             process.stderr.write(formatErrorFor(inv, result.error) + "\n");
-            process.exitCode = exitCode(result.error);
+            setExitCode(exitCode(result.error));
             return;
           }
 
@@ -176,7 +177,7 @@ export default defineCommand({
 
           if (!result.ok) {
             process.stderr.write(formatErrorFor(inv, result.error) + "\n");
-            process.exitCode = exitCode(result.error);
+            setExitCode(exitCode(result.error));
             return;
           }
 
@@ -237,7 +238,7 @@ export default defineCommand({
 
           if (!result.ok) {
             process.stderr.write(formatErrorFor(inv, result.error) + "\n");
-            process.exitCode = exitCode(result.error);
+            setExitCode(exitCode(result.error));
             return;
           }
 
@@ -292,7 +293,7 @@ export default defineCommand({
 
           if (!result.ok) {
             process.stderr.write(formatErrorFor(inv, result.error) + "\n");
-            process.exitCode = exitCode(result.error);
+            setExitCode(exitCode(result.error));
             return;
           }
 
@@ -301,7 +302,7 @@ export default defineCommand({
           } else {
             renderPhaseStatus(result.value);
           }
-          process.exitCode = result.value.exit_code;
+          setExitCode(result.value.exit_code);
         } finally {
           app.close();
         }
@@ -344,7 +345,7 @@ export default defineCommand({
 
               if (!result.ok) {
                 process.stderr.write(formatErrorFor(inv, result.error) + "\n");
-                process.exitCode = exitCode(result.error);
+                setExitCode(exitCode(result.error));
                 return;
               }
 
@@ -376,7 +377,7 @@ export default defineCommand({
 
               if (!result.ok) {
                 process.stderr.write(formatErrorFor(inv, result.error) + "\n");
-                process.exitCode = exitCode(result.error);
+                setExitCode(exitCode(result.error));
                 return;
               }
 
@@ -417,7 +418,7 @@ export default defineCommand({
 
               if (!result.ok) {
                 process.stderr.write(formatErrorFor(inv, result.error) + "\n");
-                process.exitCode = exitCode(result.error);
+                setExitCode(exitCode(result.error));
                 return;
               }
 
@@ -451,7 +452,7 @@ export default defineCommand({
 
               if (!result.ok) {
                 process.stderr.write(formatErrorFor(inv, result.error) + "\n");
-                process.exitCode = exitCode(result.error);
+                setExitCode(exitCode(result.error));
                 return;
               }
 
@@ -489,7 +490,7 @@ export default defineCommand({
 
               if (!result.ok) {
                 process.stderr.write(formatErrorFor(inv, result.error) + "\n");
-                process.exitCode = exitCode(result.error);
+                setExitCode(exitCode(result.error));
                 return;
               }
 
@@ -538,7 +539,7 @@ export default defineCommand({
 
               if (!result.ok) {
                 process.stderr.write(formatErrorFor(inv, result.error) + "\n");
-                process.exitCode = exitCode(result.error);
+                setExitCode(exitCode(result.error));
                 return;
               }
 
@@ -570,7 +571,7 @@ export default defineCommand({
 
               if (!result.ok) {
                 process.stderr.write(formatErrorFor(inv, result.error) + "\n");
-                process.exitCode = exitCode(result.error);
+                setExitCode(exitCode(result.error));
                 return;
               }
 

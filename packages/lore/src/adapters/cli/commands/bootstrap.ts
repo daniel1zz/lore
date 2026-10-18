@@ -45,6 +45,7 @@
  */
 
 import { defineCommand } from "citty";
+import { setExitCode } from "../run-scope.js";
 import type { BootstrapReport } from "@lore/core";
 import { buildBootstrapInjection, resolveBootstrapInjectionBudgets } from "@lore/core";
 import { loadLoreApp } from "../loader.js";
@@ -220,7 +221,7 @@ export default defineCommand({
     try {
       if (app.sessionService === undefined) {
         process.stderr.write("Error: SessionService not wired on this App instance.\n");
-        process.exitCode = 1;
+        setExitCode(1);
         return;
       }
 
@@ -234,7 +235,7 @@ export default defineCommand({
           process.stderr.write(
             "Error: --seat-branch and --seat-worktree must be given together with --injection.\n",
           );
-          process.exitCode = 2;
+          setExitCode(2);
           return;
         }
         // Resolved BEFORE the main-checkout early-out so a retired knob is announced on every call (D5).
@@ -245,13 +246,13 @@ export default defineCommand({
         const injectionReport = await app.sessionService.bootstrap(by, undefined, injectionSeat);
         if (!injectionReport.ok) {
           process.stderr.write(formatErrorFor(inv, injectionReport.error) + "\n");
-          process.exitCode = exitCode(injectionReport.error);
+          setExitCode(exitCode(injectionReport.error));
           return;
         }
         const seatClaims = await app.sessionService.seatClaims(injectionSeat);
         if (!seatClaims.ok) {
           process.stderr.write(formatErrorFor(inv, seatClaims.error) + "\n");
-          process.exitCode = exitCode(seatClaims.error);
+          setExitCode(exitCode(seatClaims.error));
           return;
         }
         const { json } = buildBootstrapInjection(
@@ -277,7 +278,7 @@ export default defineCommand({
 
       if (!result.ok) {
         process.stderr.write(formatErrorFor(inv, result.error) + "\n");
-        process.exitCode = exitCode(result.error);
+        setExitCode(exitCode(result.error));
         return;
       }
 
@@ -289,7 +290,7 @@ export default defineCommand({
       const staleListResult = await listFreshStalenessEscalates(buildStalenessFlowDeps(app));
       if (!staleListResult.ok) {
         process.stderr.write(formatErrorFor(inv, staleListResult.error) + "\n");
-        process.exitCode = exitCode(staleListResult.error);
+        setExitCode(exitCode(staleListResult.error));
         return;
       }
 
@@ -299,7 +300,7 @@ export default defineCommand({
       const armedSpecsResult = await countArmedSpecs(buildListSpecs(app));
       if (!armedSpecsResult.ok) {
         process.stderr.write(formatErrorFor(inv, armedSpecsResult.error) + "\n");
-        process.exitCode = exitCode(armedSpecsResult.error);
+        setExitCode(exitCode(armedSpecsResult.error));
         return;
       }
 

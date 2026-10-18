@@ -172,6 +172,7 @@
  */
 
 import type { Invocation } from "@lore/core";
+import { setExitCode } from "../run-scope.js";
 import { dirname } from "node:path";
 import { defineCommand } from "citty";
 import { z } from "zod";
@@ -438,7 +439,7 @@ export async function runGithubIssuesListing(inv: Invocation,
   const joinedResult = await resolveGithubJoinedRows(app.corpusService, cfg, locator);
   if (!joinedResult.ok) {
     process.stderr.write(formatErrorFor(inv, joinedResult.error) + "\n");
-    process.exitCode = exitCode(joinedResult.error);
+    setExitCode(exitCode(joinedResult.error));
     return;
   }
 
@@ -520,7 +521,7 @@ async function runGithubVerify(inv: Invocation,
   const joinedResult = await resolveGithubJoinedRows(app.corpusService, cfg, locator);
   if (!joinedResult.ok) {
     process.stderr.write(formatErrorFor(inv, joinedResult.error) + "\n");
-    process.exitCode = exitCode(joinedResult.error);
+    setExitCode(exitCode(joinedResult.error));
     return;
   }
 
@@ -604,18 +605,18 @@ export default defineCommand({
     // corpus is opened.
     if (args.apply === true && args.sync !== true) {
       process.stderr.write("Error: --apply is only meaningful with --sync.\n");
-      process.exitCode = 2;
+      setExitCode(2);
       return;
     }
     if (args.sync === true && (args.verify === true || args.open === true || args.resolved === true || args.all === true || args.local === true)) {
       process.stderr.write("Error: --sync cannot be combined with --verify, --open, --resolved, --all or --local.\n");
-      process.exitCode = 2;
+      setExitCode(2);
       return;
     }
     if (args.sync === true) {
       const { app: syncApp } = loadLoreApp({ inv });
       try {
-        process.exitCode = await runIssuesSync(inv, syncApp.issueClose, { apply: args.apply === true, json: args.json === true });
+        setExitCode(await runIssuesSync(inv, syncApp.issueClose, { apply: args.apply === true, json: args.json === true }));
       } finally {
         syncApp.close();
       }
@@ -626,7 +627,7 @@ export default defineCommand({
     ).length;
     if (modeFlagsSet > 1) {
       process.stderr.write("Error: --open, --resolved, and --all are mutually exclusive.\n");
-      process.exitCode = 2;
+      setExitCode(2);
       return;
     }
     const mode: "open" | "resolved" | "all" =
@@ -639,7 +640,7 @@ export default defineCommand({
     const severityFilter = typeof args.severity === "string" ? args.severity : undefined;
     if (severityFilter !== undefined && !isIssueSeverity(severityFilter)) {
       process.stderr.write(`Error: --severity must be one of ${ISSUE_SEVERITIES.join("/")}.\n`);
-      process.exitCode = 2;
+      setExitCode(2);
       return;
     }
     const categoryFilter = typeof args.category === "string" ? args.category : undefined;
@@ -666,7 +667,7 @@ export default defineCommand({
       // `report-issue-wiring.ts::resolveGithubJoinedRows`).
       if (args.local !== true && classification.kind === "retired") {
         process.stderr.write(formatErrorFor(inv, classification.error) + "\n");
-        process.exitCode = exitCode(classification.error);
+        setExitCode(exitCode(classification.error));
         return;
       }
       // reason: the GitHub read surface (AC-GR-1/2/10/12, AC-GR-8) applies
@@ -721,7 +722,7 @@ export default defineCommand({
         source.kind === "upstream" ? unsupportedUpstreamReadError<IssueRow[]>() : await readLocalRows(app, mode);
       if (!rowsResult.ok) {
         process.stderr.write(formatErrorFor(inv, rowsResult.error) + "\n");
-        process.exitCode = exitCode(rowsResult.error);
+        setExitCode(exitCode(rowsResult.error));
         return;
       }
       // reason: filtering happens HERE, before renderRows computes `total`
@@ -1136,7 +1137,7 @@ function renderVerifyResult(corpusPath: string, divergences: readonly Resolution
   }
 
   if (!clean) {
-    process.exitCode = VERIFY_DIVERGENCE_EXIT_CODE;
+    setExitCode(VERIFY_DIVERGENCE_EXIT_CODE);
   }
 }
 
@@ -1158,7 +1159,7 @@ async function runVerify(inv: Invocation, app: ReturnType<typeof loadLoreApp>["a
     source.kind === "upstream" ? unsupportedUpstreamReadError<VerifyTarget[]>() : await collectLocalVerifyTargets(app);
   if (!targetsResult.ok) {
     process.stderr.write(formatErrorFor(inv, targetsResult.error) + "\n");
-    process.exitCode = exitCode(targetsResult.error);
+    setExitCode(exitCode(targetsResult.error));
     return;
   }
 
@@ -1171,7 +1172,7 @@ async function runVerify(inv: Invocation, app: ReturnType<typeof loadLoreApp>["a
   const labelsResult = await fetchGithubLabelResolutions(targets, env);
   if (!labelsResult.ok) {
     process.stderr.write(formatErrorFor(inv, labelsResult.error) + "\n");
-    process.exitCode = exitCode(labelsResult.error);
+    setExitCode(exitCode(labelsResult.error));
     return;
   }
 

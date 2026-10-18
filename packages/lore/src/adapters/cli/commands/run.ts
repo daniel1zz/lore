@@ -45,6 +45,7 @@
  * Side-effect class: IO (corpus DB write for register, file reads, stdin/stdout).
  */
 import { createHash } from "node:crypto";
+import { setExitCode } from "../run-scope.js";
 import { spawnSync } from "node:child_process";
 import { readFileSync, realpathSync } from "node:fs";
 import { defineCommand } from "citty";
@@ -90,7 +91,7 @@ function isAction(value: string): value is Action {
 
 function usageError(message: string): void {
   process.stderr.write(`Error: ${message}\n`);
-  process.exitCode = USAGE_EXIT;
+  setExitCode(USAGE_EXIT);
 }
 
 function stringArg(args: Record<string, unknown>, key: string): string | undefined {
@@ -196,7 +197,7 @@ async function runRegister(args: Record<string, unknown>, inv: Invocation): Prom
   const composition = await computeComposition(agentId !== undefined ? agentType : undefined, inv);
   if ("error" in composition) {
     process.stderr.write(`Error: cannot compute the run composition: ${composition.error}\n`);
-    process.exitCode = VALIDATION_EXIT;
+    setExitCode(VALIDATION_EXIT);
     return;
   }
   const runProcess = await measureRunProcess(stringArg(args, "harness-pid"), inv.cwd, inv.env);
@@ -215,7 +216,7 @@ async function runRegister(args: Record<string, unknown>, inv: Invocation): Prom
     });
     if (!result.ok) {
       process.stderr.write(`${formatErrorFor(inv, result.error)}\n`);
-      process.exitCode = exitCode(result.error);
+      setExitCode(exitCode(result.error));
       return;
     }
     writeAllSync(1, args["json"] === true ? `${JSON.stringify({ ok: true, data: result.value }, null, 2)}\n` : `${result.value.id}\n`);
@@ -229,7 +230,7 @@ async function runShow(args: Record<string, unknown>, inv: Invocation): Promise<
     const result = await service.show(id);
     if (!result.ok) {
       process.stderr.write(`${formatErrorFor(inv, result.error)}\n`);
-      process.exitCode = exitCode(result.error);
+      setExitCode(exitCode(result.error));
       return;
     }
     writeAllSync(1, args["json"] === true ? `${JSON.stringify({ ok: true, data: result.value }, null, 2)}\n` : renderRunText(result.value));
@@ -245,7 +246,7 @@ async function runEnd(args: Record<string, unknown>, inv: Invocation): Promise<v
     const result = await service.end(id, reason);
     if (!result.ok) {
       process.stderr.write(`${formatErrorFor(inv, result.error)}\n`);
-      process.exitCode = exitCode(result.error);
+      setExitCode(exitCode(result.error));
       return;
     }
     const ended = result.value;
@@ -282,7 +283,7 @@ async function runOccupancy(args: Record<string, unknown>, inv: Invocation): Pro
     });
     if (!result.ok) {
       process.stderr.write(`${formatErrorFor(inv, result.error)}\n`);
-      process.exitCode = exitCode(result.error);
+      setExitCode(exitCode(result.error));
       return;
     }
     const occupancy = result.value;
@@ -312,7 +313,7 @@ async function runTasks(args: Record<string, unknown>, inv: Invocation): Promise
     const result = await service.tasks(id);
     if (!result.ok) {
       process.stderr.write(`${formatErrorFor(inv, result.error)}\n`);
-      process.exitCode = exitCode(result.error);
+      setExitCode(exitCode(result.error));
       return;
     }
     if (args["json"] === true) {
@@ -361,13 +362,13 @@ async function runReap(args: Record<string, unknown>, inv: Invocation): Promise<
     const result = await app.runReapService.reap({ apply: args["apply"] === true });
     if (!result.ok) {
       process.stderr.write(`${formatErrorFor(inv, result.error)}\n`);
-      process.exitCode = REAP_FAILURE_EXIT;
+      setExitCode(REAP_FAILURE_EXIT);
       return;
     }
     const report = result.value;
     writeAllSync(1, args["json"] === true ? `${JSON.stringify({ ok: true, data: report }, null, 2)}\n` : renderReapText(report));
     const failed = report.processes.some((entry) => entry.action === "denied" || entry.action === "survived");
-    if (failed || report.runs.some((entry) => entry.action === "end-failed")) process.exitCode = REAP_FAILURE_EXIT;
+    if (failed || report.runs.some((entry) => entry.action === "end-failed")) setExitCode(REAP_FAILURE_EXIT);
   } finally {
     app.close();
   }

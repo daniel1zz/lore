@@ -19,6 +19,7 @@
  */
 
 import { defineCommand } from "citty";
+import { exitCli, setExitCode } from "../run-scope.js";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatErrorFor, formatShortId, resolveActor } from "../utils.js";
 import { linkTypeSchema } from "@lore/core";
@@ -86,13 +87,13 @@ export default defineCommand({
         const fromResolve = await app.corpusService.resolve(args.from);
         if (!fromResolve.ok) {
           process.stderr.write(formatErrorFor(inv, fromResolve.error) + "\n");
-          process.exitCode = exitCode(fromResolve.error);
+          setExitCode(exitCode(fromResolve.error));
           return;
         }
         const fromGet = await app.corpusService.get(fromResolve.value);
         if (!fromGet.ok) {
           process.stderr.write(formatErrorFor(inv, fromGet.error) + "\n");
-          process.exitCode = exitCode(fromGet.error);
+          setExitCode(exitCode(fromGet.error));
           return;
         }
         const fromDoc = fromGet.value.doc;
@@ -100,13 +101,13 @@ export default defineCommand({
         const toResolve = await app.corpusService.resolve(args.to);
         if (!toResolve.ok) {
           process.stderr.write(formatErrorFor(inv, toResolve.error) + "\n");
-          process.exitCode = exitCode(toResolve.error);
+          setExitCode(exitCode(toResolve.error));
           return;
         }
         const toGet = await app.corpusService.get(toResolve.value);
         if (!toGet.ok) {
           process.stderr.write(formatErrorFor(inv, toGet.error) + "\n");
-          process.exitCode = exitCode(toGet.error);
+          setExitCode(exitCode(toGet.error));
           return;
         }
         const toDoc = toGet.value.doc;
@@ -125,7 +126,7 @@ export default defineCommand({
           // reason: invalid link type or provider error → exit 6 (AI_PROVIDER_ERROR),
           // consistent with AC-LINK-AI-2 and AC-AI-FAIL-1. No link is created.
           process.stderr.write(formatErrorFor(inv, inferResult.error) + "\n");
-          process.exitCode = exitCode(inferResult.error);
+          setExitCode(exitCode(inferResult.error));
           return;
         }
 
@@ -141,7 +142,7 @@ export default defineCommand({
         });
         if (!linkResult.ok) {
           process.stderr.write(formatErrorFor(inv, linkResult.error) + "\n");
-          process.exitCode = exitCode(linkResult.error);
+          setExitCode(exitCode(linkResult.error));
           return;
         }
 
@@ -164,7 +165,7 @@ export default defineCommand({
         process.stderr.write(
           `Error: Invalid link type '${linkType}'. Valid types: ${VALID_LINK_TYPES.join(", ")}\n`,
         );
-        process.exit(2);
+        exitCli(2);
       }
 
       const result = await app.corpusService.link(args.from, args.to, linkType, {
@@ -173,7 +174,7 @@ export default defineCommand({
 
       if (!result.ok) {
         process.stderr.write(formatErrorFor(inv, result.error) + "\n");
-        process.exitCode = exitCode(result.error);
+        setExitCode(exitCode(result.error));
         return;
       }
 

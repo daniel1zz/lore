@@ -81,6 +81,7 @@ interface RunResult {
 async function runLore(args: string[], cwd: string, actor: string | null = null): Promise<RunResult> {
   const proc = await runLoreInProcess(args, {
     cwd,
+    home: cwd,
     env: withSessionIdentity({ ...process.env, HOME: cwd, EDITOR: "true" }, actor) as Record<string, string>,
   });
   return {
