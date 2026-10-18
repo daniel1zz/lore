@@ -28,11 +28,5 @@
     "ac": "AC-HR-6",
     "reason": "oracle test not written yet (decide-detail-link.bun.test.ts absent); owned by the implementing task of this spec's plan, which removes this row when it adds the file",
     "owner_plan": "plan-human-review-surface-decision-detail-dashboard-needs-you"
-  },
-  {
-    "spec": "spec-human-review-surface-decisions-audit-items-and-pending",
-    "ac": "AC-HR-7",
-    "reason": "oracle test not written yet (dashboard-bootstrap-next.bun.test.ts absent); owned by the implementing task of this spec's plan, which removes this row when it adds the file",
-    "owner_plan": "plan-human-review-surface-decision-detail-dashboard-needs-you"
   }
 ]
