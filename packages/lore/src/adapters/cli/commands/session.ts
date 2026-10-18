@@ -39,7 +39,7 @@ import { dirname } from "node:path";
 import { defineCommand } from "citty";
 import type { Invocation } from "@lore/core";
 import { invocationOf } from "../command-invocation.js";
-import { loadCoChangeRules, reviewCoChange, type CoChangeFinding, type CoChangeGroup, type GlobMatchFn } from "../../../service/co-change-review.js";
+import { loadCoChangeRules, reviewCoChange, type CoChangeFinding, type CoChangeRulesLoad, type CoChangeGroup, type GlobMatchFn } from "../../../service/co-change-review.js";
 import { reviewHelperScope } from "../../../service/helper-scope-review.js";
 import type { SessionLivenessRecord } from "../../../service/session-service.js";
 import { resolveClaimSessionId } from "../../../service/task-workflow-service.js";
@@ -148,13 +148,13 @@ interface CoChangeJudgment {
  * judgments of this run: they come back as `{measured:false, reason}` plus a `not_measured` line (the hook prints it).
  */
 function judgeCoChange(input: {
+  readonly rules: CoChangeRulesLoad;
   readonly trail: SessionTrail;
   readonly turn: string | undefined;
   readonly session: string;
-  readonly projectRoot: string;
   readonly helperReview: { readonly helpers: readonly { readonly run: string; readonly files: readonly string[] }[] };
 }): CoChangeJudgment {
-  const rules = loadCoChangeRules(input.projectRoot, readFileOrNull);
+  const rules = input.rules;
   if (!rules.measured) return { view: { measured: false, reason: rules.reason }, findings: [], notMeasured: [`co_change not measured: ${rules.reason}`] };
   const notMeasured: string[] = [];
   const mainRun = `cc:${input.session}`;
@@ -228,19 +228,22 @@ async function runSessionTrailReview(args: { turn?: unknown; json?: unknown }, i
       process.exitCode = 1;
       return;
     }
+    const projectRoot = dirname(dirname(dbPath));
+    const coChangeRules = loadCoChangeRules(projectRoot, readFileOrNull);
     const review = await reviewHelperScope({
       trail,
       claimedTasks: (run) => runService.claimedTasks(run),
       openClaimsOfWorkingCopy: (workingCopy) => runService.openClaimsOfWorkingCopy(workingCopy),
-      projectRoot: dirname(dirname(dbPath)),
+      projectRoot,
       realpath: realpathSync,
+      ...(coChangeRules.measured ? { coChange: { rules: coChangeRules.rules, matches: createGlobMatcher() } } : {}),
     });
     if (!review.ok) {
       process.stderr.write(formatErrorFor(inv, review.error) + "\n");
       process.exitCode = exitCode(review.error);
       return;
     }
-    const coChange = judgeCoChange({ trail, turn, session, projectRoot: dirname(dirname(dbPath)), helperReview: review.value });
+    const coChange = judgeCoChange({ rules: coChangeRules, trail, turn, session, helperReview: review.value });
     emit({
       ...(turn !== undefined ? { turn } : {}),
       ...review.value,
