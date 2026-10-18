@@ -170,11 +170,14 @@ export const RETIRED_FROM_INSTALL_PATHS = new Set<string>(
  * installed into `<claude-dir>/` (spec-context-fragments-config-driven-layered-
  * rule-injection D9; precedent: SPEC-083's governance read). Whole-directory
  * retirement, unlike {@link RETIRED_FROM_INSTALL_PATHS}'s per-file entries, so a
- * newly added fragment needs no edit here. Consumers: {@link isRetiredFromInstall}
+ * newly added fragment needs no edit here. `project` is the per-repo scaffold
+ * (`pre-push`, `reference-transaction`, CLAUDE.md templates): `lore setup --project`
+ * reads it off the binary's own assets root, so it MUST ship (INT-T7: an npm package
+ * without it installed no hooks). Consumers: {@link isRetiredFromInstall}
  * (also used by `setup-check.ts`'s `buildCheckEmbeddedManifest`) and
  * {@link listBinaryReadAssetPaths} (npm assembly in `scripts/publish-npm.ts`).
  */
-export const BINARY_READ_ONLY_TOP_DIRS: readonly string[] = ["context"];
+export const BINARY_READ_ONLY_TOP_DIRS: readonly string[] = ["context", "project"];
 
 /**
  * Predicate form of {@link RETIRED_FROM_INSTALL_PATHS} — `path` is the FULL

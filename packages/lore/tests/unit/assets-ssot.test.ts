@@ -1154,12 +1154,12 @@ describe("assets/context manifest", () => {
     }
   });
 
-  it("listBinaryReadAssetPaths lists context files as assetsRoot-relative POSIX paths; empty for a missing dir", () => {
+  it("listBinaryReadAssetPaths lists context and project files as assetsRoot-relative POSIX paths; only the seeded project file for a missing context dir", () => {
     const withCtx = makeTempAssets(true);
     const without = makeTempAssets(false);
     try {
-      expect(listBinaryReadAssetPaths(withCtx)).toEqual(["context/zz-probe.md"]);
-      expect(listBinaryReadAssetPaths(without)).toEqual([]);
+      expect(listBinaryReadAssetPaths(withCtx)).toEqual(["context/zz-probe.md", "project/seed.md"]);
+      expect(listBinaryReadAssetPaths(without)).toEqual(["project/seed.md"]);
     } finally {
       rmSync(withCtx, { recursive: true, force: true });
       rmSync(without, { recursive: true, force: true });
