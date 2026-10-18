@@ -341,12 +341,12 @@ function renderOutcome(
   const check = "check" in result.value ? result.value.check : null;
   if (check !== null) {
     // --check: nothing was written; exit 1 names each file that would change and/or the ceiling breach (AC-MI-3).
-    if (check.differing.length === 0 && check.ceilingBreach === null) {
+    if (check.differing.length === 0 && check.findings.length === 0) {
       console.log("context refresh --check: every target is already refreshed and within its ceiling");
       return;
     }
     for (const path of check.differing) console.log(`would change: ${path}`);
-    if (check.ceilingBreach !== null) console.log(`ceiling: ${check.ceilingBreach}`);
+    for (const finding of check.findings) console.log(`${finding.kind}: ${finding.message}`);
     process.exitCode = 1;
     return;
   }
@@ -587,8 +587,8 @@ export default defineCommand({
       // reason: --json prints the report (incl. `check`) and returns before the plain-text exit mapping, so the
       // exit-1 contract for a drifted/over-ceiling --check is applied here for both output modes.
       if (args.check === true && result.ok && result.value.check !== null) {
-        const { differing, ceilingBreach } = result.value.check;
-        if (differing.length > 0 || ceilingBreach !== null) process.exitCode = 1;
+        const { differing, findings } = result.value.check;
+        if (differing.length > 0 || findings.length > 0) process.exitCode = 1;
       }
       return;
     }

@@ -307,12 +307,22 @@ export interface RulesFileOutcome {
 /** Per-skill-folder outcome; `path` is the `SKILL.md` port path. Same states as rules files. */
 export type SkillDirOutcome = RulesFileOutcome;
 
+/** One finding `lore context refresh --check` reports: the finding's own kind plus its message. */
+export interface ContextRefreshCheckFinding {
+  kind: string;
+  message: string;
+}
+
 /** What `lore context refresh --check` found (spec-module-index-lists-only-folders-with-a-memory-file-managed, AC-MI-3). */
 export interface ContextRefreshCheck {
   /** Port paths whose bytes differ from their refreshed content (or that a refresh would create/prune), in plan order. */
   differing: string[];
-  /** The ceiling-breach message when the refreshed root CLAUDE.md would exceed its configured ceiling, else `null`. */
-  ceilingBreach: string | null;
+  /**
+   * Every deterministic finding on the refreshed root CLAUDE.md, each under its OWN kind (`max_lines` / `max_bytes`
+   * ceiling breaches, `section_missing` / `section_duplicate` structure findings, ...). Empty when none. A caller
+   * must label each entry by `kind`, never call a structure finding a ceiling breach (MI-T3).
+   */
+  findings: ContextRefreshCheckFinding[];
 }
 
 /** Outcome of one {@link runContextRefresh} call. */
@@ -821,6 +831,7 @@ export async function runContextRefresh(
   let sectionOutcomes: SpliceResult["perSection"] = [];
   let downgraded: AdvisoryFinding[] = [];
   let claudeMdRefusalMessage: string | null = null;
+  let checkFindings: ContextRefreshCheckFinding[] = [];
   let migratedLegacyBlocks: string[] = [];
   const checkMode = opts.check === true;
   const differing: string[] = [];
@@ -864,6 +875,7 @@ export async function runContextRefresh(
       if (findings.length > 0) {
         // reason: D16 — the CLAUDE.md refusal must NOT short-circuit the rules-file write set (it is
         // independent of the Z1 splice); it is held here and returned AFTER the rules files are written.
+        checkFindings = findings.map((finding) => ({ kind: finding.kind, message: finding.message }));
         claudeMdRefusalMessage =
           `refusing to write ${CLAUDE_MD_PATH} — the spliced candidate breaches its ceiling: ` +
           findings.map((finding) => `[${finding.kind}] ${finding.message}`).join("; ");
@@ -877,6 +889,10 @@ export async function runContextRefresh(
           (finding) => finding.downgraded_kind === "max_lines" || finding.downgraded_kind === "max_bytes",
         );
         if (checkMode && downgradedCeilings.length > 0) {
+          checkFindings = downgradedCeilings.map((finding) => ({
+            kind: finding.downgraded_kind ?? "ceiling",
+            message: finding.message,
+          }));
           claudeMdRefusalMessage = downgradedCeilings.map((finding) => finding.message).join("; ");
         }
       }
@@ -914,7 +930,7 @@ export async function runContextRefresh(
       path: (scope === "user" || rulesOnly) && rulesDir !== null ? rulesDir : CLAUDE_MD_PATH,
       sections: sectionOutcomes,
       migratedLegacyBlocks,
-      check: { differing, ceilingBreach: claudeMdRefusalMessage },
+      check: { differing, findings: checkFindings },
       rules: ruleActions.map((action) => action.outcome),
       skills: skillActions.map((action) => action.outcome),
       downgraded,
