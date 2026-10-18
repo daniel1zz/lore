@@ -10,7 +10,11 @@
  * Invariants:
  *   - Dispatch order (DD-4), enforced by `DashboardHandler.handle`'s caller (`index.ts`,
  *     invoked only for paths that already fell through the untouched `/api/*` branch):
- *       1. `GET /auth/bootstrap` — nonce lifecycle.
+ *       1. `GET /auth/bootstrap` — nonce lifecycle. A valid redemption answers 302 to the
+ *          optional `next` query value ONLY when `resolveSameOriginNext` accepts it (a path
+ *          with exactly one leading `/`; no `//`, no `\`, no scheme, no control chars, checked
+ *          raw and percent-decoded; AC-HR-7, spec-human-review-surface D6, changes BR-862);
+ *          otherwise, or with no `next`, the 302 goes to `/`.
  *       2. Exact static asset match (manifest key === pathname).
  *       3. `GET` SPA fallback (any other non-`/api` path) — serves `/index.html`.
  *   - `handle()` returns `null` for anything it does not claim (wrong method, or a GET

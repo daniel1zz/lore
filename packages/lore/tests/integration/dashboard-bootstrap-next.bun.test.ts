@@ -3,7 +3,7 @@
  * changes BR-862). Throwaway corpus + ephemeral port; never the repo `.lore/`.
  * @task_ref task-skill-implement-hr-t5-sign-in-link-keeps-a-same-origin
  */
-import { afterEach, describe, expect, it } from "bun:test";
+import { afterEach, describe, expect, it } from "vitest";
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
