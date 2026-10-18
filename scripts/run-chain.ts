@@ -12,6 +12,7 @@
  * Side-effect class: IO in `main` (spawns each step with inherited stdio); `runChain`/`renderTable` are pure.
  *
  * Usage: bun scripts/run-chain.ts [shell-command ...]   (no arguments = DEFAULT_STEPS)
+ *        bun scripts/run-chain.ts --floor [package.json]    (build + typecheck + every ^check: script except the corpus-dependent set = `bun run check:floor`)
  *        bun scripts/run-chain.ts --static [package.json]   (build + typecheck + every ^check: script = `bun run check:static`)
  */
 import { spawnSync } from "node:child_process";
@@ -70,8 +71,8 @@ export function renderTable(results: readonly StepResult[], labels: ReadonlyMap<
 export const CORPUS_DEPENDENT_CHECKS: ReadonlySet<string> = new Set(["check:spec-mirror", "check:live-repo-state", "check:corpus-fail-census"]);
 export const CORPUS_DEPENDENT_LABEL = "corpus-dependent: needs a fresh mirror export / live corpus state";
 
-/** The aggregate script itself: excluded from its own step list, or the floor would recurse into itself. */
-const STATIC_FLOOR_SCRIPT = "check:static";
+/** Aggregate scripts excluded from every derived list: they ARE the chains, naming them would recurse. */
+const AGGREGATE_SCRIPTS: ReadonlySet<string> = new Set(["check:static", "check:floor"]);
 
 /**
  * Derive the `check:static` step list from a package.json `scripts` map: build, typecheck, then EVERY
@@ -82,7 +83,7 @@ export function deriveStaticSteps(scripts: Readonly<Record<string, string>>): { 
   for (const base of ["build", "typecheck"]) {
     if (!(base in scripts)) throw new Error(`check:static: package.json has no "${base}" script`);
   }
-  const checks = Object.keys(scripts).filter((name) => /^check:/.test(name) && name !== STATIC_FLOOR_SCRIPT);
+  const checks = Object.keys(scripts).filter((name) => /^check:/.test(name) && !AGGREGATE_SCRIPTS.has(name));
   const steps = ["build", "typecheck", ...checks].map((name) => `bun run ${name}`);
   const labels = new Map<string, string>();
   for (const name of checks) if (CORPUS_DEPENDENT_CHECKS.has(name)) labels.set(`bun run ${name}`, CORPUS_DEPENDENT_LABEL);
@@ -97,6 +98,29 @@ export function runStaticFloor(packageJsonPath: string, run: StepRunner = spawnS
   const { steps, labels } = deriveStaticSteps(scripts);
   const results = runChain(steps, run);
   console.log(renderTable(results, labels));
+  return results.every((r) => r.exit === 0) ? 0 : 1;
+}
+
+/**
+ * Derive the `check:floor` step list (the integrate floor): build, typecheck, then every `^check:` script
+ * except the aggregates and CORPUS_DEPENDENT_CHECKS (the one source of what judges corpus state, not code).
+ * @throws Error when the map has no `build` or `typecheck` script.
+ */
+export function deriveFloorSteps(scripts: Readonly<Record<string, string>>): string[] {
+  for (const base of ["build", "typecheck"]) {
+    if (!(base in scripts)) throw new Error(`check:floor: package.json has no "${base}" script`);
+  }
+  const checks = Object.keys(scripts).filter((name) => /^check:/.test(name) && !AGGREGATE_SCRIPTS.has(name) && !CORPUS_DEPENDENT_CHECKS.has(name));
+  return ["build", "typecheck", ...checks].map((name) => `bun run ${name}`);
+}
+
+/** Run the derived integrate floor over `packageJsonPath` and print the table; returns the exit code. */
+export function runFloor(packageJsonPath: string, run: StepRunner = spawnStep): number {
+  const parsed: unknown = JSON.parse(readFileSync(packageJsonPath, "utf8"));
+  const scripts = (parsed as { scripts?: Record<string, string> }).scripts;
+  if (scripts === undefined) throw new Error(`check:floor: ${packageJsonPath} has no scripts`);
+  const results = runChain(deriveFloorSteps(scripts), run);
+  console.log(renderTable(results));
   return results.every((r) => r.exit === 0) ? 0 : 1;
 }
 
@@ -124,7 +148,9 @@ if (import.meta.main) {
   try {
     const argv = process.argv.slice(2);
     // `--static [package.json]`: the post-merge floor (build + typecheck + every check:*)
-    process.exit(argv[0] === "--static" ? runStaticFloor(argv[1] ?? join(ROOT, "package.json")) : main(argv));
+    // `--floor [package.json]`: the integrate floor (the static floor minus the corpus-dependent checks)
+    const pkg = argv[1] ?? join(ROOT, "package.json");
+    process.exit(argv[0] === "--static" ? runStaticFloor(pkg) : argv[0] === "--floor" ? runFloor(pkg) : main(argv));
   } catch (e) {
     console.error(`run-chain: ${e instanceof Error ? e.message : String(e)}`);
     process.exit(2);
