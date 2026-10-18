@@ -1200,8 +1200,9 @@ function renderCriteriaList(result: AcListResult): void {
     const marker = passUnfalsifiedMarker(result.coverage, criterion.id);
     const retiredOracle = retiredOracleMarker(result.coverage, criterion.id);
     const otherCommand = otherCommandMarker(result.coverage, criterion.id);
+    const oracleFiles = oracleFileMarkers(result.coverage, criterion.id);
     console.log(
-      `  ${badge}${criterion.id} — ${criterion.statement} [${describeVerify(criterion.verify)}]${marker}${retiredOracle}${otherCommand}`,
+      `  ${badge}${criterion.id} — ${criterion.statement} [${describeVerify(criterion.verify)}]${marker}${retiredOracle}${otherCommand}${oracleFiles}`,
     );
   }
   if (result.dangling.length > 0) {
@@ -1308,6 +1309,27 @@ function otherCommandMarker(coverage: AcListResult["coverage"], acId: string): s
   const fact = coverage?.find((f) => f.ac_id === acId);
   if (fact === undefined || fact.other_command === undefined || fact.other_command === 0) return "";
   return ` [other_command=${fact.other_command}]`;
+}
+
+/**
+ * Trailing human-table markers for the missing-oracle check (AC-EI-2): ` [oracle_file_missing: <paths>]` naming
+ * every declared oracle path absent on disk, and ` [N segment(s) not checked]` counting command segments the
+ * extractor could not classify (AS-17: never read as checked-clean). `--json` carries the same facts as the
+ * `oracle_file_missing` / `oracle_paths_unchecked` keys of each `coverage[]` entry.
+ *
+ * @param coverage - `AcListResult.coverage` (`null`: no markers)
+ * @param acId - the criterion id whose fact to read
+ * @returns the concatenated markers; `""` when neither applies or the fact never computed them
+ */
+function oracleFileMarkers(coverage: AcListResult["coverage"], acId: string): string {
+  const fact = coverage?.find((f) => f.ac_id === acId);
+  if (fact === undefined) return "";
+  const missing = fact.oracle_file_missing ?? [];
+  const unchecked = fact.oracle_paths_unchecked ?? [];
+  return (
+    (missing.length > 0 ? ` [oracle_file_missing: ${missing.join(", ")}]` : "") +
+    (unchecked.length > 0 ? ` [${unchecked.length} segment(s) not checked]` : "")
+  );
 }
 
 function describeVerify(verify: AcceptanceCriterion["verify"]): string {

@@ -116,6 +116,7 @@ import {
   resolveStatusAfterContractEdit,
   resolveOracleGeneration,
   findMissingOracleFiles,
+  findUncheckedOracleSegments,
   evidenceRanMissingOracle,
   type AcceptanceCriterion,
   type AcCoverageFact,
@@ -1489,7 +1490,7 @@ function annotateMissingOracleFiles(
     };
     const criterionCommand = criterion.verify.command;
     const missingPaths = findMissingOracleFiles(criterionCommand, { ...rootCtx, fileExists: pathContext.fileExists });
-    // reason: TG-22 — only a pass that RAN the missing file keeps the state at not_measured; see AcCoverageFact.passes_ran_missing_oracle.
+    // reason: AC-EI-2 removed TG-22's narrowing — this count is INFORMATION ONLY (deriveAcCoverageState never reads it).
     const passesRanMissingOracle = tasks
       .flatMap((task) => extractEvidence(task))
       .filter(
@@ -1505,6 +1506,11 @@ function annotateMissingOracleFiles(
             rootCtx,
           ),
       ).length;
-    return { ...fact, oracle_file_missing: missingPaths, passes_ran_missing_oracle: passesRanMissingOracle };
+    return {
+      ...fact,
+      oracle_file_missing: missingPaths,
+      passes_ran_missing_oracle: passesRanMissingOracle,
+      oracle_paths_unchecked: findUncheckedOracleSegments(criterionCommand),
+    };
   });
 }

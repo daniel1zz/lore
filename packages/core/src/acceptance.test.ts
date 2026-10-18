@@ -549,16 +549,16 @@ describe("evidenceEntrySchema ac_ref", () => {
   });
 });
 
-describe("deriveAcCoverageState oracle_file_missing counts only passes that named the missing file (TG-22, AC-TG-6)", () => {
+describe("deriveAcCoverageState oracle_file_missing is not_measured whatever earlier passes ran (AC-EI-2 over TG-22; AC-TG-6 text)", () => {
   const base = { ac_id: "AC-9", mode: "script", fail: 0, attested_pass: 0, attested_fail: 0, falsified: 1 } as const;
   const gone = ["scripts/tests/gone.test.ts"];
 
-  it("NEGATIVE: a pass that did not run the missing file is not not_measured", () => {
+  it("NEGATIVE (was TG-22's narrowing): a pass that ran OTHER files is still not_measured", () => {
     const state = deriveAcCoverageState({
       ...base, pass: 1, oracle_file_missing: gone, passes_ran_missing_oracle: 0,
       refs: [{ task_id: "t1", result: "pass" }],
     });
-    expect(state).toBe("pass");
+    expect(state).toBe("not_measured");
   });
 
   it("HAPPY: a pass that ran the missing file is not_measured", () => {
@@ -569,12 +569,30 @@ describe("deriveAcCoverageState oracle_file_missing counts only passes that name
     expect(state).toBe("not_measured");
   });
 
-  it("BOUNDARY: a fact whose passes_ran_missing_oracle was never computed never counts as running the missing file", () => {
+  it("BOUNDARY (was TG-22's narrowing): a fact whose passes_ran_missing_oracle was never computed is not_measured too", () => {
     const state = deriveAcCoverageState({
       ...base, pass: 1, oracle_file_missing: gone,
       refs: [{ task_id: "t1", result: "pass" }],
     });
-    expect(state).toBe("pass");
+    expect(state).toBe("not_measured");
+  });
+
+  it("STATE: an attested pass with the oracle file missing is not_measured, never attested_pass", () => {
+    const state = deriveAcCoverageState({
+      ...base, pass: 1, attested_pass: 1, oracle_file_missing: gone, passes_ran_missing_oracle: 0,
+      refs: [{ task_id: "t1", result: "pass" }],
+    });
+    expect(state).toBe("not_measured");
+  });
+
+  it("BOUNDARY: a fail outranks it, an empty missing list does not demote, and no counted pass stays none", () => {
+    expect(
+      deriveAcCoverageState({ ...base, pass: 0, fail: 1, oracle_file_missing: gone, refs: [{ task_id: "t1", result: "fail" }] }),
+    ).toBe("fail");
+    expect(
+      deriveAcCoverageState({ ...base, pass: 1, oracle_file_missing: [], refs: [{ task_id: "t1", result: "pass" }] }),
+    ).toBe("pass");
+    expect(deriveAcCoverageState({ ...base, pass: 0, oracle_file_missing: gone, refs: [] })).toBe("none");
   });
 });
 

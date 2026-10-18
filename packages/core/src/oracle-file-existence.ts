@@ -403,6 +403,146 @@ export function classifyCommandSegments(command: string): ClassifiedSegment[] {
   return splitCommandSegments(command).map(classifyCommandSegment);
 }
 
+// ─── AC-EI-2: interpreter / runner script paths ────────────────────────────
+
+/**
+ * Leading-token shapes of a segment that hands a FILE to an interpreter (AC-EI-2,
+ * spec-evidence-identity-an-attested-row-counts-only-for-the): bare `bun`/`node`/`sh`/`bash`/`tsx`, or
+ * `bunx`/`npx` (optionally `--bun`/`-y`/`--yes`) followed by `bun`/`node`/`tsx`. Capture 1 = the
+ * interpreter after a launcher, capture 2 = a bare interpreter, capture 3 = the rest of the segment.
+ * `bunx vitest` / `bunx playwright` never match here (they are {@link RecognizedRunner}s whose paths
+ * {@link extractTestFileTokens} already reads).
+ */
+const INTERPRETER_SEGMENT_PATTERN =
+  /^\s*(?:(?:bunx|npx)\s+(?:(?:--bun|-y|--yes)\s+)*(bun|node|tsx)|(bun|node|sh|bash|tsx))(?=\s|$)([\s\S]*)$/;
+
+/** Flags after which the NEXT token is the flag's value, never the script (node/bun/tsx option surface). */
+const VALUE_TAKING_INTERPRETER_FLAGS: ReadonlySet<string> = new Set([
+  "-r", "--require", "--import", "--loader", "--env-file", "--conditions", "-C", "--cwd", "--preload", "--config", "--tsconfig",
+]);
+
+/** Flags that hand INLINE code to the interpreter: there is no file to check, so the segment is unclassifiable. */
+const INLINE_CODE_FLAGS_BY_FAMILY = {
+  // reason: `-e` is errexit for sh/bash (NOT inline code) — the inline flag is per-family, never one shared set.
+  shell: new Set(["-c"]),
+  js: new Set(["-e", "-p", "--eval", "--print"]),
+} as const;
+
+/** A token that plausibly names a file: has a path separator or a script extension, and no shell expansion syntax. */
+const SCRIPT_EXTENSION_PATTERN = /\.(?:[cm]?[jt]sx?|sh|bash)$/;
+const SHELL_EXPANSION_PATTERN = /[$`*?<>()|{}]/;
+
+/**
+ * Shell builtins / output commands that take no script and run no oracle: a segment led by one of these is
+ * never reported as unchecked (it is not an oracle invocation). Anything else the extractor cannot classify IS reported.
+ */
+const BENIGN_SHELL_LEADERS: ReadonlySet<string> = new Set([
+  "cd", "echo", "printf", "test", "[", "true", "false", ":", "export", "set", "exit",
+]);
+
+function tokenizeSegment(segment: string): string[] {
+  return (segment.match(/"[^"]*"|'[^']*'|\S+/g) ?? []).map(stripWrappingQuotes);
+}
+
+/**
+ * Reads the script file one segment hands to an interpreter.
+ *
+ * @param segment - one `&&`/`;` segment ({@link splitCommandSegments})
+ * @returns `{ kind: "path", path }` when the first positional argument names a file; `{ kind: "unresolved" }`
+ *   when the segment IS an interpreter invocation but names no checkable file (inline `-e`/`-c` code, a
+ *   shell-expanded or extension-less word, no argument); `null` when the segment is not an interpreter
+ *   invocation, or is `bun test` / `bun run <script-name>` (recognised runners whose names are not files).
+ * @example
+ *   extractInterpreterScript("bun scripts/measure-test-wall.ts --max-seconds 600")
+ *   // => { kind: "path", path: "scripts/measure-test-wall.ts" }
+ *   extractInterpreterScript("sh -c 'exit 1'") // => { kind: "unresolved" }
+ *   extractInterpreterScript("bun run typecheck") // => null
+ */
+export function extractInterpreterScript(
+  segment: string,
+): { kind: "path"; path: string } | { kind: "unresolved" } | null {
+  const match = INTERPRETER_SEGMENT_PATTERN.exec(segment);
+  if (match === null) return null;
+  const interpreter = match[1] ?? match[2];
+  const tokens = tokenizeSegment(match[3] ?? "");
+  const inlineFlags: ReadonlySet<string> =
+    interpreter === "sh" || interpreter === "bash" ? INLINE_CODE_FLAGS_BY_FAMILY.shell : INLINE_CODE_FLAGS_BY_FAMILY.js;
+  let skipNext = false;
+  let sawRun = false;
+  for (const token of tokens) {
+    if (skipNext) {
+      skipNext = false;
+      continue;
+    }
+    if (inlineFlags.has(token)) return { kind: "unresolved" };
+    if (VALUE_TAKING_INTERPRETER_FLAGS.has(token)) {
+      skipNext = true;
+      continue;
+    }
+    if (token.startsWith("-")) continue;
+    if (interpreter === "bun" && !sawRun && token === "test") return null;
+    if (interpreter === "bun" && !sawRun && token === "run") {
+      sawRun = true;
+      continue;
+    }
+    const pathLike = (token.includes("/") || SCRIPT_EXTENSION_PATTERN.test(token)) && !SHELL_EXPANSION_PATTERN.test(token);
+    if (pathLike) return { kind: "path", path: token };
+    // reason: `bun run typecheck` names a package script, not a file: a recognised runner, nothing to extract.
+    return sawRun ? null : { kind: "unresolved" };
+  }
+  return sawRun ? null : { kind: "unresolved" };
+}
+
+/**
+ * Every file path a declared command asks the filesystem to hold: test-file tokens of recognised runner
+ * segments ({@link extractTestFileTokens}) PLUS the script path of every interpreter segment
+ * ({@link extractInterpreterScript}). AC-EI-2: `bun scripts/measure-test-wall.ts --max-seconds 600` yields
+ * `scripts/measure-test-wall.ts`.
+ *
+ * @param command - the exact command string
+ * @returns de-duplicated, order-preserving path tokens
+ */
+export function extractOraclePathTokens(command: string): string[] {
+  const seen = new Set<string>();
+  const tokens: string[] = [];
+  const push = (token: string): void => {
+    if (seen.has(token)) return;
+    seen.add(token);
+    tokens.push(token);
+  };
+  for (const { segment, runner } of classifyCommandSegments(command)) {
+    if (runner !== "unclassified") for (const token of segment.match(TEST_FILE_TOKEN_PATTERN) ?? []) push(token);
+    const script = extractInterpreterScript(segment);
+    if (script?.kind === "path") push(script.path);
+  }
+  return tokens;
+}
+
+/**
+ * Segments of `command` the extractor could not classify (AC-EI-2 half 5; baseline AS-17): neither a
+ * recognised runner, nor an interpreter segment naming a file, nor a benign shell builtin. The existence check
+ * says NOTHING about them, so a caller must report them instead of reading silence as "checked clean".
+ *
+ * @param command - the exact command string
+ * @returns trimmed text of each unclassifiable segment, in source order; `[]` when every segment is understood
+ * @example
+ *   findUncheckedOracleSegments("python3 check.py && echo done") // => ["python3 check.py"]
+ *   findUncheckedOracleSegments("bunx --bun vitest run a.test.ts && echo ok") // => []
+ */
+export function findUncheckedOracleSegments(command: string): string[] {
+  const unchecked: string[] = [];
+  for (const { segment, runner } of classifyCommandSegments(command)) {
+    const text = segment.trim();
+    if (text.length === 0 || runner !== "unclassified") continue;
+    const script = extractInterpreterScript(segment);
+    if (script?.kind === "path") continue;
+    const leader = tokenizeSegment(text)[0] ?? "";
+    if (script === null && BENIGN_SHELL_LEADERS.has(leader)) continue;
+    unchecked.push(text);
+  }
+  return unchecked;
+}
+
 /**
  * Matches a segment that consists of NOTHING BUT `cd <target>` — the target
  * being a double-quoted, single-quoted, or bare run. Anchored at BOTH ends on
@@ -498,7 +638,7 @@ const CD_SEGMENT_PATTERN = /^\s*cd\s+("[^"]*"|'[^']*'|\S+)\s*$/;
 export function extractCdPrefixTarget(command: string): string | null {
   const segments = splitCommandSegments(command);
   const invocationIndex = segments.findIndex(
-    (segment) => extractTestFileTokens(segment).length > 0,
+    (segment) => extractOraclePathTokens(segment).length > 0,
   );
   const scanEnd = invocationIndex === -1 ? segments.length : invocationIndex;
 
@@ -691,7 +831,7 @@ export function findMissingOracleFiles(
     fileExists: FileExistsPort;
   },
 ): string[] {
-  const tokens = extractTestFileTokens(command);
+  const tokens = extractOraclePathTokens(command);
   if (tokens.length === 0) return [];
 
   const roots = computeCandidateRoots(command, opts);
@@ -766,7 +906,7 @@ export function evidenceRanMissingOracle(
   ctx: { cwd: string; additionalCwds?: string[]; corpusRoot?: string },
 ): boolean {
   if (criterion.missingPaths.length === 0) return false;
-  const ran = resolveTokenLocations(evidence.command, extractTestFileTokens(evidence.command), {
+  const ran = resolveTokenLocations(evidence.command, extractOraclePathTokens(evidence.command), {
     ...ctx,
     ...(evidence.executionRoot !== undefined ? { executionRoot: evidence.executionRoot } : {}),
   });
@@ -799,6 +939,6 @@ export function describePrecheckRoots(
   command: string,
   opts: { cwd: string; additionalCwds?: string[]; corpusRoot?: string },
 ): string[] {
-  if (extractTestFileTokens(command).length === 0) return [];
+  if (extractOraclePathTokens(command).length === 0) return [];
   return computeCandidateRoots(command, opts);
 }

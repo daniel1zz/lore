@@ -530,10 +530,17 @@ export interface AcCoverageFact {
    * How many `pass` evidence rows tagged with this criterion RAN one of its missing oracle files (TG-22;
    * `evidenceRanMissingOracle`, same normalised-location comparison, execution root included). Set by
    * `AcService.listCriteria` beside {@link oracle_file_missing}; ABSENT = not computed = no such pass.
-   * {@link deriveAcCoverageState} answers `"not_measured"` only when this is positive: a pass that ran OTHER
-   * files proves nothing about the missing one, but must not be hidden by it either.
+   * INFORMATION ONLY since AC-EI-2: {@link deriveAcCoverageState} no longer reads it (TG-22's narrowing was
+   * removed — a missing oracle is not measured whatever earlier passes ran).
    */
   passes_ran_missing_oracle?: number;
+  /**
+   * Segments of the criterion's CURRENT script command the missing-oracle extractor could not classify
+   * (AC-EI-2 half 5; AS-17): neither a recognised runner, an interpreter naming a file, nor a benign shell
+   * builtin. Their paths were NOT checked — listed here so "not checked" is never read as "checked clean".
+   * ABSENT = not computed; `[]` = every segment understood. Set by `AcService.listCriteria`.
+   */
+  oracle_paths_unchecked?: readonly string[];
 }
 
 /**
@@ -698,11 +705,11 @@ export function computeAcCoverage(
  * | 6 | `"pass"` | `fail === 0`, `attested_pass === 0`, `pass > 0`, `falsified > 0` |
  * | 7 | `"none"` | `pass === 0` AND `fail === 0` |
  *
- * **AC-TG-6 — missing oracle file (between rows 2 and 3)**: when {@link AcCoverageFact.oracle_file_missing}
- * is non-empty and `fail === 0` and `passes_ran_missing_oracle > 0` (TG-22: a pass that ran
- * other files does not count), the state is `"not_measured"` BEFORE rows 3-6 are tried —
- * an earlier attested pass against a test file that no longer exists must not render as passing. A real
- * `fail` still outranks it (rows 1-2); a criterion with no evidence stays `"none"` (row 7).
+ * **AC-TG-6 / AC-EI-2 — missing oracle file (between rows 2 and 3)**: when {@link AcCoverageFact.oracle_file_missing}
+ * is non-empty and `fail === 0` and the criterion has any counted pass (`pass > 0`), the state is
+ * `"not_measured"` BEFORE rows 3-6 are tried — whichever files the earlier passes ran (TG-22's "passes that
+ * ran the missing file" narrowing is removed: AC-TG-6's text never had it). A real `fail` still outranks it
+ * (rows 1-2); a criterion with no counted pass stays `"none"` (row 7).
  *
  * This is the COMPLETE return set — `"inconclusive"`/`"expected-fail"` are
  * badge-layer residuals `commands/ac.ts::coverageBadge` derives from `fact.refs`
@@ -780,9 +787,9 @@ export function deriveAcCoverageState(fact: AcCoverageFact): AcCoverageState {
     return isSupersededByNewerAttestedPass(fact.refs) ? "fail_superseded" : "fail";
   }
   // AC-TG-6: the oracle file is gone, so no earlier pass (attested or not) may render as passing.
-  // TG-22: only a pass that RAN the missing file counts — a pass that ran other files proves nothing about it.
+  // AC-EI-2: regardless of which files earlier passes ran (TG-22's narrowing removed; passes_ran_missing_oracle is information only).
   const missing = fact.oracle_file_missing;
-  if (missing !== undefined && missing.length > 0 && fact.passes_ran_missing_oracle !== undefined && fact.passes_ran_missing_oracle > 0) {
+  if (missing !== undefined && missing.length > 0 && fact.pass > 0) {
     return "not_measured";
   }
   if (fact.attested_pass > 0) return "attested_pass";
