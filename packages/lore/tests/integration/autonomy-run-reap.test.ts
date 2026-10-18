@@ -100,6 +100,26 @@ async function spawnParentWithChild(childCwd: string): Promise<{ parent: number;
   return { parent: parent.pid, child };
 }
 
+/**
+ * A node "shared main harness" that spawns a `sleep` child with cwd `childCwd` only after `delayMs`, so the child starts
+ * AFTER the runs registered against the parent pid (the proof windows are second-precision). Returns both pids.
+ */
+async function spawnHarnessWithLateChild(childCwd: string, delayMs: number): Promise<{ parent: number; childPid: Promise<number> }> {
+  const script = `const {spawn}=require("node:child_process");setTimeout(()=>{const c=spawn("sleep",["600"],{cwd:${JSON.stringify(childCwd)},stdio:"ignore"});console.log(c.pid);},${delayMs});setInterval(()=>{},1000);`;
+  const parent = spawn("node", ["-e", script], { cwd: tmpdir(), stdio: ["ignore", "pipe", "ignore"] });
+  if (parent.pid === undefined) throw new Error("node harness did not start");
+  trackedPids.add(parent.pid);
+  const childPid = new Promise<number>((resolve, reject) => {
+    parent.stdout?.once("data", (chunk: Buffer) => {
+      const pid = Number.parseInt(chunk.toString("utf8").trim(), 10);
+      trackedPids.add(pid);
+      resolve(pid);
+    });
+    parent.once("error", reject);
+  });
+  return { parent: parent.pid, childPid };
+}
+
 afterEach(async () => {
   for (const pid of trackedPids) {
     try {
@@ -528,5 +548,69 @@ describe("AC-AU-5 lore run reap", () => {
     expect(r.exitCode).toBe(0);
     expect(r.stdout).toContain("nothing to do");
     expect(readdirSync(fixture.corpus)).toContain(".lore");
+  }, 90_000);
+});
+
+describe("AC-AU-5 proof C (AU-T14): an ended subagent run sharing the live main pid", () => {
+  /** main run (live, corpus checkout) + subagent run (shares main's pid, worktree W); a child of main starts later in `childAt`. */
+  async function sharedMainFixture(childAt: "worktree" | "main-checkout") {
+    const fixture = makeFixture();
+    const worktree = fixture.worktree("c1");
+    const harness = await spawnHarnessWithLateChild(childAt === "worktree" ? worktree : fixture.corpus, 3000);
+    fixture.register("main-s", { cwd: fixture.corpus, pid: harness.parent });
+    fixture.register("sub-s", { cwd: worktree, pid: harness.parent });
+    const child = await harness.childPid;
+    return { fixture, worktree, harness, child };
+  }
+
+  it("RED-FIRST: a process in an ended subagent's worktree, descending from the ALIVE shared main pid, is reaped", async () => {
+    const { fixture, harness, child } = await sharedMainFixture("worktree");
+    fixture.endRun("cc:sub-s");
+
+    const dry = fixture.reap();
+    expect(dry.exitCode).toBe(0);
+    expect(entryFor(dry.report, child)).toMatchObject({ action: "would-reap", proof: "exclusive-worktree", owner_runs: ["cc:sub-s"], signals: [] });
+    expect(isAlive(child)).toBe(true);
+
+    const applied = fixture.reap({ apply: true });
+    expect(applied.exitCode).toBe(0);
+    expect(entryFor(applied.report, child)).toMatchObject({ action: "reaped", proof: "exclusive-worktree", signals: ["SIGTERM"], decision: { verdict: "auto" } });
+    expect(isAlive(child)).toBe(false);
+    expect(isAlive(harness.parent)).toBe(true);
+    expect(decisionRows(fixture, "process-reap")).toEqual([{ subject_id: `pid:${child}`, verdict: "auto", channel: "machine" }]);
+    expect(fixture.db((db) => (db.query("SELECT ended_at FROM runs WHERE id = 'cc:main-s'").get() as { ended_at: string | null }).ended_at)).toBeNull();
+  }, 90_000);
+
+  it("CONTROL 1: the same process while the subagent run is NOT ended is not a candidate (kept, no row)", async () => {
+    const { fixture, harness, child } = await sharedMainFixture("worktree");
+    const applied = fixture.reap({ apply: true });
+    expect(applied.exitCode).toBe(0);
+    expect(entryFor(applied.report, child)).toBeUndefined();
+    expect(isAlive(child)).toBe(true);
+    expect(isAlive(harness.parent)).toBe(true);
+    expect(decisionRows(fixture, "process-reap")).toEqual([]);
+  }, 90_000);
+
+  it("CONTROL 2: a process in MAIN's checkout descending from the live main pid is never touched, even with an ended subagent nested below", async () => {
+    const { fixture, harness, child } = await sharedMainFixture("main-checkout");
+    fixture.endRun("cc:sub-s");
+    const applied = fixture.reap({ apply: true });
+    expect(applied.exitCode).toBe(0);
+    expect(entryFor(applied.report, child)).toBeUndefined();
+    expect(isAlive(child)).toBe(true);
+    expect(isAlive(harness.parent)).toBe(true);
+    expect(decisionRows(fixture, "process-reap")).toEqual([]);
+  }, 90_000);
+
+  it("CONTROL 3: a worktree ALSO held by a live run is not exclusive; the shared-pid descendant is kept-live-owner", async () => {
+    const { fixture, worktree, harness, child } = await sharedMainFixture("worktree");
+    const other = spawnSleeper();
+    fixture.register("other-live", { cwd: worktree, pid: other.pid });
+    fixture.endRun("cc:sub-s");
+    const applied = fixture.reap({ apply: true });
+    expect(applied.exitCode).toBe(0);
+    expect(entryFor(applied.report, child)).toMatchObject({ action: "kept-live-owner", signals: [] });
+    expect(isAlive(child)).toBe(true);
+    expect(isAlive(harness.parent)).toBe(true);
   }, 90_000);
 });
