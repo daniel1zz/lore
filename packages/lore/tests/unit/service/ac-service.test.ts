@@ -721,7 +721,9 @@ const FIVE_TOKEN_LESS_COMMANDS = [
   "bun run typecheck",
   'test $(grep -rln "TODO" packages/lore/src | wc -l) -eq 0',
   "bun run dev -- setup --dry-run --claude-dir /tmp/lore-setup-probe",
-  "diff <(shasum assets/hooks/pre-push) <(shasum hooks/pre-push)",
+  // reason: the original `diff <(...) <(...)` is a bash process substitution that `sh -c` (what lore verify runs)
+  // cannot parse, so TG-45 refuses it at declaration; this POSIX form keeps the fixture token-less.
+  "cmp assets/hooks/pre-push hooks/pre-push",
 ];
 
 describe("NEGATIVE/BOUNDARY — addCriterion declared-path-existence (AC-OX-4)", () => {

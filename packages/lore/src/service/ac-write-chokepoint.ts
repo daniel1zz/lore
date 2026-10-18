@@ -11,6 +11,10 @@
  * with an unquoted shell pipe (`@lore/core` `commandHasUnsafePipe`, the one detector), is refused with
  * VALIDATION_ERROR field `command` under every oracle except `other`; under `other` it is admitted and
  * {@link admitAcWrite} returns the note in `advisories`. A stored unchanged command is never re-checked.
+ * Unparseable command (TG-45): on the same paths a script criterion that is ADDED or whose command CHANGED, and that
+ * `sh -n -c` (the shell `lore verify` runs it under, parse only) cannot parse, is refused with VALIDATION_ERROR
+ * field `command` naming the shell's message — rule `ac-command-parses`. This is the one IO step in
+ * {@link applyAcChange} (a short `sh -n` spawn via `ac-command-parse-check.ts`, only for changed commands).
  * Invariants:
  *   - A change is detected on the canonical JSON of the array (`JSON.stringify`; order and every
  *     field significant) — reordered, reworded, appended, dropped, added-from-absent all count.
@@ -28,14 +32,14 @@
  *     else VALIDATION_ERROR field `falsifier.expected_exit_code`. A stored criterion whose falsifier is
  *     unchanged is never re-checked, and `acFalsifierSchema` is deliberately NOT tightened (a stored 0 must
  *     still parse; `lore verify --falsify` refuses it at run time, BR-1074).
- *   - {@link applyAcChange} is pure: no IO, no clock. Returns a Result; never throws.
+ *   - {@link applyAcChange} reads no store and no clock; its only IO is the `sh -n` parse spawn above. Returns a Result; a missing shell throws loud.
  *   - {@link admitAcWrite} is the citation-gate half (spec C4, AC-BLS2-2): the SAME chokepoint decides, on
  *     every sanctioned path (`ac-verb`, `create`), whether an ADDED or REVISED criterion may be written. It
  *     reads the store (baseline docs; exemptions, which the gate honours — an unexpired one waives an uncited criterion, BR-959; on refusal also specs and `ac_cites`) but never writes;
  *     the decision itself is the pure `ac-cite-gate.ts::decideCiteGate`. The liveness re-check that closes
  *     the retire-vs-cite race happens in the write transaction (`ProvenanceWriteExtras.require_live_rules`),
  *     not here — a read here is only the early, friendly answer.
- * Side-effect class: `applyAcChange` pure; `admitAcWrite` store reads + one clock read.
+ * Side-effect class: `applyAcChange` spawns `sh -n` for changed script commands; `admitAcWrite` store reads + one clock read.
  *
  * Source: spec-baseline-slice-2-completeness-census-per-branch-citation §C3, AC-BLS2-1.
  */
@@ -68,6 +72,7 @@ import {
 } from "./ac-cite-gate.js";
 import { loadRuleIndexData } from "./rule-index-loader.js";
 import { ownProposedRules } from "./rule-changes.js";
+import { shellParseError, VERIFY_SHELL } from "./ac-command-parse-check.js";
 
 /** The refusal code — also the `LoreError` discriminant in `@lore/core` errors.ts. */
 export const AC_WRITE_NOT_VIA_AC_VERB = "AC_WRITE_NOT_VIA_AC_VERB" as const;
@@ -199,6 +204,34 @@ function pipeRefusal(stored: unknown, incoming: unknown, docId: string | undefin
   };
 }
 
+/** The rule name a refused unparseable command carries (TG-45). */
+export const AC_COMMAND_PARSES_RULE = "ac-command-parses" as const;
+
+/**
+ * TG-45: the first script criterion that is ADDED or whose command CHANGED and that the verify shell cannot
+ * parse — as a refusal naming the parser message; `undefined` when every changed command parses. Parse only:
+ * the command is never run, so a parseable command whose check would fail is admitted.
+ */
+function unparseableCommandRefusal(stored: unknown, incoming: unknown, docId: string | undefined): LoreError | undefined {
+  const before = scriptCommandsById(stored);
+  for (const [acId, now] of scriptCommandsById(incoming)) {
+    if (before.get(acId)?.command === now.command) continue;
+    const parserMessage = shellParseError(now.command);
+    if (parserMessage === null) continue;
+    return {
+      code: "VALIDATION_ERROR",
+      field: "command",
+      ...(docId !== undefined ? { id: docId } : {}),
+      message:
+        `rule ${AC_COMMAND_PARSES_RULE}: AC "${acId}": the command does not parse under \`${VERIFY_SHELL} -n -c\` ` +
+        `(the shell \`lore verify\` runs it with), so it could never run: ${parserMessage}. Nothing was written. ` +
+        `Fix the quoting (an apostrophe inside single quotes closes the string; put the text in double quotes).`,
+      value: now.command,
+    };
+  }
+  return undefined;
+}
+
 /**
  * Advisories for the criteria that are ADDED or whose command / oracle changed in `next` against `existing`,
  * under oracle `other` only (every other oracle is refused by {@link applyAcChange}). One line per criterion,
@@ -280,6 +313,9 @@ export function applyAcChange(
   if (path !== "wholesale") {
     const pipeBlocked = pipeRefusal(before?.[KEY], after[KEY], docId);
     if (pipeBlocked !== undefined) return err(pipeBlocked);
+    // reason: TG-45 — same paths and changed-only scope as the pipe refusal above; wholesale never carries a changed command.
+    const unparseable = unparseableCommandRefusal(before?.[KEY], after[KEY], docId);
+    if (unparseable !== undefined) return err(unparseable);
   }
   if (path === "ac-verb") return ok(undefined);
   if (path !== "wholesale") {
