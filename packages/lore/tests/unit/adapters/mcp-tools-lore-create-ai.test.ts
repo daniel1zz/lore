@@ -23,6 +23,7 @@
  * @spec_ref AC-NOAI-4 AC-NOAI-5
  */
 
+import { liveInvocation } from "../../live-invocation.js";
 import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
 import { describe, it, expect, beforeEach } from "vitest";
@@ -143,7 +144,7 @@ beforeEach(() => {
   app = made.app;
   aiProvider = made.aiProvider;
   server = new McpServer({ name: "test", version: "0.0.0" });
-  registerTools(server, app);
+  registerTools(server, app, undefined, liveInvocation());
 });
 
 // ─── HAPPY — ai field absent (defaults to false) ─────────────────────────────

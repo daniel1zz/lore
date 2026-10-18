@@ -119,7 +119,7 @@ import {
   type VerificationProfile,
 } from "@lore/core";
 import type { PlanBundle } from "@lore/core";
-import { readOsUsername, resolveActorWithSource } from "@lore/core/node";
+import { resolveActorWithSource } from "@lore/core/node";
 import {
   checkpointRegistry,
   describeCheckpointVacuity,
@@ -527,6 +527,18 @@ export interface GateDependencies {
 /**
  * Service-layer gate checkpoint runner. See module header for the full rationale.
  */
+/** Thrown by the port-less actor fallback when the session tier of the injected env names no actor: nothing may guess one. */
+export class GateActorUnresolvedError extends Error {
+  constructor() {
+    super("GateEnforcer has no resolveActorPort and its env names no session — wire `resolveActorPort` (app.ts does) to record gate rows");
+    this.name = "GateActorUnresolvedError";
+  }
+}
+
+function noOsUsername(): string {
+  throw new GateActorUnresolvedError();
+}
+
 export class GateEnforcer {
   /**
    * @param config - The project's resolved `LoreConfig`, or `undefined` when no
@@ -572,7 +584,7 @@ export class GateEnforcer {
   private resolveActor(): string {
     return this.resolveActorPort !== undefined
       ? this.resolveActorPort()
-      : resolveActorWithSource(undefined, this.env, readOsUsername).actor;
+      : resolveActorWithSource(undefined, this.env, noOsUsername).actor;
   }
 
   /**

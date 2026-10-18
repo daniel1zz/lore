@@ -15,6 +15,7 @@
  * different-inputs-different-outputs (two distinct runs R1/R2 produce distinct stamps).
  */
 
+import { liveInvocation } from "../../live-invocation.js";
 import { Database } from "bun:sqlite";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
@@ -107,7 +108,7 @@ describe("AC-RID-7 MCP harness_run attestation (real server, tools/list + tools/
     taskSlug = task.value.slug;
 
     const server = new McpServer({ name: "lore", version: "0.0.0-test" });
-    registerTools(server, app);
+    registerTools(server, app, undefined, liveInvocation());
     const [clientT, serverT] = InMemoryTransport.createLinkedPair();
     await server.connect(serverT);
     client = new Client({ name: "test-client", version: "0.0.0" });

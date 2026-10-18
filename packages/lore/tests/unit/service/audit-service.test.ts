@@ -29,7 +29,8 @@ import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
 import { TaskWorkflowService } from "../../../src/service/task-workflow-service.js";
 import { AuditService } from "../../../src/service/audit-service.js";
-import { readOsUsername, resolveActorWithSource } from "@lore/core/node";
+import { resolveActorWithSource } from "@lore/core/node";
+import { readOsUsername } from "../../../src/os-username.js";
 import type { CreateDocInput, VersionRecord, AuditEntry } from "@lore/core";
 
 // ─── Fixture helpers ──────────────────────────────────────────────────────────

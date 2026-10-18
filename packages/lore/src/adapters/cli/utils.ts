@@ -62,7 +62,8 @@ import {
   isClaimStale,
   isInvalidated,
 } from "@lore/core";
-import { readOsUsername, resolveActorWithSource as resolveActorWithSourceCore } from "@lore/core/node";
+import { resolveActorWithSource as resolveActorWithSourceCore } from "@lore/core/node";
+import { readOsUsername } from "../../os-username.js";
 import type { ActorSource as CoreActorSource } from "@lore/core/node";
 import type { DocRecord, LoreError, ReviewJudgment, ValidityCarrier } from "@lore/core";
 import type { TreeNode } from "../../service/corpus-service.js";

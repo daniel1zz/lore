@@ -27,6 +27,7 @@
  * @spec_ref AC-BLS2-1
  */
 
+import { liveInvocation } from "../../live-invocation.js";
 import { recordLockGateOff } from "../../helpers/record-lock-gate-off.js";
 import { describe, it, expect } from "vitest";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -120,7 +121,7 @@ type McpServerInternal = {
 
 function mcpSet(cs: CorpusService) {
   const server = new McpServer({ name: "test", version: "0.0.0" });
-  registerTools(server, appFor(cs));
+  registerTools(server, appFor(cs), undefined, liveInvocation());
   const tool = (server as unknown as McpServerInternal)._registeredTools["lore_set"];
   if (!tool) throw new Error("lore_set not registered");
   return (args: Record<string, unknown>) => tool.handler(args, {} as unknown);

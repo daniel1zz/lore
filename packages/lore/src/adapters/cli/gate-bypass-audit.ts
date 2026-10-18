@@ -36,7 +36,6 @@
  * Source: SPEC-080 §Scope, §Design Decisions D1/D3; AC-080-2.
  */
 
-import { resolveActorFromProcess } from "@lore/core/node";
 import { invocationInScope } from "./invocation-scope.js";
 import {
   buildGateSkipAuditEntry,
@@ -101,7 +100,14 @@ export async function runGateEnvBypassAudit(
 
   const nowIso = new Date().toISOString();
   // reason: the invocation's claimed name (resolved once at the entry) — never an independent resolution.
-  const actor = invocationInScope()?.identity.claimed ?? resolveActorFromProcess().actor;
+  const scopedInvocation = invocationInScope();
+  if (scopedInvocation === undefined) {
+    // reason: no delivered Invocation means no resolved name to attribute the row to, and a guessed one is worse than
+    // no row — the audit is best-effort by contract (D3), so say so loudly and let the gate proceed.
+    warnBypassNotAudited("no invocation in scope: cannot name the actor");
+    return;
+  }
+  const actor = scopedInvocation.identity.claimed;
   const entry = buildGateSkipAuditEntry(checkpoint, "env_bypass", nowIso, actor);
 
   try {

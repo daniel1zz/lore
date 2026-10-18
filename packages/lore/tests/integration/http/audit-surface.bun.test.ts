@@ -24,6 +24,7 @@
  * @spec_ref spec-baseline-close-out-fixes-audit-surface-node-validation AC-BLC-1
  */
 
+import { liveInvocation } from "../../live-invocation.js";
 import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
@@ -171,7 +172,7 @@ describe("AC-BLC-1 MCP surface", () => {
 
   it("lore_create, lore_set and lore_approve record surface 'mcp'", async () => {
     const server = new McpServer({ name: "test", version: "0.0.0" });
-    registerTools(server, rig.app);
+    registerTools(server, rig.app, undefined, liveInvocation());
     const tools = (server as unknown as McpInternal)._registeredTools;
     const call = async (name: string, args: Record<string, unknown>): Promise<unknown> => {
       const tool = tools[name];

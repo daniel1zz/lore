@@ -59,6 +59,7 @@
  * @spec_ref AC-JV-5, spec-judgment-surfaces-must-verify-before-they-certify-machine D6
  */
 
+import { liveInvocation } from "../../live-invocation.js";
 import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
@@ -388,7 +389,7 @@ describe("lore_assess (MCP) — AC-JV-5(b)(c): diffSource wired, resolved commit
   beforeEach(() => {
     app = makeApp();
     server = new McpServer({ name: "test", version: "0.0.0" });
-    registerTools(server, app);
+    registerTools(server, app, undefined, liveInvocation());
 
     gitTmpDir = mkdtempSync(join(tmpdir(), "lore-mcp-assess-diff-source-wiring-"));
     spawnSync("git", ["init", "-q"], { cwd: gitTmpDir, env: gitEnv });
@@ -448,7 +449,7 @@ describe("lore_assess (MCP) — AC-JV-5(d): REVERSE CONTROL — diffSource resol
   beforeEach(() => {
     app = makeApp();
     server = new McpServer({ name: "test", version: "0.0.0" });
-    registerTools(server, app);
+    registerTools(server, app, undefined, liveInvocation());
 
     gitTmpDir = mkdtempSync(join(tmpdir(), "lore-mcp-assess-diff-source-wiring-reverse-"));
     spawnSync("git", ["init", "-q"], { cwd: gitTmpDir, env: gitEnv });

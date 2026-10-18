@@ -47,6 +47,7 @@
  * Coverage: HAPPY / NEGATIVE / BOUNDARY / ERROR / STATE / REGRESSION.
  */
 
+import { liveInvocation } from "../../live-invocation.js";
 import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -197,7 +198,7 @@ beforeEach(async () => {
   if (!prdResult.ok) throw new Error(`fixture setup failed: ${prdResult.error.code}`);
 
   server = new McpServer({ name: "test", version: "0.0.0" });
-  registerTools(server, app, () => makeConfig(GITHUB_UPSTREAM));
+  registerTools(server, app, () => makeConfig(GITHUB_UPSTREAM), liveInvocation());
 });
 
 afterEach(() => {

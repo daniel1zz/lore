@@ -33,8 +33,7 @@
   "packages/lore/src/adapters/cli/setup-check.ts": 1,
   "packages/lore/src/adapters/cli/utils.ts": 9,
   "packages/lore/src/adapters/http/machine-auth.ts": 3,
-  "packages/lore/src/adapters/mcp/call-scope.ts": 1,
-  "packages/lore/src/adapters/mcp/tools.ts": 4,
+  "packages/lore/src/adapters/mcp/tools.ts": 1,
   "packages/lore/src/adapters/process-table-port.ts": 1,
   "packages/lore/src/adapters/real-fs-probe.ts": 2,
   "packages/lore/src/adapters/real-human-channel-port.ts": 2,
@@ -43,8 +42,10 @@
   "packages/lore/src/adapters/session-heartbeat-port.ts": 2,
   "packages/lore/src/ai/claude-cli-provider.ts": 2,
   "packages/lore/src/ai/registry.ts": 1,
-  "packages/lore/src/app.ts": 9,
+  "packages/lore/src/app.ts": 8,
+  "packages/lore/src/os-username.ts": 1,
   "packages/lore/src/service/worktree-cleanup.ts": 1,
   "packages/lore/src/store/foreign-schema-guard.ts": 2,
-  "packages/lore/src/store/turso-store.ts": 1
+  "packages/lore/src/store/turso-store.ts": 1,
+  "packages/lore/src/store/write-context-store.ts": 1
 }

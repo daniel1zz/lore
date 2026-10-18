@@ -94,7 +94,8 @@ import {
   type LoreError,
   type Result,
 } from "@lore/core";
-import { readOsUsername, resolveActorWithSource } from "@lore/core/node";
+import { resolveActorWithSource } from "@lore/core/node";
+import { readOsUsername } from "../../../os-username.js";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatError, resolveActor } from "../utils.js";
 import { classifyFeedbackUpstream, fileGithubIssue, resolveConsumerCorpusRoot } from "../report-issue-wiring.js";

@@ -36,6 +36,7 @@
  *   creates-then-fails-the
  */
 
+import { liveInvocation } from "../../live-invocation.js";
 import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
 import { describe, it, expect } from "vitest";
@@ -177,7 +178,7 @@ describe("lore_create.supersedes — NEGATIVE (AC1, type-ineligible target)", ()
   it("supersedes naming a task → isError, AND the corpus doc count is UNCHANGED before/after", async () => {
     const app = makeApp();
     const server = new McpServer({ name: "test", version: "0.0.0" });
-    registerTools(server, app);
+    registerTools(server, app, undefined, liveInvocation());
     const handler = getToolHandler(server, "lore_create");
 
     const task = await createTask("A Task That Cannot Be Superseded");
@@ -217,7 +218,7 @@ describe("lore_create.supersedes — BOUNDARY (target does not resolve)", () => 
   it("supersedes naming a nonexistent slug → isError (DOC_NOT_FOUND), creates NOTHING", async () => {
     const app = makeApp();
     const server = new McpServer({ name: "test", version: "0.0.0" });
-    registerTools(server, app);
+    registerTools(server, app, undefined, liveInvocation());
     const handler = getToolHandler(server, "lore_create");
 
     const knowledgeCountBefore = await countDocsOfType("knowledge");
@@ -245,7 +246,7 @@ describe("lore_create.supersedes — CONTROL (AC3, type-eligible targets still s
   it("supersedes a knowledge target → creates AND invalidates end-to-end", async () => {
     const app = makeApp();
     const server = new McpServer({ name: "test", version: "0.0.0" });
-    registerTools(server, app);
+    registerTools(server, app, undefined, liveInvocation());
     const handler = getToolHandler(server, "lore_create");
 
     const oldKnowledge = await createKnowledge("Old Knowledge Doc (MCP)");
@@ -275,7 +276,7 @@ describe("lore_create.supersedes — CONTROL (AC3, type-eligible targets still s
   it("supersedes an adr target → creates AND invalidates end-to-end (both eligible types, not just one)", async () => {
     const app = makeApp();
     const server = new McpServer({ name: "test", version: "0.0.0" });
-    registerTools(server, app);
+    registerTools(server, app, undefined, liveInvocation());
     const handler = getToolHandler(server, "lore_create");
 
     const oldAdr = await createAdr("Old Decision (MCP)");

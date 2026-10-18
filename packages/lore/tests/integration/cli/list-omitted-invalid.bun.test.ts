@@ -12,6 +12,7 @@
  *   REGRESSION: BR-745 — the invalidated doc stays excluded from the default rows
  *   MCP:        lore_list result carries omitted_invalid
  */
+import { liveInvocation } from "../../live-invocation.js";
 import { afterAll, describe, expect, it } from "vitest";
 import { appendFileSync, mkdtempSync, rmSync } from "fs";
 import { join } from "path";
@@ -156,7 +157,7 @@ describe("AC-CRIT-6: MCP lore_list carries omitted_invalid", () => {
     if (!inv.ok) throw new Error(JSON.stringify(inv.error));
 
     const server = new McpServer({ name: "test", version: "0.0.0" });
-    registerTools(server, app);
+    registerTools(server, app, undefined, liveInvocation());
     const tool = (
       server as unknown as {
         _registeredTools: Record<

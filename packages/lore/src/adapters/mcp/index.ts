@@ -7,7 +7,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import type { App } from "../../app.js";
-import type { LoreConfig } from "@lore/core";
+import type { Invocation, LoreConfig } from "@lore/core";
 import { registerTools } from "./tools.js";
 import { registerResources } from "./resources.js";
 import { setProcessAuditSurface } from "../../store/audit-surface.js";
@@ -27,8 +27,14 @@ import { setProcessAuditSurface } from "../../store/audit-surface.js";
  *   (`resolveTaskStartBudgets(getConfig?.())`). Additive/optional — an omitted
  *   `getConfig` preserves the pre-fix `DEFAULT_TASK_START_BUDGETS` fallback
  *   (REGRESSION-safe).
+ * @param inv - The Invocation the entry (`src/index.ts`) resolved at server start: the server's env, cwd, temp dir and
+ *   claimed name. Tools read ambient facts from it, never from the process (AS-26).
  */
-export async function startMcpServer(app: App, getConfig?: () => LoreConfig | undefined): Promise<void> {
+export async function startMcpServer(
+  app: App,
+  getConfig: (() => LoreConfig | undefined) | undefined,
+  inv: Invocation,
+): Promise<void> {
   // reason: SPEC-024 §9.2 — MCP surface MUST use in-process flag, not env var.
   // The timing problem: if we tried to read a LORE_SURFACE env var, the MCP adapter
   // and the tool handlers share one process, so there is no reliable moment to set
@@ -42,7 +48,7 @@ export async function startMcpServer(app: App, getConfig?: () => LoreConfig | un
     version: "0.1.0",
   });
 
-  registerTools(server, app, getConfig);
+  registerTools(server, app, getConfig, inv);
   registerResources(server, app);
 
   const transport = new StdioServerTransport();

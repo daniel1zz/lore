@@ -101,6 +101,7 @@
  * implemented". The InMemoryStore rule-registry methods are B2's (in flight).
  */
 
+import { liveInvocation } from "../../live-invocation.js";
 import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
 import { describe, it, expect, beforeEach } from "vitest";
@@ -484,7 +485,7 @@ const entryPoints: EntryPoint[] = [
     name: "MCP lore_set handler",
     set: async (idOrSlug, patch) => {
       const server = new McpServer({ name: "t", version: "0" });
-      registerTools(server, app);
+      registerTools(server, app, undefined, liveInvocation());
       const tool = (server as unknown as McpServerInternal)._registeredTools["lore_set"];
       if (!tool) throw new Error("lore_set not registered");
       const res = await tool.handler({ id_or_slug: idOrSlug, ...patch, by: "mcp-test" }, {});

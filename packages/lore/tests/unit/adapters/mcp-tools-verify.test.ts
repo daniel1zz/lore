@@ -40,6 +40,7 @@
  * @spec_ref AC-VRF-10 AC-VRF-2; SPEC-039 §M2
  */
 
+import { liveInvocation } from "../../live-invocation.js";
 import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
 import { describe, it, expect, beforeEach } from "vitest";
@@ -230,7 +231,7 @@ describe("lore_verify", () => {
     it("threads plan/ac/task/by through to verifyPlan and returns its Result value", async () => {
       const { app, calls } = makeApp();
       const server = new McpServer({ name: "test", version: "0.0.0" });
-      registerTools(server, app);
+      registerTools(server, app, undefined, liveInvocation());
       const call = getToolHandler(server, "lore_verify");
 
       const result = await asSessionActor("alice", () => call({ plan: "plan-1", ac: ["AC-1", "AC-2"], task: "task-1" }));
@@ -254,7 +255,7 @@ describe("lore_verify", () => {
     it("omitting ac/task leaves those keys ABSENT from verifyPlan's opts (not present-but-undefined)", async () => {
       const { app, calls } = makeApp();
       const server = new McpServer({ name: "test", version: "0.0.0" });
-      registerTools(server, app);
+      registerTools(server, app, undefined, liveInvocation());
       const call = getToolHandler(server, "lore_verify");
 
       await call({ plan: "plan-1", by: "alice" });
@@ -273,7 +274,7 @@ describe("lore_verify", () => {
           err({ code: "VALIDATION_ERROR", field: "task", message: "ambiguous target task — task-a, task-b", value: ["task-a", "task-b"] }),
       });
       const server = new McpServer({ name: "test", version: "0.0.0" });
-      registerTools(server, app);
+      registerTools(server, app, undefined, liveInvocation());
       const call = getToolHandler(server, "lore_verify");
 
       const result = await call({ plan: "plan-1", by: "alice" });
@@ -295,7 +296,7 @@ describe("lore_verify", () => {
           }),
       });
       const server = new McpServer({ name: "test", version: "0.0.0" });
-      registerTools(server, app);
+      registerTools(server, app, undefined, liveInvocation());
       const call = getToolHandler(server, "lore_verify");
 
       const result = await call({ plan: "plan-1", by: "alice" });
@@ -312,7 +313,7 @@ describe("lore_verify", () => {
     it("HAPPY: allow_new_commands: true threads opts.allowNewCommands: true", async () => {
       const { app, calls } = makeApp();
       const server = new McpServer({ name: "test", version: "0.0.0" });
-      registerTools(server, app);
+      registerTools(server, app, undefined, liveInvocation());
       const call = getToolHandler(server, "lore_verify");
 
       await call({ plan: "plan-1", by: "alice", allow_new_commands: true });
@@ -324,7 +325,7 @@ describe("lore_verify", () => {
     it("NEGATIVE: allow_new_commands omitted never threads opts.allowNewCommands", async () => {
       const { app, calls } = makeApp();
       const server = new McpServer({ name: "test", version: "0.0.0" });
-      registerTools(server, app);
+      registerTools(server, app, undefined, liveInvocation());
       const call = getToolHandler(server, "lore_verify");
 
       await call({ plan: "plan-1", by: "alice" });
@@ -336,7 +337,7 @@ describe("lore_verify", () => {
     it("NEGATIVE: allow_new_commands: false never threads opts.allowNewCommands (false is not forwarded)", async () => {
       const { app, calls } = makeApp();
       const server = new McpServer({ name: "test", version: "0.0.0" });
-      registerTools(server, app);
+      registerTools(server, app, undefined, liveInvocation());
       const call = getToolHandler(server, "lore_verify");
 
       await call({ plan: "plan-1", by: "alice", allow_new_commands: false });
@@ -348,7 +349,7 @@ describe("lore_verify", () => {
     it("REGRESSION: the handler NEVER supplies confirmUnapprovedCommand (MCP is non-interactive)", async () => {
       const { app, calls } = makeApp();
       const server = new McpServer({ name: "test", version: "0.0.0" });
-      registerTools(server, app);
+      registerTools(server, app, undefined, liveInvocation());
       const call = getToolHandler(server, "lore_verify");
 
       await call({ plan: "plan-1", by: "alice" });
@@ -362,7 +363,7 @@ describe("lore_verify", () => {
     it("App.verifyRunnerService === undefined → isError=true, STORE_ERROR (never throws)", async () => {
       const { app } = makeApp({ omitVerifyRunnerService: true });
       const server = new McpServer({ name: "test", version: "0.0.0" });
-      registerTools(server, app);
+      registerTools(server, app, undefined, liveInvocation());
       const call = getToolHandler(server, "lore_verify");
 
       const result = await call({ plan: "plan-1", by: "alice" });
@@ -396,7 +397,7 @@ describe("lore_evidence_add — forged attestation is inert (AC-VRF-2 adapter ha
   it("REGRESSION: even a raw object smuggling `attestation` past the schema never reaches TaskWorkflowService.addEvidence", async () => {
     const { app } = makeApp();
     const server = new McpServer({ name: "test", version: "0.0.0" });
-    registerTools(server, app);
+    registerTools(server, app, undefined, liveInvocation());
     const call = getToolHandler(server, "lore_evidence_add");
 
     const planId = await createPlan();

@@ -21,6 +21,7 @@
  * @spec_ref spec-approval-and-plan-closure-go-through-the-same-checks-on AC-AP-2
  */
 
+import { liveInvocation } from "../live-invocation.js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { mkdirSync, mkdtempSync, rmSync } from "fs";
 import { join } from "path";
@@ -63,7 +64,7 @@ beforeAll(async () => {
   await must(app.corpusService.create({ type: "prd", title: "Surfaces root PRD", content: "root" } as CreateDocInput));
 
   const mcp = new McpServer({ name: "test", version: "0.0.0" });
-  registerTools(mcp, app);
+  registerTools(mcp, app, undefined, liveInvocation());
   tools = (mcp as unknown as McpInternal)._registeredTools;
 
   machineAuth = createMachineAuthStores({ baseDir: mkdtempSync(join(tmpdir(), "lore-set-approval-machine-")) });

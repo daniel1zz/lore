@@ -35,6 +35,7 @@
  * @spec_ref AC-BLS3-3
  */
 
+import { liveInvocation } from "../../live-invocation.js";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 const setDefaultTimeout = (ms: number): void => { vi.setConfig({ testTimeout: ms, hookTimeout: ms }); };
 import { execFileSync } from "node:child_process";
@@ -196,7 +197,7 @@ type McpServerInternal = {
 async function mcpTree(c: Corpus, args: Record<string, unknown> = {}): Promise<{ isError: boolean; raw: string; tree?: TreeNodeLite }> {
   return withApp(c.dir, async (app) => {
     const server = new McpServer({ name: "bc-nav", version: "0.0.0" });
-    registerTools(server, app);
+    registerTools(server, app, undefined, liveInvocation());
     const tool = (server as unknown as McpServerInternal)._registeredTools["lore_tree"];
     if (!tool) throw new Error("lore_tree not registered");
     const result = await tool.handler(args, {});

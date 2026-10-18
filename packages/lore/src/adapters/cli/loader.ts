@@ -56,6 +56,7 @@
 import { dirname } from "path";
 import { mergeDefaults, isAiConfigValidationError, extractClaim, resolveClaimTtlMinutes, resolveForeignCorpusWriteGateEnabled } from "@lore/core";
 import type {
+  Invocation,
   LoreConfig,
   LoreDefaults,
   CallerSurface,
@@ -69,10 +70,9 @@ import type {
 import {
   loadConfig,
   loadGlobalConfig,
-  readProcessAmbient,
   resolveGlobalConfigPath,
 } from "@lore/core/node";
-import { createApp, createAppWithWriteContext, type App } from "../../app.js";
+import { ambientFromProcess, createApp, createAppWithWriteContext, type App, type AppAmbient } from "../../app.js";
 import { findLoreDbPath, formatError, exitCode } from "./utils.js";
 import { findForeignBehindSchema } from "../../store/foreign-schema-guard.js";
 import { invocationInScope } from "./invocation-scope.js";
@@ -159,6 +159,12 @@ export interface LoadLoreAppOptions {
    * passes anything else.
    */
   readonly surface?: LoreAppBootSurface;
+  /**
+   * The Invocation to compose against (env, home, temp dir, identity) — the MCP server passes the one it resolved at
+   * start. Omitted → the running command's delivered Invocation (transitional scope), else the process snapshot
+   * (tests and scripts calling `loadLoreApp()` directly have none).
+   */
+  readonly inv?: Invocation;
 }
 
 /**
@@ -422,12 +428,12 @@ export function loadLoreApp(opts: LoadLoreAppOptions = {}): {
   // reason: SPEC-003 §6.2 — resolve once here so we have the path for the warning message.
   // reason: transitional (until loadLoreApp takes `inv` itself): the running command's Invocation when the delivery
   // scope is open, else the process snapshot an Invocation-less entry (MCP/HTTP/tests) would resolve at startup.
-  const scopedInvocation = invocationInScope();
-  const globalConfigAmbient =
-    scopedInvocation !== undefined
-      ? { env: scopedInvocation.env, home: scopedInvocation.paths.home }
-      : readProcessAmbient();
-  const globalConfigPath = resolveGlobalConfigPath(globalConfigAmbient.env, globalConfigAmbient.home);
+  const composedInvocation = opts.inv ?? invocationInScope();
+  const ambient: AppAmbient =
+    composedInvocation !== undefined
+      ? { env: composedInvocation.env, home: composedInvocation.paths.home, tmpDir: composedInvocation.paths.tmpDir }
+      : ambientFromProcess();
+  const globalConfigPath = resolveGlobalConfigPath(ambient.env, ambient.home);
   let globalDefaults: LoreDefaults | undefined;
   if (globalConfigPath !== undefined) {
     const globalResult = loadGlobalConfig(globalConfigPath);
@@ -476,8 +482,8 @@ export function loadLoreApp(opts: LoadLoreAppOptions = {}): {
     const invocationIdentity = invocationInScope()?.identity;
     appOrResult =
       invocationIdentity === undefined
-        ? createApp(dbPath, telemetryOnlyConfig)
-        : createAppWithWriteContext(dbPath, telemetryOnlyConfig, { identity: invocationIdentity });
+        ? createApp(dbPath, telemetryOnlyConfig, undefined, ambient)
+        : createAppWithWriteContext(dbPath, telemetryOnlyConfig, { identity: invocationIdentity }, ambient);
   } catch (thrown) {
     const message = thrown instanceof Error ? thrown.message : String(thrown);
     console.error(`Error: Storage failure: ${message}`); // CLI surface

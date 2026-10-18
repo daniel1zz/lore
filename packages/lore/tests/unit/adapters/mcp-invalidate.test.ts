@@ -35,6 +35,7 @@
  * @spec_ref SPEC-043 §Acceptance Criteria AC-MH-9
  */
 
+import { liveInvocation } from "../../live-invocation.js";
 import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
 import { describe, it, expect } from "vitest";
@@ -157,7 +158,7 @@ describe("lore_invalidate — HAPPY (deep-equals the underlying ValidityService 
   it("MCP payload {doc, decision_status_unchanged?} matches ValidityService.invalidate()'s own result", async () => {
     const app = makeApp();
     const server = new McpServer({ name: "test", version: "0.0.0" });
-    registerTools(server, app);
+    registerTools(server, app, undefined, liveInvocation());
     const handler = getToolHandler(server, "lore_invalidate");
 
     const doc = await createKnowledge("Invalidate Target");
@@ -194,7 +195,7 @@ describe("lore_invalidate — ERROR (ineligible type)", () => {
   it("a plan target → isError with VALIDATION_ERROR", async () => {
     const app = makeApp();
     const server = new McpServer({ name: "test", version: "0.0.0" });
-    registerTools(server, app);
+    registerTools(server, app, undefined, liveInvocation());
     const handler = getToolHandler(server, "lore_invalidate");
 
     const plan = await createPlan("Cannot Be Invalidated");
@@ -212,7 +213,7 @@ describe("lore_search / lore_list — include_invalid (BOUNDARY + REGRESSION)", 
   it("excludes the invalidated doc by default, includes it when include_invalid:true", async () => {
     const app = makeApp();
     const server = new McpServer({ name: "test", version: "0.0.0" });
-    registerTools(server, app);
+    registerTools(server, app, undefined, liveInvocation());
     const searchHandler = getToolHandler(server, "lore_search");
     const listHandler = getToolHandler(server, "lore_list");
 
@@ -246,7 +247,7 @@ describe("lore_get — validity_state (STATE, AC-MH-9)", () => {
   it("carries {invalidated:true, invalid_at, invalidated_by_slug, reason} for an invalidated doc, and {invalidated:false} for its valid successor", async () => {
     const app = makeApp();
     const server = new McpServer({ name: "test", version: "0.0.0" });
-    registerTools(server, app);
+    registerTools(server, app, undefined, liveInvocation());
     const getHandler = getToolHandler(server, "lore_get");
 
     const successor = await createKnowledge("Successor Doc");

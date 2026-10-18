@@ -17,6 +17,7 @@
  */
 
 import { Database } from "bun:sqlite";
+import { homedir, tmpdir } from "node:os";
 import { dirname } from "node:path";
 import { SQLiteStore } from "./store/sqlite-store.js";
 import { assertNoForeignSchemaMigration } from "./store/foreign-schema-guard.js";
@@ -62,7 +63,6 @@ import { NoOpTelemetry, type Telemetry } from "@lore/core";
 // GlobalConfigService writes to.
 import {
   createTelemetry,
-  readProcessAmbient,
   readSessionTrail,
   resolveGlobalConfigPath,
   resolveGlobalConfigWritePath,
@@ -736,6 +736,31 @@ function warnOnStderr(line: string): void {
  *   one (bare test constructions, `createApp` callers with trace disabled) —
  *   behaviorally identical to the old function-local variable in that case.
  */
+/**
+ * The ambient process facts the composition root hands to the ports it wires: the environment, the user's home
+ * directory and the OS temp directory. Built from the entry's `Invocation` where there is one
+ * (`{ env: inv.env, home: inv.paths.home, tmpDir: inv.paths.tmpDir }`), else from the process by
+ * {@link ambientFromProcess}.
+ */
+export interface AppAmbient {
+  readonly env: Readonly<Record<string, string | undefined>>;
+  readonly home: string;
+  readonly tmpDir: string;
+}
+
+/**
+ * Read the running process for an {@link AppAmbient}: the composition root's ONE fallback for callers with no
+ * Invocation (tests, scripts, library use). Visible here so `check:ambient-reads` counts it against this file.
+ * `$HOME` wins over `os.homedir()` for the reason documented at `home-dir-node.ts`.
+ *
+ * @returns the live `process.env` object plus the resolved home and temp directories
+ */
+export function ambientFromProcess(): AppAmbient {
+  const env = process.env;
+  const envHome = env["HOME"];
+  return { env, home: envHome !== undefined && envHome !== "" ? envHome : homedir(), tmpDir: tmpdir() };
+}
+
 function buildAppFromSqlite(
   store: SQLiteStore,
   telemetry: Telemetry = new NoOpTelemetry(),
@@ -776,9 +801,8 @@ function buildAppFromSqlite(
   // (even with `undefined`): it then resolves to its default — off without baseline docs, report with
   // them. Only a bare `new AcService(store)` / `new CorpusService(store)` is ungated.
   citeGateRaw?: unknown,
+  ambient: AppAmbient = ambientFromProcess(),
 ): App {
-  // reason: ambient process state read ONCE per composition (AS-26): env, home and tmp dir for the ports below.
-  const ambient = readProcessAmbient();
   const db = store.getDatabase();
   // reason: claimTtlMinutes flows into DocSummary.meta's task.claim_stale (SPEC-036 §2
   // D3) — same resolved value TaskWorkflowService below uses, one resolution path
@@ -844,7 +868,7 @@ function buildAppFromSqlite(
     corpusService.resolveDeclaredAcIds.bind(corpusService),
     { enforcer: gateEnforcer, getPlanBundle: corpusService.getPlanBundle.bind(corpusService) },
     corpusService.resolveDeclaredAcIdsForAdhocTask.bind(corpusService),
-    process.env,
+    ambient.env,
     corpusService.resolveDeclaredAcCriteria.bind(corpusService),
     corpusService.resolveDeclaredAcCriteriaForAdhocTask.bind(corpusService),
     // reason: args 10-13 keep their real-IO defaults; arg 14 is the single worktree-removal test's facts for `done`'s
@@ -1047,7 +1071,7 @@ function buildAppFromSqlite(
         requireCommandApproval: verifyRequireCommandApproval,
         envAllowlist: verifyEnvConfig.allowlist,
         envPassthroughAll: verifyEnvConfig.passthrough_all,
-        processEnv: process.env,
+        processEnv: ambient.env,
         tmpDir: ambient.tmpDir,
       },
       undefined,
@@ -1203,9 +1227,8 @@ function buildAppFromTurso(
   pruneState?: { inFlight?: Promise<void> },
   // See buildAppFromSqlite's identical parameter JSDoc.
   citeGateRaw?: unknown,
+  ambient: AppAmbient = ambientFromProcess(),
 ): App {
-  // reason: ambient process state read ONCE per composition (AS-26): env, home and tmp dir for the ports below.
-  const ambient = readProcessAmbient();
   const apiKeyDb = new Database(dbPath);
   // reason: claimTtlMinutes flows into DocSummary.meta's task.claim_stale (SPEC-036 §2
   // D3) — same resolved value TaskWorkflowService below uses, one resolution path
@@ -1257,7 +1280,7 @@ function buildAppFromTurso(
     corpusService.resolveDeclaredAcIds.bind(corpusService),
     { enforcer: gateEnforcer, getPlanBundle: corpusService.getPlanBundle.bind(corpusService) },
     corpusService.resolveDeclaredAcIdsForAdhocTask.bind(corpusService),
-    process.env,
+    ambient.env,
     corpusService.resolveDeclaredAcCriteria.bind(corpusService),
     corpusService.resolveDeclaredAcCriteriaForAdhocTask.bind(corpusService),
     // reason: args 10-13 keep their real-IO defaults; arg 14 is the single worktree-removal test's facts for `done`'s
@@ -1449,7 +1472,7 @@ function buildAppFromTurso(
         requireCommandApproval: verifyRequireCommandApproval,
         envAllowlist: verifyEnvConfig.allowlist,
         envPassthroughAll: verifyEnvConfig.passthrough_all,
-        processEnv: process.env,
+        processEnv: ambient.env,
         tmpDir: ambient.tmpDir,
       },
       undefined,
@@ -1546,10 +1569,10 @@ function buildAppFromTurso(
  * GitHub-repo `feedback.upstream` — NOT the vendor-consent shape, which names the lore vendor's own
  * intake repository, an issue tracker this corpus must never close issues on.
  */
-function wireIssueCloseOnArchive(app: App, store: StoreInterface, config: LoreConfig | undefined): void {
+function wireIssueCloseOnArchive(app: App, store: StoreInterface, config: LoreConfig | undefined, ambient: AppAmbient): void {
   const upstream = resolveFeedbackUpstreamCfg(config);
   const repo = upstream !== undefined && isGithubUpstreamCfg(upstream) ? upstream.repo : undefined;
-  const closer = repo === undefined ? undefined : new GhIssueCloser(new GhRunner({ execFile: createNodeGhExecFile(), env: readProcessAmbient().env }));
+  const closer = repo === undefined ? undefined : new GhIssueCloser(new GhRunner({ execFile: createNodeGhExecFile(), env: ambient.env }));
   const step = new IssueCloseOnArchive(store, closer, repo);
   app.corpusService.setArchiveIssueClosePort(step);
   app.taskWorkflowService.setArchiveIssueClosePort(step);
@@ -1561,20 +1584,22 @@ export function createApp(
   dbPath: string,
   config: LoreConfig | undefined,
   writeContext?: AppWriteContext,
+  ambient?: AppAmbient,
 ): App | Result<App, LoreError>;
 export function createApp(
   dbPath: string,
   config?: LoreConfig,
   writeContext?: AppWriteContext,
+  ambient?: AppAmbient,
 ): App | Result<App, LoreError> {
-  const built = createAppUnscoped(dbPath, config, writeContext);
+  const built = createAppUnscoped(dbPath, config, writeContext, ambient);
   const app = "corpusService" in built ? built : built.ok ? built.value : undefined;
   if (app === undefined) return built;
   // reason: spec-run-identity-slice-1 D3 — an MCP server is one long-lived App serving many callers, each call
   // carrying its own identity. The call-scoped App is built by the SAME composition path (same store selection,
   // same wrapping chokepoint) over the same corpus file, so no service can write outside the call's context.
   app.forWriteContext = (callContext) => {
-    const scoped = createApp(dbPath, config, callContext);
+    const scoped = createApp(dbPath, config, callContext, ambient);
     return "corpusService" in scoped ? ok(scoped) : scoped;
   };
   return built;
@@ -1597,21 +1622,25 @@ export function createAppWithWriteContext(
   dbPath: string,
   config: (LoreConfig & { sync?: never }) | undefined,
   writeContext: AppWriteContext,
+  ambient?: AppAmbient,
 ): App | Result<App, LoreError> {
-  return createApp(dbPath, config, writeContext);
+  return createApp(dbPath, config, writeContext, ambient);
 }
 
 function createAppUnscoped(
   dbPath: string,
   config?: LoreConfig,
   writeContext?: AppWriteContext,
+  ambientIn?: AppAmbient,
 ): App | Result<App, LoreError> {
   // reason: spec-close-the-eight-verified-critical-defects F5 (AC-CRIT-7) — the composition root is the one
   // place scripts/tests calling createApp(findLoreDbPath()) directly pass through; a linked worktree must
   // never let `new SQLiteStore` migrate the MAIN checkout's behind corpus. Throws ForeignSchemaMigrationRefusedError.
   assertNoForeignSchemaMigration(dbPath);
-  // reason: ambient process state read ONCE per composition (AS-26): env for the gate enforcer, sync credentials.
-  const ambient = readProcessAmbient();
+  // reason: ambient process state for the ports below (AS-26): the entry's Invocation values when the caller passed
+  // them (CLI loader, MCP server), else the process snapshot — which tests and scripts calling `createApp(dbPath)`
+  // directly have no Invocation to supply. Resolved once per composition.
+  const ambient = ambientIn ?? ambientFromProcess();
   // Resolve telemetry from config — defaults to NoOp when telemetry section is absent.
   // reason: AC-C3 — createApp default behavior MUST NOT produce file side effects.
   // Users must explicitly set telemetry.enabled=true in config.yaml to opt in.
@@ -1808,8 +1837,9 @@ function createAppUnscoped(
       judgmentRequiredTypes,
       pruneState,
       citeGateRaw,
+      ambient,
     );
-    wireIssueCloseOnArchive(sqliteApp, sqliteStore, config);
+    wireIssueCloseOnArchive(sqliteApp, sqliteStore, config, ambient);
     return sqliteApp;
   }
 
@@ -1918,8 +1948,9 @@ function createAppUnscoped(
         judgmentRequiredTypes,
         pruneState,
         citeGateRaw,
+        ambient,
       );
-    wireIssueCloseOnArchive(tursoApp, store, config);
+    wireIssueCloseOnArchive(tursoApp, store, config, ambient);
     return { ok: true, value: tursoApp };
   } catch (e) {
     telemetry.close();

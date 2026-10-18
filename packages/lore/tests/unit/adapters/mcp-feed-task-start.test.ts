@@ -69,6 +69,7 @@
  * carrying task/phase).
  */
 
+import { liveInvocation } from "../../live-invocation.js";
 import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { describe, it, expect, beforeEach } from "vitest";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -227,7 +228,7 @@ let server: McpServer;
 beforeEach(() => {
   app = makeApp();
   server = new McpServer({ name: "test", version: "0.0.0" });
-  registerTools(server, app);
+  registerTools(server, app, undefined, liveInvocation());
 });
 
 // ─── lore_feed checkpoint "task-start" ─────────────────────────────────────────
@@ -388,7 +389,7 @@ describe("AC-070-9: lore_feed task-start resolves workflow.task_feed.* config bu
       // directly, below). A constant closure is sufficient here — this test only
       // needs ONE fixed config for the whole call.
       const configuredServer = new McpServer({ name: "test-ac-070-9", version: "0.0.0" });
-      registerTools(configuredServer, app, () => config);
+      registerTools(configuredServer, app, () => config, liveInvocation());
 
       const mcpResult = await getToolHandler(configuredServer, "lore_feed")({
         checkpoint: "task-start",
@@ -457,7 +458,7 @@ describe(
         // reason: the getter reads `currentConfig` (a `let`, mutated below) on EVERY
         // call — proves registerTools stores the FUNCTION, not a snapshot of its
         // first return value.
-        registerTools(configuredServer, app, () => currentConfig);
+        registerTools(configuredServer, app, () => currentConfig, liveInvocation());
 
         const firstResult = await getToolHandler(configuredServer, "lore_feed")({
           checkpoint: "task-start",
@@ -491,7 +492,7 @@ describe(
         const task = await createTask(plan.id, LONG_TITLE_FOR_BUDGETS);
 
         const configuredServer = new McpServer({ name: "test-ac-070-15-undef", version: "0.0.0" });
-        registerTools(configuredServer, app, () => undefined);
+        registerTools(configuredServer, app, () => undefined, liveInvocation());
 
         const result = await getToolHandler(configuredServer, "lore_feed")({
           checkpoint: "task-start",

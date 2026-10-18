@@ -17,8 +17,12 @@ if (process.argv.includes("--mcp-server")) {
   // requiring a restart — the CLI never had this staleness problem because each
   // invocation is a fresh process. `app` itself still comes from the one-time
   // `loadLoreApp()` call (DB connection + services are legitimately long-lived).
-  const { app } = loadLoreApp();
-  await startMcpServer(app, loadProjectConfig);
+  // reason: the MCP server is an entry like the CLI: it resolves ONE Invocation at start (AS-26) and hands it to the
+  // app composition and to the tools, which read ambient facts from it instead of the process.
+  const { resolveEntryInvocation } = await import("./adapters/cli/run-cli.js");
+  const inv = await resolveEntryInvocation(process.argv.slice(2));
+  const { app } = loadLoreApp({ inv });
+  await startMcpServer(app, loadProjectConfig, inv);
 } else {
   // reason: the CLI branch lives in adapters/cli/run-cli.ts so the in-process test runner executes the
   // SAME startup sequence (identity resolution, strict usage renderer, runMain exit mapping) as the binary
