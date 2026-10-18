@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Foundational types, error model, runtime validation, lifecycle rules, config, and telemetry. Pure modules with no I/O except `config.ts` (file read/write) and `telemetry.ts` (append-only JSONL). Published as `@lore/core` workspace package; depends on no other `@lore/*` package. Browser-safe distribution leaves — `memory-markers.ts`, `fs-ports.ts`, `issue-resolution-vocab.ts` — carry ZERO imports by construction, so none can pull a Node builtin into the barrel; the dashboard imports them directly and builds no list of its own.
+Foundational types, error model, runtime validation, lifecycle rules, config, and telemetry. Pure modules with no I/O except `config.ts` (file read/write) and `telemetry.ts` (append-only JSONL). Published as `@lore/core` workspace package; depends on no other `@lore/*` package. Browser-safe distribution leaves — `memory-markers.ts`, `fs-ports.ts`, `issue-resolution-vocab.ts` — carry no Node import by construction (`memory-markers.ts` and `issue-resolution-vocab.ts` import nothing; `fs-ports.ts` imports only the import-free `./errors.js`, for the rooted-write `VALIDATION_ERROR`, BR-1177), so none can pull a Node builtin into the barrel; the dashboard imports them directly and builds no list of its own.
 
 ## Key Invariants
 
