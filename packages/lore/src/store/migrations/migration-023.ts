@@ -1,9 +1,9 @@
 /**
- * Migration 022 — `decision_log.verdict` admits `'superseded'` (task AU-T16, spec-autonomy-phase-1-decision-function-
+ * Migration 023 — `decision_log.verdict` admits `'superseded'` (task AU-T16, spec-autonomy-phase-1-decision-function-
  * human-channel-lore AC-AU-3): a closing record for a pending decision whose subject is gone or was re-decided on a
  * newer version. SQL is an inlined string constant so `bun build --compile` can bundle it without filesystem access.
  *
- * Public surface: {@link MIGRATION_022_SQL}.
+ * Public surface: {@link MIGRATION_023_SQL}.
  *
  * Invariants:
  *   - SQLite cannot alter a CHECK, so the table is REBUILT in one BEGIN IMMEDIATE/COMMIT: new table with the widened
@@ -19,8 +19,8 @@
  *
  * Side-effect class: schema DDL (executed once per store).
  */
-export const MIGRATION_022_SQL = `-- Migration: 022-decision-log-superseded-verdict
--- Schema version: 22
+export const MIGRATION_023_SQL = `-- Migration: 023-decision-log-superseded-verdict
+-- Schema version: 23
 
 BEGIN IMMEDIATE;
 
@@ -66,7 +66,7 @@ BEGIN
   SELECT RAISE(ABORT, 'decision_log is append-only');
 END;
 
-PRAGMA user_version = 22;
+PRAGMA user_version = 23;
 
 COMMIT;
 `;

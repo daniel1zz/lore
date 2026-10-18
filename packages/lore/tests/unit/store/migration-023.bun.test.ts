@@ -1,5 +1,5 @@
 /**
- * Migration 022 (AU-T16) — decision_log's verdict CHECK admits 'superseded' through a table rebuild that keeps every
+ * Migration 023 (AU-T16) — decision_log's verdict CHECK admits 'superseded' through a table rebuild that keeps every
  * existing row byte-for-byte (so the hash chain still verifies), keeps the append-only triggers, and keeps ids growing.
  */
 import { describe, expect, it } from "bun:test";
@@ -46,9 +46,9 @@ function legacyDb(path: string): void {
   db.close();
 }
 
-describe("migration 022 decision_log superseded verdict", () => {
+describe("migration 023 decision_log superseded verdict", () => {
   it("old CHECK refuses 'superseded' (negative control on the legacy table)", () => {
-    const dir = mkdtempSync(join(tmpdir(), "lore-m022-"));
+    const dir = mkdtempSync(join(tmpdir(), "lore-m023-"));
     try {
       const db = new Database(join(dir, "old.db"));
       db.exec(MIGRATION_020_SQL);
@@ -67,7 +67,7 @@ describe("migration 022 decision_log superseded verdict", () => {
   }, 30_000);
 
   it("upgrade from 21 keeps rows verbatim, the chain clean, the triggers armed, and accepts 'superseded'", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "lore-m022-"));
+    const dir = mkdtempSync(join(tmpdir(), "lore-m023-"));
     const path = join(dir, "lore.db");
     try {
       legacyDb(path);
@@ -82,7 +82,7 @@ describe("migration 022 decision_log superseded verdict", () => {
         expect(after.ok && verifyDecisionChain(after.value)).toEqual({ clean: true, checked: 4 });
         expect(after.ok && after.value[3]?.verdict).toBe("superseded");
         const db = store.getDatabase();
-        expect((db.query("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(22);
+        expect((db.query("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(23);
         expect(() => db.run("UPDATE decision_log SET score = 1 WHERE id = 1")).toThrow(/append-only/);
         expect(() => db.run("DELETE FROM decision_log WHERE id = 1")).toThrow(/append-only/);
         const bad = await store.appendDecisionRecord({ ...input(5, "auto"), verdict: "bogus" as DecisionRecordInput["verdict"] });

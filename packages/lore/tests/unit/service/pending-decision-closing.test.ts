@@ -136,6 +136,20 @@ describe("AU-T16 pending closes stale escalations", () => {
   });
 });
 
+describe("AU-T16 human-answer-only classes", () => {
+  it("a threshold-integrity escalation stays pending despite a newer version and an absent probe", async () => {
+    const { store, service } = serviceWith({ "threshold-integrity": async () => "absent" });
+    const base = { ts: "2026-10-18T01:00:00.000Z", factors: "{}", score: 0, threshold: null, reasons: "[]", executor_run: null, channel: "machine" as const };
+    await store.appendDecisionRecord({ ...base, class: "threshold-integrity", subject_id: "thresholds", subject_version: "h1", facts: "{}", verdict: "escalate" });
+    await store.appendDecisionRecord({ ...base, class: "threshold-integrity", subject_id: "thresholds", subject_version: "h2", facts: "{}", verdict: "auto" });
+    await store.appendDecisionRecord({ ...base, class: "autonomy-threshold-write", subject_id: "thresholds", subject_version: "h3", facts: "{}", verdict: "auto" });
+    const pending = await service.listPending();
+    expect(pending.ok && pending.value.map((p) => [p.class, p.subject_version])).toEqual([["threshold-integrity", "h1"]]);
+    const rows = await store.listDecisionLog();
+    expect(rows.ok && rows.value.some((r) => r.verdict === "superseded")).toBe(false);
+  });
+});
+
 describe("AU-T16 class existence probes", () => {
   const subject = (id: string, version = "v") => ({ id, version });
 

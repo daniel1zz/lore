@@ -37,6 +37,7 @@ import { isIssuedHumanChannelProof, type HumanChannelProof } from "./human-chann
 import {
   deriveOpenEscalations,
   derivePendingDecisions,
+  HUMAN_ANSWER_ONLY_CLASSES,
   newerVersionSupersession,
   SUPERSEDED_FACTS_KEY,
   type OpenEscalation,
@@ -190,7 +191,7 @@ export class DecisionService {
         cause = "newer-version";
         detail = `decision record ${newer.id} re-measured the subject at version ${newer.subject_version}`;
       } else {
-        const probe = this.deps.subjectProbes?.[candidate.class];
+        const probe = HUMAN_ANSWER_ONLY_CLASSES.includes(candidate.class) ? undefined : this.deps.subjectProbes?.[candidate.class];
         if (probe !== undefined && (await probe({ id: candidate.subject_id, version: candidate.subject_version })) === "absent") {
           cause = "subject-gone";
           detail = `class ${candidate.class} existence probe: ${candidate.subject_id} no longer exists`;

@@ -12,7 +12,7 @@
  *     (DecisionRecordInput) cannot supply hashes.
  *   - Effective verdict: the latest `human-tty` record wins (auto = accept, refuse = reject); otherwise the WORST
  *     over `machine` records (refuse > escalate > auto). `agent-asserted` records never take part.
- *   - `superseded` (migration 022, AU-T16) rows are CLOSING MARKERS of a pending decision whose subject is gone or was
+ *   - `superseded` (migration 023, AU-T16) rows are CLOSING MARKERS of a pending decision whose subject is gone or was
  *     re-decided on a newer version. They are not decisions: effectiveDecisionVerdict ignores them, and anything that
  *     counts, calibrates or SAMPLES auto decisions (AU-T8 outcome calibration, 1-in-10 sampling) must select
  *     `verdict = 'auto'` and therefore never sees them. Only service/pending-decisions.ts reads them. A new
@@ -24,7 +24,7 @@
  */
 import { createHash } from "node:crypto";
 
-/** `superseded` (migration 022) is a CLOSING record, not a decision: see the invariants above. */
+/** `superseded` (migration 023) is a CLOSING record, not a decision: see the invariants above. */
 export type DecisionVerdict = "auto" | "escalate" | "refuse" | "superseded";
 /** `human-tty` is produced only by the human channel (AU-T3); `agent-asserted` never takes precedence. */
 export type DecisionChannel = "machine" | "human-tty" | "agent-asserted";

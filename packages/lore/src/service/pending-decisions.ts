@@ -4,7 +4,7 @@
  * Purpose: a pending decision is not a separate table; it is a (class, subject, version) whose EFFECTIVE verdict
  * is a machine `escalate` (no human-tty record has answered it). This module derives that list from the log rows.
  * Public surface: derivePendingDecisions, deriveOpenEscalations, newerVersionSupersession, isSupersedeMarker,
- *   SUPERSEDED_FACTS_KEY, recommendAnswer, PendingDecision, SubjectExistenceProbe(s), RECOMMEND_ACCEPT_MIN_SCORE.
+ *   SUPERSEDED_FACTS_KEY, HUMAN_ANSWER_ONLY_CLASSES, recommendAnswer, PendingDecision, SubjectExistenceProbe(s), RECOMMEND_ACCEPT_MIN_SCORE.
  * Invariants:
  *   - `id` is the id of the FIRST machine escalate row of the key, so it stays the same when the escalating
  *     operation is re-run and appends further escalate rows.
@@ -89,7 +89,7 @@ export type SubjectExistenceProbe = (subject: { readonly id: string; readonly ve
 /** Class id -> existence probe. A class with no probe is only ever closed by a newer version. */
 export type SubjectExistenceProbes = Readonly<Record<string, SubjectExistenceProbe>>;
 
-/** True for a closing marker row appended by DecisionService: machine channel, verdict `superseded` (migration 022). */
+/** True for a closing marker row appended by DecisionService: machine channel, verdict `superseded` (migration 023). */
 export function isSupersedeMarker(row: DecisionLogRow): boolean {
   return row.channel === "machine" && row.verdict === "superseded";
 }
@@ -156,10 +156,18 @@ export function deriveOpenEscalations(rows: readonly DecisionLogRow[]): Result<O
 }
 
 /**
+ * Classes whose pending decision is ONLY ever answered by a human-tty record (AU-T9): their subject never "disappears"
+ * and a re-measurement on another version must not close the open question. The newer-version rule skips them and they
+ * have no existence probe. (Rows of class `autonomy-threshold-write` are not escalations, so they never become pending.)
+ */
+export const HUMAN_ANSWER_ONLY_CLASSES: readonly string[] = ["threshold-integrity"];
+
+/**
  * The newest later row that supersedes `pending` by re-measuring the SAME class + subject id on ANOTHER version, or
  * null. "Later" is log order (id above the pending key's latest escalate row); closing markers do not count.
  */
 export function newerVersionSupersession(rows: readonly DecisionLogRow[], pending: OpenEscalation): DecisionLogRow | null {
+  if (HUMAN_ANSWER_ONLY_CLASSES.includes(pending.class)) return null;
   let newest: DecisionLogRow | null = null;
   for (const row of rows) {
     if (row.id <= pending.latest_escalate_id) continue;
