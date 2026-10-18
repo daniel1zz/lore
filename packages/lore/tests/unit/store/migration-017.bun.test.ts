@@ -63,7 +63,7 @@ describe("migration-017 constants", () => {
       expect(c.ddl).not.toMatch(/NOT NULL/i);
     }
     expect(MIGRATION_017_SQL).toContain("PRAGMA user_version = 17;");
-    expect(LATEST_SCHEMA_VERSION).toBe(23);
+    expect(LATEST_SCHEMA_VERSION).toBe(24);
   });
 });
 
@@ -90,7 +90,7 @@ describe("migration-017 on a SQLite file", () => {
 
     const store = actedStore(new SQLiteStore(path));
 
-    expect(userVersion(store.getDatabase())).toBe(23);
+    expect(userVersion(store.getDatabase())).toBe(24);
     const end = await store.getRunEnd(RUN);
     expect(end).toEqual({ ok: true, value: { endedAt: null, endReason: null } });
     store.close();
@@ -105,7 +105,7 @@ describe("migration-017 on a SQLite file", () => {
 
     const store = actedStore(new SQLiteStore(path));
 
-    expect(userVersion(store.getDatabase())).toBe(23);
+    expect(userVersion(store.getDatabase())).toBe(24);
     const cols = (store.getDatabase().query("PRAGMA table_info(runs)").all() as { name: string }[]).map((c) => c.name);
     expect(cols.filter((n) => n === "ended_at")).toHaveLength(1);
     expect(cols).toContain("end_reason");
@@ -121,7 +121,7 @@ describe("migration-017 on a SQLite file", () => {
 
     const second = actedStore(new SQLiteStore(path));
 
-    expect(userVersion(second.getDatabase())).toBe(23);
+    expect(userVersion(second.getDatabase())).toBe(24);
     expect(await second.getRunEnd(RUN)).toEqual({ ok: true, value: { endedAt: AT, endReason: "r" } });
     second.close();
   });

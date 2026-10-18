@@ -49,6 +49,7 @@ import { MIGRATION_020_SQL } from "./migrations/migration-020.js";
 import { MIGRATION_021_ADD_COLUMNS, MIGRATION_021_SQL } from "./migrations/migration-021.js";
 import { MIGRATION_022_SQL } from "./migrations/migration-022.js";
 import { MIGRATION_023_SQL } from "./migrations/migration-023.js";
+import { MIGRATION_024_SQL } from "./migrations/migration-024.js";
 import { DECISION_GENESIS_HASH, computeDecisionEntryHash } from "./decision-log.js";
 import type { DecisionLogRow, DecisionRecordInput } from "./decision-log.js";
 import type { DecisionSubjectKey } from "./store-interface.js";
@@ -782,6 +783,11 @@ export class TursoStore implements StoreInterface {
       if (currentVersion < 23) {
         // reason: migration-023 rebuilds decision_log with the widened verdict CHECK in ONE BEGIN/COMMIT string.
         await this.client.executeMultiple(MIGRATION_023_SQL);
+      }
+
+      if (currentVersion < 24) {
+        // reason: migration-024 adds the nullable decision_log.detail column (plain ADD COLUMN; hashes stay valid).
+        await this.client.executeMultiple(MIGRATION_024_SQL);
       }
     })();
 
@@ -2564,8 +2570,8 @@ export class TursoStore implements StoreInterface {
         const rs = await tx.execute({
           sql: `INSERT INTO decision_log
                   (ts, class, subject_id, subject_version, facts, factors, score, threshold, verdict, reasons,
-                   executor_run, channel, prev_hash, entry_hash)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                   executor_run, channel, prev_hash, entry_hash, detail)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           args: [
             input.ts,
             input.class,
@@ -2581,10 +2587,11 @@ export class TursoStore implements StoreInterface {
             input.channel,
             prevHash,
             entryHash,
+            input.detail ?? null,
           ] as InValue[],
         });
         await tx.commit();
-        return ok({ ...input, id: Number(rs.lastInsertRowid), prev_hash: prevHash, entry_hash: entryHash });
+        return ok({ ...input, detail: input.detail ?? null, id: Number(rs.lastInsertRowid), prev_hash: prevHash, entry_hash: entryHash });
       } catch (e) {
         try {
           await tx.rollback();
@@ -2661,6 +2668,7 @@ export class TursoStore implements StoreInterface {
             channel: rowStr(row, "channel") as DecisionLogRow["channel"],
             prev_hash: rowStr(row, "prev_hash"),
             entry_hash: rowStr(row, "entry_hash"),
+            detail: rowStrOrNull(row, "detail"),
           }),
         ),
       );
