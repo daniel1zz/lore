@@ -504,20 +504,16 @@ export function stageFilesToDisk(plan: PublishPlan, repoRoot: string = REPO_ROOT
 }
 
 /**
- * Stage (b): computes the `PublishPlan` (current platform, workspace
- * version, the SAME `assets/{skills,agents,hooks,governance}` tree (plus the
- * binary-read `assets/context/**`, via `mergeShippedAssetFiles`)
- * `RealAssetSource` walks for `lore setup` — reused here rather than
- * re-implemented, so "which assets ship" has exactly one SSOT) and
- * physically stages it to `dist-npm/<pkg>-<target>/`.
+ * The single "which asset files ship in the npm package" computation: the machine
+ * install set (`RealAssetSource.load()`) plus the retired-from-install and binary-read
+ * paths, unioned by `mergeShippedAssetFiles`. Exported so a test can assert the real
+ * list against the real `assets/` tree.
+ *
+ * @param assetsRoot - Absolute path of the `assets/` directory.
+ * @returns sorted, `assets/`-rooted repo-relative paths, or the load error.
  */
-async function realAssemble(): Promise<Result<PublishPlan, LoreError>> {
-  const versionResult = readWorkspaceVersion();
-  if (!versionResult.ok) return versionResult;
-
-  const platform = resolvePlatform();
-
-  const assetSource = new RealAssetSource(join(REPO_ROOT, "assets"));
+export async function computeShippedAssetFiles(assetsRoot: string): Promise<Result<string[], LoreError>> {
+  const assetSource = new RealAssetSource(assetsRoot);
   const loaded = await assetSource.load();
   if (!loaded.ok) return loaded;
   // `RealAssetSource.load()` appends one SYNTHETIC `kind: "settings-hook"`
@@ -556,8 +552,28 @@ async function realAssemble(): Promise<Result<PublishPlan, LoreError>> {
   const shippedAssetFiles = mergeShippedAssetFiles({
     installSetAssetFiles: assetFiles,
     retiredFromInstallPaths: RETIRED_FROM_INSTALL_PATHS,
-    binaryReadAssetPaths: listBinaryReadAssetPaths(join(REPO_ROOT, "assets")),
+    binaryReadAssetPaths: listBinaryReadAssetPaths(assetsRoot),
   });
+  return ok(shippedAssetFiles);
+}
+
+/**
+ * Stage (b): computes the `PublishPlan` (current platform, workspace
+ * version, the SAME `assets/{skills,agents,hooks,governance}` tree (plus the
+ * binary-read `assets/context/**`, via `mergeShippedAssetFiles`)
+ * `RealAssetSource` walks for `lore setup` — reused here rather than
+ * re-implemented, so "which assets ship" has exactly one SSOT) and
+ * physically stages it to `dist-npm/<pkg>-<target>/`.
+ */
+async function realAssemble(): Promise<Result<PublishPlan, LoreError>> {
+  const versionResult = readWorkspaceVersion();
+  if (!versionResult.ok) return versionResult;
+
+  const platform = resolvePlatform();
+
+  const shippedResult = await computeShippedAssetFiles(join(REPO_ROOT, "assets"));
+  if (!shippedResult.ok) return shippedResult;
+  const shippedAssetFiles = shippedResult.value;
 
   const planResult = buildPublishPlan({
     version: versionResult.value,
