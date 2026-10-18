@@ -76,6 +76,7 @@ const PROJECT_ASSETS_DIR = join(REPO_ROOT, "assets", "project");
 
 const HOOK_FILES = [
   "pre-push",
+  "reference-transaction",
 ];
 
 // ─── Real port builders ─────────────────────────────────────────────────────

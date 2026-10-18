@@ -45,7 +45,7 @@ export const LORE_BINARY_VERSION = "0.1.0" as const;
 
 export const EMBEDDED_ASSETS_MANIFEST: EmbeddedAssetsManifest = {
   binary_version: LORE_BINARY_VERSION,
-  tree_digest: "9c568deb6e4c7dbfc37c33b65e484a95cd466d8e0e6d3d264f13e92513621749",
+  tree_digest: "4bb35d1a814e20b6cd9bc0b42ab28883c1b43c6a98bf91962e098e154375f85c",
   entries: [
   { path: "agents/lore-implementer.md", kind: "agent", ownership: "managed", sha256: "8b063e990dea63597d6728495ec0925bb15b4f2a3d1933ca11bd53abe9d70da7" },
   { path: "agents/lore-reader.md", kind: "agent", ownership: "managed", sha256: "336b2da60cfe9afae51f17ac8f6f9f33e7c67b2f3639874795e22a0e257e8696" },
@@ -86,6 +86,7 @@ export const EMBEDDED_ASSETS_MANIFEST: EmbeddedAssetsManifest = {
   { path: "project/lore-config-template.yaml", kind: "project", ownership: "user_once", sha256: "10b2ad0ffcced2590c7e1639cd95a0b3590d400bd45d30be6d7c59beb8946d23" },
   { path: "project/lore.tree.yaml.template", kind: "project", ownership: "user_once", sha256: "b169f38f2ec3a16249764a8360f37f177ad20de6eabe6f91882278bbbe71ddd9" },
   { path: "project/pre-push", kind: "project", ownership: "managed", sha256: "39e1303455d0321abcaee00a580ec4333e2514d08c74b0b37478082cb978643e" },
+  { path: "project/reference-transaction", kind: "project", ownership: "managed", sha256: "cfd46bdb01638c6685bb16c3e8c8c1d0021e6f99b46debc2973e0f808059d7cf" },
   { path: "skills/lore-ai-native-coding/SKILL.md", kind: "skill", ownership: "managed", sha256: "7ddcbfab10a643beef91cf3f0f8dc00701964575c725d785f6e5fad441c9a5c3" },
   { path: "skills/lore-ai-native-coding/references/ai-anti-patterns.md", kind: "skill", ownership: "managed", sha256: "91edef16b885924ba3639d7b918a68c14160cf2f4ba01e27eac2492ba6b39743" },
   { path: "skills/lore-ai-native-coding/references/backend-layering.md", kind: "skill", ownership: "managed", sha256: "601e24d28845f8c08996e75bb4c64ee5b4ed67f844249d08336c1ee91328c150" },

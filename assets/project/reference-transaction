@@ -1,0 +1,27 @@
+#!/bin/sh
+# Main-ref guard (spec-main-advances-only-through-lore-integrate-per-session, BR-1246/BR-1247).
+# refs/heads/main moves ONLY through `lore integrate`, whose compare-and-swap runs with LORE_INTEGRATE=1 in its
+# environment. Every other move of main -- `git update-ref refs/heads/main ...`, a commit made while branch main is
+# checked out, `git pull`/`git merge` on main, `git branch -f main` -- is refused here, in the `prepared` state, which
+# aborts the whole ref transaction ("fatal: ref updates aborted by hook").
+# Needs git >= 2.28 (the reference-transaction hook); `lore setup --project` refuses older git and names its version.
+# Named limit: the marker is recognised, not authenticated. Any same-user process that sets LORE_INTEGRATE=1 passes
+# this hook, so it stops accidents, not deliberate forgery.
+# Not refused: creating main where it did not exist (an empty repository's first commit), rows where old == new
+# (git emits them for `git reset`), every ref other than refs/heads/main.
+# Bypass (a human, deliberately): LORE_INTEGRATE=1 git <command>.
+state="$1"
+refused=""
+# stdin must always be drained: git writes one "<old> <new> <ref>" row per ref in the transaction.
+while read -r old new ref; do
+  [ "$ref" = "refs/heads/main" ] || continue
+  [ "$old" = "$new" ] && continue
+  case "$old" in *[!0]*) ;; *) continue ;; esac # all zeros: main is being created, not moved
+  refused="$old -> $new"
+done
+[ "$state" = "prepared" ] || exit 0
+[ -n "$refused" ] || exit 0
+[ "${LORE_INTEGRATE:-}" = "1" ] && exit 0
+echo "lore: refs/heads/main may only move through 'lore integrate <branch>' (refused: $refused)." >&2
+echo "lore: work on your own branch in your own worktree, then run 'lore integrate <branch>'." >&2
+exit 1
