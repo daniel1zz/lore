@@ -71,43 +71,8 @@ Folders with their own memory file — read it before working there:
 - [`packages/dashboard`](packages/dashboard/CLAUDE.md) — Vite + React + shadcn local-dev web UI: read views plus the SPEC-022 write surface.
 
 201 folders have no memory file and are not listed.
-<!-- lore:managed section=command-table hash=f44bb6fc -->
-Commands (from package.json scripts):
-- `dev`: `bun run packages/lore/src/index.ts`
-- `build`: `bun run scripts/build.ts`
-- `test`: `bun scripts/oracle-lock.ts bun scripts/run-chain.ts`
-- `test:vitest`: `bun scripts/run-tests.ts`
-- `test:bun`: `echo 'test:bun is retired (task-skill-implement-tg-23): one runner. Run a file with: bunx --bun vitest run <file> [-t <name>]; run everything with: bun run test' >&2; exit 1`
-- `test:changed`: `bun scripts/changed-tests.ts`
-- `test:watch`: `bunx --bun vitest`
-- `typecheck`: `bun run typecheck:core && bun run typecheck:lore && bun run typecheck:lore-tests && bun run typecheck:scripts && bun run typecheck:dashboard && bun run typecheck:dashboard-tests && bun run typecheck:dashboard-e2e`
-- `typecheck:core`: `tsc --noEmit -p packages/core/tsconfig.json`
-- `typecheck:lore`: `tsc --noEmit -p packages/lore/tsconfig.json`
-- `typecheck:lore-tests`: `tsc --noEmit -p packages/lore/tsconfig.tests.json`
-- `typecheck:scripts`: `tsc --noEmit -p tsconfig.json`
-- `typecheck:dashboard`: `bun run --filter '@lore/dashboard' typecheck`
-- `typecheck:dashboard-tests`: `bun --cwd=packages/dashboard run prebuild && tsc --noEmit -p packages/dashboard/tsconfig.tests.json`
-- `typecheck:dashboard-e2e`: `tsc --noEmit -p packages/dashboard/tsconfig.e2e.json`
-- `check:static`: `bun scripts/run-chain.ts --static`
-- `check:floor`: `bun scripts/run-chain.ts --floor`
-- `check:ordinal-sites`: `node scripts/check-ordinal-write-sites.mjs`
-- `test:file`: `bun scripts/test-file.ts`
-- `check:test-budgets`: `bun scripts/check-test-budgets.ts`
-- `check:no-timer-retry`: `bun scripts/check-no-timer-retry.ts`
-- `check:ac-ref-integrity`: `bun scripts/check-ac-ref-integrity.ts`
-- `check:no-nul-bytes`: `bun scripts/check-no-nul-bytes.ts`
-- `check:agent-hygiene`: `bun scripts/check-agent-hygiene.ts`
-- `check:plan-member-sites`: `bun scripts/check-plan-membership-sites.ts`
-- `check:ac-state-renderers`: `bun scripts/check-ac-state-renderers.ts`
-- `check:prose-pins`: `bun scripts/check-prose-pins.ts`
-- `check:shipped-defaults`: `bun scripts/check-shipped-defaults.ts`
-- `check:ac-oracle-ownership`: `bun scripts/check-ac-oracle-ownership.ts`
-- `check:evidence-identity-drop-set`: `bun scripts/check-evidence-identity-drop-set.ts`
-- `check:capture-source-buckets`: `bun scripts/check-capture-source-buckets.ts`
-- `check:spec-mirror`: `bun scripts/export-spec-mirror.ts --check`
-- `check:corpus-fail-census`: `bun scripts/check-corpus-fail-census.ts`
-- `check:live-repo-state`: `bun scripts/check-claude-md-live-sweep.ts && bun scripts/check-list-json-real-corpus-buffer.ts && bun scripts/check-phase-write-live-state.ts && bun scripts/check-live-mirror-integrity.ts && bun scripts/check-live-corpus-detectors.ts`
-- `mirror:export`: `bun scripts/export-spec-mirror.ts`
+<!-- lore:managed section=command-table hash=4bf6c197 -->
+No scripts are marked as documented (package.json `lore.documentedScripts`); see package.json `scripts` and the Commands section above.
 <!-- lore:managed section=governance-pointer hash=760d2396 -->
 ## Finding Live Project State
 

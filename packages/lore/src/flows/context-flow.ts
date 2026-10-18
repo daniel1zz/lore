@@ -383,16 +383,22 @@ function renderModuleIndexBody(facts: ContextFacts): string {
   return lines.join("\n");
 }
 
-/** Renders the command-table section body from {@link ContextFacts.commands}. */
+/**
+ * Renders the command-table section body from {@link ContextFacts.commands} — the scripts the project marks
+ * as documented (`package.json` `lore.documentedScripts`), NOT every script. With none marked it is a pointer.
+ * Decision record: task-skill-design-mi-t4-the-generated-command-table-in-claude (opt-in table; the
+ * `check:memory-files` script runs `lore context refresh --check` in the code floor so a package.json edit that
+ * changes this section cannot land stale). Z1 contract ("command table (package.json scripts)") is unchanged.
+ */
 function renderCommandTableBody(facts: ContextFacts): string {
   const entries = Object.entries(facts.commands);
   if (entries.length === 0) {
-    return "No package.json scripts were discovered.";
+    return "No scripts are marked as documented (package.json `lore.documentedScripts`); see package.json `scripts` and the Commands section above.";
   }
   // reason: no `## Commands` heading here — the setup template's hand-written part already carries that
   // required section and a second one fails the section check (`section_duplicate`).
   const lines = entries.map(([name, command]) => `- \`${name}\`: \`${command}\``);
-  return ["Commands (from package.json scripts):", ...lines].join("\n");
+  return ["Documented commands (package.json `lore.documentedScripts`):", ...lines].join("\n");
 }
 
 /** Renders the governance-pointer section body — static pointer text, no facts needed. */
