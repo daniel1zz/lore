@@ -859,7 +859,7 @@ function buildAppFromSqlite(
   // generation-carrying siblings of the 4th/6th args — `resolveDeclaredAcCriteria`/
   // `resolveDeclaredAcCriteriaForAdhocTask` return the full criterion (not just its id),
   // which `resolveAcOracleGeneration` needs and a bare id set structurally cannot supply.
-  const worktreeRemovalService = buildWorktreeRemovalService(store, ambient);
+  const worktreeRemovalService = buildWorktreeRemovalService(store, ambient, repoRoot);
   const taskWorkflowService = new TaskWorkflowService(
     store,
     telemetry,
@@ -960,8 +960,8 @@ function buildAppFromSqlite(
     phaseService: new PhaseService(store, recordLockService),
     taskWorkflowService,
     sessionService,
-    runService: new RunService(store, undefined, taskWorkflowService, realpathNative, createRealWorktreeProbe(ambient.cwd)),
-    runReapService: buildRunReapService(store, taskWorkflowService, ambient),
+    runService: new RunService(store, undefined, taskWorkflowService, realpathNative, repoRoot, createRealWorktreeProbe(ambient.cwd)),
+    runReapService: buildRunReapService(store, taskWorkflowService, ambient, repoRoot),
     worktreeRemovalService,
     verifiedInvocationIdentity: () => ensureVerifiedIdentity(store),
     // reason: ValidityService owns extra.validity (bi-temporal invalidation) — store +
@@ -1276,7 +1276,7 @@ function buildAppFromTurso(
   // reason: 8th/9th args — see buildAppFromSqlite's identical comment (both
   // composition roots must wire the generation-carrying siblings, or the
   // Turso-backed surface silently stamps no `ac_oracle_generation`).
-  const worktreeRemovalService = buildWorktreeRemovalService(store, ambient);
+  const worktreeRemovalService = buildWorktreeRemovalService(store, ambient, repoRoot);
   const taskWorkflowService = new TaskWorkflowService(
     store,
     telemetry,
@@ -1373,8 +1373,8 @@ function buildAppFromTurso(
     phaseService: new PhaseService(store, recordLockService),
     taskWorkflowService,
     sessionService,
-    runService: new RunService(store, undefined, taskWorkflowService, realpathNative, createRealWorktreeProbe(ambient.cwd)),
-    runReapService: buildRunReapService(store, taskWorkflowService, ambient),
+    runService: new RunService(store, undefined, taskWorkflowService, realpathNative, repoRoot, createRealWorktreeProbe(ambient.cwd)),
+    runReapService: buildRunReapService(store, taskWorkflowService, ambient, repoRoot),
     worktreeRemovalService,
     verifiedInvocationIdentity: () => ensureVerifiedIdentity(store),
     // reason: ValidityService owns extra.validity (bi-temporal invalidation) — store +
@@ -1982,10 +1982,11 @@ function buildRunReapService(
   store: ConstructorParameters<typeof DecisionService>[0]["store"],
   taskWorkflowService: TaskWorkflowService,
   ambient: AppAmbient,
+  repoRoot: string,
 ): RunReapService {
   return new RunReapService({
     store,
-    runs: new RunService(store, undefined, taskWorkflowService, realpathNative, createRealWorktreeProbe(ambient.cwd)),
+    runs: new RunService(store, undefined, taskWorkflowService, realpathNative, repoRoot, createRealWorktreeProbe(ambient.cwd)),
     decisions: new DecisionService({ store, executorRun: null }),
     processes: createRealProcessTablePort({ env: ambient.env }),
   });
@@ -2006,6 +2007,7 @@ function buildOverrideDecisionPort(store: ConstructorParameters<typeof DecisionS
 function buildWorktreeRemovalService(
   store: ConstructorParameters<typeof RunService>[0] & WorktreeRemovalRunStore & StoreInterface,
   ambient: AppAmbient,
+  repoRoot: string,
 ): WorktreeRemovalService {
   return new WorktreeRemovalService({
     // reason: AC-AU-11 — every worktree removal asks decide(worktree-remove) through the decision log; `executorRun: null`
@@ -2013,7 +2015,7 @@ function buildWorktreeRemovalService(
     decisions: new DecisionService({ store, executorRun: null }),
     probe: createRealWorktreeProbe(ambient.cwd),
     processScan: createRealProcessScanPort({ cwd: ambient.cwd }),
-    occupancy: new RunService(store, undefined, undefined, realpathNative, createRealWorktreeProbe(ambient.cwd)),
+    occupancy: new RunService(store, undefined, undefined, realpathNative, repoRoot, createRealWorktreeProbe(ambient.cwd)),
     runs: store,
   });
 }

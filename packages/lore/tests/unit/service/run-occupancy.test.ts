@@ -30,7 +30,7 @@ async function setup() {
   let tick = 0;
   // reason: registered_at orders two runs of one agent (f); a strictly increasing clock makes "newer" unambiguous.
   const now = () => new Date(Date.UTC(2026, 9, 12, 5, 0, tick++));
-  const service = new RunService(store, now, undefined, (p) => LINKS[p] ?? p);
+  const service = new RunService(store, now, undefined, (p) => LINKS[p] ?? p, "/repo");
   const corpus = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
   const plan = await corpus.create({ type: "plan", title: "Plan A", content: "# A" } as CreateDocInput);
   if (!plan.ok) throw new Error(JSON.stringify(plan.error));
@@ -184,7 +184,7 @@ describe("AC-WL-1 RunService.occupancy", () => {
     const t = await setup();
     const blank = await t.service.occupancy({ worktree: "" });
     expect(blank.ok).toBe(false);
-    const bare = await new RunService(actedStore(new InMemoryStore())).occupancy({ worktree: "/w/agent-X1" });
+    const bare = await new RunService(actedStore(new InMemoryStore()), undefined, undefined, undefined, "/repo").occupancy({ worktree: "/w/agent-X1" });
     expect(bare.ok).toBe(false);
   });
 

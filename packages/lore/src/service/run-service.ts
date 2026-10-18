@@ -151,12 +151,20 @@ export class RunService {
   constructor(
     private readonly store: RunStore,
     private readonly now: () => Date = () => new Date(),
-    private readonly claims?: RunClaimEnder,
+    private readonly claims: RunClaimEnder | undefined,
     /** Required by {@link RunService.occupancy} only (the claim path comparison); wired by `app.ts`. */
-    private readonly realpathPort?: RealpathFn,
+    private readonly realpathPort: RealpathFn | undefined,
+    /**
+     * Absolute repository root (the corpus's project root, `app.ts` `repoRoot`). `git worktree list` is repo-wide, so
+     * {@link RunService.openClaimsOfWorkingCopy} runs it HERE and never from the judged working copy, which is often
+     * already removed (AU-T24: spawn ENOENT). Blank is refused at construction; there is no fallback.
+     */
+    private readonly repoRoot: string,
     /** Resolves a branch-name claim to its directory ({@link RunService.openClaimsOfWorkingCopy}); git runs only then. Wired by `app.ts` from the invocation's cwd. */
     private readonly worktreeProbe?: WorktreeGitProbe,
-  ) {}
+  ) {
+    if (repoRoot.trim() === "") throw new RangeError("RunService requires a non-blank repoRoot (AU-T24)");
+  }
 
   /**
    * Register a run, first registration wins.
@@ -369,6 +377,8 @@ export class RunService {
    * (`git worktree list` failed) is returned in `not_measured`, never dropped (AU-T23). Unlike
    * {@link RunService.claimedTasks} it needs no run id, so it sees a claim whose run has no end record yet.
    *
+   * `git worktree list` runs from the repository root given at construction, never from `workingCopy` (AU-T24).
+   *
    * @param workingCopy - absolute directory of the working copy (need not exist: ENOENT falls back to `path.resolve`).
    * @returns ok({tasks sorted by slug, not_measured}); VALIDATION_ERROR for a blank path or a service built without
    *   a realpath port; STORE_ERROR from the store or a non-ENOENT realpath failure.
@@ -395,7 +405,7 @@ export class RunService {
             notMeasured.push(`open claim of ${task.slug}: worktree ${claim.worktree} not resolved (no worktree probe wired)`);
             continue;
           }
-          const resolution = resolveClaimWorktree(this.worktreeProbe, claim.worktree, workingCopy);
+          const resolution = resolveClaimWorktree(this.worktreeProbe, claim.worktree, this.repoRoot);
           if (resolution.kind === "resolved") matches = resolveDirectory(resolution.path) === resolvedDirectory;
           else if (resolution.kind === "not-measured") {
             notMeasured.push(`open claim of ${task.slug}: worktree ${claim.worktree} not resolved (${resolution.reason})`);
