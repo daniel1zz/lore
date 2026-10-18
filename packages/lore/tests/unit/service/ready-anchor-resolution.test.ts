@@ -262,6 +262,7 @@ describe("ready() — REGRESSION", () => {
         return typeof value === "function" ? value.bind(target) : value;
       },
     }) as StoreInterface;
+    actedStore(proxy);
 
     const { corpusService, taskWorkflowService } = makeServices(proxy);
     const planId = await createPlan(corpusService);

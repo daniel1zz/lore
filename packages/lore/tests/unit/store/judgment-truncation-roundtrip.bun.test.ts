@@ -22,6 +22,7 @@ import { AIProviderService } from "../../../src/service/ai-provider-service.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
 import { JudgmentService } from "../../../src/service/judgment-service.js";
 import { InMemoryAIProvider } from "../../../src/ai/in-memory-provider.js";
+import { actedStore } from "../../live-invocation.js";
 
 const VALID_REVIEW_JSON = JSON.stringify({
   decision: "approve",
@@ -59,7 +60,7 @@ afterEach(() => {
 
 /** Record a real judgment on a file-backed store, then re-open the file and read it back. */
 async function recordAndReadBack(parentContent: string, planContent: string) {
-  const store = new SQLiteStore(dbPath);
+  const store = actedStore(new SQLiteStore(dbPath));
   const corpus = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
   const spec = await corpus.create({ type: "spec", title: "RT Spec", content: parentContent } as CreateDocInput);
   if (!spec.ok) throw new Error("spec create failed");
@@ -80,7 +81,7 @@ async function recordAndReadBack(parentContent: string, planContent: string) {
   if (!recorded.ok) throw new Error("record failed: " + JSON.stringify(recorded.error));
   store.close();
 
-  const reopened = new SQLiteStore(dbPath);
+  const reopened = actedStore(new SQLiteStore(dbPath));
   try {
     const rows = await reopened.findJudgments(plan.value.id);
     if (!rows.ok) throw new Error("findJudgments failed");

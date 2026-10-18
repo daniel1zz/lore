@@ -24,6 +24,7 @@ import { TursoStore } from "../../../src/store/turso-store.js";
 import { makeDoc, resetCounter, runFileBackedDbSizeSuite, runStoreCoreSuite } from "./store-core.shared.js";
 import { runStoreJudgmentsSuite } from "./store-judgments.shared.js";
 import { SNIPPET_MARK_CLOSE, SNIPPET_MARK_OPEN } from "@lore/core";
+import { actedStore } from "../../live-invocation.js";
 
 // ─── Suite ───────────────────────────────────────────────────────────────────
 
@@ -36,7 +37,7 @@ describe("TursoStore", () => {
     resetCounter();
     tmpDir = mkdtempSync(join(tmpdir(), "lore-turso-test-"));
     dbPath = join(tmpDir, "lore.db");
-    store = new TursoStore({ localPath: dbPath });
+    store = actedStore(new TursoStore({ localPath: dbPath }));
   });
 
   afterEach(async () => {
@@ -280,7 +281,7 @@ describe("TursoStore", () => {
         // We inject a rejected promise directly into _schemaInitPromise to simulate
         // a post-construction initSchema failure without needing a broken file path.
         // NOTE: TypeScript private field — accessed via type assertion for test injection only.
-        const testStore = new TursoStore({ localPath: dbPath + ".inject" });
+        const testStore = actedStore(new TursoStore({ localPath: dbPath + ".inject" }));
         const fakeError = new Error("simulated initSchema failure");
 
         // Inject a pre-rejected promise — simulates a late async initSchema rejection.
@@ -332,7 +333,7 @@ describe("TursoStore", () => {
         // If the .catch() accidentally swallowed errors, operations would fail.
         const freshDir = mkdtempSync(join(tmpdir(), "lore-turso-reg01-"));
         const freshPath = join(freshDir, "lore.db");
-        const freshStore = new TursoStore({ localPath: freshPath });
+        const freshStore = actedStore(new TursoStore({ localPath: freshPath }));
         try {
           const doc = makeDoc({ slug: "prd-turso-reg01" });
           const insertResult = await freshStore.insert(doc);
@@ -388,7 +389,7 @@ runStoreCoreSuite({
   label: "TursoStore",
   createStore: () => {
     const tmpDir = mkdtempSync(join(tmpdir(), "lore-turso-core-"));
-    const store = new TursoStore({ localPath: join(tmpDir, "lore.db") });
+    const store = actedStore(new TursoStore({ localPath: join(tmpDir, "lore.db") }));
     // reason: stash tmpDir on the instance so destroyStore can remove it.
     (store as TursoStore & { __tmpDir?: string }).__tmpDir = tmpDir;
     return store;
@@ -404,7 +405,7 @@ runStoreJudgmentsSuite({
   label: "TursoStore",
   createStore: () => {
     const tmpDir = mkdtempSync(join(tmpdir(), "lore-turso-judg-"));
-    const store = new TursoStore({ localPath: join(tmpDir, "lore.db") });
+    const store = actedStore(new TursoStore({ localPath: join(tmpDir, "lore.db") }));
     // reason: stash tmpDir on the instance so destroyStore can remove it.
     (store as TursoStore & { __tmpDir?: string }).__tmpDir = tmpDir;
     return store;
@@ -421,7 +422,7 @@ runFileBackedDbSizeSuite({
   label: "TursoStore",
   createStore: () => {
     const tmpDir = mkdtempSync(join(tmpdir(), "lore-turso-size-"));
-    const store = new TursoStore({ localPath: join(tmpDir, "lore.db") });
+    const store = actedStore(new TursoStore({ localPath: join(tmpDir, "lore.db") }));
     // reason: stash tmpDir on the instance so destroyStore can remove it.
     (store as TursoStore & { __tmpDir?: string }).__tmpDir = tmpDir;
     return store;

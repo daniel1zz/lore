@@ -10,10 +10,11 @@
 
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { runPagingStoreSuite } from "./paging.shared.js";
+import { actedStore } from "../../live-invocation.js";
 
 runPagingStoreSuite({
   label: "InMemoryStore",
-  createStore: () => new InMemoryStore(),
+  createStore: () => actedStore(new InMemoryStore()),
   destroyStore: () => {
     // reason: no external resources — nothing to release.
   },

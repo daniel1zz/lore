@@ -793,7 +793,7 @@ Example key AKIAIOSFODNN7EXAMPLE was changed to [REDACTED].
         writeFileSync(join(tempDir, "prd.md"), makePrdFile("PRD-001", "My PRD"));
         writeFileSync(join(tempDir, "spec.md"), makeSpecFile("SPEC-001", "Auth Spec", "PRD-001"));
 
-        const failingStore = new FailingFindManyStore();
+        const failingStore = actedStore(new FailingFindManyStore());
         const failingService = new MigrationService(failingStore);
 
         const result = await failingService.execute(tempDir, defaultOpts);

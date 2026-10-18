@@ -441,7 +441,7 @@ describe("PhaseMigrationService.migrateTasks — membership is extra.plan_id, no
       }
     }
 
-    const store = new TaskQueryFailingStore();
+    const store = actedStore(new TaskQueryFailingStore());
     const cs = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
     const prd = await createPrd(cs, "PRD Mig Err");
     const spec = await createSpec(cs, prd.id, "Spec Mig Err");

@@ -29,6 +29,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SQLiteStore } from "../../../src/store/sqlite-store.js";
+import { actedStore } from "../../live-invocation.js";
 
 function userVersion(db: Database): number {
   return (db.query("PRAGMA user_version").get() as { user_version: number }).user_version;
@@ -42,7 +43,7 @@ function indexNames(db: Database): string[] {
 
 describe("migration-011 (trace_events) — schema (AC-TRACE-1)", () => {
   it("HAPPY: a fresh SQLiteStore lands on the current head user_version with trace_events and all four indexes present", () => {
-    const store = new SQLiteStore(":memory:");
+    const store = actedStore(new SQLiteStore(":memory:"));
     const db = store.getDatabase();
 
     // reason: migration-012 (spec-issue-closure-loop-computed-resolution-
@@ -67,7 +68,7 @@ describe("migration-011 (trace_events) — schema (AC-TRACE-1)", () => {
   });
 
   it("HAPPY: trace_events columns match SPEC-102 §Schema verbatim (TEXT ts, no CHECK on kind/surface, promoted checkpoint/hit_count)", () => {
-    const store = new SQLiteStore(":memory:");
+    const store = actedStore(new SQLiteStore(":memory:"));
     const db = store.getDatabase();
 
     const columns = (
@@ -106,7 +107,7 @@ describe("StoreInterface trace methods (SQLiteStore)", () => {
   let store: SQLiteStore;
 
   beforeEach(() => {
-    store = new SQLiteStore(":memory:");
+    store = actedStore(new SQLiteStore(":memory:"));
   });
 
   afterEach(() => {
@@ -306,7 +307,7 @@ describe("AC-TRACE-7: Turso isolation — local-only trace writes", () => {
       // to open a SEPARATE local handle on the Turso embedded-replica FILE
       // (never `this.client`) — proves migration-011 lands identically on a
       // replica-shaped local file, independent of any remote Turso state.
-      const localTraceStore = new SQLiteStore(replicaPath);
+      const localTraceStore = actedStore(new SQLiteStore(replicaPath));
       expect(userVersion(localTraceStore.getDatabase())).toBe(23);
 
       const insertResult = await localTraceStore.insertTraceEvent({

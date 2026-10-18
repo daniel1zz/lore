@@ -245,7 +245,7 @@ describe("ERROR — a failed store write never reaches the audit write", () => {
         return err({ code: "LINK_CYCLE", path: [] });
       }
     }
-    const store = new FailingLinkStore();
+    const store = actedStore(new FailingLinkStore());
     const cs = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
     const a = await createPrd(cs, "Fail A");
     const b = await createPrd(cs, "Fail B");
@@ -268,7 +268,7 @@ describe("ERROR — a failed store write never reaches the audit write", () => {
         return err({ code: "STORE_ERROR", message: "forced failure for test" });
       }
     }
-    const store = new FailingUpdateStore();
+    const store = actedStore(new FailingUpdateStore());
     const tcs = new TreeCheckService(store);
     await insertRawDoc(store, "prd", "Root", null);
     const plan = await insertRawDoc(store, "plan", "Orphan Plan", null);

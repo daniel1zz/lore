@@ -11,10 +11,11 @@
 
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { runBatchStoreMethodsSuite } from "./batch-methods.shared.js";
+import { actedStore } from "../../live-invocation.js";
 
 runBatchStoreMethodsSuite({
   label: "InMemoryStore",
-  createStore: () => new InMemoryStore(),
+  createStore: () => actedStore(new InMemoryStore()),
   destroyStore: () => {
     // reason: no external resources — nothing to release.
   },

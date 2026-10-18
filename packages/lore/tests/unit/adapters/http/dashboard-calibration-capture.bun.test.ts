@@ -87,7 +87,7 @@ async function makeTestServer(useFailingStore: boolean): Promise<TestContext> {
   mkdirSync(loreDir, { recursive: true });
   const dbPath = join(loreDir, "lore.db");
 
-  const store = useFailingStore ? new FailingCalibrationSQLiteStore(dbPath) : actedStore(new SQLiteStore(dbPath));
+  const store = useFailingStore ? actedStore(new FailingCalibrationSQLiteStore(dbPath)) : actedStore(new SQLiteStore(dbPath));
   const db = store.getDatabase();
   const telemetry = new NoOpTelemetry();
 

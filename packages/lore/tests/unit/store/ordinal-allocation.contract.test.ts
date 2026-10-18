@@ -38,6 +38,7 @@ import {
   ORDINAL_ALLOCATION_CASES,
   type OrdinalAllocationCase,
 } from "./ordinal-allocation-cases.js";
+import { actedStore } from "../../live-invocation.js";
 
 // ─── Factories ───────────────────────────────────────────────────────────────
 
@@ -91,7 +92,7 @@ describe("InMemoryStore — ordinal-allocation contract (SPEC-084, vitest twin)"
   let store: InMemoryStore;
 
   beforeEach(() => {
-    store = new InMemoryStore();
+    store = actedStore(new InMemoryStore());
   });
 
   let generatedCount = 0;

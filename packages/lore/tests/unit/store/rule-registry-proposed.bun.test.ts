@@ -24,6 +24,7 @@ import type { StoreInterface } from "../../../src/store/store-interface.js";
 import { TursoStore } from "../../../src/store/turso-store.js";
 import { MIGRATION_015_SQL } from "../../../src/store/migrations/migration-015.js";
 import { MIGRATION_018_SQL } from "../../../src/store/migrations/migration-018.js";
+import { actedStore } from "../../live-invocation.js";
 
 let counter = 0;
 function doc(type: "spec" | "baseline", label: string, extra: Record<string, unknown>, status: DocRecord["status"] = "draft"): DocRecord {
@@ -180,13 +181,13 @@ function tmpDb(prefix: string): { dir: string; path: string } {
   return { dir, path: join(dir, "lore.db") };
 }
 
-runSuite({ label: "InMemoryStore", create: () => ({ store: new InMemoryStore(), cleanup: () => undefined }) });
+runSuite({ label: "InMemoryStore", create: () => ({ store: actedStore(new InMemoryStore()), cleanup: () => undefined }) });
 
 runSuite({
   label: "SQLiteStore",
   create: () => {
     const { dir, path } = tmpDb("lore-proposed-sqlite-");
-    const store = new SQLiteStore(path);
+    const store = actedStore(new SQLiteStore(path));
     return {
       store,
       cleanup: () => {
@@ -201,7 +202,7 @@ runSuite({
   label: "TursoStore (local file mode)",
   create: () => {
     const { dir, path } = tmpDb("lore-proposed-turso-");
-    const store = new TursoStore({ localPath: path });
+    const store = actedStore(new TursoStore({ localPath: path }));
     return {
       store,
       cleanup: () => {
@@ -225,7 +226,7 @@ describe("migration-018 (SQLite)", () => {
       .run(id, n, lifecycle);
 
   it("STATE: a fresh store accepts 'proposed' and the CHECK still refuses an unknown state", () => {
-    const store = new SQLiteStore(join(dir, "fresh.db"));
+    const store = actedStore(new SQLiteStore(join(dir, "fresh.db")));
     const db = store.getDatabase();
     expect(() => insertRow(db, "BR-1", 1, "proposed")).not.toThrow();
     expect(() => insertRow(db, "BR-2", 2, "planned")).toThrow();
@@ -234,7 +235,7 @@ describe("migration-018 (SQLite)", () => {
 
   it("REGRESSION: upgrading a v17 file keeps every registry row and lands on user_version 22 (019 follows 018)", () => {
     const path = join(dir, "v17.db");
-    new SQLiteStore(path).close();
+    actedStore(new SQLiteStore(path)).close();
     const raw = new Database(path);
     // Rebuild the pre-018 shape: migration-015's table (CHECK without 'proposed'), then a live row, then v17.
     raw.exec(MIGRATION_015_SQL);
@@ -244,7 +245,7 @@ describe("migration-018 (SQLite)", () => {
     raw.exec("PRAGMA user_version = 17");
     raw.close();
 
-    const upgraded = new SQLiteStore(path);
+    const upgraded = actedStore(new SQLiteStore(path));
     const rows = upgraded.getDatabase().query("SELECT id, lifecycle FROM rule_registry ORDER BY n").all();
     expect(rows).toEqual([
       { id: "BR-1", lifecycle: "live" },
@@ -256,7 +257,7 @@ describe("migration-018 (SQLite)", () => {
   });
 
   it("REGRESSION: re-running the migration SQL is a no-op that keeps a proposed row", () => {
-    const store = new SQLiteStore(join(dir, "rerun.db"));
+    const store = actedStore(new SQLiteStore(join(dir, "rerun.db")));
     const db = store.getDatabase();
     insertRow(db, "BR-1", 1, "proposed");
     db.exec(MIGRATION_018_SQL);

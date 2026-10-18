@@ -24,6 +24,7 @@ import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
 import { SessionService } from "../../../src/service/session-service.js";
 import type { DocId, LinkType, CreateDocInput } from "@lore/core";
+import { actedStore } from "../../live-invocation.js";
 
 /** Counting subclass — asserts batch-call-count invariants (mirrors StalenessProbeService's CountingStore precedent). */
 class CountingStore extends InMemoryStore {
@@ -53,7 +54,7 @@ async function mustCreate(cs: CorpusService, input: CreateDocInput) {
 
 describe("SessionService.bootstrap — BOUNDARY: batched findLinksByToIds call count", () => {
   it("issues EXACTLY ONE findLinksByToIds call across 3 active plans, not 3", async () => {
-    const store = new CountingStore();
+    const store = actedStore(new CountingStore());
     const { corpusService, sessionService } = makeSessionService(store);
 
     // Three plans, each with a blocker/blocked pair of tasks. Every plan's blocker
@@ -103,7 +104,7 @@ describe("SessionService.bootstrap — BOUNDARY: batched findLinksByToIds call c
   });
 
   it("an archived plan is excluded from active_plans and contributes no task ids to the batch", async () => {
-    const store = new CountingStore();
+    const store = actedStore(new CountingStore());
     const { corpusService, sessionService } = makeSessionService(store);
 
     const activePlan = await mustCreate(corpusService, {
@@ -146,7 +147,7 @@ describe("SessionService.bootstrap — BOUNDARY: batched findLinksByToIds call c
   });
 
   it("BOUNDARY: zero active plans still returns ok and issues the (empty) batch call once", async () => {
-    const store = new CountingStore();
+    const store = actedStore(new CountingStore());
     const { sessionService } = makeSessionService(store);
 
     store.findLinksByToIdsCallCount = 0;

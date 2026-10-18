@@ -55,6 +55,7 @@ import type { RuleStateService } from "../../../src/service/rule-state-service.j
 import { RuleStateService as RuleStateServiceImpl } from "../../../src/service/rule-state-service.js";
 import { SQLiteStore } from "../../../src/store/sqlite-store.js";
 import { makeRuleService } from "../../helpers/make-rule-service.js";
+import { actedStore } from "../../live-invocation.js";
 
 const WORKER = join(fileURLToPath(new URL(".", import.meta.url)), "..", "..", "fixtures", "cite-retire-race-worker.ts");
 const WRITERS = 8;
@@ -83,7 +84,7 @@ async function must<T>(r: { ok: boolean; value?: T; error?: unknown }, what: str
 /** Armed branch + one leaf holding live BR-1 + 8 specs each with one uncited criterion. */
 async function seed(dir: string): Promise<Fixture> {
   const dbPath = join(dir, "corpus.db");
-  const store = new SQLiteStore(dbPath);
+  const store = actedStore(new SQLiteStore(dbPath));
   const cs = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
   const rules = makeRuleService(store);
   const ac = new AcService(store, new RecordLockService(store, new GateEnforcer(undefined)));
@@ -186,7 +187,7 @@ function citesOf(spec: DocRecord): string[] {
 }
 
 async function readState(fx: Fixture) {
-  const store = new SQLiteStore(fx.dbPath);
+  const store = actedStore(new SQLiteStore(fx.dbPath));
   try {
     const specs: DocRecord[] = [];
     for (const id of fx.specIds) {
@@ -289,7 +290,7 @@ describe("enforce mode, armed branch: 8 citers race 1 retirer (QA-2 / D6)", () =
     const retired = await race(dir, { ...fx, specIds: [] }, "enforce", true, "retire-only");
     expect(retired.retire).toEqual({ ok: true });
 
-    const store = new SQLiteStore(fx.dbPath);
+    const store = actedStore(new SQLiteStore(fx.dbPath));
     const gated = new AcService(store, new RecordLockService(store, new GateEnforcer(undefined)), { citeGate: { mode: "enforce", armed_branches: [BRANCH_SLUG] } });
     const before = await store.find(fx.specIds[0] as never);
     const res = await gated.citeCriterion(fx.specIds[0] as string, AC_ID, [RULE_ID], {}, { by: "agent:late" });
@@ -305,7 +306,7 @@ describe("enforce mode, armed branch: 8 citers race 1 retirer (QA-2 / D6)", () =
   it("a branch that is NOT armed still accepts the cite (gate scope is per armed branch)", async () => {
     const fx = await seed(dir);
     await race(dir, { ...fx, specIds: [] }, "enforce", true, "retire-only");
-    const store = new SQLiteStore(fx.dbPath);
+    const store = actedStore(new SQLiteStore(fx.dbPath));
     const ungated = new AcService(store, new RecordLockService(store, new GateEnforcer(undefined)), { citeGate: { mode: "enforce", armed_branches: ["some-other-branch"] } });
     const res = await ungated.citeCriterion(fx.specIds[0] as string, AC_ID, [RULE_ID], {}, { by: "agent:late" });
     store.close();

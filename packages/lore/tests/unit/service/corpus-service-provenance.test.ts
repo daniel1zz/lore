@@ -190,7 +190,7 @@ describe("CorpusService.create() provenance auto-write — HAPPY", () => {
 
 describe("CorpusService.create() provenance auto-write — ERROR (fail-soft)", () => {
   it("AC-P4-4: a forced store.addLink failure during provenance write never surfaces as create()'s error", async () => {
-    const failingStore = new FailingLinkStore();
+    const failingStore = actedStore(new FailingLinkStore());
     const { service, telemetry } = makeService(failingStore);
 
     const skill = await createApprovedSkillDoc(service, { title: "Write-spec rules", appliesTo: "spec" });
@@ -216,7 +216,7 @@ describe("CorpusService.create() provenance auto-write — ERROR (fail-soft)", (
   });
 
   it("AC-P4-4: create() itself never throws when the provenance store call fails", async () => {
-    const failingStore = new FailingLinkStore();
+    const failingStore = actedStore(new FailingLinkStore());
     const { service } = makeService(failingStore);
     await createApprovedSkillDoc(service, { title: "Write-spec rules", appliesTo: "spec" });
 

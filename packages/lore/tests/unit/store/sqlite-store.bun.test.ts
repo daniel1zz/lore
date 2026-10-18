@@ -41,6 +41,7 @@ import {
 import { runStoreJudgmentsSuite } from "./store-judgments.shared.js";
 import { formatError } from "../../../src/adapters/cli/utils.js";
 import type { DocRecord, LoreError } from "@lore/core";
+import { actedStore } from "../../live-invocation.js";
 
 // ─── FTS5 Special-Token Escape — SPEC-013 §3.5 ───────────────────────────────
 //
@@ -67,7 +68,7 @@ describe("SQLiteStore.search — FTS5 special-token escape (SPEC-013 §3.5)", ()
   // Each test gets a fresh in-memory store — matches the pattern used above.
   beforeEach(() => {
     resetCounter();
-    store = new SQLiteStore(":memory:");
+    store = actedStore(new SQLiteStore(":memory:"));
   });
 
   afterEach(() => {
@@ -280,7 +281,7 @@ describe("SQLiteStore.dbSizeBytes (AC-STORE-010)", () => {
   beforeEach(() => {
     tempDir = mkdtempSync(join(tmpdir(), "lore-db-size-"));
     dbPath = join(tempDir, "test.db");
-    store = new SQLiteStore(dbPath);
+    store = actedStore(new SQLiteStore(dbPath));
   });
 
   afterEach(() => {
@@ -360,7 +361,7 @@ describe("SQLiteStore — DUPLICATE_SLUG.existing_id names the winner (task-skil
 
   beforeEach(() => {
     resetCounter();
-    store = new SQLiteStore(":memory:");
+    store = actedStore(new SQLiteStore(":memory:"));
   });
 
   afterEach(() => {
@@ -565,13 +566,13 @@ describe("AC-3 SSOT: no store constructs DUPLICATE_SLUG from the REJECTED doc's 
 
 runStoreCoreSuite({
   label: "SQLiteStore",
-  createStore: () => new SQLiteStore(":memory:"),
+  createStore: () => actedStore(new SQLiteStore(":memory:")),
   destroyStore: (store) => store.close(),
 });
 
 runStoreJudgmentsSuite({
   label: "SQLiteStore",
-  createStore: () => new SQLiteStore(":memory:"),
+  createStore: () => actedStore(new SQLiteStore(":memory:")),
   destroyStore: (store) => store.close(),
   enforcesForeignKeys: true,
 });
@@ -581,7 +582,7 @@ runFileBackedDbSizeSuite({
   label: "SQLiteStore",
   createStore: () => {
     const tempDir = mkdtempSync(join(tmpdir(), "lore-db-size-"));
-    const store = new SQLiteStore(join(tempDir, "test.db"));
+    const store = actedStore(new SQLiteStore(join(tempDir, "test.db")));
     // reason: stash tempDir on the instance so destroyStore can remove it.
     (store as SQLiteStore & { __tmpDir?: string }).__tmpDir = tempDir;
     return store;

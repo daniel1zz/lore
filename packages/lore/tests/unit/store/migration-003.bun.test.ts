@@ -33,6 +33,7 @@ import { join } from "node:path";
 import { SQLiteStore } from "../../../src/store/sqlite-store.js";
 import { MIGRATION_001_SQL } from "../../../src/store/migrations/migration-001.js";
 import { MIGRATION_002_SQL } from "../../../src/store/migrations/migration-002.js";
+import { actedStore } from "../../live-invocation.js";
 
 describe("migration-003 (review_judgments + calibration_records)", () => {
   let tempDir: string;
@@ -48,7 +49,7 @@ describe("migration-003 (review_judgments + calibration_records)", () => {
   });
 
   it("HAPPY: a fresh :memory: DB migrates straight to the current user_version with both new tables + indexes", () => {
-    const store = new SQLiteStore(":memory:");
+    const store = actedStore(new SQLiteStore(":memory:"));
     const db = store.getDatabase();
 
     const { user_version: userVersion } = db.query("PRAGMA user_version").get() as {
@@ -127,7 +128,7 @@ describe("migration-003 (review_judgments + calibration_records)", () => {
     // migration-003 (then also migration-004/005, since currentVersion (2) is below
     // every later migration's threshold too) — never throw, never touch the
     // pre-existing docs row.
-    const store = new SQLiteStore(dbPath);
+    const store = actedStore(new SQLiteStore(dbPath));
     const db = store.getDatabase();
 
     const { user_version: postUpgradeVersion } = db.query("PRAGMA user_version").get() as {
@@ -155,11 +156,11 @@ describe("migration-003 (review_judgments + calibration_records)", () => {
   });
 
   it("REGRESSION: reopening an already-migrated (latest version) file-backed DB a second time is idempotent — no throw, schema unchanged", () => {
-    const firstOpen = new SQLiteStore(dbPath);
+    const firstOpen = actedStore(new SQLiteStore(dbPath));
     firstOpen.close();
 
     expect(() => {
-      const secondOpen = new SQLiteStore(dbPath);
+      const secondOpen = actedStore(new SQLiteStore(dbPath));
       const db = secondOpen.getDatabase();
       const { user_version: userVersion } = db.query("PRAGMA user_version").get() as {
         user_version: number;

@@ -35,7 +35,7 @@ import { createApp, type App } from "../../src/app.js";
 import { SQLiteStore } from "../../src/store/sqlite-store.js";
 import { TursoStore } from "../../src/store/turso-store.js";
 import type { LoreConfig, LoreError, Result } from "@lore/core";
-import { liveAmbient, liveWriteContext } from "../live-invocation.js";
+import { liveAmbient, liveWriteContext, actedStore } from "../live-invocation.js";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────
 
@@ -199,7 +199,7 @@ describe("createApp store selection — in-process (spec-eager-libsql-load-makes
   it("supporting check: TursoStore/SQLiteStore instanceof identity is distinguishable (fences the store-identity assertions above against a vacuous always-false read)", () => {
     const dir = makeTmpDir("sanity-turso-identity");
     scratchDirs.push(dir);
-    const store = new TursoStore({ localPath: join(dir, "sanity.db") });
+    const store = actedStore(new TursoStore({ localPath: join(dir, "sanity.db") }));
     try {
       expect(store).toBeInstanceOf(TursoStore);
       expect(store).not.toBeInstanceOf(SQLiteStore);

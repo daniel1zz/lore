@@ -751,6 +751,8 @@ describe("author attribution — cookie-session writes resolve via the actor cha
   beforeEach(() => {
     process.env["CLAUDE_CODE_SESSION_ID"] = "d4a5b0a1-1111-2222-3333-444444444444";
     process.env["LORE_ACTOR"] = "agent:decoy-lore-actor-must-be-ignored";
+    // the write actor is read once when the app is composed: compose it AFTER the env this case is about is set
+    app = makeApp();
   });
 
   afterEach(() => {
@@ -803,7 +805,7 @@ describe("author attribution — cookie-session writes resolve via the actor cha
     expect(latestVersion?.created_by).not.toBe("system");
   });
 
-  it("two different cookie sessions in sequence each resolve their OWN session actor (no caching across writes)", async () => {
+  it("an app composed under a different session resolves that session's actor (the actor is read once per composition, never per write)", async () => {
     const req1 = jsonReq("POST", "/api/dashboard/docs", { type: "prd", title: "First Attributed Doc" });
     const res1 = await handleDashboardRoute(req1, makeUrl("/api/dashboard/docs"), app, COOKIE_ACTOR);
     const body1 = await parseRes(res1!);
@@ -811,6 +813,7 @@ describe("author attribution — cookie-session writes resolve via the actor cha
     expect(doc1.created_by).toBe(SESSION_ACTOR);
 
     process.env["CLAUDE_CODE_SESSION_ID"] = "5ec0ad5e-1111-2222-3333-444444444444";
+    app = makeApp();
     const req2 = jsonReq("POST", "/api/dashboard/docs", { type: "prd", title: "Second Attributed Doc" });
     const res2 = await handleDashboardRoute(req2, makeUrl("/api/dashboard/docs"), app, COOKIE_ACTOR);
     const body2 = await parseRes(res2!);

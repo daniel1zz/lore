@@ -10,6 +10,7 @@ import { join } from "node:path";
 import { SQLiteStore } from "../../../src/store/sqlite-store.js";
 import { MIGRATION_020_SQL } from "../../../src/store/migrations/migration-020.js";
 import { computeDecisionEntryHash, DECISION_GENESIS_HASH, verifyDecisionChain, type DecisionRecordInput } from "../../../src/store/decision-log.js";
+import { actedStore } from "../../live-invocation.js";
 
 function input(n: number, verdict: DecisionRecordInput["verdict"]): DecisionRecordInput {
   return {
@@ -71,7 +72,7 @@ describe("migration 023 decision_log superseded verdict", () => {
     const path = join(dir, "lore.db");
     try {
       legacyDb(path, from);
-      const store = new SQLiteStore(path);
+      const store = actedStore(new SQLiteStore(path));
       try {
         const before = await store.listDecisionLog();
         expect(before.ok && before.value.map((r) => [r.id, r.verdict])).toEqual([[1, "auto"], [2, "escalate"], [3, "refuse"]]);

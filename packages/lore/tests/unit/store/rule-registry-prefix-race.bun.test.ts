@@ -32,6 +32,7 @@ import { CorpusService } from "../../../src/service/corpus-service.js";
 import { RuleService } from "../../../src/service/rule-service.js";
 import { SQLiteStore } from "../../../src/store/sqlite-store.js";
 import { makeRuleService } from "../../helpers/make-rule-service.js";
+import { actedStore } from "../../live-invocation.js";
 
 const WORKERS = 8;
 const ROUNDS = 3;
@@ -91,9 +92,9 @@ describe("rule registry — BR / AS / AD from one registry on real SQLite (spec-
   beforeEach(async () => {
     dir = mkdtempSync(join(tmpdir(), "lore-prefix-race-"));
     dbPath = join(dir, "corpus.db");
-    s1 = new SQLiteStore(dbPath);
+    s1 = actedStore(new SQLiteStore(dbPath));
     targets = await seed(s1);
-    s2 = new SQLiteStore(dbPath);
+    s2 = actedStore(new SQLiteStore(dbPath));
   });
   afterEach(() => {
     s2.close();
@@ -181,13 +182,13 @@ describe("rule registry — BR / AS / AD from one registry on real SQLite (spec-
     const rules = makeRuleService(s1);
     const before = (await must(await rules.addRule(targets.standards[0] as string, rule("one"), { by: "agent:t" }), "one") as { ruleId: string }).ruleId;
     s2.close();
-    const reopened = new SQLiteStore(dbPath);
+    const reopened = actedStore(new SQLiteStore(dbPath));
     try {
       const after = await must(await makeRuleService(reopened).addRule(targets.standards[1] as string, rule("two"), { by: "agent:t" }), "two");
       expect(numberOf((after as { ruleId: string }).ruleId) > numberOf(before)).toBe(true);
     } finally {
       reopened.close();
-      s2 = new SQLiteStore(dbPath); // keep afterEach's close() valid
+      s2 = actedStore(new SQLiteStore(dbPath)); // keep afterEach's close() valid
     }
   });
 });
@@ -195,7 +196,7 @@ describe("rule registry — BR / AS / AD from one registry on real SQLite (spec-
 describe("rule registry — business-only control on real SQLite (green on main)", () => {
   it("8 concurrent BR adds on 8 leaves still yield BR-1..BR-8, all distinct (the existing path is unchanged)", async () => {
     const dir = mkdtempSync(join(tmpdir(), "lore-prefix-control-"));
-    const store = new SQLiteStore(join(dir, "corpus.db"));
+    const store = actedStore(new SQLiteStore(join(dir, "corpus.db")));
     try {
       const cs = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
       const prd = await must(await cs.create({ type: "prd", title: "Control product", content: "root" } as CreateDocInput), "prd");

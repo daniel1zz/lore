@@ -658,7 +658,7 @@ describe("VersionService.restore — atomic CAS write ordering (M4)", () => {
   }
 
   it("ERROR/STATE: concurrent version bump → CAS update fails with STALE_VERSION, NO versions/audit rows written", async () => {
-    const staleStore = new StaleOnceStore();
+    const staleStore = actedStore(new StaleOnceStore());
     const staleService = new VersionService(staleStore, new RecordLockService(staleStore, new GateEnforcer(undefined)));
 
     const doc = makeDoc({ version: 2 });

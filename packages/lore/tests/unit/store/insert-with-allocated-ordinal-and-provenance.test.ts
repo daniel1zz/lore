@@ -14,10 +14,11 @@
 
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { runInsertWithAllocatedOrdinalAndProvenanceSuite } from "./insert-with-allocated-ordinal-and-provenance.shared.js";
+import { actedStore } from "../../live-invocation.js";
 
 runInsertWithAllocatedOrdinalAndProvenanceSuite({
   label: "InMemoryStore",
-  createStore: () => new InMemoryStore(),
+  createStore: () => actedStore(new InMemoryStore()),
   destroyStore: () => {
     // reason: no external resources to release — mirrors
     // provenance-writes.test.ts's identical no-op destroyStore.

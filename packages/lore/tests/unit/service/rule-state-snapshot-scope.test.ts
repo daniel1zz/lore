@@ -20,6 +20,7 @@ import type { StoreFilters } from "../../../src/store/store-interface.js";
 import { RuleStateService } from "../../../src/service/rule-state-service.js";
 import { DOC_TYPE_ROLE_MAP, ok } from "@lore/core";
 import type { AcceptanceCriterion, DocRecord, DocType, EvidenceEntry, LoreError, Result } from "@lore/core";
+import { actedStore } from "../../live-invocation.js";
 
 const HEAD = "f".repeat(40);
 const OLD = "a".repeat(40);
@@ -164,7 +165,7 @@ function stateMap(rules: ReadonlyArray<{ rule_id: string; state: string }>): Rec
 
 describe("AC-BLS2-9 RuleStateService snapshot scope", () => {
   it("full(): every findMany filter names a type in {baseline, spec, plan, task}", async () => {
-    const store = new SpyStore();
+    const store = actedStore(new SpyStore());
     await buildCorpus(store, 1000);
     store.filters.length = 0;
     const res = await new RuleStateService(store, git).full();
@@ -174,7 +175,7 @@ describe("AC-BLS2-9 RuleStateService snapshot scope", () => {
   });
 
   it("full(): the snapshot queries all four needed types (narrowing must not drop one)", async () => {
-    const store = new SpyStore();
+    const store = actedStore(new SpyStore());
     await buildCorpus(store, 10);
     store.filters.length = 0;
     await new RuleStateService(store, git).full();
@@ -183,7 +184,7 @@ describe("AC-BLS2-9 RuleStateService snapshot scope", () => {
   });
 
   it("full(): 0 knowledge docs are returned to the service out of 1000 in the store", async () => {
-    const store = new SpyStore();
+    const store = actedStore(new SpyStore());
     await buildCorpus(store, 1000);
     store.returnedTypes.length = 0;
     await new RuleStateService(store, git).full();
@@ -191,7 +192,7 @@ describe("AC-BLS2-9 RuleStateService snapshot scope", () => {
   });
 
   it("counts(): every findMany filter names a type in {baseline, spec, plan, task}", async () => {
-    const store = new SpyStore();
+    const store = actedStore(new SpyStore());
     await buildCorpus(store, 1000);
     store.filters.length = 0;
     const res = await new RuleStateService(store, git).counts();
@@ -201,7 +202,7 @@ describe("AC-BLS2-9 RuleStateService snapshot scope", () => {
   });
 
   it("rule states are unchanged by narrowing: known verdicts on a 1000-knowledge corpus", async () => {
-    const store = new SpyStore();
+    const store = actedStore(new SpyStore());
     await buildCorpus(store, 1000);
     const res = await new RuleStateService(store, git).full();
     if (!res.ok) throw new Error(JSON.stringify(res.error));
@@ -209,9 +210,9 @@ describe("AC-BLS2-9 RuleStateService snapshot scope", () => {
   });
 
   it("rule states equal those of the same corpus with zero knowledge docs", async () => {
-    const big = new SpyStore();
+    const big = actedStore(new SpyStore());
     await buildCorpus(big, 1000);
-    const bare = new SpyStore();
+    const bare = actedStore(new SpyStore());
     await buildCorpus(bare, 0);
     const a = await new RuleStateService(big, git).full();
     const b = await new RuleStateService(bare, git).full();

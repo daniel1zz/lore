@@ -227,7 +227,7 @@ describe("CorpusService spec-create fallback — ERROR", () => {
       }
     }
 
-    const { service } = makeGatedService(new FindManyFailingStore());
+    const { service } = makeGatedService(actedStore(new FindManyFailingStore()));
     const prd = await createApprovedPrd(service, "Root PRD");
 
     const spec = await service.create({

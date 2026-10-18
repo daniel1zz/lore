@@ -57,7 +57,11 @@ function commit(dir: string, file: string, message: string): string {
 async function makeArchivableTask(): Promise<{ svc: TaskWorkflowService; taskId: string }> {
   const store = actedStore(new InMemoryStore());
   const cs = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
-  const svc = new TaskWorkflowService(store, undefined, { claimTtlMinutes: 120 });
+  const svc = new TaskWorkflowService(
+    store, undefined, { claimTtlMinutes: 120 },
+    undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined,
+    createRealWorktreeProbe(process.cwd()),
+  );
   const plan = await cs.create({ type: "plan", title: "Range plan", content: "body" } as CreateDocInput);
   if (!plan.ok) throw new Error("plan");
   const task = await cs.create({

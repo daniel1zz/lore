@@ -401,6 +401,8 @@ describe("POST /api/docs", () => {
       process.env["CLAUDE_CODE_SESSION_ID"] = "v1da5b0a-1111-2222-3333-444444444444";
       // decoy: must be ignored (BR-1055)
       process.env["LORE_ACTOR"] = "agent:decoy-lore-actor-must-be-ignored";
+      // the write actor is read once when the app is composed: compose it AFTER the env this case is about is set
+      app = makeApp();
     });
 
     afterEach(() => {

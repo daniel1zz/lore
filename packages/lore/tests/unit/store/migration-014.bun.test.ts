@@ -44,6 +44,7 @@ import { computeBaselineStatus } from "../../../src/service/baseline-status.js";
 import { LATEST_SCHEMA_VERSION } from "../../../src/store/schema-version.js";
 import { SQLiteStore } from "../../../src/store/sqlite-store.js";
 import { makeRuleService } from "../../helpers/make-rule-service.js";
+import { actedStore } from "../../live-invocation.js";
 
 // Variable specifier: migration-014.ts does not exist yet; the file must still load and typecheck.
 const MIGRATION_014_MODULE = "../../../src/store/migrations/migration-014.js";
@@ -163,7 +164,7 @@ describe("migration-014 (registry lifecycle/version, ac_cites, rule_depends, ac_
   afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
   async function seedSchema13(): Promise<void> {
-    const seed = new SQLiteStore(path);
+    const seed = actedStore(new SQLiteStore(path));
     const docs: DocRecord[] = [
       makeDoc(LEAF_A, "m14-leaf-a", {
         type: "baseline",
@@ -228,7 +229,7 @@ describe("migration-014 (registry lifecycle/version, ac_cites, rule_depends, ac_
 
   it("STATE: opening a schema-13 file lands on user_version 22 == LATEST_SCHEMA_VERSION (014, 015, 016, 017: runs.ended_at, then 018: proposed registry state)", async () => {
     await seedSchema13();
-    const store = new SQLiteStore(path);
+    const store = actedStore(new SQLiteStore(path));
     expect(LATEST_SCHEMA_VERSION).toBe(23);
     expect(userVersion(store.getDatabase())).toBe(23);
     store.close();
@@ -236,7 +237,7 @@ describe("migration-014 (registry lifecycle/version, ac_cites, rule_depends, ac_
 
   it("HAPPY: rule_registry carries lifecycle + version per rule, matching the owning leaves", async () => {
     await seedSchema13();
-    const store = new SQLiteStore(path);
+    const store = actedStore(new SQLiteStore(path));
     const rows = store
       .getDatabase()
       .query("SELECT id, leaf_doc_id, lifecycle, version FROM rule_registry ORDER BY n")
@@ -253,7 +254,7 @@ describe("migration-014 (registry lifecycle/version, ac_cites, rule_depends, ac_
 
   it("HAPPY: ac_cites has exactly the 3 citing criteria as (doc_id, ac_id, rule_id) rows; the uncited AC adds none", async () => {
     await seedSchema13();
-    const store = new SQLiteStore(path);
+    const store = actedStore(new SQLiteStore(path));
     const rows = store.getDatabase().query("SELECT doc_id, ac_id, rule_id FROM ac_cites ORDER BY doc_id, ac_id").all();
     expect(rows).toEqual([
       { doc_id: SPEC_1, ac_id: "AC-1", rule_id: "BR-1" },
@@ -265,7 +266,7 @@ describe("migration-014 (registry lifecycle/version, ac_cites, rule_depends, ac_
 
   it("HAPPY: rule_depends mirrors each leaf's depends_on", async () => {
     await seedSchema13();
-    const store = new SQLiteStore(path);
+    const store = actedStore(new SQLiteStore(path));
     const rows = store.getDatabase().query("SELECT leaf_id, rule_id FROM rule_depends ORDER BY leaf_id, rule_id").all();
     expect(rows).toEqual([
       { leaf_id: LEAF_A, rule_id: "BR-4" },
@@ -277,7 +278,7 @@ describe("migration-014 (registry lifecycle/version, ac_cites, rule_depends, ac_
 
   it("BOUNDARY: ac_exemptions exists and is empty after migration (no exemption is invented by the backfill)", async () => {
     await seedSchema13();
-    const store = new SQLiteStore(path);
+    const store = actedStore(new SQLiteStore(path));
     const db = store.getDatabase();
     expect(tableExists(db, "ac_exemptions")).toBe(true);
     expect(db.query("SELECT COUNT(*) AS c FROM ac_exemptions").get()).toEqual({ c: 0 });
@@ -286,12 +287,12 @@ describe("migration-014 (registry lifecycle/version, ac_cites, rule_depends, ac_
 
   it("REGRESSION: re-opening and re-running MIGRATION_014_SQL yields identical rows (idempotent)", async () => {
     await seedSchema13();
-    const first = new SQLiteStore(path);
+    const first = actedStore(new SQLiteStore(path));
     const before = snapshot(first.getDatabase());
     expect((before.cites as unknown[]).length).toBe(3);
     first.close();
 
-    const second = new SQLiteStore(path);
+    const second = actedStore(new SQLiteStore(path));
     expect(snapshot(second.getDatabase())).toEqual(before);
     second.close();
 
@@ -311,14 +312,14 @@ describe("migration-014 (registry lifecycle/version, ac_cites, rule_depends, ac_
 
   it("STATE: a clean migrated corpus reports index_mismatch 0", async () => {
     await seedSchema13();
-    const store = new SQLiteStore(path);
+    const store = actedStore(new SQLiteStore(path));
     expect((await statusOf(store))["index_mismatch"]).toBe(0);
     store.close();
   });
 
   it("NEGATIVE: removing one ac_cites row makes the status mismatch count exactly 1", async () => {
     await seedSchema13();
-    const store = new SQLiteStore(path);
+    const store = actedStore(new SQLiteStore(path));
     const db = store.getDatabase();
     expect(db.prepare("DELETE FROM ac_cites WHERE doc_id = ? AND ac_id = 'AC-2'").run(SPEC_1).changes).toBe(1);
     expect((await statusOf(store))["index_mismatch"]).toBe(1);
@@ -327,7 +328,7 @@ describe("migration-014 (registry lifecycle/version, ac_cites, rule_depends, ac_
 
   it("NEGATIVE: a stray ac_cites row and a missing rule_depends row are each counted (mismatch is a count, not a flag)", async () => {
     await seedSchema13();
-    const store = new SQLiteStore(path);
+    const store = actedStore(new SQLiteStore(path));
     const db = store.getDatabase();
     db.prepare("INSERT INTO ac_cites (doc_id, ac_id, rule_id) VALUES (?, 'AC-3', 'BR-5')").run(SPEC_1);
     db.prepare("DELETE FROM rule_depends WHERE leaf_id = ? AND rule_id = 'BR-2'").run(LEAF_B);
@@ -337,7 +338,7 @@ describe("migration-014 (registry lifecycle/version, ac_cites, rule_depends, ac_
 
   it("NEGATIVE: a stale registry lifecycle is counted and NOT silently repaired by the status check", async () => {
     await seedSchema13();
-    const store = new SQLiteStore(path);
+    const store = actedStore(new SQLiteStore(path));
     const db = store.getDatabase();
     db.prepare("UPDATE rule_registry SET lifecycle = 'live' WHERE id = 'BR-3'").run();
     expect((await statusOf(store))["index_mismatch"]).toBe(1);
@@ -347,7 +348,7 @@ describe("migration-014 (registry lifecycle/version, ac_cites, rule_depends, ac_
 
   it("STATE: `rule set` lifecycle change updates registry lifecycle + version to match the leaf (two different rules)", async () => {
     await seedSchema13();
-    const store = new SQLiteStore(path);
+    const store = actedStore(new SQLiteStore(path));
     const rules = makeRuleService(store);
     const db = store.getDatabase();
 
@@ -377,7 +378,7 @@ describe("migration-014 (registry lifecycle/version, ac_cites, rule_depends, ac_
 
   it("ERROR: if the registry update fails, the leaf lifecycle change rolls back (same transaction)", async () => {
     await seedSchema13();
-    const store = new SQLiteStore(path);
+    const store = actedStore(new SQLiteStore(path));
     const db = store.getDatabase();
     db.exec(
       `CREATE TRIGGER t_block_registry_update BEFORE UPDATE ON rule_registry

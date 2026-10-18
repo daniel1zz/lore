@@ -487,7 +487,7 @@ describe("BOUNDARY — retracting an already-terminal task / a task claimed by a
 
 describe("STATE — partial-failure recovery: doc half committed, re-run repairs the missing link", () => {
   it("a forced addLink failure still commits the doc half; re-running the SAME invalidate repairs the link", async () => {
-    const store = new FlakyLinkStore(1);
+    const store = actedStore(new FlakyLinkStore(1));
     const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
     const validityService = new ValidityService(store);
 

@@ -39,6 +39,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createHash } from "node:crypto";
 import type { AuditEntry, DocRecord, VersionRecord } from "@lore/core";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
+import { actedStore } from "../../live-invocation.js";
 
 // ─── Factories ───────────────────────────────────────────────────────────────
 
@@ -151,7 +152,7 @@ describe("InMemoryStore — audit hash chain parity (SPEC-079 G3)", () => {
   let store: InMemoryStore;
 
   beforeEach(() => {
-    store = new InMemoryStore();
+    store = actedStore(new InMemoryStore());
   });
 
   afterEach(() => {
@@ -231,7 +232,7 @@ describe("InMemoryStore — audit hash chain parity (SPEC-079 G3)", () => {
 
     // Fresh store (genesis prev_hash "" again), same logical details,
     // NORMAL key order — must produce the byte-identical hash.
-    const storeB = new InMemoryStore();
+    const storeB = actedStore(new InMemoryStore());
     const entryNormalOrder = makeAudit({ details: { a: 1, b: 2 } });
     const resB = await storeB.appendAuditEntry(entryNormalOrder);
     expect(resB.ok).toBe(true);
