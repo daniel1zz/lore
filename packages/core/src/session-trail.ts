@@ -118,7 +118,14 @@ export type HelperRecord = z.infer<typeof HelperRecordSchema>;
 
 /** `helpers/<agent_id>.judged.json`, written only by the turn-end review. */
 export const JudgedFileSchema = z
-  .object({ judged_end_count: z.number().int().nonnegative() })
+  .object({
+    judged_end_count: z.number().int().nonnegative(),
+    /**
+     * Instant (epoch ms) of the review-start snapshot that judged `judged_end_count`: edit records of the helper
+     * with `ts <= judged_at_ms` were judged by that review. Absent on a file written before AU-T25.
+     */
+    judged_at_ms: z.number().int().nonnegative().optional(),
+  })
   .strict();
 
 /** `session.json`: written once at SessionStart. */
@@ -231,7 +238,7 @@ export interface TrailTurn {
   readonly changes: Measured<TrailChange[]>;
 }
 
-export type TrailHelper = HelperRecord & { agent_id: string; judged_end_count: number };
+export type TrailHelper = HelperRecord & { agent_id: string; judged_end_count: number; judged_at_ms?: number };
 
 export interface SessionTrail {
   readonly session: string;
@@ -305,9 +312,14 @@ function readHelper(session: string, raw: RawHelper): TrailHelper {
     throw new TrailFileInvalidError(recordFile, "run does not name this session and agent");
   }
   const judged = raw.judged_json === null
-    ? 0
-    : parseSessionFile(`helpers/${raw.agent_id}.judged.json`, raw.judged_json, JudgedFileSchema).judged_end_count;
-  return { ...record, agent_id: raw.agent_id, judged_end_count: judged };
+    ? { judged_end_count: 0 }
+    : parseSessionFile(`helpers/${raw.agent_id}.judged.json`, raw.judged_json, JudgedFileSchema);
+  return {
+    ...record,
+    agent_id: raw.agent_id,
+    judged_end_count: judged.judged_end_count,
+    ...(judged.judged_at_ms === undefined ? {} : { judged_at_ms: judged.judged_at_ms }),
+  };
 }
 
 /** Chronological by snapshot mtime (unopened turns last), ties by turn id. */

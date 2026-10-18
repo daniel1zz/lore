@@ -118,4 +118,12 @@ export function readJudged(f: TurnFixture, agent: string): number | null {
   return (JSON.parse(readFileSync(file, "utf8")) as { judged_end_count: number }).judged_end_count;
 }
 
+/** `judged_at_ms` of a helper's judged file, or null when the file or the field is absent (AU-T25). */
+export function readJudgedAt(f: TurnFixture, agent: string): number | null {
+  const file = join(helpersDir(f), `${agent}.judged.json`);
+  if (!existsSync(file)) return null;
+  const at = (JSON.parse(readFileSync(file, "utf8")) as { judged_at_ms?: number }).judged_at_ms;
+  return at ?? null;
+}
+
 export { runHook };
