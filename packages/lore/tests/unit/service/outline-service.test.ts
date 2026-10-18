@@ -757,6 +757,9 @@ describe("OutlineService.resolve", () => {
         // reason: spec-worktree-removal-is-decided-by-who-is-inside-not-by-how — new required StoreInterface method.
         listRunsByAgentRef: (agentRef) => store.listRunsByAgentRef(agentRef),
         countAttributedWrites: (windowStart, kinds) => store.countAttributedWrites(windowStart, kinds),
+        // reason: AC-AU-2 — new required StoreInterface methods (decision log).
+        appendDecisionRecord: (input) => store.appendDecisionRecord(input),
+        listDecisionLog: (subject) => store.listDecisionLog(subject),
       };
 
       const brokenService = new OutlineService(brokenStore);

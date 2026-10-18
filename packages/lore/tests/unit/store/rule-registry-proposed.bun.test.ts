@@ -232,7 +232,7 @@ describe("migration-018 (SQLite)", () => {
     store.close();
   });
 
-  it("REGRESSION: upgrading a v17 file keeps every registry row and lands on user_version 19 (019 follows 018)", () => {
+  it("REGRESSION: upgrading a v17 file keeps every registry row and lands on user_version 20 (019 follows 018)", () => {
     const path = join(dir, "v17.db");
     new SQLiteStore(path).close();
     const raw = new Database(path);
@@ -251,7 +251,7 @@ describe("migration-018 (SQLite)", () => {
       { id: "BR-2", lifecycle: "retired" },
     ]);
     expect(() => insertRow(upgraded.getDatabase(), "BR-3", 3, "proposed")).not.toThrow();
-    expect((upgraded.getDatabase().query("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(19);
+    expect((upgraded.getDatabase().query("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(20);
     upgraded.close();
   });
 
