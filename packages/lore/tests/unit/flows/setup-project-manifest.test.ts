@@ -45,6 +45,7 @@ const REPO_DIR = "/repo";
 
 const HOOK_ASSET_CONTENTS: Record<string, string> = {
   "pre-push": "#!/usr/bin/env bash\necho pre-push\n",
+  "reference-transaction": "#!/bin/sh\necho reference-transaction\n",
 };
 const HOOK_TARGET_PATHS = Object.keys(HOOK_ASSET_CONTENTS).map((name) => `hooks/${name}`);
 const TREE_YAML_CONTENT = "root: prd\n";
@@ -129,6 +130,7 @@ function makeExec(): ExecPort {
   let hooksPath: string | null = null;
   return {
     async run(argv: string[]) {
+      if (argv[0] === "git" && argv[1] === "--version") return { code: 0, stdout: "git version 2.45.0\n", stderr: "" };
       if (argv[0] === "git" && argv[1] === "config" && argv[2] === "--get") {
         return hooksPath === null ? { code: 1, stdout: "", stderr: "" } : { code: 0, stdout: `${hooksPath}\n`, stderr: "" };
       }

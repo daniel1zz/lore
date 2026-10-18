@@ -46,6 +46,7 @@ const REPO_DIR = "/repo";
 
 const HOOK_ASSET_CONTENTS: Record<string, string> = {
   "pre-push": "#!/usr/bin/env bash\necho pre-push\n",
+  "reference-transaction": "#!/bin/sh\necho reference-transaction\n",
 };
 const TREE_YAML_CONTENT = "root: prd\n";
 const CLAUDE_MD_CONTENT = "# CLAUDE.md\n\nStub.\n";
@@ -107,7 +108,8 @@ function withInjectedWriteFailure(base: InMemoryProjectFs, failOnPath: string): 
 
 function makeExec(): ExecPort {
   return {
-    async run() {
+    async run(argv: string[]) {
+      if (argv[1] === "--version") return { code: 0, stdout: "git version 2.45.0\n", stderr: "" };
       return { code: 0, stdout: "", stderr: "" };
     },
   };

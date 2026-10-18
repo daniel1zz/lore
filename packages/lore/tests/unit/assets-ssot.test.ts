@@ -433,6 +433,7 @@ const DECLARED_FILES = [
   "hooks/lib/session-trail.mjs",
   // project (4 .sh gates + pre-push + tree.yaml template + verification-profile config template, SPEC-058 D6)
   "project/pre-push",
+  "project/reference-transaction", // main-ref guard hook (BR-1246), installed by `lore setup --project`
   "project/lore.tree.yaml.template",
   "project/lore-config-template.yaml",
   // project scaffold repo-root .gitignore + CLAUDE.md stub templates (SPEC-060 D3/D4)
@@ -462,7 +463,7 @@ const DECLARED_FILES = [
 
 const SKILL_MD_FILES = DECLARED_FILES.filter((f) => f.endsWith("SKILL.md"));
 const EXECUTABLE_REQUIRED_FILES = DECLARED_FILES.filter(
-  (f) => f.endsWith(".sh") || f.endsWith("/pre-push"),
+  (f) => f.endsWith(".sh") || f.endsWith("/pre-push") || f.endsWith("/reference-transaction"),
 );
 const DECLARED_TOP_LEVEL_DIRS = ["skills", "agents", "hooks", "project", "governance", "context"];
 
