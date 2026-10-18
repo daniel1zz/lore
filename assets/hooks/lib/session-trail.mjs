@@ -505,6 +505,26 @@ function parseDiff(nameStatusZ, numstat, run, workingCopy) {
 }
 
 /**
+ * Paths the helper itself changed since `base`: what its own first-parent commits changed (a merge
+ * commit contributes only the paths it changed against BOTH parents, i.e. conflict resolutions), plus
+ * everything uncommitted or untracked. A path that only arrived by merging another branch (main) into
+ * the helper's branch is not the helper's. The stored base is unchanged (spec D6); this only narrows
+ * which paths of diff(base, working tree) are charged, and holds however many times main was merged.
+ * @param {string} workingCopy
+ * @param {string} base
+ * @param {Record<string,string>} env - carries the temporary index already `add -A`'d.
+ * @returns {Set<string>}
+ */
+function helperOwnPaths(workingCopy, base, env) {
+  const own = new Set();
+  const addZ = (out) => { for (const p of out.split('\0')) if (p !== '') own.add(p); };
+  addZ(runGit(workingCopy, ['log', '--first-parent', '--no-merges', '--no-renames', '--name-only', '--format=', '-z', `${base}..HEAD`]));
+  addZ(runGit(workingCopy, ['log', '--first-parent', '--merges', '--cc', '--no-renames', '--name-only', '--format=', '-z', `${base}..HEAD`]));
+  addZ(runGit(workingCopy, ['diff', '--cached', '--no-renames', '--name-only', '-z', 'HEAD'], env));
+  return own;
+}
+
+/**
  * Measure an isolated helper's changes in its own working copy: diff(base, working tree) through
  * a temporary index seeded from the helper's real index plus `add -A`, so committed, staged,
  * modified and untracked files all count. Never throws: failure is a measured:false value.
@@ -535,7 +555,9 @@ export function measureHelperChanges(cwd, run, storedBase) {
     runGit(workingCopy, ['add', '-A'], env);
     const nameStatus = runGit(workingCopy, ['diff', '--cached', '--no-renames', '--name-status', '-z', base], env);
     const numstat = runGit(workingCopy, ['diff', '--cached', '--no-renames', '--numstat', base], env);
-    return { isolated, changes: { measured: true, value: { base, files: parseDiff(nameStatus, numstat, run, workingCopy) } } };
+    const own = helperOwnPaths(workingCopy, base, env);
+    const files = parseDiff(nameStatus, numstat, run, workingCopy).filter((f) => own.has(f.path));
+    return { isolated, changes: { measured: true, value: { base, files } } };
   } catch (err) {
     const detail = String(err?.stderr || err?.message || err).trim().split('\n')[0];
     return {
