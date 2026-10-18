@@ -24,7 +24,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import { Database } from "bun:sqlite";
 import { citeSpecViaCli, loreRunnerFor } from "../helpers/cli-live-rule.js";
 import { lore, newCorpus, readLog, removeCorpora, runDecide, type Corpus, type Run } from "./fixtures/autonomy-calibration-helpers.js";
-import { loosenOverrideClasses } from "./fixtures/autonomy-override-helpers.js";
+import { loosenOverrideClassesViaCli } from "./fixtures/autonomy-override-helpers.js";
 
 afterAll(removeCorpora);
 
@@ -210,7 +210,7 @@ describe("AC-AU-7 ac exempt is decided", () => {
 describe("AC-AU-7 half 4 (control): a class loosened through a human-tty governance decision lets the override through", () => {
   it("(4) override-judgment prior raised by the human -> approve --override-judgment exits 0 with an AUTO machine decision record", async () => {
     const { corpus, spec } = newCorpusWithSpec("lore-au7-h4-");
-    await loosenOverrideClasses(corpus.dir, ["override-judgment"]);
+    await loosenOverrideClassesViaCli(corpus.dir, ["override-judgment"]);
     const judgmentId = insertJudgment(corpus, spec, "reject");
 
     const r = lore(corpus, ["approve", spec.slug, "--override-judgment", judgmentId]);

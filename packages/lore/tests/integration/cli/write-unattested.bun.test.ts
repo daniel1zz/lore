@@ -38,6 +38,7 @@ import { tmpdir, userInfo } from "node:os";
 import { join } from "node:path";
 import type { AuditEntry, VersionRecord } from "@lore/core";
 import { SQLiteStore } from "../../../src/store/sqlite-store.js";
+import { loosenOverrideClasses } from "../fixtures/autonomy-override-helpers.js";
 
 setDefaultTimeout(300_000);
 
@@ -157,8 +158,11 @@ describe("AC-RID-8: --harness-run naming an unregistered run id", () => {
   let dir = "";
   let task = "";
 
-  beforeAll(() => {
+  beforeAll(async () => {
     dir = corpusDir("unattested-unknown-");
+    // AC-AU-7: `done --override-attestation` is decided; this suite's subject is not the override, so the class is loosened
+  // the documented way (a human-tty governance decision on a throwaway corpus), never by a bypass in product code.
+    await loosenOverrideClasses(dir, ["override-attestation"]);
     task = newTask(dir, "Unattested claim target");
   });
 

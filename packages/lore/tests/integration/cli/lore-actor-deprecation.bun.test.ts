@@ -26,6 +26,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AuditEntry } from "@lore/core";
 import { SQLiteStore } from "../../../src/store/sqlite-store.js";
+import { loosenOverrideClasses } from "../fixtures/autonomy-override-helpers.js";
 import { sessionActorFor, sessionIdFor } from "../../helpers/session-actor";
 
 setDefaultTimeout(300_000);
@@ -84,7 +85,7 @@ async function auditSince(since: string): Promise<AuditEntry[]> {
   }
 }
 
-beforeAll(() => {
+beforeAll(async () => {
   dir = realpathSync(mkdtempSync(join(tmpdir(), "actor-deprecation-")));
   if (dir.startsWith(REPO_ROOT)) throw new Error("fixture must live outside the repo");
   scratch.push(dir);
@@ -97,6 +98,9 @@ beforeAll(() => {
   git(["commit", "-q", "-m", "init"]);
   mustLore(["init"], dir, SETUP);
   mustLore(["create", "prd", "--title", "Deprecation Root", "--content", "root", "--no-ai"], dir, SETUP);
+  // AC-AU-7: `done --override-attestation` is decided; this suite's subject is not the override, so the class is loosened
+  // the documented way (a human-tty governance decision on a throwaway corpus), never by a bypass in product code.
+  await loosenOverrideClasses(dir, ["override-attestation"]);
 });
 
 afterAll(() => {
