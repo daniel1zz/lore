@@ -23,6 +23,6 @@ if (process.argv.includes("--mcp-server")) {
   // reason: the CLI branch lives in adapters/cli/run-cli.ts so the in-process test runner executes the
   // SAME startup sequence (identity resolution, strict usage renderer, runMain exit mapping) as the binary
   // instead of a copy of it. The real process keeps the synchronous stdio console ON.
-  const { runCli } = await import("./adapters/cli/run-cli.js");
-  void runCli({ installSyncStdout: true });
+  const { runCliFromProcess } = await import("./adapters/cli/run-cli.js");
+  void runCliFromProcess({ installSyncStdout: true });
 }

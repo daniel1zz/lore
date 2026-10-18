@@ -18,7 +18,7 @@ import { spawnSync } from "node:child_process";
 import { defineCommand } from "citty";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatError } from "../utils.js";
-import { getInvocationIdentity } from "../invocation-identity.js";
+import { invocationInScope } from "../invocation-scope.js";
 import { SQLiteStore } from "../../../store/sqlite-store.js";
 import { DecisionService } from "../../../service/decision-service.js";
 import {
@@ -91,7 +91,7 @@ const prune = defineCommand({
         return;
       }
       store = new SQLiteStore(dbPath);
-      const decisions = new DecisionService({ store, executorRun: getInvocationIdentity()?.harnessRun ?? null });
+      const decisions = new DecisionService({ store, executorRun: invocationInScope()?.identity.harnessRun ?? null });
       const service = new StashPruneService({ git: gitRunnerFor(app.repoRoot), store, decisions });
       const result = args.apply === true ? await service.apply() : await dryRun(service);
       if (!result.ok) {

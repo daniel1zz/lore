@@ -88,4 +88,5 @@ export * from "./context-fragments.js";
 export * from "./baseline.js";
 export * from "./dedicated-extra-keys.js";
 export * from "./run-identity.js";
+export * from "./invocation.js";
 export * from "./context-variables.js";
