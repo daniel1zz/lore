@@ -205,6 +205,10 @@ export const COMMAND_LOADERS: Readonly<Record<string, () => Promise<CommandModul
     // stash — `stash prune [--apply]`: archive every stash under refs/lore/archive/stash, then lore drops it on an
     // auto decide(stash-drop) verdict (spec-autonomy-phase-1 AC-AU-4); see commands/stash.ts's header.
     stash: () => import("./commands/stash.js"),
+    // integrate — `integrate <branch>`: the one path by which a branch lands on main (merge in the session's detached
+    // integration worktree, post-merge floor, CAS update of main, max 3 attempts, exit 75 on three lost races;
+    // spec-main-advances-only-through-lore-integrate-per-session AC-INT-1); see commands/integrate.ts's header.
+    integrate: () => import("./commands/integrate.js"),
 };
 
 /**

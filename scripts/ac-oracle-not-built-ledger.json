@@ -7,12 +7,6 @@
   },
   {
     "spec": "spec-main-advances-only-through-lore-integrate-per-session",
-    "ac": "AC-INT-1",
-    "reason": "oracle test not written yet (lore-integrate.test.ts absent); owned by task-skill-implement-int-t1-lore-integrate-per-session",
-    "owner_plan": "plan-main-advances-only-through-lore-integrate"
-  },
-  {
-    "spec": "spec-main-advances-only-through-lore-integrate-per-session",
     "ac": "AC-INT-2",
     "reason": "oracle test not written yet (lore-integrate.test.ts absent); owned by task-skill-implement-int-t2-main-ref-hook-installed-by-lore",
     "owner_plan": "plan-main-advances-only-through-lore-integrate"

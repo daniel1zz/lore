@@ -160,6 +160,7 @@ import {
   isAutonomyThresholdBreak,
   renderAutonomyThresholdLine,
 } from "../status-autonomy-thresholds.js";
+import { collectIntegrateLosses, renderIntegrateLossLines } from "../status-integrate-losses.js";
 import { RuleStateService } from "../../../service/rule-state-service.js";
 import { SpawnGitPort, resolveGitRoot } from "../../../service/rule-state-git-port.js";
 import {
@@ -1975,6 +1976,14 @@ export default defineCommand({
         baselineStore.close();
       }
 
+      // AC-INT-1 (5) — branches that keep losing the race for main (`lore integrate` exit 75), listed until they land.
+      const integrateLosses = collectIntegrateLosses(dbPath);
+      if (!integrateLosses.ok) {
+        process.stderr.write(formatError(integrateLosses.error) + "\n");
+        process.exitCode = exitCode(integrateLosses.error);
+        return;
+      }
+
       if (args.json) {
         console.log(
           JSON.stringify(
@@ -1982,6 +1991,7 @@ export default defineCommand({
               ok: true,
               data: {
                 ...status,
+                integrate_losses: integrateLosses.value,
                 ai_defaults: aiDefaults,
                 open_stale_candidates: openStaleCandidates,
                 code_anchor_specs: codeAnchorSpecs,
@@ -2196,6 +2206,9 @@ export default defineCommand({
       if (!decisionLogStatus.value.verify.clean || decisionLogStatus.value.head !== null) {
         console.log(`\n${renderDecisionLogLine(decisionLogStatus.value)}`);
       }
+
+      const integrateLossLines = renderIntegrateLossLines(integrateLosses.value);
+      if (integrateLossLines.length > 0) console.log(`\n${integrateLossLines.join("\n")}`);
 
       // AC-AU-9 — the governed threshold record's integrity. A BREAK is named and fails the command (exit 1): every
       // class is escalating, which a status that exits 0 would hide. Other states print one informational line.
