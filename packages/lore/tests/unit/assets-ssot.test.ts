@@ -536,7 +536,8 @@ const CORPUS_WORKFLOW_BODY_SHA256: Record<(typeof CORPUS_WORKFLOW_FRAGMENT_RELS)
 // RE-BASELINE (task-traceability-pass-over-the-ten-fragments-classify-every): traceability pass against knowledge-traceability-table-always-loaded-lore-fragments; restores the CLAUDE.md state-narrative prohibition, the maintenance command labels, the report-issue trigger examples and the anchor-timing reason.
 // RE-BASELINE (task-drop-the-explanation-the-traceability-pass-over-restored): drops the explanation clauses the traceability pass put back (see knowledge-traceability-table-always-loaded-lore-fragments v3); every instruction, condition and qualifier is kept.
   // RE-BASELINE (task-skill-implement-close-fragment-scopes-defect-reports-br, BR-1153): the report-issue bullet gains the scope rule (lore defects only, one root cause per report, repo upkeep to plan/task).
-  "context/corpus-workflow-4-close.md": "2004140cbb3dc5faa5394b1cf3bfaa69e14434319907c8e60adbe050bc4a11da",
+  // RE-BASELINE (orchestrator-owned doc change, spec-the-approval-judge-rejects-patch-shaped-designs-design D3): adds the lesson-changes-a-mechanism bullet after the invalidate bullet.
+  "context/corpus-workflow-4-close.md": "91f727466e49304d1632eb6b24e4ef7b52715c493ba4d1abf18a42e6b1806219",
 };
 
 /** Concatenated bodies of the corpus-workflow fragments, in file-name (= rendering) order. */

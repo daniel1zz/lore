@@ -45,7 +45,7 @@ export const LORE_BINARY_VERSION = "0.1.0" as const;
 
 export const EMBEDDED_ASSETS_MANIFEST: EmbeddedAssetsManifest = {
   binary_version: LORE_BINARY_VERSION,
-  tree_digest: "81ad1d2bfd647dc09e6b0c4c4379d9b3834b0d12aac18c618de6fb066cef6a7a",
+  tree_digest: "9c568deb6e4c7dbfc37c33b65e484a95cd466d8e0e6d3d264f13e92513621749",
   entries: [
   { path: "agents/lore-implementer.md", kind: "agent", ownership: "managed", sha256: "8b063e990dea63597d6728495ec0925bb15b4f2a3d1933ca11bd53abe9d70da7" },
   { path: "agents/lore-reader.md", kind: "agent", ownership: "managed", sha256: "336b2da60cfe9afae51f17ac8f6f9f33e7c67b2f3639874795e22a0e257e8696" },
@@ -55,7 +55,7 @@ export const EMBEDDED_ASSETS_MANIFEST: EmbeddedAssetsManifest = {
   { path: "context/corpus-workflow-1-feed.md", kind: "context", ownership: "managed", sha256: "9ffda72eb264f2ec358a1631ff6716f34a0d5279a47c48930ae677bccc0194a4" },
   { path: "context/corpus-workflow-2-produce.md", kind: "context", ownership: "managed", sha256: "c97c3731947951c869ca4541f21548ffc8fecf936129bbe14c2f19d2b07f3116" },
   { path: "context/corpus-workflow-3-execute.md", kind: "context", ownership: "managed", sha256: "78c1039bcaa7082ec38f611d7eebc48de399994123740bfeed6946b40b72fb70" },
-  { path: "context/corpus-workflow-4-close.md", kind: "context", ownership: "managed", sha256: "f1cd5c71464c0ce1cc914c8c3bebf7b5da746923a521b8ba2c56d27cc9b019dc" },
+  { path: "context/corpus-workflow-4-close.md", kind: "context", ownership: "managed", sha256: "ff7fb4844547648f1da95b9a2451e3ebcbbaec0037cdb514b02ace35ab49760f" },
   { path: "context/dispatch-bundle.md", kind: "context", ownership: "managed", sha256: "fad2df8beb68f36fd591290ec8d91bbec836eeaf149708d8b6ec263b869cac39" },
   { path: "context/evidence-attestation.md", kind: "context", ownership: "managed", sha256: "1202d4007575d28a3403245b6d797771b3f0a9bc0b66d75830b028ab22d6c79d" },
   { path: "context/worktree-dispatch.md", kind: "context", ownership: "managed", sha256: "62af7c1649e1524f64198524fd1cc048fce715b0c61f5d7ecfe43cf83835d438" },
