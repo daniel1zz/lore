@@ -23,6 +23,10 @@
 
 import type { CommandDef } from "citty";
 import type { Invocation } from "@lore/core";
+import type { InvocationResolvers } from "@lore/core/node";
+import { resolveTargetDir } from "./setup-args.js";
+import { detectWorktreeDerivedActor } from "./utils.js";
+import { resolveUserConfigDir } from "../../service/context-fragments/user-config-dir.js";
 import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 
@@ -59,6 +63,22 @@ function findProjectRoot(cwd: string): string | null {
 }
 
 /**
+ * The lore-owned path and identity POLICY an Invocation is built with (BR-813 claude dir, BR-1012 user config dir,
+ * working-copy actor, project root). Pure functions of already-read values: the entry hands them to core's
+ * `resolveInvocation`, and the in-process test runner hands the SAME object to its own builder, so a test run and
+ * the binary cannot disagree on where a path comes from.
+ */
+export const invocationResolvers: InvocationResolvers = {
+  claudeDir: ({ argv, env, home }) => {
+    const claudeDirFlag = findClaudeDirFlag(argv);
+    return resolveTargetDir({ ...(claudeDirFlag === undefined ? {} : { claudeDirFlag }), env, homeDir: home });
+  },
+  userConfigDir: (env, home) => resolveUserConfigDir(env, home),
+  worktreeActor: (cwd) => detectWorktreeDerivedActor(cwd),
+  projectRoot: findProjectRoot,
+};
+
+/**
  * Read the running process ONCE into an {@link Invocation}: argv (minus the harness-owned `--harness-run`),
  * cwd, env, home, claude/user-config dirs, project root, temp dir, host, exec path, run identity, stdio.
  *
@@ -67,18 +87,7 @@ function findProjectRoot(cwd: string): string | null {
  */
 export async function resolveEntryInvocation(rawArgv: readonly string[]): Promise<Invocation> {
   const { resolveInvocation } = await import("@lore/core/node");
-  const { resolveTargetDir } = await import("./setup-args.js");
-  const { detectWorktreeDerivedActor } = await import("./utils.js");
-  const { resolveUserConfigDir } = await import("../../service/context-fragments/user-config-dir.js");
-  return resolveInvocation(rawArgv, {
-    claudeDir: ({ argv, env, home }) => {
-      const claudeDirFlag = findClaudeDirFlag(argv);
-      return resolveTargetDir({ ...(claudeDirFlag === undefined ? {} : { claudeDirFlag }), env, homeDir: home });
-    },
-    userConfigDir: (env, home) => resolveUserConfigDir(env, home),
-    worktreeActor: (cwd) => detectWorktreeDerivedActor(cwd),
-    projectRoot: findProjectRoot,
-  });
+  return resolveInvocation(rawArgv, invocationResolvers);
 }
 
 /**
