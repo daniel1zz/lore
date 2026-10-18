@@ -139,7 +139,7 @@ describe("AC-AU-6 half 2: no self-matching waits", () => {
     const text = readFileSync(join(REPO_ROOT, "assets/agents/lore-implementer.md"), "utf8");
     expect(text).toContain("pid=$!");
     expect(text).toContain("kill -0");
-    expect(text).toMatch(/never poll with `pgrep -f`/);
+    expect(text).toMatch(/never poll with `pgrep -f`/i);
   });
 });
 

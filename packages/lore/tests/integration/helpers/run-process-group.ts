@@ -5,7 +5,8 @@
  * timed-out `spawnSync` lived 5+ hours because `spawnSync`'s timeout kills only the direct child).
  * Public surface: {@link runProcessGroup}, {@link ProcessGroupTimeoutError}, {@link killLiveProcessGroups}.
  * Invariants: every child is a process-group leader (`detached`); the group is SIGKILLed on timeout,
- * and on this process's `exit` for any group still alive.
+ * and on this process's `exit`, `SIGTERM` and `SIGINT` for any group still alive (a signal-killed vitest
+ * worker never emits `exit`: that gap left a 25 h orphan `npm pack`, AC-AU-6 half 3).
  * Side-effect class: IO (spawns and kills processes).
  */
 
@@ -50,6 +51,18 @@ export function killLiveProcessGroups(): void {
 }
 
 process.on("exit", killLiveProcessGroups);
+
+for (const signal of ["SIGTERM", "SIGINT"] as const) {
+  const reapThenDie = (): void => {
+    killLiveProcessGroups();
+    process.off(signal, reapThenDie);
+    // reason: installing a listener removes Node's default "die on signal"; when ours is the only listener
+    // the process must still die of the signal it was sent, so re-raise. Another listener (the test runner's
+    // own shutdown) owns the exit then, and re-raising would run it twice.
+    if (process.listenerCount(signal) === 0) process.kill(process.pid, signal);
+  };
+  process.on(signal, reapThenDie);
+}
 
 /**
  * Runs `bin args` in its own process group and resolves with its collected output.

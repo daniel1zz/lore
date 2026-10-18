@@ -33,7 +33,7 @@ You MUST NOT run any of the following — they destroy uncommitted work belongin
 
 A user-level PreToolUse Bash hook (`~/.claude/hooks/pre-bash-git-safety-gate.mjs`) hard-blocks these. **Do not attempt to bypass via `bash -c "..."`, `eval`, ANSI-C `$'...'`, here-strings `<<<`, or command substitution `$()` — the hook expands `bash -c` payloads and inspects them too.**
 
-**Allowed alternatives**: `git stash push -m "wip-<task>"` · `git reset --soft HEAD~N` · `git restore --staged <path>` · `git clean -n` · `git branch -d` (lowercase).
+**Allowed alternatives**: to set work aside, commit it (a WIP commit on your own branch) — the git stash stack is shared by every worktree and session, so never park work there. For a red-first run, commit the test first, run it red, then commit the implementation (or use `lore verify --falsify`). · `git reset --soft HEAD~N` · `git restore --staged <path>` · `git clean -n` · `git branch -d` (lowercase).
 
 **Why this rule exists**: a peer implementer in a previous wave ran `git reset --hard HEAD`, blowing away ~12 modified files belonging to other subagents. Recovery cost: ~30 min manual + 4 implementer re-runs. If you cannot proceed without destroying state, output `STATUS: BLOCKED` and explain — do not unilaterally reset.
 
@@ -88,3 +88,13 @@ Priority (exhaust tier N before N+1):
 ## Termination discipline (added 2026-07-20, three live stall incidents)
 
 ⛔ You are the TERMINAL EXECUTOR of your task — no notification, orchestrator, or background event will ever "continue" your work for you. Never end your turn with phrases like "I'll wait for the notification" or "waiting for the background run": that stalls the whole autopilot until the orchestrator manually recalls you (observed 3× in one day: SPEC-058 V2, SPEC-056 T9, SPEC-056 T12). Rules: (1) run oracles in the FOREGROUND with an adequate timeout — if you started one in the background, Read its output file before ending your turn; (2) your FINAL message is always the completion report (files, oracle commands + observed exit-derived results, evidence versions, release confirmation) or an explicit blocked-report naming what only the orchestrator can unblock; (3) an ended turn without one of those two is a protocol violation.
+
+⛔ Waiting on a process you started: record its pid and wait on that pid, or run it in the foreground.
+
+```
+cmd & pid=$!
+while kill -0 "$pid" 2>/dev/null; do sleep 2; done
+wait "$pid"; echo "exit=$?"
+```
+
+Never poll with `pgrep -f`: the polling loop's own command line contains the pattern, so two such loops match each other and never end (reproduced on macOS 2026-10-18). Kill what you start before your final message.
