@@ -2,6 +2,9 @@
 // @reads packages/core/src/acceptance.ts
 // @reads packages/lore/src/service/ac-service.ts
 // @reads packages/lore/src/adapters/cli/commands/ac.ts
+// @reads packages/lore/src/adapters/cli/commands/status.ts
+// @reads packages/lore/src/service/task-workflow-service.ts
+// @reads scripts/check-unclaimed-oracle.ts
 /**
  * AC-EI-2 — a missing oracle is not measured, whatever it is and whatever ran before
  * (spec-evidence-identity-an-attested-row-counts-only-for-the; AC-TG-6's text never had TG-22's narrowing; AS-17).
