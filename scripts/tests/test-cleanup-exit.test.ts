@@ -1,3 +1,4 @@
+// @reads scripts/run-chain.ts
 // @spawns scripts/check-prose-pins.ts
 // @reads package.json
 // @reads scripts/prose-pin-ledger.json
@@ -45,6 +46,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
+import { DEFAULT_STEPS } from "../run-chain";
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const read = (rel: string): string => readFileSync(join(REPO_ROOT, rel), "utf8");
@@ -193,8 +195,9 @@ describe("AC-TG-9 — the guards pass on the real tree and run in the test chain
 
   it("the `test` script runs check:prose-pins and check:ac-oracle-ownership, and both scripts exist", () => {
     const pkg = z.object({ scripts: z.record(z.string(), z.string()) }).parse(JSON.parse(read("package.json")));
-    expect(pkg.scripts.test).toContain("bun run check:prose-pins");
-    expect(pkg.scripts.test).toContain("bun run check:ac-oracle-ownership");
+    expect(pkg.scripts.test).toContain("scripts/run-chain.ts");
+    expect(DEFAULT_STEPS).toContain("bun run check:prose-pins");
+    expect(DEFAULT_STEPS).toContain("bun run check:ac-oracle-ownership");
     expect(pkg.scripts["check:prose-pins"]).toBe("bun scripts/check-prose-pins.ts");
     expect(pkg.scripts["check:ac-oracle-ownership"]).toBe("bun scripts/check-ac-oracle-ownership.ts");
   });

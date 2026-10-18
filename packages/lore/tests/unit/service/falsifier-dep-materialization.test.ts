@@ -971,8 +971,11 @@ describe("both runners", () => {
         bunTestRun.status,
         `expected a nonzero exit with materialization skipped; output:\n${bunOutput}`,
       ).not.toBe(0);
-      expect(bunOutput).toMatch(/cannot find (?:package|module) ['"]zod['"]/i);
-      expect(bunOutput).not.toMatch(/cannot find (?:package|module) ['"]@lore\//i);
+      // reason: the failure message carries bun's whole output (issue #191: a nonzero exit whose text did not
+      // match was once seen under load, and the stored tail showed only the AssertionError, so the alternative
+      // wording was never captured). A recurrence now records exactly what bun printed.
+      expect(/cannot find (?:package|module) ['"]zod['"]/i.test(bunOutput), `bun exited ${String(bunTestRun.status)} without the zod resolution error; output:\n${bunOutput}`).toBe(true);
+      expect(/cannot find (?:package|module) ['"]@lore\//i.test(bunOutput), `@lore/* must resolve through the workspace alias; output:\n${bunOutput}`).toBe(false);
     },
     30000,
   );

@@ -226,16 +226,30 @@ let capB: Capture;
 let capC: Capture;
 let capD: Capture;
 
-beforeAll(() => {
+// reason (TG-15): every step below blocks synchronously on `bun run` spawns (13 s alone, 41-53 s measured inside an
+// 8-worker run). One synchronous hook past 60 s starves the worker's RPC and ends the whole run with
+// `Timeout calling "onTaskUpdate"`; awaiting a loop turn between the ten steps bounds each blocked stretch to one step.
+const loopTurn = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
+
+beforeAll(async () => {
   A = buildCorpus("a", { kind: "none" });
+  await loopTurn();
   A2 = buildCorpus("a2", { kind: "none" });
+  await loopTurn();
   B = buildCorpus("b-off", { kind: "baseline", gate: "off" });
+  await loopTurn();
   C = buildCorpus("c-report", { kind: "baseline", gate: "absent" });
+  await loopTurn();
   D = buildCorpus("d-enforce", { kind: "baseline", gate: "enforce" });
+  await loopTurn();
   capA = capture(A);
+  await loopTurn();
   capA2 = capture(A2);
+  await loopTurn();
   capB = capture(B);
+  await loopTurn();
   capC = capture(C);
+  await loopTurn();
   capD = capture(D);
 }, SETUP_TIMEOUT_MS);
 

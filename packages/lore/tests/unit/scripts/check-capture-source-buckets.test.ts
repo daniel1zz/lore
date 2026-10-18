@@ -1,3 +1,4 @@
+// @reads scripts/run-chain.ts -- the wiring case reads the chain steps
 // @spawns scripts/check-capture-source-buckets.ts -- every case runs the real scan as a child process over a fixture tree or the real tree
 // @reads scripts/check-capture-source-buckets.ts -- the pin test imports scanTree in-process
 // @reads packages/** -- the real-tree cases walk every package src directory
@@ -50,6 +51,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
+import { DEFAULT_STEPS } from "../../../../../scripts/run-chain";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 /** `packages/lore/tests/unit/scripts` -> repo root is five levels up. */
@@ -530,7 +532,8 @@ describe("AC-CT-10 wiring", () => {
   it("AC-CT-10: `bun run test` runs the scan, through a named check script that runs the AC command", () => {
     const pkg = JSON.parse(readFileSync(join(REPO_ROOT, "package.json"), "utf8")) as { scripts: Record<string, string> };
     expect(pkg.scripts["check:capture-source-buckets"]).toBe("bun scripts/check-capture-source-buckets.ts");
-    expect(pkg.scripts["test"]).toContain("bun run check:capture-source-buckets");
+    expect(pkg.scripts["test"]).toContain("scripts/run-chain.ts");
+    expect(DEFAULT_STEPS).toContain("bun run check:capture-source-buckets");
   });
 
   it("AC-CT-10: the not-built ledger no longer carries AC-CT-10 (the oracle is built)", () => {

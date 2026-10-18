@@ -1,3 +1,4 @@
+// @reads scripts/run-chain.ts
 // @reads .claude/**
 // @reads .gitattributes
 // @reads .gitignore
@@ -45,6 +46,7 @@
  * @spec_ref spec-test-governance-guards-that-refuse-bad-tests-declared AC-TG-4
  */
 import { describe, it, expect, afterEach } from "vitest";
+import { DEFAULT_STEPS } from "../run-chain";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -242,7 +244,11 @@ describe("real tree and wiring", () => {
   it("HAPPY: package.json test chain runs it next to check:ac-state-renderers", () => {
     const pkg = JSON.parse(readFileSync(join(repo, "package.json"), "utf8")) as { scripts: Record<string, string> };
     expect(pkg.scripts["check:prose-pins"]).toBe("bun scripts/check-prose-pins.ts");
-    expect(pkg.scripts.test).toContain("check:ac-state-renderers && bun run check:prose-pins");
+    // the `test` script runs run-chain.ts (every step, one exit table); the order lives in DEFAULT_STEPS
+    expect(pkg.scripts.test).toContain("scripts/run-chain.ts");
+    const a = DEFAULT_STEPS.indexOf("bun run check:ac-state-renderers");
+    expect(a).toBeGreaterThanOrEqual(0);
+    expect(DEFAULT_STEPS.indexOf("bun run check:prose-pins")).toBe(a + 1);
   });
 
   it("HAPPY: hooks/pre-push and assets/project/pre-push both run it, byte-identical", () => {
