@@ -45,9 +45,9 @@ export const LORE_BINARY_VERSION = "0.1.0" as const;
 
 export const EMBEDDED_ASSETS_MANIFEST: EmbeddedAssetsManifest = {
   binary_version: LORE_BINARY_VERSION,
-  tree_digest: "e1a97ab4f6246c1be45bdd63da7cb47a25775e3d93522ed2cd9b1117e366c2d1",
+  tree_digest: "9f7a5779ddc4776ce1eb21cd4e347ac724998131514d2c7b92680bf9c9207bc9",
   entries: [
-  { path: "agents/lore-implementer.md", kind: "agent", ownership: "managed", sha256: "f9a171e11ccbe81be5a3fcd93b7192a954c97e7a12129430a50b8dde846727e2" },
+  { path: "agents/lore-implementer.md", kind: "agent", ownership: "managed", sha256: "70cbe7c13fec7d473b370ef5618a1ae31bddaba3d3ac50c983c5cd4964ee7606" },
   { path: "agents/lore-reader.md", kind: "agent", ownership: "managed", sha256: "336b2da60cfe9afae51f17ac8f6f9f33e7c67b2f3639874795e22a0e257e8696" },
   { path: "context/ac-design.md", kind: "context", ownership: "managed", sha256: "cb99bd0d8cb444da4eb362d9954213ee1294145db84628acbf12642393359d67" },
   { path: "context/agent-rules.md", kind: "context", ownership: "managed", sha256: "976b665a0f1596f718d33f34533c01dae49f702c0aca9bda45b573b7368660e7" },

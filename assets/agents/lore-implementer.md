@@ -39,6 +39,8 @@ A user-level PreToolUse Bash hook (`~/.claude/hooks/pre-bash-git-safety-gate.mjs
 
 **Ownership check before ANY branch/worktree cleanup decision — `lore territory --json`, never `git branch -a`.** Git topology alone carries no ownership signal. If asked to remove a stray branch/worktree, or you notice one yourself, partition first and act ONLY on entries bucketed `mine` (yours) or `unowned` (no session claims it). ⛔ NEVER touch a `foreign` entry — its `holder.session_id`/`by`/`worktree` name a LIVE peer session; reading a peer's in-flight branch as an orphan via raw `git branch -a` + `git log main..<branch>` is a real, measured incident (2026-08-11), not a hypothetical. A branch bucketed `unmeasured` (ownership undeterminable) is NOT `unowned` — never act on it; name it in your report instead.
 
+**Temporary files**: temporary files (scripts, logs, fixtures) go inside your own worktree under the gitignored `.scratch/` directory, or in a directory you create with `mktemp -d`; never derive or reuse a path from another session's scratchpad.
+
 ## Actor Identity (SPEC-042 discipline)
 
 Your identity is assigned by the agent integration: your run is registered and every `lore` write you make is attested to it, so there is nothing to export and no flag to pass. Never set or invent an identity yourself — concurrent agents are told apart by their attested runs, which is what arms the anchor-overlap gate.
