@@ -17,6 +17,8 @@
  * (unknown branch, missing floor key, missing session); 75 = three lost races (EX_TEMPFAIL, safe to re-run; the
  * integrations that moved main are named).
  *
+ * After landing (and on an already-integrated no-op) the shared checkout's detached view is moved to main with a plain
+ * `git checkout --detach main`; the outcome carries `shared_view` = refreshed | kept_dirty <paths> | not_measured <reason>.
  * Output: progress and the result on stdout/stderr as text; `--json` prints `{ ok: true, data: <outcome> }` on stdout.
  * Side-effect class: IO (git subprocesses, the floor command, the corpus directory's loss ledger).
  */
@@ -34,6 +36,7 @@ import {
   type FloorRunner,
   type IntegrateGit,
   type IntegrateOutcome,
+  type SharedViewRefresh,
 } from "../../../service/integrate-service.js";
 
 type AmbientEnv = Readonly<Record<string, string | undefined>>;
@@ -63,12 +66,24 @@ function mainCheckoutRoot(runGit: IntegrateGit, cwd: string): string | undefined
   return dirname(commonDir);
 }
 
+/** One line naming what happened to the shared checkout's view of main. */
+function renderSharedView(view: SharedViewRefresh): string {
+  switch (view.state) {
+    case "refreshed":
+      return "integrate: shared checkout refreshed to main";
+    case "kept_dirty":
+      return `integrate: shared checkout kept-dirty (not refreshed; an uncommitted edit would be overwritten): ${view.paths.join(" ")}`;
+    case "not_measured":
+      return `integrate: shared checkout not-measured: ${view.reason}`;
+  }
+}
+
 function renderOutcome(outcome: IntegrateOutcome): { out?: string; err?: string } {
   switch (outcome.kind) {
     case "landed":
-      return { out: `integrate: landed ${outcome.branch} on main as ${outcome.sha.slice(0, 12)} after ${outcome.attempts} attempt(s)` };
+      return { out: `integrate: landed ${outcome.branch} on main as ${outcome.sha.slice(0, 12)} after ${outcome.attempts} attempt(s)\n${renderSharedView(outcome.shared_view)}` };
     case "already_integrated":
-      return { out: `integrate: ${outcome.branch} is already integrated into main (${outcome.main.slice(0, 12)}); nothing to do` };
+      return { out: `integrate: ${outcome.branch} is already integrated into main (${outcome.main.slice(0, 12)}); nothing to do\n${renderSharedView(outcome.shared_view)}` };
     case "floor_failed":
       return {
         err:
