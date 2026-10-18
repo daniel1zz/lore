@@ -411,7 +411,7 @@ describe("record-edit gate on CorpusService.set (AC-DR-2)", () => {
         project: { name: "test-project", author: "alice" },
         workflow: { gates: { "record-edit": { enabled: false } } },
       });
-      const enforcer = new GateEnforcer(config, store.appendAuditEntry.bind(store));
+      const enforcer = new GateEnforcer(config, store.appendAuditEntry.bind(store), undefined, () => "test-actor");
       const service = new CorpusService(store, new RecordLockService(store, enforcer));
       const spec = await approvedSpec(store, service);
 
@@ -431,7 +431,7 @@ describe("record-edit gate on CorpusService.set (AC-DR-2)", () => {
 
     it("a passing evaluation (an unlocked doc rewritten) leaves a gate_passed trace naming the doc, and a metadata-only save leaves none", async () => {
       const store = new InMemoryStore();
-      const enforcer = new GateEnforcer(undefined, store.appendAuditEntry.bind(store));
+      const enforcer = new GateEnforcer(undefined, store.appendAuditEntry.bind(store), undefined, () => "test-actor");
       const service = new CorpusService(store, new RecordLockService(store, enforcer));
       const spec = await mustCreate(service, { type: "spec", title: "Draft", content: "v1" });
 
