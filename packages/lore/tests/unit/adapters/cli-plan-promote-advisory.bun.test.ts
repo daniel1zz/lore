@@ -124,6 +124,13 @@ describe("lore approve <plan-under-prd> — reachability advisory (AC-VRW-5a)", 
     const prdSlug = await createPrd(tmpDir, "Advisory PRD");
     const planSlug = await createPlan(tmpDir, prdSlug, "PRD-Parented Plan");
 
+    // Plans are judged by default (BR-281 / BR-1237); this suite tests the plan-promote reachability
+    // advisory, not the review-judgment checkpoint, so disable M2 as the 5b case below does.
+    saveConfig(tmpDir, {
+      project: { name: "cli-plan-promote-advisory-test", author: "tester" },
+      workflow: { review: { judgment_required_types: [] } },
+    } as never);
+
     const result = await runLore(["approve", planSlug], tmpDir);
 
     expect(result.exitCode).toBe(0);

@@ -91,7 +91,7 @@
  */
 
 import { afterAll, describe, expect, it } from "vitest";
-import { mkdtempSync, rmSync } from "node:fs";
+import { appendFileSync, mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { z } from "zod";
@@ -204,6 +204,9 @@ function makeTempCorpus(prefix: string): string {
   const dir = mkdtempSync(join(tmpdir(), prefix));
   temporaryDirs.push(dir);
   runLoreOk(["init"], dir);
+  // reason: plans are judged by default (BR-281 / BR-1237); this suite approves a plan only to put it in
+  // a lifecycle state, never to exercise review-judgment.
+  appendFileSync(join(dir, ".lore", "config.yaml"), "workflow:\n  review:\n    judgment_required_types: []\n", "utf8");
   return dir;
 }
 

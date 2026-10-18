@@ -167,8 +167,8 @@ describe("judgeDoc — HAPPY (single-attempt success)", () => {
       provider: "my-custom-provider",
       model: "my-custom-provider",
       // reason: judgeDoc stamps the currently-active REVIEW_PROMPT_VERSION (v1 → v2 SPEC-053, v2 → v3 #126),
-      // so a real judge run now records "v3".
-      prompt_version: "v3",
+      // so a real judge run now records "v4" (v3 → v4 BR-1237).
+      prompt_version: "v4",
     });
   });
 

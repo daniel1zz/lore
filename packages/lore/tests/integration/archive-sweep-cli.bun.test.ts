@@ -111,7 +111,8 @@ function disablePlanCloseGate(dir: string): void {
   const configPath = join(dir, ".lore", "config.yaml");
   appendFileSync(
     configPath,
-    ['workflow:', '  gates:', '    "plan-close":', "      enabled: false", ""].join("\n"),
+    // reason: continues the `workflow:` block `beforeEach` seeds (two raw `workflow:` keys are invalid YAML).
+    ['  gates:', '    "plan-close":', "      enabled: false", ""].join("\n"),
     "utf8",
   );
 }
@@ -123,6 +124,10 @@ beforeEach(() => {
   makeCleanTreeRepo(tmpDir);
   const initResult = runLore(["init"], tmpDir);
   expect(initResult.exitCode).toBe(0);
+  // reason: plans are judged by default (BR-281 / BR-1237); these fixtures approve a plan only to reach the
+  // archive behaviour under test, never review-judgment. Seeds the one top-level `workflow:` key that
+  // `disablePlanCloseGate` below continues.
+  appendFileSync(join(tmpDir, ".lore", "config.yaml"), "workflow:\n  review:\n    judgment_required_types: []\n", "utf8");
 });
 
 afterEach(() => {

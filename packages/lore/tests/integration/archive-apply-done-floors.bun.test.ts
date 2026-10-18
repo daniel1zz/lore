@@ -74,11 +74,23 @@ function parseSlug(stdout: string): string {
   return slug;
 }
 
-/** Appends the plan-close override (never overwrites — `lore init` seeds a required `project:` block). */
+/**
+ * Appends the plan-close override (never overwrites — `lore init` seeds a required `project:` block).
+ * Also empties `judgment_required_types`: plans are judged by default (BR-281 / BR-1237) and this suite's
+ * fixture approves a plan only to reach the archive floors it tests, not to exercise review-judgment.
+ */
 function disablePlanCloseGate(dir: string): void {
   appendFileSync(
     join(dir, ".lore", "config.yaml"),
-    ["workflow:", "  gates:", '    "plan-close":', "      enabled: false", ""].join("\n"),
+    [
+      "workflow:",
+      "  gates:",
+      '    "plan-close":',
+      "      enabled: false",
+      "  review:",
+      "    judgment_required_types: []",
+      "",
+    ].join("\n"),
     "utf8",
   );
 }

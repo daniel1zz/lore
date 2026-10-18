@@ -513,7 +513,8 @@ const CORPUS_WORKFLOW_BODY_SHA256: Record<(typeof CORPUS_WORKFLOW_FRAGMENT_RELS)
 // the reword dropped and cut three clauses (feed latest_handoffs, feed no-session-marker floor, produce legacy config clause); the second assessment (knowledge-assessment-always-loaded-lore-fragments-state-the-2) named what was still missing.
 // RE-BASELINE (task-restore-the-remaining-clauses-the-assessment-named-and): restores the legacy `workflow.gates."task-claim"` config honored for phase-claim (one deprecation warning per process).
 // RE-BASELINE (task-traceability-pass-over-the-ten-fragments-classify-every): traceability pass against knowledge-traceability-table-always-loaded-lore-fragments; restores the phase-claim definition.
-  "context/corpus-workflow-2-produce.md": "7b1a42517ccb9d1d9363240157d9b880a1e7b8133c7760bbd07988699826a720",
+// RE-BASELINE (task-skill-implement-dn-1-review-prompt-v4-with-design, spec-the-approval-judge-rejects-patch-shaped-designs-design D3): adds the one "design the end state" sentence.
+  "context/corpus-workflow-2-produce.md": "1c8d39f6e2d20ad3523ac34dd93113f32213513e971199e600994eabaf81dfd9",
 // RE-BASELINE (task-reword-the-ten-always-loaded-fragments-to-the-rule-only, spec-always-loaded-lore-fragments-state-the-rule-only-reasoning):
 // that commit shortened the wording of the ten always-loaded fragments (verbatim before-text in
 // knowledge-always-loaded-lore-fragments-verbatim-source-before). It also lost rules; see the assessments

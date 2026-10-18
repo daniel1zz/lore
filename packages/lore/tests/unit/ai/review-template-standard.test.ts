@@ -84,8 +84,9 @@ describe("AC-BLC-5 — judge sees architecture standard four parts", () => {
     });
     const out = v2(leaf, CHECKS, BUDGETS, NOW).prompt;
     expect(out).toContain("BR-1");
+    // the rendered label is `<key>: <value>`; the bare word "migration" also appears in the v4 design_necessity rule
     for (const key of ["current_reality", "target_rule", "current_exceptions", "migration"]) {
-      expect(out).not.toContain(key);
+      expect(out).not.toContain(`${key}:`);
     }
   });
 
@@ -113,8 +114,8 @@ describe("AC-BLC-5 — prompt version freeze", () => {
   const frozenV2 = REVIEW_TEMPLATES["v2"]!;
   const v3 = REVIEW_TEMPLATES["v3"]!;
 
-  it("STATE: the active version is v3", () => {
-    expect(REVIEW_PROMPT_VERSION).toBe("v3");
+  it("STATE: the active version is v4", () => {
+    expect(REVIEW_PROMPT_VERSION).toBe("v4");
   });
 
   it("REGRESSION: v2 output for a standard node is byte-identical to its pre-fix render (no four parts)", () => {

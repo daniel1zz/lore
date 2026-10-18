@@ -174,6 +174,9 @@ async function makeCorpus(): Promise<Corpus & { prdSlug: string; report7: string
       "      enabled: false",
       "    task-claim:",
       "      enabled: false",
+      // plans are judged by default (BR-281 / BR-1237); this fixture approves a plan only to archive it
+      "  review:",
+      "    judgment_required_types: []",
       "feedback:",
       "  upstream:",
       `    repo: ${FAKE_REPO}`,

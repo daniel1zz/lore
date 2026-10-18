@@ -678,7 +678,7 @@ const WorkflowConfigSchema = z
      *   gate-checkpoint machinery.
      * @invariant Absence of the whole `workflow` section, or of `review` within it,
      *   or of an individual field, ALL fall back to that field's own schema default
-     *   (`true` / `["spec","adr"]`) — same "absence = default" shape as `staleness`/
+     *   (`true` / `["spec","adr","plan"]`) — same "absence = default" shape as `staleness`/
      *   `drift`/`attestation` above (SPEC-103's OWN stated default row, AC-TIER-7's
      *   kill-switch test proves the EXPLICIT-override path, not this default path).
      */
@@ -689,9 +689,9 @@ const WorkflowConfigSchema = z
         /**
          * `DocType` values M2 gates on a `reject` / missing judgment / provenance
          * collision. An `escalate` gates every type regardless (see the second
-         * `@invariant` above); `[]` disables M2 entirely. Default: ["spec","adr"].
+         * `@invariant` above); `[]` disables M2 entirely. Default: ["spec","adr","plan"].
          */
-        judgment_required_types: z.array(z.string()).default(["spec", "adr"]),
+        judgment_required_types: z.array(z.string()).default(["spec", "adr", "plan"]),
       })
       .strict()
       .default({}),
@@ -1585,14 +1585,14 @@ export function resolveLedgerAutoApprove(config: LoreConfig | undefined): boolea
  * §Mechanisms M2). Mirrors {@link resolveLedgerAutoApprove}'s fully-optional-chained
  * shape (see that function's JSDoc for why the shallower {@link resolveClaimTtlMinutes}
  * shape is unsafe for a NESTED optional-with-default sub-section) — the schema default is
- * `["spec","adr"]`, and `[]` is the documented kill-switch (AC-TIER-7).
+ * `["spec","adr","plan"]` (BR-281), and `[]` is the documented kill-switch (AC-TIER-7).
  *
  * @param config - Parsed LoreConfig, or undefined when no config file was loaded
  * @returns Effective `judgment_required_types` array (never mutated in place by callers)
  * @example
- *   resolveJudgmentRequiredTypes(undefined) // => ["spec", "adr"]
+ *   resolveJudgmentRequiredTypes(undefined) // => ["spec", "adr", "plan"]
  *   resolveJudgmentRequiredTypes({ ..., workflow: { review: { judgment_required_types: [] } } }) // => []
- *   resolveJudgmentRequiredTypes({ ..., workflow: { gates: {} } } as LoreConfig) // => ["spec","adr"] (no throw)
+ *   resolveJudgmentRequiredTypes({ ..., workflow: { gates: {} } } as LoreConfig) // => ["spec","adr","plan"] (no throw)
  */
 export function resolveJudgmentRequiredTypes(config: LoreConfig | undefined): string[] {
   return (
