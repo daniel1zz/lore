@@ -1,8 +1,6 @@
 // @spawns assets/hooks/session-trail-start.mjs
 // @spawns assets/hooks/subagent-trail.mjs
 /**
- * @spec_ref AC-ST-2
- *
  * AU-T26: an isolated helper that merges main into its branch is charged only with what ITS commits
  * and uncommitted edits changed, never with what main brought in (spec session-trail D6 keeps the
  * stored base; the merged-in side is subtracted from the measured files).
