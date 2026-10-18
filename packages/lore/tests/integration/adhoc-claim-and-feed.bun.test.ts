@@ -40,7 +40,7 @@
  */
 
 import type { Invocation } from "@lore/core";
-import { liveInvocation, liveAmbient } from "../live-invocation.js";
+import { liveInvocation, liveAmbient, liveWriteContext } from "../live-invocation.js";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { mkdtempSync, mkdirSync, rmSync } from "fs";
 import { join, resolve } from "path";
@@ -106,7 +106,7 @@ beforeEach(() => {
   const loreDir = join(tmpDir, ".lore");
   mkdirSync(loreDir, { recursive: true });
 
-  const app = createApp(join(loreDir, "lore.db"), undefined, liveAmbient());
+  const app = createApp(join(loreDir, "lore.db"), undefined, liveAmbient(), liveWriteContext());
   app.close();
 
   originalCwd = process.cwd();
@@ -132,7 +132,7 @@ function dbPath(): string {
 // ─── Fixture helpers ──────────────────────────────────────────────────────────
 
 async function createRootPrd(): Promise<{ prdId: string }> {
-  const app = createApp(dbPath(), undefined, liveAmbient());
+  const app = createApp(dbPath(), undefined, liveAmbient(), liveWriteContext());
   try {
     const prdResult = await app.corpusService.create({
       type: "prd",
@@ -151,7 +151,7 @@ async function createAdhocTask(
   title: string,
   anchors?: string[],
 ): Promise<{ taskId: string; taskSlug: string }> {
-  const app = createApp(dbPath(), undefined, liveAmbient());
+  const app = createApp(dbPath(), undefined, liveAmbient(), liveWriteContext());
   try {
     const taskResult = await app.corpusService.create({
       type: "task",
@@ -168,7 +168,7 @@ async function createAdhocTask(
 
 /** Creates a REAL plan-parented (non-ad-hoc) task, for the regression check. */
 async function createPlanParentedTask(): Promise<{ taskId: string; taskSlug: string }> {
-  const app = createApp(dbPath(), undefined, liveAmbient());
+  const app = createApp(dbPath(), undefined, liveAmbient(), liveWriteContext());
   try {
     const planResult = await app.corpusService.create({
       type: "plan",

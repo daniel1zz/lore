@@ -56,6 +56,7 @@ import type {
   LoreError,
   AcceptanceCriterion,
 } from "@lore/core";
+import { actedStore } from "../../live-invocation.js";
 
 // ─── Capturing telemetry spy (mirrors corpus-service-telemetry.test.ts) ──────
 
@@ -82,7 +83,7 @@ class CapturingTelemetry implements Telemetry {
 // ─── Fixture helpers ──────────────────────────────────────────────────────────
 
 function makeServices(ttl = 120) {
-  const store = new InMemoryStore();
+  const store = actedStore(new InMemoryStore());
   const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
   const telemetry = new CapturingTelemetry();
   const taskWorkflowService = new TaskWorkflowService(store, telemetry, { claimTtlMinutes: ttl });
@@ -101,7 +102,7 @@ function makeServicesWithAcPort(
   resolveDeclaredAcIds: (planId: string) => Promise<Result<Set<string> | null, LoreError>>,
   ttl = 120,
 ) {
-  const store = new InMemoryStore();
+  const store = actedStore(new InMemoryStore());
   const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
   const telemetry = new CapturingTelemetry();
   let callCount = 0;
@@ -1122,7 +1123,7 @@ describe("STATE / REGRESSION — evidence without ac_ref never invokes the port 
 // just how appendEvidenceEntry reacts to an arbitrary port Result.
 
 function makeServicesWithRealAcPorts(ttl = 120) {
-  const store = new InMemoryStore();
+  const store = actedStore(new InMemoryStore());
   const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
   const acService = new AcService(store, new RecordLockService(store, new GateEnforcer(undefined)));
   const telemetry = new CapturingTelemetry();

@@ -38,6 +38,7 @@ import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
 import { UatService } from "../../../src/service/uat-service.js";
 import { resolveDoc } from "../../../src/service/resolve.js";
 import type { CreateDocInput, DocRecord, LoreConfig, UatVerdict } from "@lore/core";
+import { actedStore } from "../../live-invocation.js";
 
 // ─── Fixtures ────────────────────────────────────────────────────────────────
 
@@ -80,7 +81,7 @@ function configWithDesignRequiresUat(overrides?: Record<string, unknown>): LoreC
 }
 
 async function makeHarness(config?: LoreConfig) {
-  const store = new InMemoryStore();
+  const store = actedStore(new InMemoryStore());
   await seedLiveRule(store);
   const enforcer = new GateEnforcer(config);
   const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)), undefined, undefined, enforcer);

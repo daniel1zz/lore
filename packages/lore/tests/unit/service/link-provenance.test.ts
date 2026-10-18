@@ -45,13 +45,14 @@ import { AuditService } from "../../../src/service/audit-service.js";
 import type { CreateDocInput, DocId, DocRecord, LinkRecord, LoreError, Result, TreeBlueprint } from "@lore/core";
 import { DOC_TYPE_ROLE_MAP, err } from "@lore/core";
 import { ulid } from "ulidx";
+import { actedStore } from "../../live-invocation.js";
 
 const FAR_PAST = "2000-01-01T00:00:00.000Z"; // always before any doc created during a test run
 
 // ─── Fixture helpers ──────────────────────────────────────────────────────────
 
 function makeStore() {
-  return new InMemoryStore();
+  return actedStore(new InMemoryStore());
 }
 
 async function createPrd(cs: CorpusService, title: string): Promise<DocRecord> {

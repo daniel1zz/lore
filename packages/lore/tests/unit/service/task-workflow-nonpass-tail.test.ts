@@ -38,11 +38,12 @@ import { CorpusService } from "../../../src/service/corpus-service.js";
 import { TaskWorkflowService, type EvidenceInput } from "../../../src/service/task-workflow-service.js";
 import { exitCode } from "../../../src/adapters/cli/utils.js";
 import type { CreateDocInput } from "@lore/core";
+import { actedStore } from "../../live-invocation.js";
 
 // ─── Fixture helpers ──────────────────────────────────────────────────────────
 
 function makeServices(ttl = 120) {
-  const store = new InMemoryStore();
+  const store = actedStore(new InMemoryStore());
   const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
   const taskWorkflowService = new TaskWorkflowService(store, undefined, { claimTtlMinutes: ttl });
   return { store, corpusService, taskWorkflowService };

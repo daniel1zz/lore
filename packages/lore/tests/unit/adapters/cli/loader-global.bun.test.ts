@@ -32,7 +32,7 @@ import { tmpdir } from "os";
 import { createApp } from "../../../../src/app.js";
 import { loadLoreApp } from "../../../../src/adapters/cli/loader.js";
 import { saveConfig } from "@lore/core/node";
-import { liveAmbient, liveInvocation } from "../../../live-invocation.js";
+import { liveAmbient, liveInvocation, liveWriteContext } from "../../../live-invocation.js";
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -41,7 +41,7 @@ function createTempProject(): string {
   const loreDir = join(dir, ".lore");
   mkdirSync(loreDir, { recursive: true });
   const dbPath = join(loreDir, "lore.db");
-  const app = createApp(dbPath, undefined, liveAmbient());
+  const app = createApp(dbPath, undefined, liveAmbient(), liveWriteContext());
   app.close();
   return dir;
 }

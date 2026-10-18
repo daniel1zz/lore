@@ -34,6 +34,7 @@ import { RecordLockService } from "../../src/service/record-lock-service.js";
 import { SQLiteStore } from "../../src/store/sqlite-store.js";
 import type { StoreInterface } from "../../src/store/store-interface.js";
 import { withWriteContext } from "../../src/store/write-context-store.js";
+import { actedStore } from "../live-invocation.js";
 
 const CALLER = "agent:caller-not-internal";
 const RUN = "cc:internal-writers-run";
@@ -59,7 +60,7 @@ interface Fixture {
 function openFixture(): Fixture {
   const dir = mkdtempSync(join(tmpdir(), "run-only-internal-"));
   scratch.push(dir);
-  const raw = new SQLiteStore(join(dir, "lore.db"));
+  const raw = actedStore(new SQLiteStore(join(dir, "lore.db")));
   const store = withWriteContext(raw, { identity: { harnessRun: RUN as never, claimed: CALLER, claimedSource: "session" } });
   const lock = new RecordLockService(store, new GateEnforcer(undefined));
   return { store, corpus: new CorpusService(store, lock), lock };

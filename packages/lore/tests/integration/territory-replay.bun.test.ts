@@ -72,6 +72,7 @@ import { SessionService } from "../../src/service/session-service.js";
 import type { SessionHeartbeatRecord } from "../../src/service/session-liveness.js";
 import { RealGitPort } from "../../src/adapters/real-git-port.js";
 import { partitionTerritory, type TerritoryEntry } from "../../src/adapters/cli/territory-partition.js";
+import { actedStore } from "../live-invocation.js";
 
 // ─── Real git-repo fixtures (throwaway `mkdtemp` — NEVER this repo's own tree) ──
 
@@ -182,7 +183,7 @@ function makeHeartbeatFakes(): {
 }
 
 function makeCorpusAndSession() {
-  const store = new InMemoryStore();
+  const store = actedStore(new InMemoryStore());
   const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
   const heartbeats = makeHeartbeatFakes();
   const sessionService = new SessionService(

@@ -24,6 +24,7 @@ import type { GithubIssueSnapshot, IssueCloser } from "../../../src/service/issu
 import type { GithubIssueRef } from "../../../src/service/resolution-projector.js";
 import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
+import { actedStore } from "../../live-invocation.js";
 
 interface FakeIssue {
   state: "open" | "closed";
@@ -77,7 +78,7 @@ interface World {
 }
 
 async function buildWorld(configured = true): Promise<World> {
-  const store = new InMemoryStore();
+  const store = actedStore(new InMemoryStore());
   const cs = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
   const github = new FakeGithub();
   // reason: the step is deliberately NOT wired into `cs` — the drift this command repairs is exactly what

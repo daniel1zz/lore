@@ -87,6 +87,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { SQLiteStore } from "../../src/store/sqlite-store.js";
 import { CorpusService } from "../../src/service/corpus-service.js";
+import { actedStore } from "../live-invocation.js";
 
 // ─── Worktree-anchored dist/lore binary (never the main checkout's, never a
 //     bare `lore` on PATH) ─────────────────────────────────────────────────
@@ -243,7 +244,7 @@ function makeUpstream(): UpstreamFixture {
  * does not allow `task` under `prd`). Returns the created task's id.
  */
 async function fileReport(upstream: UpstreamFixture, title: string): Promise<string> {
-  const store = new SQLiteStore(join(upstream.root, ".lore", "lore.db"));
+  const store = actedStore(new SQLiteStore(join(upstream.root, ".lore", "lore.db")));
   const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
   try {
     const result = await corpusService.create({

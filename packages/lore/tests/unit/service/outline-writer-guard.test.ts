@@ -24,6 +24,7 @@ import { CorpusService } from "../../../src/service/corpus-service.js";
 import { PrdOutlineService } from "../../../src/service/prd-outline-service.js";
 import { renderOutlineContent } from "@lore/core";
 import type { CreateDocInput } from "@lore/core";
+import { actedStore } from "../../live-invocation.js";
 
 // ─── Fixture types (structural mirror of SPEC-080 §C1's OutlineEntry shape) ───
 
@@ -53,7 +54,7 @@ function outlineEntry(overrides: Partial<OutlineEntryFixture> = {}): OutlineEntr
 // ─── Fixture helpers ────────────────────────────────────────────────────────
 
 function makeServices() {
-  const store = new InMemoryStore();
+  const store = actedStore(new InMemoryStore());
   const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
   const prdOutlineService = new PrdOutlineService(store);
   return { store, corpusService, prdOutlineService };

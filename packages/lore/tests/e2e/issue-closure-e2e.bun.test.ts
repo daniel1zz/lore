@@ -85,6 +85,7 @@ import { CorpusService } from "../../src/service/corpus-service.js";
 import type { CreateDocInput, DocRecord, DocStatus } from "@lore/core";
 import { approveCitedSpec } from "../helpers/live-rule-fixture.js";
 import { runLoreInProcess } from "../helpers/run-lore-in-process";
+import { actedStore } from "../live-invocation.js";
 
 // tests/e2e/ -> tests/ -> packages/lore/ -> packages/ -> repo root (4 levels up),
 // same derivation as tests/e2e/issue-closure.bun.test.ts.
@@ -288,7 +289,7 @@ describe("AC-ICL-8: filed issue + archived spec resolves-edge computes fixed", (
     const dir = freshDir("lore-icl8-happy-");
     await initCorpus(dir);
 
-    const store = new SQLiteStore(dbPathFor(dir));
+    const store = actedStore(new SQLiteStore(dbPathFor(dir)));
     const cs = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
     const prd = await seedRootPrd(cs);
     const issue = await seedIssueTask(cs, "AC-ICL-8 filed defect (happy)");
@@ -326,7 +327,7 @@ describe("AC-ICL-8 (amended by D6 of spec-archiving-the-work-that-resolves-a-def
     const dir = freshDir("lore-icl8-state-");
     await initCorpus(dir);
 
-    const store = new SQLiteStore(dbPathFor(dir));
+    const store = actedStore(new SQLiteStore(dbPathFor(dir)));
     const cs = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
     const prd = await seedRootPrd(cs);
     const issue = await seedIssueTask(cs, "AC-ICL-8 filed defect (state)");
@@ -376,7 +377,7 @@ describe("AC-ICL-8: a resolves edge whose source is not yet terminal never false
     const dir = freshDir("lore-icl8-negative-");
     await initCorpus(dir);
 
-    const store = new SQLiteStore(dbPathFor(dir));
+    const store = actedStore(new SQLiteStore(dbPathFor(dir)));
     const cs = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
     const prd = await seedRootPrd(cs);
     const issue = await seedIssueTask(cs, "AC-ICL-8 filed defect (negative)");
@@ -413,7 +414,7 @@ describe("AC-ICL-8: D2's active-OR-archived boundary, proven with a PLAN (not ju
     const dir = freshDir("lore-icl8-boundary-");
     await initCorpus(dir);
 
-    const store = new SQLiteStore(dbPathFor(dir));
+    const store = actedStore(new SQLiteStore(dbPathFor(dir)));
     const cs = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
     const prd = await seedRootPrd(cs);
     const issue = await seedIssueTask(cs, "AC-ICL-8 filed defect (boundary)");
@@ -446,7 +447,7 @@ describe("AC-ICL-8: the hand-set anti-pattern is rejected even inside a genuinel
     const dir = freshDir("lore-icl8-error-");
     await initCorpus(dir);
 
-    const store = new SQLiteStore(dbPathFor(dir));
+    const store = actedStore(new SQLiteStore(dbPathFor(dir)));
     const cs = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
     const prd = await seedRootPrd(cs);
     const issue = await seedIssueTask(cs, "AC-ICL-8 filed defect (error)");
@@ -490,7 +491,7 @@ describe("AC-ICL-8: archived-with-a-fixed-edge never regresses to closed; an unr
     const dir = freshDir("lore-icl8-regression-");
     await initCorpus(dir);
 
-    const store = new SQLiteStore(dbPathFor(dir));
+    const store = actedStore(new SQLiteStore(dbPathFor(dir)));
     const cs = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
     const prd = await seedRootPrd(cs);
     const issue = await seedIssueTask(cs, "AC-ICL-8 filed defect (regression, fixed)");

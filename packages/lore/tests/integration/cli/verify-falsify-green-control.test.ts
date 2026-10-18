@@ -129,6 +129,7 @@ import type { VerifySpawnSpec } from "../../../src/service/verify-spawn.js";
 import { NoOpTelemetry, err, extractEvidence } from "@lore/core";
 import type { CreateDocInput, DocRecord } from "@lore/core";
 import { sessionActorFor, withSessionIdentity } from "../../helpers/session-actor.js";
+import { actedStore } from "../../live-invocation.js";
 
 // ─── Git identity (local, per-commit — never touches the machine's real git config) ──
 
@@ -388,7 +389,7 @@ interface InMemoryFixture {
  * file's own declared oracle command runs under `bunx vitest`).
  */
 async function buildInMemoryFixture(): Promise<InMemoryFixture> {
-  const store = new InMemoryStore();
+  const store = actedStore(new InMemoryStore());
   const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
   const acService = new AcService(store, new RecordLockService(store, new GateEnforcer(undefined)));
   const taskWorkflowService = new TaskWorkflowService(

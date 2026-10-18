@@ -543,7 +543,9 @@ async function runCli(): Promise<number> {
   }
   const targetRepo = upstreamCfg.repo;
 
-  const app = createApp(join(corpusRoot, ".lore", "lore.db"), undefined, ambientOfInvocation(await resolveEntryInvocation(process.argv.slice(2))));
+  const inv = await resolveEntryInvocation(process.argv.slice(2));
+
+  const app = createApp(join(corpusRoot, ".lore", "lore.db"), undefined, ambientOfInvocation(inv), { identity: inv.identity });
   try {
     const gathered = await gatherMigrationCandidates(app);
     if (!gathered.ok) {

@@ -38,6 +38,7 @@ import type { GitPort, WorktreeInfo, SeatReadyReportLike } from "../../../src/se
 import { buildSeatListJsonPayload, formatSeatList } from "../../../src/adapters/cli/seat-render.js";
 import { ok, err } from "@lore/core";
 import type { LoreError, Result } from "@lore/core";
+import { actedStore } from "../../live-invocation.js";
 
 /** A minimal, independently-scripted fake `GitPort` — deliberately NOT imported from
  *  `seat-service.test.ts`'s own fixture, per this file's role as a standalone oracle
@@ -74,7 +75,7 @@ async function alwaysReady(): Promise<SeatReadyReportLike> {
 }
 
 function makeSeatService(gitPort: FakeListGitPort): SeatService {
-  return new SeatService(new InMemoryStore(), gitPort, alwaysReady);
+  return new SeatService(actedStore(new InMemoryStore()), gitPort, alwaysReady);
 }
 
 // ─── HAPPY ──────────────────────────────────────────────────────────────────

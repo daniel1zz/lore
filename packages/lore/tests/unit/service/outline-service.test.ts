@@ -18,6 +18,7 @@ import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { OutlineService, renderResolvedToMarkdown } from "../../../src/service/outline-service.js";
 import type { DocRecord } from "@lore/core";
 import type { StoreInterface } from "../../../src/store/store-interface.js";
+import { actedStore } from "../../live-invocation.js";
 
 // ─── Test Fixtures ──────────────────────────────────────────────────────────
 
@@ -153,7 +154,7 @@ describe("OutlineService.resolve", () => {
   let corpus: Awaited<ReturnType<typeof buildCorpus>>;
 
   beforeEach(async () => {
-    store = new InMemoryStore();
+    store = actedStore(new InMemoryStore());
     service = new OutlineService(store);
     corpus = await buildCorpus(store);
   });
@@ -1022,7 +1023,7 @@ describe("OutlineService.resolve — acceptance criteria projection (SPEC-038 §
   let service: OutlineService;
 
   beforeEach(() => {
-    store = new InMemoryStore();
+    store = actedStore(new InMemoryStore());
     service = new OutlineService(store);
   });
 

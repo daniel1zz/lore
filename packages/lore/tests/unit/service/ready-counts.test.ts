@@ -11,9 +11,10 @@ import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
 import { TaskWorkflowService } from "../../../src/service/task-workflow-service.js";
 import type { CreateDocInput } from "@lore/core";
+import { actedStore } from "../../live-invocation.js";
 
 async function setup() {
-  const store = new InMemoryStore();
+  const store = actedStore(new InMemoryStore());
   const cs = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
   const twf = new TaskWorkflowService(store, undefined, { claimTtlMinutes: 120 });
   const mk = async (input: CreateDocInput) => {

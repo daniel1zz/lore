@@ -35,7 +35,7 @@
  * @spec_ref AC-ASSESS-1, AC-ASSESS-8, AC-ASSESS-9, AC-ASSESS-10, task-lore-assess-asks-the-caller-for-a-git-range-that-cannot-be
  */
 
-import { liveInvocation } from "../../live-invocation.js";
+import { liveInvocation, actedStore } from "../../live-invocation.js";
 import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
@@ -80,7 +80,7 @@ const VALID_JSON = JSON.stringify({
 function makeApp(opts: {
   resolveAiDefault?: (explicit?: boolean) => { ai: boolean; source: AiDefaultSource };
 } = {}): App {
-  store = new InMemoryStore();
+  store = actedStore(new InMemoryStore());
   corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
   aiProvider = new InMemoryAIProvider("in-memory", { kind: "ok", content: VALID_JSON });
   const providers = new Map([["in-memory", aiProvider]]) as unknown as ReadonlyMap<string, import("@lore/core").AIProvider>;

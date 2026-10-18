@@ -8,6 +8,9 @@ import { homedir, hostname, tmpdir, userInfo } from "node:os";
 import type { Invocation } from "@lore/core";
 import type { AppAmbient } from "../src/app.js";
 import type { ProviderRuntime } from "../src/ai/registry.js";
+import { declareWriteActorForTests } from "../src/store/write-context-store.js";
+import type { StoreInterface } from "../src/store/store-interface.js";
+import { resolveActorWithSource } from "@lore/core/node";
 
 /** The live process as an Invocation: `env` is the LIVE `process.env` object, so a test's later env edits stay visible. */
 export function liveInvocation(): Invocation {
@@ -47,4 +50,22 @@ export function liveAmbient(): AppAmbient {
 /** The live process as a provider-registry runtime: what `buildProviderRegistry(config, runtime)` takes. */
 export function liveProviderRuntime(): ProviderRuntime {
   return { env: process.env, tmpDir: tmpdir() };
+}
+
+/**
+ * The author name a bare-constructed service's writes carried before the write actor became explicit: the session tier of
+ * the live env, else the OS user — exactly what the CLI claims outside a worktree.
+ */
+export function liveWriteActor(): string {
+  return resolveActorWithSource(undefined, process.env, () => userInfo().username).actor;
+}
+
+/** The write context `createApp(dbPath, config, ambient, writeContext)` takes: the live process's claimed name, no run. */
+export function liveWriteContext(): { readonly identity: Invocation["identity"] } {
+  return { identity: { harnessRun: null, claimed: liveWriteActor(), claimedSource: "os" } };
+}
+
+/** Declares the live author on a bare test store (see {@link declareWriteActorForTests}); returns the same store. */
+export function actedStore<T extends StoreInterface>(store: T): T {
+  return declareWriteActorForTests(store, liveWriteActor());
 }

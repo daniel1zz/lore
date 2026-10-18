@@ -25,6 +25,7 @@ import type { App } from "../../../src/app.js";
 import type { CreateDocInput, DocRecord } from "@lore/core";
 import { RESUME_SCOPE_CLOSURE } from "@lore/core";
 import { makeRuleService } from "../../helpers/make-rule-service.js";
+import { actedStore } from "../../live-invocation.js";
 
 const T_SETUP = "2026-03-01T08:00:00.000Z";
 const T_CLAIM = "2026-03-01T10:00:00.000Z";
@@ -99,7 +100,7 @@ async function feedFor(plan: DocRecord): Promise<string> {
 
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ["Date"] });
-  store = new InMemoryStore();
+  store = actedStore(new InMemoryStore());
   corpus = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
   rules = makeRuleService(store);
   workflow = new TaskWorkflowService(store, undefined, { claimTtlMinutes: 120 });

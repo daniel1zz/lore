@@ -30,7 +30,7 @@ import { createApp } from "../../../src/app.js";
 import { TaskWorkflowService } from "../../../src/service/task-workflow-service.js";
 import type { EvidenceInput } from "../../../src/service/task-workflow-service.js";
 import type { CreateDocInput } from "@lore/core";
-import { liveInvocation, liveAmbient } from "../../live-invocation.js";
+import { liveInvocation, liveAmbient, liveWriteContext } from "../../live-invocation.js";
 import type { Invocation } from "@lore/core";
 
 // ─── Command type ─────────────────────────────────────────────────────────────
@@ -60,7 +60,7 @@ beforeEach(() => {
   mkdirSync(loreDir, { recursive: true });
 
   // Real SQLite DB (plan + task are seeded per-test via seedTask()).
-  const app = createApp(join(loreDir, "lore.db"), undefined, liveAmbient());
+  const app = createApp(join(loreDir, "lore.db"), undefined, liveAmbient(), liveWriteContext());
   app.close();
 
   originalCwd = process.cwd();
@@ -83,7 +83,7 @@ afterEach(() => {
  * App instance from the one the evidence command will open via loadLoreApp).
  */
 async function seedTask(): Promise<string> {
-  const app = createApp(join(tmpDir, ".lore", "lore.db"), undefined, liveAmbient());
+  const app = createApp(join(tmpDir, ".lore", "lore.db"), undefined, liveAmbient(), liveWriteContext());
   try {
     const planResult = await app.corpusService.create({
       type: "plan",

@@ -12,6 +12,7 @@ import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
 import type { RuleService } from "../../../src/service/rule-service.js";
 import { makeRuleService } from "../../helpers/make-rule-service.js";
+import { actedStore } from "../../live-invocation.js";
 
 let store: InMemoryStore;
 let corpus: CorpusService;
@@ -45,7 +46,7 @@ async function leafNode(title: string, parent: DocRecord): Promise<DocRecord> {
 }
 
 beforeEach(async () => {
-  store = new InMemoryStore();
+  store = actedStore(new InMemoryStore());
   corpus = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
   svc = makeRuleService(store);
   const prd = await mustCreate({ type: "prd", title: "P", content: "root" } as CreateDocInput);

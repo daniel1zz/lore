@@ -40,9 +40,10 @@ import { JudgmentService } from "../../../src/service/judgment-service.js";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { reviewJudgmentSchema } from "@lore/core";
 import type { NewReviewJudgment, ReviewJudgment, Telemetry, TelemetryEvent } from "@lore/core";
+import { actedStore } from "../../live-invocation.js";
 
 function makeService() {
-  const store = new InMemoryStore();
+  const store = actedStore(new InMemoryStore());
   const telemetry: Telemetry = { record: vi.fn(), emit: vi.fn(), close: vi.fn() };
   return { service: new JudgmentService(store, telemetry), store };
 }

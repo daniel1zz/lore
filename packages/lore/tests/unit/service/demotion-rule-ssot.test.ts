@@ -102,6 +102,7 @@ import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { approveCitedSpec } from "../../helpers/live-rule-fixture.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
 import { AcService } from "../../../src/service/ac-service.js";
+import { actedStore } from "../../live-invocation.js";
 
 // ─── Fixtures (mirrors ac-set.test.ts) ─────────────────────────────────────────
 
@@ -112,7 +113,7 @@ type Services = {
 };
 
 function makeServices(): Services {
-  const store = new InMemoryStore();
+  const store = actedStore(new InMemoryStore());
   return { store, corpusService: new CorpusService(store, recordLockGateOff(store)), acService: new AcService(store, recordLockGateOff(store)) };
 }
 

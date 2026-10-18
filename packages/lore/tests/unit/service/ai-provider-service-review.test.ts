@@ -51,6 +51,7 @@ import type {
   Telemetry,
   TelemetryEvent,
 } from "@lore/core";
+import { actedStore } from "../../live-invocation.js";
 
 // ─── Test helpers ─────────────────────────────────────────────────────────────
 
@@ -127,7 +128,7 @@ async function makeBundle(
 
 describe("judgeDoc — HAPPY (single-attempt success)", () => {
   it("a well-formed judge response produces an ok judgment carrying the model's decision/confidence/reasons", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const { bundle, checks } = await makeBundle(store);
     const provider = new InMemoryAIProvider("in-memory", { kind: "ok", content: VALID_JSON });
     const { service } = makeReviewService({ provider });
@@ -142,7 +143,7 @@ describe("judgeDoc — HAPPY (single-attempt success)", () => {
   });
 
   it("doc_id/doc_version are taken from the bundle's doc, not fabricated", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const { bundle, checks } = await makeBundle(store);
     const provider = new InMemoryAIProvider("in-memory", { kind: "ok", content: VALID_JSON });
     const { service } = makeReviewService({ provider });
@@ -155,7 +156,7 @@ describe("judgeDoc — HAPPY (single-attempt success)", () => {
   });
 
   it("judge identity: provider === model === activeProviderName, prompt_version === 'v3'", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const { bundle, checks } = await makeBundle(store);
     const provider = new InMemoryAIProvider("my-custom-provider", { kind: "ok", content: VALID_JSON });
     const { service } = makeReviewService({ provider });
@@ -173,7 +174,7 @@ describe("judgeDoc — HAPPY (single-attempt success)", () => {
   });
 
   it("an escalate decision with blocking_questions round-trips intact", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const { bundle, checks } = await makeBundle(store);
     const escalateJson = JSON.stringify({
       decision: "escalate",
@@ -196,7 +197,7 @@ describe("judgeDoc — HAPPY (single-attempt success)", () => {
 
 describe("judgeDoc — checks override (SPEC-034 §4: deterministic checks are authoritative)", () => {
   it("result.value.checks deep-equals the EXACT checks argument, ignoring a divergent 'checks' field in the model's own JSON", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const { bundle } = await makeBundle(store);
     // Deliberately pass in checks with a FAIL outcome the mocked "happy" fixture would never
     // naturally produce, and have the model's own JSON claim something different — proves the
@@ -231,7 +232,7 @@ describe("judgeDoc — checks override (SPEC-034 §4: deterministic checks are a
 
 describe("judgeDoc — corrective retry success", () => {
   it("first malformed, second valid → ok; the SECOND call's content wins", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const { bundle, checks } = await makeBundle(store);
     const secondJson = JSON.stringify({
       decision: "reject",
@@ -254,7 +255,7 @@ describe("judgeDoc — corrective retry success", () => {
   });
 
   it("the retry prompt embeds a correction notice plus the original prompt content", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const { bundle, checks } = await makeBundle(store);
     const provider = new InMemoryAIProvider("in-memory", {
       kind: "sequence",
@@ -270,7 +271,7 @@ describe("judgeDoc — corrective retry success", () => {
   });
 
   it("exactly 2 provider calls happen on the retry path, not 1 or 3", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const { bundle, checks } = await makeBundle(store);
     const provider = new InMemoryAIProvider("in-memory", {
       kind: "sequence",
@@ -287,7 +288,7 @@ describe("judgeDoc — corrective retry success", () => {
 
 describe("judgeDoc — double-malformed failure", () => {
   it("both responses malformed → AI_PROVIDER_ERROR, no judgment returned", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const { bundle, checks } = await makeBundle(store);
     const provider = new InMemoryAIProvider("in-memory", {
       kind: "sequence",
@@ -302,7 +303,7 @@ describe("judgeDoc — double-malformed failure", () => {
   });
 
   it("the provider is never called a 3rd time after two malformed responses", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const { bundle, checks } = await makeBundle(store);
     const provider = new InMemoryAIProvider("in-memory", {
       kind: "sequence",
@@ -315,7 +316,7 @@ describe("judgeDoc — double-malformed failure", () => {
   });
 
   it("error message's raw-output prefix is capped at 500 chars", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const { bundle, checks } = await makeBundle(store);
     const longGarbage = "not json ".repeat(200); // 1800 chars, well over 500
     const provider = new InMemoryAIProvider("in-memory", {
@@ -331,7 +332,7 @@ describe("judgeDoc — double-malformed failure", () => {
   });
 
   it("a transport-level provider error does NOT trigger a corrective retry (exactly 1 call)", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const { bundle, checks } = await makeBundle(store);
     const provider = new InMemoryAIProvider("in-memory", {
       kind: "err",
@@ -349,7 +350,7 @@ describe("judgeDoc — double-malformed failure", () => {
 
 describe("judgeDoc — telemetry exactly-once, kind='review'", () => {
   it("single-attempt success: emit is called exactly once", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const { bundle, checks } = await makeBundle(store);
     const provider = new InMemoryAIProvider("in-memory", { kind: "ok", content: VALID_JSON });
     const { service, emitCalls } = makeReviewService({ provider });
@@ -360,7 +361,7 @@ describe("judgeDoc — telemetry exactly-once, kind='review'", () => {
   });
 
   it("retry-success path: emit is called exactly once, not once per attempt", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const { bundle, checks } = await makeBundle(store);
     const provider = new InMemoryAIProvider("in-memory", {
       kind: "sequence",
@@ -373,7 +374,7 @@ describe("judgeDoc — telemetry exactly-once, kind='review'", () => {
   });
 
   it("double-malformed failure: emit is called exactly once", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const { bundle, checks } = await makeBundle(store);
     const provider = new InMemoryAIProvider("in-memory", {
       kind: "sequence",
@@ -386,7 +387,7 @@ describe("judgeDoc — telemetry exactly-once, kind='review'", () => {
   });
 
   it("transport-error failure: emit is called exactly once", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const { bundle, checks } = await makeBundle(store);
     const provider = new InMemoryAIProvider("in-memory", {
       kind: "err",
@@ -399,7 +400,7 @@ describe("judgeDoc — telemetry exactly-once, kind='review'", () => {
   });
 
   it("aiTelemetryEnabled=false silences emit entirely, even on the retry-success path", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const { bundle, checks } = await makeBundle(store);
     const provider = new InMemoryAIProvider("in-memory", {
       kind: "sequence",
@@ -412,7 +413,7 @@ describe("judgeDoc — telemetry exactly-once, kind='review'", () => {
   });
 
   it("decision/confidence are PRESENT (as real object keys) on a successful judgment", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const { bundle, checks } = await makeBundle(store);
     const provider = new InMemoryAIProvider("in-memory", { kind: "ok", content: VALID_JSON });
     const { service, emitCalls } = makeReviewService({ provider });
@@ -426,7 +427,7 @@ describe("judgeDoc — telemetry exactly-once, kind='review'", () => {
   });
 
   it("decision/confidence are ABSENT (not present-but-undefined) on a double-malformed failure", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const { bundle, checks } = await makeBundle(store);
     const provider = new InMemoryAIProvider("in-memory", {
       kind: "sequence",
@@ -441,7 +442,7 @@ describe("judgeDoc — telemetry exactly-once, kind='review'", () => {
   });
 
   it("decision/confidence are ABSENT on a transport-level provider error", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const { bundle, checks } = await makeBundle(store);
     const provider = new InMemoryAIProvider("in-memory", {
       kind: "err",
@@ -456,7 +457,7 @@ describe("judgeDoc — telemetry exactly-once, kind='review'", () => {
   });
 
   it("emitted event's target_doc_id and doc_type mirror the reviewed doc", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const { bundle, checks } = await makeBundle(store);
     const provider = new InMemoryAIProvider("in-memory", { kind: "ok", content: VALID_JSON });
     const { service, emitCalls } = makeReviewService({ provider });

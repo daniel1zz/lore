@@ -14,6 +14,7 @@
 import { Database } from "bun:sqlite";
 import { SQLiteStore } from "../../../../src/store/sqlite-store.js";
 import type { StoreInterface } from "../../../../src/store/store-interface.js";
+import { actedStore } from "../../../live-invocation.js";
 
 const WRITE_CONTEXT_MODULE = "../../../../src/store/write-context-store.js";
 
@@ -41,7 +42,7 @@ export class RunSeeder {
   private readonly auditStamps: { docId: string; timestamp: string; run: string }[] = [];
 
   private constructor(private readonly dbPath: string) {
-    this.store = new SQLiteStore(dbPath);
+    this.store = actedStore(new SQLiteStore(dbPath));
   }
 
   static async open(dbPath: string): Promise<RunSeeder> {

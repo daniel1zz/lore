@@ -31,14 +31,14 @@ import { TaskWorkflowService } from "../../../src/service/task-workflow-service.
 import { AuditService } from "../../../src/service/audit-service.js";
 import { resolveActorWithSource } from "@lore/core/node";
 import type { CreateDocInput, VersionRecord, AuditEntry } from "@lore/core";
-import { liveInvocation } from "../../live-invocation.js";
+import { liveInvocation, actedStore } from "../../live-invocation.js";
 
 // ─── Fixture helpers ──────────────────────────────────────────────────────────
 
 const FAR_PAST = "2000-01-01T00:00:00.000Z"; // always before any doc created during a test run
 
 function makeStore() {
-  const store = new InMemoryStore();
+  const store = actedStore(new InMemoryStore());
   const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
   return { store, corpusService };
 }
@@ -211,7 +211,7 @@ describe("BOUNDARY — exact (doc_id, version) join, not a fuzzy/adjacent match"
 
 describe("STATE — verify()'s `since` genuinely reads from the constructor default when opts is omitted", () => {
   it("two AuditService instances with different constructor verifySince values disagree on the same store state", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
     const planId = await createPlan(corpusService);
 
@@ -238,7 +238,7 @@ describe("STATE — verify()'s `since` genuinely reads from the constructor defa
   });
 
   it("a per-call opts.since overrides the constructor default", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
     const planId = await createPlan(corpusService);
 

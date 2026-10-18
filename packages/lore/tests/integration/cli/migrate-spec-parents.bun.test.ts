@@ -21,6 +21,7 @@ import { mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SQLiteStore } from "../../../src/store/sqlite-store.js";
+import { actedStore } from "../../live-invocation.js";
 
 setDefaultTimeout(300_000);
 
@@ -64,7 +65,7 @@ interface DocState {
 
 /** Reads one spec's observable state straight from the throwaway DB (opened and closed per call). */
 async function stateOf(slug: string): Promise<DocState> {
-  const store = new SQLiteStore(join(dir, ".lore", "lore.db"));
+  const store = actedStore(new SQLiteStore(join(dir, ".lore", "lore.db")));
   try {
     const doc = await store.findBySlug(slug);
     if (!doc.ok || doc.value === null) throw new Error(`no doc ${slug}`);
@@ -91,7 +92,7 @@ async function stateOf(slug: string): Promise<DocState> {
  * straight through the store: write `parent_id` on an already-created, parentless spec.
  */
 async function forceLegacyParent(slug: string, parentSlug: string): Promise<void> {
-  const store = new SQLiteStore(join(dir, ".lore", "lore.db"));
+  const store = actedStore(new SQLiteStore(join(dir, ".lore", "lore.db")));
   try {
     const doc = await store.findBySlug(slug);
     const parent = await store.findBySlug(parentSlug);
@@ -104,7 +105,7 @@ async function forceLegacyParent(slug: string, parentSlug: string): Promise<void
 }
 
 async function forceApproved(slug: string): Promise<void> {
-  const store = new SQLiteStore(join(dir, ".lore", "lore.db"));
+  const store = actedStore(new SQLiteStore(join(dir, ".lore", "lore.db")));
   try {
     const doc = await store.findBySlug(slug);
     if (!doc.ok || doc.value === null) throw new Error(`no doc ${slug}`);
@@ -140,7 +141,7 @@ beforeAll(async () => {
     specs.push(slug);
   }
   await forceApproved(specs[0] as string);
-  const store = new SQLiteStore(join(dir, ".lore", "lore.db"));
+  const store = actedStore(new SQLiteStore(join(dir, ".lore", "lore.db")));
   try {
     const prd = await store.findBySlug(prdSlug);
     if (!prd.ok || prd.value === null) throw new Error("prd missing");

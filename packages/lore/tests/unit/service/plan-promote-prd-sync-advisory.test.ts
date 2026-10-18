@@ -25,6 +25,7 @@ import { CorpusService } from "../../../src/service/corpus-service.js";
 import { ReviewService } from "../../../src/service/review-service.js";
 import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
 import type { CreateDocInput, DocRecord, LoreConfig } from "@lore/core";
+import { actedStore } from "../../live-invocation.js";
 
 const SCRIPT_AC = {
   id: "AC-1",
@@ -49,7 +50,7 @@ function prdSyncConfig(overrides?: Record<string, unknown>): LoreConfig {
 }
 
 async function makeHarness(config?: LoreConfig) {
-  const store = new InMemoryStore();
+  const store = actedStore(new InMemoryStore());
   await seedLiveRule(store);
   const enforcer = new GateEnforcer(config);
   const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)), undefined, undefined, enforcer);

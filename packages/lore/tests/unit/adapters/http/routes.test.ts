@@ -80,6 +80,7 @@ import type { CreateDocInput } from "@lore/core";
 import type { App } from "../../../../src/app.js";
 import type { ApiKeyStore, ActorContext } from "../../../../src/adapters/http/auth.js";
 import { handleApiRoute } from "../../../../src/adapters/http/routes.js";
+import { actedStore } from "../../../live-invocation.js";
 
 /** Always before any doc/judgment/audit entry created during a test run (SPEC-033 F1 routes). */
 const FAR_PAST = "2000-01-01T00:00:00.000Z";
@@ -90,7 +91,7 @@ const FAR_PAST = "2000-01-01T00:00:00.000Z";
 const stubApiKeyStore = {} as ApiKeyStore;
 
 function makeApp(): App {
-  const store = new InMemoryStore();
+  const store = actedStore(new InMemoryStore());
   return {
     corpusService: new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined))),
     reviewService: new ReviewService(store, new RecordLockService(store, new GateEnforcer(undefined))),

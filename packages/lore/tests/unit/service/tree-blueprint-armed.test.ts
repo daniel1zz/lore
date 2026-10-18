@@ -42,6 +42,7 @@ import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { TreeCheckService } from "../../../src/service/tree-check-service.js";
 import type { DocRecord, DocId, DocType, TreeBlueprint } from "@lore/core";
 import { DOC_TYPE_ROLE_MAP, parseTreeBlueprint } from "@lore/core";
+import { actedStore } from "../../live-invocation.js";
 
 // ─── Locate + parse the REAL repo-root lore.tree.yaml ──────────────────────
 
@@ -164,7 +165,7 @@ describe("repo-root lore.tree.yaml — parsed shape pinning (STATE)", () => {
 
 describe("repo-root lore.tree.yaml — HAPPY", () => {
   it("AC-2.HAPPY-01: a fixture populating every declared position is consistent, zero drifts", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const svc = new TreeCheckService(store);
 
     const prd = await seedDoc(store, { id: makeId(), type: "prd" });
@@ -191,7 +192,7 @@ describe("repo-root lore.tree.yaml — HAPPY", () => {
   });
 
   it("AC-2.HAPPY-02: minimal fixture (prd + one spec only) is ALSO consistent — different shape, still passes (defeats a hardcoded-true check)", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const svc = new TreeCheckService(store);
     const prd = await seedDoc(store, { id: makeId(), type: "prd" });
     await seedDoc(store, { id: makeId(), type: "spec" });
@@ -207,7 +208,7 @@ describe("repo-root lore.tree.yaml — HAPPY", () => {
 
 describe("repo-root lore.tree.yaml — BOUNDARY (missing)", () => {
   it("AC-2.BND-01: prd with zero specs → exactly one `missing` drift for the spec slot", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const svc = new TreeCheckService(store);
     await seedDoc(store, { id: makeId(), type: "prd" });
     // No spec seeded at all.
@@ -224,7 +225,7 @@ describe("repo-root lore.tree.yaml — BOUNDARY (missing)", () => {
   });
 
   it("AC-2.BND-02: prd with one spec satisfies min:1 exactly — no missing drift at the boundary", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const svc = new TreeCheckService(store);
     const prd = await seedDoc(store, { id: makeId(), type: "prd" });
     await seedDoc(store, { id: makeId(), type: "spec" });
@@ -243,7 +244,7 @@ describe("repo-root lore.tree.yaml — NEGATIVE (misplaced)", () => {
   it("AC-2.NEG-00: a spec parented directly under the prd is misplaced — the blueprint's spec slot is \"no parent\" (BR-2, BR-400)", async () => {
     // re-baseline: the repo blueprint still DRAWS spec under prd, but a spec takes no parent, so a
     // spec that carries the prd as its parent is the defect, not the conformant shape.
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const svc = new TreeCheckService(store);
     const prd = await seedDoc(store, { id: makeId(), type: "prd" });
     const parentedSpec = await seedDoc(store, { id: makeId(), type: "spec", parent_id: prd.id });
@@ -257,7 +258,7 @@ describe("repo-root lore.tree.yaml — NEGATIVE (misplaced)", () => {
   });
 
   it("AC-2.NEG-01: a spec parented under a plan → misplaced drift, non-conformant", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const svc = new TreeCheckService(store);
     const prd = await seedDoc(store, { id: makeId(), type: "prd" });
     const plan = await seedDoc(store, { id: makeId(), type: "plan", parent_id: prd.id });
@@ -277,7 +278,7 @@ describe("repo-root lore.tree.yaml — NEGATIVE (misplaced)", () => {
   });
 
   it("AC-2.NEG-02: task is a LEAF — a knowledge doc parented under a task is misplaced (PARENT_TYPE_CONTRACT has no task entry for knowledge)", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const svc = new TreeCheckService(store);
     const prd = await seedDoc(store, { id: makeId(), type: "prd" });
     const spec = await seedDoc(store, { id: makeId(), type: "spec" });
@@ -306,7 +307,7 @@ describe("repo-root lore.tree.yaml — NEGATIVE (misplaced)", () => {
     // no recursive knowledge->knowledge position, so walkBlueprint never visits
     // it either (no missing/extra drift). This is the exact "deliberately NOT
     // modeled" behavior called out in SPEC-032 §3.2 — silence, not rejection.
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const svc = new TreeCheckService(store);
     const prd = await seedDoc(store, { id: makeId(), type: "prd" });
     const spec = await seedDoc(store, { id: makeId(), type: "spec" });

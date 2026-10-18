@@ -29,6 +29,7 @@ import { CorpusService } from "../../../src/service/corpus-service.js";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { InMemoryAIProvider } from "../../../src/ai/in-memory-provider.js";
 import type { AIProvider, CreateDocInput, PlanBundle, Telemetry, TelemetryEvent } from "@lore/core";
+import { actedStore } from "../../live-invocation.js";
 
 const WIDE_BUDGETS = { max_plan_chars: 8000, max_spec_chars: 12000, max_task_chars: 4000, max_diff_chars: 24000 };
 const NARROW_BUDGETS = { max_plan_chars: 8000, max_spec_chars: 12000, max_task_chars: 4000, max_diff_chars: 700 };
@@ -117,7 +118,7 @@ describe("AC-CRIT-3: findings on files the judge never saw are unverifiable, not
   const diffText = diffChunk("src/shown.ts", 3) + diffChunk("src/a.ts", 40) + diffChunk("src/b.ts", 40);
 
   it("HAPPY: finding on an omitted file moves to unverifiable_findings (not-shown-to-judge), counted in not_shown, absent from typed_gaps; shown-file finding stays scored", async () => {
-    const bundle = await makeBundle(new InMemoryStore());
+    const bundle = await makeBundle(actedStore(new InMemoryStore()));
     const provider = new InMemoryAIProvider("in-memory", {
       kind: "sequence",
       responses: [
@@ -151,7 +152,7 @@ describe("AC-CRIT-3: findings on files the judge never saw are unverifiable, not
   });
 
   it("STATE: withdrawal applies even with NO diffSource (paths unchecked) — judge visibility needs no git referent", async () => {
-    const bundle = await makeBundle(new InMemoryStore());
+    const bundle = await makeBundle(actedStore(new InMemoryStore()));
     const provider = new InMemoryAIProvider("in-memory", {
       kind: "sequence",
       responses: [{ kind: "ok", content: judgeResponseWithGaps(50, [finding("src/b.ts", "b.ts is wrong.")]) }],
@@ -168,7 +169,7 @@ describe("AC-CRIT-3: findings on files the judge never saw are unverifiable, not
   });
 
   it("BOUNDARY: the head-truncated file counts as shown — its finding stays in typed_gaps", async () => {
-    const bundle = await makeBundle(new InMemoryStore());
+    const bundle = await makeBundle(actedStore(new InMemoryStore()));
     const provider = new InMemoryAIProvider("in-memory", {
       kind: "sequence",
       responses: [{ kind: "ok", content: judgeResponseWithGaps(70, [finding("src/big.ts", "big.ts is wrong.")]) }],
@@ -186,7 +187,7 @@ describe("AC-CRIT-3: findings on files the judge never saw are unverifiable, not
   });
 
   it("REGRESSION: no truncation at all — nothing is moved, not_shown is 0", async () => {
-    const bundle = await makeBundle(new InMemoryStore());
+    const bundle = await makeBundle(actedStore(new InMemoryStore()));
     const provider = new InMemoryAIProvider("in-memory", {
       kind: "sequence",
       responses: [{ kind: "ok", content: judgeResponseWithGaps(70, [finding("src/a.ts", "a.ts is wrong.")]) }],

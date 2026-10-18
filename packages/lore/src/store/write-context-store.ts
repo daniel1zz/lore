@@ -85,6 +85,21 @@ export function readWriteContext(store: StoreInterface): StampingContext | undef
 }
 
 /**
+ * Test-only: declare the author of the writes a bare (unwrapped) `store` receives, so a service constructed over it
+ * resolves the same name a CLI invocation would claim. It records the context WITHOUT wrapping the store: nothing is
+ * stamped, and the store object a test holds stays the one it built. Never called from production code — every
+ * production composition builds its store with a real write context.
+ *
+ * @param store - the bare store a unit test hands to a service
+ * @param claimed - the author name its writes carry
+ * @returns the same `store`
+ */
+export function declareWriteActorForTests<T extends StoreInterface>(store: T, claimed: string): T {
+  CONTEXT_BY_STORE.set(store, { identity: { harnessRun: null, claimed, claimedSource: "os" } });
+  return store;
+}
+
+/**
  * Thrown by {@link resolveWriteActorFor} when a write names no author and its store carries no write context: the
  * composition that built the service did not hand it an identity. A wiring defect, never a caller error — nothing
  * may guess an author from the process. `error` is the `LoreError` an adapter can render.

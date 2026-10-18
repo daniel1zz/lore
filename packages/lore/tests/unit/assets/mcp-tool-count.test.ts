@@ -21,7 +21,7 @@
  * @spec_ref AC-CV-8
  */
 
-import { liveInvocation } from "../../live-invocation.js";
+import { liveInvocation, actedStore } from "../../live-invocation.js";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -45,7 +45,7 @@ const HAND_TYPED_COUNT = /\b\d+ `?lore_\*`? tools/;
 // reason: tool registration only needs the services handlers close over; other App
 // fields are null-cast exactly as mcp-tools.test.ts does.
 function makeApp(): App {
-  const store = new InMemoryStore();
+  const store = actedStore(new InMemoryStore());
   const lock = new RecordLockService(store, new GateEnforcer(undefined));
   return {
     corpusService: new CorpusService(store, lock),

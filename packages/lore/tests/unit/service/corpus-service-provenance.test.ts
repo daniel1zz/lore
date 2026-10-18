@@ -50,6 +50,7 @@ import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
 import type { CreateDocInput, LinkRecord, LoreError, Result, Telemetry, TelemetryEvent } from "@lore/core";
 import { err } from "@lore/core";
+import { actedStore } from "../../live-invocation.js";
 
 // ─── Capturing telemetry spy (mirrors corpus-service-telemetry.test.ts) ───────
 
@@ -83,7 +84,7 @@ class FailingLinkStore extends InMemoryStore {
 
 // ─── Test helpers ──────────────────────────────────────────────────────────────
 
-function makeService(store: InMemoryStore = new InMemoryStore()) {
+function makeService(store: InMemoryStore = actedStore(new InMemoryStore())) {
   const telemetry = new CapturingTelemetry();
   const service = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)), telemetry);
   return { service, store, telemetry };

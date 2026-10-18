@@ -22,13 +22,14 @@ import { AcService } from "../../src/service/ac-service.js";
 import { RuleService } from "../../src/service/rule-service.js";
 import { SQLiteStore } from "../../src/store/sqlite-store.js";
 import { makeRuleService } from "../helpers/make-rule-service.js";
+import { actedStore } from "../live-invocation.js";
 
 const [dbPath, role, target, readyFile, barrierFile, resultPath, mode, armedBranch, actor] = process.argv.slice(2);
 if (!dbPath || !role || !target || !readyFile || !barrierFile || !resultPath || !mode || !armedBranch || !actor) {
   throw new Error("cite-retire-race-worker: missing argv");
 }
 
-const store = new SQLiteStore(dbPath);
+const store = actedStore(new SQLiteStore(dbPath));
 // PINNED CONTRACT (C4/D6): the gate config is handed to AcService as the 2nd constructor
 // argument. Today's AcService ignores it (report-only citing) — that is the RED state.
 const ac = new AcService(store, new RecordLockService(store, new GateEnforcer(undefined)), {

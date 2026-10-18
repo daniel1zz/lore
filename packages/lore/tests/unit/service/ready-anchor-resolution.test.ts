@@ -41,10 +41,11 @@ import type { FileAnchorProbeContext } from "../../../src/service/anchor-resolut
 import type { FsProbe } from "../../../src/service/drift-check-service.js";
 import type { CreateDocInput, DocRecord } from "@lore/core";
 import type { StoreInterface } from "../../../src/store/store-interface.js";
+import { actedStore } from "../../live-invocation.js";
 
 const NOW = "2026-08-06T12:00:00.000Z";
 
-function makeServices(store: StoreInterface = new InMemoryStore()) {
+function makeServices(store: StoreInterface = actedStore(new InMemoryStore())) {
   return {
     store,
     corpusService: new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined))),
@@ -247,7 +248,7 @@ describe("ready() — REGRESSION", () => {
   });
 
   it("ready() performs zero store writes while probing", async () => {
-    const base = new InMemoryStore();
+    const base = actedStore(new InMemoryStore());
     const writes: string[] = [];
     const proxy = new Proxy(base, {
       get(target, prop, receiver) {

@@ -12,7 +12,7 @@
  *   REGRESSION: BR-745 — the invalidated doc stays excluded from the default rows
  *   MCP:        lore_list result carries omitted_invalid
  */
-import { liveInvocation } from "../../live-invocation.js";
+import { liveInvocation, actedStore } from "../../live-invocation.js";
 import { afterAll, describe, expect, it } from "vitest";
 import { appendFileSync, mkdtempSync, rmSync } from "fs";
 import { join } from "path";
@@ -125,7 +125,7 @@ describe("AC-CRIT-6: lore list reports omitted_invalid (CLI)", () => {
 
 describe("AC-CRIT-6: MCP lore_list carries omitted_invalid", () => {
   it("AC-CRIT-6 lore_list reports omitted_invalid=1 by default and 0 with include_invalid", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
     const validityService = new ValidityService(store);
     const app = {

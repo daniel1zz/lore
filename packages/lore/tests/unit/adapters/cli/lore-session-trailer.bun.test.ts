@@ -92,6 +92,7 @@ import type { CreateDocInput, DocRecord } from "@lore/core";
 import { InMemoryStore } from "../../../../src/store/in-memory-store.js";
 import { CorpusService } from "../../../../src/service/corpus-service.js";
 import { TaskWorkflowService } from "../../../../src/service/task-workflow-service.js";
+import { actedStore } from "../../../live-invocation.js";
 
 // ─── Real git-repo fixtures (throwaway `mkdtemp` — NEVER this repo's own tree) ──
 
@@ -163,7 +164,7 @@ function configureTrackedHooksPathOutsideGitDir(repoRoot: string, relativeDir: s
 // ─── Service fixtures ───────────────────────────────────────────────────────
 
 function makeServices(processEnv: Record<string, string | undefined> = {}) {
-  const store = new InMemoryStore();
+  const store = actedStore(new InMemoryStore());
   const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
   const taskWorkflowService = new TaskWorkflowService(
     store,
@@ -259,7 +260,7 @@ describe("commits made under a claim carry the Lore-Session git trailer (AC-OWN-
 
   it("STATE: re-claiming under a NEW session overwrites the marker — a later commit carries the NEW id", async () => {
     const { repoRoot } = makeRepo();
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
     const { taskId } = await createPlanAndTask(corpusService);
 

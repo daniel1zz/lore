@@ -30,9 +30,10 @@ import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
 import { AcService } from "../../../src/service/ac-service.js";
 import type { CreateDocInput, DocRecord, LoreError } from "@lore/core";
+import { actedStore } from "../../live-invocation.js";
 
 function makeServices() {
-  const store = new InMemoryStore();
+  const store = actedStore(new InMemoryStore());
   const lock = () => new RecordLockService(store, new GateEnforcer(undefined));
   return { store, corpusService: new CorpusService(store, lock()), acService: new AcService(store, lock()) };
 }

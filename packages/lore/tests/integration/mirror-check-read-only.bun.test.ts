@@ -83,7 +83,7 @@ import { tmpdir } from "os";
 import { join } from "path";
 import type { CreateDocInput } from "@lore/core";
 import { createApp, type App } from "../../src/app.js";
-import { liveAmbient } from "../live-invocation.js";
+import { liveAmbient, liveWriteContext } from "../live-invocation.js";
 
 // ─── Loading scripts/export-spec-mirror.ts WITHOUT a static cross-package import ──
 //
@@ -203,7 +203,7 @@ async function setupCleanExportedCorpus(): Promise<ThrowawayCorpus> {
   const dbPath = join(tmpRoot, ".lore", "lore.db");
 
   const docs: SeededDoc[] = [];
-  const app = createApp(dbPath, undefined, liveAmbient());
+  const app = createApp(dbPath, undefined, liveAmbient(), liveWriteContext());
   try {
     const prdResult = await app.corpusService.create({
       type: "prd",
@@ -384,7 +384,7 @@ describe("mirror-check-read-only (AC-MIS-5): runCheck reports drift on a throwaw
     const before = snapshotMirrorBytes(corpus.tmpRoot);
     expect(Object.keys(before).length).toBeGreaterThan(0); // sanity floor: never a vacuous empty-corpus pass
 
-    const app = createApp(corpus.dbPath, undefined, liveAmbient());
+    const app = createApp(corpus.dbPath, undefined, liveAmbient(), liveWriteContext());
     let parity: MirrorParityAllTypesResultLocal;
     try {
       parity = await mirrorMod.runCheck(app, corpus.tmpRoot);
@@ -413,7 +413,7 @@ describe("mirror-check-read-only (AC-MIS-5): runCheck reports drift on a throwaw
 
       const before = snapshotMirrorBytes(corpus.tmpRoot);
 
-      const app = createApp(corpus.dbPath, undefined, liveAmbient());
+      const app = createApp(corpus.dbPath, undefined, liveAmbient(), liveWriteContext());
       let parity: MirrorParityAllTypesResultLocal;
       try {
         parity = await mirrorMod.runCheck(app, corpus.tmpRoot);
@@ -461,7 +461,7 @@ describe("mirror-check-read-only (AC-MIS-5): runCheck reports drift on a throwaw
       const before = snapshotMirrorBytes(corpus.tmpRoot);
       expect(before[orphanRelPath]).toBeDefined(); // sanity: the orphan is really there before we check
 
-      const app = createApp(corpus.dbPath, undefined, liveAmbient());
+      const app = createApp(corpus.dbPath, undefined, liveAmbient(), liveWriteContext());
       let parity: MirrorParityAllTypesResultLocal;
       try {
         parity = await mirrorMod.runCheck(app, corpus.tmpRoot);
@@ -488,7 +488,7 @@ describe("mirror-check-read-only (AC-MIS-5): runCheck reports drift on a throwaw
       writeFileSync(indexPath, "{ this is not valid JSON !!!", "utf8");
       const beforeHash = sha256(readFileSync(indexPath));
 
-      const app = createApp(corpus.dbPath, undefined, liveAmbient());
+      const app = createApp(corpus.dbPath, undefined, liveAmbient(), liveWriteContext());
       let caught: unknown;
       try {
         await mirrorMod.runCheck(app, corpus.tmpRoot);
@@ -514,7 +514,7 @@ describe("mirror-check-read-only (AC-MIS-5): runCheck reports drift on a throwaw
       const planTarget = findByType(corpus.docs, "plan");
       driftCorpus(corpus.tmpRoot, specTarget, planTarget);
 
-      const app = createApp(corpus.dbPath, undefined, liveAmbient());
+      const app = createApp(corpus.dbPath, undefined, liveAmbient(), liveWriteContext());
       let first: MirrorParityAllTypesResultLocal;
       let second: MirrorParityAllTypesResultLocal;
       try {
@@ -540,7 +540,7 @@ describe("mirror-check-read-only (AC-MIS-5): runCheck reports drift on a throwaw
 
       const before = snapshotMirrorBytes(corpus.tmpRoot);
 
-      const app = createApp(corpus.dbPath, undefined, liveAmbient());
+      const app = createApp(corpus.dbPath, undefined, liveAmbient(), liveWriteContext());
       try {
         await mirrorMod.runExport(app, corpus.tmpRoot);
       } finally {

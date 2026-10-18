@@ -24,6 +24,7 @@ import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { resolveDoc, resolveDocId } from "../../../src/service/resolve.js";
 import { DOC_TYPE_ROLE_MAP } from "@lore/core";
 import type { DocRecord, Slug } from "@lore/core";
+import { actedStore } from "../../live-invocation.js";
 
 // ─── DocRecord factory ──────────────────────────────────────────────────────
 
@@ -67,7 +68,7 @@ describe("resolveDoc — SPEC-065 unique ID-prefix resolution", () => {
   // ── HAPPY ──────────────────────────────────────────────────────────────
 
   it("AC-065-1: a unique 10-char ID prefix resolves via resolveDoc", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const doc = await insertDoc(
       store,
       makeDoc({ id: FULL_UNIQUE, type: "prd", title: "Unique Doc", slug: "prd-unique-doc" }),
@@ -82,7 +83,7 @@ describe("resolveDoc — SPEC-065 unique ID-prefix resolution", () => {
   });
 
   it("AC-065-7: prefix resolution works through resolveDocId (the MCP-tool-consumed path) too", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     await insertDoc(store, makeDoc({ id: FULL_UNIQUE, type: "spec", title: "MCP Path Doc", slug: "spec-mcp-path-doc" }));
 
     const prefix = FULL_UNIQUE.slice(0, 12);
@@ -96,7 +97,7 @@ describe("resolveDoc — SPEC-065 unique ID-prefix resolution", () => {
   // ── NEGATIVE ───────────────────────────────────────────────────────────
 
   it("AC-065-2: an ambiguous ID prefix returns VALIDATION_ERROR listing every candidate's full ID and slug", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     await insertDoc(store, makeDoc({ id: FULL_A, type: "prd", title: "Doc A", slug: "prd-doc-a" }));
     await insertDoc(store, makeDoc({ id: FULL_B, type: "prd", title: "Doc B", slug: "prd-doc-b" }));
 
@@ -114,7 +115,7 @@ describe("resolveDoc — SPEC-065 unique ID-prefix resolution", () => {
   });
 
   it("NEGATIVE: a hyphenated slug-shaped input never triggers prefix scanning (charset excludes hyphens)", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     await insertDoc(store, makeDoc({ id: FULL_UNIQUE, type: "prd", title: "Some Doc", slug: "prd-some-doc" }));
 
     const result = await resolveDoc(store, "prd-nonexistent-slug");
@@ -130,7 +131,7 @@ describe("resolveDoc — SPEC-065 unique ID-prefix resolution", () => {
   // ── BOUNDARY ───────────────────────────────────────────────────────────
 
   it("AC-065-3: a non-matching truncated-ID-shaped input returns NOT_FOUND with a truncation diagnostic naming 26-char full IDs", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     await insertDoc(store, makeDoc({ id: FULL_UNIQUE, type: "prd", title: "Some Doc", slug: "prd-some-doc" }));
 
     const noMatchPrefix = "9ZZZZZ9999"; // prefix-shaped, matches nothing
@@ -147,7 +148,7 @@ describe("resolveDoc — SPEC-065 unique ID-prefix resolution", () => {
   });
 
   it("BOUNDARY: a 5-char input (below the 6-char prefix floor) is NOT treated as an ID prefix — plain NOT_FOUND, no diagnostic", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     await insertDoc(store, makeDoc({ id: FULL_UNIQUE, type: "prd", title: "Some Doc", slug: "prd-some-doc" }));
 
     const result = await resolveDoc(store, "9ZZZZ"); // 5 chars, below the floor
@@ -159,7 +160,7 @@ describe("resolveDoc — SPEC-065 unique ID-prefix resolution", () => {
   });
 
   it("BOUNDARY: a full 26-char but non-existent ID is NOT re-scanned as a prefix — plain NOT_FOUND, no diagnostic", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     await insertDoc(store, makeDoc({ id: FULL_UNIQUE, type: "prd", title: "Some Doc", slug: "prd-some-doc" }));
 
     const result = await resolveDoc(store, FULL_A); // syntactically a full ULID, but never inserted
@@ -171,7 +172,7 @@ describe("resolveDoc — SPEC-065 unique ID-prefix resolution", () => {
   });
 
   it("BOUNDARY: prefix matching is case-insensitive (a lowercase-typed prefix still resolves)", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const doc = await insertDoc(
       store,
       makeDoc({ id: FULL_UNIQUE, type: "prd", title: "Case Doc", slug: "prd-case-doc" }),
@@ -188,7 +189,7 @@ describe("resolveDoc — SPEC-065 unique ID-prefix resolution", () => {
   // ── ERROR ──────────────────────────────────────────────────────────────
 
   it("ERROR: a store.findByIdPrefix failure propagates as STORE_ERROR, never silently swallowed", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const brokenStore = Object.create(store, {
       findByIdPrefix: {
         value: () =>
@@ -208,7 +209,7 @@ describe("resolveDoc — SPEC-065 unique ID-prefix resolution", () => {
   // ── STATE ──────────────────────────────────────────────────────────────
 
   it("STATE: a soft-deleted doc's prefix is excluded — resolves as zero candidates (NOT_FOUND), not the deleted doc", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     await insertDoc(
       store,
       makeDoc({
@@ -229,7 +230,7 @@ describe("resolveDoc — SPEC-065 unique ID-prefix resolution", () => {
   });
 
   it("STATE: a prefix ambiguous only because of a soft-deleted sibling resolves uniquely to the live doc", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const live = await insertDoc(
       store,
       makeDoc({ id: FULL_A, type: "prd", title: "Live Doc", slug: "prd-live-doc" }),
@@ -256,7 +257,7 @@ describe("resolveDoc — SPEC-065 unique ID-prefix resolution", () => {
   // ── REGRESSION ─────────────────────────────────────────────────────────
 
   it("REGRESSION: exact full-ULID resolution is untouched by the prefix addition", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const doc = await insertDoc(
       store,
       makeDoc({ id: FULL_UNIQUE, type: "prd", title: "Exact Doc", slug: "prd-exact-doc" }),
@@ -269,7 +270,7 @@ describe("resolveDoc — SPEC-065 unique ID-prefix resolution", () => {
   });
 
   it("REGRESSION: exact slug resolution is untouched by the prefix addition", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const doc = await insertDoc(
       store,
       makeDoc({ id: FULL_UNIQUE, type: "prd", title: "Slug Doc", slug: "prd-slug-doc" }),

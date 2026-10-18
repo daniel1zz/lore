@@ -35,13 +35,14 @@ import { NoOpTelemetry } from "@lore/core";
 import type { App } from "../../../../src/app.js";
 import type { ApiKeyStore, ActorContext } from "../../../../src/adapters/http/auth.js";
 import { handleDashboardRoute } from "../../../../src/adapters/http/dashboard-routes.js";
+import { actedStore } from "../../../live-invocation.js";
 
 // ─── Test infrastructure ──────────────────────────────────────────────────────
 
 const stubApiKeyStore = {} as ApiKeyStore;
 
 function makeApp(): App {
-  const store = new InMemoryStore();
+  const store = actedStore(new InMemoryStore());
   return {
     corpusService: new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined))),
     reviewService: new ReviewService(store, new RecordLockService(store, new GateEnforcer(undefined))),

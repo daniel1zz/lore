@@ -48,6 +48,7 @@ import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
 import { sessionActorFromId } from "@lore/core";
 import type { CreateDocInput } from "@lore/core";
+import { actedStore } from "../../live-invocation.js";
 
 const OS_USERNAME = userInfo().username;
 
@@ -79,7 +80,7 @@ afterEach(() => {
 // ─── Fixture helpers ──────────────────────────────────────────────────────────
 
 function makeStore() {
-  return new InMemoryStore();
+  return actedStore(new InMemoryStore());
 }
 
 async function createPlan(cs: CorpusService, title: string, opts?: { by?: string }) {

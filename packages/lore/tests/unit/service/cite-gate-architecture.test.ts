@@ -41,6 +41,7 @@ import { CorpusService } from "../../../src/service/corpus-service.js";
 import { AcService } from "../../../src/service/ac-service.js";
 import { indexBaseline, placeSpecInBranch } from "../../../src/service/ac-cite-gate.js";
 import { exitCode } from "../../../src/adapters/cli/utils.js";
+import { actedStore } from "../../live-invocation.js";
 
 type Mode = "off" | "report" | "enforce";
 interface GateCfg {
@@ -103,7 +104,7 @@ interface World {
  * Spec S (AC-S-1 cites BR-1, AC-S-2 uncited legacy); spec F has no criteria.
  */
 async function world(): Promise<World> {
-  const store = new InMemoryStore();
+  const store = actedStore(new InMemoryStore());
   const cs = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
   const root = await insertBaseline(store, "baseline-root", { node: "root" }, null);
   const alpha = await insertBaseline(store, "baseline-branch-alpha", { node: "branch" }, root);

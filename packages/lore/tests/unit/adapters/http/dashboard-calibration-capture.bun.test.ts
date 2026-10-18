@@ -50,6 +50,7 @@ import { AuditService } from "../../../../src/service/audit-service.js";
 import { NoOpTelemetry, err } from "@lore/core";
 import type { App } from "../../../../src/app.js";
 import type { CalibrationRecord, LoreError, Result } from "@lore/core";
+import { actedStore } from "../../../live-invocation.js";
 
 const FAR_PAST = "2000-01-01T00:00:00.000Z";
 
@@ -86,7 +87,7 @@ async function makeTestServer(useFailingStore: boolean): Promise<TestContext> {
   mkdirSync(loreDir, { recursive: true });
   const dbPath = join(loreDir, "lore.db");
 
-  const store = useFailingStore ? new FailingCalibrationSQLiteStore(dbPath) : new SQLiteStore(dbPath);
+  const store = useFailingStore ? new FailingCalibrationSQLiteStore(dbPath) : actedStore(new SQLiteStore(dbPath));
   const db = store.getDatabase();
   const telemetry = new NoOpTelemetry();
 

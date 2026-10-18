@@ -46,6 +46,7 @@ import { JudgmentService } from "../../../src/service/judgment-service.js";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { wilsonLowerBound } from "@lore/core";
 import type { NewReviewJudgment, Telemetry, TelemetryEvent } from "@lore/core";
+import { actedStore } from "../../live-invocation.js";
 
 // ─── Test helpers ─────────────────────────────────────────────────────────────
 
@@ -62,7 +63,7 @@ function makeMockTelemetry() {
 }
 
 function makeService() {
-  const store = new InMemoryStore();
+  const store = actedStore(new InMemoryStore());
   const { telemetry } = makeMockTelemetry();
   return { service: new JudgmentService(store, telemetry), store };
 }

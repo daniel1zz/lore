@@ -62,6 +62,7 @@ import {
   ANCHOR_OVERLAP_SESSION_UNMEASURED_REASON,
 } from "../../../src/service/gate-predicates.js";
 import type { DocRecord, DocType, TaskClaim } from "@lore/core";
+import { actedStore } from "../../live-invocation.js";
 
 // ─── Fixtures ────────────────────────────────────────────────────────────────
 
@@ -134,7 +135,7 @@ async function mustInsert(store: InMemoryStore, doc: DocRecord): Promise<DocReco
  * `process.env` to the single production instance.
  */
 function makeStore() {
-  const store = new InMemoryStore();
+  const store = actedStore(new InMemoryStore());
   const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
   return { store, corpusService };
 }

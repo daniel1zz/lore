@@ -57,6 +57,7 @@ import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { InMemoryAIProvider } from "../../../src/ai/in-memory-provider.js";
 import { runDeterministicChecks } from "@lore/core";
 import type { AIProvider, CreateDocInput, DocRecord, ReviewBundle, Telemetry, TelemetryEvent } from "@lore/core";
+import { actedStore } from "../../live-invocation.js";
 
 const BUDGET = 12000;
 const BUDGETS = { max_doc_chars: BUDGET, max_context_chars: 8000 };
@@ -313,7 +314,7 @@ describe("AIProviderService.judgeDoc — REGRESSION end-to-end: truncated:true s
   }
 
   it("a spec body with a heading past the cutoff: judgment.truncated===true and the judge's own prompt named the omitted heading", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const content =
       "## Overview\n" + "a".repeat(6000) + "\n## Design Decisions\n" + "b".repeat(6000) + "\n## D7\nDetails here.";
     const bundle = await makeReviewBundle(store, content);

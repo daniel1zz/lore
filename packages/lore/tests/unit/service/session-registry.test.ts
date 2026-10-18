@@ -46,6 +46,7 @@ import { SessionService } from "../../../src/service/session-service.js";
 import { bootstrapReportSchema, type BootstrapReport } from "@lore/core";
 import type { CreateDocInput, DocRecord } from "@lore/core";
 import type { StoreInterface } from "../../../src/store/store-interface.js";
+import { actedStore } from "../../live-invocation.js";
 
 // ─── Fixtures ────────────────────────────────────────────────────────────────
 
@@ -90,7 +91,7 @@ async function mustCreate(cs: CorpusService, input: CreateDocInput): Promise<Doc
   return result.value;
 }
 
-function makeServices(store: StoreInterface = new InMemoryStore()) {
+function makeServices(store: StoreInterface = actedStore(new InMemoryStore())) {
   const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
   const taskWorkflowService = new TaskWorkflowService(store, undefined, { claimTtlMinutes: 120 });
   const sessionService = new SessionService(store, {
@@ -257,7 +258,7 @@ describe("TaskWorkflowService.ready — sessions (SPEC-042 D1, D7)", () => {
 
   // REGRESSION — ready() performs zero store mutations (mirrors session-readonly.test.ts's proxy)
   it("ready() performs zero store mutations, even when it computes sessions/anchor_conflicts", async () => {
-    const rawStore = new InMemoryStore();
+    const rawStore = actedStore(new InMemoryStore());
     const seed = makeServices(rawStore);
     const planId = await createPlan(seed.corpusService);
     const taskOneId = await createTask(seed.corpusService, planId, "Task One", ["src/a"]);
@@ -344,7 +345,7 @@ describe("SessionService.bootstrap — active_sessions (SPEC-042 D8)", () => {
 
   // REGRESSION — bootstrap() performs zero store mutations (mirrors session-readonly.test.ts)
   it("bootstrap() performs zero store mutations while computing active_sessions", async () => {
-    const rawStore = new InMemoryStore();
+    const rawStore = actedStore(new InMemoryStore());
     const seed = makeServices(rawStore);
     const planId = await createPlan(seed.corpusService);
     const taskId = await createTask(seed.corpusService, planId, "Task");

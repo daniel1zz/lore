@@ -46,6 +46,7 @@ import type { CreateDocInput, DocRecord, DocId } from "@lore/core";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
 import { AcService } from "../../../src/service/ac-service.js";
+import { actedStore } from "../../live-invocation.js";
 
 type CiteWarning = { id: string; kind: "dangling" | "inactive" };
 interface CiteApi {
@@ -134,7 +135,7 @@ const AC = (id: string, extra: Record<string, unknown> = {}) => ({
 });
 
 async function setup() {
-  const store = new InMemoryStore();
+  const store = actedStore(new InMemoryStore());
   const cs = new CorpusService(store, recordLockGateOff(store));
   const ac = new AcService(store, recordLockGateOff(store));
   await insertLeaf(store, [rule("BR-1", "live"), rule("BR-2", "deprecated"), rule("BR-3", "retired")]);

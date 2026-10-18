@@ -52,6 +52,7 @@ import { PhaseWorkflowService } from "../../../src/service/phase-workflow-servic
 import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
 import type { GateDependencies } from "../../../src/service/gate-enforcer.js";
 import type { CreateDocInput, DocRecord, DocType, LoreConfig } from "@lore/core";
+import { actedStore } from "../../live-invocation.js";
 
 // ─── Shared interleave helper ─────────────────────────────────────────────────
 
@@ -101,7 +102,7 @@ async function mustCreate(cs: CorpusService, input: CreateDocInput): Promise<Doc
 const TOCTOU_SESSION_ENV = { CLAUDE_CODE_SESSION_ID: "3de02220-toctou" } as const;
 
 function makeTaskServices(config?: LoreConfig, withGate = true) {
-  const store = new InMemoryStore();
+  const store = actedStore(new InMemoryStore());
   const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
   const gate: GateDependencies | undefined = withGate
     ? { enforcer: new GateEnforcer(config), getPlanBundle: corpusService.getPlanBundle.bind(corpusService) }
@@ -382,7 +383,7 @@ function makePhaseServices(
   withGate = true,
   sessionEnv: Record<string, string | undefined> = { ...TOCTOU_SESSION_ENV },
 ) {
-  const store = new InMemoryStore();
+  const store = actedStore(new InMemoryStore());
   const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
   const gate: GateDependencies | undefined = withGate
     ? { enforcer: new GateEnforcer(config), getPlanBundle: corpusService.getPlanBundle.bind(corpusService) }

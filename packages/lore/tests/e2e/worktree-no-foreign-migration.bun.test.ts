@@ -28,7 +28,7 @@ import { tmpdir } from "node:os";
 import { createApp } from "../../src/app";
 import { findLoreDbPath } from "../../src/adapters/cli/corpus-resolution";
 import { LATEST_SCHEMA_VERSION } from "../../src/store/schema-version";
-import { liveAmbient } from "../live-invocation.js";
+import { liveAmbient, liveWriteContext } from "../live-invocation.js";
 
 const PKG_ROOT = new URL("../../", import.meta.url).pathname.replace(/\/$/, "");
 const CLI_ENTRY = join(PKG_ROOT, "src", "index.ts");
@@ -103,7 +103,7 @@ describe("AC-CRIT-7: a linked worktree never migrates the main checkout's corpus
     const previousCwd = process.cwd();
     process.chdir(worktreeDir);
     try {
-      expect(() => createApp(findLoreDbPath({ cwd: process.cwd(), env: process.env }), undefined, liveAmbient())).toThrow(/schema mismatch/);
+      expect(() => createApp(findLoreDbPath({ cwd: process.cwd(), env: process.env }), undefined, liveAmbient(), liveWriteContext())).toThrow(/schema mismatch/);
     } finally {
       process.chdir(previousCwd);
     }

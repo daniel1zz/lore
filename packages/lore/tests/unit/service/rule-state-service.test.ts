@@ -90,6 +90,7 @@ import type {
   LoreError,
   Result,
 } from "@lore/core";
+import { actedStore } from "../../live-invocation.js";
 
 // ─── Pinned contract types (mirrors the header; the implementation must satisfy these) ───
 
@@ -312,7 +313,7 @@ interface World {
 }
 
 async function newWorld(): Promise<World> {
-  const store = new InMemoryStore();
+  const store = actedStore(new InMemoryStore());
   const prd = await put(store, rawDoc("prd", "root-prd", {}, null));
   return {
     store,

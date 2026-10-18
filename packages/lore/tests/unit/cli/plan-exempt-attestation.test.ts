@@ -52,7 +52,7 @@ import {
 } from "../../../src/adapters/cli/plan-exempt-validation.js";
 import planCommand from "../../../src/adapters/cli/commands/plan.js";
 import { findUnknownFlag } from "../../../src/adapters/cli/strict-flags.js";
-import { liveInvocation } from "../../live-invocation.js";
+import { liveInvocation, actedStore } from "../../live-invocation.js";
 import type { Invocation } from "@lore/core";
 
 // ─── Fixtures ────────────────────────────────────────────────────────────────
@@ -114,7 +114,7 @@ let store: InMemoryStore;
 let service: PlanExemptionService;
 
 beforeEach(() => {
-  store = new InMemoryStore();
+  store = actedStore(new InMemoryStore());
   service = new PlanExemptionService(store);
 });
 

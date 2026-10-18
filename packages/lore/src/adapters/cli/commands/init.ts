@@ -94,7 +94,7 @@ export default defineCommand({
 
     // Initialise the SQLite DB (SQLiteStore constructor runs migrations)
     const dbPath = join(loreDir, "lore.db");
-    const app = createApp(dbPath, undefined, ambientOfInvocation(inv));
+    const app = createApp(dbPath, undefined, ambientOfInvocation(inv), { identity: inv.identity });
     // reason: SPEC-143 AC-CT-3 — a fresh corpus is armed at init: nothing predates the cutoff, so
     // the R13 impact report is zero rows by construction, and both write paths (`lore verify`,
     // `lore evidence --capture`) now stamp state. Existing corpora keep the explicit

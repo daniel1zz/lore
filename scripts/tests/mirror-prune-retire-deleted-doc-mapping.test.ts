@@ -68,6 +68,7 @@ import { loadMirrorMappings } from "../export-spec-mirror-core.js";
 import { InMemoryStore } from "../../packages/lore/src/store/in-memory-store.js";
 import { ExportDocsService, type ResolveDocBody } from "../../packages/lore/src/service/export-docs-service.js";
 import { OutlineService, renderResolvedToMarkdown } from "../../packages/lore/src/service/outline-service.js";
+import { actedStore } from "../../packages/lore/tests/live-invocation.js";
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
 const REPO_ROOT = join(__dirname, "..", "..");
@@ -350,7 +351,7 @@ function seedIndex(projectDir: string, mappings: Record<string, { human_id: stri
 
 describe("BOUNDARY — a per-type exportDocs({type}) call must not retire a SOFT-DELETED doc's mapping when that doc belongs to a DIFFERENT type, but a whole-corpus call may", () => {
   it("BOUNDARY: exportDocs({type:'spec'}) leaves a soft-deleted KNOWLEDGE doc's mapping untouched — its id never appears in this pass's type-scoped everKnownDocIds at all", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const service = makeExportService(store);
     const projectDir = makeInMemoryProjectDir();
 
@@ -392,7 +393,7 @@ describe("BOUNDARY — a per-type exportDocs({type}) call must not retire a SOFT
   });
 
   it("BOUNDARY (contrast): a whole-corpus exportDocs({type: undefined}) DOES retire that SAME soft-deleted knowledge doc's mapping, proving the restriction above is scope-specific, not a blanket refusal", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const service = makeExportService(store);
     const projectDir = makeInMemoryProjectDir();
 
@@ -423,7 +424,7 @@ describe("BOUNDARY — a per-type exportDocs({type}) call must not retire a SOFT
 
 describe("REGRESSION — a mapping whose docId NEVER existed in the store at all (an inert orphan RESERVATION) is left untouched, even by a whole-corpus call", () => {
   it("REGRESSION: an orphan mapping claiming SPEC-999 with no backing DocRecord anywhere survives a whole-corpus exportDocs() run — this is the exact shape an existing fixture (export-docs-service.test.ts's SPEC-040 case) relies on to force sequential fallback instead of a human_id collision", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const service = makeExportService(store);
     const projectDir = makeInMemoryProjectDir();
 
@@ -446,7 +447,7 @@ describe("REGRESSION — a mapping whose docId NEVER existed in the store at all
 
 describe("NEGATIVE — a LIVE doc whose mirror file was manually removed keeps its mapping (this is a re-export case, never a retirement case)", () => {
   it("NEGATIVE: file deleted out-of-band, doc still live in the store — mapping is preserved and the file is recreated at the SAME path", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const service = makeExportService(store);
     const projectDir = makeInMemoryProjectDir();
 

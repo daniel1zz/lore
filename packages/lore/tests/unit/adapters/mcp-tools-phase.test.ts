@@ -38,7 +38,7 @@
  *   task-mcp-lore-evidence-add-bypasses-the-oracle-file-existence
  */
 
-import { liveInvocation } from "../../live-invocation.js";
+import { liveInvocation, actedStore } from "../../live-invocation.js";
 import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { describe, it, expect, beforeEach } from "vitest";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -67,7 +67,7 @@ let store: InMemoryStore;
 let corpusService: CorpusService;
 
 function makeApp(): App {
-  store = new InMemoryStore();
+  store = actedStore(new InMemoryStore());
   corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
   const gateEnforcer = new GateEnforcer(undefined);
   const phaseServices = buildPhaseServices(store, new NoOpTelemetry(), 120, gateEnforcer, corpusService, process.env);

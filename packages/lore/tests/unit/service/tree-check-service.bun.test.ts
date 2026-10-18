@@ -38,6 +38,7 @@ import type { DocRecord, DocId, DocType, DocStatus } from "@lore/core";
 import { DOC_TYPE_ROLE_MAP } from "@lore/core";
 import type { TreeBlueprint } from "@lore/core";
 import { TreeCheckService } from "../../../src/service/tree-check-service.js";
+import { actedStore } from "../../live-invocation.js";
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -134,7 +135,7 @@ async function seedPlanWithChildTasks(
 
 describe("TreeCheckService.checkTree — plan-terminality (HAPPY)", () => {
   it("AC-CLOSURE-1-HAPPY: non-terminal plan, 2 children both archived → plan-terminality drift naming that plan", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const svc = new TreeCheckService(store);
     const { planId } = await seedPlanWithChildTasks(store, {
       planStatus: "active", // non-terminal
@@ -169,7 +170,7 @@ describe("TreeCheckService.checkTree — plan-terminality (BOUNDARY: vacuous gua
      * of terminality-readiness" would fire on every brand-new plan in the
      * corpus and would be strictly worse than shipping no detector at all.
      */
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const svc = new TreeCheckService(store);
     const { planId } = await seedPlanWithChildTasks(store, {
       planStatus: "active", // non-terminal
@@ -193,7 +194,7 @@ describe("TreeCheckService.checkTree — plan-terminality (BOUNDARY: vacuous gua
 
 describe("TreeCheckService.checkTree — plan-terminality (NEGATIVE)", () => {
   it("AC-CLOSURE-1-NEG: non-terminal plan, 2 children — one archived, one active → NO plan-terminality drift", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const svc = new TreeCheckService(store);
     await seedPlanWithChildTasks(store, {
       planStatus: "active", // non-terminal
@@ -216,7 +217,7 @@ describe("TreeCheckService.checkTree — plan-terminality (STATE)", () => {
      * A plan that has already been closed and whose children are terminal
      * is consistent — there is nothing left to announce.
      */
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const svc = new TreeCheckService(store);
     await seedPlanWithChildTasks(store, {
       planStatus: "archived", // ALREADY terminal
@@ -239,7 +240,7 @@ describe("TreeCheckService.checkTree — plan-terminality (BOUNDARY: deprecated 
      * same as `archived` — the detector must treat it identically, not just
      * pattern-match the literal string "archived".
      */
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const svc = new TreeCheckService(store);
     const { planId } = await seedPlanWithChildTasks(store, {
       planStatus: "active", // non-terminal
@@ -262,7 +263,7 @@ describe("TreeCheckService.checkTree — plan-terminality (BOUNDARY: deprecated 
   });
 
   it("AC-CLOSURE-1-BND-DEPRECATED-ONLY: non-terminal plan, single child deprecated (not archived) → plan-terminality drift", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const svc = new TreeCheckService(store);
     await seedPlanWithChildTasks(store, {
       planStatus: "draft", // non-terminal

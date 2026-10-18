@@ -41,7 +41,7 @@ import { tmpdir } from "os";
 import { createApp } from "../../../src/app.js";
 import { evidenceBadge, formatReadyLine } from "../../../src/adapters/cli/commands/ready.js";
 import type { CreateDocInput, DocSummary, ReadyRecord } from "@lore/core";
-import { liveInvocation, liveAmbient } from "../../live-invocation.js";
+import { liveInvocation, liveAmbient, liveWriteContext } from "../../live-invocation.js";
 import type { Invocation } from "@lore/core";
 
 // ─── Command type ─────────────────────────────────────────────────────────────
@@ -76,7 +76,7 @@ beforeEach(() => {
   const loreDir = join(tmpDir, ".lore");
   mkdirSync(loreDir, { recursive: true });
 
-  const app = createApp(join(loreDir, "lore.db"), undefined, liveAmbient());
+  const app = createApp(join(loreDir, "lore.db"), undefined, liveAmbient(), liveWriteContext());
   app.close();
 
   originalCwd = process.cwd();
@@ -95,7 +95,7 @@ afterEach(() => {
 });
 
 async function seedTask(): Promise<string> {
-  const app = createApp(join(tmpDir, ".lore", "lore.db"), undefined, liveAmbient());
+  const app = createApp(join(tmpDir, ".lore", "lore.db"), undefined, liveAmbient(), liveWriteContext());
   try {
     const planResult = await app.corpusService.create({
       type: "plan",
@@ -120,7 +120,7 @@ async function seedTask(): Promise<string> {
 
 /** Like {@link seedTask} but also returns the parent plan's slug — `lore ready` needs it. */
 async function seedPlanAndTask(): Promise<{ planSlug: string; taskSlug: string }> {
-  const app = createApp(join(tmpDir, ".lore", "lore.db"), undefined, liveAmbient());
+  const app = createApp(join(tmpDir, ".lore", "lore.db"), undefined, liveAmbient(), liveWriteContext());
   try {
     const planResult = await app.corpusService.create({
       type: "plan",

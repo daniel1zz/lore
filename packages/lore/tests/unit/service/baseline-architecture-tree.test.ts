@@ -53,6 +53,7 @@ import { RuleStateService } from "../../../src/service/rule-state-service.js";
 import { computeBaselineStatus } from "../../../src/service/baseline-status.js";
 import { indexBaseline } from "../../../src/service/ac-cite-gate.js";
 import { makeRuleService } from "../../helpers/make-rule-service.js";
+import { actedStore } from "../../live-invocation.js";
 
 // ─── Fixtures ────────────────────────────────────────────────────────────────
 
@@ -99,7 +100,7 @@ async function baseline(cs: CorpusService, title: string, parent: DocRecord, ext
 }
 
 async function world(opts: { architecture: boolean } = { architecture: true }): Promise<World> {
-  const store = new InMemoryStore();
+  const store = actedStore(new InMemoryStore());
   const cs = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
   const rules = makeRuleService(store);
   const prd = await must(await cs.create({ type: "prd", title: "Product", content: "p" } as CreateDocInput), "prd");
@@ -553,7 +554,7 @@ describe("architecture tree (BL-5)", () => {
     });
 
     it("an architecture-only baseline has zero branches (nothing to arm)", async () => {
-      const store = new InMemoryStore();
+      const store = actedStore(new InMemoryStore());
       const cs = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
       const prd = await must(await cs.create({ type: "prd", title: "P", content: "p" } as CreateDocInput), "prd");
       const root = await baseline(cs, "Arch root", prd, { tree: "architecture", node: "root" });

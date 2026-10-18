@@ -50,6 +50,7 @@ import type { CreateDocInput, DocRecord, DocId } from "@lore/core";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
 import { AcService } from "../../../src/service/ac-service.js";
+import { actedStore } from "../../live-invocation.js";
 
 const REFUSAL = "AC_CITE_REQUIRED";
 const WOULD_REFUSE = "cite_gate_would_refuse";
@@ -139,7 +140,7 @@ interface World {
  * Spec O (other): 37 ACs, AC-O-1 cites BR-9, AC-O-2 cites BR-11 (rest uncited) -> 40 ACs corpus-wide.
  */
 async function world(): Promise<World> {
-  const store = new InMemoryStore();
+  const store = actedStore(new InMemoryStore());
   const cs = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
   const plain = new AcService(store, new RecordLockService(store, new GateEnforcer(undefined)));
   const root = await insertBaseline(store, "baseline-root", { node: "root" }, null);
@@ -239,7 +240,7 @@ describe("cite gate — config resolution (AC-BLS2-2)", () => {
   });
 
   it("AcService.resolveCiteGate on a corpus with no baseline docs and no config is mode off", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const res = await (gated(store, undefined) as unknown as {
       resolveCiteGate(): Promise<{ ok: boolean; value?: GateCfg }>;
     }).resolveCiteGate();
@@ -555,7 +556,7 @@ describe("cite gate — refusal feeding pack (AC-BLS2-2)", () => {
 
 describe("cite gate — no baseline docs and no config leaves outputs unchanged (AC-BLS2-2, QA-5)", () => {
   async function run(svcFactory: (s: InMemoryStore) => AcService) {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const cs = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
     const prd = await cs.create({ type: "prd", title: "P", content: "root" } as CreateDocInput);
     if (!prd.ok) throw new Error("prd");
@@ -597,7 +598,7 @@ describe("cite gate — no baseline docs and no config leaves outputs unchanged 
 
 describe("cite gate — latency on a 1,500-rule corpus (AC-BLS2-2, QA-1)", () => {
   it("p95 added latency of 50 enforce-armed `ac add` calls is <= 50 ms", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const cs = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
     const plain = new AcService(store, new RecordLockService(store, new GateEnforcer(undefined)));
     const root = await insertBaseline(store, "baseline-root", { node: "root" }, null);

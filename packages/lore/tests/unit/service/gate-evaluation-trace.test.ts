@@ -79,6 +79,7 @@ import { citeSpecViaCli } from "../../helpers/cli-live-rule.js";
 const PACKAGE_ROOT = fileURLToPath(new URL("../../../", import.meta.url));
 const INDEX_TS = join(PACKAGE_ROOT, "src", "index.ts");
 const APP_TS = join(PACKAGE_ROOT, "src", "app.ts");
+const LIVE_TS = join(PACKAGE_ROOT, "tests", "live-invocation.ts");
 
 interface RunResult {
   readonly stdout: string;
@@ -153,11 +154,12 @@ function seedServiceOps(dbPath: string, scriptDir: string, ops: readonly Record<
   const scriptPath = join(scriptDir, "seed-ops.ts");
   const scriptSource = `
 import { createApp } from ${JSON.stringify(APP_TS)};
+import { liveAmbient, liveWriteContext } from ${JSON.stringify(LIVE_TS)};
 
 const dbPath = process.argv[2];
 const ops = JSON.parse(process.argv[3]);
 
-const app = createApp(dbPath);
+const app = createApp(dbPath, undefined, liveAmbient(), liveWriteContext());
 const results = [];
 try {
   for (const op of ops) {

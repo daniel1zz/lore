@@ -20,6 +20,7 @@ import { CorpusService } from "../../../src/service/corpus-service.js";
 import { SessionService } from "../../../src/service/session-service.js";
 import type { CreateDocInput } from "@lore/core";
 import type { StoreInterface } from "../../../src/store/store-interface.js";
+import { actedStore } from "../../live-invocation.js";
 
 const MUTATING_METHODS = [
   "insert",
@@ -106,7 +107,7 @@ async function seedCorpus(store: InMemoryStore) {
 
 describe("SessionService — read-only invariant (AC-SL-2)", () => {
   it("bootstrap() performs zero store mutations", async () => {
-    const rawStore = new InMemoryStore();
+    const rawStore = actedStore(new InMemoryStore());
     await seedCorpus(rawStore);
 
     const { proxy, counts } = countingProxy(rawStore);
@@ -128,7 +129,7 @@ describe("SessionService — read-only invariant (AC-SL-2)", () => {
   });
 
   it("resume() performs zero store mutations", async () => {
-    const rawStore = new InMemoryStore();
+    const rawStore = actedStore(new InMemoryStore());
     await seedCorpus(rawStore);
 
     const { proxy, counts } = countingProxy(rawStore);

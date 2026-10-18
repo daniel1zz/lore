@@ -45,7 +45,7 @@ import { tmpdir } from "os";
 import { createApp } from "../../../src/app.js";
 import type { App } from "../../../src/app.js";
 import type { DocType } from "@lore/core";
-import { liveInvocation, liveAmbient } from "../../live-invocation.js";
+import { liveInvocation, liveAmbient, liveWriteContext } from "../../live-invocation.js";
 import type { Invocation } from "@lore/core";
 
 type RunnableCommand = {
@@ -132,7 +132,7 @@ async function initLoreDb(): Promise<void> {
 /** Opens a SECOND App instance against the SAME db file this test's CLI
  *  commands wrote to — the real-state oracle for "doc count unchanged". */
 function openDbApp(): App {
-  return createApp(join(tmpDir, ".lore", "lore.db"), undefined, liveAmbient());
+  return createApp(join(tmpDir, ".lore", "lore.db"), undefined, liveAmbient(), liveWriteContext());
 }
 
 /**

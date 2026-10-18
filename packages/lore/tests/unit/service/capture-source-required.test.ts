@@ -64,11 +64,12 @@ import {
 import { PhaseWorkflowService } from "../../../src/service/phase-workflow-service.js";
 import { VerifyRunnerService } from "../../../src/service/verify-runner-service.js";
 import type { VerifySpawnSpec, VerifyExecutionResult } from "../../../src/service/verify-spawn.js";
+import { actedStore } from "../../live-invocation.js";
 
 // ─── Shared fixtures (TaskWorkflowService) ─────────────────────────────────────
 
 function makeServices() {
-  const store = new InMemoryStore();
+  const store = actedStore(new InMemoryStore());
   const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
   const taskWorkflowService = new TaskWorkflowService(store, undefined, { claimTtlMinutes: 120 });
   return { store, corpusService, taskWorkflowService };
@@ -150,7 +151,7 @@ async function mustInsert(store: InMemoryStore, doc: DocRecord): Promise<DocReco
 }
 
 function makePhaseServices() {
-  const store = new InMemoryStore();
+  const store = actedStore(new InMemoryStore());
   const service = new PhaseWorkflowService(store, undefined, { claimTtlMinutes: 120 });
   return { store, service };
 }

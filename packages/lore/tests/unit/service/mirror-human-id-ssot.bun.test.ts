@@ -61,6 +61,7 @@ import type { DocRecord, ExportIndex, MirrorHumanId } from "@lore/core";
 import { assertIsMirrorHumanId } from "@lore/core";
 import { SQLiteStore } from "../../../src/store/sqlite-store.js";
 import { OrdinalMigrationService } from "../../../src/service/ordinal-migration-service.js";
+import { actedStore } from "../../live-invocation.js";
 
 /**
  * Narrows a raw human_id string literal to the branded {@link MirrorHumanId} for fixture
@@ -129,7 +130,7 @@ describe("OrdinalMigrationService step-3 reconcile composes human_id via formatM
   let service: OrdinalMigrationService;
 
   beforeEach(() => {
-    store = new SQLiteStore(":memory:");
+    store = actedStore(new SQLiteStore(":memory:"));
     projectDir = mkdtempSync(join(tmpdir(), "lore-mirror-human-id-ssot-"));
     service = new OrdinalMigrationService(store);
   });

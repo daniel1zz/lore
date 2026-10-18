@@ -54,6 +54,7 @@ import type {
   Telemetry,
   TelemetryEvent,
 } from "@lore/core";
+import { actedStore } from "../../live-invocation.js";
 
 // ─── Test helpers ─────────────────────────────────────────────────────────────
 
@@ -80,7 +81,7 @@ function makeMockTelemetry() {
  * or the service's own instrumentation pollutes the assertion.
  */
 function makeService() {
-  const store = new InMemoryStore();
+  const store = actedStore(new InMemoryStore());
   const serviceTelemetry = makeMockTelemetry().telemetry;
   return { service: new JudgmentService(store, serviceTelemetry), store };
 }

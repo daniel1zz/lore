@@ -38,6 +38,7 @@ import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
 import { SessionService } from "../../../src/service/session-service.js";
 import type { BootstrapReport, CreateDocInput, DocRecord, LoreError, Result } from "@lore/core";
+import { actedStore } from "../../live-invocation.js";
 
 function makeSessionService(store: InMemoryStore) {
   const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
@@ -75,7 +76,7 @@ function bootstrapWithSeat(sessionService: SessionService): BootstrapWithSeat {
  *  hint (plan-a's own newest) is distinguishable from the corpus-global newest
  *  (plan-b's, which is chronologically later). Shared by every seat-scoping case below. */
 async function buildTwoPlanCorpusWithHandoffs() {
-  const store = new InMemoryStore();
+  const store = actedStore(new InMemoryStore());
   const { corpusService, sessionService } = makeSessionService(store);
 
   const planA = await mustCreate(corpusService, { type: "plan", title: "Plan A", content: "# A" } as CreateDocInput);
@@ -143,7 +144,7 @@ describe("SessionService.bootstrap — FROZEN BASELINE resume_hint (no seat arg,
   });
 
   it("an empty corpus with no seat argument still returns resume_hint: null", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const { sessionService } = makeSessionService(store);
     const result = await sessionService.bootstrap("alice");
     expect(result.ok).toBe(true);
@@ -187,7 +188,7 @@ describe("SessionService.bootstrap — seat-scoped resume_hint (HAPPY, RED until
   });
 
   it("a seat-scoped plan with zero handoffs of its own returns resume_hint: null, never a corpus-global fallback", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const { corpusService, sessionService } = makeSessionService(store);
     const emptyPlan = await mustCreate(corpusService, {
       type: "plan",
@@ -260,7 +261,7 @@ describe("SessionService.bootstrap — unresolvable seat branch (ERROR/BOUNDARY,
 
 describe("SessionService.bootstrap — D3 handoff derivation hygiene (archived/deprecated/invalidated exclusion, AC-096-2)", () => {
   it("NEGATIVE: an archived handoff doc is excluded from latest_handoffs and resume_hint", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const { corpusService, sessionService } = makeSessionService(store);
     const plan = await mustCreate(corpusService, { type: "plan", title: "Plan Archived", content: "# P" } as CreateDocInput);
     const handoff = await sessionService.writeHandoff({
@@ -284,7 +285,7 @@ describe("SessionService.bootstrap — D3 handoff derivation hygiene (archived/d
   });
 
   it("NEGATIVE: a deprecated handoff doc is excluded from latest_handoffs and resume_hint", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const { corpusService, sessionService } = makeSessionService(store);
     const plan = await mustCreate(corpusService, { type: "plan", title: "Plan Deprecated", content: "# P" } as CreateDocInput);
     const handoff = await sessionService.writeHandoff({
@@ -308,7 +309,7 @@ describe("SessionService.bootstrap — D3 handoff derivation hygiene (archived/d
   });
 
   it("NEGATIVE: a handoff doc invalidated via extra.validity.invalid_at is excluded from latest_handoffs and resume_hint", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const { corpusService, sessionService } = makeSessionService(store);
     const plan = await mustCreate(corpusService, { type: "plan", title: "Plan Invalidated", content: "# P" } as CreateDocInput);
     const handoff = await sessionService.writeHandoff({
@@ -338,7 +339,7 @@ describe("SessionService.bootstrap — D3 handoff derivation hygiene (archived/d
   });
 
   it("STATE: draft and approved handoffs are BOTH retained", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const { corpusService, sessionService } = makeSessionService(store);
     const planDraft = await mustCreate(corpusService, { type: "plan", title: "Plan Draft Handoff", content: "# P" } as CreateDocInput);
     const planApproved = await mustCreate(corpusService, { type: "plan", title: "Plan Approved Handoff", content: "# P" } as CreateDocInput);
@@ -376,7 +377,7 @@ describe("SessionService.bootstrap — D3 handoff derivation hygiene (archived/d
   });
 
   it("BOUNDARY: an invalidated-then-undone handoff (extra.validity present, invalid_at absent) is retained", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const { corpusService, sessionService } = makeSessionService(store);
     const plan = await mustCreate(corpusService, { type: "plan", title: "Plan Undone", content: "# P" } as CreateDocInput);
     const handoff = await sessionService.writeHandoff({
@@ -405,7 +406,7 @@ describe("SessionService.bootstrap — D3 handoff derivation hygiene (archived/d
   });
 
   it("REGRESSION: an archived/invalidated NON-handoff knowledge doc never participates in handoff derivation — a genuine handoff is unaffected", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const { corpusService, sessionService } = makeSessionService(store);
     const plan = await mustCreate(corpusService, { type: "plan", title: "Plan With Genuine Handoff", content: "# P" } as CreateDocInput);
     const handoff = await sessionService.writeHandoff({

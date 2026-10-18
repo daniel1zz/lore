@@ -30,6 +30,7 @@ import { CorpusService } from "../../../src/service/corpus-service.js";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { buildAssessPromptV6 } from "../../../src/ai/assess-template.js";
 import type { CreateDocInput } from "@lore/core";
+import { actedStore } from "../../live-invocation.js";
 
 const DEFAULT_BUDGETS = { max_plan_chars: 8000, max_spec_chars: 12000, max_task_chars: 4000, max_diff_chars: 24000 };
 
@@ -64,7 +65,7 @@ const TWO_CRITERIA = [
 
 describe("CorpusService.create — plan extra.ac_scope cross-entity validation (AC-ADF-5)", () => {
   it("NEGATIVE (BOUNDARY): an empty ac_scope array is rejected by Zod's planAcScopeSchema.min(1) at create time", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const { corpusService, specId } = await makePrdAndSpec(store, ONE_CRITERION);
 
     const result = await corpusService.create({
@@ -81,7 +82,7 @@ describe("CorpusService.create — plan extra.ac_scope cross-entity validation (
   });
 
   it("NEGATIVE: an ac_scope id not declared on the parent spec is rejected, naming the unknown id", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const { corpusService, specId } = await makePrdAndSpec(store, ONE_CRITERION);
 
     const result = await corpusService.create({
@@ -99,7 +100,7 @@ describe("CorpusService.create — plan extra.ac_scope cross-entity validation (
   });
 
   it("NEGATIVE: a plan parented directly under a PRD (no spec) declaring ac_scope is rejected", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const { corpusService, prdId } = await makePrdAndSpec(store, ONE_CRITERION);
 
     const result = await corpusService.create({
@@ -116,7 +117,7 @@ describe("CorpusService.create — plan extra.ac_scope cross-entity validation (
   });
 
   it("HAPPY: an ac_scope matching a declared spec criterion succeeds", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const { corpusService, specId } = await makePrdAndSpec(store, ONE_CRITERION);
 
     const result = await corpusService.create({
@@ -133,7 +134,7 @@ describe("CorpusService.create — plan extra.ac_scope cross-entity validation (
 
 describe("CorpusService.set — plan extra.ac_scope cross-entity validation on the update path (AC-ADF-5, REGRESSION)", () => {
   it("NEGATIVE: set() rejects an ac_scope id not declared on the parent spec", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const { corpusService, specId } = await makePrdAndSpec(store, ONE_CRITERION);
 
     const planResult = await corpusService.create({
@@ -151,7 +152,7 @@ describe("CorpusService.set — plan extra.ac_scope cross-entity validation on t
   });
 
   it("NEGATIVE (STATE/REGRESSION): set() rejects an empty ac_scope array — NOT auto-caught by Zod on this path (docPatchSchema.extra is untyped), proving the explicit planAcScopeSchema re-check inside set() actually runs", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const { corpusService, specId } = await makePrdAndSpec(store, ONE_CRITERION);
 
     const planResult = await corpusService.create({
@@ -169,7 +170,7 @@ describe("CorpusService.set — plan extra.ac_scope cross-entity validation on t
   });
 
   it("HAPPY: set() accepts an ac_scope matching a declared spec criterion", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const { corpusService, specId } = await makePrdAndSpec(store, ONE_CRITERION);
 
     const planResult = await corpusService.create({
@@ -187,7 +188,7 @@ describe("CorpusService.set — plan extra.ac_scope cross-entity validation on t
 
 describe("buildAssessPromptV6 — D5 scope-fit rendering restricts out-of-scope rows and the declared-id universe (AC-ADF-5)", () => {
   it("a plan scoped to a strict subset of the spec's declared criteria marks the out-of-scope row and restricts declaredAcIds + the ac_id instruction", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const { corpusService, specId } = await makePrdAndSpec(store, TWO_CRITERIA);
 
     const planResult = await corpusService.create({

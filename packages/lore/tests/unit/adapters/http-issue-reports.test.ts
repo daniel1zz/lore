@@ -52,6 +52,7 @@ import { authenticateRequest } from "../../../src/adapters/http/auth.js";
 import type { ApiKeyStore, ActorContext } from "../../../src/adapters/http/auth.js";
 import type { SessionStore } from "../../../src/adapters/http/sessions.js";
 import type { App } from "../../../src/app.js";
+import { actedStore } from "../../live-invocation.js";
 
 /** Far enough in the past that every audit entry this suite writes is "since" it. */
 const FAR_PAST = "2000-01-01T00:00:00.000Z";
@@ -251,7 +252,7 @@ async function createResolvesFix(
 
 describe("GET /api/issue-reports (AC-074-5)", () => {
   it("AC-074-5 HAPPY: cookie session returns 200", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const app = makeApp(store);
     const prdId = await createRootPrd(app.corpusService);
     const planId = await createPlan(app.corpusService, prdId);
@@ -265,7 +266,7 @@ describe("GET /api/issue-reports (AC-074-5)", () => {
   });
 
   it("AC-074-5 HAPPY: bearer token returns 200 (read-only)", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const app = makeApp(store);
     const prdId = await createRootPrd(app.corpusService);
     const planId = await createPlan(app.corpusService, prdId);
@@ -279,7 +280,7 @@ describe("GET /api/issue-reports (AC-074-5)", () => {
   });
 
   it("AC-074-5 HAPPY: field-exactness — each row carries exactly the 9 declared keys, response carries open_count", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const app = makeApp(store);
     const prdId = await createRootPrd(app.corpusService);
     const planId = await createPlan(app.corpusService, prdId);
@@ -329,7 +330,7 @@ describe("GET /api/issue-reports (AC-074-5)", () => {
   });
 
   it("AC-074-5 NEGATIVE: non-issue-report tasks are excluded from rows", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const app = makeApp(store);
     const prdId = await createRootPrd(app.corpusService);
     const planId = await createPlan(app.corpusService, prdId);
@@ -343,7 +344,7 @@ describe("GET /api/issue-reports (AC-074-5)", () => {
   });
 
   it("AC-074-5 NEGATIVE: approved reports are excluded from the open set", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const app = makeApp(store);
     const prdId = await createRootPrd(app.corpusService);
     const planId = await createPlan(app.corpusService, prdId);
@@ -365,7 +366,7 @@ describe("GET /api/issue-reports (AC-074-5)", () => {
   });
 
   it("AC-074-3 NEGATIVE: a rejected report is excluded from the open set even though its status stays draft (SPEC-005 audit-trail invariant)", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const app = makeApp(store);
     const prdId = await createRootPrd(app.corpusService);
     const planId = await createPlan(app.corpusService, prdId);
@@ -395,7 +396,7 @@ describe("GET /api/issue-reports (AC-074-5)", () => {
   // ─── BOUNDARY ──────────────────────────────────────────────────────────────
 
   it("AC-074-5 BOUNDARY: zero reports returns 200 with empty rows and open_count 0, not an error", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const app = makeApp(store);
     await createRootPrd(app.corpusService); // corpus with docs, but no issue reports
 
@@ -408,7 +409,7 @@ describe("GET /api/issue-reports (AC-074-5)", () => {
   });
 
   it("AC-074-5 BOUNDARY: an entirely empty corpus (no docs at all) also returns 200 empty, not an error", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const app = makeApp(store);
 
     const res = await getIssueReports(app);
@@ -421,7 +422,7 @@ describe("GET /api/issue-reports (AC-074-5)", () => {
   // ─── ERROR ─────────────────────────────────────────────────────────────────
 
   it("AC-074-5 ERROR: a malformed extra.issue_report (wrong nested type) degrades gracefully rather than throwing", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const app = makeApp(store);
     const prdId = await createRootPrd(app.corpusService);
     const planId = await createPlan(app.corpusService, prdId);
@@ -446,7 +447,7 @@ describe("GET /api/issue-reports (AC-074-5)", () => {
   // ─── STATE ─────────────────────────────────────────────────────────────────
 
   it("AC-074-5 STATE: rows are sorted reported_at descending (newest first)", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const app = makeApp(store);
     const prdId = await createRootPrd(app.corpusService);
     const planId = await createPlan(app.corpusService, prdId);
@@ -461,7 +462,7 @@ describe("GET /api/issue-reports (AC-074-5)", () => {
   });
 
   it("AC-074-5 STATE: an in-review report stays in the open set (only status leaving draft/in-review closes it)", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const app = makeApp(store);
     const prdId = await createRootPrd(app.corpusService);
     const planId = await createPlan(app.corpusService, prdId);
@@ -480,7 +481,7 @@ describe("GET /api/issue-reports (AC-074-5)", () => {
   it(
     "AC-074-3 STATE: a report rejected then re-approved and later reopened (content edit auto-demotes an approved doc to draft) is NOT excluded — a later approve supersedes the earlier reject",
     async () => {
-      const store = new InMemoryStore();
+      const store = actedStore(new InMemoryStore());
       const app = makeApp(store);
       const prdId = await createRootPrd(app.corpusService);
       const planId = await createPlan(app.corpusService, prdId);
@@ -519,7 +520,7 @@ describe("GET /api/issue-reports (AC-074-5)", () => {
   // ─── D7 (spec-issue-closure-loop-computed-resolution-agent-reachable, AC-ICL-9) ──
 
   it("spec-issue-closure-loop-computed-resolution-agent-reachable#AC-ICL-9 HAPPY: a resolves in-edge from a non-terminal source computes 'resolving'", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const app = makeApp(store);
     const prdId = await createRootPrd(app.corpusService);
     const planId = await createPlan(app.corpusService, prdId);
@@ -537,7 +538,7 @@ describe("GET /api/issue-reports (AC-074-5)", () => {
   });
 
   it("spec-issue-closure-loop-computed-resolution-agent-reachable#AC-ICL-9 HAPPY: a resolves in-edge from an archived source computes 'fixed'", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const app = makeApp(store);
     const prdId = await createRootPrd(app.corpusService);
     const planId = await createPlan(app.corpusService, prdId);
@@ -555,7 +556,7 @@ describe("GET /api/issue-reports (AC-074-5)", () => {
   });
 
   it("spec-issue-closure-loop-computed-resolution-agent-reachable#AC-ICL-9 STATE: an unclosed escalation — status stays 'draft' but resolution is 'fixed' — stays visible in rows while excluded from open_count", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const app = makeApp(store);
     const prdId = await createRootPrd(app.corpusService);
     const planId = await createPlan(app.corpusService, prdId);
@@ -592,7 +593,7 @@ describe("GET /api/issue-reports (AC-074-5)", () => {
   // ─── REGRESSION ────────────────────────────────────────────────────────────
 
   it("AC-074-5 REGRESSION: an unrelated v1 GET route on the same dispatcher is unaffected by the new route", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const app = makeApp(store);
     const url = makeUrl("/api/issue-reports");
     const res = await handleApiRoute(req("/api/issue-reports"), url, app, COOKIE_ACTOR);
@@ -604,7 +605,7 @@ describe("GET /api/issue-reports (AC-074-5)", () => {
   });
 
   it("AC-074-5 REGRESSION: open_count still equals rows.length when no row has a resolves edge (pre-D7 baseline — every row computes 'open')", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const app = makeApp(store);
     const prdId = await createRootPrd(app.corpusService);
     const planId = await createPlan(app.corpusService, prdId);

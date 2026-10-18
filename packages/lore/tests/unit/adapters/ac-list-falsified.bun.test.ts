@@ -54,7 +54,7 @@ import { createApp } from "../../../src/app.js";
 import { SQLiteStore } from "../../../src/store/sqlite-store.js";
 import type { App } from "../../../src/app.js";
 import type { DocRecord } from "@lore/core";
-import { liveInvocation, liveAmbient } from "../../live-invocation.js";
+import { liveInvocation, liveAmbient, actedStore, liveWriteContext } from "../../live-invocation.js";
 import type { Invocation } from "@lore/core";
 
 // ─── Command type + in-process importers ────────────────────────────────────
@@ -105,7 +105,7 @@ beforeEach(() => {
   tmpDir = resolve(mkdtempSync(join(tmpdir(), "lore-ac-list-falsified-test-")));
   mkdirSync(join(tmpDir, ".lore"), { recursive: true });
   dbPath = join(tmpDir, ".lore", "lore.db");
-  rawStore = new SQLiteStore(dbPath);
+  rawStore = actedStore(new SQLiteStore(dbPath));
   originalCwd = process.cwd();
   process.chdir(tmpDir);
   // reason: AC-TG-6 — a command naming a missing test file renders `not_measured`; the fixtures' command
@@ -223,7 +223,7 @@ async function seedSpecPlanTask(prefix: string): Promise<{
 }
 
 async function withApp<T>(fn: (app: App) => Promise<T>): Promise<T> {
-  const app = createApp(dbPath, undefined, liveAmbient());
+  const app = createApp(dbPath, undefined, liveAmbient(), liveWriteContext());
   try {
     return await fn(app);
   } finally {

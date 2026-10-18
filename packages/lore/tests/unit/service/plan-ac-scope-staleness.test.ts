@@ -35,6 +35,7 @@ import { InMemoryAIProvider } from "../../../src/ai/in-memory-provider.js";
 import { buildAssessPromptV6, extractDeclaredAcceptanceCriteria } from "../../../src/ai/assess-template.js";
 import type { AIProvider, CreateDocInput, PlanBundle, Telemetry, TelemetryEvent } from "@lore/core";
 import { computeAssessmentFacts } from "@lore/core";
+import { actedStore } from "../../live-invocation.js";
 
 const DEFAULT_BUDGETS = { max_plan_chars: 8000, max_spec_chars: 12000, max_task_chars: 4000, max_diff_chars: 24000 };
 
@@ -90,14 +91,14 @@ async function makeStaleScopeFixture(store: InMemoryStore) {
 
 describe("plan.extra.ac_scope staleness — dropping a declared AC from the spec does not invalidate an already-scoped plan (AC-ADF-11)", () => {
   it("HAPPY/STATE: creating a plan scoped to both currently-declared criteria succeeds", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const { corpusService, planId } = await makeStaleScopeFixture(store);
     const docResult = await corpusService.get(planId);
     expect(docResult.ok).toBe(true);
   });
 
   it("STATE: dropping AC-X-2 from the spec's extra.acceptance_criteria via set() SUCCEEDS — no cross-check against any plan's ac_scope", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const { corpusService, specId } = await makeStaleScopeFixture(store);
 
     const setResult = await new AcService(store, new RecordLockService(store, new GateEnforcer(undefined))).removeCriterion(specId, "AC-X-2");
@@ -105,7 +106,7 @@ describe("plan.extra.ac_scope staleness — dropping a declared AC from the spec
   });
 
   it("STATE: after the drop, computeAssessmentFacts derives dangling=['AC-X-2'], declared_ids=['AC-X-1'], scoped_ids unchanged", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const { corpusService, specId, planId } = await makeStaleScopeFixture(store);
 
     const setResult = await new AcService(store, new RecordLockService(store, new GateEnforcer(undefined))).removeCriterion(specId, "AC-X-2");
@@ -128,7 +129,7 @@ describe("plan.extra.ac_scope staleness — dropping a declared AC from the spec
   });
 
   it("STATE: buildAssessPromptV6's Facts section names AC-X-2 alongside the literal dangling-annotation phrase", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const { corpusService, specId, planId } = await makeStaleScopeFixture(store);
 
     const setResult = await new AcService(store, new RecordLockService(store, new GateEnforcer(undefined))).removeCriterion(specId, "AC-X-2");
@@ -147,7 +148,7 @@ describe("plan.extra.ac_scope staleness — dropping a declared AC from the spec
   });
 
   it("BOUNDARY: when ac_scope exactly matches the currently-declared set (no drop), dangling is [] and no AC table row is marked out of scope", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
 
     const prdResult = await corpusService.create({
@@ -199,7 +200,7 @@ describe("plan.extra.ac_scope staleness — dropping a declared AC from the spec
   });
 
   it("REGRESSION/STATE: a full assessPlan() run composes staleness facts and D4 grounding warnings in one call without interfering", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const { corpusService, specId, planId } = await makeStaleScopeFixture(store);
 
     const setResult = await new AcService(store, new RecordLockService(store, new GateEnforcer(undefined))).removeCriterion(specId, "AC-X-2");

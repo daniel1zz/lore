@@ -17,6 +17,7 @@ import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
 import { RuleService } from "../../../src/service/rule-service.js";
 import { makeRuleService } from "../../helpers/make-rule-service.js";
+import { actedStore } from "../../live-invocation.js";
 
 async function must<T>(r: { ok: boolean; value?: T; error?: unknown }, what: string): Promise<T> {
   if (!r.ok) throw new Error(`fixture ${what} failed: ${JSON.stringify(r.error)}`);
@@ -34,7 +35,7 @@ interface World {
 }
 
 async function world(): Promise<World> {
-  const store = new InMemoryStore();
+  const store = actedStore(new InMemoryStore());
   const cs = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
   const rules = makeRuleService(store);
   const prd = await must(await cs.create({ type: "prd", title: "Product", content: "p" } as CreateDocInput), "prd");

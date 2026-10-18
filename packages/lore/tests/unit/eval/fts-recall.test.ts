@@ -24,12 +24,13 @@ import {
   FtsRecallResultSchema,
 } from "../../../src/eval/scenarios/fts-recall.js";
 import type { App } from "../../../src/app.js";
+import { actedStore } from "../../live-invocation.js";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 /** Build a minimal App using InMemoryStore (no SQLite, no file I/O). */
 function makeApp(store?: InMemoryStore): App {
-  const s = store ?? new InMemoryStore();
+  const s = store ?? actedStore(new InMemoryStore());
   const telemetry = new NoOpTelemetry();
   return {
     corpusService: new CorpusService(s, new RecordLockService(s, new GateEnforcer(undefined)), telemetry),

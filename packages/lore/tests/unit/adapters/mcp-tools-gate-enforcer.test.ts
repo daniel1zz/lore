@@ -21,7 +21,7 @@
  *               blanket lore_create block
  */
 
-import { liveInvocation } from "../../live-invocation.js";
+import { liveInvocation, actedStore } from "../../live-invocation.js";
 import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { describe, it, expect, beforeEach } from "vitest";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -51,7 +51,7 @@ const stubApiKeyStore = {} as ApiKeyStore;
  * `app.ts`'s `buildAppFromSqlite`/`buildAppFromTurso` wire in production.
  */
 function makeGatedApp(): App {
-  const store = new InMemoryStore();
+  const store = actedStore(new InMemoryStore());
   const gateEnforcer = new GateEnforcer(undefined);
   return {
     corpusService: new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)), new NoOpTelemetry(), undefined, gateEnforcer),

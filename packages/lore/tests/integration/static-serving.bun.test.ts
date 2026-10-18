@@ -96,7 +96,7 @@ import type { MachineAuthStores } from "../../src/adapters/http/machine-auth.js"
 import { createApp } from "../../src/app.js";
 import type { App } from "../../src/app.js";
 import type { LoreConfig } from "@lore/core";
-import { liveAmbient } from "../live-invocation.js";
+import { liveAmbient, liveWriteContext } from "../live-invocation.js";
 
 // ─── Future contract types (this file's own DashboardServingConfig — see header) ─────
 
@@ -190,7 +190,7 @@ async function makeServer(dashboard?: DashboardServingConfig): Promise<ServerCtx
   const dbPath = join(tmpDir, ".lore", "lore.db");
 
   const config = { project: { name: "static-serving-red", author: "test" } } as unknown as LoreConfig;
-  const appResult = createApp(dbPath, config, liveAmbient());
+  const appResult = createApp(dbPath, config, liveAmbient(), liveWriteContext());
   // reason: no `sync` section above → createApp's SQLiteStore branch always returns a
   // bare App, never the Result-wrapped TursoStore branch (same narrowing as
   // tests/http/telemetry-route.bun.test.ts).

@@ -19,12 +19,13 @@ import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
 import { RuleService, findUnregisteredRuleIds } from "../../../src/service/rule-service.js";
 import { makeRuleService } from "../../helpers/make-rule-service.js";
+import { actedStore } from "../../live-invocation.js";
 
 let store: InMemoryStore;
 let corpus: CorpusService;
 
 beforeEach(() => {
-  store = new InMemoryStore();
+  store = actedStore(new InMemoryStore());
   corpus = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
 });
 

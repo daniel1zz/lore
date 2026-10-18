@@ -43,7 +43,7 @@ const root = mkdtempSync(join(tmpdir(), "lore-mcp-overhead-"));
 try {
   mkdirSync(join(root, ".lore"), { recursive: true });
   const dbPath = join(root, ".lore", "lore.db");
-  const app = createApp(dbPath, undefined, ambientOfInvocation(inv));
+  const app = createApp(dbPath, undefined, ambientOfInvocation(inv), { identity: inv.identity });
   const created = await app.corpusService.create({ type: "plan", title: "Bench Plan", content: "# Plan" } as CreateDocInput);
   if (!created.ok) throw new Error(`seed doc: ${JSON.stringify(created.error)}`);
   const slug = created.value.slug;

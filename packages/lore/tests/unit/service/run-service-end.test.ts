@@ -9,6 +9,7 @@ import { describe, expect, it } from "vitest";
 import { ok, type RunId } from "@lore/core";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { RunService, type RunClaimEnder } from "../../../src/service/run-service.js";
+import { actedStore } from "../../live-invocation.js";
 
 const COMPOSITION = { schemaVersion: 1 as const, fragments: [] };
 const NOW = new Date("2026-10-11T10:00:00.000Z");
@@ -32,7 +33,7 @@ async function registered(store: InMemoryStore, service: RunService, session: st
 
 describe("RunService.end", () => {
   it("HAPPY: ends a registered run, asks the claim owner to end its claims, returns what it handled", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const claims = claimEnder();
     const service = new RunService(store, () => NOW, claims);
     const id = await registered(store, service, "s1");
@@ -48,7 +49,7 @@ describe("RunService.end", () => {
   });
 
   it("NEGATIVE: an unknown run id is ok(unknown-run), writes nothing and never touches claims", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const claims = claimEnder();
     const service = new RunService(store, () => NOW, claims);
 
@@ -60,7 +61,7 @@ describe("RunService.end", () => {
   });
 
   it("BOUNDARY: a repeat end reports already-ended but still processes claims (a retry finishes a partial run end)", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const claims = claimEnder();
     const service = new RunService(store, () => NOW, claims);
     const id = await registered(store, service, "s2");
@@ -74,7 +75,7 @@ describe("RunService.end", () => {
   });
 
   it("ERROR: a blank reason is a VALIDATION_ERROR and ends nothing", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const service = new RunService(store, () => NOW, claimEnder());
     const id = await registered(store, service, "s3");
 
@@ -86,7 +87,7 @@ describe("RunService.end", () => {
   });
 
   it("ERROR: a service built without a claim port refuses loudly rather than ending a run and leaving its claims", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const service = new RunService(store, () => NOW);
     const id = await registered(store, service, "s4");
 
@@ -99,7 +100,7 @@ describe("RunService.end", () => {
 
 describe("RunService.register — reopen", () => {
   it("HAPPY: registering an ended run reopens it and returns the ORIGINAL stored record", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const service = new RunService(store, () => NOW, claimEnder());
     const id = await registered(store, service, "s5");
     const original = await store.getRun(id);

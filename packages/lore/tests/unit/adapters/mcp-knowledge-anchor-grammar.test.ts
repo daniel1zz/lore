@@ -47,7 +47,7 @@
  * @spec_ref spec-a-write-side-fact-with-no-read-side-address-counts-with-no §M2, AC-RR-9
  */
 
-import { liveInvocation } from "../../live-invocation.js";
+import { liveInvocation, actedStore } from "../../live-invocation.js";
 import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
 import { createHash } from "node:crypto";
@@ -82,7 +82,7 @@ let corpusService: CorpusService;
 let app: App;
 
 function makeApp(): App {
-  store = new InMemoryStore();
+  store = actedStore(new InMemoryStore());
   corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
   const judgmentService = new JudgmentService(store, new NoOpTelemetry());
   const aiProvider = new InMemoryAIProvider("in-memory", { kind: "ok", content: "{}" });

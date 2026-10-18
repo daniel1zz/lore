@@ -61,6 +61,7 @@ import { CorpusService } from "../../../src/service/corpus-service.js";
 import { TaskWorkflowService, type EvidenceInput } from "../../../src/service/task-workflow-service.js";
 import { exitCode } from "../../../src/adapters/cli/utils.js";
 import type { CreateDocInput } from "@lore/core";
+import { actedStore } from "../../live-invocation.js";
 
 // ─── VerifyRunnerService fixture builders (mirrors verify-runner-service.test.ts) ──
 
@@ -398,7 +399,7 @@ async function createTaskDoc(cs: CorpusService, planId: string, title = "Test Ta
 
 describe("REGRESSION — caller-supplied inconclusive result via addEvidence is rejected (SPEC-061 §Scope D2, mirrors the attestation guard)", () => {
   it("VALIDATION_ERROR field result, doc unchanged, exit code 4 (same mapping as the pre-existing attestation-smuggling guard)", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
     const taskWorkflowService = new TaskWorkflowService(store, undefined, { claimTtlMinutes: 120 });
     const planId = await createPlanDoc(corpusService);
@@ -430,7 +431,7 @@ describe("REGRESSION — caller-supplied inconclusive result via addEvidence is 
   });
 
   it("a legitimate pass/fail addEvidence call is UNAFFECTED by the new guard (REGRESSION)", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
     const taskWorkflowService = new TaskWorkflowService(store, undefined, { claimTtlMinutes: 120 });
     const planId = await createPlanDoc(corpusService);

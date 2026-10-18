@@ -28,6 +28,7 @@ import { DecisionService } from "../../src/service/decision-service.js";
 import { RunReapService, type ReapReport } from "../../src/service/run-reap-service.js";
 import { createRealProcessTablePort, type ProcessTablePort } from "../../src/adapters/process-table-port.js";
 import { ok } from "@lore/core";
+import { actedStore } from "../live-invocation.js";
 
 const PACKAGE_ROOT = new URL("../../", import.meta.url).pathname.replace(/\/$/, "");
 const REPO_ROOT = join(PACKAGE_ROOT, "..", "..");
@@ -420,7 +421,7 @@ describe("AC-AU-5 lore run reap", () => {
         return outcome;
       },
     };
-    const stores = [new SQLiteStore(fixture.dbPath), new SQLiteStore(fixture.dbPath)];
+    const stores = [actedStore(new SQLiteStore(fixture.dbPath)), actedStore(new SQLiteStore(fixture.dbPath))];
     try {
       const services = stores.map(
         (store) =>

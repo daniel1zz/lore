@@ -51,7 +51,7 @@
  * @spec_ref AC-061-11 AC-061-12 AC-061-13 AC-061-14 AC-061-17
  */
 
-import { liveInvocation } from "../../live-invocation.js";
+import { liveInvocation, actedStore } from "../../live-invocation.js";
 import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
 import { describe, it, expect, beforeEach } from "vitest";
@@ -351,7 +351,7 @@ let corpusService: CorpusService;
 
 /** Mirrors `mcp-tools-task-workflow.test.ts`'s fixture App verbatim. */
 function makeApp(): App {
-  store = new InMemoryStore();
+  store = actedStore(new InMemoryStore());
   corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
   return {
     corpusService,

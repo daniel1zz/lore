@@ -35,7 +35,7 @@ import { createApp, type App } from "../../src/app.js";
 import { SQLiteStore } from "../../src/store/sqlite-store.js";
 import { TursoStore } from "../../src/store/turso-store.js";
 import type { LoreConfig, LoreError, Result } from "@lore/core";
-import { liveAmbient } from "../live-invocation.js";
+import { liveAmbient, liveWriteContext } from "../live-invocation.js";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────
 
@@ -101,7 +101,7 @@ describe("createApp store selection — in-process (spec-eager-libsql-load-makes
     const config: LoreConfig = {
       project: { name: "libsql-store-selection-oracle", author: "libsql-store-selection-oracle" },
     };
-    const result = createApp(dbPath, config, liveAmbient());
+    const result = createApp(dbPath, config, liveAmbient(), liveWriteContext());
     expect(isResult(result)).toBe(false);
     const app = result as App;
     expect(storeOf(app)).toBeInstanceOf(SQLiteStore);
@@ -116,7 +116,7 @@ describe("createApp store selection — in-process (spec-eager-libsql-load-makes
       project: { name: "libsql-store-selection-oracle", author: "libsql-store-selection-oracle" },
       sync: { enabled: false, auth_token_env: "LORE_SYNC_TOKEN", interval: 60 },
     };
-    const result = createApp(dbPath, config, liveAmbient());
+    const result = createApp(dbPath, config, liveAmbient(), liveWriteContext());
     expect(isResult(result)).toBe(false);
     const app = result as App;
     expect(storeOf(app)).toBeInstanceOf(SQLiteStore);
@@ -131,7 +131,7 @@ describe("createApp store selection — in-process (spec-eager-libsql-load-makes
     const previous = process.env[tokenEnvName];
     delete process.env[tokenEnvName];
     try {
-      const result = createApp(dbPath, syncEnabledConfig(tokenEnvName), liveAmbient());
+      const result = createApp(dbPath, syncEnabledConfig(tokenEnvName), liveAmbient(), liveWriteContext());
       expect(isResult(result)).toBe(true);
       const asResult = result as Result<App, LoreError>;
       expect(asResult.ok).toBe(false);
@@ -160,7 +160,7 @@ describe("createApp store selection — in-process (spec-eager-libsql-load-makes
     const previous = process.env[tokenEnvName];
     delete process.env[tokenEnvName];
     try {
-      const result = createApp(dbPath, syncEnabledConfig(tokenEnvName), liveAmbient());
+      const result = createApp(dbPath, syncEnabledConfig(tokenEnvName), liveAmbient(), liveWriteContext());
       // Anti-downgrade invariant: whatever the error CODE turns out to be,
       // there must never be a working App backed by SQLiteStore on this path.
       if (!isResult(result)) {

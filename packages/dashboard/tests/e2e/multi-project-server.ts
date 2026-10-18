@@ -77,15 +77,16 @@ async function main(): Promise<void> {
   const rawKey = await ensureLocalApiKey(machineAuth.apiKeyStore, machineAuth.baseDir);
 
   // reason: this script is the e2e server's entry — it resolves the Invocation once and composes both apps from it.
-  const ambient = ambientOfInvocation(await resolveEntryInvocation(process.argv.slice(2)));
-  const app: App = createApp(join(primaryProjectRoot, ".lore", "lore.db"), undefined, ambient);
+  const inv = await resolveEntryInvocation(process.argv.slice(2));
+  const ambient = ambientOfInvocation(inv);
+  const app: App = createApp(join(primaryProjectRoot, ".lore", "lore.db"), undefined, ambient, { identity: inv.identity });
 
   let mountRegistry: MountRegistry<App> | undefined;
   if (registryProjects.length > 0) {
     mountRegistry = createMountRegistry<App>();
     await mountRegistry.init(
       { projects: registryProjects },
-      { createApp: async (dbPath: string) => createApp(dbPath, undefined, ambient) },
+      { createApp: async (dbPath: string) => createApp(dbPath, undefined, ambient, { identity: inv.identity }) },
     );
   }
 

@@ -30,6 +30,7 @@ import { AIProviderService } from "../../../src/service/ai-provider-service.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { InMemoryAIProvider } from "../../../src/ai/in-memory-provider.js";
+import { actedStore } from "../../live-invocation.js";
 
 // ─── Harness ─────────────────────────────────────────────────────────────────
 
@@ -135,7 +136,7 @@ function expectAllOrCountedOmission(prompt: string, ids: string[], noun: string)
 describe("review judge sees structured parts (#107)", () => {
   describe("baseline node (HAPPY)", () => {
     async function leafWorld() {
-      const store = new InMemoryStore();
+      const store = actedStore(new InMemoryStore());
       await insertDoc(store, {
         type: "baseline",
         slug: "baseline-orders",
@@ -192,7 +193,7 @@ describe("review judge sees structured parts (#107)", () => {
     });
 
     it("puts each rule's confidence and lifecycle in the input (spec: id, statement, confidence, lifecycle)", async () => {
-      const store = new InMemoryStore();
+      const store = actedStore(new InMemoryStore());
       await insertDoc(store, {
         type: "baseline",
         slug: "baseline-states",
@@ -211,7 +212,7 @@ describe("review judge sees structured parts (#107)", () => {
     });
 
     it("puts every glossary term of a branch node in the judge input (glossary is not allowed on leaves)", async () => {
-      const store = new InMemoryStore();
+      const store = actedStore(new InMemoryStore());
       await insertDoc(store, {
         type: "baseline",
         slug: "baseline-branch",
@@ -235,7 +236,7 @@ describe("review judge sees structured parts (#107)", () => {
 
   describe("plan review sees the parent spec's structured acceptance criteria (HAPPY)", () => {
     async function planWorld() {
-      const store = new InMemoryStore();
+      const store = actedStore(new InMemoryStore());
       const spec = await insertDoc(store, {
         type: "spec",
         slug: "spec-parent",
@@ -286,7 +287,7 @@ describe("review judge sees structured parts (#107)", () => {
 
   describe("size caps never drop content silently (BOUNDARY)", () => {
     it("a leaf with far more rules than any prompt budget shows all of them or counts the omitted ones", async () => {
-      const store = new InMemoryStore();
+      const store = actedStore(new InMemoryStore());
       const rules = Array.from({ length: 150 }, (_, i) =>
         rule(`BR-${i + 1}`, `Rule number ${i + 1}: ${"x".repeat(380)}`),
       );
@@ -302,7 +303,7 @@ describe("review judge sees structured parts (#107)", () => {
     });
 
     it("a plan whose parent spec has a huge criteria list shows every criterion or counts the omitted ones", async () => {
-      const store = new InMemoryStore();
+      const store = actedStore(new InMemoryStore());
       const acs = Array.from({ length: 120 }, (_, i) =>
         criterion(`AC-BIG-${i + 1}`, `Criterion ${i + 1}: ${"y".repeat(300)}`),
       );

@@ -53,6 +53,7 @@ import type {
 } from "@lore/core";
 import { ok } from "@lore/core";
 import { RecordLockService } from "../../../src/service/record-lock-service.js";
+import { actedStore } from "../../live-invocation.js";
 
 /**
  * task-t3-hardening-reachable-override-escape-real-ai-provenance — a minimal AIProvider
@@ -126,7 +127,7 @@ const VALID_UAT_VERDICT = {
 async function makeApp(
   opts: { ledgerAutoApprove?: boolean; judgmentRequiredTypes?: readonly string[]; wireOverridePort?: boolean } = {},
 ) {
-  const store = new InMemoryStore();
+  const store = actedStore(new InMemoryStore());
   await seedLiveRule(store);
   const telemetry = makeTelemetry();
   const enforcer = new GateEnforcer(undefined);

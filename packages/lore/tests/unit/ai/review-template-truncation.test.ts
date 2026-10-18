@@ -27,6 +27,7 @@ import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { InMemoryAIProvider } from "../../../src/ai/in-memory-provider.js";
 import { runDeterministicChecks } from "@lore/core";
 import type { AIProvider, CreateDocInput, DocRecord, ReviewBundle, Telemetry, TelemetryEvent } from "@lore/core";
+import { actedStore } from "../../live-invocation.js";
 
 const BUDGETS = { max_doc_chars: 12000, max_context_chars: 8000 };
 
@@ -129,7 +130,7 @@ async function makeReviewBundle(store: InMemoryStore, content: string) {
 
 describe("AIProviderService.judgeDoc — persisted judgment.truncated mirrors docTruncated (AC-ADF-8)", () => {
   it("a 36000-char spec body: the returned NewReviewJudgment has truncated === true", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const bundle = await makeReviewBundle(store, "z".repeat(36000));
     const checks = runDeterministicChecks(bundle);
     const provider = new InMemoryAIProvider("in-memory", { kind: "ok", content: VALID_REVIEW_JSON });
@@ -142,7 +143,7 @@ describe("AIProviderService.judgeDoc — persisted judgment.truncated mirrors do
   });
 
   it("a small spec body: the truncated key is ABSENT entirely (additive-only, never a stored false)", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const bundle = await makeReviewBundle(store, "Small spec body, well under budget.");
     const checks = runDeterministicChecks(bundle);
     const provider = new InMemoryAIProvider("in-memory", { kind: "ok", content: VALID_REVIEW_JSON });

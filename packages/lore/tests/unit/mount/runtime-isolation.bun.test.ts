@@ -46,7 +46,7 @@ import { createMachineAuthStores, type MachineAuthStores } from "../../../src/ad
 import { createMountRegistry } from "../../../src/mount/mount-registry.js";
 import type { MountRegistryDeps } from "../../../src/mount/types.js";
 import type { DashboardConfig } from "@lore/core";
-import { liveAmbient } from "../../live-invocation.js";
+import { liveAmbient, liveWriteContext } from "../../live-invocation.js";
 
 const scratchDirs: string[] = [];
 
@@ -105,10 +105,10 @@ async function makeTestServer(): Promise<TestContext> {
   mkdirSync(join(brokenRoot, ".lore"), { recursive: true });
   // Give "broken" a real (empty-schema) db file so probeUpstreamDb succeeds and
   // classification proceeds to createApp — where the STUB (not a real corpus) takes over.
-  const seedApp = createApp(join(brokenRoot, ".lore", "lore.db"), undefined, liveAmbient());
+  const seedApp = createApp(join(brokenRoot, ".lore", "lore.db"), undefined, liveAmbient(), liveWriteContext());
   seedApp.close();
 
-  const healthyApp = createApp(join(healthyRoot, ".lore", "lore.db"), undefined, liveAmbient());
+  const healthyApp = createApp(join(healthyRoot, ".lore", "lore.db"), undefined, liveAmbient(), liveWriteContext());
 
   const deps: MountRegistryDeps<App> = {
     createApp: async (dbPath: string) => {

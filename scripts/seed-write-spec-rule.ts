@@ -197,7 +197,8 @@ export async function seedWriteSpecRule(app: App): Promise<SeedResult> {
 if (import.meta.main) {
   const dbPath =
     process.argv[2] ?? process.env["LORE_DB_PATH"] ?? join(process.cwd(), ".lore", "lore.db");
-  const app = createApp(dbPath, undefined, ambientOfInvocation(await resolveEntryInvocation(process.argv.slice(2))));
+  const inv = await resolveEntryInvocation(process.argv.slice(2));
+  const app = createApp(dbPath, undefined, ambientOfInvocation(inv), { identity: inv.identity });
   try {
     const result = await seedWriteSpecRule(app);
     console.log(JSON.stringify(result));

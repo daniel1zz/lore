@@ -23,6 +23,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { STATE_BINDING_ARMED_ACTION } from "@lore/core";
 import { SQLiteStore } from "../../../src/store/sqlite-store.js";
+import { actedStore } from "../../live-invocation.js";
 
 vi.setConfig({ testTimeout: 300_000, hookTimeout: 300_000 });
 
@@ -107,7 +108,7 @@ interface Row {
 }
 
 async function evidenceRows(dir: string, task: string): Promise<Row[]> {
-  const store = new SQLiteStore(join(dir, ".lore", "lore.db"));
+  const store = actedStore(new SQLiteStore(join(dir, ".lore", "lore.db")));
   try {
     const r = await store.findMany({ type: "task" });
     if (!r.ok) throw new Error(JSON.stringify(r.error));
@@ -120,7 +121,7 @@ async function evidenceRows(dir: string, task: string): Promise<Row[]> {
 }
 
 async function armingRows(dir: string): Promise<number> {
-  const store = new SQLiteStore(join(dir, ".lore", "lore.db"));
+  const store = actedStore(new SQLiteStore(join(dir, ".lore", "lore.db")));
   try {
     const r = await store.listAuditRowsByAction(STATE_BINDING_ARMED_ACTION);
     if (!r.ok) throw new Error(JSON.stringify(r.error));

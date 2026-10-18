@@ -18,9 +18,10 @@ import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
 import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
+import { actedStore } from "../../live-invocation.js";
 
 function makeFixture(): { store: InMemoryStore; service: CorpusService } {
-  const store = new InMemoryStore();
+  const store = actedStore(new InMemoryStore());
   const lock = new RecordLockService(store, new GateEnforcer(undefined));
   const service = new CorpusService(store, lock, undefined, undefined, undefined, undefined, true);
   return { store, service };

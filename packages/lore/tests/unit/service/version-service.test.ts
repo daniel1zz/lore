@@ -27,6 +27,7 @@ import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { VersionService } from "../../../src/service/version-service.js";
 import { err } from "@lore/core";
 import type { DocRecord, VersionRecord } from "@lore/core";
+import { actedStore } from "../../live-invocation.js";
 
 // ─── Factories ────────────────────────────────────────────────────────────────
 
@@ -85,7 +86,7 @@ let service: VersionService;
 
 beforeEach(() => {
   _seq = 0;
-  store = new InMemoryStore();
+  store = actedStore(new InMemoryStore());
   service = new VersionService(store, new RecordLockService(store, new GateEnforcer(undefined)));
 });
 

@@ -185,7 +185,8 @@ export async function runCheck(app: App, ledger: AcRefLedgerFile): Promise<AcRef
 export async function main(dbPathOverride?: string, repoRootOverride?: string): Promise<number> {
   const repoRoot = repoRootOverride ?? REPO_ROOT;
   const dbPath = dbPathOverride ?? findLoreDbPath({ cwd: process.cwd(), env: process.env });
-  const app = createApp(dbPath, undefined, ambientOfInvocation(await resolveEntryInvocation(process.argv.slice(2))));
+  const inv = await resolveEntryInvocation(process.argv.slice(2));
+  const app = createApp(dbPath, undefined, ambientOfInvocation(inv), { identity: inv.identity });
   try {
     const ledger = loadLedgerFromDisk(repoRoot);
     const report = await runCheck(app, ledger);

@@ -25,6 +25,7 @@ import { CorpusService } from "../../../src/service/corpus-service.js";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { InMemoryAIProvider } from "../../../src/ai/in-memory-provider.js";
 import type { AIProvider, CreateDocInput, PlanBundle, Telemetry, TelemetryEvent } from "@lore/core";
+import { actedStore } from "../../live-invocation.js";
 
 const DEFAULT_BUDGETS = { max_plan_chars: 8000, max_spec_chars: 12000, max_task_chars: 4000, max_diff_chars: 24000 };
 
@@ -88,7 +89,7 @@ const INVALID_SEVERITY_ENUM_JSON = JSON.stringify({
 
 describe("assessPlan — typed-field schema violations are treated as malformed JSON, not silently accepted (AC-ADF-3)", () => {
   it("two syntactically-valid-but-typed-field-invalid responses in a row → AI_PROVIDER_ERROR after exactly one corrective retry, no document created", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const bundle = await makeBundle(store);
 
     const beforeResult = await store.findMany({});
@@ -121,7 +122,7 @@ describe("assessPlan — typed-field schema violations are treated as malformed 
   });
 
   it("the out-of-range dimension score alone (first attempt) triggers the corrective retry — proves the typed field is actually validated, not just skimmed for legacy fields", async () => {
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const bundle = await makeBundle(store);
 
     // Second attempt is well-formed so we can observe that a retry DID happen because of

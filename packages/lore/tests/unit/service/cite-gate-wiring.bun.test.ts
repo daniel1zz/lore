@@ -19,7 +19,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { LoreConfigSchema, type CreateDocInput, type LoreConfig } from "@lore/core";
 import { createApp, type App } from "../../../src/app.js";
-import { liveAmbient } from "../../live-invocation.js";
+import { liveAmbient, liveWriteContext } from "../../live-invocation.js";
 
 const PROJECT = { name: "wiring", author: "tester" };
 
@@ -86,7 +86,7 @@ function rulesOf(a: App): NonNullable<App["ruleService"]> {
 }
 
 function open(config: LoreConfig | undefined): App {
-  const made = config === undefined ? createApp(join(dir, "c.db"), undefined, liveAmbient()) : createApp(join(dir, "c.db"), config, liveAmbient());
+  const made = config === undefined ? createApp(join(dir, "c.db"), undefined, liveAmbient(), liveWriteContext()) : createApp(join(dir, "c.db"), config, liveAmbient(), liveWriteContext());
   if ("ok" in made) throw new Error(`createApp failed: ${JSON.stringify(made)}`);
   app = made;
   return made;

@@ -26,6 +26,7 @@ import { GlobalConfigService } from "../../../src/service/global-config-service.
 import { computeConfigHash } from "../../../src/service/config-service.js";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import type { GlobalLoreConfig } from "@lore/core";
+import { actedStore } from "../../live-invocation.js";
 
 // ─── Harness ──────────────────────────────────────────────────────────────────
 
@@ -46,7 +47,7 @@ function sha256(text: string): string {
 }
 
 function harness() {
-  const store = new InMemoryStore();
+  const store = actedStore(new InMemoryStore());
   const globalConfigService = new GlobalConfigService(configPath, store.appendAuditEntry.bind(store));
   return { store, globalConfigService };
 }
@@ -197,7 +198,7 @@ describe("SPEC-064 — GlobalConfigService", () => {
 
   it("BOUNDARY: first write creates missing nested parent directories", async () => {
     const nestedPath = join(workDir, "a", "b", "c", "config.yaml");
-    const store = new InMemoryStore();
+    const store = actedStore(new InMemoryStore());
     const nestedService = new GlobalConfigService(nestedPath, store.appendAuditEntry.bind(store));
 
     const result = await nestedService.update({ defaults: { format: "json" } }, { actor: "tester" });

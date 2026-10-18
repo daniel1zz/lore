@@ -60,6 +60,7 @@ import type { CreateDocInput, DocRecord } from "@lore/core";
 import type { App } from "../../../src/app.js";
 import type { ApiKeyStore } from "../../../src/adapters/http/auth.js";
 import { makeRuleService } from "../../helpers/make-rule-service.js";
+import { actedStore } from "../../live-invocation.js";
 
 /** Pinned section heading — the implementation must emit exactly this line. */
 const HEADING = "## Governing rules";
@@ -71,7 +72,7 @@ let rules: RuleService;
 let app: App;
 
 function makeApp(): App {
-  store = new InMemoryStore();
+  store = actedStore(new InMemoryStore());
   corpus = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
   rules = makeRuleService(store);
   const sessionService = new SessionService(store, {

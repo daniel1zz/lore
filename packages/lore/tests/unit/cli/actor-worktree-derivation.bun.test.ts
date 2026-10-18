@@ -61,7 +61,7 @@ import {
   resolveActorWithIdentitySource,
   resolveActorWithSource,
 } from "../../../src/adapters/cli/utils.js";
-import { liveInvocation, liveAmbient } from "../../live-invocation.js";
+import { liveInvocation, liveAmbient, liveWriteContext } from "../../live-invocation.js";
 import type { Invocation } from "@lore/core";
 
 // ─── Git fixture helpers ────────────────────────────────────────────────────
@@ -403,7 +403,7 @@ describe("SPEC-104 AC-ACTOR-5 — lore claim from a linked worktree records agen
     const dbPath = join(loreDir, "lore.db");
     {
       mkdirSync(loreDir, { recursive: true });
-      const setupApp = createApp(dbPath, undefined, liveAmbient());
+      const setupApp = createApp(dbPath, undefined, liveAmbient(), liveWriteContext());
       const planResult = await setupApp.corpusService.create({
         type: "plan",
         title: "Actor Derive E2E Plan",
@@ -435,7 +435,7 @@ describe("SPEC-104 AC-ACTOR-5 — lore claim from a linked worktree records agen
       expect(output.stderr.join("\n")).toBe("");
 
       // Verify the durable record, not just stdout.
-      const verifyApp = createApp(dbPath, undefined, liveAmbient());
+      const verifyApp = createApp(dbPath, undefined, liveAmbient(), liveWriteContext());
       const docResult = await verifyApp.corpusService.get(taskResult.value.slug);
       verifyApp.close();
       if (!docResult.ok) throw new Error(`verify get failed: ${JSON.stringify(docResult.error)}`);

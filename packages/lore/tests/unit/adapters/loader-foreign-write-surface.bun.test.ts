@@ -67,7 +67,7 @@ import { saveConfig } from "@lore/core/node";
 import { createApp, type App } from "../../../src/app.js";
 import { loadLoreApp } from "../../../src/adapters/cli/loader.js";
 import { FOREIGN_CORPUS_WRITE_TOKEN } from "../../../src/service/foreign-corpus-write-guard.js";
-import { liveAmbient, liveInvocation } from "../../live-invocation.js";
+import { liveAmbient, liveInvocation, liveWriteContext } from "../../live-invocation.js";
 
 // ─── Fixtures ──────────────────────────────────────────────────────────────
 
@@ -98,7 +98,7 @@ function initGitRepo(dir: string): void {
 function makeCorpus(dir: string): void {
   const loreDir = join(dir, ".lore");
   mkdirSync(loreDir, { recursive: true });
-  const app = createApp(join(loreDir, "lore.db"), undefined, liveAmbient());
+  const app = createApp(join(loreDir, "lore.db"), undefined, liveAmbient(), liveWriteContext());
   (app as App).close();
 }
 

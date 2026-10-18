@@ -149,7 +149,7 @@ async function buildMountRegistry(inv: Invocation): Promise<MountRegistry<App> |
     // reason: registered projects are always plain local SQLite corpora (no `sync`
     // config passed) — `createApp(dbPath)`'s single-arg overload always returns a
     // bare `App`, never `Result<App>` (see `app.ts`'s overload pair).
-    { createApp: async (registryDbPath: string) => createApp(registryDbPath, undefined, ambientOfInvocation(inv)) },
+    { createApp: async (registryDbPath: string) => createApp(registryDbPath, undefined, ambientOfInvocation(inv), { identity: inv.identity }) },
   );
 
   process.stdout.write(`\n[dashboard] Multi-project registry (${registeredProjects.length} declared):\n`);
