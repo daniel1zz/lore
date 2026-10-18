@@ -16,6 +16,7 @@
 import type { IssueCloseOnArchive, IssueSyncOutcome } from "../../service/issue-close-on-archive.js";
 import { exitCode, formatErrorFor } from "./utils.js";
 import type { Invocation } from "@lore/core";
+import { printLine } from "./output.js";
 
 /** Minimal shape of the step this module drives — keeps the unit test free of a real store. */
 export type IssueSyncDriver = Pick<IssueCloseOnArchive, "planSync" | "applySync">;
@@ -32,17 +33,17 @@ export async function runIssuesSync(
   opts: { apply: boolean; json: boolean },
 ): Promise<number> {
   if (driver === undefined) {
-    process.stderr.write("Error: this App has no issue-sync step wired.\n");
+    inv.io.stderr.write("Error: this App has no issue-sync step wired.\n");
     return 1;
   }
   const outcome: IssueSyncOutcome = opts.apply ? await driver.applySync() : await driver.planSync();
 
   if (outcome.kind === "not_configured") {
-    process.stderr.write("Error: GitHub not configured — set feedback.upstream.repo in .lore/config.yaml, then re-run\n");
+    inv.io.stderr.write("Error: GitHub not configured — set feedback.upstream.repo in .lore/config.yaml, then re-run\n");
     return 1;
   }
   if (outcome.kind === "store_error") {
-    process.stderr.write(formatErrorFor(inv, outcome.error) + "\n");
+    inv.io.stderr.write(formatErrorFor(inv, outcome.error) + "\n");
     return exitCode(outcome.error);
   }
 
@@ -51,7 +52,7 @@ export async function runIssuesSync(
   const failed = applyFailed || plan.unreadable.length > 0;
 
   if (opts.json) {
-    console.log( // CLI surface
+    printLine(inv.io.stdout,  // CLI surface
       JSON.stringify(
         {
           ok: !failed,
@@ -69,25 +70,25 @@ export async function runIssuesSync(
   }
 
   if (plan.drift.length === 0 && plan.unreadable.length === 0) {
-    console.log("sync: clean — no GitHub issue drift found."); // CLI surface
+    printLine(inv.io.stdout, "sync: clean — no GitHub issue drift found."); // CLI surface
     return 0;
   }
   if (plan.drift.length > 0) {
-    console.log(`sync: ${plan.drift.length} issue(s) drifted${applied === undefined ? " (run with --apply to repair)" : ""}:`); // CLI surface
+    printLine(inv.io.stdout, `sync: ${plan.drift.length} issue(s) drifted${applied === undefined ? " (run with --apply to repair)" : ""}:`); // CLI surface
     for (const entry of plan.drift) {
       const facts = [`${entry.computed}`, `github ${entry.github_state}`, entry.missing_label ? "label missing" : "label ok"];
-      console.log(`  #${entry.number} ${entry.slug} — ${facts.join(", ")}`); // CLI surface
+      printLine(inv.io.stdout, `  #${entry.number} ${entry.slug} — ${facts.join(", ")}`); // CLI surface
     }
   }
   for (const entry of applied ?? []) {
     if (entry.error === undefined) {
-      console.log(`  #${entry.number}: repaired (closed=${entry.closed}, labelled=${entry.labelled})`); // CLI surface
+      printLine(inv.io.stdout, `  #${entry.number}: repaired (closed=${entry.closed}, labelled=${entry.labelled})`); // CLI surface
     } else {
-      process.stderr.write(`  #${entry.number}: repair FAILED — ${entry.error}\n`);
+      inv.io.stderr.write(`  #${entry.number}: repair FAILED — ${entry.error}\n`);
     }
   }
   for (const entry of plan.unreadable) {
-    process.stderr.write(`  #${entry.number} ${entry.slug}: could not read GitHub state — ${entry.error}\n`);
+    inv.io.stderr.write(`  #${entry.number} ${entry.slug}: could not read GitHub state — ${entry.error}\n`);
   }
   return failed ? 1 : 0;
 }

@@ -38,6 +38,7 @@ import { withValidityStatus } from "../../../service/validity-service.js";
 import type { DocType, ReviewJudgment } from "@lore/core";
 import type { PendingDoc } from "../../../service/review-service.js";
 import { invocationOf } from "../command-invocation.js";
+import { printLine } from "../output.js";
 
 /** A fresh (non-stale) escalation: decision === "escalate" AND judgment.doc_version === doc.version. */
 function isFreshEscalation(judgment: ReviewJudgment | null, docVersion: number): boolean {
@@ -93,7 +94,7 @@ export default defineCommand({
       // in both output modes. A read failure is loud, never an empty list.
       const decisionsResult = await collectPendingDecisions(dbPath, inv.env, repoRoot);
       if (!decisionsResult.ok) {
-        process.stderr.write(formatErrorFor(inv, decisionsResult.error) + "\n");
+        inv.io.stderr.write(formatErrorFor(inv, decisionsResult.error) + "\n");
         setExitCode(exitCode(decisionsResult.error));
         return;
       }
@@ -101,7 +102,7 @@ export default defineCommand({
       // AC-AU-10: the sampling floor's audit queue is listed SEPARATELY from the blocking escalations.
       const auditResult = await collectAuditItems(dbPath);
       if (!auditResult.ok) {
-        process.stderr.write(formatErrorFor(inv, auditResult.error) + "\n");
+        inv.io.stderr.write(formatErrorFor(inv, auditResult.error) + "\n");
         setExitCode(exitCode(auditResult.error));
         return;
       }
@@ -118,7 +119,7 @@ export default defineCommand({
       const result = await app.reviewService.pending(filters);
 
       if (!result.ok) {
-        process.stderr.write(formatErrorFor(inv, result.error) + "\n");
+        inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
         setExitCode(exitCode(result.error));
         return;
       }
@@ -132,10 +133,10 @@ export default defineCommand({
       // post-filter empty check below).
       if (docs.length === 0) {
         if (args.json) {
-          console.log(JSON.stringify({ ok: true, data: { docs: [], total: 0, decisions, audit } }, null, 2));
+          printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { docs: [], total: 0, decisions, audit } }, null, 2));
         } else {
-          console.log("No pending documents.");
-          if (decisionsBlock !== "") console.log(decisionsBlock);
+          printLine(inv.io.stdout, "No pending documents.");
+          if (decisionsBlock !== "") printLine(inv.io.stdout, decisionsBlock);
         }
         return;
       }
@@ -146,7 +147,7 @@ export default defineCommand({
       for (const doc of docs) {
         const judgmentResult = await app.judgmentService.latestFor(doc.id);
         if (!judgmentResult.ok) {
-          process.stderr.write(formatErrorFor(inv, judgmentResult.error) + "\n");
+          inv.io.stderr.write(formatErrorFor(inv, judgmentResult.error) + "\n");
           setExitCode(exitCode(judgmentResult.error));
           return;
         }
@@ -162,7 +163,7 @@ export default defineCommand({
         // two "now"s (the same rule `lore list`'s single `nowIso` read enforces).
         const nowIso = new Date().toISOString();
         const withValidity = withValidityStatus(visibleDocs, nowIso);
-        console.log(
+        printLine(inv.io.stdout, 
           JSON.stringify(
             {
               ok: true,
@@ -181,23 +182,23 @@ export default defineCommand({
       }
 
       if (visibleDocs.length === 0) {
-        console.log(args.escalated ? "No escalated documents." : "No pending documents.");
-        if (decisionsBlock !== "") console.log(decisionsBlock);
+        printLine(inv.io.stdout, args.escalated ? "No escalated documents." : "No pending documents.");
+        if (decisionsBlock !== "") printLine(inv.io.stdout, decisionsBlock);
         return;
       }
 
-      console.log(formatTable(PENDING_TABLE_HEADERS, buildPendingTableRows(visibleDocs, judgments)));
-      console.log(`\n${visibleDocs.length} ${args.escalated ? "escalated" : "pending"} document${visibleDocs.length === 1 ? "" : "s"}`);
+      printLine(inv.io.stdout, formatTable(PENDING_TABLE_HEADERS, buildPendingTableRows(visibleDocs, judgments)));
+      printLine(inv.io.stdout, `\n${visibleDocs.length} ${args.escalated ? "escalated" : "pending"} document${visibleDocs.length === 1 ? "" : "s"}`);
 
-      if (decisionsBlock !== "") console.log(decisionsBlock);
+      if (decisionsBlock !== "") printLine(inv.io.stdout, decisionsBlock);
 
       if (args.escalated) {
         for (const doc of visibleDocs) {
           const judgment = judgments.get(doc.id);
           if (judgment !== null && judgment !== undefined && judgment.blocking_questions.length > 0) {
-            console.log(`\n${doc.title}:`);
+            printLine(inv.io.stdout, `\n${doc.title}:`);
             for (const question of judgment.blocking_questions) {
-              console.log(`  - ${question}`);
+              printLine(inv.io.stdout, `  - ${question}`);
             }
           }
         }

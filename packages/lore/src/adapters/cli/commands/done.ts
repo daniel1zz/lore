@@ -156,6 +156,7 @@ import { resolveCallerSession } from "../caller-session.js";
 import { formatDoneMessage, formatLastTaskAdvisory } from "../done-render.js";
 import { emitIssueCloseItems } from "../issue-close-output.js";
 import { invocationOf } from "../command-invocation.js";
+import { printLine } from "../output.js";
 
 /**
  * Resolves `--override-attestation-cite <n>`'s citation into a self-contained
@@ -328,7 +329,7 @@ export default defineCommand({
     const overrideAttestationRaw = args["override-attestation"];
     const hasOverrideAttestation = typeof overrideAttestationRaw === "string";
     if (hasOverrideAttestation && overrideAttestationRaw.trim() === "") {
-      process.stderr.write(
+      inv.io.stderr.write(
         "Error: --override-attestation requires a non-empty, non-whitespace reason.\n",
       );
       exitCli(2);
@@ -346,7 +347,7 @@ export default defineCommand({
     const overrideAttestationCiteRaw = args["override-attestation-cite"];
     const hasOverrideAttestationCite = typeof overrideAttestationCiteRaw === "string";
     if (hasOverrideAttestation && hasOverrideAttestationCite) {
-      process.stderr.write(
+      inv.io.stderr.write(
         "Error: --override-attestation and --override-attestation-cite are mutually exclusive " +
           "— pass a free-text reason OR cite an existing evidence row, not both.\n",
       );
@@ -356,7 +357,7 @@ export default defineCommand({
     if (hasOverrideAttestationCite) {
       const trimmedCite = overrideAttestationCiteRaw.trim();
       if (!/^[0-9]+$/.test(trimmedCite)) {
-        process.stderr.write(
+        inv.io.stderr.write(
           "Error: --override-attestation-cite requires a positive 1-based integer row index, " +
             `got "${overrideAttestationCiteRaw}".\n`,
         );
@@ -371,7 +372,7 @@ export default defineCommand({
     const noNewTestsRaw = args["declare-no-new-tests"];
     const hasNoNewTests = typeof noNewTestsRaw === "string";
     if (hasNoNewTests && noNewTestsRaw.trim() === "") {
-      process.stderr.write("Error: --declare-no-new-tests requires a non-empty, non-whitespace reason.\n");
+      inv.io.stderr.write("Error: --declare-no-new-tests requires a non-empty, non-whitespace reason.\n");
       exitCli(2);
     }
 
@@ -391,7 +392,7 @@ export default defineCommand({
           overrideAttestationCiteIndex,
         );
         if (!citeResult.ok) {
-          process.stderr.write(formatErrorFor(inv, citeResult.error) + "\n");
+          inv.io.stderr.write(formatErrorFor(inv, citeResult.error) + "\n");
           setExitCode(exitCode(citeResult.error));
           return;
         }
@@ -402,11 +403,11 @@ export default defineCommand({
       // (unregistered -> null + one warning), resolved once and passed EXPLICITLY like `claim`/`release` do.
       const verifiedIdentity = await app.verifiedInvocationIdentity?.();
       if (verifiedIdentity !== undefined && !verifiedIdentity.ok) {
-        process.stderr.write(formatErrorFor(inv, verifiedIdentity.error) + "\n");
+        inv.io.stderr.write(formatErrorFor(inv, verifiedIdentity.error) + "\n");
         setExitCode(exitCode(verifiedIdentity.error));
         return;
       }
-      const by = resolveActor(undefined, inv.env, inv.cwd, inv.user);
+      const by = resolveActor(inv.io, undefined, inv.env, inv.cwd, inv.user);
       // reason: the worktree-removal test's "mine" side (D2) — raw session id, unknown stays absent.
       const callerSession = resolveCallerSession(undefined, inv.env);
       const doneOpts = {
@@ -433,7 +434,7 @@ export default defineCommand({
       }
 
       if (!result.ok) {
-        process.stderr.write(formatErrorFor(inv, result.error) + "\n");
+        inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
         setExitCode(exitCode(result.error));
         return;
       }
@@ -445,11 +446,11 @@ export default defineCommand({
       // precedent) — this fires at most once per plan, ever.
       const lastTaskAdvisory = formatLastTaskAdvisory(result.value);
       if (lastTaskAdvisory !== undefined) {
-        process.stderr.write(lastTaskAdvisory + "\n");
+        inv.io.stderr.write(lastTaskAdvisory + "\n");
       }
 
       if (args.json) {
-        console.log(
+        printLine(inv.io.stdout, 
           JSON.stringify(
             {
               ok: true,
@@ -465,12 +466,12 @@ export default defineCommand({
             2,
           ),
         );
-        emitIssueCloseItems(result.value.issue_close, { json: true });
+        emitIssueCloseItems(inv.io, result.value.issue_close, { json: true });
         return;
       }
 
-      console.log(formatDoneMessage(result.value));
-      emitIssueCloseItems(result.value.issue_close, { json: false });
+      printLine(inv.io.stdout, formatDoneMessage(result.value));
+      emitIssueCloseItems(inv.io, result.value.issue_close, { json: false });
     } finally {
       app.close();
     }

@@ -84,6 +84,7 @@ import {
   type ResolvedAcScope,
 } from "../create-task-validation.js";
 import { invocationOf } from "../command-invocation.js";
+import { printLine } from "../output.js";
 
 const VALID_TYPES: DocType[] = ["prd", "spec", "adr", "plan", "knowledge", "task"];
 
@@ -259,20 +260,20 @@ export default defineCommand({
     const docType = args.type as DocType;
 
     if (!VALID_TYPES.includes(docType)) {
-      process.stderr.write(
+      inv.io.stderr.write(
         `Error: Invalid type '${args.type}'. Valid types: ${VALID_TYPES.join(", ")}\n`,
       );
       exitCli(2);
     }
 
     if (!args.title) {
-      process.stderr.write("Error: --title is required.\n");
+      inv.io.stderr.write("Error: --title is required.\n");
       exitCli(2);
     }
 
     // Reject empty string passed explicitly to --parent (citty parses "" as string "").
     if (args.parent !== undefined && args.parent.trim() === "") {
-      process.stderr.write(
+      inv.io.stderr.write(
         "Error: --parent received empty string. Pass a valid document ID or slug, or omit the flag.\n",
       );
       exitCli(2);
@@ -282,7 +283,7 @@ export default defineCommand({
     for (const [flag, allowedTypes] of Object.entries(TYPE_SPECIFIC_FLAGS)) {
       const flagValue = args[flag as keyof typeof args];
       if (flagValue !== undefined && !allowedTypes.includes(docType)) {
-        process.stderr.write(
+        inv.io.stderr.write(
           `Error: --${flag} is only valid for type(s): ${allowedTypes.join(", ")} (got '${docType}').\n`,
         );
         exitCli(2);
@@ -293,14 +294,14 @@ export default defineCommand({
     if (docType === "adr") {
       const ds = args["decision-status"];
       if (!ds) {
-        process.stderr.write(
+        inv.io.stderr.write(
           `Error: --decision-status is required for type 'adr'.\n` +
             `  Valid values: ${ADR_DECISION_STATUSES.join(" | ")}\n`,
         );
         exitCli(2);
       }
       if (!ADR_DECISION_STATUSES.includes(ds as AdrDecisionStatus)) {
-        process.stderr.write(
+        inv.io.stderr.write(
           `Error: Invalid --decision-status '${ds}'.\n` +
             `  Valid values: ${ADR_DECISION_STATUSES.join(" | ")}\n`,
         );
@@ -311,14 +312,14 @@ export default defineCommand({
     if (docType === "knowledge") {
       const st = args["sub-type"];
       if (!st) {
-        process.stderr.write(
+        inv.io.stderr.write(
           `Error: --sub-type is required for type 'knowledge'.\n` +
             `  Valid values: ${KNOWLEDGE_SUB_TYPES.join(" | ")}\n`,
         );
         exitCli(2);
       }
       if (!KNOWLEDGE_SUB_TYPES.includes(st as KnowledgeSubType)) {
-        process.stderr.write(
+        inv.io.stderr.write(
           `Error: Invalid --sub-type '${st}'.\n` +
             `  Valid values: ${KNOWLEDGE_SUB_TYPES.join(" | ")}\n`,
         );
@@ -348,12 +349,12 @@ export default defineCommand({
       };
       const adhocConflicts = checkTaskCreateAdhocConflicts(taskCreateFlags);
       if (adhocConflicts.length > 0) {
-        process.stderr.write(formatTaskCreateAdhocConflictError(adhocConflicts) + "\n");
+        inv.io.stderr.write(formatTaskCreateAdhocConflictError(adhocConflicts) + "\n");
         exitCli(2);
       }
       const missingTaskFlags = checkTaskCreateRequiredFlags(taskCreateFlags);
       if (missingTaskFlags.length > 0) {
-        process.stderr.write(formatTaskCreateMissingFlagsError(missingTaskFlags) + "\n");
+        inv.io.stderr.write(formatTaskCreateMissingFlagsError(missingTaskFlags) + "\n");
         exitCli(2);
       }
       // The ad-hoc branch of --ac-scope requiredness (task-an-ad-hoc-task-can-
@@ -367,7 +368,7 @@ export default defineCommand({
       // and a caller must not need to know which branch it is on to detect an
       // ac-scope requiredness refusal.
       if (isAdhocAcScopeDeclarationMissing(taskCreateFlags, acScope.passed)) {
-        process.stderr.write(formatAdhocAcScopeMissingError() + "\n");
+        inv.io.stderr.write(formatAdhocAcScopeMissingError() + "\n");
         exitCli(4);
       }
     }
@@ -389,7 +390,7 @@ export default defineCommand({
     const _hasExplicitNoAi = _rawArgv.includes("--no-ai");
 
     if (_hasExplicitAi && _hasExplicitNoAi) {
-      process.stderr.write(
+      inv.io.stderr.write(
         "Error: --ai and --no-ai are mutually exclusive. Pass only one.\n",
       );
       exitCli(2);
@@ -414,7 +415,7 @@ export default defineCommand({
 
       // Mutex guard: --content and --content-file are mutually exclusive (exit 2 per Bug A spec).
       if (args.content !== undefined && args["content-file"] !== undefined) {
-        process.stderr.write(
+        inv.io.stderr.write(
           "Error: --content and --content-file are mutually exclusive. Pass only one.\n",
         );
         exitCli(2);
@@ -443,7 +444,7 @@ export default defineCommand({
         try {
           resolvedContent = readFileSync(args["content-file"], "utf8");
         } catch (e) {
-          process.stderr.write(
+          inv.io.stderr.write(
             `Error: cannot read --content-file '${args["content-file"]}': ${e instanceof Error ? e.message : String(e)}\n`,
           );
           setExitCode(4);
@@ -458,7 +459,7 @@ export default defineCommand({
           // No-AI path: fall back to editor (SPEC-003 §3.1 / AC-AI-2)
           const editorResult = await openEditor({ defaults, env: inv.env, tmpDir: inv.paths.tmpDir });
           if (!editorResult.ok) {
-            process.stderr.write(formatErrorFor(inv, editorResult.error) + "\n");
+            inv.io.stderr.write(formatErrorFor(inv, editorResult.error) + "\n");
             setExitCode(exitCode(editorResult.error));
             return;
           }
@@ -480,7 +481,7 @@ export default defineCommand({
           const showSpinner = process.stderr.isTTY && !args.json;
           const aiService = app.aiProviderService;
           if (showSpinner) {
-            process.stderr.write(`⏳ Generating via ${aiService.activeProviderName}...\n`);
+            inv.io.stderr.write(`⏳ Generating via ${aiService.activeProviderName}...\n`);
           }
 
           const aiResult = await aiService.generate({
@@ -493,7 +494,7 @@ export default defineCommand({
           });
 
           if (!aiResult.ok) {
-            process.stderr.write(formatErrorFor(inv, aiResult.error) + "\n");
+            inv.io.stderr.write(formatErrorFor(inv, aiResult.error) + "\n");
             setExitCode(exitCode(aiResult.error));
             return;
           }
@@ -501,7 +502,7 @@ export default defineCommand({
           resolvedContent = aiResult.value.content;
           aiProvenance = aiResult.value.ai_provenance;
           if (showSpinner) {
-            process.stderr.write(
+            inv.io.stderr.write(
               `✓ Generated ${aiResult.value.content.length} chars in ` +
               `${(aiResult.value.duration_ms / 1000).toFixed(1)}s\n`,
             );
@@ -514,7 +515,7 @@ export default defineCommand({
       if (docType === "task" && args["plan-id"]) {
         const planResolve = await app.corpusService.resolve(args["plan-id"]);
         if (!planResolve.ok) {
-          process.stderr.write(formatErrorFor(inv, planResolve.error) + "\n");
+          inv.io.stderr.write(formatErrorFor(inv, planResolve.error) + "\n");
           setExitCode(exitCode(planResolve.error));
           return;
         }
@@ -528,7 +529,7 @@ export default defineCommand({
       if (resolvesTokens.length > 0) {
         const resolved = await resolveResolvesTargets(app.corpusService, resolvesTokens);
         if (!resolved.ok) {
-          process.stderr.write(formatErrorFor(inv, resolved.error) + "\n");
+          inv.io.stderr.write(formatErrorFor(inv, resolved.error) + "\n");
           setExitCode(exitCode(resolved.error));
           return;
         }
@@ -582,11 +583,11 @@ export default defineCommand({
       // SPEC-079 G2 — resolved once, reused as the create's own audit actor
       // (both branches below) and, when --supersedes is set, the invalidate
       // step's actor too.
-      const resolvedActor = resolveActor(undefined, inv.env, inv.cwd, inv.user);
+      const resolvedActor = resolveActor(inv.io, undefined, inv.env, inv.cwd, inv.user);
 
       if (args.supersedes !== undefined) {
         if (app.validityService === undefined) {
-          process.stderr.write("Error: ValidityService not wired on this App instance.\n");
+          inv.io.stderr.write("Error: ValidityService not wired on this App instance.\n");
           setExitCode(1);
           return;
         }
@@ -608,7 +609,7 @@ export default defineCommand({
           resolvedActor,
         );
         if (!orchResult.ok) {
-          process.stderr.write(formatErrorFor(inv, orchResult.error) + "\n");
+          inv.io.stderr.write(formatErrorFor(inv, orchResult.error) + "\n");
           setExitCode(exitCode(orchResult.error));
           return;
         }
@@ -617,7 +618,7 @@ export default defineCommand({
       } else {
         const result = await app.corpusService.create(createInput, { by: resolvedActor });
         if (!result.ok) {
-          process.stderr.write(formatErrorFor(inv, result.error) + "\n");
+          inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
           setExitCode(exitCode(result.error));
           return;
         }
@@ -644,7 +645,7 @@ export default defineCommand({
                 supersede_repair_command: renderSupersedeRepairMessage(args.supersedes!, doc.slug),
               }
             : doc;
-        console.log(
+        printLine(inv.io.stdout, 
           JSON.stringify(
             { ok: true, data: linkedResolves.length > 0 ? { ...data, resolves_linked: linkedResolves } : data },
             null,
@@ -652,17 +653,17 @@ export default defineCommand({
           ),
         );
       } else {
-        console.log(`Created ${doc.type} document`);
-        console.log(`  ID:     ${doc.id}`);
-        console.log(`  Slug:   ${doc.slug}`);
-        console.log(`  Title:  ${doc.title}`);
-        console.log(`  Status: ${doc.status} (v${doc.version})`);
-        if (linkedResolves.length > 0) console.log(`  Resolves: ${linkedResolves.join(", ")}`);
-        console.log(`\nRun \`lore get ${doc.slug}\` to view the document.`);
+        printLine(inv.io.stdout, `Created ${doc.type} document`);
+        printLine(inv.io.stdout, `  ID:     ${doc.id}`);
+        printLine(inv.io.stdout, `  Slug:   ${doc.slug}`);
+        printLine(inv.io.stdout, `  Title:  ${doc.title}`);
+        printLine(inv.io.stdout, `  Status: ${doc.status} (v${doc.version})`);
+        if (linkedResolves.length > 0) printLine(inv.io.stdout, `  Resolves: ${linkedResolves.join(", ")}`);
+        printLine(inv.io.stdout, `\nRun \`lore get ${doc.slug}\` to view the document.`);
       }
 
       for (const failure of resolvesFailures) {
-        process.stderr.write(
+        inv.io.stderr.write(
           `Error: ${doc.slug} was created but its resolves link to ${failure.slug} failed (${formatErrorFor(inv, failure.error)})\n` +
             `  Repair: lore link ${doc.slug} ${failure.slug} --type resolves\n`,
         );
@@ -674,7 +675,7 @@ export default defineCommand({
       // nonzero exit naming the EXACT repair command.
       if (supersedeError !== undefined) {
         const repairMsg = renderSupersedeRepairMessage(args.supersedes!, doc.slug);
-        process.stderr.write(`Error: ${repairMsg}\n  (invalidate failed: ${formatErrorFor(inv, supersedeError)})\n`);
+        inv.io.stderr.write(`Error: ${repairMsg}\n  (invalidate failed: ${formatErrorFor(inv, supersedeError)})\n`);
         setExitCode(exitCode(supersedeError));
       }
 
@@ -693,7 +694,7 @@ export default defineCommand({
       // one union member statically carries, without widening the port's own type.
       const orphanAdvisory = (doc as { orphan_advisory?: string }).orphan_advisory;
       if (typeof orphanAdvisory === "string") {
-        process.stderr.write(`⚠ ${orphanAdvisory}\n`);
+        inv.io.stderr.write(`⚠ ${orphanAdvisory}\n`);
       }
 
       // Non-resolving `file_anchors` advisory (task-a-mistyped-task-file-anchor-
@@ -708,7 +709,7 @@ export default defineCommand({
       if (declaredAnchors.length > 0) {
         const report = collectFileAnchorResolution(declaredAnchors, buildFileAnchorProbeContext(inv.cwd));
         for (const line of renderFileAnchorAdvisory(report, { subject: doc.slug })) {
-          process.stderr.write(line + "\n");
+          inv.io.stderr.write(line + "\n");
         }
       }
     } finally {

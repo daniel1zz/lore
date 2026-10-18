@@ -20,6 +20,7 @@ import { defineCommand } from "citty";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatErrorFor, resolveActor } from "../utils.js";
 import { invocationOf } from "../command-invocation.js";
+import { printLine } from "../output.js";
 
 const recordCommand = defineCommand({
   meta: { name: "record", description: "Record a structured UAT verdict for a plan (SPEC-054)" },
@@ -44,7 +45,7 @@ const recordCommand = defineCommand({
     const { app } = loadLoreApp({ inv });
     try {
       if (app.uatService === undefined) {
-        process.stderr.write("Error: UAT service is not available in this build.\n");
+        inv.io.stderr.write("Error: UAT service is not available in this build.\n");
         setExitCode(1);
         return;
       }
@@ -52,25 +53,25 @@ const recordCommand = defineCommand({
       try {
         payload = JSON.parse(readFileSync(args["json-file"] as string, "utf8"));
       } catch (e) {
-        process.stderr.write(`Error: could not read/parse --json-file: ${(e as Error).message}\n`);
+        inv.io.stderr.write(`Error: could not read/parse --json-file: ${(e as Error).message}\n`);
         setExitCode(2);
         return;
       }
-      const by = resolveActor(undefined, inv.env, inv.cwd, inv.user);
+      const by = resolveActor(inv.io, undefined, inv.env, inv.cwd, inv.user);
       const result = await app.uatService.record(String(args.plan), payload, { by });
       if (!result.ok) {
         if (args.json) {
-          console.log(JSON.stringify({ ok: false, error: result.error }, null, 2));
+          printLine(inv.io.stdout, JSON.stringify({ ok: false, error: result.error }, null, 2));
         } else {
-          process.stderr.write(formatErrorFor(inv, result.error));
+          inv.io.stderr.write(formatErrorFor(inv, result.error));
         }
         setExitCode(exitCode(result.error));
         return;
       }
       if (args.json) {
-        console.log(JSON.stringify({ ok: true, data: { slug: result.value.doc.slug } }, null, 2));
+        printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { slug: result.value.doc.slug } }, null, 2));
       } else {
-        console.log(`Recorded UAT verdict: ${result.value.doc.slug} → informs ${String(args.plan)}`);
+        printLine(inv.io.stdout, `Recorded UAT verdict: ${result.value.doc.slug} → informs ${String(args.plan)}`);
       }
     } finally {
       app.close();
@@ -92,27 +93,27 @@ const showCommand = defineCommand({
       const result = await app.corpusService.getLatestUatVerdict(String(args.plan));
       if (!result.ok) {
         if (args.json) {
-          console.log(JSON.stringify({ ok: false, error: result.error }, null, 2));
+          printLine(inv.io.stdout, JSON.stringify({ ok: false, error: result.error }, null, 2));
         } else {
-          process.stderr.write(formatErrorFor(inv, result.error));
+          inv.io.stderr.write(formatErrorFor(inv, result.error));
         }
         setExitCode(exitCode(result.error));
         return;
       }
       if (args.json) {
-        console.log(JSON.stringify({ ok: true, data: result.value }, null, 2));
+        printLine(inv.io.stdout, JSON.stringify({ ok: true, data: result.value }, null, 2));
         return;
       }
       if (!result.value.present) {
-        console.log(`No UAT verdict linked to plan "${String(args.plan)}".`);
+        printLine(inv.io.stdout, `No UAT verdict linked to plan "${String(args.plan)}".`);
         return;
       }
       const v = result.value.verdict!;
-      console.log(`UAT verdict for ${result.value.docSlug}:`);
-      console.log(`  Verdict: ${v.verdict}`);
-      console.log(`  P0 accepted: ${result.value.p0Accepted ? "yes" : "no"}`);
+      printLine(inv.io.stdout, `UAT verdict for ${result.value.docSlug}:`);
+      printLine(inv.io.stdout, `  Verdict: ${v.verdict}`);
+      printLine(inv.io.stdout, `  P0 accepted: ${result.value.p0Accepted ? "yes" : "no"}`);
       if (result.value.uncoveredP0.length > 0) {
-        console.log(`  Uncovered P0: ${result.value.uncoveredP0.join(", ")}`);
+        printLine(inv.io.stdout, `  Uncovered P0: ${result.value.uncoveredP0.join(", ")}`);
       }
     } finally {
       app.close();

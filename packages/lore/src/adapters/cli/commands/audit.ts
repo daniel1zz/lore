@@ -64,6 +64,7 @@ import type { AuditFilters } from "../../../store/store-interface.js";
 import type { AuditAnchorRef, AuditMiss } from "../../../service/audit-service.js";
 import { invocationOf } from "../command-invocation.js";
 import { resolveTrackedWriteRoot } from "../working-tree-root.js";
+import { printLine } from "../output.js";
 
 // ─── SPEC-079 G3 — `.lore/audit-anchor.json` file contract ─────────────────
 //
@@ -172,43 +173,43 @@ export default defineCommand({
       if (args.doc === "arm") {
         const stateBinding = app.stateBindingService;
         if (stateBinding === undefined) {
-          process.stderr.write("Error: stateBindingService is not wired on this App (internal wiring error)\n");
+          inv.io.stderr.write("Error: stateBindingService is not wired on this App (internal wiring error)\n");
           setExitCode(1);
           return;
         }
         const result = args.confirm
-          ? await stateBinding.arm({ actor: resolveActor(undefined, inv.env, inv.cwd, inv.user), nowIso: new Date().toISOString() })
+          ? await stateBinding.arm({ actor: resolveActor(inv.io, undefined, inv.env, inv.cwd, inv.user), nowIso: new Date().toISOString() })
           : await stateBinding.reportImpact();
         if (!result.ok) {
-          process.stderr.write(formatErrorFor(inv, result.error) + "\n");
+          inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
           setExitCode(exitCode(result.error));
           return;
         }
         if (args.json) {
-          console.log(JSON.stringify({ ok: true, data: result.value }, null, 2));
+          printLine(inv.io.stdout, JSON.stringify({ ok: true, data: result.value }, null, 2));
           setExitCode(0);
           return;
         }
         const value = result.value;
         if ("status" in value && value.status === "already_armed") {
-          console.log(`State binding already armed (audit row id ${value.arming_rev}); nothing written.`);
+          printLine(inv.io.stdout, `State binding already armed (audit row id ${value.arming_rev}); nothing written.`);
           setExitCode(0);
           return;
         }
         const report = "status" in value ? value.report : value;
-        console.log(
+        printLine(inv.io.stdout, 
           `${report.would_become_unbound_rows} attested row(s) in ${report.would_become_unbound_docs} doc(s) ` +
             `would become UNBOUND (audit_id_unresolved) and be refused by the floors once armed ` +
             `(${report.attested_rows} attested of ${report.evidence_rows} evidence rows in ${report.docs_with_evidence} docs; ` +
             `${report.unresolved_evidence_rows} evidence rows have no resolvable audit id).`,
         );
         if (report.would_become_unbound_slugs.length > 0) {
-          console.log(`Docs: ${report.would_become_unbound_slugs.join(", ")}`);
+          printLine(inv.io.stdout, `Docs: ${report.would_become_unbound_slugs.join(", ")}`);
         }
         if ("status" in value) {
-          console.log(`Armed: wrote state-binding-armed audit row id ${value.arming_rev}.`);
+          printLine(inv.io.stdout, `Armed: wrote state-binding-armed audit row id ${value.arming_rev}.`);
         } else {
-          console.log("Report only — nothing written. Re-run with --confirm to arm this corpus.");
+          printLine(inv.io.stdout, "Report only — nothing written. Re-run with --confirm to arm this corpus.");
         }
         setExitCode(0);
         return;
@@ -219,7 +220,7 @@ export default defineCommand({
       if (args.doc === "anchor") {
         const headResult = await app.auditService.getChainHead();
         if (!headResult.ok) {
-          process.stderr.write(formatErrorFor(inv, headResult.error) + "\n");
+          inv.io.stderr.write(formatErrorFor(inv, headResult.error) + "\n");
           setExitCode(exitCode(headResult.error));
           return;
         }
@@ -232,18 +233,18 @@ export default defineCommand({
         };
         // reason: INT-T5 — audit-anchor.json is tracked; pin the head in the invoking working tree, while the
         // chain head itself was read from the shared corpus above.
-        const anchorRoot = resolveTrackedWriteRoot(inv.cwd, resolveConsumerCorpusRoot(inv));
+        const anchorRoot = resolveTrackedWriteRoot(inv.cwd, resolveConsumerCorpusRoot(inv.io, inv));
         if (!anchorRoot.ok) {
-          process.stderr.write(formatErrorFor(inv, anchorRoot.error) + "\n");
+          inv.io.stderr.write(formatErrorFor(inv, anchorRoot.error) + "\n");
           setExitCode(exitCode(anchorRoot.error));
           return;
         }
         writeFileSync(auditAnchorFilePath(anchorRoot.value),`${JSON.stringify(anchorFile, null, 2)}\n`, "utf8");
 
         if (args.json) {
-          console.log(JSON.stringify({ ok: true, data: anchorFile }, null, 2));
+          printLine(inv.io.stdout, JSON.stringify({ ok: true, data: anchorFile }, null, 2));
         } else {
-          console.log(
+          printLine(inv.io.stdout, 
             `Anchored audit chain head (id ${anchorFile.head_id}, ${anchorFile.entry_count} entr${anchorFile.entry_count === 1 ? "y" : "ies"}) → .lore/audit-anchor.json`,
           );
         }
@@ -254,15 +255,15 @@ export default defineCommand({
       // ── --verify branch ─────────────────────────────────────────────────
       if (args.verify) {
         // reason: INT-T5 — the anchor file is tracked, so it is read from the same invoking working tree it is written to.
-        const anchorRoot = resolveTrackedWriteRoot(inv.cwd, resolveConsumerCorpusRoot(inv));
+        const anchorRoot = resolveTrackedWriteRoot(inv.cwd, resolveConsumerCorpusRoot(inv.io, inv));
         if (!anchorRoot.ok) {
-          process.stderr.write(formatErrorFor(inv, anchorRoot.error) + "\n");
+          inv.io.stderr.write(formatErrorFor(inv, anchorRoot.error) + "\n");
           setExitCode(exitCode(anchorRoot.error));
           return;
         }
         const { anchor, error: anchorFileError } = readAuditAnchorFile(anchorRoot.value);
         if (anchorFileError !== undefined) {
-          process.stderr.write(`Error: ${anchorFileError}\n`);
+          inv.io.stderr.write(`Error: ${anchorFileError}\n`);
           setExitCode(4);
           return;
         }
@@ -272,7 +273,7 @@ export default defineCommand({
           ...(anchor !== undefined ? { anchor } : {}),
         });
         if (!result.ok) {
-          process.stderr.write(formatErrorFor(inv, result.error) + "\n");
+          inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
           setExitCode(exitCode(result.error));
           return;
         }
@@ -280,34 +281,34 @@ export default defineCommand({
         const { clean, misses, since, chain, anchor: anchorResult } = result.value;
 
         if (args.json) {
-          console.log(JSON.stringify({ ok: true, data: { clean, misses, since, chain, anchor: anchorResult } }, null, 2));
+          printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { clean, misses, since, chain, anchor: anchorResult } }, null, 2));
           setExitCode(clean ? 0 : 4);
           return;
         }
 
         if (misses.length === 0) {
-          console.log(`Audit trail is complete since ${since} — no missing entries.`);
+          printLine(inv.io.stdout, `Audit trail is complete since ${since} — no missing entries.`);
         } else {
-          console.log(`Audit trail is INCOMPLETE since ${since} — ${misses.length} missing entr${misses.length === 1 ? "y" : "ies"}:`);
+          printLine(inv.io.stdout, `Audit trail is INCOMPLETE since ${since} — ${misses.length} missing entr${misses.length === 1 ? "y" : "ies"}:`);
           const headers = ["Doc ID", "Version", "Action", "Created At"];
           const rows = misses.map((m: AuditMiss) => [m.doc_id, `v${m.version}`, m.action, m.created_at]);
-          console.log(formatTable(headers, rows));
+          printLine(inv.io.stdout, formatTable(headers, rows));
         }
 
         if (chain.clean) {
-          console.log(`Chain integrity: clean (${chain.checked} entr${chain.checked === 1 ? "y" : "ies"} checked).`);
+          printLine(inv.io.stdout, `Chain integrity: clean (${chain.checked} entr${chain.checked === 1 ? "y" : "ies"} checked).`);
         } else if (chain.break !== undefined) {
-          console.log(
+          printLine(inv.io.stdout, 
             `Chain integrity: BROKEN at audit row id ${chain.break.id} (${chain.break.reason}) — ${chain.checked} entr${chain.checked === 1 ? "y" : "ies"} checked before the break.`,
           );
         }
 
         if (anchorResult.status === "absent") {
-          console.log("Anchor: none set — run `lore audit anchor` to pin a trust root.");
+          printLine(inv.io.stdout, "Anchor: none set — run `lore audit anchor` to pin a trust root.");
         } else if (anchorResult.status === "clean") {
-          console.log(`Anchor: verified (head id ${anchorResult.head_id}).`);
+          printLine(inv.io.stdout, `Anchor: verified (head id ${anchorResult.head_id}).`);
         } else {
-          console.log(
+          printLine(inv.io.stdout, 
             `Anchor: MISMATCH (${anchorResult.reason}) — expected head id ${anchorResult.head_id} hash ${anchorResult.head_hash}. The chain may have been rewritten or rewound since anchoring.`,
           );
         }
@@ -323,7 +324,7 @@ export default defineCommand({
       if (args.limit !== undefined) {
         const limitResult = parsePositiveIntArg(args.limit, "--limit", { min: 1 });
         if (!limitResult.ok) {
-          process.stderr.write(limitResult.message + "\n");
+          inv.io.stderr.write(limitResult.message + "\n");
           setExitCode(2);
           return;
         }
@@ -340,7 +341,7 @@ export default defineCommand({
       if (args.doc !== undefined) {
         const resolveResult = await app.corpusService.resolve(args.doc);
         if (!resolveResult.ok) {
-          process.stderr.write(formatErrorFor(inv, resolveResult.error) + "\n");
+          inv.io.stderr.write(formatErrorFor(inv, resolveResult.error) + "\n");
           setExitCode(exitCode(resolveResult.error));
           return;
         }
@@ -349,7 +350,7 @@ export default defineCommand({
 
       const result = await app.auditService.query(filters);
       if (!result.ok) {
-        process.stderr.write(formatErrorFor(inv, result.error) + "\n");
+        inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
         setExitCode(exitCode(result.error));
         return;
       }
@@ -357,12 +358,12 @@ export default defineCommand({
       const entries = result.value;
 
       if (args.json) {
-        console.log(JSON.stringify({ ok: true, data: { entries, total: entries.length } }, null, 2));
+        printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { entries, total: entries.length } }, null, 2));
         return;
       }
 
       if (entries.length === 0) {
-        console.log("No audit entries found.");
+        printLine(inv.io.stdout, "No audit entries found.");
         return;
       }
 
@@ -374,8 +375,8 @@ export default defineCommand({
         summarizeDetails(e),
       ]);
 
-      console.log(args.doc !== undefined ? `Audit trail for ${args.doc}:` : "Audit trail:");
-      console.log(formatTable(headers, rows));
+      printLine(inv.io.stdout, args.doc !== undefined ? `Audit trail for ${args.doc}:` : "Audit trail:");
+      printLine(inv.io.stdout, formatTable(headers, rows));
     } finally {
       app.close();
     }

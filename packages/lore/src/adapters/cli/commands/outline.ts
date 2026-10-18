@@ -30,6 +30,8 @@ import type { LoreError, OutlineEntry } from "@lore/core";
 import type { PrdOutlineService } from "../../../service/prd-outline-service.js";
 import type { App } from "../../../app.js";
 import { invocationOf } from "../command-invocation.js";
+import { printLine } from "../output.js";
+import type { CliIo } from "../output.js";
 
 /**
  * `App.prdOutlineService` is typed optional only to keep pre-existing
@@ -63,8 +65,8 @@ function retiredOutlineWrite(verb: string): LoreError {
 /** Prints the refusal (text or `--json` envelope) and sets exit code 4. Writes nothing. */
 function refuseRetiredWrite(inv: Invocation, verb: string, json: unknown): void {
   const error = retiredOutlineWrite(verb);
-  if (json === true) console.log(JSON.stringify({ ok: false, error }, null, 2));
-  else process.stderr.write(formatErrorFor(inv, error) + "\n");
+  if (json === true) printLine(inv.io.stdout, JSON.stringify({ ok: false, error }, null, 2));
+  else inv.io.stderr.write(formatErrorFor(inv, error) + "\n");
   setExitCode(exitCode(error));
 }
 
@@ -117,23 +119,23 @@ export default defineCommand({
           const result = await requireOutlineService(app).outlineList(args.prd as string);
 
           if (!result.ok) {
-            if (args.json) console.log(JSON.stringify({ ok: false, error: result.error }, null, 2));
-            else process.stderr.write(formatErrorFor(inv, result.error) + "\n");
+            if (args.json) printLine(inv.io.stdout, JSON.stringify({ ok: false, error: result.error }, null, 2));
+            else inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
             setExitCode(exitCode(result.error));
             return;
           }
 
           if (args.json) {
-            console.log(JSON.stringify({ ok: true, data: result.value }, null, 2));
+            printLine(inv.io.stdout, JSON.stringify({ ok: true, data: result.value }, null, 2));
             return;
           }
 
           if (result.value.length === 0) {
-            console.log("No outline entries declared on this PRD.");
+            printLine(inv.io.stdout, "No outline entries declared on this PRD.");
             return;
           }
 
-          renderOutlineList(result.value);
+          renderOutlineList(inv.io, result.value);
         } finally {
           app.close();
         }
@@ -176,8 +178,8 @@ export default defineCommand({
 
 // ─── Output Helpers ──────────────────────────────────────────────────────────
 
-function renderOutlineList(entries: OutlineEntry[]): void {
+function renderOutlineList(io: CliIo, entries: OutlineEntry[]): void {
   for (const entry of entries) {
-    console.log(`  ${entry.section} — ${entry.title} [${entry.tier}]`);
+    printLine(io.stdout, `  ${entry.section} — ${entry.title} [${entry.tier}]`);
   }
 }

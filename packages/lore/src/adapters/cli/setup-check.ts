@@ -147,6 +147,8 @@ import { detectDoubleRegistrations } from "./setup-hook-double-registration.js";
 import type { DoubleRegistration } from "./setup-hook-double-registration.js";
 import { exitCode, formatErrorFor } from "./utils.js";
 import type { Invocation } from "@lore/core";
+import { printLine } from "./output.js";
+import type { CliIo } from "./output.js";
 
 // ─── On-disk artifact filenames ─────────────────────────────────────────────
 
@@ -638,16 +640,16 @@ export async function runSetupCheck(opts: {
 }): Promise<void> {
   const result = await computeSetupCheckReport(opts);
   if (!result.ok) {
-    process.stderr.write(formatErrorFor(opts.inv, result.error) + "\n");
+    opts.inv.io.stderr.write(formatErrorFor(opts.inv, result.error) + "\n");
     setExitCode(exitCode(result.error));
     return;
   }
   const report = result.value;
 
   if (opts.json) {
-    console.log(JSON.stringify({ ok: true, data: report }, null, 2));
+    printLine(opts.inv.io.stdout, JSON.stringify({ ok: true, data: report }, null, 2));
   } else {
-    console.log(renderSetupCheckReport(report, opts.targetDir));
+    printLine(opts.inv.io.stdout, renderSetupCheckReport(report, opts.targetDir));
   }
   setExitCode(report.summary === "sync" ? 0 : 3);
 }
@@ -667,7 +669,7 @@ export async function runSetupCheck(opts: {
  * @param opts.now - Time seam for the cache's `checked_at`.
  * @throws Never — a cache write failure is printed to stderr with exit 1.
  */
-export async function finishProjectSetupCheck(opts: {
+export async function finishProjectSetupCheck(io: CliIo, opts: {
   repoDir: string;
   files: SetupCheckFiles;
   json: boolean;
@@ -697,15 +699,15 @@ export async function finishProjectSetupCheck(opts: {
       resolveCheckReminderEnabled(opts.repoDir),
     );
   } catch (cause) {
-    process.stderr.write(`Error: lore setup --project --check could not write its cache at ${cachePath}: ${describeCaught(cause)}\n`);
+    io.stderr.write(`Error: lore setup --project --check could not write its cache at ${cachePath}: ${describeCaught(cause)}\n`);
     setExitCode(1);
     return;
   }
 
   if (opts.json) {
-    console.log(JSON.stringify({ ok: true, data: report }, null, 2));
+    printLine(io.stdout, JSON.stringify({ ok: true, data: report }, null, 2));
   } else {
-    console.log(renderSetupCheckReport(report, opts.repoDir, "project"));
+    printLine(io.stdout, renderSetupCheckReport(report, opts.repoDir, "project"));
   }
   setExitCode(inSync ? 0 : 3);
 }

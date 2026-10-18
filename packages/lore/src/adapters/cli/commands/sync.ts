@@ -25,6 +25,7 @@ import {
   loadLibsqlClientModule,
   probeTmpdirUsability,
 } from "../../../store/turso-store.js";
+import { printLine } from "../output.js";
 
 // ─── Push / Pull implementations ─────────────────────────────────────────────
 
@@ -140,9 +141,9 @@ const syncSetup = defineCommand({
     if (!args.url) {
       const msg = "Missing required option --url (libsql://...)";
       if (args.json) {
-        console.log(JSON.stringify({ ok: false, error: msg }));
+        printLine(inv.io.stdout, JSON.stringify({ ok: false, error: msg }));
       } else {
-        process.stderr.write(`Error: ${msg}\n`);
+        inv.io.stderr.write(`Error: ${msg}\n`);
       }
       exitCli(1);
     }
@@ -151,9 +152,9 @@ const syncSetup = defineCommand({
     if (!args.url.startsWith("libsql://")) {
       const msg = `Invalid URL — must start with libsql:// (got: ${args.url})`;
       if (args.json) {
-        console.log(JSON.stringify({ ok: false, error: msg }));
+        printLine(inv.io.stdout, JSON.stringify({ ok: false, error: msg }));
       } else {
-        process.stderr.write(`Error: ${msg}\n`);
+        inv.io.stderr.write(`Error: ${msg}\n`);
       }
       exitCli(1);
     }
@@ -162,9 +163,9 @@ const syncSetup = defineCommand({
     if (loreDir === null) {
       const msg = "No Lore project found. Run `lore init` first.";
       if (args.json) {
-        console.log(JSON.stringify({ ok: false, error: msg }));
+        printLine(inv.io.stdout, JSON.stringify({ ok: false, error: msg }));
       } else {
-        process.stderr.write(`Error: ${msg}\n`);
+        inv.io.stderr.write(`Error: ${msg}\n`);
       }
       exitCli(1);
     }
@@ -174,9 +175,9 @@ const syncSetup = defineCommand({
     if (!configResult.ok) {
       const msg = `Failed to load config: ${configResult.error.code}`;
       if (args.json) {
-        console.log(JSON.stringify({ ok: false, error: msg }));
+        printLine(inv.io.stdout, JSON.stringify({ ok: false, error: msg }));
       } else {
-        process.stderr.write(`Error: ${msg}\n`);
+        inv.io.stderr.write(`Error: ${msg}\n`);
       }
       exitCli(1);
     }
@@ -200,15 +201,15 @@ const syncSetup = defineCommand({
     if (!saveResult.ok) {
       const msg = `Failed to save config: ${formatErrorFor(inv, saveResult.error)}`;
       if (args.json) {
-        console.log(JSON.stringify({ ok: false, error: msg }));
+        printLine(inv.io.stdout, JSON.stringify({ ok: false, error: msg }));
       } else {
-        process.stderr.write(`Error: ${msg}\n`);
+        inv.io.stderr.write(`Error: ${msg}\n`);
       }
       exitCli(1);
     }
 
     if (args.json) {
-      console.log(
+      printLine(inv.io.stdout, 
         JSON.stringify({
           ok: true,
           data: {
@@ -220,11 +221,11 @@ const syncSetup = defineCommand({
         }),
       );
     } else {
-      console.log(`Sync configured.`);
-      console.log(`  Remote URL:    ${args.url}`);
-      console.log(`  Token env var: ${tokenEnv}`);
-      console.log(`  Interval:      ${safeInterval}s`);
-      console.log(`  Config:        ${join(loreDir, ".lore", "config.yaml")}`);
+      printLine(inv.io.stdout, `Sync configured.`);
+      printLine(inv.io.stdout, `  Remote URL:    ${args.url}`);
+      printLine(inv.io.stdout, `  Token env var: ${tokenEnv}`);
+      printLine(inv.io.stdout, `  Interval:      ${safeInterval}s`);
+      printLine(inv.io.stdout, `  Config:        ${join(loreDir, ".lore", "config.yaml")}`);
     }
 
     exitCli(0);
@@ -251,9 +252,9 @@ const syncStatus = defineCommand({
     if (loreDir === null) {
       const msg = "No Lore project found. Run `lore init` first.";
       if (args.json) {
-        console.log(JSON.stringify({ ok: false, error: msg }));
+        printLine(inv.io.stdout, JSON.stringify({ ok: false, error: msg }));
       } else {
-        process.stderr.write(`Error: ${msg}\n`);
+        inv.io.stderr.write(`Error: ${msg}\n`);
       }
       exitCli(1);
     }
@@ -262,9 +263,9 @@ const syncStatus = defineCommand({
     if (!configResult.ok) {
       const msg = `Failed to load config: ${configResult.error.code}`;
       if (args.json) {
-        console.log(JSON.stringify({ ok: false, error: msg }));
+        printLine(inv.io.stdout, JSON.stringify({ ok: false, error: msg }));
       } else {
-        process.stderr.write(`Error: ${msg}\n`);
+        inv.io.stderr.write(`Error: ${msg}\n`);
       }
       exitCli(1);
     }
@@ -275,17 +276,17 @@ const syncStatus = defineCommand({
     // No sync section or sync disabled
     if (syncSection === undefined) {
       if (args.json) {
-        console.log(JSON.stringify({ ok: true, data: { configured: false, status: "not configured" } }));
+        printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { configured: false, status: "not configured" } }));
       } else {
-        console.log("Sync is not configured (local-only mode).");
-        console.log("Run `lore sync setup --url libsql://...` to configure remote sync.");
+        printLine(inv.io.stdout, "Sync is not configured (local-only mode).");
+        printLine(inv.io.stdout, "Run `lore sync setup --url libsql://...` to configure remote sync.");
       }
       exitCli(0);
     }
 
     if (!syncSection.enabled) {
       if (args.json) {
-        console.log(
+        printLine(inv.io.stdout, 
           JSON.stringify({
             ok: true,
             data: {
@@ -299,17 +300,17 @@ const syncStatus = defineCommand({
           }),
         );
       } else {
-        console.log("Sync is disabled.");
-        console.log(`  Remote URL:    ${syncSection.remote_url ?? "(none)"}`);
-        console.log(`  Token env var: ${syncSection.auth_token_env}`);
-        console.log(`  Interval:      ${syncSection.interval}s`);
+        printLine(inv.io.stdout, "Sync is disabled.");
+        printLine(inv.io.stdout, `  Remote URL:    ${syncSection.remote_url ?? "(none)"}`);
+        printLine(inv.io.stdout, `  Token env var: ${syncSection.auth_token_env}`);
+        printLine(inv.io.stdout, `  Interval:      ${syncSection.interval}s`);
       }
       exitCli(0);
     }
 
     // Sync is enabled
     if (args.json) {
-      console.log(
+      printLine(inv.io.stdout, 
         JSON.stringify({
           ok: true,
           data: {
@@ -323,10 +324,10 @@ const syncStatus = defineCommand({
         }),
       );
     } else {
-      console.log("Sync is enabled.");
-      console.log(`  Remote URL:    ${syncSection.remote_url ?? "(none)"}`);
-      console.log(`  Token env var: ${syncSection.auth_token_env}`);
-      console.log(`  Interval:      ${syncSection.interval}s`);
+      printLine(inv.io.stdout, "Sync is enabled.");
+      printLine(inv.io.stdout, `  Remote URL:    ${syncSection.remote_url ?? "(none)"}`);
+      printLine(inv.io.stdout, `  Token env var: ${syncSection.auth_token_env}`);
+      printLine(inv.io.stdout, `  Interval:      ${syncSection.interval}s`);
     }
 
     exitCli(0);
@@ -353,9 +354,9 @@ const syncPushCmd = defineCommand({
     if (loreDir === null) {
       const msg = "No Lore project found. Run `lore init` first.";
       if (args.json) {
-        console.log(JSON.stringify({ ok: false, error: msg }));
+        printLine(inv.io.stdout, JSON.stringify({ ok: false, error: msg }));
       } else {
-        process.stderr.write(`Error: ${msg}\n`);
+        inv.io.stderr.write(`Error: ${msg}\n`);
       }
       exitCli(1);
     }
@@ -364,9 +365,9 @@ const syncPushCmd = defineCommand({
     if (!configResult.ok) {
       const msg = `Failed to load config: ${configResult.error.code}`;
       if (args.json) {
-        console.log(JSON.stringify({ ok: false, error: msg }));
+        printLine(inv.io.stdout, JSON.stringify({ ok: false, error: msg }));
       } else {
-        process.stderr.write(`Error: ${msg}\n`);
+        inv.io.stderr.write(`Error: ${msg}\n`);
       }
       exitCli(1);
     }
@@ -378,9 +379,9 @@ const syncPushCmd = defineCommand({
           ? "Sync is not configured. Run `lore sync setup --url libsql://...` first."
           : `Sync credentials unavailable: ${formatErrorFor(inv, credResult.error)}`;
       if (args.json) {
-        console.log(JSON.stringify({ ok: false, error: msg }));
+        printLine(inv.io.stdout, JSON.stringify({ ok: false, error: msg }));
       } else {
-        process.stderr.write(`Error: ${msg}\n`);
+        inv.io.stderr.write(`Error: ${msg}\n`);
       }
       exitCli(1);
     }
@@ -391,9 +392,9 @@ const syncPushCmd = defineCommand({
     if (!pushResult.ok) {
       const msg = formatErrorFor(inv, pushResult.error);
       if (args.json) {
-        console.log(JSON.stringify({ ok: false, error: msg }));
+        printLine(inv.io.stdout, JSON.stringify({ ok: false, error: msg }));
       } else {
-        process.stderr.write(`Error: ${msg}\n`);
+        inv.io.stderr.write(`Error: ${msg}\n`);
       }
       exitCli(1);
     }
@@ -401,13 +402,13 @@ const syncPushCmd = defineCommand({
     const report = pushResult.value;
 
     if (args.json) {
-      console.log(JSON.stringify({ ok: true, data: { pushed: true, report } }));
+      printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { pushed: true, report } }));
     } else {
-      console.log("Push complete.");
+      printLine(inv.io.stdout, "Push complete.");
       for (const t of report.tables) {
-        console.log(`  ${t.table}: ${t.local_rows} local → ${t.remote_rows} remote`);
+        printLine(inv.io.stdout, `  ${t.table}: ${t.local_rows} local → ${t.remote_rows} remote`);
       }
-      console.log(`  Total: ${report.total_rows} rows`);
+      printLine(inv.io.stdout, `  Total: ${report.total_rows} rows`);
     }
 
     exitCli(0);
@@ -434,9 +435,9 @@ const syncPullCmd = defineCommand({
     if (loreDir === null) {
       const msg = "No Lore project found. Run `lore init` first.";
       if (args.json) {
-        console.log(JSON.stringify({ ok: false, error: msg }));
+        printLine(inv.io.stdout, JSON.stringify({ ok: false, error: msg }));
       } else {
-        process.stderr.write(`Error: ${msg}\n`);
+        inv.io.stderr.write(`Error: ${msg}\n`);
       }
       exitCli(1);
     }
@@ -445,9 +446,9 @@ const syncPullCmd = defineCommand({
     if (!configResult.ok) {
       const msg = `Failed to load config: ${configResult.error.code}`;
       if (args.json) {
-        console.log(JSON.stringify({ ok: false, error: msg }));
+        printLine(inv.io.stdout, JSON.stringify({ ok: false, error: msg }));
       } else {
-        process.stderr.write(`Error: ${msg}\n`);
+        inv.io.stderr.write(`Error: ${msg}\n`);
       }
       exitCli(1);
     }
@@ -459,9 +460,9 @@ const syncPullCmd = defineCommand({
           ? "Sync is not configured. Run `lore sync setup --url libsql://...` first."
           : `Sync credentials unavailable: ${formatErrorFor(inv, credResult.error)}`;
       if (args.json) {
-        console.log(JSON.stringify({ ok: false, error: msg }));
+        printLine(inv.io.stdout, JSON.stringify({ ok: false, error: msg }));
       } else {
-        process.stderr.write(`Error: ${msg}\n`);
+        inv.io.stderr.write(`Error: ${msg}\n`);
       }
       exitCli(1);
     }
@@ -472,9 +473,9 @@ const syncPullCmd = defineCommand({
     if (!pullResult.ok) {
       const msg = formatErrorFor(inv, pullResult.error);
       if (args.json) {
-        console.log(JSON.stringify({ ok: false, error: msg }));
+        printLine(inv.io.stdout, JSON.stringify({ ok: false, error: msg }));
       } else {
-        process.stderr.write(`Error: ${msg}\n`);
+        inv.io.stderr.write(`Error: ${msg}\n`);
       }
       exitCli(1);
     }
@@ -482,11 +483,11 @@ const syncPullCmd = defineCommand({
     const syncInfo = pullResult.value;
 
     if (args.json) {
-      console.log(JSON.stringify({ ok: true, data: { pulled: true, sync: syncInfo ?? null } }));
+      printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { pulled: true, sync: syncInfo ?? null } }));
     } else {
-      console.log("Pull complete.");
+      printLine(inv.io.stdout, "Pull complete.");
       if (syncInfo) {
-        console.log(`  Frame: ${syncInfo.frameNo}, synced: ${syncInfo.framesSynced}`);
+        printLine(inv.io.stdout, `  Frame: ${syncInfo.frameNo}, synced: ${syncInfo.framesSynced}`);
       }
     }
 

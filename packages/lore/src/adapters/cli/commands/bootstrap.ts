@@ -54,6 +54,7 @@ import { buildStalenessFlowDeps, listFreshStalenessEscalates } from "../../../fl
 import { buildListSpecs, countArmedSpecs } from "../../../flows/drift-flow.js";
 import { computeMemoryFileHealth, formatMemoryFileHealthLine } from "../memory-file-health.js";
 import { invocationOf } from "../command-invocation.js";
+import { printLine } from "../output.js";
 
 /**
  * `BootstrapReport` widened with the SPEC-044 §Design Decisions D14
@@ -220,19 +221,19 @@ export default defineCommand({
     const { app, config } = loadLoreApp({ inv });
     try {
       if (app.sessionService === undefined) {
-        process.stderr.write("Error: SessionService not wired on this App instance.\n");
+        inv.io.stderr.write("Error: SessionService not wired on this App instance.\n");
         setExitCode(1);
         return;
       }
 
-      const by = resolveActor(typeof args.by === "string" ? args.by : undefined, inv.env, inv.cwd, inv.user);
+      const by = resolveActor(inv.io, typeof args.by === "string" ? args.by : undefined, inv.env, inv.cwd, inv.user);
       const seatBranch = typeof args["seat-branch"] === "string" ? args["seat-branch"] : undefined;
       const seatWorktreeArg = typeof args["seat-worktree"] === "string" ? args["seat-worktree"] : undefined;
 
       if (args.injection) {
         // D11 — the pair is required together in this mode; no cwd default.
         if ((seatBranch === undefined) !== (seatWorktreeArg === undefined)) {
-          process.stderr.write(
+          inv.io.stderr.write(
             "Error: --seat-branch and --seat-worktree must be given together with --injection.\n",
           );
           setExitCode(2);
@@ -245,13 +246,13 @@ export default defineCommand({
         const injectionSeat = { branch: seatBranch, worktree: seatWorktreeArg };
         const injectionReport = await app.sessionService.bootstrap(by, undefined, injectionSeat);
         if (!injectionReport.ok) {
-          process.stderr.write(formatErrorFor(inv, injectionReport.error) + "\n");
+          inv.io.stderr.write(formatErrorFor(inv, injectionReport.error) + "\n");
           setExitCode(exitCode(injectionReport.error));
           return;
         }
         const seatClaims = await app.sessionService.seatClaims(injectionSeat);
         if (!seatClaims.ok) {
-          process.stderr.write(formatErrorFor(inv, seatClaims.error) + "\n");
+          inv.io.stderr.write(formatErrorFor(inv, seatClaims.error) + "\n");
           setExitCode(exitCode(seatClaims.error));
           return;
         }
@@ -266,7 +267,7 @@ export default defineCommand({
           },
           budgets,
         );
-        if (json !== "") console.log(json);
+        if (json !== "") printLine(inv.io.stdout, json);
         return;
       }
 
@@ -277,7 +278,7 @@ export default defineCommand({
       const result = await app.sessionService.bootstrap(by, undefined, seat);
 
       if (!result.ok) {
-        process.stderr.write(formatErrorFor(inv, result.error) + "\n");
+        inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
         setExitCode(exitCode(result.error));
         return;
       }
@@ -289,7 +290,7 @@ export default defineCommand({
       // service file outside this task's file anchors).
       const staleListResult = await listFreshStalenessEscalates(buildStalenessFlowDeps(app));
       if (!staleListResult.ok) {
-        process.stderr.write(formatErrorFor(inv, staleListResult.error) + "\n");
+        inv.io.stderr.write(formatErrorFor(inv, staleListResult.error) + "\n");
         setExitCode(exitCode(staleListResult.error));
         return;
       }
@@ -299,7 +300,7 @@ export default defineCommand({
       // branch uses).
       const armedSpecsResult = await countArmedSpecs(buildListSpecs(app));
       if (!armedSpecsResult.ok) {
-        process.stderr.write(formatErrorFor(inv, armedSpecsResult.error) + "\n");
+        inv.io.stderr.write(formatErrorFor(inv, armedSpecsResult.error) + "\n");
         setExitCode(exitCode(armedSpecsResult.error));
         return;
       }
@@ -320,9 +321,9 @@ export default defineCommand({
       };
 
       if (args.json) {
-        console.log(JSON.stringify({ ok: true, data: reportWithStaleness }, null, 2));
+        printLine(inv.io.stdout, JSON.stringify({ ok: true, data: reportWithStaleness }, null, 2));
       } else {
-        console.log(formatBootstrapReport(reportWithStaleness, by));
+        printLine(inv.io.stdout, formatBootstrapReport(reportWithStaleness, by));
       }
     } finally {
       app.close();

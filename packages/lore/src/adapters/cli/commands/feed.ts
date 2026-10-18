@@ -115,6 +115,8 @@ import { buildTaskFeedFlowDeps, resolveTaskStartBudgets } from "../task-feed-wir
 import { renderTaskStartPack } from "../task-feed-render.js";
 import { exitCode, formatError, formatErrorFor, resolveActor } from "../utils.js";
 import { FEED_PHASE_START_MISSING_TARGET, FEED_TASK_START_MISSING_TARGET } from "../cli-refusal-messages.js";
+import { printLine } from "../output.js";
+import type { CliIo } from "../output.js";
 
 /** Loosely-typed view of the args this command's dispatch table needs — mirrors citty's parsed-args shape. */
 interface FeedArgs {
@@ -153,26 +155,26 @@ async function handleSessionResume(app: App, args: FeedArgs, _config: LoreConfig
       ...(typeof args.handoff === "string" ? { handoff: args.handoff } : {}),
       ...(typeof args.by === "string" ? { by: args.by } : {}),
     },
-    { env: inv.env, tmpDir: inv.paths.tmpDir, cwd: inv.cwd, user: inv.user },
+    { env: inv.env, tmpDir: inv.paths.tmpDir, cwd: inv.cwd, user: inv.user, io: inv.io },
   );
 
   if (!result.ok) {
-    process.stderr.write(formatErrorFor(inv, result.error) + "\n");
+    inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
     setExitCode(exitCode(result.error));
     return;
   }
 
   if (args.json) {
-    console.log(JSON.stringify(result.value, null, 2));
+    printLine(inv.io.stdout, JSON.stringify(result.value, null, 2));
   } else {
-    console.log(result.value.feed);
+    printLine(inv.io.stdout, result.value.feed);
   }
   setExitCode(0);
 }
 
 async function handlePhaseStart(app: App, args: FeedArgs, _config: LoreConfig | undefined, inv: Invocation): Promise<void> {
   if (typeof args.target !== "string" || args.target.length === 0) {
-    process.stderr.write(
+    inv.io.stderr.write(
       `Error: \`lore feed phase-start <phase>\` ${FEED_PHASE_START_MISSING_TARGET}.\n`,
     );
     setExitCode(2);
@@ -183,22 +185,22 @@ async function handlePhaseStart(app: App, args: FeedArgs, _config: LoreConfig | 
   const result = await buildPhaseStartPack(deps, args.target);
 
   if (!result.ok) {
-    process.stderr.write(formatErrorFor(inv, result.error) + "\n");
+    inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
     setExitCode(exitCode(result.error));
     return;
   }
 
   if (args.json) {
-    console.log(JSON.stringify(result.value, null, 2));
+    printLine(inv.io.stdout, JSON.stringify(result.value, null, 2));
   } else {
-    renderPhaseStartPackText(result.value);
+    renderPhaseStartPackText(inv.io, result.value);
   }
   setExitCode(0);
 }
 
 async function handleTaskStart(app: App, args: FeedArgs, config: LoreConfig | undefined, inv: Invocation): Promise<void> {
   if (typeof args.target !== "string" || args.target.length === 0) {
-    process.stderr.write(
+    inv.io.stderr.write(
       `Error: \`lore feed task-start <task>\` ${FEED_TASK_START_MISSING_TARGET}.\n`,
     );
     setExitCode(2);
@@ -210,15 +212,15 @@ async function handleTaskStart(app: App, args: FeedArgs, config: LoreConfig | un
   const result = await buildTaskStartPack(deps, args.target, budgets);
 
   if (!result.ok) {
-    process.stderr.write(formatErrorFor(inv, result.error) + "\n");
+    inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
     setExitCode(exitCode(result.error));
     return;
   }
 
   if (args.json) {
-    console.log(JSON.stringify(result.value, null, 2));
+    printLine(inv.io.stdout, JSON.stringify(result.value, null, 2));
   } else {
-    console.log(renderTaskStartPack(result.value));
+    printLine(inv.io.stdout, renderTaskStartPack(result.value));
   }
   setExitCode(0);
 }
@@ -246,7 +248,7 @@ const SPECIAL_CHECKPOINT_HANDLERS: Readonly<Record<string, CheckpointHandler>> =
  */
 function recordFeedTrace(app: App, inv: Invocation, checkpoint: string, docsServed: readonly string[]): void {
   if (app.traceRecorder === undefined) return;
-  app.traceRecorder.recordFeed(resolveActor(undefined, inv.env, inv.cwd, inv.user), checkpoint, docsServed);
+  app.traceRecorder.recordFeed(resolveActor(inv.io, undefined, inv.env, inv.cwd, inv.user), checkpoint, docsServed);
 }
 
 // SPEC-070 Fix F7: fail loud, at module init, if the shared SPECIAL_FEED_CHECKPOINTS
@@ -331,7 +333,7 @@ export default defineCommand({
       // `checkpointRegistry`'s own module invariant already prescribes — never a
       // second hand-maintained list of valid names.
       if (!isRegisteredCheckpoint(checkpointName)) {
-        process.stderr.write(`Error: unknown checkpoint "${checkpointName}" — not registered as a lore gate checkpoint.\n`);
+        inv.io.stderr.write(`Error: unknown checkpoint "${checkpointName}" — not registered as a lore gate checkpoint.\n`);
         setExitCode(2);
         return;
       }
@@ -343,9 +345,9 @@ export default defineCommand({
       );
 
       if (args.json) {
-        console.log(JSON.stringify(outcome, null, 2));
+        printLine(inv.io.stdout, JSON.stringify(outcome, null, 2));
       } else {
-        console.log(outcome.feed);
+        printLine(inv.io.stdout, outcome.feed);
       }
 
       // reason: feed is advisory context, never a gate — exit 0 always, regardless of
@@ -360,17 +362,17 @@ export default defineCommand({
 });
 
 /** Renders a phase-start pack's four sections to stdout, plus a truncation notice when any section was clipped. */
-function renderPhaseStartPackText(pack: PhaseStartPack): void {
-  console.log(`# Phase start — ${pack.phase_id}\n`);
-  console.log("## Scope");
-  console.log(pack.sections.scope);
-  console.log("\n## Sibling phases");
-  console.log(pack.sections.siblings);
-  console.log("\n## Linked knowledge");
-  console.log(pack.sections.knowledge_pointers);
-  console.log("\n## Latest handoff");
-  console.log(pack.sections.handoff);
+function renderPhaseStartPackText(io: CliIo, pack: PhaseStartPack): void {
+  printLine(io.stdout, `# Phase start — ${pack.phase_id}\n`);
+  printLine(io.stdout, "## Scope");
+  printLine(io.stdout, pack.sections.scope);
+  printLine(io.stdout, "\n## Sibling phases");
+  printLine(io.stdout, pack.sections.siblings);
+  printLine(io.stdout, "\n## Linked knowledge");
+  printLine(io.stdout, pack.sections.knowledge_pointers);
+  printLine(io.stdout, "\n## Latest handoff");
+  printLine(io.stdout, pack.sections.handoff);
   if (pack.truncated.length > 0) {
-    console.log(`\n(truncated sections: ${pack.truncated.join(", ")})`);
+    printLine(io.stdout, `\n(truncated sections: ${pack.truncated.join(", ")})`);
   }
 }

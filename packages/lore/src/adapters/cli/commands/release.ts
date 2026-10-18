@@ -51,6 +51,7 @@ import { exitCode, formatErrorFor, resolveActor } from "../utils.js";
 import { requirePhaseWorkflowService } from "../phase-wiring.js";
 import { hasZeroReleaseEvidence, ZERO_EVIDENCE_RELEASE_WARNING } from "../../../service/task-workflow-service.js";
 import { invocationOf } from "../command-invocation.js";
+import { printLine } from "../output.js";
 
 export default defineCommand({
   meta: {
@@ -85,11 +86,11 @@ export default defineCommand({
       // below and the stamped rows then agree (BR-1035, spec-run-identity-slice-1 D7).
       const verifiedIdentity = await app.verifiedInvocationIdentity?.();
       if (verifiedIdentity !== undefined && !verifiedIdentity.ok) {
-        console.error(formatErrorFor(inv, verifiedIdentity.error)); // CLI surface
+        printLine(inv.io.stderr, formatErrorFor(inv, verifiedIdentity.error)); // CLI surface
         exitCli(exitCode(verifiedIdentity.error));
       }
       const verifiedRun = verifiedIdentity?.value?.harnessRun ?? null;
-      const by = resolveActor(undefined, inv.env, inv.cwd, inv.user);
+      const by = resolveActor(inv.io, undefined, inv.env, inv.cwd, inv.user);
       const releaseOpts = {
         by,
         // reason: spec-run-identity-slice-1 D6/BR-1043 — see commands/claim.ts: the releasing run is explicit.
@@ -115,7 +116,7 @@ export default defineCommand({
       }
 
       if (!result.ok) {
-        process.stderr.write(formatErrorFor(inv, result.error) + "\n");
+        inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
         setExitCode(exitCode(result.error));
         return;
       }
@@ -127,7 +128,7 @@ export default defineCommand({
       // ADVISORY output.
       const warnings = hasZeroReleaseEvidence(result.value) ? [ZERO_EVIDENCE_RELEASE_WARNING] : [];
       for (const warning of warnings) {
-        process.stderr.write(`⚠ ${warning}\n`);
+        inv.io.stderr.write(`⚠ ${warning}\n`);
       }
 
       if (args.json) {
@@ -135,11 +136,11 @@ export default defineCommand({
         if (warnings.length > 0) {
           data["warnings"] = warnings;
         }
-        console.log(JSON.stringify({ ok: true, data }, null, 2));
+        printLine(inv.io.stdout, JSON.stringify({ ok: true, data }, null, 2));
         return;
       }
 
-      console.log(`Released ${result.value.slug} by ${by} (v${result.value.version})`);
+      printLine(inv.io.stdout, `Released ${result.value.slug} by ${by} (v${result.value.version})`);
     } finally {
       app.close();
     }

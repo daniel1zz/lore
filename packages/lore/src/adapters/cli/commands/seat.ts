@@ -38,6 +38,7 @@ import { loadLoreApp } from "../loader.js";
 import { exitCode, formatErrorFor } from "../utils.js";
 import { buildSeatListJsonPayload, formatSeatList } from "../seat-render.js";
 import { invocationOf } from "../command-invocation.js";
+import { printLine } from "../output.js";
 
 const RESERVED_SUBCOMMANDS = new Set(["list", "resume", "remove"]);
 
@@ -72,7 +73,7 @@ export default defineCommand({
     const { app } = loadLoreApp({ inv });
     try {
       if (app.seatService === undefined) {
-        process.stderr.write("Error: SeatService not wired on this App instance.\n");
+        inv.io.stderr.write("Error: SeatService not wired on this App instance.\n");
         setExitCode(1);
         return;
       }
@@ -83,21 +84,21 @@ export default defineCommand({
       if (target === "list") {
         const result = await seatService.list();
         if (!result.ok) {
-          process.stderr.write(formatErrorFor(inv, result.error) + "\n");
+          inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
           setExitCode(exitCode(result.error));
           return;
         }
         if (args.json) {
-          console.log(JSON.stringify(buildSeatListJsonPayload(result.value), null, 2));
+          printLine(inv.io.stdout, JSON.stringify(buildSeatListJsonPayload(result.value), null, 2));
         } else {
-          console.log(formatSeatList(result.value));
+          printLine(inv.io.stdout, formatSeatList(result.value));
         }
         return;
       }
 
       if (target === "resume" || target === "remove") {
         if (planArg === undefined || planArg.length === 0) {
-          process.stderr.write(`Error: \`lore seat ${target}\` requires a plan id/slug: lore seat ${target} <plan>\n`);
+          inv.io.stderr.write(`Error: \`lore seat ${target}\` requires a plan id/slug: lore seat ${target} <plan>\n`);
           setExitCode(2);
           return;
         }
@@ -105,14 +106,14 @@ export default defineCommand({
         if (target === "resume") {
           const result = await seatService.resume(planArg);
           if (!result.ok) {
-            process.stderr.write(formatErrorFor(inv, result.error) + "\n");
+            inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
             setExitCode(exitCode(result.error));
             return;
           }
           if (args.json) {
-            console.log(JSON.stringify({ ok: true, data: result.value }, null, 2));
+            printLine(inv.io.stdout, JSON.stringify({ ok: true, data: result.value }, null, 2));
           } else {
-            console.log(`Resumed seat for plan ${planArg}: ${result.value.path} (${result.value.branch})`);
+            printLine(inv.io.stdout, `Resumed seat for plan ${planArg}: ${result.value.path} (${result.value.branch})`);
           }
           return;
         }
@@ -120,14 +121,14 @@ export default defineCommand({
         // target === "remove"
         const result = await seatService.remove(planArg, { force: args.force === true });
         if (!result.ok) {
-          process.stderr.write(formatErrorFor(inv, result.error) + "\n");
+          inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
           setExitCode(exitCode(result.error));
           return;
         }
         if (args.json) {
-          console.log(JSON.stringify({ ok: true, data: { removed: planArg } }, null, 2));
+          printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { removed: planArg } }, null, 2));
         } else {
-          console.log(`Removed seat for plan ${planArg}.`);
+          printLine(inv.io.stdout, `Removed seat for plan ${planArg}.`);
         }
         return;
       }
@@ -139,14 +140,14 @@ export default defineCommand({
       }
       const result = await seatService.enter(target, { mainCwd: inv.cwd });
       if (!result.ok) {
-        process.stderr.write(formatErrorFor(inv, result.error) + "\n");
+        inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
         setExitCode(exitCode(result.error));
         return;
       }
       if (args.json) {
-        console.log(JSON.stringify({ ok: true, data: result.value }, null, 2));
+        printLine(inv.io.stdout, JSON.stringify({ ok: true, data: result.value }, null, 2));
       } else {
-        console.log(`Entered seat for plan ${target}: ${result.value.path} (${result.value.branch})`);
+        printLine(inv.io.stdout, `Entered seat for plan ${target}: ${result.value.path} (${result.value.branch})`);
       }
     } finally {
       app.close();

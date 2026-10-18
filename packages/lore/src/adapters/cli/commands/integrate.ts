@@ -139,7 +139,7 @@ export default defineCommand({
     const runGit = gitRunnerFor(inv.env);
     const branch = typeof args.branch === "string" ? args.branch : "";
     if (branch === "") {
-      process.stderr.write("Error: lore integrate requires a <branch>\n");
+      inv.io.stderr.write("Error: lore integrate requires a <branch>\n");
       exitCli(2);
     }
     const { app, dbPath, config } = loadLoreApp({ inv });
@@ -148,7 +148,7 @@ export default defineCommand({
       const projectRoot = dirname(corpusDir);
       const mainRoot = mainCheckoutRoot(runGit, projectRoot);
       if (mainRoot === undefined) {
-        process.stderr.write(`Error: ${projectRoot} is not inside a non-bare git repository whose common dir is <root>/.git\n`);
+        inv.io.stderr.write(`Error: ${projectRoot} is not inside a non-bare git repository whose common dir is <root>/.git\n`);
         setExitCode(1);
         return;
       }
@@ -158,7 +158,7 @@ export default defineCommand({
         ledger: new IntegrateLossLedger(corpusDir),
         projectRoot,
         worktreesRoot: resolvePath(mainRoot, ".claude", "worktrees"),
-        log: (line) => process.stdout.write(`${line}\n`),
+        log: (line) => inv.io.stdout.write(`${line}\n`),
       });
       const result = await service.integrate({
         branch,
@@ -168,14 +168,14 @@ export default defineCommand({
         ...(typeof args.message === "string" && args.message !== "" ? { message: args.message } : {}),
       });
       if (!result.ok) {
-        process.stderr.write(`${formatError(result.error)}\n`);
+        inv.io.stderr.write(`${formatError(result.error)}\n`);
         setExitCode(exitCode(result.error));
         return;
       }
       const rendered = renderOutcome(result.value);
-      if (args.json === true) process.stdout.write(`${JSON.stringify({ ok: true, data: result.value }, null, 2)}\n`);
-      else if (rendered.out !== undefined) process.stdout.write(`${rendered.out}\n`);
-      if (rendered.err !== undefined) process.stderr.write(`${rendered.err}\n`);
+      if (args.json === true) inv.io.stdout.write(`${JSON.stringify({ ok: true, data: result.value }, null, 2)}\n`);
+      else if (rendered.out !== undefined) inv.io.stdout.write(`${rendered.out}\n`);
+      if (rendered.err !== undefined) inv.io.stderr.write(`${rendered.err}\n`);
       setExitCode(integrateExitCode(result.value));
     } finally {
       app.close();

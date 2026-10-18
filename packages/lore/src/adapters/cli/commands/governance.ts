@@ -275,7 +275,7 @@ export default defineCommand({
     const distinctTopics = resolveDistinctTopicsRequested(positionalTopics, legacyFlag);
 
     if (distinctTopics.length > 1) {
-      process.stderr.write(
+      inv.io.stderr.write(
         `Error: lore governance accepts at most one topic (requested: ${distinctTopics.join(", ")})\n`,
       );
       setExitCode(2);
@@ -285,14 +285,14 @@ export default defineCommand({
     const requestedTopic = distinctTopics[0];
     let topic: GovernanceTopic;
     if (requestedTopic === undefined || requestedTopic === RETIRED_GOVERNANCE_TOPIC) {
-      process.stderr.write(RETIRED_TOPIC_MESSAGE);
+      inv.io.stderr.write(RETIRED_TOPIC_MESSAGE);
       setExitCode(2);
       return;
     } else if (isKnownGovernanceTopic(requestedTopic)) {
       topic = requestedTopic;
     } else {
       const knownTopics = KNOWN_GOVERNANCE_TOPICS.join(", ");
-      process.stderr.write(
+      inv.io.stderr.write(
         `Error: unknown governance topic "${requestedTopic}" (known topics: ${knownTopics})\n`,
       );
       setExitCode(2);
@@ -307,7 +307,7 @@ export default defineCommand({
     // below). The legacy-flag deprecation line is irrelevant here — that
     // flag only ever aliases `seat-briefing`.
     if (topic === "bootstrap-framing") {
-      writeAllSync(1, BOOTSTRAP_FRAMING_LINE);
+      inv.io.stdout.write(BOOTSTRAP_FRAMING_LINE);
       return;
     }
 
@@ -323,7 +323,7 @@ export default defineCommand({
 
     const result = readGovernanceAsset(assetsRoot, GOVERNANCE_TOPIC_ASSETS[topic]);
     if (!result.ok) {
-      process.stderr.write(formatErrorFor(inv, result.error) + "\n");
+      inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
       setExitCode(exitCode(result.error));
       return;
     }
@@ -333,9 +333,9 @@ export default defineCommand({
     // message, and D6 only requires the deprecation line when the legacy
     // flag actually served content.
     if (legacyFlag) {
-      process.stderr.write(SEAT_BRIEFING_FLAG_DEPRECATION_MESSAGE + "\n");
+      inv.io.stderr.write(SEAT_BRIEFING_FLAG_DEPRECATION_MESSAGE + "\n");
     }
 
-    writeAllSync(1, result.value);
+    inv.io.stdout.write(result.value);
   },
 });

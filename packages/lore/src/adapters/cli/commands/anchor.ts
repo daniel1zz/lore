@@ -83,6 +83,8 @@ import { collectFileAnchorResolution, renderFileAnchorAdvisory } from "../../../
 import { ANCHOR_SCANNED_DOC_TYPES } from "../../../service/drift-check-service.js";
 import { buildFileAnchorProbeContext } from "../../real-fs-probe.js";
 import { invocationOf } from "../command-invocation.js";
+import { printLine } from "../output.js";
+import type { CliIo } from "../output.js";
 
 /**
  * Reads every trailing positional argument beyond the `skip` leading ones
@@ -122,22 +124,22 @@ function collectVariadicPositionals(args: Record<string, unknown>, skip: number)
  * @param subject - The task slug, rendered into the advisory header.
  * @param cwd - The invocation's working directory the anchors are probed against.
  */
-function emitFileAnchorAdvisory(anchors: string[], subject: string, cwd: string): void {
+function emitFileAnchorAdvisory(io: CliIo, anchors: string[], subject: string, cwd: string): void {
   if (anchors.length === 0) return;
   const report = collectFileAnchorResolution(anchors, buildFileAnchorProbeContext(cwd));
   for (const line of renderFileAnchorAdvisory(report, { subject })) {
-    process.stderr.write(line + "\n");
+    io.stderr.write(line + "\n");
   }
 }
 
 /** Render a numbered list of declared anchors. */
-function renderAnchorList(anchors: string[]): void {
+function renderAnchorList(io: CliIo, anchors: string[]): void {
   if (anchors.length === 0) {
-    console.log("  (no anchors declared)");
+    printLine(io.stdout, "  (no anchors declared)");
     return;
   }
   for (let i = 0; i < anchors.length; i++) {
-    console.log(`  ${i + 1}. ${anchors[i]}`);
+    printLine(io.stdout, `  ${i + 1}. ${anchors[i]}`);
   }
 }
 
@@ -220,59 +222,59 @@ export default defineCommand({
 
           const targetResult = await resolveAnchorTarget(app, targetId);
           if (!targetResult.ok) {
-            process.stderr.write(formatErrorFor(inv, targetResult.error) + "\n");
+            inv.io.stderr.write(formatErrorFor(inv, targetResult.error) + "\n");
             setExitCode(exitCode(targetResult.error));
             return;
           }
           const target = targetResult.value;
 
           if (target.type === "task") {
-            const by = resolveActor(undefined, inv.env, inv.cwd, inv.user);
+            const by = resolveActor(inv.io, undefined, inv.env, inv.cwd, inv.user);
             const result = await app.taskWorkflowService.addAnchors(targetId, paths, {
               by,
               source: app.callerSurface,
             });
 
             if (!result.ok) {
-              process.stderr.write(formatErrorFor(inv, result.error) + "\n");
+              inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
               setExitCode(exitCode(result.error));
               return;
             }
 
             const anchors = (result.value.extra["file_anchors"] as string[] | undefined) ?? [];
-            emitFileAnchorAdvisory(anchors, result.value.slug, inv.cwd);
+            emitFileAnchorAdvisory(inv.io, anchors, result.value.slug, inv.cwd);
             if (args.json) {
-              console.log(JSON.stringify({ ok: true, data: { doc: result.value, anchors } }, null, 2));
+              printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { doc: result.value, anchors } }, null, 2));
               return;
             }
 
-            console.log(`Added ${paths.length} anchor(s) to ${result.value.slug} (v${result.value.version})`);
-            renderAnchorList(anchors);
+            printLine(inv.io.stdout, `Added ${paths.length} anchor(s) to ${result.value.slug} (v${result.value.version})`);
+            renderAnchorList(inv.io, anchors);
           } else if (isCodeAnchorTarget(target.type)) {
             if (app.driftCheckService === undefined) {
-              process.stderr.write("Error: DriftCheckService not wired on this App instance.\n");
+              inv.io.stderr.write("Error: DriftCheckService not wired on this App instance.\n");
               setExitCode(1);
               return;
             }
             const result = await app.driftCheckService.addCodeAnchors(targetId, paths);
 
             if (!result.ok) {
-              process.stderr.write(formatErrorFor(inv, result.error) + "\n");
+              inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
               setExitCode(exitCode(result.error));
               return;
             }
 
             const anchors = result.value;
             if (args.json) {
-              console.log(JSON.stringify({ ok: true, data: { anchors } }, null, 2));
+              printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { anchors } }, null, 2));
               return;
             }
 
-            console.log(`Added ${paths.length} anchor(s) to ${target.slug}`);
-            renderAnchorList(anchors);
+            printLine(inv.io.stdout, `Added ${paths.length} anchor(s) to ${target.slug}`);
+            renderAnchorList(inv.io, anchors);
           } else {
             const error = unsupportedTargetTypeError(target.type);
-            process.stderr.write(formatErrorFor(inv, error) + "\n");
+            inv.io.stderr.write(formatErrorFor(inv, error) + "\n");
             setExitCode(exitCode(error));
           }
         } finally {
@@ -309,58 +311,58 @@ export default defineCommand({
 
           const targetResult = await resolveAnchorTarget(app, targetId);
           if (!targetResult.ok) {
-            process.stderr.write(formatErrorFor(inv, targetResult.error) + "\n");
+            inv.io.stderr.write(formatErrorFor(inv, targetResult.error) + "\n");
             setExitCode(exitCode(targetResult.error));
             return;
           }
           const target = targetResult.value;
 
           if (target.type === "task") {
-            const by = resolveActor(undefined, inv.env, inv.cwd, inv.user);
+            const by = resolveActor(inv.io, undefined, inv.env, inv.cwd, inv.user);
             const result = await app.taskWorkflowService.removeAnchors(targetId, paths, {
               by,
               source: app.callerSurface,
             });
 
             if (!result.ok) {
-              process.stderr.write(formatErrorFor(inv, result.error) + "\n");
+              inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
               setExitCode(exitCode(result.error));
               return;
             }
 
             const anchors = (result.value.extra["file_anchors"] as string[] | undefined) ?? [];
             if (args.json) {
-              console.log(JSON.stringify({ ok: true, data: { doc: result.value, anchors } }, null, 2));
+              printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { doc: result.value, anchors } }, null, 2));
               return;
             }
 
-            console.log(`Removed ${paths.length} anchor(s) from ${result.value.slug} (v${result.value.version})`);
-            renderAnchorList(anchors);
+            printLine(inv.io.stdout, `Removed ${paths.length} anchor(s) from ${result.value.slug} (v${result.value.version})`);
+            renderAnchorList(inv.io, anchors);
           } else if (isCodeAnchorTarget(target.type)) {
             if (app.driftCheckService === undefined) {
-              process.stderr.write("Error: DriftCheckService not wired on this App instance.\n");
+              inv.io.stderr.write("Error: DriftCheckService not wired on this App instance.\n");
               setExitCode(1);
               return;
             }
             const result = await app.driftCheckService.removeCodeAnchors(targetId, paths);
 
             if (!result.ok) {
-              process.stderr.write(formatErrorFor(inv, result.error) + "\n");
+              inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
               setExitCode(exitCode(result.error));
               return;
             }
 
             const anchors = result.value;
             if (args.json) {
-              console.log(JSON.stringify({ ok: true, data: { anchors } }, null, 2));
+              printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { anchors } }, null, 2));
               return;
             }
 
-            console.log(`Removed ${paths.length} anchor(s) from ${target.slug}`);
-            renderAnchorList(anchors);
+            printLine(inv.io.stdout, `Removed ${paths.length} anchor(s) from ${target.slug}`);
+            renderAnchorList(inv.io, anchors);
           } else {
             const error = unsupportedTargetTypeError(target.type);
-            process.stderr.write(formatErrorFor(inv, error) + "\n");
+            inv.io.stderr.write(formatErrorFor(inv, error) + "\n");
             setExitCode(exitCode(error));
           }
         } finally {
@@ -390,7 +392,7 @@ export default defineCommand({
           const targetResult = await resolveAnchorTarget(app, args.target as string);
 
           if (!targetResult.ok) {
-            process.stderr.write(formatErrorFor(inv, targetResult.error) + "\n");
+            inv.io.stderr.write(formatErrorFor(inv, targetResult.error) + "\n");
             setExitCode(exitCode(targetResult.error));
             return;
           }
@@ -403,18 +405,18 @@ export default defineCommand({
             anchors = (doc.extra["code_anchors"] as string[] | undefined) ?? [];
           } else {
             const error = unsupportedTargetTypeError(doc.type);
-            process.stderr.write(formatErrorFor(inv, error) + "\n");
+            inv.io.stderr.write(formatErrorFor(inv, error) + "\n");
             setExitCode(exitCode(error));
             return;
           }
 
           if (args.json) {
-            console.log(JSON.stringify({ ok: true, data: { anchors } }, null, 2));
+            printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { anchors } }, null, 2));
             return;
           }
 
-          console.log(`${doc.type === "task" ? "File" : "Code"} anchors for ${doc.slug}:`);
-          renderAnchorList(anchors);
+          printLine(inv.io.stdout, `${doc.type === "task" ? "File" : "Code"} anchors for ${doc.slug}:`);
+          renderAnchorList(inv.io, anchors);
         } finally {
           app.close();
         }

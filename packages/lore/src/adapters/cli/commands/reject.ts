@@ -16,6 +16,7 @@ import { exitCode, formatErrorFor, resolveActor } from "../utils.js";
 import { runCalibrationHook } from "../../../flows/calibration-hook.js";
 import type { DocId } from "@lore/core";
 import { invocationOf } from "../command-invocation.js";
+import { printLine } from "../output.js";
 
 export default defineCommand({
   meta: {
@@ -46,14 +47,14 @@ export default defineCommand({
     const inv = invocationOf(context);
     const { app } = loadLoreApp({ inv });
     try {
-      const reviewer = resolveActor(undefined, inv.env, inv.cwd, inv.user);
+      const reviewer = resolveActor(inv.io, undefined, inv.env, inv.cwd, inv.user);
       const opts: Record<string, unknown> = { reviewer };
       if (args.reason !== undefined) opts["reason"] = args.reason;
 
       const result = await app.reviewService.reject(args.id as DocId, opts);
 
       if (!result.ok) {
-        process.stderr.write(formatErrorFor(inv, result.error) + "\n");
+        inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
         setExitCode(exitCode(result.error));
         return;
       }
@@ -72,10 +73,10 @@ export default defineCommand({
       });
 
       if (args.json) {
-        console.log(JSON.stringify({ ok: true, data: doc }, null, 2));
+        printLine(inv.io.stdout, JSON.stringify({ ok: true, data: doc }, null, 2));
       } else {
-        console.log(`Rejected ${doc.slug} (status remains: ${doc.status})`);
-        if (args.reason) console.log(`  Reason: ${args.reason}`);
+        printLine(inv.io.stdout, `Rejected ${doc.slug} (status remains: ${doc.status})`);
+        if (args.reason) printLine(inv.io.stdout, `  Reason: ${args.reason}`);
       }
     } finally {
       app.close();

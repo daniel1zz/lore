@@ -11,6 +11,7 @@ import { SQLiteStore } from "../../../store/sqlite-store.js";
 import { resolveDocId } from "../../../service/resolve.js";
 import { formatAttributionLabels, loadVersionAttributions, type WriteAttribution } from "../../../service/attribution-report.js";
 import { invocationOf } from "../command-invocation.js";
+import { printLine } from "../output.js";
 
 export default defineCommand({
   meta: {
@@ -45,27 +46,27 @@ export default defineCommand({
       // bind and throws a bare bun:sqlite "datatype mismatch" — validate first.
       const limitResult = parsePositiveIntArg(args.limit ?? "20", "--limit", { min: 1 });
       if (!limitResult.ok) {
-        process.stderr.write(limitResult.message + "\n");
+        inv.io.stderr.write(limitResult.message + "\n");
         setExitCode(2);
         return;
       }
       const result = await app.versionService.log(args.id as DocId, { limit: limitResult.value });
 
       if (!result.ok) {
-        process.stderr.write(formatErrorFor(inv, result.error) + "\n");
+        inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
         setExitCode(exitCode(result.error));
         return;
       }
 
       const resolved = await resolveDocId(attributionStore, args.id);
       if (!resolved.ok) {
-        process.stderr.write(formatErrorFor(inv, resolved.error) + "\n");
+        inv.io.stderr.write(formatErrorFor(inv, resolved.error) + "\n");
         setExitCode(exitCode(resolved.error));
         return;
       }
       const loaded = await loadVersionAttributions(attributionStore, resolved.value, limitResult.value);
       if (!loaded.ok) {
-        process.stderr.write(formatErrorFor(inv, loaded.error) + "\n");
+        inv.io.stderr.write(formatErrorFor(inv, loaded.error) + "\n");
         setExitCode(exitCode(loaded.error));
         return;
       }
@@ -78,12 +79,12 @@ export default defineCommand({
       const entries = result.value.map((e) => ({ ...e, ...attributionOf(e.version) }));
 
       if (args.json) {
-        console.log(JSON.stringify({ ok: true, data: { entries, total: entries.length } }, null, 2));
+        printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { entries, total: entries.length } }, null, 2));
         return;
       }
 
       if (entries.length === 0) {
-        console.log(`No version history for ${args.id}.`);
+        printLine(inv.io.stdout, `No version history for ${args.id}.`);
         return;
       }
 
@@ -100,8 +101,8 @@ export default defineCommand({
         formatAttributionLabels(e),
       ]);
 
-      console.log(`Version history for ${args.id}:`);
-      console.log(formatTable(headers, rows));
+      printLine(inv.io.stdout, `Version history for ${args.id}:`);
+      printLine(inv.io.stdout, formatTable(headers, rows));
     } finally {
       attributionStore.close();
       app.close();

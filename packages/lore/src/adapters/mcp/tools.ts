@@ -1340,9 +1340,9 @@ function resolveMcpCallerCwd(callerCwdArg: string | undefined): string {
  * @example
  * resolveMcpCorpusProvenance(undefined); // => null — HTTP's own treatment
  */
-function resolveMcpCorpusProvenance(callerCwdArg: string | undefined, env: NodeJS.ProcessEnv): CorpusProvenance | null {
+function resolveMcpCorpusProvenance(io: Invocation["io"], callerCwdArg: string | undefined, env: NodeJS.ProcessEnv): CorpusProvenance | null {
   if (callerCwdArg === undefined) return null;
-  return resolveCorpus(callerCwdArg, env)?.provenance ?? null;
+  return resolveCorpus(io, callerCwdArg, env)?.provenance ?? null;
 }
 
 /**
@@ -1380,13 +1380,14 @@ function resolveMcpCorpusProvenance(callerCwdArg: string | undefined, env: NodeJ
  *   // => undefined — no per-call caller directory, guard inert
  */
 function checkMcpForeignCorpusWrite(
+  io: Invocation["io"],
   callerCwdArg: string | undefined,
   getConfig: (() => LoreConfig | undefined) | undefined,
   env: NodeJS.ProcessEnv,
 ): ReturnType<typeof errorContent> | undefined {
   const verdict = checkForeignCorpusWrite(
     {
-      provenance: resolveMcpCorpusProvenance(callerCwdArg, env),
+      provenance: resolveMcpCorpusProvenance(io, callerCwdArg, env),
       enabled: resolveForeignCorpusWriteGateEnabled(getConfig?.()),
     },
     false,
@@ -1642,7 +1643,7 @@ export function registerTools(
     // AC-CP-5(a)/(b) — checked FIRST, before any other side effect
     // (including the AI-generation call below), so a refused write never
     // spends an AI call first. See checkMcpForeignCorpusWrite's own header.
-    const foreignWriteRefusal = checkMcpForeignCorpusWrite(args.caller_cwd, getConfig, inv.env);
+    const foreignWriteRefusal = checkMcpForeignCorpusWrite(inv.io, args.caller_cwd, getConfig, inv.env);
     if (foreignWriteRefusal !== undefined) return foreignWriteRefusal;
 
     // SPEC-024 AC-NOAI-4/5: ai=false (default) → create with empty/provided content (no AI call).
@@ -2931,7 +2932,7 @@ export function registerTools(
             ...(args.handoff !== undefined ? { handoff: args.handoff } : {}),
             ...(args.by !== undefined ? { by: args.by } : {}),
           },
-          { env: inv.env, tmpDir: inv.paths.tmpDir, cwd: inv.cwd, user: inv.user },
+          { env: inv.env, tmpDir: inv.paths.tmpDir, cwd: inv.cwd, user: inv.user, io: inv.io },
         );
         if (!result.ok) return errorContent(result.error);
         return textContent(result.value);
@@ -3394,7 +3395,7 @@ export function registerTools(
           },
           cfg,
           {
-            consumerCorpusRoot: resolveConsumerCorpusRoot(inv),
+            consumerCorpusRoot: resolveConsumerCorpusRoot(inv.io, inv),
             corpusService: app.corpusService,
             actor,
             actorSource,

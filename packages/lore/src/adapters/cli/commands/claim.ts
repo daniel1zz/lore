@@ -61,6 +61,7 @@ import type { ActorSource } from "@lore/core/node";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatErrorFor, resolveActorWithIdentitySource } from "../utils.js";
 import { requirePhaseWorkflowService } from "../phase-wiring.js";
+import { printLine } from "../output.js";
 
 export default defineCommand({
   meta: {
@@ -108,11 +109,11 @@ export default defineCommand({
       // below and the stamped rows then agree (BR-1035, spec-run-identity-slice-1 D7).
       const verifiedIdentity = await app.verifiedInvocationIdentity?.();
       if (verifiedIdentity !== undefined && !verifiedIdentity.ok) {
-        console.error(formatErrorFor(inv, verifiedIdentity.error)); // CLI surface
+        printLine(inv.io.stderr, formatErrorFor(inv, verifiedIdentity.error)); // CLI surface
         exitCli(exitCode(verifiedIdentity.error));
       }
       const verifiedRun = verifiedIdentity?.value?.harnessRun ?? null;
-      const resolvedActor = resolveActorWithIdentitySource(undefined, inv.env, inv.cwd, inv.user);
+      const resolvedActor = resolveActorWithIdentitySource(inv.io, undefined, inv.env, inv.cwd, inv.user);
       const by = resolvedActor.actor;
       const machine = typeof args.machine === "string" ? args.machine : inv.host;
       const claimOpts = {
@@ -155,7 +156,7 @@ export default defineCommand({
         // reason: corpus scope is a TASK-lease fact; PhaseWorkflowService has no such field, so
         // passing it on would silently drop an authority the caller believes they were granted.
         if (claimOpts.corpusScope !== undefined) {
-          process.stderr.write("Error: --corpus-scope applies to task claims only; this target is a phase\n");
+          inv.io.stderr.write("Error: --corpus-scope applies to task claims only; this target is a phase\n");
           setExitCode(2);
           return;
         }
@@ -163,22 +164,22 @@ export default defineCommand({
       }
 
       if (!result.ok) {
-        process.stderr.write(formatErrorFor(inv, result.error) + "\n");
+        inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
         setExitCode(exitCode(result.error));
         return;
       }
 
       if (args.json) {
-        console.log(JSON.stringify({ ok: true, data: { doc: result.value } }, null, 2));
+        printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { doc: result.value } }, null, 2));
         return;
       }
 
-      console.log(`Claimed ${result.value.slug} by ${by} (v${result.value.version})`);
+      printLine(inv.io.stdout, `Claimed ${result.value.slug} by ${by} (v${result.value.version})`);
       // reason: D4 — a `--steal` of an orphaned_dirty claim inherits uncommitted work, so the output names that worktree.
       const writtenClaim = taskClaimSchema.safeParse(result.value.extra["claim"]);
       const inheritedWorktree = writtenClaim.success ? writtenClaim.data.inherited_dirty_worktree : undefined;
       if (inheritedWorktree !== undefined) {
-        console.log(`Inherited dirty worktree: ${inheritedWorktree} (uncommitted changes from the ended run's claim)`);
+        printLine(inv.io.stdout, `Inherited dirty worktree: ${inheritedWorktree} (uncommitted changes from the ended run's claim)`);
       }
     } finally {
       app.close();

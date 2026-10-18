@@ -63,6 +63,7 @@ import { dirname, isAbsolute, join, resolve as resolvePath, sep } from "node:pat
 import { spawnSync } from "node:child_process";
 import { resolveCorpusProvenance } from "@lore/core";
 import type { CorpusProvenanceGitFacts, ResolvedCorpus } from "@lore/core";
+import type { CliIo } from "./output.js";
 
 const NO_DB_MESSAGE =
   "Error: No Lore database found in this directory or any parent.\n" +
@@ -315,7 +316,7 @@ export function findSandboxRefusal(dbPath: string, env: NodeJS.ProcessEnv): stri
  * @returns `@lore/core`'s `ResolvedCorpus` (path + provenance), or
  *   `undefined` when no corpus exists on any route this module knows about
  */
-export function resolveCorpus(cwd: string, env: NodeJS.ProcessEnv): ResolvedCorpus | undefined {
+export function resolveCorpus(io: CliIo, cwd: string, env: NodeJS.ProcessEnv): ResolvedCorpus | undefined {
   const resolved = resolveCorpusProvenance({
     cwd,
     probeExists: existsSync,
@@ -325,7 +326,7 @@ export function resolveCorpus(cwd: string, env: NodeJS.ProcessEnv): ResolvedCorp
   if (resolved !== undefined && resolved.provenance !== "undetermined") {
     const refusal = findSandboxRefusal(resolved.path, env);
     if (refusal !== undefined) {
-      process.stderr.write(refusal);
+      io.stderr.write(refusal);
       exitCli(SANDBOX_REFUSAL_EXIT_CODE);
     }
   }
@@ -344,8 +345,8 @@ export function resolveCorpus(cwd: string, env: NodeJS.ProcessEnv): ResolvedCorp
  * — is what makes it a mechanism instead of a convention two call sites could
  * independently forget.
  */
-function definiteCorpusPath(locator: CorpusLocator): string | undefined {
-  const resolved = resolveCorpus(locator.cwd, locator.env);
+function definiteCorpusPath(io: CliIo, locator: CorpusLocator): string | undefined {
+  const resolved = resolveCorpus(io, locator.cwd, locator.env);
   return resolved !== undefined && resolved.provenance !== "undetermined" ? resolved.path : undefined;
 }
 
@@ -360,10 +361,10 @@ function definiteCorpusPath(locator: CorpusLocator): string | undefined {
  * @param locator - the run's `cwd` + `env` (an `Invocation` works)
  * @returns absolute path to the lore.db file
  */
-export function findLoreDbPath(locator: CorpusLocator): string {
-  const path = definiteCorpusPath(locator);
+export function findLoreDbPath(io: CliIo, locator: CorpusLocator): string {
+  const path = definiteCorpusPath(io, locator);
   if (path === undefined) {
-    process.stderr.write(NO_DB_MESSAGE);
+    io.stderr.write(NO_DB_MESSAGE);
     exitCli(1);
   }
   return path;
@@ -381,6 +382,6 @@ export function findLoreDbPath(locator: CorpusLocator): string {
  * @returns The discovered `.lore/lore.db` absolute path, or `undefined` when
  *   no corpus can be confirmed from `locator.cwd`.
  */
-export function findLoreDbPathQuiet(locator: CorpusLocator): string | undefined {
-  return definiteCorpusPath(locator);
+export function findLoreDbPathQuiet(io: CliIo, locator: CorpusLocator): string | undefined {
+  return definiteCorpusPath(io, locator);
 }

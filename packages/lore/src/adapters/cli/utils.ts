@@ -66,6 +66,7 @@ import type { ActorSource as CoreActorSource } from "@lore/core/node";
 import type { DocRecord, Invocation, LoreError, ReviewJudgment, ValidityCarrier } from "@lore/core";
 import type { TreeNode } from "../../service/corpus-service.js";
 import type { DocWithNavigation } from "../../service/corpus-service.js";
+import type { CliIo } from "./output.js";
 
 /** `Retry:` line of the write-contention message when the caller supplied none: names the action, reads nothing ambient. */
 const WRITE_CONTENTION_GENERIC_RETRY = "re-run the same lore command";
@@ -629,8 +630,8 @@ export function resetActorFallbackWarningForTests(): void {
  *   resolveActor(undefined, inv.env, inv.cwd, inv.user) // => session actor, worktree-derived agent:<branch>, or OS username
  *   resolveActor("alice", inv.env, inv.cwd, inv.user) // => "alice" (never warns)
  */
-export function resolveActor(explicit: string | undefined, env: Readonly<Record<string, string | undefined>>, cwd: string, user: string): string {
-  return resolveActorWithIdentitySource(explicit, env, cwd, user).actor;
+export function resolveActor(io: CliIo, explicit: string | undefined, env: Readonly<Record<string, string | undefined>>, cwd: string, user: string): string {
+  return resolveActorWithIdentitySource(io, explicit, env, cwd, user).actor;
 }
 
 /**
@@ -653,7 +654,7 @@ export function resolveActor(explicit: string | undefined, env: Readonly<Record<
  *   resolveActorWithIdentitySource(undefined) // => {actor: "<OS username>", source: "os-fallback"} (warns once)
  *   resolveActorWithIdentitySource("alice")   // => {actor: "alice", source: "explicit"} (never warns)
  */
-export function resolveActorWithIdentitySource(
+export function resolveActorWithIdentitySource(io: CliIo, 
   explicit: string | undefined,
   env: Readonly<Record<string, string | undefined>>,
   cwd: string,
@@ -662,7 +663,7 @@ export function resolveActorWithIdentitySource(
   const resolved = resolveActorWithSource(explicit, env, cwd, user);
   if (resolved.source === "os-fallback" && !warnedActorFallback) {
     warnedActorFallback = true;
-    process.stderr.write(
+    io.stderr.write(
       `⚠ actor resolved to OS username "${resolved.actor}" — corpus writes under this identity ` +
         "aren't traceable to an agent. Install the agent integration (`lore setup`) so writes " +
         "carry an attested run.\n",

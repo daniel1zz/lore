@@ -7,6 +7,7 @@ import { setExitCode } from "../run-scope.js";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatErrorFor, resolveActor } from "../utils.js";
 import { invocationOf } from "../command-invocation.js";
+import { printLine } from "../output.js";
 
 export default defineCommand({
   meta: {
@@ -35,19 +36,19 @@ export default defineCommand({
     const { app } = loadLoreApp({ inv });
     try {
       const result = await app.corpusService.unlink(args.from, args.to, {
-        by: resolveActor(undefined, inv.env, inv.cwd, inv.user),
+        by: resolveActor(inv.io, undefined, inv.env, inv.cwd, inv.user),
       });
 
       if (!result.ok) {
-        process.stderr.write(formatErrorFor(inv, result.error) + "\n");
+        inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
         setExitCode(exitCode(result.error));
         return;
       }
 
       if (args.json) {
-        console.log(JSON.stringify({ ok: true, data: null }));
+        printLine(inv.io.stdout, JSON.stringify({ ok: true, data: null }));
       } else {
-        console.log(`Unlinked ${args.from} → ${args.to}`);
+        printLine(inv.io.stdout, `Unlinked ${args.from} → ${args.to}`);
       }
     } finally {
       app.close();

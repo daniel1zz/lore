@@ -100,6 +100,7 @@ import type { MountRegistry } from "../../../mount/types.js";
 import { createDashboardTeardown, registerDashboardShutdownSignals, type KillableChild } from "../dashboard-lifecycle.js";
 import type { Invocation } from "@lore/core";
 import { invocationOf } from "../command-invocation.js";
+import type { CliIo } from "../output.js";
 
 // Re-export for tests that import from this module path.
 export { ensureLocalApiKey } from "../local-key.js";
@@ -123,10 +124,10 @@ const NOOP_VITE_CHILD: KillableChild = { kill() {} };
  *   should already have applied it — defensive only, mirrors this command's pre-existing
  *   `?? "8787"`-style guards).
  */
-function parsePort(rawValue: string | undefined, flagName: string, fallback: string): number {
+function parsePort(io: CliIo, rawValue: string | undefined, flagName: string, fallback: string): number {
   const port = parseInt(rawValue ?? fallback, 10);
   if (isNaN(port) || port < 1 || port > 65535) {
-    process.stderr.write(`Error: --${flagName} must be a valid port (1–65535)\n`);
+    io.stderr.write(`Error: --${flagName} must be a valid port (1–65535)\n`);
     exitCli(1);
   }
   return port;
@@ -153,11 +154,11 @@ async function buildMountRegistry(inv: Invocation): Promise<MountRegistry<App> |
     { createApp: async (registryDbPath: string) => createApp(registryDbPath, undefined, ambientOfInvocation(inv), { identity: inv.identity }) },
   );
 
-  process.stdout.write(`\n[dashboard] Multi-project registry (${registeredProjects.length} declared):\n`);
+  inv.io.stdout.write(`\n[dashboard] Multi-project registry (${registeredProjects.length} declared):\n`);
   for (const entry of mountRegistry.listEntries()) {
     const detail =
       entry.state === "mounted" ? "mounted" : `${entry.state}${entry.diagnosis !== undefined ? ` — ${entry.diagnosis}` : ""}`;
-    process.stdout.write(`  - ${entry.name}: ${detail}\n`);
+    inv.io.stdout.write(`  - ${entry.name}: ${detail}\n`);
   }
   return mountRegistry;
 }
@@ -168,14 +169,14 @@ async function buildMountRegistry(inv: Invocation): Promise<MountRegistry<App> |
  *
  * @param url - URL to open.
  */
-function openBrowser(url: string): void {
+function openBrowser(io: CliIo, url: string): void {
   const platform = process.platform;
   const cmd =
     platform === "darwin" ? "open" : platform === "win32" ? "start" : "xdg-open";
   try {
     spawn(cmd, [url], { detached: true, stdio: "ignore" });
   } catch {
-    process.stdout.write(`Could not open browser automatically. Visit: ${url}\n`);
+    io.stdout.write(`Could not open browser automatically. Visit: ${url}\n`);
   }
 }
 
@@ -282,7 +283,7 @@ async function runPackagedMode(
   // attempts that topology at all).
   const assetsResult = await resolveAssets(inv);
   if (!assetsResult.available) {
-    process.stderr.write(
+    inv.io.stderr.write(
       `Error: Dashboard assets are not built (${assetsResult.reason})\n` +
         `Run 'bun run build' to build them for packaged mode, or run 'lore dashboard --dev' ` +
         `to use the development topology instead.\n`,
@@ -290,7 +291,7 @@ async function runPackagedMode(
     exitCli(1);
   }
 
-  const apiPort = parsePort(args["api-port"], "api-port", "8787");
+  const apiPort = parsePort(inv.io, args["api-port"], "api-port", "8787");
 
   // reason: `{surface: "http"}` — this command mounts the SAME long-lived
   // `startHttpServer` boot `lore serve` does, so it inherits §D5's HTTP
@@ -303,7 +304,7 @@ async function runPackagedMode(
   // api_keys ROW exists before any nonce is minted, so a session `GET /auth/bootstrap`
   // creates later can actually resolve. The raw key this returns is intentionally
   // discarded — packaged mode's nonce flow never reads or serves it (DD-2 unchanged).
-  await ensureLocalApiKey(machineAuth.apiKeyStore, machineAuth.baseDir);
+  await ensureLocalApiKey(inv.io, machineAuth.apiKeyStore, machineAuth.baseDir);
 
   const mountRegistry = await buildMountRegistry(inv);
 
@@ -332,17 +333,17 @@ async function runPackagedMode(
 
   // Machine-readable handshake, printed BEFORE the browser opens and BEFORE this command
   // blocks — the seam task-skill-test-f5a-cli-packaged-mode-red-scenarios pins.
-  process.stdout.write(`LORE_DASHBOARD_URL=${bootstrapUrl}\n`);
-  process.stdout.write(`\nDashboard ready: ${bootstrapUrl}\n`);
+  inv.io.stdout.write(`LORE_DASHBOARD_URL=${bootstrapUrl}\n`);
+  inv.io.stdout.write(`\nDashboard ready: ${bootstrapUrl}\n`);
 
   // reason: `args.open` (not `args["no-open"]`) — see the flag definition's own `reason:`
   // comment below for why the declared name and the read site must agree with citty/mri's
   // negation rewrite.
   if (args.open !== false) {
-    openBrowser(bootstrapUrl);
+    openBrowser(inv.io, bootstrapUrl);
   }
 
-  const teardown = createDashboardTeardown({
+  const teardown = createDashboardTeardown(inv.io, {
     vite: NOOP_VITE_CHILD,
     server,
     ...(mountRegistry !== undefined ? { mountRegistry } : {}),
@@ -482,12 +483,12 @@ async function runDevMode(
   // per-project cache would collide on the SECOND project's `lore dashboard` run
   // (ApiKeyStore.create rejects a duplicate name). Dev-mode-only: packaged mode's DD-2
   // nonce flow never mints or reads this key — see this file's header.
-  const localKey = await ensureLocalApiKey(machineAuth.apiKeyStore, machineAuth.baseDir);
+  const localKey = await ensureLocalApiKey(inv.io, machineAuth.apiKeyStore, machineAuth.baseDir);
 
   const mountRegistry = await buildMountRegistry(inv);
 
-  const apiPort = parsePort(args["api-port"], "api-port", "8787");
-  const dashPort = parsePort(args["dashboard-port"], "dashboard-port", "5173");
+  const apiPort = parsePort(inv.io, args["api-port"], "api-port", "8787");
+  const dashPort = parsePort(inv.io, args["dashboard-port"], "dashboard-port", "5173");
 
   // task-dashboard-bootstrap-origin-allowlist-hardcodes-port-5173 — the allowlist is
   // built from the ACTUAL apiPort/dashPort this run resolved, never a hardcoded
@@ -499,7 +500,7 @@ async function runDevMode(
   // child is spawned, so the paired RED suite can assert the actual port appears (and the
   // retired 5173 hardcode never does) without a live network probe.
   if (inv.env.LORE_DASHBOARD_DEBUG_ALLOWLIST === "1") {
-    process.stdout.write(`LORE_DASHBOARD_ALLOWLIST=${JSON.stringify(allowedOrigins)}\n`);
+    inv.io.stdout.write(`LORE_DASHBOARD_ALLOWLIST=${JSON.stringify(allowedOrigins)}\n`);
   }
 
   // Start HTTP server in-process — single Database connection, no cross-process sync.
@@ -551,7 +552,7 @@ async function runDevMode(
   );
 
   vite.on("error", (err) => {
-    process.stderr.write(`[dashboard] Vite process error: ${err.message}\n`);
+    inv.io.stderr.write(`[dashboard] Vite process error: ${err.message}\n`);
   });
 
   // reason: teardown is built ONCE, right after Vite is spawned, and the SAME instance
@@ -560,7 +561,7 @@ async function runDevMode(
   // vite-child-on-sigterm-only-sigint's root cause), and `createDashboardTeardown`'s own
   // `ran` guard makes calling it more than once (e.g. a signal arriving mid-startup-
   // failure-teardown) a safe no-op rather than a double-kill.
-  const teardown = createDashboardTeardown({
+  const teardown = createDashboardTeardown(inv.io, {
     // reason: killableProcessGroup wraps the raw ChildProcess so teardown signals the
     // WHOLE process group (spawned detached: true above) — see that function's own
     // header for why a plain `vite.kill()` leaves the actual Vite server (a further
@@ -642,7 +643,7 @@ async function runDevMode(
   }
 
   if (startupOutcome.kind === "exited") {
-    process.stderr.write(
+    inv.io.stderr.write(
       `[dashboard] Fatal: Vite dev server exited before binding port ${dashPort} ` +
         `(code=${startupOutcome.code ?? "null"}, signal=${startupOutcome.signal ?? "null"}). ` +
         `--dashboard-port ${dashPort} is likely already in use — --strictPort is set deliberately ` +
@@ -653,7 +654,7 @@ async function runDevMode(
     await teardown("startup-failure");
     exitCli(1);
   } else if (startupOutcome.kind === "timeout") {
-    process.stderr.write(
+    inv.io.stderr.write(
       `[dashboard] Warning: Vite did not respond on port ${dashPort} in time — continuing anyway (may still be starting up).\n`,
     );
     // Continue anyway — Vite may still be starting up (genuine slow start, not a
@@ -662,12 +663,12 @@ async function runDevMode(
   // startupOutcome.kind === "ready" → proceed normally, nothing to do here.
 
   const dashUrl = `http://localhost:${dashPort}/`;
-  process.stdout.write(`\nDashboard ready: ${dashUrl}\n`);
+  inv.io.stdout.write(`\nDashboard ready: ${dashUrl}\n`);
 
   // reason: `args.open` — see the flag definition's `reason:` comment (below) on citty/mri's
   // `--no-X` negation rewrite.
   if (args.open !== false) {
-    openBrowser(dashUrl);
+    openBrowser(inv.io, dashUrl);
   }
 
   // Block until SIGINT (Ctrl+C) OR SIGTERM (kill/pkill default) — handlers were already

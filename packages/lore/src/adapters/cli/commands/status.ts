@@ -252,6 +252,8 @@ import {
   formatAdoptionDowngradeLines,
   type CheckClaudeMdRenderInput,
 } from "../claude-md-render.js";
+import { printLine } from "../output.js";
+import type { CliIo } from "../output.js";
 
 /** All CallerSurface values in a stable display order. */
 /** BR-1039 — the stated period of the attribution share, in days ending now. */
@@ -348,8 +350,8 @@ function toPrdBudgetLike(core: OutlineBudget | undefined): Partial<PrdBudgetLike
 }
 
 /** Text rendering for one PRD's budget breaches — used by `renderPrdBudgetSection`. */
-function renderPrdBudgetBreach(prdSlug: string, breach: PrdBudgetBreach): void {
-  console.log(`  - ${prdSlug} [${breach.kind}]: ${breach.detail}`);
+function renderPrdBudgetBreach(io: CliIo, prdSlug: string, breach: PrdBudgetBreach): void {
+  printLine(io.stdout, `  - ${prdSlug} [${breach.kind}]: ${breach.detail}`);
 }
 
 /** The `data.baseline_budget` payload of `--check-prd-budget` (Baseline slice 3b, AC-BLS3B-8). */
@@ -360,15 +362,15 @@ interface BaselineBudgetPayload {
 }
 
 /** Text rendering for the per-kind baseline node budget section; one line per finding naming node, kind, measured and cap. */
-function renderBaselineBudgetSection(payload: BaselineBudgetPayload): void {
+function renderBaselineBudgetSection(io: CliIo, payload: BaselineBudgetPayload): void {
   if (payload.consistent) {
-    console.log(`Baseline node budget: within budget (${payload.checked} node(s) checked).`);
+    printLine(io.stdout, `Baseline node budget: within budget (${payload.checked} node(s) checked).`);
     return;
   }
-  console.log(`Baseline node budget: BREACHED (${payload.checked} node(s) checked):`);
+  printLine(io.stdout, `Baseline node budget: BREACHED (${payload.checked} node(s) checked):`);
   for (const n of payload.nodes) {
     const unit = n.metric === "chars" ? "chars" : "rules";
-    console.log(`  - ${n.slug} [${n.kind}]: ${n.measured} ${unit}, exceeding the ${n.kind} cap of ${n.cap} ${unit}`);
+    printLine(io.stdout, `  - ${n.slug} [${n.kind}]: ${n.measured} ${unit}, exceeding the ${n.kind} cap of ${n.cap} ${unit}`);
   }
 }
 
@@ -377,19 +379,19 @@ function renderBaselineBudgetSection(payload: BaselineBudgetPayload): void {
  * regardless of whether `--check-tree`/`--check-drift`/`--check-requirements`
  * were ALSO requested (every requested section always prints fully).
  */
-function renderPrdBudgetSection(payload: {
+function renderPrdBudgetSection(io: CliIo, payload: {
   checked: number;
   consistent: boolean;
   prds: Array<{ slug: string; whole_doc_chars: number; breaches: PrdBudgetBreach[] }>;
 }): void {
   if (payload.consistent) {
-    console.log(`PRD budget: within budget (${payload.checked} PRD(s) checked).`);
+    printLine(io.stdout, `PRD budget: within budget (${payload.checked} PRD(s) checked).`);
     return;
   }
-  console.log(`PRD budget: BREACHED (${payload.checked} PRD(s) checked):`);
+  printLine(io.stdout, `PRD budget: BREACHED (${payload.checked} PRD(s) checked):`);
   for (const prd of payload.prds) {
     for (const breach of prd.breaches) {
-      renderPrdBudgetBreach(prd.slug, breach);
+      renderPrdBudgetBreach(io, prd.slug, breach);
     }
   }
 }
@@ -405,9 +407,9 @@ function renderPrdBudgetSection(payload: {
  * can call it directly (this file transitively imports `loader.js` → `bun:sqlite`,
  * unresolvable under vitest — see that function's own doc for why).
  */
-function renderDriftSection(payload: CodeDriftPayload): void {
+function renderDriftSection(io: CliIo, payload: CodeDriftPayload): void {
   for (const line of renderDriftSectionLines(payload)) {
-    console.log(line);
+    printLine(io.stdout, line);
   }
 }
 
@@ -418,15 +420,15 @@ function renderDriftSection(payload: CodeDriftPayload): void {
  * whether other sections were ALSO requested (every requested section always
  * prints fully).
  */
-function renderIssuesSection(payload: IssueCheckPayload): void {
+function renderIssuesSection(io: CliIo, payload: IssueCheckPayload): void {
   if (payload.consistent) {
-    console.log(`Issue closure: consistent (${payload.checked} issue report(s) checked).`);
+    printLine(io.stdout, `Issue closure: consistent (${payload.checked} issue report(s) checked).`);
     return;
   }
   const total = payload.stale_open.length;
-  console.log(`Issue closure: ${total} issue(s) flagged (${payload.checked} checked):`);
+  printLine(io.stdout, `Issue closure: ${total} issue(s) flagged (${payload.checked} checked):`);
   for (const row of payload.stale_open) {
-    console.log(
+    printLine(io.stdout, 
       `  - ${row.slug} [stale open]: reported ${row.reported_at}, ${row.age_days}d old, still open ` +
         `(fix: triage via \`lore issue resolve ${row.slug} --state rejected|wontfix --reason <r>\`, or link a fixing doc via \`lore link ... --type resolves ${row.slug}\`)`,
     );
@@ -451,17 +453,17 @@ interface MemoryPointersPayload {
 }
 
 /** Text rendering for the `--check-memory-pointers` section (Phase 2, N14). */
-function renderMemoryPointersSection(payload: MemoryPointersPayload): void {
+function renderMemoryPointersSection(io: CliIo, payload: MemoryPointersPayload): void {
   if (payload.consistent) {
-    console.log(`Memory pointers: within budget (${payload.checked} memory file(s) checked).`);
-    for (const line of payload.adoption_lines) console.log(line);
+    printLine(io.stdout, `Memory pointers: within budget (${payload.checked} memory file(s) checked).`);
+    for (const line of payload.adoption_lines) printLine(io.stdout, line);
     return;
   }
-  console.log(`Memory pointers: BREACHED (${payload.checked} memory file(s) checked):`);
+  printLine(io.stdout, `Memory pointers: BREACHED (${payload.checked} memory file(s) checked):`);
   for (const finding of payload.findings) {
-    console.log(`  - ${finding.message}`);
+    printLine(io.stdout, `  - ${finding.message}`);
   }
-  for (const line of payload.adoption_lines) console.log(line);
+  for (const line of payload.adoption_lines) printLine(io.stdout, line);
 }
 
 /**
@@ -1124,7 +1126,7 @@ export default defineCommand({
         // `summary` is carried into the payload so a --json consumer reads the
         // SAME tokens (`skipped`, both shas) a stdout reader does — one
         // rendering, two surfaces, never a second phrasing that can drift.
-        console.log(
+        printLine(inv.io.stdout, 
           JSON.stringify(
             { ok: true, data: { binary_provenance_check: { ...verdict, summary: rendered.summary } } },
             null,
@@ -1132,7 +1134,7 @@ export default defineCommand({
           ),
         );
       } else {
-        for (const line of rendered.lines) console.log(line);
+        for (const line of rendered.lines) printLine(inv.io.stdout, line);
       }
 
       setExitCode(BINARY_PROVENANCE_EXIT_CODES[verdict.kind]);
@@ -1155,19 +1157,19 @@ export default defineCommand({
             message: `no enumerator registered for count field "${args.enumerate}" — known fields: ${knownFields}`,
             value: args.enumerate,
           };
-          process.stderr.write(formatErrorFor(inv, error) + "\n");
+          inv.io.stderr.write(formatErrorFor(inv, error) + "\n");
           setExitCode(exitCode(error));
           return;
         }
         const membersResult = await enumerator(app, dbPath, inv.cwd);
         if (!membersResult.ok) {
-          process.stderr.write(formatErrorFor(inv, membersResult.error) + "\n");
+          inv.io.stderr.write(formatErrorFor(inv, membersResult.error) + "\n");
           setExitCode(exitCode(membersResult.error));
           return;
         }
         const members = membersResult.value;
         if (args.json) {
-          console.log(
+          printLine(inv.io.stdout, 
             JSON.stringify(
               { ok: true, data: { field: args.enumerate, count: members.length, members } },
               null,
@@ -1175,8 +1177,8 @@ export default defineCommand({
             ),
           );
         } else {
-          console.log(`${args.enumerate}: ${members.length} member(s)`);
-          for (const member of members) console.log(`  - ${member}`);
+          printLine(inv.io.stdout, `${args.enumerate}: ${members.length} member(s)`);
+          for (const member of members) printLine(inv.io.stdout, `  - ${member}`);
         }
         setExitCode(0);
         return;
@@ -1212,7 +1214,7 @@ export default defineCommand({
       // carries the same fact in `budget_source`/`budget_substitution` for
       // consumers that never see stderr.
       const substitutionNotice = formatMemoryFileBudgetSubstitution(budgetResolution, inv.cwd);
-      if (substitutionNotice !== undefined) process.stderr.write(substitutionNotice + "\n");
+      if (substitutionNotice !== undefined) inv.io.stderr.write(substitutionNotice + "\n");
 
       const files = discoverMemoryFiles(inv.cwd, budgets.filenames);
       // reason: runMemoryFileChecks (service/claude-md-admission.ts) is the
@@ -1248,9 +1250,9 @@ export default defineCommand({
       };
 
       if (args.json) {
-        console.log(JSON.stringify(buildCheckClaudeMdJsonPayload(renderInput), null, 2));
+        printLine(inv.io.stdout, JSON.stringify(buildCheckClaudeMdJsonPayload(renderInput), null, 2));
       } else {
-        for (const line of formatCheckClaudeMdHuman(renderInput)) console.log(line);
+        for (const line of formatCheckClaudeMdHuman(renderInput)) printLine(inv.io.stdout, line);
       }
 
       setExitCode(findings.length > 0 ? 3 : 0);
@@ -1276,14 +1278,14 @@ export default defineCommand({
       try {
         const checked = await collectDecisionLogStatus(dbPath);
         if (!checked.ok) {
-          process.stderr.write(formatErrorFor(inv, checked.error) + "\n");
+          inv.io.stderr.write(formatErrorFor(inv, checked.error) + "\n");
           setExitCode(exitCode(checked.error));
           return;
         }
         if (args.json) {
-          console.log(JSON.stringify({ ok: true, data: { decision_log: { ...checked.value.verify, head: checked.value.head } } }, null, 2));
+          printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { decision_log: { ...checked.value.verify, head: checked.value.head } } }, null, 2));
         } else {
-          console.log(renderDecisionLogLine(checked.value));
+          printLine(inv.io.stdout, renderDecisionLogLine(checked.value));
         }
         setExitCode(checked.value.verify.clean ? 0 : DECISION_LOG_BREAK_EXIT);
       } finally {
@@ -1299,12 +1301,12 @@ export default defineCommand({
       try {
         const checked = await collectAutonomyThresholdStatus(dbPath);
         if (!checked.ok) {
-          process.stderr.write(formatErrorFor(inv, checked.error) + "\n");
+          inv.io.stderr.write(formatErrorFor(inv, checked.error) + "\n");
           setExitCode(exitCode(checked.error));
           return;
         }
-        if (args.json) console.log(JSON.stringify({ ok: true, data: { autonomy_thresholds: checked.value } }, null, 2));
-        else console.log(renderAutonomyThresholdLine(checked.value));
+        if (args.json) printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { autonomy_thresholds: checked.value } }, null, 2));
+        else printLine(inv.io.stdout, renderAutonomyThresholdLine(checked.value));
         setExitCode(isAutonomyThresholdBreak(checked.value) ? AUTONOMY_THRESHOLD_BREAK_EXIT : 0);
       } finally {
         app.close();
@@ -1356,14 +1358,14 @@ export default defineCommand({
               // Run fix first, then re-check
               const fixR = await app.treeCheckService.fix(blueprint);
               if (!fixR.ok) {
-                process.stderr.write(formatErrorFor(inv, fixR.error) + "\n");
+                inv.io.stderr.write(formatErrorFor(inv, fixR.error) + "\n");
                 setExitCode(exitCode(fixR.error));
                 return;
               }
 
               const checkR = await app.treeCheckService.checkTree(blueprint);
               if (!checkR.ok) {
-                process.stderr.write(formatErrorFor(inv, checkR.error) + "\n");
+                inv.io.stderr.write(formatErrorFor(inv, checkR.error) + "\n");
                 setExitCode(exitCode(checkR.error));
                 return;
               }
@@ -1418,7 +1420,7 @@ export default defineCommand({
               // Check-only
               const checkR = await app.treeCheckService.checkTree(blueprint);
               if (!checkR.ok) {
-                process.stderr.write(formatErrorFor(inv, checkR.error) + "\n");
+                inv.io.stderr.write(formatErrorFor(inv, checkR.error) + "\n");
                 setExitCode(exitCode(checkR.error));
                 return;
               }
@@ -1445,7 +1447,7 @@ export default defineCommand({
           if (!driftEnabled) {
             driftPayload = disabledCodeDriftPayload();
           } else if (app.driftCheckService === undefined) {
-            process.stderr.write("Error: DriftCheckService not wired on this App instance.\n");
+            inv.io.stderr.write("Error: DriftCheckService not wired on this App instance.\n");
             setExitCode(1);
             return;
           } else {
@@ -1453,7 +1455,7 @@ export default defineCommand({
             const probe = buildRealFsProbe(inv.cwd);
             const driftResult = await runDrift(deps, probe);
             if (!driftResult.ok) {
-              process.stderr.write(formatErrorFor(inv, driftResult.error) + "\n");
+              inv.io.stderr.write(formatErrorFor(inv, driftResult.error) + "\n");
               setExitCode(exitCode(driftResult.error));
               return;
             }
@@ -1475,7 +1477,7 @@ export default defineCommand({
         if (checkRequirementsRequested) {
           const prdsResult = await app.corpusService.list({ type: "prd" });
           if (!prdsResult.ok) {
-            process.stderr.write(formatErrorFor(inv, prdsResult.error) + "\n");
+            inv.io.stderr.write(formatErrorFor(inv, prdsResult.error) + "\n");
             setExitCode(exitCode(prdsResult.error));
             return;
           }
@@ -1483,7 +1485,7 @@ export default defineCommand({
           for (const prd of prdsResult.value.docs) {
             const covResult = await app.corpusService.computeRequirementCoverageForPrd(prd.id);
             if (!covResult.ok) {
-              process.stderr.write(formatErrorFor(inv, covResult.error) + "\n");
+              inv.io.stderr.write(formatErrorFor(inv, covResult.error) + "\n");
               setExitCode(exitCode(covResult.error));
               return;
             }
@@ -1514,7 +1516,7 @@ export default defineCommand({
         if (checkPrdBudgetRequested) {
           const prdsResult = await app.corpusService.list({ type: "prd" });
           if (!prdsResult.ok) {
-            process.stderr.write(formatErrorFor(inv, prdsResult.error) + "\n");
+            inv.io.stderr.write(formatErrorFor(inv, prdsResult.error) + "\n");
             setExitCode(exitCode(prdsResult.error));
             return;
           }
@@ -1522,7 +1524,7 @@ export default defineCommand({
           for (const prdSummary of prdsResult.value.docs) {
             const getResult = await app.corpusService.get(prdSummary.id);
             if (!getResult.ok) {
-              process.stderr.write(formatErrorFor(inv, getResult.error) + "\n");
+              inv.io.stderr.write(formatErrorFor(inv, getResult.error) + "\n");
               setExitCode(exitCode(getResult.error));
               return;
             }
@@ -1559,7 +1561,7 @@ export default defineCommand({
           try {
             const nodesResult = await budgetStore.findMany({ type: "baseline" });
             if (!nodesResult.ok) {
-              process.stderr.write(formatErrorFor(inv, nodesResult.error) + "\n");
+              inv.io.stderr.write(formatErrorFor(inv, nodesResult.error) + "\n");
               setExitCode(exitCode(nodesResult.error));
               return;
             }
@@ -1581,7 +1583,7 @@ export default defineCommand({
           const staleAfterDays = resolveStaleAfterDays(config);
           const issuesResult = await computeIssueCheck(app.corpusService, staleAfterDays);
           if (!issuesResult.ok) {
-            process.stderr.write(formatErrorFor(inv, issuesResult.error) + "\n");
+            inv.io.stderr.write(formatErrorFor(inv, issuesResult.error) + "\n");
             setExitCode(exitCode(issuesResult.error));
             return;
           }
@@ -1604,7 +1606,7 @@ export default defineCommand({
 
           const allDocsResult = await app.corpusService.list({});
           if (!allDocsResult.ok) {
-            process.stderr.write(formatErrorFor(inv, allDocsResult.error) + "\n");
+            inv.io.stderr.write(formatErrorFor(inv, allDocsResult.error) + "\n");
             setExitCode(exitCode(allDocsResult.error));
             return;
           }
@@ -1637,7 +1639,7 @@ export default defineCommand({
           try {
             const findingsResult = await findBaselineIntegrityFindings(baselineStore);
             if (!findingsResult.ok) {
-              process.stderr.write(formatErrorFor(inv, findingsResult.error) + "\n");
+              inv.io.stderr.write(formatErrorFor(inv, findingsResult.error) + "\n");
               setExitCode(exitCode(findingsResult.error));
               return;
             }
@@ -1672,7 +1674,7 @@ export default defineCommand({
         // (regardless of --json) — matches the pre-D5-restructure behavior, which
         // wrote this message before --json was ever consulted (it used to
         // exitCli(4) immediately on a missing/invalid blueprint).
-        for (const line of treeErrorLines) process.stderr.write(line + "\n");
+        for (const line of treeErrorLines) inv.io.stderr.write(line + "\n");
 
         if (args.json) {
           const data: Record<string, unknown> = { ...treeData };
@@ -1688,36 +1690,36 @@ export default defineCommand({
           if (issuesPayload !== undefined) data["issues"] = issuesPayload;
           if (memoryPointersPayload !== undefined) data["memory_pointers"] = memoryPointersPayload;
           if (baselinePayload !== undefined) data["baseline_check"] = baselinePayload;
-          console.log(JSON.stringify({ ok: true, data }, null, 2));
+          printLine(inv.io.stdout, JSON.stringify({ ok: true, data }, null, 2));
         } else {
-          for (const line of treeRenderLines) console.log(line);
-          if (driftPayload !== undefined) renderDriftSection(driftPayload);
+          for (const line of treeRenderLines) printLine(inv.io.stdout, line);
+          if (driftPayload !== undefined) renderDriftSection(inv.io, driftPayload);
           if (requirementsPayload !== undefined) {
             for (const prd of requirementsPayload.prds) {
               if (prd.migrated.length > 0) {
-                console.log(`  ${prd.slug}: migrated [${prd.migrated.join(", ")}] (covered by citations); unmigrated [${prd.unmigrated.join(", ")}]`);
+                printLine(inv.io.stdout, `  ${prd.slug}: migrated [${prd.migrated.join(", ")}] (covered by citations); unmigrated [${prd.unmigrated.join(", ")}]`);
               }
             }
             if (requirementsPayload.consistent) {
-              console.log(`Requirement coverage: all P0 requirements covered (${requirementsPayload.checked} PRD(s) checked).`);
+              printLine(inv.io.stdout, `Requirement coverage: all P0 requirements covered (${requirementsPayload.checked} PRD(s) checked).`);
             } else {
-              console.log(`Requirement coverage: UNCOVERED P0 requirements (${requirementsPayload.checked} PRD(s) checked):`);
+              printLine(inv.io.stdout, `Requirement coverage: UNCOVERED P0 requirements (${requirementsPayload.checked} PRD(s) checked):`);
               for (const prd of requirementsPayload.prds) {
                 if (prd.uncovered_p0.length > 0) {
-                  console.log(`  - ${prd.slug}: ${prd.uncovered_p0.join(", ")} (fix: unmigrated -> add a spec AC with --covers <R-id>; migrated -> add a script AC with --cite <BR-n>)`);
+                  printLine(inv.io.stdout, `  - ${prd.slug}: ${prd.uncovered_p0.join(", ")} (fix: unmigrated -> add a spec AC with --covers <R-id>; migrated -> add a script AC with --cite <BR-n>)`);
                 }
               }
             }
           }
-          if (prdBudgetPayload !== undefined) renderPrdBudgetSection(prdBudgetPayload);
-          if (baselineBudgetPayload !== undefined) renderBaselineBudgetSection(baselineBudgetPayload);
-          if (issuesPayload !== undefined) renderIssuesSection(issuesPayload);
-          if (memoryPointersPayload !== undefined) renderMemoryPointersSection(memoryPointersPayload);
+          if (prdBudgetPayload !== undefined) renderPrdBudgetSection(inv.io, prdBudgetPayload);
+          if (baselineBudgetPayload !== undefined) renderBaselineBudgetSection(inv.io, baselineBudgetPayload);
+          if (issuesPayload !== undefined) renderIssuesSection(inv.io, issuesPayload);
+          if (memoryPointersPayload !== undefined) renderMemoryPointersSection(inv.io, memoryPointersPayload);
           if (baselinePayload !== undefined) {
-            if (baselinePayload.consistent) console.log("Baseline: registry, leaves and depends_on are consistent.");
+            if (baselinePayload.consistent) printLine(inv.io.stdout, "Baseline: registry, leaves and depends_on are consistent.");
             else {
-              console.log(`Baseline: ${baselinePayload.findings.length} integrity finding(s):`);
-              for (const f of baselinePayload.findings) console.log(`  - [${f.kind}] ${f.doc}: ${f.detail}`);
+              printLine(inv.io.stdout, `Baseline: ${baselinePayload.findings.length} integrity finding(s):`);
+              for (const f of baselinePayload.findings) printLine(inv.io.stdout, `  - [${f.kind}] ${f.doc}: ${f.detail}`);
             }
           }
         }
@@ -1735,7 +1737,7 @@ export default defineCommand({
       const result = await app.corpusService.status();
 
       if (!result.ok) {
-        process.stderr.write(formatErrorFor(inv, result.error) + "\n");
+        inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
         setExitCode(exitCode(result.error));
         return;
       }
@@ -1747,7 +1749,7 @@ export default defineCommand({
       // SPEC-143 AC-CT-8 — state-binding checks `lore verify` SKIPPED because a peer held the oracle lock.
       const stateBindingSkipsResult = await collectStateBindingSkips(app);
       if (!stateBindingSkipsResult.ok) {
-        process.stderr.write(formatErrorFor(inv, stateBindingSkipsResult.error) + "\n");
+        inv.io.stderr.write(formatErrorFor(inv, stateBindingSkipsResult.error) + "\n");
         setExitCode(exitCode(stateBindingSkipsResult.error));
         return;
       }
@@ -1759,7 +1761,7 @@ export default defineCommand({
       // computeArmedGates precedent).
       const staleListResult = await listFreshStalenessEscalates(buildStalenessFlowDeps(app));
       if (!staleListResult.ok) {
-        process.stderr.write(formatErrorFor(inv, staleListResult.error) + "\n");
+        inv.io.stderr.write(formatErrorFor(inv, staleListResult.error) + "\n");
         setExitCode(exitCode(staleListResult.error));
         return;
       }
@@ -1777,7 +1779,7 @@ export default defineCommand({
       // this one in silence).
       const codeAnchorSpecMembersResult = await collectCodeAnchorSpecMembers(app);
       if (!codeAnchorSpecMembersResult.ok) {
-        process.stderr.write(formatErrorFor(inv, codeAnchorSpecMembersResult.error) + "\n");
+        inv.io.stderr.write(formatErrorFor(inv, codeAnchorSpecMembersResult.error) + "\n");
         setExitCode(exitCode(codeAnchorSpecMembersResult.error));
         return;
       }
@@ -1793,7 +1795,7 @@ export default defineCommand({
       // exemption, never by a synthesized red run.
       const falsifiabilitySignalsResult = await collectFalsifiabilitySignals(app, dbPath, inv.cwd);
       if (!falsifiabilitySignalsResult.ok) {
-        process.stderr.write(formatErrorFor(inv, falsifiabilitySignalsResult.error) + "\n");
+        inv.io.stderr.write(formatErrorFor(inv, falsifiabilitySignalsResult.error) + "\n");
         setExitCode(exitCode(falsifiabilitySignalsResult.error));
         return;
       }
@@ -1816,7 +1818,7 @@ export default defineCommand({
       // corpus-integrity breach the CI gate should block on.
       const unredeemedResult = await listUnredeemedAllowMissingPathDeclarations(app, dbPath, inv.cwd);
       if (!unredeemedResult.ok) {
-        process.stderr.write(formatErrorFor(inv, unredeemedResult.error) + "\n");
+        inv.io.stderr.write(formatErrorFor(inv, unredeemedResult.error) + "\n");
         setExitCode(exitCode(unredeemedResult.error));
         return;
       }
@@ -1831,14 +1833,14 @@ export default defineCommand({
       // collectCaptureSourceMembers's member lists' lengths.
       const captureSourceMembersResult = await collectCaptureSourceMembers(app);
       if (!captureSourceMembersResult.ok) {
-        process.stderr.write(formatErrorFor(inv, captureSourceMembersResult.error) + "\n");
+        inv.io.stderr.write(formatErrorFor(inv, captureSourceMembersResult.error) + "\n");
         setExitCode(exitCode(captureSourceMembersResult.error));
         return;
       }
       // reason: SPEC-143 AC-CT-9(d) — report-only, alongside (never merged into) the capture_source counts.
       const stampVerdictResult = await collectStampVerdictDistribution(app);
       if (!stampVerdictResult.ok) {
-        process.stderr.write(formatErrorFor(inv, stampVerdictResult.error) + "\n");
+        inv.io.stderr.write(formatErrorFor(inv, stampVerdictResult.error) + "\n");
         setExitCode(exitCode(stampVerdictResult.error));
         return;
       }
@@ -1846,13 +1848,13 @@ export default defineCommand({
       // reason: SPEC-143 AC-CT-3b — the arming state is ALWAYS reported (never absent), so a corpus
       // left unarmed (outside git, or an existing corpus not yet armed) cannot read as "fine".
       if (app.stateBindingService === undefined) {
-        process.stderr.write("Error: stateBindingService is not wired on this App (internal wiring error)\n");
+        inv.io.stderr.write("Error: stateBindingService is not wired on this App (internal wiring error)\n");
         setExitCode(1);
         return;
       }
       const stateBindingResult = await app.stateBindingService.readState(dirname(dirname(dbPath)));
       if (!stateBindingResult.ok) {
-        process.stderr.write(formatErrorFor(inv, stateBindingResult.error) + "\n");
+        inv.io.stderr.write(formatErrorFor(inv, stateBindingResult.error) + "\n");
         setExitCode(exitCode(stateBindingResult.error));
         return;
       }
@@ -1868,7 +1870,7 @@ export default defineCommand({
       // list's `.length`, never a separately-tallied counter (AC-FR-5).
       const adoptedAbandonedMembersResult = await collectAdoptedAbandonedMembers(app);
       if (!adoptedAbandonedMembersResult.ok) {
-        process.stderr.write(formatErrorFor(inv, adoptedAbandonedMembersResult.error) + "\n");
+        inv.io.stderr.write(formatErrorFor(inv, adoptedAbandonedMembersResult.error) + "\n");
         setExitCode(exitCode(adoptedAbandonedMembersResult.error));
         return;
       }
@@ -1900,7 +1902,7 @@ export default defineCommand({
           (path) => existsSync(join(repoRoot, path)),
         );
         if (!baselineResult.ok) {
-          process.stderr.write(formatErrorFor(inv, baselineResult.error) + "\n");
+          inv.io.stderr.write(formatErrorFor(inv, baselineResult.error) + "\n");
           setExitCode(exitCode(baselineResult.error));
           return;
         }
@@ -1911,7 +1913,7 @@ export default defineCommand({
         // BR-1039 — claims, evidence and handoffs of the last ATTRIBUTION_WINDOW_DAYS days and how many carry an attested run.
         const shareResult = await new AttributionReport(baselineStore).share(ATTRIBUTION_WINDOW_DAYS, () => new Date());
         if (!shareResult.ok) {
-          process.stderr.write(formatErrorFor(inv, shareResult.error) + "\n");
+          inv.io.stderr.write(formatErrorFor(inv, shareResult.error) + "\n");
           setExitCode(exitCode(shareResult.error));
           return;
         }
@@ -1921,14 +1923,14 @@ export default defineCommand({
         const attributionReport = new AttributionReport(baselineStore);
         const sourcesResult = await attributionReport.identitySources(ATTRIBUTION_WINDOW_DAYS, () => new Date());
         if (!sourcesResult.ok) {
-          process.stderr.write(formatErrorFor(inv, sourcesResult.error) + "\n");
+          inv.io.stderr.write(formatErrorFor(inv, sourcesResult.error) + "\n");
           setExitCode(exitCode(sourcesResult.error));
           return;
         }
         identitySources = sourcesResult.value;
         const orphanedResult = await attributionReport.orphanedDirty(() => new Date());
         if (!orphanedResult.ok) {
-          process.stderr.write(formatErrorFor(inv, orphanedResult.error) + "\n");
+          inv.io.stderr.write(formatErrorFor(inv, orphanedResult.error) + "\n");
           setExitCode(exitCode(orphanedResult.error));
           return;
         }
@@ -1936,14 +1938,14 @@ export default defineCommand({
 
         const censusBaseline = await baselineStore.findMany({ type: "baseline" });
         if (!censusBaseline.ok) {
-          process.stderr.write(formatErrorFor(inv, censusBaseline.error) + "\n");
+          inv.io.stderr.write(formatErrorFor(inv, censusBaseline.error) + "\n");
           setExitCode(exitCode(censusBaseline.error));
           return;
         }
         if (censusBaseline.value.length > 0) {
           const censusSpecs = await baselineStore.findMany({ type: "spec" });
           if (!censusSpecs.ok) {
-            process.stderr.write(formatErrorFor(inv, censusSpecs.error) + "\n");
+            inv.io.stderr.write(formatErrorFor(inv, censusSpecs.error) + "\n");
             setExitCode(exitCode(censusSpecs.error));
             return;
           }
@@ -1954,13 +1956,13 @@ export default defineCommand({
         const rawGate = resolveCiteGateRaw(config);
         const effective = await resolveCiteGateFor(baselineStore, rawGate);
         if (!effective.ok) {
-          process.stderr.write(formatErrorFor(inv, effective.error) + "\n");
+          inv.io.stderr.write(formatErrorFor(inv, effective.error) + "\n");
           setExitCode(exitCode(effective.error));
           return;
         }
         const adoptRows = await app.auditService.query({ action: BASELINE_ADOPT_AUDIT_ACTION, limit: 1 });
         if (!adoptRows.ok) {
-          process.stderr.write(formatErrorFor(inv, adoptRows.error) + "\n");
+          inv.io.stderr.write(formatErrorFor(inv, adoptRows.error) + "\n");
           setExitCode(exitCode(adoptRows.error));
           return;
         }
@@ -1980,13 +1982,13 @@ export default defineCommand({
       // AC-INT-1 (5) — branches that keep losing the race for main (`lore integrate` exit 75), listed until they land.
       const integrateLosses = collectIntegrateLosses(dbPath);
       if (!integrateLosses.ok) {
-        process.stderr.write(formatErrorFor(inv, integrateLosses.error) + "\n");
+        inv.io.stderr.write(formatErrorFor(inv, integrateLosses.error) + "\n");
         setExitCode(exitCode(integrateLosses.error));
         return;
       }
 
       if (args.json) {
-        console.log(
+        printLine(inv.io.stdout, 
           JSON.stringify(
             {
               ok: true,
@@ -2032,9 +2034,9 @@ export default defineCommand({
         return;
       }
 
-      console.log("Corpus Status");
-      console.log("─".repeat(40));
-      console.log(`Total documents:  ${status.total_docs} (live)`);
+      printLine(inv.io.stdout, "Corpus Status");
+      printLine(inv.io.stdout, "─".repeat(40));
+      printLine(inv.io.stdout, `Total documents:  ${status.total_docs} (live)`);
       // reason: printed UNCONDITIONALLY, including the `0` case — unlike the
       // `open_stale_candidates` / `code_anchor_specs` lines below, which are advisories
       // that only matter when non-zero. This one is a COUNT RECONCILIATION: the line
@@ -2042,36 +2044,36 @@ export default defineCommand({
       // that an exclusion was applied and by how much
       // (task-validity-landed-on-lore-list-only-the-dispatch-surface, Required #3 —
       // "an omitted count is the same silence class this whole family is about").
-      console.log(
+      printLine(inv.io.stdout, 
         `Retracted:        ${status.invalid_docs} (excluded from the counts above; ` +
           `see them with \`lore list --include-invalid\`)`,
       );
-      console.log(
+      printLine(inv.io.stdout, 
         `Last updated:     ${status.last_updated.slice(0, 19).replace("T", " ")}`,
       );
       if (status.db_size_bytes > 0) {
         const kb = (status.db_size_bytes / 1024).toFixed(1);
-        console.log(`Database size:    ${kb} KB`);
+        printLine(inv.io.stdout, `Database size:    ${kb} KB`);
       }
 
       if (Object.keys(status.by_type).length > 0) {
-        console.log("\nBy type:");
+        printLine(inv.io.stdout, "\nBy type:");
         for (const [type, count] of Object.entries(status.by_type)) {
-          console.log(`  ${type.padEnd(12)} ${count}`);
+          printLine(inv.io.stdout, `  ${type.padEnd(12)} ${count}`);
         }
       }
 
       if (Object.keys(status.by_status).length > 0) {
-        console.log("\nBy status:");
+        printLine(inv.io.stdout, "\nBy status:");
         for (const [s, count] of Object.entries(status.by_status)) {
-          console.log(`  ${s.padEnd(12)} ${count}`);
+          printLine(inv.io.stdout, `  ${s.padEnd(12)} ${count}`);
         }
       }
 
       // SPEC-044 §Design Decisions D14 — text line only when count > 0 (never a silent
       // zero-line noise addition to every `lore status` invocation).
       if (openStaleCandidates > 0) {
-        console.log(
+        printLine(inv.io.stdout, 
           `\nOpen stale candidates: ${openStaleCandidates} (run \`lore review --staleness --list\` to see them)`,
         );
       }
@@ -2079,7 +2081,7 @@ export default defineCommand({
       // SPEC-045 §Design Decisions D5 — same "only when > 0" discipline as
       // open_stale_candidates above.
       if (codeAnchorSpecs > 0) {
-        console.log(
+        printLine(inv.io.stdout, 
           `\nCode anchors declared: ${codeAnchorSpecs} specs (run \`lore status --check-drift\` to verify)`,
         );
       }
@@ -2087,7 +2089,7 @@ export default defineCommand({
       // SPEC-058 §Scope — one-line discoverability note (SPEC-044/045 armed-count
       // precedent): says WHETHER the corpus opted in, and into which spec_kinds,
       // never dumping the profiles' full oracle-requirement content.
-      console.log(
+      printLine(inv.io.stdout, 
         verificationProfileKinds.length > 0
           ? `\nVerification profiles: configured (kinds: ${verificationProfileKinds.join(", ")})`
           : "\nVerification profiles: not configured",
@@ -2098,7 +2100,7 @@ export default defineCommand({
       // "never a silent count" discipline as `Retracted:` above: this is the
       // corpus's own baseline falsifiability metric, not a per-run advisory.
       // REPORT-ONLY — never affects exit code (see the computation site's comment).
-      console.log(
+      printLine(inv.io.stdout, 
         `Pass-unfalsified criteria: ${passUnfalsifiedCount} (green, never observed able to fail — ` +
           "report-only, see spec-oracle-tier-falsifiability-a-criterion-never-observed-red)",
       );
@@ -2106,18 +2108,18 @@ export default defineCommand({
       // AC-EI-1 — criteria holding evidence rows that ran a command other than the declared one: those rows
       // count toward no pass/fail tally, so the count is printed UNCONDITIONALLY (including 0), never silent.
       // REPORT-ONLY; `lore status --enumerate ac_other_command_count` lists the members.
-      console.log(
+      printLine(inv.io.stdout, 
         `Criteria with other-command evidence: ${acOtherCommandCount} (rows that ran a command other than the ` +
           "criterion's current one count toward no pass or fail — see spec-evidence-identity-an-attested-row-counts-only-for-the)",
       );
 
       // AC-EI-2 — criteria whose declared oracle path (test or script) is missing on disk, each NAMED with its path.
       // Printed UNCONDITIONALLY (including 0). REPORT-ONLY; `--enumerate ac_oracle_file_missing_count` lists them.
-      console.log(
+      printLine(inv.io.stdout, 
         `Criteria with a missing oracle file: ${acOracleFileMissingCount} (not measured once any pass is on record — ` +
           "see spec-evidence-identity-an-attested-row-counts-only-for-the)",
       );
-      for (const member of oracleFileMissingMembers) console.log(`  ${member}`);
+      for (const member of oracleFileMissingMembers) printLine(inv.io.stdout, `  ${member}`);
 
       // spec-oracle-executability-a-runner-s-discovery-refusal-is-not-a §D8,
       // task-wire-allow-missing-path-and-the-unredeemed-declaration (AC-OX-10) —
@@ -2127,7 +2129,7 @@ export default defineCommand({
       // created IS a dangling promise (D8's own "make the ambiguity visible
       // and attributable" resolution), so it must stay visible even at zero.
       // REPORT-ONLY — never affects exit code.
-      console.log(
+      printLine(inv.io.stdout, 
         `Unredeemed allow-missing-path declarations: ${unredeemedAllowMissingPathCount} ` +
           "(a lore ac add/set --allow-missing-path escape whose declared path still does not exist — " +
           "creating the file drops this on the next run, report-only)",
@@ -2138,15 +2140,15 @@ export default defineCommand({
       // discipline as every other count above. Enumerate either bucket's
       // exact members via `lore status --enumerate capture_source_runner_count`
       // / `--enumerate capture_source_self_report_count`. REPORT-ONLY.
-      console.log(
+      printLine(inv.io.stdout, 
         `Capture source: ${captureSourceRunnerCount} runner-captured / ${captureSourceSelfReportCount} ` +
           `self-reported / ${captureSourceRunnerUnattestedCount} runner-unattested (across every task/phase evidence entry — report-only, see ` +
           "spec-falsifiability-reachability-a-feedable-checkpoint-an §D5)",
       );
 
       // SPEC-143 AC-CT-9(d) — the stamp-verdict axis, printed UNCONDITIONALLY beside the capture_source line.
-      console.log(`${formatStampVerdictLine(stampVerdicts)} (report-only, never merged into the capture_source buckets)`);
-      console.log(
+      printLine(inv.io.stdout, `${formatStampVerdictLine(stampVerdicts)} (report-only, never merged into the capture_source buckets)`);
+      printLine(inv.io.stdout, 
         stateBindingState.armed
           ? `State binding: armed (audit row id ${stateBindingState.arming_rev})`
           : stateBindingState.reason === "not_a_git_repo"
@@ -2160,7 +2162,7 @@ export default defineCommand({
       // even when nothing is dangling, or the count itself becomes the kind of
       // silent gap §M7 exists to close. Enumerate exact members via
       // `lore status --enumerate adopted_abandoned_count`. REPORT-ONLY.
-      console.log(
+      printLine(inv.io.stdout, 
         `Adopted-and-abandoned reports: ${adoptedAbandonedCount} ` +
           "('adopted' claims whose owner plan/task reached archived/deprecated with the report still carrying " +
           "no terminal resolution — report-only, see spec-the-defect-channel-cannot-be-honestly-maintained-an §M7)",
@@ -2170,18 +2172,18 @@ export default defineCommand({
       // — printed UNCONDITIONALLY, including the "none embedded" case, same
       // "never a silent count" discipline as `Retracted:` above: not knowing
       // which binary issued this report is itself the fact worth printing.
-      console.log(formatBinaryProvenanceStatusLine(embeddedProvenance));
+      printLine(inv.io.stdout, formatBinaryProvenanceStatusLine(embeddedProvenance));
 
       // BR-1039 — printed UNCONDITIONALLY (including 0 of 0), same "never a silent count" discipline as above.
-      console.log(
+      printLine(inv.io.stdout, 
         `Attribution (last ${attributionShare.window_days} days): ${attributionShare.attested} of ${attributionShare.total} ` +
           `claims/evidence/handoffs carry an attested run (share ${attributionShare.share})`,
       );
-      console.log(
+      printLine(inv.io.stdout, 
         `Identity sources (last ${identitySources.window_days} days): run ${identitySources.run}, session ${identitySources.session}, ` +
           `worktree ${identitySources.worktree}, os ${identitySources.os}, other ${identitySources.other}`,
       );
-      console.log(
+      printLine(inv.io.stdout, 
         `Orphaned-dirty claims: ${orphanedDirty.count}` +
           (orphanedDirty.oldest_age_minutes === null ? "" : ` (oldest ${orphanedDirty.oldest_age_minutes} min)`),
       );
@@ -2189,7 +2191,7 @@ export default defineCommand({
       // BR-670 / AC-FIP-4 — rule totals over BOTH trees, one line, only when the baseline block exists
       // (a corpus without baseline docs prints byte-identical output). AD debt entries are named apart.
       if (baselineStatus !== null) {
-        console.log(
+        printLine(inv.io.stdout, 
           `\nBaseline rules: ${baselineStatus.rules_total} (BR ${baselineStatus.rules_by_family.BR}, AS ${baselineStatus.rules_by_family.AS}; ` +
             `live ${baselineStatus.rules_by_lifecycle.live}, deprecated ${baselineStatus.rules_by_lifecycle.deprecated}, retired ${baselineStatus.rules_by_lifecycle.retired}); ` +
             `${baselineStatus.debt_entries} AD debt entries not counted`,
@@ -2200,31 +2202,31 @@ export default defineCommand({
       // decisions prints what it printed before). Report-only: the exit-1 oracle is `--check-decision-log`.
       const decisionLogStatus = await collectDecisionLogStatus(dbPath);
       if (!decisionLogStatus.ok) {
-        process.stderr.write(formatErrorFor(inv, decisionLogStatus.error) + "\n");
+        inv.io.stderr.write(formatErrorFor(inv, decisionLogStatus.error) + "\n");
         setExitCode(exitCode(decisionLogStatus.error));
         return;
       }
       if (!decisionLogStatus.value.verify.clean || decisionLogStatus.value.head !== null) {
-        console.log(`\n${renderDecisionLogLine(decisionLogStatus.value)}`);
+        printLine(inv.io.stdout, `\n${renderDecisionLogLine(decisionLogStatus.value)}`);
       }
 
       const integrateLossLines = renderIntegrateLossLines(integrateLosses.value);
-      if (integrateLossLines.length > 0) console.log(`\n${integrateLossLines.join("\n")}`);
+      if (integrateLossLines.length > 0) printLine(inv.io.stdout, `\n${integrateLossLines.join("\n")}`);
 
       // AC-AU-9 — the governed threshold record's integrity. A BREAK is named and fails the command (exit 1): every
       // class is escalating, which a status that exits 0 would hide. Other states print one informational line.
       const thresholdStatus = await collectAutonomyThresholdStatus(dbPath);
       if (!thresholdStatus.ok) {
-        process.stderr.write(formatErrorFor(inv, thresholdStatus.error) + "\n");
+        inv.io.stderr.write(formatErrorFor(inv, thresholdStatus.error) + "\n");
         setExitCode(exitCode(thresholdStatus.error));
         return;
       }
-      if (thresholdStatus.value.state !== "unseeded") console.log(`\n${renderAutonomyThresholdLine(thresholdStatus.value)}`);
+      if (thresholdStatus.value.state !== "unseeded") printLine(inv.io.stdout, `\n${renderAutonomyThresholdLine(thresholdStatus.value)}`);
       if (isAutonomyThresholdBreak(thresholdStatus.value)) setExitCode(AUTONOMY_THRESHOLD_BREAK_EXIT);
 
       // baseline slice 1 §C7 — one line, only when a warning count is non-zero (report-only).
       if (baselineStatus !== null && baselineWarningCount(baselineStatus) > 0) {
-        console.log(
+        printLine(inv.io.stdout, 
           `\nBaseline warnings: ${baselineStatus.cites_dangling} dangling cites, ${baselineStatus.cites_to_inactive} cites to inactive rules, ` +
             `${baselineStatus.ambiguous_ac_ref} ambiguous evidence refs, ${baselineStatus.registry_mismatch} registry mismatches, ` +
             `${baselineStatus.index_mismatch} index mismatches, ` +
@@ -2235,18 +2237,18 @@ export default defineCommand({
       // baseline slice 3b BR-1011 — both census counts, printed even at 0 (a count that vanishes at 0 reads as "not measured");
       // the whole pair is absent without baseline docs. The slugs live in `--json`.
       if (specCitationCensus !== null) {
-        console.log(`\nSpecs without citation: ${specCitationCensus.specs_without_citation.count}`);
-        console.log(`Specs with a parent:    ${specCitationCensus.specs_with_parent.count}`);
+        printLine(inv.io.stdout, `\nSpecs without citation: ${specCitationCensus.specs_without_citation.count}`);
+        printLine(inv.io.stdout, `Specs with a parent:    ${specCitationCensus.specs_with_parent.count}`);
       }
 
       // BR-987 (AC-FIP-3) — printed only when true, so a corpus whose gate refuses something prints what it printed before.
       if (acCiteStatus !== null && acCiteStatus.enforce_refuses_nothing) {
-        console.log(`\nWarning: ${ENFORCE_REFUSES_NOTHING_WARNING}`);
+        printLine(inv.io.stdout, `\nWarning: ${ENFORCE_REFUSES_NOTHING_WARNING}`);
       }
 
       // baseline slice 2 §C4 — exemptions on this branch's corpus, only when any exist (report-only).
       if (baselineStatus !== null && baselineStatus.exemptions_active + baselineStatus.exemptions_expired + baselineStatus.exemptions_satisfied > 0) {
-        console.log(
+        printLine(inv.io.stdout, 
           `\nExemptions: ${baselineStatus.exemptions_active} active, ${baselineStatus.exemptions_expired} expired, ${baselineStatus.exemptions_satisfied} satisfied (cited) ` +
             `(${(baselineStatus.exemption_ratio * 100).toFixed(1)}% of live criteria, cap 10%)`,
         );
@@ -2256,7 +2258,7 @@ export default defineCommand({
       // codeAnchorSpecs above; silent when unavailable (no companion source
       // checkout, e.g. an external `lore` install) or when the scan found nothing.
       if (unclaimedOracle.available && unclaimedOracle.findings.length > 0) {
-        console.log(
+        printLine(inv.io.stdout, 
           `\nUnclaimed oracle values: ${unclaimedOracle.findings.length} (a test-name filter value ` +
             "present in a test file, bound by NO declared AC — run `bun scripts/check-unclaimed-oracle.ts` for detail)",
         );
@@ -2265,9 +2267,9 @@ export default defineCommand({
       // SPEC-043 D8 — invalidated-feeding-source warning (computed via the SAME
       // armed-gate helper SessionService.bootstrap uses; see CorpusService.status).
       if (status.invalidated_feeding_source_warnings.length > 0) {
-        console.log("\n⚠ Invalidated feeding sources:");
+        printLine(inv.io.stdout, "\n⚠ Invalidated feeding sources:");
         for (const warning of status.invalidated_feeding_source_warnings) {
-          console.log(`  - ${warning}`);
+          printLine(inv.io.stdout, `  - ${warning}`);
         }
       }
 
@@ -2276,23 +2278,23 @@ export default defineCommand({
       // prd_sync_exempt plans prints byte-identically to pre-SPEC-080.
       const exemptPlansLines = renderExemptPlansSection(status.exempt_plans);
       if (exemptPlansLines.length > 0) {
-        console.log("");
+        printLine(inv.io.stdout, "");
         for (const line of exemptPlansLines) {
-          console.log(line);
+          printLine(inv.io.stdout, line);
         }
       }
 
       // SPEC-143 AC-CT-8 — printed only when a skip is unresolved (a corpus with none prints what it printed before).
       const stateBindingSkipLine = renderStateBindingSkipLine(stateBindingSkips);
-      if (stateBindingSkipLine !== undefined) console.log(`\n${stateBindingSkipLine}`);
+      if (stateBindingSkipLine !== undefined) printLine(inv.io.stdout, `\n${stateBindingSkipLine}`);
 
       // SPEC-024 AC-NOAI-10: show resolved per-surface AI defaults
-      console.log("\nAI defaults (per surface):");
+      printLine(inv.io.stdout, "\nAI defaults (per surface):");
       for (const [surface, aiOn] of Object.entries(aiDefaults)) {
         const current = surface === app.callerSurface ? " ← current" : "";
-        console.log(`  ${surface.padEnd(14)} ${aiOn ? "on" : "off"}${current}`);
+        printLine(inv.io.stdout, `  ${surface.padEnd(14)} ${aiOn ? "on" : "off"}${current}`);
       }
-      console.log("  (override via --ai / --no-ai, or LORE_AI_DEFAULT=off, or ai.default_per_surface in config)");
+      printLine(inv.io.stdout, "  (override via --ai / --no-ai, or LORE_AI_DEFAULT=off, or ai.default_per_surface in config)");
     } finally {
       app.close();
     }

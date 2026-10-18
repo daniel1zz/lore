@@ -207,6 +207,8 @@ import { GhRunner, createNodeGhExecFile } from "../../../service/gh-runner.js";
 import { invocationOf } from "../command-invocation.js";
 import { readGithubIssueRef, labelToResolution, type GithubIssueRef } from "../../../service/resolution-projector.js";
 import type { GithubIssueRow } from "../../../service/github-issue-listing.js";
+import { printLine } from "../output.js";
+import type { CliIo } from "../output.js";
 
 /**
  * One rendered row — the fields D4 names (title, slug, reporter_project,
@@ -436,9 +438,9 @@ export async function runGithubIssuesListing(inv: Invocation,
     readonly category?: string;
   } = { mode: "all" },
 ): Promise<void> {
-  const joinedResult = await resolveGithubJoinedRows(app.corpusService, cfg, locator);
+  const joinedResult = await resolveGithubJoinedRows(inv.io, app.corpusService, cfg, locator);
   if (!joinedResult.ok) {
-    process.stderr.write(formatErrorFor(inv, joinedResult.error) + "\n");
+    inv.io.stderr.write(formatErrorFor(inv, joinedResult.error) + "\n");
     setExitCode(exitCode(joinedResult.error));
     return;
   }
@@ -448,7 +450,7 @@ export async function runGithubIssuesListing(inv: Invocation,
   const filtered = filterIssueRows(modeFiltered, filters.severity, filters.category);
 
   if (json) {
-    console.log( // CLI surface
+    printLine(inv.io.stdout,  // CLI surface
       JSON.stringify(
         {
           ok: true,
@@ -469,11 +471,11 @@ export async function runGithubIssuesListing(inv: Invocation,
     return;
   }
 
-  console.log(formatIssueCorpusLine(corpusPath)); // CLI surface
+  printLine(inv.io.stdout, formatIssueCorpusLine(corpusPath)); // CLI surface
   if (filtered.length === 0) {
-    console.log(`(no ${filters.mode} GitHub issue reports)`); // CLI surface
+    printLine(inv.io.stdout, `(no ${filters.mode} GitHub issue reports)`); // CLI surface
   } else {
-    console.log(`GitHub issue reports (${cfg.repo}) (${filtered.length}):`); // CLI surface
+    printLine(inv.io.stdout, `GitHub issue reports (${cfg.repo}) (${filtered.length}):`); // CLI surface
     const headers = ["Number", "Title", "State", "Resolution", "Slug", "Severity", "Category"];
     const tableRows = filtered.map((r) => [
       String(r.number),
@@ -484,9 +486,9 @@ export async function runGithubIssuesListing(inv: Invocation,
       r.severity ?? "",
       r.category ?? "",
     ]);
-    console.log(formatTable(headers, tableRows)); // CLI surface
+    printLine(inv.io.stdout, formatTable(headers, tableRows)); // CLI surface
   }
-  console.log(GITHUB_LISTING_LOCAL_BOUNDARY_NOTE); // CLI surface
+  printLine(inv.io.stdout, GITHUB_LISTING_LOCAL_BOUNDARY_NOTE); // CLI surface
 }
 
 /**
@@ -518,9 +520,9 @@ async function runGithubVerify(inv: Invocation,
   json: boolean,
   locator: CorpusLocator,
 ): Promise<void> {
-  const joinedResult = await resolveGithubJoinedRows(app.corpusService, cfg, locator);
+  const joinedResult = await resolveGithubJoinedRows(inv.io, app.corpusService, cfg, locator);
   if (!joinedResult.ok) {
-    process.stderr.write(formatErrorFor(inv, joinedResult.error) + "\n");
+    inv.io.stderr.write(formatErrorFor(inv, joinedResult.error) + "\n");
     setExitCode(exitCode(joinedResult.error));
     return;
   }
@@ -540,7 +542,7 @@ async function runGithubVerify(inv: Invocation,
     });
   }
 
-  renderVerifyResult(corpusPath, divergences, json);
+  renderVerifyResult(inv.io, corpusPath, divergences, json);
 }
 
 export default defineCommand({
@@ -604,12 +606,12 @@ export default defineCommand({
     // (never a narrowing of the listing); --apply means nothing alone. Usage errors exit 2 BEFORE the
     // corpus is opened.
     if (args.apply === true && args.sync !== true) {
-      process.stderr.write("Error: --apply is only meaningful with --sync.\n");
+      inv.io.stderr.write("Error: --apply is only meaningful with --sync.\n");
       setExitCode(2);
       return;
     }
     if (args.sync === true && (args.verify === true || args.open === true || args.resolved === true || args.all === true || args.local === true)) {
-      process.stderr.write("Error: --sync cannot be combined with --verify, --open, --resolved, --all or --local.\n");
+      inv.io.stderr.write("Error: --sync cannot be combined with --verify, --open, --resolved, --all or --local.\n");
       setExitCode(2);
       return;
     }
@@ -626,7 +628,7 @@ export default defineCommand({
       Boolean,
     ).length;
     if (modeFlagsSet > 1) {
-      process.stderr.write("Error: --open, --resolved, and --all are mutually exclusive.\n");
+      inv.io.stderr.write("Error: --open, --resolved, and --all are mutually exclusive.\n");
       setExitCode(2);
       return;
     }
@@ -639,7 +641,7 @@ export default defineCommand({
     // and fail loud only after.
     const severityFilter = typeof args.severity === "string" ? args.severity : undefined;
     if (severityFilter !== undefined && !isIssueSeverity(severityFilter)) {
-      process.stderr.write(`Error: --severity must be one of ${ISSUE_SEVERITIES.join("/")}.\n`);
+      inv.io.stderr.write(`Error: --severity must be one of ${ISSUE_SEVERITIES.join("/")}.\n`);
       setExitCode(2);
       return;
     }
@@ -666,7 +668,7 @@ export default defineCommand({
       // ingest-seam, AC-GR-1/2/10/12: `runGithubIssuesListing` reads live via
       // `report-issue-wiring.ts::resolveGithubJoinedRows`).
       if (args.local !== true && classification.kind === "retired") {
-        process.stderr.write(formatErrorFor(inv, classification.error) + "\n");
+        inv.io.stderr.write(formatErrorFor(inv, classification.error) + "\n");
         setExitCode(exitCode(classification.error));
         return;
       }
@@ -721,7 +723,7 @@ export default defineCommand({
       const rowsResult =
         source.kind === "upstream" ? unsupportedUpstreamReadError<IssueRow[]>() : await readLocalRows(app, mode);
       if (!rowsResult.ok) {
-        process.stderr.write(formatErrorFor(inv, rowsResult.error) + "\n");
+        inv.io.stderr.write(formatErrorFor(inv, rowsResult.error) + "\n");
         setExitCode(exitCode(rowsResult.error));
         return;
       }
@@ -731,7 +733,7 @@ export default defineCommand({
       // header names the census defect a self-consistent-but-unfiltered
       // total would reproduce).
       const filteredRows = filterIssueRows(rowsResult.value, severityFilter, categoryFilter);
-      renderRows(filteredRows, mode, source, args.json === true);
+      renderRows(inv.io, filteredRows, mode, source, args.json === true);
     } finally {
       app.close();
     }
@@ -831,14 +833,14 @@ async function readLocalRows(
  * @param source - which corpus was read and why (both fields reach `--json`)
  * @param json - whether `--json` was passed
  */
-function renderRows(
+function renderRows(io: CliIo, 
   rows: IssueRow[],
   mode: "open" | "resolved" | "all",
   source: IssueReadSource,
   json: boolean,
 ): void {
   if (json) {
-    console.log( // CLI surface
+    printLine(io.stdout,  // CLI surface
       JSON.stringify(
         {
           ok: true,
@@ -858,13 +860,13 @@ function renderRows(
     return;
   }
 
-  console.log(formatIssueCorpusLine(source.corpus_path)); // CLI surface
+  printLine(io.stdout, formatIssueCorpusLine(source.corpus_path)); // CLI surface
   if (rows.length === 0) {
-    console.log(`(no ${mode} issue reports)`); // CLI surface
+    printLine(io.stdout, `(no ${mode} issue reports)`); // CLI surface
     return;
   }
 
-  console.log(`${mode} issue reports (${rows.length}):`); // CLI surface
+  printLine(io.stdout, `${mode} issue reports (${rows.length}):`); // CLI surface
   const headers = ["Title", "Slug", "Reporter", "Reported", "Age", "Resolution", "Severity", "Category"];
   const tableRows = rows.map((r) => [
     r.title,
@@ -876,7 +878,7 @@ function renderRows(
     r.severity ?? "",
     r.category ?? "",
   ]);
-  console.log(formatTable(headers, tableRows)); // CLI surface
+  printLine(io.stdout, formatTable(headers, tableRows)); // CLI surface
 }
 
 /**
@@ -1105,11 +1107,11 @@ function computeDivergences(
  *   structurally unreachable) does not have to construct a fake one just
  *   to satisfy this function's signature.
  */
-function renderVerifyResult(corpusPath: string, divergences: readonly ResolutionDivergence[], json: boolean): void {
+function renderVerifyResult(io: CliIo, corpusPath: string, divergences: readonly ResolutionDivergence[], json: boolean): void {
   const clean = divergences.length === 0;
 
   if (json) {
-    console.log( // CLI surface
+    printLine(io.stdout,  // CLI surface
       JSON.stringify(
         {
           ok: true,
@@ -1125,13 +1127,13 @@ function renderVerifyResult(corpusPath: string, divergences: readonly Resolution
       ),
     );
   } else {
-    console.log(formatIssueCorpusLine(corpusPath)); // CLI surface
+    printLine(io.stdout, formatIssueCorpusLine(corpusPath)); // CLI surface
     if (clean) {
-      console.log("verify: clean — no resolution-label divergences found."); // CLI surface
+      printLine(io.stdout, "verify: clean — no resolution-label divergences found."); // CLI surface
     } else {
-      console.log(`verify: ${divergences.length} divergence(s) found:`); // CLI surface
+      printLine(io.stdout, `verify: ${divergences.length} divergence(s) found:`); // CLI surface
       for (const divergence of divergences) {
-        console.log(`  ${divergence.slug}: corpus=${divergence.corpus_resolution} github=${divergence.github_label_resolution}`); // CLI surface
+        printLine(io.stdout, `  ${divergence.slug}: corpus=${divergence.corpus_resolution} github=${divergence.github_label_resolution}`); // CLI surface
       }
     }
   }
@@ -1158,23 +1160,23 @@ async function runVerify(inv: Invocation, app: ReturnType<typeof loadLoreApp>["a
   const targetsResult =
     source.kind === "upstream" ? unsupportedUpstreamReadError<VerifyTarget[]>() : await collectLocalVerifyTargets(app);
   if (!targetsResult.ok) {
-    process.stderr.write(formatErrorFor(inv, targetsResult.error) + "\n");
+    inv.io.stderr.write(formatErrorFor(inv, targetsResult.error) + "\n");
     setExitCode(exitCode(targetsResult.error));
     return;
   }
 
   const targets = targetsResult.value;
   if (targets.length === 0) {
-    renderVerifyResult(source.corpus_path, [], json);
+    renderVerifyResult(inv.io, source.corpus_path, [], json);
     return;
   }
 
   const labelsResult = await fetchGithubLabelResolutions(targets, env);
   if (!labelsResult.ok) {
-    process.stderr.write(formatErrorFor(inv, labelsResult.error) + "\n");
+    inv.io.stderr.write(formatErrorFor(inv, labelsResult.error) + "\n");
     setExitCode(exitCode(labelsResult.error));
     return;
   }
 
-  renderVerifyResult(source.corpus_path, computeDivergences(targets, labelsResult.value), json);
+  renderVerifyResult(inv.io, source.corpus_path, computeDivergences(targets, labelsResult.value), json);
 }

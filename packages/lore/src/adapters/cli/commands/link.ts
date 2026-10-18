@@ -25,6 +25,7 @@ import { exitCode, formatErrorFor, formatShortId, resolveActor } from "../utils.
 import { linkTypeSchema } from "@lore/core";
 import type { LinkType } from "@lore/core";
 import { invocationOf } from "../command-invocation.js";
+import { printLine } from "../output.js";
 
 /**
  * The CLI's accepted `--type` values — DERIVED from `linkTypeSchema.options`
@@ -75,7 +76,7 @@ export default defineCommand({
     const { args } = context;
     const inv = invocationOf(context);
     const hasInfer = args.infer === true;
-    const resolvedActor = resolveActor(undefined, inv.env, inv.cwd, inv.user);
+    const resolvedActor = resolveActor(inv.io, undefined, inv.env, inv.cwd, inv.user);
 
     const { app } = loadLoreApp({ inv });
     try {
@@ -86,13 +87,13 @@ export default defineCommand({
         // Fetch both documents for AI context
         const fromResolve = await app.corpusService.resolve(args.from);
         if (!fromResolve.ok) {
-          process.stderr.write(formatErrorFor(inv, fromResolve.error) + "\n");
+          inv.io.stderr.write(formatErrorFor(inv, fromResolve.error) + "\n");
           setExitCode(exitCode(fromResolve.error));
           return;
         }
         const fromGet = await app.corpusService.get(fromResolve.value);
         if (!fromGet.ok) {
-          process.stderr.write(formatErrorFor(inv, fromGet.error) + "\n");
+          inv.io.stderr.write(formatErrorFor(inv, fromGet.error) + "\n");
           setExitCode(exitCode(fromGet.error));
           return;
         }
@@ -100,20 +101,20 @@ export default defineCommand({
 
         const toResolve = await app.corpusService.resolve(args.to);
         if (!toResolve.ok) {
-          process.stderr.write(formatErrorFor(inv, toResolve.error) + "\n");
+          inv.io.stderr.write(formatErrorFor(inv, toResolve.error) + "\n");
           setExitCode(exitCode(toResolve.error));
           return;
         }
         const toGet = await app.corpusService.get(toResolve.value);
         if (!toGet.ok) {
-          process.stderr.write(formatErrorFor(inv, toGet.error) + "\n");
+          inv.io.stderr.write(formatErrorFor(inv, toGet.error) + "\n");
           setExitCode(exitCode(toGet.error));
           return;
         }
         const toDoc = toGet.value.doc;
 
         if (showSpinner) {
-          process.stderr.write(
+          inv.io.stderr.write(
             `⏳ Inferring link type via ${app.aiProviderService.activeProviderName}...\n`,
           );
         }
@@ -125,7 +126,7 @@ export default defineCommand({
         if (!inferResult.ok) {
           // reason: invalid link type or provider error → exit 6 (AI_PROVIDER_ERROR),
           // consistent with AC-LINK-AI-2 and AC-AI-FAIL-1. No link is created.
-          process.stderr.write(formatErrorFor(inv, inferResult.error) + "\n");
+          inv.io.stderr.write(formatErrorFor(inv, inferResult.error) + "\n");
           setExitCode(exitCode(inferResult.error));
           return;
         }
@@ -133,7 +134,7 @@ export default defineCommand({
         const inferredType = inferResult.value.linkType;
 
         if (showSpinner) {
-          process.stderr.write(`✓ Inferred link type: ${inferredType}\n`);
+          inv.io.stderr.write(`✓ Inferred link type: ${inferredType}\n`);
         }
 
         // Create the link with the inferred type (CorpusService.link enforces cycle check → exit 4)
@@ -141,16 +142,16 @@ export default defineCommand({
           by: resolvedActor,
         });
         if (!linkResult.ok) {
-          process.stderr.write(formatErrorFor(inv, linkResult.error) + "\n");
+          inv.io.stderr.write(formatErrorFor(inv, linkResult.error) + "\n");
           setExitCode(exitCode(linkResult.error));
           return;
         }
 
         const link = linkResult.value;
         if (args.json) {
-          console.log(JSON.stringify({ ok: true, data: link }, null, 2));
+          printLine(inv.io.stdout, JSON.stringify({ ok: true, data: link }, null, 2));
         } else {
-          console.log(
+          printLine(inv.io.stdout, 
             `Linked ${formatShortId(link.from_id)} → ${formatShortId(link.to_id)} ` +
               `(${link.link_type}) [inferred]`,
           );
@@ -162,7 +163,7 @@ export default defineCommand({
       const linkType = (args.type ?? "relates-to") as LinkType;
 
       if (!VALID_LINK_TYPES.includes(linkType)) {
-        process.stderr.write(
+        inv.io.stderr.write(
           `Error: Invalid link type '${linkType}'. Valid types: ${VALID_LINK_TYPES.join(", ")}\n`,
         );
         exitCli(2);
@@ -173,16 +174,16 @@ export default defineCommand({
       });
 
       if (!result.ok) {
-        process.stderr.write(formatErrorFor(inv, result.error) + "\n");
+        inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
         setExitCode(exitCode(result.error));
         return;
       }
 
       const link = result.value;
       if (args.json) {
-        console.log(JSON.stringify({ ok: true, data: link }, null, 2));
+        printLine(inv.io.stdout, JSON.stringify({ ok: true, data: link }, null, 2));
       } else {
-        console.log(`Linked ${formatShortId(link.from_id)} → ${formatShortId(link.to_id)} (${link.link_type})`);
+        printLine(inv.io.stdout, `Linked ${formatShortId(link.from_id)} → ${formatShortId(link.to_id)} (${link.link_type})`);
       }
     } finally {
       app.close();

@@ -193,6 +193,8 @@ import { computeSetupCheckReport, finishProjectSetupCheck, runSetupCheck } from 
 import type { SetupCheckFiles } from "../setup-check.js";
 import { createNodeGhExecFile, GhRunner } from "../../../service/gh-runner.js";
 import { createGhRunnerHealthProbe, ghHealthExitCode, runGitHubHealthCheck } from "../setup-github-health.js";
+import { printLine } from "../output.js";
+import type { CliIo } from "../output.js";
 
 // ─── Repo-root resolution (dev mode only — see setup-args.ts's module doc) ──
 // packages/lore/src/adapters/cli/commands/setup.ts -> repo root is 6 levels up.
@@ -279,7 +281,7 @@ async function promptYesNo(question: string): Promise<boolean> {
  *   printed its own message and set `process.exitCode` (0 for a deliberate
  *   "no", 2 for the non-interactive-without-`--yes` case).
  */
-async function confirmOrReport(opts: {
+async function confirmOrReport(io: CliIo, opts: {
   yes: boolean;
   json: boolean;
   verb: string;
@@ -288,7 +290,7 @@ async function confirmOrReport(opts: {
   const decision = classifyConfirmation({ yes: opts.yes, json: opts.json });
 
   if (decision === "reject-noninteractive") {
-    process.stderr.write(
+    io.stderr.write(
       `Error: refusing to ${opts.verb} without confirmation in a non-interactive session — pass --yes.\n`,
     );
     setExitCode(2);
@@ -296,10 +298,10 @@ async function confirmOrReport(opts: {
   }
 
   if (decision === "prompt") {
-    console.log(opts.preview());
+    printLine(io.stdout, opts.preview());
     const confirmed = await promptYesNo("Proceed? [y/N] ");
     if (!confirmed) {
-      console.log("Aborted — no changes made.");
+      printLine(io.stdout, "Aborted — no changes made.");
       setExitCode(0);
       return false;
     }
@@ -620,7 +622,7 @@ function applyLanguageProjections(plan: readonly LanguageProjection[]): Result<v
 
 /** Reports a LoreError on stderr and sets the mapped exit code. */
 function failWith(inv: Invocation, error: LoreError): void {
-  process.stderr.write(formatErrorFor(inv, error) + "\n");
+  inv.io.stderr.write(formatErrorFor(inv, error) + "\n");
   setExitCode(exitCode(error));
 }
 
@@ -805,7 +807,7 @@ async function runProjectCheck(opts: { json: boolean; assetsRoot: string; inv: I
   if (!settings.ok) return failWith(opts.inv, settings.error);
 
   const parts = [ledger.value, rules.value, settings.value];
-  await finishProjectSetupCheck({
+  await finishProjectSetupCheck(opts.inv.io, {
     repoDir,
     json: opts.json,
     files: {
@@ -829,7 +831,7 @@ async function runProjectScaffold(opts: {
   if (!repoDirResolved.ok) return failWith(opts.inv, repoDirResolved.error);
   const repoDir = repoDirResolved.value;
 
-  const proceed = await confirmOrReport({
+  const proceed = await confirmOrReport(opts.inv.io, {
     yes: opts.yes,
     json: opts.json,
     verb: "scaffold",
@@ -867,7 +869,7 @@ async function runProjectScaffold(opts: {
 
   const result = await service.scaffold(repoDir);
   if (!result.ok) {
-    process.stderr.write(formatErrorFor(opts.inv, result.error) + "\n");
+    opts.inv.io.stderr.write(formatErrorFor(opts.inv, result.error) + "\n");
     setExitCode(exitCode(result.error));
     return;
   }
@@ -885,9 +887,9 @@ async function runProjectScaffold(opts: {
   };
 
   if (opts.json) {
-    console.log(JSON.stringify({ ok: true, data: { ...receipt, next_steps: PROJECT_NEXT_STEPS } }, null, 2));
+    printLine(opts.inv.io.stdout, JSON.stringify({ ok: true, data: { ...receipt, next_steps: PROJECT_NEXT_STEPS } }, null, 2));
   } else {
-    console.log(renderProjectScaffoldReceipt(receipt, { targetDir: repoDir, binPath: opts.binPath }));
+    printLine(opts.inv.io.stdout, renderProjectScaffoldReceipt(receipt, { targetDir: repoDir, binPath: opts.binPath }));
   }
   setExitCode(scaffoldReportFailed(result.value) ? 1 : 0);
 
@@ -910,7 +912,7 @@ async function runProjectUninstall(opts: { json: boolean; yes: boolean; inv: Inv
   if (!repoDirResolved.ok) return failWith(opts.inv, repoDirResolved.error);
   const repoDir = repoDirResolved.value;
 
-  const proceed = await confirmOrReport({
+  const proceed = await confirmOrReport(opts.inv.io, {
     yes: opts.yes,
     json: opts.json,
     verb: "uninstall",
@@ -922,15 +924,15 @@ async function runProjectUninstall(opts: { json: boolean; yes: boolean; inv: Inv
 
   const result = await uninstallProject(makeRealProjectRemoveFs(), { repoDir });
   if (!result.ok) {
-    process.stderr.write(formatErrorFor(opts.inv, result.error) + "\n");
+    opts.inv.io.stderr.write(formatErrorFor(opts.inv, result.error) + "\n");
     setExitCode(exitCode(result.error));
     return;
   }
 
   if (opts.json) {
-    console.log(JSON.stringify({ ok: true, data: result.value }, null, 2));
+    printLine(opts.inv.io.stdout, JSON.stringify({ ok: true, data: result.value }, null, 2));
   } else {
-    console.log(renderProjectUninstallReport(repoDir, result.value));
+    printLine(opts.inv.io.stdout, renderProjectUninstallReport(repoDir, result.value));
   }
   setExitCode(0);
 }
@@ -938,15 +940,15 @@ async function runProjectUninstall(opts: { json: boolean; yes: boolean; inv: Inv
 async function runDryRun(inv: Invocation, service: SetupService, targetDir: string, binPath: string, json: boolean): Promise<void> {
   const planResult = await service.planInstall({ targetDir });
   if (!planResult.ok) {
-    process.stderr.write(formatErrorFor(inv, planResult.error) + "\n");
+    inv.io.stderr.write(formatErrorFor(inv, planResult.error) + "\n");
     setExitCode(exitCode(planResult.error));
     return;
   }
 
   if (json) {
-    console.log(JSON.stringify({ ok: true, data: { targetDir, binPath, plan: planResult.value } }, null, 2));
+    printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { targetDir, binPath, plan: planResult.value } }, null, 2));
   } else {
-    console.log(renderInstallPlan(planResult.value, { targetDir, binPath }));
+    printLine(inv.io.stdout, renderInstallPlan(planResult.value, { targetDir, binPath }));
   }
   setExitCode(0);
 }
@@ -959,13 +961,13 @@ async function runDryRun(inv: Invocation, service: SetupService, targetDir: stri
  * a sibling task's claimed anchor). No-op when `skippedDiverged` is empty
  * (fresh install, or an update converge with nothing diverged).
  */
-function renderDivergedSkipSection(skippedDiverged: string[]): void {
+function renderDivergedSkipSection(io: CliIo, skippedDiverged: string[]): void {
   if (skippedDiverged.length === 0) return;
-  console.log("");
-  console.log(`skipped (diverged, ${skippedDiverged.length}) — user-modified, not overwritten:`);
+  printLine(io.stdout, "");
+  printLine(io.stdout, `skipped (diverged, ${skippedDiverged.length}) — user-modified, not overwritten:`);
   for (const p of skippedDiverged) {
-    console.log(`  ${p}`);
-    console.log("    repair: lore setup --yes --force-diverged");
+    printLine(io.stdout, `  ${p}`);
+    printLine(io.stdout, "    repair: lore setup --yes --force-diverged");
   }
 }
 
@@ -982,7 +984,7 @@ async function runInstall(inv: Invocation,
     return;
   }
 
-  const proceed = await confirmOrReport({
+  const proceed = await confirmOrReport(inv.io, {
     yes: opts.yes,
     json: opts.json,
     verb: "install",
@@ -1012,17 +1014,17 @@ async function runInstall(inv: Invocation,
     ...(settingsLanguage !== undefined ? { settingsLanguage } : {}),
   });
   if (!result.ok) {
-    process.stderr.write(formatErrorFor(inv, result.error) + "\n");
+    inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
     setExitCode(exitCode(result.error));
     return;
   }
 
   const ctx = renderCtx(opts.targetDir, opts.binPath, mcpRegistrar.lastError);
   if (opts.json) {
-    console.log(JSON.stringify({ ok: true, data: result.value }, null, 2));
+    printLine(inv.io.stdout, JSON.stringify({ ok: true, data: result.value }, null, 2));
   } else {
-    console.log(renderInstallReceipt(result.value, ctx));
-    renderDivergedSkipSection(result.value.skippedDiverged);
+    printLine(inv.io.stdout, renderInstallReceipt(result.value, ctx));
+    renderDivergedSkipSection(inv.io, result.value.skippedDiverged);
   }
   setExitCode(mcpOutcomeExitCode(result.value));
 
@@ -1035,7 +1037,7 @@ async function runUninstall(inv: Invocation,
   mcpRegistrar: CapturingMcpRegistrar,
   opts: { targetDir: string; binPath: string; json: boolean; yes: boolean },
 ): Promise<void> {
-  const proceed = await confirmOrReport({
+  const proceed = await confirmOrReport(inv.io, {
     yes: opts.yes,
     json: opts.json,
     verb: "uninstall",
@@ -1046,16 +1048,16 @@ async function runUninstall(inv: Invocation,
 
   const result = await service.uninstall({ targetDir: opts.targetDir });
   if (!result.ok) {
-    process.stderr.write(formatErrorFor(inv, result.error) + "\n");
+    inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
     setExitCode(exitCode(result.error));
     return;
   }
 
   const ctx = renderCtx(opts.targetDir, opts.binPath, mcpRegistrar.lastError);
   if (opts.json) {
-    console.log(JSON.stringify({ ok: true, data: result.value }, null, 2));
+    printLine(inv.io.stdout, JSON.stringify({ ok: true, data: result.value }, null, 2));
   } else {
-    console.log(renderUninstallReceipt(result.value, ctx));
+    printLine(inv.io.stdout, renderUninstallReceipt(result.value, ctx));
   }
   setExitCode(mcpOutcomeExitCode(result.value));
 }
@@ -1092,11 +1094,11 @@ async function runGitHubChannelHealthCheck(opts: { json: boolean; inv: Invocatio
   const report = await runGitHubHealthCheck({ runner });
 
   if (opts.json) {
-    console.log(JSON.stringify({ ok: report.ok, data: { github_channel: report } }, null, 2));
+    printLine(opts.inv.io.stdout, JSON.stringify({ ok: report.ok, data: { github_channel: report } }, null, 2));
   } else if (report.ok) {
-    console.log(`✓ GitHub feedback channel reachable — ${report.message}`);
+    printLine(opts.inv.io.stdout, `✓ GitHub feedback channel reachable — ${report.message}`);
   } else {
-    process.stderr.write(`✗ GitHub feedback channel unavailable: ${report.message}\n`);
+    opts.inv.io.stderr.write(`✗ GitHub feedback channel unavailable: ${report.message}\n`);
   }
 
   if (!report.ok && getExitCode() === 0) {
@@ -1136,7 +1138,7 @@ async function runCheckDispatch(opts: { targetDir: string; json: boolean; inv: I
 
   const freshnessResult = await computeSetupCheckReport({ targetDir: opts.targetDir, cwd: opts.inv.cwd });
   if (!freshnessResult.ok) {
-    process.stderr.write(formatErrorFor(opts.inv, freshnessResult.error) + "\n");
+    opts.inv.io.stderr.write(formatErrorFor(opts.inv, freshnessResult.error) + "\n");
     setExitCode(exitCode(freshnessResult.error));
     await runGitHubChannelHealthCheck({ json: true, inv: opts.inv });
     return;
@@ -1146,7 +1148,7 @@ async function runCheckDispatch(opts: { targetDir: string; json: boolean; inv: I
   const runner = createGhRunnerHealthProbe(new GhRunner({ execFile: createNodeGhExecFile(), env: opts.inv.env }));
   const channelReport = await runGitHubHealthCheck({ runner });
 
-  console.log(JSON.stringify({ ok: true, data: { ...report, github_channel: channelReport } }, null, 2));
+  printLine(opts.inv.io.stdout, JSON.stringify({ ok: true, data: { ...report, github_channel: channelReport } }, null, 2));
 
   setExitCode(report.summary === "sync" ? 0 : 3);
   if (!channelReport.ok && getExitCode() === 0) {
@@ -1229,7 +1231,7 @@ export default defineCommand({
               ? "--force-diverged"
               : undefined;
       if (mutexFlag !== undefined) {
-        process.stderr.write(
+        inv.io.stderr.write(
           `Error: --check cannot be combined with ${mutexFlag} — a read-only check has no separate mutate mode.\n`,
         );
         setExitCode(2);
@@ -1239,7 +1241,7 @@ export default defineCommand({
         // reason: BR-849 — `--check --project` checks the PROJECT install (BR-1085). `--claude-dir` stays refused
         // exactly as `--project` alone refuses it: the project scaffold has no machine target to redirect.
         if (claudeDirFlag !== undefined) {
-          process.stderr.write("Error: --check --project cannot be combined with --claude-dir — the project check reads only the current repo.\n");
+          inv.io.stderr.write("Error: --check --project cannot be combined with --claude-dir — the project check reads only the current repo.\n");
           setExitCode(2);
           return;
         }
@@ -1262,7 +1264,7 @@ export default defineCommand({
       ...(claudeDirFlag !== undefined ? { claudeDir: claudeDirFlag } : {}),
     });
     if (!validated.ok) {
-      process.stderr.write(`Error: ${validated.message}\n`);
+      inv.io.stderr.write(`Error: ${validated.message}\n`);
       setExitCode(2);
       return;
     }

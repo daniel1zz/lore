@@ -90,7 +90,7 @@ const prune = defineCommand({
     let store: SQLiteStore | undefined;
     try {
       if (app.repoRoot === undefined) {
-        process.stderr.write("Error: repoRoot not set on this App instance.\n");
+        inv.io.stderr.write("Error: repoRoot not set on this App instance.\n");
         setExitCode(1);
         return;
       }
@@ -98,7 +98,7 @@ const prune = defineCommand({
       // run-identity-verify.ts): verify once through the app's wrapped store; an unregistered id is null.
       const verifiedIdentity = await app.verifiedInvocationIdentity?.();
       if (verifiedIdentity !== undefined && !verifiedIdentity.ok) {
-        process.stderr.write(`${formatErrorFor(inv, verifiedIdentity.error)}\n`);
+        inv.io.stderr.write(`${formatErrorFor(inv, verifiedIdentity.error)}\n`);
         setExitCode(exitCode(verifiedIdentity.error));
         return;
       }
@@ -113,11 +113,11 @@ const prune = defineCommand({
       const service = new StashPruneService({ git, store, decisions });
       const result = args.apply === true ? await service.apply() : await dryRun(service);
       if (!result.ok) {
-        process.stderr.write(`${formatErrorFor(inv, result.error)}\n`);
+        inv.io.stderr.write(`${formatErrorFor(inv, result.error)}\n`);
         setExitCode(exitCode(result.error));
         return;
       }
-      process.stdout.write(`${args.json === true ? JSON.stringify({ ok: true, data: result.value }, null, 2) : renderReport(result.value)}\n`);
+      inv.io.stdout.write(`${args.json === true ? JSON.stringify({ ok: true, data: result.value }, null, 2) : renderReport(result.value)}\n`);
     } finally {
       store?.close();
       app.close();

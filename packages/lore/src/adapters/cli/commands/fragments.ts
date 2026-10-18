@@ -55,6 +55,7 @@ import { resolveAssetsRoot, resolveTargetDir, type SetupPathContext } from "../s
 import { writeAllSync } from "../stdio-sync.js";
 import type { Invocation } from "@lore/core";
 import { invocationOf } from "../command-invocation.js";
+import type { CliIo } from "../output.js";
 
 const ACTIONS = ["render", "check", "pointers"] as const;
 type Action = (typeof ACTIONS)[number];
@@ -212,29 +213,27 @@ function isAction(value: string): value is Action {
   return (ACTIONS as readonly string[]).includes(value);
 }
 
-function usageError(message: string): void {
-  process.stderr.write(`Error: ${message}\n`);
+function usageError(io: CliIo, message: string): void {
+  io.stderr.write(`Error: ${message}\n`);
   setExitCode(USAGE_EXIT);
 }
 
-function emitHookJson(outlet: HookOutlet, additionalContext: string): void {
-  writeAllSync(
-    1,
-    `${JSON.stringify({ hookSpecificOutput: { hookEventName: HOOK_EVENT_NAMES[outlet], additionalContext } })}\n`,
+function emitHookJson(io: CliIo, outlet: HookOutlet, additionalContext: string): void {
+  io.stdout.write(`${JSON.stringify({ hookSpecificOutput: { hookEventName: HOOK_EVENT_NAMES[outlet], additionalContext } })}\n`,
   );
 }
 
 async function runRender(args: Record<string, unknown>, cwd: string, inv: Invocation): Promise<void> {
   const outlet = typeof args["outlet"] === "string" ? args["outlet"] : "";
   if (outlet === RETIRED_SESSION_START_OUTLET) {
-    usageError(
+    usageError(inv.io, 
       `lore fragments render: outlet ${RETIRED_SESSION_START_OUTLET} is retired; the only render target is ${HOOK_OUTLETS.join("|")}. ` +
         "Session-start upgrade advice comes from the session-start-resume hook, and dynamic main fragments are refused by `lore fragments check`.",
     );
     return;
   }
   if (!isHookOutlet(outlet)) {
-    usageError(`lore fragments render requires --outlet <${HOOK_OUTLETS.join("|")}> (got "${outlet}"; known outlets: ${OUTLET_IDS.join(", ")})`);
+    usageError(inv.io, `lore fragments render requires --outlet <${HOOK_OUTLETS.join("|")}> (got "${outlet}"; known outlets: ${OUTLET_IDS.join(", ")})`);
     return;
   }
   const agentType = typeof args["agent-type"] === "string" && args["agent-type"] !== "" ? args["agent-type"] : undefined;
@@ -245,14 +244,14 @@ async function runRender(args: Record<string, unknown>, cwd: string, inv: Invoca
     : deps;
   if (!result.ok) {
     // D12: a hook never blocks start and never emits nothing — banner with the code, exit 0.
-    emitHookJson(outlet, buildHookBanner(result.error));
-    process.stderr.write(`lore fragments render: ${result.error.code}: ${result.error.message}\n`);
+    emitHookJson(inv.io, outlet, buildHookBanner(result.error));
+    inv.io.stderr.write(`lore fragments render: ${result.error.code}: ${result.error.message}\n`);
     return;
   }
   if (args["explain"] === true) {
-    for (const row of result.value.explain) process.stderr.write(`explain: ${row.id} layer=${row.layer} chars=${row.chars}\n`);
+    for (const row of result.value.explain) inv.io.stderr.write(`explain: ${row.id} layer=${row.layer} chars=${row.chars}\n`);
   }
-  emitHookJson(outlet, result.value.additionalContext);
+  emitHookJson(inv.io, outlet, result.value.additionalContext);
 }
 
 /**
@@ -264,23 +263,21 @@ export async function runCheck(args: Record<string, unknown>, cwd: string, inv: 
   const json = args["json"] === true;
   const deps = buildFlowDeps(cwd, inv);
   if (!deps.ok) {
-    if (json) writeAllSync(1, `${JSON.stringify({ ok: false, error: deps.error })}\n`);
-    process.stderr.write(`${label}: ${deps.error.code}: ${deps.error.message}\n`);
+    if (json) inv.io.stdout.write(`${JSON.stringify({ ok: false, error: deps.error })}\n`);
+    inv.io.stderr.write(`${label}: ${deps.error.code}: ${deps.error.message}\n`);
     setExitCode(CHECK_FAILED_EXIT);
     return;
   }
   const report = await runFragmentsCheck(deps.value);
   if (json) {
-    writeAllSync(1, `${JSON.stringify({ ok: report.ok, data: report })}\n`);
+    inv.io.stdout.write(`${JSON.stringify({ ok: report.ok, data: report })}\n`);
   } else {
-    writeAllSync(
-      1,
-      `${label}: ${report.checks.length} outlet checks across ${report.agentTypes.length} agent types — ` +
+    inv.io.stdout.write(`${label}: ${report.checks.length} outlet checks across ${report.agentTypes.length} agent types — ` +
         `${report.ok ? "ok" : `${report.findings.length} finding(s)`}\n`,
     );
   }
   for (const finding of report.findings) {
-    process.stderr.write(`[${finding.kind}] ${finding.code}: ${finding.message}\n`);
+    inv.io.stderr.write(`[${finding.kind}] ${finding.code}: ${finding.message}\n`);
   }
   if (!report.ok) setExitCode(CHECK_FAILED_EXIT);
 }
@@ -303,9 +300,9 @@ async function runPointers(cwd: string, inv: Invocation): Promise<void> {
     },
   });
   if (result.skipped !== undefined && result.skipped !== "no-corpus") {
-    process.stderr.write(`lore fragments pointers: no pointers emitted (${result.skipped})\n`);
+    inv.io.stderr.write(`lore fragments pointers: no pointers emitted (${result.skipped})\n`);
   }
-  if (result.text.length > 0) writeAllSync(1, result.text);
+  if (result.text.length > 0) inv.io.stdout.write(result.text);
 }
 
 export default defineCommand({
@@ -330,7 +327,7 @@ export default defineCommand({
     const inv = invocationOf(context);
     const action = typeof args.action === "string" ? args.action : "";
     if (!isAction(action)) {
-      usageError(`lore fragments requires an action: ${ACTIONS.join(" | ")} (got "${action}")`);
+      usageError(inv.io, `lore fragments requires an action: ${ACTIONS.join(" | ")} (got "${action}")`);
       return;
     }
     const cwd = typeof args.cwd === "string" && args.cwd !== "" ? resolve(args.cwd) : inv.cwd;

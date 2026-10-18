@@ -19,6 +19,7 @@ import { loadLoreApp } from "../loader.js";
 import { exitCode, formatErrorFor, resolveActor } from "../utils.js";
 import type { InvalidateOpts } from "../../../service/validity-service.js";
 import { invocationOf } from "../command-invocation.js";
+import { printLine } from "../output.js";
 
 export default defineCommand({
   meta: {
@@ -54,12 +55,12 @@ export default defineCommand({
     const { app } = loadLoreApp({ inv });
     try {
       if (app.validityService === undefined) {
-        process.stderr.write("Error: ValidityService not wired on this App instance.\n");
+        inv.io.stderr.write("Error: ValidityService not wired on this App instance.\n");
         setExitCode(1);
         return;
       }
 
-      const by = resolveActor(undefined, inv.env, inv.cwd, inv.user);
+      const by = resolveActor(inv.io, undefined, inv.env, inv.cwd, inv.user);
       const opts: InvalidateOpts = { by };
       if (args["superseded-by"] !== undefined) opts.supersededBy = args["superseded-by"];
       if (args.reason !== undefined) opts.reason = args.reason;
@@ -68,7 +69,7 @@ export default defineCommand({
       const result = await app.validityService.invalidate(args.id, opts);
 
       if (!result.ok) {
-        process.stderr.write(formatErrorFor(inv, result.error) + "\n");
+        inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
         setExitCode(exitCode(result.error));
         return;
       }
@@ -76,7 +77,7 @@ export default defineCommand({
       const { doc, decision_status_unchanged, task_already_terminal, task_claim_holder } = result.value;
 
       if (args.json) {
-        console.log(
+        printLine(inv.io.stdout, 
           JSON.stringify(
             {
               ok: true,
@@ -95,22 +96,22 @@ export default defineCommand({
       }
 
       if (args.undo === true) {
-        console.log(`Undone invalidation for ${doc.slug}`);
+        printLine(inv.io.stdout, `Undone invalidation for ${doc.slug}`);
         if (decision_status_unchanged !== undefined) {
-          console.log(
+          printLine(inv.io.stdout, 
             `  Note: decision_status remains "${decision_status_unchanged}" — --undo never auto-reverts it.`,
           );
         }
       } else {
-        console.log(`Invalidated ${doc.slug} (v${doc.version})`);
+        printLine(inv.io.stdout, `Invalidated ${doc.slug} (v${doc.version})`);
         // BOUNDARY advisories (AC6, task-a-task-cannot-be-retracted-
         // supersedes-emits-a-repair) — NAMED, non-blocking notes; the
         // retraction always applies regardless of either condition.
         if (task_already_terminal !== undefined) {
-          console.log(`  Note: this task was already "${task_already_terminal}" (terminal) before retraction.`);
+          printLine(inv.io.stdout, `  Note: this task was already "${task_already_terminal}" (terminal) before retraction.`);
         }
         if (task_claim_holder !== undefined) {
-          console.log(`  Note: this task carries a claim held by "${task_claim_holder}".`);
+          printLine(inv.io.stdout, `  Note: this task carries a claim held by "${task_claim_holder}".`);
         }
       }
     } finally {

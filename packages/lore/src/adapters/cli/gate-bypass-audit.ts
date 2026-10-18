@@ -44,6 +44,7 @@ import {
   type RecordGateSkip,
 } from "../../service/gate-enforcer.js";
 import type { GateCheckpoint } from "../../service/checkpoint-registry.js";
+import type { CliIo } from "./output.js";
 
 export { findLoreDbPathQuiet } from "./corpus-resolution.js";
 
@@ -92,12 +93,12 @@ export async function runGateEnvBypassAudit(
   try {
     recordGateSkip = await deps.openRecordGateSkip();
   } catch (error) {
-    warnBypassNotAudited(describeThrown(error));
+    warnBypassNotAudited(inv.io, describeThrown(error));
     return;
   }
 
   if (recordGateSkip === null) {
-    warnBypassNotAudited("corpus unreachable");
+    warnBypassNotAudited(inv.io, "corpus unreachable");
     return;
   }
 
@@ -109,14 +110,14 @@ export async function runGateEnvBypassAudit(
   try {
     const result = await recordGateSkip(entry);
     if (!result.ok) {
-      warnBypassNotAudited(describeLoreError(result.error));
+      warnBypassNotAudited(inv.io, describeLoreError(result.error));
     }
   } catch (error) {
-    warnBypassNotAudited(describeThrown(error));
+    warnBypassNotAudited(inv.io, describeThrown(error));
   }
 }
 
 /** Single stderr-line formatter shared by every failure branch above (SPEC-080 D1). */
-function warnBypassNotAudited(reason: string): void {
-  process.stderr.write(`gate bypass NOT audited: ${reason}\n`); // CLI surface
+function warnBypassNotAudited(io: CliIo, reason: string): void {
+  io.stderr.write(`gate bypass NOT audited: ${reason}\n`); // CLI surface
 }

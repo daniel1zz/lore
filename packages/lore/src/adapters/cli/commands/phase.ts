@@ -44,6 +44,8 @@ import { requirePhaseChecklistService, getPhaseStatus } from "../phase-wiring.js
 import type { PlanPhase, ChecklistItem } from "@lore/core";
 import type { PhaseStatusPayload } from "../../../flows/phase-status-flow.js";
 import { invocationOf } from "../command-invocation.js";
+import { printLine } from "../output.js";
+import type { CliIo } from "../output.js";
 
 export default defineCommand({
   meta: {
@@ -87,18 +89,18 @@ export default defineCommand({
           );
 
           if (!result.ok) {
-            process.stderr.write(formatErrorFor(inv, result.error) + "\n");
+            inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
             setExitCode(exitCode(result.error));
             return;
           }
 
           if (args.json) {
-            console.log(JSON.stringify({ ok: true, data: { phases: result.value } }, null, 2));
+            printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { phases: result.value } }, null, 2));
             return;
           }
 
-          console.log(`Added phase "${args.name}" to plan ${args.plan}`);
-          renderPhaseList(result.value);
+          printLine(inv.io.stdout, `Added phase "${args.name}" to plan ${args.plan}`);
+          renderPhaseList(inv.io, result.value);
         } finally {
           app.close();
         }
@@ -127,22 +129,22 @@ export default defineCommand({
           const result = await app.phaseService.listPhases(args.plan as string);
 
           if (!result.ok) {
-            process.stderr.write(formatErrorFor(inv, result.error) + "\n");
+            inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
             setExitCode(exitCode(result.error));
             return;
           }
 
           if (args.json) {
-            console.log(JSON.stringify({ ok: true, data: { phases: result.value } }, null, 2));
+            printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { phases: result.value } }, null, 2));
             return;
           }
 
           if (result.value.length === 0) {
-            console.log("No phases declared on this plan.");
+            printLine(inv.io.stdout, "No phases declared on this plan.");
             return;
           }
 
-          renderPhaseList(result.value);
+          renderPhaseList(inv.io, result.value);
         } finally {
           app.close();
         }
@@ -176,21 +178,21 @@ export default defineCommand({
           const result = await app.phaseService.removePhase(args.plan as string, args.name as string);
 
           if (!result.ok) {
-            process.stderr.write(formatErrorFor(inv, result.error) + "\n");
+            inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
             setExitCode(exitCode(result.error));
             return;
           }
 
           if (args.json) {
-            console.log(JSON.stringify({ ok: true, data: { phases: result.value } }, null, 2));
+            printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { phases: result.value } }, null, 2));
             return;
           }
 
-          console.log(`Removed phase "${args.name as string}" from plan ${args.plan as string}`);
+          printLine(inv.io.stdout, `Removed phase "${args.name as string}" from plan ${args.plan as string}`);
           if (result.value.length > 0) {
-            renderPhaseList(result.value);
+            renderPhaseList(inv.io, result.value);
           } else {
-            console.log("No phases remaining.");
+            printLine(inv.io.stdout, "No phases remaining.");
           }
         } finally {
           app.close();
@@ -237,18 +239,18 @@ export default defineCommand({
           );
 
           if (!result.ok) {
-            process.stderr.write(formatErrorFor(inv, result.error) + "\n");
+            inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
             setExitCode(exitCode(result.error));
             return;
           }
 
           if (args.json) {
-            console.log(JSON.stringify({ ok: true, data: { phases: result.value } }, null, 2));
+            printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { phases: result.value } }, null, 2));
             return;
           }
 
-          console.log(`Renamed phase "${args.old as string}" → "${args.new as string}" on plan ${args.plan as string}`);
-          renderPhaseList(result.value);
+          printLine(inv.io.stdout, `Renamed phase "${args.old as string}" → "${args.new as string}" on plan ${args.plan as string}`);
+          renderPhaseList(inv.io, result.value);
         } finally {
           app.close();
         }
@@ -292,15 +294,15 @@ export default defineCommand({
           const result = await getPhaseStatus(app, args.phase as string, nowIso);
 
           if (!result.ok) {
-            process.stderr.write(formatErrorFor(inv, result.error) + "\n");
+            inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
             setExitCode(exitCode(result.error));
             return;
           }
 
           if (args.json) {
-            console.log(JSON.stringify({ ok: true, data: result.value }, null, 2));
+            printLine(inv.io.stdout, JSON.stringify({ ok: true, data: result.value }, null, 2));
           } else {
-            renderPhaseStatus(result.value);
+            renderPhaseStatus(inv.io, result.value);
           }
           setExitCode(result.value.exit_code);
         } finally {
@@ -344,17 +346,17 @@ export default defineCommand({
               });
 
               if (!result.ok) {
-                process.stderr.write(formatErrorFor(inv, result.error) + "\n");
+                inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
                 setExitCode(exitCode(result.error));
                 return;
               }
 
               if (args.json) {
-                console.log(JSON.stringify({ ok: true, data: { checklist: result.value } }, null, 2));
+                printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { checklist: result.value } }, null, 2));
                 return;
               }
-              console.log(`Added checklist item "${args.id as string}" to phase ${args.phase as string}`);
-              renderChecklist(result.value);
+              printLine(inv.io.stdout, `Added checklist item "${args.id as string}" to phase ${args.phase as string}`);
+              renderChecklist(inv.io, result.value);
             } finally {
               app.close();
             }
@@ -376,20 +378,20 @@ export default defineCommand({
               const result = await service.listChecklist(args.phase as string);
 
               if (!result.ok) {
-                process.stderr.write(formatErrorFor(inv, result.error) + "\n");
+                inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
                 setExitCode(exitCode(result.error));
                 return;
               }
 
               if (args.json) {
-                console.log(JSON.stringify({ ok: true, data: { checklist: result.value } }, null, 2));
+                printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { checklist: result.value } }, null, 2));
                 return;
               }
               if (result.value.length === 0) {
-                console.log("No checklist items declared on this phase.");
+                printLine(inv.io.stdout, "No checklist items declared on this phase.");
                 return;
               }
-              renderChecklist(result.value);
+              renderChecklist(inv.io, result.value);
             } finally {
               app.close();
             }
@@ -410,24 +412,24 @@ export default defineCommand({
             const { app } = loadLoreApp({ inv });
             try {
               const service = requirePhaseChecklistService(app);
-              const by = resolveActor(undefined, inv.env, inv.cwd, inv.user);
+              const by = resolveActor(inv.io, undefined, inv.env, inv.cwd, inv.user);
               const result = await service.dropChecklistItem(args.phase as string, args.id as string, {
                 by,
                 reason: args.reason as string,
               });
 
               if (!result.ok) {
-                process.stderr.write(formatErrorFor(inv, result.error) + "\n");
+                inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
                 setExitCode(exitCode(result.error));
                 return;
               }
 
               if (args.json) {
-                console.log(JSON.stringify({ ok: true, data: { checklist: result.value } }, null, 2));
+                printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { checklist: result.value } }, null, 2));
                 return;
               }
-              console.log(`Dropped checklist item "${args.id as string}" on phase ${args.phase as string}`);
-              renderChecklist(result.value);
+              printLine(inv.io.stdout, `Dropped checklist item "${args.id as string}" on phase ${args.phase as string}`);
+              renderChecklist(inv.io, result.value);
             } finally {
               app.close();
             }
@@ -447,21 +449,21 @@ export default defineCommand({
             const { app } = loadLoreApp({ inv });
             try {
               const service = requirePhaseChecklistService(app);
-              const by = resolveActor(undefined, inv.env, inv.cwd, inv.user);
+              const by = resolveActor(inv.io, undefined, inv.env, inv.cwd, inv.user);
               const result = await service.checkChecklistItem(args.phase as string, args.id as string, { by });
 
               if (!result.ok) {
-                process.stderr.write(formatErrorFor(inv, result.error) + "\n");
+                inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
                 setExitCode(exitCode(result.error));
                 return;
               }
 
               if (args.json) {
-                console.log(JSON.stringify({ ok: true, data: { checklist: result.value } }, null, 2));
+                printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { checklist: result.value } }, null, 2));
                 return;
               }
-              console.log(`Checked checklist item "${args.id as string}" on phase ${args.phase as string} by ${by}`);
-              renderChecklist(result.value);
+              printLine(inv.io.stdout, `Checked checklist item "${args.id as string}" on phase ${args.phase as string} by ${by}`);
+              renderChecklist(inv.io, result.value);
             } finally {
               app.close();
             }
@@ -489,17 +491,17 @@ export default defineCommand({
               );
 
               if (!result.ok) {
-                process.stderr.write(formatErrorFor(inv, result.error) + "\n");
+                inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
                 setExitCode(exitCode(result.error));
                 return;
               }
 
               if (args.json) {
-                console.log(JSON.stringify({ ok: true, data: { checklist: result.value } }, null, 2));
+                printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { checklist: result.value } }, null, 2));
                 return;
               }
-              console.log(`Edited checklist item "${args.id as string}" statement on phase ${args.phase as string}`);
-              renderChecklist(result.value);
+              printLine(inv.io.stdout, `Edited checklist item "${args.id as string}" statement on phase ${args.phase as string}`);
+              renderChecklist(inv.io, result.value);
             } finally {
               app.close();
             }
@@ -529,7 +531,7 @@ export default defineCommand({
             const { app } = loadLoreApp({ inv });
             try {
               const service = requirePhaseChecklistService(app);
-              const by = resolveActor(undefined, inv.env, inv.cwd, inv.user);
+              const by = resolveActor(inv.io, undefined, inv.env, inv.cwd, inv.user);
               const result = await service.addTrackNote(args.phase as string, {
                 id: ulid(),
                 note: args.note as string,
@@ -538,16 +540,16 @@ export default defineCommand({
               });
 
               if (!result.ok) {
-                process.stderr.write(formatErrorFor(inv, result.error) + "\n");
+                inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
                 setExitCode(exitCode(result.error));
                 return;
               }
 
               if (args.json) {
-                console.log(JSON.stringify({ ok: true, data: { track: result.value } }, null, 2));
+                printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { track: result.value } }, null, 2));
                 return;
               }
-              console.log(`Added track note to phase ${args.phase as string}`);
+              printLine(inv.io.stdout, `Added track note to phase ${args.phase as string}`);
             } finally {
               app.close();
             }
@@ -570,21 +572,21 @@ export default defineCommand({
               const result = await service.listTrack(args.phase as string);
 
               if (!result.ok) {
-                process.stderr.write(formatErrorFor(inv, result.error) + "\n");
+                inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
                 setExitCode(exitCode(result.error));
                 return;
               }
 
               if (args.json) {
-                console.log(JSON.stringify({ ok: true, data: { track: result.value } }, null, 2));
+                printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { track: result.value } }, null, 2));
                 return;
               }
               if (result.value.length === 0) {
-                console.log("No track notes on this phase.");
+                printLine(inv.io.stdout, "No track notes on this phase.");
                 return;
               }
               for (const item of result.value) {
-                console.log(`  [${item.at}] ${item.by}: ${item.note}`);
+                printLine(inv.io.stdout, `  [${item.at}] ${item.by}: ${item.note}`);
               }
             } finally {
               app.close();
@@ -604,29 +606,29 @@ export default defineCommand({
  *   1. Foundation — Core infrastructure setup
  *   2. Build
  */
-function renderPhaseList(phases: PlanPhase[]): void {
+function renderPhaseList(io: CliIo, phases: PlanPhase[]): void {
   for (let i = 0; i < phases.length; i++) {
     const phase = phases[i]!;
     const desc = phase.description ? ` — ${phase.description}` : "";
-    console.log(`  ${i + 1}. ${phase.name}${desc}`);
+    printLine(io.stdout, `  ${i + 1}. ${phase.name}${desc}`);
   }
 }
 
 /** Render a phase status scorecard to stdout (SPEC-056). */
-function renderPhaseStatus(payload: PhaseStatusPayload): void {
-  console.log(`Phase: ${payload.phase_title} (${payload.phase_slug})`);
-  console.log(`Plan: ${payload.plan_slug}`);
-  console.log(`State: ${payload.state}`);
-  console.log(`AC scope: ${payload.ac_scope.attested}/${payload.ac_scope.total} attested`);
-  console.log(`Checklist: ${payload.checklist.satisfied}/${payload.checklist.total} satisfied`);
-  console.log(`Blocking: ${payload.blocking.length > 0 ? payload.blocking.join(", ") : "(none)"}`);
-  console.log(
+function renderPhaseStatus(io: CliIo, payload: PhaseStatusPayload): void {
+  printLine(io.stdout, `Phase: ${payload.phase_title} (${payload.phase_slug})`);
+  printLine(io.stdout, `Plan: ${payload.plan_slug}`);
+  printLine(io.stdout, `State: ${payload.state}`);
+  printLine(io.stdout, `AC scope: ${payload.ac_scope.attested}/${payload.ac_scope.total} attested`);
+  printLine(io.stdout, `Checklist: ${payload.checklist.satisfied}/${payload.checklist.total} satisfied`);
+  printLine(io.stdout, `Blocking: ${payload.blocking.length > 0 ? payload.blocking.join(", ") : "(none)"}`);
+  printLine(io.stdout, 
     `Dropped: ${payload.checklist.dropped_named.length > 0 ? payload.checklist.dropped_named.join(", ") : "(none)"}`,
   );
   if (payload.claim !== null) {
-    console.log(`Claim: ${payload.claim.by}${payload.claim.stale ? " (stale)" : ""}`);
+    printLine(io.stdout, `Claim: ${payload.claim.by}${payload.claim.stale ? " (stale)" : ""}`);
   } else {
-    console.log("Claim: (none)");
+    printLine(io.stdout, "Claim: (none)");
   }
 }
 
@@ -637,7 +639,7 @@ function renderPhaseStatus(payload: PhaseStatusPayload): void {
  *   2. [ ] CHK-2 — unit suite green (script:test)
  *   3. [dropped] CHK-3 — deprecated check
  */
-function renderChecklist(items: ChecklistItem[]): void {
+function renderChecklist(io: CliIo, items: ChecklistItem[]): void {
   for (let i = 0; i < items.length; i++) {
     const item = items[i]!;
     let marker: string;
@@ -649,6 +651,6 @@ function renderChecklist(items: ChecklistItem[]): void {
       marker = item.result === "pass" ? "✔" : item.result === "fail" ? "✘" : " ";
     }
     const bindNote = item.bind.kind === "script" ? ` (script:${item.bind.oracle})` : "";
-    console.log(`  ${i + 1}. [${marker}] ${item.id} — ${item.statement}${bindNote}`);
+    printLine(io.stdout, `  ${i + 1}. [${marker}] ${item.id} — ${item.statement}${bindNote}`);
   }
 }

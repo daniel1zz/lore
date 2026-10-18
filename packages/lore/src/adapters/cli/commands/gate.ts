@@ -240,6 +240,8 @@ import { findLoreDbPathQuiet, runGateEnvBypassAudit } from "../gate-bypass-audit
 import type { Invocation } from "@lore/core";
 import { invocationOf } from "../command-invocation.js";
 import { renderPredicateContractsExplain } from "../../../service/predicate-contracts.js";
+import { printLine } from "../output.js";
+import type { CliIo } from "../output.js";
 
 /**
  * Real `GateBypassAuditDeps.openRecordGateSkip` wiring for the `LORE_GATE_BYPASS=1`
@@ -261,7 +263,7 @@ import { renderPredicateContractsExplain } from "../../../service/predicate-cont
  * exists.
  */
 async function openBypassRecordGateSkip(inv: Invocation): Promise<RecordGateSkip | null> {
-  const dbPath = findLoreDbPathQuiet(inv);
+  const dbPath = findLoreDbPathQuiet(inv.io, inv);
   if (dbPath === undefined) return null;
   // reason: F5 (AC-CRIT-7) — a bypass audit from a linked worktree must not migrate main's behind corpus.
   // Thrown BEFORE the catch below on purpose: runGateEnvBypassAudit turns the throw into its single
@@ -391,7 +393,7 @@ export default defineCommand({
           candidate = JSON.parse(rawInputJson as string);
         } catch (e) {
           const message = e instanceof Error ? e.message : String(e);
-          process.stderr.write(`Error: --input-json is not valid JSON: ${message}\n`);
+          inv.io.stderr.write(`Error: --input-json is not valid JSON: ${message}\n`);
           setExitCode(2);
           return;
         }
@@ -399,7 +401,7 @@ export default defineCommand({
         const parsed = gateSpecCreateInputSchema.safeParse(candidate);
         if (!parsed.success) {
           const issue = parsed.error.issues[0];
-          process.stderr.write(
+          inv.io.stderr.write(
             `Error: --input-json does not match the expected shape: ${issue?.message ?? "invalid input"}\n`,
           );
           setExitCode(2);
@@ -408,7 +410,7 @@ export default defineCommand({
 
         const { app, config } = loadLoreApp({ inv });
         try {
-          if (isGateDisabledByConfig("spec-create", config)) return;
+          if (isGateDisabledByConfig(inv.io, "spec-create", config)) return;
           await runSpecCreateGate(app, parsed.data, config, inv);
         } finally {
           app.close();
@@ -444,7 +446,7 @@ export default defineCommand({
 
         const { app, config } = loadLoreApp({ inv });
         try {
-          if (isGateDisabledByConfig("spec-promote", config)) return;
+          if (isGateDisabledByConfig(inv.io, "spec-promote", config)) return;
           await runSpecPromoteGate(app, args.spec as string, config, inv);
         } finally {
           app.close();
@@ -480,7 +482,7 @@ export default defineCommand({
 
         const { app, config } = loadLoreApp({ inv });
         try {
-          if (isGateDisabledByConfig("plan-promote", config)) return;
+          if (isGateDisabledByConfig(inv.io, "plan-promote", config)) return;
           await runPlanPromoteGate(app, args.plan as string, config, inv);
         } finally {
           app.close();
@@ -518,8 +520,8 @@ export default defineCommand({
 
         const { app, config } = loadLoreApp({ inv });
         try {
-          if (isGateDisabledByConfig("task-claim", config)) return;
-          const by = resolveActor(undefined, inv.env, inv.cwd, inv.user);
+          if (isGateDisabledByConfig(inv.io, "task-claim", config)) return;
+          const by = resolveActor(inv.io, undefined, inv.env, inv.cwd, inv.user);
           await runTaskClaimGate(app, args.task as string, by, config, inv);
         } finally {
           app.close();
@@ -558,8 +560,8 @@ export default defineCommand({
 
         const { app, config } = loadLoreApp({ inv });
         try {
-          if (isGateDisabledByConfig("phase-claim", config)) return;
-          const by = resolveActor(undefined, inv.env, inv.cwd, inv.user);
+          if (isGateDisabledByConfig(inv.io, "phase-claim", config)) return;
+          const by = resolveActor(inv.io, undefined, inv.env, inv.cwd, inv.user);
           await runPhaseClaimGate(app, args.phase as string, by, config, inv);
         } finally {
           app.close();
@@ -591,13 +593,14 @@ export default defineCommand({
         },
       },
       async run(context) {
+    const inv = invocationOf(context);
         const { args } = context;
         // reason: unlike the five checkpoint subcommands above, this one never
         // reads the corpus or runs a predicate — it is a pure, offline render
         // of the static contract table, so it deliberately has no
         // LORE_GATE_BYPASS / isGateDisabledByConfig / loadLoreApp call site.
         if (!args.explain) {
-          process.stderr.write(
+          inv.io.stderr.write(
             "gate plan-close: pass --explain to print the predicate contract table " +
               "(plan-close has no other CLI pre-flight check yet — its real gate runs " +
               "at `lore set`'s archival transition).\n",
@@ -608,7 +611,7 @@ export default defineCommand({
         // reason: matches this file's established stdout convention for the
         // other five subcommands' pass/feed output (`console.log`, not
         // `process.stdout.write`) — CLI surface.
-        console.log(renderPredicateContractsExplain("plan-close"));
+        printLine(inv.io.stdout, renderPredicateContractsExplain("plan-close"));
       },
     }),
   },
@@ -626,14 +629,14 @@ export default defineCommand({
  * @returns `true` iff the checkpoint is disabled (caller must return without gating);
  *   `false` iff the caller should proceed to run the checkpoint normally.
  */
-function isGateDisabledByConfig(
+function isGateDisabledByConfig(io: CliIo, 
   checkpoint: GateCheckpoint,
   config: LoreConfig | undefined,
 ): boolean {
   if (resolveGateEnabled(config, checkpoint)) {
     return false;
   }
-  process.stderr.write(`gate: ${checkpoint} disabled by config\n`);
+  io.stderr.write(`gate: ${checkpoint} disabled by config\n`);
   setExitCode(0);
   return true;
 }
@@ -702,7 +705,7 @@ async function runSpecCreateGate(
   // `tests/integration/gate-spec-create.bun.test.ts` and
   // `tests/integration/p4-e2e-feed-provenance-loop.bun.test.ts`.
   if (!isCheckpointBlocked(results)) {
-    console.log("gate: pass");
+    printLine(inv.io.stdout, "gate: pass");
     setExitCode(0);
     return;
   }
@@ -719,8 +722,8 @@ async function runSpecCreateGate(
   };
 
   const failures = selectFailures(results);
-  console.log(checkpoint.feed(feedCtx, failures));
-  emitGateReportIssueHint(config);
+  printLine(inv.io.stdout, checkpoint.feed(feedCtx, failures));
+  emitGateReportIssueHint(inv.io, config);
   recordHookGateDeny(app, "spec-create", failures, undefined, inv);
   setExitCode(4);
 }
@@ -777,7 +780,7 @@ function recordHookGateDeny(
   actor?: string,
 ): void {
   if (app.traceRecorder === undefined) return;
-  const resolvedActor = actor ?? resolveActor(undefined, inv.env, inv.cwd, inv.user);
+  const resolvedActor = actor ?? resolveActor(inv.io, undefined, inv.env, inv.cwd, inv.user);
   app.traceRecorder.recordGateDeny(
     resolvedActor,
     checkpoint,
@@ -804,14 +807,14 @@ function recordHookGateDeny(
  *   `resolveAcQuantifiableGateEnabled`/`resolveAnchorOverlapGateEnabled`; no second
  *   config parse.
  */
-function emitGateReportIssueHint(config: LoreConfig | undefined): void {
+function emitGateReportIssueHint(io: CliIo, config: LoreConfig | undefined): void {
   let hint: string | null = null;
   try {
     hint = buildReportIssueHint("gate", resolveFeedbackUpstreamCfg(config) !== undefined);
   } catch {
     hint = null;
   }
-  if (hint !== null) process.stderr.write(hint + "\n"); // CLI surface
+  if (hint !== null) io.stderr.write(hint + "\n"); // CLI surface
 }
 
 /**
@@ -835,7 +838,7 @@ async function runPlanPromoteGate(
 ): Promise<void> {
   const bundleResult = await app.corpusService.getPlanBundle(planIdOrSlug);
   if (!bundleResult.ok) {
-    process.stderr.write(formatErrorFor(inv, bundleResult.error) + "\n");
+    inv.io.stderr.write(formatErrorFor(inv, bundleResult.error) + "\n");
     setExitCode(exitCode(bundleResult.error));
     return;
   }
@@ -849,14 +852,14 @@ async function runPlanPromoteGate(
 
   if (isCheckpointBlocked(results)) {
     const failures = selectFailures(results);
-    console.log(checkpoint.feed(ctx, failures));
-    emitGateReportIssueHint(config);
+    printLine(inv.io.stdout, checkpoint.feed(ctx, failures));
+    emitGateReportIssueHint(inv.io, config);
     recordHookGateDeny(app, "plan-promote", failures, planIdOrSlug, inv);
     setExitCode(4);
     return;
   }
 
-  console.log("gate: pass");
+  printLine(inv.io.stdout, "gate: pass");
   setExitCode(0);
 }
 
@@ -927,7 +930,7 @@ async function runTaskClaimGate(
 ): Promise<void> {
   const taskResult = await app.corpusService.get(taskIdOrSlug);
   if (!taskResult.ok) {
-    process.stderr.write(formatErrorFor(inv, taskResult.error) + "\n");
+    inv.io.stderr.write(formatErrorFor(inv, taskResult.error) + "\n");
     setExitCode(exitCode(taskResult.error));
     return;
   }
@@ -940,7 +943,7 @@ async function runTaskClaimGate(
       message: `Expected a task document; got type '${task.type}'`,
       value: task.type,
     };
-    process.stderr.write(formatErrorFor(inv, error) + "\n");
+    inv.io.stderr.write(formatErrorFor(inv, error) + "\n");
     setExitCode(exitCode(error));
     return;
   }
@@ -959,7 +962,7 @@ async function runTaskClaimGate(
   // session id is surfaced here exactly as `claim()` surfaces it, never ignored.
   const sessionIdResult = resolveClaimSessionId(inv.env);
   if (!sessionIdResult.ok) {
-    process.stderr.write(formatErrorFor(inv, sessionIdResult.error) + "\n");
+    inv.io.stderr.write(formatErrorFor(inv, sessionIdResult.error) + "\n");
     setExitCode(exitCode(sessionIdResult.error));
     return;
   }
@@ -969,7 +972,7 @@ async function runTaskClaimGate(
   // run, so the dry-run reads the same invocation identity (unregistered -> null + one warning).
   const verifiedIdentity = await app.verifiedInvocationIdentity?.();
   if (verifiedIdentity !== undefined && !verifiedIdentity.ok) {
-    process.stderr.write(formatErrorFor(inv, verifiedIdentity.error) + "\n");
+    inv.io.stderr.write(formatErrorFor(inv, verifiedIdentity.error) + "\n");
     setExitCode(exitCode(verifiedIdentity.error));
     return;
   }
@@ -1015,13 +1018,13 @@ async function runTaskClaimGate(
       // Every OTHER `getPlanBundle` failure (unresolvable/soft-deleted parent,
       // store error) still exits loud, unchanged.
       if (!isNonPlanParentError(bundleResult.error)) {
-        process.stderr.write(formatErrorFor(inv, bundleResult.error) + "\n");
+        inv.io.stderr.write(formatErrorFor(inv, bundleResult.error) + "\n");
         setExitCode(exitCode(bundleResult.error));
         return;
       }
       const siblingsResult = await app.taskWorkflowService.findAdhocSiblingTasks();
       if (!siblingsResult.ok) {
-        process.stderr.write(formatErrorFor(inv, siblingsResult.error) + "\n");
+        inv.io.stderr.write(formatErrorFor(inv, siblingsResult.error) + "\n");
         setExitCode(exitCode(siblingsResult.error));
         return;
       }
@@ -1047,14 +1050,14 @@ async function runTaskClaimGate(
 
   if (isCheckpointBlocked(results)) {
     const failures = selectFailures(results);
-    console.log(checkpoint.feed(ctx, failures));
-    emitGateReportIssueHint(config);
+    printLine(inv.io.stdout, checkpoint.feed(ctx, failures));
+    emitGateReportIssueHint(inv.io, config);
     recordHookGateDeny(app, "task-claim", failures, taskIdOrSlug, inv, by);
     setExitCode(4);
     return;
   }
 
-  console.log("gate: pass");
+  printLine(inv.io.stdout, "gate: pass");
   setExitCode(0);
 }
 
@@ -1099,7 +1102,7 @@ async function runPhaseClaimGate(
 ): Promise<void> {
   const phaseResult = await app.corpusService.get(phaseIdOrSlug);
   if (!phaseResult.ok) {
-    process.stderr.write(formatErrorFor(inv, phaseResult.error) + "\n");
+    inv.io.stderr.write(formatErrorFor(inv, phaseResult.error) + "\n");
     setExitCode(exitCode(phaseResult.error));
     return;
   }
@@ -1112,7 +1115,7 @@ async function runPhaseClaimGate(
       message: `Expected a phase document; got type '${phase.type}'`,
       value: phase.type,
     };
-    process.stderr.write(formatErrorFor(inv, error) + "\n");
+    inv.io.stderr.write(formatErrorFor(inv, error) + "\n");
     setExitCode(exitCode(error));
     return;
   }
@@ -1128,7 +1131,7 @@ async function runPhaseClaimGate(
   // identical surfacing of an unusable id, as `runTaskClaimGate` above.
   const sessionIdResult = resolveClaimSessionId(inv.env);
   if (!sessionIdResult.ok) {
-    process.stderr.write(formatErrorFor(inv, sessionIdResult.error) + "\n");
+    inv.io.stderr.write(formatErrorFor(inv, sessionIdResult.error) + "\n");
     setExitCode(exitCode(sessionIdResult.error));
     return;
   }
@@ -1149,7 +1152,7 @@ async function runPhaseClaimGate(
   } else {
     const bundleResult = await app.corpusService.getPlanBundle(phase.parent_id);
     if (!bundleResult.ok) {
-      process.stderr.write(formatErrorFor(inv, bundleResult.error) + "\n");
+      inv.io.stderr.write(formatErrorFor(inv, bundleResult.error) + "\n");
       setExitCode(exitCode(bundleResult.error));
       return;
     }
@@ -1165,14 +1168,14 @@ async function runPhaseClaimGate(
 
   if (isCheckpointBlocked(results)) {
     const failures = selectFailures(results);
-    console.log(checkpoint.feed(ctx, failures));
-    emitGateReportIssueHint(config);
+    printLine(inv.io.stdout, checkpoint.feed(ctx, failures));
+    emitGateReportIssueHint(inv.io, config);
     recordHookGateDeny(app, "phase-claim", failures, phaseIdOrSlug, inv, by);
     setExitCode(4);
     return;
   }
 
-  console.log("gate: pass");
+  printLine(inv.io.stdout, "gate: pass");
   setExitCode(0);
 }
 
@@ -1224,7 +1227,7 @@ async function runSpecPromoteGate(
 ): Promise<void> {
   const listResult = await requireAcService(app).listCriteria(specIdOrSlug);
   if (!listResult.ok) {
-    process.stderr.write(formatErrorFor(inv, listResult.error) + "\n");
+    inv.io.stderr.write(formatErrorFor(inv, listResult.error) + "\n");
     setExitCode(exitCode(listResult.error));
     return;
   }
@@ -1235,7 +1238,7 @@ async function runSpecPromoteGate(
   // second lookup cannot newly fail on a target this call would otherwise reject.
   const specResult = await app.corpusService.get(specIdOrSlug);
   if (!specResult.ok) {
-    process.stderr.write(formatErrorFor(inv, specResult.error) + "\n");
+    inv.io.stderr.write(formatErrorFor(inv, specResult.error) + "\n");
     setExitCode(exitCode(specResult.error));
     return;
   }
@@ -1252,7 +1255,7 @@ async function runSpecPromoteGate(
   // read as "cites".
   const citesResult = await app.corpusService.specCitesLiveRule(specResult.value.doc.extra);
   if (!citesResult.ok) {
-    process.stderr.write(formatErrorFor(inv, citesResult.error) + "\n");
+    inv.io.stderr.write(formatErrorFor(inv, citesResult.error) + "\n");
     setExitCode(exitCode(citesResult.error));
     return;
   }
@@ -1273,14 +1276,14 @@ async function runSpecPromoteGate(
 
   if (isCheckpointBlocked(results)) {
     const failures = selectFailures(results);
-    process.stderr.write(checkpoint.feed(ctx, failures));
-    emitGateReportIssueHint(config);
+    inv.io.stderr.write(checkpoint.feed(ctx, failures));
+    emitGateReportIssueHint(inv.io, config);
     recordHookGateDeny(app, "spec-promote", failures, specIdOrSlug, inv);
     setExitCode(4);
     return;
   }
 
-  console.log(`gate: pass (${criteria.length} acceptance criteria declared)`);
+  printLine(inv.io.stdout, `gate: pass (${criteria.length} acceptance criteria declared)`);
   setExitCode(0);
 
   // reason: the deterministic verdict above is final — everything from here on is the
@@ -1302,7 +1305,7 @@ async function runSpecPromoteGate(
 async function emitJudgeAdvisory(inv: Invocation, app: App, specIdOrSlug: string): Promise<void> {
   const bundleResult = await app.corpusService.getReviewBundle(specIdOrSlug);
   if (!bundleResult.ok) {
-    process.stderr.write(`gate: judge advisory unavailable — ${formatErrorFor(inv, bundleResult.error)}\n`);
+    inv.io.stderr.write(`gate: judge advisory unavailable — ${formatErrorFor(inv, bundleResult.error)}\n`);
     return;
   }
 
@@ -1311,13 +1314,13 @@ async function emitJudgeAdvisory(inv: Invocation, app: App, specIdOrSlug: string
     source: app.callerSurface,
   });
   if (!judgeResult.ok) {
-    process.stderr.write(
+    inv.io.stderr.write(
       `gate: judge advisory unavailable — ${formatErrorFor(inv, judgeResult.error, { aiHasNoFallback: true })}\n`,
     );
     return;
   }
 
-  process.stderr.write(formatJudgeAdvisory(judgeResult.value) + "\n");
+  inv.io.stderr.write(formatJudgeAdvisory(judgeResult.value) + "\n");
 }
 
 /** Renders a `NewReviewJudgment` as a compact, greppable stderr advisory block. */

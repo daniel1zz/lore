@@ -92,6 +92,8 @@ import {
 import { buildReportIssueHint } from "./report-issue-hint.js";
 import { setProcessAuditSurface } from "../../store/audit-surface.js";
 import { resolveFeedbackUpstreamCfg } from "./report-issue-wiring.js";
+import { printLine } from "./output.js";
+import type { CliIo } from "./output.js";
 
 /**
  * Detect whether the current CLI invocation is by an AI agent or a human.
@@ -216,12 +218,12 @@ export interface LoadLoreAppOptions {
  *   resolveForeignWriteProvenance("http") // => null, wherever the server was started
  *   resolveForeignWriteProvenance("cli")  // => "own" | "git_common_dir" | "undetermined" | null
  */
-function resolveForeignWriteProvenance(bootSurface: LoreAppBootSurface, cwd: string, env: NodeJS.ProcessEnv): CorpusProvenance | null {
+function resolveForeignWriteProvenance(io: CliIo, bootSurface: LoreAppBootSurface, cwd: string, env: NodeJS.ProcessEnv): CorpusProvenance | null {
   switch (bootSurface) {
     case "http":
       return null;
     case "cli":
-      return resolveCorpus(cwd, env)?.provenance ?? null;
+      return resolveCorpus(io, cwd, env)?.provenance ?? null;
     default: {
       // Exhaustive check — a new LoreAppBootSurface must decide explicitly.
       // reason: the fallback is the CLI branch, not `null`: an unhandled
@@ -229,7 +231,7 @@ function resolveForeignWriteProvenance(bootSurface: LoreAppBootSurface, cwd: str
       // disable it for a whole adapter.
       const _exhaustive: never = bootSurface;
       void _exhaustive;
-      return resolveCorpus(cwd, env)?.provenance ?? null;
+      return resolveCorpus(io, cwd, env)?.provenance ?? null;
     }
   }
 }
@@ -314,8 +316,8 @@ function safeInternalErrorHint(rawConfig: LoreConfig | undefined): string | null
  *   `.lore/lore.db` is discoverable from `cwd`, or the config file is
  *   missing/malformed.
  */
-export function loadProjectConfig(locator: CorpusLocator): LoreConfig | undefined {
-  const dbPath = findLoreDbPath(locator);
+export function loadProjectConfig(io: CliIo, locator: CorpusLocator): LoreConfig | undefined {
+  const dbPath = findLoreDbPath(io, locator);
   const configResult = resolveProjectConfigResult(dbPath);
   if (!configResult.ok) return undefined;
   const { sync: _sync, ...configWithoutSync } = configResult.value;
@@ -385,7 +387,7 @@ export function loadLoreApp(opts: LoadLoreAppOptions): {
   // for why "cli" is both the overwhelming majority case and the fail-closed
   // direction.
   const bootSurface: LoreAppBootSurface = opts.surface ?? "cli";
-  const dbPath = findLoreDbPath(opts.inv);
+  const dbPath = findLoreDbPath(opts.inv.io, opts.inv);
   // reason: F5 (AC-CRIT-7) — refuse BEFORE createApp so a worktree never migrates main's corpus; the
   // createApp try/catch below would downgrade this to a generic exit-1 "Storage failure".
   const foreignBehind = findForeignBehindSchema(dbPath, opts.inv.cwd);
@@ -393,7 +395,7 @@ export function loadLoreApp(opts: LoadLoreAppOptions): {
     const refusal: LoreError = { code: "VALIDATION_ERROR", field: "schema_version", message: foreignBehind.message };
     // reason: formatError renders "Validation failed on field …" without the code; the code is appended so
     // a script can grep the machine-readable class (exit 4 alone is shared by every validation refusal).
-    console.error(`${formatErrorFor(opts.inv, refusal)} [${refusal.code}]`); // CLI surface
+    printLine(opts.inv.io.stderr, `${formatErrorFor(opts.inv, refusal)} [${refusal.code}]`); // CLI surface
     exitCli(exitCode(refusal));
   }
   const configResult = resolveProjectConfigResult(dbPath);
@@ -405,7 +407,7 @@ export function loadLoreApp(opts: LoadLoreAppOptions): {
     // AiConfigSchema.parse({}) defaults here previously masked typos (e.g. an unrecognized
     // `ai.cli` key silently reverting BOTH `ai.assess.max_diff_chars` and every
     // `ai.providers.<name>.timeout_ms` override to built-in defaults with zero warning).
-    console.error(formatErrorFor(opts.inv, configResult.error)); // CLI surface
+    printLine(opts.inv.io.stderr, formatErrorFor(opts.inv, configResult.error)); // CLI surface
     exitCli(exitCode(configResult.error));
   } else {
     // reason: all OTHER config parse failures (malformed YAML, invalid sync/telemetry/
@@ -441,7 +443,7 @@ export function loadLoreApp(opts: LoadLoreAppOptions): {
         "message" in globalResult.error
           ? globalResult.error.message
           : globalResult.error.code;
-      console.error( // CLI surface
+      printLine(composedInvocation.io.stderr,  // CLI surface
         `Warning: global config at ${globalConfigPath} ignored — ${reason}`,
       );
     }
@@ -474,18 +476,18 @@ export function loadLoreApp(opts: LoadLoreAppOptions): {
     appOrResult = createAppWithWriteContext(dbPath, telemetryOnlyConfig, ambient, { identity: composedInvocation.identity });
   } catch (thrown) {
     const message = thrown instanceof Error ? thrown.message : String(thrown);
-    console.error(`Error: Storage failure: ${message}`); // CLI surface
+    printLine(composedInvocation.io.stderr, `Error: Storage failure: ${message}`); // CLI surface
     const hint = safeInternalErrorHint(rawConfig);
-    if (hint !== null) console.error(hint); // CLI surface
+    if (hint !== null) printLine(composedInvocation.io.stderr, hint); // CLI surface
     exitCli(1);
   }
   let app: App;
   if ("ok" in appOrResult) {
     // createApp returned a Result — only happens when ai.provider is unknown
     if (!appOrResult.ok) {
-      console.error(formatErrorFor(opts.inv, appOrResult.error)); // CLI surface
+      printLine(composedInvocation.io.stderr, formatErrorFor(opts.inv, appOrResult.error)); // CLI surface
       const hint = safeInternalErrorHint(rawConfig);
-      if (hint !== null) console.error(hint); // CLI surface
+      if (hint !== null) printLine(composedInvocation.io.stderr, hint); // CLI surface
       exitCli(1);
     }
     app = appOrResult.value;
@@ -519,7 +521,7 @@ export function loadLoreApp(opts: LoadLoreAppOptions): {
   // computed, and `corpus-resolution.ts`'s own module header names exactly
   // this guard as the caller that needs `resolveCorpus()` directly instead.
   const foreignWriteContext: ForeignCorpusWriteContext = {
-    provenance: resolveForeignWriteProvenance(bootSurface, ambient.cwd, ambient.env),
+    provenance: resolveForeignWriteProvenance(composedInvocation.io, bootSurface, ambient.cwd, ambient.env),
     enabled: resolveForeignCorpusWriteGateEnabled(telemetryOnlyConfig),
   };
   app.corpusService.setForeignCorpusWriteContext(foreignWriteContext);

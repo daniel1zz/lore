@@ -53,6 +53,7 @@ import type {
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatErrorFor, formatTable } from "../utils.js";
 import { invocationOf } from "../command-invocation.js";
+import { printLine } from "../output.js";
 
 /** Default `--since` when omitted — effectively "all time" (SPEC-102 names no pinned watermark). */
 const EPOCH_ISO = "1970-01-01T00:00:00.000Z";
@@ -174,7 +175,7 @@ export default defineCommand({
             // service here means a hand-built App test/eval stub reached this
             // command, not a real corpus. Fail loud rather than crash on
             // `undefined.stats(...)`.
-            process.stderr.write("Error: trace stats unavailable (traceStatsService not wired)\n");
+            inv.io.stderr.write("Error: trace stats unavailable (traceStatsService not wired)\n");
             setExitCode(1);
             return;
           }
@@ -203,21 +204,21 @@ export default defineCommand({
                 message: `no enumerator registered for count field "${args.enumerate}" — known fields: ${knownFields}`,
                 value: args.enumerate,
               };
-              process.stderr.write(formatErrorFor(inv, error) + "\n");
+              inv.io.stderr.write(formatErrorFor(inv, error) + "\n");
               setExitCode(exitCode(error));
               return;
             }
 
             const enumerationResult = await enumerator(app.traceStatsService, statsOpts);
             if (!enumerationResult.ok) {
-              process.stderr.write(formatErrorFor(inv, enumerationResult.error) + "\n");
+              inv.io.stderr.write(formatErrorFor(inv, enumerationResult.error) + "\n");
               setExitCode(exitCode(enumerationResult.error));
               return;
             }
 
             const enumeration = enumerationResult.value;
             if (args.json) {
-              console.log(
+              printLine(inv.io.stdout, 
                 JSON.stringify(
                   {
                     ok: true,
@@ -234,8 +235,8 @@ export default defineCommand({
             } else {
               // The count prints alongside its members so a reader can see the
               // two agree — they are the same list, read once.
-              console.log(`${enumeration.field}: ${enumeration.count} member(s)`);
-              for (const line of formatEnumerationMembers(enumeration)) console.log(`  - ${line}`);
+              printLine(inv.io.stdout, `${enumeration.field}: ${enumeration.count} member(s)`);
+              for (const line of formatEnumerationMembers(enumeration)) printLine(inv.io.stdout, `  - ${line}`);
             }
             setExitCode(0);
             return;
@@ -244,7 +245,7 @@ export default defineCommand({
           const result = await app.traceStatsService.stats(statsOpts);
 
           if (!result.ok) {
-            process.stderr.write(formatErrorFor(inv, result.error) + "\n");
+            inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
             setExitCode(exitCode(result.error));
             return;
           }
@@ -252,38 +253,38 @@ export default defineCommand({
           const report = result.value;
 
           if (args.json) {
-            console.log(JSON.stringify({ ok: true, data: report }, null, 2));
+            printLine(inv.io.stdout, JSON.stringify({ ok: true, data: report }, null, 2));
             setExitCode(0);
             return;
           }
 
-          console.log(`Trace stats since ${report.since}:`);
+          printLine(inv.io.stdout, `Trace stats since ${report.since}:`);
 
-          console.log("\nCounts by kind:");
+          printLine(inv.io.stdout, "\nCounts by kind:");
           const kindRows = Object.entries(report.counts_by_kind).map(([kind, count]) => [kind, String(count)]);
-          console.log(kindRows.length > 0 ? formatTable(["Kind", "Count"], kindRows) : "  (none)");
+          printLine(inv.io.stdout, kindRows.length > 0 ? formatTable(["Kind", "Count"], kindRows) : "  (none)");
 
-          console.log("\nDeny by checkpoint:");
+          printLine(inv.io.stdout, "\nDeny by checkpoint:");
           const denyRows = report.deny_by_checkpoint.map((d) => [d.checkpoint, d.layer, String(d.count)]);
-          console.log(denyRows.length > 0 ? formatTable(["Checkpoint", "Layer", "Count"], denyRows) : "  (none)");
+          printLine(inv.io.stdout, denyRows.length > 0 ? formatTable(["Checkpoint", "Layer", "Count"], denyRows) : "  (none)");
 
-          console.log(`\nZero-hit searches: ${report.zero_hit_search_count}`);
-          console.log(`Never-read docs: ${report.never_read_docs_count}`);
+          printLine(inv.io.stdout, `\nZero-hit searches: ${report.zero_hit_search_count}`);
+          printLine(inv.io.stdout, `Never-read docs: ${report.never_read_docs_count}`);
 
           if (report.deny_retry_gap.length > 0) {
-            console.log("\nDeny -> retry-success gap (best-effort, computed read-side vs audit):");
+            printLine(inv.io.stdout, "\nDeny -> retry-success gap (best-effort, computed read-side vs audit):");
             const gapRows = report.deny_retry_gap.map((g) => [
               g.checkpoint,
               String(g.denies),
               String(g.retried_success),
             ]);
-            console.log(formatTable(["Checkpoint", "Denies", "Retried OK"], gapRows));
+            printLine(inv.io.stdout, formatTable(["Checkpoint", "Denies", "Retried OK"], gapRows));
           }
 
           if (report.raw_search_queries !== undefined) {
-            console.log("\nRaw search queries (--raw-queries):");
+            printLine(inv.io.stdout, "\nRaw search queries (--raw-queries):");
             const rawRows = report.raw_search_queries.map((q) => [q.ts, q.actor, q.query]);
-            console.log(rawRows.length > 0 ? formatTable(["Timestamp", "Actor", "Query"], rawRows) : "  (none)");
+            printLine(inv.io.stdout, rawRows.length > 0 ? formatTable(["Timestamp", "Actor", "Query"], rawRows) : "  (none)");
           }
 
           setExitCode(0);

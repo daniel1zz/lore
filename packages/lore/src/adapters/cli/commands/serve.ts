@@ -40,7 +40,7 @@ export default defineCommand({
 
     const port = args.port !== undefined ? parseInt(args.port, 10) : 3456;
     if (isNaN(port) || port < 1 || port > 65535) {
-      process.stderr.write("Error: --port must be a valid port number (1–65535)\n");
+      inv.io.stderr.write("Error: --port must be a valid port number (1–65535)\n");
       exitCli(1);
     }
 

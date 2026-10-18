@@ -28,6 +28,7 @@ import { resolveSubTypeFilter } from "../../../service/corpus-service.js";
 import { KNOWLEDGE_SUB_TYPES } from "@lore/core";
 import type { DocType } from "@lore/core";
 import { invocationOf } from "../command-invocation.js";
+import { printLine } from "../output.js";
 
 export default defineCommand({
   meta: {
@@ -77,7 +78,7 @@ export default defineCommand({
       // `.slice(0, NaN)` → an always-empty result set masquerading as "no matches".
       const limitResult = parsePositiveIntArg(args.limit ?? "10", "--limit", { min: 1 });
       if (!limitResult.ok) {
-        process.stderr.write(limitResult.message + "\n");
+        inv.io.stderr.write(limitResult.message + "\n");
         setExitCode(2);
         return;
       }
@@ -87,7 +88,7 @@ export default defineCommand({
       // must never degrade into an exit-0 empty hit list.
       const subTypeResolution = resolveSubTypeFilter(args["sub-type"], args.type);
       if (!subTypeResolution.ok) {
-        process.stderr.write(subTypeResolution.message + "\n");
+        inv.io.stderr.write(subTypeResolution.message + "\n");
         setExitCode(2);
         return;
       }
@@ -100,7 +101,7 @@ export default defineCommand({
       const result = await app.corpusService.search(args.query, filters);
 
       if (!result.ok) {
-        process.stderr.write(formatErrorFor(inv, result.error) + "\n");
+        inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
         setExitCode(exitCode(result.error));
         return;
       }
@@ -108,12 +109,12 @@ export default defineCommand({
       const results = result.value.results.slice(0, limitResult.value);
 
       if (args.json) {
-        console.log(JSON.stringify({ ok: true, data: { results, total: results.length } }, null, 2));
+        printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { results, total: results.length } }, null, 2));
         return;
       }
 
       if (results.length === 0) {
-        console.log(`No results for "${args.query}".`);
+        printLine(inv.io.stdout, `No results for "${args.query}".`);
         return;
       }
 
@@ -129,8 +130,8 @@ export default defineCommand({
         r.score.toFixed(2),
       ]);
 
-      console.log(formatTable(headers, rows));
-      console.log(`\n${results.length} result${results.length === 1 ? "" : "s"} for "${args.query}"`);
+      printLine(inv.io.stdout, formatTable(headers, rows));
+      printLine(inv.io.stdout, `\n${results.length} result${results.length === 1 ? "" : "s"} for "${args.query}"`);
     } finally {
       app.close();
     }

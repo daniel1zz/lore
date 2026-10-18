@@ -309,6 +309,7 @@ import {
 } from "../evidence-precheck.js";
 import { captureOracleCommand, type EvidenceProvenance } from "../../evidence-capture.js";
 import { invocationOf } from "../command-invocation.js";
+import { printLine } from "../output.js";
 
 const VALID_RESULTS = ["pass", "fail", "expected-fail"] as const;
 
@@ -372,7 +373,7 @@ export default defineCommand({
     const { args } = context;
     const inv = invocationOf(context);
     if (args["output-tail"] !== undefined && args["output-tail-file"] !== undefined) {
-      process.stderr.write(
+      inv.io.stderr.write(
         "Error: --output-tail and --output-tail-file are mutually exclusive.\n",
       );
       setExitCode(2);
@@ -392,7 +393,7 @@ export default defineCommand({
       ...(typeof args["output-tail-file"] === "string" ? { outputTailFile: args["output-tail-file"] } : {}),
     });
     if (captureConflict !== null) {
-      process.stderr.write(formatErrorFor(inv, captureConflict) + "\n");
+      inv.io.stderr.write(formatErrorFor(inv, captureConflict) + "\n");
       setExitCode(exitCode(captureConflict));
       return;
     }
@@ -445,7 +446,7 @@ export default defineCommand({
       // behavior for every non-`ai` config section (an explicit SPEC-030
       // non-goal); fixing it belongs there and would change every section's
       // semantics at once, not just this key's.
-      const captureTimeoutMs = resolveCaptureTimeoutMs(loadProjectConfig(inv));
+      const captureTimeoutMs = resolveCaptureTimeoutMs(loadProjectConfig(inv.io, inv));
       const captured = captureOracleCommand({
         command: args.command as string,
         cwd: inv.cwd,
@@ -453,7 +454,7 @@ export default defineCommand({
         timeoutMs: captureTimeoutMs,
       });
       if (!captured.ok) {
-        process.stderr.write(formatErrorFor(inv, captured.error) + "\n");
+        inv.io.stderr.write(formatErrorFor(inv, captured.error) + "\n");
         setExitCode(exitCode(captured.error));
         return;
       }
@@ -493,7 +494,7 @@ export default defineCommand({
         outputTail,
       });
       if (capturedDiscoveryRefusal !== null) {
-        process.stderr.write(formatErrorFor(inv, capturedDiscoveryRefusal) + "\n");
+        inv.io.stderr.write(formatErrorFor(inv, capturedDiscoveryRefusal) + "\n");
         setExitCode(exitCode(capturedDiscoveryRefusal));
         return;
       }
@@ -506,7 +507,7 @@ export default defineCommand({
         outputTail,
       });
       if (capturedRedProofGap !== null) {
-        process.stderr.write(formatErrorFor(inv, capturedRedProofGap) + "\n");
+        inv.io.stderr.write(formatErrorFor(inv, capturedRedProofGap) + "\n");
         setExitCode(exitCode(capturedRedProofGap));
         return;
       }
@@ -517,7 +518,7 @@ export default defineCommand({
         outputTail = tailChars(readFileSync(args["output-tail-file"], "utf8"), CAPTURE_TAIL_CHARS);
       } catch (e) {
         const message = e instanceof Error ? e.message : "unknown error";
-        process.stderr.write(`Error: could not read --output-tail-file: ${message}\n`);
+        inv.io.stderr.write(`Error: could not read --output-tail-file: ${message}\n`);
         setExitCode(2);
         return;
       }
@@ -564,7 +565,7 @@ export default defineCommand({
             "use --oracle manual for genuinely manual checks.",
           value: args.command,
         };
-        process.stderr.write(formatErrorFor(inv, precheckError) + "\n");
+        inv.io.stderr.write(formatErrorFor(inv, precheckError) + "\n");
         setExitCode(exitCode(precheckError));
         return;
       }
@@ -588,7 +589,7 @@ export default defineCommand({
         capture: captureRequested,
       });
       if (pipeRefusal !== null) {
-        process.stderr.write(formatErrorFor(inv, pipeRefusal) + "\n");
+        inv.io.stderr.write(formatErrorFor(inv, pipeRefusal) + "\n");
         setExitCode(exitCode(pipeRefusal));
         return;
       }
@@ -606,7 +607,7 @@ export default defineCommand({
         ...(outputTail !== undefined ? { outputTail } : {}),
       });
       if (filteredPassRefusal !== null) {
-        process.stderr.write(formatErrorFor(inv, filteredPassRefusal) + "\n");
+        inv.io.stderr.write(formatErrorFor(inv, filteredPassRefusal) + "\n");
         setExitCode(exitCode(filteredPassRefusal));
         return;
       }
@@ -625,12 +626,12 @@ export default defineCommand({
         ...(outputTail !== undefined ? { outputTail } : {}),
       });
       if (underMatchedRefusal !== null) {
-        process.stderr.write(formatErrorFor(inv, underMatchedRefusal) + "\n");
+        inv.io.stderr.write(formatErrorFor(inv, underMatchedRefusal) + "\n");
         setExitCode(exitCode(underMatchedRefusal));
         return;
       }
 
-      const by = resolveActor(undefined, inv.env, inv.cwd, inv.user);
+      const by = resolveActor(inv.io, undefined, inv.env, inv.cwd, inv.user);
       const evidenceInput = {
         // reason: cast — CLI arg strings are validated by evidenceEntrySchema server-side;
         // an invalid oracle/result value fails loud with VALIDATION_ERROR rather than
@@ -679,17 +680,17 @@ export default defineCommand({
       }
 
       if (!result.ok) {
-        process.stderr.write(formatErrorFor(inv, result.error) + "\n");
+        inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
         setExitCode(exitCode(result.error));
         return;
       }
 
       if (args.json) {
-        console.log(JSON.stringify({ ok: true, data: { doc: result.value } }, null, 2));
+        printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { doc: result.value } }, null, 2));
         return;
       }
 
-      console.log(
+      printLine(inv.io.stdout, 
         `Recorded ${args.oracle as string} evidence (${args.result as string}) on ${result.value.slug} (v${result.value.version})${captureMargin}`,
       );
     } finally {

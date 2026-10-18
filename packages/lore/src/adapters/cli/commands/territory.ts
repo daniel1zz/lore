@@ -58,6 +58,7 @@ import { loadLoreApp } from "../loader.js";
 import { exitCode, formatErrorFor } from "../utils.js";
 import { partitionTerritory, formatTerritoryHuman } from "../territory-partition.js";
 import { invocationOf } from "../command-invocation.js";
+import { printLine } from "../output.js";
 
 export default defineCommand({
   meta: {
@@ -77,7 +78,7 @@ export default defineCommand({
     const { app } = loadLoreApp({ inv });
     try {
       if (app.sessionService === undefined) {
-        process.stderr.write("Error: SessionService not wired on this App instance.\n");
+        inv.io.stderr.write("Error: SessionService not wired on this App instance.\n");
         setExitCode(1);
         return;
       }
@@ -86,7 +87,7 @@ export default defineCommand({
       // set for a real CLI boot; a missing value here means the App was
       // mis-constructed, not that process.cwd() is a safe stand-in.
       if (app.repoRoot === undefined) {
-        process.stderr.write("Error: repoRoot not set on this App instance.\n");
+        inv.io.stderr.write("Error: repoRoot not set on this App instance.\n");
         setExitCode(1);
         return;
       }
@@ -94,14 +95,14 @@ export default defineCommand({
       const gitPort = new RealGitPort(app.repoRoot);
       const worktreeListResult = await gitPort.worktreeList();
       if (!worktreeListResult.ok) {
-        process.stderr.write(formatErrorFor(inv, worktreeListResult.error) + "\n");
+        inv.io.stderr.write(formatErrorFor(inv, worktreeListResult.error) + "\n");
         setExitCode(exitCode(worktreeListResult.error));
         return;
       }
 
       const activeSessionsResult = await app.sessionService.getActiveSessions();
       if (!activeSessionsResult.ok) {
-        process.stderr.write(formatErrorFor(inv, activeSessionsResult.error) + "\n");
+        inv.io.stderr.write(formatErrorFor(inv, activeSessionsResult.error) + "\n");
         setExitCode(exitCode(activeSessionsResult.error));
         return;
       }
@@ -128,9 +129,9 @@ export default defineCommand({
       );
 
       if (args.json) {
-        console.log(JSON.stringify({ ok: true, data: partition }, null, 2));
+        printLine(inv.io.stdout, JSON.stringify({ ok: true, data: partition }, null, 2));
       } else {
-        console.log(formatTerritoryHuman(partition));
+        printLine(inv.io.stdout, formatTerritoryHuman(partition));
       }
     } finally {
       app.close();

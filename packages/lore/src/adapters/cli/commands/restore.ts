@@ -8,6 +8,7 @@ import { loadLoreApp } from "../loader.js";
 import { exitCode, formatErrorFor } from "../utils.js";
 import type { DocId } from "@lore/core";
 import { invocationOf } from "../command-invocation.js";
+import { printLine } from "../output.js";
 
 export default defineCommand({
   meta: {
@@ -39,7 +40,7 @@ export default defineCommand({
     const inv = invocationOf(context);
     const versionNum = parseInt(args.version, 10);
     if (isNaN(versionNum) || versionNum < 1) {
-      process.stderr.write("Error: version must be a positive integer.\n");
+      inv.io.stderr.write("Error: version must be a positive integer.\n");
       exitCli(2);
     }
 
@@ -48,16 +49,16 @@ export default defineCommand({
       const result = await app.versionService.restore(args.id as DocId, versionNum);
 
       if (!result.ok) {
-        process.stderr.write(formatErrorFor(inv, result.error) + "\n");
+        inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
         setExitCode(exitCode(result.error));
         return;
       }
 
       const doc = result.value;
       if (args.json) {
-        console.log(JSON.stringify({ ok: true, data: doc }, null, 2));
+        printLine(inv.io.stdout, JSON.stringify({ ok: true, data: doc }, null, 2));
       } else {
-        console.log(`Restored ${doc.slug} from v${versionNum} → new version v${doc.version}`);
+        printLine(inv.io.stdout, `Restored ${doc.slug} from v${versionNum} → new version v${doc.version}`);
       }
     } finally {
       app.close();

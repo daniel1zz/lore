@@ -24,7 +24,7 @@ if (process.argv.includes("--mcp-server")) {
   try {
     const inv = await resolveEntryInvocation(process.argv.slice(2));
     const { app } = loadLoreApp({ inv });
-    await startMcpServer(app, () => loadProjectConfig(inv), inv);
+    await startMcpServer(app, () => loadProjectConfig(inv.io, inv), inv);
   } catch (error) {
     // reason: startup helpers shared with the CLI end a failed start with `exitCli(code)` (a thrown CliExit); this
     // entry is where that becomes the process code, exactly as the CLI branch below does for a returned run.

@@ -103,6 +103,8 @@ import { loadLoreApp } from "../loader.js";
 import { exitCode, formatError, formatErrorFor, resolveActor } from "../utils.js";
 import { assembleHandoffInput, parseHandoffJsonFile } from "../handoff-input.js";
 import { invocationOf } from "../command-invocation.js";
+import { printLine } from "../output.js";
+import type { CliIo } from "../output.js";
 
 /** Field flags mutually exclusive with `--json-file` (D6) — `--plan` is NOT in this list; it works with both paths. */
 const FIELD_FLAGS = ["file", "decision", "next", "failing-command", "failing-tail-file"] as const;
@@ -874,7 +876,7 @@ function buildBlockReason(missing: readonly MissingItem[]): string {
  * shape check ({@link buildCardinalityLineMatcher} — an internal-invariant
  * fault report, not a verdict) and the calling hook's own `FAULT_EXIT_CODE`.
  */
-function runCoverageCheck(): void {
+function runCoverageCheck(io: CliIo): void {
   let payload: unknown = {};
   try {
     const raw = readFileSync(0, "utf8");
@@ -967,15 +969,15 @@ function runCoverageCheck(): void {
     // parking the work nowhere is reported through its OWN prefix, never
     // either of the other two.
     if (item.unrecognizedToken !== undefined) {
-      process.stderr.write(
+      io.stderr.write(
         `${UNRECOGNIZED_DISPOSITION_STDERR_PREFIX}${item.id}: received "${item.unrecognizedToken}" (accepted: "${RESUME_DISPOSITION_DONE}" or "${RESUME_DISPOSITION_DEFERRED_PREFIX}<reason>")\n`,
       );
     } else if (item.missingDestinationReason !== undefined) {
-      process.stderr.write(
+      io.stderr.write(
         `${RESUME_DISPOSITION_MISSING_DESTINATION_STDERR_PREFIX}${item.id}: received reason "${item.missingDestinationReason}" — add an issue reference (e.g. "#123") or a corpus slug (e.g. "task-…")\n`,
       );
     } else {
-      process.stderr.write(`${UNDISPOSITIONED_ITEM_STDERR_PREFIX}${item.id}\n`);
+      io.stderr.write(`${UNDISPOSITIONED_ITEM_STDERR_PREFIX}${item.id}\n`);
     }
   }
   // H1: the verdict travels the Stop contract's block channel. One JSON object,
@@ -983,7 +985,7 @@ function runCoverageCheck(): void {
   // `stop-doc-sync.mjs`, whose relay this hook mirrored; successor
   // `stop-turn-review.mjs`), and the exit status stays 0 — a non-zero
   // status is the channel measured to change nothing (H2).
-  process.stdout.write(JSON.stringify({ decision: STOP_HOOK_BLOCK_DECISION, reason: buildBlockReason(missing) }));
+  io.stdout.write(JSON.stringify({ decision: STOP_HOOK_BLOCK_DECISION, reason: buildBlockReason(missing) }));
 }
 
 /** citty/mri yields a single string for one occurrence of a repeatable flag, an array for ≥2, or `undefined` for zero. Normalizes to a string array. */
@@ -1045,11 +1047,11 @@ export default defineCommand({
     const inv = invocationOf(context);
     const subcommand = typeof args.subcommand === "string" ? args.subcommand : undefined;
     if (subcommand === COVERAGE_CHECK_SUBCOMMAND) {
-      runCoverageCheck();
+      runCoverageCheck(inv.io);
       return;
     }
     if (subcommand !== undefined) {
-      process.stderr.write(
+      inv.io.stderr.write(
         `Error: unknown \`lore handoff\` subcommand "${subcommand}" (expected: ${COVERAGE_CHECK_SUBCOMMAND}, or omit for the default write path)\n`,
       );
       setExitCode(2);
@@ -1061,7 +1063,7 @@ export default defineCommand({
     const conflictingFlags = FIELD_FLAGS.filter((f) => rawArgv.includes(`--${f}`));
 
     if (jsonFilePassed && conflictingFlags.length > 0) {
-      process.stderr.write(
+      inv.io.stderr.write(
         `Error: --json-file is mutually exclusive with ${conflictingFlags.map((f) => `--${f}`).join(", ")}.\n`,
       );
       setExitCode(2);
@@ -1077,7 +1079,7 @@ export default defineCommand({
       try {
         raw = readFileSync(args["json-file"] as string, "utf8");
       } catch (e) {
-        process.stderr.write(
+        inv.io.stderr.write(
           `Error: cannot read --json-file '${args["json-file"] as string}': ${e instanceof Error ? e.message : String(e)}\n`,
         );
         setExitCode(2);
@@ -1086,11 +1088,11 @@ export default defineCommand({
 
       const parsed = parseHandoffJsonFile(raw, {
         // reason: the writer is the invoking run alone — a payload-supplied `by` is overridden, never trusted.
-        by: resolveActor(undefined, inv.env, inv.cwd, inv.user),
+        by: resolveActor(inv.io, undefined, inv.env, inv.cwd, inv.user),
         ...(explicitPlan !== undefined ? { plan: explicitPlan } : {}),
       });
       if (!parsed.ok) {
-        process.stderr.write(`Error: ${parsed.error}\n`);
+        inv.io.stderr.write(`Error: ${parsed.error}\n`);
         setExitCode(2);
         return;
       }
@@ -1099,7 +1101,7 @@ export default defineCommand({
       const hasFailingCommand = typeof args["failing-command"] === "string";
       const hasFailingTailFile = typeof args["failing-tail-file"] === "string";
       if (hasFailingCommand !== hasFailingTailFile) {
-        process.stderr.write(
+        inv.io.stderr.write(
           "Error: --failing-command and --failing-tail-file must be passed together.\n",
         );
         setExitCode(2);
@@ -1111,7 +1113,7 @@ export default defineCommand({
         try {
           failingTail = tailChars(readFileSync(args["failing-tail-file"] as string, "utf8"), 2000);
         } catch (e) {
-          process.stderr.write(
+          inv.io.stderr.write(
             `Error: cannot read --failing-tail-file '${args["failing-tail-file"] as string}': ${e instanceof Error ? e.message : String(e)}\n`,
           );
           setExitCode(2);
@@ -1120,7 +1122,7 @@ export default defineCommand({
       }
 
       const assembled = assembleHandoffInput({
-        by: resolveActor(undefined, inv.env, inv.cwd, inv.user),
+        by: resolveActor(inv.io, undefined, inv.env, inv.cwd, inv.user),
         ...(explicitPlan !== undefined ? { plan: explicitPlan } : {}),
         files: normalizeRepeatable(args.file),
         decisions: normalizeRepeatable(args.decision),
@@ -1132,7 +1134,7 @@ export default defineCommand({
       const validated = handoffExtraSchema.safeParse(assembled);
       if (!validated.success) {
         const issue = validated.error.issues[0];
-        process.stderr.write(
+        inv.io.stderr.write(
           `Error: invalid handoff payload — field '${issue !== undefined ? issue.path.join(".") : "(root)"}': ${issue?.message ?? "validation failed"}\n`,
         );
         setExitCode(2);
@@ -1144,7 +1146,7 @@ export default defineCommand({
     const { app } = loadLoreApp({ inv });
     try {
       if (app.sessionService === undefined) {
-        process.stderr.write("Error: SessionService not wired on this App instance.\n");
+        inv.io.stderr.write("Error: SessionService not wired on this App instance.\n");
         setExitCode(1);
         return;
       }
@@ -1153,7 +1155,7 @@ export default defineCommand({
       // `--harness-run` verifies to null), never the raw flag; the service reads that run's session trail.
       const identity = await app.verifiedInvocationIdentity?.();
       if (identity !== undefined && !identity.ok) {
-        process.stderr.write(formatErrorFor(inv, identity.error) + "\n");
+        inv.io.stderr.write(formatErrorFor(inv, identity.error) + "\n");
         setExitCode(exitCode(identity.error));
         return;
       }
@@ -1161,19 +1163,19 @@ export default defineCommand({
 
       const result = await app.sessionService.writeHandoff(candidate, undefined, { run });
       if (!result.ok) {
-        process.stderr.write(formatErrorFor(inv, result.error) + "\n");
+        inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
         setExitCode(exitCode(result.error));
         return;
       }
 
       const doc = result.value;
       if (args.json) {
-        console.log(JSON.stringify({ ok: true, data: doc }, null, 2));
+        printLine(inv.io.stdout, JSON.stringify({ ok: true, data: doc }, null, 2));
       } else {
-        console.log(`Recorded handoff by ${candidate.by}`);
-        console.log(`  Slug:   ${doc.slug}`);
-        console.log(`  Status: ${doc.status} (v${doc.version})`);
-        console.log(`\nRun \`lore get ${doc.slug}\` to view the document.`);
+        printLine(inv.io.stdout, `Recorded handoff by ${candidate.by}`);
+        printLine(inv.io.stdout, `  Slug:   ${doc.slug}`);
+        printLine(inv.io.stdout, `  Status: ${doc.status} (v${doc.version})`);
+        printLine(inv.io.stdout, `\nRun \`lore get ${doc.slug}\` to view the document.`);
       }
     } finally {
       app.close();

@@ -37,26 +37,26 @@ export default defineCommand({
     const { args } = context;
     const inv = invocationOf(context);
     if (typeof args.reason !== "string" || args.reason.trim() === "") {
-      process.stderr.write("Error: --reason is required: lore reopen <spec> --reason \"<why>\"\n");
+      inv.io.stderr.write("Error: --reason is required: lore reopen <spec> --reason \"<why>\"\n");
       exitCli(2);
     }
     const { app } = loadLoreApp({ inv });
     try {
-      const reviewer = resolveActor(undefined, inv.env, inv.cwd, inv.user);
+      const reviewer = resolveActor(inv.io, undefined, inv.env, inv.cwd, inv.user);
 
       const result = await app.reviewService.reopen(args.id, args.reason, { reviewer });
       if (!result.ok) {
-        process.stderr.write(formatErrorFor(inv, result.error) + "\n");
+        inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
         setExitCode(exitCode(result.error));
         return;
       }
 
       const doc = result.value;
       if (args.json) {
-        process.stdout.write(JSON.stringify({ id: doc.id, slug: doc.slug, status: doc.status, version: doc.version }) + "\n");
+        inv.io.stdout.write(JSON.stringify({ id: doc.id, slug: doc.slug, status: doc.status, version: doc.version }) + "\n");
         return;
       }
-      process.stdout.write(`Reopened ${doc.slug} (v${doc.version}): approved -> draft\n`);
+      inv.io.stdout.write(`Reopened ${doc.slug} (v${doc.version}): approved -> draft\n`);
     } finally {
       app.close();
     }

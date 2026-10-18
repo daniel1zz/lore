@@ -46,6 +46,8 @@ import type { App } from "../../../app.js";
 import type { AddRuleInput, SetRulePatch } from "../../../service/rule-service.js";
 import type { ProposeRuleChangeInput, RuleEnforcement } from "../../../service/rule-change-service.js";
 import { invocationOf } from "../command-invocation.js";
+import { printLine } from "../output.js";
+import type { CliIo } from "../output.js";
 
 /** citty/mri yields one string for a single occurrence of a repeatable flag, an array for >= 2, `undefined` for none. */
 function repeatable(value: unknown): string[] | undefined {
@@ -54,14 +56,14 @@ function repeatable(value: unknown): string[] | undefined {
 }
 
 function reportFailure(inv: Invocation, error: LoreError, json: boolean): void {
-  if (json) console.log(JSON.stringify({ ok: false, error }, null, 2));
-  else process.stderr.write(formatErrorFor(inv, error));
+  if (json) printLine(inv.io.stdout, JSON.stringify({ ok: false, error }, null, 2));
+  else inv.io.stderr.write(formatErrorFor(inv, error));
   setExitCode(exitCode(error));
 }
 
-function requireRuleService(app: App) {
+function requireRuleService(io: CliIo, app: App) {
   if (app.ruleService === undefined) {
-    process.stderr.write("Error: RuleService is not available in this build.\n");
+    io.stderr.write("Error: RuleService is not available in this build.\n");
     setExitCode(1);
     return undefined;
   }
@@ -90,9 +92,9 @@ function fourPartFromArgs(args: Record<string, unknown>): { ok: true; parts: Fou
 
 type FourPartFlags = Pick<AddRuleInput, "current_reality" | "target_rule" | "current_exceptions" | "migration">;
 
-function failUsage(message: string, json: boolean): void {
-  if (json) console.log(JSON.stringify({ ok: false, error: { code: "VALIDATION_ERROR", field: "args", message } }, null, 2));
-  else process.stderr.write(`Error: ${message}\n`);
+function failUsage(io: CliIo, message: string, json: boolean): void {
+  if (json) printLine(io.stdout, JSON.stringify({ ok: false, error: { code: "VALIDATION_ERROR", field: "args", message } }, null, 2));
+  else io.stderr.write(`Error: ${message}\n`);
   setExitCode(2);
 }
 
@@ -110,18 +112,18 @@ export default defineCommand({
         const inv = invocationOf(context);
         const { app } = loadLoreApp({ inv });
         try {
-          if (app.ruleReadService === undefined) return failUsage("RuleReadService is not available in this build.", args.json === true);
+          if (app.ruleReadService === undefined) return failUsage(inv.io, "RuleReadService is not available in this build.", args.json === true);
           const result = await app.ruleReadService.show(args.rule as string);
           if (!result.ok) return reportFailure(inv, result.error, args.json === true);
-          if (args.json) return void console.log(JSON.stringify({ ok: true, data: result.value }, null, 2));
+          if (args.json) return void printLine(inv.io.stdout, JSON.stringify({ ok: true, data: result.value }, null, 2));
           const v = result.value;
           if (v.state === "proposed") {
             // A proposed rule is not part of the baseline: it has no confidence and no leaf yet (spec: change set).
-            console.log(`${v.id} [proposed] — proposed by ${v.proposed_by ?? "(unknown spec)"}, not in the baseline\nWill land on ${v.leaf}.\n${v.statement}`);
+            printLine(inv.io.stdout, `${v.id} [proposed] — proposed by ${v.proposed_by ?? "(unknown spec)"}, not in the baseline\nWill land on ${v.leaf}.\n${v.statement}`);
           } else {
-            console.log(`${v.id} [${v.state}, ${v.confidence}] on ${v.leaf}\n${v.statement}`);
+            printLine(inv.io.stdout, `${v.id} [${v.state}, ${v.confidence}] on ${v.leaf}\n${v.statement}`);
           }
-          console.log(v.citingCriteria.length === 0 ? "Cited by: (none)" : `Cited by:\n${v.citingCriteria.map((c) => `  ${c.spec} ${c.ac}`).join("\n")}`);
+          printLine(inv.io.stdout, v.citingCriteria.length === 0 ? "Cited by: (none)" : `Cited by:\n${v.citingCriteria.map((c) => `  ${c.spec} ${c.ac}`).join("\n")}`);
         } finally {
           app.close();
         }
@@ -140,16 +142,16 @@ export default defineCommand({
         const { args } = context;
         const inv = invocationOf(context);
         const given = [args.spec, args.file, args.text].filter((v) => typeof v === "string");
-        if (given.length !== 1) return failUsage("pass exactly one of --spec, --file, --text", args.json === true);
+        if (given.length !== 1) return failUsage(inv.io, "pass exactly one of --spec, --file, --text", args.json === true);
         const { app } = loadLoreApp({ inv });
         try {
-          if (app.ruleReadService === undefined) return failUsage("RuleReadService is not available in this build.", args.json === true);
+          if (app.ruleReadService === undefined) return failUsage(inv.io, "RuleReadService is not available in this build.", args.json === true);
           const query =
             typeof args.spec === "string" ? { spec: args.spec } : typeof args.file === "string" ? { file: args.file } : { text: args.text as string };
           const result = await app.ruleReadService.find(query, { includeTombstones: args["include-retired"] === true });
           if (!result.ok) return reportFailure(inv, result.error, args.json === true);
-          if (args.json) return void console.log(JSON.stringify({ ok: true, data: { rules: result.value } }, null, 2));
-          console.log(result.value.length === 0 ? "No matching rules." : result.value.join("\n"));
+          if (args.json) return void printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { rules: result.value } }, null, 2));
+          printLine(inv.io.stdout, result.value.length === 0 ? "No matching rules." : result.value.join("\n"));
         } finally {
           app.close();
         }
@@ -166,17 +168,17 @@ export default defineCommand({
         const inv = invocationOf(context);
         const { app } = loadLoreApp({ inv });
         try {
-          if (app.impactService === undefined) return failUsage("ImpactService is not available in this build.", args.json === true);
+          if (app.impactService === undefined) return failUsage(inv.io, "ImpactService is not available in this build.", args.json === true);
           const result = await app.impactService.impact(args.rule as string);
           if (!result.ok) return reportFailure(inv, result.error, args.json === true);
-          if (args.json) return void console.log(JSON.stringify({ ok: true, data: result.value }, null, 2));
+          if (args.json) return void printLine(inv.io.stdout, JSON.stringify({ ok: true, data: result.value }, null, 2));
           const v = result.value;
           // Standing split (spec D7): Living (edited in place) before Records (locked once approved).
-          console.log(`Living (${v.living.length}):${v.living.map((l) => `\n  ${l}`).join("")}`);
-          console.log(`Records (${v.records.length}):${v.records.map((r) => `\n  ${r.slug} ${r.acId}`).join("")}`);
-          console.log(`Citing criteria (${v.citingCriteria.length}):${v.citingCriteria.map((c) => `\n  ${c.spec} ${c.ac}`).join("")}`);
-          console.log(`Dependent leaves (${v.dependentLeaves.length}):${v.dependentLeaves.map((l) => `\n  ${l}`).join("")}`);
-          console.log(`Cycles (${v.cycles.length}):${v.cycles.map((c) => `\n  ${c.join(" <-> ")}`).join("")}`);
+          printLine(inv.io.stdout, `Living (${v.living.length}):${v.living.map((l) => `\n  ${l}`).join("")}`);
+          printLine(inv.io.stdout, `Records (${v.records.length}):${v.records.map((r) => `\n  ${r.slug} ${r.acId}`).join("")}`);
+          printLine(inv.io.stdout, `Citing criteria (${v.citingCriteria.length}):${v.citingCriteria.map((c) => `\n  ${c.spec} ${c.ac}`).join("")}`);
+          printLine(inv.io.stdout, `Dependent leaves (${v.dependentLeaves.length}):${v.dependentLeaves.map((l) => `\n  ${l}`).join("")}`);
+          printLine(inv.io.stdout, `Cycles (${v.cycles.length}):${v.cycles.map((c) => `\n  ${c.join(" <-> ")}`).join("")}`);
         } finally {
           app.close();
         }
@@ -208,9 +210,9 @@ export default defineCommand({
         const examples = repeatable(args.example);
         let input: ProposeRuleChangeInput;
         if (op === "add") {
-          if (args.rule !== undefined) return failUsage("`add` takes no rule id: the registry allocates it", json);
+          if (args.rule !== undefined) return failUsage(inv.io, "`add` takes no rule id: the registry allocates it", json);
           if (args.leaf === undefined || args.statement === undefined || args["enforced-by"] === undefined) {
-            return failUsage("`add` requires --leaf, --statement, --example (1-3) and --enforced-by", json);
+            return failUsage(inv.io, "`add` requires --leaf, --statement, --example (1-3) and --enforced-by", json);
           }
           input = {
             op: "add",
@@ -220,9 +222,9 @@ export default defineCommand({
             enforced_by: args["enforced-by"] as RuleEnforcement,
           };
         } else if (op === "modify" || op === "retire" || op === "amend") {
-          if (args.rule === undefined) return failUsage(`\`${op}\` requires the rule id: lore rule propose <spec> ${op} <BR-n> ...`, json);
+          if (args.rule === undefined) return failUsage(inv.io, `\`${op}\` requires the rule id: lore rule propose <spec> ${op} <BR-n> ...`, json);
           if (op === "retire") {
-            if (args.note === undefined) return failUsage("`retire` requires --note <why>", json);
+            if (args.note === undefined) return failUsage(inv.io, "`retire` requires --note <why>", json);
             input = { op: "retire", id: args.rule as string, note: args.note as string };
           } else {
             input = {
@@ -236,19 +238,19 @@ export default defineCommand({
             };
           }
         } else {
-          return failUsage(`op must be add, modify, retire or amend (got '${op}')`, json);
+          return failUsage(inv.io, `op must be add, modify, retire or amend (got '${op}')`, json);
         }
         const { app } = loadLoreApp({ inv });
         try {
-          if (app.ruleChangeService === undefined) return failUsage("RuleChangeService is not available in this build.", json);
+          if (app.ruleChangeService === undefined) return failUsage(inv.io, "RuleChangeService is not available in this build.", json);
           const result = await app.ruleChangeService.propose(args.spec as string, input, {
-            by: resolveActor(undefined, inv.env, inv.cwd, inv.user),
+            by: resolveActor(inv.io, undefined, inv.env, inv.cwd, inv.user),
             ...(args.correction !== undefined ? { correction: { reason: args.correction as string } } : {}),
           });
           if (!result.ok) return reportFailure(inv, result.error, json);
           const { change, doc } = result.value;
-          if (json) return void console.log(JSON.stringify({ ok: true, data: { change, spec: doc.slug, version: doc.version } }, null, 2));
-          console.log(
+          if (json) return void printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { change, spec: doc.slug, version: doc.version } }, null, 2));
+          printLine(inv.io.stdout, 
             change.op === "add"
               ? `Reserved ${change.id} (proposed, not in the baseline) for ${change.leaf} in ${doc.slug} (v${doc.version}).`
               : args.op === "amend"
@@ -276,22 +278,22 @@ export default defineCommand({
         const json = args.json === true;
         const { app } = loadLoreApp({ inv });
         try {
-          if (app.ruleChangeService === undefined) return failUsage("RuleChangeService is not available in this build.", json);
-          const result = await app.ruleChangeService.apply(args.spec as string, { by: resolveActor(undefined, inv.env, inv.cwd, inv.user) });
+          if (app.ruleChangeService === undefined) return failUsage(inv.io, "RuleChangeService is not available in this build.", json);
+          const result = await app.ruleChangeService.apply(args.spec as string, { by: resolveActor(inv.io, undefined, inv.env, inv.cwd, inv.user) });
           if (!result.ok) return reportFailure(inv, result.error, json);
           const outcome = result.value;
-          if (json) return void console.log(JSON.stringify({ ok: true, data: outcome }, null, 2));
+          if (json) return void printLine(inv.io.stdout, JSON.stringify({ ok: true, data: outcome }, null, 2));
           if (outcome.kind === "noop") {
             const why = {
               "no-changes": "has no rule changes",
               "already-applied": "rule changes already landed",
               "already-abandoned": "is deprecated and its proposed rules are already retired",
             }[outcome.reason];
-            return void console.log(`${outcome.spec}: nothing to apply (${why}).`);
+            return void printLine(inv.io.stdout, `${outcome.spec}: nothing to apply (${why}).`);
           }
           const verb = outcome.kind === "applied" ? "Applied rule changes of" : "Retired the proposed rules (never landed) of";
-          console.log(`${verb} ${outcome.spec}:`);
-          for (const leaf of outcome.leaves) console.log(`  ${leaf.leaf} (v${leaf.version}): ${leaf.rules.join(", ")}`);
+          printLine(inv.io.stdout, `${verb} ${outcome.spec}:`);
+          for (const leaf of outcome.leaves) printLine(inv.io.stdout, `  ${leaf.leaf} (v${leaf.version}): ${leaf.rules.join(", ")}`);
         } finally {
           app.close();
         }
@@ -308,17 +310,17 @@ export default defineCommand({
         const inv = invocationOf(context);
         const { app } = loadLoreApp({ inv });
         try {
-          if (app.ruleChangeService === undefined) return failUsage("RuleChangeService is not available in this build.", args.json === true);
+          if (app.ruleChangeService === undefined) return failUsage(inv.io, "RuleChangeService is not available in this build.", args.json === true);
           const result = await app.ruleChangeService.changes(args.spec as string);
           if (!result.ok) return reportFailure(inv, result.error, args.json === true);
-          if (args.json) return void console.log(JSON.stringify({ ok: true, data: result.value }, null, 2));
+          if (args.json) return void printLine(inv.io.stdout, JSON.stringify({ ok: true, data: result.value }, null, 2));
           const { spec, changes } = result.value;
-          if (changes.length === 0) return void console.log(`${spec}: no rule changes.`);
-          console.log(`${spec}: ${changes.length} rule change(s)`);
+          if (changes.length === 0) return void printLine(inv.io.stdout, `${spec}: no rule changes.`);
+          printLine(inv.io.stdout, `${spec}: ${changes.length} rule change(s)`);
           for (const c of changes) {
-            if (c.op === "add") console.log(`  add ${c.id} on ${c.leaf}: ${c.statement}`);
-            else if (c.op === "retire") console.log(`  retire ${c.id}: ${c.note}`);
-            else console.log(`  modify ${c.id}${c.statement !== undefined ? `: ${c.statement}` : ""}`);
+            if (c.op === "add") printLine(inv.io.stdout, `  add ${c.id} on ${c.leaf}: ${c.statement}`);
+            else if (c.op === "retire") printLine(inv.io.stdout, `  retire ${c.id}: ${c.note}`);
+            else printLine(inv.io.stdout, `  modify ${c.id}${c.statement !== undefined ? `: ${c.statement}` : ""}`);
           }
         } finally {
           app.close();
@@ -345,10 +347,10 @@ export default defineCommand({
         const inv = invocationOf(context);
         const { app } = loadLoreApp({ inv });
         try {
-          const svc = requireRuleService(app);
+          const svc = requireRuleService(inv.io, app);
           if (svc === undefined) return;
           const four = fourPartFromArgs(args);
-          if (!four.ok) return failUsage(four.message, args.json === true);
+          if (!four.ok) return failUsage(inv.io, four.message, args.json === true);
           const input: AddRuleInput = {
             statement: args.statement as string,
             confidence: args.confidence as AddRuleInput["confidence"],
@@ -356,12 +358,12 @@ export default defineCommand({
             examples: repeatable(args.example) ?? [],
             ...four.parts,
           };
-          const result = await svc.addRule(args.leaf as string, input, { by: resolveActor(undefined, inv.env, inv.cwd, inv.user) });
+          const result = await svc.addRule(args.leaf as string, input, { by: resolveActor(inv.io, undefined, inv.env, inv.cwd, inv.user) });
           if (!result.ok) return reportFailure(inv, result.error, args.json === true);
           if (args.json) {
-            console.log(JSON.stringify({ ok: true, data: { ruleId: result.value.ruleId, leaf: result.value.doc.slug, version: result.value.doc.version } }, null, 2));
+            printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { ruleId: result.value.ruleId, leaf: result.value.doc.slug, version: result.value.doc.version } }, null, 2));
           } else {
-            console.log(`Added ${result.value.ruleId} to ${result.value.doc.slug} (v${result.value.doc.version}).`);
+            printLine(inv.io.stdout, `Added ${result.value.ruleId} to ${result.value.doc.slug} (v${result.value.doc.version}).`);
           }
         } finally {
           app.close();
@@ -391,11 +393,11 @@ export default defineCommand({
         const inv = invocationOf(context);
         const { app } = loadLoreApp({ inv });
         try {
-          const svc = requireRuleService(app);
+          const svc = requireRuleService(inv.io, app);
           if (svc === undefined) return;
           const examples = repeatable(args.example);
           const four = fourPartFromArgs(args);
-          if (!four.ok) return failUsage(four.message, args.json === true);
+          if (!four.ok) return failUsage(inv.io, four.message, args.json === true);
           const patch: SetRulePatch = {
             ...(args.statement !== undefined ? { statement: args.statement as string } : {}),
             ...(args.confidence !== undefined ? { confidence: args.confidence as AddRuleInput["confidence"] } : {}),
@@ -406,12 +408,12 @@ export default defineCommand({
             ...(args["move-to"] !== undefined ? { moveTo: args["move-to"] as string } : {}),
             ...four.parts,
           };
-          const result = await svc.setRule(args.rule as string, patch, { by: resolveActor(undefined, inv.env, inv.cwd, inv.user) });
+          const result = await svc.setRule(args.rule as string, patch, { by: resolveActor(inv.io, undefined, inv.env, inv.cwd, inv.user) });
           if (!result.ok) return reportFailure(inv, result.error, args.json === true);
           if (args.json) {
-            console.log(JSON.stringify({ ok: true, data: { rule: result.value.rule, leaf: result.value.doc.slug, version: result.value.doc.version } }, null, 2));
+            printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { rule: result.value.rule, leaf: result.value.doc.slug, version: result.value.doc.version } }, null, 2));
           } else {
-            console.log(`Updated ${result.value.rule.id} [${result.value.rule.lifecycle}] on ${result.value.doc.slug} (v${result.value.doc.version}).`);
+            printLine(inv.io.stdout, `Updated ${result.value.rule.id} [${result.value.rule.lifecycle}] on ${result.value.doc.slug} (v${result.value.doc.version}).`);
           }
         } finally {
           app.close();

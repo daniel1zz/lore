@@ -108,6 +108,7 @@ import type {
 import type { PendingDoc } from "../../../service/review-service.js";
 import type { StalenessBatchResult, StalenessProbeOutcome } from "../../../service/staleness-probe-service.js";
 import { invocationOf } from "../command-invocation.js";
+import { printLine } from "../output.js";
 
 /** Structural type of the wired App, without importing app.ts's bun:sqlite-reachable module. */
 type App = ReturnType<typeof loadLoreApp>["app"];
@@ -123,7 +124,7 @@ function loadBlueprintOrExit(inv: Invocation): TreeBlueprint | undefined {
   const loaded = loadTreeBlueprint(inv.cwd);
   if (loaded.status === "missing") return undefined;
   if (loaded.status === "invalid") {
-    process.stderr.write(formatErrorFor(inv, loaded.error) + "\n");
+    inv.io.stderr.write(formatErrorFor(inv, loaded.error) + "\n");
     exitCli(4);
   }
   return loaded.blueprint;
@@ -284,25 +285,25 @@ export default defineCommand({
     if (args.doc === "backfill-ledger") {
       const { app } = loadLoreApp({ inv });
       try {
-        const actor = resolveActor(undefined, inv.env, inv.cwd, inv.user);
+        const actor = resolveActor(inv.io, undefined, inv.env, inv.cwd, inv.user);
         const result = await app.reviewService.backfillLedger({ actor });
         if (!result.ok) {
-          process.stderr.write(formatErrorFor(inv, result.error) + "\n");
+          inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
           setExitCode(exitCode(result.error));
           return;
         }
         if (args.json) {
-          console.log(JSON.stringify({ ok: true, data: result.value }, null, 2));
+          printLine(inv.io.stdout, JSON.stringify({ ok: true, data: result.value }, null, 2));
         } else if (result.value.fast_tracked.length === 0) {
-          console.log("No draft ledger docs to backfill — already up to date.");
+          printLine(inv.io.stdout, "No draft ledger docs to backfill — already up to date.");
         } else {
-          console.log(
+          printLine(inv.io.stdout, 
             `Fast-tracked ${result.value.fast_tracked.length} ledger doc(s): ` +
               result.value.fast_tracked.join(", "),
           );
         }
         for (const failure of result.value.failed) {
-          process.stderr.write(`Warning: failed to fast-track ${failure.slug}: ${failure.reason}\n`);
+          inv.io.stderr.write(`Warning: failed to fast-track ${failure.slug}: ${failure.reason}\n`);
         }
         return;
       } finally {
@@ -321,25 +322,25 @@ export default defineCommand({
     const isStalenessListMode = isStaleness && isList;
 
     if (hasExplicitAi && hasExplicitNoAi) {
-      process.stderr.write("Error: --ai and --no-ai are mutually exclusive. Pass only one.\n");
+      inv.io.stderr.write("Error: --ai and --no-ai are mutually exclusive. Pass only one.\n");
       exitCli(2);
     }
     // reason: D9 review U6 — --pending and --staleness address disjoint populations
     // (draft docs awaiting first review vs approved/active staleness candidates);
     // combining them is a usage error, checked before any IO (review U11).
     if (args.pending && isStaleness) {
-      process.stderr.write("Error: --pending and --staleness are mutually exclusive (disjoint populations).\n");
+      inv.io.stderr.write("Error: --pending and --staleness are mutually exclusive (disjoint populations).\n");
       exitCli(2);
     }
     if (hasExplicitNoAi && !isStalenessListMode) {
       // reason: review (and staleness probing) has no non-AI mode (mirrors SPEC-026 §3
       // D5 assess exactly) — the command name IS the AI intent, so --no-ai is always a
       // contradiction EXCEPT the --staleness --list read-only path (D7/D9).
-      process.stderr.write("Error: lore review requires AI; --no-ai is a contradiction. Omit the flag to proceed.\n");
+      inv.io.stderr.write("Error: lore review requires AI; --no-ai is a contradiction. Omit the flag to proceed.\n");
       exitCli(2);
     }
     if (!args.pending && !isStaleness && (args.doc === undefined || args.doc === "")) {
-      process.stderr.write("Error: a document ID or slug is required unless --pending or batch --staleness is passed.\n");
+      inv.io.stderr.write("Error: a document ID or slug is required unless --pending or batch --staleness is passed.\n");
       exitCli(2);
     }
 
@@ -353,7 +354,7 @@ export default defineCommand({
       if (!isStalenessListMode && !hasExplicitAi) {
         const resolved = app.resolveAiDefault(undefined);
         if (isAssessAiBraked(resolved)) {
-          process.stderr.write(
+          inv.io.stderr.write(
             "Error: AI is required for `lore review` but is disabled for this surface by " +
               "config.ai.default_per_surface. Pass --ai to override.\n",
           );
@@ -362,7 +363,7 @@ export default defineCommand({
         }
       }
 
-      const actor = resolveActor(undefined, inv.env, inv.cwd, inv.user);
+      const actor = resolveActor(inv.io, undefined, inv.env, inv.cwd, inv.user);
 
       // ─── SPEC-044: staleness probing branch ─────────────────────────────────
       if (isStaleness) {
@@ -372,19 +373,19 @@ export default defineCommand({
         if (isList) {
           const listResult = await listFreshStalenessEscalates(flowDeps);
           if (!listResult.ok) {
-            process.stderr.write(formatErrorFor(inv, listResult.error) + "\n");
+            inv.io.stderr.write(formatErrorFor(inv, listResult.error) + "\n");
             setExitCode(exitCode(listResult.error));
             return;
           }
           const entries = listResult.value;
 
           if (args.json) {
-            console.log(JSON.stringify({ ok: true, data: buildStalenessListJsonPayload(entries) }, null, 2));
+            printLine(inv.io.stdout, JSON.stringify({ ok: true, data: buildStalenessListJsonPayload(entries) }, null, 2));
             return;
           }
 
           if (entries.length === 0) {
-            console.log("No open stale candidates.");
+            printLine(inv.io.stdout, "No open stale candidates.");
             return;
           }
 
@@ -393,13 +394,13 @@ export default defineCommand({
             e.doc.title.slice(0, 32),
             formatStalenessBadge(e.judgment),
           ]);
-          console.log(formatTable(["Slug", "Title", "Badge"], rows));
-          console.log(`\n${entries.length} open stale candidate${entries.length === 1 ? "" : "s"}`);
+          printLine(inv.io.stdout, formatTable(["Slug", "Title", "Badge"], rows));
+          printLine(inv.io.stdout, `\n${entries.length} open stale candidate${entries.length === 1 ? "" : "s"}`);
           return;
         }
 
         if (app.stalenessProbeService === undefined) {
-          process.stderr.write("Error: StalenessProbeService not wired on this App instance.\n");
+          inv.io.stderr.write("Error: StalenessProbeService not wired on this App instance.\n");
           setExitCode(1);
           return;
         }
@@ -413,7 +414,7 @@ export default defineCommand({
         if (args.limit !== undefined) {
           const limitResult = parsePositiveIntArg(args.limit, "--limit", { min: 1 });
           if (!limitResult.ok) {
-            process.stderr.write(limitResult.message + "\n");
+            inv.io.stderr.write(limitResult.message + "\n");
             setExitCode(2);
             return;
           }
@@ -424,7 +425,7 @@ export default defineCommand({
         if (args["min-age-days"] !== undefined) {
           const minAgeDaysResult = parsePositiveIntArg(args["min-age-days"], "--min-age-days", { min: 0 });
           if (!minAgeDaysResult.ok) {
-            process.stderr.write(minAgeDaysResult.message + "\n");
+            inv.io.stderr.write(minAgeDaysResult.message + "\n");
             setExitCode(2);
             return;
           }
@@ -440,7 +441,7 @@ export default defineCommand({
             source: app.callerSurface,
           });
           if (!outcomeResult.ok) {
-            process.stderr.write(formatErrorFor(inv, outcomeResult.error) + "\n");
+            inv.io.stderr.write(formatErrorFor(inv, outcomeResult.error) + "\n");
             setExitCode(exitCode(outcomeResult.error));
             return;
           }
@@ -448,9 +449,9 @@ export default defineCommand({
 
           if (args.json) {
             const payload = await buildStalenessSingleJsonPayload(flowDeps, outcome);
-            console.log(JSON.stringify({ ok: true, data: payload }, null, 2));
+            printLine(inv.io.stdout, JSON.stringify({ ok: true, data: payload }, null, 2));
           } else {
-            console.log(await renderProbeText(inv, flowDeps, outcome));
+            printLine(inv.io.stdout, await renderProbeText(inv, flowDeps, outcome));
           }
 
           setExitCode(computeStalenessExitCode([outcome], failOnCandidate));
@@ -465,7 +466,7 @@ export default defineCommand({
           source: app.callerSurface,
         });
         if (!batchResult.ok) {
-          process.stderr.write(formatErrorFor(inv, batchResult.error) + "\n");
+          inv.io.stderr.write(formatErrorFor(inv, batchResult.error) + "\n");
           setExitCode(exitCode(batchResult.error));
           return;
         }
@@ -473,19 +474,19 @@ export default defineCommand({
 
         if (args.json) {
           const payload = await buildStalenessBatchJsonPayload(flowDeps, batch);
-          console.log(JSON.stringify({ ok: true, data: payload }, null, 2));
+          printLine(inv.io.stdout, JSON.stringify({ ok: true, data: payload }, null, 2));
         } else {
           if (batch.probes.length === 0) {
-            console.log(
+            printLine(inv.io.stdout, 
               `No staleness candidates found (total_candidates: ${batch.total_candidates}, ` +
                 `skipped: ${batch.skipped.invalidated} invalidated / ${batch.skipped.too_young} too young).`,
             );
           } else {
             for (const outcome of batch.probes) {
-              console.log(await renderProbeText(inv, flowDeps, outcome));
-              console.log("");
+              printLine(inv.io.stdout, await renderProbeText(inv, flowDeps, outcome));
+              printLine(inv.io.stdout, "");
             }
-            console.log(
+            printLine(inv.io.stdout, 
               `${batch.probes.length} probed, ${batch.total_candidates} total candidates, ` +
                 `${batch.excluded_by_limit} excluded by limit.`,
             );
@@ -503,14 +504,14 @@ export default defineCommand({
       if (args.pending) {
         const pendingResult = await app.reviewService.pending();
         if (!pendingResult.ok) {
-          process.stderr.write(formatErrorFor(inv, pendingResult.error) + "\n");
+          inv.io.stderr.write(formatErrorFor(inv, pendingResult.error) + "\n");
           setExitCode(exitCode(pendingResult.error));
           return;
         }
         const docs: PendingDoc[] = pendingResult.value;
 
         if (docs.length === 0) {
-          console.log("No pending documents.");
+          printLine(inv.io.stdout, "No pending documents.");
           return;
         }
 
@@ -523,7 +524,7 @@ export default defineCommand({
         const failures = outcomes.filter((o) => !o.result.ok);
 
         if (args.json) {
-          console.log(
+          printLine(inv.io.stdout, 
             JSON.stringify(
               {
                 ok: true,
@@ -549,12 +550,12 @@ export default defineCommand({
             o.result.ok ? o.result.value.judgment.decision : "ERROR",
             o.result.ok ? o.result.value.judgment.confidence.toFixed(2) : (formatErrorFor(inv, o.result.error).split("\n")[0] ?? ""),
           ]);
-          console.log(formatTable(["ID", "Title", "Decision", "Confidence/Error"], rows));
-          console.log(`\n${outcomes.length} reviewed, ${failures.length} failed`);
+          printLine(inv.io.stdout, formatTable(["ID", "Title", "Decision", "Confidence/Error"], rows));
+          printLine(inv.io.stdout, `\n${outcomes.length} reviewed, ${failures.length} failed`);
         }
 
         if (failures.length > 0) {
-          process.stderr.write(`Warning: ${failures.length}/${outcomes.length} doc(s) failed review.\n`);
+          inv.io.stderr.write(`Warning: ${failures.length}/${outcomes.length} doc(s) failed review.\n`);
         }
         if (failures.length === outcomes.length) {
           setExitCode(6);
@@ -569,19 +570,19 @@ export default defineCommand({
       const result = await reviewOneDoc(app, docIdOrSlug, blueprint);
 
       if (!result.ok) {
-        process.stderr.write(formatErrorFor(inv, result.error, { aiHasNoFallback: true }) + "\n");
+        inv.io.stderr.write(formatErrorFor(inv, result.error, { aiHasNoFallback: true }) + "\n");
         setExitCode(exitCode(result.error));
         return;
       }
       const { docSlug, judgment } = result.value;
 
       if (args.json) {
-        console.log(JSON.stringify({ ok: true, data: { requested_by: actor, judgment } }, null, 2));
+        printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { requested_by: actor, judgment } }, null, 2));
         return;
       }
 
       const nudgeBlock = await renderSupersededCandidateNudgeBlock(buildStalenessFlowDeps(app), docSlug, judgment);
-      console.log(formatJudgmentSummary(judgment) + renderAdvisoryBlock(judgment) + renderTruncationBlock(judgment) + nudgeBlock);
+      printLine(inv.io.stdout, formatJudgmentSummary(judgment) + renderAdvisoryBlock(judgment) + renderTruncationBlock(judgment) + nudgeBlock);
     } finally {
       app.close();
     }

@@ -27,6 +27,7 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { exitCli } from "./run-scope.js";
 import { join } from "node:path";
+import type { CliIo } from "./output.js";
 
 // ─── DI interface ───────────────────────────────────────────────────────────────
 
@@ -60,7 +61,7 @@ export interface LocalApiKeyCreator {
  * @example
  *   const rawKey = await ensureLocalApiKey(machineAuth.apiKeyStore, machineAuth.baseDir);
  */
-export async function ensureLocalApiKey(
+export async function ensureLocalApiKey(io: CliIo, 
   store: LocalApiKeyCreator,
   baseDir: string,
 ): Promise<string> {
@@ -82,9 +83,9 @@ export async function ensureLocalApiKey(
     result.error.message !== undefined
       ? result.error.message
       : result.error.code;
-  process.stderr.write(`Error: Failed to create dashboard API key: ${msg}\n`);
+  io.stderr.write(`Error: Failed to create dashboard API key: ${msg}\n`);
   if (result.error.code === "VALIDATION_ERROR") {
-    process.stderr.write(
+    io.stderr.write(
       `Hint: Run 'lore agent revoke dashboard-local' then delete '${keyPath}' and retry.\n`,
     );
   }

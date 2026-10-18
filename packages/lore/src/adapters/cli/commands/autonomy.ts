@@ -40,7 +40,7 @@ async function withDecisions(inv: Invocation, fn: (opened: Opened) => Promise<nu
   try {
     const identity = await app.verifiedInvocationIdentity?.();
     if (identity !== undefined && !identity.ok) {
-      process.stderr.write(`${formatErrorFor(inv, identity.error)}\n`);
+      inv.io.stderr.write(`${formatErrorFor(inv, identity.error)}\n`);
       setExitCode(exitCode(identity.error));
       return;
     }
@@ -53,7 +53,7 @@ async function withDecisions(inv: Invocation, fn: (opened: Opened) => Promise<nu
 }
 
 function fail(inv: Invocation, error: LoreError): number {
-  process.stderr.write(`${formatErrorFor(inv, error)}\n`);
+  inv.io.stderr.write(`${formatErrorFor(inv, error)}\n`);
   return exitCode(error);
 }
 
@@ -104,7 +104,7 @@ async function propose(inv: Invocation, opened: Opened, build: (current: Governe
   if (!seeded.ok) return fail(inv, seeded.error);
   const next = build(seeded.value.record);
   if (!next.ok) {
-    process.stderr.write(`Error: ${next.message}\n`);
+    inv.io.stderr.write(`Error: ${next.message}\n`);
     return 4;
   }
   const outcome: Result<ProposeOutcome, LoreError> = await thresholds.propose(next.record, opened.service);
@@ -128,7 +128,7 @@ const show = defineCommand({
     await withDecisions(inv, async ({ service }) => {
       const seeded = await service.thresholds().ensureSeeded();
       if (!seeded.ok) return fail(inv, seeded.error);
-      process.stdout.write(`${args.json === true ? JSON.stringify({ ok: true, data: { record: seeded.value.record, regenerable: seeded.value.regenerablePatterns, integrity: seeded.value.integrity } }, null, 2) : renderGoverned(seeded.value)}\n`);
+      inv.io.stdout.write(`${args.json === true ? JSON.stringify({ ok: true, data: { record: seeded.value.record, regenerable: seeded.value.regenerablePatterns, integrity: seeded.value.integrity } }, null, 2) : renderGoverned(seeded.value)}\n`);
       return 0;
     });
   },
@@ -170,7 +170,7 @@ const set = defineCommand({
     }
     if (problems.length === 0 && Object.keys(edit).length === 0) problems.push("nothing to change: pass at least one of --tier --threshold --prior --recoverability --judge");
     if (problems.length > 0) {
-      process.stderr.write(`Error: ${problems.join("; ")}\n`);
+      inv.io.stderr.write(`Error: ${problems.join("; ")}\n`);
       setExitCode(4);
       return;
     }
@@ -220,8 +220,8 @@ const verifyPushedHeadsCommand = defineCommand({
       if (!rows.ok) return fail(inv, rows.error);
       const verdict = verifyPushedHeads(rows.value, heads.value);
       if (!verdict.clean) {
-        process.stderr.write(`Decision log does NOT reproduce ${verdict.failures.length} head(s) already pushed — the local database was rewritten:\n`);
-        for (const { head, why } of verdict.failures) process.stderr.write(`  head row ${head.head_id} (${head.recorded_at}): ${why.reason} — ${why.detail}\n`);
+        inv.io.stderr.write(`Decision log does NOT reproduce ${verdict.failures.length} head(s) already pushed — the local database was rewritten:\n`);
+        for (const { head, why } of verdict.failures) inv.io.stderr.write(`  head row ${head.head_id} (${head.recorded_at}): ${why.reason} — ${why.detail}\n`);
         return 1;
       }
       if (args.record === true) {
@@ -232,7 +232,7 @@ const verifyPushedHeadsCommand = defineCommand({
           if (!recorded.ok) return fail(inv, recorded.error);
         }
       }
-      process.stdout.write(`Decision log reproduces all ${verdict.checked} pushed head(s).\n`);
+      inv.io.stdout.write(`Decision log reproduces all ${verdict.checked} pushed head(s).\n`);
       return 0;
     });
   },

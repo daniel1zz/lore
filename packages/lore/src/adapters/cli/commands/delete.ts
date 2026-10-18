@@ -7,6 +7,7 @@ import { setExitCode } from "../run-scope.js";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatErrorFor, resolveActor } from "../utils.js";
 import { invocationOf } from "../command-invocation.js";
+import { printLine } from "../output.js";
 
 export default defineCommand({
   meta: {
@@ -34,21 +35,21 @@ export default defineCommand({
     const { app } = loadLoreApp({ inv });
     try {
       const result = await app.corpusService.delete(args.id, args.confirm ?? false, {
-        by: resolveActor(undefined, inv.env, inv.cwd, inv.user),
+        by: resolveActor(inv.io, undefined, inv.env, inv.cwd, inv.user),
       });
 
       if (!result.ok) {
-        process.stderr.write(formatErrorFor(inv, result.error) + "\n");
+        inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
         setExitCode(exitCode(result.error));
         return;
       }
 
       const { id, recoverable_until } = result.value;
       if (args.json) {
-        console.log(JSON.stringify({ ok: true, data: { id, recoverable_until } }, null, 2));
+        printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { id, recoverable_until } }, null, 2));
       } else {
-        console.log(`Deleted ${id}`);
-        console.log(`  Recoverable until: ${recoverable_until.slice(0, 10)}`);
+        printLine(inv.io.stdout, `Deleted ${id}`);
+        printLine(inv.io.stdout, `  Recoverable until: ${recoverable_until.slice(0, 10)}`);
       }
     } finally {
       app.close();

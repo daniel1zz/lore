@@ -121,6 +121,7 @@ import {
   formatDecisionStatusRefusal,
 } from "../decision-status-validation.js";
 import { invocationOf } from "../command-invocation.js";
+import { printLine } from "../output.js";
 
 /**
  * Advisory text printed when `CorpusService.set`'s internal approved→draft
@@ -247,13 +248,13 @@ export default defineCommand({
 
     // Mutex: --ai + --no-ai
     if (_hasExplicitAi && _hasExplicitNoAi) {
-      process.stderr.write("Error: --ai and --no-ai are mutually exclusive. Pass only one.\n");
+      inv.io.stderr.write("Error: --ai and --no-ai are mutually exclusive. Pass only one.\n");
       exitCli(2);
     }
 
     // Mutex: --no-ai + any AI mutation flag (contradiction: "regenerate but don't use AI")
     if (_hasExplicitNoAi && hasAiMutation) {
-      process.stderr.write(
+      inv.io.stderr.write(
         "Error: --no-ai cannot be combined with --regenerate, --refine, or --refine-stdin.\n",
       );
       exitCli(2);
@@ -262,7 +263,7 @@ export default defineCommand({
     // Mutex: more than one AI mutation mode
     const aiModeCount = [hasRegenerate, hasRefine, hasRefineStdin].filter(Boolean).length;
     if (aiModeCount > 1) {
-      process.stderr.write(
+      inv.io.stderr.write(
         "Error: --regenerate, --refine, and --refine-stdin are mutually exclusive. Pass only one.\n",
       );
       exitCli(2);
@@ -270,7 +271,7 @@ export default defineCommand({
 
     // Mutex: AI mutation flags cannot be combined with manual content flags
     if (hasAiMutation && (args.content !== undefined || args["content-file"] !== undefined)) {
-      process.stderr.write(
+      inv.io.stderr.write(
         "Error: --regenerate/--refine/--refine-stdin cannot be combined with --content or --content-file.\n",
       );
       exitCli(2);
@@ -278,7 +279,7 @@ export default defineCommand({
 
     // Mutex: existing --content + --content-file guard (exit 2 per Bug A spec).
     if (args.content !== undefined && args["content-file"] !== undefined) {
-      process.stderr.write(
+      inv.io.stderr.write(
         "Error: --content and --content-file are mutually exclusive. Pass only one.\n",
       );
       exitCli(2);
@@ -286,7 +287,7 @@ export default defineCommand({
 
     // Validate --refine inline prompt is non-empty
     if (hasRefine && args.refine!.trim() === "") {
-      process.stderr.write("Error: --refine requires a non-empty prompt string.\n");
+      inv.io.stderr.write("Error: --refine requires a non-empty prompt string.\n");
       exitCli(2);
     }
 
@@ -300,14 +301,14 @@ export default defineCommand({
       try {
         raw = readFileSync(0, "utf8");
       } catch (e) {
-        process.stderr.write(
+        inv.io.stderr.write(
           `Error: failed to read stdin: ${e instanceof Error ? e.message : String(e)}\n`,
         );
         exitCli(2);
       }
       stdinPrompt = raw.trim();
       if (!stdinPrompt) {
-        process.stderr.write("Error: --refine-stdin requires non-empty stdin input.\n");
+        inv.io.stderr.write("Error: --refine-stdin requires non-empty stdin input.\n");
         exitCli(2);
       }
     }
@@ -318,7 +319,7 @@ export default defineCommand({
     if (args.correction !== undefined) {
       const reason = typeof args.correction === "string" ? args.correction.trim() : "";
       if (reason === "") {
-        process.stderr.write('Error: --correction requires a non-empty reason (--correction "<why this is a fix>").\n');
+        inv.io.stderr.write('Error: --correction requires a non-empty reason (--correction "<why this is a fix>").\n');
         exitCli(2);
       }
       correctionOpt = { reason };
@@ -330,14 +331,14 @@ export default defineCommand({
         hasRefineStdin ? "--refine-stdin" : undefined,
       ].filter((flag): flag is string => flag !== undefined);
       if (aiFlags.length > 0) {
-        process.stderr.write(
+        inv.io.stderr.write(
           `Error: --correction cannot be combined with ${aiFlags.join(" / ")} — a correction is a hand-written small fix, not an AI rewrite.\n`,
         );
         exitCli(2);
       }
     }
 
-    const resolvedActor = resolveActor(undefined, inv.env, inv.cwd, inv.user);
+    const resolvedActor = resolveActor(inv.io, undefined, inv.env, inv.cwd, inv.user);
     const { app, defaults } = loadLoreApp({ inv });
     try {
       // ─── Step 2: AI mutation path (SPEC-019) ──────────────────────────────────
@@ -350,7 +351,7 @@ export default defineCommand({
         if (!useAi) {
           // reason: on agent surfaces AI defaults to off. The user must pass --ai explicitly
           // when running --regenerate/--refine in agent/CI contexts (SPEC-024 §9.3, SPEC-019 §9.6).
-          process.stderr.write(
+          inv.io.stderr.write(
             "Error: AI is required for --regenerate/--refine/--refine-stdin but is disabled " +
               "for this surface. Pass --ai to enable.\n",
           );
@@ -361,13 +362,13 @@ export default defineCommand({
         // Fetch the document to be mutated
         const resolveResult = await app.corpusService.resolve(args.id);
         if (!resolveResult.ok) {
-          process.stderr.write(formatErrorFor(inv, resolveResult.error) + "\n");
+          inv.io.stderr.write(formatErrorFor(inv, resolveResult.error) + "\n");
           setExitCode(exitCode(resolveResult.error));
           return;
         }
         const getResult = await app.corpusService.get(resolveResult.value);
         if (!getResult.ok) {
-          process.stderr.write(formatErrorFor(inv, getResult.error) + "\n");
+          inv.io.stderr.write(formatErrorFor(inv, getResult.error) + "\n");
           setExitCode(exitCode(getResult.error));
           return;
         }
@@ -377,7 +378,7 @@ export default defineCommand({
         // own gate then refuses its output. A correction cannot reach here (rejected above), so no exit applies.
         const rewriteGate = await app.corpusService.assertAiRewriteAllowed(doc);
         if (!rewriteGate.ok) {
-          process.stderr.write(formatErrorFor(inv, rewriteGate.error) + "\n");
+          inv.io.stderr.write(formatErrorFor(inv, rewriteGate.error) + "\n");
           setExitCode(exitCode(rewriteGate.error));
           return;
         }
@@ -400,7 +401,7 @@ export default defineCommand({
           }
 
           if (showSpinner) {
-            process.stderr.write(`⏳ Regenerating via ${aiService.activeProviderName}...\n`);
+            inv.io.stderr.write(`⏳ Regenerating via ${aiService.activeProviderName}...\n`);
           }
 
           const aiResult = await aiService.regenerateContent(doc, {
@@ -410,7 +411,7 @@ export default defineCommand({
           });
 
           if (!aiResult.ok) {
-            process.stderr.write(formatErrorFor(inv, aiResult.error) + "\n");
+            inv.io.stderr.write(formatErrorFor(inv, aiResult.error) + "\n");
             setExitCode(exitCode(aiResult.error));
             return;
           }
@@ -424,14 +425,14 @@ export default defineCommand({
           // Warn about content truncation (SPEC-019 §9.4)
           const maxChars = aiService.refineMaxInputChars;
           if (doc.content.length > maxChars) {
-            process.stderr.write(
+            inv.io.stderr.write(
               `Warning: document content (${doc.content.length} chars) exceeds the ` +
                 `refine limit (${maxChars} chars) and will be truncated.\n`,
             );
           }
 
           if (showSpinner) {
-            process.stderr.write(`⏳ Refining via ${aiService.activeProviderName}...\n`);
+            inv.io.stderr.write(`⏳ Refining via ${aiService.activeProviderName}...\n`);
           }
 
           const aiResult = await aiService.refineContent(doc, userPrompt, {
@@ -440,7 +441,7 @@ export default defineCommand({
           });
 
           if (!aiResult.ok) {
-            process.stderr.write(formatErrorFor(inv, aiResult.error) + "\n");
+            inv.io.stderr.write(formatErrorFor(inv, aiResult.error) + "\n");
             setExitCode(exitCode(aiResult.error));
             return;
           }
@@ -450,7 +451,7 @@ export default defineCommand({
         }
 
         if (showSpinner) {
-          process.stderr.write(
+          inv.io.stderr.write(
             `✓ AI generated ${newContent.length} chars in ${(durationMs / 1000).toFixed(1)}s\n`,
           );
         }
@@ -466,18 +467,18 @@ export default defineCommand({
         );
 
         if (!setResult.ok) {
-          process.stderr.write(formatErrorFor(inv, setResult.error) + "\n");
+          inv.io.stderr.write(formatErrorFor(inv, setResult.error) + "\n");
           setExitCode(exitCode(setResult.error));
           return;
         }
 
         const updatedDoc = setResult.value;
         if (args.json) {
-          console.log(JSON.stringify({ ok: true, data: updatedDoc }, null, 2));
+          printLine(inv.io.stdout, JSON.stringify({ ok: true, data: updatedDoc }, null, 2));
         } else {
-          console.log(`Updated ${updatedDoc.slug} → v${updatedDoc.version}`);
+          printLine(inv.io.stdout, `Updated ${updatedDoc.slug} → v${updatedDoc.version}`);
           if (prevStatus === "approved" && updatedDoc.status === "draft") {
-            console.log(APPROVED_DEMOTION_ADVISORY);
+            printLine(inv.io.stdout, APPROVED_DEMOTION_ADVISORY);
           }
         }
         return;
@@ -495,7 +496,7 @@ export default defineCommand({
         try {
           fileContent = readFileSync(args["content-file"], "utf8");
         } catch (e) {
-          process.stderr.write(
+          inv.io.stderr.write(
             `Error: cannot read --content-file '${args["content-file"]}': ${e instanceof Error ? e.message : String(e)}\n`,
           );
           setExitCode(4);
@@ -516,27 +517,27 @@ export default defineCommand({
       if (args.kind !== undefined) {
         const resolveForKind = await app.corpusService.resolve(args.id);
         if (!resolveForKind.ok) {
-          process.stderr.write(formatErrorFor(inv, resolveForKind.error) + "\n");
+          inv.io.stderr.write(formatErrorFor(inv, resolveForKind.error) + "\n");
           setExitCode(exitCode(resolveForKind.error));
           return;
         }
         const getForKind = await app.corpusService.get(resolveForKind.value);
         if (!getForKind.ok) {
-          process.stderr.write(formatErrorFor(inv, getForKind.error) + "\n");
+          inv.io.stderr.write(formatErrorFor(inv, getForKind.error) + "\n");
           setExitCode(exitCode(getForKind.error));
           return;
         }
         const targetDoc = getForKind.value.doc;
 
         if (targetDoc.type !== "spec") {
-          process.stderr.write(
+          inv.io.stderr.write(
             `Error: --kind is only valid for type 'spec' (got '${targetDoc.type}').\n`,
           );
           exitCli(2);
         }
 
         if (!SPEC_KINDS.includes(args.kind as SpecKind)) {
-          process.stderr.write(
+          inv.io.stderr.write(
             `Error: Invalid --kind '${args.kind}'.\n` +
               `  Valid values: ${SPEC_KINDS.join(" | ")}\n`,
           );
@@ -555,26 +556,26 @@ export default defineCommand({
       if (args["decision-status"] !== undefined) {
         const checkResult = checkDecisionStatusValue(args["decision-status"]);
         if (checkResult.kind === "refused") {
-          process.stderr.write(formatDecisionStatusRefusal(checkResult) + "\n");
+          inv.io.stderr.write(formatDecisionStatusRefusal(checkResult) + "\n");
           exitCli(2);
         }
 
         const resolveForDecisionStatus = await app.corpusService.resolve(args.id);
         if (!resolveForDecisionStatus.ok) {
-          process.stderr.write(formatErrorFor(inv, resolveForDecisionStatus.error) + "\n");
+          inv.io.stderr.write(formatErrorFor(inv, resolveForDecisionStatus.error) + "\n");
           setExitCode(exitCode(resolveForDecisionStatus.error));
           return;
         }
         const getForDecisionStatus = await app.corpusService.get(resolveForDecisionStatus.value);
         if (!getForDecisionStatus.ok) {
-          process.stderr.write(formatErrorFor(inv, getForDecisionStatus.error) + "\n");
+          inv.io.stderr.write(formatErrorFor(inv, getForDecisionStatus.error) + "\n");
           setExitCode(exitCode(getForDecisionStatus.error));
           return;
         }
         const targetDocForDecisionStatus = getForDecisionStatus.value.doc;
 
         if (targetDocForDecisionStatus.type !== "adr") {
-          process.stderr.write(
+          inv.io.stderr.write(
             `Error: --decision-status is only valid for type 'adr' (got '${targetDocForDecisionStatus.type}').\n`,
           );
           setExitCode(4);
@@ -592,12 +593,12 @@ export default defineCommand({
         >;
         if (existingExtraForDecisionStatus["decision_status"] === ACCEPTED_DECISION_STATUS_VALUE) {
           if (args.json) {
-            console.log(JSON.stringify({ ok: true, data: targetDocForDecisionStatus }, null, 2));
+            printLine(inv.io.stdout, JSON.stringify({ ok: true, data: targetDocForDecisionStatus }, null, 2));
           } else {
-            console.log(
+            printLine(inv.io.stdout, 
               `Updated ${targetDocForDecisionStatus.slug} → v${targetDocForDecisionStatus.version}`,
             );
-            console.log("  (decision_status already 'accepted' — no change)");
+            printLine(inv.io.stdout, "  (decision_status already 'accepted' — no change)");
           }
           return;
         }
@@ -619,13 +620,13 @@ export default defineCommand({
         // No flags provided — open editor pre-populated with current content (AC-SET-1)
         const resolvedId = await app.corpusService.resolve(args.id);
         if (!resolvedId.ok) {
-          process.stderr.write(formatErrorFor(inv, resolvedId.error) + "\n");
+          inv.io.stderr.write(formatErrorFor(inv, resolvedId.error) + "\n");
           setExitCode(exitCode(resolvedId.error));
           return;
         }
         const getResult = await app.corpusService.get(resolvedId.value);
         if (!getResult.ok) {
-          process.stderr.write(formatErrorFor(inv, getResult.error) + "\n");
+          inv.io.stderr.write(formatErrorFor(inv, getResult.error) + "\n");
           setExitCode(exitCode(getResult.error));
           return;
         }
@@ -639,7 +640,7 @@ export default defineCommand({
           tmpDir: inv.paths.tmpDir,
         });
         if (!editorResult.ok) {
-          process.stderr.write(formatErrorFor(inv, editorResult.error) + "\n");
+          inv.io.stderr.write(formatErrorFor(inv, editorResult.error) + "\n");
           setExitCode(exitCode(editorResult.error));
           return;
         }
@@ -648,7 +649,7 @@ export default defineCommand({
 
         // If the content is unchanged, skip the service call entirely (AC-SET-1)
         if (newContent === currentDoc.content) {
-          process.stdout.write("no changes\n");
+          inv.io.stdout.write("no changes\n");
           return;
         }
 
@@ -666,13 +667,13 @@ export default defineCommand({
       ) {
         const resolveForDemotion = await app.corpusService.resolve(args.id);
         if (!resolveForDemotion.ok) {
-          process.stderr.write(formatErrorFor(inv, resolveForDemotion.error) + "\n");
+          inv.io.stderr.write(formatErrorFor(inv, resolveForDemotion.error) + "\n");
           setExitCode(exitCode(resolveForDemotion.error));
           return;
         }
         const getForDemotion = await app.corpusService.get(resolveForDemotion.value);
         if (!getForDemotion.ok) {
-          process.stderr.write(formatErrorFor(inv, getForDemotion.error) + "\n");
+          inv.io.stderr.write(formatErrorFor(inv, getForDemotion.error) + "\n");
           setExitCode(exitCode(getForDemotion.error));
           return;
         }
@@ -685,7 +686,7 @@ export default defineCommand({
       });
 
       if (!result.ok) {
-        process.stderr.write(formatErrorFor(inv, result.error) + "\n");
+        inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
         setExitCode(exitCode(result.error));
         return;
       }
@@ -695,23 +696,23 @@ export default defineCommand({
       // lines. Failures/warnings go to stderr in BOTH modes; success lines print after the update line.
       const issueCloseItems = (doc as { issueClose?: IssueCloseItem[] }).issueClose;
       if (args.json) {
-        console.log(JSON.stringify({ ok: true, data: doc }, null, 2));
-        emitIssueCloseItems(issueCloseItems, { json: true });
+        printLine(inv.io.stdout, JSON.stringify({ ok: true, data: doc }, null, 2));
+        emitIssueCloseItems(inv.io, issueCloseItems, { json: true });
       } else {
-        console.log(`Updated ${doc.slug} → v${doc.version}`);
-        emitIssueCloseItems(issueCloseItems, { json: false });
+        printLine(inv.io.stdout, `Updated ${doc.slug} → v${doc.version}`);
+        emitIssueCloseItems(inv.io, issueCloseItems, { json: false });
         if (priorStatusForDemotionAdvisory === "approved" && doc.status === "draft") {
-          console.log(APPROVED_DEMOTION_ADVISORY);
+          printLine(inv.io.stdout, APPROVED_DEMOTION_ADVISORY);
         }
         if (correctionOpt !== undefined) {
-          console.log(`  (correction recorded: ${correctionOpt.reason})`);
+          printLine(inv.io.stdout, `  (correction recorded: ${correctionOpt.reason})`);
         }
         // reason: SPEC-068 D5 — when --slug renamed the doc, the old slug stops
         // resolving immediately, but any FREE-TEXT reference to it inside other
         // docs' bodies (e.g. "see spec-foo") is NOT rewritten; link-table edges
         // key on the doc's immutable ULID and are unaffected either way.
         if (args.slug !== undefined) {
-          console.log(
+          printLine(inv.io.stdout, 
             `  (note: free-text references to the old slug in other docs' bodies are not rewritten)`,
           );
         }
@@ -729,14 +730,14 @@ export default defineCommand({
           // "fresh claim" when no floor); failures are printed too, never silent.
           const cascade = (doc as { cascade?: PlanCloseCascadeResult }).cascade;
           if (cascade !== undefined) {
-            for (const a of cascade.archived) console.log(`Cascade archived: ${a.slug}`);
+            for (const a of cascade.archived) printLine(inv.io.stdout, `Cascade archived: ${a.slug}`);
             for (const s of cascade.skipped) {
-              console.log(`Cascade skipped: ${s.slug} (${s.floor ?? "fresh claim"})`);
+              printLine(inv.io.stdout, `Cascade skipped: ${s.slug} (${s.floor ?? "fresh claim"})`);
             }
-            for (const f of cascade.failed) console.log(`Cascade failed: ${f.slug} (${f.reason})`);
+            for (const f of cascade.failed) printLine(inv.io.stdout, `Cascade failed: ${f.slug} (${f.reason})`);
           }
           const exemptionNotice = formatAttestationExemptionNotice(doc.extra);
-          if (exemptionNotice !== null) console.log(exemptionNotice);
+          if (exemptionNotice !== null) printLine(inv.io.stdout, exemptionNotice);
           // reason: task-assert-the-plan-close-vacuity-discriminator-on-the-render
           // (spec-governance-visibility-an-armed-gate-that-vacuously-passes
           // §AC-GV-6) — `CorpusService.set`'s plan-close block writes this key
@@ -749,7 +750,7 @@ export default defineCommand({
           // the doc that was just persisted, never re-derived.
           const vacuityNotice = doc.extra[PLAN_CLOSE_VACUITY_NOTICE_FIELD];
           if (typeof vacuityNotice === "string") {
-            console.log(`  (${vacuityNotice})`);
+            printLine(inv.io.stdout, `  (${vacuityNotice})`);
           }
         }
       }

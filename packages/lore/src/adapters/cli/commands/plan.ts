@@ -67,6 +67,8 @@ import {
 } from "../plan-exempt-validation.js";
 import type { PlanExemptionService } from "../../../service/plan-exemption-service.js";
 import { invocationOf } from "../command-invocation.js";
+import { printLine } from "../output.js";
+import type { CliIo } from "../output.js";
 
 /**
  * `App.planExemptionService` is typed optional only to keep pre-existing
@@ -84,8 +86,8 @@ function requirePlanExemptionService(app: { planExemptionService?: PlanExemption
 }
 
 /** Writes a usage refusal to stderr and sets the SPEC-003 §5 usage exit code. */
-function refuse(message: string): void {
-  process.stderr.write(message + "\n");
+function refuse(io: CliIo, message: string): void {
+  io.stderr.write(message + "\n");
   setExitCode(PLAN_EXEMPT_USAGE_EXIT_CODE);
 }
 
@@ -128,7 +130,7 @@ export default defineCommand({
         const inv = invocationOf(context);
         const checked = checkExemptAttestationArgs({ reason: args.reason, kind: args.kind });
         if (!checked.ok) {
-          refuse(checked.message);
+          refuse(inv.io, checked.message);
           return;
         }
 
@@ -136,29 +138,29 @@ export default defineCommand({
         const { loadLoreApp } = await import("../loader.js");
         const { app } = loadLoreApp({ inv });
         try {
-          const by = resolveActor(undefined, inv.env, inv.cwd, inv.user);
+          const by = resolveActor(inv.io, undefined, inv.env, inv.cwd, inv.user);
           const result = await requirePlanExemptionService(app).exemptAttestation(
             args.plan as string,
             { reason: checked.reason, kind: checked.kind, by },
           );
 
           if (!result.ok) {
-            if (args.json) console.log(JSON.stringify({ ok: false, error: result.error }, null, 2));
-            else process.stderr.write(formatErrorFor(inv, result.error) + "\n");
+            if (args.json) printLine(inv.io.stdout, JSON.stringify({ ok: false, error: result.error }, null, 2));
+            else inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
             setExitCode(exitCode(result.error));
             return;
           }
 
           if (args.json) {
-            console.log(JSON.stringify({ ok: true, data: result.value }, null, 2));
+            printLine(inv.io.stdout, JSON.stringify({ ok: true, data: result.value }, null, 2));
             return;
           }
 
-          console.log(
+          printLine(inv.io.stdout, 
             `Recorded plan-close ATTESTATION EXEMPTION [${result.value.kind}] for ` +
               `${args.plan as string}: ${result.value.reason}`,
           );
-          console.log(`  declared by ${result.value.by} at ${result.value.at}`);
+          printLine(inv.io.stdout, `  declared by ${result.value.by} at ${result.value.at}`);
         } finally {
           app.close();
         }
@@ -176,36 +178,36 @@ export default defineCommand({
         const inv = invocationOf(context);
         const checked = checkExemptAssessmentFreshnessArgs({ reason: args.reason });
         if (!checked.ok) {
-          refuse(checked.message);
+          refuse(inv.io, checked.message);
           return;
         }
 
         const { loadLoreApp } = await import("../loader.js");
         const { app } = loadLoreApp({ inv });
         try {
-          const by = resolveActor(undefined, inv.env, inv.cwd, inv.user);
+          const by = resolveActor(inv.io, undefined, inv.env, inv.cwd, inv.user);
           const result = await requirePlanExemptionService(app).exemptAssessmentFreshness(
             args.plan as string,
             { reason: checked.reason, by },
           );
 
           if (!result.ok) {
-            if (args.json) console.log(JSON.stringify({ ok: false, error: result.error }, null, 2));
-            else process.stderr.write(formatErrorFor(inv, result.error) + "\n");
+            if (args.json) printLine(inv.io.stdout, JSON.stringify({ ok: false, error: result.error }, null, 2));
+            else inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
             setExitCode(exitCode(result.error));
             return;
           }
 
           if (args.json) {
-            console.log(JSON.stringify({ ok: true, data: result.value }, null, 2));
+            printLine(inv.io.stdout, JSON.stringify({ ok: true, data: result.value }, null, 2));
             return;
           }
 
-          console.log(
+          printLine(inv.io.stdout, 
             `Recorded plan-close ASSESSMENT-FRESHNESS EXEMPTION for ` +
               `${args.plan as string}: ${result.value.reason}`,
           );
-          console.log(`  declared by ${result.value.by} at ${result.value.at}`);
+          printLine(inv.io.stdout, `  declared by ${result.value.by} at ${result.value.at}`);
         } finally {
           app.close();
         }

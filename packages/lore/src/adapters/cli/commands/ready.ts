@@ -60,6 +60,7 @@ import type { AnchorConflict } from "../../../service/task-workflow-service.js";
 import { renderFileAnchorAdvisory } from "../../../service/anchor-resolution.js";
 import { buildFileAnchorProbeContext } from "../../real-fs-probe.js";
 import { invocationOf } from "../command-invocation.js";
+import { printLine } from "../output.js";
 
 /** The literal set `ReadyRecord.latest_evidence.result` can hold (@lore/core task-workflow.ts). */
 type EvidenceResult = NonNullable<ReadyRecord["latest_evidence"]>["result"];
@@ -204,12 +205,12 @@ export default defineCommand({
     const hasAdhoc = args.adhoc === true;
 
     if (hasPlan && hasAdhoc) {
-      process.stderr.write("Error: <plan> and --adhoc are mutually exclusive. Pass only one.\n");
+      inv.io.stderr.write("Error: <plan> and --adhoc are mutually exclusive. Pass only one.\n");
       setExitCode(2);
       return;
     }
     if (!hasPlan && !hasAdhoc) {
-      process.stderr.write("Error: a plan document ID or slug is required unless --adhoc is passed.\n");
+      inv.io.stderr.write("Error: a plan document ID or slug is required unless --adhoc is passed.\n");
       setExitCode(2);
       return;
     }
@@ -219,22 +220,22 @@ export default defineCommand({
       if (hasAdhoc) {
         const adhocResult = await app.taskWorkflowService.readyAdhoc();
         if (!adhocResult.ok) {
-          process.stderr.write(formatErrorFor(inv, adhocResult.error) + "\n");
+          inv.io.stderr.write(formatErrorFor(inv, adhocResult.error) + "\n");
           setExitCode(exitCode(adhocResult.error));
           return;
         }
         const records = adhocResult.value;
 
         if (args.json) {
-          console.log(JSON.stringify({ ok: true, data: { adhoc: { records } } }, null, 2));
+          printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { adhoc: { records } } }, null, 2));
           return;
         }
 
         if (records.length === 0) {
-          console.log("No open ad-hoc tasks.");
+          printLine(inv.io.stdout, "No open ad-hoc tasks.");
         } else {
-          console.log(`Ad-hoc tasks (${records.length}):`);
-          for (const record of records) console.log(formatReadyLine(record));
+          printLine(inv.io.stdout, `Ad-hoc tasks (${records.length}):`);
+          for (const record of records) printLine(inv.io.stdout, formatReadyLine(record));
         }
         return;
       }
@@ -251,7 +252,7 @@ export default defineCommand({
       );
 
       if (!result.ok) {
-        process.stderr.write(formatErrorFor(inv, result.error) + "\n");
+        inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
         setExitCode(exitCode(result.error));
         return;
       }
@@ -260,16 +261,16 @@ export default defineCommand({
       const records = report.records;
 
       if (args.json) {
-        console.log(JSON.stringify({ ok: true, data: { ready: report } }, null, 2));
+        printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { ready: report } }, null, 2));
         return;
       }
 
       if (records.length === 0) {
-        console.log("No tasks found under this plan.");
+        printLine(inv.io.stdout, "No tasks found under this plan.");
       } else {
         const hasPhases = records.some((r) => r.phase !== undefined);
         if (!hasPhases) {
-          for (const record of records) console.log(formatReadyLine(record));
+          for (const record of records) printLine(inv.io.stdout, formatReadyLine(record));
         } else {
           const byPhase = new Map<string, ReadyRecord[]>();
           const unphased: ReadyRecord[] = [];
@@ -284,33 +285,33 @@ export default defineCommand({
           }
 
           for (const [phase, group] of byPhase) {
-            console.log(`Phase: ${phase}`);
-            for (const record of group) console.log(formatReadyLine(record));
+            printLine(inv.io.stdout, `Phase: ${phase}`);
+            for (const record of group) printLine(inv.io.stdout, formatReadyLine(record));
           }
           if (unphased.length > 0) {
-            console.log("(unphased)");
-            for (const record of unphased) console.log(formatReadyLine(record));
+            printLine(inv.io.stdout, "(unphased)");
+            for (const record of unphased) printLine(inv.io.stdout, formatReadyLine(record));
           }
         }
 
         if (records.some((r) => r.upstream_unapproved === true)) {
-          console.log("⚠ Parent spec is not approved — readiness above is advisory only.");
+          printLine(inv.io.stdout, "⚠ Parent spec is not approved — readiness above is advisory only.");
         }
       }
 
       // SPEC-042 D7 — sessions + anchor-conflict advisories (plan-scoped).
-      console.log("");
-      console.log(`Sessions (${report.sessions.length}):`);
+      printLine(inv.io.stdout, "");
+      printLine(inv.io.stdout, `Sessions (${report.sessions.length}):`);
       if (report.sessions.length > 0) {
-        for (const session of report.sessions) console.log(formatSessionLine(session));
+        for (const session of report.sessions) printLine(inv.io.stdout, formatSessionLine(session));
       } else {
-        console.log("  (none)");
+        printLine(inv.io.stdout, "  (none)");
       }
 
       if (report.anchor_conflicts.length > 0) {
-        console.log("");
-        console.log(`⚠ Anchor conflicts (${report.anchor_conflicts.length}):`);
-        for (const conflict of report.anchor_conflicts) console.log(formatAnchorConflictLine(conflict));
+        printLine(inv.io.stdout, "");
+        printLine(inv.io.stdout, `⚠ Anchor conflicts (${report.anchor_conflicts.length}):`);
+        for (const conflict of report.anchor_conflicts) printLine(inv.io.stdout, formatAnchorConflictLine(conflict));
       }
 
       // task-a-mistyped-task-file-anchor-is-stored-and-consulted — non-resolving
@@ -324,8 +325,8 @@ export default defineCommand({
         rowLabel: (row) => `${row.task_slug} → ${row.anchor}`,
       });
       if (anchorAdvisory.length > 0) {
-        console.log("");
-        for (const line of anchorAdvisory) console.log(line);
+        printLine(inv.io.stdout, "");
+        for (const line of anchorAdvisory) printLine(inv.io.stdout, line);
       }
     } finally {
       app.close();

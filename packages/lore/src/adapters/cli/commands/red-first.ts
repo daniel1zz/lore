@@ -36,6 +36,7 @@ import { setExitCode } from "../run-scope.js";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatErrorFor, resolveActor } from "../utils.js";
 import { invocationOf } from "../command-invocation.js";
+import { printLine } from "../output.js";
 
 export default defineCommand({
   meta: {
@@ -58,27 +59,27 @@ export default defineCommand({
     const inv = invocationOf(context);
     const { app } = loadLoreApp({ inv });
     try {
-      const by = resolveActor(undefined, inv.env, inv.cwd, inv.user);
+      const by = resolveActor(inv.io, undefined, inv.env, inv.cwd, inv.user);
       const result = await app.taskWorkflowService.declareRedFirst(args.task as string, {
         by,
         source: app.callerSurface,
       });
 
       if (!result.ok) {
-        if (args.json) console.log(JSON.stringify({ ok: false, error: result.error }, null, 2));
-        else process.stderr.write(formatErrorFor(inv, result.error) + "\n");
+        if (args.json) printLine(inv.io.stdout, JSON.stringify({ ok: false, error: result.error }, null, 2));
+        else inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
         setExitCode(exitCode(result.error));
         return;
       }
 
       const doc = result.value;
       if (args.json) {
-        console.log(JSON.stringify({ ok: true, data: doc }, null, 2));
+        printLine(inv.io.stdout, JSON.stringify({ ok: true, data: doc }, null, 2));
         return;
       }
 
-      console.log(`Declared red-first test discipline on ${doc.slug} (v${doc.version})`);
-      console.log(
+      printLine(inv.io.stdout, `Declared red-first test discipline on ${doc.slug} (v${doc.version})`);
+      printLine(inv.io.stdout, 
         `  \`lore done ${doc.slug}\` now also requires an "expected-fail"/"fail" evidence ` +
           `row alongside the pre-existing passing one.`,
       );

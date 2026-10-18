@@ -77,6 +77,7 @@
 
 import type { ArgsDef, CommandContext, CommandDef, Resolvable } from "citty";
 import { exitCli } from "./run-scope.js";
+import { invocationOf } from "./command-invocation.js";
 
 // ─── Declared-flag derivation (mirrors citty's own resolveArgs) ────────────
 
@@ -394,10 +395,12 @@ export async function wrapCommandStrict(cmd: CommandDef<any>, commandPath: strin
   if (typeof cmd.run === "function") {
     const originalRun = cmd.run;
     wrapped.run = async (context: CommandContext) => {
+      // reason: `deliverInvocation` (index.ts) wraps OUTSIDE this wrapper, so the context here already carries `inv`.
+      const { io } = invocationOf(context);
       const argsDef = (await resolveMaybe(context.cmd.args)) ?? {};
       const unknownFlag = findUnknownFlag(context.rawArgs, argsDef);
       if (unknownFlag !== null) {
-        process.stderr.write(
+        io.stderr.write(
           `Error: Unknown option: ${unknownFlag}\n` + `  Run \`${commandPath} --help\` to see valid options.\n`,
         );
         exitCli(2);
@@ -410,7 +413,7 @@ export async function wrapCommandStrict(cmd: CommandDef<any>, commandPath: strin
       if (singleDashViolation !== null) {
         const suggestionLine =
           singleDashViolation.suggestion !== null ? `  Did you mean ${singleDashViolation.suggestion}?\n` : "";
-        process.stderr.write(
+        io.stderr.write(
           `Error: Unknown option: ${singleDashViolation.token}\n` +
             suggestionLine +
             `  Run \`${commandPath} --help\` to see valid options.\n`,

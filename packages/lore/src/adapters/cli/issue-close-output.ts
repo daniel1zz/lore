@@ -12,18 +12,20 @@
  */
 
 import type { IssueCloseItem } from "../../service/issue-close-on-archive.js";
+import { printLine } from "./output.js";
+import type { CliIo } from "./output.js";
 
 /**
  * @param items - the lines a service returned (`undefined` when no archive step ran)
  * @param opts - `json`: true when stdout is reserved for a JSON document
  */
-export function emitIssueCloseItems(items: readonly IssueCloseItem[] | undefined, opts: { json: boolean }): void {
+export function emitIssueCloseItems(io: CliIo, items: readonly IssueCloseItem[] | undefined, opts: { json: boolean }): void {
   if (items === undefined) return;
   for (const item of items) {
     if (item.stream === "stderr") {
-      process.stderr.write(`${item.message}\n`);
+      io.stderr.write(`${item.message}\n`);
     } else if (!opts.json) {
-      console.log(item.message); // CLI surface
+      printLine(io.stdout, item.message); // CLI surface
     }
   }
 }

@@ -153,6 +153,7 @@ import { ReceiptLogV2, type ReceiptV2Entry } from "../../service/receipt-log-v2.
 import { readGithubIssueRef, type GithubIssueRef } from "../../service/resolution-projector.js";
 import { toIssueTaskInput } from "../../service/issue-task-shaping.js";
 import { findLoreDbPath, type CorpusLocator } from "./corpus-resolution.js";
+import type { CliIo } from "./output.js";
 
 /**
  * Resolves the CALLING corpus's own root — the directory containing
@@ -166,8 +167,8 @@ import { findLoreDbPath, type CorpusLocator } from "./corpus-resolution.js";
  *   when no `.lore/lore.db` is discoverable from `cwd` — see this module's
  *   header for why this is still safe to call from an MCP tool handler.
  */
-export function resolveConsumerCorpusRoot(locator: CorpusLocator): string {
-  const dbPath = findLoreDbPath(locator);
+export function resolveConsumerCorpusRoot(io: CliIo, locator: CorpusLocator): string {
+  const dbPath = findLoreDbPath(io, locator);
   return dirname(dirname(dbPath));
 }
 
@@ -411,11 +412,11 @@ export interface GithubIssueListing {
  *   `err(...)` on the first failing call: `verifyTarget()`'s auth/target
  *   failure surfaces BEFORE `listIssues()` is ever attempted.
  */
-export async function resolveGithubIssueListing(
+export async function resolveGithubIssueListing(io: CliIo, 
   cfg: GithubUpstreamCfg,
   locator: CorpusLocator,
 ): Promise<Result<GithubIssueListing, LoreError>> {
-  const receiptsPath = join(resolveConsumerCorpusRoot(locator), ".lore", RECEIPT_LOG_V2_FILENAME);
+  const receiptsPath = join(resolveConsumerCorpusRoot(io, locator), ".lore", RECEIPT_LOG_V2_FILENAME);
   const runner = new GhRunner({ execFile: createNodeGhExecFile(), env: locator.env });
   const port = new GitHubIntakePort({ runner, repo: cfg.repo, receiptsPath });
 
@@ -460,12 +461,12 @@ export async function resolveGithubIssueListing(
  *   issue, in listing order ({@link joinListing}'s own contract); `err(...)`
  *   on the first failing `gh`/store call
  */
-export async function resolveGithubJoinedRows(
+export async function resolveGithubJoinedRows(io: CliIo, 
   corpusService: CorpusService,
   cfg: GithubUpstreamCfg,
   locator: CorpusLocator,
 ): Promise<Result<{ repoId: number; rows: readonly GithubIssueRow[] }, LoreError>> {
-  const listingResult = await resolveGithubIssueListing(cfg, locator);
+  const listingResult = await resolveGithubIssueListing(io, cfg, locator);
   if (!listingResult.ok) return listingResult;
   const { issues, repoId } = listingResult.value;
 

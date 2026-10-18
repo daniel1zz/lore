@@ -29,7 +29,7 @@ export default defineCommand({
   async run(context) {
     const { args } = context;
     const inv = invocationOf(context);
-    const dbPath = findLoreDbPath(inv);
+    const dbPath = findLoreDbPath(inv.io, inv);
     const code = await runDecideFlow(
       inv,
       {

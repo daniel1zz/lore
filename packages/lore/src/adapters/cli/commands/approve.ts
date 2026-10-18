@@ -16,6 +16,7 @@ import { exitCode, formatErrorFor, resolveActor } from "../utils.js";
 import { runCalibrationHook } from "../../../flows/calibration-hook.js";
 import type { DocId } from "@lore/core";
 import { invocationOf } from "../command-invocation.js";
+import { printLine } from "../output.js";
 
 export default defineCommand({
   meta: {
@@ -58,7 +59,7 @@ export default defineCommand({
     const inv = invocationOf(context);
     const { app } = loadLoreApp({ inv });
     try {
-      const reviewer = resolveActor(undefined, inv.env, inv.cwd, inv.user);
+      const reviewer = resolveActor(inv.io, undefined, inv.env, inv.cwd, inv.user);
       const result = await app.reviewService.approve(args.id as DocId, {
         reviewer,
         ...(typeof args["override-judgment"] === "string"
@@ -68,7 +69,7 @@ export default defineCommand({
       });
 
       if (!result.ok) {
-        process.stderr.write(formatErrorFor(inv, result.error) + "\n");
+        inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
         setExitCode(exitCode(result.error));
         return;
       }
@@ -83,7 +84,7 @@ export default defineCommand({
       // (the common case: non-plan approval, reachable plan, or no advisory
       // dependency wired) prints nothing at all.
       for (const advisory of doc.reachability_advisories ?? []) {
-        process.stderr.write(`${advisory}\n`);
+        inv.io.stderr.write(`${advisory}\n`);
       }
 
       // reason: ReviewService.approve() bumps doc.version by 1 as part of the
@@ -99,9 +100,9 @@ export default defineCommand({
       });
 
       if (args.json) {
-        console.log(JSON.stringify({ ok: true, data: doc }, null, 2));
+        printLine(inv.io.stdout, JSON.stringify({ ok: true, data: doc }, null, 2));
       } else {
-        console.log(`Approved ${doc.slug} → status: approved (v${doc.version})`);
+        printLine(inv.io.stdout, `Approved ${doc.slug} → status: approved (v${doc.version})`);
       }
     } finally {
       app.close();
