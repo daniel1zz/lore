@@ -79,11 +79,8 @@ const EXIT_REPO_MISMATCH = 4;
  * TG-49), which a stdout-reading probe misreported as an unarmed environment and failed a whole test file.
  */
 export function assertChildrenInheritSandbox(spawn: ProbeSpawn = (cmd, args) => spawnSync(cmd, args, { encoding: "utf8" })): void {
-  const expectedRepo = process.env[REPO];
-  if (expectedRepo === undefined || expectedRepo === "") {
-    throw new Error(`test-isolation: this process has ${REPO}=${JSON.stringify(expectedRepo ?? null)}; the run's environment was never armed.`);
-  }
-  const script = `[ "$${MARKER}" = 1 ] || exit ${EXIT_MARKER_UNARMED}; [ "$${REPO}" = "$1" ] || exit ${EXIT_REPO_MISMATCH}`;
+  const expectedRepo = process.env[REPO] ?? "";
+  const script = `[ "$${MARKER}" = 1 ] || exit ${EXIT_MARKER_UNARMED}; [ -n "$${REPO}" ] && [ "$${REPO}" = "$1" ] || exit ${EXIT_REPO_MISMATCH}`;
   const probe = spawn("sh", ["-c", script, "sh", expectedRepo]);
   if (probe.error !== undefined) {
     throw new Error(`test-isolation: the child-environment probe failed to run: ${probe.error.message}`);
