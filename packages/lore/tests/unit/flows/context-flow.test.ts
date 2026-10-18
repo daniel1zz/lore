@@ -148,10 +148,14 @@ describe("runContextRefresh", () => {
     return { ...base, adoption: "enforce" as const };
   }
 
-  /** Grows `fs`'s tree by `count` distinct single-file top-level module directories (`m0000/x.ts`, `m0001/x.ts`, ...). */
+  /**
+   * Grows `fs`'s module index by `count` distinct top-level module directories that each carry a memory file
+   * (`m0000/CLAUDE.md`, ...): since spec-module-index-lists-only-folders-with-a-memory-file-managed only such
+   * folders get an index line.
+   */
   async function growModuleIndex(fs: InMemoryFsPort, count: number): Promise<void> {
     for (let i = 0; i < count; i++) {
-      await fs.writeFile(`m${String(i).padStart(4, "0")}/x.ts`, "x");
+      await fs.writeFile(`m${String(i).padStart(4, "0")}/CLAUDE.md`, "# m\n\n## Purpose\n\nx.\n");
     }
   }
 
@@ -166,9 +170,9 @@ describe("runContextRefresh", () => {
     const budgets = resolveMemoryFileBudgets(undefined);
     const enforced = enforcedBudgets(budgets);
     const lineFloor = Math.ceil(budgets.root.max_lines * budgets.evict_threshold_fraction);
-    // `renderModuleIndexBody` adds exactly one line per top-level module dir on
-    // top of the 15-line zero-module baseline (measured against current src).
-    const BASELINE_LINES = 15;
+    // `renderModuleIndexBody` adds exactly one line per memory-file module dir on top of a 20-line
+    // baseline once at least one module is listed (measured against current src).
+    const BASELINE_LINES = 20;
     const modulesForLines = (lines: number): number => lines - BASELINE_LINES;
 
     // Side A — one line under the floor: allowed (default budgets, i.e. warn).

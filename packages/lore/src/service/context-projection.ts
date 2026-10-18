@@ -35,6 +35,13 @@
  *     the Invariants section below for the exact boundary against a
  *     genuinely malformed fingerprint attempt, which still fails loud).
  *
+ *   - migrateLegacyAutoBlocks(content) — recognises the retired
+ *     `<!-- auto:module-index -->` / `<!-- auto:dynamic-context -->` blocks
+ *     (assets/skills/lore-init-context era), so a caller can hand
+ *     `spliceManagedSections` text where they are already gone: the first
+ *     block becomes the (empty) managed zone when none exists yet, every
+ *     other block is removed, hand text outside the blocks is untouched.
+ *
  * Invariants:
  *   - `next` is the FULL declarative section list for the zone on every
  *     call — a stored section id absent from `next` is dropped from the
@@ -298,6 +305,60 @@ export function parseManagedSections(content: string): Result<ParsedManagedSecti
  */
 export function renderManagedSections(facts: ManagedSectionsFacts): ManagedSection[] {
   return facts.sections;
+}
+
+// ─── migrateLegacyAutoBlocks ─────────────────────────────────────────────────
+
+/** The retired auto-block names recognised by {@link migrateLegacyAutoBlocks} (full marker text is `<!-- auto:<name> -->`). */
+const LEGACY_AUTO_BLOCK_NAMES = ["module-index", "dynamic-context"] as const;
+
+/** Result of {@link migrateLegacyAutoBlocks}. */
+export interface LegacyBlockMigration {
+  /** Content with every legacy block gone (see the function doc for where the zone lands). */
+  content: string;
+  /** Marker names (`auto:module-index`, ...) of the blocks that were migrated, one per block, grouped by name; empty = nothing to migrate. */
+  migrated: string[];
+}
+
+/**
+ * Replaces legacy `auto:module-index` / `auto:dynamic-context` blocks (open marker line through close
+ * marker, inclusive) so the managed zone supersedes them once (spec-module-index-lists-only-folders-
+ * with-a-memory-file-managed, AC-MI-2).
+ *
+ * When `content` has NO managed zone yet, the first block is replaced in place by an empty zone
+ * (`CLAUDE_MD_MARKER_START` + `CLAUDE_MD_MARKER_END`) that `spliceManagedSections` then fills; when a
+ * zone exists, every block is simply removed together with the one newline that ended its close marker.
+ * Every byte outside the blocks is preserved. A block with an open marker but no close marker is left
+ * untouched (it is hand text, not a recognisable block). Pure; idempotent (a second call finds nothing).
+ *
+ * @param content - Current memory-file text.
+ * @returns the migrated text plus the names of the migrated blocks.
+ */
+export function migrateLegacyAutoBlocks(content: string): LegacyBlockMigration {
+  let result = content;
+  const migrated: string[] = [];
+  let zonePlaced = content.includes(CLAUDE_MD_MARKER_START);
+
+  for (const name of LEGACY_AUTO_BLOCK_NAMES) {
+    const open = `<!-- auto:${name} -->`;
+    const close = `<!-- /auto:${name} -->`;
+    for (;;) {
+      const start = result.indexOf(open);
+      if (start === -1) break;
+      const closeIdx = result.indexOf(close, start + open.length);
+      if (closeIdx === -1) break;
+      const blockEnd = closeIdx + close.length;
+      migrated.push(`auto:${name}`);
+      if (!zonePlaced) {
+        result = `${result.slice(0, start)}${CLAUDE_MD_MARKER_START}\n${CLAUDE_MD_MARKER_END}${result.slice(blockEnd)}`;
+        zonePlaced = true;
+      } else {
+        const trailing = result.startsWith("\r\n", blockEnd) ? 2 : result.startsWith("\n", blockEnd) ? 1 : 0;
+        result = `${result.slice(0, start)}${result.slice(blockEnd + trailing)}`;
+      }
+    }
+  }
+  return { content: result, migrated };
 }
 
 // ─── spliceManagedSections ───────────────────────────────────────────────────

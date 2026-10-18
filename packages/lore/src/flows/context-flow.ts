@@ -126,6 +126,16 @@
  *     and `--force` (init-only) never bypasses `runContextRefresh`'s check
  *     either, since refresh has no `--force` option to bypass with.
  *
+ *   - Module index (spec-module-index-lists-only-folders-with-a-memory-file-managed, BR-882 modified):
+ *     the `module-index` section lists ONLY folders that carry a memory file (link + first Purpose
+ *     sentence, or "no Purpose section"), counts the rest in one line, and says so when the walk was
+ *     truncated. The managed sections carry the setup template's H2s (`## Module Index`, `## Finding
+ *     Live Project State`; the command table adds none, `## Commands` is hand-written) so refresh never loses a required heading.
+ *   - Legacy `auto:module-index` / `auto:dynamic-context` blocks are replaced by the managed zone on the
+ *     first init/refresh that sees them (`migrateLegacyAutoBlocks`), reported in `migratedLegacyBlocks`.
+ *   - `opts.check` (refresh only) computes the same plan and writes nothing: `report.check` names every
+ *     file a refresh would change and any ceiling breach; the CLI exits 1 unless both are empty.
+ *
  * Side-effect class: IO (exclusively via the injected `FsWritePort`)
  *
  * Source: spec-context-verb-family-two-zone-claude-md-anatomy-lore
@@ -138,7 +148,7 @@ import type { ContextConfigLayer, Fragment, FsWritePort, LoreError, MemoryFileBu
 import type { AdvisoryFinding } from "../service/claude-md-findings.js";
 import { collectContextFacts, type ContextFacts } from "../service/context-facts.js";
 import { runMemoryFileChecks } from "../service/claude-md-admission.js";
-import { spliceManagedSections, type ManagedSection, type SpliceResult } from "../service/context-projection.js";
+import { migrateLegacyAutoBlocks, spliceManagedSections, type ManagedSection, type SpliceResult } from "../service/context-projection.js";
 import { discoverFragments } from "../service/context-fragments/discover.js";
 import { expandFragments } from "../service/context-fragments/expand.js";
 import { LORE_CONTEXT_VARIABLES } from "../service/context-variables-registry.js";
@@ -223,6 +233,12 @@ export interface ContextRefreshOptions {
    * template. Needs the fragment deps (else VALIDATION_ERROR).
    */
   rulesOnly?: boolean;
+  /**
+   * When `true`, compute everything a refresh would do and write NOTHING: the report's `check` lists the
+   * differing files and any ceiling breach (the caller maps a non-empty result to exit 1). A missing
+   * CLAUDE.md is reported as differing rather than refused. Skips the compare-and-swap step (nothing to swap).
+   */
+  check?: boolean;
 }
 
 /** The dependency bundle every context-flow verb takes — see module header's "no config/store" invariant. */
@@ -267,6 +283,8 @@ export interface ContextInitReport {
   path: string;
   narrative: ContextNarrativeOutcome;
   sections: SpliceResult["perSection"];
+  /** Legacy auto-block markers (`auto:module-index`, ...) replaced by the managed zone in this call; empty when none. */
+  migratedLegacyBlocks: string[];
 }
 
 /** What refresh did with one lore rules file (D15). */
@@ -289,12 +307,24 @@ export interface RulesFileOutcome {
 /** Per-skill-folder outcome; `path` is the `SKILL.md` port path. Same states as rules files. */
 export type SkillDirOutcome = RulesFileOutcome;
 
+/** What `lore context refresh --check` found (spec-module-index-lists-only-folders-with-a-memory-file-managed, AC-MI-3). */
+export interface ContextRefreshCheck {
+  /** Port paths whose bytes differ from their refreshed content (or that a refresh would create/prune), in plan order. */
+  differing: string[];
+  /** The ceiling-breach message when the refreshed root CLAUDE.md would exceed its configured ceiling, else `null`. */
+  ceilingBreach: string | null;
+}
+
 /** Outcome of one {@link runContextRefresh} call. */
 export interface ContextRefreshReport {
   /** Path written: {@link CLAUDE_MD_PATH} (project scope) or the user rules dir `<home>/.claude/rules` (user scope). */
   path: string;
   /** Z1 managed-section outcomes; empty for scope "user" (it writes no CLAUDE.md). */
   sections: SpliceResult["perSection"];
+  /** Legacy auto-block markers (`auto:module-index`, ...) replaced by the managed zone in this call; empty when none (migration happens once). */
+  migratedLegacyBlocks: string[];
+  /** Present only for `opts.check`: what a real refresh would change (nothing was written); `null` otherwise. */
+  check: ContextRefreshCheck | null;
   /** One entry per lore rules file considered (selected or pruned); empty without fragment deps. */
   rules: RulesFileOutcome[];
   /** One entry per lore skill folder considered (selected or pruned); empty without fragment deps. */
@@ -311,15 +341,36 @@ export interface ContextRefreshReport {
 
 // ─── Rendering (facts -> ManagedSection[]) ──────────────────────────────────
 
-/** Renders the module-index section body from {@link ContextFacts.moduleIndex}. */
+/** Plural-aware count line for folders that have no memory file; `null` when there are none. */
+function renderWithoutMemoryFileLine(count: number): string | null {
+  if (count === 0) return null;
+  return count === 1
+    ? "1 folder has no memory file and is not listed."
+    : `${String(count)} folders have no memory file and are not listed.`;
+}
+
+/**
+ * Renders the module-index section body from {@link ContextFacts.memoryModules}: the `## Module Index`
+ * heading (the same H2 the setup template's managed block carries), one link line per folder that HAS a
+ * memory file (first sentence of its Purpose, or "no Purpose section"), one count line for the folders
+ * that do not, and a notice when the walk was truncated — never a silent drop (BR-882 modified).
+ */
 function renderModuleIndexBody(facts: ContextFacts): string {
-  if (facts.moduleIndex.length === 0) {
-    return "No nested module directories were discovered.";
+  const lines: string[] = ["## Module Index", ""];
+  if (facts.memoryModules.length === 0) {
+    lines.push("No folder has its own memory file yet.");
+  } else {
+    lines.push("Folders with their own memory file — read it before working there:", "");
+    for (const module of facts.memoryModules) {
+      lines.push(`- [\`${module.path}\`](${module.memoryFilePath}) — ${module.purpose ?? "no Purpose section"}`);
+    }
   }
-  const lines = facts.moduleIndex.map(
-    (entry) => `- \`${entry.path}\`${entry.hasMemoryFile ? " — has its own memory file" : " — no memory file yet"}`,
-  );
-  return ["Module index (auto-discovered):", ...lines].join("\n");
+  const withoutLine = renderWithoutMemoryFileLine(facts.modulesWithoutMemoryFile);
+  if (withoutLine !== null) lines.push("", withoutLine);
+  if (facts.walkTruncated) {
+    lines.push("", `Folder discovery stopped after ${String(facts.moduleIndex.length)} folders; deeper folders are neither listed nor counted.`);
+  }
+  return lines.join("\n");
 }
 
 /** Renders the command-table section body from {@link ContextFacts.commands}. */
@@ -328,6 +379,8 @@ function renderCommandTableBody(facts: ContextFacts): string {
   if (entries.length === 0) {
     return "No package.json scripts were discovered.";
   }
+  // reason: no `## Commands` heading here — the setup template's hand-written part already carries that
+  // required section and a second one fails the section check (`section_duplicate`).
   const lines = entries.map(([name, command]) => `- \`${name}\`: \`${command}\``);
   return ["Commands (from package.json scripts):", ...lines].join("\n");
 }
@@ -335,6 +388,7 @@ function renderCommandTableBody(facts: ContextFacts): string {
 /** Renders the governance-pointer section body — static pointer text, no facts needed. */
 function renderGovernancePointerBody(): string {
   return (
+    "## Finding Live Project State\n\n" +
     "Run `lore governance claude-md` for this project's memory-file content contract. The standing " +
     "corpus-workflow discipline lives in the lore-owned `.claude/rules/lore-*.md` files (written by " +
     "`lore context refresh`; inspect them with `lore fragments`)."
@@ -419,14 +473,15 @@ export async function runContextInit(
   const narrative: ContextNarrativeOutcome = existing !== null ? "existing" : opts.narrative !== undefined ? "generated" : "skeleton";
   const baseContent = existing !== null ? existing : (opts.narrative ?? SKELETON_NARRATIVE);
 
-  const spliceResult = spliceManagedSections(baseContent, sections);
+  const migration = migrateLegacyAutoBlocks(baseContent);
+  const spliceResult = spliceManagedSections(migration.content, sections);
   if (!spliceResult.ok) return spliceResult;
 
   const finalContent = ensureTrailingNewline(spliceResult.value.content);
   const written = await deps.fs.writeFile(CLAUDE_MD_PATH, finalContent);
   if (!written.ok) return written;
 
-  return ok({ path: CLAUDE_MD_PATH, narrative, sections: spliceResult.value.perSection });
+  return ok({ path: CLAUDE_MD_PATH, narrative, sections: spliceResult.value.perSection, migratedLegacyBlocks: migration.migrated });
 }
 
 // ─── Fragment pipeline (lore rules files, D15) ───────────────────────────────
@@ -766,9 +821,15 @@ export async function runContextRefresh(
   let sectionOutcomes: SpliceResult["perSection"] = [];
   let downgraded: AdvisoryFinding[] = [];
   let claudeMdRefusalMessage: string | null = null;
+  let migratedLegacyBlocks: string[] = [];
+  const checkMode = opts.check === true;
+  const differing: string[] = [];
   if (scope === "project" && !rulesOnly) {
     const existing = await deps.fs.readFile(CLAUDE_MD_PATH);
-    if (existing === null) {
+    if (existing === null && checkMode) {
+      // reason: --check must answer "is the repo refreshed?" — an absent CLAUDE.md is a clear no, not a usage error.
+      differing.push(CLAUDE_MD_PATH);
+    } else if (existing === null) {
       return err({
         code: "VALIDATION_ERROR",
         field: "path",
@@ -776,36 +837,51 @@ export async function runContextRefresh(
         value: CLAUDE_MD_PATH,
       });
     }
-    const factsResult = await collectContextFacts(deps.fs, root, budgets);
-    if (!factsResult.ok) return factsResult;
+    if (existing !== null) {
+      const migration = migrateLegacyAutoBlocks(existing);
+      migratedLegacyBlocks = migration.migrated;
+      const factsResult = await collectContextFacts(deps.fs, root, budgets);
+      if (!factsResult.ok) return factsResult;
 
-    const spliceResult = spliceManagedSections(existing, renderContextSections(factsResult.value));
-    if (!spliceResult.ok) return spliceResult;
-    const finalContent = ensureTrailingNewline(spliceResult.value.content);
-    sectionOutcomes = spliceResult.value.perSection;
+      const spliceResult = spliceManagedSections(migration.content, renderContextSections(factsResult.value));
+      if (!spliceResult.ok) return spliceResult;
+      const finalContent = ensureTrailingNewline(spliceResult.value.content);
+      sectionOutcomes = spliceResult.value.perSection;
 
-    // AC-CTX-8 pre-write admission — SSOT: the SAME composition entry `lore
-    // status --check-claude-md` runs (`runMemoryFileChecks`), never a second
-    // inline size check and never a direct call into the underlying capacity
-    // lint (module header, AC-COMPOSE-1). Runs on the SPLICED candidate,
-    // before any write. Only `.deterministic` gates the write. `.advisory` never
-    // refuses; only its `kind: "downgraded"` entries are surfaced (the
-    // `downgraded:` field of the `ok(...)` return below), the rest dropped
-    // (module header explains why `fileExists`/`docExists` are inert stand-ins here).
-    const { deterministic: findings, advisory } = runMemoryFileChecks(
-      [{ path: CLAUDE_MD_PATH, role: "root", content: finalContent }],
-      budgets,
-      { fileExists: () => true, docExists: () => true },
-    );
-    if (findings.length > 0) {
-      // reason: D16 — the CLAUDE.md refusal must NOT short-circuit the rules-file write set (it is
-      // independent of the Z1 splice); it is held here and returned AFTER the rules files are written.
-      claudeMdRefusalMessage =
-        `refusing to write ${CLAUDE_MD_PATH} — the spliced candidate breaches its ceiling: ` +
-        findings.map((finding) => `[${finding.kind}] ${finding.message}`).join("; ");
-    } else {
-      downgraded = advisory.filter((finding) => finding.kind === "downgraded");
-      claudeMdWrite = { content: finalContent, readBytes: existing };
+      // AC-CTX-8 pre-write admission — SSOT: the SAME composition entry `lore
+      // status --check-claude-md` runs (`runMemoryFileChecks`), never a second
+      // inline size check and never a direct call into the underlying capacity
+      // lint (module header, AC-COMPOSE-1). Runs on the SPLICED candidate,
+      // before any write. Only `.deterministic` gates the write. `.advisory` never
+      // refuses; only its `kind: "downgraded"` entries are surfaced (the
+      // `downgraded:` field of the `ok(...)` return below), the rest dropped
+      // (module header explains why `fileExists`/`docExists` are inert stand-ins here).
+      const { deterministic: findings, advisory } = runMemoryFileChecks(
+        [{ path: CLAUDE_MD_PATH, role: "root", content: finalContent }],
+        budgets,
+        { fileExists: () => true, docExists: () => true },
+      );
+      if (findings.length > 0) {
+        // reason: D16 — the CLAUDE.md refusal must NOT short-circuit the rules-file write set (it is
+        // independent of the Z1 splice); it is held here and returned AFTER the rules files are written.
+        claudeMdRefusalMessage =
+          `refusing to write ${CLAUDE_MD_PATH} — the spliced candidate breaches its ceiling: ` +
+          findings.map((finding) => `[${finding.kind}] ${finding.message}`).join("; ");
+      } else {
+        downgraded = advisory.filter((finding) => finding.kind === "downgraded");
+        claudeMdWrite = { content: finalContent, readBytes: existing };
+        // reason: adoption=warn downgrades EVERY deterministic finding to advisory, ceiling breaches included; --check
+        // answers "is the root file within its ceiling?", so it re-reads those downgraded ceiling breaches (never the
+        // section findings, which stay advisory under warn) instead of reporting a false pass.
+        const downgradedCeilings = downgraded.filter(
+          (finding) => finding.downgraded_kind === "max_lines" || finding.downgraded_kind === "max_bytes",
+        );
+        if (checkMode && downgradedCeilings.length > 0) {
+          claudeMdRefusalMessage = downgradedCeilings.map((finding) => finding.message).join("; ");
+        }
+      }
+      if (finalContent !== existing) differing.push(CLAUDE_MD_PATH);
+  
     }
   }
 
@@ -828,6 +904,22 @@ export async function runContextRefresh(
     skillActions = plannedSkills.value;
   }
   const actions: RulesAction[] = [...ruleActions, ...skillActions];
+
+  // ── --check: report what a refresh would change; no CAS, no write ──
+  if (checkMode) {
+    for (const action of actions) {
+      if (action.kind !== "none") differing.push(action.outcome.path);
+    }
+    return ok({
+      path: (scope === "user" || rulesOnly) && rulesDir !== null ? rulesDir : CLAUDE_MD_PATH,
+      sections: sectionOutcomes,
+      migratedLegacyBlocks,
+      check: { differing, ceilingBreach: claudeMdRefusalMessage },
+      rules: ruleActions.map((action) => action.outcome),
+      skills: skillActions.map((action) => action.outcome),
+      downgraded,
+    });
+  }
 
   // ── D8 compare-and-swap: re-read EVERY target before the FIRST write; any change = zero writes ──
   const casTargets: Array<{ path: string; readBytes: string | null }> = [];
@@ -882,6 +974,8 @@ export async function runContextRefresh(
   return ok({
     path: (scope === "user" || rulesOnly) && rulesDir !== null ? rulesDir : CLAUDE_MD_PATH,
     sections: sectionOutcomes,
+    migratedLegacyBlocks,
+    check: null,
     rules: ruleActions.map((action) => action.outcome),
     skills: skillActions.map((action) => action.outcome),
     downgraded,

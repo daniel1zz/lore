@@ -338,8 +338,24 @@ function renderOutcome(
     return;
   }
 
+  const check = "check" in result.value ? result.value.check : null;
+  if (check !== null) {
+    // --check: nothing was written; exit 1 names each file that would change and/or the ceiling breach (AC-MI-3).
+    if (check.differing.length === 0 && check.ceilingBreach === null) {
+      console.log("context refresh --check: every target is already refreshed and within its ceiling");
+      return;
+    }
+    for (const path of check.differing) console.log(`would change: ${path}`);
+    if (check.ceilingBreach !== null) console.log(`ceiling: ${check.ceilingBreach}`);
+    process.exitCode = 1;
+    return;
+  }
+
   const narrativeSuffix = "narrative" in result.value ? ` (narrative: ${result.value.narrative})` : "";
   console.log(`Wrote ${result.value.path}${narrativeSuffix}`);
+  for (const block of result.value.migratedLegacyBlocks) {
+    console.log(`  migrated legacy block ${block} into the managed zone`);
+  }
   renderSections(result.value.sections);
   if ("rules" in result.value) {
     for (const rule of result.value.rules) {
@@ -469,6 +485,10 @@ export default defineCommand({
       type: "string",
       description: "[refresh | add | remove] Scope: project (default; repo CLAUDE.md + .claude/rules/lore-*.md + .lore/context/selection.yaml) | user (~/.claude/rules/lore-*.md + the user config dir selection.yaml)",
     },
+    check: {
+      type: "boolean",
+      description: "[refresh only] Compute the refresh and write nothing: exit 0 only when every target already equals its refreshed content and the root CLAUDE.md is within its ceiling, else exit 1 naming each differing file / the ceiling",
+    },
     json: {
       type: "boolean",
       description: "Output result as JSON",
@@ -497,6 +517,12 @@ export default defineCommand({
           ? "--scope applies to `refresh`, `add` and `remove` only"
           : `unknown --scope "${scopeArg}" (expected: ${KNOWN_SCOPES.join(" | ")})`;
       process.stderr.write(`Error: ${reason}\n`);
+      process.exitCode = 2;
+      return;
+    }
+
+    if (args.check === true && topic !== "refresh") {
+      process.stderr.write("Error: --check applies to `refresh` only\n");
       process.exitCode = 2;
       return;
     }
@@ -556,8 +582,14 @@ export default defineCommand({
     if (topic === "refresh") {
       const fragmentDeps = buildFragmentDeps();
       if (!fragmentDeps.ok) return reportFailure(fragmentDeps.error);
-      const result = await runContextRefresh({ fs: fsPort, budgets, ...fragmentDeps.value }, "", { scope });
+      const result = await runContextRefresh({ fs: fsPort, budgets, ...fragmentDeps.value }, "", { scope, check: args.check === true });
       renderOutcome(json, result);
+      // reason: --json prints the report (incl. `check`) and returns before the plain-text exit mapping, so the
+      // exit-1 contract for a drifted/over-ceiling --check is applied here for both output modes.
+      if (args.check === true && result.ok && result.value.check !== null) {
+        const { differing, ceilingBreach } = result.value.check;
+        if (differing.length > 0 || ceilingBreach !== null) process.exitCode = 1;
+      }
       return;
     }
 
