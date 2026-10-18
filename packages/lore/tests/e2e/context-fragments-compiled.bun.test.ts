@@ -255,8 +255,7 @@ function sessionStartPayload(source: string): Record<string, unknown> {
 }
 
 /** D15 fingerprint: first line of every lore-owned rules file (hash value is the renderer's business). */
-// reason: user scope records the fragment source folder as an optional `source=` token (BR-1176, iv-owned-prune.test.ts).
-const RULES_FINGERPRINT = /^<!-- lore:managed fragment=(\S+) hash=[0-9a-f]{8}(?: source=\S+)? -->$/;
+const RULES_FINGERPRINT = /^<!-- lore:managed fragment=(\S+) hash=[0-9a-f]{8} -->$/;
 
 const projectRulesDir = (sb: Sandbox): string => join(sb.corpus, ".claude", "rules");
 const homeRulesDir = (sb: Sandbox): string => join(sb.home, ".claude", "rules");

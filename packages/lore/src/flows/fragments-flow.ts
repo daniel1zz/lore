@@ -44,7 +44,6 @@ import {
   isLoreRulesFileName,
   parseSkillFile,
   renderRulesFile,
-  stripRulesSource,
   renderSkillFile,
   SKILL_DIR_PREFIX,
   SKILL_FILE_NAME,
@@ -275,7 +274,7 @@ async function detectProjectRulesDrift(deps: FragmentsFlowDeps, all: readonly Fr
     const stored = await deps.fs.readFile(`${projectRulesDir(deps)}/${rendered.value.fileName}`);
     if (stored === null) {
       files.push({ fileName: rendered.value.fileName, reason: "missing" });
-    } else if (stripRulesSource(stored) !== rendered.value.content) {
+    } else if (stored !== rendered.value.content) {
       files.push({ fileName: rendered.value.fileName, reason: "changed" });
     }
   }
@@ -329,7 +328,7 @@ async function detectProjectSkillsDrift(
     expected.add(rendered.value.dirName);
     const stored = await deps.fs.readFile(`${skillsDir}/${rendered.value.dirName}/${SKILL_FILE_NAME}`);
     if (stored === null) files.push({ dirName: rendered.value.dirName, reason: "missing" });
-    else if (stripRulesSource(stored) !== rendered.value.content) files.push({ dirName: rendered.value.dirName, reason: "changed" });
+    else if (stored !== rendered.value.content) files.push({ dirName: rendered.value.dirName, reason: "changed" });
   }
   for (const name of presentLore) {
     if (!expected.has(name)) files.push({ dirName: name, reason: "extra" });

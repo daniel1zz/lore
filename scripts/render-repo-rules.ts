@@ -15,7 +15,7 @@
  * never leak into committed bytes (project-scope files are byte-identical across machines, AC-CV-3).
  *
  * Exit codes: 0 rendered (or nothing to render) / 1 a rules file the renderer cannot prove it owns
- * (`foreign_skip` / `legacy_skip`) or a renderer error — never reported as clean.
+ * (`diverged_skip`) or a renderer error — never reported as clean.
  */
 import { existsSync, mkdtempSync, rmSync, unlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -82,7 +82,7 @@ export async function renderRepoRules(repoDir: string): Promise<RenderRepoRulesR
       finalRules = second.rules;
     }
     const unowned = finalRules
-      .filter((o) => o.state === "foreign_skip" || o.state === "legacy_skip" || o.state === "diverged_skip")
+      .filter((o) => o.state === "diverged_skip")
       .map((o) => rel(repoDir, o.path));
     return { rewritten, unowned };
   } finally {
