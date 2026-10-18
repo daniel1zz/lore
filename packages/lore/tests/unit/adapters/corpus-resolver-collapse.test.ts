@@ -56,6 +56,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve as resolvePath } from "node:path";
 import { fileURLToPath } from "node:url";
 import ts from "typescript";
+import { CliExit } from "../../../src/adapters/cli/run-scope.js";
 import {
   findLoreDbPath,
   findLoreDbPathQuiet,
@@ -410,16 +411,15 @@ function checkCallSitePreservation(
 
 // ─── Behavioural fixture helpers (half a) ──────────────────────────────────
 
-class ProcessExitSignal extends Error {
-  constructor(public readonly code: number | undefined) {
-    super(`process.exit(${String(code)})`);
+/** The code of the `CliExit` that `fn` throws: a command helper ends a run with `exitCli(code)`, nothing calls `process.exit`. */
+function exitCodeOf(fn: () => unknown): number {
+  try {
+    fn();
+  } catch (error) {
+    if (error instanceof CliExit) return error.code;
+    throw error;
   }
-}
-
-function mockProcessExit() {
-  return vi.spyOn(process, "exit").mockImplementation(((code?: number) => {
-    throw new ProcessExitSignal(code);
-  }) as never);
+  throw new Error("expected the call to end the run with exitCli, but it returned");
 }
 
 const scratchDirs: string[] = [];
@@ -485,12 +485,9 @@ describe("AC-CP-2(a) BEHAVIOUR — both wrappers delegate to ONE shared resolver
     initGitRepo(repo); // a real git repo, never `lore init`-ed
     process.chdir(repo);
 
-    const exitSpy = mockProcessExit();
     const stderrSpy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
 
-    expect(() => findLoreDbPath({ cwd: process.cwd(), env: process.env })).toThrow(ProcessExitSignal);
-    expect(exitSpy).toHaveBeenCalledTimes(1);
-    expect(exitSpy).toHaveBeenCalledWith(1);
+    expect(exitCodeOf(() => findLoreDbPath({ cwd: process.cwd(), env: process.env }))).toBe(1);
     expect(stderrSpy.mock.calls.map((c) => String(c[0])).join("")).toBe(PRE_CHANGE_NO_DB_STDERR_MESSAGE);
   });
 
@@ -570,11 +567,9 @@ describe("§5.2 — provenance: undetermined never surfaces its own cwd path", (
     const dir = mkScratchDir("ac-cp-2-undetermined-loud-");
     process.chdir(dir);
 
-    const exitSpy = mockProcessExit();
     const stderrSpy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
 
-    expect(() => findLoreDbPath({ cwd: process.cwd(), env: process.env })).toThrow(ProcessExitSignal);
-    expect(exitSpy).toHaveBeenCalledWith(1);
+    expect(exitCodeOf(() => findLoreDbPath({ cwd: process.cwd(), env: process.env }))).toBe(1);
     expect(stderrSpy.mock.calls.map((c) => String(c[0])).join("")).toBe(PRE_CHANGE_NO_DB_STDERR_MESSAGE);
   });
 });

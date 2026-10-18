@@ -50,7 +50,10 @@
  */
 
 import type { Invocation } from "@lore/core";
-import { liveInvocation, liveAmbient, liveWriteContext } from "../../live-invocation.js";
+import { liveInvocation, liveAmbient, liveWriteContext, runHandlerForExit } from "../../live-invocation.js";
+
+/** The exit code the most recent command call ended with (commands return it; none sets `process.exitCode`). */
+let lastExitCode = 0;
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, writeFileSync, mkdirSync, readFileSync, existsSync } from "fs";
 import { join, resolve } from "path";
@@ -104,7 +107,6 @@ let tmpDir: string;
 let originalCwd: string;
 
 beforeEach(() => {
-  process.exitCode = 0;
   tmpDir = resolve(mkdtempSync(join(tmpdir(), "lore-cli-assess-test-")));
   const loreDir = join(tmpDir, ".lore");
   mkdirSync(loreDir, { recursive: true });
@@ -117,7 +119,6 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  process.exitCode = 0;
   process.chdir(originalCwd);
   try {
     const { rmSync } = require("fs") as { rmSync: (p: string, opts: object) => void };
@@ -257,12 +258,12 @@ describe("lore assess --diff-file — hermetic success path (AC-ASSESS-1)", () =
     const cmd = await importAssessCommand();
     const output = captureOutput();
     try {
-      await cmd.run({ args: { plan: planSlug, "diff-file": diffFile, json: true }, inv: liveInvocation() });
+      lastExitCode = await runHandlerForExit(() => cmd.run({ args: { plan: planSlug, "diff-file": diffFile, json: true }, inv: liveInvocation() }));
     } finally {
       output.restore();
     }
 
-    expect(process.exitCode === 0 || process.exitCode === undefined).toBe(true);
+    expect(lastExitCode === 0).toBe(true);
     const stdoutText = output.stdout.join("\n");
     expect(stdoutText).toContain('"ok": true');
 
@@ -293,7 +294,7 @@ describe("lore assess --diff-file — hermetic success path (AC-ASSESS-1)", () =
     const cmd = await importAssessCommand();
     const output = captureOutput();
     try {
-      await cmd.run({ args: { plan: planSlug, "diff-file": diffFile, json: true }, inv: liveInvocation() });
+      lastExitCode = await runHandlerForExit(() => cmd.run({ args: { plan: planSlug, "diff-file": diffFile, json: true }, inv: liveInvocation() }));
     } finally {
       output.restore();
     }
@@ -327,12 +328,12 @@ describe("lore assess --diff <range> — real git subprocess fixture (AC-ASSESS-
     const cmd = await importAssessCommand();
     const output = captureOutput();
     try {
-      await cmd.run({ args: { plan: planSlug, diff: "HEAD~1..HEAD", json: true }, inv: liveInvocation() });
+      lastExitCode = await runHandlerForExit(() => cmd.run({ args: { plan: planSlug, diff: "HEAD~1..HEAD", json: true }, inv: liveInvocation() }));
     } finally {
       output.restore();
     }
 
-    expect(process.exitCode === 0 || process.exitCode === undefined).toBe(true);
+    expect(lastExitCode === 0).toBe(true);
     expect(existsSync(captureFile)).toBe(true);
     const capturedPrompt = readFileSync(captureFile, "utf8");
     expect(capturedPrompt).toContain("GIT_FIXTURE_MARKER_a1b2c3");
@@ -346,12 +347,12 @@ describe("lore assess --diff <range> — real git subprocess fixture (AC-ASSESS-
     const cmd = await importAssessCommand();
     const output = captureOutput();
     try {
-      await cmd.run({ args: { plan: planSlug, diff: "HEAD~1..HEAD", json: true }, inv: liveInvocation() });
+      lastExitCode = await runHandlerForExit(() => cmd.run({ args: { plan: planSlug, diff: "HEAD~1..HEAD", json: true }, inv: liveInvocation() }));
     } finally {
       output.restore();
     }
 
-    expect(process.exitCode).toBe(2);
+    expect(lastExitCode).toBe(2);
 
     const app = createApp(join(tmpDir, ".lore", "lore.db"), undefined, liveAmbient(), liveWriteContext());
     try {
@@ -397,12 +398,12 @@ describe("lore assess — auto-derived commit set: PRIMARY ORACLE (interleaved f
     const output = captureOutput();
     try {
       // Deliberately NO --diff / --diff-file — this is the auto-derivation path.
-      await cmd.run({ args: { plan: planSlug, json: true }, inv: liveInvocation() });
+      lastExitCode = await runHandlerForExit(() => cmd.run({ args: { plan: planSlug, json: true }, inv: liveInvocation() }));
     } finally {
       output.restore();
     }
 
-    expect(process.exitCode === 0 || process.exitCode === undefined).toBe(true);
+    expect(lastExitCode === 0).toBe(true);
     expect(existsSync(captureFile)).toBe(true);
     const capturedPrompt = readFileSync(captureFile, "utf8");
     expect(capturedPrompt).toContain("OWN_A_CONTENT");
@@ -462,12 +463,12 @@ describe("lore assess — auto-derived commit set: CONTROL (contiguous, no forei
     const cmd = await importAssessCommand();
     const output = captureOutput();
     try {
-      await cmd.run({ args: { plan: planSlug, json: true }, inv: liveInvocation() });
+      lastExitCode = await runHandlerForExit(() => cmd.run({ args: { plan: planSlug, json: true }, inv: liveInvocation() }));
     } finally {
       output.restore();
     }
 
-    expect(process.exitCode === 0 || process.exitCode === undefined).toBe(true);
+    expect(lastExitCode === 0).toBe(true);
     const capturedPrompt = readFileSync(captureFile, "utf8");
     expect(capturedPrompt).toContain("CONTIGUOUS_A_CONTENT");
     expect(capturedPrompt).toContain("CONTIGUOUS_B_CONTENT");
@@ -513,14 +514,14 @@ describe("lore assess — auto-derived commit set: BOUNDARY (no discoverable com
     const cmd = await importAssessCommand();
     const output = captureOutput();
     try {
-      await cmd.run({ args: { plan: planSlug, json: true }, inv: liveInvocation() });
+      lastExitCode = await runHandlerForExit(() => cmd.run({ args: { plan: planSlug, json: true }, inv: liveInvocation() }));
     } finally {
       output.restore();
     }
 
     // The run still succeeds (assess degrades to "no diff", same as never passing
     // --diff at all pre-fix) — it must NOT fail just because derivation found nothing.
-    expect(process.exitCode === 0 || process.exitCode === undefined).toBe(true);
+    expect(lastExitCode === 0).toBe(true);
 
     const stderrText = output.stderr.join("");
     expect(stderrText).toContain(ASSESS_NO_COMMITS_DERIVED);
@@ -584,7 +585,7 @@ describe("lore assess — SPEC-028 AC-AE-1: pre-flight diff-budget stderr warnin
     const cmd = await importAssessCommand();
     const output = captureOutput();
     try {
-      await cmd.run({ args: { plan: planSlug, "diff-file": diffFile, json: true }, inv: liveInvocation() });
+      lastExitCode = await runHandlerForExit(() => cmd.run({ args: { plan: planSlug, "diff-file": diffFile, json: true }, inv: liveInvocation() }));
     } finally {
       output.restore();
     }
@@ -617,7 +618,7 @@ describe("lore assess — SPEC-028 AC-AE-1: pre-flight diff-budget stderr warnin
     const cmd = await importAssessCommand();
     const output = captureOutput();
     try {
-      await cmd.run({ args: { plan: planSlug, "diff-file": diffFile, json: true }, inv: liveInvocation() });
+      lastExitCode = await runHandlerForExit(() => cmd.run({ args: { plan: planSlug, "diff-file": diffFile, json: true }, inv: liveInvocation() }));
     } finally {
       output.restore();
     }
@@ -646,7 +647,7 @@ describe("lore assess — SPEC-028 AC-AE-1: pre-flight diff-budget stderr warnin
     const cmd = await importAssessCommand();
     const output = captureOutput();
     try {
-      await cmd.run({ args: { plan: planSlug, "diff-file": diffFile, json: true }, inv: liveInvocation() });
+      lastExitCode = await runHandlerForExit(() => cmd.run({ args: { plan: planSlug, "diff-file": diffFile, json: true }, inv: liveInvocation() }));
     } finally {
       output.restore();
     }
@@ -712,12 +713,12 @@ describe("lore assess --diff <range> — git-diff spawnSync maxBuffer (task-lore
     const cmd = await importAssessCommand();
     const output = captureOutput();
     try {
-      await cmd.run({ args: { plan: planSlug, diff: "HEAD~1..HEAD", json: true }, inv: liveInvocation() });
+      lastExitCode = await runHandlerForExit(() => cmd.run({ args: { plan: planSlug, diff: "HEAD~1..HEAD", json: true }, inv: liveInvocation() }));
     } finally {
       output.restore();
     }
 
-    expect(process.exitCode).toBe(2);
+    expect(lastExitCode).toBe(2);
     const stderrText = output.stderr.join("");
     expect(stderrText).toContain("200 bytes"); // names the buffer size (maxDiffChars * 4)
     expect(stderrText).toContain("ai.assess.max_diff_chars=50"); // names the knob + effective value
@@ -751,12 +752,12 @@ describe("lore assess --diff <range> — git-diff spawnSync maxBuffer (task-lore
     const cmd = await importAssessCommand();
     const output = captureOutput();
     try {
-      await cmd.run({ args: { plan: planSlug, diff: "HEAD~1..HEAD", json: true }, inv: liveInvocation() });
+      lastExitCode = await runHandlerForExit(() => cmd.run({ args: { plan: planSlug, diff: "HEAD~1..HEAD", json: true }, inv: liveInvocation() }));
     } finally {
       output.restore();
     }
 
-    expect(process.exitCode).toBe(2);
+    expect(lastExitCode).toBe(2);
     const stderrText = output.stderr.join("");
     expect(stderrText).toContain("git diff HEAD~1..HEAD failed:");
     expect(stderrText).not.toContain("ai.assess.max_diff_chars"); // generic path never names the knob
@@ -787,12 +788,12 @@ describe("lore assess --diff <range> — git-diff spawnSync maxBuffer (task-lore
     const cmd = await importAssessCommand();
     const output = captureOutput();
     try {
-      await cmd.run({ args: { plan: planSlug, diff: "HEAD~1..HEAD", json: true }, inv: liveInvocation() });
+      lastExitCode = await runHandlerForExit(() => cmd.run({ args: { plan: planSlug, diff: "HEAD~1..HEAD", json: true }, inv: liveInvocation() }));
     } finally {
       output.restore();
     }
 
-    expect(process.exitCode === 0 || process.exitCode === undefined).toBe(true);
+    expect(lastExitCode === 0).toBe(true);
     // Proof the run reached the AI provider (i.e. spawnSync fully captured the diff and
     // returned no ENOBUFS — an ENOBUFS early-return, Step 3, would never write this file).
     expect(existsSync(captureFile)).toBe(true);
@@ -823,12 +824,12 @@ describe("lore assess --diff <range> — git-diff spawnSync maxBuffer (task-lore
     const cmd = await importAssessCommand();
     const output = captureOutput();
     try {
-      await cmd.run({ args: { plan: planSlug, diff: "HEAD~1..HEAD", json: true }, inv: liveInvocation() });
+      lastExitCode = await runHandlerForExit(() => cmd.run({ args: { plan: planSlug, diff: "HEAD~1..HEAD", json: true }, inv: liveInvocation() }));
     } finally {
       output.restore();
     }
 
-    expect(process.exitCode).toBe(2);
+    expect(lastExitCode).toBe(2);
     const stderrText = output.stderr.join("");
     expect(stderrText).toContain(`ai.assess.max_diff_chars=${maxDiffChars}`);
     expect(stderrText).not.toContain("spawnSync ENOBUFS");
@@ -853,12 +854,12 @@ describe("lore assess — double-malformed AI output end-to-end (AC-ASSESS-4)", 
     const cmd = await importAssessCommand();
     const output = captureOutput();
     try {
-      await cmd.run({ args: { plan: planSlug, json: true }, inv: liveInvocation() });
+      lastExitCode = await runHandlerForExit(() => cmd.run({ args: { plan: planSlug, json: true }, inv: liveInvocation() }));
     } finally {
       output.restore();
     }
 
-    expect(process.exitCode).toBe(6);
+    expect(lastExitCode).toBe(6);
 
     const app = createApp(join(tmpDir, ".lore", "lore.db"), undefined, liveAmbient(), liveWriteContext());
     try {
@@ -885,12 +886,12 @@ describe("lore assess — double-malformed AI output end-to-end (AC-ASSESS-4)", 
     const cmd = await importAssessCommand();
     const output = captureOutput();
     try {
-      await cmd.run({ args: { plan: planSlug, json: true }, inv: liveInvocation() });
+      lastExitCode = await runHandlerForExit(() => cmd.run({ args: { plan: planSlug, json: true }, inv: liveInvocation() }));
     } finally {
       output.restore();
     }
 
-    expect(process.exitCode).toBe(6);
+    expect(lastExitCode).toBe(6);
 
     const stderrText = output.stderr.join("");
     expect(stderrText).not.toContain("--no-ai");

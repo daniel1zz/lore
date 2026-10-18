@@ -96,7 +96,7 @@ vi.mock("../../../src/adapters/cli/loader.js", () => ({
 // to the mocked factory, never the real one.
 import issueCommand from "../../../src/adapters/cli/commands/issue.js";
 import type { Invocation } from "@lore/core";
-import { liveInvocation } from "../../live-invocation.js";
+import { liveInvocation, runHandlerForExit } from "../../live-invocation.js";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Scenario 1 — HAPPY / BOUNDARY / NEGATIVE: pure 9-state round trip
@@ -217,8 +217,13 @@ function resolveRun(): (ctx: { args: Record<string, unknown> }) => Promise<unkno
   }
   const run = cmd.run;
   // reason: the command reads its Invocation from `ctx.inv` (AS-26); the real entry delivers it, so the test does too.
-  return (ctx) => run({ ...ctx, inv: liveInvocation() });
+  return async (ctx) => {
+    lastExitCode = await runHandlerForExit(() => run({ ...ctx, inv: liveInvocation() }));
+  };
 }
+
+/** The exit code the most recent `resolveRun()` call ended with (commands return it; none sets `process.exitCode`). */
+let lastExitCode = 0;
 
 const BASE_RESOLVE_ARGS = {
   issue: "task-fixture-issue-report",
@@ -229,7 +234,6 @@ const BASE_RESOLVE_ARGS = {
 };
 
 describe("AC-GI-4 scenario 3 — lore issue resolve calls the injected ResolutionProjector (REGRESSION: zero-caller)", () => {
-  const originalExitCode = process.exitCode;
   // Typed to the REAL overloaded signature of `process.stderr.write` (what
   // `vi.spyOn(process.stderr, "write")` actually returns) rather than the
   // generic `ReturnType<typeof vi.spyOn>` fallback — the fallback collapses
@@ -240,7 +244,6 @@ describe("AC-GI-4 scenario 3 — lore issue resolve calls the injected Resolutio
   let issueDoc: DocRecord;
 
   beforeEach(() => {
-    process.exitCode = undefined;
     stderrSpy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
     logSpy = vi.spyOn(console, "log").mockImplementation(() => undefined);
 
@@ -268,7 +271,6 @@ describe("AC-GI-4 scenario 3 — lore issue resolve calls the injected Resolutio
   afterEach(() => {
     stderrSpy.mockRestore();
     logSpy.mockRestore();
-    process.exitCode = originalExitCode;
   });
 
   // ── Liveness controls: prove the harness genuinely reached the write path,
@@ -279,7 +281,7 @@ describe("AC-GI-4 scenario 3 — lore issue resolve calls the injected Resolutio
     await resolveRun()({ args: BASE_RESOLVE_ARGS });
     expect(getMock).toHaveBeenCalledTimes(1);
     expect(setMock).toHaveBeenCalledTimes(1);
-    expect(process.exitCode).toBeUndefined();
+    expect(lastExitCode).toBe(0);
   });
 
   // ── The mandatory case ───────────────────────────────────────────────────
@@ -304,8 +306,7 @@ describe("AC-GI-4 scenario 3 — lore issue resolve calls the injected Resolutio
     await resolveRun()({ args: { ...BASE_RESOLVE_ARGS, state: "fixed" } });
     expect(setMock).not.toHaveBeenCalled();
     expect(projectMock).not.toHaveBeenCalled();
-    expect(process.exitCode).not.toBe(0);
-    expect(process.exitCode).not.toBeUndefined();
+    expect(lastExitCode).not.toBe(0);
   });
 });
 
@@ -374,7 +375,6 @@ describe("AC-GI-4 scenario 4 — a hand-edited label never overrides the corpus-
 // ═══════════════════════════════════════════════════════════════════════════
 
 describe("AC-GI-4 scenario 5 — a projection (network) failure never swallows the corpus verdict", () => {
-  const originalExitCode = process.exitCode;
   // Typed to the REAL overloaded signature of `process.stderr.write` (what
   // `vi.spyOn(process.stderr, "write")` actually returns) rather than the
   // generic `ReturnType<typeof vi.spyOn>` fallback — the fallback collapses
@@ -387,7 +387,6 @@ describe("AC-GI-4 scenario 5 — a projection (network) failure never swallows t
   const NETWORK_FAILURE_MESSAGE = "gh api request failed: network error reaching api.github.com";
 
   beforeEach(() => {
-    process.exitCode = undefined;
     stderrSpy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
     logSpy = vi.spyOn(console, "log").mockImplementation(() => undefined);
 
@@ -421,7 +420,6 @@ describe("AC-GI-4 scenario 5 — a projection (network) failure never swallows t
   afterEach(() => {
     stderrSpy.mockRestore();
     logSpy.mockRestore();
-    process.exitCode = originalExitCode;
   });
 
   it("ERROR: the corpus verdict is still recorded (set() fires) even though projection fails", async () => {
@@ -436,8 +434,7 @@ describe("AC-GI-4 scenario 5 — a projection (network) failure never swallows t
 
   it("ERROR: the failure is surfaced LOUDLY — a nonzero exit code, distinct from the clean happy-path exit", async () => {
     await resolveRun()({ args: BASE_RESOLVE_ARGS });
-    expect(process.exitCode).not.toBeUndefined();
-    expect(process.exitCode).not.toBe(0);
+    expect(lastExitCode).not.toBe(0);
   });
 
   it("ERROR: the failure's actual reason is named on stderr, not a generic swallow", async () => {
@@ -449,6 +446,6 @@ describe("AC-GI-4 scenario 5 — a projection (network) failure never swallows t
   it("REGRESSION CONTROL: the happy path (projection succeeds) exits clean — proves the nonzero exit above is caused by the failure, not by this harness", async () => {
     projectMock.mockResolvedValue(ok(undefined));
     await resolveRun()({ args: BASE_RESOLVE_ARGS });
-    expect(process.exitCode).toBeUndefined();
+    expect(lastExitCode).toBe(0);
   });
 });

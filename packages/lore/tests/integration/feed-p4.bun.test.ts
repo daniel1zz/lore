@@ -42,7 +42,10 @@
  */
 
 import type { Invocation } from "@lore/core";
-import { liveInvocation, liveAmbient, liveWriteContext } from "../live-invocation.js";
+import { liveInvocation, liveAmbient, liveWriteContext, runHandlerForExit } from "../live-invocation.js";
+
+/** The exit code the most recent command call ended with (commands return it; none sets `process.exitCode`). */
+let lastExitCode = 0;
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { mkdtempSync, mkdirSync, rmSync } from "fs";
 import { join, resolve } from "path";
@@ -113,7 +116,6 @@ let dbPath: string;
 let originalCwd: string;
 
 beforeEach(() => {
-  process.exitCode = 0;
   tmpDir = resolve(mkdtempSync(join(tmpdir(), "lore-feed-p4-test-")));
   const loreDir = join(tmpDir, ".lore");
   mkdirSync(loreDir, { recursive: true });
@@ -127,7 +129,6 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  process.exitCode = 0;
   process.chdir(originalCwd);
   try {
     rmSync(tmpDir, { recursive: true, force: true });
@@ -209,12 +210,12 @@ async function runFeed(args: { checkpoint: string; parent?: string; json?: boole
   const cmd = await importFeedCommand();
   const output = captureOutput();
   try {
-    await cmd.run({ args: { ...args }, inv: liveInvocation() });
+    lastExitCode = await runHandlerForExit(() => cmd.run({ args: { ...args }, inv: liveInvocation() }));
   } finally {
     output.restore();
   }
   return {
-    exitCode: process.exitCode,
+    exitCode: lastExitCode,
     stdout: output.stdout.join("\n"),
     stderr: output.stderr.join("\n"),
   };
@@ -224,11 +225,11 @@ async function runGateSpecCreate(payload: Record<string, unknown>) {
   const cmd = await importGateSpecCreate();
   const output = captureOutput();
   try {
-    await cmd.run({ args: { "input-json": JSON.stringify(payload) }, inv: liveInvocation() });
+    lastExitCode = await runHandlerForExit(() => cmd.run({ args: { "input-json": JSON.stringify(payload) }, inv: liveInvocation() }));
   } finally {
     output.restore();
   }
-  return { exitCode: process.exitCode, stdout: output.stdout.join("\n") };
+  return { exitCode: lastExitCode, stdout: output.stdout.join("\n") };
 }
 
 // ─── Tests ───────────────────────────────────────────────────────────────────

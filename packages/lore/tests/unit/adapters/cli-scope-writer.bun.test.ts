@@ -422,7 +422,9 @@ describe("lore scope list — BOUNDARY", () => {
 describe("lore scope add — STATE", () => {
   it("a scope edit leaves extra.claim and extra.verification_evidence byte-identical", async () => {
     const slug = await createTask(tmpDir, "Stateful Task", { evidenceAc: "AC-SC-2" });
-    await mustRun(["claim", slug, "--worktree", "wt-x"], tmpDir);
+    // reason: an absolute path inside the corpus dir: a relative worktree is probed by `git status` against the PROCESS cwd,
+    // which an in-process run no longer changes (the claim is the subject here, not that probe).
+    await mustRun(["claim", slug, "--worktree", join(tmpDir, "wt-x")], tmpDir);
     const before = (await getDoc(slug, tmpDir)).extra;
 
     await mustRun(["scope", "add", slug, "AC-SC-1"], tmpDir);

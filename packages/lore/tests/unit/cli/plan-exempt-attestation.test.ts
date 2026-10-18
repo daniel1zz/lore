@@ -52,7 +52,7 @@ import {
 } from "../../../src/adapters/cli/plan-exempt-validation.js";
 import planCommand from "../../../src/adapters/cli/commands/plan.js";
 import { findUnknownFlag } from "../../../src/adapters/cli/strict-flags.js";
-import { liveInvocation, actedStore } from "../../live-invocation.js";
+import { liveInvocation, actedStore, runHandlerForExit } from "../../live-invocation.js";
 import type { Invocation } from "@lore/core";
 
 // ─── Fixtures ────────────────────────────────────────────────────────────────
@@ -260,16 +260,11 @@ describe("AC-069-8 — the exemption writer merges onto extra instead of replaci
 // ═══ AC-069-9 — refusals: blank reason and off-taxonomy kind both exit 2 ═════
 
 describe("AC-069-9 — an exemption with no justification, or an untyped one, is never authorable", () => {
-  const originalExitCode = process.exitCode;
-
+  /** The exit code the most recent handler call ended with (handlers return it; none sets `process.exitCode`). */
+  let lastExitCode = 0;
   beforeEach(() => {
-    process.exitCode = undefined;
+    lastExitCode = 0;
   });
-
-  afterEach(() => {
-    process.exitCode = originalExitCode;
-  });
-
   /** The real citty subcommand object — not a re-implementation of its logic. */
   function subcommand(name: string): { run: (ctx: { args: Record<string, unknown>; inv?: Invocation }) => unknown } {
     const subs = planCommand.subCommands as Record<string, unknown> | undefined;
@@ -340,31 +335,28 @@ describe("AC-069-9 — an exemption with no justification, or an untyped one, is
   // ── ERROR — the REAL command handler's REAL exit code ───────────────────
 
   it("AC-069-9 the real `lore plan exempt-attestation` handler sets process.exitCode 2 on a blank reason", async () => {
-    expect(process.exitCode).toBeUndefined();
-    await subcommand("exempt-attestation").run({
+    lastExitCode = await runHandlerForExit(() => subcommand("exempt-attestation").run({
       args: { plan: "plan-exempt-fixture", reason: "   ", kind: "red-tdd" },
  inv: liveInvocation(),
-    });
-    expect(process.exitCode).toBe(PLAN_EXEMPT_USAGE_EXIT_CODE);
+    }));
+    expect(lastExitCode).toBe(PLAN_EXEMPT_USAGE_EXIT_CODE);
     expect(PLAN_EXEMPT_USAGE_EXIT_CODE).toBe(2);
   });
 
   it("AC-069-9 the real handler sets process.exitCode 2 on an off-taxonomy kind", async () => {
-    expect(process.exitCode).toBeUndefined();
-    await subcommand("exempt-attestation").run({
+    lastExitCode = await runHandlerForExit(() => subcommand("exempt-attestation").run({
       args: { plan: "plan-exempt-fixture", reason: "a real justification", kind: "bogus-kind" },
  inv: liveInvocation(),
-    });
-    expect(process.exitCode).toBe(2);
+    }));
+    expect(lastExitCode).toBe(2);
   });
 
   it("AC-069-9 the real assessment-freshness handler sets process.exitCode 2 on a blank reason", async () => {
-    expect(process.exitCode).toBeUndefined();
-    await subcommand("exempt-assessment-freshness").run({
+    lastExitCode = await runHandlerForExit(() => subcommand("exempt-assessment-freshness").run({
       args: { plan: "plan-exempt-fixture", reason: "" },
  inv: liveInvocation(),
-    });
-    expect(process.exitCode).toBe(2);
+    }));
+    expect(lastExitCode).toBe(2);
   });
 
   /**
@@ -377,17 +369,16 @@ describe("AC-069-9 — an exemption with no justification, or an untyped one, is
    * corpus-less test process) rather than exiting 2.
    */
   it("AC-069-9 CONTROL: a VALID invocation does not exit 2 at the validation seam", async () => {
-    expect(process.exitCode).toBeUndefined();
     try {
-      await subcommand("exempt-attestation").run({
+      lastExitCode = await runHandlerForExit(() => subcommand("exempt-attestation").run({
         args: { plan: "plan-exempt-fixture", reason: "a real justification", kind: "red-tdd" },
  inv: liveInvocation(),
-      });
+      }));
     } catch {
       // Reaching the loader (and failing there, corpus-less) is the POINT:
       // it proves validation let a valid invocation through.
     }
-    expect(process.exitCode).not.toBe(PLAN_EXEMPT_USAGE_EXIT_CODE);
+    expect(lastExitCode).not.toBe(PLAN_EXEMPT_USAGE_EXIT_CODE);
   });
 });
 

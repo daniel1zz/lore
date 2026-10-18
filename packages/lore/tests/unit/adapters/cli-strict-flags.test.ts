@@ -124,9 +124,6 @@ describe("wrapCommandStrict", () => {
       { type: { type: "string" } },
       runSpy as unknown as (ctx: CommandContext) => unknown,
     );
-    const exitSpy = vi.spyOn(process, "exit").mockImplementation(((code?: number) => {
-      throw new Error(`exit:${code}`);
-    }) as never);
     const stderrSpy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
 
     const wrapped = await wrapCommandStrict(leaf, "lore link");
@@ -136,9 +133,8 @@ describe("wrapCommandStrict", () => {
         args: {} as never,
         cmd: wrapped,
       }),
-    ).rejects.toThrow("exit:2");
+    ).rejects.toMatchObject({ name: "CliExit", code: 2 });
 
-    expect(exitSpy).toHaveBeenCalledWith(2);
     expect(runSpy).not.toHaveBeenCalled();
     expect(stderrSpy.mock.calls.join("\n")).toContain("Unknown option: --kind");
     expect(stderrSpy.mock.calls.join("\n")).toContain("lore link --help");
@@ -175,9 +171,6 @@ describe("wrapCommandStrict", () => {
         },
       },
     };
-    const exitSpy = vi.spyOn(process, "exit").mockImplementation(((code?: number) => {
-      throw new Error(`exit:${code}`);
-    }) as never);
     const stderrSpy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
 
     const wrapped = await wrapCommandStrict(group, "lore phase");
@@ -190,7 +183,7 @@ describe("wrapCommandStrict", () => {
         args: {} as never,
         cmd: addCmd as CommandDef,
       }),
-    ).rejects.toThrow("exit:2");
+    ).rejects.toMatchObject({ name: "CliExit", code: 2 });
     expect(addRun).not.toHaveBeenCalled();
     expect(stderrSpy.mock.calls.join("\n")).toContain("Unknown option: --bogus");
     expect(stderrSpy.mock.calls.join("\n")).toContain("lore phase add --help");

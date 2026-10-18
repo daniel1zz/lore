@@ -33,7 +33,10 @@ import { join, resolve } from "path";
 import { tmpdir } from "os";
 import { createApp, type App } from "../../src/app.js";
 import type { CreateDocInput } from "@lore/core";
-import { liveInvocation, liveAmbient, liveWriteContext } from "../live-invocation.js";
+import { liveInvocation, liveAmbient, liveWriteContext, runHandlerForExit } from "../live-invocation.js";
+
+/** The exit code the most recent command call ended with (commands return it; none sets `process.exitCode`). */
+let lastExitCode = 0;
 import type { Invocation } from "@lore/core";
 
 // ─── Command type + importer (mirrors spec-loop-e2e.bun.test.ts) ────────────
@@ -69,7 +72,6 @@ let dbPath: string;
 let originalCwd: string;
 
 beforeEach(() => {
-  process.exitCode = 0;
   tmpDir = resolve(mkdtempSync(join(tmpdir(), "lore-gate-skill-discovery-test-")));
   const loreDir = join(tmpDir, ".lore");
   mkdirSync(loreDir, { recursive: true });
@@ -83,7 +85,6 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  process.exitCode = 0;
   process.chdir(originalCwd);
   try {
     rmSync(tmpDir, { recursive: true, force: true });
@@ -162,11 +163,11 @@ async function runGateSpecCreate(payload: Record<string, unknown>) {
   const cmd = await importGateSpecCreate();
   const output = captureOutput();
   try {
-    await cmd.run({ args: { "input-json": JSON.stringify(payload) }, inv: liveInvocation() });
+    lastExitCode = await runHandlerForExit(() => cmd.run({ args: { "input-json": JSON.stringify(payload) }, inv: liveInvocation() }));
   } finally {
     output.restore();
   }
-  return { exitCode: process.exitCode, stdout: output.stdout.join("\n") };
+  return { exitCode: lastExitCode, stdout: output.stdout.join("\n") };
 }
 
 async function countDocs(): Promise<number> {

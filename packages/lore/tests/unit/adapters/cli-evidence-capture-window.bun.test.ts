@@ -60,7 +60,7 @@ import {
   type CreateDocInput,
   type EvidenceEntry,
 } from "@lore/core";
-import { liveInvocation, liveAmbient, liveWriteContext } from "../../live-invocation.js";
+import { liveInvocation, liveAmbient, liveWriteContext, runHandlerForExit } from "../../live-invocation.js";
 import type { Invocation } from "@lore/core";
 
 type RunnableCommand = {
@@ -78,7 +78,6 @@ let tmpDir: string;
 let originalCwd: string;
 
 beforeEach(() => {
-  process.exitCode = 0;
   tmpDir = resolve(mkdtempSync(join(tmpdir(), "lore-cli-capture-window-test-")));
   mkdirSync(join(tmpDir, ".lore"), { recursive: true });
   const app = createApp(join(tmpDir, ".lore", "lore.db"), undefined, liveAmbient(), liveWriteContext());
@@ -88,7 +87,6 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  process.exitCode = 0;
   process.chdir(originalCwd);
   try {
     rmSync(tmpDir, { recursive: true, force: true });
@@ -198,7 +196,7 @@ async function runCapture(
   taskSlug: string,
   command: string,
   result = "pass",
-): Promise<{ stderr: string; stdout: string; exitCode: typeof process.exitCode }> {
+): Promise<{ stderr: string; stdout: string; exitCode: number }> {
   const cmd = await importEvidenceCommand();
   const stderr = captureStderr();
   const logLines: string[] = [];
@@ -206,11 +204,11 @@ async function runCapture(
     logLines.push(String(args[0]));
   });
   try {
-    await cmd.run({
+    const exitCode = await runHandlerForExit(() => cmd.run({
       args: { task: taskSlug, oracle: "tsc", command, result, capture: true },
  inv: liveInvocation(),
-    });
-    return { stderr: stderr.text(), stdout: logLines.join("\n"), exitCode: process.exitCode };
+    }));
+    return { stderr: stderr.text(), stdout: logLines.join("\n"), exitCode };
   } finally {
     logSpy.mockRestore();
     stderr.restore();
@@ -232,7 +230,7 @@ async function runSelfReport(taskSlug: string): Promise<string> {
     logLines.push(String(args[0]));
   });
   try {
-    await cmd.run({
+    await runHandlerForExit(() => cmd.run({
       args: {
         task: taskSlug,
         oracle: "manual",
@@ -241,7 +239,7 @@ async function runSelfReport(taskSlug: string): Promise<string> {
         "output-tail": "0 errors",
       },
  inv: liveInvocation(),
-    });
+    }));
     return logLines.join("\n");
   } finally {
     logSpy.mockRestore();
@@ -325,7 +323,6 @@ describe("lore evidence --capture window — BOUNDARY", () => {
 
     // direction 2: same command, generous window — proves the key is not merely
     // "always refuse" (an inert knob passes a one-directional test either way)
-    process.exitCode = 0;
     writeCaptureWindowConfig("30000");
     expect(configRoundTrips(30_000)).toBe(true);
     const allowedTask = await seedTask();
@@ -382,8 +379,6 @@ describe("lore evidence --capture window — STATE", () => {
 
     await runCapture(taskSlug, "sleep 5");
     expect(await readEvidence(taskSlug)).toEqual([]);
-
-    process.exitCode = 0;
     writeCaptureWindowConfig("30000");
     const ok = await runCapture(taskSlug, "echo now-it-fits");
     expect(ok.exitCode).toBe(0);

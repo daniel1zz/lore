@@ -99,7 +99,7 @@
  */
 
 import type { Invocation } from "@lore/core";
-import { liveInvocation } from "../../live-invocation.js";
+import { liveInvocation, runHandlerForExit } from "../../live-invocation.js";
 import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from "vitest";
 import { ok, err, type DocRecord, type IssueResolution, type LoreError } from "@lore/core";
 
@@ -186,13 +186,16 @@ function makeIssueTaskDoc(overrides: Partial<DocRecord> & { extra: Record<string
 }
 
 /** Real `run()` extracted directly off the flat (non-subcommand) `issues` command. */
-function callIssuesRun(args: Record<string, unknown>): Promise<void> {
+async function callIssuesRun(args: Record<string, unknown>): Promise<void> {
   const run = issuesCommand.run as unknown as (ctx: { args: Record<string, unknown>; inv: Invocation }) => Promise<void>;
   if (run === undefined) {
     throw new Error("lore issues has no run() handler");
   }
-  return run({ args, inv: liveInvocation() });
+  lastExitCode = await runHandlerForExit(() => run({ args, inv: liveInvocation() }));
 }
+
+/** The exit code the most recent `callIssuesRun` ended with (commands return it; none sets `process.exitCode`). */
+let lastExitCode = 0;
 
 /** Wires `loadLoreAppMock` to a synthetic App exposing exactly what `issues.ts` reads. */
 function wireApp(): void {
@@ -218,13 +221,10 @@ function parseJsonPayload(logSpy: ReturnType<typeof vi.spyOn>): { ok: boolean; d
   throw new Error(`no console.log call produced parseable JSON (${logSpy.mock.calls.length} calls captured)`);
 }
 
-let originalExitCode: typeof process.exitCode;
 let stderrSpy: MockInstance;
 let logSpy: MockInstance;
 
 beforeEach(() => {
-  originalExitCode = process.exitCode;
-  process.exitCode = undefined;
   stderrSpy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
   logSpy = vi.spyOn(console, "log").mockImplementation(() => undefined);
 
@@ -240,7 +240,6 @@ beforeEach(() => {
 afterEach(() => {
   stderrSpy.mockRestore();
   logSpy.mockRestore();
-  process.exitCode = originalExitCode;
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -301,7 +300,7 @@ describe("AC-GI-5 scenario 1 — a hand-edited resolution label diverges from th
 
   it("ERROR/STATE: the exit code marks a divergence found — distinct from the clean exit", async () => {
     await callIssuesRun({ all: true, verify: true, json: true });
-    expect(process.exitCode).toBe(11);
+    expect(lastExitCode).toBe(11);
   });
 });
 
@@ -347,8 +346,8 @@ describe("AC-GI-5 scenario 2 (MANDATORY) — no divergence -> --verify reports c
 
   it("BOUNDARY: the clean run's exit code is 0 (or left undefined, this repo's own clean-exit convention) — never the divergence code", async () => {
     await callIssuesRun({ all: true, verify: true, json: true });
-    expect(process.exitCode === undefined || process.exitCode === 0).toBe(true);
-    expect(process.exitCode).not.toBe(11);
+    expect(lastExitCode).toBe(0);
+    expect(lastExitCode).not.toBe(11);
   });
 });
 

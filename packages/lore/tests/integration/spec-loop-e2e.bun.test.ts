@@ -49,7 +49,10 @@ import { saveConfig } from "@lore/core/node";
 import { checkRepoPollution } from "../../src/repo-pollution-guard.js";
 import { citeSpecViaCli, type LoreRunner } from "../helpers/cli-live-rule.js";
 import type { CreateDocInput } from "@lore/core";
-import { liveInvocation, liveAmbient, liveWriteContext } from "../live-invocation.js";
+import { liveInvocation, liveAmbient, liveWriteContext, runHandlerForExit } from "../live-invocation.js";
+
+/** The exit code the most recent command call ended with (commands return it; none sets `process.exitCode`). */
+let lastExitCode = 0;
 import type { Invocation } from "@lore/core";
 
 /**
@@ -168,7 +171,6 @@ let originalCwd: string;
 let originalEnv: string | undefined;
 
 beforeEach(() => {
-  process.exitCode = 0;
   originalEnv = process.env["LORE_GATE_BYPASS"];
   delete process.env["LORE_GATE_BYPASS"];
 
@@ -185,7 +187,6 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  process.exitCode = 0;
   if (originalEnv === undefined) delete process.env["LORE_GATE_BYPASS"];
   else process.env["LORE_GATE_BYPASS"] = originalEnv;
   process.chdir(originalCwd);
@@ -242,22 +243,22 @@ async function runGateSpecCreate(payload: Record<string, unknown>) {
   const cmd = await importGateCommand("spec-create");
   const output = captureOutput();
   try {
-    await cmd.run({ args: { "input-json": JSON.stringify(payload) }, inv: liveInvocation() });
+    lastExitCode = await runHandlerForExit(() => cmd.run({ args: { "input-json": JSON.stringify(payload) }, inv: liveInvocation() }));
   } finally {
     output.restore();
   }
-  return { exitCode: process.exitCode, stdout: output.stdout.join("\n"), stderr: output.stderr.join("") };
+  return { exitCode: lastExitCode, stdout: output.stdout.join("\n"), stderr: output.stderr.join("") };
 }
 
 async function runGateSpecPromote(specIdOrSlug: string) {
   const cmd = await importGateCommand("spec-promote");
   const output = captureOutput();
   try {
-    await cmd.run({ args: { spec: specIdOrSlug }, inv: liveInvocation() });
+    lastExitCode = await runHandlerForExit(() => cmd.run({ args: { spec: specIdOrSlug }, inv: liveInvocation() }));
   } finally {
     output.restore();
   }
-  return { exitCode: process.exitCode, stdout: output.stdout.join("\n"), stderr: output.stderr.join("") };
+  return { exitCode: lastExitCode, stdout: output.stdout.join("\n"), stderr: output.stderr.join("") };
 }
 
 /** Actually create the spec (step 3 of the loop — not a gate call, the real creation). */

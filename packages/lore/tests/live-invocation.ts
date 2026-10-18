@@ -11,6 +11,7 @@ import type { ProviderRuntime } from "../src/ai/registry.js";
 import { declareWriteActorForTests } from "../src/store/write-context-store.js";
 import type { StoreInterface } from "../src/store/store-interface.js";
 import { resolveActorWithSource } from "@lore/core/node";
+import { runInScope } from "../src/adapters/cli/run-scope.js";
 
 /** The live process as an Invocation: `env` is the LIVE `process.env` object, so a test's later env edits stay visible. */
 export function liveInvocation(): Invocation {
@@ -68,4 +69,19 @@ export function liveWriteContext(): { readonly identity: Invocation["identity"] 
 /** Declares the live author on a bare test store (see {@link declareWriteActorForTests}); returns the same store. */
 export function actedStore<T extends StoreInterface>(store: T): T {
   return declareWriteActorForTests(store, liveWriteActor());
+}
+
+/**
+ * Run `body` (a command handler called directly: `cmd.run({ args, inv })`) as ONE run and return the exit code it ended
+ * with: the code of `exitCli`, else the last `setExitCode`, else 0. Commands report their code to the run, never to
+ * `process.exit` / `process.exitCode`, so a test that calls a handler without `runCli` reads the code from here.
+ *
+ * @param body - the handler call; its returned value is ignored
+ * @param inv - the run's Invocation (default: the live process; its io is the real process streams, so a test that
+ *   captures output by spying on `console` / `process.stderr.write` keeps working)
+ */
+export async function runHandlerForExit(body: () => unknown, inv: Invocation = liveInvocation()): Promise<number> {
+  return runInScope(inv, async () => {
+    await body();
+  });
 }

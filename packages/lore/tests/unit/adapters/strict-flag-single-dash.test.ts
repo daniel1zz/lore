@@ -238,17 +238,13 @@ describe("wrapCommandStrict single-dash rejection (ERROR, STATE)", () => {
   it("AC-073-1: ERROR — lore list -json exits 2 BEFORE calling the real run, naming -json and suggesting --json", async () => {
     const runSpy = vi.fn();
     const leaf = makeLeaf(LIST_ARGS, runSpy as unknown as (ctx: CommandContext) => unknown);
-    const exitSpy = vi.spyOn(process, "exit").mockImplementation(((code?: number) => {
-      throw new Error(`exit:${code}`);
-    }) as never);
     const stderrSpy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
 
     const wrapped = await wrapCommandStrict(leaf, "lore list");
     await expect(
       wrapped.run?.({ rawArgs: ["-json"], args: {} as never, cmd: wrapped }),
-    ).rejects.toThrow("exit:2");
+    ).rejects.toMatchObject({ name: "CliExit", code: 2 });
 
-    expect(exitSpy).toHaveBeenCalledWith(2);
     expect(runSpy).not.toHaveBeenCalled();
     const stderrOutput = stderrSpy.mock.calls.join("\n");
     expect(stderrOutput).toContain("Unknown option: -json");
@@ -259,17 +255,13 @@ describe("wrapCommandStrict single-dash rejection (ERROR, STATE)", () => {
   it("AC-073-2: ERROR — lore verify -yes exits 2 suggesting --yes", async () => {
     const runSpy = vi.fn();
     const leaf = makeLeaf(VERIFY_ALLOW_NEW_COMMANDS_ARGS, runSpy as unknown as (ctx: CommandContext) => unknown);
-    const exitSpy = vi.spyOn(process, "exit").mockImplementation(((code?: number) => {
-      throw new Error(`exit:${code}`);
-    }) as never);
     const stderrSpy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
 
     const wrapped = await wrapCommandStrict(leaf, "lore verify");
     await expect(
       wrapped.run?.({ rawArgs: ["plan-1", "-yes"], args: {} as never, cmd: wrapped }),
-    ).rejects.toThrow("exit:2");
+    ).rejects.toMatchObject({ name: "CliExit", code: 2 });
 
-    expect(exitSpy).toHaveBeenCalledWith(2);
     expect(runSpy).not.toHaveBeenCalled();
     const stderrOutput = stderrSpy.mock.calls.join("\n");
     expect(stderrOutput).toContain("Unknown option: -yes");
@@ -315,15 +307,12 @@ describe("wrapCommandStrict single-dash rejection (ERROR, STATE)", () => {
   it("STATE: a double-dash violation is reported before a single-dash one when both are present", async () => {
     const runSpy = vi.fn();
     const leaf = makeLeaf(LIST_ARGS, runSpy as unknown as (ctx: CommandContext) => unknown);
-    vi.spyOn(process, "exit").mockImplementation(((code?: number) => {
-      throw new Error(`exit:${code}`);
-    }) as never);
     const stderrSpy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
 
     const wrapped = await wrapCommandStrict(leaf, "lore list");
     await expect(
       wrapped.run?.({ rawArgs: ["--kind", "blocks", "-json"], args: {} as never, cmd: wrapped }),
-    ).rejects.toThrow("exit:2");
+    ).rejects.toMatchObject({ name: "CliExit", code: 2 });
 
     const stderrOutput = stderrSpy.mock.calls.join("\n");
     expect(stderrOutput).toContain("Unknown option: --kind");
