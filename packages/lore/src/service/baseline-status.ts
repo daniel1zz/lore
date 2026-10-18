@@ -61,6 +61,8 @@ export interface BaselineStatus {
   exemptions_active: number;
   /** Criterion exemptions past their expiry (kept for the record, no longer excusing anything). */
   exemptions_expired: number;
+  /** Unexpired exemptions whose criterion now cites a live rule (BR-959): they excuse nothing and use no cap. */
+  exemptions_satisfied: number;
   /** `exemptions_active / live criteria` (0 when none); the cap is 0.10. */
   exemption_ratio: number;
 }
@@ -319,6 +321,7 @@ export async function computeBaselineStatus(
     index_mismatch: indexMismatch.value,
     exemptions_active: exemptions.value.active,
     exemptions_expired: exemptions.value.expired,
+    exemptions_satisfied: exemptions.value.satisfied,
     exemption_ratio: exemptions.value.ratio,
   });
 }

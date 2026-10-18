@@ -1428,6 +1428,42 @@ export function escapeFtsQuery(raw: string): string {
 
 // ─── Criterion exemptions (migration-014 `ac_exemptions`, spec C4) ───────────
 
+/** Map key of one exemption's criterion: `doc_id` + NUL + `ac_id`. */
+export function exemptionKey(docId: string, acId: string): string {
+  return `${docId}\u0000${acId}`;
+}
+
+/** Empty satisfied-set: no exemption is known to be cited. */
+export const NO_SATISFIED_EXEMPTIONS: ReadonlySet<string> = new Set<string>();
+
+/** The three states of an exemption at an instant; see {@link exemptionState}. */
+export type ExemptionState = "active" | "expired" | "satisfied";
+
+/**
+ * THE one definition of exemption state (BR-959: an unexpired exemption waives only the UNCITED case).
+ * `expired` = `expires_at <= nowIso`; `satisfied` = unexpired but its criterion now cites a live rule
+ * (`satisfiedKeys` holds {@link exemptionKey}s, computed by `satisfiedExemptionKeys` in ac-cite-gate.ts);
+ * `active` = unexpired and still uncited. Every reader (list/counts, headroom, the gate, the grant cap in all
+ * three stores) goes through {@link isExemptionActive} - never re-derive it.
+ */
+export function exemptionState(
+  row: { doc_id: string; ac_id: string; expires_at: string },
+  nowIso: string,
+  satisfiedKeys: ReadonlySet<string>,
+): ExemptionState {
+  if (!(row.expires_at > nowIso)) return "expired";
+  return satisfiedKeys.has(exemptionKey(row.doc_id, row.ac_id)) ? "satisfied" : "active";
+}
+
+/** `true` iff {@link exemptionState} is `active`. */
+export function isExemptionActive(
+  row: { doc_id: string; ac_id: string; expires_at: string },
+  nowIso: string,
+  satisfiedKeys: ReadonlySet<string>,
+): boolean {
+  return exemptionState(row, nowIso, satisfiedKeys) === "active";
+}
+
 /** Refusal when the active-exemption cap (10% of live criteria) is already full. Shared by all three stores. */
 export function buildAcExemptionCapError(activeCount: number, liveCriteria: number, maxActive: number): LoreError {
   return {

@@ -137,6 +137,8 @@ import {
   wrapStoreError,
   buildAcExemptionAlreadyActiveError,
   buildAcExemptionCapError,
+  isExemptionActive,
+  NO_SATISFIED_EXEMPTIONS,
   buildNonLiveRuleRefusal,
 } from "./store-shared.js";
 import { stampAuditSurface } from "./audit-surface.js";
@@ -2593,27 +2595,33 @@ export class SQLiteStore implements StoreInterface {
       const existing = this.db
         .prepare("SELECT expires_at FROM ac_exemptions WHERE doc_id = ? AND ac_id = ?")
         .get(row.doc_id, row.ac_id) as { expires_at: string } | null;
-      if (existing !== null && existing.expires_at > cap.now) {
+      const satisfied = cap.satisfied ?? NO_SATISFIED_EXEMPTIONS;
+      if (
+        existing !== null &&
+        isExemptionActive({ doc_id: row.doc_id, ac_id: row.ac_id, expires_at: existing.expires_at }, cap.now, satisfied)
+      ) {
         this.db.run("ROLLBACK");
         return err(buildAcExemptionAlreadyActiveError(row.doc_id, row.ac_id));
       }
       if (existing !== null) {
         this.db.prepare("DELETE FROM ac_exemptions WHERE doc_id = ? AND ac_id = ?").run(row.doc_id, row.ac_id);
       }
-      const inserted = this.db
+      // reason: the active count applies the shared predicate in TS (cite-satisfaction is not a SQL fact);
+      // BEGIN IMMEDIATE already holds the write lock, so count-then-insert stays one serialised step.
+      const unexpired = this.db
+        .prepare("SELECT doc_id, ac_id, expires_at FROM ac_exemptions WHERE expires_at > ?")
+        .all(cap.now) as Array<{ doc_id: string; ac_id: string; expires_at: string }>;
+      const activeCount = unexpired.filter((r) => isExemptionActive(r, cap.now, satisfied)).length;
+      if (activeCount >= cap.maxActive) {
+        this.db.run("ROLLBACK");
+        return err(buildAcExemptionCapError(activeCount, cap.liveCriteria, cap.maxActive));
+      }
+      this.db
         .prepare(
           `INSERT INTO ac_exemptions (doc_id, ac_id, reason, expires_at, granted_by, granted_at)
-           SELECT ?, ?, ?, ?, ?, ?
-           WHERE (SELECT COUNT(*) FROM ac_exemptions WHERE expires_at > ?) < ?`,
+           VALUES (?, ?, ?, ?, ?, ?)`,
         )
-        .run(row.doc_id, row.ac_id, row.reason, row.expires_at, row.granted_by, row.granted_at, cap.now, cap.maxActive);
-      if (inserted.changes === 0) {
-        const count = this.db
-          .prepare("SELECT COUNT(*) AS n FROM ac_exemptions WHERE expires_at > ?")
-          .get(cap.now) as { n: number };
-        this.db.run("ROLLBACK");
-        return err(buildAcExemptionCapError(count.n, cap.liveCriteria, cap.maxActive));
-      }
+        .run(row.doc_id, row.ac_id, row.reason, row.expires_at, row.granted_by, row.granted_at);
       this.db.run("COMMIT");
       return ok({ ...row });
     } catch (e) {

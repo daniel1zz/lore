@@ -695,6 +695,7 @@ describe("decideCiteGate — exempted criteria (AC-BLS2-19)", () => {
       [row("S1", "A", "2026-01-01T00:00:01.000Z"), row("S1", "B", now), row("S1", "C", "2025-01-01T00:00:00.000Z"), row("S2", "D", "2999-01-01T00:00:00.000Z")],
       "S1",
       now,
+      new Set(),
     );
     expect([...ids]).toEqual(["A"]);
   });
