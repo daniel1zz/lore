@@ -729,6 +729,12 @@ const WorkflowConfigSchema = z
     integrate: z
       .object({
         floor_command: z.string().min(1).optional(),
+        /**
+         * `post_refresh_command` (INT-T11) rebuilds the shared checkout's build artifacts after its view was
+         * refreshed to the landed main (this repository: `bun run build`). Absent = no rebuild, and the integrate
+         * output says "skipped (... not set)".
+         */
+        post_refresh_command: z.string().min(1).optional(),
       })
       .strict()
       .optional(),
