@@ -168,7 +168,8 @@ function validHelperRecord(v) {
     && (v.changes === undefined || validMeasured(v.changes, validHelperChanges));
 }
 
-const validJudged = (v) => hasShape(v, ['judged_end_count']) && isCount(v.judged_end_count);
+const validJudged = (v) => hasShape(v, ['judged_end_count'], ['judged_at_ms'])
+  && isCount(v.judged_end_count) && (v.judged_at_ms === undefined || isCount(v.judged_at_ms));
 const validSessionJson = (v) => hasShape(v, ['started_at']) && isText(v.started_at);
 const validRemoved = (v) => hasShape(v, ['removed_at', 'started_at'])
   && isText(v.removed_at) && (v.started_at === null || isText(v.started_at));
@@ -241,9 +242,14 @@ function readHelper(session, raw) {
     throw new TrailFileInvalidError(recordFile, 'run does not name this session and agent');
   }
   const judged = raw.judged_json === null
-    ? 0
-    : parseSessionFile(`helpers/${raw.agent_id}.judged.json`, raw.judged_json, validJudged).judged_end_count;
-  return { ...record, agent_id: raw.agent_id, judged_end_count: judged };
+    ? { judged_end_count: 0 }
+    : parseSessionFile(`helpers/${raw.agent_id}.judged.json`, raw.judged_json, validJudged);
+  return {
+    ...record,
+    agent_id: raw.agent_id,
+    judged_end_count: judged.judged_end_count,
+    ...(judged.judged_at_ms === undefined ? {} : { judged_at_ms: judged.judged_at_ms }),
+  };
 }
 
 const byText = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
@@ -879,15 +885,18 @@ const TRAIL_REVIEW_TIMEOUT_MS = 15000;
  * Snapshot of every helper end not yet judged: `end_count > judged_end_count`, read ONCE at review start.
  * The snapshot, never a later re-read, is what `markHelpersJudged` records.
  * @param {string} base - state base. @param {string} sessionId
- * @returns {{helpers: Array<{agent_id: string, end_count: number}>, unreadable?: string}}
+ * Each entry carries `snapshot_at_ms`, the instant of this read: `markHelpersJudged` stamps it as `judged_at_ms`, the
+ * boundary before which a helper's edit records count as already judged.
+ * @returns {{helpers: Array<{agent_id: string, end_count: number, snapshot_at_ms: number}>, unreadable?: string}}
  *   `unreadable` is set (and `helpers` empty) when the trail cannot be read: that is not "nothing to judge".
  */
 export function snapshotUnjudgedHelpers(base, sessionId) {
   try {
+    const snapshotAtMs = Date.now();
     const trail = readSessionTrail(sessionId, base);
     const helpers = (trail?.helpers ?? [])
       .filter((h) => h.end_count > h.judged_end_count)
-      .map((h) => ({ agent_id: h.agent_id, end_count: h.end_count }));
+      .map((h) => ({ agent_id: h.agent_id, end_count: h.end_count, snapshot_at_ms: snapshotAtMs }));
     return { helpers };
   } catch (err) {
     return { helpers: [], unreadable: `session trail unreadable (${err.message})` };
@@ -895,16 +904,17 @@ export function snapshotUnjudgedHelpers(base, sessionId) {
 }
 
 /**
- * Write `helpers/<agent_id>.judged.json` = the snapshotted `end_count` (the ONLY writer of that file).
+ * Write `helpers/<agent_id>.judged.json` = the snapshotted `end_count` and `judged_at_ms` = the snapshot instant
+ * (the ONLY writer of that file).
  * @param {string} base @param {string} sessionId
- * @param {Array<{agent_id: string, end_count: number}>} helpers - the review-start snapshot.
+ * @param {Array<{agent_id: string, end_count: number, snapshot_at_ms: number}>} helpers - the review-start snapshot.
  * @returns {string[]} reasons for helpers whose judged file could not be written (empty on success).
  */
 export function markHelpersJudged(base, sessionId, helpers) {
   const failures = [];
-  for (const { agent_id: agentId, end_count: endCount } of helpers) {
+  for (const { agent_id: agentId, end_count: endCount, snapshot_at_ms: judgedAtMs } of helpers) {
     try {
-      writeJsonAtomic(join(base, 'sessions', sessionId, 'helpers', `${agentId}.judged.json`), { judged_end_count: endCount });
+      writeJsonAtomic(join(base, 'sessions', sessionId, 'helpers', `${agentId}.judged.json`), { judged_end_count: endCount, judged_at_ms: judgedAtMs });
     } catch (err) {
       failures.push(`helper ${agentId} could not be marked judged (${err.message})`);
     }
@@ -919,7 +929,7 @@ export function markHelpersJudged(base, sessionId, helpers) {
  * @param {object} input
  * @param {string} input.base @param {string} input.sessionId @param {string} input.turnId
  * @param {string} input.cwd - where `lore` finds the corpus.
- * @param {Array<{agent_id: string, end_count: number}>} input.helpers - review-start snapshot.
+ * @param {Array<{agent_id: string, end_count: number, snapshot_at_ms: number}>} input.helpers - review-start snapshot.
  * @returns {{findings: string[], notMeasured: string[], markJudged: () => string[]}}
  */
 export function runTrailReview({ base, sessionId, turnId, cwd, helpers }) {

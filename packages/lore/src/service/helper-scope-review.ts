@@ -26,6 +26,11 @@
  *   also judged under every open claim whose RECORDED worktree resolves to the group's working copy (the port
  *   compares directories, never directory names or branch names). The owner stays a member run; these claims
  *   only widen the union of tasks and anchors.
+ * @invariant Each edit record is judged once (AU-T25). The edit records of ALL turns are read on every review, so a
+ *   helper that ends again would be charged again with an edit an earlier review already reported. An edit whose
+ *   `ts` is at or before the helper's `judged_at_ms` (the review-start snapshot instant, written with
+ *   `judged_end_count`) is skipped; the decision is the event's own timestamp against the judged stamp, no path
+ *   test. The measured `changes` diff is cumulative by design (decision (b)) and is not touched by this.
  * @invariant The session's own scratchpad (`.../claude-<uid>/<project>/<session>/scratchpad/`) is never
  *   repository content: a path under it is not "outside the working copy". Structural match on the session id of
  *   the trail, no agent-id allowlist; another session's scratchpad stays a finding.
@@ -113,6 +118,15 @@ function canonicalPath(path: string, realpath: RealpathFn): string {
   }
 }
 
+/**
+ * True when an earlier review already judged this edit record: the helper's judged file stamps the instant of the
+ * review-start snapshot (`judged_at_ms`), and an edit recorded at or before it was in scope of that review.
+ * A judged file without the stamp (written before AU-T25) covers nothing, so such a helper is judged in full.
+ */
+function isCoveredByJudgedEnd(editTs: number, helper: TrailHelper): boolean {
+  return helper.judged_at_ms !== undefined && editTs <= helper.judged_at_ms;
+}
+
 /** True when `canonical` is inside the scratchpad directory of `session` (never repository content). */
 function isSessionScratchpad(canonical: string, session: string): boolean {
   const escaped = session.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -188,7 +202,7 @@ export async function reviewHelperScope(input: ReviewHelperScopeInput): Promise<
     for (const turn of trail.turns) {
       if (!turn.edits.measured) continue;
       for (const edit of turn.edits.value) {
-        if (edit.run === helper.run) classify(isAbsolute(edit.file) ? edit.file : resolve(workingCopy, edit.file));
+        if (edit.run === helper.run && !isCoveredByJudgedEnd(edit.ts, helper)) classify(isAbsolute(edit.file) ? edit.file : resolve(workingCopy, edit.file));
       }
     }
     const files = [...inside].sort();
