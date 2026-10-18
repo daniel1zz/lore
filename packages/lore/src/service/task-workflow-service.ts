@@ -317,6 +317,7 @@
 import { requireOverrideAuto, type OverrideDecisionPort } from "./override-decision.js";
 import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
+import { isAbsolute } from "node:path";
 import { z } from "zod";
 import { err, ok, classifyEvidenceStamps, findMissingOracleFiles, hasPassOnRecord, extractDeclaredPhases, hasClaimConflict, type ClaimHolder, type ClaimParty, type RunId, type Result } from "@lore/core";
 import type { LoreError } from "@lore/core";
@@ -2075,6 +2076,11 @@ export function measureWorktreeCleanliness(worktree: string | undefined): Worktr
   if (worktree === undefined) {
     return { status: "not-measured-no-worktree", paths: [] };
   }
+  // reason: a relative recorded worktree (a branch name such as "feat-a") would be resolved against the process's
+  // working directory by the child spawn; there is no base to resolve it against here, so it cannot be measured.
+  if (!isAbsolute(worktree)) {
+    return { status: "not-measured-not-a-repo", paths: [] };
+  }
 
   try {
     const result = spawnSync("git", ["status", "--porcelain"], {
@@ -2112,6 +2118,7 @@ export function measureWorktreeCleanliness(worktree: string | undefined): Worktr
  * is a repo" reads identically to "not a repo" for this narrow purpose).
  */
 function isInsideGitRepo(cwd: string): boolean {
+  if (!isAbsolute(cwd)) return false;
   try {
     const result = spawnSync("git", ["rev-parse", "--is-inside-work-tree"], {
       cwd,

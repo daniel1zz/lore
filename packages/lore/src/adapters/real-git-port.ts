@@ -139,7 +139,7 @@
 
 import { execFileSync, spawn } from "node:child_process";
 import { chmodSync, mkdirSync, readFileSync, realpathSync, statSync, unlinkSync, writeFileSync } from "node:fs";
-import { join, resolve, sep } from "node:path";
+import { isAbsolute, join, resolve, sep } from "node:path";
 
 import { err, ok } from "@lore/core";
 import type { LoreError, Result } from "@lore/core";
@@ -161,6 +161,11 @@ interface GitRunResult {
  * method can uniformly inspect `exitCode` without a separate try/catch.
  */
 function runGit(cwd: string, args: string[]): Promise<GitRunResult> {
+  // reason: a RELATIVE cwd is resolved by the OS against the process's working directory, which nothing below an entry
+  // may read (AS-26). A recorded claim worktree can be a bare branch name ("feat-a"); it is not a place git can run in.
+  if (!isAbsolute(cwd)) {
+    return Promise.resolve({ exitCode: -1, stdout: "", stderr: `refusing a relative cwd "${cwd}": no base directory to resolve it against` });
+  }
   return new Promise((resolve) => {
     const child = spawn(GIT_COMMAND, args, { cwd, stdio: ["ignore", "pipe", "pipe"] });
 
