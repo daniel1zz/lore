@@ -146,6 +146,7 @@ import { MIGRATION_020_SQL } from "./migrations/migration-020.js";
 import { MIGRATION_021_ADD_COLUMNS, MIGRATION_021_SQL } from "./migrations/migration-021.js";
 import { MIGRATION_022_SQL } from "./migrations/migration-022.js";
 import { MIGRATION_023_SQL } from "./migrations/migration-023.js";
+import { MIGRATION_024_SQL } from "./migrations/migration-024.js";
 import { DECISION_GENESIS_HASH, computeDecisionEntryHash } from "./decision-log.js";
 import type { DecisionLogRow, DecisionRecordInput } from "./decision-log.js";
 import type { DecisionSubjectKey } from "./store-interface.js";
@@ -739,6 +740,11 @@ export class SQLiteStore implements StoreInterface {
         }
         throw error;
       }
+    }
+
+    if (currentVersion < 24) {
+      // reason: migration-024 adds the nullable decision_log.detail column (plain ADD COLUMN; hashes stay valid).
+      this.db.exec(MIGRATION_024_SQL);
     }
   }
 
@@ -2767,8 +2773,8 @@ export class SQLiteStore implements StoreInterface {
         .prepare(
           `INSERT INTO decision_log
              (ts, class, subject_id, subject_version, facts, factors, score, threshold, verdict, reasons,
-              executor_run, channel, prev_hash, entry_hash)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+              executor_run, channel, prev_hash, entry_hash, detail)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
         .run(
           input.ts,
@@ -2785,10 +2791,11 @@ export class SQLiteStore implements StoreInterface {
           input.channel,
           prevHash,
           entryHash,
+          input.detail ?? null,
         );
       const idRow = this.db.query("SELECT last_insert_rowid() AS id").get() as { id: number };
       this.db.run("COMMIT");
-      return ok({ ...input, id: Number(idRow.id), prev_hash: prevHash, entry_hash: entryHash });
+      return ok({ ...input, detail: input.detail ?? null, id: Number(idRow.id), prev_hash: prevHash, entry_hash: entryHash });
     } catch (e) {
       try {
         this.db.run("ROLLBACK");

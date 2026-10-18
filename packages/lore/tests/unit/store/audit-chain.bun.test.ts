@@ -412,7 +412,7 @@ describe("migration-009 (audit hash chain backfill)", () => {
     // the head — a fresh store runs every migration up to it, not just
     // through migration-009. This test's own concern (audit hash-chain
     // columns present) is unaffected — asserted directly below.
-    expect(userVersion(db)).toBe(23);
+    expect(userVersion(db)).toBe(24);
     const cols = tableColumnNames(db, "audit");
     expect(cols).toContain("prev_hash");
     expect(cols).toContain("entry_hash");
@@ -484,7 +484,7 @@ describe("migration-009 (audit hash chain backfill)", () => {
     const store = actedStore(new SQLiteStore(dbPath));
     const db = store.getDatabase();
 
-    expect(userVersion(db)).toBe(23);
+    expect(userVersion(db)).toBe(24);
     expect(tableColumnNames(db, "audit")).toContain("prev_hash");
     expect(tableColumnNames(db, "audit")).toContain("entry_hash");
 
@@ -544,7 +544,7 @@ describe("migration-009 (audit hash chain backfill)", () => {
     expect(() => {
       const secondOpen = actedStore(new SQLiteStore(dbPath));
       const db = secondOpen.getDatabase();
-      expect(userVersion(db)).toBe(23);
+      expect(userVersion(db)).toBe(24);
       expect(tableColumnNames(db, "audit")).toContain("prev_hash");
       secondOpen.close();
     }).not.toThrow();

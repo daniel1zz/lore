@@ -45,6 +45,7 @@ import {
   effectiveDecisionVerdict,
   verifyDecisionChain,
   type DecisionChainHead,
+  type DecisionDetail,
   type DecisionLogRow,
   type EffectiveDecisionVerdict,
 } from "../store/decision-log.js";
@@ -99,6 +100,29 @@ export function loosenedClassIdsOf(subjectId: string): string[] {
     .map((line) => /^([^.:\s]+)[.:]/.exec(line)?.[1])
     .filter((id): id is string => id !== undefined && id !== "worktreeRemoveRegenerable");
   return [...new Set(ids)];
+}
+
+const REGENERABLE_ENTRY = "worktreeRemoveRegenerable";
+
+/**
+ * The human-readable detail of a governance-loosen decision (HR-T1): names every loosened edit, the governed
+ * entries it touches with their BEFORE and AFTER values (keyed by entry), and what accepting / rejecting does.
+ * `change` = { entry: "<entries joined by '; '>", before: { <entry>: value }, after: { <entry>: value } }; a class
+ * entry's value is the whole class record (null when the class does not exist on that side), the regenerable
+ * entry's value is the pattern list.
+ */
+export function buildLoosenDetail(before: GovernedThresholds, after: GovernedThresholds, change: ThresholdChange, executorRun: string | null): DecisionDetail {
+  const entries = [...new Set(change.loosened.map((line) => (line.startsWith(`${REGENERABLE_ENTRY}:`) ? REGENERABLE_ENTRY : (/^([^.:\s]+)[.:]/.exec(line)?.[1] ?? line))))];
+  const valueOf = (record: GovernedThresholds, entry: string): unknown =>
+    entry === REGENERABLE_ENTRY ? record.worktreeRemoveRegenerable : (record.classes[entry] ?? null);
+  const side = (record: GovernedThresholds) => Object.fromEntries(entries.map((entry) => [entry, valueOf(record, entry)]));
+  return {
+    summary: `Loosen the governed autonomy thresholds: ${change.loosened.join("; ")}`,
+    requested_by: executorRun === null ? "lore (no attested run)" : `run ${executorRun}`,
+    change: { entry: entries.join("; "), before: side(before), after: side(after) },
+    on_accept: "The governed autonomy record is rewritten with these values once you re-run the same `lore autonomy` command; the loosened setting then applies to every later decision.",
+    on_reject: "Nothing changes: the governed autonomy record keeps its current values and the loosening is never applied.",
+  };
 }
 
 /** sha256 hex of `text` — the hash the write rows carry. */
@@ -248,7 +272,8 @@ export class AutonomyThresholdService {
       if (!written.ok) return written;
       return ok({ kind: "applied", change, write_record_id: written.value.id, approved_by_record: effective.value.record_id });
     }
-    const decided = await decisions.decide(GOVERNANCE_LOOSEN_CLASS, subject, {});
+    const detail = buildLoosenDetail(current.record, checked.data, change, this.deps.executorRun);
+    const decided = await decisions.decide(GOVERNANCE_LOOSEN_CLASS, subject, {}, detail);
     if (!decided.ok) return decided;
     const pending = await decisions.listPending();
     if (!pending.ok) return pending;
