@@ -121,10 +121,12 @@ export const OPERATION_CLASS_REGISTRY: OperationClassRegistry = {
  * only); until then it lives beside the registry so the rule has one declared source, not a list inside the
  * cleanup service. Widening it here is a governance-loosen change — do not add a path just to make a worktree pass.
  * Source: task AU-T13; spec-autonomy-phase-1-decision-function-human-channel-lore AC-AU-11.
+ * dist-npm/ added 2026-10-18 by user approval (governance-loosen): the output of `bun run build:npm`.
  */
 export const WORKTREE_REMOVE_REGENERABLE_PATTERNS: readonly string[] = [
   "node_modules/",
   "dist/",
+  "dist-npm/",
   ".turbo/",
   "coverage/",
   "*.tsbuildinfo",
