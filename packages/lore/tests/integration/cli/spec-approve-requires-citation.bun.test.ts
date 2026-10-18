@@ -142,7 +142,9 @@ describe("AC-BLS3B-2: a spec needs a citing criterion to be approved", () => {
 
   it("REGRESSION: a plan's approval is unaffected by the citation requirement", () => {
     const plan = slugOf(mustRun(["create", "plan", "--title", "SAC Plan", "--parent", prd, "--content", "## Plan", "--no-ai"], dir).stdout);
-    const r = runLore(["approve", plan], dir);
+    // reason: plans are judged by default (BR-281 / BR-1237); the same audited no-judgment escape the
+    // spec cases use keeps this case about the citation requirement alone.
+    const r = approve(plan);
     expect(r.exitCode).toBe(0);
     expect(docOf(plan, dir).status).toBe("approved");
   });

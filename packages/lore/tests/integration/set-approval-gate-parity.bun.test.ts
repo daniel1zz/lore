@@ -208,7 +208,12 @@ describe("AC-AP-1 set to approved is refused exactly as approve is", () => {
       );
     const a = await mk("Parity plan A");
     const b = await mk("Parity plan B");
-    const { setErr, approveErr } = await bothRefused(a, b, { auditUnchanged: true });
+    // reason: plans are judged by default (BR-281 / BR-1237); an approve judgment of each twin's current
+    // version lets the refusal come from plan-promote, the checkpoint this case is about. The passing
+    // judgment gate leaves its own gate_passed trace row, so parity (not unchanged) is the audit contract.
+    await judge(a.id);
+    await judge(b.id);
+    const { setErr, approveErr } = await bothRefused(a, b, { auditUnchanged: false });
     expect(setErr.code).toBe(approveErr.code);
     expect((setErr as { field?: string }).field).toBe("gate:plan-promote");
     expect(mask(setErr, a)).toEqual(mask(approveErr, b));

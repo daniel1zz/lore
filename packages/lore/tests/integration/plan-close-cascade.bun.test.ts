@@ -80,9 +80,13 @@ function dbPath(): string {
 
 /** `createApp(dbPath, config)` always returns a bare App here — `sync` is absent. */
 function openApp(extra: Record<string, unknown> = {}): App {
+  // reason: plans are judged by default (BR-281 / BR-1237); this suite approves a plan only to reach the
+  // plan-close cascade it tests, never review-judgment, so M2 is emptied unless a caller's `workflow` says otherwise.
+  const extraWorkflow = (extra["workflow"] ?? {}) as Record<string, unknown>;
   const config: LoreConfig = {
     project: { name: "plan-close-cascade-test", author: "tester" },
     ...extra,
+    workflow: { review: { judgment_required_types: [] }, ...extraWorkflow },
   } as unknown as LoreConfig;
   return createApp(dbPath(), config) as App;
 }
