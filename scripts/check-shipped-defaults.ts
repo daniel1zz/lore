@@ -189,6 +189,10 @@ export const PROJECT_SPECIFIC_KEYS: readonly ProjectSpecificKeyEntry[] = [
       "Identifies THIS project by name; a shipped default would be meaningless (or actively wrong) for every other corpus.",
   },
   {
+    key: "workflow.integrate.floor_command",
+    rationale: "The post-merge floor lore integrate runs is the project's own build/check command; it has no meaningful shipped default and integrate refuses when it is absent (adr-main-advances-only-by-lore-integrate-per-session).",
+  },
+  {
     key: "project.author",
     rationale: "Identifies the default author identity for THIS project; inherently per-installation, never shared.",
   },

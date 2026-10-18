@@ -30,6 +30,11 @@ audit:
 # the gate and never dogfooded it. An oracle counts as covered iff at least
 # one declared AC binds verify.mode=script to that oracle.
 workflow:
+  # Main moves only through `lore integrate` (adr-main-advances-only-by-lore-integrate-per-session).
+  # The floor runs in the session's fresh integration worktree: install deps, then the code-only floor
+  # (check:static minus the corpus-dependent checks, scripts/run-chain.ts CORPUS_DEPENDENT_CHECKS).
+  integrate:
+    floor_command: "bun install --frozen-lockfile && bun run check:floor"
   # The main agent dispatches all source changes to implementer agents in this repo
   # (adr-rule-delivery-tiers-gate-hook-skill-and-optimistic); stop-turn-review checks it once per turn.
   turn_end:
