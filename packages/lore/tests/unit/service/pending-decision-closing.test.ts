@@ -3,8 +3,6 @@
  * version, or whose subject no longer exists, is CLOSED by an appended marker row (never an edit or delete).
  * Control: an escalation with the subject present and no newer version stays pending.
  *
- * @spec_ref AC-AU-3
- * @spec_ref AC-AU-2
  */
 import { describe, expect, it } from "vitest";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
