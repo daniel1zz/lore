@@ -19,7 +19,7 @@
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { spawnSync, execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync, appendFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, appendFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { withSessionIdentity } from "../../helpers/session-actor.js";
@@ -178,6 +178,7 @@ describe("AC-TG-6 — red-first (--allow-missing-path) ACs: no evidence stays no
   let taskVanished: string;
   let taskDifferentFile: string;
   let taskDotSpelling: string;
+  let taskScript: string;
 
   const addScriptAc = (id: string, file: string, extra: string[] = []): void => {
     mustRun(
@@ -214,11 +215,17 @@ describe("AC-TG-6 — red-first (--allow-missing-path) ACs: no evidence stays no
     addScriptAc("AC-VAN", "vanish.test.ts", ["--allow-missing-path", "red-first: written before verify"]);
     addScriptAc("AC-DIFF", "never-written.test.ts", ["--allow-missing-path", "red-first: a later task writes it"]);
     addScriptAc("AC-DOT", "dotspelled.bun.test.ts", ["--allow-missing-path", "red-first: written before the pass"]);
+    mustRun(
+      ["ac", "add", spec, "AC-SCR", "--statement", "AC-SCR script oracle", "--mode", "script", "--oracle", "other",
+        "--command", "sh scripts/ran.sh", "--allow-missing-path", "red-first: written before the pass"],
+      dir,
+    );
     plan = extractSlug(mustRun(["create", "plan", "--title", "RF Plan", "--parent", spec, "--no-ai", "--content", "body"], dir));
     taskRedFirst = newTask("RF Task One", ["AC-OK", "AC-RF"]);
     taskVanished = newTask("RF Task Two", ["AC-OK", "AC-VAN"]);
     taskDifferentFile = newTask("RF Task Three", ["AC-OK", "AC-DIFF"]);
     taskDotSpelling = newTask("RF Task Four", ["AC-OK", "AC-DOT"]);
+    taskScript = newTask("RF Task Five", ["AC-OK", "AC-SCR"]);
     commitAll(dir, "fixture");
   }, 180_000);
 
@@ -256,7 +263,7 @@ describe("AC-TG-6 — red-first (--allow-missing-path) ACs: no evidence stays no
     expect(done.stderr).toContain("vanish.test.ts");
   });
 
-  it("REGRESSION (TG-22): a declared red-first AC with a pass tagged to it that ran a DIFFERENT existing file is not a pass on its missing oracle -> done allowed, state not not_measured", { timeout: 180_000 }, () => {
+  it("REGRESSION (TG-22 narrowing removed; AC-TG-6 text + AC-EI-2): a declared red-first AC with a pass tagged to it that ran a DIFFERENT existing file renders not_measured and lore done exits 4 naming the AC and its path", { timeout: 180_000 }, () => {
     const verified = runLore(["verify", plan, "--task", taskDifferentFile, "--ac", "AC-OK", "--yes"], dir);
     expect(verified.exitCode, verified.stdout + verified.stderr).toBe(0);
     // A pass tagged AC-DIFF whose command runs other.bun.test.ts (exists), never never-written.test.ts (the AC's oracle).
@@ -267,9 +274,14 @@ describe("AC-TG-6 — red-first (--allow-missing-path) ACs: no evidence stays no
     );
     expect(recorded.exitCode, recorded.stdout + recorded.stderr).toBe(0);
 
-    expect(stateOf("AC-DIFF")).not.toBe("not_measured");
+    // AC-EI-2: a missing oracle is not measured whichever files earlier passes ran (TG-22's "passes that ran the
+    // missing file" narrowing is gone; spec-test-governance-guards-that-refuse-bad-tests-declared AC-TG-6 text never had it).
+    expect(stateOf("AC-DIFF")).toBe("not_measured");
+    // AC-TG-6 text: `lore done` exits 4 naming the AC until its command is repointed — no "ran the missing file" narrowing.
     const done = runLore(["done", taskDifferentFile, "--declare-no-new-tests", "fixture"], dir);
-    expect(done.exitCode, done.stdout + done.stderr).toBe(0);
+    expect(done.exitCode, done.stdout + done.stderr).toBe(4);
+    expect(done.stderr).toContain("AC-DIFF");
+    expect(done.stderr).toContain("never-written.test.ts");
   });
 
   it("NEGATIVE (TG-22): a pass recorded as ./dotspelled.bun.test.ts of an AC path dotspelled.bun.test.ts that has since vanished is still not measured and refuses done", { timeout: 180_000 }, () => {
@@ -289,5 +301,22 @@ describe("AC-TG-6 — red-first (--allow-missing-path) ACs: no evidence stays no
     const done = runLore(["done", taskDotSpelling, "--declare-no-new-tests", "fixture"], dir);
     expect(done.exitCode, done.stdout + done.stderr).toBe(4);
     expect(done.stderr).toContain("AC-DOT");
+  });
+  it("NEGATIVE (AC-EI-2): a script path that once passed and vanished is not measured and lore done exits 4 naming the AC and the script", { timeout: 180_000 }, () => {
+    mkdirSync(join(dir, "scripts"), { recursive: true });
+    writeFileSync(join(dir, "scripts", "ran.sh"), "echo ran\n");
+    commitAll(dir, "write script oracle");
+    for (const ac of ["AC-OK", "AC-SCR"]) {
+      const verified = runLore(["verify", plan, "--task", taskScript, "--ac", ac, "--yes"], dir);
+      expect(verified.exitCode, verified.stdout + verified.stderr).toBe(0);
+    }
+    rmSync(join(dir, "scripts", "ran.sh"));
+    commitAll(dir, "delete script oracle");
+
+    expect(stateOf("AC-SCR")).toBe("not_measured");
+    const done = runLore(["done", taskScript, "--declare-no-new-tests", "fixture"], dir);
+    expect(done.exitCode, done.stdout + done.stderr).toBe(4);
+    expect(done.stderr).toContain("AC-SCR");
+    expect(done.stderr).toContain("scripts/ran.sh");
   });
 });

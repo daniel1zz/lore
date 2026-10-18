@@ -563,9 +563,15 @@ async function listUnredeemedAllowMissingPathDeclarations(
  */
 async function collectFalsifiabilitySignals(
   app: ReturnType<typeof loadLoreApp>["app"],
+  dbPath: string,
 ): Promise<
   Result<
-    { passUnfalsifiedMembers: string[]; otherCommandMembers: string[]; declaredScriptCommands: string[] },
+    {
+      passUnfalsifiedMembers: string[];
+      otherCommandMembers: string[];
+      oracleFileMissingMembers: string[];
+      declaredScriptCommands: string[];
+    },
     LoreError
   >
 > {
@@ -577,10 +583,18 @@ async function collectFalsifiabilitySignals(
   // AC-EI-1: one `"<spec-slug>#<ac-id>"` per criterion with >=1 evidence row that ran a command other than
   // its current declared one — read off `AcCoverageFact.other_command`, never compared here.
   const otherCommandMembers: string[] = [];
+  // AC-EI-2: one `"<spec-slug>#<ac-id>: <missing path>, …"` per criterion whose declared command names an oracle path
+  // (test OR script) absent on disk — read off `AcCoverageFact.oracle_file_missing`, never re-checked here. Such a
+  // criterion renders `not_measured` once any pass is on record, so status must name the path, not just the state.
+  const oracleFileMissingMembers: string[] = [];
   const declaredScriptCommands: string[] = [];
 
   for (const specSummary of specsResult.value.docs) {
-    const listResult = await acService.listCriteria(specSummary.slug);
+    const listResult = await acService.listCriteria(specSummary.slug, {
+      fileExists: existsSync,
+      cwd: process.cwd(),
+      corpusRoot: dirname(dirname(dbPath)),
+    });
     if (!listResult.ok) return listResult;
 
     for (const criterion of listResult.value.criteria) {
@@ -597,11 +611,14 @@ async function collectFalsifiabilitySignals(
         if (fact.other_command !== undefined && fact.other_command > 0) {
           otherCommandMembers.push(`${specSummary.slug}#${fact.ac_id}`);
         }
+        if (fact.oracle_file_missing !== undefined && fact.oracle_file_missing.length > 0) {
+          oracleFileMissingMembers.push(`${specSummary.slug}#${fact.ac_id}: ${fact.oracle_file_missing.join(", ")}`);
+        }
       }
     }
   }
 
-  return ok({ passUnfalsifiedMembers, otherCommandMembers, declaredScriptCommands });
+  return ok({ passUnfalsifiedMembers, otherCommandMembers, oracleFileMissingMembers, declaredScriptCommands });
 }
 
 /**
@@ -839,15 +856,20 @@ const COUNT_FIELD_ENUMERATORS: Record<
   string,
   (app: ReturnType<typeof loadLoreApp>["app"], dbPath: string) => Promise<Result<string[], LoreError>>
 > = {
-  pass_unfalsified_count: async (app) => {
-    const signalsResult = await collectFalsifiabilitySignals(app);
+  pass_unfalsified_count: async (app, dbPath) => {
+    const signalsResult = await collectFalsifiabilitySignals(app, dbPath);
     if (!signalsResult.ok) return signalsResult;
     return ok(signalsResult.value.passUnfalsifiedMembers);
   },
-  ac_other_command_count: async (app) => {
-    const signalsResult = await collectFalsifiabilitySignals(app);
+  ac_other_command_count: async (app, dbPath) => {
+    const signalsResult = await collectFalsifiabilitySignals(app, dbPath);
     if (!signalsResult.ok) return signalsResult;
     return ok(signalsResult.value.otherCommandMembers);
+  },
+  ac_oracle_file_missing_count: async (app, dbPath) => {
+    const signalsResult = await collectFalsifiabilitySignals(app, dbPath);
+    if (!signalsResult.ok) return signalsResult;
+    return ok(signalsResult.value.oracleFileMissingMembers);
   },
   unredeemed_allow_missing_path_count: async (app, dbPath) =>
     listUnredeemedAllowMissingPathDeclarations(app, dbPath),
@@ -1051,7 +1073,7 @@ export default defineCommand({
     enumerate: {
       type: "string",
       description:
-        "Enumerate the MEMBERS behind a count field the plain run reports (e.g. pass_unfalsified_count, ac_other_command_count, unredeemed_allow_missing_path_count, capture_source_runner_count, capture_source_self_report_count, capture_source_runner_unattested_count, code_anchor_specs, adopted_abandoned_count). Unknown field → exit 4, naming it and the known set.",
+        "Enumerate the MEMBERS behind a count field the plain run reports (e.g. pass_unfalsified_count, ac_other_command_count, ac_oracle_file_missing_count, unredeemed_allow_missing_path_count, capture_source_runner_count, capture_source_self_report_count, capture_source_runner_unattested_count, code_anchor_specs, adopted_abandoned_count). Unknown field → exit 4, naming it and the known set.",
     },
   },
   async run({ args }) {
@@ -1729,7 +1751,7 @@ export default defineCommand({
       // report. REPORT-ONLY: neither number below may influence process.exitCode —
       // 574/700 existing criteria are grandfathered by the governing spec's WRITTEN
       // exemption, never by a synthesized red run.
-      const falsifiabilitySignalsResult = await collectFalsifiabilitySignals(app);
+      const falsifiabilitySignalsResult = await collectFalsifiabilitySignals(app, dbPath);
       if (!falsifiabilitySignalsResult.ok) {
         process.stderr.write(formatError(falsifiabilitySignalsResult.error) + "\n");
         process.exitCode = exitCode(falsifiabilitySignalsResult.error);
@@ -1738,9 +1760,11 @@ export default defineCommand({
       // reason: AC-FR-5 — the count is DERIVED from the member list's length,
       // never a separately-tallied counter (see collectFalsifiabilitySignals's
       // own JSDoc and the COUNT_FIELD_ENUMERATORS registry above).
-      const { passUnfalsifiedMembers, otherCommandMembers, declaredScriptCommands } = falsifiabilitySignalsResult.value;
+      const { passUnfalsifiedMembers, otherCommandMembers, oracleFileMissingMembers, declaredScriptCommands } =
+        falsifiabilitySignalsResult.value;
       const passUnfalsifiedCount = passUnfalsifiedMembers.length;
       const acOtherCommandCount = otherCommandMembers.length;
+      const acOracleFileMissingCount = oracleFileMissingMembers.length;
       const unclaimedOracle = await runUnclaimedOracleCheck(declaredScriptCommands);
 
       // spec-oracle-executability-a-runner-s-discovery-refusal-is-not-a §D8,
@@ -1929,6 +1953,8 @@ export default defineCommand({
                 },
                 pass_unfalsified_count: passUnfalsifiedCount,
                 ac_other_command_count: acOtherCommandCount,
+                ac_oracle_file_missing_count: acOracleFileMissingCount,
+                ac_oracle_file_missing: oracleFileMissingMembers,
                 unclaimed_oracle: unclaimedOracle,
                 unredeemed_allow_missing_path_count: unredeemedAllowMissingPathCount,
                 capture_source_runner_count: captureSourceRunnerCount,
@@ -2035,6 +2061,14 @@ export default defineCommand({
         `Criteria with other-command evidence: ${acOtherCommandCount} (rows that ran a command other than the ` +
           "criterion's current one count toward no pass or fail — see spec-evidence-identity-an-attested-row-counts-only-for-the)",
       );
+
+      // AC-EI-2 — criteria whose declared oracle path (test or script) is missing on disk, each NAMED with its path.
+      // Printed UNCONDITIONALLY (including 0). REPORT-ONLY; `--enumerate ac_oracle_file_missing_count` lists them.
+      console.log(
+        `Criteria with a missing oracle file: ${acOracleFileMissingCount} (not measured once any pass is on record — ` +
+          "see spec-evidence-identity-an-attested-row-counts-only-for-the)",
+      );
+      for (const member of oracleFileMissingMembers) console.log(`  ${member}`);
 
       // spec-oracle-executability-a-runner-s-discovery-refusal-is-not-a §D8,
       // task-wire-allow-missing-path-and-the-unredeemed-declaration (AC-OX-10) —

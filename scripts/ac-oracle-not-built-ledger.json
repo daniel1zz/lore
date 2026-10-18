@@ -1,12 +1,6 @@
 [
   {
     "spec": "spec-evidence-identity-an-attested-row-counts-only-for-the",
-    "ac": "AC-EI-2",
-    "reason": "oracle test not written yet (missing-oracle-any-path.test.ts absent); owned by task-skill-implement-ei-2-missing-oracle-detection-covers",
-    "owner_plan": "plan-evidence-identity-count-only-equal-command-attested-rows"
-  },
-  {
-    "spec": "spec-evidence-identity-an-attested-row-counts-only-for-the",
     "ac": "AC-EI-3",
     "reason": "oracle script not written yet (scripts/check-evidence-identity-drop-set.ts absent); owned by task-skill-test-ei-3-drop-set-snapshot-and-check-evidence",
     "owner_plan": "plan-evidence-identity-count-only-equal-command-attested-rows"
