@@ -177,6 +177,17 @@ describe("check:floor (deriveFloorSteps)", () => {
     for (const name of CORPUS_DEPENDENT_CHECKS) expect(steps).not.toContain(`bun run ${name}`);
   });
 
+  it("classifies by what a check judges: corpus-state checks are out of the floor, the tree-judging ac-oracle-ownership stays in", () => {
+    expect(CORPUS_DEPENDENT_CHECKS.has("check:evidence-identity-drop-set")).toBe(true);
+    expect(CORPUS_DEPENDENT_CHECKS.has("check:ac-ref-integrity")).toBe(true);
+    expect(CORPUS_DEPENDENT_CHECKS.has("check:ac-oracle-ownership")).toBe(false);
+    const real = (JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8")) as { scripts: Record<string, string> }).scripts;
+    const steps = deriveFloorSteps(real);
+    expect(steps).toContain("bun run check:ac-oracle-ownership");
+    expect(steps).not.toContain("bun run check:evidence-identity-drop-set");
+    expect(steps).not.toContain("bun run check:ac-ref-integrity");
+  });
+
   it("fails loud without build or typecheck", () => {
     expect(() => deriveFloorSteps({ typecheck: "y", "check:a": "a" })).toThrow(/"build"/);
   });

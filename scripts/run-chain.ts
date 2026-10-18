@@ -68,7 +68,13 @@ export function renderTable(results: readonly StepResult[], labels: ReadonlyMap<
  * The check:* scripts whose verdict depends on live corpus / mirror state rather than on the code alone:
  * the first two are red until `bun scripts/export-spec-mirror.ts` ran, the census reads recorded AC states.
  */
-export const CORPUS_DEPENDENT_CHECKS: ReadonlySet<string> = new Set(["check:spec-mirror", "check:live-repo-state", "check:corpus-fail-census"]);
+export const CORPUS_DEPENDENT_CHECKS: ReadonlySet<string> = new Set([
+  "check:spec-mirror", // reason: compares the exported mirror to live corpus docs
+  "check:live-repo-state", // reason: sweeps the live corpus / repo state, not the merged code
+  "check:corpus-fail-census", // reason: reads recorded AC states in the corpus
+  "check:evidence-identity-drop-set", // reason: judges only recorded AC states in the corpus; a branch cannot turn it red
+  "check:ac-ref-integrity", // reason: judges evidence rows' ac_ref against declared ACs in the corpus only
+]);
 export const CORPUS_DEPENDENT_LABEL = "corpus-dependent: needs a fresh mirror export / live corpus state";
 
 /** Aggregate scripts excluded from every derived list: they ARE the chains, naming them would recurse. */
