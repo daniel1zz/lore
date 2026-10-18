@@ -1,5 +1,6 @@
 // @reads vitest.shared.ts
 /** @spec_ref AC-TG-11 */
+/** @layer unit AC-TG-11 — unit coverage of one mechanism behind the wall-time AC; the AC itself is owned by scripts/measure-test-wall.ts */
 /**
  * test-yield-setup: the worker's event loop gets a turn between two tests (task-skill-implement-tg-15).
  *

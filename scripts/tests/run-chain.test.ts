@@ -1,6 +1,7 @@
 // @spawns scripts/run-chain.ts
 // @reads package.json
 /** @spec_ref AC-TG-10 */
+/** @layer unit AC-TG-10 — unit coverage of the chain runner behind the whole-run AC; the AC itself is owned by its `bun run test` oracle */
 /**
  * run-chain: the `bun run test` chain runs EVERY step and reports all results (task-skill-implement-tg-15).
  * Six dimensions: HAPPY (all pass) / NEGATIVE (two failing steps both reported, exit 1) / BOUNDARY (the failing step is

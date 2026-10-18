@@ -22,6 +22,7 @@
  *               into an unpaired code unit (BUG-001)
  *
  * @spec_ref AC-ETI-7, AC-ETI-8
+ * @layer unit AC-TG-11 — the tail-keeps-the-final-summary half of the wall-time AC, proven on the pure helper
  */
 
 import { describe, it, expect } from "vitest";
@@ -186,3 +187,28 @@ describe("REGRESSION", () => {
     }
   });
 });
+
+// ─── AC-TG-11 — the witness window never costs the runner's final summary ────────
+
+describe("AC-TG-11 — the stream end survives the witness window (task-skill-fix-tg-36)", () => {
+  it("AC-TG-11 keeps the last lines of a stream whose ac_ref occurs only far before the end, and still contains the ac_ref", () => {
+    const cap = 4000;
+    const body = Array.from({ length: 2000 }, (_, i) => `test case ${i}\n`).join("");
+    const stream = `AC-TG-11 first\n${body}measure-test-wall: 612 s wall\nmeasure-test-wall: FAIL - over budget\n`;
+
+    const result = selectOutputTailWindow(stream, "AC-TG-11", cap);
+    expect(result.length).toBeLessThanOrEqual(cap);
+    expect(result.endsWith("measure-test-wall: 612 s wall\nmeasure-test-wall: FAIL - over budget\n")).toBe(true);
+    expect(result).toContain("AC-TG-11");
+  });
+
+  it("AC-TG-11 keeps the stream end when the ac_ref sits at the very start of a huge block", () => {
+    const cap = 4000;
+    const stream = `AC-TG-11 start\n${"z".repeat(50000)}\nDONE 3 passed\n`;
+    const result = selectOutputTailWindow(stream, "AC-TG-11", cap);
+    expect(result.length).toBeLessThanOrEqual(cap);
+    expect(result.endsWith("\nDONE 3 passed\n")).toBe(true);
+    expect(result).toContain("AC-TG-11 start");
+  });
+});
+
