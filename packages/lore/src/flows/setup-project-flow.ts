@@ -171,7 +171,7 @@
  */
 
 import { createHash } from "node:crypto";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import {
   CLAUDE_MD_MARKER_START,
   CLAUDE_MD_MARKER_END,
@@ -1285,16 +1285,30 @@ async function checkGitSupportsMainRefHook(deps: ProjectScaffoldFlowDeps, repoDi
   };
 }
 
+/**
+ * The `core.hooksPath` value setup writes: the ABSOLUTE path of `<repoDir>/hooks`.
+ *
+ * Why absolute (INT-T8, measured on git 2.50): git resolves a RELATIVE hooksPath
+ * against each working tree, so with `hooks/` untracked a linked worktree has no
+ * `hooks/` and runs no hook (the main-ref guard and pre-push silently do not run
+ * there). An absolute path is shared by every worktree of the repo, needs no
+ * tracked `hooks/`, and lives in the untracked `.git/config`.
+ */
+export function absoluteHooksPath(repoDir: string): string {
+  return join(resolve(repoDir), "hooks");
+}
+
 async function runGitHooksPathStep(deps: ProjectScaffoldFlowDeps, repoDir: string): Promise<GitHooksPathResult> {
   try {
+    const target = absoluteHooksPath(repoDir);
     const getResult = await deps.exec.run(["git", "config", "--get", "core.hooksPath"], repoDir);
     const priorValue = getResult.code === 0 ? getResult.stdout.trim() : null;
 
-    if (priorValue === "hooks") {
+    if (priorValue === target) {
       return { status: "skipped", prior_value: priorValue };
     }
 
-    const setResult = await deps.exec.run(["git", "config", "core.hooksPath", "hooks"], repoDir);
+    const setResult = await deps.exec.run(["git", "config", "core.hooksPath", target], repoDir);
     if (setResult.code !== 0) {
       return {
         status: "failed",
