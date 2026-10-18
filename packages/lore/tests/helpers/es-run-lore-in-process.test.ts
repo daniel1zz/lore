@@ -96,7 +96,9 @@ describe("AC-ES-1 concurrent in-process runs are isolated", () => {
       if (name !== "list") return command;
       return {
         ...command,
-        run: async (context: { inv: { cwd: string; paths: { home: string }; env: Record<string, string | undefined> } }) => {
+        run: async (context: {
+          inv: { cwd: string; paths: { home: string }; env: Record<string, string | undefined>; io: { stdout: { write(t: string): unknown }; stderr: { write(t: string): unknown } } };
+        }) => {
           const { inv } = context;
           const label = inv.env["ES_RUN_LABEL"] ?? "?";
           writeFileSync(join(inv.paths.home, "entered.txt"), `entered ${label}`);
@@ -108,12 +110,13 @@ describe("AC-ES-1 concurrent in-process runs are isolated", () => {
             envHome: process.env["HOME"],
             ownHome: inv.paths.home,
           };
-          console.log(`stdout-console ${label}`);
-          process.stdout.write(`stdout-write ${label}\n`);
-          console.error(`stderr-console ${label}`);
+          // reason: a command writes through `inv.io`, the only output channel a run owns (no console or stream patch).
+          inv.io.stdout.write(`stdout-line ${label}\n`);
+          inv.io.stdout.write(`stdout-write ${label}\n`);
+          inv.io.stderr.write(`stderr-line ${label}\n`);
           writeFileSync(join(inv.paths.home, "finished.txt"), `finished ${label}`);
           await new Promise((resolve) => setTimeout(resolve, 20));
-          console.log(`stdout-after-wait ${label}`);
+          inv.io.stdout.write(`stdout-after-wait ${label}\n`);
         },
       } as unknown as CommandDef<any>;
     };
@@ -136,9 +139,9 @@ describe("AC-ES-1 concurrent in-process runs are isolated", () => {
     expect(latch.arrived).toBe(2);
     for (const [label, result] of [["A", a], ["B", b]] as const) {
       const other = label === "A" ? "B" : "A";
-      expect(result.stderr).toBe(`stderr-console ${label}\n`);
+      expect(result.stderr).toBe(`stderr-line ${label}\n`);
       expect(result.exitCode).toBe(0);
-      expect(result.stdout).toBe(`stdout-console ${label}\nstdout-write ${label}\nstdout-after-wait ${label}\n`);
+      expect(result.stdout).toBe(`stdout-line ${label}\nstdout-write ${label}\nstdout-after-wait ${label}\n`);
       expect(result.stdout).not.toContain(other);
       expect(duringOverlap[label]).toEqual({ envSame: true, cwdSame: true, envHome: process.env["HOME"], ownHome: homes[label] });
       // each home holds exactly what its own run wrote: the other run changed nothing there
