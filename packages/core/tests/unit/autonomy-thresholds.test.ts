@@ -28,6 +28,7 @@ describe("seedGovernedThresholds", () => {
     expect(registryOf(seed)).toEqual(OPERATION_CLASS_REGISTRY);
     expect(seed.worktreeRemoveRegenerable).toEqual([...WORKTREE_REMOVE_REGENERABLE_PATTERNS]);
     expect(seed.worktreeRemoveRegenerable).toContain("dist-npm/");
+    expect(seed.worktreeRemoveRegenerable).toContain(".scratch/");
   });
 
   it("is a copy: mutating it never touches the registry constants", () => {
