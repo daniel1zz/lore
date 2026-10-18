@@ -141,6 +141,9 @@ const main = defineCommand({
     // worktree — `worktree check <path>` / `worktree sweep [--apply]`: lore's ONE "may this worktree be removed
     // now" test (spec-one-worktree-removal-test-for-the-guard-lore-done-and-a); see commands/worktree.ts's header.
     worktree: () => import("./commands/worktree.js").then(wrapDefault("worktree")),
+    // stash — `stash prune [--apply]`: archive every stash under refs/lore/archive/stash, then lore drops it on an
+    // auto decide(stash-drop) verdict (spec-autonomy-phase-1 AC-AU-4); see commands/stash.ts's header.
+    stash: () => import("./commands/stash.js").then(wrapDefault("stash")),
   },
 });
 
