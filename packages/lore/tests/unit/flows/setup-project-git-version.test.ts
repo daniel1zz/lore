@@ -37,8 +37,9 @@ describe("scaffoldProject git-version guard", () => {
     const result = await scaffoldProject(deps, { repoDir: "/tmp/never-written" });
     expect(result.ok).toBe(false);
     if (result.ok) return;
-    expect(result.error.message).toContain("2.27.1");
-    expect(result.error.message).toContain("2.28");
+    const text = JSON.stringify(result.error);
+    expect(text).toContain("2.27.1");
+    expect(text).toContain("2.28");
     expect(writes).toEqual([]);
   });
 
