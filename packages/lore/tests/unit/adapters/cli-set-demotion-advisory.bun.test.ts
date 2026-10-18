@@ -326,9 +326,9 @@ describe("lore set — approved→draft demotion advisory on the standard patch 
     // Both the AI-mutation branch and the standard patch branch must reference the
     // exported identifier by name.
     const identifierOccurrences = source.split("APPROVED_DEMOTION_ADVISORY").length - 1;
-    // 1 export declaration + JSDoc mentions + >=2 console.log call sites.
+    // 1 export declaration + JSDoc mentions + >=2 printLine call sites.
     expect(identifierOccurrences).toBeGreaterThanOrEqual(3);
-    const consoleLogUsages = (source.match(/console\.log\(APPROVED_DEMOTION_ADVISORY\)/g) ?? []).length;
+    const consoleLogUsages = (source.match(/printLine\(inv\.io\.stdout, APPROVED_DEMOTION_ADVISORY\)/g) ?? []).length;
     expect(consoleLogUsages).toBe(2);
   });
 });

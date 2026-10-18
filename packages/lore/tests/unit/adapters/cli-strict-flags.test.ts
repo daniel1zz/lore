@@ -188,6 +188,7 @@ describe("wrapCommandStrict", () => {
         rawArgs: ["plan-1", "phase-1", "--bogus"],
         args: {} as never,
         cmd: addCmd as CommandDef,
+        ...liveInv(),
       }),
     ).rejects.toMatchObject({ name: "CliExit", code: 2 });
     expect(addRun).not.toHaveBeenCalled();
@@ -214,6 +215,7 @@ describe("wrapCommandStrict", () => {
       rawArgs: ["plan-1", "phase-1"],
       args: {} as never,
       cmd: addCmd as CommandDef,
+      ...liveInv(),
     });
 
     expect(addRun).toHaveBeenCalledTimes(1);
