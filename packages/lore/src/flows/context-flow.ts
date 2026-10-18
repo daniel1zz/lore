@@ -430,7 +430,8 @@ export async function runContextInit(
   if (!spliceResult.ok) return spliceResult;
 
   const finalContent = ensureTrailingNewline(spliceResult.value.content);
-  await deps.fs.writeFile(CLAUDE_MD_PATH, finalContent);
+  const written = await deps.fs.writeFile(CLAUDE_MD_PATH, finalContent);
+  if (!written.ok) return written;
 
   return ok({ path: CLAUDE_MD_PATH, narrative, sections: spliceResult.value.perSection });
 }
@@ -868,17 +869,25 @@ export async function runContextRefresh(
     }
   }
 
-  if (claudeMdWrite !== null) await deps.fs.writeFile(CLAUDE_MD_PATH, claudeMdWrite.content);
+  if (claudeMdWrite !== null) {
+    const written = await deps.fs.writeFile(CLAUDE_MD_PATH, claudeMdWrite.content);
+    if (!written.ok) return written;
+  }
   const rulesWritten: string[] = []; // rules AND skill files: D16 lists every lore file written
   for (const action of actions) {
     if (action.kind === "write") {
-      await deps.fs.writeFile(action.outcome.path, action.content);
+      const written = await deps.fs.writeFile(action.outcome.path, action.content);
+      if (!written.ok) return written;
       rulesWritten.push(action.outcome.path);
     } else if (action.kind === "delete") {
-      await deps.fs.deleteFile?.(action.outcome.path);
+      const deleted = await deps.fs.deleteFile?.(action.outcome.path);
+      if (deleted !== undefined && !deleted.ok) return deleted;
       // reason: a pruned skill leaves an empty `lore-<id>/` dir; remove it only when empty so a
       // hand-added file beside SKILL.md keeps its folder (BR-1064, BR-1060).
-      if (action.removeDirIfEmpty !== undefined) await deps.fs.removeDirIfEmpty?.(action.removeDirIfEmpty);
+      if (action.removeDirIfEmpty !== undefined) {
+        const removed = await deps.fs.removeDirIfEmpty?.(action.removeDirIfEmpty);
+        if (removed !== undefined && !removed.ok) return removed;
+      }
     }
   }
 

@@ -24,6 +24,8 @@
  *   Interface, §Design Decisions D9.
  */
 
+import { err, ok, type LoreError, type Result } from "./errors.js";
+
 /**
  * Read-only filesystem capability. Paths are caller-defined strings (the
  * context-verb callers use repo-relative POSIX paths); this contract does
@@ -40,20 +42,24 @@ export interface FsReadPort {
 
 /** Read + write filesystem capability — {@link FsReadPort} plus a write method and an optional delete. */
 export interface FsWritePort extends FsReadPort {
-  /** Writes `content` to `path`, creating or overwriting it wholesale (no partial/append writes). */
-  writeFile(path: string, content: string): Promise<void>;
   /**
-   * Removes the file at `path`; a no-op when it does not exist. Optional so read/write-only test
+   * Writes `content` to `path`, creating or overwriting it wholesale (no partial/append writes).
+   * ROOTED (BR-1177): a port is constructed with the roots it may write under; a `path` outside every
+   * root resolves `err(VALIDATION_ERROR)` and nothing is written. A genuine disk failure still throws.
+   */
+  writeFile(path: string, content: string): Promise<Result<void, LoreError>>;
+  /**
+   * Removes the file at `path`; a no-op when it does not exist; outside every root = `err(VALIDATION_ERROR)`, target untouched. Optional so read/write-only test
    * doubles stay valid; a caller that NEEDS to delete (spec-context-fragments D15 prune) must
    * refuse loudly when the port lacks it, never skip silently.
    */
-  deleteFile?(path: string): Promise<void>;
+  deleteFile?(path: string): Promise<Result<void, LoreError>>;
   /**
    * Removes the directory at `path` ONLY when it exists and holds no entries; a no-op when it is absent
    * or non-empty (never recursive, never throws for those two cases). Optional: a port without real
    * directories (the in-memory double) may omit it, and a caller treats the cleanup as best-effort.
    */
-  removeDirIfEmpty?(path: string): Promise<void>;
+  removeDirIfEmpty?(path: string): Promise<Result<void, LoreError>>;
 }
 
 /**
@@ -71,10 +77,17 @@ export interface FsWritePort extends FsReadPort {
  */
 export class InMemoryFsPort implements FsWritePort {
   private readonly files: Map<string, string>;
+  private readonly roots: readonly string[] | undefined;
 
-  /** @param initialFiles - Optional seed content, keyed by path (as passed to {@link readFile}). */
-  constructor(initialFiles?: Record<string, string>) {
+  /**
+   * @param initialFiles - Optional seed content, keyed by path (as passed to {@link readFile}).
+   * @param roots - Writable roots (lexical containment; this double has no symlinks to model). `""`/`"."`
+   *   is the relative-path space. Omitted = UNROOTED, a test-only convenience for suites that exercise
+   *   flow logic rather than the root guard; every production port is constructed with roots.
+   */
+  constructor(initialFiles?: Record<string, string>, roots?: readonly string[]) {
     this.files = new Map(Object.entries(initialFiles ?? {}));
+    this.roots = roots;
   }
 
   async exists(path: string): Promise<boolean> {
@@ -101,16 +114,78 @@ export class InMemoryFsPort implements FsWritePort {
     return [...children];
   }
 
-  async writeFile(path: string, content: string): Promise<void> {
+  async writeFile(path: string, content: string): Promise<Result<void, LoreError>> {
+    const guard = this.guard(path);
+    if (!guard.ok) return guard;
     this.files.set(path, content);
+    return ok(undefined);
   }
 
-  async deleteFile(path: string): Promise<void> {
+  async deleteFile(path: string): Promise<Result<void, LoreError>> {
+    const guard = this.guard(path);
+    if (!guard.ok) return guard;
     this.files.delete(path);
+    return ok(undefined);
   }
 
   /** No-op: this double has no real directories — a directory exists only while a file lives under it. */
-  async removeDirIfEmpty(_path: string): Promise<void> {}
+  async removeDirIfEmpty(path: string): Promise<Result<void, LoreError>> {
+    return this.guard(path);
+  }
+
+  private guard(path: string): Result<void, LoreError> {
+    return this.roots === undefined ? ok(undefined) : assertInsideRoots(path, this.roots);
+  }
+}
+
+/**
+ * Lexically normalises a port path: collapses `.`, empty and `a/..` segments and unifies `\` to `/`.
+ * Absolute paths keep their leading `/`; a relative path that climbs above its start keeps leading `..`
+ * segments (so it can never be mistaken for inside a root). Pure — no Node import (browser-safe barrel).
+ */
+export function normalizePortPath(path: string): string {
+  const unified = path.split("\\").join("/");
+  const absolute = unified.startsWith("/");
+  const out: string[] = [];
+  for (const segment of unified.split("/")) {
+    if (segment === "" || segment === ".") continue;
+    if (segment === "..") {
+      if (out.length > 0 && out[out.length - 1] !== "..") out.pop();
+      else if (!absolute) out.push("..");
+      continue;
+    }
+    out.push(segment);
+  }
+  return (absolute ? "/" : "") + out.join("/");
+}
+
+/**
+ * True iff `path` lies inside (or equals) one of `roots`, compared lexically after {@link normalizePortPath}.
+ * A root of `""`/`"."` is the relative-path space: it contains every relative path that does not climb out.
+ */
+export function isInsideRoots(path: string, roots: readonly string[]): boolean {
+  const target = normalizePortPath(path);
+  return roots.some((root) => {
+    const base = normalizePortPath(root);
+    if (base === "") return !target.startsWith("/") && target !== ".." && !target.startsWith("../");
+    if (base === "/") return target.startsWith("/");
+    return target === base || target.startsWith(`${base}/`);
+  });
+}
+
+/** `ok` when `path` is inside `roots` (lexically), else the BR-1177 `VALIDATION_ERROR` naming the path and the roots. */
+export function assertInsideRoots(path: string, roots: readonly string[]): Result<void, LoreError> {
+  return isInsideRoots(path, roots) ? ok(undefined) : err(outsideRootsError(path, roots));
+}
+
+/** The BR-1177 refusal: `VALIDATION_ERROR` on `path`, message names the offending path and every root. */
+export function outsideRootsError(path: string, roots: readonly string[]): LoreError {
+  return {
+    code: "VALIDATION_ERROR",
+    field: "path",
+    message: `refusing to write ${path} — it is outside the write roots [${roots.join(", ")}]; nothing was written.`,
+    value: path,
+  };
 }
 
 /** Removes exactly one trailing `/` from `path`, if present (private path helper, not exported — `listDir` prefix matching only). */

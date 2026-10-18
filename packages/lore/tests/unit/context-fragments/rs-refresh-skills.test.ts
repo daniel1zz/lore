@@ -37,11 +37,11 @@ class RecordingFs implements FsWritePort {
   }
   async writeFile(path: string, content: string) {
     this.ops.push(`write ${path}`);
-    await this.inner.writeFile(path, content);
+    return this.inner.writeFile(path, content);
   }
   async deleteFile(path: string) {
     this.ops.push(`delete ${path}`);
-    await this.inner.deleteFile(path);
+    return this.inner.deleteFile(path);
   }
 }
 

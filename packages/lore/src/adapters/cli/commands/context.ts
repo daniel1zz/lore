@@ -78,9 +78,9 @@
  *   §Public Interface, §Design Decisions D2/D3; AC-CTX-3.
  */
 
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, rmdirSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, readlinkSync, realpathSync, rmSync, rmdirSync, writeFileSync } from "node:fs";
 import { currentHomeDir } from "@lore/core/node";
-import { dirname, isAbsolute, join } from "node:path";
+import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { defineCommand } from "citty";
 import {
@@ -88,7 +88,7 @@ import {
   formatMemoryFileBudgetSubstitution,
   resolveMemoryFileBudgetsFromConfigResult,
 } from "@lore/core";
-import { err, ok } from "@lore/core";
+import { err, isInsideRoots, ok, outsideRootsError } from "@lore/core";
 import type { CallerSurface, ContextConfigLayer, FsWritePort, LoreError, MemoryFileBudgets, Result } from "@lore/core";
 import { loadConfig, loadGlobalConfig } from "@lore/core/node";
 import { exitCode, findLoreDbPath, formatError } from "../utils.js";
@@ -179,19 +179,50 @@ export function toContextLayer(
 }
 
 /**
- * Builds a real `node:fs`-backed `FsWritePort` rooted at `repoRoot` — the
- * CLI adapter boundary D9 reserves for the "real implementation" (never
- * `@lore/core`, never `service/context-facts.ts`/`flows/context-flow.ts`
- * themselves). Mirrors `adapters/real-fs-probe.ts`'s "collapse ordinary
- * failure, never throw" convention for the three read methods; `writeFile`
- * is the one method allowed to throw (a genuine disk-write failure is a
- * real error the caller must see, not silently swallow).
+ * Resolves `path` to the location a write would really land on: the realpath of its deepest EXISTING
+ * ancestor (following symlinks, including a dangling link at the target) with the not-yet-existing
+ * segments appended. Pure observation — touches nothing.
  */
-export function makeRealContextFsPort(repoRoot: string): FsWritePort {
+function resolveWriteLanding(path: string, depth = 0): string {
+  const absolute = resolve(path);
+  if (depth > 32) return absolute; // reason: a symlink loop — the lexical form stays outside any root unless it is genuinely inside.
+  try {
+    return realpathSync(absolute);
+  } catch {
+    // The path (or an ancestor) is missing — or it is a dangling symlink, which realpath also rejects.
+  }
+  try {
+    if (lstatSync(absolute).isSymbolicLink()) {
+      return resolveWriteLanding(resolve(dirname(absolute), readlinkSync(absolute)), depth + 1);
+    }
+  } catch {
+    // Not even an lstat-able entry: genuinely absent, climb to the parent below.
+  }
+  const parent = dirname(absolute);
+  if (parent === absolute) return absolute;
+  return join(resolveWriteLanding(parent, depth + 1), basename(absolute));
+}
+
+/**
+ * Builds a real `node:fs`-backed, ROOTED `FsWritePort` (BR-1177): relative paths resolve against
+ * `repoRoot`, and every mutation first checks that its REAL landing spot (symlinks followed, see
+ * {@link resolveWriteLanding}) lies inside one of `roots` (also realpath-resolved) — outside any root it
+ * returns `err(VALIDATION_ERROR)` and touches nothing, so a target resolved from the wrong home fails loud
+ * instead of writing. This is the CLI adapter boundary D9 reserves for the "real implementation" (never
+ * `@lore/core`). Reads follow the "collapse ordinary failure, never throw" convention; a genuine disk-write
+ * failure inside a root still throws (a real error the caller must see).
+ *
+ * @param repoRoot - Base for relative paths.
+ * @param roots - Directories a write or delete may land under (project root, agent settings folder, ...).
+ */
+export function makeRealContextFsPort(repoRoot: string, roots: readonly string[]): FsWritePort {
   // reason: the fragment pipeline addresses files OUTSIDE the repo (shipped assets, the XDG
   // user layer, `~/.claude/CLAUDE.md`) by absolute path; `join(repoRoot, "/abs")` would
   // wrongly nest them under the repo, so absolute paths pass through unchanged.
   const resolvePath = (path: string): string => (isAbsolute(path) ? path : join(repoRoot, path));
+  const realRoots = roots.map((root) => resolveWriteLanding(root));
+  const guard = (path: string, target: string): Result<void, LoreError> =>
+    isInsideRoots(resolveWriteLanding(target), realRoots) ? ok(undefined) : err(outsideRootsError(path, roots));
   return {
     async exists(path: string): Promise<boolean> {
       return existsSync(resolvePath(path));
@@ -210,27 +241,38 @@ export function makeRealContextFsPort(repoRoot: string): FsWritePort {
         return [];
       }
     },
-    async writeFile(path: string, content: string): Promise<void> {
+    async writeFile(path: string, content: string): Promise<Result<void, LoreError>> {
       const target = resolvePath(path);
+      const allowed = guard(path, target);
+      if (!allowed.ok) return allowed;
       // reason: user scope may create `~/.claude/CLAUDE.md` before `~/.claude/` exists.
       mkdirSync(dirname(target), { recursive: true });
       writeFileSync(target, content, "utf8");
+      return ok(undefined);
     },
-    async deleteFile(path: string): Promise<void> {
+    async deleteFile(path: string): Promise<Result<void, LoreError>> {
+      const target = resolvePath(path);
+      const allowed = guard(path, target);
+      if (!allowed.ok) return allowed;
       // reason: `force: true` makes an already-absent file a no-op (the port contract); every
       // other failure (permissions, a directory at the path) stays loud.
-      rmSync(resolvePath(path), { force: true });
+      rmSync(target, { force: true });
+      return ok(undefined);
     },
-    async removeDirIfEmpty(path: string): Promise<void> {
+    async removeDirIfEmpty(path: string): Promise<Result<void, LoreError>> {
+      const target = resolvePath(path);
+      const allowed = guard(path, target);
+      if (!allowed.ok) return allowed;
       // reason: `rmdir` is the atomic "only if empty" primitive — an absent or non-empty dir is the
       // expected no-op; any other failure (permissions, a file at the path) stays loud.
       try {
-        rmdirSync(resolvePath(path));
+        rmdirSync(target);
       } catch (cause) {
         const code = (cause as NodeJS.ErrnoException).code;
-        if (code === "ENOENT" || code === "ENOTEMPTY" || code === "EEXIST") return;
+        if (code === "ENOENT" || code === "ENOTEMPTY" || code === "EEXIST") return ok(undefined);
         throw cause;
       }
+      return ok(undefined);
     },
   };
 }
@@ -462,7 +504,6 @@ export default defineCommand({
 
     const dbPath = findLoreDbPath();
     const repoRoot = dirname(dirname(dbPath));
-    const fsPort = makeRealContextFsPort(repoRoot);
     const json = args.json === true;
 
     // ONE config load + budgets resolution per invocation (AC-CTX-8) — reused
@@ -488,6 +529,10 @@ export default defineCommand({
       return;
     }
     const home = currentHomeDir();
+    const userConfigDir = resolveUserConfigDir(process.env, home);
+    // reason: BR-1177 — writes may land only in the project, the agent settings folder (rules, skills) and
+    // the user config layer (user-scope selection file); a target resolved from the wrong home is refused.
+    const fsPort = makeRealContextFsPort(repoRoot, [repoRoot, join(home, ".claude"), userConfigDir]);
     const pathCtx: SetupPathContext = {
       repoRoot: REPO_ROOT,
       isCompiled: Bun.main.startsWith("/$bunfs/"),
@@ -517,7 +562,6 @@ export default defineCommand({
     }
 
     if (topic === "list" || topic === "add" || topic === "remove") {
-      const userConfigDir = resolveUserConfigDir(process.env, home);
       const selectionDeps: SelectionFlowDeps = {
         fs: fsPort,
         roots: {

@@ -14,7 +14,7 @@
 
 import { describe, expect, it } from "vitest";
 import { InMemoryFsPort, resolveMemoryFileBudgets } from "@lore/core";
-import type { FsWritePort } from "@lore/core";
+import type { FsWritePort, LoreError, Result } from "@lore/core";
 import { runContextRefresh } from "../../../src/flows/context-flow.js";
 
 const FRAGMENT_A = "---\nid: d16-a\ntitle: D16 A\naudience: [main]\nmode: static\n---\nSentinel body D16-A-1.\n";
@@ -51,9 +51,9 @@ class InterleavingFs implements FsWritePort {
   listDir(path: string): Promise<string[]> {
     return this.inner.listDir(path);
   }
-  async writeFile(path: string, content: string): Promise<void> {
+  async writeFile(path: string, content: string): Promise<Result<void, LoreError>> {
     this.writes.push(path);
-    await this.inner.writeFile(path, content);
+    return this.inner.writeFile(path, content);
   }
 }
 
