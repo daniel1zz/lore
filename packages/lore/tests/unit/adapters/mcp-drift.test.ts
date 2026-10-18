@@ -36,6 +36,7 @@
  *               pre-SPEC-045 behavior)
  */
 
+import { liveInvocation } from "../../live-invocation.js";
 import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
 import { describe, it, expect, beforeEach } from "vitest";
@@ -201,7 +202,7 @@ let server: McpServer;
 beforeEach(() => {
   app = makeApp();
   server = new McpServer({ name: "test", version: "0.0.0" });
-  registerTools(server, app);
+  registerTools(server, app, undefined, liveInvocation());
 });
 
 // ─── BOUNDARY: lore_status {} — byte-identical pre-SPEC-045 shape ────────────

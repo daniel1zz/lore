@@ -544,7 +544,7 @@ describe("AC-GI-11 scenario 1: dry-run performs ZERO network writes", () => {
       targetRepo: TARGET_REPO,
       concurrency: 4,
       dryRun: true,
-      ghRunner: new GhRunner({ execFile: fakeGh.execFile }),
+      ghRunner: new GhRunner({ execFile: fakeGh.execFile, env: process.env }),
       receiptLogPath,
     });
   }, 30_000);
@@ -605,7 +605,7 @@ describe("AC-GI-11 scenarios 2-4: a successful migration lands 12 issues (2 clos
       targetRepo: TARGET_REPO,
       concurrency: 4,
       dryRun: false,
-      ghRunner: new GhRunner({ execFile: fakeGh.execFile }),
+      ghRunner: new GhRunner({ execFile: fakeGh.execFile, env: process.env }),
       receiptLogPath,
     });
   }, 30_000);
@@ -764,7 +764,7 @@ describe("AC-GI-11 scenario 5: a failure between create and PATCH is reconciliat
       targetRepo: TARGET_REPO,
       concurrency: 1,
       dryRun: false,
-      ghRunner: new GhRunner({ execFile: fakeGh.execFile }),
+      ghRunner: new GhRunner({ execFile: fakeGh.execFile, env: process.env }),
       receiptLogPath,
     });
   }, 30_000);

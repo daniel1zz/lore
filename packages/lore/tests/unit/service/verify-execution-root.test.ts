@@ -20,6 +20,7 @@
  * @spec_ref AC-063-2 (REPRO), AC-063-3 (REGRESSION), AC-063-6 (explicit override)
  */
 
+import { tmpdir } from "node:os";
 import { describe, it, expect } from "vitest";
 import { ok } from "@lore/core";
 import type { AcceptanceCriterion, DocRecord, LoreError, PlanBundle, Result } from "@lore/core";
@@ -135,6 +136,7 @@ const baseConfig = {
   envAllowlist: [],
   envPassthroughAll: true,
   processEnv: {},
+  tmpDir: tmpdir(),
 };
 
 const PASS_EXECUTION: VerifyExecutionResult = {

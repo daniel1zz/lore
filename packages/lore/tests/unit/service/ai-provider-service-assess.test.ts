@@ -318,7 +318,7 @@ describe("assessPlan — corrective retry success (AC-ASSESS-3, D9)", () => {
     });
     const { service } = makeAssessService({ provider });
 
-    const result = await service.assessPlan(bundle, { commitDerivationUnverifiable: false });
+    const result = await service.assessPlan(bundle, { repoRoot: process.cwd(), commitDerivationUnverifiable: false });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.value.judgment.retried).toBe(true);
@@ -330,7 +330,7 @@ describe("assessPlan — corrective retry success (AC-ASSESS-3, D9)", () => {
     const provider = new InMemoryAIProvider("in-memory", { kind: "ok", content: VALID_JSON });
     const { service } = makeAssessService({ provider });
 
-    const result = await service.assessPlan(bundle, { commitDerivationUnverifiable: false });
+    const result = await service.assessPlan(bundle, { repoRoot: process.cwd(), commitDerivationUnverifiable: false });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.value.judgment.retried).toBe(false);
@@ -345,7 +345,7 @@ describe("assessPlan — corrective retry success (AC-ASSESS-3, D9)", () => {
     });
     const { service } = makeAssessService({ provider });
 
-    await service.assessPlan(bundle, { commitDerivationUnverifiable: false });
+    await service.assessPlan(bundle, { repoRoot: process.cwd(), commitDerivationUnverifiable: false });
     expect(provider.calls).toHaveLength(2);
     const retryPrompt = provider.calls[1]?.prompt ?? "";
     expect(retryPrompt).toContain("Correction Required");
@@ -362,7 +362,7 @@ describe("assessPlan — corrective retry success (AC-ASSESS-3, D9)", () => {
     });
     const { service } = makeAssessService({ provider });
 
-    await service.assessPlan(bundle, { commitDerivationUnverifiable: false });
+    await service.assessPlan(bundle, { repoRoot: process.cwd(), commitDerivationUnverifiable: false });
     expect(provider.calls).toHaveLength(2);
   });
 });
@@ -379,7 +379,7 @@ describe("assessPlan — double-malformed failure (AC-ASSESS-4)", () => {
     });
     const { service } = makeAssessService({ provider });
 
-    const result = await service.assessPlan(bundle, { commitDerivationUnverifiable: false });
+    const result = await service.assessPlan(bundle, { repoRoot: process.cwd(), commitDerivationUnverifiable: false });
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.error.code).toBe("AI_PROVIDER_ERROR");
@@ -395,7 +395,7 @@ describe("assessPlan — double-malformed failure (AC-ASSESS-4)", () => {
     });
     const { service } = makeAssessService({ provider });
 
-    const result = await service.assessPlan(bundle, { commitDerivationUnverifiable: false });
+    const result = await service.assessPlan(bundle, { repoRoot: process.cwd(), commitDerivationUnverifiable: false });
     expect(result.ok).toBe(false);
     if (result.ok) return;
     // message = fixed prefix text + up to 500 chars of raw output — the raw slice
@@ -415,7 +415,7 @@ describe("assessPlan — double-malformed failure (AC-ASSESS-4)", () => {
       responses: [{ kind: "ok", content: "garbage one" }, { kind: "ok", content: "garbage two" }],
     });
     const { service } = makeAssessService({ provider });
-    await service.assessPlan(bundle, { commitDerivationUnverifiable: false });
+    await service.assessPlan(bundle, { repoRoot: process.cwd(), commitDerivationUnverifiable: false });
 
     const afterResult = await store.findMany({});
     if (!afterResult.ok) throw new Error("findMany failed");
@@ -431,7 +431,7 @@ describe("assessPlan — double-malformed failure (AC-ASSESS-4)", () => {
     });
     const { service } = makeAssessService({ provider });
 
-    const result = await service.assessPlan(bundle, { commitDerivationUnverifiable: false });
+    const result = await service.assessPlan(bundle, { repoRoot: process.cwd(), commitDerivationUnverifiable: false });
     expect(result.ok).toBe(false);
     // Only ONE call — a transport error is not a "malformed JSON" retry trigger.
     expect(provider.calls).toHaveLength(1);
@@ -450,7 +450,7 @@ describe("assessPlan — telemetry exactly-once on every terminal outcome (D10)"
     });
     const { service, emitCalls } = makeAssessService({ provider });
 
-    await service.assessPlan(bundle, { commitDerivationUnverifiable: false });
+    await service.assessPlan(bundle, { repoRoot: process.cwd(), commitDerivationUnverifiable: false });
     expect(emitCalls).toHaveLength(1);
   });
 
@@ -463,7 +463,7 @@ describe("assessPlan — telemetry exactly-once on every terminal outcome (D10)"
     });
     const { service, emitCalls } = makeAssessService({ provider });
 
-    await service.assessPlan(bundle, { commitDerivationUnverifiable: false });
+    await service.assessPlan(bundle, { repoRoot: process.cwd(), commitDerivationUnverifiable: false });
     expect(emitCalls).toHaveLength(1);
   });
 
@@ -473,7 +473,7 @@ describe("assessPlan — telemetry exactly-once on every terminal outcome (D10)"
     const provider = new InMemoryAIProvider("in-memory", { kind: "ok", content: VALID_JSON });
     const { service, emitCalls } = makeAssessService({ provider });
 
-    await service.assessPlan(bundle, { commitDerivationUnverifiable: false });
+    await service.assessPlan(bundle, { repoRoot: process.cwd(), commitDerivationUnverifiable: false });
     expect(emitCalls).toHaveLength(1);
   });
 
@@ -483,7 +483,7 @@ describe("assessPlan — telemetry exactly-once on every terminal outcome (D10)"
     const provider = new InMemoryAIProvider("in-memory", { kind: "ok", content: VALID_JSON });
     const { service, emitCalls } = makeAssessService({ provider });
 
-    await service.assessPlan(bundle, { commitDerivationUnverifiable: false });
+    await service.assessPlan(bundle, { repoRoot: process.cwd(), commitDerivationUnverifiable: false });
     expect(emitCalls[0]?.kind).toBe("assess");
   });
 
@@ -496,7 +496,7 @@ describe("assessPlan — telemetry exactly-once on every terminal outcome (D10)"
     });
     const { service, telemetry } = makeAssessService({ provider, aiTelemetryEnabled: false });
 
-    await service.assessPlan(bundle, { commitDerivationUnverifiable: false });
+    await service.assessPlan(bundle, { repoRoot: process.cwd(), commitDerivationUnverifiable: false });
     expect(telemetry.emit).not.toHaveBeenCalled();
   });
 });
@@ -510,7 +510,7 @@ describe("assessPlan — prompt content carries the plan bundle's materials (AC-
     const provider = new InMemoryAIProvider("in-memory", { kind: "ok", content: VALID_JSON });
     const { service } = makeAssessService({ provider });
 
-    await service.assessPlan(bundle, { commitDerivationUnverifiable: false });
+    await service.assessPlan(bundle, { repoRoot: process.cwd(), commitDerivationUnverifiable: false });
     const prompt = provider.calls[0]?.prompt ?? "";
     expect(prompt).toContain(bundle.plan.title);
     expect(prompt).toContain("Plan goals and phases.");
@@ -522,7 +522,7 @@ describe("assessPlan — prompt content carries the plan bundle's materials (AC-
     const provider = new InMemoryAIProvider("in-memory", { kind: "ok", content: VALID_JSON });
     const { service } = makeAssessService({ provider });
 
-    await service.assessPlan(bundle, { commitDerivationUnverifiable: false });
+    await service.assessPlan(bundle, { repoRoot: process.cwd(), commitDerivationUnverifiable: false });
     const prompt = provider.calls[0]?.prompt ?? "";
     expect(prompt).toContain("AC-ASSESS-1");
     expect(prompt).toContain("Something must happen.");
@@ -534,7 +534,7 @@ describe("assessPlan — prompt content carries the plan bundle's materials (AC-
     const provider = new InMemoryAIProvider("in-memory", { kind: "ok", content: VALID_JSON });
     const { service } = makeAssessService({ provider });
 
-    await service.assessPlan(bundle, { commitDerivationUnverifiable: false });
+    await service.assessPlan(bundle, { repoRoot: process.cwd(), commitDerivationUnverifiable: false });
     const prompt = provider.calls[0]?.prompt ?? "";
     expect(prompt).toContain("oracle=tsc");
     expect(prompt).toContain('command="bun run typecheck"');
@@ -552,7 +552,7 @@ describe("assessPlan — prompt content carries the plan bundle's materials (AC-
     const provider = new InMemoryAIProvider("in-memory", { kind: "ok", content: VALID_JSON });
     const { service } = makeAssessService({ provider });
 
-    await service.assessPlan(bundle, { commitDerivationUnverifiable: false });
+    await service.assessPlan(bundle, { repoRoot: process.cwd(), commitDerivationUnverifiable: false });
     const prompt = provider.calls[0]?.prompt ?? "";
     expect(prompt).toContain("Implement the thing");
   });
@@ -563,7 +563,7 @@ describe("assessPlan — prompt content carries the plan bundle's materials (AC-
     const provider = new InMemoryAIProvider("in-memory", { kind: "ok", content: VALID_JSON });
     const { service } = makeAssessService({ provider });
 
-    await service.assessPlan(bundle, { diffText: "diff --git a/foo.ts b/foo.ts\n+added line\n", commitDerivationUnverifiable: false });
+    await service.assessPlan(bundle, { repoRoot: process.cwd(), diffText: "diff --git a/foo.ts b/foo.ts\n+added line\n", commitDerivationUnverifiable: false });
     const prompt = provider.calls[0]?.prompt ?? "";
     expect(prompt).toContain("added line");
   });
@@ -586,7 +586,7 @@ describe("assessPlan — prompt content carries the plan bundle's materials (AC-
 
     const provider = new InMemoryAIProvider("in-memory", { kind: "ok", content: VALID_JSON });
     const { service } = makeAssessService({ provider });
-    await service.assessPlan(bundleResult.value, { commitDerivationUnverifiable: false });
+    await service.assessPlan(bundleResult.value, { repoRoot: process.cwd(), commitDerivationUnverifiable: false });
     const prompt = provider.calls[0]?.prompt ?? "";
     expect(prompt).toContain("(no evidence recorded)");
   });
@@ -618,7 +618,7 @@ describe("assessPlan — budget truncation is recorded in judgment.truncated (AC
       budgets: { max_plan_chars: 50, max_spec_chars: 12000, max_task_chars: 4000, max_diff_chars: 24000 },
     });
 
-    const result = await service.assessPlan(bundleResult.value, { commitDerivationUnverifiable: false });
+    const result = await service.assessPlan(bundleResult.value, { repoRoot: process.cwd(), commitDerivationUnverifiable: false });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.value.judgment.truncated).toContain("plan");
@@ -630,7 +630,7 @@ describe("assessPlan — budget truncation is recorded in judgment.truncated (AC
     const provider = new InMemoryAIProvider("in-memory", { kind: "ok", content: VALID_JSON });
     const { service } = makeAssessService({ provider });
 
-    const result = await service.assessPlan(bundle, { commitDerivationUnverifiable: false });
+    const result = await service.assessPlan(bundle, { repoRoot: process.cwd(), commitDerivationUnverifiable: false });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.value.judgment.truncated).toEqual([]);
@@ -659,7 +659,7 @@ describe("assessPlan — budget truncation is recorded in judgment.truncated (AC
       budgets: { max_plan_chars: 8000, max_spec_chars: 12000, max_task_chars: 20, max_diff_chars: 24000 },
     });
 
-    const result = await service.assessPlan(bundleResult.value, { commitDerivationUnverifiable: false });
+    const result = await service.assessPlan(bundleResult.value, { repoRoot: process.cwd(), commitDerivationUnverifiable: false });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.value.judgment.truncated.some((s) => s.startsWith("task:"))).toBe(true);
@@ -691,7 +691,7 @@ describe("assessPlan — diff-section truncation is file-boundary-aware (SPEC-02
     const provider = new InMemoryAIProvider("in-memory", { kind: "ok", content: VALID_JSON });
     const { service } = makeAssessService({ provider, budgets });
 
-    const result = await service.assessPlan(bundle, { diffText, commitDerivationUnverifiable: false });
+    const result = await service.assessPlan(bundle, { repoRoot: process.cwd(), diffText, commitDerivationUnverifiable: false });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.value.judgment.truncated).toContain("diff:docs/readme.md");
@@ -712,7 +712,7 @@ describe("assessPlan — diff-section truncation is file-boundary-aware (SPEC-02
     const provider = new InMemoryAIProvider("in-memory", { kind: "ok", content: VALID_JSON });
     const { service } = makeAssessService({ provider });
 
-    const result = await service.assessPlan(bundle, { diffText, commitDerivationUnverifiable: false });
+    const result = await service.assessPlan(bundle, { repoRoot: process.cwd(), diffText, commitDerivationUnverifiable: false });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.value.judgment.truncated.some((s) => s.startsWith("diff:"))).toBe(false);
@@ -788,7 +788,7 @@ describe("buildAssessPrompt — diff-omission truncation manifest (bugfix F3)", 
     const provider = new InMemoryAIProvider("in-memory", { kind: "ok", content: VALID_JSON });
     const { service } = makeAssessService({ provider, budgets });
 
-    const result = await service.assessPlan(bundle, { diffText, commitDerivationUnverifiable: false });
+    const result = await service.assessPlan(bundle, { repoRoot: process.cwd(), diffText, commitDerivationUnverifiable: false });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.value.judgment.truncated).toContain("diff:packages/lore/tests/unit/foo.test.ts");
@@ -843,7 +843,7 @@ describe("assessPlan — overlong-but-valid reasoning is clipped without a corre
     });
     const { service } = makeAssessService({ provider });
 
-    const result = await service.assessPlan(bundle, { commitDerivationUnverifiable: false });
+    const result = await service.assessPlan(bundle, { repoRoot: process.cwd(), commitDerivationUnverifiable: false });
 
     expect(result.ok).toBe(true);
     if (!result.ok) return;
@@ -865,7 +865,7 @@ describe("assessPlan — overlong-but-valid reasoning is clipped without a corre
     const provider = new InMemoryAIProvider("in-memory", { kind: "ok", content: VALID_JSON });
     const { service } = makeAssessService({ provider });
 
-    const result = await service.assessPlan(bundle, { commitDerivationUnverifiable: false });
+    const result = await service.assessPlan(bundle, { repoRoot: process.cwd(), commitDerivationUnverifiable: false });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
 
@@ -903,7 +903,7 @@ describe("assessPlan — overlong-but-valid reasoning is clipped without a corre
     });
     const { service } = makeAssessService({ provider });
 
-    const result = await service.assessPlan(bundle, { commitDerivationUnverifiable: false });
+    const result = await service.assessPlan(bundle, { repoRoot: process.cwd(), commitDerivationUnverifiable: false });
 
     expect(result.ok).toBe(true);
     if (!result.ok) return;
@@ -924,7 +924,7 @@ describe("assessPlan — overlong-but-valid reasoning is clipped without a corre
     const provider = new InMemoryAIProvider("in-memory", { kind: "ok", content: VALID_JSON });
     const { service } = makeAssessService({ provider });
 
-    const result = await service.assessPlan(bundle, { commitDerivationUnverifiable: false });
+    const result = await service.assessPlan(bundle, { repoRoot: process.cwd(), commitDerivationUnverifiable: false });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
 
@@ -984,7 +984,7 @@ describe("buildAssessPrompt — structured acceptance criteria table (SPEC-038 A
     const provider = new InMemoryAIProvider("in-memory", { kind: "ok", content: scriptedJson });
     const { service } = makeAssessService({ provider });
 
-    const result = await service.assessPlan(bundle, { commitDerivationUnverifiable: false });
+    const result = await service.assessPlan(bundle, { repoRoot: process.cwd(), commitDerivationUnverifiable: false });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.value.judgment.prompt_version).toBe(ASSESS_PROMPT_VERSION);
@@ -1035,7 +1035,7 @@ describe("assessPlan — ac_id containment against declared structured criteria 
     const provider = new InMemoryAIProvider("in-memory", { kind: "ok", content: scriptedJson });
     const { service } = makeAssessService({ provider });
 
-    const result = await service.assessPlan(bundle, { commitDerivationUnverifiable: false });
+    const result = await service.assessPlan(bundle, { repoRoot: process.cwd(), commitDerivationUnverifiable: false });
     expect(result.ok).toBe(true);
   });
 
@@ -1052,7 +1052,7 @@ describe("assessPlan — ac_id containment against declared structured criteria 
     const provider = new InMemoryAIProvider("in-memory", { kind: "ok", content: scriptedJson });
     const { service, emitCalls } = makeAssessService({ provider });
 
-    const result = await service.assessPlan(bundle, { commitDerivationUnverifiable: false });
+    const result = await service.assessPlan(bundle, { repoRoot: process.cwd(), commitDerivationUnverifiable: false });
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.error.code).toBe("VALIDATION_ERROR");
@@ -1080,7 +1080,7 @@ describe("assessPlan — ac_id containment against declared structured criteria 
     });
     const provider = new InMemoryAIProvider("in-memory", { kind: "ok", content: scriptedJson });
     const { service } = makeAssessService({ provider });
-    await service.assessPlan(bundle, { commitDerivationUnverifiable: false });
+    await service.assessPlan(bundle, { repoRoot: process.cwd(), commitDerivationUnverifiable: false });
 
     const afterResult = await store.findMany({});
     if (!afterResult.ok) throw new Error("findMany failed");
@@ -1110,7 +1110,7 @@ describe("buildAssessPrompt — legacy verbatim path is byte-identical for specs
     const provider = new InMemoryAIProvider("in-memory", { kind: "ok", content: VALID_JSON });
     const { service } = makeAssessService({ provider });
 
-    const result = await service.assessPlan(bundle, { commitDerivationUnverifiable: false });
+    const result = await service.assessPlan(bundle, { repoRoot: process.cwd(), commitDerivationUnverifiable: false });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.value.judgment.prompt_version).toBe(ASSESS_PROMPT_VERSION);
@@ -1205,7 +1205,7 @@ describe("assessPlan — diff-range scope-mismatch warning (task-assess-diff-ran
     const provider = new InMemoryAIProvider("in-memory", { kind: "ok", content: VALID_JSON });
     const { service } = makeAssessService({ provider });
 
-    const result = await service.assessPlan(bundle, { diffText, commitDerivationUnverifiable: false });
+    const result = await service.assessPlan(bundle, { repoRoot: process.cwd(), diffText, commitDerivationUnverifiable: false });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.value.scope_warning).toBeUndefined();
@@ -1219,7 +1219,7 @@ describe("assessPlan — diff-range scope-mismatch warning (task-assess-diff-ran
     const provider = new InMemoryAIProvider("in-memory", { kind: "ok", content: VALID_JSON });
     const { service } = makeAssessService({ provider });
 
-    const result = await service.assessPlan(bundle, { diffText, commitDerivationUnverifiable: false });
+    const result = await service.assessPlan(bundle, { repoRoot: process.cwd(), diffText, commitDerivationUnverifiable: false });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.value.scope_warning).toBeDefined();
@@ -1247,7 +1247,7 @@ describe("assessPlan — diff-range scope-mismatch warning (task-assess-diff-ran
     const provider = new InMemoryAIProvider("in-memory", { kind: "ok", content: VALID_JSON });
     const { service } = makeAssessService({ provider });
 
-    const result = await service.assessPlan(bundle, { diffText, commitDerivationUnverifiable: false });
+    const result = await service.assessPlan(bundle, { repoRoot: process.cwd(), diffText, commitDerivationUnverifiable: false });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.value.scope_warning).toBeUndefined();
@@ -1260,7 +1260,7 @@ describe("assessPlan — diff-range scope-mismatch warning (task-assess-diff-ran
     const provider = new InMemoryAIProvider("in-memory", { kind: "ok", content: VALID_JSON });
     const { service } = makeAssessService({ provider });
 
-    const result = await service.assessPlan(bundle, { diffText, commitDerivationUnverifiable: false });
+    const result = await service.assessPlan(bundle, { repoRoot: process.cwd(), diffText, commitDerivationUnverifiable: false });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.value.scope_warning).toBeUndefined();
@@ -1274,7 +1274,7 @@ describe("assessPlan — diff-range scope-mismatch warning (task-assess-diff-ran
     const provider = new InMemoryAIProvider("in-memory", { kind: "ok", content: VALID_JSON });
     const { service } = makeAssessService({ provider });
 
-    const result = await service.assessPlan(bundle, { diffText, commitDerivationUnverifiable: false });
+    const result = await service.assessPlan(bundle, { repoRoot: process.cwd(), diffText, commitDerivationUnverifiable: false });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.value.scope_warning).toBeUndefined();
@@ -1288,11 +1288,11 @@ describe("assessPlan — diff-range scope-mismatch warning (task-assess-diff-ran
 
     const providerA = new InMemoryAIProvider("in-memory", { kind: "ok", content: VALID_JSON });
     const { service: serviceA } = makeAssessService({ provider: providerA });
-    const resultNoWarning = await serviceA.assessPlan(bundleNoWarning, { diffText: diffTouching(["src/a.ts"]), commitDerivationUnverifiable: false });
+    const resultNoWarning = await serviceA.assessPlan(bundleNoWarning, { repoRoot: process.cwd(), diffText: diffTouching(["src/a.ts"]), commitDerivationUnverifiable: false });
 
     const providerB = new InMemoryAIProvider("in-memory", { kind: "ok", content: VALID_JSON });
     const { service: serviceB } = makeAssessService({ provider: providerB });
-    const resultWithWarning = await serviceB.assessPlan(bundleWithWarning, {
+    const resultWithWarning = await serviceB.assessPlan(bundleWithWarning, { repoRoot: process.cwd(),
       diffText: diffTouching(["src/a.ts", "docs/x.md", "docs/y.md"]),
       commitDerivationUnverifiable: false,
     });

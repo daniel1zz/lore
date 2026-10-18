@@ -145,7 +145,7 @@ async function runFalsify(declared: number, mutated: Scripted) {
     async () => ok(bundle),
     recordVerifiedEvidence,
     makeScriptedExecutor(mutated),
-    {
+    { tmpDir: tmpdir(),
       repoRoot,
       defaultTimeoutMs: 15000,
       claimTtlMinutes: 120,

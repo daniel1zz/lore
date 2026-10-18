@@ -156,7 +156,7 @@ describe("AC-CRIT-3: findings on files the judge never saw are unverifiable, not
       kind: "sequence",
       responses: [{ kind: "ok", content: judgeResponseWithGaps(50, [finding("src/b.ts", "b.ts is wrong.")]) }],
     });
-    const result = await makeService(provider, NARROW_BUDGETS).assessPlan(bundle, {
+    const result = await makeService(provider, NARROW_BUDGETS).assessPlan(bundle, { repoRoot: process.cwd(),
       commitDerivationUnverifiable: false,
       diffText,
     });
@@ -173,7 +173,7 @@ describe("AC-CRIT-3: findings on files the judge never saw are unverifiable, not
       kind: "sequence",
       responses: [{ kind: "ok", content: judgeResponseWithGaps(70, [finding("src/big.ts", "big.ts is wrong.")]) }],
     });
-    const result = await makeService(provider, NARROW_BUDGETS).assessPlan(bundle, {
+    const result = await makeService(provider, NARROW_BUDGETS).assessPlan(bundle, { repoRoot: process.cwd(),
       commitDerivationUnverifiable: false,
       diffText: diffChunk("src/big.ts", 200),
     });
@@ -191,7 +191,7 @@ describe("AC-CRIT-3: findings on files the judge never saw are unverifiable, not
       kind: "sequence",
       responses: [{ kind: "ok", content: judgeResponseWithGaps(70, [finding("src/a.ts", "a.ts is wrong.")]) }],
     });
-    const result = await makeService(provider, WIDE_BUDGETS).assessPlan(bundle, {
+    const result = await makeService(provider, WIDE_BUDGETS).assessPlan(bundle, { repoRoot: process.cwd(),
       commitDerivationUnverifiable: false,
       diffText: diffChunk("src/a.ts", 3),
     });

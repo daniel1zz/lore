@@ -168,7 +168,7 @@ describe("TraceRecorder — deny instrumentation + isolation (AC-TRACE-3)", () =
   it("HAPPY: a service-layer gate deny inserts a kind=gate_deny row with checkpoint/predicates_failed/layer=service", async () => {
     const store = makeStore();
     const recorder = new TraceRecorder(store.insertTraceEvent.bind(store), () => "agent");
-    const enforcer = new GateEnforcer(undefined, undefined, recorder);
+    const enforcer = new GateEnforcer(undefined, undefined, recorder, () => "test-actor");
 
     const result = enforcer.enforce("spec-create", {
       specKind: "feature",
@@ -199,7 +199,7 @@ describe("TraceRecorder — deny instrumentation + isolation (AC-TRACE-3)", () =
   it("HAPPY: enforce() does NOT fire a deny trace when every predicate passes", async () => {
     const store = makeStore();
     const recorder = new TraceRecorder(store.insertTraceEvent.bind(store), () => "agent");
-    const enforcer = new GateEnforcer(undefined, undefined, recorder);
+    const enforcer = new GateEnforcer(undefined, undefined, recorder, () => "test-actor");
 
     const result = enforcer.enforce("spec-create", {
       specKind: "feature",
@@ -232,7 +232,7 @@ describe("TraceRecorder — deny instrumentation + isolation (AC-TRACE-3)", () =
       throw new Error("simulated synchronous port failure");
     };
     const recorder = new TraceRecorder(throwingInsert, () => "agent");
-    const enforcer = new GateEnforcer(undefined, undefined, recorder);
+    const enforcer = new GateEnforcer(undefined, undefined, recorder, () => "test-actor");
 
     let result: ReturnType<typeof enforcer.enforce> | undefined;
     expect(() => {
@@ -281,7 +281,7 @@ describe("TraceRecorder — deny instrumentation + isolation (AC-TRACE-3)", () =
     const rejectingInsert = (_event: TraceEventInput): Promise<Result<void, LoreError>> =>
       Promise.reject(new Error("simulated async port failure"));
     const recorder = new TraceRecorder(rejectingInsert, () => "agent");
-    const enforcer = new GateEnforcer(undefined, undefined, recorder);
+    const enforcer = new GateEnforcer(undefined, undefined, recorder, () => "test-actor");
 
     const result = enforcer.enforce("spec-create", {
       specKind: "feature",
@@ -299,7 +299,7 @@ describe("TraceRecorder — deny instrumentation + isolation (AC-TRACE-3)", () =
     const erroringInsert = (_event: TraceEventInput): Promise<Result<void, LoreError>> =>
       Promise.resolve({ ok: false, error: { code: "STORE_ERROR", message: "simulated store failure" } });
     const recorder = new TraceRecorder(erroringInsert, () => "agent");
-    const enforcer = new GateEnforcer(undefined, undefined, recorder);
+    const enforcer = new GateEnforcer(undefined, undefined, recorder, () => "test-actor");
 
     const result = enforcer.enforce("spec-create", {
       specKind: "feature",

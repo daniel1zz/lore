@@ -477,7 +477,7 @@ describe("MINOR fix — the green control's own LAUNCH failure records inconclus
         executorCalls.push(spec);
         return err({ code: "STORE_ERROR", message: launchFailureMessage });
       },
-      {
+      { tmpDir: tmpdir(),
         repoRoot: repoDir,
         defaultTimeoutMs: 5000,
         claimTtlMinutes: 120,

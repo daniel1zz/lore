@@ -49,6 +49,7 @@
  *   AC-VS-1, AC-VS-2, AC-VS-3, AC-VS-4, AC-VS-5; D1, D2, D3
  */
 
+import { tmpdir } from "node:os";
 import { describe, it, expect } from "vitest";
 import { ok } from "@lore/core";
 import type { AcceptanceCriterion, DocRecord, LoreError, PlanBundle, Result } from "@lore/core";
@@ -199,6 +200,7 @@ const config = {
   envAllowlist: [],
   envPassthroughAll: true,
   processEnv: {},
+  tmpDir: tmpdir(),
 };
 
 /**

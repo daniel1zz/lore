@@ -47,6 +47,7 @@
  * @spec_ref SPEC-061 §Scope D2, D3, D5; §Acceptance Criteria AC-061-4, AC-061-5, AC-061-6
  */
 
+import { tmpdir } from "node:os";
 import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
 import { describe, it, expect } from "vitest";
@@ -166,6 +167,7 @@ const config = {
   envAllowlist: [],
   envPassthroughAll: true,
   processEnv: {},
+  tmpDir: tmpdir(),
 };
 /** Every declared path exists: this file tests the completeness guard, not the AC-TG-6 missing-file branch. */
 const filesExist = (): boolean => true;

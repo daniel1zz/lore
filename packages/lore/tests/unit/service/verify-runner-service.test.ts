@@ -85,6 +85,7 @@
  * @spec_ref AC-VRF-3; SPEC-039 §M2
  */
 
+import { tmpdir } from "node:os";
 import { describe, it, expect } from "vitest";
 import { ok, err } from "@lore/core";
 import type { AcceptanceCriterion, DocRecord, LoreError, PlanBundle, Result } from "@lore/core";
@@ -235,6 +236,7 @@ const config = {
   envAllowlist: [],
   envPassthroughAll: true,
   processEnv: {},
+  tmpDir: tmpdir(),
 };
 const NOW = "2026-07-08T10:00:00.000Z";
 const FRESH_CLAIM_AT = "2026-07-08T09:59:00.000Z"; // 1 minute before NOW — well within the 120min TTL

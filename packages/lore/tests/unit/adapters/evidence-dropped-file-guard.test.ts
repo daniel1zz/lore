@@ -45,6 +45,7 @@
  * @spec_ref task-skill-implement-tg-32-evidence-precheck-follows-the-one
  */
 
+import { liveInvocation } from "../../live-invocation.js";
 import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
 import { describe, it, expect, beforeEach } from "vitest";
@@ -321,7 +322,7 @@ let server: McpServer;
 beforeEach(() => {
   app = makeApp();
   server = new McpServer({ name: "test", version: "0.0.0" });
-  registerTools(server, app);
+  registerTools(server, app, undefined, liveInvocation());
 });
 
 describe("MCP lore_evidence_add refuses exactly what the CLI refuses (dropped file)", () => {

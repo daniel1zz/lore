@@ -13,6 +13,7 @@
  *   REGRESSION: an unknown `--by` on a write command is rejected by the strict-flag seam (exit 2 path)
  */
 
+import { liveInvocation } from "../../live-invocation.js";
 import { describe, it, expect, vi } from "vitest";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CommandDef } from "citty";
@@ -71,7 +72,7 @@ interface McpToolSchema {
 async function collectMcpToolSchemas(): Promise<Map<string, McpToolSchema>> {
   const { registerTools } = await import("../../../src/adapters/mcp/tools.js");
   const server = new McpServer({ name: "ac-roi-1", version: "0.0.0" });
-  registerTools(server, { callerSurface: "mcp" } as unknown as App);
+  registerTools(server, { callerSurface: "mcp" } as unknown as App, undefined, liveInvocation());
   const registered = (server as unknown as { _registeredTools: Record<string, { inputSchema?: McpToolSchema }> })._registeredTools;
   const out = new Map<string, McpToolSchema>();
   for (const [name, tool] of Object.entries(registered)) if (tool.inputSchema !== undefined) out.set(name, tool.inputSchema);
@@ -81,7 +82,7 @@ async function collectMcpToolSchemas(): Promise<Map<string, McpToolSchema>> {
 async function collectMcpToolShapes(): Promise<Map<string, readonly string[]>> {
   const { registerTools } = await import("../../../src/adapters/mcp/tools.js");
   const server = new McpServer({ name: "ac-roi-1", version: "0.0.0" });
-  registerTools(server, { callerSurface: "mcp" } as unknown as App);
+  registerTools(server, { callerSurface: "mcp" } as unknown as App, undefined, liveInvocation());
   const registered = (server as unknown as { _registeredTools: Record<string, { inputSchema?: { shape?: Record<string, unknown> } }> })
     ._registeredTools;
   const out = new Map<string, readonly string[]>();

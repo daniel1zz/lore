@@ -560,7 +560,7 @@ async function runCli(): Promise<number> {
       targetRepo,
       concurrency: MIGRATION_CONCURRENCY,
       dryRun: !live,
-      ghRunner: new GhRunner({ execFile: createNodeGhExecFile() }),
+      ghRunner: new GhRunner({ execFile: createNodeGhExecFile(), env: process.env }),
       receiptLogPath,
     });
 

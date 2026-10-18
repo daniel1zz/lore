@@ -202,7 +202,7 @@ import type { App } from "../../app.js";
 import { runWithAuditSurface } from "../../store/audit-surface.js";
 import { assertRegisteredToolsMatchNames, type LoreMcpToolName } from "./tool-names.js";
 import { McpCallScope, actorSourceOfName, requireCallIdentity } from "./call-scope.js";
-import type { LoreError, LoreConfig, CorpusProvenance } from "@lore/core";
+import type { Invocation, LoreError, LoreConfig, CorpusProvenance } from "@lore/core";
 import type { LinkType } from "@lore/core";
 import { renderAssessmentContent, CAPTURE_TAIL_CHARS } from "@lore/core";
 import type { NewReviewJudgment, ReviewJudgment, Result, TreeBlueprint } from "@lore/core";
@@ -256,7 +256,6 @@ import { resolveCorpus } from "../cli/corpus-resolution.js";
 // only, no bun:sqlite) — safe to import here without breaking this file's
 // vitest-reachability (mirrors this module's own precedent of lazy-importing
 // ONLY bun:sqlite-tainted deps, not every Node-adjacent one).
-import { resolveActorWithSource } from "@lore/core/node";
 import { computeValidityState } from "../../flows/validity-state.js";
 import {
   buildStalenessBatchJsonPayload,
@@ -1603,11 +1602,16 @@ async function reviewDocViaMcp(
  *   PER "task-start" `lore_feed` invocation rather than read from a closed-over
  *   snapshot — see this function's own JSDoc above for why a getter, not a value.
  */
-export function registerTools(server: McpServer, baseApp: App, getConfig?: () => LoreConfig | undefined): void {
+export function registerTools(
+  server: McpServer,
+  baseApp: App,
+  getConfig: (() => LoreConfig | undefined) | undefined,
+  inv: Invocation,
+): void {
   // reason: spec-run-identity-slice-1 D3 — handlers are registered ONCE but each attested call runs against its own
   // call-scoped App (see call-scope.ts). `app` and the service names below are live views that resolve to the
   // current call's App, so handler bodies stay unchanged.
-  const scope = new McpCallScope(baseApp);
+  const scope = new McpCallScope(baseApp, inv.env);
   const app = scope.app;
   const corpusService = scope.service("corpusService");
   const versionService = scope.service("versionService");
@@ -2063,7 +2067,7 @@ export function registerTools(server: McpServer, baseApp: App, getConfig?: () =>
     // from the kind="get" row `corpusService.get` above already fired
     // (a different consumption pattern — the whole navigation bundle, not a
     // single doc read). A no-op when trace.enabled resolves false.
-    app.traceRecorder?.recordContextBundle(resolveActorWithSource(undefined, process.env).actor);
+    app.traceRecorder?.recordContextBundle(inv.identity.claimed);
 
     return textContent({ target: doc, linked_specs: linkedSpecs, related_adrs: relatedAdrs, active_plans: activePlans });
   });
@@ -2110,7 +2114,7 @@ export function registerTools(server: McpServer, baseApp: App, getConfig?: () =>
         // documents), so `workflow.drift.enabled` cannot be honored from this
         // surface; MCP always runs the check (enabled) when check_drift is true.
         const deps = buildDriftFlowDeps(app, app.driftCheckService);
-        const probe = buildRealFsProbe(process.cwd());
+        const probe = buildRealFsProbe(inv.cwd);
         const driftResult = await runDrift(deps, probe);
         if (!driftResult.ok) return errorContent(driftResult.error);
         payload["code_drift"] = driftResult.value;
@@ -2336,7 +2340,7 @@ export function registerTools(server: McpServer, baseApp: App, getConfig?: () =>
     // the schema field's own JSDoc for why a long-lived MCP server needs this
     // escape hatch at all.
     const precheckRoots = {
-      cwd: process.cwd(),
+      cwd: inv.cwd,
       ...(args.caller_cwd !== undefined ? { additionalCwds: [args.caller_cwd] } : {}),
       // reason: exactOptionalPropertyTypes — app.repoRoot is `string | undefined`;
       // conditionally spread rather than pass it verbatim (see evidence-precheck.ts's
@@ -2602,6 +2606,10 @@ export function registerTools(server: McpServer, baseApp: App, getConfig?: () =>
       // requiring the caller to assemble a diff themselves.
       let diffText: string | undefined = args.diff_text;
       let diffSource: DiffSourceRecord;
+      // reason: the MCP server has no Invocation; its cwd is the one `assessPlan` verifies finding paths
+      // against (formerly `assessPlan`'s own `opts.repoRoot ?? process.cwd()` default). Read once here,
+      // reused by the derivation below, so this handler's cwd read count does not rise (AS-26 ratchet).
+      const assessRepoRoot = inv.cwd;
       // reason: task-the-mcp-assess-adapter-still-calls-derivecommitsetforplan —
       // mirrors `commands/assess.ts`'s own `commitDerivationUnverifiable` local exactly:
       // set ONLY by the auto-derived branch below when the derivation reports
@@ -2625,7 +2633,7 @@ export function registerTools(server: McpServer, baseApp: App, getConfig?: () =>
         // so this computation cannot be omitted and still compile.
         const allTasksArchived = bundle.tasks.every((t) => t.status === "archived");
         const derivation = deriveCommitSetForPlan(
-          process.cwd(),
+          assessRepoRoot,
           bundle.tasks.map((t) => t.slug),
           allTasksArchived,
           collectRecordedRanges(bundle.tasks),
@@ -2650,6 +2658,7 @@ export function registerTools(server: McpServer, baseApp: App, getConfig?: () =>
         source: app.callerSurface,
         commitDerivationUnverifiable,
         diffSource,
+        repoRoot: assessRepoRoot,
       });
       if (!assessResult.ok) return errorContent(assessResult.error);
 
@@ -2914,11 +2923,15 @@ export function registerTools(server: McpServer, baseApp: App, getConfig?: () =>
       // stdout print. Do not re-append or re-derive the closure text here —
       // that would let this surface silently diverge from the CLI's.
       if (args.checkpoint === SESSION_RESUME_CHECKPOINT) {
-        const result = await buildResumeFeed(app, {
-          ...(args.plan !== undefined ? { plan: args.plan } : {}),
-          ...(args.handoff !== undefined ? { handoff: args.handoff } : {}),
-          ...(args.by !== undefined ? { by: args.by } : {}),
-        });
+        const result = await buildResumeFeed(
+          app,
+          {
+            ...(args.plan !== undefined ? { plan: args.plan } : {}),
+            ...(args.handoff !== undefined ? { handoff: args.handoff } : {}),
+            ...(args.by !== undefined ? { by: args.by } : {}),
+          },
+          { env: inv.env, tmpDir: inv.paths.tmpDir },
+        );
         if (!result.ok) return errorContent(result.error);
         return textContent(result.value);
       }
@@ -3384,6 +3397,7 @@ export function registerTools(server: McpServer, baseApp: App, getConfig?: () =>
             corpusService: app.corpusService,
             actor,
             actorSource,
+            env: inv.env,
           },
         );
         if (!fileResult.ok) return errorContent(fileResult.error);

@@ -125,7 +125,7 @@
  *   (task-verifying-a-handoff-you-just-authored-arms-the-coverage D1) is the
  *   ONLY place this module reads a wall clock's persisted trace or the
  *   filesystem beyond `app`'s own store — `readSessionStartIso` below reads
- *   `os.tmpdir()` for the SessionStart hook's marker
+ *   the marker under the caller-supplied temp dir for the SessionStart hook's marker
  *   (`assets/hooks/session-start-marker.mjs`), never `app.corpusService` —
  *   the marker is a session-scoped fact, orthogonal to the corpus.
  *   `readSessionStartIso` returns a DISCRIMINATED `SessionStartReadResult`
@@ -150,7 +150,7 @@
  *   exactly as before this task.
  *
  * Side-effect class: IO (corpusService reads, outlineService MDX resolution,
- *   sessionService reads, `os.tmpdir()` marker read for `suppressFloor` — no
+ *   sessionService reads, temp-dir marker read for `suppressFloor` — no
  *   writes, except one advisory stderr line when the marker is unreadable)
  * Source: IoC vertical-slice tech-spec §4.1/§11, P4 slice; SPEC-041 §3 D5;
  *   spec-context-provenance-injected-corpus-global-state-and-a D3;
@@ -160,7 +160,6 @@
  */
 
 import { existsSync, readFileSync } from "node:fs";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { App } from "../app.js";
 import type { DocRecord, LoreError, Result } from "@lore/core";
@@ -683,18 +682,20 @@ type UnmeasuredSessionStartReadResult = Exclude<SessionStartReadResult, { kind: 
  *   with no string `started_at`) are DISTINCT code paths (AC 4c/4d), both
  *   converging on the same kind because both mean the same thing to a
  *   caller: a marker exists but cannot be trusted.
- * @param env - Environment map (test seam); defaults to `process.env`.
+ * @param env - Environment map (`Invocation.env`; a literal object in tests).
+ * @param tmpDir - The OS temp directory the hook writes the marker under (`Invocation.paths.tmpDir`).
  * @returns The discriminated outcome — see {@link SessionStartReadResult}.
  */
 export function readSessionStartIso(
-  env: Record<string, string | undefined> = process.env,
+  env: Readonly<Record<string, string | undefined>>,
+  tmpDir: string,
 ): SessionStartReadResult {
   const sessionId = env["CLAUDE_CODE_SESSION_ID"] ?? env["CLAUDE_SESSION_ID"];
   if (sessionId === undefined || sessionId.trim() === "") {
     return { kind: "no-session-id" };
   }
 
-  const markerPath = join(tmpdir(), sessionStartMarkerFilename(sessionId));
+  const markerPath = join(tmpDir, sessionStartMarkerFilename(sessionId));
   let raw: string;
   try {
     if (!existsSync(markerPath)) return { kind: "no-marker" };
@@ -813,16 +814,19 @@ async function buildRuleDiffBlock(
  *
  * @param app - Wired `App` providing `sessionService`.
  * @param opts - `{plan?, handoff?, by?}`, forwarded to `SessionService.resume` untouched.
+ * @param ambient - The invocation's `env` and `paths.tmpDir`, read only to locate the SessionStart marker
+ *   (AS-26: this flow reads no ambient state itself).
  * @returns `ok(ResumeFeedOutcome)`, or `err(LoreError)` on an unresolvable target,
  *   a `SessionService.resume` store error, or a missing `sessionService` (an
  *   `App` test stub that omits it — see `app.ts`'s `sessionService?` JSDoc).
  * @example
- * const result = await buildResumeFeed(app, { plan: "plan-session-layer" });
+ * const result = await buildResumeFeed(app, { plan: "plan-session-layer" }, { env: inv.env, tmpDir: inv.paths.tmpDir });
  * if (result.ok) console.log(result.value.feed);
  */
 export async function buildResumeFeed(
   app: App,
   opts: { plan?: string; handoff?: string; by?: string },
+  ambient: { readonly env: Readonly<Record<string, string | undefined>>; readonly tmpDir: string },
 ): Promise<Result<ResumeFeedOutcome, LoreError>> {
   if (app.sessionService === undefined) {
     return err({
@@ -840,7 +844,7 @@ export async function buildResumeFeed(
   let authorshipUndeterminedNote: string | undefined;
   if (resume.found && !resume.multi_actor && resume.handoff !== undefined) {
     const currentActor = resolveActor(opts.by);
-    const sessionStart = readSessionStartIso();
+    const sessionStart = readSessionStartIso(ambient.env, ambient.tmpDir);
     const sessionStartIso = sessionStart.kind === "measured" ? sessionStart.startedAt : undefined;
     // Same call, same argument shape as before this task — the arming
     // VERDICT for every non-measured kind is therefore byte-identical

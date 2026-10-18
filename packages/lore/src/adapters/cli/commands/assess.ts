@@ -96,6 +96,7 @@ import {
 import { assessmentFreshness } from "../../../service/gate-predicates.js";
 import { deriveCommitSetForPlan, type DiffSourceRecord } from "../assess-commit-derivation.js";
 import { collectRecordedRanges } from "../../../service/task-commit-range.js";
+import { invocationOf } from "../command-invocation.js";
 
 /** One-line stderr/text summary of how this run's diff (if any) was obtained. */
 function formatDiffSourceLine(source: DiffSourceRecord): string {
@@ -158,9 +159,11 @@ export default defineCommand({
       description: "Explicitly confirm AI use (rarely needed — assess defaults to AI on every surface). Pass --no-ai to abort (always exit 2 — assess has no non-AI mode).",
     },
   },
-  async run({ args }) {
+  async run(context) {
+    const { args } = context;
+    const inv = invocationOf(context);
     // ─── Step 1: argument mutex checks (synchronous, before any IO) ────────────
-    const rawArgv = process.argv;
+    const rawArgv = inv.argv;
     const hasExplicitAi = rawArgv.includes("--ai");
     const hasExplicitNoAi = rawArgv.includes("--no-ai");
 
@@ -290,7 +293,7 @@ export default defineCommand({
         // has no merged work yet.
         const allTasksArchived = bundle.tasks.every((t) => t.status === "archived");
         const derivation = deriveCommitSetForPlan(
-          process.cwd(),
+          inv.cwd,
           bundle.tasks.map((t) => t.slug),
           allTasksArchived,
           collectRecordedRanges(bundle.tasks),
@@ -387,6 +390,7 @@ export default defineCommand({
         source: app.callerSurface,
         commitDerivationUnverifiable,
         diffSource,
+        repoRoot: inv.cwd,
       });
       if (!assessResult.ok) {
         // reason: assess has no non-AI mode (SPEC-026 §3 D5) — the shared AI_PROVIDER_ERROR

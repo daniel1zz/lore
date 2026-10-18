@@ -10,6 +10,7 @@
  * records the call's own resolved name) / REGRESSION (a `recorded_by` that reaches the handler anyway is not recorded).
  */
 
+import { liveInvocation } from "../../live-invocation.js";
 import { describe, it, expect, beforeEach } from "vitest";
 import type { z } from "zod";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -90,7 +91,7 @@ let server: McpServer;
 
 beforeEach(() => {
   server = new McpServer({ name: "test", version: "0.0.0" });
-  registerTools(server, makeApp());
+  registerTools(server, makeApp(), undefined, liveInvocation());
 });
 
 const EVIDENCE = { oracle: "manual", command: "bun run typecheck", result: "pass", output_tail: "ok" } as const;

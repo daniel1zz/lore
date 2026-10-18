@@ -13,6 +13,8 @@
  * @spec_ref SPEC-080 §Scope, §Design Decisions D1/D3; AC-080-2
  */
 
+import { runWithinInvocation } from "../../../src/adapters/cli/invocation-scope.js";
+import { liveInvocation } from "../../live-invocation.js";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -27,6 +29,11 @@ import { ok, err } from "@lore/core";
 import type { LoreError, Result } from "@lore/core";
 
 /** Spies on `process.stderr.write` (swallowing real output), restored via `vi.restoreAllMocks()`. */
+/** The audit names its actor from the delivered Invocation (no process fallback), so run it inside a scope like the CLI does. */
+function auditInScope(checkpoint: Parameters<typeof runGateEnvBypassAudit>[0], deps: GateBypassAuditDeps): Promise<void> {
+  return runWithinInvocation(liveInvocation(), () => runGateEnvBypassAudit(checkpoint, deps));
+}
+
 function spyStderr() {
   return vi.spyOn(process.stderr, "write").mockImplementation(() => true);
 }
@@ -44,7 +51,7 @@ describe("runGateEnvBypassAudit (LORE_GATE_BYPASS=1 escape-hatch audit trace)", 
       openRecordGateSkip: vi.fn().mockResolvedValue(recordGateSkip),
     };
 
-    await runGateEnvBypassAudit("task-claim", deps);
+    await auditInScope("task-claim", deps);
 
     expect(recordGateSkip).toHaveBeenCalledTimes(1);
     const entry = recordGateSkip.mock.calls[0]![0];
@@ -65,7 +72,7 @@ describe("runGateEnvBypassAudit (LORE_GATE_BYPASS=1 escape-hatch audit trace)", 
       openRecordGateSkip: vi.fn().mockResolvedValue(recordGateSkip),
     };
 
-    await runGateEnvBypassAudit("spec-create", deps);
+    await auditInScope("spec-create", deps);
 
     const entry = recordGateSkip.mock.calls[0]![0];
     expect(entry.doc_id).toBeUndefined();
@@ -80,7 +87,7 @@ describe("runGateEnvBypassAudit (LORE_GATE_BYPASS=1 escape-hatch audit trace)", 
       openRecordGateSkip: vi.fn().mockResolvedValue(null),
     };
 
-    await expect(runGateEnvBypassAudit("plan-promote", deps)).resolves.toBeUndefined();
+    await expect(auditInScope("plan-promote", deps)).resolves.toBeUndefined();
 
     expect(stderrSpy).toHaveBeenCalledTimes(1);
     const written = stderrSpy.mock.calls[0]![0] as string;
@@ -96,7 +103,7 @@ describe("runGateEnvBypassAudit (LORE_GATE_BYPASS=1 escape-hatch audit trace)", 
       openRecordGateSkip: vi.fn().mockRejectedValue(new Error("db corrupted")),
     };
 
-    await expect(runGateEnvBypassAudit("phase-claim", deps)).resolves.toBeUndefined();
+    await expect(auditInScope("phase-claim", deps)).resolves.toBeUndefined();
 
     expect(stderrSpy).toHaveBeenCalledTimes(1);
     const written = stderrSpy.mock.calls[0]![0] as string;
@@ -112,7 +119,7 @@ describe("runGateEnvBypassAudit (LORE_GATE_BYPASS=1 escape-hatch audit trace)", 
       openRecordGateSkip: vi.fn().mockResolvedValue(recordGateSkip),
     };
 
-    await runGateEnvBypassAudit("spec-promote", deps);
+    await auditInScope("spec-promote", deps);
 
     expect(stderrSpy).toHaveBeenCalledTimes(1);
     expect(stderrSpy.mock.calls[0]![0] as string).toContain("write failed");
@@ -130,7 +137,7 @@ describe("runGateEnvBypassAudit (LORE_GATE_BYPASS=1 escape-hatch audit trace)", 
       openRecordGateSkip: vi.fn().mockResolvedValue(recordGateSkip),
     };
 
-    await runGateEnvBypassAudit("task-claim", deps);
+    await auditInScope("task-claim", deps);
 
     expect(stderrSpy).toHaveBeenCalledTimes(1);
     expect(stderrSpy.mock.calls[0]![0] as string).toContain("disk full");
@@ -147,7 +154,7 @@ describe("runGateEnvBypassAudit (LORE_GATE_BYPASS=1 escape-hatch audit trace)", 
         openRecordGateSkip: vi.fn().mockResolvedValue(recordGateSkip),
       };
 
-      await runGateEnvBypassAudit(checkpoint, deps);
+      await auditInScope(checkpoint, deps);
 
       expect(recordGateSkip.mock.calls[0]![0].details).toMatchObject({ checkpoint });
     },
@@ -204,5 +211,15 @@ describe("findLoreDbPathQuiet (safe .lore/lore.db discovery, never process.exit)
     process.chdir(nested);
 
     expect(findLoreDbPathQuiet()).toBe(join(tmpDir, ".lore", "lore.db"));
+  });
+
+  // NEGATIVE — outside any delivered Invocation there is no resolved name: no row is written, one loud line is printed.
+  it("without an Invocation in scope: writes NO row and prints the NOT-audited line naming the missing invocation", async () => {
+    const stderrSpy = spyStderr();
+    const recordGateSkip = vi.fn<RecordGateSkip>().mockResolvedValue(ok(undefined));
+    await runGateEnvBypassAudit("task-claim", { openRecordGateSkip: vi.fn().mockResolvedValue(recordGateSkip) });
+    expect(recordGateSkip).not.toHaveBeenCalled();
+    expect(stderrSpy).toHaveBeenCalledTimes(1);
+    expect(String(stderrSpy.mock.calls[0]![0])).toContain("no invocation in scope");
   });
 });

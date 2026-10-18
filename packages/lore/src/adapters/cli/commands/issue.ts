@@ -170,6 +170,7 @@ import { readGithubIssueRef, type GithubIssueRef } from "../../../service/resolu
 // names the winner (see the DUPLICATE_SLUG branch in `run()`).
 import { toIssueTaskInput } from "../../../service/issue-task-shaping.js";
 import { classifyFeedbackUpstream, resolveGithubIssueListing } from "../report-issue-wiring.js";
+import { invocationOf } from "../command-invocation.js";
 import { buildUnconfiguredUpstreamRemedy, type LoreError } from "@lore/core";
 
 /**
@@ -466,7 +467,8 @@ export default defineCommand({
           description: "Output result as JSON",
         },
       },
-      async run({ args }) {
+      async run(context) {
+        const { args } = context;
         const rawNumber = readStringArg(args as unknown as Record<string, unknown>, "number");
         const issueNumber = Number(rawNumber);
         if (rawNumber.length === 0 || !Number.isInteger(issueNumber) || issueNumber <= 0) {
@@ -495,7 +497,7 @@ export default defineCommand({
           }
           const cfg = classification.cfg;
 
-          const listingResult = await resolveGithubIssueListing(cfg);
+          const listingResult = await resolveGithubIssueListing(cfg, invocationOf(context).env);
           if (!listingResult.ok) {
             process.stderr.write(formatError(listingResult.error) + "\n");
             process.exitCode = exitCode(listingResult.error);

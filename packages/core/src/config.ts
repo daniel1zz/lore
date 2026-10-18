@@ -2687,8 +2687,9 @@ export function mergeDefaults(
 }
 
 /**
- * Resolve sync credentials from process.env using the env-var name in config.sync.
- * D-004: token is read from process.env at runtime, never stored on disk.
+ * Resolve sync credentials from `env` using the env-var name in config.sync.
+ * D-004: token is read from the invocation environment at runtime, never stored on disk.
+ * `env` is `Invocation.env` (AS-26: this pure module reads no ambient state).
  * Fails loud (VALIDATION_ERROR) when:
  *   - no sync section in config
  *   - sync.enabled !== true
@@ -2698,6 +2699,7 @@ export function mergeDefaults(
  */
 export function resolveSyncCredentials(
   config: LoreConfig,
+  env: Readonly<Record<string, string | undefined>>,
 ): Result<{ url: string; token: string }, LoreError> {
   if (config.sync === undefined) {
     return err({
@@ -2728,7 +2730,7 @@ export function resolveSyncCredentials(
   }
 
   const envVarName = config.sync.auth_token_env;
-  const token = process.env[envVarName];
+  const token = env[envVarName];
 
   if (!token) {
     return err({

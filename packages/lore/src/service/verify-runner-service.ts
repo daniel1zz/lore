@@ -186,7 +186,6 @@
 
 import { existsSync, readdirSync, statSync, mkdtempSync, readFileSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
 import { execFileSync } from "node:child_process";
 import { CAPTURE_TAIL_CHARS, err, findMissingOracleFiles, ok, RUNNER_UNATTESTED_CAPTURE_SOURCE } from "@lore/core";
 import type { AuditEntry, FileExistsPort, StateStamp } from "@lore/core";
@@ -499,6 +498,8 @@ export interface FalsifierRunResult {
  * scratch copy.
  */
 export interface CreateFalsifierScratchWorktreeOpts {
+  /** REQUIRED — the OS temp directory the scratch parent is created under (`Invocation.paths.tmpDir`; AS-26: no ambient read here). */
+  tmpDir: string;
   /**
    * `true` iff `repoRoot` is itself a git worktree whose UNCOMMITTED (tracked,
    * modified) changes the falsifier's command must observe (AC-JV-3 — a
@@ -550,8 +551,8 @@ export interface CreateFalsifierScratchWorktreeOpts {
  * @param repoRoot - The git repository to branch a scratch worktree from
  *   (`_runFalsifier`'s resolved execution root — `VerifyRunnerService.config.repoRoot` when no
  *   worktree-aware resolution was supplied, a caller's linked worktree root otherwise).
- * @param opts - See {@link CreateFalsifierScratchWorktreeOpts}. Omitted = today's default
- *   `HEAD`-only behavior.
+ * @param opts - See {@link CreateFalsifierScratchWorktreeOpts}. `tmpDir` is required; without
+ *   `captureUncommitted` the behavior is today's default `HEAD`-only one.
  * @returns The created worktree's paths, or `STORE_ERROR` when the scratch
  *   temp directory can't be created, the uncommitted-state snapshot itself fails (a
  *   non-git `repoRoot`, a missing `git` binary), or `git worktree add` itself fails (a
@@ -560,19 +561,19 @@ export interface CreateFalsifierScratchWorktreeOpts {
  *   worktree.
  *
  * @example
- * const result = createFalsifierScratchWorktree("/path/to/repo");
+ * const result = createFalsifierScratchWorktree("/path/to/repo", { tmpDir: "/tmp" });
  * // result.ok && result.value.worktreeDir → e.g. "/tmp/lore-attested-red-xxxx/wt"
  * @example
  * // AC-JV-3 — branches off a linked worktree's UNCOMMITTED state instead of its last commit.
- * const result = createFalsifierScratchWorktree("/path/to/worktree", { captureUncommitted: true });
+ * const result = createFalsifierScratchWorktree("/path/to/worktree", { tmpDir: "/tmp", captureUncommitted: true });
  */
 export function createFalsifierScratchWorktree(
   repoRoot: string,
-  opts?: CreateFalsifierScratchWorktreeOpts,
+  opts: CreateFalsifierScratchWorktreeOpts,
 ): Result<FalsifierScratchWorktree, LoreError> {
   let parentDir: string;
   try {
-    parentDir = mkdtempSync(join(tmpdir(), "lore-attested-red-"));
+    parentDir = mkdtempSync(join(opts.tmpDir, "lore-attested-red-"));
   } catch (error) {
     return err({
       code: "STORE_ERROR",
@@ -604,7 +605,7 @@ export function createFalsifierScratchWorktree(
   // swaps it for a `git stash create` snapshot ONLY when the caller asked for one
   // (see this function's own JSDoc + `CreateFalsifierScratchWorktreeOpts`).
   let checkoutRef = "HEAD";
-  if (opts?.captureUncommitted === true) {
+  if (opts.captureUncommitted === true) {
     try {
       const stashSha = execFileSync("git", ["stash", "create"], {
         cwd: repoRoot,
@@ -814,6 +815,8 @@ export class VerifyRunnerService {
       envPassthroughAll: boolean;
       /** SPEC-039 §M2 — parent environment snapshot fed to `resolveVerifyEnv`. */
       processEnv: Readonly<Record<string, string | undefined>>;
+      /** The OS temp directory falsifier scratch worktrees are created under (`Invocation.paths.tmpDir`). */
+      tmpDir: string;
     },
     private readonly checkBinaryFreshness?: () => BinaryFreshnessVerdict,
     /** Existence probe behind the AC-TG-6 missing-oracle-file check; real `node:fs` by default, a fake in unit tests. */
@@ -1879,6 +1882,7 @@ export class VerifyRunnerService {
       opts.executionRoot ?? { root: this.config.repoRoot, mode: "corpus_root" };
     const repoRoot = resolvedExecutionRoot.root;
     const createResult = createFalsifierScratchWorktree(repoRoot, {
+      tmpDir: this.config.tmpDir,
       captureUncommitted: resolvedExecutionRoot.mode === "worktree",
     });
     if (!createResult.ok) return createResult;

@@ -32,7 +32,7 @@
  *     ("explicit" | "session" | "os-fallback"; "env" is kept in the
  *     type for dependents but is never produced)
  *   - ResolvedActor — {actor, source}
- *   - resolveActorWithSource(explicit?, env?) — the pure resolution function
+ *   - resolveActorWithSource(explicit, env, osUsername) — the pure resolution function
  *
  * Invariants:
  *   - Never throws. A session id that sanitizes to the empty string
@@ -44,20 +44,19 @@
  *     (adapters/cli/utils.ts), which stays there since it is a CLI-specific
  *     UX concern (once-per-process stderr write), not a resolution rule.
  *
- * Side-effect class: IO (reads `os.userInfo()`; `env` is caller-supplied
- *   data, defaulting to `process.env` — not a filesystem/network read)
+ * Side-effect class: pure given its arguments (`env` and the OS-username thunk are
+ *   caller-supplied; the module reads no ambient state, AS-26).
  *
  * Source: SPEC-069 §F1, SPEC-071 §Design Decisions, SPEC-079 §Design
  *   Decisions D2.
  */
 
-import { userInfo } from "node:os";
 import { sessionActorFromId } from "./session-actor.js";
 
 /**
  * Which resolution tier produced the actor identity {@link resolveActorWithSource}
  * returned — `"explicit"` (`--by`/`opts.by`), `"session"` (`$CLAUDE_CODE_SESSION_ID`/`$CLAUDE_SESSION_ID`), or
- * `"os-fallback"` (`os.userInfo().username`, the untraceable default).
+ * `"os-fallback"` (the OS username, the untraceable default).
  */
 // reason: "env" is never produced (BR-1055, spec-run-only-write-identity-and-run-end-claim-release);
 // the member stays only because run-identity-node.ts and issue-front-matter.ts
@@ -74,25 +73,28 @@ export interface ResolvedActor {
  * Pure actor-resolution core shared by every corpus write surface (the CLI's
  * `resolveActor` wrapper, and — since SPEC-079 — `CorpusService`'s own
  * `opts.by` fallback). First non-empty tier wins: explicit > session tier >
- * OS username. No IO beyond `os.userInfo()`; never writes to
+ * OS username. No IO of its own (the OS username arrives as a thunk); never writes to
  * stderr (side-effecting advisories are the CALLER's job).
  *
  * @param explicit - Explicit actor value (CLI `--by` / service `opts.by`), if supplied
- * @param env - Environment map to resolve session-id vars from;
- *   defaults to `process.env`. Tests pass a literal object here instead of
- *   mutating `process.env`.
+ * @param env - Environment map to resolve session-id vars from (`Invocation.env`).
+ *   Tests pass a literal object here instead of mutating `process.env`.
+ * @param osUsername - Lazy OS-username source (`readOsUsername` from `invocation-node.ts` in
+ *   production). A thunk, not a string: the OS lookup can throw and must stay unreached unless
+ *   the os-fallback tier is actually taken.
  * @returns `{actor, source}` — `actor` is never empty (OS username is always available)
  * @example
- *   resolveActorWithSource("alice")  // => {actor: "alice", source: "explicit"}
+ *   resolveActorWithSource("alice", {}, () => "bob")  // => {actor: "alice", source: "explicit"}
  * @example
- *   resolveActorWithSource(undefined, { CLAUDE_CODE_SESSION_ID: "3de02220-..." })
+ *   resolveActorWithSource(undefined, { CLAUDE_CODE_SESSION_ID: "3de02220-..." }, () => "bob")
  *   // => {actor: "agent:session-3de02220", source: "session"}
  * @example
- *   resolveActorWithSource(undefined) // => {actor: "<OS username>", source: "os-fallback"}
+ *   resolveActorWithSource(undefined, {}, () => "bob") // => {actor: "bob", source: "os-fallback"}
  */
 export function resolveActorWithSource(
-  explicit?: string,
-  env: Record<string, string | undefined> = process.env,
+  explicit: string | undefined,
+  env: Readonly<Record<string, string | undefined>>,
+  osUsername: () => string,
 ): ResolvedActor {
   if (explicit !== undefined && explicit.trim() !== "") {
     return { actor: explicit, source: "explicit" };
@@ -108,8 +110,8 @@ export function resolveActorWithSource(
     try {
       return { actor: sessionActorFromId(sessionId), source: "session" };
     } catch {
-      return { actor: userInfo().username, source: "os-fallback" };
+      return { actor: osUsername(), source: "os-fallback" };
     }
   }
-  return { actor: userInfo().username, source: "os-fallback" };
+  return { actor: osUsername(), source: "os-fallback" };
 }

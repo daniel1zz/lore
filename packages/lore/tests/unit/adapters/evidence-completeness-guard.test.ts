@@ -51,6 +51,7 @@
  * @spec_ref AC-061-11 AC-061-12 AC-061-13 AC-061-14 AC-061-17
  */
 
+import { liveInvocation } from "../../live-invocation.js";
 import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
 import { describe, it, expect, beforeEach } from "vitest";
@@ -434,7 +435,7 @@ let server: McpServer;
 beforeEach(() => {
   app = makeApp();
   server = new McpServer({ name: "test", version: "0.0.0" });
-  registerTools(server, app);
+  registerTools(server, app, undefined, liveInvocation());
 });
 
 describe("AC-061-17 — MCP lore_evidence_add refuses exactly what the CLI refuses", () => {

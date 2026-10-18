@@ -131,7 +131,9 @@
 
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
-import { currentHomeDir } from "@lore/core/node";
+import { resolveGlobalConfigPath } from "@lore/core/node";
+import type { Invocation } from "@lore/core";
+import { invocationOf } from "../command-invocation.js";
 import { createInterface } from "node:readline/promises";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -577,10 +579,10 @@ function findProjectRoot(start: string): string {
  * (the exact two paths `lore fragments check` compares). An unknown code is a VALIDATION_ERROR
  * naming it; callers run this BEFORE any write so nothing lands on a refusal.
  */
-function planLanguageProjections(claudeDir: string, cwd: string): Result<LanguageProjection[], LoreError> {
+function planLanguageProjections(claudeDir: string, cwd: string, inv: Invocation): Result<LanguageProjection[], LoreError> {
   const plan: LanguageProjection[] = [];
 
-  const globalConfig = loadGlobalConfig();
+  const globalConfig = loadGlobalConfig(resolveGlobalConfigPath(inv.env, inv.paths.home));
   if (!globalConfig.ok) return globalConfig;
   const globalCode = globalConfig.value.context?.language;
   if (globalCode !== undefined) {
@@ -632,13 +634,14 @@ function failWith(error: LoreError): void {
 function buildProjectRefreshDeps(opts: {
   repoDir: string;
   assetsRoot: string;
+  inv: Invocation;
 }): Result<
   { budgets: MemoryFileBudgets } & Extract<ReturnType<typeof buildRefreshFragmentDeps>, { ok: true }>["value"],
   LoreError
 > {
   const projectConfig = loadConfig(opts.repoDir);
   if (!projectConfig.ok) return projectConfig;
-  const globalConfig = loadGlobalConfig();
+  const globalConfig = loadGlobalConfig(resolveGlobalConfigPath(opts.inv.env, opts.inv.paths.home));
   if (!globalConfig.ok) return globalConfig;
   const budgets = resolveRepoMemoryFileBudgets(opts.repoDir);
   if (!budgets.ok) return budgets;
@@ -648,7 +651,7 @@ function buildProjectRefreshDeps(opts: {
   const fragmentDeps = buildRefreshFragmentDeps({
     repoRoot: opts.repoDir,
     assetsRoot: opts.assetsRoot,
-    home: currentHomeDir(),
+    home: opts.inv.paths.home,
     globalLayer: toContextLayer(globalConfig.value),
     projectLayer: toContextLayer(projectConfig.value),
   });
@@ -660,6 +663,7 @@ async function runProjectContextProjection(opts: {
   repoDir: string;
   assetsRoot: string;
   claudeDir: string;
+  inv: Invocation;
 }): Promise<Result<void, LoreError>> {
   const refreshDeps = buildProjectRefreshDeps(opts);
   if (!refreshDeps.ok) return refreshDeps;
@@ -675,7 +679,7 @@ async function runProjectContextProjection(opts: {
   );
   if (!refreshed.ok) return refreshed;
 
-  const plan = planLanguageProjections(opts.claudeDir, opts.repoDir);
+  const plan = planLanguageProjections(opts.claudeDir, opts.repoDir, opts.inv);
   if (!plan.ok) return plan;
   return applyLanguageProjections(plan.value.filter((item) => item.layer === "project"));
 }
@@ -710,7 +714,7 @@ function toRepoRelative(repoDir: string, portPath: string): string {
  * differs from a fresh render is `outdated`, a hand-edited one is `diverged`, and a file whose fragment is no
  * longer selected is `orphaned`.
  */
-async function classifyProjectRulesFiles(opts: { repoDir: string; assetsRoot: string }): Promise<Result<SetupCheckFiles, LoreError>> {
+async function classifyProjectRulesFiles(opts: { repoDir: string; assetsRoot: string; inv: Invocation }): Promise<Result<SetupCheckFiles, LoreError>> {
   const refreshDeps = buildProjectRefreshDeps(opts);
   if (!refreshDeps.ok) return refreshDeps;
   const planned = await runContextRefresh(
@@ -735,9 +739,9 @@ async function classifyProjectRulesFiles(opts: { repoDir: string; assetsRoot: st
  * config's `context.language`): absent file or key -> `missing`; a different value -> `outdated`. No configured
  * language means lore manages no entry, so nothing is reported. An unreadable settings file is a loud error.
  */
-function classifyProjectSettingsEntries(repoDir: string): Result<SetupCheckFiles, LoreError> {
+function classifyProjectSettingsEntries(repoDir: string, inv: Invocation): Result<SetupCheckFiles, LoreError> {
   const files: SetupCheckFiles = { outdated: [], diverged: [], missing: [], orphaned: [] };
-  const plan = planLanguageProjections(repoDir, repoDir);
+  const plan = planLanguageProjections(repoDir, repoDir, inv);
   if (!plan.ok) return plan;
   const settingsFs = createRealClaudeSettingsFs();
   for (const item of plan.value.filter((entry) => entry.layer === "project")) {
@@ -778,8 +782,8 @@ function classifyProjectSettingsEntries(repoDir: string): Result<SetupCheckFiles
  * skill, lore rules files and fragment skills, lore entries in the project settings file), writes ONLY the
  * project check cache, exits 0 in sync / 3 otherwise (4 on an unreadable ledger or settings file).
  */
-async function runProjectCheck(opts: { json: boolean; assetsRoot: string }): Promise<void> {
-  const repoDir = process.cwd();
+async function runProjectCheck(opts: { json: boolean; assetsRoot: string; inv: Invocation }): Promise<void> {
+  const repoDir = opts.inv.cwd;
   const ledger = await checkProjectLedger(
     {
       fs: makeRealProjectFs(),
@@ -789,9 +793,9 @@ async function runProjectCheck(opts: { json: boolean; assetsRoot: string }): Pro
     repoDir,
   );
   if (!ledger.ok) return failWith(ledger.error);
-  const rules = await classifyProjectRulesFiles({ repoDir, assetsRoot: opts.assetsRoot });
+  const rules = await classifyProjectRulesFiles({ repoDir, assetsRoot: opts.assetsRoot, inv: opts.inv });
   if (!rules.ok) return failWith(rules.error);
-  const settings = classifyProjectSettingsEntries(repoDir);
+  const settings = classifyProjectSettingsEntries(repoDir, opts.inv);
   if (!settings.ok) return failWith(settings.error);
 
   const parts = [ledger.value, rules.value, settings.value];
@@ -813,8 +817,9 @@ async function runProjectScaffold(opts: {
   assetsRoot: string;
   binPath: string;
   claudeDir: string;
+  inv: Invocation;
 }): Promise<void> {
-  const repoDir = process.cwd();
+  const repoDir = opts.inv.cwd;
 
   const proceed = await confirmOrReport({
     yes: opts.yes,
@@ -880,7 +885,7 @@ async function runProjectScaffold(opts: {
   // reason: runs only after a scaffold that did not itself fail — a failed scaffold may lack the
   // CLAUDE.md / config the refresh flow reads, and its own non-zero exit already reports the run.
   if (scaffoldReportFailed(result.value)) return;
-  const projected = await runProjectContextProjection({ repoDir, assetsRoot: opts.assetsRoot, claudeDir: opts.claudeDir });
+  const projected = await runProjectContextProjection({ repoDir, assetsRoot: opts.assetsRoot, claudeDir: opts.claudeDir, inv: opts.inv });
   if (!projected.ok) failWith(projected.error);
 }
 
@@ -891,8 +896,8 @@ async function runProjectScaffold(opts: {
  * SEPARATE global `~/.claude` installer `lore setup --uninstall` alone
  * targets). Thin pipe over `flows/setup-project-uninstall.ts::uninstallProject`.
  */
-async function runProjectUninstall(opts: { json: boolean; yes: boolean }): Promise<void> {
-  const repoDir = process.cwd();
+async function runProjectUninstall(opts: { json: boolean; yes: boolean; inv: Invocation }): Promise<void> {
+  const repoDir = opts.inv.cwd;
 
   const proceed = await confirmOrReport({
     yes: opts.yes,
@@ -956,11 +961,11 @@ function renderDivergedSkipSection(skippedDiverged: string[]): void {
 async function runInstall(
   service: SetupService,
   mcpRegistrar: CapturingMcpRegistrar,
-  opts: { targetDir: string; binPath: string; json: boolean; yes: boolean; forceDiverged: boolean },
+  opts: { targetDir: string; binPath: string; json: boolean; yes: boolean; forceDiverged: boolean; inv: Invocation },
 ): Promise<void> {
   // reason: resolved BEFORE the confirm prompt and any write — an unknown context.language code
   // (AC-CF-18) must refuse the whole run with nothing installed, not leave a half-applied setup.
-  const languagePlan = planLanguageProjections(opts.targetDir, process.cwd());
+  const languagePlan = planLanguageProjections(opts.targetDir, opts.inv.cwd, opts.inv);
   if (!languagePlan.ok) {
     failWith(languagePlan.error);
     return;
@@ -1071,8 +1076,8 @@ function mcpOutcomeExitCode(receipt: SetupReceipt): number {
  * stays the one a caller's `$?` reports; a clean asset check (`0`) is the
  * only state this is allowed to override.
  */
-async function runGitHubChannelHealthCheck(opts: { json: boolean }): Promise<void> {
-  const runner = createGhRunnerHealthProbe(new GhRunner({ execFile: createNodeGhExecFile() }));
+async function runGitHubChannelHealthCheck(opts: { json: boolean; inv: Invocation }): Promise<void> {
+  const runner = createGhRunnerHealthProbe(new GhRunner({ execFile: createNodeGhExecFile(), env: opts.inv.env }));
   const report = await runGitHubHealthCheck({ runner });
 
   if (opts.json) {
@@ -1111,10 +1116,10 @@ async function runGitHubChannelHealthCheck(opts: { json: boolean }): Promise<voi
  * codes"): the channel probe never downgrades an already-nonzero freshness
  * exit, and may only override a clean `0`.
  */
-async function runCheckDispatch(opts: { targetDir: string; json: boolean }): Promise<void> {
+async function runCheckDispatch(opts: { targetDir: string; json: boolean; inv: Invocation }): Promise<void> {
   if (!opts.json) {
     await runSetupCheck({ targetDir: opts.targetDir, json: false });
-    await runGitHubChannelHealthCheck({ json: false });
+    await runGitHubChannelHealthCheck({ json: false, inv: opts.inv });
     return;
   }
 
@@ -1122,12 +1127,12 @@ async function runCheckDispatch(opts: { targetDir: string; json: boolean }): Pro
   if (!freshnessResult.ok) {
     process.stderr.write(formatError(freshnessResult.error) + "\n");
     process.exitCode = exitCode(freshnessResult.error);
-    await runGitHubChannelHealthCheck({ json: true });
+    await runGitHubChannelHealthCheck({ json: true, inv: opts.inv });
     return;
   }
   const report = freshnessResult.value;
 
-  const runner = createGhRunnerHealthProbe(new GhRunner({ execFile: createNodeGhExecFile() }));
+  const runner = createGhRunnerHealthProbe(new GhRunner({ execFile: createNodeGhExecFile(), env: opts.inv.env }));
   const channelReport = await runGitHubHealthCheck({ runner });
 
   console.log(JSON.stringify({ ok: true, data: { ...report, github_channel: channelReport } }, null, 2));
@@ -1196,7 +1201,9 @@ export default defineCommand({
       description: "Output as JSON",
     },
   },
-  async run({ args }) {
+  async run(context) {
+    const { args } = context;
+    const inv = invocationOf(context);
     const json = args.json === true;
     const claudeDirFlag = typeof args["claude-dir"] === "string" ? args["claude-dir"] : undefined;
 
@@ -1225,15 +1232,15 @@ export default defineCommand({
           process.exitCode = 2;
           return;
         }
-        await runProjectCheck({ json, assetsRoot: resolveAssetsRoot(buildSetupPathContext()) });
+        await runProjectCheck({ json, assetsRoot: resolveAssetsRoot(buildSetupPathContext()), inv });
         return;
       }
       const checkTargetDir = resolveTargetDir({
         ...(claudeDirFlag !== undefined ? { claudeDirFlag } : {}),
-        env: process.env,
-        homeDir: currentHomeDir(),
+        env: inv.env,
+        homeDir: inv.paths.home,
       });
-      await runCheckDispatch({ targetDir: checkTargetDir, json });
+      await runCheckDispatch({ targetDir: checkTargetDir, json, inv });
       return;
     }
 
@@ -1250,17 +1257,14 @@ export default defineCommand({
     }
 
     // reason: SetupService.assertSafeTargetDir refuses a targetDir that IS/nests the REAL
-    // os.homedir()/.claude UNLESS this env var is set (see service/setup-service.ts's module
-    // doc) — that guard exists to stop a test that constructs SetupService DIRECTLY
-    // (bypassing this adapter) from accidentally hitting a developer's real ~/.claude.
-    // Reaching THIS adapter at all — the compiled production binary, or an integration test
-    // that deliberately spawns the real CLI with an overridden $HOME to simulate a genuine
-    // run — IS a legitimate "lore setup" intent, so this adapter always opts in on the
-    // caller's behalf. Direct SetupService test construction (setup-service.test.ts) never
-    // sets this and stays guarded. `--project` never reaches SetupService at all, but
-    // setting this unconditionally, before the mode branch, is simpler than threading it
-    // through two branches for no behavioral difference (ProjectSetupService never reads it).
-    process.env["LORE_SETUP_ALLOW_REAL"] = "1";
+    // `<home>/.claude` UNLESS the guard's env carries LORE_SETUP_ALLOW_REAL=1 (see
+    // service/setup-service.ts's module doc) — that guard exists to stop a test that constructs
+    // SetupService DIRECTLY (bypassing this adapter) from accidentally hitting a developer's real
+    // ~/.claude. Reaching THIS adapter at all — the compiled production binary, or an integration test
+    // that deliberately spawns the real CLI with an overridden $HOME to simulate a genuine run — IS a
+    // legitimate "lore setup" intent, so this adapter always opts in on the caller's behalf, by putting
+    // the flag in the `userState` it hands the service (below) instead of writing the process
+    // environment. Direct SetupService test construction never sets it and stays guarded.
 
     const pathCtx = buildSetupPathContext();
     const assetsRoot = resolveAssetsRoot(pathCtx);
@@ -1269,21 +1273,21 @@ export default defineCommand({
     if (validated.mode === "project") {
       const claudeDir = resolveTargetDir({
         ...(claudeDirFlag !== undefined ? { claudeDirFlag } : {}),
-        env: process.env,
-        homeDir: currentHomeDir(),
+        env: inv.env,
+        homeDir: inv.paths.home,
       });
-      await runProjectScaffold({ json, yes: args.yes === true, assetsRoot, binPath, claudeDir });
+      await runProjectScaffold({ json, yes: args.yes === true, assetsRoot, binPath, claudeDir, inv });
       return;
     }
     if (validated.mode === "project-uninstall") {
-      await runProjectUninstall({ json, yes: args.yes === true });
+      await runProjectUninstall({ json, yes: args.yes === true, inv });
       return;
     }
 
     const targetDir = resolveTargetDir({
       ...(claudeDirFlag !== undefined ? { claudeDirFlag } : {}),
-      env: process.env,
-      homeDir: currentHomeDir(),
+      env: inv.env,
+      homeDir: inv.paths.home,
     });
 
     const mcpRegistrar = new CapturingMcpRegistrar(new RealMcpRegistrar());
@@ -1292,6 +1296,9 @@ export default defineCommand({
       new RealSetupFsReader(),
       new RealSetupFsWriter(),
       mcpRegistrar,
+      // reason: this adapter opts in to the real `~/.claude` (see the LORE_SETUP_ALLOW_REAL note above), so the guard
+      // input carries the flag explicitly instead of reading the process environment back.
+      { env: { ...inv.env, LORE_SETUP_ALLOW_REAL: "1" }, home: inv.paths.home },
     );
 
     if (validated.mode === "dry-run") {
@@ -1308,6 +1315,7 @@ export default defineCommand({
       json,
       yes: args.yes === true,
       forceDiverged: args["force-diverged"] === true,
+      inv,
     });
   },
 });

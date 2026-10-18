@@ -13,6 +13,7 @@
  * Every test injects argv/env explicitly; the real process env is never read.
  * Each test gets a fresh module instance via vi.resetModules() to stay order-independent.
  */
+import { userInfo } from "node:os";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 type Resolve = (
@@ -23,8 +24,22 @@ type Resolve = (
 
 async function load(): Promise<Resolve> {
   vi.resetModules();
-  const mod = (await import("@lore/core/node")) as unknown as { resolveInvocationIdentity: Resolve };
-  return mod.resolveInvocationIdentity;
+  const mod = (await import("@lore/core/node")) as unknown as {
+    resolveInvocationIdentity: (
+      argv: string[],
+      env: Record<string, string | undefined>,
+      osUsername: () => string,
+      detectWorktree?: () => string | undefined,
+    ) => ReturnType<Resolve>;
+  };
+  // the OS username and the invocation cwd are now parameters; the tests keep the old (argv, env, detect?(cwd)) shape
+  return (argv, env, detectWorktree) =>
+    mod.resolveInvocationIdentity(
+      argv,
+      env,
+      () => userInfo().username,
+      detectWorktree === undefined ? undefined : () => detectWorktree(process.cwd()),
+    );
 }
 
 describe("resolveInvocationIdentity", () => {

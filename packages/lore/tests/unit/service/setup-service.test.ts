@@ -64,6 +64,9 @@ function sha256(content: string): string {
 /** A non-existent, non-real path used by every in-memory-fake scenario — never touches the real filesystem. */
 const TARGET_DIR = "/fake-target/claude-dir";
 
+/** The real-`~/.claude` guard's input, explicit and hermetic: no env flag, the real home — so the guard is ARMED. */
+const USER_STATE = { env: {}, home: os.homedir() };
+
 // ─── Fakes ──────────────────────────────────────────────────────────────────
 
 class FixedAssetSource implements AssetSource {
@@ -284,7 +287,7 @@ describe("HAPPY", () => {
   it("fresh install writes every asset, merges settings.json, registers mcp — manifest sha256 == sha256 of final on-disk bytes (I5)", async () => {
     const fs = new MapFs();
     const mcp = new OkMcpRegistrar();
-    const service = new SetupService(new FixedAssetSource(buildPayload()), fs, fs, mcp);
+    const service = new SetupService(new FixedAssetSource(buildPayload()), fs, fs, mcp, USER_STATE);
 
     const result = await service.install(
       { targetDir: TARGET_DIR, binPath: "/usr/local/bin/lore" },
@@ -332,7 +335,7 @@ describe("NEGATIVE", () => {
     const fs = new MapFs();
     fs.seed(path.join(TARGET_DIR, "settings.json"), "{not valid json");
     const mcp = new OkMcpRegistrar();
-    const service = new SetupService(new FixedAssetSource(buildPayload()), fs, fs, mcp);
+    const service = new SetupService(new FixedAssetSource(buildPayload()), fs, fs, mcp, USER_STATE);
 
     const result = await service.install({ targetDir: TARGET_DIR, binPath: "/usr/local/bin/lore" });
 
@@ -345,7 +348,7 @@ describe("NEGATIVE", () => {
 
   it("uninstall with no manifest present fails loud — nothing to uninstall", async () => {
     const fs = new MapFs();
-    const service = new SetupService(new FixedAssetSource(buildPayload()), fs, fs, new OkMcpRegistrar());
+    const service = new SetupService(new FixedAssetSource(buildPayload()), fs, fs, new OkMcpRegistrar(), USER_STATE);
 
     const result = await service.uninstall({ targetDir: TARGET_DIR });
 
@@ -362,7 +365,7 @@ describe("BOUNDARY", () => {
   it("I2: a byte-identical re-run reports every entry skipped and fires ZERO SetupFsWriter calls", async () => {
     const fs = new MapFs();
     const mcp = new OkMcpRegistrar();
-    const service = new SetupService(new FixedAssetSource(buildPayload()), fs, fs, mcp);
+    const service = new SetupService(new FixedAssetSource(buildPayload()), fs, fs, mcp, USER_STATE);
 
     const first = await service.install(
       { targetDir: TARGET_DIR, binPath: "/usr/local/bin/lore" },
@@ -391,7 +394,7 @@ describe("BOUNDARY", () => {
   it("an empty asset payload still installs successfully (manifest + mcp only)", async () => {
     const fs = new MapFs();
     const mcp = new OkMcpRegistrar();
-    const service = new SetupService(new FixedAssetSource({ files: [] }), fs, fs, mcp);
+    const service = new SetupService(new FixedAssetSource({ files: [] }), fs, fs, mcp, USER_STATE);
 
     const result = await service.install({ targetDir: TARGET_DIR, binPath: "/usr/local/bin/lore" });
 
@@ -416,7 +419,7 @@ describe("ERROR", () => {
     };
     const fs = new MapFs();
     fs.failWriteOnCall = 2;
-    const service = new SetupService(new FixedAssetSource(payload), fs, fs, new OkMcpRegistrar());
+    const service = new SetupService(new FixedAssetSource(payload), fs, fs, new OkMcpRegistrar(), USER_STATE);
 
     const result = await service.install({ targetDir: TARGET_DIR, binPath: "/usr/local/bin/lore" });
 
@@ -449,7 +452,7 @@ describe("ERROR", () => {
 
   it("MCP registrar failure is non-fatal — file writes stand, receipt.mcp is 'failed', overall Result stays ok", async () => {
     const fs = new MapFs();
-    const service = new SetupService(new FixedAssetSource(buildPayload()), fs, fs, new FailingMcpRegistrar());
+    const service = new SetupService(new FixedAssetSource(buildPayload()), fs, fs, new FailingMcpRegistrar(), USER_STATE);
 
     const result = await service.install({ targetDir: TARGET_DIR, binPath: "/usr/local/bin/lore" });
 
@@ -463,7 +466,7 @@ describe("ERROR", () => {
   it("MCP registrar 'already_registered' outcome is idempotent success — receipt.mcp is 'already_registered', not 'failed', overall Result stays ok (task-lore-setup-mcp-add-step-is-non-idempotent-already-exists)", async () => {
     const fs = new MapFs();
     const mcp = new AlreadyRegisteredMcpRegistrar();
-    const service = new SetupService(new FixedAssetSource(buildPayload()), fs, fs, mcp);
+    const service = new SetupService(new FixedAssetSource(buildPayload()), fs, fs, mcp, USER_STATE);
 
     const result = await service.install({ targetDir: TARGET_DIR, binPath: "/usr/local/bin/lore" });
 
@@ -491,7 +494,7 @@ describe("STATE", () => {
       await fsp.writeFile(path.join(targetDir, "settings.json"), preExistingSettings, "utf8");
 
       const { reader, writer } = makeRealFsPorts();
-      const service = new SetupService(new FixedAssetSource(buildPayload()), reader, writer, new OkMcpRegistrar());
+      const service = new SetupService(new FixedAssetSource(buildPayload()), reader, writer, new OkMcpRegistrar(), USER_STATE);
 
       const installResult = await service.install({ targetDir, binPath: "/usr/local/bin/lore" });
       expect(installResult.ok).toBe(true);
@@ -536,7 +539,7 @@ describe("STATE", () => {
     const targetDir = await makeTempDir();
     try {
       const { reader, writer } = makeRealFsPorts();
-      const service = new SetupService(new FixedAssetSource(buildPayload()), reader, writer, new OkMcpRegistrar());
+      const service = new SetupService(new FixedAssetSource(buildPayload()), reader, writer, new OkMcpRegistrar(), USER_STATE);
 
       const installResult = await service.install({ targetDir, binPath: "/usr/local/bin/lore" });
       expect(installResult.ok).toBe(true);
@@ -574,7 +577,7 @@ describe("REGRESSION", () => {
       await fsp.writeFile(path.join(targetDir, "settings.json"), original, "utf8");
 
       const { reader, writer } = makeRealFsPorts();
-      const service = new SetupService(new FixedAssetSource(buildPayload()), reader, writer, new OkMcpRegistrar());
+      const service = new SetupService(new FixedAssetSource(buildPayload()), reader, writer, new OkMcpRegistrar(), USER_STATE);
 
       const installResult = await service.install({ targetDir, binPath: "/usr/local/bin/lore" });
       expect(installResult.ok).toBe(true);
@@ -605,7 +608,7 @@ describe("REGRESSION", () => {
       await fsp.writeFile(path.join(targetDir, "skills", "my-user-skill.md"), "# my own skill\n", "utf8");
 
       const { reader, writer } = makeRealFsPorts();
-      const service = new SetupService(new FixedAssetSource(buildPayload()), reader, writer, new OkMcpRegistrar());
+      const service = new SetupService(new FixedAssetSource(buildPayload()), reader, writer, new OkMcpRegistrar(), USER_STATE);
 
       const installResult = await service.install({ targetDir, binPath: "/usr/local/bin/lore" });
       expect(installResult.ok).toBe(true);
@@ -631,7 +634,7 @@ describe("I4 — planInstall never touches the writer port", () => {
   it("I4: planInstall uses ONLY the reader; a poisoned writer proves zero writer calls (no exception thrown)", async () => {
     const fs = new MapFs();
     const poison = new PoisonedWriter();
-    const service = new SetupService(new FixedAssetSource(buildPayload()), fs, poison, new OkMcpRegistrar());
+    const service = new SetupService(new FixedAssetSource(buildPayload()), fs, poison, new OkMcpRegistrar(), USER_STATE);
 
     const result = await service.planInstall({ targetDir: TARGET_DIR });
 
@@ -650,7 +653,7 @@ describe("I5 — manifest sha256 reflects final on-disk bytes", () => {
     const fs = new MapFs();
     fs.seed(path.join(TARGET_DIR, "settings.json"), `${JSON.stringify({ theme: "dark" }, null, 2)}\n`);
     const payload = buildPayload();
-    const service = new SetupService(new FixedAssetSource(payload), fs, fs, new OkMcpRegistrar());
+    const service = new SetupService(new FixedAssetSource(payload), fs, fs, new OkMcpRegistrar(), USER_STATE);
 
     const result = await service.install({ targetDir: TARGET_DIR, binPath: "/usr/local/bin/lore" });
 
@@ -676,28 +679,21 @@ describe("I6 — test-pollution safety guard", () => {
   const realClaudeDir = path.join(os.homedir(), ".claude");
 
   it("I6: assertSafeTargetDir refuses the real ~/.claude directory and any nested path", () => {
-    expect(assertSafeTargetDir(realClaudeDir).ok).toBe(false);
-    expect(assertSafeTargetDir(path.join(realClaudeDir, "skills", "lore")).ok).toBe(false);
+    expect(assertSafeTargetDir(realClaudeDir, USER_STATE).ok).toBe(false);
+    expect(assertSafeTargetDir(path.join(realClaudeDir, "skills", "lore"), USER_STATE).ok).toBe(false);
   });
 
   it("I6: assertSafeTargetDir allows an unrelated directory", () => {
-    expect(assertSafeTargetDir("/tmp/some-mkdtemp-dir").ok).toBe(true);
+    expect(assertSafeTargetDir("/tmp/some-mkdtemp-dir", USER_STATE).ok).toBe(true);
   });
 
-  it("I6: LORE_SETUP_ALLOW_REAL=1 is the documented production escape hatch", () => {
-    const prev = process.env["LORE_SETUP_ALLOW_REAL"];
-    process.env["LORE_SETUP_ALLOW_REAL"] = "1";
-    try {
-      expect(assertSafeTargetDir(realClaudeDir).ok).toBe(true);
-    } finally {
-      if (prev === undefined) delete process.env["LORE_SETUP_ALLOW_REAL"];
-      else process.env["LORE_SETUP_ALLOW_REAL"] = prev;
-    }
+  it("I6: LORE_SETUP_ALLOW_REAL=1 in the guard's env is the documented production escape hatch", () => {
+    expect(assertSafeTargetDir(realClaudeDir, { env: { LORE_SETUP_ALLOW_REAL: "1" }, home: os.homedir() }).ok).toBe(true);
   });
 
   it("I6: install() itself refuses to run against the real ~/.claude directory", async () => {
     const fs = new MapFs();
-    const service = new SetupService(new FixedAssetSource(buildPayload()), fs, fs, new OkMcpRegistrar());
+    const service = new SetupService(new FixedAssetSource(buildPayload()), fs, fs, new OkMcpRegistrar(), USER_STATE);
 
     const result = await service.install({ targetDir: realClaudeDir, binPath: "/usr/local/bin/lore" });
 
@@ -748,7 +744,7 @@ describe("{{lore:claude_dir}} settings-hook variable resolution", () => {
       )}\n`,
     );
     const mcp = new OkMcpRegistrar();
-    const service = new SetupService(new FixedAssetSource(buildPlaceholderHookPayload()), fs, fs, mcp);
+    const service = new SetupService(new FixedAssetSource(buildPlaceholderHookPayload()), fs, fs, mcp, USER_STATE);
 
     const result = await service.install({ targetDir: TARGET_DIR, binPath: "/usr/local/bin/lore" });
     expect(result.ok).toBe(true);
@@ -816,7 +812,7 @@ describe("{{lore:claude_dir}} settings-hook variable resolution", () => {
   it("is idempotent — a byte-identical re-run against the same targetDir fires ZERO writer calls (I2, extended to the placeholder-carrying payload)", async () => {
     const fs = new MapFs();
     const mcp = new OkMcpRegistrar();
-    const service = new SetupService(new FixedAssetSource(buildPlaceholderHookPayload()), fs, fs, mcp);
+    const service = new SetupService(new FixedAssetSource(buildPlaceholderHookPayload()), fs, fs, mcp, USER_STATE);
 
     const first = await service.install(
       { targetDir: TARGET_DIR, binPath: "/usr/local/bin/lore" },
@@ -853,7 +849,7 @@ describe("{{lore:claude_dir}} settings-hook variable resolution", () => {
         },
       ],
     };
-    const service = new SetupService(new FixedAssetSource(payload), fs, fs, mcp);
+    const service = new SetupService(new FixedAssetSource(payload), fs, fs, mcp, USER_STATE);
 
     const result = await service.install({ targetDir: TARGET_DIR, binPath: "/usr/local/bin/lore" });
     expect(result.ok).toBe(false);
@@ -866,14 +862,14 @@ describe("{{lore:claude_dir}} settings-hook variable resolution", () => {
 
   it("resolves to a DIFFERENT targetDir's commands for a different install location (command identity is per-targetDir, not global)", async () => {
     const fsA = new MapFs();
-    const serviceA = new SetupService(new FixedAssetSource(buildPlaceholderHookPayload()), fsA, fsA, new OkMcpRegistrar());
+    const serviceA = new SetupService(new FixedAssetSource(buildPlaceholderHookPayload()), fsA, fsA, new OkMcpRegistrar(), USER_STATE);
     await serviceA.install({ targetDir: "/fake-target/dir-a", binPath: "/usr/local/bin/lore" });
     const onDiskA = fsA.store.get("/fake-target/dir-a/settings.json") as string;
     expect(onDiskA).toContain("/fake-target/dir-a/hooks/");
     expect(onDiskA).not.toContain("/fake-target/dir-b/hooks/");
 
     const fsB = new MapFs();
-    const serviceB = new SetupService(new FixedAssetSource(buildPlaceholderHookPayload()), fsB, fsB, new OkMcpRegistrar());
+    const serviceB = new SetupService(new FixedAssetSource(buildPlaceholderHookPayload()), fsB, fsB, new OkMcpRegistrar(), USER_STATE);
     await serviceB.install({ targetDir: "/fake-target/dir-b", binPath: "/usr/local/bin/lore" });
     const onDiskB = fsB.store.get("/fake-target/dir-b/settings.json") as string;
     expect(onDiskB).toContain("/fake-target/dir-b/hooks/");
@@ -887,7 +883,7 @@ describe("{{lore:claude_dir}} settings-hook variable resolution", () => {
       await fsp.writeFile(path.join(targetDir, "settings.json"), preExisting, "utf8");
 
       const { reader, writer } = makeRealFsPorts();
-      const service = new SetupService(new FixedAssetSource(buildPlaceholderHookPayload()), reader, writer, new OkMcpRegistrar());
+      const service = new SetupService(new FixedAssetSource(buildPlaceholderHookPayload()), reader, writer, new OkMcpRegistrar(), USER_STATE);
 
       const installResult = await service.install({ targetDir, binPath: "/usr/local/bin/lore" });
       expect(installResult.ok).toBe(true);

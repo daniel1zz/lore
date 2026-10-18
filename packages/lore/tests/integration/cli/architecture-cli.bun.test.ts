@@ -25,6 +25,7 @@
  * @spec_ref spec-baseline-slice-3a-architecture-tree-baseline-root#AC-BLS3-1
  */
 
+import { liveInvocation } from "../../live-invocation.js";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 const setDefaultTimeout = (ms: number): void => { vi.setConfig({ testTimeout: ms, hookTimeout: ms }); };
 import { execFileSync } from "node:child_process";
@@ -247,7 +248,7 @@ describe("MCP tools accept the architecture fields", () => {
     const { app } = loadLoreApp({ surface: "http" });
     try {
       const server = new McpServer({ name: "arch", version: "0.0.0" });
-      registerTools(server, app);
+      registerTools(server, app, undefined, liveInvocation());
       type Handler = (a: Record<string, unknown>, e: unknown) => Promise<CallToolResult>;
       const tools = (server as unknown as { _registeredTools: Record<string, { handler: Handler }> })._registeredTools;
       const std2 = await tools["lore_baseline_add"]!.handler({ parent: archSection, tree: "architecture", node: "standard", label: "std2", title: "MCP Standard", by: ACTOR }, {});

@@ -8,7 +8,7 @@
  *
  * Public surface:
  *   - SetupService — stateless, constructor-injected ports (AssetSource,
- *     SetupFsReader, SetupFsWriter, McpRegistrar)
+ *     SetupFsReader, SetupFsWriter, McpRegistrar) plus the `SetupUserState` {env, home}
  *       .planInstall(opts)  — dry-run; reader-only, zero writer-port calls
  *       .install(opts, now?) — materializes the payload, manifest-authoritative
  *       .uninstall(opts, now?) — reverses STRICTLY via the manifest
@@ -16,15 +16,15 @@
  *     injected ports (real implementations are a DOWNSTREAM task; this module
  *     only depends on the interfaces + whatever fakes its own test suite builds)
  *   - SetupReceipt — the outcome shape returned by both `install` and `uninstall`
- *   - assertSafeTargetDir(targetDir) — the test-pollution safety guard
+ *   - assertSafeTargetDir(targetDir, userState) — the test-pollution safety guard
  *
  * Invariants:
  *   - `targetDir` is a RESOLVED string parameter on every method — this module
- *     NEVER calls `currentHomeDir()` or reads `process.env.CLAUDE_CONFIG_DIR`
+ *     NEVER reads the home directory or `CLAUDE_CONFIG_DIR` from the process
  *     itself; that resolution (`--claude-dir` > `$CLAUDE_CONFIG_DIR` >
  *     `homedir()`) lives in the CLI adapter (SPEC-046 §Design).
  *   - `assertSafeTargetDir` REFUSES a `targetDir` that is or is inside the
- *     REAL `currentHomeDir()/.claude` unless `process.env.LORE_SETUP_ALLOW_REAL
+ *     REAL `<userState.home>/.claude` unless `userState.env.LORE_SETUP_ALLOW_REAL
  *     === "1"` (the production escape hatch — a real `lore setup` run DOES
  *     target `~/.claude`). Every public method calls this FIRST, before any
  *     port call — this is this task's dedicated test-pollution guard (mirrors
@@ -181,7 +181,6 @@
 import { createHash } from "node:crypto";
 import path from "node:path";
 import os from "node:os";
-import { currentHomeDir } from "@lore/core/node";
 
 import { err, ok, expandTemplate } from "@lore/core";
 import type { Result, LoreError } from "@lore/core";
@@ -429,26 +428,33 @@ const defaultNow = (): string => new Date().toISOString();
 
 // ─── Test-pollution safety guard ────────────────────────────────────────────
 
+/** The two ambient facts the real-`~/.claude` guard needs, resolved once at the entry (`Invocation.env`, `Invocation.paths.home`). */
+export interface SetupUserState {
+  readonly env: Readonly<Record<string, string | undefined>>;
+  readonly home: string;
+}
+
 /**
  * Refuses a `targetDir` that is (or is nested inside) the REAL
- * `currentHomeDir()/.claude` directory of the executing user, unless
- * `process.env.LORE_SETUP_ALLOW_REAL === "1"` (the production escape hatch —
+ * `<home>/.claude` directory of the executing user, unless
+ * `env.LORE_SETUP_ALLOW_REAL === "1"` (the production escape hatch —
  * a genuine `lore setup` run targets exactly this directory). Every
  * {@link SetupService} public method calls this first.
  *
  * @param targetDir - Candidate target directory (resolved, per this module's
  *   "targetDir is a RESOLVED string param" invariant).
+ * @param userState - The invocation's `env` and `paths.home` (AS-26: this module reads no ambient state).
  * @returns `ok(undefined)` when safe to proceed, else `err(VALIDATION_ERROR)`.
  * @throws Never.
  *
  * @example
- * assertSafeTargetDir("/tmp/some-mkdtemp-dir"); // => ok(undefined)
- * assertSafeTargetDir(`${currentHomeDir()}/.claude`); // => err({code: "VALIDATION_ERROR", ...})
+ * assertSafeTargetDir("/tmp/some-mkdtemp-dir", { env: {}, home: "/home/u" }); // => ok(undefined)
+ * assertSafeTargetDir("/home/u/.claude", { env: {}, home: "/home/u" }); // => err({code: "VALIDATION_ERROR", ...})
  */
-export function assertSafeTargetDir(targetDir: string): Result<void, LoreError> {
-  if (process.env["LORE_SETUP_ALLOW_REAL"] === "1") return ok(undefined);
+export function assertSafeTargetDir(targetDir: string, userState: SetupUserState): Result<void, LoreError> {
+  if (userState.env["LORE_SETUP_ALLOW_REAL"] === "1") return ok(undefined);
 
-  const realClaudeDir = path.resolve(currentHomeDir(), ".claude");
+  const realClaudeDir = path.resolve(userState.home, ".claude");
   const resolved = path.resolve(targetDir);
   const isRealOrNested = resolved === realClaudeDir || resolved.startsWith(`${realClaudeDir}${path.sep}`);
 
@@ -485,6 +491,8 @@ export class SetupService {
     private readonly reader: SetupFsReader,
     private readonly writer: SetupFsWriter,
     private readonly mcpRegistrar: McpRegistrar,
+    /** REQUIRED — feeds the real-`~/.claude` guard; a missing value must not weaken it (AS-26). */
+    private readonly userState: SetupUserState,
   ) {}
 
   /**
@@ -497,7 +505,7 @@ export class SetupService {
    * @throws VALIDATION_ERROR (unsafe targetDir / malformed settings.json / malformed manifest)
    */
   async planInstall(opts: { targetDir: string }): Promise<Result<InstallPlan, LoreError>> {
-    const guard = assertSafeTargetDir(opts.targetDir);
+    const guard = assertSafeTargetDir(opts.targetDir, this.userState);
     if (!guard.ok) return guard;
 
     const payloadResult = await this.assetSource.load();
@@ -554,7 +562,7 @@ export class SetupService {
     opts: { targetDir: string; binPath: string; forceDiverged?: boolean; settingsLanguage?: string },
     now: () => string = defaultNow,
   ): Promise<Result<SetupReceipt, LoreError>> {
-    const guard = assertSafeTargetDir(opts.targetDir);
+    const guard = assertSafeTargetDir(opts.targetDir, this.userState);
     if (!guard.ok) return guard;
 
     const nowIso = now();
@@ -872,7 +880,7 @@ export class SetupService {
     opts: { targetDir: string },
     _now: () => string = defaultNow,
   ): Promise<Result<SetupReceipt, LoreError>> {
-    const guard = assertSafeTargetDir(opts.targetDir);
+    const guard = assertSafeTargetDir(opts.targetDir, this.userState);
     if (!guard.ok) return guard;
 
     const manifestPath = path.join(opts.targetDir, MANIFEST_FILENAME);

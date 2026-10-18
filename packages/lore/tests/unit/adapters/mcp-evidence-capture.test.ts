@@ -57,6 +57,7 @@
  * @spec_ref task-the-ac-scope-re-keying-left-the-red-first-floor-unarmed
  */
 
+import { liveInvocation } from "../../live-invocation.js";
 import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
 import { describe, it, expect, afterEach, beforeEach } from "vitest";
@@ -205,7 +206,7 @@ let server: McpServer;
 beforeEach(() => {
   app = makeApp();
   server = new McpServer({ name: "test", version: "0.0.0" });
-  registerTools(server, app);
+  registerTools(server, app, undefined, liveInvocation());
 });
 
 // ─── HAPPY ───────────────────────────────────────────────────────────────────
@@ -641,7 +642,7 @@ function configWithCaptureWindow(captureTimeoutMs: number): LoreConfig {
  */
 function serverWithConfig(config: LoreConfig | undefined): McpServer {
   const configured = new McpServer({ name: "test-configured", version: "0.0.0" });
-  registerTools(configured, app, () => config);
+  registerTools(configured, app, () => config, liveInvocation());
   return configured;
 }
 

@@ -40,7 +40,7 @@
 
 import { afterEach, describe, expect, it } from "vitest";
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { ok } from "@lore/core";
@@ -128,6 +128,7 @@ async function runInstallOnce(targetDir: string): Promise<void> {
     new RealSetupFsReader(),
     new RealSetupFsWriter(),
     new OkMcpRegistrar(),
+    { env: {}, home: homedir() },
   );
   const result = await service.install(
     { targetDir, binPath: "/usr/local/bin/lore" },

@@ -21,6 +21,7 @@
  *               blanket lore_create block
  */
 
+import { liveInvocation } from "../../live-invocation.js";
 import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { describe, it, expect, beforeEach } from "vitest";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -106,7 +107,7 @@ let server: McpServer;
 beforeEach(() => {
   app = makeGatedApp();
   server = new McpServer({ name: "test", version: "0.0.0" });
-  registerTools(server, app);
+  registerTools(server, app, undefined, liveInvocation());
 });
 
 // ─── lore_create — MCP-path gate closure ─────────────────────────────────────

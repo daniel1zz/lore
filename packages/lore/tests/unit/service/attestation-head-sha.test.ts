@@ -156,7 +156,7 @@ async function attestAt(root: string, corpusRoot: string = root): Promise<Attest
       return ok(makeDoc({ id, type: "task", title: "Task" }));
     },
     async (_spec: VerifySpawnSpec): Promise<Result<VerifyExecutionResult, LoreError>> => ok(PASS_EXECUTION),
-    {
+    { tmpDir: tmpdir(),
       repoRoot: corpusRoot,
       defaultTimeoutMs: 300000,
       claimTtlMinutes: 120,

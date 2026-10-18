@@ -117,7 +117,7 @@ describe("commitDerivationUnverifiable: HAPPY — an absence-based scope_fidelit
     const provider = new InMemoryAIProvider("in-memory", { kind: "ok", content: judgeJson });
     const service = makeAssessService(provider);
 
-    const result = await service.assessPlan(bundle, { commitDerivationUnverifiable: true });
+    const result = await service.assessPlan(bundle, { repoRoot: process.cwd(), commitDerivationUnverifiable: true });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
 
@@ -148,7 +148,7 @@ describe("commitDerivationUnverifiable: CONTROL — the flag explicitly false ne
     const provider = new InMemoryAIProvider("in-memory", { kind: "ok", content: judgeJson });
     const service = makeAssessService(provider);
 
-    const result = await service.assessPlan(bundle, { commitDerivationUnverifiable: false });
+    const result = await service.assessPlan(bundle, { repoRoot: process.cwd(), commitDerivationUnverifiable: false });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
 
@@ -177,7 +177,7 @@ describe("commitDerivationUnverifiable: CONTROL — the flag explicitly false ne
     const provider = new InMemoryAIProvider("in-memory", { kind: "ok", content: judgeJson });
     const service = makeAssessService(provider);
 
-    const result = await service.assessPlan(bundle, { commitDerivationUnverifiable: false });
+    const result = await service.assessPlan(bundle, { repoRoot: process.cwd(), commitDerivationUnverifiable: false });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
 
@@ -205,7 +205,7 @@ describe("commitDerivationUnverifiable: BOUNDARY — an EVIDENCE-based scope_fid
     const provider = new InMemoryAIProvider("in-memory", { kind: "ok", content: judgeJson });
     const service = makeAssessService(provider);
 
-    const result = await service.assessPlan(bundle, { commitDerivationUnverifiable: true });
+    const result = await service.assessPlan(bundle, { repoRoot: process.cwd(), commitDerivationUnverifiable: true });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
 
@@ -232,7 +232,7 @@ describe("commitDerivationUnverifiable: NEGATIVE — no scope_fidelity dimension
     const provider = new InMemoryAIProvider("in-memory", { kind: "ok", content: judgeJson });
     const service = makeAssessService(provider);
 
-    const result = await service.assessPlan(bundle, { commitDerivationUnverifiable: true });
+    const result = await service.assessPlan(bundle, { repoRoot: process.cwd(), commitDerivationUnverifiable: true });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
 
@@ -268,7 +268,7 @@ describe("commitDerivationUnverifiable: STATE — the matching typed_gaps[] entr
     const provider = new InMemoryAIProvider("in-memory", { kind: "ok", content: judgeJson });
     const service = makeAssessService(provider);
 
-    const result = await service.assessPlan(bundle, { commitDerivationUnverifiable: true });
+    const result = await service.assessPlan(bundle, { repoRoot: process.cwd(), commitDerivationUnverifiable: true });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
 
@@ -303,7 +303,7 @@ describe("commitDerivationUnverifiable: REGRESSION — composes correctly alongs
     const provider = new InMemoryAIProvider("in-memory", { kind: "ok", content: judgeJson });
     const service = makeAssessService(provider);
 
-    const result = await service.assessPlan(bundle, { commitDerivationUnverifiable: true });
+    const result = await service.assessPlan(bundle, { repoRoot: process.cwd(), commitDerivationUnverifiable: true });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
 

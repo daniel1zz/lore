@@ -168,7 +168,7 @@ async function runService(repo: string, command: string, armed: boolean): Promis
       return ok(makeDoc({ id, type: "task", title: "Task" }));
     },
     async (spec: VerifySpawnSpec): Promise<Result<VerifyExecutionResult, LoreError>> => executeVerifySpawnSpec(spec),
-    {
+    { tmpDir: tmpdir(),
       repoRoot: repo,
       defaultTimeoutMs: 60_000,
       claimTtlMinutes: 120,

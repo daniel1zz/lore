@@ -48,6 +48,8 @@
  *                byte-identical to its pre-existing documented contract.
  */
 
+import type { Invocation } from "@lore/core";
+import { liveInvocation } from "../live-invocation.js";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { mkdtempSync, mkdirSync, rmSync } from "fs";
 import { join, resolve } from "path";
@@ -57,7 +59,7 @@ import type { CreateDocInput } from "@lore/core";
 
 // ─── Command type + importers (mirrors feed-p4.bun.test.ts / list-governed-by.bun.test.ts) ──
 
-type RunnableCommand = { run: (ctx: { args: Record<string, unknown> }) => Promise<void> };
+type RunnableCommand = { run: (ctx: { args: Record<string, unknown>; inv?: Invocation }) => Promise<void> };
 
 async function importFeedCommand(): Promise<RunnableCommand> {
   const mod = await import("../../src/adapters/cli/commands/feed.js");
@@ -138,7 +140,7 @@ async function runFeed(args: { checkpoint: string; parent?: string }) {
   const cmd = await importFeedCommand();
   const output = captureOutput();
   try {
-    await cmd.run({ args: { ...args } });
+    await cmd.run({ args: { ...args }, inv: liveInvocation() });
   } finally {
     output.restore();
   }
@@ -149,7 +151,7 @@ async function runGateSpecCreate(payload: Record<string, unknown>) {
   const cmd = await importGateSpecCreate();
   const output = captureOutput();
   try {
-    await cmd.run({ args: { "input-json": JSON.stringify(payload) } });
+    await cmd.run({ args: { "input-json": JSON.stringify(payload) }, inv: liveInvocation() });
   } finally {
     output.restore();
   }
@@ -160,7 +162,7 @@ async function runListGovernedBy(governedBy: string) {
   const cmd = await importListCommand();
   const output = captureOutput();
   try {
-    await cmd.run({ args: { "governed-by": governedBy, json: true } });
+    await cmd.run({ args: { "governed-by": governedBy, json: true }, inv: liveInvocation() });
   } finally {
     output.restore();
   }

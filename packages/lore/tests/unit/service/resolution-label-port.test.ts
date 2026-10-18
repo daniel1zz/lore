@@ -101,7 +101,7 @@ describe("GhResolutionLabelPort (spec-the-defect-channel-reaches-no-machine-but-
       { match: isPlainGet, respond: () => okJson([{ name: "bug" }]) },
       { match: isPost, respond: () => okJson({}) },
     ]);
-    const port = new GhResolutionLabelPort(new GhRunner({ execFile }));
+    const port = new GhResolutionLabelPort(new GhRunner({ execFile, env: process.env }));
 
     const result = await port.setLabel(REF, "resolution:fixed");
 
@@ -121,7 +121,7 @@ describe("GhResolutionLabelPort (spec-the-defect-channel-reaches-no-machine-but-
       { match: isDelete, respond: () => okJson({}) },
       { match: isPost, respond: () => okJson({}) },
     ]);
-    const port = new GhResolutionLabelPort(new GhRunner({ execFile }));
+    const port = new GhResolutionLabelPort(new GhRunner({ execFile, env: process.env }));
 
     const result = await port.setLabel(REF, "resolution:fixed");
 
@@ -139,7 +139,7 @@ describe("GhResolutionLabelPort (spec-the-defect-channel-reaches-no-machine-but-
     const execFile = scriptedExecFile(calls, [
       { match: isPlainGet, respond: () => okJson([{ name: "resolution:fixed" }, { name: "bug" }]) },
     ]);
-    const port = new GhResolutionLabelPort(new GhRunner({ execFile }));
+    const port = new GhResolutionLabelPort(new GhRunner({ execFile, env: process.env }));
 
     const result = await port.setLabel(REF, "resolution:fixed");
 
@@ -159,7 +159,7 @@ describe("GhResolutionLabelPort (spec-the-defect-channel-reaches-no-machine-but-
       { match: isDelete, respond: () => okJson({}) },
       { match: isPost, respond: () => okJson({}) },
     ]);
-    const port = new GhResolutionLabelPort(new GhRunner({ execFile }));
+    const port = new GhResolutionLabelPort(new GhRunner({ execFile, env: process.env }));
 
     const result = await port.setLabel(REF, "resolution:rejected");
 
@@ -181,7 +181,7 @@ describe("GhResolutionLabelPort (spec-the-defect-channel-reaches-no-machine-but-
       failure.code = "ENOENT";
       throw failure;
     };
-    const port = new GhResolutionLabelPort(new GhRunner({ execFile }));
+    const port = new GhResolutionLabelPort(new GhRunner({ execFile, env: process.env }));
 
     const result = await port.setLabel(REF, "resolution:fixed");
 
@@ -196,7 +196,7 @@ describe("GhResolutionLabelPort (spec-the-defect-channel-reaches-no-machine-but-
       calls.push({ args });
       return { stdout: "not json at all", stderr: "" };
     };
-    const port = new GhResolutionLabelPort(new GhRunner({ execFile }));
+    const port = new GhResolutionLabelPort(new GhRunner({ execFile, env: process.env }));
 
     const result = await port.setLabel(REF, "resolution:fixed");
 
@@ -220,7 +220,7 @@ describe("GhResolutionLabelPort (spec-the-defect-channel-reaches-no-machine-but-
       }
       throw new Error(`unexpected call: ${JSON.stringify(args)}`);
     };
-    const port = new GhResolutionLabelPort(new GhRunner({ execFile }));
+    const port = new GhResolutionLabelPort(new GhRunner({ execFile, env: process.env }));
 
     const result = await port.setLabel(REF, "resolution:fixed");
 

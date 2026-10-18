@@ -79,7 +79,6 @@
  */
 
 import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, readlinkSync, realpathSync, rmSync, rmdirSync, writeFileSync } from "node:fs";
-import { currentHomeDir } from "@lore/core/node";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { defineCommand } from "citty";
@@ -90,7 +89,8 @@ import {
 } from "@lore/core";
 import { err, isInsideRoots, ok, outsideRootsError } from "@lore/core";
 import type { CallerSurface, ContextConfigLayer, FsWritePort, LoreError, MemoryFileBudgets, Result } from "@lore/core";
-import { loadConfig, loadGlobalConfig } from "@lore/core/node";
+import { loadConfig, loadGlobalConfig, resolveGlobalConfigPath } from "@lore/core/node";
+import { invocationOf } from "../command-invocation.js";
 import { exitCode, findLoreDbPath, formatError } from "../utils.js";
 import { resolveAssetsRoot, type SetupPathContext } from "../setup-args.js";
 import { collectContextFacts } from "../../../service/context-facts.js";
@@ -477,7 +477,9 @@ export default defineCommand({
       description: "Output result as JSON",
     },
   },
-  async run({ args }) {
+  async run(context) {
+    const { args } = context;
+    const inv = invocationOf(context);
     const topic = typeof args.topic === "string" ? args.topic : undefined;
 
     if (topic === undefined) {
@@ -522,14 +524,14 @@ export default defineCommand({
     const substitutionNotice = formatMemoryFileBudgetSubstitution(budgetResolution, repoRoot);
     if (substitutionNotice !== undefined) process.stderr.write(substitutionNotice + "\n");
 
-    const globalConfigResult = loadGlobalConfig();
+    const home = inv.paths.home;
+    const globalConfigResult = loadGlobalConfig(resolveGlobalConfigPath(inv.env, home));
     if (!globalConfigResult.ok) {
       process.stderr.write(formatError(globalConfigResult.error) + "\n");
       process.exitCode = exitCode(globalConfigResult.error);
       return;
     }
-    const home = currentHomeDir();
-    const userConfigDir = resolveUserConfigDir(process.env, home);
+    const userConfigDir = resolveUserConfigDir(inv.env, home);
     // reason: BR-1177 — writes may land only in the project, the agent settings folder (rules, skills) and
     // the user config layer (user-scope selection file); a target resolved from the wrong home is refused.
     const fsPort = makeRealContextFsPort(repoRoot, [repoRoot, join(home, ".claude"), userConfigDir]);

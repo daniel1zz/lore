@@ -61,6 +61,7 @@
  * repo's own `.lore/` corpus is never touched (root CLAUDE.md).
  */
 
+import { liveInvocation } from "../../live-invocation.js";
 import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -239,7 +240,7 @@ beforeEach(() => {
   store = new InMemoryStore();
   app = makeApp(store);
   server = new McpServer({ name: "test", version: "0.0.0" });
-  registerTools(server, app);
+  registerTools(server, app, undefined, liveInvocation());
   guardSpy.mockClear();
   resolveCorpusSpy.mockClear();
 });

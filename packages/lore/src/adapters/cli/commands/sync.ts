@@ -15,6 +15,7 @@ import { err, ok } from "@lore/core";
 // reachable via the @lore/core/node subpath (browser-safety split,
 // packages/core/src/CLAUDE.md).
 import { loadConfig, saveConfig } from "@lore/core/node";
+import { invocationOf } from "../command-invocation.js";
 import { formatError } from "../utils.js";
 import { syncPush, type PushReport } from "../../http/sync-push.js";
 import {
@@ -238,7 +239,8 @@ const syncStatus = defineCommand({
       description: "Output as JSON",
     },
   },
-  async run({ args }) {
+  async run(context) {
+    const { args } = context;
     const loreDir = findLoreDir();
     if (loreDir === null) {
       const msg = "No Lore project found. Run `lore init` first.";
@@ -338,7 +340,8 @@ const syncPushCmd = defineCommand({
       description: "Output as JSON",
     },
   },
-  async run({ args }) {
+  async run(context) {
+    const { args } = context;
     const loreDir = findLoreDir();
     if (loreDir === null) {
       const msg = "No Lore project found. Run `lore init` first.";
@@ -361,7 +364,7 @@ const syncPushCmd = defineCommand({
       process.exit(1);
     }
 
-    const credResult = resolveSyncCredentials(configResult.value);
+    const credResult = resolveSyncCredentials(configResult.value, invocationOf(context).env);
     if (!credResult.ok) {
       const msg =
         credResult.error.code === "VALIDATION_ERROR" && credResult.error.field === "sync"
@@ -417,7 +420,8 @@ const syncPullCmd = defineCommand({
       description: "Output as JSON",
     },
   },
-  async run({ args }) {
+  async run(context) {
+    const { args } = context;
     const loreDir = findLoreDir();
     if (loreDir === null) {
       const msg = "No Lore project found. Run `lore init` first.";
@@ -440,7 +444,7 @@ const syncPullCmd = defineCommand({
       process.exit(1);
     }
 
-    const credResult = resolveSyncCredentials(configResult.value);
+    const credResult = resolveSyncCredentials(configResult.value, invocationOf(context).env);
     if (!credResult.ok) {
       const msg =
         credResult.error.code === "VALIDATION_ERROR" && credResult.error.field === "sync"

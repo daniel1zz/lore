@@ -341,7 +341,7 @@ describe("AC-FR-2 — falsifier-produces-attested-fail", () => {
 
     const recorder = makeRecordVerifiedEvidence();
     const getPlanBundle = async (): Promise<Result<PlanBundle, LoreError>> => ok(bundle);
-    const service = new VerifyRunnerService(getPlanBundle, recorder.fn, realExecutor, {
+    const service = new VerifyRunnerService(getPlanBundle, recorder.fn, realExecutor, { tmpDir: tmpdir(),
       ...BASE_CONFIG,
       repoRoot,
     });
@@ -384,7 +384,7 @@ describe("AC-FR-2 — falsifier-produces-attested-fail", () => {
 
     const recorder = makeRecordVerifiedEvidence();
     const getPlanBundle = async (): Promise<Result<PlanBundle, LoreError>> => ok(bundle);
-    const service = new VerifyRunnerService(getPlanBundle, recorder.fn, realExecutor, {
+    const service = new VerifyRunnerService(getPlanBundle, recorder.fn, realExecutor, { tmpDir: tmpdir(),
       ...BASE_CONFIG,
       repoRoot,
     });
@@ -419,7 +419,7 @@ describe("AC-FR-2 — falsifier-produces-attested-fail", () => {
 
     const recorder = makeRecordVerifiedEvidence();
     const getPlanBundle = async (): Promise<Result<PlanBundle, LoreError>> => ok(bundle);
-    const service = new VerifyRunnerService(getPlanBundle, recorder.fn, realExecutor, {
+    const service = new VerifyRunnerService(getPlanBundle, recorder.fn, realExecutor, { tmpDir: tmpdir(),
       ...BASE_CONFIG,
       repoRoot,
     });
@@ -457,7 +457,7 @@ describe("AC-FR-2 — falsifier-produces-attested-fail", () => {
 
       const recorder = makeRecordVerifiedEvidence();
       const getPlanBundle = async (): Promise<Result<PlanBundle, LoreError>> => ok(bundle);
-      const service = new VerifyRunnerService(getPlanBundle, recorder.fn, realExecutor, {
+      const service = new VerifyRunnerService(getPlanBundle, recorder.fn, realExecutor, { tmpDir: tmpdir(),
         ...BASE_CONFIG,
         repoRoot,
       });
@@ -494,7 +494,7 @@ describe("AC-FR-3 — working-tree-untouched", () => {
 
     const recorder = makeRecordVerifiedEvidence();
     const getPlanBundle = async (): Promise<Result<PlanBundle, LoreError>> => ok(bundle);
-    const service = new VerifyRunnerService(getPlanBundle, recorder.fn, realExecutor, {
+    const service = new VerifyRunnerService(getPlanBundle, recorder.fn, realExecutor, { tmpDir: tmpdir(),
       ...BASE_CONFIG,
       repoRoot,
     });
@@ -520,7 +520,7 @@ describe("AC-FR-3 — working-tree-untouched", () => {
     // NEVER calling removeFalsifierScratchWorktree, simulating a process that
     // died the instant after the mutation landed, before ANY cleanup step
     // (the `finally` block in `_runFalsifier`) ever got a chance to run.
-    const createResult = createFalsifierScratchWorktree(repoRoot);
+    const createResult = createFalsifierScratchWorktree(repoRoot, { tmpDir: tmpdir() });
     expect(createResult.ok).toBe(true);
     if (!createResult.ok) return;
     const scratch = createResult.value;
@@ -567,7 +567,7 @@ describe("AC-FR-3 — working-tree-untouched", () => {
           "import { pathToFileURL } from 'node:url';",
           "async function main() {",
           "  const mod = await import(pathToFileURL(process.argv[2]).href);",
-          "  const created = mod.createFalsifierScratchWorktree(process.argv[3]);",
+          "  const created = mod.createFalsifierScratchWorktree(process.argv[3], { tmpDir: (await import('node:os')).tmpdir() });",
           "  if (!created.ok) { console.error('CREATE_FAILED ' + JSON.stringify(created.error)); process.exit(2); }",
           "  const falsifier = JSON.parse(process.argv[4]);",
           "  const applied = mod.applyFalsifierMutation(created.value.worktreeDir, falsifier);",
@@ -657,7 +657,7 @@ describe("AC-FR-11 — green-control", () => {
 
       const recorder = makeRecordVerifiedEvidence();
       const getPlanBundle = async (): Promise<Result<PlanBundle, LoreError>> => ok(bundle);
-      const service = new VerifyRunnerService(getPlanBundle, recorder.fn, realExecutor, {
+      const service = new VerifyRunnerService(getPlanBundle, recorder.fn, realExecutor, { tmpDir: tmpdir(),
         ...BASE_CONFIG,
         repoRoot,
       });
@@ -707,7 +707,7 @@ describe("AC-FR-11 — green-control", () => {
 
       const recorder = makeRecordVerifiedEvidence();
       const getPlanBundle = async (): Promise<Result<PlanBundle, LoreError>> => ok(bundle);
-      const service = new VerifyRunnerService(getPlanBundle, recorder.fn, realExecutor, {
+      const service = new VerifyRunnerService(getPlanBundle, recorder.fn, realExecutor, { tmpDir: tmpdir(),
         ...BASE_CONFIG,
         repoRoot,
       });
@@ -757,7 +757,7 @@ describe("AC-FR-11 — green-control", () => {
 
       const recorder = makeRecordVerifiedEvidence();
       const getPlanBundle = async (): Promise<Result<PlanBundle, LoreError>> => ok(bundle);
-      const service = new VerifyRunnerService(getPlanBundle, recorder.fn, realExecutor, {
+      const service = new VerifyRunnerService(getPlanBundle, recorder.fn, realExecutor, { tmpDir: tmpdir(),
         ...BASE_CONFIG,
         repoRoot,
       });
@@ -803,7 +803,7 @@ describe("AC-FR-11 — green-control", () => {
 
       const recorder = makeRecordVerifiedEvidence();
       const getPlanBundle = async (): Promise<Result<PlanBundle, LoreError>> => ok(bundle);
-      const service = new VerifyRunnerService(getPlanBundle, recorder.fn, realExecutor, {
+      const service = new VerifyRunnerService(getPlanBundle, recorder.fn, realExecutor, { tmpDir: tmpdir(),
         ...BASE_CONFIG,
         repoRoot,
       });
@@ -846,7 +846,7 @@ describe("AC-FR-11 — green-control", () => {
 
       const recorder = makeRecordVerifiedEvidence();
       const getPlanBundle = async (): Promise<Result<PlanBundle, LoreError>> => ok(bundle);
-      const service = new VerifyRunnerService(getPlanBundle, recorder.fn, realExecutor, {
+      const service = new VerifyRunnerService(getPlanBundle, recorder.fn, realExecutor, { tmpDir: tmpdir(),
         ...BASE_CONFIG,
         repoRoot,
         defaultTimeoutMs: 300, // reason: far shorter than `sleep 5` — a genuine timeout, not a stub
@@ -882,7 +882,7 @@ describe("AC-FR-11 — green-control", () => {
 
       const recorder = makeRecordVerifiedEvidence();
       const getPlanBundle = async (): Promise<Result<PlanBundle, LoreError>> => ok(bundle);
-      const service = new VerifyRunnerService(getPlanBundle, recorder.fn, realExecutor, {
+      const service = new VerifyRunnerService(getPlanBundle, recorder.fn, realExecutor, { tmpDir: tmpdir(),
         ...BASE_CONFIG,
         repoRoot,
       });

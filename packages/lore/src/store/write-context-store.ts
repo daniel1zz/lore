@@ -32,6 +32,7 @@
 
 import { ok, type LoreError, type Result } from "@lore/core";
 import { resolveActorWithSource } from "@lore/core/node";
+import { readOsUsername } from "../os-username.js";
 import { verifyInvocationIdentity } from "../service/run-identity-verify.js";
 import type { AuditEntry, InvocationIdentity, VersionRecord } from "@lore/core";
 
@@ -93,8 +94,20 @@ export function readWriteContext(store: StoreInterface): StampingContext | undef
  * read the OS user next to a `--by` claim).
  */
 export function resolveWriteActorFor(store: StoreInterface, by?: string): string {
-  if (by !== undefined) return resolveActorWithSource(by, process.env).actor;
-  return readWriteContext(store)?.identity.claimed ?? resolveActorWithSource(undefined, process.env).actor;
+  if (by !== undefined) return actorFromProcessTiers(by);
+  return readWriteContext(store)?.identity.claimed ?? actorFromProcessTiers(undefined);
+}
+
+/**
+ * The env-chain tiers (explicit > session > OS user) for a store with NO write context.
+ *
+ * reason: a visible, counted process read (AS-26 ledger) rather than a threaded value: the services that call
+ * `resolveWriteActorFor` are constructed bare (`new CorpusService(store)`) by hundreds of tests and by the HTTP/MCP
+ * read paths, none of which has an Invocation to inject, so failing loud here would break every unwrapped write
+ * instead of naming it. Goes away when every store is built with a write context (IV-7/8).
+ */
+function actorFromProcessTiers(by: string | undefined): string {
+  return resolveActorWithSource(by, process.env, readOsUsername).actor;
 }
 
 function stampRecord<T extends object>(record: T, stamp: Stamp): T {

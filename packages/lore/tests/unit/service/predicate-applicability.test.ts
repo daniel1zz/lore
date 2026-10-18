@@ -261,7 +261,7 @@ describe("GateEnforcer.enforce — enforce advisory on plan-close not-applicable
   // (PLUS, AC-FR-8/D7, one gate_passed row — the checkpoint was NOT blocked).
   it("HAPPY: enforce returns ok and records one gate_not_applicable row naming the absent referent, plus one gate_passed row", () => {
     const recordGateSkip = vi.fn<RecordGateSkip>().mockResolvedValue(ok(undefined));
-    const enforcer = new GateEnforcer(undefined, recordGateSkip);
+    const enforcer = new GateEnforcer(undefined, recordGateSkip, undefined, () => "test-actor");
 
     const result = enforcer.enforce("plan-close", notApplicableCtx());
 
@@ -285,7 +285,7 @@ describe("GateEnforcer.enforce — enforce advisory on plan-close not-applicable
     const recordGateSkip: RecordGateSkip = vi.fn(() => {
       throw new Error("boom");
     }) as unknown as RecordGateSkip;
-    const enforcer = new GateEnforcer(undefined, recordGateSkip);
+    const enforcer = new GateEnforcer(undefined, recordGateSkip, undefined, () => "test-actor");
 
     const result = enforcer.enforce("plan-close", notApplicableCtx());
 
@@ -296,7 +296,7 @@ describe("GateEnforcer.enforce — enforce advisory on plan-close not-applicable
   // to the caller; enforce()'s Result is unaffected once microtasks settle.
   it("NEGATIVE: a rejecting audit writer never surfaces — enforce's Result is unaffected", async () => {
     const recordGateSkip = vi.fn<RecordGateSkip>().mockRejectedValue(new Error("network down"));
-    const enforcer = new GateEnforcer(undefined, recordGateSkip);
+    const enforcer = new GateEnforcer(undefined, recordGateSkip, undefined, () => "test-actor");
 
     const result = enforcer.enforce("plan-close", notApplicableCtx());
     expect(result).toEqual({ ok: true, value: undefined });
@@ -310,7 +310,7 @@ describe("GateEnforcer.enforce — enforce advisory on plan-close not-applicable
   // proving the reason -> kind mapping covers both attestation producers.
   it("BOUNDARY: a zero-evidence plan is audited with the attestation-not-applicable kind", () => {
     const recordGateSkip = vi.fn<RecordGateSkip>().mockResolvedValue(ok(undefined));
-    const enforcer = new GateEnforcer(undefined, recordGateSkip);
+    const enforcer = new GateEnforcer(undefined, recordGateSkip, undefined, () => "test-actor");
     // reason: task-report-why-each-plan-close-predicate-passed-so-a-vacuous —
     // this test counts audit rows for attestationFloor's own zero-evidence
     // not-applicable case specifically; assessmentFreshnessExempt keeps the
@@ -351,7 +351,7 @@ describe("GateEnforcer.enforce — enforce advisory on plan-close not-applicable
   // own vacuous case specifically.
   it("COVERAGE-RESTORE: an UNEXEMPTED plan with real evidence but no assessment/task-activity data audits the assessment-freshness no-evidence entry too", () => {
     const recordGateSkip = vi.fn<RecordGateSkip>().mockResolvedValue(ok(undefined));
-    const enforcer = new GateEnforcer(undefined, recordGateSkip);
+    const enforcer = new GateEnforcer(undefined, recordGateSkip, undefined, () => "test-actor");
     const ctx: GateContext = {
       targetIdOrSlug: "plan-coverage-restore",
       attestationMinRatio: null,
@@ -394,7 +394,7 @@ describe("GateEnforcer.enforce — enforce advisory on plan-close not-applicable
   // (AC-FR-8/D7 — a genuine, non-vacuous pass is no longer silent).
   it("STATE: a plan-close call with no not-applicable verdicts fires gate_passed only, never gate_not_applicable", () => {
     const recordGateSkip = vi.fn<RecordGateSkip>().mockResolvedValue(ok(undefined));
-    const enforcer = new GateEnforcer(undefined, recordGateSkip);
+    const enforcer = new GateEnforcer(undefined, recordGateSkip, undefined, () => "test-actor");
     const ctx: GateContext = {
       targetIdOrSlug: "plan-z",
       attestationMinRatio: 0.5,
@@ -432,7 +432,7 @@ describe("GateEnforcer.enforce — enforce advisory on plan-close not-applicable
       workflow: { gates: { "plan-close": { enabled: false } } },
     } as unknown as LoreConfig;
     const recordGateSkip = vi.fn<RecordGateSkip>().mockResolvedValue(ok(undefined));
-    const enforcer = new GateEnforcer(config, recordGateSkip);
+    const enforcer = new GateEnforcer(config, recordGateSkip, undefined, () => "test-actor");
 
     const result = enforcer.enforce("plan-close", notApplicableCtx());
 
@@ -454,7 +454,7 @@ describe("GateEnforcer.enforce — notApplicableAdvisoryKind is keyed per-refere
   // row anywhere carries the retired "prd-sync-domain-doc" kind.
   it("HAPPY: the planClaimedAcCoverage referent maps to attestation-not-applicable and the retired prd-sync-domain-doc kind never appears", () => {
     const recordGateSkip = vi.fn<RecordGateSkip>().mockResolvedValue(ok(undefined));
-    const enforcer = new GateEnforcer(undefined, recordGateSkip);
+    const enforcer = new GateEnforcer(undefined, recordGateSkip, undefined, () => "test-actor");
     // reason: `planClaimedAcCoverage` is deliberately OMITTED — the Amendment A companion-push
     // trigger. `planDeclaredScopeCoverage` IS supplied (an unresolved declared scope would add a
     // second row, reason `scope-undeclared`, belonging to a different concern).
@@ -485,7 +485,7 @@ describe("GateEnforcer.enforce — notApplicableAdvisoryKind is keyed per-refere
   // advisory that blocked would make this a gate, which D4 explicitly forbids.
   it("BOUNDARY: an undeclared declared-scope is audited as attestation-not-applicable naming the plan, and never blocks", () => {
     const recordGateSkip = vi.fn<RecordGateSkip>().mockResolvedValue(ok(undefined));
-    const enforcer = new GateEnforcer(undefined, recordGateSkip);
+    const enforcer = new GateEnforcer(undefined, recordGateSkip, undefined, () => "test-actor");
     const ctx: GateContext = {
       targetIdOrSlug: "plan-undeclared",
       attestationMinRatio: 0.5,
@@ -520,7 +520,7 @@ describe("GateEnforcer.enforce — notApplicableAdvisoryKind is keyed per-refere
   // keyed branch for the producer that has no competing referent.
   it("NEGATIVE: attestationFloor's zero-evidence not-applicable still maps to attestation-not-applicable", () => {
     const recordGateSkip = vi.fn<RecordGateSkip>().mockResolvedValue(ok(undefined));
-    const enforcer = new GateEnforcer(undefined, recordGateSkip);
+    const enforcer = new GateEnforcer(undefined, recordGateSkip, undefined, () => "test-actor");
     // reason: task-report-why-each-plan-close-predicate-passed-so-a-vacuous —
     // this test counts exactly ONE audit row for attestationFloor's own
     // zero-evidence case; assessmentFreshnessExempt keeps the newly-visible

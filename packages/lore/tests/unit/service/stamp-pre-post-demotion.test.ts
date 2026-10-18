@@ -116,7 +116,7 @@ async function attestRealRun(repo: string, command: string): Promise<Attestation
       return ok(makeDoc({ id, type: "task", title: "Task" }));
     },
     async (spec: VerifySpawnSpec): Promise<Result<VerifyExecutionResult, LoreError>> => executeVerifySpawnSpec(spec),
-    {
+    { tmpDir: tmpdir(),
       repoRoot: repo,
       defaultTimeoutMs: 60_000,
       claimTtlMinutes: 120,

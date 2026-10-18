@@ -43,6 +43,7 @@
  *   REGRESSION: sync setup url stored as remote_url (not plaintext token)
  */
 
+import { liveInvocation } from "../../live-invocation.js";
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { mkdtempSync, mkdirSync, writeFileSync, existsSync } from "fs";
 import { join } from "path";
@@ -314,7 +315,7 @@ describe("lore sync push — negative cases (SPEC-009 §5)", () => {
     const exitCapture = captureExit();
 
     try {
-      await push.run({ args: { json: false } });
+      await push.run({ args: { json: false }, inv: liveInvocation() });
     } catch (e: any) {
       if (!e.message?.includes("process.exit")) throw e;
     } finally {
@@ -347,7 +348,7 @@ describe("lore sync push — negative cases (SPEC-009 §5)", () => {
     const exitCapture = captureExit();
 
     try {
-      await push.run({ args: { json: false } });
+      await push.run({ args: { json: false }, inv: liveInvocation() });
     } catch (e: any) {
       if (!e.message?.includes("process.exit")) throw e;
     } finally {
@@ -369,7 +370,7 @@ describe("lore sync pull — negative cases (SPEC-009 §5)", () => {
     const exitCapture = captureExit();
 
     try {
-      await pull.run({ args: { json: false } });
+      await pull.run({ args: { json: false }, inv: liveInvocation() });
     } catch (e: any) {
       if (!e.message?.includes("process.exit")) throw e;
     } finally {
@@ -590,7 +591,7 @@ describe("REGRESSION Fix6 — push/pull --json flag consistency (SPEC-009 §5)",
     const exitCapture = captureExit();
 
     try {
-      await push.run({ args: { json: true } });
+      await push.run({ args: { json: true }, inv: liveInvocation() });
     } catch (e: any) {
       if (!e.message?.includes("process.exit")) throw e;
     } finally {
@@ -617,7 +618,7 @@ describe("REGRESSION Fix6 — push/pull --json flag consistency (SPEC-009 §5)",
     const exitCapture = captureExit();
 
     try {
-      await pull.run({ args: { json: true } });
+      await pull.run({ args: { json: true }, inv: liveInvocation() });
     } catch (e: any) {
       if (!e.message?.includes("process.exit")) throw e;
     } finally {
@@ -646,7 +647,7 @@ describe("REGRESSION — sync push/pull error message quality (SPEC-009 §5)", (
     const exitCapture = captureExit();
 
     try {
-      await push.run({ args: { json: false } });
+      await push.run({ args: { json: false }, inv: liveInvocation() });
     } catch (e: any) {
       if (!e.message?.includes("process.exit")) throw e;
     } finally {
@@ -668,7 +669,7 @@ describe("REGRESSION — sync push/pull error message quality (SPEC-009 §5)", (
     const exitCapture = captureExit();
 
     try {
-      await pull.run({ args: { json: false } });
+      await pull.run({ args: { json: false }, inv: liveInvocation() });
     } catch (e: any) {
       if (!e.message?.includes("process.exit")) throw e;
     } finally {

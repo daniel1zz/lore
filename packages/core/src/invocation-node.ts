@@ -16,7 +16,7 @@
  * reason: lives under `@lore/core/node` (not the default barrel) because it imports `node:os`.
  */
 
-import { homedir, hostname, tmpdir } from "node:os";
+import { homedir, hostname, tmpdir, userInfo } from "node:os";
 import type { Invocation } from "./invocation.js";
 import { resolveInvocationIdentity } from "./run-identity-node.js";
 
@@ -35,6 +35,25 @@ export interface InvocationResolvers {
 }
 
 /**
+ * The OS account name of the running process (the os-fallback tier of actor resolution). Module-private on purpose:
+ * this file is allowlisted for ambient reads because the ENTRY reads here, so it exports nothing but
+ * {@link resolveInvocation} — a helper exported from it would let any file read the process through it uncounted
+ * (guard: `scripts/tests/invocation-node-exports.test.ts`).
+ */
+function osUsername(): string {
+  return userInfo().username;
+}
+
+/**
+ * `$HOME` wins over `os.homedir()`: under Bun, os.homedir() ignores a HOME assigned after startup
+ * (measured 2026-10-17, see home-dir-node.ts), and the in-process test runner relies on the env value.
+ */
+function homeFrom(env: EnvBag): string {
+  const envHome = env["HOME"];
+  return envHome !== undefined && envHome !== "" ? envHome : homedir();
+}
+
+/**
  * Resolve the invocation of the running process.
  *
  * @param rawArgv - arguments after the program name, as typed (still containing `--harness-run`)
@@ -45,11 +64,8 @@ export interface InvocationResolvers {
 export function resolveInvocation(rawArgv: readonly string[], resolvers: InvocationResolvers): Invocation {
   const cwd = process.cwd();
   const env: EnvBag = Object.freeze({ ...process.env });
-  // reason: `$HOME` wins over `os.homedir()`: under Bun, os.homedir() ignores a HOME assigned after startup
-  // (measured 2026-10-17, see home-dir-node.ts), and the in-process test runner relies on the env value.
-  const envHome = env["HOME"];
-  const home = envHome !== undefined && envHome !== "" ? envHome : homedir();
-  const resolution = resolveInvocationIdentity(rawArgv, { ...env }, (dir) => resolvers.worktreeActor(dir));
+  const home = homeFrom(env);
+  const resolution = resolveInvocationIdentity(rawArgv, { ...env }, osUsername, () => resolvers.worktreeActor(cwd));
   const argv: readonly string[] = Object.freeze([...resolution.argv]);
   const bunMain = (globalThis as { Bun?: { main?: string } }).Bun?.main;
   return Object.freeze({

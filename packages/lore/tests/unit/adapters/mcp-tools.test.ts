@@ -9,6 +9,7 @@
  * @spec_ref AC-MCP-001
  */
 
+import { liveInvocation } from "../../live-invocation.js";
 import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
 import { describe, it, expect, beforeEach } from "vitest";
@@ -115,7 +116,7 @@ let server: McpServer;
 beforeEach(() => {
   app = makeApp();
   server = new McpServer({ name: "test", version: "0.0.0" });
-  registerTools(server, app);
+  registerTools(server, app, undefined, liveInvocation());
 });
 
 // ─── lore_create ─────────────────────────────────────────────────────────────
@@ -878,7 +879,7 @@ describe("lore_uat_record", () => {
   it("AC-1/HAPPY: recording against a plan through MCP still creates the knowledge/uat doc + informs link, unchanged", async () => {
     const { app: uatApp, store } = makeAppWithUatService();
     const localServer = new McpServer({ name: "test", version: "0.0.0" });
-    registerTools(localServer, uatApp);
+    registerTools(localServer, uatApp, undefined, liveInvocation());
 
     const planResult = await uatApp.corpusService.create({ type: "plan", title: "Test plan", content: "body", extra: {} });
     if (!planResult.ok) throw new Error("fixture plan create failed");
@@ -899,7 +900,7 @@ describe("lore_uat_record", () => {
   it("AC-5/NEGATIVE: refuses a non-plan target through the SAME MCP path — proves the fix lives in the service layer, not mcp/tools.ts", async () => {
     const { app: uatApp } = makeAppWithUatService();
     const localServer = new McpServer({ name: "test", version: "0.0.0" });
-    registerTools(localServer, uatApp);
+    registerTools(localServer, uatApp, undefined, liveInvocation());
 
     const adrResult = await uatApp.corpusService.create({
       type: "adr",
@@ -921,7 +922,7 @@ describe("lore_uat_record", () => {
   it("AC-4/ORDERING (MCP surface): the refused MCP call creates NO knowledge/uat doc and NO link", async () => {
     const { app: uatApp, store } = makeAppWithUatService();
     const localServer = new McpServer({ name: "test", version: "0.0.0" });
-    registerTools(localServer, uatApp);
+    registerTools(localServer, uatApp, undefined, liveInvocation());
 
     const adrResult = await uatApp.corpusService.create({
       type: "adr",

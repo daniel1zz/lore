@@ -52,6 +52,7 @@
  *               their pre-existing wording after the SSOT refactor.
  */
 
+import { liveInvocation } from "../../live-invocation.js";
 import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
 import { describe, it, expect } from "vitest";
@@ -153,7 +154,7 @@ function makeConfig(upstream?: Record<string, unknown>): LoreConfig {
 /** Registers a fresh McpServer whose `getConfig` resolves to a FIXED config — one per shape under test. */
 function makeServerWithConfig(config: LoreConfig): McpServer {
   const server = new McpServer({ name: "test", version: "0.0.0" });
-  registerTools(server, makeApp(), () => config);
+  registerTools(server, makeApp(), () => config, liveInvocation());
   return server;
 }
 

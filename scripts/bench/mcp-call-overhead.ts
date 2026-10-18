@@ -65,7 +65,7 @@ try {
     seeder.close();
   }
 
-  const scope = new McpCallScope(app, (line) => {
+  const scope = new McpCallScope(app, process.env, (line) => {
     throw new Error(`unexpected warning during bench: ${line}`);
   });
 

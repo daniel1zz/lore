@@ -35,6 +35,7 @@
  * @spec_ref AC-ASSESS-1, AC-ASSESS-8, AC-ASSESS-9, AC-ASSESS-10, task-lore-assess-asks-the-caller-for-a-git-range-that-cannot-be
  */
 
+import { liveInvocation } from "../../live-invocation.js";
 import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
@@ -204,7 +205,7 @@ let server: McpServer;
 function setup(opts: Parameters<typeof makeApp>[0] = {}) {
   app = makeApp(opts);
   server = new McpServer({ name: "test", version: "0.0.0" });
-  registerTools(server, app);
+  registerTools(server, app, undefined, liveInvocation());
 }
 
 beforeEach(() => {

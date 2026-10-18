@@ -188,7 +188,7 @@ const GATE_SKIP_AUDIT_ACTION = "gate_skipped";
  * @param mechanism - Which escape hatch produced the skip.
  * @param nowIso - ISO 8601 timestamp, resolved by the caller (`new Date().toISOString()`).
  * @param actor - Resolved actor identity, e.g. `resolveActorWithSource(undefined,
- *   process.env).actor` (the SAME chain `CorpusService`'s SPEC-079 G2 writes use).
+ *   env, readOsUsername).actor` (the SAME chain `CorpusService`'s SPEC-079 G2 writes use).
  * @param target - The target doc's id/slug as the calling checkpoint's `GateContext`
  *   supplied it (`specIdOrSlug`/`targetIdOrSlug`), when one was available — absent
  *   for checkpoints gating a not-yet-created candidate (e.g. `spec-create`).
@@ -474,7 +474,7 @@ const LORE_GATE_BYPASS_ENV_VAR = "LORE_GATE_BYPASS";
  * @param env - The process environment to read the variable from — an explicit
  *   parameter (never a bare top-level `process.env` read inside this function)
  *   so it stays a pure function of its arguments, testable without mutating
- *   global state; `enforce()`'s own call site passes the real `process.env`.
+ *   global state; `enforce()`'s own call site passes the environment injected at construction.
  * @returns The note text (leading `\n\n`, no trailing newline) or `""`.
  * @example
  * describeBypassBoundaryNote("spec-create", { LORE_GATE_BYPASS: "1" });
@@ -527,6 +527,18 @@ export interface GateDependencies {
 /**
  * Service-layer gate checkpoint runner. See module header for the full rationale.
  */
+/** Thrown by the port-less actor fallback when the session tier of the injected env names no actor: nothing may guess one. */
+export class GateActorUnresolvedError extends Error {
+  constructor() {
+    super("GateEnforcer has no resolveActorPort and its env names no session — wire `resolveActorPort` (app.ts does) to record gate rows");
+    this.name = "GateActorUnresolvedError";
+  }
+}
+
+function noOsUsername(): string {
+  throw new GateActorUnresolvedError();
+}
+
 export class GateEnforcer {
   /**
    * @param config - The project's resolved `LoreConfig`, or `undefined` when no
@@ -560,12 +572,19 @@ export class GateEnforcer {
      * row carries the SAME name as the operation it gates; absent (bare tests) → the env chain.
      */
     private readonly resolveActorPort?: () => string,
+    /**
+     * The invocation environment: read for the `LORE_GATE_BYPASS` boundary note and the env tier of the
+     * port-less actor fallback. `app.ts` passes its captured snapshot; omitted (bare tests) -> `{}`, i.e.
+     * "no variable is set", which leaves a denial's text byte-identical (AC-4 REGRESSION) — a missing env
+     * can only withhold an advisory note, never change a verdict.
+     */
+    private readonly env: Readonly<Record<string, string | undefined>> = {},
   ) {}
 
   private resolveActor(): string {
     return this.resolveActorPort !== undefined
       ? this.resolveActorPort()
-      : resolveActorWithSource(undefined, process.env).actor;
+      : resolveActorWithSource(undefined, this.env, noOsUsername).actor;
   }
 
   /**
@@ -675,7 +694,7 @@ export class GateEnforcer {
     // when the CLI-only `LORE_GATE_BYPASS=1` escape hatch is set in THIS process's
     // env, and ONLY on this already-blocked branch; it never influences whether the
     // checkpoint blocks, and stays "" (no message growth at all) when unset (AC-4).
-    const bypassBoundaryNote = describeBypassBoundaryNote(checkpoint, process.env);
+    const bypassBoundaryNote = describeBypassBoundaryNote(checkpoint, this.env);
     // reason: SPEC-102 D7 — service-layer deny, layer="service" (disambiguates
     // from the hook-layer `lore gate` CLI deny path, which fires its own
     // `recordGateDeny(..., "hook")` call — the two layers see different

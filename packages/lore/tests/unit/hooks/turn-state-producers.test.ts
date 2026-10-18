@@ -216,7 +216,7 @@ describe("session-start marker: writer == reader (both resolve the session via C
     process.env.TMPDIR = tmp;
     let read: ReturnType<typeof readSessionStartIso>;
     try {
-      read = readSessionStartIso({ CLAUDE_CODE_SESSION_ID: sid });
+      read = readSessionStartIso({ CLAUDE_CODE_SESSION_ID: sid }, tmp);
     } finally {
       if (prevTmp === undefined) delete process.env.TMPDIR;
       else process.env.TMPDIR = prevTmp;

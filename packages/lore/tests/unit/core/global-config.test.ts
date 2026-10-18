@@ -2,7 +2,7 @@
  * @spec_ref SPEC-003 §6.2 (XDG-aware global config loading)
  *
  * Six-dimension test suite for global config functions in src/core/config.ts:
- *   - resolveGlobalConfigPath()  — XDG path resolution with env-var precedence
+ *   - resolveGlobalConfigPath(process.env, homedir())  — XDG path resolution with env-var precedence
  *   - loadGlobalConfig()         — parse + validate GlobalLoreConfigSchema
  *   - mergeDefaults()            — project-wins merge semantics
  *
@@ -138,7 +138,7 @@ describe("loadGlobalConfig() — happy path (AC-GC-1)", () => {
     const dir = makeLoreConfigHome("defaults:\n  editor: vim\n");
     process.env["LORE_CONFIG_HOME"] = dir;
 
-    const path = resolveGlobalConfigPath();
+    const path = resolveGlobalConfigPath(process.env, homedir());
     expect(path).toBeDefined();
     const result = loadGlobalConfig(path);
 
@@ -153,7 +153,7 @@ describe("loadGlobalConfig() — happy path (AC-GC-1)", () => {
     const dir = makeLoreConfigHome(content);
     process.env["LORE_CONFIG_HOME"] = dir;
 
-    const path = resolveGlobalConfigPath();
+    const path = resolveGlobalConfigPath(process.env, homedir());
     const result = loadGlobalConfig(path);
 
     expect(result.ok).toBe(true);
@@ -193,7 +193,7 @@ describe("mergeDefaults() — happy path", () => {
 
 // ─── NEGATIVE — path resolution ordering (AC-GC-2) ───────────────────────────
 
-describe("resolveGlobalConfigPath() — path resolution ordering (AC-GC-2)", () => {
+describe("resolveGlobalConfigPath(process.env, homedir()) — path resolution ordering (AC-GC-2)", () => {
   it("prefers $LORE_CONFIG_HOME over $XDG_CONFIG_HOME when both exist", () => {
     const loreDir = makeLoreConfigHome("defaults:\n  editor: from-lore\n");
     const xdgDir = makeXdgConfigHome("defaults:\n  editor: from-xdg\n");
@@ -201,7 +201,7 @@ describe("resolveGlobalConfigPath() — path resolution ordering (AC-GC-2)", () 
     process.env["LORE_CONFIG_HOME"] = loreDir;
     process.env["XDG_CONFIG_HOME"] = xdgDir;
 
-    const path = resolveGlobalConfigPath();
+    const path = resolveGlobalConfigPath(process.env, homedir());
     expect(path).toBeDefined();
     // Should point to the LORE_CONFIG_HOME file
     expect(path).toContain(loreDir);
@@ -213,7 +213,7 @@ describe("resolveGlobalConfigPath() — path resolution ordering (AC-GC-2)", () 
     const xdgDir = makeXdgConfigHome("defaults:\n  editor: from-xdg\n");
     process.env["XDG_CONFIG_HOME"] = xdgDir;
 
-    const path = resolveGlobalConfigPath();
+    const path = resolveGlobalConfigPath(process.env, homedir());
     expect(path).toBeDefined();
     expect(path).toContain(xdgDir);
   });
@@ -225,7 +225,7 @@ describe("resolveGlobalConfigPath() — path resolution ordering (AC-GC-2)", () 
     process.env["LORE_CONFIG_HOME"] = emptyDir;
     process.env["XDG_CONFIG_HOME"] = xdgDir;
 
-    const path = resolveGlobalConfigPath();
+    const path = resolveGlobalConfigPath(process.env, homedir());
     expect(path).toBeDefined();
     expect(path).toContain(xdgDir);
   });
@@ -241,7 +241,7 @@ describe("resolveGlobalConfigPath() — path resolution ordering (AC-GC-2)", () 
     // are both set to empty dirs, XDG path is checked and returns undefined.
     // If the user happens to have ~/.config/lore/config.yaml, the result
     // would be defined — that's expected behaviour.
-    const path = resolveGlobalConfigPath();
+    const path = resolveGlobalConfigPath(process.env, homedir());
     // When XDG points to an empty dir and LORE is unset, path should be
     // undefined (or point to ~/.config if the user has one — both are valid)
     if (path !== undefined) {
@@ -256,7 +256,7 @@ describe("resolveGlobalConfigPath() — path resolution ordering (AC-GC-2)", () 
     const xdgDir = makeXdgConfigHome("defaults:\n  color: true\n");
     process.env["XDG_CONFIG_HOME"] = xdgDir;
 
-    const path = resolveGlobalConfigPath();
+    const path = resolveGlobalConfigPath(process.env, homedir());
     expect(path).toBeDefined();
     expect(path).toBe(join(xdgDir, "lore", "config.yaml"));
   });
@@ -265,7 +265,7 @@ describe("resolveGlobalConfigPath() — path resolution ordering (AC-GC-2)", () 
     const loreDir = makeLoreConfigHome("defaults:\n  editor: vim\n");
     process.env["LORE_CONFIG_HOME"] = loreDir;
 
-    const path = resolveGlobalConfigPath();
+    const path = resolveGlobalConfigPath(process.env, homedir());
     expect(path).toBeDefined();
     expect(path).toBe(join(loreDir, "config.yaml"));
   });
@@ -281,7 +281,7 @@ describe("resolveGlobalConfigPath() — path resolution ordering (AC-GC-2)", () 
 // ~/.config/lore/config.yaml even with $XDG_CONFIG_HOME explicitly set to an
 // isolated temp dir.
 
-describe("resolveGlobalConfigPath() — XDG_CONFIG_HOME replaces (never stacks under) ~/.config default", () => {
+describe("resolveGlobalConfigPath(process.env, homedir()) — XDG_CONFIG_HOME replaces (never stacks under) ~/.config default", () => {
   it("returns undefined when XDG_CONFIG_HOME points at an empty dir, even if ~/.config/lore/config.yaml exists on this machine", () => {
     // reason: this assertion is the exact leak-repro from the incident. There
     // is no fake-homedir seam in this module (homedir() is called directly
@@ -294,7 +294,7 @@ describe("resolveGlobalConfigPath() — XDG_CONFIG_HOME replaces (never stacks u
     delete process.env["LORE_CONFIG_HOME"];
     process.env["XDG_CONFIG_HOME"] = makeTempDir(); // no lore/ subdir inside
 
-    expect(resolveGlobalConfigPath()).toBeUndefined();
+    expect(resolveGlobalConfigPath(process.env, homedir())).toBeUndefined();
   });
 
   it("treats an empty-string XDG_CONFIG_HOME identically to unset (AC-4)", () => {
@@ -306,10 +306,10 @@ describe("resolveGlobalConfigPath() — XDG_CONFIG_HOME replaces (never stacks u
     delete process.env["LORE_CONFIG_HOME"];
 
     delete process.env["XDG_CONFIG_HOME"];
-    const withUnsetVar = resolveGlobalConfigPath();
+    const withUnsetVar = resolveGlobalConfigPath(process.env, homedir());
 
     process.env["XDG_CONFIG_HOME"] = "";
-    const withEmptyVar = resolveGlobalConfigPath();
+    const withEmptyVar = resolveGlobalConfigPath(process.env, homedir());
 
     expect(withEmptyVar).toBe(withUnsetVar);
   });
@@ -321,7 +321,7 @@ describe("resolveGlobalConfigPath() — XDG_CONFIG_HOME replaces (never stacks u
     // No machine-dependent value assertion — only that omitting XDG_CONFIG_HOME
     // does not itself suppress the ~/.config default (never throws, and any
     // returned path must be the real default candidate).
-    const path = resolveGlobalConfigPath();
+    const path = resolveGlobalConfigPath(process.env, homedir());
     if (path !== undefined) {
       expect(path).toBe(join(homedir(), ".config", "lore", "config.yaml"));
     }
@@ -334,7 +334,7 @@ describe("loadGlobalConfig() — boundary cases (AC-GC-3)", () => {
   it("empty file → returns ok({})", () => {
     const dir = makeLoreConfigHome("");
     process.env["LORE_CONFIG_HOME"] = dir;
-    const path = resolveGlobalConfigPath();
+    const path = resolveGlobalConfigPath(process.env, homedir());
 
     const result = loadGlobalConfig(path);
     expect(result.ok).toBe(true);
@@ -346,7 +346,7 @@ describe("loadGlobalConfig() — boundary cases (AC-GC-3)", () => {
   it("whitespace-only file → returns ok({})", () => {
     const dir = makeLoreConfigHome("   \n   \n");
     process.env["LORE_CONFIG_HOME"] = dir;
-    const path = resolveGlobalConfigPath();
+    const path = resolveGlobalConfigPath(process.env, homedir());
 
     const result = loadGlobalConfig(path);
     expect(result.ok).toBe(true);
@@ -358,7 +358,7 @@ describe("loadGlobalConfig() — boundary cases (AC-GC-3)", () => {
   it("defaults: {} → returns ok({ defaults: {} })", () => {
     const dir = makeLoreConfigHome("defaults: {}\n");
     process.env["LORE_CONFIG_HOME"] = dir;
-    const path = resolveGlobalConfigPath();
+    const path = resolveGlobalConfigPath(process.env, homedir());
 
     const result = loadGlobalConfig(path);
     expect(result.ok).toBe(true);
@@ -368,7 +368,7 @@ describe("loadGlobalConfig() — boundary cases (AC-GC-3)", () => {
   });
 
   it("no global config path (undefined) → returns ok({})", () => {
-    // reason: force resolveGlobalConfigPath() to find nothing at any candidate
+    // reason: force resolveGlobalConfigPath(process.env, homedir()) to find nothing at any candidate
     // path via an isolated, empty $XDG_CONFIG_HOME — WITHOUT this isolation,
     // the fallthrough call inside loadGlobalConfig(undefined) resolves the
     // real machine's ambient env, which leaked ~/.config/lore/config.yaml
@@ -386,7 +386,7 @@ describe("loadGlobalConfig() — boundary cases (AC-GC-3)", () => {
   it("YAML comment-only file → returns ok({})", () => {
     const dir = makeLoreConfigHome("# this file is intentionally empty\n");
     process.env["LORE_CONFIG_HOME"] = dir;
-    const path = resolveGlobalConfigPath();
+    const path = resolveGlobalConfigPath(process.env, homedir());
 
     const result = loadGlobalConfig(path);
     expect(result.ok).toBe(true);
@@ -418,7 +418,7 @@ describe("loadGlobalConfig() — error cases (AC-GC-4)", () => {
   it("malformed YAML → returns err(VALIDATION_ERROR)", () => {
     const dir = makeLoreConfigHome("defaults:\n  editor: [unclosed\n  bad: : :\n");
     process.env["LORE_CONFIG_HOME"] = dir;
-    const path = resolveGlobalConfigPath();
+    const path = resolveGlobalConfigPath(process.env, homedir());
 
     const result = loadGlobalConfig(path);
     expect(result.ok).toBe(false);
@@ -432,7 +432,7 @@ describe("loadGlobalConfig() — error cases (AC-GC-4)", () => {
       "project:\n  name: lore\n  author: alice\n",
     );
     process.env["LORE_CONFIG_HOME"] = dir;
-    const path = resolveGlobalConfigPath();
+    const path = resolveGlobalConfigPath(process.env, homedir());
 
     const result = loadGlobalConfig(path);
     expect(result.ok).toBe(false);
@@ -446,7 +446,7 @@ describe("loadGlobalConfig() — error cases (AC-GC-4)", () => {
       "sync:\n  enabled: false\n",
     );
     process.env["LORE_CONFIG_HOME"] = dir;
-    const path = resolveGlobalConfigPath();
+    const path = resolveGlobalConfigPath(process.env, homedir());
 
     const result = loadGlobalConfig(path);
     expect(result.ok).toBe(false);
@@ -460,7 +460,7 @@ describe("loadGlobalConfig() — error cases (AC-GC-4)", () => {
       "telemetry:\n  enabled: true\n",
     );
     process.env["LORE_CONFIG_HOME"] = dir;
-    const path = resolveGlobalConfigPath();
+    const path = resolveGlobalConfigPath(process.env, homedir());
 
     const result = loadGlobalConfig(path);
     expect(result.ok).toBe(false);
@@ -472,7 +472,7 @@ describe("loadGlobalConfig() — error cases (AC-GC-4)", () => {
   it("unknown top-level key → returns err(VALIDATION_ERROR)", () => {
     const dir = makeLoreConfigHome("unknown_key: should-not-be-here\n");
     process.env["LORE_CONFIG_HOME"] = dir;
-    const path = resolveGlobalConfigPath();
+    const path = resolveGlobalConfigPath(process.env, homedir());
 
     const result = loadGlobalConfig(path);
     expect(result.ok).toBe(false);
@@ -510,7 +510,7 @@ describe("loadGlobalConfig() — error cases (AC-GC-4)", () => {
   it("does not throw on malformed YAML — never throws", () => {
     const dir = makeLoreConfigHome("{{invalid: yaml]]");
     process.env["LORE_CONFIG_HOME"] = dir;
-    const path = resolveGlobalConfigPath();
+    const path = resolveGlobalConfigPath(process.env, homedir());
 
     expect(() => loadGlobalConfig(path)).not.toThrow();
   });
@@ -518,7 +518,7 @@ describe("loadGlobalConfig() — error cases (AC-GC-4)", () => {
 
 // ─── STATE (AC-GC-5) ─────────────────────────────────────────────────────────
 
-describe("resolveGlobalConfigPath() — state (AC-GC-5)", () => {
+describe("resolveGlobalConfigPath(process.env, homedir()) — state (AC-GC-5)", () => {
   it("returns undefined when no config file exists at any candidate path", () => {
     delete process.env["LORE_CONFIG_HOME"];
     // Point XDG to a dir without lore/config.yaml
@@ -527,7 +527,7 @@ describe("resolveGlobalConfigPath() — state (AC-GC-5)", () => {
 
     // If ~/.config/lore/config.yaml also doesn't exist, result is undefined.
     // This test is best-effort — if the dev machine has that file, skip assertion.
-    const path = resolveGlobalConfigPath();
+    const path = resolveGlobalConfigPath(process.env, homedir());
     // When XDG points to emptyXdg (no lore/config.yaml), result should be undefined
     // (or point to ~/.config if developer has it — both valid)
     if (path !== undefined) {
@@ -536,7 +536,7 @@ describe("resolveGlobalConfigPath() — state (AC-GC-5)", () => {
       expect(() => readFileSync(path, "utf8")).not.toThrow();
     }
     // Primary assertion: does not throw
-    expect(resolveGlobalConfigPath).not.toThrow();
+    expect(() => resolveGlobalConfigPath(process.env, homedir())).not.toThrow();
   });
 });
 
@@ -637,15 +637,16 @@ describe("saveGlobalConfig() — validate-then-write + atomic (AC-064-3)", () =>
     }
   });
 
-  it("HAPPY: omitting path resolves via resolveGlobalConfigWritePath (LORE_CONFIG_HOME)", () => {
+  it("HAPPY: the write path resolveGlobalConfigWritePath returns (LORE_CONFIG_HOME) is where the config lands", () => {
     const dir = makeTempDir();
     process.env["LORE_CONFIG_HOME"] = dir;
     delete process.env["XDG_CONFIG_HOME"];
 
-    const result = saveGlobalConfig({ defaults: { editor: "vim" } });
+    const expectedPath = join(dir, "config.yaml");
+    expect(resolveGlobalConfigWritePath(process.env, homedir())).toBe(expectedPath);
+    const result = saveGlobalConfig({ defaults: { editor: "vim" } }, resolveGlobalConfigWritePath(process.env, homedir()));
     expect(result.ok).toBe(true);
 
-    const expectedPath = join(dir, "config.yaml");
     expect(existsSync(expectedPath)).toBe(true);
     const reread = loadGlobalConfig(expectedPath);
     expect(reread.ok && reread.value.defaults?.editor).toBe("vim");
@@ -741,13 +742,13 @@ describe("saveGlobalConfig() — validate-then-write + atomic (AC-064-3)", () =>
   });
 });
 
-describe("resolveGlobalConfigWritePath() — precedence (mirrors resolveGlobalConfigPath, unresolved-by-existence)", () => {
+describe("resolveGlobalConfigWritePath(process.env, homedir()) — precedence (mirrors resolveGlobalConfigPath, unresolved-by-existence)", () => {
   it("prefers $LORE_CONFIG_HOME when set, regardless of whether the file exists", () => {
     const dir = makeTempDir(); // no config.yaml inside — deliberately non-existent
     process.env["LORE_CONFIG_HOME"] = dir;
     delete process.env["XDG_CONFIG_HOME"];
 
-    expect(resolveGlobalConfigWritePath()).toBe(join(dir, "config.yaml"));
+    expect(resolveGlobalConfigWritePath(process.env, homedir())).toBe(join(dir, "config.yaml"));
   });
 
   it("falls back to $XDG_CONFIG_HOME/lore/config.yaml when LORE_CONFIG_HOME is unset", () => {
@@ -755,13 +756,13 @@ describe("resolveGlobalConfigWritePath() — precedence (mirrors resolveGlobalCo
     const dir = makeTempDir();
     process.env["XDG_CONFIG_HOME"] = dir;
 
-    expect(resolveGlobalConfigWritePath()).toBe(join(dir, "lore", "config.yaml"));
+    expect(resolveGlobalConfigWritePath(process.env, homedir())).toBe(join(dir, "lore", "config.yaml"));
   });
 
   it("falls back to ~/.config/lore/config.yaml when neither env var is set", () => {
     delete process.env["LORE_CONFIG_HOME"];
     delete process.env["XDG_CONFIG_HOME"];
 
-    expect(resolveGlobalConfigWritePath()).toBe(join(homedir(), ".config", "lore", "config.yaml"));
+    expect(resolveGlobalConfigWritePath(process.env, homedir())).toBe(join(homedir(), ".config", "lore", "config.yaml"));
   });
 });

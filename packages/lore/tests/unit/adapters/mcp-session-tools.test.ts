@@ -51,6 +51,7 @@
  * @spec_ref SPEC-041 §4 AC-SL-6; spec-context-provenance-injected-corpus-global-state-and-a §Design Decisions D3
  */
 
+import { liveInvocation } from "../../live-invocation.js";
 import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
 import { describe, it, expect, beforeEach } from "vitest";
@@ -197,7 +198,7 @@ describe("lore_bootstrap", () => {
   beforeEach(() => {
     app = makeApp();
     server = new McpServer({ name: "test", version: "0.0.0" });
-    registerTools(server, app);
+    registerTools(server, app, undefined, liveInvocation());
   });
 
   describe("happy path", () => {
@@ -278,7 +279,7 @@ describe("lore_handoff", () => {
   beforeEach(() => {
     app = makeApp();
     server = new McpServer({ name: "test", version: "0.0.0" });
-    registerTools(server, app);
+    registerTools(server, app, undefined, liveInvocation());
   });
 
   describe("happy path", () => {
@@ -343,7 +344,7 @@ describe("lore_feed session-resume dispatch (SPEC-041 §3 D5)", () => {
   beforeEach(() => {
     app = makeApp();
     server = new McpServer({ name: "test", version: "0.0.0" });
-    registerTools(server, app);
+    registerTools(server, app, undefined, liveInvocation());
   });
 
   it("HAPPY + STATE: a lore_handoff write is surfaced by a subsequent session-resume feed call", async () => {

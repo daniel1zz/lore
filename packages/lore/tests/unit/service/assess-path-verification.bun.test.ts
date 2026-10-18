@@ -315,7 +315,7 @@ describe("AC-JV-1: assess findings are path-verified against the ASSESSED commit
 
     // reason: opts.diffSource is deliberately OMITTED — mirrors every real `lore assess`
     // call today (see ai-provider-service.ts's own JSDoc on opts.diffSource).
-    const result = await service.assessPlan(bundle, { commitDerivationUnverifiable: false });
+    const result = await service.assessPlan(bundle, { repoRoot: process.cwd(), commitDerivationUnverifiable: false });
 
     expect(result.ok).toBe(true);
     if (!result.ok) return;

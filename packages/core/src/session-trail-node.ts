@@ -2,7 +2,7 @@
  * session-trail-node.ts — Node-only half of the session trail: state-base resolution and the
  * filesystem reader.
  *
- * Public surface: `stateBase(env?, home?)`, `readSessionTrail(sessionId, base?)`.
+ * Public surface: `stateBase(env, home)`, `readSessionTrail(sessionId, base)`.
  *
  * Invariants:
  *   - `stateBase` is the twin of `getStateBase` in `assets/hooks/lib/turn-state.mjs`
@@ -16,7 +16,6 @@
  */
 
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
-import { currentHomeDir } from "./home-dir-node.js";
 import { join } from "node:path";
 import {
   assertTrailSessionId,
@@ -28,12 +27,12 @@ import {
 
 /**
  * Resolve the state base.
- * @param env - environment to read `CLAUDE_STATE_BASE_OVERRIDE` from (default `process.env`).
- * @param home - home directory for the default (default `os.homedir()`).
+ * @param env - invocation environment to read `CLAUDE_STATE_BASE_OVERRIDE` from (`Invocation.env`).
+ * @param home - home directory for the default (`Invocation.paths.home`).
  */
 export function stateBase(
-  env: Readonly<Record<string, string | undefined>> = process.env,
-  home: string = currentHomeDir(),
+  env: Readonly<Record<string, string | undefined>>,
+  home: string,
 ): string {
   return env.CLAUDE_STATE_BASE_OVERRIDE || join(home, ".claude", "session-state");
 }
@@ -80,12 +79,12 @@ function readRawHelpers(sessionDir: string): RawHelper[] {
 /**
  * Read one session's trail from disk.
  * @param sessionId - the session id (from `sessionOfRun(run)`).
- * @param base - state base; default `stateBase()`.
+ * @param base - state base, `stateBase(inv.env, inv.paths.home)` (required: no ambient default, AS-26).
  * @returns the trail, or `null` when `<base>/sessions/<sessionId>` does not exist.
  * @throws {TrailSessionIdInvalidError} unusable session id.
  * @throws {TrailFileInvalidError} malformed session.json, removed.json or helper record.
  */
-export function readSessionTrail(sessionId: string, base: string = stateBase()): SessionTrail | null {
+export function readSessionTrail(sessionId: string, base: string): SessionTrail | null {
   assertTrailSessionId(sessionId);
   const sessionDir = join(base, "sessions", sessionId);
   if (!existsSync(sessionDir) || !isDirectory(sessionDir)) return null;

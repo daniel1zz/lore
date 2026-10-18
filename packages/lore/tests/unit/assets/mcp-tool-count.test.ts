@@ -21,6 +21,7 @@
  * @spec_ref AC-CV-8
  */
 
+import { liveInvocation } from "../../live-invocation.js";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -77,7 +78,7 @@ function handTypedLines(files: string[]): string[] {
 describe("AC-CV-8 MCP tool count is a variable", () => {
   it("LORE_MCP_TOOL_NAMES set-equals the tools registered on a real MCP server", () => {
     const server = new McpServer({ name: "test", version: "0.0.0" });
-    registerTools(server, makeApp());
+    registerTools(server, makeApp(), undefined, liveInvocation());
     const registered = Object.keys(
       (server as unknown as { _registeredTools: Record<string, unknown> })._registeredTools,
     );

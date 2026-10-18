@@ -39,6 +39,8 @@
  *                `getPlanBundle`-succeeds branch is untouched.
  */
 
+import type { Invocation } from "@lore/core";
+import { liveInvocation } from "../live-invocation.js";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { mkdtempSync, mkdirSync, rmSync } from "fs";
 import { join, resolve } from "path";
@@ -49,7 +51,7 @@ import { asSessionActor } from "../helpers/session-actor";
 
 // ─── Command import + invocation helpers (mirrors gate-p2-cross-tier.bun.test.ts) ──
 
-type RunnableCommand = { run: (ctx: { args: Record<string, unknown> }) => Promise<void> };
+type RunnableCommand = { run: (ctx: { args: Record<string, unknown>; inv?: Invocation }) => Promise<void> };
 
 async function importDefaultCommand(modulePath: string): Promise<RunnableCommand> {
   const mod = await import(modulePath);
@@ -198,7 +200,7 @@ describe("SPEC-069 ad-hoc task claim gap fix", () => {
     const claimCmd = await importDefaultCommand("../../src/adapters/cli/commands/claim.js");
     const output = captureOutput();
     try {
-      await asSessionActor("agent:x", () => claimCmd.run({ args: { task: taskSlug, worktree: "wt-adhoc-1" } }));
+      await asSessionActor("agent:x", () => claimCmd.run({ args: { task: taskSlug, worktree: "wt-adhoc-1" }, inv: liveInvocation() }));
     } finally {
       output.restore();
     }
@@ -215,7 +217,7 @@ describe("SPEC-069 ad-hoc task claim gap fix", () => {
     const gateCmd = await importGateTaskClaimSubCommand();
     const output = captureOutput();
     try {
-      await asSessionActor("agent:x", () => gateCmd.run({ args: { task: taskSlug } }));
+      await asSessionActor("agent:x", () => gateCmd.run({ args: { task: taskSlug }, inv: liveInvocation() }));
     } finally {
       output.restore();
     }
@@ -245,7 +247,7 @@ describe("SPEC-069 ad-hoc task claim gap fix", () => {
     const feedCmd = await importDefaultCommand("../../src/adapters/cli/commands/feed.js");
     const output = captureOutput();
     try {
-      await feedCmd.run({ args: { checkpoint: "task-start", target: taskSlug } });
+      await feedCmd.run({ args: { checkpoint: "task-start", target: taskSlug }, inv: liveInvocation() });
     } finally {
       output.restore();
       if (originalLoreActor === undefined) delete process.env["LORE_ACTOR"];
@@ -272,7 +274,7 @@ describe("SPEC-069 ad-hoc task claim gap fix", () => {
     // First claim (agent:one) succeeds — establishes the fresh sibling claim.
     const firstOutput = captureOutput();
     try {
-      await asSessionActor("agent:one", () => claimCmd.run({ args: { task: taskOneSlug, worktree: "wt-one" } }));
+      await asSessionActor("agent:one", () => claimCmd.run({ args: { task: taskOneSlug, worktree: "wt-one" }, inv: liveInvocation() }));
     } finally {
       firstOutput.restore();
     }
@@ -282,7 +284,7 @@ describe("SPEC-069 ad-hoc task claim gap fix", () => {
     process.exitCode = 0;
     const secondOutput = captureOutput();
     try {
-      await asSessionActor("agent:two", () => claimCmd.run({ args: { task: taskTwoSlug, worktree: "wt-two" } }));
+      await asSessionActor("agent:two", () => claimCmd.run({ args: { task: taskTwoSlug, worktree: "wt-two" }, inv: liveInvocation() }));
     } finally {
       secondOutput.restore();
     }
@@ -297,7 +299,7 @@ describe("SPEC-069 ad-hoc task claim gap fix", () => {
     const claimCmd = await importDefaultCommand("../../src/adapters/cli/commands/claim.js");
     const output = captureOutput();
     try {
-      await asSessionActor("agent:regression", () => claimCmd.run({ args: { task: taskSlug, worktree: "wt-regression" } }));
+      await asSessionActor("agent:regression", () => claimCmd.run({ args: { task: taskSlug, worktree: "wt-regression" }, inv: liveInvocation() }));
     } finally {
       output.restore();
     }

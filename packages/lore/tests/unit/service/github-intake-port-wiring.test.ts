@@ -151,7 +151,7 @@ describe("(ii) BEHAVIOURAL: one fileIssue call invokes assembleIssueBody + appen
         respond: () => okJson({ number: 42, html_url: "https://github.com/acme/widget/issues/42" }),
       },
     ]);
-    const runner = new GhRunner({ execFile });
+    const runner = new GhRunner({ execFile, env: process.env });
     const port = new GitHubIntakePort({ runner, repo: "acme/widget", receiptsPath });
 
     try {

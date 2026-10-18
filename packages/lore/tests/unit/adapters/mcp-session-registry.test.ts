@@ -43,6 +43,7 @@
  * @spec_ref SPEC-042 §Acceptance Criteria AC-S3-8
  */
 
+import { liveInvocation } from "../../live-invocation.js";
 import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
 import { describe, it, expect, beforeEach } from "vitest";
@@ -165,7 +166,7 @@ describe("lore_claim — machine/worktree persisted (SPEC-042 D2, D9)", () => {
   beforeEach(() => {
     const app = makeApp();
     server = new McpServer({ name: "test", version: "0.0.0" });
-    registerTools(server, app);
+    registerTools(server, app, undefined, liveInvocation());
   });
 
   it("HAPPY: {machine, worktree, branch} all persist into extra.claim", async () => {
@@ -207,7 +208,7 @@ describe("lore_anchor_set — declarative replace, preserves claim/evidence (SPE
   beforeEach(() => {
     const app = makeApp();
     server = new McpServer({ name: "test", version: "0.0.0" });
-    registerTools(server, app);
+    registerTools(server, app, undefined, liveInvocation());
   });
 
   it("HAPPY + STATE: replacing anchors preserves an existing claim AND evidence untouched", async () => {
@@ -276,7 +277,7 @@ describe("lore_bootstrap — exposes active_sessions (SPEC-042 D8, D9)", () => {
   beforeEach(() => {
     const app = makeApp();
     server = new McpServer({ name: "test", version: "0.0.0" });
-    registerTools(server, app);
+    registerTools(server, app, undefined, liveInvocation());
   });
 
   it("HAPPY: a fresh claim shows up as one active session", async () => {
@@ -305,7 +306,7 @@ describe("lore_ready — REGRESSION: MCP payload deep-equals a direct service ca
   beforeEach(() => {
     const app = makeApp();
     server = new McpServer({ name: "test", version: "0.0.0" });
-    registerTools(server, app);
+    registerTools(server, app, undefined, liveInvocation());
   });
 
   /** Strips the wall-clock-derived `age_minutes` subfield from every record's claim, in place on a fresh copy. */
