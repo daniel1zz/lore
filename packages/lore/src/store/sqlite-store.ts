@@ -97,6 +97,8 @@ import type {
   ProvenanceWriteExtras,
   RunEndOutcome,
   RunEndState,
+  RunLifecycle,
+  RunProcessRecord,
 } from "./store-interface.js";
 import {
   type AuditChainRow,
@@ -108,6 +110,9 @@ import {
   type LinkRow,
   type VersionRow,
   INSERT_RUN_SQL,
+  RUN_LIFECYCLE_SQL,
+  type RunLifecycleRow,
+  rowToRunLifecycle,
   type RunRow,
   countAttributedWritesSql,
   emptyKindsError,
@@ -136,6 +141,7 @@ import {
 } from "./store-shared.js";
 import { stampAuditSurface } from "./audit-surface.js";
 import { MIGRATION_020_SQL } from "./migrations/migration-020.js";
+import { MIGRATION_021_ADD_COLUMNS, MIGRATION_021_SQL } from "./migrations/migration-021.js";
 import { DECISION_GENESIS_HASH, computeDecisionEntryHash } from "./decision-log.js";
 import type { DecisionLogRow, DecisionRecordInput } from "./decision-log.js";
 import type { DecisionSubjectKey } from "./store-interface.js";
@@ -673,6 +679,26 @@ export class SQLiteStore implements StoreInterface {
       // reason: migration-020 (decision_log + append-only triggers) is one idempotent BEGIN/COMMIT string.
       try {
         this.db.exec(MIGRATION_020_SQL);
+      } catch (error) {
+        try {
+          this.db.exec("ROLLBACK;");
+        } catch {
+          // reason: same as migration-004/005/006 — safe to ignore, see above.
+        }
+        throw error;
+      }
+    }
+
+    if (currentVersion < 21) {
+      // reason: migration-021 is two-phase like 017/019 (see migration-021.ts's module JSDoc): the nullable
+      // `runs.harness_pid` / `.harness_pid_start` / `.worktree` columns are added only where `PRAGMA table_info`
+      // lacks them, then one BEGIN/COMMIT bumps user_version.
+      try {
+        for (const { table, column, ddl } of MIGRATION_021_ADD_COLUMNS) {
+          const cols = this.db.query(`PRAGMA table_info(${table})`).all() as { name: string }[];
+          if (!cols.some((c) => c.name === column)) this.db.exec(ddl);
+        }
+        this.db.exec(MIGRATION_021_SQL);
       } catch (error) {
         try {
           this.db.exec("ROLLBACK;");
@@ -3185,6 +3211,27 @@ export class SQLiteStore implements StoreInterface {
         | { ended_at: string | null; end_reason: string | null }
         | null;
       return ok(row === null ? null : { endedAt: row.ended_at, endReason: row.end_reason });
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
+  async recordRunProcess(id: RunId, proc: RunProcessRecord): Promise<Result<boolean, LoreError>> {
+    try {
+      // reason: the NEWEST registration wins here (unlike the identity columns): a resumed run lives in a new process.
+      const updated = this.db
+        .prepare("UPDATE runs SET harness_pid = ?, harness_pid_start = ?, worktree = ? WHERE id = ?")
+        .run(proc.pid, proc.startTime, proc.worktree, id);
+      return ok(updated.changes > 0);
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
+  async listRunLifecycles(): Promise<Result<RunLifecycle[], LoreError>> {
+    try {
+      const rows = this.db.prepare(RUN_LIFECYCLE_SQL).all() as RunLifecycleRow[];
+      return ok(rows.map(rowToRunLifecycle));
     } catch (e) {
       return wrapStoreError(e);
     }

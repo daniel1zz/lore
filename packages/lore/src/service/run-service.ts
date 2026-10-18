@@ -34,7 +34,7 @@ import {
   type RunId,
   type RunRecord,
 } from "@lore/core";
-import type { StoreInterface } from "../store/store-interface.js";
+import type { RunProcessRecord, StoreInterface } from "../store/store-interface.js";
 import { claimNamesWorktree, makeDirectoryResolver, type RealpathFn } from "./seat-claim-match.js";
 
 export type RunStore = Pick<
@@ -44,6 +44,7 @@ export type RunStore = Pick<
   | "endRun"
   | "reopenRun"
   | "getRunEnd"
+  | "recordRunProcess"
   | "listRunsByAgentRef"
   | "findMany"
   | "queryAudit"
@@ -127,6 +128,12 @@ export interface RegisterRunInput {
   readonly branch?: string;
   /** Computed by the caller from the existing fragment selection (D5). */
   readonly composition: CompositionRecord;
+  /**
+   * The OS process this registration runs in, MEASURED by the caller (pid + start time probed, worktree resolved;
+   * AC-AU-5). Absent = nothing measured: the run stays/becomes a legacy run whose death is unprovable. Unlike the
+   * identity columns, the newest registration's process wins (a resumed run lives in a new process).
+   */
+  readonly process?: RunProcessRecord;
 }
 
 function validationError(field: string, message: string, value?: unknown): LoreError {
@@ -196,6 +203,13 @@ export class RunService {
     // reason: AC-ROI-6 — a resumed helper registers again; an ended run is reopened (no-op for an open one).
     const reopened = await this.store.reopenRun(id);
     if (!reopened.ok) return reopened;
+    if (input.process !== undefined) {
+      if ((input.process.pid === null) !== (input.process.startTime === null)) {
+        return err(validationError("process", "a run process records its pid and start time together or not at all", input.process));
+      }
+      const recorded = await this.store.recordRunProcess(id, input.process);
+      if (!recorded.ok) return recorded;
+    }
     const stored = await this.store.getRun(id);
     if (!stored.ok) return stored;
     if (stored.value === null) {

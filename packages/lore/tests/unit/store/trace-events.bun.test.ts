@@ -50,7 +50,7 @@ describe("migration-011 (trace_events) — schema (AC-TRACE-1)", () => {
     // the head — a fresh store runs every migration up to it, not just
     // through migration-011. This test's own concern (trace_events + its
     // four indexes) is unaffected — asserted directly below.
-    expect(userVersion(db)).toBe(20);
+    expect(userVersion(db)).toBe(21);
 
     const tables = (
       db.query("SELECT name FROM sqlite_master WHERE type = 'table'").all() as { name: string }[]
@@ -307,7 +307,7 @@ describe("AC-TRACE-7: Turso isolation — local-only trace writes", () => {
       // (never `this.client`) — proves migration-011 lands identically on a
       // replica-shaped local file, independent of any remote Turso state.
       const localTraceStore = new SQLiteStore(replicaPath);
-      expect(userVersion(localTraceStore.getDatabase())).toBe(20);
+      expect(userVersion(localTraceStore.getDatabase())).toBe(21);
 
       const insertResult = await localTraceStore.insertTraceEvent({
         ts: "2026-07-28T00:00:00.000Z",

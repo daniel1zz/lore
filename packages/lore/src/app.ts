@@ -86,6 +86,9 @@ import { RunService } from "./service/run-service.js";
 import { WorktreeRemovalService, type WorktreeRemovalRunStore } from "./service/worktree-removal-service.js";
 import { createRealWorktreeProbe } from "./service/worktree-cleanup.js";
 import { createRealProcessScanPort } from "./adapters/real-process-scan-port.js";
+import { createRealProcessTablePort } from "./adapters/process-table-port.js";
+import { DecisionService } from "./service/decision-service.js";
+import { RunReapService } from "./service/run-reap-service.js";
 import { ensureVerifiedIdentity, resolveWriteActorFor, withVerifiedWriteContext } from "./store/write-context-store.js";
 import { PlanExemptionService } from "./service/plan-exemption-service.js";
 import { UatService } from "./service/uat-service.js";
@@ -322,6 +325,11 @@ export interface App {
    * so hand-built App test stubs stay valid; always present from `createApp`.
    */
   runService?: RunService;
+  /**
+   * RunReapService — `lore run reap [--apply]` (AC-AU-5): ends runs that died without ending and reaps only the
+   * processes an ended run provably left behind. Optional like `runService` so hand-built App test stubs stay valid.
+   */
+  runReapService?: RunReapService;
   /**
    * WorktreeRemovalService — THE "may this worktree be removed now" test's measurement + `lore worktree check|sweep`
    * (spec-one-worktree-removal-test-for-the-guard-lore-done-and-a). Optional like `runService` so hand-built App test
@@ -915,6 +923,7 @@ function buildAppFromSqlite(
     taskWorkflowService,
     sessionService,
     runService: new RunService(store, undefined, taskWorkflowService, realpathNative),
+    runReapService: buildRunReapService(store, taskWorkflowService),
     worktreeRemovalService,
     verifiedInvocationIdentity: () => ensureVerifiedIdentity(store),
     // reason: ValidityService owns extra.validity (bi-temporal invalidation) — store +
@@ -1318,6 +1327,7 @@ function buildAppFromTurso(
     taskWorkflowService,
     sessionService,
     runService: new RunService(store, undefined, taskWorkflowService, realpathNative),
+    runReapService: buildRunReapService(store, taskWorkflowService),
     worktreeRemovalService,
     verifiedInvocationIdentity: () => ensureVerifiedIdentity(store),
     // reason: ValidityService owns extra.validity (bi-temporal invalidation) — store +
@@ -1904,6 +1914,24 @@ function createAppUnscoped(
       ...(cause !== undefined ? { cause } : {}),
     } satisfies LoreError);
   }
+}
+
+/**
+ * Builds `lore run reap`'s service (AC-AU-5): the run registry and decision log through `store`, run endings through a
+ * claim-wired `RunService` (an ended run releases its claims), the OS through the real process-table port.
+ * reason: `executorRun: null` — the reap sweep is machine-channel and names no executing run until AU-T3 threads the
+ * verified invocation identity into decision rows; do not invent one here.
+ */
+function buildRunReapService(
+  store: ConstructorParameters<typeof DecisionService>[0]["store"],
+  taskWorkflowService: TaskWorkflowService,
+): RunReapService {
+  return new RunReapService({
+    store,
+    runs: new RunService(store, undefined, taskWorkflowService, realpathNative),
+    decisions: new DecisionService({ store, executorRun: null }),
+    processes: createRealProcessTablePort(),
+  });
 }
 
 /**

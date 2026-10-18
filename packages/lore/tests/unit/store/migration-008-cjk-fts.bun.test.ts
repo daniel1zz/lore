@@ -106,7 +106,7 @@ describe("migration-008 (CJK bigram shadow columns for FTS5)", () => {
     // the head — a fresh store runs every migration up to it, not just
     // through migration-008. This test's own concern (CJK shadow columns
     // present) is unaffected — asserted directly below.
-    expect(userVersion(db)).toBe(20);
+    expect(userVersion(db)).toBe(21);
     const cols = tableColumnNames(db, "docs");
     expect(cols).toContain("fts_title");
     expect(cols).toContain("fts_content");
@@ -163,7 +163,7 @@ describe("migration-008 (CJK bigram shadow columns for FTS5)", () => {
     const store = new SQLiteStore(dbPath);
     const db = store.getDatabase();
 
-    expect(userVersion(db)).toBe(20);
+    expect(userVersion(db)).toBe(21);
     const cols = tableColumnNames(db, "docs");
     expect(cols).toContain("fts_title");
     expect(cols).toContain("fts_content");
@@ -201,7 +201,7 @@ describe("migration-008 (CJK bigram shadow columns for FTS5)", () => {
     expect(() => {
       const secondOpen = new SQLiteStore(dbPath);
       const db = secondOpen.getDatabase();
-      expect(userVersion(db)).toBe(20);
+      expect(userVersion(db)).toBe(21);
       expect(tableColumnNames(db, "docs")).toContain("fts_title");
       secondOpen.close();
     }).not.toThrow();

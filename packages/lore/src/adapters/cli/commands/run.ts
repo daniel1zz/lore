@@ -25,6 +25,14 @@
  *       Read-only (spec session-trail, Run -> tasks): the tasks the run ever claimed, from the claim audit rows
  *       (so a released or archived task is still listed), each with its current status and `file_anchors`.
  *       `--json` prints `{ok, data: {run, tasks}}`. An unregistered run id exits 4 naming it.
+ *   register ... [--harness-pid <pid>]
+ *       Also records the harness process (pid resolved past a plain shell wrapper, its start time read now, and the
+ *       checkout root the command ran in) so `reap` can prove a run dead and what it left behind (AC-AU-5).
+ *   reap [--apply] [--json]
+ *       (AC-AU-5, RunReapService) Ends runs with no end whose recorded harness pid is dead (decide run-end-stale, reason
+ *       dead-pid), escalates legacy runs without a pid as ONE decision, and reaps processes inside ENDED runs' worktrees
+ *       only when decide(process-reap) is auto on an ownership proof. Without --apply nothing changes. Exit 0 on a
+ *       completed sweep (escalations are reported), 1 when the table is unmeasurable or a kill failed.
  *   attest-input
  *       Reads a Claude Code PreToolUse payload on stdin and prints hook JSON carrying `updatedInput` with the
  *       run (derived from `session_id` + `agent_id`) inserted by the core rewrite. ⛔ The output NEVER carries
@@ -37,7 +45,8 @@
  * Side-effect class: IO (corpus DB write for register, file reads, stdin/stdout).
  */
 import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { readFileSync, realpathSync } from "node:fs";
 import { defineCommand } from "citty";
 import { z } from "zod";
 import {
@@ -52,11 +61,14 @@ import { loadLoreApp } from "../loader.js";
 import { exitCode, formatError } from "../utils.js";
 import { writeAllSync } from "../stdio-sync.js";
 import type { RunService } from "../../../service/run-service.js";
+import type { ReapReport } from "../../../service/run-reap-service.js";
+import type { RunProcessRecord } from "../../../store/store-interface.js";
+import { createRealProcessTablePort } from "../../process-table-port.js";
 import { runFragmentsRender } from "../../../flows/fragments-flow.js";
 import { detectWorktreeBranch } from "../../real-git-port.js";
 import { buildFlowDeps } from "./fragments.js";
 
-const ACTIONS = ["register", "show", "end", "occupancy", "tasks", "attest-input"] as const;
+const ACTIONS = ["register", "show", "end", "occupancy", "tasks", "reap", "attest-input"] as const;
 type Action = (typeof ACTIONS)[number];
 
 const USAGE_EXIT = 2;
@@ -105,6 +117,42 @@ async function computeComposition(agentType: string | undefined): Promise<Compos
   };
 }
 
+/**
+ * The process a registration runs in (AC-AU-5), measured here and handed to RunService as facts: the harness pid
+ * (`--harness-pid`, resolved past a plain shell wrapper), that process's start time read NOW, and the checkout the
+ * command ran in. `undefined` when the caller named no pid (nothing is measured, nothing is overwritten); a pid that
+ * cannot be probed records a null pair (a legacy-style run) with a stderr note — registration itself never fails on it.
+ */
+async function measureRunProcess(rawPid: string | undefined): Promise<RunProcessRecord | undefined | { error: string }> {
+  if (rawPid === undefined) return undefined;
+  if (!/^[0-9]+$/.test(rawPid)) return { error: `--harness-pid must be a positive integer (got "${rawPid}")` };
+  const port = createRealProcessTablePort();
+  const pid = await port.resolveHarnessPid(Number.parseInt(rawPid, 10));
+  const inspected = pid === null ? null : await port.inspect(pid);
+  const startTime = inspected === null || inspected.zombie ? null : inspected.startTime;
+  if (pid === null || startTime === null) {
+    process.stderr.write(`Note: harness pid ${rawPid} could not be probed; the run is registered without a recorded process\n`);
+  }
+  return {
+    pid: pid !== null && startTime !== null ? pid : null,
+    startTime: pid !== null && startTime !== null ? startTime : null,
+    worktree: detectCheckoutRoot(process.cwd()),
+  };
+}
+
+/** The top-level directory of the checkout containing `directory` (real path), or null outside a repository. */
+function detectCheckoutRoot(directory: string): string | null {
+  const probe = spawnSync("git", ["rev-parse", "--show-toplevel"], { cwd: directory, encoding: "utf8" });
+  if (probe.error !== undefined || probe.status !== 0) return null;
+  const top = (probe.stdout ?? "").trim();
+  if (top === "") return null;
+  try {
+    return realpathSync(top);
+  } catch {
+    return top;
+  }
+}
+
 function renderRunText(run: RunRecord): string {
   const lines = [
     `Run: ${run.id}`,
@@ -149,6 +197,8 @@ async function runRegister(args: Record<string, unknown>): Promise<void> {
     process.exitCode = VALIDATION_EXIT;
     return;
   }
+  const runProcess = await measureRunProcess(stringArg(args, "harness-pid"));
+  if (runProcess !== undefined && "error" in runProcess) return usageError(runProcess.error);
 
   await withRunService(async (service) => {
     const result = await service.register({
@@ -159,6 +209,7 @@ async function runRegister(args: Record<string, unknown>): Promise<void> {
       ...(parent !== undefined ? { parentRunId: parent } : {}),
       ...(branch !== undefined ? { branch } : {}),
       composition,
+      ...(runProcess !== undefined ? { process: runProcess } : {}),
     });
     if (!result.ok) {
       process.stderr.write(`${formatError(result.error)}\n`);
@@ -276,6 +327,50 @@ async function runTasks(args: Record<string, unknown>): Promise<void> {
   });
 }
 
+const REAP_FAILURE_EXIT = 1;
+
+/** Human rendering of a reap report: one line per run ending / process, then the legacy decision. */
+function renderReapText(report: ReapReport): string {
+  const lines: string[] = [report.apply ? "Reap (applied)" : "Reap (dry run: nothing signalled, ended or recorded; pass --apply)"];
+  for (const run of report.runs) lines.push(`  run ${run.run_id}: ${run.action} (${run.reason})`);
+  if (report.legacy !== null) {
+    lines.push(
+      `  legacy runs without a recorded pid (${report.legacy.run_ids.length}): ${report.legacy.verdict}` +
+        `${report.legacy.already_pending ? " (one decision already pending)" : ""} — ${report.legacy.run_ids.join(", ")}`,
+    );
+  }
+  for (const entry of report.processes) {
+    lines.push(`  pid ${entry.pid} ${entry.action} [${entry.proof}] cwd ${entry.cwd} :: ${entry.command}`);
+    for (const reason of entry.reasons) lines.push(`      ${reason}`);
+  }
+  if (report.runs.length === 0 && report.legacy === null && report.processes.length === 0) lines.push("  nothing to do");
+  return `${lines.join("\n")}\n`;
+}
+
+/**
+ * `lore run reap [--apply] [--json]`. Exit 0 on a completed sweep (escalations are reported, not failures);
+ * 1 when the process table cannot be measured, a decision cannot be recorded, a signal is denied, or a reaped
+ * process survived SIGKILL. Writes nothing without --apply.
+ */
+async function runReap(args: Record<string, unknown>): Promise<void> {
+  const { app } = loadLoreApp();
+  try {
+    if (app.runReapService === undefined) throw new Error("App was built without a runReapService");
+    const result = await app.runReapService.reap({ apply: args["apply"] === true });
+    if (!result.ok) {
+      process.stderr.write(`${formatError(result.error)}\n`);
+      process.exitCode = REAP_FAILURE_EXIT;
+      return;
+    }
+    const report = result.value;
+    writeAllSync(1, args["json"] === true ? `${JSON.stringify({ ok: true, data: report }, null, 2)}\n` : renderReapText(report));
+    const failed = report.processes.some((entry) => entry.action === "denied" || entry.action === "survived");
+    if (failed || report.runs.some((entry) => entry.action === "end-failed")) process.exitCode = REAP_FAILURE_EXIT;
+  } finally {
+    app.close();
+  }
+}
+
 const preToolUsePayloadSchema =z.object({
   session_id: z.string().min(1),
   agent_id: z.string().min(1).optional(),
@@ -333,6 +428,8 @@ export default defineCommand({
     "agent-type": { type: "string", description: "register: subagent type (required with --agent-id)" },
     parent: { type: "string", description: "register: parent run hint (main runs only)" },
     branch: { type: "string", description: "register: branch the run works on" },
+    "harness-pid": { type: "string", description: "register: pid of the harness process (its start time and checkout are recorded for `reap`)" },
+    apply: { type: "boolean", description: "reap: actually end dead runs and reap proven orphans (default: report only)" },
     reason: { type: "string", description: "end: why the run ended (required)" },
     worktree: { type: "string", description: "occupancy: worktree directory to measure (required)" },
     json: { type: "boolean", description: "Output JSON", default: false },
@@ -352,6 +449,8 @@ export default defineCommand({
         return runOccupancy(rest);
       case "tasks":
         return runTasks(rest);
+      case "reap":
+        return runReap(rest);
       case "attest-input":
         return runAttestInput();
       default: {

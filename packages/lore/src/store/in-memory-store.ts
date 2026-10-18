@@ -61,6 +61,8 @@ import type {
   ProvenanceWriteExtras,
   RunEndOutcome,
   RunEndState,
+  RunLifecycle,
+  RunProcessRecord,
 } from "./store-interface.js";
 import {
   allocateWithBoundedRetry,
@@ -125,6 +127,7 @@ export class InMemoryStore implements StoreInterface {
   private readonly runs = new Map<string, RunRecord>();
   /** Mirrors `runs.ended_at` / `runs.end_reason` (migration-017); absent key = open run. */
   private readonly runEnds = new Map<string, RunEndState>();
+  private readonly runProcesses = new Map<string, RunProcessRecord>();
 
   // ── Document CRUD ─────────────────────────────────────────────────────────
 
@@ -1587,6 +1590,31 @@ export class InMemoryStore implements StoreInterface {
   async getRunEnd(id: RunId): Promise<Result<RunEndState | null, LoreError>> {
     if (!this.runs.has(id)) return ok(null);
     return ok(this.runEnds.get(id) ?? { endedAt: null, endReason: null });
+  }
+
+  async recordRunProcess(id: RunId, proc: RunProcessRecord): Promise<Result<boolean, LoreError>> {
+    if (!this.runs.has(id)) return ok(false);
+    // reason: newest registration wins — mirrors SQLite's unconditional UPDATE (a resumed run lives in a new process).
+    this.runProcesses.set(id, { ...proc });
+    return ok(true);
+  }
+
+  async listRunLifecycles(): Promise<Result<RunLifecycle[], LoreError>> {
+    const rows = [...this.runs.values()].sort((a, b) => a.registeredAt.localeCompare(b.registeredAt) || a.id.localeCompare(b.id));
+    return ok(
+      rows.map((run) => {
+        const end = this.runEnds.get(run.id);
+        return {
+          id: run.id,
+          registeredAt: run.registeredAt,
+          endedAt: end?.endedAt ?? null,
+          endReason: end?.endReason ?? null,
+          parentRunId: run.parentRunId,
+          agentRef: run.agentRef,
+          process: { ...(this.runProcesses.get(run.id) ?? { pid: null, startTime: null, worktree: null }) },
+        };
+      }),
+    );
   }
 
   async countAttributedWrites(
