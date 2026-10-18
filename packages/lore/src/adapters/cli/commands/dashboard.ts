@@ -100,6 +100,7 @@ import type { MountRegistry } from "../../../mount/types.js";
 import { createDashboardTeardown, registerDashboardShutdownSignals, type KillableChild } from "../dashboard-lifecycle.js";
 import type { Invocation } from "@lore/core";
 import { invocationOf } from "../command-invocation.js";
+import { registerServerForInvocation } from "../live-server-registry.js";
 import type { CliIo } from "../output.js";
 
 // Re-export for tests that import from this module path.
@@ -124,6 +125,17 @@ const NOOP_VITE_CHILD: KillableChild = { kill() {} };
  *   should already have applied it — defensive only, mirrors this command's pre-existing
  *   `?? "8787"`-style guards).
  */
+/** Wrap a teardown so the live-server record is removed on every exit path that runs it. */
+function withLiveServerRemoval(
+  teardown: (signal: string) => Promise<void>,
+  unregisterLiveServer: () => void,
+): (signal: string) => Promise<void> {
+  return async (signal) => {
+    unregisterLiveServer();
+    await teardown(signal);
+  };
+}
+
 function parsePort(io: CliIo, rawValue: string | undefined, flagName: string, fallback: string): number {
   const port = parseInt(rawValue ?? fallback, 10);
   if (isNaN(port) || port < 1 || port > 65535) {
@@ -328,6 +340,10 @@ async function runPackagedMode(
     },
   });
 
+  // AC-HR-5: record the live base URL (no nonce) for this corpus so other CLI processes
+  // can link to it; removed by the shared teardown on the SIGINT/SIGTERM path (BR-869).
+  const unregisterLiveServer = registerServerForInvocation(inv, `http://localhost:${server.port}`);
+
   // DD-2: one-time nonce redeemed into a `lore_sid` session by GET /auth/bootstrap — the
   // machine key is never served over HTTP, unlike --dev's VITE_LORE_BOOTSTRAP_TOKEN flow.
   const nonceToken = nonces.mint();
@@ -345,13 +361,16 @@ async function runPackagedMode(
     openBrowser(inv.io, inv.cwd, bootstrapUrl);
   }
 
-  const teardown = createDashboardTeardown(inv.io, {
-    vite: NOOP_VITE_CHILD,
-    server,
-    ...(mountRegistry !== undefined ? { mountRegistry } : {}),
-    app,
-    machineAuthDb: machineAuth.db,
-  });
+  const teardown = withLiveServerRemoval(
+    createDashboardTeardown(inv.io, {
+      vite: NOOP_VITE_CHILD,
+      server,
+      ...(mountRegistry !== undefined ? { mountRegistry } : {}),
+      app,
+      machineAuthDb: machineAuth.db,
+    }),
+    unregisterLiveServer,
+  );
 
   let shutdownResolve: () => void;
   const shutdownPromise = new Promise<void>((resolve) => {
@@ -564,7 +583,8 @@ async function runDevMode(
   // vite-child-on-sigterm-only-sigint's root cause), and `createDashboardTeardown`'s own
   // `ran` guard makes calling it more than once (e.g. a signal arriving mid-startup-
   // failure-teardown) a safe no-op rather than a double-kill.
-  const teardown = createDashboardTeardown(inv.io, {
+  const unregisterLiveServer = registerServerForInvocation(inv, `http://localhost:${server.port}`);
+  const teardown = withLiveServerRemoval(createDashboardTeardown(inv.io, {
     // reason: killableProcessGroup wraps the raw ChildProcess so teardown signals the
     // WHOLE process group (spawned detached: true above) — see that function's own
     // header for why a plain `vite.kill()` leaves the actual Vite server (a further
@@ -574,7 +594,7 @@ async function runDevMode(
     ...(mountRegistry !== undefined ? { mountRegistry } : {}),
     app,
     machineAuthDb: machineAuth.db,
-  });
+  }), unregisterLiveServer);
 
   // reason: registered IMMEDIATELY after Vite is spawned — NOT after the startup race
   // below settles. The startup race's own "timeout" branch can legitimately take up to
