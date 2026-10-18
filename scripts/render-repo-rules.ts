@@ -17,12 +17,13 @@
  * Exit codes: 0 rendered (or nothing to render) / 1 a rules file the renderer cannot prove it owns
  * (`diverged_skip`) or a renderer error — never reported as clean.
  */
-import { existsSync, mkdtempSync, rmSync, unlinkSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, unlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import { loadConfig, loadGlobalConfig, resolveGlobalConfigPath } from "@lore/core/node";
 import { resolveMemoryFileBudgets } from "@lore/core";
 import { runContextRefresh, type ContextRefreshReport } from "../packages/lore/src/flows/context-flow.js";
+import { parseRulesFile } from "../packages/lore/src/service/context-fragments/section.js";
 import { buildRefreshFragmentDeps, makeRealContextFsPort, toContextLayer } from "../packages/lore/src/adapters/cli/commands/context.js";
 
 type RulesOutcome = ContextRefreshReport["rules"][number];
@@ -67,15 +68,17 @@ export async function renderRepoRules(repoDir: string): Promise<RenderRepoRulesR
   const home = mkdtempSync(join(tmpdir(), "lore-render-rules-home-"));
   try {
     const first = await refreshRulesOnce(repoDir, home);
-    const diverged = first.rules.filter((o) => o.state === "diverged_skip");
+    // reason: `diverged_skip` now also covers a file with no parseable managed header; only a fingerprinted file
+    // whose body was edited is a hand edit to discard. A headerless or foreign-header file is never ours to delete.
+    const absPath = (o: RulesOutcome): string => (o.path.startsWith("/") ? o.path : join(repoDir, o.path));
+    const diverged = first.rules.filter((o) => o.state === "diverged_skip" && parseRulesFile(readFileSync(absPath(o), "utf8")) !== null);
     const rewritten: { path: string; reason: "rendered" | "hand-edit discarded" }[] = first.rules
       .filter(changed)
       .map((o) => ({ path: rel(repoDir, o.path), reason: "rendered" as const }));
     let finalRules = first.rules;
     if (diverged.length > 0) {
       for (const o of diverged) {
-        const abs = o.path.startsWith("/") ? o.path : join(repoDir, o.path);
-        unlinkSync(abs);
+        unlinkSync(absPath(o));
         rewritten.push({ path: rel(repoDir, o.path), reason: "hand-edit discarded" });
       }
       const second = await refreshRulesOnce(repoDir, home);
