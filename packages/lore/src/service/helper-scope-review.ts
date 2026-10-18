@@ -10,6 +10,20 @@
  * @invariant A helper's files are its measured changes (paths relative to its working copy) UNION the files named
  *   by any turn's edit records for that helper run (absolute as recorded, so a write by absolute path into
  *   another checkout is visible).
+ * @invariant Attribution of MEASURED changes (decision (b), AU-T19). A helper record's measured diff is
+ *   `diff(base, working tree)` taken at its stop — everything in the working copy, not what the helper itself
+ *   changed — and every file in it is stamped with the helper's own run. Measured on session c1ffea04: 10 of 30
+ *   helper records have `started_at == ended_at` (no SubagentStart record preceded the stop, so there is no
+ *   start-time state to diff against) and helpers of one worktree (`a1714a6b…`, `a3228ca7…`, `a8bb13b6…` in
+ *   `agent-a3228ca7…`) carry the same base and the same 32 files. A start snapshot (a) therefore cannot be
+ *   built from what SubagentStart provides (a bare `{run, started_at, end_count:0}` record, written by a hook
+ *   that must stay silent and cheap), and for the records above it would be absent. So helpers that share a
+ *   working copy AND a base form one group: the group's measured files are judged ONCE, under the union of the
+ *   tasks every member run claimed, and reported against the owner (the first member that claimed a task, else
+ *   the first member). A nested helper is charged only with its OWN edit records (those are truly per-run).
+ * @invariant The session's own scratchpad (`.../claude-<uid>/<project>/<session>/scratchpad/`) is never
+ *   repository content: a path under it is not "outside the working copy". Structural match on the session id of
+ *   the trail, no agent-id allowlist; another session's scratchpad stays a finding.
  * @invariant Findings, per helper and kind (one finding lists every file of that kind): a file outside the
  *   helper's working copy; a file no anchor of any claimed task covers (matching is `anchorsOverlap`, no new
  *   matcher); changed files and no claimed task. A helper that changed nothing yields none, and an unmeasurable
@@ -87,6 +101,18 @@ function canonicalPath(path: string, realpath: RealpathFn): string {
   }
 }
 
+/** True when `canonical` is inside the scratchpad directory of `session` (never repository content). */
+function isSessionScratchpad(canonical: string, session: string): boolean {
+  const escaped = session.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`/claude-\\d+/[^/]+/${escaped}/scratchpad(/|$)`).test(canonical);
+}
+
+/** Helpers that share a working copy and a base: their measured diffs are one and the same. */
+function groupKey(helper: TrailHelper, realpath: RealpathFn, projectRoot: string): string | null {
+  if (helper.changes?.measured !== true) return null;
+  return `${canonicalPath(helper.working_copy ?? projectRoot, realpath)}\0${helper.changes.value.base}`;
+}
+
 function listOf(files: readonly string[]): string {
   return files.join(", ");
 }
@@ -106,17 +132,44 @@ export async function reviewHelperScope(input: ReviewHelperScopeInput): Promise<
   for (const turn of trail.turns) {
     if (!turn.edits.measured) notMeasured.push(`turn ${turn.turn}: edit records unreadable (${turn.edits.reason})`);
   }
+  const claimCache = new Map<string, Result<readonly RunClaimedTask[], LoreError>>();
+  const claimsOf = async (run: string): Promise<Result<readonly RunClaimedTask[], LoreError>> => {
+    const cached = claimCache.get(run);
+    if (cached !== undefined) return cached;
+    const fresh = await input.claimedTasks(run);
+    claimCache.set(run, fresh);
+    return fresh;
+  };
   for (const helper of trail.helpers.filter(isUnjudged)) {
     const workingCopy = canonicalPath(helper.working_copy ?? input.projectRoot, realpath);
     const inside = new Set<string>();
     const outside = new Set<string>();
     const classify = (absolute: string): void => {
       const canonical = canonicalPath(absolute, realpath);
+      if (isSessionScratchpad(canonical, trail.session)) return;
       if (canonical === workingCopy || !canonical.startsWith(workingCopy + sep)) outside.add(absolute);
       else inside.add(relative(workingCopy, canonical).split(sep).join("/"));
     };
+    const key = groupKey(helper, realpath, input.projectRoot);
+    const members = key === null ? [helper] : trail.helpers.filter((m) => groupKey(m, realpath, input.projectRoot) === key);
+    const memberClaims: RunClaimedTask[] = [];
+    let owner = helper;
+    if (members.length > 1) {
+      const ordered = [...members].sort((a, b) => (a.started_at + a.agent_id).localeCompare(b.started_at + b.agent_id));
+      let ownerChosen = false;
+      for (const member of ordered) {
+        const claimed = await claimsOf(member.run);
+        if (!claimed.ok) return err(claimed.error);
+        memberClaims.push(...claimed.value);
+        if (!ownerChosen && claimed.value.length > 0) {
+          owner = member;
+          ownerChosen = true;
+        }
+      }
+      if (!ownerChosen) owner = ordered[0] ?? helper;
+    }
     if (helper.changes?.measured === true) {
-      for (const file of helper.changes.value.files) inside.add(file.path);
+      if (owner.agent_id === helper.agent_id) for (const file of helper.changes.value.files) inside.add(file.path);
     } else if (helper.changes?.measured === false && helper.isolated === true) {
       notMeasured.push(`helper ${helper.agent_id}: changes not measured (${helper.changes.reason})`);
     }
@@ -130,10 +183,10 @@ export async function reviewHelperScope(input: ReviewHelperScopeInput): Promise<
     helpers.push({ agent_id: helper.agent_id, run: helper.run, end_count: helper.end_count, judged_end_count: helper.judged_end_count, files });
     if (inside.size === 0 && outside.size === 0) continue;
 
-    const claimed = await input.claimedTasks(helper.run);
-    if (!claimed.ok) return err(claimed.error);
-    const slugs = claimed.value.map((t) => t.slug);
-    const anchors = claimed.value.flatMap((t) => [...t.file_anchors]);
+    const own = members.length > 1 ? ok(memberClaims) : await claimsOf(helper.run);
+    if (!own.ok) return err(own.error);
+    const slugs = [...new Set(own.value.map((t) => t.slug))];
+    const anchors = own.value.flatMap((t) => [...t.file_anchors]);
     const add = (kind: HelperScopeFindingKind, list: readonly string[], message: string, tasks: readonly string[]): void => {
       findings.push({ kind, helper: helper.agent_id, run: helper.run, files: list, tasks, message });
     };
