@@ -12,11 +12,14 @@
  *   - Factors come from facts lore measured in THIS call (INV-2): R = loss-free-by-proof only after the archive
  *     ref was verified; B from run attribution; E = lore-evaluated; C = computed by DecisionService
  *     from the class's recorded outcomes (AC-AU-8; no caller can supply a value).
- *   - Attribution: the branch in the stash message ("On <branch>:" / "WIP on <branch>:") ->
- *     `worktree-agent-<agentId>` -> runs whose agent_ref is <agentId> (any run not ended = live), plus open task
- *     claims that record that branch (a claim whose run is not provably ended = live). A named branch with no
- *     run or claim behind it (main, a feature branch, no branch) has no provable owner (B 0.9: the archive ref
- *     keeps it recoverable for any session). A store failure while measuring leaves B unmeasured (-> 0, escalate).
+ *   - Attribution (AU-T20): an owner is PROVEN, never inferred from an unrelated open claim. A stash on a
+ *     `worktree-agent-<agentId>` branch belongs to that agent's runs (by agent_ref) and to open task claims that
+ *     record that private branch (a claim whose run is not provably ended = live). Any other branch (main, a
+ *     feature branch) belongs to the run whose lifetime (registered_at .. ended_at/open) contains the stash
+ *     commit's creation time AND whose recorded worktree (migration-021) is the checkout where that branch is
+ *     checked out (`git worktree list`). No such run (or no recorded worktree, or the branch is checked out
+ *     nowhere) = no provable owner (B 0.9: the archive ref keeps it recoverable for any session). A store or git
+ *     failure while measuring leaves B unmeasured (-> 0, escalate).
  *   - The drop re-resolves `stash@{n}` by sha immediately before dropping, so concurrent pushes/drops by other
  *     sessions cannot shift the index onto a different stash.
  *   - "Contained in main" (tracked diff blobs and the ^3 untracked tree blobs equal main's) is REPORTED, not a
@@ -26,6 +29,7 @@
  * Source: spec-autonomy-phase-1-decision-function-human-channel-lore AC-AU-4;
  *   adr-autonomy-is-decided-by-measured-facts-one-decision-function D4.
  */
+import { realpathSync } from "node:fs";
 import { err, ok, type AutonomyFacts, type LoreError, type Result } from "@lore/core";
 import type { RunId } from "@lore/core";
 import type { DecisionService } from "./decision-service.js";
@@ -101,7 +105,7 @@ export interface StashPruneReport {
 
 export interface StashPruneDeps {
   readonly git: GitRunner;
-  readonly store: Pick<StoreInterface, "listRunsByAgentRef" | "getRunEnd" | "findMany">;
+  readonly store: Pick<StoreInterface, "listRunsByAgentRef" | "getRunEnd" | "findMany" | "listRunLifecycles">;
   readonly decisions: DecisionService;
   /** Ref whose blobs "contained in main" is compared against. */
   readonly mainRef?: string;
@@ -135,7 +139,7 @@ export class StashPruneService {
     const facts: StashFacts[] = [];
     for (const [index, row] of rows.entries()) {
       const [sha = "", message = ""] = row.split("\0");
-      const attribution = await this.attribute(parseStashBranch(message));
+      const attribution = await this.attribute(parseStashBranch(message), sha);
       facts.push({ sha, index, message, attribution, containment: this.measureContainment(sha, mainBlobs) });
     }
     return ok(facts);
@@ -227,10 +231,70 @@ export class StashPruneService {
     return ok(undefined);
   }
 
-  private async attribute(branch: string | null): Promise<StashAttribution> {
+  private async attribute(branch: string | null, sha: string): Promise<StashAttribution> {
     if (branch === null) {
       return { branch, runs: [], state: "no-provable-owner", reason: "stash names no branch: no provable owner" };
     }
+    if (AGENT_BRANCH.test(branch)) return this.attributeAgentBranch(branch);
+    return this.attributeByLifetimeAndCheckout(branch, sha);
+  }
+
+  /**
+   * A stash on a non-agent branch belongs to the run alive when it was made, in the checkout that has the branch.
+   * reason: open task claims are deliberately NOT consulted here — a claim recording "main" says nothing about who
+   * made a given stash on main (the AU-T20 false "live").
+   */
+  private async attributeByLifetimeAndCheckout(branch: string, sha: string): Promise<StashAttribution> {
+    const createdAt = this.stashCreatedAtMs(sha);
+    if (createdAt === null) return unmeasured(branch, `cannot read creation time of stash ${sha}`);
+    const checkout = this.checkoutOfBranch(branch);
+    if (!checkout.ok) return unmeasured(branch, checkout.error);
+    if (checkout.value === null) {
+      return { branch, runs: [], state: "no-provable-owner", reason: `branch ${branch} is checked out in no working copy: no provable owner` };
+    }
+    const lifecycles = await this.deps.store.listRunLifecycles();
+    if (!lifecycles.ok) return unmeasured(branch, `cannot read runs: ${lifecycles.error.code}`);
+    const owners = lifecycles.value.filter(
+      (run) =>
+        run.process.worktree !== null &&
+        samePath(run.process.worktree, checkout.value as string) &&
+        Date.parse(run.registeredAt) <= createdAt &&
+        (run.endedAt === null || Date.parse(run.endedAt) >= createdAt),
+    );
+    if (owners.length === 0) {
+      return { branch, runs: [], state: "no-provable-owner", reason: `no run in ${checkout.value} was alive when this stash was made: no provable owner` };
+    }
+    const runs = owners.map((run) => run.id as string);
+    const endedRuns = owners.filter((run) => run.endedAt !== null).map((run) => run.id as string);
+    const live = owners.filter((run) => run.endedAt === null).map((run) => run.id as string);
+    if (live.length > 0) {
+      return { branch, runs, endedRuns, state: "live", reason: `stash made in ${checkout.value} during live run ${live.join(", ")}` };
+    }
+    return { branch, runs, endedRuns, state: "ended", reason: `stash made in ${checkout.value} during ended run ${runs.join(", ")}` };
+  }
+
+  /** Stash commit creation time (ms since epoch), or null when git cannot say. */
+  private stashCreatedAtMs(sha: string): number | null {
+    const shown = this.deps.git(["show", "-s", "--format=%ct", sha]);
+    if (shown.status !== 0) return null;
+    const seconds = Number(shown.stdout.trim());
+    return Number.isFinite(seconds) && seconds > 0 ? seconds * 1000 : null;
+  }
+
+  /** Path of the working copy that has `branch` checked out now (`git worktree list --porcelain`), null when none does. */
+  private checkoutOfBranch(branch: string): { readonly ok: true; readonly value: string | null } | { readonly ok: false; readonly error: string } {
+    const listed = this.deps.git(["worktree", "list", "--porcelain"]);
+    if (listed.status !== 0) return { ok: false, error: `git worktree list failed: ${listed.stderr.trim()}` };
+    for (const block of listed.stdout.split("\n\n")) {
+      const lines = block.split("\n");
+      const path = lines.find((l) => l.startsWith("worktree "))?.slice("worktree ".length);
+      const checked = lines.find((l) => l.startsWith("branch "))?.slice("branch ".length);
+      if (path !== undefined && checked === `refs/heads/${branch}`) return { ok: true, value: path };
+    }
+    return { ok: true, value: null };
+  }
+
+  private async attributeAgentBranch(branch: string): Promise<StashAttribution> {
     const runIds = new Map<string, boolean>(); // run id -> ended
     const agentId = AGENT_BRANCH.exec(branch)?.[1];
     if (agentId !== undefined) {
@@ -345,6 +409,16 @@ export class StashPruneService {
       if (entry.blob === null) return line.endsWith(" missing");
       return line.startsWith(`${entry.blob} blob `);
     });
+  }
+}
+
+/** Same directory, comparing resolved real paths when both exist (macOS /var vs /private/var). */
+function samePath(a: string, b: string): boolean {
+  if (a === b) return true;
+  try {
+    return realpathSync(a) === realpathSync(b);
+  } catch {
+    return false; // reason: a recorded worktree that no longer exists cannot be proven equal to a live checkout
   }
 }
 
