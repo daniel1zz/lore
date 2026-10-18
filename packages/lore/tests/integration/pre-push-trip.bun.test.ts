@@ -282,6 +282,18 @@ const EXPECTED_LORE_STEPS: readonly string[] = [
   "status --check-claude-md",
 ];
 
+/**
+ * The `lore` invocations the hook makes AFTER the ratchet and the prose-pin guard (AU-T9, AC-AU-9). A run the ratchet
+ * blocks exits before them, so only a run that reaches the end of the hook shows all of ALL_LORE_STEPS.
+ */
+const POST_RATCHET_LORE_STEPS: readonly string[] = [
+  "status --check-autonomy-thresholds",
+  "autonomy verify-pushed-heads --record",
+];
+
+/** Every `lore` call of a hook run that is not stopped by the ratchet, in order. */
+const ALL_LORE_STEPS: readonly string[] = [...EXPECTED_LORE_STEPS, ...POST_RATCHET_LORE_STEPS];
+
 /** Every `pre-push:` failure line the five earlier steps can emit — none may appear. */
 const EARLIER_STEP_FAILURE_LINES: readonly string[] = [
   "pre-push: binary provenance check failed",
@@ -486,7 +498,7 @@ describe("spec-bootstrap-fixpoint-integrity-binary-provenance-an-anchor#AC-BFI-9
     // Positive trace: the shim recorded all five `lore` steps, in hook order.
     // ⛔ Asserting only the ABSENCE of their failure lines would pass equally on
     // a hook that skipped them entirely.
-    expect(result.loreCalls).toEqual([...EXPECTED_LORE_STEPS]);
+    expect(result.loreCalls).toEqual([...ALL_LORE_STEPS]);
     // And none of them failed, so the exit 1 above is the ratchet's alone.
     for (const line of EARLIER_STEP_FAILURE_LINES) {
       expect(result.combined).not.toContain(line);
@@ -541,7 +553,7 @@ describe("spec-bootstrap-fixpoint-integrity-binary-provenance-an-anchor#AC-BFI-9
     expect(result.combined).not.toContain("check-anchor-coverage:");
     expect(result.combined).not.toContain("pre-push: anchor-coverage ratchet");
     // ⛔ and skipping it did NOT short-circuit the hook: the five real steps ran.
-    expect(result.loreCalls).toEqual([...EXPECTED_LORE_STEPS]);
+    expect(result.loreCalls).toEqual([...ALL_LORE_STEPS]);
   }, 120_000);
 
   it("REGRESSION: both copies carry the ratchet invocation, stay byte-identical, and keep it AFTER the fail-open preamble", () => {

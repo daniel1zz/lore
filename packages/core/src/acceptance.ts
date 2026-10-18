@@ -527,6 +527,12 @@ export interface AcCoverageFact {
    */
   oracle_file_missing?: readonly string[];
   /**
+   * The criterion was declared with the D8 `--allow-missing-path` escape (a red-first oracle the next task writes).
+   * Read ONLY by {@link deriveAcCoverageState}'s one missing-oracle rule: declared + no `pass` on record -> `"none"`.
+   * Set by `AcService.listCriteria` beside {@link oracle_file_missing}; ABSENT = not declared.
+   */
+  allow_missing_declared?: boolean;
+  /**
    * How many `pass` evidence rows tagged with this criterion RAN one of its missing oracle files (TG-22;
    * `evidenceRanMissingOracle`, same normalised-location comparison, execution root included). Set by
    * `AcService.listCriteria` beside {@link oracle_file_missing}; ABSENT = not computed = no such pass.
@@ -707,7 +713,7 @@ export function computeAcCoverage(
  *
  * **AC-TG-6 / AC-EI-2 — missing oracle file (between rows 2 and 3)**: when {@link AcCoverageFact.oracle_file_missing}
  * is non-empty and `fail === 0`, the state is `"not_measured"` BEFORE rows 3-7 are tried — whether the criterion has passes
- * (whichever files they ran; TG-22's narrowing is removed) or NO evidence at all (EI-6: "whenever" means whenever). A real `fail`
+ * (whichever files they ran; TG-22's narrowing is removed) or NO evidence at all (EI-6: "whenever" means whenever). ONE exception (AC-TG-6): an AC declared red-first ({@link AcCoverageFact.allow_missing_declared}) with `pass === 0` is `"none"`. A real `fail`
  * still outranks it (rows 1-2); a criterion whose oracle files all exist and has no evidence stays `"none"` (row 7).
  *
  * This is the COMPLETE return set — `"inconclusive"`/`"expected-fail"` are
@@ -807,7 +813,11 @@ export function deriveAcCoverageState(fact: AcCoverageFact): AcCoverageState {
   // reason: EI-6 — AC-EI-2 says "whenever any extracted path is missing", so the check does NOT depend on evidence: a criterion with
   // zero rows and a missing oracle is not measured too (it was `none`, which read as "nothing wrong"). A PRESENT oracle with no
   // evidence still falls through to `none`. A real `fail` already returned above.
+  // ONE rule (AC-TG-6 + AC-EI-2): a missing oracle the AC DECLARED red-first (--allow-missing-path) with no pass on record is
+  // `none` (the test is not written yet; nothing was claimed, so nothing is unmeasured). Any other missing oracle - undeclared,
+  // or declared but with a pass on record (it vanished, or the pass ran a different file) - is `not_measured`.
   if (missing !== undefined && missing.length > 0) {
+    if (fact.allow_missing_declared === true && fact.pass === 0) return "none";
     return "not_measured";
   }
   if (fact.attested_pass > 0) return "attested_pass";
