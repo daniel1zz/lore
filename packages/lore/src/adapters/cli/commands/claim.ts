@@ -53,6 +53,7 @@
  *   SPEC-056 §Design Decisions D2, D7
  */
 
+import { invocationOf } from "../command-invocation.js";
 import { hostname } from "os";
 import { defineCommand } from "citty";
 import { taskClaimSchema } from "@lore/core";
@@ -98,7 +99,9 @@ export default defineCommand({
       description: "Output result as JSON",
     },
   },
-  async run({ args }) {
+  async run(context) {
+    const { args } = context;
+    const inv = invocationOf(context);
     const { app } = loadLoreApp();
     try {
       // reason: the run is verified ONCE against the registry (unregistered -> null + one warning); the decision
@@ -109,7 +112,7 @@ export default defineCommand({
         process.exit(exitCode(verifiedIdentity.error));
       }
       const verifiedRun = verifiedIdentity?.value?.harnessRun ?? null;
-      const resolvedActor = resolveActorWithIdentitySource();
+      const resolvedActor = resolveActorWithIdentitySource(undefined, inv.env, inv.cwd);
       const by = resolvedActor.actor;
       const machine = typeof args.machine === "string" ? args.machine : hostname();
       const claimOpts = {

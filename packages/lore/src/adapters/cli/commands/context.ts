@@ -139,12 +139,8 @@ const REPO_ROOT = join(fileURLToPath(new URL(".", import.meta.url)), "..", "..",
  * stable env-var checks is cheaper than that coupling. See SPEC-024 §8 Q1
  * for the classification rules this mirrors verbatim.
  */
-function detectContextCliSurface(): CallerSurface {
-  if (
-    process.env["LORE_AI_DEFAULT"] === "off" ||
-    process.env["CLAUDECODE"] === "1" ||
-    process.env["CI"] === "true"
-  ) {
+function detectContextCliSurface(env: Readonly<Record<string, string | undefined>>): CallerSurface {
+  if (env["LORE_AI_DEFAULT"] === "off" || env["CLAUDECODE"] === "1" || env["CI"] === "true") {
     return "agent";
   }
   return "cli";
@@ -406,6 +402,7 @@ export function buildRefreshFragmentDeps(opts: {
   repoRoot: string;
   assetsRoot: string;
   home: string;
+  env: Readonly<Record<string, string | undefined>>;
   globalLayer: ContextConfigLayer;
   projectLayer: ContextConfigLayer;
 }): Result<
@@ -420,14 +417,14 @@ export function buildRefreshFragmentDeps(opts: {
   },
   LoreError
 > {
-  const userConfigDir = resolveUserConfigDir(process.env, opts.home);
+  const userConfigDir = resolveUserConfigDir(opts.env, opts.home);
   const layers = foldSelections({ repoRoot: opts.repoRoot, userConfigDir, globalLayer: opts.globalLayer, projectLayer: opts.projectLayer });
   if (!layers.ok) return layers;
   return ok({
     assetsRoot: opts.assetsRoot,
     home: opts.home,
     // reason: still required by the flow's all-or-nothing dep check; `userConfigDir` is what it reads.
-    xdgConfigHome: process.env["XDG_CONFIG_HOME"] || join(opts.home, ".config"),
+    xdgConfigHome: opts.env["XDG_CONFIG_HOME"] || join(opts.home, ".config"),
     userConfigDir,
     globalConfig: layers.value.globalConfig,
     projectConfig: layers.value.projectConfig,
@@ -537,8 +534,8 @@ export default defineCommand({
     const fsPort = makeRealContextFsPort(repoRoot, [repoRoot, join(home, ".claude"), userConfigDir]);
     const pathCtx: SetupPathContext = {
       repoRoot: REPO_ROOT,
-      isCompiled: Bun.main.startsWith("/$bunfs/"),
-      execPath: process.execPath,
+      isCompiled: inv.isCompiled,
+      execPath: inv.execPath,
     };
     const assetsRoot = resolveAssetsRoot(pathCtx);
     const scope: ContextRefreshScope = (scopeArg as ContextRefreshScope | undefined) ?? "project";
@@ -551,6 +548,7 @@ export default defineCommand({
         repoRoot,
         assetsRoot,
         home,
+        env: inv.env,
         globalLayer: toContextLayer(globalConfigResult.value),
         projectLayer: toContextLayer(config),
       });
@@ -627,7 +625,7 @@ export default defineCommand({
     }
 
     // topic === "init"
-    const rawArgv = process.argv.slice(2);
+    const rawArgv = inv.argv;
     const hasExplicitAi = rawArgv.includes("--ai");
     const hasExplicitNoAi = rawArgv.includes("--no-ai");
     if (hasExplicitAi && hasExplicitNoAi) {
@@ -641,7 +639,7 @@ export default defineCommand({
         ? false
         : (args.ai as boolean | undefined);
 
-    const surface = detectContextCliSurface();
+    const surface = detectContextCliSurface(inv.env);
     const { ai: useAi } = resolveAiDefault(explicitAi, surface, config?.ai?.default_per_surface);
     const aiConfig = config?.ai ?? AiConfigSchema.parse({});
 

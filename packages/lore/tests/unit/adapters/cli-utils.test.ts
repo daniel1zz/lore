@@ -705,12 +705,12 @@ describe("resolveActorWithSource", () => {
   describe("HAPPY", () => {
     it("returns {source: explicit} when --by is passed", () => {
       delete process.env["LORE_ACTOR"];
-      expect(resolveActorWithSource("alice")).toEqual({ actor: "alice", source: "explicit" });
+      expect(resolveActorWithSource("alice", process.env, process.cwd())).toEqual({ actor: "alice", source: "explicit" });
     });
 
     it("ignores $LORE_ACTOR when --by is not passed (BR-1055), resolving to OS username", () => {
       process.env["LORE_ACTOR"] = "agent:bob";
-      expect(resolveActorWithSource(undefined, undefined, nonWorktreeCwd)).toEqual({
+      expect(resolveActorWithSource(undefined, process.env, nonWorktreeCwd)).toEqual({
         actor: OS_USERNAME,
         source: "os-fallback",
       });
@@ -718,7 +718,7 @@ describe("resolveActorWithSource", () => {
 
     it("returns {source: os-fallback, actor: OS username} when neither is provided", () => {
       delete process.env["LORE_ACTOR"];
-      expect(resolveActorWithSource(undefined, undefined, nonWorktreeCwd)).toEqual({
+      expect(resolveActorWithSource(undefined, process.env, nonWorktreeCwd)).toEqual({
         actor: OS_USERNAME,
         source: "os-fallback",
       });
@@ -728,7 +728,7 @@ describe("resolveActorWithSource", () => {
   describe("BOUNDARY", () => {
     it("treats a whitespace-only --by as absent, falling through past a set $LORE_ACTOR", () => {
       process.env["LORE_ACTOR"] = "agent:carol";
-      expect(resolveActorWithSource("   ", undefined, nonWorktreeCwd)).toEqual({
+      expect(resolveActorWithSource("   ", process.env, nonWorktreeCwd)).toEqual({
         actor: OS_USERNAME,
         source: "os-fallback",
       });
@@ -736,7 +736,7 @@ describe("resolveActorWithSource", () => {
 
     it("treats a whitespace-only $LORE_ACTOR as absent, falling through to OS username", () => {
       process.env["LORE_ACTOR"] = "   ";
-      expect(resolveActorWithSource(undefined, undefined, nonWorktreeCwd)).toEqual({
+      expect(resolveActorWithSource(undefined, process.env, nonWorktreeCwd)).toEqual({
         actor: OS_USERNAME,
         source: "os-fallback",
       });
@@ -746,14 +746,14 @@ describe("resolveActorWithSource", () => {
   describe("STATE — $LORE_ACTOR set/unset within the test", () => {
     it("prefers explicit --by even when $LORE_ACTOR is also set", () => {
       process.env["LORE_ACTOR"] = "agent:dave";
-      expect(resolveActorWithSource("erin")).toEqual({ actor: "erin", source: "explicit" });
+      expect(resolveActorWithSource("erin", process.env, process.cwd())).toEqual({ actor: "erin", source: "explicit" });
     });
 
     it("resolves identically whether $LORE_ACTOR is set or deleted mid-test", () => {
       process.env["LORE_ACTOR"] = "agent:frank";
-      expect(resolveActorWithSource(undefined, undefined, nonWorktreeCwd).source).toBe("os-fallback");
+      expect(resolveActorWithSource(undefined, process.env, nonWorktreeCwd).source).toBe("os-fallback");
       delete process.env["LORE_ACTOR"];
-      expect(resolveActorWithSource(undefined, undefined, nonWorktreeCwd)).toEqual({
+      expect(resolveActorWithSource(undefined, process.env, nonWorktreeCwd)).toEqual({
         actor: OS_USERNAME,
         source: "os-fallback",
       });
@@ -765,7 +765,7 @@ describe("resolveActorWithSource", () => {
       delete process.env["LORE_ACTOR"];
       resetActorFallbackWarningForTests();
       const stderrSpy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
-      expect(resolveActor("grace")).toBe(resolveActorWithSource("grace").actor);
+      expect(resolveActor("grace")).toBe(resolveActorWithSource("grace", process.env, process.cwd()).actor);
       stderrSpy.mockRestore();
     });
 
@@ -773,7 +773,7 @@ describe("resolveActorWithSource", () => {
       process.env["LORE_ACTOR"] = "agent:heidi";
       resetActorFallbackWarningForTests();
       const stderrSpy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
-      expect(resolveActor(undefined)).toBe(resolveActorWithSource(undefined).actor);
+      expect(resolveActor(undefined)).toBe(resolveActorWithSource(undefined, process.env, process.cwd()).actor);
       expect(resolveActor(undefined)).not.toBe("agent:heidi");
       stderrSpy.mockRestore();
     });
@@ -782,7 +782,7 @@ describe("resolveActorWithSource", () => {
       delete process.env["LORE_ACTOR"];
       resetActorFallbackWarningForTests();
       const stderrSpy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
-      expect(resolveActor(undefined)).toBe(resolveActorWithSource(undefined).actor);
+      expect(resolveActor(undefined)).toBe(resolveActorWithSource(undefined, process.env, process.cwd()).actor);
       stderrSpy.mockRestore();
     });
   });

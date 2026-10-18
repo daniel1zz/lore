@@ -50,6 +50,8 @@ import { createApp } from "../../src/app.js";
 import type { App } from "../../src/app.js";
 import type { CreateDocInput, DocRecord, TaskClaim } from "@lore/core";
 import { resolveActor } from "../../src/adapters/cli/utils.js";
+import { liveInvocation } from "../live-invocation.js";
+import type { Invocation } from "@lore/core";
 
 /**
  * The name the CURRENT process environment resolves to (session tier, else the fallback tiers). No surface takes a
@@ -162,7 +164,7 @@ async function fetchDoc(idOrSlug: string): Promise<DocRecord> {
 
 // ─── `lore gate phase-claim` invocation (mirrors gate-p2-cross-tier.bun.test.ts) ──
 
-type RunnableCommand = { run: (ctx: { args: Record<string, unknown> }) => Promise<void> };
+type RunnableCommand = { run: (ctx: { args: Record<string, unknown>; inv?: Invocation }) => Promise<void> };
 
 async function importPhaseClaimGate(): Promise<RunnableCommand> {
   const mod = await import("../../src/adapters/cli/commands/gate.js");
@@ -202,7 +204,7 @@ async function runPreflight(phaseSlug: string): Promise<{ exitCode: number; stdo
   const output = captureOutput();
   process.exitCode = 0;
   try {
-    await cmd.run({ args: { phase: phaseSlug } });
+    await cmd.run({ args: { phase: phaseSlug }, inv: liveInvocation() });
   } finally {
     output.restore();
   }

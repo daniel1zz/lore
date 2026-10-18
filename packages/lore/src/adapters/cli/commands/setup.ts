@@ -652,6 +652,7 @@ function buildProjectRefreshDeps(opts: {
     repoRoot: opts.repoDir,
     assetsRoot: opts.assetsRoot,
     home: opts.inv.paths.home,
+    env: opts.inv.env,
     globalLayer: toContextLayer(globalConfig.value),
     projectLayer: toContextLayer(projectConfig.value),
   });
@@ -1149,11 +1150,11 @@ async function runCheckDispatch(opts: { targetDir: string; json: boolean; inv: I
  * (1.3.x) — see setup-args.ts's module doc for the empirically-verified `/$bunfs/`
  * detection this repo uses instead.
  */
-function buildSetupPathContext(): SetupPathContext {
+function buildSetupPathContext(inv: Invocation): SetupPathContext {
   return {
     repoRoot: REPO_ROOT,
-    isCompiled: Bun.main.startsWith("/$bunfs/"),
-    execPath: process.execPath,
+    isCompiled: inv.isCompiled,
+    execPath: inv.execPath,
   };
 }
 
@@ -1232,7 +1233,7 @@ export default defineCommand({
           process.exitCode = 2;
           return;
         }
-        await runProjectCheck({ json, assetsRoot: resolveAssetsRoot(buildSetupPathContext()), inv });
+        await runProjectCheck({ json, assetsRoot: resolveAssetsRoot(buildSetupPathContext(inv)), inv });
         return;
       }
       const checkTargetDir = resolveTargetDir({
@@ -1266,7 +1267,7 @@ export default defineCommand({
     // the flag in the `userState` it hands the service (below) instead of writing the process
     // environment. Direct SetupService test construction never sets it and stays guarded.
 
-    const pathCtx = buildSetupPathContext();
+    const pathCtx = buildSetupPathContext(inv);
     const assetsRoot = resolveAssetsRoot(pathCtx);
     const binPath = resolveBinPath(pathCtx);
 

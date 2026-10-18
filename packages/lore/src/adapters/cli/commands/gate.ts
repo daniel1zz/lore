@@ -236,6 +236,7 @@ import { resolveFeedbackUpstreamCfg } from "../report-issue-wiring.js";
 import { SQLiteStore } from "../../../store/sqlite-store.js";
 import { assertNoForeignSchemaMigration } from "../../../store/foreign-schema-guard.js";
 import { findLoreDbPathQuiet, runGateEnvBypassAudit } from "../gate-bypass-audit.js";
+import { invocationOf } from "../command-invocation.js";
 import { renderPredicateContractsExplain } from "../../../service/predicate-contracts.js";
 
 /**
@@ -371,10 +372,11 @@ export default defineCommand({
           required: true,
         },
       },
-      async run({ args }) {
+      async run(context) {
+        const { args } = context;
         // LORE_GATE_BYPASS=1: exit 0 before ANY parsing or checking (module header;
         // SPEC-080 G4 — best-effort env_bypass audit trace, exit-0 unconditional).
-        if (process.env["LORE_GATE_BYPASS"] === "1") {
+        if (invocationOf(context).env["LORE_GATE_BYPASS"] === "1") {
           await auditGateBypass("spec-create");
           process.exitCode = 0;
           return;
@@ -426,10 +428,11 @@ export default defineCommand({
           required: true,
         },
       },
-      async run({ args }) {
+      async run(context) {
+        const { args } = context;
         // LORE_GATE_BYPASS=1: exit 0 before ANY parsing or checking (module header;
         // SPEC-080 G4 — best-effort env_bypass audit trace, exit-0 unconditional).
-        if (process.env["LORE_GATE_BYPASS"] === "1") {
+        if (invocationOf(context).env["LORE_GATE_BYPASS"] === "1") {
           await auditGateBypass("spec-promote");
           process.exitCode = 0;
           return;
@@ -460,10 +463,11 @@ export default defineCommand({
           required: true,
         },
       },
-      async run({ args }) {
+      async run(context) {
+        const { args } = context;
         // LORE_GATE_BYPASS=1: exit 0 before ANY parsing or checking (module header;
         // SPEC-080 G4 — best-effort env_bypass audit trace, exit-0 unconditional).
-        if (process.env["LORE_GATE_BYPASS"] === "1") {
+        if (invocationOf(context).env["LORE_GATE_BYPASS"] === "1") {
           await auditGateBypass("plan-promote");
           process.exitCode = 0;
           return;
@@ -496,10 +500,11 @@ export default defineCommand({
           required: true,
         },
       },
-      async run({ args }) {
+      async run(context) {
+        const { args } = context;
         // LORE_GATE_BYPASS=1: exit 0 before ANY parsing or checking (module header;
         // SPEC-080 G4 — best-effort env_bypass audit trace, exit-0 unconditional).
-        if (process.env["LORE_GATE_BYPASS"] === "1") {
+        if (invocationOf(context).env["LORE_GATE_BYPASS"] === "1") {
           await auditGateBypass("task-claim");
           process.exitCode = 0;
           return;
@@ -509,7 +514,7 @@ export default defineCommand({
         try {
           if (isGateDisabledByConfig("task-claim", config)) return;
           const by = resolveActor();
-          await runTaskClaimGate(app, args.task as string, by, config);
+          await runTaskClaimGate(app, args.task as string, by, config, invocationOf(context).env);
         } finally {
           app.close();
         }
@@ -534,10 +539,11 @@ export default defineCommand({
           required: true,
         },
       },
-      async run({ args }) {
+      async run(context) {
+        const { args } = context;
         // LORE_GATE_BYPASS=1: exit 0 before ANY parsing or checking (module header;
         // SPEC-080 G4 — best-effort env_bypass audit trace, exit-0 unconditional).
-        if (process.env["LORE_GATE_BYPASS"] === "1") {
+        if (invocationOf(context).env["LORE_GATE_BYPASS"] === "1") {
           await auditGateBypass("phase-claim");
           process.exitCode = 0;
           return;
@@ -547,7 +553,7 @@ export default defineCommand({
         try {
           if (isGateDisabledByConfig("phase-claim", config)) return;
           const by = resolveActor();
-          await runPhaseClaimGate(app, args.phase as string, by, config);
+          await runPhaseClaimGate(app, args.phase as string, by, config, invocationOf(context).env);
         } finally {
           app.close();
         }
@@ -905,6 +911,7 @@ async function runTaskClaimGate(
   taskIdOrSlug: string,
   by: string,
   config: LoreConfig | undefined,
+  env: Readonly<Record<string, string | undefined>>,
 ): Promise<void> {
   const taskResult = await app.corpusService.get(taskIdOrSlug);
   if (!taskResult.ok) {
@@ -938,7 +945,7 @@ async function runTaskClaimGate(
   // print a refusal the real claim does not produce — a pre-flight that
   // contradicts the command it previews is worse than no pre-flight. An unusable
   // session id is surfaced here exactly as `claim()` surfaces it, never ignored.
-  const sessionIdResult = resolveClaimSessionId(process.env);
+  const sessionIdResult = resolveClaimSessionId(env);
   if (!sessionIdResult.ok) {
     process.stderr.write(formatError(sessionIdResult.error) + "\n");
     process.exitCode = exitCode(sessionIdResult.error);
@@ -1069,12 +1076,14 @@ async function runTaskClaimGate(
  *   `lore claim`/`runTaskClaimGate`.
  * @param config - `loadLoreApp()`'s resolved project config — forwarded to
  *   `resolveAnchorOverlapGateEnabled` (see above).
+ * @param env - the invocation environment (`inv.env`); the claim session id is resolved from it.
  */
 async function runPhaseClaimGate(
   app: App,
   phaseIdOrSlug: string,
   by: string,
   config: LoreConfig | undefined,
+  env: Readonly<Record<string, string | undefined>>,
 ): Promise<void> {
   const phaseResult = await app.corpusService.get(phaseIdOrSlug);
   if (!phaseResult.ok) {
@@ -1105,7 +1114,7 @@ async function runPhaseClaimGate(
   // `process.env` and feeds it to `noAnchorOverlap`
   // (task-phaseworkflowservice-claim-captures-no-session-id-so-every). Identical read,
   // identical surfacing of an unusable id, as `runTaskClaimGate` above.
-  const sessionIdResult = resolveClaimSessionId(process.env);
+  const sessionIdResult = resolveClaimSessionId(env);
   if (!sessionIdResult.ok) {
     process.stderr.write(formatError(sessionIdResult.error) + "\n");
     process.exitCode = exitCode(sessionIdResult.error);

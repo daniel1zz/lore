@@ -78,7 +78,7 @@ describe("SPEC-069 AC-069-1: resolveActorWithSource session tier", () => {
       const result = resolveActorWithSource("alice", {
         LORE_ACTOR: "agent:bob",
         CLAUDE_CODE_SESSION_ID: "3de02220-5d69-4b5a-ac23-d66e14c0261b",
-      });
+      }, process.cwd());
       expect(result).toEqual({ actor: "alice", source: "explicit" });
     });
 
@@ -86,14 +86,14 @@ describe("SPEC-069 AC-069-1: resolveActorWithSource session tier", () => {
       const result = resolveActorWithSource(undefined, {
         LORE_ACTOR: "agent:x",
         CLAUDE_CODE_SESSION_ID: "abc",
-      });
+      }, process.cwd());
       expect(result).toEqual({ actor: "agent:session-abc", source: "session" });
     });
 
     it("session tier fires from CLAUDE_CODE_SESSION_ID when no --by and no $LORE_ACTOR (literal SPEC-069 AC example)", () => {
       const result = resolveActorWithSource(undefined, {
         CLAUDE_CODE_SESSION_ID: "3DE02220-5d69-4b5a-ac23-d66e14c0261b",
-      });
+      }, process.cwd());
       expect(result.actor).toBe("agent:session-3de02220");
       expect(result.source).toBe("session");
     });
@@ -107,7 +107,7 @@ describe("SPEC-069 AC-069-1: resolveActorWithSource session tier", () => {
 
   describe("STATE — CLAUDE_SESSION_ID alias", () => {
     it("the CLAUDE_SESSION_ID alias fires the session tier when CLAUDE_CODE_SESSION_ID is absent", () => {
-      const result = resolveActorWithSource(undefined, { CLAUDE_SESSION_ID: "abcdef12" });
+      const result = resolveActorWithSource(undefined, { CLAUDE_SESSION_ID: "abcdef12" }, process.cwd());
       expect(result).toEqual({ actor: "agent:session-abcdef12", source: "session" });
     });
 
@@ -115,7 +115,7 @@ describe("SPEC-069 AC-069-1: resolveActorWithSource session tier", () => {
       const result = resolveActorWithSource(undefined, {
         CLAUDE_CODE_SESSION_ID: "primary1",
         CLAUDE_SESSION_ID: "alias0002",
-      });
+      }, process.cwd());
       expect(result).toEqual({ actor: "agent:session-primary1", source: "session" });
     });
   });
@@ -125,7 +125,7 @@ describe("SPEC-069 AC-069-1: resolveActorWithSource session tier", () => {
       const result = resolveActorWithSource("   ", {
         LORE_ACTOR: "agent:carol",
         CLAUDE_CODE_SESSION_ID: "deadbeef",
-      });
+      }, process.cwd());
       expect(result).toEqual({ actor: "agent:session-deadbeef", source: "session" });
     });
 
@@ -133,7 +133,7 @@ describe("SPEC-069 AC-069-1: resolveActorWithSource session tier", () => {
       const result = resolveActorWithSource(undefined, {
         LORE_ACTOR: "   ",
         CLAUDE_CODE_SESSION_ID: "deadbeef",
-      });
+      }, process.cwd());
       expect(result).toEqual({ actor: "agent:session-deadbeef", source: "session" });
     });
 
@@ -184,8 +184,8 @@ describe("SPEC-069 AC-069-1: resolveActorWithSource session tier", () => {
       expect(source).toBe("session");
     });
 
-    it("omitting the env param entirely still type-checks and returns a ResolvedActor (default-param regression)", () => {
-      const result = resolveActorWithSource("zed");
+    it("an explicit process env and cwd return a ResolvedActor (no ambient default)", () => {
+      const result = resolveActorWithSource("zed", process.env, process.cwd());
       expect(result).toEqual({ actor: "zed", source: "explicit" });
     });
   });

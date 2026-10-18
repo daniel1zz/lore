@@ -489,16 +489,15 @@ export interface ResolvedActor {
  * line) — every one of these is the caller's cue to fall through to the
  * existing OS-username tier, unchanged.
  *
- * @param startDir - directory to start the upward walk from (default
- *   `process.cwd()`; tests pass a fixture directory instead of mutating
- *   global cwd)
+ * @param startDir - directory to start the upward walk from (the invocation's
+ *   `cwd`; tests pass a fixture directory instead of mutating global cwd)
  * @returns `agent:<branch>` when a linked worktree with a resolvable branch
  *   HEAD is found; `undefined` otherwise (never throws)
  * @example
  *   detectWorktreeDerivedActor("/repo/.worktrees/trace-layer") // => "agent:trace-layer"
  *   detectWorktreeDerivedActor("/repo")                        // => undefined (main checkout)
  */
-export function detectWorktreeDerivedActor(startDir: string = process.cwd()): string | undefined {
+export function detectWorktreeDerivedActor(startDir: string): string | undefined {
   try {
     let dir = startDir;
     for (;;) {
@@ -546,10 +545,10 @@ export function detectWorktreeDerivedActor(startDir: string = process.cwd()): st
  * byte-identical on a miss (AC-ACTOR-3, AC-ACTOR-4).
  *
  * @param explicit - Value of the --by flag, if the user passed one
- * @param env - Environment map (defaults to `process.env`); tests pass a
+ * @param env - Environment map (the invocation's `env`); tests pass a
  *   literal object, matching the core function's own testing seam
- * @param cwd - Directory to detect worktree membership from (defaults to
- *   `process.cwd()`); tests pass a fixture directory instead of mutating
+ * @param cwd - Directory to detect worktree membership from (the
+ *   invocation's `cwd`); tests pass a fixture directory instead of mutating
  *   global cwd
  * @returns `{actor, source}` — `source: "worktree-derived"` only when every
  *   named tier was exhausted AND `cwd` resolved to a linked worktree with a
@@ -562,9 +561,9 @@ export function detectWorktreeDerivedActor(startDir: string = process.cwd()): st
  *   // => {actor: "<OS username>", source: "os-fallback"}
  */
 export function resolveActorWithSource(
-  explicit?: string,
-  env: Record<string, string | undefined> = process.env,
-  cwd: string = process.cwd(),
+  explicit: string | undefined,
+  env: Readonly<Record<string, string | undefined>>,
+  cwd: string,
 ): ResolvedActor {
   const core = resolveActorWithSourceCore(explicit, env, readOsUsername);
   if (core.source !== "os-fallback") {
@@ -621,7 +620,10 @@ export function resetActorFallbackWarningForTests(): void {
  *   resolveActor("alice")   // => "alice" (never warns)
  */
 export function resolveActor(explicit?: string): string {
-  return resolveActorWithIdentitySource(explicit).actor;
+  // reason: the one remaining ambient read of the actor chain — ~40 command bodies call `resolveActor(by)` with no
+  // Invocation in hand; each moves to `resolveActorWithIdentitySource(by, inv.env, inv.cwd)` with its own migration
+  // step (ledger ratchet, AS-26), and this fallback goes with the last of them.
+  return resolveActorWithIdentitySource(explicit, process.env, process.cwd()).actor;
 }
 
 /**
@@ -635,19 +637,19 @@ export function resolveActor(explicit?: string): string {
  * unchanged, since only `claim` needs the resolution tier.
  *
  * @param explicit - Value of the --by flag, if the user passed one
- * @param env - Environment map (SPEC-104; defaults to `process.env`); tests
+ * @param env - Environment map (SPEC-104; the invocation's `env`); tests
  *   pass a literal object, matching `resolveActorWithSource`'s own testing seam
- * @param cwd - Directory to detect worktree membership from (SPEC-104;
- *   defaults to `process.cwd()`; tests pass a fixture directory)
+ * @param cwd - Directory to detect worktree membership from (SPEC-104; the
+ *   invocation's `cwd`; tests pass a fixture directory)
  * @returns `{actor, source}` — `actor` matches `resolveActor(explicit)` exactly
  * @example
  *   resolveActorWithIdentitySource(undefined) // => {actor: "<OS username>", source: "os-fallback"} (warns once)
  *   resolveActorWithIdentitySource("alice")   // => {actor: "alice", source: "explicit"} (never warns)
  */
 export function resolveActorWithIdentitySource(
-  explicit?: string,
-  env: Record<string, string | undefined> = process.env,
-  cwd: string = process.cwd(),
+  explicit: string | undefined,
+  env: Readonly<Record<string, string | undefined>>,
+  cwd: string,
 ): ResolvedActor {
   const resolved = resolveActorWithSource(explicit, env, cwd);
   if (resolved.source === "os-fallback" && !warnedActorFallback) {
