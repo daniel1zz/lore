@@ -445,8 +445,17 @@ export function parseArgs(argv: readonly string[]): ChangedTestsCliArgs {
   return { list, base };
 }
 
-function runGit(args: readonly string[], cwd: string): string {
-  const result = spawnSync("git", args, { cwd, encoding: "utf8" });
+/** The slice of `spawnSync` the git helpers read; injectable so lost-answer behaviour is testable without a real child. */
+export type GitSpawn = (
+  command: string,
+  args: readonly string[],
+  cwd: string,
+) => { status: number | null; stdout?: string | null; stderr?: string | null; error?: Error | undefined };
+
+const DEFAULT_GIT_SPAWN: GitSpawn = (command, args, cwd) => spawnSync(command, [...args], { cwd, encoding: "utf8" });
+
+function runGit(args: readonly string[], cwd: string, spawn: GitSpawn = DEFAULT_GIT_SPAWN): string {
+  const result = spawn("git", args, cwd);
   if (result.error) {
     throw new ChangedTestsError("git", `git ${args.join(" ")} failed to spawn: ${result.error.message}`, { args, cwd });
   }
@@ -458,16 +467,32 @@ function runGit(args: readonly string[], cwd: string): string {
       stderr: result.stderr,
     });
   }
-  return result.stdout;
+  return result.stdout ?? "";
 }
 
-function getRepoRoot(cwd: string): string {
-  return runGit(["rev-parse", "--show-toplevel"], cwd).trim();
+/**
+ * reason: `rev-parse --show-toplevel` and `merge-base` ALWAYS print on success. Under the Bun runtime a
+ * spawnSync call can return status 0 with stdout lost (TG-49, ~1/6000); an empty answer here is that
+ * loss, never a real result, so it fails loud instead of selecting against a "" repo root / base.
+ */
+function runGitNonEmpty(args: readonly string[], cwd: string, spawn: GitSpawn): string {
+  const out = runGit(args, cwd, spawn).trim();
+  if (out.length === 0) {
+    throw new ChangedTestsError("git", `git ${args.join(" ")} exited 0 with empty stdout (lost answer; it always prints on success)`, {
+      args,
+      cwd,
+    });
+  }
+  return out;
 }
 
-function resolveBaseRef(repoRoot: string, base: string | undefined): string {
+export function getRepoRoot(cwd: string, spawn: GitSpawn = DEFAULT_GIT_SPAWN): string {
+  return runGitNonEmpty(["rev-parse", "--show-toplevel"], cwd, spawn);
+}
+
+export function resolveBaseRef(repoRoot: string, base: string | undefined, spawn: GitSpawn = DEFAULT_GIT_SPAWN): string {
   if (base !== undefined) return base;
-  return runGit(["merge-base", "main", "HEAD"], repoRoot).trim();
+  return runGitNonEmpty(["merge-base", "main", "HEAD"], repoRoot, spawn);
 }
 
 /** `git status --porcelain` line format: 2-char status + space + path, or `<path> -> <newPath>` for renames — extract the (new, for renames) path. */
@@ -477,8 +502,31 @@ function parsePorcelainPath(line: string): string {
   return arrowIdx === -1 ? body : body.slice(arrowIdx + 4);
 }
 
-function getChangedFiles(repoRoot: string, baseRef: string): string[] {
-  const diffOut = runGit(["diff", "--name-only", `${baseRef}...HEAD`], repoRoot);
+export function getChangedFiles(repoRoot: string, baseRef: string, spawn: GitSpawn = DEFAULT_GIT_SPAWN): string[] {
+  const range = `${baseRef}...HEAD`;
+  const diffOut = runGit(["diff", "--name-only", range], repoRoot, spawn);
+  // reason: an empty name list is legitimate ("nothing changed") but is also what a lost stdout looks
+  // like. `git diff --quiet` reports the same fact on the EXIT STATUS channel (1 = changes exist), so
+  // empty names + changes-exist is a lost answer and fails loud.
+  if (diffOut.trim().length === 0) {
+    const quiet = spawn("git", ["diff", "--quiet", range], repoRoot);
+    if (quiet.error) {
+      throw new ChangedTestsError("git", `git diff --quiet ${range} failed to spawn: ${quiet.error.message}`, { cwd: repoRoot });
+    }
+    if (quiet.status === 1) {
+      throw new ChangedTestsError("git", `git diff --name-only ${range} returned no names but git diff --quiet reports changes exist (lost stdout)`, {
+        cwd: repoRoot,
+        range,
+      });
+    }
+    if (quiet.status !== 0) {
+      throw new ChangedTestsError("git", `git diff --quiet ${range} exited ${String(quiet.status)}: ${quiet.stderr ?? ""}`, {
+        cwd: repoRoot,
+        range,
+        status: quiet.status,
+      });
+    }
+  }
   const diffFiles = diffOut
     .split("\n")
     .map((l) => l.trim())
@@ -498,7 +546,7 @@ function getChangedFiles(repoRoot: string, baseRef: string): string[] {
   // WARNING, since `zeroSelectionWarning` only fires when nothing else was
   // selected either). Filter blank lines on the RAW line (an empty string's
   // `.length` is 0 either way) and slice on the RAW line — never trim first.
-  const statusOut = runGit(["status", "--porcelain", "--untracked-files=all"], repoRoot);
+  const statusOut = runGit(["status", "--porcelain", "--untracked-files=all"], repoRoot, spawn);
   const statusFiles = statusOut
     .split("\n")
     .filter((l) => l.length > 0)
