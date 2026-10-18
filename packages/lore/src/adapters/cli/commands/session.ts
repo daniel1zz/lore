@@ -231,6 +231,7 @@ async function runSessionTrailReview(args: { turn?: unknown; json?: unknown }, i
     const review = await reviewHelperScope({
       trail,
       claimedTasks: (run) => runService.claimedTasks(run),
+      openClaimsOfWorkingCopy: (workingCopy) => runService.openClaimsOfWorkingCopy(workingCopy),
       projectRoot: dirname(dirname(dbPath)),
       realpath: realpathSync,
     });

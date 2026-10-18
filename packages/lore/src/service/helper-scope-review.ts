@@ -21,6 +21,11 @@
  *   working copy AND a base form one group: the group's measured files are judged ONCE, under the union of the
  *   tasks every member run claimed, and reported against the owner (the first member that claimed a task, else
  *   the first member). A nested helper is charged only with its OWN edit records (those are truly per-run).
+ * @invariant Open claims of the working copy (AU-T22). A running implementer has no helper end record, so a
+ *   group of its nested zero-duration helpers has no claiming member. The group (and a lone helper) is therefore
+ *   also judged under every open claim whose RECORDED worktree resolves to the group's working copy (the port
+ *   compares directories, never directory names or branch names). The owner stays a member run; these claims
+ *   only widen the union of tasks and anchors.
  * @invariant The session's own scratchpad (`.../claude-<uid>/<project>/<session>/scratchpad/`) is never
  *   repository content: a path under it is not "outside the working copy". Structural match on the session id of
  *   the trail, no agent-id allowlist; another session's scratchpad stays a finding.
@@ -36,6 +41,12 @@ import type { RunClaimedTask } from "./run-service.js";
 
 /** Resolves the tasks a run claimed (`RunService.claimedTasks`, injected so this module stays store-free). */
 export type ClaimedTasksPort = (run: string) => Promise<Result<readonly RunClaimedTask[], LoreError>>;
+
+/**
+ * Resolves the OPEN claims whose recorded worktree is the given working-copy directory
+ * (`RunService.openClaimsOfWorkingCopy`, injected). Covers a claiming run that has no end record yet.
+ */
+export type OpenClaimsOfWorkingCopyPort = (workingCopy: string) => Promise<Result<readonly RunClaimedTask[], LoreError>>;
 
 /** `realpath` of an existing path; throws ENOENT otherwise (`fs.realpathSync` shape). */
 export type RealpathFn = (path: string) => string;
@@ -72,6 +83,7 @@ export interface HelperScopeReview {
 export interface ReviewHelperScopeInput {
   readonly trail: SessionTrail;
   readonly claimedTasks: ClaimedTasksPort;
+  readonly openClaimsOfWorkingCopy: OpenClaimsOfWorkingCopyPort;
   /** The project root (directory holding `.lore/`); the base for edit records of a helper with no working copy. */
   readonly projectRoot: string;
   readonly realpath: RealpathFn;
@@ -185,8 +197,11 @@ export async function reviewHelperScope(input: ReviewHelperScopeInput): Promise<
 
     const own = members.length > 1 ? ok(memberClaims) : await claimsOf(helper.run);
     if (!own.ok) return err(own.error);
-    const slugs = [...new Set(own.value.map((t) => t.slug))];
-    const anchors = own.value.flatMap((t) => [...t.file_anchors]);
+    const openInCopy = await input.openClaimsOfWorkingCopy(workingCopy);
+    if (!openInCopy.ok) return err(openInCopy.error);
+    const judgedUnder = [...own.value, ...openInCopy.value];
+    const slugs = [...new Set(judgedUnder.map((t) => t.slug))];
+    const anchors = judgedUnder.flatMap((t) => [...t.file_anchors]);
     const add = (kind: HelperScopeFindingKind, list: readonly string[], message: string, tasks: readonly string[]): void => {
       findings.push({ kind, helper: helper.agent_id, run: helper.run, files: list, tasks, message });
     };
