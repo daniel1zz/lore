@@ -121,7 +121,7 @@ describe("AC-MI-1: module index lists only folders with a memory file, nothing d
     expect(entries[0]).toContain("no Purpose section");
   });
 
-  it("AC-MI-1 REGRESSION (AC-CTX-9): a hidden or gitignored folder holding a memory file is not listed", async () => {
+  it("AC-MI-1 REGRESSION (context walk hygiene): a hidden or gitignored folder holding a memory file is not listed", async () => {
     const dir = await makeProject();
     put(dir, "CLAUDE.md", "# Proj\n");
     put(dir, ".gitignore", "ignored/\n");
@@ -193,8 +193,8 @@ describe("AC-MI-2: managed zone keeps the template headings; legacy auto blocks 
   });
 });
 
-describe("AC-MI-3 (throwaway half): context refresh --check computes, writes nothing, exits 0 only when refreshed", () => {
-  it("AC-MI-3 NEGATIVE: a stale CLAUDE.md -> exit exactly 1 naming it, bytes unchanged; after a real refresh -> exit 0", async () => {
+describe("refresh --check: context refresh --check computes, writes nothing, exits 0 only when refreshed", () => {
+  it("refresh --check NEGATIVE: a stale CLAUDE.md -> exit exactly 1 naming it, bytes unchanged; after a real refresh -> exit 0", async () => {
     const dir = await makeProject();
     put(dir, "CLAUDE.md", "# Proj\n\nhand text\n");
     put(dir, "svc/CLAUDE.md", "# Svc\n\n## Purpose\n\nSvc serves.\n");
@@ -212,7 +212,7 @@ describe("AC-MI-3 (throwaway half): context refresh --check computes, writes not
     expect(fresh.exitCode, fresh.stdout + fresh.stderr).toBe(0);
   });
 
-  it("AC-MI-3 BOUNDARY: a refreshed file over the configured ceiling -> exit exactly 1 naming the ceiling, nothing written", async () => {
+  it("refresh --check BOUNDARY: a refreshed file over the configured ceiling -> exit exactly 1 naming the ceiling, nothing written", async () => {
     const dir = await makeProject();
     put(dir, "CLAUDE.md", "# Proj\n\nhand text\n");
     const refreshed = await runLore(["context", "refresh"], dir);

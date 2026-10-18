@@ -208,7 +208,7 @@ describe("collectContextFacts", () => {
   });
 });
 
-describe("module index = memory-file folders (spec-module-index-lists-only-folders-with-a-memory-file-managed, AC-MI-1)", () => {
+describe("module index = memory-file folders (spec-module-index-lists-only-folders-with-a-memory-file-managed)", () => {
   it("HAPPY: memoryModules carries link target + first Purpose sentence; the rest are counted, not listed", async () => {
     const fs = new InMemoryFsPort({
       "a/CLAUDE.md": "# A\n\n## Purpose\n\nA does x. Then y.\n",
