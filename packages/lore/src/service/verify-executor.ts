@@ -52,9 +52,11 @@
  *     `selectOutputTailWindow` (spec-evidence-output-tail-integrity-a-self-reported-non-pass
  *     §D4) — the plain stream-END tail UNLESS `spec.acRef` is set and that id occurs
  *     earlier in the stream than the plain tail's own window, in which case the window
- *     is taken around the id's LAST occurrence instead, so a run whose captured output
- *     exceeds the cap after the AC's own result line still stores a tail that witnesses
- *     it. `selectOutputTailWindow` itself is built from `@lore/core`'s code-point-safe
+ *     is the witness window around the id's LAST occurrence + an elision marker + the stream END
+ *     (the last half of the cap is ALWAYS the stream end, so the runner's final summary line
+ *     survives — task-skill-fix-tg-36), so a run whose captured output exceeds the cap after the
+ *     AC's own result line still stores a tail that witnesses it.
+ *     `selectOutputTailWindow` itself is built from `@lore/core`'s code-point-safe
  *     `tailChars`/`headChars` (BUG-001 fix, `packages/core/src/truncate.ts`) — the SAME
  *     helpers `adapters/cli/commands/evidence.ts` and `commands/handoff.ts` use, never a
  *     locally re-implemented copy.

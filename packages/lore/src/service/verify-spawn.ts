@@ -284,6 +284,9 @@ export function deriveVerifyResult(exitCode: number | null, timedOut: boolean): 
   return !timedOut && exitCode === 0 ? "pass" : "fail";
 }
 
+/** Joins the AC-id witness window to the stream end inside a stored `output_tail`. */
+export const VERIFY_TAIL_ELISION_MARKER = "\n[... output elided between the AC-id window and the stream end ...]\n";
+
 /**
  * Select the `output_tail` window for a captured verify-run stream
  * (spec-evidence-output-tail-integrity-a-self-reported-non-pass §D4).
@@ -297,11 +300,10 @@ export function deriveVerifyResult(exitCode: number | null, timedOut: boolean): 
  *      ordinary window is left alone (returns the identical plain tail), so this
  *      function never surprises a caller whose output happens to fit the cap already.
  *
- * When it does override, the window is centered on the id's last occurrence: up to
- * `maxChars / 2` characters of LEADING context, then filled forward to the `maxChars`
- * budget (trailing context, capped at the stream's actual end) — so a short run of
- * output after the match (e.g. a test runner's own summary line) still has a chance to
- * survive, not just the match itself.
+ * When it does override, the result is `witness window + elision marker + stream END`:
+ * the last `maxChars / 2` characters of the stream are ALWAYS kept (the runner's final
+ * summary line must survive — task-skill-fix-tg-36), and the remaining budget is a
+ * window centered on the id's last occurrence (half leading context, half trailing).
  *
  * Composed ENTIRELY from `headChars`/`tailChars` (`@lore/core`, BUG-001 surrogate-pair
  * safety) — every cut point here is a plain numeric OFFSET fed to one of those two
@@ -352,11 +354,20 @@ export function selectOutputTailWindow(
   const plainTailStart = stream.length - plainTail.length;
   if (idx >= plainTailStart) return plainTail; // already witnessed in the ordinary tail
 
-  const leadBudget = Math.floor(maxChars / 2);
-  const windowStart = Math.max(0, idx - leadBudget);
+  // reason: the window used to REPLACE the stream end, so a runner that names the AC id in its
+  // test titles (AC-TG-11: `measure-test-wall` runs the whole suite) stored a tail ending
+  // mid-test-output and lost its own final summary line. The evidence rule is that the tail
+  // keeps the runner's final summary (task-skill-fix-tg-36), so the stored tail is TWO
+  // segments: the witness window, an elision marker, then the stream END (never dropped).
+  const endSegment = tailChars(stream, Math.floor(maxChars / 2));
+  const witnessBudget = maxChars - endSegment.length - VERIFY_TAIL_ELISION_MARKER.length;
+  if (witnessBudget <= 0) return plainTail; // cap too small to hold both segments: the end wins
+  // The id's last occurrence lies before the plain tail (idx < length - maxChars) and
+  // witnessBudget + endSegment.length < maxChars, so the witness window cannot reach the end
+  // segment: the two never overlap and the marker always marks a real gap.
+  const windowStart = Math.max(0, idx - Math.floor(witnessBudget / 2));
   // "Drop the first windowStart characters" — expressed as tailChars keeping the last
   // (length - windowStart) characters, never a raw `stream.slice(windowStart)`.
-  const fromWindowStart = tailChars(stream, stream.length - windowStart);
-  // Cap the total to maxChars, taking from the (safe) start of that suffix forward.
-  return headChars(fromWindowStart, maxChars);
+  const witnessSegment = headChars(tailChars(stream, stream.length - windowStart), witnessBudget);
+  return `${witnessSegment}${VERIFY_TAIL_ELISION_MARKER}${endSegment}`;
 }

@@ -79,4 +79,25 @@ describe("executeVerifySpawnSpec single stream", () => {
     if (!result.ok) return;
     expect(result.value.outputTail).toContain("AC-X PASS: summary");
   });
+
+  // AC-TG-11 / task-skill-fix-tg-36: the acRef-anchored window used to REPLACE the stream end
+  // whenever the AC id occurred earlier than the plain tail, so a runner that names the id in its
+  // test titles lost its final summary line (two lore verify runs of AC-TG-11 stored a tail ending
+  // mid-test-output). The tail must keep the stream end AND still witness the id.
+  test("VSS-R2: >1 MB of output (child process included) naming the AC id keeps the final summary line AND the id", async () => {
+    const script = [
+      "echo 'AC-TG-11 starts'; i=0; while [ $i -lt 400 ]; do echo \"test line $i\"$(head -c 2900 /dev/zero | tr '\\0' 'p'); i=$((i+1)); done",
+      "sh -c 'j=0; while [ $j -lt 100 ]; do echo \"child line $j\"$(head -c 2900 /dev/zero | tr \"\\\\0\" \"c\"); j=$((j+1)); done'",
+      "echo 'runner: FINAL-SUMMARY 7 passed, 0 failed'",
+      "echo 'runner: FAIL - over budget' >&2",
+    ].join("; ");
+    const result = await executeVerifySpawnSpec(spec(script, "AC-TG-11"));
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const tail = result.value.outputTail;
+    expect(tail.length).toBeLessThanOrEqual(4000);
+    expect(tail.endsWith("runner: FAIL - over budget\n")).toBe(true);
+    expect(tail).toContain("runner: FINAL-SUMMARY 7 passed, 0 failed\nrunner: FAIL - over budget\n");
+    expect(tail).toContain("AC-TG-11");
+  }, 60_000);
 });
