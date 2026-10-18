@@ -722,7 +722,7 @@ describe("INT-T6 the shared checkout's view of main follows an integrate", () =>
     const fx = new Fixture("true");
     const branch = fx.makeBranch("noop");
     expect((await fx.integrate(branch, "sess-t6b")).exitCode).toBe(0);
-    fx.git(["checkout", "-q", "--detach", "HEAD~1"]); // the view fell behind main
+    fx.git(["checkout", "-q", "--detach", "main~1"]); // the view fell behind main
     expect(fx.git(["rev-parse", "HEAD"])).not.toBe(fx.main());
 
     const r = await fx.integrate(branch, "sess-t6b");
