@@ -609,6 +609,13 @@ describe("deriveAcCoverageState oracle_file_missing is not_measured whatever ear
         ...base, pass: 1, oracle_file_missing: gone, allow_missing_declared: true, refs: [{ task_id: "t1", result: "pass" }],
       }),
     ).toBe("not_measured");
+    // declared, the only pass is an other-command row (pass counts 0, refs keeps it) -> still a pass on record -> not_measured
+    expect(
+      deriveAcCoverageState({
+        ...base, pass: 0, oracle_file_missing: gone, allow_missing_declared: true,
+        refs: [{ task_id: "t1", result: "pass", other_command: true }],
+      }),
+    ).toBe("not_measured");
     // NOT declared, no evidence -> not_measured (EI-6 control for the same facts)
     expect(
       deriveAcCoverageState({ ...base, pass: 0, oracle_file_missing: gone, allow_missing_declared: false, refs: [] }),

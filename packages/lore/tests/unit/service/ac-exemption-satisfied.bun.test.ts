@@ -19,6 +19,7 @@ import { LoreConfigSchema, type CreateDocInput } from "@lore/core";
 import { createApp, type App } from "../../../src/app.js";
 import { SQLiteStore } from "../../../src/store/sqlite-store.js";
 import { AcExemptionService } from "../../../src/service/ac-exemption-service.js";
+import { alwaysAutoOverridePort } from "../../helpers/always-auto-override-port.js";
 import { exemptionHeadroom, indexBaseline, satisfiedExemptionKeys } from "../../../src/service/ac-cite-gate.js";
 import { exemptionState } from "../../../src/store/store-shared.js";
 
@@ -44,7 +45,7 @@ beforeEach(async () => {
   if ("ok" in made) throw new Error(`createApp failed: ${JSON.stringify(made)}`);
   app = made;
   side = new SQLiteStore(join(dir, "c.db"));
-  svc = new AcExemptionService(side);
+  svc = new AcExemptionService(side, () => new Date(), alwaysAutoOverridePort()); // AU-T7: explicit test port; no port = refused
   const cs = app.corpusService;
   const rs = app.ruleService!;
   const prd = await must(await cs.create({ type: "prd", title: "Sat product", content: "root" } as CreateDocInput), "prd");

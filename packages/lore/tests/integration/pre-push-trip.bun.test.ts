@@ -498,7 +498,7 @@ describe("spec-bootstrap-fixpoint-integrity-binary-provenance-an-anchor#AC-BFI-9
     // Positive trace: the shim recorded all five `lore` steps, in hook order.
     // ⛔ Asserting only the ABSENCE of their failure lines would pass equally on
     // a hook that skipped them entirely.
-    expect(result.loreCalls).toEqual([...ALL_LORE_STEPS]);
+    expect(result.loreCalls).toEqual([...EXPECTED_LORE_STEPS]);
     // And none of them failed, so the exit 1 above is the ratchet's alone.
     for (const line of EARLIER_STEP_FAILURE_LINES) {
       expect(result.combined).not.toContain(line);
@@ -514,7 +514,7 @@ describe("spec-bootstrap-fixpoint-integrity-binary-provenance-an-anchor#AC-BFI-9
     // The step was reached and passed — not skipped. Its OK verdict is the proof.
     expect(result.combined).toContain("check-anchor-coverage: OK —");
     expect(result.combined).not.toContain("pre-push: anchor-coverage ratchet");
-    expect(result.loreCalls).toEqual([...EXPECTED_LORE_STEPS]);
+    expect(result.loreCalls).toEqual([...ALL_LORE_STEPS]);
   }, 120_000);
 
   it("STATE: the reverse ratchet direction also blocks — a ledger row whose spec now declares anchors is named as debt_paid", () => {

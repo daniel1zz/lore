@@ -713,7 +713,7 @@ export function computeAcCoverage(
  *
  * **AC-TG-6 / AC-EI-2 — missing oracle file (between rows 2 and 3)**: when {@link AcCoverageFact.oracle_file_missing}
  * is non-empty and `fail === 0`, the state is `"not_measured"` BEFORE rows 3-7 are tried — whether the criterion has passes
- * (whichever files they ran; TG-22's narrowing is removed) or NO evidence at all (EI-6: "whenever" means whenever). ONE exception (AC-TG-6): an AC declared red-first ({@link AcCoverageFact.allow_missing_declared}) with `pass === 0` is `"none"`. A real `fail`
+ * (whichever files they ran; TG-22's narrowing is removed) or NO evidence at all (EI-6: "whenever" means whenever). ONE exception (AC-TG-6): an AC declared red-first ({@link AcCoverageFact.allow_missing_declared}) with no pass on record ({@link hasPassOnRecord}) is `"none"`. A real `fail`
  * still outranks it (rows 1-2); a criterion whose oracle files all exist and has no evidence stays `"none"` (row 7).
  *
  * This is the COMPLETE return set — `"inconclusive"`/`"expected-fail"` are
@@ -817,7 +817,9 @@ export function deriveAcCoverageState(fact: AcCoverageFact): AcCoverageState {
   // `none` (the test is not written yet; nothing was claimed, so nothing is unmeasured). Any other missing oracle - undeclared,
   // or declared but with a pass on record (it vanished, or the pass ran a different file) - is `not_measured`.
   if (missing !== undefined && missing.length > 0) {
-    if (fact.allow_missing_declared === true && fact.pass === 0) return "none";
+    // reason: `pass` excludes other-command rows (EI-1), so "a pass on record" also reads `refs` via hasPassOnRecord - the same
+    // predicate `lore done`'s missing-oracle floor uses; a pass that ran a DIFFERENT file is still a pass on record.
+    if (fact.allow_missing_declared === true && fact.pass === 0 && !hasPassOnRecord(fact.refs)) return "none";
     return "not_measured";
   }
   if (fact.attested_pass > 0) return "attested_pass";

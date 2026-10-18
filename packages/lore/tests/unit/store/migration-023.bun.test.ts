@@ -2,7 +2,7 @@
  * Migration 023 (AU-T16) — decision_log's verdict CHECK admits 'superseded' through a table rebuild that keeps every
  * existing row byte-for-byte (so the hash chain still verifies), keeps the append-only triggers, and keeps ids growing.
  */
-import { describe, expect, it } from "bun:test";
+import { describe, expect, it } from "vitest";
 import { Database } from "bun:sqlite";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
