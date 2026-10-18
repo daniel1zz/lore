@@ -32,6 +32,7 @@ import { defineCommand } from "citty";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatError, formatTable } from "../utils.js";
 import { PENDING_TABLE_HEADERS, buildPendingTableRows } from "../pending-render.js";
+import { collectPendingDecisions, renderPendingDecisions } from "../pending-decisions-render.js";
 import { withValidityStatus } from "../../../service/validity-service.js";
 import type { DocType, ReviewJudgment } from "@lore/core";
 import type { PendingDoc } from "../../../service/review-service.js";
@@ -81,8 +82,19 @@ export default defineCommand({
     },
   },
   async run({ args }) {
-    const { app } = loadLoreApp();
+    const { app, dbPath } = loadLoreApp();
     try {
+      // AC-AU-3: open autonomy decisions (escalations awaiting the human) are listed beside the pending docs,
+      // in both output modes. A read failure is loud, never an empty list.
+      const decisionsResult = await collectPendingDecisions(dbPath);
+      if (!decisionsResult.ok) {
+        process.stderr.write(formatError(decisionsResult.error) + "\n");
+        process.exitCode = exitCode(decisionsResult.error);
+        return;
+      }
+      const decisions = decisionsResult.value;
+      const decisionsBlock = renderPendingDecisions(decisions);
+
       const filters: Record<string, unknown> = {};
       if (args.author !== undefined) filters["author"] = args.author;
       if (args.type !== undefined) filters["type"] = args.type as DocType;
@@ -107,9 +119,10 @@ export default defineCommand({
       // post-filter empty check below).
       if (docs.length === 0) {
         if (args.json) {
-          console.log(JSON.stringify({ ok: true, data: { docs: [], total: 0 } }, null, 2));
+          console.log(JSON.stringify({ ok: true, data: { docs: [], total: 0, decisions } }, null, 2));
         } else {
           console.log("No pending documents.");
+          if (decisionsBlock !== "") console.log(decisionsBlock);
         }
         return;
       }
@@ -143,6 +156,7 @@ export default defineCommand({
               data: {
                 docs: withValidity.map((d) => ({ ...d, judgment: judgments.get(d.id) ?? null })),
                 total: withValidity.length,
+                decisions,
               },
             },
             null,
@@ -154,11 +168,14 @@ export default defineCommand({
 
       if (visibleDocs.length === 0) {
         console.log(args.escalated ? "No escalated documents." : "No pending documents.");
+        if (decisionsBlock !== "") console.log(decisionsBlock);
         return;
       }
 
       console.log(formatTable(PENDING_TABLE_HEADERS, buildPendingTableRows(visibleDocs, judgments)));
       console.log(`\n${visibleDocs.length} ${args.escalated ? "escalated" : "pending"} document${visibleDocs.length === 1 ? "" : "s"}`);
+
+      if (decisionsBlock !== "") console.log(decisionsBlock);
 
       if (args.escalated) {
         for (const doc of visibleDocs) {

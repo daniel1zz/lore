@@ -3,8 +3,8 @@
  *
  * Purpose: every autonomy decision made through the service layer is appended to the hash-chained decision log,
  * and the EFFECTIVE verdict of a (class, subject, version) is answered from that log, never from a re-score.
- * Public surface: DecisionService.{decide, effectiveVerdict, verifyChain, chainHead, recordHumanTtyUngated},
- *   DecisionSubject, DecideOutcome.
+ * Public surface: DecisionService.{decide, effectiveVerdict, verifyChain, chainHead, listPending, getPending,
+ *   resolvePending}, DecisionSubject, DecideOutcome.
  * Invariants:
  *   - INV-2 (plan): no public method accepts caller-provided factor values. `decide` takes MEASURED FACTS
  *     (autonomyFactsSchema) and the factor values are computed by @lore/core's decide(); a new method that
@@ -14,9 +14,11 @@
  *   - The effective verdict rules live in store/decision-log.ts::effectiveDecisionVerdict (latest human-tty,
  *     else worst machine); this service only fetches the subject's rows and applies them.
  *   - A new `subject.version` is a new subject: re-scoring the same version with better facts cannot improve it.
+ *   - `resolvePending` is the ONLY writer of channel `human-tty` and requires a HumanChannelProof (AC-AU-3); a
+ *     method that appends a human-tty row without one is a defect (the former ungated test seam is deleted).
  * Side-effect class: IO (decision_log appends through the injected store; clock via the injected `now`).
  *
- * Source: spec-autonomy-phase-1-decision-function-human-channel-lore AC-AU-2;
+ * Source: spec-autonomy-phase-1-decision-function-human-channel-lore AC-AU-2, AC-AU-3;
  *   adr-autonomy-is-decided-by-measured-facts-one-decision-function D5.
  */
 import { decide, err, ok, type AutonomyDecision, type LoreError, type Result, type OperationClassRegistry } from "@lore/core";
@@ -31,6 +33,8 @@ import {
   type EffectiveDecisionVerdict,
 } from "../store/decision-log.js";
 import type { StoreInterface } from "../store/store-interface.js";
+import { isIssuedHumanChannelProof, type HumanChannelProof } from "./human-channel.js";
+import { derivePendingDecisions, type PendingDecision } from "./pending-decisions.js";
 
 /** What a decision is about: a stable id plus the version (or sha) it was measured at. */
 export interface DecisionSubject {
@@ -145,30 +149,68 @@ export class DecisionService {
     return ok(decisionChainHead(rows.value));
   }
 
+  /** Open escalations (effective verdict: machine escalate), ordered by id. See pending-decisions.ts. */
+  async listPending(): Promise<Result<PendingDecision[], LoreError>> {
+    const rows = await this.deps.store.listDecisionLog();
+    if (!rows.ok) return rows;
+    return derivePendingDecisions(rows.value);
+  }
+
+  /** One open escalation by the id `lore decide` takes, or null when that id is not (or no longer) pending. */
+  async getPending(pendingId: number): Promise<Result<PendingDecision | null, LoreError>> {
+    const pending = await this.listPending();
+    if (!pending.ok) return pending;
+    return ok(pending.value.find((p) => p.id === pendingId) ?? null);
+  }
+
   /**
-   * ⛔ INTERNAL TEST SEAM — NOT THE HUMAN CHANNEL. Appends a `human-tty` record (verdict `auto` = accept,
-   * `refuse` = reject) with NO tty, nonce or agent-ancestry check. AU-T3 (human channel) replaces this with a
-   * gated writer and must delete or gate this method; until then NO adapter may call it. It still takes no
-   * factor values: the record carries the human's verdict and the subject's identity only.
+   * THE human channel's only writer: answers pending decision `pendingId` with a `human-tty` record
+   * (accept -> verdict `auto`, reject -> `refuse`). Demands a `HumanChannelProof`, which only
+   * `confirmHumanNonce` mints after the TTY, agent-ancestry and nonce checks; a forged literal is refused.
+   * The record carries the human's answer, the ancestry snapshot the proof captured and the chain head as it
+   * stood BEFORE this append. It takes no factor values.
+   *
+   * @returns err(VALIDATION_ERROR) for a forged proof, or when `pendingId` is not pending (already answered,
+   *   never existed, or answered concurrently); nothing is written in either case.
    */
-  async recordHumanTtyUngated(
-    classId: string,
-    subject: DecisionSubject,
-    verdict: "auto" | "refuse",
+  async resolvePending(
+    pendingId: number,
+    answer: "accept" | "reject",
+    reason: string | undefined,
+    proof: HumanChannelProof,
   ): Promise<Result<DecisionLogRow, LoreError>> {
-    if (subject.version === "") return err(validationError("subject.version", "a decision subject needs a version or sha"));
+    if (!isIssuedHumanChannelProof(proof)) {
+      return err(validationError("proof", "a human-tty record needs a proof minted by the human channel (TTY, agent-ancestry and nonce checks)"));
+    }
+    const rows = await this.deps.store.listDecisionLog();
+    if (!rows.ok) return rows;
+    const pending = derivePendingDecisions(rows.value);
+    if (!pending.ok) return pending;
+    const target = pending.value.find((p) => p.id === pendingId);
+    if (target === undefined) return err(validationError("id", `decision ${pendingId} is not pending`));
+    const verdict = answer === "accept" ? "auto" : "refuse";
+    const head = decisionChainHead(rows.value);
     const input: DecisionRecordInput = {
       ts: this.now(),
-      class: classId,
-      subject_id: subject.id,
-      subject_version: subject.version,
-      facts: "{}",
+      class: target.class,
+      subject_id: target.subject_id,
+      subject_version: target.subject_version,
+      facts: canonicalJson({
+        human: {
+          pending_id: target.id,
+          answer,
+          reason: reason ?? null,
+          ancestry: proof.ancestry,
+          verified_at: proof.verified_at,
+          chain_head: head === null ? null : { head_id: head.head_id, head_hash: head.head_hash, count: head.count },
+        },
+      }),
       factors: "{}",
       score: verdict === "auto" ? 1 : 0,
       threshold: null,
       verdict,
-      reasons: canonicalJson([`human-tty ${verdict === "auto" ? "accept" : "reject"}`]),
-      executor_run: this.deps.executorRun,
+      reasons: canonicalJson([`human-tty ${answer}`, ...(reason === undefined ? [] : [reason])]),
+      executor_run: null,
       channel: "human-tty",
     };
     return this.deps.store.appendDecisionRecord(input);
