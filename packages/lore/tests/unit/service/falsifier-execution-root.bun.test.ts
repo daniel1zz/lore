@@ -286,7 +286,7 @@ describe("AC-JV-3 (SERVICE tier) — verifyFalsifier resolves its execution root
     // HAPPY — executionRoot resolved to the WORKTREE.
     {
       const recorder = makeRecordVerifiedEvidence();
-      const service = new VerifyRunnerService(getPlanBundle, recorder.fn, realExecutor, {
+      const service = new VerifyRunnerService(getPlanBundle, recorder.fn, realExecutor, { tmpDir: tmpdir(),
         ...BASE_CONFIG,
         repoRoot, // config.repoRoot deliberately still points at the MAIN checkout
       });
@@ -307,7 +307,7 @@ describe("AC-JV-3 (SERVICE tier) — verifyFalsifier resolves its execution root
     // "happened to pass" (AC-JV-3's own text).
     {
       const recorder = makeRecordVerifiedEvidence();
-      const service = new VerifyRunnerService(getPlanBundle, recorder.fn, realExecutor, {
+      const service = new VerifyRunnerService(getPlanBundle, recorder.fn, realExecutor, { tmpDir: tmpdir(),
         ...BASE_CONFIG,
         repoRoot,
       });
@@ -340,7 +340,7 @@ describe("AC-JV-3 (SERVICE tier) — verifyFalsifier resolves its execution root
     const bundle: PlanBundle = { plan, spec, tasks: [task] };
     const getPlanBundle = async (): Promise<Result<PlanBundle, LoreError>> => ok(bundle);
     const recorder = makeRecordVerifiedEvidence();
-    const service = new VerifyRunnerService(getPlanBundle, recorder.fn, realExecutor, {
+    const service = new VerifyRunnerService(getPlanBundle, recorder.fn, realExecutor, { tmpDir: tmpdir(),
       ...BASE_CONFIG,
       repoRoot,
     });
@@ -365,7 +365,7 @@ describe("AC-JV-3 (SERVICE tier) — verifyFalsifier resolves its execution root
     // Deliberately NO uncommitted change — worktreeDir is byte-identical to HEAD.
     expect(gitStatusPorcelain(worktreeDir)).toBe("");
 
-    const createResult = createFalsifierScratchWorktree(worktreeDir, { captureUncommitted: true });
+    const createResult = createFalsifierScratchWorktree(worktreeDir, { tmpDir: tmpdir(), captureUncommitted: true });
     expect(createResult.ok).toBe(true);
     if (!createResult.ok) return;
     const scratch = createResult.value;
@@ -377,7 +377,7 @@ describe("AC-JV-3 (SERVICE tier) — verifyFalsifier resolves its execution root
     const nonGitDir = mkdtempSync(join(tmpdir(), "lore-jv3-non-git-"));
     cleanupDirs.push(nonGitDir);
 
-    const result = createFalsifierScratchWorktree(nonGitDir, { captureUncommitted: true });
+    const result = createFalsifierScratchWorktree(nonGitDir, { tmpDir: tmpdir(), captureUncommitted: true });
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.error.code).toBe("STORE_ERROR");
@@ -390,7 +390,7 @@ describe("AC-JV-3 (SERVICE tier) — verifyFalsifier resolves its execution root
     const { worktreeDir } = addWorktree(repoRoot, "jv3-service-state");
     writeFileSync(join(worktreeDir, "extra.txt"), "extra: WORKTREE_ONLY_CHANGE\n", "utf8");
 
-    const createResult = createFalsifierScratchWorktree(worktreeDir, { captureUncommitted: true });
+    const createResult = createFalsifierScratchWorktree(worktreeDir, { tmpDir: tmpdir(), captureUncommitted: true });
     expect(createResult.ok).toBe(true);
     if (!createResult.ok) return;
     const scratch = createResult.value;

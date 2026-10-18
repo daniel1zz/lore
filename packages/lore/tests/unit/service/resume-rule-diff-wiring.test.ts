@@ -13,6 +13,7 @@
 
 import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
+import { tmpdir } from "node:os";
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
@@ -91,7 +92,7 @@ async function claimAt(task: DocRecord, iso: string): Promise<void> {
 }
 
 async function feedFor(plan: DocRecord): Promise<string> {
-  const r = await buildResumeFeed(app, { plan: plan.slug });
+  const r = await buildResumeFeed(app, { plan: plan.slug }, { env: process.env, tmpDir: tmpdir() });
   if (!r.ok) throw new Error(`buildResumeFeed failed: ${JSON.stringify(r.error)}`);
   return r.value.feed;
 }
@@ -149,7 +150,7 @@ describe("lore feed session-resume prints the BL-15 rule diff", () => {
 
   it("an unknown --plan fails the feed instead of printing nothing", async () => {
     await makeFixture();
-    const r = await buildResumeFeed(app, { plan: "no-such-plan" });
+    const r = await buildResumeFeed(app, { plan: "no-such-plan" }, { env: process.env, tmpDir: tmpdir() });
     expect(r.ok).toBe(false);
   });
 });

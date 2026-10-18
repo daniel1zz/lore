@@ -103,7 +103,7 @@ async function runAssessAndGetPrompt(diffText: string | undefined): Promise<stri
   });
   const service = makeAssessService(provider);
 
-  const result = await service.assessPlan(bundle, {
+  const result = await service.assessPlan(bundle, { repoRoot: process.cwd(),
     ...(diffText !== undefined ? { diffText } : {}),
     commitDerivationUnverifiable: false,
   });

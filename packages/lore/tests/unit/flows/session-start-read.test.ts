@@ -75,13 +75,13 @@ afterEach(() => {
 describe("HAPPY — env var set + valid marker", () => {
   it('kind "measured", startedAt equal to the marker\'s own started_at string', () => {
     writeMarker(JSON.stringify({ started_at: "2026-08-01T10:00:00.000Z" }));
-    const result = readSessionStartIso({ CLAUDE_CODE_SESSION_ID: testSessionId });
+    const result = readSessionStartIso({ CLAUDE_CODE_SESSION_ID: testSessionId }, tmpdir());
     expect(result).toEqual({ kind: "measured", startedAt: "2026-08-01T10:00:00.000Z" });
   });
 
   it("CLAUDE_SESSION_ID (the fallback var) alone is honoured the same way", () => {
     writeMarker(JSON.stringify({ started_at: "2026-08-01T11:00:00.000Z" }));
-    const result = readSessionStartIso({ CLAUDE_SESSION_ID: testSessionId });
+    const result = readSessionStartIso({ CLAUDE_SESSION_ID: testSessionId }, tmpdir());
     expect(result).toEqual({ kind: "measured", startedAt: "2026-08-01T11:00:00.000Z" });
   });
 });
@@ -90,7 +90,7 @@ describe("HAPPY — env var set + valid marker", () => {
 
 describe('NEGATIVE — AC 4a: neither session-id env var is set', () => {
   it('kind "no-session-id" when both env vars are absent', () => {
-    const result: SessionStartReadResult = readSessionStartIso({});
+    const result: SessionStartReadResult = readSessionStartIso({}, tmpdir());
     expect(result.kind).toBe("no-session-id");
   });
 });
@@ -100,14 +100,14 @@ describe('NEGATIVE — AC 4a: neither session-id env var is set', () => {
 describe('BOUNDARY — AC 4b: session id present, marker absent', () => {
   it('kind "no-marker" — distinguishable from "no-session-id"', () => {
     // Deliberately do NOT write a marker file.
-    const result = readSessionStartIso({ CLAUDE_CODE_SESSION_ID: testSessionId });
+    const result = readSessionStartIso({ CLAUDE_CODE_SESSION_ID: testSessionId }, tmpdir());
     expect(result.kind).toBe("no-marker");
     expect(result.kind).not.toBe("no-session-id");
   });
 
   it('control: "no-session-id" and "no-marker" are DIFFERENT string values — proves the two are not the same collapsed sentinel', () => {
-    const noSessionId = readSessionStartIso({});
-    const noMarker = readSessionStartIso({ CLAUDE_CODE_SESSION_ID: testSessionId });
+    const noSessionId = readSessionStartIso({}, tmpdir());
+    const noMarker = readSessionStartIso({ CLAUDE_CODE_SESSION_ID: testSessionId }, tmpdir());
     expect(noSessionId.kind).not.toBe(noMarker.kind);
   });
 });
@@ -117,7 +117,7 @@ describe('BOUNDARY — AC 4b: session id present, marker absent', () => {
 describe("ERROR — AC 4c: marker with a wrong-TYPED started_at (non-throwing path)", () => {
   it('kind "unreadable", detail names the missing string field', () => {
     writeMarker(JSON.stringify({ started_at: 12345 }));
-    const result = readSessionStartIso({ CLAUDE_CODE_SESSION_ID: testSessionId });
+    const result = readSessionStartIso({ CLAUDE_CODE_SESSION_ID: testSessionId }, tmpdir());
     expect(result.kind).toBe("unreadable");
     if (result.kind !== "unreadable") return;
     expect(result.detail).toContain("started_at");
@@ -127,7 +127,7 @@ describe("ERROR — AC 4c: marker with a wrong-TYPED started_at (non-throwing pa
 describe("ERROR — AC 4d: marker with invalid JSON (throwing path)", () => {
   it('kind "unreadable", detail names the JSON parse failure — DIFFERENT detail text from AC 4c', () => {
     writeMarker("{ not valid json");
-    const result = readSessionStartIso({ CLAUDE_CODE_SESSION_ID: testSessionId });
+    const result = readSessionStartIso({ CLAUDE_CODE_SESSION_ID: testSessionId }, tmpdir());
     expect(result.kind).toBe("unreadable");
     if (result.kind !== "unreadable") return;
     expect(result.detail).toContain("JSON");
@@ -135,13 +135,13 @@ describe("ERROR — AC 4d: marker with invalid JSON (throwing path)", () => {
 
   it("control: the two unreadable triggers (4c wrong-type vs 4d invalid-JSON) produce DIFFERENT detail strings — proves they are genuinely separate branches, not one catch-all", () => {
     writeMarker(JSON.stringify({ started_at: 12345 }));
-    const wrongType = readSessionStartIso({ CLAUDE_CODE_SESSION_ID: testSessionId });
+    const wrongType = readSessionStartIso({ CLAUDE_CODE_SESSION_ID: testSessionId }, tmpdir());
 
     const secondSessionId = `${testSessionId}-b`;
     const secondMarkerPath = join(tmpdir(), sessionStartMarkerFilename(secondSessionId));
     writeFileSync(secondMarkerPath, "{ not valid json", "utf8");
     try {
-      const invalidJson = readSessionStartIso({ CLAUDE_CODE_SESSION_ID: secondSessionId });
+      const invalidJson = readSessionStartIso({ CLAUDE_CODE_SESSION_ID: secondSessionId }, tmpdir());
       expect(wrongType.kind).toBe("unreadable");
       expect(invalidJson.kind).toBe("unreadable");
       if (wrongType.kind !== "unreadable" || invalidJson.kind !== "unreadable") return;
@@ -158,13 +158,13 @@ describe("STATE — referential transparency + blank-session-id boundary", () =>
   it("two calls with the same env/marker produce structurally equal results", () => {
     writeMarker(JSON.stringify({ started_at: "2026-08-01T12:00:00.000Z" }));
     const env = { CLAUDE_CODE_SESSION_ID: testSessionId };
-    const first = readSessionStartIso(env);
-    const second = readSessionStartIso(env);
+    const first = readSessionStartIso(env, tmpdir());
+    const second = readSessionStartIso(env, tmpdir());
     expect(first).toEqual(second);
   });
 
   it('a whitespace-only session id is treated as absent -> kind "no-session-id" (matches the pre-existing trim() convention)', () => {
-    const result = readSessionStartIso({ CLAUDE_CODE_SESSION_ID: "   " });
+    const result = readSessionStartIso({ CLAUDE_CODE_SESSION_ID: "   " }, tmpdir());
     expect(result.kind).toBe("no-session-id");
   });
 });
@@ -173,8 +173,8 @@ describe("STATE — referential transparency + blank-session-id boundary", () =>
 
 describe("REGRESSION — the defect this task fixes, as a single assertion", () => {
   it('"no-session-id" and "no-marker" are DIFFERENT values (pre-fix, both were the SAME undefined sentinel)', () => {
-    const noSessionId = readSessionStartIso({});
-    const noMarker = readSessionStartIso({ CLAUDE_CODE_SESSION_ID: testSessionId });
+    const noSessionId = readSessionStartIso({}, tmpdir());
+    const noMarker = readSessionStartIso({ CLAUDE_CODE_SESSION_ID: testSessionId }, tmpdir());
     // Pre-fix this would have been `undefined === undefined` (both branches
     // returned the same collapsed sentinel) — post-fix these are distinct
     // discriminated kinds.

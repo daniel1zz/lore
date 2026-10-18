@@ -257,7 +257,7 @@ function addWorkspaceMember(repoRoot: string, dirName: string, packageName: stri
 }
 
 function createScratch(repoRoot: string): FalsifierScratchWorktree {
-  const result = createFalsifierScratchWorktree(repoRoot);
+  const result = createFalsifierScratchWorktree(repoRoot, { tmpDir: tmpdir() });
   if (!result.ok) {
     throw new Error(`createFalsifierScratchWorktree failed: ${JSON.stringify(result.error)}`);
   }
@@ -1300,7 +1300,7 @@ describe("green control still fires", () => {
         getPlanBundle,
         recorder.fn,
         greenControlStillFiresRealExecutor,
-        { ...GREEN_CONTROL_STILL_FIRES_BASE_CONFIG, repoRoot },
+        { tmpDir: tmpdir(), ...GREEN_CONTROL_STILL_FIRES_BASE_CONFIG, repoRoot },
       );
 
       const result = await service.verifyFalsifier(plan.id, criterion.id, {
@@ -1403,7 +1403,7 @@ describe("green control still fires", () => {
         getPlanBundle,
         recorder.fn,
         greenControlStillFiresRealExecutor,
-        { ...GREEN_CONTROL_STILL_FIRES_BASE_CONFIG, repoRoot },
+        { tmpDir: tmpdir(), ...GREEN_CONTROL_STILL_FIRES_BASE_CONFIG, repoRoot },
       );
 
       const result = await service.verifyFalsifier(plan.id, criterion.id, {

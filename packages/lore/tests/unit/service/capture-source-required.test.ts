@@ -38,6 +38,7 @@
  *   AC-2 AC-3 AC-4 AC-5 AC-6
  */
 
+import { tmpdir } from "node:os";
 import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
 import { existsSync, readFileSync } from "node:fs";
@@ -191,6 +192,7 @@ const VERIFY_CONFIG = {
   envAllowlist: [],
   envPassthroughAll: true,
   processEnv: {},
+  tmpDir: tmpdir(),
 };
 const NOW = "2026-08-03T10:00:00.000Z";
 const FRESH_CLAIM_AT = "2026-08-03T09:59:00.000Z";

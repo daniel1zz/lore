@@ -124,7 +124,7 @@ async function runFalsify(storedExitCode: number) {
   const executor = makeRecordingExecutor();
   const recorder = makeRecorder();
   const bundle = makeBundle(criterionWithStoredExit(storedExitCode));
-  const service = new VerifyRunnerService(async () => ok(bundle), recorder.fn, executor.fn, {
+  const service = new VerifyRunnerService(async () => ok(bundle), recorder.fn, executor.fn, { tmpDir: tmpdir(),
     repoRoot,
     defaultTimeoutMs: 15000,
     claimTtlMinutes: 120,

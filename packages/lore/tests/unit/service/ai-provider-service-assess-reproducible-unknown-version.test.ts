@@ -137,7 +137,7 @@ describe("assessPlan — an unregistered getAssessTemplateReproducibility lookup
     const provider = new InMemoryAIProvider("in-memory", { kind: "ok", content: VALID_JSON });
     const service = makeAssessService(provider);
 
-    const result = await service.assessPlan(bundle, { commitDerivationUnverifiable: false });
+    const result = await service.assessPlan(bundle, { repoRoot: process.cwd(), commitDerivationUnverifiable: false });
 
     expect(result.ok).toBe(false);
     if (result.ok) return;
@@ -159,7 +159,7 @@ describe("assessPlan — an unregistered getAssessTemplateReproducibility lookup
     const provider = new InMemoryAIProvider("in-memory", { kind: "ok", content: VALID_JSON });
     const service = makeAssessService(provider);
 
-    await service.assessPlan(bundle, { commitDerivationUnverifiable: false });
+    await service.assessPlan(bundle, { repoRoot: process.cwd(), commitDerivationUnverifiable: false });
 
     expect(provider.calls).toHaveLength(0);
   });

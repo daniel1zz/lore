@@ -120,7 +120,7 @@ describe("AC-AEP-5: an ungrounded absence-based dimension_scores entry is remove
     const provider = new InMemoryAIProvider("in-memory", { kind: "ok", content: judgeJson });
     const service = makeAssessService(provider);
 
-    const result = await service.assessPlan(bundle, { commitDerivationUnverifiable: false });
+    const result = await service.assessPlan(bundle, { repoRoot: process.cwd(), commitDerivationUnverifiable: false });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
 
@@ -144,7 +144,7 @@ describe("AC-AEP-5: an ungrounded absence-based dimension_scores entry is remove
     const provider = new InMemoryAIProvider("in-memory", { kind: "ok", content: judgeJson });
     const service = makeAssessService(provider);
 
-    const result = await service.assessPlan(bundle, { commitDerivationUnverifiable: false });
+    const result = await service.assessPlan(bundle, { repoRoot: process.cwd(), commitDerivationUnverifiable: false });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
 
@@ -171,7 +171,7 @@ describe("AC-AEP-6: CONTROL — suppression is scoped to the ungrounded absence 
     const provider = new InMemoryAIProvider("in-memory", { kind: "ok", content: judgeJson });
     const service = makeAssessService(provider);
 
-    const result = await service.assessPlan(bundle, { commitDerivationUnverifiable: false });
+    const result = await service.assessPlan(bundle, { repoRoot: process.cwd(), commitDerivationUnverifiable: false });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
 
@@ -196,7 +196,7 @@ describe("AC-AEP-6: CONTROL — suppression is scoped to the ungrounded absence 
     const provider = new InMemoryAIProvider("in-memory", { kind: "ok", content: judgeJson });
     const service = makeAssessService(provider);
 
-    const result = await service.assessPlan(bundle, { commitDerivationUnverifiable: false });
+    const result = await service.assessPlan(bundle, { repoRoot: process.cwd(), commitDerivationUnverifiable: false });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
 
@@ -220,7 +220,7 @@ describe("AC-AEP-6: CONTROL — suppression is scoped to the ungrounded absence 
     const provider = new InMemoryAIProvider("in-memory", { kind: "ok", content: judgeJson });
     const service = makeAssessService(provider);
 
-    const result = await service.assessPlan(bundle, { commitDerivationUnverifiable: false });
+    const result = await service.assessPlan(bundle, { repoRoot: process.cwd(), commitDerivationUnverifiable: false });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
 
@@ -253,7 +253,7 @@ describe("AC-AEP-7: CONTROL for D4 — suppression follows findUngroundedAbsence
     const provider = new InMemoryAIProvider("in-memory", { kind: "ok", content: judgeJson });
     const service = makeAssessService(provider, SMALL_TASK_BUDGET);
 
-    const result = await service.assessPlan(bundle, { commitDerivationUnverifiable: false });
+    const result = await service.assessPlan(bundle, { repoRoot: process.cwd(), commitDerivationUnverifiable: false });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
 
@@ -299,7 +299,7 @@ describe("AC-AEP-8: REGRESSION — the 100%-task-truncation branch still forces 
     const provider = new InMemoryAIProvider("in-memory", { kind: "ok", content: judgeJson });
     const service = makeAssessService(provider, SMALL_TASK_BUDGET);
 
-    const result = await service.assessPlan(bundle, { commitDerivationUnverifiable: false });
+    const result = await service.assessPlan(bundle, { repoRoot: process.cwd(), commitDerivationUnverifiable: false });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
 
@@ -341,7 +341,7 @@ describe("AC-AEP-8: REGRESSION — the 100%-task-truncation branch still forces 
     const provider = new InMemoryAIProvider("in-memory", { kind: "ok", content: judgeJson });
     const service = makeAssessService(provider);
 
-    const result = await service.assessPlan(bundle, { commitDerivationUnverifiable: false });
+    const result = await service.assessPlan(bundle, { repoRoot: process.cwd(), commitDerivationUnverifiable: false });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
 
@@ -384,7 +384,7 @@ describe("AC-AEP-11: a suppressed dimension's matching typed_gaps entries are al
     const provider = new InMemoryAIProvider("in-memory", { kind: "ok", content: judgeJson });
     const service = makeAssessService(provider);
 
-    const result = await service.assessPlan(bundle, { commitDerivationUnverifiable: false });
+    const result = await service.assessPlan(bundle, { repoRoot: process.cwd(), commitDerivationUnverifiable: false });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
 
@@ -434,7 +434,7 @@ describe("AC-AEP-12: CONTROL — a grounded absence dimension keeps both rows, e
     const provider = new InMemoryAIProvider("in-memory", { kind: "ok", content: judgeJson });
     const service = makeAssessService(provider);
 
-    const result = await service.assessPlan(bundle, { commitDerivationUnverifiable: false });
+    const result = await service.assessPlan(bundle, { repoRoot: process.cwd(), commitDerivationUnverifiable: false });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
 
@@ -459,7 +459,7 @@ describe("AC-AEP-12: CONTROL — a grounded absence dimension keeps both rows, e
     const provider = new InMemoryAIProvider("in-memory", { kind: "ok", content: judgeJson });
     const service = makeAssessService(provider);
 
-    const result = await service.assessPlan(bundle, { commitDerivationUnverifiable: false });
+    const result = await service.assessPlan(bundle, { repoRoot: process.cwd(), commitDerivationUnverifiable: false });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
 
@@ -488,7 +488,7 @@ describe("AC-AEP-12: CONTROL — a grounded absence dimension keeps both rows, e
     const provider = new InMemoryAIProvider("in-memory", { kind: "ok", content: judgeJson });
     const service = makeAssessService(provider);
 
-    const result = await service.assessPlan(bundle, { commitDerivationUnverifiable: false });
+    const result = await service.assessPlan(bundle, { repoRoot: process.cwd(), commitDerivationUnverifiable: false });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
 

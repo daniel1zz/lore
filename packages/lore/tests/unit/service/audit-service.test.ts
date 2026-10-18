@@ -29,7 +29,7 @@ import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
 import { TaskWorkflowService } from "../../../src/service/task-workflow-service.js";
 import { AuditService } from "../../../src/service/audit-service.js";
-import { resolveActorWithSource } from "@lore/core/node";
+import { readOsUsername, resolveActorWithSource } from "@lore/core/node";
 import type { CreateDocInput, VersionRecord, AuditEntry } from "@lore/core";
 
 // ─── Fixture helpers ──────────────────────────────────────────────────────────
@@ -109,7 +109,7 @@ describe("HAPPY — a CorpusService.create() write satisfies verify() out of the
     // test time (this test never mutates process.env, so it's stable within
     // a single run — see audit-actor-fidelity.test.ts for the full env-chain
     // coverage this asymmetry is dedicated to).
-    expect(entry.actor).toBe(resolveActorWithSource(undefined, process.env).actor);
+    expect(entry.actor).toBe(resolveActorWithSource(undefined, process.env, readOsUsername).actor);
     expect(entry.details?.["version"]).toBe(1);
   });
 
