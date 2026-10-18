@@ -36,13 +36,16 @@
  *   the trail, no agent-id allowlist; another session's scratchpad stays a finding.
  * @invariant Findings, per helper and kind (one finding lists every file of that kind): a file outside the
  *   helper's working copy; a file no anchor of any claimed task covers (matching is `anchorsOverlap`, no new
- *   matcher); changed files and no claimed task. A helper that changed nothing yields none, and an unmeasurable
+ *   matcher; a file a `workflow.turn_end.co_change` rule REQUIRES counts as covered when an anchor-covered changed
+ *   file matched that rule's `when` (AU-T27: one rule list, the one `co-change-review` judges, no second path
+ *   list)); changed files and no claimed task. A helper that changed nothing yields none, and an unmeasurable
  *   part is reported in `not_measured`, never as "changed nothing".
  */
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
-import { anchorsOverlap, err, ok, type LoreError, type Result } from "@lore/core";
+import { anchorsOverlap, err, ok, type CoChangeRule, type LoreError, type Result } from "@lore/core";
 import type { SessionTrail, TrailHelper } from "@lore/core/node";
 import type { OpenClaimsOfWorkingCopy, RunClaimedTask } from "./run-service.js";
+import type { GlobMatchFn } from "./co-change-review.js";
 
 /** Resolves the tasks a run claimed (`RunService.claimedTasks`, injected so this module stays store-free). */
 export type ClaimedTasksPort = (run: string) => Promise<Result<readonly RunClaimedTask[], LoreError>>;
@@ -92,6 +95,8 @@ export interface ReviewHelperScopeInput {
   /** The project root (directory holding `.lore/`); the base for edit records of a helper with no working copy. */
   readonly projectRoot: string;
   readonly realpath: RealpathFn;
+  /** The validated co_change rules plus the glob matcher; absent = no co-change coverage (rules unmeasured or unset). */
+  readonly coChange?: { readonly rules: readonly CoChangeRule[]; readonly matches: GlobMatchFn };
 }
 
 /** Helper ends not yet judged: `end_count` above `judged_end_count`. */
@@ -137,6 +142,22 @@ function isSessionScratchpad(canonical: string, session: string): boolean {
 function groupKey(helper: TrailHelper, realpath: RealpathFn, projectRoot: string): string | null {
   if (helper.changes?.measured !== true) return null;
   return `${canonicalPath(helper.working_copy ?? projectRoot, realpath)}\0${helper.changes.value.base}`;
+}
+
+/**
+ * Files of `files` that no anchor covers directly but a co_change rule requires because an anchor-covered file of
+ * `files` matched that rule's `when`. Pure; a rule whose `when` only matched uncovered files unlocks nothing.
+ */
+function coChangeRequiredFiles(files: readonly string[], anchors: readonly string[], coChange: ReviewHelperScopeInput["coChange"]): Set<string> {
+  const required = new Set<string>();
+  if (coChange === undefined) return required;
+  const anchored = files.filter((file) => anchorsOverlap([file], [...anchors]).overlaps);
+  const any = (patterns: readonly string[], file: string): boolean => patterns.some((pattern) => coChange.matches(pattern, file));
+  for (const rule of coChange.rules) {
+    if (!anchored.some((file) => any(rule.when, file))) continue;
+    for (const file of files) if (any(rule.require, file)) required.add(file);
+  }
+  return required;
 }
 
 function listOf(files: readonly string[]): string {
@@ -230,7 +251,8 @@ export async function reviewHelperScope(input: ReviewHelperScopeInput): Promise<
       const list = [...files, ...[...outside].sort()];
       add("no-claimed-task", list, `Helper ${helper.agent_id} (${helper.run}) changed files but claimed no task: ${listOf(list)}`, []);
     } else {
-      const uncovered = files.filter((file) => !anchorsOverlap([file], anchors).overlaps);
+      const requiredByCoChange = coChangeRequiredFiles(files, anchors, input.coChange);
+      const uncovered = files.filter((file) => !anchorsOverlap([file], anchors).overlaps && !requiredByCoChange.has(file));
       if (uncovered.length > 0) {
         add("outside-anchors", uncovered, `Helper ${helper.agent_id} (${helper.run}) changed files outside the anchors of its task ${slugs.join(", ")}: ${listOf(uncovered)}`, slugs);
       }
