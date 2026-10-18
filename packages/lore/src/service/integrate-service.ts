@@ -96,9 +96,19 @@ export interface IntegrateRequest {
   readonly message?: string;
 }
 
+/**
+ * What happened to the shared checkout's read-only view of main after main moved (INT-T6): `refreshed` = it now sits at
+ * main; `kept_dirty` = git refused because an uncommitted edit of `paths` would be overwritten, nothing was touched;
+ * `not_measured` = the view was not eligible or git failed for another reason (`reason` says which), nothing was touched.
+ */
+export type SharedViewRefresh =
+  | { readonly state: "refreshed" }
+  | { readonly state: "kept_dirty"; readonly paths: readonly string[] }
+  | { readonly state: "not_measured"; readonly reason: string };
+
 export type IntegrateOutcome =
-  | { readonly kind: "landed"; readonly branch: string; readonly sha: string; readonly base: string; readonly attempts: number; readonly worktree: string }
-  | { readonly kind: "already_integrated"; readonly branch: string; readonly main: string }
+  | { readonly kind: "landed"; readonly branch: string; readonly sha: string; readonly base: string; readonly attempts: number; readonly worktree: string; readonly shared_view: SharedViewRefresh }
+  | { readonly kind: "already_integrated"; readonly branch: string; readonly main: string; readonly shared_view: SharedViewRefresh }
   | { readonly kind: "floor_failed"; readonly branch: string; readonly attempts: number; readonly exit_status: number; readonly output_tail: string }
   | { readonly kind: "conflict"; readonly branch: string; readonly paths: readonly string[] }
   | {
@@ -193,7 +203,7 @@ export class IntegrateService {
       if (git(projectRoot, ["merge-base", "--is-ancestor", tip, base.value]).status === 0) {
         const cleared = ledger.clear(request.branch);
         if (!cleared.ok) return cleared;
-        return ok({ kind: "already_integrated", branch: request.branch, main: base.value });
+        return ok({ kind: "already_integrated", branch: request.branch, main: base.value, shared_view: this.refreshSharedView() });
       }
       log(`integrate: ${request.branch} attempt ${attempt}/${INTEGRATE_MAX_ATTEMPTS} on ${short(base.value)}`);
 
@@ -217,7 +227,7 @@ export class IntegrateService {
       if (swapped.status === 0) {
         const cleared = ledger.clear(request.branch);
         if (!cleared.ok) return cleared;
-        return ok({ kind: "landed", branch: request.branch, sha: merge, base: base.value, attempts: attempt, worktree: wt });
+        return ok({ kind: "landed", branch: request.branch, sha: merge, base: base.value, attempts: attempt, worktree: wt, shared_view: this.refreshSharedView() });
       }
 
       const now = this.resolveCommit(TARGET_REF);
@@ -304,6 +314,38 @@ export class IntegrateService {
     }
     this.deps.log(`integrate: detached the shared checkout ${shared} at ${TARGET_NAME} (its edits are untouched)`);
     return ok(undefined);
+  }
+
+  /**
+   * Moves the shared checkout's detached view to the current main with `git checkout --detach main` — never forced, so
+   * git itself refuses (and loses nothing) when an uncommitted edit would be overwritten (ADR E5/E5b). Never fails the
+   * integration: main already moved, so every non-refresh is reported, not thrown.
+   */
+  private refreshSharedView(): SharedViewRefresh {
+    const { git, projectRoot } = this.deps;
+    const gitDir = git(projectRoot, ["rev-parse", "--path-format=absolute", "--absolute-git-dir"]);
+    const commonDir = git(projectRoot, ["rev-parse", "--path-format=absolute", "--git-common-dir"]);
+    if (gitDir.status !== 0 || commonDir.status !== 0) {
+      return { state: "not_measured", reason: `could not locate the git dir of ${projectRoot}: ${(gitDir.stderr || commonDir.stderr).trim()}` };
+    }
+    if (realpathSync(gitDir.stdout.trim()) !== realpathSync(commonDir.stdout.trim())) {
+      return { state: "not_measured", reason: `${projectRoot} is a linked worktree, not the shared checkout` };
+    }
+    const branch = git(projectRoot, ["symbolic-ref", "-q", "HEAD"]);
+    if (branch.status === 0) {
+      return { state: "not_measured", reason: `the shared checkout is on ${branch.stdout.trim()}, not a detached view of ${TARGET_NAME}` };
+    }
+    const inProgress = this.operationInProgress(projectRoot);
+    if (inProgress !== undefined) return { state: "not_measured", reason: `the shared checkout has a ${inProgress} in progress` };
+    const moved = git(projectRoot, ["checkout", "-q", "--detach", TARGET_NAME]);
+    if (moved.status === 0) return { state: "refreshed" };
+    const text = `${moved.stderr}${moved.stdout}`;
+    if (!text.includes("would be overwritten")) {
+      return { state: "not_measured", reason: `git checkout --detach ${TARGET_NAME} exited ${moved.status}: ${text.trim()}` };
+    }
+    // git lists each blocking path on its own tab-indented line
+    const paths = text.split("\n").filter((l) => l.startsWith("\t")).map((l) => l.trim());
+    return { state: "kept_dirty", paths };
   }
 
   /** The multi-step operation a checkout is in the middle of (it blocks a detach), or `undefined`. */

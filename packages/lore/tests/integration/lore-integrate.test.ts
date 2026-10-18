@@ -750,7 +750,7 @@ describe("INT-T6 the shared checkout's view of main follows an integrate", () =>
     expect(fx.git(["rev-parse", "HEAD"])).toBe(headBefore); // not moved
     const data = (JSON.parse(r.stdout.slice(r.stdout.indexOf("{"))) as { data: { shared_view: { state: string; paths?: string[] } } }).data;
     expect(data.shared_view).toEqual({ state: "kept_dirty", paths: ["base.txt"] });
-    expect(fx.git(["status", "--porcelain=v1"])).toBe("M base.txt");
+    expect(fx.git(["status", "--porcelain=v1", "--untracked-files=no"])).toBe("M base.txt");
   }, 120_000);
 
   it("INT-T6 a shared checkout on a branch is reported not-measured and left untouched", async () => {
