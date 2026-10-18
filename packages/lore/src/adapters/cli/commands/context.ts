@@ -92,6 +92,7 @@ import type { CallerSurface, ContextConfigLayer, FsWritePort, LoreError, MemoryF
 import { loadConfig, loadGlobalConfig, resolveGlobalConfigPath } from "@lore/core/node";
 import { invocationOf } from "../command-invocation.js";
 import { exitCode, findLoreDbPath, formatError } from "../utils.js";
+import { resolveTrackedWriteRoot } from "../working-tree-root.js";
 import { resolveAssetsRoot, type SetupPathContext } from "../setup-args.js";
 import { collectContextFacts } from "../../../service/context-facts.js";
 import {
@@ -528,7 +529,13 @@ export default defineCommand({
     }
 
     const dbPath = findLoreDbPath(inv);
-    const repoRoot = dirname(dirname(dbPath));
+    // reason: INT-T5 — the corpus (config, budgets) resolves through the git common dir and may be the shared
+    // checkout; every TRACKED file this command writes (CLAUDE.md, .claude/rules, .lore/context, selection.yaml)
+    // lands in the invoking working tree (adr-main-advances-only-by-lore-integrate-per-session, "Corpus home").
+    const corpusRoot = dirname(dirname(dbPath));
+    const writeRoot = resolveTrackedWriteRoot(inv.cwd, corpusRoot);
+    if (!writeRoot.ok) return reportFailure(writeRoot.error);
+    const repoRoot = writeRoot.value;
     const json = args.json === true;
 
     // ONE config load + budgets resolution per invocation (AC-CTX-8) — reused
@@ -536,7 +543,7 @@ export default defineCommand({
     // as by both verbs' `ContextFlowDeps.budgets` and `resolveInitNarrative`'s
     // facts collection. Resolution rules live in `@lore/core`'s
     // `resolveMemoryFileBudgetsFromConfigResult` — see its doc.
-    const configResult = loadConfig(repoRoot);
+    const configResult = loadConfig(corpusRoot);
     const config = configResult.ok ? configResult.value : undefined;
     const budgetResolution = resolveMemoryFileBudgetsFromConfigResult(configResult);
     const budgets = budgetResolution.budgets;
@@ -544,7 +551,7 @@ export default defineCommand({
     // on silently substituted ceilings would bake the wrong Zone-1 sizing into
     // the file itself. Emitted before any write, on stderr so `--json` stdout
     // stays a clean payload.
-    const substitutionNotice = formatMemoryFileBudgetSubstitution(budgetResolution, repoRoot);
+    const substitutionNotice = formatMemoryFileBudgetSubstitution(budgetResolution, corpusRoot);
     if (substitutionNotice !== undefined) process.stderr.write(substitutionNotice + "\n");
 
     const home = inv.paths.home;

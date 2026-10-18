@@ -40,6 +40,7 @@ import { dirname } from "path";
 import { defineCommand } from "citty";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatError } from "../utils.js";
+import { resolveTrackedWriteRoot } from "../working-tree-root.js";
 import { requirePhaseMigrationService } from "../phase-wiring.js";
 import type { SectionMigrationVerdict } from "../../../service/outline-migration-service.js";
 import { invocationOf } from "../command-invocation.js";
@@ -184,7 +185,15 @@ export default defineCommand({
       const { app, dbPath } = loadLoreApp({ inv });
       // reason: export-index.json lives at <projectDir>/.lore/export-index.json —
       // same derivation ExportDocsService's own CLI command uses (dbPath = <projectDir>/.lore/lore.db).
-      const projectDir = dirname(dirname(dbPath));
+      // reason: INT-T5 — export-index.json is tracked; write it in the invoking working tree, not the corpus checkout.
+      const projectDirResolved = resolveTrackedWriteRoot(inv.cwd, dirname(dirname(dbPath)));
+      if (!projectDirResolved.ok) {
+        app.close();
+        process.stderr.write(formatError(projectDirResolved.error) + "\n");
+        process.exitCode = exitCode(projectDirResolved.error);
+        return;
+      }
+      const projectDir = projectDirResolved.value;
       try {
         if (app.ordinalMigrationService === undefined) {
           process.stderr.write("Internal error: OrdinalMigrationService not wired on App\n");

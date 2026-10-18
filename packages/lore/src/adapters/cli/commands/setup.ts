@@ -141,6 +141,7 @@ import { fileURLToPath } from "node:url";
 import { defineCommand } from "citty";
 import { seedAcCiteModeAudited } from "./baseline-adopt.js";
 import { parseDocument } from "yaml";
+import { resolveTrackedWriteRoot } from "../working-tree-root.js";
 import { err, loadConfigFromString, ok, resolveMemoryFileBudgets } from "@lore/core";
 import type { AdoptionMode, FsWritePort, LoreError, MemoryFileBudgets, Result } from "@lore/core";
 import { buildRefreshFragmentDeps, makeRealContextFsPort, toContextLayer } from "./context.js";
@@ -784,7 +785,9 @@ function classifyProjectSettingsEntries(repoDir: string, inv: Invocation): Resul
  * project check cache, exits 0 in sync / 3 otherwise (4 on an unreadable ledger or settings file).
  */
 async function runProjectCheck(opts: { json: boolean; assetsRoot: string; inv: Invocation }): Promise<void> {
-  const repoDir = opts.inv.cwd;
+  const repoDirResolved = resolveTrackedWriteRoot(opts.inv.cwd, opts.inv.cwd);
+  if (!repoDirResolved.ok) return failWith(repoDirResolved.error);
+  const repoDir = repoDirResolved.value;
   const ledger = await checkProjectLedger(
     {
       fs: makeRealProjectFs(),
@@ -820,7 +823,9 @@ async function runProjectScaffold(opts: {
   claudeDir: string;
   inv: Invocation;
 }): Promise<void> {
-  const repoDir = opts.inv.cwd;
+  const repoDirResolved = resolveTrackedWriteRoot(opts.inv.cwd, opts.inv.cwd);
+  if (!repoDirResolved.ok) return failWith(repoDirResolved.error);
+  const repoDir = repoDirResolved.value;
 
   const proceed = await confirmOrReport({
     yes: opts.yes,
@@ -898,7 +903,9 @@ async function runProjectScaffold(opts: {
  * targets). Thin pipe over `flows/setup-project-uninstall.ts::uninstallProject`.
  */
 async function runProjectUninstall(opts: { json: boolean; yes: boolean; inv: Invocation }): Promise<void> {
-  const repoDir = opts.inv.cwd;
+  const repoDirResolved = resolveTrackedWriteRoot(opts.inv.cwd, opts.inv.cwd);
+  if (!repoDirResolved.ok) return failWith(repoDirResolved.error);
+  const repoDir = repoDirResolved.value;
 
   const proceed = await confirmOrReport({
     yes: opts.yes,
