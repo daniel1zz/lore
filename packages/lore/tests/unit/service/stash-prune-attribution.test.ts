@@ -6,7 +6,6 @@
  * branch main (no run) used to be reported "live"; control: a stash made during a still-live run in the checkout
  * that has main checked out stays live.
  *
- * @spec_ref AC-AU-4
  */
 import { describe, expect, it } from "vitest";
 import { ok } from "@lore/core";
