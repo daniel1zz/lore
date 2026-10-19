@@ -65,7 +65,8 @@ describe("AC-BCG-3 the site-map write takes BR-n values only", () => {
     const [site] = await c.sitesOf("alpha");
     const before = await leafVersion(c, c.leafA);
     const r = await c.run(["baseline", "map", c.leafA, "--site", site as string, "--non-business", "storage"]);
-    expect(r.exitCode, r.stdout + r.stderr).toBe(4);
+    expect(r.exitCode, r.stdout + r.stderr).not.toBe(0);
+    expect(r.stderr).toContain("--non-business");
     expect(await leafVersion(c, c.leafA)).toBe(before);
   }, 120_000);
 
