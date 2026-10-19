@@ -94,6 +94,16 @@ function ClaimBadge({ claim, claimTtlMinutes }: ClaimBadgeProps): React.ReactEle
 }
 
 /**
+ * The row's status badge. The task's own status comes first: an archived task is "done"
+ * (the server's `ready` is false for it, which says nothing about being blocked); only a
+ * non-archived task is "ready" or "blocked", from `ready`.
+ */
+function readyBadgeLabel(record: ReadyRecord): "done" | "ready" | "blocked" {
+  if (record.task.status === "archived") return "done";
+  return record.ready ? "ready" : "blocked";
+}
+
+/**
  * @example
  * <ReadyTaskList records={records} claimTtlMinutes={120} />
  */
@@ -108,7 +118,9 @@ export function ReadyTaskList({ records, claimTtlMinutes, onTaskClick }: ReadyTa
 
   return (
     <div className="space-y-2" aria-label="Ready tasks">
-      {records.map((record) => (
+      {records.map((record) => {
+        const badge = readyBadgeLabel(record);
+        return (
         <div
           key={record.task.id}
           role="button"
@@ -121,8 +133,8 @@ export function ReadyTaskList({ records, claimTtlMinutes, onTaskClick }: ReadyTa
         >
           <div className="flex items-center gap-1.5 flex-wrap">
             <span className="text-sm font-medium truncate">{record.task.title}</span>
-            <Badge variant={record.ready ? "secondary" : "outline"} className="text-xs">
-              {record.ready ? "ready" : "blocked"}
+            <Badge variant={badge === "blocked" ? "outline" : "secondary"} className="text-xs">
+              {badge}
             </Badge>
             <ClaimBadge claim={record.claim} claimTtlMinutes={claimTtlMinutes} />
             <span className="text-xs text-muted-foreground ml-auto shrink-0">
@@ -135,7 +147,8 @@ export function ReadyTaskList({ records, claimTtlMinutes, onTaskClick }: ReadyTa
             </p>
           )}
         </div>
-      ))}
+        );
+      })}
     </div>
   );
 }

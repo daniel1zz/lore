@@ -84,7 +84,7 @@ function PlanReadinessSummary({ planId, project }: PlanReadinessSummaryProps): R
 export function ActivePlansPanel({ project = null, onNavigate }: ActivePlansPanelProps): React.ReactElement {
   const { data, isLoading, error } = useQuery({
     queryKey: queryKeys.scope(project, ["home", "active-plans"]),
-    queryFn: () => apiList(project, { type: "plan", status: "active" }),
+    queryFn: () => apiList(project, { type: "plan", active: true }),
   });
 
   const plans = data?.docs.slice(0, ACTIVE_PLANS_LIMIT) ?? [];

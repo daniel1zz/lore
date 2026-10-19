@@ -811,6 +811,23 @@ export function deriveSessions(
 }
 
 /**
+ * The ONE definition of an "active plan": a plan whose status is neither `archived` nor
+ * `deprecated` (so draft, in-review and approved plans are all active).
+ *
+ * Bootstrap's `active_plans` loop and the HTTP list filter `GET /api/docs?type=plan&active=true`
+ * both call this, so the two surfaces cannot disagree. Pure and browser-safe (no Node import).
+ *
+ * @param plan - Anything carrying the plan's `status` (a `DocRecord` or `DocSummary`).
+ * @returns true when the plan is still in play.
+ * @example
+ * isActivePlan({ status: "approved" }); // => true
+ * isActivePlan({ status: "archived" }); // => false
+ */
+export function isActivePlan(plan: { readonly status: DocRecord["status"] }): boolean {
+  return plan.status !== "archived" && plan.status !== "deprecated";
+}
+
+/**
  * Max `updated_at` across a plan doc and its child tasks (SPEC-069 §Design
  * Decisions D6) — the last corpus write anywhere in the plan's subtree. Pure,
  * total: no IO, no wall-clock reads, no store lookups — `plan.updated_at` and
