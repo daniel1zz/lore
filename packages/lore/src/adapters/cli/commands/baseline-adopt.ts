@@ -16,7 +16,7 @@
  *     disarmed -> exit 2.
  *   - A call that changes nothing AND repeats the last adopted state writes no row and prints `no change` (exit 0).
  *     A call whose result equals a hand-edited current state (not yet attested) writes the row only.
- *   - The config is written first, the row second; a failed row append is reported loudly and leaves the config
+ *   - Authority is decided first (a foreign refusal leaves the config untouched); then the config is written and the row second; a failed row append is reported loudly and leaves the config
  *     changed but unaudited, which `lore status` then (truthfully) reports as `unaudited`.
  *
  * Side-effect class: IO (config file write, one audit append).
@@ -30,7 +30,7 @@ import type { CiteGateMode, Invocation, LoreError, Result } from "@lore/core";
 import { invocationOf } from "../command-invocation.js";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatError, formatErrorFor, resolveActor } from "../utils.js";
-import { resolveTrackedWriteRoot } from "../working-tree-root.js";
+import { resolveTrackedWriteRoot, resolveWorkingTreeRoot } from "../working-tree-root.js";
 import { resolveDoc } from "../../../service/resolve.js";
 import { bareDocWriter, type DocWritePort } from "../../../service/corpus-service.js";
 import { SQLiteStore } from "../../../store/sqlite-store.js";
@@ -54,6 +54,7 @@ export async function appendAdoptAuditRow(
   actor: string,
   old: AcCiteStored,
   next: AcCiteStored,
+  foreignIntent = false,
 ): Promise<Result<void, LoreError>> {
   // reason: AC-DCL-5 — the row goes through the ONE write route (foreign-corpus refusal, caller actor), never a bare store append.
   const appended = await writer.appendAudit({
@@ -61,8 +62,51 @@ export async function appendAdoptAuditRow(
     sessionId: ADOPT_AUDIT_SESSION_ID,
     action: BASELINE_ADOPT_AUDIT_ACTION,
     details: { old, new: next },
+    foreignIntent,
   });
   return appended.ok ? ok(undefined) : err(appended.error);
+}
+
+/** What {@link applyAuditedAdoption} needs: the write route, the tree the config lives in, and the settings change. */
+export interface AuditedAdoptionRequest {
+  readonly writer: DocWritePort;
+  readonly actor: string;
+  /** Toplevel of the tree whose `.lore/config.yaml` is rewritten. */
+  readonly repoDir: string;
+  /** `true` when `repoDir` is the invoking working tree itself (the adopt declares intent on its own config). */
+  readonly ownTree: boolean;
+  readonly old: AcCiteStored;
+  readonly next: AcCiteStored;
+  /** `false` = the stored settings already equal `next` (hand-edited state): only the audit row is written. */
+  readonly writeConfig: boolean;
+}
+
+/** Where {@link applyAuditedAdoption} stopped: `unwritten` = nothing changed; `config-unaudited` = config changed, row missing. */
+export interface AuditedAdoptionFailure {
+  readonly stage: "unwritten" | "config-unaudited";
+  readonly error: LoreError;
+}
+
+/**
+ * Authority first, then config, then audit: the config write and its audit row are ONE unit. The foreign-corpus
+ * decision is taken BEFORE the config is touched, so a refused adopt leaves `.lore/config.yaml` byte-identical
+ * and writes no row; an adopt that targets the invoking tree's own config declares that intent for the row.
+ *
+ * @returns `ok` when everything requested landed; otherwise the failing stage and error.
+ */
+export async function applyAuditedAdoption(request: AuditedAdoptionRequest): Promise<Result<void, AuditedAdoptionFailure>> {
+  const authority = await request.writer.assertWritable(request.ownTree);
+  if (!authority.ok) return { ok: false, error: { stage: "unwritten", error: authority.error } };
+  if (request.writeConfig) {
+    const written = writeAcCiteStored(request.repoDir, {
+      ...(request.next.mode !== null ? { mode: request.next.mode } : {}),
+      armed_branches: request.next.armed_branches,
+    });
+    if (!written.ok) return { ok: false, error: { stage: "unwritten", error: written.error } };
+  }
+  const audited = await appendAdoptAuditRow(request.writer, request.actor, request.old, request.next, request.ownTree);
+  if (audited.ok) return ok(undefined);
+  return { ok: false, error: { stage: request.writeConfig ? "config-unaudited" : "unwritten", error: audited.error } };
 }
 
 /**
@@ -192,23 +236,30 @@ async function runAdopt(args: Record<string, unknown>, inv: Invocation): Promise
       }
     }
 
-    if (!unchanged) {
-      const written = writeAcCiteStored(repoDir, {
-        ...(next.mode !== null ? { mode: next.mode } : {}),
-        armed_branches: next.armed_branches,
-      });
-      if (!written.ok) return fail(inv, written.error, json, exitCode(written.error));
-    }
-
-    const audited = await appendAdoptAuditRow(app.corpusService, resolveActor(inv.io, undefined, inv.env, inv.cwd, inv.user), old, next);
-    if (!audited.ok) {
-      return fail(inv, 
+    // reason: the target is the invoking working tree's own config (resolveTrackedWriteRoot) unless cwd is outside
+    // any git tree, where the root falls back to the corpus root and no own-tree intent exists.
+    const invokingTree = resolveWorkingTreeRoot(inv.cwd);
+    if (!invokingTree.ok) return fail(inv, invokingTree.error, json, exitCode(invokingTree.error));
+    const applied = await applyAuditedAdoption({
+      writer: app.corpusService,
+      actor: resolveActor(inv.io, undefined, inv.env, inv.cwd, inv.user),
+      repoDir,
+      ownTree: invokingTree.value === repoDir,
+      old,
+      next,
+      writeConfig: !unchanged,
+    });
+    if (!applied.ok) {
+      const { stage, error } = applied.error;
+      if (stage === "unwritten") return fail(inv, error, json, exitCode(error));
+      return fail(
+        inv,
         {
           code: "STORE_ERROR",
-          message: `config was changed but the audit row was NOT written (status will report the mode as unaudited): ${formatErrorFor(inv, audited.error).trim()}`,
+          message: `config was changed but the audit row was NOT written (status will report the mode as unaudited): ${formatErrorFor(inv, error).trim()}`,
         },
         json,
-        exitCode(audited.error),
+        exitCode(error),
       );
     }
 
