@@ -2,7 +2,7 @@
  * Navigation roots — the ONE place that decides which document is "the strategy document"
  * (the first PRD) and which is "the baseline root" (the `node: "root"` baseline doc).
  *
- * Public surface: {@link pickStrategyDocument}, {@link pickBaselineRoot}.
+ * Public surface: {@link pickStrategyDocument}, {@link pickBaselineRoot}, {@link pickArchitectureRoot}.
  * Invariants:
  *   - Pure over a caller-supplied `DocRecord[]`; soft-deleted docs are never picked.
  *   - ONE ordering for "first": `created_at` ASC (oldest first), ties keep input order. Every
@@ -42,6 +42,17 @@ function oldestLive(docs: readonly DocRecord[], matches: (doc: DocRecord) => boo
  */
 export function pickStrategyDocument(docs: readonly DocRecord[]): DocRecord | undefined {
   return oldestLive(docs, (d) => d.type === "prd");
+}
+
+/**
+ * The architecture root: the oldest live baseline doc with `extra.tree === "architecture"` and `extra.node === "root"`,
+ * or `undefined` (bootstrap reports that as an explicit `architecture: null`).
+ *
+ * @param docs - Any superset of the corpus' docs.
+ * @returns the architecture root (oldest created when, abnormally, several exist).
+ */
+export function pickArchitectureRoot(docs: readonly DocRecord[]): DocRecord | undefined {
+  return oldestLive(docs, (d) => d.type === "baseline" && d.extra["node"] === "root" && d.extra["tree"] === "architecture");
 }
 
 /**
