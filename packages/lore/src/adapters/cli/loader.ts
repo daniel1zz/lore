@@ -55,7 +55,7 @@
 
 import { dirname } from "path";
 import { exitCli } from "./cli-exit.js";
-import { mergeDefaults, isAiConfigValidationError, isPrdSyncRenameError, readClaimRecord, resolveClaimTtlMinutes, resolveForeignCorpusWriteGateEnabled } from "@lore/core";
+import { mergeDefaults, isAiConfigValidationError, isPrdSyncRenameError, isRetiredAdoptionError, readClaimRecord, resolveClaimTtlMinutes, resolveForeignCorpusWriteGateEnabled } from "@lore/core";
 import type {
   Invocation,
   LoreConfig,
@@ -335,7 +335,7 @@ export function loadProjectConfig(io: CliIo, locator: CorpusLocator): LoreConfig
   const configResult = resolveProjectConfigResult(dbPath, io);
   if (!configResult.ok) {
     // reason: the retired-name refusal must not read as "no config" in silence (every gate would run unconfigured).
-    if (isPrdSyncRenameError(configResult.error)) printLine(io.stderr, formatError(configResult.error)); // CLI surface
+    if (isPrdSyncRenameError(configResult.error) || isRetiredAdoptionError(configResult.error)) printLine(io.stderr, formatError(configResult.error)); // CLI surface
     return undefined;
   }
   const { sync: _sync, ...configWithoutSync } = configResult.value;
@@ -420,7 +420,11 @@ export function loadLoreApp(opts: LoadLoreAppOptions): {
   let rawConfig: LoreConfig | undefined;
   if (configResult.ok) {
     rawConfig = configResult.value;
-  } else if (isAiConfigValidationError(configResult.error) || isPrdSyncRenameError(configResult.error)) {
+  } else if (
+    isAiConfigValidationError(configResult.error) ||
+    isPrdSyncRenameError(configResult.error) ||
+    isRetiredAdoptionError(configResult.error)
+  ) {
     // BL-D3: a config still naming `prd_sync` that this checkout may not rewrite (or that carries both names) fails
     // loud here for the same reason an invalid `ai` block does — the fallback below would run every gate unconfigured.
     // SPEC-030 AC-HJ-3: an invalid `ai` block MUST fail loud — silently falling back to

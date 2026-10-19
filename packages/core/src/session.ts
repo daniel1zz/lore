@@ -875,22 +875,18 @@ export function deriveLastActivityAt(plan: DocRecord, tasks: DocRecord[]): strin
  * @invariant Declared on the SCHEMA, not only the TS literal: a plain `z.object`
  *   silently STRIPS unrecognised keys on `.parse()`, so omitting it here would make
  *   the field vanish at any downstream `bootstrapReportSchema.parse`.
- * @invariant Present iff adoption mode is `warn` OR the root file has >= 1 would-be
- *   deterministic finding of any kind; ABSENT (never `null`) otherwise — an absent
- *   field means "enforce and clean", so it must never be emitted as a placeholder.
+ * @invariant Present iff the root file has >= 1 deterministic finding of any kind (limits are always
+ *   enforced: there is no adoption mode); ABSENT (never `null`) otherwise — an absent field means
+ *   "clean", so it must never be emitted as a placeholder.
  */
 export const memoryFileHealthSchema = z.object({
-  mode: z.enum(["enforce", "warn"]),
-  mode_source: z.enum(["config", "default"]),
   /** Missing required root H2 names, in contract order. */
   missing: z.array(z.string()),
   /** True iff a `section_order` finding exists for the root file. */
   out_of_order: z.boolean(),
-  /** Distinct would-be deterministic kinds moved to advisory by `warn` (empty in `enforce`). */
-  downgraded_kinds: z.array(z.string()),
-  downgraded_count: z.number().int().min(0),
-  /** `warn` AND `downgraded_count === 0`. */
-  promotable: z.boolean(),
+  /** Distinct kinds of the root file's deterministic findings. */
+  finding_kinds: z.array(z.string()),
+  finding_count: z.number().int().min(1),
 });
 
 /** Derived TypeScript type for {@link memoryFileHealthSchema}. */

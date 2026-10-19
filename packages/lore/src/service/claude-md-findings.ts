@@ -49,10 +49,9 @@
  *     bytes), and `target_distance` (line count minus
  *     `claude-md-admission.ts`'s `OFFICIAL_LINE_TARGET`, negative/zero/
  *     positive).
- *   - Adoption (spec-claude-md-root-section-structure-check-and-adoption-mode):
- *     the three `section_*` deterministic kinds come from
- *     `claude-md-structure.ts`; in `warn` mode EVERY deterministic kind is
- *     re-emitted as an advisory `downgraded` finding carrying `downgraded_kind`.
+ *   - The three `section_*` deterministic kinds come from `claude-md-structure.ts`. Every
+ *     deterministic kind is always exit-relevant: the adoption mode that once moved them to an
+ *     advisory `downgraded` kind was retired (task-memory-file-limits-are-always-enforced-the-warn-adoption).
  *
  * Side-effect class: pure (types only — zero imports, zero logic)
  *
@@ -199,8 +198,7 @@ export type AdvisoryFindingKind =
   | "target_distance"
   | "section_extra"
   | "section_empty"
-  | "module_section_missing"
-  | "downgraded";
+  | "module_section_missing";
 
 /**
  * One advisory observation — structurally SEPARATE from
@@ -227,13 +225,6 @@ export interface AdvisoryFinding {
    * (the H2 section name).
    */
   reference?: string;
-  /**
-   * Present ONLY on `kind: "downgraded"` — the deterministic kind that
-   * `runMemoryFileChecks` moved here because adoption mode is `warn`. Keeps
-   * rendering injective: a downgraded `max_lines` never prints as a plain one
-   * (spec-claude-md-root-section-structure-check-and-adoption-mode).
-   */
-  downgraded_kind?: MemoryFileFindingKind;
   /** Human-readable summary. */
   message: string;
 }
