@@ -1,4 +1,5 @@
 // @spawns packages/lore/src/index.ts
+// @reads assets/project/reference-transaction
 /**
  * @spec_ref spec-a-task-is-archived-only-on-a-landing-lore-recorded-one  AC-LRD-1;
  *   business rules BR-1291 (archival needs a recorded landing), BR-209 (the `not-landed` requirement's place in the order).
@@ -18,6 +19,7 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { FIXTURE_HOME_OUTSIDE_REPO, makeCleanTreeRepo } from "../helpers/clean-tree-repo.js";
+import { installShippedGuard } from "./support/main-guard-repo.js";
 
 interface RunResult {
   readonly stdout: string;
@@ -48,8 +50,8 @@ function mustRun(args: string[]): string {
   return result.stdout;
 }
 
-function git(args: string[]): string {
-  return execFileSync("git", args, { cwd: dir, stdio: ["ignore", "pipe", "pipe"] }).toString();
+function git(args: string[], extraEnv: NodeJS.ProcessEnv = {}): string {
+  return execFileSync("git", args, { cwd: dir, stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, ...extraEnv } }).toString();
 }
 
 function parseSlug(stdout: string): string {
@@ -74,8 +76,10 @@ function makeBranch(name: string): void {
 
 /** The branch's content reaches main WITHOUT `lore integrate` (a hand cherry-pick): no landing is recorded anywhere. */
 function cherryPickOntoMain(branch: string): void {
-  git(["checkout", "-q", "main"]);
-  git(["cherry-pick", branch]);
+  // the guard refuses a hand checkout of main and a hand commit on it; this test takes the marker bypass on purpose
+  const marked = { LORE_INTEGRATE: "1" };
+  git(["checkout", "-q", "main"], marked);
+  git(["cherry-pick", branch], marked);
   git(["checkout", "-q", "--detach", "main"]);
 }
 
@@ -117,6 +121,7 @@ beforeEach(() => {
   planSlug = parseSlug(mustRun(["create", "plan", "--title", "Landing Plan", "--parent", prd, "--content", "x", "--no-ai"]));
   mustRun(["set", planSlug, "--status", "approved"]);
   git(["checkout", "-q", "--detach", "main"]);
+  installShippedGuard(dir, join(dir, ".git", "guard-hooks")); // integrate refuses to run without the guard (BR-1273)
 });
 
 afterEach(() => {

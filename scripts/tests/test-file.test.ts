@@ -4,8 +4,9 @@
  * silently passes) when a path collected nothing. Pure routing + exit-code cases with an injected
  * runner, plus one real spawn proving a path that matches nothing exits non-zero.
  */
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { spawnSync } from "node:child_process";
+import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -73,6 +74,28 @@ describe("test:file routing (TG-41)", () => {
     expect(judgeCollected([BUN_FILE], skipped, ROOT)).toEqual([BUN_FILE]);
     expect(judgeCollected([BUN_FILE], null, ROOT)).toEqual([BUN_FILE]);
     expect(judgeCollected([BUN_FILE], "not json", ROOT)).toEqual([BUN_FILE]);
+  });
+
+  it("REGRESSION: two concurrent main() runs each judge only their own report", () => {
+    // Run B executes entirely inside run A's runner, i.e. between A writing its report and A reading it back.
+    const logs: string[] = [];
+    const spy = vi.spyOn(console, "log").mockImplementation((m: unknown) => void logs.push(String(m)));
+    try {
+      const runnerFor = (file: string, inner?: () => number) =>
+        (_g: Group, reportFile: string): { exit: number; report: string | null } => {
+          writeFileSync(reportFile, report(file));
+          const innerCode = inner?.();
+          if (innerCode !== undefined) expect(innerCode).toBe(0);
+          return { exit: 0, report: readFileSync(reportFile, "utf8") };
+        };
+      const fileA = "scripts/tests/a-concurrent.test.ts";
+      const fileB = "scripts/tests/b-concurrent.test.ts";
+      const codeA = main([fileA], runnerFor(fileA, () => main([fileB], runnerFor(fileB), NODE_SET, ROOT)), NODE_SET, ROOT);
+      expect(codeA).toBe(0);
+    } finally {
+      spy.mockRestore();
+    }
+    expect(logs.filter((l) => l.includes("collected no tests"))).toEqual([]);
   });
 
   it("ERROR (real spawn): a path that matches nothing exits non-zero", () => {

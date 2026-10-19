@@ -144,7 +144,7 @@ function withInjectedWriteFailure(base: InMemoryProjectFs, failOnPath: string): 
 function makeExec(): ExecPort {
   return {
     async run(argv: string[]) {
-      if (argv[1] === "--version") return { code: 0, stdout: "git version 2.45.0\n", stderr: "" };
+      if (argv[1] === "--version") return { code: 0, stdout: "git version 2.46.0\n", stderr: "" };
       return { code: 0, stdout: "", stderr: "" };
     },
   };

@@ -25,6 +25,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parse } from "yaml";
+import { initRepoWithMainCommit } from "./support/main-guard-repo.js";
 
 // ─── Harness ────────────────────────────────────────────────────────────────
 
@@ -68,8 +69,7 @@ const scratch: string[] = [];
 function makeRepo(claudeMd?: string): string {
   const dir = mkdtempSync(join(tmpdir(), "lore-setup-adoption-"));
   scratch.push(dir);
-  const init = Bun.spawnSync(["git", "init", "-q", dir]);
-  if (init.exitCode !== 0) throw new Error(`fixture: git init failed: ${init.stderr.toString()}`);
+  initRepoWithMainCommit(dir); // setup refuses a main with no commit (BR-1343)
   if (claudeMd !== undefined) writeFileSync(join(dir, "CLAUDE.md"), claudeMd);
   return dir;
 }

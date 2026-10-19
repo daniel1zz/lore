@@ -1,4 +1,5 @@
 // @spawns packages/lore/src/index.ts
+// @reads assets/project/reference-transaction
 /**
  * AC-GV-6 (spec-governance-visibility-an-armed-gate-that-vacuously-passes §B1.1,
  * task-assert-the-plan-close-vacuity-discriminator-on-the-render) — the plan-close
@@ -65,6 +66,7 @@ import { appendFileSync, mkdtempSync, rmSync, existsSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import { FIXTURE_HOME_OUTSIDE_REPO, makeCleanTreeRepo } from "../../helpers/clean-tree-repo.js";
+import { installShippedGuard } from "../../integration/support/main-guard-repo.js";
 
 // tests/unit/adapters/ → tests/unit/ → tests/ → packages/lore/
 const PACKAGE_ROOT = new URL("../../../", import.meta.url).pathname.replace(/\/$/, "");
@@ -144,6 +146,7 @@ function claimTask(dir: string, taskSlug: string): void {
   if (made.status !== 0) throw new Error(`git branch ${branch} failed: ${made.stderr}`);
   const r = runLore(["claim", taskSlug, "--worktree", branch], dir);
   if (r.exitCode !== 0) throw new Error(`claim ${taskSlug} failed: ${r.stderr}`);
+  installShippedGuard(dir, join(dir, ".git", "guard-hooks")); // integrate refuses to run without the guard (BR-1273)
   const landed = runLore(["integrate", branch, "--session", "gv6-integrate"], dir);
   if (landed.exitCode !== 0) throw new Error(`integrate ${branch} failed: ${landed.stderr}${landed.stdout}`);
 }

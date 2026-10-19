@@ -1,4 +1,5 @@
 // @spawns packages/lore/src/index.ts
+// @reads assets/project/reference-transaction
 /**
  * @spec_ref spec-a-task-is-archived-only-on-a-landing-lore-recorded-one  AC-LRD-2;
  *   business rule BR-1336 (integration records a landing on every claimant, also when the branch is already integrated).
@@ -18,6 +19,7 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { FIXTURE_HOME_OUTSIDE_REPO, makeCleanTreeRepo } from "../helpers/clean-tree-repo.js";
+import { installShippedGuard } from "./support/main-guard-repo.js";
 
 interface RunResult {
   readonly stdout: string;
@@ -103,6 +105,7 @@ beforeEach(() => {
   const prd = parseSlug(mustRun(["create", "prd", "--title", "Claimants PRD", "--content", "root", "--no-ai"]));
   planSlug = parseSlug(mustRun(["create", "plan", "--title", "Claimants Plan", "--parent", prd, "--content", "x", "--no-ai"]));
   git(["checkout", "-q", "--detach", "main"]);
+  installShippedGuard(dir, join(dir, ".git", "guard-hooks")); // integrate refuses to run without the guard (BR-1273)
 });
 
 afterEach(() => {
