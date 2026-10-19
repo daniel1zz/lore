@@ -8,7 +8,7 @@
  *   BOUNDARY:   a (leaf, site) pair is per leaf: the same site under another leaf is NOT exempt
  *   REGRESSION: the committed ledger is well-formed and sorted-unique
  */
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { type CoverageData, type DebtLedger, judgeAgainstLedger } from "../check-baseline-coverage";
@@ -81,7 +81,11 @@ describe("judgeAgainstLedger", () => {
 
 describe("the committed ledger", () => {
   it("REGRESSION: rows are unique, well-formed and never name the new refusal of baseline sites", () => {
-    const file = JSON.parse(readFileSync(join(import.meta.dirname, "..", "baseline-coverage-debt.json"), "utf8")) as DebtLedger;
+    const path = join(import.meta.dirname, "..", "baseline-coverage-debt.json");
+    // The ledger was burned to zero and deleted (task-skill-fix-burn-the-baseline-coverage-debt-ledger-to-zero); the mechanism stays
+    // for the next newly-armed oracle (ADR), so an absent file is the retired state and a present one must still be well-formed.
+    if (!existsSync(path)) return;
+    const file = JSON.parse(readFileSync(path, "utf8")) as DebtLedger;
     expect(file.adr).toBe("adr-a-newly-armed-structural-oracle-enforces-from-a-baseline");
     const keys = file.rows.map((r) => `${r.kind}\t${r.leaf}\t${r.site}`);
     expect(new Set(keys).size).toBe(keys.length);
