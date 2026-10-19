@@ -125,8 +125,14 @@ export interface ContextFacts {
   modulesWithoutMemoryFile: number;
   /** `true` iff the walk hit {@link MAX_MODULE_INDEX_ENTRIES} and stopped; rendered as a notice so nothing is dropped silently. */
   walkTruncated: boolean;
-  /** The scripts `root`'s `package.json` marks via `lore.documentedScripts` (name -> body), or `{}` when none/absent/unreadable/schema-invalid. */
-  commands: Record<string, string>;
+  /** The scripts `root`'s `package.json` marks via `lore.documentedScripts` (name -> body plus the one-line description the project wrote), or `{}` when none/absent/unreadable. */
+  commands: Record<string, DocumentedCommand>;
+}
+
+/** One documented script: its actual `package.json` command and the project's own one-line description of it. */
+export interface DocumentedCommand {
+  command: string;
+  description: string;
 }
 
 // ─── Constants ───────────────────────────────────────────────────────────────
@@ -164,9 +170,20 @@ const MAX_PURPOSE_CHARS = 160;
 const rootPackageJsonSchema = z
   .object({
     scripts: z.record(z.string()).optional(),
-    lore: z.object({ documentedScripts: z.array(z.string()).optional() }).passthrough().optional(),
+    // reason: `documentedScripts` is validated on its own in `readCommands` so a wrong shape fails loud
+    // instead of the whole package.json degrading to "nothing documented".
+    lore: z.object({ documentedScripts: z.unknown().optional() }).passthrough().optional(),
   })
   .passthrough();
+
+/** `lore.documentedScripts`: script name -> non-empty one-line description (D4 of spec-prose-about-code-is-bound-to-what-it-describes-one). */
+const documentedScriptsSchema = z.record(
+  z
+    .string()
+    .trim()
+    .min(1)
+    .refine((text) => !text.includes("\n"), "must be one line"),
+);
 
 // ─── Path helpers ────────────────────────────────────────────────────────────
 
@@ -216,7 +233,7 @@ function validateRoot(root: string): Result<void, LoreError> {
  * renders a pointer. A marker naming a script that does not exist fails loud (stale marker), never silently dropped.
  * Absence/parse/schema failure still degrades to `{}` (see module header).
  */
-async function readCommands(fs: FsReadPort, root: string): Promise<Result<Record<string, string>, LoreError>> {
+async function readCommands(fs: FsReadPort, root: string): Promise<Result<Record<string, DocumentedCommand>, LoreError>> {
   const raw = await fs.readFile(joinRepoPath(root, "package.json"));
   if (raw === null) return ok({});
 
@@ -230,8 +247,21 @@ async function readCommands(fs: FsReadPort, root: string): Promise<Result<Record
   const validated = rootPackageJsonSchema.safeParse(parsed);
   if (!validated.success) return ok({});
   const scripts = validated.data.scripts ?? {};
-  const documented: Record<string, string> = {};
-  for (const name of validated.data.lore?.documentedScripts ?? []) {
+  const marker = validated.data.lore?.documentedScripts;
+  if (marker === undefined) return ok({});
+  const descriptions = documentedScriptsSchema.safeParse(marker);
+  if (!descriptions.success) {
+    return err({
+      code: "VALIDATION_ERROR",
+      field: "package.json lore.documentedScripts",
+      message: `lore.documentedScripts must map each script name to a non-empty one-line description: ${descriptions.error.issues
+        .map((issue) => `${issue.path.join(".") || "(root)"}: ${issue.message}`)
+        .join("; ")}`,
+      value: marker,
+    });
+  }
+  const documented: Record<string, DocumentedCommand> = {};
+  for (const [name, description] of Object.entries(descriptions.data)) {
     const body = scripts[name];
     if (body === undefined) {
       return err({
@@ -241,7 +271,7 @@ async function readCommands(fs: FsReadPort, root: string): Promise<Result<Record
         value: name,
       });
     }
-    documented[name] = body;
+    documented[name] = { command: body, description };
   }
   return ok(documented);
 }
