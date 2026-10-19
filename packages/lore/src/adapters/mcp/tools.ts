@@ -225,13 +225,6 @@ import {
 import { KNOWLEDGE_SUB_TYPES } from "@lore/core";
 import { buildUnconfiguredUpstreamRemedy, ISSUE_CATEGORY_MAX_LENGTH, ISSUE_SEVERITIES } from "@lore/core";
 import { resolveSubTypeFilter } from "../../service/corpus-service.js";
-// spec-a-github-filed-defect-must-be-claimable-one-ingest-seam AC-GR-11 —
-// `readGithubIssueRef` is pure/store-free (no `gh`/`bun:sqlite` deps, see
-// its own module header), so — unlike `report-issue-wiring.js` below —
-// this import stays static: it locates the task `fileGithubIssue` just
-// minted by its stored GitHub pointer, never by recomputing a slug this
-// handler has no `repo_id` to recompute it from.
-import { readGithubIssueRef } from "../../service/resolution-projector.js";
 import type { HandoffExtra } from "@lore/core";
 import { isAssessAiBraked } from "../../ai/resolve-ai.js";
 import { REVIEW_PROMPT_VERSION } from "../../ai/review-template.js";
@@ -3380,7 +3373,7 @@ export function registerTools(
   registerToolWithArgs(
     server,
     "lore_report_issue",
-    "File a structured lore-defect report into this corpus's configured upstream (feedback.upstream in .lore/config.yaml) — lands as a draft ad-hoc task in the upstream pending-review queue",
+    "File a structured lore-defect report as a GitHub issue in the repository set in the feedback section of .lore/config.yaml. Returns the issue {number, url}; GitHub owns the report, so nothing is created in the corpus.",
     LoreReportIssueSchema,
     async (args) => {
       // ⛔ RETIRED (P4, spec-the-defect-channel-reaches-no-machine-but-its-own-
@@ -3484,36 +3477,10 @@ export function registerTools(
         );
         if (!fileResult.ok) return errorContent(fileResult.error);
 
-        // D8/AC-GR-9's mint already landed inside `fileGithubIssue` — this
-        // read locates the SAME task by its stored GitHub pointer
-        // (`readGithubIssueRef`, pure/store-free) rather than recomputing
-        // `githubIssueTaskSlug` from a `repo_id` this handler was never
-        // given: `fileGithubIssue`'s return shape (`GithubReportResult`)
-        // carries `number`/`url`, never `repo_id`. AC-GR-11 requires the
-        // success payload to NAME the created task's slug.
-        const taskLookup = await app.corpusService.listFull({ type: "task" });
-        if (!taskLookup.ok) {
-          return errorContent({
-            code: "STORE_ERROR",
-            message:
-              `issue filed upstream as #${fileResult.value.number} (${fileResult.value.url}) but locating the ` +
-              `created corpus task failed (${taskLookup.error.code}) — the upstream issue itself was NOT lost.`,
-          });
-        }
-        const createdTask = taskLookup.value.docs.find((doc) => {
-          const ref = readGithubIssueRef(doc.extra);
-          return ref !== undefined && ref.repo === cfg.repo && ref.issueNumber === fileResult.value.number;
-        });
-        if (createdTask === undefined) {
-          return errorContent({
-            code: "STORE_ERROR",
-            message:
-              `issue filed upstream as #${fileResult.value.number} (${fileResult.value.url}) but no corpus task ` +
-              `carrying that GitHub reference could be found — the upstream issue itself was NOT lost.`,
-          });
-        }
-
-        return textContent({ ...fileResult.value, task_slug: createdTask.slug });
+        // GitHub owns the report (AC-GS-10/15): filing creates no corpus
+        // document, so the payload is the GitHub issue's {number, url} (plus
+        // the advisory dedup fields) and names no task slug.
+        return textContent(fileResult.value);
       }
 
       // legacy-shaped `feedback.upstream` — retired (P4): `IssueReportService`

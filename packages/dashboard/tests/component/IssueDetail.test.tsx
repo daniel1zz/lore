@@ -1,105 +1,47 @@
 // @vitest-environment jsdom
 /**
- * @layer dashboard-component AC-ICL-9 (IssueDetail; the AC's oracle is the Playwright issues-resolution spec)
- * @spec_ref SPEC-078 T13 dispatch deliverable, AC-078-7/AC-078-8
+ * @layer dashboard-component AC-GS-14 (IssueDetail on the live join)
+ * @spec_ref spec-github-owns-issue-report-state-no-mirror-task-work-carries T9
  *
- * Tests for `IssueDetail` (`components/IssueDetail.tsx`) — the SPEC-074
- * issue-report detail + adjudication body, project-scoped since SPEC-078 T13
- * threads its explicit `project` prop into `apiGetDoc`/the query cache key.
- * (No prior test file existed for this component before this task.)
+ * Tests for `IssueDetail` (`components/IssueDetail.tsx`): one listed GitHub issue, its derived status and
+ * the carriers that name it, read from the shared `GET /api/issue-reports` live join.
  *
- * Test plan (six-dimension coverage, scoped to project threading — the
- * approve/reject adjudication flow itself is SPEC-074's own concern and
- * reuses `TriageQueue`'s already-tested write path verbatim):
- *   HAPPY — registry-less mode (`project` omitted, defaults `null`):
- *     `apiGetDoc` is called with `null`, cache key carries no project segment.
- *   STATE (project scoping) — `project="acme"` passed explicitly (the value
- *     `routes/p.$name.issues_.$id.tsx` resolves from `Route.useParams()`):
- *     `apiGetDoc` is called with `"acme"`, cache key carries the
- *     `project:acme` segment, and the visible identity label renders "acme".
- *   REGRESSION — approving invalidates BOTH the doc query key and the shared
- *     issue-reports key, each still scoped to the SAME project the detail
- *     view was rendered with (a project mismatch here would silently leave a
- *     stale badge/list in the other project after an adjudication).
+ *   HAPPY — the matching issue renders its title, derived status badge and carrier links.
+ *   STATE (project scoping) — `project="acme"` scopes the fetch, the cache key and the carrier links.
+ *   NEGATIVE — an issue number GitHub does not list renders "not found", never a guessed status.
+ *   ERROR — a refused listing (401) renders the `gh auth login` hint, not "not found".
+ *   BOUNDARY — an issue no work carries says so and renders no carrier link.
  */
 
 import "@testing-library/jest-dom/vitest";
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
+import { render, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import type { DocRecord } from "@lore/core";
-import type { DocWithNavigation, IssueReportsResponse } from "@/lib/api";
+import type { IssueReportsResponse } from "@/lib/api";
 
 vi.mock("@/lib/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/api")>();
-  return { ...actual, apiGetDoc: vi.fn(), apiGetIssueReports: vi.fn() };
+  return { ...actual, apiGetIssueReports: vi.fn() };
 });
 
-vi.mock("@/api/mutations", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/api/mutations")>();
-  return { ...actual, apiApproveDoc: vi.fn(), apiRejectDoc: vi.fn() };
-});
-
-const toastSuccess = vi.fn();
-vi.mock("sonner", () => ({ toast: { success: (...args: unknown[]) => toastSuccess(...args), error: vi.fn() } }));
-
-import { apiGetDoc, apiGetIssueReports } from "@/lib/api";
-import { apiApproveDoc } from "@/api/mutations";
+import { ApiError, apiGetIssueReports } from "@/lib/api";
 import { IssueDetail } from "@/components/IssueDetail";
 
-const mockedApiGetDoc = vi.mocked(apiGetDoc);
 const mockedApiGetIssueReports = vi.mocked(apiGetIssueReports);
-const mockedApprove = vi.mocked(apiApproveDoc);
 
-/**
- * D8 (spec-issue-closure-loop-computed-resolution-agent-reachable) —
- * `IssueDetail` now ALSO reads the shared issue-reports projection (for
- * `resolution`), so every test in this file needs it mocked, not just the
- * ones that care about the resolution badge. Defaults to an EMPTY
- * projection (no matching row -> no resolution badge rendered) so the
- * pre-existing project-scoping/adjudication tests below are unaffected;
- * tests that DO care override this in their own `beforeEach`/call.
- */
-function emptyIssueReports(): IssueReportsResponse {
-  return { open_count: 0, rows: [] };
-}
+const LIVE: IssueReportsResponse = {
+  open_count: 1,
+  rows: [
+    { number: 30, title: "Bug thirty", state: "open", status: "adopted", carrier: "task-fix-30", carriers: ["task-fix-30"] },
+    { number: 31, title: "Bug thirty-one", state: "open", status: "open", carrier: null, carriers: [] },
+  ],
+};
 
-function makeIssueDoc(overrides: Partial<DocRecord> = {}): DocWithNavigation {
-  const doc: DocRecord = {
-    id: "01HISSUE0000000000000000001",
-    slug: "task-issue-report",
-    title: "Bug: something broke",
-    type: "task",
-    role: "plan",
-    status: "in-review",
-    priority: "medium",
-    content: "It broke.",
-    created_at: "2026-07-01T00:00:00Z",
-    updated_at: "2026-07-01T00:00:00Z",
-    created_by: "reporter",
-    parent_id: "01HPARENT000000000000000001",
-    tags: [],
-    extra: { issue_report: { reported_at: "2026-07-01T00:00:00Z" } },
-    version: 1,
-    deleted_at: null,
-    ...overrides,
-  };
-  return {
-    doc,
-    navigation: { parent: null, ancestors: [], siblings: [], children: [], related: [] },
-  };
-}
-
-// reason: `project` defaults to `null` (never `undefined`) — this IS the
-// documented "registry-less mode ... defaults null" behavior above, not a
-// type workaround: `IssueDetailProps.project?: string | null` never widens
-// to accept an explicit `undefined` under `exactOptionalPropertyTypes`.
-function renderDetail(project: string | null = null) {
+function renderDetail(issueNumber: string, project?: string | null) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const result = render(
     <QueryClientProvider client={client}>
-      <IssueDetail reportId="01HISSUE0000000000000000001" project={project} onAdjudicated={vi.fn()} />
+      <IssueDetail issueNumber={issueNumber} {...(project === undefined ? {} : { project })} />
     </QueryClientProvider>,
   );
   return { ...result, client };
@@ -107,87 +49,49 @@ function renderDetail(project: string | null = null) {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  mockedApiGetDoc.mockResolvedValue(makeIssueDoc());
-  mockedApiGetIssueReports.mockResolvedValue(emptyIssueReports());
-  mockedApprove.mockResolvedValue(undefined as never);
+  mockedApiGetIssueReports.mockResolvedValue(LIVE);
 });
 
-describe("IssueDetail (SPEC-078 T13)", () => {
-  describe("happy path — registry-less mode", () => {
-    it("calls apiGetDoc with null and keys the query without a project segment", async () => {
-      const { client } = renderDetail(null);
+describe("IssueDetail (live join, AC-GS-14)", () => {
+  it("HAPPY: renders the title, the derived status and the carrier link", async () => {
+    const { client } = renderDetail("30");
 
-      await screen.findByText("Bug: something broke");
-
-      expect(mockedApiGetDoc).toHaveBeenCalledWith(null, "01HISSUE0000000000000000001");
-      const keys = client.getQueryCache().getAll().map((q) => q.queryKey);
-      expect(keys).toContainEqual(["doc", "01HISSUE0000000000000000001"]);
-    });
+    expect(await screen.findByText("Bug thirty")).toBeInTheDocument();
+    expect(screen.getByTestId("issue-report-resolution")).toHaveTextContent("adopted");
+    expect(screen.getByTestId("issue-carrier-link")).toHaveAttribute("href", "/docs/task-fix-30");
+    expect(mockedApiGetIssueReports).toHaveBeenCalledWith(null);
+    expect(client.getQueryCache().getAll().map((q) => q.queryKey)).toContainEqual(["issue-reports"]);
   });
 
-  describe("state — project scoping (AC-078-8)", () => {
-    it("calls apiGetDoc with the resolved project and keys the query with a project segment", async () => {
-      const { client } = renderDetail("acme");
+  it("STATE: a project prop scopes the fetch, the cache key and the carrier link", async () => {
+    const { client } = renderDetail("30", "acme");
 
-      await screen.findByText("Bug: something broke");
-
-      expect(mockedApiGetDoc).toHaveBeenCalledWith("acme", "01HISSUE0000000000000000001");
-      const keys = client.getQueryCache().getAll().map((q) => q.queryKey);
-      expect(keys).toContainEqual(["project:acme", "doc", "01HISSUE0000000000000000001"]);
-    });
-
-    it("renders the project identity label", async () => {
-      renderDetail("acme");
-      await screen.findByText("Bug: something broke");
-      expect(screen.getByText(/acme/i)).toBeInTheDocument();
-    });
+    await screen.findByText("Bug thirty");
+    expect(mockedApiGetIssueReports).toHaveBeenCalledWith("acme");
+    expect(client.getQueryCache().getAll().map((q) => q.queryKey)).toContainEqual(["project:acme", "issue-reports"]);
+    expect(screen.getByTestId("issue-carrier-link")).toHaveAttribute("href", "/p/acme/docs/task-fix-30");
   });
 
-  describe("regression — adjudication invalidates project-scoped keys", () => {
-    it("approving calls apiApproveDoc with the same project the detail view was rendered with", async () => {
-      const user = userEvent.setup();
-      renderDetail("acme");
-      await screen.findByText("Bug: something broke");
+  it("BOUNDARY: an issue no work carries says so and renders no carrier link", async () => {
+    renderDetail("31");
 
-      await user.click(screen.getByRole("button", { name: "Approve" }));
-
-      await waitFor(() => expect(mockedApprove).toHaveBeenCalledWith("acme", "01HISSUE0000000000000000001"));
-      expect(toastSuccess).toHaveBeenCalledWith("Issue report approved");
-    });
+    expect(await screen.findByText("Bug thirty-one")).toBeInTheDocument();
+    expect(screen.getByText("No task or plan names this issue.")).toBeInTheDocument();
+    expect(screen.queryByTestId("issue-carrier-link")).not.toBeInTheDocument();
   });
 
-  describe("D8 resolution rendering (spec-issue-closure-loop-computed-resolution-agent-reachable, AC-ICL-9)", () => {
-    it("renders the computed resolution badge matched from the shared issue-reports projection", async () => {
-      mockedApiGetIssueReports.mockResolvedValue({
-        open_count: 0,
-        rows: [
-          {
-            id: "01HISSUE0000000000000000001",
-            slug: "task-issue-report",
-            title: "Bug: something broke",
-            reporter_project: "acme-agent",
-            reporter_actor: "agent:x",
-            lore_version: "1.0.0",
-            reported_at: "2026-07-01T00:00:00Z",
-            possible_duplicates: [],
-            status: "draft",
-            resolution: "fixed",
-          },
-        ],
-      });
+  it("NEGATIVE: an issue number GitHub does not list renders not found", async () => {
+    renderDetail("999");
 
-      renderDetail(null);
-      await screen.findByText("Bug: something broke");
+    expect(await screen.findByText("Issue not found")).toBeInTheDocument();
+    expect(screen.queryByTestId("issue-report-resolution")).not.toBeInTheDocument();
+  });
 
-      const badge = await screen.findByTestId("issue-report-resolution");
-      expect(badge).toHaveTextContent("fixed");
-    });
+  it("ERROR: a 401 listing renders the gh auth login hint, not 'not found'", async () => {
+    mockedApiGetIssueReports.mockRejectedValue(new ApiError(401, "AUTH_REQUIRED", "run gh auth login"));
+    renderDetail("30");
 
-    it("NEGATIVE: renders no resolution badge when the report is absent from the shared projection", async () => {
-      renderDetail(null); // beforeEach already stubs an EMPTY issue-reports projection
-      await screen.findByText("Bug: something broke");
-
-      expect(screen.queryByTestId("issue-report-resolution")).not.toBeInTheDocument();
-    });
+    expect(await screen.findByText("gh auth login")).toBeInTheDocument();
+    expect(screen.queryByText("Issue not found")).not.toBeInTheDocument();
   });
 });

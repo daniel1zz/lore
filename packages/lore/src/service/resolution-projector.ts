@@ -112,8 +112,7 @@ export function labelToResolution(label: string): IssueResolution | undefined {
 
 /**
  * An issue task's GitHub counterpart — the target `project()` writes the
- * label onto, and (D4) the type `issue-task-shaping.ts::toIssueTaskInput`
- * imports rather than re-declaring its own `{repo, number}` shape.
+ * label onto, and the `{repo, number}` shape the GitHub write ports share.
  */
 export interface GithubIssueRef {
   readonly repo: string;
@@ -124,8 +123,7 @@ export interface GithubIssueRef {
    * OPTIONAL: a ref read off a task written BEFORE this field existed
    * carries none, and {@link readGithubIssueRef} degrades that case to an
    * omitted key (never `repo_id: undefined`) rather than fabricating one.
-   * A freshly-minted ref (`issue-task-shaping.ts::toIssueTaskInput`, going
-   * forward) always carries it — that module refuses to proceed without it.
+   * A ref built from the live listing (`lore issue resolve`) always carries it.
    */
   readonly repo_id?: number;
 }

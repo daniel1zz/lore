@@ -61,21 +61,21 @@
  *   - `fileGithubIssue(input, cfg, ctx)` — the LIVE GitHub filing path's
  *     orchestration (AC-GI-1): retry recognition over the local v2 receipt
  *     log, then `GitHubIntakePort.verifyTarget`/`.searchDuplicates`/
- *     `.fileIssue`, then — spec-a-github-filed-defect-must-be-claimable-one-
- *     ingest-seam D8 — mints the corpus task via `issue-task-shaping.ts`'s
- *     `toIssueTaskInput` + `ctx.corpusService.create` so the filed defect is
- *     claimable with NO further command (AC-GR-9). The LIVE path
+ *     `.fileIssue`. GitHub owns the report: filing creates NO corpus document
+ *     (spec-github-owns-issue-report-state-no-mirror-task-work-carries D7,
+ *     AC-GS-10) — the only local trace is the filing log's intent + outcome
+ *     receipts, written by `GitHubIntakePort.fileIssue`. The LIVE path
  *     `commands/report-issue.ts` calls whenever `classifyFeedbackUpstream`
  *     resolves the GITHUB shape.
  *   - `resolveGithubIssueListing(cfg)` — the ONE place that constructs
  *     `GhRunner` + `GitHubIntakePort` for READS (AC-GR-1): `verifyTarget()`
  *     for the numeric repo id, then `listIssues()` for the batched listing.
- *   - `resolveGithubJoinedRows(corpusService, cfg)` — the read surface's
- *     shared read+join (AC-GR-1/2/10/12): calls `resolveGithubIssueListing`
- *     then joins against the corpus's already-ingested tasks via
- *     `github-issue-listing.ts::joinListing`, so `commands/issues.ts` and
- *     `commands/report-issue.ts --list` render off ONE join, never two.
- *     Read-only by construction — see that function's own header.
+ *   - `resolveGithubStatusRows(corpusService, cfg)` — the read surface's
+ *     shared read+join (AC-GS-3): calls `resolveGithubIssueListing` then joins
+ *     the live listing against the carriers (tasks and plans naming an issue in
+ *     `extra.issues`) via `github-issue-listing.ts::joinIssueStatuses`, so
+ *     `commands/issues.ts` and `commands/report-issue.ts --list` render off ONE
+ *     join, never two. Read-only by construction — see that function's own header.
  *
  * Invariants:
  *   - `resolveConsumerCorpusRoot` is safe to call from a long-lived MCP
@@ -91,52 +91,30 @@
  *     `resolveActor` (fallback chain), MCP requires `by` explicitly
  *     (SPEC-025 precedent); both thread the resolved actor through
  *     `GithubFilingContext.actor`, never through anything built here.
- *   - D8/AC-GR-7: a corpus-write failure AFTER the GitHub filing already
- *     landed is reported as a `STORE_ERROR` naming BOTH the filed issue
- *     number and its URL — mirrors `github-intake-port.ts`'s own
- *     `fileIssue`'s outcome-receipt-write failure message verbatim ("the
- *     upstream issue itself was NOT lost"), the same split, so the same
- *     honesty.
- *   - **Retry-path decision (documented per the spec's ask, covered by a
- *     test)**: on the RETRY branch (a prior successful filing for this
- *     exact title is already recorded in the local receipt log),
- *     `fileGithubIssue` returns the prior outcome immediately and does
- *     **NOT** re-attempt the corpus-task mint. Two reasons: (1) the retry
- *     branch's entire purpose is "no network call at all" for an
- *     already-completed filing — minting the task on this branch would
- *     require an extra `verifyTarget()` call purely to recover `repo_id`,
- *     breaking that documented zero-call guarantee; (2) if the ORIGINAL
- *     call's corpus write is the thing that failed (the D8/AC-GR-7
- *     scenario), the caller already saw that exact failure, synchronously,
- *     naming the issue number/URL — recovering from it is the job of a
- *     dedicated re-mint path (`lore issue adopt <number>`, an explicitly
- *     later phase, `commands/issue.ts`), not a second, silently-diverging
- *     mint attempt bolted onto the retry branch here. A naive
- *     implementation that DID call `ctx.corpusService.create` again on this
- *     branch would hit the store's typed `DUPLICATE_SLUG` (the task already
- *     exists, minted by the original call) — since this branch calls
- *     `create` zero times, that error can never surface from here.
+ *   - ⛔ `fileGithubIssue` NEVER writes the corpus (AC-GS-10): the former
+ *     mint-a-task step and its split-write failure path are deleted. The
+ *     retry branch (a prior successful filing for this exact title is in the
+ *     local receipt log) returns the prior outcome with no network call.
+ *     `ctx.corpusService` is READ only, to resolve the reporter's root PRD.
  *
  * Side-effect class: IO indirectly — `fileGithubIssue` reads/writes the local
- * v2 receipt log, calls `gh` via `GitHubIntakePort`, and (D8, non-retry path
- * only) writes ONE corpus task via `ctx.corpusService.create`.
+ * v2 receipt log and calls `gh` via `GitHubIntakePort`; it writes no corpus
+ * document.
  *
  * Source: SPEC-072 §3 Structure, §4 Public Interface, §11 Downstream Handoff;
  * spec-the-defect-channel-reaches-no-machine-but-its-own-github P2/P4;
- * spec-a-github-filed-defect-must-be-claimable-one-ingest-seam D8, D13.
+ * spec-a-github-filed-defect-must-be-claimable-one-ingest-seam D8, D13 (the
+ * mint they describe is retired by spec-github-owns-issue-report-state-no-mirror-
+ * task-work-carries D7).
  */
 
 import { basename, dirname, join } from "node:path";
 import { exitCli } from "./cli-exit.js";
 import {
-  assembleIssueBody,
   err,
   ok,
-  redactReporterIdentity,
   VENDOR_INTAKE_REPO,
-  type DocRecord,
   type FeedbackConfig,
-  type IssueFrontMatterFields,
   type IssueSeverity,
   type LoreConfig,
   type LoreError,
@@ -147,11 +125,8 @@ import {
 import type { CorpusService } from "../../service/corpus-service.js";
 import { GhRunner, createNodeGhExecFile } from "../../service/gh-runner.js";
 import { GitHubIntakePort, type GithubListedIssue } from "../../service/github-intake-port.js";
-import { joinListing, type GithubIssueRow } from "../../service/github-issue-listing.js";
-import { computeIssueResolution, hasIssueReport, type IssueResolution } from "../../service/issue-resolution.js";
+import { joinIssueStatuses, type IssueStatusRow } from "../../service/github-issue-listing.js";
 import { ReceiptLogV2, type ReceiptV2Entry } from "../../service/receipt-log-v2.js";
-import { readGithubIssueRef, type GithubIssueRef } from "../../service/resolution-projector.js";
-import { toIssueTaskInput } from "../../service/issue-task-shaping.js";
 import { findLoreDbPath, type CorpusLocator } from "./corpus-resolution.js";
 import type { CliIo } from "./output.js";
 
@@ -343,7 +318,7 @@ export type FeedbackUpstreamClassification =
  * `vendor` declares CONSENT, not a destination, and the destination it consents
  * to is a GitHub repository reached through exactly the same
  * `GitHubIntakePort`. Collapsing it here means `fileGithubIssue`,
- * `resolveGithubIssueListing`, `resolveGithubJoinedRows` and the MCP handler
+ * `resolveGithubIssueListing`, `resolveGithubStatusRows` and the MCP handler
  * need ZERO changes and cannot learn a second addressing path — the
  * "capability implemented but not wired" failure mode, closed by construction.
  *
@@ -389,7 +364,7 @@ export function classifyFeedbackUpstream(config: LoreConfig | undefined): Feedba
 
 /**
  * One live GitHub issue listing (D3's read half): the numeric repo id
- * `joinListing` keys on (`repo_id`, D5's rename-proof identity) plus the
+ * `joinIssueStatuses` keys on (`repo_id`, D5's rename-proof identity) plus the
  * batched issue list, both fetched by {@link resolveGithubIssueListing}.
  */
 export interface GithubIssueListing {
@@ -406,7 +381,7 @@ export interface GithubIssueListing {
  *
  * @param cfg - the GitHub-shaped `feedback.upstream` config
  * @returns `ok({issues, repoId})` — `repoId` is `verifyTarget()`'s numeric
- *   `id` (the join key `joinListing`/`readGithubIssueRef` both key on, never
+ *   `id` (the join key `joinIssueStatuses` and the carrier refs both key on, never
  *   the stored `owner/repo` string, D5); `issues` is `listIssues()`'s
  *   batched result — ONE `gh api` call regardless of listing size.
  *   `err(...)` on the first failing call: `verifyTarget()`'s auth/target
@@ -426,83 +401,40 @@ export async function resolveGithubIssueListing(io: CliIo,
   const listResult = await port.listIssues();
   if (!listResult.ok) return listResult;
 
-  return ok({ issues: listResult.value, repoId: verifyResult.value.id });
+  return ok({ issues: listResult.value.issues, repoId: verifyResult.value.id });
 }
 
 /**
- * Reads + joins a live GitHub listing against the corpus's already-ingested
- * issue tasks — the SAME read path `commands/issues.ts` and
- * `commands/report-issue.ts --list` both call, so neither builds its own
- * port or its own join (AC-GR-1/2/10/12; the duplication a review caught
- * before this function existed: `lore issues` silently fell through to the
- * local corpus while `lore report-issue --list` refused loudly for the
- * IDENTICAL retired-shape config — see {@link classifyFeedbackUpstream}'s
- * own header for that precedent, and D1's fix for the shape-policy half of
- * it).
+ * Reads the complete live GitHub listing and joins it against the carriers (every task and plan whose
+ * `extra.issues` names an issue, archived ones included) — the ONE read path `commands/issues.ts` and
+ * `commands/report-issue.ts --list` share, so neither builds its own port or its own join (AC-GS-3).
  *
- * `resolveOne` ({@link ResolveIssueResolution} in `github-issue-listing.ts`)
- * must stay a SYNCHRONOUS closure — this function therefore gathers every
- * candidate task's store-fetched facts (`resolvesInEdges`) with an async
- * per-task `corpusService.get()` call BEFORE calling `joinListing`, mirrors
- * `commands/issues.ts::readLocalRows`'s identical per-task read shape.
+ * ⛔ READ-ONLY: calls `corpusService.listFull` only, never a write. ⛔ No offline fallback: when the
+ * listing fails, the error is returned as-is and no carrier row is produced (AC-GS-2) — a carrier alone
+ * proves nothing about what GitHub currently shows.
  *
- * ⛔ READ-ONLY (AC-GR-12): this function calls `corpusService.list`,
- * `.listFull`, and `.get` only — never `.create`/`.update`/`.set`. A task
- * whose per-doc `get()` fails (deleted between the two calls) degrades to
- * "excluded from the join" rather than aborting the whole read — the same
- * graceful-partial-result precedent `readLocalRows` documents.
- *
- * @param corpusService - the caller's own `CorpusService` — the SAME corpus
- *   `fileGithubIssue`'s `ctx.corpusService` mints ingested tasks into, never
- *   a second one
+ * @param corpusService - the caller's own `CorpusService` (the only corpus consulted)
  * @param cfg - the GitHub-shaped `feedback.upstream` config
- * @param locator - the run's `cwd` + `env` (an `Invocation`): `env` is what `gh` is spawned from, `cwd` locates the corpus
- * @returns `ok({repoId, rows})` — `rows` has exactly one entry per listed
- *   issue, in listing order ({@link joinListing}'s own contract); `err(...)`
- *   on the first failing `gh`/store call
+ * @param locator - the run's `cwd` + `env` (an `Invocation`)
+ * @returns `ok({repoId, issues, rows})` — `rows` has exactly one entry per listed issue, in listing order;
+ *   `err(...)` on the first failing `gh`/store call
  */
-export async function resolveGithubJoinedRows(io: CliIo, 
+export async function resolveGithubStatusRows(io: CliIo,
   corpusService: CorpusService,
   cfg: GithubUpstreamCfg,
   locator: CorpusLocator,
-): Promise<Result<{ repoId: number; rows: readonly GithubIssueRow[] }, LoreError>> {
+): Promise<Result<{ repoId: number; issues: readonly GithubListedIssue[]; rows: readonly IssueStatusRow[] }, LoreError>> {
   const listingResult = await resolveGithubIssueListing(io, cfg, locator);
   if (!listingResult.ok) return listingResult;
   const { issues, repoId } = listingResult.value;
 
-  const listResult = await corpusService.listFull({ type: "task" });
-  if (!listResult.ok) return listResult;
-
-  const resolutionByTaskId = new Map<string, IssueResolution>();
-  const joinableTasks: DocRecord[] = [];
-  for (const task of listResult.value.docs.filter((d) => hasIssueReport(d.extra))) {
-    const getResult = await corpusService.get(task.id);
-    if (!getResult.ok) continue; // reason: same graceful degrade `readLocalRows` documents for its own per-task get().
-
-    const resolvesInEdges = getResult.value.navigation.related.filter((r) => r.link_type === "resolves");
-    resolutionByTaskId.set(
-      task.id,
-      computeIssueResolution(
-        task,
-        resolvesInEdges.map((r) => ({ from_id: r.id })),
-        resolvesInEdges.map((r) => ({ id: r.id, status: r.status })),
-      ),
-    );
-    joinableTasks.push(task);
+  const carriers = [];
+  for (const type of ["task", "plan"] as const) {
+    const listed = await corpusService.listFull({ type });
+    if (!listed.ok) return listed;
+    carriers.push(...listed.value.docs.filter((doc) => Array.isArray((doc.extra as Record<string, unknown> | null | undefined)?.["issues"])));
   }
-
-  const rows = joinListing(issues, joinableTasks, repoId, (task) => {
-    const resolution = resolutionByTaskId.get(task.id);
-    // reason: `task` is always drawn from `joinableTasks` above — the exact
-    // set this loop just computed a resolution for, one entry each — so
-    // `resolutionByTaskId` can never miss it. `joinListing` calls this
-    // closure synchronously per its own contract (github-issue-listing.ts's
-    // header), which is why the fetch above must happen BEFORE this call,
-    // not inside it.
-    return resolution as IssueResolution;
-  });
-
-  return ok({ repoId, rows });
+  return ok({ repoId, issues, rows: joinIssueStatuses(issues, carriers, repoId, new Date().toISOString()) });
 }
 
 // ─── GitHub filing path (spec-the-defect-channel-reaches-no-machine-but-its-own-github P2, AC-GI-1) ───
@@ -630,111 +562,6 @@ function buildIssueDescriptionBlock(input: GithubReportInput): string {
 }
 
 /**
- * Builds the AC-GR-7-shaped `STORE_ERROR` for a corpus-write failure that
- * happens AFTER the GitHub issue already landed — the split-write honesty
- * mirror of `github-intake-port.ts::fileIssue`'s own outcome-receipt-write
- * failure message ("the upstream issue itself was NOT lost"). The message
- * MUST contain both `issueNumber` and `issueUrl` (AC-GR-7's oracle greps
- * both substrings) so an operator who only sees this error can still find
- * the public issue and, later, `lore issue adopt` it.
- *
- * @param issueNumber - the number GitHub assigned the already-filed issue.
- * @param issueUrl - that issue's `html_url`.
- * @param reason - why the corpus write failed (a shaping refusal's message,
- *   or the store error's `message`/`code`).
- */
-function buildPartialSuccessStoreError(issueNumber: number, issueUrl: string, reason: string): LoreError {
-  return {
-    code: "STORE_ERROR",
-    message:
-      `issue filed upstream as #${issueNumber} (${issueUrl}) but the corpus task could not be created ` +
-      `(${reason}) — the upstream issue itself was NOT lost.`,
-  };
-}
-
-/**
- * Renders a `LoreError` as one human-readable line — several `LoreError`
- * members (e.g. `DOC_NOT_FOUND`, `DUPLICATE_SLUG`) carry no `message` field
- * at all, so a bare `.message` access does not compile against the full
- * union; this falls back to `.code` for those.
- */
-function describeLoreError(error: LoreError): string {
-  return "message" in error ? error.message : error.code;
-}
-
-/**
- * Mints the corpus task for one freshly-filed (or freshly-verified) GitHub
- * issue (D8) — reconstructs the EXACT front-matter fields and body
- * `GitHubIntakePort.fileIssue` posted (both are PURE functions of the same
- * inputs: `input`'s triage labels + the caller's own resolved identity +
- * the port's returned `idempotencyKey`), so `toIssueTaskInput`'s
- * `parseIssueBody(issue.body)` round-trips back to a byte-identical
- * `IssueFrontMatterFields` — this function never invents a value
- * `fileIssue` did not already determine.
- *
- * @param input - the report's triage labels + free-form content
- * @param identity - the RAW identity `fileIssue` was called with
- * @param issueNumber - GitHub's assigned issue number
- * @param issueUrl - that issue's `html_url`
- * @param idempotencyKey - `FileIssuePortResult.idempotencyKey` from the SAME
- *   `fileIssue()` call (never freshly generated here — it must match what
- *   was actually posted, so a `lore issue adopt` reading this task back
- *   later sees the same key GitHub's copy carries)
- * @param repoId - the target repo's numeric id (`verifyTarget()`'s `id`, D1)
- * @param cfg - the GitHub-shaped `feedback.upstream` config (`cfg.repo`)
- * @param rootPrdId - the reporter's own root PRD id — threaded through to
- *   `toIssueTaskInput` as a precondition proof only; see that function's own
- *   `rootPrdId` doc for why it is NOT written into `parent_id` directly
- *   (D13's actual parenting happens via `CorpusService._createImpl`'s adhoc
- *   auto-parenting instead)
- * @param corpusService - the reporter's OWN `CorpusService`
- * @param actor - the resolved filing actor, attributed as the task's creator
- * @returns `ok(void)` once the task is created; `err(...)` shaped by
- *   {@link buildPartialSuccessStoreError} on a shaping OR store failure
- */
-async function mintIssueTask(
-  input: GithubReportInput,
-  identity: RawReporterIdentity,
-  issueNumber: number,
-  issueUrl: string,
-  idempotencyKey: string,
-  repoId: number,
-  cfg: GithubUpstreamCfg,
-  rootPrdId: string,
-  corpusService: CorpusService,
-  actor: string,
-): Promise<Result<void, LoreError>> {
-  const redacted = redactReporterIdentity(identity);
-  const fields: IssueFrontMatterFields = {
-    severity: input.severity,
-    category: input.category,
-    tags: [...input.tags],
-    reporter_corpus: redacted.reporter_corpus,
-    reporter_root_prd: redacted.reporter_root_prd,
-    idempotency_key: idempotencyKey,
-  };
-  const listedIssue: GithubListedIssue = {
-    number: issueNumber,
-    title: input.title,
-    state: "open",
-    body: assembleIssueBody(fields, buildIssueDescriptionBlock(input), redacted.actor),
-  };
-  const ref: GithubIssueRef = { repo: cfg.repo, issueNumber, repo_id: repoId };
-
-  const taskInputResult = toIssueTaskInput(listedIssue, ref, rootPrdId);
-  if (!taskInputResult.ok) {
-    return err(buildPartialSuccessStoreError(issueNumber, issueUrl, describeLoreError(taskInputResult.error)));
-  }
-
-  const createResult = await corpusService.create(taskInputResult.value, { by: actor });
-  if (!createResult.ok) {
-    return err(buildPartialSuccessStoreError(issueNumber, issueUrl, describeLoreError(createResult.error)));
-  }
-
-  return ok(undefined);
-}
-
-/**
  * Orchestrates the LIVE GitHub filing path — the caller-side glue around
  * `GitHubIntakePort`'s four ops (`report-issue.ts` calls this instead of
  * `IssueReportService.report()` whenever `resolveFeedbackUpstreamCfg`
@@ -742,19 +569,16 @@ async function mintIssueTask(
  * order:
  *   1. Retry recognition — reads the LOCAL v2 receipt log and returns a
  *      PRIOR filing's outcome verbatim (no network call at all, and no
- *      corpus write — see this module's header for why the retry branch
- *      deliberately does not re-attempt the mint) when one exists for the
- *      exact same title ({@link findPriorGithubFiling}).
+ *      corpus write) when one exists for the exact same title
+ *      ({@link findPriorGithubFiling}).
  *   2. `verifyTarget()` — fail loud before any write-shaped call.
  *   3. `searchDuplicates()` — advisory; a failure degrades, never blocks.
  *   4. Resolves the reporter's own identity (`resolveLocalRootPrd`,
  *      `os.homedir()`) and calls `fileIssue()`, which itself performs the
  *      redaction + front-matter assembly + two-phase receipt writes.
- *   5. D8/AC-GR-9 — mints the corpus task ({@link mintIssueTask}) so the
- *      filed defect is claimable with no further command. A failure here
- *      is reported via {@link buildPartialSuccessStoreError} (AC-GR-7):
- *      the GitHub issue is NOT rolled back — it already exists publicly —
- *      so the error names it instead of hiding behind a generic message.
+ *   ⛔ No further step: filing creates NO corpus document (AC-GS-10). The
+ *   GitHub issue is the report; the receipts written in step 4 are the only
+ *   local trace.
  *
  * @param input - the report's content + already-validated triage labels
  * @param cfg - the GitHub-shaped `feedback.upstream` config
@@ -776,10 +600,7 @@ export async function fileGithubIssue(
   if (priorReadResult.ok) {
     const prior = findPriorGithubFiling(priorReadResult.value.entries, input.title);
     if (prior !== undefined) {
-      // Retry-path decision (see this module's header): the corpus mint is
-      // NOT re-attempted here. `ctx.corpusService.create` is never called on
-      // this branch, so the store's DUPLICATE_SLUG can never surface from
-      // it — pinned by a test in github-filing-split-write.test.ts.
+      // Retry recognition: no network call and no corpus write on this branch.
       return ok({
         number: prior.number,
         url: prior.url,
@@ -836,20 +657,6 @@ export async function fileGithubIssue(
     identity,
   });
   if (!fileResult.ok) return fileResult;
-
-  const mintResult = await mintIssueTask(
-    input,
-    identity,
-    fileResult.value.number,
-    fileResult.value.url,
-    fileResult.value.idempotencyKey,
-    verifyResult.value.id,
-    cfg,
-    rootPrd.id,
-    ctx.corpusService,
-    ctx.actor,
-  );
-  if (!mintResult.ok) return mintResult;
 
   return ok({
     number: fileResult.value.number,

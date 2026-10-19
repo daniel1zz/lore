@@ -1,14 +1,16 @@
 /**
- * AC-IC-1 — the post-archive step that closes the GitHub issue of every defect report a just-archived
- * spec / plan / task resolves (spec-archiving-the-work-that-resolves-a-defect-report-closes D1-D4, D6).
+ * @task task-skill-refactor-gs-t4-close-on-archive-keyed-on-carriers
  *
+ * Unit companion of the carrier-close oracle (owned by integration/cli/issue-close-on-archive-carrier.bun.test.ts).
+ * The post-archive step closes every GitHub issue a just-archived CARRIER names in `extra.issues`.
  * Real services over InMemoryStore + a RECORDING FAKE `IssueCloser` — nothing here can reach GitHub.
- *   HAPPY:      plan close, `lore done`, archive sweep and the plan-close cascade each close the issue.
- *   NEGATIVE:   an explicit `wontfix` verdict, an active-only source and a link-less doc close nothing.
- *   ERROR:      close / label / comment failures keep the archive, are audited and reported.
- *   BOUNDARY:   already-closed issue, absent closer, local-only report, two archived sources.
- *   STATE:      the issue task's own status and version are never changed.
- *   REGRESSION: mutation "call the step only from CorpusService.set" is caught by the done / sweep cases.
+ *   HAPPY:      plan close, `lore done`, archive sweep and the plan-close cascade each close ALL named issues.
+ *   NEGATIVE:   a task with no carrier, a verdict-closed issue, a doc type that is no carrier touch nothing.
+ *   ERROR:      read / close / comment / label failures keep the archive, are audited and reported, and never
+ *               stop the issues after the failing one.
+ *   BOUNDARY:   absent closer, already-completed issue, malformed `extra.issues` entry, no configured repo.
+ *   STATE:      the step never writes the carrier (version unchanged by the step itself).
+ *   REGRESSION: mutation "read only extra.issues[0]" is caught by every multi-issue case.
  */
 
 import { describe, expect, it } from "vitest";
@@ -17,10 +19,7 @@ import type { CreateDocInput, DocRecord, LoreError, Result } from "@lore/core";
 
 import { CorpusService } from "../../../src/service/corpus-service.js";
 import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
-import {
-  IssueCloseOnArchive,
-  ISSUE_CLOSE_FAILED_AUDIT_ACTION,
-} from "../../../src/service/issue-close-on-archive.js";
+import { IssueCloseOnArchive, ISSUE_CLOSE_FAILED_AUDIT_ACTION } from "../../../src/service/issue-close-on-archive.js";
 import type { GithubIssueSnapshot, IssueCloser } from "../../../src/service/issue-closer-port.js";
 import type { GithubIssueRef } from "../../../src/service/resolution-projector.js";
 import { RecordLockService } from "../../../src/service/record-lock-service.js";
@@ -29,24 +28,37 @@ import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { actedStore } from "../../live-invocation.js";
 
 const NOW = "2026-10-12T10:00:00.000Z";
+const REPO_ID = 123;
+const REPO = "acme/widget";
 
-/** Recording fake — the ONLY GitHub surface any test in this file touches. */
+/** Recording fake — the ONLY GitHub surface any test in this file touches. Issue state is per number. */
 class RecordingCloser implements IssueCloser {
   readonly calls: string[] = [];
-  state: "open" | "closed" = "open";
-  closeError: LoreError | undefined;
+  readonly issues = new Map<number, GithubIssueSnapshot>();
+  readError = new Map<number, LoreError>();
+  closeError = new Map<number, LoreError>();
   commentError: LoreError | undefined;
   labelError: LoreError | undefined;
 
+  seed(number: number, snapshot: GithubIssueSnapshot): void {
+    this.issues.set(number, snapshot);
+  }
+  private snapshotOf(number: number): GithubIssueSnapshot {
+    return this.issues.get(number) ?? { state: "open", stateReason: null, labels: [] };
+  }
+
   async readIssue(ref: GithubIssueRef): Promise<Result<GithubIssueSnapshot, LoreError>> {
     this.calls.push(`read:${ref.issueNumber}`);
-    return ok({ state: this.state, labels: [] });
+    const failure = this.readError.get(ref.issueNumber);
+    if (failure !== undefined) return err(failure);
+    return ok(this.snapshotOf(ref.issueNumber));
   }
   async closeIssue(ref: GithubIssueRef): Promise<Result<{ alreadyClosed: boolean }, LoreError>> {
     this.calls.push(`close:${ref.issueNumber}@${ref.repo}`);
-    if (this.state === "closed") return ok({ alreadyClosed: true });
-    if (this.closeError !== undefined) return err(this.closeError);
-    this.state = "closed";
+    if (this.snapshotOf(ref.issueNumber).state === "closed") return ok({ alreadyClosed: true });
+    const failure = this.closeError.get(ref.issueNumber);
+    if (failure !== undefined) return err(failure);
+    this.issues.set(ref.issueNumber, { state: "closed", stateReason: "completed", labels: [] });
     return ok({ alreadyClosed: false });
   }
   async commentIssue(ref: GithubIssueRef, body: string): Promise<Result<void, LoreError>> {
@@ -59,6 +71,13 @@ class RecordingCloser implements IssueCloser {
     if (this.labelError !== undefined) return err(this.labelError);
     return ok(undefined);
   }
+  async removeLabels(ref: GithubIssueRef, names: readonly string[]): Promise<Result<void, LoreError>> {
+    this.calls.push(`unlabel:${ref.issueNumber}:${names.join(",")}`);
+    return ok(undefined);
+  }
+  writes(): string[] {
+    return this.calls.filter((call) => !call.startsWith("read:"));
+  }
 }
 
 function transportError(message: string): LoreError {
@@ -70,8 +89,6 @@ interface World {
   readonly cs: CorpusService;
   readonly tw: TaskWorkflowService;
   readonly closer: RecordingCloser;
-  readonly reportId: string;
-  readonly reportSlug: string;
 }
 
 async function must<T>(promise: Promise<Result<T, LoreError>>, what: string): Promise<T> {
@@ -80,57 +97,40 @@ async function must<T>(promise: Promise<Result<T, LoreError>>, what: string): Pr
   return result.value;
 }
 
-/** Builds services, a filed report for GitHub #7, and wires the step into BOTH services. */
-async function buildWorld(opts: { closer?: RecordingCloser | null; github?: boolean; explicit?: string } = {}): Promise<World> {
+/** Services over one store with the step wired into BOTH, as `app.ts` does. */
+async function buildWorld(opts: { closer?: RecordingCloser | null; repo?: string | null } = {}): Promise<World> {
   const store = actedStore(new InMemoryStore());
   const cs = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
   const tw = new TaskWorkflowService(store, undefined, { claimTtlMinutes: 120 });
   const closer = opts.closer === null ? undefined : (opts.closer ?? new RecordingCloser());
-  const step = new IssueCloseOnArchive(store, closer, closer === undefined ? undefined : "acme/widget", () => NOW);
+  const repo = opts.repo === null ? undefined : (opts.repo ?? REPO);
+  const step = new IssueCloseOnArchive(store, closer, repo, () => NOW);
   cs.setArchiveIssueClosePort(step);
   tw.setArchiveIssueClosePort(step);
-
   await must(cs.create({ type: "prd", title: "Root PRD", content: "root" } as CreateDocInput), "prd");
-  const report = await must(
-    cs.create({
-      type: "task",
-      title: "Filed defect",
-      extra: {
-        adhoc: true,
-        issue_report: {
-          reporter_project: "consumer",
-          reporter_actor: "agent:x",
-          lore_version: "0.0.0",
-          expected: "exit 0",
-          actual: "exit 4",
-          reported_at: "2026-01-01T00:00:00.000Z",
-          ...(opts.github === false ? {} : { github: { repo: "acme/widget", number: 7, repo_id: 123 } }),
-          ...(opts.explicit !== undefined
-            ? { resolution: { state: opts.explicit, reason: "r", resolved_at: NOW, resolved_by: "t" } }
-            : {}),
-        },
-      },
-    } as CreateDocInput),
-    "report",
-  );
-  return { store, cs, tw, closer: closer ?? new RecordingCloser(), reportId: report.id, reportSlug: report.slug };
+  return { store, cs, tw, closer: closer ?? new RecordingCloser() };
 }
 
-async function createPlan(w: World, title: string, content = "body"): Promise<DocRecord> {
-  return must(w.cs.create({ type: "plan", title, content } as CreateDocInput), "plan");
-}
+const refsOf = (...numbers: number[]): Array<{ repo_id: number; number: number }> =>
+  numbers.map((number) => ({ repo_id: REPO_ID, number }));
 
-async function createTask(w: World, plan: DocRecord, title: string): Promise<DocRecord> {
+async function createPlan(w: World, title: string, issues?: number[]): Promise<DocRecord> {
   return must(
     w.cs.create({
-      type: "task", title, parent_id: plan.id, content: "body", extra: { plan_id: plan.id },
+      type: "plan", title, content: "body", ...(issues === undefined ? {} : { extra: { issues: refsOf(...issues) } }),
+    } as CreateDocInput),
+    "plan",
+  );
+}
+
+async function createTask(w: World, plan: DocRecord, title: string, issues?: number[]): Promise<DocRecord> {
+  return must(
+    w.cs.create({
+      type: "task", title, parent_id: plan.id, content: "body",
+      extra: { plan_id: plan.id, ...(issues === undefined ? {} : { issues: refsOf(...issues) }) },
     } as CreateDocInput),
     "task",
   );
-}
-
-async function resolvesLink(w: World, fromId: string): Promise<void> {
-  await must(w.cs.link(fromId, w.reportId, "resolves"), "link");
 }
 
 async function activate(w: World, id: string): Promise<void> {
@@ -158,265 +158,239 @@ async function passEvidence(w: World, taskId: string): Promise<void> {
   );
 }
 
-async function expectReportUntouched(w: World, before: DocRecord): Promise<void> {
-  const after = await must(w.cs.get(w.reportId), "get report");
-  expect(after.doc.status).toBe(before.status);
-  expect(after.doc.version).toBe(before.version);
-}
+const FIXED_COMMENT = (n: number, type: string, slug: string): string => `comment:${n}:Fixed by ${type} ${slug} (archived 2026-10-12)`;
 
-async function snapshotReport(w: World): Promise<DocRecord> {
-  return (await must(w.cs.get(w.reportId), "get report")).doc;
-}
-
-const FIXED_COMMENT = (type: string, slug: string): string => `comment:7:Fixed by ${type} ${slug} (archived 2026-10-12)`;
-
-describe("AC-IC-1 (a): archiving a plan that resolves a filed report closes its issue", () => {
-  it("calls close once, then comment naming the plan, then label resolution:fixed — and says so", async () => {
+describe("carrier close (a): archiving a plan carrier closes EVERY named issue", () => {
+  it("three issues: close, then comment naming the plan, then label resolution:fixed — for each, in declared order", async () => {
     const w = await buildWorld();
-    const before = await snapshotReport(w);
-    const plan = await createPlan(w, "Fix the defect");
-    await resolvesLink(w, plan.id);
+    const plan = await createPlan(w, "Fix three", [11, 12, 13]);
 
     const archived = await archivePlan(w, plan);
 
-    expect(w.closer.calls.filter((c) => !c.startsWith("read:"))).toEqual([
-      "close:7@acme/widget",
-      FIXED_COMMENT("plan", plan.slug),
-      "label:7:resolution:fixed",
-    ]);
-    expect(archived.issueClose?.map((i) => i.message)).toContain(`issue #7: closed on GitHub (fixed by ${plan.slug})`);
-    expect(archived.issueClose?.find((i) => i.kind === "closed")?.stream).toBe("stdout");
-    await expectReportUntouched(w, before); // (k)
+    expect(w.closer.writes()).toEqual(
+      [11, 12, 13].flatMap((n) => [`close:${n}@${REPO}`, FIXED_COMMENT(n, "plan", plan.slug), `label:${n}:resolution:fixed`]),
+    );
+    expect(archived.issueClose?.map((i) => i.message)).toEqual(
+      [11, 12, 13].map((n) => `issue #${n}: closed on GitHub (fixed by ${plan.slug})`),
+    );
+    expect(archived.issueClose?.every((i) => i.stream === "stdout")).toBe(true);
   });
 
-  it("a spec archived through set closes it the same way", async () => {
-    const w = await buildWorld();
-    const spec = await must(w.cs.create({ type: "spec", title: "Spec fix", content: "body" } as CreateDocInput), "spec");
-    await resolvesLink(w, spec.id);
-    // reason: approving a spec runs the rule-citation gate, which is not what this test is about — put the
-    // spec at `active` directly in the store, then archive it through the real CorpusService.set path.
-    await must(w.store.update(spec.id, { status: "active", version: spec.version + 1 }, { expected_version: spec.version }), "activate");
-    const archived = await must(w.cs.set(spec.id, { status: "archived" }), "archive");
-    expect(archived.issueClose?.map((i) => i.kind)).toEqual(["closed"]);
-    expect(w.closer.calls).toContain("close:7@acme/widget");
-    expect(w.closer.calls).toContain(FIXED_COMMENT("spec", spec.slug));
+  it("the written repo is the configured upstream, not anything derived from repo_id", async () => {
+    const w = await buildWorld({ repo: "renamed/widget" });
+    const plan = await createPlan(w, "Fix renamed", [11]);
+    await archivePlan(w, plan);
+    expect(w.closer.calls).toContain("close:11@renamed/widget");
   });
 });
 
-describe("AC-IC-1 (b): every archive path reaches the step", () => {
-  it("TaskWorkflowService.done on a task that resolves the report", async () => {
+describe("carrier close (b): every archive path reaches the step", () => {
+  it("TaskWorkflowService.done on a task carrier closes all its issues", async () => {
     const w = await buildWorld();
-    const before = await snapshotReport(w);
     const plan = await createPlan(w, "Plan for done");
-    const task = await createTask(w, plan, "Fixer task");
-    await resolvesLink(w, task.id);
+    const task = await createTask(w, plan, "Carrier task", [11, 12]);
     await passEvidence(w, task.id);
 
     const done = await must(w.tw.done(task.id, { by: "alice" }), "done");
 
-    expect(done.issue_close?.map((i) => i.kind)).toEqual(["closed"]);
-    expect(w.closer.calls).toContain("close:7@acme/widget");
-    expect(w.closer.calls).toContain(FIXED_COMMENT("task", task.slug));
-    expect(w.closer.calls).toContain("label:7:resolution:fixed");
-    await expectReportUntouched(w, before);
+    expect(done.issue_close?.map((i) => i.kind)).toEqual(["closed", "closed"]);
+    expect(w.closer.writes()).toContain(FIXED_COMMENT(11, "task", task.slug));
+    expect(w.closer.writes()).toContain(FIXED_COMMENT(12, "task", task.slug));
+    expect(w.closer.writes()).toContain("label:12:resolution:fixed");
   });
 
-  it("the archive sweep (lore archive --apply) — archiveSweepCandidate", async () => {
+  it("the archive sweep (archiveSweepCandidate) on a task carrier", async () => {
     const w = await buildWorld();
     const plan = await createPlan(w, "Plan for sweep");
-    const task = await createTask(w, plan, "Straggler fixer");
-    await resolvesLink(w, task.id);
+    const task = await createTask(w, plan, "Straggler carrier", [11, 12]);
     await activate(w, task.id);
     const doc = await must(w.cs.get(task.id), "get task");
 
     const swept = await must(w.cs.archiveSweepCandidate(doc.doc, "done_plan_straggler", "plan closed"), "sweep");
 
-    expect(swept.issueClose?.map((i) => i.kind)).toEqual(["closed"]);
-    expect(w.closer.calls).toContain(FIXED_COMMENT("task", task.slug));
+    expect(swept.issueClose?.map((i) => i.kind)).toEqual(["closed", "closed"]);
   });
 
-  it("the plan-close cascade archives a member task that resolves the report", async () => {
+  it("the plan-close cascade archives a member task carrier and closes its issues", async () => {
     const w = await buildWorld();
     const plan = await createPlan(w, "Plan with cascade");
-    const task = await createTask(w, plan, "Cascaded fixer");
-    await resolvesLink(w, task.id);
+    const task = await createTask(w, plan, "Cascaded carrier", [11, 12]);
     await activate(w, task.id);
 
     const archived = await archivePlan(w, plan);
 
     expect(archived.cascade?.archived.map((a) => a.slug)).toContain(task.slug);
-    expect(w.closer.calls).toContain(FIXED_COMMENT("task", task.slug));
-    expect(archived.issueClose?.some((i) => i.kind === "closed")).toBe(true);
+    expect(w.closer.writes()).toContain(FIXED_COMMENT(12, "task", task.slug));
   });
 });
 
-describe("AC-IC-1 (c)(d)(j): GitHub failures never undo the archive", () => {
-  it("(c) close failure: plan stays archived, one issue_close_failed audit row with number and error, result names it", async () => {
+describe("carrier close (c): an issue already closed with a verdict is skipped, and only that issue", () => {
+  it("not_planned + resolution:rejected: no write at all, a stdout line says closed as rejected; the others still close", async () => {
     const w = await buildWorld();
-    w.closer.closeError = transportError("HTTP 502 bad gateway");
-    const plan = await createPlan(w, "Plan close fails");
-    await resolvesLink(w, plan.id);
+    w.closer.seed(13, { state: "closed", stateReason: "not_planned", labels: ["resolution:rejected"] });
+    const plan = await createPlan(w, "Mixed", [11, 12, 13]);
 
     const archived = await archivePlan(w, plan);
 
-    expect(archived.status).toBe("archived");
-    expect(w.closer.calls.some((c) => c.startsWith("comment:"))).toBe(false);
-    const failure = archived.issueClose?.find((i) => i.kind === "close_failed");
-    expect(failure?.stream).toBe("stderr");
-    expect(failure?.message).toContain("#7");
-    expect(failure?.message).toContain("HTTP 502 bad gateway");
-    expect(failure?.message).toContain("lore issues --sync");
-    const audit = await must(w.store.queryAudit({ action: ISSUE_CLOSE_FAILED_AUDIT_ACTION }), "audit");
-    expect(audit).toHaveLength(1);
-    expect(audit[0]?.details).toMatchObject({ issue: 7, step: "close", error: "HTTP 502 bad gateway" });
-    expect((await must(w.cs.get(plan.id), "get plan")).doc.status).toBe("archived");
+    expect(w.closer.writes().filter((call) => call.includes(":13") || call.includes("close:13"))).toEqual([]);
+    const skipped = archived.issueClose?.find((i) => i.kind === "skipped_verdict");
+    expect(skipped?.message).toBe("issue #13 skipped: closed as rejected");
+    expect(skipped?.stream).toBe("stdout");
+    expect(w.closer.writes()).toContain("close:12@acme/widget");
   });
 
-  it("(d) label failure after a successful close: close kept, failure reported and audited", async () => {
+  it.each([
+    ["wontfix", "not_planned", ["resolution:wontfix"]],
+    ["superseded", "not_planned", ["resolution:superseded"]],
+    ["duplicate", "duplicate", []],
+    ["not planned", "not_planned", ["bug"]],
+  ])("a %s close is skipped (state_reason %s, labels %j)", async (verdict, stateReason, labels) => {
     const w = await buildWorld();
-    w.closer.labelError = transportError("HTTP 403 forbidden");
-    const plan = await createPlan(w, "Plan label fails");
-    await resolvesLink(w, plan.id);
+    w.closer.seed(11, { state: "closed", stateReason, labels });
+    const plan = await createPlan(w, "Verdict", [11]);
 
     const archived = await archivePlan(w, plan);
 
-    expect(w.closer.state).toBe("closed");
-    const kinds = archived.issueClose?.map((i) => i.kind);
-    expect(kinds).toContain("closed");
-    expect(kinds).toContain("label_failed");
-    expect(archived.issueClose?.find((i) => i.kind === "label_failed")?.message).toContain("HTTP 403 forbidden");
-    const audit = await must(w.store.queryAudit({ action: ISSUE_CLOSE_FAILED_AUDIT_ACTION }), "audit");
-    expect(audit).toHaveLength(1);
-    expect(audit[0]?.details).toMatchObject({ issue: 7, step: "label" });
+    expect(w.closer.writes()).toEqual([]);
+    expect(archived.issueClose?.map((i) => i.message)).toEqual([`issue #11 skipped: closed as ${verdict}`]);
   });
 
-  it("(j) comment failure after a successful close: close kept, comment failure reported, label still attempted", async () => {
+  it("an issue closed as completed is not a verdict: no second comment, the fixed label converges", async () => {
     const w = await buildWorld();
-    w.closer.commentError = transportError("HTTP 500 on comment");
-    const plan = await createPlan(w, "Plan comment fails");
-    await resolvesLink(w, plan.id);
-
-    const archived = await archivePlan(w, plan);
-
-    expect(w.closer.state).toBe("closed");
-    expect(archived.issueClose?.map((i) => i.kind)).toEqual(["closed", "comment_failed"]);
-    expect(w.closer.calls).toContain("label:7:resolution:fixed");
-  });
-});
-
-describe("AC-IC-1 (e)(f)(g): absent closer, local-only report, already-closed issue", () => {
-  it("(e) closer absent: archive committed, one line says GitHub is not configured and names --sync", async () => {
-    const w = await buildWorld({ closer: null });
-    const plan = await createPlan(w, "Plan no closer");
-    await resolvesLink(w, plan.id);
-
-    const archived = await archivePlan(w, plan);
-
-    expect(archived.status).toBe("archived");
-    const notConfigured = archived.issueClose?.filter((i) => i.kind === "not_configured") ?? [];
-    expect(notConfigured).toHaveLength(1);
-    expect(notConfigured[0]?.message).toContain("GitHub not configured");
-    expect(notConfigured[0]?.message).toContain("lore issues --sync");
-  });
-
-  it("(f) a report without a github ref: no close call, the result says so", async () => {
-    const w = await buildWorld({ github: false });
-    const plan = await createPlan(w, "Plan local report");
-    await resolvesLink(w, plan.id);
-
-    const archived = await archivePlan(w, plan);
-
-    expect(w.closer.calls).toEqual([]);
-    expect(archived.issueClose?.map((i) => i.kind)).toEqual(["no_github_ref"]);
-  });
-
-  it("(g) an issue already closed on GitHub is a no-op success: no comment, no failure", async () => {
-    const w = await buildWorld();
-    w.closer.state = "closed";
-    const plan = await createPlan(w, "Plan already closed");
-    await resolvesLink(w, plan.id);
+    w.closer.seed(11, { state: "closed", stateReason: "completed", labels: [] });
+    const plan = await createPlan(w, "Already completed", [11]);
 
     const archived = await archivePlan(w, plan);
 
     expect(archived.issueClose?.map((i) => i.kind)).toEqual(["already_closed"]);
-    expect(w.closer.calls.some((c) => c.startsWith("comment:"))).toBe(false);
-    expect(await must(w.store.queryAudit({ action: ISSUE_CLOSE_FAILED_AUDIT_ACTION }), "audit")).toHaveLength(0);
-  });
-
-  it("two archived documents both resolving #7: the first closes, the second is a no-op", async () => {
-    const w = await buildWorld();
-    const first = await createPlan(w, "First fixer");
-    const second = await createPlan(w, "Second fixer");
-    await resolvesLink(w, first.id);
-    await resolvesLink(w, second.id);
-
-    const a = await archivePlan(w, first);
-    const b = await archivePlan(w, second);
-
-    expect(a.issueClose?.map((i) => i.kind)).toEqual(["closed"]);
-    expect(b.issueClose?.map((i) => i.kind)).toEqual(["already_closed"]);
-    expect(w.closer.calls.filter((c) => c.startsWith("comment:"))).toHaveLength(1);
+    expect(w.closer.writes().some((call) => call.startsWith("comment:"))).toBe(false);
+    expect(w.closer.writes()).toContain("label:11:resolution:fixed");
   });
 });
 
-describe("AC-IC-1 (h): prose says 'closes #N' but no resolves link exists", () => {
-  it("warns on stderr naming N and the exact lore link command", async () => {
+describe("carrier close (d): GitHub failures never undo the archive and never stop the next issue", () => {
+  it("a failed close on #12: archive kept, ONE audit row naming #12, #11 and #13 still closed", async () => {
     const w = await buildWorld();
-    const plan = await createPlan(w, "Prose only", "This plan closes #7 once shipped.");
+    w.closer.closeError.set(12, transportError("error connecting to api.github.com"));
+    const plan = await createPlan(w, "Close fails", [11, 12, 13]);
 
     const archived = await archivePlan(w, plan);
 
-    const warning = archived.issueClose?.find((i) => i.kind === "unlinked_prose");
-    expect(warning?.stream).toBe("stderr");
-    expect(warning?.message).toContain("#7");
-    expect(warning?.message).toContain(`lore link ${plan.slug} ${w.reportSlug} --type resolves`);
-    expect(w.closer.calls).toEqual([]);
+    expect(archived.status).toBe("archived");
+    expect(w.closer.writes()).toContain("close:11@acme/widget");
+    expect(w.closer.writes()).toContain("close:13@acme/widget");
+    expect(w.closer.writes().some((call) => call.startsWith("comment:12"))).toBe(false);
+    const failure = archived.issueClose?.find((i) => i.kind === "close_failed");
+    expect(failure?.stream).toBe("stderr");
+    expect(failure?.message).toContain("#12");
+    expect(failure?.message).toContain("lore issues --sync");
+    const audit = await must(w.store.queryAudit({ action: ISSUE_CLOSE_FAILED_AUDIT_ACTION }), "audit");
+    expect(audit).toHaveLength(1);
+    expect(audit[0]?.details).toMatchObject({ issue: 12, step: "close", source: plan.slug });
   });
 
-  it("NEGATIVE: no warning when the document already carries the link, and none for a number that is no filed report", async () => {
+  it("a failed READ of #11: reported and audited as step read; #12 is still processed", async () => {
     const w = await buildWorld();
-    const linked = await createPlan(w, "Linked prose", "This fixes #7.");
-    await resolvesLink(w, linked.id);
-    const archivedLinked = await archivePlan(w, linked);
-    expect(archivedLinked.issueClose?.some((i) => i.kind === "unlinked_prose")).toBe(false);
+    w.closer.readError.set(11, transportError("HTTP 502"));
+    const plan = await createPlan(w, "Read fails", [11, 12]);
 
-    const other = await createPlan(w, "Other number", "Resolves #999 someday.");
-    const archivedOther = await archivePlan(w, other);
-    expect(archivedOther.issueClose?.some((i) => i.kind === "unlinked_prose")).toBe(false);
+    const archived = await archivePlan(w, plan);
+
+    expect(archived.issueClose?.find((i) => i.kind === "read_failed")?.message).toContain("#11");
+    expect(w.closer.writes()).toContain("close:12@acme/widget");
+    const audit = await must(w.store.queryAudit({ action: ISSUE_CLOSE_FAILED_AUDIT_ACTION }), "audit");
+    expect(audit.map((row) => row.details)).toEqual([expect.objectContaining({ issue: 11, step: "read" })]);
+  });
+
+  it("a label failure after a successful close: close kept, failure reported and audited", async () => {
+    const w = await buildWorld();
+    w.closer.labelError = transportError("HTTP 403 forbidden");
+    const plan = await createPlan(w, "Label fails", [11]);
+
+    const archived = await archivePlan(w, plan);
+
+    expect(archived.issueClose?.map((i) => i.kind)).toEqual(["closed", "label_failed"]);
+    const audit = await must(w.store.queryAudit({ action: ISSUE_CLOSE_FAILED_AUDIT_ACTION }), "audit");
+    expect(audit[0]?.details).toMatchObject({ issue: 11, step: "label" });
+  });
+
+  it("a comment failure after a successful close: close kept, label still attempted", async () => {
+    const w = await buildWorld();
+    w.closer.commentError = transportError("HTTP 500 on comment");
+    const plan = await createPlan(w, "Comment fails", [11]);
+
+    const archived = await archivePlan(w, plan);
+
+    expect(archived.issueClose?.map((i) => i.kind)).toEqual(["closed", "comment_failed"]);
+    expect(w.closer.writes()).toContain("label:11:resolution:fixed");
   });
 });
 
-describe("AC-IC-1 (i): only a report whose fix has LANDED (archived source) is closed", () => {
-  it("a report whose only resolving source is active is not closed when an unrelated doc is archived", async () => {
+describe("carrier close (e): no carrier, no closer, no repo", () => {
+  it("a task and a plan without extra.issues make no GitHub call and return no line", async () => {
     const w = await buildWorld();
-    const fixer = await createPlan(w, "Active fixer");
-    await resolvesLink(w, fixer.id);
-    await activate(w, fixer.id);
-    const unrelated = await createPlan(w, "Unrelated");
+    const plan = await createPlan(w, "Plain plan");
+    const task = await createTask(w, plan, "Plain task");
+    await passEvidence(w, task.id);
 
-    const archived = await archivePlan(w, unrelated);
+    const done = await must(w.tw.done(task.id, { by: "alice" }), "done");
+    const archived = await archivePlan(w, plan);
 
     expect(w.closer.calls).toEqual([]);
+    expect(done.issue_close).toEqual([]);
     expect(archived.issueClose).toEqual([]);
   });
 
-  it("an explicit wontfix verdict outranks the link: archiving the linked plan closes nothing", async () => {
-    const w = await buildWorld({ explicit: "wontfix" });
-    const plan = await createPlan(w, "Fixer of a wontfix");
-    await resolvesLink(w, plan.id);
+  it("closer absent: archive committed, ONE line says GitHub is not configured and names --sync", async () => {
+    const w = await buildWorld({ closer: null });
+    const plan = await createPlan(w, "No closer", [11, 12]);
+
+    const archived = await archivePlan(w, plan);
+
+    expect(archived.status).toBe("archived");
+    const lines = archived.issueClose ?? [];
+    expect(lines.map((i) => i.kind)).toEqual(["not_configured"]);
+    expect(lines[0]?.message).toContain("lore issues --sync");
+  });
+
+  it("closer wired but no upstream repo: one loud read_failed line, no GitHub call", async () => {
+    const w = await buildWorld({ repo: null });
+    const plan = await createPlan(w, "No repo", [11]);
 
     const archived = await archivePlan(w, plan);
 
     expect(w.closer.calls).toEqual([]);
-    expect(archived.issueClose).toEqual([]);
+    expect(archived.issueClose?.map((i) => i.kind)).toEqual(["read_failed"]);
+    expect(archived.issueClose?.[0]?.stream).toBe("stderr");
+  });
+
+  it("a malformed extra.issues entry planted at store level is dropped; the valid entries still close", async () => {
+    const w = await buildWorld();
+    const plan = await createPlan(w, "Planted", [11]);
+    const stored = await must(w.cs.get(plan.id), "get plan");
+    await must(
+      w.store.update(
+        plan.id,
+        { extra: { ...stored.doc.extra, issues: [{ repo_id: REPO_ID, number: 11 }, { repo_id: "x", number: 0 }, 7] }, version: stored.doc.version + 1 },
+        { expected_version: stored.doc.version },
+      ),
+      "plant",
+    );
+
+    const archived = await archivePlan(w, plan);
+
+    expect(archived.issueClose?.map((i) => i.kind)).toEqual(["closed"]);
   });
 });
 
-describe("AC-IC-1 REGRESSION: an App without the port behaves as before", () => {
-  it("a bare CorpusService archives a plan with no issueClose field", async () => {
+describe("carrier close REGRESSION: an App without the port behaves as before", () => {
+  it("a bare CorpusService archives a plan carrier with no issueClose field", async () => {
     const store = actedStore(new InMemoryStore());
     const cs = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
-    const plan = await must(cs.create({ type: "plan", title: "Bare", content: "b" } as CreateDocInput), "plan");
+    const plan = await must(
+      cs.create({ type: "plan", title: "Bare", content: "b", extra: { issues: refsOf(11) } } as CreateDocInput),
+      "plan",
+    );
     await must(cs.set(plan.id, { status: "approved" }), "approve");
     await must(cs.set(plan.id, { status: "active" }), "activate");
     const archived = await must(cs.set(plan.id, { status: "archived" }), "archive");
