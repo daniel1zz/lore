@@ -32,6 +32,7 @@
     "check:ac-ref-integrity": "bun scripts/check-ac-ref-integrity.ts",
     "check:memory-files": "bun run packages/lore/src/index.ts context refresh --check",
     "check:no-nul-bytes": "bun scripts/check-no-nul-bytes.ts",
+    "check:no-bunx-of-declared-deps": "bun scripts/check-no-bunx-of-declared-deps.ts",
     "check:agent-hygiene": "bun scripts/check-agent-hygiene.ts",
     "check:plan-member-sites": "bun scripts/check-plan-membership-sites.ts",
     "check:ac-state-renderers": "bun scripts/check-ac-state-renderers.ts",
