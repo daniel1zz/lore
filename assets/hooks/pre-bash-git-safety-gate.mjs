@@ -99,6 +99,9 @@
 import { readFileSync } from 'node:fs';
 import { resolve as resolvePath } from 'node:path';
 import { spawnSync } from 'node:child_process';
+// GENERATED copy of packages/core/src/shell-cwd.ts (single source; scripts/sync-hook-shell-cwd.ts --check keeps it
+// identical). The ONE cwd-aware shell parser: this hook has no `cd` / `$VAR` handling of its own.
+import { parseShellCommand } from './lib/shell-cwd.mjs';
 
 let payload;
 try {
@@ -483,7 +486,7 @@ function describeCheckReason(reason, check, absolute) {
  * @returns {{ refusals: string[] }} empty = lore says removable
  */
 function assessOccupancy(path) {
-  const absolute = resolvePath(CWD, path);
+  const absolute = resolvePath(CWD, path); // callers pass an absolute path already resolved against the command's cwd
   const check = readWorktreeCheck(absolute);
   if (!check.ok) {
     return {
@@ -507,10 +510,24 @@ function assessOccupancy(path) {
  *   merged + unoccupied + NO --force — the mandated post-merge cleanup path
  *   (CLAUDE.md). Every other outcome blocks, --force or not.
  */
-function probeWorktreeRemove(inner) {
+function probeWorktreeRemove(inner, cwd = CWD, segment = null) {
   const forced = WORKTREE_REMOVE_FORCE_RE.test(inner);
-  const path = extractPathArg(inner, WORKTREE_REMOVE_VERB_RE);
-  if (!path) return 'Assessment: could not parse the worktree path — treat as UNSAFE.';
+  // reason: #211 — the path is read from the shared parser's argv (quotes removed, `$VAR` expanded from the hook's env,
+  // trailing `)` of a subshell gone) and resolved against the directory the command RUNS in (after any earlier `cd`),
+  // never against the hook's own cwd. An expansion the parser could not resolve refuses, naming it.
+  let typed;
+  if (segment !== null) {
+    const unresolved = segment.unresolved[0];
+    if (unresolved) {
+      return `Assessment: could not resolve the worktree path (${unresolved.cause}: ${unresolved.detail}) — treat as UNSAFE.`;
+    }
+    const verbAt = segment.argv.indexOf('remove');
+    typed = verbAt === -1 ? undefined : segment.argv.slice(verbAt + 1).find((t) => t && !t.startsWith('-'));
+  } else {
+    typed = extractPathArg(inner, WORKTREE_REMOVE_VERB_RE);
+  }
+  if (!typed) return 'Assessment: could not parse the worktree path — treat as UNSAFE.';
+  const path = resolvePath(cwd, typed);
 
   const st = git(['status', '--porcelain'], path);
   if (!st.ok) {
@@ -802,14 +819,49 @@ function splitSegmentPairs(text) {
 // over-block on pathological input it cannot parse, but must never silently
 // under-block (same posture as the probe try/catch blocks below).
 let segmentPairs;
+let preprocessedCmd = cmd;
 try {
-  segmentPairs = splitSegmentPairs(stripHeredocs(expandInlineShellPayloads(cmd)));
+  preprocessedCmd = stripHeredocs(expandInlineShellPayloads(cmd));
+  segmentPairs = splitSegmentPairs(preprocessedCmd);
 } catch {
   segmentPairs = cmd
     .split(/(?:&&|\|\||\||;|\n)+/)
     .map((s) => s.trim())
     .filter(Boolean)
     .map((s) => ({ raw: s, sanitized: s }));
+}
+
+// ── #211: where does each segment RUN? (one parse of the same preprocessed text, by the shared parser) ────────
+// reason: the parse is fail-closed. A parse that cannot be read, or a segment this hook's splitter cut differently
+// from the parser, leaves the segment's directory UNKNOWN and every probe then refuses naming why — never a silent
+// fall back to the hook's own cwd, which is exactly the wrong directory after a `cd`.
+let shellParse;
+try {
+  shellParse = parseShellCommand(preprocessedCmd, { root: CWD, env: process.env });
+} catch (error) {
+  shellParse = { kind: 'not-measured', cause: 'unbalanced-quotes', detail: `shell parser failed: ${error?.message ?? error}` };
+}
+let parserCursor = 0;
+const squashSpace = (text) => text.replace(/\s+/g, ' ').replace(/^[()\s]+|[()\s]+$/g, '');
+
+/**
+ * The parser segment matching a hook segment, in source order.
+ *
+ * @param {string} raw the hook segment's raw text
+ * @returns {{ segment: object | null, unknown: string | null }} `unknown` names why the directory is not known
+ */
+function findParsedSegment(raw) {
+  if (shellParse.kind !== 'parsed') return { segment: null, unknown: `${shellParse.cause}: ${shellParse.detail}` };
+  const wanted = squashSpace(raw);
+  for (let at = parserCursor; at < shellParse.segments.length; at += 1) {
+    const candidate = shellParse.segments[at];
+    if (squashSpace(candidate.raw) === wanted) {
+      parserCursor = at + 1;
+      if (candidate.cwd.kind === 'not-measured') return { segment: candidate, unknown: `${candidate.cwd.cause}: ${candidate.cwd.detail}` };
+      return { segment: candidate, unknown: null };
+    }
+  }
+  return { segment: null, unknown: 'segmentation-mismatch: the command could not be matched to the shell parser\'s segments' };
 }
 
 const PRINT_LIKE = /^(echo|printf|cat|head|tail|less|more|grep|rg|ag|sed|awk|jq|cut|tr|sort|uniq|wc|find|ls|stat|file|test|\[|true|false)\b/;
@@ -861,6 +913,7 @@ const LORE_DECIDE_PAT =
   /(?:(?:env|command|exec|nohup|time|sudo|npx|bunx|xargs)\s+(?:-\S+\s+)*)*(?:(?:\S*\/)?lore|(?:bun|node)\s+(?:run\s+)?\S*index\.(?:ts|js))\s+(?:-\S+\s+(?:[^-\s]\S*\s+)?)*decide(?:\s|$)/;
 
 for (const pair of segmentPairs) {
+  const where = findParsedSegment(pair.raw);
   const target = selectInspectionTarget(pair);
   if (!target.inspect) continue;
   if (isCommandPositionMatch(target.sanitized, LORE_DECIDE_PAT)) {
@@ -883,7 +936,11 @@ for (const pair of segmentPairs) {
         // Probes consume the RAW text (D1). Safe because git() is
         // spawnSync('git', argsArray) with no shell (D3): raw,
         // attacker-influenced text only ever becomes a single array element.
-        try { assessment = rule.probe(target.raw); } catch { assessment = 'Assessment: probe failed — treat as UNSAFE.'; }
+        if (where.unknown !== null) {
+          assessment = `Assessment: could not determine the directory this command runs in (${where.unknown}) — treat as UNSAFE.`;
+        } else {
+          try { assessment = rule.probe(target.raw, where.segment.cwd.absolute, where.segment); } catch { assessment = 'Assessment: probe failed — treat as UNSAFE.'; }
+        }
       }
       // A probe returning `null` (currently only probeWorktreeRemove, for its
       // CLEAN+MERGED+UNOCCUPIED+no-force case) declares THIS specific invocation

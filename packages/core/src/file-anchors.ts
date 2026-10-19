@@ -10,7 +10,7 @@
  *   - anchorsOverlap(a, b) — pure precondition-only overlap check over two
  *     ALREADY-NORMALIZED anchor lists (D4)
  *   - extractFileAnchors(task) — defensive read accessor, mirrors
- *     task-workflow.ts's extractClaim/extractEvidence shape
+ *     task-workflow.ts's readClaimRecord/extractEvidence shape
  *   - fileAnchorProbePath / classifyFileAnchorResolution / unprobedFileAnchors —
  *     the RESOLUTION-classification half (task-a-mistyped-task-file-anchor-is-
  *     stored-and-consulted): given filesystem observations COLLECTED ELSEWHERE,
@@ -256,7 +256,7 @@ function safeTaskExtra(task: DocRecord): Record<string, unknown> {
 /**
  * Extracts a task's declared `file_anchors`. Returns `[]` when absent or
  * malformed (defensive — `extra` is untyped storage), mirroring
- * `task-workflow.ts`'s `extractEvidence`/`extractClaim` shape exactly.
+ * `task-workflow.ts`'s `extractEvidence`/`readClaimRecord` shape exactly.
  *
  * @invariant Does NOT re-run `normalizeFileAnchors` on read — entries written
  *   through the sanctioned seams (create-time `--anchor`, the

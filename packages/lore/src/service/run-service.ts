@@ -23,7 +23,7 @@ import { basename } from "node:path";
 import {
   deriveRunId,
   err,
-  extractClaim,
+  extractHeldClaim,
   extractFileAnchors,
   ok,
   runRecordSchema,
@@ -279,8 +279,7 @@ export class RunService {
       const resolveDirectory = makeDirectoryResolver(this.realpathPort);
       resolvedDirectory = resolveDirectory(input.worktree);
       for (const task of tasks.value) {
-        if (task.status === "archived" || task.status === "deprecated") continue;
-        const claim = extractClaim(task);
+        const claim = extractHeldClaim(task);
         if (claim === undefined) continue;
         if (!claimNamesWorktree(claim.worktree, { branch: input.branch, resolvedDirectory }, resolveDirectory)) continue;
         claimsOfWorktree.push({
@@ -396,8 +395,7 @@ export class RunService {
       const resolveDirectory = makeDirectoryResolver(this.realpathPort);
       const resolvedDirectory = resolveDirectory(workingCopy);
       for (const task of tasks.value) {
-        if (task.status === "archived" || task.status === "deprecated") continue;
-        const claim = extractClaim(task);
+        const claim = extractHeldClaim(task);
         if (claim === undefined) continue;
         let matches = claimNamesWorktree(claim.worktree, { branch: undefined, resolvedDirectory }, resolveDirectory);
         if (!matches && claim.worktree !== undefined) {

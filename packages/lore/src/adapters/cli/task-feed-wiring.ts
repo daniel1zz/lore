@@ -3,7 +3,7 @@
  * Boundary: "adapters/cli/task-feed-wiring.ts (NEW: buildTaskFeedFlowDeps)").
  *
  * THICK-BUNDLE / THIN-FLOW (D2): every domain derivation `flows/task-feed-flow.ts`
- * renders — `computeAcCoverage`, `extractClaim`+`isClaimStale`, fail-evidence
+ * renders — `computeAcCoverage`, `extractHeldClaim`+`isClaimStale`, fail-evidence
  * extraction, `ac_scope` filtering/dangling-id detection — lives HERE, over
  * `CorpusService.getPlanBundle` + `TaskWorkflowService.ready`. The flow module
  * itself imports none of these functions (AC-070-1, enforced by
@@ -63,7 +63,7 @@ import {
   err,
   computeAcCoverage,
   deriveAcCoverageState,
-  extractClaim,
+  extractHeldClaim,
   isClaimStale,
   extractFileAnchors,
   planAcScopeSchema,
@@ -322,7 +322,7 @@ async function buildTaskBundle(app: App, taskIdOrSlug: string): Promise<Result<T
 
   const nowIso = new Date().toISOString();
   const ttlMinutes = app.taskWorkflowService.claimTtlMinutes;
-  const claim = extractClaim(task);
+  const claim = extractHeldClaim(task);
   const claimView: ClaimView | null =
     claim === undefined ? null : { holder: claim.by, fresh: !isClaimStale(claim, nowIso, ttlMinutes) };
 

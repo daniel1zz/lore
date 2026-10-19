@@ -136,6 +136,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatErrorFor } from "../utils.js";
+import { refuseFilterValue, requireCheckTreeForFix } from "../filter-values.js";
 import type { AcService } from "../../../service/ac-service.js";
 import { buildStalenessFlowDeps, listFreshStalenessEscalates } from "../../../flows/staleness-flow.js";
 import { loadTreeBlueprint } from "../../../flows/blueprint-flow.js";
@@ -1099,6 +1100,9 @@ export default defineLoreCommand({
   async run(context): Promise<number> {
     const { args } = context;
     const inv = invocationOf(context);
+    // reason: AC-DCL-2 — `--fix` only applies under `--check-tree`; alone it was silently ignored.
+    const fixNeedsTree = requireCheckTreeForFix(args.fix === true, args["check-tree"] === true);
+    if (!fixNeedsTree.ok) return refuseFilterValue(inv, fixNeedsTree.error);
     // ── check-binary-provenance branch (spec-bootstrap-fixpoint-integrity-
     // binary-provenance-an-anchor, AC-BFI-2) ────────────────────────────────
     // reason: dispatched FIRST, ahead of --enumerate and --check-claude-md.

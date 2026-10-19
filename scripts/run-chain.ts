@@ -27,6 +27,7 @@ export const DEFAULT_STEPS: readonly string[] = [
   "bun run check:ac-state-renderers",
   "bun run check:prose-pins",
   "bun run check:capture-source-buckets",
+  "bun run check:hook-shell-cwd",
   "bun run test:vitest",
   "bun run check:spec-mirror",
   "bun run check:live-repo-state",

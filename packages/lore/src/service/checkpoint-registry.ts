@@ -82,7 +82,7 @@
  */
 
 import {
-  extractClaim,
+  extractHeldClaim,
   extractFileAnchors,
   isClaimStale,
   lintAcQuantifiability,
@@ -2620,7 +2620,7 @@ export function buildAnchorGateContext(
   const siblingClaims: SiblingClaimInfo[] = [];
   for (const sibling of siblingTasks) {
     if (sibling.id === candidateTask.id) continue;
-    const claim = extractClaim(sibling);
+    const claim = extractHeldClaim(sibling);
     if (claim === undefined) continue;
     siblingClaims.push({
       slug: sibling.slug,

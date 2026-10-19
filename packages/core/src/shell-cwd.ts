@@ -1,0 +1,630 @@
+/**
+ * shell-cwd.ts — the ONE parser that reads a shell command string with working-directory
+ * semantics: which argv each `&&` / `||` / `;` / `|` / `&` / newline segment runs, and in WHICH
+ * directory (after every earlier `cd`, scoped by `( … )` subshells, with `$VAR` expanded from an
+ * explicit env map).
+ *
+ * Public surface: {@link parseShellCommand}, {@link resolvePathInSegment}, {@link ABSTRACT_ROOT},
+ * {@link CWD_BUILTINS}, {@link InvalidShellRootError}, and the result types.
+ * Side-effect class: pure (no IO, no Node builtin, no `process.env` read — the caller passes env),
+ * so it stays importable from the browser-safe `@lore/core` barrel.
+ *
+ * ## Invariants
+ *
+ * - Never guess. Anything whose effect on the directory cannot be read from the text alone makes
+ *   the affected cwd `not-measured` and NAMES the cause: an unset `$VAR`, `cd -`, `$( )` / backticks
+ *   / process substitution, an unquoted glob in a `cd` target, `pushd` / `popd`, `eval` / `source`,
+ *   a `cd` joined by `||`, compound keywords and `{ … }` groups, unsupported `cd` options. Once a
+ *   scope is `not-measured` it stays so until that scope ends. Unbalanced quotes or parentheses make the
+ *   whole parse `not-measured` (segmentation itself is unknowable).
+ * - A segment's `cwd` is the directory its command STARTS in (before its own effect). A `cd`
+ *   segment therefore reports the directory it left.
+ * - `( … )`, a pipeline stage and a `&`-backgrounded segment are subshells: a `cd` inside them never
+ *   reaches the following segments.
+ * - A directory is classified against the caller's `root`: `inside` (carries the path relative to
+ *   the root, `""` = the root itself) or `outside` (the caller must refuse, not resolve).
+ * - Paths are normalised lexically (`.` / `..` collapsed). Symlinks are not followed.
+ * - Words are expanded only as far as needed: argv carries quote-removed text, `$VAR` replaced when
+ *   the env has it; an unresolvable expansion stays in the text as typed and is listed in the
+ *   segment's `unresolved`.
+ *
+ * Shipped to the git-safety hook as `assets/hooks/lib/shell-cwd.mjs`: THIS file is the single
+ * source; `scripts/sync-hook-shell-cwd.ts` regenerates that copy and `--check` proves it identical.
+ *
+ * Reports: #229 (cd in a later chain segment), #164 (`(cd x && …)` subshell), #221 (absolute cd),
+ * #211 (hook ignores cd / `$VAR`). Spec: spec-defect-clusters-round-1-done-floors-judge-real-runs-on D4.
+ */
+
+/** Stand-in root for callers that only need a root-relative answer (no real directory to classify against). */
+export const ABSTRACT_ROOT = "/__shell_cwd_root__";
+
+/** Builtins that change the working directory; consumers classify them through this list, never their own `cd` literal. */
+export const CWD_BUILTINS: readonly string[] = ["cd", "pushd", "popd"];
+
+/** Why a directory (or a whole command) could not be measured. */
+export type NotMeasuredCause =
+  | "unset-variable"
+  | "unsupported-expansion"
+  | "cd-dash"
+  | "command-substitution"
+  | "unbalanced-quotes"
+  | "unbalanced-parentheses"
+  | "stack-builtin"
+  | "conditional-cd"
+  | "unsupported-grouping"
+  | "dynamic-command"
+  | "glob-in-cd"
+  | "unsupported-cd-option";
+
+/** A measurement the parser refuses to guess; `detail` names the exact variable / construct. */
+export interface NotMeasured {
+  readonly kind: "not-measured";
+  readonly cause: NotMeasuredCause;
+  readonly detail: string;
+}
+
+/** The directory a segment starts in. */
+export type ShellCwd =
+  | { readonly kind: "inside"; readonly relative: string; readonly absolute: string }
+  | { readonly kind: "outside"; readonly absolute: string }
+  | NotMeasured;
+
+/** One command of the chain. */
+export interface ShellSegment {
+  /** Source text of the segment, trimmed (no surrounding parentheses or operators). */
+  readonly raw: string;
+  /** Quote-removed words, leading `NAME=value` assignments removed, `$VAR` expanded where the env allowed. */
+  readonly argv: readonly string[];
+  readonly cwd: ShellCwd;
+  /**
+   * Expansions of this segment's words that could not be resolved (their text stays as typed in `argv`).
+   * @example `echo $W` with `$W` unset yields `[{ cause: "unset-variable", detail: "$W" }]`.
+   */
+  readonly unresolved: readonly NotMeasured[];
+  /**
+   * The literal target of the most recent successful `cd` in scope, NOT composed with earlier cds
+   * (`cd a && cd b` gives `"b"`), or `null`. Exists only so `commandRunsFileUnfiltered` can keep answering
+   * every case its pre-parser rule answered true (plan "Ownership answers"); new code uses `cwd`.
+   */
+  readonly lastCdTarget: string | null;
+  /** How many `( … )` subshells enclose this segment (0 = the top-level chain). */
+  readonly depth: number;
+}
+
+/** Result of {@link parseShellCommand}. */
+export type ShellParse =
+  | { readonly kind: "parsed"; readonly root: string; readonly segments: readonly ShellSegment[] }
+  | NotMeasured;
+
+/** A path named inside a segment, resolved against that segment's directory. */
+export type ResolvedSegmentPath =
+  | { readonly kind: "inside"; readonly path: string; readonly absolute: string }
+  | { readonly kind: "outside"; readonly absolute: string }
+  | NotMeasured;
+
+/** Variables available for `$NAME` / `${NAME}` / `~` expansion. */
+export type ShellEnv = Readonly<Record<string, string | undefined>>;
+
+/** Thrown when `root` is not an absolute posix path — a caller bug, never a silent default. */
+export class InvalidShellRootError extends Error {
+  readonly root: string;
+  constructor(root: string) {
+    super(`shell-cwd: root must be an absolute posix path, got ${JSON.stringify(root)}`);
+    this.name = "InvalidShellRootError";
+    this.root = root;
+  }
+}
+
+// ─── tokenizer ───────────────────────────────────────────────────────────────
+
+type WordPart =
+  | { readonly kind: "text"; readonly text: string }
+  | { readonly kind: "variable"; readonly name: string; readonly quoted: boolean }
+  | { readonly kind: "home" }
+  | { readonly kind: "unresolvable"; readonly cause: NotMeasuredCause; readonly detail: string };
+
+interface Word {
+  readonly parts: WordPart[];
+  glob: boolean;
+}
+
+type Operator = "&&" | "||" | "|" | ";" | "&" | "\n" | "(" | ")";
+
+type Token =
+  | { readonly kind: "word"; readonly word: Word; readonly start: number; readonly end: number }
+  | { readonly kind: "op"; readonly op: Operator; readonly start: number; readonly end: number };
+
+const VARIABLE_NAME_START = /[A-Za-z_]/;
+const VARIABLE_NAME_CHAR = /[A-Za-z0-9_]/;
+const SPECIAL_PARAMETER = /[?$!#@*\-0-9]/;
+
+const unbalancedQuotes = (detail: string): NotMeasured => ({ kind: "not-measured", cause: "unbalanced-quotes", detail });
+
+/**
+ * Index just past the `)` closing a `$(` / `<(` / `>(` opened at `openIndex` (the `(` itself), or -1.
+ * Quote- and nesting-aware.
+ */
+function findClosingParen(command: string, openIndex: number): number {
+  let depth = 0;
+  for (let index = openIndex; index < command.length; index += 1) {
+    const char = command[index] as string; // reason: bounds asserted by the loop condition
+    if (char === "\\") {
+      index += 1;
+    } else if (char === "'" || char === '"') {
+      const close = findClosingQuote(command, index);
+      if (close === -1) return -1;
+      index = close;
+    } else if (char === "(") {
+      depth += 1;
+    } else if (char === ")") {
+      depth -= 1;
+      if (depth === 0) return index + 1;
+    }
+  }
+  return -1;
+}
+
+/** Index of the quote character closing the one at `openIndex`, or -1. Double quotes honour `\` escapes. */
+function findClosingQuote(command: string, openIndex: number): number {
+  const quote = command[openIndex] as string; // reason: caller passes an index of a quote character
+  for (let index = openIndex + 1; index < command.length; index += 1) {
+    const char = command[index] as string; // reason: bounds asserted by the loop condition
+    if (quote === '"' && char === "\\") index += 1;
+    else if (char === quote) return index;
+  }
+  return -1;
+}
+
+/** Index of the backtick closing the one at `openIndex`, or -1. */
+function findClosingBacktick(command: string, openIndex: number): number {
+  for (let index = openIndex + 1; index < command.length; index += 1) {
+    if (command[index] === "\\") index += 1;
+    else if (command[index] === "`") return index;
+  }
+  return -1;
+}
+
+function pushText(word: Word, text: string): void {
+  const last = word.parts[word.parts.length - 1];
+  if (last !== undefined && last.kind === "text") {
+    word.parts[word.parts.length - 1] = { kind: "text", text: last.text + text };
+    return;
+  }
+  word.parts.push({ kind: "text", text });
+}
+
+/**
+ * Reads a `$…` expansion starting at `index` (the `$`) into `word`.
+ *
+ * @returns the index to continue from, or a {@link NotMeasured} when a construct is unbalanced
+ */
+function readDollar(command: string, index: number, word: Word, quoted: boolean): number | NotMeasured {
+  const next = command[index + 1];
+  if (next === "(") {
+    const end = findClosingParen(command, index + 1);
+    if (end === -1) return { kind: "not-measured", cause: "unbalanced-parentheses", detail: "unterminated $(" };
+    word.parts.push({ kind: "unresolvable", cause: "command-substitution", detail: command.slice(index, end) });
+    return end;
+  }
+  if (next === "{") {
+    const close = command.indexOf("}", index + 2);
+    if (close === -1) return unbalancedQuotes("unterminated ${");
+    const inner = command.slice(index + 2, close);
+    if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(inner)) {
+      word.parts.push({ kind: "variable", name: inner, quoted });
+    } else {
+      word.parts.push({ kind: "unresolvable", cause: "unsupported-expansion", detail: command.slice(index, close + 1) });
+    }
+    return close + 1;
+  }
+  if (next !== undefined && VARIABLE_NAME_START.test(next)) {
+    let end = index + 2;
+    while (end < command.length && VARIABLE_NAME_CHAR.test(command[end] as string)) end += 1;
+    word.parts.push({ kind: "variable", name: command.slice(index + 1, end), quoted });
+    return end;
+  }
+  if (next !== undefined && SPECIAL_PARAMETER.test(next)) {
+    word.parts.push({ kind: "unresolvable", cause: "unsupported-expansion", detail: `$${next}` });
+    return index + 2;
+  }
+  if (next === "'" && !quoted) {
+    word.parts.push({ kind: "unresolvable", cause: "unsupported-expansion", detail: "$'…' (ANSI-C quoting)" });
+    return index + 1;
+  }
+  pushText(word, "$");
+  return index + 1;
+}
+
+/** Splits `command` into words and operators; {@link NotMeasured} when quotes / substitutions do not balance. */
+function tokenize(command: string): Token[] | NotMeasured {
+  const tokens: Token[] = [];
+  let word: Word | null = null;
+  let wordStart = 0;
+
+  const open = (index: number): Word => {
+    if (word === null) {
+      word = { parts: [], glob: false };
+      wordStart = index;
+    }
+    return word;
+  };
+  const closeWord = (end: number): void => {
+    if (word !== null) tokens.push({ kind: "word", word, start: wordStart, end });
+    word = null;
+  };
+  const pushOp = (op: Operator, start: number, length: number): void => {
+    closeWord(start);
+    tokens.push({ kind: "op", op, start, end: start + length });
+  };
+
+  let index = 0;
+  while (index < command.length) {
+    const char = command[index] as string; // reason: bounds asserted by the loop condition
+
+    if (char === " " || char === "\t" || char === "\r") {
+      closeWord(index);
+      index += 1;
+    } else if (char === "\n") {
+      pushOp("\n", index, 1);
+      index += 1;
+    } else if (char === "#" && word === null) {
+      while (index < command.length && command[index] !== "\n") index += 1;
+    } else if (char === "&" && command[index + 1] === "&") {
+      pushOp("&&", index, 2);
+      index += 2;
+    } else if (char === "|" && command[index + 1] === "|") {
+      pushOp("||", index, 2);
+      index += 2;
+    } else if (char === "|") {
+      pushOp("|", index, 1);
+      index += 1;
+    } else if (char === ";") {
+      pushOp(";", index, 1);
+      index += 1;
+    } else if (char === "&") {
+      // reason: `2>&1`, `>&2`, `&>file` use `&` inside a redirection; only a free-standing `&` backgrounds.
+      const redirect = command[index - 1] === ">" || command[index - 1] === "<" || command[index + 1] === ">";
+      if (redirect) {
+        pushText(open(index), "&");
+      } else {
+        pushOp("&", index, 1);
+      }
+      index += 1;
+    } else if (char === "(" && word === null) {
+      pushOp("(", index, 1);
+      index += 1;
+    } else if (char === ")") {
+      pushOp(")", index, 1);
+      index += 1;
+    } else if ((char === "<" || char === ">") && command[index + 1] === "(") {
+      const end = findClosingParen(command, index + 1);
+      if (end === -1) return { kind: "not-measured", cause: "unbalanced-parentheses", detail: "unterminated process substitution" };
+      open(index).parts.push({ kind: "unresolvable", cause: "command-substitution", detail: command.slice(index, end) });
+      index = end;
+    } else if (char === "\\") {
+      const escaped = command[index + 1];
+      if (escaped === "\n") {
+        index += 2; // line continuation
+      } else {
+        pushText(open(index), escaped ?? "\\");
+        index += 2;
+      }
+    } else if (char === "'") {
+      const close = findClosingQuote(command, index);
+      if (close === -1) return unbalancedQuotes("unterminated single quote");
+      pushText(open(index), command.slice(index + 1, close));
+      index = close + 1;
+    } else if (char === '"') {
+      const close = findClosingQuote(command, index);
+      if (close === -1) return unbalancedQuotes("unterminated double quote");
+      const target = open(index);
+      pushText(target, "");
+      let cursor = index + 1;
+      while (cursor < close) {
+        const inner = command[cursor] as string; // reason: cursor < close <= length - 1
+        if (inner === "\\") {
+          const escaped = command[cursor + 1] as string; // reason: close is past this index
+          if (escaped === "$" || escaped === '"' || escaped === "\\" || escaped === "`") pushText(target, escaped);
+          else pushText(target, `\\${escaped}`);
+          cursor += 2;
+        } else if (inner === "$") {
+          const next = readDollar(command, cursor, target, true);
+          if (typeof next !== "number") return next;
+          cursor = next;
+        } else if (inner === "`") {
+          const end = findClosingBacktick(command, cursor);
+          if (end === -1 || end > close) return unbalancedQuotes("unterminated backtick");
+          target.parts.push({ kind: "unresolvable", cause: "command-substitution", detail: command.slice(cursor, end + 1) });
+          cursor = end + 1;
+        } else {
+          pushText(target, inner);
+          cursor += 1;
+        }
+      }
+      index = close + 1;
+    } else if (char === "`") {
+      const end = findClosingBacktick(command, index);
+      if (end === -1) return unbalancedQuotes("unterminated backtick");
+      open(index).parts.push({ kind: "unresolvable", cause: "command-substitution", detail: command.slice(index, end + 1) });
+      index = end + 1;
+    } else if (char === "$") {
+      const next = readDollar(command, index, open(index), false);
+      if (typeof next !== "number") return next;
+      index = next;
+    } else if (char === "~" && word === null) {
+      const after = command[index + 1];
+      const bare = after === undefined || after === "/" || /\s/.test(after) || after === ";" || after === "&" || after === "|" || after === ")";
+      const target = open(index);
+      if (bare) target.parts.push({ kind: "home" });
+      else target.parts.push({ kind: "unresolvable", cause: "unsupported-expansion", detail: "~user" });
+      index += 1;
+    } else {
+      const target = open(index);
+      if (char === "*" || char === "?" || char === "[") target.glob = true;
+      pushText(target, char);
+      index += 1;
+    }
+  }
+  closeWord(command.length);
+  return tokens;
+}
+
+// ─── path helpers (posix, lexical) ───────────────────────────────────────────
+
+function normalizeAbsolute(path: string): string {
+  const out: string[] = [];
+  for (const part of path.split("/")) {
+    if (part === "" || part === ".") continue;
+    if (part === "..") out.pop();
+    else out.push(part);
+  }
+  return `/${out.join("/")}`;
+}
+
+function classify(absolute: string, root: string): ShellCwd {
+  if (absolute === root) return { kind: "inside", relative: "", absolute };
+  const prefix = root === "/" ? "/" : `${root}/`;
+  if (absolute.startsWith(prefix)) return { kind: "inside", relative: absolute.slice(prefix.length), absolute };
+  return { kind: "outside", absolute };
+}
+
+// ─── grouping into segments ──────────────────────────────────────────────────
+
+/** Keywords that open / continue a compound command, whose `cd` effect this parser does not follow. */
+const COMPOUND_KEYWORDS: ReadonlySet<string> = new Set([
+  "if", "then", "else", "elif", "fi", "do", "done", "while", "until", "for", "case", "esac", "select", "function", "{", "}",
+]);
+const DYNAMIC_COMMANDS: ReadonlySet<string> = new Set(["eval", "source", "."]);
+const ASSIGNMENT = /^([A-Za-z_][A-Za-z0-9_]*)=([\s\S]*)$/;
+
+interface ResolvedWord {
+  readonly text: string;
+  readonly unresolved: readonly NotMeasured[];
+}
+
+function resolveWord(word: Word, env: ReadonlyMap<string, string>): ResolvedWord {
+  let text = "";
+  const unresolved: NotMeasured[] = [];
+  for (const part of word.parts) {
+    if (part.kind === "text") {
+      text += part.text;
+    } else if (part.kind === "home" || part.kind === "variable") {
+      const name = part.kind === "home" ? "HOME" : part.name;
+      const value = env.get(name);
+      if (value === undefined) {
+        unresolved.push({ kind: "not-measured", cause: "unset-variable", detail: `$${name}` });
+        text += part.kind === "home" ? "~" : `$${name}`;
+      } else {
+        if (part.kind === "variable" && !part.quoted && /\s/.test(value)) {
+          unresolved.push({ kind: "not-measured", cause: "unsupported-expansion", detail: `$${name} contains whitespace and would be word-split` });
+        }
+        text += value;
+      }
+    } else {
+      unresolved.push({ kind: "not-measured", cause: part.cause, detail: part.detail });
+      text += part.detail;
+    }
+  }
+  return { text, unresolved };
+}
+
+interface Scope {
+  cwd: ShellCwd;
+  readonly env: Map<string, string>;
+  lastCdTarget: string | null;
+}
+
+function cloneScope(scope: Scope): Scope {
+  return { cwd: scope.cwd, env: new Map(scope.env), lastCdTarget: scope.lastCdTarget };
+}
+
+interface PendingWord {
+  readonly word: Word;
+}
+
+/**
+ * Applies a `cd` segment to `scope`.
+ *
+ * @param args - the words after `cd`
+ */
+function applyCd(scope: Scope, args: readonly PendingWord[], root: string): void {
+  if (scope.cwd.kind === "not-measured") return;
+  const targets: PendingWord[] = [];
+  for (const arg of args) {
+    const text = resolveWord(arg.word, scope.env).text;
+    if (text === "--") continue;
+    if (text === "-P" || text === "-L") continue;
+    if (text.startsWith("-") && text !== "-") {
+      scope.cwd = { kind: "not-measured", cause: "unsupported-cd-option", detail: `cd ${text}` };
+      return;
+    }
+    targets.push(arg);
+  }
+  if (targets.length > 1) {
+    scope.cwd = { kind: "not-measured", cause: "unsupported-cd-option", detail: "cd with more than one directory argument" };
+    return;
+  }
+  // reason: a bare `cd` goes to $HOME, so an absent target is the `~` word — unset $HOME then reports not-measured.
+  const target: PendingWord = targets[0] ?? { word: { parts: [{ kind: "home" }], glob: false } };
+  const resolved = resolveWord(target.word, scope.env);
+  const failure = resolved.unresolved[0];
+  if (failure !== undefined) {
+    scope.cwd = failure;
+    return;
+  }
+  if (target.word.glob) {
+    scope.cwd = { kind: "not-measured", cause: "glob-in-cd", detail: `cd ${resolved.text}` };
+    return;
+  }
+  if (resolved.text === "-") {
+    scope.cwd = { kind: "not-measured", cause: "cd-dash", detail: "cd - returns to $OLDPWD, which the text does not name" };
+    return;
+  }
+  if (resolved.text === "") return; // bash: `cd ""` leaves the directory unchanged
+  const absolute = resolved.text.startsWith("/")
+    ? normalizeAbsolute(resolved.text)
+    : normalizeAbsolute(`${scope.cwd.absolute}/${resolved.text}`);
+  scope.cwd = classify(absolute, root);
+  scope.lastCdTarget = resolved.text;
+}
+
+/**
+ * Parses `command` into segments with their working directories.
+ *
+ * @param command - the shell command text
+ * @param options.root - absolute posix directory the command starts in; every segment cwd is classified against it
+ * @param options.env - variables for `$NAME` / `${NAME}` / `~`; a name absent here is UNSET (never read from the process)
+ * @returns the segments in source order, or {@link NotMeasured} when the text cannot be segmented
+ * @throws {InvalidShellRootError} when `root` is not absolute
+ * @example
+ *   parseShellCommand("a.test.ts && cd packages/lore && bun test b.bun.test.ts", { root: "/r", env: {} })
+ *   // segment 2 → cwd { kind: "inside", relative: "packages/lore" }
+ * @example
+ *   parseShellCommand("(cd x && bun test y) && bun test z", { root: "/r", env: {} })
+ *   // `bun test z` runs in root: the cd was scoped to the subshell
+ */
+export function parseShellCommand(command: string, options: { root: string; env: ShellEnv }): ShellParse {
+  if (!options.root.startsWith("/")) throw new InvalidShellRootError(options.root);
+  const root = normalizeAbsolute(options.root);
+  const tokens = tokenize(command);
+  if (!Array.isArray(tokens)) return tokens;
+
+  const baseEnv = new Map<string, string>();
+  for (const [name, value] of Object.entries(options.env)) if (value !== undefined) baseEnv.set(name, value);
+
+  const stack: Scope[] = [{ cwd: classify(root, root), env: baseEnv, lastCdTarget: null }];
+  const segments: ShellSegment[] = [];
+  let pending: PendingWord[] = [];
+  let segmentStart = 0;
+  let previousOp: Operator | null = null;
+
+  const flush = (end: number, nextOp: Operator | null): void => {
+    const scope = stack[stack.length - 1] as Scope; // reason: the stack is never emptied below one scope
+    const words = pending;
+    pending = [];
+    const raw = command.slice(segmentStart, end).trim();
+    if (words.length === 0) return;
+
+    const assignments: [string, string][] = [];
+    let first = 0;
+    while (first < words.length) {
+      const resolved = resolveWord((words[first] as PendingWord).word, scope.env);
+      const match = ASSIGNMENT.exec(resolved.text);
+      if (match === null || resolved.unresolved.length > 0) break;
+      assignments.push([match[1] as string, match[2] as string]);
+      first += 1;
+    }
+    const commandWords = words.slice(first);
+    const resolvedWords = commandWords.map((entry) => resolveWord(entry.word, scope.env));
+    const argv = resolvedWords.map((entry) => entry.text);
+    const unresolved = resolvedWords.flatMap((entry) => entry.unresolved);
+    segments.push({ raw, argv, cwd: scope.cwd, unresolved, lastCdTarget: scope.lastCdTarget, depth: stack.length - 1 });
+
+    const isolated = previousOp === "|" || nextOp === "|" || nextOp === "&";
+    if (isolated) return;
+
+    const head = argv[0];
+    if (head === undefined) {
+      for (const [name, value] of assignments) scope.env.set(name, value);
+      return;
+    }
+    if (head === "export") {
+      for (const word of argv.slice(1)) {
+        const match = ASSIGNMENT.exec(word);
+        if (match !== null) scope.env.set(match[1] as string, match[2] as string);
+      }
+      return;
+    }
+    const conditional = previousOp === "||" || nextOp === "||";
+    if (head === "cd") {
+      if (conditional) {
+        if (scope.cwd.kind !== "not-measured") scope.cwd = { kind: "not-measured", cause: "conditional-cd", detail: `${raw} is joined by ||` };
+        return;
+      }
+      applyCd(scope, commandWords.slice(1), root);
+    } else if (head === "pushd" || head === "popd") {
+      if (scope.cwd.kind !== "not-measured") scope.cwd = { kind: "not-measured", cause: "stack-builtin", detail: head };
+    } else if (DYNAMIC_COMMANDS.has(head)) {
+      if (scope.cwd.kind !== "not-measured") scope.cwd = { kind: "not-measured", cause: "dynamic-command", detail: head };
+    } else if (COMPOUND_KEYWORDS.has(head)) {
+      if (scope.cwd.kind !== "not-measured") scope.cwd = { kind: "not-measured", cause: "unsupported-grouping", detail: head };
+    }
+  };
+
+  for (const token of tokens) {
+    if (token.kind === "word") {
+      if (pending.length === 0) segmentStart = token.start;
+      pending.push({ word: token.word });
+      continue;
+    }
+    const { op } = token;
+    if (op === "(") {
+      if (pending.length > 0) return { kind: "not-measured", cause: "unsupported-grouping", detail: "( after a command word" };
+      stack.push(cloneScope(stack[stack.length - 1] as Scope));
+      previousOp = op;
+      segmentStart = token.end;
+      continue;
+    }
+    if (op === ")") {
+      flush(token.start, op);
+      if (stack.length === 1) return { kind: "not-measured", cause: "unbalanced-parentheses", detail: "unmatched )" };
+      stack.pop();
+      previousOp = op;
+      segmentStart = token.end;
+      continue;
+    }
+    flush(token.start, op);
+    previousOp = op;
+    segmentStart = token.end;
+  }
+  flush(command.length, null);
+  if (stack.length !== 1) return { kind: "not-measured", cause: "unbalanced-parentheses", detail: "unclosed (" };
+  return { kind: "parsed", root, segments };
+}
+
+/**
+ * Resolves a path named in `segment` against the directory that segment runs in.
+ *
+ * @param parse - the parse that produced `segment` (supplies the root)
+ * @param segment - one of `parse.segments`
+ * @param token - a path word of the segment, as written
+ * @returns `inside` with the root-relative normalised path; `outside` with its absolute path; or the segment's own
+ *   {@link NotMeasured} when its directory is unknown
+ * @example
+ *   // segment.cwd = inside "packages/lore"
+ *   resolvePathInSegment(parse, segment, "tests/b.bun.test.ts").path // "packages/lore/tests/b.bun.test.ts"
+ */
+export function resolvePathInSegment(
+  parse: Extract<ShellParse, { kind: "parsed" }>,
+  segment: ShellSegment,
+  token: string,
+): ResolvedSegmentPath {
+  if (segment.cwd.kind === "not-measured") return segment.cwd;
+  const absolute = token.startsWith("/")
+    ? normalizeAbsolute(token)
+    : normalizeAbsolute(`${segment.cwd.absolute}/${token}`);
+  const placed = classify(absolute, parse.root);
+  if (placed.kind === "inside") return { kind: "inside", path: placed.relative, absolute };
+  if (placed.kind === "outside") return { kind: "outside", absolute };
+  return placed;
+}

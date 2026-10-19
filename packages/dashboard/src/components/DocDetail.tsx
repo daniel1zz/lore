@@ -106,7 +106,7 @@ import { resolveEditBaseVersion } from "@/lib/edit-session";
 import type { DocWithNavigation } from "@/lib/api";
 import { apiGetEvidencePanel, evidencePanelQueryKey } from "@/lib/api";
 import type { DocRecord, DocStatus, LinkType } from "@lore/core";
-import { deriveTypeMeta, extractClaim, extractEvidence } from "@lore/core";
+import { deriveTypeMeta, readClaimRecord, extractEvidence } from "@lore/core";
 import { cn } from "@/lib/utils";
 import { TYPE_ACCENT, TYPE_ACCENT_BORDER_CLASS } from "@/lib/type-accent";
 import { formatTypeMetaLabel, isNotablePriority, metaBadgeVariant } from "@/lib/type-meta-label";
@@ -293,11 +293,11 @@ export function DocDetail({
   // PlanExecution view when there's at least one task child; a plan with zero tasks
   // keeps the plain list (no empty rollup shell, per AC-37-3).
   const hasTaskChildren = doc.type === "plan" && navigation.children.some((child) => child.type === "task");
-  // reason: mirrors TaskExecution's own "nothing to show" gate (extractClaim/
+  // reason: mirrors TaskExecution's own "nothing to show" gate (readClaimRecord/
   // extractEvidence, both safeParse-degrading) so the section's leading
   // Separator isn't orphaned when TaskExecution would render `null`.
   const hasTaskExecutionData =
-    doc.type === "task" && (extractClaim(doc) !== undefined || extractEvidence(doc).length > 0);
+    doc.type === "task" && (readClaimRecord(doc) !== undefined || extractEvidence(doc).length > 0);
   // reason: SPEC-075 §Module Boundary — mirrors VerificationProjectionService.evidencePanel's
   // own doc_type switch (task/spec/plan get a real projection branch; everything else —
   // prd/adr/knowledge/phase — is "other", no evidence surface). Gating the tab BUTTON on

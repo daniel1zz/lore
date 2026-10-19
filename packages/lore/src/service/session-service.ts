@@ -64,7 +64,7 @@ import {
   err,
   ok,
   evaluateReadiness,
-  extractClaim,
+  extractHeldClaim,
   isClaimStale,
   knowledgeExtraSchema,
   handoffExtraSchema,
@@ -337,8 +337,8 @@ export class SessionService {
       const resolvedDirectory = resolveDirectory(seat.worktree);
       const matched: BootstrapSeatClaim[] = [];
       for (const task of allDocs) {
-        if (task.type !== "task" || task.status === "archived" || task.status === "deprecated") continue;
-        const claim = extractClaim(task);
+        if (task.type !== "task") continue;
+        const claim = extractHeldClaim(task);
         const recorded = claim?.worktree;
         if (claim === undefined || recorded === undefined || recorded === "") continue;
         if (!claimNamesWorktree(recorded, { branch: seat.branch, resolvedDirectory }, resolveDirectory)) continue;
@@ -496,7 +496,7 @@ export class SessionService {
     const myClaims: BootstrapReport["my_claims"] = [];
     for (const task of allDocs) {
       if (task.type !== "task") continue;
-      const claim = extractClaim(task);
+      const claim = extractHeldClaim(task);
       if (claim === undefined || claim.by !== by) continue;
       // reason: plan membership is `extra.plan_id` — the DECLARED property
       // {@link isPlanMember} reads — NEVER `task.parent_id`. SPEC-065 D4's

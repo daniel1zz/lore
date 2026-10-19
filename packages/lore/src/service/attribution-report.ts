@@ -25,7 +25,7 @@
  */
 
 import type { AuditEntry, DocId, LoreError, Result, VersionRecord } from "@lore/core";
-import { err, extractClaim, ok } from "@lore/core";
+import { err, extractHeldClaim, ok } from "@lore/core";
 import type { StoreInterface } from "../store/store-interface.js";
 
 export const UNATTESTED = "unattested";
@@ -170,7 +170,7 @@ export class AttributionReport {
     let count = 0;
     let oldestMs: number | null = null;
     for (const task of tasks.value) {
-      const orphan = extractClaim(task)?.orphaned_dirty;
+      const orphan = extractHeldClaim(task)?.orphaned_dirty;
       if (orphan === undefined) continue;
       const atMs = Date.parse(orphan.at);
       if (Number.isNaN(atMs)) {

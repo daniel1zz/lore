@@ -7,6 +7,11 @@ import { z } from "zod";
 import type { DocRecord, DocStatus, DocType, Slug } from "./types.js";
 import { DECISION_STATUSES, KNOWLEDGE_SUB_TYPES } from "./types.js";
 import { evidenceEntrySchema, taskClaimSchema } from "./task-workflow.js";
+import { VALID_TRANSITIONS } from "./lifecycle.js";
+// reason: the transition graph moved to the leaf `lifecycle.ts` so `task-workflow.ts` can ask "is this status
+// terminal?" without an import cycle (schemas.ts imports task-workflow.ts values at load time). Re-exported here
+// verbatim so every existing importer of these names is unchanged.
+export { isValidTransition, getAllowedTransitions, isTerminalStatus } from "./lifecycle.js";
 import { assessmentResultSchema } from "./assessment.js";
 import { uatVerdictSchema } from "./uat.js";
 import { prdRequirementsSchema } from "./requirement.js";
@@ -413,7 +418,7 @@ export type PlanPhase = z.infer<typeof planPhaseSchema>;
 /**
  * Extracts and validates a plan's declared `extra.phases[]` array. Returns `[]`
  * when absent, malformed, or not an array — mirrors the "extract, tolerate
- * malformed" shape `task-workflow.ts::extractEvidence`/`extractClaim` and
+ * malformed" shape `task-workflow.ts::extractEvidence`/`readClaimRecord` and
  * `phase-workflow-service.ts`'s own `readAcScope`/`readChecklist` already use
  * (`z.array(schema).safeParse`, never a hand-rolled type guard).
  *
@@ -823,37 +828,6 @@ export type DocPatch = z.infer<typeof docPatchSchema>;
 // ─── Lifecycle Transition Graph ────────────────────────────────────────────
 
 /**
- * Valid status transitions per SPEC-002 §3 diagram.
- * Key: from-status, Value: set of allowed to-statuses.
- */
-const VALID_TRANSITIONS: Readonly<Record<DocStatus, ReadonlySet<DocStatus>>> = {
-  draft: new Set<DocStatus>(["in-review", "approved"]),
-  "in-review": new Set<DocStatus>(["approved", "draft"]),
-  approved: new Set<DocStatus>(["active", "archived", "deprecated"]),
-  active: new Set<DocStatus>(["archived", "deprecated"]),
-  archived: new Set<DocStatus>([]),
-  deprecated: new Set<DocStatus>([]),
-};
-
-/**
- * Doc types allowed the `draft -> archived` edge (SPEC-002's base graph has
- * NO such edge — the pre-existing "B1 blocker fix" deliberately keeps a
- * PRD/spec/adr/plan from skipping every workflow gate by jumping straight
- * from `draft` to terminal). Added deliberately, NARROWLY, per
- * spec-lifecycle-archival-plan-close-cascade-deterministic §Design Decisions
- * D3: the lifecycle-archival cascade/sweep (`lore archive --apply`, the
- * plan-close cascade) archives `task`/`knowledge` docs that are almost
- * always still `draft` (tasks default to draft at creation; handoffs are
- * ALWAYS draft, `session-service.ts::writeHandoff`) once their owning plan
- * closes or they go stale. A fake intermediate status (e.g. forcing
- * `approved` first) was explicitly rejected by the governing spec in favor
- * of this direct, TYPE-SCOPED edge — never a blanket widening of
- * `VALID_TRANSITIONS` itself, which would silently reopen the B1 gap for
- * every other doc type.
- */
-const DRAFT_TO_ARCHIVED_ALLOWED_TYPES: ReadonlySet<DocType> = new Set<DocType>(["task", "knowledge"]);
-
-/**
  * Doc types that may take the reopen-only `approved → draft` edge (spec D5, BR-1050).
  * Deliberately NOT part of {@link VALID_TRANSITIONS}: `lore set --status draft` on an
  * approved doc stays refused; only `ReviewService.reopen` consults this.
@@ -870,47 +844,6 @@ export function isReopenTransition(type: DocType, from: DocStatus, to: DocStatus
     from === "approved" &&
     to === "draft"
   );
-}
-
-/**
- * Returns true if transitioning from -> to is a valid lifecycle step.
- *
- * @param docType - OPTIONAL. When supplied and `from === "draft" && to ===
- *   "archived"`, additionally checks {@link DRAFT_TO_ARCHIVED_ALLOWED_TYPES}
- *   — legal for `task`/`knowledge`, illegal for every other type (same as
- *   omitting `docType` entirely, which preserves the pre-existing strict
- *   behavior for every caller that has no type in scope).
- * Source: SPEC-002 §3; spec-lifecycle-archival-plan-close-cascade-deterministic §Design Decisions D3.
- */
-export function isValidTransition(from: DocStatus, to: DocStatus, docType?: DocType): boolean {
-  if (VALID_TRANSITIONS[from].has(to)) return true;
-  return (
-    from === "draft" &&
-    to === "archived" &&
-    docType !== undefined &&
-    DRAFT_TO_ARCHIVED_ALLOWED_TYPES.has(docType)
-  );
-}
-
-/**
- * Returns the set of statuses reachable from `from`.
- *
- * @param docType - OPTIONAL, same widening rule as {@link isValidTransition}
- *   — when supplied and type-eligible, `"archived"` is included for a
- *   `draft` source even though the base {@link VALID_TRANSITIONS} graph
- *   omits it.
- */
-export function getAllowedTransitions(from: DocStatus, docType?: DocType): DocStatus[] {
-  const base = [...VALID_TRANSITIONS[from]];
-  if (
-    from === "draft" &&
-    docType !== undefined &&
-    DRAFT_TO_ARCHIVED_ALLOWED_TYPES.has(docType) &&
-    !base.includes("archived")
-  ) {
-    return [...base, "archived"];
-  }
-  return base;
 }
 
 /**

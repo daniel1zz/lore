@@ -67,8 +67,9 @@
  *     enforceClaimGate`'s identical interim choice). The resolved invoking identity supplies the candidate actor identity the overlap
  *     predicate's "different actor" test needs; this pre-flight check reaches the IDENTICAL
  *     verdict `lore claim`/`PhaseWorkflowService.claim` themselves would for the same
- *     target/actor — `buildAnchorGateContext` (`checkpoint-registry.js`) is the shared
- *     ctx-builder every one of these call sites uses.
+ *     target/actor — `buildEffectiveAnchorGateContext` (`task-workflow-service.js`: sibling
+ *     selection of HELD claims plus run-aware staleness) is the ONE ctx-builder every one
+ *     of these call sites uses, reached via the services' `buildAnchorGateContext`.
  *
  * `LORE_GATE_BYPASS=1` short-circuits to exit 0 before ANY parsing or checking, for
  * ALL FIVE subcommands — an escape hatch for callers that must not be blocked. It
@@ -195,7 +196,6 @@ import {
   isCheckpointBlocked,
   selectFailures,
   buildUpstreamSpecContext,
-  buildAnchorGateContext,
   isNonPlanParentError,
   type CheckpointDef,
   type GateCheckpoint,
@@ -864,16 +864,14 @@ async function runPlanPromoteGate(
  * CLI gate must reach the IDENTICAL verdict `TaskWorkflowService.claim`'s
  * `GateEnforcer` path reaches for the same task/actor — that means feeding
  * `checkTaskClaim` a POPULATED `candidateBy`/`candidateAnchors`/`siblingClaims` ctx
- * via `buildAnchorGateContext` (`checkpoint-registry.js`), NOT just the upstream-spec
+ * via `taskWorkflowService.buildAnchorGateContext` (the one shared builder), NOT just the upstream-spec
  * ctx. Before this fix, this function built ONLY `buildUpstreamSpecContext(...)` — the
  * anchor fields were always `undefined`, so `noAnchorOverlap` vacuously passed here
  * even while a real conflict blocked `lore claim` itself (the two surfaces disagreed,
  * exactly the drift retro-item-8's SSOT relocation was meant to prevent). `nowIso` is
  * resolved HERE (a CLI adapter may read the wall clock; `checkpoint-registry.ts`'s
- * pure `check`/`feed` callbacks and `GateEnforcer.enforce` may not) and `ttlMinutes`
- * is read from `app.taskWorkflowService.claimTtlMinutes` — the SAME already-resolved
- * value `lore tree`/`lore list`'s claim badges use (`resolveClaimTtlMinutes(config)`,
- * resolved ONCE in `app.ts`) — never re-derived a second time here.
+ * pure `check`/`feed` callbacks and `GateEnforcer.enforce` may not); the TTL is the
+ * service's own `claimTtlMinutes`, applied inside the shared builder — never re-derived here.
  *
  * SPEC-069 ad-hoc gap fix (task-fix-spec-069-gap-adhoc-task-claim-structurally-
  * impossible): a `--adhoc` task's `parent_id` is the root PRD (non-null, but not a
@@ -937,7 +935,6 @@ async function runTaskClaimGate(
 
   const checkpoint = requireCheckpoint("task-claim");
   const nowIso = new Date().toISOString();
-  const ttlMinutes = app.taskWorkflowService.claimTtlMinutes;
   const anchorOverlapEnabled = resolveAnchorOverlapGateEnabled(config);
   // reason: anchor-overlap PARITY with the real claim (this function's own header
   // invariant) — `TaskWorkflowService.claim` captures the session instance from
@@ -968,8 +965,8 @@ async function runTaskClaimGate(
   // legacy/corrupted row. Routed through the SAME checkpoint as every other task, via
   // a synthetic "no spec parent, no siblings" context rather than a second hardcoded
   // pass shape: there is no plan to walk, hence no upstream edge to gate against AND
-  // no sibling claims to compare anchors with — `buildAnchorGateContext(by, task, [],
-  // nowIso, ttlMinutes)` correctly reduces to `{candidateBy: by, candidateAnchors:
+  // no sibling claims to compare anchors with — `taskWorkflowService.buildAnchorGateContext(by, task, [],
+  // nowIso)` correctly reduces to `{candidateBy: by, candidateAnchors:
   // extractFileAnchors(task), siblingClaims: []}` when passed an empty sibling list
   // (the SAME synthetic shape `TaskWorkflowService.enforceClaimGate` builds for this
   // identical edge case), which vacuously passes `noAnchorOverlap` — see
@@ -978,9 +975,14 @@ async function runTaskClaimGate(
   // early-return path.
   let ctx: GateContext;
   if (task.parent_id === null) {
+    const anchorCtx = await app.taskWorkflowService.buildAnchorGateContext(by, task, [], nowIso, candidateSessionId);
+    if (!anchorCtx.ok) {
+      inv.io.stderr.write(formatErrorFor(inv, anchorCtx.error) + "\n");
+      return exitCode(anchorCtx.error);
+    }
     ctx = {
       ...buildUpstreamSpecContext(undefined),
-      ...buildAnchorGateContext(by, task, [], nowIso, ttlMinutes, candidateSessionId),
+      ...anchorCtx.value,
       targetIdOrSlug: taskIdOrSlug,
       candidateRun,
       anchorOverlapEnabled,
@@ -1011,17 +1013,27 @@ async function runTaskClaimGate(
         inv.io.stderr.write(formatErrorFor(inv, siblingsResult.error) + "\n");
         return exitCode(siblingsResult.error);
       }
+      const anchorCtx = await app.taskWorkflowService.buildAnchorGateContext(by, task, siblingsResult.value, nowIso, candidateSessionId);
+      if (!anchorCtx.ok) {
+        inv.io.stderr.write(formatErrorFor(inv, anchorCtx.error) + "\n");
+        return exitCode(anchorCtx.error);
+      }
       ctx = {
         ...buildUpstreamSpecContext(undefined),
-        ...buildAnchorGateContext(by, task, siblingsResult.value, nowIso, ttlMinutes, candidateSessionId),
+        ...anchorCtx.value,
         targetIdOrSlug: taskIdOrSlug,
         candidateRun,
         anchorOverlapEnabled,
       };
     } else {
+      const anchorCtx = await app.taskWorkflowService.buildAnchorGateContext(by, task, bundleResult.value.tasks, nowIso, candidateSessionId);
+      if (!anchorCtx.ok) {
+        inv.io.stderr.write(formatErrorFor(inv, anchorCtx.error) + "\n");
+        return exitCode(anchorCtx.error);
+      }
       ctx = {
         ...buildUpstreamSpecContext(bundleResult.value.spec),
-        ...buildAnchorGateContext(by, task, bundleResult.value.tasks, nowIso, ttlMinutes, candidateSessionId),
+        ...anchorCtx.value,
         targetIdOrSlug: taskIdOrSlug,
         candidateRun,
         anchorOverlapEnabled,
@@ -1059,7 +1071,7 @@ async function runTaskClaimGate(
  * Session parity (task-phaseworkflowservice-claim-captures-no-session-id-so-every
  * §Required fix 4, AC-4): `PhaseWorkflowService.claim` now CAPTURES the session instance
  * from `$CLAUDE_CODE_SESSION_ID`/`$CLAUDE_SESSION_ID`, so this pre-flight reads it
- * through the SAME `resolveClaimSessionId` and threads it into `buildAnchorGateContext`
+ * through the SAME `resolveClaimSessionId` and threads it into the shared builder
  * — byte-for-byte what `runTaskClaimGate` above does. Threading it in only ONE of the
  * two places is the failure mode this pairing exists to prevent: omit it here and every
  * same-actor overlap would print a `ANCHOR_OVERLAP_SESSION_UNMEASURED` refusal the real
@@ -1102,7 +1114,6 @@ async function runPhaseClaimGate(
 
   const checkpoint = requireCheckpoint("phase-claim");
   const nowIso = new Date().toISOString();
-  const ttlMinutes = requirePhaseWorkflowService(app).claimTtlMinutes;
   const anchorOverlapEnabled = resolveAnchorOverlapGateEnabled(config);
   // reason: anchor-overlap PARITY with the real phase claim (this function's own header
   // paragraph) — `PhaseWorkflowService.claim` captures the session instance from
@@ -1122,9 +1133,14 @@ async function runPhaseClaimGate(
   // rationale of the synthetic "no spec parent, no siblings" context.
   let ctx: GateContext;
   if (phase.parent_id === null) {
+    const anchorCtx = await requirePhaseWorkflowService(app).buildAnchorGateContext(by, phase, [], nowIso, candidateSessionId);
+    if (!anchorCtx.ok) {
+      inv.io.stderr.write(formatErrorFor(inv, anchorCtx.error) + "\n");
+      return exitCode(anchorCtx.error);
+    }
     ctx = {
       ...buildUpstreamSpecContext(undefined),
-      ...buildAnchorGateContext(by, phase, [], nowIso, ttlMinutes, candidateSessionId),
+      ...anchorCtx.value,
       targetIdOrSlug: phaseIdOrSlug,
       anchorOverlapEnabled,
     };
@@ -1134,9 +1150,14 @@ async function runPhaseClaimGate(
       inv.io.stderr.write(formatErrorFor(inv, bundleResult.error) + "\n");
       return exitCode(bundleResult.error);
     }
+    const anchorCtx = await requirePhaseWorkflowService(app).buildAnchorGateContext(by, phase, bundleResult.value.tasks, nowIso, candidateSessionId);
+    if (!anchorCtx.ok) {
+      inv.io.stderr.write(formatErrorFor(inv, anchorCtx.error) + "\n");
+      return exitCode(anchorCtx.error);
+    }
     ctx = {
       ...buildUpstreamSpecContext(bundleResult.value.spec),
-      ...buildAnchorGateContext(by, phase, bundleResult.value.tasks, nowIso, ttlMinutes, candidateSessionId),
+      ...anchorCtx.value,
       targetIdOrSlug: phaseIdOrSlug,
       anchorOverlapEnabled,
     };

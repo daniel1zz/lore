@@ -357,7 +357,7 @@ export function assertScopeFreeze(
  *
  * `extra` is untyped storage, so a malformed value degrades to `undefined`
  * ("nobody declared a readable scope") rather than throwing — the same
- * extract-and-tolerate shape as `extractEvidence`/`extractClaim`
+ * extract-and-tolerate shape as `extractEvidence`/`readClaimRecord`
  * (`task-workflow.ts`) and `extractFileAnchors` (`file-anchors.ts`). It lives
  * HERE, beside {@link assertScopeFreeze} and {@link acScopeArraySchema},
  * because the whole scope contract — shape, invariant, reader — is one unit

@@ -1,11 +1,11 @@
 import { defineConfig } from "vitest/config";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { homedir, tmpdir } from "node:os";
+import { rmSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, URL } from "node:url";
 import { workspaceAliases } from "./workspace-aliases";
 import { resolveMaxWorkers } from "./scripts/test-max-workers";
-import { armSandboxEnv } from "./scripts/test-isolation-env";
+import { armSandboxEnv, createRunRoot } from "./scripts/test-isolation-env";
 import { readRecorderAliases, readRecorderMockRedirect } from "./scripts/test-read-aliases";
 
 // reason: arm the AC-TG-2 sandbox marker HERE, at config load in the runner's main process.
@@ -24,6 +24,10 @@ export const THROWAWAY_HOME_ENV = "LORE_TEST_THROWAWAY_HOME";
  * the same reason as the sandbox marker: workers are forked with this environment as their startup environment, and under
  * the Bun runtime a child spawned without an explicit `env` inherits only that.
  *
+ * One run root (plan-test-runs-own-their-temp-dir-one-run-root-holds-home-and) holds that home and a `tmp/` that TMPDIR,
+ * TMP and TEMP point at, so the directories tests create through `tmpdir()` are removed with the run instead of piling up
+ * in the developer's temp dir.
+ *
  * What the tools need from the real home, set explicitly and nothing else:
  *   - `BUN_INSTALL_CACHE_DIR`: bun's package cache lives under `$HOME/.bun` by default; without this every `bun`
  *     the run starts (the one `bun run build`, the oracle subprocesses) would re-download packages into the empty home.
@@ -38,13 +42,14 @@ function armThrowawayHome(env: Record<string, string | undefined> = process.env)
   if (env["BUN_INSTALL_CACHE_DIR"] === undefined) {
     env["BUN_INSTALL_CACHE_DIR"] = join(env["BUN_INSTALL"] ?? join(realHome, ".bun"), "install", "cache");
   }
-  const home = mkdtempSync(join(tmpdir(), "lore-test-home-"));
+  const { root, home } = createRunRoot(env);
   writeFileSync(join(home, ".gitconfig"), "[user]\n\tname = Lore Test\n\temail = lore-test@example.invalid\n");
   env["HOME"] = home;
   env[THROWAWAY_HOME_ENV] = home;
-  // reason: the process that created the home removes it when it ends (also for `vitest list`, which loads this config
-  // and runs no teardown); a nested run created nothing and removes nothing.
-  process.once("exit", () => rmSync(home, { recursive: true, force: true }));
+  // reason: the process that created the root removes it, with the home and every directory the tests made under its
+  // tmp/, when it ends (also for `vitest list`, which loads this config and runs no teardown); a nested run created
+  // nothing and removes nothing. A run killed by SIGKILL cannot; the next run removes its root (createRunRoot).
+  process.once("exit", () => rmSync(root, { recursive: true, force: true }));
 }
 armThrowawayHome();
 
