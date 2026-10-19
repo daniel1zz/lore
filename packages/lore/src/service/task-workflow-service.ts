@@ -33,6 +33,11 @@
  *                                             red-first <task>`) — the ONLY writer
  *                                             for that flag (task-red-first-
  *                                             discipline-is-asked-for-in-prose-but-never)
+ *   park(idOrSlug, opts, now?)             → sets extra.parked {at, by, reason} (`lore park
+ *                                             <task> --reason`) — the ONLY writer for that
+ *                                             key (BR-1354): the task's unlanded branch stops
+ *                                             holding its anchors at `lore integrate`; no
+ *                                             status, branch or anchor changes
  *   ready(planIdOrSlug, now?)              → computed readiness report (zero writes)
  *   readyAdhoc(now?)                       → OPEN ad-hoc (planless) task listing (zero
  *                                             writes, SPEC-069 D2) — the `--adhoc`
@@ -837,6 +842,12 @@ export interface AnchorMutationOpts {
   by: string;
   /** See {@link ClaimOpts.source}. */
   source?: string;
+}
+
+/** Options for {@link TaskWorkflowService.park}. */
+export interface ParkOpts extends AnchorMutationOpts {
+  /** Why the work is set aside; non-blank (the CLI refuses a missing or blank one with exit 2). */
+  reason: string;
 }
 
 /**
@@ -5016,6 +5027,36 @@ export class TaskWorkflowService {
       "update",
       { by: opts.by, red_first: true },
     );
+  }
+
+  // ── Park (spec-landing-does-the-bookkeeping-claims-start-from-main-parked, BR-1354) ──
+
+  /**
+   * Parks `idOrSlug`: records `extra.parked = {at, by, reason}` so the own-diff holder query at `lore integrate`
+   * (BR-1346) no longer counts this task's UNLANDED BRANCH as holding the files it anchors. A HELD claim still holds:
+   * parking releases only the branch-based hold.
+   *
+   * This is the ONLY writer for `extra.parked`. It changes nothing else: not the status, not the claim, not the branch,
+   * not the anchors (the work stays where it is and can be picked up again; claiming it removes the park). Parking a
+   * parked task replaces the record (new `at`/`by`/`reason`).
+   *
+   * @param idOrSlug - Task document ULID or slug.
+   * @param opts - `{ by, reason, source? }`; `reason` must be non-blank.
+   * @param now - Time seam (D10).
+   * @returns The updated task DocRecord.
+   * @throws DOC_NOT_FOUND, VALIDATION_ERROR (blank reason, or not a task), STALE_VERSION.
+   */
+  async park(idOrSlug: string, opts: ParkOpts, now: () => string = defaultNow): Promise<Result<DocRecord, LoreError>> {
+    const reason = opts.reason.trim();
+    if (reason === "") {
+      return err({ code: "VALIDATION_ERROR", field: "reason", message: "lore park needs a non-blank --reason: say why the work is set aside", value: opts.reason });
+    }
+    const taskResult = await this.resolveTask(idOrSlug);
+    if (!taskResult.ok) return taskResult;
+    const task = taskResult.value;
+    const nowIso = now();
+    const parked = { at: nowIso, by: opts.by, reason };
+    return this.writeTaskExtra(task, { ...task.extra, parked }, nowIso, opts.by, `Parked by ${opts.by}: ${reason}`, "update", { by: opts.by, parked }, false);
   }
 
   // ── ready ────────────────────────────────────────────────────────────────

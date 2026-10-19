@@ -49,7 +49,8 @@ import { defineLoreCommand, exitCli } from "../cli-exit.js";
 import { invocationOf } from "../command-invocation.js";
 import { loadLoreApp } from "../loader.js";
 import { resolveCallerSession } from "../caller-session.js";
-import { exitCode, formatError } from "../utils.js";
+import { exitCode, formatError, formatErrorFor, resolveActor } from "../utils.js";
+import { isTerminalStatus, ok, type DocStatus } from "@lore/core";
 import { removeCorpusSnapshot, takeCorpusSnapshot } from "../../../store/corpus-snapshot.js";
 import { sqliteIntegrationLease } from "../../../store/integration-lease.js";
 import { IntegrateLossLedger } from "../../../service/integrate-loss-ledger.js";
@@ -62,6 +63,7 @@ import {
   type FloorRunner,
   type IntegrateGit,
   type IntegrateOutcome,
+  type TaskCompletion,
   type SharedViewRebuild,
   type SharedViewRefresh,
 } from "../../../service/integrate-service.js";
@@ -220,6 +222,11 @@ export default defineLoreCommand({
         inv.io.stderr.write("Error: this composition has no branch ownership reader, so the branch's own change cannot be judged; nothing was landed\n");
         return 1;
       }
+      const drift = app.driftCheckService;
+      if (drift === undefined) {
+        inv.io.stderr.write("Error: this composition has no drift-check service, so anchored paths cannot be judged (BR-1355); nothing was landed\n");
+        return 1;
+      }
       const service = new IntegrateService({
         git: runGit,
         lease: sqliteIntegrationLease,
@@ -232,11 +239,52 @@ export default defineLoreCommand({
         attempts: new IntegrateAttemptLedger(corpusDir),
         // the landing is recorded through the corpus write route (TaskWorkflowService -> CorpusService.writeDoc)
         landings: { record: (landing) => app.taskWorkflowService.recordLanding(landing) },
+        // BR-1355: spec and knowledge anchors follow the files the branch renamed, through the corpus write route
+        anchors: { follow: (moves, landing) => drift.followMovedFiles(moves, landing) },
+        // BR-1356: the done walk for every task of the landed branch; a refusal prints and never un-lands main
+        completion: {
+          complete: async (tasks) => {
+            const identity = await app.verifiedInvocationIdentity?.();
+            if (identity !== undefined && !identity.ok) {
+              return tasks.map((task) => ({ task, outcome: "refused" as const, message: formatErrorFor(inv, identity.error) }));
+            }
+            const by = resolveActor(inv.io, undefined, inv.env, inv.cwd, inv.user);
+            const callerSession = resolveCallerSession(undefined, inv.env);
+            const doneOpts = {
+              by,
+              harnessRun: identity?.value?.harnessRun ?? null,
+              source: app.callerSurface,
+              ...(callerSession !== undefined ? { callerSession } : {}),
+            };
+            const completions: TaskCompletion[] = [];
+            for (const task of tasks) {
+              const done = await app.taskWorkflowService.done(task, doneOpts);
+              if (done.ok) {
+                completions.push({ task, outcome: "archived" });
+                continue;
+              }
+              const floor = (done.error as { details?: { floor?: unknown } }).details?.floor;
+              completions.push({ task, outcome: "refused", ...(typeof floor === "string" ? { floor } : {}), message: formatErrorFor(inv, done.error) });
+            }
+            return completions;
+          },
+        },
         // the branch's own change is judged before the floor (BR-1346, BR-1347, BR-1348); it reads the repository and the claims only
         ownDiff: new OwnDiffJudgment({
           git: runGit,
           projectRoot,
           ownership,
+          codeAnchors: {
+            read: async () => {
+              const declared = await drift.listDeclaredAnchors();
+              if (!declared.ok) return declared;
+              return ok(
+                declared.value
+                  .filter((entry) => !isTerminalStatus(entry.doc_status as DocStatus, entry.doc_type))
+                  .map((entry) => ({ doc_slug: entry.doc_slug, anchor: entry.anchor.raw, path: entry.anchor.path, is_dir: entry.anchor.isDir })),
+              );
+            },
+          },
           loadCoChangeRules: () => loadCoChangeRules(projectRoot, readFileOrNull),
           matchesGlob: (pattern, path) => new Bun.Glob(pattern).match(path),
         }),

@@ -34,7 +34,9 @@ function setup(): { fx: OwnDiffFixture; taskT: string; taskU: string } {
   f.claim(taskU, "branch-y");
   f.release(taskU);
   f.makeBranch("branch-x", { "src/x.ts": "export const x = 2;\n" });
-  const taskT = f.createTask("T", ["src/x.ts"]);
+  // T anchors another file: its change to src/x.ts is outside its anchors, so only U's hold is in question (and T never
+  // blocks U's second claim at the claim gate)
+  const taskT = f.createTask("T", ["src/t.ts"]);
   f.claim(taskT, "branch-x");
   return { fx: f, taskT, taskU };
 }

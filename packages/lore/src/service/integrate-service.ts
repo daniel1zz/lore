@@ -12,7 +12,11 @@
  *   `deps.ownDiff.judge(branch, tip)` judges the branch's own change (`git diff <merge-base(main, tip)> <tip>`) against its
  *   tasks and the other live claims; a refusal is `err(VALIDATION_ERROR, field "own-diff")`, exit 4, naming BR-1346/1347/1348,
  *   with nothing touched. A pass hands `outside_anchors` (own-change paths no task of the branch anchors) to the landing record.
- * Public surface: IntegrateService.integrate, LandingRecorder, OwnDiffJudge, IntegrateOutcome, integrateExitCode, IntegrateRequest,
+ * Landing bookkeeping (spec-landing-does-the-bookkeeping-claims-start-from-main-parked), after main moved and the landing
+ *   is recorded, never un-landing main and never failing the call: `deps.anchors.follow` rewrites the spec and knowledge
+ *   anchors of the files the branch renamed (BR-1355), then `deps.completion.complete` runs the done walk for every task
+ *   of the branch (BR-1356); each refusal is printed with its floor id and the command that satisfies it.
+ * Public surface: IntegrateService.integrate, LandingRecorder, AnchorFollower, LandingCompleter, TaskCompletion, OwnDiffJudge, IntegrateOutcome, integrateExitCode, IntegrateRequest,
  *   IntegrateDeps, IntegrateGit, FloorRunner, CorpusSnapshotter, INTEGRATE_MAX_ATTEMPTS, INTEGRATE_EXIT_LOST_RACES, INTEGRATE_MARKER_ENV,
  *   integrationWorktreePath.
  * Invariants:
@@ -74,7 +78,7 @@ import { join } from "node:path";
 import { err, ok, type LoreError, type Result } from "@lore/core";
 import type { IntegrateLossLedger } from "./integrate-loss-ledger.js";
 import type { AttemptRecord, IntegrateAttemptLedger } from "./integrate-attempt-ledger.js";
-import type { OwnDiffVerdict } from "./own-diff-judgment.js";
+import type { OwnDiffRename, OwnDiffVerdict } from "./own-diff-judgment.js";
 import type { LandingFact, LandingRequest } from "./task-commit-range.js";
 import { EMBEDDED_ASSETS_MANIFEST } from "../generated/assets-manifest.js";
 import { GIT_UPGRADE_HINT, MIN_GIT_FOR_MAIN_REF_HOOK, parseGitVersion } from "../flows/setup-project-flow.js";
@@ -163,9 +167,37 @@ export interface LandingRecorder {
   readonly record: (landing: LandingRequest) => Promise<Result<readonly string[], LoreError>>;
 }
 
-/** Judges a branch's own change before it lands (BR-1346, BR-1347, BR-1348); `OwnDiffJudgment` implements it. Reads, never writes. */
+/**
+ * Rewrites the code anchors of spec and knowledge docs that name a file the landed branch renamed (BR-1355). Resolves
+ * to the slugs of the documents rewritten. Wired by the CLI to `DriftCheckService.followMovedFiles`; a failure never
+ * un-lands main.
+ */
+export interface AnchorFollower {
+  readonly follow: (moves: readonly OwnDiffRename[], landing: { readonly branch: string; readonly landing_commit: string }) => Promise<Result<readonly string[], LoreError>>;
+}
+
+/** What the done walk did for one task of a landed branch: archived, or refused (with the floor that refused, when it was one). */
+export type TaskCompletion =
+  | { readonly task: string; readonly outcome: "archived" }
+  | { readonly task: string; readonly outcome: "refused"; readonly floor?: string; readonly message: string };
+
+/**
+ * Runs the done walk for each of `tasks` (BR-1356). Wired by the CLI to `TaskWorkflowService.done`; one completion per
+ * task, in order; a refusal is a value, never a throw, and never touches main.
+ */
+export interface LandingCompleter {
+  readonly complete: (tasks: readonly string[]) => Promise<readonly TaskCompletion[]>;
+}
+
+/** Judges a branch's own change before it lands (BR-1346, BR-1347, BR-1348, BR-1355); `OwnDiffJudgment` implements it. Reads, never writes. */
 export interface OwnDiffJudge {
   readonly judge: (branch: string, tip: string) => Promise<Result<OwnDiffVerdict, LoreError>>;
+}
+
+/** What the own-diff judgment hands the landing: the footprint to record and the renames anchors must follow. */
+interface JudgedChange {
+  readonly footprint: Pick<LandingFact, "outside_anchors">;
+  readonly renames: readonly OwnDiffRename[];
 }
 
 export interface IntegrateDeps {
@@ -176,6 +208,10 @@ export interface IntegrateDeps {
   readonly pid?: number;
   /** Landing records (`extra.landing` on the branch's tasks). Absent in a bare construction: nothing is recorded. */
   readonly landings?: LandingRecorder;
+  /** Anchors follow renamed files after the landing (BR-1355). Absent in a bare construction: none are rewritten. */
+  readonly anchors?: AnchorFollower;
+  /** The done walk after the landing (BR-1356). Absent in a bare construction: no task is archived by the landing. */
+  readonly completion?: LandingCompleter;
   /** The own-diff judgment run before the floor. Absent in a bare construction: the branch is not judged. */
   readonly ownDiff?: OwnDiffJudge;
   /** Floor corpus: the floor reads a snapshot of the shared corpus inside the integration worktree, never the live one. */
@@ -357,8 +393,9 @@ export class IntegrateService {
     floorCommand: string,
     tip: string,
     wt: string,
-    footprint: Pick<LandingFact, "outside_anchors">,
+    judged: JudgedChange,
   ): Promise<Result<IntegrateOutcome, LoreError>> {
+    const footprint = judged.footprint;
     const { git, projectRoot, ledger, log } = this.deps;
     const clock = this.deps.clock ?? Date.now;
     const remoteOfBranch = this.remoteOf(request.branch);
@@ -377,7 +414,8 @@ export class IntegrateService {
         // and the branch head itself is the landed commit: it is an ancestor of main.
         // reason: BR-1336 — nothing reconstructs a landing from main's history: the branch head is the landed commit and
         // the recorder takes the range start from each task's own claim base (`base_from_claim`).
-        await this.recordLanding({ branch: request.branch, branch_head: tip, main_before: base.value, main_after: base.value, landing_commit: tip, base_from_claim: true });
+        const claimants = await this.recordLanding({ branch: request.branch, branch_head: tip, main_before: base.value, main_after: base.value, landing_commit: tip, base_from_claim: true });
+        await this.completeLanding(claimants, [], { branch: request.branch, landing_commit: tip });
         const cleared = ledger.clear(request.branch);
         if (!cleared.ok) return cleared;
         const view = this.refreshSharedView();
@@ -431,7 +469,8 @@ export class IntegrateService {
       const casMs = clock() - casStart;
       if (swapped.status === 0) {
         finish({ outcome: "landed", merge_ms: mergeMs, corpus_snapshot_ms: snapshotMs, floor: floorTimings, cas_ms: casMs });
-        await this.recordLanding({ branch: request.branch, branch_head: tip, main_before: base.value, main_after: merge, landing_commit: merge, ...footprint });
+        const claimants = await this.recordLanding({ branch: request.branch, branch_head: tip, main_before: base.value, main_after: merge, landing_commit: merge, ...footprint });
+        await this.completeLanding(claimants, judged.renames, { branch: request.branch, landing_commit: merge });
         const cleared = ledger.clear(request.branch);
         if (!cleared.ok) return cleared;
         const view = this.refreshSharedView();
@@ -464,17 +503,17 @@ export class IntegrateService {
    *
    * @returns the landed footprint to record, or the refusal (VALIDATION_ERROR on field `own-diff`, exit 4).
    */
-  private async judgeOwnDiff(branch: string, tip: string): Promise<Result<Pick<LandingFact, "outside_anchors">, LoreError>> {
+  private async judgeOwnDiff(branch: string, tip: string): Promise<Result<JudgedChange, LoreError>> {
     const judgment = this.deps.ownDiff;
-    if (judgment === undefined) return ok({});
+    if (judgment === undefined) return ok({ footprint: {}, renames: [] });
     const main = this.resolveCommit(TARGET_REF);
     if (!main.ok) return main;
     const onMain = this.deps.git(this.deps.projectRoot, ["merge-base", "--is-ancestor", tip, main.value]);
-    if (onMain.status === 0) return ok({});
+    if (onMain.status === 0) return ok({ footprint: {}, renames: [] });
     if (onMain.status !== 1) return err(gitFailure(`is ${short(tip)} on ${TARGET_NAME}`, onMain));
     const verdict = await judgment.judge(branch, tip);
     if (!verdict.ok) return verdict;
-    return ok({ outside_anchors: [...verdict.value.outside_anchors] });
+    return ok({ footprint: { outside_anchors: [...verdict.value.outside_anchors] }, renames: verdict.value.renames });
   }
 
   /**
@@ -482,15 +521,46 @@ export class IntegrateService {
    * could not be written is logged loudly, so the missing record is visible; `lore done` refuses that task as
    * `not-landed` until `lore integrate` is run again on the branch (BR-1336).
    */
-  private async recordLanding(landing: LandingRequest): Promise<void> {
+  private async recordLanding(landing: LandingRequest): Promise<readonly string[]> {
     const recorder = this.deps.landings;
-    if (recorder === undefined) return;
+    if (recorder === undefined) return [];
     const written = await recorder.record(landing);
     if (!written.ok) {
       this.deps.log(`integrate: WARNING: the landing of ${landing.branch} was not recorded on its tasks: ${written.error.code}${"message" in written.error ? ` ${written.error.message}` : ""}`);
-      return;
+      return [];
     }
     this.deps.log(`integrate: landing of ${landing.branch} recorded on ${written.value.length === 0 ? "no task (none claimed this branch)" : written.value.join(", ")}`);
+    return written.value;
+  }
+
+  /**
+   * The bookkeeping that follows a recorded landing, in this order, never un-landing main and never failing the call
+   * (main has already moved): (1) BR-1355 anchors follow the renamed files; (2) BR-1356 the done walk for every task of
+   * the branch. A refused task is printed with the floor that refused and the command its refusal names; a failure to
+   * run a step is a loud WARNING line.
+   */
+  private async completeLanding(
+    tasks: readonly string[],
+    moves: readonly OwnDiffRename[],
+    landing: { readonly branch: string; readonly landing_commit: string },
+  ): Promise<void> {
+    const { anchors, completion, log } = this.deps;
+    if (anchors !== undefined && moves.length > 0) {
+      const followed = await anchors.follow(moves, landing);
+      if (!followed.ok) {
+        log(`integrate: WARNING: anchors did not follow the files ${landing.branch} moved: ${followed.error.code}${"message" in followed.error ? ` ${followed.error.message}` : ""}`);
+      } else {
+        log(`integrate: anchors followed ${moves.map((m) => `${m.from} -> ${m.to}`).join(", ")} on ${followed.value.length === 0 ? "no document" : followed.value.join(", ")}`);
+      }
+    }
+    if (completion === undefined || tasks.length === 0) return;
+    for (const done of await completion.complete(tasks)) {
+      if (done.outcome === "archived") {
+        log(`integrate: ${done.task} archived by the landing (every done floor is met)`);
+        continue;
+      }
+      log(`integrate: ${done.task} stays unarchived${done.floor !== undefined ? ` [floor: ${done.floor}]` : ""}; main stays landed. ${done.message}`);
+    }
   }
 
   /**

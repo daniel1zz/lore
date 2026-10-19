@@ -368,6 +368,13 @@ export const taskExtraSchema = z
      */
     red_first: z.boolean().optional(),
     /**
+     * Parked work: the task's unlanded branch no longer holds the files it anchors
+     * (spec-landing-does-the-bookkeeping-claims-start-from-main-parked, BR-1354). Written ONLY by
+     * `TaskWorkflowService.park` (`lore park <task> --reason "<why>"`); a claim removes it (a task claimed
+     * again holds again). Read by the own-diff holder query at `lore integrate`. Shape is the plan's shared contract.
+     */
+    parked: z.object({ at: z.string(), by: z.string(), reason: z.string() }).optional(),
+    /**
      * Bi-temporal validity metadata (SPEC-043 D1) — a task is a SECOND
      * eligible type alongside knowledge/adr as of
      * task-a-task-cannot-be-retracted-supersedes-emits-a-repair (Defect 2):

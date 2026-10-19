@@ -80,15 +80,19 @@ describe("AC-LB-3 — anchors follow moved files at landing", () => {
     expect(relanded.exitCode, relanded.text).toBe(0);
   }, 300_000);
 
-  it("a rename of an unanchored file changes no document; the knowledge doc's anchor follows like a spec's", () => {
+  it("a knowledge doc's anchor follows a rename like a spec's, and a document anchoring nothing moved is not rewritten", () => {
     const f = new OwnDiffFixture();
     fx = f;
     f.commitOnMain(BASE, "base sources");
     const knowledge = f.parseSlug(
-      f.mustLore(["create", "knowledge", "--title", "Anchored fact", "--content", "w is one", "--no-ai"]).stdout,
+      f.mustLore(["create", "knowledge", "--title", "Anchored fact", "--sub-type", "reference", "--content", "w is one", "--no-ai"]).stdout,
     );
     f.mustLore(["anchor", "add", knowledge, "src/w.ts#w"]);
     const knowledgeVersion = versionOf(f, knowledge);
+    const bystander = f.parseSlug(
+      f.mustLore(["create", "spec", "--title", "Bystander spec", "--content", "## Overview\nx", "--no-ai", "--code-anchor", "src/z.ts"]).stdout,
+    );
+    const bystanderVersion = versionOf(f, bystander);
     f.makeBranch("branch-r", { "src/w.ts": null, "src/w2.ts": "export const w = 1;\n" });
     const task = f.createTask("TR", ["src/w2.ts"]);
     f.claim(task, "branch-r");
@@ -98,5 +102,7 @@ describe("AC-LB-3 — anchors follow moved files at landing", () => {
     expect(landed.exitCode, landed.text).toBe(0);
     expect(specAnchors(f, knowledge)).toEqual(["src/w2.ts#w"]);
     expect(versionOf(f, knowledge)).toBe(knowledgeVersion + 1);
+    expect(versionOf(f, bystander)).toBe(bystanderVersion);
+    expect(specAnchors(f, bystander)).toEqual(["src/z.ts"]);
   }, 300_000);
 });
