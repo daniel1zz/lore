@@ -62,7 +62,7 @@
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { spawnSync } from "child_process";
-import { mkdtempSync, rmSync, existsSync } from "fs";
+import { appendFileSync, mkdtempSync, rmSync, existsSync } from "fs";
 import { patchLoreConfig } from "../../helpers/patch-lore-config.js";
 import { join } from "path";
 import { tmpdir } from "os";
