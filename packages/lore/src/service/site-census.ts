@@ -227,21 +227,7 @@ export function traceCensusMany(input: { rootDir: string; entries: readonly Site
     if (!existsSync(entryPath)) throw new SiteCensusError("entry-file-missing", { file: entry.file, rootDir });
     return entryPath;
   });
-  const options: TS.CompilerOptions = {
-    target: ts.ScriptTarget.ESNext,
-    module: ts.ModuleKind.ESNext,
-    moduleResolution: ts.ModuleResolutionKind.Bundler,
-    strict: true,
-    skipLibCheck: true,
-    noEmit: true,
-    types: [], // reason: ambient bun-types are irrelevant to call resolution and cost seconds.
-    jsx: ts.JsxEmit.ReactJSX,
-    ...tsconfigPathOptions(ts, rootDir),
-  };
-  const resolutions: HostResolutions = { importsByFile: new Map(), unresolvedByFile: new Map() };
-  const host = createWorkspaceHost(ts, options, rootDir, resolutions);
-  const program = ts.createProgram({ rootNames: [...new Set(entryPaths)], options, host });
-  const checker = program.getTypeChecker();
+  const { program, checker, resolutions } = buildCensusProgram(ts, rootDir, entryPaths);
   const scoped = input.closureScoped !== false;
   return input.entries.map((entry, i): CensusTrace => {
     const entryPath = entryPaths[i] as string;
@@ -268,6 +254,89 @@ export function traceCensusMany(input: { rootDir: string; entries: readonly Site
     const unresolvedImports = [...unresolved.values()].sort((a, b) => (a.specifier === b.specifier ? (a.from < b.from ? -1 : a.from > b.from ? 1 : 0) : a.specifier < b.specifier ? -1 : 1));
     return { sites: walker.result(), bootstrap: walker.bootstrapResult(), reached: walker.reachedSymbols(), unresolvedImports };
   });
+}
+
+/** One runnable command of a checkout: the file of its top-level module and the sub-command name path inside it. */
+export interface RunnableCommandPath {
+  /** Top-level command name as the registry spells it (`ac`, `sync-docs`). */
+  readonly top: string;
+  /** Command module, relative to rootDir. */
+  readonly file: string;
+  /** Sub-command names below the module's default command; `[]` = the module's own `run`. */
+  readonly subs: readonly string[];
+}
+
+/**
+ * List every runnable command of the checkout at `rootDir` STATICALLY: read the registry object literal `registryVar` of
+ * `registryFile`, follow each entry's lazy import to its command module, and walk the module's `subCommands` structure
+ * (inline objects, `defineCommand` calls, identifiers, factory calls, lazy imports). No analysed code is executed, so
+ * the compiled binary (which cannot resolve the checkout's bare imports) can run it.
+ *
+ * @throws SiteCensusError("command-unresolved") when the registry or any command module / sub-command is not statically
+ *   resolvable; never returns a shorter list.
+ * @example
+ * listRunnableCommandPaths({ rootDir, registryFile: "packages/lore/src/adapters/cli/index.ts", registryVar: "COMMAND_LOADERS" });
+ */
+export function listRunnableCommandPaths(input: { rootDir: string; registryFile: string; registryVar: string }): RunnableCommandPath[] {
+  const ts = loadTypeScript();
+  const rootDir = path.resolve(input.rootDir);
+  const registryPath = path.resolve(rootDir, input.registryFile);
+  const unresolved = (context: Record<string, string>): SiteCensusError => new SiteCensusError("command-unresolved", { registry: input.registryFile, ...context });
+  if (!existsSync(registryPath)) throw unresolved({ reason: "command registry not found" });
+  const { program, checker } = buildCensusProgram(ts, rootDir, [registryPath]);
+  const registryFile = program.getSourceFile(registryPath);
+  if (registryFile === undefined) throw unresolved({ reason: "command registry not loadable" });
+  let literal: TS.ObjectLiteralExpression | undefined;
+  for (const st of registryFile.statements) {
+    if (!ts.isVariableStatement(st)) continue;
+    for (const decl of st.declarationList.declarations) {
+      if (ts.isIdentifier(decl.name) && decl.name.text === input.registryVar && decl.initializer !== undefined) {
+        let init: TS.Expression = decl.initializer;
+        while (ts.isParenthesizedExpression(init) || ts.isAsExpression(init) || ts.isSatisfiesExpression(init)) init = init.expression;
+        if (ts.isObjectLiteralExpression(init)) literal = init;
+      }
+    }
+  }
+  if (literal === undefined) throw unresolved({ reason: `module exports no ${input.registryVar} object literal` });
+  const walker = new CensusWalker(ts, program, checker, rootDir);
+  const out: RunnableCommandPath[] = [];
+  for (const prop of literal.properties) {
+    if (!ts.isPropertyAssignment(prop) || !(ts.isIdentifier(prop.name) || ts.isStringLiteral(prop.name))) throw unresolved({ reason: `${input.registryVar} entry has no static name` });
+    const top = prop.name.text;
+    let body: TS.Node = prop.initializer;
+    while (ts.isArrowFunction(body) || ts.isParenthesizedExpression(body)) body = ts.isArrowFunction(body) ? body.body : body.expression;
+    const importCall = ts.isCallExpression(body) && body.expression.kind === ts.SyntaxKind.ImportKeyword ? body : undefined;
+    const specifier = importCall?.arguments[0];
+    const moduleSymbol = specifier === undefined ? undefined : checker.getSymbolAtLocation(specifier);
+    const moduleFile = moduleSymbol?.declarations?.find(ts.isSourceFile);
+    if (moduleFile === undefined) throw unresolved({ reason: "loader does not statically import a command module", command: top });
+    const file = path.relative(rootDir, moduleFile.fileName).split(path.sep).join("/");
+    for (const subs of walker.runnableSubPaths(moduleFile, file)) out.push({ top, file, subs });
+  }
+  return out;
+}
+
+/** The one TypeScript program every census verb builds: workspace-aware resolution over `rootNames`, nothing emitted. */
+function buildCensusProgram(
+  ts: typeof TS,
+  rootDir: string,
+  rootNames: readonly string[],
+): { program: TS.Program; checker: TS.TypeChecker; resolutions: HostResolutions } {
+  const options: TS.CompilerOptions = {
+    target: ts.ScriptTarget.ESNext,
+    module: ts.ModuleKind.ESNext,
+    moduleResolution: ts.ModuleResolutionKind.Bundler,
+    strict: true,
+    skipLibCheck: true,
+    noEmit: true,
+    types: [], // reason: ambient bun-types are irrelevant to call resolution and cost seconds.
+    jsx: ts.JsxEmit.ReactJSX,
+    ...tsconfigPathOptions(ts, rootDir),
+  };
+  const resolutions: HostResolutions = { importsByFile: new Map(), unresolvedByFile: new Map() };
+  const host = createWorkspaceHost(ts, options, rootDir, resolutions);
+  const program = ts.createProgram({ rootNames: [...new Set(rootNames)], options, host });
+  return { program, checker: program.getTypeChecker(), resolutions };
 }
 
 /** Files reachable from `entryPath` through the imports the workspace host resolved (the entry included). */
@@ -664,6 +733,77 @@ class CensusWalker {
     }
     const run = command === undefined ? undefined : this.runFunction(command);
     return run === undefined ? [] : [run];
+  }
+
+  /**
+   * Every runnable node of the command module `file`: the sub-command name path (`[]` = the module's own command,
+   * `["add"]` = `default.subCommands.add`) of each command object that declares a `run`. Reads the declared structure
+   * only (no analysed code runs). A module with no default command, a computed / spread sub-command entry, or a
+   * sub-command value that does not resolve to a command object is a loud `command-unresolved`, never a shorter list.
+   */
+  runnableSubPaths(file: TS.SourceFile, rel: string): string[][] {
+    const ts = this.ts;
+    const exported = file.statements.find((st): st is TS.ExportAssignment => ts.isExportAssignment(st));
+    const root = exported === undefined ? undefined : this.lazyCommandObject(exported.expression, 0);
+    if (root === undefined) throw new SiteCensusError("command-unresolved", { reason: "no default command object", file: rel });
+    const out: string[][] = [];
+    this.collectRunnable(root, [], out, rel);
+    return out;
+  }
+
+  private collectRunnable(command: TS.ObjectLiteralExpression, subs: readonly string[], out: string[][], rel: string): void {
+    const ts = this.ts;
+    if (this.propertyValue(command, "run") !== undefined) out.push([...subs]);
+    const group = this.propertyValue(command, "subCommands");
+    if (group === undefined) return;
+    const container = this.lazyCommandObject(group.expr, 0, group.shorthand);
+    const where = [...subs].join(" ") || "(top)";
+    if (container === undefined) throw new SiteCensusError("command-unresolved", { reason: "subCommands is not an object literal", file: rel, at: where });
+    for (const prop of container.properties) {
+      const name = ts.isSpreadAssignment(prop) || prop.name === undefined ? undefined : this.propertyName(prop.name);
+      if (name === undefined) throw new SiteCensusError("command-unresolved", { reason: "subCommands entry has no static name", file: rel, at: where });
+      const value = this.propertyValue(container, name);
+      const child = value === undefined ? undefined : this.lazyCommandObject(value.expr, 0, value.shorthand);
+      if (child === undefined) throw new SiteCensusError("command-unresolved", { reason: "sub-command does not resolve to a command object", file: rel, at: [...subs, name].join(" ") });
+      this.collectRunnable(child, [...subs, name], out, rel);
+    }
+  }
+
+  /**
+   * {@link commandObject} plus citty's lazy forms: a thunk returning a command (`() => ({..})`), and a lazily imported
+   * module (`() => import("./x.js")`, `import("./x.js").then((m) => m.default)`) whose default export is the command.
+   */
+  private lazyCommandObject(expr: TS.Node, depth: number, shorthand = false): TS.ObjectLiteralExpression | undefined {
+    const ts = this.ts;
+    if (depth > MAX_CODE_RESOLVE_DEPTH) return undefined;
+    const node = ts.isExpression(expr) ? this.unwrap(expr) : expr;
+    if (ts.isArrowFunction(node) || ts.isFunctionExpression(node)) {
+      if (!ts.isBlock(node.body)) return this.lazyCommandObject(node.body, depth + 1);
+      const returns = node.body.statements.filter(ts.isReturnStatement);
+      const only = returns[0];
+      return returns.length === 1 && only?.expression !== undefined ? this.lazyCommandObject(only.expression, depth + 1) : undefined;
+    }
+    if (ts.isCallExpression(node)) {
+      const callee = this.unwrap(node.expression);
+      if (callee.kind === ts.SyntaxKind.ImportKeyword) return this.importedDefaultCommand(node, depth);
+      if (ts.isPropertyAccessExpression(callee) && callee.name.text === "then") {
+        const receiver = this.unwrap(callee.expression);
+        const cb = node.arguments[0];
+        const picksDefault = cb !== undefined && ts.isArrowFunction(cb) && !ts.isBlock(cb.body) && ts.isPropertyAccessExpression(cb.body) && cb.body.name.text === "default";
+        if (picksDefault && ts.isCallExpression(receiver) && this.unwrap(receiver.expression).kind === ts.SyntaxKind.ImportKeyword) return this.importedDefaultCommand(receiver, depth);
+      }
+    }
+    return this.commandObject(node, depth, shorthand);
+  }
+
+  private importedDefaultCommand(call: TS.CallExpression, depth: number): TS.ObjectLiteralExpression | undefined {
+    const ts = this.ts;
+    const spec = call.arguments[0];
+    const moduleSymbol = spec === undefined ? undefined : this.checker.getSymbolAtLocation(spec);
+    if (moduleSymbol === undefined) return undefined;
+    const def = this.checker.getExportsOfModule(moduleSymbol).find((e) => e.name === "default");
+    const decl = def?.declarations?.find(ts.isExportAssignment);
+    return decl === undefined ? undefined : this.lazyCommandObject(decl.expression, depth + 1);
   }
 
   /** Object literal behind `expr`: itself, the first argument of a call (`defineCommand({..})`), or an identifier's initializer. */
