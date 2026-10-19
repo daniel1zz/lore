@@ -72,7 +72,7 @@
  *      (`isSelfDeclaredOrdinalTitle`, `@lore/core`) has the prefix stripped
  *      via a DIRECT store write (`store.update` + `insertVersion` +
  *      `appendAuditEntry`) — the same un-gated, no-`CorpusService`,
- *      no-approved→draft-reset bypass `OutlineMigrationService`/
+ *      no-approved→draft-reset bypass
  *      `PhaseMigrationService` already established for one-shot migrations.
  *   3. **Export-index reconcile** — `.lore/export-index.json`'s `human_id`
  *      field is corrected in place for every doc whose recorded mapping
@@ -109,8 +109,7 @@
  *
  * Side-effect class: IO (StoreInterface reads/writes; `.lore/export-index.json`
  * read + atomic rewrite; no AI, no telemetry, no gate — a one-shot migration
- * path, same precedent as `MigrationService`/`PhaseMigrationService`/
- * `OutlineMigrationService`).
+ * path, same precedent as `MigrationService`/`PhaseMigrationService`).
  *
  * Source: SPEC-084 §One-shot repair migration, §Acceptance Criteria AC-084-4.
  */
@@ -252,7 +251,7 @@ export interface OrdinalMigrationReport {
 // ─── Internal Helpers ───────────────────────────────────────────────────────
 
 /** `message` is present on most but not every `LoreError` variant — falls back
- *  to the error code itself, same precedent `OutlineMigrationService` documents. */
+ *  to the error code itself, same precedent `PhaseMigrationService` documents. */
 function describeLoreError(error: LoreError): string {
   return "message" in error ? error.message : error.code;
 }

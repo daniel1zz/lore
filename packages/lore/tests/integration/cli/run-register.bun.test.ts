@@ -15,8 +15,8 @@
  *   - `--harness claude-code` (the only harness in slice 1; any other value is refused).
  *   - Without `--agent-id` the run is the MAIN run, id `cc:<session>`, kind "main".
  *   - With `--agent-id` the run is a SUBAGENT, id `cc:<session>:<agent_id>`, kind
- *     "subagent", `--agent-type` is stored as its agent type, and its parent is the
- *     session's main run `cc:<session>` (derived, D2).
+ *     "subagent", `--agent-type` is stored as its agent type, and its parent is the `--parent` it was
+ *     given, or null (unknown) when none was given — never guessed (BR-1027, DC2-24).
  *   - `--parent` / `--branch` are optional caller-supplied hints. `--branch` is stored as the
  *     run's branch on FIRST registration. A second registration of the same id is a no-op
  *     (first wins, BR-1029): exit 0, no stored column changes, whatever `--parent` / `--branch`
@@ -160,21 +160,21 @@ describe("AC-RID-1: run registration derives distinct runs and links subagents t
     expect([main.branch, a1.branch, a2.branch]).toEqual(["main", "wt-a1", "wt-a2"]);
   }, 120_000);
 
-  it("HAPPY: each subagent's parent is the main run cc:<session>; the main run has no parent", () => {
+  it("HAPPY: a subagent's parent is the --parent it was given, or null when none; the main run has no parent", () => {
     register(sb, { session: SESSION, branch: "main" });
-    register(sb, { session: SESSION, agentId: "agent-A1", agentType: "lore-implementer" });
+    register(sb, { session: SESSION, agentId: "agent-A1", agentType: "lore-implementer", parent: MAIN });
     register(sb, { session: SESSION, agentId: "agent-A2", agentType: "lore-reviewer" });
 
     expect(showRun(sb, MAIN).parentRunId).toBeNull();
     expect(showRun(sb, A1).parentRunId).toBe(MAIN);
-    expect(showRun(sb, A2).parentRunId).toBe(MAIN);
+    expect(showRun(sb, A2).parentRunId).toBeNull();
   }, 120_000);
 
-  it("BOUNDARY: the same agent id in a different session is a different run with that session's parent", () => {
+  it("BOUNDARY: the same agent id in a different session is a different run with the parent it was given", () => {
     register(sb, { session: "sess-one" });
     register(sb, { session: "sess-two" });
-    register(sb, { session: "sess-one", agentId: "agent-X", agentType: "lore-implementer" });
-    register(sb, { session: "sess-two", agentId: "agent-X", agentType: "lore-implementer" });
+    register(sb, { session: "sess-one", agentId: "agent-X", agentType: "lore-implementer", parent: "cc:sess-one" });
+    register(sb, { session: "sess-two", agentId: "agent-X", agentType: "lore-implementer", parent: "cc:sess-two" });
 
     expect(showRun(sb, "cc:sess-one:agent-X").parentRunId).toBe("cc:sess-one");
     expect(showRun(sb, "cc:sess-two:agent-X").parentRunId).toBe("cc:sess-two");
@@ -192,7 +192,7 @@ describe("AC-RID-1: run registration derives distinct runs and links subagents t
 
   it("STATE: re-registering a subagent with a different parent and branch changes no stored column", () => {
     register(sb, { session: SESSION, branch: "main" });
-    register(sb, { session: SESSION, agentId: "agent-A1", agentType: "lore-implementer", branch: "wt-first" });
+    register(sb, { session: SESSION, agentId: "agent-A1", agentType: "lore-implementer", parent: MAIN, branch: "wt-first" });
     const before = showRun(sb, A1);
     expect(before.parentRunId).toBe(MAIN);
     expect(before.branch).toBe("wt-first");

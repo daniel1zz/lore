@@ -189,6 +189,12 @@ export async function refreshScopeFiles(deps: EditScopeDeps, task: string, worki
       const scope = await readEditScope(deps, workingCopy);
       if (!scope.ok) throw new Error(`${scope.error.code}: ${"message" in scope.error ? String(scope.error.message) : ""}`);
       if (!deps.hasScopeFile(workingCopy) && !scope.value.claims.some((c) => c.task === task)) continue;
+      // reason: the file is lore's derived state; with no open claim left (and none unmeasured) it describes nothing,
+      // and a leftover copy would be unknown ignored data that keeps a finished worktree alive at `lore done`.
+      if (scope.value.claims.length === 0 && scope.value.not_measured.length === 0) {
+        deps.removeScopeFile(workingCopy);
+        continue;
+      }
       deps.writeScopeFile(workingCopy, JSON.stringify({ schema: SCOPE_FILE_SCHEMA, ...scope.value }, null, 2) + "\n");
     } catch (cause) {
       const reason = cause instanceof Error ? cause.message : String(cause);

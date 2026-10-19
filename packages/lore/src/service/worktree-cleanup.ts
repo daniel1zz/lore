@@ -38,6 +38,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync, lstatSync, readdirSync, readFileSync, readlinkSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import type { AuditEntry } from "@lore/core";
+import { SCOPE_FILE_NAME } from "./edit-scope.js";
 import {
   decideWorktreeRemoval,
   type Measured,
@@ -204,6 +205,19 @@ export function ignoredPathsOutsideLossFreeSet(
     const identical = probe.ignoredPathIdenticalToMain?.(worktreePath, path);
     return !(identical?.ok === true && identical.value);
   });
+}
+
+/**
+ * Drops lore's own edit-time scope file from `outside` when the worktree holds no open claim: the file is derived
+ * state (rewritten from the claims on every claim/anchor/release), so with every claim closed it carries nothing to
+ * lose. This is a rule about lore's own file, NOT a loosening of the governed regenerable-pattern set. A copy that
+ * could not be proven claim-free (`openClaimCount` is `null`) stays listed: unproven is never loss-free.
+ *
+ * @param outside - ignored paths outside the loss-free set
+ * @param openClaimCount - open claims recorded for the worktree, or `null` when occupancy could not be measured
+ */
+export function withoutDerivedScopeFile(outside: readonly string[], openClaimCount: number | null): string[] {
+  return openClaimCount === 0 ? outside.filter((path) => path !== SCOPE_FILE_NAME) : [...outside];
 }
 
 /**

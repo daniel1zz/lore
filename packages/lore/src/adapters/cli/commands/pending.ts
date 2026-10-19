@@ -1,5 +1,5 @@
 /**
- * lore pending — list documents in draft status awaiting review.
+ * lore pending — list documents awaiting review (draft or in-review, `isPendingReviewDoc`).
  *
  * SPEC-034 §4 triage rendering: every pending doc gains an "AI Judgment" badge
  * column (`judgmentService.latestFor(doc.id)`, one call per doc — CLI-scale
@@ -11,7 +11,8 @@
  * SPEC-043 D3 (task `task-lore-pending-does-not-filter-invalidated-docs-an`):
  * `ReviewService.pending` excludes invalidated docs by default — an
  * invalidated draft (e.g. a superseded duplicate) has no lifecycle exit
- * (`draft` never transitions to `archived`) and would otherwise sit in this
+ * (`VALID_TRANSITIONS` in `@lore/core` lifecycle.ts gives it no exit to `archived` for most doc
+ * types; knowledge and task drafts are the exceptions) and would otherwise sit in this
  * queue forever. `--include-invalid` restores them, badged `[invalid]` on the
  * Title column (`../pending-render.js::buildPendingTableRows`, the SAME
  * `formatValidityBadge` renderer `lore list --include-invalid` uses).
@@ -41,6 +42,7 @@ import type { DocType, ReviewJudgment } from "@lore/core";
 import type { PendingDoc } from "../../../service/review-service.js";
 import { invocationOf } from "../command-invocation.js";
 import { printLine } from "../output.js";
+import { HIDDEN_CLASSES_TEXT, refuseHiddenTypeWithoutAll } from "../../../service/pending-queue.js";
 
 /** A fresh (non-stale) escalation: decision === "escalate" AND judgment.doc_version === doc.version. */
 function isFreshEscalation(judgment: ReviewJudgment | null, docVersion: number): boolean {
@@ -51,7 +53,8 @@ function isFreshEscalation(judgment: ReviewJudgment | null, docVersion: number):
 export default defineLoreCommand({
   meta: {
     name: "pending",
-    description: "List documents in draft status (pending review)",
+    description:
+      `List documents awaiting review (draft or in-review). Hidden by default: ${HIDDEN_CLASSES_TEXT}; pass --all to list tasks and ledger records, --include-invalid for invalidated documents.`,
   },
   args: {
     author: {
@@ -60,7 +63,7 @@ export default defineLoreCommand({
     },
     type: {
       type: "string",
-      description: "Filter by document type",
+      description: "Filter by document type (--type task needs --all: tasks are hidden by default)",
     },
     since: {
       type: "string",
@@ -77,7 +80,7 @@ export default defineLoreCommand({
     all: {
       type: "boolean",
       description:
-        "SPEC-103 M3 — restore the full draft list, including task-type docs and ledger " +
+        "SPEC-103 M3 — restore the full queue, including task-type docs and ledger " +
         "knowledge sub_types (assessment/retro/handoff/uat), both hidden by default " +
         "('pending = promises').",
     },
@@ -96,6 +99,13 @@ export default defineLoreCommand({
       const parsedType = parseDocTypeFilter("--type", args.type);
       if (!parsedType.ok) return refuseFilterValue(inv, parsedType.error);
       typeFilter = parsedType.value;
+    }
+    // reason: D11 — the default queue hides tasks, so `--type task` alone could only print an
+    // empty list that reads as "nothing to review". Say so instead (usage error, exit 2).
+    const hiddenRefusal = refuseHiddenTypeWithoutAll(typeFilter, args.all === true);
+    if (hiddenRefusal !== undefined) {
+      inv.io.stderr.write(hiddenRefusal + "\n");
+      return 2;
     }
     if (args.since !== undefined) {
       const parsedSince = parseSinceFilter("--since", args.since);

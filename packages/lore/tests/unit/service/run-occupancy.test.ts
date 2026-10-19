@@ -37,11 +37,12 @@ async function setup() {
   const planId = plan.value.id;
   let n = 0;
 
-  async function register(session: string, agentId?: string): Promise<RunId> {
+  async function register(session: string, agentId?: string, parent?: RunId): Promise<RunId> {
     const r = await service.register({
       harness: "claude-code",
       sessionId: session,
       ...(agentId === undefined ? {} : { agentId, agentType: "t" }),
+      ...(parent === undefined ? {} : { parentRunId: parent }),
       composition: COMPOSITION,
     });
     if (!r.ok) throw new Error(JSON.stringify(r.error));
@@ -81,8 +82,8 @@ async function setup() {
 describe("AC-WL-1 RunService.occupancy", () => {
   it("(a) agent worktree whose subagent run ended: agent_run.ended true, not occupied", async () => {
     const t = await setup();
-    await t.register("S1");
-    const run = await t.register("S1", "X1");
+    const main = await t.register("S1");
+    const run = await t.register("S1", "X1", main);
     await t.end(run);
     const out = await t.occupancy("/w/agent-X1");
     expect(out.agent_run).toEqual({ id: run, ended: true, parent_ended: false });
@@ -92,8 +93,8 @@ describe("AC-WL-1 RunService.occupancy", () => {
 
   it("(b) the same run with no end: occupied", async () => {
     const t = await setup();
-    await t.register("S1");
-    const run = await t.register("S1", "X1");
+    const main = await t.register("S1");
+    const run = await t.register("S1", "X1", main);
     const out = await t.occupancy("/w/agent-X1");
     expect(out.agent_run).toEqual({ id: run, ended: false, parent_ended: false });
     expect(out.occupied).toBe(true);
@@ -102,7 +103,7 @@ describe("AC-WL-1 RunService.occupancy", () => {
   it("(c) run open but its parent run ended: parent_ended true, not occupied", async () => {
     const t = await setup();
     const parent = await t.register("S1");
-    const run = await t.register("S1", "X1");
+    const run = await t.register("S1", "X1", parent);
     await t.end(parent);
     const out = await t.occupancy("/w/agent-X1");
     expect(out.agent_run).toEqual({ id: run, ended: false, parent_ended: true });

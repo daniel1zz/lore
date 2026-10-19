@@ -412,6 +412,8 @@ function findDedicatedExtraKeyViolation(
   const guarded = DEDICATED_EXTRA_KEYS[existing.type];
   if (guarded === undefined) return null;
   for (const entry of guarded) {
+    // reason: DC2-8 — a sub_type-scoped key (knowledge `uat`) guards only docs of that sub_type.
+    if (entry.subType !== undefined && existing.extra["sub_type"] !== entry.subType) continue;
     if (!jsonDeepEqual(existing.extra[entry.key], incomingExtra[entry.key])) {
       return { key: entry.key, writer: entry.writer };
     }
@@ -3138,21 +3140,6 @@ export class CorpusService {
           value: parsedPatch.data.extra[violation.key],
         });
       }
-    }
-
-    // Guard: extra.outline (SPEC-080 C1; its writers were retired by BR-985) — STRONGER than the
-    // drop-only guard immediately above: ANY direct patch whose `extra` carries
-    // an "outline" key is rejected outright, even a byte-identical restate of
-    // the doc's current outline (no value-equality escape hatch, unlike the
-    // extra.validity guard below which tolerates a same-value restate). Since slice 3a no verb writes
-    // this field at all: the stored outline is read-only history superseded by the baseline tree.
-    if (parsedPatch.data.extra !== undefined && Object.prototype.hasOwnProperty.call(parsedPatch.data.extra, "outline")) {
-      return err({
-        code: "VALIDATION_ERROR",
-        field: "extra.outline",
-        message: "extra.outline cannot be changed via `lore set` — outline writes are retired; record the structure with `lore baseline add` instead",
-        value: parsedPatch.data.extra["outline"],
-      });
     }
 
     // Cross-entity phase validation when updating a task's extra.phase (AC-PHASE-3,

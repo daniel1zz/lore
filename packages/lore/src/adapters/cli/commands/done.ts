@@ -27,12 +27,12 @@
  * (adr-lore-done-requires-a-runner-attested-pass-the-sixth-false) for
  * verification `lore verify` structurally cannot perform (`--oracle manual`
  * browser/visual checks; any oracle with no script-mode AC to bind to) — mirrors
- * `lore approve --override-judgment`/`lore outline exempt --reason`'s shape: an
+ * `lore approve --override-judgment`'s shape: an
  * explicit flag carrying a MANDATORY free-text reason, written verbatim to every
  * lifecycle step's audit entry (never silent, never defaulted, no env-var form).
  * A blank/whitespace-only reason is a CLI USAGE ERROR (exit 2) — checked HERE,
  * before `app` is even loaded, mirroring `commands/set.ts`'s `--refine`
- * non-empty-prompt precedent and `commands/outline.ts`'s `exempt --reason` guard
+ * non-empty-prompt precedent and `commands/plan.ts`'s `--reason` guard
  * — never forwarded to the service as an empty string (the service re-checks it
  * too, defensively, for any OTHER caller that builds `DoneOpts` directly; see
  * `TaskWorkflowService.done`'s own JSDoc). The predicate itself lives ENTIRELY in
