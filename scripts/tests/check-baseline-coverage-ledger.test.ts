@@ -4,7 +4,7 @@
  * The three outcomes, plus the CLI-verdict boundary:
  *   HAPPY:      a ledgered pair does not fail, and is counted
  *   NEGATIVE:   a pair not in the ledger fails with its fix line
- *   STATE:      a ledger row that is now mapped / no longer reported fails as stale
+ *   STATE:      a ledger row that is now mapped / no longer reported passes, printed as informational (never blocks other branches)
  *   BOUNDARY:   a (leaf, site) pair is per leaf: the same site under another leaf is NOT exempt
  *   REGRESSION: the committed ledger is well-formed and sorted-unique
  */
@@ -43,12 +43,20 @@ describe("judgeAgainstLedger", () => {
     expect(verdict.failingLines).toEqual(["  gap          f.ts#new", "    fix: fix new"]);
   });
 
-  it("STATE: a ledger row whose site is now mapped (no longer reported) fails as stale", () => {
+  it("STATE: a ledger row whose site is now mapped (no longer reported) PASSES and is printed as informational", () => {
     const census = data([leaf({ slug: "l1", gaps: [], ok: true })]);
     const verdict = judgeAgainstLedger([census], ledger([{ leaf: "l1", site: "f.ts#fixed", kind: "gap" }]));
-    expect(verdict.ok).toBe(false);
+    expect(verdict.ok).toBe(true);
     expect(verdict.stale).toEqual([{ leaf: "l1", site: "f.ts#fixed", kind: "gap" }]);
+    expect(verdict.staleLines).toEqual(["stale debt row (remove it): l1 f.ts#fixed"]);
     expect(verdict.failingCount).toBe(0);
+  });
+
+  it("STATE: a stale row next to an unledgered pair still fails only because of the unledgered pair", () => {
+    const census = data([leaf({ slug: "l1", gaps: ["f.ts#new"], fix_commands: ["fix"] })]);
+    const verdict = judgeAgainstLedger([census], ledger([{ leaf: "l1", site: "f.ts#fixed", kind: "gap" }]));
+    expect(verdict).toMatchObject({ ok: false, failingCount: 1 });
+    expect(verdict.staleLines).toHaveLength(1);
   });
 
   it("BOUNDARY: the same site under another leaf is not exempt", () => {
