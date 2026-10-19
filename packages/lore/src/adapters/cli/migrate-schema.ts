@@ -24,6 +24,7 @@ import type { Invocation } from "@lore/core";
 import { printLine } from "./output.js";
 import { findLoreDbPath, formatErrorFor, resolveActor } from "./utils.js";
 import { resolveCorpus } from "./corpus-resolution.js";
+import { bareDocWriter } from "../../service/corpus-service.js";
 import { SQLiteStore } from "../../store/sqlite-store.js";
 import { probeSchemaVersion } from "../../store/schema-probe.js";
 import { isSchemaBehind, pendingMigrationVersions } from "../../store/schema-behind.js";
@@ -106,10 +107,11 @@ export async function runMigrateSchema(inv: Invocation, options: MigrateSchemaOp
   }
   try {
     const durationMs = Date.now() - startedAt;
-    const audited = await store.appendAuditEntry({
-      timestamp: new Date().toISOString(),
-      actor,
-      session_id: MIGRATE_SCHEMA_AUDIT_SESSION_ID,
+    // The schema is current once the store opened, so the audit row rides the one write route (bare writer: this
+    // command never builds the app, which refuses the very corpus it repairs).
+    const audited = await bareDocWriter(store).appendAudit({
+      by: actor,
+      sessionId: MIGRATE_SCHEMA_AUDIT_SESSION_ID,
       action: "migrate_schema",
       details: { from, to: LATEST_SCHEMA_VERSION, duration_ms: durationMs, working_copy: inv.cwd, corpus: dbPath },
     });

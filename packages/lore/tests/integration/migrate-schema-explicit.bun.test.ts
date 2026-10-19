@@ -165,7 +165,10 @@ describe("`lore migrate schema`", () => {
     expect(details.from).toBe(BEHIND);
     expect(details.to).toBe(LATEST_SCHEMA_VERSION);
     expect(typeof details.duration_ms).toBe("number");
+    expect(details.duration_ms as number).toBeGreaterThanOrEqual(0);
     expect(details.working_copy).toBe(corpusDir);
+    // the row rides the shared write route (CorpusService.appendAudit): exactly one, naming the resolved actor
+    expect(rows.filter((row) => row.actor === rows[0]!.actor)).toHaveLength(1);
   }, TEST_TIMEOUT_MS);
 
   it("AC-4: a second run reports nothing pending and writes nothing", () => {
