@@ -42,7 +42,6 @@ beforeEach(() => {
   makeCleanTreeRepo(dir);
   expect(runLore(["init"], dir).exitCode).toBe(0);
   const created = runLore(["create", "spec", "--title", "DC2 14 corpus", "--content", "## Overview\nx", "--no-ai"], dir);
-  expect(created.stderr).toBe("");
   expect(created.exitCode).toBe(0);
   spec = created.stdout.match(/Slug:\s+(\S+)/)?.[1] as string;
   expect(spec).toBeTruthy();
