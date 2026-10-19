@@ -69,7 +69,7 @@ import { join } from "node:path";
 import { err, ok, type LoreError, type Result } from "@lore/core";
 import type { IntegrateLossLedger } from "./integrate-loss-ledger.js";
 import type { AttemptRecord, IntegrateAttemptLedger } from "./integrate-attempt-ledger.js";
-import type { LandedFootprint, OwnDiffVerdict } from "./own-diff-judgment.js";
+import type { OwnDiffVerdict } from "./own-diff-judgment.js";
 import type { LandingFact } from "./task-commit-range.js";
 
 /** Attempts (merge + floor + CAS) one call makes before it gives up with exit 75. */
@@ -150,7 +150,7 @@ export interface IntegrationLease {
  * written. Wired by the CLI to `TaskWorkflowService.recordLanding` (the corpus write route); a failure never un-lands main.
  */
 export interface LandingRecorder {
-  readonly record: (landing: LandingFact & Partial<LandedFootprint>) => Promise<Result<readonly string[], LoreError>>;
+  readonly record: (landing: LandingFact) => Promise<Result<readonly string[], LoreError>>;
 }
 
 /** Judges a branch's own change before it lands (BR-1346, BR-1347, BR-1348); `OwnDiffJudgment` implements it. Reads, never writes. */
@@ -341,7 +341,7 @@ export class IntegrateService {
     floorCommand: string,
     tip: string,
     wt: string,
-    footprint: Partial<LandedFootprint>,
+    footprint: Pick<LandingFact, "outside_anchors">,
   ): Promise<Result<IntegrateOutcome, LoreError>> {
     const { git, projectRoot, ledger, log } = this.deps;
     const clock = this.deps.clock ?? Date.now;
@@ -446,7 +446,7 @@ export class IntegrateService {
    *
    * @returns the landed footprint to record, or the refusal (VALIDATION_ERROR on field `own-diff`, exit 4).
    */
-  private async judgeOwnDiff(branch: string, tip: string): Promise<Result<Partial<LandedFootprint>, LoreError>> {
+  private async judgeOwnDiff(branch: string, tip: string): Promise<Result<Pick<LandingFact, "outside_anchors">, LoreError>> {
     const judgment = this.deps.ownDiff;
     if (judgment === undefined) return ok({});
     const main = this.resolveCommit(TARGET_REF);
@@ -456,7 +456,7 @@ export class IntegrateService {
     if (onMain.status !== 1) return err(gitFailure(`is ${short(tip)} on ${TARGET_NAME}`, onMain));
     const verdict = await judgment.judge(branch, tip);
     if (!verdict.ok) return verdict;
-    return ok({ outside_anchors: verdict.value.outside_anchors });
+    return ok({ outside_anchors: [...verdict.value.outside_anchors] });
   }
 
   /**
@@ -487,7 +487,7 @@ export class IntegrateService {
    * could not be written is logged loudly, so the missing record is visible; `lore done` refuses that task as
    * `not-landed` until `lore integrate` is run again on the branch (BR-1336).
    */
-  private async recordLanding(landing: LandingFact & Partial<LandedFootprint>): Promise<void> {
+  private async recordLanding(landing: LandingFact): Promise<void> {
     const recorder = this.deps.landings;
     if (recorder === undefined) return;
     const written = await recorder.record(landing);

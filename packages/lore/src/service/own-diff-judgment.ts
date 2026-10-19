@@ -36,7 +36,6 @@ import {
   isSymbolScannable,
   isTerminalStatus,
   ok,
-  readClaimRecord,
   splitFileAnchor,
   type AuditEntry,
   type DocRecord,
@@ -46,7 +45,7 @@ import {
 import { detectWorktreeBranch, type BranchMeasurement } from "../adapters/real-git-port.js";
 import type { StoreInterface } from "../store/store-interface.js";
 import { reviewCoChange, type CoChangeRulesLoad, type GlobMatchFn } from "./co-change-review.js";
-import { isPlanMember } from "./plan-membership.js";
+import { claimedNamesOf, isTaskOfIntegrationBranch, planIntegrationBranches } from "./branch-membership.js";
 
 /** Rule id: a change held by another live claim is refused. */
 export const OWN_DIFF_RULE_COLLISION = "BR-1346";
@@ -93,9 +92,7 @@ export interface BranchOwnership {
  * Reads the tasks of a branch and the other candidate live claims from the corpus.
  *
  * @invariant Read-only. A store or audit failure is an `err`, never an empty ownership.
- * @invariant `claimedNames` mirrors `TaskWorkflowService.claimedNames` (claim audit rows' `worktree` and `branch`, plus
- *   the current claim's); the duplicate exists only while that private method is held by another task, and must be
- *   replaced by a call to it.
+ * @invariant Membership is decided by `branch-membership.ts`, the same rules `TaskWorkflowService.recordLanding` records by.
  */
 export class BranchOwnershipReader {
   constructor(
@@ -114,19 +111,14 @@ export class BranchOwnershipReader {
     if (!plans.ok) return plans;
     const audit = await this.store.queryAudit({ action: "claim" });
     if (!audit.ok) return audit;
-    const integrationBranchOfPlan = new Map<string, string>();
-    for (const plan of plans.value) {
-      const declared = plan.extra?.["integration_branch"];
-      if (typeof declared === "string" && declared !== "") integrationBranchOfPlan.set(plan.id, declared);
-    }
+    const integrationBranches = planIntegrationBranches(plans.value);
     const own: AnchoredTask[] = [];
     const others: OtherTask[] = [];
     for (const task of tasks.value) {
       if (task.status === "deprecated") continue;
       const names = await this.claimedBranchNames(task, audit.value);
-      const planBranch = [...integrationBranchOfPlan].find(([planId]) => isPlanMember(task, planId))?.[1];
       const anchors = extractFileAnchors(task);
-      if (names.includes(branch) || planBranch === branch) {
+      if (names.includes(branch) || isTaskOfIntegrationBranch(task, integrationBranches, branch)) {
         own.push({ slug: task.slug, anchors });
         continue;
       }
@@ -138,18 +130,7 @@ export class BranchOwnershipReader {
 
   /** Every branch name `task`'s claims recorded; a recorded worktree path contributes the branch checked out there. */
   private async claimedBranchNames(task: DocRecord, audit: readonly AuditEntry[]): Promise<string[]> {
-    const names = new Set<string>();
-    const add = (value: unknown): void => {
-      if (typeof value === "string" && value.trim() !== "") names.add(value);
-    };
-    for (const row of audit) {
-      if (row.doc_id !== task.id) continue;
-      add(row.details?.["worktree"]);
-      add(row.details?.["branch"]);
-    }
-    const current = readClaimRecord(task);
-    add(current?.worktree);
-    add(current?.branch);
+    const names = new Set(claimedNamesOf(audit, task));
     for (const name of [...names]) {
       if (!name.startsWith("/")) continue;
       const measured = await this.detectBranch(name);

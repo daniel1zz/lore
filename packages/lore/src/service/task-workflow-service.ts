@@ -379,6 +379,7 @@ import { resolveDoc } from "./resolve.js";
 //   lives in `plan-membership.ts`'s SSOT note — do not reintroduce one
 //   (task-three-byte-identical-copies-of-isplanmember-survive).
 import { isPlanMember } from "./plan-membership.js";
+import { claimedNamesOf, isTaskOfIntegrationBranch, planIntegrationBranches } from "./branch-membership.js";
 import type { StampOutcome } from "./git-state-stamp.js";
 import { loadStampBindingContext, readRecordedCorpusRev } from "./stamp-binding-reader.js";
 import type { ArchiveIssueClosePort, IssueCloseItem } from "./issue-close-on-archive.js";
@@ -4349,17 +4350,9 @@ export class TaskWorkflowService {
    * protocol) and `branch` (auto-captured), plus the current claim's. `lore integrate <branch>` matches on these.
    */
   private static claimedNames(auditRows: readonly AuditEntry[], task: DocRecord): string[] {
-    const names = new Set<string>();
-    for (const row of auditRows) {
-      for (const key of ["worktree", "branch"] as const) {
-        const value = row.details?.[key];
-        if (typeof value === "string" && value.trim() !== "") names.add(value);
-      }
-    }
-    const current = readClaimRecord(task);
-    if (current?.worktree !== undefined) names.add(current.worktree);
-    if (current?.branch !== undefined) names.add(current.branch);
-    return [...names];
+    // reason: one derivation shared with `lore integrate`'s own-diff judgment (branch-membership.ts), so a landing and the
+    // judgment that preceded it agree on whose branch it is.
+    return claimedNamesOf(auditRows, task);
   }
 
   /**
@@ -4405,7 +4398,8 @@ export class TaskWorkflowService {
 
   /**
    * Records a landing (`extra.landing`) on every task not archived or deprecated whose claim, current or historical
-   * (claim audit), recorded `landing.branch` (or a working copy on it), through the one write route
+   * (claim audit), recorded `landing.branch` (or a working copy on it), or that belongs to a plan whose declared
+   * integration branch is `landing.branch` (BR-1348), through the one write route
    * (`writer.writeDoc`). Called by `lore integrate` after main moved, and when the branch is found already integrated.
    * Idempotent: a task already holding a landing of the same branch head is reported, not rewritten. Every task is attempted; the first
    * write failure is returned after the rest were tried.
@@ -4417,6 +4411,9 @@ export class TaskWorkflowService {
     if (!tasksResult.ok) return tasksResult;
     const auditResult = await this.store.queryAudit({ action: "claim" });
     if (!auditResult.ok) return auditResult;
+    const plansResult = await this.store.findMany({ type: "plan" });
+    if (!plansResult.ok) return plansResult;
+    const integrationBranches = planIntegrationBranches(plansResult.value);
     const nowIso = now();
     const slugs: string[] = [];
     let firstFailure: LoreError | undefined;
@@ -4424,7 +4421,12 @@ export class TaskWorkflowService {
       // reason: BR-1336 — a finished task is never rewritten by a later landing of a branch it once claimed.
       if (task.status === "archived" || task.status === "deprecated") continue;
       const rows = auditResult.value.filter((row) => row.doc_id === task.id);
-      if (!(await this.landingCandidateNames(rows, task)).includes(landing.branch)) continue;
+      // reason: BR-1348 — the tasks of a branch are those claimed on it AND every task of a plan whose declared
+      // integration branch it is (the own-diff judgment at integrate judged the branch against exactly these).
+      const ofBranch =
+        isTaskOfIntegrationBranch(task, integrationBranches, landing.branch) ||
+        (await this.landingCandidateNames(rows, task)).includes(landing.branch);
+      if (!ofBranch) continue;
       const existing = readTaskLanding(task.extra);
       // reason: BR-1336 — "holds no landing for that head": a task already carrying a landing of this branch head is
       // reported, not rewritten (an already-integrated re-run must not replace the real merge commit's record).
