@@ -8,7 +8,7 @@
  * Spawned CLI = the SOURCE entry with HOME=<mkdtemp>; the repo's own `.lore/` is never written.
  */
 import { spawnSync } from "node:child_process";
-import { appendFileSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { appendFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -19,6 +19,12 @@ const LORE_SRC_ENTRY = join(HERE, "../../../src/index.ts");
 const SHIPPED_FRAGMENT = join(HERE, "../../../../../assets/context/worktree-dispatch.md");
 const SPAWN_TIMEOUT_MS = 60_000;
 const NOT_CONFIGURED = "no floor is configured";
+
+const ROOT_CLAUDE_MD =
+  "# P\n\n" +
+  ["What This Is", "Commands", "Architecture", "Module Index", "Finding Live Project State"]
+    .map((heading) => `## ${heading}\n\nshort\n`)
+    .join("\n");
 
 const sandboxes: string[] = [];
 afterAll(() => {
@@ -44,6 +50,7 @@ function makeSandbox(floorCommand: string | null): Sandbox {
   sandboxes.push(sb.repo, sb.home);
   const init = run(sb, "init");
   if (init.status !== 0) throw new Error(`lore init failed (${String(init.status)}): ${init.stderr}`);
+  writeFileSync(join(sb.repo, "CLAUDE.md"), ROOT_CLAUDE_MD);
   if (floorCommand !== null) {
     appendFileSync(
       join(sb.repo, ".lore", "config.yaml"),
