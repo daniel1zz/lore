@@ -25,6 +25,7 @@
     "check:static":"bun scripts/run-chain.ts --static",
     "check:floor": "bun scripts/run-chain.ts --floor",
     "check:ordinal-sites": "node scripts/check-ordinal-write-sites.mjs",
+    "check:baseline-coverage": "bun scripts/check-baseline-coverage.ts",
     "test:file": "bun scripts/test-file.ts",
     "check:test-budgets": "bun scripts/check-test-budgets.ts",
     "check:no-timer-retry": "bun scripts/check-no-timer-retry.ts",
