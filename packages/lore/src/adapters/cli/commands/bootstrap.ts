@@ -91,6 +91,11 @@ export function formatBootstrapReport(report: BootstrapReportWithStaleness, by: 
     report.root !== null ? `Root: ${report.root.slug} "${report.root.title}"` : "Root: (none)",
   );
   if (report.strategy !== undefined) lines.push(`Strategy: ${report.strategy.slug} "${report.strategy.title}"`);
+  lines.push(
+    report.architecture !== null
+      ? `Architecture: ${report.architecture.slug} "${report.architecture.title}" (${report.architecture.id})`
+      : "Architecture: (none)",
+  );
   lines.push("");
 
   lines.push(`Active plans (${report.active_plans.length}):`);

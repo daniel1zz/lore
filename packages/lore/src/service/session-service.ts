@@ -59,7 +59,7 @@
  * Source: SPEC-041 §3 D1-D5; task-active-sessions-derives-only-over-active-plans-tasks-with.
  */
 
-import { pickBaselineRoot, pickStrategyDocument } from "./navigation-roots.js";
+import { pickArchitectureRoot, pickBaselineRoot, pickStrategyDocument } from "./navigation-roots.js";
 import {
   err,
   ok,
@@ -424,6 +424,13 @@ export class SessionService {
     const navigationRoot = baselineRoot ?? firstPrd;
     const root = navigationRoot !== undefined ? toRootRef(navigationRoot) : null;
     const strategy = baselineRoot !== undefined && firstPrd !== undefined ? toRootRef(firstPrd) : undefined;
+    // `architecture` is ADDITIVE (`root` stays the business root for every `data.root` consumer);
+    // `null` = no architecture root in this corpus, reported explicitly rather than omitted.
+    const architectureDoc = pickArchitectureRoot(allDocs);
+    const architecture =
+      architectureDoc !== undefined
+        ? { tree: "architecture" as const, id: architectureDoc.id, ...toRootRef(architectureDoc) }
+        : null;
 
     // Active (non-terminal) plans + per-plan task readiness counts. Batched: ONE
     // findLinksByToIds across every active plan's tasks (below) instead of the
@@ -643,6 +650,7 @@ export class SessionService {
     const report: BootstrapReport = {
       root,
       ...(strategy !== undefined ? { strategy } : {}),
+      architecture,
       active_plans: activePlans,
       pending_reviews: pendingReviews,
       my_claims: myClaims,
