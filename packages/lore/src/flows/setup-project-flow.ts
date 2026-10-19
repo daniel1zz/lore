@@ -406,6 +406,18 @@ export interface GitHooksPathResult {
   detail?: string;
 }
 
+/**
+ * The detach-main step's outcome (BR-1343): every working copy that had `refs/heads/main` checked out, now detached at
+ * the same commit. `done` lists them in `detached`; `skipped` = none was on main; `failed` names the working copy git
+ * would not detach (the guard is installed, but that working copy still sits on main until fixed).
+ */
+export interface MainDetachResult {
+  status: SimpleStepStatus;
+  /** Absolute paths of the working copies detached this run, in `git worktree list` order. */
+  detached: string[];
+  detail?: string;
+}
+
 /** The full per-step outcome of one {@link scaffoldProject} run. */
 export interface ProjectScaffoldReport {
   init: SimpleStepResult;
@@ -432,6 +444,8 @@ export interface ProjectScaffoldReport {
    */
   claude_md: SimpleStepResult;
   git_hooks_path: GitHooksPathResult;
+  /** BR-1343: the working copies detached from main so the installed guard never meets one already on it. */
+  main_detached: MainDetachResult;
   /**
    * Memory-file judgement — absent ONLY when the CLAUDE.md step itself failed (nothing to judge).
    * A missing port is a `status: "skipped"` row, never absence. See {@link MemoryFileJudgement}.
@@ -475,13 +489,14 @@ export interface ProjectScaffoldReport {
 /** The `assets/project/*` hook filenames copied verbatim into `<repo>/hooks/`. */
 export const HOOK_ASSET_NAMES = [
   "pre-push",
-  // The main-ref guard (spec-main-advances-only-through-lore-integrate-per-session, BR-1246): refuses every move of
-  // refs/heads/main that does not carry the `lore integrate` marker. Needs git >= 2.28 (see MIN_GIT_FOR_MAIN_REF_HOOK).
+  // The main-ref guard (spec-no-working-copy-can-check-out-main-the-main-ref-guard, BR-1342/BR-1343): refuses every move
+  // of refs/heads/main that does not carry the `lore integrate` marker AND every checkout of main. Needs git >= 2.46
+  // (see MIN_GIT_FOR_MAIN_REF_HOOK).
   "reference-transaction",
 ] as const;
 
-/** The oldest git that runs the `reference-transaction` hook: 2.28. */
-export const MIN_GIT_FOR_MAIN_REF_HOOK = { major: 2, minor: 28 } as const;
+/** The oldest git that passes symref updates (`git checkout main`) to the `reference-transaction` hook: 2.46. */
+export const MIN_GIT_FOR_MAIN_REF_HOOK = { major: 2, minor: 46 } as const;
 
 /**
  * Reads `git version 2.39.3 (Apple Git-145)` into `{ major: 2, minor: 39 }`; `undefined` when the text is not a git
@@ -1269,6 +1284,55 @@ async function checkGitSupportsMainRefHook(deps: ProjectScaffoldFlowDeps, repoDi
   };
 }
 
+/** A refusal naming the first commit to make when `refs/heads/main` does not resolve to a commit; `undefined` when it does. */
+async function checkMainHasCommit(deps: ProjectScaffoldFlowDeps, repoDir: string): Promise<LoreError | undefined> {
+  const probe = await deps.exec.run(["git", "rev-parse", "--verify", "-q", "refs/heads/main^{commit}"], repoDir);
+  if (probe.code === 0) return undefined;
+  return {
+    code: "VALIDATION_ERROR",
+    field: "git",
+    message:
+      "lore setup --project refuses: refs/heads/main has no commit yet, so there is nothing to detach working copies at and the guard would " +
+      "refuse your first commit's checkout. Make the first commit on main (git commit --allow-empty -m 'init'), then re-run. Nothing was changed.",
+  };
+}
+
+/** The working copies (absolute paths) whose HEAD is `refs/heads/main`, from `git worktree list --porcelain`. */
+function parseWorktreesOnMain(porcelain: string): string[] {
+  const onMain: string[] = [];
+  for (const block of porcelain.split("\n\n")) {
+    const lines = block.split("\n");
+    const path = lines.find((l) => l.startsWith("worktree "))?.slice("worktree ".length);
+    if (path !== undefined && lines.includes("branch refs/heads/main")) onMain.push(path);
+  }
+  return onMain;
+}
+
+/**
+ * Detaches every working copy that has main checked out (`git -C <path> checkout --detach main`: same commit, so edits and
+ * untracked files stay byte-identical). Never throws; a working copy git refuses is reported `failed` and the rest are
+ * still attempted.
+ */
+async function runDetachMainStep(deps: ProjectScaffoldFlowDeps, repoDir: string): Promise<MainDetachResult> {
+  try {
+    const listed = await deps.exec.run(["git", "worktree", "list", "--porcelain"], repoDir);
+    if (listed.code !== 0) return { status: "failed", detached: [], detail: `git worktree list exited ${listed.code}: ${listed.stderr.trim()}` };
+    const detached: string[] = [];
+    const failures: string[] = [];
+    for (const path of parseWorktreesOnMain(listed.stdout)) {
+      const result = await deps.exec.run(["git", "checkout", "-q", "--detach", "main"], path);
+      if (result.code === 0) detached.push(path);
+      else failures.push(`${path} (git exit ${result.code}: ${(result.stderr || result.stdout).trim()})`);
+    }
+    if (failures.length > 0) {
+      return { status: "failed", detached, detail: `could not detach ${failures.join("; ")}; finish or abort what is in progress there, then run 'git checkout --detach main' in it` };
+    }
+    return detached.length > 0 ? { status: "done", detached } : { status: "skipped", detached };
+  } catch (error) {
+    return { status: "failed", detached: [], detail: toMessage(error) };
+  }
+}
+
 /**
  * The `core.hooksPath` value setup writes: the ABSOLUTE path of `<repoDir>/hooks`.
  *
@@ -1508,10 +1572,14 @@ export async function scaffoldProject(
     });
   }
 
-  // reason: checked BEFORE any write — the main-ref hook is part of the scaffold and git < 2.28 cannot run it, so a
-  // scaffold that installed everything else would leave main unguarded while looking set up (BR-1246).
+  // reason: checked BEFORE any write — the main-ref hook is part of the scaffold and git < 2.46 never shows it a checkout
+  // of main, so a scaffold that installed everything else would leave main unguarded while looking set up (BR-1343).
   const gitVersionRefusal = await checkGitSupportsMainRefHook(deps, repoDir);
   if (gitVersionRefusal !== undefined) return err(gitVersionRefusal);
+  // reason: an unborn main has nothing to detach at, and its first commit would leave the shared checkout on main
+  // with the guard already refusing every way off it; refuse up front so nothing is half-installed (BR-1343).
+  const unbornRefusal = await checkMainHasCommit(deps, repoDir);
+  if (unbornRefusal !== undefined) return err(unbornRefusal);
 
   const init = await runInitStep(deps, repoDir);
 
@@ -1551,6 +1619,9 @@ export async function scaffoldProject(
   const claude_md: SimpleStepResult = claudeMdOutcome.terminal ?? finalizeClaudeMdRow(seam);
 
   const git_hooks_path = await runGitHooksPathStep(deps, repoDir);
+  // reason: after the hooks are written and wired, so a failed install never detaches anything; `git checkout --detach`
+  // passes the guard because its HEAD update carries a commit, not `ref:refs/heads/main`.
+  const main_detached = await runDetachMainStep(deps, repoDir);
 
   const skills: SimpleStepResult | undefined =
     deps.skillAssets === undefined ? undefined : (skillsOutcome.terminal ?? finalizeSkillsRow(skillsOutcome.candidates, seam));
@@ -1567,6 +1638,7 @@ export async function scaffoldProject(
     gitignore,
     claude_md,
     git_hooks_path,
+    main_detached,
     ...(memory_files === undefined ? {} : { memory_files }),
     ...(skills === undefined ? {} : { skills }),
     ...(ac_cite === undefined ? {} : { ac_cite }),
