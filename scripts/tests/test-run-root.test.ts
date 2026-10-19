@@ -35,7 +35,7 @@ const NODE_SELECTION = [
   "packages/lore/tests/unit/adapters/real-process-scan-port.test.ts",
   "packages/lore/tests/unit/service/setup-service.test.ts",
 ];
-const ARM_SCRIPT = `import "./vitest.shared.ts"; console.log("ROOT_HOME=" + process.env.${MARKER}); setInterval(() => undefined, 1000);`;
+const ARM_SCRIPT = `import "./vitest.shared.ts"; console.log("ROOT_HOME=" + process.env.${MARKER}); process.on("SIGTERM", () => process.exit(0)); setInterval(() => undefined, 1000);`;
 
 const scratch: string[] = [];
 const children: ChildProcess[] = [];
@@ -54,13 +54,21 @@ function freshTmp(): string {
 function outerEnv(tmp: string, extra: Record<string, string> = {}): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = { ...process.env, TMPDIR: tmp, TMP: tmp, TEMP: tmp, NO_COLOR: "1" };
   delete env["FORCE_COLOR"];
+  // reason: the outer worker's own runner variables (VITEST_WORKER_ID, VITEST_POOL_ID, ...) must not reach a fresh run.
+  for (const key of Object.keys(env)) if (key.startsWith("VITEST")) delete env[key];
   delete env[MARKER];
   return { ...env, ...extra };
 }
 
 function runVitest(runtime: "bun" | "node", files: readonly string[], tmp: string): { status: number | null; output: string } {
   const args = runtime === "bun" ? ["--bun", "vitest", "run", ...files] : ["vitest", "run", "-c", "vitest.node.config.ts", ...files];
-  const r = spawnSync("bunx", args, { cwd: REPO_ROOT, env: outerEnv(tmp), encoding: "utf8", timeout: RUN_TIMEOUT_MS });
+  const env = outerEnv(tmp);
+  if (runtime === "node") {
+    // reason: under `bunx --bun` the outer PATH starts with bun's `node` shim, which would run the "Node" invocation on Bun.
+    delete env["NODE"];
+    env["PATH"] = (env["PATH"] ?? "").split(":").filter((p) => !p.includes("bun-node")).join(":");
+  }
+  const r = spawnSync("bunx", args, { cwd: REPO_ROOT, env, encoding: "utf8", timeout: RUN_TIMEOUT_MS });
   return { status: r.status, output: `${r.stdout}\n${r.stderr}` };
 }
 
