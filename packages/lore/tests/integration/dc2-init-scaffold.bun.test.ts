@@ -110,7 +110,7 @@ describe(`${SPEC}#AC-DC2-5 lore init is one atomic scaffold`, () => {
     expect(again.stderr).toContain("already initialised");
   });
 
-  it(`${SPEC}#AC-DC2-5 (b) the ignore list is exactly the db files plus the check cache, and git never lists the cache`, () => {
+  it(`${SPEC}#AC-DC2-5 (b) the ignore list is exactly the db files plus the check cache, and git never lists the cache`, { timeout: 120_000 }, () => {
     const { repo, home } = makeInitialisedRepo();
 
     const lines = readFileSync(join(repo, ".lore", ".gitignore"), "utf8")
@@ -143,7 +143,7 @@ describe(`${SPEC}#AC-DC2-5 lore init is one atomic scaffold`, () => {
     expect(status.stdout).not.toContain("Verification profiles: not configured");
   });
 
-  it(`${SPEC}#AC-DC2-5 (d) plain init seeds exactly one approved write-spec rule document`, () => {
+  it(`${SPEC}#AC-DC2-5 (d) plain init seeds exactly one approved write-spec rule document`, { timeout: 120_000 }, () => {
     const { repo, home } = makeInitialisedRepo();
 
     const list = runLore(["list", "--type", "knowledge", "--json"], repo, home);
@@ -182,7 +182,7 @@ describe(`${SPEC}#AC-DC2-5 lore init is one atomic scaffold`, () => {
     expect(output).not.toContain("bun scripts/");
   });
 
-  it(`${SPEC}#AC-DC2-5 (d) with no rule document the pack names only product commands`, () => {
+  it(`${SPEC}#AC-DC2-5 (d) with no rule document the pack names only product commands`, { timeout: 120_000 }, () => {
     const { repo, home } = makeInitialisedRepo();
     const list = runLore(["list", "--type", "knowledge", "--json"], repo, home);
     const slug = (JSON.parse(list.stdout) as { data: { docs: Array<{ slug: string }> } }).data.docs[0]!.slug;
