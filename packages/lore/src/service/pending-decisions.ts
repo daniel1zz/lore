@@ -3,7 +3,7 @@
  *
  * Purpose: a pending decision is not a separate table; it is a (class, subject, version) whose EFFECTIVE verdict
  * is a machine `escalate` (no human-tty record has answered it). This module derives that list from the log rows.
- * Public surface: derivePendingDecisions, deriveOpenEscalations, newerVersionSupersession, isSupersedeMarker,
+ * Public surface: derivePendingDecisions, parseRowFactors, parseRowReasons, deriveOpenEscalations, newerVersionSupersession, isSupersedeMarker,
  *   SUPERSEDED_FACTS_KEY, HUMAN_ANSWER_ONLY_CLASSES, recommendAnswer, PendingDecision, SubjectExistenceProbe(s), RECOMMEND_ACCEPT_MIN_SCORE.
  * Invariants:
  *   - `id` is the id of the FIRST machine escalate row of the key, so it stays the same when the escalating
@@ -51,6 +51,8 @@ export interface PendingDecision {
   readonly reasons: readonly string[];
   readonly recommended: RecommendedAnswer;
   readonly recommended_reason: string;
+  /** Raw `detail` column of the latest escalating row (JSON text), or null for a row decided before detail existed. */
+  readonly detail: string | null;
 }
 
 /**
@@ -76,6 +78,16 @@ function parseColumn<T>(schema: z.ZodType<T>, text: string, row: DecisionLogRow,
   const parsed = schema.safeParse(json);
   if (!parsed.success) return err({ code: "STORE_ERROR", message: `decision_log row ${row.id}: column ${column} has an unexpected shape` });
   return ok(parsed.data);
+}
+
+/** The `factors` column of `row` (factor name -> score), or STORE_ERROR when it no longer parses. */
+export function parseRowFactors(row: DecisionLogRow): Result<Readonly<Record<string, number>>, LoreError> {
+  return parseColumn(factorsSchema, row.factors, row, "factors");
+}
+
+/** The `reasons` column of `row`, or STORE_ERROR when it no longer parses. */
+export function parseRowReasons(row: DecisionLogRow): Result<readonly string[], LoreError> {
+  return parseColumn(reasonsSchema, row.reasons, row, "reasons");
 }
 
 /** facts key that marks a closing record; the value is {@link SupersedeMarkerFacts}. */
@@ -149,6 +161,7 @@ export function deriveOpenEscalations(rows: readonly DecisionLogRow[]): Result<O
       reasons: reasons.value,
       recommended: recommendation.answer,
       recommended_reason: recommendation.reason,
+      detail: latest.detail ?? null,
       latest_escalate_id: latestEscalate.id,
     });
   }
