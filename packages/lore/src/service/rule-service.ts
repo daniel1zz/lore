@@ -40,8 +40,9 @@
  * Source: spec-baseline-slice-1-rules-with-permanent-ids-ac-citations §C3.
  */
 
+import { isDeepStrictEqual } from "node:util";
 import { err, ok, type Result } from "@lore/core";
-import type { LoreError, DocRecord, DocStatus, VersionRecord } from "@lore/core";
+import type { LoreError, DocRecord, DocStatus } from "@lore/core";
 import {
   ANY_RULE_ID_PATTERN,
   BASELINE_RULE_ID_PATTERN,
@@ -69,7 +70,7 @@ import type { StoreInterface } from "../store/store-interface.js";
 import { NON_BUSINESS_PREFIX } from "./leaf-coverage.js";
 import { buildOwnerLeafIndex, judgeOwnedBy, parseOwnedBy, type OwnerLeafIndex } from "./owned-by.js";
 import { resolveDoc } from "./resolve.js";
-import type { CreateDocResult, WriteActorOpts } from "./corpus-service.js";
+import { bareDocWriter, type CreateDocResult, type DocWritePort, type WriteActorOpts } from "./corpus-service.js";
 import { collectKnownRuleIds } from "./baseline-rule-ids.js";
 import { collectLeafRules } from "./rule-index-queries.js";
 import { CorpusWriteAuthority, type CorpusWriteAuthorityContext } from "./foreign-corpus-write-guard.js";
@@ -200,9 +201,14 @@ export class RuleService {
   constructor(
     private readonly store: StoreInterface,
     createDoc: CreateBaselineDocPort,
+    /** The one write route (`CorpusService`, AC-DCL-3); `app.ts` passes the composed one, a bare test gets a bare writer. */
+    writer?: DocWritePort,
   ) {
     this.createDoc = createDoc;
+    this.writer = writer ?? bareDocWriter(store);
   }
+
+  private readonly writer: DocWritePort;
 
   /**
    * Arms the claim-scoped corpus-write guard for every baseline write this instance performs
@@ -309,13 +315,13 @@ export class RuleService {
         const issue = shape.error.issues[0];
         return err(validationError(issue ? `extra.${issue.path.join(".")}` : "extra", issue ? issue.message : "invalid leaf extra"));
       }
-      const allocated = await this.store.allocateRuleAndUpdateLeaf(base.id, base.version, withRule, actor, family);
+      // reason: AC-DCL-3 — allocation goes through the one write route (foreign-corpus refusal, the store's
+      // one transaction, then the audit row as the calling actor).
+      const allocated = await this.writer.allocateRule({ leaf: base, buildExtra: withRule, family, by: actor });
       if (!allocated.ok) {
         if (allocated.error.code === "STALE_VERSION") { lastStale = allocated.error; continue; }
         return allocated;
       }
-      const audited = await this.appendAudit(actor, allocated.value.doc, "rule-add", { rule_id: allocated.value.ruleId });
-      if (!audited.ok) return audited;
       return ok(allocated.value);
     }
     return err(lastStale ?? staleExhausted(leafId));
@@ -411,23 +417,21 @@ export class RuleService {
           return err(validationError(`extra.${issue ? issue.path.join(".") : ""}`, `${label} leaf: ${issue ? issue.message : "invalid extra"}`));
         }
       }
+      // reason: AC-DCL-3 / #145 — a registered move goes through the one write route: foreign-corpus refusal,
+      // the store's single transaction (both leaves' version rows stamped with the invocation's run), then
+      // one audit row per leaf as the calling actor.
       const moved = registered
-        ? await this.store.moveRule(
+        ? await this.writer.moveRule({
             ruleId,
-            { id: from.id, expectedVersion: from.version, extra: fromExtra },
-            { id: to.id, expectedVersion: to.version, extra: toExtra },
-            actor,
-          )
+            from: { id: from.id, expectedVersion: from.version, extra: fromExtra },
+            to: { id: to.id, expectedVersion: to.version, extra: toExtra },
+            auditDetails: { rule_id: ruleId, from: from.id, to: to.id, registered },
+            by: actor,
+          })
         : await this.moveUnregisteredRule(from, fromExtra, to, toExtra, actor);
       if (!moved.ok) {
         if (moved.error.code === "STALE_VERSION") { lastStale = moved.error; continue; }
         return moved;
-      }
-      for (const doc of [moved.value.from, moved.value.to]) {
-        const audited = await this.appendAudit(actor, doc, "rule-move", {
-          rule_id: ruleId, from: from.id, to: to.id, registered,
-        });
-        if (!audited.ok) return audited;
       }
       return ok({ rule: edited.value, doc: moved.value.to });
     }
@@ -844,7 +848,10 @@ export class RuleService {
     });
   }
 
-  /** CAS write of one leaf (doc + version row + audit entry, atomic). */
+  /**
+   * CAS write of one leaf on the one write route (AC-DCL-3): doc + version row + audit entry in one
+   * transaction as the calling `actor`; an `extra`/`status` equal to the stored ones writes nothing.
+   */
   private async commit(
     doc: DocRecord,
     extra: Record<string, unknown>,
@@ -853,35 +860,18 @@ export class RuleService {
     summary: string,
     details: Record<string, unknown>,
   ): Promise<Result<DocRecord, LoreError>> {
-    const now = new Date().toISOString();
-    const version = doc.version + 1;
-    const versionRecord: VersionRecord = {
-      doc_id: doc.id,
-      version,
-      content: doc.content,
-      extra,
-      status,
-      title: doc.title,
+    const written = await this.writer.writeDoc({
+      doc,
+      patch: { extra, status },
       action: "update",
-      created_at: now,
-      created_by: actor,
-      change_summary: summary,
-      slug: doc.slug,
-    };
-    return this.store.updateWithProvenance(
-      doc.id,
-      { extra, status, version, updated_at: now },
-      { expected_version: doc.version },
-      versionRecord,
-      {
-        timestamp: now,
-        actor,
-        session_id: doc.id,
-        action: "update",
-        doc_id: doc.id,
-        details: { ...details, version, new_version: version },
-      },
-    );
+      changeSummary: summary,
+      auditAction: "update",
+      auditDetails: details,
+      lock: "none",
+      by: actor,
+    });
+    if (!written.ok) return written;
+    return ok(written.value.doc);
   }
 
   /** One mutate→demote→commit attempt on `doc` (already freshly read). */
@@ -891,6 +881,11 @@ export class RuleService {
     mutate: (doc: DocRecord) => Mutation,
     keepsApproval = false,
   ): Promise<Result<DocRecord, LoreError>> {
+    // reason: #297 — a mutation that leaves `extra` as stored is a no-op and must write NOTHING, not even the
+    // approved->draft demotion that precedes a real edit. `mutate` is pure over the doc, and the demotion changes
+    // only `status`, so previewing it on the stored doc yields the same `extra` the real run would.
+    const preview = mutate(doc);
+    if (preview.ok && isDeepStrictEqual(preview.value.extra, doc.extra)) return ok(doc);
     const ready = keepsApproval ? ok(doc) : await this.demoteIfApproved(doc, actor, "baseline edit");
     if (!ready.ok) return ready;
     const mutation = mutate(ready.value);
@@ -941,23 +936,6 @@ export class RuleService {
     const removed = await this.commit(from, fromExtra, from.status, actor, "Rule moved out (unregistered id)", { operation: "rule-move-out" });
     if (!removed.ok) return removed;
     return ok({ from: removed.value, to: added.value });
-  }
-
-  /** Audit entry for the store-owned allocate / move transactions (they write the version row themselves). */
-  private async appendAudit(
-    actor: string,
-    doc: DocRecord,
-    operation: string,
-    details: Record<string, unknown>,
-  ): Promise<Result<void, LoreError>> {
-    return this.store.appendAuditEntry({
-      timestamp: new Date().toISOString(),
-      actor,
-      session_id: doc.id,
-      action: "update",
-      doc_id: doc.id,
-      details: { ...details, operation, version: doc.version, new_version: doc.version },
-    });
   }
 }
 

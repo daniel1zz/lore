@@ -21,7 +21,7 @@ import type { DocType, DocId, DocRecord, DocStatus } from "@lore/core";
 import { err, ok, type LoreError, type Result } from "@lore/core";
 import { isParentlessType, isValidParentType, ROOT_TYPES } from "@lore/core";
 import { ancestorChainWalk } from "@lore/core";
-import { resolveWriteActorFor } from "../store/write-context-store.js";
+import { bareDocWriter, type DocWritePort } from "./corpus-service.js";
 
 // ─── Public Types ──────────────────────────────────────────────────────────
 
@@ -86,7 +86,15 @@ export interface ReconcileReport {
 // ─── TreeCheckService ──────────────────────────────────────────────────────
 
 export class TreeCheckService {
-  constructor(private readonly store: StoreInterface) {}
+  constructor(
+    private readonly store: StoreInterface,
+    /** The one write route (`CorpusService`, AC-DCL-3); `app.ts` passes the composed one, a bare test gets a bare writer. */
+    writer?: DocWritePort,
+  ) {
+    this.writer = writer ?? bareDocWriter(store);
+  }
+
+  private readonly writer: DocWritePort;
 
   // ── checkTree ─────────────────────────────────────────────────────────────
 
@@ -211,20 +219,14 @@ export class TreeCheckService {
   // ── fix ───────────────────────────────────────────────────────────────────
 
   /**
-   * @invariant SPEC-079 G1 (relationship provenance) — every APPLIED repair
-   *   (an entry landing in `FixReport.fixed`, never a `skipped` one) writes
-   *   exactly one audit entry (`action: "tree-fix"`, `doc_id` = the fixed
-   *   doc, `details: {kind, doc_id, old_parent_id, new_parent_id}` — the
-   *   repair descriptor). Audit-only, mirroring `link`/`unlink` (SPEC-079
-   *   G1): a tree-fix is a `parent_id` correction the `store.update` call
-   *   right above it already versions via the doc's own `version` bump — see
-   *   that call for the actual state write; this entry is provenance on top
-   *   of it, not a second copy of the state.
+   * @invariant SPEC-079 G1 + AC-DCL-3 — every APPLIED repair (an entry landing in `FixReport.fixed`, never a
+   *   `skipped` one) is ONE write on the one write route (`CorpusService.writeDoc`): the `parent_id` update,
+   *   its version row (#276) and its audit entry (`action: "tree-fix"`, `doc_id` = the fixed doc,
+   *   `details: {kind, doc_id, old_parent_id, new_parent_id}`) in one transaction, attributed to the caller.
    * @param opts.by - Optional explicit actor (no adapter currently threads
    *   one — `lore status --check-tree --fix` is this method's sole
-   *   production caller and passes none); omitted falls back to the SAME
-   *   session-tier/OS-username env chain
-   *   `CorpusService`'s writes use (`resolveActorWithSource`, SPEC-079 G2).
+   *   production caller and passes none); omitted falls back to the store
+   *   write context's claimed name, the same chain every `CorpusService` write uses.
    */
   async fix(
     blueprint: TreeBlueprint,
@@ -264,9 +266,6 @@ export class TreeCheckService {
     // Start skipped with phantom cycles detected in pre-fix state
     const skipped: SkippedItem[] = [...phantomSkips];
 
-    // SPEC-079 G2 — resolved once for the whole run, reused for every
-    // applied repair's audit entry below.
-    const resolvedActor = resolveWriteActorFor(this.store, opts?.by);
 
     for (const drift of fixableDrifts) {
       const doc = drift.actual!;
@@ -304,33 +303,29 @@ export class TreeCheckService {
       }
 
       const currentDoc = byId.get(doc.id);
-      const newVersion = (currentDoc?.version ?? 1) + 1;
+      if (currentDoc === undefined) return err({ code: "DOC_NOT_FOUND", id: doc.id });
 
-      const updateR = await this.store.update(doc.id, {
-        parent_id: candidate.id,
-        updated_at: new Date().toISOString(),
-        version: newVersion,
-      });
-
-      if (updateR.ok === false) return updateR;
-
-      // SPEC-079 G1 — relationship provenance: one audit entry per applied
-      // tree-fix repair (audit-only, mirrors link/unlink — the store.update
-      // call above already versions the actual parent_id state change).
-      const auditResult = await this.store.appendAuditEntry({
-        timestamp: new Date().toISOString(),
-        actor: resolvedActor,
-        session_id: doc.id,
-        action: "tree-fix",
-        doc_id: doc.id,
-        details: {
+      // reason: AC-DCL-3 / #276 — a repair that moves `parent_id` is a document write: it goes through the one
+      // write route so the version bump has its version row (it used to write only an audit row), the audit row
+      // names the calling actor, and the write is refused from a foreign-resolved corpus. SPEC-079 G1 keeps the
+      // relationship-provenance audit action `tree-fix`.
+      const writtenR = await this.writer.writeDoc({
+        doc: currentDoc,
+        patch: { parent_id: candidate.id },
+        action: "update",
+        changeSummary: `tree-fix: parent_id ${doc.parent_id ?? "none"} -> ${candidate.id} (${drift.kind})`,
+        auditAction: "tree-fix",
+        auditDetails: {
           kind: drift.kind,
           doc_id: doc.id,
           old_parent_id: doc.parent_id,
           new_parent_id: candidate.id,
         },
+        lock: "none",
+        ...(opts?.by !== undefined ? { by: opts.by } : {}),
       });
-      if (!auditResult.ok) return auditResult;
+      if (writtenR.ok === false) return writtenR;
+      const updateR = { ok: true as const, value: writtenR.value.doc };
 
       fixed.push({
         id: doc.id,

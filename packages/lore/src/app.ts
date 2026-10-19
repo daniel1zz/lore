@@ -948,10 +948,10 @@ function buildAppFromSqlite(
     // per-type config value (judgmentRequiredTypes), mirroring the claimTtlMinutes/
     // gateEnforcer resolved-value DI shape every other optional dependency here uses.
     reviewService,
-    versionService: new VersionService(store, recordLockService),
+    versionService: new VersionService(store, recordLockService, corpusService),
     outlineService,
-    migrationService: new MigrationService(store),
-    treeCheckService: new TreeCheckService(store),
+    migrationService: new MigrationService(store, corpusService),
+    treeCheckService: new TreeCheckService(store, corpusService),
     apiKeyStore: new ApiKeyStore(db),
     // reason: SessionStore shares the same Database as ApiKeyStore — one connection, no WAL lock
     // contention. Both auth tables live in the same SQLite file. SPEC-016 §3.5.
@@ -968,7 +968,7 @@ function buildAppFromSqlite(
       return ok(renderResolvedToMarkdown(resolved.value));
     }, warnSinkOf(ambient.io.stderr)),
     // reason: PhaseService depends only on StoreInterface — stateless, no AI, no telemetry. SPEC-023 §9.1.
-    phaseService: new PhaseService(store, recordLockService),
+    phaseService: new PhaseService(store, recordLockService, corpusService),
     taskWorkflowService,
     sessionService,
     runService: new RunService(store, undefined, taskWorkflowService, realpathNative, repoRoot, createRealWorktreeProbe(ambient.cwd)),
@@ -984,7 +984,7 @@ function buildAppFromSqlite(
     validityService: new ValidityService(store, telemetry, {
       latestStalenessJudgment: (docId) => judgmentService.latestFor(docId, "staleness"),
       recordCalibration: judgmentService.recordCalibration.bind(judgmentService),
-    }),
+    }, corpusService),
     // reason: DriftCheckService depends only on StoreInterface — stateless, no AI, no
     // telemetry, same shape as PhaseService/AcService. SPEC-045 §Design Decisions D4.
     driftCheckService: new DriftCheckService(store),
@@ -999,7 +999,7 @@ function buildAppFromSqlite(
     // reason: OrdinalMigrationService depends only on StoreInterface — stateless,
     // no AI, no telemetry, same shape as OutlineMigrationService/PhaseMigrationService.
     // SPEC-084 §One-shot repair migration.
-    ordinalMigrationService: new OrdinalMigrationService(store),
+    ordinalMigrationService: new OrdinalMigrationService(store, corpusService),
     specParentMigrationService: new SpecParentMigrationService(store),
     // reason: SeatService (SPEC-057) — real GitPort over the SAME repoRoot
     // VerifyRunnerService already receives (captured at composition time, never a
@@ -1041,10 +1041,10 @@ function buildAppFromSqlite(
     // 2nd arg wires the resolved workflow.requirement_quantifiable.enabled config
     // brake (SPEC-059 §Scope) — one resolution path (resolveRequirementQuantifiableEnabled
     // at createApp), mirroring claimTtlMinutes's identical "resolve once, thread down" shape.
-    requirementService: new RequirementService(store, requirementQuantifiableEnabled),
+    requirementService: new RequirementService(store, requirementQuantifiableEnabled, corpusService),
     // reason: RuleService gets the WIRED corpusService.create (gates + provenance guards apply to
     // node creation); its `createDoc` port is required — RuleService builds no CorpusService of its own.
-    ruleService: new RuleService(store, corpusService.create.bind(corpusService)),
+    ruleService: new RuleService(store, corpusService.create.bind(corpusService), corpusService),
     // reason: the change set of a locked spec is gated by the ONE RecordLockService, like criteria edits.
     ruleChangeService,
     ruleReadService: new RuleReadService(store),
@@ -1363,10 +1363,10 @@ function buildAppFromTurso(
     // per-type config value (judgmentRequiredTypes), mirroring the claimTtlMinutes/
     // gateEnforcer resolved-value DI shape every other optional dependency here uses.
     reviewService,
-    versionService: new VersionService(store, recordLockService),
+    versionService: new VersionService(store, recordLockService, corpusService),
     outlineService,
-    migrationService: new MigrationService(store),
-    treeCheckService: new TreeCheckService(store),
+    migrationService: new MigrationService(store, corpusService),
+    treeCheckService: new TreeCheckService(store, corpusService),
     apiKeyStore: new ApiKeyStore(apiKeyDb),
     // reason: Same local replica file as ApiKeyStore — sessions table lives alongside api_keys.
     // api_keys is one of the 5 replicated tables; sessions is local-only (SPEC-016 non-goal:
@@ -1384,7 +1384,7 @@ function buildAppFromTurso(
       return ok(renderResolvedToMarkdown(resolved.value));
     }, warnSinkOf(ambient.io.stderr)),
     // reason: PhaseService depends only on StoreInterface — stateless, no AI, no telemetry. SPEC-023 §9.1.
-    phaseService: new PhaseService(store, recordLockService),
+    phaseService: new PhaseService(store, recordLockService, corpusService),
     taskWorkflowService,
     sessionService,
     runService: new RunService(store, undefined, taskWorkflowService, realpathNative, repoRoot, createRealWorktreeProbe(ambient.cwd)),
@@ -1398,7 +1398,7 @@ function buildAppFromTurso(
     validityService: new ValidityService(store, telemetry, {
       latestStalenessJudgment: (docId) => judgmentService.latestFor(docId, "staleness"),
       recordCalibration: judgmentService.recordCalibration.bind(judgmentService),
-    }),
+    }, corpusService),
     // reason: DriftCheckService depends only on StoreInterface — stateless, no AI, no
     // telemetry, same shape as PhaseService/AcService. SPEC-045 §Design Decisions D4.
     driftCheckService: new DriftCheckService(store),
@@ -1413,7 +1413,7 @@ function buildAppFromTurso(
     // reason: OrdinalMigrationService depends only on StoreInterface — stateless,
     // no AI, no telemetry, same shape as OutlineMigrationService/PhaseMigrationService.
     // SPEC-084 §One-shot repair migration.
-    ordinalMigrationService: new OrdinalMigrationService(store),
+    ordinalMigrationService: new OrdinalMigrationService(store, corpusService),
     specParentMigrationService: new SpecParentMigrationService(store),
     // reason: SeatService (SPEC-057) — real GitPort over the SAME repoRoot
     // VerifyRunnerService already receives (captured at composition time, never a
@@ -1452,10 +1452,10 @@ function buildAppFromTurso(
     // 2nd arg wires the resolved workflow.requirement_quantifiable.enabled config
     // brake (SPEC-059 §Scope) — one resolution path (resolveRequirementQuantifiableEnabled
     // at createApp), mirroring claimTtlMinutes's identical "resolve once, thread down" shape.
-    requirementService: new RequirementService(store, requirementQuantifiableEnabled),
+    requirementService: new RequirementService(store, requirementQuantifiableEnabled, corpusService),
     // reason: RuleService gets the WIRED corpusService.create (gates + provenance guards apply to
     // node creation); its `createDoc` port is required — RuleService builds no CorpusService of its own.
-    ruleService: new RuleService(store, corpusService.create.bind(corpusService)),
+    ruleService: new RuleService(store, corpusService.create.bind(corpusService), corpusService),
     // reason: the change set of a locked spec is gated by the ONE RecordLockService, like criteria edits.
     ruleChangeService,
     ruleReadService: new RuleReadService(store),

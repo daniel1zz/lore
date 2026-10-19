@@ -58,7 +58,7 @@ import {
   KNOWLEDGE_SUB_TYPES,
   knowledgeSubTypeSchema,
 } from "@lore/core";
-import type { KnowledgeSubType } from "@lore/core";
+import type { KnowledgeSubType, RuleIdPrefix } from "@lore/core";
 import type {
   CreateDocInput,
   DocPatch,
@@ -66,6 +66,7 @@ import type {
   RequirementCoverage,
   SpecKind,
   VersionRecord,
+  VersionAction,
   AuditEntry,
   ArchiveCandidateRule,
   AcceptanceCriterion,
@@ -85,6 +86,8 @@ import { ownProposedRules } from "./rule-changes.js";
 import type { RuleChangeLandingPort } from "./rule-landing-port.js";
 import { isParentlessType, isValidParentType, parentlessRefusalMessage, PARENT_TYPE_CONTRACT } from "@lore/core";
 import type {
+  ProvenanceWriteExtras,
+  RuleLeafPatch,
   SearchHit,
   StoreInterface,
 } from "../store/store-interface.js";
@@ -92,8 +95,8 @@ import { NoOpTelemetry, type Telemetry, type TelemetryEvent } from "@lore/core";
 import type { PlanBundle } from "@lore/core";
 import type { ReviewBundle } from "@lore/core";
 import type { TreeBlueprint } from "@lore/core";
-import { resolveWriteActorFor } from "../store/write-context-store.js";
-import { describeLoreError, type GateEnforcer } from "./gate-enforcer.js";
+import { resolveWriteActorFor, WriteActorUnresolvedError } from "../store/write-context-store.js";
+import { describeLoreError, GateEnforcer } from "./gate-enforcer.js";
 import type { TraceRecorder } from "./trace-recorder.js";
 import type { GateContext } from "./checkpoint-registry.js";
 import {
@@ -116,7 +119,7 @@ import { pickBaselineRoot, pickStrategyDocument } from "./navigation-roots.js";
 import { hasIssueReport, type ResolvesInEdgeLike, type ResolutionSourceDocLike } from "./issue-resolution.js";
 import type { ArchiveIssueClosePort, IssueCloseItem } from "./issue-close-on-archive.js";
 import { isPlanMember } from "./plan-membership.js";
-import { bodyDiffers, type RecordLockService } from "./record-lock-service.js";
+import { bodyDiffers, RecordLockService, type RecordEditOp } from "./record-lock-service.js";
 import { ANCHOR_SCANNED_DOC_TYPES } from "./drift-check-service.js";
 // reason: NOT a cross-service import — `service/CLAUDE.md`'s "no cross-service imports"
 // rule scopes "service" to a store-holding class composed in `app.ts`. These four are
@@ -791,9 +794,134 @@ export interface PlanCloseCascadeResult {
  */
 export type CorpusSetResult = DocRecord & { cascade?: PlanCloseCascadeResult; issueClose?: IssueCloseItem[] };
 
+// ─── The one write route (spec-defect-clusters-round-1 D3, AC-DCL-3) ────────
+
+/** The doc fields a {@link DocWriteRequest} may change. `version` / `updated_at` are NEVER in a patch: the route owns them. */
+export type DocWritePatch = Partial<
+  Pick<DocRecord, "content" | "extra" | "title" | "status" | "parent_id" | "tags" | "priority">
+>;
+
+/**
+ * One document change, as every service states it to {@link CorpusService.writeDoc}.
+ * The route supplies everything else: the CAS guard, the version number, the version row, the audit row
+ * (caller actor + run), the foreign-corpus refusal, the record lock and the transaction.
+ */
+export interface DocWriteRequest {
+  /** The doc as the caller read it: its `version` is the CAS guard and the base of the new version number. */
+  readonly doc: DocRecord;
+  readonly patch: DocWritePatch;
+  /** `VersionRecord.action` of the version row (almost always `"update"`; `"restore"` for a restore). */
+  readonly action: VersionAction;
+  /** `VersionRecord.change_summary`. */
+  readonly changeSummary?: string;
+  /** `AuditEntry.action`. */
+  readonly auditAction: string;
+  /** Operation-specific audit `details`; the route adds `version` / `new_version`. */
+  readonly auditDetails?: Readonly<Record<string, unknown>>;
+  /** `AuditEntry.session_id`; defaults to the doc id. */
+  readonly auditSessionId?: string;
+  /**
+   * Record-edit gate: the rewrite path this write is on, or `"none"` when the write is a sanctioned
+   * lifecycle/metadata edit the lock does not protect (validity, rule/requirement `extra`, ordinal metadata).
+   * `"content"` compares `patch.content` / `patch.title` against the stored doc, so a write that leaves both
+   * unchanged is not refused.
+   */
+  readonly lock: RecordEditOp | "none";
+  /** Explicit actor; absent = the store write context's claimed name (never `created_by`, never "system"). */
+  readonly by?: string;
+  /** Same-transaction extras (citation-gate liveness, extra audit rows). */
+  readonly extras?: ProvenanceWriteExtras;
+  /** Timestamp seam; default now. */
+  readonly now?: string;
+}
+
+/** Outcome of {@link CorpusService.writeDoc}: `written: false` means the patch changed nothing and NOTHING was written. */
+export interface DocWriteOutcome {
+  readonly doc: DocRecord;
+  readonly written: boolean;
+}
+
+/** One new document, as every service states it to {@link CorpusService.insertDoc}. */
+export interface DocInsertRequest {
+  readonly doc: DocRecord;
+  readonly changeSummary?: string;
+  readonly auditAction: string;
+  readonly auditDetails?: Readonly<Record<string, unknown>>;
+  readonly auditSessionId?: string;
+  readonly by?: string;
+}
+
+/** A store-owned rule move, as {@link CorpusService.moveRule} takes it. */
+export interface RuleMoveRequest {
+  readonly ruleId: string;
+  readonly from: RuleLeafPatch;
+  readonly to: RuleLeafPatch;
+  readonly auditDetails: Readonly<Record<string, unknown>>;
+  readonly by?: string;
+}
+
+/** A registry-allocated rule add, as {@link CorpusService.allocateRule} takes it. */
+export interface RuleAllocateRequest {
+  /** The leaf as read (CAS base). */
+  readonly leaf: DocRecord;
+  /** Pure builder of the leaf's new `extra` given the allocated id. */
+  readonly buildExtra: (ruleId: string) => Record<string, unknown>;
+  /** Id family (`BR` | `AS` | `AD`). */
+  readonly family: RuleIdPrefix;
+  readonly by?: string;
+}
+
+/**
+ * What every non-corpus service holds instead of the store's write methods: the narrow surface of
+ * {@link CorpusService}'s write route. Services never call `store.update` / `insertVersion` /
+ * `appendAuditEntry` / `*WithProvenance` themselves (AC-DCL-3's static scan enforces it).
+ */
+export interface DocWritePort {
+  writeDoc(request: DocWriteRequest): Promise<Result<DocWriteOutcome, LoreError>>;
+  insertDoc(request: DocInsertRequest): Promise<Result<DocRecord, LoreError>>;
+  assignOrdinalForRepair(
+    doc: DocRecord,
+    ordinal: number,
+    by?: string,
+    now?: string,
+  ): Promise<Result<DocWriteOutcome, LoreError>>;
+  moveRule(request: RuleMoveRequest): Promise<Result<{ from: DocRecord; to: DocRecord }, LoreError>>;
+  allocateRule(request: RuleAllocateRequest): Promise<Result<{ ruleId: string; doc: DocRecord }, LoreError>>;
+}
+
+/** The post-patch value of one patched field of `doc`. */
+function patchedFieldsUnchanged(doc: DocRecord, patch: DocWritePatch): boolean {
+  for (const key of Object.keys(patch) as (keyof DocWritePatch)[]) {
+    const incoming = patch[key];
+    if (incoming === undefined) continue;
+    if (key === "content") {
+      if (bodyDiffers(doc.content, incoming as string)) return false;
+      continue;
+    }
+    if (!isDeepStrictEqual(incoming, doc[key])) return false;
+  }
+  return true;
+}
+
+/** `patch` without its `undefined`-valued keys (exactOptionalPropertyTypes: an undefined key must not overwrite). */
+function definedOnly(patch: DocWritePatch): DocWritePatch {
+  return Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined)) as DocWritePatch;
+}
+
+/**
+ * The write route a service falls back to when its composition root handed it none: a bare `CorpusService`
+ * with an ungated record lock and an inert foreign-corpus context. Same convention as every other optional
+ * wiring (`new GateEnforcer(undefined)`, "bare `new XService(store)` stays ungated"): production composes
+ * the REAL `corpusService` into each service in `app.ts` (asserted by single-write-path.bun.test.ts), and
+ * only a unit test constructing a service over a bare store reaches this.
+ */
+export function bareDocWriter(store: StoreInterface): DocWritePort {
+  return new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
+}
+
 // ─── CorpusService ─────────────────────────────────────────────────────────
 
-export class CorpusService {
+export class CorpusService implements DocWritePort {
   private readonly telemetry: Telemetry;
   /**
    * The foreign-corpus-write guard's ambient facts (spec-corpus-resolution-
@@ -1020,6 +1148,240 @@ export class CorpusService {
   private refuseIfForeignCorpusWrite<T>(): Result<T, LoreError> | undefined {
     const verdict = checkForeignCorpusWrite(this.foreignCorpusWriteContext, false);
     return verdict.allowed ? undefined : err(foreignCorpusWriteRefusalError(verdict));
+  }
+
+
+  // ── The one write route ────────────────────────────────────────────────────
+
+  /**
+   * THE write route for changing an existing document (spec-defect-clusters-round-1 D3). In order: the
+   * foreign-corpus refusal, the no-op check (a patch that changes nothing writes nothing and returns
+   * `written: false`), the record-lock check for `request.lock`, then ONE `updateWithProvenance` transaction
+   * carrying the doc update, its version row and its audit row — all three land or none do. The version
+   * row and audit row name the CALLING actor (`request.by`, else the store write context's claimed name);
+   * the store's write context stamps the run. Never the doc's creator, never "system".
+   *
+   * @param request - See {@link DocWriteRequest}.
+   * @returns the post-write doc with `written: true`; the unchanged doc with `written: false`; or the refusal
+   *   (`gate:corpus-write:foreign-provenance`, `gate:record-edit`, `STALE_VERSION`, a store error).
+   */
+  async writeDoc(request: DocWriteRequest): Promise<Result<DocWriteOutcome, LoreError>> {
+    const refusal = this.refuseIfForeignCorpusWrite<DocWriteOutcome>();
+    if (refusal !== undefined) return refusal;
+    const { doc, patch } = request;
+    if (patchedFieldsUnchanged(doc, patch)) return ok({ doc, written: false });
+
+    if (request.lock !== "none") {
+      const gate = await this.recordLock.assertEditable(doc, request.lock, {
+        ...(patch.content !== undefined ? { content: patch.content } : {}),
+        ...(patch.title !== undefined ? { title: patch.title } : {}),
+        ...(patch.extra !== undefined ? { extra: patch.extra } : {}),
+      });
+      if (!gate.ok) return gate;
+    }
+
+    const actor = this.resolveWriteActorResult(request.by);
+    if (!actor.ok) return actor;
+    const now = request.now ?? new Date().toISOString();
+    const newVersion = doc.version + 1;
+    const after: DocRecord = { ...doc, ...definedOnly(patch), version: newVersion, updated_at: now };
+    const versionRecord: VersionRecord = {
+      doc_id: doc.id,
+      version: newVersion,
+      content: after.content,
+      extra: after.extra,
+      status: after.status,
+      title: after.title,
+      action: request.action,
+      created_at: now,
+      created_by: actor.value,
+      ...(request.changeSummary !== undefined ? { change_summary: request.changeSummary } : {}),
+      // reason: SPEC-072 D4 — a write never changes the slug, so the snapshot carries the doc's current one.
+      slug: doc.slug,
+    };
+    const written = await this.store.updateWithProvenance(
+      doc.id,
+      { ...definedOnly(patch), version: newVersion, updated_at: now },
+      { expected_version: doc.version },
+      versionRecord,
+      {
+        timestamp: now,
+        actor: actor.value,
+        session_id: request.auditSessionId ?? doc.id,
+        action: request.auditAction,
+        doc_id: doc.id,
+        // reason: SPEC-035 §2 — `version` is the join key AuditService.verify matches against the version row.
+        details: { ...request.auditDetails, version: newVersion, new_version: newVersion },
+      },
+      request.extras,
+    );
+    if (!written.ok) return written;
+    return ok({ doc: written.value, written: true });
+  }
+
+  /**
+   * THE write route for adding a NEW document that arrives with its own identity and timestamps (an import
+   * or a migration-created doc). Foreign-corpus refusal, then ONE `insertWithProvenance` transaction (doc +
+   * version 1 + audit), attributed to the calling actor.
+   *
+   * @param request - See {@link DocInsertRequest}.
+   */
+  async insertDoc(request: DocInsertRequest): Promise<Result<DocRecord, LoreError>> {
+    const refusal = this.refuseIfForeignCorpusWrite<DocRecord>();
+    if (refusal !== undefined) return refusal;
+    const actor = this.resolveWriteActorResult(request.by);
+    if (!actor.ok) return actor;
+    const { doc } = request;
+    const versionRecord: VersionRecord = {
+      doc_id: doc.id,
+      version: doc.version,
+      content: doc.content,
+      extra: doc.extra,
+      status: doc.status,
+      title: doc.title,
+      action: "create",
+      created_at: doc.created_at,
+      created_by: actor.value,
+      ...(request.changeSummary !== undefined ? { change_summary: request.changeSummary } : {}),
+      slug: doc.slug,
+    };
+    return this.store.insertWithProvenance(doc, versionRecord, {
+      timestamp: doc.created_at,
+      actor: actor.value,
+      session_id: request.auditSessionId ?? doc.id,
+      action: request.auditAction,
+      doc_id: doc.id,
+      details: { ...request.auditDetails, version: doc.version },
+    });
+  }
+
+  /**
+   * Route for the ordinal repair-assignment (`StoreInterface.assignOrdinalForRepair`): foreign-corpus
+   * refusal, the store's own atomic ordinal write, then the version row and audit row that write never
+   * produced. A repeat call at the same ordinal is a no-op that writes nothing.
+   *
+   * ⛔ NOT one transaction: the ordinal column write is a store primitive (`update` cannot set `ordinal`), so
+   * a failure of the version/audit step after it leaves the ordinal assigned and is returned as the error.
+   * The migration re-run converges (the same-value repeat is a no-op) but does not backfill the missing rows.
+   *
+   * @param doc - The doc as read (its `version` decides whether the store call changed anything).
+   * @param ordinal - The target ordinal, computed by the caller to be free.
+   */
+  async assignOrdinalForRepair(
+    doc: DocRecord,
+    ordinal: number,
+    by?: string,
+    now: string = new Date().toISOString(),
+  ): Promise<Result<DocWriteOutcome, LoreError>> {
+    const refusal = this.refuseIfForeignCorpusWrite<DocWriteOutcome>();
+    if (refusal !== undefined) return refusal;
+    const actor = this.resolveWriteActorResult(by);
+    if (!actor.ok) return actor;
+    const assigned = await this.store.assignOrdinalForRepair(doc.id, ordinal);
+    if (!assigned.ok) return assigned;
+    const after = assigned.value;
+    if (after.version === doc.version) return ok({ doc: after, written: false });
+
+    const versionResult = await this.store.insertVersion({
+      doc_id: after.id,
+      version: after.version,
+      content: after.content,
+      extra: after.extra,
+      status: after.status,
+      title: after.title,
+      action: "update",
+      created_at: now,
+      created_by: actor.value,
+      change_summary: `Ordinal ${ordinal} assigned (ordinal migration)`,
+      slug: after.slug,
+    });
+    if (!versionResult.ok) return versionResult;
+    const auditResult = await this.store.appendAuditEntry({
+      timestamp: now,
+      actor: actor.value,
+      session_id: `ordinal-migration-${after.id}`,
+      action: "ordinal-backfill",
+      doc_id: after.id,
+      details: { new_ordinal: ordinal, version: after.version, new_version: after.version },
+    });
+    if (!auditResult.ok) return auditResult;
+    return ok({ doc: after, written: true });
+  }
+
+  /**
+   * Route for a registered rule move: foreign-corpus refusal, then the store's ONE transaction that
+   * CAS-updates both leaves, writes their version rows and repoints the registry (the store stamps the run on
+   * those rows through `RuleLeafPatch.harness_run`), then one audit row per leaf, attributed to the caller.
+   *
+   * @param request - See {@link RuleMoveRequest}.
+   */
+  async moveRule(request: RuleMoveRequest): Promise<Result<{ from: DocRecord; to: DocRecord }, LoreError>> {
+    const refusal = this.refuseIfForeignCorpusWrite<{ from: DocRecord; to: DocRecord }>();
+    if (refusal !== undefined) return refusal;
+    const actor = this.resolveWriteActorResult(request.by);
+    if (!actor.ok) return actor;
+    const moved = await this.store.moveRule(request.ruleId, request.from, request.to, actor.value);
+    if (!moved.ok) return moved;
+    for (const doc of [moved.value.from, moved.value.to]) {
+      const audited = await this.store.appendAuditEntry({
+        timestamp: new Date().toISOString(),
+        actor: actor.value,
+        session_id: doc.id,
+        action: "update",
+        doc_id: doc.id,
+        details: { ...request.auditDetails, operation: "rule-move", version: doc.version, new_version: doc.version },
+      });
+      if (!audited.ok) return audited;
+    }
+    return moved;
+  }
+
+  /**
+   * Route for a registry-allocated rule add: foreign-corpus refusal, the store's ONE transaction (allocate the
+   * next id, CAS-update the leaf, write its version row — stamped with the invocation's run), then the audit
+   * row as the calling actor.
+   *
+   * @param request - See {@link RuleAllocateRequest}.
+   */
+  async allocateRule(request: RuleAllocateRequest): Promise<Result<{ ruleId: string; doc: DocRecord }, LoreError>> {
+    const refusal = this.refuseIfForeignCorpusWrite<{ ruleId: string; doc: DocRecord }>();
+    if (refusal !== undefined) return refusal;
+    const actor = this.resolveWriteActorResult(request.by);
+    if (!actor.ok) return actor;
+    const { leaf } = request;
+    const allocated = await this.store.allocateRuleAndUpdateLeaf(
+      leaf.id,
+      leaf.version,
+      request.buildExtra,
+      actor.value,
+      request.family,
+    );
+    if (!allocated.ok) return allocated;
+    const audited = await this.store.appendAuditEntry({
+      timestamp: new Date().toISOString(),
+      actor: actor.value,
+      session_id: allocated.value.doc.id,
+      action: "update",
+      doc_id: allocated.value.doc.id,
+      details: {
+        rule_id: allocated.value.ruleId,
+        operation: "rule-add",
+        version: allocated.value.doc.version,
+        new_version: allocated.value.doc.version,
+      },
+    });
+    if (!audited.ok) return audited;
+    return allocated;
+  }
+
+  /** {@link resolveWriteActor} as a `Result`: an unwired write context is a refusal, not a throw. */
+  private resolveWriteActorResult(by?: string): Result<string, LoreError> {
+    try {
+      return ok(this.resolveWriteActor(by));
+    } catch (e) {
+      if (e instanceof WriteActorUnresolvedError) return err(e.error);
+      throw e;
+    }
   }
 
   /**
