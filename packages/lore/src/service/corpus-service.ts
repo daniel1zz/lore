@@ -841,6 +841,15 @@ export interface DocWriteRequest {
    * crossing, which is what every non-lifecycle write wants.
    */
   readonly foreignIntent?: boolean;
+  /**
+   * `"bump"` (default): the write is a new version of the doc — one `updateWithProvenance` transaction carrying the
+   * version row. `"keep"`: a status move that is NOT a new version (a reject returning an in-review doc to draft keeps
+   * its version, so a judgment recorded against it stays fresh): the doc update, then ONE audit row whose `version`
+   * is the unchanged one, and no version row (a second row at the same version cannot exist). The two steps are not
+   * one transaction — the store has no primitive that updates a doc and audits without a version row — which is
+   * exactly how the reject path wrote them before AC-DCL-5.
+   */
+  readonly versioning?: "bump" | "keep";
 }
 
 /** Outcome of {@link CorpusService.writeDoc}: `written: false` means the patch changed nothing and NOTHING was written. */
@@ -1207,6 +1216,31 @@ export class CorpusService {
 
   // ── The one write route ────────────────────────────────────────────────────
 
+  /** {@link writeDoc}'s `versioning: "keep"` leg: CAS-guarded doc update, then the audit row; no version row. */
+  private async writeDocKeepingVersion(
+    request: DocWriteRequest,
+    actor: string,
+    now: string,
+  ): Promise<Result<DocWriteOutcome, LoreError>> {
+    const { doc, patch } = request;
+    const updated = await this.store.update(
+      doc.id,
+      { ...definedOnly(patch), updated_at: now },
+      { expected_version: doc.version },
+    );
+    if (!updated.ok) return updated;
+    const audited = await this.store.appendAuditEntry({
+      timestamp: now,
+      actor,
+      session_id: request.auditSessionId ?? doc.id,
+      action: request.auditAction,
+      doc_id: doc.id,
+      details: { ...request.auditDetails, version: doc.version },
+    });
+    if (!audited.ok) return audited;
+    return ok({ doc: updated.value, written: true });
+  }
+
   /**
    * THE write route for changing an existing document (spec-defect-clusters-round-1 D3). In order: the
    * foreign-corpus refusal, the no-op check (a patch that changes nothing writes nothing and returns
@@ -1237,6 +1271,7 @@ export class CorpusService {
     const actor = this.resolveWriteActorResult(request.by);
     if (!actor.ok) return actor;
     const now = request.now ?? new Date().toISOString();
+    if (request.versioning === "keep") return this.writeDocKeepingVersion(request, actor.value, now);
     const newVersion = doc.version + 1;
     const after: DocRecord = { ...doc, ...definedOnly(patch), version: newVersion, updated_at: now };
     const versionRecord: VersionRecord = {

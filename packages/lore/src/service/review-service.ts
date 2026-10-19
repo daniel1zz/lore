@@ -990,9 +990,12 @@ export class ReviewService {
       return ok(doc);
     }
 
+    // reason: a reject is NOT a new version — the doc keeps its version so a judgment recorded against it stays fresh
+    // (the dashboard's calibration capture matches the judgment's doc_version to the doc's); `versioning: "keep"`.
     const rejected = await this.writer.writeDoc({
       doc,
       patch: { status: "draft" },
+      versioning: "keep",
       action: "reject",
       auditAction: "reject",
       auditDetails,
