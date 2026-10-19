@@ -130,6 +130,12 @@
  *     sentence, or "no Purpose section"), counts the rest in one line, and says so when the walk was
  *     truncated. The managed sections carry the setup template's H2s (`## Module Index`, `## Finding
  *     Live Project State`; the command table adds none, `## Commands` is hand-written) so refresh never loses a required heading.
+ *   - Architecture-card links (task-module-claude-md-files-do-not-link-their-architecture-2): when the caller
+ *     injects `deps.moduleCards` (project scope, refresh only), refresh normalises the one
+ *     `Architecture card: \`<slug>\`` line of every module memory file the walk found — written for a module a card's
+ *     `Source:` line names, removed when no card maps to it. `--check` lists a file whose line is missing, stale or
+ *     dangling in `check.differing`, so `bun run check:memory-files` goes red. No cards -> no line and no error.
+ *     Only hard ceilings (`max_lines`/`max_bytes`) refuse a link write; the eviction floor is `status`'s to report.
  *   - Legacy `auto:module-index` / `auto:dynamic-context` blocks are replaced by the managed zone on the
  *     first init/refresh that sees them (`migrateLegacyAutoBlocks`), reported in `migratedLegacyBlocks`.
  *   - `opts.check` (refresh only) computes the same plan and writes nothing: `report.check` names every
@@ -852,8 +858,12 @@ interface ModuleCardAction {
   readBytes: string;
 }
 
-/** Finding kinds that refuse a card-link write: the line only ever adds bytes, so only size breaches matter. */
-const CARD_LINK_REFUSAL_KINDS: ReadonlySet<string> = new Set(["max_lines", "max_bytes", "eviction_required"]);
+/**
+ * Finding kinds that refuse a card-link write: only the HARD ceilings. ⛔ Not `eviction_required` — that floor fires
+ * while a file is still writable on purpose (`lore governance claude-md`), is reported by `lore status
+ * --check-claude-md`, and refusing here would make a module already past its floor impossible to link forever.
+ */
+const CARD_LINK_REFUSAL_KINDS: ReadonlySet<string> = new Set(["max_lines", "max_bytes"]);
 
 /**
  * Plans (reads only) the `Architecture card:` line of every module memory file the walk found: linked to the

@@ -1,5 +1,7 @@
 # Module: adapters/http
 
+Architecture card: `baseline-module-card-http-adapter`
+
 ## Purpose
 
 `Bun.serve` HTTP API adapter: bearer-token auth and sync-push. Mounts `/health` (unauthenticated) and `/api/*` (bearer-token authenticated) routes. Also hosts `sync-push.ts`, the manual logical-replication helper `lore sync push` uses to replicate the 5 core tables into a remote libsql. Optionally (`HttpConfig.dashboard`) serves the packaged production dashboard SPA — static assets + a one-time nonce auth endpoint — so `lore dashboard` runs as a single process with no vite child (`static-serving.ts` + `dashboard-assets-loader.ts`).

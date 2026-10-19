@@ -1,5 +1,7 @@
 # Module: service
 
+Architecture card: `baseline-module-card-service`
+
 ## Purpose
 
 Business logic layer: stateless services, all returning `Promise<Result<T, LoreError>>`. ~25 services orchestrate `StoreInterface` calls and apply domain rules (lifecycle, parent-type validation, MDX placeholders, version snapshots, drift checks, AI generation, file-to-corpus sync, task/phase execution workflow, structured acceptance criteria, audit). No thrown exceptions cross this boundary. `GateEnforcer` (`gate-enforcer.ts`) is a cross-cutting, non-store-holding module — see Patterns below for its checkpoint contract.
