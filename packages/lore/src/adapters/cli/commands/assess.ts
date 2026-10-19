@@ -94,7 +94,7 @@ import {
   formatStampVerdictLine,
 } from "../assess-render.js";
 import { assessmentFreshness } from "../../../service/gate-predicates.js";
-import { deriveCommitSetForPlan, type DiffSourceRecord } from "../assess-commit-derivation.js";
+import { deriveCommitSetForPlan, describeCommitCount, type DiffSourceRecord } from "../assess-commit-derivation.js";
 import { collectRecordedRanges } from "../../../service/task-commit-range.js";
 import { invocationOf } from "../command-invocation.js";
 import { printLine } from "../output.js";
@@ -117,7 +117,7 @@ function formatDiffSourceLine(source: DiffSourceRecord): string {
           (source.tasks_not_measured.length > 0
             ? ` (${String(source.tasks_not_measured.length)} task(s) NOT MEASURED: no recorded commit range and no slug match)`
             : "") + (measuredZero > 0 ? ` (${String(measuredZero)} task(s) recorded an empty commit range)` : "");
-        return `Diff source: derived from ${String(source.commits.length)} commit(s) across this plan's tasks${gapNote}`;
+        return `Diff source: derived from ${describeCommitCount(source.commits.length, source.excluded_merged_commit_count)} across this plan's tasks${gapNote}`;
       }
       if (source.status === "unverifiable_convention_mismatch") {
         return (
@@ -305,7 +305,7 @@ export default defineLoreCommand({
               ? ` (${String(derivation.tasks_without_commits.length - derivation.tasks_not_measured.length)} task(s) recorded an empty commit range)`
               : "");
           inv.io.stderr.write(
-            `Derived diff from ${String(derivation.commits.length)} commit(s) across this plan's tasks${gapNote}.\n`,
+            `Derived diff from ${describeCommitCount(derivation.commits.length, derivation.excluded_merged_commit_count)} across this plan's tasks${gapNote}.\n`,
           );
         } else if (derivation.status === "unverifiable_convention_mismatch") {
           commitDerivationUnverifiable = true;
