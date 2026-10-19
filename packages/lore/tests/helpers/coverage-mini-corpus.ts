@@ -24,6 +24,8 @@ export const MINI_CLI = "packages/lore/src/adapters/cli";
 export interface MiniCorpus {
   readonly dir: string;
   readonly root: string;
+  /** The branch node leaves A and B sit under; new leaves are added beneath it. */
+  readonly branch: string;
   readonly leafA: string;
   readonly leafB: string;
   run(args: string[]): Promise<{ stdout: string; stderr: string; exitCode: number }>;
@@ -103,6 +105,7 @@ export async function buildMiniCorpus(): Promise<MiniCorpus> {
   return {
     dir,
     root,
+    branch,
     leafA,
     leafB,
     run,
