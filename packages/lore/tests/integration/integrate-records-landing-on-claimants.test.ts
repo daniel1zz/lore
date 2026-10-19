@@ -164,13 +164,13 @@ describe("AC-LRD-2 — lore integrate records a landing on every claimant", () =
 
   it("(2b) an already-integrated branch records the branch head itself as the landed commit, with the claim's base as the range start", () => {
     makeBranch("feat-head");
-    const task = createTask("Head");
+    const first = createTask("HeadFirst");
     const tip = git(["rev-parse", "feat-head"]);
+    mustRun(["claim", first, "--worktree", "feat-head"]);
+    expect(integrate("feat-head").exitCode).toBe(0);
+    // the branch is on main now (its head is an ancestor of a merge commit); a second claimant has no landing yet
+    const task = createTask("Head");
     mustRun(["claim", task, "--worktree", "feat-head"]);
-    // main absorbs the branch without lore integrate (fast path a hand merge would take): the head is an ancestor of main
-    git(["checkout", "-q", "main"]);
-    git(["merge", "-q", "--no-edit", "--no-ff", "-m", "hand merge", "feat-head"]);
-    git(["checkout", "-q", "--detach", "main"]);
     const mainTip = git(["rev-parse", "main"]);
 
     const again = integrate("feat-head");
