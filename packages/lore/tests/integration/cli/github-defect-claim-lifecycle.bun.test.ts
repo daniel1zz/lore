@@ -181,18 +181,18 @@ afterAll(() => {
   }
 });
 
-describe("AC-GR-9: filing alone makes the defect claimable", () => {
+describe("AC-GR-9 (retired by GS-T7 / AC-GS-10): filing alone creates NO corpus task", () => {
   it(
-    "AC-GR-9 HAPPY: report-issue exits 0 against the stub gh, then claim on the derived slug exits 0 — no adopt step",
+    "AC-GS-10: report-issue exits 0 against the stub gh and the formerly-derived task slug does not exist (claim exits 3)",
     () => {
       const fileResult = run([
         "report-issue",
         "--title",
-        "AC-GR-9 e2e: filed defect must be claimable with no extra command",
+        "AC-GR-9 e2e: filed defect creates no corpus document",
         "--description",
         "Filed by github-defect-claim-lifecycle.bun.test.ts against a payload-serving gh stub.",
         "--expected",
-        "the minted task is claimable immediately",
+        "no corpus task is created by filing",
         "--actual",
         "captured by this test run",
         "--severity",
@@ -213,25 +213,13 @@ describe("AC-GR-9: filing alone makes the defect claimable", () => {
       expect(parsed.data.url).toBe(STUB_ISSUE_URL);
       expect(parsed.data.retried).toBe(false);
 
-      // D1's deterministic slug — BOUNDARY: exactly this shape, not merely "some slug".
-      const derivedSlug = `task-gh-${STUB_REPO_ID}-${STUB_ISSUE_NUMBER}`;
-
-      const claimResult = run(["claim", derivedSlug]);
+      // GitHub owns the report: the slug the mint used to derive resolves to nothing (DOC_NOT_FOUND, exit 3).
+      const formerSlug = `task-gh-${STUB_REPO_ID}-${STUB_ISSUE_NUMBER}`;
+      const claimResult = run(["claim", formerSlug]);
       expect(
         claimResult.exitCode,
-        `claim on the derived slug '${derivedSlug}' failed (exit ${claimResult.exitCode}) — the filed defect was ` +
-          `not claimable with no extra command. stdout: ${claimResult.stdout}\nstderr: ${claimResult.stderr}`,
-      ).toBe(0);
-
-      // Falsifier (this task's report names the mutation actually run): remove
-      // fileGithubIssue's corpus-mint call — the slug above resolves to
-      // nothing and this claim call reddens (DOC_NOT_FOUND, exit 3).
-      const getResult = run(["get", derivedSlug, "--json"]);
-      expect(getResult.exitCode, `get on the derived slug failed: ${getResult.stderr}`).toBe(0);
-      const parsedDoc = JSON.parse(getResult.stdout) as { data: { doc: { extra?: Record<string, unknown> } } };
-      const extra = parsedDoc.data.doc.extra ?? {};
-      expect(extra["adhoc"]).toBe(true);
-      expect("plan_id" in extra).toBe(false);
+        `claim on '${formerSlug}' should find no task. stdout: ${claimResult.stdout}\nstderr: ${claimResult.stderr}`,
+      ).toBe(3);
     },
     60_000,
   );

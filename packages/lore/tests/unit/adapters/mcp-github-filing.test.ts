@@ -9,10 +9,10 @@
  * `tools.ts:2921-2930` pre-fix). That refusal is now deleted: the handler
  * wires onto the SAME `fileGithubIssue` (`report-issue-wiring.ts`) the CLI's
  * `commands/report-issue.ts` calls — one call site, never a second filing
- * path (this task's own bundle) — and the success payload now NAMES the
- * created corpus task's slug (D8/AC-GR-9's mint already lands inside
- * `fileGithubIssue`; this handler locates it afterward via the pure,
- * store-free `readGithubIssueRef`).
+ * path (this task's own bundle). Since GS-T7
+ * (spec-github-owns-issue-report-state-no-mirror-task-work-carries AC-GS-15)
+ * filing creates no corpus task, so the success payload is the GitHub issue's
+ * `{number, url}` and names no task slug.
  *
  * ⛔ Per this task's own Stated Limit: the handler is obtained by
  * IMPORTING `registerTools` (`adapters/mcp/tools.ts:1434`) and registering
@@ -70,8 +70,6 @@ import { JudgmentService } from "../../../src/service/judgment-service.js";
 import type { App } from "../../../src/app.js";
 import type { ApiKeyStore } from "../../../src/adapters/http/auth.js";
 import { registerTools } from "../../../src/adapters/mcp/tools.js";
-import { githubIssueTaskSlug } from "../../../src/service/issue-task-shaping.js";
-import { readGithubIssueRef } from "../../../src/service/resolution-projector.js";
 import { inLoopAuditVerifyRunner } from "../../support/audit-verify-runner-stub.js";
 
 // ─── GitHubIntakePort mocked wholesale — see this file's own header ────────
@@ -214,30 +212,20 @@ afterEach(() => {
 // ═══════════════════════════════════════════════════════════════════════════
 
 describe("AC-GR-11: lore_report_issue files under a GitHub-shaped feedback.upstream", () => {
-  it("HAPPY: the success payload names the created corpus task's slug", async () => {
+  it("HAPPY: the success payload is the GitHub issue {number, url} and names no task slug", async () => {
     const call = getToolHandler(server, "lore_report_issue");
 
     const result = await call(REPORT_ISSUE_ARGS);
 
     const payload = parseResult(result);
-    // Falsifier (this task's own instruction): restoring the deleted
-    // isGithubUpstreamCfg refusal branch reddens EXACTLY this assertion —
-    // the payload degrades to a VALIDATION_ERROR envelope with no
-    // `task_slug` key at all (checked BEFORE `isError`, deliberately, so
-    // the failure lands squarely on "the payload names the task slug"
-    // rather than on the more generic isError check below).
-    expect(payload["task_slug"]).toBe(githubIssueTaskSlug(REPO_ID, 42));
     expect(result.isError).toBeUndefined();
-
-    // The slug must resolve to a REAL corpus task, not a fabricated string.
-    const taskLookup = await app.corpusService.listFull({ type: "task" });
-    if (!taskLookup.ok) throw new Error("listFull failed");
-    const created = taskLookup.value.docs.find((d) => d.slug === payload["task_slug"]);
-    expect(created).toBeDefined();
-    expect(readGithubIssueRef(created?.extra)).toEqual({ repo: "acme/widget", issueNumber: 42, repo_id: REPO_ID });
+    expect(payload["number"]).toBe(42);
+    expect(payload["url"]).toBe("https://github.com/acme/widget/issues/42");
+    // AC-GS-15: GitHub owns the report — no corpus task exists to name.
+    for (const key of ["task_slug", "slug", "task_id"]) expect(Object.keys(payload)).not.toContain(key);
   });
 
-  it("REGRESSION: the pre-existing GithubReportResult fields survive alongside task_slug", async () => {
+  it("REGRESSION: the GithubReportResult fields survive", async () => {
     const call = getToolHandler(server, "lore_report_issue");
     const result = await call(REPORT_ISSUE_ARGS);
 
@@ -251,24 +239,19 @@ describe("AC-GR-11: lore_report_issue files under a GitHub-shaped feedback.upstr
     });
   });
 
-  it("STATE: filing mints exactly one new adhoc corpus task", async () => {
-    const before = await app.corpusService.listFull({ type: "task" });
+  it("STATE: filing creates no corpus document at all", async () => {
+    const before = await app.corpusService.listFull({});
     if (!before.ok) throw new Error("listFull failed");
-    expect(before.value.total).toBe(0);
 
     const call = getToolHandler(server, "lore_report_issue");
     await call(REPORT_ISSUE_ARGS);
 
-    const after = await app.corpusService.listFull({ type: "task" });
+    const after = await app.corpusService.listFull({});
     if (!after.ok) throw new Error("listFull failed");
-    expect(after.value.total).toBe(1);
-    expect(after.value.docs[0]?.extra).toMatchObject({ adhoc: true });
+    expect(after.value.total).toBe(before.value.total);
   });
 
-  it("BOUNDARY: the payload names the JUST-FILED issue's task, not an unrelated pre-existing issue task", async () => {
-    // Pre-seed a corpus task for a DIFFERENT issue number, same repo — the
-    // lookup must discriminate by (repo, issueNumber), never just "the
-    // first issue-report task found".
+  it("BOUNDARY: two filings return each its own issue number", async () => {
     verifyTargetMock.mockResolvedValueOnce(ok({ login: "acme", id: REPO_ID }));
     searchDuplicatesMock.mockResolvedValueOnce(ok([]));
     fileIssueMock.mockResolvedValueOnce(
@@ -277,14 +260,10 @@ describe("AC-GR-11: lore_report_issue files under a GitHub-shaped feedback.upstr
     const call = getToolHandler(server, "lore_report_issue");
     const priorResult = await call({ ...REPORT_ISSUE_ARGS, title: "A prior, unrelated report" });
     expect(priorResult.isError).toBeUndefined();
-    const priorSlug = parseResult(priorResult)["task_slug"];
-    expect(priorSlug).toBe(githubIssueTaskSlug(REPO_ID, 7));
+    expect(parseResult(priorResult)["number"]).toBe(7);
 
-    // Now file the ACTUAL probe report (issue #42, per the shared mock default).
     const result = await call(REPORT_ISSUE_ARGS);
-    const payload = parseResult(result);
-    expect(payload["task_slug"]).toBe(githubIssueTaskSlug(REPO_ID, 42));
-    expect(payload["task_slug"]).not.toBe(priorSlug);
+    expect(parseResult(result)["number"]).toBe(42);
   });
 
   it("NEGATIVE: a missing severity is refused before any GitHub call, naming the field", async () => {
@@ -324,7 +303,7 @@ describe("AC-GR-11: lore_report_issue files under a GitHub-shaped feedback.upstr
     expect(error["field"]).toBe("severity,category");
   });
 
-  it("ERROR: a GitHubIntakePort.verifyTarget failure propagates and mints no task", async () => {
+  it("ERROR: a GitHubIntakePort.verifyTarget failure propagates and creates no corpus document", async () => {
     verifyTargetMock.mockReset().mockResolvedValue(
       err({ code: "AUTH_REQUIRED", message: "gh not authenticated", retryable: false }),
     );
@@ -340,7 +319,7 @@ describe("AC-GR-11: lore_report_issue files under a GitHub-shaped feedback.upstr
     expect(taskLookup.value.total).toBe(0);
   });
 
-  it("ERROR: a GitHubIntakePort.fileIssue failure propagates and mints no task", async () => {
+  it("ERROR: a GitHubIntakePort.fileIssue failure propagates and creates no corpus document", async () => {
     fileIssueMock.mockReset().mockResolvedValue(err({ code: "STORE_ERROR", message: "gh api rate limited" }));
     const call = getToolHandler(server, "lore_report_issue");
 
