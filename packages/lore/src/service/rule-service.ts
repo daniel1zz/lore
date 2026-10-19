@@ -74,6 +74,7 @@ import { resolveDoc } from "./resolve.js";
 import { bareDocWriter, type CreateDocResult, type DocWritePort, type WriteActorOpts } from "./corpus-service.js";
 import { collectKnownRuleIds } from "./baseline-rule-ids.js";
 import { collectLeafRules } from "./rule-index-queries.js";
+import { demotionOf, type Demotion } from "./demotion-notice.js";
 import { CorpusWriteAuthority, type CorpusWriteAuthorityContext } from "./foreign-corpus-write-guard.js";
 
 // reason: C7's `--check-baseline` imports this from the service that owns rules; the helper itself
@@ -281,8 +282,11 @@ export class RuleService {
     leaf: string,
     input: AddRuleInput,
     opts?: { by?: string },
-  ): Promise<Result<{ ruleId: string; doc: DocRecord }, LoreError>> {
+  ): Promise<Result<{ ruleId: string; doc: DocRecord; demoted?: Demotion }, LoreError>> {
     const actor = this.resolveActor(opts?.by);
+    // reason: D18 — the demotion is its own CAS write; a later STALE_VERSION re-apply reads the leaf already
+    // draft, so the notice is captured on the attempt that wrote it and survives the retry.
+    let demoted: Demotion | undefined;
     // reason: first pass validates the rule's own fields only; "AS" is the one family that admits every
     // field (four-part standard included). The family-specific verdict comes from the extra check below.
     const candidate = baselineRuleSchema.safeParse({ ...input, id: `AS-${PREVALIDATION_NUMBER}`, lifecycle: "live" });
@@ -318,6 +322,7 @@ export class RuleService {
         if (readied.error.code === "STALE_VERSION") { lastStale = readied.error; continue; }
         return readied;
       }
+      demoted ??= demotionOf(fresh.value, readied.value);
       const base = readied.value;
       const withRule = (ruleId: string): Record<string, unknown> => ({
         ...base.extra,
@@ -335,7 +340,7 @@ export class RuleService {
         if (allocated.error.code === "STALE_VERSION") { lastStale = allocated.error; continue; }
         return allocated;
       }
-      return ok(allocated.value);
+      return ok({ ...allocated.value, ...(demoted !== undefined ? { demoted } : {}) });
     }
     return err(lastStale ?? staleExhausted(leafId));
   }
@@ -352,8 +357,9 @@ export class RuleService {
     ruleId: string,
     patch: SetRulePatch,
     opts?: { by?: string },
-  ): Promise<Result<{ rule: BaselineRule; doc: DocRecord }, LoreError>> {
+  ): Promise<Result<{ rule: BaselineRule; doc: DocRecord; demoted?: Demotion }, LoreError>> {
     const actor = this.resolveActor(opts?.by);
+    let demoted: Demotion | undefined; // reason: D18 — kept across CAS re-applies, see addRule
     if (!ANY_RULE_ID_PATTERN.test(ruleId)) {
       return err(validationError("ruleId", `rule id must match BR-<n>, AS-<n> or AD-<n> (got '${ruleId}')`, ruleId));
     }
@@ -401,7 +407,8 @@ export class RuleService {
           if (written.error.code === "STALE_VERSION") { lastStale = written.error; continue; }
           return written;
         }
-        return ok({ rule: edited.value, doc: written.value });
+        demoted ??= written.value.demoted;
+        return ok({ rule: edited.value, doc: written.value.doc, ...(demoted !== undefined ? { demoted } : {}) });
       }
 
       const dest = await this.resolveBaselineDoc(patch.moveTo, ["leaf", "standard", "debt-registry"]);
@@ -433,6 +440,9 @@ export class RuleService {
         if (toReady.error.code === "STALE_VERSION") { lastStale = toReady.error; continue; }
         return toReady;
       }
+      // reason: a move can demote both leaves; `demoted` is a single value, so the source leaf wins and the
+      // destination's is reported only when the source was not approved.
+      demoted ??= demotionOf(sourceLeaf, fromReady.value) ?? demotionOf(toFresh.value, toReady.value);
       const from = fromReady.value;
       const to = toReady.value;
       const fromExtra = { ...from.extra, rules: rulesOf(from).filter((r) => r.id !== ruleId) };
@@ -460,7 +470,7 @@ export class RuleService {
         if (moved.error.code === "STALE_VERSION") { lastStale = moved.error; continue; }
         return moved;
       }
-      return ok({ rule: edited.value, doc: moved.value.to });
+      return ok({ rule: edited.value, doc: moved.value.to, ...(demoted !== undefined ? { demoted } : {}) });
     }
     return err(lastStale ?? staleExhausted(ruleId));
   }
@@ -952,12 +962,12 @@ export class RuleService {
     mutate: (doc: DocRecord) => Mutation,
     keepsApproval = false,
     scopeProof?: readonly DocRecord[],
-  ): Promise<Result<DocRecord, LoreError>> {
+  ): Promise<Result<{ doc: DocRecord; demoted?: Demotion }, LoreError>> {
     // reason: #297 — a mutation that leaves `extra` as stored is a no-op and must write NOTHING, not even the
     // approved->draft demotion that precedes a real edit. `mutate` is pure over the doc, and the demotion changes
     // only `status`, so previewing it on the stored doc yields the same `extra` the real run would.
     const preview = mutate(doc);
-    if (preview.ok && isDeepStrictEqual(preview.value.extra, doc.extra)) return ok(doc);
+    if (preview.ok && isDeepStrictEqual(preview.value.extra, doc.extra)) return ok({ doc });
     const ready = keepsApproval ? ok(doc) : await this.demoteIfApproved(doc, actor, "baseline edit");
     if (!ready.ok) return ready;
     const mutation = mutate(ready.value);
@@ -967,7 +977,10 @@ export class RuleService {
       const issue = shape.error.issues[0];
       return err(validationError(issue ? `extra.${issue.path.join(".")}` : "extra", issue ? issue.message : "invalid baseline extra"));
     }
-    return this.commit(ready.value, mutation.value.extra, ready.value.status, actor, mutation.value.summary, mutation.value.details, scopeProof);
+    const committed = await this.commit(ready.value, mutation.value.extra, ready.value.status, actor, mutation.value.summary, mutation.value.details, scopeProof);
+    if (!committed.ok) return committed;
+    const demoted = demotionOf(doc, ready.value);
+    return ok({ doc: committed.value, ...(demoted !== undefined ? { demoted } : {}) });
   }
 
   /** Re-read → mutate → commit, re-applying on STALE_VERSION up to {@link MAX_CAS_REAPPLIES} times. */
@@ -984,7 +997,7 @@ export class RuleService {
       const fresh = await this.readLeaf(docId);
       if (!fresh.ok) return fresh;
       const written = await this.writeLeafExtra(fresh.value, actor, mutate, keepsApproval, scopeProof);
-      if (written.ok) return written;
+      if (written.ok) return ok(written.value.doc);
       if (written.error.code !== "STALE_VERSION") return written;
       lastStale = written.error;
     }

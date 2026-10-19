@@ -62,6 +62,7 @@ import { CorpusService } from "../../../src/service/corpus-service.js";
 import { DriftCheckService, type FsProbe } from "../../../src/service/drift-check-service.js";
 import { disabledCodeDriftPayload, runDrift } from "../../../src/flows/drift-flow.js";
 import { actedStore } from "../../live-invocation.js";
+import { withExportReader } from "../../with-export-reader.js";
 
 // ─── Fixture helpers ──────────────────────────────────────────────────────────
 
@@ -111,11 +112,11 @@ async function createKnowledge(
 
 /** A deterministic FsProbe stub — `present` paths resolve, everything else is missing. */
 function makeProbe(present: Record<string, { kind: "file" | "dir"; content?: string; children?: string[] }>): FsProbe {
-  return {
+  return withExportReader({
     stat: (path) => present[path]?.kind ?? "missing",
     readFile: (path) => present[path]?.content ?? null,
     listDir: (path) => present[path]?.children ?? null,
-  };
+  });
 }
 
 /** The always-resolving fixture file both populations anchor at. */

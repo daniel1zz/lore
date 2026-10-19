@@ -45,7 +45,12 @@ export function formatDoneMessage(result: DoneResult): string {
   const worktreeLines = (result.worktree_outcomes ?? []).map(formatWorktreeOutcomeLine);
   // task-done-floor-accepts-an-anchored-test-file-the-task-deleted: a test file accepted WITHOUT a run says so.
   const removedLines = (result.removed_test_anchors ?? []).map((path) => `test file ${path}: removed by this task (no run needed)`);
-  return [archived, ...removedLines, ...worktreeLines].join("\n");
+  // a declared ac_scope id satisfied by supersession (D15) says so, naming the superseding criterion.
+  const supersededLines = (result.superseded_scope ?? []).map(
+    (entry) =>
+      `ac_scope ${entry.ac_id}: satisfied by supersession (superseded by ${entry.superseded_by.spec}:${entry.superseded_by.ac}: ${entry.superseded_by.reason})`,
+  );
+  return [archived, ...supersededLines, ...removedLines, ...worktreeLines].join("\n");
 }
 
 /**

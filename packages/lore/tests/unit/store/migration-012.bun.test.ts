@@ -307,7 +307,7 @@ describe("migration-012 (widen links.link_type CHECK to accept 'resolves')", () 
       .run("01HGOVERNSPRE00000001", "01HGOVERNSPRE00000002", "2026-07-29T00:00:00.000Z", "agent:test");
     rawDb.close();
 
-    const store = actedStore(new SQLiteStore(dbPath));
+    const store = actedStore(new SQLiteStore(dbPath, { migrate: true }));
     const db = store.getDatabase();
 
     expect(userVersion(db)).toBe(26);

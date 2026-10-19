@@ -347,7 +347,10 @@ export const AiConfigSchema = z
      */
     review: z
       .object({
-        /** Max chars of the reviewed document's own content included in the prompt. Default: 12000. */
+        /**
+         * Read ONLY by the frozen review prompt versions v1-v5. From v6 the document under review is never cut
+         * (BR-268), so this key no longer bounds the active prompt; only `max_context_chars` does.
+         */
         max_doc_chars: z.number().int().positive().default(12000),
         /** Max chars of the parent document's content included as context. Default: 8000. */
         max_context_chars: z.number().int().positive().default(8000),

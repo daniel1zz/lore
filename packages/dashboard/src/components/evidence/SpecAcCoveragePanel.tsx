@@ -117,6 +117,10 @@ type CoverageState = ReturnType<typeof deriveAcCoverageState>;
  */
 function stateVariant(state: CoverageState): "destructive" | "default" | "secondary" | "outline" {
   switch (state) {
+    case "superseded":
+      // reason: a criterion superseded by another spec's (D15) is retired, not failing or passing: the neutral
+      // `"outline"` treatment, with the state NAME as the visible text (same convention as `"none"`).
+      return "outline";
     case "fail":
       return "destructive";
     case "fail_superseded":

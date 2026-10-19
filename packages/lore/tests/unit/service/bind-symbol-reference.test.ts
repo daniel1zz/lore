@@ -34,6 +34,7 @@ import {
   type FsProbe,
 } from "@lore/core";
 import { extractCodeReferences } from "../../../src/service/claude-md-admission.js";
+import { withExportReader } from "../../with-export-reader.js";
 
 const PACKAGE_ROOT = new URL("../../../", import.meta.url).pathname.replace(/\/$/, "");
 const INDEX_TS = join(PACKAGE_ROOT, "src", "index.ts");
@@ -138,11 +139,12 @@ describe("AC-BIND-1: path#Symbol in a memory file", () => {
 
 describe("AC-BIND-1: one resolver for prose and spec anchors", () => {
   const files = new Map<string, string>([["packages/core/src/x.ts", "export const Here = 1;\n"]]);
-  const probe = (content: (p: string) => string | null): FsProbe => ({
-    stat: (p) => (files.has(p) ? "file" : "missing"),
-    readFile: content,
-    listDir: () => [],
-  });
+  const probe = (content: (p: string) => string | null): FsProbe =>
+    withExportReader({
+      stat: (p) => (files.has(p) ? "file" : "missing"),
+      readFile: content,
+      listDir: () => [],
+    });
 
   it("STATE: the same path#Symbol classifies identically as a spec anchor (computeDrift) and as a prose reference", () => {
     const okProbe = probe((p) => files.get(p) ?? null);
@@ -188,11 +190,11 @@ describe("AC-BIND-1: one resolver for prose and spec anchors", () => {
       ["pkg/src/sibling.ts", "export const Here = 1;\n"],
       ["gone-at-root.ts", "export const Here = 1;\n"],
     ]);
-    const docProbe: FsProbe = {
+    const docProbe: FsProbe = withExportReader({
       stat: (p) => (docFiles.has(p) ? "file" : "missing"),
       readFile: (p) => docFiles.get(p) ?? null,
       listDir: () => [],
-    };
+    });
     const content = "`./sibling.ts#Here` ok; `./sibling.ts#Gone` bad symbol; `./gone-at-root.ts` must not fall back to the root.";
 
     const references = extractCodeReferences(content, "pkg/src/CLAUDE.md");

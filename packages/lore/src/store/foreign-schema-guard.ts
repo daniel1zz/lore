@@ -1,39 +1,36 @@
 /**
- * Foreign-schema guard: refuses to let a linked git worktree run the main
- * checkout's corpus migrations.
+ * Behind-schema guard: refuses to open a corpus that is older than this binary's schema, naming `lore migrate schema`.
  *
- * Purpose: `SQLiteStore`'s constructor unconditionally migrates a behind
- * `.lore/lore.db`. A worktree without its own `.lore/` resolves the MAIN
- * checkout's corpus (corpus-resolution.ts, SPEC M4), so a worktree running an
- * older or newer binary would silently rewrite main's schema. This guard runs
- * BEFORE `new SQLiteStore` on every adapter/composition path that opens a
- * discovered corpus.
+ * Purpose: a corpus upgrade runs ONLY through the explicit `lore migrate schema` command. This guard runs BEFORE
+ * `new SQLiteStore` on every adapter/composition path that opens a discovered corpus (CLI loader, MCP server and
+ * `lore serve` through it, `createApp`, the gate's audit open), so a read-only command, a hook or a linked worktree
+ * can never rewrite a shared corpus as a side effect. The `SQLiteStore` constructor refuses too (the last line of
+ * defence); this guard exists so the refusal is a validation error (exit 4) naming both versions and the command,
+ * not a generic storage failure.
  *
- * Public surface: {@link findForeignBehindSchema},
- * {@link assertNoForeignSchemaMigration}, {@link ForeignSchemaMigrationRefusedError}.
+ * (The file and symbol names say "foreign" for historical reasons: the guard began as the linked-worktree-only check
+ * of spec-close-the-eight-verified-critical-defects-no-judge-listing §Design F5, AC-CRIT-7. It now covers every
+ * corpus behind the binary, which includes the main checkout's corpus opened from a linked worktree. Renaming would
+ * touch the loader and the gate, which other work owns.)
+ *
+ * Public surface: {@link findForeignBehindSchema}, {@link assertNoForeignSchemaMigration},
+ * {@link ForeignSchemaMigrationRefusedError}.
  *
  * Invariants:
  *   - Never writes: the version read is a readonly handle (`probeSchemaVersion`).
- *   - Only a corpus that is BOTH the main checkout's own `.lore/lore.db` AND
- *     opened from a linked worktree AND behind `LATEST_SCHEMA_VERSION` is refused.
- *     A worktree with its own `.lore/`, the main checkout itself, and a probe
- *     failure all pass through (a probe failure is surfaced loudly by the
- *     constructor's own open, so nothing is hidden).
- *   - The `SQLiteStore` constructor is deliberately unchanged (init paths rely
- *     on its migrate-on-open); callers opt in by calling this guard first.
+ *   - A corpus that is behind `LATEST_SCHEMA_VERSION` is refused, from any working copy. A new/empty file
+ *     (`user_version` 0), a corpus at or ahead of the binary, a missing file and a probe failure all pass through (a
+ *     probe failure is surfaced loudly by the constructor's own open, so nothing is hidden).
  *
- * Side-effect class: IO (spawns `git rev-parse`, opens the db readonly).
- *
- * Source: spec-close-the-eight-verified-critical-defects-no-judge-listing §Design F5 (AC-CRIT-7).
+ * Side-effect class: IO (opens the db readonly).
  */
 
-import { spawnSync } from "node:child_process";
-import { existsSync, realpathSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { existsSync } from "node:fs";
 import { probeSchemaVersion } from "./schema-probe.js";
+import { isSchemaBehind, schemaBehindMessage } from "./schema-behind.js";
 import { LATEST_SCHEMA_VERSION } from "./schema-version.js";
 
-/** Facts about a refused open: main's corpus is behind and cwd is a linked worktree. */
+/** Facts about a refused open: the corpus is behind the binary's schema. */
 export interface ForeignBehindSchema {
   readonly dbPath: string;
   readonly userVersion: number;
@@ -59,67 +56,35 @@ export class ForeignSchemaMigrationRefusedError extends Error {
   }
 }
 
-function realOrResolved(path: string): string {
-  try {
-    return realpathSync(path);
-  } catch {
-    // reason: a path that does not exist cannot be a foreign corpus; the
-    // lexical form is only used for an equality comparison that then fails.
-    return resolve(path);
-  }
-}
-
-/** Main checkout root when `cwd` is inside a LINKED worktree; `undefined` otherwise (primary checkout, non-git, probe failure). */
-function mainCheckoutRootOfLinkedWorktree(cwd: string): string | undefined {
-  const gitDir = spawnSync("git", ["rev-parse", "--git-dir"], { cwd, encoding: "utf8", timeout: 5000 });
-  const commonDir = spawnSync("git", ["rev-parse", "--git-common-dir"], { cwd, encoding: "utf8", timeout: 5000 });
-  if (gitDir.status !== 0 || commonDir.status !== 0) return undefined;
-  const gitDirText = gitDir.stdout?.trim();
-  const commonDirText = commonDir.stdout?.trim();
-  if (!gitDirText || !commonDirText) return undefined;
-  const gitDirAbs = realOrResolved(resolve(cwd, gitDirText));
-  const commonDirAbs = realOrResolved(resolve(cwd, commonDirText));
-  if (gitDirAbs === commonDirAbs) return undefined;
-  return dirname(commonDirAbs);
-}
-
 /**
- * Decides whether opening `dbPath` from `cwd` would migrate a foreign (main
- * checkout) corpus from a linked worktree.
+ * Decides whether opening `dbPath` would have to upgrade an older corpus.
  *
  * @param dbPath - the discovered `.lore/lore.db` about to be opened
- * @param cwd - the directory the invocation runs in (`Invocation.cwd`); tests pass a fixture directory
+ * @param _cwd - the directory the invocation runs in; unused now that every behind corpus is refused wherever it is
+ *   opened from (kept so the loader and gate call sites keep their shape)
  * @returns the refusal facts, or `null` when opening is safe
  * @example
- *   const behind = findForeignBehindSchema(findLoreDbPath());
+ *   const behind = findForeignBehindSchema(findLoreDbPath(), inv.cwd);
  *   if (behind !== null) refuse(behind.message);
  */
-export function findForeignBehindSchema(dbPath: string, cwd: string): ForeignBehindSchema | null {
-  const mainRoot = mainCheckoutRootOfLinkedWorktree(cwd);
-  if (mainRoot === undefined) return null;
-  const mainDb = join(mainRoot, ".lore", "lore.db");
-  if (!existsSync(mainDb) || !existsSync(dbPath)) return null;
-  if (realOrResolved(dbPath) !== realOrResolved(mainDb)) return null;
-
+export function findForeignBehindSchema(dbPath: string, _cwd: string): ForeignBehindSchema | null {
+  if (!existsSync(dbPath)) return null;
   const probe = probeSchemaVersion(dbPath);
   if (!probe.ok) return null;
   const userVersion = probe.value.user_version;
-  if (userVersion >= LATEST_SCHEMA_VERSION) return null;
+  if (!isSchemaBehind(userVersion, LATEST_SCHEMA_VERSION)) return null;
   return {
     dbPath,
     userVersion,
     latestVersion: LATEST_SCHEMA_VERSION,
-    message:
-      `schema mismatch: the main checkout's corpus at '${dbPath}' is at schema version ${userVersion}, ` +
-      `this binary needs ${LATEST_SCHEMA_VERSION}; a linked worktree never migrates the main checkout's corpus — ` +
-      `run any lore command once from the main checkout to migrate it, then retry`,
+    message: schemaBehindMessage(dbPath, userVersion, LATEST_SCHEMA_VERSION),
   };
 }
 
 /**
  * Throwing form of {@link findForeignBehindSchema} for composition roots.
  *
- * @throws ForeignSchemaMigrationRefusedError when the open would migrate a foreign corpus
+ * @throws ForeignSchemaMigrationRefusedError when the open would upgrade an older corpus
  */
 export function assertNoForeignSchemaMigration(dbPath: string, cwd: string): void {
   const behind = findForeignBehindSchema(dbPath, cwd);

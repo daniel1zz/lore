@@ -78,7 +78,7 @@ describe("migration 023 decision_log superseded verdict", () => {
     const path = join(dir, "lore.db");
     try {
       legacyDb(path, from);
-      const store = actedStore(new SQLiteStore(path));
+      const store = actedStore(new SQLiteStore(path, { migrate: true }));
       try {
         const before = await store.listDecisionLog();
         expect(before.ok && before.value.map((r) => [r.id, r.verdict])).toEqual([[1, "auto"], [2, "escalate"], [3, "refuse"]]);

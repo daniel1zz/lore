@@ -224,8 +224,8 @@ export interface SetCriterionPatch {
   covers?: string[];
   /**
    * Baseline rule ids this criterion cites — REPLACES the whole list (`[]` clears it).
-   * Report-only: dangling / inactive ids are stored and surfaced as audit-recorded warnings
-   * (baseline slice 1 §C4). Grammar/uniqueness/cap are the schema's (`cites`).
+   * Dangling / inactive ids are refused under gate mode `enforce` on an armed branch, and stored with an
+   * audit-recorded warning under `report`/`off` (baseline slice 1 §C4). Grammar/uniqueness/cap are the schema's (`cites`).
    */
   cites?: string[];
   /**
@@ -508,7 +508,8 @@ export class AcService {
       if (pathCheck.value.declaration !== null) declaration = pathCheck.value.declaration;
     }
 
-    // §C4 — report-only citation warnings, recorded in the audit entry (never rejected, never dropped).
+    // §C4 — citation warnings, recorded in the audit entry; under gate mode `enforce` on an armed branch
+    // `writeCriteria` refuses a dangling/inactive id before any write, under `report`/`off` it is stored.
     const addedCites = newCriterion?.cites;
     const citeAudit = addedCites !== undefined ? await this.citeAuditDetails(addedCites, spec.id) : undefined;
     if (citeAudit !== undefined && !citeAudit.ok) return citeAudit;
@@ -527,8 +528,9 @@ export class AcService {
 
   /**
    * Add (or, with `remove`, drop) baseline rule citations on ONE declared criterion
-   * (baseline slice 1 §C4, AC-BLS1-6). REPORT-ONLY: a dangling / deprecated / retired id is
-   * WRITTEN and returned as a {@link CiteWarning}; it never rejects and never drops the id.
+   * (baseline slice 1 §C4, AC-BLS1-6). A dangling / deprecated / retired id is refused
+   * under gate mode `enforce` on an armed branch; under `report`/`off` it is WRITTEN and returned as a
+   * {@link CiteWarning}, never dropped.
    * Ids are set-deduplicated. Citing is NOT a contract edit: like `addCriterion` it never
    * demotes an approved spec (the no-demote branch of `writeCriteria`); it writes exactly one
    * version row and one audit entry with `details.operation === "cite"`.

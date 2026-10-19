@@ -481,7 +481,7 @@ describe("migration-009 (audit hash chain backfill)", () => {
     // apply migration-009 — never throw, never touch the pre-existing
     // rows' logical content, and produce a fully self-consistent chain over
     // exactly those 3 legacy rows.
-    const store = actedStore(new SQLiteStore(dbPath));
+    const store = actedStore(new SQLiteStore(dbPath, { migrate: true }));
     const db = store.getDatabase();
 
     expect(userVersion(db)).toBe(26);

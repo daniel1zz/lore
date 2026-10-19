@@ -113,6 +113,8 @@ class Fixture {
         "set -e",
         `if [ -f .lore/lore.db ]; then DB=.lore/lore.db; else DB="$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")/.lore/lore.db"; fi`,
         `bun run ${JSON.stringify(toolPath)} stageOlder "$DB" ${latestVersion - 1}`,
+        // an older corpus is upgraded only by the explicit command (the snapshot is this worktree's own corpus)
+        `bun run ${JSON.stringify(INDEX_TS)} migrate schema`,
         `bun run ${JSON.stringify(INDEX_TS)} get ${JSON.stringify(this.docSlug)} > floor-read.out`,
         `grep -q "present in the shared corpus" floor-read.out`,
         `bun run ${JSON.stringify(toolPath)} marker .lore/lore.db`,

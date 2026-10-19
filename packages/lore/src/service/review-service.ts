@@ -534,6 +534,7 @@ export class ReviewService {
     const aiProvenance: JudgeIdentity | undefined = provenanceParsed.success ? provenanceParsed.data : undefined;
 
     let provenanceCollision = false;
+    let truncatedApproval = false;
     const independentDecisions: ReviewDecision[] = [];
     // reason: D4 — the escalate denial renders these verbatim, so they are collected
     // from the SAME independent-judgment walk the decisions come from (never a second
@@ -543,6 +544,12 @@ export class ReviewService {
     for (const judgment of currentVersionJudgments) {
       if (aiProvenance !== undefined && judgeIdentitiesEqual(judgment.judge, aiProvenance)) {
         provenanceCollision = true;
+        continue;
+      }
+      // reason: BR-269 — an approve made on cut input never counts. A truncated reject/escalate still does: a
+      // refusal on partial input is the safe direction, and dropping it would let noise out-roll a block.
+      if (judgment.decision === "approve" && judgment.truncated === true) {
+        truncatedApproval = true;
         continue;
       }
       independentDecisions.push(judgment.decision);
@@ -570,6 +577,7 @@ export class ReviewService {
       targetIdOrSlug: doc.slug,
       reviewJudgmentDecisions: policyScopedDecisions,
       reviewJudgmentProvenanceCollision: provenanceCollision,
+      reviewJudgmentTruncatedApproval: truncatedApproval,
       reviewJudgmentBlockingQuestions: blockingQuestions,
       // reason: AC-FR-8/D7 — see this file's spec-promote gate block's identical
       // note; `doc.id` is the RESOLVED doc's real id, never its slug.

@@ -2,6 +2,10 @@
  * lore migrate <action> — corpus migration commands.
  *
  * Actions:
+ *   schema [--dry-run] The ONLY command that upgrades the corpus to the binary's schema (every other command refuses an
+ *                      older corpus, exit 4). Per-migration transactions; one `migrate_schema` audit row (actor, working
+ *                      copy, from, to, duration). `--dry-run` lists the pending migrations; a second run writes nothing.
+ *                      Logic in `../migrate-schema.ts`.
  *   v1 --from <path>   Import a DocMan v1 corpus.
  *   phases [--dry-run] Promote legacy singular plan.extra.phase → extra.legacy_phase
  *                      across all plan rows in a single sweep. Idempotent. (SPEC-023 §4 AC-PHASE-10)
@@ -56,17 +60,18 @@ import { resolveTrackedWriteRoot } from "../working-tree-root.js";
 import { requirePhaseMigrationService } from "../phase-wiring.js";
 import { invocationOf } from "../command-invocation.js";
 import { printLine } from "../output.js";
+import { runMigrateSchema } from "../migrate-schema.js";
 
 export default defineLoreCommand({
   meta: {
     name: "migrate",
     description:
-      "Corpus migration: `v1 --from <path>` (v1 import), `phases` (phase schema sweep), `spec-kind` (spec_kind mistype audit), `tasks-to-phases` (task→phase doc-type sweep), `ordinals` (SPEC-084 ordinal repair migration), `spec-parents` (clear every spec parent_id; preview by default, `--apply` writes, `--revert` restores), `plan-outline-exempt` (remove the legacy outline-sync exemption from every stored plan; preview by default, `--apply` writes), `outline-sections` (remove the stored outline from every PRD, archived in its previous version; preview by default, `--apply` writes), `config-keys` (rename retired keys in .lore/config.yaml; preview by default, `--apply` writes), or `memory-limits` (remove the retired memory-file adoption setting and list the findings a person must fix; preview by default, `--apply` writes)",
+      "Corpus migration: `schema [--dry-run]` (the ONLY command that upgrades the corpus to this binary's schema; every other command refuses an older corpus with exit 4; one audit row per upgrade), `v1 --from <path>` (v1 import), `phases` (phase schema sweep), `spec-kind` (spec_kind mistype audit), `tasks-to-phases` (task→phase doc-type sweep), `ordinals` (SPEC-084 ordinal repair migration), `spec-parents` (clear every spec parent_id; preview by default, `--apply` writes, `--revert` restores), `plan-outline-exempt` (remove the legacy outline-sync exemption from every stored plan; preview by default, `--apply` writes), `outline-sections` (remove the stored outline from every PRD, archived in its previous version; preview by default, `--apply` writes), `config-keys` (rename retired keys in .lore/config.yaml; preview by default, `--apply` writes), or `memory-limits` (remove the retired memory-file adoption setting and list the findings a person must fix; preview by default, `--apply` writes)",
   },
   args: {
     version: {
       type: "positional",
-      description: "Migration action: v1 | phases | spec-kind | tasks-to-phases | outline-sections | ordinals | spec-parents | plan-outline-exempt | config-keys | memory-limits",
+      description: "Migration action: schema | v1 | phases | spec-kind | tasks-to-phases | outline-sections | ordinals | spec-parents | plan-outline-exempt | config-keys | memory-limits",
       required: true,
     },
     from: {
@@ -102,6 +107,10 @@ export default defineLoreCommand({
   async run(context): Promise<number> {
     const { args } = context;
     const inv = invocationOf(context);
+    if (args.version === "schema") {
+      // reason: the ONE command that upgrades a corpus schema; it bypasses `loadLoreApp` (which refuses the older corpus).
+      return runMigrateSchema(inv, { dryRun: args["dry-run"] === true, json: args.json === true });
+    }
     if (
       args.version !== "v1" &&
       args.version !== "phases" &&

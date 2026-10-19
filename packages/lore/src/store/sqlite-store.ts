@@ -41,6 +41,7 @@ import { MIGRATION_019_ADD_COLUMNS, MIGRATION_019_SQL } from "./migrations/migra
 // JSDoc for the bump-together invariant.
 import { LATEST_SCHEMA_VERSION } from "./schema-version.js";
 export { LATEST_SCHEMA_VERSION } from "./schema-version.js";
+import { isSchemaBehind, SchemaBehindError } from "./schema-behind.js";
 import type {
   AuditEntry,
   CalibrationRecord,
@@ -186,6 +187,13 @@ export interface SQLiteStoreOptions {
    * build a corpus that is GENUINELY one schema behind, whatever the newest migration does; production callers never set it.
    */
   readonly schemaCeiling?: number;
+  /**
+   * Permit upgrading an existing corpus that is older than the schema. Without it the constructor throws
+   * {@link SchemaBehindError} and touches nothing: a corpus upgrade runs only through `lore migrate schema` (the one
+   * caller that sets this), never as a side effect of opening. A NEW file (`user_version` 0) is always built at the
+   * latest schema and needs no flag.
+   */
+  readonly migrate?: true;
 }
 
 export class SQLiteStore implements StoreInterface {
@@ -199,6 +207,8 @@ export class SQLiteStore implements StoreInterface {
   readonly writeWaitMs: number;
 
   private readonly schemaCeiling: number;
+  /** True only for the explicit `lore migrate schema` open; see {@link SQLiteStoreOptions.migrate}. */
+  private readonly migrateAllowed: boolean;
   /** The corpus file; named by a failed migration (migration-026 fails loud with it). */
   private readonly corpusPath: string;
 
@@ -220,6 +230,7 @@ export class SQLiteStore implements StoreInterface {
     this.writeWaitMs = declaredWriteWaitMs;
     this.corpusPath = dbPath;
     this.schemaCeiling = options?.schemaCeiling ?? LATEST_SCHEMA_VERSION;
+    this.migrateAllowed = options?.migrate === true;
     try {
       if (options?.readonly === true) this.db.run(`PRAGMA busy_timeout = ${this.writeWaitMs}`);
       else this.init();
@@ -294,7 +305,20 @@ export class SQLiteStore implements StoreInterface {
     // Enable WAL for better concurrent read performance
     this.db.run("PRAGMA journal_mode = WAL");
     this.db.run("PRAGMA foreign_keys = ON");
+    this.refuseUnrequestedUpgrade();
     this.runMigrations();
+  }
+
+  /**
+   * Throws {@link SchemaBehindError} when the corpus already exists at an older schema and this open was not asked to
+   * `migrate`. Runs before any migration statement, so the refused corpus is byte-for-byte untouched.
+   */
+  private refuseUnrequestedUpgrade(): void {
+    if (this.migrateAllowed) return;
+    const currentVersion = (this.db.query("PRAGMA user_version").get() as { user_version: number }).user_version;
+    if (isSchemaBehind(currentVersion, this.schemaCeiling)) {
+      throw new SchemaBehindError(this.corpusPath, currentVersion, this.schemaCeiling);
+    }
   }
 
   /**
@@ -1028,13 +1052,16 @@ export class SQLiteStore implements StoreInterface {
         current.type,
         async (candidate) => {
           try {
-            const updateResult = this.db
+            // reason: the outcome is decided from RETURNING rows, never from the driver's affected-row
+            // count — bun reports a stale non-zero count for a zero-row UPDATE inside a multi-statement
+            // transaction (task-a-version-guarded-store-update-decides-its-outcome-from).
+            const updatedRows = this.db
               .prepare(
-                "UPDATE docs SET ordinal = ?, version = ? WHERE id = ? AND version = ? AND ordinal IS NULL",
+                "UPDATE docs SET ordinal = ?, version = ? WHERE id = ? AND version = ? AND ordinal IS NULL RETURNING id",
               )
-              .run(candidate, newVersion, id, expectedVersion);
+              .all(candidate, newVersion, id, expectedVersion);
 
-            if (updateResult.changes > 0) {
+            if (updatedRows.length > 0) {
               return {
                 kind: "success",
                 value: { ...current, ordinal: candidate, version: newVersion },
@@ -1410,7 +1437,9 @@ export class SQLiteStore implements StoreInterface {
 
       if (opts?.expected_version !== undefined) {
         // Conditional UPDATE: only affects the row if version still matches
-        const result = this.db
+        // reason: RETURNING rows decide the CAS outcome — the driver's affected-row count is stale
+        // after other writes in the same transaction (bun 1.3.10 measured 4 for a zero-row UPDATE).
+        const updatedRows = this.db
           .prepare(
             `UPDATE docs SET
                slug = ?, type = ?, role = ?, title = ?, status = ?,
@@ -1418,9 +1447,9 @@ export class SQLiteStore implements StoreInterface {
                tags = ?, version = ?, created_at = ?, updated_at = ?,
                created_by = ?, deleted_at = ?, fts_title = ?, fts_content = ?,
                fts_tags = ?
-             WHERE id = ? AND version = ?`,
+             WHERE id = ? AND version = ? RETURNING id`,
           )
-          .run(
+          .all(
             updated.slug,
             updated.type,
             updated.role,
@@ -1443,7 +1472,7 @@ export class SQLiteStore implements StoreInterface {
             opts.expected_version,
           );
 
-        if (result.changes === 0) {
+        if (updatedRows.length === 0) {
           // Row exists (checked above) but version didn't match — re-read actual version
           const actualRow = this.db
             .prepare("SELECT version FROM docs WHERE id = ?")
@@ -2427,8 +2456,8 @@ export class SQLiteStore implements StoreInterface {
     // reason: the CAS is checked HERE against the row read under this
     // transaction's write lock (BEGIN IMMEDIATE — no writer can change it
     // between this read and the UPDATE below) instead of trusting
-    // `updateDocSync`'s `result.changes === 0` miss detection. Measured under
-    // bun 1.3.10: `Statement.run().changes` after a ZERO-row UPDATE reports
+    // `updateDocSync`'s miss detection (now RETURNING-based; this explicit check is kept as the cheap
+    // early refusal). Measured under bun 1.3.10: the statement's affected-row count after a ZERO-row UPDATE reports
     // the FTS-trigger row count of an EARLIER write in the same transaction
     // (4 for a miss that follows a hit), so a second CAS in one transaction —
     // `moveRule`'s target leaf — silently "succeeds" without writing. The
@@ -3305,11 +3334,10 @@ export class SQLiteStore implements StoreInterface {
 
   async pruneTraceEvents(cutoffIso: string, batchSize = 50_000): Promise<Result<number, LoreError>> {
     try {
-      const result = this.db.run(
-        "DELETE FROM trace_events WHERE id IN (SELECT id FROM trace_events WHERE ts < ? LIMIT ?)",
-        [cutoffIso, batchSize],
-      );
-      return ok(result.changes);
+      const deletedRows = this.db
+        .prepare("DELETE FROM trace_events WHERE id IN (SELECT id FROM trace_events WHERE ts < ? LIMIT ?) RETURNING id")
+        .all(cutoffIso, batchSize);
+      return ok(deletedRows.length);
     } catch (e) {
       return wrapStoreError(e);
     }
@@ -3351,9 +3379,9 @@ export class SQLiteStore implements StoreInterface {
     try {
       // reason: `ended_at IS NULL` in the WHERE makes the FIRST end win and the call idempotent.
       const updated = this.db
-        .prepare("UPDATE runs SET ended_at = ?, end_reason = ? WHERE id = ? AND ended_at IS NULL")
-        .run(endedAt, reason, id);
-      if (updated.changes > 0) return ok("ended");
+        .prepare("UPDATE runs SET ended_at = ?, end_reason = ? WHERE id = ? AND ended_at IS NULL RETURNING id")
+        .all(endedAt, reason, id);
+      if (updated.length > 0) return ok("ended");
       const row = this.db.prepare("SELECT id FROM runs WHERE id = ?").get(id) as { id: string } | null;
       return ok(row === null ? "unknown-run" : "already-ended");
     } catch (e) {
@@ -3364,9 +3392,9 @@ export class SQLiteStore implements StoreInterface {
   async reopenRun(id: RunId): Promise<Result<boolean, LoreError>> {
     try {
       const updated = this.db
-        .prepare("UPDATE runs SET ended_at = NULL, end_reason = NULL WHERE id = ? AND ended_at IS NOT NULL")
-        .run(id);
-      return ok(updated.changes > 0);
+        .prepare("UPDATE runs SET ended_at = NULL, end_reason = NULL WHERE id = ? AND ended_at IS NOT NULL RETURNING id")
+        .all(id);
+      return ok(updated.length > 0);
     } catch (e) {
       return wrapStoreError(e);
     }
@@ -3387,9 +3415,9 @@ export class SQLiteStore implements StoreInterface {
     try {
       // reason: the NEWEST registration wins here (unlike the identity columns): a resumed run lives in a new process.
       const updated = this.db
-        .prepare("UPDATE runs SET harness_pid = ?, harness_pid_start = ?, worktree = ? WHERE id = ?")
-        .run(proc.pid, proc.startTime, proc.worktree, id);
-      return ok(updated.changes > 0);
+        .prepare("UPDATE runs SET harness_pid = ?, harness_pid_start = ?, worktree = ? WHERE id = ? RETURNING id")
+        .all(proc.pid, proc.startTime, proc.worktree, id);
+      return ok(updated.length > 0);
     } catch (e) {
       return wrapStoreError(e);
     }
