@@ -194,6 +194,26 @@ export const AC_CITE_SHAPE_PATTERN = ANY_RULE_ID_PATTERN;
 export const AC_CITES_MAX = 10;
 
 /**
+ * The immutable record of a criterion being superseded by another spec's criterion (D15).
+ * `spec` is the superseding spec's document id, `ac` its criterion id, `by`/`at` the actor and ISO time.
+ */
+export const supersededByRefSchema = z.object({
+  spec: z.string().min(1),
+  ac: z.string().min(1),
+  reason: z.string().min(1).max(1000),
+  by: z.string().min(1),
+  at: z.string().min(1),
+});
+
+/** Derived type of {@link supersededByRefSchema}. */
+export type SupersededByRef = z.infer<typeof supersededByRefSchema>;
+
+/** True when a criterion carries the D15 superseded marker (the ONE predicate verify, set, rm and list share). */
+export function isAcSuperseded(criterion: { readonly superseded_by?: SupersededByRef | undefined }): boolean {
+  return criterion.superseded_by !== undefined;
+}
+
+/**
  * One structured acceptance criterion declared on a spec.
  *
  * @example
@@ -294,6 +314,13 @@ export const acceptanceCriterionSchema = z.object({
     .max(AC_CITES_MAX)
     .refine((ids) => new Set(ids).size === ids.length, "cites[] must be unique")
     .optional(),
+  /**
+   * D15 (spec-defect-clusters-round-2-part-b D15) — this criterion is SUPERSEDED by another spec's
+   * criterion: `lore verify` skips it (listing it as superseded), and it is immutable (`ac set`, `ac rm`
+   * and a second supersede are refused). Written ONLY by `AcService.supersedeCriterion`
+   * (`lore ac supersede`); optional and additive, so every earlier criterion parses unchanged.
+   */
+  superseded_by: supersededByRefSchema.optional(),
 });
 
 /** Derived TypeScript type for one acceptance criterion declaration. */
