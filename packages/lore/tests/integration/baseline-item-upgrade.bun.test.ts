@@ -110,6 +110,7 @@ function dumpState(path: string): string {
       docs: db.query("SELECT id, title, status, content, extra, version FROM docs ORDER BY id").all(),
       versions: db.query("SELECT doc_id, version, status, extra, action FROM versions ORDER BY doc_id, version").all(),
       registry: db.query("SELECT id, leaf_doc_id, lifecycle, version FROM rule_registry ORDER BY id").all(),
+      audit: db.query("SELECT id, actor, action, doc_id, details, prev_hash, entry_hash FROM audit ORDER BY id").all(),
     });
   } finally {
     db.close();
@@ -229,8 +230,46 @@ describe("AC-BIA-7: the schema upgrade converts baseline nodes to items once", (
       expect(doc.content).toBe("Body past");
       expect(extra.pending.node?.title).toBe("Past leaf edited");
       expect(extra.pending.node?.content).toBe("Body edited");
-      // converted in place: no new version row and no version bump (the audit chain has no row to carry one)
-      expect(doc.version).toBe(2);
+      // the conversion is a real write: version 3, with its own versions row
+      expect(doc.version).toBe(3);
+    });
+
+    it("STATE: a converted node gets ONE new version row and ONE hash-chained audit row; an untouched approved node gets none", () => {
+      const db = new Database(dbPath, { readonly: true });
+      try {
+        const versionCount = (docId: string) => (db.query("SELECT COUNT(*) AS n FROM versions WHERE doc_id = ?").get(docId) as { n: number }).n;
+        expect(versionCount("01APPROVEDLEAF0000000000AA")).toBe(1);
+        expect(versionCount("01DRAFTPASTLEAF000000000BB")).toBe(3);
+        expect(versionCount("01NEVERAPPROVEDLEAF00000CC")).toBe(2);
+        const written = db
+          .query("SELECT doc_id, version, action, status, created_by FROM versions WHERE doc_id = '01DRAFTPASTLEAF000000000BB' AND version = 3")
+          .get() as { action: string; status: string; created_by: string };
+        expect(written.action).toBe("update");
+        expect(written.status).toBe("draft");
+        expect(written.created_by).not.toBe("");
+
+        const rows = db.query("SELECT id, actor, action, doc_id, details, prev_hash, entry_hash FROM audit ORDER BY id").all() as {
+          id: number;
+          actor: string;
+          action: string;
+          doc_id: string | null;
+          details: string;
+          prev_hash: string | null;
+          entry_hash: string | null;
+        }[];
+        const migrated = rows.filter((r) => r.action === "migrate-schema-027");
+        expect(migrated.map((r) => r.doc_id).sort()).toEqual(["01DRAFTPASTLEAF000000000BB", "01NEVERAPPROVEDLEAF00000CC"]);
+        expect(rows.some((r) => r.doc_id === "01APPROVEDLEAF0000000000AA")).toBe(false);
+        for (const row of migrated) expect(row.actor).toBe(rows.find((r) => r.action === "migrate_schema")?.actor);
+        expect(JSON.parse(migrated[0]?.details ?? "{}").summary).toContain("split into approved + pending items");
+        // chained like any write: each row's prev_hash is the previous row's entry_hash
+        rows.forEach((row, index) => {
+          expect(row.entry_hash).toMatch(/^[0-9a-f]{64}$/);
+          expect(row.prev_hash).toBe(index === 0 ? "" : rows[index - 1]?.entry_hash);
+        });
+      } finally {
+        db.close();
+      }
     });
 
     it("HAPPY: the never-approved node has every item pending and no approved rule", () => {
