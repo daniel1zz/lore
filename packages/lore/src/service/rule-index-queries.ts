@@ -25,6 +25,7 @@
 
 import { ruleIdPrefix, ruleIdPrefixOfNode, type DocRecord, type RuleLifecycle, type RuleRegistryState } from "@lore/core";
 import type { AcCiteRow, RuleDependsRow } from "../store/store-interface.js";
+import { approvedRulesOf } from "./baseline-items.js";
 import { findProposal } from "./rule-changes.js";
 
 export interface CitingCriterion {
@@ -128,9 +129,7 @@ export function collectLeafRules(baselineDocs: readonly DocRecord[]): Map<string
   const byId = new Map<string, LeafRule>();
   for (const doc of baselineDocs) {
     if ((doc.deleted_at ?? null) !== null || ruleIdPrefixOfNode(doc.extra) === undefined) continue;
-    const rules = doc.extra["rules"];
-    if (!Array.isArray(rules)) continue;
-    for (const r of rules as unknown[]) {
+    for (const r of approvedRulesOf(doc)) {
       if (!isRecord(r) || typeof r["id"] !== "string" || byId.has(r["id"])) continue;
       const lifecycle = r["lifecycle"];
       if (lifecycle !== "live" && lifecycle !== "deprecated" && lifecycle !== "retired") continue;

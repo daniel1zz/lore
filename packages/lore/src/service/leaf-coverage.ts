@@ -20,6 +20,7 @@
  * Side-effect class: pure.
  */
 
+import { approvedCommandsOf } from "./baseline-items.js";
 import type { Site, UnresolvedImport } from "./site-census.js";
 
 /** Verdict of {@link computeLeafCoverage}; both lists hold site keys. */
@@ -142,7 +143,7 @@ export function leavesUnder(
   while (queue.length > 0) {
     const doc = queue.shift() as { id: string; slug: string; extra: Record<string, unknown> };
     if (doc.extra["node"] === "leaf") {
-      const commands = Array.isArray(doc.extra["commands"]) ? (doc.extra["commands"] as string[]) : [];
+      const commands = approvedCommandsOf(doc);
       if (commands.length > 0) out.push({ slug: doc.slug, commands });
     } else {
       queue.push(...baselineDocs.filter((d) => d.parent_id === doc.id));

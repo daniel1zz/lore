@@ -16,6 +16,7 @@
  */
 
 import { isBusinessBaseline, type BaselineNodeBudgets } from "@lore/core";
+import { approvedRuleIdsOf, pendingRevisionsOf } from "./baseline-items.js";
 
 /** The baseline kinds this check measures. */
 export type BudgetedNodeKind = "leaf" | "branch" | "standard";
@@ -71,8 +72,10 @@ export function checkBaselineNodeBudget(node: BaselineNodeBudgetInput, budgets: 
     breaches.push({ slug: node.slug, kind, metric: "chars", measured: node.content.length, cap: charCap });
   }
   if (kind === "leaf") {
-    const rules = node.extra["rules"];
-    const ruleCount = Array.isArray(rules) ? rules.length : 0;
+    // reason: the cap bounds what the node can come to hold, so a pending add counts although it is not live yet.
+    const approved = approvedRuleIdsOf(node);
+    const pendingAdds = Object.keys(pendingRevisionsOf(node).rules).filter((id) => !approved.includes(id));
+    const ruleCount = approved.length + pendingAdds.length;
     if (ruleCount > budgets.leaf_rules) {
       breaches.push({ slug: node.slug, kind, metric: "rules", measured: ruleCount, cap: budgets.leaf_rules });
     }

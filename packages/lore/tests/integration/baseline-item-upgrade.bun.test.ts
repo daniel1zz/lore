@@ -152,7 +152,7 @@ function buildBehindCorpus(withCorruptNode: boolean) {
     if (withCorruptNode) {
       db.prepare(
         `INSERT INTO docs (id, slug, type, role, title, status, priority, content, parent_id, extra, tags, version, created_at, updated_at, created_by)
-         VALUES ('01CORRUPTLEAF0000000000DD', 'leaf-corrupt', 'baseline', 'intent', 'Corrupt', 'draft', 'medium', '', NULL, '{not json', '[]', 1, ?, ?, 'human:tester')`,
+         VALUES ('01CORRUPTLEAF0000000000DD', 'leaf-corrupt', 'baseline', 'intent', 'Corrupt', 'draft', 'medium', '', NULL, '[1]', '[]', 1, ?, ?, 'human:tester')`,
       ).run(NOW, NOW);
     }
     registerRule(db, "BR-1", 1, "01APPROVEDLEAF0000000000AA");
@@ -229,7 +229,8 @@ describe("AC-BIA-7: the schema upgrade converts baseline nodes to items once", (
       expect(doc.content).toBe("Body past");
       expect(extra.pending.node?.title).toBe("Past leaf edited");
       expect(extra.pending.node?.content).toBe("Body edited");
-      expect(doc.version).toBe(3);
+      // converted in place: no new version row and no version bump (the audit chain has no row to carry one)
+      expect(doc.version).toBe(2);
     });
 
     it("HAPPY: the never-approved node has every item pending and no approved rule", () => {

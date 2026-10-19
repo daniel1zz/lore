@@ -31,6 +31,7 @@ import { isAbsolute, join } from "node:path";
 import { describePrecheckRoots, err, extractTestFileTokens, ok, truncateSection } from "@lore/core";
 import type { AIProvider, DocRecord, LoreError, Result } from "@lore/core";
 import type { StoreInterface } from "../store/store-interface.js";
+import { approvedRulesOf } from "./baseline-items.js";
 
 /** A rule cited by more than this share of the live-rule-citing criteria is a catch-all. */
 export const CATCH_ALL_THRESHOLD_SHARE = 0.05;
@@ -162,10 +163,8 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function liveRulesOf(leaf: DocRecord, branchSlug: string | null): Array<[string, LiveRule]> {
-  const raw = leaf.extra["rules"];
-  if (!Array.isArray(raw)) return [];
   const out: Array<[string, LiveRule]> = [];
-  for (const rule of raw as unknown[]) {
+  for (const rule of approvedRulesOf(leaf)) {
     if (!isRecord(rule) || typeof rule["id"] !== "string" || rule["lifecycle"] !== "live") continue;
     const examples = Array.isArray(rule["examples"]) ? (rule["examples"] as unknown[]).filter((e): e is string => typeof e === "string") : [];
     out.push([rule["id"], { statement: typeof rule["statement"] === "string" ? rule["statement"] : "", examples, leaf: leaf.slug, branch: branchSlug }]);

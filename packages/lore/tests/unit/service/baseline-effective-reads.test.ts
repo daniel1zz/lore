@@ -112,8 +112,13 @@ const DIRECT_READ_ALLOWLIST: Record<string, string> = {
   "packages/lore/src/service/rule-change-service.ts": "write path: `lore rule apply` writes approved versions",
   "packages/lore/src/service/corpus-service.ts": "write path: a baseline create / wholesale write guard",
   "packages/lore/src/store/index-rows.ts": "index derivation: the registry and rule_depends rows follow the approved versions stored in these keys",
-  "packages/lore/src/ai/review-template.ts": "review bundle renderer; reworked per item by the review/approve task",
-  "packages/core/src/review-checks.ts": "review-time checks on the node under review; reworked per item by the review/approve task",
+  "packages/lore/src/store/migrations/migration-027.ts": "the one-time conversion that splits stored items into approved and pending versions",
+  "packages/lore/src/ai/review-template.ts":"review bundle renderer; reworked per item by the review/approve task",
+  "scripts/lib/baseline-site-maps.ts":
+    "reads the stored list from `lore get --json` for the site-map excuse scripts that lore-40 D1 deletes with site_map; the stored list IS the approved version",
+  "packages/lore/src/adapters/cli/commands/baseline.ts":
+    "five reads (rule show statement, leaf commands, coverage rules, depends and map echoes) still direct: the file is held by task-identity-resolves-only-to-a-run-a-human-session-an-http; move them to the accessor when that claim releases and delete this entry",
+  "packages/core/src/review-checks.ts":"review-time checks on the node under review; reworked per item by the review/approve task",
 };
 
 const KEYS = "rules|commands|label|glossary|depends_on";

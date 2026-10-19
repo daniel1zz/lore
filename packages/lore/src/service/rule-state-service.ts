@@ -36,6 +36,7 @@ import { err, ok, parseCodeAnchor, ruleIdPrefixOfNode } from "@lore/core";
 import type { DocRecord, DocType, EvidenceEntry, LoreError, Result, RuleLifecycle } from "@lore/core";
 import type { StoreInterface } from "../store/store-interface.js";
 import { attestedRunKey, indexLatestAttestedRuns } from "./attested-ac-runs.js";
+import { approvedRulesOf } from "./baseline-items.js";
 
 // ─── Public contract ────────────────────────────────────────────────────────────────────────
 
@@ -210,9 +211,7 @@ function declaredAcsOf(spec: DocRecord): DeclaredAc[] {
 function collectRules(leaves: readonly DocRecord[]): Array<{ id: string; leaf: string; lifecycle: RuleLifecycle }> {
   const seen = new Map<string, { id: string; leaf: string; lifecycle: RuleLifecycle }>();
   for (const leaf of leaves) {
-    const rules = leaf.extra["rules"];
-    if (!Array.isArray(rules)) continue;
-    for (const r of rules as unknown[]) {
+    for (const r of approvedRulesOf(leaf)) {
       if (typeof r !== "object" || r === null) continue;
       const { id, lifecycle } = r as { id?: unknown; lifecycle?: unknown };
       if (typeof id !== "string" || typeof lifecycle !== "string" || !LIFECYCLES.has(lifecycle)) continue;

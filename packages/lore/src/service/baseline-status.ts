@@ -29,6 +29,7 @@ import {
 } from "../store/index-rows.js";
 import { countCitations, buildRuleIndex } from "./ac-citations.js";
 import { collectKnownRuleIds, findUnregisteredRuleIds } from "./baseline-rule-ids.js";
+import { approvedDependsOnOf, approvedRulesOf } from "./baseline-items.js";
 import type { RuleStateService, RuleStateCounts } from "./rule-state-service.js";
 import { AcExemptionService } from "./ac-exemption-service.js";
 
@@ -93,9 +94,7 @@ export function baselineWarningCount(status: BaselineStatus): number {
 }
 
 function ruleRecordsOf(doc: DocRecord): Array<{ id: string; statement: string; lifecycle: string }> {
-  const raw = doc.extra["rules"];
-  if (!Array.isArray(raw)) return [];
-  return (raw as unknown[]).flatMap((r) => {
+  return approvedRulesOf(doc).flatMap((r) => {
     if (typeof r !== "object" || r === null) return [];
     const { id, statement, lifecycle } = r as { id?: unknown; statement?: unknown; lifecycle?: unknown };
     if (typeof id !== "string") return [];
@@ -176,10 +175,8 @@ export async function findBaselineIntegrityFindings(
   }
   const known = collectKnownRuleIds(ruleNodes, registry.value);
   for (const leaf of liveLeaves) {
-    const deps = leaf.extra["depends_on"];
-    if (!Array.isArray(deps)) continue;
-    for (const dep of deps as unknown[]) {
-      if (typeof dep === "string" && !known.has(dep)) {
+    for (const dep of approvedDependsOnOf(leaf)) {
+      if (!known.has(dep)) {
         findings.push({ kind: "dangling-depends-on", doc: leaf.slug, detail: `depends_on ${dep} names no existing rule` });
       }
     }
