@@ -43,18 +43,21 @@ describe("collectContextFacts", () => {
     const fs = new InMemoryFsPort({
       "package.json": JSON.stringify({
         scripts: { build: "bun run build", test: "bun test", "test:bun": "echo retired >&2; exit 1" },
-        lore: { documentedScripts: ["build", "test"] },
+        lore: { documentedScripts: { build: "Compile it.", test: "Run the tests." } },
       }),
     });
     const result = await collectContextFacts(fs, "", DEFAULT_BUDGETS);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.value.commands).toEqual({ build: "bun run build", test: "bun test" });
+    expect(result.value.commands).toEqual({
+      build: { command: "bun run build", description: "Compile it." },
+      test: { command: "bun test", description: "Run the tests." },
+    });
   });
 
   it("ERROR: a documentedScripts entry naming a script that does not exist fails loud, not silently dropped (MI-T4)", async () => {
     const fs = new InMemoryFsPort({
-      "package.json": JSON.stringify({ scripts: { build: "x" }, lore: { documentedScripts: ["build", "gone"] } }),
+      "package.json": JSON.stringify({ scripts: { build: "x" }, lore: { documentedScripts: { build: "Builds.", gone: "Missing." } } }),
     });
     const result = await collectContextFacts(fs, "", DEFAULT_BUDGETS);
     expect(result.ok).toBe(false);

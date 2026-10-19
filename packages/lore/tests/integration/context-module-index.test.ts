@@ -87,13 +87,15 @@ describe("AC-MI-1: module index lists only folders with a memory file, nothing d
     expect(byPath("lib/gamma")).toContain("Gamma parses input.");
     // the folders that only group the memory-file folders (svc, lib, bulk) have no memory file either: they are
     // counted, never listed. 40 bulk/mN + bulk + svc + lib = 43 discovered without.
-    const countLines = lines.filter((l) => /no memory file/i.test(l));
-    expect(countLines).toHaveLength(1);
-    expect(countLines[0]).toMatch(/\b43\b/);
+    // D5 (spec-prose-about-code-is-bound-to-what-it-describes-one): the count is no longer in the committed
+    // section; `refresh --check` reports it.
+    expect(lines.filter((l) => /no memory file/i.test(l))).toHaveLength(0);
+    const check = await runLore(["context", "refresh", "--check"], dir);
+    expect(check.stdout).toMatch(/\b43 folders have no memory file/);
     expect(lines.join("\n")).not.toContain("bulk/m0");
   });
 
-  it("AC-MI-1 BOUNDARY: the count line names exactly 40 when 40 folders have no memory file", async () => {
+  it("AC-MI-1 BOUNDARY: refresh --check names exactly 40 when 40 folders have no memory file (not in the committed section)", async () => {
     const dir = await makeProject();
     put(dir, "CLAUDE.md", "# Proj\n");
     put(dir, "a/CLAUDE.md", "# A\n\n## Purpose\n\nA is a.\n");
@@ -104,9 +106,9 @@ describe("AC-MI-1: module index lists only folders with a memory file, nothing d
     expect(refreshed.exitCode, refreshed.stderr).toBe(0);
     const lines = moduleIndexLines(read(dir, "CLAUDE.md"));
     expect(lines.filter((l) => l.startsWith("- ["))).toHaveLength(3);
-    const countLines = lines.filter((l) => /no memory file/i.test(l));
-    expect(countLines).toHaveLength(1);
-    expect(countLines[0]).toMatch(/\b40\b/);
+    expect(lines.filter((l) => /no memory file/i.test(l))).toHaveLength(0);
+    const check = await runLore(["context", "refresh", "--check"], dir);
+    expect(check.stdout).toMatch(/\b40 folders have no memory file/);
   });
 
   it("AC-MI-1 BOUNDARY: a memory file without a Purpose section is listed with its link and 'no Purpose section'", async () => {
