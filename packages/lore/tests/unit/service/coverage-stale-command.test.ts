@@ -9,8 +9,8 @@
  * sites it owns). Census errors stay for genuinely unanalysable trees (see compiled-root-coverage.bun.test.ts).
  *
  * Fixture: tests/helpers/coverage-mini-corpus.ts (throwaway checkout + corpus; never the repo's .lore/).
- * Dimensions: HAPPY (control; absent declaration -> exit 0 with the line), NEGATIVE (absent declaration PLUS a real gap -> exit 1
- * for the gap), REGRESSION (never exit 4, never `command-unresolved`), BOUNDARY (JSON shape; all-absent leaf measured by owned sites).
+ * Dimensions: HAPPY (control; absent declaration -> exit 0 with the line), NEGATIVE (absent declaration PLUS an unmapped site -> exit 0,
+ * the site listed), REGRESSION (never exit 4, never `command-unresolved`), BOUNDARY (JSON shape; all-absent leaf measured by owned sites).
  *
  */
 import { afterEach, describe, expect, it } from "vitest";
@@ -95,16 +95,16 @@ describe("declared command not in this tree is reported, not a defect (task-root
     expect(b?.absent_commands).toEqual([]);
   }, 120_000);
 
-  it("an absent declaration PLUS a real gap still exits 1 for the gap", async () => {
+  it("an absent declaration PLUS an unmapped site still exits 0 and lists the site as a gap (report only)", async () => {
     const c = await buildMiniCorpus();
     corpora.push(c);
     // leaf A declares alpha and gamma; alpha's site is never mapped (a real gap); gamma is absent from the registry.
     expect((await c.run(["baseline", "map", c.leafA, "--command", "gamma"])).exitCode).toBe(0);
     await c.mapAllSites(c.leafB, "beta");
     const r = await c.run(["baseline", "coverage", c.root, "--json"]);
-    expect(r.exitCode, r.stdout + r.stderr).toBe(1);
+    expect(r.exitCode, r.stdout + r.stderr).toBe(0);
     const data = (JSON.parse(r.stdout) as { data: { complete: boolean; leaves: { slug: string; ok: boolean; gaps: string[]; absent_commands: { command: string }[] }[] } }).data;
-    expect(data.complete).toBe(false);
+    expect(data.complete).toBe(true);
     const a = data.leaves.find((l) => l.slug === c.leafA);
     expect(a?.ok).toBe(false);
     expect(a?.gaps.length).toBeGreaterThan(0);

@@ -122,7 +122,8 @@ describe("removing a site mapping is refused while main still reaches it (task-r
   it("coverage lists a mapping the tree no longer reaches as removable, with the fix", async () => {
     const c = await fresh();
     const stale = "packages/lore/src/adapters/cli/lib/gone.ts#vanished#GONE_CODE";
-    expect((await c.run(["baseline", "map", c.leafA, "--site", stale, "--non-business", "fixture stale row"])).exitCode).toBe(0);
+    const rule = await addRule(c, c.leafA);
+    expect((await c.run(["baseline", "map", c.leafA, "--site", stale, "--rule", rule])).exitCode).toBe(0);
     const r = await c.run(["baseline", "coverage", c.root]);
     expect(r.stdout).toContain(stale);
     expect(r.stdout).toContain(`lore baseline map ${c.leafA} --remove-site ${stale}`);

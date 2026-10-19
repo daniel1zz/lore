@@ -132,17 +132,25 @@ describe("computeLeafCoverage", () => {
     expect(r.ok).toBe(false);
   });
 
-  it("all mapped + dynamic justified with non-business:<reason> -> ok=true", async () => {
+  it("a dynamic site mapped to a live rule -> ok=true", async () => {
     const { computeLeafCoverage, sites, dynKey } = await setup();
     const siteMap = {
       [KEYED[0]]: ["BR-001"],
       [KEYED[1]]: ["BR-002"],
       [KEYED[2]]: ["BR-003"],
       [KEYED[3]]: ["BR-001"],
-      [dynKey]: ["non-business:registry dispatch"],
+      [dynKey]: ["BR-002"],
     };
     const r = computeLeafCoverage({ sites, siteMap, liveRuleIds: LIVE });
     expect(r).toEqual({ gaps: [], notMeasured: [], ok: true });
+  });
+
+  it("REGRESSION: a non-business:<reason> value maps nothing (BR-1248): the dynamic site stays not_measured", async () => {
+    const { computeLeafCoverage, sites, dynKey } = await setup();
+    const siteMap = { ...Object.fromEntries(KEYED.map((k) => [k, ["BR-001"]])), [dynKey]: ["non-business:registry dispatch"] };
+    const r = computeLeafCoverage({ sites, siteMap, liveRuleIds: LIVE });
+    expect(r.notMeasured).toEqual([dynKey]);
+    expect(r.ok).toBe(false);
   });
 
   it("all keyed mapped but dynamic unjustified -> not_measured remains, ok=false", async () => {

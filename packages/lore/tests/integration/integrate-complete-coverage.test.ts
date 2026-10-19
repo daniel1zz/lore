@@ -1,8 +1,8 @@
 // @spawns packages/lore/src/index.ts
 // @spawns scripts/check-baseline-coverage.ts
 /**
- * AC-BCR-5 oracle: `lore integrate` refuses to advance main unless root baseline coverage of the MERGED tree is complete
- * (spec-baseline-coverage-cannot-silently-regress-one-program; BR-660, BR-1248).
+ * AC-BCR-5 oracle: `lore integrate` refuses to advance main while a runnable command of the MERGED tree is declared by no leaf
+ * (spec-baseline-coverage-refuses-only-undeclared-commands-a-site; BR-660, BR-1248).
  *
  * A throwaway repo (the mini lore checkout of coverage-mini-corpus: two registry commands, each declared by one leaf, every
  * site accounted for) with its own throwaway corpus; REAL `lore integrate` processes, REAL git worktrees; the floor command
@@ -10,8 +10,7 @@
  * repo's own `.lore/` is never read or written.
  *
  *   - control (not vacuous): a branch that adds no failure site and no command integrates (exit 0, main advances);
- *   - a branch whose merged tree leaves one (site, command-leaf) pair unaccounted: exit 1, the pair and its
- *     `lore baseline map` fix line named, main unchanged; the SAME branch with that pair mapped integrates (exit 0);
+ *   - a branch whose merged tree reaches a new, unmapped site integrates (exit 0, main advances): a site is report output;
  *   - a branch adding a runnable command no leaf declares: exit 1, the command and its fix line named, main unchanged.
  */
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -78,7 +77,7 @@ beforeAll(async () => {
 
 afterAll(() => mini?.dispose());
 
-describe("AC-BCR-5 integrate refuses unless root coverage of the merged tree is complete", () => {
+describe("AC-BCR-5 integrate refuses only while a runnable command is undeclared", () => {
   it("control: a branch that adds no failure site and no command lands (exit 0, main advances)", async () => {
     const branch = makeBranch("adds-nothing", { "notes.txt": "nothing the census sees\n" });
     const before = git(["rev-parse", "main"]);
@@ -90,31 +89,18 @@ describe("AC-BCR-5 integrate refuses unless root coverage of the merged tree is 
     expect(git(["merge-base", "--is-ancestor", branch, "main"])).toBe("");
   }, 240_000);
 
-  it("a branch leaving one (site, leaf) pair unaccounted ends floor_failed naming the pair and its fix; mapped, the same branch lands", async () => {
+  it("a branch whose merged tree reaches a new unmapped site still lands: sites are report output, the floor never names a gap", async () => {
     const branch = makeBranch("new-site", {
       [`${MINI_CLI}/lib/shared.ts`]: `import { err } from "./result.js";\nexport function checkShared() {\n  if (Math.random() > 2) return err({ code: "ALPHA_NEW" });\n  return err({ code: "ALPHA_BAD" });\n}\n`,
     });
     const before = git(["rev-parse", "main"]);
 
-    const refused = await integrate(branch, "bcr-site-1");
-
-    expect(refused.exitCode, refused.out).toBe(1);
-    expect(git(["rev-parse", "main"])).toBe(before);
-    const gap = /^\s*gap\s+(\S+)\s*$/m.exec(refused.out);
-    expect(gap, refused.out).not.toBeNull();
-    const pairKey = gap?.[1] as string;
-    expect(pairKey).toContain("ALPHA_NEW");
-    expect(refused.out).toContain(`${mini.leafA}`);
-    expect(refused.out).toContain(`fix: lore baseline map ${mini.leafA} --site ${pairKey}`);
-    expect(refused.out).toContain("floor");
-
-    // mapping the pair BEFORE the branch lands is safe: coverage ignores map entries for sites the census does not see yet
-    await mini.mapSite(mini.leafA, pairKey);
-    const landed = await integrate(branch, "bcr-site-2");
+    const landed = await integrate(branch, "bcr-site");
 
     expect(landed.exitCode, landed.out).toBe(0);
     expect(git(["rev-parse", "main"])).not.toBe(before);
     expect(git(["merge-base", "--is-ancestor", branch, "main"])).toBe("");
+    expect(landed.out).not.toMatch(/^\s*gap\s/m);
   }, 480_000);
 
   it("simplest failing case: a branch adding a runnable command no leaf declares is refused, command and fix named, main unchanged", async () => {
