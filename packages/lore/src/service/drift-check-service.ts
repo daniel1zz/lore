@@ -62,31 +62,17 @@ import {
   normalizeCodeAnchorEntries,
   parseCodeAnchor,
   type DriftInputEntry,
-  type AnchorProbe,
+  collectAnchorProbes,
+  type FsProbe,
   type DriftRow,
 } from "@lore/core";
 import type { DocRecord, DocType } from "@lore/core";
 import type { StoreInterface } from "../store/store-interface.js";
 import { resolveDoc } from "./resolve.js";
 
-// ─── FsProbe Port (D4) ───────────────────────────────────────────────────────
+// FsProbe (D4) is the core port; re-exported so existing importers keep their path.
+export type { FsProbe };
 
-/**
- * Filesystem probe port — the ONLY way `DriftCheckService` touches the filesystem.
- * The real implementation (node:fs sync, repo root = `process.cwd()`, same
- * assumption as `lore status --check-tree`) is built in the CLI adapter (T2) and
- * passed to {@link DriftCheckService.checkDrift} per call. Every method MAY throw —
- * `checkDrift` wraps each call individually and turns a throw into a `probe_error`
- * drift row rather than aborting the scan (D4).
- */
-export interface FsProbe {
-  /** Classifies `path` on the working tree. MAY throw on an unexpected IO failure. */
-  stat(path: string): "file" | "dir" | "missing";
-  /** Reads full file content. Returns `null` when unreadable; MAY throw. */
-  readFile(path: string): string | null;
-  /** Lists immediate (non-recursive) children, UNFILTERED (dotfiles included — filtering happens in `computeDrift`). Returns `null` when unlistable; MAY throw. */
-  listDir(path: string): string[] | null;
-}
 
 // ─── Public Types ──────────────────────────────────────────────────────────
 
@@ -175,7 +161,7 @@ export class DriftCheckService {
       }
     }
 
-    const probes = collectProbes(declared, probe);
+    const probes = collectAnchorProbes(declared.map((entry) => entry.anchor), probe);
     const { consistent, drifts } = computeDrift(declared, probes);
 
     return ok({
@@ -399,71 +385,4 @@ function extractParsedCodeAnchors(doc: DocRecord): DriftInputEntry["anchor"][] {
     if (result.ok) parsed.push(result.value);
   }
   return parsed;
-}
-
-/**
- * Probes every DISTINCT path referenced by `declared`, exactly once per method
- * (`stat` always; `listDir` only when some anchor on that path is a dir anchor;
- * `readFile` only when some anchor on that path carries a `#Symbol`) — the D4
- * probe-level dedup. Every call is individually try/catch-wrapped; a throw (or an
- * explicit `null` from `listDir`/`readFile`) sets `.error` on that path's probe
- * entry, which `computeDrift` turns into a `probe_error` row for every anchor
- * sharing that path.
- */
-function collectProbes(declared: DriftInputEntry[], probe: FsProbe): Map<string, AnchorProbe> {
-  const descriptors = new Map<string, { needsListDir: boolean; needsContent: boolean }>();
-  for (const entry of declared) {
-    const existing = descriptors.get(entry.anchor.path) ?? { needsListDir: false, needsContent: false };
-    if (entry.anchor.isDir) existing.needsListDir = true;
-    if (entry.anchor.symbol !== undefined || entry.anchor.title !== undefined) existing.needsContent = true;
-    descriptors.set(entry.anchor.path, existing);
-  }
-
-  const probes = new Map<string, AnchorProbe>();
-  for (const [path, descriptor] of descriptors) {
-    const result: AnchorProbe = {};
-
-    try {
-      result.stat = probe.stat(path);
-    } catch (caught) {
-      result.error = describeCaught(caught);
-      probes.set(path, result);
-      continue;
-    }
-
-    if (result.stat === "dir" && descriptor.needsListDir) {
-      try {
-        const children = probe.listDir(path);
-        if (children === null) {
-          result.error = `listDir returned null for "${path}"`;
-        } else {
-          result.children = children;
-        }
-      } catch (caught) {
-        result.error = describeCaught(caught);
-      }
-    }
-
-    if (result.stat === "file" && descriptor.needsContent) {
-      try {
-        const content = probe.readFile(path);
-        if (content === null) {
-          result.error = `readFile returned null for "${path}"`;
-        } else {
-          result.content = content;
-        }
-      } catch (caught) {
-        result.error = describeCaught(caught);
-      }
-    }
-
-    probes.set(path, result);
-  }
-
-  return probes;
-}
-
-/** Renders any thrown value as a diagnostic string (never re-throws). */
-function describeCaught(caught: unknown): string {
-  return caught instanceof Error ? caught.message : String(caught);
 }

@@ -96,6 +96,12 @@ export interface ParsedCodeAnchor {
   symbol?: string;
   /** Exact test title, present iff the anchor used the `#"title"` form (test files only). Mutually exclusive with `symbol`. */
   title?: string;
+  /**
+   * Script name, present iff this reference names a package.json script (prose
+   * references only; `parseCodeAnchor` never sets it). `path` is then the
+   * governing package.json and `symbol`/`title` are unset.
+   */
+  script?: string;
 }
 
 /**
@@ -364,6 +370,29 @@ export function scanTestTitles(source: string): Set<string> {
   return titles;
 }
 
+/**
+ * Names of the `scripts` entries in a package.json text. `undefined` when the text
+ * is not a JSON object or has no object-valued `scripts`; the caller reports that
+ * as a `probe_error`, never as "no scripts".
+ *
+ * @param source - Full text of one package.json.
+ * @returns The script names, or `undefined` when the shape is unusable.
+ * @example
+ * scanPackageScripts('{"scripts":{"build":"tsc"}}'); // => Set(["build"])
+ */
+export function scanPackageScripts(source: string): Set<string> | undefined {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(source);
+  } catch {
+    return undefined;
+  }
+  if (typeof parsed !== "object" || parsed === null) return undefined;
+  const scripts = (parsed as Record<string, unknown>)["scripts"];
+  if (typeof scripts !== "object" || scripts === null || Array.isArray(scripts)) return undefined;
+  return new Set(Object.keys(scripts));
+}
+
 // ─── Drift Classification (D2, D4) ──────────────────────────────────────────
 
 /** The six drift kinds `computeDrift` classifies a declared anchor into (D2). */
@@ -374,6 +403,9 @@ export const DRIFT_KINDS = [
   "symbol_missing",
   "node_type_mismatch",
   "probe_error",
+  // A prose reference `bun run <name>` whose <name> is not in the governing
+  // package.json `scripts` (spec-prose-about-code-is-bound-to-what-it-describes-one D1).
+  "script_missing",
 ] as const;
 
 /** Derived TypeScript type for a drift row's classification. */
@@ -554,6 +586,21 @@ export function computeDrift(
     }
 
     // probe.stat === "file"
+    if (anchor.script !== undefined) {
+      const scripts = probe.content === undefined ? undefined : scanPackageScripts(probe.content);
+      if (scripts === undefined) {
+        drifts.push({
+          ...docIdentityOf(entry),
+          anchor: anchor.raw,
+          kind: "probe_error",
+          detail: `"${anchor.path}" is unreadable or has no scripts object; cannot verify script "${anchor.script}"`,
+        });
+      } else if (!scripts.has(anchor.script)) {
+        drifts.push({ ...docIdentityOf(entry), anchor: anchor.raw, kind: "script_missing" });
+      }
+      continue;
+    }
+
     if (anchor.title !== undefined) {
       if (probe.content === undefined) {
         drifts.push({

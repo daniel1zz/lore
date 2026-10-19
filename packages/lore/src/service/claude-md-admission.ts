@@ -153,7 +153,12 @@
 
 import {
   docTypeSchema,
+  GOVERNING_PACKAGE_JSON,
   normalizeFileAnchors,
+  parseCodeAnchor,
+  resolveCodeReferences,
+  type CodeReference,
+  type FsProbe,
   resolveAdoption,
   ROOT_REQUIRED_SECTIONS,
   MODULE_REQUIRED_SECTIONS,
@@ -264,130 +269,154 @@ function joinPaths(dir: string, rel: string): string {
   return dir === "" ? rel : `${dir}/${rel}`;
 }
 
+/** A source file whose `#Symbol` suffix names an export (the only files `scanExportedSymbols` can read). */
+const CODE_FILE_RE = /\.(?:ts|tsx|mts|cts|js|jsx|mjs|cjs)$/;
+
 /**
- * Module-relative resolution (N4, the fifth false-positive class): a module
- * doc's own convention is to reference a sibling file relative to ITS OWN
- * directory (`commands/set.ts` inside `adapters/cli/CLAUDE.md`, meaning
- * `packages/lore/src/adapters/cli/commands/set.ts`) — the repo-root-relative
- * check alone reports this as dangling. Resolves `filePart` against
- * `dirnameOf(scannedFilePath)`, re-validates the JOINED candidate through
- * the SAME `normalizeFileAnchors` gate the root-relative candidate already
- * passed (so a `filePart` that escapes the repo root via `..` once joined to
- * a deep module directory is rejected here too, not silently accepted), and
- * probes it with the SAME injected `fileExists` — this function never
- * touches `fs` itself.
- *
- * @returns `true` iff the module-relative candidate normalizes AND `fileExists` confirms it.
+ * Matches a package-manager script invocation inside one backtick span:
+ * `` `bun run build` ``, `` `npm run test:file a b` ``. The captured name must be
+ * followed by whitespace or the closing backtick, so `` `bun run packages/x/y.ts` ``
+ * (running a file) never yields the name `packages`.
  */
-function resolvesModuleRelative(
-  filePart: string,
-  scannedFilePath: string,
-  fileExists: (p: string) => boolean,
-): boolean {
-  const joined = joinPaths(dirnameOf(scannedFilePath), filePart);
-  const normalized = normalizeFileAnchors([joined]);
-  if (!normalized.ok) return false;
-  const normalizedJoined = normalized.value[0];
-  if (normalizedJoined === undefined) return false;
-  return fileExists(normalizedJoined);
+const SCRIPT_INVOCATION_RE =
+  /`(?:bun|npm|pnpm|yarn)(?:[ \t]+-\S+)*[ \t]+run[ \t]+([A-Za-z0-9][A-Za-z0-9:_.-]*)(?=[\s`])[^`]*`/g;
+
+/** A script "name" that is really a source file (`bun run scripts/x.ts` style) is not a package.json script. */
+const SCRIPT_NAME_IS_FILE_RE = /\.(?:ts|tsx|mts|cts|js|jsx|mjs|cjs)$/;
+
+/** 1-based line of character offset `index` in `content`. */
+function lineOf(content: string, index: number): number {
+  let line = 1;
+  for (let at = content.indexOf("\n"); at !== -1 && at < index; at = content.indexOf("\n", at + 1)) line += 1;
+  return line;
 }
 
 /**
- * Extracts backtick-quoted, repo-relative-looking path candidates from
- * `content` and reports the ones `fileExists` says are absent (spec §D6
- * grammar v1, ADVISORY, `kind: "reference_missing"` — N13 migrated this kind
- * off `MemoryFileFindingKind`; see this module's header).
- *
- * Candidate grammar: a backtick-quoted token that contains `/`, has no
- * whitespace, and does not start with a URL scheme. Four measured
- * false-positive classes are excluded outright before any existence check
- * runs (N4: npm scope names / retired path aliases, glob metacharacters,
- * brace expansion, tilde home paths — {@link isExcludedReferenceCandidate}),
- * and a further charset + shape gate ({@link looksLikePathCandidate})
- * silently drops non-path noise (bare verb/enum lists, code fragments) that
- * is not one of the five official classes but was independently measured as
- * false-positive noise in real module docs. A `path#Symbol` suffix is a
- * fragment on top of a file path — only the file part (text before the
- * first `#`) is existence-checked. Candidates are normalized through
- * `@lore/core`'s `normalizeFileAnchors` (the SAME normalizer
- * `task.extra.file_anchors` uses, SPEC-042) — a candidate that fails that
- * normalization (e.g. an escaping `..` segment) is silently skipped rather
- * than reported, matching the module's "misses acceptable, false alarms
- * not" risk posture. Duplicate missing references (same normalized path)
- * report once, first occurrence order preserved.
- *
- * A candidate absent at its repo-root-relative location is given ONE more
- * chance when `filePath` is supplied: resolved against `filePath`'s OWN
- * directory (N4's fifth class, module-relative resolution —
- * {@link resolvesModuleRelative}). Only a candidate absent at BOTH locations
- * is reported — module-relative resolution is a second resolution strategy,
- * never a blanket exclusion.
- *
- * @param content - Raw file text to scan (e.g. a CLAUDE.md body).
- * @param fileExists - Caller-owned existence predicate — the SOLE source of
- *   truth for "does this path exist"; this module never touches `fs`.
- * @param filePath - The scanned file's own repo-relative path (e.g.
- *   `"packages/lore/src/adapters/cli/CLAUDE.md"`, the same value
- *   `MemoryFileRecord.path` carries). OPTIONAL — omitting it disables
- *   module-relative resolution (every candidate is then checked
- *   repo-root-relative only, the pre-N4 behavior).
- * @returns One `reference_missing` {@link AdvisoryFinding} per distinct absent reference.
- *   Empty array on empty `content`, when no candidate matches the grammar,
- *   or when every candidate exists (root-relative or module-relative).
- * @example
- * checkReferenceExistence(
- *   "See `packages/lore/src/gone.ts` for details.",
- *   (p) => p !== "packages/lore/src/gone.ts",
- * );
- * // => [{ kind: "reference_missing", path: "packages/lore/src/gone.ts", ... }]
- * @example
- * checkReferenceExistence(
- *   "Every subcommand lives in `commands/set.ts`.",
- *   (p) => p === "packages/lore/src/adapters/cli/commands/set.ts",
- *   "packages/lore/src/adapters/cli/CLAUDE.md",
- * );
- * // => [] — resolved against the scanned file's own directory
+ * Parses one backtick token into a path reference, or `undefined` when the token is not
+ * a path (grammar gates: `/` present, no URL scheme, none of N4's four excluded classes,
+ * path-safe charset and shape). A `#Symbol` suffix is kept only on a source-code file
+ * (markdown heading fragments are not exports); a fragment that does not parse as a
+ * symbol is dropped, leaving a path-only reference.
  */
-export function checkReferenceExistence(
-  content: string,
-  fileExists: (p: string) => boolean,
-  filePath?: string,
-): AdvisoryFinding[] {
-  if (content.length === 0) return [];
+function parsePathReference(
+  token: string,
+  scannedFilePath: string | undefined,
+  line: number,
+): CodeReference | undefined {
+  if (!token.includes("/")) return undefined;
+  if (URL_SCHEME_RE.test(token)) return undefined;
+  if (isExcludedReferenceCandidate(token)) return undefined;
 
-  const findings: AdvisoryFinding[] = [];
-  const alreadyReported = new Set<string>();
+  const hashIndex = token.indexOf("#");
+  const filePart = hashIndex === -1 ? token : token.slice(0, hashIndex);
+  if (filePart.length === 0) return undefined;
+  if (!looksLikePathCandidate(filePart)) return undefined;
+
+  const withFragment = hashIndex !== -1 && CODE_FILE_RE.test(filePart) ? parseCodeAnchor(token) : undefined;
+  const parsed = withFragment !== undefined && withFragment.ok ? withFragment : parseCodeAnchor(filePart);
+  if (!parsed.ok) return undefined; // not a valid repo-relative path (SPEC-042 grammar): noise, not a finding
+
+  const anchor = parsed.value;
+  const joined = normalizeFileAnchors([joinPaths(dirnameOf(scannedFilePath ?? ""), filePart)]);
+  const moduleRelativePath =
+    scannedFilePath !== undefined && joined.ok && joined.value[0] !== undefined && joined.value[0] !== anchor.path
+      ? joined.value[0].replace(/\/$/, "")
+      : undefined;
+
+  return {
+    raw: token,
+    path: anchor.path,
+    isDir: anchor.isDir,
+    line,
+    ...(anchor.symbol === undefined ? {} : { symbol: anchor.symbol }),
+    ...(moduleRelativePath === undefined ? {} : { moduleRelativePath }),
+  };
+}
+
+/**
+ * Extracts every code reference a memory file or context fragment makes, in document
+ * order, one entry per occurrence: backticked repo paths, `path#Symbol` on source files,
+ * `bun run <script>` invocations, and (when `knownScripts` is given) bare backticked
+ * names that are package.json scripts.
+ *
+ * Grammar (spec §D6, v2): a path candidate is a backtick token that contains `/`, has no
+ * whitespace and no URL scheme, is not one of N4's four measured false-positive classes
+ * (npm scope names, glob metacharacters, brace expansion, tilde home paths), and passes
+ * the charset + shape gate. Misses are acceptable, false alarms are not. Resolution of
+ * what the extracted references point at is NOT done here: `resolveCodeReferences`
+ * (`@lore/core`) is the one resolver.
+ *
+ * @param content - Raw file text.
+ * @param scannedFilePath - The document's own repo-relative path; enables module-relative
+ *   resolution (`commands/set.ts` inside `adapters/cli/CLAUDE.md`). Omit for root-relative only.
+ * @param knownScripts - Names of the governing package.json scripts; enables bare-name
+ *   script references (reverse index only; a bare name that exists can never be a finding).
+ * @returns References in document order; empty on empty content.
+ * @example
+ * extractCodeReferences("See `a/b.ts#Gone` and `bun run nope`.\n");
+ * // => [{ raw: "a/b.ts#Gone", path: "a/b.ts", symbol: "Gone", line: 1, ... },
+ * //     { raw: "bun run nope", path: "package.json", script: "nope", line: 1, ... }]
+ */
+export function extractCodeReferences(
+  content: string,
+  scannedFilePath?: string,
+  knownScripts?: ReadonlySet<string>,
+): CodeReference[] {
+  if (content.length === 0) return [];
+  const found: Array<{ index: number; reference: CodeReference }> = [];
 
   for (const match of content.matchAll(BACKTICK_TOKEN_RE)) {
     const token = match[1];
-    if (token === undefined || !token.includes("/")) continue;
-    if (URL_SCHEME_RE.test(token)) continue;
-    if (isExcludedReferenceCandidate(token)) continue;
+    if (token === undefined || match.index === undefined) continue;
+    const line = lineOf(content, match.index);
+    const pathReference = parsePathReference(token, scannedFilePath, line);
+    if (pathReference !== undefined) {
+      found.push({ index: match.index, reference: pathReference });
+    } else if (knownScripts?.has(token) === true) {
+      found.push({
+        index: match.index,
+        reference: { raw: token, path: GOVERNING_PACKAGE_JSON, isDir: false, script: token, line },
+      });
+    }
+  }
 
-    const hashIndex = token.indexOf("#");
-    const filePart = hashIndex === -1 ? token : token.slice(0, hashIndex);
-    if (filePart.length === 0) continue;
-    if (!looksLikePathCandidate(filePart)) continue;
-
-    const normalized = normalizeFileAnchors([filePart]);
-    if (!normalized.ok) continue; // not a valid repo-relative path (SPEC-042 grammar) — noise, not a finding
-
-    const normalizedPath = normalized.value[0];
-    if (normalizedPath === undefined || alreadyReported.has(normalizedPath)) continue;
-
-    if (fileExists(normalizedPath)) continue;
-    if (filePath !== undefined && resolvesModuleRelative(filePart, filePath, fileExists)) continue;
-
-    alreadyReported.add(normalizedPath);
-    findings.push({
-      kind: "reference_missing",
-      path: normalizedPath,
-      reference: token,
-      message: `\`${normalizedPath}\` is referenced but does not exist`,
+  for (const match of content.matchAll(SCRIPT_INVOCATION_RE)) {
+    const name = match[1];
+    if (name === undefined || match.index === undefined || SCRIPT_NAME_IS_FILE_RE.test(name)) continue;
+    found.push({
+      index: match.index,
+      reference: {
+        raw: match[0].slice(1, -1),
+        path: GOVERNING_PACKAGE_JSON,
+        isDir: false,
+        script: name,
+        line: lineOf(content, match.index),
+      },
     });
   }
 
-  return findings;
+  return found.sort((a, b) => a.index - b.index).map((entry) => entry.reference);
+}
+
+/**
+ * Resolves every reference in `content` through the one core resolver and renders each
+ * unresolved one as a deterministic {@link MemoryFileFinding} (`reference_unresolved`).
+ *
+ * @param file - The memory file being checked.
+ * @param probe - Filesystem port; every failure to observe becomes a `probe_error` finding.
+ * @returns One finding per distinct unresolved reference, first occurrence's line.
+ */
+function checkCodeReferences(file: MemoryFileRecord, probe: FsProbe): MemoryFileFinding[] {
+  const references = extractCodeReferences(file.content, file.path);
+  return resolveCodeReferences(references, probe).map(({ reference, kind, detail }) => ({
+    path: file.path,
+    role: file.role,
+    kind: "reference_unresolved" as const,
+    reference: reference.raw,
+    line: reference.line,
+    drift_kind: kind,
+    message: `${file.path}:${reference.line} references \`${reference.raw}\` which does not resolve (${kind}${detail === undefined ? "" : `: ${detail}`})`,
+  }));
 }
 
 // ─── Narrative smells (advisory, AC-CTX-2 / spec §D7) ───────────────────────
@@ -778,8 +807,15 @@ export function measureTargetDistances(
  * {@link checkSlugPointers} (Phase 2).
  */
 export interface AdmissionDeps {
-  /** Caller-owned repo-relative-path existence predicate — backs `checkReferenceExistence`. */
-  fileExists: (p: string) => boolean;
+  /**
+   * Filesystem port the one core resolver reads references through. ABSENT means the caller
+   * judges structure/capacity only (the inert call sites in `flows/context-flow.ts` and
+   * `flows/setup-project-flow.ts`): reference checks are then not run at all, never
+   * approximated from a predicate.
+   */
+  probe?: FsProbe;
+  /** Retired: no longer consulted (references resolve through `probe`). Accepted so inert callers still compile. */
+  fileExists?: (p: string) => boolean;
   /** Caller-owned corpus-slug existence predicate — backs `checkSlugPointers` (Phase 2). */
   docExists: (slug: string) => boolean;
 }
@@ -860,8 +896,9 @@ export function runMemoryFileChecks(
     ...measureTargetDistances(files, OFFICIAL_LINE_TARGET),
   ];
   for (const file of files) {
-    advisory.push(...checkReferenceExistence(file.content, deps.fileExists, file.path));
     advisory.push(...detectNarrativeSmells(file.content));
+
+    if (deps.probe !== undefined) wouldBeDeterministic.push(...checkCodeReferences(file, deps.probe));
 
     for (const finding of checkSlugPointers(file.content, deps.docExists)) {
       wouldBeDeterministic.push({ ...finding, path: file.path, role: file.role });

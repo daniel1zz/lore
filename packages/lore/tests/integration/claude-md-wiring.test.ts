@@ -212,7 +212,7 @@ function findTypeDeclaration(typeName: string): string | undefined {
 
 // ─── AC-WIRE-1: reference_missing reaches the CLI as advisory ──────────────
 
-describe("claude-md wiring — reference_missing reaches the CLI as advisory", () => {
+describe("claude-md wiring — an unresolved reference reaches the CLI as a deterministic finding", () => {
   let tmpDir: string;
 
   beforeEach(() => {
@@ -221,7 +221,27 @@ describe("claude-md wiring — reference_missing reaches the CLI as advisory", (
 
   afterEach(() => cleanupDir(tmpDir));
 
-  it("HAPPY: emits a reference_missing finding in the advisory array (never in findings) for a dangling backtick-quoted repo-relative path, exit code exactly 0", () => {
+  /** Absent `adoption` resolves to warn (exit 0); the deterministic-ness assertions pin enforce. */
+  function pinEnforce(): void {
+    mkdirSync(join(tmpDir, ".lore"), { recursive: true });
+    writeFileSync(join(tmpDir, ".lore", "config.yaml"), "context:\n  memory_files:\n    adoption: enforce\n");
+  }
+
+  it("HAPPY: a dangling backtick-quoted repo-relative path is a reference_unresolved finding (never advisory), exit code exactly 3 under enforce", () => {
+    pinEnforce();
+    writeFileSync(
+      join(tmpDir, "CLAUDE.md"),
+      "See `packages/lore/src/definitely-missing-file-xyz-123.ts` for the mechanism.\n",
+    );
+
+    const { result, parsed } = runCheckClaudeMdJson(tmpDir);
+
+    expect(result.exitCode).toBe(3);
+    expect(findingKinds(parsed)).toContain("reference_unresolved");
+    expect(advisoryKinds(parsed)).not.toContain("reference_missing");
+  });
+
+  it("WARN: under the default adoption mode the same reference is a downgraded note and the exit code is exactly 0", () => {
     writeFileSync(
       join(tmpDir, "CLAUDE.md"),
       "See `packages/lore/src/definitely-missing-file-xyz-123.ts` for the mechanism.\n",
@@ -230,32 +250,31 @@ describe("claude-md wiring — reference_missing reaches the CLI as advisory", (
     const { result, parsed } = runCheckClaudeMdJson(tmpDir);
 
     expect(result.exitCode).toBe(0);
-    expect(advisoryKinds(parsed)).toContain("reference_missing");
-    // REGRESSION half of the N13 migration: never duplicated into the
-    // deterministic array now that it is advisory-only.
-    expect(findingKinds(parsed)).not.toContain("reference_missing");
+    expect(findingKinds(parsed)).not.toContain("reference_unresolved");
+    expect(advisoryKinds(parsed)).toContain("downgraded");
   });
 
-  it("NEGATIVE: reports no reference_missing for a backtick-quoted path that actually exists, exit code exactly 0", () => {
+  it("NEGATIVE: reports no reference_unresolved for a backtick-quoted path that actually exists, exit code exactly 0", () => {
+    pinEnforce();
     mkdirSync(join(tmpDir, "notes"), { recursive: true });
     writeFileSync(join(tmpDir, "notes", "present.md"), "real file\n");
     writeFileSync(join(tmpDir, "CLAUDE.md"), "See `notes/present.md` for the mechanism.\n");
 
     const { result, parsed } = runCheckClaudeMdJson(tmpDir);
 
+    expect(findingKinds(parsed)).not.toContain("reference_unresolved");
     expect(result.exitCode).toBe(0);
-    expect(advisoryKinds(parsed)).not.toContain("reference_missing");
   });
 
-  it("REGRESSION (N13 type migration): MemoryFileFindingKind no longer declares reference_missing, AdvisoryFindingKind does", () => {
+  it("REGRESSION: MemoryFileFindingKind declares reference_unresolved, AdvisoryFindingKind no longer declares reference_missing", () => {
     const deterministicDecl = findTypeDeclaration("MemoryFileFindingKind");
     const advisoryDecl = findTypeDeclaration("AdvisoryFindingKind");
 
     expect(deterministicDecl, "MemoryFileFindingKind declaration not found under src/service/claude-md-*.ts").toBeDefined();
     expect(advisoryDecl, "AdvisoryFindingKind declaration not found under src/service/claude-md-*.ts").toBeDefined();
 
-    expect(deterministicDecl as string).not.toContain("reference_missing");
-    expect(advisoryDecl as string).toContain("reference_missing");
+    expect(deterministicDecl as string).toContain("reference_unresolved");
+    expect(advisoryDecl as string).not.toContain("reference_missing");
   });
 
   it("STATE: a dangling reference alongside a REAL deterministic ceiling breach still reports both — advisory is not crowded out by a real finding", () => {
@@ -272,7 +291,7 @@ describe("claude-md wiring — reference_missing reaches the CLI as advisory", (
 
     expect(result.exitCode).toBe(3); // the real breach still decides the exit code
     expect(findingKinds(parsed)).toContain("max_lines");
-    expect(advisoryKinds(parsed)).toContain("reference_missing");
+    expect(findingKinds(parsed)).toContain("reference_unresolved");
   });
 });
 
@@ -350,14 +369,14 @@ describe("claude-md wiring — narrative smells reach the CLI without affecting 
     // AC-ADV-1 (`line_length`, `target_distance`) are emitted for EVERY discovered
     // file including an empty one, by design, so asserting the whole array is empty
     // asserts a property this case never intended to cover.
-    const narrativeKinds = ["reference_missing", "iso_date_density", "status_word"];
+    const narrativeKinds = ["iso_date_density", "status_word"];
     const narrative = (parsed.data?.claude_md?.advisory ?? []).filter((a: { kind: string }) =>
       narrativeKinds.includes(a.kind),
     );
     expect(narrative).toEqual([]);
   });
 
-  it("STATE: several advisory kinds firing at once (dangling reference + dense ISO dates + status wording) never changes the exit code", () => {
+  it("STATE: several advisory kinds firing at once (dense ISO dates + status wording, plus a dangling reference downgraded by warn mode) never changes the exit code", () => {
     const content =
       "See `packages/lore/src/definitely-missing-file-xyz-789.ts`.\n" +
       isoDatesParagraph(8) +
@@ -368,7 +387,7 @@ describe("claude-md wiring — narrative smells reach the CLI without affecting 
 
     expect(result.exitCode).toBe(0);
     const kinds = new Set(advisoryKinds(parsed));
-    expect(kinds.has("reference_missing")).toBe(true);
+    expect(kinds.has("downgraded")).toBe(true);
     expect(kinds.has("iso_date_density")).toBe(true);
     expect(kinds.has("status_word")).toBe(true);
   });
