@@ -5,7 +5,7 @@
  *
  * (a) every positional token of `lore baseline sites` forms the command path; an unresolvable path exits 4.
  * (b) a chain of MAX_CALL_DEPTH + 2 calls ending in a refusal: the cut at MAX_CALL_DEPTH is ONE not_measured `depth-bound` site naming
- *     the function where the walk stopped, and `baseline coverage` for a leaf declaring that command is incomplete.
+ *     the function where the walk stopped, and `baseline coverage` for a leaf declaring that command reports the cut (report only).
  * (c) a function first reached at depth 12 and again at depth 3 keeps its callees' sites (deep-first order forced).
  * (d) `deps.fn = other` after construction: a not_measured dynamic site for `deps.fn`.
  *
@@ -115,7 +115,7 @@ describe(`${SPEC}#AC-DC2-19 (b) a depth cut is recorded, not dropped`, () => {
     expect(sites.some((s) => s.code === "CHAIN_END")).toBe(true);
   });
 
-  it(`${SPEC}#AC-DC2-19 coverage for a leaf declaring the cut command is incomplete (exit 1)`, () => {
+  it(`${SPEC}#AC-DC2-19 coverage for a leaf declaring the cut command reports the depth-bound site (report only, exit 0)`, () => {
     const root = fixtureRoot({ chain: chainSource(MAX_CALL_DEPTH + 2) });
     // reason: `baseline coverage` lists the runnable commands from the registry module before it censuses a leaf.
     writeFileSync(join(root, "packages/lore/src/adapters/cli/index.ts"), `export const COMMAND_LOADERS = { chain: () => import("./commands/chain.js") };\n`);
@@ -126,7 +126,8 @@ describe(`${SPEC}#AC-DC2-19 (b) a depth cut is recorded, not dropped`, () => {
     const leaf = slugOf(mustRun(["baseline", "add", branch, "--node", "leaf", "--label", "lf", "--title", "DC2-19 Leaf"], root));
     mustRun(["baseline", "map", leaf, "--command", "chain"], root);
     const r = runLore(["baseline", "coverage", leaf, "--json"], root);
-    expect(r.exitCode, r.stderr + r.stdout).toBe(1);
+    // reason: an unmapped site is report output, never a refusal (BR-1248); the cut still shows in the leaf's gaps.
+    expect(r.exitCode, r.stderr + r.stdout).toBe(0);
     expect(r.stdout).toContain("depth-bound");
   }, 300_000);
 });
