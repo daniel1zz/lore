@@ -80,7 +80,7 @@
  */
 
 import { dirname, join } from "node:path";
-import { spawn } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { defineLoreCommand, exitCli } from "../cli-exit.js";
 import { loadGlobalConfig, resolveGlobalConfigPath } from "@lore/core/node";
@@ -185,10 +185,7 @@ async function buildMountRegistry(inv: Invocation): Promise<MountRegistry<App> |
 }
 
 /** Minimal child-process surface {@link openBrowser} needs: an `error` event emitter that can be detached. */
-export interface BrowserOpenerChild {
-  on(event: "error", listener: (err: Error) => void): unknown;
-  unref?(): void;
-}
+export type BrowserOpenerChild = Pick<ChildProcess, "on"> & Partial<Pick<ChildProcess, "unref">>;
 
 /** Test seam of {@link openBrowser}: the spawn function and the platform name. */
 export interface BrowserOpenerDeps {
