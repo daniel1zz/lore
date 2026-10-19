@@ -15,7 +15,7 @@
  * Usage: bun scripts/check-ac-oracle-ownership-corpus.ts   (cwd = the corpus root)
  */
 
-import { specAcceptanceCriteriaSchema } from "@lore/core";
+import { extractAllowMissingPathDeclarations, extractCriteria } from "../packages/lore/src/service/ac-service.js";
 import { ambientOfInvocation, createApp, type App } from "../packages/lore/src/app.js";
 import { resolveEntryInvocation } from "../packages/lore/src/adapters/cli/run-cli.js";
 import { findLoreDbPath } from "../packages/lore/src/adapters/cli/utils.js";
@@ -43,9 +43,8 @@ export class CorpusDumpError extends Error {
 
 /**
  * Reads every spec of the corpus behind `app` with its criteria. Criteria and red-first
- * declarations are read straight off `spec.extra` with the SAME rules `AcService.listCriteria`
- * applies (`specAcceptanceCriteriaSchema` safeParse, unparseable -> `[]`; well-formed
- * `allow_missing_path_declarations` entries only). reason: `listCriteria` also walks every plan
+ * declarations come from the SAME `extractCriteria` / `extractAllowMissingPathDeclarations`
+ * `AcService.listCriteria` calls (one rule, no copy). reason: `listCriteria` also walks every plan
  * and task of the spec for coverage facts this check never reads — measured 88 s for 223 specs.
  * `scripts/tests/check-ac-oracle-ownership-bulk.test.ts` pins the two readers to equal output.
  */
@@ -58,17 +57,7 @@ export async function readCorpusSpecAcs(app: App): Promise<CorpusDump> {
       specs.push({ slug: doc.slug, status: doc.status, criteria: [], allow_missing_declarations: [] });
       continue;
     }
-    const parsed = specAcceptanceCriteriaSchema.safeParse(doc.extra["acceptance_criteria"]);
-    const criteria = parsed.success ? parsed.data : [];
-    const rawDecls = doc.extra["allow_missing_path_declarations"];
-    const declarations: { ac_id: string; reason: string }[] = [];
-    for (const entry of Array.isArray(rawDecls) ? rawDecls : []) {
-      if (typeof entry !== "object" || entry === null) continue;
-      const row = entry as Record<string, unknown>;
-      if (typeof row["ac_id"] === "string" && typeof row["reason"] === "string" && typeof row["declared_at"] === "string") {
-        declarations.push({ ac_id: row["ac_id"], reason: row["reason"] });
-      }
-    }
+    const criteria = extractCriteria(doc);
     specs.push({
       slug: doc.slug,
       status: doc.status,
@@ -76,7 +65,7 @@ export async function readCorpusSpecAcs(app: App): Promise<CorpusDump> {
         id: c.id,
         ...(c.verify === undefined ? {} : c.verify.mode === "script" ? { verify: { mode: c.verify.mode, command: c.verify.command } } : { verify: { mode: c.verify.mode } }),
       })),
-      allow_missing_declarations: declarations,
+      allow_missing_declarations: extractAllowMissingPathDeclarations(doc).map((d) => ({ ac_id: d.ac_id, reason: d.reason })),
     });
   }
   return { specs };
