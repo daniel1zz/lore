@@ -13,7 +13,7 @@
  * task that once claimed the branch is not rewritten (BOUNDARY).
  */
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { appendFileSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { execFileSync, spawnSync } from "node:child_process";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -157,6 +157,35 @@ describe("AC-LRD-2 — lore integrate records a landing on every claimant", () =
     expect(secondLanding?.branch_head).toBe(git(["rev-parse", "feat-two"]));
     expect(landingOf(first)).toEqual(firstLanding);
   }, 300_000);
+
+  it("(2b) an already-integrated branch records the branch head itself as the landed commit, with the claim's base as the range start", () => {
+    makeBranch("feat-head");
+    const task = createTask("Head");
+    const tip = git(["rev-parse", "feat-head"]);
+    mustRun(["claim", task, "--worktree", "feat-head"]);
+    // main absorbs the branch without lore integrate (fast path a hand merge would take): the head is an ancestor of main
+    git(["checkout", "-q", "main"]);
+    git(["merge", "-q", "--no-edit", "--no-ff", "-m", "hand merge", "feat-head"]);
+    git(["checkout", "-q", "--detach", "main"]);
+    const mainTip = git(["rev-parse", "main"]);
+
+    const again = integrate("feat-head");
+
+    expect(again.exitCode, again.text).toBe(0);
+    expect(again.text).toContain("already integrated");
+    const landing = landingOf(task);
+    expect(landing?.branch_head).toBe(tip);
+    expect(landing?.landing_commit).toBe(tip);
+    expect(landing?.main_after).toBe(mainTip);
+    expect(landing?.main_before).not.toBe(mainTip);
+  }, 300_000);
+
+  it("(2c) integrate-service.ts reconstructs nothing from main's history", () => {
+    const source = readFileSync(join(PROJECT_ROOT, "src", "service", "integrate-service.ts"), "utf8");
+    expect(source).not.toContain("locateExistingLanding");
+    expect(source).not.toContain("ancestry-path");
+    expect(source).not.toContain('"rev-list"');
+  });
 
   it("(3) a branch no claim named prints that the landing names no task", () => {
     makeBranch("feat-unclaimed");
