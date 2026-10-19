@@ -246,8 +246,34 @@ export interface RulesDrift {
 interface RulesScopeTarget {
   readonly outlet: "rules:project" | "rules:user";
   readonly dir: string;
-  /** Whether a scope with no lore rules file yet is already under `lore context` management. */
-  readonly isAdopted: (present: readonly string[], selected: readonly Fragment[]) => Promise<boolean>;
+}
+
+/**
+ * Whether a scope is already under `lore context` management, so a missing rules file is drift.
+ * A switch (not a stored callback) keeps every call site statically nameable.
+ */
+async function isRulesScopeAdopted(
+  deps: FragmentsFlowDeps,
+  outlet: RulesScopeTarget["outlet"],
+  present: readonly string[],
+  selected: readonly Fragment[],
+): Promise<boolean> {
+  if (present.length > 0) return true;
+  switch (outlet) {
+    case "rules:project":
+      // reason: a project that was never put under `lore context` management (no CLAUDE.md, no lore rules
+      // file yet) has nothing to be stale against - the same "no CLAUDE.md is not drift" rule the old Z1
+      // check had - so the SHIPPED-only baseline of a fresh `lore init` stays clean (AC-CF-4 e2e control).
+      // A project- or user-layer static fragment is explicit local intent, so its missing file is always drift.
+      return (await deps.fs.exists(deps.projectClaudeMdPath)) || selected.some((fragment) => fragment.layer !== "shipped");
+    case "rules:user":
+      // DC2-27: only user-layer fragments reach this outlet and each is explicit local intent.
+      return selected.length > 0;
+    default: {
+      const unreachable: never = outlet;
+      throw new Error(`unhandled rules outlet ${String(unreachable)}`);
+    }
+  }
 }
 
 /**
@@ -260,7 +286,7 @@ async function detectRulesDrift(deps: FragmentsFlowDeps, all: readonly Fragment[
   if (!selected.ok) return selected;
 
   const present = (await deps.fs.listDir(target.dir)).filter(isLoreRulesFileName).sort();
-  if (!(await target.isAdopted(present, selected.value))) return { ok: true, value: { drifted: false, files: [] } };
+  if (!(await isRulesScopeAdopted(deps, target.outlet, present, selected.value))) return { ok: true, value: { drifted: false, files: [] } };
 
   const files: { fileName: string; reason: "missing" | "changed" | "extra" }[] = [];
   const expectedNames = new Set<string>();
@@ -286,29 +312,12 @@ async function detectRulesDrift(deps: FragmentsFlowDeps, all: readonly Fragment[
 
 /** The project scope's drift target (`rules:project` -> `<project>/.claude/rules`). */
 function projectRulesTarget(deps: FragmentsFlowDeps): RulesScopeTarget {
-  return {
-    outlet: "rules:project",
-    dir: projectRulesDir(deps),
-    // reason: a project that was never put under `lore context` management (no CLAUDE.md, no lore rules
-    // file yet) has nothing to be stale against - the same "no CLAUDE.md is not drift" rule the old Z1
-    // check had - so the SHIPPED-only baseline of a fresh `lore init` stays clean (AC-CF-4 e2e control).
-    // A project- or user-layer static fragment is explicit local intent, so its missing file is always drift.
-    isAdopted: async (present, selected) =>
-      present.length > 0 || (await deps.fs.exists(deps.projectClaudeMdPath)) || selected.some((fragment) => fragment.layer !== "shipped"),
-  };
+  return { outlet: "rules:project", dir: projectRulesDir(deps) };
 }
 
-/**
- * The user scope's drift target (`rules:user` -> `<claude dir>/rules`, DC2-27). Only user-layer
- * fragments reach this outlet, and a user-layer fragment is explicit local intent, so any selected
- * fragment or existing lore file means the scope is managed; an untouched home stays clean.
- */
+/** The user scope's drift target (`rules:user` -> `<claude dir>/rules`, DC2-27). */
 function userRulesTarget(deps: FragmentsFlowDeps): RulesScopeTarget {
-  return {
-    outlet: "rules:user",
-    dir: deps.userRulesDir,
-    isAdopted: async (present, selected) => present.length > 0 || selected.length > 0,
-  };
+  return { outlet: "rules:user", dir: deps.userRulesDir };
 }
 
 /** One drifted project skill directory (`lore-<id>` + why), for `check` findings. */
