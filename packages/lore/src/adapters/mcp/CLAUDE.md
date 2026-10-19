@@ -71,7 +71,7 @@ Registers the `lore_*` tools (count pinned by `tests/unit/adapters/mcp-tools.tes
   required-field validation, and contradictory-field rejection derive from
   ONE exported descriptor,
   `../../flows/feed-flow.ts::SPECIAL_FEED_CHECKPOINTS` — the same descriptor
-  the CLI's `commands/feed.ts` handler table asserts coverage against at
+  the CLI's `adapters/cli/commands/feed.ts` handler table asserts coverage against at
   module init. Never re-derive this list independently.
 
 ## Tools (one line each — mechanism/spec detail via `lore search <tool>` or the frozen snapshot)

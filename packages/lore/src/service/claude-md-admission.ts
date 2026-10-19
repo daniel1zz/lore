@@ -306,6 +306,9 @@ function parsePathReference(
   if (!token.includes("/")) return undefined;
   if (URL_SCHEME_RE.test(token)) return undefined;
   if (isExcludedReferenceCandidate(token)) return undefined;
+  // reason: a leading `./` is a module-specifier spelling (`./errors.js` names the `.ts` source
+  // through its emitted extension), not a repo path; checking it would report every such mention.
+  if (token.startsWith("./")) return undefined;
 
   const hashIndex = token.indexOf("#");
   const filePart = hashIndex === -1 ? token : token.slice(0, hashIndex);
@@ -317,11 +320,16 @@ function parsePathReference(
   if (!parsed.ok) return undefined; // not a valid repo-relative path (SPEC-042 grammar): noise, not a finding
 
   const anchor = parsed.value;
-  const joined = normalizeFileAnchors([joinPaths(dirnameOf(scannedFilePath ?? ""), filePart)]);
-  const moduleRelativePath =
-    scannedFilePath !== undefined && joined.ok && joined.value[0] !== undefined && joined.value[0] !== anchor.path
-      ? joined.value[0].replace(/\/$/, "")
-      : undefined;
+  const alternativePaths: string[] = [];
+  // Ancestor-relative resolution: module docs name siblings relative to their own directory
+  // (`commands/set.ts` in adapters/cli/CLAUDE.md) or to a parent package (`service/x.ts`).
+  for (let dir = dirnameOf(scannedFilePath ?? ""); scannedFilePath !== undefined && dir !== ""; dir = dirnameOf(dir)) {
+    const joined = normalizeFileAnchors([joinPaths(dir, filePart)]);
+    const candidate = joined.ok ? joined.value[0]?.replace(/\/$/, "") : undefined;
+    if (candidate !== undefined && candidate !== anchor.path && !alternativePaths.includes(candidate)) {
+      alternativePaths.push(candidate);
+    }
+  }
 
   return {
     raw: token,
@@ -329,7 +337,7 @@ function parsePathReference(
     isDir: anchor.isDir,
     line,
     ...(anchor.symbol === undefined ? {} : { symbol: anchor.symbol }),
-    ...(moduleRelativePath === undefined ? {} : { moduleRelativePath }),
+    ...(alternativePaths.length === 0 ? {} : { alternativePaths }),
   };
 }
 
@@ -406,11 +414,14 @@ export function extractCodeReferences(
  * @param probe - Filesystem port; every failure to observe becomes a `probe_error` finding.
  * @returns One finding per distinct unresolved reference, first occurrence's line.
  */
-function checkCodeReferences(file: MemoryFileRecord, probe: FsProbe): MemoryFileFinding[] {
+function checkCodeReferences(
+  file: { path: string; content: string; role?: MemoryFileRecord["role"] },
+  probe: FsProbe,
+): MemoryFileFinding[] {
   const references = extractCodeReferences(file.content, file.path);
   return resolveCodeReferences(references, probe).map(({ reference, kind, detail }) => ({
     path: file.path,
-    role: file.role,
+    ...(file.role === undefined ? {} : { role: file.role }),
     kind: "reference_unresolved" as const,
     reference: reference.raw,
     line: reference.line,
@@ -814,6 +825,12 @@ export interface AdmissionDeps {
    * approximated from a predicate.
    */
   probe?: FsProbe;
+  /**
+   * Other prose that binds to code and is NOT a memory file: context fragments
+   * (`.lore/context/*.md`, `assets/context/*.md`). Their references are resolved like a
+   * memory file's, but no ceiling, structure or emphasis check applies to them.
+   */
+  referenceDocuments?: ReadonlyArray<{ path: string; content: string }>;
   /** Retired: no longer consulted (references resolve through `probe`). Accepted so inert callers still compile. */
   fileExists?: (p: string) => boolean;
   /** Caller-owned corpus-slug existence predicate — backs `checkSlugPointers` (Phase 2). */
@@ -913,6 +930,12 @@ export function runMemoryFileChecks(
       advisory.push(...structure.advisory);
     } else if (file.role === "module") {
       advisory.push(...checkModuleStructure(file, MODULE_REQUIRED_SECTIONS));
+    }
+  }
+
+  if (deps.probe !== undefined) {
+    for (const document of deps.referenceDocuments ?? []) {
+      wouldBeDeterministic.push(...checkCodeReferences(document, deps.probe));
     }
   }
 

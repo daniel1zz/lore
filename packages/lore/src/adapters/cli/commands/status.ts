@@ -243,7 +243,7 @@ import { BASELINE_ADOPT_AUDIT_ACTION } from "./baseline-adopt.js";
 import { decideAcCiteStatus, ENFORCE_REFUSES_NOTHING_WARNING, lastAdoptedModeOf } from "../../../service/ac-cite-status.js";
 import { AttributionReport, type AttributionShare, type IdentitySourceCounts, type OrphanedDirtySummary } from "../../../service/attribution-report.js";
 import type { AcCiteStatus } from "../../../service/ac-cite-status.js";
-import { discoverMemoryFiles } from "../../real-memory-file-probe.js";
+import { discoverFragmentDocuments, discoverMemoryFiles } from "../../real-memory-file-probe.js";
 import { runMemoryFileChecks } from "../../../service/claude-md-admission.js";
 import type { MemoryFileFinding } from "../../../service/claude-md-findings.js";
 import {
@@ -1237,6 +1237,7 @@ export default defineLoreCommand({
         adoption,
       } = runMemoryFileChecks(files, budgets, {
         probe: buildRealFsProbe(inv.cwd),
+        referenceDocuments: discoverFragmentDocuments(inv.cwd),
         docExists: () => true,
       });
 
@@ -1602,6 +1603,7 @@ export default defineLoreCommand({
             adoption: memoryPointerAdoption,
           } = runMemoryFileChecks(files, budgets, {
             probe: buildRealFsProbe(inv.cwd),
+            referenceDocuments: discoverFragmentDocuments(inv.cwd),
             docExists: (slug) => knownSlugs.has(slug),
           });
           memoryPointersPayload = {

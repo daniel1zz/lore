@@ -223,3 +223,30 @@ function walkRulesDir(repoRoot: string, dir: string, records: MemoryFileRecord[]
     records.push({ path: relativePath, role: "rules", content });
   }
 }
+
+/** Repo-relative directories whose `*.md` files are context fragments (project layer, then the shipped layer of this repo). */
+const FRAGMENT_DIRS: readonly string[] = [".lore/context", "assets/context"];
+
+/**
+ * Reads every context fragment under `repoRoot` as a reference document: raw file text
+ * (frontmatter included, so a reference's line number is its line in the file).
+ * A directory that does not exist is an empty layer; a listed `*.md` file that cannot be
+ * read THROWS naming the path, because a fragment the check cannot read is not a clean one.
+ *
+ * @param repoRoot - Absolute repo root.
+ * @returns `{ path, content }` per fragment, project layer first, file names sorted.
+ * @example
+ * discoverFragmentDocuments(process.cwd());
+ * // => [{ path: ".lore/context/test-runner-split.md", content: "---\nid: ..." }]
+ */
+export function discoverFragmentDocuments(repoRoot: string): Array<{ path: string; content: string }> {
+  const documents: Array<{ path: string; content: string }> = [];
+  for (const dir of FRAGMENT_DIRS) {
+    const absoluteDir = join(repoRoot, dir);
+    if (!existsSync(absoluteDir)) continue;
+    for (const name of readdirSync(absoluteDir).filter((n) => n.endsWith(".md")).sort()) {
+      documents.push({ path: `${dir}/${name}`, content: readFileSync(join(absoluteDir, name), "utf8") });
+    }
+  }
+  return documents;
+}

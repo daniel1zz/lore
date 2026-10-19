@@ -108,8 +108,8 @@ export interface CodeReference {
   script?: string;
   /** 1-based line of the reference in its document. */
   line: number;
-  /** The same reference resolved against the document's own directory; consulted only when `path` is missing. */
-  moduleRelativePath?: string;
+  /** The same reference resolved against each ancestor directory of the document (nearest first); consulted only when `path` is missing. */
+  alternativePaths?: readonly string[];
 }
 
 /** A reference the resolver could not affirmatively verify. */
@@ -139,7 +139,7 @@ function toAnchor(reference: CodeReference, path: string, isDir: boolean): Parse
 /**
  * Resolves prose references with `computeDrift`. A path-only reference is satisfied by a
  * file or a directory (the probe decides which `isDir` to classify with); a reference
- * missing at its repo-relative `path` gets one more chance at `moduleRelativePath`.
+ * missing at its repo-relative `path` gets one more chance at each of `alternativePaths`.
  * References are de-duplicated by (path, symbol, script); the first occurrence is kept.
  *
  * @param references - References extracted from one or more documents.
@@ -181,9 +181,12 @@ export function resolveCodeReferences(references: readonly CodeReference[], prob
   const findings: ReferenceFinding[] = [];
   for (const drift of drifts) {
     const reference = distinct[Number(drift.doc_id)] as CodeReference;
-    if (isMissingKind(drift.kind) && reference.moduleRelativePath !== undefined) {
-      const { moduleRelativePath, ...withoutAlternative } = reference;
-      if (resolveCodeReferences([{ ...withoutAlternative, path: moduleRelativePath }], probe).length === 0) continue;
+    if (isMissingKind(drift.kind) && reference.alternativePaths !== undefined) {
+      const { alternativePaths, ...withoutAlternatives } = reference;
+      const resolvesElsewhere = alternativePaths.some(
+        (path) => resolveCodeReferences([{ ...withoutAlternatives, path }], probe).length === 0,
+      );
+      if (resolvesElsewhere) continue;
     }
     findings.push({ reference, kind: drift.kind, ...(drift.detail === undefined ? {} : { detail: drift.detail }) });
   }
