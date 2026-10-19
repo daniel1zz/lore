@@ -64,6 +64,7 @@ import {
 import { resolveActorWithWorktree } from "@lore/core/node";
 import type { ActorSource as CoreActorSource } from "@lore/core/node";
 import type { DocRecord, Invocation, LoreError, OsUser, ReviewJudgment, ValidityCarrier } from "@lore/core";
+import { describeSoftDeleted } from "../../service/soft-delete-window.js";
 import type { TreeNode } from "../../service/corpus-service.js";
 import type { DocWithNavigation } from "../../service/corpus-service.js";
 import type { CliIo } from "./output.js";
@@ -199,6 +200,9 @@ export function formatErrorFor(inv: Invocation, error: LoreError, opts?: { aiHas
 export function formatError(error: LoreError, opts?: { aiHasNoFallback?: boolean; retryCommand?: string }): string {
   switch (error.code) {
     case "DOC_NOT_FOUND": {
+      if (error.deleted_at !== undefined) {
+        return `Error: Document not found: ${error.id} — ${describeSoftDeleted(error.id, error.deleted_at)}`;
+      }
       const lines = [`Error: Document not found: ${error.id}`];
       if (error.suggestions && error.suggestions.length > 0) {
         lines.push(`  Suggestion: Did you mean one of: ${error.suggestions.join(", ")}?`);

@@ -451,6 +451,15 @@ export const LoreDeleteSchema = z.object({
 });
 
 /**
+ * Input schema for lore_undelete — restores a soft-deleted doc inside its recovery window
+ * (`lore undelete`). Attributed to the call's own identity — see {@link LoreSetSchema}.
+ */
+export const LoreUndeleteSchema = z.object({
+  id_or_slug: z.string(),
+  harness_run: HARNESS_RUN_FIELD,
+});
+
+/**
  * Input schema for lore_list.
  *
  * `limit`/`offset` (pagination hardening, unbounded-payload review): unlike the CLI's
@@ -1817,6 +1826,19 @@ export function registerTools(
     if (!result.ok) return errorContent(result.error);
     return textContent(result.value);
   });
+
+  // lore_undelete
+  registerToolWithArgs(
+    server,
+    "lore_undelete",
+    "Restore a soft-deleted document within its 30-day recovery window (writes a new version, action undelete)",
+    LoreUndeleteSchema,
+    async (args) => {
+      const result = await corpusService.undelete(args.id_or_slug, args.by !== undefined ? { by: args.by } : undefined);
+      if (!result.ok) return errorContent(result.error);
+      return textContent(result.value);
+    },
+  );
 
   // lore_list
   registerToolWithArgs(server, "lore_list", "List documents matching optional filters", LoreListSchema, async (args) => {
