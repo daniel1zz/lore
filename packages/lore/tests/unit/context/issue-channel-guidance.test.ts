@@ -61,6 +61,16 @@ describe("AC-IGH-1 report-issue bullet in the CLOSE fragment", () => {
     expect(bullet).not.toContain("not a report");
   });
 
+  it("AC-IGH-1(a2) bullet separates the two routes: report-issue for lore defects, the project's own tracker for other problems", () => {
+    const bullet = reportIssueBullet();
+    expect(bullet).toContain("`lore report-issue --title");
+    expect(bullet).toContain("lore's own repository");
+    expect(bullet).toContain("this project's own issue tracker");
+    // the other-problems clause must come after the lore-defect clause and must not route through report-issue
+    expect(bullet.indexOf("this project's own issue tracker")).toBeGreaterThan(bullet.indexOf("`lore report-issue --title"));
+    expect(bullet).toMatch(/never through `lore report-issue`/);
+  });
+
   it("AC-IGH-1(b) compiled rules file is byte-identical to a fresh render of the fragment", async () => {
     const files: Record<string, string> = {};
     for (const name of readdirSync(SHIPPED_DIR).filter((n) => n.endsWith(".md"))) {
