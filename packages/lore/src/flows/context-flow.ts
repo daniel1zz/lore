@@ -154,7 +154,7 @@ import { loadFragmentDocuments, prefetchReferenceProbe } from "../service/code-r
 import { migrateLegacyAutoBlocks, spliceManagedSections, type ManagedSection, type SpliceResult } from "../service/context-projection.js";
 import { discoverFragments } from "../service/context-fragments/discover.js";
 import { expandFragments } from "../service/context-fragments/expand.js";
-import { LORE_CONTEXT_VARIABLES } from "../service/context-variables-registry.js";
+import { LORE_CONTEXT_VARIABLES, configVariableValues } from "../service/context-variables-registry.js";
 import { resolveUserConfigDir } from "../service/context-fragments/user-config-dir.js";
 import {
   isLoreRulesFileName,
@@ -607,7 +607,12 @@ async function selectScopeFragments(
         config: resolveContextConfig(fragmentDeps.globalConfig, fragmentDeps.projectConfig, outlet),
       });
       // reason: expansion happens BEFORE any render/fingerprint/budget check, through the one shared helper.
-      const expanded = expandFragments(selected, outlet, { invocation: {} }, LORE_CONTEXT_VARIABLES);
+      const expanded = expandFragments(
+        selected,
+        outlet,
+        { invocation: configVariableValues(fragmentDeps.globalConfig, fragmentDeps.projectConfig, outlet) },
+        LORE_CONTEXT_VARIABLES,
+      );
       return expanded.ok ? ok([...expanded.value]) : expanded;
     };
     const rules = selectFor(outlets.rules);

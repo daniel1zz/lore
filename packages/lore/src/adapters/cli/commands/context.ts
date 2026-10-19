@@ -166,16 +166,21 @@ function detectContextCliSurface(env: Readonly<Record<string, string | undefined
 /** The `context.language` / `context.fragments.disable` subset of a loaded config, as a `ContextConfigLayer`. */
 export function toContextLayer(
   source:
-    | { context?: { language?: string | undefined; fragments?: { disable?: string[] | undefined } | undefined } | undefined }
+    | {
+        context?: { language?: string | undefined; fragments?: { disable?: string[] | undefined } | undefined } | undefined;
+        workflow?: { integrate?: { floor_command?: string | undefined } | undefined } | undefined;
+      }
     | undefined,
 ): ContextConfigLayer {
   const language = source?.context?.language;
   const disable = source?.context?.fragments?.disable;
+  const floorCommand = source?.workflow?.integrate?.floor_command;
   return {
     context: {
       ...(language !== undefined ? { language } : {}),
       ...(disable !== undefined ? { fragments: { disable } } : {}),
     },
+    ...(floorCommand !== undefined ? { workflow: { integrate: { floor_command: floorCommand } } } : {}),
   };
 }
 

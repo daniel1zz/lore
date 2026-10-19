@@ -13,6 +13,12 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, describe, expect, it } from "vitest";
+import { expandTemplate, resolveIntegrateFloor } from "@lore/core";
+import {
+  LORE_CONTEXT_VARIABLES,
+  configVariableValues,
+  integrateFloorText,
+} from "../../../src/service/context-variables-registry.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const LORE_SRC_ENTRY = join(HERE, "../../../src/index.ts");
@@ -87,5 +93,32 @@ describe("the dispatch rule names the configured integrate floor", () => {
     const source = readFileSync(SHIPPED_FRAGMENT, "utf8");
     expect(source).not.toContain("check:static");
     expect(source).toContain("{{lore:integrate_floor}}");
+  });
+});
+
+describe("config-derived placeholder values", () => {
+  const layer = (floor: string) => ({ workflow: { integrate: { floor_command: floor } } });
+
+  it("BOUNDARY: each outlet reads only its own layer; the subagent hook prefers project over global", () => {
+    expect(resolveIntegrateFloor(layer("g"), layer("p"), "rules:user")).toBe("g");
+    expect(resolveIntegrateFloor(layer("g"), layer("p"), "rules:project")).toBe("p");
+    expect(resolveIntegrateFloor(layer("g"), {}, "rules:project")).toBeNull();
+    expect(resolveIntegrateFloor(layer("g"), layer("p"), "hook:subagent-start")).toBe("p");
+    expect(resolveIntegrateFloor(layer("g"), {}, "hook:subagent-start")).toBe("g");
+  });
+
+  it("ERROR: a config variable with no supplied value is refused, never rendered empty", () => {
+    const r = expandTemplate(
+      "{{lore:integrate_floor}}",
+      { outlet: "rules:project", path: "p.md", lineOffset: 0, invocation: {} },
+      LORE_CONTEXT_VARIABLES,
+    );
+    expect(r.ok).toBe(false);
+  });
+
+  it("HAPPY: the unset text names no script and the set text carries the command verbatim", () => {
+    expect(configVariableValues({}, {}, "rules:project")["integrate_floor"]).toBe(integrateFloorText(null));
+    expect(integrateFloorText(null)).toContain(NOT_CONFIGURED);
+    expect(configVariableValues({}, layer("a && b"), "rules:project")["integrate_floor"]).toBe("set to `a && b`");
   });
 });

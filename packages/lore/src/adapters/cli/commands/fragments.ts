@@ -159,14 +159,26 @@ function loadContextLayer(path: string | undefined, schema: z.ZodTypeAny): Layer
       error: { code: "VALIDATION_ERROR", message: `${path}: ${cause instanceof Error ? cause.message : String(cause)}` },
     };
   }
-  const context = raw !== null && typeof raw === "object" ? (raw as Record<string, unknown>)["context"] : undefined;
-  if (context === undefined || context === null) return { ok: true, value: {} };
+  const root = raw !== null && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
+  const floorCommand = readFloorCommand(root["workflow"]);
+  const workflow = floorCommand === undefined ? {} : { workflow: { integrate: { floor_command: floorCommand } } };
+  const context = root["context"];
+  if (context === undefined || context === null) return { ok: true, value: workflow };
   const parsed = schema.safeParse(context);
   if (!parsed.success) {
     const issues = parsed.error.issues.map((i) => `${i.path.join(".") || "(root)"}: ${i.message}`).join("; ");
     return { ok: false, error: { code: "VALIDATION_ERROR", message: `${path}: invalid context block — ${issues}` } };
   }
-  return { ok: true, value: { context: parsed.data as NonNullable<ContextConfigLayer["context"]> } };
+  return { ok: true, value: { context: parsed.data as NonNullable<ContextConfigLayer["context"]>, ...workflow } };
+}
+
+/** `workflow.integrate.floor_command` of a raw config's `workflow:` block; absent or not a non-empty string = unset. */
+function readFloorCommand(workflow: unknown): string | undefined {
+  if (workflow === null || typeof workflow !== "object") return undefined;
+  const integrate = (workflow as Record<string, unknown>)["integrate"];
+  if (integrate === null || typeof integrate !== "object") return undefined;
+  const floor = (integrate as Record<string, unknown>)["floor_command"];
+  return typeof floor === "string" && floor.length > 0 ? floor : undefined;
 }
 
 export type DepsResult = { ok: true; value: FragmentsFlowDeps } | { ok: false; error: FragmentsFlowError };
