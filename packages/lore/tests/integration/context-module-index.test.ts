@@ -197,9 +197,8 @@ describe("AC-MI-2: managed zone keeps the template headings; legacy auto blocks 
 });
 
 describe("MI-T3 refresh --check labels each finding by its own kind", () => {
-  it("MI-T3 NEGATIVE: under adoption enforce a CLAUDE.md lacking required sections exits 1 printing section_missing, never labelled 'ceiling:'", async () => {
+  it("MI-T3 NEGATIVE: a CLAUDE.md lacking required sections exits 1 printing section_missing, never labelled 'ceiling:'", async () => {
     const dir = await makeProject();
-    put(dir, ".lore/config.yaml", "context:\n  memory_files:\n    adoption: enforce\n");
     put(dir, "CLAUDE.md", "# Proj\n\nhand text only\n");
     const before = read(dir, "CLAUDE.md");
     const check = await runLore(["context", "refresh", "--check"], dir);
