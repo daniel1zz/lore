@@ -21,7 +21,15 @@ import { readFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { z } from "zod";
-import { err, ok, type Fragment, type LoreError, type Result } from "@lore/core";
+import {
+  err,
+  FRAGMENT_FINGERPRINT_LINE,
+  formatFragmentFingerprint,
+  ok,
+  type Fragment,
+  type LoreError,
+  type Result,
+} from "@lore/core";
 
 /** Every lore-owned rules file name starts with this (reserved in both rules dirs). */
 export const RULES_FILE_PREFIX = "lore-";
@@ -29,11 +37,6 @@ export const RULES_FILE_SUFFIX = ".md";
 
 /** Ids usable as a file-name stem and inside the fingerprint comment. */
 const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9_-]*$/;
-
-// reason: strict on purpose (BR-1176, spec-process-state-end-state D3) — ownership is the intact fingerprint alone.
-// A header with any extra token (the interim build wrote `source=`) does not parse, so such a file is never
-// treated as lore-owned and is kept, never overwritten or pruned.
-const FINGERPRINT_LINE = /^<!-- lore:managed fragment=(\S+) hash=([0-9a-f]{8}) -->$/;
 
 /** The only error `renderRulesFile` returns; narrowed so callers can read `message` (still a member of `LoreError`). */
 export type RulesFileIdError = Extract<LoreError, { code: "VALIDATION_ERROR" }>;
@@ -84,7 +87,7 @@ export function renderRulesFile(fragment: Fragment): Result<RulesFileRender, Rul
     });
   }
   const rest = fragment.body.endsWith("\n") ? fragment.body : `${fragment.body}\n`;
-  const content = `<!-- lore:managed fragment=${id} hash=${hashRest(rest)} -->\n${rest}`;
+  const content = `${formatFragmentFingerprint(id, hashRest(rest))}\n${rest}`;
   return ok({ id, fileName: rulesFileName(id), content });
 }
 
@@ -96,7 +99,7 @@ export function renderRulesFile(fragment: Fragment): Result<RulesFileRender, Rul
 export function parseRulesFile(content: string): ParsedRulesFile | null {
   const newline = content.indexOf("\n");
   if (newline < 0) return null;
-  const match = FINGERPRINT_LINE.exec(content.slice(0, newline));
+  const match = FRAGMENT_FINGERPRINT_LINE.exec(content.slice(0, newline));
   if (match === null) return null;
   const id = match[1] as string;
   const recordedHash = match[2] as string;
@@ -172,7 +175,7 @@ export function renderSkillFile(fragment: Fragment): Result<SkillFileRender, Rul
   const frontmatterBlock = `${FRONTMATTER_OPEN}${stringifyYaml({ name: dirName, description }, { lineWidth: 0 })}---\n`;
   const rest = fragment.body.endsWith("\n") ? fragment.body : `${fragment.body}\n`;
   const hash = hashRest(frontmatterBlock + rest);
-  return ok({ id, dirName, content: `${frontmatterBlock}<!-- lore:managed fragment=${id} hash=${hash} -->\n${rest}` });
+  return ok({ id, dirName, content: `${frontmatterBlock}${formatFragmentFingerprint(id, hash)}\n${rest}` });
 }
 
 /**
@@ -188,7 +191,7 @@ export function parseSkillFile(content: string): ParsedSkillFile | null {
   const afterFrontmatter = content.slice(frontmatterBlock.length);
   const newline = afterFrontmatter.indexOf("\n");
   if (newline < 0) return null;
-  const match = FINGERPRINT_LINE.exec(afterFrontmatter.slice(0, newline));
+  const match = FRAGMENT_FINGERPRINT_LINE.exec(afterFrontmatter.slice(0, newline));
   if (match === null) return null;
   let raw: unknown;
   try {

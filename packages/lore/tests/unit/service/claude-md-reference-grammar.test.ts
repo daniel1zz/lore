@@ -4,6 +4,8 @@
 // @reads .serena/**
 // @reads CLAUDE.md
 // @reads adapters/cli
+// @reads adapters/cli/commands/feed.ts
+// @reads adapters/cli/commands/sync.ts
 // @reads adapters/read-side-by-filters.ts
 // @reads ai/assess-template.ts
 // @reads assets/**
@@ -37,6 +39,7 @@
 // @reads service/warn-sink.ts
 // @reads src
 // @reads src/api/mutations.ts
+// @reads src/components/evidence
 // @reads src/components/ui
 // @reads src/index.css
 // @reads src/index.ts
@@ -62,7 +65,7 @@
  * TODAY's `checkReferenceExistence` over this repo's ten real memory files
  * (root CLAUDE.md + nine module CLAUDE.md files, discovered via the real
  * `discoverMemoryFiles`) with a real-filesystem `fileExists` yields 101
- * `reference_missing` findings, dozens of which are exactly the five
+ * `reference_unresolved` findings, dozens of which are exactly the five
  * measured false-positive classes this spec exists to exclude — e.g. root
  * CLAUDE.md alone reports `@lore/core`, `@libsql/client`, `hooks/**`,
  * `assets/**`, `~/.claude/`, `docs/requirements/{prd,spec,adr,knowledge,
@@ -101,7 +104,7 @@
  * normalization contract) / STATE (the combined fixture proves classes and
  * the genuine control coexist in one scan without cross-contaminating each
  * other's verdict) / REGRESSION (a real-repo sweep: none of the four
- * exclude-class token shapes remain in `reference_missing` findings across
+ * exclude-class token shapes remain in `reference_unresolved` findings across
  * all ten real memory files; the AC's own worked example, `commands/set.ts`
  * in `adapters/cli/CLAUDE.md`, stops being reported once resolved against
  * its own directory).
@@ -111,7 +114,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { discoverMemoryFiles } from "../../../src/adapters/real-memory-file-probe.js";
 
@@ -153,10 +156,18 @@ type CheckReferenceExistenceFn = (
  * against — never the real (narrower) exported type.
  */
 async function loadCheckReferenceExistence(): Promise<CheckReferenceExistenceFn> {
-  const modulePathParts = ["..", "..", "..", "src", "service", "claude-md-admission.js"];
-  const modulePath = modulePathParts.join("/");
-  const mod = (await import(modulePath)) as { checkReferenceExistence: CheckReferenceExistenceFn };
-  return mod.checkReferenceExistence;
+  // reason: `checkReferenceExistence` was retired when references moved to the one core
+  // resolver (spec-prose-about-code-is-bound-to-what-it-describes-one D1); the shim drives
+  // the same `extractCodeReferences` + `resolveCodeReferences` path production uses.
+  const { checkReferenceExistence } = await import("./claude-md-reference-shim.js");
+  return (content, fileExists, filePath) =>
+    checkReferenceExistence(content, fileExists, filePath, (p) => {
+      try {
+        return readFileSync(join(REPO_ROOT, p), "utf8");
+      } catch {
+        return null;
+      }
+    });
 }
 
 /** A `fileExists` stand-in that reports every path as absent — worst case for exclusion tests. */
@@ -332,7 +343,7 @@ describe("reference grammar — five exclusion classes with a genuine-dangling c
   // (never depends on build artifacts like `dist/lore`, which exists in a
   // built checkout but not in a bare worktree).
 
-  it("REGRESSION: none of the four excluded-pattern-class token shapes remain in reference_missing findings across every real memory file in this repo", async () => {
+  it("REGRESSION: none of the four excluded-pattern-class token shapes remain in reference_unresolved findings across every real memory file in this repo", async () => {
     const checkReferenceExistence = await loadCheckReferenceExistence();
     const files = discoverMemoryFiles(REPO_ROOT, ["CLAUDE.md"]);
     // Sanity: the sweep actually walked the repo's real memory files (root +

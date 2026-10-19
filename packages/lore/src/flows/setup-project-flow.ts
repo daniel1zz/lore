@@ -183,6 +183,7 @@ import {
 import type {
   AdoptionMode,
   AssetFile,
+  FsProbe,
   LoreError,
   MemoryFileBudgets,
   Result,
@@ -343,6 +344,18 @@ export type WriteAdoptionMode = (repoDir: string, mode: AdoptionMode) => Result<
 export type ResolveMemoryFileBudgets = (repoDir: string) => Result<MemoryFileBudgets, LoreError>;
 
 /**
+ * What the adoption judgement needs to resolve code references: a read-only probe of the
+ * target repo and its context fragments, so the verdict counts a dangling `path#Symbol` the
+ * way `lore status --check-claude-md` later will.
+ *
+ * @param repoDir - Absolute repo root.
+ */
+export type ResolveReferenceContext = (repoDir: string) => {
+  probe: FsProbe;
+  referenceDocuments: ReadonlyArray<{ path: string; content: string }>;
+};
+
+/**
  * The ports {@link scaffoldProject} depends on, bundled for constructor injection.
  *
  * `writeAdoptionMode` + `resolveMemoryFileBudgets` are OPTIONAL in the TYPE only
@@ -357,6 +370,8 @@ export interface ProjectScaffoldFlowDeps {
   assets: ProjectAssetSource;
   writeAdoptionMode?: WriteAdoptionMode;
   resolveMemoryFileBudgets?: ResolveMemoryFileBudgets;
+  /** Same optionality and loud-skip rule as the two ports above; the production adapter supplies it. */
+  resolveReferenceContext?: ResolveReferenceContext;
   /** BL-8 — the authoring-skill source; absent means the `skills` row is omitted (bare-port test fixtures). */
   skillAssets?: ProjectSkillAssetSource;
   /** BL-8 — the ac-cite mode seed; absent means the `ac_cite` row is omitted (bare-port test fixtures). */
@@ -1170,18 +1185,20 @@ async function runClaudeMdStep(
  * the default-`warn` resolution would move every finding into `advisory` and hide the
  * count from this caller. Judging against schema defaults instead would write `enforce`
  * for a repo whose tighter ceilings `status --check-claude-md` then fails on.
- * `docExists`/`fileExists` are `() => true`: this step judges structure/capacity,
- * and a dangling-reference verdict needs the target repo on disk.
+ * References are judged too (`deps.resolveReferenceContext` supplies the target repo's probe
+ * and fragments), so the mode written is the mode `lore status --check-claude-md` will
+ * agree with; `docExists` is `() => true` (slug pointers are `--check-memory-pointers`'s job).
  *
  * A missing port is a loud `skipped` row (never an absent one); a budget-resolution
  * failure is a `failed` row and the write port is NOT called.
  */
 function runAdoptionStep(deps: ProjectScaffoldFlowDeps, repoDir: string, postSpliceContent: string): AdoptionStepResult {
-  const { writeAdoptionMode, resolveMemoryFileBudgets } = deps;
-  if (writeAdoptionMode === undefined || resolveMemoryFileBudgets === undefined) {
+  const { writeAdoptionMode, resolveMemoryFileBudgets, resolveReferenceContext } = deps;
+  if (writeAdoptionMode === undefined || resolveMemoryFileBudgets === undefined || resolveReferenceContext === undefined) {
     const missing = [
       ...(writeAdoptionMode === undefined ? ["writeAdoptionMode"] : []),
       ...(resolveMemoryFileBudgets === undefined ? ["resolveMemoryFileBudgets"] : []),
+      ...(resolveReferenceContext === undefined ? ["resolveReferenceContext"] : []),
     ];
     return { status: "skipped", detail: `adoption not judged: deps.${missing.join(" and deps.")} not injected`, checklist: [] };
   }
@@ -1191,7 +1208,7 @@ function runAdoptionStep(deps: ProjectScaffoldFlowDeps, repoDir: string, postSpl
   const { deterministic } = runMemoryFileChecks(
     [{ path: CLAUDE_MD_TARGET_NAME, role: "root", content: postSpliceContent }],
     budgets,
-    { fileExists: () => true, docExists: () => true },
+    { ...resolveReferenceContext(repoDir), docExists: () => true },
   );
   const mode: AdoptionMode = deterministic.length === 0 ? "enforce" : "warn";
   const checklist = mode === "warn" ? deterministic.map((finding) => finding.message) : [];

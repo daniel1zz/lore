@@ -53,6 +53,7 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join, relative, sep } from "node:path";
 import type { MemoryFileRecord } from "../service/claude-md-findings.js";
+import { FRAGMENT_DOCUMENT_DIRS } from "../service/code-reference-index.js";
 
 /** Directory basenames never descended into, at any depth. */
 const EXCLUDED_DIR_NAMES: ReadonlySet<string> = new Set([
@@ -222,4 +223,29 @@ function walkRulesDir(repoRoot: string, dir: string, records: MemoryFileRecord[]
     const relativePath = relative(repoRoot, absolutePath).split(sep).join("/");
     records.push({ path: relativePath, role: "rules", content });
   }
+}
+
+
+/**
+ * Reads every context fragment under `repoRoot` as a reference document: raw file text
+ * (frontmatter included, so a reference's line number is its line in the file).
+ * A directory that does not exist is an empty layer; a listed `*.md` file that cannot be
+ * read THROWS naming the path, because a fragment the check cannot read is not a clean one.
+ *
+ * @param repoRoot - Absolute repo root.
+ * @returns `{ path, content }` per fragment, project layer first, file names sorted.
+ * @example
+ * discoverFragmentDocuments(process.cwd());
+ * // => [{ path: ".lore/context/test-runner-split.md", content: "---\nid: ..." }]
+ */
+export function discoverFragmentDocuments(repoRoot: string): Array<{ path: string; content: string }> {
+  const documents: Array<{ path: string; content: string }> = [];
+  for (const dir of FRAGMENT_DOCUMENT_DIRS) {
+    const absoluteDir = join(repoRoot, dir);
+    if (!existsSync(absoluteDir)) continue;
+    for (const name of readdirSync(absoluteDir).filter((n) => n.endsWith(".md")).sort()) {
+      documents.push({ path: `${dir}/${name}`, content: readFileSync(join(absoluteDir, name), "utf8") });
+    }
+  }
+  return documents;
 }

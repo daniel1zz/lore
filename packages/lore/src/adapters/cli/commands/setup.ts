@@ -145,6 +145,8 @@ import { parseDocument } from "yaml";
 import { resolveTrackedWriteRoot } from "../working-tree-root.js";
 import { err, loadConfigFromString, ok, resolveMemoryFileBudgets } from "@lore/core";
 import type { AdoptionMode, FsWritePort, LoreError, MemoryFileBudgets, Result } from "@lore/core";
+import { buildRealFsProbe } from "../../real-fs-probe.js";
+import { discoverFragmentDocuments } from "../../real-memory-file-probe.js";
 import { buildRefreshFragmentDeps, makeRealContextFsPort, toContextLayer } from "./context.js";
 import { loadConfig, loadGlobalConfig } from "@lore/core/node";
 
@@ -850,6 +852,10 @@ async function runProjectScaffold(opts: {
     assets: projectAssets,
     writeAdoptionMode: writeAdoptionModeToConfig,
     resolveMemoryFileBudgets: resolveRepoMemoryFileBudgets,
+    resolveReferenceContext: (dir) => ({
+      probe: buildRealFsProbe(dir),
+      referenceDocuments: discoverFragmentDocuments(dir),
+    }),
     skillAssets: makeRealProjectSkillSource(opts.assetsRoot),
     seedAcCiteMode: (dir) => seedAcCiteModeAudited(dir, opts.inv),
   });

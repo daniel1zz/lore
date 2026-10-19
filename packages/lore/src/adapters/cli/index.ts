@@ -175,6 +175,9 @@ export const COMMAND_LOADERS: Readonly<Record<string, () => Promise<CommandModul
     // dedicated writer for a task's `extra.red_first`; see commands/red-first.ts's
     // module header.
     "red-first": () => import("./commands/red-first.js"),
+    // refs (spec-prose-about-code-is-bound-to-what-it-describes-one D2) — read verb over the
+    // one reverse index of code references; see commands/refs.ts's module header.
+    refs: () => import("./commands/refs.js"),
     invalidate: () => import("./commands/invalidate.js"),
     setup: () => import("./commands/setup.js"),
     // governance (SPEC-083 D1) — bootstrap-stage, no corpus required; see
