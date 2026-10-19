@@ -101,7 +101,19 @@ export interface Site {
   readonly dynamic: boolean;
   /** `depth-bound` exactly when the walk stopped at {@link MAX_CALL_DEPTH} inside `symbol`: everything the cut callee reaches is NOT listed. */
   readonly kind?: "depth-bound";
+  /** 1-based line of the site in `file` (the first one for a site de-duplicated across several calls; the declaration for an interface site). */
+  readonly line: number;
+  /** 1-based column of the site's node on `line`. */
+  readonly column: number;
+  /**
+   * The business rules the tree declares at this site (BR-1344), sorted, unique: `[]` = unmapped, one = declared, two or more =
+   * a conflict (a site carries at most one rule). Read from the syntax at the site only; see {@link RULE_TAG}.
+   */
+  readonly rules: readonly string[];
 }
+
+/** The doc-tag that declares a rule on a port type, interface, method, callee or statement: `@lore-site BR-<n>`. */
+export const RULE_TAG = "@lore-site";
 
 /** How a refusal's `field` shows in its key: nothing, the literal, or a per-(file,symbol,code) ordinal. */
 type FieldKey = { readonly kind: "none" } | { readonly kind: "literal"; readonly value: string } | { readonly kind: "ordinal" };
@@ -113,6 +125,9 @@ interface PendingSite {
   readonly code: string;
   readonly field: FieldKey;
   readonly pos: number;
+  readonly line: number;
+  readonly column: number;
+  readonly rules: readonly string[];
   readonly bootstrap: boolean;
 }
 
@@ -699,7 +714,7 @@ class CensusWalker {
         seen.set(base, n + 1);
         key = p.field.kind === "none" ? `${base}#~${n}` : `${base}~${n}`;
       }
-      if (!merged.has(key)) merged.set(key, { key, file: p.rel, symbol: p.symbol, code: p.code, dynamic: false });
+      if (!merged.has(key)) merged.set(key, { key, file: p.rel, symbol: p.symbol, code: p.code, dynamic: false, line: p.line, column: p.column, rules: p.rules });
     });
     return merged;
   }
@@ -922,7 +937,7 @@ class CensusWalker {
       return;
     }
     if (this.ts.isElementAccessExpression(callee)) {
-      this.addSite(call, undefined, `dynamic:${this.label(callee)}`);
+      this.addSite(call, undefined, `dynamic:${this.label(callee)}`, [...this.statementRulesOf(call), ...this.tagRulesAlong(this.declarationsOfExpression(callee.expression))]);
       return;
     }
     const dispatch = this.interfaceMethodOf(callee);
@@ -938,7 +953,156 @@ class CensusWalker {
       this.handleInjectedCall(call, callee, depth);
       return;
     }
+    const helper = this.ruleHelperOf(targets);
+    if (helper !== undefined) this.recordHelperCall(call, helper);
     this.followOrCut(call, targets, depth);
+  }
+
+  // ── rule declarations (BR-1344) ──────────────────────────────────────────────
+
+  /** 1-based line and column of `node`'s first token. */
+  private positionOf(node: TS.Node): { line: number; column: number } {
+    const at = node.getSourceFile().getLineAndCharacterOfPosition(node.getStart());
+    return { line: at.line + 1, column: at.character + 1 };
+  }
+
+  /** The `@lore-site BR-<n>` ids in the block comments directly before `node` (its leading trivia), in source order. */
+  private tagRulesOf(node: TS.Node): string[] {
+    const text = node.getSourceFile().getFullText();
+    const found: string[] = [];
+    for (const range of this.ts.getLeadingCommentRanges(text, node.getFullStart()) ?? []) {
+      if (range.kind !== this.ts.SyntaxKind.MultiLineCommentTrivia) continue;
+      for (const match of text.slice(range.pos, range.end).matchAll(/@lore-site\s+(BR-\d+)\b/g)) found.push(match[1] as string);
+    }
+    return found;
+  }
+
+  /**
+   * The tags on `decls` and on the type that holds each: the declaration itself, then its enclosing member / type literal up to
+   * and including the first interface, class or type alias. So one tag on a port type or interface covers every member, and one
+   * on a method covers every call of it.
+   */
+  private tagRulesAlong(decls: readonly TS.Node[]): string[] {
+    const ts = this.ts;
+    const found: string[] = [];
+    for (const decl of decls) {
+      if (!this.isFollowable(decl.getSourceFile())) continue;
+      for (let cur: TS.Node | undefined = decl; cur !== undefined && !ts.isSourceFile(cur); cur = cur.parent) {
+        found.push(...this.tagRulesOf(cur));
+        if (ts.isInterfaceDeclaration(cur) || ts.isClassDeclaration(cur) || ts.isTypeAliasDeclaration(cur)) break;
+      }
+    }
+    return found;
+  }
+
+  /** The declarations of the symbol an expression names (identifier or property access), `[]` when it names none. */
+  private declarationsOfExpression(expr: TS.Expression): readonly TS.Declaration[] {
+    const node = this.unwrap(expr);
+    const location = this.ts.isPropertyAccessExpression(node) ? node.name : node;
+    if (!this.ts.isIdentifier(location)) return [];
+    return this.dealias(this.checker.getSymbolAtLocation(location))?.declarations ?? [];
+  }
+
+  /** The tags on the statement that holds `node` (the nearest ancestor sitting directly in a block, case clause or source file). */
+  private statementRulesOf(node: TS.Node): string[] {
+    const ts = this.ts;
+    for (let cur: TS.Node | undefined = node; cur !== undefined && !ts.isSourceFile(cur); cur = cur.parent) {
+      const parent = cur.parent;
+      if (parent === undefined) break;
+      if (ts.isBlock(parent) || ts.isSourceFile(parent) || ts.isCaseClause(parent) || ts.isDefaultClause(parent) || ts.isModuleBlock(parent)) return this.tagRulesOf(cur);
+    }
+    return [];
+  }
+
+  /** The `BR-<n>` string literals `expr` evaluates to (a literal, a const, a ternary of those); anything else declares nothing. */
+  private ruleIdsOf(expr: TS.Expression): string[] {
+    return (this.literalsOf(expr, 0) ?? []).filter((id) => /^BR-\d+$/.test(id));
+  }
+
+  /** The `rule` member of a refusal literal, when it is a readable `BR-<n>` literal. */
+  private literalRulesOf(object: TS.ObjectLiteralExpression): string[] {
+    const ts = this.ts;
+    for (const prop of object.properties) {
+      if (ts.isPropertyAssignment(prop) && this.propertyName(prop.name) === "rule") return this.ruleIdsOf(prop.initializer);
+      if (ts.isShorthandPropertyAssignment(prop) && prop.name.text === "rule") return (this.literalsOfSymbol(this.checker.getShorthandAssignmentValueSymbol(prop), 0) ?? []).filter((id) => /^BR-\d+$/.test(id));
+    }
+    return [];
+  }
+
+  /** Sorted unique ids. */
+  private static uniqueRules(ids: readonly string[]): string[] {
+    return [...new Set(ids)].sort();
+  }
+
+  /**
+   * True when `fn` hands its own `rule` parameter on to the error it builds (`{ rule }` / `rule: rule` anywhere in its body): a
+   * rule-taking refusal helper. Its own literal is a pass-through, not a site: every CALL of the helper is the site and carries the rule.
+   */
+  private passesRuleThrough(fn: FunctionLike): boolean {
+    const ts = this.ts;
+    const param = fn.parameters.find((p) => ts.isIdentifier(p.name) && p.name.text === "rule");
+    if (param === undefined || fn.body === undefined) return false;
+    const paramSymbol = this.checker.getSymbolAtLocation(param.name);
+    let passes = false;
+    const scan = (node: TS.Node): void => {
+      if (passes) return;
+      if (ts.isShorthandPropertyAssignment(node) && node.name.text === "rule") {
+        passes = this.checker.getShorthandAssignmentValueSymbol(node) === paramSymbol;
+        return;
+      }
+      if (ts.isPropertyAssignment(node) && this.propertyName(node.name) === "rule" && ts.isIdentifier(node.initializer)) {
+        passes = this.checker.getSymbolAtLocation(node.initializer) === paramSymbol;
+        return;
+      }
+      ts.forEachChild(node, scan);
+    };
+    scan(fn.body);
+    return passes;
+  }
+
+  /** The function a refusal literal is written in, when it is a rule-taking helper handing its `rule` on (the literal is then a pass-through). */
+  private isPassThroughLiteral(object: TS.ObjectLiteralExpression): boolean {
+    for (let cur: TS.Node | undefined = object.parent; cur !== undefined; cur = cur.parent) {
+      if (this.isFunctionLike(cur)) return this.passesRuleThrough(cur);
+    }
+    return false;
+  }
+
+  /** The rule-taking helper among `targets` (first one that passes its `rule` parameter through), with its parameter positions. */
+  private ruleHelperOf(targets: readonly FunctionLike[]): { fn: FunctionLike; ruleIndex: number; fieldIndex: number } | undefined {
+    const ts = this.ts;
+    for (const fn of targets) {
+      if (!this.passesRuleThrough(fn)) continue;
+      const names = fn.parameters.map((p) => (ts.isIdentifier(p.name) ? p.name.text : ""));
+      return { fn, ruleIndex: names.indexOf("rule"), fieldIndex: names.indexOf("field") };
+    }
+    return undefined;
+  }
+
+  /** The codes a rule-taking helper builds: the readable `code` of every object literal in its body. `undefined` when it names none. */
+  private helperCodes(fn: FunctionLike): string[] | undefined {
+    const ts = this.ts;
+    const codes = new Set<string>();
+    const scan = (node: TS.Node): void => {
+      if (ts.isObjectLiteralExpression(node)) for (const code of this.codesOfErrArgument(node) ?? []) codes.add(code);
+      ts.forEachChild(node, scan);
+    };
+    if (fn.body !== undefined) scan(fn.body);
+    return codes.size === 0 ? undefined : [...codes].sort();
+  }
+
+  /** A call of a rule-taking helper IS a failure site: its code from the helper, its field and rule from the call's arguments. */
+  private recordHelperCall(call: TS.CallExpression, helper: { fn: FunctionLike; ruleIndex: number; fieldIndex: number }): void {
+    const codes = this.helperCodes(helper.fn);
+    const ruleArg = call.arguments[helper.ruleIndex];
+    const rules = [...(ruleArg === undefined ? [] : this.ruleIdsOf(ruleArg)), ...this.statementRulesOf(call)];
+    if (codes === undefined) {
+      this.addSite(call, undefined, `dynamic:${this.label(call)}`, rules);
+      return;
+    }
+    const fieldArg = helper.fieldIndex >= 0 ? call.arguments[helper.fieldIndex] : undefined;
+    const field: FieldKey = fieldArg === undefined ? { kind: "none" } : this.fieldKeyFrom(this.literalsOf(fieldArg, 0));
+    for (const code of codes) this.addCodedSite(call, code, field, rules);
   }
 
   /** Follow `fns` one level deeper, or - at {@link MAX_CALL_DEPTH} - record a `depth-bound` not_measured site naming the function where the walk stopped. */
@@ -954,7 +1118,8 @@ class CensusWalker {
     const rel = path.relative(this.rootDir, file.fileName).split(path.sep).join("/");
     const symbol = this.enclosingSymbolName(call);
     const key = `${rel}#${symbol}#depth-bound`;
-    this.depthCuts.set(call, { site: { key, file: rel, symbol, dynamic: true, kind: "depth-bound" }, bootstrap: this.isNonBusinessSymbol(symbol, file) });
+    const where = this.positionOf(call);
+    this.depthCuts.set(call, { site: { key, file: rel, symbol, dynamic: true, kind: "depth-bound", ...where, rules: [] }, bootstrap: this.isNonBusinessSymbol(symbol, file) });
   }
 
   // ── dependency injection (#104) ──────────────────────────────────────────────
@@ -985,7 +1150,7 @@ class CensusWalker {
     if (this.isNonBusinessSymbol(this.enclosingSymbolName(call), call.getSourceFile())) return;
     const resolved = this.functionsBoundTo(decls, new Set(), 0);
     this.followOrCut(call, resolved.fns, depth);
-    if (resolved.fns.length !== 1 || resolved.opaque) this.addSite(call, undefined, `dynamic:${this.label(callee)}`);
+    if (resolved.fns.length !== 1 || resolved.opaque) this.addSite(call, undefined, `dynamic:${this.label(callee)}`, [...this.statementRulesOf(call), ...this.tagRulesAlong(decls)]);
   }
 
   /** Implementations behind `receiver.method(..)` when `receiver` is an injected member / parameter bound to concrete values. */
@@ -1290,7 +1455,7 @@ class CensusWalker {
    * The interface / abstract method a call dispatches through, when the callee has declarations
    * under rootDir but none with a body (so the runtime implementation is unknown statically).
    */
-  private interfaceMethodOf(callee: TS.Expression): { file: string; iface: string; method: string } | undefined {
+  private interfaceMethodOf(callee: TS.Expression): { file: string; iface: string; method: string; decl: TS.Declaration } | undefined {
     if (!this.ts.isPropertyAccessExpression(callee)) return undefined;
     const symbol = this.dealias(this.checker.getSymbolAtLocation(callee.name));
     const decls = symbol?.declarations ?? [];
@@ -1308,26 +1473,43 @@ class CensusWalker {
     const iface = ts.isInterfaceDeclaration(owner) || ts.isClassDeclaration(owner) ? owner.name?.text : this.enclosingSymbolName(owner);
     if (iface === undefined || iface.length === 0) return undefined;
     const file = path.relative(this.rootDir, decl.getSourceFile().fileName).split(path.sep).join("/");
-    return { file, iface, method: callee.name.text };
+    return { file, iface, method: callee.name.text, decl };
   }
 
-  private addInterfaceSite(dispatch: { file: string; iface: string; method: string }): void {
+  /** An interface / abstract method is ONE site (keyed by its declaration), positioned and tagged at the declaration. */
+  private addInterfaceSite(dispatch: { file: string; iface: string; method: string; decl: TS.Declaration }): void {
     const key = `${dispatch.file}#${dispatch.iface}#${dispatch.method}`;
     if (this.sites.has(key)) return;
-    this.sites.set(key, { key, file: dispatch.file, symbol: dispatch.iface, dynamic: true });
+    this.sites.set(key, {
+      key,
+      file: dispatch.file,
+      symbol: dispatch.iface,
+      dynamic: true,
+      ...this.positionOf(dispatch.decl),
+      rules: CensusWalker.uniqueRules(this.tagRulesAlong([dispatch.decl])),
+    });
   }
 
   private recordFailureCall(call: TS.CallExpression, callee: string): void {
     const arg = call.arguments[0];
     const codes = arg !== undefined ? this.codesOfErrArgument(arg) : undefined;
     if (codes === undefined || codes.length === 0) {
-      this.addSite(call, undefined, `dynamic:${callee}(${arg === undefined ? "" : this.label(arg)})`);
+      const inner = arg === undefined ? undefined : this.unwrap(arg);
+      // reason: `err(validationError(.., rule))` is ONE site and the helper call records it (carrying the rule); a second dynamic
+      // site for the wrapping err() would count the same refusal twice.
+      if (inner !== undefined && this.ts.isCallExpression(inner) && this.ruleHelperOf(this.resolveTargets(this.unwrap(inner.expression))) !== undefined) return;
+      const innerRules =
+        inner !== undefined && this.ts.isCallExpression(inner)
+          ? [...inner.arguments.flatMap((a) => this.ruleIdsOf(a)), ...this.tagRulesAlong(this.declarationsOfExpression(this.unwrap(inner.expression)))]
+          : [];
+      this.addSite(call, undefined, `dynamic:${callee}(${arg === undefined ? "" : this.label(arg)})`, [...this.statementRulesOf(call), ...innerRules]);
       return;
     }
     const object = this.unwrap(arg as TS.Expression) as TS.ObjectLiteralExpression;
     this.consumedArguments.add(object);
     const field = this.fieldKeyOf(object);
-    for (const code of codes) this.addCodedSite(call, code, field);
+    const rules = [...this.literalRulesOf(object), ...this.statementRulesOf(call)];
+    for (const code of codes) this.addCodedSite(call, code, field, rules);
   }
 
   /**
@@ -1338,17 +1520,20 @@ class CensusWalker {
   private handleTypedLiteral(object: TS.ObjectLiteralExpression): void {
     if (this.consumedArguments.has(object) || this.errorTypes.length === 0) return;
     if (!this.isTypedAsProductError(object)) return;
+    // reason: a rule-taking helper's own literal passes its `rule` parameter through; the helper's CALLS are the sites (BR-1344).
+    if (this.isPassThroughLiteral(object)) return;
     const codes = this.codesOfErrArgument(object);
+    const rules = [...this.literalRulesOf(object), ...this.statementRulesOf(object)];
     if (codes !== undefined && codes.length > 0) {
       const field = this.fieldKeyOf(object);
-      for (const code of codes) this.addCodedSite(object, code, field);
+      for (const code of codes) this.addCodedSite(object, code, field, rules);
       return;
     }
     const hasCodeKey = object.properties.some((p) => (this.ts.isPropertyAssignment(p) || this.ts.isShorthandPropertyAssignment(p)) && this.propertyName(p.name) === "code");
     const hasSpread = object.properties.some((p) => this.ts.isSpreadAssignment(p));
     // reason: a literal typed as the error but with neither a `code` key nor a spread cannot occur (it would not type-check); with
     // a spread or an unreadable code the refusal exists but cannot be named, so it is reported as dynamic, never dropped.
-    if (hasCodeKey || hasSpread) this.addSite(object, undefined, `dynamic:error-literal(${this.label(object)})`);
+    if (hasCodeKey || hasSpread) this.addSite(object, undefined, `dynamic:error-literal(${this.label(object)})`, rules);
   }
 
   private isTypedAsProductError(object: TS.ObjectLiteralExpression): boolean {
@@ -1378,7 +1563,7 @@ class CensusWalker {
     return literals !== undefined && literals.length === 1 ? { kind: "literal", value: (literals[0] as string).replace(/#/g, "~") } : { kind: "ordinal" };
   }
 
-  private addCodedSite(node: TS.Node, code: string, field: FieldKey): void {
+  private addCodedSite(node: TS.Node, code: string, field: FieldKey, rules: readonly string[]): void {
     const file = node.getSourceFile();
     const rel = path.relative(this.rootDir, file.fileName).split(path.sep).join("/");
     const symbol = this.enclosingSymbolName(node);
@@ -1388,6 +1573,8 @@ class CensusWalker {
       code,
       field,
       pos: node.getStart(),
+      ...this.positionOf(node),
+      rules: CensusWalker.uniqueRules(rules),
       bootstrap: this.isNonBusinessSymbol(symbol, file),
     });
   }
@@ -1483,14 +1670,20 @@ class CensusWalker {
     return (symbol.flags & this.ts.SymbolFlags.Alias) !== 0 ? this.checker.getAliasedSymbol(symbol) : symbol;
   }
 
-  private addSite(node: TS.Node, code: string | undefined, tail: string): void {
+  private addSite(node: TS.Node, code: string | undefined, tail: string, rules: readonly string[] = []): void {
     const file = node.getSourceFile();
     const rel = path.relative(this.rootDir, file.fileName).split(path.sep).join("/");
     const symbol = this.enclosingSymbolName(node);
     const key = `${rel}#${symbol}#${tail}`;
     const sink = this.isNonBusinessSymbol(symbol, file) ? this.bootstrapSites : this.sites;
-    if (sink.has(key)) return;
-    sink.set(key, code === undefined ? { key, file: rel, symbol, dynamic: true } : { key, file: rel, symbol, code, dynamic: false });
+    const where = this.positionOf(node);
+    const existing = sink.get(key);
+    // reason: one key can stand for several calls (a dynamic callee called twice in one function); every call's declaration counts,
+    // so a second call carrying another rule makes the site a conflict instead of being dropped.
+    const merged = CensusWalker.uniqueRules([...(existing?.rules ?? []), ...rules]);
+    const first = existing !== undefined && existing.line <= where.line ? existing : undefined;
+    const position = first === undefined ? where : { line: first.line, column: first.column };
+    sink.set(key, code === undefined ? { key, file: rel, symbol, dynamic: true, ...position, rules: merged } : { key, file: rel, symbol, code, dynamic: false, ...position, rules: merged });
   }
 
   private label(node: TS.Node): string {

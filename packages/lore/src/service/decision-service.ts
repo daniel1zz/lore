@@ -31,7 +31,7 @@
  * Source: spec-autonomy-phase-1-decision-function-human-channel-lore AC-AU-2, AC-AU-3;
  *   adr-autonomy-is-decided-by-measured-facts-one-decision-function D5.
  */
-import { decide, err, ok, type AutonomyDecision, type LoreError, type Result, type OperationClassRegistry } from "@lore/core";
+import { decide, err, ok, validationError, type AutonomyDecision, type LoreError, type Result, type OperationClassRegistry } from "@lore/core";
 import {
   AutonomyCalibrationService,
   classConfidence,
@@ -105,10 +105,6 @@ export interface DecisionServiceDeps {
   readonly subjectProbes?: SubjectExistenceProbes;
   /** Reversal probes: when present, every decide() first sweeps new outcomes of earlier auto decisions. */
   readonly reversalProbes?: readonly ReversalProbe[];
-}
-
-function validationError(field: string, message: string): LoreError {
-  return { code: "VALIDATION_ERROR", field, message };
 }
 
 /** Which queue a {@link DecisionReadView} belongs to: a blocking open decision, or a non-blocking audit item. */

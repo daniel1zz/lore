@@ -15,10 +15,16 @@
  * Dimensions: HAPPY (each form reports its rule), NEGATIVE (undeclared -> unmapped), BOUNDARY (two rules -> conflict, both named),
  * REGRESSION (the helper's own pass-through literal is not a second site; the site list is exactly the five).
  */
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { buildMiniCorpus, MINI_CLI, type MiniCorpus } from "../helpers/coverage-mini-corpus.js";
+import { runLoreInProcess } from "../helpers/run-lore-in-process.js";
+import { sessionEnvFor } from "../helpers/session-actor.js";
 
 vi.setConfig({ testTimeout: 300_000, hookTimeout: 300_000 });
+
+const MINI_CLI = "packages/lore/src/adapters/cli";
 
 const REFUSAL = `export const err = (e: { code: string; rule?: string }) => ({ ok: false as const, code: e.code });\n`;
 
@@ -64,21 +70,30 @@ interface SiteRow {
   readonly rules: string[];
 }
 
-let c: MiniCorpus;
+let dir = "";
 let sites: SiteRow[] = [];
 
+// reason: a bare TS root with no corpus on purpose: the census reads the tree alone, so each declared id reads as declared
+// (liveness unchecked) whatever the ids are; rule liveness is the corpus's one contribution and has its own assertions in AC-RIC-5.
 beforeAll(async () => {
-  c = await buildMiniCorpus();
-  c.writeSource(`${MINI_CLI}/lib/refusal.ts`, REFUSAL);
-  c.writeSource(`${MINI_CLI}/lib/helpers.ts`, HELPERS);
-  c.writeSource(`${MINI_CLI}/lib/port.ts`, PORT);
-  c.writeSource(`${MINI_CLI}/commands/probe.ts`, PROBE);
-  const r = await c.run(["baseline", "sites", "probe", "--json"]);
+  dir = realpathSync(mkdtempSync(join(tmpdir(), "ric1-")));
+  const home = join(dir, ".home");
+  mkdirSync(home, { recursive: true });
+  const write = (rel: string, content: string): void => {
+    mkdirSync(dirname(join(dir, rel)), { recursive: true });
+    writeFileSync(join(dir, rel), content);
+  };
+  write("package.json", JSON.stringify({ name: "ric1-root", private: true }));
+  write(`${MINI_CLI}/lib/refusal.ts`, REFUSAL);
+  write(`${MINI_CLI}/lib/helpers.ts`, HELPERS);
+  write(`${MINI_CLI}/lib/port.ts`, PORT);
+  write(`${MINI_CLI}/commands/probe.ts`, PROBE);
+  const r = await runLoreInProcess(["baseline", "sites", "probe", "--json"], { cwd: dir, home, env: { ...process.env, HOME: home, ...sessionEnvFor("ric1") } });
   expect(r.exitCode, r.stderr + r.stdout).toBe(0);
   sites = (JSON.parse(r.stdout) as { data: { sites: SiteRow[] } }).data.sites;
 });
 
-afterAll(() => c?.dispose());
+afterAll(() => rmSync(dir, { recursive: true, force: true }));
 
 const byCode = (code: string): SiteRow | undefined => sites.find((s) => s.code === code);
 

@@ -22,7 +22,7 @@
  * Side-effect class: IO through the injected FsWritePort (at most one selection-file write per change).
  */
 import { createHash } from "node:crypto";
-import { err, ok, type Fragment, type FragmentDelivery, type FsWritePort, type LoreError, type Result } from "@lore/core";
+import { err, ok, validationError, type Fragment, type FragmentDelivery, type FsWritePort, type LoreError, type Result } from "@lore/core";
 import { discoverFragments, type FragmentRoots } from "../service/context-fragments/discover.js";
 import {
   addToDisable,
@@ -80,10 +80,6 @@ const LAYERS = ["shipped", "user", "project"] as const;
 /** sha256 of file bytes; an absent file hashes to a sentinel no real content equals. */
 function hashFileBytes(content: string | null): string {
   return content === null ? "absent" : `sha256:${createHash("sha256").update(content, "utf8").digest("hex")}`;
-}
-
-function validationError(field: string, message: string): SelectionFlowError {
-  return { code: "VALIDATION_ERROR", field, message };
 }
 
 /** Discover each layer separately: ownership checks need un-merged fragments (discoverFragments merges by id). */

@@ -37,7 +37,6 @@ export const DEDICATED_EXTRA_KEYS: Partial<Record<DocType, readonly DedicatedExt
     { key: "rules", writer: "lore rule add|set" },
     { key: "depends_on", writer: "lore baseline depends" },
     { key: "glossary", writer: "lore baseline glossary" },
-    { key: "site_map", writer: "lore baseline map" },
     { key: "commands", writer: "lore baseline map --command" },
   ],
   spec: [{ key: "rule_changes", writer: "lore rule propose" }],

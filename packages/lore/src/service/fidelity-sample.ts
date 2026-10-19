@@ -28,7 +28,7 @@ import { randomBytes } from "node:crypto";
 import { z } from "zod";
 import { readFileSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
-import { describePrecheckRoots, err, extractTestFileTokens, ok, truncateSection } from "@lore/core";
+import { describePrecheckRoots, err, extractTestFileTokens, ok, truncateSection, validationError } from "@lore/core";
 import type { AIProvider, DocRecord, LoreError, Result } from "@lore/core";
 import type { StoreInterface } from "../store/store-interface.js";
 
@@ -95,10 +95,6 @@ export interface FidelityRecord {
 const judgeReplySchema = z.array(
   z.object({ n: z.number().int(), verdict: z.enum(["faithful", "not_faithful"]), reason: z.string() }).strict(),
 );
-
-function validationError(field: string, message: string): LoreError {
-  return { code: "VALIDATION_ERROR", field, message };
-}
 
 function aiError(provider: string, message: string): LoreError {
   return { code: "AI_PROVIDER_ERROR", provider, message };

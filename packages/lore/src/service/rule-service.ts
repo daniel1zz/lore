@@ -13,7 +13,7 @@
  *   addNode(parent, input, opts?)          → DocRecord        (new baseline node of either tree)
  *   setLabel(node, label, opts?)           → DocRecord
  *   setDependsOn(leaf, change, opts?)      → DocRecord
- *   setSiteMap(leaf, change, opts?)        → DocRecord   (`extra.site_map` + `extra.commands`, leaf only)
+ *   setCommands(leaf, change, opts?)       → DocRecord   (`extra.commands`, leaf only)
  *   glossaryAdd(node, entry, opts?)        → DocRecord
  *   glossaryRemove(node, term, opts?)      → DocRecord
  *   listBaselineTree(root?)                → BaselineTreeEntry[]   (read-only, depth-first)
@@ -41,7 +41,7 @@
  */
 
 import { isDeepStrictEqual } from "node:util";
-import { err, ok, type Result } from "@lore/core";
+import { err, ok, validationError, type Result } from "@lore/core";
 import type { LoreError, DocRecord, DocStatus } from "@lore/core";
 import {
   ANY_RULE_ID_PATTERN,
@@ -158,22 +158,11 @@ export interface BaselineTreeEntry {
 
 // ─── Errors (value constructors) ─────────────────────────────────────────────
 
-function validationError(field: string, message: string, value?: unknown): LoreError {
-  return value === undefined
-    ? { code: "VALIDATION_ERROR", field, message }
-    : { code: "VALIDATION_ERROR", field, message, value };
-}
-
 /** Result of one mutation attempt against a fresh read: the new extra, or a refusal. */
 type Mutation = Result<{ extra: Record<string, unknown>; summary: string; details: Record<string, unknown> }, LoreError>;
 
-/**
- * One `lore baseline map` edit of a leaf's completeness-census state.
- * `sites` SETS (replaces) each key's mapping; entries are unretired rule ids of THIS leaf.
- */
-export interface SiteMapChange {
-  sites?: Record<string, string[]>;
-  removeSites?: string[];
+/** One `lore baseline map` edit of the commands a leaf answers for (a site's rule is declared in code, BR-1344). */
+export interface CommandsChange {
   addCommands?: string[];
   removeCommands?: string[];
 }
@@ -575,23 +564,20 @@ export class RuleService {
   }
 
   /**
-   * Edit a leaf's `site_map` (census site key -> unretired rule ids of the leaf) and its
-   * `commands` list — the ONLY writer of both keys (`lore baseline map`).
+   * Edit a leaf's `commands` list — the ONLY writer of that key (`lore baseline map`).
    *
-   * @returns the updated leaf; VALIDATION_ERROR for an empty change, a non-leaf, a site with no rule (BR-655), a value
-   *   that is not an unretired rule of this leaf (BR-654), removing something absent, or dropping a command main still has.
+   * @returns the updated leaf; VALIDATION_ERROR for an empty change, a non-leaf, a blank command, removing a command that
+   *   is not declared, or dropping a command main still has.
    */
-  async setSiteMap(
+  async setCommands(
     leaf: string,
-    change: SiteMapChange,
+    change: CommandsChange,
     opts?: { by?: string },
   ): Promise<Result<DocRecord, LoreError>> {
-    const sites = change.sites ?? {};
-    const removeSites = change.removeSites ?? [];
     const addCommands = (change.addCommands ?? []).map((c) => c.trim());
     const removeCommands = (change.removeCommands ?? []).map((c) => c.trim());
-    if (Object.keys(sites).length + removeSites.length + addCommands.length + removeCommands.length === 0) {
-      return err(validationError("site_map", "nothing to change: pass at least one site mapping, removal or command"));
+    if (addCommands.length + removeCommands.length === 0) {
+      return err(validationError("commands", "nothing to change: pass at least one command to add or remove"));
     }
     if ([...addCommands, ...removeCommands].some((c) => c.length === 0)) {
       return err(validationError("commands", "a command name must not be blank"));
@@ -601,59 +587,29 @@ export class RuleService {
     const gate = await this.authorizeCorpusWrite([target.value], "baseline-map", opts?.by);
     if (!gate.ok) return gate;
     // reason: dropping a command declaration leaves the command undeclared for every other branch, so it waits until main's
-    // registry no longer has it (BR-1316/BR-1317). A site mapping is traceability and is removable at any time (ADR
-    // adr-a-structural-gate-refuses-only-what-an-excuse-cannot, decision 5).
+    // registry no longer has it (BR-1316/BR-1317).
     if (this.mainTree !== undefined) {
       const declared = commandsOf(target.value);
       const commandsGone = await refuseLiveCommandRemoval(this.mainTree, target.value, removeCommands.filter((c) => declared.includes(c)));
       if (!commandsGone.ok) return commandsGone;
     }
-    // A command add/remove changes what the census measures, so it re-opens approval; a site-only change does not.
-    const keepsApproval = addCommands.length + removeCommands.length === 0;
+    // A command add/remove changes what the census measures, so it re-opens approval (the default of retryWrite).
     return this.retryWrite(target.value.id, opts?.by, (doc) => {
-      const unretiredRuleIds = new Set(rulesOf(doc).filter((r) => r.lifecycle !== "retired").map((r) => r.id));
-      // All-or-nothing: judge EVERY row and report every refusal in one VALIDATION_ERROR, so a many-row call is
-      // fixed in one pass and nothing is written unless all rows hold.
-      const problems: { value: string; message: string }[] = [];
-      for (const [site, entries] of Object.entries(sites)) {
-        if (site.trim().length === 0 || entries.length === 0) {
-          problems.push({ value: site, message: `site '${site}' needs a non-empty key and at least one rule id of this leaf (BR-655)` });
-          continue;
-        }
-        for (const entry of entries) {
-          if (!unretiredRuleIds.has(entry)) {
-            problems.push({ value: entry, message: `'${entry}' for site '${site}' is not an unretired rule of this leaf (BR-654: a site maps to unretired BR-n ids of its own leaf only)` });
-          }
-        }
-      }
-      if (problems.length === 1) return err(validationError("site_map", problems[0]!.message, problems[0]!.value));
-      if (problems.length > 1) {
-        return err(validationError("site_map", `${problems.length} site rows refused, nothing written: ${problems.map((p) => p.message).join("; ")}`, problems.map((p) => p.value)));
-      }
-      const currentMap = siteMapOf(doc);
-      const absentSites = removeSites.filter((k) => !(k in currentMap));
-      if (absentSites.length > 0) {
-        return err(validationError("site_map", `cannot remove, not mapped: ${absentSites.join(", ")}`, absentSites));
-      }
       const currentCommands = commandsOf(doc);
       const absentCommands = removeCommands.filter((c) => !currentCommands.includes(c));
       if (absentCommands.length > 0) {
         return err(validationError("commands", `cannot remove, not present: ${absentCommands.join(", ")}`, absentCommands));
       }
-      const nextMap: Record<string, string[]> = { ...currentMap, ...sites };
-      for (const key of removeSites) delete nextMap[key];
       const nextCommands = [...new Set([...currentCommands.filter((c) => !removeCommands.includes(c)), ...addCommands])];
       const extra: Record<string, unknown> = { ...doc.extra };
-      if (Object.keys(nextMap).length > 0) extra["site_map"] = nextMap;
-      else delete extra["site_map"];
       if (nextCommands.length > 0) extra["commands"] = nextCommands;
       else delete extra["commands"];
       return ok({
         extra,
-        summary: `site_map set ${Object.keys(sites).length} removed ${removeSites.length}; commands +${addCommands.length} -${removeCommands.length}`,
-        details: { operation: "baseline-map", sites: Object.keys(sites), removeSites, addCommands, removeCommands },
+        summary: `commands +${addCommands.length} -${removeCommands.length}`,
+        details: { operation: "baseline-map", addCommands, removeCommands },
       });
-    }, keepsApproval);
+    });
   }
 
   /** Add a glossary entry to a root|branch node; a duplicate term is refused. */
@@ -969,11 +925,6 @@ function rulesOf(doc: DocRecord): BaselineRule[] {
 function dependsOnOf(doc: DocRecord): string[] {
   const raw = doc.extra["depends_on"];
   return Array.isArray(raw) ? (raw as string[]) : [];
-}
-
-function siteMapOf(doc: DocRecord): Record<string, string[]> {
-  const raw = doc.extra["site_map"];
-  return raw !== null && typeof raw === "object" && !Array.isArray(raw) ? (raw as Record<string, string[]>) : {};
 }
 
 function commandsOf(doc: DocRecord): string[] {

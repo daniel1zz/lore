@@ -18,7 +18,7 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { parseDocument } from "yaml";
-import { CITE_GATE_MODES, err, loadConfigFromString, ok } from "@lore/core";
+import { CITE_GATE_MODES, err, loadConfigFromString, ok, storeError } from "@lore/core";
 import type { CiteGateMode, LoreError, Result } from "@lore/core";
 
 /** The raw stored ac-cite settings: `mode` is `null` when the key is absent, `armed_branches` `[]` when absent. */
@@ -31,10 +31,6 @@ export interface AcCiteStored {
 export type AcCiteSeedOutcome = { status: "written" } | { status: "kept"; existing: CiteGateMode };
 
 const configPathOf = (repoDir: string): string => join(repoDir, ".lore", "config.yaml");
-
-function storeError(message: string, cause?: unknown): LoreError {
-  return { code: "STORE_ERROR", message, ...(cause instanceof Error ? { cause } : {}) };
-}
 
 function readDocument(repoDir: string): Result<ReturnType<typeof parseDocument>, LoreError> {
   const path = configPathOf(repoDir);

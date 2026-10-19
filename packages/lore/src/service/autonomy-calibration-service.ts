@@ -27,7 +27,7 @@
  * Source: spec-autonomy-phase-1-decision-function-human-channel-lore AC-AU-8, AC-AU-10;
  *   adr-autonomy-is-decided-by-measured-facts-one-decision-function D6, PRD I2 (sampling floor).
  */
-import { err, ok, wilsonLowerBound, type DocId, type LoreError, type OperationClassRegistry, type Result } from "@lore/core";
+import { err, ok, storeError, validationError, wilsonLowerBound, type DocId, type LoreError, type OperationClassRegistry, type Result } from "@lore/core";
 import { z } from "zod";
 import { decisionChainHead, type DecisionLogRow } from "../store/decision-log.js";
 import type { StoreInterface } from "../store/store-interface.js";
@@ -76,14 +76,6 @@ const outcomeFactsSchema = z.object({
     detail: z.string(),
   }),
 });
-
-function storeError(message: string): LoreError {
-  return { code: "STORE_ERROR", message };
-}
-
-function validationError(field: string, message: string): LoreError {
-  return { code: "VALIDATION_ERROR", field, message };
-}
 
 const round6 = (value: number): number => Math.round(value * 1e6) / 1e6;
 

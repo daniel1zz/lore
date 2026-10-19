@@ -30,7 +30,7 @@
  *   adr-autonomy-is-decided-by-measured-facts-one-decision-function D4.
  */
 import { realpathSync } from "node:fs";
-import { err, ok, type AutonomyFacts, type LoreError, type Result } from "@lore/core";
+import { err, ok, storeError, type AutonomyFacts, type LoreError, type Result } from "@lore/core";
 import type { RunId } from "@lore/core";
 import type { DecisionService } from "./decision-service.js";
 import type { DecisionDetail } from "../store/decision-log.js";
@@ -143,10 +143,6 @@ export function parseStashBranch(message: string): string | null {
   const branch = match?.[1];
   if (branch === undefined || branch === "(no branch)") return null;
   return branch;
-}
-
-function storeError(message: string): LoreError {
-  return { code: "STORE_ERROR", message };
 }
 
 export class StashPruneService {

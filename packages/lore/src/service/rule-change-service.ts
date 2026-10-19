@@ -42,7 +42,7 @@
  * Source: spec-a-spec-carries-its-rule-changes-the-baseline-takes-them (Model, Scope, Edge cases); BR-1069.
  */
 
-import { err, ok, type Result } from "@lore/core";
+import { err, ok, validationError, type Result } from "@lore/core";
 import type { DocRecord, DocStatus, LoreError, RuleChange } from "@lore/core";
 import {
   baselineExtraSchema,
@@ -99,12 +99,6 @@ export interface RuleChangeList {
   /** The spec's slug. */
   spec: string;
   changes: RuleChange[];
-}
-
-function validationError(field: string, message: string, value?: unknown): LoreError {
-  return value === undefined
-    ? { code: "VALIDATION_ERROR", field, message }
-    : { code: "VALIDATION_ERROR", field, message, value };
 }
 
 function staleExhausted(id: string): LoreError {

@@ -15,7 +15,7 @@
  * Source: spec-baseline-slice-2-completeness-census-per-branch-citation C4 "Exemptions" (AC-BLS2-10).
  */
 
-import { err, ok, specAcceptanceCriteriaSchema } from "@lore/core";
+import { err, ok, specAcceptanceCriteriaSchema, validationError } from "@lore/core";
 import type { DocRecord, LoreError, Result } from "@lore/core";
 import type { AcExemptionRow, StoreInterface } from "../store/store-interface.js";
 import { createHash } from "node:crypto";
@@ -61,10 +61,6 @@ export interface AcExemptionCounts {
   liveCriteria: number;
   /** `active / liveCriteria`, 0 when there are no live criteria. */
   ratio: number;
-}
-
-function validationError(field: string, message: string, value?: unknown): LoreError {
-  return { code: "VALIDATION_ERROR", field, message, value } as LoreError;
 }
 
 function viewOf(row: AcExemptionRow, nowIso: string, satisfied: ReadonlySet<string>): AcExemptionView {

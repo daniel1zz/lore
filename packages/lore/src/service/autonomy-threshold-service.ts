@@ -33,6 +33,7 @@ import {
   ok,
   registryOf,
   seedGovernedThresholds,
+  storeError,
   type GovernedThresholds,
   type LoreError,
   type OperationClassRegistry,
@@ -173,10 +174,6 @@ export type ProposeOutcome =
   | { readonly kind: "refused"; readonly integrity: Extract<ThresholdIntegrity, { state: "broken" }> };
 
 const writeFactsSchema = z.object({ content_hash: z.string().regex(/^[0-9a-f]{64}$/) }).passthrough();
-
-function storeError(message: string): LoreError {
-  return { code: "STORE_ERROR", message };
-}
 
 function integrityKey(version: string) {
   return { class: THRESHOLD_INTEGRITY_CLASS, subject_id: THRESHOLD_SUBJECT_ID, subject_version: version };

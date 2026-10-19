@@ -2,14 +2,14 @@
  * Module: leaf-coverage — decide whether a baseline leaf accounts for every census site.
  *
  * Purpose: the pure verdict half of the completeness census (spec baseline-slice-2 C2): given the
- *   sites a leaf's commands reach, the leaf's `site_map`, and the live rule ids, report what is
- *   still unaccounted for.
- * Public surface: {@link computeLeafCoverage}, {@link findCorruptSiteMapValues}, {@link collectOwnedSites}, {@link partitionDeclaredCommands},
+ *   sites a leaf's commands reach (each carrying the rules the TREE declares there, BR-1344) and the leaf's rule ids,
+ *   report what is mapped, unmapped, in conflict or declared against a dead rule.
+ * Public surface: {@link computeLeafCoverage}, {@link sitesDeclaringRulesOf}, {@link partitionDeclaredCommands},
  *   {@link absentCommandFixCommand}, {@link leavesUnder}, {@link absentDeclarationsOf}, {@link absentDeclarationRefusal},
  *   {@link AbsentDeclaration}, {@link LeafCoverage}.
  * Invariants:
- *   - A site counts as mapped only by an unretired `BR-n` id of the leaf (BR-1248). Free text
- *     excuses nothing; a stored value that is not a BR-n id is CORRUPT data ({@link findCorruptSiteMapValues}), never "unmapped".
+ *   - A site is mapped for a leaf only when the code declares exactly one rule there and that rule is a LIVE rule of the leaf
+ *     (BR-1344). The corpus holds no site mapping; it contributes liveness and commands only.
  *   - `gaps` (keyed) and `notMeasured` (dynamic) are REPORT output: they never decide an exit code. Only a runnable command
  *     no leaf declares ({@link computeUndeclaredCommands}) refuses (BR-1248, BR-660).
  *   - Bootstrap sites (site-census `bootstrap`, app wiring / config loading) are never reported as unmapped; the verdict
@@ -21,65 +21,66 @@
  */
 
 import type { Site, UnresolvedImport } from "./site-census.js";
+import { classifySiteDeclaration, type RuleStatus, type RuleStatusOf } from "./site-declarations.js";
 
-/** Verdict of {@link computeLeafCoverage}; both lists hold site keys. */
+/** One reached site that declares one of the leaf's own live rules. */
+export interface MappedSite {
+  readonly key: string;
+  readonly file: string;
+  readonly line: number;
+  readonly rule: string;
+}
+
+/** One reached site whose code declares two or more rules (a site carries at most one). */
+export interface ConflictedSite {
+  readonly key: string;
+  readonly file: string;
+  readonly line: number;
+  readonly rules: readonly string[];
+}
+
+/** One reached site whose declared rule is retired, deprecated or unknown to the corpus. */
+export interface InvalidDeclaration {
+  readonly key: string;
+  readonly file: string;
+  readonly line: number;
+  readonly rule: string;
+  readonly status: Exclude<RuleStatus, "live">;
+}
+
+/** Verdict of {@link computeLeafCoverage}; `gaps` and `notMeasured` hold site keys. */
 export interface LeafCoverage {
-  /** Keyed sites with no live-rule mapping (reported, never refused). */
+  /** The leaf's own live rules, each declared at a reached site: file:line and rule. */
+  readonly mapped: MappedSite[];
+  /** Keyed sites that declare no rule (reported, never refused). */
   readonly gaps: string[];
-  /** Dynamic sites the census could not measure and no live rule maps (reported, never refused). */
+  /** Dynamic sites the census could not measure and that declare no rule (reported, never refused). */
   readonly notMeasured: string[];
+  /** Sites declaring more than one rule. */
+  readonly conflicts: ConflictedSite[];
+  /** Sites declaring a retired, deprecated or unknown rule id. */
+  readonly invalid: InvalidDeclaration[];
   /** `<specifier> (from <file>)` for each import the census could not resolve: sites behind it are missing. */
   readonly unresolvedImports?: string[];
   readonly ok: boolean;
 }
 
-/** The command that accounts for one unaccounted (site, leaf) pair: map the site to a live rule. */
-export function siteFixCommand(leafSlug: string, siteKey: string): string {
-  return `lore baseline map ${leafSlug} --site ${siteKey} --rule <BR-n>`;
-}
-
-/** Split a site key (`file#symbol#code` | `file#symbol#dynamic:<label>`) back into a {@link Site}. */
-function siteFromKey(key: string): Site {
-  const first = key.indexOf("#");
-  const second = key.indexOf("#", first + 1);
-  const file = first < 0 ? key : key.slice(0, first);
-  const symbol = first < 0 || second < 0 ? "" : key.slice(first + 1, second);
-  const tail = second < 0 ? "" : key.slice(second + 1);
-  return tail.startsWith("dynamic:") ? { key, file, symbol, dynamic: true } : { key, file, symbol, code: tail, dynamic: false };
+/** The fix line for one site that declares no rule: where to write the declaration. */
+export function siteFixHint(site: { key: string; file: string; line: number; dynamic: boolean }): string {
+  return site.dynamic
+    ? `tag the callee or the statement at ${site.file}:${site.line} with \`@lore-site BR-<n>\``
+    : `declare the rule at ${site.file}:${site.line}: \`rule: "BR-<n>"\` on the refusal, or the rule argument of its helper`;
 }
 
 /**
- * The sites a command-less (cross-cutting) leaf owns: its own `site_map` keys. There is no census to run for such a leaf;
- * these are the sites its rules guard (BL-D1). A hand-off from another leaf no longer exists: free-text entries excuse nothing.
+ * The sites (from the union census of every live command) that declare one of `ruleIds`: what a command-less (cross-cutting)
+ * leaf owns. There is no census to run for such a leaf; the code names the sites its rules guard (BL-D1, BR-1344).
  *
- * @param ownSiteMap - the leaf's own `site_map`.
- * @returns the owned sites, sorted by key.
+ * @param sites - every non-bootstrap site of every censused command, de-duplicated by key.
+ * @param ruleIds - the leaf's rule ids (any lifecycle: a retired rule's site still belongs to the leaf that held it).
  */
-export function collectOwnedSites(input: { ownSiteMap: Readonly<Record<string, readonly string[]>> }): Site[] {
-  return Object.keys(input.ownSiteMap).sort().map(siteFromKey);
-}
-
-/** One stored `site_map` value that is not a `BR-n` id: the corpus holds an entry the grammar no longer admits. */
-export interface CorruptSiteMapValue {
-  readonly leaf: string;
-  readonly site: string;
-  readonly value: string;
-}
-
-const RULE_ID_PATTERN = /^BR-\d+$/;
-
-/**
- * Every stored site_map value of a leaf that is not a `BR-n` id (BR-1248: a site map takes rule ids only). Such a value is
- * corrupt data, so coverage exits 2 naming it rather than reading it as "unmapped" or as an excuse.
- *
- * @param leafSlug - the leaf the map belongs to (named in the refusal).
- * @param siteMap - the leaf's stored `site_map`.
- * @returns the offending (leaf, site, value) triples, in site then value order.
- */
-export function findCorruptSiteMapValues(leafSlug: string, siteMap: Readonly<Record<string, readonly string[]>>): CorruptSiteMapValue[] {
-  return Object.keys(siteMap)
-    .sort()
-    .flatMap((site) => (siteMap[site] ?? []).filter((value) => !RULE_ID_PATTERN.test(value)).map((value) => ({ leaf: leafSlug, site, value })));
+export function sitesDeclaringRulesOf(sites: readonly Site[], ruleIds: ReadonlySet<string>): Site[] {
+  return sites.filter((site) => site.rules.some((rule) => ruleIds.has(rule)));
 }
 
 /** The command that declares a runnable command on a leaf (`<leaf>` is the leaf that owns the command's behaviour). */
@@ -190,42 +191,50 @@ export function computeUndeclaredCommands(
   return runnable.filter((c) => !declaredEntries.has(`${c.entry.file}#${c.entry.symbol}`)).map((c) => c.name);
 }
 
-function isMappedToLiveRule(entries: readonly string[] | undefined, live: ReadonlySet<string>): boolean {
-  return entries !== undefined && entries.some((entry) => live.has(entry));
-}
-
 /**
- * Compare census sites against a leaf's site map.
+ * Judge the declarations the tree makes at a leaf's reached sites.
  *
- * @param input.sites - Sites from `listSites`.
+ * @param input.sites - Sites from `listSites` (each carries `rules`, read from the tree being judged).
  * @param input.bootstrap - Bootstrap sites from the census (`listSites(...).bootstrap`); default none.
- * @param input.siteMap - siteKey -> rule ids (`BR-n`); any other value is ignored here (see {@link findCorruptSiteMapValues}).
  * @param input.liveRuleIds - ids of the leaf's live rules.
+ * @param input.statusOf - corpus liveness of any rule id; absent = every single declaration is read as live.
  * @example
- * computeLeafCoverage({ sites, siteMap: { "a.ts#f#X": ["BR-1"] }, liveRuleIds: ["BR-1"] });
+ * computeLeafCoverage({ sites, liveRuleIds: ["BR-1"], statusOf });
  */
 export function computeLeafCoverage(input: {
   sites: readonly Site[];
   bootstrap?: readonly Site[];
   unresolvedImports?: readonly UnresolvedImport[];
-  siteMap: Readonly<Record<string, readonly string[]>>;
   liveRuleIds: readonly string[];
+  statusOf?: RuleStatusOf;
 }): LeafCoverage {
   const live = new Set(input.liveRuleIds);
+  const mapped: MappedSite[] = [];
   const gaps: string[] = [];
   const notMeasured: string[] = [];
+  const conflicts: ConflictedSite[] = [];
+  const invalid: InvalidDeclaration[] = [];
   const bootstrap = new Set((input.bootstrap ?? []).map((s) => s.key));
   for (const site of input.sites) {
     if (bootstrap.has(site.key)) continue;
-    if (isMappedToLiveRule(input.siteMap[site.key], live)) continue;
-    (site.dynamic ? notMeasured : gaps).push(site.key);
+    const at = { key: site.key, file: site.file, line: site.line };
+    const declaration = classifySiteDeclaration(site.rules, input.statusOf);
+    if (declaration.state === "unmapped") (site.dynamic ? notMeasured : gaps).push(site.key);
+    else if (declaration.state === "conflict") conflicts.push({ ...at, rules: declaration.rules });
+    else if (declaration.state === "declared") {
+      // reason: a site declaring ANOTHER leaf's live rule is accounted for by that leaf; it is neither this leaf's mapping nor a gap.
+      if (live.has(declaration.rule)) mapped.push({ ...at, rule: declaration.rule });
+    } else invalid.push({ ...at, rule: declaration.rule, status: declaration.state });
   }
   const unresolvedImports = (input.unresolvedImports ?? []).map((u) => `${u.specifier} (from ${u.from})`);
   // reason: the key appears only when non-empty, so a complete verdict keeps its pre-#94 shape byte-for-byte.
   return {
+    mapped,
     gaps,
     notMeasured,
+    conflicts,
+    invalid,
     ...(unresolvedImports.length > 0 ? { unresolvedImports } : {}),
-    ok: gaps.length === 0 && notMeasured.length === 0 && unresolvedImports.length === 0,
+    ok: gaps.length === 0 && notMeasured.length === 0 && conflicts.length === 0 && invalid.length === 0 && unresolvedImports.length === 0,
   };
 }
