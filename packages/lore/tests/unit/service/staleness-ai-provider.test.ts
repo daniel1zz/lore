@@ -56,7 +56,7 @@ function makeStalenessService(opts: { provider: InMemoryAIProvider }) {
     true,
     8000,
     { max_plan_chars: 8000, max_spec_chars: 12000, max_task_chars: 4000, max_diff_chars: 24000 },
-    { max_doc_chars: 12000, max_context_chars: 8000 },
+    { max_context_chars: 8000 },
     { max_doc_chars: 12000, neighbor_limit: 3 },
   );
   return { service };
