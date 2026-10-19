@@ -199,6 +199,9 @@ export const HOOK_REGISTRATIONS: readonly HookRegistration[] = [
 
   // pre-helper-foreign-working-copy-gate.mjs — refuses a Write/Edit/MultiEdit/NotebookEdit by a worktree-isolated helper whose target is inside a git working copy that is not its own (the shared checkout, another worktree, another repo): harm that lands at once on someone else and cannot be undone by the actor (BR-1092). Never applies to the main session; writes outside every working copy are left to the turn-end helper-scope review.
   { file: "pre-helper-foreign-working-copy-gate.mjs", runner: "node", event: "PreToolUse", matcher: "Write|Edit|MultiEdit|NotebookEdit" },
+
+  // pre-edit-anchor-gate.mjs — a helper's Write/Edit/MultiEdit/NotebookEdit outside the anchors of its claimed task is declared through `lore anchor declare` (the task-claim gate's overlap predicate; free path -> added to the task's anchors) or denied before it happens (path held by another live claim, no claim, anything undecidable). Git-ignored paths pass. Never applies to the main session; Bash writes stay with the turn-end helper-scope review.
+  { file: "pre-edit-anchor-gate.mjs", runner: "node", event: "PreToolUse", matcher: "Write|Edit|MultiEdit|NotebookEdit" },
 ] as const;
 
 /** Strips exactly one trailing `/` (never more — a caller-malformed `claudeDir` with repeated trailing slashes is out of scope). */
