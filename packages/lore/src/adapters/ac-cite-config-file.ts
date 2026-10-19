@@ -50,10 +50,10 @@ function storedOf(doc: ReturnType<typeof parseDocument>, path: string): Result<A
   const armed: unknown = doc.getIn(["workflow", "gates", "ac-cite", "armed_branches"], true) ?? null;
   const armedPlain = armed !== null && typeof armed === "object" && "toJSON" in armed ? (armed as { toJSON(): unknown }).toJSON() : armed;
   if (mode !== undefined && mode !== null && !(CITE_GATE_MODES as readonly unknown[]).includes(mode)) {
-    return err({ code: "VALIDATION_ERROR", field: "workflow.gates.ac-cite.mode", message: `${path}: workflow.gates."ac-cite".mode must be one of ${CITE_GATE_MODES.join(" | ")}`, value: mode });
+    return err({ code: "VALIDATION_ERROR", field: "workflow.gates.ac-cite.mode", message: `${path}: workflow.gates."ac-cite".mode must be one of ${CITE_GATE_MODES.join(" | ")}`, value: mode, rule: "BR-987" });
   }
   if (armedPlain !== null && !(Array.isArray(armedPlain) && armedPlain.every((s) => typeof s === "string"))) {
-    return err({ code: "VALIDATION_ERROR", field: "workflow.gates.ac-cite.armed_branches", message: `${path}: workflow.gates."ac-cite".armed_branches must be a list of branch slugs`, value: armedPlain });
+    return err({ code: "VALIDATION_ERROR", field: "workflow.gates.ac-cite.armed_branches", message: `${path}: workflow.gates."ac-cite".armed_branches must be a list of branch slugs`, value: armedPlain, rule: "BR-987" });
   }
   return ok({ mode: (mode ?? null) as CiteGateMode | null, armed_branches: (armedPlain ?? []) as string[] });
 }

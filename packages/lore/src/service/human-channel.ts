@@ -68,24 +68,34 @@ export interface AncestrySnapshotEntry {
 
 /** The controlling terminal (/dev/tty in production). */
 export interface HumanTerminal {
+  /** @lore-site BR-1250 */
   write(text: string): void;
   /** Blocks until the human submits a line; returns it without the line terminator. */
+  /** @lore-site BR-1250 */
   readLine(): string;
   close(): void;
 }
 
 /** Everything the channel needs from the outside world; production wiring is adapters/real-human-channel-port.ts. */
 export interface HumanChannelPorts {
+  /** @lore-site BR-1249 */
   stdinIsTty(): boolean;
+  /** @lore-site BR-1249 */
   stdoutIsTty(): boolean;
+  /** @lore-site BR-1249 */
   env(): Readonly<Record<string, string | undefined>>;
   /** argv after the program name, as the OS delivered it (before any harness-run flag stripping). */
+  /** @lore-site BR-1249 */
   argv(): readonly string[];
+  /** @lore-site BR-1249 */
   selfPid(): number;
+  /** @lore-site BR-1249 */
   readProcessTable(): HumanChannelOutcome<readonly ProcessEntry[], string>;
   /** Fresh per call. */
+  /** @lore-site BR-1250 */
   newNonce(): string;
   /** null when the process has no controlling terminal. */
+  /** @lore-site BR-1249 */
   openTerminal(): HumanTerminal | null;
 }
 
@@ -176,6 +186,7 @@ export interface HumanChannelPreconditions {
 }
 
 function refusal(rule: HumanChannelRule, detail: string): HumanChannelOutcome<never, HumanChannelRefusal> {
+  /** @lore-site BR-1249 */
   return err({ rule, message: `${rule}: ${detail}` });
 }
 

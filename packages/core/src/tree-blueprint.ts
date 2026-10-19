@@ -77,6 +77,7 @@ export function parseTreeBlueprint(raw: string): Result<TreeBlueprint, LoreError
       code: "VALIDATION_ERROR",
       field: "lore.tree.yaml",
       message: `YAML parse failed: ${(e as Error).message}`,
+      rule: "BR-273",
     });
   }
   const parsed = treeBlueprintSchema.safeParse(doc);
@@ -85,6 +86,7 @@ export function parseTreeBlueprint(raw: string): Result<TreeBlueprint, LoreError
       code: "VALIDATION_ERROR",
       field: "lore.tree.yaml",
       message: parsed.error.issues[0]?.message ?? "invalid blueprint",
+      rule: "BR-273",
     });
   }
   return ok(parsed.data);

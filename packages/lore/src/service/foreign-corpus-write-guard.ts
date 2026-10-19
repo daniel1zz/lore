@@ -282,6 +282,7 @@ export function foreignCorpusWriteRefusalError(verdict: ForeignCorpusWriteRefusa
     code: "VALIDATION_ERROR",
     field: FOREIGN_CORPUS_WRITE_TOKEN,
     message: verdict.reason,
+    rule: "BR-802",
   };
 }
 
@@ -359,6 +360,7 @@ export function guardTaskLifecycleWrites(
     // module header's "claim REFRESH" design decision for why this does NOT
     // also inspect an EXISTING lease's carried-forward worktree.
     const verdict = checkForeignCorpusWrite(context, opts.worktree !== undefined);
+    /** @lore-site BR-802 */
     if (!verdict.allowed) return err(foreignCorpusWriteRefusalError(verdict));
     return originalClaim(idOrSlug, opts, now);
   };
@@ -586,6 +588,7 @@ export class CorpusWriteAuthority {
       corpusWriteTargetKindOf(targets),
       targets.map((t) => t.slug),
     );
+    /** @lore-site BR-802 */
     if (!verdict.allowed) return err(foreignCorpusWriteRefusalError(verdict));
     return ok(grant.value);
   }

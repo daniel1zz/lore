@@ -226,6 +226,7 @@ export interface ReversalFinding {
 /** Looks for evidence that an auto decision was reversed. `null` = none found. */
 export interface ReversalProbe {
   readonly name: string;
+  /** @lore-site BR-1271 */
   check(row: DecisionLogRow): Promise<Result<ReversalFinding | null, LoreError>>;
 }
 
@@ -373,13 +374,13 @@ export class AutonomyCalibrationService {
    */
   async recordAudit(decisionId: number, answer: "right" | "wrong", reason: string | undefined, proof: HumanChannelProof): Promise<Result<DecisionLogRow, LoreError>> {
     if (!isIssuedHumanChannelProof(proof)) {
-      return err(validationError("proof", "an audit answer needs a proof minted by the human channel (TTY, agent-ancestry and nonce checks)"));
+      return err(validationError("proof", "an audit answer needs a proof minted by the human channel (TTY, agent-ancestry and nonce checks)", undefined, "BR-1249"));
     }
     const rows = await this.rows();
     if (!rows.ok) return rows;
     const queue = deriveAuditQueue(rows.value);
     if (!queue.ok) return queue;
-    if (!queue.value.some((item) => item.id === decisionId)) return err(validationError("id", `decision ${decisionId} is not awaiting audit`));
+    if (!queue.value.some((item) => item.id === decisionId)) return err(validationError("id", `decision ${decisionId} is not awaiting audit`, undefined, "BR-1252"));
     const decision = rows.value.find((r) => r.id === decisionId);
     if (decision === undefined) return err(storeError(`audit item ${decisionId} vanished from the log`));
     const head = decisionChainHead(rows.value);

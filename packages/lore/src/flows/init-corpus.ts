@@ -115,6 +115,7 @@ export async function initCorpusAt(
       code: "STORE_ERROR",
       message: `initCorpusAt: failed to create "${loreDir}" or its .gitignore: ${describeCaught(cause)}`,
       ...(cause instanceof Error ? { cause } : {}),
+      rule: "BR-830",
     });
   }
 
@@ -149,6 +150,7 @@ export async function initCorpusAt(
       code: "STORE_ERROR",
       message: `initCorpusAt: failed to initialize the SQLite DB at "${join(loreDir, "lore.db")}": ${describeCaught(cause)}`,
       ...(cause instanceof Error ? { cause } : {}),
+      rule: "BR-830",
     });
   }
 

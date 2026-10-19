@@ -166,6 +166,7 @@ export class PlanExemptionService {
           `attestation_exempt_kind must be one of: ` +
           `${attestationExemptKindSchema.options.join(", ")} (got '${String(opts.kind)}')`,
         value: opts.kind,
+        rule: "BR-1198",
       });
     }
 
@@ -252,6 +253,7 @@ export class PlanExemptionService {
         field: INTEGRATION_BRANCH_FIELD,
         message: `integration branch must be a plain branch name like 'gs-integration' (got '${String(opts.branch)}')`,
         value: opts.branch,
+        rule: "BR-1313",
       });
     }
     const at = new Date().toISOString();
@@ -298,6 +300,7 @@ export class PlanExemptionService {
         field: "type",
         message: `Expected a plan document; got type '${plan.type}'`,
         value: plan.type,
+        rule: "BR-1198",
       });
     }
 
@@ -336,6 +339,7 @@ function validateReason(raw: unknown): Result<string, LoreError> {
       field: "reason",
       message: "reason is required and must not be blank",
       value: raw,
+      rule: "BR-1198",
     });
   }
   return ok(raw);

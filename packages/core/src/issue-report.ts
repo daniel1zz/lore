@@ -405,6 +405,7 @@ export function buildUnconfiguredUpstreamRemedy(): LoreError {
     field: "feedback.upstream",
     message:
       '`feedback.upstream` is not configured — declare one of its two consent-bearing shapes in the git-tracked, team-shared .lore/config.yaml. Set feedback.upstream.vendor: true to file and read issue reports through the lore project\'s own GitHub intake (its address ships inside this binary — you never type it), OR set feedback.upstream.repo (e.g. "owner/repo") to use a GitHub intake you host yourself. Neither is a default: filing sends this project\'s title, description, repro command and actor identity to whichever GitHub repository is named.',
+    rule: "BR-489",
   };
 }
 

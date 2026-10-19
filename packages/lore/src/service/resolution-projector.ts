@@ -220,6 +220,7 @@ export class ResolutionProjector {
   async project(resolution: IssueResolution, ref: GithubIssueRef): Promise<Result<void, LoreError>> {
     const label = resolutionToLabel(resolution);
     const setResult = await this.port.setLabel(ref, label);
+    /** @lore-site BR-533 */
     if (!setResult.ok) return err(setResult.error);
     return ok(undefined);
   }

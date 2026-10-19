@@ -194,7 +194,7 @@ function classifyGhFailure(cause: unknown): LoreError {
   const failure = toGhChildProcessFailure(cause);
 
   if (failure.code === "ENOENT") {
-    return { code: "AUTH_REQUIRED", message: GH_INSTALL_REMEDY, retryable: false };
+    return { code: "AUTH_REQUIRED", message: GH_INSTALL_REMEDY, retryable: false, rule: "BR-504" };
   }
 
   if (failure.stderr.includes(GH_AUTH_LOGIN_LITERAL)) {
@@ -202,6 +202,7 @@ function classifyGhFailure(cause: unknown): LoreError {
       code: "AUTH_REQUIRED",
       message: `gh is installed but not authenticated. Run \`${GH_AUTH_LOGIN_LITERAL}\` and re-run.`,
       retryable: false,
+      rule: "BR-504",
     };
   }
 
@@ -210,6 +211,7 @@ function classifyGhFailure(cause: unknown): LoreError {
       code: "TRANSPORT_UNAVAILABLE",
       message: `gh could not reach GitHub: ${boundedTail(failure.stderr)}`,
       retryable: true,
+      rule: "BR-504",
     };
   }
 
@@ -220,6 +222,7 @@ function classifyGhFailure(cause: unknown): LoreError {
       message: `gh reported a rate limit: ${boundedTail(failure.stderr)}`,
       reset: Number(rateLimitMatch[1]),
       retryable: true,
+      rule: "BR-504",
     };
   }
 
@@ -228,6 +231,7 @@ function classifyGhFailure(cause: unknown): LoreError {
     field: "gh",
     message: `gh exited with code ${String(failure.code ?? "unknown")}: ${boundedTail(failure.stderr)}`,
     value: failure.code,
+    rule: "BR-504",
   };
 }
 
@@ -293,6 +297,7 @@ export class GhRunner {
       const { stdout } = await this.execFile(args, { env: scrubbedEnv, maxBuffer: MAX_BUFFER_BYTES });
       return ok({ stdout });
     } catch (cause) {
+      /** @lore-site BR-503 */
       return err(classifyGhFailure(cause));
     }
   }

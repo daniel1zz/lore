@@ -589,6 +589,7 @@ export function createFalsifierScratchWorktree(
     return err({
       code: "STORE_ERROR",
       message: `attested-red runner could not create a scratch temp directory: ${error instanceof Error ? error.message : String(error)}`,
+      rule: "BR-249",
     });
   }
   // AC-AU-11: the owner marker lets `lore worktree sweep --apply` prove this scratch's run ended (pid dead) if the
@@ -603,6 +604,7 @@ export function createFalsifierScratchWorktree(
     return err({
       code: "STORE_ERROR",
       message: `attested-red runner could not write the scratch owner marker in "${parentDir}": ${owner.reason}`,
+      rule: "BR-249",
     });
   }
   // reason: `git worktree add <path>` REQUIRES `<path>` to not already exist
@@ -640,6 +642,7 @@ export function createFalsifierScratchWorktree(
       return err({
         code: "STORE_ERROR",
         message: `attested-red runner could not snapshot "${repoRoot}"'s uncommitted state via "git stash create": ${error instanceof Error ? error.message : String(error)}`,
+        rule: "BR-249",
       });
     }
   }
@@ -662,6 +665,7 @@ export function createFalsifierScratchWorktree(
     return err({
       code: "STORE_ERROR",
       message: `attested-red runner could not create a scratch git worktree from "${repoRoot}": ${error instanceof Error ? error.message : String(error)}`,
+      rule: "BR-249",
     });
   }
   return ok({ worktreeDir, parentDir });
@@ -748,6 +752,7 @@ export function applyFalsifierMutation(
       field: "falsifier.path",
       message: `declared falsifier path "${falsifier.path}" does not exist inside the scratch worktree: ${error instanceof Error ? error.message : String(error)}`,
       value: falsifier.path,
+      rule: "BR-190",
     });
   }
   if (!content.includes(falsifier.find)) {
@@ -756,6 +761,7 @@ export function applyFalsifierMutation(
       field: "falsifier.find",
       message: `declared falsifier 'find' text was not found in "${falsifier.path}" — the declaration is stale (the file no longer contains it). Refused rather than silently applying nothing.`,
       value: falsifier.find,
+      rule: "BR-190",
     });
   }
   const mutated = content.replace(falsifier.find, falsifier.replace);
@@ -765,6 +771,7 @@ export function applyFalsifierMutation(
     return err({
       code: "STORE_ERROR",
       message: `attested-red runner could not write the mutated file "${falsifier.path}": ${error instanceof Error ? error.message : String(error)}`,
+      rule: "BR-249",
     });
   }
   return ok(undefined);
@@ -963,6 +970,7 @@ export class VerifyRunnerService {
           `full scope. Declare it with '${SCOPE_WRITER_HINT} ${task.slug} <AC-ID>' ` +
           "(repeatable), or name the criteria for this run explicitly with --ac <AC-ID>.",
         value: task.slug,
+        rule: "BR-164",
       });
     }
 
@@ -976,6 +984,7 @@ export class VerifyRunnerService {
           `nothing for lore verify to attest. Re-declare with '${SCOPE_WRITER_HINT} ` +
           `${task.slug} <AC-ID>' before verifying.`,
         value: task.slug,
+        rule: "BR-165",
       });
     }
 
@@ -992,6 +1001,7 @@ export class VerifyRunnerService {
             `declaration with '${SCOPE_WRITER_HINT} ${task.slug} ${offending.join(" ")}', or ` +
             "retarget the run with --task.",
           value: offending,
+          rule: "BR-167",
         });
       }
       return ok(selectNamed(acIds));
@@ -1008,6 +1018,7 @@ export class VerifyRunnerService {
           "criteria would attest nothing while exiting 0, so it is refused: fix the scope " +
           `('${SCOPE_WRITER_HINT}' / 'lore scope rm') or the spec's acceptance_criteria.`,
         value: declared,
+        rule: "BR-166",
       });
     }
     return ok(inScope);
@@ -1164,6 +1175,7 @@ export class VerifyRunnerService {
               "automatically, or run interactively (TTY, no --json) to confirm.",
             command: criterion.verify.command,
             ac_id: criterion.id,
+            rule: "BR-171",
           });
         }
       }
@@ -1224,6 +1236,7 @@ export class VerifyRunnerService {
             `lore verify aborted at AC "${criterion.id}" — command failed to launch (${detail}). ` +
             `${completedAcIds.length} AC(s) already recorded before the abort: ` +
             `${completedAcIds.length > 0 ? completedAcIds.join(", ") : "none"}.`,
+          rule: "BR-175",
         });
       }
 
@@ -1521,6 +1534,7 @@ export class VerifyRunnerService {
           `Expected a task document for the ad-hoc verify path; got type '${task.type}'. ` +
           "The no-PLAN-positional invocation targets a SPEC-069 --adhoc TASK only.",
         value: task.type,
+        rule: "BR-183",
       });
     }
     if (task.extra["adhoc"] !== true) {
@@ -1532,6 +1546,7 @@ export class VerifyRunnerService {
           "lore verify path is reachable ONLY for a SPEC-069 --adhoc task. Pass the PLAN " +
           "positional (this task's plan_id) to verify a plan-owned task.",
         value: task.slug,
+        rule: "BR-183",
       });
     }
 
@@ -1545,6 +1560,7 @@ export class VerifyRunnerService {
           "a governing spec for it (no plan/spec link exists for an --adhoc task, SPEC-069 " +
           `D2) — declare one with '${SCOPE_WRITER_HINT} ${task.slug} <AC-ID>' first.`,
         value: task.slug,
+        rule: "BR-164",
       });
     }
     if (declared.length === 0) {
@@ -1556,6 +1572,7 @@ export class VerifyRunnerService {
           "so there is no declared AC id to resolve a governing spec from. Re-declare with " +
           `'${SCOPE_WRITER_HINT} ${task.slug} <AC-ID>' before verifying.`,
         value: task.slug,
+        rule: "BR-165",
       });
     }
 
@@ -1582,6 +1599,7 @@ export class VerifyRunnerService {
           field: "acIds",
           message: `unknown AC id(s) not declared on spec "${spec.slug}": ${unknown.join(", ")}`,
           value: unknown,
+          rule: "BR-167",
         });
       }
     }
@@ -1632,6 +1650,7 @@ export class VerifyRunnerService {
         field: "spec",
         message: `plan "${plan.slug}" has no parent spec — nothing to verify`,
         value: plan.id,
+        rule: "BR-168",
       });
     }
 
@@ -1644,6 +1663,7 @@ export class VerifyRunnerService {
         field: "acceptance_criteria",
         message: `spec "${spec.slug}" has no structured acceptance_criteria declared — nothing to verify`,
         value: spec.id,
+        rule: "BR-168",
       });
     }
 
@@ -1660,6 +1680,7 @@ export class VerifyRunnerService {
           field: "acIds",
           message: `unknown AC id(s) not declared on spec "${spec.slug}": ${unknown.join(", ")}`,
           value: unknown,
+          rule: "BR-167",
         });
       }
     }
@@ -1762,6 +1783,7 @@ export class VerifyRunnerService {
         field: "spec",
         message: `plan "${plan.slug}" has no parent spec — nothing to falsify`,
         value: plan.id,
+        rule: "BR-185",
       });
     }
 
@@ -1774,6 +1796,7 @@ export class VerifyRunnerService {
         field: "acceptance_criteria",
         message: `spec "${spec.slug}" has no structured acceptance_criteria declared — nothing to falsify`,
         value: spec.id,
+        rule: "BR-185",
       });
     }
 
@@ -1784,6 +1807,7 @@ export class VerifyRunnerService {
         field: "acId",
         message: `unknown AC id "${acId}" — not declared on spec "${spec.slug}"`,
         value: acId,
+        rule: "BR-185",
       });
     }
     if (criterion.verify.mode !== "script") {
@@ -1794,6 +1818,7 @@ export class VerifyRunnerService {
           `AC "${acId}" is not script-mode (verify.mode is "${criterion.verify.mode}") — ` +
           "an attested-red run requires a script command to mutate-and-run",
         value: criterion.verify.mode,
+        rule: "BR-185",
       });
     }
     const falsifier = criterion.verify.falsifier;
@@ -1806,6 +1831,7 @@ export class VerifyRunnerService {
           "<spec> <id> --falsifier-path <path> --falsifier-find <text> --falsifier-replace " +
           "<text> --falsifier-exit-code <n>') before running the attested-red path",
         value: acId,
+        rule: "BR-248",
       });
     }
 
@@ -1822,6 +1848,7 @@ export class VerifyRunnerService {
           `recorded. Correct it with: lore ac set ${spec.slug} ${acId} --correction "<reason>" ` +
           `--falsifier-exit-code <n> (repeat the other --falsifier-* flags)`,
         value: falsifier.expected_exit_code,
+        rule: "BR-1074",
       });
     }
 
@@ -2112,6 +2139,7 @@ export class VerifyRunnerService {
           message:
             `attested-red run for AC "${criterion.id}" aborted — falsifier command failed ` +
             `to launch (${detail}). No evidence recorded.`,
+          rule: "BR-193",
         });
       }
 
@@ -2194,6 +2222,7 @@ export class VerifyRunnerService {
             "reality. Nothing recorded; fix the declared expected_exit_code (or the mutation) " +
             "and retry.",
           value: { declared: falsifier.expected_exit_code, observed: exitCode, timed_out: timedOut },
+          rule: "BR-191",
         });
       }
 

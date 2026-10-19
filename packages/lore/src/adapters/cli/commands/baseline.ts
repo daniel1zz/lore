@@ -211,7 +211,7 @@ async function readRuleStatusIndex(inv: Invocation): Promise<RuleStatusOf | unde
 
 function reportCensusFailure(inv: Invocation, cause: unknown, json: boolean): ExitReport {
   if (!(cause instanceof SiteCensusError)) throw cause;
-  return reportFailure(inv, { code: "VALIDATION_ERROR", field: `census:${cause.reason}`, message: cause.message }, json);
+  return reportFailure(inv, { code: "VALIDATION_ERROR", field: `census:${cause.reason}`, message: cause.message, rule: "BR-663" }, json);
 }
 
 /** Print the root's refusal: each runnable command no leaf declares, with its fix line. Prints nothing when there is none. */
@@ -258,7 +258,7 @@ async function runCoverage(target: string, json: boolean, commandsOnly: boolean,
     const resolved = await resolveDoc(store, target);
     if (!resolved.ok) return reportFailure(inv, resolved.error, json);
     if (resolved.value.type !== "baseline") {
-      return reportFailure(inv, { code: "VALIDATION_ERROR", field: "target", message: `'${target}' is a ${resolved.value.type}, not a baseline node` }, json);
+      return reportFailure(inv, { code: "VALIDATION_ERROR", field: "target", message: `'${target}' is a ${resolved.value.type}, not a baseline node`, rule: "BR-662" }, json);
     }
     const all = await store.findMany({ type: "baseline" });
     if (!all.ok) return reportFailure(inv, all.error, json);
@@ -433,7 +433,7 @@ function reportFidelityFailure(inv: Invocation, error: LoreError, json: boolean)
 /** `fidelity`: validate flags, resolve the AI provider (never skipping the judge), run, store, print. */
 async function runFidelityCommand(args: Record<string, unknown>, inv: Invocation): Promise<ExitReport> {
   const json = args.json === true;
-  const fail = (field: string, message: string): ExitReport => reportFidelityFailure(inv, { code: "VALIDATION_ERROR", field, message }, json);
+  const fail = (field: string, message: string): ExitReport => reportFidelityFailure(inv, { code: "VALIDATION_ERROR", field, message, rule: "BR-963" }, json);
   const rawArgv = inv.argv;
   // reason: SPEC-024 tri-state AI flag - citty collapses --ai/--no-ai, so detect them in argv like assess.ts does.
   const hasExplicitAi = rawArgv.includes("--ai");
@@ -511,7 +511,7 @@ export default defineLoreCommand({
         return await withRuleService(inv, async (svc): Promise<number> => {
           if (args.tree !== undefined && !(BASELINE_TREES as readonly string[]).includes(args.tree as string)) {
             return reportFailure(inv, 
-              { code: "VALIDATION_ERROR", field: "tree", message: `--tree must be one of ${BASELINE_TREES.join(" | ")} (got '${String(args.tree)}')`, value: args.tree },
+              { code: "VALIDATION_ERROR", field: "tree", message: `--tree must be one of ${BASELINE_TREES.join(" | ")} (got '${String(args.tree)}')`, value: args.tree, rule: "BR-979" },
               args.json === true,
             );
           }
@@ -521,7 +521,7 @@ export default defineLoreCommand({
               content = readFileSync(args["content-file"] as string, "utf8");
             } catch (cause) {
               return reportFailure(inv, 
-                { code: "VALIDATION_ERROR", field: "content-file", message: `cannot read ${String(args["content-file"])}: ${cause instanceof Error ? cause.message : String(cause)}` },
+                { code: "VALIDATION_ERROR", field: "content-file", message: `cannot read ${String(args["content-file"])}: ${cause instanceof Error ? cause.message : String(cause)}`, rule: "BR-614" },
                 args.json === true,
               );
             }
@@ -693,7 +693,7 @@ export default defineLoreCommand({
             sites = listSitesMany({ rootDir, commands: [command] }).get(command) as SiteList;
           } catch (cause) {
             if (cause instanceof SiteCensusError && cause.reason === "entry-symbol-missing") {
-              return reportFailure(inv, { code: "VALIDATION_ERROR", field: "command", message: `no CLI command '${command}': ${cause.message}`, value: command } as LoreError, json);
+              return reportFailure(inv, { code: "VALIDATION_ERROR", field: "command", message: `no CLI command '${command}': ${cause.message}`, value: command, rule: "BR-664" } as LoreError, json);
             }
             throw cause;
           }

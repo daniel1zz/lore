@@ -894,6 +894,7 @@ export class SQLiteStore implements StoreInterface {
           code: "DUPLICATE_SLUG",
           slug: doc.slug,
           existing_id: winnerId,
+          rule: "BR-498",
         });
       }
       return wrapStoreError(e);
@@ -1019,7 +1020,7 @@ export class SQLiteStore implements StoreInterface {
 
       if (!existingRow) {
         this.db.run("ROLLBACK");
-        return err({ code: "DOC_NOT_FOUND", id });
+        return err({ code: "DOC_NOT_FOUND", id, rule: "BR-949" });
       }
 
       const current = rowToDocRecord(existingRow);
@@ -1038,6 +1039,7 @@ export class SQLiteStore implements StoreInterface {
           id,
           expected: expectedVersion,
           actual: current.version,
+          rule: "BR-536",
         });
       }
 
@@ -1076,7 +1078,7 @@ export class SQLiteStore implements StoreInterface {
             // forever.
             return {
               kind: "error",
-              error: { code: "STALE_VERSION", id, expected: expectedVersion, actual: current.version },
+              error: { code: "STALE_VERSION", id, expected: expectedVersion, actual: current.version, rule: "BR-536" },
             };
           } catch (e) {
             const msg = e instanceof Error ? e.message : "";
@@ -1419,7 +1421,7 @@ export class SQLiteStore implements StoreInterface {
         .get(id) as DocRow | null;
 
       if (!existingRow) {
-        return err({ code: "DOC_NOT_FOUND", id });
+        return err({ code: "DOC_NOT_FOUND", id, rule: "BR-949" });
       }
 
       const current = rowToDocRecord(existingRow);
@@ -1480,7 +1482,7 @@ export class SQLiteStore implements StoreInterface {
 
           if (!actualRow) {
             // Deleted between our SELECT and the UPDATE (race) — treat as not found
-            return err({ code: "DOC_NOT_FOUND", id });
+            return err({ code: "DOC_NOT_FOUND", id, rule: "BR-949" });
           }
 
           return err({
@@ -1488,6 +1490,7 @@ export class SQLiteStore implements StoreInterface {
             id,
             expected: opts.expected_version,
             actual: actualRow.version,
+            rule: "BR-27",
           });
         }
 
@@ -1602,6 +1605,7 @@ export class SQLiteStore implements StoreInterface {
           from: link.from_id,
           to: link.to_id,
           type: link.link_type,
+          rule: "BR-949",
         });
       }
       return wrapStoreError(e);
@@ -1625,7 +1629,7 @@ export class SQLiteStore implements StoreInterface {
     } catch (e) {
       const msg = e instanceof Error ? e.message : "";
       if (msg.includes("UNIQUE constraint failed: links.")) {
-        return err({ code: "DUPLICATE_LINK", from: link.from_id, to: link.to_id, type: link.link_type });
+        return err({ code: "DUPLICATE_LINK", from: link.from_id, to: link.to_id, type: link.link_type, rule: "BR-550" });
       }
       return wrapStoreError(e);
     }
@@ -2319,6 +2323,7 @@ export class SQLiteStore implements StoreInterface {
         );
         if (refusal !== null) {
           this.db.run("ROLLBACK");
+          /** @lore-site BR-260 */
           return err(refusal);
         }
       }
@@ -2472,7 +2477,7 @@ export class SQLiteStore implements StoreInterface {
       .prepare("SELECT * FROM docs WHERE id = ?")
       .get(patch.id) as DocRow | null;
     if (!row || row.deleted_at !== null) {
-      return err({ code: "DOC_NOT_FOUND", id: patch.id });
+      return err({ code: "DOC_NOT_FOUND", id: patch.id, rule: "BR-633" });
     }
     // reason: the CAS is checked HERE against the row read under this
     // transaction's write lock (BEGIN IMMEDIATE — no writer can change it
@@ -2489,6 +2494,7 @@ export class SQLiteStore implements StoreInterface {
         id: patch.id,
         expected: patch.expectedVersion,
         actual: Number(row.version),
+        rule: "BR-631",
       });
     }
     const updated = this.updateDocSync(
@@ -2668,7 +2674,7 @@ export class SQLiteStore implements StoreInterface {
         .get(ruleId) as { leaf_doc_id: string } | null;
       if (!registryRow) {
         this.db.run("ROLLBACK");
-        return err({ code: "DOC_NOT_FOUND", id: ruleId });
+        return err({ code: "DOC_NOT_FOUND", id: ruleId, rule: "BR-640" });
       }
       if (registryRow.leaf_doc_id !== fromLeaf.id) {
         this.db.run("ROLLBACK");
@@ -2677,6 +2683,7 @@ export class SQLiteStore implements StoreInterface {
           field: "fromLeaf.id",
           message: `rule ${ruleId} is registered to leaf ${registryRow.leaf_doc_id}, not ${fromLeaf.id}`,
           value: fromLeaf.id,
+          rule: "BR-640",
         });
       }
       const nowIso = new Date().toISOString();
@@ -2749,6 +2756,7 @@ export class SQLiteStore implements StoreInterface {
         isExemptionActive({ doc_id: row.doc_id, ac_id: row.ac_id, expires_at: existing.expires_at }, cap.now, satisfied)
       ) {
         this.db.run("ROLLBACK");
+        /** @lore-site BR-971 */
         return err(buildAcExemptionAlreadyActiveError(row.doc_id, row.ac_id));
       }
       if (existing !== null) {
@@ -2762,6 +2770,7 @@ export class SQLiteStore implements StoreInterface {
       const activeCount = unexpired.filter((r) => isExemptionActive(r, cap.now, satisfied)).length;
       if (activeCount >= cap.maxActive) {
         this.db.run("ROLLBACK");
+        /** @lore-site BR-971 */
         return err(buildAcExemptionCapError(activeCount, cap.liveCriteria, cap.maxActive));
       }
       this.db

@@ -49,7 +49,7 @@ const LAYER_ORDER = ["shipped", "user", "project"] as const;
 const FORBIDDEN_BODY_MARKER = "<system-reminder";
 
 function fail(path: string, message: string): Result<never, DiscoverError> {
-  return err({ code: "VALIDATION_ERROR", field: path, message: `${path}: ${message}` });
+  return err({ code: "VALIDATION_ERROR", field: path, message: `${path}: ${message}`, rule: "BR-898" });
 }
 
 function joinPath(root: string, name: string): string {

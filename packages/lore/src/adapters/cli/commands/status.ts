@@ -764,6 +764,7 @@ async function collectCodeAnchorSpecMembers(
         `code_anchor_specs: this command's anchored-spec member list holds ${members.length} spec(s) but the shared ` +
         `flows/drift-flow.ts::countArmedSpecs counted ${sharedCountResult.value} over the SAME ${specs.length} live ` +
         `spec(s) — one of the two call sites has bypassed the shared isSpecAnchored predicate; reconcile before trusting either number.`,
+      rule: "BR-444",
     });
   }
 
@@ -1166,6 +1167,7 @@ export default defineLoreCommand({
             field: "enumerate",
             message: `no enumerator registered for count field "${args.enumerate}" — known fields: ${knownFields}`,
             value: args.enumerate,
+            rule: "BR-443",
           };
           inv.io.stderr.write(formatErrorFor(inv, error) + "\n");
           return exitCode(error);

@@ -566,14 +566,14 @@ export class DecisionService {
     proof: HumanChannelProof,
   ): Promise<Result<DecisionLogRow, LoreError>> {
     if (!isIssuedHumanChannelProof(proof)) {
-      return err(validationError("proof", "a human-tty record needs a proof minted by the human channel (TTY, agent-ancestry and nonce checks)"));
+      return err(validationError("proof", "a human-tty record needs a proof minted by the human channel (TTY, agent-ancestry and nonce checks)", undefined, "BR-1249"));
     }
     const rows = await this.deps.store.listDecisionLog();
     if (!rows.ok) return rows;
     const pending = derivePendingDecisions(rows.value);
     if (!pending.ok) return pending;
     const target = pending.value.find((p) => p.id === pendingId);
-    if (target === undefined) return err(validationError("id", `decision ${pendingId} is not pending`));
+    if (target === undefined) return err(validationError("id", `decision ${pendingId} is not pending`, undefined, "BR-1252"));
     const verdict = answer === "accept" ? "auto" : "refuse";
     const head = decisionChainHead(rows.value);
     const input: DecisionRecordInput = {

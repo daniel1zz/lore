@@ -179,5 +179,6 @@ export function checkOverrides(all: readonly Fragment[], configs: OverrideConfig
     field: "context.fragments",
     message: `cross-file override/disable of static main fragment refused: ${list.join(", ")}`,
     value: list,
+    rule: "BR-898",
   });
 }

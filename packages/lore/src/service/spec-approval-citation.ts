@@ -82,5 +82,6 @@ export async function requireSpecCitesLiveRule(
     field: "acceptance_criteria",
     message: uncitedSpecMessage(specSlug),
     value: specSlug,
+    rule: "BR-286",
   });
 }

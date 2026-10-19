@@ -12,9 +12,11 @@
 export type RuleId = `BR-${number}`;
 
 /** Member every refusal may carry: the rule it enforces. Absent = the site is `unmapped` in the census. */
-export interface RuleDeclared {
+// reason: a `type` alias (not an interface) so every LoreError member keeps its implicit index signature: callers assign errors to
+// `{ [k: string]: unknown; code: string }` shapes, which an interface in the intersection would break.
+export type RuleDeclared = {
   rule?: RuleId;
-}
+};
 
 /** Discriminated union of all service-layer errors; the variants below are the SSOT for the code list. */
 export type LoreError = RuleDeclared &

@@ -41,7 +41,7 @@ export type Selection = z.infer<typeof SelectionSchema>;
 export type SelectionError = Extract<LoreError, { code: "VALIDATION_ERROR" }>;
 
 function selectionError(field: string, message: string, value?: unknown): SelectionError {
-  return { code: "VALIDATION_ERROR", field, message, value };
+  return { code: "VALIDATION_ERROR", field, message, value, rule: "BR-1062" };
 }
 
 /** A selection that disables nothing (what an absent file means). */
@@ -65,11 +65,13 @@ export function parseSelection(text: string, source: string): Result<Selection, 
   try {
     raw = parseYaml(text);
   } catch (cause) {
+    /** @lore-site BR-1062 */
     return err(selectionError("selection", `${source}: invalid YAML: ${cause instanceof Error ? cause.message : String(cause)}`));
   }
   const parsed = SelectionSchema.safeParse(raw);
   if (!parsed.success) {
     const detail = parsed.error.issues.map((i) => `${i.path.join(".") || "(root)"}: ${i.message}`).join("; ");
+    /** @lore-site BR-1062 */
     return err(selectionError("selection", `${source}: invalid selection file (${detail})`, raw));
   }
   return ok({ schemaVersion: 1, disable: normalizeDisable(parsed.data.disable) });
@@ -106,12 +108,14 @@ export function addToDisable(
   fragments: readonly Fragment[],
 ): Result<Selection, SelectionError> {
   const unknown = refuseUnknown(id, fragments);
+  /** @lore-site BR-1063 */
   if (unknown) return err(unknown);
   const next: Selection = { schemaVersion: 1, disable: normalizeDisable([...selection.disable, id]) };
   const own = layerOf(next);
   const other: ContextConfigLayer = {};
   // reason: ownership rules live in checkOverrides (SSOT); "global" there is the user scope.
   const verdict = checkOverrides(fragments, scope === "project" ? { global: other, project: own } : { global: own, project: other });
+  /** @lore-site BR-905 */
   if (!verdict.ok) return err(selectionError("id", `${verdict.error.message} (scope: ${scope})`, id));
   return ok(next);
 }
@@ -126,6 +130,7 @@ export function addToDisable(
  */
 export function removeFromDisable(selection: Selection, id: string, fragments: readonly Fragment[]): Result<Selection, SelectionError> {
   const unknown = refuseUnknown(id, fragments);
+  /** @lore-site BR-1063 */
   if (unknown) return err(unknown);
   return ok({ schemaVersion: 1, disable: normalizeDisable(selection.disable.filter((d) => d !== id)) });
 }
@@ -146,6 +151,7 @@ export function selectionToLayer(
 ): Result<ContextConfigLayer, SelectionError> {
   const stray = configLayer.context?.fragments?.disable ?? [];
   if (stray.length > 0) {
+    /** @lore-site BR-1062 */
     return err(
       selectionError(
         "context.fragments.disable",

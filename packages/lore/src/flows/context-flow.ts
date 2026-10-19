@@ -503,6 +503,7 @@ export function checkInitAllowed(existing: string | null, force: boolean): Resul
         "managed sections, or pass --force to re-run init anyway (existing hand-written " +
         "content outside the managed zone is preserved either way).",
       value: CLAUDE_MD_PATH,
+      rule: "BR-876",
     });
   }
   return ok(undefined);
@@ -604,6 +605,7 @@ function resolveFragmentDeps(deps: ContextFlowDeps): Result<FragmentRefreshDeps 
       message:
         "fragment refresh deps are partially supplied — assetsRoot, home, xdgConfigHome, globalConfig and projectConfig " +
         "must all be set together.",
+      rule: "BR-839",
     });
   }
   return ok({
@@ -677,6 +679,7 @@ async function selectScopeFragments(
       code: "VALIDATION_ERROR",
       field: "fragments",
       message: e instanceof Error ? e.message : String(e),
+      rule: "BR-839",
     });
   }
 }
@@ -725,6 +728,7 @@ async function planRulesFiles(
           `refusing to write ${path} — fragment "${id}" (${fragment.path}) breaches the rules-file budget: ` +
           findings.map((finding) => `[${finding.kind}] ${finding.message}`).join("; "),
         value: path,
+        rule: "BR-839",
       });
     }
 
@@ -763,6 +767,7 @@ async function planRulesFiles(
         field: "deps.fs",
         message: `cannot prune stale ${path}: the injected FsWritePort has no deleteFile.`,
         value: path,
+        rule: "BR-839",
       });
     }
     actions.push({ kind: "delete", outcome: { id, path, state: "pruned" }, readBytes: bytes });
@@ -803,6 +808,7 @@ async function planSkillDirs(
           `refusing to write skill ${skillsDir}/${dirName} — fragment "${id}" (${fragment.path}) would shadow the skill ` +
           `"${dirName}" shipped with lore; rename the fragment id. Nothing was written.`,
         value: id,
+        rule: "BR-1064",
       });
     }
     keep.add(dirName);
@@ -954,6 +960,7 @@ export async function runContextRefresh(
       field: "rulesOnly",
       message: "rulesOnly needs the fragment deps (assetsRoot, home, xdgConfigHome, globalConfig, projectConfig).",
       value: true,
+      rule: "BR-839",
     });
   }
   if (scope === "user" && fragmentDeps === null) {
@@ -962,6 +969,7 @@ export async function runContextRefresh(
       field: "scope",
       message: "scope user needs the fragment deps (assetsRoot, home, xdgConfigHome, globalConfig, projectConfig).",
       value: scope,
+      rule: "BR-839",
     });
   }
 
@@ -989,6 +997,7 @@ export async function runContextRefresh(
         field: "path",
         message: `no ${CLAUDE_MD_PATH} found — run \`lore context init\` first.`,
         value: CLAUDE_MD_PATH,
+        rule: "BR-839",
       });
     }
     if (existing !== null) {
@@ -1102,6 +1111,7 @@ export async function runContextRefresh(
         code: "CONFLICT",
         path: target.path,
         message: `refusing to write ${target.path} — it changed after refresh read it (another writer interleaved); nothing was written.`,
+        rule: "BR-839",
       });
     }
   }
@@ -1141,6 +1151,7 @@ export async function runContextRefresh(
         `${claudeMdRefusalMessage} — CLAUDE.md left unchanged; lore rules files written independently (D16): ` +
         (rulesWritten.length > 0 ? rulesWritten.join(", ") : "none changed"),
       value: CLAUDE_MD_PATH,
+      rule: "BR-839",
     });
   }
 

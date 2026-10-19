@@ -127,6 +127,7 @@ export function normalizeFileAnchors(anchors: string[]): Result<string[], LoreEr
       field: "file_anchors",
       message: `at most ${MAX_FILE_ANCHORS} file anchors allowed; got ${anchors.length}`,
       value: anchors.length,
+      rule: "BR-122",
     });
   }
 
@@ -140,6 +141,7 @@ export function normalizeFileAnchors(anchors: string[]): Result<string[], LoreEr
         field: "file_anchors",
         message: "file anchor entries must not be empty",
         value: raw,
+        rule: "BR-11",
       });
     }
     if (raw.length > MAX_FILE_ANCHOR_LENGTH) {
@@ -148,6 +150,7 @@ export function normalizeFileAnchors(anchors: string[]): Result<string[], LoreEr
         field: "file_anchors",
         message: `file anchor exceeds ${MAX_FILE_ANCHOR_LENGTH} chars: "${raw.slice(0, 40)}..."`,
         value: raw,
+        rule: "BR-11",
       });
     }
     if (raw.includes("\\")) {
@@ -156,6 +159,7 @@ export function normalizeFileAnchors(anchors: string[]): Result<string[], LoreEr
         field: "file_anchors",
         message: `file anchor must use POSIX "/" separators, not "\\": "${raw}"`,
         value: raw,
+        rule: "BR-11",
       });
     }
     if (raw.startsWith("/")) {
@@ -164,6 +168,7 @@ export function normalizeFileAnchors(anchors: string[]): Result<string[], LoreEr
         field: "file_anchors",
         message: `file anchor must be repo-relative (no leading "/"): "${raw}"`,
         value: raw,
+        rule: "BR-11",
       });
     }
 
@@ -178,6 +183,7 @@ export function normalizeFileAnchors(anchors: string[]): Result<string[], LoreEr
           field: "file_anchors",
           message: `file anchor symbol must be an ASCII identifier (path#Symbol): "${raw}"`,
           value: raw,
+          rule: "BR-11",
         });
       }
       if (body.endsWith("/")) {
@@ -186,6 +192,7 @@ export function normalizeFileAnchors(anchors: string[]): Result<string[], LoreEr
           field: "file_anchors",
           message: `a directory anchor must not carry a #Symbol: "${raw}"`,
           value: raw,
+          rule: "BR-11",
         });
       }
     }
@@ -200,6 +207,7 @@ export function normalizeFileAnchors(anchors: string[]): Result<string[], LoreEr
           field: "file_anchors",
           message: `file anchor must not contain ".." segments: "${raw}"`,
           value: raw,
+          rule: "BR-122",
         });
       }
       segments.push(seg);
@@ -211,6 +219,7 @@ export function normalizeFileAnchors(anchors: string[]): Result<string[], LoreEr
         field: "file_anchors",
         message: `file anchor normalizes to an empty path: "${raw}"`,
         value: raw,
+        rule: "BR-122",
       });
     }
 

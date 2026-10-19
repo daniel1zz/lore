@@ -119,6 +119,7 @@ export class PhaseService {
         field: "type",
         message: `Expected a plan document; got type '${plan.type}'`,
         value: plan.type,
+        rule: "BR-233",
       });
     }
 
@@ -151,6 +152,7 @@ export class PhaseService {
         field: "name",
         message: "Phase name must not be empty after trimming whitespace",
         value: name,
+        rule: "BR-99",
       });
     }
 
@@ -164,6 +166,7 @@ export class PhaseService {
         field: "type",
         message: `Expected a plan document; got type '${plan.type}'`,
         value: plan.type,
+        rule: "BR-233",
       });
     }
 
@@ -178,6 +181,7 @@ export class PhaseService {
         field: "phases[].name",
         message: `Phase "${trimmedName}" already exists on this plan`,
         value: trimmedName,
+        rule: "BR-99",
       });
     }
 
@@ -223,6 +227,7 @@ export class PhaseService {
         field: "type",
         message: `Expected a plan document; got type '${plan.type}'`,
         value: plan.type,
+        rule: "BR-233",
       });
     }
 
@@ -237,6 +242,7 @@ export class PhaseService {
         field: "phases[].name",
         message: `Phase "${name}" does not exist on this plan`,
         value: name,
+        rule: "BR-234",
       });
     }
 
@@ -250,6 +256,7 @@ export class PhaseService {
         field: "extra.phase",
         message: `Cannot remove phase "${name}" — ${blockingTasksResult.value.length} task(s) still reference it: ${slugs}. Clear or move them first.`,
         value: name,
+        rule: "BR-101",
       });
     }
 
@@ -289,6 +296,7 @@ export class PhaseService {
         field: "name",
         message: "New phase name must not be empty after trimming whitespace",
         value: newName,
+        rule: "BR-99",
       });
     }
     if (trimmedNew === oldName) {
@@ -297,6 +305,7 @@ export class PhaseService {
         field: "name",
         message: "New phase name is identical to the current name",
         value: newName,
+        rule: "BR-99",
       });
     }
 
@@ -310,6 +319,7 @@ export class PhaseService {
         field: "type",
         message: `Expected a plan document; got type '${plan.type}'`,
         value: plan.type,
+        rule: "BR-233",
       });
     }
 
@@ -325,6 +335,7 @@ export class PhaseService {
         field: "phases[].name",
         message: `Phase "${oldName}" does not exist on this plan`,
         value: oldName,
+        rule: "BR-234",
       });
     }
     if (existing.some((p) => p.name === trimmedNew)) {
@@ -333,6 +344,7 @@ export class PhaseService {
         field: "phases[].name",
         message: `Phase "${trimmedNew}" already exists on this plan`,
         value: trimmedNew,
+        rule: "BR-99",
       });
     }
 

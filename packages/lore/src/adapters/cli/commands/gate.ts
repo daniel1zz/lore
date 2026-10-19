@@ -928,6 +928,7 @@ async function runTaskClaimGate(
       field: "type",
       message: `Expected a task document; got type '${task.type}'`,
       value: task.type,
+      rule: "BR-577",
     };
     inv.io.stderr.write(formatErrorFor(inv, error) + "\n");
     return exitCode(error);
@@ -1107,6 +1108,7 @@ async function runPhaseClaimGate(
       field: "type",
       message: `Expected a phase document; got type '${phase.type}'`,
       value: phase.type,
+      rule: "BR-577",
     };
     inv.io.stderr.write(formatErrorFor(inv, error) + "\n");
     return exitCode(error);

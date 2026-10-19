@@ -105,6 +105,7 @@ const DEFAULT_NONCE_TTL_MS = 60_000;
  * module's header comment for why. */
 export interface NonceStore {
   /** Mint a fresh, single-use, TTL-bounded token. */
+  /** @lore-site BR-862 */
   mint(): string;
 }
 
@@ -121,6 +122,7 @@ type ConsumeNonceOutcome = "granted" | "unknown" | "expired" | "consumed";
 interface NonceStoreWithConsume extends NonceStore {
   /** Atomically check-and-mark a token consumed. Single call, no separate peek — a
    * concurrent double-redemption of the same token can only grant once. */
+  /** @lore-site BR-862 */
   consume(token: string): ConsumeNonceOutcome;
 }
 
@@ -216,6 +218,7 @@ export interface DashboardHandler {
    *   GET whose assets are unavailable) — the caller must fall through to its own
    *   pre-existing 404, keeping non-dashboard-configured behavior byte-identical.
    */
+  /** @lore-site BR-858 */
   handle(req: Request, url: URL): Promise<Response | null>;
 }
 

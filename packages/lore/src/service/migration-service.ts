@@ -241,6 +241,7 @@ export class MigrationService {
         field: "sourcePath",
         message: `Secret scan found ${report.secret_warnings.length} potential secret(s). Fix source files or pass skipSecretScan=true to proceed.`,
         value: report.secret_warnings.map((w) => w.file),
+        rule: "BR-795",
       });
     }
 
@@ -529,8 +530,9 @@ function collectMdFiles(dirPath: string): Result<string[], LoreError> {
     return ok(walkFiles(dirPath, { extensions: [".md"] }));
   } catch (e) {
     const storeErr: LoreError = e instanceof Error
-      ? { code: "STORE_ERROR", message: `Cannot read source directory "${dirPath}": ${e.message}`, cause: e }
-      : { code: "STORE_ERROR", message: `Cannot read source directory "${dirPath}": ${String(e)}` };
+      ? { code: "STORE_ERROR", message: `Cannot read source directory "${dirPath}": ${e.message}`, cause: e, rule: "BR-797" }
+      : { code: "STORE_ERROR", message: `Cannot read source directory "${dirPath}": ${String(e)}`, rule: "BR-797" };
+    /** @lore-site BR-797 */
     return err(storeErr);
   }
 }
