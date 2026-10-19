@@ -21,6 +21,7 @@ import { hostname, tmpdir } from "node:os";
 import { resolveInvocationIdentity } from "@lore/core/node";
 import type { Invocation } from "@lore/core";
 import { invocationResolvers } from "../../src/adapters/cli/run-cli";
+import { withTestRun } from "./test-run-identity";
 
 /** What a test names to build an Invocation. */
 export interface TestInvocationInput {
@@ -34,6 +35,12 @@ export interface TestInvocationInput {
   readonly home: string;
   /** Where the run's stdout / stderr go, and what its stdin is. */
   readonly io: Invocation["io"];
+  /**
+   * Who the run is. `"test-run"` (default): an agent run registered in the corpus under `cwd` first
+   * (`withTestRun`: the run `argv` / `env` names, else `DEFAULT_TEST_RUN`). `"none"`: resolved exactly as the binary
+   * resolves it (a human session under `home`, else no known party): what a test of the refusal or of a session uses.
+   */
+  readonly identity?: "test-run" | "none";
 }
 
 /**
@@ -45,7 +52,10 @@ export function buildTestInvocation(input: TestInvocationInput): Invocation {
   // macOS /var -> /private/var resolves), and commands report that; the in-process run must report the same one.
   const cwd = realpathSync(input.cwd);
   const projectRoot = invocationResolvers.projectRoot(cwd);
-  const resolution = resolveInvocationIdentity(input.argv, { ...env }, () =>
+  // reason: a test run is a KNOWN PARTY by default, as an installed agent integration makes it (BR-1351): the run its
+  // argv / env names, registered in the corpus under `cwd`. `identity: "none"` resolves as the binary would.
+  const argvIn = input.identity === "none" ? input.argv : withTestRun(input.argv, env, cwd);
+  const resolution = resolveInvocationIdentity(argvIn, { ...env }, () =>
     projectRoot === null ? null : invocationResolvers.humanSession({ env, home, projectRoot }),
   );
   const argv: readonly string[] = Object.freeze([...resolution.argv]);

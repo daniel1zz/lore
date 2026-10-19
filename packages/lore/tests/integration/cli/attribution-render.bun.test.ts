@@ -11,8 +11,8 @@
  * CorpusService writes no literal "system" author for create / set / delete.
  *
  * ── Seed (directly through the store in a mkdtemp corpus; the CLI cannot yet produce attested writes) ─
- *   doc W  : v1 create attested cc:attr-run-1, claimed agent:alice (flag)
- *            v2 update attested cc:attr-run-2, claimed agent:bob   (env)     <- latest write
+ *   doc W  : v1 create attested cc:attr-run-1, claimed agent:alice (run)
+ *            v2 update attested cc:attr-run-2, claimed agent:bob   (human)   <- latest write
  *   doc L  : v1 written by the BARE store (no harness_run, exactly a pre-016 row), author agent:legacy-writer
  *   doc U  : v1 written with an identity that has no run (harnessRun null), claimed agent:carol (os)
  * Attested rows go through fixtures/run-seeder.ts (pinned `withWriteContext` decorator when present, else raw
@@ -33,6 +33,7 @@ import { join } from "node:path";
 import type { AuditEntry, DocRecord, VersionRecord } from "@lore/core";
 import type { StoreInterface } from "../../../src/store/store-interface.js";
 import { RunSeeder } from "./fixtures/run-seeder.js";
+import { withTestRun } from "../../helpers/test-run-identity.js";
 
 setDefaultTimeout(300_000);
 
@@ -58,7 +59,10 @@ function lore(args: string[], cwd: string, actor: string | null = "agent:session
     if (!actor.startsWith(SESSION_ACTOR_PREFIX)) throw new Error(`fixture actor must be ${SESSION_ACTOR_PREFIX}<id8>: ${actor}`);
     env.CLAUDE_CODE_SESSION_ID = `${actor.slice(SESSION_ACTOR_PREFIX.length)}-aaaa-bbbb-cccc`;
   }
-  const p = Bun.spawnSync(["bun", "run", ENTRY, ...args], { cwd, env: env as Record<string, string> });
+  // reason: a write needs a known party; the writer `actor` names is the agent run of that session, registered first.
+  // `actor === null` means no identity at all (a read).
+  const argv = actor === null ? args : withTestRun(args, env, cwd);
+  const p = Bun.spawnSync(["bun", "run", ENTRY, ...argv], { cwd, env: env as Record<string, string> });
   return { stdout: p.stdout.toString(), stderr: p.stderr.toString(), exitCode: p.exitCode ?? 1 };
 }
 function mustLore(args: string[], cwd: string, actor: string | null = "agent:session-4e17de01"): Run {
@@ -110,8 +114,15 @@ function versionRecord(id: string, slug: string, n: number, action: string, auth
     slug,
   } as unknown as VersionRecord;
 }
-function auditRecord(id: string, action: string, author: string, at: string): AuditEntry {
-  return { timestamp: at, actor: author, session_id: "s-seed", action, doc_id: id, details: { type: "knowledge", surface: "agent" } } as AuditEntry;
+function auditRecord(id: string, action: string, author: string, at: string, nameSource?: string): AuditEntry {
+  return {
+    timestamp: at,
+    actor: author,
+    session_id: "s-seed",
+    action,
+    doc_id: id,
+    details: { type: "knowledge", surface: "agent", ...(nameSource === undefined ? {} : { name_source: nameSource }) },
+  } as AuditEntry;
 }
 async function must<T extends { ok: boolean }>(p: Promise<T>, what: string): Promise<void> {
   const r = await p;
@@ -126,9 +137,10 @@ async function writeVersion(
   action: "create" | "update",
   author: string,
   at: string,
+  nameSource?: string,
 ): Promise<void> {
   await must(store.insertVersion(versionRecord(id, slug, n, action, author, at)), `version ${slug} v${n}`);
-  await must(store.appendAuditEntry(auditRecord(id, action === "create" ? "create" : "update", author, at)), `audit ${slug} v${n}`);
+  await must(store.appendAuditEntry(auditRecord(id, action === "create" ? "create" : "update", author, at, nameSource)), `audit ${slug} v${n}`);
 }
 
 const scratch: string[] = [];
@@ -149,14 +161,15 @@ beforeAll(async () => {
     const idU = "01HATTRU000000000000000001";
     // W: two attested versions by two different runs/names
     await must(store.insert(docRecord(idW, SLUG_W, 2, "agent:alice", T2)), "doc W");
-    await writeVersion(seeder.as({ harnessRun: RUN_1, claimed: "agent:alice", claimedSource: "flag" }), idW, SLUG_W, 1, "create", "agent:alice", T1);
-    await writeVersion(seeder.as({ harnessRun: RUN_2, claimed: "agent:bob", claimedSource: "env" }), idW, SLUG_W, 2, "update", "agent:bob", T2);
+    await writeVersion(seeder.as({ harnessRun: RUN_1, claimed: "agent:alice", claimedSource: "run" }), idW, SLUG_W, 1, "create", "agent:alice", T1);
+    await writeVersion(seeder.as({ harnessRun: RUN_2, claimed: "agent:bob", claimedSource: "human" }), idW, SLUG_W, 2, "update", "agent:bob", T2);
     // L: bare store = no harness_run, the same row shape migration 016 leaves on pre-existing rows
     await must(store.insert(docRecord(idL, SLUG_L, 1, "agent:legacy-writer", T1)), "doc L");
     await writeVersion(seeder.as(null), idL, SLUG_L, 1, "create", "agent:legacy-writer", T1);
-    // U: identity with NO run
+    // U: a LEGACY row with a recorded name source but no run (written before every write needed a run; a new write can
+    // no longer have this shape, but old corpora hold them and they must keep reading honestly)
     await must(store.insert(docRecord(idU, SLUG_U, 1, "agent:carol", T1)), "doc U");
-    await writeVersion(seeder.as({ harnessRun: null, claimed: "agent:carol", claimedSource: "os" }), idU, SLUG_U, 1, "create", "agent:carol", T1);
+    await writeVersion(seeder.as(null), idU, SLUG_U, 1, "create", "agent:carol", T1, "os");
   } finally {
     seeder.finish();
   }
@@ -190,14 +203,14 @@ describe("AC-RID-9 lore get / lore log render attested and claimed (BR-1037, D9,
   it("HAPPY: lore get text shows the latest write's run and claimed name with source", () => {
     const out = mustLore(["get", SLUG_W], dir).stdout;
     expect(out).toContain(`attested: ${RUN_2}`);
-    expect(out).toContain("claimed: agent:bob (env)");
+    expect(out).toContain("claimed: agent:bob (human)");
   });
 
   it("HAPPY: lore log text shows each version's own run and claimed name with source", () => {
     expect(logRow(SLUG_W, 2)).toContain(`attested: ${RUN_2}`);
-    expect(logRow(SLUG_W, 2)).toContain("claimed: agent:bob (env)");
+    expect(logRow(SLUG_W, 2)).toContain("claimed: agent:bob (human)");
     expect(logRow(SLUG_W, 1)).toContain(`attested: ${RUN_1}`);
-    expect(logRow(SLUG_W, 1)).toContain("claimed: agent:alice (flag)");
+    expect(logRow(SLUG_W, 1)).toContain("claimed: agent:alice (run)");
   });
 
   it("STATE: the same write reads identically on get and log in text (labels extracted from both)", () => {
@@ -205,7 +218,7 @@ describe("AC-RID-9 lore get / lore log render attested and claimed (BR-1037, D9,
     const row = logRow(SLUG_W, 2);
     expect(attestedLabel(get)).toBe(RUN_2);
     expect(attestedLabel(row)).toBe(attestedLabel(get));
-    expect(claimedLabel(row)).toBe("agent:bob (env)");
+    expect(claimedLabel(row)).toBe("agent:bob (human)");
     expect(claimedLabel(row)).toBe(claimedLabel(get));
   });
 
@@ -305,14 +318,11 @@ describe("AC-RID-9 CorpusService writes no literal 'system' author (D4)", () => 
     expect(rows.map((r) => r.created_by)).toEqual(rows.map(() => "agent:session-c0ea7e02"));
   });
 
-  it("NEGATIVE: with no session id and no --by, the author is the resolved fallback name, never the literal 'system'", () => {
-    mustLore(["create", "knowledge", "--title", "Sys Three", "--sub-type", "reference", "--no-ai", "--content", "body"], cwd, null);
-    const rows = versionAuthors(cwd, "knowledge-sys-three");
-    expect(rows.length).toBeGreaterThanOrEqual(1);
-    for (const r of rows) {
-      expect(r.created_by).not.toBe("system");
-      expect(r.created_by.trim().length).toBeGreaterThan(0);
-    }
+  it("NEGATIVE: with no run and no human session there is no fallback author at all: the write is refused and no 'system' row appears", () => {
+    const refused = lore(["create", "knowledge", "--title", "Sys Three", "--sub-type", "reference", "--no-ai", "--content", "body"], cwd, null);
+    expect(refused.exitCode).toBe(4);
+    expect(refused.stderr).toContain("lore session start --human");
+    expect(versionAuthors(cwd, "knowledge-sys-three")).toEqual([]);
   });
 
   it("REGRESSION: lore get on a freshly created doc no longer says 'by system'", () => {

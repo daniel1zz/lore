@@ -34,7 +34,6 @@ import { RunIdentityArgumentError } from "@lore/core/node";
 import type { Invocation, InvocationReader } from "@lore/core";
 import { runCli } from "../../src/adapters/cli/run-cli";
 import { buildTestInvocation } from "./test-invocation";
-import { withTestRun } from "./test-run-identity";
 
 /** Environment bag, same shape as `process.env`. */
 export type InProcessEnv = Readonly<Record<string, string | undefined>>;
@@ -123,10 +122,11 @@ export async function runLoreInProcess(args: readonly string[], options: InProce
   let inv: Invocation;
   try {
     inv = buildTestInvocation({
-      argv: options.identity === "none" ? args : withTestRun(args, env, options.cwd),
+      argv: args,
       cwd: options.cwd,
       env,
       home,
+      ...(options.identity === undefined ? {} : { identity: options.identity }),
       // reason: a run has no terminal and no input unless a test gives it one: an empty, non-TTY stdin.
       io: {
         stdout: { write: (text) => out.push(text) },

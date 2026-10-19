@@ -45,7 +45,7 @@ export const LORE_BINARY_VERSION = "0.1.0" as const;
 
 export const EMBEDDED_ASSETS_MANIFEST: EmbeddedAssetsManifest = {
   binary_version: LORE_BINARY_VERSION,
-  tree_digest: "3872565dd2c000b9642b648b08a209bf14c19b38c62a098e4047ea4d049dfa6c",
+  tree_digest: "09339102fa8c6bffe0c0ded1ec81f0ccc35f0719d39e9e163e7fa7734ef2e762",
   entries: [
   { path: "agents/lore-implementer.md", kind: "agent", ownership: "managed", sha256: "be7b99d5d1f72cf4ff8579ab09c2e42454c03ec0e0f9ba4e8fdb303b4a6cb73f" },
   { path: "agents/lore-reader.md", kind: "agent", ownership: "managed", sha256: "336b2da60cfe9afae51f17ac8f6f9f33e7c67b2f3639874795e22a0e257e8696" },
@@ -74,9 +74,9 @@ export const EMBEDDED_ASSETS_MANIFEST: EmbeddedAssetsManifest = {
   { path: "hooks/pre-edit-anchor-gate.mjs", kind: "hook", ownership: "managed", sha256: "8dd34c73b4b7b3c6dbe13f299d05c87ef8ea0c479e869598667f367d9125136a" },
   { path: "hooks/pre-helper-foreign-working-copy-gate.mjs", kind: "hook", ownership: "managed", sha256: "cb5908db3a8beeb904a555e7c57d7c60e33eb3da9350d243dccf8776a8a307a9" },
   { path: "hooks/pre-no-general-agent-gate.mjs", kind: "hook", ownership: "managed", sha256: "795dcedc192ba2cee8bb00938afee11b2a513db682e13f6bc6cdaec191ae0892" },
-  { path: "hooks/pre-tool-harness-run.mjs", kind: "hook", ownership: "managed", sha256: "56647fbe978d185db43e4f87e2425d70a3a965e39bb7d08c696745a240c2fd28" },
+  { path: "hooks/pre-tool-harness-run.mjs", kind: "hook", ownership: "managed", sha256: "d6685e3c13aaee80b07eaa2c005d3ea5cb37795a1e0a6e91d0903610c972d671" },
   { path: "hooks/run-end.mjs", kind: "hook", ownership: "managed", sha256: "3615dadf253fa5ec2142ba8262e6478c5b487752de8699c17f2fd69952d5d60d" },
-  { path: "hooks/run-register.mjs", kind: "hook", ownership: "managed", sha256: "f927077ec59e0d094700cca6e6c1fd4ae43ea931878b278ec2f62df37e3320dd" },
+  { path: "hooks/run-register.mjs", kind: "hook", ownership: "managed", sha256: "2d9d2094211634641908e2f91b19fda70d82dc77ca284641d335cd216d9ee28d" },
   { path: "hooks/session-start-marker.mjs", kind: "hook", ownership: "managed", sha256: "8ce033f95a90a4f100f72b9f6a84a95cb563f339dbf6418ff1947e693b6ba1e8" },
   { path: "hooks/session-start-resume.mjs", kind: "hook", ownership: "managed", sha256: "822a231c0a4b77eaf13bad1700c3447782d920c7ea4cb19d16c6054109dc57b8" },
   { path: "hooks/session-trail-start.mjs", kind: "hook", ownership: "managed", sha256: "25a3adfed51be127797c7efdc9e1904321f298c09fb63fb73ebe0dcf5b78d6c5" },

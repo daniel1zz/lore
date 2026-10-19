@@ -26,12 +26,11 @@ import { Database } from "bun:sqlite";
 import { mkdtempSync, mkdirSync, rmSync } from "fs";
 import { join, resolve } from "path";
 import { tmpdir } from "os";
-import { createApp } from "../../src/app.js";
 import type { App } from "../../src/app.js";
 import type { CreateDocInput, DocRecord, RunId } from "@lore/core";
 import { cleanupWorktrees, commitAll, makeWorktree } from "./support/run-end-fixture.js";
 import { loosenOverrideClasses } from "./fixtures/autonomy-override-helpers.js";
-import { liveAmbient, liveWriteContext } from "../live-invocation.js";
+import { createLiveApp } from "../helpers/live-app.js";
 
 setDefaultTimeout(120_000);
 
@@ -47,7 +46,7 @@ let sessionCounter = 0;
 beforeEach(async () => {
   tmpDir = resolve(mkdtempSync(join(tmpdir(), "lore-run-owned-done-")));
   mkdirSync(join(tmpDir, ".lore"), { recursive: true });
-  (createApp(dbPath(), undefined, liveAmbient(), liveWriteContext()) as App).close();
+  createLiveApp(dbPath()).close();
   // AU-T7: `done --override-attestation` is decided; this suite's subject is not the override, so the class is loosened
   // the documented way (a human-tty governance decision on a throwaway corpus), never by a bypass in product code.
   await loosenOverrideClasses(tmpDir, ["override-attestation"]);
@@ -67,7 +66,7 @@ function dbPath(): string {
 }
 
 async function withApp<T>(fn: (app: App) => Promise<T>): Promise<T> {
-  const app = createApp(dbPath(), undefined, liveAmbient(), liveWriteContext()) as App;
+  const app = createLiveApp(dbPath());
   try {
     return await fn(app);
   } finally {

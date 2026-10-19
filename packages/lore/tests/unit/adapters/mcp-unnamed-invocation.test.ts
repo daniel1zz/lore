@@ -34,6 +34,12 @@ import { actedStore, liveInvocation } from "../../live-invocation.js";
 import { inLoopAuditVerifyRunner } from "../../support/audit-verify-runner-stub.js";
 
 const REASON = refusalNamingHowToBecomeKnown("The server has no known party.");
+
+/** Every refusal of a call with no known party names both remedies (BR-1351). */
+function expectNamesBothRemedies(refusal: string): void {
+  expect(refusal).toContain("lore session start --human");
+  expect(refusal).toContain("lore setup");
+}
 const SESSION_ENV = { CLAUDE_CODE_SESSION_ID: "3de02220-aaaa-bbbb-cccc-111122223333" };
 
 interface Fixture {
@@ -124,24 +130,23 @@ describe("ES-D MCP: an unnamed server (no known party)", () => {
     const { server } = fixture({});
     const result = await call(server, "lore_bootstrap", {});
     expect(result.isError).toBe(true);
-    expect(text(result)).toContain("OS user lookup failed");
-    expect(text(result)).toContain(REASON);
+    expectNamesBothRemedies(text(result));
   });
 
-  it("a write tool refuses, naming the reason, and writes nothing", async () => {
+  it("a write tool refuses, naming both remedies, and writes nothing", async () => {
     const { server, corpusService } = fixture({});
     const result = await call(server, "lore_create", { type: "plan", title: "Unnamed plan", content: "# Plan" });
     expect(result.isError).toBe(true);
-    expect(text(result)).toContain(REASON);
+    expectNamesBothRemedies(text(result));
     const listed = await corpusService.list({ type: "plan" });
     expect(listed.ok && listed.value.docs.map((d) => d.title)).not.toContain("Unnamed plan");
   });
 
-  it("an identity-recording tool (claim) refuses, naming the reason, before looking up its target", async () => {
+  it("an identity-recording tool (claim) refuses, naming both remedies, before looking up its target", async () => {
     const { server } = fixture({});
     const result = await call(server, "lore_claim", { id_or_slug: "no-such-task" });
     expect(result.isError).toBe(true);
-    expect(text(result)).toContain(REASON);
+    expectNamesBothRemedies(text(result));
   });
 
   it("the context bundle is served and says its trace was not recorded and why", async () => {
@@ -157,14 +162,17 @@ describe("ES-D MCP: an unnamed server (no known party)", () => {
 });
 
 describe("ES-D MCP: the same server with an attested run", () => {
-  it("reports no missing trace and serves the writes", async () => {
+  it("reports no missing trace on a read (the real per-call attested write path is exercised by write-requires-known-party.bun.test.ts)", async () => {
     const { server, corpusService } = fixture(SESSION_ENV);
     const slug = await seedPlan(corpusService);
     const bundle = await call(server, "lore_context_bundle", { id_or_slug: slug });
     expect(JSON.parse(text(bundle))).not.toHaveProperty("trace_not_recorded");
-    const created = await call(server, "lore_create", { type: "plan", title: "Named plan", content: "# Plan" });
-    expect(created.isError).toBeFalsy();
-    const boot = await call(server, "lore_bootstrap", {});
-    expect(boot.isError).toBeFalsy();
+  });
+
+  it("a call naming harness_run against an App with no per-call write context is refused loudly (it cannot attest)", async () => {
+    const { server } = fixture(SESSION_ENV);
+    const result = await call(server, "lore_create", { harness_run: `cc:${SESSION_ENV.CLAUDE_CODE_SESSION_ID}`, type: "plan", title: "Named plan", content: "# Plan" });
+    expect(result.isError).toBe(true);
+    expect(text(result)).toContain("cannot attest");
   });
 });

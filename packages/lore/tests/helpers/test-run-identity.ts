@@ -20,10 +20,28 @@
  * Side-effect class: IO (one SQLite insert under the corpus found from `cwd`).
  */
 
-import { Database } from "bun:sqlite";
-import { existsSync } from "node:fs";
+import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
-import { HARNESS_RUN_FLAG } from "@lore/core";
+
+// reason: the REAL `fs`, reached through `createRequire`, never `import "node:fs"`: that specifier is aliased to the test
+// run's recording wrapper (scripts/test-recorded-fs.ts -> scripts/test-read-log.ts), and this module is imported by
+// scripts/test-known-party-spawn.ts which test-read-log.ts itself imports, so an aliased import here is a load cycle.
+const { existsSync } = createRequire(import.meta.url)("node:fs") as typeof import("node:fs");
+
+// reason: spelled out here, NOT imported from `@lore/core`: this module is loaded by the test run's own child_process
+// wrapper (scripts/test-read-log.ts -> scripts/test-known-party-spawn.ts), and `@lore/core` itself imports
+// `child_process` through that wrapper, so importing it here would be a load cycle. `core/tests/run-identity-node.test.ts`
+// pins this value to core's `HARNESS_RUN_FLAG`.
+export const HARNESS_RUN_FLAG = "--harness-run";
+
+// reason: `bun:sqlite` is required LAZILY, inside the one function that writes the registry: this module is imported by
+// the spawn shim of EVERY test run (scripts/test-known-party-spawn.ts), including the few files vitest runs under Node,
+// where a top-level `import "bun:sqlite"` would fail at load. Under Node, registering is simply unavailable.
+type BunDatabase = import("bun:sqlite").Database;
+function openRegistry(dbPath: string): BunDatabase {
+  const { Database } = createRequire(import.meta.url)("bun:sqlite") as typeof import("bun:sqlite");
+  return new Database(dbPath);
+}
 
 /** The run a test uses when it names no writer: an agent run of a fixed fake session. */
 export const DEFAULT_TEST_RUN = "cc:lore-test-default";
@@ -71,9 +89,18 @@ function findCorpusRoot(cwd: string): string | null {
 export function registerTestRun(cwd: string, runId: string): boolean {
   const root = findCorpusRoot(cwd);
   if (root === null) return false;
+  return registerRunInDb(join(root, ".lore", "lore.db"), runId);
+}
+
+/**
+ * Register `runId` (an agent run `cc:<session>[:<agent>]`) in the corpus file at `dbPath` (first registration wins).
+ *
+ * @returns `true` when the file has a runs table (the run is registered, newly or already), else `false`
+ */
+export function registerRunInDb(dbPath: string, runId: string): boolean {
   const [, session, agent] = runId.split(":");
-  if (session === undefined) throw new Error(`registerTestRun: ${runId} is not a cc:<session>[:<agent>] run id`);
-  const db = new Database(join(root, ".lore", "lore.db"));
+  if (session === undefined) throw new Error(`registerRunInDb: ${runId} is not a cc:<session>[:<agent>] run id`);
+  const db = openRegistry(dbPath);
   try {
     const hasRuns = db.query("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'runs'").get() !== null;
     if (!hasRuns) return false;

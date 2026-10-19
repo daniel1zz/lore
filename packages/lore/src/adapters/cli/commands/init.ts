@@ -105,25 +105,39 @@ export default defineLoreCommand({
     // reason: user decision 2026-10-17 — outside a git repository there is no state to stamp
     // against, so init does NOT arm, and says so (stdout line, `--json` field, `lore status`) rather
     // than downgrading silently. `lore audit arm --confirm` arms it once the corpus is in git.
+    // reason: spec-every-write-is-made-by-a-known-party-an-attested-agent-run — arming writes an audit row, and a
+    // write needs a known party. A person has no human session yet at `init` (`lore session start` needs the corpus
+    // this command creates), so init does NOT arm for an invocation with no known party and says so, exactly as it
+    // does outside git; `lore audit arm --confirm` arms it once a session is open.
+    // A run named on the command line is checked against THIS corpus's registry, which `init` has just created empty:
+    // a hook-injected run cannot have been registered here yet, so it is no known party until `lore run register`.
     const stateBinding = app.stateBindingService;
     const insideGit = isInsideGitRepository(cwd);
+    const verifiedParty = inv.identity.claimed === null ? undefined : await app.verifiedInvocationIdentity?.();
+    const knownParty = inv.identity.claimed !== null && (verifiedParty === undefined || verifiedParty.ok);
     const armed = !insideGit
       ? "not_a_git_repo"
-      : stateBinding === undefined
-        ? undefined
-        : await stateBinding.arm({ actor: resolveActor(inv), nowIso: new Date().toISOString() });
+      : !knownParty
+        ? "no_known_party"
+        : stateBinding === undefined
+          ? undefined
+          : await stateBinding.arm({ actor: resolveActor(inv), nowIso: new Date().toISOString() });
     app.close();
-    if (armed === "not_a_git_repo") {
-      const line = `state binding not armed: ${cwd} is not inside a git repository; run \`lore audit arm --confirm\` after placing the corpus in git`;
+    if (armed === "not_a_git_repo" || armed === "no_known_party") {
+      const line =
+        armed === "not_a_git_repo"
+          ? `state binding not armed: ${cwd} is not inside a git repository; run \`lore audit arm --confirm\` after placing the corpus in git`
+          : "state binding not armed: no known party yet (a write needs an attested agent run registered in this corpus, or a human session); " +
+            "run `lore session start --human <name>` (or `lore run register`), then `lore audit arm --confirm`";
       if (args.json) {
-        printLine(inv.io.stdout, 
+        printLine(inv.io.stdout,
           JSON.stringify({
             ok: true,
             data: {
               path: loreDir,
               project: projectName,
               author: args.author,
-              state_binding: { armed: false, reason: "not_a_git_repo" },
+              state_binding: { armed: false, reason: armed },
             },
           }),
         );

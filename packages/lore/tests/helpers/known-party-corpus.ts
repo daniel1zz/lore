@@ -86,8 +86,11 @@ function spawnLore(dir: string, home: string, args: readonly string[], party: Pa
   if (party.kind === "run") {
     registerTestRun(dir, party.run);
     argv = [HARNESS_RUN_FLAG, party.run, ...argv];
-  } else if (party.kind === "human" && party.marker === true) {
-    env["CLAUDECODE"] = "1";
+  } else {
+    // reason: the test run's spawn rewrite (scripts/test-known-party-spawn.ts) gives every `lore` start a registered
+    // agent run; these parties are exactly the ones that must NOT have one, so the start opts out of it.
+    env["LORE_TEST_IDENTITY"] = "none";
+    if (party.kind === "human" && party.marker === true) env["CLAUDECODE"] = "1";
   }
   const proc = Bun.spawnSync(["bun", "run", ENTRY, ...argv], { cwd: dir, env });
   return { stdout: proc.stdout.toString(), stderr: proc.stderr.toString(), exitCode: proc.exitCode ?? 1 };

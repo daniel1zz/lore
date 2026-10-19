@@ -94,7 +94,9 @@ describe("AC-HID-1: a write with no known party is refused before anything is wr
     // reason: NOT registered through `registerTestRun` — the whole point is that the registry has never seen it.
     const result = Bun.spawnSync(["bun", "run", ENTRY, "--harness-run", "cc:never-registered", "set", prd, "--title", "Renamed by a ghost"], {
       cwd: corpus.dir,
-      env: { ...scrubIdentityEnv(process.env), HOME: corpus.home, LORE_STATE_HOME: join(corpus.home, "state") },
+      // reason: this start names its own (unregistered) run, so the test run's spawn rewrite leaves it alone anyway; the
+      // opt-out is stated for the reader.
+      env: { ...scrubIdentityEnv(process.env), HOME: corpus.home, LORE_STATE_HOME: join(corpus.home, "state"), LORE_TEST_IDENTITY: "none" },
     });
     const stderr = result.stderr.toString();
     expect(result.exitCode).toBe(4);

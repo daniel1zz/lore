@@ -58,7 +58,8 @@ import { TaskWorkflowService } from "../../../src/service/task-workflow-service.
 import { AcService } from "../../../src/service/ac-service.js";
 import { RuleService } from "../../../src/service/rule-service.js";
 import { SessionService } from "../../../src/service/session-service.js";
-import { sessionActorFor, sessionEnvFor } from "../../helpers/session-actor";
+import { sessionEnvFor } from "../../helpers/session-actor";
+import { withTestRun } from "../../helpers/test-run-identity";
 import { actedStore } from "../../live-invocation.js";
 
 setDefaultTimeout(300_000);
@@ -74,8 +75,10 @@ interface Identity {
   readonly claimedSource: string;
 }
 
-const ID_A: Identity = { harnessRun: "cc:matrix-session-a", claimed: "agent:matrix-writer-a", claimedSource: "worktree" };
-const ID_B: Identity = { harnessRun: "cc:matrix-session-b:agent-7", claimed: "agent:matrix-writer-b", claimedSource: "os" };
+// reason: an agent run's name is DERIVED from its session (`agent:session-<8>`), so the two identities use two distinct
+// 8-character session prefixes and the expected names are the derived ones (BR-1055, nameOfAgentRun).
+const ID_A: Identity = { harnessRun: "cc:aaaaaaaa-matrix-a", claimed: "agent:session-aaaaaaaa", claimedSource: "run" };
+const ID_B: Identity = { harnessRun: "cc:bbbbbbbb-matrix-b:agent-7", claimed: "agent:session-bbbbbbbb", claimedSource: "run" };
 
 function runRecord(identity: Identity): Record<string, unknown> {
   const parts = identity.harnessRun.split(":");
@@ -512,7 +515,9 @@ function cleanEnv(extra: Record<string, string>): NodeJS.ProcessEnv {
 }
 
 function lore(args: string[], cwd: string, extra: Record<string, string> = {}): { stdout: string; stderr: string; exitCode: number } {
-  const proc = Bun.spawnSync(["bun", "run", ENTRY, ...args], { cwd, env: cleanEnv({ HOME: cwd, ...extra }) });
+  const env = cleanEnv({ HOME: cwd, ...extra });
+  // reason: every write needs a known party; a spawn that names no `--harness-run` runs as the agent run of the session its env names.
+  const proc = Bun.spawnSync(["bun", "run", ENTRY, ...withTestRun(args, env, cwd)], { cwd, env });
   return { stdout: proc.stdout.toString(), stderr: proc.stderr.toString(), exitCode: proc.exitCode ?? 1 };
 }
 
@@ -556,8 +561,8 @@ async function auditSince(dir: string, since: string): Promise<AuditEntry[]> {
 }
 
 describe("CLI chokepoint: `lore --harness-run R <write>` (name N from the session tier) stamps the audit row at the composition root", () => {
-  /** The writer name ID_A's fixture session resolves to — the only way a CLI/MCP write is named (BR-1055). */
-  const NAME_A = sessionActorFor(ID_A.claimed);
+  /** The writer name ID_A's run derives — the only way a CLI/MCP write is named (BR-1055). */
+  const NAME_A = ID_A.claimed;
 
   let dir = "";
   let task = "";
@@ -577,7 +582,7 @@ describe("CLI chokepoint: `lore --harness-run R <write>` (name N from the sessio
     expect(rows.length).toBeGreaterThan(0);
     for (const row of rows) {
       expect(harnessRunOf(row)).toBe(ID_A.harnessRun);
-      expect(JSON.stringify(row)).toContain("session");
+      expect((row.details as Record<string, unknown> | undefined)?.["name_source"]).toBe("run");
     }
   });
 
@@ -639,7 +644,7 @@ describe("MCP lore_batch: three operations in one call carry the same R and the 
   it("create, create and link in ONE batch call -> all audit rows share harness_run R and author N", async () => {
     await registerInCorpus(dir, ID_A);
     const since = new Date().toISOString();
-    const NAME_A = sessionActorFor(ID_A.claimed);
+    const NAME_A = ID_A.claimed;
     const create = (title: string) => ({ op: "create", args: { type: "knowledge", title, content: "body", extra: { sub_type: "reference" } } });
     const result = await withClient(ID_A.claimed, (c) =>
       c.callTool({
@@ -660,14 +665,14 @@ describe("MCP lore_batch: three operations in one call carry the same R and the 
     expect(rows.length).toBeGreaterThanOrEqual(3);
     for (const row of rows) {
       expect(harnessRunOf(row)).toBe(ID_A.harnessRun);
-      expect(JSON.stringify(row)).toContain("session");
+      expect((row.details as Record<string, unknown> | undefined)?.["name_source"]).toBe("run");
     }
     expect(new Set(rows.map((r) => r.actor)).size).toBe(1);
   });
 
-  it("a batch with no harness_run stamps none of its operations (no run is guessed)", async () => {
+  it("a batch with no harness_run is refused and writes none of its operations (no run is guessed, BR-1351)", async () => {
     const since = new Date().toISOString();
-    await withClient("agent:matrix-unattested", (c) =>
+    const result = await withClient("agent:matrix-unattested", (c) =>
       c.callTool({
         name: "lore_batch",
         arguments: {
@@ -675,9 +680,10 @@ describe("MCP lore_batch: three operations in one call carry the same R and the 
         },
       }),
     );
-    const rows = (await auditSince(dir, since)).filter((r) => r.actor === sessionActorFor("agent:matrix-unattested"));
-    expect(rows.length).toBeGreaterThan(0);
-    for (const row of rows) expect(harnessRunOf(row) ?? null).toBeNull();
+    expect(result.isError).toBe(true);
+    expect(JSON.stringify(result.content)).toContain("lore session start --human");
+    const rows = (await auditSince(dir, since)).filter((r) => (r.details as Record<string, unknown> | undefined)?.["title"] === "Unattested batch");
+    expect(rows).toHaveLength(0);
   });
 });
 
