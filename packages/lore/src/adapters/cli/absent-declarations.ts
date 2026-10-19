@@ -22,37 +22,42 @@ import { SQLiteStore } from "../../store/sqlite-store.js";
 import { SiteCensusError, findCensusRoot, resolveCommandEntry } from "../../service/site-census.js";
 import { listRunnableCommands, type RunnableCommand } from "./runnable-commands.js";
 
-/** The predicate inputs of one tree: a declared command's census entry key, and the registry's runnable entry keys. */
+/** The predicate inputs of one tree: each declared command's census entry key, and the registry's runnable entry keys. */
 export interface TreePredicate {
   /** The registry's runnable commands (the list `runnableEntries` is built from). */
   readonly runnable: readonly RunnableCommand[];
-  readonly entryKeyOf: (command: string) => string | undefined;
+  /** `file#symbol` per declared command; `undefined` = the command resolves to no census entry. */
+  readonly entryKeys: ReadonlyMap<string, string | undefined>;
   readonly runnableEntries: ReadonlySet<string>;
 }
 
 /**
- * @throws SiteCensusError when the tree's registry cannot be analysed (never a shorter list).
+ * Resolve `commands` against the tree at `rootDir`.
+ *
+ * @throws SiteCensusError when the tree's registry cannot be analysed, or a command fails to resolve for any reason other
+ *   than "no such command" (never read as absent).
  */
-export async function treePredicateFor(rootDir: string): Promise<TreePredicate> {
+export async function treePredicateFor(rootDir: string, commands: Iterable<string>): Promise<TreePredicate> {
   const runnable = await listRunnableCommands(rootDir);
   const runnableEntries = new Set(runnable.map((c) => `${c.entry.file}#${c.entry.symbol}`));
-  const entryKeyOf = (command: string): string | undefined => {
+  const entryKeys = new Map<string, string | undefined>();
+  for (const command of commands) {
     try {
       const entry = resolveCommandEntry({ rootDir, command });
-      return `${entry.file}#${entry.symbol}`;
+      entryKeys.set(command, `${entry.file}#${entry.symbol}`);
     } catch (cause) {
-      if (cause instanceof SiteCensusError && cause.reason === "command-unresolved") return undefined;
-      throw cause;
+      if (!(cause instanceof SiteCensusError && cause.reason === "command-unresolved")) throw cause;
+      entryKeys.set(command, undefined);
     }
-  };
-  return { runnable, entryKeyOf, runnableEntries };
+  }
+  return { runnable, entryKeys, runnableEntries };
 }
 
 /** Absent declarations of `leaves` in the tree at `rootDir`; builds the tree predicate once. */
 export async function measureAbsentDeclarations(rootDir: string, leaves: readonly DeclaringLeaf[]): Promise<AbsentDeclaration[]> {
   if (leaves.length === 0) return [];
-  const { entryKeyOf, runnableEntries } = await treePredicateFor(rootDir);
-  return absentDeclarationsOf(leaves, entryKeyOf, runnableEntries);
+  const { entryKeys, runnableEntries } = await treePredicateFor(rootDir, leaves.flatMap((l) => l.commands));
+  return absentDeclarationsOf(leaves, entryKeys, runnableEntries);
 }
 
 /**

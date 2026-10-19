@@ -293,8 +293,8 @@ async function runCoverage(target: string, json: boolean, inv: Invocation): Prom
     // must declare it in the shared corpus before it lands, so every other branch's tree lacks it until then and refusing it would
     // block every other integrate. It also must not surface as a census error (exit 4) from resolveCommandEntry; only an
     // unanalysable tree still throws.
-    const { runnable, entryKeyOf, runnableEntries } = await treePredicateFor(rootDir);
-    const partitionByLeaf = new Map(leaves.map((leaf) => [leaf.slug, partitionDeclaredCommands(leafCommands(leaf), entryKeyOf, runnableEntries)]));
+    const { runnable, entryKeys, runnableEntries } = await treePredicateFor(rootDir, leaves.flatMap(leafCommands));
+    const partitionByLeaf = new Map(leaves.map((leaf) => [leaf.slug, partitionDeclaredCommands(leafCommands(leaf), entryKeys, runnableEntries)]));
     const livePartition = (leaf: DocRecord) => partitionByLeaf.get(leaf.slug) as { live: string[]; absent: string[] };
     const censusByCommand = listSitesMany({ rootDir, commands: leaves.flatMap((leaf) => livePartition(leaf).live) });
     const reports: LeafCoverageReport[] = leaves.map((leaf) => {
@@ -358,7 +358,7 @@ async function runCoverage(target: string, json: boolean, inv: Invocation): Prom
             new Set(
               leaves
                 .flatMap((leaf) => livePartition(leaf).live)
-                .map((command) => entryKeyOf(command) as string),
+                .map((command) => entryKeys.get(command) as string),
             ),
           )
         : [];

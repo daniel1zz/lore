@@ -100,19 +100,20 @@ export function absentCommandFixCommand(leafSlug: string, command: string): stri
  * may be pending in a branch that has not landed). A command is absent when it resolves to no census entry, or its entry is no longer a runnable registry command.
  *
  * @param declared - the leaf's `extra.commands`.
- * @param entryKeyOf - `file#symbol` of a declared command, or `undefined` when it resolves to no census entry (the caller
- *   maps ONLY a command-unresolved failure to `undefined`; any other failure must propagate, never read as absent).
+ * @param entryKeys - `file#symbol` of each declared command, or `undefined` when it resolves to no census entry (the caller
+ *   maps ONLY a command-unresolved failure to `undefined`; any other failure must propagate, never read as absent). Data, not a
+ *   callback: the census would otherwise see an unresolvable call here and ask every reaching leaf to account for it.
  * @param runnableEntries - `file#symbol` of every command the registry lists.
  */
 export function partitionDeclaredCommands(
   declared: readonly string[],
-  entryKeyOf: (command: string) => string | undefined,
+  entryKeys: ReadonlyMap<string, string | undefined>,
   runnableEntries: ReadonlySet<string>,
 ): { live: string[]; absent: string[] } {
   const live: string[] = [];
   const absent: string[] = [];
   for (const command of declared) {
-    const key = entryKeyOf(command);
+    const key = entryKeys.get(command);
     (key !== undefined && runnableEntries.has(key) ? live : absent).push(command);
   }
   return { live, absent };
@@ -156,11 +157,11 @@ export function leavesUnder(
 /** Every absent declaration of `leaves`, by the SAME predicate coverage uses ({@link partitionDeclaredCommands}). */
 export function absentDeclarationsOf(
   leaves: readonly DeclaringLeaf[],
-  entryKeyOf: (command: string) => string | undefined,
+  entryKeys: ReadonlyMap<string, string | undefined>,
   runnableEntries: ReadonlySet<string>,
 ): AbsentDeclaration[] {
   return leaves.flatMap((leaf) =>
-    partitionDeclaredCommands(leaf.commands, entryKeyOf, runnableEntries).absent.map((command) => ({
+    partitionDeclaredCommands(leaf.commands, entryKeys, runnableEntries).absent.map((command) => ({
       leaf: leaf.slug,
       command,
       fix: absentCommandFixCommand(leaf.slug, command),
