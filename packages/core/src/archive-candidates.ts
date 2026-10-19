@@ -56,7 +56,7 @@
  *   §Candidate Rules R1-R4, §Design Decisions D1.
  */
 
-import { extractClaim, isClaimStale } from "./task-workflow.js";
+import { extractHeldClaim, isClaimStale } from "./task-workflow.js";
 import { knowledgeExtraSchema } from "./schemas.js";
 import type { HandoffExtra } from "./session.js";
 import type { DocId, DocRecord, DocStatus } from "./types.js";
@@ -113,7 +113,7 @@ function getAgeMinutes(nowIso: string, createdAtIso: string): number {
  * Extracts every live, non-terminal `knowledge`/`sub_type: "handoff"` doc from
  * `docs` with its Zod-valid `HandoffExtra` payload. A doc that fails to parse
  * (malformed/legacy `extra`) is silently excluded — the same "tolerate, don't
- * crash" contract {@link extractClaim} already applies to task claims.
+ * crash" contract {@link readClaimRecord} already applies to task claims.
  */
 function extractHandoffs(docs: readonly DocRecord[]): HandoffInfo[] {
   const infos: HandoffInfo[] = [];
@@ -259,7 +259,7 @@ export function computeArchiveCandidates(
     if (TERMINAL_STATUSES.has(doc.status)) continue;
     const planStatus = parentPlanStatus(doc.parent_id);
     if (planStatus === undefined || !TERMINAL_STATUSES.has(planStatus)) continue;
-    const claim = extractClaim(doc);
+    const claim = extractHeldClaim(doc);
     const fresh = claim !== undefined && !isClaimStale(claim, nowIso, ttl.claimTtlMinutes);
     if (fresh) continue;
     candidates.push({
@@ -343,7 +343,7 @@ export function computePlanCloseCascadeTargets(
     if (TERMINAL_STATUSES.has(doc.status)) continue;
 
     if (doc.type === "task") {
-      const claim = extractClaim(doc);
+      const claim = extractHeldClaim(doc);
       const fresh = claim !== undefined && !isClaimStale(claim, nowIso, claimTtlMinutes);
       if (fresh) {
         skipped.push({

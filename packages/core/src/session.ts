@@ -201,7 +201,7 @@
 
 import { z } from "zod";
 import { ChangeSourceSchema, type ChangeSource, type SessionTrail } from "./session-trail.js";
-import { extractClaim, isClaimStale } from "./task-workflow.js";
+import { extractHeldClaim, isClaimStale } from "./task-workflow.js";
 import type { DocId, DocRecord } from "./types.js";
 
 // ─── Handoff Extra Schema (S2, SPEC-041 §3 D3) ─────────────────────────────
@@ -751,7 +751,7 @@ export function deriveSessions(
   const order: string[] = [];
 
   for (const task of tasks) {
-    const claim = extractClaim(task);
+    const claim = extractHeldClaim(task);
     if (claim === undefined) continue;
     if (staleByTask?.get(task.id) ?? isClaimStale(claim, nowIso, ttlMinutes)) continue;
 

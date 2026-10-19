@@ -213,7 +213,7 @@ function safeExtra(extra: unknown): Record<string, unknown> {
 /**
  * Extracts and validates `plan.extra.prd_sync_exempt` from a DocRecord-shaped
  * input. Returns `undefined` when absent or malformed (defensive — `extra` is
- * untyped storage; matches `extractValidity`/`extractClaim`'s degrade-to-
+ * untyped storage; matches `extractValidity`/`readClaimRecord`'s degrade-to-
  * undefined contract).
  */
 export function extractPrdSyncExempt(doc: Pick<DocRecord, "extra">): PrdSyncExempt | undefined {

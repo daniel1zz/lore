@@ -148,7 +148,7 @@
 
 import { realpathSync } from "node:fs";
 import { isAbsolute, relative, resolve } from "node:path";
-import { err, extractClaim, isClaimStale, ok, type LoreError, type Result } from "@lore/core";
+import { err, extractHeldClaim, isClaimStale, ok, type LoreError, type Result } from "@lore/core";
 import type { CorpusProvenance } from "@lore/core";
 import type { DocRecord, TaskClaim } from "@lore/core";
 import type { StoreInterface } from "../store/store-interface.js";
@@ -221,7 +221,7 @@ export type ForeignCorpusWriteRefusal = Extract<ForeignCorpusWriteVerdict, { all
  * @param context - The two ambient facts — see {@link ForeignCorpusWriteContext}.
  * @param intentDeclared - Whether THIS specific write already carries
  *   declared intent — `opts.worktree !== undefined` for a fresh `lore claim`
- *   call, or `extractClaim(task)?.worktree !== undefined` for every later
+ *   call, or `readClaimRecord(task)?.worktree !== undefined` for every later
  *   lifecycle verb reading the persisted lease; always `false` for a
  *   non-lifecycle write (`lore create`/`set`/`link`/`unlink`/`delete` — none
  *   of these have any lease to read intent from).
@@ -559,7 +559,7 @@ export class CorpusWriteAuthority {
     const callerDir = canonicalDir(this.context.callerDir);
     const nowIso = this.now();
     for (const task of tasks.value) {
-      const claim = extractClaim(task);
+      const claim = extractHeldClaim(task);
       if (claim?.corpus_scope === undefined || claim.worktree === undefined) continue;
       if (isClaimStale(claim, nowIso, this.context.claimTtlMinutes)) continue;
       if (!isWithin(canonicalDir(claim.worktree), callerDir)) continue;

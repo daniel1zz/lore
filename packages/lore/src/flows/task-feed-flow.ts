@@ -11,11 +11,11 @@
  * THICK-BUNDLE / THIN-FLOW (SPEC-070 D2, the review-mandated correction over the
  * phase-start precedent): every domain fact this module renders arrives ALREADY
  * DERIVED on `TaskBundle` — this module NEVER calls `computeAcCoverage`,
- * `extractClaim`, `isClaimStale`, or `extractEvidence` itself (those derivations
+ * `readClaimRecord`, `isClaimStale`, or `extractEvidence` itself (those derivations
  * live in `adapters/cli/task-feed-wiring.ts::buildTaskFeedFlowDeps`, over
  * `CorpusService.getPlanBundle` + `TaskWorkflowService.ready`). AC-070-1 asserts
  * this module's import graph contains none of those four function names — grep:
- * `grep -n 'computeAcCoverage\|extractClaim\|isClaimStale\|extractEvidence' \
+ * `grep -n 'computeAcCoverage\|readClaimRecord\|isClaimStale\|extractEvidence' \
  *   packages/lore/src/flows/task-feed-flow.ts` MUST return 0 hits.
  *
  * Contract (resolved by `tests/unit/flows/task-feed-flow.test.ts` — that file is the
