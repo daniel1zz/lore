@@ -20,6 +20,7 @@
  */
 import type { Invocation } from "@lore/core";
 import { exitCode, formatErrorFor } from "./utils.js";
+import { renderDecisionDetailLines, renderDetailsLine, resolveDetailBase } from "./decision-detail-lines.js";
 import { DecisionService } from "../../service/decision-service.js";
 import {
   HUMAN_CHANNEL_REFUSAL_EXIT,
@@ -49,6 +50,14 @@ function decideIoOf(io: Invocation["io"]): DecideFlowIo {
     stdout: (text) => void io.stdout.write(text),
     stderr: (text) => void io.stderr.write(text),
   };
+}
+
+/**
+ * The one-line summary followed by the decision's plain-words detail and its dashboard link, all shown above the
+ * confirmation code. The nonce is not involved: it is generated and written inside `confirmHumanNonce`.
+ */
+function withDetailLines(summary: string, row: { readonly detail: string | null }, decisionId: number, inv: Invocation): string {
+  return [summary, ...renderDecisionDetailLines(row), renderDetailsLine(resolveDetailBase(inv), decisionId)].join("\n");
 }
 
 function usageRefusal(io: DecideFlowIo, message: string): number {
@@ -96,7 +105,7 @@ export async function runDecideFlow(inv: Invocation, input: DecideFlowInput, por
       const item = audit.value;
       const auditAnswer = input.accept ? "right" : "wrong";
       const auditSummary = `audit decision ${item.id}: auto ${item.class} ${item.subject_id} (${item.subject_version}) was ${auditAnswer.toUpperCase()}`;
-      const auditProof = confirmHumanNonce(ports, pre.value, auditSummary);
+      const auditProof = confirmHumanNonce(ports, pre.value, withDetailLines(auditSummary, item, item.id, inv));
       if (!auditProof.ok) return usageRefusal(io, auditProof.error.message);
       const answered = await service.resolveAudit(item.id, auditAnswer, input.reason, auditProof.value);
       if (!answered.ok) {
@@ -108,7 +117,7 @@ export async function runDecideFlow(inv: Invocation, input: DecideFlowInput, por
     }
     const target = pending.value;
     const summary = `${answer} decision ${target.id}: ${target.class} ${target.subject_id} (${target.subject_version}), score ${target.score}`;
-    const proof = confirmHumanNonce(ports, pre.value, summary);
+    const proof = confirmHumanNonce(ports, pre.value, withDetailLines(summary, target, target.id, inv));
     if (!proof.ok) return usageRefusal(io, proof.error.message);
 
     const resolved = await service.resolvePending(target.id, answer, input.reason, proof.value);

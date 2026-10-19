@@ -51,6 +51,8 @@ export interface PendingDecision {
   readonly reasons: readonly string[];
   readonly recommended: RecommendedAnswer;
   readonly recommended_reason: string;
+  /** Serialised DecisionDetail of the latest escalating row (HR-T7), or null for a row decided before detail existed. */
+  readonly detail: string | null;
 }
 
 /**
@@ -149,6 +151,7 @@ export function deriveOpenEscalations(rows: readonly DecisionLogRow[]): Result<O
       reasons: reasons.value,
       recommended: recommendation.answer,
       recommended_reason: recommendation.reason,
+      detail: latest.detail ?? null,
       latest_escalate_id: latestEscalate.id,
     });
   }
