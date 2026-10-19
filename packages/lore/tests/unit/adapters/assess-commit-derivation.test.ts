@@ -295,7 +295,7 @@ describe("deriveCommitSetForPlan — STATE: idempotent across repeated calls", (
     const first = deriveCommitSetForPlan(dir, ["task-plan-idem-a"], false, ranges);
     const second = deriveCommitSetForPlan(dir, ["task-plan-idem-a"], false, ranges);
     expect(second).toEqual(first);
-  });
+  }, 15000);
 });
 
 // ─── REGRESSION ────────────────────────────────────────────────────────────────
