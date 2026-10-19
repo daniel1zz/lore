@@ -129,11 +129,9 @@ export interface SeatEnterOpts {
 export interface SeatListEntry {
   branch: string;
   created_at: string;
-  merged: boolean;
+  /** `null` = NOT MEASURED: the main checkout has no checked-out branch (detached HEAD), so there is no base to judge against (BR-380). Never a guess. */
+  merged: boolean | null;
 }
-
-/** The base branch `list` compares seats against. `remove` instead uses the main checkout's checked-out branch (see {@link mainCheckoutBranch}). */
-const SEAT_BASE_BRANCH = "main";
 
 /**
  * The main checkout's checked-out branch — `git worktree list` always reports
@@ -263,8 +261,9 @@ export class SeatService {
    * Lists every active seat worktree — the G13 cost counter-metric data
    * surface (SPEC-057 AC-S-7). Filters `worktreeList()` down to entries
    * whose branch is a genuine seat branch (`parseSeatBranch(...) !== null`)
-   * and resolves each one's merge status via `isMerged` against
-   * {@link SEAT_BASE_BRANCH}.
+   * and resolves each one's merge status via `isMerged` against the SAME base
+   * branch `remove` uses ({@link mainCheckoutBranch}). A detached main checkout
+   * yields `merged: null` (not measured) — never a guess, never an error.
    *
    * @returns `ok([])` for a corpus/repo with no active seats — an empty list
    *   is a valid result, never an error.
@@ -273,12 +272,17 @@ export class SeatService {
     const listResult = await this.gitPort.worktreeList();
     if (!listResult.ok) return listResult;
 
+    const base = mainCheckoutBranch(listResult.value);
     const entries: SeatListEntry[] = [];
     for (const worktree of listResult.value) {
       if (worktree.branch === null) continue;
       if (parseSeatBranch(worktree.branch) === null) continue;
 
-      const mergedResult = await this.gitPort.isMerged(worktree.branch, SEAT_BASE_BRANCH);
+      if (!base.ok) {
+        entries.push({ branch: worktree.branch, created_at: worktree.createdAt, merged: null });
+        continue;
+      }
+      const mergedResult = await this.gitPort.isMerged(worktree.branch, base.value);
       if (!mergedResult.ok) return mergedResult;
 
       entries.push({ branch: worktree.branch, created_at: worktree.createdAt, merged: mergedResult.value });
