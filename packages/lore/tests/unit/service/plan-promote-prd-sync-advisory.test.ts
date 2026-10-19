@@ -39,12 +39,12 @@ const HUMAN_AC = {
   verify: { mode: "human" as const },
 };
 
-/** knob ON: the SAME `workflow.gates."plan-close".prd_sync.enabled` the retired advisory read. */
+/** knob ON: the SAME `workflow.gates."plan-close".cited_rule_check.enabled` the retired advisory read. */
 function prdSyncConfig(overrides?: Record<string, unknown>): LoreConfig {
   return {
     project: { name: "t", author: "t" },
     workflow: {
-      gates: { "plan-close": { prd_sync: { enabled: true } }, ...(overrides ?? {}) },
+      gates: { "plan-close": { cited_rule_check: { enabled: true } }, ...(overrides ?? {}) },
     },
   } as unknown as LoreConfig;
 }
@@ -146,7 +146,7 @@ describe("plan-promote no longer produces a prd-sync domain-doc advisory (BR-984
   });
 
   // BOUNDARY — knob OFF (default) behaves identically.
-  it("BOUNDARY: prd_sync disabled (default) yields no prd_sync_advisories either", async () => {
+  it("BOUNDARY: cited_rule_check disabled (default) yields no prd_sync_advisories either", async () => {
     const { corpusService, reviewService } = await makeHarness();
     const spec = await createUnlinkedSpec(corpusService, [SCRIPT_AC]);
     const plan = await createPlan(corpusService, spec.id);

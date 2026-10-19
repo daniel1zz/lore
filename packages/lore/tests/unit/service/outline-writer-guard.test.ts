@@ -7,7 +7,7 @@
  * writers (single-entry CAS patch, unknown-section rejection, blank-reason rejection); it now pins:
  *   - the service surface: only `outlineList` remains, and it still reads stored entries / rejects a
  *     non-prd target
- *   - the `CorpusService.set` guards that keep stored outline / `prd_sync_exempt` data from being
+ *   - the `CorpusService.set` guards that keep stored outline data from being
  *     silently rewritten through `lore set`, now naming the retirement instead of a dead verb
  *   - `renderOutlineContent` (@lore/core, read projection) is unchanged
  *
@@ -86,13 +86,12 @@ async function createSpec(cs: CorpusService, parentId: string, title = "Test Spe
 
 async function createPlan(
   cs: CorpusService,
-  opts: { title?: string; prdSyncExempt?: { reason: string; by: string; at: string } } = {},
+  opts: { title?: string } = {},
 ): Promise<string> {
   const result = await cs.create({
     type: "plan",
     title: opts.title ?? "Test Plan",
     content: "plan body",
-    ...(opts.prdSyncExempt !== undefined ? { extra: { prd_sync_exempt: opts.prdSyncExempt } } : {}),
   } as CreateDocInput);
   if (!result.ok) throw new Error(`plan create failed: ${JSON.stringify(result.error)}`);
   return result.value.id;
@@ -188,52 +187,6 @@ describe("NEGATIVE — CorpusService.set rejects a direct extra.outline patch, n
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.error.code).toBe("VALIDATION_ERROR");
-  });
-});
-
-// ═══ NEGATIVE/BOUNDARY/HAPPY — CorpusService.set: prd_sync_exempt drop guard ═
-
-describe("CorpusService.set — plan.extra.prd_sync_exempt wholesale-drop guard", () => {
-  it("NEGATIVE: rejects a patch that DROPS an existing exemption (present before, absent after), naming the retirement", async () => {
-    const { corpusService } = makeServices();
-    const exemption = { reason: "domain doc rewrite scheduled next plan", by: "agent:alice", at: "2026-07-26T00:00:00.000Z" };
-    const planId = await createPlan(corpusService, { prdSyncExempt: exemption });
-
-    const result = await corpusService.set(planId, { extra: { some_unrelated_field: true } });
-
-    expect(result.ok).toBe(false);
-    if (result.ok) return;
-    expect(result.error.code).toBe("VALIDATION_ERROR");
-    const message = (result.error as { message?: string }).message ?? "";
-    expect(message).toContain("retired");
-
-    const after = await corpusService.get(planId);
-    expect(after.ok).toBe(true);
-    if (!after.ok) return;
-    expect(after.value.doc.extra["prd_sync_exempt"]).toEqual(exemption);
-  });
-
-  it("HAPPY: a patch that RESTATES the exemption verbatim alongside a new field succeeds", async () => {
-    const { corpusService } = makeServices();
-    const exemption = { reason: "domain doc rewrite scheduled next plan", by: "agent:alice", at: "2026-07-26T00:00:00.000Z" };
-    const planId = await createPlan(corpusService, { prdSyncExempt: exemption });
-
-    const result = await corpusService.set(planId, {
-      extra: { prd_sync_exempt: exemption, some_unrelated_field: true },
-    });
-
-    expect(result.ok).toBe(true);
-    if (!result.ok) return;
-    expect(result.value.extra["prd_sync_exempt"]).toEqual(exemption);
-    expect(result.value.extra["some_unrelated_field"]).toBe(true);
-  });
-
-  it("BOUNDARY: a plan with NO exemption declared is unaffected by a bare extra patch", async () => {
-    const { corpusService } = makeServices();
-    const planId = await createPlan(corpusService, {});
-
-    const result = await corpusService.set(planId, { extra: { some_unrelated_field: true } });
-    expect(result.ok).toBe(true);
   });
 });
 
