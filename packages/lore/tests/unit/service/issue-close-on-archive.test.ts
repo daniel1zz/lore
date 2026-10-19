@@ -71,6 +71,10 @@ class RecordingCloser implements IssueCloser {
     if (this.labelError !== undefined) return err(this.labelError);
     return ok(undefined);
   }
+  async removeLabels(ref: GithubIssueRef, names: readonly string[]): Promise<Result<void, LoreError>> {
+    this.calls.push(`unlabel:${ref.issueNumber}:${names.join(",")}`);
+    return ok(undefined);
+  }
   writes(): string[] {
     return this.calls.filter((call) => !call.startsWith("read:"));
   }

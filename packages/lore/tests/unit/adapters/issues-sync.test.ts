@@ -1,57 +1,51 @@
 /**
- * AC-IC-4 (sync half) — `lore issues --sync [--apply] [--json]`
- * (spec-archiving-the-work-that-resolves-a-defect-report-closes D3). Real `IssueCloseOnArchive` over
- * InMemoryStore + a RECORDING FAKE closer; the render + exit-code half is driven through `runIssuesSync`.
- *   HAPPY:      drift (a) fixed + archived source with the issue open / label missing is listed and, with
- *               --apply, closed and labelled; drift (b) a terminal report missing its label is listed and
- *               only labelled.
- *   NEGATIVE:   a fixed report resting only on an ACTIVE source is NOT listed; a clean corpus lists nothing.
- *   BOUNDARY:   without --apply the closer is never asked to write and the exit is 0.
- *   ERROR:      any failed apply exits EXACTLY 1 and names the error in applied[].error; an unconfigured
- *               closer exits 1.
- *   REGRESSION: closing a (b) report would fail the never-closed assertion.
+ * `lore issues --sync [--json]` — the PUSH-ONLY repair
+ * (spec-github-owns-issue-report-state-no-mirror-task-work-carries D5). Real `IssueCloseOnArchive` over
+ * InMemoryStore + a RECORDING FAKE closer, the COMPLETE listing handed in as data; the render + exit-code half is
+ * driven through `runIssuesSync`. Moved here from the mirror model (`issue_report` seeds, `--apply`, drift rows):
+ * the repair is now keyed on carriers (`extra.issues`) and always applies.
+ *   HAPPY:      an open issue named by an archived carrier is closed, commented and labelled resolution:fixed; an
+ *               open issue carrying a resolution:* label and no carrier has only the label removed.
+ *   NEGATIVE:   a closed-and-labelled fixed issue, an open issue with a live carrier, a verdict-closed issue and
+ *               an issue whose only carrier is deprecated get NO write.
+ *   BOUNDARY:   a closed/completed issue with an archived carrier but no resolution:fixed label is only labelled,
+ *               never touched otherwise.
+ *   STATE:      nothing to repair prints `clean` and exits 0 with zero writes; planning alone writes nothing.
+ *   ERROR:      the failing call's own kind decides the exit (transport 9, auth 8), the other repairs still run;
+ *               an unconfigured closer exits 4; a missing driver exits 1.
+ *   REGRESSION: `clean` is only reachable through a listing the caller already holds in full.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { err, ok } from "@lore/core";
-import type { CreateDocInput, DocRecord, DocStatus, LoreError, Result } from "@lore/core";
+import type { CreateDocInput, DocRecord, LoreError, Result } from "@lore/core";
 
 import { runIssuesSync } from "../../../src/adapters/cli/issues-sync.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
 import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
-import { IssueCloseOnArchive } from "../../../src/service/issue-close-on-archive.js";
+import type { GithubListedIssue } from "../../../src/service/github-intake-port.js";
+import { IssueCloseOnArchive, type IssueSyncListing } from "../../../src/service/issue-close-on-archive.js";
 import type { GithubIssueSnapshot, IssueCloser } from "../../../src/service/issue-closer-port.js";
 import type { GithubIssueRef } from "../../../src/service/resolution-projector.js";
 import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { actedStore, liveInvocation } from "../../live-invocation.js";
 
-interface FakeIssue {
-  state: "open" | "closed";
-  labels: string[];
-}
+const REPO_ID = 123;
+const REPO = "acme/widget";
 
 /** Recording fake — the only GitHub surface this file touches. */
 class FakeGithub implements IssueCloser {
-  readonly issues = new Map<number, FakeIssue>();
   readonly writes: string[] = [];
-  readonly failClose = new Set<number>();
+  readonly closeFailures = new Map<number, LoreError>();
 
-  async readIssue(ref: GithubIssueRef): Promise<Result<GithubIssueSnapshot, LoreError>> {
-    const issue = this.issues.get(ref.issueNumber);
-    if (issue === undefined) return err({ code: "VALIDATION_ERROR", field: "gh", message: `no #${ref.issueNumber}`, value: ref.issueNumber });
-    return ok({ state: issue.state, labels: [...issue.labels] });
+  async readIssue(): Promise<Result<GithubIssueSnapshot, LoreError>> {
+    return ok({ state: "open", stateReason: null, labels: [] });
   }
   async closeIssue(ref: GithubIssueRef): Promise<Result<{ alreadyClosed: boolean }, LoreError>> {
-    this.writes.push(`close:${ref.issueNumber}`);
-    if (this.failClose.has(ref.issueNumber)) {
-      return err({ code: "VALIDATION_ERROR", field: "gh", message: "HTTP 502", value: "502" });
-    }
-    const issue = this.issues.get(ref.issueNumber);
-    if (issue === undefined) return err({ code: "VALIDATION_ERROR", field: "gh", message: "missing", value: 0 });
-    const was = issue.state;
-    issue.state = "closed";
-    return ok({ alreadyClosed: was === "closed" });
+    this.writes.push(`close:${ref.issueNumber}@${ref.repo}`);
+    const failure = this.closeFailures.get(ref.issueNumber);
+    return failure === undefined ? ok({ alreadyClosed: false }) : err(failure);
   }
   async commentIssue(ref: GithubIssueRef): Promise<Result<void, LoreError>> {
     this.writes.push(`comment:${ref.issueNumber}`);
@@ -59,10 +53,16 @@ class FakeGithub implements IssueCloser {
   }
   async labelIssue(ref: GithubIssueRef, label: string): Promise<Result<void, LoreError>> {
     this.writes.push(`label:${ref.issueNumber}:${label}`);
-    this.issues.get(ref.issueNumber)?.labels.push(label);
+    return ok(undefined);
+  }
+  async removeLabels(ref: GithubIssueRef, names: readonly string[]): Promise<Result<void, LoreError>> {
+    this.writes.push(`unlabel:${ref.issueNumber}:${names.join(",")}`);
     return ok(undefined);
   }
 }
+
+const transport: LoreError = { code: "TRANSPORT_UNAVAILABLE", message: "could not resolve host", retryable: true };
+const auth: LoreError = { code: "AUTH_REQUIRED", message: "run gh auth login", retryable: false };
 
 async function must<T>(promise: Promise<Result<T, LoreError>>, what: string): Promise<T> {
   const result = await promise;
@@ -83,195 +83,209 @@ async function buildWorld(configured = true): Promise<World> {
   const github = new FakeGithub();
   // reason: the step is deliberately NOT wired into `cs` — the drift this command repairs is exactly what
   // is left when an archive could not close the issue.
-  const step = new IssueCloseOnArchive(store, configured ? github : undefined, configured ? "acme/widget" : undefined);
+  const step = new IssueCloseOnArchive(store, configured ? github : undefined, configured ? REPO : undefined);
   await must(cs.create({ type: "prd", title: "Root PRD", content: "root" } as CreateDocInput), "prd");
   return { store, cs, github, step };
 }
 
-async function fileReport(
-  w: World,
-  number: number,
-  gh: FakeIssue,
-  opts: { explicit?: "wontfix" | "rejected"; archivedIssueTask?: boolean } = {},
-): Promise<DocRecord> {
-  const report = await must(
+/** A task carrier naming `number`, optionally moved to `status` straight in the store (no archive step runs). */
+async function carrier(w: World, number: number, status: "draft" | "archived" | "deprecated"): Promise<DocRecord> {
+  const task = await must(
     w.cs.create({
       type: "task",
-      title: `Defect ${number}`,
-      extra: {
-        adhoc: true,
-        issue_report: {
-          reporter_project: "consumer",
-          reporter_actor: "agent:x",
-          lore_version: "0.0.0",
-          expected: "exit 0",
-          actual: "exit 4",
-          reported_at: "2026-01-01T00:00:00.000Z",
-          github: { repo: "acme/widget", number, repo_id: 123 },
-          ...(opts.explicit !== undefined
-            ? { resolution: { state: opts.explicit, reason: "r", resolved_at: "2026-10-01T00:00:00.000Z", resolved_by: "t" } }
-            : {}),
-        },
-      },
+      title: `Carrier of ${number} (${status})`,
+      content: "body",
+      extra: { adhoc: true, issues: [{ repo_id: REPO_ID, number }] },
     } as CreateDocInput),
-    "report",
+    "carrier",
   );
-  w.github.issues.set(number, gh);
-  if (opts.archivedIssueTask === true) await setStatus(w, report, "archived");
-  return report;
+  if (status === "draft") return task;
+  await must(w.store.update(task.id, { status, version: task.version + 1 }, { expected_version: task.version }), "status");
+  return task;
 }
 
-async function setStatus(w: World, doc: DocRecord, status: DocStatus): Promise<void> {
-  await must(w.store.update(doc.id, { status, version: doc.version + 1 }, { expected_version: doc.version }), "status");
-}
+const issue = (number: number, over: Partial<GithubListedIssue> = {}): GithubListedIssue => ({
+  number,
+  title: `Issue ${number}`,
+  state: "open",
+  body: "",
+  labels: [],
+  state_reason: null,
+  ...over,
+});
 
-/** A plan resolving `report` and sitting at `status` (written straight to the store — no archive step runs). */
-async function resolver(w: World, report: DocRecord, title: string, status: DocStatus): Promise<void> {
-  const plan = await must(w.cs.create({ type: "plan", title, content: "b" } as CreateDocInput), "plan");
-  await must(w.cs.link(plan.id, report.id, "resolves"), "link");
-  await setStatus(w, plan, status);
-}
+const listingOf = (...issues: GithubListedIssue[]): IssueSyncListing => ({ issues, repoId: REPO_ID });
 
-let logged: string[] = [];
+let stdout: string[] = [];
+let stderr: string[] = [];
 beforeEach(() => {
-  logged = [];
+  stdout = [];
+  stderr = [];
   vi.spyOn(process.stdout, "write").mockImplementation(((chunk: unknown) => {
-    logged.push(String(chunk).replace(/\n$/, ""));
+    stdout.push(String(chunk).replace(/\n$/, ""));
     return true;
   }) as never);
-  vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+  vi.spyOn(process.stderr, "write").mockImplementation(((chunk: unknown) => {
+    stderr.push(String(chunk).replace(/\n$/, ""));
+    return true;
+  }) as never);
 });
 afterEach(() => vi.restoreAllMocks());
 
 interface SyncJson {
   ok: boolean;
   data: {
-    drift: Array<{ number: number; slug: string; computed: string; github_state: string; missing_label: boolean }>;
-    applied?: Array<{ number: number; closed: boolean; labelled: boolean; error?: string }>;
+    clean: boolean;
+    changes: Array<{ number: number; action: string }>;
+    applied: Array<{ number: number; action: string; failed?: boolean }>;
   };
 }
 
-async function syncJson(w: World, apply: boolean): Promise<{ exit: number; json: SyncJson }> {
-  logged = [];
-  const exit = await runIssuesSync(liveInvocation(), w.step, { apply, json: true });
-  return { exit, json: JSON.parse(logged.join("\n")) as SyncJson };
+async function sync(w: World, listing: IssueSyncListing, json = true): Promise<number> {
+  stdout = [];
+  stderr = [];
+  return await runIssuesSync(liveInvocation(), w.step, listing, { json });
 }
 
-/** The standard mixed corpus: #1 drift(a) open+unlabelled, #2 drift(a) closed but unlabelled, #3 fixed+closed+labelled (clean),
- *  #4 fixed on an ACTIVE source only, #5 wontfix unlabelled, #6 closed-by-archive unlabelled, #7 wontfix already labelled. */
-async function mixedCorpus(w: World): Promise<void> {
-  const r1 = await fileReport(w, 1, { state: "open", labels: [] });
-  await resolver(w, r1, "Fixer one", "archived");
-  const r2 = await fileReport(w, 2, { state: "closed", labels: [] });
-  await resolver(w, r2, "Fixer two", "archived");
-  const r3 = await fileReport(w, 3, { state: "closed", labels: ["resolution:fixed"] });
-  await resolver(w, r3, "Fixer three", "archived");
-  const r4 = await fileReport(w, 4, { state: "open", labels: [] });
-  await resolver(w, r4, "Fixer four", "active");
-  await fileReport(w, 5, { state: "open", labels: [] }, { explicit: "wontfix" });
-  await fileReport(w, 6, { state: "closed", labels: [] }, { archivedIssueTask: true });
-  await fileReport(w, 7, { state: "open", labels: ["resolution:wontfix"] }, { explicit: "wontfix" });
-}
-
-describe("AC-IC-4: drift detection", () => {
-  it("lists drift (a) and (b) exactly — and NOT a fixed report resting only on an active source, nor a clean one", async () => {
+describe("sync repairs GitHub from the carriers", () => {
+  it("HAPPY: an open issue named by an archived carrier is closed, commented and labelled fixed, in that order", async () => {
     const w = await buildWorld();
-    await mixedCorpus(w);
+    await carrier(w, 1, "archived");
 
-    const { exit, json } = await syncJson(w, false);
+    const exit = await sync(w, listingOf(issue(1)));
 
     expect(exit).toBe(0);
+    expect(w.github.writes).toHaveLength(3);
+    expect(w.github.writes[0]).toBe(`close:1@${REPO}`);
+    expect(w.github.writes[1]).toBe("comment:1");
+    expect(w.github.writes[2]).toBe("label:1:resolution:fixed");
+    const json = JSON.parse(stdout.join("\n")) as SyncJson;
     expect(json.ok).toBe(true);
-    const byNumber = Object.fromEntries(json.data.drift.map((d) => [d.number, d]));
-    expect(Object.keys(byNumber).sort()).toEqual(["1", "2", "5", "6"]);
-    expect(byNumber[1]).toMatchObject({ computed: "fixed", github_state: "open", missing_label: true });
-    expect(byNumber[2]).toMatchObject({ computed: "fixed", github_state: "closed", missing_label: true });
-    expect(byNumber[5]).toMatchObject({ computed: "wontfix", missing_label: true });
-    expect(byNumber[6]).toMatchObject({ computed: "closed", missing_label: true });
-    expect(byNumber[4]).toBeUndefined(); // active-only source: the work has not landed
-    expect(byNumber[3]).toBeUndefined();
-    expect(byNumber[7]).toBeUndefined();
-    expect(json.data.applied).toBeUndefined();
+    expect(json.data.clean).toBe(false);
+    expect(json.data.changes).toEqual([expect.objectContaining({ number: 1, action: "close" })]);
   });
 
-  it("a fixed report whose issue is closed AND labelled is clean: 'sync: clean', exit 0", async () => {
+  it("HAPPY: an open issue with resolution:* labels and no carrier has only those labels removed — never closed", async () => {
     const w = await buildWorld();
-    const r = await fileReport(w, 3, { state: "closed", labels: ["resolution:fixed"] });
-    await resolver(w, r, "Fixer", "archived");
 
-    const exit = await runIssuesSync(liveInvocation(), w.step, { apply: false, json: false });
+    const exit = await sync(w, listingOf(issue(2, { labels: ["resolution:adopted", "resolution:fixed", "bug"] })));
 
     expect(exit).toBe(0);
-    expect(logged.join("\n")).toContain("clean");
+    expect(w.github.writes).toEqual(["unlabel:2:resolution:adopted,resolution:fixed"]);
   });
-});
 
-describe("AC-IC-4: without --apply nothing is written", () => {
-  it("the closer is never asked to write, the exit is 0", async () => {
+  it("BOUNDARY: a closed/completed issue with an archived carrier but no resolution:fixed label is only labelled", async () => {
     const w = await buildWorld();
-    await mixedCorpus(w);
+    await carrier(w, 3, "archived");
 
-    const { exit } = await syncJson(w, false);
+    const exit = await sync(w, listingOf(issue(3, { state: "closed", state_reason: "completed" })));
+
+    expect(exit).toBe(0);
+    expect(w.github.writes).toEqual(["label:3:resolution:fixed"]);
+  });
+
+  it("NEGATIVE: fixed+labelled, live-carrier, verdict-closed and dead-carrier issues get NO write", async () => {
+    const w = await buildWorld();
+    await carrier(w, 4, "archived");
+    await carrier(w, 5, "draft");
+    await carrier(w, 6, "archived");
+    await carrier(w, 7, "deprecated");
+
+    const exit = await sync(
+      w,
+      listingOf(
+        issue(4, { state: "closed", state_reason: "completed", labels: ["resolution:fixed"] }),
+        issue(5),
+        issue(6, { state: "closed", state_reason: "not_planned", labels: ["resolution:rejected"] }),
+        issue(7),
+      ),
+    );
 
     expect(exit).toBe(0);
     expect(w.github.writes).toEqual([]);
   });
 });
 
-describe("AC-IC-4: --apply repairs", () => {
-  it("(a) is closed and labelled, (b) is ONLY labelled and never closed; applied[] carries {number, closed, labelled}", async () => {
+describe("sync says clean only for work it saw in full", () => {
+  it("STATE: nothing to repair prints `clean`, exits 0 and writes nothing", async () => {
     const w = await buildWorld();
-    await mixedCorpus(w);
 
-    const { exit, json } = await syncJson(w, true);
+    const exit = await sync(w, listingOf(issue(1), issue(2, { state: "closed", state_reason: "completed" })), false);
 
     expect(exit).toBe(0);
-    const applied = Object.fromEntries((json.data.applied ?? []).map((a) => [a.number, a]));
-    expect(applied[1]).toEqual({ number: 1, closed: true, labelled: true });
-    expect(applied[2]).toEqual({ number: 2, closed: false, labelled: true }); // already closed: only the label was missing
-    expect(applied[5]).toEqual({ number: 5, closed: false, labelled: true });
-    expect(applied[6]).toEqual({ number: 6, closed: false, labelled: true });
-    // (b) never closed — the (b) reports are #5 and #6.
-    expect(w.github.writes).not.toContain("close:5");
-    expect(w.github.writes).not.toContain("close:6");
-    expect(w.github.writes).toContain("close:1");
-    expect(w.github.writes).toContain("label:1:resolution:fixed");
-    expect(w.github.writes).toContain("label:5:resolution:wontfix");
-    expect(w.github.issues.get(5)?.state).toBe("open");
-    expect(w.github.issues.get(4)?.state).toBe("open"); // active-only source untouched
-
-    // a second run finds nothing: the repair converged
-    const again = await syncJson(w, false);
-    expect(again.json.data.drift).toEqual([]);
+    expect(stdout.join("\n")).toContain("clean");
+    expect(w.github.writes).toEqual([]);
   });
 
-  it("any failed apply exits EXACTLY 1 and names the error in applied[].error; the other repairs still run", async () => {
+  it("STATE: a run with changes never prints `clean`, and says what it did per issue", async () => {
     const w = await buildWorld();
-    await mixedCorpus(w);
-    w.github.failClose.add(1);
+    await carrier(w, 1, "archived");
 
-    const { exit, json } = await syncJson(w, true);
+    const exit = await sync(w, listingOf(issue(1)), false);
 
-    expect(exit).toBe(1);
-    expect(json.ok).toBe(false);
-    const failed = json.data.applied?.find((a) => a.number === 1);
-    expect(failed?.closed).toBe(false);
-    expect(failed?.error).toContain("HTTP 502");
-    expect(json.data.applied?.find((a) => a.number === 5)).toEqual({ number: 5, closed: false, labelled: true });
+    expect(exit).toBe(0);
+    expect(stdout.join("\n")).not.toContain("clean");
+    expect(stdout.join("\n")).toContain("issue #1: closed on GitHub");
+  });
+
+  it("STATE: planning alone (planSync) writes nothing and names the change", async () => {
+    const w = await buildWorld();
+    await carrier(w, 1, "archived");
+
+    const outcome = await w.step.planSync(listingOf(issue(1), issue(2, { labels: ["resolution:open"] })));
+
+    expect(w.github.writes).toEqual([]);
+    expect(outcome.kind).toBe("planned");
+    if (outcome.kind !== "planned") return;
+    expect(outcome.plan.changes.map((c) => [c.number, c.action])).toEqual([
+      [1, "close"],
+      [2, "strip_labels"],
+    ]);
+    expect(outcome.applied).toBeUndefined();
   });
 });
 
-describe("AC-IC-4: ERROR — no GitHub closer configured", () => {
-  it("--sync exits 1 and says so on stderr (never a silent clean)", async () => {
-    const w = await buildWorld(false);
+describe("sync failure kinds decide the exit", () => {
+  it("ERROR: a transport failure on one close exits 9 and the OTHER repairs still run", async () => {
+    const w = await buildWorld();
+    await carrier(w, 1, "archived");
+    await carrier(w, 2, "archived");
+    w.github.closeFailures.set(1, transport);
 
-    const exit = await runIssuesSync(liveInvocation(), w.step, { apply: false, json: false });
+    const exit = await sync(w, listingOf(issue(1), issue(2)), false);
 
-    expect(exit).toBe(1);
-    expect(logged.join("\n")).not.toContain("clean");
+    expect(exit).toBe(9);
+    expect(w.github.writes).toContain(`close:2@${REPO}`);
+    expect(w.github.writes).toContain("label:2:resolution:fixed");
+    expect(stderr.join("\n")).toContain("issue #1: close FAILED");
+    expect(stdout.join("\n")).not.toContain("clean");
   });
 
-  it("an App with no step at all exits 1", async () => {
-    expect(await runIssuesSync(liveInvocation(), undefined, { apply: false, json: false })).toBe(1);
+  it("ERROR: an auth failure exits 8 (the failing call's own kind, not a generic 1)", async () => {
+    const w = await buildWorld();
+    await carrier(w, 1, "archived");
+    w.github.closeFailures.set(1, auth);
+
+    const exit = await sync(w, listingOf(issue(1)));
+
+    expect(exit).toBe(8);
+    const json = JSON.parse(stdout.join("\n")) as SyncJson;
+    expect(json.ok).toBe(false);
+    expect(json.data.applied[0]?.failed).toBe(true);
+  });
+
+  it("ERROR: no GitHub closer configured exits 4 and says so on stderr (never a silent clean)", async () => {
+    const w = await buildWorld(false);
+
+    const exit = await sync(w, listingOf(issue(1)), false);
+
+    expect(exit).toBe(4);
+    expect(stderr.join("\n")).toContain("GitHub not configured");
+    expect(stdout.join("\n")).not.toContain("clean");
+  });
+
+  it("ERROR: a missing sync driver exits 1", async () => {
+    const exit = await runIssuesSync(liveInvocation(), undefined, listingOf(), { json: false });
+    expect(exit).toBe(1);
   });
 });

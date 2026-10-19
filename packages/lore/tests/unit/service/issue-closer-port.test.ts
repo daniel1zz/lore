@@ -185,3 +185,33 @@ describe("AC-IC-3: GhIssueCloser.labelIssue", () => {
     expect(calls.some((call) => call.includes("DELETE"))).toBe(false);
   });
 });
+
+describe("GhIssueCloser.removeLabels (used by `lore issues --sync`)", () => {
+  it("HAPPY: one DELETE per name, URL-encoded, and no read call first", async () => {
+    const { runner, calls } = scriptedRunner((args) => (args.includes("DELETE") ? ok({ stdout: "" }) : undefined));
+
+    const result = await new GhIssueCloser(runner).removeLabels(REF, ["resolution:adopted", "resolution:fixed"]);
+
+    expect(result).toEqual(ok(undefined));
+    expect(calls).toEqual([
+      ["api", `${ISSUE_PATH}/labels/resolution%3Aadopted`, "-X", "DELETE"],
+      ["api", `${ISSUE_PATH}/labels/resolution%3Afixed`, "-X", "DELETE"],
+    ]);
+  });
+
+  it("ERROR: the first failing DELETE is returned and the remaining names are not attempted", async () => {
+    const { runner, calls } = scriptedRunner((args) => (args.includes("DELETE") ? err(stderrFailure("gh: HTTP 404")) : undefined));
+
+    const result = await new GhIssueCloser(runner).removeLabels(REF, ["resolution:adopted", "resolution:fixed"]);
+
+    expect(result.ok).toBe(false);
+    expect(calls).toHaveLength(1);
+  });
+
+  it("BOUNDARY: an empty name list makes no call at all", async () => {
+    const { runner, calls } = scriptedRunner();
+
+    expect(await new GhIssueCloser(runner).removeLabels(REF, [])).toEqual(ok(undefined));
+    expect(calls).toEqual([]);
+  });
+});
