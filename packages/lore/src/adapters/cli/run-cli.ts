@@ -30,6 +30,7 @@ import type { Invocation } from "@lore/core";
 import { OsUserLookupError } from "@lore/core/node";
 import type { InvocationResolvers } from "@lore/core/node";
 import { CliExit } from "./cli-exit.js";
+import { primeReplicaClientWhenSyncEnabled } from "./replica-priming.js";
 import type { ExitReport } from "./cli-exit.js";
 import { printLine } from "./output.js";
 import { resolveTargetDir } from "./setup-args.js";
@@ -180,6 +181,9 @@ export async function runCli(inv: Invocation, options: RunCliOptions = {}): Prom
     },
   });
   try {
+    // reason: D22 — a corpus with `sync.enabled` opens through the embedded replica, whose client the compiled binary
+    // can only load asynchronously. Loaded here, once, before any command builds its App; a no-op without sync.
+    await primeReplicaClientWhenSyncEnabled(inv.io, inv);
     return await dispatch(inv, main, reported);
   } catch (error) {
     if (error instanceof CliExit) return error.code;
