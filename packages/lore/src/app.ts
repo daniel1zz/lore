@@ -1062,7 +1062,7 @@ function buildAppFromSqlite(
     requirementService: new RequirementService(store, requirementQuantifiableEnabled, corpusService),
     // reason: RuleService gets the WIRED corpusService.create (gates + provenance guards apply to
     // node creation); its `createDoc` port is required — RuleService builds no CorpusService of its own.
-    // reason: accountability-reducing writes (--remove-site/--remove-command, rule retire/move) wait for main's tree; one port, both roots.
+    // reason: accountability-reducing writes (--remove-command, rule retire/move) wait for main's tree; one port, both roots.
     ruleService: armMainTree(new RuleService(store, corpusService.create.bind(corpusService), corpusService), repoRoot),
     // reason: the change set of a locked spec is gated by the ONE RecordLockService, like criteria edits.
     ruleChangeService,
@@ -1475,7 +1475,7 @@ function buildAppFromTurso(
     requirementService: new RequirementService(store, requirementQuantifiableEnabled, corpusService),
     // reason: RuleService gets the WIRED corpusService.create (gates + provenance guards apply to
     // node creation); its `createDoc` port is required — RuleService builds no CorpusService of its own.
-    // reason: accountability-reducing writes (--remove-site/--remove-command, rule retire/move) wait for main's tree; one port, both roots.
+    // reason: accountability-reducing writes (--remove-command, rule retire/move) wait for main's tree; one port, both roots.
     ruleService: armMainTree(new RuleService(store, corpusService.create.bind(corpusService), corpusService), repoRoot),
     // reason: the change set of a locked spec is gated by the ONE RecordLockService, like criteria edits.
     ruleChangeService,

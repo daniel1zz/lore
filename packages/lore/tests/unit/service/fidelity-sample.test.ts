@@ -18,7 +18,7 @@
  *      call 3 (only when >= 1 disagreement) = adjudicator, replying for exactly the disagreeing n's.
  *      Missing n / extra n / unparseable / provider error -> err AI_PROVIDER_ERROR (CLI exit 6), nothing written.
  *      faithful_share = faithful / size (denominator is the whole sample).
- * *  - Read-only: rules, citations, confidence, site_map unchanged.
+ * *  - Read-only: rules, citations, confidence unchanged.
  */
 
 import { RecordLockService } from "../../../src/service/record-lock-service.js";

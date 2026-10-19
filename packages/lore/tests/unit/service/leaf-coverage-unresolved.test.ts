@@ -12,25 +12,25 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { computeLeafCoverage } from "../../../src/service/leaf-coverage.js";
 
-const site = { key: "a.ts#f#X", file: "a.ts", symbol: "f", code: "X", dynamic: false } as const;
-const mapped = { "a.ts#f#X": ["BR-1"] };
+// a site whose code declares BR-1 (BR-1344)
+const site = { key: "a.ts#f#X", file: "a.ts", symbol: "f", code: "X", dynamic: false, line: 3, column: 10, rules: ["BR-1"] } as const;
 
 describe("computeLeafCoverage with unresolved imports (#94)", () => {
   it("is NOT ok and names the specifier and importing file, even when every site is mapped", () => {
     const r = computeLeafCoverage({
       sites: [site],
-      siteMap: mapped,
       liveRuleIds: ["BR-1"],
       unresolvedImports: [{ specifier: "@lore/core", from: "x/y.ts" }],
     });
     expect(r.ok).toBe(false);
     expect(r.unresolvedImports).toEqual(["@lore/core (from x/y.ts)"]);
     expect(r.gaps).toEqual([]);
+    expect(r.mapped).toEqual([{ key: "a.ts#f#X", file: "a.ts", line: 3, rule: "BR-1" }]);
   });
 
   it("stays ok, with no unresolvedImports key, when none are reported (control)", () => {
-    const r = computeLeafCoverage({ sites: [site], siteMap: mapped, liveRuleIds: ["BR-1"], unresolvedImports: [] });
-    expect(r).toEqual({ gaps: [], notMeasured: [], ok: true });
+    const r = computeLeafCoverage({ sites: [site], liveRuleIds: ["BR-1"], unresolvedImports: [] });
+    expect(r).toEqual({ mapped: [{ key: "a.ts#f#X", file: "a.ts", line: 3, rule: "BR-1" }], gaps: [], notMeasured: [], conflicts: [], invalid: [], ok: true });
   });
 });
 

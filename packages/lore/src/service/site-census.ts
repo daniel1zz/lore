@@ -1039,6 +1039,17 @@ class CensusWalker {
    * rule-taking refusal helper. Its own literal is a pass-through, not a site: every CALL of the helper is the site and carries the rule.
    */
   private passesRuleThrough(fn: FunctionLike): boolean {
+    const cached = this.passThroughOf.get(fn);
+    if (cached !== undefined) return cached;
+    const passes = this.scanPassesRuleThrough(fn);
+    this.passThroughOf.set(fn, passes);
+    return passes;
+  }
+
+  /** Per-function memo of {@link passesRuleThrough}: every call of every walked function asks, and the answer is a body scan. */
+  private readonly passThroughOf = new Map<FunctionLike, boolean>();
+
+  private scanPassesRuleThrough(fn: FunctionLike): boolean {
     const ts = this.ts;
     const param = fn.parameters.find((p) => ts.isIdentifier(p.name) && p.name.text === "rule");
     if (param === undefined || fn.body === undefined) return false;
