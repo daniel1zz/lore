@@ -30,6 +30,7 @@
 
 import { defineCommand } from "citty";
 
+import { resolveDetailBase } from "../decision-detail-lines.js";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatErrorFor, formatTable } from "../utils.js";
 import { PENDING_TABLE_HEADERS, buildPendingTableRows } from "../pending-render.js";
@@ -105,7 +106,8 @@ export default defineCommand({
         return exitCode(auditResult.error);
       }
       const audit = auditResult.value;
-      const decisionsBlock = renderPendingDecisions(decisions) + renderAuditItems(audit);
+      const detailBase = resolveDetailBase(inv);
+      const decisionsBlock = renderPendingDecisions(decisions, detailBase) + renderAuditItems(audit, detailBase);
 
       const filters: Record<string, unknown> = {};
       if (args.author !== undefined) filters["author"] = args.author;
