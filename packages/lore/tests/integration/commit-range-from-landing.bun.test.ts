@@ -116,6 +116,7 @@ function integrateService(f: Fixture, withRecorder: boolean): IntegrateService {
   dirs.push(ledgerDir);
   return new IntegrateService({
     git: gitRunner,
+    lease: { acquire: () => ok({ kind: "held", release: () => {} }) },
     runFloor: () => ({ status: 0, output: "" }),
     corpus: { take: () => ok({ takenAt: "t" }), remove: () => ok(undefined) },
     ledger: new IntegrateLossLedger(ledgerDir),

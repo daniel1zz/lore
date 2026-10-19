@@ -6,7 +6,8 @@
  * Purpose: every live script-mode acceptance criterion must have exactly one existing OWNING
  * test file, where the owner is the FIRST test file named in its `verify.command`.
  * Public surface: `evaluateOwnership` (pure), `extractAcReferences` (pure),
- * `collectScriptAcs` (IO, spawns the `lore` CLI), `main` (IO, returns the exit code, never
+ * `collectScriptAcs` (IO, one `lore ac list` spawn per spec — the slow reference reader),
+ * `collectScriptAcsBulk` (IO, ONE reader process; the default), `scriptAcsFromDump` (pure), `main` (IO, returns the exit code, never
  * calls `process.exit`).
  * Invariants: AC ids are unique ONLY within one spec (`packages/core/src/acceptance.ts`
  * superRefine) — every resolution below is per spec, never by global id.
@@ -37,7 +38,7 @@
  * Residual (named, not hidden): a script AC whose command names no test file (e.g. a `tsc`
  * or `grep` oracle) has no owning file to check; it is counted in the report, never failed.
  *
- * Usage: bun scripts/check-ac-oracle-ownership.ts
+ * Usage: bun scripts/check-ac-oracle-ownership.ts [--reader=per-spec-cli]  (the flag selects the slow reference reader)
  */
 
 import { existsSync } from "node:fs";
@@ -45,6 +46,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 import { z } from "zod";
+import type { CorpusDump } from "./check-ac-oracle-ownership-corpus.js";
 import { collectRepoTestFiles, extractTestFilePaths, type TestFileContent } from "./check-unclaimed-oracle.js";
 
 const REPO_ROOT = join(fileURLToPath(import.meta.url), "..", "..");
@@ -259,16 +261,72 @@ export function collectScriptAcs(
   return { acs: out, skippedDeprecatedSpecs };
 }
 
+const CORPUS_READER = join(REPO_ROOT, "scripts", "check-ac-oracle-ownership-corpus.ts");
+
+const CorpusDumpSchema = z.object({
+  specs: z.array(
+    z.object({
+      slug: z.string(),
+      status: z.string(),
+      criteria: z.array(z.object({ id: z.string(), verify: z.object({ mode: z.string().optional(), command: z.string().optional() }).optional() })),
+      allow_missing_declarations: z.array(z.object({ ac_id: z.string(), reason: z.string() })),
+    }),
+  ),
+});
+
+/** Pure. The same {@link ScriptAcScan} `collectScriptAcs` builds, from one whole-corpus dump. */
+export function scriptAcsFromDump(dump: CorpusDump): ScriptAcScan {
+  const acs: ScriptAc[] = [];
+  const skippedDeprecatedSpecs: string[] = [];
+  for (const spec of dump.specs) {
+    if (spec.status === "deprecated") {
+      skippedDeprecatedSpecs.push(spec.slug);
+      continue;
+    }
+    const reasons = new Map(spec.allow_missing_declarations.map((d) => [d.ac_id, d.reason] as const));
+    for (const c of spec.criteria) {
+      if (c.verify?.mode === "script" && typeof c.verify.command === "string") {
+        const reason = reasons.get(c.id);
+        acs.push({ spec: spec.slug, id: c.id, command: c.verify.command, ...(reason !== undefined ? { allowMissingReason: reason } : {}) });
+      }
+    }
+  }
+  return { acs, skippedDeprecatedSpecs };
+}
+
 /**
- * Runs the check for the corpus at `corpusCwd` (cwd of the `lore` spawn) against test files
- * under `treeRoot`. Returns the process exit code; never calls `process.exit`.
+ * IO. Every script AC of every live spec through ONE reader process (`check-ac-oracle-ownership-corpus.ts`)
+ * instead of one `lore ac list` spawn per spec — exact, full corpus, no cache. Throws
+ * {@link OwnershipScanError} when the reader fails (never an empty "clean" scan, AS-17).
+ */
+export function collectScriptAcsBulk(corpusCwd: string): ScriptAcScan {
+  const r = spawnSync("bun", [CORPUS_READER], { cwd: corpusCwd, encoding: "utf8", maxBuffer: 256 * 1024 * 1024 });
+  if (r.error || r.status !== 0) {
+    throw new OwnershipScanError(`corpus reader failed (exit ${r.status ?? -1}): ${r.error?.message ?? r.stderr ?? r.stdout}`);
+  }
+  let json: unknown;
+  try {
+    json = JSON.parse(r.stdout);
+  } catch (e) {
+    throw new OwnershipScanError(`corpus reader printed unparseable JSON: ${e instanceof Error ? e.message : String(e)}`);
+  }
+  const parsed = CorpusDumpSchema.safeParse(json);
+  if (!parsed.success) throw new OwnershipScanError(`corpus reader unexpected shape: ${parsed.error.message}`);
+  return scriptAcsFromDump(parsed.data);
+}
+
+/**
+ * Runs the check for the corpus at `corpusCwd` (cwd of the reader spawn) against test files
+ * under `treeRoot`. `indexTs` is used only by the `per-spec-cli` reference reader. Returns the process exit code; never calls `process.exit`.
  */
 export function main(
   corpusCwd: string = REPO_ROOT,
   treeRoot: string = corpusCwd,
   indexTs: string = join(REPO_ROOT, "packages", "lore", "src", "index.ts"),
+  reader: "bulk" | "per-spec-cli" = "bulk",
 ): number {
-  const { acs, skippedDeprecatedSpecs } = collectScriptAcs(corpusCwd, indexTs);
+  // reason: `per-spec-cli` is the slow reference reader, kept so the equality of the two readers stays testable.
+  const { acs, skippedDeprecatedSpecs } = reader === "bulk" ? collectScriptAcsBulk(corpusCwd) : collectScriptAcs(corpusCwd, indexTs);
   console.log(
     `check-ac-oracle-ownership: skipped ${skippedDeprecatedSpecs.length} deprecated spec(s)${skippedDeprecatedSpecs.length > 0 ? `: ${skippedDeprecatedSpecs.join(", ")}` : ""}`,
   );
@@ -279,7 +337,9 @@ export function main(
   const fileExists = (p: string): boolean => existsSync(join(treeRoot, p));
   const report = evaluateOwnership(acs, collectRepoTestFiles(treeRoot), fileExists);
   console.log(`check-ac-oracle-ownership: ${report.ledgered.length} script AC(s) declared red-first (--allow-missing-path), oracle not written yet.`);
-  for (const r of report.ledgered) console.log(`  ledgered spec=${r.spec} ac=${r.acId} path=${r.path} reason=${r.reason}`);
+  // reason: print in (spec, ac) order so both readers (whose spec enumeration orders differ) emit identical output.
+  const byKey = (a: { spec: string; acId: string }, b: { spec: string; acId: string }): number => a.spec.localeCompare(b.spec) || a.acId.localeCompare(b.acId, undefined, { numeric: true });
+  for (const r of [...report.ledgered].sort(byKey)) console.log(`  ledgered spec=${r.spec} ac=${r.acId} path=${r.path} reason=${r.reason}`);
   console.log(
     `check-ac-oracle-ownership: scanned ${report.scannedScriptAcs} script AC(s), ${report.scannedTestFiles} test file(s); ${report.acsWithoutTestFile} script AC(s) name no test file (not checked).`,
   );
@@ -288,7 +348,7 @@ export function main(
     return 0;
   }
   const byRule = new Map<OwnershipRule, number>();
-  for (const f of report.findings) {
+  for (const f of [...report.findings].sort(byKey)) {
     byRule.set(f.rule, (byRule.get(f.rule) ?? 0) + 1);
     console.log(`  rule=${f.rule} spec=${f.spec} ac=${f.acId} path=${f.path}`);
   }
@@ -300,7 +360,8 @@ export function main(
 
 if (import.meta.main) {
   try {
-    process.exit(main());
+    const reader = process.argv.includes("--reader=per-spec-cli") ? "per-spec-cli" : "bulk";
+    process.exit(main(undefined, undefined, undefined, reader));
   } catch (e) {
     console.error(`check-ac-oracle-ownership: scan failed — ${e instanceof Error ? e.message : String(e)}`);
     process.exit(1);

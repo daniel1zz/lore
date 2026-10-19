@@ -70,6 +70,7 @@ describe("integrate records per-attempt phase durations", () => {
     };
     const service = new IntegrateService({
       git,
+      lease: { acquire: () => ok({ kind: "held", release: () => {} }) },
       corpus: { take: () => ((now += 40), ok({ takenAt: "2026-10-19T00:00:00.000Z" })), remove: () => ok(undefined) },
       runFloor: () => {
         now += 7000; // the "sleep": the floor takes 7 s of the injected clock
@@ -126,6 +127,7 @@ describe("integrate records per-attempt phase durations", () => {
     };
     const service = new IntegrateService({
       git,
+      lease: { acquire: () => ok({ kind: "held", release: () => {} }) },
       corpus: { take: () => ok({ takenAt: "2026-10-19T00:00:00.000Z" }), remove: () => ok(undefined) },
       runFloor: () => ((now += 900), { status: 7, output: "boom" }),
       ledger: new IntegrateLossLedger(corpusDir),
