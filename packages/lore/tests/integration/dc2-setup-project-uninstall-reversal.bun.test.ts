@@ -62,9 +62,12 @@ function expectOk(result: RunResult, what: string): void {
 function configureProjectLanguage(repo: string, code: string): void {
   const configPath = join(repo, ".lore", "config.yaml");
   const config = readFileSync(configPath, "utf8");
-  // The seeded template carries a `context:` block (memory_files); the language key joins it.
-  if (!/^context:\n/m.test(config)) throw new Error("fixture assumption broken: config.yaml has no context: block");
-  writeFileSync(configPath, config.replace(/^context:\n/m, `context:\n  language: ${code}\n`));
+  // Setup no longer seeds a `context:` block, so the fixture adds one; if a future seed brings one back, the language key joins it.
+  if (/^context:/m.test(config) && !/^context:\n/m.test(config)) throw new Error("fixture assumption broken: config.yaml has an inline context: value");
+  const edited = /^context:\n/m.test(config)
+    ? config.replace(/^context:\n/m, `context:\n  language: ${code}\n`)
+    : `${config.replace(/\n*$/, "\n")}context:\n  language: ${code}\n`;
+  writeFileSync(configPath, edited);
 }
 
 function loreRulesFiles(repo: string): string[] {
