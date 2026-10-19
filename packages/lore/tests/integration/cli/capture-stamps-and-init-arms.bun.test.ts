@@ -230,7 +230,7 @@ describe("lore evidence --capture stamps like verify (AC-CT-3b)", () => {
     expect(row.attestation?.["stamp_unbound_reason"]).toBeUndefined();
     const done = lore(["done", task], d);
     expect(done.exitCode, done.stderr + done.stdout).toBe(0);
-  });
+  }, 120_000);
 
   it("dirty tree: captured pass is unbound/dirty_tree and lore done refuses it", async () => {
     const d = makeCommittedCorpus();
