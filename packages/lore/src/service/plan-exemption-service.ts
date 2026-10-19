@@ -11,9 +11,13 @@
  *     `extra.assessment_freshness_exempt_reason` (no kind taxonomy for this
  *     one — D4 mirrors the flag+reason shape only).
  *
+ * It is ALSO the writer of `extra.integration_branch` (the one non-exemption field here: both are plan-level
+ * `extra` keys with no `lore set` route, and `mergeExemptionIntoExtra` is the audited read-merge-write for them).
+ *
  * Public surface:
  *   exemptAttestation(planIdOrSlug, {reason, kind, by})        → AttestationExemption
  *   exemptAssessmentFreshness(planIdOrSlug, {reason, by})      → PlanExemption
+ *   setIntegrationBranch(planIdOrSlug, {branch, by})           → PlanIntegrationBranch
  *
  * Why this service exists at all — the defect it closes: both field families
  * were GATE-READ WITH NO WRITER. `CorpusService.set`'s plan-close block
@@ -68,6 +72,12 @@ export const ATTESTATION_EXEMPT_KIND_FIELD = "attestation_exempt_kind";
 export const ASSESSMENT_FRESHNESS_EXEMPT_FIELD = "assessment_freshness_exempt";
 export const ASSESSMENT_FRESHNESS_EXEMPT_REASON_FIELD = "assessment_freshness_exempt_reason";
 
+/** `extra` key the integration-branch declaration owns. */
+export const INTEGRATION_BRANCH_FIELD = "integration_branch";
+
+/** A branch name safe to hand to git as a ref: no leading dash, no whitespace, no `..`, no ref-special characters. */
+const INTEGRATION_BRANCH_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._/-]*$/;
+
 // ─── Types ───────────────────────────────────────────────────────────────────
 
 /** Options common to every exemption verb. */
@@ -88,6 +98,21 @@ export interface AttestationExemptOpts extends PlanExemptOpts {
 export interface PlanExemption {
   readonly exempt: true;
   readonly reason: string;
+  readonly by: string;
+  readonly at: string;
+}
+
+/** {@link PlanExemptionService.setIntegrationBranch} options. */
+export interface IntegrationBranchOpts {
+  /** The branch the plan's members land on before it reaches main. */
+  readonly branch: string;
+  /** Actor identity recording the declaration (already resolved by the caller). */
+  readonly by: string;
+}
+
+/** A persisted integration-branch declaration. */
+export interface PlanIntegrationBranch {
+  readonly branch: string;
   readonly by: string;
   readonly at: string;
 }
@@ -203,6 +228,43 @@ export class PlanExemptionService {
     });
     if (!written.ok) return written;
     return ok({ exempt: true, reason: reason.value, by: opts.by, at });
+  }
+
+  /**
+   * Declare the integration (feature) branch a plan lands through (`extra.integration_branch`). For
+   * readiness, a `blocks` edge counts as met when the blocker's recorded branch head is on this branch
+   * (`TaskWorkflowService.ready`); `lore done` still judges "landed" against main, so members archive only
+   * after the branch reaches main.
+   *
+   * @param planIdOrSlug - Plan document ULID or slug
+   * @param opts - `{branch, by}` — `branch` must look like a plain git branch name
+   * @returns The persisted declaration `{branch, by, at}`
+   * @throws (as `Result`) DOC_NOT_FOUND, VALIDATION_ERROR (blank/odd branch name, non-plan target), STALE_VERSION
+   */
+  async setIntegrationBranch(
+    planIdOrSlug: string,
+    opts: IntegrationBranchOpts,
+  ): Promise<Result<PlanIntegrationBranch, LoreError>> {
+    const branch = typeof opts.branch === "string" ? opts.branch.trim() : "";
+    if (branch === "" || !INTEGRATION_BRANCH_PATTERN.test(branch) || branch.includes("..") || branch.endsWith("/")) {
+      return err({
+        code: "VALIDATION_ERROR",
+        field: INTEGRATION_BRANCH_FIELD,
+        message: `integration branch must be a plain branch name like 'gs-integration' (got '${String(opts.branch)}')`,
+        value: opts.branch,
+      });
+    }
+    const at = new Date().toISOString();
+    const written = await this.mergeExemptionIntoExtra(planIdOrSlug, {
+      at,
+      by: opts.by,
+      fields: { [INTEGRATION_BRANCH_FIELD]: branch },
+      operation: "integration-branch",
+      changeSummary: `Plan integration branch declared: ${branch}`,
+      auditDetails: { [INTEGRATION_BRANCH_FIELD]: branch },
+    });
+    if (!written.ok) return written;
+    return ok({ branch, by: opts.by, at });
   }
 
   // ── Private ───────────────────────────────────────────────────────────────

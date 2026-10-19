@@ -4843,6 +4843,7 @@ export class TaskWorkflowService {
 
     const blockerIds = new Set(blocksLinks.map((l) => l.from_id));
     const blockerStatuses = new Map<DocId, BlockerInfo>();
+    const blockerDocs: DocRecord[] = [];
     if (blockerIds.size > 0) {
       // reason: StoreFilters has no id-in-list predicate — D7 only adds a link batch
       // query, not a doc batch query. One unfiltered findMany + client-side pick keeps
@@ -4853,9 +4854,16 @@ export class TaskWorkflowService {
       for (const doc of allDocsResult.value) {
         if (blockerIds.has(doc.id)) {
           blockerStatuses.set(doc.id, { slug: doc.slug, status: doc.status });
+          blockerDocs.push(doc);
         }
       }
     }
+
+    // reason: task-skill-fix-a-blocks-edge-in-a-feature-branch-plan-is-met — a plan landing through one
+    // integration branch cannot archive its blockers until that branch reaches main, so a blocker whose
+    // recorded branch head is on the declared integration branch counts as met for READINESS only.
+    const landedResult = await this.findBlockersLandedOnIntegration(plan, blockerDocs);
+    if (!landedResult.ok) return landedResult;
 
     const staleByTask = await this.resolveClaimStalenessByTask(tasks, nowIso);
     if (!staleByTask.ok) return staleByTask;
@@ -4867,6 +4875,7 @@ export class TaskWorkflowService {
         nowIso,
         this.claimTtlMinutes,
         parentSpecStatus,
+        landedResult.value,
       ),
       staleByTask.value,
     );
@@ -4883,6 +4892,51 @@ export class TaskWorkflowService {
       anchor_conflicts: anchorConflicts,
       anchor_resolution: this.computeAnchorResolution(tasks, anchorProbe),
     });
+  }
+
+  /**
+   * Which unarchived blockers of `plan` have LANDED on the plan's declared integration branch
+   * (`plan.extra.integration_branch`) — the readiness-only relaxation of "a blocker is met when archived".
+   *
+   * A blocker qualifies iff its recorded claim head (same pick as {@link findUnlandedWorkFloor}) is an
+   * ancestor of the integration branch (`rev-list --count <branch>..<head>` is 0) AND carries at least
+   * one commit past its claim-time base — a claim that has done no work has a head that is trivially an
+   * ancestor of everything, and must NOT unblock its dependents.
+   *
+   * Fails closed, each visibly: no declared branch, no probe wired, no recorded worktree/base, an unreadable
+   * head, or an integration branch that does not exist all leave the blocker UNMET (original behaviour).
+   * `lore done` is untouched: it keeps judging "landed" against main.
+   *
+   * @returns blocker id to integration branch name, for the qualifying blockers only.
+   */
+  private async findBlockersLandedOnIntegration(
+    plan: DocRecord,
+    blockers: readonly DocRecord[],
+  ): Promise<Result<Map<DocId, string>, LoreError>> {
+    const landed = new Map<DocId, string>();
+    const declared = plan.extra?.["integration_branch"];
+    const probe = this.worktreeProbe;
+    if (typeof declared !== "string" || declared === "" || probe === undefined) return ok(landed);
+    const cwd = probe.currentWorkingDirectory();
+    if (!probe.branchTip(cwd, declared).ok) return ok(landed);
+
+    for (const blocker of blockers) {
+      if (blocker.status === "archived" || blocker.status === "deprecated") continue;
+      const recordedResult = await this.readRecordedWorktrees(blocker);
+      if (!recordedResult.ok) return recordedResult;
+      const currentWorktree = readClaimRecord(blocker)?.worktree;
+      const recorded =
+        recordedResult.value.find((r) => r.path === currentWorktree) ??
+        recordedResult.value[recordedResult.value.length - 1];
+      if (recorded === undefined || recorded.baseSha === undefined) continue;
+      const head = resolveClaimHead(probe, recorded.path, cwd);
+      if (!head.ok) continue;
+      const ownWork = probe.countCommits(cwd, `${recorded.baseSha}..${head.value.sha}`);
+      if (!ownWork.ok || ownWork.value === 0) continue;
+      const unlanded = probe.countCommits(cwd, `${declared}..${head.value.sha}`);
+      if (unlanded.ok && unlanded.value === 0) landed.set(blocker.id, declared);
+    }
+    return ok(landed);
   }
 
   /**
