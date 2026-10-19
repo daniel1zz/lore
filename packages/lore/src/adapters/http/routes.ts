@@ -26,9 +26,7 @@ import { resolveExpectedVersion } from "./concurrency.js";
 import { handleGetConfig, handleGetMachineConfig } from "./config-routes.js";
 import { handleGetIssueReports } from "./issue-reports-routes.js";
 import type { ListFilters, SearchFilters } from "../../service/corpus-service.js";
-import type { PendingFilters } from "../../service/review-service.js";
-import { requireAuditVerifyRunner } from "../../service/audit-verify-runner.js";
-import type { CreateDocInput, DocPatch } from "@lore/core";
+import type { PendingFilters } from "../../service/review-service.js";import type { CreateDocInput, DocPatch } from "@lore/core";
 import type { DocStatus, DocType, LinkType } from "@lore/core";
 import { computeValidityState } from "../../flows/validity-state.js";
 
@@ -611,9 +609,7 @@ async function handleAuditVerify(url: URL, app: App): Promise<Response> {
   const since = url.searchParams.get("since");
   // reason: the full-chain verdict runs off the serving loop (worker per persistent store) and reads the anchor file,
   // so a dashboard "clean" means what `lore audit --verify` means.
-  const runner = requireAuditVerifyRunner(app);
-  if (!runner.ok) return loreErrorResponse(runner.error);
-  const result = await runner.value.verify(since !== null ? { since } : undefined);
+  const result = await app.auditVerifyRunner.verify(since !== null ? { since } : undefined);
   if (!result.ok) return loreErrorResponse(result.error);
   return jsonOk(result.value);
 }

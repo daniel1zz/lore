@@ -41,6 +41,7 @@ import { handleDashboardRoute } from "../../../../src/adapters/http/dashboard-ro
 import type { App } from "../../../../src/app.js";
 import type { ApiKeyStore, ActorContext } from "../../../../src/adapters/http/auth.js";
 import { actedStore } from "../../../live-invocation.js";
+import { inLoopAuditVerifyRunner } from "../../../support/audit-verify-runner-stub.js";
 
 // ─── Harness (mirrors config-service.test.ts) ──────────────────────────────────
 
@@ -90,6 +91,7 @@ function makeApp(
     specKindService: null as unknown as App["specKindService"],
     judgmentService: null as unknown as App["judgmentService"],
     auditService: null as unknown as App["auditService"],
+    auditVerifyRunner: inLoopAuditVerifyRunner(null as unknown as App["auditService"]),
     // reason: exactOptionalPropertyTypes:true (tsconfig.tests.json) distinguishes an
     // explicit `configService: undefined` from an OMITTED key on an optional property —
     // only the latter is assignable to `configService?: ConfigService`. Spread the key

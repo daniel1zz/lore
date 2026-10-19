@@ -62,14 +62,22 @@ export interface AuditVerifyRunner {
 
 // ─── .lore/audit-anchor.json ────────────────────────────────────────────────
 
-const auditAnchorFileSchema = z.object({
+export const auditAnchorFileSchema = z.object({
   head_id: z.number(),
   head_hash: z.string(),
   entry_count: z.number(),
   anchored_at: z.string(),
 });
 
+/** Shape of `.lore/audit-anchor.json`, written by `lore audit anchor` and read by every verify surface. */
+export type AuditAnchorFile = z.infer<typeof auditAnchorFileSchema>;
+
 const ANCHOR_FILE_LABEL = ".lore/audit-anchor.json";
+
+/** `<corpusRoot>/.lore/audit-anchor.json` — the one place the file's location is spelled. */
+export function auditAnchorFilePath(corpusRoot: string): string {
+  return join(corpusRoot, ".lore", "audit-anchor.json");
+}
 
 /**
  * Reads and validates `<corpusRoot>/.lore/audit-anchor.json`. A missing file is `ok(undefined)` (verify reports the
@@ -77,7 +85,7 @@ const ANCHOR_FILE_LABEL = ".lore/audit-anchor.json";
  * trust root is never silently treated as absent. Same contract as `lore audit --verify`.
  */
 export function readAuditAnchorFile(corpusRoot: string): Result<AuditAnchorRef | undefined, LoreError> {
-  const path = join(corpusRoot, ".lore", "audit-anchor.json");
+  const path = auditAnchorFilePath(corpusRoot);
   if (!existsSync(path)) return ok(undefined);
   try {
     const parsed = auditAnchorFileSchema.parse(JSON.parse(readFileSync(path, "utf8")));
@@ -137,19 +145,6 @@ export const spawnAuditVerifyWorker: AuditVerifyWorkerPort = (job) =>
     worker.addEventListener("close", () => settle(workerFailure("audit verify worker exited without a result")));
     worker.postMessage(job);
   });
-
-/**
- * The runner a server surface (HTTP route, MCP tool) must use, or a STORE_ERROR when the composition did not wire
- * one. A missing runner is a composition bug: the surface reports it, it never runs the verdict on the loop instead.
- */
-export function requireAuditVerifyRunner(app: {
-  readonly auditVerifyRunner?: AuditVerifyRunner;
-}): Result<AuditVerifyRunner, LoreError> {
-  if (app.auditVerifyRunner === undefined) {
-    return err({ code: "STORE_ERROR", message: "audit verify runner is not wired into this App (composition root bug)" });
-  }
-  return ok(app.auditVerifyRunner);
-}
 
 // ─── Composition ────────────────────────────────────────────────────────────
 

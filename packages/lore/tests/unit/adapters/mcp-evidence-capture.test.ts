@@ -82,6 +82,7 @@ import type { ApiKeyStore } from "../../../src/adapters/http/auth.js";
 import { registerTools, LoreEvidenceAddSchema } from "../../../src/adapters/mcp/tools.js";
 import { captureOracleCommand } from "../../../src/adapters/evidence-capture.js";
 import type { CreateDocInput, DocRecord, EvidenceEntry } from "@lore/core";
+import { inLoopAuditVerifyRunner } from "../../support/audit-verify-runner-stub.js";
 
 // ─── Fixtures ────────────────────────────────────────────────────────────────
 
@@ -140,6 +141,7 @@ function makeApp(): App {
     specKindService: null as unknown as App["specKindService"],
     judgmentService: null as unknown as App["judgmentService"],
     auditService: null as unknown as App["auditService"],
+    auditVerifyRunner: inLoopAuditVerifyRunner(null as unknown as App["auditService"]),
     callerSurface: "mcp" as const,
     resolveAiDefault: (_explicit?: boolean) => ({ ai: false, source: "cli_flag" as const }),
     telemetry: new NoOpTelemetry(),

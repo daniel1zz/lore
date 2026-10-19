@@ -36,6 +36,7 @@ import type { App } from "../../../../src/app.js";
 import type { ApiKeyStore, ActorContext } from "../../../../src/adapters/http/auth.js";
 import { handleDashboardRoute } from "../../../../src/adapters/http/dashboard-routes.js";
 import { actedStore } from "../../../live-invocation.js";
+import { inLoopAuditVerifyRunner } from "../../../support/audit-verify-runner-stub.js";
 
 // ─── Test infrastructure ──────────────────────────────────────────────────────
 
@@ -71,6 +72,7 @@ function makeApp(): App {
     // `tests/unit/flows/calibration-hook.test.ts`.
     judgmentService: new JudgmentService(store, new NoOpTelemetry()),
     auditService: null as unknown as App["auditService"],
+    auditVerifyRunner: inLoopAuditVerifyRunner(null as unknown as App["auditService"]),
     callerSurface: "cli" as const,
     resolveAiDefault: (_explicit?: boolean) => ({ ai: false, source: "cli_flag" as const }),
     telemetry: new NoOpTelemetry(),

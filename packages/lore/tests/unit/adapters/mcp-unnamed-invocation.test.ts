@@ -30,6 +30,7 @@ import { SessionService } from "../../../src/service/session-service.js";
 import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
 import { actedStore, liveInvocation } from "../../live-invocation.js";
+import { inLoopAuditVerifyRunner } from "../../support/audit-verify-runner-stub.js";
 
 const REASON = "ENOENT: no passwd entry for uid 4242";
 const SESSION_ENV = { CLAUDE_CODE_SESSION_ID: "3de02220-aaaa-bbbb-cccc-111122223333" };
@@ -65,6 +66,7 @@ function fixture(env: Record<string, string>): Fixture {
     specKindService: null as unknown as App["specKindService"],
     judgmentService: null as unknown as App["judgmentService"],
     auditService: null as unknown as App["auditService"],
+    auditVerifyRunner: inLoopAuditVerifyRunner(null as unknown as App["auditService"]),
     sessionService,
     callerSurface: "mcp" as const,
     resolveAiDefault: (_explicit?: boolean) => ({ ai: false, source: "cli_flag" as const }),

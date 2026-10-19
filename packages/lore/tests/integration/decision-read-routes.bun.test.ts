@@ -31,6 +31,7 @@ import { decisionChainHead, NO_DETAIL_TEXT, type DecisionRecordInput } from "../
 import { MIGRATION_002_SQL } from "../../src/store/migrations/migration-002.js";
 import type { App } from "../../src/app.js";
 import { actedStore, liveIo } from "../live-invocation.js";
+import { inLoopAuditVerifyRunner } from "../support/audit-verify-runner-stub.js";
 
 const FAR_PAST = "2000-01-01T00:00:00.000Z";
 const DETAIL = {
@@ -128,6 +129,7 @@ async function makeCtx(): Promise<Ctx> {
     specKindService: null as unknown as App["specKindService"],
     judgmentService: new JudgmentService(docStore, new NoOpTelemetry()),
     auditService: new AuditService(docStore, { verifySince: FAR_PAST }),
+    auditVerifyRunner: inLoopAuditVerifyRunner(new AuditService(docStore, { verifySince: FAR_PAST })),
     callerSurface: "cli" as const,
     resolveAiDefault: () => ({ ai: false, source: "cli_flag" as const }),
     telemetry: new NoOpTelemetry(),

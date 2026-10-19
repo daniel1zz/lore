@@ -85,6 +85,7 @@ import type { App } from "../../../src/app.js";
 import type { ApiKeyStore } from "../../../src/adapters/http/auth.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type { CreateDocInput } from "@lore/core";
+import { inLoopAuditVerifyRunner } from "../../support/audit-verify-runner-stub.js";
 
 // ─── Shared fixed judge response — one finding names a path PRESENT at the assessed
 // commit, the other names a path that NEVER existed anywhere in the fixture repo. Used
@@ -337,6 +338,7 @@ function makeApp(): App {
     specKindService: null as unknown as App["specKindService"],
     judgmentService: null as unknown as App["judgmentService"],
     auditService: null as unknown as App["auditService"],
+    auditVerifyRunner: inLoopAuditVerifyRunner(null as unknown as App["auditService"]),
     callerSurface: "mcp" as const,
     resolveAiDefault: (_explicit?: boolean) => ({ ai: true, source: "env" as const }),
     telemetry: new NoOpTelemetry(),

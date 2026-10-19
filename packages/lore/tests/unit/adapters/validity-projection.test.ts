@@ -47,6 +47,7 @@ import { ok, DOC_TYPE_ROLE_MAP, NoOpTelemetry } from "@lore/core";
 import type { App } from "../../../src/app.js";
 import type { DocRecord, Slug } from "@lore/core";
 import { actedStore } from "../../live-invocation.js";
+import { inLoopAuditVerifyRunner } from "../../support/audit-verify-runner-stub.js";
 
 const NOW_ISO = "2026-07-11T00:00:00.000Z";
 const PAST_ISO = "2026-07-01T00:00:00.000Z";
@@ -101,6 +102,7 @@ function makeApp(corpusService: CorpusService, outlineService: OutlineService): 
     specKindService: null as unknown as App["specKindService"],
     judgmentService: null as unknown as App["judgmentService"],
     auditService: null as unknown as App["auditService"],
+    auditVerifyRunner: inLoopAuditVerifyRunner(null as unknown as App["auditService"]),
     callerSurface: "cli" as const,
     resolveAiDefault: () => ({ ai: false, source: "cli_flag" as const }),
     telemetry: new NoOpTelemetry(),

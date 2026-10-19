@@ -20,6 +20,7 @@ import { runLinkIntegrity } from "../../../src/eval/scenarios/link-integrity.js"
 import type { App } from "../../../src/app.js";
 import type { DocRecord, LinkRecord } from "@lore/core";
 import { actedStore } from "../../live-invocation.js";
+import { inLoopAuditVerifyRunner } from "../../support/audit-verify-runner-stub.js";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -54,6 +55,7 @@ function makeApp(store?: InMemoryStore): App {
     specKindService: null as unknown as App["specKindService"],
     judgmentService: null as unknown as App["judgmentService"],
     auditService: null as unknown as App["auditService"],
+    auditVerifyRunner: inLoopAuditVerifyRunner(null as unknown as App["auditService"]),
     // reason: test does not exercise AI-default path; callerSurface required by App interface (SPEC-024).
     callerSurface: "cli" as const,
     resolveAiDefault: (_explicit?: boolean) => ({ ai: false, source: "cli_flag" as const }),

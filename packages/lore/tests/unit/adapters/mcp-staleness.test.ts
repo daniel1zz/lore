@@ -58,6 +58,7 @@ import {
 } from "../../../src/flows/staleness-flow.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type { CreateDocInput, DocId, LoreError } from "@lore/core";
+import { inLoopAuditVerifyRunner } from "../../support/audit-verify-runner-stub.js";
 
 // ─── Test Infrastructure (mirrors mcp-tools-review.test.ts) ──────────────────
 
@@ -118,6 +119,7 @@ function makeApp(): App {
     stalenessProbeService,
     validityService: new ValidityService(store, new NoOpTelemetry()),
     auditService: null as unknown as App["auditService"],
+    auditVerifyRunner: inLoopAuditVerifyRunner(null as unknown as App["auditService"]),
     callerSurface: "mcp" as const,
     resolveAiDefault: (_explicit?: boolean) => ({ ai: false, source: "env" as const }),
     telemetry: new NoOpTelemetry(),

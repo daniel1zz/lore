@@ -295,12 +295,11 @@ export interface App {
    * store, in-loop only for an InMemory composition, chosen by store kind in `buildAuditVerifyRunner`. It reads
    * `.lore/audit-anchor.json`, so those surfaces report the same anchor status as `lore audit --verify`. The CLI
    * calls `auditService.verify` directly (a one-shot process has no event loop to stall).
-   * Optional on the same precedent as `stalenessProbeService` (hand-built App test stubs stay valid); always present
-   * in production — both build paths wire it unconditionally, and a caller that finds it absent fails loud rather
-   * than running the verdict on the loop.
+   * Required: every composition (both build paths, every test stub) names its runner, so no surface can end up
+   * computing the verdict on its own loop by omission.
    * Source: plan-audit-verify-reads-only-the-keys-it-joins-runs-off-the D2, D3
    */
-  auditVerifyRunner?: AuditVerifyRunner;
+  auditVerifyRunner: AuditVerifyRunner;
   /**
    * StateBindingService — the per-corpus state-binding arming step (SPEC-143 AC-CT-3) behind
    * `lore audit arm`. Optional on the same precedent as `acService` (hand-built App test stubs
