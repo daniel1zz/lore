@@ -169,11 +169,12 @@ describe("HAPPY — lore red-first declares the flag and lore done accepts a pro
         "--oracle",
         "test",
         "--command",
-        "bunx vitest run --grep new-feature",
+        // reason: DCL-1 (d) — the red row must be runner-produced (`--capture` spawns it): this command prints a
+        // failed-test line and a runner summary, then exits nonzero.
+        "echo '1 fail' && echo 'Ran 3 tests across 1 files' && false",
         "--result",
         "expected-fail",
-        "--output-tail",
-        "AssertionError: expected 1 to equal 2",
+        "--capture",
       ],
       tmpDir,
     );

@@ -53,7 +53,7 @@ Repo-wide invariants. The why, the layer stack, the service table and per-module
 - Standing lessons (oracle design, mirror export, test selection, governance tooling quirks) and their slugs: `knowledge-root-claude-md-tier-2-text-verbatim-body-before-the`.
 
 # ─── lore governance (managed) ───
-<!-- lore:managed section=module-index hash=73f031b0 -->
+<!-- lore:managed section=module-index hash=360dcf6f -->
 ## Module Index
 
 Folders with their own memory file — read it before working there:
@@ -68,7 +68,7 @@ Folders with their own memory file — read it before working there:
 - [`packages/lore/src/store`](packages/lore/src/store/CLAUDE.md) — Async persistence abstraction: `StoreInterface` with SQLite / Turso / InMemory implementations and FTS5 escape.
 - [`packages/dashboard`](packages/dashboard/CLAUDE.md) — Vite + React + shadcn local-dev web UI: read views plus the SPEC-022 write surface.
 
-205 folders have no memory file and are not listed.
+212 folders have no memory file and are not listed.
 <!-- lore:managed section=command-table hash=4bf6c197 -->
 No scripts are marked as documented (package.json `lore.documentedScripts`); see package.json `scripts` and the Commands section above.
 <!-- lore:managed section=governance-pointer hash=760d2396 -->

@@ -62,6 +62,9 @@ class FakeGit {
   changedSince(s: string, _paths: string[]): Result<boolean, LoreError> {
     return ok(this.changed.has(s));
   }
+  changedPaths(s: string, paths: string[]): Result<string[], LoreError> {
+    return ok(this.changed.has(s) ? [...paths] : []);
+  }
 }
 void err;
 

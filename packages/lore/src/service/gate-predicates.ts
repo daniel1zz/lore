@@ -55,6 +55,7 @@
  *   conflicts or why.
  */
 
+import type { RuleOffence } from "./rule-state-service.js";
 import {
   parentlessRefusalMessage,
   SPEC_KINDS,
@@ -1595,6 +1596,8 @@ export type RefusingRuleState = "contradicted" | "stale";
 export interface CitedRuleViolation {
   readonly rule_id: string;
   readonly state: RefusingRuleState;
+  /** The citing inputs behind `state`, exactly as `RuleStateService.full()` reported them (never re-derived here). */
+  readonly offences: readonly RuleOffence[];
 }
 
 /**
@@ -1604,15 +1607,17 @@ export interface CitedRuleViolation {
  * rules the closing plan's spec criteria cite, reads their state through `RuleStateService.full()`,
  * and passes ONLY the offending ones here.
  *
- * @param violations - Cited rules whose state is `contradicted`, or `stale` with no attested pass
- *   recorded by the plan's own tasks since it went stale (a later pass makes the rule `verified`,
- *   so it never reaches this list). Empty = nothing to refuse.
+ * @param violations - Cited rules whose state is `contradicted` (a citing criterion's latest attested
+ *   run failed) or `stale` (BR-984: a citing spec's code changed after the latest attested pass, by ANY
+ *   plan - not only the closing plan's specs). A later attested pass of the stale criterion makes the
+ *   rule `verified`; a pass recorded by the closing plan clears only the criteria it covers.
+ *   Empty = nothing to refuse.
  * @returns `{ok: true}` when `violations` is empty; otherwise `{ok: false, reason:
  *   "CITED_RULE_REFUTED", field: "cited-rule-state"}`.
  * @example
  * citedRuleStateClean([]);                                   // => { ok: true }
  * @example
- * citedRuleStateClean([{ rule_id: "BR-5", state: "stale" }]); // => { ok: false, reason: "CITED_RULE_REFUTED", field: "cited-rule-state" }
+ * citedRuleStateClean([{ rule_id: "BR-5", state: "stale", offences: [] }]); // => { ok: false, reason: "CITED_RULE_REFUTED", field: "cited-rule-state" }
  */
 export function citedRuleStateClean(violations: readonly CitedRuleViolation[]): PredicateResult {
   if (violations.length === 0) return { ok: true };

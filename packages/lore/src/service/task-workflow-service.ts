@@ -627,6 +627,10 @@ export type DoneFloorId =
   | "red-first"
   | "no-new-tests"
   | "unfiltered-test-file"
+  // reason: DCL-1 (e) — evaluated by `evaluateDoneFloors` right after `attested-pass`.
+  | "latest-attested-fail"
+  // reason: DCL-1 (a) — async (needs git); evaluated by `findUnlandedWorkFloor` before `missing-oracle-file`.
+  | "unmerged-branch"
   // reason: AC-TG-6 — evaluated after the four synchronous floors, by `findMissingOracleFileFloor` (async: resolves criteria).
   | "missing-oracle-file";
 
@@ -641,7 +645,9 @@ function doneFloorRefusal(
   floor: DoneFloorId,
   error: Extract<LoreError, { code: "VALIDATION_ERROR" }>,
 ): Result<{ refusal: DoneFloorRefusal }, never> {
-  return ok({ refusal: { floor, error: { ...error, details: { floor } } } });
+  // reason: DCL-1 — the rule's name is part of the TEXT too (`done`/`set` print only the message), so a reader
+  // and a test can name the refusing floor without parsing `details`.
+  return ok({ refusal: { floor, error: { ...error, message: `${error.message} [floor: ${floor}]`, details: { floor } } } });
 }
 
 export interface DoneResult {
@@ -1139,6 +1145,45 @@ function isRedRunResult(result: EvidenceEntry["result"]): boolean {
 }
 
 /**
+ * Whether a runner (not the caller's own typing) produced this row: `lore verify` attests it
+ * (`attestation`), `lore evidence --capture` spawns the command (`capture_source:"runner"`).
+ * An ABSENT `capture_source` reads as self-report, never as runner (same rule as {@link isRunnerCaptured}).
+ */
+function isRunnerProducedRow(entry: EvidenceEntry): boolean {
+  return entry.capture_source === "runner" || entry.attestation !== undefined;
+}
+
+/**
+ * A red row that counts toward the red-first / no-new-tests floors: red by result AND produced by a runner.
+ * A hand-typed `lore evidence --result expected-fail` (no `--capture`, no verify) proves nothing ran
+ * (DCL-1 (d); local report "red-first floor ignores capture_source", #11).
+ */
+function isRunnerProducedRedRun(entry: EvidenceEntry): boolean {
+  return isRedRunResult(entry.result) && isRunnerProducedRow(entry);
+}
+
+/**
+ * Criteria (`ac_ref`) whose LATEST runner-produced pass/fail row is a `fail` — an earlier attested pass
+ * does not outvote a later attested fail (DCL-1 (e)). `expected-fail` is an intended red, never a
+ * failing criterion; self-reported rows are ignored (they decide nothing). "Latest" = greatest
+ * `recorded_at`, ties broken by log position (the log is append-only).
+ *
+ * @returns Criterion ids in first-seen order; `[]` when none.
+ */
+function findCriteriaWithLatestRunFailed(evidence: readonly EvidenceEntry[]): string[] {
+  const latest = new Map<string, { at: string; result: EvidenceEntry["result"] }>();
+  for (const entry of evidence) {
+    if (entry.ac_ref === undefined || !isRunnerProducedRow(entry)) continue;
+    if (entry.result !== "pass" && entry.result !== "fail") continue;
+    const seen = latest.get(entry.ac_ref);
+    if (seen === undefined || entry.recorded_at >= seen.at) {
+      latest.set(entry.ac_ref, { at: entry.recorded_at, result: entry.result });
+    }
+  }
+  return [...latest.entries()].filter(([, row]) => row.result === "fail").map(([acId]) => acId);
+}
+
+/**
  * Classifies one stored row against the CAPTURE axis — the axis
  * {@link buildAttestationFloorRefusal} must describe truthfully, and the axis a
  * reader of the old refusal was wrongly sent to inspect.
@@ -1173,14 +1218,23 @@ function isRunnerCaptured(entry: EvidenceEntry): boolean {
  * — do NOT "fix" that gap by weakening this floor.
  */
 const ATTESTATION_FLOOR_REPAIRS =
-  "Two repairs: (1) `lore verify <plan>` — the SOLE issuer of `attestation` — runs the " +
-  "plan's declared script-mode acceptance criteria itself and attests the pass; for an " +
-  "`--adhoc` task (no plan) the equivalent is `lore verify --task <task>`, which needs a " +
-  "NON-EMPTY `extra.ac_scope` to resolve a governing spec from, so a task declaring an " +
-  'EMPTY `ac_scope` can reach neither. (2) `lore done --override-attestation "<reason>"`, ' +
-  "the audited escape hatch for verification `lore verify` structurally CANNOT perform " +
-  "(a manual/browser oracle, or any task with no script-mode AC to bind to) — for the " +
-  "EMPTY-`ac_scope` case above it is the only available route.";
+  "Three repairs: (1) `lore verify <plan>` runs the plan's declared script-mode acceptance " +
+  "criteria itself and attests the pass; for an `--adhoc` task (no plan) the equivalent is " +
+  "`lore verify --task <task>`, which needs a NON-EMPTY `extra.ac_scope` to resolve a governing " +
+  'spec from. (2) `lore evidence <task> --oracle <kind> --command "<cmd>" --result pass --capture` ' +
+  "— the runner spawns YOUR command and attests its exit code; the route for a task declaring an " +
+  "EMPTY `ac_scope`, which `lore verify` cannot reach. (3) " +
+  '`lore done --override-attestation "<reason>"`, the audited escape hatch for verification ' +
+  "neither route can perform (a manual/browser oracle).";
+
+/**
+ * The ONE sentence every evidence-floor refusal carries (DCL-1 (g), SSOT): the two routes that make a
+ * runner produce a row. A refusal naming only one of them sent readers down the wrong path (#49).
+ */
+const RUNNER_ROUTES_SENTENCE =
+  "A row counts only when a runner produced it: `lore verify` (attests the AC's declared command) or " +
+  '`lore evidence <task> --oracle <kind> --command "<cmd>" --result <pass|expected-fail|fail> --capture` ' +
+  "(the runner spawns your command and checks its exit code); a hand-typed row with neither never counts.";
 
 /**
  * `done()`'s attestation-floor refusal message — the FIRST floor's text, for a task
@@ -1336,7 +1390,9 @@ function findMissingUnfilteredTestFileRuns(
   // floor by its bare command (prior behaviour — a worktree-mode row's root is
   // the worktree, which gives no useful offset against the corpus repo root).
   const unfilteredPassingRuns = evidence
-    .filter((entry) => entry.oracle === "test" && entry.result === "pass")
+    // reason: DCL-1 (c) / #188 — an `e2e` row (`bun run build && … bun test <file>`) runs the file as truly as a
+    // `test` row does; and a row counts only when a runner produced it (the message below always said "attested").
+    .filter((entry) => (entry.oracle === "test" || entry.oracle === "e2e") && entry.result === "pass" && isRunnerProducedRow(entry))
     .map((entry) => ({
       command: entry.command,
       relativeRoot: toRepoRelativeExecutionRoot(entry.attestation?.execution_root, repoRoot),
@@ -1422,7 +1478,7 @@ function requiresNoNewTestsDeclaration(task: DocRecord, evidence: EvidenceEntry[
   if (readRedFirstDeclared(task)) return false;
   const acScope = extractDeclaredAcScope(task);
   if (acScope === undefined) return false;
-  return !evidence.some((e) => isRedRunResult(e.result));
+  return !evidence.some(isRunnerProducedRedRun);
 }
 
 /**
@@ -2976,6 +3032,19 @@ export class TaskWorkflowService {
     if (!taskResult.ok) return taskResult;
     const task = taskResult.value;
 
+    // reason: DCL-1 (f) / issue #51 — a terminal task has nothing left to claim; a claim on it would put a
+    // live lease on finished work and lock its record. Refused before any gate or write.
+    if (task.status === "archived" || task.status === "deprecated") {
+      return err({
+        code: "VALIDATION_ERROR",
+        field: "status",
+        message:
+          `Task "${task.slug}" is ${task.status} — a terminal task cannot be claimed. Claim an open task ` +
+          `(\`lore ready <plan>\`), or reopen this one first if the work really continues (\`lore reopen ${task.slug}\`).`,
+        value: task.status,
+      });
+    }
+
     const scopeResult = await this.resolveCorpusScope(opts);
     if (!scopeResult.ok) return scopeResult;
     const corpusScope = scopeResult.value;
@@ -3640,6 +3709,7 @@ export class TaskWorkflowService {
               ? `Task "${task.slug}" holds runner-attested pass evidence, but every one of those rows is ` +
                 `UNBOUND (${[...new Set(unboundPassReasons)].join(", ")}): recorded after state-binding was ` +
                 `armed without a valid state stamp, so it certifies no named state. Re-run \`lore verify\` ` +
+                `or \`lore evidence ${task.slug} --oracle <kind> --command "<cmd>" --result pass --capture\` ` +
                 `on a committed tree to record a stamped row (or use --override-attestation with a reason).`
               : buildAttestationFloorRefusal(task.slug, evidence),
           value: evidence.map((e, index) => ({
@@ -3652,6 +3722,23 @@ export class TaskWorkflowService {
       overrideReason = escapes.overrideReason;
     }
 
+    // reason: DCL-1 (e) — per criterion the LATEST runner-produced result decides. An attested pass
+    // followed by an attested fail (a regression caught by a later `lore verify` / `--capture` run) must
+    // not archive just because the earlier pass still sits in the log. Not bypassable by
+    // `--override-attestation`: that escape covers "no runner-attested pass exists", not "a runner saw it fail".
+    const failedCriteria = findCriteriaWithLatestRunFailed(evidence);
+    if (failedCriteria.length > 0) {
+      return doneFloorRefusal("latest-attested-fail", {
+        code: "VALIDATION_ERROR",
+        field: "extra.verification_evidence",
+        message:
+          `Task "${task.slug}" has criteri${failedCriteria.length === 1 ? "on" : "a"} whose LATEST runner-produced ` +
+          `result is \`fail\`: ${failedCriteria.join(", ")} — an earlier pass does not outvote it. Fix the work, ` +
+          `then record a newer passing run for each. ${RUNNER_ROUTES_SENTENCE}`,
+        value: failedCriteria,
+      });
+    }
+
     // reason: the red-first floor (task-red-first-discipline-is-asked-for-in-
     // prose-but-never) — mirrors the result:pass floor immediately above,
     // evaluated ONLY when the task itself claims red-first discipline. A task
@@ -3659,15 +3746,16 @@ export class TaskWorkflowService {
     // never fires); a task that DOES set it needs BOTH floors independently —
     // this one is reached only after the pass floor above already succeeded,
     // so it can never mask (or be masked by) that check.
-    if (readRedFirstDeclared(task) && !evidence.some((e) => isRedRunResult(e.result))) {
+    if (readRedFirstDeclared(task) && !evidence.some(isRunnerProducedRedRun)) {
       return doneFloorRefusal("red-first", {
         code: "VALIDATION_ERROR",
         field: "extra.verification_evidence",
         message:
-          `Task "${task.slug}" declares extra.red_first but holds no "expected-fail"/"fail" ` +
+          `Task "${task.slug}" declares extra.red_first but holds no RUNNER-PRODUCED "expected-fail"/"fail" ` +
           `evidence entry — lore done requires proof the test was actually run red before ` +
           `archiving a red-first claim (record one via \`lore evidence ${task.slug} --oracle ` +
-          `<kind> --command "<cmd>" --result expected-fail\`)`,
+          `<kind> --command "<cmd that exits nonzero>" --result expected-fail --capture\`). ` +
+          RUNNER_ROUTES_SENTENCE,
         value: evidence.map((e) => e.result),
       });
     }
@@ -3711,11 +3799,12 @@ export class TaskWorkflowService {
           field: "extra.verification_evidence",
           message:
             `Task "${task.slug}" ${scopeClause} with no ` +
-            `"expected-fail"/"fail" evidence entry and no extra.red_first opt-in — lore done ` +
+            `RUNNER-PRODUCED "expected-fail"/"fail" evidence entry and no extra.red_first opt-in — lore done ` +
             "requires proof a test was actually run red before archiving, or an explicit " +
             "declaration that this task legitimately adds no new test (record a red run via " +
-            `\`lore evidence ${task.slug} --oracle <kind> --command "<cmd>" --result ` +
-            'expected-fail`, or use the audited `--declare-no-new-tests "<reason>"` escape hatch)',
+            `\`lore evidence ${task.slug} --oracle <kind> --command "<cmd that exits nonzero>" --result ` +
+            'expected-fail --capture`, or use the audited `--declare-no-new-tests "<reason>"` escape hatch). ' +
+            RUNNER_ROUTES_SENTENCE,
           value: evidence.map((e) => e.result),
         });
       }
@@ -3735,11 +3824,12 @@ export class TaskWorkflowService {
         message:
           `Task "${task.slug}" declares test-file anchor(s) with no attested UNFILTERED ` +
           `result:pass run: ${missingUnfilteredRuns.join(", ")} — lore done requires, for ` +
-          `EACH declared test-file anchor, at least one oracle:test result:pass evidence ` +
+          `EACH declared test-file anchor, at least one oracle:test or oracle:e2e result:pass evidence ` +
           `row whose command runs that file with no ${UNFILTERED_RUN_CASE_FILTER_DESCRIPTION} ` +
-          `case filter AND carries a runner \`attestation\`. Routes that satisfy it: (1) ` +
+          `case filter AND was produced by a runner. Routes that satisfy it: (1) ` +
           `\`lore evidence ${task.slug} --oracle test --command "<unfiltered command from the ` +
-          `repo root>" --capture\` (the runner spawns it and attests the exit code); (2) when ` +
+          `repo root>" --capture\` (the runner spawns it and attests the exit code); (2) ` +
+          `\`lore verify <plan>\` on an AC whose declared command runs the file unfiltered; when ` +
           `the file is only reachable from a package directory, \`lore verify --execution-root ` +
           `<that directory>\` — the attested root is joined with the command's paths, so a ` +
           `package-relative command matches the repo-relative anchor`,
@@ -3776,7 +3866,7 @@ export class TaskWorkflowService {
     const evaluated = this.evaluateDoneFloors(task, {}, stampBinding.value);
     if (!evaluated.ok) return evaluated;
     if (evaluated.value.refusal !== null) return ok(evaluated.value.refusal);
-    return this.findMissingOracleFileFloor(task);
+    return this.findAsyncFloor(task);
   }
 
   /**
@@ -3867,10 +3957,63 @@ export class TaskWorkflowService {
         `Task "${task.slug}" covers AC(s) whose oracle file is missing: ${findings.join("; ")} — lore done ` +
         "refuses: an AC whose test file does not exist is NOT MEASURED, whatever an earlier attested pass said. " +
         "Repoint the command with `lore ac set <spec> <AC-ID> --command \"<cmd naming an existing file>\"`, " +
-        "then re-run `lore verify`.",
+        `then re-attest it: \`lore verify\`, or \`lore evidence ${task.slug} --oracle test --command "<cmd>" --result pass --capture\`.`,
       value: findings,
     };
     return ok({ floor: "missing-oracle-file", error: { ...error, details: { floor: "missing-oracle-file" } } });
+  }
+
+  /**
+   * The `unmerged-branch` floor (DCL-1 (a), issue #171): the work a task claims must have LANDED on the
+   * integration branch before the task archives. Measured from the claim's recorded worktree/branch — the
+   * current claim's, else the latest one the claim audit history recorded (same pick as
+   * {@link recordCommitRange}) — by `git rev-list --count <main>..<head>` (0 ⇒ head is an ancestor of main).
+   *
+   * Fail-open cases, each deliberate and visible: no claim ever recorded a worktree/branch (nothing to
+   * test — adhoc and orchestrator-run tasks), no worktree probe wired (bare unit construction), the head
+   * or the integration branch cannot be read (a deleted branch/worktree: `git branch -d` only deletes a
+   * merged branch). `recordCommitRange` writes the same unreadable-head fact into `extra.commit_range` as
+   * `not-measured` with its reason on every `lore done`, so "not measured" is never recorded as "landed".
+   *
+   * @returns `ok(refusal)` naming the unmerged branch and its unlanded commit count; `ok(null)` otherwise;
+   *   `err` only when the claim audit history itself is unreadable.
+   */
+  private async findUnlandedWorkFloor(task: DocRecord): Promise<Result<DoneFloorRefusal | null, LoreError>> {
+    const probe = this.worktreeProbe;
+    if (probe === undefined) return ok(null);
+    const recordedResult = await this.readRecordedWorktrees(task);
+    if (!recordedResult.ok) return recordedResult;
+    const currentWorktree = readClaimRecord(task)?.worktree;
+    const recorded =
+      recordedResult.value.find((r) => r.path === currentWorktree) ?? recordedResult.value[recordedResult.value.length - 1];
+    if (recorded === undefined) return ok(null);
+
+    const cwd = probe.currentWorkingDirectory();
+    const head = resolveClaimHead(probe, recorded.path, cwd);
+    if (!head.ok) return ok(null);
+    const integration = probe.integrationBranch(cwd);
+    if (!integration.ok) return ok(null);
+    const unlanded = probe.countCommits(cwd, `${integration.value}..${head.value.sha}`);
+    if (!unlanded.ok || unlanded.value === 0) return ok(null);
+
+    const error: Extract<LoreError, { code: "VALIDATION_ERROR" }> = {
+      code: "VALIDATION_ERROR",
+      field: "extra.claim",
+      message:
+        `Task "${task.slug}" was claimed on "${recorded.path}" whose head ${head.value.sha.slice(0, 12)} is NOT ` +
+        `on ${integration.value}: ${unlanded.value} commit(s) are not merged — lore done archives only landed work. ` +
+        `Land the branch (\`lore integrate\` / merge it into ${integration.value}), ` +
+        `then re-run \`lore done ${task.slug}\`. [floor: unmerged-branch]`,
+      value: { branch: recorded.path, head: head.value.sha, integration: integration.value, unmerged: unlanded.value },
+    };
+    return ok({ floor: "unmerged-branch", error: { ...error, details: { floor: "unmerged-branch" } } });
+  }
+
+  /** The async floors, in order: landed work, then oracle-file existence. The first refusal wins. */
+  private async findAsyncFloor(task: DocRecord): Promise<Result<DoneFloorRefusal | null, LoreError>> {
+    const unlanded = await this.findUnlandedWorkFloor(task);
+    if (!unlanded.ok || unlanded.value !== null) return unlanded;
+    return this.findMissingOracleFileFloor(task);
   }
 
   private async _doneImpl(
@@ -3917,9 +4060,9 @@ export class TaskWorkflowService {
       if (!decided.ok) return decided;
     }
 
-    const missingOracle = await this.findMissingOracleFileFloor(task);
-    if (!missingOracle.ok) return missingOracle;
-    if (missingOracle.value !== null) return err(missingOracle.value.error);
+    const asyncFloor = await this.findAsyncFloor(task);
+    if (!asyncFloor.ok) return asyncFloor;
+    if (asyncFloor.value !== null) return err(asyncFloor.value.error);
 
     const nowIso = now();
     const claim = readClaimRecord(task);

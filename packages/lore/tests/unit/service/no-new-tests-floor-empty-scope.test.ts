@@ -178,7 +178,8 @@ describe("HAPPY — an empty-scope task with a REAL red row archives with no esc
 
     await taskWorkflowService.addEvidence(
       taskId,
-      evidence({ result: "expected-fail", output_tail: "AssertionError: expected 1 to equal 2" }),
+      // reason: DCL-1 (d) — a red row counts only when a runner produced it.
+      evidence({ result: "expected-fail", output_tail: "AssertionError: expected 1 to equal 2", capture_source: "runner" }),
     );
     await satisfyAttestationFloor(taskWorkflowService, taskId);
 
@@ -356,7 +357,7 @@ describe("STATE — mutual exclusion with the red-first floor survives the re-ke
       ac_scope: [],
       red_first: true,
     });
-    await taskWorkflowService.addEvidence(taskId, evidence({ result: "expected-fail" }));
+    await taskWorkflowService.addEvidence(taskId, evidence({ result: "expected-fail", capture_source: "runner" }));
     await satisfyAttestationFloor(taskWorkflowService, taskId);
 
     const doneResult = await taskWorkflowService.done(taskId, { by: "alice" });

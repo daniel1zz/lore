@@ -145,8 +145,8 @@ describe("PREDICATE_CONTRACTS — contract table exhaustiveness (AC-PCI-11)", ()
       planClaimedAcCoverage: [],
       prdSyncEnabled: true,
       citedRuleViolations: [
-        { rule_id: "BR-5", state: "stale" },
-        { rule_id: "BR-9", state: "contradicted" },
+        { rule_id: "BR-5", state: "stale", offences: [] },
+        { rule_id: "BR-9", state: "contradicted", offences: [] },
       ],
       parentSpecPointer: { slug: "spec-x", title: "Spec X", status: "approved" },
     };

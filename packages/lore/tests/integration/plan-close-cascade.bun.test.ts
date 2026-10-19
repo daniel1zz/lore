@@ -240,7 +240,9 @@ describe("plan-close cascade (R1) — BOUNDARY", () => {
     try {
       const plan = await makeApprovedPlan(app);
       const task = await makeTask(app, plan, "Already archived task");
-      // reason: task defaults to draft; draft->archived is legal for `task` (SPEC-lifecycle-archival D3).
+      // reason: task defaults to draft; draft->archived is legal for `task` (SPEC-lifecycle-archival D3), but
+      // `set --status archived` now applies the `lore done` floors (DCL-1 (b)), so the task holds an attested pass first.
+      await giveAttestedPass(app, task);
       const preArchived = await app.corpusService.set(task.id, { status: "archived" });
       expect(preArchived.ok).toBe(true);
 

@@ -27,6 +27,8 @@ export type ConclusiveAttestedEntry = EvidenceEntry & { result: "pass" | "fail" 
 export interface AttestedRunIndex {
   /** Keyed by {@link attestedRunKey}. */
   readonly latest: ReadonlyMap<string, ConclusiveAttestedEntry>;
+  /** Same keys as `latest`: the task whose evidence row is that latest run (to name it and its plan). */
+  readonly originTasks: ReadonlyMap<string, DocRecord>;
   /** Plan-less rows whose `ac_ref` is declared by more than one spec: counted, attributed to nothing. */
   readonly ambiguousAcRef: number;
 }
@@ -61,11 +63,15 @@ export function indexLatestAttestedRuns(input: {
     for (const acId of spec.acIds) specsByAcId.set(acId, [...(specsByAcId.get(acId) ?? []), spec.id]);
   }
   const latest = new Map<string, ConclusiveAttestedEntry>();
+  const originTasks = new Map<string, DocRecord>();
   let ambiguousAcRef = 0;
-  const offer = (specId: string, entry: ConclusiveAttestedEntry): void => {
+  const offer = (specId: string, entry: ConclusiveAttestedEntry, task: DocRecord): void => {
     const key = attestedRunKey(specId, entry.ac_ref as string);
     const current = latest.get(key);
-    if (current === undefined || entry.recorded_at >= current.recorded_at) latest.set(key, entry);
+    if (current === undefined || entry.recorded_at >= current.recorded_at) {
+      latest.set(key, entry);
+      originTasks.set(key, task);
+    }
   };
   for (const task of input.tasks) {
     const planId = task.extra["plan_id"];
@@ -74,13 +80,13 @@ export function indexLatestAttestedRuns(input: {
     for (const entry of extractEvidence(task)) {
       if (entry.ac_ref === undefined || !isConclusiveAttested(entry)) continue;
       if (hasLineage) {
-        if (lineageSpecId !== null && specIds.has(lineageSpecId)) offer(lineageSpecId, entry);
+        if (lineageSpecId !== null && specIds.has(lineageSpecId)) offer(lineageSpecId, entry, task);
         continue;
       }
       const owners = specsByAcId.get(entry.ac_ref) ?? [];
       if (owners.length > 1) ambiguousAcRef += 1;
-      else if (owners.length === 1) offer(owners[0] as string, entry);
+      else if (owners.length === 1) offer(owners[0] as string, entry, task);
     }
   }
-  return { latest, ambiguousAcRef };
+  return { latest, originTasks, ambiguousAcRef };
 }

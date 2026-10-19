@@ -1943,7 +1943,8 @@ describe("HAPPY — done() accepts a red_first task carrying both a pass AND a r
 
     await taskWorkflowService.addEvidence(
       taskId,
-      evidence({ result: "expected-fail", output_tail: "AssertionError: expected 1 to equal 2" }),
+      // reason: DCL-1 (d) — a red row counts for red-first only when a runner produced it.
+      evidence({ result: "expected-fail", output_tail: "AssertionError: expected 1 to equal 2", capture_source: "runner" }),
     );
     await taskWorkflowService.addEvidence(taskId, evidence({ result: "pass", command: "second run" }));
     await taskWorkflowService.recordVerifiedEvidence(taskId, attestedPass(), "2026-07-27T09:00:00.000Z");
@@ -1962,7 +1963,7 @@ describe("HAPPY — done() accepts a red_first task carrying both a pass AND a r
 
     await taskWorkflowService.addEvidence(
       taskId,
-      evidence({ result: "fail", output_tail: "AssertionError: expected 1 to equal 2" }),
+      evidence({ result: "fail", output_tail: "AssertionError: expected 1 to equal 2", capture_source: "runner" }),
     );
     await taskWorkflowService.addEvidence(taskId, evidence({ result: "pass", command: "second run" }));
     await taskWorkflowService.recordVerifiedEvidence(taskId, attestedPass(), "2026-07-27T09:00:00.000Z");
@@ -2184,7 +2185,7 @@ describe("REGRESSION — declareRedFirst + a red row together satisfy done()'s n
     await taskWorkflowService.declareRedFirst(taskId, { by: "alice" });
     await taskWorkflowService.addEvidence(
       taskId,
-      evidence({ result: "expected-fail", output_tail: "AssertionError: expected 1 to equal 2" }),
+      evidence({ result: "expected-fail", output_tail: "AssertionError: expected 1 to equal 2", capture_source: "runner" }),
     );
     await taskWorkflowService.addEvidence(taskId, evidence({ result: "pass", command: "second" }));
     await taskWorkflowService.recordVerifiedEvidence(taskId, attestedPass(), "2026-07-27T09:00:00.000Z");
@@ -2461,6 +2462,7 @@ describe("BOUNDARY — the three done() evidence floors are independent; none ma
         command: `bunx vitest run ${FILE} -t "AC-1"`,
         result: "expected-fail",
         output_tail: "AssertionError: expected 1 to equal 2",
+        capture_source: "runner",
       }),
     );
     await taskWorkflowService.addEvidence(

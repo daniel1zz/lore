@@ -229,7 +229,9 @@ export class IntegrateService {
     if (!worktree.ok) return worktree;
     const wt = worktree.value;
 
-    const fromRemote = this.remoteOf(request.branch) !== undefined;
+    const remoteOfBranch = this.remoteOf(request.branch);
+    if (!remoteOfBranch.ok) return remoteOfBranch;
+    const fromRemote = remoteOfBranch.value !== undefined;
     const message = request.message ?? this.defaultMessage(request.branch, tip);
     const movedBy: string[] = [];
     let lastConsecutiveLosses = 0;
@@ -293,19 +295,24 @@ export class IntegrateService {
     return ok({ kind: "lost_races", branch: request.branch, attempts: INTEGRATE_MAX_ATTEMPTS, moved_by: movedBy, consecutive_losses: lastConsecutiveLosses });
   }
 
-  /** The configured remote named by the first path segment of `rev` (`origin/main` -> `origin`), else `undefined`. */
-  private remoteOf(rev: string): string | undefined {
+  /**
+   * The configured remote named by the first path segment of `rev` (`origin/main` -> `origin`), else `ok(undefined)`;
+   * err when `git remote` cannot list remotes (a remote-tracking argument must never be guessed local).
+   */
+  private remoteOf(rev: string): Result<string | undefined, LoreError> {
     const slash = rev.indexOf("/");
-    if (slash <= 0) return undefined;
+    if (slash <= 0) return ok(undefined);
     const candidate = rev.slice(0, slash);
     const remotes = this.deps.git(this.deps.projectRoot, ["remote"]);
-    if (remotes.status !== 0) return undefined;
-    return remotes.stdout.split("\n").map((r) => r.trim()).includes(candidate) ? candidate : undefined;
+    if (remotes.status !== 0) return err(gitFailure("git remote", remotes));
+    return ok(remotes.stdout.split("\n").map((r) => r.trim()).includes(candidate) ? candidate : undefined);
   }
 
   /** Fetches the remote of a remote-tracking argument so the rev resolves to the remote's current tip. */
   private fetchRemoteTracking(rev: string): Result<void, LoreError> {
-    const remote = this.remoteOf(rev);
+    const found = this.remoteOf(rev);
+    if (!found.ok) return found;
+    const remote = found.value;
     if (remote === undefined) return ok(undefined);
     this.deps.log(`integrate: fetching ${remote}`);
     const out = this.deps.git(this.deps.projectRoot, ["fetch", "-q", remote]);

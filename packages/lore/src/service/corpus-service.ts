@@ -2424,6 +2424,22 @@ export class CorpusService {
       });
     }
 
+    // reason: DCL-1 (b), issues #174 / BR-212 — `lore set --status archived` is an archive route like `lore done`,
+    // plan close and the sweep, and archives a task only if `lore done`'s floors would let it through. The
+    // check is the ONE copy of the floors (`DoneFloorPort`); the refusal is the exact error `done()` returns
+    // (`details.floor` names the floor), nothing is written. An UNWIRED service (bare unit construction)
+    // keeps the pre-port behaviour, as plan close does.
+    if (
+      existing.type === "task" &&
+      newStatus === "archived" &&
+      existing.status !== "archived" &&
+      this.doneFloorPort !== undefined
+    ) {
+      const floorResult = await this.doneFloorPort.checkDoneFloors(existing.id);
+      if (!floorResult.ok) return floorResult;
+      if (floorResult.value !== null) return err(floorResult.value.error);
+    }
+
     const newVersion = existing.version + 1;
 
     // Build patch explicitly — exactOptionalPropertyTypes requires no undefined values in Partial<DocRecord>
@@ -4187,9 +4203,10 @@ export class CorpusService {
 
   /**
    * The rules the closing plan's spec criteria cite whose state makes the close refuse (BR-984):
-   * `contradicted`, or `stale` — a pass recorded after staleness makes the latest attested run fresh,
-   * so `RuleStateService.full()` already reports such a rule `verified` and it never lists here.
-   * `verified`, `unverified` and `unknown` never refuse.
+   * `contradicted`, or `stale` (BR-984: ANY citing spec's code changed after its criterion's latest
+   * attested pass, by any plan). A fresh attested pass of the stale criterion makes the rule `verified`,
+   * so it no longer lists here. `verified`, `unverified` and `unknown` never refuse. Each violation
+   * carries the per-input `offences` `RuleStateService.full()` computed, for the refusal to name.
    *
    * @param spec - The closing plan's resolved ancestor spec (`PlanBundle.spec`).
    * @returns `ok([])` when the spec cites nothing (rule state is then not even read), when no
@@ -4217,7 +4234,7 @@ export class CorpusService {
     for (const rule of full.value.rules) {
       if (!cited.has(rule.rule_id)) continue;
       if (rule.state === "contradicted" || rule.state === "stale") {
-        violations.push({ rule_id: rule.rule_id, state: rule.state });
+        violations.push({ rule_id: rule.rule_id, state: rule.state, offences: rule.offences });
       }
     }
     return ok(violations);

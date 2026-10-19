@@ -50,6 +50,8 @@ export interface GitPort {
   isAncestor(sha: string): Result<boolean, LoreError>;
   /** `true` = `git diff --quiet <sha> HEAD -- <paths>` exits 1 (something changed). */
   changedSince(sha: string, paths: string[]): Result<boolean, LoreError>;
+  /** The subset of `paths` that `git diff --name-only <sha> HEAD -- <paths>` lists; sorted; empty = unchanged. */
+  changedPaths(sha: string, paths: string[]): Result<string[], LoreError>;
 }
 
 export type RuleVerification = "contradicted" | "stale" | "verified" | "unverified" | "unknown";
@@ -72,6 +74,21 @@ export interface RuleStateInput {
   anchor_paths: string[];
 }
 
+/** Where an offending run was recorded: the task holding the evidence row and that task's plan (each `null` when unknown). */
+export interface RuleOffenceOrigin {
+  task: string | null;
+  plan: string | null;
+}
+
+/**
+ * The input that makes a rule `contradicted` or `stale` (BR-984): one per such input, so a refusal can name
+ * the citing criterion, the sha of its latest attested run, and what to re-run. Computed by `decideRule` from
+ * the verdicts it already derives — consumers render it, never re-derive it.
+ */
+export type RuleOffence =
+  | ({ kind: "stale"; spec: string; ac_id: string; run_sha: string; changed_paths: string[] } & RuleOffenceOrigin)
+  | ({ kind: "contradicted"; spec: string; ac_id: string; run_sha: string | null } & RuleOffenceOrigin);
+
 export interface RuleStateEntry {
   rule_id: string;
   leaf: string;
@@ -81,6 +98,8 @@ export interface RuleStateEntry {
   unknown_reason?: UnknownReason;
   /** Sorted by (spec, ac_id). */
   inputs: RuleStateInput[];
+  /** Inputs behind a `contradicted` (failing runs) or `stale` (changed anchors) state, in input order; `[]` for every other state. */
+  offences: RuleOffence[];
 }
 
 export interface RuleStateFull {
@@ -114,6 +133,8 @@ interface CitingInput {
   input: RuleStateInput;
   /** Latest attested conclusive run, or null. */
   run: EvidenceEntry | null;
+  /** Task + plan that recorded `run` (both null when `run` is null or lineage is unknown). */
+  origin: RuleOffenceOrigin;
 }
 
 interface RuleModel {
@@ -224,7 +245,7 @@ function buildSnapshot(docs: readonly DocRecord[]): Snapshot {
 
   // Latest attested conclusive run per (spec, AC); ambiguous ad-hoc rows are counted and dropped. The attribution
   // is the shared `attested-ac-runs` module (also the gate of `lore rule apply`) — never re-derived here.
-  const { latest, ambiguousAcRef } = indexLatestAttestedRuns({
+  const { latest, originTasks, ambiguousAcRef } = indexLatestAttestedRuns({
     specs: specs.map((spec) => ({ id: spec.id, acIds: (declared.get(spec.id) ?? []).map((ac) => ac.id) })),
     plans: [...plans.values()],
     tasks,
@@ -236,6 +257,12 @@ function buildSnapshot(docs: readonly DocRecord[]): Snapshot {
     for (const ac of declared.get(spec.id) ?? []) {
       if (!ac.isScript) continue;
       const run = latest.get(attestedRunKey(spec.id, ac.id)) ?? null;
+      const originTask = originTasks.get(attestedRunKey(spec.id, ac.id));
+      const originPlanId = originTask?.extra["plan_id"];
+      const origin: RuleOffenceOrigin = {
+        task: originTask?.slug ?? null,
+        plan: typeof originPlanId === "string" ? (plans.get(originPlanId)?.slug ?? null) : null,
+      };
       for (const ruleId of ac.cites) {
         const input: RuleStateInput = {
           spec: spec.slug,
@@ -245,7 +272,7 @@ function buildSnapshot(docs: readonly DocRecord[]): Snapshot {
           head_sha: run?.attestation?.head_sha ?? null,
           anchor_paths: anchorPaths,
         };
-        citing.set(ruleId, [...(citing.get(ruleId) ?? []), { specId: spec.id, input, run }]);
+        citing.set(ruleId, [...(citing.get(ruleId) ?? []), { specId: spec.id, input, run, origin }]);
       }
     }
   }
@@ -261,13 +288,17 @@ function buildSnapshot(docs: readonly DocRecord[]): Snapshot {
 
 // ─── Git evaluation (full mode) ─────────────────────────────────────────────────────────────
 
-type PassVerdict = { kind: "verified" } | { kind: "stale" } | { kind: "unknown"; reason: UnknownReason };
+type PassVerdict =
+  | { kind: "verified" }
+  | { kind: "stale"; changedPaths: string[] }
+  | { kind: "unknown"; reason: UnknownReason };
 
 /** Memoised, budget-respecting view over the GitPort for ONE `full()` call. */
 class GitEvaluator {
   private head: Result<string, LoreError> | undefined;
   private readonly ancestor = new Map<string, Result<boolean, LoreError>>();
   private readonly changed = new Map<string, Result<boolean, LoreError>>();
+  private readonly listed = new Map<string, Result<string[], LoreError>>();
 
   constructor(
     private readonly git: GitPort,
@@ -294,7 +325,18 @@ class GitEvaluator {
       this.changed.set(sha, changed);
     }
     if (!changed.ok) return { kind: "unknown", reason: "git-unavailable" };
-    return changed.value ? { kind: "stale" } : { kind: "verified" };
+    if (!changed.value) return { kind: "verified" };
+    // reason: name the paths over the SAME pathspec set `changedSince` judged, so the listing is exactly
+    // why this verdict is stale (an own-anchor-only listing could be empty when a peer spec's anchor moved).
+    const pathspec = this.pathsBySha.get(sha) ?? [...ownAnchorPaths];
+    const listKey = `${sha}\u0000${pathspec.join("\u0000")}`;
+    let listed = this.listed.get(listKey);
+    if (listed === undefined) {
+      listed = this.git.changedPaths(sha, pathspec);
+      this.listed.set(listKey, listed);
+    }
+    if (!listed.ok) return { kind: "unknown", reason: "git-unavailable" };
+    return { kind: "stale", changedPaths: listed.value };
   }
 }
 
@@ -306,13 +348,26 @@ function preGitUnknown(run: EvidenceEntry): UnknownReason | null {
   return null;
 }
 
-function decideRule(rule: RuleModel, git: GitEvaluator): { state: RuleVerification; reason?: UnknownReason } {
-  let stale = false;
+function decideRule(
+  rule: RuleModel,
+  git: GitEvaluator,
+): { state: RuleVerification; reason?: UnknownReason; offences: RuleOffence[] } {
+  const staleOffences: RuleOffence[] = [];
+  const contradictedOffences: RuleOffence[] = [];
   let verified = false;
   let unknownReason: UnknownReason | undefined;
-  for (const { run, input } of rule.inputs) {
+  for (const { run, input, origin } of rule.inputs) {
     if (run === null) continue;
-    if (run.result === "fail") return { state: "contradicted" };
+    if (run.result === "fail") {
+      contradictedOffences.push({
+        kind: "contradicted",
+        spec: input.spec,
+        ac_id: input.ac_id,
+        run_sha: run.attestation?.head_sha ?? null,
+        ...origin,
+      });
+      continue;
+    }
     const early = preGitUnknown(run);
     if (early !== null) {
       unknownReason ??= early;
@@ -327,14 +382,23 @@ function decideRule(rule: RuleModel, git: GitEvaluator): { state: RuleVerificati
       continue;
     }
     const v = git.verdict(sha, input.anchor_paths);
-    if (v.kind === "stale") stale = true;
-    else if (v.kind === "verified") verified = true;
+    if (v.kind === "stale") {
+      staleOffences.push({
+        kind: "stale",
+        spec: input.spec,
+        ac_id: input.ac_id,
+        run_sha: sha,
+        changed_paths: v.changedPaths,
+        ...origin,
+      });
+    } else if (v.kind === "verified") verified = true;
     else unknownReason ??= v.reason;
   }
-  if (stale) return { state: "stale" };
-  if (verified) return { state: "verified" };
-  if (unknownReason !== undefined) return { state: "unknown", reason: unknownReason };
-  return { state: "unverified" };
+  if (contradictedOffences.length > 0) return { state: "contradicted", offences: contradictedOffences };
+  if (staleOffences.length > 0) return { state: "stale", offences: staleOffences };
+  if (verified) return { state: "verified", offences: [] };
+  if (unknownReason !== undefined) return { state: "unknown", reason: unknownReason, offences: [] };
+  return { state: "unverified", offences: [] };
 }
 
 // ─── Service ────────────────────────────────────────────────────────────────────────────────
@@ -427,6 +491,7 @@ export class RuleStateService {
         state: decided.state,
         ...(decided.reason !== undefined ? { unknown_reason: decided.reason } : {}),
         inputs: rule.inputs.map((i) => i.input),
+        offences: decided.offences,
       };
     });
     const head = git.headSha();
