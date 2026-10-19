@@ -45,6 +45,19 @@
     "check:live-repo-state": "bun scripts/check-claude-md-live-sweep.ts && bun scripts/check-list-json-real-corpus-buffer.ts && bun scripts/check-phase-write-live-state.ts && bun scripts/check-live-mirror-integrity.ts && bun scripts/check-live-corpus-detectors.ts",
     "mirror:export": "bun scripts/export-spec-mirror.ts"
   },
+  "lore": {
+    "documentedScripts": {
+      "dev": "Run the lore CLI from source; arguments after the script name go to lore.",
+      "build": "Compile the standalone binary to dist/lore.",
+      "typecheck": "Run tsc over core, lore (src and tests), scripts and the dashboard (src, tests, e2e).",
+      "test:vitest": "Build dist/lore, then run every test file: vitest on Bun, then vitest on Node for the files in vitest.node-files.ts, then the test-file census.",
+      "test": "Take the checkout's oracle lock, then run each check script and test:vitest in a fixed order; every step runs and a per-step exit table prints.",
+      "test:changed": "Select and run the tests a change can affect, printing a reason per file; --list previews, an optional ref sets the diff base.",
+      "test:file": "Run the named test files, each on the runner that collects it (Bun, or Node for files in vitest.node-files.ts); -t <name> and other flags pass through.",
+      "check:floor": "Build, typecheck and run every check: script except the corpus-dependent ones (the integrate floor).",
+      "check:memory-files": "Run `lore context refresh --check`: exit 1 when CLAUDE.md or a lore rules file differs from a fresh refresh, or the root file is over its ceiling."
+    }
+  },
   "devDependencies": {
     "bun-types": "^1.3.14",
     "typescript": "^5.8.3",
