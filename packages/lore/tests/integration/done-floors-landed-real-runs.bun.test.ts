@@ -1,4 +1,5 @@
 // @spawns packages/lore/src/index.ts
+// @reads assets/project/reference-transaction
 /**
  * @spec_ref spec-defect-clusters-round-1-done-floors-judge-real-runs-on  AC-DCL-1 (cases a-h), D1;
  *   business rules BR-199, BR-212, BR-146; reports #171 #174 #188 #49 #51 + three local reports.
@@ -25,6 +26,7 @@ import { execFileSync } from "child_process";
 import { join } from "path";
 import { tmpdir } from "os";
 import { FIXTURE_HOME_OUTSIDE_REPO, makeCleanTreeRepo } from "../helpers/clean-tree-repo.js";
+import { installShippedGuard } from "./support/main-guard-repo.js";
 
 interface RunResult {
   readonly stdout: string;
@@ -143,6 +145,7 @@ describe("AC-DCL-1 (a) — lore done archives only landed work", () => {
     git(["add", "feature.txt"], dir);
     git(["commit", "-q", "-m", "feature work"], dir);
     git(["checkout", "-q", "--detach", "main"], dir);
+    installShippedGuard(dir, join(dir, ".git", "guard-hooks")); // integrate refuses to run without the guard (BR-1273)
     mustRun(["claim", task, "--worktree", "feat-unmerged"], dir);
     capturePass(task);
 

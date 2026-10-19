@@ -73,6 +73,7 @@ import yaml from "yaml";
 import { err, ok } from "@lore/core";
 import type { LoreError, Result } from "@lore/core";
 import { saveConfig } from "@lore/core/node";
+import { initRepoWithMainCommit } from "../../integration/support/main-guard-repo.js";
 
 import {
   mergeConfigWithOverlay,
@@ -350,7 +351,7 @@ const tempDirs: string[] = [];
 function makeThrowawayGitRepo(): string {
   const dir = mkdtempSync(join(tmpdir(), "lore-config-template-"));
   tempDirs.push(dir);
-  execSync("git init -q", { cwd: dir });
+  initRepoWithMainCommit(dir); // setup refuses a main with no commit (BR-1343)
   return dir;
 }
 

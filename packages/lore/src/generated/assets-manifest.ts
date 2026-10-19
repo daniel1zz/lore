@@ -45,7 +45,7 @@ export const LORE_BINARY_VERSION = "0.1.0" as const;
 
 export const EMBEDDED_ASSETS_MANIFEST: EmbeddedAssetsManifest = {
   binary_version: LORE_BINARY_VERSION,
-  tree_digest: "eb569f7d730600c11fd4c550a830b26d4e0af0a2161ab80819e07d996fb5f9d3",
+  tree_digest: "3872565dd2c000b9642b648b08a209bf14c19b38c62a098e4047ea4d049dfa6c",
   entries: [
   { path: "agents/lore-implementer.md", kind: "agent", ownership: "managed", sha256: "be7b99d5d1f72cf4ff8579ab09c2e42454c03ec0e0f9ba4e8fdb303b4a6cb73f" },
   { path: "agents/lore-reader.md", kind: "agent", ownership: "managed", sha256: "336b2da60cfe9afae51f17ac8f6f9f33e7c67b2f3639874795e22a0e257e8696" },
@@ -92,7 +92,7 @@ export const EMBEDDED_ASSETS_MANIFEST: EmbeddedAssetsManifest = {
   { path: "project/lore-config-template.yaml", kind: "project", ownership: "user_once", sha256: "10b2ad0ffcced2590c7e1639cd95a0b3590d400bd45d30be6d7c59beb8946d23" },
   { path: "project/lore.tree.yaml.template", kind: "project", ownership: "user_once", sha256: "b169f38f2ec3a16249764a8360f37f177ad20de6eabe6f91882278bbbe71ddd9" },
   { path: "project/pre-push", kind: "project", ownership: "managed", sha256: "39e1303455d0321abcaee00a580ec4333e2514d08c74b0b37478082cb978643e" },
-  { path: "project/reference-transaction", kind: "project", ownership: "managed", sha256: "cfd46bdb01638c6685bb16c3e8c8c1d0021e6f99b46debc2973e0f808059d7cf" },
+  { path: "project/reference-transaction", kind: "project", ownership: "managed", sha256: "14582714d132d6734f2222bf7415eb34e00b31f960fd084eb66e8b7e8453612f" },
   { path: "skills/lore-ai-native-coding/SKILL.md", kind: "skill", ownership: "managed", sha256: "7ddcbfab10a643beef91cf3f0f8dc00701964575c725d785f6e5fad441c9a5c3" },
   { path: "skills/lore-ai-native-coding/references/ai-anti-patterns.md", kind: "skill", ownership: "managed", sha256: "91edef16b885924ba3639d7b918a68c14160cf2f4ba01e27eac2492ba6b39743" },
   { path: "skills/lore-ai-native-coding/references/backend-layering.md", kind: "skill", ownership: "managed", sha256: "601e24d28845f8c08996e75bb4c64ee5b4ed67f844249d08336c1ee91328c150" },

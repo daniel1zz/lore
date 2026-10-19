@@ -1,4 +1,5 @@
 // @spawns packages/lore/src/index.ts
+// @reads assets/project/reference-transaction
 /**
  * @spec_ref spec-lore-owns-worktree-cleanup-archive-removes-the-task-s AC-WTC-1
  * @task task-red-for-106-ac-wtc-1-ac-wtc-2-ac-wtc-3
@@ -31,6 +32,7 @@ import { spawnSync } from "node:child_process";
 import { appendFileSync, existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { installShippedGuard } from "../support/main-guard-repo.js";
 
 const REPO_ROOT = resolve(fileURLToPath(new URL(".", import.meta.url)), "..", "..", "..", "..", "..");
 const LORE_ENTRY = join(REPO_ROOT, "packages", "lore", "src", "index.ts");
@@ -101,7 +103,14 @@ describe("done removes the recorded worktree (#106)", () => {
    * requires on the claiming task (BR-1291, BR-1336). A branch with no commit past main is "already integrated" and
    * records the landing the same way.
    */
+  /** `lore integrate` refuses to run without the main-ref guard, and the shared checkout is a detached view of main (BR-1273). */
+  function armGuard(): void {
+    mustOk(git(repo, "checkout", "-q", "--detach", "main"), "detach shared checkout");
+    installShippedGuard(repo, join(repo, ".git", "guard-hooks"));
+  }
+
   function mergeToMain(c: Case): void {
+    armGuard();
     mustOk(lore(["integrate", c.branch, "--session", "wtc-fixture-session"]), `integrate ${c.branch}`);
   }
 
@@ -210,6 +219,7 @@ describe("done removes the recorded worktree (#106)", () => {
     writeFileSync(join(unclaimedPath, "own-unclaimed.txt"), "x\n");
     mustOk(git(unclaimedPath, "add", "-A"), "unclaimed add");
     mustOk(git(unclaimedPath, "commit", "-q", "-m", "unclaimed own commit"), "unclaimed commit");
+    armGuard();
     mustOk(lore(["integrate", unclaimedBranch, "--session", "wtc-fixture-session"]), "unclaimed integrate");
   }, 300_000);
 

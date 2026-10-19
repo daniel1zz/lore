@@ -32,16 +32,20 @@
  * Side-effect class: IO (git subprocesses through the injected IntegrateGit, the floor through FloorRunner, the loss
  *   ledger's files, creation of one worktree directory, the lease).
  *
- * Before anything moves (after the request is validated, before the integration worktree exists):
- *   - a remote-tracking argument (`origin/main`: its first segment names a configured remote) is fetched first and is
- *     merged with fast-forward allowed, so inbound commits land as the remote's own commits when main has not diverged;
- *   - ANY worktree other than the shared checkout that has `refs/heads/main` checked out is refused (E3: a ref moving
- *     under a checked-out branch stages the inverse diff in that tree);
- *   - a shared checkout still on branch main is detached at main (`git checkout --detach main`: same commit, so edits
- *     and untracked files stay byte-identical); one that cannot be (merge/rebase/cherry-pick/revert in progress) is
- *     refused naming it. Both refusals are `err(VALIDATION_ERROR, field "worktree")`, exit 4.
- * The reference-transaction hook that refuses every other move of main ships as assets/project/reference-transaction
- * and is installed by `lore setup --project`; it recognises INTEGRATE_MARKER_ENV on the CAS.
+ * Before anything moves (after the request's own fields are validated, before the first git side effect: the
+ * remote-tracking fetch, the integration worktree and every merge):
+ *   - the main-ref guard must be in force (spec-no-working-copy-can-check-out-main-the-main-ref-guard, BR-1343): the
+ *     `reference-transaction` hook in the ACTIVE hooks directory (`git rev-parse --git-path hooks`, so `core.hooksPath`
+ *     is honoured) is byte-identical to the shipped asset (sha256 against EMBEDDED_ASSETS_MANIFEST) and executable, and
+ *     git is >= 2.46 (read through `deps.readGitVersion`, default `git --version`). Otherwise
+ *     `err(VALIDATION_ERROR, field "main-ref-guard")`, exit 4, naming `lore setup --project` or the version. This
+ *     replaces the old per-run scan for worktrees on main and the shared-checkout detach: the hook makes a checkout of
+ *     main impossible, so there is nothing left to scan or detach;
+ * Then a remote-tracking argument (`origin/main`: its first segment names a configured remote) is fetched and is merged
+ * with fast-forward allowed, so inbound commits land as the remote's own commits when main has not diverged.
+ * The reference-transaction hook ships as assets/project/reference-transaction and is installed by `lore setup
+ * --project` (which also detaches every working copy that has main checked out); it recognises INTEGRATE_MARKER_ENV on
+ * the CAS, and the marker is set ONLY on that CAS `update-ref`.
  *
  * The floor's corpus (INT-T12): just before the floor runs, `deps.corpus.take` writes a consistent snapshot (VACUUM INTO)
  * of the shared corpus into `<integration worktree>/.lore/`, so a branch whose binary needs a newer schema migrates the
@@ -60,12 +64,15 @@
  *
  * Source: spec-main-advances-only-through-lore-integrate-per-session AC-INT-1, AC-INT-2, BR-1245, BR-1246.
  */
-import { existsSync, realpathSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { err, ok, type LoreError, type Result } from "@lore/core";
 import type { IntegrateLossLedger } from "./integrate-loss-ledger.js";
 import type { AttemptRecord, IntegrateAttemptLedger } from "./integrate-attempt-ledger.js";
 import type { LandingFact } from "./task-commit-range.js";
+import { EMBEDDED_ASSETS_MANIFEST } from "../generated/assets-manifest.js";
+import { GIT_UPGRADE_HINT, MIN_GIT_FOR_MAIN_REF_HOOK, parseGitVersion } from "../flows/setup-project-flow.js";
 
 /** Attempts (merge + floor + CAS) one call makes before it gives up with exit 75. */
 export const INTEGRATE_MAX_ATTEMPTS = 3;
@@ -79,6 +86,9 @@ export const INTEGRATE_MARKER_ENV = "LORE_INTEGRATE";
 /** The branch integrations land on. */
 const TARGET_REF = "refs/heads/main";
 const TARGET_NAME = "main";
+/** The guard hook: its filename in the hooks directory, and its path in the embedded asset manifest. */
+const MAIN_REF_HOOK_NAME = "reference-transaction";
+const MAIN_REF_HOOK_ASSET_PATH = "project/reference-transaction";
 
 /** How much of a failing floor's output the outcome carries: sized so the failed steps' re-printed blocks (run-chain prints them last, up to 2500 chars each) always fit. */
 export const FLOOR_TAIL_CHARS = 12000;
@@ -162,6 +172,11 @@ export interface IntegrateDeps {
   readonly ledger: IntegrateLossLedger;
   /** Per-attempt phase durations, kept per branch and NOT cleared on landing (see integrate-attempt-ledger.ts). */
   readonly attempts: IntegrateAttemptLedger;
+  /**
+   * The installed git's `git --version` line (default: `git --version` run through `deps.git` in `projectRoot`);
+   * injected so a test can report an old git without a second git on the machine.
+   */
+  readonly readGitVersion?: () => string;
   /** Wall clock in epoch milliseconds (default `Date.now`); injected so tests assert exact durations. */
   readonly clock?: () => number;
   /** The main checkout's root: the repo whose refs main lives in (git commands run here). */
@@ -292,14 +307,15 @@ export class IntegrateService {
           "workflow.integrate.floor_command is not set in .lore/config.yaml (or the file failed to parse): lore integrate will not advance main on a tree whose floor was never named",
       });
     }
+    // reason: first of every git side effect. BR-1273 refuses "before anything moves, with nothing changed", and a fetch
+    // moves refs/remotes/*; the guard check only reads, so a refused run leaves every ref as it found it.
+    const guarded = this.requireMainRefGuard();
+    if (!guarded.ok) return guarded;
     const fetched = this.fetchRemoteTracking(request.branch);
     if (!fetched.ok) return fetched;
     const tipResult = this.resolveCommit(request.branch);
     if (!tipResult.ok) return tipResult;
     const tip = tipResult.value;
-
-    const prepared = this.prepareSharedCheckout();
-    if (!prepared.ok) return prepared;
 
     const worktree = this.ensureWorktree(request.sessionId);
     if (!worktree.ok) return worktree;
@@ -490,51 +506,33 @@ export class IntegrateService {
   }
 
   /**
-   * Refuses a repository where a ref move would stage a reverse diff in a checked-out tree, and detaches the shared
-   * checkout when it is still on branch main (E3, E5; the ADR's Installation and migration).
+   * Refuses to run unless the main-ref guard is in force: git >= 2.46 and the shipped `reference-transaction` hook,
+   * byte for byte and executable, in the active hooks directory. Reads only; nothing is changed on refusal.
    */
-  private prepareSharedCheckout(): Result<void, LoreError> {
+  private requireMainRefGuard(): Result<void, LoreError> {
     const { git, projectRoot } = this.deps;
-    const listed = git(projectRoot, ["worktree", "list", "--porcelain"]);
-    if (listed.status !== 0) return err(gitFailure("git worktree list", listed));
-    const shared = realpathSync(projectRoot);
-    const isShared = (p: string): boolean => p === shared || (existsSync(p) && realpathSync(p) === shared);
-    const onMain: string[] = [];
-    for (const block of listed.stdout.split("\n\n")) {
-      const lines = block.split("\n");
-      const path = lines.find((l) => l.startsWith("worktree "))?.slice("worktree ".length);
-      if (path !== undefined && lines.includes(`branch ${TARGET_REF}`)) onMain.push(path);
+    const refuse = (message: string, value?: string): Result<void, LoreError> =>
+      err({ code: "VALIDATION_ERROR", field: "main-ref-guard", message: `integrate: ${message} Nothing was changed`, ...(value === undefined ? {} : { value }) });
+    const { major, minor } = MIN_GIT_FOR_MAIN_REF_HOOK;
+    const versionLine = this.deps.readGitVersion !== undefined ? this.deps.readGitVersion() : git(projectRoot, ["--version"]).stdout;
+    const version = parseGitVersion(versionLine);
+    if (version === undefined) {
+      return refuse(`cannot read the git version (got ${JSON.stringify(versionLine.trim())}), so the main-ref guard cannot be proven to work; it needs git >= ${major}.${minor}. ${GIT_UPGRADE_HINT}`);
     }
-    const others = onMain.filter((p) => !isShared(p));
-    if (others.length > 0) {
-      return err({
-        code: "VALIDATION_ERROR",
-        field: "worktree",
-        message: `integrate: ${others.join(", ")} has ${TARGET_NAME} checked out; moving ${TARGET_NAME} under a checked-out branch stages a reverse diff there. Detach it (git -C <path> checkout --detach ${TARGET_NAME}) or switch it to another branch, then re-run. Nothing was changed`,
-        value: others.join(", "),
-      });
+    if (version.major < major || (version.major === major && version.minor < minor)) {
+      return refuse(`${version.raw} is older than git ${major}.${minor}, the first git that reports 'git checkout main' to the reference-transaction hook. ${GIT_UPGRADE_HINT} Then run 'lore setup --project'.`, version.raw);
     }
-    if (!onMain.some(isShared)) return ok(undefined);
-
-    const inProgress = this.operationInProgress(shared);
-    if (inProgress !== undefined) {
-      return err({
-        code: "VALIDATION_ERROR",
-        field: "worktree",
-        message: `integrate: the shared checkout ${shared} is on branch ${TARGET_NAME} with a ${inProgress} in progress and cannot be detached; finish or abort it (git -C ${shared} ${inProgress} --abort), then re-run. Nothing was changed`,
-        value: shared,
-      });
+    const located = git(projectRoot, ["rev-parse", "--path-format=absolute", "--git-path", "hooks"]);
+    if (located.status !== 0) return err(gitFailure("locating the hooks directory", located));
+    const installed = join(located.stdout.trim(), MAIN_REF_HOOK_NAME);
+    if (!existsSync(installed)) return refuse(`the main-ref guard is not installed: ${installed} does not exist. Run 'lore setup --project' to install it.`, installed);
+    const expected = EMBEDDED_ASSETS_MANIFEST.entries.find((e) => e.path === MAIN_REF_HOOK_ASSET_PATH);
+    if (expected === undefined) return err({ code: "STORE_ERROR", message: `integrate: the embedded asset manifest has no ${MAIN_REF_HOOK_ASSET_PATH} (a build defect)` });
+    const actual = createHash("sha256").update(readFileSync(installed)).digest("hex");
+    if (actual !== expected.sha256) {
+      return refuse(`the main-ref guard at ${installed} differs from the one this lore ships (sha256 ${actual.slice(0, 12)} vs ${expected.sha256.slice(0, 12)}). Run 'lore setup --project' to refresh it.`, installed);
     }
-    const detached = git(shared, ["checkout", "-q", "--detach", TARGET_NAME]);
-    if (detached.status !== 0) {
-      return err({
-        code: "VALIDATION_ERROR",
-        field: "worktree",
-        message: `integrate: the shared checkout ${shared} is on branch ${TARGET_NAME} and could not be detached (git exit ${detached.status}): ${(detached.stderr || detached.stdout).trim()}. Nothing was changed`,
-        value: shared,
-      });
-    }
-    this.deps.log(`integrate: detached the shared checkout ${shared} at ${TARGET_NAME} (its edits are untouched)`);
+    if ((statSync(installed).mode & 0o111) === 0) return refuse(`the main-ref guard at ${installed} is not executable, so git skips it. Run 'lore setup --project' to repair it.`, installed);
     return ok(undefined);
   }
 

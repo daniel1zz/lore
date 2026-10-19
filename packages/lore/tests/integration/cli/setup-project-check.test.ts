@@ -29,6 +29,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { HOOK_ASSET_NAMES } from "../../../src/flows/setup-project-flow.js";
+import { initRepoWithMainCommit } from "../support/main-guard-repo.js";
 
 /** A project hook the current binary ships — derived from the SSOT so a hook retirement cannot break this suite again. */
 const SHIPPED_HOOK: string = HOOK_ASSET_NAMES[0];
@@ -117,7 +118,7 @@ beforeAll(() => {
   mkdirSync(join(sandbox, "home"), { recursive: true });
   templateRepo = join(sandbox, "template");
   mkdirSync(templateRepo, { recursive: true });
-  execFileSync("git", ["init", "-q"], { cwd: templateRepo });
+  initRepoWithMainCommit(templateRepo); // setup refuses a main with no commit (BR-1343)
   // `lore init` first so context.language can be set BEFORE the scaffold projects it into the settings file.
   const init = spawnSync(BUN_BIN, ["run", INDEX_TS, "init"], { cwd: templateRepo, env: envFor(templateRepo), encoding: "utf8" });
   if (init.status !== 0) throw new Error(`lore init failed: ${init.stderr}`);

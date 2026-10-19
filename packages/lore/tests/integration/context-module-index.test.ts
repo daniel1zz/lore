@@ -19,6 +19,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { runLoreInProcess } from "../helpers/run-lore-in-process";
+import { initRepoWithMainCommit } from "./support/main-guard-repo.js";
 
 /**
  * A hand-written root file that already carries the three required sections the managed zone does not supply: limits
@@ -53,8 +54,7 @@ function put(dir: string, rel: string, content: string): void {
 async function makeProject(): Promise<string> {
   const dir = mkdtempSync(join(tmpdir(), "lore-module-index-"));
   scratch.push(dir);
-  const git = spawnSync("git", ["init", "-q", dir]);
-  if (git.status !== 0) throw new Error(`git init failed: ${String(git.stderr)}`);
+  initRepoWithMainCommit(dir); // setup refuses a main with no commit (BR-1343)
   const init = await runLore(["init"], dir);
   if (init.exitCode !== 0) throw new Error(`lore init failed: ${init.stderr}`);
   return dir;

@@ -22,6 +22,7 @@ import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import yaml from "yaml";
+import { initRepoWithMainCommit } from "./support/main-guard-repo.js";
 
 setDefaultTimeout(300_000);
 
@@ -52,7 +53,7 @@ afterAll(() => {
 function makeCorpus(): string {
   const dir = realpathSync(mkdtempSync(join(tmpdir(), "lore-review-treepos-")));
   scratch.push(dir);
-  execFileSync("git", ["init", "-q", "."], { cwd: dir, stdio: "ignore" });
+  initRepoWithMainCommit(dir); // setup refuses a main with no commit (BR-1343)
   const init = runLore(["init"], dir);
   expect(init.exitCode, init.stderr + init.stdout).toBe(0);
   const setup = runLore(["setup", "--project", "--yes"], dir);

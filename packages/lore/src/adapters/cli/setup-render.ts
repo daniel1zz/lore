@@ -418,6 +418,8 @@ export function renderProjectScaffoldReceipt(receipt: ProjectScaffoldReceipt, ct
     `Git hooksPath: ${receipt.git_hooks_path.status} (prior: ${receipt.git_hooks_path.prior_value ?? "unset"})` +
       (receipt.git_hooks_path.detail ? ` — ${receipt.git_hooks_path.detail}` : ""),
   );
+  lines.push(`Main checkouts: ${receipt.main_detached.status}${receipt.main_detached.detail ? ` — ${receipt.main_detached.detail}` : ""}`);
+  for (const path of receipt.main_detached.detached) lines.push(`  detached at main: ${path}`);
   lines.push("");
 
   // BOUNDARY: an empty `backups` array omits the WHOLE section — D6's "loud" intent

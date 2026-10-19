@@ -1,3 +1,4 @@
+// @reads assets/project/reference-transaction
 /**
  * A task's commit range is a fact of its LANDING (`lore integrate`), not of its last claim.
  * Throwaway git repos + InMemoryStore only (never the repo's `.lore/`).
@@ -29,6 +30,7 @@ import { IntegrateLossLedger } from "../../src/service/integrate-loss-ledger.js"
 import { IntegrateAttemptLedger } from "../../src/service/integrate-attempt-ledger.js";
 import { deriveCommitSetForPlan } from "../../src/adapters/cli/assess-commit-derivation.js";
 import { actedStore } from "../live-invocation.js";
+import { installShippedGuard } from "./support/main-guard-repo.js";
 
 const GIT_ENV = {
   ...process.env,
@@ -47,6 +49,13 @@ afterEach(() => {
 
 function run(dir: string, ...args: string[]): string {
   const r = spawnSync("git", args, { cwd: dir, env: GIT_ENV, encoding: "utf8" });
+  if (r.status !== 0) throw new Error(`git ${args.join(" ")} failed: ${r.stderr}`);
+  return r.stdout.trim();
+}
+
+/** git with the integrate marker: what a deliberate human bypass of the main-ref guard looks like. */
+function runMarked(dir: string, ...args: string[]): string {
+  const r = spawnSync("git", args, { cwd: dir, env: { ...GIT_ENV, LORE_INTEGRATE: "1" }, encoding: "utf8" });
   if (r.status !== 0) throw new Error(`git ${args.join(" ")} failed: ${r.stderr}`);
   return r.stdout.trim();
 }
@@ -83,6 +92,9 @@ async function fixture(probeOverride?: Partial<ReturnType<typeof createRealWorkt
   const ownCommit = commit(repo, "own-landing-file.txt", "feat: the branch's own work");
   run(repo, "checkout", "-q", "main");
   commit(repo, "main-moved.txt", "chore: main moved on");
+  // the shared checkout is a detached view of main and the shipped guard is installed: integrate refuses to run without it
+  run(repo, "checkout", "-q", "--detach", "main");
+  installShippedGuard(repo, join(repo, ".git", "guard-hooks"));
 
   const store = actedStore(new InMemoryStore());
   const cs = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
@@ -203,8 +215,10 @@ describe("AC-LAND-1: a task's commit range is recorded at landing, so a later re
     // work done AFTER the claim, so the claim's head differs from its base_sha
     run(f.repo, "checkout", "-q", "feat-landing");
     commit(f.repo, "after-claim.txt", "feat: work after the claim");
-    run(f.repo, "checkout", "-q", "main");
-    run(f.repo, "merge", "--no-ff", "-q", "-m", "manual merge, no branch name in the subject", "feat-landing");
+    // a hand merge: the guard refuses it without the marker (that is its job), so this test takes the bypass on purpose
+    runMarked(f.repo, "checkout", "-q", "main");
+    runMarked(f.repo, "merge", "--no-ff", "-q", "-m", "manual merge, no branch name in the subject", "feat-landing");
+    run(f.repo, "checkout", "-q", "--detach", "main");
     const done = await f.svc.done(f.taskId, { by: "alice" });
     expect(done.ok).toBe(false);
     expect(!done.ok && "message" in done.error ? done.error.message : "").toContain("[floor: not-landed]");
@@ -229,7 +243,7 @@ describe("AC-LAND-1: a task's commit range is recorded at landing, so a later re
     const f = await fixture();
     run(f.repo, "checkout", "-q", "-b", "other-branch", "main");
     commit(f.repo, "other.txt", "feat: other");
-    run(f.repo, "checkout", "-q", "main");
+    run(f.repo, "checkout", "-q", "--detach", "main");
     const landed = await integrateService(f, true).integrate({ branch: "other-branch", sessionId: "s4", floorCommand: "true" });
     expect(landed.ok && landed.value.kind).toBe("landed");
     const task = await f.store.find(f.taskId);
@@ -240,7 +254,7 @@ describe("AC-LAND-1: a task's commit range is recorded at landing, so a later re
     const f = await fixture();
     run(f.repo, "checkout", "-q", "-b", "unclaimed-branch", "main");
     commit(f.repo, "unclaimed.txt", "feat: unclaimed");
-    run(f.repo, "checkout", "-q", "main");
+    run(f.repo, "checkout", "-q", "--detach", "main");
     mkdirSync(join(f.repo, ".claude", "worktrees"), { recursive: true });
     const landed = await integrateService(f, true).integrate({ branch: "unclaimed-branch", sessionId: "s3", floorCommand: "true" });
     expect(landed.ok && landed.value.kind).toBe("landed");

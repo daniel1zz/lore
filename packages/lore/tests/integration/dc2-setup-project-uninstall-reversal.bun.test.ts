@@ -16,6 +16,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { initRepoWithMainCommit } from "./support/main-guard-repo.js";
 
 const PACKAGE_ROOT = new URL("../../", import.meta.url).pathname.replace(/\/$/, "");
 const INDEX_TS = join(PACKAGE_ROOT, "src", "index.ts");
@@ -35,7 +36,8 @@ afterEach(() => {
 function makeRepo(): string {
   const dir = mkdtempSync(join(tmpdir(), "dc2-4-repo-"));
   scratch.push(dir);
-  for (const args of [["init"], ["config", "user.email", "t@example.com"], ["config", "user.name", "T"]]) {
+  initRepoWithMainCommit(dir); // setup refuses a main with no commit (BR-1343)
+  for (const args of [["config", "user.email", "t@example.com"], ["config", "user.name", "T"]]) {
     const proc = Bun.spawnSync(["git", ...args], { cwd: dir });
     if (proc.exitCode !== 0) throw new Error(`git ${args.join(" ")} failed: ${proc.stderr.toString()}`);
   }
