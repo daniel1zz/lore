@@ -119,7 +119,7 @@ import { pickBaselineRoot, pickStrategyDocument } from "./navigation-roots.js";
 import { hasIssueReport, type ResolvesInEdgeLike, type ResolutionSourceDocLike } from "./issue-resolution.js";
 import type { ArchiveIssueClosePort, IssueCloseItem } from "./issue-close-on-archive.js";
 import { isPlanMember } from "./plan-membership.js";
-import { bodyDiffers, RecordLockService, type RecordEditOp, type RecordEditPatch } from "./record-lock-service.js";
+import { bodyDiffers, RecordLockService, type RecordEditOp } from "./record-lock-service.js";
 import { ANCHOR_SCANNED_DOC_TYPES } from "./drift-check-service.js";
 // reason: NOT a cross-service import — `service/CLAUDE.md`'s "no cross-service imports"
 // rule scopes "service" to a store-holding class composed in `app.ts`. These four are
@@ -887,8 +887,12 @@ export interface DocWritePort {
   ): Promise<Result<DocWriteOutcome, LoreError>>;
   moveRule(request: RuleMoveRequest): Promise<Result<{ from: DocRecord; to: DocRecord }, LoreError>>;
   allocateRule(request: RuleAllocateRequest): Promise<Result<{ ruleId: string; doc: DocRecord }, LoreError>>;
-  /** Read-only record-lock verdict for an edit a dry run only SIMULATES — the same gate `writeDoc` applies. */
-  assertEditable(doc: DocRecord, op: RecordEditOp, patch?: RecordEditPatch): Promise<Result<void, LoreError>>;
+  /**
+   * Read-only record-lock verdict for a dry run: `ok(undefined)` when the doc is not a locked record, else
+   * `ok(<RECORD_LOCKED message>)` — the text a live `writeDoc` refusal carries. Evaluates NO gate, so a dry run
+   * that asks leaves no `gate_passed` / skip row behind (a dry run writes nothing).
+   */
+  describeRecordLock(doc: DocRecord): Promise<Result<string | undefined, LoreError>>;
 }
 
 /** The post-patch value of one patched field of `doc`. */
@@ -1377,11 +1381,17 @@ export class CorpusService implements DocWritePort {
   }
 
   /**
-   * The record-lock verdict {@link writeDoc} applies for `lock: op`, without writing: lets a dry run report a
-   * refusal the live run would hit.
+   * The record-lock verdict {@link writeDoc} reaches for a text rewrite, WITHOUT evaluating the gate: lets a dry
+   * run report the refusal a live run would hit while writing nothing (the gate leaves a trace row even when it
+   * passes). Same lock facts (`RecordLockService.resolve`), so the verdict cannot drift from the live one.
+   *
+   * @returns `ok(undefined)` when `doc` is not a locked record; `ok(message)` naming `RECORD_LOCKED` when it is.
    */
-  async assertEditable(doc: DocRecord, op: RecordEditOp, patch?: RecordEditPatch): Promise<Result<void, LoreError>> {
-    return this.recordLock.assertEditable(doc, op, patch);
+  async describeRecordLock(doc: DocRecord): Promise<Result<string | undefined, LoreError>> {
+    const lock = await this.recordLock.resolve(doc);
+    if (!lock.ok) return lock;
+    if (!(lock.value.standing === "record" && lock.value.locked)) return ok(undefined);
+    return ok(`Gate "record-edit" would block: RECORD_LOCKED — ${doc.slug} is a locked record (${lock.value.reason})`);
   }
 
   /** {@link resolveWriteActor} as a `Result`: an unwired write context is a refusal, not a throw. */

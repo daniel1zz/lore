@@ -2,6 +2,7 @@
 // @reads packages/lore/src/service/ac-service.ts
 // @reads packages/lore/src/service/phase-service.ts
 // @reads packages/lore/src/service/requirement-service.ts
+// @reads packages/lore/src/service/task-workflow-service.ts
 // @reads packages/lore/src/store/sqlite-store.ts
 /**
  * Phase-write audit-pairing oracle — the SINGLE file behind SPEC-148's
