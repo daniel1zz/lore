@@ -6,7 +6,16 @@
 
 /** Discriminated union of all service-layer errors; the variants below are the SSOT for the code list. */
 export type LoreError =
-  | { code: "DOC_NOT_FOUND"; id: string; suggestions?: string[] }
+  | {
+      code: "DOC_NOT_FOUND";
+      id: string;
+      suggestions?: string[];
+      /**
+       * ISO time the doc was soft-deleted, present iff the id/slug DID resolve to a soft-deleted doc
+       * (a deleted doc is not addressable; the message names this date and `lore undelete`).
+       */
+      deleted_at?: string;
+    }
   | { code: "SLUG_NOT_FOUND"; slug: string; suggestions?: string[] }
   | { code: "STALE_VERSION"; id: string; expected: number; actual: number }
   | {

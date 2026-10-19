@@ -75,7 +75,8 @@ export class VersionService {
     idOrSlug: string,
     opts?: { limit?: number; offset?: number },
   ): Promise<Result<VersionEntry[], LoreError>> {
-    const resolved = await resolveDocId(this.store, idOrSlug);
+    // reason: history of a deleted doc stays readable (delete/undelete are rows in it).
+    const resolved = await resolveDocId(this.store, idOrSlug, { includeDeleted: true });
     if (!resolved.ok) return resolved;
     const docId = resolved.value;
     const result = await this.store.findVersions(docId, {
@@ -112,7 +113,7 @@ export class VersionService {
     idOrSlug: string,
     opts?: { from?: number; to?: number },
   ): Promise<Result<Diff, LoreError>> {
-    const resolved = await resolveDocId(this.store, idOrSlug);
+    const resolved = await resolveDocId(this.store, idOrSlug, { includeDeleted: true });
     if (!resolved.ok) return resolved;
     const docId = resolved.value;
     const allResult = await this.store.findVersions(docId);

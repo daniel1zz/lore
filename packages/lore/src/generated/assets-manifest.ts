@@ -45,7 +45,7 @@ export const LORE_BINARY_VERSION = "0.1.0" as const;
 
 export const EMBEDDED_ASSETS_MANIFEST: EmbeddedAssetsManifest = {
   binary_version: LORE_BINARY_VERSION,
-  tree_digest: "c2133f9925798a557ccae1746f64774b455130d4a697ab4a127a8655fe1cb72d",
+  tree_digest: "725ab90912c35175b56cd975bbd3ed1655ddc1a20cf4d4fe0caded13b76de935",
   entries: [
   { path: "agents/lore-implementer.md", kind: "agent", ownership: "managed", sha256: "73f710267743633a7496545862a255fd348e733e5215cdbe62200ecf1af48488" },
   { path: "agents/lore-reader.md", kind: "agent", ownership: "managed", sha256: "336b2da60cfe9afae51f17ac8f6f9f33e7c67b2f3639874795e22a0e257e8696" },
@@ -357,7 +357,7 @@ export const EMBEDDED_ASSETS_MANIFEST: EmbeddedAssetsManifest = {
   { path: "skills/lore-uat/templates/acceptance-report.md", kind: "skill", ownership: "managed", sha256: "135ed6f2b32146d7e20d119d9c5393dde79d34d1e0258e93a55ad0a549b17bac" },
   { path: "skills/lore-uat/templates/journey.yaml", kind: "skill", ownership: "managed", sha256: "443d43a6f968f8fa8b7df460598f2d05f0e34ff47053b4d0a34d70f9eca0c05a" },
   { path: "skills/lore-write-a-skill/SKILL.md", kind: "skill", ownership: "managed", sha256: "01faaa41d0e7f7f8b3e126b568c848ac3753794aa19602227b0b7f8f1409cd66" },
-  { path: "skills/lore/SKILL.md", kind: "skill", ownership: "managed", sha256: "b58a2bafbaf48e768d1e9208cf17b745873e97f08b30271606fba709d132733b" },
+  { path: "skills/lore/SKILL.md", kind: "skill", ownership: "managed", sha256: "d6251f0087b5b4eb366d48c7d239de258003918d7c5db530f9eed33f1b261706" },
   { path: "skills/shared/batched-governance.md", kind: "skill", ownership: "managed", sha256: "f50808396c3a8e83264219020d9e174a8d4cc9442a5717fe82cd8e87bfe0f20b" },
   { path: "skills/shared/docs-lookup-guide.md", kind: "skill", ownership: "managed", sha256: "978aa02e7943ebf0f4afe21bda79da7d5d4551d94a4da2ef7ca90241edd0d99a" },
   { path: "skills/shared/ears-spec-generation.md", kind: "skill", ownership: "managed", sha256: "91532135bd8cf18c8e9dcece25bb33d33df15caef6ee536b41f33333674daf2b" },

@@ -160,6 +160,9 @@
  * adapter-agnostic and reusable the moment a future task threads
  * `caller_cwd` through `lore_set`/`lore_link`/`lore_unlink`.
  *
+ * (The one AC verb on this surface is `lore_ac_supersede`, which RETIRES a criterion through the same
+ * `AcService.supersedeCriterion` the CLI calls; it never declares or edits one.)
+ *
  * ⛔ NO AC-DECLARING TOOL EXISTS ON THIS SURFACE (there is no `lore_ac_add`/`lore_ac_set`;
  * `lore ac add|set|rm|cite` — `../cli/commands/ac.ts` — are the ONLY writers of
  * `spec.extra.acceptance_criteria`). `lore_set` replaces `extra` wholesale, so it could
@@ -444,6 +447,15 @@ export const LoreDeleteSchema = z.object({
 });
 
 /**
+ * Input schema for lore_undelete — restores a soft-deleted doc inside its recovery window
+ * (`lore undelete`). Attributed to the call's own identity — see {@link LoreSetSchema}.
+ */
+export const LoreUndeleteSchema = z.object({
+  id_or_slug: z.string(),
+  harness_run: HARNESS_RUN_FIELD,
+});
+
+/**
  * Input schema for lore_list.
  *
  * `limit`/`offset` (pagination hardening, unbounded-payload review): unlike the CLI's
@@ -568,6 +580,20 @@ export const LoreApproveSchema = z.object({
 export const LoreReopenSchema = z.object({
   harness_run: HARNESS_RUN_FIELD,
   id_or_slug: z.string(),
+  reason: z.string(),
+});
+
+/**
+ * Input schema for lore_ac_supersede (DC2-15 D15): mark ONE criterion of `spec` superseded by criterion `by_ac` of
+ * spec `by_spec`. The MCP peer of `lore ac supersede <spec> <id> --by <spec>:<AC-ID> --reason`; both call
+ * `AcService.supersedeCriterion`, so the stored mark is identical. `reason` is required and non-blank (service-enforced).
+ */
+export const LoreAcSupersedeSchema = z.object({
+  harness_run: HARNESS_RUN_FIELD,
+  spec: z.string(),
+  ac_id: z.string(),
+  by_spec: z.string(),
+  by_ac: z.string(),
   reason: z.string(),
 });
 
@@ -1811,6 +1837,19 @@ export function registerTools(
     return textContent(result.value);
   });
 
+  // lore_undelete
+  registerToolWithArgs(
+    server,
+    "lore_undelete",
+    "Restore a soft-deleted document within its 30-day recovery window (writes a new version, action undelete)",
+    LoreUndeleteSchema,
+    async (args) => {
+      const result = await corpusService.undelete(args.id_or_slug, args.by !== undefined ? { by: args.by } : undefined);
+      if (!result.ok) return errorContent(result.error);
+      return textContent(result.value);
+    },
+  );
+
   // lore_list
   registerToolWithArgs(server, "lore_list", "List documents matching optional filters", LoreListSchema, async (args) => {
     const { type, status, since, author, tag, limit, offset, governed_by, include_invalid, sub_type } = args;
@@ -2045,6 +2084,21 @@ export function registerTools(
       const result = await reviewService.reopen(args.id_or_slug, args.reason, { reviewer: args.by });
       if (!result.ok) return errorContent(result.error);
       return textContent({ doc: result.value });
+    },
+  );
+
+  // lore_ac_supersede — the same service method as `lore ac supersede` (retires a criterion; never declares one).
+  registerToolWithArgs(
+    server,
+    "lore_ac_supersede",
+    "Mark an acceptance criterion superseded by another spec's criterion (verify skips it, coverage reads `superseded`, it becomes immutable; the spec is not demoted)",
+    LoreAcSupersedeSchema,
+    async (args) => {
+      const result = await scope
+        .service("acService")
+        .supersedeCriterion(args.spec, args.ac_id, { spec: args.by_spec, ac: args.by_ac }, args.reason, { by: args.by });
+      if (!result.ok) return errorContent(result.error);
+      return textContent({ criteria: result.value });
     },
   );
 

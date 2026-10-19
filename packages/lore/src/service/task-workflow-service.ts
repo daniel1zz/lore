@@ -339,6 +339,10 @@ import {
   anchorsOverlap,
   computeAcScopeEdit,
   extractDeclaredAcScope,
+  isAcSuperseded,
+  partitionDeclaredScopeBySupersession,
+  type DeclaredScopeSupersession,
+  type SupersededScopeEntry,
   isTestFileAnchor,
   commandRunsFileUnfiltered,
   UNFILTERED_RUN_CASE_FILTER_DESCRIPTION,
@@ -715,6 +719,12 @@ export interface DoneResult {
    * branch deleted them (task-done-floor-accepts-an-anchored-test-file-the-task-deleted). Absent when none.
    */
   removed_test_anchors?: string[];
+  /**
+   * Declared `extra.ac_scope` ids whose criterion is superseded (D15), each with the superseding criterion. Such an id
+   * is satisfied by supersession: the ac_scope no-new-tests floor does not demand a red run for it. The CLI prints one
+   * line per entry so the archive visibly names the supersession. Absent when the scope holds none.
+   */
+  superseded_scope?: SupersededScopeEntry[];
   /**
    * The post-archive GitHub issue step's lines (spec-archiving-the-work-that-resolves-a-defect-report-
    * closes D4) — present only after a real archive walk with the archive port wired; possibly empty.
@@ -1496,10 +1506,19 @@ function findMissingUnfilteredTestFileRuns(
  * @example
  * requiresNoNewTestsDeclaration({ extra: {} } as DocRecord, []); // => false — no ac_scope key at all
  */
-function requiresNoNewTestsDeclaration(task: DocRecord, evidence: EvidenceEntry[]): boolean {
+function requiresNoNewTestsDeclaration(
+  task: DocRecord,
+  evidence: EvidenceEntry[],
+  supersession?: DeclaredScopeSupersession,
+): boolean {
   if (readRedFirstDeclared(task)) return false;
   const acScope = extractDeclaredAcScope(task);
   if (acScope === undefined) return false;
+  // reason: a NON-EMPTY scope whose every id is superseded (D15) claims no live criterion — it is satisfied by
+  // supersession, so no red run is owed. An EMPTY scope stays armed (see the ⛔ note above), and one live id keeps
+  // the floor armed for the whole scope. `supersession` is resolved by the caller from the governing spec; absent
+  // (unresolvable) means nothing is assumed superseded — fail closed.
+  if (acScope.length > 0 && supersession !== undefined && supersession.live.length === 0) return false;
   return !evidence.some(isRunnerProducedRedRun);
 }
 
@@ -3677,6 +3696,7 @@ export class TaskWorkflowService {
     escapes: { overrideReason?: string; noNewTestsReason?: string },
     stampBinding: StampBindingContext,
     anchorRemovals: ReadonlyMap<string, AnchorRemovalVerdict>,
+    supersession?: DeclaredScopeSupersession,
   ): Result<
     {
       refusal: DoneFloorRefusal | null;
@@ -3809,7 +3829,7 @@ export class TaskWorkflowService {
     // never mask or double-require against that one; AC6 control: a task that DID
     // opt in keeps working byte-identically, since this branch returns false for it.
     let noNewTestsReason: string | undefined;
-    if (requiresNoNewTestsDeclaration(task, evidence)) {
+    if (requiresNoNewTestsDeclaration(task, evidence, supersession)) {
       if (escapes.noNewTestsReason === undefined || escapes.noNewTestsReason.trim() === "") {
         if (escapes.noNewTestsReason !== undefined) {
           return err({
@@ -3920,7 +3940,8 @@ export class TaskWorkflowService {
     if (!stampBinding.ok) return stampBinding;
     const removals = await this.measureAnchorRemovals(task);
     if (!removals.ok) return removals;
-    const evaluated = this.evaluateDoneFloors(task, {}, stampBinding.value, removals.value);
+    const supersession = await this.resolveScopeSupersession(task);
+    const evaluated = this.evaluateDoneFloors(task, {}, stampBinding.value, removals.value, supersession);
     if (!evaluated.ok) return evaluated;
     if (evaluated.value.refusal !== null) return ok(evaluated.value.refusal);
     return this.findAsyncFloor(task);
@@ -3963,6 +3984,35 @@ export class TaskWorkflowService {
     return ok(ids);
   }
 
+  /**
+   * The governing spec's criteria for the done floors: the ad-hoc port for an `--adhoc` task, else the plan-owned
+   * port. `ok(null)` when a plan-owned task has no parent to resolve through.
+   */
+  private async resolveFloorCriteria(task: DocRecord): Promise<Result<AcceptanceCriterion[] | null, LoreError>> {
+    if (task.extra["adhoc"] === true) return this.resolveAdhocGoverningAcCriteria(task);
+    if (task.parent_id === null) return ok(null);
+    const resolved = await this.resolveDeclaredAcCriteria(task.parent_id);
+    if (!resolved.ok) return resolved;
+    return ok(resolved.value ?? []);
+  }
+
+  /**
+   * Which of the task's declared `extra.ac_scope` ids are satisfied by supersession (D15), via the ONE shared
+   * predicate ({@link partitionDeclaredScopeBySupersession} -> `isAcSuperseded`). `undefined` when there is nothing
+   * to partition (no scope key, an empty scope) or the criteria cannot be resolved.
+   *
+   * reason: an unresolvable criterion set answers `undefined`, never an error and never "all superseded": the
+   * no-new-tests floor then stays armed exactly as before, so a resolution failure can only keep a refusal, never
+   * grant an exemption (fail closed).
+   */
+  private async resolveScopeSupersession(task: DocRecord): Promise<DeclaredScopeSupersession | undefined> {
+    const scope = extractDeclaredAcScope(task);
+    if (scope === undefined || scope.length === 0) return undefined;
+    const criteria = await this.resolveFloorCriteria(task);
+    if (!criteria.ok || criteria.value === null) return undefined;
+    return partitionDeclaredScopeBySupersession(scope, criteria.value);
+  }
+
   private async findMissingOracleFileFloor(task: DocRecord): Promise<Result<DoneFloorRefusal | null, LoreError>> {
     const repoRoot = this.repoRoot;
     if (repoRoot === undefined) return ok(null);
@@ -3972,17 +4022,10 @@ export class TaskWorkflowService {
     }
     if (covered.size === 0) return ok(null);
 
-    let criteria: AcceptanceCriterion[];
-    if (task.extra["adhoc"] === true) {
-      const resolved = await this.resolveAdhocGoverningAcCriteria(task);
-      if (!resolved.ok) return resolved;
-      criteria = resolved.value;
-    } else {
-      if (task.parent_id === null) return ok(null);
-      const resolved = await this.resolveDeclaredAcCriteria(task.parent_id);
-      if (!resolved.ok) return resolved;
-      criteria = resolved.value ?? [];
-    }
+    const resolvedCriteria = await this.resolveFloorCriteria(task);
+    if (!resolvedCriteria.ok) return resolvedCriteria;
+    if (resolvedCriteria.value === null) return ok(null);
+    const criteria = resolvedCriteria.value;
 
     const declaredMissingOk = await this.readAllowMissingPathAcIds(task);
     if (!declaredMissingOk.ok) return declaredMissingOk;
@@ -3990,6 +4033,8 @@ export class TaskWorkflowService {
 
     const findings: string[] = [];
     for (const criterion of criteria) {
+      // reason: a superseded criterion (D15) is retired — its oracle is never run, so a missing oracle file is moot.
+      if (isAcSuperseded(criterion)) continue;
       if (!covered.has(criterion.id) || criterion.verify.mode !== "script") continue;
       const criterionCommand = criterion.verify.command;
       const missing = findMissingOracleFiles(criterionCommand, {
@@ -4133,6 +4178,7 @@ export class TaskWorkflowService {
     if (!stampBinding.ok) return stampBinding;
     const removals = await this.measureAnchorRemovals(task);
     if (!removals.ok) return removals;
+    const supersession = await this.resolveScopeSupersession(task);
     const evaluated = this.evaluateDoneFloors(
       task,
       {
@@ -4141,6 +4187,7 @@ export class TaskWorkflowService {
       },
       stampBinding.value,
       removals.value,
+      supersession,
     );
     if (!evaluated.ok) return evaluated;
     if (evaluated.value.refusal !== null) return err(evaluated.value.refusal.error);
@@ -4250,6 +4297,9 @@ export class TaskWorkflowService {
       worktree_outcomes: worktreeOutcomes,
       ...(commitRangeNote(task.extra) !== undefined ? { commit_range_note: commitRangeNote(task.extra) as string } : {}),
       ...(removedTestAnchors.length > 0 ? { removed_test_anchors: removedTestAnchors } : {}),
+      ...(supersession !== undefined && supersession.superseded.length > 0
+        ? { superseded_scope: [...supersession.superseded] }
+        : {}),
       ...(issueClose !== undefined ? { issue_close: issueClose } : {}),
       ...(planFact?.kind === "fully_terminal"
         ? { plan_now_fully_terminal: { plan_slug: planFact.plan_slug } }
