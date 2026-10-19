@@ -67,6 +67,7 @@ import {
 } from "@lore/core";
 import type { DocRecord, DocType } from "@lore/core";
 import type { StoreInterface } from "../store/store-interface.js";
+import { bareDocWriter, type DocWritePort } from "./corpus-service.js";
 import { resolveDoc } from "./resolve.js";
 
 // ─── FsProbe Port (D4) ───────────────────────────────────────────────────────
@@ -139,7 +140,16 @@ const defaultNow = (): string => new Date().toISOString();
 // ─── DriftCheckService ───────────────────────────────────────────────────────
 
 export class DriftCheckService {
-  constructor(private readonly store: StoreInterface) {}
+  constructor(
+    private readonly store: StoreInterface,
+    // reason: AC-DCL-5 — the ONE write route (`CorpusService`); `app.ts` passes the composed one, a bare test gets a
+    // bare writer. This service never calls `store.update` / `insertVersion` / `appendAuditEntry` itself.
+    writer?: DocWritePort,
+  ) {
+    this.writer = writer ?? bareDocWriter(store);
+  }
+
+  private readonly writer: DocWritePort;
 
   // ── checkDrift ──────────────────────────────────────────────────────────
 
@@ -300,10 +310,9 @@ export class DriftCheckService {
   }
 
   /**
-   * Shared CAS-guarded write path for addCodeAnchors/removeCodeAnchors/
-   * setCodeAnchors — bumps the document's version, writes one insertVersion snapshot,
-   * then one audit entry (action "update", actor "system"). Mirrors
-   * `AcService.writeCriteria` exactly. Target-type admission already happened in
+   * Shared write path for addCodeAnchors/removeCodeAnchors/setCodeAnchors: ONE `CorpusService.writeDoc` (CAS on
+   * the doc's version, version row + audit row naming the CALLER, foreign-corpus refusal, no-op writes nothing).
+   * Mirrors `AcService.writeCriteria`. Target-type admission already happened in
    * {@link DriftCheckService.resolveAnchorableDoc}; this path is type-agnostic.
    */
   private async writeCodeAnchors(
@@ -312,45 +321,18 @@ export class DriftCheckService {
     operation: "add" | "remove" | "set",
     now: () => string,
   ): Promise<Result<string[], LoreError>> {
-    const nowIso = now();
-    const newVersion = doc.version + 1;
-    const newExtra: Record<string, unknown> = { ...doc.extra, code_anchors: anchors };
-
-    const updateResult = await this.store.update(
-      doc.id,
-      { extra: newExtra, updated_at: nowIso, version: newVersion },
-      { expected_version: doc.version },
-    );
-    if (!updateResult.ok) return updateResult;
-
     const changeVerb = operation === "add" ? "updated" : operation === "remove" ? "updated (removal)" : "replaced";
-    const versionResult = await this.store.insertVersion({
-      doc_id: doc.id,
-      version: newVersion,
-      content: updateResult.value.content,
-      extra: updateResult.value.extra,
-      status: updateResult.value.status,
-      title: updateResult.value.title,
+    const written = await this.writer.writeDoc({
+      doc,
+      patch: { extra: { ...doc.extra, code_anchors: anchors } },
       action: "update",
-      created_at: nowIso,
-      created_by: "system",
-      change_summary: `Code anchors ${changeVerb} — ${anchors.length} entries`,
-      // SPEC-072 D1/D2 — this write path only touches `extra`; carry the
-      // current (unchanged) slug.
-      slug: updateResult.value.slug,
+      changeSummary: `Code anchors ${changeVerb} — ${anchors.length} entries`,
+      auditAction: "update",
+      auditDetails: { operation, anchor_count: anchors.length },
+      lock: "none",
+      now: now(),
     });
-    if (!versionResult.ok) return versionResult;
-
-    const auditResult = await this.store.appendAuditEntry({
-      timestamp: nowIso,
-      actor: "system",
-      session_id: doc.id,
-      action: "update",
-      doc_id: doc.id,
-      details: { operation, anchor_count: anchors.length, version: newVersion },
-    });
-    if (!auditResult.ok) return auditResult;
-
+    if (!written.ok) return written;
     return ok(anchors);
   }
 }

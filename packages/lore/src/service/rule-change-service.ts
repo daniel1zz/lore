@@ -43,7 +43,7 @@
  */
 
 import { err, ok, type Result } from "@lore/core";
-import type { AuditEntry, DocRecord, DocStatus, LoreError, RuleChange, VersionRecord } from "@lore/core";
+import type { DocRecord, DocStatus, LoreError, RuleChange } from "@lore/core";
 import {
   baselineExtraSchema,
   resolveStatusAfterContractEdit,
@@ -58,6 +58,7 @@ export type RuleEnforcement = BaselineRule["enforced_by"];
 import type { StoreInterface } from "../store/store-interface.js";
 import { resolveWriteActorFor } from "../store/write-context-store.js";
 import { CorpusWriteAuthority, type CorpusWriteAuthorityContext } from "./foreign-corpus-write-guard.js";
+import { bareDocWriter, type DocWritePort } from "./corpus-service.js";
 import { RecordLockService } from "./record-lock-service.js";
 import { resolveDoc } from "./resolve.js";
 import { collectLeafRules } from "./rule-index-queries.js";
@@ -132,14 +133,30 @@ export class RuleChangeService implements RuleChangeLandingPort {
   constructor(
     private readonly store: StoreInterface,
     private readonly recordLock: RecordLockService,
-  ) {}
+    // reason: AC-DCL-5 — the ONE write route (`CorpusService`); `app.ts` passes the composed one, a bare test gets a
+    // bare writer sharing this service's record lock. This service never calls a store write primitive itself.
+    writer?: DocWritePort,
+  ) {
+    this.writer = writer ?? bareDocWriter(store, recordLock);
+  }
+
+  private readonly writer: DocWritePort;
+
+  /**
+   * `true` once the claim-scoped authority is armed: every write of this service follows an `authorize(...)` call
+   * (a foreign crossing is refused there unless a scoped lease covers it), so the write route's own foreign-corpus
+   * refusal must not second-guess a decision already taken. Unarmed ⇒ the route decides alone.
+   */
+  private get foreignIntent(): boolean {
+    return this.writeAuthority !== undefined;
+  }
 
   /**
    * Arms the claim-scoped corpus-write guard (same context `RuleService` receives). Absent ⇒ every write is
    * ungated, exactly as before the guard existed.
    */
   setCorpusWriteContext(context: CorpusWriteAuthorityContext): void {
-    this.writeAuthority = new CorpusWriteAuthority(this.store, context);
+    this.writeAuthority = new CorpusWriteAuthority(this.store, context, this.writer);
   }
 
   /**
@@ -404,36 +421,19 @@ export class RuleChangeService implements RuleChangeLandingPort {
     actor: string,
     details: Record<string, unknown>,
   ): Promise<Result<DocRecord, LoreError>> {
-    const now = new Date().toISOString();
-    const version = doc.version + 1;
-    const versionRecord: VersionRecord = {
-      doc_id: doc.id,
-      version,
-      content: doc.content,
-      extra,
-      status,
-      title: doc.title,
+    const written = await this.writer.writeDoc({
+      doc,
+      patch: { extra, status },
       action: "update",
-      created_at: now,
-      created_by: actor,
-      change_summary: summary,
-      slug: doc.slug,
-    };
-    const audit: AuditEntry = {
-      timestamp: now,
-      actor,
-      session_id: doc.id,
-      action: "update",
-      doc_id: doc.id,
-      details: { ...details, version, new_version: version },
-    };
-    return this.store.updateWithProvenance(
-      doc.id,
-      { extra, status, version, updated_at: now },
-      { expected_version: doc.version },
-      versionRecord,
-      audit,
-    );
+      changeSummary: summary,
+      auditAction: "update",
+      auditDetails: details,
+      lock: "none",
+      by: actor,
+      foreignIntent: this.foreignIntent,
+    });
+    if (!written.ok) return written;
+    return ok(written.value.doc);
   }
 
   private async resolveLeaf(leafRef: string): Promise<Result<DocRecord, LoreError>> {
@@ -464,8 +464,8 @@ export class RuleChangeService implements RuleChangeLandingPort {
   ): Promise<Result<{ change: RuleChange; doc: DocRecord }, LoreError>> {
     if (leaf === undefined) return err(validationError("leaf", "an add needs a resolved baseline leaf"));
     let stored: RuleChange | undefined;
-    const reserved = await this.store.reserveProposedRuleAndUpdateSpec(
-      {
+    const reserved = await this.writer.reserveProposedRule({
+      write: {
         specId: spec.id,
         expectedVersion: spec.version,
         ownerLeafId: leaf.id,
@@ -476,13 +476,13 @@ export class RuleChangeService implements RuleChangeLandingPort {
           return { ...spec.extra, rule_changes: [...ruleChangesOf(spec.extra), stored] };
         },
       },
-      actor,
-      "BR",
-    );
+      family: "BR",
+      auditDetails: { change_op: "add", operation: "rule-propose" },
+      by: actor,
+      foreignIntent: this.foreignIntent,
+    });
     if (!reserved.ok) return reserved;
     if (stored === undefined) return err({ code: "STORE_ERROR", message: "reservation committed without building the change" });
-    const audited = await this.appendAudit(actor, reserved.value.doc, { change_op: "add", rule_id: reserved.value.ruleId });
-    if (!audited.ok) return audited;
     return ok({ change: stored, doc: reserved.value.doc });
   }
 
@@ -515,45 +515,24 @@ export class RuleChangeService implements RuleChangeLandingPort {
     actor: string,
     correctionReason: string | undefined,
   ): Promise<Result<{ change: RuleChange; doc: DocRecord }, LoreError>> {
-    const extra = { ...spec.extra, rule_changes: next };
-    const now = new Date().toISOString();
-    const version = spec.version + 1;
-    const versionRecord: VersionRecord = {
-      doc_id: spec.id,
-      version,
-      content: spec.content,
-      extra,
-      status,
-      title: spec.title,
+    const written = await this.writer.writeDoc({
+      doc: spec,
+      patch: { extra: { ...spec.extra, rule_changes: next }, status },
       action: "update",
-      created_at: now,
-      created_by: actor,
-      change_summary: summary,
-      slug: spec.slug,
-    };
-    const audit: AuditEntry = {
-      timestamp: now,
-      actor,
-      session_id: spec.id,
-      action: "update",
-      doc_id: spec.id,
-      details: {
+      changeSummary: summary,
+      auditAction: "update",
+      auditDetails: {
         operation: "rule-propose",
         change_op: change.op,
         rule_id: change.id,
-        version,
         ...(correctionReason !== undefined ? { correction: { reason: correctionReason } } : {}),
       },
-    };
-    const written = await this.store.updateWithProvenance(
-      spec.id,
-      { extra, status, version, updated_at: now },
-      { expected_version: spec.version },
-      versionRecord,
-      audit,
-    );
+      lock: "none",
+      by: actor,
+      foreignIntent: this.foreignIntent,
+    });
     if (!written.ok) return written;
-    return ok({ change, doc: written.value });
+    return ok({ change, doc: written.value.doc });
   }
 
   /**
@@ -738,17 +717,6 @@ export class RuleChangeService implements RuleChangeLandingPort {
     if (!found.ok) return found;
     if (found.value === null || found.value.deleted_at !== null) return err({ code: "DOC_NOT_FOUND", id });
     return ok(found.value);
-  }
-
-  private async appendAudit(actor: string, doc: DocRecord, details: Record<string, unknown>): Promise<Result<void, LoreError>> {
-    return this.store.appendAuditEntry({
-      timestamp: new Date().toISOString(),
-      actor,
-      session_id: doc.id,
-      action: "update",
-      doc_id: doc.id,
-      details: { ...details, operation: "rule-propose", version: doc.version },
-    });
   }
 }
 

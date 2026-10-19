@@ -27,9 +27,8 @@ import { z } from "zod";
 import { ok } from "@lore/core";
 import type { DocId, DocRecord, LoreError, Result } from "@lore/core";
 import type { StoreInterface } from "../store/store-interface.js";
+import { bareDocWriter, type DocWritePort } from "./corpus-service.js";
 
-/** Audit actor stamped on every entry this migration writes. */
-const MIGRATION_ACTOR = "system:spec-parent-migration";
 /** Audit action written by {@link SpecParentMigrationService.apply}; `revert` reads it back. */
 export const MIGRATE_SPEC_PARENT_ACTION = "migrate_spec_parent";
 /** Audit action written by {@link SpecParentMigrationService.revert}. */
@@ -61,7 +60,16 @@ export interface SpecParentReport {
 }
 
 export class SpecParentMigrationService {
-  constructor(private readonly store: StoreInterface) {}
+  constructor(
+    private readonly store: StoreInterface,
+    // reason: AC-DCL-5 — the ONE write route (`CorpusService`); `app.ts` passes the composed one, a bare test gets a
+    // bare writer. This service never calls a store `*WithProvenance` write itself.
+    writer?: DocWritePort,
+  ) {
+    this.writer = writer ?? bareDocWriter(store);
+  }
+
+  private readonly writer: DocWritePort;
 
   /**
    * List the specs `apply` would clear — every non-deleted spec with a `parent_id`. Writes nothing.
@@ -90,13 +98,12 @@ export class SpecParentMigrationService {
     const written: SpecParentRow[] = [];
     const errors: string[] = [];
     for (const row of planned.value.rows) {
-      const result = await this.store.setDocParentWithProvenance(row.doc_id, null, {
-        timestamp: new Date().toISOString(),
-        actor: MIGRATION_ACTOR,
-        session_id: `spec-parent-migration-${row.doc_id}`,
-        action: MIGRATE_SPEC_PARENT_ACTION,
-        doc_id: row.doc_id,
-        details: { old_parent_id: row.parent_id },
+      const result = await this.writer.setDocParent({
+        docId: row.doc_id,
+        parentId: null,
+        auditAction: MIGRATE_SPEC_PARENT_ACTION,
+        auditSessionId: `spec-parent-migration-${row.doc_id}`,
+        auditDetails: { old_parent_id: row.parent_id },
       });
       if (result.ok) written.push(row);
       else errors.push(`${row.slug}: ${describeError(result.error)}`);
@@ -138,13 +145,12 @@ export class SpecParentMigrationService {
         continue;
       }
 
-      const result = await this.store.setDocParentWithProvenance(doc.id, oldParentId, {
-        timestamp: new Date().toISOString(),
-        actor: MIGRATION_ACTOR,
-        session_id: `spec-parent-revert-${doc.id}`,
-        action: REVERT_SPEC_PARENT_ACTION,
-        doc_id: doc.id,
-        details: { restored_parent_id: oldParentId },
+      const result = await this.writer.setDocParent({
+        docId: doc.id,
+        parentId: oldParentId,
+        auditAction: REVERT_SPEC_PARENT_ACTION,
+        auditSessionId: `spec-parent-revert-${doc.id}`,
+        auditDetails: { restored_parent_id: oldParentId },
       });
       if (result.ok) restored.push({ slug: doc.slug, doc_id: doc.id, parent_id: oldParentId });
       else errors.push(`${doc.slug}: ${describeError(result.error)}`);

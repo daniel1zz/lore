@@ -128,6 +128,7 @@ import type { StoreInterface } from "../store/store-interface.js";
 import { findSpecChildPlans, findSpecEvidenceTasks, findTasksUnderPlans } from "./spec-evidence-tasks.js";
 import { resolveDoc } from "./resolve.js";
 import type { RecordLockService } from "./record-lock-service.js";
+import { bareDocWriter, type DocWritePort } from "./corpus-service.js";
 import { buildRuleIndex, citeWarnings, type CiteWarning } from "./ac-citations.js";
 import { ownProposedRules } from "./rule-changes.js";
 import { admitAcWrite, applyAcChange, decorateCiteRefusal, pipeAdvisories, resolveCiteGateFor } from "./ac-write-chokepoint.js";
@@ -361,9 +362,15 @@ export class AcService {
      */
     private readonly recordLock: RecordLockService,
     options?: AcServiceOptions,
+    // reason: AC-DCL-5 — the ONE write route (`CorpusService`); `app.ts` passes the composed one, a bare test gets a
+    // bare writer sharing this service's record lock. This service never calls a store write primitive itself.
+    writer?: DocWritePort,
   ) {
     this.citeGate = options === undefined ? undefined : { raw: options.citeGate };
+    this.writer = writer ?? bareDocWriter(store, recordLock);
   }
+
+  private readonly writer: DocWritePort;
 
   /**
    * The citation gate's resolved configuration as THIS service applies it. A bare (ungated) service
@@ -382,7 +389,7 @@ export class AcService {
 
   /** Arms the claim-scoped corpus-write guard for {@link citeCriterion}. Called once per CLI process. */
   setCorpusWriteContext(context: CorpusWriteAuthorityContext): void {
-    this.writeAuthority = new CorpusWriteAuthority(this.store, context);
+    this.writeAuthority = new CorpusWriteAuthority(this.store, context, this.writer);
   }
 
   /**
@@ -1110,7 +1117,6 @@ export class AcService {
     } = {},
   ): Promise<Result<DocRecord, LoreError>> {
     const now = new Date().toISOString();
-    const newVersion = spec.version + 1;
     const newExtra: Record<string, unknown> = { ...spec.extra, acceptance_criteria: criteria };
     // The sanctioned half of the AC write chokepoint (spec-baseline-slice-2 §C3): every verb's
     // write is declared through the SAME function CorpusService's wholesale paths are refused by.
@@ -1150,52 +1156,39 @@ export class AcService {
     // ONE atomic composite write (doc CAS + version row + audit row + any would-refuse rows). The
     // liveness of every cited rule is re-read INSIDE this write's transaction (D6): a concurrent
     // retire either committed first — and the write is refused — or waits for this commit.
-    const written = await this.store.updateWithProvenance(
-      spec.id,
-      { extra: newExtra, updated_at: now, version: newVersion, status: newStatus },
-      { expected_version: spec.version },
-      {
-        doc_id: spec.id,
-        version: newVersion,
-        content: spec.content,
-        extra: newExtra,
-        status: newStatus,
-        title: spec.title,
-        action: "update",
-        created_at: now,
-        created_by: actor,
-        change_summary:
-          opts.correctionReason !== undefined
-            ? `Correction: ${opts.correctionReason}`
-            : operation === "set"
-            ? buildSetChangeSummary(criteria.length, opts.acId, spec.status, newStatus)
-            : operation === "cite"
-              ? `Acceptance criterion ${opts.acId ?? ""} citations updated — ${criteria.length} entries`
-              : `Acceptance criteria ${operation === "add" ? "updated" : "updated (removal)"} — ${criteria.length} entries`,
-        // SPEC-072 D1/D2 — this write path only touches `extra`; carry the
-        // current (unchanged) slug.
-        slug: spec.slug,
+    // reason: the record lock was asked by the verb before it got here (lock "none"). A foreign crossing is allowed
+    // only for a cite that `authorizeCite` already cleared against the lease's corpus scope (armed authority); every
+    // other AC verb has no declared-intent fact, so from a linked worktree the route refuses it.
+    const outcome = await this.writer.writeDoc({
+      doc: spec,
+      patch: { extra: newExtra, status: newStatus },
+      action: "update",
+      changeSummary:
+        opts.correctionReason !== undefined
+          ? `Correction: ${opts.correctionReason}`
+          : operation === "set"
+          ? buildSetChangeSummary(criteria.length, opts.acId, spec.status, newStatus)
+          : operation === "cite"
+            ? `Acceptance criterion ${opts.acId ?? ""} citations updated — ${criteria.length} entries`
+            : `Acceptance criteria ${operation === "add" ? "updated" : "updated (removal)"} — ${criteria.length} entries`,
+      auditAction: "update",
+      auditDetails: {
+        ...(opts.auditDetails ?? {}),
+        operation,
+        criteria_count: criteria.length,
+        ...(opts.acId !== undefined ? { ac_id: opts.acId } : {}),
+        ...(opts.correctionReason !== undefined ? { correction: { reason: opts.correctionReason } } : {}),
       },
-      {
-        timestamp: now,
-        actor,
-        session_id: spec.id,
-        action: "update",
-        doc_id: spec.id,
-        details: {
-          ...(opts.auditDetails ?? {}),
-          operation,
-          criteria_count: criteria.length,
-          version: newVersion,
-          ...(opts.acId !== undefined ? { ac_id: opts.acId } : {}),
-          ...(opts.correctionReason !== undefined ? { correction: { reason: opts.correctionReason } } : {}),
-        },
-      },
-      {
+      lock: "none",
+      by: actor,
+      now,
+      foreignIntent: operation === "cite" && this.writeAuthority !== undefined,
+      extras: {
         ...(requireLiveRules.length > 0 ? { require_live_rules: requireLiveRules } : {}),
         ...(wouldRefuseAudit.length > 0 ? { also_audit: wouldRefuseAudit } : {}),
       },
-    );
+    });
+    const written: Result<DocRecord, LoreError> = outcome.ok ? ok(outcome.value.doc) : outcome;
     if (!written.ok) {
       return { ok: false, error: await decorateCiteRefusal(this.store, written.error, { target, existing, next: criteria }) };
     }

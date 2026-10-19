@@ -68,6 +68,7 @@ import type {
   CalibrationWindowFilter,
   StoreInterface,
 } from "../store/store-interface.js";
+import { bareDocWriter, type DocWritePort } from "./corpus-service.js";
 
 // ─── Public Types ───────────────────────────────────────────────────────────
 
@@ -131,7 +132,14 @@ export class JudgmentService {
   constructor(
     private readonly store: StoreInterface,
     private readonly telemetry: Telemetry,
-  ) {}
+    // reason: AC-DCL-5 — the ONE write route (`CorpusService`); `app.ts` passes the composed one, a bare test gets a
+    // bare writer. This service never calls `store.appendAuditEntry` itself.
+    writer?: DocWritePort,
+  ) {
+    this.writer = writer ?? bareDocWriter(store);
+  }
+
+  private readonly writer: DocWritePort;
 
   /**
    * Persist a new AI-authored review judgment: generate `id`/`created_at`/`created_by`,
@@ -197,12 +205,12 @@ export class JudgmentService {
     // instead of the synthetic AI judge string) because a probe is a discretionary,
     // cost-incurring action someone chose to run — the judgment row's own `judge` field
     // still carries the real provider/model/prompt-version regardless of this override.
-    const auditResult = await this.store.appendAuditEntry({
+    const auditResult = await this.writer.appendAudit({
       timestamp: parsed.data.created_at,
-      actor: opts?.auditActor ?? parsed.data.created_by,
-      session_id: `judge-${parsed.data.doc_id}`,
+      by: opts?.auditActor ?? parsed.data.created_by,
+      sessionId: `judge-${parsed.data.doc_id}`,
       action: opts?.auditAction ?? "judge",
-      doc_id: parsed.data.doc_id,
+      docId: parsed.data.doc_id,
       details: { judgment_ref: parsed.data.id, version: parsed.data.doc_version },
     });
     if (!auditResult.ok) return auditResult;

@@ -68,6 +68,7 @@ import { err, ok, outlineEntrySchema } from "@lore/core";
 import { z } from "zod";
 import type { DocRecord, LoreError, Result } from "@lore/core";
 import type { StoreInterface } from "../store/store-interface.js";
+import { bareDocWriter, type DocWritePort } from "./corpus-service.js";
 
 // ─── Public Types ───────────────────────────────────────────────────────────
 
@@ -258,7 +259,16 @@ function errRefusal(refusalValue: OutlineMigrationRefusal): Result<never, Outlin
  *   rationale as `PhaseMigrationService`/`MigrationService`).
  */
 export class OutlineMigrationService {
-  constructor(private readonly store: StoreInterface) {}
+  constructor(
+    private readonly store: StoreInterface,
+    // reason: AC-DCL-5 — the ONE write route (`CorpusService`); `app.ts` passes the composed one, a bare test gets a
+    // bare writer. This service never calls `store.update` / `insertVersion` / `appendAuditEntry` itself.
+    writer?: DocWritePort,
+  ) {
+    this.writer = writer ?? bareDocWriter(store);
+  }
+
+  private readonly writer: DocWritePort;
 
   /**
    * Migrates ONE `## `-heading-derived section of `prdId`'s body into a
@@ -475,33 +485,16 @@ export class OutlineMigrationService {
     };
 
     // ── Phase 1: child doc lands (insert + version + audit) THEN the link ──
-    const insertResult = await this.store.insert(childDoc);
-    if (!insertResult.ok) return err(insertResult.error);
-
-    const childVersionResult = await this.store.insertVersion({
-      doc_id: childId,
-      version: 1,
-      content: childDoc.content,
-      extra: childDoc.extra,
-      status: childDoc.status,
-      title: childDoc.title,
-      action: "create",
-      created_at: nowIso,
-      created_by: MIGRATION_ACTOR,
-      change_summary: `extracted verbatim from PRD section '${section}' (outline migration)`,
-      slug: childDoc.slug,
+    // reason: ONE `insertDoc` transaction (doc + version 1 + audit); the version and audit rows name the CALLER
+    // (the resolved invocation actor), the doc's own `created_by` keeps the migration marker.
+    const inserted = await this.writer.insertDoc({
+      doc: childDoc,
+      changeSummary: `extracted verbatim from PRD section '${section}' (outline migration)`,
+      auditAction: "create",
+      auditSessionId: `outline-migration-${childId}`,
+      auditDetails: { migrated_from_prd: prd.id, section },
     });
-    if (!childVersionResult.ok) return err(childVersionResult.error);
-
-    const childAuditResult = await this.store.appendAuditEntry({
-      timestamp: nowIso,
-      actor: MIGRATION_ACTOR,
-      session_id: `outline-migration-${childId}`,
-      action: "create",
-      doc_id: childId,
-      details: { version: 1, migrated_from_prd: prd.id, section },
-    });
-    if (!childAuditResult.ok) return err(childAuditResult.error);
+    if (!inserted.ok) return err(inserted.error);
 
     const linkResult = await this.store.addLink({
       from_id: prd.id,
@@ -514,38 +507,18 @@ export class OutlineMigrationService {
 
     // ── Phase 2: PRD body shrink — ONLY after phase 1 fully landed ─────────
     const shrunkContent = shrinkPrdContent(prd.content, matched);
-    const newVersion = prd.version + 1;
-    const updateResult = await this.store.update(
-      prd.id,
-      { content: shrunkContent, updated_at: nowIso, version: newVersion },
-      { expected_version: prd.version },
-    );
-    if (!updateResult.ok) return err(updateResult.error);
-
-    const prdVersionResult = await this.store.insertVersion({
-      doc_id: prd.id,
-      version: newVersion,
-      content: shrunkContent,
-      extra: prd.extra,
-      status: prd.status,
-      title: prd.title,
+    const shrunk = await this.writer.writeDoc({
+      doc: prd,
+      patch: { content: shrunkContent },
       action: "update",
-      created_at: nowIso,
-      created_by: MIGRATION_ACTOR,
-      change_summary: `section '${section}' relocated to ${childSlug} (outline migration)`,
-      slug: prd.slug,
+      changeSummary: `section '${section}' relocated to ${childSlug} (outline migration)`,
+      auditAction: "update",
+      auditDetails: { section, migrated_to: childId },
+      auditSessionId: `outline-migration-${prd.id}`,
+      lock: "none",
+      now: nowIso,
     });
-    if (!prdVersionResult.ok) return err(prdVersionResult.error);
-
-    const prdAuditResult = await this.store.appendAuditEntry({
-      timestamp: nowIso,
-      actor: MIGRATION_ACTOR,
-      session_id: `outline-migration-${prd.id}`,
-      action: "update",
-      doc_id: prd.id,
-      details: { version: newVersion, section, migrated_to: childId },
-    });
-    if (!prdAuditResult.ok) return err(prdAuditResult.error);
+    if (!shrunk.ok) return err(shrunk.error);
 
     // writesPerformed counts doc-mutating store calls only (insert + addLink
     // + update) — insertVersion/appendAuditEntry are bookkeeping, not the

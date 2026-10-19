@@ -152,6 +152,7 @@ import { err, extractHeldClaim, isClaimStale, ok, type LoreError, type Result } 
 import type { CorpusProvenance } from "@lore/core";
 import type { DocRecord, TaskClaim } from "@lore/core";
 import type { StoreInterface } from "../store/store-interface.js";
+import { bareDocWriter, type DocWritePort } from "./corpus-service.js";
 import type { ClaimOpts, EvidenceInput, ReleaseOpts, TaskWorkflowService } from "./task-workflow-service.js";
 
 /**
@@ -496,6 +497,9 @@ export class CorpusWriteAuthority {
   constructor(
     private readonly store: StoreInterface,
     private readonly context: CorpusWriteAuthorityContext,
+    // reason: AC-DCL-5 — the authorization row goes through the ONE write route, never a bare store append. The
+    // composing service passes its own writer; a bare construction gets a bare one over the same store.
+    private readonly writer: DocWritePort = bareDocWriter(store),
     private readonly now: () => string = () => new Date().toISOString(),
   ) {}
 
@@ -521,12 +525,15 @@ export class CorpusWriteAuthority {
     if (grant.value === undefined) return ok(undefined);
 
     const first = targets[0];
-    const audited = await this.store.appendAuditEntry({
+    // reason: foreign "record" — this row IS the record of the scoped authorization just granted; applying the
+    // refusal predicate to it would refuse the record of the very decision that allows the write.
+    const audited = await this.writer.appendAudit({
       timestamp: this.now(),
-      actor,
-      session_id: first?.id ?? grant.value.task,
+      by: actor,
+      sessionId: first?.id ?? grant.value.task,
       action: "corpus-scope-write",
-      ...(first !== undefined ? { doc_id: first.id } : {}),
+      foreign: "record",
+      ...(first !== undefined ? { docId: first.id } : {}),
       details: {
         operation,
         targets: targets.map((t) => t.slug),

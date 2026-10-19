@@ -1140,6 +1140,27 @@ export class TursoStore implements StoreInterface {
    * free — a collision here means ITS plan is wrong, not a transient race).
    */
   async assignOrdinalForRepair(id: DocId, ordinal: number): Promise<Result<DocRecord, LoreError>> {
+    return this.assignOrdinalForRepairTx(id, ordinal, undefined);
+  }
+
+  /**
+   * @see StoreInterface.assignOrdinalForRepairWithProvenance
+   * The same transaction as {@link assignOrdinalForRepair}, with the version row and audit row inside it.
+   */
+  async assignOrdinalForRepairWithProvenance(
+    id: DocId,
+    ordinal: number,
+    version: VersionRecord,
+    audit: AuditEntry,
+  ): Promise<Result<DocRecord, LoreError>> {
+    return this.assignOrdinalForRepairTx(id, ordinal, { version, audit });
+  }
+
+  private async assignOrdinalForRepairTx(
+    id: DocId,
+    ordinal: number,
+    provenance: { readonly version: VersionRecord; readonly audit: AuditEntry } | undefined,
+  ): Promise<Result<DocRecord, LoreError>> {
     await this.ensureReady();
     const tx = await this.client.transaction("write");
     try {
@@ -1186,6 +1207,35 @@ export class TursoStore implements StoreInterface {
       } catch (e) {
         await tx.rollback();
         return wrapStoreError(e);
+      }
+
+      if (provenance !== undefined) {
+        if (provenance.version.version !== newVersion) {
+          await tx.rollback();
+          return err({ code: "STALE_VERSION", id, expected: provenance.version.version - 1, actual: current.version });
+        }
+        const v = provenance.version;
+        await tx.execute({
+          sql: `INSERT INTO versions
+                 (doc_id, version, content, extra, status, title,
+                  action, created_at, created_by, change_summary, slug, harness_run)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          args: [
+            v.doc_id,
+            v.version,
+            v.content,
+            JSON.stringify(v.extra),
+            v.status,
+            v.title,
+            v.action,
+            v.created_at,
+            v.created_by,
+            v.change_summary ?? null,
+            v.slug ?? null,
+            v.harness_run ?? null,
+          ] as InValue[],
+        });
+        await this.appendAuditEntryTx(tx, provenance.audit);
       }
 
       await tx.commit();

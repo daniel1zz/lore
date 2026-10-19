@@ -272,6 +272,39 @@ export class InMemoryStore implements StoreInterface {
   }
 
   /**
+   * @see StoreInterface.assignOrdinalForRepairWithProvenance
+   * Layered on {@link assignOrdinalForRepair} + the polymorphic `insertVersion` / `appendAuditEntry` (like
+   * {@link updateWithProvenance}), so a failing subclass double is honoured; a later-step failure restores the doc.
+   */
+  async assignOrdinalForRepairWithProvenance(
+    id: DocId,
+    ordinal: number,
+    version: VersionRecord,
+    audit: AuditEntry,
+  ): Promise<Result<DocRecord, LoreError>> {
+    const before = this.docs.get(id);
+    const assigned = await this.assignOrdinalForRepair(id, ordinal);
+    if (!assigned.ok) return assigned;
+    if (before !== undefined && assigned.value.version === before.version) return assigned; // idempotent no-op
+    if (before !== undefined && version.version !== before.version + 1) {
+      this.restoreDocSnapshot(id, before);
+      return err({ code: "STALE_VERSION", id, expected: version.version - 1, actual: before.version });
+    }
+    const versionResult = await this.insertVersion(version);
+    if (!versionResult.ok) {
+      this.restoreDocSnapshot(id, before);
+      return versionResult;
+    }
+    const auditResult = await this.appendAuditEntry(audit);
+    if (!auditResult.ok) {
+      this.restoreDocSnapshot(id, before);
+      this.removeVersionEntry(version);
+      return auditResult;
+    }
+    return assigned;
+  }
+
+  /**
    * @see StoreInterface.findByTypeOrdinal
    * Direct-address lookup — does NOT filter soft-deleted (mirrors `find`).
    */
