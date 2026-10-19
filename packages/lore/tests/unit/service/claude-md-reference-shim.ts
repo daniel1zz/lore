@@ -9,6 +9,7 @@
  */
 
 import { resolveCodeReferences, type FsProbe } from "@lore/core";
+import { withExportReader } from "../../with-export-reader.js";
 import { extractCodeReferences } from "../../../src/service/claude-md-admission.js";
 
 /** One unresolved reference in the shape the legacy suites assert on. */
@@ -33,11 +34,11 @@ export function checkReferenceExistence(
   filePath?: string,
   readFile: (p: string) => string | null = () => null,
 ): UnresolvedReference[] {
-  const probe: FsProbe = {
+  const probe: FsProbe = withExportReader({
     stat: (p) => (fileExists(p) ? "file" : fileExists(`${p}/`) ? "dir" : "missing"),
     readFile,
     listDir: () => ["child"],
-  };
+  });
   return resolveCodeReferences(extractCodeReferences(content, filePath), probe).map(({ reference, kind }) => ({
     kind: "reference_unresolved" as const,
     drift_kind: kind,

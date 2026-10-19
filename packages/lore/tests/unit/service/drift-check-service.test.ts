@@ -41,6 +41,7 @@ import { TaskWorkflowService } from "../../../src/service/task-workflow-service.
 import { DriftCheckService, type FsProbe } from "../../../src/service/drift-check-service.js";
 import type { CreateDocInput } from "@lore/core";
 import { actedStore } from "../../live-invocation.js";
+import { withExportReader } from "../../with-export-reader.js";
 
 // ─── Fixture helpers ──────────────────────────────────────────────────────────
 
@@ -120,11 +121,11 @@ describe("HAPPY — checkDrift over a consistent armed corpus", () => {
       extra: { code_anchors: ["src/a.ts#Foo", "src/dir/"] },
     });
 
-    const probe: FsProbe = {
+    const probe: FsProbe = withExportReader({
       stat: (path) => (path === "src/a.ts" ? "file" : path === "src/dir" ? "dir" : "missing"),
       readFile: (path) => (path === "src/a.ts" ? "export const Foo = 1;\n" : null),
       listDir: (path) => (path === "src/dir" ? ["x.ts"] : null),
-    };
+    });
 
     const result = await driftCheckService.checkDrift(probe);
     expect(result.ok).toBe(true);
@@ -594,11 +595,11 @@ describe("AC-DR-8 — checkDrift is read-only over an armed, DRIFTING corpus", (
     });
     const countingDriftCheckService = new DriftCheckService(countingStore);
 
-    const probe: FsProbe = {
+    const probe: FsProbe = withExportReader({
       stat: (path) => (path === "src/dir" ? "dir" : path === "src/a.ts" ? "file" : "missing"),
       readFile: (path) => (path === "src/a.ts" ? "export const Present = 1;\n" : null),
       listDir: (path) => (path === "src/dir" ? [] : null),
-    };
+    });
 
     const result = await countingDriftCheckService.checkDrift(probe);
     expect(result.ok).toBe(true);
