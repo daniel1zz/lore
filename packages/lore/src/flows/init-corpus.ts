@@ -147,6 +147,9 @@ export async function initCorpusAt(
 
   let stagingRoot: string;
   try {
+    // reason: the pre-atomic scaffold created `repoDir` implicitly (recursive mkdir of `.lore`); keep accepting
+    // a not-yet-existing target directory. Only `.lore` itself is the "leaves nothing behind" contract.
+    mkdirSync(repoDir, { recursive: true });
     stagingRoot = mkdtempSync(join(repoDir, ".lore-init-"));
   } catch (cause) {
     return err(storeFailure(`initCorpusAt: failed to create a staging directory in "${repoDir}"`, cause));
