@@ -35,7 +35,7 @@
  *                      row per plan carrying the removed value; a second `--apply` writes nothing. Thin
  *                      pipe over `PlanOutlineExemptMigrationService`.
  *   outline-sections [--apply] Remove the stored outline (`extra.outline`) from every PRD, now that the
- *                      `lore outline` family is gone. Preview is the DEFAULT; `--apply` writes one version
+ *                      outline command family is gone. Preview is the DEFAULT; `--apply` writes one version
  *                      and one audit row per PRD (the previous version and the row's `details.removed` keep
  *                      the outline); a second `--apply` writes nothing. Thin pipe over
  *                      `OutlineSectionsRetireMigrationService`.
