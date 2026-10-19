@@ -80,7 +80,12 @@ function cleanupDir(dir: string): void {
 
 /** Bootstrap a fresh lore corpus. */
 function initCorpus(tmpDir: string): RunResult {
-  return runLore(["init"], tmpDir);
+  const init = runLore(["init"], tmpDir);
+  // reason: `lore init` seeds one parentless approved knowledge doc (the write-spec rule, DC2-5); the tree check reads
+  // it as an orphan, and these fixtures build their own tree, so the seed is soft-deleted (deleted docs are not checked).
+  const dropped = runLore(["delete", "knowledge-write-spec-rules-gate-feeding-source", "--confirm"], tmpDir);
+  if (dropped.exitCode !== 0) throw new Error(`could not drop the init seed: ${dropped.stderr}`);
+  return init;
 }
 
 /**

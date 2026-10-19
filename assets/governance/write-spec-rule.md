@@ -8,8 +8,8 @@ these rules.
 ## Rules
 
 1. **No parent.** A spec is created with no parent document: it belongs to the product trees
-   only through its criteria's rule citations (BR-n, AS-n). Creating a spec with a parent, or
-   filing one under a document by a parent link, is rejected (exit 4).
+   only through its criteria's rule citations (BR-n, AS-n). Naming any parent at creation, or
+   filing it under a document by a link, is rejected (exit 4).
 2. **Declared spec_kind.** A spec must declare `extra.spec_kind` as one of
    `feature`, `tech`, or `design`. An absent value defaults to `feature` at create
    time; an explicit unrecognised value is rejected.
@@ -34,8 +34,8 @@ programmatically via `CorpusService.create`. Does not apply to `prd`, `adr`,
 
 ## Acceptance Criteria
 
-- A spec with no `parent_id`, or a `parent_id` pointing to a non-`prd` doc, is
-  rejected by `gate-predicates.ts::parentLegal`.
+- Any parent on the new document, a PRD included, is rejected by
+  `gate-predicates.ts::parentLegal`.
 - A spec with an `extra.spec_kind` outside `feature|tech|design` is rejected by
   `gate-predicates.ts::specKindValid`.
 - A spec whose content contains no `## ` heading line is rejected by

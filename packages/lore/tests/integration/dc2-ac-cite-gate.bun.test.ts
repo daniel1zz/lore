@@ -108,6 +108,9 @@ beforeAll(async () => {
   execFileSync("git", ["init", "-q", "-b", "main"], { cwd: dir });
   writeFileSync(join(dir, "README.md"), "fixture\n");
   mustRun(["init"]);
+  // reason: `lore init` seeds the verification profiles (a feature spec needs a `test` oracle to be approved); this
+  // suite's subject is the citation gate, so the profiles are switched off the documented way (null = vacuous pass).
+  patchLoreConfig(dir, { workflow: { verification_profiles: null } });
   await loosenOverrideClasses(dir, ["override-judgment"]);
   const prd = slugOf(mustRun(["create", "prd", "--title", "DC2-13 PRD", "--content", "root", "--no-ai"]).stdout);
   const root = slugOf(mustRun(["baseline", "add", prd, "--node", "root", "--label", "Root", "--title", "DC2-13 Root"]).stdout);

@@ -52,6 +52,9 @@ function snapshotTree(dir: string): string {
   const lines: string[] = [];
   const walk = (current: string): void => {
     for (const name of readdirSync(current).sort()) {
+      // reason: SQLite's `-wal` / `-shm` sidecars come and go with any open of lore.db (a refused run included, since the
+      // db is opened before the config is read); the run must not change the corpus' own files, not these transients.
+      if (name.endsWith("-wal") || name.endsWith("-shm")) continue;
       const full = join(current, name);
       const st = statSync(full);
       if (st.isDirectory()) walk(full);

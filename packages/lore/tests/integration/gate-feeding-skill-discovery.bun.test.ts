@@ -252,7 +252,9 @@ describe("lore gate spec-create — feeding skill discovery by applies_to", () =
 
     expect(result.exitCode).toBe(4);
     expect(result.stdout).toContain("[source: applies_to:spec");
-    expect(result.stdout.toLowerCase()).toContain("seed-write-spec-rule");
+    // the remediation names only commands a consumer has (DC2-5): `lore init` seeds the rule doc; no dev-repo script
+    expect(result.stdout).toContain("`lore init` seeds it into a new corpus");
+    expect(result.stdout).not.toContain("bun scripts/");
   });
 
   // STATE — a draft (unapproved) skill doc is invisible to discovery.

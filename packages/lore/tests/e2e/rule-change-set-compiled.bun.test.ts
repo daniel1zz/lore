@@ -106,6 +106,8 @@ class World {
         // step is the only plan-close refusal under test (it is unconditional, not part of that gate).
         gates: { "ac-cite": { mode: "enforce", armed_branches: [this.branch] }, "plan-close": { enabled: false } },
         review: { judgment_required_types: [] },
+        // `lore init` seeds the verification profiles (a tech spec needs a `test` oracle to be approved); null = vacuous pass.
+        verification_profiles: null,
       },
     });
     return this;

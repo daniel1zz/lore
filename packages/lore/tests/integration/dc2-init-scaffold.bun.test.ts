@@ -119,6 +119,8 @@ describe(`${SPEC}#AC-DC2-5 lore init is one atomic scaffold`, () => {
     expect(new Set(lines)).toEqual(new Set(["lore.db", "lore.db-wal", "lore.db-shm", ".lore-project-check.json"]));
     expect(lines).toHaveLength(4);
 
+    // reason: `lore setup --project` refuses a repo whose main has no commit yet (the guard would refuse the first checkout)
+    git(repo, ["commit", "--allow-empty", "-q", "-m", "init"]);
     const setup = runLore(["setup", "--project", "--yes"], repo, home);
     expect(setup.exitCode, `setup: ${setup.stdout}${setup.stderr}`).toBe(0);
     runLore(["setup", "--project", "--check"], repo, home);

@@ -390,6 +390,10 @@ function makeFixture(prefix: string): string {
   if (!existsSync(join(dir, ".lore", "lore.db"))) {
     throw new Error(`lore init did not create ${join(dir, ".lore", "lore.db")} — a later verb would walk up to a foreign corpus`);
   }
+  // reason: `lore init` seeds one approved knowledge doc (the write-spec rule, DC2-5); the row counts asserted here are
+  // the fixtures' own, so the seed is soft-deleted (a deleted doc is not listed).
+  const dropped = spawnLore(["delete", "knowledge-write-spec-rules-gate-feeding-source", "--confirm"], dir);
+  if (dropped.exitCode !== 0) throw new Error(`could not drop the init seed (exit ${dropped.exitCode}): ${dropped.stderr}`);
   return dir;
 }
 

@@ -50,7 +50,7 @@
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { execFileSync, execSync, spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -129,7 +129,12 @@ beforeAll(() => {
   }
 
   tempRoot = mkdtempSync(join(tmpdir(), "lore-bfi1-"));
-  builtBinary = join(tempRoot, "lore");
+  // reason: a compiled `lore init` reads the config template and the write-spec rule from `<binary dir>/../assets`
+  // (DC2-5), as an installed package ships them beside the binary; the variant binary sits in `<tempRoot>/bin`, so
+  // `<tempRoot>/assets` links the repo's assets in.
+  mkdirSync(join(tempRoot, "bin"), { recursive: true });
+  symlinkSync(join(REPO_ROOT, "assets"), join(tempRoot, "assets"));
+  builtBinary = join(tempRoot, "bin", "lore");
 
   // Porcelain is read on BOTH sides of the build. `scripts/build.ts` samples it
   // once, immediately before `Bun.build`; if a concurrent writer moved the tree

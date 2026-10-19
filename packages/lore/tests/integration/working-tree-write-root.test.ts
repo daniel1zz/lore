@@ -165,7 +165,8 @@ describe("INT-T5 tracked-file writes land in the invoking working tree", () => {
     const migrated = await runLore(["migrate", "ordinals", "--apply"], worktree, home);
     expect(migrated.exitCode, migrated.stderr).toBe(0);
     const humanIds = Object.values(JSON.parse(readFileSync(indexPath, "utf8")).mappings as Record<string, { human_id: string }>).map((m) => m.human_id);
-    expect(humanIds).toEqual(["ADR-001"]);
+    // ADR-001 is the fixture's own; KN-001 is the write-spec rule document `lore init` seeds (DC2-5)
+    expect(humanIds.sort()).toEqual(["ADR-001", "KN-001"]);
     expect(snapshot(main)).toEqual(before);
   }, 60_000);
 

@@ -57,6 +57,7 @@ import type { AuditEntry, DocId, DocRecord, LoreConfig, LoreError, Result, Slug,
 import { saveConfig } from "@lore/core/node";
 import { createApp, type App, type AppAmbient } from "../app.js";
 import { SQLiteStore } from "../store/sqlite-store.js";
+import { insertInitSeedDoc } from "../store/init-seed.js";
 import { describeConfigTemplateError, mergeConfigWithOverlay, parseConfigTemplateOverlay } from "./config-template.js";
 
 /**
@@ -241,7 +242,8 @@ async function buildCorpus(
 /**
  * Inserts the write-spec rule document as ONE approved `knowledge/skill` doc with exactly one version and one
  * audit entry (a single atomic `insertWithProvenance`). `create` + `set(approved)` would write two versions, and
- * the service layer offers no approved-at-create door for a skill doc, so the seed goes to the store directly.
+ * the service layer offers no approved-at-create door for a skill doc, so the seed goes through the store-layer door
+ * `store/init-seed.ts` (store writes live only under `store/*` and `service/corpus-service.ts`).
  */
 async function seedWriteSpecRuleDoc(
   dbPath: string,
@@ -298,14 +300,5 @@ async function seedWriteSpecRuleDoc(
     details: { type: doc.type, slug: doc.slug, version: 1, auto: "init-seed" },
   };
 
-  let store: SQLiteStore | undefined;
-  try {
-    store = new SQLiteStore(dbPath);
-    const inserted = await store.insertWithProvenance(doc, version, audit);
-    return inserted.ok ? ok(undefined) : inserted;
-  } catch (cause) {
-    return err(storeFailure(`initCorpusAt: failed to seed the write-spec rule document in "${dbPath}"`, cause));
-  } finally {
-    store?.close();
-  }
+  return insertInitSeedDoc(dbPath, doc, version, audit);
 }

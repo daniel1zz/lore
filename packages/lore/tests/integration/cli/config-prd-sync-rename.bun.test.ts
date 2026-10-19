@@ -20,6 +20,7 @@ import { execFileSync } from "node:child_process";
 import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { patchLoreConfig } from "../../helpers/patch-lore-config.js";
 
 setDefaultTimeout(300_000);
 
@@ -56,8 +57,9 @@ beforeAll(() => {
   if (init.exitCode !== 0) throw new Error(`lore init failed: ${init.stderr}${init.stdout}`);
   linked = join(realpathSync(mkdtempSync(join(tmpdir(), "prdsyncrename-wt-"))), "wt");
   git(["worktree", "add", "-q", "-b", "linked", linked]);
-  oldText = `${readFileSync(configPath(), "utf8").trimEnd()}\nworkflow:\n  gates:\n    plan-close:\n      prd_sync:\n        enabled: true\n`;
-  writeFileSync(configPath(), oldText);
+  // the retired key is merged into the seeded `workflow:` block (a second `workflow:` key would make the file unparsable, BR-926)
+  patchLoreConfig(dir, "workflow:\n  gates:\n    plan-close:\n      prd_sync:\n        enabled: true\n");
+  oldText = readFileSync(configPath(), "utf8");
 });
 
 afterAll(() => {

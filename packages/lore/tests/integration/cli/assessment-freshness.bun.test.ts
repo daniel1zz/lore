@@ -82,6 +82,10 @@ async function initCorpus(dir: string): Promise<void> {
   if (result.exitCode !== 0) {
     throw new Error(`lore init failed: ${result.stderr}`);
   }
+  // reason: `lore init` seeds one approved knowledge doc (the write-spec rule, DC2-5); the assessment documents counted
+  // here are this suite's own, so the seed is soft-deleted (a deleted doc is not counted).
+  const dropped = await runLore(["delete", "knowledge-write-spec-rules-gate-feeding-source", "--confirm"], dir);
+  if (dropped.exitCode !== 0) throw new Error(`could not drop the init seed: ${dropped.stderr}`);
 }
 
 /** A hermetic fixed-JSON "AI provider" — tees stdin (the rendered prompt) to `captureFile`

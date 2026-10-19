@@ -132,6 +132,9 @@ beforeAll(async () => {
   await loosenOverrideClasses(dir, ["override-judgment"]);
   // The record-edit gate would refuse an edit of an approved record before it could demote; switch it off.
   patchLoreConfig(dir, `workflow:\n  gates:\n    record-edit:\n      enabled: false\n`);
+  // reason: `lore init` seeds the verification profiles (a feature spec needs a `test` oracle to be approved); this
+  // suite's subject is demotion, so the profiles are switched off the documented way (null = vacuous pass).
+  patchLoreConfig(dir, { workflow: { verification_profiles: null } });
   const prd = slugOf(mustRun(["create", "prd", "--title", "DC2-18 PRD", "--content", "root", "--no-ai"]).stdout);
   const root = slugOf(mustRun(["baseline", "add", prd, "--node", "root", "--label", "Root", "--title", "DC2-18 Root"]).stdout);
   leafParent = slugOf(mustRun(["baseline", "add", root, "--node", "branch", "--label", "Branch", "--title", "DC2-18 Branch"]).stdout);

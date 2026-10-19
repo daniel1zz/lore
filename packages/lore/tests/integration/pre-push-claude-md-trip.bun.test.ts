@@ -163,6 +163,10 @@ function buildBaselineFixture(dir: string): void {
   if (initResult.exitCode !== 0) {
     throw new Error(`lore init failed: ${initResult.stderr}`);
   }
+  // reason: `lore init` seeds one parentless approved knowledge doc (the write-spec rule, DC2-5); the hook's tree check
+  // reads it as an orphan, and this fixture's baseline must be clean, so the seed is soft-deleted.
+  const dropped = runLore(["delete", "knowledge-write-spec-rules-gate-feeding-source", "--confirm"], dir);
+  if (dropped.exitCode !== 0) throw new Error(`could not drop the init seed: ${dropped.stderr}`);
 
   const prdResult = runLore(
     ["create", "prd", "--title", "Fixture Root", "--content", "Root PRD for the pre-push CLAUDE.md trip fixture.", "--no-ai"],
