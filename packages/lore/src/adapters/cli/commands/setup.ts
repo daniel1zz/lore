@@ -198,6 +198,8 @@ import { createNodeGhExecFile, GhRunner } from "../../../service/gh-runner.js";
 import { createGhRunnerHealthProbe, ghHealthExitCode, runGitHubHealthCheck } from "../setup-github-health.js";
 import { printLine } from "../output.js";
 import type { CliIo } from "../output.js";
+import { findLoreDbPathQuiet } from "../corpus-resolution.js";
+import { findForeignBehindSchema } from "../../../store/foreign-schema-guard.js";
 import type { ExitReport } from "../cli-exit.js";
 
 // ─── Repo-root resolution (dev mode only — see setup-args.ts's module doc) ──
@@ -918,7 +920,24 @@ function renderDivergedSkipSection(io: CliIo, skippedDiverged: string[]): void {
   }
 }
 
-async function runInstall(inv: Invocation, 
+/**
+ * When the corpus this working copy resolves to is older than the just-installed binary's schema, names the one
+ * command that upgrades it (every other command now refuses that corpus). Silent when there is no corpus, or it is
+ * current. Read-only: the version comes from a readonly probe.
+ */
+function renderCorpusUpgradeNote(inv: Invocation): void {
+  const corpusPath = findLoreDbPathQuiet(inv.io, inv);
+  if (corpusPath === undefined) return;
+  const behind = findForeignBehindSchema(corpusPath, inv.cwd);
+  if (behind === null) return;
+  printLine(inv.io.stdout, "");
+  printLine(
+    inv.io.stdout,
+    `This project's corpus is at schema ${behind.userVersion}; the installed binary needs ${behind.latestVersion}. Run \`lore migrate schema\` (add --dry-run to preview) before other lore commands.`,
+  );
+}
+
+async function runInstall(inv: Invocation,
   service: SetupService,
   mcpRegistrar: CapturingMcpRegistrar,
   opts: { targetDir: string; binPath: string; json: boolean; yes: boolean; forceDiverged: boolean; inv: Invocation },
@@ -970,6 +989,7 @@ async function runInstall(inv: Invocation,
   } else {
     printLine(inv.io.stdout, renderInstallReceipt(result.value, ctx));
     renderDivergedSkipSection(inv.io, result.value.skippedDiverged);
+    renderCorpusUpgradeNote(inv);
   }
   const mcpExit = mcpOutcomeExitCode(result.value);
 

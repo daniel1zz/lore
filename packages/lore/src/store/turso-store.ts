@@ -20,6 +20,8 @@
 import type { Client, InStatement, InValue, ResultSet, Row, Transaction } from "@libsql/client";
 import { accessSync, constants as fsConstants } from "node:fs";
 import { createRequire } from "node:module";
+import { isSchemaBehind, SchemaBehindError } from "./schema-behind.js";
+import { LATEST_SCHEMA_VERSION } from "./schema-version.js";
 import { MIGRATION_001_SQL } from "./migrations/migration-001.js";
 import { MIGRATION_002_SQL } from "./migrations/migration-002.js";
 import { MIGRATION_003_SQL } from "./migrations/migration-003.js";
@@ -287,6 +289,8 @@ export interface TursoConfig {
   authToken?: string;
   /** Sync interval in seconds for embedded replica. Defaults to 60. */
   syncInterval?: number;
+  /** Permit upgrading an older corpus (same meaning as `SQLiteStoreOptions.migrate`); absent → refuse with `SchemaBehindError`. */
+  migrate?: true;
 }
 
 /**
@@ -500,6 +504,8 @@ export class TursoStore implements StoreInterface {
   private readonly hasRemote: boolean;
   /** The local corpus file; named by a failed migration. */
   private readonly localPath: string;
+  /** True only when the config carries `migrate: true`; see {@link TursoConfig.migrate}. */
+  private readonly migrateAllowed: boolean;
 
   /**
    * @param config - Local path + optional remote/auth/interval.
@@ -523,6 +529,7 @@ export class TursoStore implements StoreInterface {
   constructor(config: TursoConfig, injectedClient?: Client) {
     this.hasRemote = Boolean(config.remoteUrl);
     this.localPath = config.localPath;
+    this.migrateAllowed = config.migrate === true;
     this.client =
       injectedClient !== undefined
         ? injectedClient
@@ -552,6 +559,12 @@ export class TursoStore implements StoreInterface {
       const currentVersion = versionRs.rows[0]
         ? rowNum(versionRs.rows[0], "user_version")
         : 0;
+
+      // reason: a corpus upgrade runs only through `lore migrate schema` (SQLiteStore over the same local file); this
+      // store never rewrites an older corpus as a side effect of opening it. Surfaces as STORE_ERROR via ensureReady().
+      if (!this.migrateAllowed && isSchemaBehind(currentVersion, LATEST_SCHEMA_VERSION)) {
+        throw new SchemaBehindError(this.localPath, currentVersion, LATEST_SCHEMA_VERSION);
+      }
 
       if (currentVersion < 1) {
         await this.client.executeMultiple(MIGRATION_001_SQL);

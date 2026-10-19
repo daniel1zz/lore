@@ -16,7 +16,8 @@
  *   (c) `lore gate spec-create` (LORE_GATE_BYPASS=1 -> the audit-open path, which opens a
  *       bare SQLiteStore) exits exactly 0 with ONE warning naming the mismatch.
  *       main's user_version is unchanged after (a)-(c).
- *   (d) the same CLI command from the main checkout migrates (user_version == latest).
+ *   (c2) `lore migrate schema` from the worktree is refused (exit 1, "schema mismatch"); main's version is unchanged.
+ *   (d) from the main checkout `lore list` refuses (exit 4) and `lore migrate schema` upgrades (user_version == latest).
  */
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -118,9 +119,18 @@ describe("AC-CRIT-7: a linked worktree never migrates the main checkout's corpus
     expect(readUserVersion(mainDbPath)).toBe(LATEST_SCHEMA_VERSION - 1);
   }, TEST_TIMEOUT_MS);
 
-  it("(d) the same command from the main checkout migrates the corpus", () => {
-    const res = runLore(["list"], mainDir);
-    expect(res.exitCode).toBe(0);
+  it("(c2) `lore migrate schema` from the worktree is refused too: only the checkout that owns the corpus upgrades it", () => {
+    const res = runLore(["migrate", "schema"], worktreeDir);
+    expect(res.exitCode).toBe(1);
+    expect(res.stderr + res.stdout).toContain("schema mismatch");
+    expect(readUserVersion(mainDbPath)).toBe(LATEST_SCHEMA_VERSION - 1);
+  }, TEST_TIMEOUT_MS);
+
+  it("(d) from the main checkout, `lore list` refuses and only `lore migrate schema` upgrades the corpus", () => {
+    expect(runLore(["list"], mainDir).exitCode).toBe(4);
+    expect(readUserVersion(mainDbPath)).toBe(LATEST_SCHEMA_VERSION - 1);
+    expect(runLore(["migrate", "schema"], mainDir).exitCode).toBe(0);
     expect(readUserVersion(mainDbPath)).toBe(LATEST_SCHEMA_VERSION);
+    expect(runLore(["list"], mainDir).exitCode).toBe(0);
   }, TEST_TIMEOUT_MS);
 });

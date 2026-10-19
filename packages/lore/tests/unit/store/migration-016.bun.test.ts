@@ -26,7 +26,7 @@
  * ── How the schema-15 fixture is built (no dependency on the migration under test) ──────
  * A head-schema SQLiteStore seeds docs/versions/audit through its own paths; the file is then
  * regressed to schema 15 (runs table dropped, harness_run columns dropped when present,
- * user_version = 15). The next `new SQLiteStore(path)` runs the REAL migration-016.
+ * user_version = 15). The next `new SQLiteStore(path, { migrate: true })` runs the REAL migration-016.
  */
 
 import { Database } from "bun:sqlite";
@@ -185,7 +185,7 @@ describe("migration-016 (runs table, audit/versions.harness_run) — v15 corpus"
   afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
   async function seedSchema15(): Promise<void> {
-    const seed = actedStore(new SQLiteStore(path));
+    const seed = actedStore(new SQLiteStore(path, { migrate: true }));
     for (const [id, slug] of [[DOC_1, "m16-doc-1"], [DOC_2, "m16-doc-2"]] as const) {
       expect((await seed.insert(makeDoc(id, slug))).ok).toBe(true);
       expect((await seed.insertVersion(makeVersion(id, 1))).ok).toBe(true);
@@ -209,7 +209,7 @@ describe("migration-016 (runs table, audit/versions.harness_run) — v15 corpus"
 
   it("STATE: LATEST_SCHEMA_VERSION is 22 and opening a schema-15 file lands on user_version 22", async () => {
     await seedSchema15();
-    const store = actedStore(new SQLiteStore(path));
+    const store = actedStore(new SQLiteStore(path, { migrate: true }));
     expect(LATEST_SCHEMA_VERSION).toBe(26);
     expect(userVersion(store.getDatabase())).toBe(26);
     store.close();
@@ -217,7 +217,7 @@ describe("migration-016 (runs table, audit/versions.harness_run) — v15 corpus"
 
   it("HAPPY: the runs table and both harness_run columns exist after opening a schema-15 file", async () => {
     await seedSchema15();
-    const store = actedStore(new SQLiteStore(path));
+    const store = actedStore(new SQLiteStore(path, { migrate: true }));
     const db = store.getDatabase();
     expect(tableExists(db, "runs")).toBe(true);
     expect(columnNames(db, "audit")).toContain("harness_run");
@@ -232,7 +232,7 @@ describe("migration-016 (runs table, audit/versions.harness_run) — v15 corpus"
     raw.close();
     expect(before.length).toBe(3); // 2 creates + 1 set seeded above; guards against an empty comparison
 
-    const store = actedStore(new SQLiteStore(path));
+    const store = actedStore(new SQLiteStore(path, { migrate: true }));
     const db = store.getDatabase();
     expect(rowsWithoutHarnessRun(db, "audit", "id")).toEqual(before);
     const nonNull = db.query("SELECT COUNT(*) AS n FROM audit WHERE harness_run IS NOT NULL").get() as { n: number };
@@ -247,7 +247,7 @@ describe("migration-016 (runs table, audit/versions.harness_run) — v15 corpus"
     raw.close();
     expect(before.length).toBe(3);
 
-    const store = actedStore(new SQLiteStore(path));
+    const store = actedStore(new SQLiteStore(path, { migrate: true }));
     const db = store.getDatabase();
     expect(rowsWithoutHarnessRun(db, "versions", "doc_id, version")).toEqual(before);
     const nonNull = db.query("SELECT COUNT(*) AS n FROM versions WHERE harness_run IS NOT NULL").get() as { n: number };
@@ -260,14 +260,14 @@ describe("migration-016 (runs table, audit/versions.harness_run) — v15 corpus"
     const raw = new Database(path);
     const before = raw.query("SELECT * FROM docs ORDER BY id").all();
     raw.close();
-    const store = actedStore(new SQLiteStore(path));
+    const store = actedStore(new SQLiteStore(path, { migrate: true }));
     expect(store.getDatabase().query("SELECT * FROM docs ORDER BY id").all()).toEqual(before);
     store.close();
   });
 
   it("HAPPY: the migrated runs table starts empty", async () => {
     await seedSchema15();
-    const store = actedStore(new SQLiteStore(path));
+    const store = actedStore(new SQLiteStore(path, { migrate: true }));
     const n = store.getDatabase().query("SELECT COUNT(*) AS n FROM runs").get() as { n: number };
     expect(n.n).toBe(0);
     store.close();
@@ -275,7 +275,7 @@ describe("migration-016 (runs table, audit/versions.harness_run) — v15 corpus"
 
   it("STATE: opening the migrated corpus again is a no-op (version, schema and every row unchanged)", async () => {
     await seedSchema15();
-    const first = actedStore(new SQLiteStore(path));
+    const first = actedStore(new SQLiteStore(path, { migrate: true }));
     first.close();
     const snap = new Database(path);
     const audit1 = snap.query("SELECT * FROM audit ORDER BY id").all();
@@ -284,7 +284,7 @@ describe("migration-016 (runs table, audit/versions.harness_run) — v15 corpus"
     const runsCols1 = columnNames(snap, "runs");
     snap.close();
 
-    const second = actedStore(new SQLiteStore(path));
+    const second = actedStore(new SQLiteStore(path, { migrate: true }));
     const db = second.getDatabase();
     expect(userVersion(db)).toBe(26);
     expect(db.query("SELECT * FROM audit ORDER BY id").all()).toEqual(audit1);
@@ -299,7 +299,7 @@ describe("migration-016 (runs table, audit/versions.harness_run) — v15 corpus"
     const mod = await importOrMissing(MIGRATION_016_MODULE);
     const sql = mod.MIGRATION_016_SQL;
     if (typeof sql !== "string") throw new Error("MISSING BEHAVIOUR: MIGRATION_016_SQL: string not exported");
-    const store = actedStore(new SQLiteStore(path));
+    const store = actedStore(new SQLiteStore(path, { migrate: true }));
     const db = store.getDatabase();
     const before = db.query("SELECT * FROM audit ORDER BY id").all();
     expect(() => db.exec(sql)).not.toThrow();
@@ -308,7 +308,7 @@ describe("migration-016 (runs table, audit/versions.harness_run) — v15 corpus"
   });
 
   it("REGRESSION: a fresh (never-migrated) corpus is created at the same shape: version 22 + runs + columns", () => {
-    const store = actedStore(new SQLiteStore(path));
+    const store = actedStore(new SQLiteStore(path, { migrate: true }));
     const db = store.getDatabase();
     expect(userVersion(db)).toBe(26);
     expect(tableExists(db, "runs")).toBe(true);

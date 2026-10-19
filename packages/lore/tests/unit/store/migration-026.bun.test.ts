@@ -66,7 +66,7 @@ describe("migration 026 versions.action admits 'undelete'", () => {
     const before = versionRows(old);
     old.close();
 
-    const upgraded = new SQLiteStore(dbPath);
+    const upgraded = new SQLiteStore(dbPath, { migrate: true });
     try {
       expect(versionRows(upgraded)).toEqual(before);
       const user = (upgraded.getDatabase().query("PRAGMA user_version").get() as { user_version: number }).user_version;
@@ -109,7 +109,7 @@ describe("migration 026 versions.action admits 'undelete'", () => {
     expect(() => insertAction(old, 3, "undelete")).toThrow(/CHECK/i);
     old.close();
 
-    const reopened = new SQLiteStore(dbPath);
+    const reopened = new SQLiteStore(dbPath, { migrate: true });
     try {
       expect(versionRows(reopened)).toEqual(before);
       expect((reopened.getDatabase().query("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(26);

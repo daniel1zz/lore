@@ -11,7 +11,7 @@
  * write paths, then the file is regressed to the exact schema-12 shape by
  * running the same table-rebuild recipe backwards (the `docs` DDL is read from
  * sqlite_master and its `'baseline'` CHECK entry removed, `rule_registry`
- * dropped, `user_version = 12`). The next `new SQLiteStore(path)` therefore
+ * dropped, `user_version = 12`). The next `new SQLiteStore(path, { migrate: true })` therefore
  * runs the REAL migration-013 against a populated schema-12 file.
  *
  *   HAPPY:      a 'baseline' doc inserts and reads back after migration.
@@ -146,7 +146,7 @@ describe("migration-013 (docs.type admits 'baseline' + rule_registry)", () => {
 
   /** Seeds a populated corpus through the store's own write paths, then regresses it to schema 12. */
   async function seedSchema12(): Promise<{ rowids: Map<string, number> }> {
-    const seed = actedStore(new SQLiteStore(path));
+    const seed = actedStore(new SQLiteStore(path, { migrate: true }));
     const parent = makeDoc("01HM013PARENT00000000001", "m13-plan", { type: "plan", role: "plan", title: "Quarterly plan" });
     expect((await seed.insert(parent)).ok).toBe(true);
     const spec = makeDoc("01HM013SPEC0000000000001", "m13-spec", { type: "spec", role: "spec", title: "Alpha specification", parent_id: parent.id });
@@ -183,7 +183,7 @@ describe("migration-013 (docs.type admits 'baseline' + rule_registry)", () => {
   }
 
   it("HAPPY: after migration a 'baseline' doc inserts and reads back (SQLite)", async () => {
-    const store = actedStore(new SQLiteStore(path));
+    const store = actedStore(new SQLiteStore(path, { migrate: true }));
     expect(userVersion(store.getDatabase())).toBe(LATEST_SCHEMA_VERSION);
     const baseline = makeDoc("01HM013BASELINE000000001", "m13-baseline", {
       type: "baseline",
@@ -213,7 +213,7 @@ describe("migration-013 (docs.type admits 'baseline' + rule_registry)", () => {
     ).toThrow(/CHECK constraint failed/);
     raw.close();
 
-    const store = actedStore(new SQLiteStore(path));
+    const store = actedStore(new SQLiteStore(path, { migrate: true }));
     expect(() =>
       store
         .getDatabase()
@@ -227,7 +227,7 @@ describe("migration-013 (docs.type admits 'baseline' + rule_registry)", () => {
 
   it("BOUNDARY: a populated schema-12 file migrates with every doc, rowid, FTS hit, ordinal, version and link intact", async () => {
     const { rowids } = await seedSchema12();
-    const store = actedStore(new SQLiteStore(path));
+    const store = actedStore(new SQLiteStore(path, { migrate: true }));
     const db = store.getDatabase();
     expect(userVersion(db)).toBe(26);
 
@@ -265,7 +265,7 @@ describe("migration-013 (docs.type admits 'baseline' + rule_registry)", () => {
 
   it("STATE: every index, trigger, FTS table and foreign key survives the rebuild; the partial UNIQUE ordinal index still enforces", async () => {
     await seedSchema12();
-    const store = actedStore(new SQLiteStore(path));
+    const store = actedStore(new SQLiteStore(path, { migrate: true }));
     const db = store.getDatabase();
 
     expect(namesOf(db, "index", "docs")).toEqual(EXPECTED_DOC_INDEXES);
@@ -319,7 +319,7 @@ describe("migration-013 (docs.type admits 'baseline' + rule_registry)", () => {
     const raw = new Database(path);
     raw.exec("CREATE TABLE docs_new (junk TEXT)");
     raw.close();
-    const store = actedStore(new SQLiteStore(path));
+    const store = actedStore(new SQLiteStore(path, { migrate: true }));
     const db = store.getDatabase();
     expect(userVersion(db)).toBe(26);
     expect((db.query("PRAGMA foreign_keys").get() as { foreign_keys: number }).foreign_keys).toBe(1);
@@ -329,7 +329,7 @@ describe("migration-013 (docs.type admits 'baseline' + rule_registry)", () => {
 
   it("HAPPY (Turso): a populated schema-12 file migrates through TursoStore.initSchema, then a 'baseline' doc inserts and rule_registry exists", async () => {
     await seedSchema12();
-    const turso = actedStore(new TursoStore({ localPath: path }));
+    const turso = actedStore(new TursoStore({ localPath: path, migrate: true }));
     const baseline = makeDoc("01HM013TBASELINE00000001", "m13-turso-baseline", { type: "baseline", role: "intent", title: "Turso baseline" });
     const inserted = await turso.insert(baseline);
     expect(inserted.ok).toBe(true);
@@ -348,11 +348,11 @@ describe("migration-013 (docs.type admits 'baseline' + rule_registry)", () => {
 
   it("REGRESSION: re-opening and re-running MIGRATION_013_SQL on a migrated file is idempotent and keeps rule_registry rows", async () => {
     await seedSchema12();
-    const first = actedStore(new SQLiteStore(path));
+    const first = actedStore(new SQLiteStore(path, { migrate: true }));
     first.getDatabase().prepare("INSERT INTO rule_registry (id, n, leaf_doc_id, allocated_at, allocated_by) VALUES ('BR-1', 1, 'leaf', ?, 'a')").run(STAMP);
     first.close();
 
-    const second = actedStore(new SQLiteStore(path));
+    const second = actedStore(new SQLiteStore(path, { migrate: true }));
     expect(userVersion(second.getDatabase())).toBe(26);
     second.close();
 
