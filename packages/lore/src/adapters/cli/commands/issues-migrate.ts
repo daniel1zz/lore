@@ -246,14 +246,14 @@ async function convertMirror(ctx: ApplyContext, mirror: LegacyMirror, ref: Issue
   extra["issues"] = withRef(readIssueRefs(doc.value.extra), ref);
   if (classification.disposition === "rehome" && classification.owner !== undefined) {
     const plan = classification.owner;
-    if (doc.value.parent_id !== plan.id) {
-      const cleared = await ctx.app.corpusService.setDocParent({ docId: doc.value.id, parentId: null, auditAction: "issue_mirror_rehome_parent", auditSessionId: doc.value.id, auditDetails: { to_plan: plan.slug } });
-      if (!cleared.ok) return cleared;
-      const linked = await ctx.app.corpusService.link(doc.value.id, plan.id, "parent");
-      if (!linked.ok) return linked;
-      doc = await readMirrorFresh(ctx, mirror);
-      if (!doc.ok) return doc;
-    }
+    // reason: always (re)move the parent, never compare it — a rerun after an interruption between the parent move and
+    // the extra write must converge, and the final write below is what marks the mirror converted.
+    const cleared = await ctx.app.corpusService.setDocParent({ docId: doc.value.id, parentId: null, auditAction: "issue_mirror_rehome_parent", auditSessionId: doc.value.id, auditDetails: { to_plan: plan.slug } });
+    if (!cleared.ok) return cleared;
+    const linked = await ctx.app.corpusService.link(doc.value.id, plan.id, "parent");
+    if (!linked.ok) return linked;
+    doc = await readMirrorFresh(ctx, mirror);
+    if (!doc.ok) return doc;
     delete extra["adhoc"];
     extra["plan_id"] = plan.id;
   }
