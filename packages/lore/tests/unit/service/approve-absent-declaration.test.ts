@@ -59,6 +59,16 @@ describe("approving a baseline leaf refuses while it declares a command absent f
     expect(refused.stderr).toContain(`lore baseline map ${c.leafA} --remove-command "gamma"`);
   }, 120_000);
 
+  it("`set --status approved` is refused the same way (the service gates every road), and approves after removal", async () => {
+    const c = await withStaleGamma();
+    const refused = await c.run(["set", c.leafA, "--status", "approved"]);
+    expect(refused.exitCode, refused.stdout + refused.stderr).toBe(4);
+    expect(refused.stderr).toContain(`lore baseline map ${c.leafA} --remove-command "gamma"`);
+    expect((await c.run(["baseline", "map", c.leafA, "--remove-command", "gamma"])).exitCode).toBe(0);
+    const ok = await c.run(["set", c.leafA, "--status", "approved"]);
+    expect(ok.exitCode, ok.stdout + ok.stderr).toBe(0);
+  }, 120_000);
+
   it("a leaf declaring only live commands approves untouched", async () => {
     const c = await withStaleGamma();
     const ok = await c.run(["approve", c.leafB]);

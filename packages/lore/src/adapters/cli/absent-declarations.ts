@@ -5,7 +5,7 @@
  *   `lore approve` of a baseline node (refuses it) and `lore status` (lists it). The tree is the checkout holding the corpus
  *   (a worktree resolves the shared corpus, so that is main's tree); a leaf's commands are resolved with the census's own
  *   entry resolution and compared with the registry's runnable commands.
- * Public surface: {@link treePredicateFor}, {@link measureAbsentDeclarations}, {@link censusRootOfCorpus}.
+ * Public surface: {@link treePredicateFor}, {@link measureAbsentDeclarations}, {@link censusRootOfCorpus}, {@link buildBaselineDeclarationPort}.
  * Invariants:
  *   - Only a command-unresolved failure reads as absent; any other census failure propagates (never read as absent).
  *   - Only the commands handed in are measured: approval measures the approved node's leaves, never the whole tree.
@@ -16,9 +16,8 @@
 
 import { dirname } from "node:path";
 import { err, ok, type LoreError, type Result } from "@lore/core";
-import { absentDeclarationRefusal, absentDeclarationsOf, leavesUnder, type AbsentDeclaration, type DeclaringLeaf } from "../../service/leaf-coverage.js";
-import { resolveDoc } from "../../service/resolve.js";
-import { SQLiteStore } from "../../store/sqlite-store.js";
+import { absentDeclarationsOf, type AbsentDeclaration, type DeclaringLeaf } from "../../service/leaf-coverage.js";
+import type { BaselineDeclarationPort } from "../../service/review-service.js";
 import { SiteCensusError, findCensusRoot, resolveCommandEntry } from "../../service/site-census.js";
 import { listRunnableCommands, type RunnableCommand } from "./runnable-commands.js";
 
@@ -69,31 +68,21 @@ export function censusRootOfCorpus(dbPath: string): string | undefined {
 }
 
 /**
- * The approval verdict for `idOrSlug`: `ok` unless it is a baseline node with a leaf at or below it declaring a command absent
- * from the corpus checkout's tree, in which case a VALIDATION_ERROR (exit 4) naming each command and its fix. Only the
- * node's own leaves are measured (never the whole tree). A document that is not a baseline node, or a corpus whose checkout
- * holds no lore sources (no tree to compare with), is not this check's concern: `ok`. An unanalysable tree refuses loudly.
+ * The port `ReviewService` measures a baseline node's leaves through (wired in app.ts, so approve, `set --status approved`,
+ * MCP and HTTP all refuse alike). The tree is the one at `repoRoot` (the corpus checkout; main's tree from a worktree).
+ * A checkout with no lore sources has no tree to compare with: nothing is measured. An unanalysable tree is a loud refusal.
  */
-export async function checkBaselineApprovable(dbPath: string, idOrSlug: string): Promise<Result<void, LoreError>> {
-  const rootDir = censusRootOfCorpus(dbPath);
-  if (rootDir === undefined) return ok(undefined);
-  const store = new SQLiteStore(dbPath);
-  try {
-    const resolved = await resolveDoc(store, idOrSlug);
-    if (!resolved.ok || resolved.value.type !== "baseline") return ok(undefined);
-    const all = await store.findMany({ type: "baseline" });
-    if (!all.ok) return all;
-    const leaves = leavesUnder(resolved.value, all.value);
-    let absent: AbsentDeclaration[];
-    try {
-      absent = await measureAbsentDeclarations(rootDir, leaves);
-    } catch (cause) {
-      if (!(cause instanceof SiteCensusError)) throw cause;
-      return err({ code: "VALIDATION_ERROR", field: `census:${cause.reason}`, message: cause.message });
-    }
-    if (absent.length === 0) return ok(undefined);
-    return err({ code: "VALIDATION_ERROR", field: "baseline-commands", message: absentDeclarationRefusal(resolved.value.slug, absent), value: absent });
-  } finally {
-    store.close();
-  }
+export function buildBaselineDeclarationPort(repoRoot: string): BaselineDeclarationPort {
+  return {
+    async absentDeclarations(leaves) {
+      const rootDir = findCensusRoot(repoRoot);
+      if (rootDir === undefined) return ok([]);
+      try {
+        return ok(await measureAbsentDeclarations(rootDir, leaves));
+      } catch (cause) {
+        if (!(cause instanceof SiteCensusError)) throw cause;
+        return err({ code: "VALIDATION_ERROR", field: `census:${cause.reason}`, message: cause.message });
+      }
+    },
+  };
 }

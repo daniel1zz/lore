@@ -12,7 +12,6 @@
 import { defineLoreCommand } from "../cli-exit.js";
 
 import { loadLoreApp } from "../loader.js";
-import { checkBaselineApprovable } from "../absent-declarations.js";
 import { exitCode, formatErrorFor, resolveActor } from "../utils.js";
 import { runCalibrationHook } from "../../../flows/calibration-hook.js";
 import type { DocId } from "@lore/core";
@@ -58,15 +57,8 @@ export default defineLoreCommand({
   async run(context): Promise<number> {
     const { args } = context;
     const inv = invocationOf(context);
-    const { app, dbPath } = loadLoreApp({ inv });
+    const { app } = loadLoreApp({ inv });
     try {
-      // reason: a declared command absent from main's tree never fails coverage (a branch may pre-declare a command), so a stale
-      // declaration is refused here, where a baseline node is vouched for (task-approving-a-baseline-leaf-refuses-while-it-declares-a).
-      const approvable = await checkBaselineApprovable(dbPath, args.id as string);
-      if (!approvable.ok) {
-        inv.io.stderr.write(formatErrorFor(inv, approvable.error) + "\n");
-        return exitCode(approvable.error);
-      }
       const reviewer = resolveActor(inv.io, undefined, inv.env, inv.cwd, inv.user);
       const result = await app.reviewService.approve(args.id as DocId, {
         reviewer,
