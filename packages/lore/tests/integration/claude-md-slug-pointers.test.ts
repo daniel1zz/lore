@@ -290,8 +290,8 @@ describe("slug pointers — a dangling slug is refused", () => {
     expect(collectFindingsByKind(parsed, "slug_pointer_missing").length).toBe(2);
   });
 
-  it("ERROR (no crash): an empty CLAUDE.md produces zero slug_pointer_missing findings, exit code exactly 0", () => {
-    writeFileSync(join(tmpDir, "CLAUDE.md"), "");
+  it("ERROR (no crash): a sections-only CLAUDE.md produces zero slug_pointer_missing findings, exit code exactly 0", () => {
+    writeFileSync(join(tmpDir, "CLAUDE.md"), SECTIONS_PREFIX);
 
     const { result, parsed } = runCheckMemoryPointersJson(tmpDir);
 

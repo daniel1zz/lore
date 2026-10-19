@@ -20,6 +20,12 @@ import { dirname, join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { runLoreInProcess } from "../helpers/run-lore-in-process";
 
+/**
+ * A hand-written root file that already carries the three required sections the managed zone does not supply: limits
+ * are always enforced, so a root file without them is refused by `context refresh`.
+ */
+const HAND_ROOT = "# Proj\n\n## What This Is\n\nx\n\n## Commands\n\nx\n\n## Architecture\n\nx\n";
+
 const scratch: string[] = [];
 
 afterEach(() => {
@@ -68,7 +74,7 @@ function moduleIndexLines(claudeMd: string): string[] {
 describe("AC-MI-1: module index lists only folders with a memory file, nothing dropped silently", () => {
   it("AC-MI-1 HAPPY: 3 memory-file folders and 40 without -> exactly 3 index lines (link + first Purpose sentence) and one count line", async () => {
     const dir = await makeProject();
-    put(dir, "CLAUDE.md", "# Proj\n\nhand text\n");
+    put(dir, "CLAUDE.md", `${HAND_ROOT}\nhand text\n`);
     put(dir, "svc/alpha/CLAUDE.md", "# Alpha\n\n## Purpose\n\nAlpha does the first thing. It also does more.\n\n## Other\n\nx\n");
     put(dir, "svc/beta/CLAUDE.md", "# Beta\n\n## Purpose\nBeta owns persistence.\n");
     put(dir, "lib/gamma/CLAUDE.md", "# Gamma\n\n## Purpose\n\nGamma parses input. Second sentence.\n");
@@ -97,7 +103,7 @@ describe("AC-MI-1: module index lists only folders with a memory file, nothing d
 
   it("AC-MI-1 BOUNDARY: refresh --check names exactly 40 when 40 folders have no memory file (not in the committed section)", async () => {
     const dir = await makeProject();
-    put(dir, "CLAUDE.md", "# Proj\n");
+    put(dir, "CLAUDE.md", HAND_ROOT);
     put(dir, "a/CLAUDE.md", "# A\n\n## Purpose\n\nA is a.\n");
     put(dir, "b/CLAUDE.md", "# B\n\n## Purpose\n\nB is b.\n");
     put(dir, "c/CLAUDE.md", "# C\n\n## Purpose\n\nC is c.\n");
@@ -113,7 +119,7 @@ describe("AC-MI-1: module index lists only folders with a memory file, nothing d
 
   it("AC-MI-1 BOUNDARY: a memory file without a Purpose section is listed with its link and 'no Purpose section'", async () => {
     const dir = await makeProject();
-    put(dir, "CLAUDE.md", "# Proj\n");
+    put(dir, "CLAUDE.md", HAND_ROOT);
     put(dir, "svc/CLAUDE.md", "# Svc\n\n## Notes\n\nNo purpose heading here.\n");
     const refreshed = await runLore(["context", "refresh"], dir);
     expect(refreshed.exitCode, refreshed.stderr).toBe(0);
@@ -125,7 +131,7 @@ describe("AC-MI-1: module index lists only folders with a memory file, nothing d
 
   it("AC-MI-1 REGRESSION (context walk hygiene): a hidden or gitignored folder holding a memory file is not listed", async () => {
     const dir = await makeProject();
-    put(dir, "CLAUDE.md", "# Proj\n");
+    put(dir, "CLAUDE.md", HAND_ROOT);
     put(dir, ".gitignore", "ignored/\n");
     put(dir, ".hidden/CLAUDE.md", "# H\n\n## Purpose\n\nHidden.\n");
     put(dir, "ignored/CLAUDE.md", "# I\n\n## Purpose\n\nIgnored.\n");
@@ -160,7 +166,7 @@ describe("AC-MI-2: managed zone keeps the template headings; legacy auto blocks 
 
   it("AC-MI-2 STATE: legacy auto:module-index / auto:dynamic-context blocks become one managed zone, reported by name, hand text byte-identical", async () => {
     const dir = await makeProject();
-    const head = "# Proj\n\nhand text before.\n\n";
+    const head = "# Proj\n\n## What This Is\n\nhand text before.\n\n## Commands\n\nx\n\n## Architecture\n\nx\n\n";
     const mid = "\nhand text between.\n\n";
     const tail = "\nhand text after.\n";
     const legacy =
@@ -213,7 +219,7 @@ describe("MI-T3 refresh --check labels each finding by its own kind", () => {
 describe("refresh --check: context refresh --check computes, writes nothing, exits 0 only when refreshed", () => {
   it("refresh --check NEGATIVE: a stale CLAUDE.md -> exit exactly 1 naming it, bytes unchanged; after a real refresh -> exit 0", async () => {
     const dir = await makeProject();
-    put(dir, "CLAUDE.md", "# Proj\n\nhand text\n");
+    put(dir, "CLAUDE.md", `${HAND_ROOT}\nhand text\n`);
     put(dir, "svc/CLAUDE.md", "# Svc\n\n## Purpose\n\nSvc serves.\n");
     const before = read(dir, "CLAUDE.md");
 
@@ -231,7 +237,7 @@ describe("refresh --check: context refresh --check computes, writes nothing, exi
 
   it("refresh --check BOUNDARY: a refreshed file over the configured ceiling -> exit exactly 1 naming the ceiling, nothing written", async () => {
     const dir = await makeProject();
-    put(dir, "CLAUDE.md", "# Proj\n\nhand text\n");
+    put(dir, "CLAUDE.md", `${HAND_ROOT}\nhand text\n`);
     const refreshed = await runLore(["context", "refresh"], dir);
     expect(refreshed.exitCode, refreshed.stderr).toBe(0);
     // grow hand text (outside the managed zone) past the default root ceiling

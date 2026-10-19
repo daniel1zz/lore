@@ -181,12 +181,20 @@ const SPEC_DISCOVERY_POINTER_SECTION_ID = "spec-discovery-pointer";
  * Minimal Z2 placeholder narrative written on a fresh `context init` when no
  * `opts.narrative` was resolved (D3: "skeleton" fallback) — deliberately
  * short and self-describing, never a hostage to AI availability.
+ *
+ * reason: it carries the three required root sections the managed zone does not supply (What This Is, Commands,
+ * Architecture), in contract order ahead of the managed zone's Module Index and Finding Live Project State. Limits
+ * are always enforced, so a skeleton without them would make the very next `lore context refresh` refuse the file
+ * `context init` just wrote.
  */
 const SKELETON_NARRATIVE =
   "# Project Discipline\n\n" +
   "_(placeholder — describe this project's standing rules, prohibitions, and thresholds here.\n" +
   "The sections below this point are lore-managed: they regenerate automatically via\n" +
-  "`lore context refresh` and should not be hand-edited.)_\n";
+  "`lore context refresh` and should not be hand-edited.)_\n\n" +
+  "## What This Is\n\n_(placeholder — one paragraph: what this project is and who it serves.)_\n\n" +
+  "## Commands\n\n_(placeholder — the commands to build, test and run.)_\n\n" +
+  "## Architecture\n\n_(placeholder — the layers and where to find them.)_\n";
 
 // ─── Public shapes ──────────────────────────────────────────────────────────
 

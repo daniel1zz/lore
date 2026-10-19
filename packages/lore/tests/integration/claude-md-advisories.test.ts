@@ -198,6 +198,21 @@ function nLineBody(lineCount: number): string {
   return lines.join("\n") + "\n";
 }
 
+/**
+ * A structure-conforming root file of EXACTLY `totalLines` lines: the five required H2 sections (two lines each) first,
+ * then filler. Limits are always enforced, so a root file without the sections would exit 3 and hide the advisory
+ * property each case below is about.
+ */
+function rootBody(totalLines: number): string {
+  const sections = ["What This Is", "Commands", "Architecture", "Module Index", "Finding Live Project State"].flatMap((name) => [
+    `## ${name}`,
+    `body of ${name}`,
+  ]);
+  const lines = [...sections];
+  for (let i = 1; lines.length < totalLines; i++) lines.push(`Line ${i}: standing discipline entry, not a status narrative.`);
+  return lines.join("\n") + "\n";
+}
+
 // ─── AC-ADV-1 ───────────────────────────────────────────────────────────────
 
 describe("always-on advisories — printed every run, exit code untouched", () => {
@@ -223,7 +238,7 @@ describe("always-on advisories — printed every run, exit code untouched", () =
   // ─── HAPPY ────────────────────────────────────────────────────────────────
 
   it("HAPPY: a single root file gets exactly one line_length and one target_distance entry, measured = lines.used - OFFICIAL_LINE_TARGET, exit code exactly 0", () => {
-    writeFileSync(join(tmpDir, "CLAUDE.md"), nLineBody(50));
+    writeFileSync(join(tmpDir, "CLAUDE.md"), rootBody(50));
 
     const { result, parsed } = runCheckClaudeMdJson(tmpDir);
 
@@ -263,7 +278,7 @@ describe("always-on advisories — printed every run, exit code untouched", () =
       "OFFICIAL_LINE_TARGET must be a number to construct this boundary fixture",
     ).toBe("number");
     const target = OFFICIAL_LINE_TARGET as number;
-    writeFileSync(join(tmpDir, "CLAUDE.md"), nLineBody(target));
+    writeFileSync(join(tmpDir, "CLAUDE.md"), rootBody(target));
 
     const { result, parsed } = runCheckClaudeMdJson(tmpDir);
 
@@ -279,12 +294,12 @@ describe("always-on advisories — printed every run, exit code untouched", () =
 
   // ─── ERROR (no crash) ─────────────────────────────────────────────────────
 
-  it("ERROR (no crash): an empty, 0-line CLAUDE.md still gets both kinds, valid JSON, exit code exactly 0", () => {
+  it("ERROR (no crash): an empty, 0-line CLAUDE.md still gets both kinds and valid JSON; its missing sections are enforced (exit code exactly 3), the advisories change nothing", () => {
     writeFileSync(join(tmpDir, "CLAUDE.md"), "");
 
     const { result, parsed } = runCheckClaudeMdJson(tmpDir);
 
-    expect(result.exitCode).toBe(0);
+    expect(result.exitCode).toBe(3);
     const headroom = headroomEntries(parsed);
     expect(headroom).toHaveLength(1);
 
@@ -298,7 +313,7 @@ describe("always-on advisories — printed every run, exit code untouched", () =
   // ─── STATE ────────────────────────────────────────────────────────────────
 
   it("STATE: three simultaneously discovered files across root/module/rules roles each get their OWN pair of findings — non-vacuous, per-file, never aggregated", () => {
-    writeFileSync(join(tmpDir, "CLAUDE.md"), nLineBody(120));
+    writeFileSync(join(tmpDir, "CLAUDE.md"), rootBody(120));
     mkdirSync(join(tmpDir, "packages", "widget"), { recursive: true });
     writeFileSync(join(tmpDir, "packages", "widget", "CLAUDE.md"), nLineBody(45));
     mkdirSync(join(tmpDir, ".claude", "rules"), { recursive: true });
