@@ -1,65 +1,27 @@
 /**
- * Derives a plan's OWN commit set directly from git history, instead of asking the
- * caller for a git range (defect: task-lore-assess-asks-the-caller-for-a-git-range-
- * that-cannot-be). Under concurrency a plan's commits are NOT contiguous in `main` —
- * other sessions merge between them — so there is no correct contiguous range to ask
- * for (measured 2026-08-01: a naive "first task commit .. last task commit" range
- * pulled in 6 foreign commits out of 13, ≈46% foreign content). This module finds a
- * plan's own commits by their CONTENT (an exact, `--fixed-strings` git-grep match of
- * each task's slug against commit messages) rather than their POSITION.
+ * Derives a plan's OWN commit set from the commit range each task RECORDED (`extra.landing`, written by `lore
+ * integrate`; else `extra.commit_range`, written at done time). A task with no recorded range is reported as NOT
+ * MEASURED (named in `tasks_not_measured`, `attribution: "not_measured"`) — it is never attributed by searching
+ * commit messages for its slug, because that guess silently attributes (or misses) work (BR-1291, BR-1336). Under
+ * concurrency a plan's commits are not contiguous in `main`, so a recorded per-task range (not one plan-wide range)
+ * is the only sound source.
  *
- * Shared by both adapters that create an assessment (CLI `commands/assess.ts`, MCP
- * `../mcp/tools.ts`) — mirrors the existing cross-adapter sharing precedent already in
- * this directory (`task-feed-wiring.ts`, `phase-wiring.ts`, `evidence-precheck.ts` all
- * live under `adapters/cli/` and are imported by `../mcp/tools.ts` too).
+ * Shared by both adapters that create an assessment (CLI `commands/assess.ts`, MCP `../mcp/tools.ts`).
  *
- * Algorithm:
- *   1. Per task slug: `git log --fixed-strings --grep=<slug> --format=%H%x09%s` over
- *      HEAD's reachable history (deliberately NOT `--all` — that would also sweep in
- *      stray unmerged branches; HEAD's history already contains every MERGED branch's
- *      commits, which is what "this plan's own commits" means once work has landed).
- *   2. Union the matched shas across every task, remembering which task slug(s) each
- *      one matched (AC #3 transparency — an auditor can see exactly which tasks
- *      contributed which commits, and which tasks contributed none).
- *   3. Prune to MAXIMAL elements under the ancestor order (`git merge-base
- *      --is-ancestor`): if matched commit A is an ancestor of matched commit B, A's
- *      diff is already subsumed by B's (a merge commit subsumes its own branch's inner
- *      commits when a message happens to reference the same task slug on both) — only
- *      B needs diffing, keeping the recorded commit list free of double-counted work.
- *   4. Diff each maximal commit against its OWN first parent only (`git diff <sha>^1
- *      <sha>`, or the empty tree for a root commit). This first-parent-only diff is
- *      what makes the mechanism immune to interleaving: it is EXACTLY what that one
- *      step introduced, regardless of how many foreign commits sit before/after it
- *      anywhere else in main's history.
- *   5. Concatenate the maximal commits' diffs, oldest first, into one diff text.
+ * Per task: the own commits of a recorded range are the non-merge commits on the first-parent chain of `base..head`
+ * (see {@link resolveRecordedRange}); each is diffed against its own first parent. A recorded range whose commit
+ * objects are missing is NOT MEASURED too, with a warning.
  *
- * Zero matched commits — a plan with genuinely no discoverable commits yet, OR one
- * whose history was squashed/rewritten and no longer mentions any task slug — is
- * INDISTINGUISHABLE from either cause by this mechanism, and is reported as the SAME
- * named `"no_commits_found"` status. It is never silently downgraded to an empty
- * `"derived"` diff — that would be the false-green form of the very defect this module
- * exists to fix (`diff_available=true` on an empty diff reads as "audited").
+ * Zero attributed commits is reported as the named status `"no_commits_found"`, or — when every task of the plan is
+ * already `archived` (merged work is a certainty) — `"unverifiable_convention_mismatch"`: the dimension it would
+ * inform must be reported unverifiable, never scored. Neither is ever silently downgraded to an empty `"derived"` diff.
  *
- * `"unverifiable_convention_mismatch"` (task-lore-assess-derives-a-plan-s-commits-by-
- * grepping-task): the ONE sub-case of "zero matched commits" that is NOT a legitimate
- * absence — every one of this plan's tasks is already `archived`, which by the lifecycle
- * graph (`VALID_TRANSITIONS`, `@lore/core`) means merged work exists. Zero matched commits
- * in that state is a CONTRADICTION: it proves the `--grep=<slug>` convention this module
- * relies on was not followed (a conventionally-worded commit, e.g. Conventional Commits,
- * never mentions the task slug), not that no work happened. The caller passes
- * `allTasksArchived` (computed from the DocRecord statuses it already holds — this module
- * stays free of any `@lore/core`/DocStatus dependency, mirroring its existing pure
- * git-log-wrapper scope) to distinguish this from genuine absence. See this function's own
- * JSDoc for the ADR three-question review this status answers.
- *
- * Source: task-lore-assess-asks-the-caller-for-a-git-range-that-cannot-be; SPEC-026 §3
- * D3 (diff acquisition is an adapter-layer concern, never the service layer);
- * task-lore-assess-derives-a-plan-s-commits-by-grepping-task;
- * adr-lore-s-mechanisms-validate-a-proxy-for-the-property-not-the
+ * Source: task-lore-assess-asks-the-caller-for-a-git-range-that-cannot-be; SPEC-026 §3 D3;
+ * adr-lore-s-mechanisms-validate-a-proxy-for-the-property-not-the;
+ * spec-a-task-is-archived-only-on-a-landing-lore-recorded-one
  */
 
 import { spawnSync } from "node:child_process";
-import { findLandingInMainLog, MAIN_FIRST_PARENT_LOG_FORMAT } from "../../service/task-commit-range.js";
 
 /** Explicit maxBuffer — the 1 MiB spawnSync default silently truncates a growing diff/log payload. */
 const GIT_MAX_BUFFER = 20 * 1024 * 1024;
@@ -68,10 +30,10 @@ const GIT_MAX_BUFFER = 20 * 1024 * 1024;
 const EMPTY_TREE_SHA = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
 
 /**
- * How one task's commits were found: `recorded_range` (the range `lore done` recorded in
- * `extra.commit_range`), `slug_match` (task slug in a commit message), or `not_measured`.
+ * How one task's commits were found: `recorded_range` (a range recorded on the task), or `not_measured`
+ * (no usable recorded range — never guessed from commit messages).
  */
-export type TaskAttribution = "recorded_range" | "slug_match" | "not_measured";
+export type TaskAttribution = "recorded_range" | "not_measured";
 
 /**
  * A commit range recorded by `lore done` for one task. `base` absent = the claim predates
@@ -80,11 +42,7 @@ export type TaskAttribution = "recorded_range" | "slug_match" | "not_measured";
 export interface RecordedRange {
   base?: string;
   head: string;
-  /**
-   * The branch/worktree the range was recorded for. When the range yields no own commits (a claim from a worktree of
-   * main recorded main itself) and no landing record exists, it names the branch whose `merge(<branch>)` commit on
-   * main's first-parent history is the landing to backfill from.
-   */
+  /** The branch/worktree the range was recorded for. */
   worktree?: string;
 }
 
@@ -171,116 +129,6 @@ function runGit(cwd: string, args: string[]): { ok: true; stdout: string } | { o
   return { ok: true, stdout: result.stdout ?? "" };
 }
 
-/** Every commit whose message contains `token` verbatim (exact-substring, no regex ambiguity). */
-function findCommitsReferencing(
-  cwd: string,
-  token: string,
-  warnings: string[],
-): { sha: string; subject: string }[] {
-  if (token.length === 0) return [];
-  const result = runGit(cwd, ["log", "--fixed-strings", `--grep=${token}`, "--format=%H%x09%s"]);
-  if (!result.ok) {
-    warnings.push(result.warning);
-    return [];
-  }
-  const commits: { sha: string; subject: string }[] = [];
-  for (const line of result.stdout.split("\n")) {
-    if (line.length === 0) continue;
-    const tabIndex = line.indexOf("\t");
-    if (tabIndex === -1) continue;
-    commits.push({ sha: line.slice(0, tabIndex), subject: line.slice(tabIndex + 1) });
-  }
-  return commits;
-}
-
-/** `true` iff `maybeAncestor` is a (non-strict) ancestor of `maybeDescendant`. Errors resolve to `false` — never wrongly drop a real commit from the diff set. */
-function isAncestor(cwd: string, maybeAncestor: string, maybeDescendant: string, warnings: string[]): boolean {
-  const result = spawnSync("git", ["merge-base", "--is-ancestor", maybeAncestor, maybeDescendant], {
-    cwd,
-    encoding: "utf8",
-    maxBuffer: GIT_MAX_BUFFER,
-  });
-  if (result.error) {
-    warnings.push(`git merge-base --is-ancestor: ${result.error.message}`);
-    return false;
-  }
-  // exit 0 = true (is an ancestor), 1 = false, anything else = a real error.
-  return result.status === 0;
-}
-
-/**
- * Drops a matched commit `a` ONLY when its changes are already fully captured by
- * another matched commit `b`'s own first-parent-only diff (`b^1..b`) — i.e. `a` became
- * reachable from `b` EXCLUSIVELY at that one step (a merge's non-first-parent side),
- * not before it.
- *
- * This is deliberately NOT a plain "is `a` an ancestor of `b`" test: on a linear
- * (non-merge) history, EVERY earlier commit is trivially an ancestor of every later
- * one, but `b^1..b` only shows what `b` itself introduced — it does NOT subsume an
- * earlier sibling commit `a` sitting further back on the same line (that is exactly
- * the interleaving case this module exists to handle correctly). The extra
- * "AND NOT an ancestor of `b`'s own first parent" check is what tells apart "`a` is
- * only reachable via the branch `b` merged in" (safe to drop — subsumed) from "`a` is
- * mainline history that predates `b`" (must keep its own diff).
- */
-function isSubsumedByFirstParentDiff(
-  cwd: string,
-  a: string,
-  b: string,
-  bFirstParent: string | undefined,
-  warnings: string[],
-): boolean {
-  if (!isAncestor(cwd, a, b, warnings)) return false;
-  if (bFirstParent === undefined) return false; // b is a root commit — nothing subsumes into it
-  return !isAncestor(cwd, a, bFirstParent, warnings);
-}
-
-/** Drops every sha whose diff is already fully captured by another matched sha's own first-parent diff — keeps only the "tips" needed for a complete, non-duplicated diff. */
-function selectMaximal(shas: string[], cwd: string, warnings: string[]): string[] {
-  const dropped = new Set<string>();
-  const firstParentCache = new Map<string, string | undefined>();
-  const firstParentOf = (sha: string): string | undefined => {
-    if (!firstParentCache.has(sha)) {
-      firstParentCache.set(sha, parentsOf(cwd, sha, warnings)[0]);
-    }
-    return firstParentCache.get(sha);
-  };
-
-  for (const a of shas) {
-    if (dropped.has(a)) continue;
-    for (const b of shas) {
-      if (a === b || dropped.has(b)) continue;
-      if (isSubsumedByFirstParentDiff(cwd, a, b, firstParentOf(b), warnings)) {
-        dropped.add(a);
-        break;
-      }
-    }
-  }
-  return shas.filter((sha) => !dropped.has(sha));
-}
-
-/** Orders `shas` oldest-first by their position in HEAD's history (one `git log` call, not one per sha). */
-function orderByHistory(cwd: string, shas: string[], warnings: string[]): string[] {
-  if (shas.length <= 1) return shas;
-  const result = runGit(cwd, ["log", "--format=%H", "--reverse"]);
-  if (!result.ok) {
-    warnings.push(result.warning);
-    return shas;
-  }
-  const wanted = new Set(shas);
-  const ordered: string[] = [];
-  for (const line of result.stdout.split("\n")) {
-    if (wanted.has(line)) ordered.push(line);
-  }
-  // Defensive: a sha absent from this HEAD-history walk (shouldn't happen — every matched sha
-  // came FROM a HEAD-reachable git-log call above) still gets included, appended at the end,
-  // rather than silently dropped.
-  for (const sha of shas) {
-    if (!ordered.includes(sha)) ordered.push(sha);
-  }
-  return ordered;
-}
-
 /** The immediate parent shas of `sha` (0 for a root commit, 2+ for a merge commit). */
 function parentsOf(cwd: string, sha: string, warnings: string[]): string[] {
   const result = runGit(cwd, ["rev-list", "--parents", "-1", sha]);
@@ -322,8 +170,8 @@ function parseLogLines(stdout: string): { sha: string; subject: string }[] {
 
 /**
  * Resolves one task's recorded range to its commits (oldest first) and the diff of the range.
- * `undefined` when the range cannot be verified (a missing object) — the caller falls back to
- * the slug search and the warning says why. Never throws.
+ * `undefined` when the range cannot be verified (a missing object) — the caller reports the task
+ * as not measured and the warning says why. Never throws.
  */
 function resolveRecordedRange(
   cwd: string,
@@ -333,7 +181,7 @@ function resolveRecordedRange(
 ): { commits: { sha: string; subject: string }[]; diff: string; excludedMerged: number } | undefined {
   if (!commitExists(cwd, range.head) || (range.base !== undefined && !commitExists(cwd, range.base))) {
     warnings.push(
-      `${slug}: recorded commit range ${range.base ?? "(none)"}..${range.head} not found in this repository — falling back to the slug search`,
+      `${slug}: recorded commit range ${range.base ?? "(none)"}..${range.head} not found in this repository — the task is not measured`,
     );
     return undefined;
   }
@@ -384,19 +232,9 @@ function resolveRecordedRange(
 }
 
 /**
- * The range `base..head` = (main before the landing)..(branch head) read from the `merge(<branch>)` commit on HEAD's
- * first-parent history, or `undefined` when there is none or the log cannot be read.
- */
-function backfillRangeFromMergeCommit(cwd: string, branch: string): RecordedRange | undefined {
-  const log = runGit(cwd, ["log", "--first-parent", `--format=${MAIN_FIRST_PARENT_LOG_FORMAT}`, "HEAD"]);
-  if (!log.ok) return undefined;
-  const landing = findLandingInMainLog(log.stdout, branch);
-  return landing === undefined ? undefined : { base: landing.main_before, head: landing.branch_head };
-}
-
-/**
- * Derives the commit set + assembled diff for a plan's own tasks. Never throws — every
- * git-command failure degrades to an empty match for that step, surfaced in `warnings`.
+ * Derives the commit set + assembled diff for a plan's own tasks from their RECORDED ranges. Never throws — every
+ * git-command failure degrades to a warning, and the affected task is reported as not measured (never guessed by
+ * searching commit messages for its slug).
  *
  * ADR three-question review (adr-lore-s-mechanisms-validate-a-proxy-for-the-property-not-the),
  * for the `allTasksArchived` → `"unverifiable_convention_mismatch"` branch specifically:
@@ -430,35 +268,32 @@ function backfillRangeFromMergeCommit(cwd: string, branch: string): RecordedRang
  *   production; tests pass a throwaway `git init` fixture directory).
  * @param taskSlugs - Every task-in-plan's slug (`bundle.tasks.map(t => t.slug)`).
  * @param recordedRanges - REQUIRED (no default, same reason as `allTasksArchived`): slug -> the range
- *   `lore done` recorded in `extra.commit_range`. A task with a usable range is attributed from it
- *   FIRST and is not slug-searched (a slug-less merge commit must not double-count the branch);
- *   tasks without one, or whose range cannot be verified, fall back to the slug search.
+ *   `lore integrate` recorded in `extra.landing` (else `extra.commit_range`). A task without one, or whose range
+ *   cannot be verified, is NOT MEASURED (`tasks_not_measured`, `attribution: "not_measured"`).
  * @param allTasksArchived - REQUIRED. Whether EVERY task in the plan already has
  *   `status === "archived"` (caller-computed — this module never imports `@lore/core`'s
  *   `DocStatus` to stay a pure git wrapper). No default: every caller must compute and
  *   pass this fact explicitly (task-the-mcp-assess-adapter-still-calls-
  *   derivecommitsetforplan — see the ADR three-question review above, Q3).
- * @returns `status: "no_commits_found"` when NOT ONE task slug appears in ANY commit
- *   message reachable from `cwd`'s HEAD AND `allTasksArchived` is `false` — a named,
- *   honest boundary state, never a silent empty `"derived"` diff. `status:
- *   "unverifiable_convention_mismatch"` for that SAME zero-match condition when
- *   `allTasksArchived` IS `true` — a distinct value, never collapsed with the above.
+ * @returns `status: "no_commits_found"` when no commit was attributed from any recorded range AND
+ *   `allTasksArchived` is `false` — a named, honest boundary state, never a silent empty `"derived"` diff.
+ *   `status: "unverifiable_convention_mismatch"` for that SAME zero-commit condition when `allTasksArchived` IS
+ *   `true` — a distinct value, never collapsed with the above.
  *
  * @example
- * deriveCommitSetForPlan("/repo", ["task-own-a", "task-own-b"], false);
- * // → { status: "derived", commits: [...], tasks_without_commits: [], diff_text: "...", warnings: [] }
+ * deriveCommitSetForPlan("/repo", ["task-a"], false, new Map([["task-a", { base: "abc", head: "def" }]]));
+ * // → { status: "derived", commits: [...], tasks_not_measured: [], attribution: { "task-a": "recorded_range" }, ... }
  * @example
- * deriveCommitSetForPlan("/repo", ["task-archived-a"], true); // every task archived, zero matches
- * // → { status: "unverifiable_convention_mismatch", commits: [], tasks_without_commits: ["task-archived-a"], diff_text: "", warnings: [] }
+ * deriveCommitSetForPlan("/repo", ["task-b"], true, new Map()); // every task archived, none recorded
+ * // → { status: "unverifiable_convention_mismatch", tasks_not_measured: ["task-b"], attribution: { "task-b": "not_measured" }, ... }
  */
 export function deriveCommitSetForPlan(
   cwd: string,
   taskSlugs: string[],
   allTasksArchived: boolean,
-  recordedRanges: ReadonlyMap<string, RecordedRange | { not_measured: string }>,
+  recordedRanges: ReadonlyMap<string, RecordedRange>,
 ): CommitDerivationResult {
   const warnings: string[] = [];
-  const matchedBySha = new Map<string, { subject: string; taskSlugs: Set<string> }>();
   const tasksWithoutCommits: string[] = [];
   const tasksNotMeasured: string[] = [];
   const attribution: Record<string, TaskAttribution> = {};
@@ -467,71 +302,37 @@ export function deriveCommitSetForPlan(
   let excludedMergedCommitCount = 0;
 
   for (const slug of taskSlugs) {
-    const entry = recordedRanges.get(slug);
-    if (entry !== undefined && "not_measured" in entry) {
-      // reason: `lore done` tried to find the landing and could not (or the claim held no work): the range is NOT
-      // measured, and is shown as such — never replaced by a diff of a claim worktree or a slug guess.
-      warnings.push(`${slug}: commit range not measured: ${entry.not_measured}`);
+    const recorded = recordedRanges.get(slug);
+    const resolvedRange = recorded === undefined ? undefined : resolveRecordedRange(cwd, slug, recorded, warnings);
+    if (resolvedRange === undefined) {
+      // reason: BR-1291 — no usable recorded range is NOT MEASURED; a task is never attributed by guessing from commit messages.
       tasksWithoutCommits.push(slug);
       tasksNotMeasured.push(slug);
       attribution[slug] = "not_measured";
       continue;
     }
-    const recorded = entry;
-    let resolvedRange = recorded === undefined ? undefined : resolveRecordedRange(cwd, slug, recorded, warnings);
-    if (recorded?.worktree !== undefined && (resolvedRange === undefined || resolvedRange.commits.length === 0)) {
-      // reason: no landing record and the claim's range holds no own commit — backfill from the `merge(<branch>)`
-      // commit `lore integrate` left on main's first-parent history (same rule as `lore done`'s backfill).
-      const backfilled = backfillRangeFromMergeCommit(cwd, recorded.worktree);
-      if (backfilled !== undefined) {
-        const fromLanding = resolveRecordedRange(cwd, slug, backfilled, warnings);
-        if (fromLanding !== undefined && fromLanding.commits.length > 0) {
-          warnings.push(`${slug}: no landing record — attributed from the merge(${recorded.worktree}) commit on main`);
-          resolvedRange = fromLanding;
-        }
-      }
-    }
-    if (resolvedRange !== undefined) {
-      attribution[slug] = "recorded_range";
-      excludedMergedCommitCount += resolvedRange.excludedMerged;
-      if (resolvedRange.commits.length === 0) {
-        // Measured zero: the range was recorded and is empty. NOT "not measured".
-        tasksWithoutCommits.push(slug);
-        continue;
-      }
-      for (const c of resolvedRange.commits) {
-        const existing = rangeCommits.get(c.sha);
-        if (existing) existing.taskSlugs.add(slug);
-        else rangeCommits.set(c.sha, { subject: c.subject, taskSlugs: new Set([slug]) });
-      }
-      rangeDiffs.push(resolvedRange.diff);
-      continue;
-    }
-    const matches = findCommitsReferencing(cwd, slug, warnings);
-    if (matches.length === 0) {
+    attribution[slug] = "recorded_range";
+    excludedMergedCommitCount += resolvedRange.excludedMerged;
+    if (resolvedRange.commits.length === 0) {
+      // Measured zero: the range was recorded and is empty. NOT "not measured".
       tasksWithoutCommits.push(slug);
-      tasksNotMeasured.push(slug);
-      attribution[slug] = "not_measured";
       continue;
     }
-    attribution[slug] = "slug_match";
-    for (const match of matches) {
-      const existing = matchedBySha.get(match.sha);
-      if (existing) {
-        existing.taskSlugs.add(slug);
-      } else {
-        matchedBySha.set(match.sha, { subject: match.subject, taskSlugs: new Set([slug]) });
-      }
+    for (const c of resolvedRange.commits) {
+      const existing = rangeCommits.get(c.sha);
+      if (existing) existing.taskSlugs.add(slug);
+      else rangeCommits.set(c.sha, { subject: c.subject, taskSlugs: new Set([slug]) });
     }
+    rangeDiffs.push(resolvedRange.diff);
   }
 
-  if (matchedBySha.size === 0 && rangeCommits.size === 0) {
+  if (rangeCommits.size === 0) {
     return {
-      // reason: zero matches on an all-archived plan is a CONTRADICTION (archived tasks
+      // reason: zero attributed commits on an all-archived plan is a CONTRADICTION (archived tasks
       // have merged work by definition) — reported as a distinct, named "cannot verify"
       // value, never silently folded into the same "no_commits_found" a genuinely
-      // commit-less (still in-progress) plan gets. See this function's own JSDoc/the
-      // module header for the ADR three-question review this answers.
+      // commit-less (still in-progress) plan gets
+      // (adr-lore-s-mechanisms-validate-a-proxy-for-the-property-not-the Q2).
       status: allTasksArchived ? "unverifiable_convention_mismatch" : "no_commits_found",
       commits: [],
       tasks_without_commits: [...taskSlugs],
@@ -543,29 +344,12 @@ export function deriveCommitSetForPlan(
     };
   }
 
-  const allShas = [...matchedBySha.keys()];
-  const maximalShas = selectMaximal(allShas, cwd, warnings);
-  const ordered = orderByHistory(cwd, maximalShas, warnings);
-
-  const slugCommits: DerivedCommit[] = ordered.map((sha) => {
-    const entry = matchedBySha.get(sha);
-    // Every sha in `ordered` originated from `maximalShas` <- `allShas` <- `matchedBySha`'s own
-    // keys, so this lookup cannot miss — the fallback below is a defensive shape, not a hope.
-    const safeEntry = entry ?? { subject: "", taskSlugs: new Set<string>() };
-    return { sha, subject: safeEntry.subject, matched_task_slugs: [...safeEntry.taskSlugs].sort() };
-  });
-
-  // A commit already in a recorded range is attributed there; a slug match on the same sha
-  // (e.g. a branch commit that also names the slug) must not be diffed a second time.
-  const slugOnly = slugCommits.filter((c) => !rangeCommits.has(c.sha));
-  const rangeDerived: DerivedCommit[] = [...rangeCommits.entries()].map(([sha, e]) => ({
+  const commits: DerivedCommit[] = [...rangeCommits.entries()].map(([sha, e]) => ({
     sha,
     subject: e.subject,
     matched_task_slugs: [...e.taskSlugs].sort(),
   }));
-  const commits = [...rangeDerived, ...slugOnly];
-  const diffText =
-    rangeDiffs.join("") + slugOnly.map((c) => diffAgainstFirstParent(cwd, c.sha, warnings)).join("");
+  const diffText = rangeDiffs.join("");
 
   return {
     status: "derived",

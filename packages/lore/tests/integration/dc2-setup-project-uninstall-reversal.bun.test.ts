@@ -16,6 +16,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { initRepoWithMainCommit } from "./support/main-guard-repo.js";
 
 const PACKAGE_ROOT = new URL("../../", import.meta.url).pathname.replace(/\/$/, "");
 const INDEX_TS = join(PACKAGE_ROOT, "src", "index.ts");
@@ -35,7 +36,8 @@ afterEach(() => {
 function makeRepo(): string {
   const dir = mkdtempSync(join(tmpdir(), "dc2-4-repo-"));
   scratch.push(dir);
-  for (const args of [["init"], ["config", "user.email", "t@example.com"], ["config", "user.name", "T"]]) {
+  initRepoWithMainCommit(dir); // setup refuses a main with no commit (BR-1343)
+  for (const args of [["config", "user.email", "t@example.com"], ["config", "user.name", "T"]]) {
     const proc = Bun.spawnSync(["git", ...args], { cwd: dir });
     if (proc.exitCode !== 0) throw new Error(`git ${args.join(" ")} failed: ${proc.stderr.toString()}`);
   }
@@ -60,9 +62,12 @@ function expectOk(result: RunResult, what: string): void {
 function configureProjectLanguage(repo: string, code: string): void {
   const configPath = join(repo, ".lore", "config.yaml");
   const config = readFileSync(configPath, "utf8");
-  // The seeded template carries a `context:` block (memory_files); the language key joins it.
-  if (!/^context:\n/m.test(config)) throw new Error("fixture assumption broken: config.yaml has no context: block");
-  writeFileSync(configPath, config.replace(/^context:\n/m, `context:\n  language: ${code}\n`));
+  // Setup no longer seeds a `context:` block, so the fixture adds one; if a future seed brings one back, the language key joins it.
+  if (/^context:/m.test(config) && !/^context:\n/m.test(config)) throw new Error("fixture assumption broken: config.yaml has an inline context: value");
+  const edited = /^context:\n/m.test(config)
+    ? config.replace(/^context:\n/m, `context:\n  language: ${code}\n`)
+    : `${config.replace(/\n*$/, "\n")}context:\n  language: ${code}\n`;
+  writeFileSync(configPath, edited);
 }
 
 function loreRulesFiles(repo: string): string[] {

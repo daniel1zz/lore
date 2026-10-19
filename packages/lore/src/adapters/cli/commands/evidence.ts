@@ -24,10 +24,10 @@
  * browser/visual check) — `../evidence-precheck.js::findCaptureFlagConflict`
  * refuses both combinations before any spawn happens.
  *
- * Capture window (task-lore-evidence-capture-has-a-hard-coded-600s-window-that-a) —
- * `--capture`'s spawn is bounded by `workflow.evidence.capture_timeout_ms` from this
- * project's `.lore/config.yaml` (default 600000 ms, byte-identical to the module
- * constant it replaced, so an upgrading consumer that sets nothing sees no change).
+ * Capture window: `--capture`'s spawn is bounded by `workflow.evidence.capture_timeout_ms` from this
+ * project's `.lore/config.yaml` (its default lives in the config schema, never restated here, so
+ * this sentence cannot drift from it).
+ * Origin: task-lore-evidence-capture-has-a-hard-coded-600s-window-that-a.
  * It was previously the hard-coded `CAPTURE_TIMEOUT_MS`, which fused two unrelated
  * facts — how long a HUNG child is tolerated versus how long an HONEST oracle may
  * take — into one number. The second grows with the test suite, and it outgrew the

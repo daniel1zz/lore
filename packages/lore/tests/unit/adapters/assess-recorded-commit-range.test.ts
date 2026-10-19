@@ -6,11 +6,11 @@
  * recorded-range path of `deriveCommitSetForPlan` against a real throwaway repo (never the
  * repo `.lore/`, never an AI judge):
  *   HAPPY:      a slug-less merge commit's branch commits are attributed via the recorded range.
- *   FALLBACK:   no recorded range -> the slug-in-message search still works (unchanged).
+ *   NO-GUESS:   no recorded range -> NOT MEASURED, never attributed by a task slug in a commit message.
  *   BOUNDARY:   head-only range (pre-base_sha claim) attributes just the head commit and says so.
  *   STATE:      not-measured (no range, no slug match) is distinguishable from measured-zero
  *               (range recorded, base == head).
- *   ERROR:      a recorded range whose objects are gone degrades to the slug search with a warning.
+ *   ERROR:      a recorded range whose objects are gone is NOT MEASURED (with a warning), never a slug search.
  */
 
 import { describe, it, expect, afterEach } from "vitest";
@@ -88,17 +88,18 @@ describe("deriveCommitSetForPlan — recorded commit range (issue #180)", () => 
     expect(result.attribution[SLUG]).toBe("recorded_range");
   });
 
-  it("FALLBACK: with no recorded range the slug-in-message search still attributes the commit", () => {
+  it("NO-GUESS: a commit naming the slug does not attribute a task that has no recorded range", () => {
     const dir = initRepo();
     commit(dir, "seed.txt", "seed\n", "seed commit");
-    const own = commit(dir, "own.txt", "SLUG_MATCHED_CONTENT\n", `implements ${SLUG}`);
+    commit(dir, "own.txt", "SLUG_MATCHED_CONTENT\n", `implements ${SLUG}`);
 
     const result = deriveCommitSetForPlan(dir, [SLUG], false, new Map());
 
-    expect(result.status).toBe("derived");
-    expect(result.commits.map((c) => c.sha)).toEqual([own]);
-    expect(result.attribution[SLUG]).toBe("slug_match");
-    expect(result.tasks_not_measured).toEqual([]);
+    expect(result.commits).toEqual([]);
+    expect(result.diff_text).not.toContain("SLUG_MATCHED_CONTENT");
+    expect(result.attribution[SLUG]).toBe("not_measured");
+    expect(result.tasks_not_measured).toEqual([SLUG]);
+    expect(result.tasks_without_commits).toEqual([SLUG]);
   });
 
   it("STATE: no range and no slug match is NOT MEASURED, distinct from a measured-zero range", () => {
@@ -125,16 +126,17 @@ describe("deriveCommitSetForPlan — recorded commit range (issue #180)", () => 
     expect(result.warnings.join("\n")).toContain("head-only");
   });
 
-  it("ERROR: a recorded range whose commit objects are gone degrades to the slug search with a warning", () => {
+  it("ERROR: a recorded range whose commit objects are gone is NOT MEASURED with a warning, never a slug search", () => {
     const dir = initRepo();
     commit(dir, "seed.txt", "seed\n", "seed commit");
-    const own = commit(dir, "own.txt", "FALLBACK_CONTENT\n", `implements ${SLUG}`);
+    commit(dir, "own.txt", "FALLBACK_CONTENT\n", `implements ${SLUG}`);
     const gone = "0123456789abcdef0123456789abcdef01234567";
 
     const result = deriveCommitSetForPlan(dir, [SLUG], false, new Map([[SLUG, { base: gone, head: gone }]]));
 
-    expect(result.commits.map((c) => c.sha)).toEqual([own]);
-    expect(result.attribution[SLUG]).toBe("slug_match");
+    expect(result.commits).toEqual([]);
+    expect(result.attribution[SLUG]).toBe("not_measured");
+    expect(result.tasks_not_measured).toEqual([SLUG]);
     expect(result.warnings.join("\n")).toContain(SLUG);
   });
 });

@@ -32,8 +32,8 @@
  * Source: spec-baseline-slice-1-rules-with-permanent-ids-ac-citations §C6, QA-3/4/5.
  */
 
-import { err, ok, parseCodeAnchor, ruleIdPrefixOfNode } from "@lore/core";
-import type { DocRecord, DocType, EvidenceEntry, LoreError, Result, RuleLifecycle } from "@lore/core";
+import { err, isAcSuperseded, ok, parseCodeAnchor, ruleIdPrefixOfNode } from "@lore/core";
+import type { DocRecord, DocType, EvidenceEntry, LoreError, Result, RuleLifecycle, SupersededByRef } from "@lore/core";
 import type { StoreInterface } from "../store/store-interface.js";
 import { attestedRunKey, indexLatestAttestedRuns } from "./attested-ac-runs.js";
 
@@ -185,6 +185,8 @@ function anchorPathsOf(spec: DocRecord): string[] {
 interface DeclaredAc {
   id: string;
   isScript: boolean;
+  /** D15 supersession mark present (shared `isAcSuperseded` predicate); a superseded criterion never contributes to a rule's state. */
+  superseded: boolean;
   cites: string[];
 }
 
@@ -194,12 +196,13 @@ function declaredAcsOf(spec: DocRecord): DeclaredAc[] {
   const out: DeclaredAc[] = [];
   for (const c of raw as unknown[]) {
     if (typeof c !== "object" || c === null) continue;
-    const { id, verify, cites } = c as { id?: unknown; verify?: unknown; cites?: unknown };
+    const { id, verify, cites, superseded_by } = c as { id?: unknown; verify?: unknown; cites?: unknown; superseded_by?: unknown };
     if (typeof id !== "string") continue;
     const mode = typeof verify === "object" && verify !== null ? (verify as { mode?: unknown }).mode : undefined;
     out.push({
       id,
       isScript: mode === "script",
+      superseded: isAcSuperseded({ superseded_by: superseded_by as SupersededByRef | undefined }),
       cites: Array.isArray(cites) ? [...new Set((cites as unknown[]).filter((x): x is string => typeof x === "string"))] : [],
     });
   }
@@ -255,7 +258,10 @@ function buildSnapshot(docs: readonly DocRecord[]): Snapshot {
   for (const spec of specs) {
     const anchorPaths = anchorPathsOf(spec);
     for (const ac of declared.get(spec.id) ?? []) {
-      if (!ac.isScript) continue;
+      // reason: a superseded criterion is skipped by `lore verify` and immutable, so nothing can ever re-verify
+      // it; counting it would pin its rule `stale` forever. Its id stays in the lineage set above (ac_ref
+      // attribution), only its contribution to rule state is dropped.
+      if (!ac.isScript || ac.superseded) continue;
       const run = latest.get(attestedRunKey(spec.id, ac.id)) ?? null;
       const originTask = originTasks.get(attestedRunKey(spec.id, ac.id));
       const originPlanId = originTask?.extra["plan_id"];

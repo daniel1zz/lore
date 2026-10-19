@@ -373,6 +373,7 @@ describe("SessionService.bootstrap — active_sessions (SPEC-042 D8)", () => {
   it("bootstrapReportSchema.parse round-trips active_sessions without stripping it", () => {
     const report: BootstrapReport = {
       root: null,
+      architecture: null,
       active_plans: [],
       pending_reviews: { count: 0, slugs: [] },
       my_claims: [],

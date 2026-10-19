@@ -161,7 +161,7 @@ describe("migration-008 (CJK bigram shadow columns for FTS5)", () => {
     // row's title/content, and make it CJK-searchable via the store's real
     // search() (not raw SQL) — proving the shadow columns AND the query-side
     // expansion in escapeFtsQuery both work end to end.
-    const store = actedStore(new SQLiteStore(dbPath));
+    const store = actedStore(new SQLiteStore(dbPath, { migrate: true }));
     const db = store.getDatabase();
 
     expect(userVersion(db)).toBe(26);
@@ -196,11 +196,11 @@ describe("migration-008 (CJK bigram shadow columns for FTS5)", () => {
   });
 
   it("REGRESSION: reopening an already-migrated (latest version) file-backed DB a second time is idempotent — no throw, shadow columns unchanged", () => {
-    const firstOpen = actedStore(new SQLiteStore(dbPath));
+    const firstOpen = actedStore(new SQLiteStore(dbPath, { migrate: true }));
     firstOpen.close();
 
     expect(() => {
-      const secondOpen = actedStore(new SQLiteStore(dbPath));
+      const secondOpen = actedStore(new SQLiteStore(dbPath, { migrate: true }));
       const db = secondOpen.getDatabase();
       expect(userVersion(db)).toBe(26);
       expect(tableColumnNames(db, "docs")).toContain("fts_title");

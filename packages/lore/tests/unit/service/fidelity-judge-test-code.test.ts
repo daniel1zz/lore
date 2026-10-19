@@ -83,7 +83,7 @@ function fakeJudge(): AIProvider & { prompts: string[] } {
 }
 
 const run = (store: InMemoryStore, ai: AIProvider, size: number) =>
-  runFidelity({ store, ai, size, seed: 1, judges: 1, exclusions: false, nonce: "N0NCE", repoRoot });
+  runFidelity({ store, ai, size, seed: 1, judges: 1, nonce: "N0NCE", repoRoot });
 
 describe("AC-BLC-8: the fidelity judge sees the cited test code", () => {
   it("HAPPY: the prompt carries the source of the test file the command names, inside the data fence", async () => {
@@ -146,7 +146,7 @@ describe("AC-BLC-8: the fidelity judge sees the cited test code", () => {
   it("STATE: with two judges an unseen item reaches neither judge nor the adjudicator and stays not_seen", async () => {
     const store = await world([`bunx vitest run ${SEEN_PATH}`, `bunx vitest run ${MISSING_PATH}`]);
     const ai = fakeJudge();
-    const r = await runFidelity({ store, ai, size: 2, seed: 1, judges: 2, exclusions: false, nonce: "N0NCE", repoRoot });
+    const r = await runFidelity({ store, ai, size: 2, seed: 1, judges: 2, nonce: "N0NCE", repoRoot });
     expect(r.ok).toBe(true);
     if (!r.ok) return;
     expect(ai.prompts).toHaveLength(2); // judge A + judge B agree, so no adjudicator

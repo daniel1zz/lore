@@ -62,6 +62,7 @@ import {
   specAcceptanceCriteriaSchema,
   UPSTREAM_APPROVED_STATUSES,
   anchorsOverlap,
+  fileAnchorPath,
   lintAcQuantifiability,
   checkOracleCoverage,
   declaredScopeCoverageVerdict,
@@ -1738,7 +1739,7 @@ export type { RadiusMeasurement };
  */
 export function resolveBlastRadiusPaths(command: string, fileAnchors: readonly string[]): string[] {
   const radius = new Set<string>();
-  for (const candidate of [...extractTestFileTokens(command), ...fileAnchors]) {
+  for (const candidate of [...extractTestFileTokens(command), ...fileAnchors.map(fileAnchorPath)]) {
     const path = candidate.trim();
     if (isValidRepoRelativePathspec(path)) radius.add(path);
   }

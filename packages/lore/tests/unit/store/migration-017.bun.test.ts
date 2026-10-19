@@ -70,7 +70,7 @@ describe("migration-017 constants", () => {
 describe("migration-017 on a SQLite file", () => {
   /** A v16 file: a real current-schema file with the two columns dropped and user_version rewound. */
   function seedV16WithRun(path: string): void {
-    const fresh = actedStore(new SQLiteStore(path));
+    const fresh = actedStore(new SQLiteStore(path, { migrate: true }));
     fresh.close();
     const raw = new Database(path);
     raw.exec("ALTER TABLE runs DROP COLUMN ended_at");
@@ -88,7 +88,7 @@ describe("migration-017 on a SQLite file", () => {
     const path = join(dir, "v16.db");
     seedV16WithRun(path);
 
-    const store = actedStore(new SQLiteStore(path));
+    const store = actedStore(new SQLiteStore(path, { migrate: true }));
 
     expect(userVersion(store.getDatabase())).toBe(26);
     const end = await store.getRunEnd(RUN);
@@ -103,7 +103,7 @@ describe("migration-017 on a SQLite file", () => {
     raw.exec("ALTER TABLE runs ADD COLUMN ended_at TEXT");
     raw.close();
 
-    const store = actedStore(new SQLiteStore(path));
+    const store = actedStore(new SQLiteStore(path, { migrate: true }));
 
     expect(userVersion(store.getDatabase())).toBe(26);
     const cols = (store.getDatabase().query("PRAGMA table_info(runs)").all() as { name: string }[]).map((c) => c.name);
@@ -114,12 +114,12 @@ describe("migration-017 on a SQLite file", () => {
 
   it("REGRESSION: reopening a migrated file is a no-op (version and run rows unchanged)", async () => {
     const path = join(dir, "again.db");
-    const first = actedStore(new SQLiteStore(path));
+    const first = actedStore(new SQLiteStore(path, { migrate: true }));
     await first.insertRun(runRecord(RUN));
     await first.endRun(RUN, AT, "r");
     first.close();
 
-    const second = actedStore(new SQLiteStore(path));
+    const second = actedStore(new SQLiteStore(path, { migrate: true }));
 
     expect(userVersion(second.getDatabase())).toBe(26);
     expect(await second.getRunEnd(RUN)).toEqual({ ok: true, value: { endedAt: AT, endReason: "r" } });

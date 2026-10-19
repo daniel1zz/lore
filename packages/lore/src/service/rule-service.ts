@@ -67,13 +67,12 @@ import {
 import type { CreateDocInput } from "@lore/core";
 import { resolveWriteActorFor } from "../store/write-context-store.js";
 import type { StoreInterface } from "../store/store-interface.js";
-import { NON_BUSINESS_PREFIX } from "./leaf-coverage.js";
-import { refuseLiveCommandRemoval, refuseReachedSiteRemoval, refuseRuleWithdrawal, type MainTreePort } from "./main-tree-guard.js";
-import { buildOwnerLeafIndex, judgeOwnedBy, parseOwnedBy, type OwnerLeafIndex } from "./owned-by.js";
+import { refuseLiveCommandRemoval, type MainTreePort } from "./main-tree-guard.js";
 import { resolveDoc } from "./resolve.js";
 import { bareDocWriter, type CreateDocResult, type DocWritePort, type WriteActorOpts } from "./corpus-service.js";
 import { collectKnownRuleIds } from "./baseline-rule-ids.js";
 import { collectLeafRules } from "./rule-index-queries.js";
+import { demotionOf, type Demotion } from "./demotion-notice.js";
 import { CorpusWriteAuthority, type CorpusWriteAuthorityContext } from "./foreign-corpus-write-guard.js";
 
 // reason: C7's `--check-baseline` imports this from the service that owns rules; the helper itself
@@ -170,8 +169,7 @@ type Mutation = Result<{ extra: Record<string, unknown>; summary: string; detail
 
 /**
  * One `lore baseline map` edit of a leaf's completeness-census state.
- * `sites` SETS (replaces) each key's mapping; entries are rule ids of THIS leaf or
- * `non-business:<reason>`.
+ * `sites` SETS (replaces) each key's mapping; entries are unretired rule ids of THIS leaf.
  */
 export interface SiteMapChange {
   sites?: Record<string, string[]>;
@@ -242,10 +240,9 @@ export class RuleService {
     targets: readonly DocRecord[],
     operation: string,
     by?: string,
-    ownerProof?: readonly DocRecord[],
   ): Promise<Result<void, LoreError>> {
     if (this.writeAuthority === undefined) return ok(undefined);
-    const verdict = await this.writeAuthority.authorize(targets, operation, this.resolveActor(by), ownerProof);
+    const verdict = await this.writeAuthority.authorize(targets, operation, this.resolveActor(by));
     if (!verdict.ok) return verdict;
     return ok(undefined);
   }
@@ -281,8 +278,11 @@ export class RuleService {
     leaf: string,
     input: AddRuleInput,
     opts?: { by?: string },
-  ): Promise<Result<{ ruleId: string; doc: DocRecord }, LoreError>> {
+  ): Promise<Result<{ ruleId: string; doc: DocRecord; demoted?: Demotion }, LoreError>> {
     const actor = this.resolveActor(opts?.by);
+    // reason: D18 — the demotion is its own CAS write; a later STALE_VERSION re-apply reads the leaf already
+    // draft, so the notice is captured on the attempt that wrote it and survives the retry.
+    let demoted: Demotion | undefined;
     // reason: first pass validates the rule's own fields only; "AS" is the one family that admits every
     // field (four-part standard included). The family-specific verdict comes from the extra check below.
     const candidate = baselineRuleSchema.safeParse({ ...input, id: `AS-${PREVALIDATION_NUMBER}`, lifecycle: "live" });
@@ -318,6 +318,7 @@ export class RuleService {
         if (readied.error.code === "STALE_VERSION") { lastStale = readied.error; continue; }
         return readied;
       }
+      demoted ??= demotionOf(fresh.value, readied.value);
       const base = readied.value;
       const withRule = (ruleId: string): Record<string, unknown> => ({
         ...base.extra,
@@ -335,7 +336,7 @@ export class RuleService {
         if (allocated.error.code === "STALE_VERSION") { lastStale = allocated.error; continue; }
         return allocated;
       }
-      return ok(allocated.value);
+      return ok({ ...allocated.value, ...(demoted !== undefined ? { demoted } : {}) });
     }
     return err(lastStale ?? staleExhausted(leafId));
   }
@@ -352,8 +353,9 @@ export class RuleService {
     ruleId: string,
     patch: SetRulePatch,
     opts?: { by?: string },
-  ): Promise<Result<{ rule: BaselineRule; doc: DocRecord }, LoreError>> {
+  ): Promise<Result<{ rule: BaselineRule; doc: DocRecord; demoted?: Demotion }, LoreError>> {
     const actor = this.resolveActor(opts?.by);
+    let demoted: Demotion | undefined; // reason: D18 — kept across CAS re-applies, see addRule
     if (!ANY_RULE_ID_PATTERN.test(ruleId)) {
       return err(validationError("ruleId", `rule id must match BR-<n>, AS-<n> or AD-<n> (got '${ruleId}')`, ruleId));
     }
@@ -364,27 +366,12 @@ export class RuleService {
 
     let lastStale: LoreError | undefined;
     let authorized = false; // reason: one authorization (and one audit row) per call, not per CAS re-apply
-    let withdrawalChecked = false; // reason: one main-tree measurement per call, not per CAS re-apply
     for (let attempt = 0; attempt <= MAX_CAS_REAPPLIES; attempt += 1) {
       const located = await this.locateRule(ruleId);
       if (!located.ok) return located;
       const { sourceLeaf, current, registered } = located.value;
       const edited = applyRulePatch(current, patch);
       if (!edited.ok) return edited;
-      // reason: retiring or moving a live rule stops accounting for every site mapping that cites it; wait for main to drop them.
-      if (!withdrawalChecked && this.mainTree !== undefined && current.lifecycle === "live" && (patch.lifecycle === "retired" || patch.moveTo !== undefined)) {
-        const docs = await this.listBaselineDocs();
-        if (!docs.ok) return docs;
-        const withdrawable = await refuseRuleWithdrawal(this.mainTree, {
-          ruleId,
-          operation: patch.moveTo !== undefined ? "move" : "retire",
-          ruleLeaf: sourceLeaf,
-          baselineDocs: docs.value,
-        });
-        if (!withdrawable.ok) return withdrawable;
-        withdrawalChecked = true;
-      }
-
       if (patch.moveTo === undefined) {
         if (!authorized) {
           const gate = await this.authorizeCorpusWrite([sourceLeaf], "rule-set", opts?.by);
@@ -401,7 +388,8 @@ export class RuleService {
           if (written.error.code === "STALE_VERSION") { lastStale = written.error; continue; }
           return written;
         }
-        return ok({ rule: edited.value, doc: written.value });
+        demoted ??= written.value.demoted;
+        return ok({ rule: edited.value, doc: written.value.doc, ...(demoted !== undefined ? { demoted } : {}) });
       }
 
       const dest = await this.resolveBaselineDoc(patch.moveTo, ["leaf", "standard", "debt-registry"]);
@@ -433,6 +421,9 @@ export class RuleService {
         if (toReady.error.code === "STALE_VERSION") { lastStale = toReady.error; continue; }
         return toReady;
       }
+      // reason: a move can demote both leaves; `demoted` is a single value, so the source leaf wins and the
+      // destination's is reported only when the source was not approved.
+      demoted ??= demotionOf(sourceLeaf, fromReady.value) ?? demotionOf(toFresh.value, toReady.value);
       const from = fromReady.value;
       const to = toReady.value;
       const fromExtra = { ...from.extra, rules: rulesOf(from).filter((r) => r.id !== ruleId) };
@@ -460,7 +451,7 @@ export class RuleService {
         if (moved.error.code === "STALE_VERSION") { lastStale = moved.error; continue; }
         return moved;
       }
-      return ok({ rule: edited.value, doc: moved.value.to });
+      return ok({ rule: edited.value, doc: moved.value.to, ...(demoted !== undefined ? { demoted } : {}) });
     }
     return err(lastStale ?? staleExhausted(ruleId));
   }
@@ -584,42 +575,11 @@ export class RuleService {
   }
 
   /**
-   * The owner leaves that let an OWNED-BY-ONLY site-map change ride a lease scoped to them instead of to the mapped
-   * leaf: `undefined` unless the change is rows-only, every entry parses as `non-business:owned-by <L> ...`, and each
-   * `<L>` is a leaf that itself maps that site to a live rule of its own. Such a row only points coverage at `<L>`; it
-   * cannot add, change or retire another leaf's rules or rule mappings. The SCOPE check stays in the guard.
-   */
-  private async ownedByOwnerProof(change: SiteMapChange, mapped: DocRecord): Promise<Result<DocRecord[] | undefined, LoreError>> {
-    const sites = Object.entries(change.sites ?? {});
-    const hasOther = (change.removeSites ?? []).length + (change.addCommands ?? []).length + (change.removeCommands ?? []).length > 0;
-    if (hasOther || sites.length === 0 || this.writeAuthority === undefined) return ok(undefined);
-    const docs = await this.listBaselineDocs();
-    if (!docs.ok) return docs;
-    const ownerLeaves = buildOwnerLeafIndex(docs.value);
-    const byId = new Map(docs.value.map((d) => [d.id, d]));
-    const owners = new Map<string, DocRecord>();
-    for (const [site, entries] of sites) {
-      if (entries.length === 0) return ok(undefined);
-      for (const entry of entries) {
-        const owned = parseOwnedBy(entry);
-        if (owned.kind !== "owned_by" || !judgeOwnedBy(owned, ownerLeaves, mapped.id).ok) return ok(undefined);
-        const ownerId = ownerLeaves.get(owned.leaf)?.leafId;
-        const ownerDoc = ownerId === undefined ? undefined : byId.get(ownerId);
-        if (ownerId === undefined || ownerDoc === undefined) return ok(undefined);
-        const liveIds = ownerLeaves.get(owned.leaf)?.liveRuleIds ?? new Set<string>();
-        if (!(siteMapOf(ownerDoc)[site] ?? []).some((id) => liveIds.has(id))) return ok(undefined);
-        owners.set(ownerId, ownerDoc);
-      }
-    }
-    return ok([...owners.values()]);
-  }
-
-  /**
-   * Edit a leaf's `site_map` (census site key -> rule ids | `non-business:<reason>`) and its
+   * Edit a leaf's `site_map` (census site key -> unretired rule ids of the leaf) and its
    * `commands` list — the ONLY writer of both keys (`lore baseline map`).
    *
-   * @returns the updated leaf; VALIDATION_ERROR for an empty change, a non-leaf, a rule id the
-   *   leaf does not carry, a `non-business:` entry without a reason, or removing something absent.
+   * @returns the updated leaf; VALIDATION_ERROR for an empty change, a non-leaf, a site with no rule (BR-655), a value
+   *   that is not an unretired rule of this leaf (BR-654), removing something absent, or dropping a command main still has.
    */
   async setSiteMap(
     leaf: string,
@@ -638,51 +598,31 @@ export class RuleService {
     }
     const target = await this.resolveBaselineDoc(leaf, "leaf");
     if (!target.ok) return target;
-    const proof = await this.ownedByOwnerProof(change, target.value);
-    if (!proof.ok) return proof;
-    const gate = await this.authorizeCorpusWrite([target.value], "baseline-map", opts?.by, proof.value);
+    const gate = await this.authorizeCorpusWrite([target.value], "baseline-map", opts?.by);
     if (!gate.ok) return gate;
-    // reason: a removal reduces accountability; the corpus is shared, so it waits until main's tree no longer needs it.
+    // reason: dropping a command declaration leaves the command undeclared for every other branch, so it waits until main's
+    // registry no longer has it (BR-1316/BR-1317). A site mapping is traceability and is removable at any time (ADR
+    // adr-a-structural-gate-refuses-only-what-an-excuse-cannot, decision 5).
     if (this.mainTree !== undefined) {
-      const mapped = siteMapOf(target.value);
-      const sitesGone = await refuseReachedSiteRemoval(this.mainTree, target.value, removeSites.filter((k) => k in mapped));
-      if (!sitesGone.ok) return sitesGone;
       const declared = commandsOf(target.value);
       const commandsGone = await refuseLiveCommandRemoval(this.mainTree, target.value, removeCommands.filter((c) => declared.includes(c)));
       if (!commandsGone.ok) return commandsGone;
     }
-    // Only the sites SET in this call are judged (entries already stored are never re-validated at write time).
-    let ownerLeaves: OwnerLeafIndex | undefined;
-    if (Object.values(sites).some((entries) => entries.some((e) => parseOwnedBy(e).kind !== "not_owned_by"))) {
-      const docs = await this.listBaselineDocs();
-      if (!docs.ok) return docs;
-      ownerLeaves = buildOwnerLeafIndex(docs.value);
-    }
-    const mappedLeafId = target.value.id;
     // A command add/remove changes what the census measures, so it re-opens approval; a site-only change does not.
     const keepsApproval = addCommands.length + removeCommands.length === 0;
     return this.retryWrite(target.value.id, opts?.by, (doc) => {
-      const ruleIds = new Set(rulesOf(doc).map((r) => r.id));
+      const unretiredRuleIds = new Set(rulesOf(doc).filter((r) => r.lifecycle !== "retired").map((r) => r.id));
       // All-or-nothing: judge EVERY row and report every refusal in one VALIDATION_ERROR, so a many-row call is
       // fixed in one pass and nothing is written unless all rows hold.
       const problems: { value: string; message: string }[] = [];
       for (const [site, entries] of Object.entries(sites)) {
         if (site.trim().length === 0 || entries.length === 0) {
-          problems.push({ value: site, message: `site '${site}' needs a non-empty key and at least one rule id or non-business reason` });
+          problems.push({ value: site, message: `site '${site}' needs a non-empty key and at least one rule id of this leaf (BR-655)` });
           continue;
         }
         for (const entry of entries) {
-          const isReason = entry.startsWith(NON_BUSINESS_PREFIX) && entry.slice(NON_BUSINESS_PREFIX.length).trim().length > 0;
-          if (!isReason && !ruleIds.has(entry)) {
-            problems.push({ value: entry, message: `'${entry}' for site '${site}' is neither a rule of this leaf nor '${NON_BUSINESS_PREFIX}<reason>'` });
-            continue;
-          }
-          const owned = parseOwnedBy(entry);
-          if (owned.kind === "malformed") {
-            problems.push({ value: entry, message: `owned-by entry for site '${site}': ${owned.problem} (grammar: ${NON_BUSINESS_PREFIX}owned-by <leaf> BR-n[ BR-m...] — <reason>)` });
-          } else if (owned.kind === "owned_by") {
-            const judged = judgeOwnedBy(owned, ownerLeaves, mappedLeafId);
-            if (!judged.ok) problems.push({ value: entry, message: `owned-by entry for site '${site}': ${judged.problem}` });
+          if (!unretiredRuleIds.has(entry)) {
+            problems.push({ value: entry, message: `'${entry}' for site '${site}' is not an unretired rule of this leaf (BR-654: a site maps to unretired BR-n ids of its own leaf only)` });
           }
         }
       }
@@ -713,7 +653,7 @@ export class RuleService {
         summary: `site_map set ${Object.keys(sites).length} removed ${removeSites.length}; commands +${addCommands.length} -${removeCommands.length}`,
         details: { operation: "baseline-map", sites: Object.keys(sites), removeSites, addCommands, removeCommands },
       });
-    }, keepsApproval, proof.value);
+    }, keepsApproval);
   }
 
   /** Add a glossary entry to a root|branch node; a duplicate term is refused. */
@@ -928,7 +868,6 @@ export class RuleService {
     actor: string,
     summary: string,
     details: Record<string, unknown>,
-    scopeProof?: readonly DocRecord[],
   ): Promise<Result<DocRecord, LoreError>> {
     const written = await this.writer.writeDoc({
       doc,
@@ -939,7 +878,6 @@ export class RuleService {
       auditDetails: details,
       lock: "none",
       by: actor,
-      ...(scopeProof !== undefined ? { scopeProof } : {}),
     });
     if (!written.ok) return written;
     return ok(written.value.doc);
@@ -951,13 +889,12 @@ export class RuleService {
     actor: string,
     mutate: (doc: DocRecord) => Mutation,
     keepsApproval = false,
-    scopeProof?: readonly DocRecord[],
-  ): Promise<Result<DocRecord, LoreError>> {
+  ): Promise<Result<{ doc: DocRecord; demoted?: Demotion }, LoreError>> {
     // reason: #297 — a mutation that leaves `extra` as stored is a no-op and must write NOTHING, not even the
     // approved->draft demotion that precedes a real edit. `mutate` is pure over the doc, and the demotion changes
     // only `status`, so previewing it on the stored doc yields the same `extra` the real run would.
     const preview = mutate(doc);
-    if (preview.ok && isDeepStrictEqual(preview.value.extra, doc.extra)) return ok(doc);
+    if (preview.ok && isDeepStrictEqual(preview.value.extra, doc.extra)) return ok({ doc });
     const ready = keepsApproval ? ok(doc) : await this.demoteIfApproved(doc, actor, "baseline edit");
     if (!ready.ok) return ready;
     const mutation = mutate(ready.value);
@@ -967,7 +904,10 @@ export class RuleService {
       const issue = shape.error.issues[0];
       return err(validationError(issue ? `extra.${issue.path.join(".")}` : "extra", issue ? issue.message : "invalid baseline extra"));
     }
-    return this.commit(ready.value, mutation.value.extra, ready.value.status, actor, mutation.value.summary, mutation.value.details, scopeProof);
+    const committed = await this.commit(ready.value, mutation.value.extra, ready.value.status, actor, mutation.value.summary, mutation.value.details);
+    if (!committed.ok) return committed;
+    const demoted = demotionOf(doc, ready.value);
+    return ok({ doc: committed.value, ...(demoted !== undefined ? { demoted } : {}) });
   }
 
   /** Re-read → mutate → commit, re-applying on STALE_VERSION up to {@link MAX_CAS_REAPPLIES} times. */
@@ -976,15 +916,14 @@ export class RuleService {
     by: string | undefined,
     mutate: (doc: DocRecord) => Mutation,
     keepsApproval = false,
-    scopeProof?: readonly DocRecord[],
   ): Promise<Result<DocRecord, LoreError>> {
     const actor = this.resolveActor(by);
     let lastStale: LoreError | undefined;
     for (let attempt = 0; attempt <= MAX_CAS_REAPPLIES; attempt += 1) {
       const fresh = await this.readLeaf(docId);
       if (!fresh.ok) return fresh;
-      const written = await this.writeLeafExtra(fresh.value, actor, mutate, keepsApproval, scopeProof);
-      if (written.ok) return written;
+      const written = await this.writeLeafExtra(fresh.value, actor, mutate, keepsApproval);
+      if (written.ok) return ok(written.value.doc);
       if (written.error.code !== "STALE_VERSION") return written;
       lastStale = written.error;
     }

@@ -1,4 +1,5 @@
 // @spawns packages/lore/src/index.ts
+// @reads assets/project/reference-transaction
 /**
  * RED — unattested writes are kept, never refused, never guessed
  * (spec-run-identity-slice-1-harness-attested-runs-attested D7 / D11; rules BR-1035, BR-1030, BR-1033).
@@ -33,13 +34,14 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 const setDefaultTimeout = (ms: number): void => { vi.setConfig({ testTimeout: ms, hookTimeout: ms }); };
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir, userInfo } from "node:os";
 import { join } from "node:path";
 import type { AuditEntry, VersionRecord } from "@lore/core";
 import { SQLiteStore } from "../../../src/store/sqlite-store.js";
 import { loosenOverrideClasses } from "../fixtures/autonomy-override-helpers.js";
 import { actedStore } from "../../live-invocation.js";
+import { installShippedGuard } from "../support/main-guard-repo.js";
 
 setDefaultTimeout(300_000);
 
@@ -232,10 +234,17 @@ describe("AC-RID-8: --harness-run naming an unregistered run id", () => {
     // `evidence --result pass` refuses a claim with no recorded worktree and a worktree with uncommitted changes,
     // so the claim names the fixture repo and the two fixture test files are committed first.
     // The corpus (.lore/) and the fake HOME state (Library/) live inside the fixture repo; ignore them.
-    writeFileSync(join(dir, ".gitignore"), ".lore/\nLibrary/\n");
+    writeFileSync(join(dir, ".gitignore"), ".lore/\nLibrary/\n.claude/\n");
+    appendFileSync(join(dir, ".lore", "config.yaml"), 'workflow:\n  integrate:\n    floor_command: "true"\n', "utf8");
     execFileSync("git", ["add", ".gitignore", "red.fixture.test.ts", "green.fixture.test.ts"], { cwd: dir });
     execFileSync("git", ["commit", "-q", "-m", "fixture tests"], { cwd: dir });
-    mustLore(["claim", t6, "--worktree", dir], dir, NAME_ENV);
+    // `lore done` needs the landing `lore integrate` records (BR-1291): the task's branch holds nothing past main, so
+    // integrate finds it already integrated and records the landing on its claimant
+    execFileSync("git", ["branch", "unattested-branch", "main"], { cwd: dir });
+    mustLore(["claim", t6, "--worktree", "unattested-branch"], dir, NAME_ENV);
+    execFileSync("git", ["checkout", "-q", "--detach", "main"], { cwd: dir }); // the shared checkout is a detached view of main
+    installShippedGuard(dir, join(dir, ".git", "guard-hooks")); // integrate refuses to run without the guard (BR-1273)
+    mustLore(["integrate", "unattested-branch", "--session", "unattested-session"], dir, NAME_ENV);
     mustLore(["evidence", t6, "--oracle", "test", "--command", "bun test ./red.fixture.test.ts 2>&1", "--result", "expected-fail", "--capture"], dir, NAME_ENV);
     mustLore(["evidence", t6, "--oracle", "test", "--command", "bun test ./green.fixture.test.ts 2>&1", "--result", "pass", "--capture"], dir, NAME_ENV);
     const r = lore(["--harness-run", GHOST_A, "done", t6], dir, NAME_ENV);

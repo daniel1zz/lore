@@ -123,7 +123,7 @@ describe("decision detail chain", () => {
     const path = join(dir, "lore.db");
     try {
       legacyDb(path);
-      const store = actedStore(new SQLiteStore(path));
+      const store = actedStore(new SQLiteStore(path, { migrate: true }));
       try {
         const rows = await store.listDecisionLog();
         expect(rows.ok).toBe(true);

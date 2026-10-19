@@ -30,8 +30,8 @@ const REFUSALS: Refusal[] = [
   { name: "an empty array", content: "[]", mention: "at least one row" },
   { name: "a row that is not an object", content: JSON.stringify(["a#b#c"]), mention: "row 1" },
   { name: "a row without a site", content: JSON.stringify([{ rules: ["BR-1"] }]), mention: "row 1" },
-  { name: "a row with neither rules nor nonBusiness", content: JSON.stringify([{ site: "a#b#c" }]), mention: "exactly one of" },
-  { name: "a row with both rules and nonBusiness", content: JSON.stringify([{ site: "a#b#c", rules: ["BR-1"], nonBusiness: "x" }]), mention: "exactly one of" },
+  { name: "a row without rules", content: JSON.stringify([{ site: "a#b#c" }]), mention: "BR-655" },
+  { name: "a row with a key other than site and rules", content: JSON.stringify([{ site: "a#b#c", rules: ["BR-1"], reason: "x" }]), mention: "unknown key 'reason'" },
   { name: "a duplicate site key", content: JSON.stringify([{ site: "dup#f#1", rules: ["BR-1"] }, { site: "ok#f#2", rules: ["BR-1"] }, { site: "dup#f#1", rules: ["BR-1"] }]), mention: "dup#f#1" },
 ];
 

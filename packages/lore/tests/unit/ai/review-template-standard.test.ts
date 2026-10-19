@@ -11,7 +11,7 @@ import { describe, it, expect } from "vitest";
 import { REVIEW_TEMPLATES, REVIEW_PROMPT_VERSION } from "../../../src/ai/review-template.js";
 import type { DocRecord, ReviewBundle, CheckResult } from "@lore/core";
 
-const BUDGETS = { max_doc_chars: 8000, max_context_chars: 4000 };
+const BUDGETS = { max_context_chars: 4000 };
 const NOW = "2026-02-01T00:00:00.000Z";
 const CHECKS: CheckResult[] = [{ check: "schema", outcome: "pass" }];
 // The ACTIVE version must carry the four parts (AC-BLC-5); v2 is frozen and tested separately below.
@@ -114,11 +114,12 @@ describe("AC-BLC-5 — prompt version freeze", () => {
   const frozenV2 = REVIEW_TEMPLATES["v2"]!;
   const v3 = REVIEW_TEMPLATES["v3"]!;
 
-  it("STATE: the active version is v5", () => {
-    expect(REVIEW_PROMPT_VERSION).toBe("v5");
+  it("STATE: the active version is a registered template, at or after v5", () => {
+    expect(typeof REVIEW_TEMPLATES[REVIEW_PROMPT_VERSION]).toBe("function");
+    expect(Number(REVIEW_PROMPT_VERSION.slice(1))).toBeGreaterThanOrEqual(5);
   });
 
-  it("REGRESSION: v2 output for a standard node is byte-identical to its pre-fix render (no four parts)", () => {
+  it("REGRESSION: v2 output for a standard node is byte-identical to its pre-fix render (no four parts, no examples line)", () => {
     const bundle = standardNode([standardRule(1)]);
     const out = frozenV2(bundle, CHECKS, BUDGETS, NOW).prompt;
     // Pre-fix block: the rule line is the last entry line before the closing fence.
@@ -137,6 +138,15 @@ describe("AC-BLC-5 — prompt version freeze", () => {
     expect(v3Out).toContain("current_reality: REALITY-1-x");
     const stripped = v3Out.replace(/\n {2}(current_reality|target_rule|current_exceptions|migration): [^\n]*/g, "");
     expect(stripped).toBe(v2Out);
+  });
+
+  it("HAPPY: v6 equals v5 for a standard node plus exactly the rules' examples lines (D9, BR-960); v5 shows none", () => {
+    const bundle = standardNode([standardRule(1)]);
+    const v5Out = REVIEW_TEMPLATES["v5"]!(bundle, CHECKS, BUDGETS, NOW).prompt;
+    const v6Out = REVIEW_TEMPLATES["v6"]!(bundle, CHECKS, BUDGETS, NOW).prompt;
+    expect(v5Out).not.toContain("examples:");
+    expect(v6Out).toContain("\n  examples: e");
+    expect(v6Out.replace(/\n {2}examples: [^\n]*/g, "")).toBe(v5Out);
   });
 
   it("REGRESSION: v2 and v3 are byte-identical for a business leaf", () => {

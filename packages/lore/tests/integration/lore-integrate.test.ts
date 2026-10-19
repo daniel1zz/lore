@@ -28,10 +28,12 @@
  *   (1) a conflicting branch: exit 4 naming the paths, main/branch/every worktree unchanged, lands after main is
  *       merged into the branch;
  *   (2) the reference-transaction hook installed by `lore setup --project` refuses update-ref and a commit on main
- *       outside integrate, and setup refuses git < 2.28 naming the version;
+ *       outside integrate, and setup refuses git < 2.46 naming the version;
  *   (3) `lore integrate origin/main` fetches from a bare remote and advances main by the same CAS;
- *   (4) the shared checkout on a dirty main is detached at the same commit with every edit byte-identical; a checkout
- *       that cannot be detached, or any other worktree holding main, exits 4 naming it before anything moves.
+ *   (4) retired: the integrate-time worktree scan and shared-checkout detach no longer exist; the guard refuses a
+ *       checkout of main at checkout time (main-checkout-guard.test.ts), setup detaches existing ones
+ *       (setup-project-detaches-main.test.ts) and integrate requires the guard (lore-integrate-requires-guard.test.ts).
+ * Every Fixture here installs the shipped guard (integrate refuses to run without it, BR-1273).
  *
  * AC-INT-3 (a session's test run never sees another session's edits, and the shipped workflow says so):
  *   (1) `bun run test:file` in session A's worktree exits 0 while process B edits a tracked file in the shared checkout;
@@ -41,10 +43,12 @@
  * @spec_ref AC-INT-1, AC-INT-2, AC-INT-3
  */
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { claimBranchTask } from "../helpers/claim-branch-task.js";
 import { spawn, spawnSync } from "node:child_process";
 import { appendFileSync, chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { installShippedGuard } from "./support/main-guard-repo.js";
 
 const PACKAGE_ROOT = new URL("../../", import.meta.url).pathname.replace(/\/$/, "");
 const INDEX_TS = join(PACKAGE_ROOT, "src", "index.ts");
@@ -73,7 +77,8 @@ while (readdirSync(dir).length < Number(count)) {
 const MOVER_MJS = `
 import { spawnSync } from "node:child_process";
 const repo = process.argv[2];
-const git = (...a) => { const r = spawnSync("git", a, { cwd: repo, encoding: "utf8" }); if (r.status !== 0) { console.error(r.stderr); process.exit(8); } return r.stdout.trim(); };
+// the mover stands for a peer integration: its CAS carries the marker, as lore integrate's own does
+const git = (...a) => { const r = spawnSync("git", a, { cwd: repo, encoding: "utf8", env: { ...process.env, LORE_INTEGRATE: "1" } }); if (r.status !== 0) { console.error(r.stderr); process.exit(8); } return r.stdout.trim(); };
 const main = git("rev-parse", "refs/heads/main");
 const tree = git("rev-parse", main + "^{tree}");
 const peer = git("commit-tree", tree, "-p", main, "-m", "peer integration " + Date.now() + "-" + process.pid);
@@ -88,7 +93,8 @@ class Fixture {
   readonly repo: string;
   private branchSeq = 0;
 
-  constructor(floorCommand: string | null, opts: { readonly detached?: boolean } = {}) {
+  /** `guard: false` leaves the repo without the main-ref guard (a test that must commit on main from the shared checkout). */
+  constructor(floorCommand: string | null, opts: { readonly detached?: boolean; readonly guard?: boolean } = {}) {
     repoSeq += 1;
     this.repo = join(root, `repo-${repoSeq}`);
     mkdirSync(this.repo, { recursive: true });
@@ -104,6 +110,8 @@ class Fixture {
     appendFileSync(join(this.repo, ".git", "info", "exclude"), ".lore/\n.claude/\n");
     // the shared checkout is a read-only view of main from here on (detached), as `lore integrate` leaves it
     if (opts.detached !== false) this.git(["checkout", "-q", "--detach", "main"]);
+    // integrate refuses to run without the shipped guard (BR-1273); outside the work tree so `git add` never sees it
+    if (opts.guard !== false) installShippedGuard(this.repo, `${this.repo}-guard-hooks`);
     if (floorCommand !== null) this.setFloor(floorCommand);
   }
 
@@ -185,6 +193,18 @@ class Fixture {
     return name;
   }
 
+  private readonly branchesWithTask = new Set<string>();
+
+  /** BR-1348: `lore integrate` refuses a branch no task belongs to, so the first integrate of a branch claims a task on it. */
+  private ensureTask(branch: string): void {
+    if (this.branchesWithTask.has(branch)) return;
+    this.branchesWithTask.add(branch);
+    claimBranchTask((args) => {
+      const r = spawnSync("bun", ["run", INDEX_TS, ...args], { cwd: this.repo, env: this.env("claim"), encoding: "utf8" });
+      return { status: r.status ?? 1, out: `${r.stdout}${r.stderr}` };
+    }, this.repo, branch);
+  }
+
   main(): string {
     return this.git(["rev-parse", "refs/heads/main"]);
   }
@@ -211,6 +231,7 @@ class Fixture {
   }
 
   integrate(branch: string, session: string, extra: string[] = [], cwd: string = this.repo): Promise<RunResult> {
+    this.ensureTask(branch);
     return this.lore(["integrate", branch, "--session", session, ...extra], session, cwd);
   }
 
@@ -328,7 +349,8 @@ describe("AC-INT-1 (3) a crash after the CAS", () => {
     const wt = join(root, "crash-wt");
     fx.git(["worktree", "add", "-q", "--detach", wt, "main"]);
     fx.git(["merge", "-q", "--no-ff", "-m", `merge(${branch}): done before the crash`, branch], wt);
-    fx.git(["update-ref", "refs/heads/main", fx.git(["rev-parse", "HEAD"], wt), fx.main()]);
+    // what the killed run's CAS did, marker included
+    expect(fx.gitRaw(["update-ref", "refs/heads/main", fx.git(["rev-parse", "HEAD"], wt), fx.main()], fx.repo, { LORE_INTEGRATE: "1" }).status).toBe(0);
     mkdirSync(join(fx.repo, ".lore", "integrate-losses"), { recursive: true });
     writeFileSync(
       join(fx.repo, ".lore", "integrate-losses", `${encodeURIComponent(branch)}.json`),
@@ -524,8 +546,10 @@ describe("AC-INT-2 (2) the main-ref hook installed by lore setup", () => {
     expect(forced.out).toContain("ref updates aborted by hook");
     expect(fx.main()).toBe(before);
 
-    // a commit on branch main made outside integrate is refused
-    fx.git(["checkout", "-q", "main"]);
+    // a commit on branch main made outside integrate is refused (checking main out takes the marker bypass: the guard
+    // refuses that checkout itself, see main-checkout-guard.test.ts)
+    expect(fx.gitRaw(["checkout", "-q", "main"]).status).toBe(128);
+    expect(fx.gitRaw(["checkout", "-q", "main"], fx.repo, { LORE_INTEGRATE: "1" }).status).toBe(0);
     writeFileSync(join(fx.repo, "stray.txt"), "stray\n");
     fx.git(["add", "stray.txt"]);
     const commit = fx.gitRaw(["commit", "-q", "-m", "stray commit on main"]);
@@ -545,7 +569,7 @@ describe("AC-INT-2 (2) the main-ref hook installed by lore setup", () => {
     expect(fx.isAncestorOfMain(fx.git(["rev-parse", branch]))).toBe(true);
   }, 180_000);
 
-  it("AC-INT-2 git older than 2.28 makes lore setup refuse loudly naming the version, installing nothing", () => {
+  it("AC-INT-2 git older than 2.46 makes lore setup refuse loudly naming the version, installing nothing", () => {
     const fx = new Fixture("true");
     const shim = join(root, `old-git-${repoSeq}`);
     mkdirSync(shim, { recursive: true });
@@ -558,7 +582,7 @@ describe("AC-INT-2 (2) the main-ref hook installed by lore setup", () => {
 
     expect(setup.exitCode, setup.out).not.toBe(0);
     expect(setup.out).toContain("2.20.1");
-    expect(setup.out).toContain("2.28");
+    expect(setup.out).toContain("2.46");
     expect(existsSync(join(fx.repo, "hooks", "reference-transaction"))).toBe(false);
     expect(fx.gitRaw(["config", "--local", "core.hooksPath"]).out).toBe(hooksPathBefore);
   }, 120_000);
@@ -575,7 +599,9 @@ describe("INT-T8 the main-ref hook runs in a consumer's linked worktree when hoo
     const before = fx.main();
 
     const wtMain = join(root, `wt-main-${repoSeq}`);
-    fx.git(["worktree", "add", "-q", wtMain, "main"]);
+    // the guard refuses `worktree add <p> main`; the marker bypass builds the hazard this test needs
+    expect(fx.gitRaw(["worktree", "add", "-q", join(root, `wt-refused-${repoSeq}`), "main"]).status).toBe(128);
+    expect(fx.gitRaw(["worktree", "add", "-q", wtMain, "main"], fx.repo, { LORE_INTEGRATE: "1" }).status).toBe(0);
     expect(existsSync(join(wtMain, "hooks"))).toBe(false);
     writeFileSync(join(wtMain, "stray.txt"), "stray\n");
     fx.git(["add", "stray.txt"], wtMain);
@@ -652,82 +678,6 @@ describe("AC-INT-2 (3) integrate origin/main", () => {
     expect(fx.git(["rev-parse", "main^1"])).toBe(localMain);
     expect(fx.git(["rev-parse", "main^2"])).toBe(remoteTip);
     expect(readFileSync(floorLog, "utf8").split("\n").filter((l) => l !== "")).toHaveLength(floorRunsBefore + 1);
-  }, 120_000);
-});
-
-describe("AC-INT-2 (4) the shared checkout and other worktrees on main", () => {
-  /** A repo whose shared checkout is on branch main, plus a branch with one commit living in its own worktree. */
-  function sharedOnMain(): { fx: Fixture; branch: string } {
-    const fx = new Fixture("true", { detached: false });
-    const wt = join(root, `feat-wt-${repoSeq}`);
-    fx.git(["worktree", "add", "-q", "-b", "feat", wt, "main"]);
-    writeFileSync(join(wt, "feat.txt"), "feature\n");
-    fx.git(["add", "feat.txt"], wt);
-    fx.git(["commit", "-q", "-m", "feature work"], wt);
-    return { fx, branch: "feat" };
-  }
-
-  it("AC-INT-2 the first integrate detaches a dirty shared checkout at the same commit; every edit stays byte-identical", async () => {
-    const { fx, branch } = sharedOnMain();
-    writeFileSync(join(fx.repo, "base.txt"), "base\nedited by a human\n");
-    writeFileSync(join(fx.repo, "untracked.txt"), "never committed\n");
-    writeFileSync(join(fx.repo, "staged.txt"), "staged\n");
-    fx.git(["add", "staged.txt"]);
-    const files =["base.txt", "untracked.txt", "staged.txt"];
-    const filesBefore = files.map((f) => readFileSync(join(fx.repo, f)));
-    const statusBefore = fx.git(["status", "--porcelain=v1"]);
-    expect(fx.git(["symbolic-ref", "-q", "HEAD"])).toBe("refs/heads/main");
-
-    const r = await fx.integrate(branch, "sess-det");
-
-    expect(r.exitCode, r.out).toBe(0);
-    expect(fx.gitStatus(["symbolic-ref", "-q", "HEAD"])).not.toBe(0); // detached now
-    expect(fx.git(["rev-parse", "HEAD"])).toBe(fx.main()); // the view follows the landed main (INT-T6); the edits survive it
-    expect(files.map((f) => readFileSync(join(fx.repo, f)))).toEqual(filesBefore);
-    expect(fx.git(["status", "--porcelain=v1"])).toBe(statusBefore);
-    expect(fx.isAncestorOfMain(fx.git(["rev-parse", branch]))).toBe(true);
-  }, 120_000);
-
-  it("AC-INT-2 a shared checkout that cannot be detached (merge in progress) exits 4 naming it before anything moves", async () => {
-    const { fx, branch } = sharedOnMain();
-    fx.git(["checkout", "-q", "-b", "side", "main"]);
-    writeFileSync(join(fx.repo, "base.txt"), "side\n");
-    fx.git(["commit", "-q", "-am", "side edit"]);
-    fx.git(["checkout", "-q", "main"]);
-    writeFileSync(join(fx.repo, "base.txt"), "main\n");
-    fx.git(["commit", "-q", "-am", "main edit"]);
-    expect(fx.gitStatus(["merge", "-q", "side"])).not.toBe(0);
-    expect(fx.gitStatus(["rev-parse", "-q", "--verify", "MERGE_HEAD"])).toBe(0);
-    const before = fx.snapshot();
-    const worktreesBefore = fx.worktreePaths();
-
-    const r = await fx.integrate(branch, "sess-det2");
-
-    expect(r.exitCode, r.out).toBe(4);
-    expect(r.out).toContain(realpathSync(fx.repo));
-    expect(r.out).toMatch(/merge/i);
-    expect(fx.snapshot()).toEqual(before);
-    expect(fx.worktreePaths()).toEqual(worktreesBefore); // no integration worktree was created
-    expect(fx.gitStatus(["rev-parse", "-q", "--verify", "MERGE_HEAD"])).toBe(0);
-  }, 120_000);
-
-  it("AC-INT-2 any worktree other than the shared checkout holding main exits 4 naming it; once it leaves main the branch lands", async () => {
-    const fx = new Fixture("true");
-    const branch = fx.makeBranch("hazard");
-    const other = join(root, `holds-main-${repoSeq}`);
-    fx.git(["worktree", "add", "-q", other, "main"]);
-    const before = fx.snapshot();
-
-    const r = await fx.integrate(branch, "sess-haz");
-
-    expect(r.exitCode, r.out).toBe(4);
-    expect(r.out).toContain(realpathSync(other));
-    expect(fx.snapshot()).toEqual(before);
-
-    fx.git(["checkout", "-q", "--detach", "main"], other);
-    const landed = await fx.integrate(branch, "sess-haz");
-    expect(landed.exitCode, landed.out).toBe(0);
-    expect(fx.isAncestorOfMain(fx.git(["rev-parse", branch]))).toBe(true);
   }, 120_000);
 });
 
@@ -830,7 +780,7 @@ function listFilesRecursive(dir: string): string[] {
 
 describe("AC-INT-3 (1) a test run in a session worktree never sees an edit in the shared checkout", () => {
   it("AC-INT-3 bun run test:file in session A's worktree exits 0 while process B edits a tracked file in the shared checkout", async () => {
-    const fx = new Fixture("true", { detached: false });
+    const fx = new Fixture("true", { detached: false, guard: false }); // commits on main from the shared checkout
     writeFileSync(join(fx.repo, "tracked.txt"), "committed\n");
     writeFileSync(join(fx.repo, "check.mjs"), TEST_FILE_SCRIPT);
     writeFileSync(join(fx.repo, "package.json"), JSON.stringify({ name: "fixture", private: true, scripts: { "test:file": "node check.mjs" } }));

@@ -33,7 +33,7 @@ export interface MiniCorpus {
   writeSource(rel: string, content: string): void;
   /** Census site keys of a registry command (`lore baseline sites <command> --json`). */
   sitesOf(command: string): Promise<string[]>;
-  /** Account for one site on a leaf with a `non-business` justification. */
+  /** Map one site to the leaf's own rule (a site map takes BR-n ids only; leaves A and B each carry one rule from build time). */
   mapSite(leaf: string, siteKey: string): Promise<void>;
   /** Account for every census site of `command` on `leaf`. */
   mapAllSites(leaf: string, command: string): Promise<void>;
@@ -93,6 +93,14 @@ export async function buildMiniCorpus(): Promise<MiniCorpus> {
   const branch = slugOf(await must(["baseline", "add", root, "--node", "branch", "--label", "br", "--title", "BCR Branch"]));
   const leafA = slugOf(await must(["baseline", "add", branch, "--node", "leaf", "--label", "la", "--title", "BCR Leaf A"]));
   const leafB = slugOf(await must(["baseline", "add", branch, "--node", "leaf", "--label", "lb", "--title", "BCR Leaf B"]));
+  const ruleArgs = ["--confidence", "established", "--enforced-by", "guaranteed", "--example", "fixture example"];
+  const ruleOf = new Map<string, string>();
+  for (const leaf of [leafA, leafB]) {
+    const out = await must(["rule", "add", leaf, "--statement", `Fixture rule of ${leaf} holds`, ...ruleArgs]);
+    const id = out.match(/BR-\d+/)?.[0];
+    if (id === undefined) throw new Error(`no rule id in: ${out}`);
+    ruleOf.set(leaf, id);
+  }
   await must(["baseline", "map", leafA, "--command", "alpha"]);
   await must(["baseline", "map", leafB, "--command", "beta"]);
   const sitesOf = async (command: string): Promise<string[]> => {
@@ -100,7 +108,9 @@ export async function buildMiniCorpus(): Promise<MiniCorpus> {
     return parsed.data.sites.map((s) => s.key);
   };
   const mapSite = async (leaf: string, siteKey: string): Promise<void> => {
-    await must(["baseline", "map", leaf, "--site", siteKey, "--non-business", "fixture site, accounted for"]);
+    const rule = ruleOf.get(leaf);
+    if (rule === undefined) throw new Error(`mapSite: leaf ${leaf} has no fixture rule; map the site with its own rule instead`);
+    await must(["baseline", "map", leaf, "--site", siteKey, "--rule", rule]);
   };
   return {
     dir,

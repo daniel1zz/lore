@@ -1,16 +1,17 @@
 // @spawns packages/lore/src/index.ts
+// @reads assets/project/reference-transaction
 /**
  * @spec_ref spec-defect-clusters-round-1-done-floors-judge-real-runs-on  AC-DCL-1 (cases a-h), D1;
  *   business rules BR-199, BR-212, BR-146; reports #171 #174 #188 #49 #51 + three local reports.
  *
  * Every route that archives a task (`lore done`, `lore set --status archived`, plan close) applies the same
  * floors; a floor counts only rows a runner produced (`lore verify` attestation or `--capture`), and only
- * work that has landed on main is archived. Each case asserts the EXACT exit code and the refusing rule's
+ * work whose landing `lore integrate` recorded is archived (BR-1291). Each case asserts the EXACT exit code and the refusing rule's
  * name (`[floor: <id>]` in the refusal text).
  *
  * Fixture (CLI subprocess `bun run src/index.ts`, throwaway git repo + corpus — never the repo's own `.lore/`).
  *
- * Coverage: (a) unmerged branch -> exit 4 / merged -> archives (NEGATIVE + HAPPY); (b) `set --status archived`
+ * Coverage: (a) unlanded branch -> exit 4 not-landed / landed through lore integrate -> archives (NEGATIVE + HAPPY); (b) `set --status archived`
  * with no attested pass -> the same refusal `done` gives (NEGATIVE + REGRESSION); (c) attested e2e pass satisfies a
  * test-file anchor (HAPPY) while a pass naming another file does not (NEGATIVE); (d) self-reported expected-fail
  * does not satisfy red-first, `--capture` does (NEGATIVE + HAPPY); (e) latest attested fail beats an earlier pass
@@ -25,6 +26,7 @@ import { execFileSync } from "child_process";
 import { join } from "path";
 import { tmpdir } from "os";
 import { FIXTURE_HOME_OUTSIDE_REPO, makeCleanTreeRepo } from "../helpers/clean-tree-repo.js";
+import { installShippedGuard } from "./support/main-guard-repo.js";
 
 interface RunResult {
   readonly stdout: string;
@@ -75,7 +77,17 @@ function statusOf(slug: string, cwd: string): string {
 function relaxPlanGates(dir: string): void {
   appendFileSync(
     join(dir, ".lore", "config.yaml"),
-    ["workflow:", "  gates:", '    "plan-close":', "      enabled: false", "  review:", "    judgment_required_types: []", ""].join("\n"),
+    [
+      "workflow:",
+      "  gates:",
+      '    "plan-close":',
+      "      enabled: false",
+      "  review:",
+      "    judgment_required_types: []",
+      "  integrate:",
+      '    floor_command: "true"',
+      "",
+    ].join("\n"),
     "utf8",
   );
 }
@@ -110,6 +122,7 @@ beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "lore-done-floors-landed-"));
   makeCleanTreeRepo(dir);
   mustRun(["init"], dir);
+  appendFileSync(join(dir, ".git", "info", "exclude"), ".claude/\n"); // `lore integrate` keeps its worktree there
   relaxPlanGates(dir);
   const prd = parseSlug(mustRun(["create", "prd", "--title", "Floors PRD", "--content", "root", "--no-ai"], dir));
   planSlug = parseSlug(mustRun(["create", "plan", "--title", "Floors Plan", "--parent", prd, "--content", "x", "--no-ai"], dir));
@@ -125,24 +138,26 @@ afterEach(() => {
 });
 
 describe("AC-DCL-1 (a) — lore done archives only landed work", () => {
-  it("(a) refuses with exit 4 [floor: unmerged-branch] naming the branch while it is unmerged, archives once merged", () => {
-    const task = createTask("Unmerged");
+  it("(a) refuses with exit 4 [floor: not-landed] naming the branch until lore integrate lands it, then archives", () => {
+    const task = createTask("Unlanded");
     git(["checkout", "-q", "-b", "feat-unmerged"], dir);
     writeFileSync(join(dir, "feature.txt"), "work\n");
     git(["add", "feature.txt"], dir);
     git(["commit", "-q", "-m", "feature work"], dir);
-    git(["checkout", "-q", "main"], dir);
+    git(["checkout", "-q", "--detach", "main"], dir);
+    installShippedGuard(dir, join(dir, ".git", "guard-hooks")); // integrate refuses to run without the guard (BR-1273)
     mustRun(["claim", task, "--worktree", "feat-unmerged"], dir);
     capturePass(task);
 
     const refused = runLore(["done", task], dir);
 
     expect(refused.exitCode).toBe(4);
-    expect(refused.text).toContain("[floor: unmerged-branch]");
+    expect(refused.text).toContain("[floor: not-landed]");
     expect(refused.text).toContain("feat-unmerged");
     expect(statusOf(task, dir)).not.toBe("archived");
 
-    git(["merge", "-q", "--no-ff", "-m", "land feature", "feat-unmerged"], dir);
+    // a hand merge records no landing: the branch's content on main is not what `lore done` reads (BR-1291)
+    mustRun(["integrate", "feat-unmerged", "--session", "done-floors-session"], dir);
     const landed = runLore(["done", task], dir);
 
     expect(landed.exitCode).toBe(0);

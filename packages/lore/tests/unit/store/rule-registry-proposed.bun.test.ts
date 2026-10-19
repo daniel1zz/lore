@@ -187,7 +187,7 @@ runSuite({
   label: "SQLiteStore",
   create: () => {
     const { dir, path } = tmpDb("lore-proposed-sqlite-");
-    const store = actedStore(new SQLiteStore(path));
+    const store = actedStore(new SQLiteStore(path, { migrate: true }));
     return {
       store,
       cleanup: () => {
@@ -235,7 +235,7 @@ describe("migration-018 (SQLite)", () => {
 
   it("REGRESSION: upgrading a v17 file keeps every registry row and lands on user_version 22 (019 follows 018)", () => {
     const path = join(dir, "v17.db");
-    actedStore(new SQLiteStore(path)).close();
+    actedStore(new SQLiteStore(path, { migrate: true })).close();
     const raw = new Database(path);
     // Rebuild the pre-018 shape: migration-015's table (CHECK without 'proposed'), then a live row, then v17.
     raw.exec(MIGRATION_015_SQL);
@@ -245,7 +245,7 @@ describe("migration-018 (SQLite)", () => {
     raw.exec("PRAGMA user_version = 17");
     raw.close();
 
-    const upgraded = actedStore(new SQLiteStore(path));
+    const upgraded = actedStore(new SQLiteStore(path, { migrate: true }));
     const rows = upgraded.getDatabase().query("SELECT id, lifecycle FROM rule_registry ORDER BY n").all();
     expect(rows).toEqual([
       { id: "BR-1", lifecycle: "live" },

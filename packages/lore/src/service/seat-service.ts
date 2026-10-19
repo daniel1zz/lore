@@ -332,7 +332,7 @@ export class SeatService {
    * Order: worktree removal, then branch deletion.
    *
    * @param planIdOrSlug - The target plan's id or slug.
-   * @param opts - `{force?: boolean}` — bypasses the unmerged-branch refusal.
+   * @param opts - `{force?: boolean}` — bypasses the refusal of an unmerged branch.
    * @returns `ok(undefined)` on success; `err` naming the branch + `--force`
    *   escape when unmerged and not forced, `gate:seat-remove:not-found` when no
    *   seat is registered, or a wrapped `GitPort` failure naming its step.

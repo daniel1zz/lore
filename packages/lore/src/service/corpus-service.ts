@@ -84,6 +84,7 @@ import { ownProposedRules } from "./rule-changes.js";
 import type { RuleChangeLandingPort } from "./rule-landing-port.js";
 import { isParentlessType, isValidParentType, parentlessRefusalMessage, PARENT_TYPE_CONTRACT } from "@lore/core";
 import type {
+  CompanionDocWrite,
   ProposedRuleWrite,
   ProvenanceWriteExtras,
   RuleLeafPatch,
@@ -236,6 +237,14 @@ this corpus yet. Seed your own team-editable version with
  */
 function isUlid(input: string): boolean {
   return ULID_REGEX.test(input);
+}
+
+/**
+ * One line naming why the rule-change landing port refused, for the deprecation refusal: its own message when it
+ * carries one, else its error code.
+ */
+function describeLandingFailure(error: LoreError): string {
+  return "message" in error && typeof error.message === "string" ? error.message : error.code;
 }
 
 /**
@@ -837,12 +846,6 @@ export interface DocWriteRequest {
    */
   readonly foreignIntent?: boolean;
   /**
-   * Owner leaves of an owned-by-only site-map write (`RuleService.setSiteMap`): when `doc` itself is outside the
-   * caller's lease scope, a lease covering every one of these authorizes the write instead
-   * ({@link CorpusWriteAuthority.decide}). Absent = the target's own scope decides.
-   */
-  readonly scopeProof?: readonly DocRecord[];
-  /**
    * `"bump"` (default): the write is a new version of the doc — one `updateWithProvenance` transaction carrying the
    * version row. `"keep"`: a status move that is NOT a new version (a reject returning an in-review doc to draft keeps
    * its version, so a judgment recorded against it stays fresh): the doc update, then ONE audit row whose `version`
@@ -1212,7 +1215,6 @@ export class CorpusService {
   private async refuseIfForeignCorpusWrite<T>(
     intentDeclared = false,
     targets: readonly DocRecord[] = [],
-    scopeProof?: readonly DocRecord[],
   ): Promise<Result<T, LoreError> | undefined> {
     const verdict = checkForeignCorpusWrite(this.foreignCorpusWriteContext, intentDeclared);
     if (verdict.allowed) return undefined;
@@ -1221,7 +1223,7 @@ export class CorpusService {
     // authority's ONE `decide`, the same call the service-level authorization report makes, so a report and the write
     // it reports on cannot disagree. No armed authority ⇒ the plain refusal below.
     if (this.corpusWriteAuthority !== undefined) {
-      const decided = await this.corpusWriteAuthority.decide(targets, scopeProof);
+      const decided = await this.corpusWriteAuthority.decide(targets);
       return decided.ok ? undefined : err(decided.error);
     }
     return err(foreignCorpusWriteRefusalError(verdict));
@@ -1278,7 +1280,7 @@ export class CorpusService {
    *   (`gate:corpus-write:foreign-provenance`, `gate:record-edit`, `STALE_VERSION`, a store error).
    */
   async writeDoc(request: DocWriteRequest): Promise<Result<DocWriteOutcome, LoreError>> {
-    const refusal = await this.refuseIfForeignCorpusWrite<DocWriteOutcome>(request.foreignIntent === true, [request.doc], request.scopeProof);
+    const refusal = await this.refuseIfForeignCorpusWrite<DocWriteOutcome>(request.foreignIntent === true, [request.doc]);
     if (refusal !== undefined) return refusal;
     const { doc, patch } = request;
     if (patchedFieldsUnchanged(doc, patch)) return ok({ doc, written: false });
@@ -3715,6 +3717,56 @@ export class CorpusService {
       shouldAllocateOrdinalOnKindFlip = wasExemptKind && !isNowExemptKind;
     }
 
+    // BR-1307 - a spec moved to `deprecated` before its change set landed abandons it: its still-proposed ids become
+    // `retired` "never landed: <spec>". The retirements are PLANNED here (a read) and committed by the SAME
+    // `updateWithProvenance` transaction as the status write below, so the deprecation and the retirements both land
+    // or neither does: a plan that cannot be made, or a leaf that moved since it was read, refuses the deprecation
+    // with nothing written. reason: do not split this back into a second write - that is the half-done state
+    // (deprecated spec, ids still reserved, "re-run lore rule apply" to finish) this replaced.
+    let abandonmentWrites: CompanionDocWrite[] = [];
+    if (existing.type === "spec" && newStatus === "deprecated" && existing.status !== "deprecated" && this.ruleChangeLanding !== undefined) {
+      const abandonment = await this.ruleChangeLanding.planAbandonment(existing.slug, { by: resolvedActor });
+      if (!abandonment.ok) {
+        return err({
+          code: "VALIDATION_ERROR",
+          field: "rule_changes",
+          message:
+            `${existing.slug} was not deprecated: retiring its proposed rules failed (${describeLandingFailure(abandonment.error)}); ` +
+            `nothing was written`,
+          value: abandonment.error,
+        });
+      }
+      abandonmentWrites = abandonment.value.leaves.map((planned) => {
+        const leafVersion = planned.leaf.version + 1;
+        return {
+          id: planned.leaf.id,
+          patch: { extra: planned.extra, status: planned.status, version: leafVersion, updated_at: now },
+          opts: { expected_version: planned.leaf.version },
+          version: {
+            doc_id: planned.leaf.id,
+            version: leafVersion,
+            content: planned.leaf.content,
+            extra: planned.extra,
+            status: planned.status,
+            title: planned.leaf.title,
+            action: "update",
+            created_at: now,
+            created_by: resolvedActor,
+            change_summary: planned.summary,
+            slug: planned.leaf.slug,
+          },
+          audit: {
+            timestamp: now,
+            actor: resolvedActor,
+            session_id: planned.leaf.id,
+            action: "update",
+            doc_id: planned.leaf.id,
+            details: { ...planned.details, version: leafVersion, new_version: leafVersion },
+          },
+        };
+      });
+    }
+
     const updateResult = await this.store.updateWithProvenance(
       existing.id,
       docPatch,
@@ -3737,26 +3789,9 @@ export class CorpusService {
           ...(correction !== undefined ? { correction: { reason: correction.reason.trim() } } : {}),
         },
       },
+      abandonmentWrites.length > 0 ? { also_update: abandonmentWrites } : undefined,
     );
     if (!updateResult.ok) return updateResult;
-
-    // A spec moved to `deprecated` before its change set landed abandons it: its still-proposed ids become
-    // `retired` "never landed: <spec>" (spec-a-spec-carries-its-rule-changes-the-baseline-takes-them, Edge cases).
-    // After the status write, so a refused/stale deprecation never retires anything; `apply` on a deprecated spec
-    // is idempotent, so a failure here is repaired by re-running `lore rule apply <spec>` (named in the error).
-    if (existing.type === "spec" && newStatus === "deprecated" && existing.status !== "deprecated" && this.ruleChangeLanding !== undefined) {
-      const abandoned = await this.ruleChangeLanding.apply(existing.slug, { by: resolvedActor });
-      if (!abandoned.ok) {
-        return err({
-          code: "VALIDATION_ERROR",
-          field: "rule_changes",
-          message:
-            `${existing.slug} is now deprecated, but retiring its proposed rules failed (${abandoned.error.code}); ` +
-            `re-run \`lore rule apply ${existing.slug}\` to retire them`,
-          value: abandoned.error,
-        });
-      }
-    }
 
     // SPEC-103 §Mechanisms M1, §Design Decisions D4 — uniform edit-reset semantics:
     // an edit to an approved ledger doc (assessment/retro/handoff/uat) still applies

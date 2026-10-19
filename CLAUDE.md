@@ -25,7 +25,7 @@ The command table (name, command, description) is generated below from `package.
 
 ## Architecture
 
-Repo-wide invariants. The why, the layer stack, the service table and per-module facts are tier 2: module CLAUDE.md files and `knowledge-root-claude-md-tier-2-text-verbatim-body-before-the`.
+Repo-wide invariants. Current-state architecture (modules, layers, standards, decisions, debt): the architecture tree, `lore get baseline-lore-architecture` (current state `baseline-architecture-current-state`, standards `baseline-architecture-standards`). The why, the layer stack, the service table and per-module facts are also in module CLAUDE.md files and `knowledge-root-claude-md-tier-2-text-verbatim-body-before-the`.
 
 - **Result<T, LoreError>**: no exception crosses a service boundary; every service method returns `Promise<Result<…>>` built with `ok()` / `err()` from `@lore/core`.
 - Services depend on the async `StoreInterface`, never on a concrete store. ⛔ No silent fallback: a missing required input fails loud.

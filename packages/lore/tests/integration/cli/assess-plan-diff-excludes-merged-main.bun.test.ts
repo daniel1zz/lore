@@ -116,7 +116,7 @@ describe("assess plan diff excludes commits merged in from main", () => {
     expect(result.diff_text).toContain("src/own-feature.ts");
   });
 
-  it("AC-ERROR: a recorded head that does not exist falls back to the slug search with a warning", () => {
+  it("AC-ERROR: a recorded head that does not exist is not measured, with a warning", () => {
     const { base } = buildIntegrateHistory({ mergeMainTimes: 1 });
     const result = deriveCommitSetForPlan(
       repo,
@@ -126,16 +126,19 @@ describe("assess plan diff excludes commits merged in from main", () => {
     );
 
     expect(result.attribution["task-x"]).toBe("not_measured");
-    expect(result.warnings.join("\n")).toContain("falling back to the slug search");
+    expect(result.warnings.join("\n")).toContain("the task is not measured");
+    expect(result.tasks_not_measured).toEqual(["task-x"]);
     expect(result.excluded_merged_commit_count).toBe(0);
   });
 
-  it("AC-REGRESSION: the slug path diffs the landing merge against its first parent (the branch's own change only)", () => {
+  it("AC-REGRESSION: a task with no recorded range is not measured, even when a landing merge message names its slug", () => {
     buildIntegrateHistory({ mergeMainTimes: 1 });
     const result = deriveCommitSetForPlan(repo, ["task-branch"], true, new Map());
 
-    expect(result.attribution["task-branch"]).toBe("slug_match");
-    expect(result.diff_text).toContain("src/own-feature.ts");
-    expect(result.diff_text).not.toContain("docs/foreign-0.md");
+    // the history holds `merge(task-branch): land task`; nothing attributes the task by that message
+    expect(result.attribution["task-branch"]).toBe("not_measured");
+    expect(result.tasks_not_measured).toEqual(["task-branch"]);
+    expect(result.commits).toEqual([]);
+    expect(result.diff_text).not.toContain("src/own-feature.ts");
   });
 });

@@ -1,5 +1,7 @@
 # Module: eval
 
+Architecture card: `baseline-module-card-eval`
+
 ## Purpose
 
 Six read-only evaluation scenarios under `lore eval`, measuring corpus health and search quality. They are re-exported from `index.ts` and consumed by `lore eval`. Each scenario is pure-ish: input + App state → structured result; never mutates the corpus. Source: SPEC-013.

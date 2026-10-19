@@ -130,6 +130,12 @@
  *     sentence, or "no Purpose section"), counts the rest in one line, and says so when the walk was
  *     truncated. The managed sections carry the setup template's H2s (`## Module Index`, `## Finding
  *     Live Project State`; the command table adds none, `## Commands` is hand-written) so refresh never loses a required heading.
+ *   - Architecture-card links (task-module-claude-md-files-do-not-link-their-architecture-2): when the caller
+ *     injects `deps.moduleCards` (project scope, refresh only), refresh normalises the one
+ *     `Architecture card: \`<slug>\`` line of every module memory file the walk found — written for a module a card's
+ *     `Source:` line names, removed when no card maps to it. `--check` lists a file whose line is missing, stale or
+ *     dangling in `check.differing`, so `bun run check:memory-files` goes red. No cards -> no line and no error.
+ *     Only hard ceilings (`max_lines`/`max_bytes`) refuse a link write; the eviction floor is `status`'s to report.
  *   - Legacy `auto:module-index` / `auto:dynamic-context` blocks are replaced by the managed zone on the
  *     first init/refresh that sees them (`migrateLegacyAutoBlocks`), reported in `migratedLegacyBlocks`.
  *   - `opts.check` (refresh only) computes the same plan and writes nothing: `report.check` names every
@@ -142,9 +148,9 @@
  */
 
 import { createHash } from "node:crypto";
-import { err, ok, resolveContextConfig, resolveMemoryFileBudgets } from "@lore/core";
+import { applyArchitectureCardLine, err, ok, resolveContextConfig, resolveMemoryFileBudgets } from "@lore/core";
 import type { ContextConfigLayer, Fragment, FsWritePort, LoreError, MemoryFileBudgets, OutletId, Result } from "@lore/core";
-import { collectContextFacts, type ContextFacts } from "../service/context-facts.js";
+import { collectContextFacts, type ContextFacts, type ModuleCardRef } from "../service/context-facts.js";
 import { runMemoryFileChecks } from "../service/claude-md-admission.js";
 import { loadFragmentDocuments, prefetchReferenceProbe } from "../service/code-reference-index.js";
 import { migrateLegacyAutoBlocks, spliceManagedSections, type ManagedSection, type SpliceResult } from "../service/context-projection.js";
@@ -260,6 +266,13 @@ export interface ContextFlowDeps extends Partial<FragmentRefreshDeps> {
    * {@link resolveFlowBudgets}.
    */
   budgets?: MemoryFileBudgets;
+  /**
+   * The architecture module cards of the corpus (`extractModuleCardRefs`), resolved by the adapter because this
+   * flow holds no store. Present (even `[]`) -> refresh normalises the `Architecture card:` line of every module
+   * memory file: linked to its card, or the stale line removed when no card maps to it. Absent -> that pass is
+   * skipped (callers that never read the corpus, e.g. `lore setup --project`).
+   */
+  moduleCards?: readonly ModuleCardRef[];
 }
 
 /**
@@ -339,6 +352,18 @@ export interface ContextRefreshCheck {
   modulesWithoutMemoryFile: number | null;
 }
 
+/** What refresh did with the `Architecture card:` line of one module memory file. */
+export type ModuleCardLinkState = "linked" | "relinked" | "unlinked" | "unchanged";
+
+/** Per-module-file outcome of the architecture-card pass of one {@link runContextRefresh} call. */
+export interface ModuleCardLinkOutcome {
+  /** Port path of the module memory file. */
+  path: string;
+  /** The card slug the file now links to; `null` for an `unlinked` file. */
+  card: string | null;
+  state: ModuleCardLinkState;
+}
+
 /** Outcome of one {@link runContextRefresh} call. */
 export interface ContextRefreshReport {
   /** Path written: {@link CLAUDE_MD_PATH} (project scope) or the user rules dir `<home>/.claude/rules` (user scope). */
@@ -359,6 +384,8 @@ export interface ContextRefreshReport {
   rules: RulesFileOutcome[];
   /** One entry per lore skill folder considered (selected or pruned); empty without fragment deps. */
   skills: SkillDirOutcome[];
+  /** One entry per module memory file whose card link is, or was, managed; empty without `deps.moduleCards`. */
+  moduleCards: ModuleCardLinkOutcome[];
 }
 
 // ─── Rendering (facts -> ManagedSection[]) ──────────────────────────────────
@@ -821,6 +848,68 @@ async function planSkillDirs(
   return ok(actions);
 }
 
+// ─── Architecture-card links (module memory files) ──────────────────────────
+
+/** One planned rewrite of a module memory file's card-link line; `readBytes` is the CAS hash source. */
+interface ModuleCardAction {
+  outcome: ModuleCardLinkOutcome;
+  /** New bytes, or `null` when the file is already canonical. */
+  content: string | null;
+  readBytes: string;
+}
+
+/**
+ * Finding kinds that refuse a card-link write: only the HARD ceilings. ⛔ Not `eviction_required` — that floor fires
+ * while a file is still writable on purpose (`lore governance claude-md`), is reported by `lore status
+ * --check-claude-md`, and refusing here would make a module already past its floor impossible to link forever.
+ */
+const CARD_LINK_REFUSAL_KINDS: ReadonlySet<string> = new Set(["max_lines", "max_bytes"]);
+
+/**
+ * Plans (reads only) the `Architecture card:` line of every module memory file the walk found: linked to the
+ * card whose `Source:` directory is that module, or stripped when no card maps to it (a dangling link is never kept).
+ * A file with no card and no stale line is not reported. A rewrite that would breach the module ceiling is refused.
+ */
+async function planModuleCardLinks(
+  deps: ContextFlowDeps,
+  cards: readonly ModuleCardRef[],
+  facts: ContextFacts,
+  budgets: MemoryFileBudgets,
+): Promise<Result<ModuleCardAction[], LoreError>> {
+  const actions: ModuleCardAction[] = [];
+  for (const module of facts.memoryModules) {
+    const card = cards.find((candidate) => candidate.directory === module.path) ?? null;
+    const existing = await deps.fs.readFile(module.memoryFilePath);
+    if (existing === null) continue;
+    const next = applyArchitectureCardLine(existing, card?.slug ?? null);
+    if (next === existing) {
+      if (card !== null) actions.push({ outcome: { path: module.memoryFilePath, card: card.slug, state: "unchanged" }, content: null, readBytes: existing });
+      continue;
+    }
+    const probe = await prefetchReferenceProbe(deps.fs, [{ path: module.memoryFilePath, content: next }]);
+    const { deterministic } = runMemoryFileChecks([{ path: module.memoryFilePath, role: "module", content: next }], budgets, {
+      probe,
+      referenceDocuments: [],
+      docExists: () => true,
+    });
+    const breaches = deterministic.filter((finding) => CARD_LINK_REFUSAL_KINDS.has(finding.kind));
+    if (breaches.length > 0) {
+      return err({
+        code: "VALIDATION_ERROR",
+        field: "path",
+        message:
+          `refusing to write ${module.memoryFilePath} — the architecture card link would breach its module ceiling: ` +
+          breaches.map((finding) => `[${finding.kind}] ${finding.message}`).join("; "),
+        value: module.memoryFilePath,
+      });
+    }
+    const hadLine = existing.includes("\nArchitecture card: ") || existing.startsWith("Architecture card: ");
+    const state: ModuleCardLinkState = card === null ? "unlinked" : hadLine ? "relinked" : "linked";
+    actions.push({ outcome: { path: module.memoryFilePath, card: card?.slug ?? null, state }, content: next, readBytes: existing });
+  }
+  return ok(actions);
+}
+
 // ─── runContextRefresh ───────────────────────────────────────────────────────
 
 /**
@@ -888,6 +977,7 @@ export async function runContextRefresh(
   const differing: string[] = [];
   let modulesWithoutMemoryFile: number | null = null;
   let claudeMdChanged = false;
+  let moduleCardActions: ModuleCardAction[] = [];
   if (scope === "project" && !rulesOnly) {
     const existing = await deps.fs.readFile(CLAUDE_MD_PATH);
     if (existing === null && checkMode) {
@@ -907,6 +997,16 @@ export async function runContextRefresh(
       const factsResult = await collectContextFacts(deps.fs, root, budgets);
       if (!factsResult.ok) return factsResult;
       modulesWithoutMemoryFile = factsResult.value.modulesWithoutMemoryFile;
+
+      // Architecture-card links: every module memory file names its card (or loses a stale line).
+      if (deps.moduleCards !== undefined) {
+        const plannedLinks = await planModuleCardLinks(deps, deps.moduleCards, factsResult.value, budgets);
+        if (!plannedLinks.ok) return plannedLinks;
+        moduleCardActions = plannedLinks.value;
+        for (const action of moduleCardActions) {
+          if (action.content !== null) differing.push(action.outcome.path);
+        }
+      }
 
       const spliceResult = spliceManagedSections(migration.content, renderContextSections(factsResult.value));
       if (!spliceResult.ok) return spliceResult;
@@ -967,6 +1067,7 @@ export async function runContextRefresh(
     skillActions = plannedSkills.value;
   }
   const actions: RulesAction[] = [...ruleActions, ...skillActions];
+  const moduleCardOutcomes = moduleCardActions.map((action) => action.outcome);
 
   // ── --check: report what a refresh would change; no CAS, no write ──
   if (checkMode) {
@@ -981,6 +1082,7 @@ export async function runContextRefresh(
       check: { differing, findings: checkFindings, modulesWithoutMemoryFile },
       rules: ruleActions.map((action) => action.outcome),
       skills: skillActions.map((action) => action.outcome),
+      moduleCards: moduleCardOutcomes,
     });
   }
 
@@ -989,6 +1091,9 @@ export async function runContextRefresh(
   if (claudeMdWrite !== null) casTargets.push({ path: CLAUDE_MD_PATH, readBytes: claudeMdWrite.readBytes });
   for (const action of actions) {
     if (action.kind !== "none") casTargets.push({ path: action.outcome.path, readBytes: action.readBytes });
+  }
+  for (const action of moduleCardActions) {
+    if (action.content !== null) casTargets.push({ path: action.outcome.path, readBytes: action.readBytes });
   }
   for (const target of casTargets) {
     const beforeWrite = await deps.fs.readFile(target.path);
@@ -1003,6 +1108,11 @@ export async function runContextRefresh(
 
   if (claudeMdWrite !== null) {
     const written = await deps.fs.writeFile(CLAUDE_MD_PATH, claudeMdWrite.content);
+    if (!written.ok) return written;
+  }
+  for (const action of moduleCardActions) {
+    if (action.content === null) continue;
+    const written = await deps.fs.writeFile(action.outcome.path, action.content);
     if (!written.ok) return written;
   }
   const rulesWritten: string[] = []; // rules AND skill files: D16 lists every lore file written
@@ -1045,5 +1155,6 @@ export async function runContextRefresh(
     check: null,
     rules: ruleActions.map((action) => action.outcome),
     skills: skillActions.map((action) => action.outcome),
+    moduleCards: moduleCardOutcomes,
   });
 }

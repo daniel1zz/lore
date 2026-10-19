@@ -35,6 +35,7 @@ function baseReport(overrides: Partial<ProjectScaffoldReport> = {}): ProjectScaf
     gitignore: { status: "done", detail: ".gitignore" },
     claude_md: { status: "done", detail: "CLAUDE.md" },
     git_hooks_path: { status: "done", prior_value: null },
+    main_detached: { status: "skipped", detached: [] },
     manifest: { status: "done", detail: ".lore/.lore-project-manifest.json" },
     backups: [],
     ...overrides,

@@ -12,11 +12,10 @@
  *   - serializeCodeAnchor(parsed) — reconstructs the canonical `path[#Symbol]` string
  *   - normalizeCodeAnchorEntries(raw[]) — parse + serialize + dedupe a candidate list,
  *     preserving first-occurrence order (the RMW authoring transform, D6)
- *   - scanExportedSymbols(source) — lexical, line-anchored export scan (D3)
  *   - computeDrift(declared, probes) — classifies each declared anchor against
- *     already-collected probe results into one of six drift kinds (D2)
+ *     already-collected probe results into one of the drift kinds (D2)
  *   - ParsedCodeAnchor / DriftKind / DriftRow / DriftInputEntry / AnchorProbe /
- *     ComputeDriftResult — the public shapes above operate on
+ *     ExportedNames / ComputeDriftResult — the public shapes above operate on
  *
  * @invariant `parseCodeAnchor` runs on the FULL RAW anchor string, split on the LAST
  *   `#` — NEVER a batched `normalizeFileAnchors` call over a list of extracted path
@@ -42,14 +41,14 @@
  *   D3's `export default` form; others simply never match a real export and surface
  *   as `symbol_missing` — the tolerated false-positive direction, review S9). A
  *   directory anchor (trailing `/`) MUST NOT carry a `#Symbol` — loud reject.
- * @invariant `scanExportedSymbols` is deliberately lexical, not a real parser — see
- *   the D3 form list in this module's JSDoc on the function itself. It does not
- *   understand `export * from`, `module.exports`, re-export chains, `export type
- *   { X }` (type-only brace lists), or destructured exports (`export const {a, b} =
- *   obj`) — all documented false-positive sources (the doc still exists, the symbol
- *   still exists, but the anchor reports `symbol_missing`). This trades false
- *   positives for a guaranteed absence of false negatives (G11) — a real export the
- *   scanner CAN parse is never missed.
+ * @invariant Exported names are DECIDED BY A PARSE, never by a text scan (BR-417):
+ *   the reader that fills `AnchorProbe.exported` (`packages/lore/src/service/
+ *   export-reader.ts`, TypeScript compiler API) lives outside this browser-safe
+ *   package and arrives through the `FsProbe.readExportedNames` port. A symbol
+ *   missing from a file whose names the reader could not fully see (unparseable
+ *   language, syntax error, unresolvable star re-export) is `probe_error` "not
+ *   measured" — `symbol_missing` only when the list is complete. ⛔ Do not add a
+ *   regex export scan back here: a text scan reports valid exports as missing.
  * @invariant `computeDrift`'s `consistent` is `true` ONLY when every declared anchor
  *   affirmatively verifies — any `probe_error`/`*_missing`/`node_type_mismatch`/
  *   `symbol_missing` row flips it `false`. A probe error is drift, never a silent
@@ -70,13 +69,17 @@
 
 import { err, ok } from "./errors.js";
 import type { Result, LoreError } from "./errors.js";
-import { normalizeFileAnchors } from "./file-anchors.js";
+import { FILE_ANCHOR_SYMBOL_RE, normalizeFileAnchors } from "./file-anchors.js";
 import type { DocType } from "./types.js";
 
 // ─── Grammar (D1) ───────────────────────────────────────────────────────────
 
-/** ASCII-only JS identifier grammar for a code anchor's `#Symbol` suffix (D1). */
-const CODE_ANCHOR_SYMBOL_RE = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
+/**
+ * ASCII-only JS identifier grammar for a code anchor's `#Symbol` suffix (D1). The ONE definition lives in
+ * `file-anchors.ts` (`FILE_ANCHOR_SYMBOL_RE`): a task's `path#Symbol` file anchor and a spec's code anchor must
+ * accept exactly the same symbol spellings.
+ */
+const CODE_ANCHOR_SYMBOL_RE = FILE_ANCHOR_SYMBOL_RE;
 
 /** A title anchor is legal only on a test file: `*.test.ts` (includes `*.bun.test.ts`). */
 const TEST_FILE_PATH_RE = /\.test\.ts$/;
@@ -286,75 +289,27 @@ export function normalizeCodeAnchorEntries(raw: string[]): Result<string[], Lore
   return ok(normalized);
 }
 
-// ─── Lexical Export Scan (D3) ───────────────────────────────────────────────
+// ─── Exported Names (BR-417) ────────────────────────────────────────────────
 
 /**
- * Lexical, line-anchored export scan (D3) — NOT a real parser (no TS compiler
- * API/LSP, no comment/string-literal awareness beyond line anchoring). Matches, at
- * the START of a line (leading whitespace/tabs allowed — a `// export const X`
- * comment or a `foo(); export const X` mid-line occurrence does NOT match, since
- * neither has `export` as the first non-whitespace token on its line):
- *
- *   - `export (const|let|var|function|async function|class|abstract class|type|
- *     interface|enum) X` — single-identifier forms
- *   - `export { A, B as C }` — brace lists, MAY span multiple lines; `as` alias
- *     exports the ALIAS (`C`, not `B`)
- *   - `export default` — matches anchor symbol `"default"` regardless of what
- *     follows (`export default function foo() {}` still yields `"default"`)
- *
- * Deliberately NOT matched (documented false-positive sources — the export may be
- * real, but this scanner cannot see it): `export * from`, `module.exports`,
- * re-export chains, `export type { X }` (type-only brace lists — the `type` keyword
- * between `export` and `{` breaks the brace-list pattern by construction), and
- * destructured exports (`export const {a, b} = obj` — the identifier-class pattern
- * requires a bare identifier immediately after the keyword, not a `{`).
- *
- * @param source - Full file text of the ONE anchored file.
- * @returns Every exported symbol name this scanner recognizes (deduplicated).
- *
- * @example
- * scanExportedSymbols("export const Foo = 1;\nexport { Bar as Baz };\n// export const Hidden = 1;");
- * // => Set(["Foo", "Baz"]) — "Hidden" is commented out, never matched
+ * What an export reader found in ONE file: the exported names, plus — when it could not see
+ * everything — why. `notMeasured` set means the name list may be INCOMPLETE (an unparseable
+ * language, a syntax error, a star re-export it could not follow): a name in `names` is still
+ * a verified export, but a name missing from `names` is NOT proven absent, so
+ * {@link computeDrift} reports it as a `probe_error` "not measured", never `symbol_missing`.
+ * The reader itself lives beside the filesystem port (`packages/lore`), because parsing needs
+ * the TypeScript compiler, which this browser-safe package never imports.
  */
-export function scanExportedSymbols(source: string): Set<string> {
-  const symbols = new Set<string>();
-
-  const singleRe =
-    /^[ \t]*export\s+(?:const|let|var|function|async\s+function|abstract\s+class|class|type|interface|enum)\s+([A-Za-z_$][A-Za-z0-9_$]*)/gm;
-  for (const match of source.matchAll(singleRe)) {
-    const name = match[1];
-    if (name !== undefined) symbols.add(name);
-  }
-
-  const defaultRe = /^[ \t]*export\s+default\b/m;
-  if (defaultRe.test(source)) symbols.add("default");
-
-  const braceRe = /^[ \t]*export\s*\{([\s\S]*?)\}/gm;
-  for (const match of source.matchAll(braceRe)) {
-    const body = match[1] ?? "";
-    for (const rawEntry of body.split(",")) {
-      const entry = rawEntry.trim();
-      if (entry.length === 0) continue;
-      const aliasMatch = entry.match(
-        /^([A-Za-z_$][A-Za-z0-9_$]*)\s+as\s+([A-Za-z_$][A-Za-z0-9_$]*)$/,
-      );
-      if (aliasMatch) {
-        const alias = aliasMatch[2];
-        if (alias !== undefined) symbols.add(alias);
-      } else if (/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(entry)) {
-        symbols.add(entry);
-      }
-      // else: malformed/unsupported brace-list entry (e.g. `type X`) — silently
-      // skipped, not this lexical scanner's job to validate syntax.
-    }
-  }
-
-  return symbols;
+export interface ExportedNames {
+  /** Every export name the reader positively found (`default` for a default export). */
+  names: ReadonlySet<string>;
+  /** Why the list may be incomplete; absent when the file was fully measured. */
+  notMeasured?: string;
 }
 
 /**
  * Lexical scan of the `describe`/`it`/`test` titles in a test file's source (issue
- * #178) — same spirit as {@link scanExportedSymbols}: not a parser. A `describe`/
+ * #178) — a text scan, not a parser (titles are string data, not exports). A `describe`/
  * `it`/`test` call (member forms such as `it.skip(` included) whose first argument is
  * a string literal (`"`, `'` or backtick) yields that literal, backslash escapes
  * collapsed. Computed titles and `${}` interpolations are not evaluated (documented
@@ -401,7 +356,7 @@ export function scanPackageScripts(source: string): Set<string> | undefined {
 
 // ─── Drift Classification (D2, D4) ──────────────────────────────────────────
 
-/** The six drift kinds `computeDrift` classifies a declared anchor into (D2). */
+/** The drift kinds a declared anchor is classified into (D2); `anchor_unreadable` is raised by the scan itself. */
 export const DRIFT_KINDS = [
   "file_missing",
   "dir_missing",
@@ -412,6 +367,9 @@ export const DRIFT_KINDS = [
   // A prose reference `bun run <name>` whose <name> is not in the governing
   // package.json `scripts` (spec-prose-about-code-is-bound-to-what-it-describes-one D1).
   "script_missing",
+  // A STORED anchor string the grammar rejects (hand-edited / imported / legacy row): never skipped, reported
+  // (baseline-detect-code-anchor-drift BR-416). Raised by the drift scan itself, not by `computeDrift`.
+  "anchor_unreadable",
 ] as const;
 
 /** Derived TypeScript type for a drift row's classification. */
@@ -451,6 +409,8 @@ export interface AnchorProbe {
   children?: string[];
   /** `FsProbe.readFile(path)` content, when collected (only meaningful for a file anchor with a symbol). */
   content?: string;
+  /** The export reader's answer for this file, when a symbol anchor needed it (BR-417); absent means no reader ran. */
+  exported?: ExportedNames;
   /** Set iff ANY probe call for this path threw or returned an unusable result (D4) — turns EVERY anchor on this path into a `probe_error` row. */
   error?: string;
 }
@@ -515,8 +475,11 @@ export interface ComputeDriftResult {
  *   6. `!isDir` and `stat === "file"`, no `symbol` → consistent (no row)
  *   7. `!isDir` and `stat === "file"`, `symbol` set, no `content` collected →
  *      `probe_error` (can't verify without content)
- *   8. `!isDir` and `stat === "file"`, `symbol` set, content collected: symbol not
- *      in `scanExportedSymbols(content)` → `symbol_missing`; else consistent
+ *   8. `!isDir` and `stat === "file"`, `symbol` set, export names collected
+ *      (`probe.exported`): symbol in the names → consistent; not in the names and the
+ *      reader marked them incomplete → `probe_error` "not measured"; not in the
+ *      names and complete → `symbol_missing`. No export names collected at all →
+ *      `probe_error` "not measured" (never a guess).
  *
  * @param declared - Every anchor declared across every scanned document (spec AND
  *   knowledge), each labeled with its owning doc's identity + type.
@@ -625,24 +588,33 @@ export function computeDrift(
       continue; // plain file anchor, exists — consistent.
     }
 
-    if (probe.content === undefined) {
+    if (probe.content === undefined || probe.exported === undefined) {
       drifts.push({
         ...docIdentityOf(entry),
         anchor: anchor.raw,
         kind: "probe_error",
-        detail: `file content unavailable to verify symbol "${anchor.symbol}"`,
+        detail: `not measured: exported names unavailable to verify symbol "${anchor.symbol}"`,
       });
       continue;
     }
 
-    const exported = scanExportedSymbols(probe.content);
-    if (!exported.has(anchor.symbol)) {
+    if (probe.exported.names.has(anchor.symbol)) continue;
+    if (probe.exported.notMeasured !== undefined) {
+      // reason: BR-417 — a name missing from an INCOMPLETE list is not proven absent; reporting it
+      // `symbol_missing` would be a guess in the false-alarm direction.
       drifts.push({
         ...docIdentityOf(entry),
         anchor: anchor.raw,
-        kind: "symbol_missing",
+        kind: "probe_error",
+        detail: `not measured: symbol "${anchor.symbol}" not found, and the file's exports are incomplete (${probe.exported.notMeasured})`,
       });
+      continue;
     }
+    drifts.push({
+      ...docIdentityOf(entry),
+      anchor: anchor.raw,
+      kind: "symbol_missing",
+    });
   }
 
   return { consistent: drifts.length === 0, drifts };

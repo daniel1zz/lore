@@ -1,3 +1,4 @@
+// @reads assets/project/reference-transaction
 /**
  * A task's commit range is a fact of its LANDING (`lore integrate`), not of its last claim.
  * Throwaway git repos + InMemoryStore only (never the repo's `.lore/`).
@@ -5,9 +6,9 @@
  *   AC-LAND-1 (a): claim on branch B, B landed through the real IntegrateService, the task re-claimed from a detached
  *     worktree of main to add evidence, then done -> commit_range names B's head and the landing commit, and
  *     assess's derived diff contains B's own file.
- *   AC-LAND-1 (b): backfill — B merged by a plain `merge(<branch>)` commit with no landing record -> the same range.
- *   NEGATIVE: a branch with no `merge(<branch>)` commit and no landing record is not invented a landing; the claim's
- *     own range is kept.
+ *   AC-LAND-1 (b): nothing reconstructs a landing from main's history (BR-1291) — B landed with no recorder, or merged by
+ *     hand, has no landing: done refuses `not-landed`; integrating the already-integrated branch records it (BR-1336).
+ *   NEGATIVE: a branch with no landing record is not invented one, and assess never backfills from `merge(<branch>)`.
  *   REGRESSION: integrate with no matching task records nothing and still lands.
  */
 import { describe, it, expect, afterEach } from "vitest";
@@ -29,6 +30,7 @@ import { IntegrateLossLedger } from "../../src/service/integrate-loss-ledger.js"
 import { IntegrateAttemptLedger } from "../../src/service/integrate-attempt-ledger.js";
 import { deriveCommitSetForPlan } from "../../src/adapters/cli/assess-commit-derivation.js";
 import { actedStore } from "../live-invocation.js";
+import { installShippedGuard } from "./support/main-guard-repo.js";
 
 const GIT_ENV = {
   ...process.env,
@@ -47,6 +49,13 @@ afterEach(() => {
 
 function run(dir: string, ...args: string[]): string {
   const r = spawnSync("git", args, { cwd: dir, env: GIT_ENV, encoding: "utf8" });
+  if (r.status !== 0) throw new Error(`git ${args.join(" ")} failed: ${r.stderr}`);
+  return r.stdout.trim();
+}
+
+/** git with the integrate marker: what a deliberate human bypass of the main-ref guard looks like. */
+function runMarked(dir: string, ...args: string[]): string {
+  const r = spawnSync("git", args, { cwd: dir, env: { ...GIT_ENV, LORE_INTEGRATE: "1" }, encoding: "utf8" });
   if (r.status !== 0) throw new Error(`git ${args.join(" ")} failed: ${r.stderr}`);
   return r.stdout.trim();
 }
@@ -79,10 +88,11 @@ async function fixture(probeOverride?: Partial<ReturnType<typeof createRealWorkt
   dirs.push(repo);
   run(repo, "init", "-q", "-b", "main");
   commit(repo, "seed.txt", "seed");
-  run(repo, "checkout", "-q", "-b", "feat-landing");
-  const ownCommit = commit(repo, "own-landing-file.txt", "feat: the branch's own work");
-  run(repo, "checkout", "-q", "main");
+  run(repo, "branch", "feat-landing");
   commit(repo, "main-moved.txt", "chore: main moved on");
+  // the shared checkout is a detached view of main and the shipped guard is installed: integrate refuses to run without it
+  run(repo, "checkout", "-q", "--detach", "main");
+  installShippedGuard(repo, join(repo, ".git", "guard-hooks"));
 
   const store = actedStore(new InMemoryStore());
   const cs = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
@@ -108,6 +118,10 @@ async function fixture(probeOverride?: Partial<ReturnType<typeof createRealWorkt
   if (!ev.ok) throw new Error(`evidence ${JSON.stringify(ev.error)}`);
   const claim = await svc.claim(task.value.id, { by: "alice", worktree: "feat-landing" });
   if (!claim.ok) throw new Error(`claim ${JSON.stringify(claim.error)}`);
+  // the branch's own work comes AFTER the claim, so the claim's recorded base_sha (the branch tip at claim time) precedes it
+  run(repo, "checkout", "-q", "feat-landing");
+  const ownCommit = commit(repo, "own-landing-file.txt", "feat: the branch's own work");
+  run(repo, "checkout", "-q", "--detach", "main");
   return { repo, svc, store, taskId: task.value.id, slug: task.value.slug, ownCommit, branchHead: ownCommit };
 }
 
@@ -163,41 +177,30 @@ describe("AC-LAND-1: a task's commit range is recorded at landing, so a later re
     expect(derived.diff_text).not.toContain("main-moved.txt");
   }, 60_000);
 
-  it("AC-LAND-1 (b): backfill from a `merge(<branch>)` commit with no landing record produces the same record", async () => {
-    const withRecord = await fixture();
-    await integrateService(withRecord, true).integrate({ branch: "feat-landing", sessionId: "s1", floorCommand: "true" });
-    await reclaimFromDetachedMain(withRecord);
-    const doneA = await withRecord.svc.done(withRecord.taskId, { by: "alice" });
+  it("AC-LAND-1 (b): landed WITHOUT a recorder there is no landing: done refuses [floor: not-landed]; integrating the already-integrated branch records it and done then archives with the same range", async () => {
+    const f = await fixture();
+    // landed WITHOUT a landing recorder: only the `merge(feat-landing)` commit on main remains, and nothing reads it (BR-1291)
+    await integrateService(f, false).integrate({ branch: "feat-landing", sessionId: "s2", floorCommand: "true" });
+    await reclaimFromDetachedMain(f);
 
-    const backfilled = await fixture();
-    // landed WITHOUT a landing recorder: only the `merge(feat-landing)` commit on main remains
-    await integrateService(backfilled, false).integrate({ branch: "feat-landing", sessionId: "s2", floorCommand: "true" });
-    expect(backfilled.svc).toBeDefined();
-    await reclaimFromDetachedMain(backfilled);
-    const doneB = await backfilled.svc.done(backfilled.taskId, { by: "alice" });
+    const refused = await f.svc.done(f.taskId, { by: "alice" });
+    expect(refused.ok).toBe(false);
+    expect(!refused.ok && "message" in refused.error ? refused.error.message : "").toContain("[floor: not-landed]");
 
-    expect(doneA.ok && doneB.ok).toBe(true);
-    if (!doneA.ok || !doneB.ok) return;
-    const strip = (extra: Record<string, unknown>): unknown => {
-      const { recorded_at: _a, ...range } = extra["commit_range"] as Record<string, unknown>;
-      const { recorded_at: _b, ...landing } = extra["landing"] as Record<string, unknown>;
-      return { range, landing };
-    };
-    const a = strip(doneA.value.task.extra) as { range: Record<string, string>; landing: Record<string, string> };
-    const b = strip(doneB.value.task.extra) as { range: Record<string, string>; landing: Record<string, string> };
-    // the two repos are separate histories (different shas), so compare the shape and the roles of each sha
-    expect(Object.keys(b.landing).sort()).toEqual(Object.keys(a.landing).sort());
-    expect(Object.keys(b.range).sort()).toEqual(Object.keys(a.range).sort());
-    expect(b.range["head"]).toBe(b.landing["branch_head"]);
-    expect(b.range["landing_commit"]).toBe(b.landing["landing_commit"]);
-    expect(b.landing["branch"]).toBe("feat-landing");
-    const ranges = collectRecordedRanges([{ slug: backfilled.slug, extra: doneB.value.task.extra }]);
-    const derived = deriveCommitSetForPlan(backfilled.repo, [backfilled.slug], true, ranges);
-    expect(derived.commits.map((c) => c.sha)).toEqual([backfilled.ownCommit]);
+    const again = await integrateService(f, true).integrate({ branch: "feat-landing", sessionId: "s2b", floorCommand: "true" });
+    expect(again.ok && again.value.kind).toBe("already_integrated");
+    const done = await f.svc.done(f.taskId, { by: "alice" });
+    expect(done.ok).toBe(true);
+    if (!done.ok) return;
+    expect(done.value.task.extra["landing"]).toMatchObject({ branch: "feat-landing", branch_head: f.branchHead });
+    expect(done.value.task.extra["commit_range"]).toMatchObject({ state: "recorded", head: f.branchHead, head_source: "landing" });
+    const ranges = collectRecordedRanges([{ slug: f.slug, extra: done.value.task.extra }]);
+    const derived = deriveCommitSetForPlan(f.repo, [f.slug], true, ranges);
+    expect(derived.commits.map((c) => c.sha)).toEqual([f.ownCommit]);
     expect(derived.diff_text).toContain("own-landing-file.txt");
   }, 60_000);
 
-  it("AC-LAND-1 (b) assess: a task archived before this change (range = main, no landing) is backfilled from merge(<branch>)", async () => {
+  it("AC-LAND-1 (b) assess: a range that recorded main itself (no landing) is never backfilled from a merge(<branch>) commit", async () => {
     const f = await fixture();
     await integrateService(f, false).integrate({ branch: "feat-landing", sessionId: "s5", floorCommand: "true" });
     const main = run(f.repo, "rev-parse", "main");
@@ -205,60 +208,24 @@ describe("AC-LAND-1: a task's commit range is recorded at landing, so a later re
     const stale = { state: "recorded", head: main, base: main, head_source: "worktree", worktree: "feat-landing", recorded_at: "t" };
     const ranges = collectRecordedRanges([{ slug: f.slug, extra: { commit_range: stale } }]);
     const derived = deriveCommitSetForPlan(f.repo, [f.slug], true, ranges);
-    expect(derived.commits.map((c) => c.sha)).toEqual([f.ownCommit]);
-    expect(derived.diff_text).toContain("own-landing-file.txt");
-    expect(derived.attribution[f.slug]).toBe("recorded_range");
+    expect(derived.commits.map((c) => c.sha)).not.toContain(f.ownCommit);
+    expect(derived.diff_text).not.toContain("own-landing-file.txt");
   }, 60_000);
 
-  it("HONEST: no landing record and no merge(<name>) commit, claim re-made from main (head == base) -> commit_range is not-measured with reason and candidates, done is not refused, assess shows it", async () => {
-    const f = await fixture();
-    run(f.repo, "merge", "--no-ff", "-q", "-m", "manual merge, no branch name in the subject", "feat-landing");
-    await reclaimFromDetachedMain(f);
-    const done = await f.svc.done(f.taskId, { by: "alice" });
-    expect(done.ok).toBe(true);
-    if (!done.ok) return;
-    const range = done.value.task.extra["commit_range"] as Record<string, unknown>;
-    expect(range["state"]).toBe("not-measured");
-    expect(String(range["reason"])).toMatch(/head == base/);
-    expect(String(range["reason"])).toMatch(/no merge\(<name>\) commit/);
-    expect(range["candidates"]).toContain("feat-landing");
-    expect(range["head"]).toBeUndefined();
-    expect(done.value.commit_range_note).toMatch(/^commit range not measured: /);
-    const ranges = collectRecordedRanges([{ slug: f.slug, extra: done.value.task.extra }]);
-    const derived = deriveCommitSetForPlan(f.repo, [f.slug], true, ranges);
-    expect(derived.attribution[f.slug]).toBe("not_measured");
-    expect(derived.tasks_not_measured).toEqual([f.slug]);
-    expect(derived.warnings.join("\n")).toMatch(/commit range not measured: /);
-    expect(derived.diff_text).toBe("");
-  }, 60_000);
-
-  it("HONEST: main's first-parent log unreadable -> not-measured names `log unreadable: <why>` and the candidates", async () => {
-    const f = await fixture({ firstParentLog: () => ({ ok: false, reason: "boom" }) });
-    await integrateService(f, false).integrate({ branch: "feat-landing", sessionId: "s6", floorCommand: "true" });
-    await reclaimFromDetachedMain(f);
-    const done = await f.svc.done(f.taskId, { by: "alice" });
-    expect(done.ok).toBe(true);
-    if (!done.ok) return;
-    const range = done.value.task.extra["commit_range"] as Record<string, unknown>;
-    expect(range["state"]).toBe("not-measured");
-    expect(String(range["reason"])).toMatch(/log unreadable: boom/);
-    expect(range["candidates"]).toContain("feat-landing");
-  }, 60_000);
-
-  it("HONEST: a claim with real work but no landing found keeps its range and says so (note + landing_unresolved)", async () => {
+  it("NEGATIVE: a hand merge with no landing record is refused [floor: not-landed], also when the branch got work after the claim", async () => {
     const f = await fixture();
     // work done AFTER the claim, so the claim's head differs from its base_sha
     run(f.repo, "checkout", "-q", "feat-landing");
-    const later = commit(f.repo, "after-claim.txt", "feat: work after the claim");
-    run(f.repo, "checkout", "-q", "main");
-    run(f.repo, "merge", "--no-ff", "-q", "-m", "manual merge, no branch name in the subject", "feat-landing");
+    commit(f.repo, "after-claim.txt", "feat: work after the claim");
+    // a hand merge: the guard refuses it without the marker (that is its job), so this test takes the bypass on purpose
+    runMarked(f.repo, "checkout", "-q", "main");
+    runMarked(f.repo, "merge", "--no-ff", "-q", "-m", "manual merge, no branch name in the subject", "feat-landing");
+    run(f.repo, "checkout", "-q", "--detach", "main");
     const done = await f.svc.done(f.taskId, { by: "alice" });
-    expect(done.ok).toBe(true);
-    if (!done.ok) return;
-    const range = done.value.task.extra["commit_range"] as Record<string, unknown>;
-    expect(range).toMatchObject({ state: "recorded", head: later });
-    expect(String(range["landing_unresolved"])).toMatch(/no merge\(<name>\) commit/);
-    expect(done.value.commit_range_note).toMatch(/no landing found/);
+    expect(done.ok).toBe(false);
+    expect(!done.ok && "message" in done.error ? done.error.message : "").toContain("[floor: not-landed]");
+    const task = await f.store.find(f.taskId);
+    expect(task.ok && task.value !== null ? task.value.status : "unreadable").not.toBe("archived");
   }, 60_000);
 
   it("HISTORY: a re-landing replaces extra.landing and appends the replaced one to extra.landing_history", async () => {
@@ -278,7 +245,7 @@ describe("AC-LAND-1: a task's commit range is recorded at landing, so a later re
     const f = await fixture();
     run(f.repo, "checkout", "-q", "-b", "other-branch", "main");
     commit(f.repo, "other.txt", "feat: other");
-    run(f.repo, "checkout", "-q", "main");
+    run(f.repo, "checkout", "-q", "--detach", "main");
     const landed = await integrateService(f, true).integrate({ branch: "other-branch", sessionId: "s4", floorCommand: "true" });
     expect(landed.ok && landed.value.kind).toBe("landed");
     const task = await f.store.find(f.taskId);
@@ -289,7 +256,7 @@ describe("AC-LAND-1: a task's commit range is recorded at landing, so a later re
     const f = await fixture();
     run(f.repo, "checkout", "-q", "-b", "unclaimed-branch", "main");
     commit(f.repo, "unclaimed.txt", "feat: unclaimed");
-    run(f.repo, "checkout", "-q", "main");
+    run(f.repo, "checkout", "-q", "--detach", "main");
     mkdirSync(join(f.repo, ".claude", "worktrees"), { recursive: true });
     const landed = await integrateService(f, true).integrate({ branch: "unclaimed-branch", sessionId: "s3", floorCommand: "true" });
     expect(landed.ok && landed.value.kind).toBe("landed");

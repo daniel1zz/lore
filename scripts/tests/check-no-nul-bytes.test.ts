@@ -117,16 +117,6 @@
 // @reads assets/skills/shared/**
 // @reads bun.lock
 // @reads bunfig.toml
-// @reads docs/architecture/adr/ADR-01KVYFJ5G8EVB6S5NMD3PNY5KA-adr-tsc-memory-root-cause-mcp-tools-zod-shape.md
-// @reads docs/architecture/tech-specs/TECH-01KV4W88GZF74B98BHCBBV9GHD-tree-consistency-guarantees.md
-// @reads docs/claude-md-archive/dogfood-eval-log.md
-// @reads docs/claude-md-archive/spec-implementation-notes.md
-// @reads docs/knowledge/RETRO-001-phase1.md
-// @reads docs/knowledge/ideation/IDEATION-001-v2-positioning-synthesis.md
-// @reads docs/planning/PLAN-001-phase1-implementation.md
-// @reads docs/planning/plans/PLAN-01KTRJGT31D8WJ4ZRHNARV9YBC-phase-2c-sync-engine-turso-embedded-replicas.md
-// @reads docs/planning/plans/PLAN-01KV4WHJGNDEYB4D8Z3JBDKF8G-.md
-// @reads docs/planning/retrospectives/RETRO-01KTTHD4F3F6S40C1XQGN85WAS-docman-frontmatter-orphan-root-cause-lore-docs-index-repair.md
 // @reads docs/requirements/**
 // @reads hooks/**
 // @reads lore.tree.yaml

@@ -4,45 +4,38 @@
  * Purpose: the pure verdict half of the completeness census (spec baseline-slice-2 C2): given the
  *   sites a leaf's commands reach, the leaf's `site_map`, and the live rule ids, report what is
  *   still unaccounted for.
- * Public surface: {@link computeLeafCoverage}, {@link collectOwnedSites}, {@link partitionDeclaredCommands}, {@link absentCommandFixCommand},
- *   {@link leavesUnder}, {@link absentDeclarationsOf}, {@link absentDeclarationRefusal}, {@link AbsentDeclaration},
- *   {@link NON_BUSINESS_PREFIX}, {@link LeafCoverage}.
+ * Public surface: {@link computeLeafCoverage}, {@link findCorruptSiteMapValues}, {@link collectOwnedSites}, {@link partitionDeclaredCommands},
+ *   {@link absentCommandFixCommand}, {@link leavesUnder}, {@link absentDeclarationsOf}, {@link absentDeclarationRefusal},
+ *   {@link AbsentDeclaration}, {@link LeafCoverage}.
  * Invariants:
- *   - A `non-business:owned-by <leaf> BR-n — <reason>` entry counts only while the owner leaf is a leaf and every named
- *     rule is live on it (see owned-by.ts); otherwise the site is a gap.
- *   - A keyed (non-dynamic) site is covered only by a mapping to at least one LIVE rule id, or a
- *     `non-business:<reason>` entry with a non-empty reason; a mapping to retired/unknown ids only
- *     is a gap.
- *   - A dynamic site is "not_measured" until it is mapped to a live rule or justified
- *     `non-business:<reason>`; it never counts as a gap.
- *   - An interface-dispatch site (see site-census) is a dynamic site, so it follows the same rule.
- *   - Bootstrap sites (site-census `bootstrap`, app wiring / config loading) are never gaps, never
- *     not_measured and never affect `ok`; the verdict does not echo them (the caller reports them).
- *   - A census with unresolved imports (site-census `unresolvedImports`) is a lower bound, never a
- *     complete list: they are reported as `unresolvedImports` (`<specifier> (from <file>)`) and make `ok` false.
- *   - `ok` iff `gaps`, `notMeasured` and `unresolvedImports` are all empty. Output follows the order of `sites`.
+ *   - A site counts as mapped only by an unretired `BR-n` id of the leaf (BR-1248). Free text
+ *     excuses nothing; a stored value that is not a BR-n id is CORRUPT data ({@link findCorruptSiteMapValues}), never "unmapped".
+ *   - `gaps` (keyed) and `notMeasured` (dynamic) are REPORT output: they never decide an exit code. Only a runnable command
+ *     no leaf declares ({@link computeUndeclaredCommands}) refuses (BR-1248, BR-660).
+ *   - Bootstrap sites (site-census `bootstrap`, app wiring / config loading) are never reported as unmapped; the verdict
+ *     does not echo them (the caller reports them).
+ *   - A census with unresolved imports (site-census `unresolvedImports`) is a lower bound, never a complete list: they are
+ *     reported as `unresolvedImports` (`<specifier> (from <file>)`) and make `ok` false.
+ *   - `ok` iff `gaps`, `notMeasured` and `unresolvedImports` are all empty ("fully mapped"). Output follows the order of `sites`.
  * Side-effect class: pure.
  */
 
 import type { Site, UnresolvedImport } from "./site-census.js";
-import { NON_BUSINESS_PREFIX, judgeOwnedBy, parseOwnedBy, type OwnerLeafIndex } from "./owned-by.js";
-
-export { NON_BUSINESS_PREFIX };
 
 /** Verdict of {@link computeLeafCoverage}; both lists hold site keys. */
 export interface LeafCoverage {
-  /** Keyed sites with no live-rule mapping and no non-business justification. */
+  /** Keyed sites with no live-rule mapping (reported, never refused). */
   readonly gaps: string[];
-  /** Dynamic sites the census could not measure and nobody has accounted for. */
+  /** Dynamic sites the census could not measure and no live rule maps (reported, never refused). */
   readonly notMeasured: string[];
   /** `<specifier> (from <file>)` for each import the census could not resolve: sites behind it are missing. */
   readonly unresolvedImports?: string[];
   readonly ok: boolean;
 }
 
-/** The command that accounts for one unaccounted (site, leaf) pair: map the site to a live rule or justify it. */
+/** The command that accounts for one unaccounted (site, leaf) pair: map the site to a live rule. */
 export function siteFixCommand(leafSlug: string, siteKey: string): string {
-  return `lore baseline map ${leafSlug} --site ${siteKey} --rule <BR-n> | --non-business <reason>`;
+  return `lore baseline map ${leafSlug} --site ${siteKey} --rule <BR-n>`;
 }
 
 /** Split a site key (`file#symbol#code` | `file#symbol#dynamic:<label>`) back into a {@link Site}. */
@@ -56,33 +49,37 @@ function siteFromKey(key: string): Site {
 }
 
 /**
- * The sites a command-less (cross-cutting) leaf owns: its own `site_map` keys plus every site another leaf's `site_map`
- * hands to it with `non-business:owned-by <this leaf> BR-n` (BL-D1). There is no census to run for such a leaf; these
- * are the sites its rules guard, and each must be accounted for in ITS site map like any census site.
+ * The sites a command-less (cross-cutting) leaf owns: its own `site_map` keys. There is no census to run for such a leaf;
+ * these are the sites its rules guard (BL-D1). A hand-off from another leaf no longer exists: free-text entries excuse nothing.
  *
- * @param leafId - id of the leaf being measured (the owner index is keyed by id and slug; both resolve to this id).
  * @param ownSiteMap - the leaf's own `site_map`.
- * @param otherSiteMaps - the `site_map` of every OTHER leaf.
- * @param ownerLeaves - {@link buildOwnerLeafIndex}; resolves an owned-by entry's leaf reference.
  * @returns the owned sites, sorted by key.
  */
-export function collectOwnedSites(input: {
-  leafId: string;
-  ownSiteMap: Readonly<Record<string, readonly string[]>>;
-  otherSiteMaps: readonly Readonly<Record<string, readonly string[]>>[];
-  ownerLeaves: OwnerLeafIndex;
-}): Site[] {
-  const keys = new Set(Object.keys(input.ownSiteMap));
-  for (const siteMap of input.otherSiteMaps) {
-    for (const [key, entries] of Object.entries(siteMap)) {
-      const handedToThisLeaf = entries.some((entry) => {
-        const parsed = parseOwnedBy(entry);
-        return parsed.kind === "owned_by" && input.ownerLeaves.get(parsed.leaf)?.leafId === input.leafId;
-      });
-      if (handedToThisLeaf) keys.add(key);
-    }
-  }
-  return [...keys].sort().map(siteFromKey);
+export function collectOwnedSites(input: { ownSiteMap: Readonly<Record<string, readonly string[]>> }): Site[] {
+  return Object.keys(input.ownSiteMap).sort().map(siteFromKey);
+}
+
+/** One stored `site_map` value that is not a `BR-n` id: the corpus holds an entry the grammar no longer admits. */
+export interface CorruptSiteMapValue {
+  readonly leaf: string;
+  readonly site: string;
+  readonly value: string;
+}
+
+const RULE_ID_PATTERN = /^BR-\d+$/;
+
+/**
+ * Every stored site_map value of a leaf that is not a `BR-n` id (BR-1248: a site map takes rule ids only). Such a value is
+ * corrupt data, so coverage exits 2 naming it rather than reading it as "unmapped" or as an excuse.
+ *
+ * @param leafSlug - the leaf the map belongs to (named in the refusal).
+ * @param siteMap - the leaf's stored `site_map`.
+ * @returns the offending (leaf, site, value) triples, in site then value order.
+ */
+export function findCorruptSiteMapValues(leafSlug: string, siteMap: Readonly<Record<string, readonly string[]>>): CorruptSiteMapValue[] {
+  return Object.keys(siteMap)
+    .sort()
+    .flatMap((site) => (siteMap[site] ?? []).filter((value) => !RULE_ID_PATTERN.test(value)).map((value) => ({ leaf: leafSlug, site, value })));
 }
 
 /** The command that declares a runnable command on a leaf (`<leaf>` is the leaf that owns the command's behaviour). */
@@ -193,21 +190,8 @@ export function computeUndeclaredCommands(
   return runnable.filter((c) => !declaredEntries.has(`${c.entry.file}#${c.entry.symbol}`)).map((c) => c.name);
 }
 
-function isAccountedFor(
-  entries: readonly string[] | undefined,
-  live: ReadonlySet<string>,
-  ownerLeaves: OwnerLeafIndex | undefined,
-): boolean {
-  if (entries === undefined) return false;
-  return entries.some((entry) => {
-    if (live.has(entry)) return true;
-    if (!entry.startsWith(NON_BUSINESS_PREFIX) || entry.slice(NON_BUSINESS_PREFIX.length).trim().length === 0) return false;
-    const owned = parseOwnedBy(entry);
-    if (owned.kind === "not_owned_by") return true;
-    // reason: an owned-by excuse holds only while its owner leaf still resolves and every named rule is live on it;
-    // a malformed one, or one judged without a lookup, never accounts for a site.
-    return owned.kind === "owned_by" && judgeOwnedBy(owned, ownerLeaves).ok;
-  });
+function isMappedToLiveRule(entries: readonly string[] | undefined, live: ReadonlySet<string>): boolean {
+  return entries !== undefined && entries.some((entry) => live.has(entry));
 }
 
 /**
@@ -215,10 +199,8 @@ function isAccountedFor(
  *
  * @param input.sites - Sites from `listSites`.
  * @param input.bootstrap - Bootstrap sites from the census (`listSites(...).bootstrap`); default none.
- * @param input.siteMap - siteKey -> rule ids (`BR-n`) and/or `non-business:<reason>`.
+ * @param input.siteMap - siteKey -> rule ids (`BR-n`); any other value is ignored here (see {@link findCorruptSiteMapValues}).
  * @param input.liveRuleIds - ids of the leaf's live rules.
- * @param input.ownerLeaves - {@link buildOwnerLeafIndex} over the baseline docs; judges `non-business:owned-by` entries
- *   (absent => every owned-by entry is a gap, never silently trusted).
  * @example
  * computeLeafCoverage({ sites, siteMap: { "a.ts#f#X": ["BR-1"] }, liveRuleIds: ["BR-1"] });
  */
@@ -228,7 +210,6 @@ export function computeLeafCoverage(input: {
   unresolvedImports?: readonly UnresolvedImport[];
   siteMap: Readonly<Record<string, readonly string[]>>;
   liveRuleIds: readonly string[];
-  ownerLeaves?: OwnerLeafIndex;
 }): LeafCoverage {
   const live = new Set(input.liveRuleIds);
   const gaps: string[] = [];
@@ -236,7 +217,7 @@ export function computeLeafCoverage(input: {
   const bootstrap = new Set((input.bootstrap ?? []).map((s) => s.key));
   for (const site of input.sites) {
     if (bootstrap.has(site.key)) continue;
-    if (isAccountedFor(input.siteMap[site.key], live, input.ownerLeaves)) continue;
+    if (isMappedToLiveRule(input.siteMap[site.key], live)) continue;
     (site.dynamic ? notMeasured : gaps).push(site.key);
   }
   const unresolvedImports = (input.unresolvedImports ?? []).map((u) => `${u.specifier} (from ${u.from})`);

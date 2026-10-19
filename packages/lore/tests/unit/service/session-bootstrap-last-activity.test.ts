@@ -219,6 +219,7 @@ describe("bootstrapReportSchema.parse — NEGATIVE fail-loud (AC-069-6, D7)", ()
   it("round-trips cleanly when last_activity_at IS present (REGRESSION control)", () => {
     const report: BootstrapReport = {
       root: null,
+      architecture: null,
       active_plans: [
         {
           slug: "plan-fixture",

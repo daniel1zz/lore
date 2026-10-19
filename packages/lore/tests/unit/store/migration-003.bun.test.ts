@@ -128,7 +128,7 @@ describe("migration-003 (review_judgments + calibration_records)", () => {
     // migration-003 (then also migration-004/005, since currentVersion (2) is below
     // every later migration's threshold too) — never throw, never touch the
     // pre-existing docs row.
-    const store = actedStore(new SQLiteStore(dbPath));
+    const store = actedStore(new SQLiteStore(dbPath, { migrate: true }));
     const db = store.getDatabase();
 
     const { user_version: postUpgradeVersion } = db.query("PRAGMA user_version").get() as {
@@ -156,11 +156,11 @@ describe("migration-003 (review_judgments + calibration_records)", () => {
   });
 
   it("REGRESSION: reopening an already-migrated (latest version) file-backed DB a second time is idempotent — no throw, schema unchanged", () => {
-    const firstOpen = actedStore(new SQLiteStore(dbPath));
+    const firstOpen = actedStore(new SQLiteStore(dbPath, { migrate: true }));
     firstOpen.close();
 
     expect(() => {
-      const secondOpen = actedStore(new SQLiteStore(dbPath));
+      const secondOpen = actedStore(new SQLiteStore(dbPath, { migrate: true }));
       const db = secondOpen.getDatabase();
       const { user_version: userVersion } = db.query("PRAGMA user_version").get() as {
         user_version: number;

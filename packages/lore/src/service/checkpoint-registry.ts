@@ -645,6 +645,13 @@ export interface GateContext {
    */
   readonly reviewJudgmentProvenanceCollision?: boolean;
   /**
+   * `true` iff the caller found >=1 independent CURRENT-version `approve` judgment marked
+   * `truncated` (made on cut input) and EXCLUDED it from `reviewJudgmentDecisions` (BR-269): such a judgment
+   * can never be the approving one. Changes the outcome only when `reviewJudgmentDecisions` is empty, where it
+   * selects {@link JUDGMENT_INPUT_TRUNCATED_REASON} over the generic "no judgment" failure.
+   */
+  readonly reviewJudgmentTruncatedApproval?: boolean;
+  /**
    * Every `blocking_questions` entry carried by the caller's CURRENT-version,
    * provenance-independent `escalate` judgments, in judgment order, concatenated
    * verbatim (spec-an-escalate-blocks-approval-for-every-doc-type-and-the D4). Read
@@ -2155,6 +2162,13 @@ export const NO_JUDGMENT_REASON = "NO_JUDGMENT";
 export const JUDGMENT_PROVENANCE_COLLISION_REASON = "JUDGMENT_PROVENANCE_COLLISION";
 
 /**
+ * `checkReviewJudgment`'s failure when the only approving judgment(s) of the current version were made on cut
+ * input (`truncated: true`) and so cannot approve (BR-269). Applies to rows recorded before the judge stopped
+ * cutting the document under review.
+ */
+export const JUDGMENT_INPUT_TRUNCATED_REASON = "JUDGMENT_INPUT_TRUNCATED";
+
+/**
  * `checkReviewJudgment`'s failure when the WORST independent current-version
  * judgment is `"reject"` (SPEC-103 D3 anti-lottery — a reject can never be outrolled
  * by a later approve on the SAME version).
@@ -2255,6 +2269,9 @@ function worstReviewDecision(decisions: readonly ReviewDecision[]): ReviewDecisi
 function checkReviewJudgment(ctx: GateContext): PredicateResult[] {
   const decisions = ctx.reviewJudgmentDecisions ?? [];
   if (decisions.length === 0) {
+    if (ctx.reviewJudgmentTruncatedApproval === true) {
+      return [{ ok: false, reason: JUDGMENT_INPUT_TRUNCATED_REASON, field: REVIEW_JUDGMENT_FIELD }];
+    }
     return [
       ctx.reviewJudgmentProvenanceCollision === true
         ? { ok: false, reason: JUDGMENT_PROVENANCE_COLLISION_REASON, field: REVIEW_JUDGMENT_FIELD }
@@ -2330,7 +2347,12 @@ function feedReviewJudgment(ctx: GateContext, failures: PredicateResult[]): stri
   const target = ctx.targetIdOrSlug ?? "<doc>";
   const collision = failures.some((f) => !f.ok && f.reason === JUDGMENT_PROVENANCE_COLLISION_REASON);
   const escalated = failures.some((f) => !f.ok && f.reason === JUDGMENT_ESCALATED_REASON);
-  const ruleMarkdown = collision
+  const inputTruncated = failures.some((f) => !f.ok && f.reason === JUDGMENT_INPUT_TRUNCATED_REASON);
+  const ruleMarkdown = inputTruncated
+    ? `Required for review-judgment: the only approving judgment(s) of ${target} for its CURRENT version were ` +
+      `made on input that was cut (marked truncated) and can never approve. ` +
+      `Recovery: run \`lore review ${target}\` for a fresh judgment, which sees the whole document.`
+    : collision
     ? `Required for review-judgment: an independent review judgment for the CURRENT ` +
       `version of ${target} is required before approval. The only judgment(s) found for ` +
       `this version were authored by the SAME provider/model/prompt_version as the doc's ` +

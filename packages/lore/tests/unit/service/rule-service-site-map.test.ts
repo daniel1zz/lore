@@ -84,9 +84,9 @@ describe("RuleService.setSiteMap", () => {
 
   it("stores the site map and commands under extra, different inputs giving different maps", async () => {
     await svc.setSiteMap(leaf.id, { sites: { "a.ts#f#X": ["BR-1"] }, addCommands: ["ac add"] }, { by: "t" });
-    await svc.setSiteMap(leaf.id, { sites: { "b.ts#g#Y": ["non-business:plumbing"] }, addCommands: ["rule add"] }, { by: "t" });
+    await svc.setSiteMap(leaf.id, { sites: { "b.ts#g#Y": ["BR-1"] }, addCommands: ["rule add"] }, { by: "t" });
     const after = await fresh(leaf.id);
-    expect(after.extra["site_map"]).toEqual({ "a.ts#f#X": ["BR-1"], "b.ts#g#Y": ["non-business:plumbing"] });
+    expect(after.extra["site_map"]).toEqual({ "a.ts#f#X": ["BR-1"], "b.ts#g#Y": ["BR-1"] });
     expect(after.extra["commands"]).toEqual(["ac add", "rule add"]);
   });
 
@@ -125,9 +125,14 @@ describe("RuleService.setSiteMap", () => {
     expect(await auditRows(leaf.id)).toBe(a0);
   });
 
-  it("refuses a blank non-business reason", async () => {
-    const res = await svc.setSiteMap(leaf.id, { sites: { "a.ts#f#X": ["non-business:   "] } }, { by: "t" });
-    expect(res.ok).toBe(false);
+  it("refuses free text and a site with no rule, writing nothing", async () => {
+    const v0 = leaf.version;
+    for (const entries of [["non-business:plumbing"], ["non-business:   "], []]) {
+      const res = await svc.setSiteMap(leaf.id, { sites: { "a.ts#f#X": entries } }, { by: "t" });
+      expect(res.ok).toBe(false);
+      if (!res.ok) expect(res.error.code).toBe("VALIDATION_ERROR");
+    }
+    expect((await fresh(leaf.id)).version).toBe(v0);
   });
 
   it("refuses removing a site that was never mapped", async () => {

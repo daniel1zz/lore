@@ -1,3 +1,4 @@
+// @reads assets/project/reference-transaction
 /**
  * @spec_ref spec-session-start-injection-carries-only-the-session-s-own — AC-SI-2, AC-SI-4.
  *
@@ -18,7 +19,9 @@
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { FIXTURE_HOME_OUTSIDE_REPO, makeCleanTreeRepo } from "../helpers/clean-tree-repo";
-import { appendFileSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from "fs";
+import { installShippedGuard } from "../integration/support/main-guard-repo.js";
+import { appendFileSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "fs";
+import { execFileSync } from "child_process";
 import { join } from "path";
 import { tmpdir } from "os";
 import { runLoreInProcess } from "../helpers/run-lore-in-process";
@@ -185,8 +188,20 @@ describe("AC-SI-2: compiled dist/lore bootstrap --injection is seat-only", () =>
   });
 
   it("(d) after lore done archives the claimed task -> stdout empty", async () => {
+    // the claimed branch really exists and is landed through `lore integrate`, the only way `lore done` accepts (BR-1291)
+    const git = (...args: string[]): void => void execFileSync("git", args, { cwd: dir, stdio: "ignore" });
+    appendFileSync(join(dir, ".git", "info", "exclude"), ".claude/\n");
+    appendFileSync(join(dir, ".lore", "config.yaml"), 'workflow:\n  integrate:\n    floor_command: "true"\n', "utf8");
+    git("checkout", "-q", "-b", "feat-done");
+    writeFileSync(join(dir, "feat-done.txt"), "work\n");
+    git("add", "feat-done.txt");
+    git("commit", "-q", "-m", "work on feat-done");
+    git("checkout", "-q", "main");
     const slug = await claimTask(dir, seeded.plan, "feat-done");
     expect(claimSlugs(await injection(dir, "feat-done", scratch))).toEqual([slug]);
+    git("checkout", "-q", "--detach", "main"); // the shared checkout is a detached view of main
+    installShippedGuard(dir, join(dir, ".git", "guard-hooks")); // integrate refuses to run without the guard (BR-1273)
+    await mustRun(["integrate", "feat-done", "--session", "seat-done-session"], dir);
     await mustRun(["evidence", slug, "--oracle", "test", "--command", "echo ok", "--result", "pass", "--capture"], dir, sessionFor(slug));
     await mustRun(["done", slug], dir, sessionFor(slug));
     const r = await injection(dir, "feat-done", scratch);
@@ -219,7 +234,7 @@ describe("AC-SI-2: compiled dist/lore bootstrap --injection is seat-only", () =>
 });
 
 describe("AC-SI-2 (e): plain bootstrap --json is unchanged", () => {
-  it("keeps exactly the 10-key set on a fresh corpus", async () => {
+  it("keeps exactly the 11-key set on a fresh corpus (the 10 measured 2026-10-11 plus `architecture`)", async () => {
     const fresh = mkdtempSync(join(tmpdir(), "lore-seat-fresh-"));
     try {
       await mustRun(["init"], fresh);
@@ -229,6 +244,7 @@ describe("AC-SI-2 (e): plain bootstrap --json is unchanged", () => {
         [
           "active_plans",
           "active_sessions",
+          "architecture",
           "archive_candidates",
           "armed_gates",
           "corpus",

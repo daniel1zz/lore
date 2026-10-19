@@ -165,11 +165,12 @@ describe("AC-SI-1 buildBootstrapInjection — seat-only projection", () => {
     expect("resume_hint" in (result.payload ?? {})).toBe(false);
   });
 
-  it("REGRESSION: corpus-global key set is exactly the nine pull-only report fields", () => {
+  it("REGRESSION: corpus-global key set is exactly the ten pull-only report fields", () => {
     expect([...BOOTSTRAP_CORPUS_GLOBAL_KEYS].sort()).toEqual(
       [
         "active_plans",
         "active_sessions",
+        "architecture",
         "archive_candidates",
         "armed_gates",
         "corpus",

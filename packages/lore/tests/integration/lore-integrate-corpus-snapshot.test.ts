@@ -1,4 +1,5 @@
 // @spawns packages/lore/src/index.ts
+// @reads assets/project/reference-transaction
 // @reads packages/lore/src/store/schema-version.ts
 // @reads packages/lore/src/store/sqlite-store.ts
 /**
@@ -20,6 +21,8 @@ import { spawn, spawnSync } from "node:child_process";
 import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { installShippedGuard } from "./support/main-guard-repo.js";
+import { claimBranchTask } from "../helpers/claim-branch-task.js";
 
 const PACKAGE_ROOT = new URL("../../", import.meta.url).pathname.replace(/\/$/, "");
 const INDEX_TS = join(PACKAGE_ROOT, "src", "index.ts");
@@ -96,6 +99,7 @@ class Fixture {
     if (init.status !== 0) throw new Error(`lore init failed: ${init.stderr}`);
     appendFileSync(join(this.repo, ".git", "info", "exclude"), ".lore/\n.claude/\n");
     this.git(["checkout", "-q", "--detach", "main"]);
+    installShippedGuard(this.repo, `${this.repo}-guard-hooks`); // integrate requires the guard (BR-1273)
 
     const created = sh(this.repo, "bun", ["run", INDEX_TS, "create", "knowledge", "--title", "Snapshot visible doc", "--sub-type", "reference", "--content", "present in the shared corpus", "--json"], this.env());
     if (created.status !== 0) throw new Error(`lore create failed: ${created.stdout}${created.stderr}`);
@@ -113,6 +117,8 @@ class Fixture {
         "set -e",
         `if [ -f .lore/lore.db ]; then DB=.lore/lore.db; else DB="$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")/.lore/lore.db"; fi`,
         `bun run ${JSON.stringify(toolPath)} stageOlder "$DB" ${latestVersion - 1}`,
+        // an older corpus is upgraded only by the explicit command (the snapshot is this worktree's own corpus)
+        `bun run ${JSON.stringify(INDEX_TS)} migrate schema`,
         `bun run ${JSON.stringify(INDEX_TS)} get ${JSON.stringify(this.docSlug)} > floor-read.out`,
         `grep -q "present in the shared corpus" floor-read.out`,
         `bun run ${JSON.stringify(toolPath)} marker .lore/lore.db`,
@@ -158,6 +164,11 @@ class Fixture {
     this.git(["add", `${name}.txt`]);
     this.git(["commit", "-q", "-m", `work on ${name}`]);
     this.git(["checkout", "-q", "--detach", "main"]);
+    // BR-1348: integrate refuses a branch no task belongs to
+    claimBranchTask((args) => {
+      const r = sh(this.repo, "bun", ["run", INDEX_TS, ...args], this.env());
+      return { status: r.status ?? 1, out: `${r.stdout}${r.stderr}` };
+    }, this.repo, name);
     return name;
   }
 

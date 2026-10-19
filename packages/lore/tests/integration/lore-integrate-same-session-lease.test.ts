@@ -1,4 +1,5 @@
 // @spawns packages/lore/src/index.ts
+// @reads assets/project/reference-transaction
 /**
  * `lore integrate` holds an exclusive lease on its session's integration worktree for its whole run
  * (task-a-second-integrate-in-the-same-session-s-integration; adr-main-advances-only-by-lore-integrate-per-session).
@@ -15,6 +16,8 @@ import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { installShippedGuard } from "./support/main-guard-repo.js";
+import { claimBranchTask } from "../helpers/claim-branch-task.js";
 
 const PACKAGE_ROOT = new URL("../../", import.meta.url).pathname.replace(/\/$/, "");
 const INDEX_TS = join(PACKAGE_ROOT, "src", "index.ts");
@@ -70,6 +73,7 @@ class Fixture {
     if (init.status !== 0) throw new Error(`lore init failed: ${init.stderr}`);
     appendFileSync(join(this.repo, ".git", "info", "exclude"), ".lore/\n.claude/\n");
     this.git(["checkout", "-q", "--detach", "main"]);
+    installShippedGuard(this.repo, `${this.repo}-guard-hooks`); // integrate requires the guard (BR-1273)
 
     const script = join(root, `floor-${repoSeq}.sh`);
     writeFileSync(
@@ -105,6 +109,11 @@ class Fixture {
     this.git(["add", `${name}.txt`]);
     this.git(["commit", "-q", "-m", `work on ${name}`]);
     this.git(["checkout", "-q", "--detach", "main"]);
+    // BR-1348: integrate refuses a branch no task belongs to
+    claimBranchTask((args) => {
+      const r = sh(this.repo, "bun", ["run", INDEX_TS, ...args], this.env("claim"));
+      return { status: r.status ?? 1, out: `${r.stdout}${r.stderr}` };
+    }, this.repo, name);
     return name;
   }
 
