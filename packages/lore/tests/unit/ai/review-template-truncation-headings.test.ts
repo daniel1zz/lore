@@ -299,20 +299,20 @@ describe("AIProviderService.judgeDoc — REGRESSION end-to-end: no truncated sta
 
   async function makeReviewBundle(store: InMemoryStore, parentContent: string) {
     const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
-    const prdResult = await corpusService.create({
-      type: "prd",
-      title: "Truncation Headings Test PRD",
+    const parentSpec = await corpusService.create({
+      type: "spec",
+      title: "Truncation Headings Parent Spec",
       content: parentContent,
     } as CreateDocInput);
-    if (!prdResult.ok) throw new Error("prd create failed");
+    if (!parentSpec.ok) throw new Error("parent spec create failed");
 
     const specResult = await corpusService.create({
-      type: "spec",
-      title: "Truncation Headings Test Spec",
-      content: "Small spec body.",
-      parent_id: prdResult.value.id,
+      type: "plan",
+      title: "Truncation Headings Test Plan",
+      content: "Small plan body.",
+      parent_id: parentSpec.value.id,
     } as CreateDocInput);
-    if (!specResult.ok) throw new Error("spec create failed");
+    if (!specResult.ok) throw new Error("plan create failed");
 
     const bundleResult = await corpusService.getReviewBundle(specResult.value.id);
     if (!bundleResult.ok) throw new Error("getReviewBundle failed");
