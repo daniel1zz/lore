@@ -16,7 +16,8 @@
  */
 
 import { afterEach, describe, expect, it } from "vitest";
-import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { patchLoreConfig } from "../../helpers/patch-lore-config.js";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -49,7 +50,7 @@ function project(adoption: "enforce" | "warn"): string {
     encoding: "utf8",
   });
   if (init.status !== 0) throw new Error(`lore init failed: ${String(init.stderr)}`);
-  appendFileSync(join(dir, ".lore", "config.yaml"), `\ncontext:\n  memory_files:\n    adoption: ${adoption}\n`);
+  patchLoreConfig(dir, `context:\n  memory_files:\n    adoption: ${adoption}\n`);
   put(dir, "src/x.ts", "export const Here = 1;\n");
   return dir;
 }

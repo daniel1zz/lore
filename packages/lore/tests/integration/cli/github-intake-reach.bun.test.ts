@@ -101,6 +101,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { fileURLToPath } from "node:url";
 import { basename, join, resolve } from "node:path";
 import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { patchLoreConfig } from "../../helpers/patch-lore-config.js";
 import { tmpdir } from "node:os";
 import { VENDOR_INTAKE_REPO } from "@lore/core";
 
@@ -274,7 +275,7 @@ function makeReporter(prefix: string): ReporterFixture {
   if (existingConfig.includes("corpus_path")) {
     throw new Error(`unexpected pre-existing corpus_path in a fresh 'lore init' config: ${existingConfig}`);
   }
-  writeFileSync(configPath, existingConfig + ["feedback:", "  upstream:", `    repo: ${TARGET_REPO}`, ""].join("\n"));
+  patchLoreConfig(root, ["feedback:", "  upstream:", `    repo: ${TARGET_REPO}`, ""].join("\n"));
 
   return { root, projectName, rootPrdSlug };
 }

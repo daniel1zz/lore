@@ -55,6 +55,7 @@ import { FEED_PHASE_START_MISSING_TARGET, FEED_TASK_START_MISSING_TARGET } from 
 import { citeSpecViaAsyncCli, asyncLoreRunnerFor } from "../helpers/cli-live-rule.js";
 import { sessionActorFor, withSessionIdentity } from "../helpers/session-actor";
 import { runLoreInProcess } from "../helpers/run-lore-in-process";
+import { patchLoreConfig } from "../helpers/patch-lore-config.js";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -128,14 +129,7 @@ function parseSlug(stdout: string): string {
  * land in the SAME file without colliding).
  */
 function appendWorkflowConfig(dir: string, yamlFragment: string): void {
-  const cfgPath = join(dir, ".lore", "config.yaml");
-  const existing = yaml.parse(readFileSync(cfgPath, "utf8")) as Record<string, unknown>;
-  const fragment = yaml.parse(yamlFragment) as { workflow?: Record<string, unknown> };
-  const mergedWorkflow = {
-    ...(existing["workflow"] as Record<string, unknown> | undefined),
-    ...fragment.workflow,
-  };
-  writeFileSync(cfgPath, yaml.stringify({ ...existing, workflow: mergedWorkflow }), "utf8");
+  patchLoreConfig(dir, yamlFragment);
 }
 
 /** Creates a prd -> spec (1 declared script-mode AC, approved) -> plan -> task chain, with anchors + evidence + a fresh claim. */

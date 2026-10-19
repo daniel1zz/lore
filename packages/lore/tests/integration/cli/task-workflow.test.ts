@@ -23,7 +23,8 @@
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { spawnSync } from "child_process";
-import { mkdirSync, rmSync, appendFileSync } from "fs";
+import { mkdirSync, rmSync } from "fs";
+import { patchLoreConfig } from "../../helpers/patch-lore-config.js";
 import { join } from "path";
 import { tmpdir } from "os";
 import { AC_REF_NOT_ON_PARENT_SPEC } from "../../../src/service/ac-ref-messages.js";
@@ -88,8 +89,8 @@ function runLore(args: string[], cwd: string, actor: string | null = null): RunR
  * actually exercises.
  */
 function disableAllGates(dir: string): void {
-  appendFileSync(
-    join(dir, ".lore", "config.yaml"),
+  patchLoreConfig(
+    dir,
     [
       "workflow:",
       "  gates:",

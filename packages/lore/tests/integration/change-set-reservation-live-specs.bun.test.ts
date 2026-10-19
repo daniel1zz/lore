@@ -22,6 +22,7 @@ import { runLoreInProcess } from "../helpers/run-lore-in-process";
 import { asyncLoreRunnerFor, ensureLiveRuleViaAsyncCli } from "../helpers/cli-live-rule";
 import { InMemoryStore } from "../../src/store/in-memory-store.js";
 import { CorpusWriteAuthority } from "../../src/service/foreign-corpus-write-guard.js";
+import { patchLoreConfig } from "../helpers/patch-lore-config.js";
 
 interface RunResult {
   readonly stdout: string;
@@ -77,8 +78,8 @@ async function approve(spec: string): Promise<void> {
 beforeAll(async () => {
   dir = mkdtempSync(join(tmpdir(), "change-set-reservation-"));
   await loreOk(["init"]);
-  appendFileSync(
-    join(dir, ".lore", "config.yaml"),
+  patchLoreConfig(
+    dir,
     ["workflow:", "  review:", "    judgment_required_types: []", "  gates:", "    spec-create:", "      enabled: false", "    spec-promote:", "      enabled: false", ""].join("\n"),
   );
   const prd = (JSON.parse(await loreOk(["create", "prd", "--title", "Fixture PRD", "--no-ai", "--content", "## Overview\n\nFixture body.", "--json"])) as { data: { slug: string } }).data.slug;

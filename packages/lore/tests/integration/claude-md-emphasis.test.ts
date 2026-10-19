@@ -70,6 +70,7 @@
 import { describe, it, expect, beforeAll, beforeEach, afterEach } from "vitest";
 import { spawnSync } from "child_process";
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from "fs";
+import { patchLoreConfig } from "../helpers/patch-lore-config.js";
 import { join } from "path";
 import { tmpdir } from "os";
 import { fileURLToPath } from "url";
@@ -248,7 +249,7 @@ const SECTIONS_PREFIX =
 /** Pins `adoption: enforce` in a config-only `.lore/` — absent key resolves to warn, which would make every exit-3 assertion here unreachable. */
 function pinEnforce(dir: string): void {
   mkdirSync(join(dir, ".lore"), { recursive: true });
-  writeFileSync(join(dir, ".lore", "config.yaml"), "context:\n  memory_files:\n    adoption: enforce\n");
+  patchLoreConfig(dir, "context:\n  memory_files:\n    adoption: enforce\n");
 }
 
 /** One of the four AC-EMPH emphasis markers (⛔ / IMPORTANT / MUST / NEVER) — chosen because a bare emoji needs no word-boundary reasoning, unlike the three ASCII words. */

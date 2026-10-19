@@ -40,6 +40,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { sessionActorFor, withSessionIdentity } from "../helpers/session-actor";
+import { patchLoreConfig } from "../helpers/patch-lore-config.js";
 
 // tests/integration/ -> tests/ -> packages/lore/ (2 levels up).
 const PROJECT_ROOT = new URL("../../", import.meta.url).pathname.replace(/\/$/, "");
@@ -117,12 +118,7 @@ function makeCorpus(prefix: string, adoption: Adoption, claudeMd: string): strin
   runLoreOk(["init"], dir);
   if (adoption !== "absent") {
     // `lore init` writes `project:` only; appending a top-level `context:` block is safe.
-    const cfgPath = join(dir, ".lore", "config.yaml");
-    writeFileSync(
-      cfgPath,
-      readFileSync(cfgPath, "utf8") +
-        `\ncontext:\n  memory_files:\n    adoption: ${adoption}\n`,
-    );
+    patchLoreConfig(dir, `context:\n  memory_files:\n    adoption: ${adoption}\n`);
   }
   writeFileSync(join(dir, "CLAUDE.md"), claudeMd);
   return dir;

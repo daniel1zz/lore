@@ -75,6 +75,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { spawnSync } from "child_process";
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync, existsSync, readdirSync, readFileSync } from "fs";
+import { patchLoreConfig } from "../helpers/patch-lore-config.js";
 import { join } from "path";
 import { tmpdir } from "os";
 
@@ -224,7 +225,7 @@ describe("claude-md wiring — an unresolved reference reaches the CLI as a dete
   /** Absent `adoption` resolves to warn (exit 0); the deterministic-ness assertions pin enforce. */
   function pinEnforce(): void {
     mkdirSync(join(tmpDir, ".lore"), { recursive: true });
-    writeFileSync(join(tmpDir, ".lore", "config.yaml"), "context:\n  memory_files:\n    adoption: enforce\n");
+    patchLoreConfig(tmpDir, "context:\n  memory_files:\n    adoption: enforce\n");
   }
 
   it("HAPPY: a dangling backtick-quoted repo-relative path is a reference_unresolved finding (never advisory), exit code exactly 3 under enforce", () => {
@@ -280,7 +281,7 @@ describe("claude-md wiring — an unresolved reference reaches the CLI as a dete
     const oversized = nLineBody(400); // root ceiling is 300 lines — real breach
     // Absent `adoption` resolves to warn (exit 0); this case asserts ENFORCEMENT, so it pins the mode.
     mkdirSync(join(tmpDir, ".lore"), { recursive: true });
-    writeFileSync(join(tmpDir, ".lore", "config.yaml"), "context:\n  memory_files:\n    adoption: enforce\n");
+    patchLoreConfig(tmpDir, "context:\n  memory_files:\n    adoption: enforce\n");
     writeFileSync(
       join(tmpDir, "CLAUDE.md"),
       oversized + "See `packages/lore/src/definitely-missing-file-xyz-456.ts` too.\n",

@@ -85,6 +85,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { spawnSync } from "child_process";
 import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync } from "fs";
+import { patchLoreConfig } from "../helpers/patch-lore-config.js";
 import { join } from "path";
 import { tmpdir } from "os";
 import { fileURLToPath } from "url";
@@ -167,13 +168,7 @@ const SECTIONS_PREFIX =
  * init config already carries a `context:` key rather than clobbering it.
  */
 function pinEnforce(dir: string): void {
-  const configPath = join(dir, ".lore", "config.yaml");
-  const existing = existsSync(configPath) ? readFileSync(configPath, "utf8") : "";
-  if (/^context:/m.test(existing)) {
-    throw new Error(`pinEnforce: ${configPath} already has a context: key; extend this helper before pinning`);
-  }
-  const separator = existing === "" || existing.endsWith("\n") ? "" : "\n";
-  writeFileSync(configPath, `${existing}${separator}context:\n  memory_files:\n    adoption: enforce\n`);
+  patchLoreConfig(dir, "context:\n  memory_files:\n    adoption: enforce\n");
 }
 
 /** Pins enforce and writes a structurally conforming root CLAUDE.md whose body is `body`. */

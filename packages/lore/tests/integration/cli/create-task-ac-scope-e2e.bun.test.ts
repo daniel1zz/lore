@@ -44,6 +44,7 @@ import { mkdtempSync, rmSync, appendFileSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import { runLoreInProcess } from "../../helpers/run-lore-in-process";
+import { patchLoreConfig } from "../../helpers/patch-lore-config.js";
 
 // reason: each test spawns ~6-7 compiled-binary processes; bun's 5s default
 // hook timeout is comfortably exceeded on a loaded machine (mirrors
@@ -121,8 +122,8 @@ describe("lore verify — ac_scope ABSENT + explicit --ac (AC-ACS-6, back-catalo
     // Disabling the checkpoint for creation does not touch `lore verify`'s
     // OWN escape valve under test below; once created, the doc's ac_scope
     // is genuinely absent regardless of why.
-    appendFileSync(
-      join(tmpDir, ".lore", "config.yaml"),
+    patchLoreConfig(
+      tmpDir,
       ["workflow:", "  gates:", '    "task-create":', "      enabled: false", ""].join("\n"),
     );
 

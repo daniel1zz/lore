@@ -27,6 +27,7 @@ import { parse as parseYaml } from "yaml";
 import { CoChangeRulesSchema } from "@lore/core";
 import { makeFixture, parseBlock, startTurn, writeRepoFile } from "../hooks/turn-review-harness";
 import { makeLoreStub, stopTurnWithStub } from "../hooks/trail-review-stub";
+import { patchLoreConfig } from "../../helpers/patch-lore-config.js";
 
 const PACKAGE_ROOT = new URL("../../../", import.meta.url).pathname.replace(/\/$/, "");
 const REPO_ROOT = join(PACKAGE_ROOT, "..", "..");
@@ -64,7 +65,9 @@ function must(args: string[]): CliResult {
 
 /** Replaces the project's config with the `lore init` text plus `snippet` (the turn_end block, or raw text). */
 function setConfig(snippet: string): void {
-  writeFileSync(join(dir, ".lore", "config.yaml"), `${baseConfig}\n${snippet}\n`);
+  // reason: each call REPLACES the previous snippet (back to the `lore init` text), so the base is rewritten first.
+  patchLoreConfig(dir, parseYaml(baseConfig) as Record<string, unknown>, { replace: true });
+  patchLoreConfig(dir, snippet);
 }
 
 function turnEnd(...lines: string[]): string {
@@ -249,8 +252,7 @@ describe("AC-ST-7 turn-end hook relay", () => {
   function hookFixture(sid: string) {
     const f = makeFixture(sid);
     const stub = makeLoreStub();
-    mkdirSync(join(f.repo, ".lore"), { recursive: true });
-    writeFileSync(join(f.repo, ".lore", "config.yaml"), `${turnEnd("    co_change:", ...RULE)}\n`);
+    patchLoreConfig(f.repo, turnEnd("    co_change:", ...RULE));
     return { f, stub, cleanup: () => [f.repo, f.base, stub.binDir].forEach((p) => rmSync(p, { recursive: true, force: true })) };
   }
 

@@ -24,6 +24,7 @@ import { join } from "node:path";
 import { STATE_BINDING_ARMED_ACTION } from "@lore/core";
 import { SQLiteStore } from "../../../src/store/sqlite-store.js";
 import { actedStore } from "../../live-invocation.js";
+import { patchLoreConfig } from "../../helpers/patch-lore-config.js";
 
 vi.setConfig({ testTimeout: 300_000, hookTimeout: 300_000 });
 
@@ -72,8 +73,8 @@ function makeCommittedCorpus(): string {
   writeFileSync(join(d, "README.md"), "fixture\n");
   mustLore(["init"], d);
   // reason: gates are not under test; disabling them lets the fixture claim a task under a draft spec.
-  appendFileSync(
-    join(d, ".lore", "config.yaml"),
+  patchLoreConfig(
+    d,
     ["workflow:", "  gates:", ...["task-claim", "task-create"].flatMap((g) => [`    ${g}:`, "      enabled: false"]), ""].join("\n"),
   );
   git(d, ["add", "."]);
@@ -193,8 +194,8 @@ describe("lore init OUTSIDE a git repository does not arm, and says so (AC-CT-3b
   it("a captured pass is accepted by lore done (unarmed corpus refuses nothing)", () => {
     const d = makeNonGitCorpus();
     mustLore(["init"], d);
-    appendFileSync(
-      join(d, ".lore", "config.yaml"),
+    patchLoreConfig(
+      d,
       ["workflow:", "  gates:", ...["task-claim", "task-create"].flatMap((g) => [`    ${g}:`, "      enabled: false"]), ""].join("\n"),
     );
     const task = makeClaimedTask(d, null);

@@ -18,7 +18,8 @@
  */
 
 import { afterAll, describe, expect, it } from "vitest";
-import { appendFileSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { patchLoreConfig } from "../../helpers/patch-lore-config.js";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -39,8 +40,8 @@ const dir = mkdtempSync(join(tmpdir(), "lore-malformed-anchor-"));
 spawnSync("git", ["init", "-q", dir]);
 const init = runLore(["init"], dir);
 if (init.exitCode !== 0) throw new Error(`lore init failed: ${init.stderr}`);
-appendFileSync(
-  join(dir, ".lore", "config.yaml"),
+patchLoreConfig(
+  dir,
   ["workflow:", "  gates:", "    spec-create:", "      enabled: false", "context:", "  memory_files:", "    adoption: enforce", ""].join("\n"),
 );
 const spec = runLore(["create", "spec", "--title", "Anchor Grammar Fixture", "--no-ai", "--content", "## Goal\n\nBody.", "--json"], dir);

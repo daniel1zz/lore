@@ -26,6 +26,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { spawnSync } from "child_process";
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from "fs";
+import { patchLoreConfig } from "../helpers/patch-lore-config.js";
 import { join } from "path";
 import { tmpdir } from "os";
 
@@ -110,7 +111,7 @@ function makeHostRepo(label: string): string {
   const dir = mkdtempSync(join(tmpdir(), `lore-claude-md-nested-${label}-`));
   runGit(["init", "-q"], dir);
   mkdirSync(join(dir, ".lore"), { recursive: true });
-  writeFileSync(join(dir, ".lore", "config.yaml"), "context:\n  memory_files:\n    adoption: enforce\n");
+  patchLoreConfig(dir, "context:\n  memory_files:\n    adoption: enforce\n");
   writeFileSync(join(dir, "CLAUDE.md"), SECTIONS);
   return dir;
 }

@@ -19,6 +19,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { FIXTURE_HOME_OUTSIDE_REPO, makeCleanTreeRepo } from "../../helpers/clean-tree-repo";
+import { patchLoreConfig } from "../../helpers/patch-lore-config.js";
 
 const PACKAGE_ROOT = new URL("../../../", import.meta.url).pathname.replace(/\/$/, "");
 const ENTRY = join(PACKAGE_ROOT, "src", "index.ts");
@@ -143,7 +144,7 @@ beforeAll(() => {
   makeCleanTreeRepo(dir);
   appendFileSync(join(dir, ".git", "info", "exclude"), "state/\n");
   must(["init"]);
-  appendFileSync(join(dir, ".lore", "config.yaml"), ["workflow:", "  gates:", "    task-claim:", "      enabled: false", ""].join("\n"));
+  patchLoreConfig(dir, ["workflow:", "  gates:", "    task-claim:", "      enabled: false", ""].join("\n"));
   const prd = slugOf(must(["create", "prd", "--title", "Scope PRD", "--content", "root", "--no-ai"]).stdout);
   planSlug = slugOf(must(["create", "plan", "--title", "Scope Plan", "--parent", prd, "--content", "x", "--no-ai"]).stdout);
   registerRun(SESSION);

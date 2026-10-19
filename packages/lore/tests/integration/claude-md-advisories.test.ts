@@ -87,6 +87,7 @@ import { tmpdir } from "os";
 // yet — the dedicated REGRESSION guard test below turns that into a legible
 // failure instead of a downstream NaN.
 import { OFFICIAL_LINE_TARGET } from "../../src/service/claude-md-admission.js";
+import { patchLoreConfig } from "../helpers/patch-lore-config.js";
 
 // ─── Path setup (mirrors tests/integration/claude-md-wiring.test.ts) ───────
 
@@ -335,7 +336,7 @@ describe("always-on advisories — printed every run, exit code untouched", () =
   it("REGRESSION: a real max_lines breach still decides the exit code (3) — line_length and target_distance are still present, never crowding out or being crowded out by a real finding", () => {
     // Absent `adoption` resolves to warn (exit 0); this case asserts ENFORCEMENT, so it pins the mode.
     mkdirSync(join(tmpDir, ".lore"), { recursive: true });
-    writeFileSync(join(tmpDir, ".lore", "config.yaml"), "context:\n  memory_files:\n    adoption: enforce\n");
+    patchLoreConfig(tmpDir, "context:\n  memory_files:\n    adoption: enforce\n");
     writeFileSync(join(tmpDir, "CLAUDE.md"), nLineBody(400)); // root ceiling is 300 lines — real breach
 
     const { result, parsed } = runCheckClaudeMdJson(tmpDir);
