@@ -142,8 +142,14 @@ export function formatReadyLine(record: ReadyRecord): string {
     record.unmet_blockers.length > 0
       ? ` blocked-by:${record.unmet_blockers.map((b) => b.slug).join(",")}`
       : "";
+  // reason: a blocker met on the plan's integration branch is NOT archived — the line says so honestly
+  // ("met on <branch>, not on main") so a reader never mistakes branch-level readiness for a landed blocker.
+  const integrationPart =
+    record.met_on_integration !== undefined && record.met_on_integration.length > 0
+      ? ` (${record.met_on_integration.map((b) => `${b.slug} met on ${b.branch}, not on main`).join("; ")})`
+      : "";
   const anchorlessPart = record.anchorless === true ? " ⚠anchorless" : "";
-  return `  [${status}] ${record.task.slug} (${record.task.status})${claimPart}${evidencePart}${blockersPart}${anchorlessPart}`;
+  return `  [${status}] ${record.task.slug} (${record.task.status})${claimPart}${evidencePart}${blockersPart}${integrationPart}${anchorlessPart}`;
 }
 
 /** Render one session grouping line, e.g. "  - alice @hostA:/w1 [b1] tasks: task-a (newest T1)". */

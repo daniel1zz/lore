@@ -1084,6 +1084,12 @@ export interface ReadyRecord {
   ready: boolean;
   /** Blockers whose status is not yet "archived" — empty when ready is true. */
   unmet_blockers: Array<{ id: DocId; slug: string; status: DocStatus }>;
+  /**
+   * Blockers that are NOT archived but count as met because their work landed on the plan's declared
+   * integration branch (`plan.extra.integration_branch`) — "met on <branch>, not on main". Present iff
+   * non-empty (the module's present-iff-true convention). Such a blocker never appears in `unmet_blockers`.
+   */
+  met_on_integration?: Array<{ id: DocId; slug: string; status: DocStatus; branch: string }>;
   /** Present iff task.extra.claim is set; annotated with computed staleness/age. */
   claim?: TaskClaim & { stale: boolean; age_minutes: number };
   /**
@@ -1339,6 +1345,9 @@ function toDocSummary(doc: DocRecord): DocSummary {
  *   spec-approval advisory keep compiling (SPEC-032 §3.4). When non-null and
  *   not `"approved"`, every returned record carries `upstream_unapproved: true` —
  *   this NEVER changes `ready` (advisory only, consistent with D3's no-daemon ethos).
+ * @param landedOnIntegration - Blocker id → integration branch it landed on (computed by the service from
+ *   git; this module stays pure). A listed, unarchived blocker counts as met and is reported in
+ *   `met_on_integration`. Defaults to empty, so every pre-existing caller keeps "met only when archived".
  * @returns One ReadyRecord per input task, in input order
  *
  * @example
@@ -1358,10 +1367,12 @@ export function evaluateReadiness(
   nowIso: string,
   ttlMinutes: number,
   parentSpecStatus: DocStatus | null = null,
+  landedOnIntegration: ReadonlyMap<DocId, string> = new Map(),
 ): ReadyRecord[] {
   return tasks.map((task) => {
     const incomingBlockers = blocksLinks.filter((link) => link.to_id === task.id);
     const unmetBlockers: Array<{ id: DocId; slug: string; status: DocStatus }> = [];
+    const metOnIntegration: Array<{ id: DocId; slug: string; status: DocStatus; branch: string }> = [];
     for (const link of incomingBlockers) {
       const blocker = blockerStatuses.get(link.from_id);
       // reason: a blocker referenced by a link but absent from blockerStatuses (e.g. the
@@ -1371,7 +1382,16 @@ export function evaluateReadiness(
       // since this is a pure read-side function with no Result channel.
       const status = blocker?.status ?? "draft";
       if (status !== "archived") {
-        unmetBlockers.push({ id: link.from_id, slug: blocker?.slug ?? link.from_id, status });
+        // reason: a blocker whose work landed on the plan's integration branch is met for readiness only —
+        // its status stays unarchived (`lore done` judges landing against main), so it is reported apart
+        // from archived blockers rather than silently dropped. Only a blocker the caller proved landed
+        // (`landedOnIntegration`) qualifies; absence from the map keeps the original blocked behaviour.
+        const branch = landedOnIntegration.get(link.from_id);
+        if (branch !== undefined && blocker !== undefined) {
+          metOnIntegration.push({ id: link.from_id, slug: blocker.slug, status, branch });
+        } else {
+          unmetBlockers.push({ id: link.from_id, slug: blocker?.slug ?? link.from_id, status });
+        }
       }
     }
 
@@ -1389,6 +1409,10 @@ export function evaluateReadiness(
       unmet_blockers: unmetBlockers,
       evidence_count: evidence.length,
     };
+
+    if (metOnIntegration.length > 0) {
+      record.met_on_integration = metOnIntegration;
+    }
 
     if (typeof phase === "string") {
       record.phase = phase;
