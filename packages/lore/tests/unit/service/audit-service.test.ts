@@ -30,7 +30,7 @@ import { CorpusService } from "../../../src/service/corpus-service.js";
 import { TaskWorkflowService } from "../../../src/service/task-workflow-service.js";
 import { AuditService } from "../../../src/service/audit-service.js";
 import type { CreateDocInput, VersionRecord, AuditEntry } from "@lore/core";
-import { liveInvocation, actedStore } from "../../live-invocation.js";
+import { liveWriteActor, actedStore } from "../../live-invocation.js";
 
 // ─── Fixture helpers ──────────────────────────────────────────────────────────
 
@@ -105,7 +105,7 @@ describe("HAPPY — a CorpusService.create() write satisfies verify() out of the
     // SPEC-079 G2 (actor fidelity) — the audit entry's actor is the write context's known-party name, never the
     // literal "system". `createPlan` passes no `by`, so the expected value is the name the store was declared with
     // (`actedStore` -> `liveWriteActor()`).
-    expect(entry.actor).toBe(liveInvocation().identity.claimed);
+    expect(entry.actor).toBe(liveWriteActor());
     expect(entry.details?.["version"]).toBe(1);
   });
 

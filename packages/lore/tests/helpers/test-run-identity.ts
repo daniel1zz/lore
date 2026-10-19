@@ -21,12 +21,12 @@
  */
 
 import { createRequire } from "node:module";
-import { dirname, isAbsolute, join, relative } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 
 // reason: the REAL `fs`, reached through `createRequire`, never `import "node:fs"`: that specifier is aliased to the test
 // run's recording wrapper (scripts/test-recorded-fs.ts -> scripts/test-read-log.ts), and this module is imported by
 // scripts/test-known-party-spawn.ts which test-read-log.ts itself imports, so an aliased import here is a load cycle.
-const { existsSync, statSync } = createRequire(import.meta.url)("node:fs") as typeof import("node:fs");
+const { existsSync, readFileSync, statSync } = createRequire(import.meta.url)("node:fs") as typeof import("node:fs");
 
 // reason: spelled out here, NOT imported from `@lore/core`: this module is loaded by the test run's own child_process
 // wrapper (scripts/test-read-log.ts -> scripts/test-known-party-spawn.ts), and `@lore/core` itself imports
@@ -78,9 +78,34 @@ function findCorpusRoot(cwd: string): string | null {
   let dir = cwd;
   for (;;) {
     if (existsSync(join(dir, ".lore", "lore.db"))) return dir;
+    // reason: never hop from the protected checkout (itself a linked worktree in an agent session) to ITS main checkout's
+    // live corpus: a test whose cwd is this repository must not register a run in the team's own `.lore/`.
+    const protectedRepo = process.env["LORE_TEST_SANDBOX_REPO"];
+    const insideProtected = protectedRepo !== undefined && protectedRepo !== "" && (dir === protectedRepo || isInside(protectedRepo, dir));
+    const mainCheckout = insideProtected ? null : mainCheckoutOfLinkedWorktree(dir);
+    if (mainCheckout !== null && existsSync(join(mainCheckout, ".lore", "lore.db"))) return mainCheckout;
     const parent = dirname(dir);
     if (parent === dir) return null;
     dir = parent;
+  }
+}
+
+/**
+ * The main checkout a LINKED worktree at `dir` belongs to (its `.git` FILE says `gitdir: <main>/.git/worktrees/<name>`), or
+ * `null`: a linked worktree has no corpus of its own, and `lore` resolves the main checkout's (git-common-dir), so a run
+ * registered for a spawn in the worktree belongs in THAT corpus. Filesystem only, never a git subprocess.
+ */
+function mainCheckoutOfLinkedWorktree(dir: string): string | null {
+  try {
+    const gitPath = join(dir, ".git");
+    if (!existsSync(gitPath) || !statSync(gitPath).isFile()) return null;
+    const pointer = /^gitdir:\s*(.+)$/m.exec(readFileSync(gitPath, "utf8"));
+    if (pointer?.[1] === undefined) return null;
+    const gitDir = resolve(dir, pointer[1].trim());
+    const commonDir = dirname(dirname(gitDir)); // <main>/.git/worktrees/<name> -> <main>/.git
+    return basename(commonDir) === ".git" ? dirname(commonDir) : null;
+  } catch {
+    return null;
   }
 }
 

@@ -54,8 +54,11 @@ function lore(args: string[], cwd: string, actor: string | null = "agent:session
   const env: Record<string, string | undefined> = { ...process.env, HOME: cwd, CLAUDECODE: "1" };
   delete env.LORE_ACTOR;
   delete env.CLAUDE_SESSION_ID;
-  if (actor === null) delete env.CLAUDE_CODE_SESSION_ID;
-  else {
+  if (actor === null) {
+    delete env.CLAUDE_CODE_SESSION_ID;
+    // reason: "no identity at all" must reach the binary as such, so the test run's known-party spawn rewrite is opted out.
+    env.LORE_TEST_IDENTITY = "none";
+  } else {
     if (!actor.startsWith(SESSION_ACTOR_PREFIX)) throw new Error(`fixture actor must be ${SESSION_ACTOR_PREFIX}<id8>: ${actor}`);
     env.CLAUDE_CODE_SESSION_ID = `${actor.slice(SESSION_ACTOR_PREFIX.length)}-aaaa-bbbb-cccc`;
   }

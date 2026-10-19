@@ -30,7 +30,7 @@ import { createApp } from "../../src/app.js";
 import { exitCode } from "../../src/adapters/cli/utils.js";
 import { registerTools } from "../../src/adapters/mcp/tools.js";
 import { computeRecoverableUntil } from "../../src/service/soft-delete-window.js";
-import { liveAmbient, liveInvocation, liveWriteContext } from "../live-invocation.js";
+import { liveAmbient, liveInvocation, liveWriteContext, LIVE_TEST_RUN } from "../live-invocation.js";
 
 vi.setConfig({ testTimeout: 300_000, hookTimeout: 300_000 });
 
@@ -253,7 +253,7 @@ describe("AC-DC2-6 recovery window boundary and the MCP route (in-process, clock
       const call = async (name: string, args: Record<string, unknown>): Promise<{ isError: boolean; text: string }> => {
         const tool = tools[name];
         if (tool === undefined) throw new Error(`tool not registered: ${name}`);
-        const res = await tool.handler(args, {});
+        const res = await tool.handler({ harness_run: LIVE_TEST_RUN, ...args }, {});
         const first = res.content[0];
         if (first === undefined || first.type !== "text") throw new Error("expected text content");
         return { isError: res.isError === true, text: first.text };
