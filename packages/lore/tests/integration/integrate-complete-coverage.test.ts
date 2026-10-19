@@ -15,7 +15,8 @@
  *   - a branch adding a runnable command no leaf declares: exit 1, the command and its fix line named, main unchanged.
  */
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
+import { claimBranchTask } from "../helpers/claim-branch-task";
 import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { execFileSync } from "node:child_process";
@@ -50,6 +51,15 @@ function makeBranch(name: string, files: Record<string, string>): string {
   git(["add", "-A"]);
   git(["commit", "-q", "-m", `work on ${name}`]);
   git(["checkout", "-q", "--detach", "main"]);
+  // BR-1348: integrate refuses a branch no task belongs to
+  claimBranchTask((args) => {
+    const r = spawnSync("bun", ["run", INDEX_TS, ...args], {
+      cwd: mini.dir,
+      encoding: "utf8",
+      env: { ...process.env, HOME: join(mini.dir, ".home"), EDITOR: "true", CLAUDECODE: "1", ...sessionEnvFor("claim") },
+    });
+    return { status: r.status ?? 1, out: `${r.stdout}${r.stderr}` };
+  }, mini.dir, name);
   return name;
 }
 
