@@ -32,8 +32,8 @@
  * Side-effect class: IO (git subprocesses through the injected IntegrateGit, the floor through FloorRunner, the loss
  *   ledger's files, creation of one worktree directory, the lease).
  *
- * Before anything moves (after the request is validated and the branch resolves, before the integration worktree
- * exists or any merge runs):
+ * Before anything moves (after the request's own fields are validated, before the first git side effect: the
+ * remote-tracking fetch, the integration worktree and every merge):
  *   - the main-ref guard must be in force (spec-no-working-copy-can-check-out-main-the-main-ref-guard, BR-1343): the
  *     `reference-transaction` hook in the ACTIVE hooks directory (`git rev-parse --git-path hooks`, so `core.hooksPath`
  *     is honoured) is byte-identical to the shipped asset (sha256 against EMBEDDED_ASSETS_MANIFEST) and executable, and
@@ -41,8 +41,8 @@
  *     `err(VALIDATION_ERROR, field "main-ref-guard")`, exit 4, naming `lore setup --project` or the version. This
  *     replaces the old per-run scan for worktrees on main and the shared-checkout detach: the hook makes a checkout of
  *     main impossible, so there is nothing left to scan or detach;
- *   - a remote-tracking argument (`origin/main`: its first segment names a configured remote) is fetched first and is
- *     merged with fast-forward allowed, so inbound commits land as the remote's own commits when main has not diverged.
+ * Then a remote-tracking argument (`origin/main`: its first segment names a configured remote) is fetched and is merged
+ * with fast-forward allowed, so inbound commits land as the remote's own commits when main has not diverged.
  * The reference-transaction hook ships as assets/project/reference-transaction and is installed by `lore setup
  * --project` (which also detaches every working copy that has main checked out); it recognises INTEGRATE_MARKER_ENV on
  * the CAS, and the marker is set ONLY on that CAS `update-ref`.
@@ -307,16 +307,15 @@ export class IntegrateService {
           "workflow.integrate.floor_command is not set in .lore/config.yaml (or the file failed to parse): lore integrate will not advance main on a tree whose floor was never named",
       });
     }
+    // reason: first of every git side effect. BR-1273 refuses "before anything moves, with nothing changed", and a fetch
+    // moves refs/remotes/*; the guard check only reads, so a refused run leaves every ref as it found it.
+    const guarded = this.requireMainRefGuard();
+    if (!guarded.ok) return guarded;
     const fetched = this.fetchRemoteTracking(request.branch);
     if (!fetched.ok) return fetched;
     const tipResult = this.resolveCommit(request.branch);
     if (!tipResult.ok) return tipResult;
     const tip = tipResult.value;
-
-    // reason: after the argument resolves (a typo should say so, not blame the guard) and before the integration worktree
-    // exists or any merge runs: nothing below this line may start without the guard in force (BR-1273).
-    const guarded = this.requireMainRefGuard();
-    if (!guarded.ok) return guarded;
 
     const worktree = this.ensureWorktree(request.sessionId);
     if (!worktree.ok) return worktree;

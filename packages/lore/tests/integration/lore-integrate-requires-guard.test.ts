@@ -73,6 +73,30 @@ describe("AC-MG-2 integrate refuses a missing or stale guard", () => {
   }, 120_000);
 });
 
+describe("AC-MG-2 a refused integrate has changed no ref, not even a remote-tracking one", () => {
+  it("AC-MG-2 integrate of origin/main with no guard exits 4 and refs/remotes is byte-identical before and after", async () => {
+    const { fx } = fixture();
+    const bare = join(root, "origin-nofetch.git");
+    fx.git(["init", "-q", "--bare", "-b", "main", bare]);
+    fx.git(["remote", "add", "origin", bare]);
+    fx.git(["push", "-q", "origin", "main"]);
+    // a peer pushes a new commit to the remote: a fetch WOULD move refs/remotes/origin/main
+    const peer = join(root, "origin-nofetch-peer");
+    fx.git(["clone", "-q", bare, peer]);
+    fx.git(["-c", "user.email=p@example.com", "-c", "user.name=p", "-c", "commit.gpgsign=false", "commit", "-q", "--allow-empty", "-m", "peer commit"], peer);
+    fx.git(["push", "-q", "origin", "main"], peer);
+    const refsBefore = fx.git(["for-each-ref", "refs/remotes"]);
+    const mainBefore = fx.main();
+    expect(refsBefore).not.toBe("");
+
+    const r = await fx.integrate("origin/main", "mg2-nofetch");
+
+    expectRefused(fx, r, mainBefore);
+    expect(r.out).toContain("lore setup --project");
+    expect(fx.git(["for-each-ref", "refs/remotes"])).toBe(refsBefore);
+  }, 120_000);
+});
+
 describe("AC-MG-2 integrate lands with the guard in force", () => {
   it("AC-MG-2 the shipped hook on git >= 2.46: the branch lands (exit 0) and main holds it", async () => {
     const { fx, branch } = fixture();

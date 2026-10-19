@@ -47,6 +47,14 @@ export function initRepoWithMainCommit(dir: string): void {
   }
 }
 
+/** Copies the shipped hook (executable) into `hooksDir`, creating it: the file half of an install, for tests with a fake git. */
+export function copyShippedGuardTo(hooksDir: string): void {
+  mkdirSync(hooksDir, { recursive: true });
+  const target = join(hooksDir, "reference-transaction");
+  copyFileSync(SHIPPED_HOOK_PATH, target);
+  chmodSync(target, 0o755);
+}
+
 /**
  * Installs the shipped guard into `repo` the way `lore setup --project` leaves it, without running setup: copies the
  * asset to `<hooksDir>/reference-transaction` (default `<repo>/hooks`; executable) and points `core.hooksPath` at it.
@@ -54,10 +62,7 @@ export function initRepoWithMainCommit(dir: string): void {
  */
 export function installShippedGuard(repo: string, hooksDir?: string): void {
   const hooks = hooksDir ?? join(realpathSync(repo), "hooks");
-  mkdirSync(hooks, { recursive: true });
-  const target = join(hooks, "reference-transaction");
-  copyFileSync(SHIPPED_HOOK_PATH, target);
-  chmodSync(target, 0o755);
+  copyShippedGuardTo(hooks);
   const set = spawnSync("git", ["config", "core.hooksPath", hooks], { cwd: repo, encoding: "utf8" });
   if (set.status !== 0) throw new Error(`git config core.hooksPath failed: ${set.stderr}`);
 }
