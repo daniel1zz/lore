@@ -90,9 +90,9 @@ async function createPlainTask(cs: CorpusService, title = "Ordinary task"): Prom
 // reason: spec-github-owns-issue-report-state-no-mirror-task-work-carries D1 retired `resolves` (the carrier is
 // extra.issues). The former AC-ICL-1 HAPPY/NEGATIVE/BOUNDARY/ERROR/STATE cases asserted the write-time target
 // check that no longer exists; the one surviving contract is that no `resolves` edge can be created at all
-// (full refusal matrix: tests/unit/service/issue-carrier-schema.test.ts, AC-GS-11).
+// (full refusal matrix: tests/unit/service/issue-carrier-schema.test.ts).
 
-describe("AC-ICL-1 (retired by AC-GS-11): resolves link type", () => {
+describe("AC-ICL-1 (retired by the carrier schema): resolves link type", () => {
   it("AC-ICL-1 NEGATIVE: linkTypeSchema no longer lists 'resolves'; CorpusService.link refuses it whatever the target", async () => {
     expect(linkTypeSchema.safeParse("resolves").success).toBe(false);
 
