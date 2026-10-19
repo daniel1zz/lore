@@ -256,6 +256,22 @@ async function walkToActive(cs: CorpusService, docId: string, store: SQLiteStore
 }
 
 /** Walks a doc all the way to `archived` via the fast-track edge (draft -> approved -> active -> archived) — valid for spec/plan per `VALID_TRANSITIONS`. */
+/**
+ * Archives a filed-defect task through a BARE (unwired) CorpusService, the same way the seeds above build the
+ * corpus. reason: DCL-1 (b) — `lore set --status archived` now applies the `lore done` floors, and this suite's
+ * subject is the COMPUTED resolution of an archived issue task, not the floors; a fixture corpus with no git
+ * repository can never hold a state-bound attested pass, so the status flip is done below the CLI.
+ */
+async function archiveIssueTaskUnwired(dir: string, docId: string): Promise<void> {
+  const store = actedStore(new SQLiteStore(dbPathFor(dir)));
+  try {
+    const cs = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
+    await mustSet(cs, docId, "archived");
+  } finally {
+    store.close();
+  }
+}
+
 async function walkToArchived(cs: CorpusService, docId: string, store: SQLiteStore): Promise<void> {
   await walkToActive(cs, docId, store);
   await mustSet(cs, docId, "archived");
@@ -352,8 +368,7 @@ describe("AC-ICL-8 (amended by D6 of spec-archiving-the-work-that-resolves-a-def
     expect(beforeText.exitCode).toBe(0);
     expect(beforeText.stdout).not.toContain("unclosed escalation");
 
-    const archiveResult = await runLore(["set", issue.slug, "--status", "archived"], dir);
-    expect(archiveResult.exitCode).toBe(0);
+    await archiveIssueTaskUnwired(dir, issue.id);
 
     // Archiving the issue task changes nothing about the verdict: still quiet.
     const afterJson = await runLore(["status", "--check-issues", "--json"], dir);
@@ -508,8 +523,7 @@ describe("AC-ICL-8: archived-with-a-fixed-edge never regresses to closed; an unr
     const linkResult = await runLore(["link", fixingSpec.slug, issue.slug, "--type", "resolves"], dir);
     expect(linkResult.exitCode).toBe(0);
 
-    const archiveResult = await runLore(["set", issue.slug, "--status", "archived"], dir);
-    expect(archiveResult.exitCode).toBe(0);
+    await archiveIssueTaskUnwired(dir, issue.id);
 
     const allResult = await runLore(["issues", "--all", "--json"], dir);
     expect(allResult.exitCode).toBe(0);

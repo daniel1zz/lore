@@ -261,12 +261,12 @@ describe("done removes the recorded worktree (#106)", () => {
     expect(existsSync(dirtyTracked.path)).toBe(true);
   }, 120_000);
 
-  it("keeps a worktree whose own commit is not reachable from main: exit 0, reason unmerged-commits", () => {
+  // reason: DCL-1 (a) / #171 supersedes the old "exit 0, kept: unmerged-commits" result — `lore done` no longer
+  // archives a task whose claimed branch holds commits main lacks, so the cleanup is never reached for it.
+  it("refuses a task whose own commit is not reachable from main: exit 4 [floor: unmerged-branch], worktree and branch untouched", () => {
     const r = done(unmerged);
-    expect(r.status).toBe(0);
-    expect(worktreeLine(r)).toMatch(/^worktree: kept /);
-    expect(worktreeLine(r)).toContain("unmerged-commits");
-    expect(worktreeLine(r)).toContain(unmerged.path);
+    expect(r.status).toBe(4);
+    expect(r.out).toContain("[floor: unmerged-branch]");
     expect(existsSync(unmerged.path)).toBe(true);
     expect(branchExists(unmerged.branch)).toBe(true);
   }, 120_000);
@@ -306,7 +306,7 @@ describe("done removes the recorded worktree (#106)", () => {
   });
 
   it("done still archives the task even when its worktree is kept (cleanup never fails archival)", () => {
-    const r = lore(["get", unmerged.slug, "--json"]);
+    const r = lore(["get", dirtyTracked.slug, "--json"]);
     expect(r.status).toBe(0);
     expect(r.stdout).toContain('"status": "archived"');
   }, 120_000);

@@ -224,6 +224,11 @@ describe("AC-IT-2: lore done on a report's own task closes its issue (compiled, 
     const doc = JSON.parse((await mustRun(corpus, "S-fail", ["get", doneSlug, "--json"])).stdout) as { data: { doc: { status: string } } };
     expect(doc.data.doc.status).toBe("archived");
 
+    // reason: DCL-1 (b) — `set --status archived` applies the `lore done` floors, so the plain-archive path holds a
+    // runner-captured pass too (what it still does NOT do is close the issue: only `lore done` calls onTaskCompleted).
+    await mustRun(corpus, "S-plain", ["evidence", plainSlug, "--oracle", "test", "--command", "echo 1 passed", "--result", "pass", "--capture"]);
+    // the report task declares an empty ac_scope, which also asks for a runner-produced red row (no-new-tests floor)
+    await mustRun(corpus, "S-plain", ["evidence", plainSlug, "--oracle", "test", "--command", "echo '1 fail' && echo 'Ran 3 tests across 1 files' && false", "--result", "expected-fail", "--capture"]);
     await mustRun(corpus, "S-plain", ["set", plainSlug, "--status", "approved"]);
     await mustRun(corpus, "S-plain", ["set", plainSlug, "--status", "active"]);
     await mustRun(corpus, "S-plain", ["set", plainSlug, "--status", "archived"]);

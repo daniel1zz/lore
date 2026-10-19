@@ -2424,6 +2424,22 @@ export class CorpusService {
       });
     }
 
+    // reason: DCL-1 (b), issues #174 / BR-212 — `lore set --status archived` is an archive route like `lore done`,
+    // plan close and the sweep, and archives a task only if `lore done`'s floors would let it through. The
+    // check is the ONE copy of the floors (`DoneFloorPort`); the refusal is the exact error `done()` returns
+    // (`details.floor` names the floor), nothing is written. An UNWIRED service (bare unit construction)
+    // keeps the pre-port behaviour, as plan close does.
+    if (
+      existing.type === "task" &&
+      newStatus === "archived" &&
+      existing.status !== "archived" &&
+      this.doneFloorPort !== undefined
+    ) {
+      const floorResult = await this.doneFloorPort.checkDoneFloors(existing.id);
+      if (!floorResult.ok) return floorResult;
+      if (floorResult.value !== null) return err(floorResult.value.error);
+    }
+
     const newVersion = existing.version + 1;
 
     // Build patch explicitly — exactOptionalPropertyTypes requires no undefined values in Partial<DocRecord>
