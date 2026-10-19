@@ -590,24 +590,32 @@ export class RuleService {
     const keepsApproval = addCommands.length + removeCommands.length === 0;
     return this.retryWrite(target.value.id, opts?.by, (doc) => {
       const ruleIds = new Set(rulesOf(doc).map((r) => r.id));
+      // All-or-nothing: judge EVERY row and report every refusal in one VALIDATION_ERROR, so a many-row call is
+      // fixed in one pass and nothing is written unless all rows hold.
+      const problems: { value: string; message: string }[] = [];
       for (const [site, entries] of Object.entries(sites)) {
         if (site.trim().length === 0 || entries.length === 0) {
-          return err(validationError("site_map", `site '${site}' needs a non-empty key and at least one rule id or non-business reason`, site));
+          problems.push({ value: site, message: `site '${site}' needs a non-empty key and at least one rule id or non-business reason` });
+          continue;
         }
         for (const entry of entries) {
           const isReason = entry.startsWith(NON_BUSINESS_PREFIX) && entry.slice(NON_BUSINESS_PREFIX.length).trim().length > 0;
           if (!isReason && !ruleIds.has(entry)) {
-            return err(validationError("site_map", `'${entry}' for site '${site}' is neither a rule of this leaf nor '${NON_BUSINESS_PREFIX}<reason>'`, entry));
+            problems.push({ value: entry, message: `'${entry}' for site '${site}' is neither a rule of this leaf nor '${NON_BUSINESS_PREFIX}<reason>'` });
+            continue;
           }
           const owned = parseOwnedBy(entry);
           if (owned.kind === "malformed") {
-            return err(validationError("site_map", `owned-by entry for site '${site}': ${owned.problem} (grammar: ${NON_BUSINESS_PREFIX}owned-by <leaf> BR-n[ BR-m...] — <reason>)`, entry));
-          }
-          if (owned.kind === "owned_by") {
+            problems.push({ value: entry, message: `owned-by entry for site '${site}': ${owned.problem} (grammar: ${NON_BUSINESS_PREFIX}owned-by <leaf> BR-n[ BR-m...] — <reason>)` });
+          } else if (owned.kind === "owned_by") {
             const judged = judgeOwnedBy(owned, ownerLeaves, mappedLeafId);
-            if (!judged.ok) return err(validationError("site_map", `owned-by entry for site '${site}': ${judged.problem}`, entry));
+            if (!judged.ok) problems.push({ value: entry, message: `owned-by entry for site '${site}': ${judged.problem}` });
           }
         }
+      }
+      if (problems.length === 1) return err(validationError("site_map", problems[0]!.message, problems[0]!.value));
+      if (problems.length > 1) {
+        return err(validationError("site_map", `${problems.length} site rows refused, nothing written: ${problems.map((p) => p.message).join("; ")}`, problems.map((p) => p.value)));
       }
       const currentMap = siteMapOf(doc);
       const absentSites = removeSites.filter((k) => !(k in currentMap));
