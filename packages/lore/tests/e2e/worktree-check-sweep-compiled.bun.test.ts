@@ -23,7 +23,7 @@
  */
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runLoreInProcess } from "../helpers/run-lore-in-process";
@@ -105,6 +105,8 @@ function addMergedWorktree(name: string): string {
   writeFileSync(join(path, `${name}.txt`), `${name}\n`);
   mustOk(git(path, "add", "-A"), `add ${name}`);
   mustOk(git(path, "commit", "-q", "-m", `own commit ${name}`), `commit ${name}`);
+  // `lore integrate` (run once in beforeAll) leaves the shared checkout detached at main: re-attach it so the merge moves main
+  mustOk(git(repo, "checkout", "-q", "main"), `checkout main for ${name}`);
   mustOk(git(repo, "merge", "-q", "--no-edit", name), `merge ${name}`);
   return path;
 }
@@ -133,6 +135,9 @@ beforeAll(async () => {
   mustOk(git(repo, "add", "-A"), "git add");
   mustOk(git(repo, "commit", "-q", "-m", "base"), "git commit");
   mustOk(await lore(["init"]), "lore init");
+  // `lore integrate` keeps its own worktree under `.claude/` and needs the floor key; neither may dirty the tree
+  appendFileSync(join(repo, ".git", "info", "exclude"), ".claude/\n.lore/integrate-attempts/\n.lore/integrate-losses/\n");
+  appendFileSync(join(repo, ".lore", "config.yaml"), 'workflow:\n  integrate:\n    floor_command: "true"\n', "utf8");
   // reason: `lore init` arms state binding (AC-CT-3); evidence captured on a dirty tree is unbound and refused by `lore done`.
   mustOk(git(repo, "add", "-A"), "git add corpus");
   mustOk(git(repo, "commit", "-q", "-m", "lore corpus"), "git commit corpus");
@@ -154,6 +159,9 @@ beforeAll(async () => {
   const created = mustOk(await lore(["create", "task", "--adhoc", "--title", "CCC claimed work", "--content", "Throwaway task.", "--no-ai", "--ac-scope", "", "--json"], "S3"), "create task");
   const slug = (JSON.parse(created.stdout) as { data: { slug: string } }).data.slug;
   mustOk(await lore(["claim", slug, "--worktree", ccc], "S3"), "claim");
+  // the branch is on main already (merged above); integrate finds it already integrated and records the landing
+  // `lore done` requires (BR-1291)
+  mustOk(await lore(["integrate", "agent-CCC", "--session", "S3"], "S3"), "integrate CCC");
   mustOk(await lore(["evidence", slug, "--oracle", "test", "--command", "echo 1 passed", "--result", "pass", "--capture"], "S3"), "evidence");
   mustOk(await lore(["done", slug, "--declare-no-new-tests", "fixture: throwaway task"], "S3"), "done");
 }, 300_000);

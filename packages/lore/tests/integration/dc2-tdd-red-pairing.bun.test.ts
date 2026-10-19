@@ -17,7 +17,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
+import { appendFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { execFileSync } from "child_process";
 import { join } from "path";
 import { tmpdir } from "os";
@@ -137,7 +137,10 @@ describe(`${ID} (b) — one red-first task closes red then green`, () => {
     git(["commit", "-q", "-m", "implementation"], dir);
     mustRun(["evidence", task, "--oracle", "test", "--command", cmd, "--result", "pass", "--capture"], dir);
     git(["checkout", "-q", "main"], dir);
-    git(["merge", "-q", "--no-ff", "-m", "land", "feat-red-first"], dir);
+    // landed through `lore integrate`, which records the landing `lore done` requires (BR-1291)
+    appendFileSync(join(dir, ".git", "info", "exclude"), ".claude/\n");
+    appendFileSync(join(dir, ".lore", "config.yaml"), 'workflow:\n  integrate:\n    floor_command: "true"\n', "utf8");
+    mustRun(["integrate", "feat-red-first", "--session", "dc2-red-session"], dir);
 
     const closed = runLore(["done", task], dir);
     expect(closed.text).not.toMatch(/\[floor:/);

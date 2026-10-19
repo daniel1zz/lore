@@ -2341,6 +2341,31 @@ function buildNoWorktreeMismatchRefusal(opts: {
 /** Why a worktree measurement is absent on a service built without a probe (bare test construction). */
 const NO_WORKTREE_PROBE_REASON = "no worktree probe is wired into this TaskWorkflowService";
 
+/** A working copy as a claim named it: the `--worktree` value (path or branch name) and the branch the claim captured. */
+interface ClaimedWorkingCopy {
+  readonly name: string;
+  readonly branch?: string;
+}
+
+/** Trailing slashes never make two spellings of one path different working copies. */
+function normalizeWorkingCopyName(name: string): string {
+  return name.length > 1 ? name.replace(/\/+$/, "") : name;
+}
+
+/**
+ * Whether two claims name ONE working copy (BR-1337): the same spelling, or a path and a branch name where the path's
+ * branch is that name. Two different paths never match through a shared branch name: separate repositories each have
+ * a `main`, and a branch name alone does not identify a working copy.
+ */
+function isSameWorkingCopy(a: ClaimedWorkingCopy, b: ClaimedWorkingCopy): boolean {
+  if (normalizeWorkingCopyName(a.name) === normalizeWorkingCopyName(b.name)) return true;
+  const aIsPath = isAbsolute(a.name);
+  const bIsPath = isAbsolute(b.name);
+  if (aIsPath && !bIsPath) return a.branch !== undefined && a.branch === b.name;
+  if (bIsPath && !aIsPath) return b.branch !== undefined && b.branch === a.name;
+  return false;
+}
+
 export class TaskWorkflowService {
   private readonly telemetry: Telemetry;
   /**
@@ -4364,6 +4389,30 @@ export class TaskWorkflowService {
   }
 
   /**
+   * Every working copy `task`'s claims named: each claim audit row's `worktree` paired with the `branch` that claim
+   * captured, plus the current claim's. Rows without a `worktree` name no working copy.
+   */
+  private static claimedWorkingCopies(auditRows: readonly AuditEntry[], task: DocRecord): ClaimedWorkingCopy[] {
+    const copies = new Map<string, ClaimedWorkingCopy>();
+    const add = (name: unknown, branch: unknown): void => {
+      if (typeof name !== "string" || name.trim() === "") return;
+      const prior = copies.get(name);
+      const captured = typeof branch === "string" && branch.trim() !== "" ? branch : prior?.branch;
+      copies.set(name, { name, ...(captured !== undefined ? { branch: captured } : {}) });
+    };
+    for (const row of auditRows) add(row.details?.["worktree"], row.details?.["branch"]);
+    const current = readClaimRecord(task);
+    add(current?.worktree, current?.branch);
+    return [...copies.values()];
+  }
+
+  /** The branch checked out in `worktree`, read through the injected git port; `undefined` when it cannot be measured. */
+  private async measuredBranchOf(worktree: string): Promise<string | undefined> {
+    const measurement = await this.detectBranch(worktree);
+    return measurement.status === "measured" ? measurement.branch : undefined;
+  }
+
+  /**
    * The ONE candidate-name derivation for a task's landing, shared by `recordLanding` (integrate time) and
    * `resolveLanding` (done time): the names the claims recorded ({@link claimedNames}) plus, for every recorded
    * worktree PATH, the branch that worktree is on, read from git. `lore integrate` names the landing merge
@@ -4453,12 +4502,9 @@ export class TaskWorkflowService {
    */
   private async refuseWhileWorkingCopyHoldsUnlandedTask(task: DocRecord, opts: ClaimOpts): Promise<Result<void, LoreError>> {
     if (opts.worktree === undefined) return ok(undefined);
-    const claimantNames = new Set<string>([opts.worktree]);
-    if (opts.branch !== undefined) claimantNames.add(opts.branch);
-    if (isAbsolute(opts.worktree)) {
-      const measurement = await this.detectBranch(opts.worktree);
-      if (measurement.status === "measured") claimantNames.add(measurement.branch);
-    }
+    const claimantBranch =
+      opts.branch ?? (isAbsolute(opts.worktree) ? await this.measuredBranchOf(opts.worktree) : undefined);
+    const claimant: ClaimedWorkingCopy = { name: opts.worktree, ...(claimantBranch !== undefined ? { branch: claimantBranch } : {}) };
     const tasksResult = await this.store.findMany({ type: "task" });
     if (!tasksResult.ok) return tasksResult;
     const auditResult = await this.store.queryAudit({ action: "claim" });
@@ -4466,9 +4512,19 @@ export class TaskWorkflowService {
     for (const other of tasksResult.value) {
       if (other.id === task.id || other.status === "archived" || other.status === "deprecated") continue;
       const rows = auditResult.value.filter((row) => row.doc_id === other.id);
-      if (rows.length === 0 && readClaimRecord(other) === undefined) continue;
-      const names = await this.landingCandidateNames(rows, other);
-      if (!names.some((name) => claimantNames.has(name))) continue;
+      const held = TaskWorkflowService.claimedWorkingCopies(rows, other);
+      let sameCopy = false;
+      for (const copy of held) {
+        // reason: a recorded path whose claim captured no branch is measured live, but only when the claimant named a
+        // branch (a path-vs-path comparison never needs it, and two repos may both have a branch called `main`).
+        const heldBranch =
+          copy.branch ?? (isAbsolute(copy.name) && !isAbsolute(claimant.name) ? await this.measuredBranchOf(copy.name) : undefined);
+        if (isSameWorkingCopy(claimant, { name: copy.name, ...(heldBranch !== undefined ? { branch: heldBranch } : {}) })) {
+          sameCopy = true;
+          break;
+        }
+      }
+      if (!sameCopy) continue;
       if (await this.isLandingOnMain(other)) continue;
       return err({
         code: "VALIDATION_ERROR",

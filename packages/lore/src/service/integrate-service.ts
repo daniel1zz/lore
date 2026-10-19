@@ -336,7 +336,7 @@ export class IntegrateService {
         // reason: BR-1336 — an already-integrated branch still records a landing on every claimant that holds none for
         // this head (the recorder skips tasks that already carry one). Main did not move, so main_before == main_after
         // and the branch head itself is the landed commit: it is an ancestor of main.
-        await this.recordLanding({ branch: request.branch, branch_head: tip, main_before: base.value, main_after: base.value, landing_commit: tip });
+        await this.recordLanding(this.locateExistingLanding(request.branch, tip, base.value));
         const cleared = ledger.clear(request.branch);
         if (!cleared.ok) return cleared;
         const view = this.refreshSharedView();
@@ -414,6 +414,29 @@ export class IntegrateService {
     const back = this.resetWorktree(wt, final.value);
     if (!back.ok) return back;
     return ok({ kind: "lost_races", branch: request.branch, attempts: INTEGRATE_MAX_ATTEMPTS, moved_by: movedBy, consecutive_losses: lastConsecutiveLosses });
+  }
+
+  /**
+   * The landing fact of a branch found already on main (BR-1336): where `tip` entered main's first-parent chain. When
+   * the earliest first-parent commit of `tip..main` descending from `tip` is a merge whose second parent is `tip`, that
+   * merge is the landed commit and its first parent is main before the landing (so `main_before..branch_head` is the
+   * branch's own work). Otherwise (a fast-forward, a hand cherry-pick of the whole history, an unreadable log) the
+   * branch head itself is the landed commit and `main_before` is main's current commit: the record is still true
+   * (`landing_commit` is on main) and its range is simply empty. This reads main once, at integrate time, to fill
+   * the record; `lore done` never searches history.
+   */
+  private locateExistingLanding(branch: string, tip: string, main: string): LandingFact {
+    const { git, projectRoot } = this.deps;
+    const fallback: LandingFact = { branch, branch_head: tip, main_before: main, main_after: main, landing_commit: tip };
+    const chain = git(projectRoot, ["rev-list", "--ancestry-path", "--first-parent", "--reverse", `${tip}..${TARGET_REF}`]);
+    if (chain.status !== 0) return fallback;
+    const entering = chain.stdout.split("\n")[0]?.trim() ?? "";
+    if (entering === "") return fallback;
+    const parents = git(projectRoot, ["rev-list", "--parents", "-n", "1", entering]);
+    if (parents.status !== 0) return fallback;
+    const [, first, second, ...rest] = parents.stdout.trim().split(" ");
+    if (first === undefined || second !== tip || rest.length > 0) return fallback;
+    return { branch, branch_head: tip, main_before: first, main_after: entering, landing_commit: entering };
   }
 
   /**

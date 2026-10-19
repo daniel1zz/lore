@@ -394,8 +394,9 @@ describe("TaskWorkflowService.claim — actor-identity gate wired end-to-end (AC
     expect(second.ok).toBe(true);
   });
 
-  // BOUNDARY — solo session holding multiple tasks in ONE worktree never trips it
-  it("solo os_default session holding multiple tasks in ONE worktree never trips it", async () => {
+  // BOUNDARY — BR-134 no longer excuses one actor holding several tasks from one working copy: BR-1337 makes that state
+  // impossible, so the second claim is refused by the working-copy rule (not by the same-name check)
+  it("solo os_default session claiming a second task on ONE worktree is refused by BR-1337, naming the first task", async () => {
     const { corpusService, taskWorkflowService } = makeServices();
     const planId = await createTopLevelPlan(corpusService);
     const taskOneId = await createTask(corpusService, planId, "Task One");
@@ -413,7 +414,9 @@ describe("TaskWorkflowService.claim — actor-identity gate wired end-to-end (AC
       identitySource: "os-fallback",
       worktree: "/repo/.worktrees/solo",
     });
-    expect(second.ok).toBe(true);
+    expect(second.ok).toBe(false);
+    if (second.ok) return;
+    expect("message" in second.error ? second.error.message : "").toContain("one working copy carries one unlanded task");
   });
 
   // STATE — a STALE holder's os_default claim never blocks a colliding fresh claim
