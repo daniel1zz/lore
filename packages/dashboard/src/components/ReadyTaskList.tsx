@@ -30,6 +30,7 @@
  */
 
 import { useEffect, useState } from "react";
+import { getAllowedTransitions } from "@lore/core";
 import type { ReadyRecord } from "@lore/core";
 import { Badge } from "@/components/ui/badge";
 
@@ -94,6 +95,19 @@ function ClaimBadge({ claim, claimTtlMinutes }: ClaimBadgeProps): React.ReactEle
 }
 
 /**
+ * The row's status badge, total over task statuses. A terminal status (no lifecycle edge
+ * leaves it, per core's `getAllowedTransitions`) renders its own honest label: archived is
+ * "done", every other terminal status (today: deprecated) renders its status name. Only a
+ * non-terminal task is "ready" or "blocked", from `ready` (the server's `ready` is false for
+ * every terminal task, which says nothing about being blocked).
+ */
+function readyBadgeLabel(record: ReadyRecord): string {
+  const { status } = record.task;
+  if (getAllowedTransitions(status).length === 0) return status === "archived" ? "done" : status;
+  return record.ready ? "ready" : "blocked";
+}
+
+/**
  * @example
  * <ReadyTaskList records={records} claimTtlMinutes={120} />
  */
@@ -108,7 +122,9 @@ export function ReadyTaskList({ records, claimTtlMinutes, onTaskClick }: ReadyTa
 
   return (
     <div className="space-y-2" aria-label="Ready tasks">
-      {records.map((record) => (
+      {records.map((record) => {
+        const badge = readyBadgeLabel(record);
+        return (
         <div
           key={record.task.id}
           role="button"
@@ -121,8 +137,8 @@ export function ReadyTaskList({ records, claimTtlMinutes, onTaskClick }: ReadyTa
         >
           <div className="flex items-center gap-1.5 flex-wrap">
             <span className="text-sm font-medium truncate">{record.task.title}</span>
-            <Badge variant={record.ready ? "secondary" : "outline"} className="text-xs">
-              {record.ready ? "ready" : "blocked"}
+            <Badge variant={badge === "blocked" ? "outline" : "secondary"} className="text-xs">
+              {badge}
             </Badge>
             <ClaimBadge claim={record.claim} claimTtlMinutes={claimTtlMinutes} />
             <span className="text-xs text-muted-foreground ml-auto shrink-0">
@@ -135,7 +151,8 @@ export function ReadyTaskList({ records, claimTtlMinutes, onTaskClick }: ReadyTa
             </p>
           )}
         </div>
-      ))}
+        );
+      })}
     </div>
   );
 }

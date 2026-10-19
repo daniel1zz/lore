@@ -72,6 +72,7 @@ import {
   bootstrapReportSchema,
   deriveSessions,
   deriveLastActivityAt,
+  isActivePlan,
   deriveResumeHint,
   parseSeatBranch,
   isInvalidated,
@@ -433,7 +434,7 @@ export class SessionService {
     const plans = allDocs.filter((d) => d.type === "plan");
     const activePlanEntries: Array<{ plan: DocRecord; tasks: DocRecord[] }> = [];
     for (const plan of plans) {
-      if (plan.status === "archived" || plan.status === "deprecated") continue;
+      if (!isActivePlan(plan)) continue;
       // reason: membership is `extra.plan_id` ({@link isPlanMember}), NEVER the
       // `parent_id` proxy — `lore create task --plan-id P --parent Q` (P !== Q)
       // is a SUPPORTED shape (SPEC-065 D4), and keying this listing on the proxy

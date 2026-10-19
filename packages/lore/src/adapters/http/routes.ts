@@ -27,6 +27,7 @@ import { handleGetConfig, handleGetMachineConfig } from "./config-routes.js";
 import { handleGetIssueReports } from "./issue-reports-routes.js";
 import type { ListFilters, SearchFilters } from "../../service/corpus-service.js";
 import type { PendingFilters } from "../../service/review-service.js";
+import { isActivePlan } from "@lore/core";
 import type { CreateDocInput, DocPatch } from "@lore/core";
 import type { DocStatus, DocType, LinkType } from "@lore/core";
 import { computeValidityState } from "../../flows/validity-state.js";
@@ -363,6 +364,15 @@ async function handleListDocs(url: URL, app: App): Promise<Response> {
   const created_by = url.searchParams.get("created_by");
   const since = url.searchParams.get("since");
   const tags = url.searchParams.get("tags");
+  const active = url.searchParams.get("active");
+
+  // `active` is a named filter, not a status: only the literal `true`, only for plans.
+  if (active !== null && (active !== "true" || type !== "plan")) {
+    return jsonError(
+      { code: "VALIDATION_ERROR", field: "active", message: "active=true is the only accepted value and requires type=plan" },
+      422,
+    );
+  }
 
   if (type !== null) filters.type = type as DocType;
   if (status !== null) filters.status = status as DocStatus;
@@ -373,7 +383,10 @@ async function handleListDocs(url: URL, app: App): Promise<Response> {
 
   const result = await app.corpusService.list(filters);
   if (!result.ok) return loreErrorResponse(result.error);
-  return jsonOk(result.value);
+  if (active === null) return jsonOk(result.value);
+  // reason: no limit/offset is passed above, so filtering after the fetch cannot shorten a page.
+  const docs = result.value.docs.filter(isActivePlan);
+  return jsonOk({ ...result.value, docs, total: docs.length });
 }
 
 async function handleCreateDoc(req: Request, app: App, actor: ActorContext): Promise<Response> {

@@ -182,6 +182,11 @@ export interface ListOpts {
   parent_id?: string;
   since?: string;
   /**
+   * Named server filter: only plans that are neither archived nor deprecated (the same
+   * predicate bootstrap uses). The server accepts it with `type: "plan"` only.
+   */
+  active?: true;
+  /**
    * Tag names to filter by — server semantics are AND (a doc must carry
    * EVERY listed tag), matching `ListFilters.tags`'s existing in-memory
    * `requiredTags.every(...)` filter (`packages/lore/src/store/sqlite-store.ts`).
@@ -299,7 +304,7 @@ export async function apiList(project: string | null, opts: ListOpts = {}): Prom
   // (routes.ts) before building the rest of the query string from the scalar fields.
   const { tags, ...scalarOpts } = opts;
   const qs = buildQueryString({
-    ...(scalarOpts as Record<string, string | undefined>),
+    ...(scalarOpts as Record<string, string | boolean | undefined>),
     ...(tags !== undefined && tags.length > 0 ? { tags: tags.join(",") } : {}),
   });
   return fetchJson<ListResponse>(project, `/docs${qs}`);

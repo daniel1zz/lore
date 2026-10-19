@@ -226,7 +226,7 @@ describe("ExecutionPage", () => {
 
       await screen.findByText("Ready Tasks");
 
-      expect(mockedApiList).toHaveBeenCalledWith("acme", { type: "plan", status: "active" });
+      expect(mockedApiList).toHaveBeenCalledWith("acme", { type: "plan", active: true });
       expect(mockedApiGetReadyReport).toHaveBeenCalledWith("acme", "plan-a");
       expect(mockedApiGetPhaseStatus).toHaveBeenCalledWith("acme", "plan-a");
 
