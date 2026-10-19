@@ -40,8 +40,8 @@
  *     row rendering that command actually ships is directly vitest-callable —
  *     `commands/status.ts::renderDriftSection` is a thin console.log wrapper
  *     over `renderDriftSectionLines`, its ONE production caller.
- *   SYMBOL_MISSING_FOOTNOTE — the documented false-positive-forms footnote (D3),
- *     printed by CLI text rendering whenever any `symbol_missing` row appears.
+ *   (The false-positive footnote of the retired text scan is gone: exported names are
+ *   decided by a parse, BR-417 — a `symbol_missing` row is a real finding.)
  *
  * Side-effect class: IO (delegates entirely to the injected DriftFlowDeps + probe)
  * Source: SPEC-045 §Design Decisions D5, D7, D8
@@ -248,21 +248,8 @@ export function renderDriftSectionLines(payload: CodeDriftPayload): string[] {
     lines.push(`  - [${row.doc_type}] ${row.doc_slug} → ${row.anchor} (${row.kind})`);
     lines.push(`    ${renderDriftRepairHint(row)}`);
   }
-  if (payload.drifts.some((d) => d.kind === "symbol_missing")) {
-    lines.push(`  ${SYMBOL_MISSING_FOOTNOTE}`);
-  }
   return lines;
 }
-
-/**
- * The documented false-positive-forms footnote (D3) — printed by CLI text
- * rendering whenever a `symbol_missing` row appears, so a reader isn't misled
- * into thinking the scanner is a real TS parser.
- */
-export const SYMBOL_MISSING_FOOTNOTE =
-  "Note: the lexical export scanner does not recognize `export * from`, `module.exports`, " +
-  "re-export chains, `export type { X }` (type-only brace lists), or destructured exports " +
-  "(`export const {a, b} = obj`) — a symbol_missing row may be a false positive from one of these forms.";
 
 /**
  * The ONE production definition of "anchored" — `true` iff `doc.extra.code_anchors`

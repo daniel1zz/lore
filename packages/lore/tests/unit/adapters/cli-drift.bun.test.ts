@@ -31,7 +31,7 @@
  *               `armed=false`; `workflow.drift.enabled=false` → exit 0, `disabled`
  *   ERROR:      the five drift kinds (file_missing, symbol_missing, dir_empty,
  *               permanently-missing file_missing, node_type_mismatch) each correctly
- *               classified, repair hint + SYMBOL_MISSING_FOOTNOTE text rendered
+ *               classified, repair hint rendered
  *   STATE:      a fixed spec stops appearing in `drifts[]` once its file is restored,
  *               while a permanently-broken spec's row survives across multiple runs;
  *               `--check-drift --check-tree` composition — drift wins the exit-code
@@ -263,13 +263,13 @@ describe("lore status --check-drift — ERROR (drift-kind classification, sequen
     );
   });
 
-  it("2) renaming the exported symbol → symbol_missing, with the SYMBOL_MISSING_FOOTNOTE note", async () => {
+  it("2) renaming the exported symbol → symbol_missing, with no false-positive disclaimer (exports are parsed)", async () => {
     writeFileSync(join(tmpDir, "src", "b.ts"), "export const Renamed = 1;\n");
 
     const result = await runLore(["status", "--check-drift"], tmpDir);
     expect(result.exitCode).toBe(3);
     expect(result.stdout).toContain(`[spec] ${specBSlug} → src/b.ts#Exported (symbol_missing)`);
-    expect(result.stdout).toContain("does not recognize `export * from`");
+    expect(result.stdout).not.toContain("lexical export scanner");
   });
 
   it("3) emptying the anchored directory → dir_empty", async () => {

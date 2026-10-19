@@ -32,7 +32,6 @@ import {
   parseCodeAnchor,
   serializeCodeAnchor,
   normalizeCodeAnchorEntries,
-  scanExportedSymbols,
   scanTestTitles,
   computeDrift,
   type DriftInputEntry,
@@ -217,97 +216,49 @@ describe("STATE — normalizeCodeAnchorEntries never batch-collapses same-path s
   });
 });
 
-// ─── HAPPY — scanExportedSymbols (D3 forms) ────────────────────────────────
+// ─── computeDrift — exported names come from the probe's export reader (BR-417) ──
+// The reader itself (TypeScript parse) lives in packages/lore/src/service/export-reader.ts and is
+// tested by packages/lore/tests/unit/service/export-reader.test.ts; here only the classification
+// over an already-collected `AnchorProbe.exported`.
 
-describe("HAPPY — scanExportedSymbols matches every D3 form", () => {
-  it("matches export const/let/var", () => {
-    const src = "export const A = 1;\nexport let B = 2;\nexport var C = 3;\n";
-    const found = scanExportedSymbols(src);
-    expect(found.has("A")).toBe(true);
-    expect(found.has("B")).toBe(true);
-    expect(found.has("C")).toBe(true);
+describe("BR-417 — computeDrift classifies a symbol anchor from AnchorProbe.exported", () => {
+  const symbolEntry = (symbol: string): DriftInputEntry =>
+    makeEntry({ anchor: { raw: `src/a.ts#${symbol}`, path: "src/a.ts", isDir: false, symbol } });
+  const fileProbe = (exported?: AnchorProbe["exported"]): Map<string, AnchorProbe> =>
+    new Map([["src/a.ts", { stat: "file", content: "// text is never scanned", ...(exported ? { exported } : {}) }]]);
+
+  it("HAPPY: a name in the reader's list is consistent, whatever the file text says", () => {
+    const result = computeDrift([symbolEntry("Foo")], fileProbe({ names: new Set(["Foo"]) }));
+    expect(result.drifts).toEqual([]);
   });
 
-  it("matches export function and export async function", () => {
-    const src = "export function foo() {}\nexport async function bar() {}\n";
-    const found = scanExportedSymbols(src);
-    expect(found.has("foo")).toBe(true);
-    expect(found.has("bar")).toBe(true);
+  it("NEGATIVE: a name absent from a COMPLETE list is symbol_missing", () => {
+    const result = computeDrift([symbolEntry("Gone")], fileProbe({ names: new Set(["Foo"]) }));
+    expect(result.drifts.map((d) => d.kind)).toEqual(["symbol_missing"]);
   });
 
-  it("matches export class and export abstract class", () => {
-    const src = "export class Foo {}\nexport abstract class Bar {}\n";
-    const found = scanExportedSymbols(src);
-    expect(found.has("Foo")).toBe(true);
-    expect(found.has("Bar")).toBe(true);
+  it("ERROR: a name absent from an INCOMPLETE list is a not-measured probe_error, never symbol_missing", () => {
+    const result = computeDrift(
+      [symbolEntry("Gone")],
+      fileProbe({ names: new Set(["Foo"]), notMeasured: "export * from a package" }),
+    );
+    expect(result.drifts.map((d) => d.kind)).toEqual(["probe_error"]);
+    expect(result.drifts[0]?.detail).toContain("not measured");
+    expect(result.drifts[0]?.detail).toContain("export * from a package");
   });
 
-  it("matches export type/interface/enum", () => {
-    const src = "export type Foo = string;\nexport interface Bar {}\nexport enum Baz {}\n";
-    const found = scanExportedSymbols(src);
-    expect(found.has("Foo")).toBe(true);
-    expect(found.has("Bar")).toBe(true);
-    expect(found.has("Baz")).toBe(true);
+  it("STATE: a name in an INCOMPLETE list is still verified", () => {
+    const result = computeDrift(
+      [symbolEntry("Foo")],
+      fileProbe({ names: new Set(["Foo"]), notMeasured: "export * from a package" }),
+    );
+    expect(result.drifts).toEqual([]);
   });
 
-  it("matches export default (any trailing form) as symbol 'default'", () => {
-    expect(scanExportedSymbols("export default function foo() {}").has("default")).toBe(true);
-    expect(scanExportedSymbols("export default class Foo {}").has("default")).toBe(true);
-    expect(scanExportedSymbols("export default 42;").has("default")).toBe(true);
-  });
-
-  it("matches a single-line export { A, B as C } brace list, alias exports the ALIAS", () => {
-    const found = scanExportedSymbols("export { A, B as C };\n");
-    expect(found.has("A")).toBe(true);
-    expect(found.has("C")).toBe(true);
-    expect(found.has("B")).toBe(false);
-  });
-
-  it("matches a MULTI-LINE export { ... } brace list", () => {
-    const src = "export {\n  A,\n  B as C,\n};\n";
-    const found = scanExportedSymbols(src);
-    expect(found.has("A")).toBe(true);
-    expect(found.has("C")).toBe(true);
-  });
-
-  it("allows leading whitespace before export (indented, still line-anchored)", () => {
-    const src = "  export const Indented = 1;\n";
-    expect(scanExportedSymbols(src).has("Indented")).toBe(true);
-  });
-});
-
-// ─── NEGATIVE — scanExportedSymbols exclusions ─────────────────────────────
-
-describe("NEGATIVE — scanExportedSymbols does not match excluded forms", () => {
-  it("does not match a commented-out export (// export const X)", () => {
-    const found = scanExportedSymbols("// export const Hidden = 1;\n");
-    expect(found.has("Hidden")).toBe(false);
-  });
-
-  it("does not match a mid-line export occurrence", () => {
-    const found = scanExportedSymbols("const y = 1; export const MidLine = 1;\n");
-    expect(found.has("MidLine")).toBe(false);
-  });
-
-  it("does not match `export type { X }` (type-only brace list, documented FP)", () => {
-    const found = scanExportedSymbols("export type { TypeOnly };\n");
-    expect(found.has("TypeOnly")).toBe(false);
-  });
-
-  it("does not match a destructured export (documented FP)", () => {
-    const found = scanExportedSymbols("export const { a, b } = obj;\n");
-    expect(found.has("a")).toBe(false);
-    expect(found.has("b")).toBe(false);
-  });
-
-  it("does not match `export * from './other'`", () => {
-    const found = scanExportedSymbols("export * from './other';\n");
-    expect(found.size).toBe(0);
-  });
-
-  it("does not match a block-commented export (/* export const X */)", () => {
-    const found = scanExportedSymbols("/* export const Blocked = 1; */\n");
-    expect(found.has("Blocked")).toBe(false);
+  it("BOUNDARY: no reader answer at all is not measured (content alone is never scanned)", () => {
+    const result = computeDrift([symbolEntry("Foo")], fileProbe());
+    expect(result.drifts.map((d) => d.kind)).toEqual(["probe_error"]);
+    expect(result.drifts[0]?.detail).toContain("not measured");
   });
 });
 
@@ -323,7 +274,7 @@ describe("HAPPY — computeDrift: fully consistent anchor set has no drift", () 
       makeEntry({ anchor: { raw: "src/dir/", path: "src/dir", isDir: true } }),
     ];
     const probes = new Map<string, AnchorProbe>([
-      ["src/a.ts", { stat: "file", content: "export const Foo = 1;\n" }],
+      ["src/a.ts", { stat: "file", content: "export const Foo = 1;\n", exported: { names: new Set(["Foo"]) } }],
       ["src/dir", { stat: "dir", children: ["x.ts", ".gitkeep"] }],
     ]);
     const result = computeDrift(declared, probes);
@@ -372,20 +323,20 @@ describe("REGRESSION — computeDrift classifies all six drift kinds", () => {
       }),
     ];
     const probes = new Map<string, AnchorProbe>([
-      ["src/a.ts", { stat: "file", content: "export const Foo = 1;\n" }],
+      ["src/a.ts", { stat: "file", content: "export const Foo = 1;\n", exported: { names: new Set(["Foo"]) } }],
     ]);
     const result = computeDrift(declared, probes);
     expect(result.drifts[0]?.kind).toBe("symbol_missing");
   });
 
-  it("symbol_missing: export type {} and destructured exports never crash, never falsely consistent", () => {
+  it("symbol_missing: a complete export list without the symbol is never falsely consistent", () => {
     const declared = [
       makeEntry({
         anchor: { raw: "src/a.ts#TypeOnly", path: "src/a.ts", isDir: false, symbol: "TypeOnly" },
       }),
     ];
     const probes = new Map<string, AnchorProbe>([
-      ["src/a.ts", { stat: "file", content: "export type { TypeOnly };\n" }],
+      ["src/a.ts", { stat: "file", content: "export type { Other };\n", exported: { names: new Set(["Other"]) } }],
     ]);
     expect(() => computeDrift(declared, probes)).not.toThrow();
     const result = computeDrift(declared, probes);
