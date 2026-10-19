@@ -230,7 +230,7 @@ describe("migration-007 (versions.slug nullable column)", () => {
     // migration-009 (SPEC-079 G3 audit hash chain, currentVersion 8 < 9),
     // then migration-010 (SPEC-084 docs.ordinal, currentVersion 9 < 10) —
     // never throw, never touch the pre-existing rows.
-    const store = actedStore(new SQLiteStore(dbPath));
+    const store = actedStore(new SQLiteStore(dbPath, { migrate: true }));
     const db = store.getDatabase();
 
     expect(userVersion(db)).toBe(26);
@@ -253,11 +253,11 @@ describe("migration-007 (versions.slug nullable column)", () => {
   });
 
   it("REGRESSION: reopening an already-migrated (latest version) file-backed DB a second time is idempotent — no throw, versions.slug unchanged", () => {
-    const firstOpen = actedStore(new SQLiteStore(dbPath));
+    const firstOpen = actedStore(new SQLiteStore(dbPath, { migrate: true }));
     firstOpen.close();
 
     expect(() => {
-      const secondOpen = actedStore(new SQLiteStore(dbPath));
+      const secondOpen = actedStore(new SQLiteStore(dbPath, { migrate: true }));
       const db = secondOpen.getDatabase();
       expect(userVersion(db)).toBe(26);
       expect(tableColumnNames(db, "versions")).toContain("slug");

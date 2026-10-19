@@ -120,6 +120,21 @@ describe("a corpus one schema behind is refused by every command except `lore mi
     expect(readUserVersion(dbPath)).toBe(BEHIND);
   }, TEST_TIMEOUT_MS);
 
+  it("`lore setup` names the command when the project corpus is behind the installed binary (and writes nothing to the corpus)", () => {
+    const proc = Bun.spawnSync([process.execPath, "run", CLI_ENTRY, "setup", "--claude-dir", join(sandbox, "claude-dir"), "--yes"], {
+      cwd: corpusDir,
+      stdin: "ignore",
+      timeout: 60_000,
+      killSignal: "SIGKILL",
+      // PATH="" makes MCP registration fail deterministically (exit 1) without touching a real `claude`; the file writes and the receipt still happen.
+      env: { ...process.env, PATH: "", HOME: sandbox, CLAUDECODE: "1" },
+    });
+    const out = proc.stdout.toString() + proc.stderr.toString();
+    expect(out).toContain("lore migrate schema");
+    expect(out).toContain(`schema ${BEHIND}`);
+    expect(readUserVersion(dbPath)).toBe(BEHIND);
+  }, TEST_TIMEOUT_MS);
+
   it("the store itself refuses a behind corpus (no side-effect migration) and migrates only when told to", () => {
     const copyPath = join(sandbox, "store-copy.db");
     copyFileSync(dbPath, copyPath);

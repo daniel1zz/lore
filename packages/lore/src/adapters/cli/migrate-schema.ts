@@ -12,6 +12,8 @@
  *     corpus at the last good schema and is reported with the failing step and the corpus path.
  *   - Exactly ONE `migrate_schema` audit row per upgrade (actor, from, to, duration, working copy, corpus path); a run
  *     with nothing pending, and `--dry-run`, write nothing.
+ *   - An upgrade (not `--dry-run`) is refused when this checkout reaches the corpus through another one (a linked
+ *     worktree on the main checkout's corpus): run it from the checkout that owns the corpus.
  *   - A corpus at user_version 0 is a new file (not an upgrade): nothing is pending and nothing is written.
  * Side-effect class: IO (reads the corpus version; upgrades the corpus and appends one audit row unless nothing is
  * pending or `--dry-run`).
@@ -21,6 +23,7 @@ import { existsSync } from "node:fs";
 import type { Invocation } from "@lore/core";
 import { printLine } from "./output.js";
 import { findLoreDbPath, formatErrorFor, resolveActor } from "./utils.js";
+import { resolveCorpus } from "./corpus-resolution.js";
 import { SQLiteStore } from "../../store/sqlite-store.js";
 import { probeSchemaVersion } from "../../store/schema-probe.js";
 import { isSchemaBehind, pendingMigrationVersions } from "../../store/schema-behind.js";
@@ -81,6 +84,16 @@ export async function runMigrateSchema(inv: Invocation, options: MigrateSchemaOp
     return 0;
   }
 
+  // reason: a linked worktree that reaches the MAIN checkout's corpus must not rewrite it (its binary may differ from
+  // the one main runs); the upgrade is run from the checkout that owns the corpus. The integrate floor's snapshot and
+  // any corpus a checkout owns have "own" provenance and pass. Same test `migrate memory-limits --apply` applies.
+  if (resolveCorpus(inv.io, inv.cwd, inv.env)?.provenance !== "own") {
+    return fail(
+      inv,
+      options,
+      `schema mismatch: the corpus at '${dbPath}' belongs to another checkout (this one reaches it through git); run \`lore migrate schema\` from the checkout that owns it`,
+    );
+  }
   const actor = resolveActor(inv.io, undefined, inv.env, inv.cwd, inv.user);
   const startedAt = Date.now();
   let store: SQLiteStore;
