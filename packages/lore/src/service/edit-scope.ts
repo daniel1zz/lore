@@ -72,7 +72,18 @@ export interface EditScopeDeps {
   /** `realpath` of an existing path; throws ENOENT otherwise. */
   realpath(path: string): string;
   now(): string;
+  /** True when `<workingCopy>/.lore-scope.json` exists. */
+  hasScopeFile(workingCopy: string): boolean;
+  /** Atomically writes `<workingCopy>/.lore-scope.json`, first making sure git ignores it there. Throws on failure. */
+  writeScopeFile(workingCopy: string, text: string): void;
+  /** Deletes `<workingCopy>/.lore-scope.json` (absent is fine). Throws on failure. */
+  removeScopeFile(workingCopy: string): void;
 }
+
+/** The scope file the hook reads in the claiming worktree: `{schema, working_copy, claims, not_measured}`. */
+export const SCOPE_FILE_NAME = ".lore-scope.json";
+/** Version of the scope file's JSON shape; the hook falls back to the lore read for any other value. */
+export const SCOPE_FILE_SCHEMA = 1;
 
 /** Why a declare was refused. */
 export type EditScopeDenialReason =
@@ -159,6 +170,37 @@ export async function readEditScope(deps: EditScopeDeps, workingCopy: string): P
     claims.push({ task: claimed.slug, anchors: [...extractFileAnchors(doc.value)], holder_run: held?.harness_run ?? null });
   }
   return ok({ working_copy: workingCopy, claims, not_measured: open.value.not_measured });
+}
+
+/**
+ * Rewrites the scope file of each of `workingCopies` that either already has one or holds an open claim of `task`.
+ *
+ * Why those two: a claim creates the file (the copy now holds `task`); an anchor change, a declare, a release
+ * refresh a file that exists. A copy that has neither is not this task's. Per copy, a failure to read the claims
+ * or write the file deletes the file (a stale file would wrongly allow a removed path) and is reported, never
+ * swallowed: the hook then falls back to the `lore anchor scope` read, which is correct, only slower.
+ *
+ * @returns One line per copy whose file could not be refreshed (empty = every file is current).
+ */
+export async function refreshScopeFiles(deps: EditScopeDeps, task: string, workingCopies: readonly string[]): Promise<string[]> {
+  const problems: string[] = [];
+  for (const workingCopy of new Set(workingCopies)) {
+    try {
+      const scope = await readEditScope(deps, workingCopy);
+      if (!scope.ok) throw new Error(`${scope.error.code}: ${"message" in scope.error ? String(scope.error.message) : ""}`);
+      if (!deps.hasScopeFile(workingCopy) && !scope.value.claims.some((c) => c.task === task)) continue;
+      deps.writeScopeFile(workingCopy, JSON.stringify({ schema: SCOPE_FILE_SCHEMA, ...scope.value }, null, 2) + "\n");
+    } catch (cause) {
+      const reason = cause instanceof Error ? cause.message : String(cause);
+      try {
+        deps.removeScopeFile(workingCopy);
+        problems.push(`scope file of ${workingCopy} not refreshed (${reason}); removed it, the hook reads claims through lore instead`);
+      } catch (removeCause) {
+        problems.push(`scope file of ${workingCopy} not refreshed (${reason}) AND could not be removed (${removeCause instanceof Error ? removeCause.message : String(removeCause)}); it may be stale`);
+      }
+    }
+  }
+  return problems;
 }
 
 /** Input of {@link declareEditPath}. */

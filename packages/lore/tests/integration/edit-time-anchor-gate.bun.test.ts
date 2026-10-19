@@ -18,12 +18,16 @@
  *   AC-EAG-f ERROR      lore unavailable -> denied (fail-closed)
  *   REGRESSION          the main session (no agent_id) and a target outside the working copy are never governed
  *   STATE               declaring is idempotent: the second edit of the declared path writes nothing more
+ *   AC-EAG-g HAPPY      claim writes <worktree>/.lore-scope.json (ignored, worktree stays clean); the hook decides in-anchor
+ *                       and ignored paths from it with NO lore on PATH; declare / rm / release keep it current
+ *   AC-EAG-h NEGATIVE   a missing, corrupt or other-schema scope file is never an allow: the hook asks lore (allow in-anchor),
+ *                       and with lore unavailable denies; the scope file itself cannot be edited by a helper
  */
 
 import { Database } from "bun:sqlite";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { execFileSync, spawnSync } from "node:child_process";
-import { appendFileSync, chmodSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { appendFileSync, chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { sessionActorFor, sessionIdOfActor } from "../helpers/session-actor";
@@ -77,7 +81,9 @@ function mustLore(args: string[], cwd: string, run?: string, actor?: string): st
 /** The binary named `lore` on the hook's PATH: this worktree's source, run under bun. */
 function writeLoreWrapper(dir: string): void {
   const file = join(dir, "lore");
-  writeFileSync(file, `#!/bin/sh\nexec bun run ${JSON.stringify(ENTRY)} "$@"\n`);
+  // EAG_LORE_BIN: measure with the compiled binary (`bun run build` -> dist/lore) instead of the bun source entry.
+  const compiled = process.env["EAG_LORE_BIN"];
+  writeFileSync(file, `#!/bin/sh\nexec ${compiled !== undefined ? JSON.stringify(compiled) : `bun run ${JSON.stringify(ENTRY)}`} "$@"\n`);
   chmodSync(file, 0o755);
 }
 
@@ -92,7 +98,9 @@ function buildFixture(): Fixture {
   git(repo, "init", "-q", "-b", "main");
   git(repo, "config", "user.email", "eag@example.invalid");
   git(repo, "config", "user.name", "eag test");
-  writeFileSync(join(repo, ".gitignore"), ".scratch/\n");
+  // `Library/` is what macOS tooling creates under the HOME the fixture CLI runs with (HOME = cwd). The scope file is
+  // deliberately NOT listed: lore must make git ignore it itself (info/exclude).
+  writeFileSync(join(repo, ".gitignore"), ".scratch/\nLibrary/\n");
   for (const f of ["src/a/a.ts", "src/b/b.ts", "shared/x.ts", "own/one.ts", "free/old.ts"]) {
     mkdirSync(dirname(join(repo, f)), { recursive: true });
     writeFileSync(join(repo, f), "export const v = 1;\n");
@@ -219,7 +227,7 @@ describe("edit-time anchor gate (task-skill-design-implementers-declare-out-of-a
       expect(r.status, `${target}: ${r.stderr}`).toBe(0);
       expect(r.stderr).toBe("");
     }
-    // Measured latency of the in-anchor fast path (git check-ignore + one `lore anchor scope` read), reported not asserted.
+    // Measured latency of the in-anchor fast path (scope file + one `git check-ignore`, no lore process), reported not asserted.
     console.info(`[latency] in-anchor edit through the hook, ms per call: ${elapsedMs.join(", ")}`);
     expect(taskState(fx.taskA)).toEqual(before);
   });
@@ -304,5 +312,90 @@ describe("edit-time anchor gate (task-skill-design-implementers-declare-out-of-a
     const r = runHook({ cwd: fx.wtB, target: join(fx.wtB, "free/old.ts"), agent: AGENT_B, actor: ACTOR_B });
     expect(r.status, r.stderr).toBe(2);
     expect(r.stderr).toContain(fx.taskA);
+  });
+
+  describe("scope file (AC-EAG-g, AC-EAG-h)", () => {
+    const scopeFileOf = (wt: string): string => join(wt, ".lore-scope.json");
+    const readScope = (wt: string): { schema: number; claims: { task: string; anchors: string[]; holder_run: string | null }[] } =>
+      JSON.parse(readFileSync(scopeFileOf(wt), "utf8")) as never;
+    const asB = (target: string, path?: string): HookResult =>
+      runHook({ cwd: fx.wtB, target, agent: AGENT_B, actor: ACTOR_B, ...(path !== undefined ? { path } : {}) });
+
+    it("AC-EAG-g: `lore claim` wrote the file in the claiming worktree, git ignores it and the worktree is clean", () => {
+      const scope = readScope(fx.wtA);
+      expect(scope.schema).toBe(1);
+      expect(scope.claims.map((c) => c.task)).toEqual([fx.taskA]);
+      expect(scope.claims[0]!.holder_run).toBe(RUN_A);
+      expect(scope.claims[0]!.anchors).toEqual(expect.arrayContaining(["src/a/", "own/one.ts"]));
+      expect(git(fx.wtA, "check-ignore", "-q", ".lore-scope.json")).toBe("");
+      expect(git(fx.wtA, "status", "--porcelain")).toBe("");
+    });
+
+    it("AC-EAG-g: in-anchor and git-ignored paths are decided from the file with NO lore on PATH", () => {
+      for (const target of [join(fx.wtA, "src/a/a.ts"), join(fx.wtA, "own/one.ts"), join(fx.wtA, ".scratch/x.md")]) {
+        const r = runHook({ cwd: fx.wtA, target, path: fx.bareBin });
+        expect(r.status, `${target}: ${r.stderr}`).toBe(0);
+      }
+      // an out-of-anchor path still needs lore: unavailable -> denied
+      expect(runHook({ cwd: fx.wtA, target: join(fx.wtA, "free/never.ts"), path: fx.bareBin }).status).toBe(2);
+    });
+
+    it("AC-EAG-g: the file lists the path declared in AC-EAG-b, so the declared path is also decided without lore", () => {
+      expect(readScope(fx.wtA).claims[0]!.anchors).toContain("free/old.ts");
+      expect(runHook({ cwd: fx.wtA, target: join(fx.wtA, "free/old.ts"), path: fx.bareBin }).status).toBe(0);
+    });
+
+    it("AC-EAG-g: `lore anchor rm` removes the path from the file at once (a removed path is not allowed from a stale file)", () => {
+      const rm = runLore(["anchor", "rm", fx.taskA, "free/old.ts"], fx.wtA, RUN_A, ACTOR_A);
+      expect(rm.exitCode, rm.stderr).toBe(0);
+      expect(readScope(fx.wtA).claims[0]!.anchors).not.toContain("free/old.ts");
+      expect(runHook({ cwd: fx.wtA, target: join(fx.wtA, "free/old.ts"), path: fx.bareBin }).status).toBe(2);
+    }, 120_000);
+
+    it("AC-EAG-h: a missing scope file (claim made before the file existed) falls back to the lore read: in-anchor allowed, no lore -> denied", () => {
+      const aside = `${scopeFileOf(fx.wtB)}.aside`;
+      renameSync(scopeFileOf(fx.wtB), aside);
+      try {
+        const startedAt = performance.now();
+        expect(asB(join(fx.wtB, "src/b/b.ts")).status).toBe(0);
+        console.info(`[latency] in-anchor edit with NO scope file (lore anchor scope fallback), ms: ${Math.round(performance.now() - startedAt)}`);
+        const noLore = asB(join(fx.wtB, "src/b/b.ts"), fx.bareBin);
+        expect(noLore.status).toBe(2);
+        expect(noLore.stderr).toMatch(/lore/);
+      } finally {
+        renameSync(aside, scopeFileOf(fx.wtB));
+      }
+    }, 120_000);
+
+    it("AC-EAG-h: a corrupt, other-schema or foreign-copy scope file is not trusted: the lore read decides, and without lore the edit is denied", () => {
+      const good = readFileSync(scopeFileOf(fx.wtB), "utf8");
+      try {
+        for (const bad of ["{not json", JSON.stringify({ ...JSON.parse(good), schema: 99 }), JSON.stringify({ ...JSON.parse(good), working_copy: fx.wtA })]) {
+          writeFileSync(scopeFileOf(fx.wtB), bad);
+          expect(asB(join(fx.wtB, "src/b/b.ts")).status, bad).toBe(0);
+          expect(asB(join(fx.wtB, "src/b/b.ts"), fx.bareBin).status, bad).toBe(2);
+        }
+      } finally {
+        writeFileSync(scopeFileOf(fx.wtB), good);
+      }
+    }, 120_000);
+
+    it("AC-EAG-h: a helper cannot edit the scope file (git ignores it, so it would otherwise pass as ignored)", () => {
+      const before = readFileSync(scopeFileOf(fx.wtA), "utf8");
+      const r = runHook({ cwd: fx.wtA, target: scopeFileOf(fx.wtA) });
+      expect(r.status).toBe(2);
+      expect(r.stderr).toContain(".lore-scope.json");
+      expect(readFileSync(scopeFileOf(fx.wtA), "utf8")).toBe(before);
+    });
+
+    it("AC-EAG-g (STATE): `lore release` rewrites the file without the task; the hook then denies naming `lore claim`", () => {
+      expect(existsSync(scopeFileOf(fx.wtB))).toBe(true);
+      const released = runLore(["release", fx.taskB], fx.wtB, RUN_B, ACTOR_B);
+      expect(released.exitCode, released.stderr).toBe(0);
+      expect(readScope(fx.wtB).claims).toEqual([]);
+      const r = asB(join(fx.wtB, "src/b/b.ts"));
+      expect(r.status).toBe(2);
+      expect(r.stderr).toContain("lore claim");
+    }, 120_000);
   });
 });

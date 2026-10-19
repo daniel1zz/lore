@@ -20,7 +20,11 @@
  * ## Decision (fail-closed: anything undecidable is a denial that names why)
  *
  *   1. target git-ignored in that working copy (`git check-ignore`)      -> allow
- *   2. `lore anchor scope --worktree <wc> --json` (one read of the open claims, their anchors, holder runs)
+ *   0. target is the scope file itself (`.lore-scope.json`)                  -> deny (only lore writes it)
+ *   2. the open claims of the working copy, their anchors and holder runs, from `<wc>/.lore-scope.json` (kept
+ *      current by `lore claim`, `anchor declare|add|rm`, `release`; no process spawned). A missing, unreadable,
+ *      other-schema or empty file, or one with an unmeasured claim, is NOT trusted: the hook asks
+ *      `lore anchor scope --worktree <wc> --json` instead (also the path for a claim made before the file existed).
  *        - cannot be read (lore missing, non-zero exit, unparseable)     -> deny, naming the reason
  *        - claims not all measured (worktree unresolved)                 -> deny, naming them
  *        - no open claim                                                 -> deny, naming `lore claim`
@@ -138,6 +142,28 @@ function anchorCovers(anchor, path) {
   return isDir && a.length < p.length && a.every((seg, i) => seg === p[i]);
 }
 
+/** Name and shape version of the scope file `lore` keeps in each claiming worktree (SCOPE_FILE_NAME / SCOPE_FILE_SCHEMA in service/edit-scope.ts). */
+const SCOPE_FILE_NAME = '.lore-scope.json';
+const SCOPE_FILE_SCHEMA = 1;
+
+/**
+ * The scope file's `{claims, not_measured}`, or undefined when the hook must ask lore instead: no file, unreadable,
+ * not this schema, naming another working copy, any unmeasured claim, or no claim at all (a released worktree must
+ * get lore's authoritative "no claim" answer, never a stale list). Never an allow by itself.
+ */
+function readScopeFile(workingCopy) {
+  try {
+    const data = JSON.parse(readFileSync(join(workingCopy, SCOPE_FILE_NAME), 'utf8'));
+    if (data?.schema !== SCOPE_FILE_SCHEMA || !Array.isArray(data.claims) || !Array.isArray(data.not_measured)) return undefined;
+    if (data.not_measured.length > 0 || data.claims.length === 0) return undefined;
+    if (typeof data.working_copy !== 'string' || realpathSync(data.working_copy) !== workingCopy) return undefined;
+    if (!data.claims.every((c) => typeof c?.task === 'string' && Array.isArray(c.anchors))) return undefined;
+    return { claims: data.claims, not_measured: [] };
+  } catch {
+    return undefined;
+  }
+}
+
 /** Runs lore; returns { status, stdout, stderr } or throws a reason string on spawn failure / timeout. */
 function runLore(cwd, args) {
   const child = spawnSync(LORE_BINARY, args, { cwd, encoding: 'utf8', timeout: LORE_TIMEOUT_MS });
@@ -180,6 +206,10 @@ try {
   deny(`the helper's run id could not be derived (${err.message}); without it its claim cannot be found`);
 }
 
+// The scope file is lore's record of this helper's scope: git ignores it, so without this line an edit to it would
+// pass as "ignored" and a helper could widen its own scope. Only lore's verbs write it.
+if (rel === SCOPE_FILE_NAME) deny(`${SCOPE_FILE_NAME} is written by lore (claim, anchor declare|add|rm, release); do not edit it. Declare scope with \`lore anchor declare <task> <path> --worktree ${workingCopy}\`.`);
+
 // 1. Git-ignored in the helper's working copy (scratch dirs, build output): not repository content.
 {
   const probeDir = nearestExistingDir(dirname(target));
@@ -190,14 +220,16 @@ try {
   if (ignored.status !== 1) deny(`git check-ignore failed for ${rel} (exit ${ignored.status}): ${(ignored.stderr ?? '').trim().split('\n')[0]}`);
 }
 
-// 2. One read of the working copy's open claims.
-let scope;
-try {
+// 2. The working copy's open claims: the scope file lore keeps current (no process spawned), else one lore read.
+let scope = readScopeFile(workingCopy);
+if (scope === undefined) {
+  try {
   const read = runLore(workingCopy, ['anchor', 'scope', '--worktree', workingCopy, '--json', '--harness-run', run]);
   if (read.status !== 0) deny(`\`lore anchor scope\` exited ${read.status}: ${(read.stderr || read.stdout).trim().split('\n')[0]}`);
   scope = JSON.parse(read.stdout)?.data;
 } catch (err) {
   deny(typeof err === 'string' ? err : `\`lore anchor scope\` output was not readable (${err?.message ?? err})`);
+  }
 }
 if (scope === undefined || !Array.isArray(scope.claims) || !Array.isArray(scope.not_measured)) {
   deny('`lore anchor scope --json` did not return {claims, not_measured}');

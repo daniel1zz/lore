@@ -83,7 +83,6 @@
  *         SPEC-045 §Design Decisions D6, §Acceptance Criteria AC-DR-4
  */
 
-import { realpathSync } from "node:fs";
 import { defineLoreCommand } from "../cli-exit.js";
 
 import type { DocRecord, DocType, LoreError, Result } from "@lore/core";
@@ -93,8 +92,8 @@ import { collectFileAnchorResolution, renderFileAnchorAdvisory } from "../../../
 import { ANCHOR_SCANNED_DOC_TYPES } from "../../../service/drift-check-service.js";
 import { buildFileAnchorProbeContext } from "../../real-fs-probe.js";
 import { invocationOf } from "../command-invocation.js";
-import { declareEditPath, readEditScope, type EditScopeDeps } from "../../../service/edit-scope.js";
-import { spawnGitCheckIgnore } from "../../../service/helper-scope-review.js";
+import { declareEditPath, readEditScope } from "../../../service/edit-scope.js";
+import { buildEditScopeDeps, refreshScopeFilesOf, scopeCandidatesOf } from "../edit-scope-wiring.js";
 import { printLine } from "../output.js";
 import type { CliIo } from "../output.js";
 
@@ -202,29 +201,6 @@ function isCodeAnchorTarget(docType: DocType): boolean {
 /** The CLI exit of an edit-scope refusal (a held path, no claim, an unmeasurable probe): VALIDATION_ERROR, exit 4. */
 const EDIT_SCOPE_DENIED_EXIT = 4;
 
-/** Wires {@link EditScopeDeps} from the App's services. Throws when the App lacks `runService` (mis-composed). */
-function editScopeDepsOf(app: ReturnType<typeof loadLoreApp>["app"]): EditScopeDeps {
-  if (app.runService === undefined) throw new Error("App was built without a runService");
-  const runService = app.runService;
-  return {
-    openClaimsOfWorkingCopy: (workingCopy) => runService.openClaimsOfWorkingCopy(workingCopy),
-    getTask: async (slug) => {
-      const found = await app.corpusService.get(slug);
-      return found.ok ? { ok: true, value: found.value.doc } : found;
-    },
-    listTasks: async () => {
-      const listed = await app.corpusService.listFull({ type: "task" });
-      return listed.ok ? { ok: true, value: listed.value.docs } : listed;
-    },
-    buildSiblingContext: (by, candidate, siblings, nowIso, sessionId) =>
-      app.taskWorkflowService.buildAnchorGateContext(by, candidate, siblings, nowIso, sessionId),
-    addAnchors: (slug, anchors, opts) => app.taskWorkflowService.addAnchors(slug, anchors, opts),
-    ignoreProbe: spawnGitCheckIgnore,
-    realpath: (path) => realpathSync(path),
-    now: () => new Date().toISOString(),
-  };
-}
-
 export default defineLoreCommand({
   meta: {
     name: "anchor",
@@ -278,6 +254,7 @@ export default defineLoreCommand({
             }
 
             const anchors = (result.value.extra["file_anchors"] as string[] | undefined) ?? [];
+            await refreshScopeFilesOf(app, result.value.slug, await scopeCandidatesOf(app, result.value.slug, inv.cwd));
             emitFileAnchorAdvisory(inv.io, anchors, result.value.slug, inv.cwd);
             if (args.json) {
               printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { doc: result.value, anchors } }, null, 2));
@@ -364,6 +341,7 @@ export default defineLoreCommand({
             }
 
             const anchors = (result.value.extra["file_anchors"] as string[] | undefined) ?? [];
+            await refreshScopeFilesOf(app, result.value.slug, await scopeCandidatesOf(app, result.value.slug, inv.cwd));
             if (args.json) {
               printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { doc: result.value, anchors } }, null, 2));
               return 0;
@@ -414,7 +392,7 @@ export default defineLoreCommand({
         const inv = invocationOf(context);
         const { app } = loadLoreApp({ inv });
         try {
-          const report = await readEditScope(editScopeDepsOf(app), args.worktree as string);
+          const report = await readEditScope(buildEditScopeDeps(app), args.worktree as string);
           if (!report.ok) {
             inv.io.stderr.write(formatErrorFor(inv, report.error) + "\n");
             return exitCode(report.error);
@@ -450,7 +428,7 @@ export default defineLoreCommand({
         const { app } = loadLoreApp({ inv });
         try {
           const by = resolveActor(inv.io, undefined, inv.env, inv.cwd, inv.user);
-          const result = await declareEditPath(editScopeDepsOf(app), {
+          const result = await declareEditPath(buildEditScopeDeps(app), {
             workingCopy: args.worktree as string,
             task: args.target as string,
             path: args.path as string,
@@ -462,6 +440,10 @@ export default defineLoreCommand({
             return exitCode(result.error);
           }
           const verdict = result.value;
+          // reason: only a written anchor changes the scope file; the worktree is named by the caller, plus the cwd's.
+          if (verdict.kind === "declared") {
+            await refreshScopeFilesOf(app, verdict.task, await scopeCandidatesOf(app, verdict.task, inv.cwd, [args.worktree as string]));
+          }
           if (args.json) printLine(inv.io.stdout, JSON.stringify({ ok: verdict.kind !== "denied", data: verdict }, null, 2));
           if (verdict.kind === "denied") {
             inv.io.stderr.write(`Refused (${verdict.reason}): ${verdict.message}\n`);
