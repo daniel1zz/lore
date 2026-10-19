@@ -10,7 +10,7 @@
  *   depends <leaf> [--add BR-n]... [--remove BR-n]...
  *   glossary add <node> --term <t> --meaning <m> [--note <n>]   (root|branch only)
  *   glossary rm  <node> --term <t>
- *   map <leaf> [--site <key> (--rule BR-n... | --non-business <reason>)] [--sites-file <path>] [--remove-site <key>]...
+ *   map <leaf> [--site <key> --rule BR-n...] [--sites-file <path>] [--remove-site <key>]...
  *               [--command <name>]... [--remove-command <name>]...
  *                   The ONLY writer of `extra.site_map` / `extra.commands` (leaf only). With no change
  *                   flag it authorizes through the corpus-write guard (claim scope, AC-BLS2-8), reports
@@ -24,9 +24,8 @@
  *                   every leaf has commands, 0 gaps and 0 unaccounted not_measured sites. The leaf's
  *                   commands are an explicit stored field (`--command`), not derived: a leaf's
  *                   Command section is prose without CLI names.
- *   fidelity --size N --seed S [--judges 1|2] [--exclusions] [--ai] [--json]
- *                   Seeded sample of live (criterion, rule) citations - or, with --exclusions, of the
- *                   `non-business:` site-map entries - judged by the AI provider; the record is stored as
+ *   fidelity --size N --seed S [--judges 1|2] [--ai] [--json]
+ *                   Seeded sample of live (criterion, rule) citations judged by the AI provider; the record is stored as
  *                   a `research` knowledge doc and printed. Read-only on rules/citations/site_map.
  *                   Never skips the judge: without --ai on a surface whose AI default is off it refuses
  *                   (exit 2); size > pool or a bad flag exits 2; a judge failure or malformed reply exits 6.
@@ -53,7 +52,7 @@ import { loadLoreApp } from "../loader.js";
 import { exitCode, formatErrorFor, resolveActor } from "../utils.js";
 import type { App } from "../../../app.js";
 import type { AddNodeInput, BaselineTreeEntry, SiteMapChange } from "../../../service/rule-service.js";
-import { NON_BUSINESS_PREFIX, commandFixCommand, collectOwnedSites, computeLeafCoverage, findCorruptSiteMapValues, computeUndeclaredCommands, partitionDeclaredCommands, siteFixCommand, absentCommandFixCommand } from "../../../service/leaf-coverage.js";
+import { commandFixCommand, collectOwnedSites, computeLeafCoverage, findCorruptSiteMapValues, computeUndeclaredCommands, partitionDeclaredCommands, siteFixCommand, absentCommandFixCommand } from "../../../service/leaf-coverage.js";
 import { treePredicateFor } from "../absent-declarations.js";
 import { resolveDoc } from "../../../service/resolve.js";
 import { SiteCensusError, type UnresolvedImport, findCensusRoot, listSitesMany, resolveCommandEntry } from "../../../service/site-census.js";
@@ -76,8 +75,7 @@ function repeatable(value: unknown): string[] {
 }
 
 /**
- * Parse the body of a `--sites-file`: a JSON array of `{ site, rules: [BR-n...] }` or `{ site, nonBusiness: "<reason>" }`
- * rows into the `sites` map of one {@link SiteMapChange}. Pure; names the offending row (1-based) and site key.
+ * Parse the body of a `--sites-file`: a JSON array of `{ site, rules: [BR-n...] }` rows into the `sites` map of one {@link SiteMapChange}. Pure; names the offending row (1-based) and site key.
  *
  * @param text - file contents
  * @param taken - site keys already named elsewhere in the same call (e.g. by `--site`); repeating one is a duplicate
@@ -94,29 +92,23 @@ export function parseSitesFile(text: string, taken: ReadonlySet<string> = new Se
   } catch (cause) {
     return fail(`sites file is not valid JSON: ${cause instanceof Error ? cause.message : String(cause)}`);
   }
-  if (!Array.isArray(parsed)) return fail("sites file must be a JSON array of { site, rules | nonBusiness } rows");
+  if (!Array.isArray(parsed)) return fail("sites file must be a JSON array of { site, rules } rows");
   if (parsed.length === 0) return fail("sites file must contain at least one row");
   const sites: Record<string, string[]> = {};
   const seen = new Set<string>(taken);
   for (const [i, row] of parsed.entries()) {
     const at = `row ${i + 1}`;
-    if (typeof row !== "object" || row === null || Array.isArray(row)) return fail(`${at} must be an object { site, rules | nonBusiness }`);
-    const { site, rules, nonBusiness } = row as Record<string, unknown>;
+    if (typeof row !== "object" || row === null || Array.isArray(row)) return fail(`${at} must be an object { site, rules }`);
+    const unknownKey = Object.keys(row).find((k) => k !== "site" && k !== "rules");
+    if (unknownKey !== undefined) return fail(`${at} has unknown key '${unknownKey}': a row is { site, rules: [BR-n...] } (BR-655)`, unknownKey);
+    const { site, rules } = row as Record<string, unknown>;
     if (typeof site !== "string" || site.trim().length === 0) return fail(`${at} needs a non-empty string 'site'`);
-    const hasRules = rules !== undefined;
-    const hasReason = nonBusiness !== undefined;
-    if (hasRules === hasReason) return fail(`${at} (site '${site}') needs exactly one of 'rules' (array of BR-n) or 'nonBusiness' (reason string)`, site);
     if (seen.has(site)) return fail(`duplicate site key '${site}' at ${at}`, site);
     seen.add(site);
-    if (hasRules) {
-      if (!Array.isArray(rules) || rules.length === 0 || !rules.every((r) => typeof r === "string" && r.trim().length > 0)) {
-        return fail(`${at} (site '${site}'): 'rules' must be a non-empty array of rule id strings`, site);
-      }
-      sites[site] = rules as string[];
-    } else {
-      if (typeof nonBusiness !== "string" || nonBusiness.trim().length === 0) return fail(`${at} (site '${site}'): 'nonBusiness' must be a non-empty reason string`, site);
-      sites[site] = [`${NON_BUSINESS_PREFIX}${nonBusiness}`];
+    if (!Array.isArray(rules) || rules.length === 0 || !rules.every((r) => typeof r === "string" && r.trim().length > 0)) {
+      return fail(`${at} (site '${site}') needs 'rules': a non-empty array of rule ids (BR-655)`, site);
     }
+    sites[site] = rules as string[];
   }
   return { ok: true, sites };
 }
@@ -357,6 +349,7 @@ async function runCoverage(target: string, json: boolean, commandsOnly: boolean,
           : collectOwnedSites({ ownSiteMap: siteMap });
       for (const site of ownedSites) byKey.set(site.key, site);
       const rules = Array.isArray(leaf.extra["rules"]) ? (leaf.extra["rules"] as Array<{ id: string; lifecycle: string }>) : [];
+      const unretiredRuleIds = new Set(rules.filter((r) => r.lifecycle !== "retired").map((r) => r.id));
       const verdict = computeLeafCoverage({
         sites: [...byKey.values()],
         bootstrap: [...bootstrapByKey.values()],
@@ -369,14 +362,16 @@ async function runCoverage(target: string, json: boolean, commandsOnly: boolean,
         commands,
         measured_by: live.length > 0 ? "commands" : ownedSites.length > 0 ? "owned_sites" : absent.length > 0 ? "absent" : "none",
         absent_commands: absent.map((command) => ({ command, fix: absentCommandFixCommand(leaf.slug, command) })),
-        // reason: only a leaf measured by its commands has a census to compare with; an owned-sites leaf's own keys ARE its sites.
-        stale_site_maps:
-          live.length > 0
-            ? Object.keys(siteMap)
-                .filter((key) => !byKey.has(key) && !bootstrapByKey.has(key))
-                .sort()
-                .map((site) => ({ site, fix: `lore baseline map ${leaf.slug} --remove-site ${site}` }))
-            : [],
+        // reason: BR-1320 - a mapping is stale when its site is no longer reached (only a command-measured leaf has a census
+        // to compare with; an owned-sites leaf's own keys ARE its sites) or none of its rules is still an unretired rule of the leaf.
+        stale_site_maps: Object.keys(siteMap)
+          .filter((key) => {
+            const unreached = live.length > 0 && !byKey.has(key) && !bootstrapByKey.has(key);
+            const unaccounted = !(siteMap[key] ?? []).some((id) => unretiredRuleIds.has(id));
+            return unreached || unaccounted;
+          })
+          .sort()
+          .map((site) => ({ site, fix: `lore baseline map ${leaf.slug} --remove-site ${site}` })),
         sites: byKey.size,
         gaps: verdict.gaps,
         not_measured: verdict.notMeasured,
@@ -398,7 +393,7 @@ async function runCoverage(target: string, json: boolean, commandsOnly: boolean,
         printLine(inv.io.stdout, `${r.slug}: ${state} - ${r.sites} site(s), ${r.gaps.length} gap(s), ${r.not_measured.length} not_measured, ${r.unresolved_imports.length} unresolved import(s), ${r.bootstrap.length} bootstrap (not counted as gaps)`);
         if (r.measured_by === "absent") printLine(inv.io.stdout, `  all declared commands absent from this tree (pending or stale): ${r.absent_commands.map((a) => a.command).join(", ")}`);
         for (const a of r.absent_commands) printLine(inv.io.stdout, `  declared command not in this tree: ${a.command} (pending in a branch that has not landed, or stale; not counted against coverage)\n    if stale: ${a.fix}`);
-        for (const s of r.stale_site_maps) printLine(inv.io.stdout, `  stale mapping ${s.site} (this tree no longer reaches it; removable once main no longer does, refused until then)\n    fix: ${s.fix}`);
+        for (const s of r.stale_site_maps) printLine(inv.io.stdout, `  stale mapping ${s.site} (its site is no longer reached or none of its rules is an unretired rule of the leaf; removable at any time, never counted against coverage)\n    fix: ${s.fix}`);
         for (const key of r.unresolved_imports) printLine(inv.io.stdout, `  unresolved  ${key} (census incomplete: sites behind this import are not listed)`);
         for (const key of r.gaps) printLine(inv.io.stdout, `  gap          ${key}\n    fix: ${siteFixCommand(r.slug, key)}`);
         for (const key of r.not_measured) printLine(inv.io.stdout, `  not_measured ${key}\n    fix: ${siteFixCommand(r.slug, key)}`);
@@ -426,10 +421,7 @@ function parseSeed(raw: unknown): number | string | undefined {
 }
 
 function renderFidelityContent(record: FidelityRecord): string {
-  const headline =
-    record.mode === "exclusions"
-      ? `${(((record.wrong_share ?? 0) * 100)).toFixed(1)}% of ${record.size} sampled exclusions judged wrong`
-      : `${(record.faithful_share * 100).toFixed(1)}% of ${record.size} sampled citations judged faithful`;
+  const headline = `${(record.faithful_share * 100).toFixed(1)}% of ${record.size} sampled citations judged faithful`;
   const catchAll = record.catch_all.map((c) => `- ${c.rule_id}: cited by ${c.citing_criteria.length} criteria`).join("\n");
   return [
     `# Baseline fidelity sample (${record.mode}, seed ${String(record.seed)})`,
@@ -485,10 +477,10 @@ async function runFidelityCommand(args: Record<string, unknown>, inv: Invocation
     const provider: AIProvider | undefined = registry.value.providers.get(registry.value.active);
     if (provider === undefined) return fail("ai", `active AI provider '${registry.value.active}' is not registered`);
 
-    const result = await runFidelity({ store, ai: provider, size, seed, judges, exclusions: args.exclusions === true, repoRoot: inv.cwd });
+    const result = await runFidelity({ store, ai: provider, size, seed, judges, repoRoot: inv.cwd });
     if (!result.ok) return reportFidelityFailure(inv, result.error, json);
     const record = result.value;
-    const share = record.mode === "exclusions" ? `${((record.wrong_share ?? 0) * 100).toFixed(1)}% wrong` : `${(record.faithful_share * 100).toFixed(1)}% faithful`;
+    const share = `${(record.faithful_share * 100).toFixed(1)}% faithful`;
     const created = await app.corpusService.create({
       type: "knowledge",
       title: `Baseline fidelity (${record.mode}) seed ${String(record.seed)}: ${share}`,
@@ -664,13 +656,12 @@ export default defineLoreCommand({
       },
     }),
     map: defineLoreCommand({
-      meta: { name: "map", description: "Map census sites of a baseline leaf to rules (or non-business reasons) and declare its commands" },
+      meta: { name: "map", description: "Map census sites of a baseline leaf to rules and declare its commands" },
       args: {
         leaf: { type: "positional", description: "Baseline leaf ID or slug", required: true },
-        site: { type: "string", description: "Census site key (file#symbol#code, from `lore baseline sites`) to map; needs --rule or --non-business" },
+        site: { type: "string", description: "Census site key (file#symbol#code, from `lore baseline sites`) to map; needs --rule" },
         rule: { type: "string", description: "[repeatable] Rule id (BR-n) of this leaf that the --site refusal enforces" },
-        "non-business": { type: "string", description: "Reason the --site is not business behaviour (stored as non-business:<reason>)" },
-        "sites-file": { type: "string", description: "JSON file of many site mappings: [{ \"site\": key, \"rules\": [BR-n...] } | { \"site\": key, \"nonBusiness\": reason }]; written as ONE version, all rows or none" },
+        "sites-file": { type: "string", description: "JSON file of many site mappings: [{ \"site\": key, \"rules\": [BR-n...] }]; written as ONE version, all rows or none" },
         "remove-site": { type: "string", description: "[repeatable] Site key to unmap" },
         command: { type: "string", description: "[repeatable] CLI command name (e.g. 'ac add') this leaf answers for" },
         "remove-command": { type: "string", description: "[repeatable] Command name to drop" },
@@ -684,14 +675,13 @@ export default defineLoreCommand({
           const by = resolveActor(inv.io, undefined, inv.env, inv.cwd, inv.user);
           const site = typeof args.site === "string" ? args.site : undefined;
           const rules = repeatable(args.rule);
-          const reason = typeof args["non-business"] === "string" ? args["non-business"] : undefined;
-          if (site === undefined && (rules.length > 0 || reason !== undefined)) {
-            return reportFailure(inv, { code: "VALIDATION_ERROR", field: "site", message: "--rule / --non-business need --site <key>" }, json);
+          if (site === undefined && rules.length > 0) {
+            return reportFailure(inv, { code: "VALIDATION_ERROR", field: "site", message: "--rule needs --site <key> (BR-655)" }, json);
           }
-          if (site !== undefined && (rules.length > 0) === (reason !== undefined)) {
-            return reportFailure(inv, { code: "VALIDATION_ERROR", field: "site", message: "--site needs exactly one of --rule BR-n (repeatable) or --non-business <reason>" }, json);
+          if (site !== undefined && rules.length === 0) {
+            return reportFailure(inv, { code: "VALIDATION_ERROR", field: "site", message: `--site '${site}' needs at least one --rule BR-n of this leaf (BR-655)`, value: site }, json);
           }
-          const rowSites: Record<string, string[]> = site !== undefined ? { [site]: reason !== undefined ? [`${NON_BUSINESS_PREFIX}${reason}`] : rules } : {};
+          const rowSites: Record<string, string[]> = site !== undefined ? { [site]: rules } : {};
           const sitesFile = typeof args["sites-file"] === "string" ? args["sites-file"] : undefined;
           if (sitesFile !== undefined) {
             let text: string;
@@ -788,12 +778,11 @@ export default defineLoreCommand({
       },
     }),
     fidelity: defineLoreCommand({
-      meta: { name: "fidelity", description: "Judge a seeded sample of citations (or non-business exclusions) with the AI provider and store the record (read-only on the baseline)" },
+      meta: { name: "fidelity", description: "Judge a seeded sample of citations with the AI provider and store the record (read-only on the baseline)" },
       args: {
         size: { type: "string", description: "Sample size N (refused when larger than the pool)", required: true },
         seed: { type: "string", description: "Sampling seed; the same seed redraws the same sample", required: true },
         judges: { type: "string", description: "1 (default) or 2 (second judge + adjudicator for disagreements)" },
-        exclusions: { type: "boolean", description: "Sample the non-business site-map exclusions instead of the citations" },
         ai: { type: "boolean", description: "Confirm AI use (required on surfaces where AI is off by default)" },
         json: { type: "boolean", description: "Output result as JSON" },
       },

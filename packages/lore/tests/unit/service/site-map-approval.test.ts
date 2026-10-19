@@ -59,7 +59,7 @@ describe("setSiteMap approval handling (AC-SMM-1)", () => {
     const before = await fresh();
     const auditBefore = (await auditOps()).length;
     const mapRowsBefore = (await auditOps()).filter((o) => o === "baseline-map").length;
-    const res = await svc.setSiteMap(leafId, { sites: { "b.ts#g#Y": ["non-business:wiring"] } }, { by: "t" });
+    const res = await svc.setSiteMap(leafId, { sites: { "b.ts#g#Y": ["BR-1"] } }, { by: "t" });
     expect(res.ok).toBe(true);
     const after = await fresh();
     expect(after.status).toBe("approved");

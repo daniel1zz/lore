@@ -6,9 +6,9 @@
  *   still unaccounted for.
  * Public surface: {@link computeLeafCoverage}, {@link findCorruptSiteMapValues}, {@link collectOwnedSites}, {@link partitionDeclaredCommands},
  *   {@link absentCommandFixCommand}, {@link leavesUnder}, {@link absentDeclarationsOf}, {@link absentDeclarationRefusal},
- *   {@link AbsentDeclaration}, {@link NON_BUSINESS_PREFIX}, {@link LeafCoverage}.
+ *   {@link AbsentDeclaration}, {@link LeafCoverage}.
  * Invariants:
- *   - A site counts as mapped only by an unretired `BR-n` id of the leaf (BR-1248). Free text (`non-business:...`, owned-by)
+ *   - A site counts as mapped only by an unretired `BR-n` id of the leaf (BR-1248). Free text
  *     excuses nothing; a stored value that is not a BR-n id is CORRUPT data ({@link findCorruptSiteMapValues}), never "unmapped".
  *   - `gaps` (keyed) and `notMeasured` (dynamic) are REPORT output: they never decide an exit code. Only a runnable command
  *     no leaf declares ({@link computeUndeclaredCommands}) refuses (BR-1248, BR-660).
@@ -21,9 +21,6 @@
  */
 
 import type { Site, UnresolvedImport } from "./site-census.js";
-import { NON_BUSINESS_PREFIX } from "./owned-by.js";
-
-export { NON_BUSINESS_PREFIX };
 
 /** Verdict of {@link computeLeafCoverage}; both lists hold site keys. */
 export interface LeafCoverage {

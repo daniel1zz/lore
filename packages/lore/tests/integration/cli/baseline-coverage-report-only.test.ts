@@ -13,6 +13,7 @@
  */
 import { afterEach, describe, expect, it } from "vitest";
 import { MINI_CLI, buildMiniCorpus, type MiniCorpus } from "../../helpers/coverage-mini-corpus";
+import { seedSiteMapValue } from "../../helpers/seed-site-map-value";
 
 const corpora: MiniCorpus[] = [];
 afterEach(() => {
@@ -84,8 +85,8 @@ describe("AC-BCG-1 coverage is report-only for sites", () => {
   it("a leaf storing a non-BR value exits exactly 2 naming the leaf, the site and the value", async () => {
     const c = await unmappedCorpus();
     const [site] = await c.sitesOf("alpha");
-    // reason: the write verb still admits free text until its own task removes it; this fixture only needs the corrupt value stored.
-    expect((await c.run(["baseline", "map", c.leafA, "--site", site as string, "--non-business", "x"])).exitCode).toBe(0);
+    // reason: the write verb admits BR-n ids only, so the corrupt value is seeded straight into the throwaway corpus's db.
+    seedSiteMapValue(c, c.leafA, site as string, "non-business:x");
     const r = await c.run(["baseline", "coverage", c.root]);
     expect(r.exitCode, r.stdout + r.stderr).toBe(2);
     expect(r.stderr).toContain(c.leafA);
