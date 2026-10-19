@@ -3892,6 +3892,7 @@ export class TaskWorkflowService {
         classId: "override-attestation",
         subject: { id: task.slug, version: `v${task.version}` },
         summary: `done ${task.slug} --override-attestation`,
+        change: { document: task.slug, override: "attestation", reason: overrideReason },
       });
       if (!decided.ok) return decided;
     }

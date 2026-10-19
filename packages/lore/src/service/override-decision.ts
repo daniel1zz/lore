@@ -26,6 +26,7 @@
  */
 import { err, ok, type AutonomyFacts, type LoreError, type Result } from "@lore/core";
 import type { DecisionService, DecisionSubject } from "./decision-service.js";
+import type { DecisionDetail } from "../store/decision-log.js";
 
 /** The registered classes (core classes.ts) of the four self-grantable overrides. */
 export type OverrideClassId = "override-judgment" | "override-attestation" | "ac-exempt" | "verify-new-command";
@@ -36,6 +37,24 @@ export interface OverrideRequest {
   readonly subject: DecisionSubject;
   /** Names the override in the refusal text, e.g. `approve spec-x --override-judgment <id>`. */
   readonly summary: string;
+  /**
+   * Class-specific facts of what is overridden, recorded as the decision detail's `change`: always the `document`
+   * (slug), plus the refused judgment id (override-judgment), the exemption reason (ac-exempt) or the command
+   * (verify-new-command). Absent = only the document slug (the subject id's part before `#`) is recorded.
+   */
+  readonly change?: Readonly<Record<string, unknown>>;
+}
+
+/** The plain-language account recorded with an override decision (HR-T2, AC-HR-1): the command asked, the document, what each answer does. */
+export function buildOverrideDetail(request: OverrideRequest): DecisionDetail {
+  const document = request.subject.id.split("#")[0] ?? request.subject.id;
+  return {
+    summary: `Allow an override on ${document}: ${request.summary}`,
+    requested_by: "the session that ran this command (override request)",
+    change: { document, override_class: request.classId, ...request.change },
+    on_accept: "The override is granted once you re-run the same command; it then proceeds.",
+    on_reject: "The override is refused; the command stays refused and writes nothing.",
+  };
 }
 
 export interface OverrideDecisionPort {
@@ -86,7 +105,7 @@ function refused(summary: string, message: string, value: unknown): LoreError {
 export function createOverrideDecisionPort(decisions: Pick<DecisionService, "decide" | "listPending">): OverrideDecisionPort {
   return {
     async requireAuto(request) {
-      const decided = await decisions.decide(request.classId, request.subject, OVERRIDE_MEASURED_FACTS);
+      const decided = await decisions.decide(request.classId, request.subject, OVERRIDE_MEASURED_FACTS, buildOverrideDetail(request));
       if (!decided.ok) return decided;
       const { decision, effective } = decided.value;
       if (effective.verdict === "auto") return ok(undefined);

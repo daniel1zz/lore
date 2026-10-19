@@ -805,6 +805,7 @@ export class ReviewService {
           version: `v${doc.version}:${overriddenJudgmentId !== undefined ? `judgment:${overriddenJudgmentId}` : "no-judgment"}`,
         },
         summary: `approve ${doc.slug} ${overriddenJudgmentId !== undefined ? `--override-judgment ${overriddenJudgmentId}` : "--override-no-judgment"}`,
+        change: { document: doc.slug, ...(overriddenJudgmentId !== undefined ? { refused_judgment_id: overriddenJudgmentId } : { override: "no-judgment" }) },
       });
       if (!decided.ok) return decided;
     }

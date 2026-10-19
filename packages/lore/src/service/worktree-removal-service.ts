@@ -29,6 +29,7 @@ import { resolve } from "node:path";
 import { deriveRunId, err, ok, type LoreError, type OperationClassRegistry, type Result, type RunId } from "@lore/core";
 import type { ProcessScanPort } from "../adapters/real-process-scan-port.js";
 import type { StoreInterface } from "../store/store-interface.js";
+import type { DecisionDetail } from "../store/decision-log.js";
 import {
   decideWorktreeRemoval,
   type Measured,
@@ -77,6 +78,7 @@ export interface RemovalDecisionPort {
     classId: string,
     subject: { readonly id: string; readonly version: string },
     facts: unknown,
+    detail?: DecisionDetail,
   ): Promise<
     Result<
       {
@@ -132,6 +134,24 @@ interface Inspection {
 
 const WORKTREE_REMOVE_CLASS = "worktree-remove";
 
+/**
+ * The plain-language account recorded with a worktree-remove decision (HR-T2, AC-HR-1; BR-1235): which worktree, and the
+ * exact ignored paths outside the regenerable set that removing it would delete.
+ *
+ * @param ignoredOutside - the ignored paths outside the loss-free set; `null` when they could not be measured
+ * @returns a DecisionDetail whose `change` is `{ worktree, ignored_paths_measured, ignored_paths }`
+ */
+export function buildWorktreeRemoveDetail(worktree: string, ignoredOutside: readonly string[] | null): DecisionDetail {
+  const lost = ignoredOutside === null ? "unmeasured ignored files" : ignoredOutside.length === 0 ? "no ignored files" : `these ignored files: ${ignoredOutside.join(", ")}`;
+  return {
+    summary: `Remove the worktree ${worktree}` + (ignoredOutside !== null && ignoredOutside.length > 0 ? `; it holds ignored files outside the regenerable set: ${ignoredOutside.join(", ")}` : ""),
+    requested_by: "lore (worktree cleanup)",
+    change: { worktree, ignored_paths_measured: ignoredOutside !== null, ignored_paths: ignoredOutside === null ? [] : [...ignoredOutside] },
+    on_accept: `The worktree and its branch are removed; ${lost} are lost.`,
+    on_reject: "The worktree is kept exactly as it is.",
+  };
+}
+
 function miss<T>(reason: string): Measured<T> {
   return { ok: false, reason };
 }
@@ -186,7 +206,8 @@ export class WorktreeRemovalService implements WorktreeRemovalFactsPort, Worktre
       blast: "own-or-ended-run",
       evidence: "lore-evaluated",
     };
-    const outcome = await this.deps.decisions.decide(WORKTREE_REMOVE_CLASS, { id: path, version }, facts);
+    const detail = buildWorktreeRemoveDetail(path, ignored.ok ? outside : null);
+    const outcome = await this.deps.decisions.decide(WORKTREE_REMOVE_CLASS, { id: path, version }, facts, detail);
     if (!outcome.ok) {
       return { allowed: false, reason: `removal not decided (nothing removed): ${outcome.error.code}`, ignored_paths: outside };
     }
