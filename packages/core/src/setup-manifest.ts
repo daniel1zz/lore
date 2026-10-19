@@ -164,6 +164,33 @@ export const setupEntrySchema = z.object({
 /** Derived TypeScript type for one manifest row. */
 export type SetupEntry = z.infer<typeof setupEntrySchema>;
 
+/**
+ * What a project setup replaced OUTSIDE the files it owns, so `lore setup --project --uninstall` can put it back
+ * (BR-834 / BR-837 / BR-845). Written only by the project ledger; absent on the machine-target manifest.
+ *
+ * - `hooks_path.prior` — git's `core.hooksPath` before the first setup (`null` = it was unset).
+ * - `settings_language` — one row per project settings file that received a `language` key: whether the file and the
+ *   key existed before the first setup, and the key's earlier value.
+ */
+export const projectPriorsSchema = z.object({
+  hooks_path: z.object({ prior: z.string().nullable() }).optional(),
+  settings_language: z
+    .array(
+      z.object({
+        /** Repo-relative POSIX path of the settings file. */
+        path: z.string().min(1),
+        file_existed: z.boolean(),
+        had_key: z.boolean(),
+        /** The key's earlier value; meaningful only when `had_key`. */
+        prior: z.unknown(),
+      }),
+    )
+    .optional(),
+});
+
+/** Derived TypeScript type for {@link projectPriorsSchema}. */
+export type ProjectPriors = z.infer<typeof projectPriorsSchema>;
+
 /** The whole `<claude-dir>/.lore-setup-manifest.json` document. */
 export const setupManifestSchema = z.object({
   /** Manifest schema version — opaque string, bumped on breaking shape changes. */
@@ -192,6 +219,8 @@ export const setupManifestSchema = z.object({
    * short-circuit compares the CURRENTLY-embedded digest against.
    */
   assets_digest: z.string().min(1).optional(),
+  /** OPTIONAL — earlier values a project setup replaced; see {@link projectPriorsSchema}. Project ledger only. */
+  project_priors: projectPriorsSchema.optional(),
 });
 
 /** Derived TypeScript type for the whole manifest document. */
