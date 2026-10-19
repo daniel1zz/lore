@@ -55,6 +55,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpath
 import { createHash } from "crypto";
 import { join } from "path";
 import { tmpdir } from "os";
+import { initRepoWithMainCommit } from "../support/main-guard-repo.js";
 
 // ─── Path setup ───────────────────────────────────────────────────────────────
 
@@ -225,7 +226,7 @@ describe("lore setup — HAPPY", () => {
 
   it("AC-046-E.H4: --project scaffolds a throwaway git repo end-to-end (wiring proof)", () => {
     const repoDir = makeScratchDir("lore-setup-project-");
-    spawnSync("git", ["init"], { cwd: repoDir, encoding: "utf8" });
+    initRepoWithMainCommit(repoDir); // setup refuses a main with no commit (BR-1343)
     spawnSync("git", ["config", "user.email", "test@example.com"], { cwd: repoDir, encoding: "utf8" });
     spawnSync("git", ["config", "user.name", "Test"], { cwd: repoDir, encoding: "utf8" });
 
@@ -367,7 +368,7 @@ describe("lore setup — STATE", () => {
       "the FIRST time (every prior uninstall coverage used a fake ProjectFsPort)",
     () => {
       const repoDir = makeScratchDir("lore-setup-project-roundtrip-");
-      spawnSync("git", ["init"], { cwd: repoDir, encoding: "utf8" });
+      initRepoWithMainCommit(repoDir); // setup refuses a main with no commit (BR-1343)
       spawnSync("git", ["config", "user.email", "test@example.com"], { cwd: repoDir, encoding: "utf8" });
       spawnSync("git", ["config", "user.name", "Test"], { cwd: repoDir, encoding: "utf8" });
 

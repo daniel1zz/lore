@@ -24,6 +24,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parse } from "yaml";
+import { initRepoWithMainCommit } from "./support/main-guard-repo.js";
 
 const PACKAGE_ROOT = new URL("../../", import.meta.url).pathname.replace(/\/$/, "");
 const INDEX_TS = join(PACKAGE_ROOT, "src", "index.ts");
@@ -47,8 +48,7 @@ const scratch: string[] = [];
 function makeRepoWithConfig(configText: string): string {
   const dir = mkdtempSync(join(tmpdir(), "lore-setup-adoption-cfg-"));
   scratch.push(dir);
-  const gitInit = Bun.spawnSync(["git", "init", "-q", dir]);
-  if (gitInit.exitCode !== 0) throw new Error(`fixture: git init failed: ${gitInit.stderr.toString()}`);
+  initRepoWithMainCommit(dir); // setup refuses a main with no commit (BR-1343)
   writeFileSync(join(dir, "CLAUDE.md"), "# Proj\n\n## What This Is\n\nx\n");
   const init = runLore(["init"], dir);
   if (init.exitCode !== 0) throw new Error(`fixture: lore init failed: ${init.all}`);
