@@ -201,7 +201,7 @@
 
 import { z } from "zod";
 import { ChangeSourceSchema, type ChangeSource, type SessionTrail } from "./session-trail.js";
-import { extractClaim, isClaimStale } from "./task-workflow.js";
+import { extractHeldClaim, isClaimStale } from "./task-workflow.js";
 import type { DocId, DocRecord } from "./types.js";
 
 // ─── Handoff Extra Schema (S2, SPEC-041 §3 D3) ─────────────────────────────
@@ -751,7 +751,7 @@ export function deriveSessions(
   const order: string[] = [];
 
   for (const task of tasks) {
-    const claim = extractClaim(task);
+    const claim = extractHeldClaim(task);
     if (claim === undefined) continue;
     if (staleByTask?.get(task.id) ?? isClaimStale(claim, nowIso, ttlMinutes)) continue;
 
@@ -808,6 +808,23 @@ export function deriveSessions(
       newest_at: g.newest_at,
     };
   });
+}
+
+/**
+ * The ONE definition of an "active plan": a plan whose status is neither `archived` nor
+ * `deprecated` (so draft, in-review and approved plans are all active).
+ *
+ * Bootstrap's `active_plans` loop and the HTTP list filter `GET /api/docs?type=plan&active=true`
+ * both call this, so the two surfaces cannot disagree. Pure and browser-safe (no Node import).
+ *
+ * @param plan - Anything carrying the plan's `status` (a `DocRecord` or `DocSummary`).
+ * @returns true when the plan is still in play.
+ * @example
+ * isActivePlan({ status: "approved" }); // => true
+ * isActivePlan({ status: "archived" }); // => false
+ */
+export function isActivePlan(plan: { readonly status: DocRecord["status"] }): boolean {
+  return plan.status !== "archived" && plan.status !== "deprecated";
 }
 
 /**

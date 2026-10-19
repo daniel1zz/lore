@@ -72,6 +72,7 @@ import { CAPTURE_TAIL_CHARS } from "./context-variables.js";
 import type { Result, LoreError } from "./errors.js";
 import type { DocId, DocRecord, DocStatus, DocSummary, LinkRecord } from "./types.js";
 import type { CompletenessVerdict } from "./attestation-completeness.js";
+import { isTerminalStatus } from "./lifecycle.js";
 
 /**
  * `attestation.completeness`'s value set, mirrored here (not re-derived) from
@@ -1136,7 +1137,7 @@ export interface BlockerInfo {
  * Defensive `extra` accessor — `task.extra` is typed `Record<string, unknown>`, but a
  * corrupted/legacy store row (or a fuzzed test fixture, AC-36-10) may hand this a
  * `null`/non-object value at runtime. Indexing directly into that would throw before
- * the array/type guards in {@link extractEvidence} / {@link extractClaim} ever run.
+ * the array/type guards in {@link extractEvidence} / {@link readClaimRecord} ever run.
  * Duplicated (not imported) from `doc-type-meta.ts`'s identical `safeExtra` helper to
  * avoid a reverse dependency — `doc-type-meta.ts` already depends on this file.
  */
@@ -1161,16 +1162,32 @@ export function extractEvidence(task: DocRecord): EvidenceEntry[] {
 }
 
 /**
- * Extracts and validates the claim from a task's extra field.
- * Returns undefined when absent or malformed (defensive — extra is untyped storage).
- * Exported for reuse by `doc-type-meta.ts::deriveTypeMeta` (SPEC-036 §2 D3) — single
- * extraction point, not re-derived at the call site.
+ * Reads the claim RECORDED on a row's `extra` field — what was stored, whoever it belongs to and
+ * whatever the row's status. Returns undefined when absent or malformed (defensive — extra is untyped
+ * storage). Use it for "what claim is on this row" questions (history, display, a row's own lifecycle
+ * verbs). For "who holds / is working on this task now" use {@link extractHeldClaim}: a terminal task
+ * holds nothing, however its stored claim reads.
+ * Exported for reuse by `doc-type-meta.ts::deriveTypeMeta` (SPEC-036 §2 D3).
  */
-export function extractClaim(task: DocRecord): TaskClaim | undefined {
+export function readClaimRecord(task: DocRecord): TaskClaim | undefined {
   const raw = safeTaskExtra(task)["claim"];
   if (raw === undefined || raw === null) return undefined;
   const parsed = taskClaimSchema.safeParse(raw);
   return parsed.success ? parsed.data : undefined;
+}
+
+/**
+ * The ONE definition of "this task holds a claim": its status is not terminal (no outgoing transition in
+ * the lifecycle graph, `isTerminalStatus` — the authority the dashboard badge uses) AND it carries a valid
+ * `extra.claim`. A terminal row's stored claim stays as history ({@link readClaimRecord}); it is not a held
+ * claim, so archived rows need no migration. Every reader of "who is working on this now" goes through this.
+ *
+ * @example
+ * extractHeldClaim({ status: "archived", type: "task", extra: { claim: { by: "a", at: "…" } } } as DocRecord); // => undefined
+ */
+export function extractHeldClaim(task: DocRecord): TaskClaim | undefined {
+  if (isTerminalStatus(task.status, task.type)) return undefined;
+  return readClaimRecord(task);
 }
 
 // ─── Command Provenance (SPEC-039 M2 trust-hardening) ──────────────────────
@@ -1217,7 +1234,7 @@ export function isApprovedVerifyCommand(task: DocRecord, command: string): boole
  *      `tasks`; no match → `VALIDATION_ERROR` (an explicit override never falls
  *      through to claim-based heuristics, even if it would resolve ambiguity).
  *   2. Otherwise, filter `tasks` down to those holding a fresh (non-stale) claim
- *      via {@link extractClaim} + {@link isClaimStale}. Exactly one fresh claim →
+ *      via {@link readClaimRecord} + {@link isClaimStale}. Exactly one fresh claim →
  *      that task. Zero or more-than-one → `VALIDATION_ERROR` listing the
  *      candidate slugs (or, when zero, prompting for `--task`) — ambiguity is
  *      fail-loud, never a silent first-match guess (SPEC-039 §3).
@@ -1260,7 +1277,7 @@ export function resolveTargetTask(
   }
 
   const freshlyClaimed = tasks.filter((task) => {
-    const claim = extractClaim(task);
+    const claim = extractHeldClaim(task);
     return claim !== undefined && !isClaimStale(claim, nowIso, ttlMinutes);
   });
 
@@ -1362,7 +1379,8 @@ export function evaluateReadiness(
     const ready = !isTerminal && unmetBlockers.length === 0;
 
     const evidence = extractEvidence(task);
-    const claim = extractClaim(task);
+    // reason: a terminal task holds no claim (extractHeldClaim) — the ready record reports who holds it now.
+    const claim = extractHeldClaim(task);
     const phase = task.extra["phase"];
 
     const record: ReadyRecord = {

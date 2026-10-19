@@ -9,7 +9,7 @@
  *
  * Spec expectations (written from the module's documented invariants, before
  * reading the implementation body):
- *   - Fetches via `apiList({ type: "plan", status: "active" })` — the filter
+ *   - Fetches via `apiList({ type: "plan", active: true })` — the filter
  *     must be exactly this shape, not e.g. all plans or all active docs.
  *   - Shows at most ACTIVE_PLANS_LIMIT (documented as 8) plans, server order.
  *   - Loading, empty-list, and fetch-error states each render a distinct
@@ -35,7 +35,7 @@
  *     apiGetReadyReport degrades only that row, not the whole panel.
  *   STATE — loading state shows skeletons before data resolves; clicking a
  *     title calls onNavigate with that plan's id.
- *   REGRESSION — apiList is called with the exact `{type:"plan",status:"active"}`
+ *   REGRESSION — apiList is called with the exact `{type:"plan",active:true}`
  *     filter (guards against silently widening/narrowing the query); the
  *     "not ready-aware" placeholder badge is gone (SPEC-037 D1 supersedes it);
  *     SPEC-042 real ready-report object shape never throws (this file's
@@ -143,12 +143,12 @@ describe("ActivePlansPanel", () => {
   });
 
   describe("regression: query filter shape", () => {
-    it('calls apiList with exactly {type: "plan", status: "active"}', async () => {
+    it('calls apiList with exactly {type: "plan", active: true}', async () => {
       mockedApiList.mockResolvedValue({ docs: [], total: 0 });
 
       renderWithClient(<ActivePlansPanel />);
 
-      await waitFor(() => expect(mockedApiList).toHaveBeenCalledWith(null, { type: "plan", status: "active" }));
+      await waitFor(() => expect(mockedApiList).toHaveBeenCalledWith(null, { type: "plan", active: true }));
     });
 
     it("no longer renders the 'not ready-aware' placeholder badge (SPEC-037 D1)", async () => {
@@ -172,7 +172,7 @@ describe("ActivePlansPanel", () => {
         </QueryClientProvider>,
       );
       await waitFor(() =>
-        expect(mockedApiList).toHaveBeenCalledWith("project-a", { type: "plan", status: "active" }),
+        expect(mockedApiList).toHaveBeenCalledWith("project-a", { type: "plan", active: true }),
       );
 
       rerender(
@@ -181,7 +181,7 @@ describe("ActivePlansPanel", () => {
         </QueryClientProvider>,
       );
       await waitFor(() =>
-        expect(mockedApiList).toHaveBeenCalledWith("project-b", { type: "plan", status: "active" }),
+        expect(mockedApiList).toHaveBeenCalledWith("project-b", { type: "plan", active: true }),
       );
 
       const cachedKeys = client.getQueryCache().getAll().map((q) => q.queryKey);

@@ -55,7 +55,7 @@
 
 import { dirname } from "path";
 import { exitCli } from "./cli-exit.js";
-import { mergeDefaults, isAiConfigValidationError, extractClaim, resolveClaimTtlMinutes, resolveForeignCorpusWriteGateEnabled } from "@lore/core";
+import { mergeDefaults, isAiConfigValidationError, readClaimRecord, resolveClaimTtlMinutes, resolveForeignCorpusWriteGateEnabled } from "@lore/core";
 import type {
   Invocation,
   LoreConfig,
@@ -252,7 +252,7 @@ function resolveForeignWriteProvenance(io: CliIo, bootSurface: LoreAppBootSurfac
 async function readTaskClaimLease(app: App, idOrSlug: string): Promise<TaskClaimLookup> {
   const result = await app.corpusService.get(idOrSlug);
   if (!result.ok) return { found: false };
-  return { found: true, claim: extractClaim(result.value.doc) };
+  return { found: true, claim: readClaimRecord(result.value.doc) };
 }
 
 /**

@@ -498,11 +498,11 @@ describe("BOUNDARY — per-section budgets clip independently and record exact t
 // ─── STATE/REGRESSION — determinism + import-graph purity (AC-070-1) ──────
 
 describe("STATE/REGRESSION — buildTaskStartPack import-graph purity + SSOT registration (AC-070-1)", () => {
-  it("the module's import/re-export statements never reference computeAcCoverage/extractClaim/isClaimStale/extractEvidence (thick-bundle/thin-flow)", () => {
+  it("the module's import/re-export statements never reference computeAcCoverage/readClaimRecord/isClaimStale/extractEvidence (thick-bundle/thin-flow)", () => {
     const source = readFileSync(TASK_FEED_FLOW_PATH, "utf8");
     const importStatements = collectImportExportStatements(source);
 
-    for (const forbidden of ["computeAcCoverage", "extractClaim", "isClaimStale", "extractEvidence"]) {
+    for (const forbidden of ["computeAcCoverage", "readClaimRecord", "isClaimStale", "extractEvidence"]) {
       expect(importStatements).not.toContain(forbidden);
     }
   });

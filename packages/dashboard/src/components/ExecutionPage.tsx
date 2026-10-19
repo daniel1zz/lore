@@ -79,7 +79,7 @@ export function ExecutionPage({
     error: plansError,
   } = useQuery({
     queryKey: queryKeys.scope(project, ["execution", "active-plans"]),
-    queryFn: () => apiList(project, { type: "plan", status: "active" }),
+    queryFn: () => apiList(project, { type: "plan", active: true }),
   });
 
   const plans = plansData?.docs ?? [];

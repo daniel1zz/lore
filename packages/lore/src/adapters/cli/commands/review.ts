@@ -94,6 +94,7 @@ import {
 } from "../../../flows/staleness-flow.js";
 import { loadTreeBlueprint } from "../../../flows/blueprint-flow.js";
 import { ok, resolveStalenessDefaults, runDeterministicChecks } from "@lore/core";
+import { refuseDocWithPending, refuseFilterValue } from "../filter-values.js";
 import type { Invocation } from "@lore/core";
 import type {
   CheckResult,
@@ -319,6 +320,9 @@ export default defineLoreCommand({
     // "review/staleness has no non-AI mode" mutex/brake below.
     const isStalenessListMode = isStaleness && isList;
 
+    // reason: AC-DCL-2 — `<doc> --pending` used to review the whole queue and ignore <doc>.
+    const docWithPending = refuseDocWithPending(args.doc, args.pending === true);
+    if (!docWithPending.ok) return refuseFilterValue(inv, docWithPending.error);
     if (hasExplicitAi && hasExplicitNoAi) {
       inv.io.stderr.write("Error: --ai and --no-ai are mutually exclusive. Pass only one.\n");
       exitCli(2);

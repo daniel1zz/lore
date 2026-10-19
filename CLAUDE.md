@@ -20,15 +20,13 @@ Target: development ~100% by AI, one project worked by MANY CONCURRENT SESSIONS,
 bun run dev               # run from source
 bun run build             # compile dist/lore
 bun run typecheck         # tsc for all packages + scripts
-bun run test:vitest       # vitest: every *.test.ts that is not *.bun.test.ts
-bun run test:bun          # bun test: *.bun.test.ts (bun:sqlite)
-bun run test              # ⛔ NOT "both runners": an && chain, a red vitest skips the rest
+bun run test:vitest       # every test file (*.bun.test.ts included): vitest on Bun, then vitest on Node (vitest.node-files.ts); builds dist/lore first
+bun run test              # check:* steps plus test:vitest in a fixed order (scripts/run-chain.ts); every step runs, a per-step exit table prints, any red step exits non-zero
 bun run test:changed [<base>]  # worktree oracle; ⛔ under- AND over-selects — hand-pick consumers, re-verify on main
-bunx vitest run <file>                  # one vitest file
-cd packages/lore && bun test <file>     # one bun file
+bun run test:file <path...> [-t <name>]  # specific files, each routed to the runner that collects it (works for *.bun.test.ts)
 ```
 
-- `*.bun.test.ts` run only under `bun test`; every other `*.test.ts` only under vitest. Never mix runners.
+- One runner, vitest: `bun run test:bun` is retired (prints a notice, exits 1). Run a single file with `bun run test:file <path>`.
 - ⛔ Never write to the repo's own `.lore/` from tests or smoke checks — use a throwaway corpus (`mkdtemp` + `lore init`). ⛔ Never assume a server on port 8787 is yours.
 - Pre-push gate: its checks and their order live in `hooks/pre-push`, never here. ⛔ Every merge to main is followed by `bun run build` (a `dist/lore` older than HEAD is refused), after the batch's last agent returns. After clone: `git config core.hooksPath hooks`.
 
@@ -42,7 +40,7 @@ Repo-wide invariants. The why, the layer stack, the service table and per-module
 - ⛔ `@lore/core`'s default barrel never imports a Node builtin; Node IO lives in `@lore/core/node`, which `packages/dashboard/src/**` never imports.
 - A doc has `id` (ULID, immutable) and `slug` (editable); services accept either via `corpusService.resolve`.
 - Gates run in the service layer, so CLI, MCP and HTTP writes are gated identically.
-- Lifecycle: `VALID_TRANSITIONS` in `packages/core/src/schemas.ts` is the only authority. Editing an approved living doc resets it to `draft`; a locked record refuses body/title/criteria rewrites (exit 4) — use `lore set --correction`, `lore reopen`, or a new linked record. `lore phase add|rm` does NOT demote but LOGS a version.
+- Lifecycle: `VALID_TRANSITIONS` in `packages/core/src/lifecycle.ts` is the only authority. Editing an approved living doc resets it to `draft`; a locked record refuses body/title/criteria rewrites (exit 4) — use `lore set --correction`, `lore reopen`, or a new linked record. `lore phase add|rm` does NOT demote but LOGS a version.
 - ⛔ A listed doc is not proven live; validity is authoritative only by direct address.
 - ⛔ The corpus is the ONLY spec index: read the governing spec (`lore get SPEC-0NN`, or `lore search`) before changing a module; exported mirrors live under `docs/requirements/{prd,spec,adr,knowledge,plan,task}/`, zero-padded 3-digit ids (`bun run mirror:export` / `check:spec-mirror`).
 
@@ -55,7 +53,7 @@ Repo-wide invariants. The why, the layer stack, the service table and per-module
 - Standing lessons (oracle design, mirror export, test selection, governance tooling quirks) and their slugs: `knowledge-root-claude-md-tier-2-text-verbatim-body-before-the`.
 
 # ─── lore governance (managed) ───
-<!-- lore:managed section=module-index hash=6c889f13 -->
+<!-- lore:managed section=module-index hash=38faf62c -->
 ## Module Index
 
 Folders with their own memory file — read it before working there:
@@ -70,7 +68,7 @@ Folders with their own memory file — read it before working there:
 - [`packages/lore/src/store`](packages/lore/src/store/CLAUDE.md) — Async persistence abstraction: `StoreInterface` with SQLite / Turso / InMemory implementations and FTS5 escape.
 - [`packages/dashboard`](packages/dashboard/CLAUDE.md) — Vite + React + shadcn local-dev web UI: read views plus the SPEC-022 write surface.
 
-202 folders have no memory file and are not listed.
+203 folders have no memory file and are not listed.
 <!-- lore:managed section=command-table hash=4bf6c197 -->
 No scripts are marked as documented (package.json `lore.documentedScripts`); see package.json `scripts` and the Commands section above.
 <!-- lore:managed section=governance-pointer hash=760d2396 -->

@@ -357,16 +357,14 @@ describe("compiled lore evidence derives a cd target from ANY chain segment", ()
     expect(await readEvidenceCount(dir, taskSlug)).toBe(before);
   });
 
-  it("BOUNDARY: a two-cd chain's refusal names the LAST target by value", async () => {
+  it("BOUNDARY: a two-cd chain's refusal names the COMPOSED directory (DCL-4: `cd first && cd second` runs in first/second)", async () => {
     const before = await readEvidenceCount(dir, taskSlug);
 
     const refused = await recordEvidence(dir, taskSlug, TWO_CD_ABSENT_FILE);
 
     expect(refused.exitCode).toBe(4);
-    expect(refused.stderr).toContain(`${DERIVED_TARGET_WORDING} second`);
-    // The FIRST cd must not be what it derived — pins last-cd-wins by value.
-    expect(refused.stderr).not.toContain(`${DERIVED_TARGET_WORDING} first`);
-    expect(refused.stderr).toContain(join(dir, "second"));
+    expect(refused.stderr).toContain(`${DERIVED_TARGET_WORDING} first/second`);
+    expect(refused.stderr).toContain(join(dir, "first", "second"));
     expect(await readEvidenceCount(dir, taskSlug)).toBe(before);
   });
 

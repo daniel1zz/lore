@@ -95,7 +95,7 @@ function safeExtra(extra: unknown): Record<string, unknown> {
 /**
  * Extracts and validates `extra.validity` from a DocRecord-shaped input.
  * Returns `undefined` when absent or malformed (defensive — `extra` is untyped
- * storage; matches `extractClaim`/`extractEvidence`'s degrade-to-undefined contract).
+ * storage; matches `readClaimRecord`/`extractEvidence`'s degrade-to-undefined contract).
  */
 export function extractValidity(doc: Pick<DocRecord, "extra">): Validity | undefined {
   const raw = safeExtra(doc.extra)["validity"];

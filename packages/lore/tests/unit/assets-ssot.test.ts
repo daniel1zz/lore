@@ -425,6 +425,8 @@ const DECLARED_FILES = [
   // run-end + shared run-id helper (SessionEnd/SubagentStop run end, BR-1059)
   "hooks/run-end.mjs",
   "hooks/lib/run-id.mjs",
+  // shared cwd-aware shell parser, GENERATED from packages/core/src/shell-cwd.ts (DCL-4; scripts/sync-hook-shell-cwd.ts)
+  "hooks/lib/shell-cwd.mjs",
   "hooks/pre-tool-harness-run.mjs",
   "hooks/lib/turn-state.mjs",
   // session trail (spec-session-trail D13): start/end writers and their shared library

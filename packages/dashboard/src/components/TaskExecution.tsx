@@ -4,7 +4,7 @@
  *   for a task doc, above PARENT/RELATED in `DocDetail`'s footer.
  * Public surface: TaskExecution, TaskExecutionProps
  * Invariants:
- *   - Parses `task.extra` via `extractClaim`/`extractEvidence`
+ *   - Parses `task.extra` via `readClaimRecord`/`extractEvidence`
  *     (`@lore/core`, `task-workflow.ts`) — both already `safeParse`-guard
  *     malformed/legacy `extra` and degrade to `undefined`/`[]` rather than
  *     throwing. Reused here (not re-implemented) so this component never
@@ -38,7 +38,7 @@
  */
 
 import type { DocRecord } from "@lore/core";
-import { extractClaim, extractEvidence } from "@lore/core";
+import { readClaimRecord, extractEvidence } from "@lore/core";
 import { Badge } from "@/components/ui/badge";
 import { formatRelativeTime } from "@/lib/format-relative-time";
 
@@ -52,7 +52,7 @@ export interface TaskExecutionProps {
  * <TaskExecution task={doc} />
  */
 export function TaskExecution({ task }: TaskExecutionProps): React.ReactElement | null {
-  const claim = extractClaim(task);
+  const claim = readClaimRecord(task);
   const evidence = extractEvidence(task);
 
   if (claim === undefined && evidence.length === 0) {

@@ -190,14 +190,14 @@ describe("extractCdPrefixTarget — chain scanning NEGATIVE", () => {
 });
 
 describe("extractCdPrefixTarget — chain scanning BOUNDARY", () => {
-  it("resolves two cd segments against the LAST one, by value", () => {
-    expect(extractCdPrefixTarget("cd a && cd b && bun test f.test.ts")).toBe("b");
+  it("composes two relative cd segments the way the shell does (DCL-4: cwd semantics, not by-value)", () => {
+    expect(extractCdPrefixTarget("cd a && cd b && bun test f.test.ts")).toBe("a/b");
   });
 
-  it("resolves three cd segments against the LAST one, by value", () => {
+  it("composes three relative cd segments the way the shell does", () => {
     expect(
       extractCdPrefixTarget("cd a && cd b && cd c && bun test f.test.ts"),
-    ).toBe("c");
+    ).toBe("a/b/c");
   });
 
   it("does NOT apply a cd that comes AFTER the test invocation", () => {
@@ -233,8 +233,8 @@ describe("extractCdPrefixTarget — chain scanning ERROR", () => {
 });
 
 describe("extractCdPrefixTarget — chain scanning STATE", () => {
-  it("applies last-cd-wins across MIXED && and ; separators", () => {
-    expect(extractCdPrefixTarget("cd a; cd b && bun test f.test.ts")).toBe("b");
+  it("composes cds across MIXED && and ; separators", () => {
+    expect(extractCdPrefixTarget("cd a; cd b && bun test f.test.ts")).toBe("a/b");
   });
 
   it("treats `;` separators exactly like `&&` in a multi-segment chain", () => {
@@ -299,10 +299,9 @@ describe("describeDerivedCdTarget — NEGATIVE", () => {
 });
 
 describe("describeDerivedCdTarget — BOUNDARY", () => {
-  it("names the LAST cd target of a multi-cd chain, not the first", () => {
+  it("names the composed directory of a multi-cd chain", () => {
     const described = describeDerivedCdTarget("cd first && cd second && bun test f.test.ts");
-    expect(described).toContain("second");
-    expect(described).not.toContain("first");
+    expect(described).toContain("first/second");
   });
 });
 
@@ -479,12 +478,12 @@ describe("findMissingOracleFiles — multi-segment cd NEGATIVE", () => {
 });
 
 describe("findMissingOracleFiles — multi-segment cd BOUNDARY", () => {
-  it("probes the LAST cd target's root, by value", () => {
+  it("probes the composed cd root (DCL-4: `cd a && cd b` runs in a/b)", () => {
     expect(
       describePrecheckRoots("cd a && cd b && bun test f.test.ts", {
         cwd: "/repo",
       }),
-    ).toEqual(["/repo/b", "/repo"]);
+    ).toEqual(["/repo/a/b", "/repo"]);
   });
 
   it("treats `;` separators exactly like `&&` at the composition level", () => {

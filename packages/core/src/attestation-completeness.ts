@@ -147,11 +147,12 @@
 // module once `classifyCommandSegment` needed the identical check for its
 // "lore-cli" runner shape — SSOT, never a second regex literal here.
 import {
-  extractCdPrefixTarget,
+  extractOraclePathTokens,
   splitCommandSegments,
   classifyCommandSegment,
   COMPILED_BINARY_TOKEN_PATTERN,
 } from "./oracle-file-existence.js";
+import { ABSTRACT_ROOT, parseShellCommand } from "./shell-cwd.js";
 
 // ─── Explicit Path-Argument Counting ────────────────────────────────────────
 
@@ -1203,17 +1204,29 @@ export function commandRunsFileUnfiltered(
 ): boolean {
   if (commandHasAnyCaseFilter(command)) return false;
 
-  // reason: `extractCdPrefixTarget` returns ONLY the derived offset (or
-  // `null`), not a "rest of the command with the cd segment(s) stripped" —
-  // unlike the old `stripCdPrefix`, there is no stripped `rest` to tokenize.
-  // Tokenizing the FULL `command` instead is deliberate and safe: the `cd`
-  // segment's own tokens ("cd", the directory argument, "&&") never equal
-  // `target` once joined to `offset` (see this function's own JSDoc example
-  // for the non-leading-cd case), so nothing is lost by not stripping them —
-  // and every test-file token past the `cd` chain is still compared exactly
-  // as before.
-  const cdOffset = extractCdPrefixTarget(command) ?? "";
   const target = normalizeForComparison(filePath);
+  // reason: directories come from the ONE shared shell parser (`shell-cwd.ts`): each segment's argv is joined to the
+  // directory THAT segment runs in, so `(cd packages/lore && bun test x.bun.test.ts) && bun test y.test.ts` (#164) and a
+  // cd in any earlier chain segment (#229) resolve correctly, and the subshell's cd does not leak onto `y`.
+  const parse = parseShellCommand(command, { root: ABSTRACT_ROOT, env: {} });
+  const segmentRuns: { relative: string; tokens: readonly string[] }[] = [];
+  // reason: plan "Ownership answers" — this function keeps EVERY case it answered true before the parser. The old rule
+  // joined every token of the command to ONE offset (the cd before the first path-naming segment, by value, uncomposed).
+  // `legacyOffsets` reproduces exactly that: the first path-naming segment's directory plus its last literal cd target.
+  const legacyOffsets = new Set<string>([""]);
+  if (parse.kind === "parsed") {
+    let sawPathSegment = false;
+    for (const segment of parse.segments) {
+      if (segment.cwd.kind === "inside") segmentRuns.push({ relative: segment.cwd.relative, tokens: segment.argv });
+      // reason: the pre-parser rule could not see a subshell's cd at all, so a path-naming segment INSIDE `( … )` never
+      // seeded its offset; seeding from it now would let a scoped cd leak onto the rest of the command (#164).
+      if (sawPathSegment || segment.depth > 0 || extractOraclePathTokens(segment.raw).length === 0) continue;
+      sawPathSegment = true;
+      legacyOffsets.clear();
+      if (segment.cwd.kind === "inside") legacyOffsets.add(segment.cwd.relative);
+      if (segment.lastCdTarget !== null && !segment.lastCdTarget.startsWith("/")) legacyOffsets.add(segment.lastCdTarget);
+    }
+  }
   const tokens = tokenizeCommand(command);
 
   // reason: F7 (spec-close-the-eight-verified-critical-defects-no-judge-listing) —
@@ -1228,10 +1241,16 @@ export function commandRunsFileUnfiltered(
   const executionRoot = opts.executionRoot ?? "";
   if (executionRoot.startsWith("/")) return false;
 
+  const runsTarget = (offset: string, token: string): boolean => {
+    if (token.length === 0 || token.startsWith("-")) return false;
+    const joined = [executionRoot, offset, token].filter((part) => part.length > 0).join("/");
+    return normalizeForComparison(joined) === target;
+  };
   for (const token of tokens) {
-    if (token.length === 0 || token.startsWith("-")) continue;
-    const joined = [executionRoot, cdOffset, token].filter((part) => part.length > 0).join("/");
-    if (normalizeForComparison(joined) === target) return true;
+    for (const offset of legacyOffsets) if (runsTarget(offset, token)) return true;
+  }
+  for (const run of segmentRuns) {
+    for (const token of run.tokens) if (runsTarget(run.relative, token)) return true;
   }
   return false;
 }

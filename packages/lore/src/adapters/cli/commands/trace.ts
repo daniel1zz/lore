@@ -52,6 +52,7 @@ import type {
 } from "../../../service/trace-stats-service.js";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatErrorFor, formatTable } from "../utils.js";
+import { parseSinceFilter, refuseFilterValue } from "../filter-values.js";
 import { invocationOf } from "../command-invocation.js";
 import { printLine } from "../output.js";
 
@@ -168,6 +169,11 @@ export default defineLoreCommand({
       async run(context) {
         const { args } = context;
         const inv = invocationOf(context);
+        // reason: AC-DCL-2 — `--since yesterday` used to return an empty report with exit 0.
+        if (typeof args.since === "string") {
+          const parsedSince = parseSinceFilter("--since", args.since);
+          if (!parsedSince.ok) return refuseFilterValue(inv, parsedSince.error);
+        }
         const { app } = loadLoreApp({ inv });
         try {
           if (app.traceStatsService === undefined) {

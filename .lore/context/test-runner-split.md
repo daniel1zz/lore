@@ -1,12 +1,12 @@
 ---
 id: project-test-runner-split
-title: "Test runner split: bun test vs vitest"
+title: "Test runner: one vitest runner"
 audience: ["subagent:lore-implementer", "subagent:lore-reader"]
 mode: static
 ---
-## Test runner split (this repo)
+## Test runner (this repo)
 
-- **Test file convention**: Files ending in `.bun.test.ts` run under `bun test` only (they use `bun:sqlite`). All other `.test.ts` files run under vitest. Do not mix runners.
-- Run a single vitest test file: `bunx vitest run packages/lore/tests/unit/service/corpus-service.test.ts`
-- Run a single bun test file: `cd packages/lore && bun test tests/unit/store/sqlite-store.bun.test.ts`
-- Tests that touch `SQLiteStore` must use `bun test`, not vitest (`bun:sqlite` is external to vitest).
+- **One runner, vitest**: every test file, `.bun.test.ts` included, runs under vitest. `bun run test:vitest` runs vitest on the Bun runtime (`bunx --bun vitest`), then on Node for the files listed in `vitest.node-files.ts`. `bun run test:bun` is retired (prints a notice, exits 1).
+- Run specific files: `bun run test:file <path...> [-t <name>]` routes each file to the runner that collects it, e.g. `bun run test:file packages/lore/tests/unit/store/sqlite-store.bun.test.ts`.
+- Run one file directly: `bunx --bun vitest run <file>` (a file listed in `vitest.node-files.ts` collects nothing there: use `test:file`).
+- `.bun.test.ts` files (they use `bun:sqlite`) run under the Bun runtime; never `bun test <file>`.
