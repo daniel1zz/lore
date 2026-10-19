@@ -315,7 +315,7 @@ describe("REGRESSION — link/unlink/tree-fix join no VERSION_ACTION_AUDIT_FAMIL
     const store = makeStore();
     const cs = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
     const tcs = new TreeCheckService(store);
-    const auditService = new AuditService(store, { verifySince: FAR_PAST });
+    const auditService = new AuditService(store);
 
     // Exactly ONE prd root — a second one would give the orphaned plan below two
     // equally-valid candidate parents, making fix() skip it ("0-or-many candidates")

@@ -18,8 +18,6 @@ context:
     root:
       max_lines: 220
       max_bytes: 24576
-audit:
-  verify_since: "2026-07-06T12:02:00Z"
 # SPEC-058 verification profiles — per-spec_kind oracle-coverage floors.
 # Armed on this corpus 2026-07-21: the mechanism shipped in SPEC-058 but was
 # only ever seeded by `lore setup --project`, so this (pre-SPEC-058) corpus

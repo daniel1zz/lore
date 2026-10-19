@@ -121,12 +121,12 @@ function makeApp(): App {
     // dashboard-routes.test.ts fix for the same reason: approve/reject's calibration
     // hook also depends on a real judgmentService).
     judgmentService: new JudgmentService(store, new NoOpTelemetry()),
-    auditService: new AuditService(store, { verifySince: FAR_PAST }),
+    auditService: new AuditService(store),
     // reason: this stub composes an in-memory-style App, so verify runs in-loop (the runner choice is by store kind);
     // the anchor root has no `.lore/audit-anchor.json`, so the anchor reads as absent.
     auditVerifyRunner: buildAuditVerifyRunner(
-      { kind: "memory", auditService: new AuditService(store, { verifySince: FAR_PAST }) },
-      { verifySince: FAR_PAST, anchorRoot: "/nonexistent-lore-anchor-root" },
+      { kind: "memory", auditService: new AuditService(store) },
+      { anchorRoot: "/nonexistent-lore-anchor-root" },
     ),
     // reason: test does not exercise AI-default path; callerSurface required by App interface (SPEC-024).
     callerSurface: "cli" as const,

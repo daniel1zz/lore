@@ -35,7 +35,6 @@ import {
   resolveSyncCredentials,
   resolveClaimTtlMinutes,
   resolveHandoffTtlMinutes,
-  resolveAuditVerifySince,
   resolveVerifyDefaultTimeoutMs,
   resolveVerifyEnvConfig,
   resolveVerifyRequireCommandApproval,
@@ -712,8 +711,6 @@ export function buildStateBindingOccupancyPort(writer: DocWritePort): StateBindi
  * @param claimTtlMinutes - Task claim lease TTL in minutes (SPEC-025 §3 D2; default 120)
  * @param handoffTtlMinutes - Handoff staleness TTL in minutes (SPEC-041 §3 D5; default
  *   10080 = 7 days) — feeds `SessionService.resume`'s `ttl_warning` threshold
- * @param auditVerifySince - Audit-verify watermark, ISO 8601 (SPEC-035 §2 D5; default the
- *   SPEC-035 deploy date)
  * @param verifyDefaultTimeoutMs - Trusted-runner default spawn timeout, ms (SPEC-039 §2 D9;
  *   default 300000)
  * @param verifyEnvConfig - Trusted-runner env-passthrough allowlist config (SPEC-039 §M2;
@@ -783,7 +780,6 @@ function buildAppFromSqlite(
   aiDefaultPerSurface: AiDefaultPerSurface | undefined,
   claimTtlMinutes: number = 120,
   handoffTtlMinutes: number = 10_080,
-  auditVerifySince: string = "2026-07-06T00:00:00Z",
   verifyDefaultTimeoutMs: number = 300_000,
   verifyEnvConfig: VerifyEnvConfig = { allowlist: [], passthrough_all: false },
   verifyRequireCommandApproval: boolean = true,
@@ -1040,7 +1036,7 @@ function buildAppFromSqlite(
     // reason: AuditService is store-only (no telemetry, mirrors VersionService) — takes
     // the resolved watermark via constructor, same DI shape as TaskWorkflowService's
     // claimTtlMinutes (D5). SPEC-035 §2, §5, §9.1.
-    auditService: new AuditService(store, { verifySince: auditVerifySince }),
+    auditService: new AuditService(store),
     auditVerifyRunner,
     stateBindingService: new StateBindingService(store, corpusService),
     // reason: AcService depends only on StoreInterface — stateless, no AI, no telemetry,
@@ -1187,8 +1183,6 @@ function buildAppFromSqlite(
  * @param claimTtlMinutes - Task claim lease TTL in minutes (SPEC-025 §3 D2; default 120)
  * @param handoffTtlMinutes - Handoff staleness TTL in minutes (SPEC-041 §3 D5; default
  *   10080 = 7 days) — see `buildAppFromSqlite`'s identical parameter JSDoc.
- * @param auditVerifySince - Audit-verify watermark, ISO 8601 (SPEC-035 §2 D5; default the
- *   SPEC-035 deploy date)
  * @param verifyDefaultTimeoutMs - Trusted-runner default spawn timeout, ms (SPEC-039 §2 D9;
  *   default 300000)
  * @param verifyEnvConfig - Trusted-runner env-passthrough allowlist config (SPEC-039 §M2;
@@ -1225,7 +1219,6 @@ function buildAppFromTurso(
   aiDefaultPerSurface: AiDefaultPerSurface | undefined,
   claimTtlMinutes: number = 120,
   handoffTtlMinutes: number = 10_080,
-  auditVerifySince: string = "2026-07-06T00:00:00Z",
   verifyDefaultTimeoutMs: number = 300_000,
   verifyEnvConfig: VerifyEnvConfig = { allowlist: [], passthrough_all: false },
   verifyRequireCommandApproval: boolean = true,
@@ -1452,7 +1445,7 @@ function buildAppFromTurso(
     // reason: AuditService is store-only (no telemetry, mirrors VersionService) — takes
     // the resolved watermark via constructor, same DI shape as TaskWorkflowService's
     // claimTtlMinutes (D5). SPEC-035 §2, §5, §9.1.
-    auditService: new AuditService(store, { verifySince: auditVerifySince }),
+    auditService: new AuditService(store),
     auditVerifyRunner,
     stateBindingService: new StateBindingService(store, corpusService),
     // reason: AcService depends only on StoreInterface — stateless, no AI, no telemetry,
@@ -1749,7 +1742,6 @@ function createAppUnscoped(
 
   // Audit-verify watermark (SPEC-035 §2 D5) — defaults to the SPEC-035 deploy date
   // when config/audit section absent.
-  const auditVerifySince = resolveAuditVerifySince(config);
 
   // Trusted-runner default spawn timeout (SPEC-039 §2 D9) — defaults to 300000ms
   // when config/verify section absent.
@@ -1886,7 +1878,6 @@ function createAppUnscoped(
       aiDefaultPerSurface,
       claimTtlMinutes,
       handoffTtlMinutes,
-      auditVerifySince,
       verifyDefaultTimeoutMs,
       verifyEnvConfig,
       verifyRequireCommandApproval,
@@ -1903,7 +1894,7 @@ function createAppUnscoped(
       citeGateRaw,
       ambient,
       // reason: D2 — a SQLite file is persistent, so verify runs in a worker over this same file (read-only).
-      buildAuditVerifyRunner({ kind: "sqlite", dbPath }, { verifySince: auditVerifySince, anchorRoot: repoRoot }),
+      buildAuditVerifyRunner({ kind: "sqlite", dbPath }, { anchorRoot: repoRoot }),
     );
     wireIssueCloseOnArchive(sqliteApp, sqliteStore, config, ambient);
     return sqliteApp;
@@ -1997,7 +1988,6 @@ function createAppUnscoped(
         aiDefaultPerSurface,
         claimTtlMinutes,
         handoffTtlMinutes,
-        auditVerifySince,
         verifyDefaultTimeoutMs,
         verifyEnvConfig,
         verifyRequireCommandApproval,
@@ -2016,7 +2006,7 @@ function createAppUnscoped(
         ambient,
         // reason: D2 — a Turso store is persistent, so verify runs in a worker over its local replica file,
         // opened without the remote URL (no second thread syncing the embedded replica).
-        buildAuditVerifyRunner({ kind: "turso", localPath: dbPath }, { verifySince: auditVerifySince, anchorRoot: repoRoot }),
+        buildAuditVerifyRunner({ kind: "turso", localPath: dbPath }, { anchorRoot: repoRoot }),
       );
     wireIssueCloseOnArchive(tursoApp, store, config, ambient);
     return { ok: true, value: tursoApp };

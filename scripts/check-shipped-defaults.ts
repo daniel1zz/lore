@@ -201,11 +201,6 @@ export const PROJECT_SPECIFIC_KEYS: readonly ProjectSpecificKeyEntry[] = [
     rationale: "Identifies the default author identity for THIS project; inherently per-installation, never shared.",
   },
   {
-    key: "audit.verify_since",
-    rationale:
-      "Names the audit hash-chain watermark for THIS corpus's own history; a shared default would misdate every other corpus's chain.",
-  },
-  {
     key: "feedback.upstream",
     rationale:
       "Carries CONSENT to send this corpus's own defect reports (title, description, repro command, actor) to a third-party GitHub intake — inherently per-project, and no default can honestly stand in for an agreement nobody made. ADDRESSING is no longer part of this key's job: the vendor intake's address ships inside the binary as @lore/core's VENDOR_INTAKE_REPO, spent by feedback.upstream.vendor: true, so the half that WAS a constant left config entirely (2026-08-25) and only the half that genuinely needs a per-project decision remains.",
@@ -257,7 +252,6 @@ export const ZOD_DEFAULTABLE_SECTIONS: readonly string[] = [
   "defaults",
   "ai",
   "workflow",
-  "audit",
   "feedback",
   "verify",
   "setup",
