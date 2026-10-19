@@ -74,7 +74,7 @@ interface Fixture {
 }
 
 /** A repo on main with branch `feat-landing` carrying one own commit, and a task claimed on that branch name. */
-async function fixture(): Promise<Fixture> {
+async function fixture(probeOverride?: Partial<ReturnType<typeof createRealWorktreeProbe>>): Promise<Fixture> {
   const repo = realpathSync(mkdtempSync(join(tmpdir(), "lore-landing-")));
   dirs.push(repo);
   run(repo, "init", "-q", "-b", "main");
@@ -89,7 +89,7 @@ async function fixture(): Promise<Fixture> {
   const svc = new TaskWorkflowService(
     store, undefined, { claimTtlMinutes: 120 },
     undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined,
-    createRealWorktreeProbe(repo),
+    { ...createRealWorktreeProbe(repo), ...probeOverride },
   );
   const plan = await cs.create({ type: "plan", title: "Landing plan", content: "body" } as CreateDocInput);
   if (!plan.ok) throw new Error("plan");
@@ -207,6 +207,70 @@ describe("AC-LAND-1: a task's commit range is recorded at landing, so a later re
     expect(derived.commits.map((c) => c.sha)).toEqual([f.ownCommit]);
     expect(derived.diff_text).toContain("own-landing-file.txt");
     expect(derived.attribution[f.slug]).toBe("recorded_range");
+  }, 60_000);
+
+  it("HONEST: no landing record and no merge(<name>) commit, claim re-made from main (head == base) -> commit_range is not-measured with reason and candidates, done is not refused, assess shows it", async () => {
+    const f = await fixture();
+    run(f.repo, "merge", "--no-ff", "-q", "-m", "manual merge, no branch name in the subject", "feat-landing");
+    await reclaimFromDetachedMain(f);
+    const done = await f.svc.done(f.taskId, { by: "alice" });
+    expect(done.ok).toBe(true);
+    if (!done.ok) return;
+    const range = done.value.task.extra["commit_range"] as Record<string, unknown>;
+    expect(range["state"]).toBe("not-measured");
+    expect(String(range["reason"])).toMatch(/head == base/);
+    expect(String(range["reason"])).toMatch(/no merge\(<name>\) commit/);
+    expect(range["candidates"]).toContain("feat-landing");
+    expect(range["head"]).toBeUndefined();
+    expect(done.value.commit_range_note).toMatch(/^commit range not measured: /);
+    const ranges = collectRecordedRanges([{ slug: f.slug, extra: done.value.task.extra }]);
+    const derived = deriveCommitSetForPlan(f.repo, [f.slug], true, ranges);
+    expect(derived.attribution[f.slug]).toBe("not_measured");
+    expect(derived.tasks_not_measured).toEqual([f.slug]);
+    expect(derived.warnings.join("\n")).toMatch(/commit range not measured: /);
+    expect(derived.diff_text).toBe("");
+  }, 60_000);
+
+  it("HONEST: main's first-parent log unreadable -> not-measured names `log unreadable: <why>` and the candidates", async () => {
+    const f = await fixture({ firstParentLog: () => ({ ok: false, reason: "boom" }) });
+    await integrateService(f, false).integrate({ branch: "feat-landing", sessionId: "s6", floorCommand: "true" });
+    await reclaimFromDetachedMain(f);
+    const done = await f.svc.done(f.taskId, { by: "alice" });
+    expect(done.ok).toBe(true);
+    if (!done.ok) return;
+    const range = done.value.task.extra["commit_range"] as Record<string, unknown>;
+    expect(range["state"]).toBe("not-measured");
+    expect(String(range["reason"])).toMatch(/log unreadable: boom/);
+    expect(range["candidates"]).toContain("feat-landing");
+  }, 60_000);
+
+  it("HONEST: a claim with real work but no landing found keeps its range and says so (note + landing_unresolved)", async () => {
+    const f = await fixture();
+    // work done AFTER the claim, so the claim's head differs from its base_sha
+    run(f.repo, "checkout", "-q", "feat-landing");
+    const later = commit(f.repo, "after-claim.txt", "feat: work after the claim");
+    run(f.repo, "checkout", "-q", "main");
+    run(f.repo, "merge", "--no-ff", "-q", "-m", "manual merge, no branch name in the subject", "feat-landing");
+    const done = await f.svc.done(f.taskId, { by: "alice" });
+    expect(done.ok).toBe(true);
+    if (!done.ok) return;
+    const range = done.value.task.extra["commit_range"] as Record<string, unknown>;
+    expect(range).toMatchObject({ state: "recorded", head: later });
+    expect(String(range["landing_unresolved"])).toMatch(/no merge\(<name>\) commit/);
+    expect(done.value.commit_range_note).toMatch(/no landing found/);
+  }, 60_000);
+
+  it("HISTORY: a re-landing replaces extra.landing and appends the replaced one to extra.landing_history", async () => {
+    const f = await fixture();
+    const first = { branch: "feat-landing", branch_head: "h1", main_before: "m0", main_after: "m1", landing_commit: "m1" };
+    const second = { branch: "feat-landing", branch_head: "h2", main_before: "m1", main_after: "m2", landing_commit: "m2" };
+    expect((await f.svc.recordLanding(first)).ok).toBe(true);
+    expect((await f.svc.recordLanding(second)).ok).toBe(true);
+    expect((await f.svc.recordLanding(second)).ok).toBe(true); // idempotent: no duplicate history entry
+    const task = await f.store.find(f.taskId);
+    const extra = task.ok && task.value !== null ? task.value.extra : {};
+    expect(extra["landing"]).toMatchObject(second);
+    expect((extra["landing_history"] as unknown[]).map((l) => (l as { branch_head: string }).branch_head)).toEqual(["h1"]);
   }, 60_000);
 
   it("NEGATIVE: landing a different branch records nothing on a task claimed elsewhere", async () => {
