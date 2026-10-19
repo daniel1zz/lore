@@ -13,6 +13,7 @@
  */
 
 export const LORE_MCP_TOOL_NAMES = [
+  "lore_ac_supersede",
   "lore_anchor_set",
   "lore_approve",
   "lore_assess",
@@ -57,6 +58,7 @@ export const LORE_MCP_TOOL_NAMES = [
   "lore_status",
   "lore_tree",
   "lore_uat_record",
+  "lore_undelete",
   "lore_verify",
 ] as const;
 

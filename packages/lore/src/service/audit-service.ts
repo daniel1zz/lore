@@ -113,7 +113,7 @@ const VERIFIABLE_VERSION_ACTIONS: ReadonlySet<VersionAction> = new Set([
  * log from a plain `lore set --status archived`.
  *
  * Keyed over the FULL `VersionAction` union (not just `VERIFIABLE_VERSION_ACTIONS`) so
- * the lookup at the call site never needs an `as`-cast; `delete` maps to an empty set
+ * the lookup at the call site never needs an `as`-cast; `delete`/`undelete` map to an empty set
  * since it's excluded from the reconcile walk upstream and is never looked up in
  * practice, but the type stays total rather than partial.
  */
@@ -138,6 +138,7 @@ const VERSION_ACTION_AUDIT_FAMILY: Readonly<Record<VersionAction, ReadonlySet<st
   reject: new Set(["reject", AUDIT_BACKFILL_ACTION]),
   restore: new Set(["restore", AUDIT_BACKFILL_ACTION]),
   delete: new Set(),
+  undelete: new Set(),
 };
 
 /** One versions row with no matching audit entry — itemized in {@link AuditVerifyResult}. */

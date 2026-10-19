@@ -51,6 +51,7 @@ import { MIGRATION_022_SQL } from "./migrations/migration-022.js";
 import { MIGRATION_023_SQL } from "./migrations/migration-023.js";
 import { MIGRATION_024_SQL } from "./migrations/migration-024.js";
 import { MIGRATION_025_SQL } from "./migrations/migration-025.js";
+import { MIGRATION_026_SQL, MigrationFailedError } from "./migrations/migration-026.js";
 import { DECISION_GENESIS_HASH, computeDecisionEntryHash } from "./decision-log.js";
 import type { DecisionLogRow, DecisionRecordInput } from "./decision-log.js";
 import type { DecisionSubjectKey } from "./store-interface.js";
@@ -213,6 +214,20 @@ export function loadLibsqlClientModule(): Promise<typeof import("@libsql/client"
 // function — it pre-resolves the client via `loadLibsqlClientModule()` above
 // and passes it in as `injectedClient`, so it never touches this fallback.
 let cachedLibsqlModuleSync: typeof import("@libsql/client") | null = null;
+
+/**
+ * Resolves `@libsql/client` through the literal-specifier dynamic `import()` and hands the module to the
+ * synchronous construction path below, so a SYNCHRONOUS `new TursoStore(...)` works from the compiled binary too
+ * (spec-defect-clusters-round-2-part-c-criterion-data-demotion D22). This is how `createApp`'s Turso branch stays
+ * synchronous without `createRequire`: an entry that is about to open a sync-enabled corpus awaits this once,
+ * before `createApp`. A project with `sync.enabled` off never calls it, so the native load stays lazy.
+ *
+ * @returns resolves once the module is cached; rejects when `@libsql/client` cannot be loaded
+ */
+export async function primeLibsqlClientForSyncConstruction(): Promise<void> {
+  if (cachedLibsqlModuleSync === null) cachedLibsqlModuleSync = await loadLibsqlClientModule();
+}
+
 function loadLibsqlClientModuleSync(): typeof import("@libsql/client") {
   if (cachedLibsqlModuleSync === null) {
     const req = createRequire(import.meta.url);
@@ -483,6 +498,8 @@ function libsqlRowToCalibrationRowWithPromptVersion(row: Row): CalibrationRowWit
 export class TursoStore implements StoreInterface {
   private readonly client: Client;
   private readonly hasRemote: boolean;
+  /** The local corpus file; named by a failed migration. */
+  private readonly localPath: string;
 
   /**
    * @param config - Local path + optional remote/auth/interval.
@@ -505,6 +522,7 @@ export class TursoStore implements StoreInterface {
    */
   constructor(config: TursoConfig, injectedClient?: Client) {
     this.hasRemote = Boolean(config.remoteUrl);
+    this.localPath = config.localPath;
     this.client =
       injectedClient !== undefined
         ? injectedClient
@@ -796,6 +814,17 @@ export class TursoStore implements StoreInterface {
       if (currentVersion < 25) {
         // reason: migration-025 adds the covering index AuditService.verify's narrow key read (listVersionKeys) is answered from.
         await this.client.executeMultiple(MIGRATION_025_SQL);
+      }
+
+      if (currentVersion < 26) {
+        // reason: migration-026 rebuilds `versions` (one BEGIN/COMMIT string) so its action CHECK admits 'undelete'.
+        try {
+          await this.client.executeMultiple(MIGRATION_026_SQL);
+        } catch (error) {
+          // reason: executeMultiple rolls the open transaction back on error (see migration-004's note), so the
+          // corpus stays at 25; the step is unknown here (one script), so say so rather than guess.
+          throw new MigrationFailedError(26, "executeMultiple (single transaction)", this.localPath, error);
+        }
       }
     })();
 

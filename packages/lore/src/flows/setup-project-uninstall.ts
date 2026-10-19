@@ -78,7 +78,7 @@ import {
   PROJECT_BACKUPS_RELATIVE_DIRNAME,
   PROJECT_MANIFEST_RELATIVE_PATH,
 } from "./setup-project-flow.js";
-import type { ProjectFsPort } from "./setup-project-flow.js";
+import type { ExecPort, ProjectFsPort } from "./setup-project-flow.js";
 
 // ─── Ports ───────────────────────────────────────────────────────────────────
 
@@ -107,6 +107,11 @@ export type ProjectFsRemovePort = ProjectFsPort & {
 export interface ProjectUninstallOptions {
   /** Absolute path to the target git repository root. */
   repoDir: string;
+  /**
+   * Runs the `git config` that restores `core.hooksPath`. Required whenever the ledger recorded an earlier hooks
+   * setting — an uninstall that cannot restore it fails loud rather than leaving lore's hooks path in place (BR-837).
+   */
+  exec?: ExecPort;
 }
 
 // ─── Constants ───────────────────────────────────────────────────────────────
@@ -131,6 +136,8 @@ export interface ProjectUninstallReport {
   removed: string[];
   /** Absolute path to the manifest that was consulted (and, on success, removed). */
   manifestPath: string;
+  /** Repo-relative settings files whose `language` key was put back to its earlier state (value restored or key removed). */
+  restoredSettings: string[];
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -138,6 +145,52 @@ export interface ProjectUninstallReport {
 /** Renders a thrown value's message. Never throws. Mirrors `setup-project-flow.ts`'s `toMessage`. */
 function toMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+type SettingsLanguagePrior = NonNullable<
+  NonNullable<ReturnType<typeof setupManifestSchema.parse>["project_priors"]>["settings_language"]
+>[number];
+
+/** Puts `core.hooksPath` back: the recorded value, or unset when there was none (BR-837). Throws on a git failure. */
+async function restoreHooksPath(exec: ExecPort, repoDir: string, prior: string | null): Promise<void> {
+  if (prior !== null) {
+    const set = await exec.run(["git", "config", "core.hooksPath", prior], repoDir);
+    if (set.code !== 0) throw new Error(`git config core.hooksPath ${prior} exited ${set.code}: ${set.stderr.trim()}`);
+    return;
+  }
+  const unset = await exec.run(["git", "config", "--unset", "core.hooksPath"], repoDir);
+  // reason: git exits 5 when the key is already absent — that is the state we want, not a failure.
+  if (unset.code !== 0 && unset.code !== 5) {
+    throw new Error(`git config --unset core.hooksPath exited ${unset.code}: ${unset.stderr.trim()}`);
+  }
+}
+
+/**
+ * Puts one settings file's `language` key back (BR-845): the earlier value, or the key removed when there was none;
+ * a file lore created that holds nothing else is removed. Every other key is untouched. Throws when the file is no
+ * longer a JSON object — it may hold the user's own settings, so it is never overwritten blind.
+ */
+function restoreSettingsLanguage(fs: ProjectFsRemovePort, repoDir: string, row: SettingsLanguagePrior): void {
+  const fullPath = join(repoDir, row.path);
+  const raw = fs.readFile(fullPath);
+  if (raw === null) return;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (cause) {
+    throw new Error(`"${fullPath}" is not valid JSON, refusing to edit it: ${toMessage(cause)}`);
+  }
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error(`"${fullPath}" does not hold a JSON object, refusing to edit it`);
+  }
+  const settings = parsed as Record<string, unknown>;
+  if (row.had_key) settings["language"] = row.prior;
+  else delete settings["language"];
+  if (!row.file_existed && Object.keys(settings).length === 0) {
+    fs.remove(fullPath, { boundary: repoDir });
+    return;
+  }
+  fs.writeFile(fullPath, `${JSON.stringify(settings, null, 2)}\n`, DEFAULT_FILE_MODE);
 }
 
 // ─── Entry point ─────────────────────────────────────────────────────────────
@@ -207,6 +260,7 @@ export async function uninstallProject(
 
   const restored: string[] = [];
   const removed: string[] = [];
+  const restoredSettings: string[] = [];
 
   try {
     for (const entry of manifest.entries) {
@@ -225,6 +279,18 @@ export async function uninstallProject(
         fs.remove(fullPath, { boundary: opts.repoDir });
         removed.push(entry.path);
       }
+    }
+
+    const priors = manifest.project_priors;
+    if (priors?.hooks_path !== undefined) {
+      if (opts.exec === undefined) {
+        throw new Error("the ledger recorded an earlier core.hooksPath but no git port was supplied to restore it");
+      }
+      await restoreHooksPath(opts.exec, repoDir, priors.hooks_path.prior);
+    }
+    for (const row of priors?.settings_language ?? []) {
+      restoreSettingsLanguage(fs, repoDir, row);
+      restoredSettings.push(row.path);
     }
 
     fs.remove(join(repoDir, PROJECT_BACKUPS_RELATIVE_DIRNAME), { boundary: opts.repoDir });
@@ -250,5 +316,5 @@ export async function uninstallProject(
     });
   }
 
-  return ok({ restored, removed, manifestPath });
+  return ok({ restored, removed, manifestPath, restoredSettings });
 }

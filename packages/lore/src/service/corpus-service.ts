@@ -110,7 +110,8 @@ import {
 } from "./checkpoint-registry.js";
 import { attestationExemptKindValid, type CitedRuleUnknown, type CitedRuleViolation } from "./gate-predicates.js";
 import type { RuleStateFull } from "./rule-state-service.js";
-import { resolveDoc, ULID_REGEX } from "./resolve.js";
+import { resolveDoc, ULID_REGEX, type ResolveDocOptions } from "./resolve.js";
+import { computeRecoverableUntil } from "./soft-delete-window.js";
 import { loadStampBindingContext, type RadiusDiffPort } from "./stamp-binding-reader.js";
 import { computeStampVerdictDistribution, type StampVerdictDistribution } from "./gate-predicates.js";
 import { collectKnownRuleIds } from "./baseline-rule-ids.js";
@@ -788,9 +789,12 @@ export type CorpusSetResult = DocRecord & { cascade?: PlanCloseCascadeResult; is
 
 // ─── The one write route (spec-defect-clusters-round-1 D3, AC-DCL-3) ────────
 
-/** The doc fields a {@link DocWriteRequest} may change. `version` / `updated_at` are NEVER in a patch: the route owns them. */
+/**
+ * The doc fields a {@link DocWriteRequest} may change. `version` / `updated_at` are NEVER in a patch: the route owns them.
+ * `deleted_at` is in it ONLY for `CorpusService.delete` / `undelete` (a soft delete is a versioned write like any other).
+ */
 export type DocWritePatch = Partial<
-  Pick<DocRecord, "content" | "extra" | "title" | "status" | "parent_id" | "tags" | "priority">
+  Pick<DocRecord, "content" | "extra" | "title" | "status" | "parent_id" | "tags" | "priority" | "deleted_at">
 >;
 
 /**
@@ -1714,8 +1718,8 @@ export class CorpusService {
    *   prefix-shaped), that diagnostic wins — it is more specific than a
    *   generic fuzzy match.
    */
-  async resolve(input: string): Promise<Result<DocId, LoreError>> {
-    const result = await resolveDoc(this.store, input);
+  async resolve(input: string, opts?: ResolveDocOptions): Promise<Result<DocId, LoreError>> {
+    const result = await resolveDoc(this.store, input, opts);
     if (result.ok) return ok(result.value.id);
 
     if (
@@ -4135,8 +4139,13 @@ export class CorpusService {
   // ── Delete ───────────────────────────────────────────────────────────────
 
   /**
-   * Soft-delete a document.
-   * Requires confirm=true, otherwise returns DELETE_REQUIRES_CONFIRM.
+   * Soft-delete a document: sets `deleted_at` as version N+1 (action `delete`, audit `delete`) through
+   * the one write route, so the history reads v1..vN, v(N+1)=delete — never a version-0 sentinel.
+   * Requires confirm=true, otherwise returns DELETE_REQUIRES_CONFIRM. A doc that is already deleted is
+   * not addressable and resolves to DOC_NOT_FOUND naming the deletion (see `resolveDoc`).
+   *
+   * @returns `{ id, recoverable_until }` — `recoverable_until` is `deleted_at + 30 days`, the window
+   *   {@link undelete} enforces.
    */
   async delete(
     idOrSlug: string,
@@ -4158,57 +4167,76 @@ export class CorpusService {
       return err({ code: "DELETE_REQUIRES_CONFIRM", id });
     }
 
-    const resolveResult = await this.resolve(idOrSlug);
-    if (!resolveResult.ok) return resolveResult;
-
-    const id = resolveResult.value;
+    const resolved = await resolveDoc(this.store, idOrSlug);
+    if (!resolved.ok) return resolved;
+    const doc = resolved.value;
     const now = new Date().toISOString();
-    const recoverableUntil = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
-    // reason: resolved ONCE, reused for both the version sentinel's `created_by`
-    // (when `opts.attributeCreatedBy` opts in) and the audit entry's `actor` below.
-    const resolvedActor = this.resolveWriteActor(opts?.by);
+    const recoverableUntil = computeRecoverableUntil(now);
 
-    // BUG-002 (audit finding) — soft-delete + version-0 sentinel + delete audit
-    // entry as ONE atomic composite write (StoreInterface.softDeleteWithProvenance),
-    // mirroring _createImpl's/set's fix above.
-    // reason: SPEC-072 D2 — deliberately no `slug` here. This is the
-    // pre-existing version-0 SENTINEL row (content/title already blank, not
-    // real snapshots — see the surrounding comment above), and `delete()`
-    // only ever resolves an id here (never fetches the full doc), so there is
-    // no slug value on hand without an extra read purely to populate a
-    // placeholder field on a row that isn't a real state snapshot to begin
-    // with. Omitted (never a bare `null`/empty-string placeholder) —
-    // consumers already treat an absent `slug` as legacy-row-shaped.
-    const versionRecord: VersionRecord = {
-      doc_id: id,
-      version: 0,
-      content: "",
-      extra: {},
-      status: "archived",
-      title: "",
+    const written = await this.writeDoc({
+      doc,
+      patch: { deleted_at: now },
       action: "delete",
-      created_at: now,
-      // reason: the SAME resolved actor as the audit entry (spec-run-identity-slice-1 D1/D4).
-      created_by: resolvedActor,
-    };
-    const auditEntry: AuditEntry = {
-      timestamp: now,
-      // SPEC-079 G2 — the resolved actor.
-      actor: resolvedActor,
-      session_id: id,
-      action: "delete",
-      doc_id: id,
-      // reason: SPEC-035 §2 — additive for writer-coverage consistency, even though
-      // `delete` sits outside AuditService.verify's VERIFIABLE_VERSION_ACTIONS set
-      // (a soft-deleted doc's version-0 sentinel row isn't part of the reconcile
-      // walk). Matches the sentinel `version: 0` the versions row above carries.
-      details: { recoverable_until: recoverableUntil, version: 0 },
-    };
+      auditAction: "delete",
+      auditDetails: { recoverable_until: recoverableUntil },
+      // reason: a delete is a lifecycle edit, not a rewrite — the record lock protects content, as before.
+      lock: "none",
+      now,
+      ...(opts?.by !== undefined ? { by: opts.by } : {}),
+    });
+    if (!written.ok) return written;
 
-    const deleteResult = await this.store.softDeleteWithProvenance(id, versionRecord, auditEntry);
-    if (!deleteResult.ok) return deleteResult;
+    return ok({ id: doc.id, recoverable_until: recoverableUntil });
+  }
 
-    return ok({ id, recoverable_until: recoverableUntil });
+  /**
+   * Restore a soft-deleted document: clears `deleted_at` as version N+1 (action `undelete`, audit
+   * `undelete`). Only inside the recovery window (`deleted_at + 30 days`, {@link computeRecoverableUntil});
+   * after it, `VALIDATION_ERROR` on field `recoverable_until` (exit 4). A live doc is also refused
+   * (`VALIDATION_ERROR`, field `deleted_at`) — there is nothing to undo.
+   *
+   * @param idOrSlug - id, slug or prefix of the DELETED doc (the one verb that may address one)
+   * @param opts - actor, plus `now` as the clock seam (default: the current time)
+   * @returns the restored doc, or DOC_NOT_FOUND / VALIDATION_ERROR / a write-route refusal
+   */
+  async undelete(idOrSlug: string, opts?: WriteActorOpts & { now?: string }): Promise<Result<DocRecord, LoreError>> {
+    const resolved = await resolveDoc(this.store, idOrSlug, { includeDeleted: true });
+    if (!resolved.ok) return resolved;
+    const doc = resolved.value;
+    const deletedAt = doc.deleted_at ?? null;
+    if (deletedAt === null) {
+      return err({
+        code: "VALIDATION_ERROR",
+        field: "deleted_at",
+        message: `${idOrSlug} is not deleted — nothing to undelete`,
+        value: idOrSlug,
+      });
+    }
+    const now = opts?.now ?? new Date().toISOString();
+    const recoverableUntil = computeRecoverableUntil(deletedAt);
+    if (Date.parse(now) > Date.parse(recoverableUntil)) {
+      return err({
+        code: "VALIDATION_ERROR",
+        field: "recoverable_until",
+        message:
+          `${idOrSlug} was deleted on ${deletedAt.slice(0, 10)} and its recovery window ended on ` +
+          `${recoverableUntil.slice(0, 10)}; it can no longer be undeleted`,
+        value: recoverableUntil,
+      });
+    }
+
+    const written = await this.writeDoc({
+      doc,
+      patch: { deleted_at: null },
+      action: "undelete",
+      auditAction: "undelete",
+      auditDetails: { deleted_at: deletedAt, recoverable_until: recoverableUntil },
+      lock: "none",
+      now,
+      ...(opts?.by !== undefined ? { by: opts.by } : {}),
+    });
+    if (!written.ok) return written;
+    return ok(written.value.doc);
   }
 
   // ── List ─────────────────────────────────────────────────────────────────

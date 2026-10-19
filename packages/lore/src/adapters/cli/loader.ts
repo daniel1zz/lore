@@ -9,8 +9,10 @@
  *
  * Invariants:
  *   - loadLoreApp() ALWAYS loads config.yaml so telemetry is wired when enabled
- *   - loadLoreApp() strips the sync section — always returns App (never Result<App>)
- *     unless ai.provider is set to an unknown name, in which case returns exit 1.
+ *   - loadLoreApp() hands the FULL config (sync section included) to createApp: with `sync.enabled` the App is
+ *     built on the embedded replica; a missing address/token or an unreachable remote ends the run with exit 1
+ *     naming it, never a fall back to the local file (D22, BR-925). Entries prime the libsql client first
+ *     (`replica-priming.ts`). Returns App, or exits 1 (unknown ai.provider, sync fault).
  *   - Global config missing/malformed → warning to stderr; defaults fall back to {}
  *   - init command is exempt — it creates the DB before config exists (uses createApp directly)
  *   - sync command is exempt — manages TursoStore directly, not corpus operations
@@ -352,15 +354,14 @@ export function loadProjectConfig(io: CliIo, locator: CorpusLocator): LoreConfig
  * and merges its defaults section with the project-level defaults (project wins).
  * Malformed global config → warning printed to stderr; loader continues with empty defaults.
  *
- * The sync section is stripped from config before passing to createApp. With sync
+ * The full config, sync section included, goes to createApp (D22). With sync off or
  * absent, createApp returns App directly — unless ai.provider references an unknown
- * name, in which case buildProviderRegistry inside createApp returns err(STORE_ERROR)
- * and createApp propagates it as Result. We detect this via duck-type check ("ok" in result)
- * and surface it as exit 1 with formatError output (AC-AI-11, SPEC-017 §3.12).
+ * name, or sync is on and its address/token is missing or its remote cannot be opened;
+ * then createApp returns err(...) as a Result. We detect this via duck-type check ("ok" in result)
+ * and surface it as exit 1 with formatError output (AC-AI-11, SPEC-017 §3.12; BR-925).
  *
- * reason: always returns App when sync is disabled AND ai.provider is a known name;
- * otherwise (unknown ai.provider) exits 1 instead of crashing with TypeError when
- * downstream code accesses app.corpusService on the unwrapped Result object.
+ * reason: always returns App when createApp built a store; otherwise exits 1 instead of crashing
+ * with TypeError when downstream code accesses app.corpusService on the unwrapped Result object.
  *
  * Commands that manage sync (lore sync setup/push/pull) handle TursoStore construction
  * separately.
@@ -440,8 +441,8 @@ export function loadLoreApp(opts: LoadLoreAppOptions): {
     rawConfig = undefined;
   }
 
-  // Strip sync section — reason: prevents createApp returning Result<App>.
-  // Corpus-level commands never need TursoStore; they use local SQLiteStore + telemetry only.
+  // The config handed back to callers and read by the guards below carries no `sync` section: they read
+  // telemetry/workflow/ai settings, never the remote. The App itself is built from the FULL `rawConfig` (D22).
   let telemetryOnlyConfig: (LoreConfig & { sync?: never }) | undefined;
   if (rawConfig !== undefined) {
     const { sync: _sync, ...configWithoutSync } = rawConfig;
@@ -497,7 +498,10 @@ export function loadLoreApp(opts: LoadLoreAppOptions): {
     // reason: the identity of the Invocation the entry resolved wraps the store inside createApp
     // (spec-run-identity-slice-1 D3). The verified identity is the store's fact (`ensureVerifiedIdentity(store)`), so
     // there is no `onVerified` write-back into a process slot.
-    appOrResult = createAppWithWriteContext(dbPath, telemetryOnlyConfig, ambient, { identity: composedInvocation.identity });
+    // reason: D22 (spec-defect-clusters-round-2-part-c-criterion-data-demotion) — the FULL config goes to the
+    // composition root: with `sync.enabled` the store is the embedded replica, and a missing address/token or an
+    // unreachable remote comes back as the error Result handled below (exit 1), never as the local file.
+    appOrResult = createAppWithWriteContext(dbPath, rawConfig, ambient, { identity: composedInvocation.identity });
   } catch (thrown) {
     const message = thrown instanceof Error ? thrown.message : String(thrown);
     printLine(composedInvocation.io.stderr, `Error: Storage failure: ${message}`); // CLI surface

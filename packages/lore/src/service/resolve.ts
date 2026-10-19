@@ -11,6 +11,18 @@
 import { err, ok, parseOrdinalRef, type LoreError, type Result } from "@lore/core";
 import type { DocId, DocRecord } from "@lore/core";
 import type { StoreInterface } from "../store/store-interface.js";
+import { describeSoftDeleted } from "./soft-delete-window.js";
+
+/**
+ * Options for {@link resolveDoc} / {@link resolveDocId}.
+ *
+ * `includeDeleted` is the ONLY way to address a soft-deleted doc: `lore undelete` (it must find
+ * what it restores) and the read-only history verbs (`lore log`, `lore diff`, `lore audit <doc>`)
+ * pass it. Every other caller gets the default: `DOC_NOT_FOUND` naming the deletion.
+ */
+export interface ResolveDocOptions {
+  readonly includeDeleted?: boolean;
+}
 
 /**
  * ULID-shape detector — 25 OR 26 chars, digits + ANY letter (not just
@@ -70,13 +82,40 @@ const FULL_ULID_LENGTH = 26;
  * truncation diagnostic appended to `suggestions` when the input was
  * prefix-shaped.
  *
+ * A soft-deleted doc is NOT addressable (spec-defect-clusters-round-2-part-a D6): on EVERY branch
+ * above, a match whose `deleted_at` is set resolves to `DOC_NOT_FOUND` carrying `deleted_at`
+ * (so the message names the date and `lore undelete`) unless `opts.includeDeleted` is true.
+ *
  * @param store - storage abstraction (any `StoreInterface` implementation)
  * @param idOrSlug - full ULID, slug, ordinal reference (`SPEC-84`), or a
  *   6-25 char ID prefix
+ * @param opts - `includeDeleted` opts into addressing a soft-deleted doc (see {@link ResolveDocOptions})
  * @returns the resolved `DocRecord`, or `DOC_NOT_FOUND` / `VALIDATION_ERROR`
  *   (ambiguous prefix) / a propagated store error
  */
 export async function resolveDoc(
+  store: StoreInterface,
+  idOrSlug: string,
+  opts?: ResolveDocOptions,
+): Promise<Result<DocRecord, LoreError>> {
+  const found = await lookupDoc(store, idOrSlug);
+  if (!found.ok) return found;
+  const deletedAt = found.value.deleted_at ?? null;
+  if (deletedAt !== null && opts?.includeDeleted !== true) {
+    // reason: a deleted doc must not be actable on by any verb — approve/reject/set/invalidate/link/
+    // set-label all resolve here, so this ONE check over every lookup branch is the root fix.
+    return err({
+      code: "DOC_NOT_FOUND",
+      id: idOrSlug,
+      deleted_at: deletedAt,
+      suggestions: [describeSoftDeleted(idOrSlug, deletedAt)],
+    });
+  }
+  return found;
+}
+
+/** Raw resolution (ULID / slug / ordinal / id prefix) — deleted docs included. */
+async function lookupDoc(
   store: StoreInterface,
   idOrSlug: string,
 ): Promise<Result<DocRecord, LoreError>> {
@@ -151,13 +190,15 @@ export async function resolveDoc(
  * @param store - storage abstraction (any `StoreInterface` implementation)
  * @param idOrSlug - full ULID, slug, ordinal reference (`SPEC-84`), or a
  *   6-25 char ID prefix — same accepted shapes as `resolveDoc`
+ * @param opts - same as `resolveDoc`'s (`includeDeleted`)
  * @returns the resolved `DocId`, or the same error `resolveDoc` would return
  */
 export async function resolveDocId(
   store: StoreInterface,
   idOrSlug: string,
+  opts?: ResolveDocOptions,
 ): Promise<Result<DocId, LoreError>> {
-  const result = await resolveDoc(store, idOrSlug);
+  const result = await resolveDoc(store, idOrSlug, opts);
   if (!result.ok) return result;
   return ok(result.value.id);
 }

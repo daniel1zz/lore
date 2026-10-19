@@ -98,6 +98,7 @@ export const versionActionSchema = z.enum([
   "reject",
   "restore",
   "delete",
+  "undelete",
 ]);
 
 // ─── Type-specific Extra Schemas ───────────────────────────────────────────
