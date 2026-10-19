@@ -412,6 +412,8 @@ function findDedicatedExtraKeyViolation(
   const guarded = DEDICATED_EXTRA_KEYS[existing.type];
   if (guarded === undefined) return null;
   for (const entry of guarded) {
+    // reason: DC2-8 — a sub_type-scoped key (knowledge `uat`) guards only docs of that sub_type.
+    if (entry.subType !== undefined && existing.extra["sub_type"] !== entry.subType) continue;
     if (!jsonDeepEqual(existing.extra[entry.key], incomingExtra[entry.key])) {
       return { key: entry.key, writer: entry.writer };
     }
