@@ -55,7 +55,7 @@
  *   conflicts or why.
  */
 
-import type { RuleOffence } from "./rule-state-service.js";
+import type { RuleOffence, UnknownReason } from "./rule-state-service.js";
 import {
   parentlessRefusalMessage,
   SPEC_KINDS,
@@ -453,37 +453,52 @@ export const AC_CITE_FIELD = "ac-cite";
 /** One added or revised criterion offered to the citation gate: its id and the rule ids it cites. */
 export interface AcCiteCandidate {
   ac_id: string;
+  /** The cites the criterion carries AFTER the write. */
   cites: readonly string[];
+  /**
+   * The cites it carried BEFORE the write (`undefined` / `[]` for a new criterion). A cite in both lists is
+   * an existing cite the write did not add, so a retired one there is not the write's fault (BR-87).
+   */
+  prior_cites?: readonly string[] | undefined;
 }
 
 /** Lifecycle of every rule a leaf lists, keyed by rule id; an id absent from the map is dangling. */
 export type AcCiteRuleStates = Readonly<Record<string, "live" | "deprecated" | "retired">>;
 
 /**
- * Every way the candidates fail the citation rule: a candidate citing nothing is `uncited`; each cited id
- * that is not live is its own violation (`missing` when no leaf lists it, else its lifecycle). A candidate
- * with at least one violation is refused whole — a criterion that cites a retired rule next to a live one
- * is still citing a retired rule (spec C4: "cites a missing / deprecated / retired id").
+ * Every way the candidates fail the citation rule. The gate judges what a write DOES, not what the criterion
+ * already carried (BR-87, DC2-13): a cite the write adds must be live (`missing` when no leaf lists it, else its
+ * lifecycle), and the criterion must hold at least one live cite after the write. A criterion left with no live
+ * cite is refused whole: `uncited` when it cites nothing, otherwise every non-live cite it still carries is named.
+ * An existing retired cite next to a live one is tolerated, so `lore ac cite` can repair a criterion by adding a
+ * live cite and then removing the retired one.
  *
- * @param candidates - the added/revised criteria (never untouched legacy ones)
- * @param ruleStates - lifecycle per rule id, from the baseline leaves
- * @returns violations in candidate order, then cite order; `[]` when every candidate cites only live rules
+ * @param candidates - the added/revised criteria (never untouched legacy ones), each with its `prior_cites`
+ * @param ruleStates - lifecycle per rule id, from the baseline leaves (an own-proposed id is `live` here)
+ * @returns violations in candidate order, then cite order; `[]` when every candidate is admitted
  * @example
  * findAcCiteViolations([{ ac_id: "AC-1", cites: [] }], {}); // [{ ac_id: "AC-1", reason: "uncited" }]
+ * findAcCiteViolations([{ ac_id: "AC-1", cites: ["BR-1", "BR-2"], prior_cites: ["BR-2"] }], { "BR-1": "live", "BR-2": "retired" }); // []
  */
 export function findAcCiteViolations(
   candidates: readonly AcCiteCandidate[],
   ruleStates: AcCiteRuleStates,
 ): Array<{ ac_id: string; rule_id?: string; reason: "uncited" | "missing" | "deprecated" | "retired" }> {
   const out: Array<{ ac_id: string; rule_id?: string; reason: "uncited" | "missing" | "deprecated" | "retired" }> = [];
+  const stateOf = (ruleId: string): "live" | "deprecated" | "retired" | undefined =>
+    Object.prototype.hasOwnProperty.call(ruleStates, ruleId) ? ruleStates[ruleId] : undefined;
   for (const candidate of candidates) {
     if (candidate.cites.length === 0) {
       out.push({ ac_id: candidate.ac_id, reason: "uncited" });
       continue;
     }
+    const prior = new Set(candidate.prior_cites ?? []);
+    const holdsLive = candidate.cites.some((ruleId) => stateOf(ruleId) === "live");
     for (const ruleId of candidate.cites) {
-      const state = Object.prototype.hasOwnProperty.call(ruleStates, ruleId) ? ruleStates[ruleId] : undefined;
+      const state = stateOf(ruleId);
       if (state === "live") continue;
+      // reason: a cite the write did not add is judged only when nothing live remains (BR-87).
+      if (holdsLive && prior.has(ruleId)) continue;
       out.push({ ac_id: candidate.ac_id, rule_id: ruleId, reason: state ?? "missing" });
     }
   }
@@ -491,8 +506,8 @@ export function findAcCiteViolations(
 }
 
 /**
- * `ac-cite` predicate: passes iff every added/revised criterion cites at least one rule and every cited
- * rule is live. Pure; whether the gate APPLIES (mode, armed branch) is decided by the caller before it
+ * `ac-cite` predicate: passes iff every added/revised criterion holds at least one live cite and every cite the
+ * write adds is live. Pure; whether the gate APPLIES (mode, armed branch) is decided by the caller before it
  * builds the context — this predicate only measures citations.
  *
  * @returns `{ok: true}` or `{ok: false, reason: AC_CITE_REQUIRED_REASON, field: AC_CITE_FIELD}`
@@ -1598,6 +1613,15 @@ export interface CitedRuleViolation {
   readonly state: RefusingRuleState;
   /** The citing inputs behind `state`, exactly as `RuleStateService.full()` reported them (never re-derived here). */
   readonly offences: readonly RuleOffence[];
+}
+
+/**
+ * One cited rule whose state is `unknown` and whose reason does NOT refuse the close (BR-984): reported, never
+ * silent. `git-unavailable` is never carried here, it refuses the close instead.
+ */
+export interface CitedRuleUnknown {
+  readonly rule_id: string;
+  readonly reason: Exclude<UnknownReason, "git-unavailable">;
 }
 
 /**

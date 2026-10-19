@@ -220,6 +220,8 @@ const setupCheckCacheSchema = z.object({
       diverged: z.array(z.string()),
       missing: z.array(z.string()),
       orphaned: z.array(z.string()),
+      /** Absent on a cache written before `retired` existed. */
+      retired: z.array(z.string()).optional(),
     })
     .optional(),
   /** Why the install is stale (empty when `status` is `sync`); see {@link SetupCheckReason}. */
@@ -237,6 +239,11 @@ export interface SetupCheckFiles {
   diverged: string[];
   missing: string[];
   orphaned: string[];
+  /**
+   * Tracked by the ledger, no longer shipped, unedited on disk: the next `lore setup --yes` removes them.
+   * Present on the GLOBAL report only (the project scaffold has no retire step); absent reads as none.
+   */
+  retired?: string[];
 }
 
 /** The full `--check` report — also the `--json` flag's `data` payload, verbatim. */
@@ -291,7 +298,7 @@ export function buildCheckEmbeddedManifest(): {
 
 /**
  * Reads and validates the target's installed setup manifest. A genuinely
- * ABSENT file is the legitimate "fresh target" signal (`ok(null)`); a
+ * ABSENT file (ENOENT only) is the legitimate "fresh target" signal (`ok(null)`); a
  * PRESENT-but-corrupted file is a loud `VALIDATION_ERROR` — see module doc.
  */
 function readInstalledManifest(targetDir: string): Result<SetupManifest | null, LoreError> {
@@ -300,8 +307,16 @@ function readInstalledManifest(targetDir: string): Result<SetupManifest | null, 
   let raw: string;
   try {
     raw = readFileSync(manifestPath, "utf8");
-  } catch {
-    return ok(null);
+  } catch (cause) {
+    // Only a genuinely ABSENT manifest is a fresh target; any other read failure (permissions,
+    // a directory in its place, I/O) must not masquerade as one.
+    if (typeof cause === "object" && cause !== null && (cause as { code?: unknown }).code === "ENOENT") {
+      return ok(null);
+    }
+    return err({
+      code: "STORE_ERROR",
+      message: `lore setup --check: cannot read the setup manifest at "${manifestPath}": ${describeCaught(cause)}`,
+    });
   }
 
   let parsedJson: unknown;
@@ -432,7 +447,7 @@ function resolveCheckReminderEnabled(cwd: string): boolean {
  */
 export function deriveSetupCheckReasons(files: SetupCheckFiles): SetupCheckReason[] {
   const isSettingsEntry = (path: string): boolean => path.includes(SETTINGS_ENTRY_MARKER);
-  const behind = [...files.outdated, ...files.missing, ...files.orphaned];
+  const behind = [...files.outdated, ...files.missing, ...files.orphaned, ...(files.retired ?? [])];
   const reasons: SetupCheckReason[] = [];
   if (behind.some((path) => !isSettingsEntry(path))) reasons.push("binary_version_changed");
   if (behind.some(isSettingsEntry)) reasons.push("settings_changed");
@@ -503,6 +518,7 @@ function renderSetupCheckReport(
     ["diverged", report.files.diverged],
     ["missing", report.files.missing],
     ["orphaned", report.files.orphaned],
+    ["retired", report.files.retired ?? []],
   ];
   for (const [label, paths] of sections) {
     if (paths.length === 0) continue;
@@ -518,7 +534,7 @@ function renderSetupCheckReport(
       }
     }
   }
-  if (scope === "project" && [report.files.outdated, report.files.missing, report.files.orphaned].some((l) => l.length > 0)) {
+  if (scope === "project" && [report.files.outdated, report.files.missing, report.files.orphaned, report.files.retired ?? []].some((l) => l.length > 0)) {
     lines.push("", "repair outdated / missing / orphaned files: lore setup --project --yes");
   }
   for (const dbl of report.double_registrations ?? []) {
@@ -592,6 +608,7 @@ export async function computeSetupCheckReport(opts: {
       diverged: plan.files.diverged,
       missing: plan.files.missing,
       orphaned: plan.files.orphaned,
+      retired: plan.files.retired,
     },
   };
 

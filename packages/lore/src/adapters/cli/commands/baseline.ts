@@ -54,10 +54,10 @@ import { exitCode, formatErrorFor, resolveActor } from "../utils.js";
 import type { App } from "../../../app.js";
 import type { AddNodeInput, BaselineTreeEntry, SiteMapChange } from "../../../service/rule-service.js";
 import { NON_BUSINESS_PREFIX, commandFixCommand, collectOwnedSites, computeLeafCoverage, computeUndeclaredCommands, partitionDeclaredCommands, siteFixCommand, absentCommandFixCommand } from "../../../service/leaf-coverage.js";
-import { listRunnableCommands } from "../runnable-commands.js";
+import { treePredicateFor } from "../absent-declarations.js";
 import { buildOwnerLeafIndex } from "../../../service/owned-by.js";
 import { resolveDoc } from "../../../service/resolve.js";
-import { SiteCensusError, type UnresolvedImport, findCensusRoot, listSitesMany, resolveCommandEntry } from "../../../service/site-census.js";
+import { SiteCensusError, type UnresolvedImport, findCensusRoot, listSitesMany } from "../../../service/site-census.js";
 import type { Site, SiteList } from "../../../service/site-census.js";
 import { RuleStateService } from "../../../service/rule-state-service.js";
 import type { RuleStateEntry, RuleStateFull } from "../../../service/rule-state-service.js";
@@ -293,18 +293,8 @@ async function runCoverage(target: string, json: boolean, inv: Invocation): Prom
     // must declare it in the shared corpus before it lands, so every other branch's tree lacks it until then and refusing it would
     // block every other integrate. It also must not surface as a census error (exit 4) from resolveCommandEntry; only an
     // unanalysable tree still throws.
-    const runnable = await listRunnableCommands(rootDir);
-    const runnableEntries = new Set(runnable.map((c) => `${c.entry.file}#${c.entry.symbol}`));
-    const entryKeyOf = (command: string): string | undefined => {
-      try {
-        const entry = resolveCommandEntry({ rootDir, command });
-        return `${entry.file}#${entry.symbol}`;
-      } catch (cause) {
-        if (cause instanceof SiteCensusError && cause.reason === "command-unresolved") return undefined;
-        throw cause;
-      }
-    };
-    const partitionByLeaf = new Map(leaves.map((leaf) => [leaf.slug, partitionDeclaredCommands(leafCommands(leaf), entryKeyOf, runnableEntries)]));
+    const { runnable, entryKeys, runnableEntries } = await treePredicateFor(rootDir, leaves.flatMap(leafCommands));
+    const partitionByLeaf = new Map(leaves.map((leaf) => [leaf.slug, partitionDeclaredCommands(leafCommands(leaf), entryKeys, runnableEntries)]));
     const livePartition = (leaf: DocRecord) => partitionByLeaf.get(leaf.slug) as { live: string[]; absent: string[] };
     const censusByCommand = listSitesMany({ rootDir, commands: leaves.flatMap((leaf) => livePartition(leaf).live) });
     const reports: LeafCoverageReport[] = leaves.map((leaf) => {
@@ -368,7 +358,7 @@ async function runCoverage(target: string, json: boolean, inv: Invocation): Prom
             new Set(
               leaves
                 .flatMap((leaf) => livePartition(leaf).live)
-                .map((command) => entryKeyOf(command) as string),
+                .map((command) => entryKeys.get(command) as string),
             ),
           )
         : [];

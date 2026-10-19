@@ -377,6 +377,12 @@ export interface SetupReceipt {
    * uninstall(): always `[]` — the concept does not apply to a reversal.
    */
   skippedDiverged: string[];
+  /**
+   * install(): retired paths (tracked by the ledger, no longer shipped) removed this run —
+   * unedited ones always, edited ones only under `--force-diverged` (after a backup).
+   * uninstall(): always `[]`.
+   */
+  removed: string[];
 }
 
 // ─── Constants ───────────────────────────────────────────────────────────────
@@ -522,7 +528,12 @@ export class SetupService {
     const currentResult = parseManifestRaw(manifestRaw);
     if (!currentResult.ok) return currentResult;
 
-    const existingFilesResult = await buildExistingFilesMap(opts.targetDir, resolvedResult.value, this.reader);
+    const existingFilesResult = await buildExistingFilesMap(
+      opts.targetDir,
+      resolvedResult.value,
+      this.reader,
+      stripMcpEntries(currentResult.value),
+    );
     if (!existingFilesResult.ok) return existingFilesResult;
 
     return ok(
@@ -589,7 +600,12 @@ export class SetupService {
     if (!currentResult.ok) return currentResult;
     const current = currentResult.value;
 
-    const existingFilesResult = await buildExistingFilesMap(opts.targetDir, resolvedPayload, this.reader);
+    const existingFilesResult = await buildExistingFilesMap(
+      opts.targetDir,
+      resolvedPayload,
+      this.reader,
+      stripMcpEntries(current),
+    );
     if (!existingFilesResult.ok) return existingFilesResult;
     const existingFiles = existingFilesResult.value;
 
@@ -626,6 +642,13 @@ export class SetupService {
       }
     }
 
+    // Retired + edited (BR-818): kept and listed as diverged, unless `--force-diverged`
+    // opts into backup-then-remove. Unedited retired paths (`plan.removals`) always go.
+    const keptRetired = opts.forceDiverged === true ? [] : plan.divergedRemovals;
+    skippedDiverged.push(...keptRetired);
+    const removalPaths = [...plan.removals, ...(opts.forceDiverged === true ? plan.divergedRemovals : [])];
+    if (opts.forceDiverged === true) backupPaths = [...backupPaths, ...plan.divergedRemovals];
+
     // ── Write phase — the first point ANY SetupFsWriter call may occur ─────
     const committedBackups: string[] = [];
     const committedWrites: string[] = [];
@@ -647,7 +670,7 @@ export class SetupService {
         committedWrites.push(write.path);
       }
 
-      for (const removedPath of plan.removals) {
+      for (const removedPath of removalPaths) {
         await this.writer.remove(path.join(opts.targetDir, removedPath), { boundary: opts.targetDir });
         committedRemovals.push(removedPath);
       }
@@ -751,10 +774,14 @@ export class SetupService {
     // regardless of real change, breaking invariant I2 ("byte-identical re-run fires ZERO
     // writer calls") — caught by this task's own regression pass against the pre-existing
     // I2 tests in `setup-service.test.ts`.
-    const hasFileChangesThisRun = writePlan.length > 0 || plan.removals.length > 0;
+    const hasFileChangesThisRun = writePlan.length > 0 || removalPaths.length > 0;
     const installedAt = hasFileChangesThisRun || current?.installed_at === undefined ? nowIso : current.installed_at;
 
-    const manifestEntries = mcpEntry !== undefined ? [...fileEntries, mcpEntry] : fileEntries;
+    // A kept (edited) retired file stays in the ledger at its recorded sha, so the next
+    // run and `--check` still see it as diverged instead of forgetting it.
+    const keptRetiredSet = new Set(keptRetired);
+    const keptRetiredEntries = (current?.entries ?? []).filter((e) => keptRetiredSet.has(e.path));
+    const manifestEntries = [...fileEntries, ...keptRetiredEntries, ...(mcpEntry !== undefined ? [mcpEntry] : [])];
     const manifest: SetupManifest = {
       version: MANIFEST_VERSION,
       claude_dir: opts.targetDir,
@@ -821,6 +848,7 @@ export class SetupService {
       mcp,
       manifestPath,
       skippedDiverged,
+      removed: committedRemovals,
     });
   }
 
@@ -964,6 +992,7 @@ export class SetupService {
       mcp,
       manifestPath,
       skippedDiverged: [],
+      removed: [],
     });
   }
 }
@@ -1259,21 +1288,30 @@ async function buildExistingFilesMap(
   targetDir: string,
   payload: AssetPayload,
   reader: SetupFsReader,
+  ledger: SetupManifest | null = null,
 ): Promise<Result<Map<string, string>, LoreError>> {
   const existingFiles = new Map<string, string>();
 
-  for (const file of payload.files) {
-    const statResult = await reader.stat(path.join(targetDir, file.path));
+  // Payload paths, plus every ledger path the payload no longer ships (retired): their
+  // on-disk sha decides whether a removal is safe (unedited) or diverged (edited).
+  const payloadPaths = new Set(payload.files.map((f) => f.path));
+  const probePaths = [
+    ...payload.files.map((f) => f.path),
+    ...(ledger?.entries ?? []).map((e) => e.path).filter((p) => !payloadPaths.has(p)),
+  ];
+
+  for (const relPath of probePaths) {
+    const statResult = await reader.stat(path.join(targetDir, relPath));
     if (!statResult.exists) continue;
     if (statResult.sha256 === undefined) {
       return err({
         code: "VALIDATION_ERROR",
-        field: `stat:${file.path}`,
-        message: `SetupFsReader.stat reported exists:true for "${file.path}" with no sha256 — contract violation`,
+        field: `stat:${relPath}`,
+        message: `SetupFsReader.stat reported exists:true for "${relPath}" with no sha256 — contract violation`,
         value: statResult,
       });
     }
-    existingFiles.set(file.path, statResult.sha256);
+    existingFiles.set(relPath, statResult.sha256);
   }
 
   return ok(existingFiles);

@@ -403,7 +403,26 @@ export function guardTaskLifecycleWrites(
 // ─── Claim-scoped corpus authoring (spec-baseline-slice-2 §C8, AC-BLS2-8, #39) ───
 
 /**
- * PURE decision for a BASELINE write (rule / cite / site map) reached from a linked
+ * What a refused write was aimed at, named in the refusal so a task's evidence row is never reported as a
+ * "baseline write": `task` / `baseline` by the target doc's type, `document` for any other doc type (or a
+ * mixed target set).
+ */
+export type CorpusWriteTargetKind = "task" | "baseline" | "document";
+
+/**
+ * The {@link CorpusWriteTargetKind} of a write's targets: the one kind they all share, else `document`.
+ * Pure.
+ */
+export function corpusWriteTargetKindOf(targets: readonly DocRecord[]): CorpusWriteTargetKind {
+  const kinds = new Set<CorpusWriteTargetKind>(
+    targets.map((t) => (t.type === "task" ? "task" : t.type === "baseline" ? "baseline" : "document")),
+  );
+  const [only] = [...kinds];
+  return kinds.size === 1 && only !== undefined ? only : "document";
+}
+
+/**
+ * PURE decision for a corpus write (rule / cite / site map / task evidence) reached from a linked
  * worktree. Same shape as {@link checkForeignCorpusWrite}, but intent is not a boolean
  * on the call: it is the ONE fact the caller measured from the lease —
  * `scopeAuthorizesTarget` is true only when the caller's fresh claim declares a
@@ -414,12 +433,13 @@ export function guardTaskLifecycleWrites(
  * refused — before this existed, rule/cite writes never consulted the guard at all.
  *
  * @example
- * checkCorpusScopedWrite({ provenance: "git_common_dir", enabled: true }, false);
+ * checkCorpusScopedWrite({ provenance: "git_common_dir", enabled: true }, false, "baseline");
  *   // => { allowed: false, reason: "gate:corpus-write:foreign-provenance: ..." }
  */
 export function checkCorpusScopedWrite(
   context: ForeignCorpusWriteContext,
   scopeAuthorizesTarget: boolean,
+  targetKind: CorpusWriteTargetKind,
 ): ForeignCorpusWriteVerdict {
   if (!context.enabled) return { allowed: true };
   if (context.provenance !== "git_common_dir") return { allowed: true };
@@ -427,7 +447,7 @@ export function checkCorpusScopedWrite(
   return {
     allowed: false,
     reason:
-      `${FOREIGN_CORPUS_WRITE_TOKEN}: this baseline write resolved a corpus OUTSIDE the caller's ` +
+      `${FOREIGN_CORPUS_WRITE_TOKEN}: this ${targetKind} write resolved a corpus OUTSIDE the caller's ` +
       "own working tree, and no fresh claim lease held from THIS worktree declares a corpus scope " +
       "covering the target's branch. Declare it on the claim: " +
       "'lore claim <task> --worktree <path> --corpus-scope <baseline-branch>' — scope is a lease " +
@@ -557,7 +577,7 @@ export class CorpusWriteAuthority {
 
     const grant = await this.findCoveringGrant(targets);
     if (!grant.ok) return grant;
-    const verdict = checkCorpusScopedWrite(this.context.foreign, grant.value !== undefined);
+    const verdict = checkCorpusScopedWrite(this.context.foreign, grant.value !== undefined, corpusWriteTargetKindOf(targets));
     if (!verdict.allowed) return err(foreignCorpusWriteRefusalError(verdict));
     return ok(grant.value);
   }
