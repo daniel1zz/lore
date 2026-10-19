@@ -4,7 +4,8 @@
  * Purpose: the pure verdict half of the completeness census (spec baseline-slice-2 C2): given the
  *   sites a leaf's commands reach, the leaf's `site_map`, and the live rule ids, report what is
  *   still unaccounted for.
- * Public surface: {@link computeLeafCoverage}, {@link NON_BUSINESS_PREFIX}, {@link LeafCoverage}.
+ * Public surface: {@link computeLeafCoverage}, {@link collectOwnedSites}, {@link partitionDeclaredCommands}, {@link absentCommandFixCommand},
+ *   {@link NON_BUSINESS_PREFIX}, {@link LeafCoverage}.
  * Invariants:
  *   - A `non-business:owned-by <leaf> BR-n — <reason>` entry counts only while the owner leaf is a leaf and every named
  *     rule is live on it (see owned-by.ts); otherwise the site is a gap.
@@ -43,9 +44,77 @@ export function siteFixCommand(leafSlug: string, siteKey: string): string {
   return `lore baseline map ${leafSlug} --site ${siteKey} --rule <BR-n> | --non-business <reason>`;
 }
 
+/** Split a site key (`file#symbol#code` | `file#symbol#dynamic:<label>`) back into a {@link Site}. */
+function siteFromKey(key: string): Site {
+  const first = key.indexOf("#");
+  const second = key.indexOf("#", first + 1);
+  const file = first < 0 ? key : key.slice(0, first);
+  const symbol = first < 0 || second < 0 ? "" : key.slice(first + 1, second);
+  const tail = second < 0 ? "" : key.slice(second + 1);
+  return tail.startsWith("dynamic:") ? { key, file, symbol, dynamic: true } : { key, file, symbol, code: tail, dynamic: false };
+}
+
+/**
+ * The sites a command-less (cross-cutting) leaf owns: its own `site_map` keys plus every site another leaf's `site_map`
+ * hands to it with `non-business:owned-by <this leaf> BR-n` (BL-D1). There is no census to run for such a leaf; these
+ * are the sites its rules guard, and each must be accounted for in ITS site map like any census site.
+ *
+ * @param leafId - id of the leaf being measured (the owner index is keyed by id and slug; both resolve to this id).
+ * @param ownSiteMap - the leaf's own `site_map`.
+ * @param otherSiteMaps - the `site_map` of every OTHER leaf.
+ * @param ownerLeaves - {@link buildOwnerLeafIndex}; resolves an owned-by entry's leaf reference.
+ * @returns the owned sites, sorted by key.
+ */
+export function collectOwnedSites(input: {
+  leafId: string;
+  ownSiteMap: Readonly<Record<string, readonly string[]>>;
+  otherSiteMaps: readonly Readonly<Record<string, readonly string[]>>[];
+  ownerLeaves: OwnerLeafIndex;
+}): Site[] {
+  const keys = new Set(Object.keys(input.ownSiteMap));
+  for (const siteMap of input.otherSiteMaps) {
+    for (const [key, entries] of Object.entries(siteMap)) {
+      const handedToThisLeaf = entries.some((entry) => {
+        const parsed = parseOwnedBy(entry);
+        return parsed.kind === "owned_by" && input.ownerLeaves.get(parsed.leaf)?.leafId === input.leafId;
+      });
+      if (handedToThisLeaf) keys.add(key);
+    }
+  }
+  return [...keys].sort().map(siteFromKey);
+}
+
 /** The command that declares a runnable command on a leaf (`<leaf>` is the leaf that owns the command's behaviour). */
 export function commandFixCommand(command: string): string {
   return `lore baseline map <leaf> --command ${/\s/.test(command) ? `"${command}"` : command}`;
+}
+
+/** The command that drops a declared command this tree does not have from its leaf (right when it is stale, wrong when it is pending). */
+export function absentCommandFixCommand(leafSlug: string, command: string): string {
+  return `lore baseline map ${leafSlug} --remove-command "${command}"`;
+}
+
+/**
+ * Split a leaf's declared commands into live and absent (never a census error, and never a coverage defect: an absent command
+ * may be pending in a branch that has not landed). A command is absent when it resolves to no census entry, or its entry is no longer a runnable registry command.
+ *
+ * @param declared - the leaf's `extra.commands`.
+ * @param entryKeyOf - `file#symbol` of a declared command, or `undefined` when it resolves to no census entry (the caller
+ *   maps ONLY a command-unresolved failure to `undefined`; any other failure must propagate, never read as absent).
+ * @param runnableEntries - `file#symbol` of every command the registry lists.
+ */
+export function partitionDeclaredCommands(
+  declared: readonly string[],
+  entryKeyOf: (command: string) => string | undefined,
+  runnableEntries: ReadonlySet<string>,
+): { live: string[]; absent: string[] } {
+  const live: string[] = [];
+  const absent: string[] = [];
+  for (const command of declared) {
+    const key = entryKeyOf(command);
+    (key !== undefined && runnableEntries.has(key) ? live : absent).push(command);
+  }
+  return { live, absent };
 }
 
 /**
