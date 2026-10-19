@@ -57,7 +57,7 @@ import { NON_BUSINESS_PREFIX, commandFixCommand, collectOwnedSites, computeLeafC
 import { treePredicateFor } from "../absent-declarations.js";
 import { buildOwnerLeafIndex } from "../../../service/owned-by.js";
 import { resolveDoc } from "../../../service/resolve.js";
-import { SiteCensusError, type UnresolvedImport, findCensusRoot, listSitesMany } from "../../../service/site-census.js";
+import { SiteCensusError, type UnresolvedImport, findCensusRoot, listSitesMany, resolveCommandEntry } from "../../../service/site-census.js";
 import type { Site, SiteList } from "../../../service/site-census.js";
 import { RuleStateService } from "../../../service/rule-state-service.js";
 import type { RuleStateEntry, RuleStateFull } from "../../../service/rule-state-service.js";
@@ -710,7 +710,7 @@ export default defineLoreCommand({
     sites: defineLoreCommand({
       meta: { name: "sites", description: "List the failure sites a CLI command can reach (static census, TypeScript compiler API)" },
       args: {
-        command: { type: "positional", description: "CLI command name, e.g. 'ac add' (or 'ac-add'); token 1 = commands/<token>.ts, further tokens = nested subcommands", required: true },
+        command: { type: "positional", description: "CLI command path, e.g. 'ac add' (or 'ac-add'); token 1 = commands/<token>.ts, every further positional = a nested subcommand ('gate spec-create')", required: true },
         json: { type: "boolean", description: "Output result as JSON" },
       },
       async run(context): Promise<number> {
@@ -719,11 +719,22 @@ export default defineLoreCommand({
         const json = args.json === true;
         try {
           const rootDir = requireCensusRoot(inv);
-          const command = args.command as string;
-          const sites = listSitesMany({ rootDir, commands: [command] }).get(command) as SiteList;
+          // reason: citty binds exactly ONE token to the declared positional; every positional survives on `args._`, and
+          // dropping the rest silently censused the wrong command (BR-664: an unresolvable path is a refusal, never a guess).
+          const command = ((args._ as string[] | undefined) ?? [args.command as string]).join(" ");
+          let sites: SiteList;
+          try {
+            sites = listSitesMany({ rootDir, commands: [command] }).get(command) as SiteList;
+          } catch (cause) {
+            if (cause instanceof SiteCensusError && cause.reason === "entry-symbol-missing") {
+              return reportFailure(inv, { code: "VALIDATION_ERROR", field: "command", message: `no CLI command '${command}': ${cause.message}`, value: command } as LoreError, json);
+            }
+            throw cause;
+          }
+          const entry = resolveCommandEntry({ rootDir, command });
           const dynamicCount = sites.filter((s) => s.dynamic).length;
           if (json) {
-            printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { command, count: sites.length, not_measured: dynamicCount, unresolved_imports: sites.unresolvedImports, sites, bootstrap: sites.bootstrap } }, null, 2));
+            printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { command, entry, count: sites.length, not_measured: dynamicCount, unresolved_imports: sites.unresolvedImports, sites, bootstrap: sites.bootstrap } }, null, 2));
             if (sites.unresolvedImports.length > 0) return 1;
             return 0;
           }
