@@ -9,19 +9,19 @@
  * Why here: `SessionService` has no filesystem, so health is composed in the CLI
  * adapter and attached beside `sessionService.bootstrap`. It routes through
  * `runMemoryFileChecks` (the sole composition entry) and re-derives nothing: the
- * adoption verdict (`mode`, `mode_source`, `downgraded_count`, `promotable`) is
- * taken from its `adoption` field verbatim.
+ * findings are taken from its `deterministic` field verbatim (limits are always
+ * enforced: there is no adoption mode).
  *
  * @invariant READ-ONLY: only `discoverMemoryFiles`, `discoverFragmentDocuments` and the `FsProbe` read;
  *   nothing is written, so two runs over an unchanged tree are identical.
  * @invariant ROOT ONLY, deduped by realpath: entries come from `budgets.filenames`
  *   (never a hard-coded name, D9); a symlinked `AGENTS.md` -> `CLAUDE.md` counts once.
- * @invariant Absent-vs-present is meaningful: `undefined` means "no root memory file,
- *   or mode `enforce` with zero would-be deterministic findings". `warn` with a root
- *   file is ALWAYS present, even when clean (`promotable: true`) — never silent.
+ * @invariant Absent-vs-present is meaningful: `undefined` means "no root memory file, or
+ *   a root file with zero deterministic findings"; a root file with any finding is ALWAYS present.
  *
  * Side-effect class: IO (synchronous node:fs reads only)
- * Source: spec-claude-md-root-section-structure-check-and-adoption-mode §Public Interface, D7-D9
+ * Source: spec-claude-md-root-section-structure-check-and-adoption-mode §Public Interface, D7-D9 (adoption mode retired by
+ * task-memory-file-limits-are-always-enforced-the-warn-adoption)
  */
 
 import { realpathSync } from "node:fs";
@@ -60,12 +60,11 @@ function dedupedRootFiles(repoRoot: string, filenames: string[]): MemoryFileReco
  *
  * @param repoRoot - Directory the memory files are discovered under (the process cwd).
  * @param config - The project config `loadLoreApp()` already parsed; `undefined` resolves
- *   schema-default budgets (adoption absent -> `warn`, `mode_source: "default"`).
+ *   schema-default budgets.
  * @returns The health block, or `undefined` when there is nothing to report.
  * @example
  * computeMemoryFileHealth(process.cwd(), config);
- * // => { mode: "warn", mode_source: "default", missing: ["Commands"], out_of_order: false,
- * //      downgraded_kinds: ["section_missing"], downgraded_count: 1, promotable: false }
+ * // => { missing: ["Commands"], out_of_order: false, finding_kinds: ["section_missing"], finding_count: 1 }
  */
 export function computeMemoryFileHealth(
   repoRoot: string,
@@ -75,38 +74,19 @@ export function computeMemoryFileHealth(
   const roots = dedupedRootFiles(repoRoot, budgets.filenames);
   if (roots.length === 0) return undefined;
 
-  const { deterministic, advisory, adoption } = runMemoryFileChecks(roots, budgets, {
+  const { deterministic } = runMemoryFileChecks(roots, budgets, {
     probe: buildRealFsProbe(repoRoot),
     referenceDocuments: discoverFragmentDocuments(repoRoot),
     // Bootstrap never reaches the corpus DB for this check (same as --check-claude-md).
     docExists: () => true,
   });
-
-  // Would-be deterministic findings: live in `deterministic` under enforce, and as
-  // `downgraded` advisories (carrying the original kind) under warn.
-  const wouldBe: { kind: string; reference?: string }[] = [
-    ...deterministic.map((f) => ({ kind: f.kind, ...(f.reference === undefined ? {} : { reference: f.reference }) })),
-    ...advisory.flatMap((f) =>
-      f.kind === "downgraded" && f.downgraded_kind !== undefined
-        ? [{ kind: f.downgraded_kind as string, ...(f.reference === undefined ? {} : { reference: f.reference }) }]
-        : [],
-    ),
-  ];
-
-  if (adoption.mode === "enforce" && wouldBe.length === 0) return undefined;
-
-  const missing = wouldBe
-    .filter((f) => f.kind === "section_missing" && f.reference !== undefined)
-    .map((f) => f.reference as string);
+  if (deterministic.length === 0) return undefined;
 
   return {
-    mode: adoption.mode,
-    mode_source: adoption.mode_source,
-    missing,
-    out_of_order: wouldBe.some((f) => f.kind === "section_order"),
-    downgraded_kinds: adoption.mode === "warn" ? [...new Set(wouldBe.map((f) => f.kind))] : [],
-    downgraded_count: adoption.downgraded_count,
-    promotable: adoption.promotable,
+    missing: deterministic.filter((f) => f.kind === "section_missing" && f.reference !== undefined).map((f) => f.reference as string),
+    out_of_order: deterministic.some((f) => f.kind === "section_order"),
+    finding_kinds: [...new Set(deterministic.map((f) => f.kind as string))],
+    finding_count: deterministic.length,
   };
 }
 
@@ -116,23 +96,16 @@ export function computeMemoryFileHealth(
  * @param health - The block from {@link computeMemoryFileHealth}, or `undefined`.
  * @returns One line (no newline), or `undefined` when the block is absent.
  * @example
- * formatMemoryFileHealthLine({ mode: "warn", mode_source: "default", missing: ["Commands", "Module Index"],
- *   out_of_order: false, downgraded_kinds: ["section_missing"], downgraded_count: 2, promotable: false });
- * // => "Memory file health: WARN adoption=warn (default) — missing sections: Commands, Module Index; not yet promotable to enforce"
+ * formatMemoryFileHealthLine({ missing: ["Commands", "Module Index"], out_of_order: false,
+ *   finding_kinds: ["section_missing"], finding_count: 2 });
+ * // => "Memory file health: FAILING — missing sections: Commands, Module Index"
  */
 export function formatMemoryFileHealthLine(health: MemoryFileHealth | undefined): string | undefined {
   if (health === undefined) return undefined;
   const parts: string[] = [];
   if (health.missing.length > 0) parts.push(`missing sections: ${health.missing.join(", ")}`);
   if (health.out_of_order) parts.push("sections out of order");
-  const otherKinds = health.downgraded_kinds.filter((k) => k !== "section_missing" && k !== "section_order");
+  const otherKinds = health.finding_kinds.filter((k) => k !== "section_missing" && k !== "section_order");
   if (otherKinds.length > 0) parts.push(`other findings: ${otherKinds.join(", ")}`);
-  const detail = parts.length > 0 ? parts.join("; ") : "no findings";
-  const verdict =
-    health.mode === "warn"
-      ? health.promotable
-        ? "clean, promotable to enforce"
-        : "not yet promotable to enforce"
-      : "FAILING under enforce";
-  return `Memory file health: ${health.mode === "warn" ? "WARN " : ""}adoption=${health.mode} (${health.mode_source}) — ${detail}; ${verdict}`;
+  return `Memory file health: FAILING — ${parts.join("; ")}`;
 }

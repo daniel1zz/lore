@@ -36,7 +36,6 @@ import { err, ok, resolveMemoryFileBudgets, setupManifestSchema } from "@lore/co
 import type { FsProbe, LoreError, MemoryFileBudgets, Result } from "@lore/core";
 import {
   scaffoldProject,
-  type AdoptionWriteOutcome,
   type ExecPort,
   type InitCorpus,
   type ProjectAssetSource,
@@ -327,22 +326,18 @@ describe("setup-project-flow — CLAUDE.md marker-section rewrite (SPEC-076 D7) 
   });
 });
 
-// ─── ADOPTION (spec-claude-md-root-section-structure-check-and-adoption-mode D4) ─────────
+// ─── MEMORY-FILE JUDGEMENT (limits are always enforced; setup writes no setting) ─────────
 
 const REAL_SHAPE_BODY = "## Module Index\n\nmodules.\n\n## Finding Live Project State\n\nlore search.\n";
 const REAL_SHAPE_TEMPLATE = `${CLAUDE_MD_MARKER_START}\n${REAL_SHAPE_BODY}${CLAUDE_MD_MARKER_END}\n`;
 const REAL_SHAPE_SKELETON =
   "# CLAUDE.md\n\n## What This Is\n\nA service.\n\n## Commands\n\n- make test\n\n## Architecture\n\nLayers.\n\n";
 
-type AdoptionCall = { repoDir: string; mode: "enforce" | "warn" };
-
 /** A probe of an empty repository: every path is missing, nothing is readable. */
 const NO_REPOSITORY_PROBE: FsProbe = { stat: () => "missing", readFile: () => null, listDir: () => null };
 
-function makeAdoptionDeps(
+function makeJudgementDeps(
   fs: InMemoryProjectFs,
-  calls: AdoptionCall[],
-  outcome: Result<AdoptionWriteOutcome, LoreError> = ok({ status: "written" }),
   budgets: Result<MemoryFileBudgets, LoreError> = ok(resolveMemoryFileBudgets(undefined)),
 ): ProjectScaffoldFlowDeps {
   return {
@@ -350,35 +345,28 @@ function makeAdoptionDeps(
     resolveMemoryFileBudgets: () => budgets,
     // An explicit fake probe: this fixture's CLAUDE.md names no code, so nothing is read.
     resolveReferenceContext: () => ({ probe: NO_REPOSITORY_PROBE, referenceDocuments: [] }),
-    writeAdoptionMode: (repoDir, mode) => {
-      calls.push({ repoDir, mode });
-      return outcome;
-    },
   };
 }
 
-describe("setup-project-flow — adoption step (D4) — judged on POST-SPLICE content", () => {
-  it("HAPPY: fresh install = skeleton + managed block -> enforce, empty checklist", async () => {
+describe("setup-project-flow — memory-file judgement — judged on POST-SPLICE content, writes no setting", () => {
+  it("HAPPY: fresh install = skeleton + managed block -> conforms, empty checklist", async () => {
     const fs = new InMemoryProjectFs();
-    const calls: AdoptionCall[] = [];
-    const result = await scaffoldProject(makeAdoptionDeps(fs, calls), { repoDir: REPO_DIR }, fixedNow);
+    const result = await scaffoldProject(makeJudgementDeps(fs), { repoDir: REPO_DIR }, fixedNow);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(calls).toEqual([{ repoDir: REPO_DIR, mode: "enforce" }]);
-    expect(result.value.adoption).toEqual({ status: "written", mode: "enforce", checklist: [] });
+    expect(result.value.memory_files).toEqual({ status: "conforms", checklist: [] });
     const content = fs.readFile(CLAUDE_MD_PATH) ?? "";
     expect(content.indexOf("## What This Is")).toBeLessThan(content.indexOf("## Module Index"));
   });
 
-  it("NEGATIVE: existing file missing the skeleton sections -> warn + one checklist line per missing section; skeleton NOT injected", async () => {
+  it("NEGATIVE: existing file missing the skeleton sections -> findings + one checklist line per missing section; skeleton NOT injected", async () => {
     const fs = new InMemoryProjectFs();
     fs.files.set(CLAUDE_MD_PATH, { content: "# Mine\n\n## Notes\n\nprose\n", mode: 0o644 });
-    const calls: AdoptionCall[] = [];
-    const result = await scaffoldProject(makeAdoptionDeps(fs, calls), { repoDir: REPO_DIR }, fixedNow);
+    const result = await scaffoldProject(makeJudgementDeps(fs), { repoDir: REPO_DIR }, fixedNow);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(calls.map((c) => c.mode)).toEqual(["warn"]);
-    const checklist = result.value.adoption?.checklist ?? [];
+    expect(result.value.memory_files?.status).toBe("findings");
+    const checklist = result.value.memory_files?.checklist ?? [];
     expect(checklist.filter((l) => l.includes("is missing")).map((l) => /"## ([^"]+)"/.exec(l)?.[1])).toEqual([
       "What This Is",
       "Commands",
@@ -387,114 +375,92 @@ describe("setup-project-flow — adoption step (D4) — judged on POST-SPLICE co
     expect(fs.readFile(CLAUDE_MD_PATH)).not.toContain("A service.");
   });
 
-  it("BOUNDARY: existing file with all five sections + block duplicates two -> warn naming the duplicates", async () => {
+  it("BOUNDARY: existing file with all five sections + block duplicates two -> findings naming the duplicates", async () => {
     const fs = new InMemoryProjectFs();
     fs.files.set(CLAUDE_MD_PATH, { content: `${REAL_SHAPE_SKELETON}${REAL_SHAPE_BODY}`, mode: 0o644 });
-    const calls: AdoptionCall[] = [];
-    const result = await scaffoldProject(makeAdoptionDeps(fs, calls), { repoDir: REPO_DIR }, fixedNow);
+    const result = await scaffoldProject(makeJudgementDeps(fs), { repoDir: REPO_DIR }, fixedNow);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(calls.map((c) => c.mode)).toEqual(["warn"]);
-    expect((result.value.adoption?.checklist ?? []).some((l) => l.includes("appears 2 times"))).toBe(true);
+    expect(result.value.memory_files?.status).toBe("findings");
+    expect((result.value.memory_files?.checklist ?? []).some((l) => l.includes("appears 2 times"))).toBe(true);
   });
 
-  it("STATE: port reports kept -> adoption row is kept with the existing value and no checklist", async () => {
+  it("STATE: the judgement writes NOTHING beyond the scaffold's own files (no config key, no extra file)", async () => {
     const fs = new InMemoryProjectFs();
-    fs.files.set(CLAUDE_MD_PATH, { content: "# Mine\n", mode: 0o644 });
-    const result = await scaffoldProject(
-      makeAdoptionDeps(fs, [], ok({ status: "kept", existing: "enforce" })),
+    const withJudgement = await scaffoldProject(makeJudgementDeps(fs), { repoDir: REPO_DIR }, fixedNow);
+    const bareFs = new InMemoryProjectFs();
+    const bare = await scaffoldProject(
+      makeDeps(bareFs, { "CLAUDE.md.template": REAL_SHAPE_TEMPLATE, "CLAUDE.md.skeleton": REAL_SHAPE_SKELETON }),
       { repoDir: REPO_DIR },
       fixedNow,
     );
-    expect(result.ok).toBe(true);
-    if (!result.ok) return;
-    expect(result.value.adoption).toEqual({ status: "kept", mode: "warn", detail: "enforce", checklist: [] });
+    expect(withJudgement.ok && bare.ok).toBe(true);
+    expect([...fs.files.keys()].sort()).toEqual([...bareFs.files.keys()].sort());
   });
 
-  it("ERROR: port failure is surfaced as adoption.status failed (never swallowed)", async () => {
-    const fs = new InMemoryProjectFs();
-    const failure: LoreError = { code: "STORE_ERROR", message: "config unreadable" };
-    const result = await scaffoldProject(makeAdoptionDeps(fs, [], err(failure)), { repoDir: REPO_DIR }, fixedNow);
-    expect(result.ok).toBe(true);
-    if (!result.ok) return;
-    expect(result.value.adoption?.status).toBe("failed");
-    expect(result.value.adoption?.detail).toContain("config unreadable");
-  });
-
-  it("DEFECT-FIX: the repo's REAL (tighter) budgets are used — a file over a custom max_lines but under the default 300 -> warn + capacity finding", async () => {
+  it("DEFECT-FIX: the repo's REAL (tighter) budgets are used — a file over a custom max_lines but under the default 300 -> findings + capacity finding", async () => {
     const fs = new InMemoryProjectFs();
     const tighter: MemoryFileBudgets = {
       ...resolveMemoryFileBudgets(undefined),
       root: { max_lines: 10, max_bytes: 30720 },
     };
-    const calls: AdoptionCall[] = [];
-    const result = await scaffoldProject(
-      makeAdoptionDeps(fs, calls, ok({ status: "written" }), ok(tighter)),
-      { repoDir: REPO_DIR },
-      fixedNow,
-    );
+    const result = await scaffoldProject(makeJudgementDeps(fs, ok(tighter)), { repoDir: REPO_DIR }, fixedNow);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     // Fresh install is ~25 lines: over 10, far under 300.
-    expect(calls.map((c) => c.mode)).toEqual(["warn"]);
-    expect((result.value.adoption?.checklist ?? []).some((l) => l.includes("ceiling"))).toBe(true);
+    expect(result.value.memory_files?.status).toBe("findings");
+    expect((result.value.memory_files?.checklist ?? []).some((l) => l.includes("ceiling"))).toBe(true);
   });
 
-  it("ERROR: budgets cannot be resolved -> adoption failed (loud), port never called", async () => {
+  it("ERROR: budgets cannot be resolved -> memory_files failed (loud, never defaulted)", async () => {
     const fs = new InMemoryProjectFs();
-    const calls: AdoptionCall[] = [];
     const result = await scaffoldProject(
-      makeAdoptionDeps(fs, calls, ok({ status: "written" }), err({ code: "STORE_ERROR", message: "config broken" })),
+      makeJudgementDeps(fs, err({ code: "STORE_ERROR", message: "config broken" })),
       { repoDir: REPO_DIR },
       fixedNow,
     );
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.value.adoption?.status).toBe("failed");
-    expect(result.value.adoption?.detail).toContain("config broken");
-    expect(calls).toEqual([]);
+    expect(result.value.memory_files?.status).toBe("failed");
+    expect(result.value.memory_files?.detail).toContain("config broken");
   });
 
-  it("NO-SILENT-FALLBACK: a missing adoption port is a LOUD skipped row naming the port, never an absent row", async () => {
+  it("NO-SILENT-FALLBACK: a missing port is a LOUD skipped row naming the port, never an absent row", async () => {
     const fs = new InMemoryProjectFs();
     const bare = await scaffoldProject(makeDeps(fs), { repoDir: REPO_DIR }, fixedNow);
     expect(bare.ok).toBe(true);
     if (!bare.ok) return;
-    expect(bare.value.adoption?.status).toBe("skipped");
-    expect(bare.value.adoption?.mode).toBeUndefined();
-    expect(bare.value.adoption?.detail).toContain("writeAdoptionMode");
-    expect(bare.value.adoption?.detail).toContain("resolveMemoryFileBudgets");
+    expect(bare.value.memory_files?.status).toBe("skipped");
+    expect(bare.value.memory_files?.detail).toContain("resolveMemoryFileBudgets");
+    expect(bare.value.memory_files?.detail).toContain("resolveReferenceContext");
 
     const half = await scaffoldProject(
-      { ...makeDeps(new InMemoryProjectFs()), writeAdoptionMode: () => ok({ status: "written" }) },
+      { ...makeDeps(new InMemoryProjectFs()), resolveMemoryFileBudgets: () => ok(resolveMemoryFileBudgets(undefined)) },
       { repoDir: REPO_DIR },
       fixedNow,
     );
-    expect(half.ok && half.value.adoption?.status).toBe("skipped");
-    expect(half.ok && half.value.adoption?.detail).toContain("resolveMemoryFileBudgets");
+    expect(half.ok && half.value.memory_files?.status).toBe("skipped");
+    expect(half.ok && half.value.memory_files?.detail).toContain("resolveReferenceContext");
 
     // The skip is RENDERED (visible to the operator), not just carried in the report.
     const text = renderProjectScaffoldReceipt(
       { ...bare.value, manifestPath: `${REPO_DIR}/.lore/.lore-project-manifest.json` },
       { targetDir: REPO_DIR, binPath: "/usr/local/bin/lore" },
     );
-    expect(text).toContain("Adoption: skipped — not judged");
-    expect(text).toContain("deps.writeAdoptionMode");
+    expect(text).toContain("Memory file: skipped");
+    expect(text).toContain("deps.resolveMemoryFileBudgets");
   });
 
-  it("REGRESSION: unreadable skeleton on a fresh install -> claude_md failed, port never called", async () => {
-    const fs = new InMemoryProjectFs();
-
+  it("REGRESSION: unreadable skeleton on a fresh install -> claude_md failed, no judgement row", async () => {
     const fs2 = new InMemoryProjectFs();
-    const calls: AdoptionCall[] = [];
     const deps = {
-      ...makeAdoptionDeps(fs2, calls),
+      ...makeJudgementDeps(fs2),
       assets: makeAssets({ "CLAUDE.md.template": REAL_SHAPE_TEMPLATE, "CLAUDE.md.skeleton": undefined }),
     };
     const result = await scaffoldProject(deps, { repoDir: REPO_DIR }, fixedNow);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.value.claude_md.status).toBe("failed");
-    expect(calls).toEqual([]);
+    expect(result.value.memory_files).toBeUndefined();
   });
 });

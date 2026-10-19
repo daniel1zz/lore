@@ -169,8 +169,7 @@ export function formatBootstrapReport(report: BootstrapReportWithStaleness, by: 
         : ""),
   );
 
-  // spec-claude-md-root-section-structure-check-and-adoption-mode D7 — one line, only
-  // when `memory_file_health` is present (warn mode, or enforce with findings).
+  // One line, only when `memory_file_health` is present (the root memory file has findings).
   const healthLine = formatMemoryFileHealthLine(report.memory_file_health);
   if (healthLine !== undefined) lines.push(healthLine);
 

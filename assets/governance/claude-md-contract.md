@@ -192,25 +192,21 @@ as a failure):
    state (its own CLI/API if it has one, or the external system that tracks
    it). Never a snapshot of that state itself.
 
-## Adoption Mode
+## Enforcement
 
-`context.memory_files.adoption` in `.lore/config.yaml` decides whether
-deterministic memory-file findings (including a missing or out-of-order root
-section) block, or only warn. It takes two values:
+Every deterministic memory-file finding (a ceiling breach, a missing or
+out-of-order root section, an unresolved reference) is always exit-relevant:
+`lore status --check-claude-md` exits non-zero, `lore context refresh` refuses
+the write, and the pre-push hook refuses the push. There is no setting that
+downgrades them.
 
-- **enforce** — findings are deterministic: `lore status --check-claude-md`
-  exits non-zero and the pre-push hook refuses the push.
-- **warn** — the same findings are downgraded to advisory: the exit code is
-  unaffected, each is listed as `[downgraded:<kind>]`, and every warn run
-  prints a summary line starting `WARN adoption=warn`.
-
-An absent value resolves to **warn**, so an existing repo is never broken by
-upgrading. `lore setup` writes the value explicitly, so a fresh install states
-its mode instead of inheriting the default. `lore bootstrap` and
-`lore status --json` expose the resolved mode, where it came from, how many
-findings were downgraded, and a `promotable` flag. A repo is promotable when
-it is in warn mode and has zero would-be deterministic findings; once
-promotable, switch the config value to enforce so the structure stays held.
+A project that upgraded from a release with the retired
+`context.memory_files.adoption` setting is brought to compliance once: any
+command refuses a config that still names it, and
+`lore migrate memory-limits` (preview by default, `--apply` to write) removes
+the setting and lists every memory-file finding a person must fix. Running it
+again changes nothing. `lore bootstrap` and `lore status --json` show a
+memory-file health block only while the root file has a finding.
 
 ## Module CLAUDE.md — file taxonomy
 

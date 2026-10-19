@@ -83,7 +83,7 @@ function mustExpand(fragments: readonly Fragment[], outlet: OutletId): readonly 
 
 const ROOT_CLAUDE_MD =
   "# P\n\n" +
-  ["What This Is", "Commands", "Architecture", "Module Index", "Finding Live Project State"]
+  ["What This Is", "Commands", "Architecture"]
     .map((heading) => `## ${heading}\n\nshort\n`)
     .join("\n");
 

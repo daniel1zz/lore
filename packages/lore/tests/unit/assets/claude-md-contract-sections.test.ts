@@ -79,14 +79,17 @@ describe("claude-md contract: root section list parity with ROOT_REQUIRED_SECTIO
     expect(CONTRACT).toMatch(/in this order/i);
   });
 
-  it("the contract has an 'Adoption Mode' heading", () => {
-    expect(CONTRACT).toMatch(/^#{2,3} .*Adoption Mode/m);
+  it("the contract has an 'Enforcement' heading and no 'Adoption Mode' heading", () => {
+    expect(CONTRACT).toMatch(/^#{2,3} Enforcement/m);
+    expect(CONTRACT).not.toMatch(/^#{2,3} .*Adoption Mode/m);
   });
 
-  it("the Adoption Mode section names both modes, enforce and warn", () => {
-    const idx = CONTRACT.search(/^#{2,3} .*Adoption Mode/m);
+  it("the Enforcement section says findings are always enforced and names the migrate action, never the warn mode", () => {
+    const idx = CONTRACT.search(/^#{2,3} Enforcement/m);
     const tail = idx === -1 ? "" : CONTRACT.slice(idx);
-    expect(/enforce/.test(tail) && /warn/.test(tail)).toBe(true);
+    expect(tail).toMatch(/always exit-relevant/);
+    expect(tail).toContain("lore migrate memory-limits");
+    expect(tail).not.toMatch(/\*\*warn\*\*/);
   });
 
   it("the contract no longer says 'exactly these headings'", () => {

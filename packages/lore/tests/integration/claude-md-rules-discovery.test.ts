@@ -255,7 +255,12 @@ describe("rules discovery — counted while worktree copies stay excluded", () =
   });
 
   it("STATE: rules files coexist with a real root AND module CLAUDE.md without perturbing their own role entries or the exit code", () => {
-    writeFileSync(join(tmpDir, "CLAUDE.md"), "# Root memory file\n\nStanding discipline only.\n");
+    writeFileSync(
+      join(tmpDir, "CLAUDE.md"),
+      ["What This Is", "Commands", "Architecture", "Module Index", "Finding Live Project State"]
+        .map((name) => `## ${name}\n\nStanding discipline only.\n`)
+        .join("\n"),
+    );
     mkdirSync(join(tmpDir, "packages", "widget"), { recursive: true });
     writeFileSync(
       join(tmpDir, "packages", "widget", "CLAUDE.md"),

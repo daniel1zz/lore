@@ -57,7 +57,6 @@ beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "lore-bind-script-"));
   mkdirSync(join(dir, ".claude", "rules"), { recursive: true });
   mkdirSync(join(dir, ".lore", "context"), { recursive: true });
-  writeFileSync(join(dir, ".lore", "config.yaml"), "context:\n  memory_files:\n    adoption: enforce\n");
   writePackageJson(dir, { build: "tsc", "test:file": "vitest run" });
 });
 

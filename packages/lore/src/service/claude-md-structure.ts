@@ -11,9 +11,8 @@
  *     `module_section_missing` only.
  *
  * Invariants:
- *   - MODE-FREE: this module knows nothing about adoption. Downgrading
- *     deterministic findings in `warn` mode is `runMemoryFileChecks`'s job
- *     (spec D2) — never emit a `downgraded` finding from here.
+ *   - Every deterministic finding it returns is exit-relevant: there is no adoption mode that
+ *     downgrades findings (retired by task-memory-file-limits-are-always-enforced-the-warn-adoption).
  *   - Heading match is CommonMark-exact via mdast (depth === 2, top-level
  *     only): ATX and setext H2 count; `###`, fenced/indented code and
  *     blockquoted headings do not. Text is trimmed, case-sensitive, never

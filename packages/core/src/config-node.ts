@@ -42,6 +42,7 @@ import {
   GlobalLoreConfigSchema,
   loadConfigFromString,
   renamePrdSyncConfigKey,
+  removeRetiredAdoptionSetting,
   type LoreConfig,
   type GlobalLoreConfig,
 } from "./config.js";
@@ -119,6 +120,55 @@ export function migrateConfigKeys(dir: string, apply: boolean): Result<ConfigKey
     writeFileSync(tempPath, renamed.value.text, "utf8");
     renameSync(tempPath, file);
     return ok({ file, renamed: true, written: true, notice });
+  } catch (e) {
+    return err({
+      code: "STORE_ERROR",
+      message: e instanceof Error ? e.message : "Failed to migrate config file",
+      ...(e instanceof Error ? { cause: e } : {}),
+    } satisfies LoreError);
+  }
+}
+
+/** What {@link migrateMemoryLimits} found in (and, with `apply`, did to) one project config file. */
+export interface MemoryLimitsConfigMigration {
+  /** Absolute path of the config file examined. */
+  readonly file: string;
+  /** The retired setting's value, or `undefined` when the file did not carry it. */
+  readonly value: unknown;
+  /** Whether the file carried the retired setting (a dry run reports `true` without writing). */
+  readonly found: boolean;
+  /** Whether the file was written (`apply` and `found`). */
+  readonly written: boolean;
+  /** The config text as it reads once the setting is gone (the input text itself when none was found). */
+  readonly text: string;
+}
+
+/**
+ * The config half of `lore migrate memory-limits`: removes the retired `context.memory_files.adoption` setting from
+ * `<dir>/.lore/config.yaml` (its line only; every other byte is identical). The write is atomic (temp file in the
+ * same directory, then rename). A second run finds no setting and changes nothing. Never loads the config through the
+ * app: the file it repairs is the one every other command now refuses.
+ *
+ * @param dir - project directory holding `.lore/config.yaml`
+ * @param apply - `false` (dry run) reports without writing; `true` writes
+ * @returns `ok(report)`; `err(VALIDATION_ERROR)` when the YAML is malformed or the setting cannot be cut out line-wise
+ *   (nothing written); `err(STORE_ERROR)` when the file cannot be read or written. Never throws.
+ * @example
+ *   migrateMemoryLimits("/repo", true); // => ok({ file: "/repo/.lore/config.yaml", value: "warn", found: true, written: true, text: "..." })
+ */
+export function migrateMemoryLimits(dir: string, apply: boolean): Result<MemoryLimitsConfigMigration, LoreError> {
+  const file = join(dir, CONFIG_FILE);
+  try {
+    const raw = readFileSync(file, "utf8");
+    const removed = removeRetiredAdoptionSetting(raw);
+    if (!removed.ok) return removed;
+    if (removed.value === undefined) return ok({ file, value: undefined, found: false, written: false, text: raw });
+    const { text, value } = removed.value;
+    if (!apply) return ok({ file, value, found: true, written: false, text });
+    const tempPath = `${file}.migrating-${process.pid}`;
+    writeFileSync(tempPath, text, "utf8");
+    renameSync(tempPath, file);
+    return ok({ file, value, found: true, written: true, text });
   } catch (e) {
     return err({
       code: "STORE_ERROR",
