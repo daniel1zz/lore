@@ -1,7 +1,7 @@
 // @spawns scripts/check-baseline-coverage.ts
 // @spawns packages/lore/src/index.ts
 /**
- * AC-BCG-2 under BR-1344 (replaces the two site-map-seeding cases of check-baseline-coverage-commands-only.test.ts): the integrate
+ * The floor-step contract under BR-1344 (replaces the two site-map-seeding cases of check-baseline-coverage-commands-only.test.ts): the integrate
  * floor step `scripts/check-baseline-coverage.ts` refuses ONLY a runnable command no leaf declares and never runs the site census,
  * whatever the tree declares at its refusal sites: a site declaring a rule id no baseline node holds does not fail the step, and an
  * undeclared command still exits 1 naming it.
@@ -10,8 +10,8 @@
  * census entry-point call so "never invokes the census" is measured. Dimensions: HAPPY (unknown declaration -> 0, zero calls),
  * NEGATIVE (undeclared command -> 1 naming it, zero calls), STATE (the full verb reports the declaration, so the fixture is live).
  *
- * Context: spec-baseline-coverage-refuses-only-undeclared-commands-a-site AC-BCG-2 (its declared oracle is the original file; this one
- * stands in for the two cases that seeded a corpus site map).
+ * Context: the predecessor spec's floor criterion keeps the original file as its oracle; this one stands in for the two cases that
+ * seeded a corpus site map.
  */
 import { afterEach, describe, expect, it } from "vitest";
 import { spawnSync } from "node:child_process";
@@ -61,7 +61,7 @@ function runRecorded(c: MiniCorpus, args: string[]): { status: number; out: stri
   return { status: r.status ?? -1, out: `${r.stdout}${r.stderr}`, censusCalls };
 }
 
-describe("AC-BCG-2 the floor step is blind to what the tree declares at its sites", () => {
+describe("the floor step is blind to what the tree declares at its sites", () => {
   it("a site declaring an unknown rule does not fail the step: exit exactly 0 when every command is declared, census never run", async () => {
     const c = await mini();
     declareUnknownRuleAtAlpha(c);
