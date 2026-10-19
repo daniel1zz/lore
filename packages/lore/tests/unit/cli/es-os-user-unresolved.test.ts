@@ -65,3 +65,23 @@ describe("ES-D an unnamed invocation (failed OS user lookup, no other name)", ()
     expect(write.exitCode).toBe(0);
   });
 });
+
+describe("ES-D a gate bypass needs an actor to audit it", () => {
+  const bypassArgs = ["gate", "spec-create", "--input-json", "{}"];
+
+  it("is refused with exit 4 naming the reason when the invocation is unnamed: nothing is bypassed", async () => {
+    const env = { ...bareEnv(), LORE_GATE_BYPASS: "1" };
+    const result = await runLoreInProcess(bypassArgs, { cwd, home, env, osUser: FAILED });
+    expect(result.exitCode).toBe(4);
+    expect(result.stderr).toContain("OS user lookup failed");
+    expect(result.stderr).toContain(REASON);
+    expect(result.stderr).not.toContain("gate bypass NOT audited");
+  });
+
+  it("still proceeds (exit 0, audited) when a session names the writer", async () => {
+    const env = { ...bareEnv(), LORE_GATE_BYPASS: "1", CLAUDE_CODE_SESSION_ID: "3de02220-aaaa-bbbb-cccc-111122223333" };
+    const result = await runLoreInProcess(bypassArgs, { cwd, home, env, osUser: FAILED });
+    expect(result.exitCode).toBe(0);
+    expect(result.stderr).not.toContain("gate bypass NOT audited");
+  });
+});
