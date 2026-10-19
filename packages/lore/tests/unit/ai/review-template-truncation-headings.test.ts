@@ -310,6 +310,7 @@ describe("AIProviderService.judgeDoc — REGRESSION end-to-end: no truncated sta
       type: "spec",
       title: "Truncation Headings Test Spec",
       content: "Small spec body.",
+      parent_id: prdResult.value.id,
     } as CreateDocInput);
     if (!specResult.ok) throw new Error("spec create failed");
 

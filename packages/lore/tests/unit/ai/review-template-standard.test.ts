@@ -118,12 +118,12 @@ describe("AC-BLC-5 — prompt version freeze", () => {
     expect(REVIEW_PROMPT_VERSION).toBe("v5");
   });
 
-  it("REGRESSION: v2 output for a standard node is byte-identical to its pre-fix render (no four parts)", () => {
+  it("REGRESSION: v2 output for a standard node is its pre-fix render plus each rule's examples (BR-960, D9), and no four parts", () => {
     const bundle = standardNode([standardRule(1)]);
     const out = frozenV2(bundle, CHECKS, BUDGETS, NOW).prompt;
-    // Pre-fix block: the rule line is the last entry line before the closing fence.
+    // Pre-fix block plus the examples line D9 adds: the rule line is followed by its examples, then the closing fence.
     expect(out).toContain(
-      "rules (1):\n- AS-1 [confidence=established, lifecycle=live, enforced_by=prompt-only]: standard statement 1\n```\n",
+      "rules (1):\n- AS-1 [confidence=established, lifecycle=live, enforced_by=prompt-only]: standard statement 1\n  examples: e\n```\n",
     );
     for (const key of ["current_reality", "target_rule", "current_exceptions", "migration"]) {
       expect(out).not.toContain(key);
