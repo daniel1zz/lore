@@ -34,6 +34,12 @@
  * @invariant The session's own scratchpad (`.../claude-<uid>/<project>/<session>/scratchpad/`) is never
  *   repository content: a path under it is not "outside the working copy". Structural match on the session id of
  *   the trail, no agent-id allowlist; another session's scratchpad stays a finding.
+ * @invariant Anchor coverage judges repository content only: a path the helper's working copy's git ignores
+ *   (`git check-ignore`, run in that working copy, ONE batched spawn per helper) is never judged against anchors.
+ *   One criterion, git's ignore rules: no `.scratch/` special case, no allowlist. A tracked path is never ignored
+ *   (check-ignore does not report tracked files). A probe that fails, or whose output does not account for every
+ *   input path, is reported in `not_measured` naming the paths, and those paths stay judged (never treated as
+ *   ignored). Only an absent `ignoreProbe` skips the filter (unit fixtures with fake working copies).
  * @invariant Findings, per helper and kind (one finding lists every file of that kind): a file outside the
  *   helper's working copy; a file no anchor of any claimed task covers (matching is `anchorsOverlap`, no new
  *   matcher; a file a `workflow.turn_end.co_change` rule REQUIRES counts as covered when an anchor-covered changed
@@ -41,6 +47,7 @@
  *   list)); changed files and no claimed task. A helper that changed nothing yields none, and an unmeasurable
  *   part is reported in `not_measured`, never as "changed nothing".
  */
+import { spawnSync } from "node:child_process";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { anchorsOverlap, err, ok, type CoChangeRule, type LoreError, type Result } from "@lore/core";
 import type { SessionTrail, TrailHelper } from "@lore/core/node";
@@ -58,6 +65,48 @@ export type OpenClaimsOfWorkingCopyPort = (workingCopy: string) => Promise<Resul
 
 /** `realpath` of an existing path; throws ENOENT otherwise (`fs.realpathSync` shape). */
 export type RealpathFn = (path: string) => string;
+
+/** Result of one `git check-ignore` spawn (`status` null = the process did not run to an exit). */
+export interface IgnoreProbeRun {
+  readonly status: number | null;
+  readonly stdout: string;
+}
+
+/** Runs `git check-ignore --stdin -z -v --non-matching` in `workingCopy` with the NUL-joined `paths` on stdin. */
+export type IgnoreProbeFn = (workingCopy: string, paths: readonly string[]) => IgnoreProbeRun;
+
+/** The real {@link IgnoreProbeFn}: a synchronous git spawn in the helper's own working copy. */
+export const spawnGitCheckIgnore: IgnoreProbeFn = (workingCopy, paths) => {
+  const run = spawnSync("git", ["check-ignore", "--stdin", "-z", "-v", "--non-matching"], {
+    cwd: workingCopy,
+    input: paths.join("\0") + "\0",
+    encoding: "utf8",
+  });
+  return { status: run.status, stdout: run.stdout ?? "" };
+};
+
+/** Paths of `paths` git ignores, or the reason the probe could not be trusted. */
+type IgnoreVerdict = { readonly measured: true; readonly ignored: ReadonlySet<string> } | { readonly measured: false; readonly reason: string };
+
+/**
+ * Batch verdict. Exit 0 (something ignored) or 1 (nothing ignored) are the only valid statuses, and the `-v -z
+ * --non-matching` output must hold exactly one 4-field record (source, line, pattern, path) per input path, in
+ * input order: a 0-status run with empty stdout (seen under load) therefore reads as not measured. A record whose
+ * pattern starts with `!` is a negation (the path is NOT ignored).
+ */
+function judgeIgnoreProbe(paths: readonly string[], run: IgnoreProbeRun): IgnoreVerdict {
+  if (run.status !== 0 && run.status !== 1) return { measured: false, reason: `git check-ignore exited ${String(run.status)}` };
+  const fields = run.stdout.split("\0");
+  if (fields.at(-1) === "") fields.pop();
+  if (fields.length !== paths.length * 4) return { measured: false, reason: `git check-ignore answered ${fields.length / 4} of ${paths.length} paths` };
+  const ignored = new Set<string>();
+  for (const [index, path] of paths.entries()) {
+    const [source, , pattern, answered] = fields.slice(index * 4, index * 4 + 4);
+    if (answered !== path) return { measured: false, reason: `git check-ignore answered ${String(answered)} where ${path} was asked` };
+    if (source !== "" && !(pattern ?? "").startsWith("!")) ignored.add(path);
+  }
+  return { measured: true, ignored };
+}
 
 export type HelperScopeFindingKind = "outside-anchors" | "outside-working-copy" | "no-claimed-task";
 
@@ -95,6 +144,8 @@ export interface ReviewHelperScopeInput {
   /** The project root (directory holding `.lore/`); the base for edit records of a helper with no working copy. */
   readonly projectRoot: string;
   readonly realpath: RealpathFn;
+  /** Git ignore probe; absent = no ignore filtering. The CLI passes {@link spawnGitCheckIgnore}. */
+  readonly ignoreProbe?: IgnoreProbeFn;
   /** The validated co_change rules plus the glob matcher; absent = no co-change coverage (rules unmeasured or unset). */
   readonly coChange?: { readonly rules: readonly CoChangeRule[]; readonly matches: GlobMatchFn };
 }
@@ -225,6 +276,17 @@ export async function reviewHelperScope(input: ReviewHelperScopeInput): Promise<
       for (const edit of turn.edits.value) {
         if (edit.run === helper.run && !isCoveredByJudgedEnd(edit.ts, helper)) classify(isAbsolute(edit.file) ? edit.file : resolve(workingCopy, edit.file));
       }
+    }
+    if (input.ignoreProbe !== undefined && inside.size > 0) {
+      const asked = [...inside].sort();
+      let verdict: IgnoreVerdict;
+      try {
+        verdict = judgeIgnoreProbe(asked, input.ignoreProbe(workingCopy, asked));
+      } catch (cause) {
+        verdict = { measured: false, reason: `git check-ignore could not run: ${cause instanceof Error ? cause.message : String(cause)}` };
+      }
+      if (verdict.measured) for (const path of verdict.ignored) inside.delete(path);
+      else notMeasured.push(`helper ${helper.agent_id}: ignore status not measured for ${listOf(asked)} (${verdict.reason})`);
     }
     const files = [...inside].sort();
     helpers.push({ agent_id: helper.agent_id, run: helper.run, end_count: helper.end_count, judged_end_count: helper.judged_end_count, files });
