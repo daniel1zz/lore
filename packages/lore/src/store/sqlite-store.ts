@@ -39,6 +39,7 @@ import { MIGRATION_019_ADD_COLUMNS, MIGRATION_019_SQL } from "./migrations/migra
 // caller can import it from schema-version.ts directly without pulling
 // bun:sqlite into the vitest module graph. See schema-version.ts's own
 // JSDoc for the bump-together invariant.
+import { LATEST_SCHEMA_VERSION } from "./schema-version.js";
 export { LATEST_SCHEMA_VERSION } from "./schema-version.js";
 import type {
   AuditEntry,
@@ -168,6 +169,11 @@ export interface SQLiteStoreOptions {
    * so a caller reports the bound the connection actually carries.
    */
   readonly writeWaitMs?: number;
+  /**
+   * Stop migrating at this schema version (default: {@link LATEST_SCHEMA_VERSION}, i.e. migrate fully). Lets a test
+   * build a corpus that is GENUINELY one schema behind, whatever the newest migration does; production callers never set it.
+   */
+  readonly schemaCeiling?: number;
 }
 
 export class SQLiteStore implements StoreInterface {
@@ -179,6 +185,8 @@ export class SQLiteStore implements StoreInterface {
    * number verbatim instead of re-deriving it from config (D4).
    */
   readonly writeWaitMs: number;
+
+  private readonly schemaCeiling: number;
 
   constructor(dbPath: string, options?: SQLiteStoreOptions) {
     const declaredWriteWaitMs = options?.writeWaitMs ?? DEFAULT_WRITE_WAIT_MS;
@@ -196,6 +204,7 @@ export class SQLiteStore implements StoreInterface {
     }
     this.db = new Database(dbPath);
     this.writeWaitMs = declaredWriteWaitMs;
+    this.schemaCeiling = options?.schemaCeiling ?? LATEST_SCHEMA_VERSION;
     try {
       this.init();
     } catch (error) {
@@ -299,21 +308,22 @@ export class SQLiteStore implements StoreInterface {
     const currentVersion = (
       this.db.query("PRAGMA user_version").get() as { user_version: number }
     ).user_version;
+    const ceiling = this.schemaCeiling;
 
-    if (currentVersion < 1) {
+    if (currentVersion < 1 && 1 <= ceiling) {
       // SQL is inlined as a constant — safe for bun build --compile (no fs access at runtime)
       this.db.exec(MIGRATION_001_SQL);
     }
 
-    if (currentVersion < 2) {
+    if (currentVersion < 2 && 2 <= ceiling) {
       this.db.exec(MIGRATION_002_SQL);
     }
 
-    if (currentVersion < 3) {
+    if (currentVersion < 3 && 3 <= ceiling) {
       this.db.exec(MIGRATION_003_SQL);
     }
 
-    if (currentVersion < 4) {
+    if (currentVersion < 4 && 4 <= ceiling) {
       try {
         this.db.exec(MIGRATION_004_SQL);
       } catch (error) {
@@ -330,7 +340,7 @@ export class SQLiteStore implements StoreInterface {
       }
     }
 
-    if (currentVersion < 5) {
+    if (currentVersion < 5 && 5 <= ceiling) {
       // reason: mirrors migration-004's catch/ROLLBACK wrapper (see migration-005.ts's
       // own JSDoc @invariant) — this migration is also multiple DDL statements wrapped
       // in one BEGIN/COMMIT, and bun:sqlite's db.exec() does not auto-rollback a caught
@@ -347,7 +357,7 @@ export class SQLiteStore implements StoreInterface {
       }
     }
 
-    if (currentVersion < 6) {
+    if (currentVersion < 6 && 6 <= ceiling) {
       // reason: mirrors migration-004/005's catch/ROLLBACK wrapper (see
       // migration-006.ts's own JSDoc @invariant) — a `docs` table-recreate,
       // also multiple DDL statements wrapped in one BEGIN/COMMIT.
@@ -387,7 +397,7 @@ export class SQLiteStore implements StoreInterface {
       }
     }
 
-    if (currentVersion < 7) {
+    if (currentVersion < 7 && 7 <= ceiling) {
       // reason: mirrors migration-005's catch/ROLLBACK wrapper (see
       // migration-007.ts's own JSDoc @invariant) — a plain nullable `ADD
       // COLUMN` plus the trailing `PRAGMA user_version` bump, wrapped in one
@@ -405,7 +415,7 @@ export class SQLiteStore implements StoreInterface {
       }
     }
 
-    if (currentVersion < 8) {
+    if (currentVersion < 8 && 8 <= ceiling) {
       // reason: migration-008 is a THREE-PHASE sequence (ADD COLUMN → JS
       // per-row CJK bigram backfill → docs_fts drop/recreate + rebuild),
       // NOT a single self-contained SQL string like migrations 004-007 — see
@@ -442,7 +452,7 @@ export class SQLiteStore implements StoreInterface {
       }
     }
 
-    if (currentVersion < 9) {
+    if (currentVersion < 9 && 9 <= ceiling) {
       // reason: migration-009 is a THREE-PHASE sequence (ADD COLUMN → JS
       // per-row hash-chain backfill → PRAGMA user_version bump), NOT a
       // single self-contained SQL string — mirrors migration-008's shape
@@ -503,7 +513,7 @@ export class SQLiteStore implements StoreInterface {
       }
     }
 
-    if (currentVersion < 10) {
+    if (currentVersion < 10 && 10 <= ceiling) {
       // reason: mirrors migration-007's catch/ROLLBACK wrapper (see
       // migration-010.ts's own JSDoc @invariant) — a plain nullable `ADD
       // COLUMN` plus a `CREATE UNIQUE INDEX` plus the trailing `PRAGMA
@@ -522,7 +532,7 @@ export class SQLiteStore implements StoreInterface {
       }
     }
 
-    if (currentVersion < 11) {
+    if (currentVersion < 11 && 11 <= ceiling) {
       // reason: mirrors migration-001/002/003's UN-wrapped shape (see
       // migration-011.ts's own JSDoc @invariant) — pure additive `CREATE
       // TABLE IF NOT EXISTS`/`CREATE INDEX IF NOT EXISTS`, no ALTER on any
@@ -531,7 +541,7 @@ export class SQLiteStore implements StoreInterface {
       this.db.exec(MIGRATION_011_SQL);
     }
 
-    if (currentVersion < 12) {
+    if (currentVersion < 12 && 12 <= ceiling) {
       // reason: mirrors migration-004's catch/ROLLBACK wrapper (see
       // migration-012.ts's own JSDoc @invariant) — a `links` table-recreate
       // widening the link_type CHECK constraint to accept "resolves", same
@@ -548,7 +558,7 @@ export class SQLiteStore implements StoreInterface {
       }
     }
 
-    if (currentVersion < 13) {
+    if (currentVersion < 13 && 13 <= ceiling) {
       // reason: mirrors migration-006's catch/ROLLBACK/FK-restore wrapper (see
       // migration-013.ts's module JSDoc) — a `docs` table-recreate widening
       // the type CHECK to accept 'baseline', plus the rule_registry table, in
@@ -575,7 +585,7 @@ export class SQLiteStore implements StoreInterface {
       }
     }
 
-    if (currentVersion < 14) {
+    if (currentVersion < 14 && 14 <= ceiling) {
       // reason: migration-014 (rule_registry lifecycle/version, ac_cites, rule_depends,
       // ac_exemptions + the docs_idx_* triggers) is one BEGIN/COMMIT with no PRAGMA toggles, so a
       // failure only needs ROLLBACK (see migration-014.ts's module JSDoc).
@@ -591,7 +601,7 @@ export class SQLiteStore implements StoreInterface {
       }
     }
 
-    if (currentVersion < 15) {
+    if (currentVersion < 15 && 15 <= ceiling) {
       // reason: migration-015 (rule_registry rebuilt with prefix + UNIQUE(prefix, n), triggers
       // re-created) is one BEGIN/COMMIT with no PRAGMA toggles — a failure only needs ROLLBACK.
       try {
@@ -606,7 +616,7 @@ export class SQLiteStore implements StoreInterface {
       }
     }
 
-    if (currentVersion < 16) {
+    if (currentVersion < 16 && 16 <= ceiling) {
       // reason: migration-016 is two-phase (see migration-016.ts's module JSDoc): the nullable
       // `harness_run` columns are added only where `PRAGMA table_info` lacks them (SQLite has no
       // ADD COLUMN IF NOT EXISTS), then one BEGIN/COMMIT string creates `runs` and bumps user_version.
@@ -626,7 +636,7 @@ export class SQLiteStore implements StoreInterface {
       }
     }
 
-    if (currentVersion < 17) {
+    if (currentVersion < 17 && 17 <= ceiling) {
       // reason: migration-017 is two-phase like 016 (see migration-017.ts's module JSDoc): `runs.ended_at` /
       // `runs.end_reason` are added only where `PRAGMA table_info` lacks them, then one BEGIN/COMMIT bumps user_version.
       try {
@@ -645,7 +655,7 @@ export class SQLiteStore implements StoreInterface {
       }
     }
 
-    if (currentVersion < 18) {
+    if (currentVersion < 18 && 18 <= ceiling) {
       // reason: migration-018 (rule_registry rebuilt so lifecycle may be 'proposed', triggers re-created) is one
       // BEGIN/COMMIT with no PRAGMA toggles, like 015 — a failure only needs ROLLBACK.
       try {
@@ -660,7 +670,7 @@ export class SQLiteStore implements StoreInterface {
       }
     }
 
-    if (currentVersion < 19) {
+    if (currentVersion < 19 && 19 <= ceiling) {
       // reason: migration-019 is two-phase like 017 (see migration-019.ts's module JSDoc): the nullable
       // `review_judgments.truncated` / `.truncation` columns are added only where `PRAGMA table_info` lacks
       // them, then one BEGIN/COMMIT bumps user_version.
@@ -680,7 +690,7 @@ export class SQLiteStore implements StoreInterface {
       }
     }
 
-    if (currentVersion < 20) {
+    if (currentVersion < 20 && 20 <= ceiling) {
       // reason: migration-020 (decision_log + append-only triggers) is one idempotent BEGIN/COMMIT string.
       try {
         this.db.exec(MIGRATION_020_SQL);
@@ -694,7 +704,7 @@ export class SQLiteStore implements StoreInterface {
       }
     }
 
-    if (currentVersion < 21) {
+    if (currentVersion < 21 && 21 <= ceiling) {
       // reason: migration-021 is two-phase like 017/019 (see migration-021.ts's module JSDoc): the nullable
       // `runs.harness_pid` / `.harness_pid_start` / `.worktree` columns are added only where `PRAGMA table_info`
       // lacks them, then one BEGIN/COMMIT bumps user_version.
@@ -714,7 +724,7 @@ export class SQLiteStore implements StoreInterface {
       }
     }
 
-    if (currentVersion < 22) {
+    if (currentVersion < 22 && 22 <= ceiling) {
       // reason: migration-022 (autonomy_thresholds) is one idempotent BEGIN/COMMIT string.
       try {
         this.db.exec(MIGRATION_022_SQL);
@@ -728,7 +738,7 @@ export class SQLiteStore implements StoreInterface {
       }
     }
 
-    if (currentVersion < 23) {
+    if (currentVersion < 23 && 23 <= ceiling) {
       // reason: migration-023 rebuilds decision_log with the widened verdict CHECK in ONE BEGIN/COMMIT string.
       try {
         this.db.exec(MIGRATION_023_SQL);
@@ -742,7 +752,7 @@ export class SQLiteStore implements StoreInterface {
       }
     }
 
-    if (currentVersion < 24) {
+    if (currentVersion < 24 && 24 <= ceiling) {
       // reason: migration-024 adds the nullable decision_log.detail column (plain ADD COLUMN; hashes stay valid).
       this.db.exec(MIGRATION_024_SQL);
     }
