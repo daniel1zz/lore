@@ -106,13 +106,14 @@ describe("AC-a: a deleted spec's change set does not reserve rules", () => {
     const run = await proposeModify(blocked, liveRuleId);
     expect(run.exitCode, text(run)).toBe(0);
     expect(await changeIds(blocked)).toEqual([liveRuleId]);
+    await loreOk(["delete", blocked, "--confirm"]); // release the rule for the later tests
   });
 });
 
 describe("AC-b: lore rule propose <spec> withdraw <BR-n>", () => {
   it("HAPPY/STATE: withdraw removes the entry in ONE version; a second spec can then propose it", async () => {
     const owner = await createSpec("Withdraw owner");
-    await proposeModify(owner, liveRuleId);
+    expect((await proposeModify(owner, liveRuleId)).exitCode).toBe(0);
     const before = await specState(owner);
     const run = await lore(["rule", "propose", owner, "withdraw", liveRuleId]);
     expect(run.exitCode, text(run)).toBe(0);
@@ -122,11 +123,12 @@ describe("AC-b: lore rule propose <spec> withdraw <BR-n>", () => {
 
     const other = await createSpec("Withdraw other");
     expect((await proposeModify(other, liveRuleId)).exitCode).toBe(0);
+    await lore(["rule", "propose", other, "withdraw", liveRuleId]); // release the rule for the later tests
   });
 
   it("HAPPY/STATE: on an approved spec --correction withdraws, status stays approved, one version", async () => {
     const owner = await createSpec("Withdraw locked");
-    await proposeModify(owner, liveRuleId);
+    expect((await proposeModify(owner, liveRuleId)).exitCode).toBe(0);
     await approve(owner);
     const before = await specState(owner);
     expect(before.status).toBe("approved");
