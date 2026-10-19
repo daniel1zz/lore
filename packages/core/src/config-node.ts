@@ -59,18 +59,25 @@ const CONFIG_FILE = ".lore/config.yaml";
  * `warn`, when given, receives one line per retired key the file still carries (see `retiredConfigKeyNotices`).
  *
  * ONE-TIME MIGRATION (BL-D3): a file still carrying `workflow.gates."plan-close".prd_sync` is rewritten in place
- * to `cited_rule_check` (atomic temp+rename; value and comments kept) and `warn` receives the named notice, once —
- * the next load finds no old key. The notice is the only record of the rewrite, so WITHOUT a `warn` channel the
- * file is NOT touched and the load fails by name (`loadConfigFromString`'s refusal), never a silent rewrite.
+ * to `cited_rule_check` (atomic temp+rename; a byte-range splice of the key, nothing else changes) and `warn`
+ * receives the named notice, once — the next load finds no old key. The rewrite happens ONLY when the caller
+ * passes `rewrite: true` (the loader does so only for a config its own checkout owns — never for a corpus
+ * resolved through a linked worktree's git-common-dir, which would be a write into another checkout) AND gives a
+ * `warn` channel (the notice is the only record of the rewrite). Otherwise the file is NOT touched and the load
+ * fails by name (`loadConfigFromString`'s refusal), never a silent rewrite and never a silent fallback.
  * Both names present is refused by `renamePrdSyncConfigKey`, file untouched.
  */
-export function loadConfig(dir: string, warn?: (line: string) => void): Result<LoreConfig, LoreError> {
+export function loadConfig(
+  dir: string,
+  warn?: (line: string) => void,
+  options: { readonly rewrite?: boolean } = {},
+): Result<LoreConfig, LoreError> {
   try {
     const configPath = join(dir, CONFIG_FILE);
     let raw = readFileSync(configPath, "utf8");
     const renamed = renamePrdSyncConfigKey(raw);
     if (!renamed.ok) return renamed;
-    if (renamed.value !== undefined && warn !== undefined) {
+    if (renamed.value !== undefined && warn !== undefined && options.rewrite === true) {
       const tempPath = `${configPath}.migrating-${process.pid}`;
       writeFileSync(tempPath, renamed.value.text, "utf8");
       renameSync(tempPath, configPath);

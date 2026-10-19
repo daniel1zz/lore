@@ -55,7 +55,7 @@
 
 import { dirname } from "path";
 import { exitCli } from "./cli-exit.js";
-import { mergeDefaults, isAiConfigValidationError, readClaimRecord, resolveClaimTtlMinutes, resolveForeignCorpusWriteGateEnabled } from "@lore/core";
+import { mergeDefaults, isAiConfigValidationError, isPrdSyncRenameError, readClaimRecord, resolveClaimTtlMinutes, resolveForeignCorpusWriteGateEnabled } from "@lore/core";
 import type {
   Invocation,
   LoreConfig,
@@ -74,7 +74,7 @@ import {
   resolveGlobalConfigPath,
 } from "@lore/core/node";
 import { ambientOfInvocation, createAppWithWriteContext, type App, type AppAmbient } from "../../app.js";
-import { findLoreDbPath, formatErrorFor, exitCode } from "./utils.js";
+import { findLoreDbPath, formatError, formatErrorFor, exitCode } from "./utils.js";
 import { findForeignBehindSchema } from "../../store/foreign-schema-guard.js";
 import { resolveCorpus, type CorpusLocator } from "./corpus-resolution.js";
 import {
@@ -267,11 +267,15 @@ async function readTaskClaimLease(app: App, idOrSlug: string): Promise<TaskClaim
  * @returns The raw `loadConfig` result — `sync` NOT yet stripped (each caller
  *   strips it on its own success path, matching their pre-existing behaviour).
  */
-function resolveProjectConfigResult(dbPath: string, io: CliIo): Result<LoreConfig, LoreError> {
+function resolveProjectConfigResult(dbPath: string, io: CliIo, locator: CorpusLocator): Result<LoreConfig, LoreError> {
   // The .lore dir is always one level up from lore.db
   const loreDir = dirname(dbPath);
   const projectDir = dirname(loreDir);
-  return loadConfig(projectDir, warnOncePerWriter(io));
+  // reason: BL-D3 — the one-time `prd_sync` -> `cited_rule_check` rewrite is a WRITE to the config file, so it is
+  // allowed only when this checkout OWNS the corpus it resolved; a linked worktree reaching the main checkout through
+  // the git-common-dir fallback must not edit that checkout's config (it gets the loud refusal instead).
+  const rewrite = resolveCorpus(io, locator.cwd, locator.env)?.provenance === "own";
+  return loadConfig(projectDir, warnOncePerWriter(io), { rewrite });
 }
 
 /** Retired-key notices already printed, per run: keyed on the run's stderr writer, so a re-read of the config stays quiet. */
@@ -332,8 +336,12 @@ function safeInternalErrorHint(rawConfig: LoreConfig | undefined): string | null
  */
 export function loadProjectConfig(io: CliIo, locator: CorpusLocator): LoreConfig | undefined {
   const dbPath = findLoreDbPath(io, locator);
-  const configResult = resolveProjectConfigResult(dbPath, io);
-  if (!configResult.ok) return undefined;
+  const configResult = resolveProjectConfigResult(dbPath, io, locator);
+  if (!configResult.ok) {
+    // reason: the retired-name refusal must not read as "no config" in silence (every gate would run unconfigured).
+    if (isPrdSyncRenameError(configResult.error)) printLine(io.stderr, formatError(configResult.error)); // CLI surface
+    return undefined;
+  }
   const { sync: _sync, ...configWithoutSync } = configResult.value;
   return configWithoutSync as LoreConfig;
 }
@@ -412,11 +420,13 @@ export function loadLoreApp(opts: LoadLoreAppOptions): {
     printLine(opts.inv.io.stderr, `${formatErrorFor(opts.inv, refusal)} [${refusal.code}]`); // CLI surface
     exitCli(exitCode(refusal));
   }
-  const configResult = resolveProjectConfigResult(dbPath, opts.inv.io);
+  const configResult = resolveProjectConfigResult(dbPath, opts.inv.io, opts.inv);
   let rawConfig: LoreConfig | undefined;
   if (configResult.ok) {
     rawConfig = configResult.value;
-  } else if (isAiConfigValidationError(configResult.error)) {
+  } else if (isAiConfigValidationError(configResult.error) || isPrdSyncRenameError(configResult.error)) {
+    // BL-D3: a config still naming `prd_sync` that this checkout may not rewrite (or that carries both names) fails
+    // loud here for the same reason an invalid `ai` block does — the fallback below would run every gate unconfigured.
     // SPEC-030 AC-HJ-3: an invalid `ai` block MUST fail loud — silently falling back to
     // AiConfigSchema.parse({}) defaults here previously masked typos (e.g. an unrecognized
     // `ai.cli` key silently reverting BOTH `ai.assess.max_diff_chars` and every

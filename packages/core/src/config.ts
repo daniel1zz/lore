@@ -2551,6 +2551,17 @@ export function parseConfig(raw: unknown): Result<LoreConfig, LoreError> {
 const PRD_SYNC_KEY = "prd_sync";
 const CITED_RULE_CHECK_KEY = "cited_rule_check";
 
+/** The `LoreError.field` of every refusal about the retired `prd_sync` name (old name read, or both names present). */
+export const PRD_SYNC_RENAME_FIELD = `workflow.gates."plan-close".${PRD_SYNC_KEY}`;
+
+/**
+ * Whether `error` is the refusal about the retired `prd_sync` config name — the loader fails LOUD on it instead of
+ * falling back to default settings (a silent fallback would run every gate unconfigured).
+ */
+export function isPrdSyncRenameError(error: LoreError): boolean {
+  return error.code === "VALIDATION_ERROR" && error.field === PRD_SYNC_RENAME_FIELD;
+}
+
 function planCloseGateEntry(raw: unknown): Record<string, unknown> | undefined {
   const at = (value: unknown, key: string): unknown =>
     typeof value === "object" && value !== null ? (value as Record<string, unknown>)[key] : undefined;
@@ -2569,10 +2580,10 @@ function detectPrdSyncConfigKey(raw: unknown): LoreError | undefined {
   if (entry === undefined || !(PRD_SYNC_KEY in entry)) return undefined;
   return {
     code: "VALIDATION_ERROR",
-    field: `workflow.gates."plan-close".${PRD_SYNC_KEY}`,
+    field: PRD_SYNC_RENAME_FIELD,
     message:
       `workflow.gates."plan-close".${PRD_SYNC_KEY} was renamed to workflow.gates."plan-close".${CITED_RULE_CHECK_KEY} ` +
-      "(it switches the cited-rule check, not outline sync); rename it in .lore/config.yaml, or load the file through loadConfig with a warning channel to migrate it once.",
+      "(it switches the cited-rule check, not outline sync); rename it in .lore/config.yaml (a checkout that owns its config migrates it on the first run of a lore command).",
     value: entry[PRD_SYNC_KEY],
   } satisfies LoreError;
 }
@@ -2614,7 +2625,7 @@ export function renamePrdSyncConfigKey(yamlText: string): Result<PrdSyncConfigRe
   if (entry.has(CITED_RULE_CHECK_KEY)) {
     return err({
       code: "VALIDATION_ERROR",
-      field: `workflow.gates."plan-close"`,
+      field: PRD_SYNC_RENAME_FIELD,
       message:
         `workflow.gates."plan-close" carries both ${PRD_SYNC_KEY} and ${CITED_RULE_CHECK_KEY}; ${PRD_SYNC_KEY} was renamed to ` +
         `${CITED_RULE_CHECK_KEY}. Delete the one you do not want in .lore/config.yaml (nothing was rewritten).`,
@@ -2622,9 +2633,19 @@ export function renamePrdSyncConfigKey(yamlText: string): Result<PrdSyncConfigRe
     } satisfies LoreError);
   }
   const enabled = entry.getIn([PRD_SYNC_KEY, "enabled"]);
-  (pair.key as { value: unknown }).value = CITED_RULE_CHECK_KEY;
+  // reason: a byte-range splice of the key token, NOT `doc.toString()` — re-stringifying reformats unrelated lines
+  // (flow-sequence spacing) and would turn a one-key rename into whole-file churn in the owner's config.
+  const keyRange = (pair.key as yaml.Scalar).range;
+  if (keyRange === undefined || keyRange === null) {
+    return err({
+      code: "VALIDATION_ERROR",
+      field: PRD_SYNC_RENAME_FIELD,
+      message: ` has no source position, so it cannot be renamed in place; rename it to  by hand.`,
+      value: yamlText,
+    } satisfies LoreError);
+  }
   return ok({
-    text: doc.toString(),
+    text: `${yamlText.slice(0, keyRange[0])}${CITED_RULE_CHECK_KEY}${yamlText.slice(keyRange[1])}`,
     notice:
       `lore: workflow.gates."plan-close".${PRD_SYNC_KEY} was renamed to workflow.gates."plan-close".${CITED_RULE_CHECK_KEY} ` +
       `and this config was rewritten in place (enabled: ${String(enabled)} kept); the old name is no longer read.`,

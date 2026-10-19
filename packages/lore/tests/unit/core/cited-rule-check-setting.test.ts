@@ -50,7 +50,7 @@ afterEach(() => {
 
 function loadCollecting(): { result: ReturnType<typeof loadConfig>; lines: string[] } {
   const lines: string[] = [];
-  return { result: loadConfig(dir, (l) => lines.push(l)), lines };
+  return { result: loadConfig(dir, (l) => lines.push(l), { rewrite: true }), lines };
 }
 
 describe("the cited-rule check has a setting named for it (D3)", () => {
@@ -114,9 +114,28 @@ describe("the cited-rule check has a setting named for it (D3)", () => {
 
   it("D3-6 ERROR: with no warning channel the old name is refused, never silently rewritten", () => {
     writeFileSync(configPath, OLD_YAML);
-    const result = loadConfig(dir);
+    const result = loadConfig(dir, undefined, { rewrite: true });
     expect(result.ok).toBe(false);
     expect(readFileSync(configPath, "utf8")).toBe(OLD_YAML);
+  });
+
+  it("D3-9 ERROR: a checkout that may not rewrite (rewrite not granted) gets the loud named refusal and an untouched file", () => {
+    writeFileSync(configPath, OLD_YAML);
+    const lines: string[] = [];
+    const result = loadConfig(dir, (l) => lines.push(l));
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(core.isPrdSyncRenameError(result.error)).toBe(true);
+    expect(JSON.stringify(result.error)).toContain("cited_rule_check");
+    expect(lines).toEqual([]);
+    expect(readFileSync(configPath, "utf8")).toBe(OLD_YAML);
+  });
+
+  it("D3-10 STATE: the migration changes ONLY the key token (every other byte, flow-sequence spacing included, is kept)", () => {
+    const text = OLD_YAML + '  other: { a: [ "x" ] }\n'.replace("  other", "  # tail\n  other");
+    writeFileSync(configPath, text);
+    loadCollecting();
+    expect(readFileSync(configPath, "utf8")).toBe(text.replace("prd_sync", "cited_rule_check"));
   });
 
   it("D3-7 NEGATIVE: the pure parser never reads the old name", () => {
