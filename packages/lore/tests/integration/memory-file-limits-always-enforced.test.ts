@@ -92,10 +92,11 @@ describe("limits are always enforced (AC a)", () => {
   });
 
   it("BOUNDARY: a conforming root file passes `status --check-claude-md` with exit 0 and no setting", () => {
-    const init = runLore(["context", "init"], dir);
-    expect(init.exitCode, init.stderr).toBe(0);
+    const sections = ["What This Is", "Commands", "Architecture", "Module Index", "Finding Live Project State"];
+    writeFileSync(claudePath(), sections.map((name) => `## ${name}\n\nBody for ${name}.\n`).join("\n"));
 
-    expect(runLore(["status", "--check-claude-md"], dir).exitCode).toBe(0);
+    const check =runLore(["status", "--check-claude-md"], dir);
+    expect(check.exitCode, check.stdout + check.stderr).toBe(0);
   });
 });
 

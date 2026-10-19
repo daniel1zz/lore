@@ -15,9 +15,6 @@ ai:
 # pinned ~10% above that. Growth beyond it must delete before it adds.
 context:
   memory_files:
-    # Root H2 structure + every deterministic memory-file check block here
-    # (spec-claude-md-root-section-structure-check-and-adoption-mode).
-    adoption: enforce
     root:
       max_lines: 220
       max_bytes: 24576
