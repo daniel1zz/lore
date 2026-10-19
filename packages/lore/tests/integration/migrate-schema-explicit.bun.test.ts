@@ -38,13 +38,16 @@ function runLore(args: string[], cwd: string) {
   const proc = Bun.spawnSync(["bun", "run", CLI_ENTRY, ...args], {
     cwd,
     stdin: "ignore",
+    // reason: before the refusal exists `lore serve` / `--mcp-server` start and never return; a timeout turns that hang into a red exit code.
+    timeout: 25_000,
+    killSignal: "SIGKILL",
     env: { ...process.env, HOME: sandbox, CLAUDECODE: "1", EDITOR: "true" },
   });
   return { out: proc.stdout.toString() + proc.stderr.toString(), stdout: proc.stdout.toString(), exitCode: proc.exitCode ?? -1 };
 }
 
 function readUserVersion(path: string): number {
-  const db = new Database(path, { readonly: true });
+  const db = new Database(path);
   try {
     return (db.query("PRAGMA user_version").get() as { user_version: number }).user_version;
   } finally {
@@ -53,7 +56,7 @@ function readUserVersion(path: string): number {
 }
 
 function migrateAuditRows(path: string): { actor: string; details: string }[] {
-  const db = new Database(path, { readonly: true });
+  const db = new Database(path);
   try {
     return db.query("SELECT actor, details FROM audit WHERE action = 'migrate_schema'").all() as { actor: string; details: string }[];
   } finally {
@@ -77,16 +80,12 @@ beforeAll(() => {
   expect(runLore(["init"], corpusDir).exitCode).toBe(0);
   dbPath = join(corpusDir, ".lore", "lore.db");
   expect(readUserVersion(dbPath)).toBe(LATEST_SCHEMA_VERSION);
-  // Replace the fresh db with a genuinely-one-behind one built by the real store.
-  const builtDir = join(sandbox, "built");
-  mkdirSync(builtDir);
-  const builtPath = join(builtDir, "lore.db");
-  new SQLiteStore(builtPath, { schemaCeiling: BEHIND }).close();
+  // Replace the fresh db with a genuinely-one-behind one built in place by the real store.
   expect(sandbox.startsWith(PKG_ROOT)).toBe(false);
   rmSync(dbPath, { force: true });
   rmSync(`${dbPath}-wal`, { force: true });
   rmSync(`${dbPath}-shm`, { force: true });
-  copyFileSync(builtPath, dbPath);
+  new SQLiteStore(dbPath, { schemaCeiling: BEHIND }).close();
   expect(readUserVersion(dbPath)).toBe(BEHIND);
 }, TEST_TIMEOUT_MS);
 
