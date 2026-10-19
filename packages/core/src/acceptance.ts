@@ -1175,3 +1175,48 @@ export function resolveGoverningSpecByAcScope(
   }
   return ok(matched);
 }
+
+// ─── Mode-foreign criterion detail (ONE validator for `ac add` and `ac set`) ──
+
+/** Which mode-specific criterion details a caller supplied (presence only, never the values). */
+export interface CriterionDetailPresence {
+  readonly oracle?: boolean;
+  readonly command?: boolean;
+  readonly timeout_ms?: boolean;
+  readonly falsifier?: boolean;
+  readonly rubric?: boolean;
+  readonly note?: boolean;
+}
+
+/** A supplied detail that belongs to a different verify mode than the criterion's own. */
+export interface ModeForeignDetail {
+  readonly flag: string;
+  readonly belongsTo: AcVerifyMode;
+}
+
+/** Fixed check order, so a caller passing several wrong details gets one deterministic refusal. */
+const MODE_DETAIL_ORDER: ReadonlyArray<readonly [keyof CriterionDetailPresence, string, AcVerifyMode]> = [
+  ["oracle", "--oracle", "script"],
+  ["command", "--command", "script"],
+  ["timeout_ms", "--timeout-ms", "script"],
+  ["falsifier", "--falsifier-*", "script"],
+  ["rubric", "--rubric", "ai"],
+  ["note", "--note", "human"],
+];
+
+/**
+ * The first supplied criterion detail that does not belong to `mode`, or `undefined`.
+ * SSOT shared by `ac add` (before the criterion is built) and `ac set` (against the stored
+ * criterion's mode) — a detail the target mode cannot hold must be refused, never dropped.
+ */
+export function findModeForeignDetail(mode: AcVerifyMode, supplied: CriterionDetailPresence): ModeForeignDetail | undefined {
+  for (const [key, flag, belongsTo] of MODE_DETAIL_ORDER) {
+    if (supplied[key] === true && belongsTo !== mode) return { flag, belongsTo };
+  }
+  return undefined;
+}
+
+/** The refusal text for a {@link ModeForeignDetail}; identical on `add` and `set`. */
+export function modeForeignDetailMessage(acId: string, found: ModeForeignDetail, mode: AcVerifyMode): string {
+  return `${found.flag} only applies to a "${found.belongsTo}"-mode criterion — "${acId}" is mode "${mode}"`;
+}
