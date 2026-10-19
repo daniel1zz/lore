@@ -57,11 +57,6 @@
  *     (`--adopted-by`) additionally REQUIRES the resolved doc's type to be
  *     `plan` or `task` — the one pointer requirement with a type constraint,
  *     because an owner that cannot itself do work defeats the point of §M7.
- *   - `checkResolutionPointer` — the ONE decision `lore issue resolve` calls
- *     for EVERY pointer-carrying state's refusal (missing / unresolvable /
- *     self-reference / wrong-type), given a lookup the CLI already performed.
- *     Store-free like every other export here, so AC-DC-15's pointer-refusal
- *     verdicts are testable under vitest with zero fixtures.
  *   - `isDanglingAdoption` — §M7's dangling-claim predicate (AC-DC-16): given
  *     a report's COMPUTED resolution and its `adopted_by` owner's current
  *     status, is this an abandoned adoption? `commands/status.ts`'s
@@ -373,86 +368,6 @@ export function reachOfExplicitResolution(state: ExplicitResolution): TerminalRe
     return { route: "issue-resolve", pointer: ADOPTED_RESOLUTION_POINTER };
   }
   return reachOfTerminalResolution(state);
-}
-
-/**
- * A resolved pointer target's minimal identity, as read from the live corpus
- * by the CLI's doc lookup (`CorpusService.get`) — just enough for
- * {@link checkResolutionPointer} to judge self-reference and type.
- */
-export interface ResolvedPointerTarget {
-  readonly id: string;
-  readonly type: string;
-}
-
-/**
- * Why a pointer failed {@link checkResolutionPointer}'s verdict — `"missing"`
- * (no value supplied), `"unresolvable"` (the value does not resolve to an
- * existing doc), `"self-reference"` (it names the report being resolved),
- * `"wrong-type"` (resolves fine, but not to a doc type
- * {@link TerminalResolutionPointer.allowed_doc_types} permits — only
- * `adopted`'s pointer declares this constraint, §M7).
- */
-export type PointerCheckFailureReason = "missing" | "unresolvable" | "self-reference" | "wrong-type";
-
-/**
- * Pure verdict over an ALREADY-ATTEMPTED pointer resolution
- * (spec-the-defect-channel-cannot-be-honestly-maintained-an §M3/§M7,
- * AC-DC-4/AC-DC-15) — the ONE decision `lore issue resolve`'s CLI wiring
- * consults for every pointer-carrying state, so a fourth pointer-carrying
- * state added later needs no NEW validation branch, only a new
- * {@link TerminalResolutionPointer} declaration.
- *
- * Deliberately store-free like every other export in this module: the actual
- * corpus lookup (the I/O) happens in the CLI BEFORE calling this function;
- * this function only judges the OUTCOME that lookup already produced, which
- * is what makes it 100% decidable — and testable under vitest with zero
- * fixtures, no `InMemoryStore`, no async.
- *
- * @param pointer - the reach table's declared pointer requirement for this state
- * @param pointerValue - the trimmed `--flag` value the caller supplied; `""`
- *   means absent
- * @param resolvedTarget - the doc the CLI's lookup for `pointerValue`
- *   returned, or `undefined` if that lookup failed (does not resolve to an
- *   existing doc)
- * @param issueDocId - the report being resolved's own doc id (self-reference check)
- * @returns `{ok: true}` when the pointer satisfies every declared
- *   requirement; otherwise `{ok: false, reason}` naming the FIRST failing
- *   check, in the fixed precedence missing > unresolvable > self-reference >
- *   wrong-type (each check assumes every prior one already passed, so a
- *   caller cannot ask "was it ALSO wrong-type" about a pointer that was never
- *   supplied)
- * @example
- *   checkResolutionPointer(ADOPTED_RESOLUTION_POINTER, "", undefined, "issue-1")
- *     // => {ok: false, reason: "missing"}
- *   checkResolutionPointer(ADOPTED_RESOLUTION_POINTER, "plan-x", undefined, "issue-1")
- *     // => {ok: false, reason: "unresolvable"} (lookup failed)
- *   checkResolutionPointer(ADOPTED_RESOLUTION_POINTER, "issue-1", {id: "issue-1", type: "task"}, "issue-1")
- *     // => {ok: false, reason: "self-reference"}
- *   checkResolutionPointer(ADOPTED_RESOLUTION_POINTER, "spec-x", {id: "spec-x", type: "spec"}, "issue-1")
- *     // => {ok: false, reason: "wrong-type"} (spec is neither plan nor task)
- *   checkResolutionPointer(ADOPTED_RESOLUTION_POINTER, "task-x", {id: "task-x", type: "task"}, "issue-1")
- *     // => {ok: true}
- */
-export function checkResolutionPointer(
-  pointer: TerminalResolutionPointer,
-  pointerValue: string,
-  resolvedTarget: ResolvedPointerTarget | undefined,
-  issueDocId: string,
-): { ok: true } | { ok: false; reason: PointerCheckFailureReason } {
-  if (pointerValue.length === 0) {
-    return { ok: false, reason: "missing" };
-  }
-  if (resolvedTarget === undefined) {
-    return { ok: false, reason: "unresolvable" };
-  }
-  if (resolvedTarget.id === issueDocId) {
-    return { ok: false, reason: "self-reference" };
-  }
-  if (pointer.allowed_doc_types !== undefined && !pointer.allowed_doc_types.includes(resolvedTarget.type)) {
-    return { ok: false, reason: "wrong-type" };
-  }
-  return { ok: true };
 }
 
 /**

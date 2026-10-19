@@ -165,7 +165,7 @@ const GithubUserSchema = z.object({ login: z.string() }).passthrough();
 /**
  * `gh api repos/<repo>`'s response shape — only the numeric `id` is read
  * (spec-a-github-filed-defect-must-be-claimable-one-ingest-seam D1: the
- * rename-proof identity key `githubIssueTaskSlug`/`joinListing` join on,
+ * rename-proof identity key the carrier slug and `joinIssueStatuses` join on,
  * fetched here at ZERO extra network cost since `verifyTarget` already
  * makes this exact call). `.passthrough()`: the real payload carries dozens
  * more fields this module has no use for.
@@ -224,7 +224,7 @@ const LIST_PAGE_SIZE = 100;
  * `HTTP/` (no header block) is treated as a body with no `Link`, i.e. a
  * single page; real `gh api -i` always emits headers.
  */
-function splitHttpResponse(stdout: string): { body: string; linkHeader: string | undefined } {
+export function splitHttpResponse(stdout: string): { body: string; linkHeader: string | undefined } {
   if (!stdout.startsWith("HTTP/")) return { body: stdout, linkHeader: undefined };
   const boundary = /\r?\n\r?\n/.exec(stdout);
   if (boundary === null) return { body: "", linkHeader: undefined };
@@ -235,7 +235,7 @@ function splitHttpResponse(stdout: string): { body: string; linkHeader: string |
 }
 
 /** Page number of the `rel="next"` entry in a `Link` header value; `undefined` when there is none. */
-function parseNextPage(linkHeader: string | undefined): number | undefined {
+export function parseNextPage(linkHeader: string | undefined): number | undefined {
   if (linkHeader === undefined) return undefined;
   for (const part of linkHeader.split(/,\s*(?=<)/)) {
     if (!/rel="?next"?/.test(part)) continue;
