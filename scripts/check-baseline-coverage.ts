@@ -8,8 +8,9 @@
  * root of the corpus it resolves (the integrate floor runs it against the corpus snapshot taken at integrate start) and
  * exits 1 unless every root is complete. The ONE exemption is the committed debt ledger `scripts/baseline-coverage-debt.json`
  * (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline): a (leaf, site) pair listed there does not fail the step but
- * is printed with a count; a pair NOT listed fails as before; a listed pair that is now mapped or no longer reported fails as
- * stale, so the ledger only shrinks. `lore baseline coverage` itself never reads the ledger and keeps its INCOMPLETE verdict.
+ * is printed with a count; a pair NOT listed fails as before; a listed pair that is now mapped or no longer reported is printed
+ * as an informational stale row (never a failure: mappings live in the branchless shared corpus, so failing on them would block
+ * every branch's floor until a row-removing commit lands on main), so the ledger only shrinks. `lore baseline coverage` itself never reads the ledger and keeps its INCOMPLETE verdict.
  *
  * Which code judges: the checkout this script lives in (`<repo>/packages/lore/src/index.ts`, run by bun), so the floor
  * judges the merged tree with the merged tree's own census, never the shared checkout's build. The census reads the
@@ -145,8 +146,11 @@ export interface LedgerVerdict {
   readonly failingCount: number;
   /** Pairs exempted by the ledger, still present in the census. */
   readonly ledgered: number;
-  /** Ledger rows that match no current unaccounted pair (mapped, or no longer reported): must be removed. */
+  /** Ledger rows that match no current unaccounted pair (mapped, or no longer reported): informational, to be removed. */
   readonly stale: DebtRow[];
+  /** One `stale debt row (remove it): <leaf> <site>` line per stale row. */
+  readonly staleLines: string[];
+  /** True exactly when no unaccounted pair is missing from the ledger; stale rows never fail. */
   readonly ok: boolean;
 }
 
@@ -182,7 +186,14 @@ export function judgeAgainstLedger(all: readonly CoverageData[], ledger: DebtLed
     failingCount += lines.filter((l) => !l.startsWith(INFORMATIONAL_PREFIX) && !l.startsWith("    fix: ")).length;
     failingLines.push(...lines);
   }
-  return { failingLines, failingCount, ledgered, stale, ok: failingCount === 0 && stale.length === 0 };
+  return {
+    failingLines,
+    failingCount,
+    ledgered,
+    stale,
+    staleLines: stale.map((row) => `stale debt row (remove it): ${row.leaf} ${row.site}`),
+    ok: failingCount === 0,
+  };
 }
 
 function readLedger(): DebtLedger {
@@ -228,10 +239,10 @@ function main(argv: readonly string[]): number {
     for (const line of verdict.failingLines) console.log(line);
   }
   if (verdict.stale.length > 0) {
-    console.log(`check:baseline-coverage: ${verdict.stale.length} STALE ledger row(s): mapped or no longer reported; remove each from scripts/baseline-coverage-debt.json:`);
-    for (const row of verdict.stale) console.log(`  stale ${row.kind} ${row.leaf} ${row.site}`);
+    console.log(`check:baseline-coverage: ${verdict.stale.length} stale debt row(s) in scripts/baseline-coverage-debt.json (informational, not failing):`);
+    for (const line of verdict.staleLines) console.log(`  ${line}`);
   }
-  console.log(`check:baseline-coverage: ${all.map((d) => d.target).join(", ")}: ${verdict.ledgered} ledgered (debt), ${verdict.failingCount} unaccounted, ${verdict.stale.length} stale`);
+  console.log(`check:baseline-coverage: ${all.map((d) => d.target).join(", ")}: ${verdict.ledgered} ledgered (debt), ${verdict.failingCount} unaccounted, ${verdict.stale.length} stale (informational)`);
   return verdict.ok ? 0 : 1;
 }
 
