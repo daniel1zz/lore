@@ -234,7 +234,7 @@ describe("AC-SI-2: compiled dist/lore bootstrap --injection is seat-only", () =>
 });
 
 describe("AC-SI-2 (e): plain bootstrap --json is unchanged", () => {
-  it("keeps exactly the 10-key set on a fresh corpus", async () => {
+  it("keeps exactly the 11-key set on a fresh corpus (the 10 measured 2026-10-11 plus `architecture`)", async () => {
     const fresh = mkdtempSync(join(tmpdir(), "lore-seat-fresh-"));
     try {
       await mustRun(["init"], fresh);
@@ -244,6 +244,7 @@ describe("AC-SI-2 (e): plain bootstrap --json is unchanged", () => {
         [
           "active_plans",
           "active_sessions",
+          "architecture",
           "archive_candidates",
           "armed_gates",
           "corpus",
