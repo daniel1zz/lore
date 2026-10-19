@@ -59,6 +59,9 @@ class FakeListGitPort implements GitPort {
   async isMerged(branch: string): Promise<Result<boolean, LoreError>> {
     return ok(this.mergedByBranch[branch] ?? false);
   }
+  async branchDelete(): Promise<Result<void, LoreError>> {
+    throw new Error("not used by this suite");
+  }
   async countUnmergedCommits(): Promise<Result<number, LoreError>> {
     throw new Error("not used by this suite");
   }
@@ -70,8 +73,8 @@ class FakeListGitPort implements GitPort {
   }
 }
 
-async function alwaysReady(): Promise<SeatReadyReportLike> {
-  return { anchor_conflicts: [] };
+async function alwaysReady(): Promise<Result<SeatReadyReportLike, LoreError>> {
+  return ok({ anchor_conflicts: [] });
 }
 
 function makeSeatService(gitPort: FakeListGitPort): SeatService {
