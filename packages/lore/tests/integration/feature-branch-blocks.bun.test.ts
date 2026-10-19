@@ -1,4 +1,5 @@
 // @spawns packages/lore/src/index.ts
+// @reads assets/project/reference-transaction
 /**
  * @spec_ref task-skill-fix-a-blocks-edge-in-a-feature-branch-plan-is-met (ad hoc, no spec)
  *
@@ -22,6 +23,7 @@ import { execFileSync } from "child_process";
 import { join } from "path";
 import { tmpdir } from "os";
 import { FIXTURE_HOME_OUTSIDE_REPO, makeCleanTreeRepo } from "../helpers/clean-tree-repo.js";
+import { installShippedGuard } from "./support/main-guard-repo.js";
 
 interface RunResult {
   readonly stdout: string;
@@ -176,6 +178,8 @@ describe("a blocks edge in a feature-branch plan is met when the blocker landed 
 
     git(["merge", "-q", "--no-ff", "-m", "land I on main", INTEGRATION], dir);
     // both branches are on main now; integrate finds each already integrated and records the landing on its claimant
+    git(["checkout", "-q", "--detach", "main"], dir); // the shared checkout is a detached view of main
+    installShippedGuard(dir, join(dir, ".git", "guard-hooks")); // integrate refuses to run without the guard (BR-1273)
     mustRun(["integrate", "feat-a", "--session", "blocks-session"], dir);
     mustRun(["integrate", "feat-b", "--session", "blocks-session"], dir);
     capturePass(b);

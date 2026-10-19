@@ -1,4 +1,5 @@
 // @spawns packages/lore/src/index.ts
+// @reads assets/project/reference-transaction
 /**
  * AC-ST-8: `lore run tasks` and the helper-scope judgment of `lore session trail-review`.
  *
@@ -19,6 +20,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { FIXTURE_HOME_OUTSIDE_REPO, makeCleanTreeRepo } from "../../helpers/clean-tree-repo";
+import { installShippedGuard } from "../support/main-guard-repo.js";
 
 const PACKAGE_ROOT = new URL("../../../", import.meta.url).pathname.replace(/\/$/, "");
 const ENTRY = join(PACKAGE_ROOT, "src", "index.ts");
@@ -86,6 +88,9 @@ function claimedTask(agent: string, anchors: string[], after: "release" | "archi
     must(["release", slug], { run });
     // archival needs the landing `lore integrate` records (BR-1291); the branch holds nothing past main, so it is
     // found already integrated and the landing is recorded on its claimant
+    // integrate refuses to run without the main-ref guard; the shared checkout is a detached view of main (BR-1273)
+    spawnSync("git", ["checkout", "-q", "--detach", "main"], { cwd: dir });
+    installShippedGuard(dir, join(dir, ".git", "guard-hooks"));
     must(["integrate", branch, "--session", "scope-integrate"]);
     // `set --status archived` applies the `lore done` floors (DCL-1 (b)): a runner-captured pass first.
     must(["evidence", slug, "--oracle", "test", "--command", "echo 'Ran 3 tests'", "--result", "pass", "--capture"]);
