@@ -59,7 +59,7 @@ export function formatSeatList(entries: SeatListEntry[]): string {
   const lines: string[] = [`Active seats (${entries.length}):`];
   for (const entry of entries) {
     lines.push(
-      `  - ${entry.branch} — created ${entry.created_at}${entry.merged ? " [merged]" : " [unmerged]"}`,
+      `  - ${entry.branch} — created ${entry.created_at}${entry.merged === null ? " [merge state not measured]" : entry.merged ? " [merged]" : " [unmerged]"}`,
     );
   }
   return lines.join("\n");
