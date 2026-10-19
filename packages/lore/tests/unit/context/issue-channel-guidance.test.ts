@@ -15,7 +15,8 @@
  */
 
 import { spawnSync } from "node:child_process";
-import { readdirSync, readFileSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
@@ -86,11 +87,18 @@ describe("AC-IGH-1 report-issue bullet in the CLOSE fragment", () => {
 
   it("AC-IGH-1(c) lore fragments check exits exactly 0", () => {
     // Run this checkout's source, not an installed `lore` whose embedded assets may predate the fragment.
-    const r = spawnSync("bun", [join(REPO_ROOT, "packages", "lore", "src", "index.ts"), "fragments", "check"], {
-      cwd: REPO_ROOT,
-      encoding: "utf8",
-    });
-    expect(r.status).toBe(0);
+    // cwd is a throwaway directory: the test sandbox refuses the repository's own corpus, and `fragments check`
+    // validates the shipped assets (embedded in the source), not the cwd's corpus.
+    const cwd = mkdtempSync(join(tmpdir(), "igh-fragments-check-"));
+    try {
+      const r = spawnSync("bun", [join(REPO_ROOT, "packages", "lore", "src", "index.ts"), "fragments", "check"], {
+        cwd,
+        encoding: "utf8",
+      });
+      expect(r.status).toBe(0);
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
   }, 60_000);
 });
 

@@ -1,4 +1,4 @@
-<!-- lore:managed fragment=corpus-workflow-close hash=91f72746 -->
+<!-- lore:managed fragment=corpus-workflow-close hash=15523f4d -->
 ## CLOSE — feedback loop + memory hygiene
 
 - Plan fully done → `lore assess <plan>`.
@@ -8,5 +8,5 @@
 - Session interrupted or ending with open work → `lore handoff [--plan <plan>] --decision "<judgment>[@confidence]" --next "<next step>"`, NOT `lore create knowledge --sub-type handoff`.
 - After writing a handoff, ALWAYS report its ticket to the user: the handoff slug plus the paste-ready resume command `lore feed session-resume --handoff <slug>`. This ticket is the ONLY sanctioned resumption path.
 - Maintenance cadence: `lore pending` (review queue) / `lore review --staleness --list` (stale candidates) / `lore status --check-tree --check-drift` (structure and code-anchor drift) / `lore archive --sweep` (execution-scoped docs due for archival; apply with `lore archive --apply`).
-- Suspect a lore defect itself (gate false-deny, wrong/misleading output, a crash)? Re-verify your own input first; if confirmed, check `lore report-issue --list` for a prior filing before re-reporting the same symptom, then `lore report-issue --title <t> --expected <e> --actual <a>` (needs `feedback.upstream`). Reports are only for a defect of lore itself: one root cause per report, reproducible and closable alone, never bundled. This repository's own upkeep (tests already red on the baseline, stale ledgers, oversized docs, missing anchors) is plan/task work, not a report.
+- Suspect a lore defect itself (gate false-deny, wrong/misleading output, a crash)? Re-verify your own input first; if confirmed, check `lore report-issue --list` for a prior filing before re-reporting the same symptom, then `lore report-issue --title <t> --expected <e> --actual <a>` (needs `feedback.upstream`). Any problem you do not fix in place (a defect, a test already red on the baseline, a stale ledger, an oversized doc, a missing anchor) is filed as an issue: one root cause per report, reproducible and closable alone, never bundled. Not fixable in place → file it as an issue, including in the tool's own repository. Create a task only when you start the fix: a task names the issues it resolves, never a task whose subject is the problem.
 - CLAUDE.md holds only permanent static discipline (rules, prohibitions, thresholds, paths, commands); events, state, history, retros and pending items belong in the corpus. Never let CLAUDE.md carry state narrative that will go stale.
