@@ -10,6 +10,7 @@
  */
 import { spawnSync } from "node:child_process";
 import { z } from "zod";
+import { approvedRulesOf } from "../../packages/lore/src/service/baseline-items.js";
 
 /** A runnable lore invocation prefix, e.g. `["lore"]` or `["bun", "packages/lore/src/index.ts"]`. */
 export type LoreCommand = readonly string[];
@@ -103,7 +104,9 @@ export function readBaselineSiteMaps(lore: LoreCommand, cwd: string): BaselineSi
         slug: n.slug,
         kind: n.node,
         siteMap: extra.site_map ?? {},
-        unretiredRuleIds: new Set((extra.rules ?? []).filter((r) => r.lifecycle !== "retired").map((r) => r.id)),
+        unretiredRuleIds: new Set(
+          (approvedRulesOf({ extra }) as readonly { id: string; lifecycle: string }[]).filter((r) => r.lifecycle !== "retired").map((r) => r.id),
+        ),
       };
     });
 }

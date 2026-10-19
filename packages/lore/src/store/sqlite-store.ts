@@ -195,6 +195,12 @@ export interface SQLiteStoreOptions {
    * latest schema and needs no flag.
    */
   readonly migrate?: true;
+  /**
+   * The identity that authors the data-conversion writes of a migration (schema 27 writes a version and an audit row
+   * per converted baseline node). `lore migrate schema` passes the resolved actor; absent, a migration that has a
+   * node to convert fails loudly instead of attributing the write to a guess.
+   */
+  readonly migrationActor?: string;
 }
 
 export class SQLiteStore implements StoreInterface {
@@ -210,6 +216,8 @@ export class SQLiteStore implements StoreInterface {
   private readonly schemaCeiling: number;
   /** True only for the explicit `lore migrate schema` open; see {@link SQLiteStoreOptions.migrate}. */
   private readonly migrateAllowed: boolean;
+  /** See {@link SQLiteStoreOptions.migrationActor}. */
+  private readonly migrationActor: string | undefined;
   /** The corpus file; named by a failed migration (migration-026 fails loud with it). */
   private readonly corpusPath: string;
 
@@ -232,6 +240,7 @@ export class SQLiteStore implements StoreInterface {
     this.corpusPath = dbPath;
     this.schemaCeiling = options?.schemaCeiling ?? LATEST_SCHEMA_VERSION;
     this.migrateAllowed = options?.migrate === true;
+    this.migrationActor = options?.migrationActor;
     try {
       if (options?.readonly === true) this.db.run(`PRAGMA busy_timeout = ${this.writeWaitMs}`);
       else this.init();
@@ -812,7 +821,7 @@ export class SQLiteStore implements StoreInterface {
     if (currentVersion < 27 && 27 <= ceiling) {
       // reason: migration-027 converts every baseline node to approved + pending items (BR-1341) in ONE transaction;
       // a node it cannot convert rolls the whole step back, throws MigrationFailedError naming it, and leaves schema 26.
-      applyMigration027(this.db, this.corpusPath);
+      applyMigration027(this.db, this.corpusPath, this.migrationActor);
     }
   }
 

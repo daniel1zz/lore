@@ -128,6 +128,9 @@ const VERSION_ACTION_AUDIT_FAMILY: Readonly<Record<VersionAction, ReadonlySet<st
     // "update") like every other version bump; their specific audit actions join that family.
     "tree-fix",
     "ordinal-backfill",
+    // reason: BR-1341 — schema 27 converts each baseline node to approved + pending items as a real write
+    // (version row action "update"); `MIGRATION_027_AUDIT_ACTION` in store/migrations/migration-027.ts.
+    "migrate-schema-027",
   ]),
   approve: new Set(["approve"]),
   reject: new Set(["reject"]),

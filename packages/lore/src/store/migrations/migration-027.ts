@@ -18,8 +18,11 @@
  *   - ATOMIC: node updates, registry updates and `PRAGMA user_version = 27` run in ONE transaction; any failure
  *     (including a baseline node whose `extra` is not a JSON object) rolls back and throws
  *     {@link MigrationFailedError} naming the node; the corpus stays at schema 26. Nothing is skipped silently.
- *   - IN PLACE: the docs row is rewritten without a version bump or a new `versions` row. The audit chain has a row
- *     for every version and a migration has no actor to write one for; the `migrate_schema` audit row is the record.
+ *   - A REAL WRITE: every converted node gets version N+1 (a `versions` row, action `update`, written by the migrate
+ *     run's actor) and ONE hash-chained audit row (`migrate-schema-027`, in the family of `update`), in the same
+ *     transaction, so `AuditService.verify` (which checks every version) and history stay truthful. A node that needs
+ *     no change gets neither. The actor is the `lore migrate schema` caller's, passed as `migrationActor`; a
+ *     conversion with no actor fails loudly (nothing is attributed to a guessed identity).
  *   - Re-runnable: a node that already carries `extra.pending` is skipped, an approved node is never touched, so a
  *     second run (or a run on a converted corpus) writes nothing.
  *   - Revision ids are deterministic (`m027-<doc id>-<item>`), so two runs agree.
@@ -31,7 +34,8 @@
  * Side-effect class: schema/data migration (executed once per store).
  */
 
-import { computeFtsShadowValues } from "../store-shared.js";
+import type { AuditEntry } from "@lore/core";
+import { computeAuditEntryHash, computeFtsShadowValues } from "../store-shared.js";
 import { MigrationFailedError, type SqlExecutor } from "./migration-026.js";
 
 /** The node-part fields of `extra` that are items of the node's own part (title and body live in columns). */
@@ -46,6 +50,7 @@ export interface BaselineNodeRow {
   readonly status: string;
   readonly extra: string;
   readonly tags: string;
+  readonly version: number;
 }
 
 /** The last `versions` row of a node whose status was `approved`. */
@@ -169,18 +174,112 @@ export function planBaselineItemConversion(node: BaselineNodeRow, lastApproved: 
 }
 
 /** Every baseline node, for the conversion pass. */
-export const SELECT_BASELINE_NODES_SQL = "SELECT id, slug, title, content, status, extra, tags FROM docs WHERE type = 'baseline'";
+export const SELECT_BASELINE_NODES_SQL = "SELECT id, slug, title, content, status, extra, tags, version FROM docs WHERE type = 'baseline'";
 /** A node's last approved version (`?` = doc id). */
 export const SELECT_LAST_APPROVED_SQL = "SELECT title, content, extra FROM versions WHERE doc_id = ? AND status = 'approved' ORDER BY version DESC LIMIT 1";
-/** Writes a converted node back (`?` = title, content, extra, fts_title, fts_content, fts_tags, id). */
-export const UPDATE_CONVERTED_NODE_SQL = "UPDATE docs SET title = ?, content = ?, extra = ?, fts_title = ?, fts_content = ?, fts_tags = ? WHERE id = ?";
+/** Writes a converted node back as its next version (`?` = title, content, extra, fts_title, fts_content, fts_tags, version, updated_at, id). */
+export const UPDATE_CONVERTED_NODE_SQL =
+  "UPDATE docs SET title = ?, content = ?, extra = ?, fts_title = ?, fts_content = ?, fts_tags = ?, version = ?, updated_at = ? WHERE id = ?";
+/** The converted node's `versions` row (`?` = doc_id, version, content, extra, status, title, created_at, created_by, change_summary, slug). */
+export const INSERT_CONVERSION_VERSION_SQL =
+  "INSERT INTO versions (doc_id, version, content, extra, status, title, action, created_at, created_by, change_summary, slug) VALUES (?, ?, ?, ?, ?, ?, 'update', ?, ?, ?, ?)";
+/** The audit chain head (`entry_hash` of the newest row, none on an empty chain). */
+export const SELECT_AUDIT_HEAD_SQL = "SELECT entry_hash FROM audit ORDER BY id DESC LIMIT 1";
+/** One audit row (`?` = timestamp, actor, session_id, action, doc_id, details, prev_hash, entry_hash). */
+export const INSERT_AUDIT_SQL =
+  "INSERT INTO audit (timestamp, actor, session_id, action, doc_id, details, prev_hash, entry_hash) VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
 /** Marks a pending add `proposed` (`?` = rule id, owning leaf doc id). */
 export const PROPOSE_RULE_SQL = "UPDATE rule_registry SET lifecycle = 'proposed' WHERE id = ? AND leaf_doc_id = ?";
 
-/** The same row values {@link UPDATE_CONVERTED_NODE_SQL} binds, computed once for both stores. */
-export function convertedNodeBindings(node: BaselineNodeRow, conversion: BaselineConversion): [string, string, string, string, string, string, string] {
+/** Audit action of a converted node; in the `update` family of `VERSION_ACTION_AUDIT_FAMILY` (audit-service.ts). */
+export const MIGRATION_027_AUDIT_ACTION = "migrate-schema-027";
+/** The version's change summary and the audit row's `details.summary`. */
+export const MIGRATION_027_SUMMARY = "migrate-schema-027: split into approved + pending items";
+/** The audit row's `session_id`: a corpus-level migration belongs to no doc session. */
+export const MIGRATION_027_SESSION_ID = "migrate-schema";
+
+/**
+ * The actor of the conversion writes.
+ *
+ * @throws {Error} when the opener passed none: a converted node must be attributed to the real `lore migrate schema` caller
+ */
+export function requireMigrationActor(actor: string | undefined, slug: string): string {
+  if (actor === undefined || actor === "") {
+    throw new Error(`baseline node ${slug} needs conversion but no migration actor was supplied (open the store through \`lore migrate schema\`)`);
+  }
+  return actor;
+}
+
+/** The values {@link UPDATE_CONVERTED_NODE_SQL} binds, computed once for both stores. */
+export function convertedNodeBindings(
+  node: BaselineNodeRow,
+  conversion: BaselineConversion,
+  now: string,
+): [string, string, string, string, string, string, number, string, string] {
   const shadow = computeFtsShadowValues(conversion.title, conversion.content, node.tags);
-  return [conversion.title, conversion.content, JSON.stringify(conversion.extra), shadow.fts_title, shadow.fts_content, shadow.fts_tags, node.id];
+  return [
+    conversion.title,
+    conversion.content,
+    JSON.stringify(conversion.extra),
+    shadow.fts_title,
+    shadow.fts_content,
+    shadow.fts_tags,
+    Number(node.version) + 1,
+    now,
+    node.id,
+  ];
+}
+
+/** The values {@link INSERT_CONVERSION_VERSION_SQL} binds. */
+export function conversionVersionBindings(
+  node: BaselineNodeRow,
+  conversion: BaselineConversion,
+  actor: string,
+  now: string,
+): [string, number, string, string, string, string, string, string, string, string] {
+  return [
+    node.id,
+    Number(node.version) + 1,
+    conversion.content,
+    JSON.stringify(conversion.extra),
+    node.status,
+    conversion.title,
+    now,
+    actor,
+    MIGRATION_027_SUMMARY,
+    node.slug,
+  ];
+}
+
+/** The audit entry of one converted node (hashed into the chain by the caller). */
+export function conversionAuditEntry(node: BaselineNodeRow, conversion: BaselineConversion, actor: string, now: string): AuditEntry {
+  return {
+    timestamp: now,
+    actor,
+    session_id: MIGRATION_027_SESSION_ID,
+    action: MIGRATION_027_AUDIT_ACTION,
+    doc_id: node.id,
+    details: {
+      summary: MIGRATION_027_SUMMARY,
+      from_version: Number(node.version),
+      to_version: Number(node.version) + 1,
+      pending_rules: Object.keys((conversion.extra["pending"] as { rules?: Record<string, unknown> }).rules ?? {}),
+    },
+  };
+}
+
+/** The values {@link INSERT_AUDIT_SQL} binds for `entry` chained after `prevHash`. */
+export function auditBindings(entry: AuditEntry, prevHash: string): [string, string, string, string, string | null, string, string, string] {
+  return [
+    entry.timestamp,
+    entry.actor,
+    entry.session_id,
+    entry.action,
+    entry.doc_id ?? null,
+    JSON.stringify(entry.details ?? {}),
+    prevHash,
+    computeAuditEntryHash(entry, prevHash),
+  ];
 }
 
 /** The version bump, inside the conversion transaction. */
@@ -189,7 +288,7 @@ export const MIGRATION_027_SQL = "PRAGMA user_version = 27;";
 /** The part of `bun:sqlite`'s `Database` the SQLite runner needs. */
 export interface Migration027Database extends SqlExecutor {
   query(sql: string): { all(...args: string[]): unknown[]; get(...args: string[]): unknown };
-  prepare(sql: string): { run(...args: string[]): unknown };
+  prepare(sql: string): { run(...args: (string | number | null)[]): unknown };
 }
 
 /**
@@ -197,9 +296,11 @@ export interface Migration027Database extends SqlExecutor {
  *
  * @param db - an open handle at schema 26
  * @param corpusPath - the corpus file, named in a failure
+ * @param actor - the `lore migrate schema` caller, who authors every conversion write; required once a node needs one
+ * @param now - the timestamp of the conversion writes (default: the current time)
  * @throws {MigrationFailedError} when any node fails to convert, after rolling the transaction back
  */
-export function applyMigration027(db: Migration027Database, corpusPath: string): void {
+export function applyMigration027(db: Migration027Database, corpusPath: string, actor?: string, now: string = new Date().toISOString()): void {
   let current = "begin transaction";
   try {
     db.exec("BEGIN IMMEDIATE;");
@@ -209,7 +310,11 @@ export function applyMigration027(db: Migration027Database, corpusPath: string):
       const lastApproved = db.query(SELECT_LAST_APPROVED_SQL).get(node.id) as ApprovedVersionRow | null;
       const conversion = planBaselineItemConversion(node, lastApproved ?? undefined);
       if (conversion === undefined) continue;
-      db.prepare(UPDATE_CONVERTED_NODE_SQL).run(...convertedNodeBindings(node, conversion));
+      const by = requireMigrationActor(actor, node.slug);
+      db.prepare(UPDATE_CONVERTED_NODE_SQL).run(...convertedNodeBindings(node, conversion, now));
+      db.prepare(INSERT_CONVERSION_VERSION_SQL).run(...conversionVersionBindings(node, conversion, by, now));
+      const head = db.query(SELECT_AUDIT_HEAD_SQL).get() as { entry_hash: string | null } | null;
+      db.prepare(INSERT_AUDIT_SQL).run(...auditBindings(conversionAuditEntry(node, conversion, by, now), head?.entry_hash ?? ""));
       for (const ruleId of conversion.proposedRuleIds) db.prepare(PROPOSE_RULE_SQL).run(ruleId, node.id);
     }
     current = "set user_version 27";
