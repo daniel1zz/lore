@@ -55,7 +55,7 @@
  *     3-session "SPEC-080" incident exactly): specC is earliest (created_at
  *     priority) and keeps 3; specD/E are collision losers and get next-free
  *     (4, 5). specE is `draft` status: an `approved` spec is a LOCKED record, and the
- *     title strip is a record-lock edit that refuses it (AC-DCL-3, #161 — covered by
+ *     title strip is a record-lock edit that refuses it (defect-clusters D3, #161 — covered by
  *     `integration/single-write-path.bun.test.ts`), so the converging corpus holds no locked record.
  *   - specExempt "Domain Detail Overview" (`spec_kind: domain-overview`) — no
  *     declared number, ordinal stays NULL forever (SPEC-084 exempt-kind rule).

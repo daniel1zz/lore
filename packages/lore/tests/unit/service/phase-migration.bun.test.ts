@@ -736,7 +736,7 @@ function wrapStoreFailingNthPhaseInsert(store: SQLiteStore, failOnCount: number)
   // reason: the write actor is resolved from the store OBJECT's declared write context, which a Proxy does not carry.
   return actedStore(new Proxy(store, {
     get(target, prop, receiver) {
-      // reason: AC-DCL-3 — the phase doc now lands through the one write route's `insertWithProvenance`
+      // reason: defect-clusters D3 — the phase doc now lands through the one write route's `insertWithProvenance`
       // (doc + version + audit in one transaction), not a bare `insert`; the first argument is still the doc.
       if (prop === "insert" || prop === "insertWithProvenance") {
         return async (doc: DocRecord, ...rest: unknown[]) => {

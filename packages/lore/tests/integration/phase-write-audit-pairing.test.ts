@@ -164,7 +164,7 @@ const AC_SERVICE_PATH = join(REPO_ROOT, "packages", "lore", "src", "service", "a
  * version row bare. It was `ac-service.ts` until the citation gate (spec-baseline-slice-2 C4, D6) moved
  * `AcService.writeCriteria` onto `updateWithProvenance` so the liveness read shares the write's transaction —
  * which made the AC write atomic and the control evaporate, exactly as its own message predicts. It was
- * `requirement-service.ts` until AC-DCL-3 routed that write through the one write route too; `task-workflow-service.ts`
+ * `requirement-service.ts` until defect-clusters D3 routed that write through the one write route too; `task-workflow-service.ts`
  * is the next store-only service that still writes its version row bare (outside D3's reported scope).
  */
 const BARE_WRITER_CONTROL_PATH = join(REPO_ROOT, "packages", "lore", "src", "service", "task-workflow-service.ts");
@@ -192,7 +192,7 @@ const BANNED_PHRASE_A = "no version" + " history";
 const BANNED_PHRASE_B = "version" + "-less";
 
 /**
- * The atomic doc+version+audit writer `writePhases` must keep using (SPEC-148 C5): since AC-DCL-3 that is the
+ * The atomic doc+version+audit writer `writePhases` must keep using (SPEC-148 C5): since defect-clusters D3 that is the
  * one write route, `CorpusService.writeDoc`, which commits all three in one `updateWithProvenance` transaction.
  *
  * ⛔ Anchored to the CALL SITE (`this.store.` prefix + open paren), never the

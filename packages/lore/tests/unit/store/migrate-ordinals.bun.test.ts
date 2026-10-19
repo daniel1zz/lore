@@ -77,7 +77,7 @@
  *               migration (err Result), never a silent rebuild.
  *   STATE:      title-strip leaves `status_before === status_after` (a draft
  *               fixture: an `approved` spec is a LOCKED record and the strip is
- *               refused, AC-DCL-3 / #161 — see single-write-path.bun.test.ts); export-index
+ *               refused, defect-clusters D3 / #161 — see single-write-path.bun.test.ts); export-index
  *               `file_path` is left untouched (Scope-Alt: renames are
  *               report-only `git mv` commands, never executed).
  *   REGRESSION: a second `--apply` run performs literally ZERO writes

@@ -160,7 +160,7 @@ describe("HAPPY — link/unlink/fix each write exactly one well-shaped audit ent
       doc_id: plan.id,
       old_parent_id: null,
       new_parent_id: prd.id,
-      // AC-DCL-3 (#276): the repair is a versioned write on the one write route, so its audit row carries the
+      // defect-clusters D3 (#276): the repair is a versioned write on the one write route, so its audit row carries the
       // version join key of the version row that now accompanies it.
       version: 2,
       new_version: 2,
@@ -353,7 +353,7 @@ describe("REGRESSION — link/unlink/tree-fix join no VERSION_ACTION_AUDIT_FAMIL
     expect(result.value.misses).toEqual([]);
   });
 
-  it("link()/unlink() write no versions row — only the audit entry (fix() writes one since AC-DCL-3, asserted above)", async () => {
+  it("link()/unlink() write no versions row — only the audit entry (fix() writes one since defect-clusters D3, asserted above)", async () => {
     const store = makeStore();
     const cs = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
     const a = await createPrd(cs, "NoVersion A");
