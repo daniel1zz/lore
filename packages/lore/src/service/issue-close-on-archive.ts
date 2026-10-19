@@ -1,50 +1,41 @@
 /**
- * `IssueCloseOnArchive` — the ONE post-archive step that closes the GitHub issue of every defect report
- * a just-archived spec / plan / task resolves, and the `lore issues --sync` drift repair built on the
- * same primitives (spec-archiving-the-work-that-resolves-a-defect-report-closes D1-D4, D6).
+ * `IssueCloseOnArchive` — the ONE post-archive step that closes every GitHub issue a just-archived
+ * CARRIER names in `extra.issues` (a task archived by `lore done`, a plan archived by `lore archive` /
+ * `lore set --status archived`), plus the legacy `lore issues --sync` drift repair, which a later task
+ * of the same plan rewrites (spec-github-owns-issue-report-state-no-mirror-task-work-carries, AC-GS-8).
  *
  * Public surface:
  *   - `ArchiveIssueClosePort` — the optional port `CorpusService` and `TaskWorkflowService` each hold
  *     (services never import each other; `app.ts` wires one instance into both). `onArchived(doc, actor)`
  *     NEVER throws and NEVER returns an error: it returns the lines to show, because the archive is
- *     already committed (D1 "post-commit: the archive is never rolled back").
+ *     already committed ("post-commit: the archive is never rolled back").
  *   - `IssueCloseItem` — one reportable line (`stream` says stdout vs stderr).
  *   - `IssueCloseOnArchive` — the implementation: `onArchived`, `planSync`, `applySync`.
  *   - `ISSUE_CLOSE_FAILED_AUDIT_ACTION` — the audit action written on every failed GitHub call.
  *
  * Invariants:
- *   - Post-commit and non-fatal: a GitHub failure is printed + audited, never an `err` that could
- *     read as "the archive failed".
- *   - Absent closer is LOUD (one `not_configured` line naming `lore issues --sync`), never silent (D4).
+ *   - Keyed on the carrier: a document with no valid `extra.issues` is a no-op (no GitHub call at all).
+ *   - EVERY named issue is attempted, in declared order; one failure never skips the rest.
+ *   - An issue already closed with a verdict (`not_planned` / `duplicate`) is skipped, never rewritten.
+ *   - Post-commit and non-fatal: a GitHub failure is printed + audited (one `issue_close_failed` row per
+ *     failed call, naming the issue), never an `err` that could read as "the archive failed".
+ *   - Absent closer is LOUD (one `not_configured` line naming `lore issues --sync`), never silent.
  *   - Close, comment and label are three independent calls; a comment or label failure never undoes
- *     the close (D2). An already-closed issue gets no second comment.
- *   - Only a report whose COMPUTED resolution is `fixed` with at least one ARCHIVED resolving source is
- *     touched (D1) — an explicit terminal verdict (`wontfix`, ...) outranks the link in
- *     `computeIssueResolution`, so it is never closed here.
- *   - The corpus is read-only here except for `issue_close_failed` audit rows; the issue task's own
- *     status is never changed (spec Out of scope).
- *
- * Completion of a report's OWN task (spec-completing-an-adopted-report-s-own-task-closes-its-github D1-D3):
- *   - `onTaskCompleted(task, actor)` — called ONLY by `TaskWorkflowService.done`; closes the GitHub issue
- *     the completed task itself IS (comment `Fixed by task <slug> (completed <date>)`). Any other archive
- *     path never calls it, so a sweep / plain status change stays label-only (D2).
- *   - HOW a task is known to have been completed (D3, `planSync`): the done walk's own audit row —
- *     `action: "update"`, `details.done === true`, `details.status_to === "archived"` — which
- *     `TaskWorkflowService.writeTaskStatus` writes for every `lore done` step and no other path writes.
- *     `lore done` itself requires a runner-attested pass, so the row is the store-recorded proof.
+ *     the close. An already-closed (completed) issue gets no second comment.
+ *   - The repo written to is the configured upstream; a carrier names only `repo_id`.
+ *   - The corpus is read-only here except for `issue_close_failed` audit rows.
  *
  * Side-effect class: IO (store reads, audit append, GitHub via the injected `IssueCloser`).
  *
- * Source: spec-archiving-the-work-that-resolves-a-defect-report-closes, AC-IC-1, AC-IC-4;
- * spec-completing-an-adopted-report-s-own-task-closes-its-github, AC-IT-1.
+ * Source: spec-github-owns-issue-report-state-no-mirror-task-work-carries, AC-GS-8.
  */
 
 import { TERMINAL_ISSUE_RESOLUTIONS, computeIssueResolution, hasIssueReport } from "./issue-resolution.js";
-import type { IssueCloser } from "./issue-closer-port.js";
-import { readGithubIssueRef, resolutionToLabel } from "./resolution-projector.js";
+import type { GithubIssueSnapshot, IssueCloser } from "./issue-closer-port.js";
+import { labelToResolution, readGithubIssueRef, resolutionToLabel } from "./resolution-projector.js";
 import type { GithubIssueRef } from "./resolution-projector.js";
-import { ok } from "@lore/core";
-import type { DocRecord, IssueResolution, LoreError, Result } from "@lore/core";
+import { issueRefSchema, ok } from "@lore/core";
+import type { DocRecord, IssueRef, IssueResolution, LoreError, Result } from "@lore/core";
 import type { StoreInterface } from "../store/store-interface.js";
 import { bareDocWriter, type DocWritePort } from "./corpus-service.js";
 
@@ -60,8 +51,7 @@ export type IssueCloseKind =
   | "label_failed"
   | "read_failed"
   | "not_configured"
-  | "no_github_ref"
-  | "unlinked_prose";
+  | "skipped_verdict";
 
 /** One line the caller prints. `number` is absent when the report carries no GitHub ref. */
 export interface IssueCloseItem {
@@ -79,15 +69,6 @@ export interface ArchiveIssueClosePort {
    * @returns the lines to show; empty when the document resolves no report and says nothing about one
    */
   onArchived(doc: DocRecord, actor: string): Promise<IssueCloseItem[]>;
-
-  /**
-   * Called by `lore done` ONLY, after the walk committed: when `task` itself is a filed report with a
-   * GitHub ref, closes that issue (D1). Same contract as {@link onArchived}: never throws, returns lines.
-   *
-   * @param task - the task as archived by the done walk
-   * @param actor - the resolved actor of the done write
-   */
-  onTaskCompleted(task: DocRecord, actor: string): Promise<IssueCloseItem[]>;
 }
 
 /** One `lore issues --sync` drift row (spec Public Interface). */
@@ -131,10 +112,43 @@ export type IssueSyncOutcome =
 const NOT_CONFIGURED_MESSAGE =
   "GitHub not configured — run lore issues --sync after configuring feedback.upstream";
 
-const PROSE_CLOSE_PATTERN = /\b(?:closes|fixes|resolves)\s+#(\d+)/gi;
+/** `resolution:*` verdicts a maintainer sets when closing an issue as not-fixed (spec ADR status table). */
+const VERDICT_RESOLUTIONS: ReadonlySet<IssueResolution> = new Set<IssueResolution>(["rejected", "wontfix", "superseded", "duplicate"]);
 
-/** The doc types whose prose is checked for a "closes #N" with no link (D6). */
-const PROSE_CHECKED_TYPES: ReadonlySet<string> = new Set(["spec", "plan", "task"]);
+/**
+ * The verdict an issue was ALREADY closed with, or `undefined` when it is open or closed as completed.
+ * reason: archiving a carrier must never overwrite a maintainer's "not a defect" with `completed`
+ * (AC-GS-8). A `not_planned` close with no `resolution:*` verdict label still counts — as "not planned" —
+ * because it is not a fix either.
+ */
+function closedVerdictOf(snapshot: GithubIssueSnapshot): string | undefined {
+  if (snapshot.state !== "closed") return undefined;
+  const reason = snapshot.stateReason;
+  if (reason !== "not_planned" && reason !== "duplicate") return undefined;
+  for (const label of snapshot.labels) {
+    const resolution = labelToResolution(label);
+    if (resolution !== undefined && VERDICT_RESOLUTIONS.has(resolution)) return resolution;
+  }
+  return reason === "duplicate" ? "duplicate" : "not planned";
+}
+
+/**
+ * The issues a carrier names, in declared order; `[]` for a non-carrier or a malformed `extra.issues`.
+ * reason: the write path (`judgeIssueCarrierExtra`) already refuses a malformed bag, so a malformed one
+ * here is legacy or hand-edited data; each entry is Zod-parsed and an invalid one is dropped rather than
+ * allowed to abort the archive that is already committed.
+ */
+function readCarrierIssueRefs(doc: DocRecord): readonly IssueRef[] {
+  if (doc.type !== "task" && doc.type !== "plan") return [];
+  const raw = doc.extra["issues"];
+  if (!Array.isArray(raw)) return [];
+  const refs: IssueRef[] = [];
+  for (const entry of raw) {
+    const parsed = issueRefSchema.safeParse(entry);
+    if (parsed.success) refs.push(parsed.data);
+  }
+  return refs;
+}
 
 function describeError(error: LoreError): string {
   return "message" in error ? error.message : error.code;
@@ -186,92 +200,52 @@ export class IssueCloseOnArchive implements ArchiveIssueClosePort {
   }
 
   async onArchived(doc: DocRecord, actor: string): Promise<IssueCloseItem[]> {
+    const refs = readCarrierIssueRefs(doc);
+    if (refs.length === 0) return [];
+    if (this.closer === undefined) return [{ kind: "not_configured", message: NOT_CONFIGURED_MESSAGE, stream: "stdout" }];
+    const closer = this.closer;
+    if (this.upstreamRepo === undefined) {
+      // reason: a carrier names `repo_id`, not `owner/repo`; the configured upstream is the only repo the
+      // closer may write to. A closer wired without it is a composition bug, so say so instead of guessing.
+      return [
+        {
+          kind: "read_failed",
+          message: `issue close step has no configured upstream repo to close ${refs.length} issue(s) named by ${doc.slug} — run lore issues --sync`,
+          stream: "stderr",
+        },
+      ];
+    }
+    const repo = this.upstreamRepo;
+
     const items: IssueCloseItem[] = [];
-    const linked = await this.collectResolvedReportIds(doc);
-    if (!linked.ok) {
-      items.push({
-        kind: "read_failed",
-        message: `issue close step could not read ${doc.slug}'s links: ${describeError(linked.error)} — run lore issues --sync`,
-        stream: "stderr",
-      });
-      return items;
-    }
-
-    let notedNotConfigured = false;
-    for (const targetId of linked.ids) {
-      const facts = await this.readReportFacts(targetId);
-      if (!facts.ok) {
+    // reason: every named issue is attempted — a failure on one never skips the rest (AC-GS-8, three-issue fixture).
+    for (const issueRef of refs) {
+      const ref: GithubIssueRef = { repo, issueNumber: issueRef.number, repo_id: issueRef.repo_id };
+      const snapshot = await closer.readIssue(ref);
+      if (!snapshot.ok) {
+        const reason = describeError(snapshot.error);
+        const audited = await this.auditFailureForDoc(doc, actor, "read", ref.issueNumber, reason);
         items.push({
           kind: "read_failed",
-          message: `issue close step could not read a report resolved by ${doc.slug}: ${describeError(facts.error)} — run lore issues --sync`,
+          number: ref.issueNumber,
+          message: `issue #${ref.issueNumber}: could not read GitHub state: ${reason} — run lore issues --sync${audited}`,
           stream: "stderr",
         });
         continue;
       }
-      if (facts.facts === null) continue; // not an issue report (the D1b write-time check normally prevents this)
-      const { task, computed, hasArchivedSource } = facts.facts;
-      // D1: only a computed `fixed` resting on an ARCHIVED source closes. An explicit terminal verdict
-      // (wontfix, ...) outranks the link, so `computed` is not `fixed` and nothing happens.
-      if (computed !== "fixed" || !hasArchivedSource) continue;
-
-      const ref = readGithubIssueRef(task.extra);
-      if (ref === undefined) {
+      const verdict = closedVerdictOf(snapshot.value);
+      if (verdict !== undefined) {
         items.push({
-          kind: "no_github_ref",
-          message: `issue ${task.slug}: local-only report (no GitHub issue), nothing to close`,
+          kind: "skipped_verdict",
+          number: ref.issueNumber,
+          message: `issue #${ref.issueNumber} skipped: closed as ${verdict}`,
           stream: "stdout",
         });
         continue;
       }
-      if (this.closer === undefined) {
-        if (!notedNotConfigured) {
-          items.push({ kind: "not_configured", message: NOT_CONFIGURED_MESSAGE, stream: "stdout" });
-          notedNotConfigured = true;
-        }
-        continue;
-      }
-      items.push(...(await this.closeOne(this.closer, this.effectiveRef(ref), doc, actor)));
+      items.push(...(await this.closeOne(closer, ref, doc, actor)));
     }
-
-    items.push(...(await this.warnUnlinkedProse(doc, linked.ids)));
     return items;
-  }
-
-  async onTaskCompleted(task: DocRecord, actor: string): Promise<IssueCloseItem[]> {
-    if (!hasIssueReport(task.extra)) return [];
-    const facts = await this.readReportFacts(task.id);
-    if (!facts.ok) {
-      return [
-        {
-          kind: "read_failed",
-          message: `issue close step could not read ${task.slug}: ${describeError(facts.error)} — run lore issues --sync`,
-          stream: "stderr",
-        },
-      ];
-    }
-    if (facts.facts === null) return [];
-    const { computed } = facts.facts;
-    // reason: an explicit terminal verdict (wontfix, duplicate, ...) outranks completion — completing the
-    // task must not close an issue the maintainers ruled "not a defect". Only closed / fixed close.
-    if (computed !== "closed" && computed !== "fixed") return [];
-
-    const ref = readGithubIssueRef(task.extra);
-    if (ref === undefined) {
-      return [
-        {
-          kind: "no_github_ref",
-          message: `issue ${task.slug}: local-only report (no GitHub issue), nothing to close`,
-          stream: "stdout",
-        },
-      ];
-    }
-    if (this.closer === undefined) {
-      return [{ kind: "not_configured", message: NOT_CONFIGURED_MESSAGE, stream: "stdout" }];
-    }
-    return this.closeOne(this.closer, this.effectiveRef(ref), task, actor, {
-      comment: `Fixed by task ${task.slug} (completed ${this.now().slice(0, 10)})`,
-      label: resolutionToLabel(computed),
-    });
   }
 
   /**
@@ -388,15 +362,6 @@ export class IssueCloseOnArchive implements ArchiveIssueClosePort {
     return this.upstreamRepo === undefined ? ref : { ...ref, repo: this.upstreamRepo };
   }
 
-  /** Targets of `doc`'s outgoing `resolves` links. */
-  private async collectResolvedReportIds(
-    doc: DocRecord,
-  ): Promise<{ ok: true; ids: string[] } | { ok: false; error: LoreError }> {
-    const links = await this.store.findLinks(doc.id, "out");
-    if (!links.ok) return { ok: false, error: links.error };
-    return { ok: true, ids: links.value.filter((link) => link.link_type === "resolves").map((link) => link.to_id) };
-  }
-
   /** Loads one report + its resolving sources and computes its resolution (same call shape as `lore issues`). */
   private async readReportFacts(
     reportId: string,
@@ -494,43 +459,10 @@ export class IssueCloseOnArchive implements ArchiveIssueClosePort {
     return items;
   }
 
-  /** D6 — "closes #N" in prose for a filed report this document has no `resolves` link to. */
-  private async warnUnlinkedProse(doc: DocRecord, linkedIds: readonly string[]): Promise<IssueCloseItem[]> {
-    if (!PROSE_CHECKED_TYPES.has(doc.type)) return [];
-    const numbers = new Set<number>();
-    for (const match of doc.content.matchAll(PROSE_CLOSE_PATTERN)) numbers.add(Number(match[1]));
-    if (numbers.size === 0) return [];
-
-    const reports = await this.store.findMany({ type: "task" });
-    if (!reports.ok) {
-      return [
-        {
-          kind: "read_failed",
-          message: `could not check ${doc.slug}'s "closes #N" mentions against filed reports: ${describeError(reports.error)}`,
-          stream: "stderr",
-        },
-      ];
-    }
-    const items: IssueCloseItem[] = [];
-    for (const number of [...numbers].sort((a, b) => a - b)) {
-      const report = reports.value.find((task) => readGithubIssueRef(task.extra)?.issueNumber === number);
-      if (report === undefined || linkedIds.includes(report.id)) continue;
-      items.push({
-        kind: "unlinked_prose",
-        number,
-        message:
-          `warning: ${doc.slug} says it fixes #${number} but has no resolves link, so GitHub issue #${number} is not closed — ` +
-          `run: lore link ${doc.slug} ${report.slug} --type resolves`,
-        stream: "stderr",
-      });
-    }
-    return items;
-  }
-
   private async auditFailureForDoc(
     doc: DocRecord,
     actor: string,
-    step: "close" | "comment" | "label",
+    step: "read" | "close" | "comment" | "label",
     number: number,
     reason: string,
   ): Promise<string> {
