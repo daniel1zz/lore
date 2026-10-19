@@ -1,4 +1,6 @@
 // @reads packages/lore/src/adapters/cli/**
+// @reads assets/governance/write-spec-rule.md
+// @reads assets/project/lore-config-template.yaml
 /**
  * Task task-skill-fix-bl-d1-coverage-census-measures-a-cross-cutting (BL-D1): the coverage census measures a cross-cutting leaf (one that declares no command of its own) by the sites it
  * OWNS, so it needs no proxy command. The sites a command-less leaf owns are its own `site_map` keys (free-text hand-offs

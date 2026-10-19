@@ -7,6 +7,7 @@
  * Never touches the repo's own `.lore/`, refs or worktrees. Side-effect class: IO (git + `bun run src/index.ts`).
  */
 import { execFileSync, spawnSync } from "node:child_process";
+import { patchLoreConfig } from "./patch-lore-config.js";
 import { appendFileSync, existsSync, mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -56,10 +57,9 @@ export class OwnDiffFixture {
     this.hooksDir = mkdtempSync(join(tmpdir(), "lore-own-diff-hooks-"));
     installShippedGuard(this.dir, this.hooksDir);
     this.mustLore(["init"]);
-    appendFileSync(
-      join(this.dir, ".lore", "config.yaml"),
+    patchLoreConfig(
+      this.dir,
       ["workflow:", "  review:", "    judgment_required_types: []", "  integrate:", '    floor_command: "true"', ...extraConfig, ""].join("\n"),
-      "utf8",
     );
     this.prdSlug = this.parseSlug(this.mustLore(["create", "prd", "--title", "Own diff PRD", "--content", "root", "--no-ai"]).stdout);
     this.planSlug = this.createPlan("Own diff plan");

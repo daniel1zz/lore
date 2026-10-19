@@ -1,4 +1,6 @@
 // @reads packages/lore/src/adapters/cli/**
+// @reads assets/governance/write-spec-rule.md
+// @reads assets/project/lore-config-template.yaml
 /**
  * AC-BCG-3 (spec-baseline-coverage-refuses-only-undeclared-commands-a-site): `lore baseline map` writes BR-n values only.
  * The excuse grammar is gone: no `--non-business` option, a site with no rule is refused naming BR-655, and a value that

@@ -194,7 +194,7 @@ describe("AC-SI-2: compiled dist/lore bootstrap --injection is seat-only", () =>
     // the claimed branch really exists and is landed through `lore integrate`, the only way `lore done` accepts (BR-1291)
     const git = (...args: string[]): void => void execFileSync("git", args, { cwd: dir, stdio: "ignore" });
     appendFileSync(join(dir, ".git", "info", "exclude"), ".claude/\n");
-    appendFileSync(join(dir, ".lore", "config.yaml"), 'workflow:\n  integrate:\n    floor_command: "true"\n', "utf8");
+    patchLoreConfig(dir, 'workflow:\n  integrate:\n    floor_command: "true"\n');
     git("checkout", "-q", "-b", "feat-done");
     writeFileSync(join(dir, "feat-done.txt"), "work\n");
     git("add", "feat-done.txt");

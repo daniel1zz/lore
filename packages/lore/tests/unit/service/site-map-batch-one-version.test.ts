@@ -1,4 +1,6 @@
 // @layer service-rule-set-site-map AC-BMB-1
+// @reads assets/governance/write-spec-rule.md
+// @reads assets/project/lore-config-template.yaml
 /**
  * AC-BMB-1: ONE map call carrying a 50-row sites set on an approved leaf adds exactly one version and one
  * `baseline-map` audit row that lists all 50 sites, and the leaf stays approved; 50 single-site calls add 50

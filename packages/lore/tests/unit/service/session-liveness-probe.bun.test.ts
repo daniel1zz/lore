@@ -1,3 +1,5 @@
+// @reads assets/governance/write-spec-rule.md
+// @reads assets/project/lore-config-template.yaml
 /**
  * AC-OWN-5 (spec-multi-session-concurrency-queryable-ownership-checkout) —
  * `lore session list` derives each liveness verdict from the orchestrator

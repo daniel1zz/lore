@@ -1,3 +1,5 @@
+// @reads assets/governance/write-spec-rule.md
+// @reads assets/project/lore-config-template.yaml
 /**
  * ES-D: a failed OS user lookup does not stop the invocation; it stops only the write that needs an actor
  * (spec-process-state-end-state-one-invocation-per-entry-returned D1, rule AS-26).

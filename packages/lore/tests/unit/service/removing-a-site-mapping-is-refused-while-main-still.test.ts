@@ -1,4 +1,6 @@
 // @reads packages/lore/src/adapters/cli/**
+// @reads assets/governance/write-spec-rule.md
+// @reads assets/project/lore-config-template.yaml
 /**
  * Task task-removing-a-site-mapping-is-refused-while-main-still, as narrowed by
  * spec-baseline-coverage-refuses-only-undeclared-commands-a-site: the corpus is shared and un-branched, so ONLY a command

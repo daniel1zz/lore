@@ -25,6 +25,7 @@ import { Database } from "bun:sqlite";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { execFileSync, spawnSync } from "node:child_process";
 import { appendFileSync, chmodSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { patchLoreConfig } from "../helpers/patch-lore-config.js";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { anchorsOverlap, normalizeFileAnchors } from "@lore/core";
@@ -122,7 +123,7 @@ function buildFixture(): Fixture {
   git(repo, "commit", "-qm", "init");
 
   mustLore(["init"], repo);
-  appendFileSync(join(repo, ".lore", "config.yaml"), ["workflow:", "  gates:", "    task-claim:", "      enabled: false", ""].join("\n"));
+  patchLoreConfig(repo, ["workflow:", "  gates:", "    task-claim:", "      enabled: false", ""].join("\n"));
   const prd = slugOf(mustLore(["create", "prd", "--title", "ESS PRD", "--content", "root", "--no-ai"], repo));
   const plan = slugOf(mustLore(["create", "plan", "--title", "ESS Plan", "--parent", prd, "--content", "x", "--no-ai"], repo));
   const newTask = (title: string, anchors: string[]): string =>

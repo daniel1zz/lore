@@ -1,3 +1,5 @@
+// @reads assets/governance/write-spec-rule.md
+// @reads assets/project/lore-config-template.yaml
 /**
  * Compiled-binary e2e for the `lore evidence` oracle-file precheck's
  * MULTI-SEGMENT cd derivation — closes

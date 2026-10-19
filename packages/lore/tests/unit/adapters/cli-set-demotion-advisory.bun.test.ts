@@ -1,4 +1,6 @@
 // @reads packages/lore/src/adapters/cli/commands/set.ts
+// @reads assets/governance/write-spec-rule.md
+// @reads assets/project/lore-config-template.yaml
 /**
  * @spec_ref spec-plan-closure-must-be-loud-terminality-divergence-silent DD-3
  *   (AC-CLOSURE-4) — `lore set`'s approved→draft auto-demotion advisory must

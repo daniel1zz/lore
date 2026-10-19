@@ -1,4 +1,6 @@
 // @layer service-rule-set-site-map AC-BMB-2
+// @reads assets/governance/write-spec-rule.md
+// @reads assets/project/lore-config-template.yaml
 /**
  * AC-BMB-2: a sites set whose 50th row names a rule of ANOTHER leaf is refused as a whole with VALIDATION_ERROR
  * (CLI exit 4) naming that row; the leaf's version, site map and audit trail are unchanged. Every invalid row is

@@ -1,4 +1,6 @@
 // @layer cli-baseline-map AC-BMB-3
+// @reads assets/governance/write-spec-rule.md
+// @reads assets/project/lore-config-template.yaml
 /**
  * AC-BMB-3: a `--sites-file` that is not valid JSON, is not an array, has a malformed row, or repeats a site key
  * is refused with VALIDATION_ERROR (exit 4) naming the problem; nothing is written (version and site map unchanged).

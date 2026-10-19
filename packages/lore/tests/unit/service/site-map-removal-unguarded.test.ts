@@ -1,4 +1,6 @@
 // @reads packages/lore/src/adapters/cli/**
+// @reads assets/governance/write-spec-rule.md
+// @reads assets/project/lore-config-template.yaml
 /**
  * AC-BCG-6 (spec-baseline-coverage-refuses-only-undeclared-commands-a-site): the completeness guards are gone, the command
  * guards stay. With main's tree still reaching a mapped site, removing the mapping, retiring a rule a mapping cites and

@@ -24,6 +24,7 @@
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { appendFileSync, existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { patchLoreConfig } from "../helpers/patch-lore-config.js";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { installShippedGuard } from "../integration/support/main-guard-repo.js";
@@ -145,7 +146,7 @@ beforeAll(async () => {
   mustOk(await lore(["init"]), "lore init");
   // `lore integrate` keeps its own worktree under `.claude/` and needs the floor key; neither may dirty the tree
   appendFileSync(join(repo, ".git", "info", "exclude"), ".claude/\n.lore/integrate-attempts/\n.lore/integrate-losses/\n");
-  appendFileSync(join(repo, ".lore", "config.yaml"), 'workflow:\n  integrate:\n    floor_command: "true"\n', "utf8");
+  patchLoreConfig(repo, 'workflow:\n  integrate:\n    floor_command: "true"\n');
   // reason: `lore init` arms state binding (AC-CT-3); evidence captured on a dirty tree is unbound and refused by `lore done`.
   mustOk(git(repo, "add", "-A"), "git add corpus");
   mustOk(git(repo, "commit", "-q", "-m", "lore corpus"), "git commit corpus");

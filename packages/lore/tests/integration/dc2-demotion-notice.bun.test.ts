@@ -23,6 +23,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { loosenOverrideClasses } from "./fixtures/autonomy-override-helpers.js";
 import { execFileSync } from "node:child_process";
 import { appendFileSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { patchLoreConfig } from "../helpers/patch-lore-config.js";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -130,7 +131,7 @@ beforeAll(async () => {
   mustRun(["init"]);
   await loosenOverrideClasses(dir, ["override-judgment"]);
   // The record-edit gate would refuse an edit of an approved record before it could demote; switch it off.
-  appendFileSync(join(dir, ".lore", "config.yaml"), `workflow:\n  gates:\n    record-edit:\n      enabled: false\n`);
+  patchLoreConfig(dir, `workflow:\n  gates:\n    record-edit:\n      enabled: false\n`);
   const prd = slugOf(mustRun(["create", "prd", "--title", "DC2-18 PRD", "--content", "root", "--no-ai"]).stdout);
   const root = slugOf(mustRun(["baseline", "add", prd, "--node", "root", "--label", "Root", "--title", "DC2-18 Root"]).stdout);
   leafParent = slugOf(mustRun(["baseline", "add", root, "--node", "branch", "--label", "Branch", "--title", "DC2-18 Branch"]).stdout);

@@ -1,4 +1,6 @@
 // @reads packages/lore/src/adapters/cli/**
+// @reads assets/governance/write-spec-rule.md
+// @reads assets/project/lore-config-template.yaml
 /**
  * AC-BCG-1 (spec-baseline-coverage-refuses-only-undeclared-commands-a-site): `lore baseline coverage <root>` refuses ONLY a
  * runnable command no leaf declares. Unmapped census sites are report output (exit 0, with their count), and a stored

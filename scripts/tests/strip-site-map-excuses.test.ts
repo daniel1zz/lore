@@ -1,4 +1,6 @@
 // @spawns scripts/strip-site-map-excuses.ts
+// @reads assets/governance/write-spec-rule.md
+// @reads assets/project/lore-config-template.yaml
 // @spawns scripts/count-site-map-excuses.ts
 // @spawns packages/lore/src/index.ts
 /**

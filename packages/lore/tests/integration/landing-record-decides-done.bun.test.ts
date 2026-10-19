@@ -15,6 +15,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { appendFileSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { patchLoreConfig } from "../helpers/patch-lore-config.js";
 import { execFileSync, spawnSync } from "node:child_process";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -102,20 +103,9 @@ beforeEach(() => {
   makeCleanTreeRepo(dir);
   appendFileSync(join(dir, ".git", "info", "exclude"), ".claude/\n");
   mustRun(["init"]);
-  appendFileSync(
-    join(dir, ".lore", "config.yaml"),
-    [
-      "workflow:",
-      "  gates:",
-      '    "plan-close":',
-      "      enabled: false",
-      "  review:",
-      "    judgment_required_types: []",
-      "  integrate:",
-      '    floor_command: "true"',
-      "",
-    ].join("\n"),
-    "utf8",
+  patchLoreConfig(
+    dir,
+    ["workflow:", "  gates:", '    "plan-close":', "      enabled: false", "  review:", "    judgment_required_types: []", "  integrate:", '    floor_command: "true"', ""].join("\n"),
   );
   const prd = parseSlug(mustRun(["create", "prd", "--title", "Landing PRD", "--content", "root", "--no-ai"]));
   planSlug = parseSlug(mustRun(["create", "plan", "--title", "Landing Plan", "--parent", prd, "--content", "x", "--no-ai"]));

@@ -1,3 +1,5 @@
+// @reads assets/governance/write-spec-rule.md
+// @reads assets/project/lore-config-template.yaml
 /**
  * `lore review --staleness` / `--list` / `--fail-on-candidate` — CLI-adapter spawned-
  * binary tests (SPEC-044 §Design Decisions D6, D7, D9; §Acceptance Criteria AC-SP-6).

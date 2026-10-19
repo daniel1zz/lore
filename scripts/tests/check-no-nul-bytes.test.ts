@@ -1,4 +1,5 @@
 // @reads .claude/rules/**
+// @reads assets/governance/write-spec-rule.md
 // @reads .claude/settings.json
 // @reads .gitignore
 // @reads .lore-bootstrap/.lore/.gitignore
