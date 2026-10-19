@@ -197,8 +197,8 @@ export const HOOK_REGISTRATIONS: readonly HookRegistration[] = [
   { file: "pre-tool-harness-run.mjs", runner: "node", event: "PreToolUse", matcher: "Bash" },
   { file: "pre-tool-harness-run.mjs", runner: "node", event: "PreToolUse", matcher: "mcp__.*lore_.*" },
 
-  // pre-helper-write-scope-gate.mjs — refuses a Write/Edit/MultiEdit/NotebookEdit by a worktree-isolated helper whose target is outside its own worktree (or a mktemp-style tmp.* dir). Applies only to helper calls (payload agent_id) in a linked worktree; the main session is never affected. A data-safety backstop (a helper's stray write into another session's tree), not dispatch routing policy.
-  { file: "pre-helper-write-scope-gate.mjs", runner: "node", event: "PreToolUse", matcher: "Write|Edit|MultiEdit|NotebookEdit" },
+  // pre-helper-foreign-working-copy-gate.mjs — refuses a Write/Edit/MultiEdit/NotebookEdit by a worktree-isolated helper whose target is inside a git working copy that is not its own (the shared checkout, another worktree, another repo): harm that lands at once on someone else and cannot be undone by the actor (BR-1092). Never applies to the main session; writes outside every working copy are left to the turn-end helper-scope review.
+  { file: "pre-helper-foreign-working-copy-gate.mjs", runner: "node", event: "PreToolUse", matcher: "Write|Edit|MultiEdit|NotebookEdit" },
 ] as const;
 
 /** Strips exactly one trailing `/` (never more — a caller-malformed `claudeDir` with repeated trailing slashes is out of scope). */

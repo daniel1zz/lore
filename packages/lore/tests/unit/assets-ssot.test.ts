@@ -428,8 +428,8 @@ const DECLARED_FILES = [
   // shared cwd-aware shell parser, GENERATED from packages/core/src/shell-cwd.ts (DCL-4; scripts/sync-hook-shell-cwd.ts)
   "hooks/lib/shell-cwd.mjs",
   "hooks/pre-tool-harness-run.mjs",
-  // pre-helper-write-scope-gate (isolated helper write-scope refusal; in HOOK_REGISTRATIONS on PreToolUse Write|Edit|MultiEdit|NotebookEdit)
-  "hooks/pre-helper-write-scope-gate.mjs",
+  // pre-helper-foreign-working-copy-gate (isolated helper writing into a foreign git working copy, BR-1092; in HOOK_REGISTRATIONS on PreToolUse Write|Edit|MultiEdit|NotebookEdit)
+  "hooks/pre-helper-foreign-working-copy-gate.mjs",
   "hooks/lib/turn-state.mjs",
   // session trail (spec-session-trail D13): start/end writers and their shared library
   "hooks/session-trail-start.mjs",

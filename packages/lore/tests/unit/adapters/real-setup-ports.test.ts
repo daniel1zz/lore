@@ -409,8 +409,8 @@ const DECLARED_FILES_IN_SCOPE = [
   "hooks/run-end.mjs",
   "hooks/lib/run-id.mjs",
   "hooks/pre-tool-harness-run.mjs",
-  // pre-helper-write-scope-gate (isolated helper write-scope refusal; in HOOK_REGISTRATIONS on PreToolUse Write|Edit|MultiEdit|NotebookEdit)
-  "hooks/pre-helper-write-scope-gate.mjs",
+  // pre-helper-foreign-working-copy-gate (isolated helper writing into a foreign git working copy, BR-1092; in HOOK_REGISTRATIONS on PreToolUse Write|Edit|MultiEdit|NotebookEdit)
+  "hooks/pre-helper-foreign-working-copy-gate.mjs",
   // shared cwd-aware shell parser, generated from packages/core/src/shell-cwd.ts (DCL-4)
   "hooks/lib/shell-cwd.mjs",
   "hooks/lib/turn-state.mjs",
