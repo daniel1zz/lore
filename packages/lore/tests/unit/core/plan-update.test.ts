@@ -94,7 +94,7 @@ const CORE_SRC_DIR = join(__dirname, "../../../../core/src");
 // (behavioral fields only) so this file never over-specifies implementation
 // detail T3 hasn't been handed authority over.
 
-type FileFreshness = "sync" | "outdated" | "diverged" | "missing" | "orphaned";
+type FileFreshness = "sync" | "outdated" | "diverged" | "missing" | "orphaned" | "retired";
 
 interface ActionEntry {
   path: string;
@@ -505,5 +505,58 @@ describe("REGRESSION: plan-update.ts import purity (T3 AC line 2)", () => {
     const src = readFileSync(join(CORE_SRC_DIR, "plan-update.ts"), "utf-8");
     const FORBIDDEN_IMPORT = /from\s+["'](?:node:)?(fs|path|os|child_process)["']|from\s+["']bun(?::|$)/;
     expect(FORBIDDEN_IMPORT.test(src)).toBe(false);
+  });
+});
+
+// ─── DC2-3: retired ledger paths ────────────────────────────────────────────
+
+describe("planUpdate — retired (tracked by the ledger, no longer shipped)", () => {
+  const retiredPath = "skills/retired-x/SKILL.md";
+  const keptPath = "skills/example/SKILL.md";
+  const embedded = makeEmbedded([embeddedEntry({ path: keptPath, sha256: "same" })], "digest-A");
+
+  it("an unedited retired file is `retired` and makes the summary stale, even when the digest matches", () => {
+    const installed = makeInstalled(
+      [installedEntry({ path: keptPath, sha256: "same" }), installedEntry({ path: retiredPath, sha256: "old" })],
+      "digest-A",
+    );
+    const probe = makeProbe({ [keptPath]: { sha256: "same" }, [retiredPath]: { sha256: "old" } });
+
+    const result: PlanUpdateResult = planUpdate(embedded, installed, probe);
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.files.retired).toEqual([retiredPath]);
+    expect(result.value.summary).toBe("stale");
+    expect(result.value.writes).toEqual([]);
+  });
+
+  it("an edited retired file is `diverged`, never `retired`", () => {
+    const installed = makeInstalled([installedEntry({ path: retiredPath, sha256: "old" })], "digest-B");
+    const probe = makeProbe({ [keptPath]: { sha256: "same" }, [retiredPath]: { sha256: "user-edit" } });
+
+    const result: PlanUpdateResult = planUpdate(embedded, installed, probe);
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.files.diverged).toEqual([retiredPath]);
+    expect(result.value.files.retired).toEqual([]);
+    expect(result.value.summary).toBe("stale");
+  });
+
+  it("a retired path already absent from disk classifies nowhere", () => {
+    const installed = makeInstalled(
+      [installedEntry({ path: keptPath, sha256: "same" }), installedEntry({ path: retiredPath, sha256: "old" })],
+      "digest-B",
+    );
+    const probe = makeProbe({ [keptPath]: { sha256: "same" } });
+
+    const result: PlanUpdateResult = planUpdate(embedded, installed, probe);
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.files.retired).toEqual([]);
+    expect(result.value.files.diverged).toEqual([]);
+    expect(result.value.summary).toBe("sync");
   });
 });
