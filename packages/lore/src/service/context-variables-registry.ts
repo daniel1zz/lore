@@ -4,13 +4,23 @@
  * Purpose: the single list of facts lore lets its own context text reference.
  * Public surface: `LORE_CONTEXT_VARIABLES`. Invariants: passes `validateRegistry`;
  * every `code` entry is fixed by the lore version, never by settings; the one `invocation`
- * entry (`claude_dir`) is supplied by `lore setup` and allowed at `setup:settings-hook` only.
+ * entry (`claude_dir`) is supplied by `lore setup` and allowed at `setup:settings-hook` only; the one `config`
+ * entry (`integrate_floor`) is read from the outlet's config layer by `configVariableValues` at fragment outlets.
  * Side effects: pure.
  *
  * @spec_ref spec-lore-owned-agent-context-is-generated-from-templates-and (D1, D5, D7)
  */
 
-import { CAPTURE_TAIL_CHARS, LORE_AGENT_NAMES, OUTLET_IDS, type ContextVariable, type VariableOutlet } from "@lore/core";
+import {
+  CAPTURE_TAIL_CHARS,
+  LORE_AGENT_NAMES,
+  OUTLET_IDS,
+  resolveIntegrateFloor,
+  type ContextConfigLayer,
+  type ContextVariable,
+  type OutletId,
+  type VariableOutlet,
+} from "@lore/core";
 
 import { LORE_MCP_TOOL_NAMES } from "../adapters/mcp/tool-names.js";
 
@@ -50,9 +60,34 @@ export const LORE_CONTEXT_VARIABLES: readonly ContextVariable[] = [
     value: () => LORE_AGENT_NAMES.reader,
   },
   {
+    name: "integrate_floor",
+    source: "config",
+    outlets: OUTLET_IDS,
+    describe: "The `workflow.integrate.floor_command` the outlet's config layer sets, or the statement that none is configured.",
+  },
+  {
     name: "claude_dir",
     source: "invocation",
     outlets: ["setup:settings-hook"],
     describe: "Absolute Claude Code config directory a settings-hook command points into (supplied by setup).",
   },
 ];
+
+/** Text `{{lore:integrate_floor}}` renders: the configured command verbatim, or an explicit "none" (never a default). */
+export function integrateFloorText(floorCommand: string | null): string {
+  return floorCommand === null
+    ? "not set: no floor is configured, so `lore integrate` refuses to advance main"
+    : `set to \`${floorCommand}\``;
+}
+
+/**
+ * Caller-supplied values for the `config` variables of one fragment outlet, read from the layers that outlet
+ * draws from. The ONE place a flow turns config into placeholder values (`expandFragments`'s `ctx.invocation`).
+ */
+export function configVariableValues(
+  global: ContextConfigLayer,
+  project: ContextConfigLayer,
+  outlet: OutletId,
+): Readonly<Record<string, string>> {
+  return { integrate_floor: integrateFloorText(resolveIntegrateFloor(global, project, outlet)) };
+}

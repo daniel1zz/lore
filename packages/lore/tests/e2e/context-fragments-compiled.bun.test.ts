@@ -77,7 +77,7 @@ import { dirname, join } from "path";
 import { parse as parseYaml } from "yaml";
 import { BOOTSTRAP_FRAMING_LINE } from "@lore/core";
 import type { Fragment, FragmentFrontmatter } from "@lore/core";
-import { LORE_CONTEXT_VARIABLES } from "../../src/service/context-variables-registry";
+import { LORE_CONTEXT_VARIABLES, configVariableValues } from "../../src/service/context-variables-registry";
 import { expandFragments } from "../../src/service/context-fragments/expand";
 import { assertFreshBinary } from "../integration/helpers/assert-fresh-binary";
 
@@ -300,7 +300,13 @@ function expandShippedBody(fm: unknown, rawFile: string, rawBody: string, file: 
   // bodyLineOffset = file lines before the body (frontmatter incl. both `---` fences), measured from the written file.
   const bodyLineOffset = rawFile.slice(0, rawFile.length - rawBody.length).split("\n").length - 1;
   const fragment: Fragment = { frontmatter: fm as FragmentFrontmatter, body: rawBody, layer: "shipped", path: file, bodyLineOffset };
-  const result = expandFragments([fragment], "rules:project", { invocation: {} }, LORE_CONTEXT_VARIABLES);
+  // reason: the fixture projects set no workflow.integrate.floor_command, so `integrate_floor` renders its "not set" text.
+  const result = expandFragments(
+    [fragment],
+    "rules:project",
+    { invocation: configVariableValues({}, {}, "rules:project") },
+    LORE_CONTEXT_VARIABLES,
+  );
   if (!result.ok) throw new Error(`shipped fragment ${file} failed to expand: ${JSON.stringify(result.error)}`);
   return (result.value[0] as Fragment).body.trim();
 }
