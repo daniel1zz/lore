@@ -984,6 +984,21 @@ export class ReviewService {
     id: string,
     opts?: RejectOpts,
   ): Promise<Result<DocRecord, LoreError>> {
+    const outcome = await this.rejectWithOutcome(id, opts);
+    if (!outcome.ok) return outcome;
+    return ok(outcome.value.doc);
+  }
+
+  /**
+   * {@link reject} plus the status the doc held BEFORE the call, so a caller can state the transition that
+   * happened (`in-review -> draft`) or that none did (`draft` stays `draft`) instead of guessing from the result.
+   *
+   * @returns The rejected doc and `from_status`, or the same errors as {@link reject}.
+   */
+  async rejectWithOutcome(
+    id: string,
+    opts?: RejectOpts,
+  ): Promise<Result<{ doc: DocRecord; from_status: DocRecord["status"] }, LoreError>> {
     const findResult = await this.resolveDoc(id);
     if (!findResult.ok) return findResult;
 
@@ -1028,7 +1043,7 @@ export class ReviewService {
         details: { ...auditDetails, version: doc.version },
       });
       if (!recorded.ok) return recorded;
-      return ok(doc);
+      return ok({ doc, from_status: doc.status });
     }
 
     // reason: a reject is NOT a new version — the doc keeps its version so a judgment recorded against it stays fresh
@@ -1045,7 +1060,7 @@ export class ReviewService {
       by: reviewer,
     });
     if (!rejected.ok) return rejected;
-    return ok(rejected.value.doc);
+    return ok({ doc: rejected.value.doc, from_status: doc.status });
   }
 
   /**

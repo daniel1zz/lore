@@ -29,8 +29,9 @@
  *      retry (inside judgeDoc) → `judgmentService.record(...)`.
  *
  * `--pending` batches step 1-5 over every doc `reviewService.pending()` returns.
- * Per-doc failures are COLLECTED, not fatal — the batch only exits 6 if EVERY
- * doc failed; otherwise exit 0 with a failure count on stderr.
+ * Per-doc failures are COLLECTED, not fatal — the batch only exits non-zero if EVERY
+ * doc failed: with the failures' shared code (4 validation, 6 AI provider), or 1 when
+ * the causes differ (`summarizeBatchFailures`); otherwise exit 0. Per-code counts go to stderr.
  *
  * `--staleness` is a SEPARATE pipeline (D9) — deterministic pre-checks (SPEC-034)
  * explicitly do NOT run for it. Batch mode (`lore review --staleness`) assembles
@@ -82,6 +83,8 @@ import {
   renderSupersededCandidateNudgeBlock,
   renderAdvisoryBlock,
   renderTruncationBlock,
+  renderBatchFailureCounts,
+  summarizeBatchFailures,
 } from "../review-render.js";
 import {
   buildStalenessBatchJsonPayload,
@@ -549,10 +552,12 @@ export default defineLoreCommand({
         if (failures.length > 0) {
           inv.io.stderr.write(`Warning: ${failures.length}/${outcomes.length} doc(s) failed review.\n`);
         }
-        if (failures.length === outcomes.length) {
-          return 6;
+        const failureErrors = failures.flatMap((o) => (o.result.ok ? [] : [o.result.error]));
+        const summary = summarizeBatchFailures(failureErrors, outcomes.length);
+        if (failureErrors.length > 0) {
+          inv.io.stderr.write(`${renderBatchFailureCounts(summary.byCode)}\n`);
         }
-        return 0;
+        return summary.exitCode;
       }
 
       // ─── Single-doc mode ───────────────────────────────────────────────────────
