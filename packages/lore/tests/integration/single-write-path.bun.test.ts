@@ -14,7 +14,7 @@
  *   - a write that changes nothing writes nothing;
  *   - restore is ONE transaction (a failure injected after the doc update leaves no partial row).
  * A static scan finds no `store.update(` / `insertVersion(` / `appendAuditEntry(` (nor the `*WithProvenance` and
- * rule-registry primitives) outside `corpus-service.ts` and `store/*`, with NO exception list (AC-DCL-5 removed the pinned one;
+ * rule-registry primitives) outside `corpus-service.ts` and `store/*`, with NO exception list (the follow-up spec removed the pinned one;
  * the full zero rule and the per-module behaviour live in write-path-everywhere.bun.test.ts).
  *
  * Coverage: HAPPY (each write) / NEGATIVE (foreign, locked) / BOUNDARY (no-op) / ERROR (injected failure) /
@@ -913,7 +913,7 @@ describe("static scan — no direct write primitive outside the write-path modul
     }
   });
 
-  it("AC-DCL-5: the zero rule — NO other module calls a store write primitive (no allowance list, no pinned count)", () => {
+  it("the zero rule — NO other module calls a store write primitive (no allowance list, no pinned count)", () => {
     expect([...offenders], `direct store write call sites outside corpus-service.ts and store/*: ${JSON.stringify([...offenders])}`).toEqual([]);
   });
 
