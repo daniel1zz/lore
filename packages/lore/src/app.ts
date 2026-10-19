@@ -1036,13 +1036,11 @@ function buildAppFromSqlite(
     // reason: SeatService (SPEC-057) — real GitPort over the SAME repoRoot
     // VerifyRunnerService already receives (captured at composition time, never a
     // second `process.cwd()` read); getReadyReport is bound to
-    // `taskWorkflowService.ready`, fail-open to `{anchor_conflicts: []}` on a
-    // `ready()` error (GetReadyReport's type carries no Result to propagate a
-    // failure through — SeatService.enter's own readiness check would otherwise be
-    // unreachable on a plan-resolution hiccup that isn't itself the plan's fault).
+    // `taskWorkflowService.ready`; a `ready()` error propagates as a Result
+    // (never a silent empty conflict list).
     seatService: new SeatService(store, new RealGitPort(repoRoot), async (planId) => {
       const readyResult = await taskWorkflowService.ready(planId);
-      return readyResult.ok ? { anchor_conflicts: readyResult.value.anchor_conflicts } : { anchor_conflicts: [] };
+      return readyResult.ok ? ok({ anchor_conflicts: readyResult.value.anchor_conflicts }) : readyResult;
     }),
     // reason: SpecKindService depends only on StoreInterface — stateless, no AI, no telemetry,
     // same shape as PhaseService. SPEC-032 §3.4.
@@ -1456,13 +1454,11 @@ function buildAppFromTurso(
     // reason: SeatService (SPEC-057) — real GitPort over the SAME repoRoot
     // VerifyRunnerService already receives (captured at composition time, never a
     // second `process.cwd()` read); getReadyReport is bound to
-    // `taskWorkflowService.ready`, fail-open to `{anchor_conflicts: []}` on a
-    // `ready()` error (GetReadyReport's type carries no Result to propagate a
-    // failure through — SeatService.enter's own readiness check would otherwise be
-    // unreachable on a plan-resolution hiccup that isn't itself the plan's fault).
+    // `taskWorkflowService.ready`; a `ready()` error propagates as a Result
+    // (never a silent empty conflict list).
     seatService: new SeatService(store, new RealGitPort(repoRoot), async (planId) => {
       const readyResult = await taskWorkflowService.ready(planId);
-      return readyResult.ok ? { anchor_conflicts: readyResult.value.anchor_conflicts } : { anchor_conflicts: [] };
+      return readyResult.ok ? ok({ anchor_conflicts: readyResult.value.anchor_conflicts }) : readyResult;
     }),
     // reason: SpecKindService depends only on StoreInterface — stateless, no AI, no telemetry,
     // same shape as PhaseService. SPEC-032 §3.4.
