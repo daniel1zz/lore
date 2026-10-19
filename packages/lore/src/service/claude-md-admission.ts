@@ -88,7 +88,7 @@
  *     only, AND either a trailing `/` or a dotted extension on its final
  *     segment) that drops non-path noise (bare verb/enum lists, code
  *     fragments). A `#Symbol` suffix is kept only on a source-code file.
- *     Candidates are normalized through `@lore/core`'s `parseCodeAnchor`
+ *     Candidates are normalized through `@lore/core`'s `classifyCodeAnchor`
  *     (the SAME normalizer spec code anchors use); one that fails is skipped,
  *     not reported (misses are acceptable, false alarms are not — spec
  *     Risks). A candidate absent at its repo-root-relative location is tried
@@ -139,7 +139,7 @@ import {
   GOVERNING_PACKAGE_JSON,
   startsWithFragmentFingerprint,
   normalizeFileAnchors,
-  parseCodeAnchor,
+  classifyCodeAnchor,
   resolveCodeReferences,
   type CodeReference,
   type FsProbe,
@@ -299,17 +299,17 @@ function parsePathReference(
   if (filePart.length === 0) return undefined;
   if (!looksLikePathCandidate(filePart)) return undefined;
 
-  const resolvedSpelling = explicitlyRelative
-    ? joinPaths(dirnameOf(scannedFilePath ?? ""), spelled)
-    : spelled;
-  const withFragment = hashIndex !== -1 && CODE_FILE_RE.test(filePart) ? parseCodeAnchor(resolvedSpelling) : undefined;
-  const parsed =
-    withFragment !== undefined && withFragment.ok
-      ? withFragment
-      : parseCodeAnchor(explicitlyRelative ? joinPaths(dirnameOf(scannedFilePath ?? ""), filePart) : filePart);
-  if (!parsed.ok) return undefined; // not a valid repo-relative path (SPEC-042 grammar): noise, not a finding
+  // The ONE anchor grammar decides: a `#fragment` is part of the reference only on a source file,
+  // and anything the grammar calls invalid (bad path, `#not-an-id`, folder + symbol) is simply
+  // not a reference. Prose extraction never refuses; only the anchor write paths do.
+  const carriesSymbol = hashIndex !== -1 && CODE_FILE_RE.test(filePart);
+  const spelledForGrammar = carriesSymbol ? spelled : filePart;
+  const classified = classifyCodeAnchor(
+    explicitlyRelative ? joinPaths(dirnameOf(scannedFilePath ?? ""), spelledForGrammar) : spelledForGrammar,
+  );
+  if (classified.kind === "invalid") return undefined;
 
-  const anchor = parsed.value;
+  const anchor = classified.anchor;
   const alternativePaths: string[] = [];
   // Ancestor-relative resolution: module docs name siblings relative to their own directory
   // (`commands/set.ts` in adapters/cli/CLAUDE.md) or to a parent package (`service/x.ts`).

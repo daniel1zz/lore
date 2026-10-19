@@ -104,29 +104,33 @@ export interface ParsedCodeAnchor {
   script?: string;
 }
 
+/** Outcome of grammar-checking ONE raw code-anchor string: a valid anchor, or why it is not one. */
+export type CodeAnchorClassification =
+  | { kind: "valid"; anchor: ParsedCodeAnchor }
+  | { kind: "invalid"; /** The exact refusal text `parseCodeAnchor` surfaces for this input. */ message: string };
+
+const invalidAnchor = (message: string): CodeAnchorClassification => ({ kind: "invalid", message });
+
 /**
- * Parses and grammar-validates ONE full raw code-anchor string (D1). Splits on the
- * LAST `#` (a path may legally contain earlier `#` characters); the path part is
- * validated + normalized via {@link normalizeFileAnchors} called with a ONE-ELEMENT
- * array (never batched — see this module's class @invariant).
+ * The ONE code-anchor grammar (D1), as a pure total function: classifies ONE full raw
+ * string as a valid anchor or as invalid with the reason. Splits on the LAST `#` (a path may
+ * legally contain earlier `#` characters); the path part is validated + normalized via
+ * {@link normalizeFileAnchors} called with a ONE-ELEMENT array (never batched — see this
+ * module's class @invariant). It never refuses: callers decide what an invalid string means.
+ * `parseCodeAnchor` (anchor writes) turns invalid into a VALIDATION_ERROR; prose extraction
+ * (memory files, fragments) treats it as "not a reference".
  *
- * @param raw - One candidate anchor string, e.g. `"src/x.ts"`, `"src/x.ts#Exported"`,
- *   `"src/dir/"`.
- * @returns `ok(parsed)` or `err(VALIDATION_ERROR)` naming the offending raw string on
- *   the first grammar violation (bad path, dir+symbol, non-ASCII/malformed symbol).
- * @throws Never — always returns a Result.
+ * @param raw - One candidate anchor string, e.g. `"src/x.ts"`, `"src/x.ts#Exported"`, `"src/dir/"`.
+ * @returns `{kind: "valid", anchor}` or `{kind: "invalid", message}`.
  *
  * @example
- * parseCodeAnchor("src/a.ts#Foo");
- * // => ok({ raw: "src/a.ts#Foo", path: "src/a.ts", isDir: false, symbol: "Foo" })
+ * classifyCodeAnchor("src/a.ts#Foo");
+ * // => { kind: "valid", anchor: { raw: "src/a.ts#Foo", path: "src/a.ts", isDir: false, symbol: "Foo" } }
  * @example
- * parseCodeAnchor("src/dir/#Foo");
- * // => err({ code: "VALIDATION_ERROR", field: "code_anchors", ... }) — dir + symbol
- * @example
- * parseCodeAnchor("src/a.ts#名前");
- * // => err(...) — non-ASCII symbol
+ * classifyCodeAnchor("src/dir/#Foo");
+ * // => { kind: "invalid", message: 'directory anchor must not carry a #Symbol: "src/dir/#Foo"' }
  */
-export function parseCodeAnchor(raw: string): Result<ParsedCodeAnchor, LoreError> {
+export function classifyCodeAnchor(raw: string): CodeAnchorClassification {
   const titleIndex = raw.indexOf('#"');
   const hashIndex = titleIndex !== -1 ? titleIndex : raw.lastIndexOf("#");
   const pathPart = hashIndex === -1 ? raw : raw.slice(0, hashIndex);
@@ -136,67 +140,69 @@ export function parseCodeAnchor(raw: string): Result<ParsedCodeAnchor, LoreError
   if (!pathResult.ok) {
     const underlying = pathResult.error;
     const underlyingMessage = underlying.code === "VALIDATION_ERROR" ? underlying.message : "invalid path";
-    return err({
-      code: "VALIDATION_ERROR",
-      field: "code_anchors",
-      message: `invalid code anchor "${raw}": ${underlyingMessage}`,
-      value: raw,
-    });
+    return invalidAnchor(`invalid code anchor "${raw}": ${underlyingMessage}`);
   }
 
   const normalizedPath = pathResult.value[0];
   if (normalizedPath === undefined) {
-    return err({
-      code: "VALIDATION_ERROR",
-      field: "code_anchors",
-      message: `code anchor normalizes to an empty path: "${raw}"`,
-      value: raw,
-    });
+    return invalidAnchor(`code anchor normalizes to an empty path: "${raw}"`);
   }
   const isDir = normalizedPath.endsWith("/");
   const path = isDir ? normalizedPath.slice(0, -1) : normalizedPath;
 
   if (symbolPart === undefined) {
-    return ok({ raw, path, isDir });
+    return { kind: "valid", anchor: { raw, path, isDir } };
   }
 
   if (isDir) {
-    return err({
-      code: "VALIDATION_ERROR",
-      field: "code_anchors",
-      message: `directory anchor must not carry a #Symbol: "${raw}"`,
-      value: raw,
-    });
+    return invalidAnchor(`directory anchor must not carry a #Symbol: "${raw}"`);
   }
 
   if (symbolPart.startsWith('"')) {
-    return parseTitleAnchor(raw, path, symbolPart);
+    return classifyTitleAnchor(raw, path, symbolPart);
   }
 
   if (!CODE_ANCHOR_SYMBOL_RE.test(symbolPart)) {
-    return err({
-      code: "VALIDATION_ERROR",
-      field: "code_anchors",
-      message:
-        `code anchor symbol must be an ASCII identifier matching ` +
+    return invalidAnchor(
+      `code anchor symbol must be an ASCII identifier matching ` +
         `/^[A-Za-z_$][A-Za-z0-9_$]*$/ (or a quoted "test title" on a test file): "${raw}"`,
-      value: raw,
-    });
+    );
   }
 
-  return ok({ raw, path, isDir: false, symbol: symbolPart });
+  return { kind: "valid", anchor: { raw, path, isDir: false, symbol: symbolPart } };
+}
+
+/**
+ * Parses and grammar-validates ONE full raw code-anchor string for the anchor WRITE paths:
+ * {@link classifyCodeAnchor} with an invalid result turned into the refusal.
+ *
+ * @param raw - One candidate anchor string, e.g. `"src/x.ts"`, `"src/x.ts#Exported"`, `"src/dir/"`.
+ * @returns `ok(parsed)` or `err(VALIDATION_ERROR)` naming the offending raw string on
+ *   the first grammar violation (bad path, dir+symbol, non-ASCII/malformed symbol).
+ * @throws Never — always returns a Result.
+ *
+ * @example
+ * parseCodeAnchor("src/a.ts#Foo");
+ * // => ok({ raw: "src/a.ts#Foo", path: "src/a.ts", isDir: false, symbol: "Foo" })
+ * @example
+ * parseCodeAnchor("src/a.ts#名前");
+ * // => err({ code: "VALIDATION_ERROR", field: "code_anchors", ... }) — non-ASCII symbol
+ */
+export function parseCodeAnchor(raw: string): Result<ParsedCodeAnchor, LoreError> {
+  const classified = classifyCodeAnchor(raw);
+  if (classified.kind === "valid") return ok(classified.anchor);
+  return err({ code: "VALIDATION_ERROR", field: "code_anchors", message: classified.message, value: raw });
 }
 
 /**
  * Validates the quoted-title suffix of one anchor (issue #178). `quoted` is the text
  * after `#`, starting with `"`.
  *
- * @returns `ok(parsed)` with `title` set, or `err(VALIDATION_ERROR)` for a non-test
- *   file, an unterminated/empty quote, or a stray unescaped quote inside the title.
+ * @returns `valid` with `title` set, or `invalid` for a non-test file, an
+ *   unterminated/empty quote, or a stray unescaped quote inside the title.
  */
-function parseTitleAnchor(raw: string, path: string, quoted: string): Result<ParsedCodeAnchor, LoreError> {
-  const fail = (reason: string): Result<ParsedCodeAnchor, LoreError> =>
-    err({ code: "VALIDATION_ERROR", field: "code_anchors", message: `${reason}: "${raw}"`, value: raw });
+function classifyTitleAnchor(raw: string, path: string, quoted: string): CodeAnchorClassification {
+  const fail = (reason: string): CodeAnchorClassification => invalidAnchor(`${reason}: "${raw}"`);
 
   if (!TEST_FILE_PATH_RE.test(path)) {
     return fail(
@@ -222,10 +228,10 @@ function parseTitleAnchor(raw: string, path: string, quoted: string): Result<Par
       title += ch;
     }
   }
-  return ok({ raw, path, isDir: false, title });
+  return { kind: "valid", anchor: { raw, path, isDir: false, title } };
 }
 
-/** Inverse of the title escape in {@link parseTitleAnchor}. */
+/** Inverse of the title escape in {@link classifyTitleAnchor}. */
 function quoteTitle(title: string): string {
   return `"${title.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
 }
