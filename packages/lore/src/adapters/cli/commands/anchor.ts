@@ -218,7 +218,7 @@ export default defineLoreCommand({
         path: {
           type: "positional",
           description:
-            "[repeatable] Task: repo-relative POSIX path (trailing '/' = directory scope). Spec/knowledge: path[#Symbol] (SPEC-045), or path#\"test title\" on a *.test.ts file to anchor a describe/it/test title (\\\" and \\\\ are the only escapes).",
+            "[repeatable] Task: repo-relative POSIX path (trailing '/' = directory scope, holding only the files its holder touched; path#Symbol = one top-level symbol of the file). Spec/knowledge: path[#Symbol] (SPEC-045), or path#\"test title\" on a *.test.ts file to anchor a describe/it/test title (\\\" and \\\\ are the only escapes).",
           required: true,
         },
         json: {
@@ -418,7 +418,7 @@ export default defineLoreCommand({
       },
       args: {
         target: { type: "positional", description: "The claimed task's ID or slug", required: true },
-        path: { type: "positional", description: "Repo path (absolute, or relative to --worktree) the helper is about to edit", required: true },
+        path: { type: "positional", description: "Repo path (absolute, or relative to --worktree), optionally path#Symbol, the helper is about to edit", required: true },
         worktree: { type: "string", description: "Working-copy directory the task's claim was recorded for", required: true },
         json: { type: "boolean", description: "Output result as JSON" },
       },

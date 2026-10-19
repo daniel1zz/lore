@@ -1,13 +1,14 @@
 #!/usr/bin/env node
 /**
- * pre-edit-anchor-gate.mjs — PreToolUse hook on Write|Edit|MultiEdit|NotebookEdit.
+ * pre-edit-anchor-gate.mjs — PreToolUse hook on Write|Edit|MultiEdit|NotebookEdit|Bash.
  *
  * A helper's edit outside the anchors of its claimed task is declared (one lore command, overlap-checked) or
  * denied BEFORE it happens, instead of being found by the turn-end review after the work.
  *
  * Public surface: none. Executable script, no exports.
- * Side-effect class: IO — reads stdin, the trail record, git metadata; spawns `git check-ignore` and at most two
- * `lore` processes; writes only to stderr. The one corpus write (an anchor) is done BY `lore anchor declare`.
+ * Side-effect class: IO — reads stdin, the trail record, the scope file, the edited file, git metadata; spawns
+ * `git check-ignore` and at most one `lore` process per unit to declare; writes only to stderr. The one corpus write
+ * (an anchor) is done BY `lore anchor declare`.
  *
  * ## Which calls it governs
  *
@@ -17,7 +18,21 @@
  *   - The helper's working copy is the trail record's `working_copy` (SubagentStart), NOT the drifting payload
  *     `cwd`; the payload cwd is the fallback only when no record carries one.
  *
- * ## Decision (fail-closed: anything undecidable is a denial that names why)
+ * ## What an edit touches (the unit of an anchor)
+ *
+ *   - Write, NotebookEdit, a non-source file, an Edit whose old_string cannot be located, a Bash write: the WHOLE file
+ *     (`path`).
+ *   - Edit / MultiEdit on a source file (`lib/top-level-symbols.mjs`): the top-level symbols whose region contains the
+ *     replaced text (`path#Symbol`; imports and re-exports are `path#$toplevel`).
+ *   - An anchor is `path` (whole file), `path#Symbol`, or `dir/`. A directory anchor holds only the files its holder
+ *     really touched, so it never covers an edit by itself: the first edit of a file under it is declared as a file anchor
+ *     (after the overlap check against every other live claim).
+ *
+ * ## Decision (fail-closed for Edit/Write: anything undecidable is a denial that names why)
+ *
+ * Order of work: the in-anchor fast path runs FIRST (scope file + the edited file; no process is spawned, the working copy
+ * is found by walking up to `.git`), so an edit inside a file/symbol anchor never pays for `git check-ignore`. Steps 1-3
+ * below run only for a unit that no anchor of the scope file covers.
  *
  *   1. target git-ignored in that working copy (`git check-ignore`)      -> allow
  *   0. target is the scope file itself (`.lore-scope.json`)                  -> deny (only lore writes it)
@@ -28,21 +43,25 @@
  *        - cannot be read (lore missing, non-zero exit, unparseable)     -> deny, naming the reason
  *        - claims not all measured (worktree unresolved)                 -> deny, naming them
  *        - no open claim                                                 -> deny, naming `lore claim`
- *        - target inside some claim's anchors (file or directory anchor) -> allow, no write
- *   3. otherwise `lore anchor declare <task> <path> --worktree <wc>`
+ *        - every unit equals / lies inside one claim's file or symbol anchor -> allow, no write
+ *   3. otherwise `lore anchor declare <task> <unit> --worktree <wc>` per uncovered unit
  *        - exit 0 (free: anchor added, or covered/ignored)               -> allow
  *        - any other exit (exit 4 = held by another live claim)          -> deny, quoting lore's refusal
  *      The claim is the one the helper's run holds; several claims and none held by this run -> deny.
  *
+ * ## Bash (BR-1092: refuse only what lands on someone else and cannot be undone)
+ *
+ * A helper's shell write whose targets are readable from the command text (`sed -i f`, `> f`, `tee f`, python
+ * `open(f, 'w')`, see lib/shell-writes.mjs) goes through steps 1-3 as a whole-file touch. It is REFUSED only when
+ * another live claim holds the file (declare's `held-by-other-claim`) or the target is the scope file. Everything else
+ * (no claim, ambiguous claim, lore unavailable, an unreadable target) is allowed: the harm is the helper's own and
+ * the turn-end helper-scope review reports it. A free file outside the anchors is auto-declared, never refused.
+ *
  * ## Invariant: the overlap rule lives in lore, not here
  *
- * The in-anchor test below is the membership fast path only (a file anchor equals the path, a directory anchor
- * `dir/` is a whole-segment prefix of it) — the same two cases `anchorsOverlap` reduces to for one file. Anything
+ * The in-anchor test below is the membership fast path only (a file anchor equals the path, a symbol anchor equals the
+ * unit or the whole file) — the cases `anchorsOverlap` reduces to for ONE unit against the helper's own claim. Anything
  * not provably covered is handed to `lore anchor declare`, which runs the task-claim gate's own predicate.
- *
- * ## Out of scope
- *
- * Bash file writes (a hook cannot parse shell reliably): the turn-end helper-scope review stays their backstop.
  *
  * Exit codes: 2 = denied. 0 = not applicable or allowed. A malformed payload exits 0 (nothing to assert on).
  */
@@ -53,6 +72,8 @@ import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'nod
 
 import { getStateBase, resolveSessionId } from './lib/turn-state.mjs';
 import { deriveClaudeCodeRunId } from './lib/run-id.mjs';
+import { extractShellWriteTargets, mayWriteFiles } from './lib/shell-writes.mjs';
+import { isSymbolScannable, locateAll, touchedSymbols } from './lib/top-level-symbols.mjs';
 
 /** Tools whose target path this hook checks, with the payload field that carries it. */
 const PATH_FIELD_BY_TOOL = {
@@ -120,6 +141,25 @@ function nearestExistingDir(target) {
   }
 }
 
+/**
+ * The root of the git working copy containing `dir`, found by walking up to the nearest `.git` entry (a directory, or the
+ * file a linked worktree has) — no process spawned. Null when none is found (the caller then asks git).
+ */
+function findWorkingCopyRoot(dir) {
+  let probe = canonicalize(dir);
+  for (;;) {
+    try {
+      statSync(join(probe, '.git'));
+      return probe;
+    } catch {
+      // keep climbing
+    }
+    const parent = dirname(probe);
+    if (parent === probe) return null;
+    probe = parent;
+  }
+}
+
 /** The working copy the SubagentStart trail record carries for this helper, or null. */
 function trailWorkingCopy(payload) {
   try {
@@ -132,14 +172,27 @@ function trailWorkingCopy(payload) {
   }
 }
 
-/** Anchor membership for ONE file path: equal segments, or a directory anchor that is a whole-segment prefix. */
-function anchorCovers(anchor, path) {
-  const isDir = anchor.endsWith('/');
-  const a = anchor.split('/').filter(Boolean);
+/** `path#Symbol` split on the last `#` when the tail is an identifier (the anchor grammar); otherwise the whole string is the path. */
+function splitAnchor(anchor) {
+  const hash = anchor.lastIndexOf('#');
+  if (hash <= 0) return { path: anchor, symbol: undefined };
+  const head = anchor.slice(0, hash);
+  const tail = anchor.slice(hash + 1);
+  if (head.endsWith('/') || !/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(tail)) return { path: anchor, symbol: undefined };
+  return { path: head, symbol: tail };
+}
+
+/**
+ * Whether ONE anchor covers the unit (`path`, optional symbol): the same file, and the anchor is whole-file or names the
+ * same symbol. A directory anchor never covers (it holds only the files its holder touched; lore decides by declaring).
+ */
+function anchorCovers(anchor, path, symbol) {
+  const held = splitAnchor(anchor);
+  if (held.path.endsWith('/')) return false;
+  const a = held.path.split('/').filter(Boolean);
   const p = path.split('/').filter(Boolean);
-  if (a.length === 0) return false;
-  if (a.length === p.length) return a.every((seg, i) => seg === p[i]);
-  return isDir && a.length < p.length && a.every((seg, i) => seg === p[i]);
+  if (a.length === 0 || a.length !== p.length || !a.every((seg, i) => seg === p[i])) return false;
+  return held.symbol === undefined || held.symbol === symbol;
 }
 
 /** Name and shape version of the scope file `lore` keeps in each claiming worktree (SCOPE_FILE_NAME / SCOPE_FILE_SCHEMA in service/edit-scope.ts). */
@@ -172,96 +225,167 @@ function runLore(cwd, args) {
   return { status: child.status, stdout: child.stdout ?? '', stderr: child.stderr ?? '' };
 }
 
+/**
+ * The units an Edit/MultiEdit touches in `target`: `[undefined]` (the whole file) or one symbol name per touched
+ * top-level symbol. Undecidable -> the whole file.
+ */
+function touchedUnits(payload, target) {
+  const wholeFile = [undefined];
+  if (payload.tool_name !== 'Edit' && payload.tool_name !== 'MultiEdit') return wholeFile;
+  if (!isSymbolScannable(target)) return wholeFile;
+  const input = payload.tool_input ?? {};
+  const olds = payload.tool_name === 'Edit' ? [input.old_string] : (Array.isArray(input.edits) ? input.edits.map((e) => e?.old_string) : []);
+  if (olds.length === 0 || olds.some((o) => typeof o !== 'string' || o === '')) return wholeFile;
+  let text;
+  try {
+    text = readFileSync(target, 'utf8');
+  } catch {
+    return wholeFile;
+  }
+  const spans = olds.flatMap((old) => locateAll(text, old));
+  // reason: every old_string must be located; one that is missing means the edit's extent is unknown, so hold the file.
+  if (olds.some((old) => locateAll(text, old).length === 0)) return wholeFile;
+  return touchedSymbols(text, spans) ?? wholeFile;
+}
+
 const payload = readPayload();
 if (payload === null) process.exit(0);
 
+const isBash = payload.tool_name === 'Bash';
 const pathField = PATH_FIELD_BY_TOOL[payload.tool_name];
-if (pathField === undefined) process.exit(0);
+if (pathField === undefined && !isBash) process.exit(0);
 if (typeof payload.agent_id !== 'string' || payload.agent_id === '') process.exit(0);
 
 const cwd = typeof payload.cwd === 'string' && payload.cwd !== '' ? payload.cwd : process.cwd();
-const rawTarget = payload.tool_input?.[pathField];
-if (typeof rawTarget !== 'string' || rawTarget === '') process.exit(0);
+
+// The targets: one file for a write tool, every readable shell-write target for Bash.
+let rawTargets;
+if (isBash) {
+  const command = payload.tool_input?.command;
+  if (typeof command !== 'string' || !mayWriteFiles(command)) process.exit(0);
+  rawTargets = extractShellWriteTargets(command, { cwd: resolve(cwd), env: process.env }).paths;
+  if (rawTargets.length === 0) process.exit(0);
+} else {
+  const rawTarget = payload.tool_input?.[pathField];
+  if (typeof rawTarget !== 'string' || rawTarget === '') process.exit(0);
+  rawTargets = [isAbsolute(rawTarget) ? rawTarget : resolve(cwd, rawTarget)];
+}
+
+/** Bash refuses only what lands on someone else; every other problem is the helper's own and is left to the turn-end review. */
+function refuse(why) {
+  if (isBash) process.exit(0);
+  deny(why);
+}
 
 const anchorDir = trailWorkingCopy(payload) ?? cwd;
 let workingCopy;
 try {
-  workingCopy = realpathSync(git(anchorDir, ['rev-parse', '--show-toplevel']));
+  workingCopy = findWorkingCopyRoot(anchorDir) ?? realpathSync(git(anchorDir, ['rev-parse', '--show-toplevel']));
 } catch (err) {
   const stderr = String(err?.stderr ?? '');
   // Not a git repository at all: no anchors can exist for it.
   if (/not a git repository/i.test(stderr)) process.exit(0);
-  deny(`the helper's working copy could not be resolved from ${anchorDir}: ${stderr.trim().split('\n')[0] || err?.message || err}`);
+  refuse(`the helper's working copy could not be resolved from ${anchorDir}: ${stderr.trim().split('\n')[0] || err?.message || err}`);
 }
 
-const target = canonicalize(isAbsolute(rawTarget) ? rawTarget : resolve(cwd, rawTarget));
-// A target outside the helper's own working copy is not an anchorable repository path (see header).
-if (target === workingCopy || !target.startsWith(workingCopy + sep)) process.exit(0);
-const rel = relative(workingCopy, target).split(sep).join('/');
+/** Units still to place, as `{ rel, target, symbol }` (symbol undefined = the whole file). No process is spawned to build them. */
+const units = [];
+for (const rawTarget of rawTargets) {
+  const target = canonicalize(rawTarget);
+  // A target outside the helper's own working copy is not an anchorable repository path (see header).
+  if (target === workingCopy || !target.startsWith(workingCopy + sep)) continue;
+  const rel = relative(workingCopy, target).split(sep).join('/');
+
+  // The scope file is lore's record of this helper's scope: git ignores it, so without this line an edit to it would
+  // pass as "ignored" and a helper could widen its own scope. Only lore's verbs write it.
+  if (rel === SCOPE_FILE_NAME) deny(`${SCOPE_FILE_NAME} is written by lore (claim, anchor declare|add|rm, release); do not edit it. Declare scope with \`lore anchor declare <task> <path> --worktree ${workingCopy}\`.`);
+
+  for (const symbol of isBash ? [undefined] : touchedUnits(payload, target)) units.push({ rel, target, symbol });
+}
+if (units.length === 0) process.exit(0);
+
+// 0. In-anchor fast path: every unit is covered by a file or symbol anchor in the scope file lore keeps current. Nothing
+// is spawned (no git, no lore); a covered path that is also git-ignored is allowed either way, so ignore is not asked.
+let scope = readScopeFile(workingCopy);
+const isCovered = ({ rel, symbol }) => scope.claims.some((claim) => Array.isArray(claim.anchors) && claim.anchors.some((anchor) => anchorCovers(String(anchor), rel, symbol)));
+if (scope !== undefined && units.every(isCovered)) process.exit(0);
+
+// 1. Git-ignored in the helper's working copy (scratch dirs, build output): not repository content.
+{
+  const ignoredByFile = new Map();
+  for (const { rel, target } of units) {
+    if (ignoredByFile.has(rel)) continue;
+    const probeDir = nearestExistingDir(dirname(target));
+    const ignored = spawnSync('git', ['-C', probeDir, 'check-ignore', '-q', '--', target], { encoding: 'utf8', timeout: GIT_TIMEOUT_MS });
+    if (ignored.error) {
+      refuse(`git check-ignore could not run for ${rel}: ${ignored.error.message}`);
+      ignoredByFile.set(rel, true);
+      continue;
+    }
+    // reason: status 1 = not ignored; anything else (128 = fatal) is an unmeasurable answer -> fail closed (Edit/Write).
+    if (ignored.status !== 0 && ignored.status !== 1) {
+      refuse(`git check-ignore failed for ${rel} (exit ${ignored.status}): ${(ignored.stderr ?? '').trim().split('\n')[0]}`);
+    }
+    ignoredByFile.set(rel, ignored.status === 0);
+  }
+  for (let i = units.length - 1; i >= 0; i -= 1) if (ignoredByFile.get(units[i].rel) === true) units.splice(i, 1);
+}
+if (units.length === 0) process.exit(0);
 
 let run;
 try {
   run = deriveClaudeCodeRunId(payload);
 } catch (err) {
-  deny(`the helper's run id could not be derived (${err.message}); without it its claim cannot be found`);
+  refuse(`the helper's run id could not be derived (${err.message}); without it its claim cannot be found`);
 }
 
-// The scope file is lore's record of this helper's scope: git ignores it, so without this line an edit to it would
-// pass as "ignored" and a helper could widen its own scope. Only lore's verbs write it.
-if (rel === SCOPE_FILE_NAME) deny(`${SCOPE_FILE_NAME} is written by lore (claim, anchor declare|add|rm, release); do not edit it. Declare scope with \`lore anchor declare <task> <path> --worktree ${workingCopy}\`.`);
-
-// 1. Git-ignored in the helper's working copy (scratch dirs, build output): not repository content.
-{
-  const probeDir = nearestExistingDir(dirname(target));
-  const ignored = spawnSync('git', ['-C', probeDir, 'check-ignore', '-q', '--', target], { encoding: 'utf8', timeout: GIT_TIMEOUT_MS });
-  if (ignored.error) deny(`git check-ignore could not run for ${rel}: ${ignored.error.message}`);
-  if (ignored.status === 0) process.exit(0);
-  // reason: status 1 = not ignored; anything else (128 = fatal) is an unmeasurable answer -> fail closed.
-  if (ignored.status !== 1) deny(`git check-ignore failed for ${rel} (exit ${ignored.status}): ${(ignored.stderr ?? '').trim().split('\n')[0]}`);
-}
-
-// 2. The working copy's open claims: the scope file lore keeps current (no process spawned), else one lore read.
-let scope = readScopeFile(workingCopy);
+// 2. The working copy's open claims: the scope file read above, else one lore read.
 if (scope === undefined) {
   try {
-  const read = runLore(workingCopy, ['anchor', 'scope', '--worktree', workingCopy, '--json', '--harness-run', run]);
-  if (read.status !== 0) deny(`\`lore anchor scope\` exited ${read.status}: ${(read.stderr || read.stdout).trim().split('\n')[0]}`);
-  scope = JSON.parse(read.stdout)?.data;
-} catch (err) {
-  deny(typeof err === 'string' ? err : `\`lore anchor scope\` output was not readable (${err?.message ?? err})`);
+    const read = runLore(workingCopy, ['anchor', 'scope', '--worktree', workingCopy, '--json', '--harness-run', run]);
+    if (read.status !== 0) refuse(`\`lore anchor scope\` exited ${read.status}: ${(read.stderr || read.stdout).trim().split('\n')[0]}`);
+    scope = JSON.parse(read.stdout)?.data;
+  } catch (err) {
+    refuse(typeof err === 'string' ? err : `\`lore anchor scope\` output was not readable (${err?.message ?? err})`);
   }
 }
 if (scope === undefined || !Array.isArray(scope.claims) || !Array.isArray(scope.not_measured)) {
-  deny('`lore anchor scope --json` did not return {claims, not_measured}');
+  refuse('`lore anchor scope --json` did not return {claims, not_measured}');
 }
-if (scope.not_measured.length > 0) deny(`an open claim of this working copy could not be resolved: ${scope.not_measured.join('; ')}`);
+if (scope.not_measured.length > 0) refuse(`an open claim of this working copy could not be resolved: ${scope.not_measured.join('; ')}`);
 if (scope.claims.length === 0) {
-  deny(
-    `no open task claim records the working copy ${workingCopy}, so ${rel} is in no task's scope. ` +
+  refuse(
+    `no open task claim records the working copy ${workingCopy}, so ${units[0].rel} is in no task's scope. ` +
       'Claim your task first: `lore claim <task-slug> --worktree <branch>` (run it from inside this working copy).',
   );
 }
-const covering = scope.claims.find((claim) => Array.isArray(claim.anchors) && claim.anchors.some((anchor) => anchorCovers(String(anchor), rel)));
-if (covering !== undefined) process.exit(0);
+const uncovered = units.filter((unit) => !isCovered(unit));
+if (uncovered.length === 0) process.exit(0);
 
-// 3. Out of every anchor: declare it on this run's claim, or be refused by lore.
+// 3. Out of every anchor: declare each uncovered unit on this run's claim, or be refused by lore.
 const own = scope.claims.filter((claim) => claim.holder_run === run);
 const chosen = scope.claims.length === 1 ? scope.claims[0] : own.length === 1 ? own[0] : undefined;
+const unitName = ({ rel, symbol }) => (symbol === undefined ? rel : `${rel}#${symbol}`);
 if (chosen === undefined) {
-  deny(
-    `${rel} is outside every anchor and the claim to declare it on is ambiguous (open claims here: ` +
+  refuse(
+    `${unitName(uncovered[0])} is outside every anchor and the claim to declare it on is ambiguous (open claims here: ` +
       `${scope.claims.map((c) => c.task).join(', ')}; held by run ${run}: ${own.map((c) => c.task).join(', ') || 'none'}). ` +
-      `Declare it yourself with \`lore anchor declare <task> ${rel} --worktree ${workingCopy}\`, then retry.`,
+      `Declare it yourself with \`lore anchor declare <task> ${unitName(uncovered[0])} --worktree ${workingCopy}\`, then retry.`,
   );
 }
-try {
-  const declared = runLore(workingCopy, ['anchor', 'declare', String(chosen.task), rel, '--worktree', workingCopy, '--harness-run', run]);
-  if (declared.status === 0) process.exit(0);
-  const reason = (declared.stderr || declared.stdout).trim();
-  deny(
-    `${rel} is outside the anchors of ${chosen.task} and \`lore anchor declare\` refused it (exit ${declared.status}): ${reason}\n` +
-      'Do not edit this file. Report STATUS: BLOCKED naming the claim above.',
-  );
-} catch (err) {
-  deny(typeof err === 'string' ? err : `\`lore anchor declare\` could not complete (${err?.message ?? err})`);
+for (const unit of uncovered) {
+  const name = unitName(unit);
+  try {
+    const declared = runLore(workingCopy, ['anchor', 'declare', String(chosen.task), name, '--worktree', workingCopy, '--harness-run', run]);
+    if (declared.status === 0) continue;
+    const reason = (declared.stderr || declared.stdout).trim();
+    // reason: BR-1092 — a shell write is refused only when another live claim holds the target.
+    if (isBash && !/held-by-other-claim/.test(reason)) continue;
+    deny(
+      `${name} is outside the anchors of ${chosen.task} and \`lore anchor declare\` refused it (exit ${declared.status}): ${reason}\n` +
+        'Do not edit this file. Report STATUS: BLOCKED naming the claim above.',
+    );
+  } catch (err) {
+    refuse(typeof err === 'string' ? err : `\`lore anchor declare\` could not complete (${err?.message ?? err})`);
+  }
 }

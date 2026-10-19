@@ -69,13 +69,17 @@
 
 import { err, ok } from "./errors.js";
 import type { Result, LoreError } from "./errors.js";
-import { normalizeFileAnchors } from "./file-anchors.js";
+import { FILE_ANCHOR_SYMBOL_RE, normalizeFileAnchors } from "./file-anchors.js";
 import type { DocType } from "./types.js";
 
 // ─── Grammar (D1) ───────────────────────────────────────────────────────────
 
-/** ASCII-only JS identifier grammar for a code anchor's `#Symbol` suffix (D1). */
-const CODE_ANCHOR_SYMBOL_RE = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
+/**
+ * ASCII-only JS identifier grammar for a code anchor's `#Symbol` suffix (D1). The ONE definition lives in
+ * `file-anchors.ts` (`FILE_ANCHOR_SYMBOL_RE`): a task's `path#Symbol` file anchor and a spec's code anchor must
+ * accept exactly the same symbol spellings.
+ */
+const CODE_ANCHOR_SYMBOL_RE = FILE_ANCHOR_SYMBOL_RE;
 
 /** A title anchor is legal only on a test file: `*.test.ts` (includes `*.bun.test.ts`). */
 const TEST_FILE_PATH_RE = /\.test\.ts$/;
