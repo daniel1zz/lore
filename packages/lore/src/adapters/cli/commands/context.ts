@@ -100,6 +100,7 @@ import { collectContextFacts } from "../../../service/context-facts.js";
 import {
   runContextInit,
   runContextRefresh,
+  renderWithoutMemoryFileLine,
   type ContextInitReport,
   type ContextRefreshReport,
   type ContextRefreshScope,
@@ -347,10 +348,14 @@ function renderOutcome(inv: Invocation,
   const check = "check" in result.value ? result.value.check : null;
   if (check !== null) {
     // --check: nothing was written; exit 1 names each file that would change and/or the ceiling breach (AC-MI-3).
+    // D5: the module index no longer carries the without-memory-file count; this is where it is reported.
+    const withoutLine = check.modulesWithoutMemoryFile === null ? null : renderWithoutMemoryFileLine(check.modulesWithoutMemoryFile);
     if (check.differing.length === 0 && check.findings.length === 0) {
       printLine(inv.io.stdout, "context refresh --check: every target is already refreshed and within its ceiling");
+      if (withoutLine !== null) printLine(inv.io.stdout, withoutLine);
       return 0;
     }
+    if (withoutLine !== null) printLine(inv.io.stdout, withoutLine);
     for (const path of check.differing) printLine(inv.io.stdout, `would change: ${path}`);
     for (const finding of check.findings) printLine(inv.io.stdout, `${finding.kind}: ${finding.message}`);
     return 1;
