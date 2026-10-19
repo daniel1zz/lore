@@ -28,7 +28,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
@@ -96,8 +96,13 @@ describe("done removes the recorded worktree (#106)", () => {
     mustOk(git(c.path, "commit", "-q", "-m", `own commit on ${c.branch}`), `commit ${c.branch}`);
   }
 
+  /**
+   * Lands the branch through `lore integrate` (the only way main advances), which records the landing `lore done`
+   * requires on the claiming task (BR-1291, BR-1336). A branch with no commit past main is "already integrated" and
+   * records the landing the same way.
+   */
   function mergeToMain(c: Case): void {
-    mustOk(git(repo, "merge", "-q", "--no-edit", c.branch), `merge ${c.branch}`);
+    mustOk(lore(["integrate", c.branch, "--session", "wtc-fixture-session"]), `integrate ${c.branch}`);
   }
 
   /** Evidence floor `lore done` needs: an attested (runner-captured) pass. */
@@ -140,6 +145,9 @@ describe("done removes the recorded worktree (#106)", () => {
     mustOk(git(repo, "add", "-A"), "git add base");
     mustOk(git(repo, "commit", "-q", "-m", "base"), "git commit base");
     mustOk(lore(["init"]), "lore init");
+    // `lore integrate` keeps its own worktree under `.claude/` and needs the floor key; neither may dirty the tree
+    appendFileSync(join(repo, ".git", "info", "exclude"), ".claude/\n.lore/integrate-attempts/\n.lore/integrate-losses/\n");
+    appendFileSync(join(repo, ".lore", "config.yaml"), 'workflow:\n  integrate:\n    floor_command: "true"\n', "utf8");
     // reason: `lore init` arms state binding (AC-CT-3); a captured pass on a dirty tree is unbound and
     // refused by `lore done`, so the corpus scaffold is committed before any evidence is captured.
     mustOk(git(repo, "add", "-A"), "git add corpus");
@@ -160,6 +168,7 @@ describe("done removes the recorded worktree (#106)", () => {
 
     // zero own commits: branch == base, nothing to land.
     zeroCommit = makeClaimed("zero");
+    mergeToMain(zeroCommit); // nothing past main: integrate finds it already integrated and records the landing
     recordEvidence(zeroCommit);
 
     // uncommitted: merged own commit, then an UNTRACKED file.
@@ -201,7 +210,7 @@ describe("done removes the recorded worktree (#106)", () => {
     writeFileSync(join(unclaimedPath, "own-unclaimed.txt"), "x\n");
     mustOk(git(unclaimedPath, "add", "-A"), "unclaimed add");
     mustOk(git(unclaimedPath, "commit", "-q", "-m", "unclaimed own commit"), "unclaimed commit");
-    mustOk(git(repo, "merge", "-q", "--no-edit", unclaimedBranch), "unclaimed merge");
+    mustOk(lore(["integrate", unclaimedBranch, "--session", "wtc-fixture-session"]), "unclaimed integrate");
   }, 300_000);
 
   afterAll(() => {
@@ -262,11 +271,11 @@ describe("done removes the recorded worktree (#106)", () => {
   }, 120_000);
 
   // reason: DCL-1 (a) / #171 supersedes the old "exit 0, kept: unmerged-commits" result — `lore done` no longer
-  // archives a task whose claimed branch holds commits main lacks, so the cleanup is never reached for it.
-  it("refuses a task whose own commit is not reachable from main: exit 4 [floor: unmerged-branch], worktree and branch untouched", () => {
+  // archives a task whose work lore integrate has not landed, so the cleanup is never reached for it (BR-1291).
+  it("refuses a task whose own commit is not landed: exit 4 [floor: not-landed], worktree and branch untouched", () => {
     const r = done(unmerged);
     expect(r.status).toBe(4);
-    expect(r.out).toContain("[floor: unmerged-branch]");
+    expect(r.out).toContain("[floor: not-landed]");
     expect(existsSync(unmerged.path)).toBe(true);
     expect(branchExists(unmerged.branch)).toBe(true);
   }, 120_000);

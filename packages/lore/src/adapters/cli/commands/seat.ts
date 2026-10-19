@@ -60,7 +60,7 @@ export default defineLoreCommand({
     },
     force: {
       type: "boolean",
-      description: "For `remove`: bypass the unmerged-branch refusal (commits will be LOST)",
+      description: "For `remove`: bypass the refusal of an unmerged branch (commits will be LOST)",
     },
     json: {
       type: "boolean",

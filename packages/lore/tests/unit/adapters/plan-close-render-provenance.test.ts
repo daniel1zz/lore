@@ -136,9 +136,16 @@ function createTaskWithEmptyScope(dir: string, planSlug: string, title: string):
   return parseSlug(r.stdout);
 }
 
+/** One working copy carries one unlanded task (BR-1337) and plan close archives only landed work (BR-1291): each task
+ *  claims its own branch (nothing past main), which `lore integrate` finds already integrated and records on it. */
 function claimTask(dir: string, taskSlug: string): void {
-  const r = runLore(["claim", taskSlug, "--worktree", dir], dir);
+  const branch = `gv6-${taskSlug}`;
+  const made = spawnSync("git", ["branch", branch, "main"], { cwd: dir, encoding: "utf8" });
+  if (made.status !== 0) throw new Error(`git branch ${branch} failed: ${made.stderr}`);
+  const r = runLore(["claim", taskSlug, "--worktree", branch], dir);
   if (r.exitCode !== 0) throw new Error(`claim ${taskSlug} failed: ${r.stderr}`);
+  const landed = runLore(["integrate", branch, "--session", "gv6-integrate"], dir);
+  if (landed.exitCode !== 0) throw new Error(`integrate ${branch} failed: ${landed.stderr}${landed.stdout}`);
 }
 
 /** Records ONE runner-attested (`--capture`), genuinely non-empty-output evidence
@@ -219,7 +226,8 @@ beforeAll(() => {
 
   // reason: plans are judged by default (BR-281 / BR-1237); these fixtures approve plans only to reach
   // plan-close rendering, never review-judgment.
-  appendFileSync(join(tmpDir, ".lore", "config.yaml"), "workflow:\n  review:\n    judgment_required_types: []\n", "utf8");
+  appendFileSync(join(tmpDir, ".lore", "config.yaml"), "workflow:\n  review:\n    judgment_required_types: []\n  integrate:\n    floor_command: \"true\"\n", "utf8");
+  appendFileSync(join(tmpDir, ".git", "info", "exclude"), ".claude/\n"); // `lore integrate` keeps its worktree there
 
   prdSlug = createPrd(tmpDir, "GV6 PRD");
 

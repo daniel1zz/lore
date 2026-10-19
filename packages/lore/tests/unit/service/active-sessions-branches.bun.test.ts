@@ -148,14 +148,15 @@ describe("SessionService.bootstrap — active_sessions[].branches populated from
     expect(session?.branches).toEqual([]);
   });
 
-  it("BOUNDARY: two tasks claimed by the SAME session on the SAME branch dedup to one entry", async () => {
+  it("BOUNDARY: a second task claimed by the SAME session on the SAME working copy is refused (BR-1337), so the entry keeps one branch and one task", async () => {
     const { repoRoot } = makeRepoOnBranch("shared-branch");
     const { corpusService, taskWorkflowService, sessionService } = makeServices();
     const { taskId: taskA } = await createPlanAndTask(corpusService, "Task A");
     const { taskId: taskB } = await createPlanAndTask(corpusService, "Task B");
 
-    await taskWorkflowService.claim(taskA, { by: "agent:t3", worktree: repoRoot });
-    await taskWorkflowService.claim(taskB, { by: "agent:t3", worktree: repoRoot });
+    expect((await taskWorkflowService.claim(taskA, { by: "agent:t3", worktree: repoRoot })).ok).toBe(true);
+    // one working copy carries one unlanded task: the second claim is refused and writes nothing
+    expect((await taskWorkflowService.claim(taskB, { by: "agent:t3", worktree: repoRoot })).ok).toBe(false);
 
     const bootstrap = await sessionService.bootstrap("agent:t3");
     expect(bootstrap.ok).toBe(true);
@@ -163,7 +164,7 @@ describe("SessionService.bootstrap — active_sessions[].branches populated from
     const session = findSessionByWorktree(bootstrap.value.active_sessions, repoRoot);
     expect(session).toBeDefined();
     expect(session?.branches).toEqual(["shared-branch"]);
-    expect(session?.task_slugs.length).toBe(2);
+    expect(session?.task_slugs.length).toBe(1);
   });
 
   it("ERROR: a claim whose worktree path does not exist on disk never throws, branches: []", async () => {
