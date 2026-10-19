@@ -46,13 +46,15 @@
  *     the reconcile signal AC-GI-3 depends on.
  *   - `searchDuplicates` never calls the expensive `/search/issues` REST
  *     endpoint (a 30-request/min bucket measured at 1054–1561ms) — it
- *     reuses `listIssues`'s single batched call and substring-matches the
+ *     reuses `listIssues`'s paginated batched read and substring-matches the
  *     cached titles locally. A `listIssues` failure degrades this to
  *     `err(...)`, which the caller (`fileGithubIssue`) turns into an
  *     advisory `dedup_degraded: true` — it NEVER blocks filing (Scope-Alt).
- *   - `listIssues` issues exactly ONE `gh api` call regardless of how many
- *     issues are being listed (AC-GI-12's "N=1 costs the same as N=50"),
- *     never one call per issue.
+ *   - `listIssues` issues one `gh api` request PER PAGE (100 entries each),
+ *     never one per issue: max(1, ceil(N/100)) requests (BR-1241 as modified
+ *     by spec-github-owns-issue-report-state D2, AC-GS-1). Any failing page
+ *     fails the whole listing — a partial list is never returned. Pull
+ *     requests (entries carrying `pull_request`) are dropped.
  *
  * Side-effect class: IO (subprocess via the injected `GhRunner`; local
  * receipt-file append via the internally-constructed `ReceiptLogV2`).
@@ -123,6 +125,15 @@ export interface GithubListedIssue {
   readonly state: string;
   readonly body: string;
   readonly labels?: readonly string[];
+  /** GitHub's `state_reason` (`completed`/`not_planned`/`reopened`/...); `null` when GitHub gives none; `undefined` for a synthetically reconstructed record. */
+  readonly state_reason?: string | null;
+}
+
+/** A complete `listIssues` result: every issue (PRs excluded) plus the request count that read it. */
+export interface GithubListing {
+  readonly issues: GithubListedIssue[];
+  /** Number of `gh api` requests made — one per page, never one per issue. */
+  readonly pages: number;
 }
 
 /**
@@ -182,6 +193,8 @@ const GithubIssueListEntrySchema = z
     state: z.string(),
     body: z.string().nullable().optional(),
     labels: z.array(GithubIssueListLabelSchema),
+    state_reason: z.string().nullable().optional(),
+    pull_request: z.unknown().optional(),
   })
   .passthrough();
 
@@ -200,6 +213,36 @@ function parseJsonSafely(text: string): unknown {
   } catch {
     return undefined;
   }
+}
+
+/** Entries per `listIssues` request — GitHub's documented maximum. */
+const LIST_PAGE_SIZE = 100;
+
+/**
+ * Splits a `gh api -i` stdout into its `Link` header value and JSON body.
+ * Headers end at the first blank line. Stdout that does not start with
+ * `HTTP/` (no header block) is treated as a body with no `Link`, i.e. a
+ * single page; real `gh api -i` always emits headers.
+ */
+function splitHttpResponse(stdout: string): { body: string; linkHeader: string | undefined } {
+  if (!stdout.startsWith("HTTP/")) return { body: stdout, linkHeader: undefined };
+  const boundary = /\r?\n\r?\n/.exec(stdout);
+  if (boundary === null) return { body: "", linkHeader: undefined };
+  const head = stdout.slice(0, boundary.index);
+  const body = stdout.slice(boundary.index + boundary[0].length);
+  const linkLine = head.split(/\r?\n/).find((line) => /^link:/i.test(line));
+  return { body, linkHeader: linkLine?.slice(linkLine.indexOf(":") + 1).trim() };
+}
+
+/** Page number of the `rel="next"` entry in a `Link` header value; `undefined` when there is none. */
+function parseNextPage(linkHeader: string | undefined): number | undefined {
+  if (linkHeader === undefined) return undefined;
+  for (const part of linkHeader.split(/,\s*(?=<)/)) {
+    if (!/rel="?next"?/.test(part)) continue;
+    const match = /[?&]page=(\d+)/.exec(part);
+    return match === null ? undefined : Number(match[1]);
+  }
+  return undefined;
 }
 
 /**
@@ -286,7 +329,7 @@ export class GitHubIntakePort {
     if (!listResult.ok) return listResult;
 
     const lowerTitle = title.toLowerCase();
-    const matches = listResult.value
+    const matches = listResult.value.issues
       .filter((issue) => {
         const lowerIssueTitle = issue.title.toLowerCase();
         return lowerIssueTitle.includes(lowerTitle) || lowerTitle.includes(lowerIssueTitle);
@@ -383,41 +426,71 @@ export class GitHubIntakePort {
   }
 
   /**
-   * Lists every issue in the target repo (open and closed) in ONE batched
-   * `gh api` call — AC-GI-12: the call count for N=1 equals the call count
-   * for N=50, never one call per issue. Each returned
-   * {@link GithubListedIssue}'s `labels` is populated from the SAME response
-   * (`entry.labels.map((l) => l.name)`) — GitHub's issues REST payload
-   * already carries a `labels` array per entry, so `commands/issues.ts`'s
-   * `--verify` (spec-a-github-filed-defect-must-be-claimable-one-ingest-seam)
-   * reads the current `resolution:*` label off THIS call's result rather
-   * than issuing a second `gh api` call per repo.
+   * Lists every issue in the target repo (open and closed), page by page
+   * (`per_page=100`, following `Link: rel="next"`) until no next page, then
+   * drops every entry carrying `pull_request` (GitHub's issues endpoint
+   * returns PRs too). Requests = number of pages = max(1, ceil(N/100)),
+   * never one per issue (AC-GS-1). Each {@link GithubListedIssue}'s
+   * `labels`/`state_reason` come from the SAME responses, so no consumer
+   * needs a second `gh api` call.
    *
-   * @returns `ok(issues[])`, or `err(...)` on the first failing `gh` call
-   *   or a malformed response body
+   * reason: requests pass `-i` so the HTTP headers (the only carrier of
+   * `Link`) precede the JSON body in stdout — see {@link splitHttpResponse}.
+   *
+   * @returns `ok({issues, pages})`, or `err(...)` with the FIRST failing
+   *   page's error (transport/auth/rate kind propagated verbatim, or
+   *   `VALIDATION_ERROR` for a malformed page or a non-advancing next link).
+   *   A failing page never yields the pages read before it.
    */
-  async listIssues(): Promise<Result<GithubListedIssue[], LoreError>> {
-    const listResult = await this.runner.run(["api", `repos/${this.repo}/issues?state=all&per_page=100`]);
-    if (!listResult.ok) return listResult;
+  async listIssues(): Promise<Result<GithubListing, LoreError>> {
+    const issues: GithubListedIssue[] = [];
+    let page = 1;
+    let pages = 0;
 
-    const parsed = GithubIssueListSchema.safeParse(parseJsonSafely(listResult.value.stdout));
-    if (!parsed.success) {
-      return err({
-        code: "VALIDATION_ERROR",
-        field: "gh_issues_list_response",
-        message: `gh returned an issues-list payload this module could not parse: ${parsed.error.message}`,
-        value: listResult.value.stdout,
-      });
+    for (;;) {
+      const pageResult = await this.runner.run([
+        "api",
+        `repos/${this.repo}/issues?state=all&per_page=${LIST_PAGE_SIZE}&page=${page}`,
+        "-i",
+      ]);
+      if (!pageResult.ok) return pageResult;
+      pages += 1;
+
+      const response = splitHttpResponse(pageResult.value.stdout);
+      const parsed = GithubIssueListSchema.safeParse(parseJsonSafely(response.body));
+      const nextPage = parseNextPage(response.linkHeader);
+
+      // reason: ONE `gh_issues_list_response` error site on purpose — a second
+      // literal would split the baseline coverage site into `~0`/`~1` and
+      // orphan its existing mapping.
+      const malformed = !parsed.success
+        ? `gh returned an issues-list payload this module could not parse (page ${page}): ${parsed.error.message}`
+        : nextPage !== undefined && nextPage <= page
+          ? `GitHub's Link header pointed at page ${nextPage} after page ${page}; refusing to loop.`
+          : undefined;
+      if (!parsed.success || malformed !== undefined) {
+        return err({
+          code: "VALIDATION_ERROR",
+          field: "gh_issues_list_response",
+          message: malformed ?? "gh returned an issues-list payload this module could not parse",
+          value: pageResult.value.stdout,
+        });
+      }
+
+      for (const entry of parsed.data) {
+        if (entry.pull_request !== undefined) continue;
+        issues.push({
+          number: entry.number,
+          title: entry.title,
+          state: entry.state,
+          body: entry.body ?? "",
+          labels: entry.labels.map((label) => label.name),
+          state_reason: entry.state_reason ?? null,
+        });
+      }
+
+      if (nextPage === undefined) return ok({ issues, pages });
+      page = nextPage;
     }
-
-    return ok(
-      parsed.data.map((entry) => ({
-        number: entry.number,
-        title: entry.title,
-        state: entry.state,
-        body: entry.body ?? "",
-        labels: entry.labels.map((label) => label.name),
-      })),
-    );
   }
 }
