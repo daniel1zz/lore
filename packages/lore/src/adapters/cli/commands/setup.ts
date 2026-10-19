@@ -154,6 +154,8 @@ import { SetupService, type McpAddOutcome, type McpRegistrar, type SetupReceipt 
 import { ProjectSetupService, checkProjectLedger } from "../../../service/project-setup-service.js";
 import {
   PROJECT_MANIFEST_RELATIVE_PATH,
+  recordProjectLanguagePrior,
+  recordProjectRulesFiles,
   type ExecPort,
   type ProjectFsPort,
   type ProjectAssetSource,
@@ -674,9 +676,25 @@ async function runProjectContextProjection(opts: {
   );
   if (!refreshed.ok) return refreshed;
 
+  // reason: rules files and the `language` key are written outside the scaffold's ledger write; the uninstall
+  // reverses ledger entries only (BR-840), so each is recorded here (BR-834) — rules after the refresh wrote them,
+  // the language prior BEFORE the write that replaces it.
+  const ledgerFs = makeRealProjectFs();
+  const recordedRules = recordProjectRulesFiles(
+    ledgerFs,
+    opts.repoDir,
+    refreshed.value.rules.map((outcome) => ({ path: toRepoRelative(opts.repoDir, outcome.path), state: outcome.state })),
+  );
+  if (!recordedRules.ok) return recordedRules;
+
   const plan = planLanguageProjections(opts.claudeDir, opts.repoDir, opts.inv);
   if (!plan.ok) return plan;
-  return applyLanguageProjections(plan.value.filter((item) => item.layer === "project"));
+  const projectItems = plan.value.filter((item) => item.layer === "project");
+  for (const item of projectItems) {
+    const recordedLanguage = recordProjectLanguagePrior(ledgerFs, opts.repoDir, toRepoRelative(opts.repoDir, item.settingsPath));
+    if (!recordedLanguage.ok) return recordedLanguage;
+  }
+  return applyLanguageProjections(projectItems);
 }
 
 // ─── --project --check (BR-1085): classify every project-managed file, write only the cache ──
@@ -914,7 +932,7 @@ async function runProjectUninstall(opts: { json: boolean; yes: boolean; inv: Inv
   });
   if (!confirmation.proceed) return confirmation.code;
 
-  const result = await uninstallProject(makeRealProjectRemoveFs(), { repoDir });
+  const result = await uninstallProject(makeRealProjectRemoveFs(), { repoDir, exec: makeRealProjectExec() });
   if (!result.ok) {
     opts.inv.io.stderr.write(formatErrorFor(opts.inv, result.error) + "\n");
     return exitCode(result.error);
