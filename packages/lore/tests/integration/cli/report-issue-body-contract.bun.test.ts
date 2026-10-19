@@ -158,7 +158,7 @@ beforeAll(() => {
   isolatedConfigHome = mkdtempSync(join(TMP_ROOT, "lore-br494-config-home-"));
   corpusRoot = mkdtempSync(join(TMP_ROOT, "lore-br494-corpus-"));
   humanCorpusRoot = mkdtempSync(join(TMP_ROOT, "lore-br494-corpus-human-"));
-  // reason: the stub always answers the same issue number, and a filed issue mints corpus task `task-gh-<repo>-<number>` — a second filing into the SAME corpus collides (DUPLICATE_SLUG), so the human-output filing gets its own corpus.
+  // reason: the stub always answers the same issue number, so a second filing of the same title into the SAME corpus is recognised as a retry ("Already filed") — the human-output filing gets its own corpus to print the first-filing text.
   for (const root of [corpusRoot, humanCorpusRoot]) prepareCorpus(root);
 
   // Filing 1 (--json): the structured contract + the recorded body. Filing 2 (human output, own corpus): the printed text.

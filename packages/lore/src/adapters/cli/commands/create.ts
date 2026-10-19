@@ -70,7 +70,7 @@ import { KNOWLEDGE_SUB_TYPES, SPEC_KINDS, extractFileAnchors } from "@lore/core"
 import { createWithSupersedes, renderSupersedeRepairMessage } from "../../../flows/supersede-flow.js";
 import { collectFileAnchorResolution, renderFileAnchorAdvisory } from "../../../service/anchor-resolution.js";
 import { buildFileAnchorProbeContext } from "../../real-fs-probe.js";
-import { resolveResolvesTargets, type ResolvesTarget } from "../create-resolves.js";
+import { resolveIssueCarrierRefs } from "../create-issue-refs.js";
 import {
   checkTaskCreateAdhocConflicts,
   checkTaskCreateRequiredFlags,
@@ -130,7 +130,6 @@ const TYPE_SPECIFIC_FLAGS: Readonly<Record<string, readonly DocType[]>> = {
   "requires-uat": ["plan"],
   adhoc: ["task"],
   linkage: ["task"],
-  resolves: ["spec", "plan", "task"],
 };
 
 /** citty/mri yields a single string for one occurrence of a repeatable flag, an array for ≥2, or `undefined` for zero. Normalizes to a string array. */
@@ -237,10 +236,10 @@ export default defineLoreCommand({
       description:
         "ID or slug of an existing knowledge/adr doc this new doc supersedes — creates then invalidates the old doc in one command (SPEC-043 D11). The target's type is validated BEFORE any write: a non-knowledge/adr target (e.g. a task) is refused with exit 4 and creates NOTHING (task-a-task-cannot-be-retracted-supersedes-emits-a-repair). Half-failure past that point (create ok, invalidate fails) reports a nonzero exit naming the exact repair command; the new doc is still created.",
     },
-    resolves: {
+    issue: {
       type: "string",
       description:
-        "[spec|plan|task, repeatable] Bind the new document to a filed defect report: a GitHub issue number (the report `lore issue adopt <n>` created) or its task-gh-… slug. Writes a `resolves` link in the same command, so archiving this document closes the report's GitHub issue. Every target must exist and carry extra.issue_report — otherwise nothing is created (exit 4). Source: spec-archiving-the-work-that-resolves-a-defect-report-closes D5",
+        "[plan|task, repeatable] Carry a GitHub issue on this work: writes extra.issues [{repo_id, number}] on the new document, so archiving it closes the issue. Each <n> must be an issue in the live listing of the configured feedback.upstream repository; otherwise nothing is created (exit 4). A spec is not an issue carrier (exit 4). Source: spec-github-owns-issue-report-state-no-mirror-task-work-carries D1",
     },
     ai: {
       type: "boolean",
@@ -404,7 +403,7 @@ export default defineLoreCommand({
         // process.argv was not set; undefined when flag not present since no default).
         : (args.ai as boolean | undefined);
 
-    const { app, defaults } = loadLoreApp({ inv });
+    const { app, defaults, config } = loadLoreApp({ inv });
     try {
       const tags = args.tags
         ? args.tags
@@ -518,21 +517,21 @@ export default defineLoreCommand({
         resolvedPlanId = planResolve.value;
       }
 
-      // spec-archiving-the-work-that-resolves-a-defect-report-closes D5 — every --resolves target is resolved
-      // and validated BEFORE any write: one bad value refuses the whole creation (exit 4, nothing written).
-      const resolvesTokens = normalizeRepeatable(args.resolves);
-      let resolvesTargets: ResolvesTarget[] = [];
-      if (resolvesTokens.length > 0) {
-        const resolved = await resolveResolvesTargets(app.corpusService, resolvesTokens);
-        if (!resolved.ok) {
-          inv.io.stderr.write(formatErrorFor(inv, resolved.error) + "\n");
-          return exitCode(resolved.error);
+      // spec-github-owns-issue-report-state-no-mirror-task-work-carries D1 — every --issue number is checked
+      // against the live GitHub listing BEFORE any write: one bad value refuses the whole creation (exit 4).
+      const issueTokens = normalizeRepeatable(args.issue);
+      let issueRefs: Array<{ repo_id: number; number: number }> = [];
+      if (issueTokens.length > 0) {
+        const resolvedRefs = await resolveIssueCarrierRefs(inv, config, docType, issueTokens);
+        if (!resolvedRefs.ok) {
+          inv.io.stderr.write(formatErrorFor(inv, resolvedRefs.error) + "\n");
+          return exitCode(resolvedRefs.error);
         }
-        resolvesTargets = resolved.value;
+        issueRefs = resolvedRefs.value;
       }
 
       // Assemble type-specific extra object
-      const extra = buildExtra(
+      const baseExtra = buildExtra(
         docType,
         args["decision-status"],
         args["sub-type"],
@@ -546,6 +545,7 @@ export default defineLoreCommand({
         args.linkage as string | undefined,
         acScope,
       );
+      const extra = issueRefs.length > 0 ? { ...(baseExtra ?? {}), issues: issueRefs } : baseExtra;
 
       // SPEC-065 D4: --parent defaults to the (already-resolved) --plan-id when
       // omitted — for every non-task type resolvedPlanId is always undefined, so
@@ -617,17 +617,6 @@ export default defineLoreCommand({
         doc = result.value;
       }
 
-      // D5 — the `resolves` links are written in the same command, right after the create. A failure here
-      // (not expected: the targets were validated above) is loud, names the exact repair command, and exits
-      // non-zero; the document is already created.
-      const linkedResolves: string[] = [];
-      const resolvesFailures: Array<{ slug: string; error: LoreError }> = [];
-      for (const target of resolvesTargets) {
-        const linked = await app.corpusService.link(doc.id, target.id, "resolves", { by: resolvedActor });
-        if (linked.ok) linkedResolves.push(target.slug);
-        else resolvesFailures.push({ slug: target.slug, error: linked.error });
-      }
-
       if (args.json) {
         const data =
           supersedeError !== undefined
@@ -639,7 +628,7 @@ export default defineLoreCommand({
             : doc;
         printLine(inv.io.stdout, 
           JSON.stringify(
-            { ok: true, data: linkedResolves.length > 0 ? { ...data, resolves_linked: linkedResolves } : data },
+            { ok: true, data },
             null,
             2,
           ),
@@ -650,20 +639,11 @@ export default defineLoreCommand({
         printLine(inv.io.stdout, `  Slug:   ${doc.slug}`);
         printLine(inv.io.stdout, `  Title:  ${doc.title}`);
         printLine(inv.io.stdout, `  Status: ${doc.status} (v${doc.version})`);
-        if (linkedResolves.length > 0) printLine(inv.io.stdout, `  Resolves: ${linkedResolves.join(", ")}`);
+        if (issueRefs.length > 0) printLine(inv.io.stdout, `  Issues: ${issueRefs.map((ref) => `#${ref.number}`).join(", ")}`);
         printLine(inv.io.stdout, `\nRun \`lore get ${doc.slug}\` to view the document.`);
       }
 
-      // reason: the later failure's code wins (the supersede orphan overrides a resolves failure), exactly as the
-      // old "last recorded code" did; the run returns it after the advisories below.
       let reported: ExitReport = 0;
-      for (const failure of resolvesFailures) {
-        inv.io.stderr.write(
-          `Error: ${doc.slug} was created but its resolves link to ${failure.slug} failed (${formatErrorFor(inv, failure.error)})\n` +
-            `  Repair: lore link ${doc.slug} ${failure.slug} --type resolves\n`,
-        );
-        reported = exitCode(failure.error);
-      }
 
       // Loud orphan (D11, never silent) — create succeeded but the follow-up
       // invalidate() failed. The new doc is real (already printed above); report a

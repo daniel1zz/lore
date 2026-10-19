@@ -6,7 +6,7 @@
 
 import { isDeepStrictEqual } from "node:util";
 import { ulid } from "ulidx";
-import { err, ok, DEDICATED_EXTRA_KEYS, type Result } from "@lore/core";
+import { err, ok, DEDICATED_EXTRA_KEYS, issueRefSchema, MAX_ISSUE_REFS_PER_CARRIER, type Result } from "@lore/core";
 import { admitAcWrite, applyAcChange } from "./ac-write-chokepoint.js";
 import type { LoreError } from "@lore/core";
 // reason: getTransliterateCjk/containsCjk (SPEC-068 D1, hotfix 2026-07-23) are
@@ -116,7 +116,7 @@ import { computeStampVerdictDistribution, type StampVerdictDistribution } from "
 import { collectKnownRuleIds } from "./baseline-rule-ids.js";
 import { buildRuleIndex, collectLiveScriptCitedRuleIds } from "./ac-citations.js";
 import { pickBaselineRoot, pickStrategyDocument } from "./navigation-roots.js";
-import { hasIssueReport, type ResolvesInEdgeLike, type ResolutionSourceDocLike } from "./issue-resolution.js";
+import { type ResolvesInEdgeLike, type ResolutionSourceDocLike } from "./issue-resolution.js";
 import type { ArchiveIssueClosePort, IssueCloseItem } from "./issue-close-on-archive.js";
 import { isPlanMember } from "./plan-membership.js";
 import { bodyDiffers, RecordLockService, type RecordEditOp } from "./record-lock-service.js";
@@ -965,6 +965,54 @@ function patchedFieldsUnchanged(doc: DocRecord, patch: DocWritePatch): boolean {
 /** `patch` without its `undefined`-valued keys (exactOptionalPropertyTypes: an undefined key must not overwrite). */
 function definedOnly(patch: DocWritePatch): DocWritePatch {
   return Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined)) as DocWritePatch;
+}
+
+/**
+ * `extra` keys that no write may carry any more. GitHub owns issue-report state; the corpus owns only the
+ * carrier `extra.issues` (spec-github-owns-issue-report-state-no-mirror-task-work-carries D1).
+ * reason: this list is the service-layer refusal every write path (CLI, MCP, HTTP, batch) shares; a check
+ * in a CLI adapter alone would let MCP and batch writes slip through (AC-GS-11).
+ */
+const RETIRED_EXTRA_KEYS: readonly string[] = ["issue_report"];
+
+/**
+ * Judges the issue-carrier shape of an `extra` bag about to be written to a document of `docType`.
+ *
+ * @param docType - type of the document being created or patched
+ * @param extra - the `extra` bag the write carries (undefined = nothing to judge)
+ * @returns a VALIDATION_ERROR naming the offending field, or `undefined` when the bag is acceptable
+ */
+function judgeIssueCarrierExtra(docType: string, extra: Record<string, unknown> | undefined): LoreError | undefined {
+  if (extra === undefined) return undefined;
+  for (const key of RETIRED_EXTRA_KEYS) {
+    if (key in extra) {
+      return {
+        code: "VALIDATION_ERROR",
+        field: `extra.${key}`,
+        message: `extra.${key} is retired: GitHub owns issue-report state. Carry the issue on the work with extra.issues ([{repo_id, number}]), and convert existing reports with \`lore issues migrate --apply\``,
+        value: extra[key],
+      };
+    }
+  }
+  const issues = extra["issues"];
+  if (issues === undefined) return undefined;
+  const refuse = (message: string): LoreError => ({ code: "VALIDATION_ERROR", field: "extra.issues", message, value: issues });
+  if (docType !== "task" && docType !== "plan") {
+    return refuse(`extra.issues is allowed only on a task or plan (a ${docType} is not an issue carrier)`);
+  }
+  if (!Array.isArray(issues) || issues.length === 0) return refuse("extra.issues must be a non-empty array of {repo_id, number}");
+  if (issues.length > MAX_ISSUE_REFS_PER_CARRIER) {
+    return refuse(`extra.issues holds ${issues.length} refs; at most ${MAX_ISSUE_REFS_PER_CARRIER} are allowed`);
+  }
+  const seen = new Set<string>();
+  for (const entry of issues) {
+    const parsedRef = issueRefSchema.safeParse(entry);
+    if (!parsedRef.success) return refuse("each extra.issues entry must be {repo_id, number}, both positive integers");
+    const refKey = `${parsedRef.data.repo_id}#${parsedRef.data.number}`;
+    if (seen.has(refKey)) return refuse(`extra.issues names ${refKey} more than once`);
+    seen.add(refKey);
+  }
+  return undefined;
 }
 
 /**
@@ -1878,6 +1926,9 @@ export class CorpusService {
     }
 
     const data = parsed.data;
+
+    const carrierRefusal = judgeIssueCarrierExtra(data.type, data.extra);
+    if (carrierRefusal !== undefined) return err(carrierRefusal);
 
     // AC write chokepoint (spec-baseline-slice-2 §C3, AC-BLS2-1; amendment log 2026-10-08):
     // create is a SANCTIONED path — inline criteria are additions, re-validated here, and the
@@ -2858,6 +2909,9 @@ export class CorpusService {
 
     const existing = findResult.value;
     const now = new Date().toISOString();
+
+    const carrierRefusal = judgeIssueCarrierExtra(existing.type, parsedPatch.data.extra);
+    if (carrierRefusal !== undefined) return err(carrierRefusal);
 
     // BR-1071 (issues #65 #50) — setting a status to approved IS an approval: it takes the approve path
     // (judgment, spec/plan-promote, rule-citation checks; an `approve` version + audit row), never a
@@ -5548,29 +5602,16 @@ export class CorpusService {
       }
     }
 
-    // D1b (spec-issue-closure-loop-computed-resolution-agent-reachable) —
-    // a `resolves` edge's `to` MUST be a task carrying `extra.issue_report`
-    // (an issue task). Enforced here, the shared link write path, so CLI,
-    // MCP, and HTTP are all covered by one implementation. `hasIssueReport`
-    // (issue-resolution.ts) is the same defensive presence predicate D2's
-    // `computeIssueResolution` builds on.
-    if (type === "resolves") {
-      const toDocResult = await this.store.find(toResult.value);
-      if (!toDocResult.ok) return toDocResult;
-      const toDoc = toDocResult.value;
-      if (toDoc === null || toDoc.deleted_at !== null) {
-        return err({ code: "DOC_NOT_FOUND", id: toResult.value });
-      }
-
-      if (toDoc.type !== "task" || !hasIssueReport(toDoc.extra)) {
-        return err({
-          code: "VALIDATION_ERROR",
-          field: "to",
-          message:
-            "resolves edge target must be a task carrying extra.issue_report (an issue task)",
-          value: { id: toResult.value, type: toDoc.type },
-        });
-      }
+    // reason: `resolves` links are retired (spec-github-owns-issue-report-state-no-mirror-task-work-carries D1);
+    // the carrier is extra.issues. Refused here, the shared link write path, so CLI, MCP and HTTP agree.
+    // The `LinkType` union still names "resolves" until the readers of stored legacy rows are rewritten.
+    if ((type as string) === "resolves") {
+      return err({
+        code: "VALIDATION_ERROR",
+        field: "type",
+        message: "link type 'resolves' is retired: carry the issue on the work with extra.issues (lore create task --issue <n>)",
+        value: type,
+      });
     }
 
     const now = new Date().toISOString();
