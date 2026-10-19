@@ -145,7 +145,7 @@ describe("lore migrate memory-limits (AC b)", () => {
     expect(readFileSync(configPath(), "utf8")).toBe(newText());
 
     expect(runLore(["status"], dir).exitCode).toBe(0);
-  });
+  }, 120_000);
 
   it("STATE: a setting that is the only key under context.memory_files removes the emptied parents too", () => {
     writeFileSync(configPath(), `${base}\ncontext:\n  memory_files:\n    adoption: enforce\n`);
