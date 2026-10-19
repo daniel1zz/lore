@@ -450,16 +450,18 @@ describe("lore setup — STATE", () => {
       //       BEFORE the manifest-tracked candidates and never itself
       //       ledger-tracked — a repo's knowledge base is intentionally NOT
       //       destroyed by reversing the scaffold tooling around it.
-      //   (b) `git config core.hooksPath` is a git-config mutation, not a
-      //       filesystem path the `SetupEntry` ledger schema has any field
-      //       for — `uninstallProject` never touches git config at all.
+      //   (b) `git config core.hooksPath` was once a residual here; the project ledger now records it (below).
       expect(existsSync(join(repoDir, ".lore", "config.yaml"))).toBe(true);
       expect(existsSync(join(repoDir, ".lore", "lore.db"))).toBe(true);
       const hooksPathAfterUninstall = spawnSync("git", ["config", "--get", "core.hooksPath"], {
         cwd: repoDir,
         encoding: "utf8",
       });
-      expect(hooksPathAfterUninstall.stdout.trim()).toBe(join(realpathSync(repoDir), "hooks"));
+      // D4 / BR-837 (spec-defect-clusters-round-2-part-a): the ledger records the earlier core.hooksPath and the
+      // uninstall restores it. This repo had none, so the setting ends unset (`git config --get` exits 1). This line
+      // used to pin the bug (lore's absolute hooks path surviving the uninstall).
+      expect(hooksPathAfterUninstall.status).toBe(1);
+      expect(hooksPathAfterUninstall.stdout.trim()).toBe("");
 
       // (c) the `hooks/` DIRECTORY itself is left behind, now empty —
       // `uninstallProject` removes exactly the manifest-tracked FILE paths
