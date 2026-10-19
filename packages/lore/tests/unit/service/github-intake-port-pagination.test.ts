@@ -12,9 +12,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
-import { GhRunner, type GhExecFile } from "../../src/service/gh-runner.js";
-import { GitHubIntakePort } from "../../src/service/github-intake-port.js";
+import { GhRunner, type GhExecFile } from "../../../src/service/gh-runner.js";
+import { GitHubIntakePort } from "../../../src/service/github-intake-port.js";
 
+const SPEC_AC = "spec-github-owns-issue-report-state-no-mirror-task-work-carries#AC-GS-1";
 const PAGE_SIZE = 100;
 
 interface StubEntry {
@@ -79,8 +80,8 @@ function makePort(stub: Stub): GitHubIntakePort {
   });
 }
 
-describe("AC-GS-1 paginated PR-free listing", () => {
-  it("AC-GS-1 reads 3 pages (100/100/52), drops 2 PRs, keeps #1 from page 3", async () => {
+describe(`${SPEC_AC} paginated PR-free listing`, () => {
+  it(`${SPEC_AC} reads 3 pages (100/100/52), drops 2 PRs, keeps #1 from page 3`, async () => {
     const stub = makeStub(makeEntries(252, [200, 77]));
     const result = await makePort(stub).listIssues();
     expect(result.ok).toBe(true);
@@ -95,7 +96,7 @@ describe("AC-GS-1 paginated PR-free listing", () => {
     expect(result.value.issues.find((issue) => issue.number === 1)?.state_reason).toBe("completed");
   });
 
-  it("AC-GS-1 a failing page 2 fails the whole listing with that page's code and returns no issues", async () => {
+  it(`${SPEC_AC} a failing page 2 fails the whole listing with that page's code and returns no issues`, async () => {
     const stub = makeStub(makeEntries(252, [200, 77]), 2);
     const result = await makePort(stub).listIssues();
     expect(result.ok).toBe(false);
@@ -112,7 +113,7 @@ describe("AC-GS-1 paginated PR-free listing", () => {
     [100, 1],
     [101, 2],
     [250, 3],
-  ])("AC-GS-1 N=%i issues cost max(1, ceil(N/100)) = %i requests", async (total, expectedRequests) => {
+  ])(`${SPEC_AC} N=%i issues cost max(1, ceil(N/100)) = %i requests`, async (total, expectedRequests) => {
     const stub = makeStub(makeEntries(total, []));
     const result = await makePort(stub).listIssues();
     expect(result.ok).toBe(true);
@@ -123,7 +124,7 @@ describe("AC-GS-1 paginated PR-free listing", () => {
     expect(result.value.pages).toBe(expectedRequests);
   });
 
-  it("AC-GS-1 an empty repository makes exactly one request", async () => {
+  it(`${SPEC_AC} an empty repository makes exactly one request`, async () => {
     const stub = makeStub([]);
     const result = await makePort(stub).listIssues();
     expect(result.ok).toBe(true);
@@ -132,7 +133,7 @@ describe("AC-GS-1 paginated PR-free listing", () => {
     expect(stub.calls).toHaveLength(1);
   });
 
-  it("AC-GS-1 a next link that does not advance fails loud instead of looping", async () => {
+  it(`${SPEC_AC} a next link that does not advance fails loud instead of looping`, async () => {
     const execFile: GhExecFile = async () => ({
       stdout: `HTTP/2.0 200 OK\r\nLink: <https://api.github.com/x?page=1>; rel="next"\r\n\r\n[]`,
       stderr: "",
