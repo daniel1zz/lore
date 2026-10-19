@@ -22,7 +22,7 @@ import { absentDeclarationsOf, partitionDeclaredCommands, type AbsentDeclaration
 import type { MainTreePort } from "../../service/main-tree-guard.js";
 import type { BaselineDeclarationPort } from "../../service/review-service.js";
 import type { RuleService } from "../../service/rule-service.js";
-import { SiteCensusError, findCensusRoot, listSitesMany, resolveCommandEntry } from "../../service/site-census.js";
+import { SiteCensusError, findCensusRoot, resolveCommandEntry } from "../../service/site-census.js";
 import { listRunnableCommands, type RunnableCommand } from "./runnable-commands.js";
 
 /** The predicate inputs of one tree: each declared command's census entry key, and the registry's runnable entry keys. */
@@ -122,6 +122,9 @@ export function buildMainTreePort(repoRoot: string): MainTreePort {
         const { live } = partitionDeclaredCommands(commands, entryKeys, runnableEntries);
         if (live.length > 0) {
           const reached = new Set<string>();
+          // reason: the census walk is loaded on demand, so the application wiring does not statically reach the census
+          // walker's internals (every command would then answer for them); the walk runs only when a removal is measured.
+          const { listSitesMany } = await import("../../service/site-census.js");
           for (const census of listSitesMany({ rootDir, commands: live }).values()) {
             const bootstrap = new Set(census.bootstrap.map((s) => s.key));
             for (const site of census) if (!bootstrap.has(site.key)) reached.add(site.key);
