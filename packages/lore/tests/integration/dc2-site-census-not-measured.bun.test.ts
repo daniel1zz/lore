@@ -18,9 +18,9 @@
  *   REGRESSION: (c) shallow-first order gives the same answer as deep-first
  */
 import { afterAll, describe, expect, it, vi } from "vitest";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { MAX_CALL_DEPTH, listSites } from "../../src/service/site-census.js";
 import { withSessionIdentity } from "../helpers/session-actor";
 
@@ -74,9 +74,31 @@ function chainSource(calls: number): string {
 
 const sitesOf = (root: string, name: string) => listSites({ rootDir: root, entry: { file: `${COMMANDS_DIR}/${name}.ts`, symbol: "default.run" } });
 
+/** The nearest ancestor `node_modules` that holds the installed deps (a linked worktree resolves them from the main checkout above it). */
+function installedNodeModules(): string {
+  for (let dir = REPO_ROOT; ; dir = dirname(dir)) {
+    if (existsSync(join(dir, "node_modules", "citty"))) return join(dir, "node_modules");
+    if (dirname(dir) === dir) throw new Error(`no node_modules holding citty at or above ${REPO_ROOT}`);
+  }
+}
+
+/**
+ * A throwaway corpus (`lore init`) whose `packages` entry links to the repository's sources: the census root is found by
+ * walking up from cwd, so the real command sources are analysed while the corpus resolves to the mkdtemp dir, never the repo's `.lore/`.
+ */
+function sourceLinkedCorpus(): string {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "dc2-19-src-")));
+  scratch.push(root);
+  // reason: the census resolves `@lore/core` and npm imports through the root's tsconfig `paths` and node_modules; an unresolved import makes the verb exit 1.
+  for (const entry of ["packages", "tsconfig.json", "tsconfig.base.json"]) symlinkSync(join(REPO_ROOT, entry), join(root, entry));
+  symlinkSync(installedNodeModules(), join(root, "node_modules"));
+  mustRun(["init"], root);
+  return root;
+}
+
 describe(`${SPEC}#AC-DC2-19 (a) every positional token forms the command path`, () => {
   it(`${SPEC}#AC-DC2-19 HAPPY: gate spec-create resolves to its entry symbol`, () => {
-    const r = runLore(["baseline", "sites", "gate", "spec-create", "--json"], REPO_ROOT);
+    const r = runLore(["baseline", "sites", "gate", "spec-create", "--json"], sourceLinkedCorpus());
     expect(r.exitCode, r.stderr + r.stdout).toBe(0);
     const data = (JSON.parse(r.stdout) as { data: { command: string; entry: { file: string; symbol: string } } }).data;
     expect(data.command).toBe("gate spec-create");
@@ -84,7 +106,7 @@ describe(`${SPEC}#AC-DC2-19 (a) every positional token forms the command path`, 
   });
 
   it(`${SPEC}#AC-DC2-19 NEGATIVE: a third token that is no subcommand exits 4 naming the whole path`, () => {
-    const r = runLore(["baseline", "sites", "gate", "spec-create", "extra"], REPO_ROOT);
+    const r = runLore(["baseline", "sites", "gate", "spec-create", "extra"], sourceLinkedCorpus());
     expect(r.exitCode, r.stderr + r.stdout).toBe(4);
     expect(r.stderr + r.stdout).toContain("gate spec-create extra");
   });
