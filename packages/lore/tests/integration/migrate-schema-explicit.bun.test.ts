@@ -69,6 +69,7 @@ function ephemeralPort(): number {
   const probe = Bun.serve({ port: 0, fetch: () => new Response("") });
   const port = probe.port;
   probe.stop(true);
+  if (port === undefined) throw new Error("Bun.serve({ port: 0 }) reported no port");
   return port;
 }
 

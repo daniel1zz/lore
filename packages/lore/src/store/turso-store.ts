@@ -20,6 +20,8 @@
 import type { Client, InStatement, InValue, ResultSet, Row, Transaction } from "@libsql/client";
 import { accessSync, constants as fsConstants } from "node:fs";
 import { createRequire } from "node:module";
+import { isSchemaBehind, SchemaBehindError } from "./schema-behind.js";
+import { LATEST_SCHEMA_VERSION } from "./schema-version.js";
 import { MIGRATION_001_SQL } from "./migrations/migration-001.js";
 import { MIGRATION_002_SQL } from "./migrations/migration-002.js";
 import { MIGRATION_003_SQL } from "./migrations/migration-003.js";
@@ -538,6 +540,12 @@ export class TursoStore implements StoreInterface {
       const currentVersion = versionRs.rows[0]
         ? rowNum(versionRs.rows[0], "user_version")
         : 0;
+
+      // reason: a corpus upgrade runs only through `lore migrate schema` (SQLiteStore over the same local file); this
+      // store never rewrites an older corpus as a side effect of opening it. Surfaces as STORE_ERROR via ensureReady().
+      if (isSchemaBehind(currentVersion, LATEST_SCHEMA_VERSION)) {
+        throw new SchemaBehindError(this.localPath, currentVersion, LATEST_SCHEMA_VERSION);
+      }
 
       if (currentVersion < 1) {
         await this.client.executeMultiple(MIGRATION_001_SQL);

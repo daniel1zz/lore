@@ -41,6 +41,7 @@ import { MIGRATION_019_ADD_COLUMNS, MIGRATION_019_SQL } from "./migrations/migra
 // JSDoc for the bump-together invariant.
 import { LATEST_SCHEMA_VERSION } from "./schema-version.js";
 export { LATEST_SCHEMA_VERSION } from "./schema-version.js";
+import { isSchemaBehind, SchemaBehindError } from "./schema-behind.js";
 import type {
   AuditEntry,
   CalibrationRecord,
@@ -186,6 +187,13 @@ export interface SQLiteStoreOptions {
    * build a corpus that is GENUINELY one schema behind, whatever the newest migration does; production callers never set it.
    */
   readonly schemaCeiling?: number;
+  /**
+   * Permit upgrading an existing corpus that is older than the schema. Without it the constructor throws
+   * {@link SchemaBehindError} and touches nothing: a corpus upgrade runs only through `lore migrate schema` (the one
+   * caller that sets this), never as a side effect of opening. A NEW file (`user_version` 0) is always built at the
+   * latest schema and needs no flag.
+   */
+  readonly migrate?: true;
 }
 
 export class SQLiteStore implements StoreInterface {
@@ -199,6 +207,8 @@ export class SQLiteStore implements StoreInterface {
   readonly writeWaitMs: number;
 
   private readonly schemaCeiling: number;
+  /** True only for the explicit `lore migrate schema` open; see {@link SQLiteStoreOptions.migrate}. */
+  private readonly migrateAllowed: boolean;
   /** The corpus file; named by a failed migration (migration-026 fails loud with it). */
   private readonly corpusPath: string;
 
@@ -220,6 +230,7 @@ export class SQLiteStore implements StoreInterface {
     this.writeWaitMs = declaredWriteWaitMs;
     this.corpusPath = dbPath;
     this.schemaCeiling = options?.schemaCeiling ?? LATEST_SCHEMA_VERSION;
+    this.migrateAllowed = options?.migrate === true;
     try {
       if (options?.readonly === true) this.db.run(`PRAGMA busy_timeout = ${this.writeWaitMs}`);
       else this.init();
@@ -294,7 +305,20 @@ export class SQLiteStore implements StoreInterface {
     // Enable WAL for better concurrent read performance
     this.db.run("PRAGMA journal_mode = WAL");
     this.db.run("PRAGMA foreign_keys = ON");
+    this.refuseUnrequestedUpgrade();
     this.runMigrations();
+  }
+
+  /**
+   * Throws {@link SchemaBehindError} when the corpus already exists at an older schema and this open was not asked to
+   * `migrate`. Runs before any migration statement, so the refused corpus is byte-for-byte untouched.
+   */
+  private refuseUnrequestedUpgrade(): void {
+    if (this.migrateAllowed) return;
+    const currentVersion = (this.db.query("PRAGMA user_version").get() as { user_version: number }).user_version;
+    if (isSchemaBehind(currentVersion, this.schemaCeiling)) {
+      throw new SchemaBehindError(this.corpusPath, currentVersion, this.schemaCeiling);
+    }
   }
 
   /**
