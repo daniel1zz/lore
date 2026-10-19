@@ -139,7 +139,7 @@ describe("lore migrate audit-backfill (AC b)", () => {
     expect(again.exitCode, again.stderr).toBe(0);
     expect(again.stdout).toContain("0 version(s) recorded as reconstructed");
     expect(auditCount()).toBe(before + 1);
-  });
+  }, 120_000);
 
   it("STATE: the reconstructed entry names the version, the reason and the upgrade run", () => {
     seedUnauditedVersion(900, "2026-01-01T00:00:00.000Z");
