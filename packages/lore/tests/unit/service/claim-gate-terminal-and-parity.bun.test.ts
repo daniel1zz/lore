@@ -111,7 +111,12 @@ function patchRow(taskId: string, claimPatch: Record<string, unknown>, status?: 
   }
 }
 
-type SiblingState = "terminal-with-claim" | "live-fresh-foreign" | "live-orphaned-dirty" | "live-stale";
+type SiblingState =
+  | "terminal-with-claim"
+  | "live-fresh-foreign"
+  | "live-orphaned-dirty"
+  | "live-orphaned-dirty-aged"
+  | "live-stale";
 
 /** Puts sibling A into `state`; every state starts from a REAL service-written claim of another run. */
 async function arrangeSibling(aId: string, state: SiblingState): Promise<void> {
@@ -126,6 +131,9 @@ async function arrangeSibling(aId: string, state: SiblingState): Promise<void> {
   const orphaned = { orphaned_dirty: { worktree: dirtyWorktree, at: new Date().toISOString() } };
   if (state === "terminal-with-claim") patchRow(aId, orphaned, "archived");
   if (state === "live-orphaned-dirty") patchRow(aId, orphaned);
+  // reason: BR-1058 — an orphaned_dirty claim never ages out; the TTL-only builder judged this one stale, the
+  // run-aware path (which the real claim uses) does not. This state is what separates the two builders.
+  if (state === "live-orphaned-dirty-aged") patchRow(aId, { ...orphaned, at: new Date(Date.now() - 500 * 60_000).toISOString() });
   if (state === "live-stale") patchRow(aId, { at: new Date(Date.now() - 500 * 60_000).toISOString() });
 }
 
@@ -168,6 +176,17 @@ describe("a terminal task holds no claim; gate and claim share one verdict", () 
   it("NEGATIVE: a live sibling with an orphaned_dirty claim on a dirty worktree blocks the candidate, gate and claim alike", async () => {
     const { a, b } = await createAdhocPair();
     await arrangeSibling(a.id, "live-orphaned-dirty");
+
+    const { gate, claim, claimErr } = await gateAndClaimExitCodes(b.slug);
+
+    expect(claim).not.toBe(0);
+    expect(claimErr).toContain("anchor-overlap");
+    expect(gate).toBe(claim);
+  });
+
+  it("STATE: an orphaned_dirty claim aged far past the TTL still blocks, and the gate agrees with the claim (BR-1058)", async () => {
+    const { a, b } = await createAdhocPair();
+    await arrangeSibling(a.id, "live-orphaned-dirty-aged");
 
     const { gate, claim, claimErr } = await gateAndClaimExitCodes(b.slug);
 
