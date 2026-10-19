@@ -9,7 +9,7 @@
  * dashboard router-cli shape).
  */
 import { describe, expect, it } from "vitest";
-import { findBunxOfDeclaredDeps, loadManifests, main, type PackageManifest } from "../check-no-bunx-of-declared-deps.ts";
+import { findBunxOfDeclaredDeps, loadManifests, main, type PackageManifest } from "../check-no-bunx-of-declared-deps.js";
 
 const pkg = (scripts: Record<string, string>, declared: string[] = []): PackageManifest => ({
   file: "packages/x/package.json",
