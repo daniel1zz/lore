@@ -2667,11 +2667,14 @@ export function loadConfigFromString(
   let parsed: unknown;
   try {
     parsed = yaml.parse(yamlText);
-  } catch (_e) {
+  } catch (e) {
+    // reason: the parser's own message names the defect (e.g. "Map keys must be unique" plus the offending
+    // key's line) — dropping it left the loader nothing to show when it refuses the file loudly.
+    const detail = e instanceof Error ? e.message.trim() : "malformed input";
     return err({
       code: "VALIDATION_ERROR",
       field: "yaml",
-      message: "Failed to parse YAML: malformed input",
+      message: `Failed to parse YAML: ${detail}`,
       value: yamlText,
     } satisfies LoreError);
   }
