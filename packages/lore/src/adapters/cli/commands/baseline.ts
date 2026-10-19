@@ -56,8 +56,8 @@ import type { AddNodeInput, BaselineTreeEntry, SiteMapChange } from "../../../se
 import { NON_BUSINESS_PREFIX, computeLeafCoverage } from "../../../service/leaf-coverage.js";
 import { buildOwnerLeafIndex } from "../../../service/owned-by.js";
 import { resolveDoc } from "../../../service/resolve.js";
-import { SiteCensusError, type UnresolvedImport, findCensusRoot, listSites, resolveCommandEntry } from "../../../service/site-census.js";
-import type { Site } from "../../../service/site-census.js";
+import { SiteCensusError, type UnresolvedImport, findCensusRoot, listSitesMany } from "../../../service/site-census.js";
+import type { Site, SiteList } from "../../../service/site-census.js";
 import { RuleStateService } from "../../../service/rule-state-service.js";
 import type { RuleStateEntry, RuleStateFull } from "../../../service/rule-state-service.js";
 import { SpawnGitPort, resolveGitRoot } from "../../../service/rule-state-git-port.js";
@@ -232,13 +232,17 @@ async function runCoverage(target: string, json: boolean, inv: Invocation): Prom
     }
     const ownerLeaves = buildOwnerLeafIndex(all.value);
     leaves.sort((a, b) => (a.slug < b.slug ? -1 : a.slug > b.slug ? 1 : 0));
+    // reason: every distinct command of every leaf is censused ONCE over one shared program (BR-1248); a per-leaf
+    // census rebuilt the program per command (~2.8 s each, 128 commands).
+    const leafCommands = (leaf: DocRecord): string[] => (Array.isArray(leaf.extra["commands"]) ? (leaf.extra["commands"] as string[]) : []);
+    const censusByCommand = listSitesMany({ rootDir, commands: leaves.flatMap(leafCommands) });
     const reports: LeafCoverageReport[] = leaves.map((leaf) => {
-      const commands = Array.isArray(leaf.extra["commands"]) ? (leaf.extra["commands"] as string[]) : [];
+      const commands = leafCommands(leaf);
       const byKey = new Map<string, Site>();
       const bootstrapByKey = new Map<string, Site>();
       const unresolvedByKey = new Map<string, UnresolvedImport>();
       for (const command of commands) {
-        const census = listSites({ rootDir, entry: resolveCommandEntry({ rootDir, command }) });
+        const census = censusByCommand.get(command) as SiteList;
         for (const u of census.unresolvedImports) unresolvedByKey.set(`${u.specifier}\0${u.from}`, u);
         for (const site of census) byKey.set(site.key, site);
         for (const site of census.bootstrap) bootstrapByKey.set(site.key, site);
@@ -598,7 +602,7 @@ export default defineLoreCommand({
         try {
           const rootDir = requireCensusRoot(inv);
           const command = args.command as string;
-          const sites = listSites({ rootDir, entry: resolveCommandEntry({ rootDir, command }) });
+          const sites = listSitesMany({ rootDir, commands: [command] }).get(command) as SiteList;
           const dynamicCount = sites.filter((s) => s.dynamic).length;
           if (json) {
             printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { command, count: sites.length, not_measured: dynamicCount, unresolved_imports: sites.unresolvedImports, sites, bootstrap: sites.bootstrap } }, null, 2));
