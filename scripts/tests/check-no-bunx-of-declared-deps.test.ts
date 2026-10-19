@@ -1,4 +1,5 @@
 // @reads package.json
+// @reads packages
 // @reads packages/*/package.json
 /**
  * task-dashboard-build-runs-the-installed-router-cli-instead-of-a: the check
