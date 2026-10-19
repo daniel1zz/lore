@@ -145,8 +145,7 @@
  *   task-lore-done-override-attestation-demands-fresh-prose-that (--override-attestation-cite)
  */
 
-import { defineCommand } from "citty";
-import { exitCli } from "../cli-exit.js";
+import { defineLoreCommand, exitCli } from "../cli-exit.js";
 import { err, extractEvidence, ok } from "@lore/core";
 import type { DocRecord, EvidenceEntry, LoreError, Result } from "@lore/core";
 import { loadLoreApp } from "../loader.js";
@@ -272,7 +271,7 @@ async function resolveEvidenceCitation(
   );
 }
 
-export default defineCommand({
+export default defineLoreCommand({
   meta: {
     name: "done",
     description:
@@ -319,7 +318,7 @@ export default defineCommand({
       description: "Output result as JSON",
     },
   },
-  async run(context) {
+  async run(context): Promise<number> {
     const { args } = context;
     const inv = invocationOf(context);
     // reason: CLI usage-error validation (exit 2) — checked BEFORE loadLoreApp(), same
@@ -464,7 +463,7 @@ export default defineCommand({
           ),
         );
         emitIssueCloseItems(inv.io, result.value.issue_close, { json: true });
-        return;
+        return 0;
       }
 
       printLine(inv.io.stdout, formatDoneMessage(result.value));
@@ -472,5 +471,6 @@ export default defineCommand({
     } finally {
       app.close();
     }
+    return 0;
   },
 });

@@ -56,7 +56,7 @@
  *         early-warning §Scope M3; SPEC-106 §Design Decisions D4
  */
 
-import { defineCommand } from "citty";
+import { defineLoreCommand } from "../cli-exit.js";
 
 import { exitCode, formatErrorFor, resolveActor } from "../utils.js";
 import {
@@ -108,13 +108,13 @@ const sharedArgs = {
   },
 };
 
-export default defineCommand({
+export default defineLoreCommand({
   meta: {
     name: "plan",
     description: "Plan-level writers (audited plan-close exemptions)",
   },
   subCommands: {
-    "exempt-attestation": defineCommand({
+    "exempt-attestation": defineLoreCommand({
       meta: {
         name: "exempt-attestation",
         description: "Record an audited, typed exemption from the plan-close attestation floor",
@@ -126,7 +126,7 @@ export default defineCommand({
           description: `Required exemption type: ${ATTESTATION_EXEMPT_KIND_VALUES.join(" | ")}`,
         },
       },
-      async run(context) {
+      async run(context): Promise<number> {
         const { args } = context;
         const inv = invocationOf(context);
         const checked = checkExemptAttestationArgs({ reason: args.reason, kind: args.kind });
@@ -152,7 +152,7 @@ export default defineCommand({
 
           if (args.json) {
             printLine(inv.io.stdout, JSON.stringify({ ok: true, data: result.value }, null, 2));
-            return;
+            return 0;
           }
 
           printLine(inv.io.stdout, 
@@ -163,16 +163,17 @@ export default defineCommand({
         } finally {
           app.close();
         }
+        return 0;
       },
     }),
 
-    "exempt-assessment-freshness": defineCommand({
+    "exempt-assessment-freshness": defineLoreCommand({
       meta: {
         name: "exempt-assessment-freshness",
         description: "Record an audited exemption from the plan-close assessment-freshness predicate",
       },
       args: { ...sharedArgs },
-      async run(context) {
+      async run(context): Promise<number> {
         const { args } = context;
         const inv = invocationOf(context);
         const checked = checkExemptAssessmentFreshnessArgs({ reason: args.reason });
@@ -197,7 +198,7 @@ export default defineCommand({
 
           if (args.json) {
             printLine(inv.io.stdout, JSON.stringify({ ok: true, data: result.value }, null, 2));
-            return;
+            return 0;
           }
 
           printLine(inv.io.stdout, 
@@ -208,6 +209,7 @@ export default defineCommand({
         } finally {
           app.close();
         }
+        return 0;
       },
     }),
   },

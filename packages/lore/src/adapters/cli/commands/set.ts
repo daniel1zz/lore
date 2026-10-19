@@ -103,8 +103,7 @@
  */
 
 import { readFileSync } from "node:fs";
-import { exitCli } from "../cli-exit.js";
-import { defineCommand } from "citty";
+import { defineLoreCommand, exitCli } from "../cli-exit.js";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatErrorFor, resolveActor } from "../utils.js";
 import { openEditor } from "../editor.js";
@@ -141,7 +140,7 @@ import { printLine } from "../output.js";
 export const APPROVED_DEMOTION_ADVISORY =
   "  (approved doc demoted to draft because content changed)";
 
-export default defineCommand({
+export default defineLoreCommand({
   meta: {
     name: "set",
     description: "Update specific fields on a document",
@@ -231,7 +230,7 @@ export default defineCommand({
         "Explicitly enable AI for --regenerate/--refine (overrides surface default). Pass --no-ai to disable.",
     },
   },
-  async run(context) {
+  async run(context): Promise<number> {
     const { args } = context;
     const inv = invocationOf(context);
     // ─── Step 1: flag parsing and mutex checks ─────────────────────────────────
@@ -474,7 +473,7 @@ export default defineCommand({
             printLine(inv.io.stdout, APPROVED_DEMOTION_ADVISORY);
           }
         }
-        return;
+        return 0;
       }
 
       // ─── Step 3: standard patch path (unchanged from pre-SPEC-019) ────────────
@@ -586,7 +585,7 @@ export default defineCommand({
             );
             printLine(inv.io.stdout, "  (decision_status already 'accepted' — no change)");
           }
-          return;
+          return 0;
         }
 
         patch["extra"] = {
@@ -623,6 +622,7 @@ export default defineCommand({
           env: inv.env,
           tmpDir: inv.paths.tmpDir,
           cwd: inv.cwd,
+          stdinIsTTY: inv.io.stdinIsTTY,
         });
         if (!editorResult.ok) {
           inv.io.stderr.write(formatErrorFor(inv, editorResult.error) + "\n");
@@ -634,7 +634,7 @@ export default defineCommand({
         // If the content is unchanged, skip the service call entirely (AC-SET-1)
         if (newContent === currentDoc.content) {
           inv.io.stdout.write("no changes\n");
-          return;
+          return 0;
         }
 
         patch["content"] = newContent;
@@ -738,5 +738,6 @@ export default defineCommand({
     } finally {
       app.close();
     }
+    return 0;
   },
 });

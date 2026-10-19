@@ -53,7 +53,7 @@
 
 import type { Invocation } from "@lore/core";
 
-import { defineCommand } from "citty";
+import { defineLoreCommand } from "../cli-exit.js";
 import type { DocRecord, LoreError, Result } from "@lore/core";
 import { extractDeclaredAcScope } from "@lore/core";
 import { loadLoreApp } from "../loader.js";
@@ -177,21 +177,22 @@ async function runScopeMutation(inv: Invocation,
 
   if (json) {
     printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { doc, ac_scope: acScope } }, null, 2));
-    return;
+    return 0;
   }
 
   const verb = op === "add" ? "Declared" : "Un-declared";
   printLine(inv.io.stdout, `${verb} ${acIds.length} ac_scope id(s) on ${doc.slug} (v${doc.version})`);
   renderScopeList(inv.io, acScope, true);
+  return 0;
 }
 
-export default defineCommand({
+export default defineLoreCommand({
   meta: {
     name: "scope",
     description: "Manage a task's or phase's declared ac_scope — the AC ids it claims (add / rm / list)",
   },
   subCommands: {
-    add: defineCommand({
+    add: defineLoreCommand({
       meta: {
         name: "add",
         description: "Declare one or more acceptance-criterion ids on a task or phase (union with existing)",
@@ -234,7 +235,7 @@ export default defineCommand({
       },
     }),
 
-    rm: defineCommand({
+    rm: defineLoreCommand({
       meta: {
         name: "rm",
         description:
@@ -278,7 +279,7 @@ export default defineCommand({
       },
     }),
 
-    list: defineCommand({
+    list: defineLoreCommand({
       meta: { name: "list", description: "List a task's or phase's declared ac_scope" },
       args: {
         target: {
@@ -291,7 +292,7 @@ export default defineCommand({
           description: "Output result as JSON",
         },
       },
-      async run(context) {
+      async run(context): Promise<number> {
         const { args } = context;
         const inv = invocationOf(context);
         const { app } = loadLoreApp({ inv });
@@ -317,7 +318,7 @@ export default defineCommand({
             printLine(inv.io.stdout, 
               JSON.stringify({ ok: true, data: { ac_scope: acScope, scope_declared: scopeDeclared } }, null, 2),
             );
-            return;
+            return 0;
           }
 
           printLine(inv.io.stdout, `Declared ac_scope for ${doc.slug}:`);
@@ -325,6 +326,7 @@ export default defineCommand({
         } finally {
           app.close();
         }
+        return 0;
       },
     }),
   },

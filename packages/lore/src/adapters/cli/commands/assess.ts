@@ -78,9 +78,8 @@
  */
 
 import { spawnSync } from "node:child_process";
-import { exitCli } from "../cli-exit.js";
 import { readFileSync } from "node:fs";
-import { defineCommand } from "citty";
+import { defineLoreCommand, exitCli } from "../cli-exit.js";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatErrorFor } from "../utils.js";
 import { ASSESS_NEWER_TASK_ACTIVITY, ASSESS_NO_COMMITS_DERIVED } from "../cli-refusal-messages.js";
@@ -131,7 +130,7 @@ function formatDiffSourceLine(source: DiffSourceRecord): string {
   }
 }
 
-export default defineCommand({
+export default defineLoreCommand({
   meta: {
     name: "assess",
     description: "AI plan-outcome assessment (LLM-as-judge) — judge a plan against its spec's ACs and its tasks' evidence",
@@ -161,7 +160,7 @@ export default defineCommand({
       description: "Explicitly confirm AI use (rarely needed — assess defaults to AI on every surface). Pass --no-ai to abort (always exit 2 — assess has no non-AI mode).",
     },
   },
-  async run(context) {
+  async run(context): Promise<number> {
     const { args } = context;
     const inv = invocationOf(context);
     // ─── Step 1: argument mutex checks (synchronous, before any IO) ────────────
@@ -473,7 +472,7 @@ export default defineCommand({
             2,
           ),
         );
-        return;
+        return 0;
       }
 
       printLine(inv.io.stdout, formatAssessmentSummary(result));
@@ -493,5 +492,6 @@ export default defineCommand({
     } finally {
       app.close();
     }
+    return 0;
   },
 });

@@ -13,7 +13,7 @@
  * Source: SPEC-055 §Scope.
  */
 
-import { defineCommand } from "citty";
+import { defineLoreCommand } from "../cli-exit.js";
 
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatErrorFor } from "../utils.js";
@@ -30,10 +30,10 @@ function requireRequirementService(io: CliIo, app: App) {
   return app.requirementService;
 }
 
-export default defineCommand({
+export default defineLoreCommand({
   meta: { name: "requirement", description: "Manage a PRD's structured requirement inventory (SPEC-055)" },
   subCommands: {
-    add: defineCommand({
+    add: defineLoreCommand({
       meta: { name: "add", description: "Append a numbered requirement to a PRD" },
       args: {
         prd: { type: "positional", description: "PRD document ID or slug", required: true },
@@ -43,7 +43,7 @@ export default defineCommand({
         "migrated-to": { type: "string", description: "Baseline rule id (BR-n, must be live) this requirement is migrated to" },
         json: { type: "boolean", description: "Output result as JSON" },
       },
-      async run(context) {
+      async run(context): Promise<number> {
         const { args } = context;
         const inv = invocationOf(context);
         const { app } = loadLoreApp({ inv });
@@ -71,9 +71,10 @@ export default defineCommand({
         } finally {
           app.close();
         }
+        return 0;
       },
     }),
-    migrate: defineCommand({
+    migrate: defineLoreCommand({
       meta: { name: "migrate", description: "Mark a requirement as migrated to a live baseline rule (coverage then derives from citations)" },
       args: {
         prd: { type: "positional", description: "PRD document ID or slug", required: true },
@@ -81,7 +82,7 @@ export default defineCommand({
         rule: { type: "positional", description: "Baseline rule id, e.g. BR-12 (must be live)", required: true },
         json: { type: "boolean", description: "Output result as JSON" },
       },
-      async run(context) {
+      async run(context): Promise<number> {
         const { args } = context;
         const inv = invocationOf(context);
         const { app } = loadLoreApp({ inv });
@@ -99,15 +100,16 @@ export default defineCommand({
         } finally {
           app.close();
         }
+        return 0;
       },
     }),
-    list: defineCommand({
+    list: defineLoreCommand({
       meta: { name: "list", description: "List a PRD's declared requirements" },
       args: {
         prd: { type: "positional", description: "PRD document ID or slug", required: true },
         json: { type: "boolean", description: "Output result as JSON" },
       },
-      async run(context) {
+      async run(context): Promise<number> {
         const { args } = context;
         const inv = invocationOf(context);
         const { app } = loadLoreApp({ inv });
@@ -130,9 +132,10 @@ export default defineCommand({
         } finally {
           app.close();
         }
+        return 0;
       },
     }),
-    rm: defineCommand({
+    rm: defineLoreCommand({
       meta: { name: "rm", description: "Remove a requirement from a PRD" },
       args: {
         prd: { type: "positional", description: "PRD document ID or slug", required: true },
@@ -140,7 +143,7 @@ export default defineCommand({
         force: { type: "boolean", description: "Remove even if a spec AC still references it" },
         json: { type: "boolean", description: "Output result as JSON" },
       },
-      async run(context) {
+      async run(context): Promise<number> {
         const { args } = context;
         const inv = invocationOf(context);
         const { app } = loadLoreApp({ inv });
@@ -160,6 +163,7 @@ export default defineCommand({
         } finally {
           app.close();
         }
+        return 0;
       },
     }),
   },

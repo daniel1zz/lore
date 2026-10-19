@@ -26,6 +26,10 @@
  *   also judged under every open claim whose RECORDED worktree resolves to the group's working copy (the port
  *   compares directories, never directory names or branch names). The owner stays a member run; these claims
  *   only widen the union of tasks and anchors.
+ * @invariant Claims of the working copy across bases. An isolated helper is also judged under the tasks claimed by
+ *   every OTHER run of the same isolated working copy, whatever its base (a SendMessage-resumed helper is a new run
+ *   on a newer base, so it is outside the base group, and the claim it must match was released). Claims only widen
+ *   the union; measured files are still charged per base group. No claim in the copy still yields no-claimed-task.
  * @invariant Each edit record is judged once (AU-T25). The edit records of ALL turns are read on every review, so a
  *   helper that ends again would be charged again with an edit an earlier review already reported. An edit whose
  *   `ts` is at or before the helper's `judged_at_ms` (the review-start snapshot instant, written with
@@ -211,6 +215,17 @@ function coChangeRequiredFiles(files: readonly string[], anchors: readonly strin
   return required;
 }
 
+/**
+ * True when `mate` is another run of the same ISOLATED working copy as `helper` (any base). A helper resumed with
+ * SendMessage is a new run re-rooted on a newer base in the same copy, so it is not in the helper's base group
+ * (measured 2026-10-19: bases `7e52699` vs `ce70361`, one working copy); its edits belong to the claim the copy's
+ * earlier run held, claimed AND released. A non-isolated helper's copy is the shared checkout and never qualifies.
+ */
+function sharesIsolatedCopy(mate: TrailHelper, helper: TrailHelper, workingCopy: string, realpath: RealpathFn): boolean {
+  if (helper.isolated !== true || mate.isolated !== true || mate.working_copy === undefined) return false;
+  return canonicalPath(mate.working_copy, realpath) === workingCopy;
+}
+
 function listOf(files: readonly string[]): string {
   return files.join(", ");
 }
@@ -294,12 +309,19 @@ export async function reviewHelperScope(input: ReviewHelperScopeInput): Promise<
 
     const own = members.length > 1 ? ok(memberClaims) : await claimsOf(helper.run);
     if (!own.ok) return err(own.error);
+    const copyMateClaims: RunClaimedTask[] = [];
+    for (const mate of trail.helpers) {
+      if (mate.run === helper.run || members.includes(mate) || !sharesIsolatedCopy(mate, helper, workingCopy, realpath)) continue;
+      const claimed = await claimsOf(mate.run);
+      if (!claimed.ok) return err(claimed.error);
+      copyMateClaims.push(...claimed.value);
+    }
     const openInCopy = await input.openClaimsOfWorkingCopy(workingCopy);
     if (!openInCopy.ok) return err(openInCopy.error);
     for (const note of openInCopy.value.not_measured) {
       if (!notMeasured.includes(note)) notMeasured.push(note);
     }
-    const judgedUnder = [...own.value, ...openInCopy.value.tasks];
+    const judgedUnder = [...own.value, ...copyMateClaims, ...openInCopy.value.tasks];
     const slugs = [...new Set(judgedUnder.map((t) => t.slug))];
     const anchors = judgedUnder.flatMap((t) => [...t.file_anchors]);
     const add = (kind: HelperScopeFindingKind, list: readonly string[], message: string, tasks: readonly string[]): void => {

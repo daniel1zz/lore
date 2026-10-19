@@ -4,14 +4,14 @@
  * Source: SPEC-010 §3.2, §6
  */
 
-import { defineCommand } from "citty";
+import { defineLoreCommand } from "../cli-exit.js";
 
 import { loadLoreApp } from "../loader.js";
 import { formatTable } from "../utils.js";
 import { invocationOf } from "../command-invocation.js";
 import { printLine } from "../output.js";
 
-const agentCreate = defineCommand({
+const agentCreate = defineLoreCommand({
   meta: {
     name: "create",
     description: "Create a new API key for an agent",
@@ -32,7 +32,7 @@ const agentCreate = defineCommand({
       description: "Output as JSON",
     },
   },
-  async run(context) {
+  async run(context): Promise<number> {
     const { args } = context;
     const inv = invocationOf(context);
     const { app } = loadLoreApp({ inv });
@@ -54,7 +54,7 @@ const agentCreate = defineCommand({
 
       if (args.json) {
         printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { name: record.name, api_key: rawKey, owner: record.owner } }));
-        return;
+        return 0;
       }
 
       printLine(inv.io.stdout, "Agent created:");
@@ -69,10 +69,11 @@ const agentCreate = defineCommand({
     } finally {
       app.close();
     }
+    return 0;
   },
 });
 
-const agentList = defineCommand({
+const agentList = defineLoreCommand({
   meta: {
     name: "list",
     description: "List all API keys",
@@ -83,7 +84,7 @@ const agentList = defineCommand({
       description: "Output as JSON",
     },
   },
-  run(context) {
+  run(context): number {
     const { args } = context;
     const inv = invocationOf(context);
     const { app } = loadLoreApp({ inv });
@@ -103,12 +104,12 @@ const agentList = defineCommand({
 
       if (args.json) {
         printLine(inv.io.stdout, JSON.stringify({ ok: true, data: keys }));
-        return;
+        return 0;
       }
 
       if (keys.length === 0) {
         printLine(inv.io.stdout, "No API keys found. Run `lore agent create --name <name>` to create one.");
-        return;
+        return 0;
       }
 
       const rows = keys.map((k) => [
@@ -122,10 +123,11 @@ const agentList = defineCommand({
     } finally {
       app.close();
     }
+    return 0;
   },
 });
 
-const agentRevoke = defineCommand({
+const agentRevoke = defineLoreCommand({
   meta: {
     name: "revoke",
     description: "Revoke an agent's API key",
@@ -141,7 +143,7 @@ const agentRevoke = defineCommand({
       description: "Output as JSON",
     },
   },
-  run(context) {
+  run(context): number {
     const { args } = context;
     const inv = invocationOf(context);
     const { app } = loadLoreApp({ inv });
@@ -159,17 +161,18 @@ const agentRevoke = defineCommand({
 
       if (args.json) {
         printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { name: args.name, revoked: true } }));
-        return;
+        return 0;
       }
 
       printLine(inv.io.stdout, `Agent '${args.name}' API key revoked.`);
     } finally {
       app.close();
     }
+    return 0;
   },
 });
 
-export default defineCommand({
+export default defineLoreCommand({
   meta: {
     name: "agent",
     description: "Manage API keys for AI agents",

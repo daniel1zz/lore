@@ -50,7 +50,7 @@
  * Source: spec-multi-session-concurrency-queryable-ownership-checkout §Scope L0, AC-OWN-1.
  */
 
-import { defineCommand } from "citty";
+import { defineLoreCommand } from "../cli-exit.js";
 
 import { RealGitPort, listLocalBranches } from "../../real-git-port.js";
 import { resolveClaimSessionId } from "../../../service/task-workflow-service.js";
@@ -60,7 +60,7 @@ import { partitionTerritory, formatTerritoryHuman } from "../territory-partition
 import { invocationOf } from "../command-invocation.js";
 import { printLine } from "../output.js";
 
-export default defineCommand({
+export default defineLoreCommand({
   meta: {
     name: "territory",
     description:
@@ -72,7 +72,7 @@ export default defineCommand({
       description: "Output the raw TerritoryPartition as JSON",
     },
   },
-  async run(context) {
+  async run(context): Promise<number> {
     const { args } = context;
     const inv = invocationOf(context);
     const { app } = loadLoreApp({ inv });
@@ -132,5 +132,6 @@ export default defineCommand({
     } finally {
       app.close();
     }
+    return 0;
   },
 });

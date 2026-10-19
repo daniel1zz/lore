@@ -47,19 +47,19 @@ const SESSION_ENV = { CLAUDE_CODE_SESSION_ID: "3de02220-5d69-4f0b-8a1e-aaaaaaaaa
 
 describe("AC-ROI-2 core resolver ignores LORE_ACTOR", () => {
   it("AC-ROI-2 core: LORE_ACTOR alone resolves to the OS user, source os-fallback", () => {
-    const r = resolveCore(undefined, { LORE_ACTOR: LORE_ACTOR_VALUE }, () => userInfo().username);
+    const r = resolveCore(undefined, { LORE_ACTOR: LORE_ACTOR_VALUE }, { ok: true, name: userInfo().username });
     expect(r.actor).not.toBe(LORE_ACTOR_VALUE);
     expect(r.source).toBe("os-fallback");
     expect(r.actor).toBe(userInfo().username);
   });
 
   it("AC-ROI-2 core: session tier wins over LORE_ACTOR", () => {
-    const r = resolveCore(undefined, { LORE_ACTOR: LORE_ACTOR_VALUE, ...SESSION_ENV }, () => userInfo().username);
+    const r = resolveCore(undefined, { LORE_ACTOR: LORE_ACTOR_VALUE, ...SESSION_ENV }, { ok: true, name: userInfo().username });
     expect(r).toEqual({ actor: "agent:session-3de02220", source: "session" });
   });
 
   it("AC-ROI-2 core: explicit still wins and LORE_ACTOR never reports source env", () => {
-    const r = resolveCore("alice", { LORE_ACTOR: LORE_ACTOR_VALUE }, () => userInfo().username);
+    const r = resolveCore("alice", { LORE_ACTOR: LORE_ACTOR_VALUE }, { ok: true, name: userInfo().username });
     expect(r).toEqual({ actor: "alice", source: "explicit" });
   });
 });

@@ -2,15 +2,14 @@
  * lore restore <doc-id> <version> — restore a document to a previous version.
  */
 
-import { defineCommand } from "citty";
-import { exitCli } from "../cli-exit.js";
+import { defineLoreCommand, exitCli } from "../cli-exit.js";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatErrorFor } from "../utils.js";
 import type { DocId } from "@lore/core";
 import { invocationOf } from "../command-invocation.js";
 import { printLine } from "../output.js";
 
-export default defineCommand({
+export default defineLoreCommand({
   meta: {
     name: "restore",
     description:
@@ -35,7 +34,7 @@ export default defineCommand({
       description: "Output as JSON",
     },
   },
-  async run(context) {
+  async run(context): Promise<number> {
     const { args } = context;
     const inv = invocationOf(context);
     const versionNum = parseInt(args.version, 10);
@@ -62,5 +61,6 @@ export default defineCommand({
     } finally {
       app.close();
     }
+    return 0;
   },
 });

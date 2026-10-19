@@ -55,7 +55,7 @@ import { existsSync, readFileSync, writeFileSync } from "fs";
 
 import { join } from "path";
 import { z } from "zod";
-import { defineCommand } from "citty";
+import { defineLoreCommand } from "../cli-exit.js";
 import { loadLoreApp } from "../loader.js";
 import { resolveConsumerCorpusRoot } from "../report-issue-wiring.js";
 import { exitCode, formatErrorFor, formatTable, parsePositiveIntArg, resolveActor } from "../utils.js";
@@ -124,7 +124,7 @@ function summarizeDetails(entry: AuditEntry): string {
   return json.length > 60 ? `${json.slice(0, 57)}...` : json;
 }
 
-export default defineCommand({
+export default defineLoreCommand({
   meta: {
     name: "audit",
     description: "Query the audit trail, verify its completeness/chain-integrity, or anchor the chain head",
@@ -164,7 +164,7 @@ export default defineCommand({
       description: "Output as JSON",
     },
   },
-  async run(context) {
+  async run(context): Promise<number> {
     const { args } = context;
     const inv = invocationOf(context);
     const { app } = loadLoreApp({ inv });
@@ -343,12 +343,12 @@ export default defineCommand({
 
       if (args.json) {
         printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { entries, total: entries.length } }, null, 2));
-        return;
+        return 0;
       }
 
       if (entries.length === 0) {
         printLine(inv.io.stdout, "No audit entries found.");
-        return;
+        return 0;
       }
 
       const headers = ["Timestamp", "Actor", "Action", "Details"];
@@ -364,5 +364,6 @@ export default defineCommand({
     } finally {
       app.close();
     }
+    return 0;
   },
 });

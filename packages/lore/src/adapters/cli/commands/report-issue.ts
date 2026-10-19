@@ -82,8 +82,7 @@
  * spec-the-defect-channel-reaches-no-machine-but-its-own-github P2/P4.
  */
 
-import { defineCommand } from "citty";
-import { exitCli } from "../cli-exit.js";
+import { defineLoreCommand, exitCli } from "../cli-exit.js";
 import {
   buildUnconfiguredUpstreamRemedy,
   err,
@@ -191,7 +190,7 @@ function validateTriageLabels(
   });
 }
 
-export default defineCommand({
+export default defineLoreCommand({
   meta: {
     name: "report-issue",
     description:
@@ -248,7 +247,7 @@ export default defineCommand({
       description: "Output result as JSON",
     },
   },
-  async run(context) {
+  async run(context): Promise<number> {
     const { args } = context;
     const inv = invocationOf(context);
     // ─── Step 1: argument mutex + required-flag checks (synchronous, before any IO) ───
@@ -363,7 +362,7 @@ export default defineCommand({
               .filter((tag) => tag.length > 0)
           : [];
 
-      const { actor, source: actorSource } = resolveActorWithSource(undefined, inv.env, () => inv.user);
+      const { actor, source: actorSource } = resolveActorWithSource(undefined, inv.env, inv.user);
       const reproCommand = args["repro-command"];
 
       const githubResult = await fileGithubIssue(
@@ -395,7 +394,7 @@ export default defineCommand({
 
       if (args.json) {
         printLine(inv.io.stdout, JSON.stringify({ ok: true, data: githubResult.value }, null, 2));
-        return;
+        return 0;
       }
 
       printLine(inv.io.stdout, 
@@ -410,5 +409,6 @@ export default defineCommand({
     } finally {
       app.close();
     }
+    return 0;
   },
 });

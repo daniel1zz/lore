@@ -32,7 +32,7 @@
  * Source: SPEC-057 §Module Boundary, §Public Interface, §Acceptance Criteria AC-S-7.
  */
 
-import { defineCommand } from "citty";
+import { defineLoreCommand } from "../cli-exit.js";
 
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatErrorFor } from "../utils.js";
@@ -42,7 +42,7 @@ import { printLine } from "../output.js";
 
 const RESERVED_SUBCOMMANDS = new Set(["list", "resume", "remove"]);
 
-export default defineCommand({
+export default defineLoreCommand({
   meta: {
     name: "seat",
     description: "Plan-bound worktree seat lifecycle: enter (bare <plan>) / list / resume / remove (SPEC-057)",
@@ -67,7 +67,7 @@ export default defineCommand({
       description: "Output result as JSON",
     },
   },
-  async run(context) {
+  async run(context): Promise<number> {
     const { args } = context;
     const inv = invocationOf(context);
     const { app } = loadLoreApp({ inv });
@@ -91,7 +91,7 @@ export default defineCommand({
         } else {
           printLine(inv.io.stdout, formatSeatList(result.value));
         }
-        return;
+        return 0;
       }
 
       if (target === "resume" || target === "remove") {
@@ -111,7 +111,7 @@ export default defineCommand({
           } else {
             printLine(inv.io.stdout, `Resumed seat for plan ${planArg}: ${result.value.path} (${result.value.branch})`);
           }
-          return;
+          return 0;
         }
 
         // target === "remove"
@@ -125,13 +125,13 @@ export default defineCommand({
         } else {
           printLine(inv.io.stdout, `Removed seat for plan ${planArg}.`);
         }
-        return;
+        return 0;
       }
 
       // Bare positional (not a reserved subcommand name) — enter.
       if (RESERVED_SUBCOMMANDS.has(target)) {
         // unreachable given the branches above, kept for exhaustiveness clarity.
-        return;
+        return 0;
       }
       const result = await seatService.enter(target, { mainCwd: inv.cwd });
       if (!result.ok) {
@@ -146,5 +146,6 @@ export default defineCommand({
     } finally {
       app.close();
     }
+    return 0;
   },
 });

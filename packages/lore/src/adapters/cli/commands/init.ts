@@ -22,8 +22,7 @@
  * command deliberately does NOT invoke.
  */
 
-import { defineCommand } from "citty";
-import { exitCli } from "../cli-exit.js";
+import { defineLoreCommand, exitCli } from "../cli-exit.js";
 import { existsSync, mkdirSync, writeFileSync } from "fs";
 import { join } from "path";
 import { ambientOfInvocation, createApp } from "../../../app.js";
@@ -35,7 +34,7 @@ import { isInsideGitRepository } from "../../../service/git-state-stamp.js";
 import { invocationOf } from "../command-invocation.js";
 import { printLine } from "../output.js";
 
-export default defineCommand({
+export default defineLoreCommand({
   meta: {
     name: "init",
     description: "Initialise a new Lore project in the current directory",
@@ -55,7 +54,7 @@ export default defineCommand({
       description: "Output as JSON",
     },
   },
-  async run(context) {
+  async run(context): Promise<number> {
     const { args } = context;
     const inv = invocationOf(context);
     const cwd = inv.cwd;
@@ -136,7 +135,7 @@ export default defineCommand({
         printLine(inv.io.stdout, "");
         printLine(inv.io.stdout, "Run `lore create prd --title \"My Project\"` to add your first document.");
       }
-      return;
+      return 0;
     }
     if (armed === undefined || !armed.ok) {
       const msg =
@@ -172,5 +171,6 @@ export default defineCommand({
       printLine(inv.io.stdout, "");
       printLine(inv.io.stdout, "Run `lore create prd --title \"My Project\"` to add your first document.");
     }
+    return 0;
   },
 });

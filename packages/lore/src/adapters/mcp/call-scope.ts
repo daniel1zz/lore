@@ -25,8 +25,8 @@
 import { warnSinkOf } from "../../service/warn-sink.js";
 import { AsyncLocalStorage } from "node:async_hooks";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
-import { err, ok, type Invocation, type InvocationIdentity, type LoreError, type NameSource, type Result } from "@lore/core";
-import { RunIdentityArgumentError, resolveInvocationIdentity, type ActorSource } from "@lore/core/node";
+import { err, ok, type Invocation, type InvocationIdentity, type LoreError, type NameSource, type ResolvedInvocationIdentity, type Result } from "@lore/core";
+import { OsUserLookupError, RunIdentityArgumentError, resolveInvocationIdentity, type ActorSource } from "@lore/core/node";
 import type { App } from "../../app.js";
 
 /** What the running call exposes to its handler. */
@@ -34,6 +34,7 @@ export interface CallContext {
   /** The App for THIS call: the base App, or a sibling whose store is wrapped for the call's identity. */
   readonly app: App;
   /** The call's identity with its run verified against the registry (unregistered -> `harnessRun` null). */
+  /** Resolved name or the reason there is none: only a tool that needs an actor fails on the latter. */
   readonly identity: InvocationIdentity;
 }
 
@@ -55,7 +56,7 @@ function errorResult(error: LoreError): CallToolResult {
 export function buildCallIdentity(input: CallAttestation, server: Pick<Invocation, "env" | "user">): Result<InvocationIdentity, LoreError> {
   const argv = input.harness_run !== undefined ? ["--harness-run", input.harness_run] : [];
   try {
-    const { identity } = resolveInvocationIdentity(argv, server.env, () => server.user);
+    const { identity } = resolveInvocationIdentity(argv, server.env, server.user);
     return ok(identity);
   } catch (e) {
     if (e instanceof RunIdentityArgumentError) {
@@ -69,12 +70,15 @@ export function buildCallIdentity(input: CallAttestation, server: Pick<Invocatio
  * The identity of the attested call that is running. Only attested tools (those whose schema declares
  * `harness_run`) run in a scope, so a handler that decides on identity (claim/release/report_issue) always has one.
  * @throws Error when called outside an attested call — a wiring defect, never a caller error.
+ * @throws {OsUserLookupError} when the call has no name for its writer (`McpCallScope.run` returns it as an error result)
  */
-export function requireCallIdentity(scope: McpCallScope): InvocationIdentity {
+export function requireCallIdentity(scope: McpCallScope): ResolvedInvocationIdentity {
   const context = scope.current();
   if (context === undefined) {
     throw new Error("requireCallIdentity: no attested call is running (the tool's schema must declare harness_run)");
   }
+  // reason: these callers (claim/release/report_issue) record an actor, so THEY are where an unnamed call fails.
+  if (context.identity.claimed === null) throw new OsUserLookupError(context.identity.unresolvedReason);
   return context.identity;
 }
 
@@ -181,10 +185,18 @@ export class McpCallScope {
       const check = await app.verifiedInvocationIdentity?.();
       if (check !== undefined) {
         if (!check.ok) return errorResult(check.error);
-        if (check.value !== undefined) verified = check.value;
+        // reason: verification only downgrades `harnessRun`; the name stays the resolved one of this call.
+        if (check.value !== undefined) verified = { ...identity, harnessRun: check.value.harnessRun };
       }
       const context: CallContext = { app, identity: verified };
-      return await this.store.run(context, () => body(context));
+      try {
+        return await this.store.run(context, () => body(context));
+      } catch (error) {
+        // reason: an unnamed call reaches here only from a tool that needed an actor (`by`, a service write, claim);
+        // it ends as that call's error result, naming the lookup's failure. Anything else is a defect and rethrows.
+        if (error instanceof OsUserLookupError) return errorResult(error.loreError);
+        throw error;
+      }
     } finally {
       scoped?.close();
     }

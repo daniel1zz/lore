@@ -61,9 +61,9 @@ import {
   isClaimStale,
   isInvalidated,
 } from "@lore/core";
-import { resolveActorWithSource as resolveActorWithSourceCore } from "@lore/core/node";
+import { resolveActorWithWorktree } from "@lore/core/node";
 import type { ActorSource as CoreActorSource } from "@lore/core/node";
-import type { DocRecord, Invocation, LoreError, ReviewJudgment, ValidityCarrier } from "@lore/core";
+import type { DocRecord, Invocation, LoreError, OsUser, ReviewJudgment, ValidityCarrier } from "@lore/core";
 import type { TreeNode } from "../../service/corpus-service.js";
 import type { DocWithNavigation } from "../../service/corpus-service.js";
 import type { CliIo } from "./output.js";
@@ -556,7 +556,8 @@ export function detectWorktreeDerivedActor(startDir: string): string | undefined
  * @param cwd - Directory to detect worktree membership from (the
  *   invocation's `cwd`); tests pass a fixture directory instead of mutating
  *   global cwd
- * @param user - The OS account name (the invocation's `user`): the os-fallback tier's value
+ * @param user - The invocation's recorded OS account lookup (`inv.user`): the os-fallback tier's value
+ * @throws {OsUserLookupError} when the OS tier is the one selected and `user` is a failure
  * @returns `{actor, source}` — `source: "worktree-derived"` only when every
  *   named tier was exhausted AND `cwd` resolved to a linked worktree with a
  *   resolvable branch HEAD
@@ -571,14 +572,9 @@ export function resolveActorWithSource(
   explicit: string | undefined,
   env: Readonly<Record<string, string | undefined>>,
   cwd: string,
-  user: string,
+  user: OsUser,
 ): ResolvedActor {
-  const core = resolveActorWithSourceCore(explicit, env, () => user);
-  if (core.source !== "os-fallback") {
-    return core;
-  }
-  const worktreeActor = detectWorktreeDerivedActor(cwd);
-  return worktreeActor !== undefined ? { actor: worktreeActor, source: "worktree-derived" } : core;
+  return resolveActorWithWorktree(explicit, env, user, () => detectWorktreeDerivedActor(cwd));
 }
 
 // reason: module-level once-per-process guard (retro `knowledge-session-process-review-2026-07-22-spec-062-064-continu`,
@@ -624,13 +620,13 @@ export function resetActorFallbackWarningForTests(): void {
  * @param explicit - Value of the --by flag, if the user passed one
  * @param env - the Invocation's environment (`inv.env`)
  * @param cwd - the Invocation's working directory (`inv.cwd`)
- * @param user - the Invocation's OS account name (`inv.user`)
+ * @param user - the Invocation's recorded OS account lookup (`inv.user`)
  * @returns Resolved actor identity string (never empty — OS username is always available)
  * @example
  *   resolveActor(undefined, inv.env, inv.cwd, inv.user) // => session actor, worktree-derived agent:<branch>, or OS username
  *   resolveActor("alice", inv.env, inv.cwd, inv.user) // => "alice" (never warns)
  */
-export function resolveActor(io: CliIo, explicit: string | undefined, env: Readonly<Record<string, string | undefined>>, cwd: string, user: string): string {
+export function resolveActor(io: CliIo, explicit: string | undefined, env: Readonly<Record<string, string | undefined>>, cwd: string, user: OsUser): string {
   return resolveActorWithIdentitySource(io, explicit, env, cwd, user).actor;
 }
 
@@ -658,7 +654,7 @@ export function resolveActorWithIdentitySource(io: CliIo,
   explicit: string | undefined,
   env: Readonly<Record<string, string | undefined>>,
   cwd: string,
-  user: string,
+  user: OsUser,
 ): ResolvedActor {
   const resolved = resolveActorWithSource(explicit, env, cwd, user);
   if (resolved.source === "os-fallback" && !warnedActorFallback) {

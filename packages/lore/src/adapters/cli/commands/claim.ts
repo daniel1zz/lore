@@ -54,8 +54,7 @@
  */
 
 import { invocationOf } from "../command-invocation.js";
-import { exitCli } from "../cli-exit.js";
-import { defineCommand } from "citty";
+import { defineLoreCommand, exitCli } from "../cli-exit.js";
 import { taskClaimSchema } from "@lore/core";
 import type { ActorSource } from "@lore/core/node";
 import { loadLoreApp } from "../loader.js";
@@ -63,7 +62,7 @@ import { exitCode, formatErrorFor, resolveActorWithIdentitySource } from "../uti
 import { requirePhaseWorkflowService } from "../phase-wiring.js";
 import { printLine } from "../output.js";
 
-export default defineCommand({
+export default defineLoreCommand({
   meta: {
     name: "claim",
     description: "Acquire an advisory execution lease on a task",
@@ -100,7 +99,7 @@ export default defineCommand({
       description: "Output result as JSON",
     },
   },
-  async run(context) {
+  async run(context): Promise<number> {
     const { args } = context;
     const inv = invocationOf(context);
     const { app } = loadLoreApp({ inv });
@@ -169,7 +168,7 @@ export default defineCommand({
 
       if (args.json) {
         printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { doc: result.value } }, null, 2));
-        return;
+        return 0;
       }
 
       printLine(inv.io.stdout, `Claimed ${result.value.slug} by ${by} (v${result.value.version})`);
@@ -182,5 +181,6 @@ export default defineCommand({
     } finally {
       app.close();
     }
+    return 0;
   },
 });

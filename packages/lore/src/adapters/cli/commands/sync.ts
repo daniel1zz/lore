@@ -4,8 +4,7 @@
  * Source: SPEC-009 §5, D-004 (auth_token_env stores NAME only, never plaintext token)
  */
 
-import { defineCommand } from "citty";
-import { exitCli } from "../cli-exit.js";
+import { defineLoreCommand, exitCli } from "../cli-exit.js";
 import { join, dirname } from "path";
 import { existsSync } from "fs";
 import { resolveSyncCredentials } from "@lore/core";
@@ -111,7 +110,7 @@ function findLoreDir(cwd: string): string | null {
 
 // ─── sync setup ───────────────────────────────────────────────────────────────
 
-const syncSetup = defineCommand({
+const syncSetup = defineLoreCommand({
   meta: {
     name: "setup",
     description: "Configure remote Turso sync connection",
@@ -234,7 +233,7 @@ const syncSetup = defineCommand({
 
 // ─── sync status ──────────────────────────────────────────────────────────────
 
-const syncStatus = defineCommand({
+const syncStatus = defineLoreCommand({
   meta: {
     name: "status",
     description: "Show current sync configuration and state",
@@ -336,7 +335,7 @@ const syncStatus = defineCommand({
 
 // ─── sync push ────────────────────────────────────────────────────────────────
 
-const syncPushCmd = defineCommand({
+const syncPushCmd = defineLoreCommand({
   meta: {
     name: "push",
     description: "Upload local DB to remote Turso (logical replication)",
@@ -417,7 +416,7 @@ const syncPushCmd = defineCommand({
 
 // ─── sync pull ────────────────────────────────────────────────────────────────
 
-const syncPullCmd = defineCommand({
+const syncPullCmd = defineLoreCommand({
   meta: {
     name: "pull",
     description: "Sync remote Turso changes to local DB (embedded replica)",
@@ -497,7 +496,7 @@ const syncPullCmd = defineCommand({
 
 // ─── sync command group ───────────────────────────────────────────────────────
 
-export default defineCommand({
+export default defineLoreCommand({
   meta: {
     name: "sync",
     description: "Manage remote Turso sync configuration",

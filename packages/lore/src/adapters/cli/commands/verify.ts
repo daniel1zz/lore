@@ -59,7 +59,7 @@
  *   1. `--allow-new-commands` (alias `--yes`) — approve every new/changed
  *      command for this run without prompting (also the required escape for
  *      non-interactive/CI invocations).
- *   2. Interactive TTY (no `--json`, `process.stdin.isTTY`) — prompt
+ *   2. Interactive TTY (no `--json`, `inv.io.stdinIsTTY`) — prompt
  *      `Run new/changed verify command "<cmd>"? [y/N]` per unapproved AC via
  *      `promptYesNo`; a non-"y"/"yes" answer aborts the run at that AC.
  *   3. Neither of the above (non-interactive, no flag) — the run aborts at the
@@ -183,8 +183,8 @@
 import { spawnSync } from "node:child_process";
 
 import { resolve as resolvePath } from "node:path";
-import { createInterface } from "node:readline/promises";
-import { defineCommand } from "citty";
+import { promptYesNo } from "../prompt.js";
+import { defineLoreCommand } from "../cli-exit.js";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatErrorFor, resolveActor } from "../utils.js";
 import { VERIFY_NO_SCRIPT_ACS } from "../cli-refusal-messages.js";
@@ -345,23 +345,7 @@ function resolveCliExecutionRoot(
   };
 }
 
-/**
- * Interactive y/N confirmation prompt (SPEC-039 §M2) — used ONLY when
- * `process.stdin.isTTY` and `--json` was not passed (see `run` below). Any
- * answer other than a case-insensitive "y"/"yes" is treated as "no".
- */
-async function promptYesNo(question: string): Promise<boolean> {
-  const rl = createInterface({ input: process.stdin, output: process.stdout });
-  try {
-    const answer = await rl.question(question);
-    const normalized = answer.trim().toLowerCase();
-    return normalized === "y" || normalized === "yes";
-  } finally {
-    rl.close();
-  }
-}
-
-export default defineCommand({
+export default defineLoreCommand({
   meta: {
     name: "verify",
     description: "Execute a plan's script-mode acceptance criteria for real and record attested evidence",
@@ -446,9 +430,9 @@ export default defineCommand({
       // a prompt reading stdin while the caller expects a machine-parseable envelope would
       // hang or corrupt output).
       const confirmUnapprovedCommand =
-        process.stdin.isTTY && args.json !== true
+        inv.io.stdinIsTTY && args.json !== true
           ? async (info: { ac_id: string; command: string }): Promise<boolean> =>
-              promptYesNo(`Run new/changed verify command "${info.command}" for ${info.ac_id}? [y/N] `)
+              promptYesNo(inv.io, `Run new/changed verify command "${info.command}" for ${info.ac_id}? [y/N] `)
           : undefined;
 
       // SPEC-063 §Design Decisions D1/D4 — resolved BEFORE calling verifyPlan

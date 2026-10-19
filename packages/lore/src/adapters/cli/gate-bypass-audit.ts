@@ -20,8 +20,10 @@
  *     miss, never `process.exit` — the bypass path's exit-0 guarantee
  *     (SPEC-080 D3) must survive an absent corpus.
  *
- * @invariant D1/D3 (SPEC-080 §Design Decisions) — this module NEVER changes the
- *   bypass's outcome. `runGateEnvBypassAudit` never throws and never rejects:
+ * @invariant D1/D3 (SPEC-080 §Design Decisions) — this module never changes the
+ *   bypass's outcome, with ONE exception: an invocation with no name for its writer (OS user lookup failed, no
+ *   other name) cannot be attributed, so the bypass is refused with `OsUserLookupError` (exit 4). Otherwise
+ *   `runGateEnvBypassAudit` never throws and never rejects:
  *   every failure mode (the injected port itself throwing/rejecting, resolving
  *   `null` for "corpus unreachable", or the write settling with `Result.err`)
  *   degrades to exactly one `gate bypass NOT audited: <reason>` stderr line.
@@ -37,6 +39,7 @@
  */
 
 import type { Invocation } from "@lore/core";
+import { OsUserLookupError } from "@lore/core/node";
 import {
   buildGateSkipAuditEntry,
   describeLoreError,
@@ -74,6 +77,7 @@ export interface GateBypassAuditDeps {
  *   this call is auditing.
  * @param inv - the running command's Invocation: its claimed name (resolved once at the entry) is the actor the
  *   audit row is attributed to — never an independent resolution (AS-26)
+ * @throws {OsUserLookupError} when `inv.identity` is unresolved: nothing is bypassed
  * @param deps - Injected port (real wiring: `commands/gate.ts` opens a
  *   `SQLiteStore` over the discovered `.lore/lore.db`; tests inject a fake
  *   resolving/rejecting/throwing stand-in).
@@ -89,6 +93,12 @@ export async function runGateEnvBypassAudit(
   inv: Invocation,
   deps: GateBypassAuditDeps,
 ): Promise<void> {
+  // reason: the audit row is attributed to the invocation's claimed name. An invocation with no name (its OS user
+  // lookup failed and no --by/session/working-copy name exists) cannot be audited, so the bypass is REFUSED
+  // (`OsUserLookupError`, exit 4 through `run-cli.ts::dispatch`) instead of proceeding unaudited.
+  if (inv.identity.claimed === null) throw new OsUserLookupError(inv.identity.unresolvedReason);
+  const actor = inv.identity.claimed;
+
   let recordGateSkip: RecordGateSkip | null;
   try {
     recordGateSkip = await deps.openRecordGateSkip();
@@ -103,8 +113,6 @@ export async function runGateEnvBypassAudit(
   }
 
   const nowIso = new Date().toISOString();
-  // reason: the invocation's claimed name (resolved once at the entry) — never an independent resolution.
-  const actor = inv.identity.claimed;
   const entry = buildGateSkipAuditEntry(checkpoint, "env_bypass", nowIso, actor);
 
   try {

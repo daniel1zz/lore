@@ -18,8 +18,7 @@
  *   Valid link type returned but link would cycle → exit 4 (CorpusService.link enforces).
  */
 
-import { defineCommand } from "citty";
-import { exitCli } from "../cli-exit.js";
+import { defineLoreCommand, exitCli } from "../cli-exit.js";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatErrorFor, formatShortId, resolveActor } from "../utils.js";
 import { linkTypeSchema } from "@lore/core";
@@ -39,7 +38,7 @@ import { printLine } from "../output.js";
  */
 const VALID_LINK_TYPES: readonly LinkType[] = linkTypeSchema.options;
 
-export default defineCommand({
+export default defineLoreCommand({
   meta: {
     name: "link",
     description: "Create a link between two documents",
@@ -72,7 +71,7 @@ export default defineCommand({
       description: "Output as JSON",
     },
   },
-  async run(context) {
+  async run(context): Promise<number> {
     const { args } = context;
     const inv = invocationOf(context);
     const hasInfer = args.infer === true;
@@ -150,7 +149,7 @@ export default defineCommand({
               `(${link.link_type}) [inferred]`,
           );
         }
-        return;
+        return 0;
       }
 
       // ─── Manual path (unchanged from pre-SPEC-019) ────────────────────────────
@@ -181,5 +180,6 @@ export default defineCommand({
     } finally {
       app.close();
     }
+    return 0;
   },
 });

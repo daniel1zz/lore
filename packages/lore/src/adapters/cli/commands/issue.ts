@@ -152,7 +152,7 @@
  *   spec-the-defect-channel-reaches-no-machine-but-its-own-github, AC-GI-4.
  */
 
-import { defineCommand } from "citty";
+import { defineLoreCommand } from "../cli-exit.js";
 
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatErrorFor, resolveActor } from "../utils.js";
@@ -446,13 +446,13 @@ function noRootPrdError(): LoreError {
   };
 }
 
-export default defineCommand({
+export default defineLoreCommand({
   meta: {
     name: "issue",
     description: "Manage filed issue reports (adopt, resolve)",
   },
   subCommands: {
-    adopt: defineCommand({
+    adopt: defineLoreCommand({
       meta: {
         name: "adopt",
         description:
@@ -469,7 +469,7 @@ export default defineCommand({
           description: "Output result as JSON",
         },
       },
-      async run(context) {
+      async run(context): Promise<number> {
         const inv = invocationOf(context);
         const { args } = context;
         const rawNumber = readStringArg(args as unknown as Record<string, unknown>, "number");
@@ -579,7 +579,7 @@ export default defineCommand({
                   `Already adopted GitHub issue #${issueNumber} as ${existing.slug} (adopted previously).`,
                 );
               }
-              return;
+              return 0;
             }
 
             inv.io.stderr.write(formatErrorFor(inv, createResult.error) + "\n");
@@ -595,9 +595,10 @@ export default defineCommand({
         } finally {
           app.close();
         }
+        return 0;
       },
     }),
-    resolve: defineCommand({
+    resolve: defineLoreCommand({
       meta: {
         name: "resolve",
         description:
@@ -639,7 +640,7 @@ export default defineCommand({
           description: "Output result as JSON",
         },
       },
-      async run(context) {
+      async run(context): Promise<number> {
         const { args } = context;
         const inv = invocationOf(context);
         const state = typeof args.state === "string" ? args.state : undefined;
@@ -899,6 +900,7 @@ export default defineCommand({
         } finally {
           app.close();
         }
+        return 0;
       },
     }),
   },

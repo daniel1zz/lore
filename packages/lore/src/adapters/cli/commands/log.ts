@@ -2,7 +2,7 @@
  * lore log [<doc-id>] — version history for a document or recent audit entries.
  */
 
-import { defineCommand } from "citty";
+import { defineLoreCommand } from "../cli-exit.js";
 
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatErrorFor, formatTable, parsePositiveIntArg } from "../utils.js";
@@ -13,7 +13,7 @@ import { formatAttributionLabels, loadVersionAttributions, type WriteAttribution
 import { invocationOf } from "../command-invocation.js";
 import { printLine } from "../output.js";
 
-export default defineCommand({
+export default defineLoreCommand({
   meta: {
     name: "log",
     description: "Show version history for a document",
@@ -34,7 +34,7 @@ export default defineCommand({
       description: "Output as JSON",
     },
   },
-  async run(context) {
+  async run(context): Promise<number> {
     const { args } = context;
     const inv = invocationOf(context);
     const { app, dbPath } = loadLoreApp({ inv });
@@ -76,12 +76,12 @@ export default defineCommand({
 
       if (args.json) {
         printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { entries, total: entries.length } }, null, 2));
-        return;
+        return 0;
       }
 
       if (entries.length === 0) {
         printLine(inv.io.stdout, `No version history for ${args.id}.`);
-        return;
+        return 0;
       }
 
       // SPEC-072 D3 — Slug column renders the value when present; a legacy
@@ -103,5 +103,6 @@ export default defineCommand({
       attributionStore.close();
       app.close();
     }
+    return 0;
   },
 });

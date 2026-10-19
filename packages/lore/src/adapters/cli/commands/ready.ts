@@ -51,7 +51,7 @@
  *         SPEC-069 §Design Decisions D2, AC-069-7
  */
 
-import { defineCommand } from "citty";
+import { defineLoreCommand } from "../cli-exit.js";
 
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatErrorFor } from "../utils.js";
@@ -177,7 +177,7 @@ function formatAnchorConflictLine(conflict: AnchorConflict): string {
   return `  - ${conflict.task_slug} conflicts with ${conflict.holder}${session} on: ${conflict.paths.join(", ")}`;
 }
 
-export default defineCommand({
+export default defineLoreCommand({
   meta: {
     name: "ready",
     description: "Computed readiness report over a plan's tasks (never stored)",
@@ -198,7 +198,7 @@ export default defineCommand({
       description: "Output the full ReadyReport as JSON (see SPEC-042 §Design Decisions D7)",
     },
   },
-  async run(context) {
+  async run(context): Promise<number> {
     const { args } = context;
     const inv = invocationOf(context);
     const hasPlan = args.plan !== undefined && String(args.plan).trim() !== "";
@@ -225,7 +225,7 @@ export default defineCommand({
 
         if (args.json) {
           printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { adhoc: { records } } }, null, 2));
-          return;
+          return 0;
         }
 
         if (records.length === 0) {
@@ -234,7 +234,7 @@ export default defineCommand({
           printLine(inv.io.stdout, `Ad-hoc tasks (${records.length}):`);
           for (const record of records) printLine(inv.io.stdout, formatReadyLine(record));
         }
-        return;
+        return 0;
       }
 
       // task-a-mistyped-task-file-anchor-is-stored-and-consulted (Required #2):
@@ -258,7 +258,7 @@ export default defineCommand({
 
       if (args.json) {
         printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { ready: report } }, null, 2));
-        return;
+        return 0;
       }
 
       if (records.length === 0) {
@@ -327,5 +327,6 @@ export default defineCommand({
     } finally {
       app.close();
     }
+    return 0;
   },
 });

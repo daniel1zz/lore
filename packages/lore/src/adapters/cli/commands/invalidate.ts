@@ -13,7 +13,7 @@
  * invalid_at, undo on a never-invalidated doc); 5 = STALE_VERSION.
  */
 
-import { defineCommand } from "citty";
+import { defineLoreCommand } from "../cli-exit.js";
 
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatErrorFor, resolveActor } from "../utils.js";
@@ -21,7 +21,7 @@ import type { InvalidateOpts } from "../../../service/validity-service.js";
 import { invocationOf } from "../command-invocation.js";
 import { printLine } from "../output.js";
 
-export default defineCommand({
+export default defineLoreCommand({
   meta: {
     name: "invalidate",
     description: "Mark a knowledge/adr/task document invalid (retract it), or undo a prior invalidation",
@@ -49,7 +49,7 @@ export default defineCommand({
       description: "Output as JSON",
     },
   },
-  async run(context) {
+  async run(context): Promise<number> {
     const { args } = context;
     const inv = invocationOf(context);
     const { app } = loadLoreApp({ inv });
@@ -90,7 +90,7 @@ export default defineCommand({
             2,
           ),
         );
-        return;
+        return 0;
       }
 
       if (args.undo === true) {
@@ -115,5 +115,6 @@ export default defineCommand({
     } finally {
       app.close();
     }
+    return 0;
   },
 });

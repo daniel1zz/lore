@@ -37,8 +37,7 @@
  */
 
 import { dirname } from "path";
-import { exitCli } from "../cli-exit.js";
-import { defineCommand } from "citty";
+import { defineLoreCommand, exitCli } from "../cli-exit.js";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatError, formatErrorFor } from "../utils.js";
 import { resolveTrackedWriteRoot } from "../working-tree-root.js";
@@ -47,7 +46,7 @@ import type { SectionMigrationVerdict } from "../../../service/outline-migration
 import { invocationOf } from "../command-invocation.js";
 import { printLine } from "../output.js";
 
-export default defineCommand({
+export default defineLoreCommand({
   meta: {
     name: "migrate",
     description:
@@ -97,7 +96,7 @@ export default defineCommand({
       description: "Output as JSON",
     },
   },
-  async run(context) {
+  async run(context): Promise<number> {
     const { args } = context;
     const inv = invocationOf(context);
     if (
@@ -175,7 +174,7 @@ export default defineCommand({
       } finally {
         app.close();
       }
-      return;
+      return 0;
     }
 
     // ── ordinals action ───────────────────────────────────────────────────
@@ -259,7 +258,7 @@ export default defineCommand({
       } finally {
         app.close();
       }
-      return;
+      return 0;
     }
 
     // ── prd-to-outline action ─────────────────────────────────────────────
@@ -343,7 +342,7 @@ export default defineCommand({
       } finally {
         app.close();
       }
-      return;
+      return 0;
     }
 
     // ── tasks-to-phases action ────────────────────────────────────────────
@@ -373,7 +372,7 @@ export default defineCommand({
         const report = result.value;
         if (args.json) {
           printLine(inv.io.stdout, JSON.stringify({ ok: true, data: report }, null, 2));
-          return;
+          return 0;
         }
 
         const label = dryRun ? "Task→phase migration (dry-run)" : "Task→phase migration complete";
@@ -395,7 +394,7 @@ export default defineCommand({
       } finally {
         app.close();
       }
-      return;
+      return 0;
     }
 
     // ── phases action ─────────────────────────────────────────────────────
@@ -413,7 +412,7 @@ export default defineCommand({
         const report = result.value;
         if (args.json) {
           printLine(inv.io.stdout, JSON.stringify({ ok: true, data: report }, null, 2));
-          return;
+          return 0;
         }
 
         const label = dryRun ? "Phase migration (dry-run)" : "Phase migration complete";
@@ -427,7 +426,7 @@ export default defineCommand({
       } finally {
         app.close();
       }
-      return;
+      return 0;
     }
 
     // ── spec-kind action ──────────────────────────────────────────────────
@@ -445,7 +444,7 @@ export default defineCommand({
         const report = result.value;
         if (args.json) {
           printLine(inv.io.stdout, JSON.stringify({ ok: true, data: report }, null, 2));
-          return;
+          return 0;
         }
 
         const label = dryRun ? "Spec-kind audit (dry-run)" : "Spec-kind audit complete";
@@ -467,7 +466,7 @@ export default defineCommand({
       } finally {
         app.close();
       }
-      return;
+      return 0;
     }
 
     // ── v1 action ─────────────────────────────────────────────────────────
@@ -491,7 +490,7 @@ export default defineCommand({
         const report = analyzeResult.value;
         if (args.json) {
           printLine(inv.io.stdout, JSON.stringify({ ok: true, data: report }, null, 2));
-          return;
+          return 0;
         }
 
         printLine(inv.io.stdout, "Migration Analysis (dry-run)");
@@ -530,7 +529,7 @@ export default defineCommand({
           }
         }
 
-        return;
+        return 0;
       }
 
       // Execute migration
@@ -548,7 +547,7 @@ export default defineCommand({
       const migResult = executeResult.value;
       if (args.json) {
         printLine(inv.io.stdout, JSON.stringify({ ok: true, data: migResult }, null, 2));
-        return;
+        return 0;
       }
 
       printLine(inv.io.stdout, "Migration complete");
@@ -574,5 +573,6 @@ export default defineCommand({
     } finally {
       app.close();
     }
+    return 0;
   },
 });

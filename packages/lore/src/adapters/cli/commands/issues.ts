@@ -174,7 +174,7 @@
 import type { Invocation } from "@lore/core";
 
 import { dirname } from "node:path";
-import { defineCommand } from "citty";
+import { defineLoreCommand } from "../cli-exit.js";
 import { z } from "zod";
 import {
   err,
@@ -468,7 +468,7 @@ export async function runGithubIssuesListing(inv: Invocation,
         2,
       ),
     );
-    return;
+    return 0;
   }
 
   printLine(inv.io.stdout, formatIssueCorpusLine(corpusPath)); // CLI surface
@@ -489,6 +489,7 @@ export async function runGithubIssuesListing(inv: Invocation,
     printLine(inv.io.stdout, formatTable(headers, tableRows)); // CLI surface
   }
   printLine(inv.io.stdout, GITHUB_LISTING_LOCAL_BOUNDARY_NOTE); // CLI surface
+  return 0;
 }
 
 /**
@@ -544,7 +545,7 @@ async function runGithubVerify(inv: Invocation,
   return renderVerifyResult(inv.io, corpusPath, divergences, json);
 }
 
-export default defineCommand({
+export default defineLoreCommand({
   meta: {
     name: "issues",
     description:
@@ -598,7 +599,7 @@ export default defineCommand({
       description: "Output as JSON",
     },
   },
-  async run(context) {
+  async run(context): Promise<number> {
     const inv = invocationOf(context);
     const { args } = context;
     // spec-archiving-the-work-that-resolves-a-defect-report-closes D3 — --sync is its own operation
@@ -619,7 +620,7 @@ export default defineCommand({
       } finally {
         syncApp.close();
       }
-      return;
+      return 0;
     }
     const modeFlagsSet = [args.open === true, args.resolved === true, args.all === true].filter(
       Boolean,
@@ -727,6 +728,7 @@ export default defineCommand({
     } finally {
       app.close();
     }
+    return 0;
   },
 });
 
@@ -1132,6 +1134,7 @@ function renderVerifyResult(io: CliIo, corpusPath: string, divergences: readonly
   if (!clean) {
     return VERIFY_DIVERGENCE_EXIT_CODE;
   }
+  return 0;
 }
 
 /**

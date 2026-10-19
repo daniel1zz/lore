@@ -2,14 +2,14 @@
  * lore delete <id> --confirm — soft-delete a document.
  */
 
-import { defineCommand } from "citty";
+import { defineLoreCommand } from "../cli-exit.js";
 
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatErrorFor, resolveActor } from "../utils.js";
 import { invocationOf } from "../command-invocation.js";
 import { printLine } from "../output.js";
 
-export default defineCommand({
+export default defineLoreCommand({
   meta: {
     name: "delete",
     description: "Soft-delete a document (recoverable for 30 days)",
@@ -29,7 +29,7 @@ export default defineCommand({
       description: "Output as JSON",
     },
   },
-  async run(context) {
+  async run(context): Promise<number> {
     const { args } = context;
     const inv = invocationOf(context);
     const { app } = loadLoreApp({ inv });
@@ -53,5 +53,6 @@ export default defineCommand({
     } finally {
       app.close();
     }
+    return 0;
   },
 });

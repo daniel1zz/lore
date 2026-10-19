@@ -23,7 +23,7 @@
 
 import type { Invocation } from "@lore/core";
 
-import { defineCommand } from "citty";
+import { defineLoreCommand } from "../cli-exit.js";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatError, formatErrorFor } from "../utils.js";
 import type { LoreError, OutlineEntry } from "@lore/core";
@@ -71,13 +71,13 @@ function refuseRetiredWrite(inv: Invocation, verb: string, json: unknown): ExitR
   return exitCode(error);
 }
 
-export default defineCommand({
+export default defineLoreCommand({
   meta: {
     name: "outline",
     description: "List a PRD's stored outline entries (writes are retired — see `lore baseline add`)",
   },
   subCommands: {
-    set: defineCommand({
+    set: defineLoreCommand({
       meta: { name: "set", description: "RETIRED (BR-985): refused with exit 4; use `lore baseline add`" },
       args: {
         "prd": { type: "positional", description: "(retired — ignored)" },
@@ -99,7 +99,7 @@ export default defineCommand({
       },
     }),
 
-    list: defineCommand({
+    list: defineLoreCommand({
       meta: { name: "list", description: "List a PRD's declared outline entries" },
       args: {
         prd: {
@@ -112,7 +112,7 @@ export default defineCommand({
           description: "Output result as JSON",
         },
       },
-      async run(context) {
+      async run(context): Promise<number> {
         const { args } = context;
         const inv = invocationOf(context);
         const { app } = loadLoreApp({ inv });
@@ -127,22 +127,23 @@ export default defineCommand({
 
           if (args.json) {
             printLine(inv.io.stdout, JSON.stringify({ ok: true, data: result.value }, null, 2));
-            return;
+            return 0;
           }
 
           if (result.value.length === 0) {
             printLine(inv.io.stdout, "No outline entries declared on this PRD.");
-            return;
+            return 0;
           }
 
           renderOutlineList(inv.io, result.value);
         } finally {
           app.close();
         }
+        return 0;
       },
     }),
 
-    rm: defineCommand({
+    rm: defineLoreCommand({
       meta: { name: "rm", description: "RETIRED (BR-985): refused with exit 4; use `lore baseline add`" },
       args: {
         "prd": { type: "positional", description: "(retired — ignored)" },
@@ -158,7 +159,7 @@ export default defineCommand({
       },
     }),
 
-    exempt: defineCommand({
+    exempt: defineLoreCommand({
       meta: { name: "exempt", description: "RETIRED (BR-985): refused with exit 4; use `lore baseline add`" },
       args: {
         "plan": { type: "positional", description: "(retired — ignored)" },
