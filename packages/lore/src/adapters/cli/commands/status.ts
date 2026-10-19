@@ -214,7 +214,6 @@ import {
   readEmbeddedBuildProvenance,
   renderBinaryProvenanceVerdict,
 } from "../../../service/binary-provenance.js";
-import { renderExemptPlansSection } from "../../../flows/status-prd-sync-flow.js";
 import {
   computeIssueResolution,
   hasIssueReport,
@@ -2230,17 +2229,6 @@ export default defineLoreCommand({
         printLine(inv.io.stdout, "\n⚠ Invalidated feeding sources:");
         for (const warning of status.invalidated_feeding_source_warnings) {
           printLine(inv.io.stdout, `  - ${warning}`);
-        }
-      }
-
-      // SPEC-080 §C4 — exempt-plans surfacing (AC-080-5). `[]` renders NO lines
-      // at all (see renderExemptPlansSection's own JSDoc), so a corpus with zero
-      // prd_sync_exempt plans prints byte-identically to pre-SPEC-080.
-      const exemptPlansLines = renderExemptPlansSection(status.exempt_plans);
-      if (exemptPlansLines.length > 0) {
-        printLine(inv.io.stdout, "");
-        for (const line of exemptPlansLines) {
-          printLine(inv.io.stdout, line);
         }
       }
 

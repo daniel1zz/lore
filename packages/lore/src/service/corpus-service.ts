@@ -40,8 +40,6 @@ import {
   SPEC_KINDS,
   buildTaskAttestationInfos,
   deriveDeclaredScopeCoverage,
-  extractPrdSyncExempt,
-  prdSyncExemptEqual,
   ORDINAL_REGISTRY,
   isSelfDeclaredOrdinalTitle,
   SELF_DECLARED_ORDINAL_TITLE_REFUSAL,
@@ -745,18 +743,6 @@ export interface CorpusStatus {
    * Empty when nothing is invalidated (never omitted — always a fact, not absent data).
    */
   invalidated_feeding_source_warnings: string[];
-  /**
-   * SPEC-080 §C4 — every ACTIVE plan currently carrying a valid
-   * `extra.prd_sync_exempt` (`extractPrdSyncExempt` returning non-`undefined`),
-   * pointer-only (slug — never the exemption's `reason`/`by`/`at`, mirroring
-   * `invalidated_feeding_source_warnings`'s pointer-not-dump shape). Closes the
-   * SPEC-069 `attestation_exempt` field's documented invisibility gap (zero
-   * status/doctor/dashboard surfacing) — that miss is not repeated here.
-   * Follows the EXACT same convention `invalidated_feeding_source_warnings`
-   * already established: empty when nothing is exempt (never omitted — always
-   * a fact, not absent data).
-   */
-  exempt_plans: Array<{ slug: string }>;
 }
 
 /**
@@ -3093,28 +3079,6 @@ export class CorpusService {
           field: "extra.validity",
           message: "extra.validity cannot be changed via `lore set` — use `lore invalidate` instead",
           value: parsedPatch.data.extra["validity"],
-        });
-      }
-    }
-
-    // plan.extra.prd_sync_exempt guard (SPEC-080 C4; the writer `lore outline exempt` was retired by
-    // BR-985, the field is now inert history that must not be silently dropped) — mirrors
-    // extra.validity's D10 shape immediately above, not the phases/claim/
-    // verification_evidence "drop-only" shape: a patch whose extra.prd_sync_exempt
-    // DIFFERS from the plan's CURRENT one — added where none existed, changed to a
-    // different value, OR dropped — is rejected outright. A patch that RESTATES
-    // the current exemption verbatim (or that never mentions the key at all, on a
-    // plan with no exemption) is a no-op by this check and proceeds normally.
-    if (existing.type === "plan" && parsedPatch.data.extra !== undefined) {
-      const incomingExempt = extractPrdSyncExempt({ extra: parsedPatch.data.extra });
-      const currentExempt = extractPrdSyncExempt(existing);
-      if (!prdSyncExemptEqual(incomingExempt, currentExempt)) {
-        return err({
-          code: "VALIDATION_ERROR",
-          field: "extra.prd_sync_exempt",
-          message:
-            "extra.prd_sync_exempt cannot be changed via `lore set` — the outline exemption is retired (BR-985); plan-close now reads cited rule state",
-          value: parsedPatch.data.extra["prd_sync_exempt"],
         });
       }
     }
@@ -5628,14 +5592,6 @@ export class CorpusService {
       }
     }
 
-    // SPEC-080 §C4 — exempt-plans surfacing (see CorpusStatus.exempt_plans's own
-    // JSDoc for why this exists). Pointer-only; sourced via the SAME
-    // `extractPrdSyncExempt` (`@lore/core`) the plan-close gate itself consults —
-    // never a second hand-rolled `extra.prd_sync_exempt` shape check.
-    const exemptPlans = activeDocs
-      .filter((d) => d.type === "plan" && extractPrdSyncExempt(d) !== undefined)
-      .map((d) => ({ slug: d.slug }));
-
     return ok({
       total_docs: liveDocs.length,
       invalid_docs: invalidDocs,
@@ -5644,7 +5600,6 @@ export class CorpusService {
       last_updated: lastUpdated,
       db_size_bytes: dbSizeResult.value,
       invalidated_feeding_source_warnings: invalidatedFeedingSourceWarnings,
-      exempt_plans: exemptPlans,
     });
   }
 

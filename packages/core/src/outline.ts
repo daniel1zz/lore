@@ -16,9 +16,6 @@
  *   - outlineBudgetSchema / OutlineBudget — `prd.extra.outline_budget` (C3):
  *     the corpus-governed tiered char budgets the `--check-prd-budget` oracle
  *     enforces, plus the content-flight scan's free-text threshold.
- *   - prdSyncExemptSchema / PrdSyncExempt — `plan.extra.prd_sync_exempt` (C4):
- *     the audited, required-reason exemption from the plan-close sync
- *     predicate.
  *   - renderOutlineContent(outline) — deterministic Markdown rendering of a
  *     `prd.extra.outline[]` array for the PRD's `content` field. `extra.outline`
  *     is the SSOT; `content` is generated ONLY by this function at write time
@@ -41,20 +38,15 @@
  *   - Every char-count field on {@link outlineBudgetSchema} rejects zero and
  *     negative values (`.positive()`) — a non-positive budget is nonsensical
  *     (it would reject every non-empty entry/body).
- *   - `prdSyncExemptSchema.reason` requires a NON-EMPTY string — "required"
- *     means "must justify", not merely "key present with an empty value"
- *     (mirrors `attestation_exempt`'s required-reason precedent this schema
- *     is a documented hardening of, SPEC-080 C4).
  *
  * Side-effect class: pure
  *
  * Source: SPEC-080 C1 (OutlineEntry), C2 (SPEC_KINDS domain-overview
- *   extension — see spec-kind.ts, NOT this module), C3 (outline_budget), C4
- *   (prd_sync_exempt)
+ *   extension — see spec-kind.ts, NOT this module), C3 (outline_budget). C4's plan exemption
+ *   (`prd_sync_exempt`) is gone: removed from stored plans by `lore migrate plan-outline-exempt` (BL-D2).
  */
 
 import { z } from "zod";
-import type { DocRecord } from "./types.js";
 
 // ─── Outline Entry Tiers ────────────────────────────────────────────────────
 
@@ -167,77 +159,6 @@ export const outlineBudgetSchema = z.object({
 
 /** Derived TypeScript type for the corpus-governed outline budget. */
 export type OutlineBudget = z.infer<typeof outlineBudgetSchema>;
-
-// ─── Plan-Close Sync Exemption Schema ───────────────────────────────────────
-
-/**
- * `plan.extra.prd_sync_exempt` (SPEC-080 C4) — an audited, required-reason
- * exemption from the plan-close `prdOutlineSynced` predicate. Mirrors
- * `attestation_exempt` (SPEC-069) with two hardenings the precedent lacks:
- * (a) a dedicated writer verb (`lore outline exempt <plan> --reason …`) —
- * `CorpusService.set` rejects direct patches to this field, same shape as
- * this module does NOT itself enforce for `outlineEntrySchema` above; (b)
- * surfacing — `lore status` lists currently-exempt plans, closing the
- * SPEC-069 field's proven invisibility gap.
- *
- * @example
- * prdSyncExemptSchema.parse({
- *   reason: "Feature landed off-cycle; domain doc update tracked in follow-up plan-042.",
- *   by: "agent:main-orchestrator",
- *   at: "2026-07-26T00:00:00.000Z",
- * });
- */
-export const prdSyncExemptSchema = z.object({
-  /** Required justification — non-empty (a present-but-empty string is still a rejection). */
-  reason: z.string().min(1),
-  /** Actor identity that recorded the exemption. */
-  by: z.string().min(1),
-  /** ISO timestamp the exemption was recorded at. */
-  at: z.string(),
-});
-
-/** Derived TypeScript type for a plan's sync exemption. */
-export type PrdSyncExempt = z.infer<typeof prdSyncExemptSchema>;
-
-/**
- * Defensive `extra`-shape guard — mirrors `validity.ts`'s private `safeExtra`
- * (duplicated, not imported, to keep this module dependency-free of that one;
- * same convention `task-workflow.ts`'s `safeTaskExtra` established).
- */
-function safeExtra(extra: unknown): Record<string, unknown> {
-  return extra !== null && typeof extra === "object" && !Array.isArray(extra)
-    ? (extra as Record<string, unknown>)
-    : {};
-}
-
-/**
- * Extracts and validates `plan.extra.prd_sync_exempt` from a DocRecord-shaped
- * input. Returns `undefined` when absent or malformed (defensive — `extra` is
- * untyped storage; matches `extractValidity`/`readClaimRecord`'s degrade-to-
- * undefined contract).
- */
-export function extractPrdSyncExempt(doc: Pick<DocRecord, "extra">): PrdSyncExempt | undefined {
-  const raw = safeExtra(doc.extra)["prd_sync_exempt"];
-  if (raw === undefined || raw === null) return undefined;
-  const parsed = prdSyncExemptSchema.safeParse(raw);
-  return parsed.success ? parsed.data : undefined;
-}
-
-/**
- * Deep-equality over two (possibly absent) {@link PrdSyncExempt} values — used
- * by `CorpusService.set`'s SPEC-080 C4 writer guard to detect whether a
- * patch's `extra.prd_sync_exempt` differs from the plan's current one (added,
- * changed, OR dropped → rejected, naming `lore outline exempt`). Mirrors
- * `validityEqual`'s exact shape (`validity.ts`) — the SAME "unconditional
- * dedicated-writer rule" precedent (SPEC-043 D10) this field's guard is
- * explicitly modeled after (SPEC-080 C4: "mirrors `attestation_exempt` ...
- * dedicated writer verb; `CorpusService.set` rejects direct patches").
- */
-export function prdSyncExemptEqual(a: PrdSyncExempt | undefined, b: PrdSyncExempt | undefined): boolean {
-  if (a === undefined && b === undefined) return true;
-  if (a === undefined || b === undefined) return false;
-  return a.reason === b.reason && a.by === b.by && a.at === b.at;
-}
 
 // ─── Render Projection ──────────────────────────────────────────────────────
 

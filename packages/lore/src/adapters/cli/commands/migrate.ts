@@ -34,6 +34,10 @@
  *                      audit entry per spec (no version row, no status change); `--revert` restores each
  *                      parent from those entries. Both idempotent. Thin pipe over
  *                      `SpecParentMigrationService`. (AC-BLS3B-7)
+ *   plan-outline-exempt [--apply] Remove the legacy outline-sync exemption (`extra.prd_sync_exempt`) from
+ *                      every stored plan (BL-D2, BR-250). Preview is the DEFAULT; `--apply` writes one audit
+ *                      row per plan carrying the removed value; a second `--apply` writes nothing. Thin
+ *                      pipe over `PlanOutlineExemptMigrationService`.
  */
 
 import { dirname } from "path";
@@ -50,12 +54,12 @@ export default defineLoreCommand({
   meta: {
     name: "migrate",
     description:
-      "Corpus migration: `v1 --from <path>` (v1 import), `phases` (phase schema sweep), `spec-kind` (spec_kind mistype audit), `tasks-to-phases` (task→phase doc-type sweep), `prd-to-outline` (per-section PRD→outline domain relocation), `ordinals` (SPEC-084 ordinal repair migration), or `spec-parents` (clear every spec parent_id; preview by default, `--apply` writes, `--revert` restores)",
+      "Corpus migration: `v1 --from <path>` (v1 import), `phases` (phase schema sweep), `spec-kind` (spec_kind mistype audit), `tasks-to-phases` (task→phase doc-type sweep), `prd-to-outline` (per-section PRD→outline domain relocation), `ordinals` (SPEC-084 ordinal repair migration), `spec-parents` (clear every spec parent_id; preview by default, `--apply` writes, `--revert` restores), or `plan-outline-exempt` (remove the legacy outline-sync exemption from every stored plan; preview by default, `--apply` writes)",
   },
   args: {
     version: {
       type: "positional",
-      description: "Migration action: v1 | phases | spec-kind | tasks-to-phases | prd-to-outline | ordinals | spec-parents",
+      description: "Migration action: v1 | phases | spec-kind | tasks-to-phases | prd-to-outline | ordinals | spec-parents | plan-outline-exempt",
       required: true,
     },
     from: {
@@ -76,7 +80,7 @@ export default defineLoreCommand({
     },
     apply: {
       type: "boolean",
-      description: "[ordinals, spec-parents] Execute the migration (default is dry-run/preview-only)",
+      description: "[ordinals, spec-parents, plan-outline-exempt] Execute the migration (default is dry-run/preview-only)",
     },
     revert: {
       type: "boolean",
@@ -106,12 +110,57 @@ export default defineLoreCommand({
       args.version !== "tasks-to-phases" &&
       args.version !== "prd-to-outline" &&
       args.version !== "ordinals" &&
-      args.version !== "spec-parents"
+      args.version !== "spec-parents" &&
+      args.version !== "plan-outline-exempt"
     ) {
       inv.io.stderr.write(
-        `Error: Unknown migration action '${args.version}'. Supported: v1, phases, spec-kind, tasks-to-phases, prd-to-outline, ordinals, spec-parents.\n`,
+        `Error: Unknown migration action '${args.version}'. Supported: v1, phases, spec-kind, tasks-to-phases, prd-to-outline, ordinals, spec-parents, plan-outline-exempt.\n`,
       );
       exitCli(2);
+    }
+
+    // ── plan-outline-exempt action ────────────────────────────────────────
+    if (args.version === "plan-outline-exempt") {
+      const { app } = loadLoreApp({ inv });
+      try {
+        const service = app.planOutlineExemptMigrationService;
+        if (service === undefined) {
+          inv.io.stderr.write("Internal error: PlanOutlineExemptMigrationService not wired on App\n");
+          return 1;
+        }
+        const apply = args.apply === true;
+        const result = apply ? await service.apply() : await service.preview();
+        if (!result.ok) {
+          if (args.json) {
+            printLine(inv.io.stdout, JSON.stringify({ ok: false, error: result.error }, null, 2));
+          } else {
+            inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
+          }
+          return exitCode(result.error);
+        }
+        const report = result.value;
+        const failed = report.errors.length > 0;
+        if (args.json) {
+          printLine(
+            inv.io.stdout,
+            JSON.stringify(
+              { ok: !failed, data: { applied: apply, count: report.count, slugs: report.rows.map((r) => r.slug), errors: report.errors } },
+              null,
+              2,
+            ),
+          );
+          return failed ? 4 : 0;
+        }
+        printLine(inv.io.stdout, apply ? "Plan outline-exempt migration complete" : "Plan outline-exempt migration (preview)");
+        printLine(inv.io.stdout, "─".repeat(40));
+        printLine(inv.io.stdout, `Plans ${apply ? "cleared" : "would clear"}: ${report.count}`);
+        for (const row of report.rows) printLine(inv.io.stdout, `  ${row.slug}`);
+        for (const e of report.errors) printLine(inv.io.stdout, `  error ${e}`);
+        if (!apply) printLine(inv.io.stdout, "\nRe-run with --apply to execute.");
+        return failed ? 4 : 0;
+      } finally {
+        app.close();
+      }
     }
 
     // ── spec-parents action ───────────────────────────────────────────────

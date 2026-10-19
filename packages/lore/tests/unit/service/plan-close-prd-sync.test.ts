@@ -145,26 +145,6 @@ describe("plan-close with the cited_rule_check knob ON — the domain document i
   });
 });
 
-describe("prd_sync_exempt stays protected from `lore set`, naming the retirement", () => {
-  it("NEGATIVE: a plain `set` patch that adds extra.prd_sync_exempt is rejected and points at the retirement, not at `lore outline exempt`", async () => {
-    const { corpusService } = makeHarness(prdSyncConfig(false));
-    const { featureSpec } = await makeLinkedAncestry(corpusService);
-    const plan = await makeApprovedPlan(corpusService, featureSpec);
-
-    const result = await corpusService.set(plan.id, {
-      extra: { prd_sync_exempt: { reason: "sneaking this in", by: "agent:t5r", at: "2026-07-26T00:00:00.000Z" } },
-    });
-
-    expect(result.ok).toBe(false);
-    if (!result.ok) {
-      expect(result.error.code).toBe("VALIDATION_ERROR");
-      const message = (result.error as { message?: string }).message ?? "";
-      expect(message).toContain("retired");
-      expect(message).not.toContain("use `lore outline exempt`");
-    }
-  });
-});
-
 describe("plan-close with the knob OFF / absent / no spec ancestor is unaffected", () => {
   it("REGRESSION: archives with the knob OFF (default)", async () => {
     const { corpusService } = makeHarness(prdSyncConfig(false));

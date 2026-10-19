@@ -10,6 +10,11 @@
  *   - a second `apply()` writes nothing.
  *   - the refusal and the listing are gone from the source tree (grep-style assertion below).
  *
+ * @reads packages/lore/src/service/corpus-service.ts
+ * @reads packages/lore/src/adapters/cli/commands/status.ts
+ * @reads packages/core/src/outline.ts
+ * @reads packages/lore/src/flows/status-prd-sync-flow.ts
+ *
  * Runner: vitest + `InMemoryStore`. Coverage: HAPPY / NEGATIVE / BOUNDARY / ERROR / STATE / REGRESSION; every
  * `it()` title carries `D2-n`.
  */
