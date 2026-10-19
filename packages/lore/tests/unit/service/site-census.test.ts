@@ -248,7 +248,7 @@ describe("listSites: interface-method calls are not_measured sites", () => {
     const { listSites } = await loadFidelity();
     const { computeLeafCoverage } = await loadCoverage();
     const sites = mainSites(listSites({ rootDir: ifaceRoot, entry: entryCapped }));
-    const r = computeLeafCoverage({ sites, siteMap: {}, liveRuleIds: [] });
+    const r = computeLeafCoverage({ sites, liveRuleIds: [] });
     expect(r.notMeasured.some((k) => k.includes("CappedStore#insertCapped"))).toBe(true);
   });
 });
