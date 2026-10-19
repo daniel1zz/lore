@@ -20,7 +20,7 @@
  */
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runLoreInProcess } from "../helpers/run-lore-in-process";
@@ -86,7 +86,8 @@ async function makeCase(agent: string, session: string, claimValue: "path" | "br
   writeFileSync(join(path, `${agent}.txt`), `${agent}\n`);
   mustOk(git(path, "add", "-A"), `add ${agent}`);
   mustOk(git(path, "commit", "-q", "-m", `own commit ${agent}`), `commit ${agent}`);
-  mustOk(git(repo, "merge", "-q", "--no-edit", branch), `merge ${agent}`);
+  // landed through `lore integrate`, which records the landing `lore done` requires on the claiming task (BR-1291)
+  mustOk(await lore(["integrate", branch, "--session", session], session), `integrate ${agent}`);
   mustOk(await lore(["evidence", slug, "--oracle", "test", "--command", "echo 1 passed", "--result", "pass", "--capture"], session), `evidence ${agent}`);
   return { slug, path, branch };
 }
@@ -113,6 +114,9 @@ beforeAll(async () => {
   mustOk(git(repo, "add", "-A"), "git add");
   mustOk(git(repo, "commit", "-q", "-m", "base"), "git commit");
   mustOk(await lore(["init"], "init-0"), "lore init");
+  // `lore integrate` keeps its own worktree under `.claude/` and needs the floor key; neither may dirty the tree
+  appendFileSync(join(repo, ".git", "info", "exclude"), ".claude/\n.lore/integrate-attempts/\n.lore/integrate-losses/\n");
+  appendFileSync(join(repo, ".lore", "config.yaml"), 'workflow:\n  integrate:\n    floor_command: "true"\n', "utf8");
   // reason: `lore init` arms state binding (AC-CT-3); evidence captured on a dirty tree is unbound and refused by `lore done`.
   mustOk(git(repo, "add", "-A"), "git add corpus");
   mustOk(git(repo, "commit", "-q", "-m", "lore corpus"), "git commit corpus");

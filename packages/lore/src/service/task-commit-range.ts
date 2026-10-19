@@ -21,8 +21,8 @@
  * `lore integrate` records `extra.landing` ({@link TaskLanding}) on every task whose claim recorded the landed
  * branch; `lore done` and assess derive the range from it (`head` = the branch head, `base` = main before the
  * landing, so `base..head` is exactly the branch's own commits). A re-claim from a worktree of main (evidence
- * repair) therefore cannot replace the range. A task landed before this record existed is backfilled from main's
- * first-parent history, where `lore integrate` left a `merge(<branch>)` commit ({@link findLandingInMainLog}).
+ * repair) therefore cannot replace the range. Nothing reconstructs a landing from main's history: a task
+ * without a recorded landing has none (BR-1291, BR-1336).
  *
  * Pure: no IO. The service measures; the assess adapter reads.
  */
@@ -41,15 +41,11 @@ export const recordedCommitRangeSchema = z.discriminatedUnion("state", [
     worktree: z.string().min(1),
     /** Landing-derived ranges only: the commit that moved main (the merge commit, or the tip on a fast-forward). */
     landing_commit: z.string().min(1).optional(),
-    /** Claim-derived ranges only: why no landing was found (the claim's own range was kept, loudly). */
-    landing_unresolved: z.string().min(1).optional(),
     recorded_at: z.string().min(1),
   }),
   z.object({
     state: z.literal("not-measured"),
     reason: z.string().min(1),
-    /** Branch/worktree names the claims recorded and the landing lookup tried. */
-    candidates: z.array(z.string().min(1)).optional(),
     recorded_at: z.string().min(1),
   }),
 ]);
@@ -57,8 +53,7 @@ export const recordedCommitRangeSchema = z.discriminatedUnion("state", [
 export type TaskCommitRange = z.infer<typeof recordedCommitRangeSchema>;
 
 /**
- * The landing of a task's branch on main (`extra.landing`), written by `lore integrate` (or backfilled from the
- * `merge(<branch>)` commit). `main_before..branch_head` is the branch's own work; `landing_commit` is the commit
+ * The landing of a task's branch on main (`extra.landing`), written by `lore integrate` only. `main_before..branch_head` is the branch's own work; `landing_commit` is the commit
  * that moved main (`main_after`).
  */
 export const taskLandingSchema = z.object({
@@ -72,7 +67,7 @@ export const taskLandingSchema = z.object({
 
 export type TaskLanding = z.infer<typeof taskLandingSchema>;
 
-/** A landing without its timestamp: what integrate (or the backfill) measures. */
+/** A landing without its timestamp: what integrate measures. */
 export type LandingFact = Omit<TaskLanding, "recorded_at">;
 
 /** Reads `extra.landing`; `undefined` when absent or malformed (a malformed record is never trusted). */
@@ -85,7 +80,7 @@ export function readTaskLanding(extra: Record<string, unknown> | undefined): Tas
 
 /**
  * The one line `lore done` prints on stderr (and assess shows) when a task's range is not landing-derived:
- * `commit range not measured: <reason>` for a not-measured range, or the claim's range kept with the landing unresolved.
+ * `commit range not measured: <reason>` for a not-measured range.
  * `undefined` for a landing-derived or plainly measured range.
  */
 export function commitRangeNote(extra: Record<string, unknown> | undefined): string | undefined {
@@ -93,9 +88,6 @@ export function commitRangeNote(extra: Record<string, unknown> | undefined): str
   const parsed = recordedCommitRangeSchema.safeParse(raw);
   if (!parsed.success) return undefined;
   if (parsed.data.state === "not-measured") return `commit range not measured: ${parsed.data.reason}`;
-  if (parsed.data.landing_unresolved !== undefined) {
-    return `commit range taken from the claim on ${parsed.data.worktree}; no landing found: ${parsed.data.landing_unresolved}`;
-  }
   return undefined;
 }
 
@@ -112,35 +104,11 @@ export function commitRangeFromLanding(landing: TaskLanding, recordedAt: string)
   };
 }
 
-/** `git log` format the backfill reads: sha, parents, subject (tab separated). */
-export const MAIN_FIRST_PARENT_LOG_FORMAT = "%H%x09%P%x09%s";
-
-/**
- * Finds the landing of `branch` in main's first-parent log (lines of {@link MAIN_FIRST_PARENT_LOG_FORMAT}, newest
- * first): the most recent two-parent commit whose subject is `merge(<branch>)` or `merge(<branch>): ...` — the message
- * `lore integrate` writes. Parent 1 is main before the landing, parent 2 the branch head. `undefined` when none.
- *
- * @example
- * findLandingInMainLog("m1\tp1 p2\tmerge(feat-x): subject", "feat-x")
- * // → { branch: "feat-x", branch_head: "p2", main_before: "p1", main_after: "m1", landing_commit: "m1" }
- */
-export function findLandingInMainLog(logText: string, branch: string): LandingFact | undefined {
-  for (const line of logText.split("\n")) {
-    const [sha, parents, subject] = line.split("\t");
-    if (sha === undefined || parents === undefined || subject === undefined) continue;
-    if (subject !== `merge(${branch})` && !subject.startsWith(`merge(${branch}): `)) continue;
-    const [first, second, ...rest] = parents.split(" ");
-    if (first === undefined || second === undefined || rest.length > 0) continue;
-    return { branch, branch_head: second, main_before: first, main_after: sha, landing_commit: sha };
-  }
-  return undefined;
-}
-
 /** A usable range: only the `recorded` shape carries commits. */
 export type MeasuredCommitRange = Extract<TaskCommitRange, { state: "recorded" }>;
 
 /** What assess gets per task: a usable range (+ branch hint), or the reason the range is not measured. */
-export type CollectedRange = { base?: string; head: string; worktree?: string } | { not_measured: string };
+export type CollectedRange = { base?: string; head: string; worktree?: string };
 
 /**
  * slug -> usable range for every task that has one (tasks done before this feature, or recorded
@@ -155,12 +123,6 @@ export function collectRecordedRanges(
     const landing = readTaskLanding(task.extra);
     if (landing !== undefined) {
       ranges.set(task.slug, { head: landing.branch_head, base: landing.main_before, worktree: landing.branch });
-      continue;
-    }
-    const parsed = recordedCommitRangeSchema.safeParse(task.extra?.["commit_range"]);
-    if (parsed.success && parsed.data.state === "not-measured" && parsed.data.candidates !== undefined) {
-      // a landing lookup was tried and failed: assess shows "not measured" instead of diffing a claim worktree
-      ranges.set(task.slug, { not_measured: parsed.data.reason });
       continue;
     }
     const range = readMeasuredCommitRange(task.extra);

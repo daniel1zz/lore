@@ -75,11 +75,18 @@ function claimedTask(agent: string, anchors: string[], after: "release" | "archi
     must(["create", "task", "--title", `Scope task ${taskCounter}`, "--parent", planSlug, "--plan-id", planSlug, "--content", "x", "--no-ai", ...anchors.flatMap((a) => ["--anchor", a])]).stdout,
   );
   const run = `${MAIN_RUN}:${agent}`;
-  // reason: the fixture is a git repository now (see beforeAll), where a claim must record its worktree.
-  must(["claim", slug, "--worktree", dir], { run });
+  // reason: the fixture is a git repository now (see beforeAll), where a claim must record its worktree. One working
+  // copy carries one unlanded task (BR-1337), so each task claims its own branch.
+  const branch = `scope-branch-${taskCounter}`;
+  const made = spawnSync("git", ["branch", branch, "main"], { cwd: dir, encoding: "utf8" });
+  if (made.status !== 0) throw new Error(`git branch ${branch} failed: ${made.stderr}`);
+  must(["claim", slug, "--worktree", branch], { run });
   if (after === "release") must(["release", slug], { run });
   if (after === "archive") {
     must(["release", slug], { run });
+    // archival needs the landing `lore integrate` records (BR-1291); the branch holds nothing past main, so it is
+    // found already integrated and the landing is recorded on its claimant
+    must(["integrate", branch, "--session", "scope-integrate"]);
     // `set --status archived` applies the `lore done` floors (DCL-1 (b)): a runner-captured pass first.
     must(["evidence", slug, "--oracle", "test", "--command", "echo 'Ran 3 tests'", "--result", "pass", "--capture"]);
     must(["set", slug, "--status", "archived"]);
@@ -141,9 +148,9 @@ beforeAll(() => {
   dir = realpathSync(mkdtempSync(join(tmpdir(), "trail-review-scope-")));
   stateBase = join(dir, "state");
   makeCleanTreeRepo(dir);
-  appendFileSync(join(dir, ".git", "info", "exclude"), "state/\n");
+  appendFileSync(join(dir, ".git", "info", "exclude"), "state/\n.claude/\n"); // `lore integrate` keeps its worktree under .claude/
   must(["init"]);
-  appendFileSync(join(dir, ".lore", "config.yaml"), ["workflow:", "  gates:", "    task-claim:", "      enabled: false", ""].join("\n"));
+  appendFileSync(join(dir, ".lore", "config.yaml"), ["workflow:", "  gates:", "    task-claim:", "      enabled: false", "  integrate:", '    floor_command: "true"', ""].join("\n"));
   const prd = slugOf(must(["create", "prd", "--title", "Scope PRD", "--content", "root", "--no-ai"]).stdout);
   planSlug = slugOf(must(["create", "plan", "--title", "Scope Plan", "--parent", prd, "--content", "x", "--no-ai"]).stdout);
   registerRun(SESSION);

@@ -126,7 +126,30 @@ export interface AttributedWriteCount {
  * The citation gate's liveness read must share the citing write's transaction, or a concurrent retire
  * can commit between the check and the write (spec-baseline-slice-2 §C4/D6, QA-2).
  */
+/**
+ * One more doc update committed in the SAME transaction as the primary {@link StoreInterface.updateWithProvenance}
+ * write, with its own version row and audit row. All of them land or none do (BR-1307: deprecating a spec and
+ * retiring its proposed rule ids on the baseline leaves are one outcome).
+ */
+export interface CompanionDocWrite {
+  /** The doc to update (a baseline leaf for a rule retirement). */
+  readonly id: DocId;
+  /** The patch, applied exactly as the primary one is. */
+  readonly patch: Partial<DocRecord>;
+  /** CAS base: a version miss fails the whole transaction with `STALE_VERSION`. */
+  readonly opts: UpdateOpts;
+  /** The version row of this doc's write. */
+  readonly version: VersionRecord;
+  /** The audit row of this doc's write. */
+  readonly audit: AuditEntry;
+}
+
 export interface ProvenanceWriteExtras {
+  /**
+   * Further doc updates (each with its version and audit row) committed in the SAME transaction, after the primary
+   * write. Any failure rolls back the primary write and every companion. InMemoryStore restores its snapshots.
+   */
+  also_update?: readonly CompanionDocWrite[];
   /**
    * Rule ids that MUST be `live` when the write commits. Read from `rule_registry.lifecycle`
    * (migration-014) in the SAME transaction as the doc write (InMemoryStore: the baseline leaf docs).

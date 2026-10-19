@@ -217,19 +217,33 @@ afterAll(() => {
 });
 
 describe("edit-time anchor gate (task-skill-design-implementers-declare-out-of-anchor-files)", () => {
-  it("AC-EAG-a: an edit inside the anchors (directory anchor, file anchor) is allowed and writes nothing", () => {
+  it("AC-EAG-a: an edit inside a file anchor is allowed and writes nothing", () => {
     const before = taskState(fx.taskA);
     const elapsedMs: number[] = [];
-    for (const target of [join(fx.wtA, "src/a/a.ts"), join(fx.wtA, "src/a/deep/new.ts"), join(fx.wtA, "own/one.ts"), "src/a/a.ts"]) {
+    for (const target of [join(fx.wtA, "own/one.ts"), "own/one.ts", join(fx.wtA, "own/one.ts")]) {
       const startedAt = performance.now();
       const r = runHook({ cwd: fx.wtA, target });
       elapsedMs.push(Math.round(performance.now() - startedAt));
       expect(r.status, `${target}: ${r.stderr}`).toBe(0);
       expect(r.stderr).toBe("");
     }
-    // Measured latency of the in-anchor fast path (scope file + one `git check-ignore`, no lore process), reported not asserted.
+    // Measured latency of the in-anchor fast path (scope file only: no git, no lore process), reported not asserted.
     console.info(`[latency] in-anchor edit through the hook, ms per call: ${elapsedMs.join(", ")}`);
     expect(taskState(fx.taskA)).toEqual(before);
+  });
+
+  it("AC-EAG-a (directory anchor): a directory holds only the files its holder touched, so the first edit under it declares the file and the second writes nothing", () => {
+    const before = taskState(fx.taskA);
+    for (const file of ["src/a/a.ts", "src/a/deep/new.ts"]) {
+      const first = runHook({ cwd: fx.wtA, target: join(fx.wtA, file) });
+      expect(first.status, `${file}: ${first.stderr}`).toBe(0);
+      expect(taskState(fx.taskA).anchors).toContain(file);
+      const declared = taskState(fx.taskA);
+      const second = runHook({ cwd: fx.wtA, target: join(fx.wtA, file) });
+      expect(second.status, `${file}: ${second.stderr}`).toBe(0);
+      expect(taskState(fx.taskA)).toEqual(declared);
+    }
+    expect(taskState(fx.taskA).anchors).toEqual(expect.arrayContaining(before.anchors));
   });
 
   it("AC-EAG-b: an edit to a free out-of-anchor path is allowed and the path becomes an anchor (one version, the helper's run)", () => {
@@ -332,6 +346,7 @@ describe("edit-time anchor gate (task-skill-design-implementers-declare-out-of-a
     });
 
     it("AC-EAG-g: in-anchor and git-ignored paths are decided from the file with NO lore on PATH", () => {
+      // `src/a/a.ts` was declared as a file anchor by the directory test above, so it too is decided from the scope file.
       for (const target of [join(fx.wtA, "src/a/a.ts"), join(fx.wtA, "own/one.ts"), join(fx.wtA, ".scratch/x.md")]) {
         const r = runHook({ cwd: fx.wtA, target, path: fx.bareBin });
         expect(r.status, `${target}: ${r.stderr}`).toBe(0);
@@ -357,9 +372,10 @@ describe("edit-time anchor gate (task-skill-design-implementers-declare-out-of-a
       renameSync(scopeFileOf(fx.wtB), aside);
       try {
         const startedAt = performance.now();
-        expect(asB(join(fx.wtB, "src/b/b.ts")).status).toBe(0);
+        // a FILE anchor (shared/x.ts): a directory-covered file would be declared by the first call, which rewrites the scope file.
+        expect(asB(join(fx.wtB, "shared/x.ts")).status).toBe(0);
         console.info(`[latency] in-anchor edit with NO scope file (lore anchor scope fallback), ms: ${Math.round(performance.now() - startedAt)}`);
-        const noLore = asB(join(fx.wtB, "src/b/b.ts"), fx.bareBin);
+        const noLore = asB(join(fx.wtB, "shared/x.ts"), fx.bareBin);
         expect(noLore.status).toBe(2);
         expect(noLore.stderr).toMatch(/lore/);
       } finally {
@@ -372,8 +388,8 @@ describe("edit-time anchor gate (task-skill-design-implementers-declare-out-of-a
       try {
         for (const bad of ["{not json", JSON.stringify({ ...JSON.parse(good), schema: 99 }), JSON.stringify({ ...JSON.parse(good), working_copy: fx.wtA })]) {
           writeFileSync(scopeFileOf(fx.wtB), bad);
-          expect(asB(join(fx.wtB, "src/b/b.ts")).status, bad).toBe(0);
-          expect(asB(join(fx.wtB, "src/b/b.ts"), fx.bareBin).status, bad).toBe(2);
+          expect(asB(join(fx.wtB, "shared/x.ts")).status, bad).toBe(0);
+          expect(asB(join(fx.wtB, "shared/x.ts"), fx.bareBin).status, bad).toBe(2);
         }
       } finally {
         writeFileSync(scopeFileOf(fx.wtB), good);

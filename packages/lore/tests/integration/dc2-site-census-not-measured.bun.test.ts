@@ -5,7 +5,7 @@
  *
  * (a) every positional token of `lore baseline sites` forms the command path; an unresolvable path exits 4.
  * (b) a chain of MAX_CALL_DEPTH + 2 calls ending in a refusal: the cut at MAX_CALL_DEPTH is ONE not_measured `depth-bound` site naming
- *     the function where the walk stopped, and `baseline coverage` for a leaf declaring that command is incomplete.
+ *     the function where the walk stopped, and `baseline coverage` for a leaf declaring that command reports the cut (report only).
  * (c) a function first reached at depth 12 and again at depth 3 keeps its callees' sites (deep-first order forced).
  * (d) `deps.fn = other` after construction: a not_measured dynamic site for `deps.fn`.
  *
@@ -18,9 +18,9 @@
  *   REGRESSION: (c) shallow-first order gives the same answer as deep-first
  */
 import { afterAll, describe, expect, it, vi } from "vitest";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { MAX_CALL_DEPTH, listSites } from "../../src/service/site-census.js";
 import { withSessionIdentity } from "../helpers/session-actor";
 
@@ -74,9 +74,31 @@ function chainSource(calls: number): string {
 
 const sitesOf = (root: string, name: string) => listSites({ rootDir: root, entry: { file: `${COMMANDS_DIR}/${name}.ts`, symbol: "default.run" } });
 
+/** The nearest ancestor `node_modules` that holds the installed deps (a linked worktree resolves them from the main checkout above it). */
+function installedNodeModules(): string {
+  for (let dir = REPO_ROOT; ; dir = dirname(dir)) {
+    if (existsSync(join(dir, "node_modules", "citty"))) return join(dir, "node_modules");
+    if (dirname(dir) === dir) throw new Error(`no node_modules holding citty at or above ${REPO_ROOT}`);
+  }
+}
+
+/**
+ * A throwaway corpus (`lore init`) whose `packages` entry links to the repository's sources: the census root is found by
+ * walking up from cwd, so the real command sources are analysed while the corpus resolves to the mkdtemp dir, never the repo's `.lore/`.
+ */
+function sourceLinkedCorpus(): string {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "dc2-19-src-")));
+  scratch.push(root);
+  // reason: the census resolves `@lore/core` and npm imports through the root's tsconfig `paths` and node_modules; an unresolved import makes the verb exit 1.
+  for (const entry of ["packages", "tsconfig.json", "tsconfig.base.json"]) symlinkSync(join(REPO_ROOT, entry), join(root, entry));
+  symlinkSync(installedNodeModules(), join(root, "node_modules"));
+  mustRun(["init"], root);
+  return root;
+}
+
 describe(`${SPEC}#AC-DC2-19 (a) every positional token forms the command path`, () => {
   it(`${SPEC}#AC-DC2-19 HAPPY: gate spec-create resolves to its entry symbol`, () => {
-    const r = runLore(["baseline", "sites", "gate", "spec-create", "--json"], REPO_ROOT);
+    const r = runLore(["baseline", "sites", "gate", "spec-create", "--json"], sourceLinkedCorpus());
     expect(r.exitCode, r.stderr + r.stdout).toBe(0);
     const data = (JSON.parse(r.stdout) as { data: { command: string; entry: { file: string; symbol: string } } }).data;
     expect(data.command).toBe("gate spec-create");
@@ -84,7 +106,7 @@ describe(`${SPEC}#AC-DC2-19 (a) every positional token forms the command path`, 
   });
 
   it(`${SPEC}#AC-DC2-19 NEGATIVE: a third token that is no subcommand exits 4 naming the whole path`, () => {
-    const r = runLore(["baseline", "sites", "gate", "spec-create", "extra"], REPO_ROOT);
+    const r = runLore(["baseline", "sites", "gate", "spec-create", "extra"], sourceLinkedCorpus());
     expect(r.exitCode, r.stderr + r.stdout).toBe(4);
     expect(r.stderr + r.stdout).toContain("gate spec-create extra");
   });
@@ -115,7 +137,7 @@ describe(`${SPEC}#AC-DC2-19 (b) a depth cut is recorded, not dropped`, () => {
     expect(sites.some((s) => s.code === "CHAIN_END")).toBe(true);
   });
 
-  it(`${SPEC}#AC-DC2-19 coverage for a leaf declaring the cut command is incomplete (exit 1)`, () => {
+  it(`${SPEC}#AC-DC2-19 coverage for a leaf declaring the cut command reports the depth-bound site (report only, exit 0)`, () => {
     const root = fixtureRoot({ chain: chainSource(MAX_CALL_DEPTH + 2) });
     // reason: `baseline coverage` lists the runnable commands from the registry module before it censuses a leaf.
     writeFileSync(join(root, "packages/lore/src/adapters/cli/index.ts"), `export const COMMAND_LOADERS = { chain: () => import("./commands/chain.js") };\n`);
@@ -126,7 +148,8 @@ describe(`${SPEC}#AC-DC2-19 (b) a depth cut is recorded, not dropped`, () => {
     const leaf = slugOf(mustRun(["baseline", "add", branch, "--node", "leaf", "--label", "lf", "--title", "DC2-19 Leaf"], root));
     mustRun(["baseline", "map", leaf, "--command", "chain"], root);
     const r = runLore(["baseline", "coverage", leaf, "--json"], root);
-    expect(r.exitCode, r.stderr + r.stdout).toBe(1);
+    // reason: an unmapped site is report output, never a refusal (BR-1248); the cut still shows in the leaf's gaps.
+    expect(r.exitCode, r.stderr + r.stdout).toBe(0);
     expect(r.stdout).toContain("depth-bound");
   }, 300_000);
 });

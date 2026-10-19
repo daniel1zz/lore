@@ -117,11 +117,25 @@ function branchDeletesTestFileAndLands(repo: string): void {
   run(repo, "merge", "--no-ff", "-q", "-m", "land", "agent-x");
 }
 
+/** What `lore integrate` records on the claimant when it lands `agent-x` (BR-1336); the `not-landed` floor reads only this. */
+async function recordLandingOfAgentX(repo: string, svc: TaskWorkflowService): Promise<void> {
+  const mergeSha = run(repo, "rev-parse", "main");
+  const recorded = await svc.recordLanding({
+    branch: "agent-x",
+    branch_head: run(repo, "rev-parse", "agent-x"),
+    main_before: run(repo, "rev-parse", `${mergeSha}^1`),
+    main_after: mergeSha,
+    landing_commit: mergeSha,
+  });
+  if (!recorded.ok) throw new Error(`recordLanding ${JSON.stringify(recorded.error)}`);
+}
+
 describe("done floor: an anchored test file the task deleted", () => {
   it("HAPPY: archives when the claimed branch deleted the anchored test file and landed, and the done message names it", async () => {
     const repo = seedRepo();
     const { svc, taskId } = await claimedTask(repo, [DELETED_TEST]);
     branchDeletesTestFileAndLands(repo);
+    await recordLandingOfAgentX(repo, svc);
 
     const done = await svc.done(taskId, { by: "alice" });
     expect(done.ok, JSON.stringify(done.ok ? null : done.error)).toBe(true);

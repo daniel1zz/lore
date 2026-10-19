@@ -625,6 +625,38 @@ export class InMemoryStore implements StoreInterface {
       }
     }
 
+    // reason: BR-1307 — companion doc writes share this write; on any failure every one already applied, the
+    // primary write, its version rows and the audit chain are restored, so nothing of the outcome survives.
+    const appliedCompanions: Array<{ id: DocId; before: DocRecord | undefined; version: VersionRecord }> = [];
+    for (const companion of extras?.also_update ?? []) {
+      const companionBefore = this.docs.get(companion.id);
+      const rollback = (): void => {
+        for (const done of appliedCompanions) {
+          this.restoreDocSnapshot(done.id, done.before);
+          this.removeVersionEntry(done.version);
+        }
+        this.restoreDocSnapshot(id, before);
+        this.removeVersionEntry(version);
+        this.auditChain.length = chainLength;
+      };
+      const companionUpdate = await this.update(companion.id, companion.patch, companion.opts);
+      if (!companionUpdate.ok) {
+        rollback();
+        return companionUpdate;
+      }
+      appliedCompanions.push({ id: companion.id, before: companionBefore, version: companion.version });
+      const companionVersion = await this.insertVersion(companion.version);
+      if (!companionVersion.ok) {
+        rollback();
+        return companionVersion;
+      }
+      const companionAudit = await this.appendAuditEntry(companion.audit);
+      if (!companionAudit.ok) {
+        rollback();
+        return companionAudit;
+      }
+    }
+
     return ok(updateResult.value);
   }
 

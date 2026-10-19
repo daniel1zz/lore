@@ -50,6 +50,44 @@ export const MAX_FILE_ANCHORS = 50;
 export const MAX_FILE_ANCHOR_LENGTH = 512;
 
 /**
+ * ASCII JS-identifier grammar of a `#Symbol` suffix — the ONE definition, shared with `code-anchors.ts`
+ * (a task's `path#Symbol` file anchor and a spec's code anchor accept exactly the same spellings).
+ */
+export const FILE_ANCHOR_SYMBOL_RE = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
+
+/** A file anchor split into its path part and its optional `#Symbol` scope. */
+export interface SplitFileAnchor {
+  /** The anchor without its `#Symbol` suffix (a directory anchor keeps its trailing `/`). */
+  readonly path: string;
+  /** The top-level symbol the anchor is scoped to, or `undefined` for a whole-file / directory anchor. */
+  readonly symbol: string | undefined;
+}
+
+/**
+ * Splits `anchor` on its LAST `#` when the tail is a valid symbol and the head is not a directory.
+ *
+ * A `#` whose tail is not a symbol (a stored legacy entry) stays part of the path: reading never throws and never
+ * reinterprets a legacy literal path as a symbol scope. Authoring is validated by {@link normalizeFileAnchors}.
+ *
+ * @example
+ * splitFileAnchor("src/app.ts#wire"); // => { path: "src/app.ts", symbol: "wire" }
+ * splitFileAnchor("src/app.ts");      // => { path: "src/app.ts", symbol: undefined }
+ */
+export function splitFileAnchor(anchor: string): SplitFileAnchor {
+  const hash = anchor.lastIndexOf("#");
+  if (hash <= 0) return { path: anchor, symbol: undefined };
+  const head = anchor.slice(0, hash);
+  const tail = anchor.slice(hash + 1);
+  if (head.endsWith("/") || !FILE_ANCHOR_SYMBOL_RE.test(tail)) return { path: anchor, symbol: undefined };
+  return { path: head, symbol: tail };
+}
+
+/** The path part of a file anchor: `src/app.ts#wire` -> `src/app.ts`; a path or directory anchor is returned as is. */
+export function fileAnchorPath(anchor: string): string {
+  return splitFileAnchor(anchor).path;
+}
+
+/**
  * Validates and normalizes a candidate `file_anchors` list (SPEC-042 D3).
  *
  * Per-entry rules (checked in this order, first failure wins):
@@ -64,7 +102,10 @@ export const MAX_FILE_ANCHOR_LENGTH = 512;
  * Normalization: `./`-prefix and duplicate `/` separators are collapsed away; a
  * trailing `/` is PRESERVED as the directory-scope marker `anchorsOverlap` reads
  * (D4). Post-normalization exact-string duplicates are dropped, first occurrence
- * wins, order otherwise preserved.
+ * wins, order otherwise preserved. A `#Symbol` suffix (`src/app.ts#wire`, ASCII
+ * identifier, never on a directory) scopes the entry to one top-level symbol of
+ * one file; the dedup key is the whole entry, so two symbols of one file both
+ * survive.
  *
  * @param anchors - Candidate raw anchor strings (e.g. from `--anchor` flags).
  * @returns `ok(normalized)` — deduplicated, normalized POSIX paths — or
@@ -126,9 +167,32 @@ export function normalizeFileAnchors(anchors: string[]): Result<string[], LoreEr
       });
     }
 
-    const isDir = raw.endsWith("/");
+    // `path#Symbol`: the symbol scopes the hold to one top-level symbol of ONE file. Split on the LAST `#`.
+    const hashAt = raw.lastIndexOf("#");
+    const symbol = hashAt === -1 ? undefined : raw.slice(hashAt + 1);
+    const body = hashAt === -1 ? raw : raw.slice(0, hashAt);
+    if (symbol !== undefined) {
+      if (!FILE_ANCHOR_SYMBOL_RE.test(symbol)) {
+        return err({
+          code: "VALIDATION_ERROR",
+          field: "file_anchors",
+          message: `file anchor symbol must be an ASCII identifier (path#Symbol): "${raw}"`,
+          value: raw,
+        });
+      }
+      if (body.endsWith("/")) {
+        return err({
+          code: "VALIDATION_ERROR",
+          field: "file_anchors",
+          message: `a directory anchor must not carry a #Symbol: "${raw}"`,
+          value: raw,
+        });
+      }
+    }
+
+    const isDir = body.endsWith("/");
     const segments: string[] = [];
-    for (const seg of raw.split("/")) {
+    for (const seg of body.split("/")) {
       if (seg === "" || seg === ".") continue;
       if (seg === "..") {
         return err({
@@ -150,7 +214,7 @@ export function normalizeFileAnchors(anchors: string[]): Result<string[], LoreEr
       });
     }
 
-    const normalizedEntry = segments.join("/") + (isDir ? "/" : "");
+    const normalizedEntry = segments.join("/") + (isDir ? "/" : "") + (symbol !== undefined ? `#${symbol}` : "");
     if (!seen.has(normalizedEntry)) {
       seen.add(normalizedEntry);
       normalized.push(normalizedEntry);
@@ -160,18 +224,20 @@ export function normalizeFileAnchors(anchors: string[]): Result<string[], LoreEr
   return ok(normalized);
 }
 
-/** One anchor parsed into D4's `(segments, isDir)` model. */
+/** One anchor parsed into D4's `(segments, isDir)` model, plus its optional `#Symbol` scope. */
 interface ParsedAnchor {
   segments: string[];
   isDir: boolean;
+  symbol: string | undefined;
 }
 
-/** Parses an already-normalized anchor string into `(segments, isDir)` (D4). */
+/** Parses an already-normalized anchor string into `(segments, isDir, symbol)` (D4). */
 function parseNormalizedAnchor(normalized: string): ParsedAnchor {
-  const isDir = normalized.endsWith("/");
-  const trimmed = isDir ? normalized.slice(0, -1) : normalized;
+  const { path, symbol } = splitFileAnchor(normalized);
+  const isDir = path.endsWith("/");
+  const trimmed = isDir ? path.slice(0, -1) : path;
   const segments = trimmed.split("/").filter((s) => s.length > 0);
-  return { segments, isDir };
+  return { segments, isDir, symbol };
 }
 
 /** Case-sensitive, whole-segment array equality. */
@@ -201,7 +267,9 @@ export interface AnchorOverlapResult {
  *
  * Two anchors overlap iff:
  *   - their `segments` are exactly equal (REGARDLESS of `isDir` on either side —
- *     `"src/a"` × `"src/a/"` OVERLAP), or
+ *     `"src/a"` × `"src/a/"` OVERLAP) AND their symbol scopes are compatible
+ *     (`"a.ts#F"` × `"a.ts#G"` do NOT overlap; `"a.ts#F"` × `"a.ts"` and
+ *     `"a.ts#F"` × `"a.ts#F"` DO — an absent symbol is the whole file), or
  *   - one side has `isDir === true` and its `segments` is a STRICT whole-segment
  *     prefix of the other's (`"src/a/"` × `"src/a/b.ts"` overlaps;
  *     `"src/a"` × `"src/ab.ts"` does NOT — segment boundaries, never a raw
@@ -229,8 +297,12 @@ export function anchorsOverlap(a: string[], b: string[]): AnchorOverlapResult {
     const parsedA = parseNormalizedAnchor(rawA);
     for (const rawB of b) {
       const parsedB = parseNormalizedAnchor(rawB);
+      const samePath = segmentsEqual(parsedA.segments, parsedB.segments);
+      // Symbol scope narrows ONLY a same-file pair: two different symbols of one file are disjoint holds; a
+      // whole-file anchor (no symbol) overlaps every symbol of its file; a directory has no symbol.
+      const symbolsCompatible = parsedA.symbol === undefined || parsedB.symbol === undefined || parsedA.symbol === parsedB.symbol;
       const overlaps =
-        segmentsEqual(parsedA.segments, parsedB.segments) ||
+        (samePath && symbolsCompatible) ||
         (parsedA.isDir && isStrictSegmentPrefix(parsedA.segments, parsedB.segments)) ||
         (parsedB.isDir && isStrictSegmentPrefix(parsedB.segments, parsedA.segments));
       if (overlaps) {
@@ -280,8 +352,8 @@ export function extractFileAnchors(task: DocRecord): string[] {
  * Deliberately a SUBSET of `code-anchors.ts`'s `DRIFT_KINDS` with the same
  * spellings — a reader who has learned one vocabulary reads the other. The two
  * kinds omitted are meaningless for a task anchor: `symbol_missing` (a task
- * anchor has no `#Symbol` grammar — `rejectHashInTaskAnchors` refuses `#`
- * outright) and `dir_empty` (an EMPTY directory is a perfectly good anchor for a
+ * anchor's `#Symbol` scopes a HOLD, it is never probed for existence — a task
+ * may anchor a symbol it is about to add) and `dir_empty` (an EMPTY directory is a perfectly good anchor for a
  * task that is about to add the first file to it).
  */
 export const FILE_ANCHOR_NONRESOLUTION_KINDS = [
@@ -396,7 +468,8 @@ export function unprobedFileAnchors(reason: FileAnchorUnprobedReason): UnprobedF
  * fileAnchorProbePath("src/a.ts");     // => "src/a.ts"
  */
 export function fileAnchorProbePath(anchor: string): string {
-  return anchor.endsWith("/") ? anchor.slice(0, -1) : anchor;
+  const path = fileAnchorPath(anchor);
+  return path.endsWith("/") ? path.slice(0, -1) : path;
 }
 
 /**

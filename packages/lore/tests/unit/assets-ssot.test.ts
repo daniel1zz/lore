@@ -432,6 +432,9 @@ const DECLARED_FILES = [
   "hooks/pre-helper-foreign-working-copy-gate.mjs",
   // pre-edit-anchor-gate (a helper's edit outside its claim's anchors is declared via `lore anchor declare` or denied; in HOOK_REGISTRATIONS on PreToolUse Write|Edit|MultiEdit|NotebookEdit)
   "hooks/pre-edit-anchor-gate.mjs",
+  // the anchor gate's two libraries: the top-level-symbol scan of an Edit, and the files a Bash command writes
+  "hooks/lib/top-level-symbols.mjs",
+  "hooks/lib/shell-writes.mjs",
   // post-edit-bindings (edit-time notice of prose bound to the edited file; in HOOK_REGISTRATIONS on PostToolUse Edit|Write|MultiEdit|NotebookEdit)
   "hooks/post-edit-bindings.mjs",
   "hooks/lib/turn-state.mjs",

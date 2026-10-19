@@ -153,6 +153,7 @@ import {
   COMPILED_BINARY_TOKEN_PATTERN,
 } from "./oracle-file-existence.js";
 import { ABSTRACT_ROOT, parseShellCommand } from "./shell-cwd.js";
+import { fileAnchorPath } from "./file-anchors.js";
 
 // ─── Explicit Path-Argument Counting ────────────────────────────────────────
 
@@ -1057,8 +1058,11 @@ export function judgeBinaryFreshness(input: BinaryFreshnessInput): BinaryFreshne
  * isTestFileAnchor("packages/core/src/attestation-completeness.ts") // => false — not a test file
  */
 export function isTestFileAnchor(anchor: string): boolean {
-  if (anchor.endsWith("/")) return false;
-  return TEST_FILE_PATH_PATTERN.test(anchor);
+  // reason: a `path#Symbol` anchor on a test file still names that ONE file; judging the raw string would let a
+  // symbol-scoped test anchor slip past the unfiltered-run floor.
+  const path = fileAnchorPath(anchor);
+  if (path.endsWith("/")) return false;
+  return TEST_FILE_PATH_PATTERN.test(path);
 }
 
 /**
