@@ -1,10 +1,20 @@
+// @reads assets/project/reference-transaction
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { copyShippedGuardTo } from "../../integration/support/main-guard-repo.js";
 import { IntegrateService, type GitOutcome, type IntegrateDeps } from "../../../src/service/integrate-service.js";
 
 function harness(remote: GitOutcome) {
   const calls: string[][] = [];
+  const hooks = mkdtempSync(join(tmpdir(), "lore-remote-listing-hooks-"));
+  copyShippedGuardTo(hooks);
   const git: IntegrateDeps["git"] = (_cwd, args) => {
     calls.push([...args]);
+    // the guard precondition runs before every other git call: the fake answers it as git >= 2.46 with the shipped hook installed
+    if (args[0] === "--version") return { status: 0, stdout: "git version 2.46.0\n", stderr: "" };
+    if (args.includes("--git-path") && args.includes("hooks")) return { status: 0, stdout: `${hooks}\n`, stderr: "" };
     if (args[0] === "remote") return remote;
     return { status: 1, stdout: "", stderr: "" }; // every other git call: rev-parse finds nothing
   };
@@ -37,7 +47,8 @@ describe("integrate: git remote that cannot list remotes", () => {
     });
     expect(h.sub("fetch")).toEqual([]);
     expect(h.sub("update-ref")).toEqual([]);
-    expect(h.sub("rev-parse")).toEqual([]);
+    // no branch resolution happened (the guard's own `rev-parse --git-path hooks` read is not one)
+    expect(h.sub("rev-parse").filter((c) => c.includes("--verify"))).toEqual([]);
   });
 
   it("a rev with no slash resolves locally: git remote never asked, no fetch", async () => {

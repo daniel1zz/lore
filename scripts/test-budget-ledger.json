@@ -103,20 +103,6 @@
     },
     {
       "path": "packages/lore/tests/integration/cli/setup.test.ts",
-      "titleFingerprint": "AC-046-E.H4: --project scaffolds a throwaway git repo end-to-end (wiring proof)",
-      "spawnCount": 5,
-      "line": 225,
-      "reason": "Pre-existing test-budget debt measured at ledger-landing time (task-land-the-baseline-ledger-policy-for-check-test-budgets-55); not yet fixed. Retire this row in the SAME commit that adds an explicit it()/test() timeout argument to this test case (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3 — an orphaned row fails loud, it is never silently dropped)."
-    },
-    {
-      "path": "packages/lore/tests/integration/cli/setup.test.ts",
-      "titleFingerprint": "AC-060-T5.S2: real --project (--yes) install then --project --uninstall (--yes) round-trip \" +\n      \"against a real mkdtemp git repo + real fs — proves D1/D2's ledger+backup design end-to-end for \" +\n      \"the FIRST time (every prior uninstall coverage used a fake ProjectFsPort)",
-      "spawnCount": 7,
-      "line": 363,
-      "reason": "Pre-existing test-budget debt measured at ledger-landing time (task-land-the-baseline-ledger-policy-for-check-test-budgets-55); not yet fixed. Retire this row in the SAME commit that adds an explicit it()/test() timeout argument to this test case (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3 — an orphaned row fails loud, it is never silently dropped)."
-    },
-    {
-      "path": "packages/lore/tests/integration/cli/setup.test.ts",
       "titleFingerprint": "AC-046-E.R1: a second --dry-run right after a real install reports every file as 'would skip'",
       "spawnCount": 3,
       "line": 478,

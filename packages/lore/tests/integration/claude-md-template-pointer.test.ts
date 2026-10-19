@@ -62,6 +62,7 @@ import { execSync, spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { initRepoWithMainCommit } from "./support/main-guard-repo.js";
 
 // ─── Path setup (mirrors tests/integration/claude-md-wiring.test.ts, same directory) ──
 
@@ -114,7 +115,7 @@ let templateContent = "";
 
 beforeAll(() => {
   repoDir = mkdtempSync(join(tmpdir(), "lore-claude-md-template-pointer-"));
-  spawnSync("git", ["init"], { cwd: repoDir, encoding: "utf8" });
+  initRepoWithMainCommit(repoDir); // setup refuses a main with no commit (BR-1343)
   spawnSync("git", ["config", "user.email", "test@example.com"], { cwd: repoDir, encoding: "utf8" });
   spawnSync("git", ["config", "user.name", "Test"], { cwd: repoDir, encoding: "utf8" });
 

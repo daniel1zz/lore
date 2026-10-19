@@ -1,3 +1,4 @@
+// @reads assets/project/reference-transaction
 /**
  * The landing lookup matches what `lore integrate` actually writes: the merge commit is named by the BRANCH
  * (`merge(<branch>)`), while a claim from a linked worktree records the worktree PATH. Both `recordLanding`
@@ -32,6 +33,7 @@ import { IntegrateService, type IntegrateGit } from "../../src/service/integrate
 import { IntegrateLossLedger } from "../../src/service/integrate-loss-ledger.js";
 import { IntegrateAttemptLedger } from "../../src/service/integrate-attempt-ledger.js";
 import { actedStore } from "../live-invocation.js";
+import { installShippedGuard } from "./support/main-guard-repo.js";
 
 const GIT_ENV = {
   ...process.env,
@@ -79,6 +81,9 @@ async function fixture(recordsBranch: boolean): Promise<Fixture> {
   writeFileSync(join(repo, "seed.txt"), "seed\n");
   run(repo, "add", "seed.txt");
   run(repo, "commit", "-q", "-m", "seed");
+  // the shared checkout is a detached view of main and the shipped guard is installed: integrate refuses to run without it
+  run(repo, "checkout", "-q", "--detach", "main");
+  installShippedGuard(repo, join(repo, ".git", "guard-hooks"));
   const worktreesRoot = join(repo, ".claude", "worktrees");
   mkdirSync(worktreesRoot, { recursive: true });
   const worktree = join(worktreesRoot, BRANCH);

@@ -1,4 +1,5 @@
 // @spawns packages/lore/src/index.ts
+// @reads assets/project/reference-transaction
 /**
  * RED — unattested writes are kept, never refused, never guessed
  * (spec-run-identity-slice-1-harness-attested-runs-attested D7 / D11; rules BR-1035, BR-1030, BR-1033).
@@ -40,6 +41,7 @@ import type { AuditEntry, VersionRecord } from "@lore/core";
 import { SQLiteStore } from "../../../src/store/sqlite-store.js";
 import { loosenOverrideClasses } from "../fixtures/autonomy-override-helpers.js";
 import { actedStore } from "../../live-invocation.js";
+import { installShippedGuard } from "../support/main-guard-repo.js";
 
 setDefaultTimeout(300_000);
 
@@ -240,6 +242,8 @@ describe("AC-RID-8: --harness-run naming an unregistered run id", () => {
     // integrate finds it already integrated and records the landing on its claimant
     execFileSync("git", ["branch", "unattested-branch", "main"], { cwd: dir });
     mustLore(["claim", t6, "--worktree", "unattested-branch"], dir, NAME_ENV);
+    execFileSync("git", ["checkout", "-q", "--detach", "main"], { cwd: dir }); // the shared checkout is a detached view of main
+    installShippedGuard(dir, join(dir, ".git", "guard-hooks")); // integrate refuses to run without the guard (BR-1273)
     mustLore(["integrate", "unattested-branch", "--session", "unattested-session"], dir, NAME_ENV);
     mustLore(["evidence", t6, "--oracle", "test", "--command", "bun test ./red.fixture.test.ts 2>&1", "--result", "expected-fail", "--capture"], dir, NAME_ENV);
     mustLore(["evidence", t6, "--oracle", "test", "--command", "bun test ./green.fixture.test.ts 2>&1", "--result", "pass", "--capture"], dir, NAME_ENV);

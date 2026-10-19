@@ -29,7 +29,7 @@ AI judges are advisory only. Never bypass a gate (`LORE_GATE_BYPASS=1`) without 
 | `get_next_tasks` / `get_plan_tasks` | `lore ready <plan> --json` (computed readiness + sessions + anchor_conflicts); `lore list --type task --plan-id <plan>` |
 | `claim_plan` / `heartbeat_plan` / `release_plan` | task-level lease: `lore claim <task> [--worktree <br>]` / `lore release <task>` (TTL computed read-side, no heartbeat) |
 | `update_task(in_progress)` | `lore claim <task>` |
-| `update_task(completed)` + `verification_evidence` | `lore evidence <task> --oracle <tsc\|test\|lint\|build\|e2e\|manual> --command "<cmd>" --result pass\|fail [--ac <id>]` then `lore release <task>` |
+| `update_task(completed)` + `verification_evidence` | `lore evidence <task> --oracle <tsc\|test\|lint\|build\|e2e\|manual> --command "<cmd>" --result pass\|fail --capture [--ac <id>]` then `lore release <task>` |
 | `verify_task_evidence` | `lore verify <plan> [--task <task>]` — trusted runner, attested evidence (exit code decides, never self-asserted) |
 | `validate_plan` | pre-exec: `lore ready <plan> --json` + gates; post-exec: `lore assess <plan>` (LLM-as-judge vs spec ACs) |
 | `assert_doc_chain` | `lore status --check-tree [--fix]` (blueprint `lore.tree.yaml`) + `--check-drift` (code anchors) |

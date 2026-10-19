@@ -23,6 +23,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { appendFileSync, existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { installShippedGuard } from "../integration/support/main-guard-repo.js";
 import { runLoreInProcess } from "../helpers/run-lore-in-process";
 
 const PROJECT_ROOT = new URL("../../../../", import.meta.url).pathname.replace(/\/$/, "");
@@ -87,6 +88,9 @@ async function makeCase(agent: string, session: string, claimValue: "path" | "br
   mustOk(git(path, "add", "-A"), `add ${agent}`);
   mustOk(git(path, "commit", "-q", "-m", `own commit ${agent}`), `commit ${agent}`);
   // landed through `lore integrate`, which records the landing `lore done` requires on the claiming task (BR-1291)
+  // integrate refuses to run without the main-ref guard; the shared checkout is a detached view of main (BR-1273)
+  mustOk(git(repo, "checkout", "-q", "--detach", "main"), `detach shared checkout for ${agent}`);
+  installShippedGuard(repo, join(repo, ".git", "guard-hooks"));
   mustOk(await lore(["integrate", branch, "--session", session], session), `integrate ${agent}`);
   mustOk(await lore(["evidence", slug, "--oracle", "test", "--command", "echo 1 passed", "--result", "pass", "--capture"], session), `evidence ${agent}`);
   return { slug, path, branch };

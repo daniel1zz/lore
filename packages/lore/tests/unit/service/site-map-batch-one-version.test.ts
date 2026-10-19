@@ -109,10 +109,10 @@ describe("lore baseline map --sites-file with 50 rows (AC-BMB-1, CLI adapter)", 
     expect(after.version).toBe(before.version + 1);
   }, 120_000);
 
-  it("a one-row sites file with nonBusiness maps that site as non-business:<reason>", async () => {
-    const file = fx.sitesFile("one.json", JSON.stringify([{ site: "x.ts#g#Z", nonBusiness: "wiring" }]));
+  it("a one-row sites file maps that site to the leaf's own rule", async () => {
+    const file = fx.sitesFile("one.json", JSON.stringify([{ site: "x.ts#g#Z", rules: [fx.ownRule] }]));
     const r = await fx.run(["baseline", "map", fx.leaf, "--sites-file", file]);
     expect(r.exitCode).toBe(0);
-    expect((await fx.leafState()).siteMap["x.ts#g#Z"]).toEqual(["non-business:wiring"]);
+    expect((await fx.leafState()).siteMap["x.ts#g#Z"]).toEqual([fx.ownRule]);
   }, 120_000);
 });

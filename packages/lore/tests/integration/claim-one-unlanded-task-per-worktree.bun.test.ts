@@ -1,4 +1,5 @@
 // @spawns packages/lore/src/index.ts
+// @reads assets/project/reference-transaction
 /**
  * @spec_ref spec-a-task-is-archived-only-on-a-landing-lore-recorded-one  AC-LRD-3;
  *   business rule BR-1337 (one working copy carries one unlanded task), BR-134 (the same-name check no longer has to
@@ -19,6 +20,7 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { FIXTURE_HOME_OUTSIDE_REPO, makeCleanTreeRepo } from "../helpers/clean-tree-repo.js";
+import { installShippedGuard } from "./support/main-guard-repo.js";
 
 interface RunResult {
   readonly stdout: string;
@@ -107,6 +109,7 @@ beforeEach(() => {
   const prd = parseSlug(mustRun(["create", "prd", "--title", "Claim PRD", "--content", "root", "--no-ai"]));
   planSlug = parseSlug(mustRun(["create", "plan", "--title", "Claim Plan", "--parent", prd, "--content", "x", "--no-ai"]));
   git(["checkout", "-q", "--detach", "main"]);
+  installShippedGuard(dir, join(dir, ".git", "guard-hooks")); // integrate refuses to run without the guard (BR-1273)
 });
 
 afterEach(() => {

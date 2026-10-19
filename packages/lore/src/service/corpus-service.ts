@@ -846,12 +846,6 @@ export interface DocWriteRequest {
    */
   readonly foreignIntent?: boolean;
   /**
-   * Owner leaves of an owned-by-only site-map write (`RuleService.setSiteMap`): when `doc` itself is outside the
-   * caller's lease scope, a lease covering every one of these authorizes the write instead
-   * ({@link CorpusWriteAuthority.decide}). Absent = the target's own scope decides.
-   */
-  readonly scopeProof?: readonly DocRecord[];
-  /**
    * `"bump"` (default): the write is a new version of the doc — one `updateWithProvenance` transaction carrying the
    * version row. `"keep"`: a status move that is NOT a new version (a reject returning an in-review doc to draft keeps
    * its version, so a judgment recorded against it stays fresh): the doc update, then ONE audit row whose `version`
@@ -1221,7 +1215,6 @@ export class CorpusService {
   private async refuseIfForeignCorpusWrite<T>(
     intentDeclared = false,
     targets: readonly DocRecord[] = [],
-    scopeProof?: readonly DocRecord[],
   ): Promise<Result<T, LoreError> | undefined> {
     const verdict = checkForeignCorpusWrite(this.foreignCorpusWriteContext, intentDeclared);
     if (verdict.allowed) return undefined;
@@ -1230,7 +1223,7 @@ export class CorpusService {
     // authority's ONE `decide`, the same call the service-level authorization report makes, so a report and the write
     // it reports on cannot disagree. No armed authority ⇒ the plain refusal below.
     if (this.corpusWriteAuthority !== undefined) {
-      const decided = await this.corpusWriteAuthority.decide(targets, scopeProof);
+      const decided = await this.corpusWriteAuthority.decide(targets);
       return decided.ok ? undefined : err(decided.error);
     }
     return err(foreignCorpusWriteRefusalError(verdict));
@@ -1287,7 +1280,7 @@ export class CorpusService {
    *   (`gate:corpus-write:foreign-provenance`, `gate:record-edit`, `STALE_VERSION`, a store error).
    */
   async writeDoc(request: DocWriteRequest): Promise<Result<DocWriteOutcome, LoreError>> {
-    const refusal = await this.refuseIfForeignCorpusWrite<DocWriteOutcome>(request.foreignIntent === true, [request.doc], request.scopeProof);
+    const refusal = await this.refuseIfForeignCorpusWrite<DocWriteOutcome>(request.foreignIntent === true, [request.doc]);
     if (refusal !== undefined) return refusal;
     const { doc, patch } = request;
     if (patchedFieldsUnchanged(doc, patch)) return ok({ doc, written: false });

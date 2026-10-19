@@ -315,6 +315,7 @@ function scaffoldReportFailed(report: ProjectScaffoldReport): boolean {
     report.gitignore.status === "failed" ||
     report.claude_md.status === "failed" ||
     report.git_hooks_path.status === "failed" ||
+    report.main_detached.status === "failed" ||
     report.memory_files?.status === "failed" ||
     report.skills?.status === "failed" ||
     report.ac_cite?.status === "failed" ||
