@@ -173,3 +173,43 @@ export const ISSUE_RESOLUTION_MEMBERS = [
   ...NON_TERMINAL_ISSUE_RESOLUTION_MEMBERS,
   ...TERMINAL_ISSUE_RESOLUTION_MEMBERS,
 ] as const satisfies readonly IssueResolution[];
+
+/**
+ * The three anomaly statuses of the displayed-status table that carry a COUNT in
+ * `lore status --check-issues`, plus `fixed (close pending)`. Each names a place
+ * where GitHub and the corpus disagree or where the verdict is missing; none is a
+ * stored value (the corpus stores no status, it is derived per read).
+ *
+ * Source: adr-github-owns-issue-report-state-the-corpus-owns-only-the (Displayed
+ * status table); spec-github-owns-issue-report-state-no-mirror-task-work-carries D4.
+ */
+export const ANOMALY_ISSUE_STATUS_MEMBERS = [
+  "fixed (close pending)",
+  "adopted (abandoned)",
+  "closed (unverified)",
+  "closed (no verdict)",
+] as const;
+
+/** One of the four anomaly statuses. */
+export type AnomalyIssueStatus = (typeof ANOMALY_ISSUE_STATUS_MEMBERS)[number];
+
+/**
+ * The DISPLAYED status of a listed GitHub issue: the eight non-`closed` members of
+ * {@link IssueResolution} plus the four anomalies. `closed` is not a displayed status
+ * any more: it split into `closed (unverified)` and `closed (no verdict)`.
+ * Derived from the member arrays above, so it cannot disagree with them.
+ */
+export type IssueStatus = Exclude<IssueResolution, "closed"> | AnomalyIssueStatus;
+
+/**
+ * Every displayed status, ordered: the resolution vocabulary (without `closed`) first,
+ * then the anomalies. Assembled by filtering and spreading, never by re-listing the
+ * terminal tokens (AC-DC-9: this file holds exactly one array literal naming them).
+ *
+ * @example
+ *   ISSUE_STATUS_MEMBERS.length // => 12
+ */
+export const ISSUE_STATUS_MEMBERS: readonly IssueStatus[] = [
+  ...ISSUE_RESOLUTION_MEMBERS.filter((member): member is Exclude<IssueResolution, "closed"> => member !== "closed"),
+  ...ANOMALY_ISSUE_STATUS_MEMBERS,
+];
