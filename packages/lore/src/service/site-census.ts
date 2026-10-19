@@ -674,7 +674,8 @@ class CensusWalker {
     if (ts.isObjectLiteralExpression(node)) return node;
     if (ts.isCallExpression(node)) {
       const arg = node.arguments[0];
-      return arg === undefined ? undefined : this.commandObject(arg, depth + 1, false);
+      const wrapped = arg === undefined ? undefined : this.commandObject(arg, depth + 1, false);
+      return wrapped ?? this.factoryReturnedCommand(node, depth);
     }
     if (ts.isIdentifier(node)) {
       const decl = this.valueDeclarationOf(node, shorthand);
@@ -682,6 +683,34 @@ class CensusWalker {
       return this.commandObject(decl.initializer, depth + 1, false);
     }
     return undefined;
+  }
+
+  /**
+   * A call to a local factory function (`regenerableVerb("add")`): the command object its body returns. The callee
+   * must resolve to a declared function with a body and EVERY `return` (outside nested functions) must resolve to
+   * the same command object; anything else is `undefined` (the caller then refuses with entry-symbol-missing).
+   */
+  private factoryReturnedCommand(call: TS.CallExpression, depth: number): TS.ObjectLiteralExpression | undefined {
+    const ts = this.ts;
+    const callee = this.unwrap(call.expression);
+    if (!ts.isIdentifier(callee)) return undefined;
+    const decl = this.valueDeclarationOf(callee, false);
+    const fn = decl === undefined ? undefined : this.functionOfDeclaration(decl);
+    if (fn === undefined || fn.body === undefined) return undefined;
+    const returned: TS.Expression[] = [];
+    if (ts.isBlock(fn.body)) {
+      const collect = (node: TS.Node): void => {
+        if (ts.isFunctionLike(node)) return;
+        if (ts.isReturnStatement(node) && node.expression !== undefined) returned.push(node.expression);
+        ts.forEachChild(node, collect);
+      };
+      ts.forEachChild(fn.body, collect);
+    } else {
+      returned.push(fn.body);
+    }
+    const found = returned.map((expr) => this.commandObject(expr, depth + 1, false));
+    const first = found[0];
+    return first !== undefined && found.every((f) => f === first) ? first : undefined;
   }
 
   private valueDeclarationOf(id: TS.Identifier, shorthand: boolean): TS.Declaration | undefined {
