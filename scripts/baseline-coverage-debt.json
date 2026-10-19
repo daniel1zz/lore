@@ -5719,6 +5719,21 @@
   },
   {
    "leaf": "baseline-accept-a-decision-record",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.collectRunnable#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-accept-a-decision-record",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.lazyCommandObject#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-accept-a-decision-record",
+   "site": "packages/lore/src/service/site-census.ts#createWorkspaceHost#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-accept-a-decision-record",
    "site": "packages/lore/src/service/trace-recorder.ts#TraceRecorder.warn#dynamic:this.warnSink",
    "kind": "not_measured"
   },
@@ -5834,6 +5849,16 @@
   },
   {
    "leaf": "baseline-account-for-a-refusal-site",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.runnableSubPaths#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-account-for-a-refusal-site",
+   "site": "packages/lore/src/service/site-census.ts#buildCensusProgram#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-account-for-a-refusal-site",
    "site": "packages/lore/src/store/store-interface.ts#StoreInterface#addLink",
    "kind": "not_measured"
   },
@@ -5935,6 +5960,21 @@
   {
    "leaf": "baseline-account-for-a-resume-ticket",
    "site": "packages/lore/src/service/record-lock-service.ts#RecordLockService.latestReopenVersion#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-account-for-a-resume-ticket",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.collectRunnable#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-account-for-a-resume-ticket",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.lazyCommandObject#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-account-for-a-resume-ticket",
+   "site": "packages/lore/src/service/site-census.ts#createWorkspaceHost#depth-bound",
    "kind": "not_measured"
   },
   {
@@ -6054,6 +6094,16 @@
   },
   {
    "leaf": "baseline-add-a-baseline-node",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.runnableSubPaths#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-add-a-baseline-node",
+   "site": "packages/lore/src/service/site-census.ts#buildCensusProgram#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-add-a-baseline-node",
    "site": "packages/lore/src/store/store-interface.ts#StoreInterface#addLink",
    "kind": "not_measured"
   },
@@ -6164,6 +6214,21 @@
   },
   {
    "leaf": "baseline-adopt-a-github-issue",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.collectRunnable#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-adopt-a-github-issue",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.lazyCommandObject#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-adopt-a-github-issue",
+   "site": "packages/lore/src/service/site-census.ts#createWorkspaceHost#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-adopt-a-github-issue",
    "site": "packages/lore/src/service/trace-recorder.ts#TraceRecorder.warn#dynamic:this.warnSink",
    "kind": "not_measured"
   },
@@ -6220,6 +6285,21 @@
   {
    "leaf": "baseline-approve-a-document",
    "site": "packages/lore/src/service/autonomy-threshold-service.ts#parseRecord#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-approve-a-document",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.collectRunnable#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-approve-a-document",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.lazyCommandObject#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-approve-a-document",
+   "site": "packages/lore/src/service/site-census.ts#createWorkspaceHost#depth-bound",
    "kind": "not_measured"
   },
   {
@@ -6395,6 +6475,21 @@
   {
    "leaf": "baseline-approve-a-spec",
    "site": "packages/lore/src/service/rule-change-service.ts#readChangeSet#dynamic:err(validationError( `extra.rule_changes${issue !== undefined && issue.path.length >...)",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-approve-a-spec",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.collectRunnable#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-approve-a-spec",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.lazyCommandObject#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-approve-a-spec",
+   "site": "packages/lore/src/service/site-census.ts#createWorkspaceHost#depth-bound",
    "kind": "not_measured"
   },
   {
@@ -6519,6 +6614,21 @@
   },
   {
    "leaf": "baseline-archive-a-task",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.collectRunnable#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-archive-a-task",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.lazyCommandObject#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-archive-a-task",
+   "site": "packages/lore/src/service/site-census.ts#createWorkspaceHost#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-archive-a-task",
    "site": "packages/lore/src/service/trace-recorder.ts#TraceRecorder.warn#dynamic:this.warnSink",
    "kind": "not_measured"
   },
@@ -6570,6 +6680,21 @@
   {
    "leaf": "baseline-assess-a-plan-s-outcome",
    "site": "packages/lore/src/service/record-lock-service.ts#RecordLockService.latestReopenVersion#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-assess-a-plan-s-outcome",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.collectRunnable#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-assess-a-plan-s-outcome",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.lazyCommandObject#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-assess-a-plan-s-outcome",
+   "site": "packages/lore/src/service/site-census.ts#createWorkspaceHost#depth-bound",
    "kind": "not_measured"
   },
   {
@@ -6674,6 +6799,21 @@
   },
   {
    "leaf": "baseline-assess-a-rule-s-impact",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.collectRunnable#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-assess-a-rule-s-impact",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.lazyCommandObject#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-assess-a-rule-s-impact",
+   "site": "packages/lore/src/service/site-census.ts#createWorkspaceHost#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-assess-a-rule-s-impact",
    "site": "packages/lore/src/service/trace-recorder.ts#TraceRecorder.warn#dynamic:this.warnSink",
    "kind": "not_measured"
   },
@@ -6765,6 +6905,16 @@
   {
    "leaf": "baseline-attribute-work-to-a-run",
    "site": "packages/lore/src/service/rule-index-queries.ts#collectLeafRules#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-attribute-work-to-a-run",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.runnableSubPaths#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-attribute-work-to-a-run",
+   "site": "packages/lore/src/service/site-census.ts#buildCensusProgram#depth-bound",
    "kind": "not_measured"
   },
   {
@@ -6869,6 +7019,21 @@
   },
   {
    "leaf": "baseline-browse-the-document-tree",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.collectRunnable#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-browse-the-document-tree",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.lazyCommandObject#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-browse-the-document-tree",
+   "site": "packages/lore/src/service/site-census.ts#createWorkspaceHost#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-browse-the-document-tree",
    "site": "packages/lore/src/service/trace-recorder.ts#TraceRecorder.warn#dynamic:this.warnSink",
    "kind": "not_measured"
   },
@@ -6934,6 +7099,21 @@
   },
   {
    "leaf": "baseline-check-a-gate-before-writing",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.collectRunnable#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-check-a-gate-before-writing",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.lazyCommandObject#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-check-a-gate-before-writing",
+   "site": "packages/lore/src/service/site-census.ts#createWorkspaceHost#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-check-a-gate-before-writing",
    "site": "packages/lore/src/service/trace-recorder.ts#TraceRecorder.warn#dynamic:this.warnSink",
    "kind": "not_measured"
   },
@@ -7049,6 +7229,21 @@
   },
   {
    "leaf": "baseline-check-a-turn-at-its-end",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.collectRunnable#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-check-a-turn-at-its-end",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.lazyCommandObject#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-check-a-turn-at-its-end",
+   "site": "packages/lore/src/service/site-census.ts#createWorkspaceHost#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-check-a-turn-at-its-end",
    "site": "packages/lore/src/store/turso-store.ts#TursoStore.findVersions#depth-bound",
    "kind": "not_measured"
   },
@@ -7130,6 +7325,21 @@
   {
    "leaf": "baseline-check-installation-freshness",
    "site": "packages/lore/src/service/record-lock-service.ts#RecordLockService.latestReopenVersion#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-check-installation-freshness",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.collectRunnable#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-check-installation-freshness",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.lazyCommandObject#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-check-installation-freshness",
+   "site": "packages/lore/src/service/site-census.ts#createWorkspaceHost#depth-bound",
    "kind": "not_measured"
   },
   {
@@ -7265,6 +7475,21 @@
   {
    "leaf": "baseline-check-resolution-labels",
    "site": "packages/lore/src/service/record-lock-service.ts#RecordLockService.latestReopenVersion#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-check-resolution-labels",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.collectRunnable#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-check-resolution-labels",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.lazyCommandObject#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-check-resolution-labels",
+   "site": "packages/lore/src/service/site-census.ts#createWorkspaceHost#depth-bound",
    "kind": "not_measured"
   },
   {
@@ -7554,6 +7779,11 @@
   },
   {
    "leaf": "baseline-cite-a-baseline-rule",
+   "site": "packages/lore/src/service/gate-predicates.ts#findAcCiteViolations#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-cite-a-baseline-rule",
    "site": "packages/lore/src/service/gate-predicates.ts#findAnchorOverlapConflict#depth-bound",
    "kind": "not_measured"
   },
@@ -7590,6 +7820,31 @@
   {
    "leaf": "baseline-cite-a-baseline-rule",
    "site": "packages/lore/src/service/rule-index-queries.ts#collectLeafRules#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-cite-a-baseline-rule",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.collectRunnable#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-cite-a-baseline-rule",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.lazyCommandObject#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-cite-a-baseline-rule",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.runnableSubPaths#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-cite-a-baseline-rule",
+   "site": "packages/lore/src/service/site-census.ts#buildCensusProgram#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-cite-a-baseline-rule",
+   "site": "packages/lore/src/service/site-census.ts#createWorkspaceHost#depth-bound",
    "kind": "not_measured"
   },
   {
@@ -7650,6 +7905,21 @@
   {
    "leaf": "baseline-claim-a-task",
    "site": "packages/lore/src/service/autonomy-threshold-service.ts#parseRecord#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-claim-a-task",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.collectRunnable#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-claim-a-task",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.lazyCommandObject#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-claim-a-task",
+   "site": "packages/lore/src/service/site-census.ts#createWorkspaceHost#depth-bound",
    "kind": "not_measured"
   },
   {
@@ -7819,6 +8089,21 @@
   },
   {
    "leaf": "baseline-close-a-plan",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.collectRunnable#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-close-a-plan",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.lazyCommandObject#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-close-a-plan",
+   "site": "packages/lore/src/service/site-census.ts#createWorkspaceHost#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-close-a-plan",
    "site": "packages/lore/src/store/store-interface.ts#StoreInterface#listRuleRegistry",
    "kind": "not_measured"
   },
@@ -7929,6 +8214,16 @@
   },
   {
    "leaf": "baseline-compute-a-rule-s-state",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.runnableSubPaths#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-compute-a-rule-s-state",
+   "site": "packages/lore/src/service/site-census.ts#buildCensusProgram#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-compute-a-rule-s-state",
    "site": "packages/lore/src/store/store-interface.ts#StoreInterface#addLink",
    "kind": "not_measured"
   },
@@ -8034,6 +8329,21 @@
   },
   {
    "leaf": "baseline-create-a-document",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.collectRunnable#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-create-a-document",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.lazyCommandObject#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-create-a-document",
+   "site": "packages/lore/src/service/site-census.ts#createWorkspaceHost#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-create-a-document",
    "site": "packages/lore/src/service/trace-recorder.ts#TraceRecorder.warn#dynamic:this.warnSink",
    "kind": "not_measured"
   },
@@ -8080,6 +8390,21 @@
   {
    "leaf": "baseline-create-a-spec",
    "site": "packages/lore/src/service/autonomy-threshold-service.ts#parseRecord#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-create-a-spec",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.collectRunnable#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-create-a-spec",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.lazyCommandObject#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-create-a-spec",
+   "site": "packages/lore/src/service/site-census.ts#createWorkspaceHost#depth-bound",
    "kind": "not_measured"
   },
   {
@@ -8180,6 +8505,21 @@
   {
    "leaf": "baseline-create-a-task",
    "site": "packages/lore/src/service/record-lock-service.ts#RecordLockService.latestReopenVersion#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-create-a-task",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.collectRunnable#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-create-a-task",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.lazyCommandObject#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-create-a-task",
+   "site": "packages/lore/src/service/site-census.ts#createWorkspaceHost#depth-bound",
    "kind": "not_measured"
   },
   {
@@ -8214,6 +8554,11 @@
   },
   {
    "leaf": "baseline-declare-a-code-anchor",
+   "site": "packages/core/src/ac-quality.ts#lintStatement#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-declare-a-code-anchor",
    "site": "packages/core/src/actor-resolution-node.ts#sessionActorOf#depth-bound",
    "kind": "not_measured"
   },
@@ -8230,6 +8575,11 @@
   {
    "leaf": "baseline-declare-a-code-anchor",
    "site": "packages/core/src/evidence-panel.ts#isStaleOnlyTask#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-declare-a-code-anchor",
+   "site": "packages/core/src/session-actor.ts#sessionActorFromId#depth-bound",
    "kind": "not_measured"
   },
   {
@@ -8299,6 +8649,21 @@
   },
   {
    "leaf": "baseline-declare-a-code-anchor",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.collectRunnable#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-declare-a-code-anchor",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.lazyCommandObject#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-declare-a-code-anchor",
+   "site": "packages/lore/src/service/site-census.ts#createWorkspaceHost#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-declare-a-code-anchor",
    "site": "packages/lore/src/service/trace-recorder.ts#TraceRecorder.warn#dynamic:this.warnSink",
    "kind": "not_measured"
   },
@@ -8350,6 +8715,21 @@
   {
    "leaf": "baseline-declare-a-falsifier",
    "site": "packages/lore/src/service/autonomy-threshold-service.ts#parseRecord#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-declare-a-falsifier",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.collectRunnable#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-declare-a-falsifier",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.lazyCommandObject#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-declare-a-falsifier",
+   "site": "packages/lore/src/service/site-census.ts#createWorkspaceHost#depth-bound",
    "kind": "not_measured"
   },
   {
@@ -8460,6 +8840,16 @@
   {
    "leaf": "baseline-declare-a-leaf-dependency",
    "site": "packages/lore/src/service/gate-enforcer.ts#GateEnforcer.warnAuditWriteFailure#dynamic:this.warnSink",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-declare-a-leaf-dependency",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.runnableSubPaths#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-declare-a-leaf-dependency",
+   "site": "packages/lore/src/service/site-census.ts#buildCensusProgram#depth-bound",
    "kind": "not_measured"
   },
   {
@@ -8609,6 +8999,21 @@
   },
   {
    "leaf": "baseline-declare-a-product-requirement",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.collectRunnable#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-declare-a-product-requirement",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.lazyCommandObject#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-declare-a-product-requirement",
+   "site": "packages/lore/src/service/site-census.ts#createWorkspaceHost#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-declare-a-product-requirement",
    "site": "packages/lore/src/service/trace-recorder.ts#TraceRecorder.warn#dynamic:this.warnSink",
    "kind": "not_measured"
   },
@@ -8665,6 +9070,21 @@
   {
    "leaf": "baseline-declare-a-task-red-first",
    "site": "packages/lore/src/service/autonomy-threshold-service.ts#parseRecord#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-declare-a-task-red-first",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.collectRunnable#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-declare-a-task-red-first",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.lazyCommandObject#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-declare-a-task-red-first",
+   "site": "packages/lore/src/service/site-census.ts#createWorkspaceHost#depth-bound",
    "kind": "not_measured"
   },
   {
@@ -8755,6 +9175,21 @@
   {
    "leaf": "baseline-declare-an-acceptance-criterion",
    "site": "packages/lore/src/service/record-lock-service.ts#RecordLockService.latestReopenVersion#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-declare-an-acceptance-criterion",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.collectRunnable#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-declare-an-acceptance-criterion",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.lazyCommandObject#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-declare-an-acceptance-criterion",
+   "site": "packages/lore/src/service/site-census.ts#createWorkspaceHost#depth-bound",
    "kind": "not_measured"
   },
   {
@@ -8870,6 +9305,16 @@
   {
    "leaf": "baseline-define-a-glossary-term",
    "site": "packages/lore/src/service/gate-enforcer.ts#GateEnforcer.warnAuditWriteFailure#dynamic:this.warnSink",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-define-a-glossary-term",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.runnableSubPaths#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-define-a-glossary-term",
+   "site": "packages/lore/src/service/site-census.ts#buildCensusProgram#depth-bound",
    "kind": "not_measured"
   },
   {
@@ -9014,6 +9459,21 @@
   },
   {
    "leaf": "baseline-delete-a-document",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.collectRunnable#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-delete-a-document",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.lazyCommandObject#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-delete-a-document",
+   "site": "packages/lore/src/service/site-census.ts#createWorkspaceHost#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-delete-a-document",
    "site": "packages/lore/src/service/trace-recorder.ts#TraceRecorder.warn#dynamic:this.warnSink",
    "kind": "not_measured"
   },
@@ -9105,6 +9565,21 @@
   {
    "leaf": "baseline-detect-code-anchor-drift",
    "site": "packages/lore/src/service/record-lock-service.ts#RecordLockService.latestReopenVersion#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-detect-code-anchor-drift",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.collectRunnable#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-detect-code-anchor-drift",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.lazyCommandObject#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-detect-code-anchor-drift",
+   "site": "packages/lore/src/service/site-census.ts#createWorkspaceHost#depth-bound",
    "kind": "not_measured"
   },
   {
@@ -9293,6 +9768,21 @@
    "kind": "not_measured"
   },
   {
+   "leaf": "baseline-edit-project-settings",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.collectRunnable#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-edit-project-settings",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.lazyCommandObject#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-edit-project-settings",
+   "site": "packages/lore/src/service/site-census.ts#createWorkspaceHost#depth-bound",
+   "kind": "not_measured"
+  },
+  {
    "leaf": "baseline-enter-a-seat",
    "site": "packages/core/src/ac-quality.ts#lintAcQuantifiability#depth-bound",
    "kind": "not_measured"
@@ -9380,6 +9870,21 @@
   {
    "leaf": "baseline-enter-a-seat",
    "site": "packages/lore/src/service/record-lock-service.ts#RecordLockService.latestReopenVersion#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-enter-a-seat",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.collectRunnable#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-enter-a-seat",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.lazyCommandObject#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-enter-a-seat",
+   "site": "packages/lore/src/service/site-census.ts#createWorkspaceHost#depth-bound",
    "kind": "not_measured"
   },
   {
@@ -9484,6 +9989,21 @@
   },
   {
    "leaf": "baseline-export-documents-to-files",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.collectRunnable#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-export-documents-to-files",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.lazyCommandObject#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-export-documents-to-files",
+   "site": "packages/lore/src/service/site-census.ts#createWorkspaceHost#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-export-documents-to-files",
    "site": "packages/lore/src/service/trace-recorder.ts#TraceRecorder.warn#dynamic:this.warnSink",
    "kind": "not_measured"
   },
@@ -9544,6 +10064,21 @@
   },
   {
    "leaf": "baseline-fast-track-ledger-records",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.collectRunnable#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-fast-track-ledger-records",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.lazyCommandObject#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-fast-track-ledger-records",
+   "site": "packages/lore/src/service/site-census.ts#createWorkspaceHost#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-fast-track-ledger-records",
    "site": "packages/lore/src/service/trace-recorder.ts#TraceRecorder.warn#dynamic:this.warnSink",
    "kind": "not_measured"
   },
@@ -9595,6 +10130,21 @@
   {
    "leaf": "baseline-file-a-defect-report",
    "site": "packages/lore/src/service/record-lock-service.ts#RecordLockService.latestReopenVersion#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-file-a-defect-report",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.collectRunnable#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-file-a-defect-report",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.lazyCommandObject#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-file-a-defect-report",
+   "site": "packages/lore/src/service/site-census.ts#createWorkspaceHost#depth-bound",
    "kind": "not_measured"
   },
   {
@@ -9695,6 +10245,21 @@
   {
    "leaf": "baseline-find-a-business-rule",
    "site": "packages/lore/src/service/record-lock-service.ts#RecordLockService.latestReopenVersion#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-find-a-business-rule",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.collectRunnable#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-find-a-business-rule",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.lazyCommandObject#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-find-a-business-rule",
+   "site": "packages/lore/src/service/site-census.ts#createWorkspaceHost#depth-bound",
    "kind": "not_measured"
   },
   {
@@ -9829,6 +10394,11 @@
   },
   {
    "leaf": "baseline-govern-autonomy-thresholds",
+   "site": "packages/lore/src/service/gate-predicates.ts#findAcCiteViolations#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-govern-autonomy-thresholds",
    "site": "packages/lore/src/service/gate-predicates.ts#noAnchorOverlap#depth-bound",
    "kind": "not_measured"
   },
@@ -9858,6 +10428,16 @@
    "kind": "not_measured"
   },
   {
+   "leaf": "baseline-govern-autonomy-thresholds",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.runnableSubPaths#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-govern-autonomy-thresholds",
+   "site": "packages/lore/src/service/site-census.ts#buildCensusProgram#depth-bound",
+   "kind": "not_measured"
+  },
+  {
    "leaf": "baseline-hand-off-a-session",
    "site": "packages/core/src/shell-cwd.ts#findClosingParen#depth-bound",
    "kind": "not_measured"
@@ -9905,6 +10485,21 @@
   {
    "leaf": "baseline-hand-off-a-session",
    "site": "packages/lore/src/service/record-lock-service.ts#RecordLockService.latestReopenVersion#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-hand-off-a-session",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.collectRunnable#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-hand-off-a-session",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.lazyCommandObject#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-hand-off-a-session",
+   "site": "packages/lore/src/service/site-census.ts#createWorkspaceHost#depth-bound",
    "kind": "not_measured"
   },
   {
@@ -9969,6 +10564,21 @@
   },
   {
    "leaf": "baseline-import-a-version-1-corpus",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.collectRunnable#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-import-a-version-1-corpus",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.lazyCommandObject#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-import-a-version-1-corpus",
+   "site": "packages/lore/src/service/site-census.ts#createWorkspaceHost#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-import-a-version-1-corpus",
    "site": "packages/lore/src/service/trace-recorder.ts#TraceRecorder.warn#dynamic:this.warnSink",
    "kind": "not_measured"
   },
@@ -10020,6 +10630,21 @@
   {
    "leaf": "baseline-import-spec-files",
    "site": "packages/lore/src/service/record-lock-service.ts#RecordLockService.latestReopenVersion#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-import-spec-files",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.collectRunnable#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-import-spec-files",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.lazyCommandObject#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-import-spec-files",
+   "site": "packages/lore/src/service/site-census.ts#createWorkspaceHost#depth-bound",
    "kind": "not_measured"
   },
   {
@@ -10048,6 +10673,16 @@
    "kind": "not_measured"
   },
   {
+   "leaf": "baseline-initialise-a-project-corpus",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.factoryReturnedCommand#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-initialise-a-project-corpus",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.valueDeclarationOf#depth-bound",
+   "kind": "not_measured"
+  },
+  {
    "leaf": "baseline-install-the-agent-integration",
    "site": "packages/core/src/ac-quality.ts#lintAcQuantifiability#depth-bound",
    "kind": "not_measured"
@@ -10129,22 +10764,27 @@
   },
   {
    "leaf": "baseline-install-the-agent-integration",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.collectRunnable#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-install-the-agent-integration",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.lazyCommandObject#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-install-the-agent-integration",
+   "site": "packages/lore/src/service/site-census.ts#createWorkspaceHost#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-install-the-agent-integration",
    "site": "packages/lore/src/service/trace-recorder.ts#TraceRecorder.warn#dynamic:this.warnSink",
    "kind": "not_measured"
   },
   {
    "leaf": "baseline-install-the-agent-integration",
    "site": "packages/lore/src/store/turso-store.ts#TursoStore.findVersions#depth-bound",
-   "kind": "not_measured"
-  },
-  {
-   "leaf": "baseline-integrate-a-branch-into-main",
-   "site": "packages/core/src/ac-quality.ts#lintAcQuantifiability#depth-bound",
-   "kind": "not_measured"
-  },
-  {
-   "leaf": "baseline-integrate-a-branch-into-main",
-   "site": "packages/core/src/actor-resolution-node.ts#sessionActorOf#depth-bound",
    "kind": "not_measured"
   },
   {
@@ -10154,16 +10794,6 @@
   },
   {
    "leaf": "baseline-integrate-a-branch-into-main",
-   "site": "packages/core/src/evidence-panel.ts#deriveAttestationSummary#depth-bound",
-   "kind": "not_measured"
-  },
-  {
-   "leaf": "baseline-integrate-a-branch-into-main",
-   "site": "packages/core/src/evidence-panel.ts#isStaleOnlyTask#depth-bound",
-   "kind": "not_measured"
-  },
-  {
-   "leaf": "baseline-integrate-a-branch-into-main",
    "site": "packages/core/src/shell-cwd.ts#findClosingParen#depth-bound",
    "kind": "not_measured"
   },
@@ -10209,32 +10839,22 @@
   },
   {
    "leaf": "baseline-integrate-a-branch-into-main",
-   "site": "packages/lore/src/service/checkpoint-registry.ts#feedAnchorOverlap#depth-bound",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.collectRunnable#depth-bound",
    "kind": "not_measured"
   },
   {
    "leaf": "baseline-integrate-a-branch-into-main",
-   "site": "packages/lore/src/service/checkpoint-registry.ts#renderRuleOffences#depth-bound",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.lazyCommandObject#depth-bound",
    "kind": "not_measured"
   },
   {
    "leaf": "baseline-integrate-a-branch-into-main",
-   "site": "packages/lore/src/service/gate-predicates.ts#findAnchorOverlapConflict#depth-bound",
-   "kind": "not_measured"
-  },
-  {
-   "leaf": "baseline-integrate-a-branch-into-main",
-   "site": "packages/lore/src/service/record-lock-service.ts#RecordLockService.latestReopenVersion#depth-bound",
+   "site": "packages/lore/src/service/site-census.ts#createWorkspaceHost#depth-bound",
    "kind": "not_measured"
   },
   {
    "leaf": "baseline-integrate-a-branch-into-main",
    "site": "packages/lore/src/service/trace-recorder.ts#TraceRecorder.warn#dynamic:this.warnSink",
-   "kind": "not_measured"
-  },
-  {
-   "leaf": "baseline-integrate-a-branch-into-main",
-   "site": "packages/lore/src/store/turso-store.ts#TursoStore.findVersions#depth-bound",
    "kind": "not_measured"
   },
   {
@@ -10294,6 +10914,21 @@
   },
   {
    "leaf": "baseline-invalidate-a-document",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.collectRunnable#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-invalidate-a-document",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.lazyCommandObject#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-invalidate-a-document",
+   "site": "packages/lore/src/service/site-census.ts#createWorkspaceHost#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-invalidate-a-document",
    "site": "packages/lore/src/service/trace-recorder.ts#TraceRecorder.warn#dynamic:this.warnSink",
    "kind": "not_measured"
   },
@@ -10385,6 +11020,21 @@
   {
    "leaf": "baseline-issue-an-agent-key",
    "site": "packages/lore/src/service/record-lock-service.ts#RecordLockService.latestReopenVersion#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-issue-an-agent-key",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.collectRunnable#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-issue-an-agent-key",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.lazyCommandObject#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-issue-an-agent-key",
+   "site": "packages/lore/src/service/site-census.ts#createWorkspaceHost#depth-bound",
    "kind": "not_measured"
   },
   {
@@ -10449,6 +11099,21 @@
   },
   {
    "leaf": "baseline-judge-a-document",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.collectRunnable#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-judge-a-document",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.lazyCommandObject#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-judge-a-document",
+   "site": "packages/lore/src/service/site-census.ts#createWorkspaceHost#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-judge-a-document",
    "site": "packages/lore/src/service/trace-recorder.ts#TraceRecorder.warn#dynamic:this.warnSink",
    "kind": "not_measured"
   },
@@ -10540,6 +11205,21 @@
   {
    "leaf": "baseline-keep-a-phase-checklist",
    "site": "packages/lore/src/service/record-lock-service.ts#RecordLockService.latestReopenVersion#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-keep-a-phase-checklist",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.collectRunnable#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-keep-a-phase-checklist",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.lazyCommandObject#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-keep-a-phase-checklist",
+   "site": "packages/lore/src/service/site-census.ts#createWorkspaceHost#depth-bound",
    "kind": "not_measured"
   },
   {
@@ -10724,6 +11404,21 @@
   },
   {
    "leaf": "baseline-keep-a-record-unchanged",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.collectRunnable#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-keep-a-record-unchanged",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.lazyCommandObject#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-keep-a-record-unchanged",
+   "site": "packages/lore/src/service/site-census.ts#createWorkspaceHost#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-keep-a-record-unchanged",
    "site": "packages/lore/src/service/trace-recorder.ts#TraceRecorder.warn#dynamic:this.warnSink",
    "kind": "not_measured"
   },
@@ -10785,6 +11480,21 @@
   {
    "leaf": "baseline-land-a-spec-s-rule-changes",
    "site": "packages/lore/src/service/autonomy-threshold-service.ts#parseRecord#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-land-a-spec-s-rule-changes",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.collectRunnable#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-land-a-spec-s-rule-changes",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.lazyCommandObject#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-land-a-spec-s-rule-changes",
+   "site": "packages/lore/src/service/site-census.ts#createWorkspaceHost#depth-bound",
    "kind": "not_measured"
   },
   {
@@ -10968,6 +11678,21 @@
    "kind": "not_measured"
   },
   {
+   "leaf": "baseline-launch-the-dashboard",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.collectRunnable#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-launch-the-dashboard",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.lazyCommandObject#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-launch-the-dashboard",
+   "site": "packages/lore/src/service/site-census.ts#createWorkspaceHost#depth-bound",
+   "kind": "not_measured"
+  },
+  {
    "leaf": "baseline-link-two-documents",
    "site": "packages/core/src/ac-quality.ts#lintAcQuantifiability#depth-bound",
    "kind": "not_measured"
@@ -11050,6 +11775,21 @@
   {
    "leaf": "baseline-link-two-documents",
    "site": "packages/lore/src/service/record-lock-service.ts#RecordLockService.latestReopenVersion#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-link-two-documents",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.collectRunnable#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-link-two-documents",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.lazyCommandObject#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-link-two-documents",
+   "site": "packages/lore/src/service/site-census.ts#createWorkspaceHost#depth-bound",
    "kind": "not_measured"
   },
   {
@@ -11150,6 +11890,21 @@
   {
    "leaf": "baseline-list-agent-keys",
    "site": "packages/lore/src/service/record-lock-service.ts#RecordLockService.latestReopenVersion#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-list-agent-keys",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.collectRunnable#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-list-agent-keys",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.lazyCommandObject#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-list-agent-keys",
+   "site": "packages/lore/src/service/site-census.ts#createWorkspaceHost#depth-bound",
    "kind": "not_measured"
   },
   {
@@ -11259,6 +12014,21 @@
   },
   {
    "leaf": "baseline-list-defect-reports",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.collectRunnable#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-list-defect-reports",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.lazyCommandObject#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-list-defect-reports",
+   "site": "packages/lore/src/service/site-census.ts#createWorkspaceHost#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-list-defect-reports",
    "site": "packages/lore/src/service/trace-recorder.ts#TraceRecorder.warn#dynamic:this.warnSink",
    "kind": "not_measured"
   },
@@ -11359,6 +12129,21 @@
   },
   {
    "leaf": "baseline-list-documents",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.collectRunnable#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-list-documents",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.lazyCommandObject#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-list-documents",
+   "site": "packages/lore/src/service/site-census.ts#createWorkspaceHost#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-list-documents",
    "site": "packages/lore/src/service/trace-recorder.ts#TraceRecorder.warn#dynamic:this.warnSink",
    "kind": "not_measured"
   },
@@ -11450,6 +12235,21 @@
   {
    "leaf": "baseline-list-documents-awaiting-review",
    "site": "packages/lore/src/service/record-lock-service.ts#RecordLockService.latestReopenVersion#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-list-documents-awaiting-review",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.collectRunnable#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-list-documents-awaiting-review",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.lazyCommandObject#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-list-documents-awaiting-review",
+   "site": "packages/lore/src/service/site-census.ts#createWorkspaceHost#depth-bound",
    "kind": "not_measured"
   },
   {
@@ -11584,6 +12384,11 @@
   },
   {
    "leaf": "baseline-measure-completeness",
+   "site": "packages/lore/src/service/gate-predicates.ts#findAcCiteViolations#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-measure-completeness",
    "site": "packages/lore/src/service/gate-predicates.ts#noAnchorOverlap#depth-bound",
    "kind": "not_measured"
   },
@@ -11704,6 +12509,21 @@
   },
   {
    "leaf": "baseline-measure-corpus-usage",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.collectRunnable#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-measure-corpus-usage",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.lazyCommandObject#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-measure-corpus-usage",
+   "site": "packages/lore/src/service/site-census.ts#createWorkspaceHost#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-measure-corpus-usage",
    "site": "packages/lore/src/service/trace-recorder.ts#TraceRecorder.warn#dynamic:this.warnSink",
    "kind": "not_measured"
   },
@@ -11769,6 +12589,21 @@
   },
   {
    "leaf": "baseline-move-a-business-rule",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.collectRunnable#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-move-a-business-rule",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.lazyCommandObject#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-move-a-business-rule",
+   "site": "packages/lore/src/service/site-census.ts#createWorkspaceHost#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-move-a-business-rule",
    "site": "packages/lore/src/service/trace-recorder.ts#TraceRecorder.warn#dynamic:this.warnSink",
    "kind": "not_measured"
   },
@@ -11860,6 +12695,21 @@
   {
    "leaf": "baseline-note-a-phase-s-progress",
    "site": "packages/lore/src/service/record-lock-service.ts#RecordLockService.latestReopenVersion#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-note-a-phase-s-progress",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.collectRunnable#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-note-a-phase-s-progress",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.lazyCommandObject#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-note-a-phase-s-progress",
+   "site": "packages/lore/src/service/site-census.ts#createWorkspaceHost#depth-bound",
    "kind": "not_measured"
   },
   {
@@ -11964,7 +12814,17 @@
   },
   {
    "leaf": "baseline-plan-the-work",
-   "site": "packages/lore/src/service/trace-recorder.ts#TraceRecorder.warn#dynamic:this.warnSink",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.collectRunnable#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-plan-the-work",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.lazyCommandObject#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-plan-the-work",
+   "site": "packages/lore/src/service/site-census.ts#createWorkspaceHost#depth-bound",
    "kind": "not_measured"
   },
   {
@@ -12020,6 +12880,21 @@
   {
    "leaf": "baseline-probe-documents-for-staleness",
    "site": "packages/lore/src/service/autonomy-threshold-service.ts#parseRecord#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-probe-documents-for-staleness",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.collectRunnable#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-probe-documents-for-staleness",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.lazyCommandObject#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-probe-documents-for-staleness",
+   "site": "packages/lore/src/service/site-census.ts#createWorkspaceHost#depth-bound",
    "kind": "not_measured"
   },
   {
@@ -12115,6 +12990,21 @@
   {
    "leaf": "baseline-propose-a-rule-change",
    "site": "packages/lore/src/service/record-lock-service.ts#RecordLockService.latestReopenVersion#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-propose-a-rule-change",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.collectRunnable#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-propose-a-rule-change",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.lazyCommandObject#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-propose-a-rule-change",
+   "site": "packages/lore/src/service/site-census.ts#createWorkspaceHost#depth-bound",
    "kind": "not_measured"
   },
   {
@@ -12155,6 +13045,21 @@
   {
    "leaf": "baseline-prove-a-red",
    "site": "packages/lore/src/service/autonomy-calibration-service.ts#AutonomyCalibrationService.observe#dynamic:this.deps.now",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-prove-a-red",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.collectRunnable#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-prove-a-red",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.lazyCommandObject#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-prove-a-red",
+   "site": "packages/lore/src/service/site-census.ts#createWorkspaceHost#depth-bound",
    "kind": "not_measured"
   },
   {
@@ -12284,6 +13189,11 @@
   },
   {
    "leaf": "baseline-prove-the-decision-record-was-not-rewritten-before-a",
+   "site": "packages/lore/src/service/gate-predicates.ts#findAcCiteViolations#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-prove-the-decision-record-was-not-rewritten-before-a",
    "site": "packages/lore/src/service/gate-predicates.ts#noAnchorOverlap#depth-bound",
    "kind": "not_measured"
   },
@@ -12313,6 +13223,16 @@
    "kind": "not_measured"
   },
   {
+   "leaf": "baseline-prove-the-decision-record-was-not-rewritten-before-a",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.runnableSubPaths#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-prove-the-decision-record-was-not-rewritten-before-a",
+   "site": "packages/lore/src/service/site-census.ts#buildCensusProgram#depth-bound",
+   "kind": "not_measured"
+  },
+  {
    "leaf": "baseline-prune-stashes",
    "site": "packages/core/src/ac-quality.ts#lintAcQuantifiability#depth-bound",
    "kind": "not_measured"
@@ -12370,6 +13290,21 @@
   {
    "leaf": "baseline-prune-stashes",
    "site": "packages/lore/src/service/record-lock-service.ts#RecordLockService.latestReopenVersion#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-prune-stashes",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.collectRunnable#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-prune-stashes",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.lazyCommandObject#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-prune-stashes",
+   "site": "packages/lore/src/service/site-census.ts#createWorkspaceHost#depth-bound",
    "kind": "not_measured"
   },
   {
@@ -12469,6 +13404,21 @@
   },
   {
    "leaf": "baseline-pull-the-rules-before-writing",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.collectRunnable#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-pull-the-rules-before-writing",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.lazyCommandObject#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-pull-the-rules-before-writing",
+   "site": "packages/lore/src/service/site-census.ts#createWorkspaceHost#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-pull-the-rules-before-writing",
    "site": "packages/lore/src/service/trace-recorder.ts#TraceRecorder.warn#dynamic:this.warnSink",
    "kind": "not_measured"
   },
@@ -12564,6 +13514,21 @@
   },
   {
    "leaf": "baseline-query-the-audit-trail",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.collectRunnable#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-query-the-audit-trail",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.lazyCommandObject#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-query-the-audit-trail",
+   "site": "packages/lore/src/service/site-census.ts#createWorkspaceHost#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-query-the-audit-trail",
    "site": "packages/lore/src/service/trace-recorder.ts#TraceRecorder.warn#dynamic:this.warnSink",
    "kind": "not_measured"
   },
@@ -12659,6 +13624,21 @@
   },
   {
    "leaf": "baseline-read-a-document",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.collectRunnable#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-read-a-document",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.lazyCommandObject#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-read-a-document",
+   "site": "packages/lore/src/service/site-census.ts#createWorkspaceHost#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-read-a-document",
    "site": "packages/lore/src/service/trace-recorder.ts#TraceRecorder.warn#dynamic:this.warnSink",
    "kind": "not_measured"
   },
@@ -12750,6 +13730,21 @@
   {
    "leaf": "baseline-read-a-document-s-history",
    "site": "packages/lore/src/service/record-lock-service.ts#RecordLockService.latestReopenVersion#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-read-a-document-s-history",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.collectRunnable#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-read-a-document-s-history",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.lazyCommandObject#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-read-a-document-s-history",
+   "site": "packages/lore/src/service/site-census.ts#createWorkspaceHost#depth-bound",
    "kind": "not_measured"
   },
   {
@@ -12919,6 +13914,21 @@
   },
   {
    "leaf": "baseline-read-a-document-s-review-judgments",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.collectRunnable#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-read-a-document-s-review-judgments",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.lazyCommandObject#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-read-a-document-s-review-judgments",
+   "site": "packages/lore/src/service/site-census.ts#createWorkspaceHost#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-read-a-document-s-review-judgments",
    "site": "packages/lore/src/service/trace-recorder.ts#TraceRecorder.warn#dynamic:this.warnSink",
    "kind": "not_measured"
   },
@@ -12980,6 +13990,21 @@
   {
    "leaf": "baseline-read-calibration-statistics",
    "site": "packages/lore/src/service/record-lock-service.ts#RecordLockService.latestReopenVersion#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-read-calibration-statistics",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.collectRunnable#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-read-calibration-statistics",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.lazyCommandObject#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-read-calibration-statistics",
+   "site": "packages/lore/src/service/site-census.ts#createWorkspaceHost#depth-bound",
    "kind": "not_measured"
   },
   {
@@ -13080,6 +14105,21 @@
   {
    "leaf": "baseline-record-an-acceptance-verdict",
    "site": "packages/lore/src/service/record-lock-service.ts#RecordLockService.latestReopenVersion#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-record-an-acceptance-verdict",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.collectRunnable#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-record-an-acceptance-verdict",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.lazyCommandObject#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-record-an-acceptance-verdict",
+   "site": "packages/lore/src/service/site-census.ts#createWorkspaceHost#depth-bound",
    "kind": "not_measured"
   },
   {
@@ -13144,6 +14184,21 @@
   },
   {
    "leaf": "baseline-record-evidence",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.collectRunnable#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-record-evidence",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.lazyCommandObject#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-record-evidence",
+   "site": "packages/lore/src/service/site-census.ts#createWorkspaceHost#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-record-evidence",
    "site": "packages/lore/src/service/trace-recorder.ts#TraceRecorder.warn#dynamic:this.warnSink",
    "kind": "not_measured"
   },
@@ -13195,6 +14250,21 @@
   {
    "leaf": "baseline-reject-a-document",
    "site": "packages/lore/src/service/autonomy-threshold-service.ts#parseRecord#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-reject-a-document",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.collectRunnable#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-reject-a-document",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.lazyCommandObject#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-reject-a-document",
+   "site": "packages/lore/src/service/site-census.ts#createWorkspaceHost#depth-bound",
    "kind": "not_measured"
   },
   {
@@ -13290,6 +14360,21 @@
   {
    "leaf": "baseline-remove-a-finished-worktree",
    "site": "packages/lore/src/service/record-lock-service.ts#RecordLockService.latestReopenVersion#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-remove-a-finished-worktree",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.collectRunnable#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-remove-a-finished-worktree",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.lazyCommandObject#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-remove-a-finished-worktree",
+   "site": "packages/lore/src/service/site-census.ts#createWorkspaceHost#depth-bound",
    "kind": "not_measured"
   },
   {
@@ -13394,6 +14479,21 @@
   },
   {
    "leaf": "baseline-remove-a-seat",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.collectRunnable#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-remove-a-seat",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.lazyCommandObject#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-remove-a-seat",
+   "site": "packages/lore/src/service/site-census.ts#createWorkspaceHost#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-remove-a-seat",
    "site": "packages/lore/src/service/trace-recorder.ts#TraceRecorder.warn#dynamic:this.warnSink",
    "kind": "not_measured"
   },
@@ -13450,6 +14550,21 @@
   {
    "leaf": "baseline-reopen-an-approved-spec",
    "site": "packages/lore/src/service/autonomy-threshold-service.ts#parseRecord#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-reopen-an-approved-spec",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.collectRunnable#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-reopen-an-approved-spec",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.lazyCommandObject#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-reopen-an-approved-spec",
+   "site": "packages/lore/src/service/site-census.ts#createWorkspaceHost#depth-bound",
    "kind": "not_measured"
   },
   {
@@ -13649,6 +14764,21 @@
   },
   {
    "leaf": "baseline-resolve-a-defect-report",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.collectRunnable#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-resolve-a-defect-report",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.lazyCommandObject#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-resolve-a-defect-report",
+   "site": "packages/lore/src/service/site-census.ts#createWorkspaceHost#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-resolve-a-defect-report",
    "site": "packages/lore/src/service/trace-recorder.ts#TraceRecorder.warn#dynamic:this.warnSink",
    "kind": "not_measured"
   },
@@ -13705,6 +14835,21 @@
   {
    "leaf": "baseline-restore-an-earlier-version",
    "site": "packages/lore/src/service/autonomy-threshold-service.ts#parseRecord#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-restore-an-earlier-version",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.collectRunnable#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-restore-an-earlier-version",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.lazyCommandObject#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-restore-an-earlier-version",
+   "site": "packages/lore/src/service/site-census.ts#createWorkspaceHost#depth-bound",
    "kind": "not_measured"
   },
   {
@@ -13799,6 +14944,21 @@
   },
   {
    "leaf": "baseline-resume-a-session",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.collectRunnable#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-resume-a-session",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.lazyCommandObject#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-resume-a-session",
+   "site": "packages/lore/src/service/site-census.ts#createWorkspaceHost#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-resume-a-session",
    "site": "packages/lore/src/service/trace-recorder.ts#TraceRecorder.warn#dynamic:this.warnSink",
    "kind": "not_measured"
   },
@@ -13864,6 +15024,21 @@
   },
   {
    "leaf": "baseline-retire-a-business-rule",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.collectRunnable#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-retire-a-business-rule",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.lazyCommandObject#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-retire-a-business-rule",
+   "site": "packages/lore/src/service/site-census.ts#createWorkspaceHost#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-retire-a-business-rule",
    "site": "packages/lore/src/service/trace-recorder.ts#TraceRecorder.warn#dynamic:this.warnSink",
    "kind": "not_measured"
   },
@@ -13920,6 +15095,21 @@
   {
    "leaf": "baseline-revise-a-business-rule",
    "site": "packages/lore/src/service/autonomy-threshold-service.ts#parseRecord#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-revise-a-business-rule",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.collectRunnable#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-revise-a-business-rule",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.lazyCommandObject#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-revise-a-business-rule",
+   "site": "packages/lore/src/service/site-census.ts#createWorkspaceHost#depth-bound",
    "kind": "not_measured"
   },
   {
@@ -14089,6 +15279,21 @@
   },
   {
    "leaf": "baseline-revise-a-document",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.collectRunnable#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-revise-a-document",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.lazyCommandObject#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-revise-a-document",
+   "site": "packages/lore/src/service/site-census.ts#createWorkspaceHost#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-revise-a-document",
    "site": "packages/lore/src/service/trace-recorder.ts#TraceRecorder.warn#dynamic:this.warnSink",
    "kind": "not_measured"
   },
@@ -14140,6 +15345,21 @@
   {
    "leaf": "baseline-revise-an-acceptance-criterion",
    "site": "packages/lore/src/service/autonomy-threshold-service.ts#parseRecord#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-revise-an-acceptance-criterion",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.collectRunnable#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-revise-an-acceptance-criterion",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.lazyCommandObject#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-revise-an-acceptance-criterion",
+   "site": "packages/lore/src/service/site-census.ts#createWorkspaceHost#depth-bound",
    "kind": "not_measured"
   },
   {
@@ -14235,6 +15455,21 @@
   {
    "leaf": "baseline-revoke-an-agent-key",
    "site": "packages/lore/src/service/record-lock-service.ts#RecordLockService.latestReopenVersion#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-revoke-an-agent-key",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.collectRunnable#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-revoke-an-agent-key",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.lazyCommandObject#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-revoke-an-agent-key",
+   "site": "packages/lore/src/service/site-census.ts#createWorkspaceHost#depth-bound",
    "kind": "not_measured"
   },
   {
@@ -14340,6 +15575,21 @@
   {
    "leaf": "baseline-run-an-evaluation-scenario",
    "site": "packages/lore/src/service/record-lock-service.ts#RecordLockService.latestReopenVersion#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-run-an-evaluation-scenario",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.collectRunnable#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-run-an-evaluation-scenario",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.lazyCommandObject#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-run-an-evaluation-scenario",
+   "site": "packages/lore/src/service/site-census.ts#createWorkspaceHost#depth-bound",
    "kind": "not_measured"
   },
   {
@@ -14370,6 +15620,21 @@
   {
    "leaf": "baseline-run-verification",
    "site": "packages/lore/src/service/autonomy-calibration-service.ts#AutonomyCalibrationService.observe#dynamic:this.deps.now",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-run-verification",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.collectRunnable#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-run-verification",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.lazyCommandObject#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-run-verification",
+   "site": "packages/lore/src/service/site-census.ts#createWorkspaceHost#depth-bound",
    "kind": "not_measured"
   },
   {
@@ -14428,6 +15693,16 @@
    "kind": "not_measured"
   },
   {
+   "leaf": "baseline-sample-citation-fidelity",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.runnableSubPaths#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-sample-citation-fidelity",
+   "site": "packages/lore/src/service/site-census.ts#buildCensusProgram#depth-bound",
+   "kind": "not_measured"
+  },
+  {
    "leaf": "baseline-scaffold-a-project-workflow",
    "site": "packages/core/src/ac-quality.ts#lintAcQuantifiability#depth-bound",
    "kind": "not_measured"
@@ -14505,6 +15780,21 @@
   {
    "leaf": "baseline-scaffold-a-project-workflow",
    "site": "packages/lore/src/service/record-lock-service.ts#RecordLockService.latestReopenVersion#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-scaffold-a-project-workflow",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.collectRunnable#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-scaffold-a-project-workflow",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.lazyCommandObject#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-scaffold-a-project-workflow",
+   "site": "packages/lore/src/service/site-census.ts#createWorkspaceHost#depth-bound",
    "kind": "not_measured"
   },
   {
@@ -14605,6 +15895,21 @@
   {
    "leaf": "baseline-search-documents",
    "site": "packages/lore/src/service/record-lock-service.ts#RecordLockService.latestReopenVersion#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-search-documents",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.collectRunnable#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-search-documents",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.lazyCommandObject#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-search-documents",
+   "site": "packages/lore/src/service/site-census.ts#createWorkspaceHost#depth-bound",
    "kind": "not_measured"
   },
   {
@@ -14775,6 +16080,21 @@
   {
    "leaf": "baseline-see-a-document-s-verification-evidence",
    "site": "packages/lore/src/service/rule-change-service.ts#readChangeSet#dynamic:err(validationError( `extra.rule_changes${issue !== undefined && issue.path.length >...)",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-see-a-document-s-verification-evidence",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.collectRunnable#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-see-a-document-s-verification-evidence",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.lazyCommandObject#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-see-a-document-s-verification-evidence",
+   "site": "packages/lore/src/service/site-census.ts#createWorkspaceHost#depth-bound",
    "kind": "not_measured"
   },
   {
@@ -14889,6 +16209,21 @@
   },
   {
    "leaf": "baseline-see-who-is-working",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.collectRunnable#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-see-who-is-working",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.lazyCommandObject#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-see-who-is-working",
+   "site": "packages/lore/src/service/site-census.ts#createWorkspaceHost#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-see-who-is-working",
    "site": "packages/lore/src/store/turso-store.ts#TursoStore.findVersions#depth-bound",
    "kind": "not_measured"
   },
@@ -14984,6 +16319,21 @@
   },
   {
    "leaf": "baseline-see-who-owns-each-branch",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.collectRunnable#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-see-who-owns-each-branch",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.lazyCommandObject#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-see-who-owns-each-branch",
+   "site": "packages/lore/src/service/site-census.ts#createWorkspaceHost#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-see-who-owns-each-branch",
    "site": "packages/lore/src/service/trace-recorder.ts#TraceRecorder.warn#dynamic:this.warnSink",
    "kind": "not_measured"
   },
@@ -15154,6 +16504,21 @@
   },
   {
    "leaf": "baseline-serve-the-corpus-over-http",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.collectRunnable#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-serve-the-corpus-over-http",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.lazyCommandObject#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-serve-the-corpus-over-http",
+   "site": "packages/lore/src/service/site-census.ts#createWorkspaceHost#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-serve-the-corpus-over-http",
    "site": "packages/lore/src/service/trace-recorder.ts#TraceRecorder.warn#dynamic:this.warnSink",
    "kind": "not_measured"
   },
@@ -15235,6 +16600,21 @@
   {
    "leaf": "baseline-start-a-session",
    "site": "packages/lore/src/service/record-lock-service.ts#RecordLockService.latestReopenVersion#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-start-a-session",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.collectRunnable#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-start-a-session",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.lazyCommandObject#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-start-a-session",
+   "site": "packages/lore/src/service/site-census.ts#createWorkspaceHost#depth-bound",
    "kind": "not_measured"
   },
   {
@@ -15405,6 +16785,21 @@
   {
    "leaf": "baseline-submit-a-document-for-review",
    "site": "packages/lore/src/service/rule-change-service.ts#readChangeSet#dynamic:err(validationError( `extra.rule_changes${issue !== undefined && issue.path.length >...)",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-submit-a-document-for-review",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.collectRunnable#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-submit-a-document-for-review",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.lazyCommandObject#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-submit-a-document-for-review",
+   "site": "packages/lore/src/service/site-census.ts#createWorkspaceHost#depth-bound",
    "kind": "not_measured"
   },
   {
@@ -15464,6 +16859,21 @@
   },
   {
    "leaf": "baseline-supersede-a-document",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.collectRunnable#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-supersede-a-document",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.lazyCommandObject#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-supersede-a-document",
+   "site": "packages/lore/src/service/site-census.ts#createWorkspaceHost#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-supersede-a-document",
    "site": "packages/lore/src/service/trace-recorder.ts#TraceRecorder.warn#dynamic:this.warnSink",
    "kind": "not_measured"
   },
@@ -15604,6 +17014,21 @@
   },
   {
    "leaf": "baseline-sweep-finished-work-into-the-archive",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.collectRunnable#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-sweep-finished-work-into-the-archive",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.lazyCommandObject#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-sweep-finished-work-into-the-archive",
+   "site": "packages/lore/src/service/site-census.ts#createWorkspaceHost#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-sweep-finished-work-into-the-archive",
    "site": "packages/lore/src/service/trace-recorder.ts#TraceRecorder.warn#dynamic:this.warnSink",
    "kind": "not_measured"
   },
@@ -15719,6 +17144,21 @@
   },
   {
    "leaf": "baseline-track-what-a-session-changed",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.collectRunnable#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-track-what-a-session-changed",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.lazyCommandObject#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-track-what-a-session-changed",
+   "site": "packages/lore/src/service/site-census.ts#createWorkspaceHost#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-track-what-a-session-changed",
    "site": "packages/lore/src/store/turso-store.ts#TursoStore.findVersions#depth-bound",
    "kind": "not_measured"
   },
@@ -15804,6 +17244,21 @@
   },
   {
    "leaf": "baseline-uninstall-an-integration",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.collectRunnable#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-uninstall-an-integration",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.lazyCommandObject#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-uninstall-an-integration",
+   "site": "packages/lore/src/service/site-census.ts#createWorkspaceHost#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-uninstall-an-integration",
    "site": "packages/lore/src/service/trace-recorder.ts#TraceRecorder.warn#dynamic:this.warnSink",
    "kind": "not_measured"
   },
@@ -15899,6 +17354,21 @@
   },
   {
    "leaf": "baseline-unlink-two-documents",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.collectRunnable#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-unlink-two-documents",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.lazyCommandObject#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-unlink-two-documents",
+   "site": "packages/lore/src/service/site-census.ts#createWorkspaceHost#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-unlink-two-documents",
    "site": "packages/lore/src/service/trace-recorder.ts#TraceRecorder.warn#dynamic:this.warnSink",
    "kind": "not_measured"
   },
@@ -15955,6 +17425,21 @@
   {
    "leaf": "baseline-upgrade-the-corpus-in-place",
    "site": "packages/lore/src/service/autonomy-threshold-service.ts#parseRecord#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-upgrade-the-corpus-in-place",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.collectRunnable#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-upgrade-the-corpus-in-place",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.lazyCommandObject#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-upgrade-the-corpus-in-place",
+   "site": "packages/lore/src/service/site-census.ts#createWorkspaceHost#depth-bound",
    "kind": "not_measured"
   },
   {
@@ -16049,6 +17534,21 @@
   },
   {
    "leaf": "baseline-verify-the-audit-trail",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.collectRunnable#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-verify-the-audit-trail",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.lazyCommandObject#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-verify-the-audit-trail",
+   "site": "packages/lore/src/service/site-census.ts#createWorkspaceHost#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-verify-the-audit-trail",
    "site": "packages/lore/src/service/trace-recorder.ts#TraceRecorder.warn#dynamic:this.warnSink",
    "kind": "not_measured"
   },
@@ -16109,6 +17609,21 @@
   },
   {
    "leaf": "baseline-withdraw-a-product-requirement",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.collectRunnable#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-withdraw-a-product-requirement",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.lazyCommandObject#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-withdraw-a-product-requirement",
+   "site": "packages/lore/src/service/site-census.ts#createWorkspaceHost#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-withdraw-a-product-requirement",
    "site": "packages/lore/src/service/trace-recorder.ts#TraceRecorder.warn#dynamic:this.warnSink",
    "kind": "not_measured"
   },
@@ -16160,6 +17675,21 @@
   {
    "leaf": "baseline-withdraw-an-acceptance-criterion",
    "site": "packages/lore/src/service/autonomy-threshold-service.ts#parseRecord#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-withdraw-an-acceptance-criterion",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.collectRunnable#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-withdraw-an-acceptance-criterion",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.lazyCommandObject#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-withdraw-an-acceptance-criterion",
+   "site": "packages/lore/src/service/site-census.ts#createWorkspaceHost#depth-bound",
    "kind": "not_measured"
   },
   {
@@ -16220,6 +17750,21 @@
   {
    "leaf": "baseline-write-a-business-rule",
    "site": "packages/lore/src/service/autonomy-threshold-service.ts#parseRecord#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-write-a-business-rule",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.collectRunnable#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-write-a-business-rule",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.lazyCommandObject#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-write-a-business-rule",
+   "site": "packages/lore/src/service/site-census.ts#createWorkspaceHost#depth-bound",
    "kind": "not_measured"
   },
   {
@@ -16325,6 +17870,21 @@
   {
    "leaf": "baseline-write-an-outline-section",
    "site": "packages/lore/src/service/record-lock-service.ts#RecordLockService.latestReopenVersion#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-write-an-outline-section",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.collectRunnable#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-write-an-outline-section",
+   "site": "packages/lore/src/service/site-census.ts#CensusWalker.lazyCommandObject#depth-bound",
+   "kind": "not_measured"
+  },
+  {
+   "leaf": "baseline-write-an-outline-section",
+   "site": "packages/lore/src/service/site-census.ts#createWorkspaceHost#depth-bound",
    "kind": "not_measured"
   },
   {
