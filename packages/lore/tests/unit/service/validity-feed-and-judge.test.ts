@@ -134,7 +134,7 @@ describe("HAPPY — lore feed <checkpoint> renders the D4 banner for an invalida
 
 describe("HAPPY — review-judge prompt gains a Staleness Notice iff doc or parent is invalidated", () => {
   const template = REVIEW_TEMPLATES[REVIEW_PROMPT_VERSION]!;
-  const budgets = { max_doc_chars: 4000, max_context_chars: 2000 };
+  const budgets = { max_context_chars: 2000 };
 
   function makeDoc(overrides: Partial<DocRecord> & { id: string; title: string }): DocRecord {
     return {

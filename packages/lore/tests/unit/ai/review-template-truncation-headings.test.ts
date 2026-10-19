@@ -1,7 +1,9 @@
 /**
- * Tests for the omitted-section heading list appended to the SPEC-040 D8 "# Truncation
- * Notice" in `review-template.ts` (`assembleReviewPrompt`, shared by `buildReviewPromptV1`
- * and `buildReviewPromptV2`).
+ * Tests for the omitted-section heading list appended to the "# Parent Truncation Notice"
+ * in `review-template.ts` (`assembleReviewPrompt`, shared by `buildReviewPromptV1`
+ * and `buildReviewPromptV2`). Since spec-defect-clusters-round-2-part-b D9 (BR-268) only the PARENT
+ * context is ever cut, so every case here cuts the parent, via `max_context_chars`; the document under
+ * review is never cut.
  *
  * Source defect (task-the-judge-truncation-notice-says-content-was-cut-but-never): the
  * pre-existing notice told a judge only that SOMETHING was cut, never WHICH sections —
@@ -60,7 +62,7 @@ import type { AIProvider, CreateDocInput, DocRecord, ReviewBundle, Telemetry, Te
 import { actedStore } from "../../live-invocation.js";
 
 const BUDGET = 12000;
-const BUDGETS = { max_doc_chars: BUDGET, max_context_chars: 8000 };
+const BUDGETS = { max_context_chars: BUDGET };
 
 function makeDoc(overrides: Partial<DocRecord>): DocRecord {
   return {
@@ -84,8 +86,13 @@ function makeDoc(overrides: Partial<DocRecord>): DocRecord {
   } as DocRecord;
 }
 
+/** A short document under review whose PARENT carries `content` (the only cuttable section). */
 function bundleFor(content: string): ReviewBundle {
-  return { doc: makeDoc({ content }), links: [] };
+  return {
+    doc: makeDoc({ content: "Short document body." }),
+    parent: makeDoc({ slug: "spec-the-parent" as DocRecord["slug"], title: "The Parent", content }),
+    links: [],
+  };
 }
 
 // ─── HAPPY ──────────────────────────────────────────────────────────────────
@@ -108,7 +115,7 @@ describe("buildOmittedSectionsNotice — HAPPY (AC1)", () => {
 
     const result = REVIEW_TEMPLATES["v1"]!(bundleFor(content), [], BUDGETS);
 
-    expect(result.docTruncated).toBe(true);
+    expect(result.truncated).toContain("parent");
     expect(result.prompt).toContain("Sections not shown (3 of 5): D7, Rollout, Appendix.");
     // NEGATIVE-shaped assertion folded in: a heading that DID survive must never appear
     // inside the omitted-list sentence itself.
@@ -132,9 +139,9 @@ describe("omitted-section heading list — CRITICAL: derived from the FULL docum
 
     const result = REVIEW_TEMPLATES["v1"]!(bundleFor(content), [], BUDGETS);
 
-    expect(result.docTruncated).toBe(true);
+    expect(result.truncated).toContain("parent");
     // The ONLY way this string can appear in the prompt is if the omitted-heading scan
-    // read `bundle.doc.content` (the full body), never `docSection.text` (the truncated
+    // read `bundle.parent.content` (the full body), never the truncated copy (the truncated
     // copy) — the truncated copy provably does not contain this substring.
     expect(result.prompt).toContain(headingName);
   });
@@ -149,8 +156,8 @@ describe("buildOmittedSectionsNotice — NEGATIVE/CONTROL (AC2)", () => {
 
     const result = REVIEW_TEMPLATES["v1"]!(bundleFor(content), [], BUDGETS);
 
-    expect(result.docTruncated).toBe(false);
-    expect(result.prompt).not.toContain("# Truncation Notice");
+    expect(result.truncated).not.toContain("parent");
+    expect(result.prompt).not.toContain("# Parent Truncation Notice");
     expect(result.prompt).not.toContain("Sections not shown");
     expect(result.prompt).not.toContain("section heading");
   });
@@ -168,7 +175,7 @@ describe("buildOmittedSectionsNotice — BOUNDARY (AC4)", () => {
 
     const result = REVIEW_TEMPLATES["v1"]!(bundleFor(content), [], BUDGETS);
 
-    expect(result.docTruncated).toBe(true);
+    expect(result.truncated).toContain("parent");
     expect(result.prompt).toContain(
       "NONE of this document's 1 section heading(s) are visible above " +
         "— the visible window falls before the first heading or within an oversized one. " +
@@ -184,7 +191,7 @@ describe("buildOmittedSectionsNotice — BOUNDARY (AC4)", () => {
 
     const result = REVIEW_TEMPLATES["v1"]!(bundleFor(content), [], BUDGETS);
 
-    expect(result.docTruncated).toBe(true);
+    expect(result.truncated).toContain("parent");
     expect(result.prompt).toContain(
       "NONE of this document's 2 section heading(s) are visible above " +
         "— the visible window falls before the first heading or within an oversized one. " +
@@ -202,7 +209,7 @@ describe("buildOmittedSectionsNotice — ERROR: zero detected headings (false-gr
 
     const result = REVIEW_TEMPLATES["v1"]!(bundleFor(content), [], BUDGETS);
 
-    expect(result.docTruncated).toBe(true);
+    expect(result.truncated).toContain("parent");
     expect(result.prompt).toContain(
       "No section headings were detected anywhere in this document, so specific omitted " +
         "sections cannot be named — treat the entire region beyond the excerpt above as " +
@@ -223,10 +230,10 @@ describe("buildOmittedSectionsNotice — STATE", () => {
 
   it("repeated calls with alternating short/long bundles never leak state between invocations", () => {
     const short1 = REVIEW_TEMPLATES["v1"]!(bundleFor(shortContent), [], BUDGETS);
-    expect(short1.docTruncated).toBe(false);
+    expect(short1.truncated).not.toContain("parent");
 
     const long1 = REVIEW_TEMPLATES["v1"]!(bundleFor(longContent), [], BUDGETS);
-    expect(long1.docTruncated).toBe(true);
+    expect(long1.truncated).toContain("parent");
     expect(long1.prompt).toContain("Sections not shown");
 
     // The short-doc call, re-run AFTER a long-doc call, must be byte-identical to short1 —
@@ -250,26 +257,24 @@ describe("buildOmittedSectionsNotice — STATE", () => {
 // ─── REGRESSION ─────────────────────────────────────────────────────────────
 
 describe("buildOmittedSectionsNotice — REGRESSION", () => {
-  it("the pre-existing Truncation Notice instruction is preserved byte-for-byte alongside the new heading list", () => {
+  it("the Parent Truncation Notice instruction is preserved byte-for-byte alongside the new heading list", () => {
     const content =
       "## Overview\n" + "a".repeat(6000) + "\n## Design Decisions\n" + "b".repeat(6000) + "\n## D7\nend";
 
     const result = REVIEW_TEMPLATES["v1"]!(bundleFor(content), [], BUDGETS);
 
-    expect(result.docTruncated).toBe(true);
-    expect(result.truncated).toContain("doc");
+    expect(result.truncated).toContain("parent");
+    expect(result.truncated).not.toContain("doc");
     // Byte-for-byte the ORIGINAL instruction sentence — unchanged by this fix.
     expect(result.prompt).toContain(
-      "The document body above was truncated to fit this prompt's character budget. Treat " +
-        "the FULL document as present but unseen beyond what is shown — do NOT conclude a " +
-        "section is missing, incomplete, or absent merely because it isn't visible here. Any " +
-        "escalation or finding about \"unseen\" or \"missing\" content MUST cite this notice " +
-        "explicitly, not silence alone.",
+      "Treat the FULL parent as present but " +
+        "unseen beyond the excerpt — do NOT conclude a parent section is missing merely because " +
+        "it isn't visible; a finding about unseen parent content MUST cite this notice.",
     );
   });
 });
 
-describe("AIProviderService.judgeDoc — REGRESSION end-to-end: truncated:true still stamped, prompt still carries the heading list", () => {
+describe("AIProviderService.judgeDoc — REGRESSION end-to-end: no truncated stamp, prompt still carries the parent's heading list", () => {
   function makeReviewService(provider: InMemoryAIProvider) {
     const telemetry: Telemetry = {
       record: (_event: TelemetryEvent) => {},
@@ -292,19 +297,19 @@ describe("AIProviderService.judgeDoc — REGRESSION end-to-end: truncated:true s
     blocking_questions: [],
   });
 
-  async function makeReviewBundle(store: InMemoryStore, content: string) {
+  async function makeReviewBundle(store: InMemoryStore, parentContent: string) {
     const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
     const prdResult = await corpusService.create({
       type: "prd",
       title: "Truncation Headings Test PRD",
-      content: "Root PRD.",
+      content: parentContent,
     } as CreateDocInput);
     if (!prdResult.ok) throw new Error("prd create failed");
 
     const specResult = await corpusService.create({
       type: "spec",
       title: "Truncation Headings Test Spec",
-      content,
+      content: "Small spec body.",
     } as CreateDocInput);
     if (!specResult.ok) throw new Error("spec create failed");
 
@@ -313,7 +318,7 @@ describe("AIProviderService.judgeDoc — REGRESSION end-to-end: truncated:true s
     return bundleResult.value;
   }
 
-  it("a spec body with a heading past the cutoff: judgment.truncated===true and the judge's own prompt named the omitted heading", async () => {
+  it("a parent with a heading past the cutoff: the judgment carries no truncated field and the judge's own prompt named the omitted heading", async () => {
     const store = actedStore(new InMemoryStore());
     const content =
       "## Overview\n" + "a".repeat(6000) + "\n## Design Decisions\n" + "b".repeat(6000) + "\n## D7\nDetails here.";
@@ -325,7 +330,7 @@ describe("AIProviderService.judgeDoc — REGRESSION end-to-end: truncated:true s
     const result = await service.judgeDoc(bundle, checks, {});
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.value.truncated).toBe(true);
+    expect("truncated" in result.value).toBe(false);
 
     // The provider double records every prompt it was called with — assert the judge's
     // OWN prompt (not the template-level unit test above) still carried the heading list.

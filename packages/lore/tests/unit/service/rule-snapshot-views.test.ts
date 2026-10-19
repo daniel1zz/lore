@@ -37,7 +37,7 @@ async function promptOf(world: World, slug: string): Promise<string> {
   if (!bundle.ok) throw new Error(`bundle failed: ${JSON.stringify(bundle.error)}`);
   const template = REVIEW_TEMPLATES[REVIEW_PROMPT_VERSION];
   if (template === undefined) throw new Error("no review template");
-  return template(bundle.value, [], { max_doc_chars: 20000, max_context_chars: 8000 }, new Date().toISOString()).prompt;
+  return template(bundle.value, [], { max_context_chars: 8000 }, new Date().toISOString()).prompt;
 }
 
 describe("snapshot views list only live rules (AC-CS-4)", () => {

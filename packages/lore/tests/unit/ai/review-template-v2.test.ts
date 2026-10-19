@@ -26,7 +26,7 @@ import {
 } from "../../../src/ai/review-template.js";
 import type { DocRecord, ReviewBundle, CheckResult, AcceptanceCriterion } from "@lore/core";
 
-const BUDGETS = { max_doc_chars: 8000, max_context_chars: 4000 };
+const BUDGETS = { max_context_chars: 4000 };
 const NOW = "2026-02-01T00:00:00.000Z";
 
 function makeDoc(overrides: Partial<DocRecord>): DocRecord {

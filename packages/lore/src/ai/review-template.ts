@@ -21,27 +21,23 @@
  *     (escalate REQUIRES blocking_questions; every other decision REQUIRES it empty) —
  *     the same invariant llmReviewOutputSchema enforces at parse time, so a judge that
  *     follows the prompt can never produce a response Zod would reject on that axis alone.
- *   - **Truncation notice (SPEC-040 D8)** — when the document BODY itself (not the parent
- *     context) is truncated for budget, the prompt gains a "# Truncation Notice" section
- *     instructing the judge to treat the full document as present-but-unseen beyond what's
- *     shown, and to cite the notice explicitly if it escalates on "unseen" grounds rather
- *     than silently inferring absence. `BuildReviewPromptResult.docTruncated` carries this
- *     boolean out to `AIProviderService.judgeDoc`, which stamps it onto the persisted
- *     judgment's `truncated` field — a STRUCTURAL signal (this field), not a string-match
- *     against `truncated.includes("doc")`, so callers never have to know the "doc" section
- *     name is the doc-body marker.
+ *   - **The document under review is never cut (BR-268, D9)** — the whole body is rendered; only
+ *     the PARENT context section keeps a budget (`max_context_chars`). A body the provider cannot
+ *     take is an AI failure raised by the provider, never a silent cut. Consequently no judgment
+ *     is ever marked `truncated` by this template (the stored field remains readable for rows
+ *     recorded earlier; BR-269 refuses to approve on them).
  *   - **Omitted-section heading list (task-the-judge-truncation-notice-says-content-was-cut-but-never)**
- *     — the bare "treat it as present but unseen" instruction was measured to fail in BOTH
+ *     — now applied to the PARENT context only. The bare "treat it as present but unseen" instruction was measured to fail in BOTH
  *     directions: a judge escalated on a section it wrongly assumed absent (it was actually
  *     declared past the cut), and a judge correctly obeyed the notice but then could not say
  *     WHICH cross-referenced sections were unverifiable. The fix is `extractSectionHeadings`,
- *     run over the FULL, untruncated `bundle.doc.content` (never the truncated copy — a
+ *     run over the FULL, untruncated the FULL parent content (never the truncated copy — a
  *     heading list built from the truncated copy could only ever name headings that already
  *     survived, which is vacuous), splitting them into shown/omitted by the ACTUAL visible
- *     char count (`docSection.text.length`, NOT `budgets.max_doc_chars` directly — the two
+ *     char count (`contextSection.text.length`, NOT `budgets.max_context_chars` directly — the two
  *     differ when `headChars` backs off one code unit to avoid splitting a surrogate pair).
  *     `buildOmittedSectionsNotice` renders this as a trailing sentence appended to the
- *     existing "# Truncation Notice" body — the pre-existing instruction text is untouched
+ *     existing "# Parent Truncation Notice" body — the pre-existing instruction text is untouched
  *     byte-for-byte (REGRESSION); only a new trailing line is added. A document with zero
  *     detected headings (no markdown structure at all) gets a distinct "cannot be named"
  *     sentence rather than a silently-empty list — an empty list with no further comment
@@ -112,9 +108,11 @@ export const ADVISORY_ONLY_CLAUSE =
   'decision="reject" — the deterministic lint is the sole hard gate. Use them to inform ' +
   "a reviewer, not to block.";
 
-/** Character budgets for each prompt section, sourced from `config.ai.review.*`. */
+/**
+ * Character budgets for CONTEXT sections only, sourced from `config.ai.review.*`. There is
+ * deliberately no budget for the document under review (BR-268).
+ */
 export interface ReviewBudgets {
-  max_doc_chars: number;
   max_context_chars: number;
 }
 
@@ -123,15 +121,7 @@ export interface BuildReviewPromptResult {
   prompt: string;
   truncated: string[];
   /**
-   * True iff the document body itself (not parent context) was truncated to fit
-   * `budgets.max_doc_chars` (SPEC-040 D8) — the trigger for both the prompt's
-   * "Truncation Notice" section and the persisted judgment's `truncated` flag.
-   * Deliberately a separate structural field rather than `truncated.includes("doc")`
-   * at the call site — see module header.
-   */
-  docTruncated: boolean;
-  /**
-   * One entry per cut section (`doc`, `parent`) with the REAL shown/total char counts
+   * One entry per cut context section (`parent`) with the REAL shown/total char counts
    * (F1) — `[]` when every input fit. The service persists it as `judgment.truncation`.
    */
   cuts: ReviewTruncationEntry[];
@@ -235,11 +225,11 @@ function extractSectionHeadings(text: string): DocSectionHeading[] {
  *      least the first section survived.
  *   4. The common case: some survive, some don't → name the omitted ones.
  *
- * @param fullDocText - The FULL, untruncated document body (never `docSection.text`)
+ * @param fullDocText - The FULL, untruncated document body (never the truncated copy)
  * @param visibleChars - The ACTUAL number of characters shown to the judge
- *   (`docSection.text.length` — not `budgets.max_doc_chars` directly; see module header)
+ *   (`contextSection.text.length` — not `budgets.max_context_chars` directly; see module header)
  * @returns A single sentence, always non-empty when this is called (the caller only calls
- *   it when `docSection.truncated` is true)
+ *   it when `contextSection.truncated` is true)
  *
  * @example
  * buildOmittedSectionsNotice("## D7\n" + "x".repeat(20) + "\n## Rollout\nmore", 10);
@@ -396,6 +386,10 @@ function renderBaselineStructuredSection(doc: ReviewBundle["doc"], withFourParts
   if (extra.depends_on !== undefined && extra.depends_on.length > 0) {
     parts.push(`depends_on: ${extra.depends_on.join(", ")}`);
   }
+  // reason: BR-960 — a leaf's declared commands are part of what the judge vouches for; shown whole, never summarised.
+  if (extra.commands !== undefined && extra.commands.length > 0) {
+    parts.push(`commands (${extra.commands.length}): ${extra.commands.join(" | ")}`);
+  }
   if (extra.glossary !== undefined && extra.glossary.length > 0) {
     const entries = extra.glossary.map(
       (g) => `- ${g.term}: ${g.meaning}${g.note !== undefined ? ` (${g.note})` : ""}`,
@@ -407,6 +401,8 @@ function renderBaselineStructuredSection(doc: ReviewBundle["doc"], withFourParts
       (r) =>
         `- ${r.id} [confidence=${r.confidence}, lifecycle=${r.lifecycle}, enforced_by=${r.enforced_by}]: ${r.statement}` +
         (r.retired_note !== undefined ? ` (retired: ${r.retired_note})` : "") +
+        // reason: BR-960 — every rule's examples reach the judge (the rule's own worked cases).
+        (r.examples.length > 0 ? `\n  examples: ${r.examples.join(" | ")}` : "") +
         (withFourParts ? renderStandardFourParts(r) : ""),
     );
     parts.push(`rules (${entries.length}):\n${renderCappedEntries(entries, "rules")}`);
@@ -523,12 +519,7 @@ function assembleReviewPrompt(
   const truncated: string[] = [];
   const cuts: ReviewTruncationEntry[] = [];
 
-  const docSection = truncateSection(bundle.doc.content, budgets.max_doc_chars);
-  if (docSection.truncated) {
-    truncated.push("doc");
-    cuts.push({ section: "doc", shown_chars: docSection.text.length, total_chars: bundle.doc.content.length });
-  }
-
+  // reason: BR-268 (D9) — the document under review is rendered whole; do NOT reintroduce truncateSection here.
   let contextBlock = "(no parent document — this doc is a root or its parent could not be resolved)";
   if (bundle.parent !== undefined) {
     const contextSection = truncateSection(bundle.parent.content, budgets.max_context_chars);
@@ -556,24 +547,6 @@ function assembleReviewPrompt(
       contextSection.text +
       parentNotice;
   }
-
-  // reason: SPEC-040 D8 — the doc-body-only truncation notice. Parent-context truncation
-  // is a different, lower-stakes concern (supplementary context, not the artifact under
-  // review) and deliberately does NOT trigger this section — see module header. The
-  // trailing sentence (task-the-judge-truncation-notice-…) names WHICH section headings
-  // fell outside the window, derived from `bundle.doc.content` (the FULL body) — never
-  // from `docSection.text` (the truncated copy) — split at `docSection.text.length` (the
-  // ACTUAL visible-char count, which can be one less than `budgets.max_doc_chars` when
-  // `headChars` backs off to avoid splitting a surrogate pair).
-  const truncationNotice = docSection.truncated
-    ? `# Truncation Notice\n` +
-      `The document body above was truncated to fit this prompt's character budget. Treat ` +
-      `the FULL document as present but unseen beyond what is shown — do NOT conclude a ` +
-      `section is missing, incomplete, or absent merely because it isn't visible here. Any ` +
-      `escalation or finding about "unseen" or "missing" content MUST cite this notice ` +
-      `explicitly, not silence alone.\n` +
-      `${buildOmittedSectionsNotice(bundle.doc.content, docSection.text.length)}\n\n`
-    : "";
 
   // reason: SPEC-043 §Design Decisions D9 — when the bundle's own doc or its parent is
   // currently invalidated (bi-temporal validity metadata), tell the judge to discount
@@ -609,8 +582,7 @@ function assembleReviewPrompt(
     `as ground truth, do not attempt to re-derive them yourself.\n\n` +
     `# Document Under Review\n` +
     `## ${bundle.doc.title} (${bundle.doc.slug}, type=${bundle.doc.type}, status=${bundle.doc.status})\n` +
-    `${docSection.text}\n\n` +
-    truncationNotice +
+    `${bundle.doc.content}\n\n` +
     stalenessNotice +
     structuredSection +
     advisory.section +
@@ -640,7 +612,7 @@ function assembleReviewPrompt(
     `- reasons MUST have at least one entry.\n` +
     advisory.rule;
 
-  return { prompt, truncated, docTruncated: docSection.truncated, cuts };
+  return { prompt, truncated, cuts };
 }
 
 // ─── Empty advisory (v1) ─────────────────────────────────────────────────────

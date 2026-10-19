@@ -9,7 +9,7 @@ import { describe, it, expect } from "vitest";
 import { REVIEW_TEMPLATES, REVIEW_PROMPT_VERSION } from "../../../src/ai/review-template.js";
 import type { DocRecord, ReviewBundle } from "@lore/core";
 
-const BUDGETS = { max_doc_chars: 12000, max_context_chars: 8000 };
+const BUDGETS = { max_context_chars: 8000 };
 
 function makeDoc(overrides: Partial<DocRecord>): DocRecord {
   return {
@@ -49,7 +49,7 @@ describe("review prompt — parent truncation notice (AC-CRIT-1)", () => {
       const notice = result.prompt.slice(result.prompt.indexOf("# Parent Truncation Notice"));
       expect(notice).toMatch(/Sections not shown[^\n]*D8/);
       expect(result.truncated).toContain("parent");
-      expect(result.docTruncated).toBe(false);
+      expect(result.truncated).not.toContain("doc");
     });
   }
 

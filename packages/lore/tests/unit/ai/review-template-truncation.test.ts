@@ -1,18 +1,7 @@
 /**
- * Tests for the SPEC-040 §T2 D8 doc-body truncation notice in `review-template.ts`'s
- * `buildReviewPromptV1` (registered as `REVIEW_TEMPLATES[REVIEW_PROMPT_VERSION]`), and its
- * wiring into `AIProviderService.judgeDoc`'s persisted `NewReviewJudgment.truncated`.
- *
- * Spec-first expectations:
- *   - When the DOCUMENT BODY (not parent context) exceeds `budgets.max_doc_chars`, the
- *     prompt gains a "# Truncation Notice" section and `docTruncated` is `true`.
- *   - At the exact boundary (`content.length === max_doc_chars`), `truncateSection`'s
- *     documented `<=` no-op rule means NO truncation occurs — `docTruncated` is `false` and
- *     the notice section is absent.
- *   - `AIProviderService.judgeDoc` stamps `truncated: true` on the persisted judgment ONLY
- *     when `docTruncated` was true — and OMITS the key entirely (not `truncated: false`)
- *     otherwise, mirroring the additive-only convention documented on
- *     `reviewJudgmentBaseShape.truncated`.
+ * D9 (BR-268, spec-defect-clusters-round-2-part-b-review-pending-queue-corpus): the document under review is
+ * never cut by `review-template.ts`, and `AIProviderService.judgeDoc` never stamps a judgment `truncated`.
+ * (Formerly the SPEC-040 D8 doc-body truncation notice tests, AC-ADF-8; the notice now exists only for the parent.)
  *
  * @spec_ref AC-ADF-8
  */
@@ -29,7 +18,7 @@ import { runDeterministicChecks } from "@lore/core";
 import type { AIProvider, CreateDocInput, DocRecord, ReviewBundle, Telemetry, TelemetryEvent } from "@lore/core";
 import { actedStore } from "../../live-invocation.js";
 
-const BUDGETS = { max_doc_chars: 12000, max_context_chars: 8000 };
+const BUDGETS = { max_context_chars: 8000 };
 
 function makeDoc(overrides: Partial<DocRecord>): DocRecord {
   return {
@@ -55,31 +44,25 @@ function makeDoc(overrides: Partial<DocRecord>): DocRecord {
 
 // ─── Pure template-level tests ────────────────────────────────────────────────
 
-describe("buildReviewPromptV1 (REVIEW_TEMPLATES) — doc-body truncation notice (AC-ADF-8)", () => {
-  it("NEGATIVE/BOUNDARY: a doc body over max_doc_chars sets docTruncated=true, adds the Truncation Notice section, and truncated includes 'doc'", () => {
-    const bundle: ReviewBundle = {
-      doc: makeDoc({ content: "x".repeat(36000) }),
-      links: [],
-    };
-    const template = REVIEW_TEMPLATES[REVIEW_PROMPT_VERSION]!;
-    const result = template(bundle, [], BUDGETS);
+describe("buildReviewPromptV1 (REVIEW_TEMPLATES) — the document under review is never cut (BR-268, D9)", () => {
+  it("a 36000-char doc body is rendered whole: last line present, no notice, no 'doc' cut", () => {
+    const content = "x".repeat(36000) + "\nLAST-LINE-MARKER";
+    const bundle: ReviewBundle = { doc: makeDoc({ content }), links: [] };
+    const result = REVIEW_TEMPLATES[REVIEW_PROMPT_VERSION]!(bundle, [], BUDGETS);
 
-    expect(result.docTruncated).toBe(true);
-    expect(result.prompt).toContain("# Truncation Notice");
-    expect(result.truncated).toContain("doc");
-  });
-
-  it("BOUNDARY: a doc body EXACTLY at max_doc_chars is NOT truncated (truncateSection's documented <= no-op boundary)", () => {
-    const bundle: ReviewBundle = {
-      doc: makeDoc({ content: "y".repeat(12000) }),
-      links: [],
-    };
-    const template = REVIEW_TEMPLATES[REVIEW_PROMPT_VERSION]!;
-    const result = template(bundle, [], BUDGETS);
-
-    expect(result.docTruncated).toBe(false);
+    expect(result.prompt).toContain(content);
     expect(result.prompt).not.toContain("# Truncation Notice");
     expect(result.truncated).not.toContain("doc");
+    expect(result.cuts).toEqual([]);
+  });
+
+  it("BOUNDARY: a body of exactly 12000 chars (the old budget) is also whole", () => {
+    const content = "y".repeat(12000);
+    const bundle: ReviewBundle = { doc: makeDoc({ content }), links: [] };
+    const result = REVIEW_TEMPLATES[REVIEW_PROMPT_VERSION]!(bundle, [], BUDGETS);
+
+    expect(result.prompt).toContain(content);
+    expect(result.truncated).toEqual([]);
   });
 });
 
@@ -128,10 +111,11 @@ async function makeReviewBundle(store: InMemoryStore, content: string) {
   return bundleResult.value;
 }
 
-describe("AIProviderService.judgeDoc — persisted judgment.truncated mirrors docTruncated (AC-ADF-8)", () => {
-  it("a 36000-char spec body: the returned NewReviewJudgment has truncated === true", async () => {
+describe("AIProviderService.judgeDoc — never stamps judgment.truncated (D9)", () => {
+  it("a 36000-char spec body: the judgment has NO truncated key and the provider saw the whole body", async () => {
     const store = actedStore(new InMemoryStore());
-    const bundle = await makeReviewBundle(store, "z".repeat(36000));
+    const body = "z".repeat(36000) + "\nLAST-LINE-MARKER";
+    const bundle = await makeReviewBundle(store, body);
     const checks = runDeterministicChecks(bundle);
     const provider = new InMemoryAIProvider("in-memory", { kind: "ok", content: VALID_REVIEW_JSON });
     const service = makeReviewService(provider);
@@ -139,7 +123,8 @@ describe("AIProviderService.judgeDoc — persisted judgment.truncated mirrors do
     const result = await service.judgeDoc(bundle, checks, {});
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.value.truncated).toBe(true);
+    expect("truncated" in result.value).toBe(false);
+    expect(provider.calls[0]!.prompt).toContain("LAST-LINE-MARKER");
   });
 
   it("a small spec body: the truncated key is ABSENT entirely (additive-only, never a stored false)", async () => {

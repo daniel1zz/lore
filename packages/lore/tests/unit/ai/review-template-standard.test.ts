@@ -11,7 +11,7 @@ import { describe, it, expect } from "vitest";
 import { REVIEW_TEMPLATES, REVIEW_PROMPT_VERSION } from "../../../src/ai/review-template.js";
 import type { DocRecord, ReviewBundle, CheckResult } from "@lore/core";
 
-const BUDGETS = { max_doc_chars: 8000, max_context_chars: 4000 };
+const BUDGETS = { max_context_chars: 4000 };
 const NOW = "2026-02-01T00:00:00.000Z";
 const CHECKS: CheckResult[] = [{ check: "schema", outcome: "pass" }];
 // The ACTIVE version must carry the four parts (AC-BLC-5); v2 is frozen and tested separately below.
