@@ -200,6 +200,7 @@
  */
 
 import { z } from "zod";
+import { baselineTreeSchema } from "./baseline.js";
 import { ChangeSourceSchema, type ChangeSource, type SessionTrail } from "./session-trail.js";
 import { extractHeldClaim, isClaimStale } from "./task-workflow.js";
 import type { DocId, DocRecord } from "./types.js";
@@ -546,6 +547,17 @@ export function renderHandoffContent(extra: HandoffExtra): string {
 
 /** `{slug, title}` pointer to the corpus's root PRD, or absent when the corpus has none. */
 export const bootstrapRootSchema = z.object({
+  slug: z.string(),
+  title: z.string(),
+});
+
+/**
+ * `{tree, id, slug, title}` pointer to a baseline tree root (the architecture tree's root in
+ * {@link bootstrapReportSchema}`.architecture`). `id` makes it addressable without a slug lookup.
+ */
+export const bootstrapTreeRootSchema = z.object({
+  tree: baselineTreeSchema,
+  id: z.string(),
   slug: z.string(),
   title: z.string(),
 });
@@ -900,6 +912,13 @@ export const bootstrapReportSchema = z.object({
    * no-baseline corpus's report stays byte-identical (AC-BLS3-3).
    */
   strategy: bootstrapRootSchema.optional(),
+  /**
+   * The ARCHITECTURE tree's root (oldest live baseline with `tree: architecture`, `node: root`),
+   * so a session can find the current-state architecture from the session-start overview.
+   * Always present: `null` is the explicit "this corpus has no architecture root" (never omitted,
+   * so absence is distinguishable from an unreported field). `root` is unchanged (business root).
+   */
+  architecture: bootstrapTreeRootSchema.nullable(),
   active_plans: z.array(bootstrapActivePlanSchema),
   pending_reviews: bootstrapPendingReviewsSchema,
   my_claims: z.array(bootstrapMyClaimSchema),
@@ -988,6 +1007,7 @@ export const BOOTSTRAP_CORPUS_GLOBAL_KEYS: ReadonlySet<string> = new Set([
   "active_sessions",
   "archive_candidates",
   "strategy",
+  "architecture",
 ]);
 
 /**

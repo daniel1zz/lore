@@ -1,5 +1,7 @@
 # Module: @lore/dashboard
 
+Architecture card: `baseline-module-card-dashboard`
+
 ## Purpose
 
 Vite + React + shadcn local-dev web UI: read views plus the SPEC-022 write surface. Web UI for browsing/editing the Lore corpus. Vite + React 19 + TypeScript + Tailwind v4 + shadcn/ui. Read views (search / tree / detail / library) plus a cookie-gated write surface: create, in-place markdown editing (CodeMirror 6 + split preview), status transitions, link management, version history + restore, soft delete, an adjudication workbench (evidence tab + approve/reject), and an execution read surface (`/execution`). Home (`/`) renders the resolved living PRD via `ResolvedPrdBody`'s MDX-placeholder splicing (`splitContentByPlaceholders`) — never raw tag text or `dangerouslySetInnerHTML`. Auth is cookie-only (no login UI).

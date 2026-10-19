@@ -88,9 +88,7 @@ async function fixture(probeOverride?: Partial<ReturnType<typeof createRealWorkt
   dirs.push(repo);
   run(repo, "init", "-q", "-b", "main");
   commit(repo, "seed.txt", "seed");
-  run(repo, "checkout", "-q", "-b", "feat-landing");
-  const ownCommit = commit(repo, "own-landing-file.txt", "feat: the branch's own work");
-  run(repo, "checkout", "-q", "main");
+  run(repo, "branch", "feat-landing");
   commit(repo, "main-moved.txt", "chore: main moved on");
   // the shared checkout is a detached view of main and the shipped guard is installed: integrate refuses to run without it
   run(repo, "checkout", "-q", "--detach", "main");
@@ -120,6 +118,10 @@ async function fixture(probeOverride?: Partial<ReturnType<typeof createRealWorkt
   if (!ev.ok) throw new Error(`evidence ${JSON.stringify(ev.error)}`);
   const claim = await svc.claim(task.value.id, { by: "alice", worktree: "feat-landing" });
   if (!claim.ok) throw new Error(`claim ${JSON.stringify(claim.error)}`);
+  // the branch's own work comes AFTER the claim, so the claim's recorded base_sha (the branch tip at claim time) precedes it
+  run(repo, "checkout", "-q", "feat-landing");
+  const ownCommit = commit(repo, "own-landing-file.txt", "feat: the branch's own work");
+  run(repo, "checkout", "-q", "--detach", "main");
   return { repo, svc, store, taskId: task.value.id, slug: task.value.slug, ownCommit, branchHead: ownCommit };
 }
 

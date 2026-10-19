@@ -80,6 +80,9 @@ const GIT_ENV = {
 
 const createdDirs: string[] = [];
 
+/** A well-formed sha that names no object in any fixture repo. */
+const GONE_SHA = "0123456789abcdef0123456789abcdef01234567";
+
 function initRepo(): string {
   const dir = mkdtempSync(join(tmpdir(), "lore-assess-commit-derivation-test-"));
   createdDirs.push(dir);
@@ -124,18 +127,23 @@ describe("deriveCommitSetForPlan — PRIMARY ORACLE: interleaved foreign history
     // fixture contrasts against needs one to exist, mirroring real repos which always
     // have history predating any one plan).
     commit(dir, "seed.txt", "seed\n", "seed commit");
-    commit(dir, "foreign1.txt", "CONTENT_FOREIGN_ALPHA\n", "unrelated foreign change alpha");
+    const foreign1 = commit(dir, "foreign1.txt", "CONTENT_FOREIGN_ALPHA\n", "unrelated foreign change alpha");
     const c2OwnA = commit(dir, "own-a.txt", "CONTENT_OWN_A_MARKER\n", "implements task-plan-x-own-task-a");
-    commit(
+    const foreign2 = commit(
       dir,
       "foreign2.txt",
       "CONTENT_FOREIGN_BETA\n",
-      "unrelated foreign change beta, references task-other-plan-foreign-task",
+      "unrelated foreign change beta, references task-plan-x-own-task-a",
     );
     const c4Own = commit(dir, "own-b.txt", "CONTENT_OWN_B_MARKER\n", "implements task-plan-x-own-task-b");
     commit(dir, "foreign3.txt", "CONTENT_FOREIGN_GAMMA\n", "unrelated foreign change gamma");
 
-    const result = deriveCommitSetForPlan(dir, ["task-plan-x-own-task-a", "task-plan-x-own-task-b"], false, new Map());
+    // each task's RECORDED range is its own commit; the foreign commit that names task A's slug is never attributed
+    const ranges = new Map([
+      ["task-plan-x-own-task-a", { base: foreign1, head: c2OwnA }],
+      ["task-plan-x-own-task-b", { base: foreign2, head: c4Own }],
+    ]);
+    const result = deriveCommitSetForPlan(dir, ["task-plan-x-own-task-a", "task-plan-x-own-task-b"], false, ranges);
 
     expect(result.status).toBe("derived");
     expect(result.commits).toHaveLength(2);
@@ -173,11 +181,15 @@ describe("deriveCommitSetForPlan — PRIMARY ORACLE: interleaved foreign history
 describe("deriveCommitSetForPlan — CONTROL: contiguous commits (SPEC oracle #5)", () => {
   it("produces the same file content as today's naive contiguous range when there is no foreign interleaving", () => {
     const dir = initRepo();
-    commit(dir, "base.txt", "base content\n", "seed commit");
+    const seed = commit(dir, "base.txt", "base content\n", "seed commit");
     const cYA = commit(dir, "y-a.txt", "CONTENT_Y_A\n", "implements task-plan-y-a");
     const cLast = commit(dir, "y-b.txt", "CONTENT_Y_B\n", "implements task-plan-y-b");
 
-    const result = deriveCommitSetForPlan(dir, ["task-plan-y-a", "task-plan-y-b"], false, new Map());
+    const ranges = new Map([
+      ["task-plan-y-a", { base: seed, head: cYA }],
+      ["task-plan-y-b", { base: cYA, head: cLast }],
+    ]);
+    const result = deriveCommitSetForPlan(dir, ["task-plan-y-a", "task-plan-y-b"], false, ranges);
     expect(result.status).toBe("derived");
     expect(result.diff_text).toContain("CONTENT_Y_A");
     expect(result.diff_text).toContain("CONTENT_Y_B");
@@ -224,34 +236,21 @@ describe("deriveCommitSetForPlan — BOUNDARY: no discoverable commits (zero-com
   });
 });
 
-describe("deriveCommitSetForPlan — BOUNDARY: ancestor pruning collapses a merge + its own inner commit", () => {
-  it("keeps only the descendant when two matched commits are in an ancestor relationship", () => {
+describe("deriveCommitSetForPlan — BOUNDARY: a merge commit inside a recorded range is not an own commit", () => {
+  it("attributes only the branch's own non-merge commit, never the merge commit that landed it", () => {
     const dir = initRepo();
-    commit(dir, "base.txt", "base\n", "seed");
-    // Simulate a branch commit whose message references the task slug...
+    const seed = commit(dir, "base.txt", "base\n", "seed");
     spawnSync("git", ["checkout", "-q", "-b", "feature"], { cwd: dir, env: GIT_ENV });
-    commit(dir, "inner.txt", "CONTENT_INNER\n", "implements task-plan-w-a (inner)");
-    spawnSync("git", ["checkout", "-q", "main"], { cwd: dir, env: GIT_ENV }).status === 0 ||
-      spawnSync("git", ["checkout", "-q", "master"], { cwd: dir, env: GIT_ENV });
-    // ...and a --no-ff merge commit whose OWN message ALSO references the same task slug.
-    spawnSync("git", ["merge", "--no-ff", "-q", "-m", "merge: implements task-plan-w-a (inner)", "feature"], {
-      cwd: dir,
-      env: GIT_ENV,
-    });
+    const inner = commit(dir, "inner.txt", "CONTENT_INNER\n", "inner work");
+    spawnSync("git", ["checkout", "-q", "-"], { cwd: dir, env: GIT_ENV });
+    spawnSync("git", ["merge", "--no-ff", "-q", "-m", "merge feature", "feature"], { cwd: dir, env: GIT_ENV });
 
-    const result = deriveCommitSetForPlan(dir, ["task-plan-w-a"], false, new Map());
+    const result = deriveCommitSetForPlan(dir, ["task-plan-w-a"], false, new Map([["task-plan-w-a", { base: seed, head: inner }]]));
+
     expect(result.status).toBe("derived");
-    // Both the inner commit and the merge commit matched the same token, but the inner
-    // commit is an ancestor of the merge commit — only the merge (the maximal/tip
-    // element) should remain, not a duplicate-counted pair.
-    expect(result.commits).toHaveLength(1);
+    expect(result.commits.map((c) => c.sha)).toEqual([inner]);
     expect(result.diff_text).toContain("CONTENT_INNER");
   }, 15000);
-  // ^ explicit timeout (spec-a-test-case-s-timeout-budget-must-be-declared-when-its
-  // D1/check-test-budgets): 7 direct spawn-helper calls (`initRepo` x1, `commit`
-  // x2, plus 4 direct `spawnSync` calls — checkout feature, checkout main,
-  // checkout master, merge). Measured 293-303ms in isolation across 2 runs;
-  // 15000ms gives >=49x headroom for a concurrent-worktree load spike.
 });
 
 // ─── NEGATIVE ──────────────────────────────────────────────────────────────────
@@ -261,9 +260,11 @@ describe("deriveCommitSetForPlan — NEGATIVE: cwd exists but is not a git repos
     const dir = mkdtempSync(join(tmpdir(), "lore-assess-commit-derivation-nongit-"));
     createdDirs.push(dir);
 
-    expect(() => deriveCommitSetForPlan(dir, ["task-anything"], false, new Map())).not.toThrow();
-    const result = deriveCommitSetForPlan(dir, ["task-anything"], false, new Map());
+    const ranges = new Map([["task-anything", { base: GONE_SHA, head: GONE_SHA }]]);
+    expect(() => deriveCommitSetForPlan(dir, ["task-anything"], false, ranges)).not.toThrow();
+    const result = deriveCommitSetForPlan(dir, ["task-anything"], false, ranges);
     expect(result.status).toBe("no_commits_found");
+    expect(result.tasks_not_measured).toEqual(["task-anything"]);
     expect(result.warnings.length).toBeGreaterThan(0);
   });
 });
@@ -273,9 +274,11 @@ describe("deriveCommitSetForPlan — NEGATIVE: cwd exists but is not a git repos
 describe("deriveCommitSetForPlan — ERROR: cwd does not exist on disk at all", () => {
   it("degrades gracefully — no_commits_found, non-empty warnings, never throws", () => {
     const nonexistent = join(tmpdir(), "lore-assess-commit-derivation-does-not-exist-xyz-123");
-    expect(() => deriveCommitSetForPlan(nonexistent, ["task-anything"], false, new Map())).not.toThrow();
-    const result = deriveCommitSetForPlan(nonexistent, ["task-anything"], false, new Map());
+    const ranges = new Map([["task-anything", { base: GONE_SHA, head: GONE_SHA }]]);
+    expect(() => deriveCommitSetForPlan(nonexistent, ["task-anything"], false, ranges)).not.toThrow();
+    const result = deriveCommitSetForPlan(nonexistent, ["task-anything"], false, ranges);
     expect(result.status).toBe("no_commits_found");
+    expect(result.tasks_not_measured).toEqual(["task-anything"]);
     expect(result.warnings.length).toBeGreaterThan(0);
   });
 });
@@ -285,12 +288,14 @@ describe("deriveCommitSetForPlan — ERROR: cwd does not exist on disk at all", 
 describe("deriveCommitSetForPlan — STATE: idempotent across repeated calls", () => {
   it("calling twice against the identical repo/args yields deep-equal results", () => {
     const dir = initRepo();
-    commit(dir, "own.txt", "CONTENT_IDEMPOTENT\n", "implements task-plan-idem-a");
+    const seed = commit(dir, "seed.txt", "seed\n", "seed");
+    const own = commit(dir, "own.txt", "CONTENT_IDEMPOTENT\n", "implements task-plan-idem-a");
+    const ranges = new Map([["task-plan-idem-a", { base: seed, head: own }]]);
 
-    const first = deriveCommitSetForPlan(dir, ["task-plan-idem-a"], false, new Map());
-    const second = deriveCommitSetForPlan(dir, ["task-plan-idem-a"], false, new Map());
+    const first = deriveCommitSetForPlan(dir, ["task-plan-idem-a"], false, ranges);
+    const second = deriveCommitSetForPlan(dir, ["task-plan-idem-a"], false, ranges);
     expect(second).toEqual(first);
-  });
+  }, 15000);
 });
 
 // ─── REGRESSION ────────────────────────────────────────────────────────────────
@@ -298,12 +303,14 @@ describe("deriveCommitSetForPlan — STATE: idempotent across repeated calls", (
 describe("deriveCommitSetForPlan — REGRESSION: an unrelated later commit never leaks in", () => {
   it("a subsequent commit that names neither task slug is excluded from a re-derived result", () => {
     const dir = initRepo();
-    commit(dir, "own.txt", "CONTENT_REG_OWN\n", "implements task-plan-reg-a");
-    const before = deriveCommitSetForPlan(dir, ["task-plan-reg-a"], false, new Map());
+    const seed = commit(dir, "seed.txt", "seed\n", "seed");
+    const own = commit(dir, "own.txt", "CONTENT_REG_OWN\n", "implements task-plan-reg-a");
+    const ranges = new Map([["task-plan-reg-a", { base: seed, head: own }]]);
+    const before = deriveCommitSetForPlan(dir, ["task-plan-reg-a"], false, ranges);
     expect(before.diff_text).toContain("CONTENT_REG_OWN");
 
     commit(dir, "later-unrelated.txt", "CONTENT_REG_UNRELATED\n", "a later commit naming nothing relevant");
-    const after = deriveCommitSetForPlan(dir, ["task-plan-reg-a"], false, new Map());
+    const after = deriveCommitSetForPlan(dir, ["task-plan-reg-a"], false, ranges);
 
     expect(after.commits).toHaveLength(1);
     expect(after.diff_text).toContain("CONTENT_REG_OWN");
@@ -374,13 +381,14 @@ describe("deriveCommitSetForPlan — RED-FIRST: convention-mismatch (allTasksArc
   // reason: same closure as above — `allTasksArchived` is REQUIRED, so this CONTROL now
   // compares the `true` and `false` values against each other instead of also including
   // an omitted third variant.
-  it("CONTROL: a plan whose commits DO mention the task slug derives the identical 'derived' commit set whether allTasksArchived is true or false", () => {
+  it("CONTROL: a plan whose tasks have recorded ranges derives the identical 'derived' commit set whether allTasksArchived is true or false", () => {
     const dir = initRepo();
-    commit(dir, "base.txt", "base\n", "seed commit");
-    commit(dir, "own.txt", "CONTENT_ARCHIVED_MATCH\n", "implements task-conv-matched-a");
+    const seed = commit(dir, "base.txt", "base\n", "seed commit");
+    const own = commit(dir, "own.txt", "CONTENT_ARCHIVED_MATCH\n", "implements task-conv-matched-a");
+    const ranges = new Map([["task-conv-matched-a", { base: seed, head: own }]]);
 
-    const withArchivedTrue = deriveCommitSetForPlan(dir, ["task-conv-matched-a"], true, new Map());
-    const withArchivedFalse = deriveCommitSetForPlan(dir, ["task-conv-matched-a"], false, new Map());
+    const withArchivedTrue = deriveCommitSetForPlan(dir, ["task-conv-matched-a"], true, ranges);
+    const withArchivedFalse = deriveCommitSetForPlan(dir, ["task-conv-matched-a"], false, ranges);
 
     expect(withArchivedTrue.status).toBe("derived");
     expect(withArchivedTrue).toEqual(withArchivedFalse);

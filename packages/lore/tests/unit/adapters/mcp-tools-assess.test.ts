@@ -178,7 +178,11 @@ async function createEmptyPlan(): Promise<string> {
  * git-fixture-driven derivation tests below must reference the actual generated slug,
  * never a guessed one (`deriveCommitSetForPlan` matches on the corpus's own `task.slug`).
  */
-async function createPlanWithNamedTasks(taskTitles: string[]): Promise<{ planId: string; taskSlugs: string[] }> {
+async function createPlanWithNamedTasks(
+  taskTitles: string[],
+  /** Per-task `extra` merged over `{plan_id}` (index-aligned with `taskTitles`) — e.g. a recorded `landing`. */
+  extras: ReadonlyArray<Record<string, unknown>> = [],
+): Promise<{ planId: string; taskSlugs: string[] }> {
   const planResult = await corpusService.create({
     type: "plan",
     title: "MCP Assess Derivation Plan",
@@ -186,13 +190,13 @@ async function createPlanWithNamedTasks(taskTitles: string[]): Promise<{ planId:
   } as CreateDocInput);
   if (!planResult.ok) throw new Error(`Failed to create plan: ${JSON.stringify(planResult.error)}`);
   const taskSlugs: string[] = [];
-  for (const title of taskTitles) {
+  for (const [index, title] of taskTitles.entries()) {
     const taskResult = await corpusService.create({
       type: "task",
       title,
       parent_id: planResult.value.id,
       content: "body",
-      extra: { plan_id: planResult.value.id },
+      extra: { plan_id: planResult.value.id, ...(extras[index] ?? {}) },
     } as CreateDocInput);
     if (!taskResult.ok) throw new Error(`Failed to create task: ${JSON.stringify(taskResult.error)}`);
     taskSlugs.push(taskResult.value.slug);
@@ -388,20 +392,30 @@ describe("lore_assess — auto-derived commit set: PRIMARY ORACLE + BOUNDARY", (
     }
   });
 
-  function gitCommit(filename: string, content: string, message: string) {
+  function gitCommit(filename: string, content: string, message: string): string {
     writeFileSync(join(gitTmpDir, filename), content);
     spawnSync("git", ["add", filename], { cwd: gitTmpDir, env: gitEnv });
     spawnSync("git", ["commit", "-q", "-m", message], { cwd: gitTmpDir, env: gitEnv });
+    return spawnSync("git", ["rev-parse", "HEAD"], { cwd: gitTmpDir, env: gitEnv, encoding: "utf8" }).stdout.trim();
+  }
+
+  /** A task's recorded landing whose own work is the single commit `head` over `before` (what `lore integrate` records). */
+  function landingOf(before: string, head: string): Record<string, unknown> {
+    return { landing: { branch: "b", branch_head: head, main_before: before, main_after: head, landing_commit: head, recorded_at: "t" } };
   }
 
   it("PRIMARY ORACLE: excludes every interleaved foreign commit from the prompt sent to the judge", async () => {
-    const { planId, taskSlugs } = await createPlanWithNamedTasks(["MCP Own Task Alpha", "MCP Own Task Beta"]);
     gitCommit("seed.txt", "seed\n", "seed commit");
-    gitCommit("foreign1.txt", "MCP_FOREIGN_ALPHA\n", "unrelated foreign change alpha");
-    gitCommit("own-a.txt", "MCP_OWN_A\n", `implements ${taskSlugs[0]}`);
-    gitCommit("foreign2.txt", "MCP_FOREIGN_BETA\n", "unrelated foreign change beta");
-    gitCommit("own-b.txt", "MCP_OWN_B\n", `implements ${taskSlugs[1]}`);
+    const foreign1 = gitCommit("foreign1.txt", "MCP_FOREIGN_ALPHA\n", "unrelated foreign change alpha");
+    const ownA = gitCommit("own-a.txt", "MCP_OWN_A\n", "own work a");
+    const foreign2 = gitCommit("foreign2.txt", "MCP_FOREIGN_BETA\n", "unrelated foreign change beta");
+    const ownB = gitCommit("own-b.txt", "MCP_OWN_B\n", "own work b");
     gitCommit("foreign3.txt", "MCP_FOREIGN_GAMMA\n", "unrelated foreign change gamma");
+    // the tasks' recorded landings (not their slugs in commit messages) name their own commits
+    const { planId } = await createPlanWithNamedTasks(
+      ["MCP Own Task Alpha", "MCP Own Task Beta"],
+      [landingOf(foreign1, ownA), landingOf(foreign2, ownB)],
+    );
 
     const result = await call()({ plan_id_or_slug: planId, ai: true }); // NOTE: no diff_text
     expect(result.isError).toBeFalsy();

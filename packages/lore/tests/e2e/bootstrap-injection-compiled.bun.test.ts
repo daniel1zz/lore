@@ -225,7 +225,8 @@ async function seedCorpus(dir: string): Promise<SeededCorpus> {
 
 /**
  * Plain `bootstrap --json`'s `data` payload — the untouched `BootstrapReport`
- * shape, REGRESSION-pinned as an exact 10-key set. `archive_candidates` (SPEC
+ * shape, REGRESSION-pinned as an exact 11-key set (`architecture`, the architecture tree root or an
+ * explicit null, sits right after `root`; session-service.ts::bootstrap). `archive_candidates` (SPEC
  * spec-lifecycle-archival-plan-close-cascade-deterministic §Design Decisions
  * D4) is the newest, LAST-inserted key (`session-service.ts::bootstrap`'s own
  * `report` object literal appends it after `active_sessions`) — unlike the
@@ -234,6 +235,7 @@ async function seedCorpus(dir: string): Promise<SeededCorpus> {
  */
 const PLAIN_BOOTSTRAP_REPORT_KEYS = [
   "root",
+  "architecture",
   "active_plans",
   "pending_reviews",
   "my_claims",
@@ -274,7 +276,7 @@ describe("AC-080-3: compiled dist/lore bootstrap --injection / --json default-bu
     expect(envelope.ok).toBe(true);
 
     const keys = Object.keys(envelope.data);
-    expect(keys).toHaveLength(10);
+    expect(keys).toHaveLength(11);
     expect(keys).toEqual([...PLAIN_BOOTSTRAP_REPORT_KEYS]);
     // Never touched by the injection projection: no condensed armed_gates
     // string[], no omitted ledger.

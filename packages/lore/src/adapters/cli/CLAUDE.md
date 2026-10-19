@@ -1,5 +1,7 @@
 # Module: adapters/cli
 
+Architecture card: `baseline-module-card-cli-adapter`
+
 ## Purpose
 
 citty CLI adapter: lazy command registry and exit-code mapping. Every subcommand lives in its own `commands/<name>.ts`, lazily imported by `index.ts` — that registry is the only count that stays true; ⛔ never restate the number here. Thin adapter only — no business logic; every command resolves args, calls a service via the App composition root, formats the result, and exits.
