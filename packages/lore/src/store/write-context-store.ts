@@ -49,7 +49,7 @@ export interface StampingContext {
     readonly unresolvedReason?: string;
   };
 }
-import type { StoreInterface } from "./store-interface.js";
+import type { ProvenanceWriteExtras, StoreInterface } from "./store-interface.js";
 
 type Stamp = { harness_run: string | null };
 
@@ -164,9 +164,23 @@ export function withWriteContext(store: StoreInterface, ctx: StampingContext): S
         if (spec.version !== undefined) next[spec.version] = stampRecord(args[spec.version] as VersionRecord, stamp);
         if (spec.audit !== undefined) next[spec.audit] = stampAudit(args[spec.audit] as AuditEntry, stamp, ctx);
         if (spec.extras !== undefined) {
-          const extras = args[spec.extras] as { also_audit?: readonly AuditEntry[] } | undefined;
-          if (extras?.also_audit !== undefined) {
-            next[spec.extras] = { ...extras, also_audit: extras.also_audit.map((a) => stampAudit(a, stamp, ctx)) };
+          const extras = args[spec.extras] as ProvenanceWriteExtras | undefined;
+          if (extras?.also_audit !== undefined || extras?.also_update !== undefined) {
+            next[spec.extras] = {
+              ...extras,
+              ...(extras.also_audit !== undefined ? { also_audit: extras.also_audit.map((a) => stampAudit(a, stamp, ctx)) } : {}),
+              // reason: BR-1307 — a companion doc write carries its own version and audit rows; they are
+              // attributed to the run exactly like the primary write's.
+              ...(extras.also_update !== undefined
+                ? {
+                    also_update: extras.also_update.map((c) => ({
+                      ...c,
+                      version: stampRecord(c.version, stamp),
+                      audit: stampAudit(c.audit, stamp, ctx),
+                    })),
+                  }
+                : {}),
+            };
           }
         }
         for (const position of spec.patches ?? []) {
