@@ -214,6 +214,20 @@ export function loadLibsqlClientModule(): Promise<typeof import("@libsql/client"
 // function — it pre-resolves the client via `loadLibsqlClientModule()` above
 // and passes it in as `injectedClient`, so it never touches this fallback.
 let cachedLibsqlModuleSync: typeof import("@libsql/client") | null = null;
+
+/**
+ * Resolves `@libsql/client` through the literal-specifier dynamic `import()` and hands the module to the
+ * synchronous construction path below, so a SYNCHRONOUS `new TursoStore(...)` works from the compiled binary too
+ * (spec-defect-clusters-round-2-part-c-criterion-data-demotion D22). This is how `createApp`'s Turso branch stays
+ * synchronous without `createRequire`: an entry that is about to open a sync-enabled corpus awaits this once,
+ * before `createApp`. A project with `sync.enabled` off never calls it, so the native load stays lazy.
+ *
+ * @returns resolves once the module is cached; rejects when `@libsql/client` cannot be loaded
+ */
+export async function primeLibsqlClientForSyncConstruction(): Promise<void> {
+  if (cachedLibsqlModuleSync === null) cachedLibsqlModuleSync = await loadLibsqlClientModule();
+}
+
 function loadLibsqlClientModuleSync(): typeof import("@libsql/client") {
   if (cachedLibsqlModuleSync === null) {
     const req = createRequire(import.meta.url);
@@ -1880,144 +1894,6 @@ export class TursoStore implements StoreInterface {
   }
 
   /**
-   * The doc-update half of {@link updateWithProvenance}, inside the caller's open write transaction: merges
-   * `patch` over `existingRow` and writes it (CAS when `opts.expected_version` is set). Never rolls back: the
-   * caller owns the transaction and rolls back on an `err`.
-   *
-   * @returns the updated doc; `DOC_NOT_FOUND` / `STALE_VERSION` when the CAS write touched no row.
-   */
-  private async applyDocUpdateTx(
-    tx: Transaction,
-    existingRow: Row,
-    id: DocId,
-    patch: Partial<DocRecord>,
-    opts: UpdateOpts | undefined,
-  ): Promise<Result<DocRecord, LoreError>> {
-    const current = rowToDocRecord(libsqlRowToDocRow(existingRow));
-    const updated: DocRecord = {
-      ...current,
-      ...patch,
-      id: current.id, // id is immutable
-    };
-    const updatedTagsJson = JSON.stringify(updated.tags);
-    // reason: same shadow-column obligation as update() — mirrors
-    // SQLiteStore.updateDocSync (updateWithProvenance there also
-    // delegates to the same private sync helper update() uses).
-    const shadow = computeFtsShadowValues(updated.title, updated.content, updatedTagsJson);
-
-    if (opts?.expected_version !== undefined) {
-      const updateRs = await tx.execute({
-        sql: `UPDATE docs SET
-               slug = ?, type = ?, role = ?, title = ?, status = ?,
-               priority = ?, content = ?, parent_id = ?, extra = ?,
-               tags = ?, version = ?, created_at = ?, updated_at = ?,
-               created_by = ?, deleted_at = ?, fts_title = ?, fts_content = ?,
-               fts_tags = ?
-             WHERE id = ? AND version = ?`,
-        args: [
-          updated.slug,
-          updated.type,
-          updated.role,
-          updated.title,
-          updated.status,
-          updated.priority,
-          updated.content,
-          updated.parent_id ?? null,
-          JSON.stringify(updated.extra),
-          updatedTagsJson,
-          updated.version,
-          updated.created_at,
-          updated.updated_at,
-          updated.created_by,
-          updated.deleted_at ?? null,
-          shadow.fts_title,
-          shadow.fts_content,
-          shadow.fts_tags,
-          id,
-          opts.expected_version,
-        ] as InValue[],
-      });
-
-      if (updateRs.rowsAffected === 0) {
-        const actualRs = await tx.execute({
-          sql: "SELECT version FROM docs WHERE id = ?",
-          args: [id],
-        });
-        const actualRow = actualRs.rows[0];
-
-        if (!actualRow) {
-          // Deleted between our SELECT and UPDATE (race)
-          return err({ code: "DOC_NOT_FOUND", id });
-        }
-
-        return err({
-          code: "STALE_VERSION",
-          id,
-          expected: opts.expected_version,
-          actual: rowNum(actualRow, "version"),
-        });
-      }
-    } else {
-      // Unconditional UPDATE — backward-compatible path
-      await tx.execute({
-        sql: `UPDATE docs SET
-               slug = ?, type = ?, role = ?, title = ?, status = ?,
-               priority = ?, content = ?, parent_id = ?, extra = ?,
-               tags = ?, version = ?, created_at = ?, updated_at = ?,
-               created_by = ?, deleted_at = ?, fts_title = ?, fts_content = ?,
-               fts_tags = ?
-             WHERE id = ?`,
-        args: [
-          updated.slug,
-          updated.type,
-          updated.role,
-          updated.title,
-          updated.status,
-          updated.priority,
-          updated.content,
-          updated.parent_id ?? null,
-          JSON.stringify(updated.extra),
-          updatedTagsJson,
-          updated.version,
-          updated.created_at,
-          updated.updated_at,
-          updated.created_by,
-          updated.deleted_at ?? null,
-          shadow.fts_title,
-          shadow.fts_content,
-          shadow.fts_tags,
-          id,
-        ] as InValue[],
-      });
-    }
-    return ok(updated);
-  }
-
-  /** Inserts one version row inside the caller's open write transaction. */
-  private async insertVersionTx(tx: Transaction, version: VersionRecord): Promise<void> {
-    await tx.execute({
-      sql: `INSERT INTO versions
-             (doc_id, version, content, extra, status, title,
-              action, created_at, created_by, change_summary, slug, harness_run)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      args: [
-        version.doc_id,
-        version.version,
-        version.content,
-        JSON.stringify(version.extra),
-        version.status,
-        version.title,
-        version.action,
-        version.created_at,
-        version.created_by,
-        version.change_summary ?? null,
-        version.slug ?? null,
-        version.harness_run ?? null,
-      ] as InValue[],
-    });
-  }
-
-  /**
    * @see StoreInterface.updateWithProvenance
    */
   async updateWithProvenance(
@@ -2057,35 +1933,129 @@ export class TursoStore implements StoreInterface {
         }
       }
 
-      const applied = await this.applyDocUpdateTx(tx, existingRow, id, patch, opts);
-      if (!applied.ok) {
-        await tx.rollback();
-        return applied;
-      }
-      const updated = applied.value;
+      const current = rowToDocRecord(libsqlRowToDocRow(existingRow));
+      const updated: DocRecord = {
+        ...current,
+        ...patch,
+        id: current.id, // id is immutable
+      };
+      const updatedTagsJson = JSON.stringify(updated.tags);
+      // reason: same shadow-column obligation as update() — mirrors
+      // SQLiteStore.updateDocSync (updateWithProvenance there also
+      // delegates to the same private sync helper update() uses).
+      const shadow = computeFtsShadowValues(updated.title, updated.content, updatedTagsJson);
 
-      await this.insertVersionTx(tx, version);
+      if (opts?.expected_version !== undefined) {
+        const updateRs = await tx.execute({
+          sql: `UPDATE docs SET
+                 slug = ?, type = ?, role = ?, title = ?, status = ?,
+                 priority = ?, content = ?, parent_id = ?, extra = ?,
+                 tags = ?, version = ?, created_at = ?, updated_at = ?,
+                 created_by = ?, deleted_at = ?, fts_title = ?, fts_content = ?,
+                 fts_tags = ?
+               WHERE id = ? AND version = ?`,
+          args: [
+            updated.slug,
+            updated.type,
+            updated.role,
+            updated.title,
+            updated.status,
+            updated.priority,
+            updated.content,
+            updated.parent_id ?? null,
+            JSON.stringify(updated.extra),
+            updatedTagsJson,
+            updated.version,
+            updated.created_at,
+            updated.updated_at,
+            updated.created_by,
+            updated.deleted_at ?? null,
+            shadow.fts_title,
+            shadow.fts_content,
+            shadow.fts_tags,
+            id,
+            opts.expected_version,
+          ] as InValue[],
+        });
+
+        if (updateRs.rowsAffected === 0) {
+          const actualRs = await tx.execute({
+            sql: "SELECT version FROM docs WHERE id = ?",
+            args: [id],
+          });
+          const actualRow = actualRs.rows[0];
+          await tx.rollback();
+
+          if (!actualRow) {
+            // Deleted between our SELECT and UPDATE (race)
+            return err({ code: "DOC_NOT_FOUND", id });
+          }
+
+          return err({
+            code: "STALE_VERSION",
+            id,
+            expected: opts.expected_version,
+            actual: rowNum(actualRow, "version"),
+          });
+        }
+      } else {
+        // Unconditional UPDATE — backward-compatible path
+        await tx.execute({
+          sql: `UPDATE docs SET
+                 slug = ?, type = ?, role = ?, title = ?, status = ?,
+                 priority = ?, content = ?, parent_id = ?, extra = ?,
+                 tags = ?, version = ?, created_at = ?, updated_at = ?,
+                 created_by = ?, deleted_at = ?, fts_title = ?, fts_content = ?,
+                 fts_tags = ?
+               WHERE id = ?`,
+          args: [
+            updated.slug,
+            updated.type,
+            updated.role,
+            updated.title,
+            updated.status,
+            updated.priority,
+            updated.content,
+            updated.parent_id ?? null,
+            JSON.stringify(updated.extra),
+            updatedTagsJson,
+            updated.version,
+            updated.created_at,
+            updated.updated_at,
+            updated.created_by,
+            updated.deleted_at ?? null,
+            shadow.fts_title,
+            shadow.fts_content,
+            shadow.fts_tags,
+            id,
+          ] as InValue[],
+        });
+      }
+
+      await tx.execute({
+        sql: `INSERT INTO versions
+               (doc_id, version, content, extra, status, title,
+                action, created_at, created_by, change_summary, slug, harness_run)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        args: [
+          version.doc_id,
+          version.version,
+          version.content,
+          JSON.stringify(version.extra),
+          version.status,
+          version.title,
+          version.action,
+          version.created_at,
+          version.created_by,
+          version.change_summary ?? null,
+          version.slug ?? null,
+          version.harness_run ?? null,
+        ] as InValue[],
+      });
+
       await this.appendAuditEntryTx(tx, audit);
       for (const extraAudit of extras?.also_audit ?? []) {
         await this.appendAuditEntryTx(tx, extraAudit);
-      }
-
-      // reason: BR-1307 — companion doc writes (a spec's rule retirements on its baseline leaves) share this
-      // write transaction; the registry rows follow the leaf writes through the docs triggers.
-      for (const companion of extras?.also_update ?? []) {
-        const companionRs = await tx.execute({ sql: "SELECT * FROM docs WHERE id = ?", args: [companion.id] });
-        const companionRow = companionRs.rows[0];
-        if (!companionRow) {
-          await tx.rollback();
-          return err({ code: "DOC_NOT_FOUND", id: companion.id });
-        }
-        const companionApplied = await this.applyDocUpdateTx(tx, companionRow, companion.id, companion.patch, companion.opts);
-        if (!companionApplied.ok) {
-          await tx.rollback();
-          return companionApplied;
-        }
-        await this.insertVersionTx(tx, companion.version);
-        await this.appendAuditEntryTx(tx, companion.audit);
       }
 
       await tx.commit();
