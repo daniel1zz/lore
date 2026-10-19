@@ -44,7 +44,7 @@ describe("review prompt v4", () => {
   });
 
   it("ERROR: an unknown version key is not registered", () => {
-    expect(REVIEW_TEMPLATES["v6"]).toBeUndefined();
+    expect(REVIEW_TEMPLATES["v7"]).toBeUndefined();
   });
 
   it.each(KINDS)("HAPPY: the v4 prompt for a %s carries the design_necessity rule", (kind) => {
