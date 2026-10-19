@@ -388,11 +388,11 @@ describe("edit-time anchor gate (task-skill-design-implementers-declare-out-of-a
       expect(readFileSync(scopeFileOf(fx.wtA), "utf8")).toBe(before);
     });
 
-    it("AC-EAG-g (STATE): `lore release` rewrites the file without the task; the hook then denies naming `lore claim`", () => {
+    it("AC-EAG-g (STATE): `lore release` of the last claim deletes the file (derived state, see scope-file-cleanup); the hook then denies naming `lore claim`", () => {
       expect(existsSync(scopeFileOf(fx.wtB))).toBe(true);
       const released = runLore(["release", fx.taskB], fx.wtB, RUN_B, ACTOR_B);
       expect(released.exitCode, released.stderr).toBe(0);
-      expect(readScope(fx.wtB).claims).toEqual([]);
+      expect(existsSync(scopeFileOf(fx.wtB))).toBe(false);
       const r = asB(join(fx.wtB, "src/b/b.ts"));
       expect(r.status).toBe(2);
       expect(r.stderr).toContain("lore claim");

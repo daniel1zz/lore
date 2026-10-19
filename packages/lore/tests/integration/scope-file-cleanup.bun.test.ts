@@ -59,6 +59,8 @@ function worktreeRemoveVerdicts(): string[] {
 }
 
 function sweepRow(): { removed?: boolean; verdict: string; escalated?: { ignored_paths: string[] } } {
+  // The fixture CLI runs with HOME = its cwd, so macOS tooling drops `Library/` into the worktree: not under test.
+  rmSync(join(wt, "Library"), { recursive: true, force: true });
   const out = mustLore(["worktree", "sweep", "--apply", "--json"], repo, false);
   const rows = (JSON.parse(out) as { data: { worktrees: { path: string; removed?: boolean; verdict: string; escalated?: { ignored_paths: string[] } }[] } }).data.worktrees;
   const row = rows.find((r) => r.path === wt);
