@@ -92,7 +92,7 @@ export class PhaseService {
     /** The one write route (`CorpusService`, AC-DCL-3); `app.ts` passes the composed one, a bare test gets a bare writer. */
     writer?: DocWritePort,
   ) {
-    this.writer = writer ?? bareDocWriter(store);
+    this.writer = writer ?? bareDocWriter(store, recordLock);
   }
 
   private readonly writer: DocWritePort;

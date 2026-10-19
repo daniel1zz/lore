@@ -919,10 +919,11 @@ function definedOnly(patch: DocWritePatch): DocWritePatch {
  * with an ungated record lock and an inert foreign-corpus context. Same convention as every other optional
  * wiring (`new GateEnforcer(undefined)`, "bare `new XService(store)` stays ungated"): production composes
  * the REAL `corpusService` into each service in `app.ts` (asserted by single-write-path.bun.test.ts), and
- * only a unit test constructing a service over a bare store reaches this.
+ * only a unit test constructing a service over a bare store reaches this. A service that already holds its own
+ * `RecordLockService` passes it, so its record-edit gate configuration is the one the write route applies.
  */
-export function bareDocWriter(store: StoreInterface): DocWritePort {
-  return new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
+export function bareDocWriter(store: StoreInterface, recordLock?: RecordLockService): DocWritePort {
+  return new CorpusService(store, recordLock ?? new RecordLockService(store, new GateEnforcer(undefined)));
 }
 
 // ─── CorpusService ─────────────────────────────────────────────────────────

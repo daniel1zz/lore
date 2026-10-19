@@ -62,7 +62,7 @@ export class VersionService {
      */
     writer?: DocWritePort,
   ) {
-    this.writer = writer ?? bareDocWriter(store);
+    this.writer = writer ?? bareDocWriter(store, recordLock);
   }
 
   private readonly writer: DocWritePort;
