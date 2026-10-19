@@ -70,7 +70,7 @@ describe("ReadyTaskList", () => {
         task: { ...makeRecord().task, id: "01HTASK0000000000000000002", slug: "task-b", title: "Task B", status: "archived" },
       });
       render(<ReadyTaskList records={[archived, makeRecord()]} claimTtlMinutes={120} />);
-      expect(screen.getAllByLabelText("Ready tasks")[0].children).toHaveLength(2);
+      expect(screen.getByLabelText("Ready tasks").children).toHaveLength(2);
       expect(screen.getByText("done")).toBeInTheDocument();
       expect(screen.getByText("ready")).toBeInTheDocument();
       expect(screen.queryByText("blocked")).not.toBeInTheDocument();
