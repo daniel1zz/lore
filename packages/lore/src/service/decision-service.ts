@@ -3,7 +3,7 @@
  *
  * Purpose: every autonomy decision made through the service layer is appended to the hash-chained decision log,
  * and the EFFECTIVE verdict of a (class, subject, version) is answered from that log, never from a re-score.
- * Public surface: DecisionService.{decide, effectiveVerdict, verifyChain, chainHead, listPending, getPending,
+ * Public surface: DecisionService.{decide, effectiveVerdict, verifyChain, chainHead, listPending, readPending, readDecisionViews, readAuditItemViews, readDecisionView (pure reads), getPending,
  *   resolvePending, governed, preview, calibration, listAudit, getAudit, resolveAudit, calibrationStats}, DecisionSubject,
  *   DecideOutcome.
  * Invariants:
@@ -35,6 +35,7 @@ import { decide, err, ok, type AutonomyDecision, type LoreError, type Result, ty
 import {
   AutonomyCalibrationService,
   classConfidence,
+  deriveAuditQueue,
   type AuditItem,
   type ClassCalibrationStats,
   type ReversalProbe,
@@ -51,6 +52,7 @@ import {
   decisionChainHead,
   decisionDetailSchema,
   effectiveDecisionVerdict,
+  renderDecisionDetailSummary,
   verifyDecisionChain,
   type DecisionChainHead,
   type DecisionChainVerifyResult,
@@ -66,9 +68,12 @@ import {
   derivePendingDecisions,
   HUMAN_ANSWER_ONLY_CLASSES,
   newerVersionSupersession,
+  parseRowFactors,
+  parseRowReasons,
   SUPERSEDED_FACTS_KEY,
   type OpenEscalation,
   type PendingDecision,
+  type RecommendedAnswer,
   type SubjectExistenceProbes,
   type SupersedeCause,
 } from "./pending-decisions.js";
@@ -104,6 +109,93 @@ export interface DecisionServiceDeps {
 
 function validationError(field: string, message: string): LoreError {
   return { code: "VALIDATION_ERROR", field, message };
+}
+
+/** Which queue a {@link DecisionReadView} belongs to: a blocking open decision, or a non-blocking audit item. */
+export type DecisionReadKind = "decision" | "audit";
+
+/**
+ * What the dashboard shows for one open decision or audit item. `summary` is the shared renderer's line (the stored
+ * summary or the exact "no detail recorded" label); `detail` is the parsed detail or null. `recommendation` is null
+ * for an audit item: nothing was escalated, so nothing recommends an answer.
+ */
+export interface DecisionReadView {
+  readonly kind: DecisionReadKind;
+  readonly id: number;
+  readonly class: string;
+  readonly subject_id: string;
+  readonly subject_version: string;
+  readonly opened_at: string;
+  readonly score: number;
+  readonly threshold: number | null;
+  readonly factors: Readonly<Record<string, number>>;
+  readonly reasons: readonly string[];
+  readonly summary: string;
+  readonly detail: DecisionDetail | null;
+  readonly recommendation: { readonly answer: RecommendedAnswer; readonly reason: string } | null;
+  /** Command text only; answering stays on the human TTY channel. */
+  readonly answer_commands: { readonly accept: string; readonly reject: string };
+  /** Audit items only: 1-based sample position within the class. */
+  readonly audit_sequence: number | null;
+}
+
+function answerCommands(id: number): DecisionReadView["answer_commands"] {
+  return { accept: `lore decide ${id} --accept`, reject: `lore decide ${id} --reject` };
+}
+
+function parseDetail(raw: string | null | undefined): DecisionDetail | null {
+  if (raw === null || raw === undefined) return null;
+  try {
+    const parsed = decisionDetailSchema.safeParse(JSON.parse(raw));
+    return parsed.success ? parsed.data : null;
+  } catch {
+    // reason: unreadable stored detail is reported through `summary` (renderDecisionDetailSummary names it); the structured field is then absent.
+    return null;
+  }
+}
+
+function openDecisionView(p: PendingDecision): DecisionReadView {
+  return {
+    kind: "decision",
+    id: p.id,
+    class: p.class,
+    subject_id: p.subject_id,
+    subject_version: p.subject_version,
+    opened_at: p.opened_at,
+    score: p.score,
+    threshold: p.threshold,
+    factors: p.factors,
+    reasons: p.reasons,
+    summary: renderDecisionDetailSummary({ detail: p.detail }),
+    detail: parseDetail(p.detail),
+    recommendation: { answer: p.recommended, reason: p.recommended_reason },
+    answer_commands: answerCommands(p.id),
+    audit_sequence: null,
+  };
+}
+
+function auditItemView(row: DecisionLogRow, sequence: number): Result<DecisionReadView, LoreError> {
+  const factors = parseRowFactors(row);
+  if (!factors.ok) return factors;
+  const reasons = parseRowReasons(row);
+  if (!reasons.ok) return reasons;
+  return ok({
+    kind: "audit",
+    id: row.id,
+    class: row.class,
+    subject_id: row.subject_id,
+    subject_version: row.subject_version,
+    opened_at: row.ts,
+    score: row.score,
+    threshold: row.threshold,
+    factors: factors.value,
+    reasons: reasons.value,
+    summary: renderDecisionDetailSummary(row),
+    detail: parseDetail(row.detail),
+    recommendation: null,
+    answer_commands: answerCommands(row.id),
+    audit_sequence: sequence,
+  });
 }
 
 export class DecisionService {
@@ -349,6 +441,53 @@ export class DecisionService {
     const rows = await this.deps.store.listDecisionLog();
     if (!rows.ok) return rows;
     return derivePendingDecisions(rows.value);
+  }
+
+  /**
+   * PURE read of the open escalations for the dashboard: the same derivation as {@link listPending} but WITHOUT
+   * `closeStalePending`, so reading appends nothing (no marker row, no chain-head move) and runs no git or process
+   * probe. A stale escalation a probe would close therefore still shows here until a CLI `lore pending` closes it.
+   * reason: HTTP read routes must not write (AC-HR-3); do not "unify" this with listPending.
+   */
+  async readPending(): Promise<Result<PendingDecision[], LoreError>> {
+    const rows = await this.deps.store.listDecisionLog();
+    if (!rows.ok) return rows;
+    return derivePendingDecisions(rows.value);
+  }
+
+  /** PURE read: every open decision as a {@link DecisionReadView}, id ASC. Appends nothing. */
+  async readDecisionViews(): Promise<Result<DecisionReadView[], LoreError>> {
+    const pending = await this.readPending();
+    if (!pending.ok) return pending;
+    return ok(pending.value.map(openDecisionView));
+  }
+
+  /** PURE read: every audit item (sampled auto decision awaiting a human answer) as a view, id ASC. Appends nothing. */
+  async readAuditItemViews(): Promise<Result<DecisionReadView[], LoreError>> {
+    const rows = await this.deps.store.listDecisionLog();
+    if (!rows.ok) return rows;
+    const queue = deriveAuditQueue(rows.value);
+    if (!queue.ok) return queue;
+    const views: DecisionReadView[] = [];
+    for (const item of queue.value) {
+      const row = rows.value.find((r) => r.id === item.id);
+      if (row === undefined) return err({ code: "STORE_ERROR", message: `audit item ${item.id} has no decision_log row` });
+      const view = auditItemView(row, item.sequence);
+      if (!view.ok) return view;
+      views.push(view.value);
+    }
+    return ok(views);
+  }
+
+  /** PURE read: one open decision or audit item by the id `lore decide` takes, or null when neither exists. */
+  async readDecisionView(id: number): Promise<Result<DecisionReadView | null, LoreError>> {
+    const open = await this.readDecisionViews();
+    if (!open.ok) return open;
+    const decision = open.value.find((v) => v.id === id);
+    if (decision !== undefined) return ok(decision);
+    const audit = await this.readAuditItemViews();
+    if (!audit.ok) return audit;
+    return ok(audit.value.find((v) => v.id === id) ?? null);
   }
 
   /** Appends a closing marker for every open escalation that is stale; returns how many markers were appended. */

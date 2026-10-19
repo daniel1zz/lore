@@ -260,6 +260,13 @@ export async function handleApiRoute(
     return handleCalibrationStats(url, app);
   }
 
+  // GET /api/decisions, /api/decisions/:id, /api/audit-items (HR-T3) — read-only, cookie or bearer.
+  // reason: paths deliberately avoid the word "decide": the human channel has no HTTP route (AC-AU-3 (4) scan).
+  if (method === "GET" && path === "/api/decisions") return handleListDecisions(app);
+  if (method === "GET" && path === "/api/audit-items") return handleListAuditItems(app);
+  const decisionMatch = /^\/api\/decisions\/([^/]+)$/.exec(path);
+  if (decisionMatch !== null && method === "GET") return handleGetDecision(decisionMatch[1] ?? "", app);
+
   // POST /api/links
   if (method === "POST" && path === "/api/links") {
     return handleCreateLink(req, app, actor);
@@ -625,6 +632,36 @@ async function handleCalibrationStats(url: URL, app: App): Promise<Response> {
     Object.keys(filter).length > 0 ? filter : undefined,
   );
   if (!result.ok) return loreErrorResponse(result.error);
+  return jsonOk(result.value);
+}
+
+const DECISION_READ_UNAVAILABLE = { code: "STORE_ERROR", message: "Decision read service not wired for this app" };
+
+/** GET /api/decisions — open decisions. Forwards to the pure read; never `listPending` (it appends). */
+async function handleListDecisions(app: App): Promise<Response> {
+  if (app.decisionReadService === undefined) return jsonError(DECISION_READ_UNAVAILABLE, 503);
+  const result = await app.decisionReadService.readDecisionViews();
+  if (!result.ok) return loreErrorResponse(result.error);
+  return jsonOk(result.value);
+}
+
+/** GET /api/audit-items — sampled auto decisions awaiting a human answer. */
+async function handleListAuditItems(app: App): Promise<Response> {
+  if (app.decisionReadService === undefined) return jsonError(DECISION_READ_UNAVAILABLE, 503);
+  const result = await app.decisionReadService.readAuditItemViews();
+  if (!result.ok) return loreErrorResponse(result.error);
+  return jsonOk(result.value);
+}
+
+/** GET /api/decisions/:id — one open decision or audit item (the view's `kind` says which); unknown id → 404. */
+async function handleGetDecision(rawId: string, app: App): Promise<Response> {
+  if (app.decisionReadService === undefined) return jsonError(DECISION_READ_UNAVAILABLE, 503);
+  if (!/^\d+$/.test(rawId)) {
+    return jsonError({ code: "VALIDATION_ERROR", field: "id", message: "Decision id must be a positive integer" }, 422);
+  }
+  const result = await app.decisionReadService.readDecisionView(Number(rawId));
+  if (!result.ok) return loreErrorResponse(result.error);
+  if (result.value === null) return jsonError({ code: "NOT_FOUND", message: `No open decision or audit item ${rawId}` }, 404);
   return jsonOk(result.value);
 }
 

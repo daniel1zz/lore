@@ -1112,6 +1112,7 @@ export class VerifyRunnerService {
             version: createHash("sha256").update(criterion.verify.command).digest("hex").slice(0, 16),
           },
           summary: `verify ${criterion.id} --yes on task ${task.slug} (command has no attested row on this task)`,
+          change: { document: task.slug, ac_id: criterion.id, command: criterion.verify.command },
         });
         if (!decided.ok) return decided;
       }

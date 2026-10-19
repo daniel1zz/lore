@@ -33,6 +33,7 @@ import { realpathSync } from "node:fs";
 import { err, ok, type AutonomyFacts, type LoreError, type Result } from "@lore/core";
 import type { RunId } from "@lore/core";
 import type { DecisionService } from "./decision-service.js";
+import type { DecisionDetail } from "../store/decision-log.js";
 import type { StoreInterface } from "../store/store-interface.js";
 
 /** Class id in @lore/core's registry. */
@@ -47,6 +48,27 @@ export function stashDecisionVersion(sha: string, attribution: StashAttribution)
   const ended = new Set(attribution.endedRuns ?? []);
   const runs = [...attribution.runs].sort().map((id) => `${id}=${ended.has(id) ? "ended" : "live"}`);
   return `${sha}|${attribution.state}|${runs.join(",")}`;
+}
+
+/**
+ * The plain-language account recorded with a stash-drop decision (HR-T2, AC-HR-1): the stash by its message, why lore
+ * attributes it to nobody (or somebody), and where the archive copy lives.
+ */
+export function buildStashDropDetail(facts: StashFacts, archiveRef: string): DecisionDetail {
+  return {
+    summary: `Drop the stash "${facts.message}"`,
+    requested_by: "lore (stash prune)",
+    change: {
+      stash_message: facts.message,
+      attribution_state: facts.attribution.state,
+      attribution_reason: facts.attribution.reason,
+      owner_runs: [...facts.attribution.runs],
+      archive_ref: archiveRef,
+    },
+    // reason: the archive ref embeds the stash sha, and a detail may carry no 40-hex run (AC-HR-1); the ref itself is in `change`.
+    on_accept: "The stash is dropped from the stash list; a copy stays recoverable under lore's stash archive refs (refs/lore/archive/stash/).",
+    on_reject: "The stash stays in the stash list untouched.",
+  };
 }
 
 /** Where every stash commit is kept before lore drops it. */
@@ -181,7 +203,12 @@ export class StashPruneService {
   private async decideAndMaybeDrop(facts: StashFacts, archiveRef: string): Promise<Result<StashOutcome, LoreError>> {
     const measured = await this.buildDecisionFacts(facts.attribution);
     if (!measured.ok) return measured;
-    const decided = await this.deps.decisions.decide(STASH_DROP_CLASS, { id: facts.sha, version: stashDecisionVersion(facts.sha, facts.attribution) }, measured.value);
+    const decided = await this.deps.decisions.decide(
+      STASH_DROP_CLASS,
+      { id: facts.sha, version: stashDecisionVersion(facts.sha, facts.attribution) },
+      measured.value,
+      buildStashDropDetail(facts, archiveRef),
+    );
     if (!decided.ok) return decided;
     const { decision, effective } = decided.value;
     if (effective.verdict !== "auto") {

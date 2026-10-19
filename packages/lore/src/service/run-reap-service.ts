@@ -54,6 +54,7 @@ import {
 import type { ProcessEntry, ProcessSnapshot, ProcessTablePort } from "../adapters/process-table-port.js";
 import type { RunLifecycle, StoreInterface } from "../store/store-interface.js";
 import type { DecisionService } from "./decision-service.js";
+import type { DecisionDetail } from "../store/decision-log.js";
 import type { RunEndResult } from "./run-service.js";
 
 /** SIGKILL is sent only if the process is still alive this long after SIGTERM (spec AC-AU-5: 5 s). */
@@ -64,6 +65,42 @@ const DEAD_PID_END_REASON = "dead-pid";
 const LEGACY_SUBJECT_ID = "legacy-runs-without-recorded-pid";
 const PROCESS_CLASS = "process-reap";
 const STALE_RUN_CLASS = "run-end-stale";
+
+/** run-end-stale detail for ONE run whose recorded pid is dead (HR-T2, AC-HR-1). */
+function buildDeadPidRunDetail(runId: string, pid: number | null): DecisionDetail {
+  return {
+    summary: `End run ${runId}: its recorded process (pid ${pid === null ? "unrecorded" : String(pid)}) is no longer running`,
+    requested_by: "lore (run reap)",
+    change: { run_ids: [runId], pids: pid === null ? [] : [pid], reason: DEAD_PID_END_REASON },
+    on_accept: `The run ${runId} is marked ended with reason ${DEAD_PID_END_REASON}.`,
+    on_reject: `The run ${runId} stays open as it is.`,
+  };
+}
+
+/** run-end-stale detail for the ONE decision covering every run with no recorded pid (HR-T2, AC-HR-1). */
+function buildLegacyRunsDetail(runIds: readonly string[]): DecisionDetail {
+  return {
+    summary: `End ${String(runIds.length)} run(s) that never recorded a process id, so lore cannot tell whether they are alive: ${runIds.join(", ")}`,
+    requested_by: "lore (run reap)",
+    change: { run_ids: [...runIds], pids: [], reason: "legacy-no-pid-accepted" },
+    on_accept: "Every listed run is marked ended with reason legacy-no-pid-accepted.",
+    on_reject: "The listed runs stay open as they are.",
+  };
+}
+
+/** process-reap detail for one leftover process inside an ended run's worktree (HR-T2, AC-HR-1). */
+function buildProcessReapDetail(
+  base: { readonly pid: number; readonly command: string; readonly cwd: string; readonly owner_runs: readonly string[] },
+  proof: { readonly kind: string; readonly reasons: readonly string[] },
+): DecisionDetail {
+  return {
+    summary: `Stop process ${String(base.pid)} (${base.command}) left running in ${base.cwd} by ended run ${base.owner_runs.join(", ")}`,
+    requested_by: "lore (run reap)",
+    change: { run_ids: [...base.owner_runs], pids: [base.pid], command: base.command, cwd: base.cwd, ownership_proof: proof.kind, proof_reasons: [...proof.reasons] },
+    on_accept: `Process ${String(base.pid)} is sent SIGTERM, then SIGKILL if it is still the same process after a grace period.`,
+    on_reject: `Process ${String(base.pid)} is left running.`,
+  };
+}
 
 export type RunReapStore = Pick<StoreInterface, "listRunLifecycles" | "queryAudit">;
 /** Narrow port to `RunService.end` (services never cross-import). */
@@ -242,7 +279,7 @@ export class RunReapService {
       }
       // Dead pid (absent, zombie, or reused by a different process). Facts are measured, never supplied.
       const facts: AutonomyFacts = { recoverability: "reversible", blast: "own-or-ended-run", evidence: "lore-evaluated" };
-      const verdict = await this.verdictFor(apply, STALE_RUN_CLASS, { id: run.id, version: run.process.startTime }, facts);
+      const verdict = await this.verdictFor(apply, STALE_RUN_CLASS, { id: run.id, version: run.process.startTime }, facts, buildDeadPidRunDetail(run.id, run.process.pid));
       if (!verdict.ok) return verdict;
       if (verdict.value.verdict !== "auto") {
         entries.push({ run_id: run.id, action: "escalated", reason: DEAD_PID_END_REASON, decision: verdict.value });
@@ -286,7 +323,7 @@ export class RunReapService {
     let effective = existing.value;
     let recordId: number | undefined;
     if (effective === null) {
-      const outcome = await this.deps.decisions.decide(STALE_RUN_CLASS, subject, facts);
+      const outcome = await this.deps.decisions.decide(STALE_RUN_CLASS, subject, facts, buildLegacyRunsDetail(runIds));
       if (!outcome.ok) return outcome;
       effective = outcome.value.effective;
       recordId = outcome.value.record_id;
@@ -403,7 +440,7 @@ export class RunReapService {
         evidence: "lore-evaluated",
       };
       const subject = { id: `pid:${candidate.pid}`, version: candidate.startTime ?? "start-time-unmeasured" };
-      const verdict = await this.verdictFor(apply, PROCESS_CLASS, subject, facts);
+      const verdict = await this.verdictFor(apply, PROCESS_CLASS, subject, facts, buildProcessReapDetail(base, proof));
       if (!verdict.ok) return verdict;
       if (verdict.value.verdict !== "auto") {
         entries.push({
@@ -496,13 +533,14 @@ export class RunReapService {
     classId: string,
     subject: { id: string; version: string },
     facts: AutonomyFacts,
+    detail: DecisionDetail,
   ): Promise<Result<{ verdict: string; score: number; record_id?: number }, LoreError>> {
     if (!apply) {
       const decision = await this.deps.decisions.preview(classId, subject.id, facts);
       if (!decision.ok) return decision;
       return ok({ verdict: decision.value.verdict, score: decision.value.score });
     }
-    const outcome = await this.deps.decisions.decide(classId, subject, facts);
+    const outcome = await this.deps.decisions.decide(classId, subject, facts, detail);
     if (!outcome.ok) return outcome;
     // reason: the EFFECTIVE verdict binds (a human-tty accept of an escalated version is auto; a worse earlier
     // machine record for the same version stays worse), not this call's raw score.
