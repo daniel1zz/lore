@@ -303,14 +303,6 @@ async function runCoverage(target: string, json: boolean, commandsOnly: boolean,
     const { runnable, entryKeys, runnableEntries } = await treePredicateFor(rootDir, leaves.flatMap(leafCommands));
     const partitionByLeaf = new Map(leaves.map((leaf) => [leaf.slug, partitionDeclaredCommands(leafCommands(leaf), entryKeys, runnableEntries)]));
     const livePartition = (leaf: DocRecord) => partitionByLeaf.get(leaf.slug) as { live: string[]; absent: string[] };
-    // reason: a stored site_map value that is not a BR-n id is corrupt data (BR-1248): exit 2 naming leaf, site and value, before any
-    // verdict, so it is never read as "unmapped" and never excuses a site.
-    const corrupt = leaves.flatMap((leaf) => findCorruptSiteMapValues(leaf.slug, (leaf.extra["site_map"] ?? {}) as Record<string, string[]>));
-    if (corrupt.length > 0) {
-      if (json) printLine(inv.io.stdout, JSON.stringify({ ok: false, error: { code: "SITE_MAP_CORRUPT", entries: corrupt } }, null, 2));
-      else for (const c of corrupt) inv.io.stderr.write(`Error: leaf ${c.leaf} stores site_map value ${JSON.stringify(c.value)} for site ${c.site}: a site map takes BR-n rule ids only\n  fix: lore baseline map ${c.leaf} --remove-site ${c.site}\n`);
-      return 2;
-    }
     // reason: complete coverage is absolute at the root (BR-660): a runnable command declared by no leaf is never
     // censused. This is the ONLY refusal of this verb (BR-1248); only the root asks, a leaf or branch judges its own commands.
     const undeclared =
@@ -332,6 +324,16 @@ async function runCoverage(target: string, json: boolean, commandsOnly: boolean,
       else printUndeclared(inv, undeclared);
       return undeclared.length === 0 ? 0 : 1;
     }
+    // reason: a stored site_map value that is not a BR-n id is corrupt data (BR-1248): exit 2 naming leaf, site and value, on the full report only, before any
+    // verdict, so it is never read as "unmapped" and never excuses a site.
+    const corrupt = leaves.flatMap((leaf) => findCorruptSiteMapValues(leaf.slug, (leaf.extra["site_map"] ?? {}) as Record<string, string[]>));
+    if (corrupt.length > 0) {
+      if (json) printLine(inv.io.stdout, JSON.stringify({ ok: false, error: { code: "SITE_MAP_CORRUPT", entries: corrupt } }, null, 2));
+      else for (const c of corrupt) inv.io.stderr.write(`Error: leaf ${c.leaf} stores site_map value ${JSON.stringify(c.value)} for site ${c.site}: a site map takes BR-n rule ids only\n  fix: lore baseline map ${c.leaf} --remove-site ${c.site}\n`);
+      return 2;
+    }
+    // reason: `--commands-only` returned above without reading any site_map value (BR-1248: the floor reads only the registry and the
+    // declarations), so leftover excuse entries make only this full report exit 2, never the integrate floor.
     const censusByCommand = listSitesMany({ rootDir, commands: leaves.flatMap((leaf) => livePartition(leaf).live) });
     const reports: LeafCoverageReport[] = leaves.map((leaf) => {
       const commands = leafCommands(leaf);
