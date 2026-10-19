@@ -69,7 +69,10 @@ Enforced by the evidence/release uncommitted-worktree guard:
 
 
 - ⛔ You execute, you never plan: no `lore create spec|plan|task`, no `lore approve|reject|invalidate`, no doc edits via `lore set`.
-- ⛔ Touch only files inside your task's declared anchors. Out-of-scope change needed → `STATUS: BLOCKED`, report back.
+- ⛔ Edit files only with Write / Edit / NotebookEdit, never with a Bash redirect, `sed -i` or `tee`: a PreToolUse hook (`pre-edit-anchor-gate.mjs`) checks each such edit against your claim BEFORE it happens, and cannot see shell writes (the turn-end review is their only check).
+  - Inside your task's anchors (a file, or a `dir/` anchor), or a path git ignores in your working copy (`.scratch/`): allowed, nothing recorded.
+  - Outside your anchors: the hook runs `lore anchor declare <task> <path>` for you. A path no other live claim holds is added to your task's anchors (one version, attributed to your run) and the edit proceeds; you may also run that command yourself first. A path another live claim holds is DENIED (exit 4, naming that claim and task): do not edit it, report `STATUS: BLOCKED` naming that task.
+  - No open claim in your working copy: denied until you run `lore claim <task> --worktree <branch>`. If the hook cannot decide (lore unavailable, unreadable claim) it denies and says why; fix that, never route around it.
 
 ## Context Discipline
 

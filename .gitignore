@@ -55,3 +55,6 @@ packages/lore/src/generated/dashboard-assets.ts
 # typechecked glob, even transiently, even with cleanup: doing so reds every
 # concurrent `typecheck` in this checkout for the duration of the write.
 .scratch/
+
+# Per-worktree scope file written by lore claim / anchor declare|add|rm / release and read by the pre-edit-anchor-gate hook
+.lore-scope.json

@@ -61,6 +61,7 @@ import { loadLoreApp } from "../loader.js";
 import { exitCode, formatErrorFor, resolveActorWithIdentitySource } from "../utils.js";
 import { requirePhaseWorkflowService } from "../phase-wiring.js";
 import { printLine } from "../output.js";
+import { refreshScopeFilesOf, scopeCandidatesOf } from "../edit-scope-wiring.js";
 
 export default defineLoreCommand({
   meta: {
@@ -165,6 +166,13 @@ export default defineLoreCommand({
         inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
         return exitCode(result.error);
       }
+
+      // reason: the edit-time anchor gate reads this working copy's scope file instead of spawning lore per edit.
+      await refreshScopeFilesOf(
+        app,
+        result.value.slug,
+        await scopeCandidatesOf(app, result.value.slug, inv.cwd, typeof args.worktree === "string" ? [args.worktree] : []),
+      );
 
       if (args.json) {
         printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { doc: result.value } }, null, 2));

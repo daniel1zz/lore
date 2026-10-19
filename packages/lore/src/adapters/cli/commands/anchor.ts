@@ -63,6 +63,15 @@
  * meaningful only for a task target (spec
  * anchor writes are attributed to "system", mirroring `AcService`'s writes).
  *
+ * Edit-time scope (task-skill-design-implementers-declare-out-of-anchor-files) — the two verbs the shipped
+ * PreToolUse hook `pre-edit-anchor-gate.mjs` calls, so a helper's edit outside its claim's anchors is declared or
+ * denied BEFORE it happens:
+ *   scope   --worktree <dir> [--json]        The open claims recorded for a working copy, with anchors and holder run.
+ *   declare <task> <path> --worktree <dir>   Add one out-of-anchor path to the claimed task unless another live
+ *                                            claim overlaps it (the task-claim gate's overlap predicate); exit 4
+ *                                            naming that claim and its task. A path already covered, or git-ignored
+ *                                            in the working copy, writes nothing and exits 0.
+ *
  * Exit codes per SPEC-003 §5:
  *   0 = success
  *   3 = DOC_NOT_FOUND (target not found)
@@ -83,6 +92,8 @@ import { collectFileAnchorResolution, renderFileAnchorAdvisory } from "../../../
 import { ANCHOR_SCANNED_DOC_TYPES } from "../../../service/drift-check-service.js";
 import { buildFileAnchorProbeContext } from "../../real-fs-probe.js";
 import { invocationOf } from "../command-invocation.js";
+import { declareEditPath, readEditScope } from "../../../service/edit-scope.js";
+import { buildEditScopeDeps, refreshScopeFilesOf, scopeCandidatesOf } from "../edit-scope-wiring.js";
 import { printLine } from "../output.js";
 import type { CliIo } from "../output.js";
 
@@ -187,6 +198,9 @@ function isCodeAnchorTarget(docType: DocType): boolean {
   return ANCHOR_SCANNED_DOC_TYPES.includes(docType);
 }
 
+/** The CLI exit of an edit-scope refusal (a held path, no claim, an unmeasurable probe): VALIDATION_ERROR, exit 4. */
+const EDIT_SCOPE_DENIED_EXIT = 4;
+
 export default defineLoreCommand({
   meta: {
     name: "anchor",
@@ -240,6 +254,7 @@ export default defineLoreCommand({
             }
 
             const anchors = (result.value.extra["file_anchors"] as string[] | undefined) ?? [];
+            await refreshScopeFilesOf(app, result.value.slug, await scopeCandidatesOf(app, result.value.slug, inv.cwd));
             emitFileAnchorAdvisory(inv.io, anchors, result.value.slug, inv.cwd);
             if (args.json) {
               printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { doc: result.value, anchors } }, null, 2));
@@ -326,6 +341,7 @@ export default defineLoreCommand({
             }
 
             const anchors = (result.value.extra["file_anchors"] as string[] | undefined) ?? [];
+            await refreshScopeFilesOf(app, result.value.slug, await scopeCandidatesOf(app, result.value.slug, inv.cwd));
             if (args.json) {
               printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { doc: result.value, anchors } }, null, 2));
               return 0;
@@ -357,6 +373,91 @@ export default defineLoreCommand({
             const error = unsupportedTargetTypeError(target.type);
             inv.io.stderr.write(formatErrorFor(inv, error) + "\n");
             return exitCode(error);
+          }
+        } finally {
+          app.close();
+        }
+        return 0;
+      },
+    }),
+
+    scope: defineLoreCommand({
+      meta: { name: "scope", description: "List the open task claims recorded for a working copy, with their anchors and holder run" },
+      args: {
+        worktree: { type: "string", description: "Working-copy directory the claims were recorded for", required: true },
+        json: { type: "boolean", description: "Output result as JSON" },
+      },
+      async run(context): Promise<number> {
+        const { args } = context;
+        const inv = invocationOf(context);
+        const { app } = loadLoreApp({ inv });
+        try {
+          const report = await readEditScope(buildEditScopeDeps(app), args.worktree as string);
+          if (!report.ok) {
+            inv.io.stderr.write(formatErrorFor(inv, report.error) + "\n");
+            return exitCode(report.error);
+          }
+          if (args.json) {
+            printLine(inv.io.stdout, JSON.stringify({ ok: true, data: report.value }, null, 2));
+            return 0;
+          }
+          printLine(inv.io.stdout, `Open claims of ${report.value.working_copy}:`);
+          for (const claim of report.value.claims) printLine(inv.io.stdout, `  ${claim.task} (run ${claim.holder_run ?? "-"}): ${claim.anchors.join(", ") || "(no anchors)"}`);
+          for (const note of report.value.not_measured) printLine(inv.io.stdout, `  not measured: ${note}`);
+        } finally {
+          app.close();
+        }
+        return 0;
+      },
+    }),
+
+    declare: defineLoreCommand({
+      meta: {
+        name: "declare",
+        description: "Declare one out-of-anchor path on a claimed task unless another live claim holds it (edit-time scope)",
+      },
+      args: {
+        target: { type: "positional", description: "The claimed task's ID or slug", required: true },
+        path: { type: "positional", description: "Repo path (absolute, or relative to --worktree) the helper is about to edit", required: true },
+        worktree: { type: "string", description: "Working-copy directory the task's claim was recorded for", required: true },
+        json: { type: "boolean", description: "Output result as JSON" },
+      },
+      async run(context): Promise<number> {
+        const { args } = context;
+        const inv = invocationOf(context);
+        const { app } = loadLoreApp({ inv });
+        try {
+          const by = resolveActor(inv.io, undefined, inv.env, inv.cwd, inv.user);
+          const result = await declareEditPath(buildEditScopeDeps(app), {
+            workingCopy: args.worktree as string,
+            task: args.target as string,
+            path: args.path as string,
+            by,
+            source: app.callerSurface,
+          });
+          if (!result.ok) {
+            inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
+            return exitCode(result.error);
+          }
+          const verdict = result.value;
+          // reason: only a written anchor changes the scope file; the worktree is named by the caller, plus the cwd's.
+          if (verdict.kind === "declared") {
+            await refreshScopeFilesOf(app, verdict.task, await scopeCandidatesOf(app, verdict.task, inv.cwd, [args.worktree as string]));
+          }
+          if (args.json) printLine(inv.io.stdout, JSON.stringify({ ok: verdict.kind !== "denied", data: verdict }, null, 2));
+          if (verdict.kind === "denied") {
+            inv.io.stderr.write(`Refused (${verdict.reason}): ${verdict.message}\n`);
+            return EDIT_SCOPE_DENIED_EXIT;
+          }
+          if (!args.json) {
+            printLine(
+              inv.io.stdout,
+              verdict.kind === "declared"
+                ? `Declared ${verdict.path} on ${verdict.task} (v${verdict.version})`
+                : verdict.kind === "covered"
+                  ? `${verdict.path} is already covered by ${verdict.task}`
+                  : `${verdict.path} is git-ignored in the working copy; nothing declared`,
+            );
           }
         } finally {
           app.close();
