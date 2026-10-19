@@ -76,6 +76,17 @@ describe("ReadyTaskList", () => {
       expect(screen.queryByText("blocked")).not.toBeInTheDocument();
     });
 
+    it("badges a deprecated (ready:false) record 'deprecated', never 'blocked'", () => {
+      const deprecated = makeRecord({
+        ready: false,
+        task: { ...makeRecord().task, status: "deprecated" },
+      });
+      render(<ReadyTaskList records={[deprecated]} claimTtlMinutes={120} />);
+      expect(screen.getByText("deprecated")).toBeInTheDocument();
+      expect(screen.queryByText("blocked")).not.toBeInTheDocument();
+      expect(screen.queryByText("ready")).not.toBeInTheDocument();
+    });
+
     it("renders 'blocked' and unmet-blocker slugs for a blocked record", () => {
       const record = makeRecord({
         ready: false,
