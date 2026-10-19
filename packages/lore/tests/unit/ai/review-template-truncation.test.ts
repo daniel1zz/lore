@@ -1,7 +1,7 @@
 /**
- * D9 (BR-268, spec-defect-clusters-round-2-part-b-review-pending-queue-corpus): the document under review is
- * never cut by `review-template.ts`, and `AIProviderService.judgeDoc` never stamps a judgment `truncated`.
- * (Formerly the SPEC-040 D8 doc-body truncation notice tests, AC-ADF-8; the notice now exists only for the parent.)
+ * D9 (BR-268, spec-defect-clusters-round-2-part-b-review-pending-queue-corpus): the active prompt version (v6)
+ * never cuts the document under review and `AIProviderService.judgeDoc` then never stamps a judgment `truncated`;
+ * the frozen v1-v5 keep the SPEC-040 D8 doc-body cut and notice (AC-ADF-8) so stored judgments stay reproducible.
  *
  * @spec_ref AC-ADF-8
  */
@@ -18,7 +18,7 @@ import { runDeterministicChecks } from "@lore/core";
 import type { AIProvider, CreateDocInput, DocRecord, ReviewBundle, Telemetry, TelemetryEvent } from "@lore/core";
 import { actedStore } from "../../live-invocation.js";
 
-const BUDGETS = { max_context_chars: 8000 };
+const BUDGETS = { max_doc_chars: 12000, max_context_chars: 8000 };
 
 function makeDoc(overrides: Partial<DocRecord>): DocRecord {
   return {
@@ -44,25 +44,54 @@ function makeDoc(overrides: Partial<DocRecord>): DocRecord {
 
 // ─── Pure template-level tests ────────────────────────────────────────────────
 
-describe("buildReviewPromptV1 (REVIEW_TEMPLATES) — the document under review is never cut (BR-268, D9)", () => {
-  it("a 36000-char doc body is rendered whole: last line present, no notice, no 'doc' cut", () => {
+describe("the document under review is never cut by the active version, v6 (BR-268, D9)", () => {
+  it("the active version is v6 and it renders a 36000-char doc body whole: last line present, no notice, no 'doc' cut", () => {
+    expect(REVIEW_PROMPT_VERSION).toBe("v6");
     const content = "x".repeat(36000) + "\nLAST-LINE-MARKER";
     const bundle: ReviewBundle = { doc: makeDoc({ content }), links: [] };
     const result = REVIEW_TEMPLATES[REVIEW_PROMPT_VERSION]!(bundle, [], BUDGETS);
 
     expect(result.prompt).toContain(content);
     expect(result.prompt).not.toContain("# Truncation Notice");
+    expect(result.docTruncated).toBe(false);
     expect(result.truncated).not.toContain("doc");
     expect(result.cuts).toEqual([]);
   });
 
-  it("BOUNDARY: a body of exactly 12000 chars (the old budget) is also whole", () => {
-    const content = "y".repeat(12000);
+  it("v6 ignores a configured max_doc_chars: a 2000 budget still yields the whole body", () => {
+    const content = "y".repeat(4000) + "\nLAST-LINE-MARKER";
     const bundle: ReviewBundle = { doc: makeDoc({ content }), links: [] };
-    const result = REVIEW_TEMPLATES[REVIEW_PROMPT_VERSION]!(bundle, [], BUDGETS);
+    const result = REVIEW_TEMPLATES["v6"]!(bundle, [], { max_doc_chars: 2000, max_context_chars: 8000 });
 
     expect(result.prompt).toContain(content);
-    expect(result.truncated).toEqual([]);
+    expect(result.docTruncated).toBe(false);
+  });
+});
+
+describe("frozen v1-v5 keep cutting the document body at max_doc_chars (SPEC-040 D8, AC-ADF-8)", () => {
+  for (const version of ["v1", "v2", "v3", "v4", "v5"]) {
+    it(`${version}: a doc body over max_doc_chars sets docTruncated=true, adds the Truncation Notice and truncated includes 'doc'`, () => {
+      const bundle: ReviewBundle = { doc: makeDoc({ content: "x".repeat(36000) + "\nLAST-LINE-MARKER" }), links: [] };
+      const result = REVIEW_TEMPLATES[version]!(bundle, [], BUDGETS);
+
+      expect(result.docTruncated).toBe(true);
+      expect(result.prompt).toContain("# Truncation Notice");
+      expect(result.prompt).not.toContain("LAST-LINE-MARKER\n\n#");
+      expect(result.truncated).toContain("doc");
+    });
+
+    it(`${version}: BOUNDARY a body exactly at max_doc_chars is not cut`, () => {
+      const bundle: ReviewBundle = { doc: makeDoc({ content: "y".repeat(12000) }), links: [] };
+      const result = REVIEW_TEMPLATES[version]!(bundle, [], BUDGETS);
+
+      expect(result.docTruncated).toBe(false);
+      expect(result.prompt).not.toContain("# Truncation Notice");
+    });
+  }
+
+  it("a frozen version without a configured max_doc_chars falls back to FROZEN_DOC_CHARS (12000), the old default", () => {
+    const bundle: ReviewBundle = { doc: makeDoc({ content: "z".repeat(12001) }), links: [] };
+    expect(REVIEW_TEMPLATES["v5"]!(bundle, [], { max_context_chars: 8000 }).docTruncated).toBe(true);
   });
 });
 

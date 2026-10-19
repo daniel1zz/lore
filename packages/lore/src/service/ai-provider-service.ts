@@ -53,8 +53,11 @@
  *     deterministic `checks` argument it was called with — the mechanical pre-checks
  *     (computed BEFORE the LLM call, SPEC-034 §4 flow step 2) are the authoritative
  *     record; the model is never trusted to self-report which checks passed
- *   - judgeDoc never stamps `truncated` on a judgment: the document under review reaches the judge whole
- *     (BR-268, D9). The stored field stays readable for earlier rows; the approval gate refuses them (BR-269)
+ *   - judgeDoc stamps `truncated: true` on the returned judgment when the review template reports
+ *     `docTruncated` (SPEC-040 D8) — additive-only field, mirrors the `checks` override precedent
+ *     (service-computed, model output never consulted for it). The active template (v6, BR-268 D9) never cuts the
+ *     document under review, so a v6 judgment is never marked; the frozen v1-v5 still do. The approval gate refuses
+ *     a stored `truncated` approve of ANY version (BR-269)
  *   - assessPlan (SPEC-040 §T2) computes `AssessmentFacts` and `source_versions` EXACTLY
  *     ONCE per call, from the full untruncated bundle, BEFORE prompt truncation — the same
  *     objects are handed to the (registry-selected) prompt template AND persisted verbatim
@@ -817,14 +820,15 @@ export class AIProviderService {
      */
     private readonly assessBudgets: AssessBudgets,
     /**
-     * Character budget for the CONTEXT section of the review judge prompt (the document under review has none, BR-268).
-     * Sourced from config.ai.review.* (default: context 8000).
+     * Character budgets for the review judge prompt. `max_context_chars` bounds the parent context; `max_doc_chars` is
+     * read only by the frozen v1-v5 templates (the active v6 never cuts the document under review, BR-268).
+     * Sourced from config.ai.review.* (defaults: doc 12000, context 8000).
      * Defaulted here (not required positionally) so pre-SPEC-034 call sites that construct
      * AIProviderService directly (several test fixtures) don't all need updating for a
      * feature they don't exercise.
      * Source: SPEC-034 §6
      */
-    private readonly reviewBudgets: ReviewBudgets = { max_context_chars: 8000 },
+    private readonly reviewBudgets: ReviewBudgets = { max_doc_chars: 12000, max_context_chars: 8000 },
     /**
      * Character/count budgets for the staleness-probe judge prompt.
      * Sourced from config.ai.staleness.* (defaults: doc 12000, neighbor_limit 20).
@@ -1525,7 +1529,7 @@ export class AIProviderService {
     // Notice" section (bundle.doc/bundle.parent invalidated-state check). judgeDoc is
     // the sole production caller of this template — resolving "now" here, once, keeps
     // review-template.ts itself wall-clock-free (its own module invariant).
-    const { prompt, cuts } = template(bundle, checks, this.reviewBudgets, new Date().toISOString());
+    const { prompt, docTruncated, cuts } = template(bundle, checks, this.reviewBudgets, new Date().toISOString());
 
     const emitReviewEvent = (
       providerResult: Result<GenerateOutput, LoreError>,
@@ -1550,7 +1554,7 @@ export class AIProviderService {
       return first.providerResult;
     }
     if (first.parsed !== undefined) {
-      const finalized = this._finalizeJudgment(first.parsed, bundle, checks, cuts);
+      const finalized = this._finalizeJudgment(first.parsed, bundle, checks, docTruncated, cuts);
       emitReviewEvent(first.providerResult, finalized.decision, finalized.confidence);
       return ok(finalized);
     }
@@ -1563,7 +1567,7 @@ export class AIProviderService {
       return second.providerResult;
     }
     if (second.parsed !== undefined) {
-      const finalized = this._finalizeJudgment(second.parsed, bundle, checks, cuts);
+      const finalized = this._finalizeJudgment(second.parsed, bundle, checks, docTruncated, cuts);
       emitReviewEvent(second.providerResult, finalized.decision, finalized.confidence);
       return ok(finalized);
     }
@@ -2151,6 +2155,10 @@ export class AIProviderService {
    * @param parsed - Validated judge output (decision/confidence/reasons/blocking_questions)
    * @param bundle - Review bundle — bundle.doc.id/version become doc_id/doc_version
    * @param checks - Deterministic pre-check results, passed in by the caller of judgeDoc
+   * @param docTruncated - SPEC-040 D8: whether the document body was truncated for the
+   *   prompt budget (`BuildReviewPromptResult.docTruncated`; never true under v6) — set additive-only (only
+   *   `truncated: true` when true; omitted, never `false`, otherwise), mirroring
+   *   `judgment.reasoning_clipped`'s additive-only convention in assessment.ts
    * @param cuts - F1: every cut prompt section with real shown/total chars
    *   (`BuildReviewPromptResult.cuts`) — stored as `truncation`; key omitted when empty
    */
@@ -2158,6 +2166,7 @@ export class AIProviderService {
     parsed: LlmReviewOutput,
     bundle: ReviewBundle,
     checks: CheckResult[],
+    docTruncated: boolean,
     cuts: readonly ReviewTruncationEntry[],
   ): NewReviewJudgment {
     return {
@@ -2171,6 +2180,7 @@ export class AIProviderService {
       // reason: explicit (not relying on reviewJudgmentSchema's optional-defaults-to-
       // "review" behavior, SPEC-044 D3) — production code states its intent plainly.
       kind: "review",
+      ...(docTruncated ? { truncated: true } : {}),
       ...(cuts.length > 0 ? { truncation: [...cuts] } : {}),
       // reason: SPEC-044 D11 byproduct — a review judge MAY emit this nomination
       // alongside its normal verdict; passed through verbatim, never re-derived here.

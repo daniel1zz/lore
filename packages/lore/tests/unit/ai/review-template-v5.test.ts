@@ -42,9 +42,9 @@ function render(version: string, kind: (typeof KINDS)[number]): string {
 }
 
 describe("review prompt v5", () => {
-  it("STATE: the current version is v5 and the registry holds exactly v1..v5", () => {
-    expect(REVIEW_PROMPT_VERSION).toBe("v5");
-    expect(Object.keys(REVIEW_TEMPLATES).sort()).toEqual(["v1", "v2", "v3", "v4", "v5"]);
+  it("STATE: v5 stays registered (frozen) and the registry holds exactly v1..v6", () => {
+    expect(REVIEW_PROMPT_VERSION).not.toBe("v5");
+    expect(Object.keys(REVIEW_TEMPLATES).sort()).toEqual(["v1", "v2", "v3", "v4", "v5", "v6"]);
     expect(typeof REVIEW_TEMPLATES[REVIEW_PROMPT_VERSION]).toBe("function");
   });
 

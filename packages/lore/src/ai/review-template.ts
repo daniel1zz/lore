@@ -21,23 +21,28 @@
  *     (escalate REQUIRES blocking_questions; every other decision REQUIRES it empty) —
  *     the same invariant llmReviewOutputSchema enforces at parse time, so a judge that
  *     follows the prompt can never produce a response Zod would reject on that axis alone.
- *   - **The document under review is never cut (BR-268, D9)** — the whole body is rendered; only
- *     the PARENT context section keeps a budget (`max_context_chars`). A body the provider cannot
- *     take is an AI failure raised by the provider, never a silent cut. Consequently no judgment
- *     is ever marked `truncated` by this template (the stored field remains readable for rows
- *     recorded earlier; BR-269 refuses to approve on them).
+ *   - **The document under review is never cut from v6 on (BR-268, D9)** — v6 renders the whole
+ *     body; only the PARENT context keeps a budget (`max_context_chars`). A body the provider
+ *     cannot take is an AI failure raised by the provider, never a silent cut, so a v6 judgment
+ *     is never marked `truncated`. v1-v5 are FROZEN and keep their body cut at `max_doc_chars`
+ *     (default {@link FROZEN_DOC_CHARS}) so stored judgments stay reproducible; `assembleReviewPrompt`
+ *     branches on its `wholeDocument` flag, which only v6 sets. Rows recorded under v1-v5 may carry
+ *     `truncated: true`; BR-269 refuses to approve on them, whatever their version.
+ *   - **Truncation notice (SPEC-040 D8, v1-v5 only)** — when the document BODY is truncated for
+ *     budget, the prompt gains a "# Truncation Notice" section and `BuildReviewPromptResult.docTruncated`
+ *     carries it out (always false for v6).
  *   - **Omitted-section heading list (task-the-judge-truncation-notice-says-content-was-cut-but-never)**
- *     — now applied to the PARENT context only. The bare "treat it as present but unseen" instruction was measured to fail in BOTH
+ *     — the bare "treat it as present but unseen" instruction was measured to fail in BOTH
  *     directions: a judge escalated on a section it wrongly assumed absent (it was actually
  *     declared past the cut), and a judge correctly obeyed the notice but then could not say
  *     WHICH cross-referenced sections were unverifiable. The fix is `extractSectionHeadings`,
- *     run over the FULL, untruncated the FULL parent content (never the truncated copy — a
+ *     run over the FULL, untruncated content (never the truncated copy — a
  *     heading list built from the truncated copy could only ever name headings that already
  *     survived, which is vacuous), splitting them into shown/omitted by the ACTUAL visible
- *     char count (`contextSection.text.length`, NOT `budgets.max_context_chars` directly — the two
+ *     char count (the truncated section's `text.length`, NOT the budget directly — the two
  *     differ when `headChars` backs off one code unit to avoid splitting a surrogate pair).
  *     `buildOmittedSectionsNotice` renders this as a trailing sentence appended to the
- *     existing "# Parent Truncation Notice" body — the pre-existing instruction text is untouched
+ *     existing truncation notice body — the pre-existing instruction text is untouched
  *     byte-for-byte (REGRESSION); only a new trailing line is added. A document with zero
  *     detected headings (no markdown structure at all) gets a distinct "cannot be named"
  *     sentence rather than a silently-empty list — an empty list with no further comment
@@ -65,7 +70,8 @@
  *     alone omits them. The block is NOT subject to `max_context_chars`/`max_doc_chars`; it has
  *     its own cap, and entries beyond it are COUNTED in an "N rules|criteria omitted" line —
  *     never dropped silently. A spec's own criteria are already rendered by the advisory block
- *     (v2) and are not repeated. v1 stays frozen (no structured block).
+ *     (v2) and are not repeated. v1 stays frozen (no structured block). From v6 (BR-960, D9) the
+ *     baseline block also shows each rule's examples and the leaf's declared commands; v2-v5 do not.
  *
  * Side-effect class: pure
  *
@@ -95,7 +101,13 @@ import type {
  * verbatim into `judge.prompt_version` on every review judgment (SPEC-034 §2) so calibration
  * queries can filter/aggregate per prompt version without a join.
  */
-export const REVIEW_PROMPT_VERSION = "v5";
+export const REVIEW_PROMPT_VERSION = "v6";
+
+/**
+ * The document-body budget the FROZEN versions v1-v5 apply when `ReviewBudgets.max_doc_chars` is absent. It equals
+ * the `ai.review.max_doc_chars` schema default those versions always ran with, so their output is unchanged.
+ */
+export const FROZEN_DOC_CHARS = 12000;
 
 /**
  * The exact advisory-only clause the v2 prompt embeds (SPEC-053 AC-053-4). Exported so a
@@ -109,10 +121,11 @@ export const ADVISORY_ONLY_CLAUSE =
   "a reviewer, not to block.";
 
 /**
- * Character budgets for CONTEXT sections only, sourced from `config.ai.review.*`. There is
- * deliberately no budget for the document under review (BR-268).
+ * Character budgets, sourced from `config.ai.review.*`. `max_context_chars` bounds the parent context in every
+ * version. `max_doc_chars` is read ONLY by the frozen v1-v5 (v6 never cuts the document under review, BR-268).
  */
 export interface ReviewBudgets {
+  max_doc_chars?: number;
   max_context_chars: number;
 }
 
@@ -121,7 +134,12 @@ export interface BuildReviewPromptResult {
   prompt: string;
   truncated: string[];
   /**
-   * One entry per cut context section (`parent`) with the REAL shown/total char counts
+   * True iff the document body itself was cut to fit `max_doc_chars` (SPEC-040 D8): the trigger for the prompt's
+   * "Truncation Notice" section and the persisted judgment's `truncated` flag. Always false for v6.
+   */
+  docTruncated: boolean;
+  /**
+   * One entry per cut section (`doc` for v1-v5, `parent`) with the REAL shown/total char counts
    * (F1) — `[]` when every input fit. The service persists it as `judgment.truncation`.
    */
   cuts: ReviewTruncationEntry[];
@@ -370,7 +388,11 @@ function renderStandardFourParts(rule: BaselineRule): string {
 }
 
 /** Pure render of a baseline node's structured parts (rules, depends_on, glossary). */
-function renderBaselineStructuredSection(doc: ReviewBundle["doc"], withFourParts: boolean): string {
+function renderBaselineStructuredSection(
+  doc: ReviewBundle["doc"],
+  withFourParts: boolean,
+  withExamplesAndCommands: boolean,
+): string {
   const heading = "Structured Data of the Document Under Review";
   const parsed = baselineExtraSchema.safeParse(doc.extra ?? {});
   if (!parsed.success) {
@@ -386,8 +408,9 @@ function renderBaselineStructuredSection(doc: ReviewBundle["doc"], withFourParts
   if (extra.depends_on !== undefined && extra.depends_on.length > 0) {
     parts.push(`depends_on: ${extra.depends_on.join(", ")}`);
   }
-  // reason: BR-960 — a leaf's declared commands are part of what the judge vouches for; shown whole, never summarised.
-  if (extra.commands !== undefined && extra.commands.length > 0) {
+  // reason: BR-960 (v6 only; v2-v5 are frozen) — a leaf's declared commands are part of what the judge vouches for;
+  // shown whole, never summarised.
+  if (withExamplesAndCommands && extra.commands !== undefined && extra.commands.length > 0) {
     parts.push(`commands (${extra.commands.length}): ${extra.commands.join(" | ")}`);
   }
   if (extra.glossary !== undefined && extra.glossary.length > 0) {
@@ -401,8 +424,8 @@ function renderBaselineStructuredSection(doc: ReviewBundle["doc"], withFourParts
       (r) =>
         `- ${r.id} [confidence=${r.confidence}, lifecycle=${r.lifecycle}, enforced_by=${r.enforced_by}]: ${r.statement}` +
         (r.retired_note !== undefined ? ` (retired: ${r.retired_note})` : "") +
-        // reason: BR-960 — every rule's examples reach the judge (the rule's own worked cases).
-        (r.examples.length > 0 ? `\n  examples: ${r.examples.join(" | ")}` : "") +
+        // reason: BR-960 (v6 only) — every rule's examples reach the judge (the rule's own worked cases).
+        (withExamplesAndCommands && r.examples.length > 0 ? `\n  examples: ${r.examples.join(" | ")}` : "") +
         (withFourParts ? renderStandardFourParts(r) : ""),
     );
     parts.push(`rules (${entries.length}):\n${renderCappedEntries(entries, "rules")}`);
@@ -488,8 +511,14 @@ function renderSpecRuleChangesSection(doc: ReviewBundle["doc"]): string {
  * -> its rules/depends_on/glossary; plan -> its parent spec's acceptance criteria; any other
  * doc type -> `""` (a spec's own criteria are already rendered by the v2 advisory block).
  */
-function renderStructuredPartsSection(bundle: ReviewBundle, withFourParts: boolean): string {
-  if (bundle.doc.type === "baseline") return renderBaselineStructuredSection(bundle.doc, withFourParts);
+function renderStructuredPartsSection(
+  bundle: ReviewBundle,
+  withFourParts: boolean,
+  withExamplesAndCommands: boolean,
+): string {
+  if (bundle.doc.type === "baseline") {
+    return renderBaselineStructuredSection(bundle.doc, withFourParts, withExamplesAndCommands);
+  }
   if (bundle.doc.type === "spec") return renderSpecRuleChangesSection(bundle.doc);
   if (bundle.doc.type === "plan" && bundle.parent !== undefined) {
     return renderPlanParentCriteriaSection(bundle.parent);
@@ -507,6 +536,9 @@ function renderStructuredPartsSection(bundle: ReviewBundle, withFourParts: boole
  * Assembly: role → document → parent context → deterministic pre-check results → output
  * instruction. Each material section is truncated to its configured budget; any section
  * that gets cut has its name appended to the returned `truncated[]` list.
+ *
+ * `wholeDocument` (v6 only, BR-268 D9): render the document under review uncut. False keeps the frozen v1-v5
+ * behaviour: the body is cut at `budgets.max_doc_chars` (default {@link FROZEN_DOC_CHARS}) with a notice.
  */
 function assembleReviewPrompt(
   bundle: ReviewBundle,
@@ -515,11 +547,21 @@ function assembleReviewPrompt(
   nowIso: string | undefined,
   advisory: { section: string; jsonField: string; rule: string },
   structuredSection: string,
+  wholeDocument: boolean,
 ): BuildReviewPromptResult {
   const truncated: string[] = [];
   const cuts: ReviewTruncationEntry[] = [];
 
-  // reason: BR-268 (D9) — the document under review is rendered whole; do NOT reintroduce truncateSection here.
+  // reason: BR-268 (D9) — v6 renders the document under review whole; v1-v5 are frozen and keep their cut so stored
+  // judgments stay reproducible. Do NOT make the cut apply to v6.
+  const docSection = wholeDocument
+    ? { text: bundle.doc.content, truncated: false }
+    : truncateSection(bundle.doc.content, budgets.max_doc_chars ?? FROZEN_DOC_CHARS);
+  if (docSection.truncated) {
+    truncated.push("doc");
+    cuts.push({ section: "doc", shown_chars: docSection.text.length, total_chars: bundle.doc.content.length });
+  }
+
   let contextBlock = "(no parent document — this doc is a root or its parent could not be resolved)";
   if (bundle.parent !== undefined) {
     const contextSection = truncateSection(bundle.parent.content, budgets.max_context_chars);
@@ -547,6 +589,21 @@ function assembleReviewPrompt(
       contextSection.text +
       parentNotice;
   }
+
+  // reason: SPEC-040 D8 — the doc-body-only truncation notice (frozen v1-v5; never produced for v6). Parent-context
+  // truncation has its own notice above. The trailing sentence (task-the-judge-truncation-notice-…) names WHICH
+  // section headings fell outside the window, derived from `bundle.doc.content` (the FULL body) — never from
+  // `docSection.text` (the truncated copy) — split at `docSection.text.length` (the ACTUAL visible-char count, which
+  // can be one less than the budget when `headChars` backs off to avoid splitting a surrogate pair).
+  const truncationNotice = docSection.truncated
+    ? `# Truncation Notice\n` +
+      `The document body above was truncated to fit this prompt's character budget. Treat ` +
+      `the FULL document as present but unseen beyond what is shown — do NOT conclude a ` +
+      `section is missing, incomplete, or absent merely because it isn't visible here. Any ` +
+      `escalation or finding about "unseen" or "missing" content MUST cite this notice ` +
+      `explicitly, not silence alone.\n` +
+      `${buildOmittedSectionsNotice(bundle.doc.content, docSection.text.length)}\n\n`
+    : "";
 
   // reason: SPEC-043 §Design Decisions D9 — when the bundle's own doc or its parent is
   // currently invalidated (bi-temporal validity metadata), tell the judge to discount
@@ -582,7 +639,8 @@ function assembleReviewPrompt(
     `as ground truth, do not attempt to re-derive them yourself.\n\n` +
     `# Document Under Review\n` +
     `## ${bundle.doc.title} (${bundle.doc.slug}, type=${bundle.doc.type}, status=${bundle.doc.status})\n` +
-    `${bundle.doc.content}\n\n` +
+    `${docSection.text}\n\n` +
+    truncationNotice +
     stalenessNotice +
     structuredSection +
     advisory.section +
@@ -612,7 +670,7 @@ function assembleReviewPrompt(
     `- reasons MUST have at least one entry.\n` +
     advisory.rule;
 
-  return { prompt, truncated, cuts };
+  return { prompt, truncated, docTruncated: docSection.truncated, cuts };
 }
 
 // ─── Empty advisory (v1) ─────────────────────────────────────────────────────
@@ -632,7 +690,7 @@ function buildReviewPromptV1(
   budgets: ReviewBudgets,
   nowIso?: string,
 ): BuildReviewPromptResult {
-  return assembleReviewPrompt(bundle, checks, budgets, nowIso, NO_ADVISORY, "");
+  return assembleReviewPrompt(bundle, checks, budgets, nowIso, NO_ADVISORY, "", false);
 }
 
 /**
@@ -647,7 +705,7 @@ function buildReviewPromptV2(
   budgets: ReviewBudgets,
   nowIso?: string,
 ): BuildReviewPromptResult {
-  return buildReviewPromptWithStructuredParts(bundle, checks, budgets, nowIso, false);
+  return buildReviewPromptWithStructuredParts(bundle, checks, budgets, nowIso, V2_RENDERING);
 }
 
 /**
@@ -661,7 +719,7 @@ function buildReviewPromptV3(
   budgets: ReviewBudgets,
   nowIso?: string,
 ): BuildReviewPromptResult {
-  return buildReviewPromptWithStructuredParts(bundle, checks, budgets, nowIso, true);
+  return buildReviewPromptWithStructuredParts(bundle, checks, budgets, nowIso, V3_RENDERING);
 }
 
 /**
@@ -743,18 +801,45 @@ function buildReviewPromptV5(
   return { ...v3, prompt: v3.prompt + DESIGN_NECESSITY_RULE_V5 };
 }
 
-/** Shared v2/v3 body; `withFourParts` is the ONLY difference between the two versions. */
+/**
+ * v6 review judge prompt (spec-defect-clusters-round-2-part-b D9, BR-268, BR-960) — v5 plus: the document under
+ * review is rendered WHOLE (no `max_doc_chars` cut, no doc truncation notice), and a baseline node's structured block
+ * shows every rule's examples and the leaf's declared commands. v1-v5 stay byte-identical to what they rendered
+ * before v6 existed.
+ */
+function buildReviewPromptV6(
+  bundle: ReviewBundle,
+  checks: CheckResult[],
+  budgets: ReviewBudgets,
+  nowIso?: string,
+): BuildReviewPromptResult {
+  const body = buildReviewPromptWithStructuredParts(bundle, checks, budgets, nowIso, V6_RENDERING);
+  return { ...body, prompt: body.prompt + DESIGN_NECESSITY_RULE_V5 };
+}
+
+/** Which optional renderings a version applies on top of the shared v2 body. Only v6 sets the last two. */
+interface StructuredRendering {
+  readonly withFourParts: boolean;
+  readonly wholeDocument: boolean;
+  readonly withExamplesAndCommands: boolean;
+}
+
+const V2_RENDERING: StructuredRendering = { withFourParts: false, wholeDocument: false, withExamplesAndCommands: false };
+const V3_RENDERING: StructuredRendering = { withFourParts: true, wholeDocument: false, withExamplesAndCommands: false };
+const V6_RENDERING: StructuredRendering = { withFourParts: true, wholeDocument: true, withExamplesAndCommands: true };
+
+/** Shared v2/v3/v6 body; the {@link StructuredRendering} flags are the ONLY difference between those versions. */
 function buildReviewPromptWithStructuredParts(
   bundle: ReviewBundle,
   checks: CheckResult[],
   budgets: ReviewBudgets,
   nowIso: string | undefined,
-  withFourParts: boolean,
+  rendering: StructuredRendering,
 ): BuildReviewPromptResult {
   const criteria = extractSpecAcceptanceCriteria(bundle);
-  const structuredSection = renderStructuredPartsSection(bundle, withFourParts);
+  const structuredSection = renderStructuredPartsSection(bundle, rendering.withFourParts, rendering.withExamplesAndCommands);
   if (criteria.length === 0) {
-    return assembleReviewPrompt(bundle, checks, budgets, nowIso, NO_ADVISORY, structuredSection);
+    return assembleReviewPrompt(bundle, checks, budgets, nowIso, NO_ADVISORY, structuredSection, rendering.wholeDocument);
   }
   const advisory = {
     section: renderAcAdvisorySection(criteria),
@@ -767,7 +852,7 @@ function buildReviewPromptWithStructuredParts(
       `- OPTIONAL "advisory": zero or more non-blocking AC-quantifiability findings; ` +
       `omit the key or use [] when none. ${ADVISORY_ONLY_CLAUSE}\n`,
   };
-  return assembleReviewPrompt(bundle, checks, budgets, nowIso, advisory, structuredSection);
+  return assembleReviewPrompt(bundle, checks, budgets, nowIso, advisory, structuredSection, rendering.wholeDocument);
 }
 
 /**
@@ -775,7 +860,8 @@ function buildReviewPromptWithStructuredParts(
  * byte-identical to its original output, locked by the `review-prompt-v1.txt` fixture) and
  * `v2` (SPEC-053, adds the non-blocking AC-quantifiability advisory dimension, frozen) and
  * `v3` (lore #126, v2 plus an architecture standard rule's four parts) and `v4` (v3 plus the
- * design_necessity rule, BR-1237, frozen) and `v5` (v3 plus the refined rule that replaces it). The active
+ * design_necessity rule, BR-1237, frozen) and `v5` (v3 plus the refined rule that replaces it, frozen) and
+ * `v6` (v5 plus the whole document under review and baseline examples/commands, D9). The active
  * key is `REVIEW_PROMPT_VERSION`. A future prompt spec adds a NEW key here rather than
  * mutating an existing one, so historical judgments' `judge.prompt_version` stays meaningful.
  */
@@ -785,6 +871,7 @@ export const REVIEW_TEMPLATES: Record<string, ReviewTemplateFn> = {
   v3: buildReviewPromptV3,
   v4: buildReviewPromptV4,
   v5: buildReviewPromptV5,
+  v6: buildReviewPromptV6,
 };
 
 /**
