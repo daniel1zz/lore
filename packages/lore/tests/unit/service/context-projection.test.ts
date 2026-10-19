@@ -206,7 +206,13 @@ function buildZoneBodyCrlf(sections: SectionFixture[]): string {
   return lines.join("\r\n");
 }
 
-const PROSE_BEFORE = "# Demo Project\n\nHand-written discipline goes here.\n\n";
+/** The message of a VALIDATION_ERROR; fails the test for any other error code. */
+function messageOf(error: LoreError): string {
+  if (error.code !== "VALIDATION_ERROR") throw new Error(`expected VALIDATION_ERROR, got ${error.code}`);
+  return error.message;
+}
+
+const PROSE_BEFORE ="# Demo Project\n\nHand-written discipline goes here.\n\n";
 const PROSE_AFTER = "\n⛔ Never remove this line manually.\n";
 
 // ─── Scenarios ──────────────────────────────────────────────────────────────
@@ -403,10 +409,10 @@ describe("context-projection splice suite (RED — packages/lore/src/service/con
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.error.code).toBe("VALIDATION_ERROR");
-    expect(result.error.message).toContain("carries no fingerprint");
-    expect(result.error.message).toContain("Repair: delete the zone");
-    expect(result.error.message).toContain(ZONE_START);
-    expect(result.error.message).toContain(ZONE_END);
+    expect(messageOf(result.error)).toContain("carries no fingerprint");
+    expect(messageOf(result.error)).toContain("Repair: delete the zone");
+    expect(messageOf(result.error)).toContain(ZONE_START);
+    expect(messageOf(result.error)).toContain(ZONE_END);
   });
 
   it("STATE: the stated repair works — with the zone deleted, a fresh fingerprinted zone is appended and Z2 prose is kept", async () => {

@@ -9,8 +9,14 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { CLAUDE_MD_MARKER_END, CLAUDE_MD_MARKER_START, InMemoryFsPort } from "@lore/core";
+import { CLAUDE_MD_MARKER_END, CLAUDE_MD_MARKER_START, InMemoryFsPort, type LoreError } from "@lore/core";
 import { runContextInit, runContextRefresh } from "../../../src/flows/context-flow.js";
+
+/** The message of a VALIDATION_ERROR; fails the test for any other error code. */
+function messageOf(error: LoreError): string {
+  if (error.code !== "VALIDATION_ERROR") throw new Error(`expected VALIDATION_ERROR, got ${error.code}`);
+  return error.message;
+}
 
 async function initialised(files: Record<string, string>): Promise<InMemoryFsPort> {
   const fs = new InMemoryFsPort(files);
@@ -29,7 +35,7 @@ describe("runContextRefresh — package file (BR-883)", () => {
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.error.code).toBe("VALIDATION_ERROR");
-    expect(result.error.message).toContain("package.json is not valid JSON");
+    expect(messageOf(result.error)).toContain("package.json is not valid JSON");
     expect(await fs.readFile("CLAUDE.md")).toBe(before);
   });
 
@@ -41,8 +47,8 @@ describe("runContextRefresh — package file (BR-883)", () => {
     const result = await runContextRefresh({ fs }, "");
     expect(result.ok).toBe(false);
     if (result.ok) return;
-    expect(result.error.message).toContain("package.json has an invalid shape");
-    expect(result.error.message).toContain("scripts");
+    expect(messageOf(result.error)).toContain("package.json has an invalid shape");
+    expect(messageOf(result.error)).toContain("scripts");
     expect(await fs.readFile("CLAUDE.md")).toBe(before);
   });
 
@@ -79,8 +85,8 @@ describe("runContextRefresh — managed-part format (BR-881)", () => {
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.error.code).toBe("VALIDATION_ERROR");
-    expect(result.error.message).toContain("carries no fingerprint");
-    expect(result.error.message).toContain("Repair: delete the zone");
+    expect(messageOf(result.error)).toContain("carries no fingerprint");
+    expect(messageOf(result.error)).toContain("Repair: delete the zone");
     expect(await fs.readFile("CLAUDE.md")).toBe(legacy);
   });
 });

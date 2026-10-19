@@ -11,10 +11,16 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { InMemoryFsPort, resolveMemoryFileBudgets } from "@lore/core";
+import { InMemoryFsPort, resolveMemoryFileBudgets, type LoreError } from "@lore/core";
 import { collectContextFacts, extractPurposeSentence } from "../../../src/service/context-facts.js";
 
 const DEFAULT_BUDGETS = resolveMemoryFileBudgets(undefined);
+
+/** The message of a VALIDATION_ERROR; fails the test for any other error code. */
+function messageOf(error: LoreError): string {
+  if (error.code !== "VALIDATION_ERROR") throw new Error(`expected VALIDATION_ERROR, got ${error.code}`);
+  return error.message;
+}
 
 describe("collectContextFacts", () => {
   it("HAPPY: discovers nested module directories and their memory-file presence, plus package.json scripts", async () => {
@@ -69,7 +75,7 @@ describe("collectContextFacts", () => {
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.error.code).toBe("VALIDATION_ERROR");
-    expect(result.error.message).toContain("package.json is not valid JSON");
+    expect(messageOf(result.error)).toContain("package.json is not valid JSON");
   });
 
   it("ERROR: a schema-invalid package.json.scripts (non-string values) fails collection naming the file and the schema error (BR-883)", async () => {
@@ -78,8 +84,8 @@ describe("collectContextFacts", () => {
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.error.code).toBe("VALIDATION_ERROR");
-    expect(result.error.message).toContain("package.json has an invalid shape");
-    expect(result.error.message).toContain("scripts.build");
+    expect(messageOf(result.error)).toContain("package.json has an invalid shape");
+    expect(messageOf(result.error)).toContain("scripts.build");
   });
 
   it("ERROR: a malformed package.json under a nested root names that nested path", async () => {
@@ -87,7 +93,7 @@ describe("collectContextFacts", () => {
     const result = await collectContextFacts(fs, "sub", DEFAULT_BUDGETS);
     expect(result.ok).toBe(false);
     if (result.ok) return;
-    expect(result.error.message).toContain("sub/package.json");
+    expect(messageOf(result.error)).toContain("sub/package.json");
   });
 
   it("STATE: a valid package.json with no marker is packageFile present with no commands", async () => {
