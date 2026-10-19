@@ -49,7 +49,7 @@ const ADOPT_MODES = CITE_GATE_MODES.filter((m): m is Exclude<CiteGateMode, "off"
 const ADOPT_AUDIT_SESSION_ID = "baseline-adopt";
 
 /** Appends the ONE `baseline_adopt` audit row (the single provenance mechanism, BR-987) for `old` -> `next`. */
-async function appendAdoptAuditRow(
+export async function appendAdoptAuditRow(
   writer: DocWritePort,
   actor: string,
   old: AcCiteStored,

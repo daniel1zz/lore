@@ -701,7 +701,7 @@ function lazyRadiusDiffPort(cwd: string): RadiusDiffPort {
  * Wires `VerifyRunnerService`'s state-binding SKIP path (SPEC-143 AC-CT-8): the read-only occupancy
  * reader plus the store's audit append. The writer of the lock protocol stays `scripts/oracle-lock.ts`.
  */
-function buildStateBindingOccupancyPort(writer: DocWritePort): StateBindingOccupancyPort {
+export function buildStateBindingOccupancyPort(writer: DocWritePort): StateBindingOccupancyPort {
   return {
     probe: probeOccupancyForCheckout,
     // reason: AC-DCL-5 — the skip row goes through the ONE write route (foreign-corpus refusal, caller actor), never a bare store append.
