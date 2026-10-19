@@ -10,7 +10,8 @@
  * census entry-point call so "never invokes the census" is measured. Dimensions: HAPPY (unknown declaration -> 0, zero calls),
  * NEGATIVE (undeclared command -> 1 naming it, zero calls), STATE (the full verb reports the declaration, so the fixture is live).
  *
- * @spec_ref spec-baseline-coverage-refuses-only-undeclared-commands-a-site#AC-BCG-2
+ * Context: spec-baseline-coverage-refuses-only-undeclared-commands-a-site AC-BCG-2 (its declared oracle is the original file; this one
+ * stands in for the two cases that seeded a corpus site map).
  */
 import { afterEach, describe, expect, it } from "vitest";
 import { spawnSync } from "node:child_process";
