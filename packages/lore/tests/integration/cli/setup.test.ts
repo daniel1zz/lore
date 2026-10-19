@@ -242,7 +242,7 @@ describe("lore setup — HAPPY", () => {
     expect(existsSync(join(repoDir, "lore.tree.yaml"))).toBe(true);
     const hooksPath = spawnSync("git", ["config", "--get", "core.hooksPath"], { cwd: repoDir, encoding: "utf8" });
     expect(hooksPath.stdout.trim()).toBe(join(realpathSync(repoDir), "hooks"));
-  });
+  }, 60_000); // spawns git + setup several times (scaffold wiring proof)
 });
 
 // ─── NEGATIVE ─────────────────────────────────────────────────────────────────
@@ -473,6 +473,7 @@ describe("lore setup — STATE", () => {
         expect(readdirSync(join(repoDir, "hooks"))).toEqual([]);
       }
     },
+    60_000, // install then uninstall round-trip spawns setup + git repeatedly
   );
 });
 
