@@ -4,7 +4,8 @@
  * Purpose: the pure verdict half of the completeness census (spec baseline-slice-2 C2): given the
  *   sites a leaf's commands reach, the leaf's `site_map`, and the live rule ids, report what is
  *   still unaccounted for.
- * Public surface: {@link computeLeafCoverage}, {@link NON_BUSINESS_PREFIX}, {@link LeafCoverage}.
+ * Public surface: {@link computeLeafCoverage}, {@link partitionDeclaredCommands}, {@link staleCommandFixCommand},
+ *   {@link NON_BUSINESS_PREFIX}, {@link LeafCoverage}.
  * Invariants:
  *   - A `non-business:owned-by <leaf> BR-n — <reason>` entry counts only while the owner leaf is a leaf and every named
  *     rule is live on it (see owned-by.ts); otherwise the site is a gap.
@@ -46,6 +47,34 @@ export function siteFixCommand(leafSlug: string, siteKey: string): string {
 /** The command that declares a runnable command on a leaf (`<leaf>` is the leaf that owns the command's behaviour). */
 export function commandFixCommand(command: string): string {
   return `lore baseline map <leaf> --command ${/\s/.test(command) ? `"${command}"` : command}`;
+}
+
+/** The command that drops a declared command the registry no longer has from its leaf. */
+export function staleCommandFixCommand(leafSlug: string, command: string): string {
+  return `lore baseline map ${leafSlug} --remove-command "${command}"`;
+}
+
+/**
+ * Split a leaf's declared commands into live and stale (BR-660: a vanished command is a coverage defect, never a census error).
+ * A command is stale when it resolves to no census entry, or its entry is no longer a runnable registry command.
+ *
+ * @param declared - the leaf's `extra.commands`.
+ * @param entryKeyOf - `file#symbol` of a declared command, or `undefined` when it resolves to no census entry (the caller
+ *   maps ONLY a command-unresolved failure to `undefined`; any other failure must propagate, never read as stale).
+ * @param runnableEntries - `file#symbol` of every command the registry lists.
+ */
+export function partitionDeclaredCommands(
+  declared: readonly string[],
+  entryKeyOf: (command: string) => string | undefined,
+  runnableEntries: ReadonlySet<string>,
+): { live: string[]; stale: string[] } {
+  const live: string[] = [];
+  const stale: string[] = [];
+  for (const command of declared) {
+    const key = entryKeyOf(command);
+    (key !== undefined && runnableEntries.has(key) ? live : stale).push(command);
+  }
+  return { live, stale };
 }
 
 /**

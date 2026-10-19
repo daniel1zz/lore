@@ -53,7 +53,7 @@ import { loadLoreApp } from "../loader.js";
 import { exitCode, formatErrorFor, resolveActor } from "../utils.js";
 import type { App } from "../../../app.js";
 import type { AddNodeInput, BaselineTreeEntry, SiteMapChange } from "../../../service/rule-service.js";
-import { NON_BUSINESS_PREFIX, commandFixCommand, computeLeafCoverage, computeUndeclaredCommands, siteFixCommand } from "../../../service/leaf-coverage.js";
+import { NON_BUSINESS_PREFIX, commandFixCommand, computeLeafCoverage, computeUndeclaredCommands, partitionDeclaredCommands, siteFixCommand, staleCommandFixCommand } from "../../../service/leaf-coverage.js";
 import { listRunnableCommands } from "../runnable-commands.js";
 import { buildOwnerLeafIndex } from "../../../service/owned-by.js";
 import { resolveDoc } from "../../../service/resolve.js";
@@ -245,6 +245,8 @@ function reportCensusFailure(inv: Invocation, cause: unknown, json: boolean): Ex
 interface LeafCoverageReport {
   slug: string;
   commands: string[];
+  /** Declared commands the registry no longer has; each makes the leaf incomplete with its own fix. */
+  stale_commands: { command: string; fix: string }[];
   sites: number;
   gaps: string[];
   not_measured: string[];
@@ -284,13 +286,29 @@ async function runCoverage(target: string, json: boolean, inv: Invocation): Prom
     // reason: every distinct command of every leaf is censused ONCE over one shared program (BR-1248); a per-leaf
     // census rebuilt the program per command (~2.8 s each, 128 commands).
     const leafCommands = (leaf: DocRecord): string[] => (Array.isArray(leaf.extra["commands"]) ? (leaf.extra["commands"] as string[]) : []);
-    const censusByCommand = listSitesMany({ rootDir, commands: leaves.flatMap(leafCommands) });
+    // reason: stale declarations are judged against the registry at EVERY scope (BR-660), so the refusal names the leaf and
+    // its fix instead of surfacing as a census error (exit 4) from resolveCommandEntry; only an unanalysable tree still throws.
+    const runnable = await listRunnableCommands(rootDir);
+    const runnableEntries = new Set(runnable.map((c) => `${c.entry.file}#${c.entry.symbol}`));
+    const entryKeyOf = (command: string): string | undefined => {
+      try {
+        const entry = resolveCommandEntry({ rootDir, command });
+        return `${entry.file}#${entry.symbol}`;
+      } catch (cause) {
+        if (cause instanceof SiteCensusError && cause.reason === "command-unresolved") return undefined;
+        throw cause;
+      }
+    };
+    const partitionByLeaf = new Map(leaves.map((leaf) => [leaf.slug, partitionDeclaredCommands(leafCommands(leaf), entryKeyOf, runnableEntries)]));
+    const livePartition = (leaf: DocRecord) => partitionByLeaf.get(leaf.slug) as { live: string[]; stale: string[] };
+    const censusByCommand = listSitesMany({ rootDir, commands: leaves.flatMap((leaf) => livePartition(leaf).live) });
     const reports: LeafCoverageReport[] = leaves.map((leaf) => {
       const commands = leafCommands(leaf);
+      const { live, stale } = livePartition(leaf);
       const byKey = new Map<string, Site>();
       const bootstrapByKey = new Map<string, Site>();
       const unresolvedByKey = new Map<string, UnresolvedImport>();
-      for (const command of commands) {
+      for (const command of live) {
         const census = censusByCommand.get(command) as SiteList;
         for (const u of census.unresolvedImports) unresolvedByKey.set(`${u.specifier}\0${u.from}`, u);
         for (const site of census) byKey.set(site.key, site);
@@ -309,13 +327,14 @@ async function runCoverage(target: string, json: boolean, inv: Invocation): Prom
       return {
         slug: leaf.slug,
         commands,
+        stale_commands: stale.map((command) => ({ command, fix: staleCommandFixCommand(leaf.slug, command) })),
         sites: byKey.size,
         gaps: verdict.gaps,
         not_measured: verdict.notMeasured,
         unresolved_imports: verdict.unresolvedImports ?? [],
         bootstrap: [...bootstrapByKey.keys()].sort(),
         fix_commands: [...verdict.gaps, ...verdict.notMeasured].map((key) => siteFixCommand(leaf.slug, key)),
-        ok: commands.length > 0 && verdict.ok,
+        ok: commands.length > 0 && stale.length === 0 && verdict.ok,
       };
     });
     // reason: complete coverage is absolute at the root (BR-660): a runnable command declared by no leaf is never
@@ -323,12 +342,11 @@ async function runCoverage(target: string, json: boolean, inv: Invocation): Prom
     const undeclared =
       resolved.value.extra["node"] === "root"
         ? computeUndeclaredCommands(
-            await listRunnableCommands(rootDir),
+            runnable,
             new Set(
               leaves
-                .flatMap(leafCommands)
-                .map((command) => resolveCommandEntry({ rootDir, command }))
-                .map((entry) => `${entry.file}#${entry.symbol}`),
+                .flatMap((leaf) => livePartition(leaf).live)
+                .map((command) => entryKeyOf(command) as string),
             ),
           )
         : [];
@@ -341,6 +359,7 @@ async function runCoverage(target: string, json: boolean, inv: Invocation): Prom
       for (const r of reports) {
         const state = r.commands.length === 0 ? "UNMEASURED (no commands declared; use `lore baseline map --command`)" : r.ok ? "complete" : "INCOMPLETE";
         printLine(inv.io.stdout, `${r.slug}: ${state} - ${r.sites} site(s), ${r.gaps.length} gap(s), ${r.not_measured.length} not_measured, ${r.unresolved_imports.length} unresolved import(s), ${r.bootstrap.length} bootstrap (not counted as gaps)`);
+        for (const s of r.stale_commands) printLine(inv.io.stdout, `  stale command ${s.command} (no longer a runnable registry command)\n    fix: ${s.fix}`);
         for (const key of r.unresolved_imports) printLine(inv.io.stdout, `  unresolved  ${key} (census incomplete: sites behind this import are not listed)`);
         for (const key of r.gaps) printLine(inv.io.stdout, `  gap          ${key}\n    fix: ${siteFixCommand(r.slug, key)}`);
         for (const key of r.not_measured) printLine(inv.io.stdout, `  not_measured ${key}\n    fix: ${siteFixCommand(r.slug, key)}`);
