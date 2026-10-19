@@ -27,8 +27,12 @@ export const LORE_AGENT_NAMES = {
   reader: "lore-reader",
 } as const;
 
-/** Where a variable's value comes from: lore's own code, or the caller of this render. */
-export type VariableSource = "code" | "invocation";
+/**
+ * Where a variable's value comes from: lore's own code, the caller of this render (`invocation`, one outlet),
+ * or the project/global config the caller already resolved for the outlet (`config`, any outlets).
+ * Both caller-supplied sources are read from `VarContext.invocation`.
+ */
+export type VariableSource = "code" | "invocation" | "config";
 
 /** A place a variable may be written: a fragment outlet, an installed asset, or the settings hook. */
 export type VariableOutlet = OutletId | "asset:install" | "setup:settings-hook";
@@ -52,7 +56,7 @@ export interface VarContext {
   readonly path: string;
   /** Lines before the body (e.g. front-matter) so reported lines are file lines. */
   readonly lineOffset: number;
-  /** Values for `invocation` variables, keyed by name. */
+  /** Values for `invocation` and `config` variables, keyed by name. */
   readonly invocation: Readonly<Record<string, string>>;
 }
 
@@ -113,10 +117,10 @@ export function expandTemplate(
       return refuse(name, `${where}: context variable '${name}' is not allowed at outlet '${ctx.outlet}'`);
     }
     let value: string;
-    if (variable.source === "invocation") {
+    if (variable.source === "invocation" || variable.source === "config") {
       const supplied = Object.hasOwn(ctx.invocation, name) ? ctx.invocation[name] : undefined;
       if (supplied === undefined) {
-        return refuse(name, `${where}: invocation variable '${name}' has no value supplied for outlet '${ctx.outlet}'`);
+        return refuse(name, `${where}: ${variable.source} variable '${name}' has no value supplied for outlet '${ctx.outlet}'`);
       }
       value = supplied;
     } else {

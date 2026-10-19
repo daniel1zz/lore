@@ -121,6 +121,7 @@ import { SpecParentMigrationService } from "./service/spec-parent-migration-serv
 import { PlanOutlineExemptMigrationService } from "./service/plan-outline-exempt-migration-service.js";
 import { SeatService } from "./service/seat-service.js";
 import { RealGitPort } from "./adapters/real-git-port.js";
+import { buildBaselineDeclarationPort } from "./adapters/cli/absent-declarations.js";
 import { realpathNative } from "./adapters/real-realpath-port.js";
 import { ConfigService } from "./service/config-service.js";
 import { GlobalConfigService } from "./service/global-config-service.js";
@@ -959,6 +960,8 @@ function buildAppFromSqlite(
   // both composition roots wire it (a root that forgets leaves those overrides granted to whoever types them).
   const overrideDecisionPort = buildOverrideDecisionPort(store);
   reviewService.setOverrideDecisionPort(overrideDecisionPort);
+  // reason: approving a baseline node refuses a leaf declaring a command the corpus checkout's tree lacks; one port, both roots.
+  reviewService.setBaselineDeclarationPort(buildBaselineDeclarationPort(repoRoot));
   taskWorkflowService.setOverrideDecisionPort(overrideDecisionPort);
   // reason: plan close and spec deprecation land / abandon a spec's rule change set through ONE writer
   // (D3, spec-a-spec-carries-its-rule-changes-the-baseline-takes-them); the instance is shared with the
@@ -1036,13 +1039,11 @@ function buildAppFromSqlite(
     // reason: SeatService (SPEC-057) — real GitPort over the SAME repoRoot
     // VerifyRunnerService already receives (captured at composition time, never a
     // second `process.cwd()` read); getReadyReport is bound to
-    // `taskWorkflowService.ready`, fail-open to `{anchor_conflicts: []}` on a
-    // `ready()` error (GetReadyReport's type carries no Result to propagate a
-    // failure through — SeatService.enter's own readiness check would otherwise be
-    // unreachable on a plan-resolution hiccup that isn't itself the plan's fault).
+    // `taskWorkflowService.ready`; a `ready()` error propagates as a Result
+    // (never a silent empty conflict list).
     seatService: new SeatService(store, new RealGitPort(repoRoot), async (planId) => {
       const readyResult = await taskWorkflowService.ready(planId);
-      return readyResult.ok ? { anchor_conflicts: readyResult.value.anchor_conflicts } : { anchor_conflicts: [] };
+      return readyResult.ok ? ok({ anchor_conflicts: readyResult.value.anchor_conflicts }) : readyResult;
     }),
     // reason: SpecKindService depends only on StoreInterface — stateless, no AI, no telemetry,
     // same shape as PhaseService. SPEC-032 §3.4.
@@ -1381,6 +1382,8 @@ function buildAppFromTurso(
   // both composition roots wire it (a root that forgets leaves those overrides granted to whoever types them).
   const overrideDecisionPort = buildOverrideDecisionPort(store);
   reviewService.setOverrideDecisionPort(overrideDecisionPort);
+  // reason: approving a baseline node refuses a leaf declaring a command the corpus checkout's tree lacks; one port, both roots.
+  reviewService.setBaselineDeclarationPort(buildBaselineDeclarationPort(repoRoot));
   taskWorkflowService.setOverrideDecisionPort(overrideDecisionPort);
   // reason: plan close and spec deprecation land / abandon a spec's rule change set through ONE writer
   // (D3, spec-a-spec-carries-its-rule-changes-the-baseline-takes-them); the instance is shared with the
@@ -1456,13 +1459,11 @@ function buildAppFromTurso(
     // reason: SeatService (SPEC-057) — real GitPort over the SAME repoRoot
     // VerifyRunnerService already receives (captured at composition time, never a
     // second `process.cwd()` read); getReadyReport is bound to
-    // `taskWorkflowService.ready`, fail-open to `{anchor_conflicts: []}` on a
-    // `ready()` error (GetReadyReport's type carries no Result to propagate a
-    // failure through — SeatService.enter's own readiness check would otherwise be
-    // unreachable on a plan-resolution hiccup that isn't itself the plan's fault).
+    // `taskWorkflowService.ready`; a `ready()` error propagates as a Result
+    // (never a silent empty conflict list).
     seatService: new SeatService(store, new RealGitPort(repoRoot), async (planId) => {
       const readyResult = await taskWorkflowService.ready(planId);
-      return readyResult.ok ? { anchor_conflicts: readyResult.value.anchor_conflicts } : { anchor_conflicts: [] };
+      return readyResult.ok ? ok({ anchor_conflicts: readyResult.value.anchor_conflicts }) : readyResult;
     }),
     // reason: SpecKindService depends only on StoreInterface — stateless, no AI, no telemetry,
     // same shape as PhaseService. SPEC-032 §3.4.

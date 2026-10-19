@@ -15,8 +15,9 @@
  *     upgraded in place is never refused) and `report` otherwise. An invalid mode THROWS — no silent fallback.
  *   - Only ADDED or REVISED criteria are gated (`changedCriteria`: id new, or its canonical JSON differs).
  *     An untouched legacy uncited criterion is never a candidate, however many siblings change.
- *   - A criterion is refused when it cites nothing OR cites any id that is not live (missing / deprecated /
- *     retired) — EXCEPT that an UNEXPIRED exemption on (spec, ac) waives the "cites nothing" case only
+ *   - A criterion is refused when it cites nothing, OR a cite the write ADDS is not live (missing / deprecated /
+ *     retired), OR it is left with no live cite at all (BR-87: an existing retired cite beside a live one is
+ *     tolerated so `lore ac cite` can repair) — EXCEPT that an UNEXPIRED exemption on (spec, ac) waives the "cites nothing" case only
  *     (rule BR-959, #105); a non-live cite is refused regardless of any exemption. The measure is `findAcCiteViolations` (gate-predicates.ts), run through the registered
  *     `ac-cite` checkpoint, so verdict and message cannot disagree.
  *   - `enforce` refuses only on an ARMED branch. A spec's branch is the branch of the leaf most of its
@@ -229,10 +230,11 @@ export function changedCriteria(
   after: readonly AcceptanceCriterion[],
 ): AcCiteCandidate[] {
   const stored = new Map(before.map((c) => [c.id, JSON.stringify(c)] as const));
+  const priorCites = new Map(before.map((c) => [c.id, c.cites ?? []] as const));
   const out: AcCiteCandidate[] = [];
   for (const criterion of after) {
     if (stored.get(criterion.id) === JSON.stringify(criterion)) continue;
-    out.push({ ac_id: criterion.id, cites: criterion.cites ?? [] });
+    out.push({ ac_id: criterion.id, cites: criterion.cites ?? [], prior_cites: priorCites.get(criterion.id) ?? [] });
   }
   return out;
 }
@@ -333,7 +335,10 @@ export function decideCiteGate(
     const message = `${checkpoint.feed(context, [])}\nNothing was written.`;
     return { kind: "refuse", findings, context, message, branch };
   }
-  return { kind: "admit", requireLiveRules: [...new Set(candidates.flatMap((c) => c.cites))], findings: [] };
+  // reason: BR-87 - only the cites the write ADDS must be live in the transaction; an existing retired cite
+  // being repaired or kept is not re-required live.
+  const added = candidates.flatMap((c) => c.cites.filter((id) => !(c.prior_cites ?? []).includes(id)));
+  return { kind: "admit", requireLiveRules: [...new Set(added)], findings: [] };
 }
 
 // ─── Exemption budget ────────────────────────────────────────────────────────
@@ -439,6 +444,11 @@ export interface CiteFeedingPackInput {
    * `lore ac cite` would fail "not declared" and the line must be an `ac add ... --cite` (BR-86).
    */
   refusedIsNew: boolean;
+  /**
+   * `true` when the refused write is a `lore create spec` (nothing was created, not even the spec): the line
+   * re-runs `lore create spec`, never `lore ac add <slug>` for a slug that does not exist.
+   */
+  refusedIsCreate?: boolean;
   /** The spec's `extra.code_anchors` (`path[#Symbol]`). */
   specAnchors: readonly string[];
   /** The spec's branch (`undefined` = unplaced). */
@@ -502,7 +512,9 @@ export function buildCiteFeedingPack(input: CiteFeedingPackInput): AcCiteFeeding
   const citeRule = first !== undefined ? first.id : "<BR-id>";
   return {
     candidates,
-    cite_line: input.refusedIsNew
+    cite_line: input.refusedIsCreate === true
+      ? `lore create spec ... (give ${input.acId} a live cite, e.g. ${citeRule})`
+      : input.refusedIsNew
       ? `lore ac add ${input.specSlug} ${input.acId} ... --cite ${citeRule}`
       : `lore ac cite ${input.specSlug} ${input.acId} ${citeRule}`,
     exemption_headroom: exemptionHeadroom(

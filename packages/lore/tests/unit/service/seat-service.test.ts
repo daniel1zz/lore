@@ -51,6 +51,7 @@ interface GitPort {
   worktreeList(): Promise<Result<FakeWorktreeInfo[], LoreError>>;
   worktreeRemove(path: string, force: boolean): Promise<Result<void, LoreError>>;
   isMerged(branch: string, into: string): Promise<Result<boolean, LoreError>>;
+  branchDelete(branch: string): Promise<Result<void, LoreError>>;
   rebaseFromMain(cwd: string): Promise<Result<void, LoreError>>;
   isDirty(cwd: string): Promise<Result<boolean, LoreError>>;
 }
@@ -75,7 +76,7 @@ interface SeatServiceCtor {
   new (
     store: InMemoryStore,
     gitPort: GitPort,
-    getReadyReport: (planId: string) => Promise<SeatReadyReportLike>,
+    getReadyReport: (planId: string) => Promise<Result<SeatReadyReportLike, LoreError>>,
   ): {
     enter(planIdOrSlug: string, opts: SeatEnterOpts): Promise<Result<{ path: string; branch: string }, LoreError>>;
     list(): Promise<Result<SeatListEntry[], LoreError>>;
@@ -129,6 +130,11 @@ class FakeGitPort implements GitPort {
     this.calls.push(`isMerged:${branch}:${into}`);
     return ok(this.isMergedResult);
   }
+
+  async branchDelete(branch: string): Promise<Result<void, LoreError>> {
+    this.calls.push(`branchDelete:${branch}`);
+    return ok(undefined);
+  }
 }
 
 async function mustCreatePlan(cs: CorpusService, title: string): Promise<DocRecord> {
@@ -137,8 +143,8 @@ async function mustCreatePlan(cs: CorpusService, title: string): Promise<DocReco
   return result.value;
 }
 
-function readyReport(): SeatReadyReportLike {
-  return { anchor_conflicts: [] };
+function readyReport(): Result<SeatReadyReportLike, LoreError> {
+  return ok({ anchor_conflicts: [] });
 }
 
 // ─── Entry sequence order (AC-S-2) ─────────────────────────────────────────────
@@ -152,7 +158,7 @@ describe("SeatService.enter — sequence order (HAPPY)", () => {
 
     const gitPort = new FakeGitPort();
     const readyCalls: string[] = [];
-    const getReadyReport = async (planId: string): Promise<SeatReadyReportLike> => {
+    const getReadyReport = async (planId: string): Promise<Result<SeatReadyReportLike, LoreError>> => {
       readyCalls.push(`getReadyReport:${planId}`);
       return readyReport();
     };
@@ -183,7 +189,7 @@ describe("SeatService.enter — sequence order (HAPPY)", () => {
     const gitPort = new FakeGitPort();
     gitPort.isDirtyResult = true;
     let readyCallCount = 0;
-    const getReadyReport = async (): Promise<SeatReadyReportLike> => {
+    const getReadyReport = async (): Promise<Result<SeatReadyReportLike, LoreError>> => {
       readyCallCount += 1;
       return readyReport();
     };
@@ -194,6 +200,39 @@ describe("SeatService.enter — sequence order (HAPPY)", () => {
     expect(result.ok).toBe(false);
     expect(gitPort.calls).toEqual(["isDirty:/repo/main"]);
     expect(readyCallCount).toBe(0);
+  });
+});
+
+describe("SeatService.enter — target type and readiness errors (NEGATIVE)", () => {
+  it("a non-plan target is refused before any git call", async () => {
+    const SeatService = await loadSeatServiceCtor();
+    const store = actedStore(new InMemoryStore());
+    const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
+    const created = await corpusService.create({ type: "prd", title: "Not A Plan", content: "# Prd" } as CreateDocInput);
+    if (!created.ok) throw new Error("prd create failed");
+
+    const gitPort = new FakeGitPort();
+    const seatService = new SeatService(store, gitPort, async () => readyReport());
+    const result = await seatService.enter(created.value.slug, { mainCwd: "/repo/main" });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(JSON.stringify(result.error)).toContain("gate:seat-entry:not-a-plan");
+    expect(gitPort.calls).toEqual([]);
+  });
+
+  it("a readiness error propagates and worktreeAdd is never reached", async () => {
+    const SeatService = await loadSeatServiceCtor();
+    const store = actedStore(new InMemoryStore());
+    const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
+    const plan = await mustCreatePlan(corpusService, "Ready Error Plan");
+
+    const gitPort = new FakeGitPort();
+    const seatService = new SeatService(store, gitPort, async () => err({ code: "STORE_ERROR", message: "ready exploded" }));
+    const result = await seatService.enter(plan.slug, { mainCwd: "/repo/main" });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(JSON.stringify(result.error)).toContain("ready exploded");
+    expect(gitPort.calls.some((c) => c.startsWith("worktreeAdd:"))).toBe(false);
   });
 });
 
@@ -211,7 +250,7 @@ describe("SeatService.enter — mid-sequence failure + retry (NEGATIVE / STATE)"
       code: "STORE_ERROR",
       message: "worktree add failed: path already exists",
     });
-    const getReadyReport = async (): Promise<SeatReadyReportLike> => readyReport();
+    const getReadyReport = async (): Promise<Result<SeatReadyReportLike, LoreError>> => readyReport();
 
     const seatService = new SeatService(store, gitPort, getReadyReport);
 
@@ -246,11 +285,21 @@ describe("SeatService.remove — unmerged/merged matched pair", () => {
     plan = await mustCreatePlan(corpusService, "Remove-Target Plan");
   });
 
+  function registeredSeat(gitPort: FakeGitPort): string {
+    const branch = `plan/${plan.slug.replace(/^plan-/, "")}`;
+    gitPort.worktreeListResult = [
+      { path: "/repo", branch: "trunk", createdAt: "2026-07-01T00:00:00.000Z" },
+      { path: "/repo-seat-x", branch, createdAt: "2026-07-01T00:00:00.000Z" },
+    ];
+    return branch;
+  }
+
   it("an unmerged seat branch refuses removal, naming the branch and the escape flag", async () => {
     const SeatService = await loadSeatServiceCtor();
     const gitPort = new FakeGitPort();
     gitPort.isMergedResult = false;
-    const getReadyReport = async (): Promise<SeatReadyReportLike> => readyReport();
+    registeredSeat(gitPort);
+    const getReadyReport = async (): Promise<Result<SeatReadyReportLike, LoreError>> => readyReport();
 
     const seatService = new SeatService(store, gitPort, getReadyReport);
     const result = await seatService.remove(plan.slug);
@@ -260,31 +309,67 @@ describe("SeatService.remove — unmerged/merged matched pair", () => {
       const serialized = JSON.stringify(result.error);
       expect(serialized).toContain("force");
     }
+    expect(gitPort.calls.some((c) => c.startsWith("worktreeRemove:") || c.startsWith("branchDelete:"))).toBe(false);
   });
 
   it("a merged seat branch removes cleanly", async () => {
     const SeatService = await loadSeatServiceCtor();
     const gitPort = new FakeGitPort();
     gitPort.isMergedResult = true;
-    const getReadyReport = async (): Promise<SeatReadyReportLike> => readyReport();
+    const branch = registeredSeat(gitPort);
+    const getReadyReport = async (): Promise<Result<SeatReadyReportLike, LoreError>> => readyReport();
 
     const seatService = new SeatService(store, gitPort, getReadyReport);
     const result = await seatService.remove(plan.slug);
 
     expect(result.ok).toBe(true);
-    expect(gitPort.calls.some((c) => c.startsWith("worktreeRemove:"))).toBe(true);
+    // The merge check runs against the main checkout's checked-out branch, not a literal "main".
+    expect(gitPort.calls).toContain(`isMerged:${branch}:trunk`);
+    expect(gitPort.calls).toContain("worktreeRemove:/repo-seat-x:false");
+    expect(gitPort.calls).toContain(`branchDelete:${branch}`);
   });
 
   it("force removal bypasses the unmerged refusal", async () => {
     const SeatService = await loadSeatServiceCtor();
     const gitPort = new FakeGitPort();
     gitPort.isMergedResult = false;
-    const getReadyReport = async (): Promise<SeatReadyReportLike> => readyReport();
+    const branch = registeredSeat(gitPort);
+    const getReadyReport = async (): Promise<Result<SeatReadyReportLike, LoreError>> => readyReport();
 
     const seatService = new SeatService(store, gitPort, getReadyReport);
     const result = await seatService.remove(plan.slug, { force: true });
 
     expect(result.ok).toBe(true);
+    expect(gitPort.calls.some((c) => c.startsWith("isMerged:"))).toBe(false);
+    expect(gitPort.calls).toContain(`branchDelete:${branch}`);
+  });
+
+  it("a plan with no registered seat worktree is refused as not-found and nothing is removed", async () => {
+    const SeatService = await loadSeatServiceCtor();
+    const gitPort = new FakeGitPort();
+    gitPort.worktreeListResult = [{ path: "/repo", branch: "trunk", createdAt: "2026-07-01T00:00:00.000Z" }];
+    const seatService = new SeatService(store, gitPort, async () => readyReport());
+    const result = await seatService.remove(plan.slug, { force: true });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      const serialized = JSON.stringify(result.error);
+      expect(serialized).toContain("gate:seat-remove:not-found");
+      expect(serialized).not.toContain("seat entry step");
+    }
+    expect(gitPort.calls.some((c) => c.startsWith("worktreeRemove:") || c.startsWith("branchDelete:"))).toBe(false);
+  });
+
+  it("a detached main checkout cannot supply a base branch: refused, not defaulted to main", async () => {
+    const SeatService = await loadSeatServiceCtor();
+    const gitPort = new FakeGitPort();
+    const branch = registeredSeat(gitPort);
+    gitPort.worktreeListResult[0] = { path: "/repo", branch: null, createdAt: "2026-07-01T00:00:00.000Z" };
+    const seatService = new SeatService(store, gitPort, async () => readyReport());
+    const result = await seatService.remove(plan.slug);
+
+    expect(result.ok).toBe(false);
+    expect(gitPort.calls).not.toContain(`isMerged:${branch}:main`);
   });
 });
 
@@ -305,7 +390,7 @@ describe("SeatService.list — G13 cost counter-metric data surface (AC-S-7)", (
     const mergedByBranch: Record<string, boolean> = { "plan/plan-a": false, "plan/plan-b": true };
     gitPort.isMerged = async (branch: string) => ok(mergedByBranch[branch] ?? false);
 
-    const getReadyReport = async (): Promise<SeatReadyReportLike> => readyReport();
+    const getReadyReport = async (): Promise<Result<SeatReadyReportLike, LoreError>> => readyReport();
     const seatService = new SeatService(store, gitPort, getReadyReport);
 
     const result = await seatService.list();
@@ -325,7 +410,7 @@ describe("SeatService.list — G13 cost counter-metric data surface (AC-S-7)", (
     const SeatService = await loadSeatServiceCtor();
     const store = actedStore(new InMemoryStore());
     const gitPort = new FakeGitPort();
-    const getReadyReport = async (): Promise<SeatReadyReportLike> => readyReport();
+    const getReadyReport = async (): Promise<Result<SeatReadyReportLike, LoreError>> => readyReport();
 
     const seatService = new SeatService(store, gitPort, getReadyReport);
     const result = await seatService.list();
@@ -347,7 +432,7 @@ describe("SeatService.resume", () => {
     const gitPort = new FakeGitPort();
     const branch = `plan/${plan.slug.replace(/^plan-/, "")}`;
     gitPort.worktreeListResult = [{ path: "/repo-seat-resume", branch, createdAt: "2026-07-01T00:00:00.000Z" }];
-    const getReadyReport = async (): Promise<SeatReadyReportLike> => readyReport();
+    const getReadyReport = async (): Promise<Result<SeatReadyReportLike, LoreError>> => readyReport();
 
     const seatService = new SeatService(store, gitPort, getReadyReport);
     const result = await seatService.resume(plan.slug);
@@ -364,7 +449,7 @@ describe("SeatService.resume", () => {
 
     const gitPort = new FakeGitPort();
     gitPort.worktreeListResult = [];
-    const getReadyReport = async (): Promise<SeatReadyReportLike> => readyReport();
+    const getReadyReport = async (): Promise<Result<SeatReadyReportLike, LoreError>> => readyReport();
 
     const seatService = new SeatService(store, gitPort, getReadyReport);
     const result = await seatService.resume(plan.slug);

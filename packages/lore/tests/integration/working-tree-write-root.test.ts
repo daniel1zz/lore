@@ -19,6 +19,8 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { runLoreInProcess } from "../helpers/run-lore-in-process";
+import { applyAuditedAdoption } from "../../src/adapters/cli/commands/baseline-adopt";
+import type { DocWritePort } from "../../src/service/corpus-service";
 
 const scratch: string[] = [];
 
@@ -203,4 +205,35 @@ describe("INT-T5 tracked-file writes land in the invoking working tree", () => {
     expect(refreshed.exitCode, refreshed.stderr).toBe(0);
     expect(readFileSync(join(home, "CLAUDE.md"), "utf8")).toContain("src/gadget");
   }, 60_000);
+
+  it("INT-T10 a refused authority decision leaves .lore/config.yaml byte-identical and writes no audit row", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "lore-int-t10-refused-"));
+    scratch.push(dir);
+    put(dir, ".lore/config.yaml", "# keep me\nproject: demo\n");
+    const before = readFileSync(join(dir, ".lore", "config.yaml"), "utf8");
+    const appended: unknown[] = [];
+    const refusal = { code: "VALIDATION_ERROR", field: "gate:corpus-write:foreign-provenance", message: "foreign" } as const;
+    const writer = {
+      assertWritable: async () => ({ ok: false, error: refusal }),
+      appendAudit: async (request: unknown) => {
+        appended.push(request);
+        return { ok: true, value: undefined };
+      },
+    } as unknown as DocWritePort;
+
+    const applied = await applyAuditedAdoption({
+      writer,
+      actor: "tester",
+      repoDir: dir,
+      ownTree: false,
+      old: { mode: null, armed_branches: [] },
+      next: { mode: "enforce", armed_branches: [] },
+      writeConfig: true,
+    });
+
+    expect(applied.ok).toBe(false);
+    if (!applied.ok) expect(applied.error.stage).toBe("unwritten");
+    expect(readFileSync(join(dir, ".lore", "config.yaml"), "utf8")).toBe(before);
+    expect(appended).toHaveLength(0);
+  });
 });
