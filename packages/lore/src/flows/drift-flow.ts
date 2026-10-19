@@ -195,7 +195,15 @@ export async function runDrift(deps: DriftFlowDeps, probe: FsProbe): Promise<Res
  * // => "fix: lore anchor rm spec-foo 'src/a.ts#Foo' (or update the path/export)"
  */
 export function renderDriftRepairHint(row: DriftRow): string {
+  if (row.kind === "anchor_unreadable") {
+    return `fix: lore anchor rm ${row.doc_slug} ${shellQuote(row.anchor)} (the stored value is not a readable anchor: ${row.detail ?? "unreadable"})`;
+  }
   return `fix: lore anchor rm ${row.doc_slug} '${row.anchor}' (or update the path/export)`;
+}
+
+/** Single-quotes `value` for a copy-pasteable shell command. */
+function shellQuote(value: string): string {
+  return `'${value.replace(/'/g, "'\\''")}'`;
 }
 
 /**

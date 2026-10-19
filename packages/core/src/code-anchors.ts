@@ -401,7 +401,7 @@ export function scanPackageScripts(source: string): Set<string> | undefined {
 
 // ─── Drift Classification (D2, D4) ──────────────────────────────────────────
 
-/** The six drift kinds `computeDrift` classifies a declared anchor into (D2). */
+/** The drift kinds a declared anchor is classified into (D2); `anchor_unreadable` is raised by the scan itself. */
 export const DRIFT_KINDS = [
   "file_missing",
   "dir_missing",
@@ -412,6 +412,9 @@ export const DRIFT_KINDS = [
   // A prose reference `bun run <name>` whose <name> is not in the governing
   // package.json `scripts` (spec-prose-about-code-is-bound-to-what-it-describes-one D1).
   "script_missing",
+  // A STORED anchor string the grammar rejects (hand-edited / imported / legacy row): never skipped, reported
+  // (baseline-detect-code-anchor-drift BR-416). Raised by the drift scan itself, not by `computeDrift`.
+  "anchor_unreadable",
 ] as const;
 
 /** Derived TypeScript type for a drift row's classification. */

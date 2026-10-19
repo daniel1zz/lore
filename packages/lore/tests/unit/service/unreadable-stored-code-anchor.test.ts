@@ -18,7 +18,7 @@
  */
 
 import { describe, expect, it } from "vitest";
-import type { CreateDocInput } from "@lore/core";
+import { ok, type CreateDocInput } from "@lore/core";
 import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
@@ -140,7 +140,7 @@ describe("REGRESSION — rendering and the reverse index", () => {
   it("names the unreadable row and its repair in the text section", async () => {
     const services = makeServices();
     await createSpecWithStoredAnchors(services, [UNREADABLE]);
-    const payload = await runDrift({ checkDrift: (p) => services.driftCheckService.checkDrift(p) }, probe);
+    const payload = await runDrift({ checkDrift: (p) => services.driftCheckService.checkDrift(p), listSpecs: async () => ok([]) }, probe);
     if (!payload.ok) throw new Error("runDrift failed");
     const text = renderDriftSectionLines(payload.value).join("\n");
     expect(text).toContain("anchor_unreadable");
