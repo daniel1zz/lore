@@ -95,8 +95,8 @@ export function renderMissing(data: CoverageData): string[] {
   for (const leaf of data.leaves) {
     if (leaf.measured_by === "none") lines.push(`  unmeasured   ${leaf.slug}: measured_by none (no command declared and no owned site)\n    fix: lore baseline map ${leaf.slug} --command <name>`);
     for (const key of leaf.unresolved_imports) lines.push(`  unresolved   ${key} (${leaf.slug}: census incomplete behind this import)`);
-    for (const key of leaf.gaps) lines.push(`  gap          ${key} (${leaf.slug})`);
-    for (const key of leaf.not_measured) lines.push(`  not_measured ${key} (${leaf.slug})`);
+    for (const key of leaf.gaps) lines.push(`  gap          ${key}`);
+    for (const key of leaf.not_measured) lines.push(`  not_measured ${key}`);
     for (const fix of leaf.fix_commands) lines.push(`    fix: ${fix}`);
     for (const a of leaf.absent_commands) lines.push(`${INFORMATIONAL_PREFIX} ${a.command} (${leaf.slug}: declared command not in this tree; pending or stale)\n    if stale: ${a.fix}`);
   }

@@ -28,8 +28,8 @@ describe("renderMissing", () => {
   it("HAPPY: a gap and a not_measured key print with the CLI's per-leaf fix_commands verbatim", () => {
     const lines = renderMissing(data([leaf({ slug: "l1", commands: ["a"], gaps: ["f.ts#g"], not_measured: ["f.ts#n"], fix_commands: ["lore baseline map l1 --site f.ts#g --rule <BR-n>", "lore baseline map l1 --site f.ts#n --rule <BR-n>"], ok: false })]));
     expect(lines).toEqual([
-      "  gap          f.ts#g (l1)",
-      "  not_measured f.ts#n (l1)",
+      "  gap          f.ts#g",
+      "  not_measured f.ts#n",
       "    fix: lore baseline map l1 --site f.ts#g --rule <BR-n>",
       "    fix: lore baseline map l1 --site f.ts#n --rule <BR-n>",
     ]);
