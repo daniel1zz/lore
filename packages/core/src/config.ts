@@ -396,7 +396,7 @@ export const CoChangeRuleSchema = z
   .strict();
 export type CoChangeRule = z.infer<typeof CoChangeRuleSchema>;
 
-/** `workflow.turn_end.co_change`: the rule list. Parsed by trail-review itself, see the `turn_end` comment. */
+/** `workflow.turn_end.co_change`: the rule list. Read through this schema by `co-change-review.ts`, see the `turn_end` comment. */
 export const CoChangeRulesSchema = z.array(CoChangeRuleSchema);
 
 /**
@@ -697,10 +697,9 @@ const WorkflowConfigSchema = z
     /**
      * Turn-end review knobs (spec-interception-moves-off-every-tool-call-one-turn-end-review,
      * Scope 4a). Read by `assets/hooks/stop-turn-review.mjs`, which is a standalone script and so
-     * scans `.lore/config.yaml` for exactly two paths — `workflow.turn_end.main_session_source_edits`
-     * (SETTING_KEYS in the hook) and the PRESENCE of `workflow.turn_end.co_change` (CO_CHANGE_KEYS, which only
-     * arms the `lore session trail-review` spawn) — rename a key here and that scan must move with it. The
-     * `co_change` rule list itself is parsed by `lore session trail-review` through {@link CoChangeRulesSchema},
+     * scans `.lore/config.yaml` for exactly one path — `workflow.turn_end.main_session_source_edits`
+     * (SETTING_KEYS in the hook) — rename the key here and that scan must move with it. The
+     * `co_change` rule list is parsed through {@link CoChangeRulesSchema} by `co-change-review.ts`,
      * never by the hook and never by the CLI loader's silent fallback.
      * @invariant `main_session_source_edits` defaults to `"off"`: absence of the whole `workflow`
      *   section, of `turn_end`, or of the field means the hook never reports main-session source
@@ -711,8 +710,8 @@ const WorkflowConfigSchema = z
       .object({
         main_session_source_edits: z.enum(["off", "block"]).default("off"),
         /**
-         * Co-change rules judged at turn end by `lore session trail-review` (spec-session-trail Design >
-         * Consumers, AC-ST-7). Default `[]`: no rule, nothing judged.
+         * Co-change rules (spec-session-trail Design > Consumers, AC-ST-7); the turn-end review no longer
+         * judges them (BR-1349), `lore integrate` reads them. Default `[]`: no rule, nothing judged.
          */
         co_change: CoChangeRulesSchema.default([]),
       })

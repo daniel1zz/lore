@@ -35,7 +35,7 @@ import {
   type Result,
 } from "@lore/core";
 import { findAnchorOverlapConflict, type AnchorOverlapConflict, type SiblingClaimInfo } from "./gate-predicates.js";
-import type { IgnoreProbeFn } from "./helper-scope-review.js";
+import type { IgnoreProbeFn } from "./git-ignore-probe.js";
 import type { OpenClaimsOfWorkingCopy } from "./run-service.js";
 import type { buildAnchorGateContext } from "./checkpoint-registry.js";
 
@@ -158,7 +158,7 @@ function judgeIgnore(path: string, run: ReturnType<IgnoreProbeFn>): boolean | st
   if (fields.length !== 4) return `git check-ignore answered ${fields.length / 4} records for 1 path`;
   const [source, , pattern, answered] = fields;
   if (answered !== path) return `git check-ignore answered ${String(answered)} where ${path} was asked`;
-  // reason: a `!pattern` record is a negation — the path is NOT ignored (same reading as helper-scope-review).
+  // reason: a `!pattern` record is a negation — the path is NOT ignored (the same reading `git check-ignore -v` documents).
   return source !== "" && !(pattern ?? "").startsWith("!");
 }
 

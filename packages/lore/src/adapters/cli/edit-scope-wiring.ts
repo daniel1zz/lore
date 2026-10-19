@@ -21,7 +21,7 @@ import { spawnSync } from "node:child_process";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { extractHeldClaim } from "@lore/core";
 import { SCOPE_FILE_NAME, refreshScopeFiles, type EditScopeDeps } from "../../service/edit-scope.js";
-import { spawnGitCheckIgnore } from "../../service/helper-scope-review.js";
+import { spawnGitCheckIgnore } from "../../service/git-ignore-probe.js";
 import type { App } from "../../app.js";
 
 /** git's answer for `args` run in `cwd`, or `undefined` when git cannot answer (not a repo, git missing). */
