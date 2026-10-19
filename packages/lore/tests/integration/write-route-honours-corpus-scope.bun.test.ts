@@ -68,6 +68,7 @@ interface Fixture {
   readonly branchX: string;
   readonly branchY: string;
   readonly leafX: string;
+  readonly ruleId: string;
   readonly plan: string;
   readonly sitesFile: string;
 }
@@ -99,11 +100,17 @@ function buildFixture(): Fixture {
   const branchX = slugOf(mustRun(["baseline", "add", root, "--node", "branch", "--label", "bx", "--title", "WRC Branch X"], repo).stdout);
   const branchY = slugOf(mustRun(["baseline", "add", root, "--node", "branch", "--label", "by", "--title", "WRC Branch Y"], repo).stdout);
   const leafX = slugOf(mustRun(["baseline", "add", branchX, "--node", "leaf", "--label", "lx", "--title", "WRC Leaf X"], repo).stdout);
+  const ruleOut = mustRun(
+    ["rule", "add", leafX, "--statement", "A mapped site is accounted for.", "--confidence", "established", "--enforced-by", "guaranteed", "--example", "map writes a version"],
+    repo,
+  );
+  const ruleId = ruleOut.stdout.match(/BR-\d+/)?.[0];
+  if (ruleId === undefined) throw new Error(`no rule id in: ${ruleOut.stdout}`);
   const plan = slugOf(mustRun(["create", "plan", "--title", "WRC Plan", "--parent", prd, "--content", "x", "--no-ai"], repo).stdout);
 
   const sitesFile = join(worktrees, "rows.json");
-  writeFileSync(sitesFile, JSON.stringify([{ site: "x.ts#fn#CODE", nonBusiness: "fixture site, not business behaviour" }]));
-  return { repo, worktrees, branchX, branchY, leafX, plan, sitesFile };
+  writeFileSync(sitesFile, JSON.stringify([{ site: "x.ts#fn#CODE", rules: [ruleId] }]));
+  return { repo, worktrees, branchX, branchY, leafX, ruleId, plan, sitesFile };
 }
 
 let taskCounter = 0;
@@ -183,7 +190,7 @@ describe("the one write route honours claim-scoped corpus authoring", () => {
 
   it("REGRESSION: the main checkout's own `baseline map --sites-file` is untouched by the scope logic", () => {
     const before = leafVersion();
-    const write = runLore(["baseline", "map", fx.leafX, "--site", "y.ts#fn#CODE", "--non-business", "main checkout site"], fx.repo, "agent:wrc-main");
+    const write = runLore(["baseline", "map", fx.leafX, "--site", "y.ts#fn#CODE", "--rule", fx.ruleId], fx.repo, "agent:wrc-main");
     expect(write.exitCode, write.stderr + write.stdout).toBe(0);
     expect(leafVersion()).toBe(before + 1);
   });
