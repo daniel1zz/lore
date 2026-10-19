@@ -61,7 +61,8 @@
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { spawnSync } from "child_process";
-import { appendFileSync, mkdtempSync, rmSync, existsSync } from "fs";
+import { mkdtempSync, rmSync, existsSync } from "fs";
+import { patchLoreConfig } from "../../helpers/patch-lore-config.js";
 import { join } from "path";
 import { tmpdir } from "os";
 import { FIXTURE_HOME_OUTSIDE_REPO, makeCleanTreeRepo } from "../../helpers/clean-tree-repo.js";
@@ -219,7 +220,7 @@ beforeAll(() => {
 
   // reason: plans are judged by default (BR-281 / BR-1237); these fixtures approve plans only to reach
   // plan-close rendering, never review-judgment.
-  appendFileSync(join(tmpDir, ".lore", "config.yaml"), "workflow:\n  review:\n    judgment_required_types: []\n", "utf8");
+  patchLoreConfig(tmpDir, "workflow:\n  review:\n    judgment_required_types: []\n");
 
   prdSlug = createPrd(tmpDir, "GV6 PRD");
 

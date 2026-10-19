@@ -120,6 +120,9 @@ export function findProjectConfigWrites(rawSource: string): number[] {
   const lineOf = (index: number): number => source.slice(0, index).split("\n").length;
   for (const match of source.matchAll(WRITE_CALL)) {
     if (match[0].startsWith(SANCTIONED_WRITER)) continue;
+    // reason: a callee-looking name INSIDE a string literal (`"this.writer.writeDoc("`) is text, not a call.
+    const lineHead = source.slice(source.lastIndexOf("\n", match.index ?? 0) + 1, match.index ?? 0);
+    if ([`"`, `'`, "`"].some((quote) => lineHead.split(quote).length % 2 === 0)) continue;
     const open = (match.index ?? 0) + match[0].length - 1;
     const args = callArguments(source, open).replace(READ_SUBCALL, "");
     if (namesProjectConfig(args, loreDirIds) || mentionsAny(args, identifiers)) lines.push(lineOf(match.index ?? 0));

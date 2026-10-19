@@ -60,6 +60,7 @@ import { parseDocument } from "yaml";
 import { join } from "path";
 import { tmpdir } from "os";
 import { runLoreInProcess } from "../../helpers/run-lore-in-process";
+import { patchLoreConfig } from "../../helpers/patch-lore-config.js";
 
 // tests/unit/adapters/ → tests/unit/ → tests/ → packages/lore/ → packages/ → repo root (5 levels up).
 const REPO_ROOT = new URL("../../../../../", import.meta.url).pathname.replace(/\/$/, "");
@@ -149,10 +150,16 @@ function disableDrift(dir: string): void {
  * block would be a duplicate-key YAML error and the whole config would be ignored.
  */
 function setConfigPaths(dir: string, entries: ReadonlyArray<readonly [readonly string[], boolean]>): void {
-  const path = join(dir, ".lore", "config.yaml");
-  const doc = parseDocument(readFileSync(path, "utf8"));
-  for (const [keyPath, value] of entries) doc.setIn([...keyPath], value);
-  writeFileSync(path, doc.toString());
+  const patch: Record<string, unknown> = {};
+  for (const [keyPath, value] of entries) {
+    let node = patch;
+    keyPath.slice(0, -1).forEach((key) => {
+      node[key] = (node[key] as Record<string, unknown> | undefined) ?? {};
+      node = node[key] as Record<string, unknown>;
+    });
+    node[keyPath[keyPath.length - 1]!] = value;
+  }
+  patchLoreConfig(dir, patch);
 }
 
 async function createPrd(tmpDir: string): Promise<string> {

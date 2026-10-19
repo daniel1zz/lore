@@ -61,6 +61,7 @@ import {
   type EvidenceEntry,
 } from "@lore/core";
 import { liveInvocation, liveAmbient, liveWriteContext, runHandlerForExit } from "../../live-invocation.js";
+import { patchLoreConfig } from "../../helpers/patch-lore-config.js";
 import type { Invocation } from "@lore/core";
 
 type RunnableCommand = {
@@ -108,15 +109,15 @@ afterEach(() => {
  * nothing, so {@link configRoundTrips} asserts parseability directly.
  */
 function writeCaptureWindowConfig(rawValue: string): void {
-  writeFileSync(
-    join(tmpDir, ".lore", "config.yaml"),
+  patchLoreConfig(
+    tmpDir,
     "project:\n" +
       "  name: capture-window-fixture\n" +
       "  author: tester\n" +
       "workflow:\n" +
       "  evidence:\n" +
       `    capture_timeout_ms: ${rawValue}\n`,
-    "utf8",
+    { replace: true },
   );
 }
 

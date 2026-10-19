@@ -94,6 +94,7 @@ import {
 } from "../../../src/service/verify-runner-service.js";
 import type { VerifyExecutionResult, VerifySpawnSpec } from "../../../src/service/verify-spawn.js";
 import type { VerifiedEvidenceInput } from "../../../src/service/task-workflow-service.js";
+import { patchLoreConfig } from "../../helpers/patch-lore-config.js";
 
 // ─── Real git-repo/worktree fixtures (throwaway `mkdtemp` — NEVER this repo's
 //     own working tree) ─────────────────────────────────────────────────────
@@ -437,8 +438,8 @@ function extractSlug(stdout: string): string {
 
 /** Disables every service-layer write gate this fixture's authoring flow would otherwise trip — mirrors `verify-ac-ref-wiring.bun.test.ts`'s `disableAllGates`. */
 function disableAllGates(dir: string): void {
-  appendFileSync(
-    join(dir, ".lore", "config.yaml"),
+  patchLoreConfig(
+    dir,
     [
       "workflow:",
       "  gates:",

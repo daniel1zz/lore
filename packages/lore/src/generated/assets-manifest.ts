@@ -45,7 +45,7 @@ export const LORE_BINARY_VERSION = "0.1.0" as const;
 
 export const EMBEDDED_ASSETS_MANIFEST: EmbeddedAssetsManifest = {
   binary_version: LORE_BINARY_VERSION,
-  tree_digest: "725ab90912c35175b56cd975bbd3ed1655ddc1a20cf4d4fe0caded13b76de935",
+  tree_digest: "2b19e90336f5bf02b1dc4c85dfceed80dfe8b2180a483b593c925e1415d51933",
   entries: [
   { path: "agents/lore-implementer.md", kind: "agent", ownership: "managed", sha256: "73f710267743633a7496545862a255fd348e733e5215cdbe62200ecf1af48488" },
   { path: "agents/lore-reader.md", kind: "agent", ownership: "managed", sha256: "336b2da60cfe9afae51f17ac8f6f9f33e7c67b2f3639874795e22a0e257e8696" },

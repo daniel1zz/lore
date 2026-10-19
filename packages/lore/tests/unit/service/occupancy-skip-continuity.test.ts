@@ -42,6 +42,7 @@ import {
 import { STATE_BINDING_SKIP_AUDIT_ACTION } from "../../../src/service/state-binding-skip.js";
 import { LOCK_FILE_NAME, main as acquireOracleLock, releaseLock } from "../../../../../scripts/oracle-lock.js";
 import { withSessionIdentity } from "../../helpers/session-actor.js";
+import { patchLoreConfig } from "../../helpers/patch-lore-config.js";
 
 const PACKAGE_ROOT = new URL("../../../", import.meta.url).pathname.replace(/\/$/, "");
 const INDEX_TS = join(PACKAGE_ROOT, "src", "index.ts");
@@ -330,8 +331,8 @@ function extractSlug(stdout: string): string {
 }
 
 function disableAllGates(dir: string): void {
-  appendFileSync(
-    join(dir, ".lore", "config.yaml"),
+  patchLoreConfig(
+    dir,
     [
       "workflow:",
       "  gates:",

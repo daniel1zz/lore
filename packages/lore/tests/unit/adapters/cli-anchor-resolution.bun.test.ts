@@ -51,7 +51,8 @@
 
 import { describe, expect, it, beforeAll, beforeEach, afterEach, vi } from "vitest";
 const setDefaultTimeout = (ms: number): void => { vi.setConfig({ testTimeout: ms, hookTimeout: ms }); };
-import { mkdtempSync, realpathSync, rmSync, writeFileSync, mkdirSync, appendFileSync } from "fs";
+import { mkdtempSync, realpathSync, rmSync, writeFileSync, mkdirSync } from "fs";
+import { patchLoreConfig } from "../../helpers/patch-lore-config.js";
 import { join } from "path";
 import { tmpdir } from "os";
 import { runLoreInProcess } from "../../helpers/run-lore-in-process";
@@ -93,8 +94,8 @@ async function mustRun(args: string[], cwd: string): Promise<RunResult> {
 
 /** Mirrors `cli-drift.bun.test.ts`'s helper — appends, never rewrites (`project:` is required). */
 function disableAllGates(dir: string): void {
-  appendFileSync(
-    join(dir, ".lore", "config.yaml"),
+  patchLoreConfig(
+    dir,
     [
       "workflow:",
       "  gates:",

@@ -10,7 +10,8 @@
  * refuses a scope that holds a LIVE id; a live criterion is never `superseded`), STATE (c: MCP mark == CLI mark
  * shape, spec not demoted), REGRESSION (b control: before supersession the same task is refused by the floor).
  */
-import { appendFileSync, mkdtempSync, rmSync } from "fs";
+import { mkdtempSync, rmSync } from "fs";
+import { patchLoreConfig } from "../helpers/patch-lore-config.js";
 import { join } from "path";
 import { tmpdir } from "os";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -101,8 +102,8 @@ beforeAll(async () => {
   dir = mkdtempSync(join(tmpdir(), "lore-ac-superseded-readers-"));
   await must(["init"]);
   await loosenOverrideClasses(dir, ["override-judgment"]);
-  appendFileSync(
-    join(dir, ".lore", "config.yaml"),
+  patchLoreConfig(
+    dir,
     [
       "workflow:", "  gates:",
       "    spec-create:", "      enabled: false",

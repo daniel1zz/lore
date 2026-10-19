@@ -10,7 +10,8 @@
  * whose `io.stdin` is a test stream; both commands used to read `process.stdin` / `process.stdin.isTTY`.
  */
 
-import { appendFileSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { patchLoreConfig } from "../../helpers/patch-lore-config.js";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Readable } from "node:stream";
@@ -113,8 +114,8 @@ async function verifyFixture(name: string): Promise<{ home: string; cwd: string;
     return slug;
   };
   await run(["init"]);
-  appendFileSync(
-    join(cwd, ".lore", "config.yaml"),
+  patchLoreConfig(
+    cwd,
     [
       "workflow:",
       "  gates:",
