@@ -1,6 +1,6 @@
 // @reads packages/lore/src/adapters/cli/**
 /**
- * BL-D1: the coverage census measures a cross-cutting leaf (one that declares no command of its own) by the sites it
+ * Task task-skill-fix-bl-d1-coverage-census-measures-a-cross-cutting (BL-D1): the coverage census measures a cross-cutting leaf (one that declares no command of its own) by the sites it
  * OWNS, so it needs no proxy command. The sites a command-less leaf owns are its own `site_map` keys plus every site
  * another leaf's `site_map` hands to it with `non-business:owned-by <this leaf> BR-n`. Each owned site must be
  * accounted for on the owner (live rule or justified non-business); a command-less leaf that owns no site at all is
@@ -11,7 +11,6 @@
  * BOUNDARY (own keys only / no owned site at all -> UNMEASURED), REGRESSION (a leaf WITH commands is measured exactly
  * as before), STATE (JSON `measured_by`).
  *
- * @spec_ref spec-baseline-coverage-cannot-silently-regress-one-program#AC-BCR-6
  */
 import { afterEach, describe, expect, it } from "vitest";
 import { buildMiniCorpus, type MiniCorpus } from "../../helpers/coverage-mini-corpus";

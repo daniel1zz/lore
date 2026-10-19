@@ -1,6 +1,6 @@
 // @reads packages/lore/src/adapters/cli/**
 /**
- * AC-BCR-5: a leaf-declared command the registry no longer has is a coverage DEFECT, not a census error.
+ * Task task-root-coverage-reports-a-declared-command-that-no-longer: a leaf-declared command the registry no longer has is a coverage DEFECT, not a census error.
  * `lore baseline coverage <root>` (and the leaf-level run) exits exactly 1 naming `stale command <cmd>` on the leaf
  * with the fix `lore baseline map <leaf> --remove-command "<cmd>"`; it never exits 4 with a `command-unresolved`
  * census error. Census errors stay for genuinely unanalysable trees (see compiled-root-coverage.bun.test.ts).
@@ -9,7 +9,6 @@
  * Dimensions: HAPPY (control exit 0), NEGATIVE (registry dropped it / its file is gone -> exit 1), REGRESSION
  * (never exit 4, never `command-unresolved`), BOUNDARY (JSON shape; the other leaf stays measured).
  *
- * @spec_ref spec-baseline-coverage-cannot-silently-regress-one-program#AC-BCR-5
  */
 import { afterEach, describe, expect, it } from "vitest";
 import { rmSync } from "node:fs";
@@ -42,7 +41,7 @@ async function withGammaDeclared(): Promise<MiniCorpus> {
   return c;
 }
 
-describe("AC-BCR-5 stale declared command is a coverage defect", () => {
+describe("stale declared command is a coverage defect (task-root-coverage-reports-a-declared-command-that-no-longer)", () => {
   it("control: gamma still in the registry -> exit 0", async () => {
     const c = await withGammaDeclared();
     const r = await c.run(["baseline", "coverage", c.root]);
