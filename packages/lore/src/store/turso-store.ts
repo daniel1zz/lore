@@ -2073,6 +2073,84 @@ export class TursoStore implements StoreInterface {
         await this.appendAuditEntryTx(tx, extraAudit);
       }
 
+      // reason: BR-1307 — companion doc writes (a spec's rule retirements on its baseline leaves) share this
+      // write transaction; each is version-guarded and decided from RETURNING rows, and the registry rows follow
+      // the leaf writes through the docs triggers. Any failure rolls back the primary write too.
+      for (const companion of extras?.also_update ?? []) {
+        const companionRs = await tx.execute({ sql: "SELECT * FROM docs WHERE id = ?", args: [companion.id] });
+        const companionRow = companionRs.rows[0];
+        if (!companionRow) {
+          await tx.rollback();
+          return err({ code: "DOC_NOT_FOUND", id: companion.id });
+        }
+        const companionCurrent = rowToDocRecord(libsqlRowToDocRow(companionRow));
+        const merged: DocRecord = { ...companionCurrent, ...companion.patch, id: companionCurrent.id };
+        const mergedTagsJson = JSON.stringify(merged.tags);
+        const mergedShadow = computeFtsShadowValues(merged.title, merged.content, mergedTagsJson);
+        const expectedVersion = companion.opts.expected_version;
+        const companionUpdateRs = await tx.execute({
+          sql: `UPDATE docs SET
+                 slug = ?, type = ?, role = ?, title = ?, status = ?,
+                 priority = ?, content = ?, parent_id = ?, extra = ?,
+                 tags = ?, version = ?, created_at = ?, updated_at = ?,
+                 created_by = ?, deleted_at = ?, fts_title = ?, fts_content = ?,
+                 fts_tags = ?
+               WHERE id = ?${expectedVersion !== undefined ? " AND version = ?" : ""} RETURNING id`,
+          args: [
+            merged.slug,
+            merged.type,
+            merged.role,
+            merged.title,
+            merged.status,
+            merged.priority,
+            merged.content,
+            merged.parent_id ?? null,
+            JSON.stringify(merged.extra),
+            mergedTagsJson,
+            merged.version,
+            merged.created_at,
+            merged.updated_at,
+            merged.created_by,
+            merged.deleted_at ?? null,
+            mergedShadow.fts_title,
+            mergedShadow.fts_content,
+            mergedShadow.fts_tags,
+            companion.id,
+            ...(expectedVersion !== undefined ? [expectedVersion] : []),
+          ] as InValue[],
+        });
+        if (companionUpdateRs.rows.length === 0) {
+          await tx.rollback();
+          return err({
+            code: "STALE_VERSION",
+            id: companion.id,
+            expected: expectedVersion ?? companionCurrent.version,
+            actual: companionCurrent.version,
+          });
+        }
+        await tx.execute({
+          sql: `INSERT INTO versions
+                 (doc_id, version, content, extra, status, title,
+                  action, created_at, created_by, change_summary, slug, harness_run)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          args: [
+            companion.version.doc_id,
+            companion.version.version,
+            companion.version.content,
+            JSON.stringify(companion.version.extra),
+            companion.version.status,
+            companion.version.title,
+            companion.version.action,
+            companion.version.created_at,
+            companion.version.created_by,
+            companion.version.change_summary ?? null,
+            companion.version.slug ?? null,
+            companion.version.harness_run ?? null,
+          ] as InValue[],
+        });
+        await this.appendAuditEntryTx(tx, companion.audit);
+      }
+
       await tx.commit();
       return ok(updated);
     } catch (e) {

@@ -64,7 +64,7 @@ import { resolveDoc } from "./resolve.js";
 import { collectLeafRules } from "./rule-index-queries.js";
 import { findOtherSpecChange, findProposal, isLanded, ruleChangesOf } from "./rule-changes.js";
 import { measureLandingEvidence } from "./landing-evidence.js";
-import type { RuleApplyLeafWrite, RuleApplyOpts, RuleApplyOutcome, RuleChangeLandingPort } from "./rule-landing-port.js";
+import type { AbandonmentPlan, RuleApplyLeafWrite, RuleApplyOpts, RuleApplyOutcome, RuleChangeLandingPort } from "./rule-landing-port.js";
 
 /** Immediate re-applies after a CAS miss before the STALE_VERSION error is surfaced. */
 export const MAX_CAS_REAPPLIES = 3;
@@ -321,19 +321,20 @@ export class RuleChangeService implements RuleChangeLandingPort {
   }
 
   /**
-   * Write every touched leaf exactly once. All leaf plans are computed (and shape-validated) BEFORE the first
-   * write, so a refusal on one leaf leaves the tree untouched; a STALE_VERSION re-plans that leaf on a fresh read.
+   * Plan every touched leaf without writing: all leaf plans are computed (and shape-validated) and each leaf's
+   * write authorized, so a refusal on one leaf leaves the tree untouched.
+   *
+   * @returns one entry per leaf the changes actually alter (a leaf whose plan is a no-op is skipped).
    */
-  private async writeLeaves(
+  private async planLeafWrites(
     spec: DocRecord,
     changes: readonly RuleChange[],
     mode: "land" | "abandon",
     actor: string,
-  ): Promise<Result<RuleApplyLeafWrite[], LoreError>> {
+  ): Promise<Result<Array<{ leaf: DocRecord; changes: RuleChange[]; plan: LeafPlan }>, LoreError>> {
     if (changes.length === 0) return ok([]);
-    const registry = await this.store.listRuleRegistry();
-    if (!registry.ok) return registry;
-    const states = new Map(registry.value.map((row) => [row.id, row.lifecycle as string]));
+    const states = await this.readRuleStates();
+    if (!states.ok) return states;
     const baseline = await this.store.findMany({ type: "baseline" });
     if (!baseline.ok) return baseline;
     const owners = collectLeafRules(baseline.value);
@@ -347,19 +348,75 @@ export class RuleChangeService implements RuleChangeLandingPort {
       groups.set(leaf.value.id as string, group);
     }
 
-    const planned: Array<{ leaf: DocRecord; changes: RuleChange[] }> = [];
+    const planned: Array<{ leaf: DocRecord; changes: RuleChange[]; plan: LeafPlan }> = [];
     for (const group of groups.values()) {
       const fresh = await this.readDoc(group.leafId);
       if (!fresh.ok) return fresh;
-      const plan = planLeaf(fresh.value, group.changes, spec.slug, mode, states);
+      const plan = planLeaf(fresh.value, group.changes, spec.slug, mode, states.value);
       if (!plan.ok) return plan;
       if (plan.value === undefined) continue;
       if (this.writeAuthority !== undefined) {
         const verdict = await this.writeAuthority.authorize([fresh.value], "rule-apply", actor);
         if (!verdict.ok) return verdict;
       }
-      planned.push({ leaf: fresh.value, changes: group.changes });
+      planned.push({ leaf: fresh.value, changes: group.changes, plan: plan.value });
     }
+    return ok(planned);
+  }
+
+  /** The registry's rule id to lifecycle map, read once per plan. */
+  private async readRuleStates(): Promise<Result<Map<string, string>, LoreError>> {
+    const registry = await this.store.listRuleRegistry();
+    if (!registry.ok) return registry;
+    return ok(new Map(registry.value.map((row) => [row.id, row.lifecycle as string])));
+  }
+
+  /**
+   * BR-1307 - the leaf writes that retire a spec's still-proposed ids "never landed: <spec>", planned and not
+   * written: the corpus commits them with the spec's move to `deprecated` in ONE transaction.
+   *
+   * @param specRef - Spec id or slug; a non-spec doc is a VALIDATION_ERROR.
+   * @returns the plan (empty `leaves` when nothing is proposed or every id is already retired); the refusal when a
+   *   leaf is unresolvable, unwritable from here, or the stored change set is corrupt.
+   */
+  async planAbandonment(specRef: string, opts: RuleApplyOpts = {}): Promise<Result<AbandonmentPlan, LoreError>> {
+    const actor = resolveWriteActorFor(this.store, opts.by);
+    const specResult = await this.resolveSpec(specRef);
+    if (!specResult.ok) return specResult;
+    const spec = specResult.value;
+    const stored = readChangeSet(spec);
+    if (!stored.ok) return stored;
+    const abandoned = stored.value.filter((change) => change.op === "add" && !isLanded(change));
+    const planned = await this.planLeafWrites(spec, abandoned, "abandon", actor);
+    if (!planned.ok) return planned;
+    return ok({
+      spec: spec.slug,
+      leaves: planned.value.map(({ leaf, plan }) => ({
+        leaf,
+        extra: plan.extra,
+        status: resolveStatusAfterContractEdit(leaf.status, true),
+        summary: `Proposed rules retired, never landed (${spec.slug}): ${plan.touched.join(", ")}`,
+        details: { operation: "rule-abandon", spec: spec.slug, rules: plan.touched },
+        rules: plan.touched,
+      })),
+    });
+  }
+
+  /**
+   * Write every touched leaf exactly once. A STALE_VERSION re-plans that leaf on a fresh read.
+   */
+  private async writeLeaves(
+    spec: DocRecord,
+    changes: readonly RuleChange[],
+    mode: "land" | "abandon",
+    actor: string,
+  ): Promise<Result<RuleApplyLeafWrite[], LoreError>> {
+    const plannedAll = await this.planLeafWrites(spec, changes, mode, actor);
+    if (!plannedAll.ok) return plannedAll;
+    const planned = plannedAll.value;
+    const stateRead = await this.readRuleStates();
+    if (!stateRead.ok) return stateRead;
+    const states = stateRead.value;
 
     const written: RuleApplyLeafWrite[] = [];
     for (const { leaf, changes: leafChanges } of planned) {
