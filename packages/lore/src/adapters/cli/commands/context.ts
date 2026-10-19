@@ -313,7 +313,11 @@ async function resolveInitNarrative(
   if (provider === undefined) return undefined;
 
   const genResult = await provider.generate({
-    prompt: buildContextNarrativePrompt(factsResult.value),
+    // the narrative prompt wants name -> command body only; descriptions belong to the generated table
+    prompt: buildContextNarrativePrompt({
+      ...factsResult.value,
+      commands: Object.fromEntries(Object.entries(factsResult.value.commands).map(([name, entry]) => [name, entry.command])),
+    }),
     doc_type: "knowledge",
     title: "CLAUDE.md context narrative",
   });
