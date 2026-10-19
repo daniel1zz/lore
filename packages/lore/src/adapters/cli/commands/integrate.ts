@@ -15,6 +15,10 @@
  * file named by `LORE_FLOOR_TIMINGS_FILE` that scripts/run-chain.ts writes; a floor command that writes none is recorded
  * as one step named `floor (no per-step timings emitted)`.
  *
+ * After main moved, the landing ({branch, branch_head, main_before, main_after, landing_commit}) is written to
+ * `extra.landing` of every task whose claim (current or historical) recorded the branch, so a later re-claim cannot
+ * replace the task's commit range; a failed write is logged as a WARNING and never un-lands main.
+ *
  * The caller's session: `--session <id>` else `CLAUDE_CODE_SESSION_ID` / `CLAUDE_SESSION_ID`; none is a refusal.
  *
  * Exit codes: 0 = landed, or already integrated (a re-run after a crash past the CAS); 1 = the floor failed (main
@@ -209,6 +213,8 @@ export default defineLoreCommand({
         },
         ledger: new IntegrateLossLedger(corpusDir),
         attempts: new IntegrateAttemptLedger(corpusDir),
+        // the landing is recorded through the corpus write route (TaskWorkflowService -> CorpusService.writeDoc)
+        landings: { record: (landing) => app.taskWorkflowService.recordLanding(landing) },
         projectRoot,
         worktreesRoot: resolvePath(mainRoot, ".claude", "worktrees"),
         log: (line) => inv.io.stdout.write(`${line}\n`),

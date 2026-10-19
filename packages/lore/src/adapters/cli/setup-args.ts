@@ -109,6 +109,8 @@ export interface SetupFlagInput {
   dryRun: boolean;
   uninstall: boolean;
   project: boolean;
+  /** `--force-diverged` — meaningful only to the global install/converge mode; every other mode rejects it. */
+  forceDiverged?: boolean;
   /** `--claude-dir <path>`, when passed — `undefined` when omitted. */
   claudeDir?: string;
 }
@@ -147,6 +149,18 @@ export type SetupFlagResult = { ok: true; mode: SetupMode } | SetupFlagRejection
  * validateSetupFlags({ dryRun: true, uninstall: true, project: false });  // => {ok: false, message: "..."}
  */
 export function validateSetupFlags(input: SetupFlagInput): SetupFlagResult {
+  if (input.forceDiverged === true) {
+    const other = input.project ? "--project" : input.dryRun ? "--dry-run" : input.uninstall ? "--uninstall" : undefined;
+    if (other !== undefined) {
+      return {
+        ok: false,
+        message:
+          `--force-diverged cannot be combined with ${other} — it only applies to the global install/converge run, ` +
+          "where it overwrites (after a backup) or removes user-edited managed files.",
+      };
+    }
+  }
+
   if (input.project) {
     if (input.dryRun) {
       return {

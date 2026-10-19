@@ -5,7 +5,10 @@
  * project's post-merge floor on the merged tree, then advance `refs/heads/main` with a compare-and-swap
  * (`git update-ref refs/heads/main <new> <base>`). Git's own ref lock + old-value check refuses a lost race, so no
  * exclusivity is needed (adr-main-advances-only-by-lore-integrate-per-session, Option A; experiments E4, E8).
- * Public surface: IntegrateService.integrate, IntegrateOutcome, integrateExitCode, IntegrateRequest,
+ * Landing record: after the CAS moved main, `deps.landings.record` writes `extra.landing` ({branch, branch_head,
+ *   main_before, main_after, landing_commit}) on every task whose claim recorded the branch, so a task's commit range
+ *   is a fact of its landing and a later re-claim cannot replace it (task-commit-range.ts). Never fails the landing.
+ * Public surface: IntegrateService.integrate, LandingRecorder, IntegrateOutcome, integrateExitCode, IntegrateRequest,
  *   IntegrateDeps, IntegrateGit, FloorRunner, CorpusSnapshotter, INTEGRATE_MAX_ATTEMPTS, INTEGRATE_EXIT_LOST_RACES, INTEGRATE_MARKER_ENV,
  *   integrationWorktreePath.
  * Invariants:
@@ -62,6 +65,7 @@ import { join } from "node:path";
 import { err, ok, type LoreError, type Result } from "@lore/core";
 import type { IntegrateLossLedger } from "./integrate-loss-ledger.js";
 import type { AttemptRecord, IntegrateAttemptLedger } from "./integrate-attempt-ledger.js";
+import type { LandingFact } from "./task-commit-range.js";
 
 /** Attempts (merge + floor + CAS) one call makes before it gives up with exit 75. */
 export const INTEGRATE_MAX_ATTEMPTS = 3;
@@ -136,12 +140,22 @@ export interface IntegrationLease {
   readonly acquire: (lockDir: string, holder: LeaseHolder) => Result<LeaseGrant, LoreError>;
 }
 
+/**
+ * Records a landing on every task whose claim (current or historical) recorded the landed branch. Resolves to the slugs
+ * written. Wired by the CLI to `TaskWorkflowService.recordLanding` (the corpus write route); a failure never un-lands main.
+ */
+export interface LandingRecorder {
+  readonly record: (landing: LandingFact) => Promise<Result<readonly string[], LoreError>>;
+}
+
 export interface IntegrateDeps {
   readonly git: IntegrateGit;
   /** One run at a time per integration worktree: a second run for the same session is refused (outcome `busy`, exit 75). */
   readonly lease: IntegrationLease;
   /** The running process's pid, recorded as the lease holder (default `process.pid`). */
   readonly pid?: number;
+  /** Landing records (`extra.landing` on the branch's tasks). Absent in a bare construction: nothing is recorded. */
+  readonly landings?: LandingRecorder;
   /** Floor corpus: the floor reads a snapshot of the shared corpus inside the integration worktree, never the live one. */
   readonly corpus: CorpusSnapshotter;
   readonly runFloor: FloorRunner;
@@ -298,14 +312,14 @@ export class IntegrateService {
     if (!granted.ok) return granted;
     if (granted.value.kind === "busy") return ok({ kind: "busy", branch: request.branch, worktree: wt, holder: granted.value.holder });
     try {
-      return this.landOn(request, request.floorCommand, tip, wt);
+      return await this.landOn(request, request.floorCommand, tip, wt);
     } finally {
       granted.value.release();
     }
   }
 
   /** The attempt loop, run while this process holds the integration worktree's lease. */
-  private landOn(request: IntegrateRequest, floorCommand: string, tip: string, wt: string): Result<IntegrateOutcome, LoreError> {
+  private async landOn(request: IntegrateRequest, floorCommand: string, tip: string, wt: string): Promise<Result<IntegrateOutcome, LoreError>> {
     const { git, projectRoot, ledger, log } = this.deps;
     const clock = this.deps.clock ?? Date.now;
     const remoteOfBranch = this.remoteOf(request.branch);
@@ -372,6 +386,7 @@ export class IntegrateService {
       const casMs = clock() - casStart;
       if (swapped.status === 0) {
         finish({ outcome: "landed", merge_ms: mergeMs, corpus_snapshot_ms: snapshotMs, floor: floorTimings, cas_ms: casMs });
+        await this.recordLanding({ branch: request.branch, branch_head: tip, main_before: base.value, main_after: merge, landing_commit: merge });
         const cleared = ledger.clear(request.branch);
         if (!cleared.ok) return cleared;
         const view = this.refreshSharedView();
@@ -395,6 +410,22 @@ export class IntegrateService {
     const back = this.resetWorktree(wt, final.value);
     if (!back.ok) return back;
     return ok({ kind: "lost_races", branch: request.branch, attempts: INTEGRATE_MAX_ATTEMPTS, moved_by: movedBy, consecutive_losses: lastConsecutiveLosses });
+  }
+
+  /**
+   * Records the landing on the branch's tasks. Never fails the integration (main has already moved): a task that
+   * could not be written is logged loudly, so the missing record is visible and `lore done` backfills it from the
+   * `merge(<branch>)` commit.
+   */
+  private async recordLanding(landing: LandingFact): Promise<void> {
+    const recorder = this.deps.landings;
+    if (recorder === undefined) return;
+    const written = await recorder.record(landing);
+    if (!written.ok) {
+      this.deps.log(`integrate: WARNING: the landing of ${landing.branch} was not recorded on its tasks: ${written.error.code}${"message" in written.error ? ` ${written.error.message}` : ""}`);
+      return;
+    }
+    this.deps.log(`integrate: landing of ${landing.branch} recorded on ${written.value.length === 0 ? "no task (none claimed this branch)" : written.value.join(", ")}`);
   }
 
   /**
