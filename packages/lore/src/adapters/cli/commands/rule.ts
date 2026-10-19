@@ -48,6 +48,7 @@ import type { App } from "../../../app.js";
 import type { AddRuleInput, SetRulePatch } from "../../../service/rule-service.js";
 import type { ProposeRuleChangeInput, RuleEnforcement } from "../../../service/rule-change-service.js";
 import { invocationOf } from "../command-invocation.js";
+import { formatDemotionLine } from "../../../service/demotion-notice.js";
 import { printLine } from "../output.js";
 import type { CliIo } from "../output.js";
 import type { ExitReport } from "../cli-exit.js";
@@ -395,9 +396,10 @@ export default defineLoreCommand({
           const result = await svc.addRule(args.leaf as string, input, { by: resolveActor(inv.io, undefined, inv.env, inv.cwd, inv.user) });
           if (!result.ok) return reportFailure(inv, result.error, args.json === true);
           if (args.json) {
-            printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { ruleId: result.value.ruleId, leaf: result.value.doc.slug, version: result.value.doc.version } }, null, 2));
+            printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { ruleId: result.value.ruleId, leaf: result.value.doc.slug, version: result.value.doc.version, ...(result.value.demoted !== undefined ? { demoted: result.value.demoted } : {}) } }, null, 2));
           } else {
             printLine(inv.io.stdout, `Added ${result.value.ruleId} to ${result.value.doc.slug} (v${result.value.doc.version}).`);
+            if (result.value.demoted !== undefined) printLine(inv.io.stdout, formatDemotionLine(result.value.demoted));
           }
         } finally {
           app.close();
@@ -446,9 +448,10 @@ export default defineLoreCommand({
           const result = await svc.setRule(args.rule as string, patch, { by: resolveActor(inv.io, undefined, inv.env, inv.cwd, inv.user) });
           if (!result.ok) return reportFailure(inv, result.error, args.json === true);
           if (args.json) {
-            printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { rule: result.value.rule, leaf: result.value.doc.slug, version: result.value.doc.version } }, null, 2));
+            printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { rule: result.value.rule, leaf: result.value.doc.slug, version: result.value.doc.version, ...(result.value.demoted !== undefined ? { demoted: result.value.demoted } : {}) } }, null, 2));
           } else {
             printLine(inv.io.stdout, `Updated ${result.value.rule.id} [${result.value.rule.lifecycle}] on ${result.value.doc.slug} (v${result.value.doc.version}).`);
+            if (result.value.demoted !== undefined) printLine(inv.io.stdout, formatDemotionLine(result.value.demoted));
           }
         } finally {
           app.close();
