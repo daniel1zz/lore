@@ -149,11 +149,13 @@ const ORPHAN_PID = 777001;
 /** A scripted process table: no real process is touched. */
 function scriptedProcesses(entries: { pid: number; ppid: number; startTime: string; command: string; cwd: string }[]): ProcessTablePort {
   return {
-    snapshot: async () =>
-      ok({
+    snapshot: async () => ({
+      ok: true as const,
+      value: {
         entries: entries.map(({ pid, ppid, startTime, command }) => ({ pid, ppid, zombie: false, startTime, command })),
         cwdByPid: new Map(entries.map((e) => [e.pid, e.cwd] as const)),
-      }),
+      },
+    }),
     inspect: async () => null,
     signal: async () => "gone" as const,
     sleep: async () => undefined,
