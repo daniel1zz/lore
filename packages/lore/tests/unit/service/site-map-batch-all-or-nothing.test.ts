@@ -76,6 +76,7 @@ describe("setSiteMap is all-or-nothing (AC-BMB-2, service)", () => {
     expect(res.ok).toBe(false);
     if (res.ok) return;
     expect(res.error.code).toBe("VALIDATION_ERROR");
+    if (res.error.code !== "VALIDATION_ERROR") return;
     expect(res.error.message).toContain("src/f50.ts#fn#E50");
     expect(res.error.message).toContain(foreignRule);
     const after = await fresh();
@@ -92,6 +93,7 @@ describe("setSiteMap is all-or-nothing (AC-BMB-2, service)", () => {
     expect(res.ok).toBe(false);
     if (res.ok) return;
     expect(res.error.code).toBe("VALIDATION_ERROR");
+    if (res.error.code !== "VALIDATION_ERROR") return;
     expect(res.error.message).toContain("src/f7.ts#fn#E7");
     expect(res.error.message).toContain("src/f50.ts#fn#E50");
   });

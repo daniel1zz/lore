@@ -10,7 +10,7 @@
  *   depends <leaf> [--add BR-n]... [--remove BR-n]...
  *   glossary add <node> --term <t> --meaning <m> [--note <n>]   (root|branch only)
  *   glossary rm  <node> --term <t>
- *   map <leaf> [--site <key> (--rule BR-n... | --non-business <reason>)] [--remove-site <key>]...
+ *   map <leaf> [--site <key> (--rule BR-n... | --non-business <reason>)] [--sites-file <path>] [--remove-site <key>]...
  *               [--command <name>]... [--remove-command <name>]...
  *                   The ONLY writer of `extra.site_map` / `extra.commands` (leaf only). With no change
  *                   flag it authorizes through the corpus-write guard (claim scope, AC-BLS2-8), reports
@@ -73,6 +73,52 @@ import type { ExitReport } from "../cli-exit.js";
 function repeatable(value: unknown): string[] {
   if (value === undefined) return [];
   return Array.isArray(value) ? value.map(String) : [String(value)];
+}
+
+/**
+ * Parse the body of a `--sites-file`: a JSON array of `{ site, rules: [BR-n...] }` or `{ site, nonBusiness: "<reason>" }`
+ * rows into the `sites` map of one {@link SiteMapChange}. Pure; names the offending row (1-based) and site key.
+ *
+ * @param text - file contents
+ * @param taken - site keys already named elsewhere in the same call (e.g. by `--site`); repeating one is a duplicate
+ * @returns the sites map, or a VALIDATION_ERROR for not-JSON / not-an-array / empty / a malformed row / a duplicate site key
+ */
+export function parseSitesFile(text: string, taken: ReadonlySet<string> = new Set()): { ok: true; sites: Record<string, string[]> } | { ok: false; error: LoreError } {
+  const fail = (message: string, value?: unknown): { ok: false; error: LoreError } => ({
+    ok: false,
+    error: { code: "VALIDATION_ERROR", field: "sites-file", message, ...(value !== undefined ? { value } : {}) } as LoreError,
+  });
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch (cause) {
+    return fail(`sites file is not valid JSON: ${cause instanceof Error ? cause.message : String(cause)}`);
+  }
+  if (!Array.isArray(parsed)) return fail("sites file must be a JSON array of { site, rules | nonBusiness } rows");
+  if (parsed.length === 0) return fail("sites file must contain at least one row");
+  const sites: Record<string, string[]> = {};
+  const seen = new Set<string>(taken);
+  for (const [i, row] of parsed.entries()) {
+    const at = `row ${i + 1}`;
+    if (typeof row !== "object" || row === null || Array.isArray(row)) return fail(`${at} must be an object { site, rules | nonBusiness }`);
+    const { site, rules, nonBusiness } = row as Record<string, unknown>;
+    if (typeof site !== "string" || site.trim().length === 0) return fail(`${at} needs a non-empty string 'site'`);
+    const hasRules = rules !== undefined;
+    const hasReason = nonBusiness !== undefined;
+    if (hasRules === hasReason) return fail(`${at} (site '${site}') needs exactly one of 'rules' (array of BR-n) or 'nonBusiness' (reason string)`, site);
+    if (seen.has(site)) return fail(`duplicate site key '${site}' at ${at}`, site);
+    seen.add(site);
+    if (hasRules) {
+      if (!Array.isArray(rules) || rules.length === 0 || !rules.every((r) => typeof r === "string" && r.trim().length > 0)) {
+        return fail(`${at} (site '${site}'): 'rules' must be a non-empty array of rule id strings`, site);
+      }
+      sites[site] = rules as string[];
+    } else {
+      if (typeof nonBusiness !== "string" || nonBusiness.trim().length === 0) return fail(`${at} (site '${site}'): 'nonBusiness' must be a non-empty reason string`, site);
+      sites[site] = [`${NON_BUSINESS_PREFIX}${nonBusiness}`];
+    }
+  }
+  return { ok: true, sites };
 }
 
 function reportFailure(inv: Invocation, error: LoreError, json: boolean): ExitReport {
@@ -543,6 +589,7 @@ export default defineLoreCommand({
         site: { type: "string", description: "Census site key (file#symbol#code, from `lore baseline sites`) to map; needs --rule or --non-business" },
         rule: { type: "string", description: "[repeatable] Rule id (BR-n) of this leaf that the --site refusal enforces" },
         "non-business": { type: "string", description: "Reason the --site is not business behaviour (stored as non-business:<reason>)" },
+        "sites-file": { type: "string", description: "JSON file of many site mappings: [{ \"site\": key, \"rules\": [BR-n...] } | { \"site\": key, \"nonBusiness\": reason }]; written as ONE version, all rows or none" },
         "remove-site": { type: "string", description: "[repeatable] Site key to unmap" },
         command: { type: "string", description: "[repeatable] CLI command name (e.g. 'ac add') this leaf answers for" },
         "remove-command": { type: "string", description: "[repeatable] Command name to drop" },
@@ -563,20 +610,34 @@ export default defineLoreCommand({
           if (site !== undefined && (rules.length > 0) === (reason !== undefined)) {
             return reportFailure(inv, { code: "VALIDATION_ERROR", field: "site", message: "--site needs exactly one of --rule BR-n (repeatable) or --non-business <reason>" }, json);
           }
+          const rowSites: Record<string, string[]> = site !== undefined ? { [site]: reason !== undefined ? [`${NON_BUSINESS_PREFIX}${reason}`] : rules } : {};
+          const sitesFile = typeof args["sites-file"] === "string" ? args["sites-file"] : undefined;
+          if (sitesFile !== undefined) {
+            let text: string;
+            try {
+              text = readFileSync(sitesFile, "utf8");
+            } catch (cause) {
+              return reportFailure(inv, { code: "VALIDATION_ERROR", field: "sites-file", message: `cannot read sites file '${sitesFile}': ${cause instanceof Error ? cause.message : String(cause)}` }, json);
+            }
+            const parsedFile = parseSitesFile(text, new Set(Object.keys(rowSites)));
+            if (!parsedFile.ok) return reportFailure(inv, parsedFile.error, json);
+            Object.assign(rowSites, parsedFile.sites);
+          }
+          const hasSites = Object.keys(rowSites).length > 0;
           const change: SiteMapChange = {
-            ...(site !== undefined ? { sites: { [site]: reason !== undefined ? [`${NON_BUSINESS_PREFIX}${reason}`] : rules } } : {}),
+            ...(hasSites ? { sites: rowSites } : {}),
             removeSites: repeatable(args["remove-site"]),
             addCommands: repeatable(args.command),
             removeCommands: repeatable(args["remove-command"]),
           };
-          const noChange = site === undefined && (change.removeSites?.length ?? 0) + (change.addCommands?.length ?? 0) + (change.removeCommands?.length ?? 0) === 0;
+          const noChange = !hasSites && (change.removeSites?.length ?? 0) + (change.addCommands?.length ?? 0) + (change.removeCommands?.length ?? 0) === 0;
           if (noChange) {
             // Authorization-only: reports the claim-scope verdict (AC-BLS2-8) and records nothing.
             const authorized = await svc.authorizeNodeWrite(args.leaf as string, "baseline-map", by);
             if (!authorized.ok) return reportFailure(inv, authorized.error, json);
             const slug = authorized.value.slug;
             if (json) printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { slug, authorized: true, recorded: false } }, null, 2));
-            else printLine(inv.io.stdout, `${slug}: site-map write authorized; nothing to record (pass --site/--command to change the map).`);
+            else printLine(inv.io.stdout, `${slug}: site-map write authorized; nothing to record (pass --site/--sites-file/--command to change the map).`);
             return 0;
           }
           const result = await svc.setSiteMap(args.leaf as string, change, { by });
