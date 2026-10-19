@@ -56,6 +56,7 @@ import {
 import type { StoreInterface } from "../store/store-interface.js";
 import { resolveDoc } from "./resolve.js";
 import { buildRuleIndex } from "./ac-citations.js";
+import { bareDocWriter, type DocWritePort } from "./corpus-service.js";
 
 /** Options for {@link RequirementService.addRequirement}. */
 export interface AddRequirementOpts {
@@ -81,7 +82,13 @@ export class RequirementService {
   constructor(
     private readonly store: StoreInterface,
     private readonly requirementQuantifiableEnabled: boolean = true,
-  ) {}
+    /** The one write route (`CorpusService`, AC-DCL-3); `app.ts` passes the composed one, a bare test gets a bare writer. */
+    writer?: DocWritePort,
+  ) {
+    this.writer = writer ?? bareDocWriter(store);
+  }
+
+  private readonly writer: DocWritePort;
 
   // ── addRequirement ──────────────────────────────────────────────────────────
 
@@ -331,54 +338,27 @@ export class RequirementService {
   }
 
   /**
-   * Shared CAS-guarded write path for add/removeRequirement: bumps the PRD's version, writes
-   * one insertVersion snapshot, then one audit entry (action "update", actor "system") —
-   * same shape as `AcService.writeCriteria`.
+   * Shared write path for add/remove/migrate: one `writeDoc` on the one write route (AC-DCL-3) — CAS-guarded
+   * `extra.requirements` update, one version snapshot, one audit entry (`action: "update"`), in one transaction,
+   * attributed to the CALLING actor (#298: it used to be the literal "system"), refused from a foreign-resolved
+   * corpus. A requirement array equal to the stored one writes nothing.
    */
   private async writeRequirements(
     prd: DocRecord,
     requirements: Requirement[],
     operation: "add" | "remove" | "migrate",
   ): Promise<Result<DocRecord, LoreError>> {
-    const now = new Date().toISOString();
-    const newVersion = prd.version + 1;
-    const newExtra: Record<string, unknown> = { ...prd.extra, requirements };
-
-    const updateResult = await this.store.update(
-      prd.id,
-      { extra: newExtra, updated_at: now, version: newVersion },
-      { expected_version: prd.version },
-    );
-    if (!updateResult.ok) return updateResult;
-
-    const versionResult = await this.store.insertVersion({
-      doc_id: prd.id,
-      version: newVersion,
-      content: updateResult.value.content,
-      extra: updateResult.value.extra,
-      status: updateResult.value.status,
-      title: updateResult.value.title,
+    const written = await this.writer.writeDoc({
+      doc: prd,
+      patch: { extra: { ...prd.extra, requirements } },
       action: "update",
-      created_at: now,
-      created_by: "system",
-      change_summary: `Requirements ${operation === "remove" ? "updated (removal)" : operation === "migrate" ? "updated (migration)" : "updated"} — ${requirements.length} entries`,
-      // SPEC-072 D1/D2 — this write path only touches `extra`; carry the
-      // current (unchanged) slug.
-      slug: updateResult.value.slug,
+      changeSummary: `Requirements ${operation === "remove" ? "updated (removal)" : operation === "migrate" ? "updated (migration)" : "updated"} — ${requirements.length} entries`,
+      auditAction: "update",
+      auditDetails: { operation, requirement_count: requirements.length },
+      lock: "none",
     });
-    if (!versionResult.ok) return versionResult;
-
-    const auditResult = await this.store.appendAuditEntry({
-      timestamp: now,
-      actor: "system",
-      session_id: prd.id,
-      action: "update",
-      doc_id: prd.id,
-      details: { operation, requirement_count: requirements.length, version: newVersion },
-    });
-    if (!auditResult.ok) return auditResult;
-
-    return ok(updateResult.value);
+    if (!written.ok) return written;
+    return ok(written.value.doc);
   }
 }
 

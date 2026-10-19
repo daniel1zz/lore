@@ -733,10 +733,13 @@ describe("PhaseMigrationService.migrateTasks — idempotent second run (AC-P-5 R
  */
 function wrapStoreFailingNthPhaseInsert(store: SQLiteStore, failOnCount: number): StoreInterface {
   let phaseInsertCount = 0;
-  return new Proxy(store, {
+  // reason: the write actor is resolved from the store OBJECT's declared write context, which a Proxy does not carry.
+  return actedStore(new Proxy(store, {
     get(target, prop, receiver) {
-      if (prop === "insert") {
-        return async (doc: DocRecord) => {
+      // reason: defect-clusters D3 — the phase doc now lands through the one write route's `insertWithProvenance`
+      // (doc + version + audit in one transaction), not a bare `insert`; the first argument is still the doc.
+      if (prop === "insert" || prop === "insertWithProvenance") {
+        return async (doc: DocRecord, ...rest: unknown[]) => {
           if ((doc.type as unknown as string) === "phase") {
             phaseInsertCount += 1;
             if (phaseInsertCount === failOnCount) {
@@ -749,13 +752,13 @@ function wrapStoreFailingNthPhaseInsert(store: SQLiteStore, failOnCount: number)
               };
             }
           }
-          return target.insert(doc);
+          return (target[prop] as (...a: unknown[]) => unknown)(doc, ...rest);
         };
       }
       const value = Reflect.get(target, prop, receiver);
       return typeof value === "function" ? (value as (...a: unknown[]) => unknown).bind(target) : value;
     },
-  }) as unknown as StoreInterface;
+  }) as unknown as StoreInterface);
 }
 
 describe("PhaseMigrationService.migrateTasks — mid-loop store failure reports partial progress (BUG-009 STATE)", () => {

@@ -137,10 +137,7 @@ import type {
   Result,
 } from "@lore/core";
 import type { StoreInterface } from "../store/store-interface.js";
-
-/** Actor stamped on every doc/version/audit row this service writes — mirrors
- *  `OutlineMigrationService`/`PhaseMigrationService`'s `MIGRATION_ACTOR` precedent. */
-const MIGRATION_ACTOR = "system:ordinal-migration";
+import { bareDocWriter, type DocWritePort } from "./corpus-service.js";
 
 // ─── Public Types ───────────────────────────────────────────────────────────
 
@@ -155,6 +152,11 @@ export interface OrdinalMigrationOpts {
    * this repair migration, not an optional extra.
    */
   projectDir: string;
+  /**
+   * The acting identity stamped on every version/audit row (AC-DCL-3). Absent = the store write context's
+   * claimed name (the invocation identity) — never a synthetic `system:` actor.
+   */
+  by?: string;
 }
 
 /**
@@ -456,7 +458,15 @@ function computeSuggestedFilePath(filePath: string, prefix: string, newHumanId: 
  * {@link StoreInterface}, mirroring every other service in this codebase.
  */
 export class OrdinalMigrationService {
-  constructor(private readonly store: StoreInterface) {}
+  constructor(
+    private readonly store: StoreInterface,
+    /** The one write route (`CorpusService`, AC-DCL-3); `app.ts` passes the composed one, a bare test gets a bare writer. */
+    writer?: DocWritePort,
+  ) {
+    this.writer = writer ?? bareDocWriter(store);
+  }
+
+  private readonly writer: DocWritePort;
 
   /**
    * Runs the full three-step SPEC-084 repair migration (see module header for
@@ -471,7 +481,7 @@ export class OrdinalMigrationService {
    *   `report.errors[]` and does not stop the run.
    */
   async migrateOrdinals(opts: OrdinalMigrationOpts): Promise<Result<OrdinalMigrationReport, LoreError>> {
-    const { dryRun, projectDir } = opts;
+    const { dryRun, projectDir, by } = opts;
     const nowIso = new Date().toISOString();
     const errors: string[] = [];
     let writesPerformed = 0;
@@ -611,36 +621,21 @@ export class OrdinalMigrationService {
         const oldDisplay =
           claim.number !== null ? formatDocDisplayId({ type: doc.type, ordinal: claim.number }) : null;
 
-        const allocResult = await this.store.assignOrdinalForRepair(doc.id, target);
+        // reason: AC-DCL-3 — the repair-assignment goes through the one write route, which also writes the
+        // version row and the audit row (the bare store primitive wrote neither) as the CALLING actor, and
+        // refuses a foreign-resolved corpus. A same-value repeat is a no-op (`written: false`).
+        const allocResult = await this.writer.assignOrdinalForRepair(doc, target, by, nowIso);
         if (!allocResult.ok) {
           errors.push(
             `ordinal repair-assignment failed for ${doc.id} (${doc.slug}) target ${target}: ${describeLoreError(allocResult.error)}`,
           );
           continue;
         }
-        const updated = allocResult.value;
+        const updated = allocResult.value.doc;
         const actualOrdinal = updated.ordinal as number;
         finalOrdinalByDocId.set(doc.id, { type: doc.type, ordinal: actualOrdinal });
         versionByDocId.set(doc.id, updated.version);
-        // `assignOrdinalForRepair` is a no-op success (unchanged version) on
-        // a same-value repeat call — only count a REAL write.
-        if (updated.version !== doc.version) writesPerformed += 1;
-
-        const auditResult = await this.store.appendAuditEntry({
-          timestamp: nowIso,
-          actor: MIGRATION_ACTOR,
-          session_id: `ordinal-migration-${doc.id}`,
-          action: "ordinal-backfill",
-          doc_id: doc.id,
-          details: {
-            old_display: oldDisplay,
-            new_ordinal: actualOrdinal,
-            new_display: formatDocDisplayId({ type: doc.type, ordinal: actualOrdinal }),
-          },
-        });
-        if (!auditResult.ok) {
-          errors.push(`audit write failed for ${doc.id} ordinal backfill: ${describeLoreError(auditResult.error)}`);
-        }
+        if (allocResult.value.written) writesPerformed += 1;
 
         reassignments.push({
           doc_id: doc.id,
@@ -669,6 +664,16 @@ export class OrdinalMigrationService {
       }
 
       if (dryRun) {
+        // A dry run reports what a live run would do — including the record-lock refusal it would hit (#161).
+        const locked = await this.writer.describeRecordLock(doc);
+        if (!locked.ok) {
+          errors.push(`title strip failed for ${doc.id} (${doc.slug}): ${describeLoreError(locked.error)}`);
+          continue;
+        }
+        if (locked.value !== undefined) {
+          errors.push(`title strip failed for ${doc.id} (${doc.slug}): ${locked.value}`);
+          continue;
+        }
         titleStrips.push({
           doc_id: doc.id,
           old_title: doc.title,
@@ -680,47 +685,26 @@ export class OrdinalMigrationService {
       }
 
       const expectedVersion = versionByDocId.get(doc.id) ?? doc.version;
-      const newVersion = expectedVersion + 1;
-      const updateResult = await this.store.update(
-        doc.id,
-        { title: newTitle, updated_at: nowIso, version: newVersion },
-        { expected_version: expectedVersion },
-      );
-      if (!updateResult.ok) {
-        errors.push(`title strip failed for ${doc.id} (${doc.slug}): ${describeLoreError(updateResult.error)}`);
+      // reason: AC-DCL-3 / #161 — a title rewrite is a record-lock edit ("content" compares the title), so a
+      // locked record (an approved spec/ADR) is REFUSED here and reported, never rewritten around the gate.
+      const stripped = await this.writer.writeDoc({
+        doc: { ...doc, version: expectedVersion },
+        patch: { title: newTitle },
+        action: "update",
+        changeSummary: "SPEC-084 title prefix strip (ordinal migration)",
+        auditAction: "update",
+        auditDetails: { old_title: doc.title, new_title: newTitle },
+        auditSessionId: `ordinal-migration-title-${doc.id}`,
+        lock: "content",
+        ...(by !== undefined ? { by } : {}),
+        now: nowIso,
+      });
+      if (!stripped.ok) {
+        errors.push(`title strip failed for ${doc.id} (${doc.slug}): ${describeLoreError(stripped.error)}`);
         continue;
       }
-      writesPerformed += 1;
-      versionByDocId.set(doc.id, newVersion);
-
-      const versionResult = await this.store.insertVersion({
-        doc_id: doc.id,
-        version: newVersion,
-        content: doc.content,
-        extra: doc.extra,
-        status: doc.status,
-        title: newTitle,
-        action: "update",
-        created_at: nowIso,
-        created_by: MIGRATION_ACTOR,
-        change_summary: "SPEC-084 title prefix strip (ordinal migration)",
-        slug: doc.slug,
-      });
-      if (!versionResult.ok) {
-        errors.push(`version write failed for ${doc.id} title strip: ${describeLoreError(versionResult.error)}`);
-      }
-
-      const auditResult = await this.store.appendAuditEntry({
-        timestamp: nowIso,
-        actor: MIGRATION_ACTOR,
-        session_id: `ordinal-migration-title-${doc.id}`,
-        action: "update",
-        doc_id: doc.id,
-        details: { version: newVersion, old_title: doc.title, new_title: newTitle },
-      });
-      if (!auditResult.ok) {
-        errors.push(`audit write failed for ${doc.id} title strip: ${describeLoreError(auditResult.error)}`);
-      }
+      if (stripped.value.written) writesPerformed += 1;
+      versionByDocId.set(doc.id, stripped.value.doc.version);
 
       titleStrips.push({
         doc_id: doc.id,

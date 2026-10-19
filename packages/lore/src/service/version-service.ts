@@ -11,6 +11,7 @@ import type { StoreInterface } from "../store/store-interface.js";
 import { resolveDocId } from "./resolve.js";
 import { applyAcChange } from "./ac-write-chokepoint.js";
 import type { RecordLockService } from "./record-lock-service.js";
+import { bareDocWriter, type DocWritePort } from "./corpus-service.js";
 
 // ─── Public Types ──────────────────────────────────────────────────────────────
 
@@ -55,7 +56,16 @@ export class VersionService {
   constructor(
     private readonly store: StoreInterface,
     private readonly recordLock: RecordLockService,
-  ) {}
+    /**
+     * The one write route (`CorpusService`, AC-DCL-3). `app.ts` passes the composed `corpusService`; absent
+     * (a bare unit-test construction) falls back to a bare writer over the same store.
+     */
+    writer?: DocWritePort,
+  ) {
+    this.writer = writer ?? bareDocWriter(store, recordLock);
+  }
+
+  private readonly writer: DocWritePort;
 
   /**
    * Return version history for a document, newest first.
@@ -203,7 +213,11 @@ export class VersionService {
    * old slug could also collide with a different doc that has since taken
    * it).
    */
-  async restore(idOrSlug: string, version: number): Promise<Result<DocRecord, LoreError>> {
+  async restore(
+    idOrSlug: string,
+    version: number,
+    opts?: { by?: string },
+  ): Promise<Result<DocRecord, LoreError>> {
     const resolved = await resolveDocId(this.store, idOrSlug);
     if (!resolved.ok) return resolved;
     const docId = resolved.value;
@@ -233,75 +247,36 @@ export class VersionService {
 
     const currentDoc = docResult.value;
 
-    // record-edit gate (spec-documents-are-living-or-records D6, BR-772): a restore rewrites the record's
-    // text and criteria wholesale, so it is refused on a locked record exactly like a `set` - BEFORE any
-    // write below. The sanctioned way to put old text back is `lore set --correction`.
-    const gate = await this.recordLock.assertEditable(currentDoc, "restore");
-    if (!gate.ok) return gate;
-
-    const nextVersion = currentDoc.version + 1;
-    const now = new Date().toISOString();
-
-    // reason: M4 blocker fix — the CAS-guarded doc update MUST land FIRST.
-    // Previously insertVersion + appendAuditEntry ran unconditionally before
-    // this write; if a concurrent writer bumped currentDoc.version between the
-    // find() above and this update, the CAS failed with STALE_VERSION but the
-    // versions/audit tables already permanently held a "restore" entry for a
-    // nextVersion the live doc never reached — a phantom history entry
-    // lore log/diff would surface forever. Update doc record to match
-    // restored version first; only insert the version snapshot + audit entry
-    // once that succeeds.
     // AC write chokepoint (spec-baseline-slice-2 §C3, #54): a restore may change the criteria
     // array back to a historical one — a sanctioned "restore" write, re-validated like any other
-    // incoming array before the CAS update so a refusal leaves no phantom history.
+    // incoming array before the write so a refusal leaves no phantom history.
     const acGate = applyAcChange("restore", currentDoc.extra, targetRecord.extra, docId);
     if (!acGate.ok) return acGate;
 
-    const updateResult = await this.store.update(docId, {
-      content: targetRecord.content,
-      extra: { ...targetRecord.extra },
-      title: targetRecord.title,
-      status: "draft",
-      version: nextVersion,
-      updated_at: now,
-    }, { expected_version: currentDoc.version });
-    if (!updateResult.ok) return updateResult;
-
-    // Create new version snapshot (N+1) with target version's content.
-    // slug is deliberately `currentDoc.slug` (the doc's UNCHANGED slug),
-    // never `targetRecord.slug` — see this method's JSDoc @remarks (SPEC-072
-    // D4): restore never restores slug.
-    const newVersionRecord = {
-      doc_id: docId,
-      version: nextVersion,
-      content: targetRecord.content,
-      extra: { ...targetRecord.extra },
-      status: "draft" as const,
-      title: targetRecord.title,
-      action: "restore" as const,
-      created_at: now,
-      created_by: currentDoc.created_by,
-      change_summary: `Restored from v${version}`,
-      slug: currentDoc.slug,
-    };
-
-    const insertResult = await this.store.insertVersion(newVersionRecord);
-    if (!insertResult.ok) return insertResult;
-
-    // Append audit entry
-    const auditResult = await this.store.appendAuditEntry({
-      timestamp: now,
-      actor: currentDoc.created_by,
-      session_id: "restore",
+    // reason: AC-DCL-3 — the doc update, its version row and its audit row are ONE transaction on the one
+    // write route (#113: a failure after the update used to leave an unrecorded change), attributed to the
+    // CALLER (#252: it used to record the doc's creator), refused from a foreign-resolved corpus (#255), and
+    // refused on a locked record (record-edit gate, spec-documents-are-living-or-records D6/BR-772: a restore
+    // rewrites text and criteria wholesale; the sanctioned way to put old text back is `lore set --correction`).
+    // SPEC-072 D4: the patch omits `slug` — restore NEVER restores a slug.
+    const written = await this.writer.writeDoc({
+      doc: currentDoc,
+      patch: {
+        content: targetRecord.content,
+        extra: { ...targetRecord.extra },
+        title: targetRecord.title,
+        status: "draft",
+      },
       action: "restore",
-      doc_id: docId,
-      // reason: SPEC-035 §2 — `version` is the join key AuditService.verify matches
-      // against the versions row's own `version` field (nextVersion, inserted above).
-      details: { restored_from_version: version, new_version: nextVersion, version: nextVersion },
+      changeSummary: `Restored from v${version}`,
+      auditAction: "restore",
+      auditDetails: { restored_from_version: version },
+      auditSessionId: "restore",
+      lock: "restore",
+      ...(opts?.by !== undefined ? { by: opts.by } : {}),
     });
-    if (!auditResult.ok) return auditResult;
-
-    return ok(updateResult.value);
+    if (!written.ok) return written;
+    return ok(written.value.doc);
   }
 }
 

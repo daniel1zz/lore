@@ -113,7 +113,7 @@ export function buildPhaseServices(
     env,
   );
   const phaseChecklistService = new PhaseChecklistService(store);
-  const phaseMigrationService = new PhaseMigrationService(store);
+  const phaseMigrationService = new PhaseMigrationService(store, corpusService);
   return { phaseWorkflowService, phaseChecklistService, phaseMigrationService };
 }
 
