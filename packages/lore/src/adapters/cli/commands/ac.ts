@@ -1532,6 +1532,8 @@ export function coverageBadge(coverage: AcListResult["coverage"], acId: string):
   if (fact === undefined) return "·";
 
   const state = deriveAcCoverageState(fact);
+  // a superseded criterion (D15) is retired: its own badge, never a count of unverified or passing evidence.
+  if (state === "superseded") return "⊖";
   if (state === "fail") {
     const attestedNote = fact.attested_fail > 0 ? `, ${fact.attested_fail} attested` : "";
     return `✘(${fact.pass}/${fact.fail}${attestedNote})`;

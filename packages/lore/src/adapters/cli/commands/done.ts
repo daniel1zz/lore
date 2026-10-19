@@ -461,6 +461,7 @@ export default defineLoreCommand({
                 transitions: result.value.transitions,
                 ...(result.value.worktree_outcomes !== undefined ? { worktree_outcomes: result.value.worktree_outcomes } : {}),
                 ...(result.value.removed_test_anchors !== undefined ? { removed_test_anchors: result.value.removed_test_anchors } : {}),
+                ...(result.value.superseded_scope !== undefined ? { superseded_scope: result.value.superseded_scope } : {}),
                 ...(result.value.issue_close !== undefined ? { issue_close: result.value.issue_close } : {}),
               },
             },

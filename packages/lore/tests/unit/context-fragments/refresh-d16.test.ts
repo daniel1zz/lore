@@ -61,8 +61,8 @@ class InterleavingFs implements FsWritePort {
   }
 }
 
-/** Schema-default budgets with adoption `enforce`: the default `warn` downgrades the ceiling to advisory. */
-const ENFORCE_BUDGETS = { ...resolveMemoryFileBudgets(undefined), adoption: "enforce" as const };
+/** Schema-default budgets: every ceiling breach is enforced, there is no adoption setting. */
+const ENFORCE_BUDGETS = resolveMemoryFileBudgets(undefined);
 
 /** `LoreError` is a union and not every variant carries `message`. */
 function messageOf(error: object): string {

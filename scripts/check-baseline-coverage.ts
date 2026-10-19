@@ -227,6 +227,27 @@ function seedLedger(except: ReadonlySet<string>): number {
   return 0;
 }
 
+/**
+ * The whole floor output, as lines. Order is load-bearing: run-chain re-prints only the LAST lines of a failed step, so
+ * informational output (absent commands, stale rows - collapsed to one counted line unless `listStale`) comes first and
+ * every unaccounted item with its fix line comes last, right before the summary line. Failing items are never truncated.
+ */
+export function renderReport(all: readonly CoverageData[], verdict: LedgerVerdict, opts: { readonly listStale: boolean }): string[] {
+  const out: string[] = [];
+  const informational = verdict.failingLines.filter((l) => l.startsWith(INFORMATIONAL_PREFIX));
+  out.push(...informational);
+  if (verdict.stale.length > 0) {
+    out.push(`check:baseline-coverage: ${verdict.stale.length} stale debt row(s) in scripts/baseline-coverage-debt.json (informational, not failing)${opts.listStale ? ":" : "; list them: bun run check:baseline-coverage -- --list-stale"}`);
+    if (opts.listStale) for (const line of verdict.staleLines) out.push(`  ${line}`);
+  }
+  if (verdict.failingCount > 0) {
+    out.push(`check:baseline-coverage: INCOMPLETE, ${verdict.failingCount} item(s) unaccounted (not in the debt ledger):`);
+    out.push(...verdict.failingLines.filter((l) => !l.startsWith(INFORMATIONAL_PREFIX)));
+  }
+  out.push(`check:baseline-coverage: ${all.map((d) => d.target).join(", ")}: ${verdict.ledgered} ledgered (debt), ${verdict.failingCount} unaccounted, ${verdict.stale.length} stale (informational)`);
+  return out;
+}
+
 function main(argv: readonly string[]): number {
   if (argv.includes("--seed-ledger")) {
     const except = new Set(argv.flatMap((a, i) => (a === "--except" && argv[i + 1] !== undefined ? [argv[i + 1] as string] : [])));
@@ -234,15 +255,7 @@ function main(argv: readonly string[]): number {
   }
   const all = businessRoots().map(coverageOf);
   const verdict = judgeAgainstLedger(all, readLedger());
-  if (verdict.failingCount > 0) {
-    console.log(`check:baseline-coverage: INCOMPLETE, ${verdict.failingCount} item(s) unaccounted (not in the debt ledger):`);
-    for (const line of verdict.failingLines) console.log(line);
-  }
-  if (verdict.stale.length > 0) {
-    console.log(`check:baseline-coverage: ${verdict.stale.length} stale debt row(s) in scripts/baseline-coverage-debt.json (informational, not failing):`);
-    for (const line of verdict.staleLines) console.log(`  ${line}`);
-  }
-  console.log(`check:baseline-coverage: ${all.map((d) => d.target).join(", ")}: ${verdict.ledgered} ledgered (debt), ${verdict.failingCount} unaccounted, ${verdict.stale.length} stale (informational)`);
+  for (const line of renderReport(all, verdict, { listStale: argv.includes("--list-stale") })) console.log(line);
   return verdict.ok ? 0 : 1;
 }
 

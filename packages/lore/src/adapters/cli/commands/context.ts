@@ -385,12 +385,6 @@ function renderOutcome(inv: Invocation,
       printLine(inv.io.stdout, `  ${rule.path}: ${rule.state}`);
     }
   }
-  // AC-STR-6: adoption=warn advisories (refresh only) — stderr so stdout stays the outcome list.
-  if ("downgraded" in result.value) {
-    for (const finding of result.value.downgraded) {
-      inv.io.stderr.write(`Advisory: ${finding.message}\n`);
-    }
-  }
   return 0;
 }
 
@@ -583,6 +577,7 @@ export default defineLoreCommand({
     const configResult = loadConfig(corpusRoot);
     const config = configResult.ok ? configResult.value : undefined;
     const budgetResolution = resolveMemoryFileBudgetsFromConfigResult(configResult);
+    if (budgetResolution.source === "retired-setting") return reportFailure(inv, budgetResolution.error);
     const budgets = budgetResolution.budgets;
     // reason: this command WRITES CLAUDE.md against these budgets, so running
     // on silently substituted ceilings would bake the wrong Zone-1 sizing into

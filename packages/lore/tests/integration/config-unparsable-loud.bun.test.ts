@@ -114,6 +114,14 @@ describe("an unparsable project config is refused loudly (BR-926)", () => {
     expect(result.stderr).toContain("Map keys must be unique");
   }, TEST_TIMEOUT_MS);
 
+  it("a sync section that is switched on without an address is refused (exit 4), never run on the local file", () => {
+    appendFileSync(configPath, "\nsync:\n  enabled: true\n");
+    const result = runLore(["list"], dir);
+    expect(result.exitCode).toBe(4);
+    expect(result.stderr).toContain(".lore/config.yaml");
+    expect(result.stderr).toContain("sync");
+  }, TEST_TIMEOUT_MS);
+
   it("a schema-invalid config (unknown top-level key) is refused too, naming the file", () => {
     appendFileSync(configPath, "\nnot_a_real_section:\n  x: 1\n");
     const result = runLore(["list"], dir);

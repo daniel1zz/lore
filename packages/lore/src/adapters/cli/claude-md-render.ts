@@ -31,7 +31,6 @@
 import type { MemoryFileBudgetResolution } from "@lore/core";
 import type { AdvisoryFinding, MemoryFileFinding } from "../../service/claude-md-findings.js";
 import type { HeadroomReport } from "../../service/claude-md-budget.js";
-import type { AdoptionReport } from "../../service/claude-md-admission.js";
 
 /** Everything `--check-claude-md`'s rendering needs, already computed by `commands/status.ts`. */
 export interface CheckClaudeMdRenderInput {
@@ -53,12 +52,6 @@ export interface CheckClaudeMdRenderInput {
   warnings: AdvisoryFinding[];
   /** Whose budgets were used, and why, if substituted — see `resolveMemoryFileBudgetsFromConfigResult`. */
   budgetResolution: MemoryFileBudgetResolution;
-  /**
-   * `runMemoryFileChecks(...).adoption` — mode, where it came from, and how
-   * many deterministic findings it downgraded
-   * (spec-claude-md-root-section-structure-check-and-adoption-mode, D7).
-   */
-  adoption: AdoptionReport;
 }
 
 /** The exact `--json` envelope `lore status --check-claude-md --json` prints. */
@@ -72,7 +65,6 @@ export interface CheckClaudeMdJsonPayload {
       readonly warnings: AdvisoryFinding[];
       readonly budget_source: MemoryFileBudgetResolution["source"];
       readonly budget_substitution: string | null;
-      readonly adoption: AdoptionReport;
     };
   };
 }
@@ -105,7 +97,6 @@ export function buildCheckClaudeMdJsonPayload(input: CheckClaudeMdRenderInput): 
         budget_source: input.budgetResolution.source,
         budget_substitution:
           input.budgetResolution.source === "substituted-defaults" ? input.budgetResolution.reason : null,
-        adoption: input.adoption,
       },
     },
   };
@@ -114,34 +105,6 @@ export function buildCheckClaudeMdJsonPayload(input: CheckClaudeMdRenderInput): 
 /** Text rendering for one deterministic finding — the finding's own `message` already names `path`. */
 function renderFindingLine(finding: MemoryFileFinding): string {
   return `  - [${finding.kind}] ${finding.message}`;
-}
-
-/** Text rendering for one downgraded (adoption=warn) finding — shared by `--check-claude-md` and `--check-memory-pointers`. */
-export function renderDowngradedLine(finding: AdvisoryFinding): string {
-  return `  - [downgraded:${finding.downgraded_kind ?? "unknown"}] ${finding.message}`;
-}
-
-/**
- * The `WARN adoption=warn` line. The fixed prefix is the token consumers/tests
- * match. Shared by `--check-claude-md` (every warn run) and
- * `--check-memory-pointers` (only when something was downgraded).
- */
-export function renderAdoptionWarnLine(adoption: AdoptionReport): string {
-  const promote = adoption.promotable
-    ? "the file conforms — promote with `context.memory_files.adoption: enforce` in .lore/config.yaml"
-    : "fix the downgraded findings, then set `context.memory_files.adoption: enforce` in .lore/config.yaml";
-  return `WARN adoption=warn (mode_source=${adoption.mode_source}): ${adoption.downgraded_count} finding(s) downgraded to advisory; ${promote}.`;
-}
-
-/**
- * Lines `--check-memory-pointers` appends under adoption=warn: the WARN line
- * plus each downgraded finding. Empty when nothing was downgraded or mode is
- * enforce.
- */
-export function formatAdoptionDowngradeLines(advisory: AdvisoryFinding[], adoption: AdoptionReport): string[] {
-  const downgraded = advisory.filter((finding) => finding.kind === "downgraded");
-  if (adoption.mode !== "warn" || downgraded.length === 0) return [];
-  return [renderAdoptionWarnLine(adoption), ...downgraded.map(renderDowngradedLine)];
 }
 
 /**
@@ -191,24 +154,14 @@ function renderFixHint(findings: MemoryFileFinding[]): string {
  */
 export function formatCheckClaudeMdHuman(input: CheckClaudeMdRenderInput): string[] {
   const lines: string[] = [];
-  const downgraded = input.advisory.filter((finding) => finding.kind === "downgraded");
 
   if (input.findings.length === 0) {
-    lines.push(
-      downgraded.length === 0
-        ? "CLAUDE.md: within budget (0 findings)."
-        : `CLAUDE.md: 0 enforced findings (${downgraded.length} downgraded by adoption=warn, exit code unaffected):`,
-    );
-    for (const finding of downgraded) lines.push(renderDowngradedLine(finding));
+    lines.push("CLAUDE.md: within budget (0 findings).");
   } else {
     lines.push(`CLAUDE.md: BREACHED (${input.findings.length} finding(s)):`);
     for (const finding of input.findings) lines.push(renderFindingLine(finding));
     lines.push(`  fix: ${renderFixHint(input.findings)}`);
   }
-
-  // ⛔ Printed on EVERY warn run, conforming or not — "must not go silent":
-  // a warn project stays visibly unenforced until someone promotes it.
-  if (input.adoption.mode === "warn") lines.push(renderAdoptionWarnLine(input.adoption));
 
   for (const report of input.headroom) lines.push(renderHeadroomLine(report));
 

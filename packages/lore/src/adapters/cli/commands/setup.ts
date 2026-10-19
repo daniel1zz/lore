@@ -144,7 +144,7 @@ import { seedAcCiteModeAudited } from "./baseline-adopt.js";
 import { parseDocument } from "yaml";
 import { resolveTrackedWriteRoot } from "../working-tree-root.js";
 import { err, loadConfigFromString, ok, resolveMemoryFileBudgets } from "@lore/core";
-import type { AdoptionMode, FsWritePort, LoreError, MemoryFileBudgets, Result } from "@lore/core";
+import type { FsWritePort, LoreError, MemoryFileBudgets, Result } from "@lore/core";
 import { buildRealFsProbe } from "../../real-fs-probe.js";
 import { discoverFragmentDocuments } from "../../real-memory-file-probe.js";
 import { buildRefreshFragmentDeps, makeRealContextFsPort, toContextLayer } from "./context.js";
@@ -154,10 +154,11 @@ import { SetupService, type McpAddOutcome, type McpRegistrar, type SetupReceipt 
 import { ProjectSetupService, checkProjectLedger } from "../../../service/project-setup-service.js";
 import {
   PROJECT_MANIFEST_RELATIVE_PATH,
+  recordProjectLanguagePrior,
+  recordProjectRulesFiles,
   type ExecPort,
   type ProjectFsPort,
   type ProjectAssetSource,
-  type AdoptionWriteOutcome,
   type ProjectScaffoldReport,
   type ProjectSkillAsset,
   type ProjectSkillAssetSource,
@@ -312,7 +313,7 @@ function scaffoldReportFailed(report: ProjectScaffoldReport): boolean {
     report.gitignore.status === "failed" ||
     report.claude_md.status === "failed" ||
     report.git_hooks_path.status === "failed" ||
-    report.adoption?.status === "failed" ||
+    report.memory_files?.status === "failed" ||
     report.skills?.status === "failed" ||
     report.ac_cite?.status === "failed" ||
     report.hooks.some((h) => h.status === "failed")
@@ -475,7 +476,7 @@ const CONFIG_TEMPLATE_ASSET_NAME = "lore-config-template.yaml";
 /**
  * Real `ResolveMemoryFileBudgets` port: the target repo's own resolved
  * `context.memory_files` budgets from its `.lore/config.yaml` (the init step has
- * already created it), so the adoption judgement uses the ceilings
+ * already created it), so the memory-file judgement uses the ceilings
  * `status --check-claude-md` will enforce. A load failure is returned, never defaulted.
  *
  * @param repoDir - Absolute repo root.
@@ -484,65 +485,6 @@ function resolveRepoMemoryFileBudgets(repoDir: string): Result<MemoryFileBudgets
   const loaded = loadConfig(repoDir);
   if (!loaded.ok) return loaded;
   return ok(resolveMemoryFileBudgets(loaded.value));
-}
-
-/**
- * Real `WriteAdoptionMode` port (spec-claude-md-root-section-structure-check-and-adoption-mode D4):
- * adds `context.memory_files.adoption` to the repo's `.lore/config.yaml` ONLY when it is
- * absent — an explicit value (either mode) is never overwritten and the file is left
- * byte-identical. The edit is applied to the RAW text via the `yaml` Document API, so
- * ONLY that one key is added (no parsed+defaulted config is round-tripped, hence no
- * default budgets are frozen into the file) and comments / key order survive. The edited
- * text is validated with `loadConfigFromString` BEFORE it is written (fail loud).
- *
- * @param repoDir - Absolute repo root.
- * @param mode - Mode judged on the post-splice CLAUDE.md.
- * @returns `err` when the config cannot be read/parsed/validated or written (surfaced, never swallowed).
- */
-function writeAdoptionModeToConfig(repoDir: string, mode: AdoptionMode): Result<AdoptionWriteOutcome, LoreError> {
-  // reason: loadConfig first — an already-invalid config is refused with its own validation error.
-  const loaded = loadConfig(repoDir);
-  if (!loaded.ok) return loaded;
-  const path = join(repoDir, ".lore", "config.yaml");
-  const storeError = (message: string, cause: unknown): LoreError => ({
-    code: "STORE_ERROR",
-    message,
-    ...(cause instanceof Error ? { cause } : {}),
-  });
-  let raw: string;
-  try {
-    raw = readFileSync(path, "utf8");
-  } catch (e) {
-    return err(storeError(`Failed to read ${path}`, e));
-  }
-  const doc = parseDocument(raw);
-  if (doc.errors.length > 0) {
-    return err(storeError(`Failed to parse ${path}: ${doc.errors[0]?.message ?? "unknown"}`, doc.errors[0]));
-  }
-  const existing = doc.getIn(["context", "memory_files", "adoption"]);
-  if (existing === "enforce" || existing === "warn") return ok({ status: "kept", existing });
-  if (existing !== undefined && existing !== null) {
-    return err({
-      code: "VALIDATION_ERROR",
-      field: "context.memory_files.adoption",
-      message: `${path}: context.memory_files.adoption has an unsupported value; expected "enforce" or "warn"`,
-      value: existing,
-    });
-  }
-  try {
-    doc.setIn(["context", "memory_files", "adoption"], mode);
-  } catch (e) {
-    return err(storeError(`Cannot add context.memory_files.adoption to ${path}`, e));
-  }
-  const edited = doc.toString();
-  const validated = loadConfigFromString(edited);
-  if (!validated.ok) return validated;
-  try {
-    writeFileSync(path, edited, "utf8");
-  } catch (e) {
-    return err(storeError(`Failed to write ${path}`, e));
-  }
-  return ok({ status: "written" });
 }
 
 // ─── context.language projection (spec-context-fragments D3; AC-CF-5, AC-CF-18) ──
@@ -674,9 +616,25 @@ async function runProjectContextProjection(opts: {
   );
   if (!refreshed.ok) return refreshed;
 
+  // reason: rules files and the `language` key are written outside the scaffold's ledger write; the uninstall
+  // reverses ledger entries only (BR-840), so each is recorded here (BR-834) — rules after the refresh wrote them,
+  // the language prior BEFORE the write that replaces it.
+  const ledgerFs = makeRealProjectFs();
+  const recordedRules = recordProjectRulesFiles(
+    ledgerFs,
+    opts.repoDir,
+    refreshed.value.rules.map((outcome) => ({ path: toRepoRelative(opts.repoDir, outcome.path), state: outcome.state })),
+  );
+  if (!recordedRules.ok) return recordedRules;
+
   const plan = planLanguageProjections(opts.claudeDir, opts.repoDir, opts.inv);
   if (!plan.ok) return plan;
-  return applyLanguageProjections(plan.value.filter((item) => item.layer === "project"));
+  const projectItems = plan.value.filter((item) => item.layer === "project");
+  for (const item of projectItems) {
+    const recordedLanguage = recordProjectLanguagePrior(ledgerFs, opts.repoDir, toRepoRelative(opts.repoDir, item.settingsPath));
+    if (!recordedLanguage.ok) return recordedLanguage;
+  }
+  return applyLanguageProjections(projectItems);
 }
 
 // ─── --project --check (BR-1085): classify every project-managed file, write only the cache ──
@@ -850,7 +808,6 @@ async function runProjectScaffold(opts: {
       );
     },
     assets: projectAssets,
-    writeAdoptionMode: writeAdoptionModeToConfig,
     resolveMemoryFileBudgets: resolveRepoMemoryFileBudgets,
     resolveReferenceContext: (dir) => ({
       probe: buildRealFsProbe(dir),
@@ -914,7 +871,7 @@ async function runProjectUninstall(opts: { json: boolean; yes: boolean; inv: Inv
   });
   if (!confirmation.proceed) return confirmation.code;
 
-  const result = await uninstallProject(makeRealProjectRemoveFs(), { repoDir });
+  const result = await uninstallProject(makeRealProjectRemoveFs(), { repoDir, exec: makeRealProjectExec() });
   if (!result.ok) {
     opts.inv.io.stderr.write(formatErrorFor(opts.inv, result.error) + "\n");
     return exitCode(result.error);

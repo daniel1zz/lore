@@ -2,43 +2,29 @@
 /**
  * @spec_ref AC-STR-4 (spec-claude-md-root-section-structure-check-and-adoption-mode)
  *
- * RED-phase e2e for `lore setup --project` adoption handling — task
- * `task-skill-test-setup-adoption-both-ends-fresh-install-red` (paired
- * implementation: I4 "setup skeleton + managed-block reshape + adoption write").
- * Decision record: adr-claude-md-root-h2-structure-is-deterministic-with-one.
+ * `lore setup --project` and the root memory file. The adoption mode AC-STR-4 once judged and wrote is retired
+ * (task-memory-file-limits-are-always-enforced-the-warn-adoption): setup writes NO memory-file setting, and instead
+ * REPORTS whether the POST-SPLICE root file conforms (`Memory file: conforms|findings`), printing the checklist of what
+ * a person must fix. Limits are always enforced, so `status --check-claude-md` fails until they do.
  *
- * Spec contract exercised (D4, D7, AC-STR-4):
- *   - NEW root file  -> skeleton (What This Is / Commands / Architecture) + managed
- *     block (Module Index / Finding Live Project State): all five H2, in order,
- *     `context.memory_files.adoption: enforce` written, check exits 0 with JSON
- *     `adoption.mode === "enforce"`.
- *   - EXISTING root file -> managed block appended; the adoption mode is judged on
- *     the POST-SPLICE content (never the pre-splice file): zero would-be
- *     deterministic findings of ALL kinds -> enforce, else warn + a printed
- *     migration checklist naming the missing sections.
- *   - The key is written ONLY when absent: an explicit value is never overwritten.
- *   - Re-running setup over an install made with the OLD template keeps
- *     `## Module Index` (exactly one copy).
+ *   - NEW root file  -> skeleton (What This Is / Commands / Architecture) + managed block (Module Index / Finding
+ *     Live Project State): all five H2 in order, no `adoption` key written, check exits 0.
+ *   - EXISTING root file -> managed block appended; judged on the POST-SPLICE content (never the pre-splice file):
+ *     zero deterministic findings of ALL kinds -> `conforms`, else `findings` + a printed checklist naming each.
+ *   - Re-running setup over an install made with the OLD template keeps `## Module Index` (exactly one copy).
  *
- * Harness: spawns the REAL CLI from source (`bun run src/index.ts ...`, source-fresh
- * by construction, no dist/ needed). Every scenario lives in its own `mkdtemp` git
- * repo with HOME pointed at it — never touches the repo's own `.lore/` corpus nor the
- * real `~/.claude`. `CLAUDECODE=1` => agent surface (no nested Claude call).
+ * Harness: spawns the REAL CLI from source (`bun run src/index.ts ...`). Every scenario lives in its own `mkdtemp` git
+ * repo with HOME pointed at it, never touching the repo's own `.lore/` corpus nor the real `~/.claude`.
  *
- * Coverage: HAPPY (fresh, conforming no-overlap), NEGATIVE (non-conforming, duplicate),
- * BOUNDARY (post-splice vs pre-splice judgement), STATE (explicit value preserved,
- * re-run idempotent), REGRESSION (old-template re-run keeps Module Index).
- *
- * RED expectation on the current base: nothing writes `adoption`, no skeleton exists,
- * no checklist is printed, and `--check-claude-md --json` has no `adoption` block.
+ * Coverage: HAPPY (fresh, conforming no-overlap), NEGATIVE (non-conforming, duplicate), BOUNDARY (post-splice vs
+ * pre-splice judgement; over-ceiling), STATE (re-run idempotent, no key written), REGRESSION (old-template re-run).
  */
 
 import { afterEach, describe, expect, it } from "vitest";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { parse, stringify } from "yaml";
-import { patchLoreConfig } from "../helpers/patch-lore-config.js";
+import { parse } from "yaml";
 
 // ─── Harness ────────────────────────────────────────────────────────────────
 
@@ -132,32 +118,17 @@ function readMemoryFilesConfig(cwd: string): Record<string, unknown> {
   return cfg?.context?.memory_files ?? {};
 }
 
-/** Writes `context.memory_files.adoption` into an already-initialised corpus config (test seeding only). */
-function seedAdoption(cwd: string, value: "enforce" | "warn"): void {
-  patchLoreConfig(cwd, { context: { memory_files: { adoption: value } } });
-}
-
-interface AdoptionBlock {
-  mode: string;
-  mode_source: string;
-  downgraded_count: number;
-  promotable: boolean;
-}
 interface CheckResult {
   readonly exitCode: number;
-  readonly adoption: AdoptionBlock | undefined;
-  readonly advisory: Array<{ kind: string; downgraded_kind?: string }>;
+  readonly report: Record<string, unknown>;
   readonly findings: Array<{ kind: string }>;
 }
 
 /** `lore status --check-claude-md --json`, exit measured un-piped (spawnSync). */
 function checkClaudeMd(cwd: string): CheckResult {
   const run = runLore(["status", "--check-claude-md", "--json"], cwd);
-  const parsed = JSON.parse(run.stdout) as {
-    data: { claude_md: { adoption?: AdoptionBlock; advisory: CheckResult["advisory"]; findings: CheckResult["findings"] } };
-  };
-  const cm = parsed.data.claude_md;
-  return { exitCode: run.exitCode, adoption: cm.adoption, advisory: cm.advisory, findings: cm.findings };
+  const parsed = JSON.parse(run.stdout) as { data: { claude_md: { findings: CheckResult["findings"] } } };
+  return { exitCode: run.exitCode, report: parsed.data.claude_md, findings: parsed.data.claude_md.findings };
 }
 
 // ─── Fixtures ───────────────────────────────────────────────────────────────
@@ -229,7 +200,7 @@ Run \`/lore-init-context\` to populate the module index below once this codebase
 
 // ─── Scenarios ──────────────────────────────────────────────────────────────
 
-describe("lore setup --project adoption — fresh install (no CLAUDE.md)", () => {
+describe("lore setup --project — fresh install (no CLAUDE.md)", () => {
   it("setup itself succeeds (fixture sanity — a failing setup would be a wrong-reason red)", () => {
     const repo = makeRepo();
     expect(setupProject(repo).exitCode).toBe(0);
@@ -242,42 +213,34 @@ describe("lore setup --project adoption — fresh install (no CLAUDE.md)", () =>
     expect(seq).toEqual([...REQUIRED]);
   });
 
-  it("writes context.memory_files.adoption: enforce into .lore/config.yaml", () => {
+  it("writes NO adoption key and reports `Memory file: conforms`", () => {
     const repo = makeRepo();
-    setupProject(repo);
-    expect(readMemoryFilesConfig(repo)["adoption"]).toBe("enforce");
+    const run = setupProject(repo);
+    expect(readMemoryFilesConfig(repo)["adoption"]).toBeUndefined();
+    expect(run.all).toContain("Memory file: conforms");
   });
 
-  it("then `status --check-claude-md --json` exits 0 with adoption.mode enforce (config-sourced)", () => {
+  it("then `status --check-claude-md --json` exits 0 with zero findings and no adoption block", () => {
     const repo = makeRepo();
     setupProject(repo);
     const check = checkClaudeMd(repo);
-    expect({ exit: check.exitCode, mode: check.adoption?.mode, source: check.adoption?.mode_source }).toEqual({
+    expect({ exit: check.exitCode, findings: check.findings.length, adoption: check.report["adoption"] }).toEqual({
       exit: 0,
-      mode: "enforce",
-      source: "config",
-    });
-  });
-
-  it("a fresh install has zero deterministic findings and zero downgraded findings", () => {
-    const repo = makeRepo();
-    setupProject(repo);
-    const check = checkClaudeMd(repo);
-    expect({ findings: check.findings.length, downgraded: check.adoption?.downgraded_count }).toEqual({
       findings: 0,
-      downgraded: 0,
+      adoption: undefined,
     });
   });
 });
 
-describe("lore setup --project adoption — existing NON-conforming root file", () => {
-  it("writes adoption: warn (never enforce) for a file with only '## Notes'", () => {
+describe("lore setup --project — existing NON-conforming root file", () => {
+  it("reports findings and writes no adoption key for a file with only '## Notes'", () => {
     const repo = makeRepo(NON_CONFORMING_FILE);
-    setupProject(repo);
-    expect(readMemoryFilesConfig(repo)["adoption"]).toBe("warn");
+    const run = setupProject(repo);
+    expect(readMemoryFilesConfig(repo)["adoption"]).toBeUndefined();
+    expect(run.all).toContain("Memory file: findings");
   });
 
-  it("prints a migration checklist naming every section the user's file is missing", () => {
+  it("prints a checklist naming every section the user's file is missing", () => {
     const repo = makeRepo(NON_CONFORMING_FILE);
     const run = setupProject(repo);
     const missing = ["What This Is", "Commands", "Architecture"].filter((s) => !run.all.includes(s));
@@ -287,8 +250,6 @@ describe("lore setup --project adoption — existing NON-conforming root file", 
   it("does NOT list sections the managed block supplies (Module Index / Finding Live Project State) as missing", () => {
     const repo = makeRepo(NON_CONFORMING_FILE);
     const run = setupProject(repo);
-    // The checklist is the only place section names are enumerated as TODO; the
-    // block-supplied ones must not appear next to a "missing" marker.
     const lines = run.all.split("\n").filter((l) => /missing/i.test(l));
     const leaked = lines.filter((l) => /Module Index|Finding Live Project State/.test(l));
     expect(leaked).toEqual([]);
@@ -300,62 +261,35 @@ describe("lore setup --project adoption — existing NON-conforming root file", 
     expect(readClaudeMd(repo)).toContain("## Notes\n\nSome notes.");
   });
 
-  it("then the check exits 0 with adoption.mode warn, mode_source config", () => {
+  it("then the check exits EXACTLY 3 with section_missing as an enforced finding (the retired warn exited 0)", () => {
     const repo = makeRepo(NON_CONFORMING_FILE);
     setupProject(repo);
     const check = checkClaudeMd(repo);
-    expect({ exit: check.exitCode, mode: check.adoption?.mode, source: check.adoption?.mode_source }).toEqual({
-      exit: 0,
-      mode: "warn",
-      source: "config",
-    });
-  });
-
-  it("the check reports the missing sections as DOWNGRADED section_missing (not silent)", () => {
-    const repo = makeRepo(NON_CONFORMING_FILE);
-    setupProject(repo);
-    const check = checkClaudeMd(repo);
-    const kinds = check.advisory.filter((a) => a.kind === "downgraded").map((a) => a.downgraded_kind);
-    expect(kinds).toContain("section_missing");
+    expect(check.exitCode).toBe(3);
+    expect(check.findings.map((f) => f.kind)).toContain("section_missing");
   });
 });
 
-describe("lore setup --project adoption — judged on POST-SPLICE content (D4)", () => {
-  it("existing file with all five sections (no block) -> warn, because the spliced block would duplicate two", () => {
+describe("lore setup --project — judged on POST-SPLICE content", () => {
+  it("existing file with all five sections (no block) -> findings, because the spliced block would duplicate two", () => {
     const repo = makeRepo(FIVE_SECTION_FILE);
-    setupProject(repo);
-    expect(readMemoryFilesConfig(repo)["adoption"]).toBe("warn");
+    const run = setupProject(repo);
+    expect(run.all).toContain("Memory file: findings");
+    expect(checkClaudeMd(repo).findings.map((f) => f.kind)).toContain("section_duplicate");
   });
 
-  it("...and the check lists section_duplicate as a downgraded finding", () => {
+  it("...and the check exits 3 on the duplicate", () => {
     const repo = makeRepo(FIVE_SECTION_FILE);
     setupProject(repo);
-    const check = checkClaudeMd(repo);
-    const kinds = check.advisory.filter((a) => a.kind === "downgraded").map((a) => a.downgraded_kind);
-    expect(kinds).toContain("section_duplicate");
+    expect(checkClaudeMd(repo).exitCode).toBe(3);
   });
 
-  it("...exits 0 under warn despite the duplicate", () => {
-    const repo = makeRepo(FIVE_SECTION_FILE);
-    setupProject(repo);
-    expect(checkClaudeMd(repo).exitCode).toBe(0);
-  });
-
-  it("existing 3-section file with no overlap -> enforce (pre-splice it lacks two sections, post-splice it is clean)", () => {
+  it("existing 3-section file with no overlap -> conforms (pre-splice it lacks two sections, post-splice it is clean)", () => {
     const repo = makeRepo(THREE_SECTION_FILE);
-    setupProject(repo);
-    expect(readMemoryFilesConfig(repo)["adoption"]).toBe("enforce");
-  });
-
-  it("...and the check on that install exits 0 with adoption.mode enforce and no findings", () => {
-    const repo = makeRepo(THREE_SECTION_FILE);
-    setupProject(repo);
+    const run = setupProject(repo);
+    expect(run.all).toContain("Memory file: conforms");
     const check = checkClaudeMd(repo);
-    expect({ exit: check.exitCode, mode: check.adoption?.mode, findings: check.findings.length }).toEqual({
-      exit: 0,
-      mode: "enforce",
-      findings: 0,
-    });
+    expect({ exit: check.exitCode, findings: check.findings.length }).toEqual({ exit: 0, findings: 0 });
   });
 
   it("existing 3-section file keeps its own sections ahead of the block (order holds: block is appended last)", () => {
@@ -365,57 +299,24 @@ describe("lore setup --project adoption — judged on POST-SPLICE content (D4)",
     expect(seq).toEqual([...REQUIRED]);
   });
 
-  it("an over-ceiling-free but otherwise conforming file is NOT forced to warn (capacity counts, structure alone does not)", () => {
-    // Contrast pair with the non-conforming case: same setup path, different content,
-    // different mode — defeats an implementation that hardcodes one value.
+  it("contrast pair: same setup path, different content, different verdict (defeats a hardcoded verdict)", () => {
     const a = makeRepo(THREE_SECTION_FILE);
     const b = makeRepo(NON_CONFORMING_FILE);
-    setupProject(a);
-    setupProject(b);
-    expect([readMemoryFilesConfig(a)["adoption"], readMemoryFilesConfig(b)["adoption"]]).toEqual(["enforce", "warn"]);
+    expect([setupProject(a).all.includes("Memory file: conforms"), setupProject(b).all.includes("Memory file: findings")]).toEqual([true, true]);
   });
 });
 
-describe("lore setup --project adoption — over-ceiling root file counts as a would-be finding (ALL kinds)", () => {
-  it("a structurally-complete 3-section file over the 300-line ceiling -> warn, not enforce", () => {
+describe("lore setup --project — over-ceiling root file counts as a finding (ALL kinds)", () => {
+  it("a structurally-complete 3-section file over the 300-line ceiling -> findings naming the ceiling", () => {
     const filler = Array.from({ length: 330 }, (_, i) => `- item ${i}`).join("\n");
     const repo = makeRepo(`${THREE_SECTION_FILE}\n${filler}\n`);
-    setupProject(repo);
-    expect(readMemoryFilesConfig(repo)["adoption"]).toBe("warn");
+    const run = setupProject(repo);
+    expect(run.all).toContain("Memory file: findings");
+    expect(run.all).toContain("ceiling");
   });
 });
 
-describe("lore setup --project adoption — explicit value is never overwritten (write-only-when-absent)", () => {
-  it("explicit `warn` + conforming-after-splice file -> stays warn", () => {
-    const repo = makeRepo();
-    setupProject(repo); // creates .lore/config.yaml (fresh -> enforce)
-    seedAdoption(repo, "warn");
-    writeFileSync(join(repo, "CLAUDE.md"), THREE_SECTION_FILE);
-    setupProject(repo);
-    expect(readMemoryFilesConfig(repo)["adoption"]).toBe("warn");
-  });
-
-  it("explicit `warn` is honoured by the check (mode_source config, mode warn)", () => {
-    const repo = makeRepo();
-    setupProject(repo);
-    seedAdoption(repo, "warn");
-    writeFileSync(join(repo, "CLAUDE.md"), THREE_SECTION_FILE);
-    setupProject(repo);
-    const a = checkClaudeMd(repo).adoption;
-    expect({ mode: a?.mode, source: a?.mode_source }).toEqual({ mode: "warn", source: "config" });
-  });
-
-  it("explicit `enforce` + non-conforming file -> stays enforce (setup never silently weakens it)", () => {
-    const repo = makeRepo();
-    setupProject(repo);
-    seedAdoption(repo, "enforce");
-    writeFileSync(join(repo, "CLAUDE.md"), NON_CONFORMING_FILE);
-    setupProject(repo);
-    expect(readMemoryFilesConfig(repo)["adoption"]).toBe("enforce");
-  });
-});
-
-describe("lore setup --project adoption — re-run semantics", () => {
+describe("lore setup --project — re-run semantics", () => {
   it("re-running setup over an OLD-template install keeps '## Module Index' (exactly once)", () => {
     const repo = makeRepo(OLD_TEMPLATE_INSTALL);
     setupProject(repo);
@@ -432,19 +333,12 @@ describe("lore setup --project adoption — re-run semantics", () => {
     expect({ hasMi: mi >= 0, flAfterMi: fl > mi }).toEqual({ hasMi: true, flAfterMi: true });
   });
 
-  it("re-running setup twice is idempotent: CLAUDE.md bytes and the adoption value do not change on run 2", () => {
+  it("re-running setup twice is idempotent: CLAUDE.md bytes and the config do not change on run 2", () => {
     const repo = makeRepo(THREE_SECTION_FILE);
     setupProject(repo);
-    const afterFirst = { md: readClaudeMd(repo), mode: readMemoryFilesConfig(repo)["adoption"] };
+    const afterFirst = { md: readClaudeMd(repo), cfg: readFileSync(join(repo, ".lore", "config.yaml"), "utf-8") };
     setupProject(repo);
-    const afterSecond = { md: readClaudeMd(repo), mode: readMemoryFilesConfig(repo)["adoption"] };
+    const afterSecond = { md: readClaudeMd(repo), cfg: readFileSync(join(repo, ".lore", "config.yaml"), "utf-8") };
     expect(afterSecond).toEqual(afterFirst);
-  });
-
-  it("an old-template install with no adoption key and a non-conforming outside prose -> warn after re-run (never enforce)", () => {
-    const repo = makeRepo(OLD_TEMPLATE_INSTALL);
-    setupProject(repo);
-    // '## Overview' is user prose; What This Is / Commands / Architecture are absent.
-    expect(readMemoryFilesConfig(repo)["adoption"]).toBe("warn");
   });
 });

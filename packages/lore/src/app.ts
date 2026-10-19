@@ -21,7 +21,7 @@ import { Database } from "bun:sqlite";
 import { dirname } from "node:path";
 import { SQLiteStore } from "./store/sqlite-store.js";
 import { assertNoForeignSchemaMigration } from "./store/foreign-schema-guard.js";
-import { TursoStore, probeTmpdirUsability } from "./store/turso-store.js";
+import { TursoStore, probeTmpdirUsability, type TursoConfig } from "./store/turso-store.js";
 import type { StoreInterface } from "./store/store-interface.js";
 import { CorpusService, type DocWritePort } from "./service/corpus-service.js";
 import { ReviewService } from "./service/review-service.js";
@@ -120,7 +120,7 @@ import { SpecParentMigrationService } from "./service/spec-parent-migration-serv
 import { PlanOutlineExemptMigrationService } from "./service/plan-outline-exempt-migration-service.js";
 import { SeatService } from "./service/seat-service.js";
 import { RealGitPort } from "./adapters/real-git-port.js";
-import { buildBaselineDeclarationPort } from "./adapters/cli/absent-declarations.js";
+import { armMainTree, buildBaselineDeclarationPort } from "./adapters/cli/absent-declarations.js";
 import { realpathNative } from "./adapters/real-realpath-port.js";
 import { ConfigService } from "./service/config-service.js";
 import { GlobalConfigService } from "./service/global-config-service.js";
@@ -1053,7 +1053,8 @@ function buildAppFromSqlite(
     requirementService: new RequirementService(store, requirementQuantifiableEnabled, corpusService),
     // reason: RuleService gets the WIRED corpusService.create (gates + provenance guards apply to
     // node creation); its `createDoc` port is required — RuleService builds no CorpusService of its own.
-    ruleService: new RuleService(store, corpusService.create.bind(corpusService), corpusService),
+    // reason: accountability-reducing writes (--remove-site/--remove-command, rule retire/move) wait for main's tree; one port, both roots.
+    ruleService: armMainTree(new RuleService(store, corpusService.create.bind(corpusService), corpusService), repoRoot),
     // reason: the change set of a locked spec is gated by the ONE RecordLockService, like criteria edits.
     ruleChangeService,
     ruleReadService: new RuleReadService(store),
@@ -1464,7 +1465,8 @@ function buildAppFromTurso(
     requirementService: new RequirementService(store, requirementQuantifiableEnabled, corpusService),
     // reason: RuleService gets the WIRED corpusService.create (gates + provenance guards apply to
     // node creation); its `createDoc` port is required — RuleService builds no CorpusService of its own.
-    ruleService: new RuleService(store, corpusService.create.bind(corpusService), corpusService),
+    // reason: accountability-reducing writes (--remove-site/--remove-command, rule retire/move) wait for main's tree; one port, both roots.
+    ruleService: armMainTree(new RuleService(store, corpusService.create.bind(corpusService), corpusService), repoRoot),
     // reason: the change set of a locked spec is gated by the ONE RecordLockService, like criteria edits.
     ruleChangeService,
     ruleReadService: new RuleReadService(store),
@@ -1610,6 +1612,40 @@ function wireIssueCloseOnArchive(app: App, store: StoreInterface, config: LoreCo
   app.issueClose = step;
 }
 
+/**
+ * Opens the embedded replica for a sync-enabled corpus. The one production implementation is
+ * {@link openTursoReplicaStore}; a test installs a double through {@link installReplicaStoreFactory}.
+ * Throws when the replica cannot open (remote unreachable, bad credentials): `createApp` turns the throw into a
+ * `STORE_ERROR` result naming the remote address — it never falls back to the local file.
+ */
+export type ReplicaStoreFactory = (config: TursoConfig) => TursoStore;
+
+function openTursoReplicaStore(config: TursoConfig): TursoStore {
+  return new TursoStore(config);
+}
+
+// reason: spec-defect-clusters-round-2-part-c-criterion-data-demotion D22 — with `sync.enabled` EVERY route (CLI,
+// `lore serve`, `lore --mcp-server`, dashboard mounts) builds its store through `createApp`'s one replica branch.
+// Those routes reach `createApp` through 198 `loadLoreApp({ inv })` call sites and the mount registry, none of which
+// can carry a per-call port, so the store-selection seam is one process-level slot. Production never installs
+// anything; the default opens the real replica.
+let replicaStoreFactory: ReplicaStoreFactory = openTursoReplicaStore;
+
+/**
+ * Test seam of the store selection: makes every sync-enabled `createApp` in this process open its replica through
+ * `factory`.
+ *
+ * @param factory - the replica-store double
+ * @returns a function that restores the previously installed factory (call it in `afterEach`)
+ */
+export function installReplicaStoreFactory(factory: ReplicaStoreFactory): () => void {
+  const previous = replicaStoreFactory;
+  replicaStoreFactory = factory;
+  return () => {
+    replicaStoreFactory = previous;
+  };
+}
+
 export function createApp(dbPath: string, config: undefined, ambient: AppAmbient, writeContext?: AppWriteContext): App;
 export function createApp(
   dbPath: string,
@@ -1637,21 +1673,21 @@ export function createApp(
 }
 
 /**
- * Builds the App for ONE write context over a config that provably carries no `sync` section.
+ * Builds the App for ONE write context. With `sync.enabled` the store is the embedded replica; otherwise the local
+ * SQLite file.
  *
  * reason: the CLI loader hands the invocation identity to the store chokepoint at construction
- * (spec-run-identity-slice-1 D3). `createApp`'s Turso branch falls back to a synchronous `createRequire`
- * that throws from the compiled binary (libsql-lazy-load AC-LL-10), so a `createApp` call site must stay
- * one- or two-argument with a sync-stripped config. This entry point carries the third argument under a
- * type that forbids `sync`: a sync-bearing config no longer type-checks, so the Turso branch is
- * unreachable by construction rather than by scan.
+ * (spec-run-identity-slice-1 D3). Since D22 (spec-defect-clusters-round-2-part-c-criterion-data-demotion) the
+ * config carries its `sync` section, so the caller must have primed the libsql module
+ * (`primeReplicaClientWhenSyncEnabled`) before a sync-enabled call.
  *
- * @param config - Config with `sync` forbidden (`sync?: never`); `undefined` for a corpus without config.
- * @returns the App, or the Result error arm `createApp` keeps for an unknown `ai.provider`.
+ * @param config - the full project config; `undefined` for a corpus without config.
+ * @returns the App, or the Result error arm: an unknown `ai.provider`, or a sync-enabled corpus whose address or
+ *   token is missing or whose remote cannot be opened (never a fallback to the local file).
  */
 export function createAppWithWriteContext(
   dbPath: string,
-  config: (LoreConfig & { sync?: never }) | undefined,
+  config: LoreConfig | undefined,
   ambient: AppAmbient,
   writeContext: AppWriteContext,
 ): App | Result<App, LoreError> {
@@ -1885,13 +1921,12 @@ function createAppUnscoped(
   // AC-LL-4's pinned ordering — credential validation FIRST (above), TMPDIR
   // usability probe SECOND, native load (TursoStore construction, below)
   // only after both. `probeTmpdirUsability` never rewrites TMPDIR itself (no
-  // silent fallback) — an unusable value is reported, never repaired. This
-  // branch is currently unreachable from any CLI command (`loader.ts` strips
-  // `config.sync` unconditionally before calling `createApp` — see that
-  // file's own comment), but keeping the composition root itself compliant
-  // with the invariant matters for any future direct caller (this is also
-  // where `AC-LL-5`/`AC-LL-7(c)`'s in-process tests exercise `createApp`
-  // directly, bypassing `loader.ts`).
+  // silent fallback) — an unusable value is reported, never repaired. Since
+  // D22 (spec-defect-clusters-round-2-part-c-criterion-data-demotion) this
+  // branch IS reachable from every route: `loader.ts` passes the full config,
+  // and the entries prime the libsql module first
+  // (`primeReplicaClientWhenSyncEnabled`), so the synchronous construction
+  // below never needs `createRequire` in the compiled binary.
   const tmpdirError = probeTmpdirUsability(ambient.env);
   if (tmpdirError !== null) {
     telemetry.close();
@@ -1906,7 +1941,7 @@ function createAppUnscoped(
   // silently land only-local (D-005 EC item 5).
   const { url: remoteUrl, token: authToken } = credResult.value;
   try {
-    const baseTursoStore = new TursoStore({
+    const baseTursoStore = replicaStoreFactory({
       localPath: dbPath,
       remoteUrl,
       authToken,
@@ -1989,8 +2024,8 @@ function createAppUnscoped(
     telemetry.close();
     const message =
       e instanceof Error
-        ? `TursoStore construction failed: ${e.message}`
-        : "TursoStore construction failed: unknown error";
+        ? `TursoStore construction failed: remote ${remoteUrl} could not be opened as a replica: ${e.message}`
+        : `TursoStore construction failed: remote ${remoteUrl} could not be opened as a replica: unknown error`;
     const cause = e instanceof Error ? e : undefined;
     return err({
       code: "STORE_ERROR",

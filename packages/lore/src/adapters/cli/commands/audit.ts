@@ -297,7 +297,7 @@ export default defineLoreCommand({
       };
 
       if (args.doc !== undefined) {
-        const resolveResult = await app.corpusService.resolve(args.doc);
+        const resolveResult = await app.corpusService.resolve(args.doc, { includeDeleted: true });
         if (!resolveResult.ok) {
           inv.io.stderr.write(formatErrorFor(inv, resolveResult.error) + "\n");
           return exitCode(resolveResult.error);

@@ -52,7 +52,8 @@ export type VersionAction =
   | "approve"
   | "reject"
   | "restore"
-  | "delete";
+  | "delete"
+  | "undelete";
 
 // ─── Primary Records ───────────────────────────────────────────────────────
 

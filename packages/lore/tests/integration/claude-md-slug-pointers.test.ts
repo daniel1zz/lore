@@ -151,8 +151,7 @@ function initCorpus(dir: string): void {
 }
 
 /**
- * The five required root H2 sections — every fixture that pins
- * `adoption: enforce` carries them so the ONLY thing that can trip the check is
+ * The five required root H2 sections — every fixture carries them so the ONLY thing that can trip the check is
  * the slug pointer under test, never `section_missing`
  * (spec-claude-md-root-section-structure-check-and-adoption-mode).
  */
@@ -161,19 +160,8 @@ const SECTIONS_PREFIX =
     .map((name) => `## ${name}\n\nbody of ${name}\n`)
     .join("\n") + "\n";
 
-/**
- * Appends `context.memory_files.adoption: enforce` to the fixture's
- * `lore init`-written config (absent key resolves to warn, under which a
- * dangling slug is downgraded and exit 3 is unreachable). Fails loud if the
- * init config already carries a `context:` key rather than clobbering it.
- */
-function pinEnforce(dir: string): void {
-  patchLoreConfig(dir, "context:\n  memory_files:\n    adoption: enforce\n");
-}
-
-/** Pins enforce and writes a structurally conforming root CLAUDE.md whose body is `body`. */
+/** Writes a structurally conforming root CLAUDE.md whose body is `body`. */
 function writeEnforcedRoot(dir: string, body: string): void {
-  pinEnforce(dir);
   writeFileSync(join(dir, "CLAUDE.md"), SECTIONS_PREFIX + body);
 }
 
@@ -303,8 +291,8 @@ describe("slug pointers — a dangling slug is refused", () => {
     expect(collectFindingsByKind(parsed, "slug_pointer_missing").length).toBe(2);
   });
 
-  it("ERROR (no crash): an empty CLAUDE.md produces zero slug_pointer_missing findings, exit code exactly 0", () => {
-    writeFileSync(join(tmpDir, "CLAUDE.md"), "");
+  it("ERROR (no crash): a sections-only CLAUDE.md produces zero slug_pointer_missing findings, exit code exactly 0", () => {
+    writeFileSync(join(tmpDir, "CLAUDE.md"), SECTIONS_PREFIX);
 
     const { result, parsed } = runCheckMemoryPointersJson(tmpDir);
 
@@ -384,20 +372,6 @@ describe("slug pointers — positive control plus real-corpus sweep", () => {
     try {
       initCorpus(dir);
       writeEnforcedRoot(dir, `See \`${DANGLING_SLUG_1}\` for the mechanism.\n`);
-      const run = runSweep(dir);
-      expect(run.exitCode).toBe(1);
-      expect(run.stderr).toContain("slug_pointer_missing");
-    } finally {
-      cleanupDir(dir);
-    }
-  });
-
-  it("the sweep script also catches the dangling slug when adoption is warn (finding downgraded to advisory)", () => {
-    const dir = makeTempDir("sweep-dangling-warn");
-    try {
-      initCorpus(dir);
-      // no adoption pin: absent key resolves to warn, which moves the finding to advisory `downgraded`
-      writeFileSync(join(dir, "CLAUDE.md"), SECTIONS_PREFIX + `See \`${DANGLING_SLUG_1}\` for the mechanism.\n`);
       const run = runSweep(dir);
       expect(run.exitCode).toBe(1);
       expect(run.stderr).toContain("slug_pointer_missing");

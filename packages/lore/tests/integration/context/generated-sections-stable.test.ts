@@ -18,6 +18,9 @@ import { dirname, join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { runLoreInProcess } from "../../helpers/run-lore-in-process";
 
+/** A hand-written root file with the three required sections the managed zone does not supply (limits are always enforced). */
+const HAND_ROOT = "# Proj\n\n## What This Is\n\nhand text\n\n## Commands\n\nx\n\n## Architecture\n\nx\n";
+
 const scratch: string[] = [];
 
 afterEach(() => {
@@ -61,7 +64,7 @@ const PKG = {
 describe("AC-BIND-5 D5: a folder without a memory file leaves CLAUDE.md byte-identical", () => {
   it("AC-BIND-5 HAPPY: add a folder with no memory file -> refresh keeps CLAUDE.md bytes, --check exits 0 and reports the count", async () => {
     const dir = await makeProject();
-    put(dir, "CLAUDE.md", "# Proj\n\nhand text\n");
+    put(dir, "CLAUDE.md", HAND_ROOT);
     put(dir, "svc/alpha/CLAUDE.md", "# Alpha\n\n## Purpose\n\nAlpha does the first thing.\n");
     put(dir, "bulk/one/file.ts", "export {};\n");
     expect((await runLore(["context", "refresh"], dir)).exitCode).toBe(0);
@@ -83,7 +86,7 @@ describe("AC-BIND-5 D5: a folder without a memory file leaves CLAUDE.md byte-ide
 
   it("AC-BIND-5 REGRESSION: a folder WITH a memory file still changes the index (--check exits 1)", async () => {
     const dir = await makeProject();
-    put(dir, "CLAUDE.md", "# Proj\n\nhand text\n");
+    put(dir, "CLAUDE.md", HAND_ROOT);
     expect((await runLore(["context", "refresh"], dir)).exitCode).toBe(0);
     put(dir, "svc/beta/CLAUDE.md", "# Beta\n\n## Purpose\n\nBeta owns persistence.\n");
     const check = await runLore(["context", "refresh", "--check"], dir);
@@ -95,7 +98,7 @@ describe("AC-BIND-5 D5: a folder without a memory file leaves CLAUDE.md byte-ide
 describe("AC-BIND-5 D4: the command table renders each documented script's description", () => {
   it("AC-BIND-5 HAPPY: name, command and description come from package.json", async () => {
     const dir = await makeProject();
-    put(dir, "CLAUDE.md", "# Proj\n\nhand text\n");
+    put(dir, "CLAUDE.md", HAND_ROOT);
     put(dir, "package.json", JSON.stringify(PKG));
     const refreshed = await runLore(["context", "refresh"], dir);
     expect(refreshed.exitCode, refreshed.stderr).toBe(0);
@@ -106,7 +109,7 @@ describe("AC-BIND-5 D4: the command table renders each documented script's descr
 
   it("AC-BIND-5 ERROR: a documented name with no script fails loud", async () => {
     const dir = await makeProject();
-    put(dir, "CLAUDE.md", "# Proj\n\nhand text\n");
+    put(dir, "CLAUDE.md", HAND_ROOT);
     put(dir, "package.json", JSON.stringify({ scripts: { build: "x" }, lore: { documentedScripts: { build: "Builds.", gone: "Missing." } } }));
     const refreshed = await runLore(["context", "refresh"], dir);
     expect(refreshed.exitCode).not.toBe(0);
@@ -115,7 +118,7 @@ describe("AC-BIND-5 D4: the command table renders each documented script's descr
 
   it("AC-BIND-5 NEGATIVE: the retired array shape and an empty description fail loud, never degrade to an empty table", async () => {
     const dir = await makeProject();
-    put(dir, "CLAUDE.md", "# Proj\n\nhand text\n");
+    put(dir, "CLAUDE.md", HAND_ROOT);
     put(dir, "package.json", JSON.stringify({ scripts: { build: "x" }, lore: { documentedScripts: ["build"] } }));
     const arr = await runLore(["context", "refresh"], dir);
     expect(arr.exitCode).not.toBe(0);

@@ -226,16 +226,22 @@ describe("DELETE /api/dashboard/docs/:id — soft delete (SPEC-027 AC-DH-6)", ()
       expect(typeof data.recoverable_until).toBe("string");
     });
 
-    it("the deleted doc's record carries a non-null deleted_at afterward", async () => {
+    it("the deleted doc is no longer addressable (DOC_NOT_FOUND with deleted_at) and its history ends in a delete version", async () => {
       const { id } = await createPrd("Deleted Doc Marker");
 
       const req = jsonReq("DELETE", `/api/dashboard/docs/${id}?confirm=true`);
       const url = makeUrl(`/api/dashboard/docs/${id}?confirm=true`);
       await handleDashboardRoute(req, url, app, COOKIE_ACTOR);
 
+      // reason: a deleted doc is not addressable (spec-defect-clusters-round-2-part-a D6) — `get` answers
+      // DOC_NOT_FOUND carrying the deletion time; its history stays readable and ends in the `delete` version.
       const getResult = await app.corpusService.get(id);
-      if (!getResult.ok) throw new Error("expected doc to still resolve after soft delete");
-      expect(getResult.value.doc.deleted_at).not.toBeNull();
+      expect(getResult.ok).toBe(false);
+      if (getResult.ok || getResult.error.code !== "DOC_NOT_FOUND") throw new Error("expected DOC_NOT_FOUND after soft delete");
+      expect(getResult.error.deleted_at).toEqual(expect.any(String));
+      const history = await app.versionService.log(id);
+      if (!history.ok) throw new Error("expected the history of a soft-deleted doc to stay readable");
+      expect(history.value.map((e) => e.action)).toEqual(["delete", "create"]);
     });
   });
 

@@ -181,7 +181,6 @@ import {
   setupManifestSchema,
 } from "@lore/core";
 import type {
-  AdoptionMode,
   AssetFile,
   FsProbe,
   LoreError,
@@ -313,28 +312,8 @@ export type AcCiteSeedResult = { status: "written" } | { status: "kept"; existin
 export type SeedAcCiteMode = (repoDir: string) => Promise<Result<AcCiteSeedResult, LoreError>>;
 
 /**
- * What {@link WriteAdoptionMode} did with `context.memory_files.adoption`:
- * `written` — the key was absent and now holds the requested mode; `kept` —
- * the key already held `existing`, nothing was written (an explicit value is
- * never overwritten, spec-claude-md-root-section-structure-check-and-adoption-mode D4).
- */
-export type AdoptionWriteOutcome = { status: "written" } | { status: "kept"; existing: AdoptionMode };
-
-/**
- * Persists the adoption mode into the target repo's `.lore/config.yaml`
- * (`context.memory_files.adoption`) — ONLY when that key is absent. The real
- * implementation (adapters/cli/commands/setup.ts) reads the current value
- * first; this flow never imports a config reader/writer or `node:fs` for it.
- *
- * @param repoDir - Absolute repo root whose `.lore/config.yaml` is updated.
- * @param mode - The mode judged on the POST-SPLICE `CLAUDE.md` content.
- * @returns `err` when the config cannot be read or written — never throws.
- */
-export type WriteAdoptionMode = (repoDir: string, mode: AdoptionMode) => Result<AdoptionWriteOutcome, LoreError>;
-
-/**
  * Resolves the target repo's REAL `context.memory_files` budgets (its own
- * `.lore/config.yaml`, read AFTER the init step created it) so the adoption
+ * `.lore/config.yaml`, read AFTER the init step created it) so the memory-file
  * judgement uses the same ceilings `lore status --check-claude-md` will later
  * enforce — never schema defaults.
  *
@@ -344,7 +323,7 @@ export type WriteAdoptionMode = (repoDir: string, mode: AdoptionMode) => Result<
 export type ResolveMemoryFileBudgets = (repoDir: string) => Result<MemoryFileBudgets, LoreError>;
 
 /**
- * What the adoption judgement needs to resolve code references: a read-only probe of the
+ * What the memory-file judgement needs to resolve code references: a read-only probe of the
  * target repo and its context fragments, so the verdict counts a dangling `path#Symbol` the
  * way `lore status --check-claude-md` later will.
  *
@@ -358,9 +337,9 @@ export type ResolveReferenceContext = (repoDir: string) => {
 /**
  * The ports {@link scaffoldProject} depends on, bundled for constructor injection.
  *
- * `writeAdoptionMode` + `resolveMemoryFileBudgets` are OPTIONAL in the TYPE only
- * (making them required would break unanchored fixtures that predate the adoption
- * step). Absence is NOT silent: the report carries an `adoption` row with
+ * `resolveMemoryFileBudgets` + `resolveReferenceContext` are OPTIONAL in the TYPE only
+ * (making them required would break unanchored fixtures that predate the judgement
+ * step). Absence is NOT silent: the report carries a `memory_files` row with
  * `status: "skipped"` naming the missing port(s). The production adapter supplies both.
  */
 export interface ProjectScaffoldFlowDeps {
@@ -368,7 +347,6 @@ export interface ProjectScaffoldFlowDeps {
   exec: ExecPort;
   initCorpus: InitCorpus;
   assets: ProjectAssetSource;
-  writeAdoptionMode?: WriteAdoptionMode;
   resolveMemoryFileBudgets?: ResolveMemoryFileBudgets;
   /** Same optionality and loud-skip rule as the two ports above; the production adapter supplies it. */
   resolveReferenceContext?: ResolveReferenceContext;
@@ -379,16 +357,13 @@ export interface ProjectScaffoldFlowDeps {
 }
 
 /**
- * Outcome of the adoption step (spec D4). `mode` is the value judged on the
- * post-splice root file — ABSENT exactly when nothing was judged (`skipped`, or
- * `failed` before judgement). `status` says whether it reached the config.
- * `checklist` is the migration checklist — one line per would-be deterministic
- * finding — populated ONLY when `mode` is `warn`.
+ * Outcome of the memory-file judgement step: the POST-SPLICE root file judged against the repo's real limits and
+ * required sections. It writes NOTHING (limits are always enforced; there is no setting to seed). `checklist` is one
+ * line per deterministic finding, populated ONLY when `status` is `findings`.
  */
-export interface AdoptionStepResult {
-  status: "written" | "kept" | "failed" | "skipped";
-  mode?: AdoptionMode;
-  /** `kept`: the explicit value already in config; `failed`/`skipped`: the reason. */
+export interface MemoryFileJudgement {
+  status: "conforms" | "findings" | "failed" | "skipped";
+  /** `failed`/`skipped`: the reason. */
   detail?: string;
   checklist: string[];
 }
@@ -458,12 +433,10 @@ export interface ProjectScaffoldReport {
   claude_md: SimpleStepResult;
   git_hooks_path: GitHooksPathResult;
   /**
-   * Adoption-mode write (spec-claude-md-root-section-structure-check-and-adoption-mode
-   * D4) — absent ONLY when the CLAUDE.md step itself failed (nothing to judge).
-   * A missing adoption port is a `status: "skipped"` row, never absence.
-   * See {@link AdoptionStepResult}.
+   * Memory-file judgement — absent ONLY when the CLAUDE.md step itself failed (nothing to judge).
+   * A missing port is a `status: "skipped"` row, never absence. See {@link MemoryFileJudgement}.
    */
-  adoption?: AdoptionStepResult;
+  memory_files?: MemoryFileJudgement;
   /**
    * BL-8 (AC-BLS3-7) — the `skills/lore-baseline/**` install into `.claude/` (ledger kind `skill`). `done` = at
    * least one file written this run; `skipped` = every file already byte-identical; `failed` names the cause.
@@ -821,7 +794,14 @@ async function runManifestWriteSeam(
   const passthroughEntries = (current?.entries ?? []).filter((e) => !managedPaths.has(e.path));
   const manifestEntries = [...passthroughEntries, ...newFileEntries];
 
-  const manifest: SetupManifest = { version: PROJECT_MANIFEST_VERSION, claude_dir: repoDir, entries: manifestEntries };
+  // reason: the priors are the ledger's record of what an EARLIER run replaced; rebuilding the manifest from entries
+  // alone would drop them and a later uninstall could no longer restore (BR-834/BR-837/BR-845).
+  const manifest: SetupManifest = {
+    version: PROJECT_MANIFEST_VERSION,
+    claude_dir: repoDir,
+    entries: manifestEntries,
+    ...(current?.project_priors === undefined ? {} : { project_priors: current.project_priors }),
+  };
   const validation = setupManifestSchema.safeParse(manifest);
   if (!validation.success) {
     return {
@@ -1173,49 +1153,36 @@ async function runClaudeMdStep(
 }
 
 /**
- * Adoption step (spec-claude-md-root-section-structure-check-and-adoption-mode D4):
- * judges the POST-SPLICE root `CLAUDE.md` content with the SOLE composition entry
- * `runMemoryFileChecks` (every deterministic kind counts — structure AND capacity
- * AND emphasis; never the pre-splice file) and asks `deps.writeAdoptionMode` to
- * persist `enforce` (zero would-be findings) or `warn` (any). The port itself only
- * writes when the key is absent, so an explicit value is never overwritten.
+ * Memory-file judgement step: judges the POST-SPLICE root `CLAUDE.md` content with the SOLE composition entry
+ * `runMemoryFileChecks` (every deterministic kind counts: structure AND capacity AND emphasis; never the pre-splice
+ * file) and reports `conforms` or the checklist of findings. It writes nothing: a nonconforming file is the person's
+ * to fix, and `lore status --check-claude-md` fails on it until they do.
  *
- * reason: budgets are the repo's REAL resolved budgets (`deps.resolveMemoryFileBudgets`)
- * with `adoption` pinned to `enforce` so `deterministic` IS the would-be finding list —
- * the default-`warn` resolution would move every finding into `advisory` and hide the
- * count from this caller. Judging against schema defaults instead would write `enforce`
- * for a repo whose tighter ceilings `status --check-claude-md` then fails on.
- * References are judged too (`deps.resolveReferenceContext` supplies the target repo's probe
- * and fragments), so the mode written is the mode `lore status --check-claude-md` will
- * agree with; `docExists` is `() => true` (slug pointers are `--check-memory-pointers`'s job).
+ * reason: budgets are the repo's REAL resolved budgets (`deps.resolveMemoryFileBudgets`): judging against schema
+ * defaults would say `conforms` for a repo whose tighter ceilings `status --check-claude-md` then fails on.
+ * References are judged too (`deps.resolveReferenceContext` supplies the target repo's probe and fragments);
+ * `docExists` is `() => true` (slug pointers are `--check-memory-pointers`'s job).
  *
- * A missing port is a loud `skipped` row (never an absent one); a budget-resolution
- * failure is a `failed` row and the write port is NOT called.
+ * A missing port is a loud `skipped` row (never an absent one); a budget-resolution failure is a `failed` row.
  */
-function runAdoptionStep(deps: ProjectScaffoldFlowDeps, repoDir: string, postSpliceContent: string): AdoptionStepResult {
-  const { writeAdoptionMode, resolveMemoryFileBudgets, resolveReferenceContext } = deps;
-  if (writeAdoptionMode === undefined || resolveMemoryFileBudgets === undefined || resolveReferenceContext === undefined) {
+function runMemoryFileJudgementStep(deps: ProjectScaffoldFlowDeps, repoDir: string, postSpliceContent: string): MemoryFileJudgement {
+  const { resolveMemoryFileBudgets, resolveReferenceContext } = deps;
+  if (resolveMemoryFileBudgets === undefined || resolveReferenceContext === undefined) {
     const missing = [
-      ...(writeAdoptionMode === undefined ? ["writeAdoptionMode"] : []),
       ...(resolveMemoryFileBudgets === undefined ? ["resolveMemoryFileBudgets"] : []),
       ...(resolveReferenceContext === undefined ? ["resolveReferenceContext"] : []),
     ];
-    return { status: "skipped", detail: `adoption not judged: deps.${missing.join(" and deps.")} not injected`, checklist: [] };
+    return { status: "skipped", detail: `memory file not judged: deps.${missing.join(" and deps.")} not injected`, checklist: [] };
   }
   const resolved = resolveMemoryFileBudgets(repoDir);
   if (!resolved.ok) return { status: "failed", detail: describeError(resolved.error), checklist: [] };
-  const budgets = { ...resolved.value, adoption: "enforce" as const };
   const { deterministic } = runMemoryFileChecks(
     [{ path: CLAUDE_MD_TARGET_NAME, role: "root", content: postSpliceContent }],
-    budgets,
+    resolved.value,
     { ...resolveReferenceContext(repoDir), docExists: () => true },
   );
-  const mode: AdoptionMode = deterministic.length === 0 ? "enforce" : "warn";
-  const checklist = mode === "warn" ? deterministic.map((finding) => finding.message) : [];
-  const written = writeAdoptionMode(repoDir, mode);
-  if (!written.ok) return { status: "failed", mode, detail: describeError(written.error), checklist };
-  if (written.value.status === "kept") return { status: "kept", mode, detail: written.value.existing, checklist: [] };
-  return { status: "written", mode, checklist };
+  if (deterministic.length === 0) return { status: "conforms", checklist: [] };
+  return { status: "findings", checklist: deterministic.map((finding) => finding.message) };
 }
 
 /** Finalizes the gitignore candidate's report row once the seam has run — keys off `seam.written` (see module doc). */
@@ -1315,11 +1282,164 @@ export function absoluteHooksPath(repoDir: string): string {
   return join(resolve(repoDir), "hooks");
 }
 
+/**
+ * Read-modify-write of the project ledger (`.lore/.lore-project-manifest.json`) by a step that runs after the
+ * manifest write seam — the rules files, the hooks setting and the language key all land outside the seam, yet
+ * the uninstall reverses ledger entries only (BR-840). `update` receives the parsed ledger and returns the new one.
+ *
+ * @param fs - the project fs port.
+ * @param repoDir - absolute repo root.
+ * @param update - pure ledger transform.
+ * @returns `ok(undefined)` once written; `err(VALIDATION_ERROR)` when the ledger is absent or malformed (nothing is
+ *   written — a change that cannot be recorded must not be made); `err(STORE_ERROR)` when the write throws.
+ * @example
+ * recordInProjectLedger(fs, repoDir, (m) => ({ ...m, project_priors: { hooks_path: { prior: null } } }));
+ */
+export function recordInProjectLedger(
+  fs: ProjectFsPort,
+  repoDir: string,
+  update: (ledger: SetupManifest) => SetupManifest,
+): Result<void, LoreError> {
+  const ledgerPath = join(repoDir, PROJECT_MANIFEST_RELATIVE_PATH);
+  const raw = fs.readFile(ledgerPath);
+  if (raw === null) {
+    return err({
+      code: "VALIDATION_ERROR",
+      field: "manifest",
+      message: `no project install ledger at "${ledgerPath}" — a change that cannot be recorded for uninstall is not made`,
+      value: ledgerPath,
+    });
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (cause) {
+    return err({ code: "VALIDATION_ERROR", field: "manifest", message: `project install ledger "${ledgerPath}" is not valid JSON: ${toMessage(cause)}`, value: ledgerPath });
+  }
+  const current = setupManifestSchema.safeParse(parsed);
+  if (!current.success) {
+    return err({ code: "VALIDATION_ERROR", field: "manifest", message: `project install ledger "${ledgerPath}" failed schema validation: ${current.error.message}`, value: ledgerPath });
+  }
+  const next = setupManifestSchema.safeParse(update(current.data));
+  if (!next.success) {
+    return err({ code: "VALIDATION_ERROR", field: "manifest", message: `updated project install ledger failed schema validation: ${next.error.message}`, value: ledgerPath });
+  }
+  const nextRaw = `${JSON.stringify(next.data, null, 2)}\n`;
+  // reason: a re-run that changes nothing must write nothing (BR idempotent re-run: zero writer calls).
+  if (nextRaw === raw) return ok(undefined);
+  try {
+    fs.writeFile(ledgerPath, nextRaw, 0o644);
+  } catch (cause) {
+    return err({ code: "STORE_ERROR", message: `writing the project install ledger "${ledgerPath}" failed: ${toMessage(cause)}`, ...(cause instanceof Error ? { cause } : {}) });
+  }
+  return ok(undefined);
+}
+
+/** One lore rules file the fragment refresh reported: repo-relative POSIX `path` and what the refresh did to it. */
+export interface ProjectRulesFileOutcome {
+  path: string;
+  state: "created" | "updated" | "unchanged" | "diverged_skip" | "pruned";
+}
+
+/**
+ * Records the lore rules files (`.claude/rules/lore-*.md`) the project setup wrote as ledger entries, so the project
+ * uninstall removes exactly those and nothing else (BR-834 / BR-845). A created, updated or unchanged file is lore's
+ * (its content is the fingerprinted render) and gets an entry; a pruned one loses its entry; a hand-edited
+ * (`diverged_skip`) one is left as the ledger already had it. A file the user owns never gets an entry.
+ *
+ * @returns `ok(undefined)`, or the ledger error from {@link recordInProjectLedger}.
+ */
+export function recordProjectRulesFiles(
+  fs: ProjectFsPort,
+  repoDir: string,
+  outcomes: readonly ProjectRulesFileOutcome[],
+  now: () => string = defaultNow,
+): Result<void, LoreError> {
+  const nowIso = now();
+  return recordInProjectLedger(fs, repoDir, (ledger) => {
+    let entries = ledger.entries;
+    for (const outcome of outcomes) {
+      if (outcome.state === "diverged_skip") continue;
+      const others = entries.filter((e) => e.path !== outcome.path);
+      if (outcome.state === "pruned") {
+        entries = others;
+        continue;
+      }
+      const content = fs.readFile(join(repoDir, outcome.path));
+      if (content === null) {
+        entries = others;
+        continue;
+      }
+      const previous = entries.find((e) => e.path === outcome.path);
+      entries = [
+        ...others,
+        {
+          path: outcome.path,
+          kind: "governance",
+          sha256: sha256Hex(content),
+          written_at: previous?.written_at ?? nowIso,
+          ownership: "managed",
+        },
+      ];
+    }
+    return { ...ledger, entries };
+  });
+}
+
+/**
+ * Records, BEFORE the setup writes `language` into a project settings file, what that file held (BR-834 / BR-845):
+ * whether the file and the key existed and the key's value. The FIRST recording wins — a re-run sees lore's own
+ * value and must not replace the user's original. A settings file that is not a JSON object is not recorded (the
+ * language write refuses it and nothing changes, so there is nothing to restore).
+ *
+ * @param settingsRelPath - repo-relative POSIX path of the settings file.
+ */
+export function recordProjectLanguagePrior(fs: ProjectFsPort, repoDir: string, settingsRelPath: string): Result<void, LoreError> {
+  const raw = fs.readFile(join(repoDir, settingsRelPath));
+  let hadKey = false;
+  let prior: unknown;
+  if (raw !== null) {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      return ok(undefined);
+    }
+    if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return ok(undefined);
+    const settings = parsed as Record<string, unknown>;
+    hadKey = Object.hasOwn(settings, "language");
+    prior = settings["language"];
+  }
+  return recordInProjectLedger(fs, repoDir, (ledger) => {
+    const rows = ledger.project_priors?.settings_language ?? [];
+    if (rows.some((row) => row.path === settingsRelPath)) return ledger;
+    return {
+      ...ledger,
+      project_priors: {
+        ...ledger.project_priors,
+        settings_language: [...rows, { path: settingsRelPath, file_existed: raw !== null, had_key: hadKey, prior }],
+      },
+    };
+  });
+}
+
 async function runGitHooksPathStep(deps: ProjectScaffoldFlowDeps, repoDir: string): Promise<GitHooksPathResult> {
   try {
     const target = absoluteHooksPath(repoDir);
     const getResult = await deps.exec.run(["git", "config", "--get", "core.hooksPath"], repoDir);
     const priorValue = getResult.code === 0 ? getResult.stdout.trim() : null;
+
+    // reason: the ledger records the FIRST earlier value and keeps it on every re-run — a second run sees our own
+    // absolute path as "prior" and would overwrite the user's real original. Recorded BEFORE the write: a crash
+    // between the two leaves a restorable ledger rather than an unrecorded change (BR-837).
+    const recorded = recordInProjectLedger(deps.fs, repoDir, (ledger) => ({
+      ...ledger,
+      project_priors: {
+        ...ledger.project_priors,
+        hooks_path: ledger.project_priors?.hooks_path ?? { prior: priorValue },
+      },
+    }));
+    if (!recorded.ok) return { status: "failed", prior_value: priorValue, detail: describeError(recorded.error) };
 
     if (priorValue === target) {
       return { status: "skipped", prior_value: priorValue };
@@ -1437,8 +1557,8 @@ export async function scaffoldProject(
   const ac_cite = await runAcCiteSeedStep(deps, repoDir);
 
   // Judged only when the CLAUDE.md step produced a candidate (a failed step has no content to judge).
-  const adoption =
-    claudeMdOutcome.pending === undefined ? undefined : runAdoptionStep(deps, repoDir, claudeMdOutcome.pending.content);
+  const memory_files =
+    claudeMdOutcome.pending === undefined ? undefined : runMemoryFileJudgementStep(deps, repoDir, claudeMdOutcome.pending.content);
 
   return ok({
     init,
@@ -1447,7 +1567,7 @@ export async function scaffoldProject(
     gitignore,
     claude_md,
     git_hooks_path,
-    ...(adoption === undefined ? {} : { adoption }),
+    ...(memory_files === undefined ? {} : { memory_files }),
     ...(skills === undefined ? {} : { skills }),
     ...(ac_cite === undefined ? {} : { ac_cite }),
     manifest: seam.manifestStatus,

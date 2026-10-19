@@ -181,8 +181,7 @@ function writeOverCeilingClaudeMd(dir: string): void {
     { length: 420 },
     (_, i) => `line ${i} of filler content padding this fixture CLAUDE.md past the root ceiling`,
   );
-  // The five required root H2 sections come first: under the `adoption: enforce`
-  // these scenarios pin, the fixture must be refused for its CEILING and nothing
+  // The five required root H2 sections come first: the fixture must be refused for its CEILING and nothing
   // else — never `section_missing` (spec-claude-md-root-section-structure-check-and-adoption-mode).
   writeFileSync(join(dir, "CLAUDE.md"), `${SECTIONS_PREFIX}${lines.join("\n")}\n`);
 }
@@ -193,14 +192,15 @@ const SECTIONS_PREFIX =
     .join("\n") + "\n";
 
 /**
- * Appends `context.memory_files` to an already-initialised fixture's config.yaml, ALWAYS with
- * `adoption: enforce` (an absent key resolves to warn, under which the hook can never trip).
+ * Appends `context.memory_files` carrying `extraLines` to an already-initialised fixture's config.yaml. With no
+ * extra lines it writes nothing: limits are always enforced, there is no setting to pin.
  */
 function configureMemoryFiles(dir: string, extraLines = ""): void {
-  patchLoreConfig(dir, `context:\n  memory_files:\n    adoption: enforce\n${extraLines}`);
+  if (extraLines === "") return;
+  patchLoreConfig(dir, `context:\n  memory_files:\n${extraLines}`);
 }
 
-/** Appends `context.memory_files.enabled: false` (plus the pinned `adoption: enforce`) to an already-initialised fixture's config.yaml. */
+/** Appends `context.memory_files.enabled: false` to an already-initialised fixture's config.yaml. */
 function disableMemoryFileCheck(dir: string): void {
   configureMemoryFiles(dir, "    enabled: false\n");
 }

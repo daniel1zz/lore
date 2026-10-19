@@ -42,7 +42,7 @@ const init = runLore(["init"], dir);
 if (init.exitCode !== 0) throw new Error(`lore init failed: ${init.stderr}`);
 patchLoreConfig(
   dir,
-  ["workflow:", "  gates:", "    spec-create:", "      enabled: false", "context:", "  memory_files:", "    adoption: enforce", ""].join("\n"),
+  ["workflow:", "  gates:", "    spec-create:", "      enabled: false", ""].join("\n"),
 );
 const spec = runLore(["create", "spec", "--title", "Anchor Grammar Fixture", "--no-ai", "--content", "## Goal\n\nBody.", "--json"], dir);
 if (spec.exitCode !== 0) throw new Error(`create spec failed: ${spec.stderr}${spec.stdout}`);

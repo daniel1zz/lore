@@ -25,7 +25,12 @@ import { runContextInit, runContextRefresh } from "../../../src/flows/context-fl
 const SHIPPED_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "..", "..", "assets", "context");
 
 function seedShipped(): Record<string, string> {
-  const files: Record<string, string> = {};
+  // reason: the shipped fragments cite `.lore/`, `.lore/config.yaml` and `bun run test:file`; code references are always
+  // enforced (no adoption mode downgrades them), so the in-memory repo must hold what those references resolve to.
+  const files: Record<string, string> = {
+    ".lore/config.yaml": "project:\n  name: fixture\n",
+    "package.json": JSON.stringify({ scripts: { "test:file": "vitest run" } }),
+  };
   for (const name of readdirSync(SHIPPED_DIR).filter((n) => n.endsWith(".md"))) {
     files[`assets/context/${name}`] = readFileSync(join(SHIPPED_DIR, name), "utf8");
   }
@@ -73,7 +78,7 @@ describe("AC-CTX-3 init/refresh idempotence with D15 lore rules files", () => {
   it("HAPPY: refresh writes one lore-<id>.md per shipped static main fragment, each with the fingerprint first line", async () => {
     const { fs, deps } = await initialized();
     const result = await runContextRefresh(deps, "", { scope: "project" });
-    expect(result.ok).toBe(true);
+    expect(result.ok, JSON.stringify(result)).toBe(true);
     const names = (await fs.listDir(RULES_DIR)).sort();
     // RE-BASELINE (task-rs-t13-migration-promoted-shipped-fragments-agent-rules): the four promoted main-audience static fragments ship too.
     expect(names).toEqual([
@@ -140,7 +145,11 @@ describe("AC-CTX-3 init/refresh idempotence with D15 lore rules files", () => {
     const before = (await fs.readFile("CLAUDE.md")) ?? "";
     const at = before.indexOf("<!-- lore:managed section=module-index");
     expect(at).toBeGreaterThan(-1);
-    const bodyStart = before.indexOf("\n", at) + 1;
+    // reason: past the `## Module Index` heading: a mangled required heading would make the section vanish, which is a
+    // refused write (limits are always enforced), not the diverged_skip this case is about.
+    const headingAt = before.indexOf("## Module Index", at);
+    expect(headingAt).toBeGreaterThan(-1);
+    const bodyStart = before.indexOf("\n", headingAt) + 1;
     const edited = before.slice(0, bodyStart) + "HAND-EDIT-MARK " + before.slice(bodyStart);
     await fs.writeFile("CLAUDE.md", edited);
 
