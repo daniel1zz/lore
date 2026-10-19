@@ -336,6 +336,7 @@ import {
   sessionIdDiscriminator,
   normalizeFileAnchors,
   extractFileAnchors,
+  fileAnchorPath,
   anchorsOverlap,
   computeAcScopeEdit,
   extractDeclaredAcScope,
@@ -1411,7 +1412,8 @@ function findMissingUnfilteredTestFileRuns(
   evidence: EvidenceEntry[],
   repoRoot: string | undefined,
 ): string[] {
-  const testFileAnchors = extractFileAnchors(task).filter(isTestFileAnchor);
+  // reason: a `path#Symbol` test anchor names the same file as its bare path; the floor asks about FILES.
+  const testFileAnchors = [...new Set(extractFileAnchors(task).filter(isTestFileAnchor).map(fileAnchorPath))];
   if (testFileAnchors.length === 0) return [];
 
   // reason: F7 — each row contributes its OWN attested `attestation.execution_root`
@@ -1714,34 +1716,6 @@ export function computeArchiveWalk(from: DocStatus): DocStatus[] {
  *  read-only fact computation, not the drift detector. */
 function isTerminalStatus(status: DocStatus): boolean {
   return status === "archived" || status === "deprecated";
-}
-
-/**
- * Rejects any candidate task anchor containing `#` — the SPEC code-anchor grammar's
- * delimiter (`path[#Symbol]`, SPEC-045 §Design Decisions D1/D6) is not valid on a
- * TASK's `file_anchors`, which is always a plain repo-relative path/dir scope.
- * Applied at the task-anchor AUTHORING seams that can introduce NEW state
- * (`setAnchors`/`addAnchors` — CLI `--anchor` at create time is validated by
- * `CorpusService._createImpl`'s existing file_anchors branch, which has no `#`
- * either since `normalizeFileAnchors` never special-cases it; this guard is the
- * dedicated check named by SPEC-045 D6 for the two RMW mutation verbs). Deliberately
- * NOT applied to `removeAnchors` — a removal candidate never creates new stored
- * state, and a stored legacy `#`-carrying entry (however it got there) must stay
- * removable.
- */
-function rejectHashInTaskAnchors(anchors: string[]): Result<void, LoreError> {
-  const offending = anchors.find((a) => a.includes("#"));
-  if (offending !== undefined) {
-    return err({
-      code: "VALIDATION_ERROR",
-      field: "file_anchors",
-      message:
-        `task file_anchors must not contain "#" — that is the SPEC code-anchor grammar ` +
-        `(path[#Symbol], SPEC-045), not valid on a task's file_anchors: "${offending}"`,
-      value: offending,
-    });
-  }
-  return ok(undefined);
 }
 
 /**
@@ -4674,9 +4648,8 @@ export class TaskWorkflowService {
     if (!taskResult.ok) return taskResult;
     const task = taskResult.value;
 
-    const hashRejectResult = rejectHashInTaskAnchors(anchors);
-    if (!hashRejectResult.ok) return hashRejectResult;
-
+    // `path#Symbol` is a valid task anchor (a hold scoped to one top-level symbol); `normalizeFileAnchors` owns
+    // the grammar, so a malformed `#` entry is refused there.
     const normalizedResult = normalizeFileAnchors(anchors);
     if (!normalizedResult.ok) return normalizedResult;
 
@@ -4716,9 +4689,6 @@ export class TaskWorkflowService {
     const taskResult = await this.resolveTask(idOrSlug);
     if (!taskResult.ok) return taskResult;
     const task = taskResult.value;
-
-    const hashRejectResult = rejectHashInTaskAnchors(anchors);
-    if (!hashRejectResult.ok) return hashRejectResult;
 
     const existing = extractFileAnchors(task);
     const normalizedResult = normalizeFileAnchors([...existing, ...anchors]);

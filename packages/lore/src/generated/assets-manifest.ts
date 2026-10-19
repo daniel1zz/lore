@@ -45,7 +45,7 @@ export const LORE_BINARY_VERSION = "0.1.0" as const;
 
 export const EMBEDDED_ASSETS_MANIFEST: EmbeddedAssetsManifest = {
   binary_version: LORE_BINARY_VERSION,
-  tree_digest: "725ab90912c35175b56cd975bbd3ed1655ddc1a20cf4d4fe0caded13b76de935",
+  tree_digest: "0a4fcac8b911147964cb183623867507596673efa0e84f7abb271a4f0d203ab8",
   entries: [
   { path: "agents/lore-implementer.md", kind: "agent", ownership: "managed", sha256: "73f710267743633a7496545862a255fd348e733e5215cdbe62200ecf1af48488" },
   { path: "agents/lore-reader.md", kind: "agent", ownership: "managed", sha256: "336b2da60cfe9afae51f17ac8f6f9f33e7c67b2f3639874795e22a0e257e8696" },
@@ -64,12 +64,14 @@ export const EMBEDDED_ASSETS_MANIFEST: EmbeddedAssetsManifest = {
   { path: "hooks/lib/run-id.mjs", kind: "hook", ownership: "managed", sha256: "d19c976ed1819180c4654587f4c839d02ad2a1f87f49517928a780602024a773" },
   { path: "hooks/lib/session-trail.mjs", kind: "hook", ownership: "managed", sha256: "1744e4171c7a2034e64b4f9c25bf1f5df7122866457eecc0f6bb00e7c9daaace" },
   { path: "hooks/lib/shell-cwd.mjs", kind: "hook", ownership: "managed", sha256: "8b5cb7e95065e837d8a88879617ee750a449cc3d6e0d6477a9f26f8ae44acca8" },
+  { path: "hooks/lib/shell-writes.mjs", kind: "hook", ownership: "managed", sha256: "6e3568a1c7f0f8c6413cfe38e5fe7f8c50c8d98ddce0e066c2a16856079e9888" },
+  { path: "hooks/lib/top-level-symbols.mjs", kind: "hook", ownership: "managed", sha256: "b80ddd3949ca5cb612f7e244a8697eceb43cc9666a872a78494bb8c437f93d0b" },
   { path: "hooks/lib/turn-state.mjs", kind: "hook", ownership: "managed", sha256: "12b8751ce64f46fefee4f6d3e43010ce5346aace5c00281d7ccf64ea5bed319b" },
   { path: "hooks/post-edit-bindings.mjs", kind: "hook", ownership: "managed", sha256: "18c17d80fc59d3635e46a74f087f4bcc6f1b9fab79ab20886fa9e241911d2309" },
   { path: "hooks/post-edit-mark.mjs", kind: "hook", ownership: "managed", sha256: "1c4c5576b4d11f7a04ab2496d038d976fd11e95a93fd14b9fcdb0cfc29718782" },
   { path: "hooks/pre-bash-git-safety-gate.mjs", kind: "hook", ownership: "managed", sha256: "d444b188873345b36264206a54088c9f16e872602b73a84b58d1a6be2dc8e169" },
   { path: "hooks/pre-dispatch-isolation-gate.mjs", kind: "hook", ownership: "managed", sha256: "0523ea4e462be20350e483acf232749e3f6a965a42322e12a5d95c311059df8a" },
-  { path: "hooks/pre-edit-anchor-gate.mjs", kind: "hook", ownership: "managed", sha256: "6bb22859b38f17ea5203fd5b6651070d22f1bfa3c170be5c9c5e516583a35233" },
+  { path: "hooks/pre-edit-anchor-gate.mjs", kind: "hook", ownership: "managed", sha256: "8dd34c73b4b7b3c6dbe13f299d05c87ef8ea0c479e869598667f367d9125136a" },
   { path: "hooks/pre-helper-foreign-working-copy-gate.mjs", kind: "hook", ownership: "managed", sha256: "cb5908db3a8beeb904a555e7c57d7c60e33eb3da9350d243dccf8776a8a307a9" },
   { path: "hooks/pre-no-general-agent-gate.mjs", kind: "hook", ownership: "managed", sha256: "795dcedc192ba2cee8bb00938afee11b2a513db682e13f6bc6cdaec191ae0892" },
   { path: "hooks/pre-tool-harness-run.mjs", kind: "hook", ownership: "managed", sha256: "56647fbe978d185db43e4f87e2425d70a3a965e39bb7d08c696745a240c2fd28" },

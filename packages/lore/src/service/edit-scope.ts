@@ -27,12 +27,14 @@ import {
   anchorsOverlap,
   extractFileAnchors,
   extractHeldClaim,
+  normalizeFileAnchors,
   ok,
+  splitFileAnchor,
   type DocRecord,
   type LoreError,
   type Result,
 } from "@lore/core";
-import { findAnchorOverlapConflict, type AnchorOverlapConflict } from "./gate-predicates.js";
+import { findAnchorOverlapConflict, type AnchorOverlapConflict, type SiblingClaimInfo } from "./gate-predicates.js";
 import type { IgnoreProbeFn } from "./helper-scope-review.js";
 import type { OpenClaimsOfWorkingCopy } from "./run-service.js";
 import type { buildAnchorGateContext } from "./checkpoint-registry.js";
@@ -69,6 +71,13 @@ export interface EditScopeDeps {
   ): Promise<Result<ReturnType<typeof buildAnchorGateContext>, LoreError>>;
   addAnchors(slug: string, anchors: string[], opts: { by: string; source?: string }): Promise<Result<DocRecord, LoreError>>;
   ignoreProbe: IgnoreProbeFn;
+  /**
+   * The repo-relative files a claim's working copy has really touched (uncommitted changes plus commits since the
+   * default branch), or `undefined` when they cannot be measured. `worktree` is the claim's recorded value (an
+   * absolute path or a branch name); `fromWorkingCopy` is a working copy of the same repository, used to resolve a
+   * branch name. An unmeasurable answer keeps the holder's directory anchors whole (fail closed).
+   */
+  touchedFiles(worktree: string | undefined, fromWorkingCopy: string): readonly string[] | undefined;
   /** `realpath` of an existing path; throws ENOENT otherwise. */
   realpath(path: string): string;
   now(): string;
@@ -92,6 +101,7 @@ export type EditScopeDenialReason =
   | "outside-working-copy"
   | "held-by-other-claim"
   | "ignore-status-not-measured"
+  | "invalid-anchor"
   | "claim-unreadable";
 
 /** The verdict of {@link declareEditPath}. `declared` wrote one anchor; the others wrote nothing. */
@@ -209,11 +219,38 @@ export async function refreshScopeFiles(deps: EditScopeDeps, task: string, worki
   return problems;
 }
 
+/**
+ * Replaces each sibling's directory anchors by the files that sibling really touched under them.
+ *
+ * A directory anchor is a claim on a region, not on every file in it: it holds only what its holder edited (its
+ * declared file anchors stay as they are) or changed in its working copy. A holder whose touched set cannot be
+ * measured keeps the whole directory.
+ */
+function narrowDirectoryHolds(deps: EditScopeDeps, siblings: readonly SiblingClaimInfo[], fromWorkingCopy: string): SiblingClaimInfo[] {
+  return siblings.map((sibling) => {
+    const directories = sibling.anchors.filter((anchor) => anchor.endsWith("/"));
+    if (directories.length === 0) return sibling;
+    const touched = deps.touchedFiles(sibling.worktree, fromWorkingCopy);
+    if (touched === undefined) return sibling;
+    const held = sibling.anchors.filter((anchor) => !anchor.endsWith("/"));
+    const underDirectory = touched.filter((file) => anchorsOverlap([file], directories).overlaps);
+    return { ...sibling, anchors: [...held, ...underDirectory] };
+  });
+}
+
+/** True when one of `anchors` is exactly the whole file `rel`, or (for a symbol unit) that symbol of it. A directory anchor never counts. */
+function exactlyCovers(anchors: readonly string[], rel: string, symbol: string | undefined): boolean {
+  return anchors.some((anchor) => {
+    const held = splitFileAnchor(anchor);
+    return !held.path.endsWith("/") && held.path === rel && (held.symbol === undefined || held.symbol === symbol);
+  });
+}
+
 /** Input of {@link declareEditPath}. */
 export interface DeclareEditPathInput {
   readonly workingCopy: string;
   readonly task: string;
-  /** Absolute, or relative to the working copy. */
+  /** Absolute, or relative to the working copy; may end in `#Symbol` (one top-level symbol of the file). */
   readonly path: string;
   /** The caller's actor — recorded on the version and audit rows of the anchor write. */
   readonly by: string;
@@ -233,14 +270,22 @@ export interface DeclareEditPathInput {
  * // path in another live claim -> { kind: "denied", reason: "held-by-other-claim", holder: { task: "t-b", ... } }
  */
 export async function declareEditPath(deps: EditScopeDeps, input: DeclareEditPathInput): Promise<Result<EditScopeVerdict, LoreError>> {
-  const rel = relativeInside(input.workingCopy, input.path, (p) => deps.realpath(p));
-  if (rel === undefined) {
+  // `path#Symbol`: the symbol is split off BEFORE the path is canonicalised (it is not a filesystem name).
+  const askedSplit = splitFileAnchor(input.path);
+  const relFile = relativeInside(input.workingCopy, askedSplit.path, (p) => deps.realpath(p));
+  const symbol = askedSplit.symbol;
+  const rel = relFile === undefined ? undefined : symbol === undefined ? relFile : `${relFile}#${symbol}`;
+  if (rel === undefined || relFile === undefined) {
     return ok({
       kind: "denied",
       reason: "outside-working-copy",
       path: input.path,
       message: `${input.path} is not inside the working copy ${input.workingCopy}; an anchor names a repository path.`,
     });
+  }
+  const grammar = normalizeFileAnchors([rel]);
+  if (!grammar.ok) {
+    return ok({ kind: "denied", reason: "invalid-anchor", path: rel, message: `${rel} is not a valid anchor: ${"message" in grammar.error ? String(grammar.error.message) : grammar.error.code}` });
   }
   const scope = await readEditScope(deps, input.workingCopy);
   if (!scope.ok) return scope;
@@ -257,9 +302,11 @@ export async function declareEditPath(deps: EditScopeDeps, input: DeclareEditPat
           : `task ${input.task} is not an open claim of ${input.workingCopy} (open here: ${held.join(", ")}).`,
     });
   }
-  if (anchorsOverlap([rel], [...own.anchors]).overlaps) return ok({ kind: "covered", task: input.task, path: rel });
+  // reason: a directory anchor does NOT count as covering here — it holds only the files its holder really touched, so
+  // the first edit of a file under it is recorded as an explicit file anchor (after the sibling overlap check below).
+  if (exactlyCovers(own.anchors, relFile, symbol)) return ok({ kind: "covered", task: input.task, path: rel });
 
-  const ignored = judgeIgnore(rel, deps.ignoreProbe(input.workingCopy, [rel]));
+  const ignored = judgeIgnore(relFile, deps.ignoreProbe(input.workingCopy, [relFile]));
   if (typeof ignored === "string") {
     return ok({ kind: "denied", reason: "ignore-status-not-measured", path: rel, message: `cannot tell whether ${rel} is git-ignored: ${ignored}` });
   }
@@ -281,7 +328,7 @@ export async function declareEditPath(deps: EditScopeDeps, input: DeclareEditPat
   const conflict: AnchorOverlapConflict | undefined = findAnchorOverlapConflict(
     holder.by,
     [rel],
-    context.value.siblingClaims,
+    narrowDirectoryHolds(deps, context.value.siblingClaims ?? [], input.workingCopy),
     holder.session_id,
     holder.harness_run ?? null,
   );
