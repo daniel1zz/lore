@@ -349,15 +349,17 @@ describe("AC-DC-9: one terminal-resolution definition site, consumed by the list
     expect(source).toMatch(/import[\s\S]{0,400}TERMINAL_ISSUE_RESOLUTION_MEMBERS[\s\S]{0,400}from "@lore\/core"/);
   });
 
-  it("AC-DC-9: commands/issues.ts imports the shared export and declares no local terminal set", async () => {
+  it("AC-DC-9: commands/issues.ts declares no local terminal set (it filters by displayed status now)", async () => {
     assertRepoRoot();
     const source = readFileSync(join(REPO_ROOT, ISSUES_COMMAND_REL), "utf8");
 
-    expect(source).toContain("TERMINAL_ISSUE_RESOLUTIONS");
-    expect(source).toMatch(/from "\.\.\/\.\.\/\.\.\/service\/issue-resolution\.js"/);
-    // The pre-M1 private copy, by its own name and by its construction shape.
+    // ⛔ AMENDED (spec-github-owns-issue-report-state-no-mirror-task-work-carries D4/D5): the listing no longer filters on
+    // the computed resolution, so it no longer imports `TERMINAL_ISSUE_RESOLUTIONS`; it filters on the DISPLAYED status
+    // (`IssueStatus`, derived from the same @lore/core vocabulary). The invariant that stays: the file must not carry a
+    // private copy of the terminal member set, by its pre-M1 name or by its construction shape.
     expect(source).not.toMatch(/TERMINAL_RESOLUTIONS\s*:/);
     expect(source).not.toMatch(/new Set<IssueResolution>/);
+    expect(source).toMatch(/new Set<IssueStatus>/);
   });
 
   // ⛔ RETIRED IN-FLIGHT (spec-the-defect-channel-reaches-no-machine-but-its-

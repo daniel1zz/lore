@@ -10,13 +10,14 @@
  * Public surface: IssueReportsCard, IssueReportsCardProps
  * Invariants:
  *   - Reads the SAME shared query (`useIssueReportsQuery`) as the nav badge
- *     and the Issues list page — one cache entry, one invalidation point.
- *     `open_count` is the server's D8-computed count (resolution `"open"`
- *     rows only, spec-issue-closure-loop-computed-resolution-agent-reachable
- *     §D8) — this component makes NO independent count/filter decision of
- *     its own, so it inherited the D8 fix with zero code changes here.
- *   - Zero open reports renders an EXPLICIT empty state ("No open issue
- *     reports"), never a blank region (AC-074-4).
+ *     and the Issues list page — one cache entry. `open_count` is the
+ *     server's count of rows whose DERIVED status is `open` (the live join,
+ *     spec-github-owns-issue-report-state-no-mirror-task-work-carries T9);
+ *     the titles shown are the rows with that same status.
+ *   - A refused GitHub listing renders an error line (401 names `gh auth
+ *     login`), never the empty state.
+ *   - Zero open issues renders an EXPLICIT empty state ("No open issues"),
+ *     never a blank region (AC-074-4).
  *   - Shows at most ISSUE_CARD_LIMIT titles even when open_count is larger.
  * Side-effect class: IO (fetch via TanStack Query)
  * Source: SPEC-074 §Scope, AC-074-4; spec-issue-closure-loop-computed-resolution-agent-reachable §D8
@@ -25,6 +26,7 @@
 import { useIssueReportsQuery } from "@/lib/issue-reports-query";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
+import { ApiError } from "@/lib/api";
 
 const ISSUE_CARD_LIMIT = 3;
 
@@ -58,21 +60,25 @@ export function IssueReportsCard({ onNavigate }: IssueReportsCardProps): React.R
       )}
 
       {error !== null && !isLoading && (
-        <p className="text-sm text-destructive">Failed to load issue reports.</p>
+        <p className="text-sm text-destructive">
+          {error instanceof ApiError && error.status === 401
+            ? "GitHub is not authenticated. Run gh auth login."
+            : "Failed to load issues from GitHub."}
+        </p>
       )}
 
-      {data !== undefined && data.open_count === 0 && (
-        <p className="text-sm text-muted-foreground">No open issue reports.</p>
+      {error === null && data !== undefined && data.open_count === 0 && (
+        <p className="text-sm text-muted-foreground">No open issues.</p>
       )}
 
-      {data !== undefined && data.open_count > 0 && (
+      {error === null && data !== undefined && data.open_count > 0 && (
         <div className="space-y-2">
           <Badge variant="outline" className="text-xs" aria-label={`${data.open_count} open issue reports`}>
             {data.open_count} open
           </Badge>
           <ul className="space-y-1.5">
-            {data.rows.slice(0, ISSUE_CARD_LIMIT).map((row) => (
-              <li key={row.id} className="text-sm">
+            {data.rows.filter((row) => row.status === "open").slice(0, ISSUE_CARD_LIMIT).map((row) => (
+              <li key={row.number} className="text-sm">
                 <button
                   type="button"
                   className="text-left text-primary hover:underline truncate block w-full"

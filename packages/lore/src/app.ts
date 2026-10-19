@@ -18,7 +18,7 @@
 
 import { warnSinkOf, type WarnSink } from "./service/warn-sink.js";
 import { Database } from "bun:sqlite";
-import { dirname } from "node:path";
+import { dirname, join } from "node:path";
 import { SQLiteStore } from "./store/sqlite-store.js";
 import { assertNoForeignSchemaMigration } from "./store/foreign-schema-guard.js";
 import { TursoStore, probeTmpdirUsability } from "./store/turso-store.js";
@@ -141,7 +141,8 @@ import { GhResolutionLabelPort } from "./service/resolution-label-port.js";
 import { GhRunner, createNodeGhExecFile } from "./service/gh-runner.js";
 import { GhIssueCloser } from "./service/issue-closer-port.js";
 import { IssueCloseOnArchive } from "./service/issue-close-on-archive.js";
-import { isGithubUpstreamCfg, resolveFeedbackUpstreamCfg } from "./adapters/cli/report-issue-wiring.js";
+import { classifyFeedbackUpstream, isGithubUpstreamCfg, resolveFeedbackUpstreamCfg } from "./adapters/cli/report-issue-wiring.js";
+import { GitHubIntakePort } from "./service/github-intake-port.js";
 
 export interface App {
   /**
@@ -564,6 +565,14 @@ export interface App {
    * configured" instead of acting). Optional for hand-built App test stubs.
    */
   issueClose?: IssueCloseOnArchive;
+  /**
+   * The live GitHub issue listing the dashboard's `GET /api/issue-reports` reads through
+   * (spec-github-owns-issue-report-state-no-mirror-task-work-carries T9). Present only when
+   * `feedback.upstream` classifies as GitHub (a repo, or the vendor-consent shape); a retired-shape
+   * upstream is carried as its own `err` so the route can say so. Absent when nothing is configured
+   * and on hand-built App test stubs (the route then answers a loud 422, never an empty list).
+   */
+  issueIntake?: Result<Pick<GitHubIntakePort, "verifyTarget" | "listIssues">, LoreError>;
   /**
    * TraceStatsService — read-only aggregation surface for `lore trace stats`
    * (SPEC-102). Store-only, no telemetry, same DI shape as `AuditService`
@@ -1610,6 +1619,17 @@ function wireIssueCloseOnArchive(app: App, store: StoreInterface, config: LoreCo
   app.corpusService.setArchiveIssueClosePort(step);
   app.taskWorkflowService.setArchiveIssueClosePort(step);
   app.issueClose = step;
+  const intake = buildIssueIntake(config, ambient, app.repoRoot ?? ambient.cwd);
+  if (intake !== undefined) app.issueIntake = intake;
+}
+
+/** The read port behind `GET /api/issue-reports`, or `undefined` when no `feedback.upstream` is configured. */
+function buildIssueIntake(config: LoreConfig | undefined, ambient: AppAmbient, corpusRoot: string): App["issueIntake"] {
+  const classification = classifyFeedbackUpstream(config);
+  if (classification.kind === "unconfigured") return undefined;
+  if (classification.kind === "retired") return err(classification.error);
+  const runner = new GhRunner({ execFile: createNodeGhExecFile(ambient.cwd), env: ambient.env });
+  return ok(new GitHubIntakePort({ runner, repo: classification.cfg.repo, receiptsPath: join(corpusRoot, ".lore", "issue-receipts-v2.jsonl") }));
 }
 
 export function createApp(dbPath: string, config: undefined, ambient: AppAmbient, writeContext?: AppWriteContext): App;

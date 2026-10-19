@@ -53,9 +53,10 @@
  *   D6, G3, G5, AC-GR-2, AC-GR-5.
  */
 
-import type { DocRecord, IssueResolution } from "@lore/core";
+import { isInvalidated, type DocRecord, type IssueResolution, type IssueStatus } from "@lore/core";
 
 import type { GithubListedIssue } from "./github-intake-port.js";
+import { deriveIssueStatus, type CarrierFact } from "./issue-resolution.js";
 import { readGithubIssueRef } from "./resolution-projector.js";
 
 /**
@@ -128,5 +129,81 @@ export function joinListing(
       return { kind: "not_ingested", issue };
     }
     return { kind: "ingested", issue, task, resolution: resolveOne(task) };
+  });
+}
+
+// ─── The single live join (carrier model) ───────────────────────────────────
+//
+// GitHub owns every issue fact; the corpus owns only the work that resolves an issue.
+// `joinIssueStatuses` is the ONE join every read surface (`lore issues`, status check,
+// dashboard, MCP, HTTP) uses: a live listing x the carriers (tasks and plans whose
+// `extra.issues` names a listed issue) -> one displayed status per listed issue.
+// `joinListing` above is the legacy mirror-task join, kept only until its last
+// consumers (report-issue-wiring.ts, commands/issues.ts) migrate to this one.
+// Source: spec-github-owns-issue-report-state-no-mirror-task-work-carries D4/D5, AC-GS-3.
+
+/** One listed issue with its derived status and the carriers that produced it. */
+export interface IssueStatusRow {
+  readonly issue: GithubListedIssue;
+  readonly status: IssueStatus;
+  /** Slugs of every carrier naming this issue (live, archived and dead alike), sorted. */
+  readonly carrierSlugs: readonly string[];
+}
+
+/**
+ * Does the carrier's `extra.issues` name `(repoId, number)`? Reads `extra`
+ * defensively: a malformed entry names nothing rather than throwing.
+ */
+function namesIssue(doc: DocRecord, repoId: number, issueNumber: number): boolean {
+  const refs = (doc.extra as Record<string, unknown> | null | undefined)?.["issues"];
+  if (!Array.isArray(refs)) return false;
+  return refs.some(
+    (ref) =>
+      typeof ref === "object" &&
+      ref !== null &&
+      (ref as Record<string, unknown>)["repo_id"] === repoId &&
+      (ref as Record<string, unknown>)["number"] === issueNumber,
+  );
+}
+
+/** What a carrier doc contributes to status derivation at the read instant `nowIso`. */
+function carrierFactOf(doc: DocRecord, nowIso: string): CarrierFact {
+  const type = doc.type === "plan" ? "plan" : "task";
+  const claim = (doc.extra as Record<string, unknown> | null | undefined)?.["claim"];
+  return {
+    type,
+    status: doc.status,
+    invalidated: isInvalidated(doc, nowIso),
+    hasOpenClaim: type === "task" && typeof claim === "object" && claim !== null,
+  };
+}
+
+/**
+ * Joins a complete live listing against the carrier docs: exactly one row per listed
+ * issue, in listing order. The join key is `(repo_id, number)`, never a repo name.
+ * A carrier naming a number absent from the listing produces no row (it is an
+ * `unknown_ref` for the status check, not a listing entry).
+ *
+ * @param issues - the complete live listing (`GitHubIntakePort.listIssues`)
+ * @param carriers - every task and plan with `extra.issues`, archived ones included
+ * @param repoId - the configured repository's numeric id (the join key's first half)
+ * @param nowIso - the read instant, injected so validity is deterministic
+ * @example
+ *   joinIssueStatuses([{number: 7, title: "t", state: "open", body: ""}], [], 1, "2026-01-01T00:00:00.000Z")
+ *   // => [{issue: {number: 7, ...}, status: "open", carrierSlugs: []}]
+ */
+export function joinIssueStatuses(
+  issues: readonly GithubListedIssue[],
+  carriers: readonly DocRecord[],
+  repoId: number,
+  nowIso: string,
+): readonly IssueStatusRow[] {
+  return issues.map((issue): IssueStatusRow => {
+    const naming = carriers.filter((doc) => namesIssue(doc, repoId, issue.number));
+    return {
+      issue,
+      status: deriveIssueStatus(issue, naming.map((doc) => carrierFactOf(doc, nowIso))),
+      carrierSlugs: naming.map((doc) => doc.slug).sort(),
+    };
   });
 }

@@ -26,7 +26,7 @@
  */
 
 import { useQuery } from "@tanstack/react-query";
-import { apiGetIssueReports } from "./api";
+import { ApiError, apiGetIssueReports } from "./api";
 import { queryKeys, useProjectParam } from "./project-api";
 
 /** Query key builder — pass to `queryClient.invalidateQueries` after approve/reject. */
@@ -34,7 +34,19 @@ export function issueReportsQueryKey(project: string | null): readonly unknown[]
   return queryKeys.scope(project, ["issue-reports"]);
 }
 
-const ISSUE_REPORTS_POLL_MS = 15_000;
+// reason: every poll lists GitHub live (gh calls against the API rate limit), so the floor is a
+// minute, not the 15s the corpus-only projection used. Source: spec-github-owns-issue-report-state
+// -no-mirror-task-work-carries T9.
+const ISSUE_REPORTS_POLL_MS = 60_000;
+
+/**
+ * A GitHub auth / config / rate-limit / unreachable refusal will not heal by retrying within seconds,
+ * and the next poll tries again anyway.
+ */
+function shouldRetryIssueReports(failureCount: number, error: unknown): boolean {
+  if (error instanceof ApiError && [401, 422, 429, 503].includes(error.status)) return false;
+  return failureCount < 2;
+}
 
 /**
  * @example
@@ -47,5 +59,6 @@ export function useIssueReportsQuery() {
     queryKey: issueReportsQueryKey(project),
     queryFn: () => apiGetIssueReports(project),
     refetchInterval: ISSUE_REPORTS_POLL_MS,
+    retry: shouldRetryIssueReports,
   });
 }

@@ -4238,15 +4238,10 @@ export class TaskWorkflowService {
 
     // spec-archiving-the-work-that-resolves-a-defect-report-closes D1/D4 — post-commit, never fatal: the
     // walk above is already committed, the step returns lines rather than an error.
-    // spec-completing-an-adopted-report-s-own-task-closes-its-github D1 — `lore done` is the ONLY caller of
-    // `onTaskCompleted`: completing a report's own task is what closes its issue; other archive paths do not.
+    // spec-github-owns-issue-report-state-no-mirror-task-work-carries AC-GS-8 — a task carrier's
+    // `extra.issues` are closed here; the step reads the carrier, so a task with none is a no-op.
     const issueClose =
-      this.archiveIssueClosePort === undefined
-        ? undefined
-        : [
-            ...(await this.archiveIssueClosePort.onArchived(task, opts.by)),
-            ...(await this.archiveIssueClosePort.onTaskCompleted(task, opts.by)),
-          ];
+      this.archiveIssueClosePort === undefined ? undefined : await this.archiveIssueClosePort.onArchived(task, opts.by);
 
     return ok({
       task,

@@ -614,29 +614,14 @@ const SCENARIOS: readonly Scenario[] = [
     kind: "audit-only",
     auditAction: ISSUE_CLOSE_FAILED_AUDIT_ACTION,
     seed: async (w) => {
-      const report = await seedRaw(
+      // the carrier: an archived plan naming GitHub #7 in extra.issues (no report document, no link)
+      const plan = await seedRaw(
         w.raw,
-        makeDoc("task", slugFor("report"), {
-          extra: {
-            adhoc: true,
-            issue_report: {
-              reporter_project: "consumer",
-              reporter_actor: "agent:x",
-              lore_version: "0.0.0",
-              expected: "exit 0",
-              actual: "exit 4",
-              reported_at: "2026-01-01T00:00:00.000Z",
-              github: { repo: "acme/widget", number: 7, repo_id: 123 },
-            },
-          },
-        }),
+        makeDoc("plan", slugFor("plan-archived"), { status: "archived", extra: { issues: [{ repo_id: 123, number: 7 }] } }),
       );
-      const plan = await seedRaw(w.raw, makeDoc("plan", slugFor("plan-archived"), { status: "archived" }));
-      const linked = await w.raw.addLink({ from_id: plan.id, to_id: report.id, link_type: "resolves", created_at: plan.created_at, created_by: AUTHOR });
-      if (!linked.ok) throw new Error("seed link failed");
       // reason: a closer whose close call FAILS is the only way the step writes a row (the failure audit), with no network.
       const closer: IssueCloser = {
-        readIssue: async () => ok({ state: "open", labels: [] }),
+        readIssue: async () => ok({ state: "open", stateReason: null, labels: [] }),
         closeIssue: async () => err({ code: "VALIDATION_ERROR", field: "gh", message: "HTTP 502 bad gateway", value: "502" }),
         commentIssue: async () => ok(undefined),
         labelIssue: async () => ok(undefined),

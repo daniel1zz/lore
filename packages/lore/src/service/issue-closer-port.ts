@@ -4,13 +4,14 @@
  * plus its one `GhRunner`-backed implementation `GhIssueCloser`.
  *
  * Public surface:
- *   - `IssueCloser` — four independent calls, each returning its own typed `Result`, so a comment or
+ *   - `IssueCloser` — five independent calls, each returning its own typed `Result`, so a comment or
  *     label failure can never be confused with (or undo) the close:
  *       `readIssue`    — current `state` + label names (the drift read `lore issues --sync` and the
  *                         already-closed check both use)
  *       `closeIssue`   — close as `completed`; an already-closed issue is `ok({alreadyClosed: true})`
  *       `commentIssue` — post one comment
  *       `labelIssue`   — converge the `resolution:*` label (delegates to `GhResolutionLabelPort`)
+ *       `removeLabels` — delete named labels (`lore issues --sync` strips stray `resolution:*` from open issues)
  *   - `GhIssueCloser` — `new GhIssueCloser(runner)`.
  *
  * Invariants:
@@ -38,6 +39,12 @@ import type { GithubIssueRef } from "./resolution-projector.js";
 export interface GithubIssueSnapshot {
   readonly state: "open" | "closed";
   readonly labels: readonly string[];
+  /**
+   * GitHub's `state_reason` (`completed`, `not_planned`, `duplicate`, ...); `null` when GitHub gives none.
+   * Optional only so a test fake that predates the field still compiles; {@link GhIssueCloser} always sets it.
+   * Archive-time close reads it to tell a closed-with-verdict issue from a plainly completed one.
+   */
+  readonly stateReason?: string | null;
 }
 
 /**
@@ -53,11 +60,19 @@ export interface IssueCloser {
   commentIssue(ref: GithubIssueRef, body: string): Promise<Result<void, LoreError>>;
   /** Converges the issue to exactly the one `resolution:*` label `label`. */
   labelIssue(ref: GithubIssueRef, label: string): Promise<Result<void, LoreError>>;
+  /**
+   * Removes each named label from the issue (one DELETE per name, no read first: the caller already holds
+   * the labels from the live listing). Stops at the first failing call and returns it.
+   * Optional only so a closer fake that predates `--sync` still compiles ({@link GhIssueCloser} always has it);
+   * `IssueCloseOnArchive.applySync` fails LOUD when a strip is planned and the closer lacks it.
+   */
+  removeLabels?(ref: GithubIssueRef, names: readonly string[]): Promise<Result<void, LoreError>>;
 }
 
 const GithubIssueResponseSchema = z
   .object({
     state: z.enum(["open", "closed"]),
+    state_reason: z.string().nullable().optional(),
     labels: z.array(z.object({ name: z.string() }).passthrough()),
   })
   .passthrough();
@@ -95,7 +110,11 @@ export class GhIssueCloser implements IssueCloser {
         value: response.value.stdout,
       });
     }
-    return ok({ state: parsed.data.state, labels: parsed.data.labels.map((label) => label.name) });
+    return ok({
+      state: parsed.data.state,
+      stateReason: parsed.data.state_reason ?? null,
+      labels: parsed.data.labels.map((label) => label.name),
+    });
   }
 
   async closeIssue(ref: GithubIssueRef): Promise<Result<{ readonly alreadyClosed: boolean }, LoreError>> {
@@ -124,5 +143,14 @@ export class GhIssueCloser implements IssueCloser {
 
   labelIssue(ref: GithubIssueRef, label: string): Promise<Result<void, LoreError>> {
     return this.labelPort.setLabel(ref, label);
+  }
+
+  async removeLabels(ref: GithubIssueRef, names: readonly string[]): Promise<Result<void, LoreError>> {
+    for (const name of names) {
+      // reason: encodeURIComponent — a resolution label carries a literal `:` that must not reach the request path raw.
+      const removed = await this.runner.run(["api", `${issuePath(ref)}/labels/${encodeURIComponent(name)}`, "-X", "DELETE"]);
+      if (!removed.ok) return err(removed.error);
+    }
+    return ok(undefined);
   }
 }
