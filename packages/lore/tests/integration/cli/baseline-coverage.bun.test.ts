@@ -161,7 +161,7 @@ describe("lore baseline coverage (e2e)", () => {
 });
 
 describe("lore baseline map (refusals)", () => {
-  it("--site without --rule is refused", () => {
+  it("--site with neither --rule nor --non-business is refused", () => {
     const r = runLore(["baseline", "map", leaf, "--site", sites[0]!.key], repo);
     expect(r.exitCode).not.toBe(0);
   });
