@@ -1,4 +1,5 @@
 // @spawns assets/hooks/pre-bash-git-safety-gate.mjs
+// @layer integration-shell-cwd-sites AC-DCL-4 (the three call sites + the scan; owner is the table-driven parser test packages/core/tests/shell-cwd.test.ts)
 // @reads packages/core/src/oracle-file-existence.ts
 // @reads packages/core/src/attestation-completeness.ts
 // @reads packages/core/src/shell-cwd.ts
