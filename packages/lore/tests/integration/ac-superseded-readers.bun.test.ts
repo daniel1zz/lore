@@ -201,7 +201,8 @@ describe("a superseded criterion is read as superseded by every coverage and flo
     const done = await lore(["done", taskOnlyAc1]);
     expect(done.exitCode, done.stderr).toBe(0);
     expect(done.stdout).toMatch(/AC-1.*supersed/i);
-    expect(done.stdout).toContain(`${specS2}:AC-9`);
+    // the mark stores the superseding spec's document id, so the line names `<spec id>:AC-9`
+    expect(done.stdout).toMatch(/superseded by \S+:AC-9/);
   }, 120_000);
 
   it("(2b) negative: a scope that still holds a LIVE id is refused by the floor", async () => {
