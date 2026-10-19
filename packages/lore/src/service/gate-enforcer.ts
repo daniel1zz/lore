@@ -124,6 +124,7 @@ import { resolveActorWithSource } from "@lore/core/node";
 import {
   checkpointRegistry,
   describeAssessmentFreshnessNotApplicable,
+  describeCitedRuleUnknowns,
   describeCheckpointVacuity,
   isCheckpointBlocked,
   planPromoteReachabilityAdvisory,
@@ -652,6 +653,8 @@ export class GateEnforcer {
     // that assessment freshness was never checked. Never blocks (same channel, same contract).
     const freshnessLine = describeAssessmentFreshnessNotApplicable(checkpoint, ctx);
     if (freshnessLine !== null) this.warnSink(freshnessLine);
+    // reason: BR-984 - a cited rule whose state was unknown (reportable reason) closes with a line, never silently.
+    for (const unknownLine of describeCitedRuleUnknowns(checkpoint, ctx)) this.warnSink(unknownLine);
     if (!isCheckpointBlocked(results)) {
       // reason: AC-FR-8/D7 (task-derive-lore-feed-s-checkpoint-set-from-the-
       // registry-make) — the ONE thing that, before this task, left NO trace

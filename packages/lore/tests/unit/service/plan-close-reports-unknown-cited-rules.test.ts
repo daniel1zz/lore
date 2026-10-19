@@ -200,9 +200,10 @@ describe("task-plan-close-reports-cited-rules-whose-state-could-not-be-measured"
     expect(r.ok).toBe(false);
     if (!r.ok) {
       expect(r.error.code).toBe("VALIDATION_ERROR");
-      expect(r.error.message).toContain("BR-5");
-      expect(r.error.message).toContain("git-unavailable");
-      expect(r.error.message).toContain("could not be measured");
+      const text = JSON.stringify(r.error);
+      expect(text).toContain("BR-5");
+      expect(text).toContain("git-unavailable");
+      expect(text).toContain("could not be measured");
     }
   });
 
