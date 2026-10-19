@@ -411,6 +411,8 @@ const DECLARED_FILES_IN_SCOPE = [
   "hooks/pre-tool-harness-run.mjs",
   // pre-helper-foreign-working-copy-gate (isolated helper writing into a foreign git working copy, BR-1092; in HOOK_REGISTRATIONS on PreToolUse Write|Edit|MultiEdit|NotebookEdit)
   "hooks/pre-helper-foreign-working-copy-gate.mjs",
+  // post-edit-bindings (edit-time notice of prose bound to the edited file; in HOOK_REGISTRATIONS on PostToolUse Edit|Write|MultiEdit|NotebookEdit)
+  "hooks/post-edit-bindings.mjs",
   // shared cwd-aware shell parser, generated from packages/core/src/shell-cwd.ts (DCL-4)
   "hooks/lib/shell-cwd.mjs",
   "hooks/lib/turn-state.mjs",
