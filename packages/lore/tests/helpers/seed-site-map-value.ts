@@ -13,11 +13,11 @@ import { join } from "node:path";
 import type { MiniCorpus } from "./coverage-mini-corpus";
 
 /**
- * Set `value` as the only `site_map` entry of `site` on `leaf` (slug), in the throwaway corpus of `c`.
+ * Set `value` (one string, or the whole value list of a mixed entry) as the `site_map` entry of `site` on `leaf` (slug), in the throwaway corpus of `c`.
  *
  * @throws Error when the subprocess fails (a missing leaf slug included).
  */
-export function seedSiteMapValue(c: MiniCorpus, leaf: string, site: string, value: string): void {
+export function seedSiteMapValue(c: MiniCorpus, leaf: string, site: string, value: string | readonly string[]): void {
   const code = `
     import { Database } from "bun:sqlite";
     const [dbPath, slug, site, value] = process.argv.slice(1);
@@ -25,10 +25,10 @@ export function seedSiteMapValue(c: MiniCorpus, leaf: string, site: string, valu
     const row = db.query("SELECT extra FROM docs WHERE slug = ?").get(slug);
     if (!row) throw new Error("no doc " + slug);
     const extra = JSON.parse(row.extra);
-    extra.site_map = { ...(extra.site_map ?? {}), [site]: [value] };
+    extra.site_map = { ...(extra.site_map ?? {}), [site]: JSON.parse(value) };
     db.query("UPDATE docs SET extra = ? WHERE slug = ?").run(JSON.stringify(extra), slug);
     db.close();
   `;
-  const r = spawnSync("bun", ["-e", code, join(c.dir, ".lore", "lore.db"), leaf, site, value], { encoding: "utf8" });
+  const r = spawnSync("bun", ["-e", code, join(c.dir, ".lore", "lore.db"), leaf, site, JSON.stringify(Array.isArray(value) ? value : [value])], { encoding: "utf8" });
   if (r.status !== 0) throw new Error(`seeding failed: ${r.stderr}${r.stdout}`);
 }

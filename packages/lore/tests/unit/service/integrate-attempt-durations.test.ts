@@ -1,3 +1,4 @@
+// @reads assets/project/reference-transaction
 /**
  * Per-attempt phase durations of `lore integrate` (task-integrate-records-per-attempt-phase-durations-so-the-floor).
  *
@@ -15,12 +16,13 @@ import { ok } from "@lore/core";
 import { IntegrateService, type IntegrateDeps } from "../../../src/service/integrate-service.js";
 import { IntegrateLossLedger } from "../../../src/service/integrate-loss-ledger.js";
 import { IntegrateAttemptLedger, medianMs } from "../../../src/service/integrate-attempt-ledger.js";
+import { installShippedGuard } from "../../integration/support/main-guard-repo.js";
 import { collectIntegrateLosses, renderIntegrateLossLines } from "../../../src/adapters/cli/status-integrate-losses.js";
 
 const IDENTITY = { GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t" };
 
-const sh = (cwd: string, args: string[]): string => {
-  const r = spawnSync("git", args, { cwd, encoding: "utf8", env: { ...process.env, ...IDENTITY } });
+const sh = (cwd: string, args: string[], extraEnv: NodeJS.ProcessEnv = {}): string => {
+  const r = spawnSync("git", args, { cwd, encoding: "utf8", env: { ...process.env, ...IDENTITY, ...extraEnv } });
   if (r.status !== 0) throw new Error(`git ${args.join(" ")}: ${r.stderr}`);
   return r.stdout.trim();
 };
@@ -42,7 +44,9 @@ beforeAll(() => {
   writeFileSync(join(repo, "b.txt"), "b\n");
   sh(repo, ["add", "."]);
   sh(repo, ["commit", "-q", "-m", "feature work"]);
-  sh(repo, ["checkout", "-q", "main"]);
+  // the shared checkout is a detached view of main and the shipped guard is installed: integrate refuses to run without it
+  sh(repo, ["checkout", "-q", "--detach", "main"]);
+  installShippedGuard(repo, join(root, "guard-hooks")); // outside the work tree: this test runs `git add .`
   mkdirSync(corpusDir);
 });
 
@@ -62,7 +66,8 @@ describe("integrate records per-attempt phase durations", () => {
           // another integration lands first: main moves under this attempt, so the real CAS below is refused by git
           const tree = sh(repo, ["rev-parse", "main^{tree}"]);
           const moved = sh(repo, ["commit-tree", tree, "-p", "main", "-m", "someone else landed"]);
-          sh(repo, ["update-ref", "refs/heads/main", moved]);
+          // the peer's integration carries the marker, exactly as `lore integrate`'s own CAS does
+          sh(repo, ["update-ref", "refs/heads/main", moved], { LORE_INTEGRATE: "1" });
         }
       }
       const r = spawnSync("git", [...args], { cwd, encoding: "utf8", env: { ...process.env, ...IDENTITY, ...env } });
@@ -119,7 +124,7 @@ describe("integrate records per-attempt phase durations", () => {
     writeFileSync(join(repo, "c.txt"), "c\n");
     sh(repo, ["add", "."]);
     sh(repo, ["commit", "-q", "-m", "feature2 work"]);
-    sh(repo, ["checkout", "-q", "main"]);
+    sh(repo, ["checkout", "-q", "--detach", "main"]);
     let now = 5_000;
     const git: IntegrateDeps["git"] = (cwd, args, env) => {
       const r = spawnSync("git", [...args], { cwd, encoding: "utf8", env: { ...process.env, ...IDENTITY, ...env } });
@@ -138,7 +143,7 @@ describe("integrate records per-attempt phase durations", () => {
       log: () => {},
     });
     const result = await service.integrate({ branch: "feature2", sessionId: "s1", floorCommand: "false" });
-    expect(result).toMatchObject({ ok: true, value: { kind: "floor_failed", exit_status: 7 } });
+    expect(result, JSON.stringify(result)).toMatchObject({ ok: true, value: { kind: "floor_failed", exit_status: 7 } });
     const read = new IntegrateAttemptLedger(corpusDir).read("feature2");
     expect(read.ok && read.value?.attempts.map(({ base: _b, started_at: _s, ...rest }) => rest)).toEqual([
       {

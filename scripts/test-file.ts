@@ -13,12 +13,13 @@
  * Output: the dot reporter keeps each runner's output short, so BOTH runner summaries
  * ("Test Files N passed (N)") stay inside the 4000-char evidence tail that
  * `lore verify` sums for its completeness check (a verbose per-test list pushed the first summary out: 1 of 3).
- * Side-effect class: IO (spawns vitest, writes a JSON report under node_modules/.cache).
+ * Side-effect class: IO (spawns vitest, writes a JSON report under a per-invocation temp dir, removed after judging).
  *
  * Exit codes: 0 every path collected tests and every runner passed; 1 a runner failed or a path
  * collected nothing; 2 usage error (no test path given).
  */
-import { mkdirSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
@@ -116,20 +117,23 @@ export function main(
     console.error("test:file: FAIL — no test file path given (usage: bun run test:file <path.test.ts...> [-t <name>])");
     return 2;
   }
-  const cacheDir = join(root, "node_modules", ".cache", "test-file");
-  mkdirSync(cacheDir, { recursive: true });
-  const reportFile = (r: Runner): string => join(cacheDir, `${r}.json`);
+  // Per-invocation directory: concurrent sessions share one node_modules, so a fixed report path let one run judge another's report.
+  const reportDir = mkdtempSync(join(tmpdir(), "lore-test-file-"));
+  const reportFile = (r: Runner): string => join(reportDir, `${r}.json`);
   let code = 0;
-  for (const g of planGroups(paths, passthrough, nodeFiles, reportFile)) {
-    rmSync(reportFile(g.runner), { force: true });
-    const res = run(g, reportFile(g.runner));
-    const empty = judgeCollected(g.files, res.report, root);
-    console.log(`test:file: ${g.runner} runner exit ${res.exit}; ${g.files.length - empty.length}/${g.files.length} path(s) collected tests`);
-    if (res.exit !== 0) code = 1;
-    for (const f of empty) {
-      console.log(`test:file: FAIL — ${f} collected no tests under the ${g.runner} runner (no such file, filtered to nothing, or wrong runner)`);
-      code = 1;
+  try {
+    for (const g of planGroups(paths, passthrough, nodeFiles, reportFile)) {
+      const res = run(g, reportFile(g.runner));
+      const empty = judgeCollected(g.files, res.report, root);
+      console.log(`test:file: ${g.runner} runner exit ${res.exit}; ${g.files.length - empty.length}/${g.files.length} path(s) collected tests`);
+      if (res.exit !== 0) code = 1;
+      for (const f of empty) {
+        console.log(`test:file: FAIL — ${f} collected no tests under the ${g.runner} runner (no such file, filtered to nothing, or wrong runner)`);
+        code = 1;
+      }
     }
+  } finally {
+    rmSync(reportDir, { recursive: true, force: true });
   }
   return code;
 }

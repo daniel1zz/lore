@@ -154,9 +154,9 @@ Output:
 
 lore evidence task-jwt-middleware --oracle test \
   --command "bunx vitest run src/middleware/jwt.test.ts" --result pass \
-  --ac AC-AUTH-2
+  --capture --ac AC-AUTH-2
 lore evidence task-jwt-middleware --oracle tsc \
-  --command "bunx tsc --noEmit" --result pass
+  --command "bunx tsc --noEmit" --result pass --capture
 
 **[ESTIMATE_ACTUAL]** task-jwt-middleware: estimated M actual M
 
@@ -309,7 +309,7 @@ Blocked: 0 | Active risks: 2 (1H mitigated, 1M active)
 
 [TASK task-jwt-middleware] — dispatched (⭐ critical path)
   implementer: lore claim → implement → oracles →
-  lore evidence --oracle test --result pass --ac AC-AUTH-2 → lore release
+  lore evidence --oracle test --result pass --capture --ac AC-AUTH-2 → lore release
   orchestrator: merge → lore set --status approved → --status archived
 [TASK task-jwt-middleware] ✅ archived
 

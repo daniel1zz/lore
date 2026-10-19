@@ -1,4 +1,5 @@
 // @spawns packages/lore/src/index.ts
+// @reads assets/project/reference-transaction
 // @layer integration-cli-capture-and-init AC-CT-3 (real CLI in a throwaway repo; owner is the in-process stamp-currency-floor unit test)
 /**
  * AC-CT-3b (SPEC-143) — `lore evidence --capture` stamps state exactly like `lore verify`, and a
@@ -24,6 +25,7 @@ import { join } from "node:path";
 import { STATE_BINDING_ARMED_ACTION } from "@lore/core";
 import { SQLiteStore } from "../../../src/store/sqlite-store.js";
 import { actedStore } from "../../live-invocation.js";
+import { installShippedGuard } from "../support/main-guard-repo.js";
 
 vi.setConfig({ testTimeout: 300_000, hookTimeout: 300_000 });
 
@@ -223,6 +225,8 @@ describe("lore evidence --capture stamps like verify (AC-CT-3b)", () => {
     // landing `lore done` requires; main does not move, so the stamp below still names HEAD
     git(d, ["branch", "ct3b-ok", "main"]);
     const task = makeClaimedTask(d, "ct3b-ok");
+    git(d, ["checkout", "-q", "--detach", "main"]); // the shared checkout is a detached view of main
+    installShippedGuard(d, join(d, ".git", "guard-hooks")); // integrate refuses to run without the guard (BR-1273)
     mustLore(["integrate", "ct3b-ok", "--session", "ct3b-session"], d);
     mustLore(["evidence", task, "--oracle", "build", "--command", "true", "--result", "pass", "--capture"], d);
     const row = (await evidenceRows(d, task))[0]!;

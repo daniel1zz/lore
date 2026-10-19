@@ -1,5 +1,6 @@
 // @spawns packages/lore/src/index.ts
 // @spawns scripts/check-baseline-coverage.ts
+// @reads assets/project/reference-transaction
 /**
  * AC-BCR-5 oracle: `lore integrate` refuses to advance main while a runnable command of the MERGED tree is declared by no leaf
  * (spec-baseline-coverage-refuses-only-undeclared-commands-a-site; BR-660, BR-1248).
@@ -20,6 +21,7 @@ import { dirname, join } from "node:path";
 import { execFileSync } from "node:child_process";
 import { buildMiniCorpus, MINI_CLI, type MiniCorpus } from "../helpers/coverage-mini-corpus";
 import { sessionEnvFor } from "../helpers/session-actor";
+import { installShippedGuard } from "./support/main-guard-repo.js";
 
 const REPO_ROOT = new URL("../../../../", import.meta.url).pathname.replace(/\/$/, "");
 const INDEX_TS = join(REPO_ROOT, "packages", "lore", "src", "index.ts");
@@ -70,6 +72,7 @@ beforeAll(async () => {
   await mini.mapAllSites(mini.leafA, "alpha");
   await mini.mapAllSites(mini.leafB, "beta");
   git(["checkout", "-q", "--detach", "main"]);
+  installShippedGuard(mini.dir, `${mini.dir}-guard-hooks`); // integrate requires the guard (BR-1273)
   const cfg = join(mini.dir, ".lore", "config.yaml");
   const base = readFileSync(cfg, "utf8").split("\nworkflow:")[0] ?? "";
   writeFileSync(cfg, `${base.trimEnd()}\nworkflow:\n  integrate:\n    floor_command: ${JSON.stringify(`bun run ${STEP_TS}`)}\n`);

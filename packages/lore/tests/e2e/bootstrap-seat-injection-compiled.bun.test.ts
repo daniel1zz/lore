@@ -1,3 +1,4 @@
+// @reads assets/project/reference-transaction
 /**
  * @spec_ref spec-session-start-injection-carries-only-the-session-s-own — AC-SI-2, AC-SI-4.
  *
@@ -18,6 +19,7 @@
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { FIXTURE_HOME_OUTSIDE_REPO, makeCleanTreeRepo } from "../helpers/clean-tree-repo";
+import { installShippedGuard } from "../integration/support/main-guard-repo.js";
 import { appendFileSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "fs";
 import { execFileSync } from "child_process";
 import { join } from "path";
@@ -197,6 +199,8 @@ describe("AC-SI-2: compiled dist/lore bootstrap --injection is seat-only", () =>
     git("checkout", "-q", "main");
     const slug = await claimTask(dir, seeded.plan, "feat-done");
     expect(claimSlugs(await injection(dir, "feat-done", scratch))).toEqual([slug]);
+    git("checkout", "-q", "--detach", "main"); // the shared checkout is a detached view of main
+    installShippedGuard(dir, join(dir, ".git", "guard-hooks")); // integrate refuses to run without the guard (BR-1273)
     await mustRun(["integrate", "feat-done", "--session", "seat-done-session"], dir);
     await mustRun(["evidence", slug, "--oracle", "test", "--command", "echo ok", "--result", "pass", "--capture"], dir, sessionFor(slug));
     await mustRun(["done", slug], dir, sessionFor(slug));

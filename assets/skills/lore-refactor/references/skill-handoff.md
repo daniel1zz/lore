@@ -161,5 +161,5 @@ task_tracking:
 
   on_completion:
     action: "Update refactoring task with verification evidence, then release the claim"
-    tool: "lore evidence <task> --oracle <tsc|test|lint|build|e2e|manual> --command \"<cmd>\" --result pass|fail; lore release <task>"
+    tool: "lore evidence <task> --oracle <tsc|test|lint|build|e2e|manual> --command \"<cmd>\" --result pass|fail --capture; lore release <task>"
 ```
