@@ -51,6 +51,7 @@ import type { ApiKeyStore } from "../../../src/adapters/http/auth.js";
 import type { CreateDocInput, DocRecord, AcCoverageFact } from "@lore/core";
 import type { RelatedKnowledgeRef } from "../../../src/flows/task-feed-flow.js";
 import { actedStore } from "../../live-invocation.js";
+import { inLoopAuditVerifyRunner } from "../../support/audit-verify-runner-stub.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 // packages/lore/tests/unit/adapters/ -> ../../../src/adapters/cli/commands/ac.ts
@@ -97,6 +98,7 @@ function makeApp(): App {
     specKindService: null as unknown as App["specKindService"],
     judgmentService: null as unknown as App["judgmentService"],
     auditService: null as unknown as App["auditService"],
+    auditVerifyRunner: inLoopAuditVerifyRunner(null as unknown as App["auditService"]),
     sessionService,
     callerSurface: "cli" as const,
     resolveAiDefault: (_explicit?: boolean) => ({ ai: false, source: "cli_flag" as const }),

@@ -50,6 +50,7 @@ import { MIGRATION_021_ADD_COLUMNS, MIGRATION_021_SQL } from "./migrations/migra
 import { MIGRATION_022_SQL } from "./migrations/migration-022.js";
 import { MIGRATION_023_SQL } from "./migrations/migration-023.js";
 import { MIGRATION_024_SQL } from "./migrations/migration-024.js";
+import { MIGRATION_025_SQL } from "./migrations/migration-025.js";
 import { DECISION_GENESIS_HASH, computeDecisionEntryHash } from "./decision-log.js";
 import type { DecisionLogRow, DecisionRecordInput } from "./decision-log.js";
 import type { DecisionSubjectKey } from "./store-interface.js";
@@ -111,6 +112,7 @@ import type {
   RunEndState,
   RunLifecycle,
   RunProcessRecord,
+  VersionKey,
 } from "./store-interface.js";
 import {
   allocateWithBoundedRetry,
@@ -128,6 +130,7 @@ import {
   rowToReviewJudgment,
   rowToSearchHit,
   rowToVersionRecord,
+  rowToVersionKey,
   toStoreError,
   wrapStoreError,
   type AuditChainRow,
@@ -788,6 +791,11 @@ export class TursoStore implements StoreInterface {
       if (currentVersion < 24) {
         // reason: migration-024 adds the nullable decision_log.detail column (plain ADD COLUMN; hashes stay valid).
         await this.client.executeMultiple(MIGRATION_024_SQL);
+      }
+
+      if (currentVersion < 25) {
+        // reason: migration-025 adds the covering index AuditService.verify's narrow key read (listVersionKeys) is answered from.
+        await this.client.executeMultiple(MIGRATION_025_SQL);
       }
     })();
 
@@ -2510,6 +2518,33 @@ export class TursoStore implements StoreInterface {
             })
           : await this.client.execute(`SELECT * FROM versions ORDER BY created_at ASC`);
       return ok(rs.rows.map((row) => rowToVersionRecord(libsqlRowToVersionRow(row))));
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
+  async listVersionKeys(since?: string): Promise<Result<VersionKey[], LoreError>> {
+    try {
+      await this.ensureReady();
+      // reason: the four selected columns are exactly the columns of idx_versions_keys (migration-025), so the
+      // index alone answers this and a versions row's content/extra pages are never read.
+      const rs =
+        since !== undefined
+          ? await this.client.execute({
+              sql: `SELECT doc_id, version, action, created_at FROM versions WHERE created_at >= ? ORDER BY created_at ASC`,
+              args: [since] as InValue[],
+            })
+          : await this.client.execute(`SELECT doc_id, version, action, created_at FROM versions ORDER BY created_at ASC`);
+      return ok(
+        rs.rows.map((row) =>
+          rowToVersionKey({
+            doc_id: String(row["doc_id"]),
+            version: Number(row["version"]),
+            action: String(row["action"]),
+            created_at: String(row["created_at"]),
+          }),
+        ),
+      );
     } catch (e) {
       return wrapStoreError(e);
     }

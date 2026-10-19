@@ -61,6 +61,7 @@ import type { App } from "../../../src/app.js";
 import type { ApiKeyStore } from "../../../src/adapters/http/auth.js";
 import { makeRuleService } from "../../helpers/make-rule-service.js";
 import { actedStore } from "../../live-invocation.js";
+import { inLoopAuditVerifyRunner } from "../../support/audit-verify-runner-stub.js";
 
 /** Pinned section heading — the implementation must emit exactly this line. */
 const HEADING = "## Governing rules";
@@ -102,6 +103,7 @@ function makeApp(): App {
     specKindService: null as unknown as App["specKindService"],
     judgmentService: null as unknown as App["judgmentService"],
     auditService: null as unknown as App["auditService"],
+    auditVerifyRunner: inLoopAuditVerifyRunner(null as unknown as App["auditService"]),
     sessionService,
     ruleService: rules,
     callerSurface: "cli" as const,

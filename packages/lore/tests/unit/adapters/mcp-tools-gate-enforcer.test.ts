@@ -39,6 +39,7 @@ import type { App } from "../../../src/app.js";
 import type { ApiKeyStore } from "../../../src/adapters/http/auth.js";
 import { registerTools } from "../../../src/adapters/mcp/tools.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
+import { inLoopAuditVerifyRunner } from "../../support/audit-verify-runner-stub.js";
 
 // ─── Test Infrastructure (mirrors mcp-tools.test.ts's makeApp, plus a wired GateEnforcer) ──
 
@@ -70,6 +71,7 @@ function makeGatedApp(): App {
     specKindService: null as unknown as App["specKindService"],
     judgmentService: new JudgmentService(store, new NoOpTelemetry()),
     auditService: null as unknown as App["auditService"],
+    auditVerifyRunner: inLoopAuditVerifyRunner(null as unknown as App["auditService"]),
     callerSurface: "mcp" as const,
     resolveAiDefault: (_explicit?: boolean) => ({ ai: false, source: "cli_flag" as const }),
     telemetry: new NoOpTelemetry(),

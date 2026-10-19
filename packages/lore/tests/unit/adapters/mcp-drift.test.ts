@@ -63,6 +63,7 @@ import { buildDriftFlowDeps, runDrift, type CodeDriftPayload } from "../../../sr
 import { buildRealFsProbe } from "../../../src/adapters/real-fs-probe.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type { CreateDocInput, LoreError } from "@lore/core";
+import { inLoopAuditVerifyRunner } from "../../support/audit-verify-runner-stub.js";
 
 // ─── Test Infrastructure (mirrors mcp-staleness.test.ts) ─────────────────────
 
@@ -118,6 +119,7 @@ function makeApp(): App {
     stalenessProbeService,
     validityService: new ValidityService(store, new NoOpTelemetry()),
     auditService: null as unknown as App["auditService"],
+    auditVerifyRunner: inLoopAuditVerifyRunner(null as unknown as App["auditService"]),
     driftCheckService,
     callerSurface: "mcp" as const,
     resolveAiDefault: (_explicit?: boolean) => ({ ai: false, source: "env" as const }),

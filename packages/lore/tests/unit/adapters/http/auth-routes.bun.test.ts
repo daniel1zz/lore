@@ -57,6 +57,7 @@ import { NoOpTelemetry } from "@lore/core";
 import { MIGRATION_002_SQL } from "../../../../src/store/migrations/migration-002.js";
 import type { App } from "../../../../src/app.js";
 import { actedStore, liveIo } from "../../../live-invocation.js";
+import { inLoopAuditVerifyRunner } from "../../../support/audit-verify-runner-stub.js";
 
 // ─── Setup ────────────────────────────────────────────────────────────────────
 
@@ -113,6 +114,7 @@ async function makeTestServer(): Promise<TestContext> {
     specKindService: null as unknown as App["specKindService"],
     judgmentService: null as unknown as App["judgmentService"],
     auditService: null as unknown as App["auditService"],
+    auditVerifyRunner: inLoopAuditVerifyRunner(null as unknown as App["auditService"]),
     // reason: test does not exercise AI-default path; callerSurface required by App interface (SPEC-024).
     callerSurface: "cli" as const,
     resolveAiDefault: (_explicit?: boolean) => ({ ai: false, source: "cli_flag" as const }),

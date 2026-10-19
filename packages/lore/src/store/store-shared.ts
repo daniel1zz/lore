@@ -43,7 +43,7 @@ import {
   type LoreError,
   type Result,
 } from "@lore/core";
-import type { RunLifecycle } from "./store-interface.js";
+import type { RunLifecycle, VersionKey } from "./store-interface.js";
 
 // ─── Raw DB row types ──────────────────────────────────────────────────────
 
@@ -500,6 +500,24 @@ export function rowToLinkRecord(row: LinkRow): LinkRecord {
     link_type: row.link_type as LinkType,
     created_at: row.created_at,
     created_by: row.created_by,
+  };
+}
+
+/** The four columns {@link StoreInterface.listVersionKeys} selects — a versions row without its payload. */
+export interface VersionKeyRow {
+  doc_id: string;
+  version: number | bigint;
+  action: string;
+  created_at: string;
+}
+
+/** Maps a {@link VersionKeyRow} to the public {@link VersionKey} (version widened from bigint to number). */
+export function rowToVersionKey(row: VersionKeyRow): VersionKey {
+  return {
+    doc_id: row.doc_id as VersionKey["doc_id"],
+    version: Number(row.version),
+    action: row.action as VersionKey["action"],
+    created_at: row.created_at,
   };
 }
 

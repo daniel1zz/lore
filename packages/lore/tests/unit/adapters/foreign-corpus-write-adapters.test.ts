@@ -98,6 +98,7 @@ import {
   FOREIGN_CORPUS_WRITE_TOKEN,
 } from "../../../src/service/foreign-corpus-write-guard.js";
 import { resolveCorpus } from "../../../src/adapters/cli/corpus-resolution.js";
+import { inLoopAuditVerifyRunner } from "../../support/audit-verify-runner-stub.js";
 
 // ─── Module mocks — typed spies over the REAL implementations ─────────────
 // `vi.fn(actual.X)` preserves the real behaviour (every non-spy assertion in
@@ -142,6 +143,7 @@ function makeApp(store: InMemoryStore): App {
     specKindService: null as unknown as App["specKindService"],
     judgmentService: new JudgmentService(store, new NoOpTelemetry()),
     auditService: null as unknown as App["auditService"],
+    auditVerifyRunner: inLoopAuditVerifyRunner(null as unknown as App["auditService"]),
     callerSurface: "mcp" as const,
     resolveAiDefault: (_explicit?: boolean) => ({ ai: false, source: "cli_flag" as const }),
     telemetry: new NoOpTelemetry(),

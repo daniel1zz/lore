@@ -51,6 +51,7 @@ import { NoOpTelemetry, err } from "@lore/core";
 import type { App } from "../../../../src/app.js";
 import type { CalibrationRecord, LoreError, Result } from "@lore/core";
 import { actedStore, liveIo } from "../../../live-invocation.js";
+import { inLoopAuditVerifyRunner } from "../../../support/audit-verify-runner-stub.js";
 
 const FAR_PAST = "2000-01-01T00:00:00.000Z";
 
@@ -109,6 +110,7 @@ async function makeTestServer(useFailingStore: boolean): Promise<TestContext> {
     specKindService: null as unknown as App["specKindService"],
     judgmentService: new JudgmentService(store, telemetry),
     auditService: new AuditService(store, { verifySince: FAR_PAST }),
+    auditVerifyRunner: inLoopAuditVerifyRunner(new AuditService(store, { verifySince: FAR_PAST })),
     callerSurface: "cli" as const,
     resolveAiDefault: (_explicit?: boolean) => ({ ai: false, source: "cli_flag" as const }),
     telemetry,

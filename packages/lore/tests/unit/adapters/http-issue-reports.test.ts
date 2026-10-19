@@ -53,6 +53,7 @@ import type { ApiKeyStore, ActorContext } from "../../../src/adapters/http/auth.
 import type { SessionStore } from "../../../src/adapters/http/sessions.js";
 import type { App } from "../../../src/app.js";
 import { actedStore } from "../../live-invocation.js";
+import { inLoopAuditVerifyRunner } from "../../support/audit-verify-runner-stub.js";
 
 /** Far enough in the past that every audit entry this suite writes is "since" it. */
 const FAR_PAST = "2000-01-01T00:00:00.000Z";
@@ -97,6 +98,7 @@ function makeApp(store: InMemoryStore): App {
     specKindService: null as unknown as App["specKindService"],
     judgmentService: null as unknown as App["judgmentService"],
     auditService: new AuditService(store, { verifySince: FAR_PAST }),
+    auditVerifyRunner: inLoopAuditVerifyRunner(new AuditService(store, { verifySince: FAR_PAST })),
     callerSurface: "cli" as const,
     resolveAiDefault: (_explicit?: boolean) => ({ ai: false, source: "cli_flag" as const }),
     telemetry: new NoOpTelemetry(),

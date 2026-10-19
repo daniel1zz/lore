@@ -365,8 +365,12 @@ console.log(
     `${buildProvenance.build_dirty ? " (DIRTY tree)" : ""} at ${buildProvenance.built_at}`,
 );
 
+// reason: the audit-verify worker (service/audit-verify-runner.ts spawns it by file URL) must be a compile
+// entrypoint of its own, or the compiled binary has no worker file to start and HTTP/MCP verify would fail.
+const auditVerifyWorkerEntrypoint = join(root, "packages", "lore", "src", "service", "audit-verify-worker.ts");
+
 const result = await Bun.build({
-  entrypoints: [entrypoint],
+  entrypoints: [entrypoint, auditVerifyWorkerEntrypoint],
   target: "bun",
   minify: true,
   compile: { outfile },

@@ -100,7 +100,7 @@ describe("migration-012 (widen links.link_type CHECK to accept 'resolves')", () 
     const store = actedStore(new SQLiteStore(":memory:"));
     const db = store.getDatabase();
 
-    expect(userVersion(db)).toBe(24);
+    expect(userVersion(db)).toBe(25);
 
     insertDoc(db, "01HRESOLVESFIX000000001", "fix-doc");
     insertDoc(db, "01HRESOLVESISSUE0000001", "issue-doc");
@@ -310,7 +310,7 @@ describe("migration-012 (widen links.link_type CHECK to accept 'resolves')", () 
     const store = actedStore(new SQLiteStore(dbPath));
     const db = store.getDatabase();
 
-    expect(userVersion(db)).toBe(24);
+    expect(userVersion(db)).toBe(25);
 
     const preservedGovernsLink = db
       .query("SELECT * FROM links WHERE from_id = ? AND link_type = 'governs'")

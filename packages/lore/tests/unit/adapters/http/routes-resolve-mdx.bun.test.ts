@@ -35,6 +35,7 @@ import type { App } from "../../../../src/app.js";
 import type { ApiKeyStore, ActorContext } from "../../../../src/adapters/http/auth.js";
 import { handleApiRoute } from "../../../../src/adapters/http/routes.js";
 import { actedStore } from "../../../live-invocation.js";
+import { inLoopAuditVerifyRunner } from "../../../support/audit-verify-runner-stub.js";
 
 // ─── Test Infrastructure ─────────────────────────────────────────────────────
 
@@ -67,6 +68,7 @@ function makeApp(): App {
     specKindService: null as unknown as App["specKindService"],
     judgmentService: null as unknown as App["judgmentService"],
     auditService: null as unknown as App["auditService"],
+    auditVerifyRunner: inLoopAuditVerifyRunner(null as unknown as App["auditService"]),
     // reason: test does not exercise AI-default path; callerSurface required by App interface (SPEC-024).
     callerSurface: "cli" as const,
     resolveAiDefault: (_explicit?: boolean) => ({ ai: false, source: "cli_flag" as const }),

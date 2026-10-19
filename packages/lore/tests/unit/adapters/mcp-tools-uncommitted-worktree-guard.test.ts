@@ -92,6 +92,7 @@ import type { App } from "../../../src/app.js";
 import type { ApiKeyStore } from "../../../src/adapters/http/auth.js";
 import { registerTools } from "../../../src/adapters/mcp/tools.js";
 import type { CreateDocInput, DocRecord } from "@lore/core";
+import { inLoopAuditVerifyRunner } from "../../support/audit-verify-runner-stub.js";
 
 // ─── Real-git fixture helpers (no fakes — see module MOCK RISK note) ────────
 
@@ -169,6 +170,7 @@ function makeApp(): App {
     specKindService: null as unknown as App["specKindService"],
     judgmentService: null as unknown as App["judgmentService"],
     auditService: null as unknown as App["auditService"],
+    auditVerifyRunner: inLoopAuditVerifyRunner(null as unknown as App["auditService"]),
     callerSurface: "mcp" as const,
     resolveAiDefault: (_explicit?: boolean) => ({ ai: false, source: "cli_flag" as const }),
     telemetry: new NoOpTelemetry(),

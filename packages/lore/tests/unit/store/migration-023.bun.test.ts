@@ -33,6 +33,9 @@ function input(n: number, verdict: DecisionRecordInput["verdict"]): DecisionReco
 function legacyDb(path: string, version: 21 | 22 = 21): void {
   const db = new Database(path);
   db.exec(MIGRATION_020_SQL);
+  // reason: this fixture models only the tables migration 023 touches; migration-025 indexes `versions`, so the
+  // upgrade chain needs that table to exist (its columns are all migration-025 reads).
+  db.exec("CREATE TABLE versions (doc_id TEXT NOT NULL, version INTEGER NOT NULL, action TEXT NOT NULL, created_at TEXT NOT NULL)");
   let prev = DECISION_GENESIS_HASH;
   for (const [i, verdict] of (["auto", "escalate", "refuse"] as const).entries()) {
     const row = input(i + 1, verdict);
@@ -83,7 +86,7 @@ describe("migration 023 decision_log superseded verdict", () => {
         expect(after.ok && verifyDecisionChain(after.value)).toEqual({ clean: true, checked: 4 });
         expect(after.ok && after.value[3]?.verdict).toBe("superseded");
         const db = store.getDatabase();
-        expect((db.query("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(24);
+        expect((db.query("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(25);
         expect(() => db.run("UPDATE decision_log SET score = 1 WHERE id = 1")).toThrow(/append-only/);
         expect(() => db.run("DELETE FROM decision_log WHERE id = 1")).toThrow(/append-only/);
         const bad = await store.appendDecisionRecord({ ...input(5, "auto"), verdict: "bogus" as DecisionRecordInput["verdict"] });

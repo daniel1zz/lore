@@ -621,7 +621,9 @@ async function handleGetPhaseStatus(planIdOrSlug: string, app: App): Promise<Res
  */
 async function handleAuditVerify(url: URL, app: App): Promise<Response> {
   const since = url.searchParams.get("since");
-  const result = await app.auditService.verify(since !== null ? { since } : undefined);
+  // reason: the full-chain verdict runs off the serving loop (worker per persistent store) and reads the anchor file,
+  // so a dashboard "clean" means what `lore audit --verify` means.
+  const result = await app.auditVerifyRunner.verify(since !== null ? { since } : undefined);
   if (!result.ok) return loreErrorResponse(result.error);
   return jsonOk(result.value);
 }
