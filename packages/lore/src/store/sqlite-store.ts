@@ -2351,6 +2351,27 @@ export class SQLiteStore implements StoreInterface {
         }
       }
 
+      // reason: BR-1307 — companion doc writes (a spec's rule retirements on its baseline leaves) share this
+      // transaction; each is version-guarded through `updateDocSync` (RETURNING-decided), and the registry rows
+      // follow the leaf writes through the docs triggers. Any failure rolls back the primary write too.
+      for (const companion of extras?.also_update ?? []) {
+        const companionUpdate = this.updateDocSync(companion.id, companion.patch, companion.opts);
+        if (!companionUpdate.ok) {
+          this.db.run("ROLLBACK");
+          return companionUpdate;
+        }
+        const companionVersion = this.insertVersionSync(companion.version);
+        if (!companionVersion.ok) {
+          this.db.run("ROLLBACK");
+          return companionVersion;
+        }
+        const companionAudit = this.appendAuditEntrySync(companion.audit);
+        if (!companionAudit.ok) {
+          this.db.run("ROLLBACK");
+          return companionAudit;
+        }
+      }
+
       this.db.run("COMMIT");
       return ok(updateResult.value);
     } catch (e) {
