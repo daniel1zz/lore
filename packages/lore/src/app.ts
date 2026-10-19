@@ -121,7 +121,7 @@ import { SpecParentMigrationService } from "./service/spec-parent-migration-serv
 import { PlanOutlineExemptMigrationService } from "./service/plan-outline-exempt-migration-service.js";
 import { SeatService } from "./service/seat-service.js";
 import { RealGitPort } from "./adapters/real-git-port.js";
-import { buildBaselineDeclarationPort } from "./adapters/cli/absent-declarations.js";
+import { armMainTree, buildBaselineDeclarationPort } from "./adapters/cli/absent-declarations.js";
 import { realpathNative } from "./adapters/real-realpath-port.js";
 import { ConfigService } from "./service/config-service.js";
 import { GlobalConfigService } from "./service/global-config-service.js";
@@ -1078,7 +1078,8 @@ function buildAppFromSqlite(
     requirementService: new RequirementService(store, requirementQuantifiableEnabled, corpusService),
     // reason: RuleService gets the WIRED corpusService.create (gates + provenance guards apply to
     // node creation); its `createDoc` port is required — RuleService builds no CorpusService of its own.
-    ruleService: new RuleService(store, corpusService.create.bind(corpusService), corpusService),
+    // reason: accountability-reducing writes (--remove-site/--remove-command, rule retire/move) wait for main's tree; one port, both roots.
+    ruleService: armMainTree(new RuleService(store, corpusService.create.bind(corpusService), corpusService), repoRoot),
     // reason: the change set of a locked spec is gated by the ONE RecordLockService, like criteria edits.
     ruleChangeService,
     ruleReadService: new RuleReadService(store),
@@ -1495,7 +1496,8 @@ function buildAppFromTurso(
     requirementService: new RequirementService(store, requirementQuantifiableEnabled, corpusService),
     // reason: RuleService gets the WIRED corpusService.create (gates + provenance guards apply to
     // node creation); its `createDoc` port is required — RuleService builds no CorpusService of its own.
-    ruleService: new RuleService(store, corpusService.create.bind(corpusService), corpusService),
+    // reason: accountability-reducing writes (--remove-site/--remove-command, rule retire/move) wait for main's tree; one port, both roots.
+    ruleService: armMainTree(new RuleService(store, corpusService.create.bind(corpusService), corpusService), repoRoot),
     // reason: the change set of a locked spec is gated by the ONE RecordLockService, like criteria edits.
     ruleChangeService,
     ruleReadService: new RuleReadService(store),

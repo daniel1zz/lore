@@ -68,6 +68,7 @@ import type { CreateDocInput } from "@lore/core";
 import { resolveWriteActorFor } from "../store/write-context-store.js";
 import type { StoreInterface } from "../store/store-interface.js";
 import { NON_BUSINESS_PREFIX } from "./leaf-coverage.js";
+import { refuseLiveCommandRemoval, refuseReachedSiteRemoval, refuseRuleWithdrawal, type MainTreePort } from "./main-tree-guard.js";
 import { buildOwnerLeafIndex, judgeOwnedBy, parseOwnedBy, type OwnerLeafIndex } from "./owned-by.js";
 import { resolveDoc } from "./resolve.js";
 import { bareDocWriter, type CreateDocResult, type DocWritePort, type WriteActorOpts } from "./corpus-service.js";
@@ -211,6 +212,17 @@ export class RuleService {
   private readonly writer: DocWritePort;
 
   /**
+   * Main's tree (the checkout holding the corpus), set post-construction by `app.ts` like the review service's declaration
+   * port. Absent (a bare test construction) = no accountability-reducing write is measured; both composition roots wire it,
+   * so CLI, MCP and HTTP refuse alike.
+   */
+  private mainTree: MainTreePort | undefined;
+
+  setMainTreePort(port: MainTreePort): void {
+    this.mainTree = port;
+  }
+
+  /**
    * Arms the claim-scoped corpus-write guard for every baseline write this instance performs
    * from now on. Called once per CLI process by the composition root.
    */
@@ -352,12 +364,26 @@ export class RuleService {
 
     let lastStale: LoreError | undefined;
     let authorized = false; // reason: one authorization (and one audit row) per call, not per CAS re-apply
+    let withdrawalChecked = false; // reason: one main-tree measurement per call, not per CAS re-apply
     for (let attempt = 0; attempt <= MAX_CAS_REAPPLIES; attempt += 1) {
       const located = await this.locateRule(ruleId);
       if (!located.ok) return located;
       const { sourceLeaf, current, registered } = located.value;
       const edited = applyRulePatch(current, patch);
       if (!edited.ok) return edited;
+      // reason: retiring or moving a live rule stops accounting for every site mapping that cites it; wait for main to drop them.
+      if (!withdrawalChecked && this.mainTree !== undefined && current.lifecycle === "live" && (patch.lifecycle === "retired" || patch.moveTo !== undefined)) {
+        const docs = await this.listBaselineDocs();
+        if (!docs.ok) return docs;
+        const withdrawable = await refuseRuleWithdrawal(this.mainTree, {
+          ruleId,
+          operation: patch.moveTo !== undefined ? "move" : "retire",
+          ruleLeaf: sourceLeaf,
+          baselineDocs: docs.value,
+        });
+        if (!withdrawable.ok) return withdrawable;
+        withdrawalChecked = true;
+      }
 
       if (patch.moveTo === undefined) {
         if (!authorized) {
@@ -616,6 +642,15 @@ export class RuleService {
     if (!proof.ok) return proof;
     const gate = await this.authorizeCorpusWrite([target.value], "baseline-map", opts?.by, proof.value);
     if (!gate.ok) return gate;
+    // reason: a removal reduces accountability; the corpus is shared, so it waits until main's tree no longer needs it.
+    if (this.mainTree !== undefined) {
+      const mapped = siteMapOf(target.value);
+      const sitesGone = await refuseReachedSiteRemoval(this.mainTree, target.value, removeSites.filter((k) => k in mapped));
+      if (!sitesGone.ok) return sitesGone;
+      const declared = commandsOf(target.value);
+      const commandsGone = await refuseLiveCommandRemoval(this.mainTree, target.value, removeCommands.filter((c) => declared.includes(c)));
+      if (!commandsGone.ok) return commandsGone;
+    }
     // Only the sites SET in this call are judged (entries already stored are never re-validated at write time).
     let ownerLeaves: OwnerLeafIndex | undefined;
     if (Object.values(sites).some((entries) => entries.some((e) => parseOwnedBy(e).kind !== "not_owned_by"))) {
