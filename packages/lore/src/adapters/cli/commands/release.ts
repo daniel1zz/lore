@@ -51,6 +51,7 @@ import { requirePhaseWorkflowService } from "../phase-wiring.js";
 import { hasZeroReleaseEvidence, ZERO_EVIDENCE_RELEASE_WARNING } from "../../../service/task-workflow-service.js";
 import { invocationOf } from "../command-invocation.js";
 import { printLine } from "../output.js";
+import { refreshScopeFilesOf, scopeCandidatesOf } from "../edit-scope-wiring.js";
 
 export default defineLoreCommand({
   meta: {
@@ -104,6 +105,9 @@ export default defineLoreCommand({
         callerCwd: inv.cwd,
       };
 
+      // reason: a release erases the claim that names the working copy, so read it BEFORE; the edit-time anchor
+      // gate's scope file there is then rewritten without this task (see edit-scope-wiring.ts).
+      const scopeCandidates = await scopeCandidatesOf(app, args.task as string, inv.cwd);
       let result = await app.taskWorkflowService.release(args.task as string, releaseOpts);
       if (
         !result.ok &&
@@ -118,6 +122,7 @@ export default defineLoreCommand({
         inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
         return exitCode(result.error);
       }
+      await refreshScopeFilesOf(app, result.value.slug, scopeCandidates);
 
       // reason: AC-RELEASE-ADVISORY — computed on the doc `release()` already
       // returned (release() never touches verification_evidence, zero extra

@@ -38,8 +38,10 @@ const USER_COMMAND = "node /opt/user-owned/my-stop-hook.mjs";
 const GIT_SAFETY = "pre-bash-git-safety-gate.mjs";
 /** BR-1092's second permitted per-call refuser: an isolated helper writing into a foreign git working copy. */
 const FOREIGN_WORKING_COPY_GATE = "pre-helper-foreign-working-copy-gate.mjs";
-/** The registered per-call hooks BR-1092 allows to refuse: exactly these two. */
-const ALLOWED_PER_CALL_REFUSERS: readonly string[] = [GIT_SAFETY, FOREIGN_WORKING_COPY_GATE];
+/** A helper's edit outside its claim's anchors, refused before it happens unless `lore anchor declare` finds the path free (task-skill-design-implementers-declare-out-of-anchor-files; user decision 2026-10-19). */
+const EDIT_ANCHOR_GATE = "pre-edit-anchor-gate.mjs";
+/** The registered per-call hooks allowed to refuse: exactly these three (BR-1092's two, plus the edit-time anchor gate). */
+const ALLOWED_PER_CALL_REFUSERS: readonly string[] = [GIT_SAFETY, FOREIGN_WORKING_COPY_GATE, EDIT_ANCHOR_GATE];
 
 interface LegacyRegistration {
   file: string;
@@ -177,7 +179,7 @@ describe("turn-end-review roster swap (AC-TE-5)", () => {
     expect(files).toContain("post-edit-mark.mjs");
   });
 
-  it("AC-TE-5.N1: the registered PreToolUse/PostToolUse hooks that can emit a deny/block are exactly {pre-bash-git-safety-gate.mjs, pre-helper-foreign-working-copy-gate.mjs} (BR-1092)", async () => {
+  it("AC-TE-5.N1: the registered PreToolUse/PostToolUse hooks that can emit a deny/block are exactly {pre-bash-git-safety-gate.mjs, pre-helper-foreign-working-copy-gate.mjs (BR-1092), pre-edit-anchor-gate.mjs}", async () => {
     const { HOOK_REGISTRATIONS } = await import("@lore/core");
     const perCall = [
       ...new Set(
