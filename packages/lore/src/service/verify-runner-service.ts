@@ -189,7 +189,7 @@ import { existsSync, readdirSync, statSync, mkdtempSync, readFileSync, writeFile
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
 import { CAPTURE_TAIL_CHARS, err, findMissingOracleFiles, ok, RUNNER_UNATTESTED_CAPTURE_SOURCE } from "@lore/core";
-import type { AuditEntry, FileExistsPort, StateStamp } from "@lore/core";
+import type { AuditEntry, FileExistsPort, StateStamp, SupersededByRef } from "@lore/core";
 import type {
   Result,
   LoreError,
@@ -389,12 +389,20 @@ export interface VerifySkippedAc {
   readonly mode: Exclude<AcVerifyMode, "script">;
 }
 
+/** One selected AC that was NOT executed because another spec's criterion supersedes it (D15). */
+export interface VerifySupersededAc {
+  readonly ac_id: string;
+  readonly superseded_by: SupersededByRef;
+}
+
 /** Full outcome of one {@link VerifyRunnerService.verifyPlan} call. */
 export interface VerifyPlanResult {
   /** The task every recorded evidence entry in `results` was attributed to. */
   readonly task: { id: DocId; slug: string };
   readonly results: VerifyAcResult[];
   readonly skipped: VerifySkippedAc[];
+  /** Selected criteria superseded by another spec's criterion: nothing was run or recorded for them. */
+  readonly superseded: VerifySupersededAc[];
   /** Advisory notes (e.g. "parent spec not approved") — never affects `results`. */
   readonly warnings: string[];
 }
@@ -1061,8 +1069,12 @@ export class VerifyRunnerService {
   ): Promise<Result<VerifyPlanResult, LoreError>> {
     const scriptCriteria: ScriptAcceptanceCriterion[] = [];
     const skipped: VerifySkippedAc[] = [];
+    // D15 — a criterion superseded by another spec's criterion is never run or recorded (BR-163); it is listed.
+    const superseded: VerifySupersededAc[] = [];
     for (const criterion of selectedCriteria) {
-      if (criterion.verify.mode === "script") {
+      if (criterion.superseded_by !== undefined) {
+        superseded.push({ ac_id: criterion.id, superseded_by: criterion.superseded_by });
+      } else if (criterion.verify.mode === "script") {
         scriptCriteria.push(criterion as ScriptAcceptanceCriterion);
       } else {
         skipped.push({ ac_id: criterion.id, mode: criterion.verify.mode });
@@ -1425,7 +1437,7 @@ export class VerifyRunnerService {
       });
     }
 
-    return ok({ task: { id: task.id, slug: task.slug }, results, skipped, warnings });
+    return ok({ task: { id: task.id, slug: task.slug }, results, skipped, superseded, warnings });
   }
 
   /**
