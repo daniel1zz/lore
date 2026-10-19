@@ -179,6 +179,7 @@ describe("renderProjectScaffoldReceipt", () => {
         // itself never reads it (see this describe block's own REGRESSION intent), so
         // an empty list keeps the byte-identical-output assertion below meaningful.
         skippedDiverged: [],
+        removed: [],
       };
       const ctx: SetupRenderCtx = { targetDir: "/tmp/fake-claude-dir", binPath: "/usr/local/bin/lore" };
 
@@ -206,7 +207,7 @@ describe("renderProjectScaffoldReceipt", () => {
     });
 
     it("renderInstallPlan: unchanged for a minimal plan", () => {
-      const plan = { writes: [], skips: [], backups: [], removals: [] };
+      const plan = { writes: [], skips: [], backups: [], removals: [], divergedRemovals: [] };
       const ctx: SetupRenderCtx = { targetDir: "/tmp/fake-claude-dir", binPath: "/usr/local/bin/lore" };
 
       const out = renderInstallPlan(plan, ctx);
@@ -240,6 +241,7 @@ describe("renderProjectScaffoldReceipt", () => {
         // itself never reads it (see this describe block's own REGRESSION intent), so
         // an empty list keeps the byte-identical-output assertion below meaningful.
         skippedDiverged: [],
+        removed: [],
       };
       const ctx: SetupRenderCtx = { targetDir: "/tmp/fake-claude-dir", binPath: "/usr/local/bin/lore" };
 

@@ -30,6 +30,7 @@ function baseReceipt(overrides: Partial<SetupReceipt> = {}): SetupReceipt {
     // suite exercises reads it, so an empty default keeps every existing fixture's
     // rendered-output assertions unchanged.
     skippedDiverged: [],
+    removed: [],
     ...overrides,
   };
 }
@@ -201,7 +202,7 @@ describe("renderInstallReceipt", () => {
 
 describe("renderInstallPlan", () => {
   function basePlan(overrides: Partial<InstallPlan> = {}): InstallPlan {
-    return { writes: [], skips: [], backups: [], removals: [], ...overrides };
+    return { writes: [], skips: [], backups: [], removals: [], divergedRemovals: [], ...overrides };
   }
 
   it("is clearly labeled as a dry-run plan with no writes performed", () => {

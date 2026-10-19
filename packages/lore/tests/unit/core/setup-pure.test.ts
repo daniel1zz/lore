@@ -154,7 +154,7 @@ describe("setup-manifest: planInstall", () => {
     const emptyManifest: SetupManifest = { version: "1", claude_dir: "/tmp/x", entries: [] };
     const plan = planInstall(emptyManifest, { files: [] }, new Map());
 
-    expect(plan).toEqual({ writes: [], skips: [], backups: [], removals: [] });
+    expect(plan).toEqual({ writes: [], skips: [], backups: [], removals: [], divergedRemovals: [] });
   });
 
   it("BOUNDARY: a file present on disk but NOT tracked by the current manifest, with differing bytes, is written AND scheduled for backup", () => {
@@ -181,8 +181,18 @@ describe("setup-manifest: planInstall", () => {
     const payload: AssetPayload = { files: [file("skills/lore/SKILL.md", "sha-1")] };
 
     expect(() => planInstall(currentManifest, payload, new Map())).not.toThrow();
-    const plan = planInstall(currentManifest, payload, new Map());
-    expect(plan.removals).toEqual(["hooks/retired-hook.mjs"]);
+    // Absent from disk: nothing to remove, nothing to keep.
+    const gone = planInstall(currentManifest, payload, new Map());
+    expect(gone.removals).toEqual([]);
+    expect(gone.divergedRemovals).toEqual([]);
+    // Present and byte-identical to the ledger: safe to remove.
+    const unedited = planInstall(currentManifest, payload, new Map([["hooks/retired-hook.mjs", "old-sha"]]));
+    expect(unedited.removals).toEqual(["hooks/retired-hook.mjs"]);
+    expect(unedited.divergedRemovals).toEqual([]);
+    // Present but edited since lore wrote it (BR-818): diverged, never a removal.
+    const edited = planInstall(currentManifest, payload, new Map([["hooks/retired-hook.mjs", "user-sha"]]));
+    expect(edited.removals).toEqual([]);
+    expect(edited.divergedRemovals).toEqual(["hooks/retired-hook.mjs"]);
   });
 
   it("STATE: plan -> simulate apply -> re-plan converges to zero writes/backups (I2 idempotency, pure half)", () => {

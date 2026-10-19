@@ -114,6 +114,29 @@ describe("validateSetupFlags — NEGATIVE", () => {
 
 // ─── resolveTargetDir ─────────────────────────────────────────────────────────
 
+describe("validateSetupFlags — --force-diverged (DC2-3)", () => {
+  it.each([
+    [{ dryRun: true, uninstall: false, project: false }, "--dry-run"],
+    [{ dryRun: false, uninstall: true, project: false }, "--uninstall"],
+    [{ dryRun: false, uninstall: false, project: true }, "--project"],
+    [{ dryRun: false, uninstall: true, project: true }, "--project"],
+  ])("rejects %j naming both flags", (flags, other) => {
+    const result = validateSetupFlags({ ...flags, forceDiverged: true });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.message).toContain("--force-diverged");
+    expect(result.message).toContain(other);
+  });
+
+  it("still resolves plain install when --force-diverged is the only flag", () => {
+    expect(validateSetupFlags({ dryRun: false, uninstall: false, project: false, forceDiverged: true })).toEqual({
+      ok: true,
+      mode: "install",
+    });
+  });
+});
+
 describe("resolveTargetDir — HAPPY", () => {
   it("no flag, no env -> join(homeDir, '.claude')", () => {
     const result = resolveTargetDir({ env: {}, homeDir: "/Users/x", cwd: "/work/dir" });
