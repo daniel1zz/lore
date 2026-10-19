@@ -2398,6 +2398,7 @@ export class CorpusService {
           existing: [],
           next: inline.data,
           actor: resolvedActor,
+          creating: true,
         });
         if (!admission.ok) return admission;
         citeGateAudit = admission.value.wouldRefuseAudit;
