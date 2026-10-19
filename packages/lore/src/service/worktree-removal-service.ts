@@ -42,6 +42,7 @@ import {
 } from "./worktree-removal-test.js";
 import {
   ignoredPathsOutsideLossFreeSet,
+  withoutDerivedScopeFile,
   isFalsifierScratchPath,
   type ListedWorktree,
   type ScratchRemovalPort,
@@ -49,6 +50,7 @@ import {
   type WorktreeRemovalGate,
   type WorktreeRemovalGatePort,
 } from "./worktree-cleanup.js";
+import { SCOPE_FILE_NAME } from "./edit-scope.js";
 
 /** Structurally `RunOccupancy` (run-service.ts) — the `lore run occupancy --json` data. */
 export interface OccupancyData {
@@ -189,12 +191,22 @@ export class WorktreeRemovalService implements WorktreeRemovalFactsPort, Worktre
     return removed.ok ? { removed: true } : { removed: false, reason: `remove-failed: ${removed.reason}` };
   }
 
+  /** Open claims recorded for `path`, or `null` when occupancy could not be measured. */
+  private async openClaimCountOf(path: string): Promise<number | null> {
+    const occupancy = await this.deps.occupancy.occupancy({ worktree: path });
+    return occupancy.ok ? occupancy.value.open_claims.length : null;
+  }
+
   private async decideRemoval(path: string): Promise<WorktreeRemovalGate> {
     const { probe } = this.deps;
     const governed = await this.deps.decisions.governed();
     if (!governed.ok) return { allowed: false, reason: `removal not decided (nothing removed): governed thresholds unreadable: ${governed.error.code}`, ignored_paths: [] };
     const ignored = probe.ignoredPaths(path);
-    const outside = ignored.ok ? ignoredPathsOutsideLossFreeSet(probe, path, ignored.value, governed.value.regenerablePatterns) : [];
+    const unfiltered = ignored.ok ? ignoredPathsOutsideLossFreeSet(probe, path, ignored.value, governed.value.regenerablePatterns) : [];
+    // reason: lore's own scope file blocks nothing once no claim is open (a crashed run leaves it behind); occupancy is
+    // asked only when that file is the thing in question, so every other worktree costs no extra read.
+    const claimCount = unfiltered.includes(SCOPE_FILE_NAME) ? await this.openClaimCountOf(path) : null;
+    const outside = withoutDerivedScopeFile(unfiltered, claimCount);
     const head = probe.headSha(path);
     // reason: the version carries the ignored-outside list, so removing the offending file produces a NEW subject and the
     // worktree can become auto — while the SAME listing can never be re-scored upward (AC-AU-2 worst-of per version).
