@@ -21,6 +21,7 @@ import { join } from "node:path";
 import { LoreConfigSchema, type CreateDocInput } from "@lore/core";
 import { createApp } from "../../src/app.js";
 import { liveAmbient, liveWriteContext } from "../live-invocation.js";
+import { patchLoreConfig } from "../helpers/patch-lore-config.js";
 
 vi.setConfig({ testTimeout: 300_000, hookTimeout: 300_000 });
 
@@ -127,7 +128,7 @@ beforeAll(async () => {
   retire(retiredB);
   retire(retiredC);
 
-  appendFileSync(join(dir, ".lore", "config.yaml"), `workflow:\n  gates:\n    ac-cite:\n      mode: enforce\n      armed_branches:\n        - ${branch}\n`);
+  patchLoreConfig(dir, `workflow:\n  gates:\n    ac-cite:\n      mode: enforce\n      armed_branches:\n        - ${branch}\n`);
 });
 
 afterAll(() => {
