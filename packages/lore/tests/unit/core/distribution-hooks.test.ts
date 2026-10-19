@@ -45,6 +45,8 @@ const EXPECTED_FILES = [
   "pre-tool-harness-run.mjs",
   // Foreign working copy gate: refuses an isolated helper's Write/Edit inside a git working copy that is not its own (BR-1092).
   "pre-helper-foreign-working-copy-gate.mjs",
+  // Edit-time anchor gate: a helper's edit outside its claim's anchors is declared through `lore anchor declare` or denied.
+  "pre-edit-anchor-gate.mjs",
   // Edit-time notice of prose bound to the edited file; additional context only, never a block (spec-prose-about-code-is-bound-to-what-it-describes-one D3).
   "post-edit-bindings.mjs",
 ];
@@ -87,14 +89,14 @@ describe("HAPPY: buildHookSettingsEntries", () => {
 });
 
 describe("BOUNDARY: HOOK_REGISTRATIONS shape", () => {
-  it("declares exactly the 13 core-governance-and-security hook files", () => {
+  it("declares exactly the 15 core-governance-and-security hook files", () => {
     const files = [...new Set(HOOK_REGISTRATIONS.map((r) => r.file))].sort();
     expect(files).toEqual([...EXPECTED_FILES].sort());
   });
 
-  it("expands to exactly 19 entries (15 hooks; per-event expansion for run-register, pre-tool-harness-run, run-end and session-trail-start)", () => {
-    // pre-bash-git-safety-gate: 1, session-start-resume: 1, session-start-marker: 1, stop-turn-review: 1, stop-handoff-coverage: 1, subagent-context: 1, subagent-stop-commit-guard: 1, run-register: 2 (SessionStart + SubagentStart), pre-tool-harness-run: 2 (Bash + mcp__.*lore_.*), user-prompt-turn-start: 1, post-edit-mark: 1, run-end: 2 (SessionEnd + SubagentStop), session-trail-start: 2 (SessionStart + SubagentStart), subagent-trail: 1, pre-helper-foreign-working-copy-gate: 1, post-edit-bindings: 1 = 20
-    expect(HOOK_REGISTRATIONS).toHaveLength(20);
+  it("expands to exactly 21 entries (17 hooks; per-event expansion for run-register, pre-tool-harness-run, run-end and session-trail-start)", () => {
+    // pre-bash-git-safety-gate: 1, session-start-resume: 1, session-start-marker: 1, stop-turn-review: 1, stop-handoff-coverage: 1, subagent-context: 1, subagent-stop-commit-guard: 1, run-register: 2 (SessionStart + SubagentStart), pre-tool-harness-run: 2 (Bash + mcp__.*lore_.*), user-prompt-turn-start: 1, post-edit-mark: 1, run-end: 2 (SessionEnd + SubagentStop), session-trail-start: 2 (SessionStart + SubagentStart), subagent-trail: 1, pre-helper-foreign-working-copy-gate: 1, post-edit-bindings: 1, pre-edit-anchor-gate: 1 = 21
+    expect(HOOK_REGISTRATIONS).toHaveLength(21);
   });
 
   it("tolerates a trailing slash on claudeDir without a double slash in the command", () => {

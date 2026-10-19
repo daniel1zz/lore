@@ -112,6 +112,8 @@ export interface ContextConfigLayer {
     readonly language?: string;
     readonly fragments?: { readonly disable?: readonly string[] };
   };
+  /** `workflow.integrate.floor_command`: the only workflow key fragment text may name (`{{lore:integrate_floor}}`). */
+  readonly workflow?: { readonly integrate?: { readonly floor_command?: string } };
 }
 
 export type LanguageSource = "global" | "project" | "none";
@@ -163,6 +165,34 @@ export function resolveContextConfig(
     default: {
       const unreachable: never = outlet;
       throw new Error(`resolveContextConfig: unknown outlet ${String(unreachable)}`);
+    }
+  }
+}
+
+/**
+ * The `workflow.integrate.floor_command` a fragment rendered for `outlet` may name, or `null` when that
+ * outlet's layer sets none. Same layer routing as {@link resolveContextConfig}: user outlets read the
+ * GLOBAL layer, project outlets the PROJECT layer, the subagent hook the project layer over the global one.
+ */
+export function resolveIntegrateFloor(
+  global: ContextConfigLayer,
+  project: ContextConfigLayer,
+  outlet: OutletId,
+): string | null {
+  const g = global.workflow?.integrate?.floor_command;
+  const p = project.workflow?.integrate?.floor_command;
+  switch (outlet) {
+    case "rules:user":
+    case "skills:user":
+      return g ?? null;
+    case "rules:project":
+    case "skills:project":
+      return p ?? null;
+    case "hook:subagent-start":
+      return p ?? g ?? null;
+    default: {
+      const unreachable: never = outlet;
+      throw new Error(`resolveIntegrateFloor: unknown outlet ${String(unreachable)}`);
     }
   }
 }

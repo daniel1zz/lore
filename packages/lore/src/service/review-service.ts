@@ -36,6 +36,7 @@ import type { StoreInterface } from "../store/store-interface.js";
 import { resolveWriteActorFor, WriteActorUnresolvedError } from "../store/write-context-store.js";
 import { bareDocWriter, type DocWritePort } from "./corpus-service.js";
 import { resolveDoc } from "./resolve.js";
+import { absentDeclarationRefusal, leavesUnder, type AbsentDeclaration, type DeclaringLeaf } from "./leaf-coverage.js";
 import { requireSpecCitesLiveRule } from "./spec-approval-citation.js";
 import { ownProposedRules } from "./rule-changes.js";
 import {
@@ -159,6 +160,11 @@ export interface ApproveOpts {
   expectedVersion?: number;
 }
 
+/** Measures declared leaf commands against the tree the corpus lives in (the adapter owns the source analysis). */
+export interface BaselineDeclarationPort {
+  absentDeclarations(leaves: readonly DeclaringLeaf[]): Promise<Result<readonly AbsentDeclaration[], LoreError>>;
+}
+
 /**
  * `approve()`'s return shape — the approved `DocRecord` PLUS an additive,
  * observability-only field (spec-verify-reachability-plan-promote-early-warning
@@ -279,6 +285,17 @@ export class ReviewService {
 
   private overrideDecisions: OverrideDecisionPort | undefined;
 
+  /**
+   * Wires the measure of a leaf's declared commands against main's tree (task-approving-a-baseline-leaf-refuses-while-it-declares-a).
+   * Set by the composition root of an entry that holds a source checkout (a service never imports an adapter); absent = the
+   * approval of a baseline node skips the check (no tree to compare with), never refuses for lack of one.
+   */
+  setBaselineDeclarationPort(port: BaselineDeclarationPort): void {
+    this.baselineDeclarations = port;
+  }
+
+  private baselineDeclarations: BaselineDeclarationPort | undefined;
+
   private async resolveDoc(idOrSlug: string): Promise<Result<DocRecord, LoreError>> {
     return resolveDoc(this.store, idOrSlug);
   }
@@ -313,6 +330,25 @@ export class ReviewService {
     if (doc.type === "spec") {
       const citationResult = await requireSpecCitesLiveRule(this.store, doc.slug, doc.extra["acceptance_criteria"], ownProposedRules(doc.extra));
       if (!citationResult.ok) return citationResult;
+    }
+    // reason: a declared command absent from main's tree never fails coverage (a branch may pre-declare a command), so a stale
+    // declaration is refused HERE, where a baseline node is vouched for. Measured on the approved node's own leaves only.
+    if (doc.type === "baseline" && this.baselineDeclarations !== undefined) {
+      const all = await this.store.findMany({ type: "baseline" });
+      if (!all.ok) return all;
+      const leaves = leavesUnder(doc, all.value);
+      if (leaves.length > 0) {
+        const absent = await this.baselineDeclarations.absentDeclarations(leaves);
+        if (!absent.ok) return absent;
+        if (absent.value.length > 0) {
+          return err({
+            code: "VALIDATION_ERROR",
+            field: "baseline-commands",
+            message: absentDeclarationRefusal(doc.slug, absent.value),
+            value: absent.value,
+          });
+        }
+      }
     }
     return gated;
   }

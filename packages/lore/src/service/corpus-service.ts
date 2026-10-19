@@ -106,8 +106,9 @@ import {
   describeCheckpointVacuity,
   isNonPlanParentError,
   PLAN_CLOSE_VACUITY_NOTICE_FIELD,
+  PLAN_CLOSE_UNMEASURED_CITED_RULES_FIELD,
 } from "./checkpoint-registry.js";
-import { attestationExemptKindValid, type CitedRuleViolation } from "./gate-predicates.js";
+import { attestationExemptKindValid, type CitedRuleUnknown, type CitedRuleViolation } from "./gate-predicates.js";
 import type { RuleStateFull } from "./rule-state-service.js";
 import { resolveDoc, ULID_REGEX } from "./resolve.js";
 import { loadStampBindingContext, type RadiusDiffPort } from "./stamp-binding-reader.js";
@@ -2398,6 +2399,7 @@ export class CorpusService {
           existing: [],
           next: inline.data,
           actor: resolvedActor,
+          creating: true,
         });
         if (!admission.ok) return admission;
         citeGateAudit = admission.value.wouldRefuseAudit;
@@ -3436,6 +3438,7 @@ export class CorpusService {
 
       // reason: AC-FR-8/D7 — see corpus-service.ts's spec-create gate block's
       // identical note; `existing.id` is the RESOLVED plan's real id, never its slug.
+      let citedRuleUnknowns: CitedRuleUnknown[] = [];
       let planCloseCtx: GateContext = { targetIdOrSlug: existing.slug, targetDocId: existing.id };
 
       if (requiresUat) {
@@ -3556,7 +3559,12 @@ export class CorpusService {
         if (spec !== undefined) {
           const violationsResult = await this.resolveCitedRuleViolations(spec);
           if (!violationsResult.ok) return violationsResult;
-          planCloseCtx = { ...planCloseCtx, citedRuleViolations: violationsResult.value };
+          citedRuleUnknowns = violationsResult.value.unknowns;
+          planCloseCtx = {
+            ...planCloseCtx,
+            citedRuleViolations: violationsResult.value.violations,
+            citedRuleUnknowns,
+          };
         }
       }
 
@@ -3607,6 +3615,13 @@ export class CorpusService {
       );
       if (planCloseVacuityNotice !== null) {
         docPatch.extra = { ...effectiveExtra, [PLAN_CLOSE_VACUITY_NOTICE_FIELD]: planCloseVacuityNotice };
+      }
+      // reason: BR-984 - the closed plan records which cited rules were unmeasured, so the report is not stderr-only.
+      if (citedRuleUnknowns.length > 0) {
+        docPatch.extra = {
+          ...(docPatch.extra ?? effectiveExtra),
+          [PLAN_CLOSE_UNMEASURED_CITED_RULES_FIELD]: citedRuleUnknowns.map((u) => ({ rule_id: u.rule_id, reason: u.reason })),
+        };
       }
     }
 
@@ -4758,11 +4773,14 @@ export class CorpusService {
    *   rule-state service is wired, or when every cited rule is fine; `err` when the spec's stored
    *   criteria are unreadable or rule state could not be computed.
    */
-  private async resolveCitedRuleViolations(spec: DocRecord): Promise<Result<CitedRuleViolation[], LoreError>> {
+  private async resolveCitedRuleViolations(
+    spec: DocRecord,
+  ): Promise<Result<{ violations: CitedRuleViolation[]; unknowns: CitedRuleUnknown[] }, LoreError>> {
+    const none = { violations: [], unknowns: [] };
     const ruleState = this.ruleStateService;
-    if (ruleState === undefined) return ok([]);
+    if (ruleState === undefined) return ok(none);
     const raw = spec.extra["acceptance_criteria"];
-    if (raw === undefined) return ok([]);
+    if (raw === undefined) return ok(none);
     const parsed = specAcceptanceCriteriaSchema.safeParse(raw);
     if (!parsed.success) {
       return err({
@@ -4772,17 +4790,33 @@ export class CorpusService {
       });
     }
     const cited = new Set(parsed.data.flatMap((criterion) => criterion.cites ?? []));
-    if (cited.size === 0) return ok([]);
+    if (cited.size === 0) return ok(none);
     const full = await ruleState.full();
     if (!full.ok) return full;
     const violations: CitedRuleViolation[] = [];
+    const unknowns: CitedRuleUnknown[] = [];
+    const unmeasurable: string[] = [];
     for (const rule of full.value.rules) {
       if (!cited.has(rule.rule_id)) continue;
       if (rule.state === "contradicted" || rule.state === "stale") {
         violations.push({ rule_id: rule.rule_id, state: rule.state, offences: rule.offences });
+      } else if (rule.state === "unknown" && rule.unknown_reason !== undefined) {
+        // reason: BR-984 - git-unavailable is a failed measurement and refuses; the other reasons are facts about
+        // the recorded evidence or the spec's own choice (no anchors) and are reported, not refused.
+        if (rule.unknown_reason === "git-unavailable") unmeasurable.push(rule.rule_id);
+        else unknowns.push({ rule_id: rule.rule_id, reason: rule.unknown_reason });
       }
     }
-    return ok(violations);
+    if (unmeasurable.length > 0) {
+      return err({
+        code: "VALIDATION_ERROR",
+        message:
+          `plan-close cannot close ${spec.slug}: the state of cited rule(s) ${unmeasurable.join(", ")} could not be measured ` +
+          `(git-unavailable: git did not answer for HEAD or the citing pass's commit). Restore git access, then close again.`,
+        field: "gate:plan-close:cited-rule-measurement",
+      });
+    }
+    return ok({ violations, unknowns });
   }
 
   /**

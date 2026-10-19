@@ -77,10 +77,14 @@ export type ProposeRuleChangeInput =
   | { op: "add"; leaf: string; statement: string; examples: string[]; enforced_by: RuleEnforcement }
   | { op: "modify"; id: string; statement?: string; examples?: string[]; enforced_by?: RuleEnforcement }
   | { op: "retire"; id: string; note: string }
-  | { op: "amend"; id: string; statement?: string; examples?: string[]; enforced_by?: RuleEnforcement };
+  | { op: "amend"; id: string; statement?: string; examples?: string[]; enforced_by?: RuleEnforcement }
+  | { op: "withdraw"; id: string };
 
 /** The `amend` member of {@link ProposeRuleChangeInput}: rewrites THIS spec's own proposed `add` entry in place. */
 type AmendInput = Extract<ProposeRuleChangeInput, { op: "amend" }>;
+
+/** The `withdraw` member of {@link ProposeRuleChangeInput}: removes THIS spec's own unlanded `modify` / `retire` entry. */
+type WithdrawInput = Extract<ProposeRuleChangeInput, { op: "withdraw" }>;
 
 /** Options of {@link RuleChangeService.propose}. */
 export interface ProposeOpts {
@@ -181,6 +185,7 @@ export class RuleChangeService implements RuleChangeLandingPort {
   ): Promise<Result<{ change: RuleChange; doc: DocRecord }, LoreError>> {
     const actor = resolveWriteActorFor(this.store, opts.by);
     if (input.op === "amend") return this.proposeAmendOfProposal(specRef, input, opts, actor);
+    if (input.op === "withdraw") return this.proposeWithdrawal(specRef, input, opts, actor);
     const shaped = shapeInput(input);
     if (!shaped.ok) return shaped;
     const specResult = await this.resolveSpec(specRef);
@@ -514,6 +519,7 @@ export class RuleChangeService implements RuleChangeLandingPort {
     summary: string,
     actor: string,
     correctionReason: string | undefined,
+    auditChangeOp: string = change.op,
   ): Promise<Result<{ change: RuleChange; doc: DocRecord }, LoreError>> {
     const written = await this.writer.writeDoc({
       doc: spec,
@@ -523,7 +529,7 @@ export class RuleChangeService implements RuleChangeLandingPort {
       auditAction: "update",
       auditDetails: {
         operation: "rule-propose",
-        change_op: change.op,
+        change_op: auditChangeOp,
         rule_id: change.id,
         ...(correctionReason !== undefined ? { correction: { reason: correctionReason } } : {}),
       },
@@ -583,6 +589,55 @@ export class RuleChangeService implements RuleChangeLandingPort {
         ? `Correction: ${correctionReason}`
         : `Rule change proposed: amend ${amended.id}`;
       const written = await this.writeChangeSet(spec, next, amended, status, summary, actor, correctionReason);
+      if (!written.ok && written.error.code === "STALE_VERSION") { lastStale = written.error; continue; }
+      return written;
+    }
+    return err(lastStale ?? staleExhausted(specResult.value.id as string));
+  }
+
+  /**
+   * `withdraw`: remove this spec's own unlanded `modify` / `retire` entry for `id` from its change set — the exit
+   * for an entry that must not stay reserved (e.g. a spec split into others). One version, one audit row
+   * (`change_op: "withdraw"`); a locked spec needs the BR-1069 correction ({@link resolveLockExit}).
+   * @returns the removed entry; VALIDATION_ERROR naming the id when this spec carries no unlanded modify / retire
+   *   of it (an `add` is refused: its reserved id is released only by deprecating the spec).
+   */
+  private async proposeWithdrawal(
+    specRef: string,
+    input: WithdrawInput,
+    opts: ProposeOpts,
+    actor: string,
+  ): Promise<Result<{ change: RuleChange; doc: DocRecord }, LoreError>> {
+    const specResult = await this.resolveSpec(specRef);
+    if (!specResult.ok) return specResult;
+    const exit = await this.resolveLockExit(specResult.value, opts.correction);
+    if (!exit.ok) return exit;
+    const correctionReason = exit.value.correctionReason;
+
+    let lastStale: LoreError | undefined;
+    for (let attempt = 0; attempt <= MAX_CAS_REAPPLIES; attempt += 1) {
+      const fresh = await this.readDoc(specResult.value.id);
+      if (!fresh.ok) return fresh;
+      const spec = fresh.value;
+      const existing = ruleChangesOf(spec.extra);
+      const entry = existing.find((c) => c.id === input.id);
+      const refuse = (why: string) => err(validationError("id", `a withdraw removes an entry of ${spec.slug}'s change set: ${input.id} ${why}`, input.id));
+      if (entry === undefined) return refuse("is not in this spec's change set");
+      if (isLanded(entry)) return refuse("already landed; a landed entry is history");
+      if (entry.op === "add") return refuse("is a proposed add; its reserved id is released by deprecating the spec, not by a withdraw");
+      const baseline = await this.store.findMany({ type: "baseline" });
+      if (!baseline.ok) return baseline;
+      const leaf = collectLeafRules(baseline.value).get(entry.id)?.leaf;
+      if (this.writeAuthority !== undefined && leaf !== undefined) {
+        const verdict = await this.writeAuthority.authorize([leaf], "rule-propose", actor);
+        if (!verdict.ok) return verdict;
+      }
+      const status = exit.value.keepStatus ? spec.status : resolveStatusAfterContractEdit(spec.status, true);
+      const summary = correctionReason !== undefined
+        ? `Correction: ${correctionReason}`
+        : `Rule change withdrawn: ${entry.op} ${entry.id}`;
+      const next = existing.filter((c) => c.id !== input.id);
+      const written = await this.writeChangeSet(spec, next, entry, status, summary, actor, correctionReason, "withdraw");
       if (!written.ok && written.error.code === "STALE_VERSION") { lastStale = written.error; continue; }
       return written;
     }
@@ -843,7 +898,7 @@ function shapeAmend(input: AmendInput): Result<AmendInput, LoreError> {
  * Validate a caller's input with the stored-shape schema (`add` against a placeholder id) so a refusal burns no
  * id and the CLI cannot write a shape the reader would later drop.
  */
-function shapeInput(input: Exclude<ProposeRuleChangeInput, { op: "amend" }>): Result<RuleChange, LoreError> {
+function shapeInput(input: Exclude<ProposeRuleChangeInput, { op: "amend" | "withdraw" }>): Result<RuleChange, LoreError> {
   const candidate =
     input.op === "add" ? { ...input, id: PREVALIDATION_ID } : input.op === "retire" ? { ...input, note: input.note.trim() } : input;
   const parsed = ruleChangeSchema.safeParse(candidate);

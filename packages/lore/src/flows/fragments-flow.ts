@@ -38,7 +38,7 @@ import {
 import { discoverFragments, type FragmentRoots } from "../service/context-fragments/discover.js";
 import { renderOutlet } from "../service/context-fragments/render.js";
 import { expandFragments } from "../service/context-fragments/expand.js";
-import { LORE_CONTEXT_VARIABLES } from "../service/context-variables-registry.js";
+import { LORE_CONTEXT_VARIABLES, configVariableValues } from "../service/context-variables-registry.js";
 import { findDuplicateLines, type ReadingGroup } from "../service/context-fragments/duplicates.js";
 import {
   isLoreRulesFileName,
@@ -185,7 +185,12 @@ function selectSafely(
     const selected = selectFragments(all, { outlet, ...(agentType !== undefined ? { agentType } : {}), config });
     // reason: the ONE expansion point of this flow - render, check (caps, duplicates), rules/skills drift all read
     // the selection through here, so they measure the same expanded text (D10).
-    const expanded = expandFragments(selected, outlet, { invocation: {} }, LORE_CONTEXT_VARIABLES);
+    const expanded = expandFragments(
+      selected,
+      outlet,
+      { invocation: configVariableValues(deps.globalConfig, deps.projectConfig, outlet) },
+      LORE_CONTEXT_VARIABLES,
+    );
     if (!expanded.ok) {
       const { message } = expanded.error as { message: string };
       return { ok: false, error: { code: "VALIDATION_ERROR", message } };

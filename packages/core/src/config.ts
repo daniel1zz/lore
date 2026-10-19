@@ -722,7 +722,7 @@ const WorkflowConfigSchema = z
     /**
      * `lore integrate` knobs (spec-main-advances-only-through-lore-integrate-per-session, BR-1245).
      * `floor_command` is the post-merge floor: a shell command run in the integration worktree on the merged
-     * tree BEFORE main moves (this repository: `bun run check:static`). It has NO default on purpose — a project
+     * tree BEFORE main moves (e.g. `bun run check:floor`; the shipped dispatch rule renders whatever is set here). It has NO default on purpose — a project
      * that never named its floor must not have main advance on an unmeasured tree; `lore integrate` refuses
      * with `workflow.integrate.floor_command` named when it is absent.
      */

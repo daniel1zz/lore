@@ -334,13 +334,16 @@ export interface InstallPlan {
   /** Paths requiring a pre-write backup (subset of `writes`' paths — see invariant). */
   backups: string[];
   /**
-   * Paths tracked in `current` but absent from `payload` — entries a future
-   * uninstall/removal pass should remove. P1 payloads are currently a
-   * superset-stable asset list (no asset is ever dropped between releases),
-   * so this is typically empty; the field exists so the shape is stable for
-   * when that changes.
+   * RETIRED paths: tracked in `current`, absent from `payload`, and present on
+   * disk byte-identical to the ledger sha (never edited) — safe to remove.
    */
   removals: string[];
+  /**
+   * Retired paths present on disk but EDITED since lore wrote them (sha differs
+   * from the ledger). Treated as diverged (BR-818): kept, unless the caller opts
+   * into backup-then-remove. A retired path absent from disk appears in neither list.
+   */
+  divergedRemovals: string[];
 }
 
 // ─── Planner ────────────────────────────────────────────────────────────────
@@ -359,8 +362,11 @@ export interface InstallPlan {
  *      on-disk content is worth preserving before being overwritten (a lore
  *      entry may have been hand-edited by the user since the last run).
  *
- * `removals` is `current.entries` minus every path present in `payload.files`
- * (lore-tracked paths that a payload no longer declares).
+ * Retired paths (`current.entries` minus every path in `payload.files`) are split
+ * by their on-disk sha: equal to the ledger → `removals`; different →
+ * `divergedRemovals`; absent → neither. `existingFiles` therefore also carries
+ * the on-disk sha of retired ledger paths (extra keys beyond the payload are inert
+ * for the payload loop).
  *
  * @param current - The manifest from the target's last successful `lore
  *   setup` run, or `null` on a first-ever install (no prior state).
@@ -372,7 +378,7 @@ export interface InstallPlan {
  *
  * @example
  * planInstall(null, { files: [{ path: "skills/lore/SKILL.md", kind: "skill", content: "x", sha256: "abc" }] }, new Map());
- * // => { writes: [{path: "skills/lore/SKILL.md", ...}], skips: [], backups: [], removals: [] }
+ * // => { writes: [{path: "skills/lore/SKILL.md", ...}], skips: [], backups: [], removals: [], divergedRemovals: [] }
  */
 export function planInstall(
   current: SetupManifest | null,
@@ -404,9 +410,14 @@ export function planInstall(
   }
 
   const payloadPaths = new Set(payload.files.map((f) => f.path));
-  const removals = (current?.entries ?? [])
-    .map((e) => e.path)
-    .filter((path) => !payloadPaths.has(path));
+  const removals: string[] = [];
+  const divergedRemovals: string[] = [];
+  for (const entry of current?.entries ?? []) {
+    if (payloadPaths.has(entry.path)) continue;
+    const onDiskSha = existingFiles.get(entry.path);
+    if (onDiskSha === undefined) continue;
+    (onDiskSha === entry.sha256 ? removals : divergedRemovals).push(entry.path);
+  }
 
-  return { writes, skips, backups, removals };
+  return { writes, skips, backups, removals, divergedRemovals };
 }
