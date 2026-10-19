@@ -1,4 +1,5 @@
 // @spawns packages/lore/src/index.ts
+// @reads packages/lore/src/service/integrate-service.ts
 /**
  * @spec_ref spec-a-task-is-archived-only-on-a-landing-lore-recorded-one  AC-LRD-2;
  *   business rule BR-1336 (integration records a landing on every claimant, also when the branch is already integrated).

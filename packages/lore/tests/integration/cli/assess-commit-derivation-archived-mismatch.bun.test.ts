@@ -118,7 +118,7 @@ afterEach(() => {
 /** Creates a plan with N tasks; optionally archives every one of them via corpusService.set. */
 async function createPlanWithTasks(
   taskTitles: string[],
-  opts: { archiveAll: boolean },
+  opts: { archiveAll: boolean; /** A recorded landing (what `lore integrate` writes) stamped on every task. */ landing?: { before: string; head: string } },
 ): Promise<{ planId: string; planSlug: string; taskSlugs: string[] }> {
   const app = createApp(join(tmpDir, ".lore", "lore.db"), undefined, liveAmbient(), liveWriteContext());
   try {
@@ -138,6 +138,18 @@ async function createPlanWithTasks(
         content: "Task body.",
         extra: {
           plan_id: planResult.value.id,
+          ...(opts.landing !== undefined
+            ? {
+                landing: {
+                  branch: "b",
+                  branch_head: opts.landing.head,
+                  main_before: opts.landing.before,
+                  main_after: opts.landing.head,
+                  landing_commit: opts.landing.head,
+                  recorded_at: "t",
+                },
+              }
+            : {}),
           verification_evidence: [
             // reason: DCL-1 (b) — `set --status archived` applies the `lore done` floors, so the seeded pass is runner-attested.
             {
@@ -182,15 +194,17 @@ function commitConventionalNoSlug() {
   spawnSync("git", ["commit", "-q", "-m", "feat(assess): add scope mismatch warning"], { cwd: tmpDir, env: GIT_ENV });
 }
 
-/** Commits that DO reference the given task slugs (realistic auto-derivation happy path). */
-function commitReferencingSlugs(slugs: string[]) {
+/** A seed commit and one own commit (realistic auto-derivation happy path); returns the range the tasks' landing records. */
+function commitOwnWork(): { before: string; head: string } {
   spawnSync("git", ["init", "-q"], { cwd: tmpDir, env: GIT_ENV });
-  for (const [i, slug] of slugs.entries()) {
-    const file = `own-${String(i)}.txt`;
-    writeFileSync(join(tmpDir, file), `own-content-${String(i)}\n`);
+  const commitFile = (file: string, message: string): string => {
+    writeFileSync(join(tmpDir, file), `${file}\n`);
     spawnSync("git", ["add", file], { cwd: tmpDir, env: GIT_ENV });
-    spawnSync("git", ["commit", "-q", "-m", `implements ${slug}`], { cwd: tmpDir, env: GIT_ENV });
-  }
+    spawnSync("git", ["commit", "-q", "-m", message], { cwd: tmpDir, env: GIT_ENV });
+    return spawnSync("git", ["rev-parse", "HEAD"], { cwd: tmpDir, env: GIT_ENV, encoding: "utf8" }).stdout.trim();
+  };
+  const before = commitFile("seed.txt", "seed commit");
+  return { before, head: commitFile("own-0.txt", "feat: the tasks' own work") };
 }
 
 function writeAiConfig(command: string) {
@@ -303,8 +317,8 @@ describe("lore assess — archived plan + conventional (non-matching) commits: H
 
 describe("lore assess — archived plan + MATCHING commits: CONTROL", () => {
   it("derives 'derived' (not 'unverifiable_convention_mismatch'), and an evidence-based scope_fidelity score survives untouched", async () => {
-    const { planSlug, taskSlugs } = await createPlanWithTasks(["Matching Task One"], { archiveAll: true });
-    commitReferencingSlugs(taskSlugs);
+    const landing = commitOwnWork();
+    const { planSlug } = await createPlanWithTasks(["Matching Task One"], { archiveAll: true, landing });
     writeAiConfig(writeEvidenceScopeFidelityProviderScript());
 
     const cmd = await importAssessCommand();

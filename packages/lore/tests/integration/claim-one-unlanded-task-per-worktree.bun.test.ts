@@ -8,8 +8,8 @@
  * repo's own `.lore/`.
  *
  * Coverage: (1) a second task naming a working copy whose earlier claimant is unlanded exits 4 naming the first task
- * and writes nothing, for the same actor (NEGATIVE + STATE); (2) the same holds for the same session id
- * (NEGATIVE); (3) once the first task's landing is recorded on a commit on main the same claim succeeds (HAPPY);
+ * and writes nothing, for the same actor under a different session (NEGATIVE + STATE); (2) the same holds for the
+ * same session id (NEGATIVE); (3) once the first task's landing is recorded on a commit on main the same claim succeeds (HAPPY);
  * (4) a claim naming another working copy is unaffected (BOUNDARY); (5) an archived earlier claimant never blocks
  * (BOUNDARY).
  */
@@ -29,6 +29,9 @@ interface RunResult {
 const PROJECT_ROOT = new URL("../../", import.meta.url).pathname.replace(/\/$/, "");
 const INDEX_TS = join(PROJECT_ROOT, "src", "index.ts");
 const SESSION = "11111111-2222-3333-4444-555555555555";
+// two session ids with the same first 8 chars: one actor (`agent:session-abcd1234`), two sessions
+const ACTOR_SESSION_A = "abcd1234-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
+const ACTOR_SESSION_B = "abcd1234-bbbb-bbbb-bbbb-bbbbbbbbbbbb";
 const DEFAULT_SESSION = "99999999-8888-7777-6666-555555555555";
 
 let dir: string;
@@ -115,13 +118,15 @@ afterEach(() => {
 });
 
 describe("AC-LRD-3 — one working copy carries one unlanded task", () => {
-  it("(1) the same actor claiming a second task on the same working copy exits 4 naming the first task and writes nothing", () => {
+  it("(1) the same actor under a DIFFERENT session claiming a second task on the same working copy exits 4 naming the first task and writes nothing", () => {
     makeBranch("feat-shared");
     const first = createTask("First");
     const second = createTask("Second");
-    mustRun(["claim", first, "--worktree", "feat-shared"]);
+    // reason: the actor is `agent:session-<first 8 chars of the session id>`, so two session ids sharing their first
+    // 8 chars are ONE actor in TWO sessions — the only way "same actor" and "same session" come apart.
+    mustRun(["claim", first, "--worktree", "feat-shared"], { CLAUDE_CODE_SESSION_ID: ACTOR_SESSION_A });
 
-    const refused = runLore(["claim", second, "--worktree", "feat-shared"]);
+    const refused = runLore(["claim", second, "--worktree", "feat-shared"], { CLAUDE_CODE_SESSION_ID: ACTOR_SESSION_B });
 
     expect(refused.exitCode, refused.text).toBe(4);
     expect(refused.text).toContain(first);
@@ -129,7 +134,7 @@ describe("AC-LRD-3 — one working copy carries one unlanded task", () => {
     expect(claimOf(second)).toBeUndefined();
   }, 300_000);
 
-  it("(2) the same session is refused alike", () => {
+  it("(2) the SAME session (same id, so the same actor too) is refused alike", () => {
     makeBranch("feat-session");
     const first = createTask("First");
     const second = createTask("Second");

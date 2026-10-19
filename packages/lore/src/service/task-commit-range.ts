@@ -70,6 +70,13 @@ export type TaskLanding = z.infer<typeof taskLandingSchema>;
 /** A landing without its timestamp: what integrate measures. */
 export type LandingFact = Omit<TaskLanding, "recorded_at">;
 
+/**
+ * What `lore integrate` hands the recorder. `base_from_claim: true` marks a branch found ALREADY on main: there is no
+ * merge to measure, so the landed commit is the branch head itself, and the recorder takes each task's own claim
+ * `base_sha` as the range start (`main_before` is then ignored). The flag is never persisted.
+ */
+export type LandingRequest = LandingFact & { readonly base_from_claim?: true };
+
 /** Reads `extra.landing`; `undefined` when absent or malformed (a malformed record is never trusted). */
 export function readTaskLanding(extra: Record<string, unknown> | undefined): TaskLanding | undefined {
   const raw = extra?.["landing"];
