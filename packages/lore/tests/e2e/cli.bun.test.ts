@@ -23,7 +23,8 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { mkdirSync, rmSync, existsSync, writeFileSync, appendFileSync } from "fs";
+import { mkdirSync, rmSync, existsSync, writeFileSync } from "fs";
+import { patchLoreConfig } from "../helpers/patch-lore-config.js";
 import { join } from "path";
 import { tmpdir } from "os";
 
@@ -95,8 +96,8 @@ function runLore(args: string[], cwd: string): RunResult {
  * config file `init` already wrote, never touches `init`'s own exit code/output.
  */
 function disableAllGates(dir: string): void {
-  appendFileSync(
-    join(dir, ".lore", "config.yaml"),
+  patchLoreConfig(
+    dir,
     [
       "workflow:",
       "  gates:",

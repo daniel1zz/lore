@@ -26,6 +26,7 @@ import { dirname, join, resolve } from "node:path";
 import { Database } from "bun:sqlite";
 import { evaluateRecordedWorktree, type WorktreeGitProbe } from "../../src/service/worktree-cleanup.js";
 import type { WorktreeRemovalFacts } from "../../src/service/worktree-removal-test.js";
+import { patchLoreConfig } from "../helpers/patch-lore-config.js";
 
 const PACKAGE_ROOT = new URL("../../", import.meta.url).pathname.replace(/\/$/, "");
 const INDEX_TS = join(PACKAGE_ROOT, "src", "index.ts");
@@ -388,8 +389,8 @@ function must(run: Run, what: string): Run {
 
 /** prd -> spec(AC with falsifier) -> plan -> task, gates off, corpus committed; returns what `verify --falsify` needs. */
 function falsifyFixture(command: string): { plan: string; task: string; acId: string } {
-  appendFileSync(
-    join(repo, ".lore", "config.yaml"),
+  patchLoreConfig(
+    repo,
     ["workflow:", "  gates:", "    spec-create:", "      enabled: false", "    spec-promote:", "      enabled: false", "    plan-promote:", "      enabled: false", "    task-claim:", "      enabled: false", '    "task-create":', "      enabled: false", ""].join("\n"),
   );
   const acId = "AC-AU11-FALSIFY";

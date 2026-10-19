@@ -24,10 +24,10 @@
 
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 const setDefaultTimeout = (ms: number): void => { vi.setConfig({ testTimeout: ms, hookTimeout: ms }); };
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
+import { mkdtempSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
-import yaml from "yaml";
+import { patchLoreConfig } from "../helpers/patch-lore-config.js";
 import { citeSpecViaAsyncCli, asyncLoreRunnerFor } from "../helpers/cli-live-rule.js";
 import { runLoreInProcess } from "../helpers/run-lore-in-process";
 
@@ -89,10 +89,7 @@ describe("lore ac set --correction, compiled binary (AC-CC-2)", () => {
     await mustLore(["create", "prd", "--title", "Correction PRD", "--content", "PRD body.", "--no-ai"]);
     // The review-judgment checkpoint defaults spec/adr into `judgment_required_types`; disabled so the approval
     // below is a fixture step, not the behaviour under test.
-    const cfgPath = join(dir, ".lore", "config.yaml");
-    const existing = yaml.parse(readFileSync(cfgPath, "utf8")) as Record<string, unknown>;
-    const workflow = { ...(existing["workflow"] as Record<string, unknown> | undefined), review: { judgment_required_types: [] } };
-    writeFileSync(cfgPath, yaml.stringify({ ...existing, workflow }), "utf8");
+    patchLoreConfig(dir, { workflow: { review: { judgment_required_types: [] } } });
 
     spec = parseSlug(
       await mustLore(["create", "spec", "--title", "Correction Spec", "--kind", "tech", "--content", "## Overview\n\nBody.\n", "--no-ai"]),

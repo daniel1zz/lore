@@ -82,6 +82,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import { runLoreInProcess } from "../helpers/run-lore-in-process";
+import { patchLoreConfig } from "../helpers/patch-lore-config.js";
 
 // ─── Path / spawn setup ─────────────────────────────────────────────────────
 
@@ -325,9 +326,7 @@ describe("AC-097-4: archive_candidates injection surfacing (spec-lifecycle-archi
     // inert-a-wholesale named. Appending is safe here because this is the
     // FIRST workflow override on this fixture's config. The `review` key empties judgment_required_types:
     // plans are judged by default (BR-281 / BR-1237) and this plan is approved only to be archived.
-    const cfgPath = join(dir, ".lore", "config.yaml");
-    const existing = readFileSync(cfgPath, "utf8");
-    writeFileSync(cfgPath, `${existing}\nworkflow:\n  gates:\n    "plan-close":\n      enabled: false\n  review:\n    judgment_required_types: []\n`, "utf8");
+    patchLoreConfig(dir, `workflow:\n  gates:\n    "plan-close":\n      enabled: false\n  review:\n    judgment_required_types: []\n`);
 
     const prdResult = await runLore(["create", "prd", "--title", "Archive Candidates PRD", "--content", "root", "--no-ai"], dir);
     expect(prdResult.exitCode).toBe(0);

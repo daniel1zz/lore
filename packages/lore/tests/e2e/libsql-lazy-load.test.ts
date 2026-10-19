@@ -99,6 +99,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { type SpawnSyncReturns, spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { patchLoreConfig } from "../helpers/patch-lore-config.js";
 import { tmpdir } from "node:os";
 import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -155,8 +156,8 @@ function makeCorpus(): string {
  * `tests/e2e/sync-cli.bun.test.ts` already uses.
  */
 function writeSyncEnabledConfig(dir: string, tokenEnvName: string): void {
-  writeFileSync(
-    join(dir, ".lore", "config.yaml"),
+  patchLoreConfig(
+    dir,
     [
       "project:",
       "  name: libsql-lazy-load-oracle",

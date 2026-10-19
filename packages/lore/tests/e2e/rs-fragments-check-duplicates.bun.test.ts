@@ -19,6 +19,7 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "fs"
 import { tmpdir } from "os";
 import { join } from "path";
 import { runLoreInProcess } from "../helpers/run-lore-in-process";
+import { patchLoreConfig } from "../helpers/patch-lore-config.js";
 
 const REPO_ROOT = new URL("../../../../", import.meta.url).pathname.replace(/\/$/, "");
 
@@ -127,7 +128,7 @@ describe("AC-RS-8 lore fragments check duplicate and selection findings", () => 
 
   it("context.fragments.disable in .lore/config.yaml exits 4 naming selection.yaml", async () => {
     const sb = await makeSandbox();
-    writeFileSync(join(sb.corpus, ".lore", "config.yaml"), "context:\n  fragments:\n    disable: [agent-rules]\n", "utf8");
+    patchLoreConfig(sb.corpus, "context:\n  fragments:\n    disable: [agent-rules]\n");
     const res = await lore(sb, "fragments", "check");
     expect(res.code).toBe(4);
     expect(res.stderr).toContain("selection.yaml");

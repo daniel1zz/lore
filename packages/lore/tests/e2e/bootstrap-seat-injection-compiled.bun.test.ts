@@ -22,6 +22,7 @@ import { appendFileSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSy
 import { join } from "path";
 import { tmpdir } from "os";
 import { runLoreInProcess } from "../helpers/run-lore-in-process";
+import { patchLoreConfig } from "../helpers/patch-lore-config.js";
 
 const REPO_ROOT = new URL("../../../../", import.meta.url).pathname.replace(/\/$/, "");
 
@@ -263,11 +264,7 @@ describe("AC-SI-4: retired config knobs + char_budget", () => {
   });
 
   it("exits 0 and warns exactly once per SET retired key on stderr", async () => {
-    appendFileSync(
-      join(dir, ".lore", "config.yaml"),
-      "\nworkflow:\n  bootstrap_injection:\n    max_active_plans: 2\n    max_handoffs: 2\n    max_pending_slugs: 2\n",
-      "utf8",
-    );
+    patchLoreConfig(dir, "workflow:\n  bootstrap_injection:\n    max_active_plans: 2\n    max_handoffs: 2\n    max_pending_slugs: 2\n");
     const r = await injection(dir, "feat-knobs", scratch);
     expect(r.exitCode).toBe(0);
     for (const key of ["max_active_plans", "max_handoffs", "max_pending_slugs"]) {
@@ -290,7 +287,8 @@ describe("AC-SI-4: retired config knobs + char_budget", () => {
   });
 
   it("char_budget=50 with a seat claim -> budget_exceeded true, payload parses as JSON (never sliced)", async () => {
-    appendFileSync(join(dir, ".lore", "config.yaml"), "    char_budget: 50\n", "utf8");
+    // reason: continues the `bootstrap_injection:` block the test above appended (the helper merges, so it re-states the key).
+    patchLoreConfig(dir, { workflow: { bootstrap_injection: { char_budget: 50 } } });
     const r = await injection(dir, "feat-knobs", scratch);
     expect(r.exitCode).toBe(0);
     const parsed = JSON.parse(r.stdout) as { budget_exceeded?: boolean; seat_claims: unknown[] };

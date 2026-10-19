@@ -45,7 +45,8 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { loosenOverrideClasses } from "../integration/fixtures/autonomy-override-helpers.js";
 import { Database } from "bun:sqlite";
-import { appendFileSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { patchLoreConfig } from "../helpers/patch-lore-config.js";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -158,8 +159,8 @@ function buildCorpus(label: string, setup: GateSetup): Corpus {
     ruleId = ruleOut.stdout.match(/\bBR-\d+\b/)?.[0];
     if (ruleId === undefined) throw new Error(`could not parse rule id from: ${ruleOut.stdout}`);
     if (setup.gate !== "absent") {
-      appendFileSync(
-        join(dir, ".lore", "config.yaml"),
+      patchLoreConfig(
+        dir,
         `workflow:\n  gates:\n    ac-cite:\n      mode: ${setup.gate}\n      armed_branches:\n        - ${branchSlug}\n`,
       );
     }

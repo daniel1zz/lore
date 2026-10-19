@@ -75,6 +75,7 @@ import {
 import { tmpdir } from "os";
 import { dirname, join } from "path";
 import { parse as parseYaml } from "yaml";
+import { patchLoreConfig } from "../helpers/patch-lore-config.js";
 import { BOOTSTRAP_FRAMING_LINE } from "@lore/core";
 import type { Fragment, FragmentFrontmatter } from "@lore/core";
 import { LORE_CONTEXT_VARIABLES, configVariableValues } from "../../src/service/context-variables-registry";
@@ -207,8 +208,7 @@ function writeGlobalConfig(sb: Sandbox, yaml: string): void {
 }
 
 function appendProjectConfig(sb: Sandbox, yaml: string): void {
-  const path = join(sb.corpus, ".lore", "config.yaml");
-  writeFileSync(path, `${readFileSync(path, "utf8")}${yaml}`, "utf8");
+  patchLoreConfig(sb.corpus, yaml);
 }
 
 function readJson(path: string): Record<string, unknown> {
