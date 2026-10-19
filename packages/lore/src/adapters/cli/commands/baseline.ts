@@ -53,7 +53,7 @@ import { loadLoreApp } from "../loader.js";
 import { exitCode, formatErrorFor, resolveActor } from "../utils.js";
 import type { App } from "../../../app.js";
 import type { AddNodeInput, BaselineTreeEntry, SiteMapChange } from "../../../service/rule-service.js";
-import { NON_BUSINESS_PREFIX, commandFixCommand, computeLeafCoverage, computeUndeclaredCommands, partitionDeclaredCommands, siteFixCommand, staleCommandFixCommand } from "../../../service/leaf-coverage.js";
+import { NON_BUSINESS_PREFIX, commandFixCommand, collectOwnedSites, computeLeafCoverage, computeUndeclaredCommands, partitionDeclaredCommands, siteFixCommand, staleCommandFixCommand } from "../../../service/leaf-coverage.js";
 import { listRunnableCommands } from "../runnable-commands.js";
 import { buildOwnerLeafIndex } from "../../../service/owned-by.js";
 import { resolveDoc } from "../../../service/resolve.js";
@@ -247,6 +247,8 @@ interface LeafCoverageReport {
   commands: string[];
   /** Declared commands the registry no longer has; each makes the leaf incomplete with its own fix. */
   stale_commands: { command: string; fix: string }[];
+  /** What measured the leaf: its declared commands' census, the sites it owns (command-less leaf), or nothing (unmeasured). */
+  measured_by: "commands" | "owned_sites" | "none";
   sites: number;
   gaps: string[];
   not_measured: string[];
@@ -260,7 +262,8 @@ interface LeafCoverageReport {
 
 /**
  * `coverage <leaf|branch>`: census each leaf's declared `commands`, compare with its `site_map`.
- * A leaf declaring no command is NOT ok — completeness of an unmeasured leaf is unproven.
+ * A leaf declaring no command is measured by the sites it owns (see collectOwnedSites); one that owns none is
+ * UNMEASURED and NOT ok — completeness of an unmeasured leaf is unproven.
  */
 async function runCoverage(target: string, json: boolean, inv: Invocation): Promise<ExitReport> {
   const { app, dbPath } = loadLoreApp({ inv });
@@ -315,6 +318,19 @@ async function runCoverage(target: string, json: boolean, inv: Invocation): Prom
         for (const site of census.bootstrap) bootstrapByKey.set(site.key, site);
       }
       const siteMap = (leaf.extra["site_map"] ?? {}) as Record<string, string[]>;
+      // reason: BL-D1 - a cross-cutting leaf declares no command (its rules guard sites other leaves' commands reach), so it
+      // is measured by the sites it owns instead of a proxy command; owning none is UNMEASURED, never silently ok.
+      const ownedSites =
+        commands.length > 0
+          ? []
+          : collectOwnedSites({
+              leafId: leaf.id,
+              ownSiteMap: siteMap,
+              // reason: inbound hand-offs come from EVERY leaf of the corpus, not only the leaves under the analysed target.
+              otherSiteMaps: all.value.filter((l) => l.extra["node"] === "leaf" && l.id !== leaf.id).map((l) => (l.extra["site_map"] ?? {}) as Record<string, string[]>),
+              ownerLeaves,
+            });
+      for (const site of ownedSites) byKey.set(site.key, site);
       const rules = Array.isArray(leaf.extra["rules"]) ? (leaf.extra["rules"] as Array<{ id: string; lifecycle: string }>) : [];
       const verdict = computeLeafCoverage({
         sites: [...byKey.values()],
@@ -327,6 +343,7 @@ async function runCoverage(target: string, json: boolean, inv: Invocation): Prom
       return {
         slug: leaf.slug,
         commands,
+        measured_by: commands.length > 0 ? "commands" : ownedSites.length > 0 ? "owned_sites" : "none",
         stale_commands: stale.map((command) => ({ command, fix: staleCommandFixCommand(leaf.slug, command) })),
         sites: byKey.size,
         gaps: verdict.gaps,
@@ -334,7 +351,7 @@ async function runCoverage(target: string, json: boolean, inv: Invocation): Prom
         unresolved_imports: verdict.unresolvedImports ?? [],
         bootstrap: [...bootstrapByKey.keys()].sort(),
         fix_commands: [...verdict.gaps, ...verdict.notMeasured].map((key) => siteFixCommand(leaf.slug, key)),
-        ok: commands.length > 0 && stale.length === 0 && verdict.ok,
+        ok: (commands.length > 0 || ownedSites.length > 0) && stale.length === 0 && verdict.ok,
       };
     });
     // reason: complete coverage is absolute at the root (BR-660): a runnable command declared by no leaf is never
@@ -357,7 +374,7 @@ async function runCoverage(target: string, json: boolean, inv: Invocation): Prom
     } else {
       if (reports.length === 0) printLine(inv.io.stdout, `${resolved.value.slug}: no leaves under this node.`);
       for (const r of reports) {
-        const state = r.commands.length === 0 ? "UNMEASURED (no commands declared; use `lore baseline map --command`)" : r.ok ? "complete" : "INCOMPLETE";
+        const state = r.measured_by === "none" ? "UNMEASURED (no commands declared and no owned sites; use `lore baseline map --command` or map the sites it owns)" : r.ok ? "complete" : "INCOMPLETE";
         printLine(inv.io.stdout, `${r.slug}: ${state} - ${r.sites} site(s), ${r.gaps.length} gap(s), ${r.not_measured.length} not_measured, ${r.unresolved_imports.length} unresolved import(s), ${r.bootstrap.length} bootstrap (not counted as gaps)`);
         for (const s of r.stale_commands) printLine(inv.io.stdout, `  stale command ${s.command} (no longer a runnable registry command)\n    fix: ${s.fix}`);
         for (const key of r.unresolved_imports) printLine(inv.io.stdout, `  unresolved  ${key} (census incomplete: sites behind this import are not listed)`);

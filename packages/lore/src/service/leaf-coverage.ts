@@ -4,7 +4,7 @@
  * Purpose: the pure verdict half of the completeness census (spec baseline-slice-2 C2): given the
  *   sites a leaf's commands reach, the leaf's `site_map`, and the live rule ids, report what is
  *   still unaccounted for.
- * Public surface: {@link computeLeafCoverage}, {@link partitionDeclaredCommands}, {@link staleCommandFixCommand},
+ * Public surface: {@link computeLeafCoverage}, {@link collectOwnedSites}, {@link partitionDeclaredCommands}, {@link staleCommandFixCommand},
  *   {@link NON_BUSINESS_PREFIX}, {@link LeafCoverage}.
  * Invariants:
  *   - A `non-business:owned-by <leaf> BR-n — <reason>` entry counts only while the owner leaf is a leaf and every named
@@ -42,6 +42,46 @@ export interface LeafCoverage {
 /** The command that accounts for one unaccounted (site, leaf) pair: map the site to a live rule or justify it. */
 export function siteFixCommand(leafSlug: string, siteKey: string): string {
   return `lore baseline map ${leafSlug} --site ${siteKey} --rule <BR-n> | --non-business <reason>`;
+}
+
+/** Split a site key (`file#symbol#code` | `file#symbol#dynamic:<label>`) back into a {@link Site}. */
+function siteFromKey(key: string): Site {
+  const first = key.indexOf("#");
+  const second = key.indexOf("#", first + 1);
+  const file = first < 0 ? key : key.slice(0, first);
+  const symbol = first < 0 || second < 0 ? "" : key.slice(first + 1, second);
+  const tail = second < 0 ? "" : key.slice(second + 1);
+  return tail.startsWith("dynamic:") ? { key, file, symbol, dynamic: true } : { key, file, symbol, code: tail, dynamic: false };
+}
+
+/**
+ * The sites a command-less (cross-cutting) leaf owns: its own `site_map` keys plus every site another leaf's `site_map`
+ * hands to it with `non-business:owned-by <this leaf> BR-n` (BL-D1). There is no census to run for such a leaf; these
+ * are the sites its rules guard, and each must be accounted for in ITS site map like any census site.
+ *
+ * @param leafId - id of the leaf being measured (the owner index is keyed by id and slug; both resolve to this id).
+ * @param ownSiteMap - the leaf's own `site_map`.
+ * @param otherSiteMaps - the `site_map` of every OTHER leaf.
+ * @param ownerLeaves - {@link buildOwnerLeafIndex}; resolves an owned-by entry's leaf reference.
+ * @returns the owned sites, sorted by key.
+ */
+export function collectOwnedSites(input: {
+  leafId: string;
+  ownSiteMap: Readonly<Record<string, readonly string[]>>;
+  otherSiteMaps: readonly Readonly<Record<string, readonly string[]>>[];
+  ownerLeaves: OwnerLeafIndex;
+}): Site[] {
+  const keys = new Set(Object.keys(input.ownSiteMap));
+  for (const siteMap of input.otherSiteMaps) {
+    for (const [key, entries] of Object.entries(siteMap)) {
+      const handedToThisLeaf = entries.some((entry) => {
+        const parsed = parseOwnedBy(entry);
+        return parsed.kind === "owned_by" && input.ownerLeaves.get(parsed.leaf)?.leafId === input.leafId;
+      });
+      if (handedToThisLeaf) keys.add(key);
+    }
+  }
+  return [...keys].sort().map(siteFromKey);
 }
 
 /** The command that declares a runnable command on a leaf (`<leaf>` is the leaf that owns the command's behaviour). */
