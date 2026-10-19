@@ -116,7 +116,7 @@ interface TwoSpecWorld {
   readonly headSha: string;
 }
 
-async function twoSpecWorld(bResult: "pass" | "fail"): Promise<TwoSpecWorld> {
+async function twoSpecWorld(bResult: "pass" | "fail", bTaskHasPlan = true): Promise<TwoSpecWorld> {
   const repo = makeRepo();
   const store = actedStore(new InMemoryStore());
   const config = {
@@ -152,7 +152,7 @@ async function twoSpecWorld(bResult: "pass" | "fail"): Promise<TwoSpecWorld> {
   );
   await put(
     store,
-    rawDoc("task", "task-b", { plan_id: planB.id, ac_scope: ["AC-B-1"], verification_evidence: [attested("AC-B-1", bResult, repo.oldSha)] }, planB.id, "draft"),
+    rawDoc("task", "task-b", { ...(bTaskHasPlan ? { plan_id: planB.id } : {}), ac_scope: ["AC-B-1"], verification_evidence: [attested("AC-B-1", bResult, repo.oldSha)] }, planB.id, "draft"),
   );
   cs.setRuleStateService(new RuleStateService(store, new SpawnGitPort(repo.root)));
   return { cs, planA, oldSha: repo.oldSha, headSha: repo.headSha };
@@ -194,5 +194,13 @@ describe("plan-close cited-rule refusal names the offending citing input (BR-984
     expect(error.message).toContain(w.oldSha);
     expect(error.message).toContain("lore verify plan-b --task task-b");
     expect(error.message).not.toContain("AC-A-1");
+  });
+
+  it("AC-PCSR-3 a run whose task records no plan renders `lore verify --task <task>` (no invented plan)", async () => {
+    const w = await twoSpecWorld("pass", false);
+    const error = await closeA(w);
+    expect(error.message).toContain("AC-B-1");
+    expect(error.message).toContain("`lore verify --task task-b`");
+    expect(error.message).not.toContain("lore verify plan-b");
   });
 });
