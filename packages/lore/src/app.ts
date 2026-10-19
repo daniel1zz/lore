@@ -261,6 +261,12 @@ export interface App {
    */
   judgmentService: JudgmentService;
   /**
+   * Read-only decision-log view for the dashboard's GET /api/decisions, /api/decisions/:id, /api/audit-items
+   * (HR-T3). Only its pure `read*` methods may be called from HTTP: `listPending` appends stale-close markers.
+   * Optional so test App literals stay valid; the routes answer 503 when absent.
+   */
+  decisionReadService?: DecisionService;
+  /**
    * StalenessProbeService — batch/single-doc orchestration for `lore review --staleness`
    * (SPEC-044 §Design Decisions D4): assembles candidates via the pure selection layer,
    * probes each via `aiProviderService.probeStaleness`, and persists via
@@ -1012,6 +1018,7 @@ function buildAppFromSqlite(
     // reason: JudgmentService owns review_judgments + calibration_records — store + own
     // telemetry wiring, same DI shape as TaskWorkflowService (D8). SPEC-034 §5, §9.1.
     judgmentService,
+    decisionReadService: new DecisionService({ store, executorRun: null }),
     // reason: StalenessProbeService takes two injected ports — probeStaleness (bound to
     // aiProviderService, the same instance createApp() already constructed) and
     // recordJudgment (bound to the SAME judgmentService instance above, never a second
@@ -1425,6 +1432,7 @@ function buildAppFromTurso(
     // reason: JudgmentService owns review_judgments + calibration_records — store + own
     // telemetry wiring, same DI shape as TaskWorkflowService (D8). SPEC-034 §5, §9.1.
     judgmentService,
+    decisionReadService: new DecisionService({ store, executorRun: null }),
     // reason: StalenessProbeService — see buildAppFromSqlite's identical comment.
     // SPEC-044 §Design Decisions D4.
     stalenessProbeService: new StalenessProbeService(
