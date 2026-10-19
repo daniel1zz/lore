@@ -528,8 +528,6 @@ export class CorpusWriteAuthority {
    * @param targets - The baseline docs this write mutates (a rule's leaf, both leaves of a move).
    * @param operation - Short verb recorded on the audit entry (`rule-add`, `ac-cite`, `baseline-map`, ...).
    * @param actor - The write's resolved actor (recorded beside the claim's own `by`).
-   * @param ownerProof - Owner leaves of an owned-by-only site-map write; when `targets` is out of scope, a lease
-   *   covering all of them authorizes the write instead.
    * @returns `undefined` when the guard is inert (no foreign crossing), the {@link CorpusScopeGrant}
    *   when a fresh scoped lease covers every target, or the foreign-write refusal.
    */
@@ -537,9 +535,8 @@ export class CorpusWriteAuthority {
     targets: readonly DocRecord[],
     operation: string,
     actor: string,
-    ownerProof?: readonly DocRecord[],
   ): Promise<Result<CorpusScopeGrant | undefined, LoreError>> {
-    const decided = await this.decide(targets, ownerProof);
+    const decided = await this.decide(targets);
     if (!decided.ok) return decided;
     if (decided.value === undefined) return ok(undefined);
     const grant = { ok: true as const, value: decided.value };
@@ -557,7 +554,6 @@ export class CorpusWriteAuthority {
       details: {
         operation,
         targets: targets.map((t) => t.slug),
-        ...(ownerProof !== undefined && ownerProof.length > 0 ? { owner_leaves: ownerProof.map((t) => t.slug) } : {}),
         claim_task: grant.value.task,
         claim_by: grant.value.by,
         claim_worktree: grant.value.worktree,
@@ -570,7 +566,7 @@ export class CorpusWriteAuthority {
   }
 
   /**
-   * THE decision: may a write to `targets` (or, for an owned-by-only site-map write, to its `ownerProof` leaves) proceed from this process? Inert (`ok(undefined)`) outside a foreign
+   * THE decision: may a write to `targets` proceed from this process? Inert (`ok(undefined)`) outside a foreign
    * crossing; otherwise the fresh scoped lease covering every target as a {@link CorpusScopeGrant}, or the
    * foreign-write refusal. Writes NOTHING — {@link authorize} adds the audit row, and the write route
    * (`CorpusService`) calls this directly, so the authorization report and the write it reports on read the SAME
@@ -578,21 +574,12 @@ export class CorpusWriteAuthority {
    */
   async decide(
     targets: readonly DocRecord[],
-    ownerProof?: readonly DocRecord[],
   ): Promise<Result<CorpusScopeGrant | undefined, LoreError>> {
     // reason: inert short-circuit through the shared predicate — never re-derive the table here.
     if (checkForeignCorpusWrite(this.context.foreign, false).allowed) return ok(undefined);
 
-    let grant = await this.findCoveringGrant(targets);
+    const grant = await this.findCoveringGrant(targets);
     if (!grant.ok) return grant;
-    // reason: an owned-by-only site-map write only points coverage at its owner leaves (it cannot add, change or
-    // retire another leaf's rules), so a lease covering EVERY owner authorizes it on any target. The caller proves
-    // "owned-by-only, each owner maps the site" (RuleService); the scope check stays here. Owners not covered either
-    // => the refusal below names the MAPPED leaf.
-    if (grant.value === undefined && ownerProof !== undefined && ownerProof.length > 0) {
-      grant = await this.findCoveringGrant(ownerProof);
-      if (!grant.ok) return grant;
-    }
     const verdict = checkCorpusScopedWrite(
       this.context.foreign,
       grant.value !== undefined,

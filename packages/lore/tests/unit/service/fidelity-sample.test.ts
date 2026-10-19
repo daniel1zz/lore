@@ -12,15 +12,13 @@
  *      Deprecated/retired rules and dangling ids are NOT in the pool.
  *  - renderJudgeInput(pairs, nonce) -> string; all rule/criterion text sits between
  *      `<<DATA-${nonce}>>` and `<<END-${nonce}>>`.
- *  - runFidelity({ store, ai, size, seed, judges: 1|2, exclusions, nonce? }) -> Result<FidelityRecord>.
+ *  - runFidelity({ store, ai, size, seed, judges: 1|2 }) -> Result<FidelityRecord>.
  *      Judge call protocol: the judge replies JSON `[{n, verdict, reason}]` with n = 1-based position in the
  *      drawn sample, verdict "faithful" | "not_faithful". With judges 2: call 1 = judge A, call 2 = judge B,
  *      call 3 (only when >= 1 disagreement) = adjudicator, replying for exactly the disagreeing n's.
  *      Missing n / extra n / unparseable / provider error -> err AI_PROVIDER_ERROR (CLI exit 6), nothing written.
  *      faithful_share = faithful / size (denominator is the whole sample).
- *      Exclusions mode: pool = leaf site_map entries whose value starts `non-business:`; verdict faithful =
- *      "the exclusion is right"; wrong_share = not_faithful / size.
- *  - Read-only: rules, citations, confidence, site_map unchanged.
+ * *  - Read-only: rules, citations, confidence, site_map unchanged.
  */
 
 import { RecordLockService } from "../../../src/service/record-lock-service.js";
@@ -52,7 +50,7 @@ interface Disagreement { n: number; verdicts: string[]; adjudicated: string }
 interface Record_ {
   seed: unknown; size: number; pool: number; judges: number;
   verdicts: Verdict[]; disagreements: Disagreement[];
-  faithful_share: number; wrong_share?: number; mode?: string;
+  faithful_share: number; mode?: string;
   catch_all: Array<{ rule_id: string; citing_criteria: number | unknown[] }>;
   threshold_share: number;
 }
@@ -62,7 +60,7 @@ interface Mod {
   renderJudgeInput(pairs: Pair[], nonce: string): string;
   runFidelity(o: {
     store: InMemoryStore; ai: InMemoryAIProvider; size: number; seed: number | string;
-    judges: 1 | 2; exclusions: boolean; nonce?: string;
+    judges: 1 | 2; nonce?: string;
   }): Promise<R<Record_>>;
 }
 async function load(): Promise<Mod> {
@@ -288,7 +286,7 @@ describe("fidelity sampling (C7)", () => {
     const m = await load();
     const w = await mainWorld();
     const ai = stub(reply(allN(POOL, "not_faithful")));
-    const res = await m.runFidelity({ store: w.store, ai, size: POOL, seed: 5, judges: 1, exclusions: false, nonce: "n0nce77" });
+    const res = await m.runFidelity({ store: w.store, ai, size: POOL, seed: 5, judges: 1, nonce: "n0nce77" });
     expect(res.ok).toBe(true);
     const prompt = ai.calls[0]!.prompt;
     const open = prompt.indexOf("<<DATA-n0nce77>>");
@@ -303,7 +301,7 @@ describe("fidelity sampling (C7)", () => {
     const m = await load();
     const w = await mainWorld();
     const ai = stub(reply(allN(POOL, "not_faithful")));
-    const rec = unwrap(await m.runFidelity({ store: w.store, ai, size: POOL, seed: 5, judges: 1, exclusions: false }));
+    const rec = unwrap(await m.runFidelity({ store: w.store, ai, size: POOL, seed: 5, judges: 1 }));
     expect(rec.verdicts).toHaveLength(POOL);
     expect(rec.verdicts.every((v) => v.verdict === "not_faithful")).toBe(true);
     expect(rec.faithful_share).toBe(0);
@@ -314,8 +312,8 @@ describe("fidelity sampling (C7)", () => {
     const w = await mainWorld();
     const aiA = stub(reply(allN(3, "faithful")));
     const aiB = stub(reply(allN(3, "faithful")));
-    unwrap(await m.runFidelity({ store: w.store, ai: aiA, size: 3, seed: 1, judges: 1, exclusions: false }));
-    unwrap(await m.runFidelity({ store: w.store, ai: aiB, size: 3, seed: 1, judges: 1, exclusions: false }));
+    unwrap(await m.runFidelity({ store: w.store, ai: aiA, size: 3, seed: 1, judges: 1 }));
+    unwrap(await m.runFidelity({ store: w.store, ai: aiB, size: 3, seed: 1, judges: 1 }));
     const na = /<<DATA-([^>\s]+)>>/.exec(aiA.calls[0]!.prompt)?.[1];
     const nb = /<<DATA-([^>\s]+)>>/.exec(aiB.calls[0]!.prompt)?.[1];
     expect(na).toBeDefined();
@@ -330,7 +328,7 @@ describe("fidelity sampling (C7)", () => {
     const w = await mainWorld();
     const entries = allN(10, "not_faithful").map(([n]): [number, "faithful" | "not_faithful"] => [n, n % 2 === 1 ? "faithful" : "not_faithful"]);
     const ai = stub(reply(entries));
-    const rec = unwrap(await m.runFidelity({ store: w.store, ai, size: 10, seed: 77, judges: 1, exclusions: false }));
+    const rec = unwrap(await m.runFidelity({ store: w.store, ai, size: 10, seed: 77, judges: 1 }));
     expect(rec.seed).toBe(77);
     expect(rec.size).toBe(10);
     expect(rec.pool).toBe(POOL);
@@ -348,7 +346,7 @@ describe("fidelity sampling (C7)", () => {
     const m = await load();
     const w = await mainWorld();
     const rec = unwrap(
-      await m.runFidelity({ store: w.store, ai: stub(reply(allN(4, "faithful"))), size: 4, seed: 3, judges: 1, exclusions: false }),
+      await m.runFidelity({ store: w.store, ai: stub(reply(allN(4, "faithful"))), size: 4, seed: 3, judges: 1 }),
     );
     expect(rec.faithful_share).toBe(1);
   });
@@ -357,7 +355,7 @@ describe("fidelity sampling (C7)", () => {
     const m = await load();
     const w = await mainWorld();
     const run = async (seed: number) =>
-      unwrap(await m.runFidelity({ store: w.store, ai: stub(reply(allN(8, "faithful"))), size: 8, seed, judges: 1, exclusions: false }))
+      unwrap(await m.runFidelity({ store: w.store, ai: stub(reply(allN(8, "faithful"))), size: 8, seed, judges: 1 }))
         .verdicts.map((v) => v.key);
     const a = await run(11);
     const b = await run(11);
@@ -373,7 +371,7 @@ describe("fidelity sampling (C7)", () => {
     const w = await mainWorld();
     const before = (await allDocs(w.store)).length;
     const ai = stub(reply(allN(POOL + 1, "faithful")));
-    const res = await m.runFidelity({ store: w.store, ai, size: POOL + 1, seed: 1, judges: 1, exclusions: false });
+    const res = await m.runFidelity({ store: w.store, ai, size: POOL + 1, seed: 1, judges: 1 });
     expect(res.ok).toBe(false);
     if (!res.ok) expect(res.error.code).toBe("VALIDATION_ERROR");
     expect(ai.calls).toHaveLength(0);
@@ -383,7 +381,7 @@ describe("fidelity sampling (C7)", () => {
   it("runFidelity: size exactly equal to the pool is accepted", async () => {
     const m = await load();
     const w = await mainWorld();
-    const res = await m.runFidelity({ store: w.store, ai: stub(reply(allN(POOL, "faithful"))), size: POOL, seed: 1, judges: 1, exclusions: false });
+    const res = await m.runFidelity({ store: w.store, ai: stub(reply(allN(POOL, "faithful"))), size: POOL, seed: 1, judges: 1 });
     expect(res.ok).toBe(true);
   });
 
@@ -400,7 +398,7 @@ describe("fidelity sampling (C7)", () => {
       const w = await mainWorld();
       const before = await allDocs(w.store);
       const ai = stub({ kind: "ok", content });
-      const res = await m.runFidelity({ store: w.store, ai, size: 3, seed: 1, judges: 1, exclusions: false });
+      const res = await m.runFidelity({ store: w.store, ai, size: 3, seed: 1, judges: 1 });
       expect(res.ok).toBe(false);
       if (!res.ok) expect(res.error.code).toBe("AI_PROVIDER_ERROR");
       const after = await allDocs(w.store);
@@ -412,7 +410,7 @@ describe("fidelity sampling (C7)", () => {
     const m = await load();
     const w = await mainWorld();
     const ai = new InMemoryAIProvider("stub", { kind: "err", error: { code: "AI_PROVIDER_ERROR", message: "binary missing", provider: "stub" } });
-    const res = await m.runFidelity({ store: w.store, ai, size: 3, seed: 1, judges: 1, exclusions: false });
+    const res = await m.runFidelity({ store: w.store, ai, size: 3, seed: 1, judges: 1 });
     expect(res.ok).toBe(false);
     if (!res.ok) expect(res.error.code).toBe("AI_PROVIDER_ERROR");
   });
@@ -425,7 +423,7 @@ describe("fidelity sampling (C7)", () => {
     const judgeB = reply(allN(10, "faithful").map(([n]): [number, "faithful" | "not_faithful"] => [n, [2, 5, 7].includes(n) ? "not_faithful" : "faithful"]));
     const adjudicator = reply([[2, "faithful"], [5, "not_faithful"], [7, "not_faithful"]]);
     const ai = stub(judgeA, judgeB, adjudicator);
-    const rec = unwrap(await m.runFidelity({ store: w.store, ai, size: 10, seed: 4, judges: 2, exclusions: false }));
+    const rec = unwrap(await m.runFidelity({ store: w.store, ai, size: 10, seed: 4, judges: 2 }));
     expect(rec.judges).toBe(2);
     expect(ai.calls).toHaveLength(3);
     expect(rec.disagreements.map((d) => d.n)).toEqual([2, 5, 7]);
@@ -445,7 +443,7 @@ describe("fidelity sampling (C7)", () => {
     const judgeA = reply(allN(10, "faithful"));
     const judgeB = reply(allN(10, "faithful").map(([n]): [number, "faithful" | "not_faithful"] => [n, [2, 5, 7].includes(n) ? "not_faithful" : "faithful"]));
     const ai = stub(judgeA, judgeB, reply([[2, "not_faithful"], [5, "not_faithful"], [7, "not_faithful"]]));
-    const rec = unwrap(await m.runFidelity({ store: w.store, ai, size: 10, seed: 4, judges: 2, exclusions: false }));
+    const rec = unwrap(await m.runFidelity({ store: w.store, ai, size: 10, seed: 4, judges: 2 }));
     expect(rec.disagreements).toHaveLength(3);
     expect(rec.faithful_share).toBeCloseTo(0.7, 10);
   });
@@ -455,7 +453,7 @@ describe("fidelity sampling (C7)", () => {
     const w = await mainWorld();
     const both = reply(allN(6, "faithful").map(([n]): [number, "faithful" | "not_faithful"] => [n, n <= 2 ? "not_faithful" : "faithful"]));
     const ai = stub(both, both);
-    const rec = unwrap(await m.runFidelity({ store: w.store, ai, size: 6, seed: 4, judges: 2, exclusions: false }));
+    const rec = unwrap(await m.runFidelity({ store: w.store, ai, size: 6, seed: 4, judges: 2 }));
     expect(ai.calls).toHaveLength(2);
     expect(rec.disagreements).toEqual([]);
     expect(rec.faithful_share).toBeCloseTo(4 / 6, 10);
@@ -467,7 +465,7 @@ describe("fidelity sampling (C7)", () => {
     const judgeA = reply(allN(4, "faithful"));
     const judgeB = reply([[1, "not_faithful"], [2, "not_faithful"], [3, "faithful"], [4, "faithful"]]);
     const ai = stub(judgeA, judgeB, reply([[1, "faithful"]]));
-    const res = await m.runFidelity({ store: w.store, ai, size: 4, seed: 4, judges: 2, exclusions: false });
+    const res = await m.runFidelity({ store: w.store, ai, size: 4, seed: 4, judges: 2 });
     expect(res.ok).toBe(false);
     if (!res.ok) expect(res.error.code).toBe("AI_PROVIDER_ERROR");
   });
@@ -476,7 +474,7 @@ describe("fidelity sampling (C7)", () => {
   it("a rule cited by more than 5% of citing criteria is listed as catch-all, rarer rules are not", async () => {
     const m = await load();
     const w = await mainWorld();
-    const rec = unwrap(await m.runFidelity({ store: w.store, ai: stub(reply(allN(3, "faithful"))), size: 3, seed: 1, judges: 1, exclusions: false }));
+    const rec = unwrap(await m.runFidelity({ store: w.store, ai: stub(reply(allN(3, "faithful"))), size: 3, seed: 1, judges: 1 }));
     const listed = rec.catch_all.map((c) => c.rule_id).sort();
     expect(listed).toEqual([w.ruleIds[0]!, w.ruleIds[1]!].sort());
     const zero = rec.catch_all.find((c) => c.rule_id === w.ruleIds[0]);
@@ -487,7 +485,7 @@ describe("fidelity sampling (C7)", () => {
   it("catch-all is independent of the drawn sample (a 1-pair sample still lists the broad rules)", async () => {
     const m = await load();
     const w = await mainWorld();
-    const rec = unwrap(await m.runFidelity({ store: w.store, ai: stub(reply(allN(1, "faithful"))), size: 1, seed: 99, judges: 1, exclusions: false }));
+    const rec = unwrap(await m.runFidelity({ store: w.store, ai: stub(reply(allN(1, "faithful"))), size: 1, seed: 99, judges: 1 }));
     expect(rec.catch_all.map((c) => c.rule_id)).toContain(w.ruleIds[0]);
   });
 
@@ -496,7 +494,7 @@ describe("fidelity sampling (C7)", () => {
     const defs = Array.from({ length: 21 }, (_, i) => ({ statement: `distinct rule ${i}` }));
     const cites = Array.from({ length: 21 }, (_, i): Array<number | string> => [i]);
     const w = await world(defs, cites);
-    const rec = unwrap(await m.runFidelity({ store: w.store, ai: stub(reply(allN(5, "faithful"))), size: 5, seed: 1, judges: 1, exclusions: false }));
+    const rec = unwrap(await m.runFidelity({ store: w.store, ai: stub(reply(allN(5, "faithful"))), size: 5, seed: 1, judges: 1 }));
     expect(rec.pool).toBe(21);
     expect(rec.catch_all).toEqual([]);
   });
@@ -509,7 +507,7 @@ describe("fidelity sampling (C7)", () => {
     const before = await snap();
     const regBefore = JSON.stringify(unwrap((await w.store.listRuleRegistry()) as R<unknown>));
     const citesBefore = JSON.stringify(unwrap((await w.store.listAcCites()) as R<unknown>));
-    unwrap(await m.runFidelity({ store: w.store, ai: stub(reply(allN(12, "not_faithful"))), size: 12, seed: 8, judges: 1, exclusions: false }));
+    unwrap(await m.runFidelity({ store: w.store, ai: stub(reply(allN(12, "not_faithful"))), size: 12, seed: 8, judges: 1 }));
     expect(await snap()).toBe(before);
     expect(JSON.stringify(unwrap((await w.store.listRuleRegistry()) as R<unknown>))).toBe(regBefore);
     expect(JSON.stringify(unwrap((await w.store.listAcCites()) as R<unknown>))).toBe(citesBefore);
@@ -517,99 +515,3 @@ describe("fidelity sampling (C7)", () => {
 });
 
 // ─── Exclusion sampling ───────────────────────────────────────────────────────────────────────────
-
-describe("exclusion sampling (C7)", () => {
-  async function excl(): Promise<World & { nonBusiness: string[]; mapped: string[] }> {
-    const w = await world([{ statement: "the only rule" }], [[0]]);
-    const nonBusiness = Array.from({ length: 8 }, (_, i) => `src/x${i}.ts#fn${i}#E${i}`);
-    const mapped = ["src/m1.ts#a#M1", "src/m2.ts#b#M2", "src/m3.ts#c#M3"];
-    const sites: Record<string, string[]> = {};
-    nonBusiness.forEach((k, i) => { sites[k] = [`non-business:reason-text-${i}`]; });
-    for (const k of mapped) sites[k] = [w.ruleIds[0]!];
-    const res = await w.rules.setSiteMap(w.leafId, { sites, addCommands: ["demo cmd"] }, { by: "fixture" });
-    if (!res.ok) throw new Error(JSON.stringify(res.error));
-    return { ...w, nonBusiness, mapped };
-  }
-
-  it("judges a seeded sample of non-business entries only and records each verdict", async () => {
-    const m = await load();
-    const w = await excl();
-    const ai = stub(reply(allN(5, "faithful")));
-    const rec = unwrap(await m.runFidelity({ store: w.store, ai, size: 5, seed: 21, judges: 1, exclusions: true }));
-    expect(rec.mode).toBe("exclusions");
-    expect(rec.pool).toBe(8);
-    expect(rec.size).toBe(5);
-    expect(rec.seed).toBe(21);
-    expect(rec.verdicts).toHaveLength(5);
-    for (const v of rec.verdicts) {
-      expect(w.nonBusiness.some((k) => v.key.includes(k))).toBe(true);
-      expect(w.mapped.some((k) => v.key.includes(k))).toBe(false);
-    }
-    expect(new Set(rec.verdicts.map((v) => v.key)).size).toBe(5);
-  });
-
-  it("records the wrong share: 2 of 5 judged wrong = 0.4, and a different script gives 0.8", async () => {
-    const m = await load();
-    const w = await excl();
-    const two = reply([[1, "not_faithful"], [2, "faithful"], [3, "faithful"], [4, "not_faithful"], [5, "faithful"]]);
-    const r1 = unwrap(await m.runFidelity({ store: w.store, ai: stub(two), size: 5, seed: 21, judges: 1, exclusions: true }));
-    expect(r1.wrong_share).toBeCloseTo(0.4, 10);
-    const four = reply([[1, "not_faithful"], [2, "not_faithful"], [3, "not_faithful"], [4, "not_faithful"], [5, "faithful"]]);
-    const r2 = unwrap(await m.runFidelity({ store: w.store, ai: stub(four), size: 5, seed: 21, judges: 1, exclusions: true }));
-    expect(r2.wrong_share).toBeCloseTo(0.8, 10);
-  });
-
-  it("the excluded entry's reason text reaches the judge inside the nonce fence", async () => {
-    const m = await load();
-    const w = await excl();
-    const ai = stub(reply(allN(8, "faithful")));
-    unwrap(await m.runFidelity({ store: w.store, ai, size: 8, seed: 2, judges: 1, exclusions: true, nonce: "xk29" }));
-    const prompt = ai.calls[0]!.prompt;
-    const open = prompt.indexOf("<<DATA-xk29>>");
-    const close = prompt.lastIndexOf("<<END-xk29>>");
-    const at = prompt.indexOf("reason-text-3");
-    expect(open).toBeGreaterThanOrEqual(0);
-    expect(at).toBeGreaterThan(open);
-    expect(at).toBeLessThan(close);
-  });
-
-  it("same seed draws the same entries in the same order, another seed draws others", async () => {
-    const m = await load();
-    const w = await excl();
-    const run = async (seed: number) =>
-      unwrap(await m.runFidelity({ store: w.store, ai: stub(reply(allN(4, "faithful"))), size: 4, seed, judges: 1, exclusions: true }))
-        .verdicts.map((v) => v.key);
-    const a = await run(5);
-    expect(await run(5)).toEqual(a);
-    expect(await run(6)).not.toEqual(a);
-  });
-
-  it("size larger than the number of non-business entries is refused with VALIDATION_ERROR and asks no judge", async () => {
-    const m = await load();
-    const w = await excl();
-    const ai = stub(reply(allN(9, "faithful")));
-    const res = await m.runFidelity({ store: w.store, ai, size: 9, seed: 1, judges: 1, exclusions: true });
-    expect(res.ok).toBe(false);
-    if (!res.ok) expect(res.error.code).toBe("VALIDATION_ERROR");
-    expect(ai.calls).toHaveLength(0);
-  });
-
-  it("a judge reply missing one n ends the exclusion run as AI_PROVIDER_ERROR", async () => {
-    const m = await load();
-    const w = await excl();
-    const res = await m.runFidelity({
-      store: w.store, ai: stub(reply([[1, "faithful"], [2, "faithful"]])), size: 3, seed: 1, judges: 1, exclusions: true,
-    });
-    expect(res.ok).toBe(false);
-    if (!res.ok) expect(res.error.code).toBe("AI_PROVIDER_ERROR");
-  });
-
-  it("no site_map, command or rule changes after an exclusion run", async () => {
-    const m = await load();
-    const w = await excl();
-    const snap = async () => JSON.stringify((await allDocs(w.store)).map((d) => [d.id, d.version, d.updated_at, d.extra]).sort());
-    const before = await snap();
-    unwrap(await m.runFidelity({ store: w.store, ai: stub(reply(allN(8, "not_faithful"))), size: 8, seed: 3, judges: 1, exclusions: true }));
-    expect(await snap()).toBe(before);
-  });
-});

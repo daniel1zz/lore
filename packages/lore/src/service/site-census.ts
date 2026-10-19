@@ -1280,7 +1280,7 @@ class CensusWalker {
     return this.callIndex.get(owner) ?? [];
   }
 
-  /** True when `symbol` in `file` (bare or `<file>#<symbol>`) is on the shared non-business list. */
+  /** True when `symbol` in `file` (bare or `<file>#<symbol>`) is on the shared bootstrap (start-up wiring) list. */
   private isNonBusinessSymbol(symbol: string, file: TS.SourceFile): boolean {
     const rel = path.relative(this.rootDir, file.fileName).split(path.sep).join("/");
     return NON_BUSINESS_SYMBOLS.includes(symbol) || NON_BUSINESS_SYMBOLS.includes(`${rel}#${symbol}`);

@@ -136,7 +136,7 @@ beforeAll(() => {
   plan = slugOf(mustRun(["create", "plan", "--title", "VWT Plan", "--parent", spec, "--content", "x", "--no-ai"], repo).stdout);
 
   sitesFile = join(worktrees, "rows.json");
-  writeFileSync(sitesFile, JSON.stringify([{ site: "x.ts#fn#CODE", nonBusiness: "fixture site, not business behaviour" }]));
+  writeFileSync(sitesFile, JSON.stringify([{ site: "x.ts#fn#CODE", rules: [ruleId] }]));
 });
 
 afterAll(() => {
