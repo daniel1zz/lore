@@ -25,7 +25,7 @@ const BASE = "b".repeat(40);
 
 type Claims = Record<string, Array<{ slug: string; anchors: string[] }>>;
 
-function helper(agent: string, over: { files?: string[]; workingCopy?: string; judged?: number } = {}): TrailHelper {
+function helper(agent: string, over: { files?: string[]; workingCopy?: string; judged?: number; base?: string } = {}): TrailHelper {
   const run = `cc:${SESSION}:${agent}`;
   return {
     agent_id: agent,
@@ -38,7 +38,7 @@ function helper(agent: string, over: { files?: string[]; workingCopy?: string; j
     isolated: true,
     changes: {
       measured: true,
-      value: { base: BASE, files: (over.files ?? []).map((path) => ({ path, status: "M" as const, lines: 1, source: { kind: "run" as const, run } })) },
+      value: { base: over.base ?? BASE, files: (over.files ?? []).map((path) => ({ path, status: "M" as const, lines: 1, source: { kind: "run" as const, run } })) },
     },
   } as TrailHelper;
 }
@@ -303,5 +303,35 @@ describe("gitignored paths are not judged against anchors (task-skill-fix-turn-e
       throw new Error("spawn git ENOENT");
     });
     expect(out.not_measured.join("\n")).toContain(".scratch/tmp.json");
+  });
+});
+
+describe("SendMessage-resumed helper: a second run of one working copy on a newer base", () => {
+  // Measured 2026-10-19 (session c1ffea04): a9e0ca47 (base 7e52699) claimed+released a task; its SendMessage resume
+  // was recorded as a9c10a59 in the SAME working copy on base ce70361, so the base-keyed group split them.
+  const NEW_BASE = "c".repeat(40);
+  const trail = () => trailOf([helper("original", { files: FILES, judged: 1 }), helper("resumed", { files: FILES, base: NEW_BASE })]);
+
+  it("SENDMSG-1 a resumed run of a copy whose original run held the claim yields no finding", async () => {
+    const out = await review(trail(), { original: [{ slug: "task-x", anchors: ["src/", "tests/"] }] });
+    expect(out.findings).toEqual([]);
+  });
+
+  it("SENDMSG-2 the same trail with no claim in that working copy still reports claimed no task", async () => {
+    const out = await review(trail(), {});
+    expect(out.findings.map((f) => [f.kind, f.helper])).toEqual([["no-claimed-task", "resumed"]]);
+  });
+
+  it("SENDMSG-3 control: a claim held in ANOTHER working copy does not cover the resumed run", async () => {
+    const other = helper("elsewhere", { files: [], workingCopy: "/wt/agent-other" });
+    const out = await review(trailOf([other, helper("resumed", { files: FILES, base: NEW_BASE })]), { elsewhere: [{ slug: "task-x", anchors: ["src/", "tests/"] }] });
+    expect(out.findings.map((f) => f.kind)).toEqual(["no-claimed-task"]);
+  });
+
+  it("SENDMSG-4 the claim's anchors still bind: a resumed-run file outside them is outside-anchors", async () => {
+    const out = await review(trailOf([helper("original", { files: [], judged: 1 }), helper("resumed", { files: [...FILES, "docs/x.md"], base: NEW_BASE })]), {
+      original: [{ slug: "task-x", anchors: ["src/", "tests/"] }],
+    });
+    expect(out.findings.map((f) => [f.kind, f.files])).toEqual([["outside-anchors", ["docs/x.md"]]]);
   });
 });
