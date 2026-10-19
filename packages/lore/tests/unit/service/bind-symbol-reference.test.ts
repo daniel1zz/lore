@@ -81,7 +81,6 @@ beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "lore-bind-symbol-"));
   mkdirSync(join(dir, ".claude", "rules"), { recursive: true });
   mkdirSync(join(dir, ".lore"), { recursive: true });
-  writeFileSync(join(dir, ".lore", "config.yaml"), "context:\n  memory_files:\n    adoption: enforce\n");
   mkdirSync(join(dir, "packages", "core", "src"), { recursive: true });
   writeFileSync(join(dir, "packages", "core", "src", "x.ts"), "export const Here = 1;\n");
 });
@@ -126,15 +125,14 @@ describe("AC-BIND-1: path#Symbol in a memory file", () => {
     expect(unresolved[0]).toMatchObject({ drift_kind: "file_missing", reference: "packages/core/src/none.ts#Here" });
   });
 
-  it("BOUNDARY: under the default warn adoption the same finding is a downgraded note and the exit is exactly 0", () => {
-    rmSync(join(dir, ".lore", "config.yaml"));
+  it("REGRESSION: with no config at all the same finding is still enforced (exit exactly 3), never a downgraded note", () => {
     writeFileSync(join(dir, RULES_FILE), "See `packages/core/src/x.ts#Gone`.\n");
 
     const { exitCode, findings, advisory } = checkClaudeMd(dir);
 
-    expect(exitCode).toBe(0);
-    expect(findings.filter((f) => f.kind === "reference_unresolved")).toEqual([]);
-    expect(advisory.some((f) => f.kind === "downgraded")).toBe(true);
+    expect(exitCode).toBe(3);
+    expect(findings.filter((f) => f.kind === "reference_unresolved")).toHaveLength(1);
+    expect(JSON.stringify(advisory)).not.toContain("downgraded");
   });
 });
 
