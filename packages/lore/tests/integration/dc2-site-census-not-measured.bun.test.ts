@@ -4,7 +4,7 @@
  * AC-DC2-19 (D19): the site census records where it stops instead of dropping sites.
  *
  * (a) every positional token of `lore baseline sites` forms the command path; an unresolvable path exits 4.
- * (b) a 14-call chain ending in a refusal: the cut at MAX_CALL_DEPTH is ONE not_measured `depth-bound` site naming
+ * (b) a chain of MAX_CALL_DEPTH + 2 calls ending in a refusal: the cut at MAX_CALL_DEPTH is ONE not_measured `depth-bound` site naming
  *     the function where the walk stopped, and `baseline coverage` for a leaf declaring that command is incomplete.
  * (c) a function first reached at depth 12 and again at depth 3 keeps its callees' sites (deep-first order forced).
  * (d) `deps.fn = other` after construction: a not_measured dynamic site for `deps.fn`.
@@ -91,8 +91,8 @@ describe(`${SPEC}#AC-DC2-19 (a) every positional token forms the command path`, 
 });
 
 describe(`${SPEC}#AC-DC2-19 (b) a depth cut is recorded, not dropped`, () => {
-  it(`${SPEC}#AC-DC2-19 a 14-call chain lists one depth-bound site naming the function where the walk stopped`, () => {
-    const root = fixtureRoot({ chain: chainSource(14) });
+  it(`${SPEC}#AC-DC2-19 a chain longer than MAX_CALL_DEPTH lists one depth-bound site naming the function where the walk stopped`, () => {
+    const root = fixtureRoot({ chain: chainSource(MAX_CALL_DEPTH + 2) });
     const cuts = sitesOf(root, "chain").filter((s) => s.kind === "depth-bound");
     expect(cuts).toHaveLength(1);
     expect(cuts[0]).toMatchObject({ dynamic: true, symbol: `c${MAX_CALL_DEPTH}` });
@@ -116,7 +116,7 @@ describe(`${SPEC}#AC-DC2-19 (b) a depth cut is recorded, not dropped`, () => {
   });
 
   it(`${SPEC}#AC-DC2-19 coverage for a leaf declaring the cut command is incomplete (exit 1)`, () => {
-    const root = fixtureRoot({ chain: chainSource(14) });
+    const root = fixtureRoot({ chain: chainSource(MAX_CALL_DEPTH + 2) });
     // reason: `baseline coverage` lists the runnable commands from the registry module before it censuses a leaf.
     writeFileSync(join(root, "packages/lore/src/adapters/cli/index.ts"), `export const COMMAND_LOADERS = { chain: () => import("./commands/chain.js") };\n`);
     mustRun(["init"], root);

@@ -76,8 +76,13 @@ import { NON_BUSINESS_SYMBOLS } from "./site-census-nonbusiness.js";
 /** Callee names whose call is a failure site: the Result error constructor and the gate-predicate failure constructor. */
 export const ERR_CALLEES: readonly string[] = ["err", "gateFailure"];
 
-/** Bound on call-graph depth from the entry (the visited set already prevents cycles). */
-export const MAX_CALL_DEPTH = 12;
+/**
+ * Bound on call-graph depth from the entry (the visited set already prevents cycles).
+ * Measured 2026-10-19 on baseline-root: 12 left 3318 (leaf, site) depth-bound cuts, 15 left 152, 18 and 24 left 0;
+ * census CPU time was flat (user 49.8s at 12, 49.2s at 15, 48.6s at 18, 45s at 24; the TypeScript program build dominates).
+ * 20 is the measured need (18) plus headroom, so chains that grow a little do not re-open depth-bound debt.
+ */
+export const MAX_CALL_DEPTH = 20;
 
 const MAX_CODE_RESOLVE_DEPTH = 6;
 const MAX_LABEL_LENGTH = 80;
