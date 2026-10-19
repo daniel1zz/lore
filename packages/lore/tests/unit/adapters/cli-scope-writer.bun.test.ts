@@ -162,7 +162,6 @@ async function seedFixture(cwd: string): Promise<void> {
       "      enabled: false",
       "",
     ].join("\n"),
-    "utf8",
   );
   await mustRun(["create", "prd", "--title", "Scope Root", "--content", "## Overview\nroot", "--no-ai"], cwd);
   await mustRun(
