@@ -911,7 +911,7 @@ function countWriteCalls(source: string): number {
   return count;
 }
 
-describe("AC-DCL-3 static scan — no direct write primitive outside the write-path modules", () => {
+describe("static scan — no direct write primitive outside the write-path modules", () => {
   const offenders = new Map<string, number>();
   for (const file of walkTs(SRC_ROOT)) {
     const rel = relative(SRC_ROOT, file).split(sep).join("/");
@@ -920,7 +920,7 @@ describe("AC-DCL-3 static scan — no direct write primitive outside the write-p
     if (n > 0) offenders.set(rel, n);
   }
 
-  it("the nine services AC-DCL-3 names contain no store.update( / insertVersion( / appendAuditEntry( / *WithProvenance( / moveRule( call", () => {
+  it("AC-DCL-3: the nine D3 services (version, migration, ordinal-migration, phase-migration, validity, rule, phase, tree-check, requirement) are at zero — they contain no store.update( / insertVersion( / appendAuditEntry( / *WithProvenance( / moveRule( call", () => {
     for (const service of [
       "version",
       "migration",
@@ -936,12 +936,12 @@ describe("AC-DCL-3 static scan — no direct write primitive outside the write-p
     }
   });
 
-  it("every other module is either clean or a pinned, named exception at exactly its recorded call count", () => {
+  it("remaining modules, pinned: every other module is clean or a named exception at exactly its recorded call count", () => {
     const unexpected = [...offenders].filter(([rel, n]) => UNMIGRATED_WRITERS[rel]?.calls !== n);
     expect(unexpected, `unlisted or changed direct store write call sites: ${JSON.stringify(unexpected)}`).toEqual([]);
   });
 
-  it("the exception list carries no stale entry: every listed module still has its calls", () => {
+  it("remaining modules, pinned: the exception list carries no stale entry — every listed module still has its calls", () => {
     const stale = Object.keys(UNMIGRATED_WRITERS).filter((rel) => !offenders.has(rel));
     expect(stale, `exceptions whose module no longer calls a write primitive — delete them: ${stale.join(", ")}`).toEqual([]);
   });

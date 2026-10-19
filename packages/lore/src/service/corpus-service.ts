@@ -872,28 +872,16 @@ export interface RuleAllocateRequest {
 }
 
 /**
- * What every non-corpus service holds instead of the store's write methods: the narrow surface of
- * {@link CorpusService}'s write route. Services never call `store.update` / `insertVersion` /
- * `appendAuditEntry` / `*WithProvenance` themselves (AC-DCL-3's static scan enforces it).
+ * What every non-corpus service holds instead of the store's write methods: the write-route surface of
+ * {@link CorpusService}, as a `Pick` of the class itself (not a parallel interface) so each call resolves to
+ * the one implementation — the baseline census follows it, and the signatures cannot drift from it.
+ * Services never call `store.update` / `insertVersion` / `appendAuditEntry` / `*WithProvenance` themselves
+ * (the static scan in single-write-path.bun.test.ts enforces it).
  */
-export interface DocWritePort {
-  writeDoc(request: DocWriteRequest): Promise<Result<DocWriteOutcome, LoreError>>;
-  insertDoc(request: DocInsertRequest): Promise<Result<DocRecord, LoreError>>;
-  assignOrdinalForRepair(
-    doc: DocRecord,
-    ordinal: number,
-    by?: string,
-    now?: string,
-  ): Promise<Result<DocWriteOutcome, LoreError>>;
-  moveRule(request: RuleMoveRequest): Promise<Result<{ from: DocRecord; to: DocRecord }, LoreError>>;
-  allocateRule(request: RuleAllocateRequest): Promise<Result<{ ruleId: string; doc: DocRecord }, LoreError>>;
-  /**
-   * Read-only record-lock verdict for a dry run: `ok(undefined)` when the doc is not a locked record, else
-   * `ok(<RECORD_LOCKED message>)` — the text a live `writeDoc` refusal carries. Evaluates NO gate, so a dry run
-   * that asks leaves no `gate_passed` / skip row behind (a dry run writes nothing).
-   */
-  describeRecordLock(doc: DocRecord): Promise<Result<string | undefined, LoreError>>;
-}
+export type DocWritePort = Pick<
+  CorpusService,
+  "writeDoc" | "insertDoc" | "assignOrdinalForRepair" | "moveRule" | "allocateRule" | "describeRecordLock"
+>;
 
 /** The post-patch value of one patched field of `doc`. */
 function patchedFieldsUnchanged(doc: DocRecord, patch: DocWritePatch): boolean {
@@ -928,7 +916,7 @@ export function bareDocWriter(store: StoreInterface, recordLock?: RecordLockServ
 
 // ─── CorpusService ─────────────────────────────────────────────────────────
 
-export class CorpusService implements DocWritePort {
+export class CorpusService {
   private readonly telemetry: Telemetry;
   /**
    * The foreign-corpus-write guard's ambient facts (spec-corpus-resolution-
