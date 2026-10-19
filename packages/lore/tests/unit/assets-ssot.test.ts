@@ -535,7 +535,8 @@ const CORPUS_WORKFLOW_BODY_SHA256: Record<(typeof CORPUS_WORKFLOW_FRAGMENT_RELS)
 // the reword dropped and cut three clauses (feed latest_handoffs, feed no-session-marker floor, produce legacy config clause); the second assessment (knowledge-assessment-always-loaded-lore-fragments-state-the-2) named what was still missing.
 // RE-BASELINE (task-traceability-pass-over-the-ten-fragments-classify-every): traceability pass against knowledge-traceability-table-always-loaded-lore-fragments; restores the snapshot-never-current-state rule, the UPSTREAM_NOT_APPROVED freeze, the verify exit-code rule and the piped-exit-code reason.
 // RE-BASELINE (task-drop-the-explanation-the-traceability-pass-over-restored): drops the explanation clauses the traceability pass put back (see knowledge-traceability-table-always-loaded-lore-fragments v3); every instruction, condition and qualifier is kept.
-  "context/corpus-workflow-3-execute.md": "f86cfd7cca00e67d45f8f702d34c1b29f0ed8afd1538798278200b15bad808d8",
+// RE-BASELINE (task-shipped-guidance-teaches-lore-evidence-result-pass-output-2): the pass-evidence bullet now teaches `--capture` (the gate refuses a hand-authored tail for --result pass).
+  "context/corpus-workflow-3-execute.md": "de48d3aa4b12a74f23dd8bbc614d6d02181789acf983971c0a8f0baced1b115b",
   // RE-BASELINE (task-rs-t13-migration-promoted-shipped-fragments-agent-rules, AC-RS-13): gains the CLAUDE.md-vs-corpus
   // boundary bullet moved from the user-layer lore-loop fragment (user-03).
 // RE-BASELINE (task-reword-the-ten-always-loaded-fragments-to-the-rule-only, spec-always-loaded-lore-fragments-state-the-rule-only-reasoning):
