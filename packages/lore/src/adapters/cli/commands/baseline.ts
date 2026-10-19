@@ -57,7 +57,7 @@ import { NON_BUSINESS_PREFIX, commandFixCommand, collectOwnedSites, computeLeafC
 import { treePredicateFor } from "../absent-declarations.js";
 import { buildOwnerLeafIndex } from "../../../service/owned-by.js";
 import { resolveDoc } from "../../../service/resolve.js";
-import { SiteCensusError, type UnresolvedImport, findCensusRoot, listSitesMany } from "../../../service/site-census.js";
+import { SiteCensusError, type UnresolvedImport, findCensusRoot, listSitesMany, resolveCommandEntry } from "../../../service/site-census.js";
 import type { Site, SiteList } from "../../../service/site-census.js";
 import { RuleStateService } from "../../../service/rule-state-service.js";
 import type { RuleStateEntry, RuleStateFull } from "../../../service/rule-state-service.js";
