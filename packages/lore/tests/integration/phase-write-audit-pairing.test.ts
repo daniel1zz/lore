@@ -162,9 +162,11 @@ const AC_SERVICE_PATH = join(REPO_ROOT, "packages", "lore", "src", "service", "a
  * The CONTROL for the "zero bare version writes" assertion: a store-only service that still writes its
  * version row bare. It was `ac-service.ts` until the citation gate (spec-baseline-slice-2 C4, D6) moved
  * `AcService.writeCriteria` onto `updateWithProvenance` so the liveness read shares the write's transaction —
- * which made the AC write atomic and the control evaporate, exactly as its own message predicts.
+ * which made the AC write atomic and the control evaporate, exactly as its own message predicts. It was
+ * `requirement-service.ts` until AC-DCL-3 routed that write through the one write route too; `task-workflow-service.ts`
+ * is the next store-only service that still writes its version row bare (outside D3's reported scope).
  */
-const BARE_WRITER_CONTROL_PATH = join(REPO_ROOT, "packages", "lore", "src", "service", "requirement-service.ts");
+const BARE_WRITER_CONTROL_PATH = join(REPO_ROOT, "packages", "lore", "src", "service", "task-workflow-service.ts");
 
 /** Reached ONLY by the generated tamper script below, never imported — it pulls in `bun:sqlite`. */
 const SQLITE_STORE_PATH = join(REPO_ROOT, "packages", "lore", "src", "store", "sqlite-store.ts");
@@ -189,7 +191,8 @@ const BANNED_PHRASE_A = "no version" + " history";
 const BANNED_PHRASE_B = "version" + "-less";
 
 /**
- * The atomic doc+version+audit writer `writePhases` must keep using (SPEC-148 C5).
+ * The atomic doc+version+audit writer `writePhases` must keep using (SPEC-148 C5): since AC-DCL-3 that is the
+ * one write route, `CorpusService.writeDoc`, which commits all three in one `updateWithProvenance` transaction.
  *
  * ⛔ Anchored to the CALL SITE (`this.store.` prefix + open paren), never the
  * bare identifier. MEASURED while authoring this file: the bare identifier
@@ -199,7 +202,7 @@ const BANNED_PHRASE_B = "version" + "-less";
  * implementation. A self-documenting file is exactly where a marker census
  * over-matches.
  */
-const ATOMIC_WRITER_CALL = "this.store.updateWithProvenance(";
+const ATOMIC_WRITER_CALL = "this.writer.writeDoc(";
 
 /**
  * The bare version write whose presence in `phase-service.ts` IS the severed
@@ -737,7 +740,7 @@ describe("REGRESSION — writePhases still routes doc, version and audit through
     ).toBe(0);
   });
 
-  it("CONTROL: requirement-service.ts does make the bare version write, so the zero above is not a mis-aimed grep", () => {
+  it("CONTROL: task-workflow-service.ts does make the bare version write, so the zero above is not a mis-aimed grep", () => {
     expect(
       countOccurrences(bareWriterControl, BARE_VERSION_WRITE_CALL),
       `${BARE_WRITER_CONTROL_PATH} no longer contains \`${BARE_VERSION_WRITE_CALL}\` — the control for the preceding zero has evaporated`,

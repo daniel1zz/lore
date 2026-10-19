@@ -75,9 +75,9 @@
  *               holds across all 5 docs.
  *   ERROR:      an unreadable/malformed export-index.json aborts the WHOLE
  *               migration (err Result), never a silent rebuild.
- *   STATE:      title-strip on an `approved` doc leaves `status_before ===
- *               status_after === "approved"` (no approved→draft reset —
- *               this bypasses CorpusService entirely); export-index
+ *   STATE:      title-strip leaves `status_before === status_after` (a draft
+ *               fixture: an `approved` spec is a LOCKED record and the strip is
+ *               refused, AC-DCL-3 / #161 — see single-write-path.bun.test.ts); export-index
  *               `file_path` is left untouched (Scope-Alt: renames are
  *               report-only `git mv` commands, never executed).
  *   REGRESSION: a second `--apply` run performs literally ZERO writes
@@ -163,21 +163,21 @@ describe("OrdinalMigrationService.migrateOrdinals (SPEC-084, AC-084-4)", () => {
   let specB: DocRecord; // declared SPEC-2, already-correct export mapping (padded SPEC-002 — RE-BASELINE above)
   let specC: DocRecord; // declared SPEC-3, earliest of the collision trio — winner
   let specD: DocRecord; // declared SPEC-3, collision loser #1
-  let specE: DocRecord; // declared SPEC-3, collision loser #2, approved status
+  let specE: DocRecord; // declared SPEC-3, collision loser #2, draft status
 
   beforeEach(async () => {
     store = actedStore(new SQLiteStore(":memory:"));
     projectDir = mkdtempSync(join(tmpdir(), "lore-migrate-ordinals-"));
     service = new OrdinalMigrationService(store);
 
-    specA = makeSpecDoc({ title: "SPEC-1 — Alpha decision", created_at: "2026-01-01T00:00:00.000Z", status: "approved" });
+    specA = makeSpecDoc({ title: "SPEC-1 — Alpha decision", created_at: "2026-01-01T00:00:00.000Z", status: "draft" });
     specB = makeSpecDoc({ title: "SPEC-2 — Beta workflow", created_at: "2026-01-02T00:00:00.000Z" });
     specC = makeSpecDoc({ title: "SPEC-3 — Triple collision winner", created_at: "2026-01-03T00:00:00.000Z" });
     specD = makeSpecDoc({ title: "SPEC-3 — Triple collision loser one", created_at: "2026-01-04T00:00:00.000Z" });
     specE = makeSpecDoc({
       title: "SPEC-3 — Triple collision loser two",
       created_at: "2026-01-05T00:00:00.000Z",
-      status: "approved",
+      status: "draft",
     });
 
     for (const doc of [specA, specB, specC, specD, specE]) {
@@ -248,8 +248,8 @@ describe("OrdinalMigrationService.migrateOrdinals (SPEC-084, AC-084-4)", () => {
     expect(report.title_strips).toHaveLength(5);
     const stripA = report.title_strips.find((t) => t.doc_id === specA.id);
     expect(stripA?.new_title).toBe("Alpha decision");
-    expect(stripA?.status_before).toBe("approved");
-    expect(stripA?.status_after).toBe("approved");
+    expect(stripA?.status_before).toBe("draft");
+    expect(stripA?.status_after).toBe("draft");
 
     // Export-index reconcile: only specA's drifted mapping needs converging;
     // specB already matches (no entry, nothing silently changed either way);
@@ -309,7 +309,7 @@ describe("OrdinalMigrationService.migrateOrdinals (SPEC-084, AC-084-4)", () => {
     if (freshA.ok) {
       expect(freshA.value?.ordinal).toBe(1);
       expect(freshA.value?.title).toBe("Alpha decision");
-      expect(freshA.value?.status).toBe("approved"); // NO approved -> draft reset
+      expect(freshA.value?.status).toBe("draft"); // status untouched
     }
 
     const freshE = await store.find(specE.id);
@@ -317,7 +317,7 @@ describe("OrdinalMigrationService.migrateOrdinals (SPEC-084, AC-084-4)", () => {
     if (freshE.ok) {
       expect(freshE.value?.ordinal).toBe(5);
       expect(freshE.value?.title).toBe("Triple collision loser two");
-      expect(freshE.value?.status).toBe("approved"); // NO approved -> draft reset
+      expect(freshE.value?.status).toBe("draft"); // status untouched
     }
 
     // Export-index human_id converged; file_path left untouched (Scope-Alt —

@@ -476,7 +476,7 @@ export class PhaseMigrationService {
         auditAction: "update",
         auditDetails: { migrated_to: phaseDoc.id },
         auditSessionId: `phase-migration-${task.id}`,
-        lock: "phase-structure",
+        lock: "content",
         ...(by !== undefined ? { by } : {}),
         now: nowIso,
       });

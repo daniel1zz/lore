@@ -123,6 +123,10 @@ const VERSION_ACTION_AUDIT_FAMILY: Readonly<Record<VersionAction, ReadonlySet<st
     "invalidate",
     "archive-cascade",
     "archive-sweep",
+    // reason: AC-DCL-3 — tree-check --fix (#276) and the ordinal backfill now write a version row (action
+    // "update") like every other version bump; their specific audit actions join that family.
+    "tree-fix",
+    "ordinal-backfill",
   ]),
   approve: new Set(["approve"]),
   reject: new Set(["reject"]),

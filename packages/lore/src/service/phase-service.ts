@@ -492,8 +492,10 @@ export class PhaseService {
    * green — the suite does not read the audit trail). That is why the audit half is
    * written here and not left to callers.
    *
-   * `actor`/`created_by` are the CALLING actor (the store write context's claimed name), resolved by the one
-   * write route (`CorpusService.writeDoc`, AC-DCL-3) — never the literal `"system"` they used to be.
+   * `actor`/`created_by` of the PLAN row stay the literal `"system"` — an internal writer's code-set identity
+   * (spec-run-only-write-identity-and-run-end-claim-release AC-ROI-9, pinned by
+   * `run-only-internal-writers.bun.test.ts`); the run is still stamped by the store write context. The member-task
+   * rewrites in `renamePhase` are NOT internal: they name the calling actor (AC-DCL-3, #44).
    *
    * @param plan - The resolved plan doc, read BEFORE the mutation; its `version` is
    *   both the CAS expectation and the base for the new version number.
@@ -515,7 +517,7 @@ export class PhaseService {
     },
   ): Promise<Result<DocRecord, LoreError>> {
     // reason: AC-DCL-3 — the plan write goes through the one write route (doc + version row + audit row in ONE
-    // transaction, the calling actor, the foreign-corpus refusal). `lock: "none"`: every caller above already
+    // transaction, the foreign-corpus refusal). `lock: "none"`: every caller above already
     // ran the `phase-structure` gate BEFORE any write. `status` is deliberately absent from the patch (ADR
     // non-demotion half): the written snapshot carries the plan's CURRENT status.
     const written = await this.writer.writeDoc({
@@ -526,6 +528,8 @@ export class PhaseService {
       auditAction: "update",
       auditDetails: { ...opts.details, operation: opts.operation, phase_count: phases.length },
       lock: "none",
+      // reason: AC-ROI-9 — the plan row of a phase write keeps the internal identity `system`; see the JSDoc above.
+      by: "system",
     });
     if (!written.ok) return written;
     return ok(written.value.doc);

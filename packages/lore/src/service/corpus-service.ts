@@ -119,7 +119,7 @@ import { pickBaselineRoot, pickStrategyDocument } from "./navigation-roots.js";
 import { hasIssueReport, type ResolvesInEdgeLike, type ResolutionSourceDocLike } from "./issue-resolution.js";
 import type { ArchiveIssueClosePort, IssueCloseItem } from "./issue-close-on-archive.js";
 import { isPlanMember } from "./plan-membership.js";
-import { bodyDiffers, RecordLockService, type RecordEditOp } from "./record-lock-service.js";
+import { bodyDiffers, RecordLockService, type RecordEditOp, type RecordEditPatch } from "./record-lock-service.js";
 import { ANCHOR_SCANNED_DOC_TYPES } from "./drift-check-service.js";
 // reason: NOT a cross-service import — `service/CLAUDE.md`'s "no cross-service imports"
 // rule scopes "service" to a store-holding class composed in `app.ts`. These four are
@@ -887,6 +887,8 @@ export interface DocWritePort {
   ): Promise<Result<DocWriteOutcome, LoreError>>;
   moveRule(request: RuleMoveRequest): Promise<Result<{ from: DocRecord; to: DocRecord }, LoreError>>;
   allocateRule(request: RuleAllocateRequest): Promise<Result<{ ruleId: string; doc: DocRecord }, LoreError>>;
+  /** Read-only record-lock verdict for an edit a dry run only SIMULATES — the same gate `writeDoc` applies. */
+  assertEditable(doc: DocRecord, op: RecordEditOp, patch?: RecordEditPatch): Promise<Result<void, LoreError>>;
 }
 
 /** The post-patch value of one patched field of `doc`. */
@@ -1372,6 +1374,14 @@ export class CorpusService implements DocWritePort {
     });
     if (!audited.ok) return audited;
     return allocated;
+  }
+
+  /**
+   * The record-lock verdict {@link writeDoc} applies for `lock: op`, without writing: lets a dry run report a
+   * refusal the live run would hit.
+   */
+  async assertEditable(doc: DocRecord, op: RecordEditOp, patch?: RecordEditPatch): Promise<Result<void, LoreError>> {
+    return this.recordLock.assertEditable(doc, op, patch);
   }
 
   /** {@link resolveWriteActor} as a `Result`: an unwired write context is a refusal, not a throw. */

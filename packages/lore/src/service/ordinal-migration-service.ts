@@ -664,6 +664,12 @@ export class OrdinalMigrationService {
       }
 
       if (dryRun) {
+        // A dry run reports what a live run would do — including the record-lock refusal it would hit (#161).
+        const editable = await this.writer.assertEditable(doc, "content", { title: newTitle });
+        if (!editable.ok) {
+          errors.push(`title strip failed for ${doc.id} (${doc.slug}): ${describeLoreError(editable.error)}`);
+          continue;
+        }
         titleStrips.push({
           doc_id: doc.id,
           old_title: doc.title,

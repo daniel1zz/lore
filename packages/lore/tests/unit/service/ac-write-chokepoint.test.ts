@@ -378,7 +378,7 @@ describe("AC write chokepoint — restore and import are sanctioned, validated p
       (v) => Array.isArray(v.extra["acceptance_criteria"]) && (v.extra["acceptance_criteria"] as unknown[]).length === 2,
     );
     if (!twoAcs) throw new Error("fixture: no 2-criteria version");
-    const res = await new VersionService(store, recordLockGateOff(store)).restore(specId, twoAcs.version);
+    const res = await new VersionService(store, recordLockGateOff(store)).restore(specId, twoAcs.version, { by: CALLER });
     expect(res.ok).toBe(true);
     expect(((await stored(store, specId)).extra["acceptance_criteria"] as unknown[]).length).toBe(2);
   });
