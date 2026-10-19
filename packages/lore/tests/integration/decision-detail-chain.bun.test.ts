@@ -56,9 +56,13 @@ function legacyDb(path: string): void {
   const db = new Database(path);
   db.exec(MIGRATION_020_SQL);
   db.exec(MIGRATION_023_SQL);
-  // reason: this fixture models only the decision_log tables; migration-025 indexes `versions`, so the upgrade
-  // chain needs that table to exist (its columns are all migration-025 reads).
-  db.exec("CREATE TABLE versions (doc_id TEXT NOT NULL, version INTEGER NOT NULL, action TEXT NOT NULL, created_at TEXT NOT NULL)");
+  // reason: this fixture models only the decision_log tables; migration-025 indexes `versions` and migration-026
+  // rebuilds it, so the upgrade chain needs that table with every column 026 copies, plus the `docs` table its
+  // doc_id references.
+  db.exec("CREATE TABLE docs (id TEXT PRIMARY KEY)");
+  db.exec(
+    "CREATE TABLE versions (doc_id TEXT NOT NULL, version INTEGER NOT NULL, content TEXT NOT NULL DEFAULT '', extra TEXT NOT NULL DEFAULT '{}', status TEXT NOT NULL DEFAULT 'draft', title TEXT NOT NULL DEFAULT '', action TEXT NOT NULL, created_at TEXT NOT NULL, created_by TEXT NOT NULL DEFAULT '', change_summary TEXT, slug TEXT, harness_run TEXT)",
+  );
   let prev = DECISION_GENESIS_HASH;
   for (const n of [1, 2]) {
     const row = input(n);
@@ -132,7 +136,7 @@ describe("decision detail chain", () => {
         expect(appended.ok && renderDecisionDetailSummary(appended.value)).toBe("Loosen the governed autonomy thresholds: stash-drop.threshold: 0.8 -> 0.5");
         const after = await store.listDecisionLog();
         expect(after.ok && verifyDecisionChain(after.value)).toEqual({ clean: true, checked: 3 });
-        expect((store.getDatabase().query("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(25);
+        expect((store.getDatabase().query("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(26);
       } finally {
         store.close();
       }

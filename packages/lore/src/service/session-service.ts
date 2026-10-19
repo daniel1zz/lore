@@ -860,7 +860,8 @@ export class SessionService {
 
     let parentId: DocId | null = null;
     if (handoff.plan_ref !== undefined) {
-      const resolveResult = await resolveDoc(this.store, handoff.plan_ref);
+      // reason: includeDeleted keeps the "must resolve to a live plan ... (soft-deleted)" refusal below reachable (BR-338: exit 4).
+      const resolveResult = await resolveDoc(this.store, handoff.plan_ref, { includeDeleted: true });
       if (!resolveResult.ok) {
         return err({
           code: "VALIDATION_ERROR",

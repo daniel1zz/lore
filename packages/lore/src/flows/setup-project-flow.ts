@@ -794,7 +794,14 @@ async function runManifestWriteSeam(
   const passthroughEntries = (current?.entries ?? []).filter((e) => !managedPaths.has(e.path));
   const manifestEntries = [...passthroughEntries, ...newFileEntries];
 
-  const manifest: SetupManifest = { version: PROJECT_MANIFEST_VERSION, claude_dir: repoDir, entries: manifestEntries };
+  // reason: the priors are the ledger's record of what an EARLIER run replaced; rebuilding the manifest from entries
+  // alone would drop them and a later uninstall could no longer restore (BR-834/BR-837/BR-845).
+  const manifest: SetupManifest = {
+    version: PROJECT_MANIFEST_VERSION,
+    claude_dir: repoDir,
+    entries: manifestEntries,
+    ...(current?.project_priors === undefined ? {} : { project_priors: current.project_priors }),
+  };
   const validation = setupManifestSchema.safeParse(manifest);
   if (!validation.success) {
     return {
@@ -1275,11 +1282,164 @@ export function absoluteHooksPath(repoDir: string): string {
   return join(resolve(repoDir), "hooks");
 }
 
+/**
+ * Read-modify-write of the project ledger (`.lore/.lore-project-manifest.json`) by a step that runs after the
+ * manifest write seam — the rules files, the hooks setting and the language key all land outside the seam, yet
+ * the uninstall reverses ledger entries only (BR-840). `update` receives the parsed ledger and returns the new one.
+ *
+ * @param fs - the project fs port.
+ * @param repoDir - absolute repo root.
+ * @param update - pure ledger transform.
+ * @returns `ok(undefined)` once written; `err(VALIDATION_ERROR)` when the ledger is absent or malformed (nothing is
+ *   written — a change that cannot be recorded must not be made); `err(STORE_ERROR)` when the write throws.
+ * @example
+ * recordInProjectLedger(fs, repoDir, (m) => ({ ...m, project_priors: { hooks_path: { prior: null } } }));
+ */
+export function recordInProjectLedger(
+  fs: ProjectFsPort,
+  repoDir: string,
+  update: (ledger: SetupManifest) => SetupManifest,
+): Result<void, LoreError> {
+  const ledgerPath = join(repoDir, PROJECT_MANIFEST_RELATIVE_PATH);
+  const raw = fs.readFile(ledgerPath);
+  if (raw === null) {
+    return err({
+      code: "VALIDATION_ERROR",
+      field: "manifest",
+      message: `no project install ledger at "${ledgerPath}" — a change that cannot be recorded for uninstall is not made`,
+      value: ledgerPath,
+    });
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (cause) {
+    return err({ code: "VALIDATION_ERROR", field: "manifest", message: `project install ledger "${ledgerPath}" is not valid JSON: ${toMessage(cause)}`, value: ledgerPath });
+  }
+  const current = setupManifestSchema.safeParse(parsed);
+  if (!current.success) {
+    return err({ code: "VALIDATION_ERROR", field: "manifest", message: `project install ledger "${ledgerPath}" failed schema validation: ${current.error.message}`, value: ledgerPath });
+  }
+  const next = setupManifestSchema.safeParse(update(current.data));
+  if (!next.success) {
+    return err({ code: "VALIDATION_ERROR", field: "manifest", message: `updated project install ledger failed schema validation: ${next.error.message}`, value: ledgerPath });
+  }
+  const nextRaw = `${JSON.stringify(next.data, null, 2)}\n`;
+  // reason: a re-run that changes nothing must write nothing (BR idempotent re-run: zero writer calls).
+  if (nextRaw === raw) return ok(undefined);
+  try {
+    fs.writeFile(ledgerPath, nextRaw, 0o644);
+  } catch (cause) {
+    return err({ code: "STORE_ERROR", message: `writing the project install ledger "${ledgerPath}" failed: ${toMessage(cause)}`, ...(cause instanceof Error ? { cause } : {}) });
+  }
+  return ok(undefined);
+}
+
+/** One lore rules file the fragment refresh reported: repo-relative POSIX `path` and what the refresh did to it. */
+export interface ProjectRulesFileOutcome {
+  path: string;
+  state: "created" | "updated" | "unchanged" | "diverged_skip" | "pruned";
+}
+
+/**
+ * Records the lore rules files (`.claude/rules/lore-*.md`) the project setup wrote as ledger entries, so the project
+ * uninstall removes exactly those and nothing else (BR-834 / BR-845). A created, updated or unchanged file is lore's
+ * (its content is the fingerprinted render) and gets an entry; a pruned one loses its entry; a hand-edited
+ * (`diverged_skip`) one is left as the ledger already had it. A file the user owns never gets an entry.
+ *
+ * @returns `ok(undefined)`, or the ledger error from {@link recordInProjectLedger}.
+ */
+export function recordProjectRulesFiles(
+  fs: ProjectFsPort,
+  repoDir: string,
+  outcomes: readonly ProjectRulesFileOutcome[],
+  now: () => string = defaultNow,
+): Result<void, LoreError> {
+  const nowIso = now();
+  return recordInProjectLedger(fs, repoDir, (ledger) => {
+    let entries = ledger.entries;
+    for (const outcome of outcomes) {
+      if (outcome.state === "diverged_skip") continue;
+      const others = entries.filter((e) => e.path !== outcome.path);
+      if (outcome.state === "pruned") {
+        entries = others;
+        continue;
+      }
+      const content = fs.readFile(join(repoDir, outcome.path));
+      if (content === null) {
+        entries = others;
+        continue;
+      }
+      const previous = entries.find((e) => e.path === outcome.path);
+      entries = [
+        ...others,
+        {
+          path: outcome.path,
+          kind: "governance",
+          sha256: sha256Hex(content),
+          written_at: previous?.written_at ?? nowIso,
+          ownership: "managed",
+        },
+      ];
+    }
+    return { ...ledger, entries };
+  });
+}
+
+/**
+ * Records, BEFORE the setup writes `language` into a project settings file, what that file held (BR-834 / BR-845):
+ * whether the file and the key existed and the key's value. The FIRST recording wins — a re-run sees lore's own
+ * value and must not replace the user's original. A settings file that is not a JSON object is not recorded (the
+ * language write refuses it and nothing changes, so there is nothing to restore).
+ *
+ * @param settingsRelPath - repo-relative POSIX path of the settings file.
+ */
+export function recordProjectLanguagePrior(fs: ProjectFsPort, repoDir: string, settingsRelPath: string): Result<void, LoreError> {
+  const raw = fs.readFile(join(repoDir, settingsRelPath));
+  let hadKey = false;
+  let prior: unknown;
+  if (raw !== null) {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      return ok(undefined);
+    }
+    if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return ok(undefined);
+    const settings = parsed as Record<string, unknown>;
+    hadKey = Object.hasOwn(settings, "language");
+    prior = settings["language"];
+  }
+  return recordInProjectLedger(fs, repoDir, (ledger) => {
+    const rows = ledger.project_priors?.settings_language ?? [];
+    if (rows.some((row) => row.path === settingsRelPath)) return ledger;
+    return {
+      ...ledger,
+      project_priors: {
+        ...ledger.project_priors,
+        settings_language: [...rows, { path: settingsRelPath, file_existed: raw !== null, had_key: hadKey, prior }],
+      },
+    };
+  });
+}
+
 async function runGitHooksPathStep(deps: ProjectScaffoldFlowDeps, repoDir: string): Promise<GitHooksPathResult> {
   try {
     const target = absoluteHooksPath(repoDir);
     const getResult = await deps.exec.run(["git", "config", "--get", "core.hooksPath"], repoDir);
     const priorValue = getResult.code === 0 ? getResult.stdout.trim() : null;
+
+    // reason: the ledger records the FIRST earlier value and keeps it on every re-run — a second run sees our own
+    // absolute path as "prior" and would overwrite the user's real original. Recorded BEFORE the write: a crash
+    // between the two leaves a restorable ledger rather than an unrecorded change (BR-837).
+    const recorded = recordInProjectLedger(deps.fs, repoDir, (ledger) => ({
+      ...ledger,
+      project_priors: {
+        ...ledger.project_priors,
+        hooks_path: ledger.project_priors?.hooks_path ?? { prior: priorValue },
+      },
+    }));
+    if (!recorded.ok) return { status: "failed", prior_value: priorValue, detail: describeError(recorded.error) };
 
     if (priorValue === target) {
       return { status: "skipped", prior_value: priorValue };

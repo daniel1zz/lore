@@ -152,6 +152,7 @@ import { MIGRATION_022_SQL } from "./migrations/migration-022.js";
 import { MIGRATION_023_SQL } from "./migrations/migration-023.js";
 import { MIGRATION_024_SQL } from "./migrations/migration-024.js";
 import { MIGRATION_025_SQL } from "./migrations/migration-025.js";
+import { applyMigration026 } from "./migrations/migration-026.js";
 import { DECISION_GENESIS_HASH, computeDecisionEntryHash } from "./decision-log.js";
 import type { DecisionLogRow, DecisionRecordInput } from "./decision-log.js";
 import type { DecisionSubjectKey } from "./store-interface.js";
@@ -198,6 +199,8 @@ export class SQLiteStore implements StoreInterface {
   readonly writeWaitMs: number;
 
   private readonly schemaCeiling: number;
+  /** The corpus file; named by a failed migration (migration-026 fails loud with it). */
+  private readonly corpusPath: string;
 
   constructor(dbPath: string, options?: SQLiteStoreOptions) {
     const declaredWriteWaitMs = options?.writeWaitMs ?? DEFAULT_WRITE_WAIT_MS;
@@ -215,6 +218,7 @@ export class SQLiteStore implements StoreInterface {
     }
     this.db = options?.readonly === true ? new Database(dbPath, { readonly: true }) : new Database(dbPath);
     this.writeWaitMs = declaredWriteWaitMs;
+    this.corpusPath = dbPath;
     this.schemaCeiling = options?.schemaCeiling ?? LATEST_SCHEMA_VERSION;
     try {
       if (options?.readonly === true) this.db.run(`PRAGMA busy_timeout = ${this.writeWaitMs}`);
@@ -772,6 +776,12 @@ export class SQLiteStore implements StoreInterface {
     if (currentVersion < 25 && 25 <= ceiling) {
       // reason: migration-025 adds the covering index AuditService.verify's narrow key read (listVersionKeys) is answered from.
       this.db.exec(MIGRATION_025_SQL);
+    }
+
+    if (currentVersion < 26 && 26 <= ceiling) {
+      // reason: migration-026 rebuilds `versions` in ONE transaction so its action CHECK admits 'undelete'; a failed
+      // step rolls back, leaves schema 25 and throws MigrationFailedError naming the step and this corpus path.
+      applyMigration026(this.db, this.corpusPath);
     }
   }
 

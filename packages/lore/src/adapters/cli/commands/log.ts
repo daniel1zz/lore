@@ -56,7 +56,7 @@ export default defineLoreCommand({
         return exitCode(result.error);
       }
 
-      const resolved = await resolveDocId(attributionStore, args.id);
+      const resolved = await resolveDocId(attributionStore, args.id, { includeDeleted: true });
       if (!resolved.ok) {
         inv.io.stderr.write(formatErrorFor(inv, resolved.error) + "\n");
         return exitCode(resolved.error);

@@ -57,6 +57,7 @@ export const LORE_MCP_TOOL_NAMES = [
   "lore_status",
   "lore_tree",
   "lore_uat_record",
+  "lore_undelete",
   "lore_verify",
 ] as const;
 
