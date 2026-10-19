@@ -84,6 +84,21 @@ const PACKAGE_ROOT = new URL("../../", import.meta.url).pathname.replace(/\/$/, 
 const INDEX_TS = join(PACKAGE_ROOT, "src", "index.ts");
 const SERVICE_DIR = join(PACKAGE_ROOT, "src", "service");
 
+/**
+ * The five required root H2 sections: limits are always enforced, so a root file missing one is a deterministic
+ * `section_missing` finding (exit 3) and would drown out the property each case below is about. Every fixture
+ * root file is prefixed with them.
+ */
+const SECTIONS_PREFIX =
+  ["What This Is", "Commands", "Architecture", "Module Index", "Finding Live Project State"]
+    .map((name) => `## ${name}\n\nbody of ${name}\n`)
+    .join("\n") + "\n";
+
+/** Writes `<dir>/CLAUDE.md` as the required sections followed by `body`. */
+function writeClaudeMd(dir: string, body: string): void {
+  writeFileSync(join(dir, "CLAUDE.md"), SECTIONS_PREFIX + body);
+}
+
 // ─── CLI subprocess harness ─────────────────────────────────────────────────
 
 interface RunResult {
@@ -221,17 +236,8 @@ describe("claude-md wiring — an unresolved reference reaches the CLI as a dete
 
   afterEach(() => cleanupDir(tmpDir));
 
-  /** Absent `adoption` resolves to warn (exit 0); the deterministic-ness assertions pin enforce. */
-  function pinEnforce(): void {
-    mkdirSync(join(tmpDir, ".lore"), { recursive: true });
-    writeFileSync(join(tmpDir, ".lore", "config.yaml"), "context:\n  memory_files:\n    adoption: enforce\n");
-  }
-
-  it("HAPPY: a dangling backtick-quoted repo-relative path is a reference_unresolved finding (never advisory), exit code exactly 3 under enforce", () => {
-    pinEnforce();
-    writeFileSync(
-      join(tmpDir, "CLAUDE.md"),
-      "See `packages/lore/src/definitely-missing-file-xyz-123.ts` for the mechanism.\n",
+  it("HAPPY: a dangling backtick-quoted repo-relative path is a reference_unresolved finding (never advisory), exit code exactly 3", () => {
+    writeClaudeMd(tmpDir, "See `packages/lore/src/definitely-missing-file-xyz-123.ts` for the mechanism.\n",
     );
 
     const { result, parsed } = runCheckClaudeMdJson(tmpDir);
@@ -241,23 +247,10 @@ describe("claude-md wiring — an unresolved reference reaches the CLI as a dete
     expect(advisoryKinds(parsed)).not.toContain("reference_missing");
   });
 
-  it("WARN: under the default adoption mode the same reference is a downgraded note and the exit code is exactly 0", () => {
-    writeFileSync(
-      join(tmpDir, "CLAUDE.md"),
-      "See `packages/lore/src/definitely-missing-file-xyz-123.ts` for the mechanism.\n",
-    );
-
-    const { result, parsed } = runCheckClaudeMdJson(tmpDir);
-
-    expect(result.exitCode).toBe(0);
-    expect(findingKinds(parsed)).not.toContain("reference_unresolved");
-    expect(advisoryKinds(parsed)).toContain("downgraded");
-  });
-
   it("NEGATIVE: reports no reference_unresolved for a backtick-quoted path that actually exists, exit code exactly 0", () => {
     mkdirSync(join(tmpDir, "notes"), { recursive: true });
     writeFileSync(join(tmpDir, "notes", "present.md"), "real file\n");
-    writeFileSync(join(tmpDir, "CLAUDE.md"), "See `notes/present.md` for the mechanism.\n");
+    writeClaudeMd(tmpDir, "See `notes/present.md` for the mechanism.\n");
 
     const { result, parsed } = runCheckClaudeMdJson(tmpDir);
 
@@ -278,12 +271,7 @@ describe("claude-md wiring — an unresolved reference reaches the CLI as a dete
 
   it("STATE: a dangling reference alongside a REAL deterministic ceiling breach still reports both — advisory is not crowded out by a real finding", () => {
     const oversized = nLineBody(400); // root ceiling is 300 lines — real breach
-    // Absent `adoption` resolves to warn (exit 0); this case asserts ENFORCEMENT, so it pins the mode.
-    mkdirSync(join(tmpDir, ".lore"), { recursive: true });
-    writeFileSync(join(tmpDir, ".lore", "config.yaml"), "context:\n  memory_files:\n    adoption: enforce\n");
-    writeFileSync(
-      join(tmpDir, "CLAUDE.md"),
-      oversized + "See `packages/lore/src/definitely-missing-file-xyz-456.ts` too.\n",
+    writeClaudeMd(tmpDir, oversized + "See `packages/lore/src/definitely-missing-file-xyz-456.ts` too.\n",
     );
 
     const { result, parsed } = runCheckClaudeMdJson(tmpDir);
@@ -315,7 +303,7 @@ describe("claude-md wiring — narrative smells reach the CLI without affecting 
 
     for (let n = 1; n <= ISO_SEARCH_MAX; n++) {
       const dir = makeTempDir(`iso-density-probe-${n}`);
-      writeFileSync(join(dir, "CLAUDE.md"), isoDatesParagraph(n));
+      writeClaudeMd(dir, isoDatesParagraph(n));
       const { result, parsed } = runCheckClaudeMdJson(dir);
       cleanupDir(dir);
 
@@ -346,9 +334,7 @@ describe("claude-md wiring — narrative smells reach the CLI without affecting 
   });
 
   it("HAPPY: status_word fires for status-narrative wording (e.g. 'not yet', 'pending', TODO markers), exit code exactly 0", () => {
-    writeFileSync(
-      join(tmpDir, "CLAUDE.md"),
-      "This feature is not yet implemented. TODO: revisit once pending work lands.\n",
+    writeClaudeMd(tmpDir, "This feature is not yet implemented. TODO: revisit once pending work lands.\n",
     );
 
     const { result, parsed } = runCheckClaudeMdJson(tmpDir);
@@ -358,7 +344,7 @@ describe("claude-md wiring — narrative smells reach the CLI without affecting 
   });
 
   it("ERROR (no crash): an empty CLAUDE.md produces zero advisory findings and exit code exactly 0", () => {
-    writeFileSync(join(tmpDir, "CLAUDE.md"), "");
+    writeClaudeMd(tmpDir, "");
 
     const { result, parsed } = runCheckClaudeMdJson(tmpDir);
 
@@ -375,18 +361,16 @@ describe("claude-md wiring — narrative smells reach the CLI without affecting 
     expect(narrative).toEqual([]);
   });
 
-  it("STATE: several advisory kinds firing at once (dense ISO dates + status wording, plus a dangling reference downgraded by warn mode) never changes the exit code", () => {
+  it("STATE: several advisory kinds firing at once (dense ISO dates + status wording) never change the exit code", () => {
     const content =
-      "See `packages/lore/src/definitely-missing-file-xyz-789.ts`.\n" +
       isoDatesParagraph(8) +
       "This is not yet done — TODO: pending review.\n";
-    writeFileSync(join(tmpDir, "CLAUDE.md"), content);
+    writeClaudeMd(tmpDir, content);
 
     const { result, parsed } = runCheckClaudeMdJson(tmpDir);
 
     expect(result.exitCode).toBe(0);
     const kinds = new Set(advisoryKinds(parsed));
-    expect(kinds.has("downgraded")).toBe(true);
     expect(kinds.has("iso_date_density")).toBe(true);
     expect(kinds.has("status_word")).toBe(true);
   });

@@ -268,7 +268,12 @@ describe("AC-CTX-3: compiled dist/lore context init/refresh two-zone CLAUDE.md l
         line.includes(`section=${targetSectionId} `),
       );
       expect(fingerprintLineIdx).toBeGreaterThanOrEqual(0);
-      const bodyLineIdx = fingerprintLineIdx + 1;
+      // reason: skip a `## ` heading the section opens with: mangling a REQUIRED root heading would make the
+      // required section vanish, and limits are always enforced, so the refresh would be refused instead of diverged.
+      let bodyLineIdx = fingerprintLineIdx + 1;
+      if (lines[bodyLineIdx]?.startsWith("## ") === true) {
+        bodyLineIdx = lines.findIndex((line, i) => i > bodyLineIdx && line.trim() !== "" && !line.startsWith("<!--"));
+      }
       expect(bodyLineIdx).toBeLessThan(lines.length);
       lines[bodyLineIdx] = `${lines[bodyLineIdx]} <<< HAND-EDITED BY TEST >>>`;
       const handEdited = lines.join("\n");

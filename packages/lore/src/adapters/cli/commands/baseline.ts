@@ -57,7 +57,7 @@ import { NON_BUSINESS_PREFIX, commandFixCommand, collectOwnedSites, computeLeafC
 import { treePredicateFor } from "../absent-declarations.js";
 import { buildOwnerLeafIndex } from "../../../service/owned-by.js";
 import { resolveDoc } from "../../../service/resolve.js";
-import { SiteCensusError, type UnresolvedImport, findCensusRoot, listSitesMany } from "../../../service/site-census.js";
+import { SiteCensusError, type UnresolvedImport, findCensusRoot, listSitesMany, resolveCommandEntry } from "../../../service/site-census.js";
 import type { Site, SiteList } from "../../../service/site-census.js";
 import { RuleStateService } from "../../../service/rule-state-service.js";
 import type { RuleStateEntry, RuleStateFull } from "../../../service/rule-state-service.js";
@@ -247,6 +247,8 @@ interface LeafCoverageReport {
   commands: string[];
   /** Declared commands this tree does not have (pending in an unlanded branch, or stale): reported, never a coverage defect. */
   absent_commands: { command: string; fix: string }[];
+  /** Mappings of a command-measured leaf whose site this tree no longer reaches: removable once main (the corpus checkout) no longer reaches them either. */
+  stale_site_maps: { site: string; fix: string }[];
   /** What measured the leaf: its declared commands' census, the sites it owns (no live command), `absent` (it declares commands, all absent from this tree, and owns no site: pending), or nothing (no command, no owned site: unmeasured). */
   measured_by: "commands" | "owned_sites" | "absent" | "none";
   sites: number;
@@ -338,6 +340,14 @@ async function runCoverage(target: string, json: boolean, inv: Invocation): Prom
         commands,
         measured_by: live.length > 0 ? "commands" : ownedSites.length > 0 ? "owned_sites" : absent.length > 0 ? "absent" : "none",
         absent_commands: absent.map((command) => ({ command, fix: absentCommandFixCommand(leaf.slug, command) })),
+        // reason: only a leaf measured by its commands has a census to compare with; an owned-sites leaf's own keys ARE its sites.
+        stale_site_maps:
+          live.length > 0
+            ? Object.keys(siteMap)
+                .filter((key) => !byKey.has(key) && !bootstrapByKey.has(key))
+                .sort()
+                .map((site) => ({ site, fix: `lore baseline map ${leaf.slug} --remove-site ${site}` }))
+            : [],
         sites: byKey.size,
         gaps: verdict.gaps,
         not_measured: verdict.notMeasured,
@@ -373,6 +383,7 @@ async function runCoverage(target: string, json: boolean, inv: Invocation): Prom
         printLine(inv.io.stdout, `${r.slug}: ${state} - ${r.sites} site(s), ${r.gaps.length} gap(s), ${r.not_measured.length} not_measured, ${r.unresolved_imports.length} unresolved import(s), ${r.bootstrap.length} bootstrap (not counted as gaps)`);
         if (r.measured_by === "absent") printLine(inv.io.stdout, `  all declared commands absent from this tree (pending or stale): ${r.absent_commands.map((a) => a.command).join(", ")}`);
         for (const a of r.absent_commands) printLine(inv.io.stdout, `  declared command not in this tree: ${a.command} (pending in a branch that has not landed, or stale; not counted against coverage)\n    if stale: ${a.fix}`);
+        for (const s of r.stale_site_maps) printLine(inv.io.stdout, `  stale mapping ${s.site} (this tree no longer reaches it; removable once main no longer does, refused until then)\n    fix: ${s.fix}`);
         for (const key of r.unresolved_imports) printLine(inv.io.stdout, `  unresolved  ${key} (census incomplete: sites behind this import are not listed)`);
         for (const key of r.gaps) printLine(inv.io.stdout, `  gap          ${key}\n    fix: ${siteFixCommand(r.slug, key)}`);
         for (const key of r.not_measured) printLine(inv.io.stdout, `  not_measured ${key}\n    fix: ${siteFixCommand(r.slug, key)}`);
@@ -710,7 +721,7 @@ export default defineLoreCommand({
     sites: defineLoreCommand({
       meta: { name: "sites", description: "List the failure sites a CLI command can reach (static census, TypeScript compiler API)" },
       args: {
-        command: { type: "positional", description: "CLI command name, e.g. 'ac add' (or 'ac-add'); token 1 = commands/<token>.ts, further tokens = nested subcommands", required: true },
+        command: { type: "positional", description: "CLI command path, e.g. 'ac add' (or 'ac-add'); token 1 = commands/<token>.ts, every further positional = a nested subcommand ('gate spec-create')", required: true },
         json: { type: "boolean", description: "Output result as JSON" },
       },
       async run(context): Promise<number> {
@@ -719,11 +730,22 @@ export default defineLoreCommand({
         const json = args.json === true;
         try {
           const rootDir = requireCensusRoot(inv);
-          const command = args.command as string;
-          const sites = listSitesMany({ rootDir, commands: [command] }).get(command) as SiteList;
+          // reason: citty binds exactly ONE token to the declared positional; every positional survives on `args._`, and
+          // dropping the rest silently censused the wrong command (BR-664: an unresolvable path is a refusal, never a guess).
+          const command = ((args._ as string[] | undefined) ?? [args.command as string]).join(" ");
+          let sites: SiteList;
+          try {
+            sites = listSitesMany({ rootDir, commands: [command] }).get(command) as SiteList;
+          } catch (cause) {
+            if (cause instanceof SiteCensusError && cause.reason === "entry-symbol-missing") {
+              return reportFailure(inv, { code: "VALIDATION_ERROR", field: "command", message: `no CLI command '${command}': ${cause.message}`, value: command } as LoreError, json);
+            }
+            throw cause;
+          }
+          const entry = resolveCommandEntry({ rootDir, command });
           const dynamicCount = sites.filter((s) => s.dynamic).length;
           if (json) {
-            printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { command, count: sites.length, not_measured: dynamicCount, unresolved_imports: sites.unresolvedImports, sites, bootstrap: sites.bootstrap } }, null, 2));
+            printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { command, entry, count: sites.length, not_measured: dynamicCount, unresolved_imports: sites.unresolvedImports, sites, bootstrap: sites.bootstrap } }, null, 2));
             if (sites.unresolvedImports.length > 0) return 1;
             return 0;
           }

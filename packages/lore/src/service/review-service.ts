@@ -36,6 +36,7 @@ import type { StoreInterface } from "../store/store-interface.js";
 import { resolveWriteActorFor, WriteActorUnresolvedError } from "../store/write-context-store.js";
 import { bareDocWriter, type DocWritePort } from "./corpus-service.js";
 import { resolveDoc } from "./resolve.js";
+import { PENDING_REVIEW_STATUSES, isPendingReviewDoc } from "./pending-queue.js";
 import { absentDeclarationRefusal, leavesUnder, type AbsentDeclaration, type DeclaringLeaf } from "./leaf-coverage.js";
 import { requireSpecCitesLiveRule } from "./spec-approval-citation.js";
 import { ownProposedRules } from "./rule-changes.js";
@@ -84,7 +85,7 @@ export interface PendingDoc {
   slug: Slug;
   type: DocType;
   title: string;
-  status: "draft";
+  status: "draft" | "in-review";
   created_by: string;
   updated_at: string;
   version: number;
@@ -106,8 +107,9 @@ export interface PendingFilters {
    * is a review-QUEUE list-surface, the same read-surface class `list`/`search`
    * already apply this filter to. Default `false`/absent: an invalidated draft
    * (e.g. a duplicate superseded by its canonical version) is excluded from the
-   * queue rather than sitting there forever — `draft` has no `->archived`
-   * lifecycle exit, so filtering is the only way this queue self-cleans.
+   * queue rather than sitting there forever — `VALID_TRANSITIONS` (`@lore/core`
+   * lifecycle.ts) gives draft no exit to archived for most types, so filtering is
+   * the way this queue self-cleans.
    */
   include_invalid?: boolean;
   /**
@@ -586,7 +588,7 @@ export class ReviewService {
   }
 
   /**
-   * Return all documents with status='draft' matching optional filters.
+   * Return all documents awaiting review (draft or in-review, `isPendingReviewDoc`) matching optional filters.
    * Source: SPEC-005 §3, AC row 1.
    *
    * @param filters - author/type/since filters plus SPEC-043 D3's `include_invalid`
@@ -609,20 +611,23 @@ export class ReviewService {
     filters?: PendingFilters,
     now: () => string = defaultNow,
   ): Promise<Result<PendingDoc[], LoreError>> {
-    const storeFilters: import("../store/store-interface.js").StoreFilters = {
-      status: "draft",
+    const baseFilters: import("../store/store-interface.js").StoreFilters = {
       ...(filters?.author !== undefined ? { created_by: filters.author } : {}),
       ...(filters?.type !== undefined ? { type: filters.type } : {}),
       ...(filters?.since !== undefined ? { since: filters.since } : {}),
     };
 
-    const result = await this.store.findMany(storeFilters);
-    if (!result.ok) return result;
+    const queued: DocRecord[] = [];
+    for (const status of PENDING_REVIEW_STATUSES) {
+      const found = await this.store.findMany({ ...baseFilters, status });
+      if (!found.ok) return found;
+      queued.push(...found.value.filter(isPendingReviewDoc));
+    }
 
     // SPEC-043 D3 — `pending` is a review-QUEUE list-surface, the same read-surface
     // class `CorpusService.list`/`search` already filter: an invalidated draft (e.g.
-    // a duplicate superseded by its canonical version) has no lifecycle exit (no
-    // draft->archived transition exists) and would otherwise sit in this queue
+    // a duplicate superseded by its canonical version) has no lifecycle exit (for most
+    // types `VALID_TRANSITIONS` has no draft exit to archived) and would otherwise sit in this queue
     // forever. Excluded by default; `include_invalid` restores it, badged by the
     // CLI (`formatValidityBadge`, `lore list --include-invalid`'s own renderer).
     // `isInvalidated` is a structural no-op for any doc type ValidityService never
@@ -630,8 +635,8 @@ export class ReviewService {
     const nowIso = now();
     const invalidFiltered =
       filters?.include_invalid === true
-        ? result.value
-        : result.value.filter((doc) => !isInvalidated(doc, nowIso));
+        ? queued
+        : queued.filter((doc) => !isInvalidated(doc, nowIso));
 
     // SPEC-103 §Mechanisms M3 — "pending = promises": task docs and ledger
     // knowledge sub_types are RECORDS/execution-workflow rows, not review-worthy
@@ -979,6 +984,21 @@ export class ReviewService {
     id: string,
     opts?: RejectOpts,
   ): Promise<Result<DocRecord, LoreError>> {
+    const outcome = await this.rejectWithOutcome(id, opts);
+    if (!outcome.ok) return outcome;
+    return ok(outcome.value.doc);
+  }
+
+  /**
+   * {@link reject} plus the status the doc held BEFORE the call, so a caller can state the transition that
+   * happened (`in-review -> draft`) or that none did (`draft` stays `draft`) instead of guessing from the result.
+   *
+   * @returns The rejected doc and `from_status`, or the same errors as {@link reject}.
+   */
+  async rejectWithOutcome(
+    id: string,
+    opts?: RejectOpts,
+  ): Promise<Result<{ doc: DocRecord; from_status: DocRecord["status"] }, LoreError>> {
     const findResult = await this.resolveDoc(id);
     if (!findResult.ok) return findResult;
 
@@ -1023,7 +1043,7 @@ export class ReviewService {
         details: { ...auditDetails, version: doc.version },
       });
       if (!recorded.ok) return recorded;
-      return ok(doc);
+      return ok({ doc, from_status: doc.status });
     }
 
     // reason: a reject is NOT a new version — the doc keeps its version so a judgment recorded against it stays fresh
@@ -1040,7 +1060,7 @@ export class ReviewService {
       by: reviewer,
     });
     if (!rejected.ok) return rejected;
-    return ok(rejected.value.doc);
+    return ok({ doc: rejected.value.doc, from_status: doc.status });
   }
 
   /**
@@ -1253,7 +1273,7 @@ function toPendingDoc(doc: DocRecord, opts?: { claimTtlMinutes?: number }): Pend
     slug: doc.slug,
     type: doc.type,
     title: doc.title,
-    status: "draft",
+    status: doc.status === "in-review" ? "in-review" : "draft",
     created_by: doc.created_by,
     updated_at: doc.updated_at,
     version: doc.version,

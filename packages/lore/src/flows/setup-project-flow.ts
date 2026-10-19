@@ -181,7 +181,6 @@ import {
   setupManifestSchema,
 } from "@lore/core";
 import type {
-  AdoptionMode,
   AssetFile,
   FsProbe,
   LoreError,
@@ -313,28 +312,8 @@ export type AcCiteSeedResult = { status: "written" } | { status: "kept"; existin
 export type SeedAcCiteMode = (repoDir: string) => Promise<Result<AcCiteSeedResult, LoreError>>;
 
 /**
- * What {@link WriteAdoptionMode} did with `context.memory_files.adoption`:
- * `written` — the key was absent and now holds the requested mode; `kept` —
- * the key already held `existing`, nothing was written (an explicit value is
- * never overwritten, spec-claude-md-root-section-structure-check-and-adoption-mode D4).
- */
-export type AdoptionWriteOutcome = { status: "written" } | { status: "kept"; existing: AdoptionMode };
-
-/**
- * Persists the adoption mode into the target repo's `.lore/config.yaml`
- * (`context.memory_files.adoption`) — ONLY when that key is absent. The real
- * implementation (adapters/cli/commands/setup.ts) reads the current value
- * first; this flow never imports a config reader/writer or `node:fs` for it.
- *
- * @param repoDir - Absolute repo root whose `.lore/config.yaml` is updated.
- * @param mode - The mode judged on the POST-SPLICE `CLAUDE.md` content.
- * @returns `err` when the config cannot be read or written — never throws.
- */
-export type WriteAdoptionMode = (repoDir: string, mode: AdoptionMode) => Result<AdoptionWriteOutcome, LoreError>;
-
-/**
  * Resolves the target repo's REAL `context.memory_files` budgets (its own
- * `.lore/config.yaml`, read AFTER the init step created it) so the adoption
+ * `.lore/config.yaml`, read AFTER the init step created it) so the memory-file
  * judgement uses the same ceilings `lore status --check-claude-md` will later
  * enforce — never schema defaults.
  *
@@ -344,7 +323,7 @@ export type WriteAdoptionMode = (repoDir: string, mode: AdoptionMode) => Result<
 export type ResolveMemoryFileBudgets = (repoDir: string) => Result<MemoryFileBudgets, LoreError>;
 
 /**
- * What the adoption judgement needs to resolve code references: a read-only probe of the
+ * What the memory-file judgement needs to resolve code references: a read-only probe of the
  * target repo and its context fragments, so the verdict counts a dangling `path#Symbol` the
  * way `lore status --check-claude-md` later will.
  *
@@ -358,9 +337,9 @@ export type ResolveReferenceContext = (repoDir: string) => {
 /**
  * The ports {@link scaffoldProject} depends on, bundled for constructor injection.
  *
- * `writeAdoptionMode` + `resolveMemoryFileBudgets` are OPTIONAL in the TYPE only
- * (making them required would break unanchored fixtures that predate the adoption
- * step). Absence is NOT silent: the report carries an `adoption` row with
+ * `resolveMemoryFileBudgets` + `resolveReferenceContext` are OPTIONAL in the TYPE only
+ * (making them required would break unanchored fixtures that predate the judgement
+ * step). Absence is NOT silent: the report carries a `memory_files` row with
  * `status: "skipped"` naming the missing port(s). The production adapter supplies both.
  */
 export interface ProjectScaffoldFlowDeps {
@@ -368,7 +347,6 @@ export interface ProjectScaffoldFlowDeps {
   exec: ExecPort;
   initCorpus: InitCorpus;
   assets: ProjectAssetSource;
-  writeAdoptionMode?: WriteAdoptionMode;
   resolveMemoryFileBudgets?: ResolveMemoryFileBudgets;
   /** Same optionality and loud-skip rule as the two ports above; the production adapter supplies it. */
   resolveReferenceContext?: ResolveReferenceContext;
@@ -379,16 +357,13 @@ export interface ProjectScaffoldFlowDeps {
 }
 
 /**
- * Outcome of the adoption step (spec D4). `mode` is the value judged on the
- * post-splice root file — ABSENT exactly when nothing was judged (`skipped`, or
- * `failed` before judgement). `status` says whether it reached the config.
- * `checklist` is the migration checklist — one line per would-be deterministic
- * finding — populated ONLY when `mode` is `warn`.
+ * Outcome of the memory-file judgement step: the POST-SPLICE root file judged against the repo's real limits and
+ * required sections. It writes NOTHING (limits are always enforced; there is no setting to seed). `checklist` is one
+ * line per deterministic finding, populated ONLY when `status` is `findings`.
  */
-export interface AdoptionStepResult {
-  status: "written" | "kept" | "failed" | "skipped";
-  mode?: AdoptionMode;
-  /** `kept`: the explicit value already in config; `failed`/`skipped`: the reason. */
+export interface MemoryFileJudgement {
+  status: "conforms" | "findings" | "failed" | "skipped";
+  /** `failed`/`skipped`: the reason. */
   detail?: string;
   checklist: string[];
 }
@@ -458,12 +433,10 @@ export interface ProjectScaffoldReport {
   claude_md: SimpleStepResult;
   git_hooks_path: GitHooksPathResult;
   /**
-   * Adoption-mode write (spec-claude-md-root-section-structure-check-and-adoption-mode
-   * D4) — absent ONLY when the CLAUDE.md step itself failed (nothing to judge).
-   * A missing adoption port is a `status: "skipped"` row, never absence.
-   * See {@link AdoptionStepResult}.
+   * Memory-file judgement — absent ONLY when the CLAUDE.md step itself failed (nothing to judge).
+   * A missing port is a `status: "skipped"` row, never absence. See {@link MemoryFileJudgement}.
    */
-  adoption?: AdoptionStepResult;
+  memory_files?: MemoryFileJudgement;
   /**
    * BL-8 (AC-BLS3-7) — the `skills/lore-baseline/**` install into `.claude/` (ledger kind `skill`). `done` = at
    * least one file written this run; `skipped` = every file already byte-identical; `failed` names the cause.
@@ -1173,49 +1146,36 @@ async function runClaudeMdStep(
 }
 
 /**
- * Adoption step (spec-claude-md-root-section-structure-check-and-adoption-mode D4):
- * judges the POST-SPLICE root `CLAUDE.md` content with the SOLE composition entry
- * `runMemoryFileChecks` (every deterministic kind counts — structure AND capacity
- * AND emphasis; never the pre-splice file) and asks `deps.writeAdoptionMode` to
- * persist `enforce` (zero would-be findings) or `warn` (any). The port itself only
- * writes when the key is absent, so an explicit value is never overwritten.
+ * Memory-file judgement step: judges the POST-SPLICE root `CLAUDE.md` content with the SOLE composition entry
+ * `runMemoryFileChecks` (every deterministic kind counts: structure AND capacity AND emphasis; never the pre-splice
+ * file) and reports `conforms` or the checklist of findings. It writes nothing: a nonconforming file is the person's
+ * to fix, and `lore status --check-claude-md` fails on it until they do.
  *
- * reason: budgets are the repo's REAL resolved budgets (`deps.resolveMemoryFileBudgets`)
- * with `adoption` pinned to `enforce` so `deterministic` IS the would-be finding list —
- * the default-`warn` resolution would move every finding into `advisory` and hide the
- * count from this caller. Judging against schema defaults instead would write `enforce`
- * for a repo whose tighter ceilings `status --check-claude-md` then fails on.
- * References are judged too (`deps.resolveReferenceContext` supplies the target repo's probe
- * and fragments), so the mode written is the mode `lore status --check-claude-md` will
- * agree with; `docExists` is `() => true` (slug pointers are `--check-memory-pointers`'s job).
+ * reason: budgets are the repo's REAL resolved budgets (`deps.resolveMemoryFileBudgets`): judging against schema
+ * defaults would say `conforms` for a repo whose tighter ceilings `status --check-claude-md` then fails on.
+ * References are judged too (`deps.resolveReferenceContext` supplies the target repo's probe and fragments);
+ * `docExists` is `() => true` (slug pointers are `--check-memory-pointers`'s job).
  *
- * A missing port is a loud `skipped` row (never an absent one); a budget-resolution
- * failure is a `failed` row and the write port is NOT called.
+ * A missing port is a loud `skipped` row (never an absent one); a budget-resolution failure is a `failed` row.
  */
-function runAdoptionStep(deps: ProjectScaffoldFlowDeps, repoDir: string, postSpliceContent: string): AdoptionStepResult {
-  const { writeAdoptionMode, resolveMemoryFileBudgets, resolveReferenceContext } = deps;
-  if (writeAdoptionMode === undefined || resolveMemoryFileBudgets === undefined || resolveReferenceContext === undefined) {
+function runMemoryFileJudgementStep(deps: ProjectScaffoldFlowDeps, repoDir: string, postSpliceContent: string): MemoryFileJudgement {
+  const { resolveMemoryFileBudgets, resolveReferenceContext } = deps;
+  if (resolveMemoryFileBudgets === undefined || resolveReferenceContext === undefined) {
     const missing = [
-      ...(writeAdoptionMode === undefined ? ["writeAdoptionMode"] : []),
       ...(resolveMemoryFileBudgets === undefined ? ["resolveMemoryFileBudgets"] : []),
       ...(resolveReferenceContext === undefined ? ["resolveReferenceContext"] : []),
     ];
-    return { status: "skipped", detail: `adoption not judged: deps.${missing.join(" and deps.")} not injected`, checklist: [] };
+    return { status: "skipped", detail: `memory file not judged: deps.${missing.join(" and deps.")} not injected`, checklist: [] };
   }
   const resolved = resolveMemoryFileBudgets(repoDir);
   if (!resolved.ok) return { status: "failed", detail: describeError(resolved.error), checklist: [] };
-  const budgets = { ...resolved.value, adoption: "enforce" as const };
   const { deterministic } = runMemoryFileChecks(
     [{ path: CLAUDE_MD_TARGET_NAME, role: "root", content: postSpliceContent }],
-    budgets,
+    resolved.value,
     { ...resolveReferenceContext(repoDir), docExists: () => true },
   );
-  const mode: AdoptionMode = deterministic.length === 0 ? "enforce" : "warn";
-  const checklist = mode === "warn" ? deterministic.map((finding) => finding.message) : [];
-  const written = writeAdoptionMode(repoDir, mode);
-  if (!written.ok) return { status: "failed", mode, detail: describeError(written.error), checklist };
-  if (written.value.status === "kept") return { status: "kept", mode, detail: written.value.existing, checklist: [] };
-  return { status: "written", mode, checklist };
+  if (deterministic.length === 0) return { status: "conforms", checklist: [] };
+  return { status: "findings", checklist: deterministic.map((finding) => finding.message) };
 }
 
 /** Finalizes the gitignore candidate's report row once the seam has run — keys off `seam.written` (see module doc). */
@@ -1437,8 +1397,8 @@ export async function scaffoldProject(
   const ac_cite = await runAcCiteSeedStep(deps, repoDir);
 
   // Judged only when the CLAUDE.md step produced a candidate (a failed step has no content to judge).
-  const adoption =
-    claudeMdOutcome.pending === undefined ? undefined : runAdoptionStep(deps, repoDir, claudeMdOutcome.pending.content);
+  const memory_files =
+    claudeMdOutcome.pending === undefined ? undefined : runMemoryFileJudgementStep(deps, repoDir, claudeMdOutcome.pending.content);
 
   return ok({
     init,
@@ -1447,7 +1407,7 @@ export async function scaffoldProject(
     gitignore,
     claude_md,
     git_hooks_path,
-    ...(adoption === undefined ? {} : { adoption }),
+    ...(memory_files === undefined ? {} : { memory_files }),
     ...(skills === undefined ? {} : { skills }),
     ...(ac_cite === undefined ? {} : { ac_cite }),
     manifest: seam.manifestStatus,

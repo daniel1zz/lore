@@ -16,6 +16,12 @@ import { describe, expect, it } from "vitest";
 import { CLAUDE_MD_MARKER_END, CLAUDE_MD_MARKER_START, InMemoryFsPort, resolveMemoryFileBudgets } from "@lore/core";
 import { runContextInit, runContextRefresh } from "../../../src/flows/context-flow.js";
 
+/**
+ * A Z2 narrative that carries the three root sections the managed zone does not supply, so the init'd file CONFORMS to the
+ * required-section structure: limits are always enforced, so a refresh of a nonconforming file is refused.
+ */
+const CONFORMING_NARRATIVE = "## What This Is\n\nA fixture.\n\n## Commands\n\n- make test\n\n## Architecture\n\nLayers.\n";
+
 describe("runContextInit", () => {
   it("HAPPY: writes a fresh CLAUDE.md with the managed zone and a skeleton narrative when no narrative is resolved", async () => {
     const fs = new InMemoryFsPort({});
@@ -77,7 +83,7 @@ describe("runContextRefresh", () => {
 
   it("REGRESSION: refresh immediately after init is idempotent (byte-identical content, every section unchanged)", async () => {
     const fs = new InMemoryFsPort({});
-    const initResult = await runContextInit({ fs }, "", {});
+    const initResult = await runContextInit({ fs }, "", { narrative: CONFORMING_NARRATIVE });
     expect(initResult.ok).toBe(true);
     const before = await fs.readFile("CLAUDE.md");
 
@@ -92,14 +98,19 @@ describe("runContextRefresh", () => {
 
   it("BOUNDARY: a hand-edit inside a managed section reports diverged_skip and leaves file bytes untouched", async () => {
     const fs = new InMemoryFsPort({});
-    await runContextInit({ fs }, "", {});
+    await runContextInit({ fs }, "", { narrative: CONFORMING_NARRATIVE });
     const original = await fs.readFile("CLAUDE.md");
     expect(original).not.toBeNull();
 
     const lines = (original as string).split("\n");
     const fingerprintLineIdx = lines.findIndex((line) => line.includes("section=module-index "));
     expect(fingerprintLineIdx).toBeGreaterThanOrEqual(0);
-    lines[fingerprintLineIdx + 1] = `${lines[fingerprintLineIdx + 1]} <<< HAND EDIT >>>`;
+    // reason: edit the section's BODY, not its `## Module Index` heading: a mangled heading would make the required
+    // section vanish, and limits are always enforced, so the refresh would be refused instead of reporting diverged_skip.
+    const headingIdx = lines.findIndex((line, i) => i > fingerprintLineIdx && line.startsWith("## "));
+    const bodyIdx = lines.findIndex((line, i) => i > headingIdx && line.trim() !== "" && !line.startsWith("<!--"));
+    expect(bodyIdx).toBeGreaterThan(headingIdx);
+    lines[bodyIdx] = `${lines[bodyIdx]} <<< HAND EDIT >>>`;
     const handEdited = lines.join("\n");
     await fs.writeFile("CLAUDE.md", handEdited);
 
@@ -138,17 +149,6 @@ describe("runContextRefresh", () => {
   }
 
   /**
-   * Budgets that PIN `adoption: enforce`. Absent `adoption` resolves to warn
-   * (spec-claude-md-root-section-structure-check-and-adoption-mode D3), under
-   * which `runMemoryFileChecks` downgrades every deterministic finding and the
-   * write gate has nothing to refuse — so every REFUSAL assertion below must
-   * name enforce explicitly or it is unreachable.
-   */
-  function enforcedBudgets(base = resolveMemoryFileBudgets(undefined)) {
-    return { ...base, adoption: "enforce" as const };
-  }
-
-  /**
    * Grows `fs`'s module index by `count` distinct top-level module directories that each carry a memory file
    * (`m0000/CLAUDE.md`, ...): since spec-module-index-lists-only-folders-with-a-memory-file-managed only such
    * folders get an index line.
@@ -168,16 +168,19 @@ describe("runContextRefresh", () => {
     // the boundary itself moved. Derived from config, never a literal, so a
     // config change moves the fixture with it.
     const budgets = resolveMemoryFileBudgets(undefined);
-    const enforced = enforcedBudgets(budgets);
-    const lineFloor = Math.ceil(budgets.root.max_lines * budgets.evict_threshold_fraction);
-    // `renderModuleIndexBody` adds exactly one line per memory-file module dir on top of a 20-line
-    // baseline once at least one module is listed (measured against current src).
-    const BASELINE_LINES = 20;
+        const lineFloor = Math.ceil(budgets.root.max_lines * budgets.evict_threshold_fraction);
+    // `renderModuleIndexBody` adds exactly one line per memory-file module dir on top of a fixed baseline once at
+    // least one module is listed; the baseline is MEASURED from one refresh, never a literal.
+    const probeFs = new InMemoryFsPort({});
+    await runContextInit({ fs: probeFs }, "", { narrative: CONFORMING_NARRATIVE });
+    await growModuleIndex(probeFs, 1);
+    expect((await runContextRefresh({ fs: probeFs }, "")).ok).toBe(true);
+    const BASELINE_LINES = countLines((await probeFs.readFile("CLAUDE.md")) as string) - 1;
     const modulesForLines = (lines: number): number => lines - BASELINE_LINES;
 
-    // Side A — one line under the floor: allowed (default budgets, i.e. warn).
+    // Side A — one line under the floor: allowed.
     const underFloorFs = new InMemoryFsPort({});
-    await runContextInit({ fs: underFloorFs }, "", {});
+    await runContextInit({ fs: underFloorFs }, "", { narrative: CONFORMING_NARRATIVE });
     await growModuleIndex(underFloorFs, modulesForLines(lineFloor - 1));
     const underFloorResult = await runContextRefresh({ fs: underFloorFs }, "");
     expect(underFloorResult.ok).toBe(true);
@@ -187,25 +190,12 @@ describe("runContextRefresh", () => {
       expect(countLines(underFloorContent as string)).toBe(lineFloor - 1);
     }
 
-    // Side A' — the same candidate under ENFORCE: whatever else the flow's
-    // skeleton may still be refused for (its root structure is another task's
-    // concern), the refusal must NEVER name the capacity boundary one line
-    // under the floor. Without this, Side B below would pass on a structure
-    // refusal alone and the floor boundary would go undiscriminated.
-    const underFloorEnforcedFs = new InMemoryFsPort({});
-    await runContextInit({ fs: underFloorEnforcedFs }, "", {});
-    await growModuleIndex(underFloorEnforcedFs, modulesForLines(lineFloor - 1));
-    const underFloorEnforced = await runContextRefresh({ fs: underFloorEnforcedFs, budgets: enforced }, "");
-    if (!underFloorEnforced.ok && underFloorEnforced.error.code === "VALIDATION_ERROR") {
-      expect(underFloorEnforced.error.message).not.toMatch(/ceiling of|eviction floor/i);
-    }
-
     // Side B — exactly AT the floor: must be refused with NO write.
     const atFloorFs = new InMemoryFsPort({});
-    await runContextInit({ fs: atFloorFs }, "", {});
+    await runContextInit({ fs: atFloorFs }, "", { narrative: CONFORMING_NARRATIVE });
     const beforeAtFloor = await atFloorFs.readFile("CLAUDE.md");
     await growModuleIndex(atFloorFs, modulesForLines(lineFloor));
-    const atFloorResult = await runContextRefresh({ fs: atFloorFs, budgets: enforced }, "");
+    const atFloorResult = await runContextRefresh({ fs: atFloorFs, budgets }, "");
     expect(atFloorResult.ok).toBe(false);
     if (!atFloorResult.ok && atFloorResult.error.code === "VALIDATION_ERROR") {
       expect(atFloorResult.error.message).toMatch(/ceiling of|eviction floor/i);
@@ -216,17 +206,17 @@ describe("runContextRefresh", () => {
     // Side C (REGRESSION) — one line past the CEILING is still refused, so
     // arming the floor did not replace the ceiling check with a weaker one.
     const overCeilingFs = new InMemoryFsPort({});
-    await runContextInit({ fs: overCeilingFs }, "", {});
+    await runContextInit({ fs: overCeilingFs }, "", { narrative: CONFORMING_NARRATIVE });
     const beforeOverCeiling = await overCeilingFs.readFile("CLAUDE.md");
     await growModuleIndex(overCeilingFs, modulesForLines(budgets.root.max_lines + 1));
-    const overCeilingResult = await runContextRefresh({ fs: overCeilingFs, budgets: enforced }, "");
+    const overCeilingResult = await runContextRefresh({ fs: overCeilingFs, budgets }, "");
     expect(overCeilingResult.ok).toBe(false);
     expect(await overCeilingFs.readFile("CLAUDE.md")).toBe(beforeOverCeiling);
   });
 
   it("NEGATIVE: a would-be ceiling breach names the findings in a non-ok Result and performs NO write", async () => {
     const fs = new InMemoryFsPort({});
-    await runContextInit({ fs }, "", {});
+    await runContextInit({ fs }, "", { narrative: CONFORMING_NARRATIVE });
     const before = await fs.readFile("CLAUDE.md");
 
     // 320 modules is comfortably over the 300-line root ceiling (35 lines
@@ -234,7 +224,7 @@ describe("runContextRefresh", () => {
     // the BOUNDARY case above.
     await growModuleIndex(fs, 320);
 
-    const refreshResult = await runContextRefresh({ fs, budgets: enforcedBudgets() }, "");
+    const refreshResult = await runContextRefresh({ fs, budgets: resolveMemoryFileBudgets(undefined) }, "");
     // RED under current src: today this returns ok:true and writes (verified
     // against current src via the same 285/286-module harness above scaled
     // up — current runContextRefresh has no admission check to refuse with).
@@ -265,7 +255,7 @@ describe("runContextRefresh", () => {
   // and the write proceeded anyway.
   it("NEGATIVE: an injected budgets override tightening root.max_lines below the DEFAULT ceiling causes refresh to refuse", async () => {
     const fs = new InMemoryFsPort({});
-    await runContextInit({ fs }, "", {});
+    await runContextInit({ fs }, "", { narrative: CONFORMING_NARRATIVE });
 
     // Zero-module baseline is 15 lines (see the BOUNDARY case above); 50
     // modules lands at 65 lines — comfortably under the schema DEFAULT
@@ -274,7 +264,7 @@ describe("runContextRefresh", () => {
     const before = await fs.readFile("CLAUDE.md");
 
     const defaultBudgets = resolveMemoryFileBudgets(undefined);
-    const tightenedBudgets = enforcedBudgets({ ...defaultBudgets, root: { ...defaultBudgets.root, max_lines: 60 } });
+    const tightenedBudgets = { ...defaultBudgets, root: { ...defaultBudgets.root, max_lines: 60 } };
 
     // RED under pre-fix src: `runContextRefresh` ignored `deps.budgets`
     // entirely (always called `resolveMemoryFileBudgets(undefined)`
@@ -293,7 +283,7 @@ describe("runContextRefresh", () => {
 
   it("REGRESSION: the same candidate under an untightened (default) budgets override still writes", async () => {
     const fs = new InMemoryFsPort({});
-    await runContextInit({ fs }, "", {});
+    await runContextInit({ fs }, "", { narrative: CONFORMING_NARRATIVE });
     await growModuleIndex(fs, 50);
 
     const defaultBudgets = resolveMemoryFileBudgets(undefined);
@@ -310,7 +300,7 @@ describe("runContextRefresh", () => {
       "packages/core/CLAUDE.md": "# core",
       "packages/lore/src/index.ts": "export {};",
     });
-    const initResult = await runContextInit({ fs }, "", {});
+    const initResult = await runContextInit({ fs }, "", { narrative: CONFORMING_NARRATIVE });
     expect(initResult.ok).toBe(true);
     const before = await fs.readFile("CLAUDE.md");
 

@@ -4287,6 +4287,23 @@ export class TaskWorkflowService {
   }
 
   /**
+   * The ONE candidate-name derivation for a task's landing, shared by `recordLanding` (integrate time) and
+   * `resolveLanding` (done time): the names the claims recorded ({@link claimedNames}) plus, for every recorded
+   * worktree PATH, the branch that worktree is on, read from git. `lore integrate` names the landing merge
+   * `merge(<branch>)`, while a claim from a linked worktree may have recorded only the path (branch not measured at
+   * claim time), so the path alone never matches. An unmeasurable worktree (deleted, detached) adds nothing.
+   */
+  private async landingCandidateNames(auditRows: readonly AuditEntry[], task: DocRecord): Promise<string[]> {
+    const names = new Set(TaskWorkflowService.claimedNames(auditRows, task));
+    for (const name of [...names]) {
+      if (!isAbsolute(name)) continue;
+      const measurement = await this.detectBranch(name);
+      if (measurement.status === "measured") names.add(measurement.branch);
+    }
+    return [...names];
+  }
+
+  /**
    * Records a landing (`extra.landing`) on every task whose claim, current or historical (claim audit), recorded
    * `landing.branch`, through the one write route (`writer.writeDoc`). Called by `lore integrate` after main moved.
    * Idempotent: a task already holding the same landing is reported, not rewritten. Every task is attempted; the first
@@ -4304,7 +4321,7 @@ export class TaskWorkflowService {
     let firstFailure: LoreError | undefined;
     for (const task of tasksResult.value) {
       const rows = auditResult.value.filter((row) => row.doc_id === task.id);
-      if (!TaskWorkflowService.claimedNames(rows, task).includes(landing.branch)) continue;
+      if (!(await this.landingCandidateNames(rows, task)).includes(landing.branch)) continue;
       const existing = readTaskLanding(task.extra);
       if (
         existing !== undefined &&
@@ -4367,7 +4384,7 @@ export class TaskWorkflowService {
     if (recorded !== undefined) return { kind: "found", landing: recorded, source: "recorded" };
     const auditResult = await this.store.queryAudit({ doc_id: task.id, action: "claim" });
     if (!auditResult.ok) return { kind: "none" }; // reason: recordCommitRange reports the unreadable claim history itself
-    const candidates = TaskWorkflowService.claimedNames(auditResult.value, task);
+    const candidates = await this.landingCandidateNames(auditResult.value, task);
     if (candidates.length === 0) return { kind: "none" };
     const probe = this.worktreeProbe;
     if (probe?.firstParentLog === undefined) {
@@ -5004,6 +5021,7 @@ export class TaskWorkflowService {
 
     const blockerIds = new Set(blocksLinks.map((l) => l.from_id));
     const blockerStatuses = new Map<DocId, BlockerInfo>();
+    const blockerDocs: DocRecord[] = [];
     if (blockerIds.size > 0) {
       // reason: StoreFilters has no id-in-list predicate — D7 only adds a link batch
       // query, not a doc batch query. One unfiltered findMany + client-side pick keeps
@@ -5014,9 +5032,16 @@ export class TaskWorkflowService {
       for (const doc of allDocsResult.value) {
         if (blockerIds.has(doc.id)) {
           blockerStatuses.set(doc.id, { slug: doc.slug, status: doc.status });
+          blockerDocs.push(doc);
         }
       }
     }
+
+    // reason: task-skill-fix-a-blocks-edge-in-a-feature-branch-plan-is-met — a plan landing through one
+    // integration branch cannot archive its blockers until that branch reaches main, so a blocker whose
+    // recorded branch head is on the declared integration branch counts as met for READINESS only.
+    const landedResult = await this.findBlockersLandedOnIntegration(plan, blockerDocs);
+    if (!landedResult.ok) return landedResult;
 
     const staleByTask = await this.resolveClaimStalenessByTask(tasks, nowIso);
     if (!staleByTask.ok) return staleByTask;
@@ -5028,6 +5053,7 @@ export class TaskWorkflowService {
         nowIso,
         this.claimTtlMinutes,
         parentSpecStatus,
+        landedResult.value,
       ),
       staleByTask.value,
     );
@@ -5044,6 +5070,51 @@ export class TaskWorkflowService {
       anchor_conflicts: anchorConflicts,
       anchor_resolution: this.computeAnchorResolution(tasks, anchorProbe),
     });
+  }
+
+  /**
+   * Which unarchived blockers of `plan` have LANDED on the plan's declared integration branch
+   * (`plan.extra.integration_branch`) — the readiness-only relaxation of "a blocker is met when archived".
+   *
+   * A blocker qualifies iff its recorded claim head (same pick as {@link findUnlandedWorkFloor}) is an
+   * ancestor of the integration branch (`rev-list --count <branch>..<head>` is 0) AND carries at least
+   * one commit past its claim-time base — a claim that has done no work has a head that is trivially an
+   * ancestor of everything, and must NOT unblock its dependents.
+   *
+   * Fails closed, each visibly: no declared branch, no probe wired, no recorded worktree/base, an unreadable
+   * head, or an integration branch that does not exist all leave the blocker UNMET (original behaviour).
+   * `lore done` is untouched: it keeps judging "landed" against main.
+   *
+   * @returns blocker id to integration branch name, for the qualifying blockers only.
+   */
+  private async findBlockersLandedOnIntegration(
+    plan: DocRecord,
+    blockers: readonly DocRecord[],
+  ): Promise<Result<Map<DocId, string>, LoreError>> {
+    const landed = new Map<DocId, string>();
+    const declared = plan.extra?.["integration_branch"];
+    const probe = this.worktreeProbe;
+    if (typeof declared !== "string" || declared === "" || probe === undefined) return ok(landed);
+    const cwd = probe.currentWorkingDirectory();
+    if (!probe.branchTip(cwd, declared).ok) return ok(landed);
+
+    for (const blocker of blockers) {
+      if (blocker.status === "archived" || blocker.status === "deprecated") continue;
+      const recordedResult = await this.readRecordedWorktrees(blocker);
+      if (!recordedResult.ok) return recordedResult;
+      const currentWorktree = readClaimRecord(blocker)?.worktree;
+      const recorded =
+        recordedResult.value.find((r) => r.path === currentWorktree) ??
+        recordedResult.value[recordedResult.value.length - 1];
+      if (recorded === undefined || recorded.baseSha === undefined) continue;
+      const head = resolveClaimHead(probe, recorded.path, cwd);
+      if (!head.ok) continue;
+      const ownWork = probe.countCommits(cwd, `${recorded.baseSha}..${head.value.sha}`);
+      if (!ownWork.ok || ownWork.value === 0) continue;
+      const unlanded = probe.countCommits(cwd, `${declared}..${head.value.sha}`);
+      if (unlanded.ok && unlanded.value === 0) landed.set(blocker.id, declared);
+    }
+    return ok(landed);
   }
 
   /**

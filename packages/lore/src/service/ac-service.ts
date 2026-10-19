@@ -105,7 +105,7 @@
  * Source: SPEC-038 §4, §6, §7 D4; spec-lore-ac-set-in-place-edit-of-a-declared-acceptance D1-D6
  */
 
-import { err, ok, type Result } from "@lore/core";
+import { err, ok, findModeForeignDetail, modeForeignDetailMessage, type ModeForeignDetail, type Result } from "@lore/core";
 import { resolveWriteActorFor } from "../store/write-context-store.js";
 import type { LoreError } from "@lore/core";
 import {
@@ -571,6 +571,8 @@ export class AcService {
       });
     }
     const target = existing[index] as AcceptanceCriterion;
+    const supersededCite = supersededRefusal(target);
+    if (supersededCite !== undefined) return err(supersededCite);
     const current = target.cites ?? [];
     const requested = [...new Set(ruleIds)];
     const authorized = await this.authorizeCite(requested, opts.by);
@@ -725,12 +727,17 @@ export class AcService {
     if (!specResult.ok) return specResult;
     const spec = specResult.value;
 
+    const existing = extractCriteria(spec);
+    // D15 first: a superseded criterion's refusal must name "superseded", not the record lock.
+    const supersededRm = supersededRefusal(existing.find((c) => c.id === acId));
+    if (supersededRm !== undefined) return err(supersededRm);
+
     // record-edit gate (spec-documents-are-living-or-records D6) - BEFORE any write.
     const gate = await this.recordLock.assertEditable(spec, "criteria");
     if (!gate.ok) return gate;
 
-    const existing = extractCriteria(spec);
-    if (!existing.some((c) => c.id === acId)) {
+    const removing = existing.find((c) => c.id === acId);
+    if (removing === undefined) {
       return err({
         code: "VALIDATION_ERROR",
         field: "acceptance_criteria[].id",
@@ -828,6 +835,11 @@ export class AcService {
     if (!specResult.ok) return specResult;
     const spec = specResult.value;
 
+    // D15 — a superseded criterion is immutable, correction or not; decided before the record lock so the
+    // refusal names "superseded".
+    const supersededSet = supersededRefusal(extractCriteria(spec).find((c) => c.id === acId));
+    if (supersededSet !== undefined) return err(supersededSet);
+
     // record-edit gate (spec-documents-are-living-or-records D6) - BEFORE any write. For a locked spec the
     // edit is refused instead of demoting the spec (the demotion below now only serves an unlocked spec).
     // reason: BR-1069/D2 — a correction on a LOCKED spec skips ONLY this gate and the demotion below; an
@@ -868,30 +880,20 @@ export class AcService {
       });
     }
     const target = existing[index] as AcceptanceCriterion;
-
     // D5 — mode-inconsistent flag guard: VALIDATION_ERROR (document-state fault,
     // D5a) naming BOTH the offending flag and the criterion's actual mode. Checked
     // in a fixed order (oracle, command, rubric, note) so a caller passing more
     // than one wrong flag at once still gets a single deterministic message.
     const mode = target.verify.mode;
-    if (patch.oracle !== undefined && mode !== "script") {
-      return err(modeMismatchError(acId, "--oracle", mode));
-    }
-    if (patch.command !== undefined && mode !== "script") {
-      return err(modeMismatchError(acId, "--command", mode));
-    }
-    if (patch.timeout_ms !== undefined && mode !== "script") {
-      return err(modeMismatchError(acId, "--timeout-ms", mode));
-    }
-    if (patch.falsifier !== undefined && mode !== "script") {
-      return err(modeMismatchError(acId, "--falsifier-*", mode));
-    }
-    if (patch.rubric !== undefined && mode !== "ai") {
-      return err(modeMismatchError(acId, "--rubric", mode));
-    }
-    if (patch.note !== undefined && mode !== "human") {
-      return err(modeMismatchError(acId, "--note", mode));
-    }
+    const foreign = findModeForeignDetail(mode, {
+      oracle: patch.oracle !== undefined,
+      command: patch.command !== undefined,
+      timeout_ms: patch.timeout_ms !== undefined,
+      falsifier: patch.falsifier !== undefined,
+      rubric: patch.rubric !== undefined,
+      note: patch.note !== undefined,
+    });
+    if (foreign !== undefined) return err(modeMismatchError(acId, foreign, mode));
 
     const verifyCandidate = buildVerifyCandidate(target.verify, patch);
     const nextOracleGeneration = resolveNextOracleGeneration(target, verifyCandidate);
@@ -979,6 +981,99 @@ export class AcService {
       ...(citeAudit !== undefined ? { auditDetails: citeAudit.value } : {}),
     });
     if (!writeResult.ok) return writeResult;
+    return ok(parsed.data);
+  }
+
+  // ── supersedeCriterion ────────────────────────────────────────────────────
+
+  /**
+   * Mark ONE criterion superseded by another spec's criterion (D15). The marker is immutable: afterwards
+   * `setCriterion`, `removeCriterion`, `citeCriterion` and a second supersede all refuse naming "superseded",
+   * and `lore verify` skips the criterion and lists it as superseded.
+   *
+   * Writes exactly one version and one audit entry and NEVER changes the spec's status (no demotion): the
+   * criterion's statement and oracle are untouched, so the spec's contract content is not edited. Like a
+   * correction, it bypasses the record-edit lock; it is the sanctioned way to retire a criterion on an approved spec.
+   *
+   * @param by - the superseding criterion: `spec` is an id, slug or short prefix; `ac` must be declared on it
+   * @param reason - why; trimmed, must be non-empty
+   * @throws DOC_NOT_FOUND (either spec), VALIDATION_ERROR (unknown AC, already superseded, target AC missing,
+   *   self-supersede, empty reason), STALE_VERSION
+   */
+  async supersedeCriterion(
+    specIdOrSlug: string,
+    acId: string,
+    by: { spec: string; ac: string },
+    reason: string,
+    opts: { by?: string } = {},
+  ): Promise<Result<AcceptanceCriterion[], LoreError>> {
+    const trimmedReason = reason.trim();
+    if (trimmedReason.length === 0) {
+      return err({
+        code: "VALIDATION_ERROR",
+        field: "reason",
+        message: "lore ac supersede needs a non-empty --reason",
+        value: reason,
+      });
+    }
+    const specResult = await this.resolveSpec(specIdOrSlug);
+    if (!specResult.ok) return specResult;
+    const spec = specResult.value;
+    const existing = extractCriteria(spec);
+    const index = existing.findIndex((c) => c.id === acId);
+    if (index === -1) return err(unknownCriterionError(existing, acId));
+    const target = existing[index] as AcceptanceCriterion;
+    const already = supersededRefusal(target);
+    if (already !== undefined) return err(already);
+
+    const superseding = await this.resolveSpec(by.spec);
+    if (!superseding.ok) return superseding;
+    if (superseding.value.id === spec.id && by.ac === acId) {
+      return err({
+        code: "VALIDATION_ERROR",
+        field: "by",
+        message: `Acceptance criterion "${acId}" cannot supersede itself`,
+        value: `${by.spec}:${by.ac}`,
+      });
+    }
+    const replacement = extractCriteria(superseding.value).find((c) => c.id === by.ac);
+    if (replacement === undefined) {
+      return err({
+        code: "VALIDATION_ERROR",
+        field: "by",
+        message: `Superseding criterion "${by.ac}" is not declared on spec "${superseding.value.slug}"`,
+        value: by.ac,
+      });
+    }
+
+    const actor = resolveWriteActorFor(this.store, opts.by);
+    const marked: AcceptanceCriterion = {
+      ...target,
+      superseded_by: {
+        spec: superseding.value.id as string,
+        ac: by.ac,
+        reason: trimmedReason,
+        by: actor,
+        at: new Date().toISOString(),
+      },
+    };
+    const next = existing.map((c, i) => (i === index ? marked : c));
+    const parsed = specAcceptanceCriteriaSchema.safeParse(next);
+    if (!parsed.success) {
+      const issue = parsed.error.issues[0];
+      return err({
+        code: "VALIDATION_ERROR",
+        field: issue !== undefined ? `acceptance_criteria.${issue.path.join(".")}` : "acceptance_criteria",
+        message: issue !== undefined ? issue.message : "Invalid acceptance criterion",
+        value: marked,
+      });
+    }
+    const written = await this.writeCriteria(spec, parsed.data, "supersede", {
+      by: actor,
+      acId,
+      auditDetails: { superseded_by: { spec: superseding.value.id, ac: by.ac, reason: trimmedReason } },
+    });
+    if (!written.ok) return written;
     return ok(parsed.data);
   }
 
@@ -1101,7 +1196,7 @@ export class AcService {
   private async writeCriteria(
     spec: DocRecord,
     criteria: AcceptanceCriterion[],
-    operation: "add" | "remove" | "set" | "cite",
+    operation: "add" | "remove" | "set" | "cite" | "supersede",
     opts: {
       status?: DocRecord["status"];
       acId?: string;
@@ -1140,7 +1235,7 @@ export class AcService {
     const target = { id: spec.id as string, slug: spec.slug, anchors: codeAnchorsOf(spec) };
     let requireLiveRules: string[] = [];
     let wouldRefuseAudit: AuditEntry[] = [];
-    if (this.citeGate !== undefined && operation !== "remove") {
+    if (this.citeGate !== undefined && operation !== "remove" && operation !== "supersede") {
       const admission = await admitAcWrite(this.store, {
         rawGateConfig: this.citeGate.raw,
         target,
@@ -1168,6 +1263,8 @@ export class AcService {
           ? `Correction: ${opts.correctionReason}`
           : operation === "set"
           ? buildSetChangeSummary(criteria.length, opts.acId, spec.status, newStatus)
+          : operation === "supersede"
+            ? `Acceptance criterion ${opts.acId ?? ""} superseded — ${criteria.length} entries`
           : operation === "cite"
             ? `Acceptance criterion ${opts.acId ?? ""} citations updated — ${criteria.length} entries`
             : `Acceptance criteria ${operation === "add" ? "updated" : "updated (removal)"} — ${criteria.length} entries`,
@@ -1208,6 +1305,34 @@ export class AcService {
 function codeAnchorsOf(spec: DocRecord): string[] {
   const anchors = spec.extra["code_anchors"];
   return Array.isArray(anchors) ? (anchors as unknown[]).filter((a): a is string => typeof a === "string") : [];
+}
+
+/** Pure. The refusal for a criterion that is already superseded (D15); `undefined` when it is still live. */
+function supersededRefusal(criterion: AcceptanceCriterion | undefined): LoreError | undefined {
+  const marker = criterion?.superseded_by;
+  if (criterion === undefined || marker === undefined) return undefined;
+  return {
+    code: "VALIDATION_ERROR",
+    field: "acceptance_criteria[].superseded_by",
+    message:
+      `Acceptance criterion "${criterion.id}" is superseded by ${marker.spec}:${marker.ac} (${marker.reason}) ` +
+      "and is immutable — it cannot be edited, removed, cited or superseded again",
+    value: criterion.id,
+  };
+}
+
+/** Pure. The "criterion not declared" refusal naming the declared ids. */
+function unknownCriterionError(existing: readonly AcceptanceCriterion[], acId: string): LoreError {
+  const declaredIds = existing.map((c) => c.id);
+  return {
+    code: "VALIDATION_ERROR",
+    field: "acceptance_criteria[].id",
+    message:
+      declaredIds.length > 0
+        ? `Acceptance criterion "${acId}" is not declared on this spec. Declared ids: ${declaredIds.join(", ")}`
+        : `Acceptance criterion "${acId}" is not declared on this spec — no criteria are declared yet`,
+    value: acId,
+  };
 }
 
 /** Pure. A spec's well-formed criteria (`[]` when unparseable). Exported so `scripts/check-ac-oracle-ownership-corpus.ts` shares the rule (SSOT). */
@@ -1433,20 +1558,13 @@ function resolveNextOracleGeneration(
  * D5a: this is decidable only against the RESOLVED document's declared mode, never
  * from argv alone.
  */
-function modeMismatchError(acId: string, flag: string, actualMode: AcVerifyMode): LoreError {
+function modeMismatchError(acId: string, found: ModeForeignDetail, actualMode: AcVerifyMode): LoreError {
   return {
     code: "VALIDATION_ERROR",
     field: "verify",
-    message: `${flag} only applies to a "${modeFieldName(flag)}"-mode criterion — "${acId}" is mode "${actualMode}"`,
-    value: { ac_id: acId, flag, mode: actualMode },
+    message: modeForeignDetailMessage(acId, found, actualMode),
+    value: { ac_id: acId, flag: found.flag, mode: actualMode },
   };
-}
-
-/** The verify mode a given mode-specific flag belongs to (for modeMismatchError's message). */
-function modeFieldName(flag: string): AcVerifyMode {
-  if (flag === "--oracle" || flag === "--command" || flag === "--timeout-ms" || flag === "--falsifier-*") return "script";
-  if (flag === "--rubric") return "ai";
-  return "human";
 }
 
 /**

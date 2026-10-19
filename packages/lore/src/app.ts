@@ -86,7 +86,6 @@ import { RuleService } from "./service/rule-service.js";
 import { RuleChangeService } from "./service/rule-change-service.js";
 import { RuleReadService } from "./service/rule-read-service.js";
 import { ImpactService } from "./service/impact-service.js";
-import { PrdOutlineService } from "./service/prd-outline-service.js";
 import { RuleStateService } from "./service/rule-state-service.js";
 import { SpawnGitPort, resolveGitRoot } from "./service/rule-state-git-port.js";
 import type { RadiusDiffPort } from "./service/stamp-binding-reader.js";
@@ -115,13 +114,13 @@ import { VerificationProjectionService } from "./service/verification-projection
 import { SessionService } from "./service/session-service.js";
 import { ValidityService } from "./service/validity-service.js";
 import { DriftCheckService } from "./service/drift-check-service.js";
-import { OutlineMigrationService } from "./service/outline-migration-service.js";
+import { OutlineSectionsRetireMigrationService } from "./service/outline-sections-retire-migration-service.js";
 import { OrdinalMigrationService } from "./service/ordinal-migration-service.js";
 import { SpecParentMigrationService } from "./service/spec-parent-migration-service.js";
 import { PlanOutlineExemptMigrationService } from "./service/plan-outline-exempt-migration-service.js";
 import { SeatService } from "./service/seat-service.js";
 import { RealGitPort } from "./adapters/real-git-port.js";
-import { buildBaselineDeclarationPort } from "./adapters/cli/absent-declarations.js";
+import { armMainTree, buildBaselineDeclarationPort } from "./adapters/cli/absent-declarations.js";
 import { realpathNative } from "./adapters/real-realpath-port.js";
 import { ConfigService } from "./service/config-service.js";
 import { GlobalConfigService } from "./service/global-config-service.js";
@@ -422,37 +421,16 @@ export interface App {
    */
   verificationProjectionService?: VerificationProjectionService;
   /**
-   * OutlineMigrationService — one-shot, idempotent, per-section PRD→outline
-   * migration (`lore migrate prd-to-outline`, SPEC-080 §Migration Plan
-   * Phase 1). Store-only, no telemetry, no gate (a one-shot migration path,
-   * same `PhaseMigrationService` rationale — no `outline-section-migrate`
-   * checkpoint exists to gate against), same DI shape as
-   * `PhaseMigrationService`/`DriftCheckService`.
-   *
-   * Optional for the same "pre-existing hand-built App test stubs stay
-   * valid" reason `driftCheckService`/`verificationProjectionService` are;
-   * always present in production — both `buildAppFromSqlite` and
-   * `buildAppFromTurso` wire it unconditionally; the CLI guards
-   * `app.outlineMigrationService === undefined` before use (mirrors
-   * `app.driftCheckService`'s inline-guard convention, not
-   * `phase-wiring.ts`'s bundled `requirePhaseMigrationService` — this
-   * service has exactly one call site and needs no shared DI bundle).
-   * Source: SPEC-080 §Migration Plan Phase 1, §Acceptance Criteria AC-080-7.
-   */
-  outlineMigrationService?: OutlineMigrationService;
-  /**
    * OrdinalMigrationService — one-shot SPEC-084 repair migration
    * (`lore migrate ordinals [--apply]`). Store-only, no telemetry, no gate
-   * (a one-shot migration path, same `PhaseMigrationService`/
-   * `OutlineMigrationService` rationale), same DI shape as
-   * `outlineMigrationService`.
+   * (a one-shot migration path, same `PhaseMigrationService` rationale).
    *
    * Optional for the same "pre-existing hand-built App test stubs stay
-   * valid" reason `outlineMigrationService`/`driftCheckService` are; always
+   * valid" reason `driftCheckService` is; always
    * present in production — both `buildAppFromSqlite` and
    * `buildAppFromTurso` wire it unconditionally; the CLI guards
    * `app.ordinalMigrationService === undefined` before use (mirrors
-   * `app.outlineMigrationService`'s inline-guard convention).
+   * `app.driftCheckService`'s inline-guard convention).
    * Source: SPEC-084 §One-shot repair migration, §Acceptance Criteria AC-084-4.
    */
   ordinalMigrationService?: OrdinalMigrationService;
@@ -468,6 +446,12 @@ export interface App {
    * hand-built-App-stub reason as `specParentMigrationService`; always present in production.
    */
   planOutlineExemptMigrationService?: PlanOutlineExemptMigrationService;
+  /**
+   * OutlineSectionsRetireMigrationService — `lore migrate outline-sections [--apply]`: removes the stored
+   * `extra.outline` from every PRD (the outline command family is gone), through the corpus write route. Same
+   * optional-DI shape as `planOutlineExemptMigrationService`; always present in production.
+   */
+  outlineSectionsRetireMigrationService?: OutlineSectionsRetireMigrationService;
   /**
    * UatService — the sole write orchestrator for a structured UAT verdict
    * (`lore uat record`, SPEC-054). Narrow injected ports (`corpusService.createUatDoc` /
@@ -509,16 +493,10 @@ export interface App {
    */
   recordLockService?: RecordLockService;
   /**
-   * PrdOutlineService — READ-ONLY reader of a PRD's stored outline (`lore outline list`); its writers
-   * and the plan-close exemption writer were retired by slice 3a (BR-985). Store-only, same
-   * optional-DI shape as `acService`/`requirementService`; always wired in production.
-   */
-  prdOutlineService?: PrdOutlineService;
-  /**
    * PlanExemptionService — the sole writer of a plan's audited plan-close
    * exemptions (`lore plan exempt-attestation` / `exempt-assessment-freshness`,
    * SPEC-069 D1 + SPEC-106 D4). Store-only, same optional-DI shape as
-   * `acService`/`prdOutlineService`; always wired in production.
+   * `acService`/`requirementService`; always wired in production.
    */
   planExemptionService?: PlanExemptionService;
   /**
@@ -1026,15 +1004,12 @@ function buildAppFromSqlite(
     // resolved attestationMinRatio scalar — stateless, no AI, no telemetry, same DI
     // shape as DriftCheckService/PhaseService. SPEC-075 §Module Boundary D1/D6.
     verificationProjectionService: new VerificationProjectionService(store, attestationMinRatio, stampRadiusDiff),
-    // reason: OutlineMigrationService depends only on StoreInterface — stateless,
-    // no AI, no telemetry, same shape as PhaseMigrationService/DriftCheckService.
-    // SPEC-080 §Migration Plan Phase 1.
-    outlineMigrationService: new OutlineMigrationService(store, corpusService),
     // reason: OrdinalMigrationService depends only on StoreInterface — stateless,
-    // no AI, no telemetry, same shape as OutlineMigrationService/PhaseMigrationService.
+    // no AI, no telemetry, same shape as PhaseMigrationService/DriftCheckService.
     // SPEC-084 §One-shot repair migration.
     ordinalMigrationService: new OrdinalMigrationService(store, corpusService),
     planOutlineExemptMigrationService: new PlanOutlineExemptMigrationService(store, corpusService),
+    outlineSectionsRetireMigrationService: new OutlineSectionsRetireMigrationService(store, corpusService),
     specParentMigrationService: new SpecParentMigrationService(store, corpusService),
     // reason: SeatService (SPEC-057) — real GitPort over the SAME repoRoot
     // VerifyRunnerService already receives (captured at composition time, never a
@@ -1078,16 +1053,14 @@ function buildAppFromSqlite(
     requirementService: new RequirementService(store, requirementQuantifiableEnabled, corpusService),
     // reason: RuleService gets the WIRED corpusService.create (gates + provenance guards apply to
     // node creation); its `createDoc` port is required — RuleService builds no CorpusService of its own.
-    ruleService: new RuleService(store, corpusService.create.bind(corpusService), corpusService),
+    // reason: accountability-reducing writes (--remove-site/--remove-command, rule retire/move) wait for main's tree; one port, both roots.
+    ruleService: armMainTree(new RuleService(store, corpusService.create.bind(corpusService), corpusService), repoRoot),
     // reason: the change set of a locked spec is gated by the ONE RecordLockService, like criteria edits.
     ruleChangeService,
     ruleReadService: new RuleReadService(store),
     impactService: new ImpactService(store),
     recordLockService,
-    // reason: PrdOutlineService is store-only, same shape as AcService/
-    // RequirementService (SPEC-080 C1, C4).
-    prdOutlineService: new PrdOutlineService(store),
-    // reason: PlanExemptionService is store-only, same shape as PrdOutlineService
+    // reason: PlanExemptionService is store-only, same shape as RequirementService
     // (SPEC-069 D1 + SPEC-106 D4) — the sole writer of the plan-close exemption
     // fields, which were gate-read with no authoring surface before it existed.
     planExemptionService: new PlanExemptionService(store, corpusService),
@@ -1446,15 +1419,12 @@ function buildAppFromTurso(
     // resolved attestationMinRatio scalar — stateless, no AI, no telemetry, same DI
     // shape as DriftCheckService/PhaseService. SPEC-075 §Module Boundary D1/D6.
     verificationProjectionService: new VerificationProjectionService(store, attestationMinRatio, stampRadiusDiff),
-    // reason: OutlineMigrationService depends only on StoreInterface — stateless,
-    // no AI, no telemetry, same shape as PhaseMigrationService/DriftCheckService.
-    // SPEC-080 §Migration Plan Phase 1.
-    outlineMigrationService: new OutlineMigrationService(store, corpusService),
     // reason: OrdinalMigrationService depends only on StoreInterface — stateless,
-    // no AI, no telemetry, same shape as OutlineMigrationService/PhaseMigrationService.
+    // no AI, no telemetry, same shape as PhaseMigrationService/DriftCheckService.
     // SPEC-084 §One-shot repair migration.
     ordinalMigrationService: new OrdinalMigrationService(store, corpusService),
     planOutlineExemptMigrationService: new PlanOutlineExemptMigrationService(store, corpusService),
+    outlineSectionsRetireMigrationService: new OutlineSectionsRetireMigrationService(store, corpusService),
     specParentMigrationService: new SpecParentMigrationService(store, corpusService),
     // reason: SeatService (SPEC-057) — real GitPort over the SAME repoRoot
     // VerifyRunnerService already receives (captured at composition time, never a
@@ -1495,16 +1465,14 @@ function buildAppFromTurso(
     requirementService: new RequirementService(store, requirementQuantifiableEnabled, corpusService),
     // reason: RuleService gets the WIRED corpusService.create (gates + provenance guards apply to
     // node creation); its `createDoc` port is required — RuleService builds no CorpusService of its own.
-    ruleService: new RuleService(store, corpusService.create.bind(corpusService), corpusService),
+    // reason: accountability-reducing writes (--remove-site/--remove-command, rule retire/move) wait for main's tree; one port, both roots.
+    ruleService: armMainTree(new RuleService(store, corpusService.create.bind(corpusService), corpusService), repoRoot),
     // reason: the change set of a locked spec is gated by the ONE RecordLockService, like criteria edits.
     ruleChangeService,
     ruleReadService: new RuleReadService(store),
     impactService: new ImpactService(store),
     recordLockService,
-    // reason: PrdOutlineService is store-only, same shape as AcService/
-    // RequirementService (SPEC-080 C1, C4).
-    prdOutlineService: new PrdOutlineService(store),
-    // reason: PlanExemptionService is store-only, same shape as PrdOutlineService
+    // reason: PlanExemptionService is store-only, same shape as RequirementService
     // (SPEC-069 D1 + SPEC-106 D4) — the sole writer of the plan-close exemption
     // fields, which were gate-read with no authoring surface before it existed.
     planExemptionService: new PlanExemptionService(store, corpusService),

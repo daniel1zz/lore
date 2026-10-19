@@ -194,7 +194,7 @@ import { AcExemptionService } from "../../../service/ac-exemption-service.js";
 import { DecisionService } from "../../../service/decision-service.js";
 import { createOverrideDecisionPort } from "../../../service/override-decision.js";
 import { exitCode, formatError, formatErrorFor, resolveActor } from "../utils.js";
-import { deriveAcCoverageState, getAllowedTransitions, ok } from "@lore/core";
+import { deriveAcCoverageState, findModeForeignDetail, getAllowedTransitions, modeForeignDetailMessage, ok } from "@lore/core";
 import type { AcceptanceCriterion, AcCoverageFact, Invocation, LoreError, Result } from "@lore/core";
 import type { AcService, AcListResult, DeclarePathOpts, SetCriterionOpts, SetCriterionPatch } from "../../../service/ac-service.js";
 import type { App } from "../../../app.js";
@@ -327,6 +327,8 @@ export default defineLoreCommand({
         if (correctionRefusal !== undefined) return correctionRefusal;
         const timeoutRefusal = refuseBadTimeoutMs(inv.io, args, "add");
         if (timeoutRefusal !== undefined) return timeoutRefusal;
+        const foreignRefusal = refuseModeForeignDetail(inv.io, args);
+        if (foreignRefusal !== undefined) return foreignRefusal;
         const { app, dbPath } = loadLoreApp({ inv });
         try {
           const beforeStatus = await fetchSpecStatus(app, args.spec as string);
@@ -603,6 +605,65 @@ export default defineLoreCommand({
       },
     }),
 
+    supersede: defineLoreCommand({
+      meta: {
+        name: "supersede",
+        description:
+          "Mark a criterion superseded by another spec's criterion: verify skips it, it becomes immutable, the spec is not demoted",
+      },
+      args: {
+        spec: { type: "positional", description: "Spec document ID or slug", required: true },
+        id: { type: "positional", description: "Criterion id to supersede", required: true },
+        by: {
+          type: "string",
+          description: "REQUIRED: the superseding criterion as <spec>:<AC-ID> (spec id or slug)",
+        },
+        reason: { type: "string", description: "REQUIRED: why the criterion is superseded (non-empty)" },
+        json: { type: "boolean", description: "Output result as JSON" },
+      },
+      async run(context): Promise<number> {
+        const { args } = context;
+        const inv = invocationOf(context);
+        // argv-decidable: exit 2 before the app loads or anything is written.
+        const reason = typeof args.reason === "string" ? args.reason.trim() : "";
+        if (reason === "") {
+          inv.io.stderr.write('Error: lore ac supersede requires a non-empty --reason "<why>".\n');
+          return 2;
+        }
+        const byRaw = typeof args.by === "string" ? args.by : "";
+        const sep = byRaw.lastIndexOf(":");
+        if (sep <= 0 || sep === byRaw.length - 1) {
+          inv.io.stderr.write("Error: lore ac supersede requires --by <spec>:<AC-ID>.\n");
+          return 2;
+        }
+        const { app } = loadLoreApp({ inv });
+        try {
+          const result = await requireAcService(app).supersedeCriterion(
+            args.spec as string,
+            args.id as string,
+            { spec: byRaw.slice(0, sep), ac: byRaw.slice(sep + 1) },
+            reason,
+            { by: resolveActor(inv.io, undefined, inv.env, inv.cwd, inv.user) },
+          );
+          if (!result.ok) {
+            inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
+            return exitCode(result.error);
+          }
+          if (args.json) {
+            printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { criteria: result.value } }, null, 2));
+            return 0;
+          }
+          printLine(
+            inv.io.stdout,
+            `Superseded acceptance criterion "${args.id as string}" on spec ${args.spec as string} by ${byRaw} (spec status unchanged)`,
+          );
+        } finally {
+          app.close();
+        }
+        return 0;
+      },
+    }),
+
     set: defineLoreCommand({
       meta: {
         name: "set",
@@ -823,8 +884,29 @@ function refuseBadTimeoutMs(io: CliIo, args: Record<string, unknown>, verb: "add
   if (!/^[0-9]+$/.test(raw) || !Number.isSafeInteger(Number(raw)) || Number(raw) <= 0) {
     return fail(io, `must be a positive integer number of milliseconds (got "${raw}")`);
   }
-  if (verb === "add" && args.mode !== "script") return fail(io, "applies to --mode script only");
   return undefined;
+}
+
+/**
+ * `ac add` half of the mode-foreign-detail refusal: the SAME validator `ac set` uses
+ * (`findModeForeignDetail`, `@lore/core`), run on argv before the app opens. A detail
+ * that belongs to another mode is refused (exit 4), never silently dropped.
+ */
+function refuseModeForeignDetail(io: CliIo, args: Record<string, unknown>): number | undefined {
+  const mode = args.mode;
+  if (mode !== "script" && mode !== "ai" && mode !== "human") return undefined; // schema names the bad mode
+  const has = (k: string): boolean => typeof args[k] === "string";
+  const found = findModeForeignDetail(mode, {
+    oracle: has("oracle"),
+    command: has("command"),
+    timeout_ms: has("timeout-ms"),
+    falsifier: ["falsifier-path", "falsifier-find", "falsifier-replace", "falsifier-exit-code"].some(has),
+    rubric: has("rubric"),
+    note: has("note"),
+  });
+  if (found === undefined) return undefined;
+  io.stderr.write(`Error: ${modeForeignDetailMessage(String(args.id), found, mode)}\n`);
+  return 4;
 }
 
 // ─── Input Assembly ──────────────────────────────────────────────────────────
@@ -1222,8 +1304,12 @@ function renderCriteriaList(io: CliIo, result: AcListResult): void {
     const retiredOracle = retiredOracleMarker(result.coverage, criterion.id);
     const otherCommand = otherCommandMarker(result.coverage, criterion.id);
     const oracleFiles = oracleFileMarkers(result.coverage, criterion.id);
-    printLine(io.stdout, 
-      `  ${badge}${criterion.id} — ${criterion.statement} [${describeVerify(criterion.verify)}]${marker}${retiredOracle}${otherCommand}${oracleFiles}`,
+    const supersededNote =
+      criterion.superseded_by !== undefined
+        ? ` [superseded by ${criterion.superseded_by.spec}:${criterion.superseded_by.ac}: ${criterion.superseded_by.reason}]`
+        : "";
+    printLine(io.stdout,
+      `  ${badge}${criterion.id} — ${criterion.statement} [${describeVerify(criterion.verify)}]${marker}${retiredOracle}${otherCommand}${oracleFiles}${supersededNote}`,
     );
   }
   if (result.dangling.length > 0) {

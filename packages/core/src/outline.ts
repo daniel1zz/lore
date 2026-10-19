@@ -1,136 +1,33 @@
 /**
- * PRD-as-outline contract — structured `prd.extra.outline[]` entry schema,
- * corpus-governed budget schema, and the plan-close sync exemption schema
- * (SPEC-080 C1/C3/C4). Pure, browser-safe leaf module: no IO, no
- * `Date.now()`/`Math.random()` calls.
+ * PRD budget schema — the corpus-governed `prd.extra.outline_budget` (SPEC-080 C3). Pure, browser-safe leaf module:
+ * no IO, no `Date.now()`/`Math.random()` calls.
+ *
+ * The structured outline itself (`prd.extra.outline[]`, its entry schema, its renderer, its write verbs and the plan-close
+ * sync exemption) is REMOVED: stored outlines were archived by `lore migrate outline-sections`, and the baseline tree
+ * carries what the outline summarised. Only the budget schema survives, because `lore status --check-prd-budget` still
+ * reads it.
  *
  * Public surface:
- *   - OUTLINE_ENTRY_TIERS / OutlineEntryTier — the two budget tiers a
- *     declared outline entry may carry (C3).
- *   - OUTLINE_LINK_RELS / OutlineLinkRel — the three link-relation kinds an
- *     outline entry's `links[]` may declare.
- *   - outlineEntrySchema / OutlineEntry — one typed `prd.extra.outline[]`
- *     entry (C1): a bounded per-domain summary with pointers into the full
- *     detail doc, mirroring the proven `requirements[]` / `acceptance_criteria[]`
- *     / `phases[]` shape (typed array + dedicated verb + CAS + version + audit).
- *   - outlineBudgetSchema / OutlineBudget — `prd.extra.outline_budget` (C3):
- *     the corpus-governed tiered char budgets the `--check-prd-budget` oracle
- *     enforces, plus the content-flight scan's free-text threshold.
- *   - renderOutlineContent(outline) — deterministic Markdown rendering of a
- *     `prd.extra.outline[]` array for the PRD's `content` field. `extra.outline`
- *     is the SSOT; `content` is generated ONLY by this function at write time
- *     (same render-projection convention as `renderHandoffContent` in
- *     `session.ts` / `renderAssessmentContent` in `assessment.ts`).
+ *   - outlineBudgetSchema / OutlineBudget — `prd.extra.outline_budget` (C3): the corpus-governed char budgets the
+ *     `--check-prd-budget` oracle enforces, plus the content-flight scan's free-text threshold.
  *
  * Invariants:
- *   - `outlineEntrySchema` is the SINGLE-ENTRY shape written by `lore outline
- *     set <prd> --section <key> …` (a dedicated-writer CAS patch, NOT an array
- *     replace) — this module does not itself enforce the dedicated-writer
- *     rule (that lives in `CorpusService.set`'s reject-direct-`extra.outline`
- *     guard, mirroring the validity/handoff precedent); it only shapes one
- *     entry.
- *   - `outlineBudgetSchema`'s three char-count fields (`core_max_chars`,
- *     `domain_max_chars`, `whole_body_max_chars`) are all REQUIRED — SPEC-080
- *     C3 states example values (4000/2000/24000) but only `extra_prose_chars`
- *     carries a stated DEFAULT (1000); a corpus author must explicitly commit
- *     to the three body-budget values rather than silently inheriting an
- *     implicit default.
- *   - Every char-count field on {@link outlineBudgetSchema} rejects zero and
- *     negative values (`.positive()`) — a non-positive budget is nonsensical
- *     (it would reject every non-empty entry/body).
+ *   - `outlineBudgetSchema`'s three char-count fields (`core_max_chars`, `domain_max_chars`, `whole_body_max_chars`) are
+ *     all REQUIRED — a corpus author must explicitly commit to the body-budget values rather than silently inheriting an
+ *     implicit default; only `extra_prose_chars` carries a DEFAULT (1000).
+ *   - Every char-count field rejects zero and negative values (`.positive()`) — a non-positive budget is nonsensical.
  *
  * Side-effect class: pure
  *
- * Source: SPEC-080 C1 (OutlineEntry), C2 (SPEC_KINDS domain-overview
- *   extension — see spec-kind.ts, NOT this module), C3 (outline_budget). C4's plan exemption
- *   (`prd_sync_exempt`) is gone: removed from stored plans by `lore migrate plan-outline-exempt` (BL-D2).
+ * Source: SPEC-080 C3 (outline_budget).
  */
 
 import { z } from "zod";
 
-// ─── Outline Entry Tiers ────────────────────────────────────────────────────
-
 /**
- * The two budget tiers a declared {@link OutlineEntry} may carry (SPEC-080
- * C3) — `"core"` entries (§1–§13 narrative-core sections) get the larger
- * `outline_budget.core_max_chars` ceiling; `"domain"` entries (§14+ per-domain
- * sections) get the tighter `outline_budget.domain_max_chars` ceiling.
- */
-export const OUTLINE_ENTRY_TIERS = ["core", "domain"] as const;
-
-/** Derived TypeScript union for an outline entry's `tier`. */
-export type OutlineEntryTier = (typeof OUTLINE_ENTRY_TIERS)[number];
-
-// ─── Outline Link Relations ─────────────────────────────────────────────────
-
-/**
- * The three relation kinds an {@link OutlineEntry}'s `links[]` entries may
- * declare — `"detail"` (the full-prose doc this summary was extracted from,
- * required ≥1 per entry per G2, cross-entity-checked by `--check-prd-budget`,
- * not this schema), `"landing-spec"` (a feature/tech/design spec implementing
- * this domain), `"adr"` (an owner decision extracted from the domain's
- * prose).
- */
-export const OUTLINE_LINK_RELS = ["detail", "landing-spec", "adr"] as const;
-
-/** Derived TypeScript union for an outline entry link's `rel`. */
-export type OutlineLinkRel = (typeof OUTLINE_LINK_RELS)[number];
-
-// ─── Outline Entry Schema ───────────────────────────────────────────────────
-
-/**
- * One typed `prd.extra.outline[]` entry (SPEC-080 C1) — a bounded per-domain
- * summary (`direction`) plus pointers (`decision_pointers` adr slugs,
- * `constraints` hard invariants, `links[]` detail/landing-spec/adr docs), NOT
- * the full narrative prose (that lives in the linked `domain-overview` spec
- * or `adr` docs).
- *
- * @example
- * outlineEntrySchema.parse({
- *   section: "distribution",
- *   title: "Distribution & Setup",
- *   tier: "core",
- *   direction: "Bounded summary of the distribution model — single binary, installer, assets tree.",
- *   decision_pointers: ["adr-turso-selection"],
- *   constraints: ["Single binary, no external runtime deps"],
- *   links: [{ slug: "spec-046-distribution-part-1", rel: "detail" }],
- * });
- */
-export const outlineEntrySchema = z.object({
-  /** Stable key identifying this entry within `prd.extra.outline[]`, e.g. "distribution". */
-  section: z.string().min(1),
-  /** Rendered heading for this entry's projected PRD section. */
-  title: z.string().min(1),
-  /** Budget tier (SPEC-080 C3) — governs which `outline_budget` ceiling applies. */
-  tier: z.enum(OUTLINE_ENTRY_TIERS),
-  /** Bounded summary prose — the projected PRD body's per-section text. */
-  direction: z.string().min(1),
-  /** ADR slugs whose decisions this domain's narrative embeds/depends on. */
-  decision_pointers: z.array(z.string().min(1)),
-  /** Hard invariants only — not general narrative (that belongs in the linked detail doc). */
-  constraints: z.array(z.string().min(1)),
-  /** Pointers into the full detail/landing-spec/adr docs this summary was extracted from or informs. */
-  links: z.array(
-    z.object({
-      /** The linked doc's slug. */
-      slug: z.string().min(1),
-      /** Which relation this link declares — see {@link OUTLINE_LINK_RELS}. */
-      rel: z.enum(OUTLINE_LINK_RELS),
-    }),
-  ),
-});
-
-/** Derived TypeScript type for one outline entry. */
-export type OutlineEntry = z.infer<typeof outlineEntrySchema>;
-
-// ─── Outline Budget Schema ──────────────────────────────────────────────────
-
-/**
- * `prd.extra.outline_budget` (SPEC-080 C3) — corpus-governed tiered char
- * budgets the `--check-prd-budget` oracle enforces, plus the content-flight
- * scan's free-text threshold. Stored on the PRD itself (version-bumped,
- * review-gated) rather than `.lore/config.yaml` — plain-YAML numeric
- * thresholds demonstrably rot unaudited (`workflow.attestation.min_ratio`
+ * `prd.extra.outline_budget` (SPEC-080 C3) — corpus-governed char budgets the `--check-prd-budget` oracle enforces, plus
+ * the content-flight scan's free-text threshold. Stored on the PRD itself (version-bumped, review-gated) rather than
+ * `.lore/config.yaml` — plain-YAML numeric thresholds demonstrably rot unaudited (`workflow.attestation.min_ratio`
  * precedent, SPEC-080 T4).
  *
  * @example
@@ -142,78 +39,18 @@ export type OutlineEntry = z.infer<typeof outlineEntrySchema>;
  * // => { core_max_chars: 4000, domain_max_chars: 2000, whole_body_max_chars: 24000, extra_prose_chars: 1000 }
  */
 export const outlineBudgetSchema = z.object({
-  /** Max rendered chars for a `tier: "core"` outline entry. */
+  /** Max rendered chars for a core section. */
   core_max_chars: z.number().int().positive(),
-  /** Max rendered chars for a `tier: "domain"` outline entry. */
+  /** Max rendered chars for a domain section. */
   domain_max_chars: z.number().int().positive(),
-  /** Max rendered chars for the WHOLE projected PRD body (G1). */
+  /** Max rendered chars for the WHOLE PRD body (G1). */
   whole_body_max_chars: z.number().int().positive(),
   /**
-   * Content-flight scan threshold (SPEC-080 C3): any free-text string value in
-   * `extra` outside typed schemas (requirements/acceptance_criteria/phases/
-   * outline) exceeding this many chars is flagged. Defaults to 1000 when
-   * absent — the SPEC-080 C3 stated default.
+   * Content-flight scan threshold (SPEC-080 C3): any free-text string value in `extra` outside typed schemas
+   * (requirements/acceptance_criteria/phases) exceeding this many chars is flagged. Defaults to 1000 when absent.
    */
   extra_prose_chars: z.number().int().positive().default(1000),
 });
 
-/** Derived TypeScript type for the corpus-governed outline budget. */
+/** Derived TypeScript type for the corpus-governed budget. */
 export type OutlineBudget = z.infer<typeof outlineBudgetSchema>;
-
-// ─── Render Projection ──────────────────────────────────────────────────────
-
-/**
- * Deterministic Markdown rendering of a `prd.extra.outline[]` array for the root
- * PRD's `content` field (SPEC-080 §Downstream Handoff, T7) — `extra.outline` is
- * the SSOT, `content` is a GENERATED projection of it, never hand-edited
- * directly. Two calls with the same input always produce the same string (no
- * IO, no wall-clock reads, no randomness) — same render-projection convention
- * as `renderHandoffContent` (`session.ts`) / `renderAssessmentContent`
- * (`assessment.ts`).
- *
- * Renders one `## {title}` heading per entry, in array (declaration) order —
- * NOT re-sorted — followed by the entry's bounded `direction` summary and any
- * declared `constraints[]` / `decision_pointers[]` / `links[]` as bullet
- * lists. An empty `outline` array renders to the empty string (never throws).
- *
- * @param outline - Ordered outline entries (`PrdOutlineService.outlineSet`'s
- *   patched array, or a doc's raw `extra.outline` after schema validation).
- * @returns Markdown body text — empty string for an empty array.
- * @example
- * renderOutlineContent([
- *   { section: "sync", title: "Sync Predicate", tier: "domain",
- *     direction: "Bounded summary.", decision_pointers: [], constraints: [],
- *     links: [{ slug: "spec-domain-sync-detail", rel: "detail" }] },
- * ]).startsWith("## Sync Predicate"); // => true
- */
-export function renderOutlineContent(outline: OutlineEntry[]): string {
-  if (outline.length === 0) return "";
-
-  const lines: string[] = [];
-  for (const entry of outline) {
-    lines.push(`## ${entry.title}`);
-    lines.push("");
-    lines.push(entry.direction);
-    lines.push("");
-
-    if (entry.constraints.length > 0) {
-      lines.push("**Constraints:**");
-      for (const constraint of entry.constraints) lines.push(`- ${constraint}`);
-      lines.push("");
-    }
-
-    if (entry.decision_pointers.length > 0) {
-      lines.push("**Decisions:**");
-      for (const adrSlug of entry.decision_pointers) lines.push(`- ${adrSlug}`);
-      lines.push("");
-    }
-
-    if (entry.links.length > 0) {
-      lines.push("**Links:**");
-      for (const link of entry.links) lines.push(`- [${link.rel}] ${link.slug}`);
-      lines.push("");
-    }
-  }
-
-  return lines.join("\n").trimEnd() + "\n";
-}

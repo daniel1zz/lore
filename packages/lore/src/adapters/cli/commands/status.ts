@@ -248,7 +248,6 @@ import type { MemoryFileFinding } from "../../../service/claude-md-findings.js";
 import {
   buildCheckClaudeMdJsonPayload,
   formatCheckClaudeMdHuman,
-  formatAdoptionDowngradeLines,
   type CheckClaudeMdRenderInput,
 } from "../claude-md-render.js";
 import { printLine } from "../output.js";
@@ -451,22 +450,18 @@ interface MemoryPointersPayload {
   checked: number;
   consistent: boolean;
   findings: MemoryFileFinding[];
-  /** Pre-rendered `WARN adoption=warn` + downgraded lines (empty unless warn downgraded something); never exit-relevant. */
-  adoption_lines: string[];
 }
 
 /** Text rendering for the `--check-memory-pointers` section (Phase 2, N14). */
 function renderMemoryPointersSection(io: CliIo, payload: MemoryPointersPayload): void {
   if (payload.consistent) {
     printLine(io.stdout, `Memory pointers: within budget (${payload.checked} memory file(s) checked).`);
-    for (const line of payload.adoption_lines) printLine(io.stdout, line);
     return;
   }
   printLine(io.stdout, `Memory pointers: BREACHED (${payload.checked} memory file(s) checked):`);
   for (const finding of payload.findings) {
     printLine(io.stdout, `  - ${finding.message}`);
   }
-  for (const line of payload.adoption_lines) printLine(io.stdout, line);
 }
 
 /**
@@ -1219,6 +1214,10 @@ export default defineLoreCommand({
     // branch and returns before that branch is ever reached.
     if (checkClaudeMdRequested) {
       const budgetResolution = resolveClaudeMdBudgets(inv.cwd);
+      if (budgetResolution.source === "retired-setting") {
+        inv.io.stderr.write(formatErrorFor(inv, budgetResolution.error) + "\n");
+        return exitCode(budgetResolution.error);
+      }
       const budgets = budgetResolution.budgets;
       // reason: emitted BEFORE any measurement is printed, so an operator
       // reading the numbers below already knows whose ceilings they are. On
@@ -1246,7 +1245,6 @@ export default defineLoreCommand({
         advisory,
         headroom,
         warnings,
-        adoption,
       } = runMemoryFileChecks(files, budgets, {
         probe: buildRealFsProbe(inv.cwd),
         referenceDocuments: discoverFragmentDocuments(inv.cwd),
@@ -1259,7 +1257,6 @@ export default defineLoreCommand({
         headroom,
         warnings,
         budgetResolution,
-        adoption,
       };
 
       if (args.json) {
@@ -1609,11 +1606,7 @@ export default defineLoreCommand({
           }
           const knownSlugs = new Set(allDocsResult.value.docs.map((d) => d.slug));
 
-          const {
-            deterministic: memoryPointerFindings,
-            advisory: memoryPointerAdvisory,
-            adoption: memoryPointerAdoption,
-          } = runMemoryFileChecks(files, budgets, {
+          const { deterministic: memoryPointerFindings } = runMemoryFileChecks(files, budgets, {
             probe: buildRealFsProbe(inv.cwd),
             referenceDocuments: discoverFragmentDocuments(inv.cwd),
             docExists: (slug) => knownSlugs.has(slug),
@@ -1622,7 +1615,6 @@ export default defineLoreCommand({
             checked: files.length,
             consistent: memoryPointerFindings.length === 0,
             findings: memoryPointerFindings,
-            adoption_lines: formatAdoptionDowngradeLines(memoryPointerAdvisory, memoryPointerAdoption),
           };
           memoryPointersInconsistent = memoryPointerFindings.length > 0;
         }

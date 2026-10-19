@@ -617,11 +617,21 @@ export const specExtraSchema = z
 
 // ─── CreateDocInput Schema ─────────────────────────────────────────────────
 
+/**
+ * A title with at least one non-whitespace character — the ONE title schema for create and patch.
+ * `.min(1)` alone let `"   "` through (DC2-8): the stored title renders as nothing and slugifies
+ * to a bare type word. The value is NOT trimmed — only blank is refused — so stored bytes stay.
+ */
+export const nonBlankTitleSchema = z
+  .string()
+  .min(1, "Title must not be empty")
+  .refine((value) => value.trim().length > 0, "Title must not be blank (whitespace only)");
+
 const baseCreateDocInputSchema = z.object({
   type: docTypeSchema,
   // reason: .min(1) enforces the AC-DASH-WRITE-10 requirement that client-side Zod
   // validation rejects empty title before making an HTTP call (SPEC-022 §9).
-  title: z.string().min(1, "Title must not be empty"),
+  title: nonBlankTitleSchema,
   content: z.string().optional(),
   parent_id: z.string().optional(),
   tags: z.array(z.string()).optional(),
@@ -824,7 +834,7 @@ export type CreateDocInput = z.infer<typeof createDocInputSchema>;
 
 /** Partial update schema — all fields optional */
 export const docPatchSchema = z.object({
-  title: z.string().optional(),
+  title: nonBlankTitleSchema.optional(),
   content: z.string().optional(),
   status: docStatusSchema.optional(),
   priority: prioritySchema.optional(),
