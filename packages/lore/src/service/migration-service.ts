@@ -30,6 +30,7 @@ import type {
 import type { StoreInterface } from "../store/store-interface.js";
 import { walkFiles } from "./fs-walk.js";
 import { applyAcChange } from "./ac-write-chokepoint.js";
+import { bareDocWriter, type DocWritePort } from "./corpus-service.js";
 
 // ─── Public Types ──────────────────────────────────────────────────────────
 
@@ -159,7 +160,15 @@ const GENERIC_KEY_REGEX = /[A-Za-z0-9_-]{32,}/;
 // ─── MigrationService ──────────────────────────────────────────────────────
 
 export class MigrationService {
-  constructor(private readonly store: StoreInterface) {}
+  constructor(
+    private readonly store: StoreInterface,
+    /** The one write route (`CorpusService`, AC-DCL-3); `app.ts` passes the composed one, a bare test gets a bare writer. */
+    writer?: DocWritePort,
+  ) {
+    this.writer = writer ?? bareDocWriter(store);
+  }
+
+  private readonly writer: DocWritePort;
 
   /**
    * Analyze source directory — parse all .md files, compute report.
@@ -369,7 +378,18 @@ export class MigrationService {
         continue;
       }
 
-      const insertResult = await this.store.insert(docRecord);
+      // reason: AC-DCL-3 — the import goes through the one write route: doc + version 1 + audit row in ONE
+      // transaction (#253: the version insert's Result used to be discarded and no audit row was written),
+      // attributed to the calling actor, refused from a foreign-resolved corpus (#255).
+      const insertResult = await this.writer.insertDoc({
+        doc: docRecord,
+        auditAction: "create",
+        auditDetails: { source: "v1-migration", v1_original_id: doc.v1Id },
+        auditSessionId: `migrate-v1-${newId}`,
+      });
+      // A VALIDATION_ERROR here is a refusal of the WHOLE write (foreign corpus, unresolved actor), not a
+      // per-file defect: stop instead of reporting every remaining file as a store error.
+      if (!insertResult.ok && insertResult.error.code === "VALIDATION_ERROR") return insertResult;
       if (!insertResult.ok) {
         importErrors.push({
           file: doc.filePath,
@@ -380,19 +400,6 @@ export class MigrationService {
         });
         continue;
       }
-
-      // Version record
-      await this.store.insertVersion({
-        doc_id: newId,
-        version: 1,
-        content: doc.content,
-        extra,
-        status: docRecord.status,
-        title: doc.title,
-        action: "create",
-        created_at: docRecord.created_at,
-        created_by: "migration:v1",
-      });
 
       v1IdToNewId.set(doc.v1Id, newId);
       imported += 1;
@@ -492,7 +499,22 @@ export class MigrationService {
         continue;
       }
 
-      await this.store.update(childNewId, { parent_id: parentNewId });
+      const childResult = await this.store.find(childNewId);
+      if (!childResult.ok || childResult.value === null) {
+        warnings.push(`${doc.filePath}: imported doc ${childNewId} could not be re-read — parent_id left null`);
+        continue;
+      }
+      // reason: AC-DCL-3 — back-filling parent_id is a document write like any other: version row + audit row.
+      const parented = await this.writer.writeDoc({
+        doc: childResult.value,
+        patch: { parent_id: parentNewId },
+        action: "update",
+        changeSummary: "parent set from v1 import",
+        auditAction: "update",
+        auditDetails: { source: "v1-migration", parent_id: parentNewId },
+        lock: "none",
+      });
+      if (!parented.ok) warnings.push(`${doc.filePath}: parent_id back-fill failed: ${parented.error.code}`);
     }
   }
 }

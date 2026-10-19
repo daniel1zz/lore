@@ -196,6 +196,9 @@ export const HOOK_REGISTRATIONS: readonly HookRegistration[] = [
   // pre-tool-harness-run.mjs — rewrites each lore call to carry `--harness-run <run>` (updatedInput only, never a permissionDecision — D12); covers raw Bash and every lore MCP tool.
   { file: "pre-tool-harness-run.mjs", runner: "node", event: "PreToolUse", matcher: "Bash" },
   { file: "pre-tool-harness-run.mjs", runner: "node", event: "PreToolUse", matcher: "mcp__.*lore_.*" },
+
+  // pre-helper-foreign-working-copy-gate.mjs — refuses a Write/Edit/MultiEdit/NotebookEdit by a worktree-isolated helper whose target is inside a git working copy that is not its own (the shared checkout, another worktree, another repo): harm that lands at once on someone else and cannot be undone by the actor (BR-1092). Never applies to the main session; writes outside every working copy are left to the turn-end helper-scope review.
+  { file: "pre-helper-foreign-working-copy-gate.mjs", runner: "node", event: "PreToolUse", matcher: "Write|Edit|MultiEdit|NotebookEdit" },
 ] as const;
 
 /** Strips exactly one trailing `/` (never more — a caller-malformed `claudeDir` with repeated trailing slashes is out of scope). */

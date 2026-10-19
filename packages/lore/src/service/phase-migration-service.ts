@@ -105,6 +105,7 @@ import type {
 } from "@lore/core";
 import type { StoreInterface } from "../store/store-interface.js";
 import { isPlanMember } from "./plan-membership.js";
+import { bareDocWriter, type DocWritePort } from "./corpus-service.js";
 
 // ─── Public Types ───────────────────────────────────────────────────────────
 
@@ -140,6 +141,11 @@ export interface PhaseMigrationReport {
 export interface MigrateTasksOpts {
   /** When true, computes the full report but performs ZERO store writes. */
   dryRun: boolean;
+  /**
+   * The acting identity stamped on every version/audit row (AC-DCL-3). Absent = the store write context's
+   * claimed name — never a synthetic `system:` actor.
+   */
+  by?: string;
 }
 
 /**
@@ -283,7 +289,15 @@ function migrationErr(
  *   instrumented path, same rationale as `MigrationService`/`AuditService`).
  */
 export class PhaseMigrationService {
-  constructor(private readonly store: StoreInterface) {}
+  constructor(
+    private readonly store: StoreInterface,
+    /** The one write route (`CorpusService`, AC-DCL-3); `app.ts`/`phase-wiring.ts` pass the composed one, a bare test gets a bare writer. */
+    writer?: DocWritePort,
+  ) {
+    this.writer = writer ?? bareDocWriter(store);
+  }
+
+  private readonly writer: DocWritePort;
 
   async migrateTasks(opts: MigrateTasksOpts): Promise<Result<PhaseMigrationReport, PhaseMigrationError>> {
     const dryRun = opts.dryRun;
@@ -397,7 +411,7 @@ export class PhaseMigrationService {
           };
 
           if (!dryRun) {
-            const writeResult = await this.persistGroup(phaseDoc, group, nowIso);
+            const writeResult = await this.persistGroup(phaseDoc, group, nowIso, opts.by);
             if (!writeResult.ok) return migrationErr(writeResult.error, partial());
           }
 
@@ -437,72 +451,36 @@ export class PhaseMigrationService {
     phaseDoc: DocRecord,
     group: PhaseGroup,
     nowIso: string,
+    by: string | undefined,
   ): Promise<Result<void, LoreError>> {
-    const insertResult = await this.store.insert(phaseDoc);
-    if (!insertResult.ok) return err(insertResult.error);
-
-    const versionResult = await this.store.insertVersion({
-      doc_id: phaseDoc.id,
-      version: 1,
-      content: phaseDoc.content,
-      extra: phaseDoc.extra,
-      status: phaseDoc.status,
-      title: phaseDoc.title,
-      action: "create",
-      created_at: nowIso,
-      created_by: MIGRATION_ACTOR,
-      change_summary: `migrated from ${group.tasks.length} task(s)`,
-      // SPEC-072 D1/D2 — the phase doc's slug at its own creation.
-      slug: phaseDoc.slug,
+    // reason: AC-DCL-3 — every write below goes through the one write route (CorpusService): the phase doc is
+    // inserted with its version 1 and audit row in one transaction, each source task is archived with its own
+    // version row and audit row in one transaction, all attributed to the calling actor, refused from a
+    // foreign-resolved corpus, and (for the tasks, #161) refused on a locked record.
+    const inserted = await this.writer.insertDoc({
+      doc: phaseDoc,
+      changeSummary: `migrated from ${group.tasks.length} task(s)`,
+      auditAction: "create",
+      auditDetails: { migrated_from: group.tasks.map((t) => t.id) },
+      auditSessionId: `phase-migration-${phaseDoc.id}`,
+      ...(by !== undefined ? { by } : {}),
     });
-    if (!versionResult.ok) return err(versionResult.error);
-
-    const auditResult = await this.store.appendAuditEntry({
-      timestamp: nowIso,
-      actor: MIGRATION_ACTOR,
-      session_id: `phase-migration-${phaseDoc.id}`,
-      action: "create",
-      doc_id: phaseDoc.id,
-      details: { version: 1, migrated_from: group.tasks.map((t) => t.id) },
-    });
-    if (!auditResult.ok) return err(auditResult.error);
+    if (!inserted.ok) return inserted;
 
     for (const task of group.tasks) {
-      const newVersion = task.version + 1;
-      const newExtra = { ...task.extra, migrated_to: phaseDoc.id };
-
-      const updateResult = await this.store.update(
-        task.id,
-        { status: "archived", extra: newExtra, updated_at: nowIso, version: newVersion },
-        { expected_version: task.version },
-      );
-      if (!updateResult.ok) return err(updateResult.error);
-
-      const taskVersionResult = await this.store.insertVersion({
-        doc_id: task.id,
-        version: newVersion,
-        content: updateResult.value.content,
-        extra: updateResult.value.extra,
-        status: updateResult.value.status,
-        title: updateResult.value.title,
+      const archived = await this.writer.writeDoc({
+        doc: task,
+        patch: { status: "archived", extra: { ...task.extra, migrated_to: phaseDoc.id } },
         action: "update",
-        created_at: nowIso,
-        created_by: MIGRATION_ACTOR,
-        change_summary: `migrated to phase ${phaseDoc.id}`,
-        // SPEC-072 D1/D2 — archiving never touches slug; carry the current value.
-        slug: updateResult.value.slug,
+        changeSummary: `migrated to phase ${phaseDoc.id}`,
+        auditAction: "update",
+        auditDetails: { migrated_to: phaseDoc.id },
+        auditSessionId: `phase-migration-${task.id}`,
+        lock: "content",
+        ...(by !== undefined ? { by } : {}),
+        now: nowIso,
       });
-      if (!taskVersionResult.ok) return err(taskVersionResult.error);
-
-      const taskAuditResult = await this.store.appendAuditEntry({
-        timestamp: nowIso,
-        actor: MIGRATION_ACTOR,
-        session_id: `phase-migration-${task.id}`,
-        action: "update",
-        doc_id: task.id,
-        details: { version: newVersion, migrated_to: phaseDoc.id },
-      });
-      if (!taskAuditResult.ok) return err(taskAuditResult.error);
+      if (!archived.ok) return archived;
     }
 
     return ok(undefined);

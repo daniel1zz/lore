@@ -92,6 +92,7 @@ import {
 import { NoOpTelemetry } from "@lore/core";
 import type { StoreInterface } from "../store/store-interface.js";
 import { resolveDoc, resolveDocId } from "./resolve.js";
+import { bareDocWriter, type DocWritePort } from "./corpus-service.js";
 
 const defaultNow = (): string => new Date().toISOString();
 
@@ -384,9 +385,17 @@ export class ValidityService {
      * record FK'd to that judgment (AC-SP-9).
      */
     private readonly stalenessCalibration?: StalenessCalibrationPort,
+    /**
+     * The one write route (`CorpusService`, AC-DCL-3). `app.ts` passes the composed `corpusService`; absent
+     * (a bare unit-test construction) falls back to a bare writer over the same store.
+     */
+    writer?: DocWritePort,
   ) {
     this.telemetry = telemetry;
+    this.writer = writer ?? bareDocWriter(store);
   }
+
+  private readonly writer: DocWritePort;
 
   /**
    * Marks `idOrSlug` invalid (or undoes a prior invalidation, `opts.undo: true`).
@@ -681,10 +690,12 @@ export class ValidityService {
   }
 
   /**
-   * Shared commit path (D2 step 1: doc-extra update + version + audit) — CAS-guarded
-   * `store.update` on `extra` only, one `insertVersion` snapshot, one `appendAuditEntry`
-   * with `action: "invalidate"` (`details.version` per SPEC-035 audit-continuity
-   * convention). Mirrors `TaskWorkflowService.writeTaskExtra`.
+   * Shared commit path (D2 step 1: doc-extra update + version + audit) — one `writeDoc` on the one write
+   * route (AC-DCL-3): foreign-corpus refusal (#255), a CAS-guarded `extra`-only update, one version snapshot and
+   * one audit entry with `action: "invalidate"` (`details.version` per SPEC-035 audit-continuity convention),
+   * all in one transaction, attributed to `actor`. `lock: "none"` — invalidation is the sanctioned exit for a
+   * locked record whose claim stopped being true (`lore invalidate` is named by the record-edit refusal).
+   * A patch that changes nothing writes nothing.
    */
   private async commitValidityExtra(
     doc: DocRecord,
@@ -694,42 +705,20 @@ export class ValidityService {
     changeSummary: string,
     auditDetails: Record<string, unknown>,
   ): Promise<Result<DocRecord, LoreError>> {
-    const newVersion = doc.version + 1;
-    const updateResult = await this.store.update(
-      doc.id,
-      { extra: newExtra, updated_at: nowIso, version: newVersion },
-      { expected_version: doc.version },
-    );
-    if (!updateResult.ok) return updateResult;
-
-    const versionResult = await this.store.insertVersion({
-      doc_id: doc.id,
-      version: newVersion,
-      content: updateResult.value.content,
-      extra: updateResult.value.extra,
-      status: updateResult.value.status,
-      title: updateResult.value.title,
+    const written = await this.writer.writeDoc({
+      doc,
+      patch: { extra: newExtra },
       action: "update",
-      created_at: nowIso,
-      created_by: actor,
-      change_summary: changeSummary,
-      // SPEC-072 D1/D2 — this write path only touches `extra`; carry the
-      // current (unchanged) slug.
-      slug: updateResult.value.slug,
+      changeSummary,
+      auditAction: "invalidate",
+      auditDetails,
+      auditSessionId: `invalidate-${doc.id}`,
+      lock: "none",
+      by: actor,
+      now: nowIso,
     });
-    if (!versionResult.ok) return versionResult;
-
-    const auditResult = await this.store.appendAuditEntry({
-      timestamp: nowIso,
-      actor,
-      session_id: `invalidate-${doc.id}`,
-      action: "invalidate",
-      doc_id: doc.id,
-      details: { ...auditDetails, version: newVersion },
-    });
-    if (!auditResult.ok) return auditResult;
-
-    return ok(updateResult.value);
+    if (!written.ok) return written;
+    return ok(written.value.doc);
   }
 
   /** Records exactly one telemetry event per successful write. Never throws. */

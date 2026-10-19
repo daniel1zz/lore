@@ -54,7 +54,9 @@
  *   - specC/D/E, ALL declaring "SPEC-3" (a 3-way collision — mirrors the real
  *     3-session "SPEC-080" incident exactly): specC is earliest (created_at
  *     priority) and keeps 3; specD/E are collision losers and get next-free
- *     (4, 5). specE is `approved` status (proves no approved→draft reset).
+ *     (4, 5). specE is `draft` status: an `approved` spec is a LOCKED record, and the
+ *     title strip is a record-lock edit that refuses it (defect-clusters D3, #161 — covered by
+ *     `integration/single-write-path.bun.test.ts`), so the converging corpus holds no locked record.
  *   - specExempt "Domain Detail Overview" (`spec_kind: domain-overview`) — no
  *     declared number, ordinal stays NULL forever (SPEC-084 exempt-kind rule).
  *   - adrOne "ADR-1 — Use store-atomic ordinals" — a DIFFERENT doc type,
@@ -73,7 +75,7 @@
  *               ADR-1); the exempt-kind doc's permanent NULL ordinal.
  *   STATE:      `--apply` converges the corpus (bijective ordinals, prose-pure
  *               titles, export-index reconciled from columns, `SPEC-<n>`/
- *               `ADR-<n>` resolve via `dist/lore get`), `approved` status
+ *               `ADR-<n>` resolve via `dist/lore get`), a `draft` status
  *               survives the title strip untouched; a dedicated follow-up case
  *               asserts the padded `SPEC-00n` mirror form resolves to the SAME
  *               document as its unpadded `SPEC-n` display form (RESOLUTION
@@ -284,7 +286,7 @@ describe("AC-084-5: compiled dist/lore migrate ordinals — dry-run/apply/idempo
   let specB: DocRecord; // SPEC-2, no export mapping (never exported control case)
   let specC: DocRecord; // SPEC-3, earliest of the trio -> keeps 3
   let specD: DocRecord; // SPEC-3, collision loser #1 -> next-free
-  let specE: DocRecord; // SPEC-3, collision loser #2, approved -> next-free
+  let specE: DocRecord; // SPEC-3, collision loser #2, draft -> next-free
   let specExempt: DocRecord; // domain-overview, permanently NULL ordinal
   let adrOne: DocRecord; // ADR-1, cross-type independence + "first of type"
 
@@ -346,7 +348,7 @@ describe("AC-084-5: compiled dist/lore migrate ordinals — dry-run/apply/idempo
       title: "SPEC-3 — Triple collision loser two",
       created_at: "2026-07-20T00:00:04.000Z",
       parent_id: prdId,
-      status: "approved",
+      status: "draft",
     });
     specExempt = makeDoc({
       type: "spec",
@@ -535,13 +537,13 @@ describe("AC-084-5: compiled dist/lore migrate ordinals — dry-run/apply/idempo
     );
     expect(stillNumbered).toEqual([]);
 
-    // approved status survived the title strip untouched (no draft reset).
+    // draft status survived the title strip untouched.
     const eRow = queryDb<{ status: string; title: string; ordinal: number }>(
       dbPath,
       "SELECT status, title, ordinal FROM docs WHERE id = ?",
       [specE.id],
     );
-    expect(eRow[0]?.status).toBe("approved");
+    expect(eRow[0]?.status).toBe("draft");
     expect(eRow[0]?.title).toBe("Triple collision loser two");
     expect(eRow[0]?.ordinal).toBe(5);
 

@@ -395,16 +395,19 @@ export function recordSessionStart(base, sessionId, nowMs = Date.now()) {
 /**
  * SubagentStart: create helpers/<agent_id>.json with end_count 0. An existing record is kept
  * (a repeated SubagentStart must not reset what SubagentStop wrote); `judged_end_count` is
- * never written here (single-writer rule).
+ * never written here (single-writer rule). `workingCopy` (the SubagentStart payload cwd) is
+ * recorded as `working_copy` so a later reader (pre-helper-foreign-working-copy-gate.mjs) knows
+ * the helper's own working copy even after the helper's shell cwd drifts.
  * @returns {boolean} true when the record was created.
  */
-export function recordHelperStart(base, sessionId, agentId, nowMs = Date.now()) {
+export function recordHelperStart(base, sessionId, agentId, nowMs = Date.now(), workingCopy = undefined) {
   assertSessionId(sessionId);
   if (typeof agentId !== 'string' || !ID_PATTERN.test(agentId)) throw new TrailRunIdInvalidError(`cc:${sessionId}:${agentId}`);
   return writeJsonExclusive(join(base, 'sessions', sessionId, 'helpers', `${agentId}.json`), {
     run: `cc:${sessionId}:${agentId}`,
     started_at: new Date(nowMs).toISOString(),
     end_count: 0,
+    ...(typeof workingCopy === 'string' && workingCopy !== '' ? { working_copy: workingCopy } : {}),
   });
 }
 
@@ -622,7 +625,8 @@ export function recordHelperEnd(base, sessionId, agentId, cwd, nowMs = Date.now(
     started_at: prior?.started_at ?? at,
     ended_at: at,
     end_count: (prior?.end_count ?? 0) + 1,
-    ...(typeof cwd === 'string' && cwd !== '' ? { working_copy: cwd } : {}),
+    // reason: the working copy recorded at SubagentStart wins over the stop-time cwd, which may have drifted
+    ...(prior?.working_copy !== undefined ? { working_copy: prior.working_copy } : typeof cwd === 'string' && cwd !== '' ? { working_copy: cwd } : {}),
     ...(measurement.isolated === undefined ? {} : { isolated: measurement.isolated }),
     ...(keptBase === null ? {} : { base: keptBase }),
     changes: measurement.changes,

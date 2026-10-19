@@ -61,6 +61,7 @@ import type { StoreInterface } from "../store/store-interface.js";
 import { resolveDoc } from "./resolve.js";
 import { isPlanMember } from "./plan-membership.js";
 import type { RecordLockService } from "./record-lock-service.js";
+import { bareDocWriter, type DocWritePort } from "./corpus-service.js";
 
 // ─── Public Types ──────────────────────────────────────────────────────────
 
@@ -88,7 +89,13 @@ export class PhaseService {
   constructor(
     private readonly store: StoreInterface,
     private readonly recordLock: RecordLockService,
-  ) {}
+    /** The one write route (`CorpusService`, AC-DCL-3); `app.ts` passes the composed one, a bare test gets a bare writer. */
+    writer?: DocWritePort,
+  ) {
+    this.writer = writer ?? bareDocWriter(store, recordLock);
+  }
+
+  private readonly writer: DocWritePort;
 
   // ── listPhases ────────────────────────────────────────────────────────────
 
@@ -341,16 +348,24 @@ export class PhaseService {
     if (!planWriteResult.ok) return planWriteResult;
 
     // Update all child tasks that reference the old phase name.
-    // reason: best-effort sequential updates — StoreInterface has no transaction primitive.
-    // Idempotent on re-run if partially applied (tasks already updated are skipped naturally).
+    // reason: AC-DCL-3 / #44 — each member task is rewritten through the one write route: its own version row
+    // and audit row (so `lore log <task>` explains its current phase), attributed to the calling actor, one
+    // transaction per task. StoreInterface has no cross-doc transaction, so the sequence stays best-effort and
+    // idempotent on re-run (tasks already renamed no longer match `oldName`). `lock: "none"`: the plan's
+    // phase-structure gate above already judged the rename; a task's own claim must not block it.
     const tasksResult = await this.findTasksByPhase(plan.id, oldName);
     if (!tasksResult.ok) return tasksResult;
     for (const task of tasksResult.value) {
-      const taskUpdateResult = await this.store.update(task.id, {
-        extra: { ...task.extra, phase: trimmedNew },
-        updated_at: new Date().toISOString(),
+      const taskWrite = await this.writer.writeDoc({
+        doc: task,
+        patch: { extra: { ...task.extra, phase: trimmedNew } },
+        action: "update",
+        changeSummary: `Phase renamed — "${oldName}" → "${trimmedNew}" (plan ${plan.slug})`,
+        auditAction: "update",
+        auditDetails: { operation: "phase-rename", phase: trimmedNew, previous_phase: oldName, plan_id: plan.id },
+        lock: "none",
       });
-      if (!taskUpdateResult.ok) return taskUpdateResult;
+      if (!taskWrite.ok) return taskWrite;
     }
 
     return ok(updatedPhases);
@@ -397,9 +412,14 @@ export class PhaseService {
         // Move singular phase to legacy_phase, clear the old key.
         delete newExtra["phase"];
         newExtra["legacy_phase"] = legacyPhase;
-        const updateResult = await this.store.update(plan.id as DocId, {
-          extra: newExtra,
-          updated_at: new Date().toISOString(),
+        const updateResult = await this.writer.writeDoc({
+          doc: plan,
+          patch: { extra: newExtra },
+          action: "update",
+          changeSummary: `Legacy phase "${legacyPhase}" moved to legacy_phase`,
+          auditAction: "update",
+          auditDetails: { operation: "phase-migrate", legacy_phase: legacyPhase },
+          lock: "none",
         });
         if (!updateResult.ok) return updateResult;
       }
@@ -472,10 +492,10 @@ export class PhaseService {
    * green — the suite does not read the audit trail). That is why the audit half is
    * written here and not left to callers.
    *
-   * `actor`/`created_by` are the literal `"system"`, matching `AcService`'s sibling
-   * `extra` write path: `PhaseService` is constructed with a store and nothing else, so
-   * there is no invoking actor to resolve. Attribution of phase writes to a real actor
-   * needs `by`-plumbing through `phase-wiring.ts`, which no decision has asked for yet.
+   * `actor`/`created_by` of the PLAN row stay the literal `"system"` — an internal writer's code-set identity
+   * (spec-run-only-write-identity-and-run-end-claim-release AC-ROI-9, pinned by
+   * `run-only-internal-writers.bun.test.ts`); the run is still stamped by the store write context. The member-task
+   * rewrites in `renamePhase` are NOT internal: they name the calling actor (AC-DCL-3, #44).
    *
    * @param plan - The resolved plan doc, read BEFORE the mutation; its `version` is
    *   both the CAS expectation and the base for the new version number.
@@ -496,45 +516,23 @@ export class PhaseService {
       details: Record<string, unknown>;
     },
   ): Promise<Result<DocRecord, LoreError>> {
-    const now = new Date().toISOString();
-    const newVersion = plan.version + 1;
-    const newExtra: Record<string, unknown> = { ...plan.extra, phases };
-
-    return this.store.updateWithProvenance(
-      plan.id,
-      { extra: newExtra, updated_at: now, version: newVersion },
-      { expected_version: plan.version },
-      {
-        doc_id: plan.id,
-        version: newVersion,
-        content: plan.content,
-        extra: newExtra,
-        // ⛔ The ADR's non-demotion half, expressed as data: the snapshot carries the
-        // plan's CURRENT status, never a recomputed one.
-        status: plan.status,
-        title: plan.title,
-        action: "update",
-        created_at: now,
-        created_by: "system",
-        change_summary: opts.change_summary,
-        // SPEC-072 D1/D2 — this write path only touches `extra`; carry the
-        // current (unchanged) slug.
-        slug: plan.slug,
-      },
-      {
-        timestamp: now,
-        actor: "system",
-        session_id: plan.id,
-        action: "update",
-        doc_id: plan.id,
-        details: {
-          ...opts.details,
-          operation: opts.operation,
-          phase_count: phases.length,
-          version: newVersion,
-        },
-      },
-    );
+    // reason: AC-DCL-3 — the plan write goes through the one write route (doc + version row + audit row in ONE
+    // transaction, the foreign-corpus refusal). `lock: "none"`: every caller above already
+    // ran the `phase-structure` gate BEFORE any write. `status` is deliberately absent from the patch (ADR
+    // non-demotion half): the written snapshot carries the plan's CURRENT status.
+    const written = await this.writer.writeDoc({
+      doc: plan,
+      patch: { extra: { ...plan.extra, phases } },
+      action: "update",
+      changeSummary: opts.change_summary,
+      auditAction: "update",
+      auditDetails: { ...opts.details, operation: opts.operation, phase_count: phases.length },
+      lock: "none",
+      // reason: AC-ROI-9 — the plan row of a phase write keeps the internal identity `system`; see the JSDoc above.
+      by: "system",
+    });
+    if (!written.ok) return written;
+    return ok(written.value.doc);
   }
 }
 
