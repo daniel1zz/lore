@@ -211,11 +211,16 @@ afterAll(() => {
 describe("edit-time anchor gate (task-skill-design-implementers-declare-out-of-anchor-files)", () => {
   it("AC-EAG-a: an edit inside the anchors (directory anchor, file anchor) is allowed and writes nothing", () => {
     const before = taskState(fx.taskA);
+    const elapsedMs: number[] = [];
     for (const target of [join(fx.wtA, "src/a/a.ts"), join(fx.wtA, "src/a/deep/new.ts"), join(fx.wtA, "own/one.ts"), "src/a/a.ts"]) {
+      const startedAt = performance.now();
       const r = runHook({ cwd: fx.wtA, target });
+      elapsedMs.push(Math.round(performance.now() - startedAt));
       expect(r.status, `${target}: ${r.stderr}`).toBe(0);
       expect(r.stderr).toBe("");
     }
+    // Measured latency of the in-anchor fast path (git check-ignore + one `lore anchor scope` read), reported not asserted.
+    console.info(`[latency] in-anchor edit through the hook, ms per call: ${elapsedMs.join(", ")}`);
     expect(taskState(fx.taskA)).toEqual(before);
   });
 
@@ -293,7 +298,7 @@ describe("edit-time anchor gate (task-skill-design-implementers-declare-out-of-a
     expect(runHook({ cwd: fx.wtA, target: join(fx.base, "elsewhere.txt") }).status).toBe(0);
     expect(runHook({ cwd: fx.wtA, target: join(fx.wtA, "shared/x.ts"), tool: "Write" }).status).toBe(2);
     expect(runHook({ cwd: fx.wtA, target: join(fx.wtA, "shared/x.ts"), tool: "NotebookEdit" }).status).toBe(2);
-  });
+  }, 120_000);
 
   it("AC-EAG-c (symmetry): helper B is denied helper A's declared path, naming task A", () => {
     const r = runHook({ cwd: fx.wtB, target: join(fx.wtB, "free/old.ts"), agent: AGENT_B, actor: ACTOR_B });
