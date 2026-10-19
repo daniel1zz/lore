@@ -70,7 +70,7 @@ import { join } from "node:path";
 import { err, ok, type LoreError, type Result } from "@lore/core";
 import type { IntegrateLossLedger } from "./integrate-loss-ledger.js";
 import type { AttemptRecord, IntegrateAttemptLedger } from "./integrate-attempt-ledger.js";
-import type { LandingFact } from "./task-commit-range.js";
+import type { LandingRequest } from "./task-commit-range.js";
 import { EMBEDDED_ASSETS_MANIFEST } from "../generated/assets-manifest.js";
 import { GIT_UPGRADE_HINT, MIN_GIT_FOR_MAIN_REF_HOOK, parseGitVersion } from "../flows/setup-project-flow.js";
 
@@ -155,7 +155,7 @@ export interface IntegrationLease {
  * written. Wired by the CLI to `TaskWorkflowService.recordLanding` (the corpus write route); a failure never un-lands main.
  */
 export interface LandingRecorder {
-  readonly record: (landing: LandingFact) => Promise<Result<readonly string[], LoreError>>;
+  readonly record: (landing: LandingRequest) => Promise<Result<readonly string[], LoreError>>;
 }
 
 export interface IntegrateDeps {
@@ -352,7 +352,9 @@ export class IntegrateService {
         // reason: BR-1336 — an already-integrated branch still records a landing on every claimant that holds none for
         // this head (the recorder skips tasks that already carry one). Main did not move, so main_before == main_after
         // and the branch head itself is the landed commit: it is an ancestor of main.
-        await this.recordLanding(this.locateExistingLanding(request.branch, tip, base.value));
+        // reason: BR-1336 — nothing reconstructs a landing from main's history: the branch head is the landed commit and
+        // the recorder takes the range start from each task's own claim base (`base_from_claim`).
+        await this.recordLanding({ branch: request.branch, branch_head: tip, main_before: base.value, main_after: base.value, landing_commit: tip, base_from_claim: true });
         const cleared = ledger.clear(request.branch);
         if (!cleared.ok) return cleared;
         const view = this.refreshSharedView();
@@ -433,34 +435,11 @@ export class IntegrateService {
   }
 
   /**
-   * The landing fact of a branch found already on main (BR-1336): where `tip` entered main's first-parent chain. When
-   * the earliest first-parent commit of `tip..main` descending from `tip` is a merge whose second parent is `tip`, that
-   * merge is the landed commit and its first parent is main before the landing (so `main_before..branch_head` is the
-   * branch's own work). Otherwise (a fast-forward, a hand cherry-pick of the whole history, an unreadable log) the
-   * branch head itself is the landed commit and `main_before` is main's current commit: the record is still true
-   * (`landing_commit` is on main) and its range is simply empty. This reads main once, at integrate time, to fill
-   * the record; `lore done` never searches history.
-   */
-  private locateExistingLanding(branch: string, tip: string, main: string): LandingFact {
-    const { git, projectRoot } = this.deps;
-    const fallback: LandingFact = { branch, branch_head: tip, main_before: main, main_after: main, landing_commit: tip };
-    const chain = git(projectRoot, ["rev-list", "--ancestry-path", "--first-parent", "--reverse", `${tip}..${TARGET_REF}`]);
-    if (chain.status !== 0) return fallback;
-    const entering = chain.stdout.split("\n")[0]?.trim() ?? "";
-    if (entering === "") return fallback;
-    const parents = git(projectRoot, ["rev-list", "--parents", "-n", "1", entering]);
-    if (parents.status !== 0) return fallback;
-    const [, first, second, ...rest] = parents.stdout.trim().split(" ");
-    if (first === undefined || second !== tip || rest.length > 0) return fallback;
-    return { branch, branch_head: tip, main_before: first, main_after: entering, landing_commit: entering };
-  }
-
-  /**
    * Records the landing on the branch's tasks. Never fails the integration (main has already moved): a task that
    * could not be written is logged loudly, so the missing record is visible; `lore done` refuses that task as
    * `not-landed` until `lore integrate` is run again on the branch (BR-1336).
    */
-  private async recordLanding(landing: LandingFact): Promise<void> {
+  private async recordLanding(landing: LandingRequest): Promise<void> {
     const recorder = this.deps.landings;
     if (recorder === undefined) return;
     const written = await recorder.record(landing);

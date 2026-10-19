@@ -363,7 +363,11 @@ function parseResult(result: CallToolResult): unknown {
   return JSON.parse(text.text);
 }
 
-async function createPlanWithNamedTasks(taskTitles: string[]): Promise<{ planId: string; taskSlugs: string[] }> {
+async function createPlanWithNamedTasks(
+  taskTitles: string[],
+  /** Per-task `extra` merged over `{plan_id}` (index-aligned with `taskTitles`) — e.g. a recorded `landing`. */
+  extras: ReadonlyArray<Record<string, unknown>> = [],
+): Promise<{ planId: string; taskSlugs: string[] }> {
   const planResult = await corpusService.create({
     type: "plan",
     title: "MCP Diff Source Wiring Plan",
@@ -371,13 +375,13 @@ async function createPlanWithNamedTasks(taskTitles: string[]): Promise<{ planId:
   } as CreateDocInput);
   if (!planResult.ok) throw new Error(`Failed to create plan: ${JSON.stringify(planResult.error)}`);
   const taskSlugs: string[] = [];
-  for (const title of taskTitles) {
+  for (const [index, title] of taskTitles.entries()) {
     const taskResult = await corpusService.create({
       type: "task",
       title,
       parent_id: planResult.value.id,
       content: "body",
-      extra: { plan_id: planResult.value.id },
+      extra: { plan_id: planResult.value.id, ...(extras[index] ?? {}) },
     } as CreateDocInput);
     if (!taskResult.ok) throw new Error(`Failed to create task: ${JSON.stringify(taskResult.error)}`);
     taskSlugs.push(taskResult.value.slug);
@@ -410,13 +414,19 @@ describe("lore_assess (MCP) — AC-JV-5(b)(c): diffSource wired, resolved commit
   });
 
   it("with an auto-derived resolved commit, the PERSISTED assessment records paths_verified.checked > 0 AND withdraws the absent-path finding into unverifiable_findings[]", async () => {
-    const { planId, taskSlugs } = await createPlanWithNamedTasks(["MCP Wiring Task Alpha"]);
     writeFileSync(join(gitTmpDir, "seed.txt"), "seed\n");
     spawnSync("git", ["add", "seed.txt"], { cwd: gitTmpDir, env: gitEnv });
     spawnSync("git", ["commit", "-q", "-m", "seed commit"], { cwd: gitTmpDir, env: gitEnv });
+    const seedSha = spawnSync("git", ["rev-parse", "HEAD"], { cwd: gitTmpDir, env: gitEnv, encoding: "utf8" }).stdout.trim();
     writeFileSync(join(gitTmpDir, PRESENT_PATH), "export const ok = true;\n");
     spawnSync("git", ["add", PRESENT_PATH], { cwd: gitTmpDir, env: gitEnv });
-    spawnSync("git", ["commit", "-q", "-m", `implements ${taskSlugs[0]}`], { cwd: gitTmpDir, env: gitEnv });
+    spawnSync("git", ["commit", "-q", "-m", "implements the wiring task"], { cwd: gitTmpDir, env: gitEnv });
+    const ownSha = spawnSync("git", ["rev-parse", "HEAD"], { cwd: gitTmpDir, env: gitEnv, encoding: "utf8" }).stdout.trim();
+    // the task's recorded landing (what `lore integrate` writes) names its own commit; no slug is searched for
+    const { planId } = await createPlanWithNamedTasks(
+      ["MCP Wiring Task Alpha"],
+      [{ landing: { branch: "b", branch_head: ownSha, main_before: seedSha, main_after: ownSha, landing_commit: ownSha, recorded_at: "t" } }],
+    );
     // ABSENT_PATH is deliberately never created/committed anywhere in this repo.
 
     const call = getToolHandler(server, "lore_assess");

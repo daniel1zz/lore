@@ -399,7 +399,7 @@ import {
   commitRangeFromLanding,
   commitRangeNote,
   readTaskLanding,
-  type LandingFact,
+  type LandingRequest,
   type TaskCommitRange,
   type TaskLanding,
 } from "./task-commit-range.js";
@@ -4380,6 +4380,19 @@ export class TaskWorkflowService {
     return [...copies.values()];
   }
 
+  /**
+   * The `base_sha` of the most recent claim of a task that named `branch` (as its `branch` or its `worktree`), from
+   * the claim audit rows (they survive release); `undefined` when no such claim recorded one.
+   */
+  private static claimBaseFor(auditRows: readonly AuditEntry[], branch: string): string | undefined {
+    const named = auditRows
+      .filter((row) => row.details?.["branch"] === branch || row.details?.["worktree"] === branch)
+      .filter((row) => typeof row.details?.["base_sha"] === "string" && row.details["base_sha"] !== "")
+      .sort((a, b) => a.timestamp.localeCompare(b.timestamp));
+    const latest = named[named.length - 1]?.details?.["base_sha"];
+    return typeof latest === "string" ? latest : undefined;
+  }
+
   /** The branch checked out in `worktree`, read through the injected git port; `undefined` when it cannot be measured. */
   private async measuredBranchOf(worktree: string): Promise<string | undefined> {
     const measurement = await this.detectBranch(worktree);
@@ -4412,7 +4425,8 @@ export class TaskWorkflowService {
    *
    * @returns the slugs of the tasks that now carry the landing (empty: no task claimed the branch).
    */
-  async recordLanding(landing: LandingFact, now: () => string = defaultNow): Promise<Result<string[], LoreError>> {
+  async recordLanding(request: LandingRequest, now: () => string = defaultNow): Promise<Result<string[], LoreError>> {
+    const { base_from_claim: baseFromClaim, ...landing } = request;
     const tasksResult = await this.store.findMany({ type: "task" });
     if (!tasksResult.ok) return tasksResult;
     const auditResult = await this.store.queryAudit({ action: "claim" });
@@ -4432,7 +4446,23 @@ export class TaskWorkflowService {
         slugs.push(task.slug);
         continue;
       }
-      const record: TaskLanding = { ...landing, recorded_at: nowIso };
+      // reason: BR-1336 — a branch found already on main has no merge to measure; the range starts at this task's own
+      // claim base (the audit row survives release). A claim that recorded none is a failure naming the task, never a guess.
+      let mainBefore = landing.main_before;
+      if (baseFromClaim === true) {
+        const claimBase = TaskWorkflowService.claimBaseFor(rows, landing.branch);
+        if (claimBase === undefined) {
+          firstFailure ??= {
+            code: "VALIDATION_ERROR",
+            field: "claim.base_sha",
+            message: `${task.slug}: no claim of this task recorded a base_sha for ${landing.branch}, so its landing range has no start`,
+            value: task.slug,
+          };
+          continue;
+        }
+        mainBefore = claimBase;
+      }
+      const record: TaskLanding = { ...landing, main_before: mainBefore, recorded_at: nowIso };
       const written = await this.writer.writeDoc({
         doc: task,
         // a re-landing replaces `landing` (singular) but the replaced one is appended to `landing_history`, so nothing is lost
