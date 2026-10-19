@@ -4,9 +4,8 @@
  *   register --harness claude-code --session <id> [--agent-id <id> --agent-type <t>] [--parent <run id>]
  *            [--branch <name>] [--json]
  *       Registers a run (first registration wins; a repeat exits 0 and changes nothing). The command layer
- *       computes the composition record — the fragments the run's outlet selects (`hook:subagent-start` for a
- *       subagent; a main run receives no fragment through any outlet since `hook:session-start` was retired, so its
- *       record is honestly empty) with the sha256 of each fragment FILE — through the existing fragments flow and
+ *       computes the composition record — the fragments the run was given (`hook:subagent-start` for a
+ *       subagent; the `rules:user` + `rules:project` selections for a main run) with the sha256 of each fragment FILE — through the existing fragments flow and
  *       hands it to RunService, which only validates and persists (D5).
  *   show <run id> [--json]
  *       Prints a registered run; unknown id exits 3 naming the id.
@@ -102,24 +101,27 @@ function stringArg(args: Record<string, unknown>, key: string): string | undefin
 }
 
 /**
- * Composition for a run: what the fragment flow selects for its outlet, hashed from the fragment FILES.
- * A main run (no agent type) records NO fragments: its only dynamic outlet, `hook:session-start`, is retired
- * (BR-912), so claiming fragments for it would record content the session never received. Static main
- * fragments reach the session through rules files/skills, which this record has never covered.
+ * Composition for a run: what the fragment flow selects, hashed from the fragment FILES.
+ * A subagent records its `hook:subagent-start` selection. A main run (no agent type) records the union of the
+ * `rules:user` and `rules:project` selections: those are the static fragments its rules files carry into the
+ * session (BR-1028), so the record lists what the session was given.
  */
 async function computeComposition(agentType: string | undefined, inv: Invocation): Promise<CompositionRecord | { error: string }> {
-  if (agentType === undefined) return { schemaVersion: 1, fragments: [] };
   const deps = buildFlowDeps(inv.cwd, inv);
   if (!deps.ok) return { error: `${deps.error.code}: ${deps.error.message}` };
-  const rendered = await runFragmentsRender(deps.value, { outlet: "hook:subagent-start", agentType });
-  if (!rendered.ok) return { error: `${rendered.error.code}: ${rendered.error.message}` };
-  return {
-    schemaVersion: 1,
-    fragments: rendered.value.explain.map((row) => ({
-      id: row.id,
-      sha256: createHash("sha256").update(readFileSync(row.path)).digest("hex"),
-    })),
-  };
+  const requests =
+    agentType === undefined
+      ? [{ outlet: "rules:user" as const }, { outlet: "rules:project" as const }]
+      : [{ outlet: "hook:subagent-start" as const, agentType }];
+  const byId = new Map<string, string>();
+  for (const request of requests) {
+    const rendered = await runFragmentsRender(deps.value, request);
+    if (!rendered.ok) return { error: `${rendered.error.code}: ${rendered.error.message}` };
+    for (const row of rendered.value.explain) {
+      byId.set(row.id, createHash("sha256").update(readFileSync(row.path)).digest("hex"));
+    }
+  }
+  return { schemaVersion: 1, fragments: [...byId].map(([id, sha256]) => ({ id, sha256 })) };
 }
 
 /**
@@ -165,7 +167,7 @@ function renderRunText(run: RunRecord): string {
     `Harness: ${run.harness}`,
     `Session: ${run.sessionRef}`,
     `Agent: ${run.agentRef ?? "-"}${run.agentType !== null ? ` (${run.agentType})` : ""}`,
-    `Parent: ${run.parentRunId ?? "-"}`,
+    `Parent: ${run.parentRunId ?? (run.kind === "main" ? "-" : "unknown")}`,
     `Branch: ${run.branch ?? "-"}`,
     `Registered: ${run.registeredAt}`,
     `Composition (${run.composition.fragments.length} fragments):`,
@@ -439,7 +441,7 @@ export default defineLoreCommand({
     session: { type: "string", description: "register: harness session id" },
     "agent-id": { type: "string", description: "register: subagent id (makes the run a subagent)" },
     "agent-type": { type: "string", description: "register: subagent type (required with --agent-id)" },
-    parent: { type: "string", description: "register: parent run hint (main runs only)" },
+    parent: { type: "string", description: "register: the parent run id; omitted => stored as unknown" },
     branch: { type: "string", description: "register: branch the run works on" },
     "harness-pid": { type: "string", description: "register: pid of the harness process (its start time and checkout are recorded for `reap`)" },
     apply: { type: "boolean", description: "reap: actually end dead runs and reap proven orphans (default: report only)" },
