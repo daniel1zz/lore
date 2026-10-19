@@ -79,6 +79,7 @@ beforeAll(() => {
     [
       "run", "register", "--harness", "claude-code", "--session", SESSION,
       "--agent-id", "agent-S1", "--agent-type", "lore-implementer", "--branch", "show-sub-branch",
+      "--parent", MAIN_ID,
     ],
   ];
   for (const args of fixtures) {

@@ -16,8 +16,8 @@
  * @invariant `end` of an unregistered run id is `ok({ outcome: "unknown-run" })` and writes nothing —
  *   SubagentStop also fires for internal agents that never registered. `end` always processes the run's
  *   claims, even for an already-ended run, so a retry after a partial failure finishes the job.
- * @invariant A subagent's parent is DERIVED (`cc:<session>`), never taken from a caller hint (D2); the
- *   hint applies to a main run only.
+ * @invariant A run's parent is the one the caller supplied (`parentRunId`) or null ("unknown"); it is never
+ *   guessed, so a helper started by another helper is not recorded as the main run's child (BR-1027, D24).
  */
 import { basename } from "node:path";
 import {
@@ -124,7 +124,7 @@ export interface RegisterRunInput {
   readonly agentId?: string;
   /** Required with `agentId`, refused without it. */
   readonly agentType?: string;
-  /** Caller hint, honoured for a main run only. */
+  /** The parent run the harness supplied; absent => stored null (unknown). */
   readonly parentRunId?: string;
   readonly branch?: string;
   /** Computed by the caller from the existing fragment selection (D5). */
@@ -188,10 +188,8 @@ export class RunService {
         sessionId: input.sessionId,
         ...(input.agentId !== undefined ? { agentId: input.agentId } : {}),
       });
-      parentRunId =
-        input.agentId !== undefined
-          ? deriveRunId(input.harness, { sessionId: input.sessionId })
-          : ((input.parentRunId ?? null) as RunId | null);
+      // reason: BR-1027 — a run records the parent it was told, never a guess; none given -> null ("unknown").
+      parentRunId = (input.parentRunId ?? null) as RunId | null;
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : String(cause);
       return err(validationError("harness", message, input.harness));
