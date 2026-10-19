@@ -113,6 +113,44 @@ describe("integrate records per-attempt phase durations", () => {
     expect(existsSync(file)).toBe(true);
   });
 
+  it("a failing floor that emits no per-step timings is recorded as ONE named step; later phases are null, never 0", async () => {
+    sh(repo, ["checkout", "-q", "-b", "feature2", "main"]);
+    writeFileSync(join(repo, "c.txt"), "c\n");
+    sh(repo, ["add", "."]);
+    sh(repo, ["commit", "-q", "-m", "feature2 work"]);
+    sh(repo, ["checkout", "-q", "main"]);
+    let now = 5_000;
+    const git: IntegrateDeps["git"] = (cwd, args, env) => {
+      const r = spawnSync("git", [...args], { cwd, encoding: "utf8", env: { ...process.env, ...IDENTITY, ...env } });
+      return { status: r.status ?? 1, stdout: r.stdout ?? "", stderr: r.stderr ?? "" };
+    };
+    const service = new IntegrateService({
+      git,
+      corpus: { take: () => ok({ takenAt: "2026-10-19T00:00:00.000Z" }), remove: () => ok(undefined) },
+      runFloor: () => ((now += 900), { status: 7, output: "boom" }),
+      ledger: new IntegrateLossLedger(corpusDir),
+      attempts: new IntegrateAttemptLedger(corpusDir, () => "t"),
+      clock: () => now,
+      projectRoot: repo,
+      worktreesRoot: join(root, "wt"),
+      log: () => {},
+    });
+    const result = await service.integrate({ branch: "feature2", sessionId: "s1", floorCommand: "false" });
+    expect(result).toMatchObject({ ok: true, value: { kind: "floor_failed", exit_status: 7 } });
+    const read = new IntegrateAttemptLedger(corpusDir).read("feature2");
+    expect(read.ok && read.value?.attempts.map(({ base: _b, started_at: _s, ...rest }) => rest)).toEqual([
+      {
+        attempt: 1,
+        outcome: "floor_failed",
+        merge_ms: 0,
+        corpus_snapshot_ms: 0,
+        floor: { total_ms: 900, steps: [{ step: "floor (no per-step timings emitted)", exit: 7, ms: 900 }] },
+        cas_ms: null,
+        total_ms: 900,
+      },
+    ]);
+  });
+
   it("a floor step list of one named step round-trips (the no-timings fallback is never silently missing)", () => {
     const dir = mkdtempSync(join(root, "ledger-"));
     const ledger = new IntegrateAttemptLedger(dir, () => "t");
