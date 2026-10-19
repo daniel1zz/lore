@@ -80,7 +80,7 @@ describe("create's inline criteria pass through the citation gate (AC-BLS2-2)", 
     const res = await w.createSpec("Born uncited", [AC("AC-N-1")]);
     expect(res.ok).toBe(false);
     if (res.ok || res.error.code !== "AC_CITE_REQUIRED") throw new Error(`expected AC_CITE_REQUIRED, got ${JSON.stringify(res)}`);
-    expect(res.error.feeding_pack?.cite_line).toMatch(/^lore ac add spec-born-uncited AC-N-1 \.\.\. --cite /);
+    expect(res.error.feeding_pack?.cite_line).toMatch(/^lore create spec /); // DC2-13: nothing was created, so the hint re-runs create, not `ac add <slug>`
   });
 
   it("an inline criterion citing a retired rule is refused", async () => {
