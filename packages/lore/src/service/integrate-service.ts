@@ -58,6 +58,7 @@ import { existsSync, realpathSync } from "node:fs";
 import { join } from "node:path";
 import { err, ok, type LoreError, type Result } from "@lore/core";
 import type { IntegrateLossLedger } from "./integrate-loss-ledger.js";
+import type { AttemptRecord, IntegrateAttemptLedger } from "./integrate-attempt-ledger.js";
 
 /** Attempts (merge + floor + CAS) one call makes before it gives up with exit 75. */
 export const INTEGRATE_MAX_ATTEMPTS = 3;
@@ -85,8 +86,21 @@ export interface GitOutcome {
 /** Runs `git <args>` in `cwd` (with `env` merged over the process environment); never throws. */
 export type IntegrateGit = (cwd: string, args: readonly string[], env?: Readonly<Record<string, string>>) => GitOutcome;
 
-/** Runs the floor shell command in `cwd`; `output` is stdout+stderr merged. Never throws. */
-export type FloorRunner = (command: string, cwd: string) => { readonly status: number; readonly output: string };
+/** One floor step's wall time, from the run-chain machine-readable timings (never parsed from prose). */
+export interface FloorStepTiming {
+  readonly step: string;
+  readonly exit: number;
+  readonly ms: number;
+}
+
+/** Name of the single step a floor is recorded as when its command emitted no per-step timings (a custom floor_command). */
+export const FLOOR_UNTIMED_STEP = "floor (no per-step timings emitted)";
+
+/**
+ * Runs the floor shell command in `cwd`; `output` is stdout+stderr merged. Never throws. `steps` are the per-step
+ * timings the floor command emitted (scripts/run-chain.ts via LORE_FLOOR_TIMINGS_FILE); absent = the command emitted none.
+ */
+export type FloorRunner = (command: string, cwd: string) => { readonly status: number; readonly output: string; readonly steps?: readonly FloorStepTiming[] };
 
 /**
  * Gives the integration worktree a private copy of the shared corpus for the floor (INT-T12) and takes it away again.
@@ -103,6 +117,10 @@ export interface IntegrateDeps {
   readonly corpus: CorpusSnapshotter;
   readonly runFloor: FloorRunner;
   readonly ledger: IntegrateLossLedger;
+  /** Per-attempt phase durations, kept per branch and NOT cleared on landing (see integrate-attempt-ledger.ts). */
+  readonly attempts: IntegrateAttemptLedger;
+  /** Wall clock in epoch milliseconds (default `Date.now`); injected so tests assert exact durations. */
+  readonly clock?: () => number;
   /** The main checkout's root: the repo whose refs main lives in (git commands run here). */
   readonly projectRoot: string;
   /** Directory under which integration worktrees are created (`<main checkout>/.claude/worktrees`). */
@@ -193,6 +211,17 @@ function short(sha: string): string {
   return sha.slice(0, 12);
 }
 
+/** The phase line printed (and recorded) per attempt: `-` marks a phase the attempt never reached. */
+export function renderAttemptPhases(record: AttemptRecord, max: number): string {
+  const ms = (v: number | null): string => (v === null ? "-" : `${v}ms`);
+  const floor =
+    record.floor === null ? "-" : `${record.floor.total_ms}ms (${record.floor.steps.map((st) => `${st.step} ${st.ms}ms`).join(", ")})`;
+  return (
+    `integrate: attempt ${record.attempt}/${max} phases: merge ${record.merge_ms}ms | corpus-snapshot ${ms(record.corpus_snapshot_ms)} | ` +
+    `floor ${floor} | cas ${ms(record.cas_ms)} | total ${record.total_ms}ms -> ${record.outcome}`
+  );
+}
+
 export class IntegrateService {
   constructor(private readonly deps: IntegrateDeps) {}
 
@@ -205,6 +234,7 @@ export class IntegrateService {
    */
   async integrate(request: IntegrateRequest): Promise<Result<IntegrateOutcome, LoreError>> {
     const { git, projectRoot, ledger, log } = this.deps;
+    const clock = this.deps.clock ?? Date.now;
     if (request.sessionId.trim() === "") {
       return err({ code: "VALIDATION_ERROR", field: "session", message: "lore integrate needs the caller's session id: pass --session <id> or set CLAUDE_CODE_SESSION_ID" });
     }
@@ -246,31 +276,53 @@ export class IntegrateService {
         return ok({ kind: "already_integrated", branch: request.branch, main: base.value, shared_view: view, rebuild: this.rebuildSharedView(view, request.postRefreshCommand) });
       }
       log(`integrate: ${request.branch} attempt ${attempt}/${INTEGRATE_MAX_ATTEMPTS} on ${short(base.value)}`);
+      const attemptStart = clock();
+      const startedAt = new Date(attemptStart).toISOString();
+      const finish = (phases: Pick<AttemptRecord, "outcome" | "merge_ms" | "corpus_snapshot_ms" | "floor" | "cas_ms">): void =>
+        this.recordAttempt(request.branch, { attempt, base: base.value, started_at: startedAt, total_ms: clock() - attemptStart, ...phases });
 
       const reset = this.resetWorktree(wt, base.value);
       if (!reset.ok) return reset;
       // an upstream ref may fast-forward (the remote's commits land as they are); a local branch always gets its own merge commit
+      const mergeStart = clock();
       const merged = git(wt, ["merge", fromRemote ? "--ff" : "--no-ff", "-m", message, tip], { GIT_MERGE_AUTOEDIT: "no" });
-      if (merged.status !== 0) return this.afterFailedMerge(request.branch, wt, base.value, merged);
+      const mergeMs = clock() - mergeStart;
+      if (merged.status !== 0) {
+        const conflicted = this.afterFailedMerge(request.branch, wt, base.value, merged);
+        if (conflicted.ok) finish({ outcome: "conflict", merge_ms: mergeMs, corpus_snapshot_ms: null, floor: null, cas_ms: null });
+        return conflicted;
+      }
 
+      const snapshotStart = clock();
       const snapshot = this.deps.corpus.take(wt);
+      const snapshotMs = clock() - snapshotStart;
       if (!snapshot.ok) return snapshot;
       log(`integrate: floor runs against a corpus snapshot taken ${snapshot.value.takenAt}`);
+      const floorStart = clock();
       const floor = this.deps.runFloor(request.floorCommand, wt);
+      const floorTotalMs = clock() - floorStart;
+      const floorTimings = {
+        total_ms: floorTotalMs,
+        steps: floor.steps !== undefined && floor.steps.length > 0 ? floor.steps.map((st) => ({ step: st.step, exit: st.exit, ms: st.ms })) : [{ step: FLOOR_UNTIMED_STEP, exit: floor.status, ms: floorTotalMs }],
+      };
       // the snapshot is removed whatever the floor said: it is never written back and never outlives its run
       const dropped = this.deps.corpus.remove(wt);
       if (!dropped.ok) return dropped;
       if (floor.status !== 0) {
         const back = this.resetWorktree(wt, base.value);
         if (!back.ok) return back;
+        finish({ outcome: "floor_failed", merge_ms: mergeMs, corpus_snapshot_ms: snapshotMs, floor: floorTimings, cas_ms: null });
         return ok({ kind: "floor_failed", branch: request.branch, attempts: attempt, exit_status: floor.status, output_tail: floor.output.slice(-FLOOR_TAIL_CHARS) });
       }
 
       const head = git(wt, ["rev-parse", "HEAD"]);
       if (head.status !== 0) return err(gitFailure("rev-parse HEAD in the integration worktree", head));
       const merge = head.stdout.trim();
+      const casStart = clock();
       const swapped = git(projectRoot, ["update-ref", TARGET_REF, merge, base.value], { [INTEGRATE_MARKER_ENV]: "1" });
+      const casMs = clock() - casStart;
       if (swapped.status === 0) {
+        finish({ outcome: "landed", merge_ms: mergeMs, corpus_snapshot_ms: snapshotMs, floor: floorTimings, cas_ms: casMs });
         const cleared = ledger.clear(request.branch);
         if (!cleared.ok) return cleared;
         const view = this.refreshSharedView();
@@ -282,6 +334,7 @@ export class IntegrateService {
       if (now.value === base.value) return err(gitFailure(`advancing ${TARGET_NAME} (main did not move, so this is not a lost race)`, swapped));
       const moved = this.describeMoves(base.value, now.value);
       movedBy.push(...moved);
+      finish({ outcome: "lost_race", merge_ms: mergeMs, corpus_snapshot_ms: snapshotMs, floor: floorTimings, cas_ms: casMs });
       const recorded = ledger.recordLoss(request.branch, tip, moved);
       if (!recorded.ok) return recorded;
       lastConsecutiveLosses = recorded.value.losses;
@@ -293,6 +346,16 @@ export class IntegrateService {
     const back = this.resetWorktree(wt, final.value);
     if (!back.ok) return back;
     return ok({ kind: "lost_races", branch: request.branch, attempts: INTEGRATE_MAX_ATTEMPTS, moved_by: movedBy, consecutive_losses: lastConsecutiveLosses });
+  }
+
+  /**
+   * Persists one attempt's phase record and prints its phase line. Never fails the integration (main may already have
+   * moved): a record that cannot be written is logged loudly, not swallowed.
+   */
+  private recordAttempt(branch: string, record: AttemptRecord): void {
+    this.deps.log(renderAttemptPhases(record, INTEGRATE_MAX_ATTEMPTS));
+    const written = this.deps.attempts.recordAttempt(branch, record);
+    if (!written.ok) this.deps.log(`integrate: WARNING: attempt ${record.attempt} phase durations were not recorded: ${written.error.code}${"message" in written.error ? ` ${written.error.message}` : ""}`);
   }
 
   /**
