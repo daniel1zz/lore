@@ -17,6 +17,7 @@
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { Database } from "bun:sqlite";
+import { execFileSync } from "node:child_process";
 import { copyFileSync, mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -72,6 +73,7 @@ beforeAll(() => {
   sandbox = realpathSync(mkdtempSync(join(tmpdir(), "lore-migrate-schema-")));
   corpusDir = join(sandbox, "corpus");
   mkdirSync(corpusDir);
+  execFileSync("git", ["init", "-q", "-b", "main"], { cwd: corpusDir, stdio: "pipe" });
   expect(runLore(["init"], corpusDir).exitCode).toBe(0);
   dbPath = join(corpusDir, ".lore", "lore.db");
   expect(readUserVersion(dbPath)).toBe(LATEST_SCHEMA_VERSION);
