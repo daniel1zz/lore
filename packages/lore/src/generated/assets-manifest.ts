@@ -45,9 +45,9 @@ export const LORE_BINARY_VERSION = "0.1.0" as const;
 
 export const EMBEDDED_ASSETS_MANIFEST: EmbeddedAssetsManifest = {
   binary_version: LORE_BINARY_VERSION,
-  tree_digest: "09d48561fd0b797fbbfde2de7fca88547d04266b943070fcfa15a898123a8035",
+  tree_digest: "eb569f7d730600c11fd4c550a830b26d4e0af0a2161ab80819e07d996fb5f9d3",
   entries: [
-  { path: "agents/lore-implementer.md", kind: "agent", ownership: "managed", sha256: "01186adc44d3660b744b8d6828260f7ea03af29e11d44c5bf17df26c2afb16d6" },
+  { path: "agents/lore-implementer.md", kind: "agent", ownership: "managed", sha256: "be7b99d5d1f72cf4ff8579ab09c2e42454c03ec0e0f9ba4e8fdb303b4a6cb73f" },
   { path: "agents/lore-reader.md", kind: "agent", ownership: "managed", sha256: "336b2da60cfe9afae51f17ac8f6f9f33e7c67b2f3639874795e22a0e257e8696" },
   { path: "context/ac-design.md", kind: "context", ownership: "managed", sha256: "cb99bd0d8cb444da4eb362d9954213ee1294145db84628acbf12642393359d67" },
   { path: "context/agent-rules.md", kind: "context", ownership: "managed", sha256: "976b665a0f1596f718d33f34533c01dae49f702c0aca9bda45b573b7368660e7" },
@@ -131,7 +131,7 @@ export const EMBEDDED_ASSETS_MANIFEST: EmbeddedAssetsManifest = {
   { path: "skills/lore-context-optimizer/SKILL.md", kind: "skill", ownership: "managed", sha256: "f2421748ed4d179c1ee886ba791bb923a45ec07792838f3386af1a62a0101f5c" },
   { path: "skills/lore-context-optimizer/references/analysis-checklist.md", kind: "skill", ownership: "managed", sha256: "55960d93ab7be09731898247293095935e6452aae61b07fb71322f067dfefc79" },
   { path: "skills/lore-context-optimizer/references/optimization-principles.md", kind: "skill", ownership: "managed", sha256: "bd296fcf91ae7a2f1806907f69f81139f0bc8290feaaabc20946ea44633f10c2" },
-  { path: "skills/lore-deploy/SKILL.md", kind: "skill", ownership: "managed", sha256: "fa92adc2435f322032ce680b9ac6fe49101a4050615025259357da499e689921" },
+  { path: "skills/lore-deploy/SKILL.md", kind: "skill", ownership: "managed", sha256: "1d289e4382a275b4de30ddd425c2184c22af632935b33aa47a26373fe2da2b3c" },
   { path: "skills/lore-deploy/references/docker-patterns.md", kind: "skill", ownership: "managed", sha256: "7ddb04c5d34de096be8e271afd76a9b0569cb4ab77ef336e6cbd5e7d90c97d1b" },
   { path: "skills/lore-deploy/references/github-actions.md", kind: "skill", ownership: "managed", sha256: "d6a0959bfca4ac7bc9ba86589abe53bf6700d507f773c0406dfa5f2fa6a12eb8" },
   { path: "skills/lore-deploy/references/k8s-patterns.md", kind: "skill", ownership: "managed", sha256: "5aa3eaa7e8db7573e39c510a7f2b31ee87590f4abd4e10efef5152702159a9d9" },
