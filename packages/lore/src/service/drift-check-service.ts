@@ -141,12 +141,9 @@ export class DriftCheckService {
    *   only become `probe_error` rows.
    */
   async checkDrift(probe: FsProbe): Promise<Result<DriftCheckResult, LoreError>> {
-    const armedByType = new Map<DocType, ArmedDoc[]>();
-    for (const type of ANCHOR_SCANNED_DOC_TYPES) {
-      const docsResult = await this.store.findMany({ type });
-      if (!docsResult.ok) return docsResult;
-      armedByType.set(type, collectArmedDocs(docsResult.value));
-    }
+    const armedResult = await this.loadArmedDocsByType();
+    if (!armedResult.ok) return armedResult;
+    const armedByType = armedResult.value;
 
     const declared: DriftInputEntry[] = [];
     const statusBreakdown: Record<string, number> = {};
@@ -175,6 +172,38 @@ export class DriftCheckService {
       status_breakdown: statusBreakdown,
       drifts,
     });
+  }
+
+  /**
+   * Every declared `code_anchors` entry of every non-deleted spec and knowledge doc, in the
+   * shape `computeDrift` consumes. The reverse index (`lore refs`) reads anchors through this
+   * single read, so it can never disagree with the drift check about what is declared.
+   *
+   * @returns One entry per declared anchor, labeled with its owning document.
+   * @throws STORE_ERROR (findMany failure).
+   */
+  async listDeclaredAnchors(): Promise<Result<DriftInputEntry[], LoreError>> {
+    const armedResult = await this.loadArmedDocsByType();
+    if (!armedResult.ok) return armedResult;
+    const declared: DriftInputEntry[] = [];
+    for (const [type, armedDocs] of armedResult.value) {
+      for (const { doc, anchors } of armedDocs) {
+        for (const anchor of anchors) {
+          declared.push({ doc_id: doc.id, doc_slug: doc.slug, doc_type: type, doc_status: doc.status, anchor });
+        }
+      }
+    }
+    return ok(declared);
+  }
+
+  private async loadArmedDocsByType(): Promise<Result<Map<DocType, ArmedDoc[]>, LoreError>> {
+    const armedByType = new Map<DocType, ArmedDoc[]>();
+    for (const type of ANCHOR_SCANNED_DOC_TYPES) {
+      const docsResult = await this.store.findMany({ type });
+      if (!docsResult.ok) return docsResult;
+      armedByType.set(type, collectArmedDocs(docsResult.value));
+    }
+    return ok(armedByType);
   }
 
   // ── Authoring RMW (D6) ────────────────────────────────────────────────────

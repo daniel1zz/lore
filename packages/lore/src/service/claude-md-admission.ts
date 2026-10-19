@@ -1,30 +1,37 @@
+
 /**
  * Content-dimension admission checks + the SOLE composition entry for the
  * memory-file admission mechanism (spec-claude-md-governance-content-
- * dimension-checks-wire-the). Absorbs `checkReferenceExistence` and
- * `detectNarrativeSmells` verbatim from the pre-split `claude-md-check.ts`
- * (spec-context-verb-family-two-zone-claude-md-anatomy-lore, AC-CTX-2), adds
- * Phase 2's two new DETERMINISTIC content metrics (`checkSlugPointers`,
- * N14; `measureEmphasis`, N5/N6), and folds
- * `claude-md-budget.ts`'s reporting layer (`computeHeadroom`/
- * `computeHeadroomWarnings`, N15) INTO the ONE seam every production call
- * site must route through: `runMemoryFileChecks`. Mirrors
- * `claude-md-budget.ts`'s purity convention: this module never touches a
- * `StoreInterface`, the filesystem, or wall-clock time — every fact it needs
- * (a memory file's path/role/content, the corpus-governed budget, whether a
- * candidate path/slug exists) is passed in by the caller (the CLI adapter
- * reads files via `real-memory-file-probe.ts`; existence via caller-owned
- * `fileExists`/`docExists` predicates — this module never calls `fs` or the
- * store itself).
+ * dimension-checks-wire-the). Holds the narrative-smell, slug-pointer,
+ * emphasis and line-length checks, the code-reference EXTRACTION grammar, and
+ * folds `claude-md-budget.ts`'s reporting layer (`computeHeadroom`/
+ * `computeHeadroomWarnings`) into the ONE seam every production call site must
+ * route through: `runMemoryFileChecks`. Mirrors `claude-md-budget.ts`'s purity
+ * convention: this module never touches a `StoreInterface`, the filesystem, or
+ * wall-clock time — every fact it needs (a memory file's path/role/content, the
+ * corpus-governed budget, a read-only `FsProbe`, whether a slug exists) is
+ * passed in by the caller (the CLI adapter reads files via
+ * `real-memory-file-probe.ts`).
  *
  * Public surface:
- *   - AdmissionDeps — `{ fileExists, docExists }`, the injected existence
- *     predicates every content check needs. `docExists` backs
- *     `checkSlugPointers` (Phase 2, first consumer) — the CLI's
- *     corpus-free `--check-claude-md` branch injects `() => true` (every
- *     slug "exists", so the check never fires there — N14's own gating
- *     mechanism, not a separate code path), while `--check-memory-pointers`
- *     (a NEW corpus-loading flag) injects a real corpus-backed lookup.
+ *   - AdmissionDeps — `{ probe?, referenceDocuments?, docExists }`. `probe`
+ *     is the read-only filesystem port the one core resolver reads through;
+ *     absent, no reference check runs (the inert call sites judge structure
+ *     and capacity only). `referenceDocuments` are context fragments, resolved
+ *     like a memory file but exempt from every ceiling/structure check.
+ *     `docExists` backs `checkSlugPointers` — the corpus-free
+ *     `--check-claude-md` branch injects `() => true` (every slug "exists", so
+ *     the check never fires there), while `--check-memory-pointers` injects a
+ *     real corpus-backed lookup.
+ *   - extractCodeReferences(content, filePath?, knownScripts?) — the grammar
+ *     of what a memory file or fragment names: backticked repo paths,
+ *     `path#Symbol` on source files, `bun run <script>`, and (with
+ *     `knownScripts`) bare script names. EXTRACTION only: whether a reference
+ *     resolves is decided by `@lore/core`'s `resolveCodeReferences`, the same
+ *     resolver (`computeDrift`) that checks spec code anchors
+ *     (spec-prose-about-code-is-bound-to-what-it-describes-one D1). The
+ *     reverse index (`code-reference-index.ts`) extracts through the same
+ *     function.
  *   - The exported 200-line official memory-file target constant, declared
  *     further below in this same module ([S]
  *     code.claude.com/docs/en/memory.md) — a plain exported module constant,
@@ -35,9 +42,8 @@
  *     first-occurrence text replace keyed on that exact identifier — an
  *     earlier prose mention, even inside a comment, would make the falsifier
  *     rewrite a comment instead of the real declaration and silently stay
- *     green; empirically verified against this exact file before landing
- *     this task). Every other mention of the name in this file (including
- *     this bullet) deliberately avoids spelling it out before that point.
+ *     green). Every other mention of the name in this file (including this
+ *     bullet) deliberately avoids spelling it out before that point.
  *   - measureLineLengths(files) / measureTargetDistances(files, target) —
  *     ADVISORY, ALWAYS ON (Phase 4, N9), `kind: "line_length"` /
  *     `kind: "target_distance"` — one pair per file in `files`, computed
@@ -45,33 +51,16 @@
  *     value, forever.
  *   - runMemoryFileChecks(files, budgets, deps) — the SOLE composition
  *     entry (spec §Module Boundary), returning `{ deterministic, advisory,
- *     headroom, warnings }`: folds `claude-md-budget.ts`'s `lintMemoryFiles`
- *     + `computeHeadroom` + `computeHeadroomWarnings` together with this
- *     module's `checkReferenceExistence` + `detectNarrativeSmells` +
+ *     headroom, warnings, adoption }`: folds `claude-md-budget.ts`'s
+ *     `lintMemoryFiles` + `computeHeadroom` + `computeHeadroomWarnings`
+ *     together with this module's `detectNarrativeSmells` +
  *     `measureLineLengths` + `measureTargetDistances` (advisory) +
- *     `checkSlugPointers` + `measureEmphasis` (deterministic) across every
- *     file. `status.ts` and `flows/context-flow.ts` call ONLY
- *     this — neither may reference an individual metric function directly
- *     (two independent call sites composing their own subset is the exact
- *     drift this mechanism shipped with: `checkReferenceExistence`/
- *     `detectNarrativeSmells` had ZERO production call sites despite full
- *     unit coverage, and Phase 1 separately let `computeHeadroom`/
- *     `computeHeadroomWarnings` bypass this entry entirely — N15 closes
- *     both holes in the SAME return shape).
- *   - checkReferenceExistence(content, fileExists, filePath?) — ADVISORY,
- *     `kind: "reference_missing"` (N13: migrated FROM
- *     `MemoryFileFindingKind` to `AdvisoryFindingKind` — see
- *     `claude-md-findings.ts`'s header. It was typed deterministic and had
- *     zero call sites; this retracts a false claim rather than removing
- *     enforcement). Extracts backtick-quoted, repo-relative-looking path
- *     candidates from `content` and reports the ones `fileExists` says are
- *     absent — after excluding N4's four measured false-positive classes
- *     (npm scope names, glob metacharacters, brace expansion, tilde home
- *     paths) and non-path noise (verb/enum lists, code fragments), and after
- *     retrying an absent candidate against `filePath`'s own directory (N4's
- *     fifth class, module-relative resolution — OPTIONAL third param, since
- *     the CLI wiring always has a `filePath` to pass but the pure unit suite
- *     may omit it to exercise root-relative-only behavior).
+ *     `checkSlugPointers` + `measureEmphasis` + the code-reference check
+ *     `reference_unresolved` (deterministic) across every file. `status.ts`
+ *     and `flows/context-flow.ts` call ONLY this — neither may reference an
+ *     individual metric function directly (two independent call sites
+ *     composing their own subset is the exact drift this mechanism shipped
+ *     with).
  *   - detectNarrativeSmells(content) — ADVISORY ONLY, NEVER exit-relevant:
  *     flags ISO-date density (at or above the exported
  *     `ISO_DATE_DENSITY_THRESHOLD`) and status wording ("not yet" /
@@ -81,9 +70,8 @@
  *     `kind: "slug_pointer_missing"` (Phase 2, N14). Extracts WHOLE
  *     backtick-quoted tokens shaped like a corpus slug
  *     (`{type}-{kebab-title}`) and reports the ones `docExists` says are
- *     absent. Closes the structural blindness where
- *     `checkReferenceExistence`'s `/`-requiring grammar skips every slug
- *     pointer outright (slugs contain no `/`).
+ *     absent. Complements the reference grammar, whose `/`-requiring path
+ *     rule skips every slug pointer outright (slugs contain no `/`).
  *   - measureEmphasis(content, maxPerKb) — DETERMINISTIC,
  *     `kind: "emphasis_saturated"` (Phase 2, N5/N6). Counts emphasis
  *     markers (⛔ / IMPORTANT / MUST / NEVER) per KB and fires ONCE per file
@@ -92,35 +80,30 @@
  *     density is not a capacity metric).
  *
  * Invariants:
- *   - `checkReferenceExistence`'s reference grammar (v2, N4 repair — spec
- *     §D6) is deliberately conservative: a candidate is a backtick-quoted
- *     token that contains `/`, has no whitespace, does not start with a URL
- *     scheme (`https://` etc.), is not one of N4's four excluded classes
- *     (`isExcludedReferenceCandidate`), and passes a charset + shape gate
- *     (`looksLikePathCandidate`: path-safe characters only, AND either a
- *     trailing `/` or a dotted extension on its final segment) that drops
- *     non-path noise (bare verb/enum lists, code fragments) independently of
- *     the five official classes. A `path#Symbol` suffix is a fragment on a
- *     file path — only the file part is existence-checked. Candidate paths
- *     are normalized via `@lore/core`'s `normalizeFileAnchors` — the SAME
- *     normalizer `task.extra.file_anchors` (SPEC-042) uses — rather than
- *     re-deriving segment/leading-slash/`..` rules locally; a candidate that
- *     fails that normalization (e.g. contains `..`) is silently skipped, not
- *     reported (misses are acceptable, false alarms are not — spec Risks). A
- *     candidate absent at its repo-root-relative location gets ONE more
- *     resolution attempt when `filePath` is supplied: joined against
- *     `filePath`'s own directory (`resolvesModuleRelative`, N4's fifth
- *     class) — module-relative is a convention module docs actually use
- *     (`commands/set.ts` inside `adapters/cli/CLAUDE.md`), not noise to
- *     exclude. Existence is decided EXCLUSIVELY via the injected
- *     `fileExists` predicate, never real `fs` access — keeps this module
- *     store-free and fs-free (spec §Module Boundary: "No store/DB dependency
- *     anywhere"), and `dirnameOf`/`joinPaths` are hand-rolled POSIX string
- *     ops rather than `node:path` for the same reason (AC-PURE-1).
- *   - `detectNarrativeSmells` NEVER affects `checkReferenceExistence`'s
- *     output, `claude-md-budget.ts`'s `lintMemoryFiles` output, or any exit
- *     code (spec §D7: advisory findings are a structurally distinct type,
- *     never an extra `kind` on `MemoryFileFinding`).
+ *   - The reference grammar (v3) is deliberately conservative: a path
+ *     candidate is a backtick-quoted token that contains `/`, has no
+ *     whitespace, does not start with a URL scheme or `./`, is not one of
+ *     N4's four excluded classes (`isExcludedReferenceCandidate`), and passes
+ *     a charset + shape gate (`looksLikePathCandidate`: path-safe characters
+ *     only, AND either a trailing `/` or a dotted extension on its final
+ *     segment) that drops non-path noise (bare verb/enum lists, code
+ *     fragments). A `#Symbol` suffix is kept only on a source-code file.
+ *     Candidates are normalized through `@lore/core`'s `parseCodeAnchor`
+ *     (the SAME normalizer spec code anchors use); one that fails is skipped,
+ *     not reported (misses are acceptable, false alarms are not — spec
+ *     Risks). A candidate absent at its repo-root-relative location is tried
+ *     against EACH ancestor directory of the scanned file (module docs name
+ *     siblings relative to their own directory or to a parent package);
+ *     only a candidate absent everywhere is a finding.
+ *   - Resolution is not done here and never approximated: a missing path, a
+ *     missing exported symbol and a missing script are findings of
+ *     `resolveCodeReferences`, and a probe that cannot observe is a
+ *     `probe_error` finding, never "fine". `dirnameOf`/`joinPaths` are
+ *     hand-rolled POSIX string ops rather than `node:path` (AC-PURE-1).
+ *   - `detectNarrativeSmells` NEVER affects the reference check's output,
+ *     `claude-md-budget.ts`'s `lintMemoryFiles` output, or any exit code
+ *     (spec §D7: advisory findings are a structurally distinct type, never
+ *     an extra `kind` on `MemoryFileFinding`).
  *   - `checkSlugPointers`'s grammar requires the ENTIRE backtick span to be
  *     the slug-shaped token (reusing `BACKTICK_TOKEN_RE`'s own
  *     no-whitespace rule) — this is what keeps a multi-word backtick
@@ -131,24 +114,24 @@
  *     false positive, spec Risks).
  *   - `runMemoryFileChecks`'s `deterministic` array starts from
  *     `lintMemoryFiles`'s output UNCHANGED (same findings, same order),
- *     then appends `checkSlugPointers`/`measureEmphasis` findings per file —
- *     this composition never re-derives or filters a deterministic verdict,
- *     only adds to it and computes advisory findings alongside it.
+ *     then appends the slug-pointer, emphasis and reference findings per
+ *     file — this composition never re-derives or filters a deterministic
+ *     verdict, only adds to it and computes advisory findings alongside it.
  *   - `measureLineLengths`/`measureTargetDistances` are computed from `files`
  *     DIRECTLY, never from `computeHeadroom`'s output — unlike
  *     `headroom_warning`, they do not depend on `budgets.enabled` (Phase 4,
  *     N9: "always-on" means independent of the capacity check's own global
- *     kill switch too, mirroring `checkReferenceExistence`/
- *     `detectNarrativeSmells`'s own unconditional stance). Both emit exactly
- *     one finding per file in `files`, including a 0-line/0-byte file — never
- *     suppressed by a falsy-zero `measured` value (AC-ADV-1 ERROR/BOUNDARY).
+ *     kill switch too). Both emit exactly one finding per file in `files`,
+ *     including a 0-line/0-byte file — never suppressed by a falsy-zero
+ *     `measured` value (AC-ADV-1 ERROR/BOUNDARY).
  *
  * Side-effect class: pure
  *
  * Source: spec-claude-md-governance-content-dimension-checks-wire-the,
  * AC-WIRE-1/AC-WIRE-2/AC-COMPOSE-1/AC-PURE-1/AC-SLUG-1/AC-SLUG-2/AC-EMPH-1/
  * AC-EMPH-2/AC-GRAM-1/AC-ADV-1; spec-context-verb-family-two-zone-claude-md-
- * anatomy-lore, AC-CTX-2.
+ * anatomy-lore, AC-CTX-2; spec-prose-about-code-is-bound-to-what-it-
+ * describes-one, AC-BIND-1/AC-BIND-2.
  */
 
 import {
@@ -269,7 +252,7 @@ function joinPaths(dir: string, rel: string): string {
   return dir === "" ? rel : `${dir}/${rel}`;
 }
 
-/** A source file whose `#Symbol` suffix names an export (the only files `scanExportedSymbols` can read). */
+/** A source file whose `#Symbol` suffix names an export (the only files whose exports the resolver can scan). */
 const CODE_FILE_RE = /\.(?:ts|tsx|mts|cts|js|jsx|mjs|cjs)$/;
 
 /**
