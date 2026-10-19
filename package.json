@@ -12,7 +12,7 @@
     "test:vitest": "bun scripts/run-tests.ts",
     "test:bun": "echo 'test:bun is retired (task-skill-implement-tg-23): one runner. Run a file with: bunx --bun vitest run <file> [-t <name>]; run everything with: bun run test' >&2; exit 1",
     "test:changed": "bun scripts/changed-tests.ts",
-    "test:watch": "bunx --bun vitest",
+    "test:watch": "bun --bun vitest",
     "typecheck": "bun run typecheck:core && bun run typecheck:lore && bun run typecheck:lore-tests && bun run typecheck:scripts && bun run typecheck:dashboard && bun run typecheck:dashboard-tests && bun run typecheck:dashboard-e2e",
     "typecheck:core": "tsc --noEmit -p packages/core/tsconfig.json",
     "typecheck:lore": "tsc --noEmit -p packages/lore/tsconfig.json",
