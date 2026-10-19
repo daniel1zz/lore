@@ -26,6 +26,7 @@ import { GateEnforcer } from "../../src/service/gate-enforcer.js";
 import { InMemoryStore } from "../../src/store/in-memory-store.js";
 import { CorpusService } from "../../src/service/corpus-service.js";
 import { TaskWorkflowService } from "../../src/service/task-workflow-service.js";
+import { detectWorktreeBranch } from "../../src/adapters/real-git-port.js";
 import { createRealWorktreeProbe } from "../../src/service/worktree-cleanup.js";
 import { IntegrateService, type IntegrateGit } from "../../src/service/integrate-service.js";
 import { IntegrateLossLedger } from "../../src/service/integrate-loss-ledger.js";
@@ -89,7 +90,12 @@ async function fixture(recordsBranch: boolean): Promise<Fixture> {
 
   const store = actedStore(new InMemoryStore());
   const cs = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
-  const detectBranch = recordsBranch ? undefined : async () => ({ status: "unmeasured" as const });
+  // reason: the branch is unmeasured only AT CLAIM TIME (the claim then records the path alone); the landing lookup
+  // that runs later reads the worktree's branch from git for real.
+  let claiming = true;
+  const detectBranch = recordsBranch
+    ? undefined
+    : async (path: string) => (claiming ? ({ status: "unmeasured" } as const) : detectWorktreeBranch(path));
   const svc = new TaskWorkflowService(
     store, undefined, { claimTtlMinutes: 120 },
     undefined, undefined, undefined, undefined, undefined, undefined,
@@ -113,6 +119,7 @@ async function fixture(recordsBranch: boolean): Promise<Fixture> {
   if (!ev.ok) throw new Error(`evidence ${JSON.stringify(ev.error)}`);
   const claim = await svc.claim(task.value.id, { by: "alice", worktree: realWorktree });
   if (!claim.ok) throw new Error(`claim ${JSON.stringify(claim.error)}`);
+  claiming = false;
   return { repo, worktree: realWorktree, svc, store, taskId: task.value.id };
 }
 
