@@ -41,17 +41,11 @@ if (process.argv.includes("--mcp-server")) {
   const { installSyncStdio } = await import("./adapters/cli/stdio-sync.js");
   installSyncStdio();
   const { resolveEntryInvocation, runCli } = await import("./adapters/cli/run-cli.js");
-  const { RunIdentityArgumentError, OsUserLookupError } = await import("@lore/core/node");
+  const { RunIdentityArgumentError } = await import("@lore/core/node");
   let exitCode: number;
   try {
     exitCode = await runCli(await resolveEntryInvocation(process.argv.slice(2)));
   } catch (error) {
-    if (error instanceof OsUserLookupError) {
-      // reason: no name for the writer exists (no --by, session or working copy) and the OS user lookup failed: a
-      // validation refusal (exit 4), named at the entry that recorded the lookup.
-      process.stderr.write(`Error: ${error.loreError.message}\n`); // CLI surface
-      process.exit(4);
-    }
     if (!(error instanceof RunIdentityArgumentError)) throw error;
     process.stderr.write(`Error: ${error.message}\n`); // CLI surface
     exitCode = 2;

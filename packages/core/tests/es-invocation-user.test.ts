@@ -6,7 +6,7 @@
  * loud only when the OS-username tier is the one selected.
  */
 import { describe, expect, it } from "vitest";
-import { OsUserLookupError, resolveActorWithSource, resolveActorWithWorktree, resolveInvocation } from "@lore/core/node";
+import { OsUserLookupError, resolveActorWithSource, resolveActorWithWorktree, resolveInvocation, resolveInvocationIdentity } from "@lore/core/node";
 import type { InvocationResolvers } from "@lore/core/node";
 
 const FAILED_REASON = "ENOENT: no passwd entry for uid 4242";
@@ -44,11 +44,43 @@ describe("AC-ES-D resolveInvocation records the user lookup", () => {
     expect(inv.identity.claimedSource === "worktree" || inv.identity.claimedSource === "session").toBe(true);
   });
 
-  it("the OS tier selected with a failed lookup fails loud at the entry, naming the reason", () => {
+  it("the OS tier selected with a failed lookup fails loud in actor resolution, naming the reason", () => {
     const env = { ...process.env };
     delete env["CLAUDE_CODE_SESSION_ID"];
     delete env["CLAUDE_SESSION_ID"];
     expect(() => resolveActorWithSource(undefined, env, { ok: false, reason: FAILED_REASON })).toThrow(OsUserLookupError);
+  });
+});
+
+describe("AC-ES-D the entry's identity with a failed lookup and no other name", () => {
+  const failed = { ok: false, reason: FAILED_REASON } as const;
+
+  it("is an unresolved identity carrying the reason: the entry does not throw and no name is substituted", () => {
+    const { identity, argv } = resolveInvocationIdentity(["list", "--harness-run", "cc:S1"], {}, failed);
+    expect(identity).toEqual({ harnessRun: "cc:S1", claimed: null, claimedSource: null, unresolvedReason: FAILED_REASON });
+    expect(argv).toEqual(["list"]);
+  });
+
+  it("a --by name still resolves, with the lookup failure irrelevant", () => {
+    const { identity } = resolveInvocationIdentity(["--by", "alice"], {}, failed);
+    expect(identity).toEqual({ harnessRun: null, claimed: "alice", claimedSource: "flag" });
+  });
+
+  it("a session name still resolves", () => {
+    const { identity } = resolveInvocationIdentity([], { CLAUDE_CODE_SESSION_ID: "3de02220-aaaa-bbbb-cccc-111122223333" }, failed);
+    expect(identity.claimed).toBe("agent:session-3de02220");
+    expect(identity.claimedSource).toBe("session");
+  });
+
+  it("a working-copy name still resolves", () => {
+    const { identity } = resolveInvocationIdentity([], {}, failed, () => "agent:feature-x");
+    expect(identity.claimed).toBe("agent:feature-x");
+    expect(identity.claimedSource).toBe("worktree");
+  });
+
+  it("a successful lookup names the writer after the OS user", () => {
+    const { identity } = resolveInvocationIdentity([], {}, { ok: true, name: "bob" });
+    expect(identity).toEqual({ harnessRun: null, claimed: "bob", claimedSource: "os" });
   });
 });
 

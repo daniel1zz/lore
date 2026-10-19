@@ -10,15 +10,16 @@
  *
  * @invariant `harnessRun` comes ONLY from the `--harness-run` flag; `--by`
  *   never produces attestation (names are not attestation, BR-1033).
- * @invariant `claimed` is never null/empty: tiers are --by > session >
- *   working copy > OS user (D11), reusing {@link resolveActorWithSource}. The
- *   environment never supplies a name (BR-1055).
+ * @invariant `claimed` is never empty: tiers are --by > session >
+ *   working copy > OS user (D11), reusing {@link resolveActorOrUnresolved}. When only a failed OS lookup is left the
+ *   identity is UNRESOLVED (`claimed: null` + reason), never a substitute name. The environment never supplies a
+ *   name (BR-1055).
  *
  * Side-effect class: pure given its arguments (env, OS-user value, worktree probe are supplied). Lives under
  * `@lore/core/node` for the same barrel-isolation reason as actor-resolution-node.ts.
  */
 
-import { resolveActorWithWorktree } from "./actor-resolution-node.js";
+import { resolveActorOrUnresolved } from "./actor-resolution-node.js";
 import type { OsUser } from "./invocation.js";
 import type { WorktreeAwareActorSource } from "./actor-resolution-node.js";
 import { HARNESS_RUN_FLAG } from "./run-identity.js";
@@ -83,7 +84,7 @@ function readFlagAt(argv: readonly string[], index: number, flag: string): { val
  * @returns the identity and argv with `--harness-run <id>` removed.
  * @throws {RunIdentityArgumentError} when `--by` / `--harness-run` has no value or an empty value
  *   (an empty `--by` must not silently fall through to a lower tier).
- * @throws {OsUserLookupError} when no higher tier names the writer and `osUser` is a failure
+ * @returns an identity whose name is unresolved (never a throw) when no tier names the writer and `osUser` is a failure
  * @example
  *   resolveInvocationIdentity(["claim", "t", "--harness-run", "cc:S1", "--by", "x"], {}, { ok: true, name: "os-user" })
  *   // => { identity: { harnessRun: "cc:S1", claimed: "x", claimedSource: "flag" }, argv: ["claim", "t", "--by", "x"] }
@@ -116,10 +117,12 @@ export function resolveInvocationIdentity(
     i++;
   }
 
-  const resolved = resolveActorWithWorktree(by, env, osUser, detectWorktree ?? (() => undefined));
+  const resolved = resolveActorOrUnresolved(by, env, osUser, detectWorktree ?? (() => undefined));
+  const run = harnessRun as RunId | null;
+  const identity: InvocationIdentity =
+    resolved.source === "unresolved"
+      ? { harnessRun: run, claimed: null, claimedSource: null, unresolvedReason: resolved.reason }
+      : { harnessRun: run, claimed: resolved.actor, claimedSource: NAME_SOURCE_BY_ACTOR_SOURCE[resolved.source] };
 
-  return {
-    identity: { harnessRun: harnessRun as RunId | null, claimed: resolved.actor, claimedSource: NAME_SOURCE_BY_ACTOR_SOURCE[resolved.source] },
-    argv: remaining,
-  };
+  return { identity, argv: remaining };
 }

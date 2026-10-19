@@ -61,13 +61,12 @@ import {
   isClaimStale,
   isInvalidated,
 } from "@lore/core";
-import { OsUserLookupError, resolveActorWithWorktree } from "@lore/core/node";
+import { resolveActorWithWorktree } from "@lore/core/node";
 import type { ActorSource as CoreActorSource } from "@lore/core/node";
 import type { DocRecord, Invocation, LoreError, OsUser, ReviewJudgment, ValidityCarrier } from "@lore/core";
 import type { TreeNode } from "../../service/corpus-service.js";
 import type { DocWithNavigation } from "../../service/corpus-service.js";
 import type { CliIo } from "./output.js";
-import { exitCli } from "./cli-exit.js";
 
 /** `Retry:` line of the write-contention message when the caller supplied none: names the action, reads nothing ambient. */
 const WRITE_CONTENTION_GENERIC_RETRY = "re-run the same lore command";
@@ -632,21 +631,6 @@ export function resolveActor(io: CliIo, explicit: string | undefined, env: Reado
 }
 
 /**
- * {@link resolveActorWithSource}, with the failed-OS-user-lookup refusal turned into the CLI's validation exit.
- * reason: `OsUserLookupError` is the one expected throw of the chain (OS tier selected, lookup failed); it is a
- * validation refusal (exit 4), so it ends the run through `exitCli` instead of surfacing as an unknown crash (exit 1).
- */
-function resolveOrExit(io: CliIo, explicit: string | undefined, env: Readonly<Record<string, string | undefined>>, cwd: string, user: OsUser): ResolvedActor {
-  try {
-    return resolveActorWithSource(explicit, env, cwd, user);
-  } catch (error) {
-    if (!(error instanceof OsUserLookupError)) throw error;
-    io.stderr.write(`Error: ${error.loreError.message}\n`);
-    return exitCli(4);
-  }
-}
-
-/**
  * `resolveActor`'s full-fidelity sibling (spec claim-time-actor-identity-
  * guard-zero-evidence-release-advis, AC-IDENTITY-REJECT) — same resolution
  * chain, same once-per-process OS-fallback advisory, but returns the FULL
@@ -672,7 +656,7 @@ export function resolveActorWithIdentitySource(io: CliIo,
   cwd: string,
   user: OsUser,
 ): ResolvedActor {
-  const resolved = resolveOrExit(io, explicit, env, cwd, user);
+  const resolved = resolveActorWithSource(explicit, env, cwd, user);
   if (resolved.source === "os-fallback" && !warnedActorFallback) {
     warnedActorFallback = true;
     io.stderr.write(

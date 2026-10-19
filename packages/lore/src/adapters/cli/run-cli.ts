@@ -14,7 +14,7 @@
  *     ended the run with (`exitCli(code)` throws `CliExit`), else what the command RETURNED (a required number,
  *     reported through `buildMain`'s `reportExit`), with ONE mapping (`exitCode(error)` in utils.ts). citty's own exits
  *     (`--help`, an unknown command, a thrown error) are decided by `dispatch` below with the codes `runMain` used
- *     (0, 1, 1), not by citty. `src/index.ts` is the only place that turns the code into `process.exit(code)`.
+ *     (0, 1, 1), not by citty. A write that finds the invocation unnamed (`OsUserLookupError`) ends with 4. `src/index.ts` is the only place that turns the code into `process.exit(code)`.
  *   - Nothing here reads or assigns a process global (`process.argv`, `process.exit`, `process.exitCode`,
  *     `process.env`, `process.chdir`, `console`, `process.stdout`); a run writes through `inv.io` and reports its
  *     code by return value, so two runs in one process share nothing.
@@ -27,6 +27,7 @@
 
 import type { CommandDef } from "citty";
 import type { Invocation } from "@lore/core";
+import { OsUserLookupError } from "@lore/core/node";
 import type { InvocationResolvers } from "@lore/core/node";
 import { CliExit } from "./cli-exit.js";
 import type { ExitReport } from "./cli-exit.js";
@@ -144,6 +145,12 @@ async function dispatch(inv: Invocation, main: CommandDef<any>, reported: { code
     return reported.code;
   } catch (error) {
     if (error instanceof CliExit) throw error;
+    if (error instanceof OsUserLookupError) {
+      // reason: a write needed an actor and the entry had recorded no name (OS user lookup failed): a validation
+      // refusal (exit 4), the same code the rest of the validation family ends with.
+      printLine(inv.io.stderr, `Error: ${error.loreError.message}`);
+      return 4;
+    }
     const isUsageError = error instanceof Error && error.name === "CLIError";
     if (!isUsageError) printLine(inv.io.stderr, error, "\n");
     if (isUsageError) await renderUsageDoubleDash(inv.io, ...(await resolveUsageTarget(main, rawArgs)));

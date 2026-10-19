@@ -140,6 +140,29 @@ export function resolveActorWithWorktree(
   osUser: OsUser,
   worktreeActor: () => string | undefined,
 ): WorktreeAwareActor {
+  const outcome = resolveActorOrUnresolved(explicit, env, osUser, worktreeActor);
+  if (outcome.source === "unresolved") throw new OsUserLookupError(outcome.reason);
+  return outcome;
+}
+
+/** No tier named the writer and the OS user lookup failed: the value form of {@link OsUserLookupError}. */
+export interface UnresolvedActor {
+  readonly source: "unresolved";
+  readonly reason: string;
+}
+
+/**
+ * The same chain as {@link resolveActorWithWorktree}, but a failed OS user lookup is RETURNED, not thrown: the entry
+ * records it in the Invocation's identity so reads proceed, and the write that needs an actor fails loud.
+ *
+ * @returns the winning tier, or `{ source: "unresolved", reason }` when only the failed OS tier was left
+ */
+export function resolveActorOrUnresolved(
+  explicit: string | undefined,
+  env: Readonly<Record<string, string | undefined>>,
+  osUser: OsUser,
+  worktreeActor: () => string | undefined,
+): WorktreeAwareActor | UnresolvedActor {
   if (explicit !== undefined && explicit.trim() !== "") {
     return { actor: explicit, source: "explicit" };
   }
@@ -147,7 +170,8 @@ export function resolveActorWithWorktree(
   if (session !== undefined) return { actor: session, source: "session" };
   const derived = worktreeActor();
   if (derived !== undefined && derived !== "") return { actor: derived, source: "worktree-derived" };
-  return resolveOsTier(osUser);
+  if (!osUser.ok) return { source: "unresolved", reason: osUser.reason };
+  return { actor: osUser.name, source: "os-fallback" };
 }
 
 /** The session-tier actor of `env`, or `undefined` when no session id names one. */

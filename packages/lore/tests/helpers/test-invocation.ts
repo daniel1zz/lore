@@ -33,6 +33,8 @@ export interface TestInvocationInput {
   readonly home: string;
   /** Where the run's stdout / stderr go, and what its stdin is. */
   readonly io: Invocation["io"];
+  /** The OS account lookup the run records; default: the real user of the test process. */
+  readonly osUser?: OsUser;
 }
 
 /** The OS account name every test run reports (the os-fallback tier of actor resolution): the real one, as the binary's entry reads it. */
@@ -46,7 +48,8 @@ export function buildTestInvocation(input: TestInvocationInput): Invocation {
   // reason: the binary's `process.cwd()` is the REAL path of the directory it started in (a symlinked tmp dir such as
   // macOS /var -> /private/var resolves), and commands report that; the in-process run must report the same one.
   const cwd = realpathSync(input.cwd);
-  const resolution = resolveInvocationIdentity(input.argv, { ...env }, TEST_USER, () => invocationResolvers.worktreeActor(cwd));
+  const user = input.osUser ?? TEST_USER;
+  const resolution = resolveInvocationIdentity(input.argv, { ...env }, user, () => invocationResolvers.worktreeActor(cwd));
   const argv: readonly string[] = Object.freeze([...resolution.argv]);
   return Object.freeze({
     cwd,
@@ -60,7 +63,7 @@ export function buildTestInvocation(input: TestInvocationInput): Invocation {
       tmpDir: tmpdir(),
     }),
     host: hostname(),
-    user: TEST_USER,
+    user,
     execPath: process.execPath,
     isCompiled: false,
     identity: resolution.identity,

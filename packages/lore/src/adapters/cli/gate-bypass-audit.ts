@@ -105,6 +105,10 @@ export async function runGateEnvBypassAudit(
   const nowIso = new Date().toISOString();
   // reason: the invocation's claimed name (resolved once at the entry) — never an independent resolution.
   const actor = inv.identity.claimed;
+  if (actor === null) {
+    warnBypassNotAudited(inv.io, `no name for the writer: ${inv.identity.unresolvedReason}`);
+    return;
+  }
   const entry = buildGateSkipAuditEntry(checkpoint, "env_bypass", nowIso, actor);
 
   try {

@@ -2069,7 +2069,8 @@ export function registerTools(
     // from the kind="get" row `corpusService.get` above already fired
     // (a different consumption pattern — the whole navigation bundle, not a
     // single doc read). A no-op when trace.enabled resolves false.
-    app.traceRecorder?.recordContextBundle(inv.identity.claimed);
+    // reason: a trace row needs an actor; the server's identity has none when its OS user lookup failed (no row, never a guess).
+    if (inv.identity.claimed !== null) app.traceRecorder?.recordContextBundle(inv.identity.claimed);
 
     return textContent({ target: doc, linked_specs: linkedSpecs, related_adrs: relatedAdrs, active_plans: activePlans });
   });

@@ -65,7 +65,6 @@ function lookUpOsUser(osUsername: () => string): OsUser {
  * @param resolvers - injected path/identity policy, see {@link InvocationResolvers}
  * @returns the immutable {@link Invocation}
  * @throws {RunIdentityArgumentError} on an empty or valueless `--by` / `--harness-run`
- * @throws {OsUserLookupError} when no `--by` / session / working-copy name exists and the user lookup failed
  */
 export function resolveInvocation(rawArgv: readonly string[], resolvers: InvocationResolvers): Invocation {
   const cwd = process.cwd();

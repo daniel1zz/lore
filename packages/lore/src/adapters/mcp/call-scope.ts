@@ -25,7 +25,7 @@
 import { warnSinkOf } from "../../service/warn-sink.js";
 import { AsyncLocalStorage } from "node:async_hooks";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
-import { err, ok, type Invocation, type InvocationIdentity, type LoreError, type NameSource, type Result } from "@lore/core";
+import { err, ok, type Invocation, type LoreError, type NameSource, type ResolvedInvocationIdentity, type Result } from "@lore/core";
 import { RunIdentityArgumentError, resolveInvocationIdentity, type ActorSource } from "@lore/core/node";
 import type { App } from "../../app.js";
 
@@ -34,7 +34,7 @@ export interface CallContext {
   /** The App for THIS call: the base App, or a sibling whose store is wrapped for the call's identity. */
   readonly app: App;
   /** The call's identity with its run verified against the registry (unregistered -> `harnessRun` null). */
-  readonly identity: InvocationIdentity;
+  readonly identity: ResolvedInvocationIdentity;
 }
 
 /** The per-call attestation argument every attested tool accepts. The name is never an argument (BR-1055). */
@@ -52,10 +52,13 @@ function errorResult(error: LoreError): CallToolResult {
  * the name source stays honest (`session`/`os`), and the working-copy tier is skipped (the server's cwd says
  * nothing about the caller).
  */
-export function buildCallIdentity(input: CallAttestation, server: Pick<Invocation, "env" | "user">): Result<InvocationIdentity, LoreError> {
+export function buildCallIdentity(input: CallAttestation, server: Pick<Invocation, "env" | "user">): Result<ResolvedInvocationIdentity, LoreError> {
   const argv = input.harness_run !== undefined ? ["--harness-run", input.harness_run] : [];
   try {
     const { identity } = resolveInvocationIdentity(argv, server.env, server.user);
+    // reason: an attested tool call hands its handler a `by`; with no name for the writer the call is refused up front
+    // (a read-only MCP tool cannot proceed unnamed), with the lookup's reason, instead of a handler guessing one.
+    if (identity.claimed === null) return err({ code: "VALIDATION_ERROR", field: "user", message: `OS user lookup failed: ${identity.unresolvedReason}` });
     return ok(identity);
   } catch (e) {
     if (e instanceof RunIdentityArgumentError) {
@@ -70,7 +73,7 @@ export function buildCallIdentity(input: CallAttestation, server: Pick<Invocatio
  * `harness_run`) run in a scope, so a handler that decides on identity (claim/release/report_issue) always has one.
  * @throws Error when called outside an attested call — a wiring defect, never a caller error.
  */
-export function requireCallIdentity(scope: McpCallScope): InvocationIdentity {
+export function requireCallIdentity(scope: McpCallScope): ResolvedInvocationIdentity {
   const context = scope.current();
   if (context === undefined) {
     throw new Error("requireCallIdentity: no attested call is running (the tool's schema must declare harness_run)");
@@ -181,7 +184,8 @@ export class McpCallScope {
       const check = await app.verifiedInvocationIdentity?.();
       if (check !== undefined) {
         if (!check.ok) return errorResult(check.error);
-        if (check.value !== undefined) verified = check.value;
+        // reason: verification only downgrades `harnessRun`; the name stays the resolved one of this call.
+        if (check.value !== undefined) verified = { ...identity, harnessRun: check.value.harnessRun };
       }
       const context: CallContext = { app, identity: verified };
       return await this.store.run(context, () => body(context));
