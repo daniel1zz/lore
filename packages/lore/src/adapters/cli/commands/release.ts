@@ -44,8 +44,7 @@
  *   task-lore-evidence-and-lore-release-accept-an-attestation-from
  */
 
-import { defineCommand } from "citty";
-import { exitCli } from "../cli-exit.js";
+import { defineLoreCommand, exitCli } from "../cli-exit.js";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatErrorFor, resolveActor } from "../utils.js";
 import { requirePhaseWorkflowService } from "../phase-wiring.js";
@@ -53,7 +52,7 @@ import { hasZeroReleaseEvidence, ZERO_EVIDENCE_RELEASE_WARNING } from "../../../
 import { invocationOf } from "../command-invocation.js";
 import { printLine } from "../output.js";
 
-export default defineCommand({
+export default defineLoreCommand({
   meta: {
     name: "release",
     description: "Clear the advisory execution lease on a task",
@@ -77,7 +76,7 @@ export default defineCommand({
       description: "Output result as JSON",
     },
   },
-  async run(context) {
+  async run(context): Promise<number> {
     const { args } = context;
     const inv = invocationOf(context);
     const { app } = loadLoreApp({ inv });
@@ -136,12 +135,13 @@ export default defineCommand({
           data["warnings"] = warnings;
         }
         printLine(inv.io.stdout, JSON.stringify({ ok: true, data }, null, 2));
-        return;
+        return 0;
       }
 
       printLine(inv.io.stdout, `Released ${result.value.slug} by ${by} (v${result.value.version})`);
     } finally {
       app.close();
     }
+    return 0;
   },
 });

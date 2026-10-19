@@ -33,7 +33,7 @@
  *   Decisions D3, D5.
  */
 
-import { defineCommand } from "citty";
+import { defineLoreCommand } from "../cli-exit.js";
 
 import { computeArchiveCandidates, resolveClaimTtlMinutes, resolveHandoffTtlMinutes } from "@lore/core";
 import { loadLoreApp } from "../loader.js";
@@ -51,7 +51,7 @@ import { printLine } from "../output.js";
  */
 const REPAIR_COMMAND = "lore archive --apply";
 
-export default defineCommand({
+export default defineLoreCommand({
   meta: {
     name: "archive",
     description: "Deterministic lifecycle-archival sweep — report or apply R2-R4 archive candidates",

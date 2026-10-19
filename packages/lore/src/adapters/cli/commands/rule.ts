@@ -38,7 +38,7 @@
 
 import type { Invocation } from "@lore/core";
 
-import { defineCommand } from "citty";
+import { defineLoreCommand } from "../cli-exit.js";
 import type { LoreError } from "@lore/core";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatErrorFor, resolveActor } from "../utils.js";
@@ -98,16 +98,16 @@ function failUsage(io: CliIo, message: string, json: boolean): ExitReport {
   return 2;
 }
 
-export default defineCommand({
+export default defineLoreCommand({
   meta: { name: "rule", description: "Add, edit and read baseline rules (permanent BR-n ids)" },
   subCommands: {
-    show: defineCommand({
+    show: defineLoreCommand({
       meta: { name: "show", description: "Show a rule: statement, leaf, confidence, state and every citing criterion" },
       args: {
         rule: { type: "positional", description: "Rule id, e.g. BR-12", required: true },
         json: { type: "boolean", description: "Output result as JSON" },
       },
-      async run(context) {
+      async run(context): Promise<number> {
         const { args } = context;
         const inv = invocationOf(context);
         const { app } = loadLoreApp({ inv });
@@ -115,7 +115,10 @@ export default defineCommand({
           if (app.ruleReadService === undefined) return failUsage(inv.io, "RuleReadService is not available in this build.", args.json === true);
           const result = await app.ruleReadService.show(args.rule as string);
           if (!result.ok) return reportFailure(inv, result.error, args.json === true);
-          if (args.json) return void printLine(inv.io.stdout, JSON.stringify({ ok: true, data: result.value }, null, 2));
+          if (args.json) {
+            printLine(inv.io.stdout, JSON.stringify({ ok: true, data: result.value }, null, 2));
+            return 0;
+          }
           const v = result.value;
           if (v.state === "proposed") {
             // A proposed rule is not part of the baseline: it has no confidence and no leaf yet (spec: change set).
@@ -127,9 +130,10 @@ export default defineCommand({
         } finally {
           app.close();
         }
+        return 0;
       },
     }),
-    find: defineCommand({
+    find: defineLoreCommand({
       meta: { name: "find", description: "Find rule ids by --spec <slug>, --file <path> or --text <q> (exactly one)" },
       args: {
         spec: { type: "string", description: "Rules cited by this spec (slug or id)" },
@@ -138,7 +142,7 @@ export default defineCommand({
         "include-retired": { type: "boolean", description: "Also list retired rules (tombstones); default lists only rules that still describe the product" },
         json: { type: "boolean", description: "Output result as JSON" },
       },
-      async run(context) {
+      async run(context): Promise<number> {
         const { args } = context;
         const inv = invocationOf(context);
         const given = [args.spec, args.file, args.text].filter((v) => typeof v === "string");
@@ -150,20 +154,24 @@ export default defineCommand({
             typeof args.spec === "string" ? { spec: args.spec } : typeof args.file === "string" ? { file: args.file } : { text: args.text as string };
           const result = await app.ruleReadService.find(query, { includeTombstones: args["include-retired"] === true });
           if (!result.ok) return reportFailure(inv, result.error, args.json === true);
-          if (args.json) return void printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { rules: result.value } }, null, 2));
+          if (args.json) {
+            printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { rules: result.value } }, null, 2));
+            return 0;
+          }
           printLine(inv.io.stdout, result.value.length === 0 ? "No matching rules." : result.value.join("\n"));
         } finally {
           app.close();
         }
+        return 0;
       },
     }),
-    impact: defineCommand({
+    impact: defineLoreCommand({
       meta: { name: "impact", description: "Impact of changing or retiring a rule: citing criteria, dependent leaves, cycles" },
       args: {
         rule: { type: "positional", description: "Rule id, e.g. BR-12", required: true },
         json: { type: "boolean", description: "Output result as JSON" },
       },
-      async run(context) {
+      async run(context): Promise<number> {
         const { args } = context;
         const inv = invocationOf(context);
         const { app } = loadLoreApp({ inv });
@@ -171,7 +179,10 @@ export default defineCommand({
           if (app.impactService === undefined) return failUsage(inv.io, "ImpactService is not available in this build.", args.json === true);
           const result = await app.impactService.impact(args.rule as string);
           if (!result.ok) return reportFailure(inv, result.error, args.json === true);
-          if (args.json) return void printLine(inv.io.stdout, JSON.stringify({ ok: true, data: result.value }, null, 2));
+          if (args.json) {
+            printLine(inv.io.stdout, JSON.stringify({ ok: true, data: result.value }, null, 2));
+            return 0;
+          }
           const v = result.value;
           // Standing split (spec D7): Living (edited in place) before Records (locked once approved).
           printLine(inv.io.stdout, `Living (${v.living.length}):${v.living.map((l) => `\n  ${l}`).join("")}`);
@@ -182,9 +193,10 @@ export default defineCommand({
         } finally {
           app.close();
         }
+        return 0;
       },
     }),
-    propose: defineCommand({
+    propose: defineLoreCommand({
       meta: {
         name: "propose",
         description:
@@ -202,7 +214,7 @@ export default defineCommand({
         correction: { type: "string", description: "Fix a LOCKED spec's change set as an audited correction; the value is the reason (BR-1069)" },
         json: { type: "boolean", description: "Output result as JSON" },
       },
-      async run(context) {
+      async run(context): Promise<number> {
         const { args } = context;
         const inv = invocationOf(context);
         const json = args.json === true;
@@ -249,7 +261,10 @@ export default defineCommand({
           });
           if (!result.ok) return reportFailure(inv, result.error, json);
           const { change, doc } = result.value;
-          if (json) return void printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { change, spec: doc.slug, version: doc.version } }, null, 2));
+          if (json) {
+            printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { change, spec: doc.slug, version: doc.version } }, null, 2));
+            return 0;
+          }
           printLine(inv.io.stdout, 
             change.op === "add"
               ? `Reserved ${change.id} (proposed, not in the baseline) for ${change.leaf} in ${doc.slug} (v${doc.version}).`
@@ -260,9 +275,10 @@ export default defineCommand({
         } finally {
           app.close();
         }
+        return 0;
       },
     }),
-    apply: defineCommand({
+    apply: defineLoreCommand({
       meta: {
         name: "apply",
         description:
@@ -272,7 +288,7 @@ export default defineCommand({
         spec: { type: "positional", description: "Spec document ID or slug", required: true },
         json: { type: "boolean", description: "Output result as JSON" },
       },
-      async run(context) {
+      async run(context): Promise<number> {
         const { args } = context;
         const inv = invocationOf(context);
         const json = args.json === true;
@@ -282,14 +298,18 @@ export default defineCommand({
           const result = await app.ruleChangeService.apply(args.spec as string, { by: resolveActor(inv.io, undefined, inv.env, inv.cwd, inv.user) });
           if (!result.ok) return reportFailure(inv, result.error, json);
           const outcome = result.value;
-          if (json) return void printLine(inv.io.stdout, JSON.stringify({ ok: true, data: outcome }, null, 2));
+          if (json) {
+            printLine(inv.io.stdout, JSON.stringify({ ok: true, data: outcome }, null, 2));
+            return 0;
+          }
           if (outcome.kind === "noop") {
             const why = {
               "no-changes": "has no rule changes",
               "already-applied": "rule changes already landed",
               "already-abandoned": "is deprecated and its proposed rules are already retired",
             }[outcome.reason];
-            return void printLine(inv.io.stdout, `${outcome.spec}: nothing to apply (${why}).`);
+            printLine(inv.io.stdout, `${outcome.spec}: nothing to apply (${why}).`);
+            return 0;
           }
           const verb = outcome.kind === "applied" ? "Applied rule changes of" : "Retired the proposed rules (never landed) of";
           printLine(inv.io.stdout, `${verb} ${outcome.spec}:`);
@@ -297,15 +317,16 @@ export default defineCommand({
         } finally {
           app.close();
         }
+        return 0;
       },
     }),
-    changes: defineCommand({
+    changes: defineLoreCommand({
       meta: { name: "changes", description: "List a spec's rule change set (what it proposes, modifies and retires)" },
       args: {
         spec: { type: "positional", description: "Spec document ID or slug", required: true },
         json: { type: "boolean", description: "Output result as JSON" },
       },
-      async run(context) {
+      async run(context): Promise<number> {
         const { args } = context;
         const inv = invocationOf(context);
         const { app } = loadLoreApp({ inv });
@@ -313,9 +334,15 @@ export default defineCommand({
           if (app.ruleChangeService === undefined) return failUsage(inv.io, "RuleChangeService is not available in this build.", args.json === true);
           const result = await app.ruleChangeService.changes(args.spec as string);
           if (!result.ok) return reportFailure(inv, result.error, args.json === true);
-          if (args.json) return void printLine(inv.io.stdout, JSON.stringify({ ok: true, data: result.value }, null, 2));
+          if (args.json) {
+            printLine(inv.io.stdout, JSON.stringify({ ok: true, data: result.value }, null, 2));
+            return 0;
+          }
           const { spec, changes } = result.value;
-          if (changes.length === 0) return void printLine(inv.io.stdout, `${spec}: no rule changes.`);
+          if (changes.length === 0) {
+            printLine(inv.io.stdout, `${spec}: no rule changes.`);
+            return 0;
+          }
           printLine(inv.io.stdout, `${spec}: ${changes.length} rule change(s)`);
           for (const c of changes) {
             if (c.op === "add") printLine(inv.io.stdout, `  add ${c.id} on ${c.leaf}: ${c.statement}`);
@@ -325,9 +352,10 @@ export default defineCommand({
         } finally {
           app.close();
         }
+        return 0;
       },
     }),
-    add: defineCommand({
+    add: defineLoreCommand({
       meta: { name: "add", description: "Append a new live rule to a baseline leaf; prints the allocated BR-n id" },
       args: {
         leaf: { type: "positional", description: "Baseline leaf document ID or slug", required: true },
@@ -342,7 +370,7 @@ export default defineCommand({
         migration: { type: "string", description: "[architecture standard] How the exceptions get closed" },
         json: { type: "boolean", description: "Output result as JSON" },
       },
-      async run(context) {
+      async run(context): Promise<number> {
         const { args } = context;
         const inv = invocationOf(context);
         const { app } = loadLoreApp({ inv });
@@ -368,9 +396,10 @@ export default defineCommand({
         } finally {
           app.close();
         }
+        return 0;
       },
     }),
-    set: defineCommand({
+    set: defineLoreCommand({
       meta: { name: "set", description: "Edit a rule, advance its lifecycle (forward-only) or move it to another leaf" },
       args: {
         rule: { type: "positional", description: "Rule id, e.g. BR-12", required: true },
@@ -388,7 +417,7 @@ export default defineCommand({
         "move-to": { type: "string", description: "Destination baseline leaf (ID or slug); the BR-n id is unchanged" },
         json: { type: "boolean", description: "Output result as JSON" },
       },
-      async run(context) {
+      async run(context): Promise<number> {
         const { args } = context;
         const inv = invocationOf(context);
         const { app } = loadLoreApp({ inv });
@@ -418,6 +447,7 @@ export default defineCommand({
         } finally {
           app.close();
         }
+        return 0;
       },
     }),
   },

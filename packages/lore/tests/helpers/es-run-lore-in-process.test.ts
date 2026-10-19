@@ -117,6 +117,7 @@ describe("AC-ES-1 concurrent in-process runs are isolated", () => {
           writeFileSync(join(inv.paths.home, "finished.txt"), `finished ${label}`);
           await new Promise((resolve) => setTimeout(resolve, 20));
           inv.io.stdout.write(`stdout-after-wait ${label}\n`);
+          return 0;
         },
       } as unknown as CommandDef<any>;
     };

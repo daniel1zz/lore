@@ -17,7 +17,7 @@
 
 import { resolve } from "path";
 
-import { defineCommand } from "citty";
+import { defineLoreCommand } from "../cli-exit.js";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatErrorFor } from "../utils.js";
 import { invocationOf } from "../command-invocation.js";
@@ -25,7 +25,7 @@ import { warnSinkOf } from "../../../service/warn-sink.js";
 
 const DEFAULT_SPEC_DIR = "docs/requirements/spec";
 
-export default defineCommand({
+export default defineLoreCommand({
   meta: {
     name: "sync-docs",
     description: "Backfill new spec files from disk into the Lore corpus",
@@ -44,7 +44,7 @@ export default defineCommand({
       description: "Output SyncReport as JSON to stdout",
     },
   },
-  async run(context) {
+  async run(context): Promise<number> {
     const { args } = context;
     const inv = invocationOf(context);
     // Resolve fromDir at run() time (not module-load time) so cwd is correct (SPEC-018 §3.1)
@@ -74,7 +74,7 @@ export default defineCommand({
         if (report.errors.length > 0) {
           return 4;
         }
-        return;
+        return 0;
       }
 
       // ── Human-readable report ───────────────────────────────────────────────
@@ -133,5 +133,6 @@ export default defineCommand({
     } finally {
       app.close();
     }
+    return 0;
   },
 });

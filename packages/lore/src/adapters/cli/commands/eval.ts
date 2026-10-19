@@ -17,8 +17,7 @@
  * Source: SPEC-013 §3
  */
 
-import { defineCommand } from "citty";
-import { exitCli } from "../cli-exit.js";
+import { defineLoreCommand, exitCli } from "../cli-exit.js";
 import { loadLoreApp } from "../loader.js";
 import {
   runMigrationCoverage,
@@ -33,7 +32,7 @@ import { printLine } from "../output.js";
 
 // ─── migration subcommand ─────────────────────────────────────────────────────
 
-const migrationCommand = defineCommand({
+const migrationCommand = defineLoreCommand({
   meta: {
     name: "migration",
     description: "Eval migration coverage: imports <dir> and checks imported===expected && links_broken===0",
@@ -100,7 +99,7 @@ const migrationCommand = defineCommand({
 
 // ─── tree subcommand ──────────────────────────────────────────────────────────
 
-const treeCommand = defineCommand({
+const treeCommand = defineLoreCommand({
   meta: {
     name: "tree",
     description: "Eval tree-consistency: checks for orphan docs, cycles, and invalid parent types",
@@ -166,7 +165,7 @@ const treeCommand = defineCommand({
 
 // ─── links subcommand ─────────────────────────────────────────────────────────
 
-const linksCommand = defineCommand({
+const linksCommand = defineLoreCommand({
   meta: {
     name: "links",
     description: "Eval link-integrity: checks for dangling, deleted-target, and self-loop links",
@@ -232,7 +231,7 @@ const linksCommand = defineCommand({
 
 // ─── types subcommand ─────────────────────────────────────────────────────────
 
-const typesCommand = defineCommand({
+const typesCommand = defineLoreCommand({
   meta: {
     name: "types",
     description: "Eval type-distribution: checks doc type counts against configurable thresholds",
@@ -289,7 +288,7 @@ const typesCommand = defineCommand({
 
 // ─── fts subcommand ───────────────────────────────────────────────────────────
 
-const ftsCommand = defineCommand({
+const ftsCommand = defineLoreCommand({
   meta: {
     name: "fts",
     description: "Eval fts-recall: avg recall@K of FTS search against curated query/expected-slug fixtures",
@@ -342,7 +341,7 @@ const ftsCommand = defineCommand({
 
 // ─── placeholders subcommand ──────────────────────────────────────────────────
 
-const placeholdersCommand = defineCommand({
+const placeholdersCommand = defineLoreCommand({
   meta: {
     name: "placeholders",
     description: "Eval placeholder-parse: all detected MDX placeholders resolve (no unknown components, no resolution errors)",
@@ -406,7 +405,7 @@ const placeholdersCommand = defineCommand({
  * Scenarios: migration (§3.1), tree (§3.2), links (§3.3), types (§3.4), fts (§3.5), placeholders (§3.6).
  * Source: SPEC-013 §3
  */
-export default defineCommand({
+export default defineLoreCommand({
   meta: {
     name: "eval",
     description: "Run evaluation scenarios against the corpus (SPEC-013)",

@@ -131,7 +131,7 @@
  * directly re-splits the contract; route it through `toListJsonRows` like the rest.
  */
 
-import { defineCommand } from "citty";
+import { defineLoreCommand } from "../cli-exit.js";
 
 import { loadLoreApp } from "../loader.js";
 import {
@@ -256,7 +256,7 @@ function toListJsonRows(docs: readonly ListedDoc[], claimTtlMinutes: number): Li
   });
 }
 
-export default defineCommand({
+export default defineLoreCommand({
   meta: {
     name: "list",
     description: "List documents with optional filters",
@@ -324,7 +324,7 @@ export default defineCommand({
       description: "Output as JSON",
     },
   },
-  async run(context) {
+  async run(context): Promise<number> {
     const { args } = context;
     const inv = invocationOf(context);
     const { app } = loadLoreApp({ inv });
@@ -440,11 +440,11 @@ export default defineCommand({
           printLine(inv.io.stdout, 
             JSON.stringify({ ok: true, data: { docs: toListJsonRows(docs, claimTtlMinutes), total } }, null, 2),
           );
-          return;
+          return 0;
         }
         if (total === 0) {
           printLine(inv.io.stdout, `No documents governed by "${args["governed-by"]}".`);
-          return;
+          return 0;
         }
         const headers = ["ID", "Type", "Title", "Status", ...validityHeaders(), "Updated"];
         const rows = docs.map((d) => [
@@ -457,7 +457,7 @@ export default defineCommand({
         ]);
         printLine(inv.io.stdout, formatTable(headers, rows));
         printLine(inv.io.stdout, `\n${total} document${total === 1 ? "" : "s"} (filter: --governed-by ${args["governed-by"]})`);
-        return;
+        return 0;
       }
 
       // reason: resolved AFTER the --governed-by short-circuit above (which owns
@@ -568,11 +568,11 @@ export default defineCommand({
           printLine(inv.io.stdout, 
             JSON.stringify({ ok: true, data: { docs: toListJsonRows(filtered, claimTtlMinutes), total, omitted_invalid: omittedInvalid } }, null, 2),
           );
-          return;
+          return 0;
         }
         if (total === 0) {
           printLine(inv.io.stdout, `No documents found with phase "${phaseFilter}".`);
-          return;
+          return 0;
         }
         // reason: workflow badge (claim/evidence, AC-WF-9) is only meaningful for task
         // rows; --phase filtering only applies to tasks in practice (SPEC-023), so we
@@ -590,7 +590,7 @@ export default defineCommand({
         ]);
         printLine(inv.io.stdout, formatTable(headers, rows));
         printLine(inv.io.stdout, `\n${total} document${total === 1 ? "" : "s"} (filter: --phase ${phaseFilter}${planFilterDesc()})${hiddenNote()}`);
-        return;
+        return 0;
       }
 
       // Task-type listings render a claim/evidence workflow badge on each row
@@ -612,11 +612,11 @@ export default defineCommand({
               2,
             ),
           );
-          return;
+          return 0;
         }
         if (fullTotal === 0) {
           printLine(inv.io.stdout, "No documents found.");
-          return;
+          return 0;
         }
 
         const ttlMinutes = claimTtlMinutes;
@@ -640,7 +640,7 @@ export default defineCommand({
           `\n${fullTotal} document${fullTotal === 1 ? "" : "s"} ` +
             `(filter: --type task${planFilterDesc()}${taskFilterDesc})${hiddenNote()}`,
         );
-        return;
+        return 0;
       }
 
       // reason: DocSummary (list()'s return shape) carries no validity signal — when
@@ -663,11 +663,11 @@ export default defineCommand({
               2,
             ),
           );
-          return;
+          return 0;
         }
         if (fullTotal === 0) {
           printLine(inv.io.stdout, "No documents found.");
-          return;
+          return 0;
         }
 
         const headers = ["ID", "Type", "Title", "Status", ...validityHeaders(), "Updated"];
@@ -683,7 +683,7 @@ export default defineCommand({
         printLine(inv.io.stdout, 
           `\n${fullTotal} document${fullTotal === 1 ? "" : "s"} (filter: --include-invalid${planFilterDesc()})`,
         );
-        return;
+        return 0;
       }
 
       // reason: --plan-id is a membership filter with no StoreFilters column
@@ -708,11 +708,11 @@ export default defineCommand({
               2,
             ),
           );
-          return;
+          return 0;
         }
         if (fullTotal === 0) {
           printLine(inv.io.stdout, `No documents found with plan membership "${args["plan-id"]}".`);
-          return;
+          return 0;
         }
 
         const headers = ["ID", "Type", "Title", "Status", ...validityHeaders(), "Updated"];
@@ -732,7 +732,7 @@ export default defineCommand({
           `\n${fullTotal} document${fullTotal === 1 ? "" : "s"} (filter:${planFilterDesc()}` +
             `${otherFilterDesc ? ` ${otherFilterDesc}` : ""})${hiddenNote()}`,
         );
-        return;
+        return 0;
       }
 
       // reason: the `now` seam is injected (rather than left to `list()`'s internal
@@ -758,12 +758,12 @@ export default defineCommand({
         // pre-gated stamp names that dependency at the call site instead; see
         // `withPreGatedLiveStatus`'s JSDoc for the contract it rests on.
         printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { docs: withPreGatedLiveStatus(docs), total, omitted_invalid: omittedInvalidDefault } }, null, 2));
-        return;
+        return 0;
       }
 
       if (total === 0) {
         printLine(inv.io.stdout, "No documents found.");
-        return;
+        return 0;
       }
 
       const headers = ["ID", "Type", "Title", "Status", "Updated"];
@@ -794,5 +794,6 @@ export default defineCommand({
     } finally {
       app.close();
     }
+    return 0;
   },
 });

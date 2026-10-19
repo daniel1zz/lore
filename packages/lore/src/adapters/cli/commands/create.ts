@@ -61,8 +61,7 @@
  */
 
 import { readFileSync } from "node:fs";
-import { exitCli } from "../cli-exit.js";
-import { defineCommand } from "citty";
+import { defineLoreCommand, exitCli } from "../cli-exit.js";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatErrorFor, resolveActor } from "../utils.js";
 import { openEditor } from "../editor.js";
@@ -141,7 +140,7 @@ function normalizeRepeatable(value: unknown): string[] {
   return [String(value)];
 }
 
-export default defineCommand({
+export default defineLoreCommand({
   meta: {
     name: "create",
     description: "Create a new document",
@@ -457,7 +456,7 @@ export default defineCommand({
 
         if (!useAi) {
           // No-AI path: fall back to editor (SPEC-003 §3.1 / AC-AI-2)
-          const editorResult = await openEditor({ defaults, env: inv.env, tmpDir: inv.paths.tmpDir, cwd: inv.cwd });
+          const editorResult = await openEditor({ defaults, env: inv.env, tmpDir: inv.paths.tmpDir, cwd: inv.cwd, stdinIsTTY: inv.io.stdinIsTTY });
           if (!editorResult.ok) {
             inv.io.stderr.write(formatErrorFor(inv, editorResult.error) + "\n");
             return exitCode(editorResult.error);
@@ -657,7 +656,7 @@ export default defineCommand({
 
       // reason: the later failure's code wins (the supersede orphan overrides a resolves failure), exactly as the
       // old "last recorded code" did; the run returns it after the advisories below.
-      let reported: ExitReport;
+      let reported: ExitReport = 0;
       for (const failure of resolvesFailures) {
         inv.io.stderr.write(
           `Error: ${doc.slug} was created but its resolves link to ${failure.slug} failed (${formatErrorFor(inv, failure.error)})\n` +

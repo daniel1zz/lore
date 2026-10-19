@@ -13,6 +13,7 @@
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Readable } from "node:stream";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { MockInstance } from "vitest";
 import { runCli } from "../../../src/adapters/cli/run-cli";
@@ -41,7 +42,7 @@ async function run(args: readonly string[]): Promise<{ code: number; stdout: str
     cwd,
     env: runEnv(),
     home,
-    io: { stdout: { write: (text) => out.push(text) }, stderr: { write: (text) => err.push(text) } },
+    io: { stdout: { write: (text) => out.push(text) }, stderr: { write: (text) => err.push(text) }, stdin: Readable.from([]), stdinIsTTY: false },
   });
   const code = await runCli(inv);
   return { code, stdout: out.join(""), stderr: err.join("") };

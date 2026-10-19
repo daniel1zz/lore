@@ -2,7 +2,7 @@
  * lore diff <doc-id> [v1 v2] — show diff between two versions of a document.
  */
 
-import { defineCommand } from "citty";
+import { defineLoreCommand } from "../cli-exit.js";
 
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatErrorFor, parsePositiveIntArg } from "../utils.js";
@@ -10,7 +10,7 @@ import type { DocId } from "@lore/core";
 import { invocationOf } from "../command-invocation.js";
 import { printLine } from "../output.js";
 
-export default defineCommand({
+export default defineLoreCommand({
   meta: {
     name: "diff",
     description: "Show diff between two versions of a document",
@@ -34,7 +34,7 @@ export default defineCommand({
       description: "Output as JSON",
     },
   },
-  async run(context) {
+  async run(context): Promise<number> {
     const { args } = context;
     const inv = invocationOf(context);
     const { app } = loadLoreApp({ inv });
@@ -70,7 +70,7 @@ export default defineCommand({
 
       if (args.json) {
         printLine(inv.io.stdout, JSON.stringify({ ok: true, data: diff }, null, 2));
-        return;
+        return 0;
       }
 
       printLine(inv.io.stdout, `Diff ${args.id}: v${diff.from_version} → v${diff.to_version}`);
@@ -104,5 +104,6 @@ export default defineCommand({
     } finally {
       app.close();
     }
+    return 0;
   },
 });

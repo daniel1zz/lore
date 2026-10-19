@@ -31,6 +31,7 @@
  */
 
 import { ok, type LoreError, type Result } from "@lore/core";
+import { OsUserLookupError } from "@lore/core/node";
 import { verifyInvocationIdentity } from "../service/run-identity-verify.js";
 import type { AuditEntry, InvocationIdentity, VersionRecord } from "@lore/core";
 
@@ -42,8 +43,10 @@ import type { AuditEntry, InvocationIdentity, VersionRecord } from "@lore/core";
 export interface StampingContext {
   readonly identity: {
     readonly harnessRun: string | null;
-    readonly claimed: string;
-    readonly claimedSource: string;
+    readonly claimed: string | null;
+    readonly claimedSource: string | null;
+    /** Present when `claimed` is null: why the invocation has no name for its writer. */
+    readonly unresolvedReason?: string;
   };
 }
 import type { StoreInterface } from "./store-interface.js";
@@ -118,17 +121,19 @@ export class WriteActorUnresolvedError extends Error {
 
 /**
  * The author of a write: the explicit `by` when given, else the claimed name of the store's write context
- * (the invocation identity). ⛔ Fails loud ({@link WriteActorUnresolvedError}) when neither exists — never reads the
- * process.
+ * (the invocation identity). ⛔ Fails loud ({@link WriteActorUnresolvedError}) when neither exists, and
+ * ({@link OsUserLookupError}) when the identity is unresolved — never reads the process.
  * ⛔ Every service that writes an audit row MUST resolve its actor here, never by an independent
  * `resolveActorWithSource` call: a second resolution can disagree with the invocation's name (gate rows once
  * read the OS user next to a `--by` claim).
  */
 export function resolveWriteActorFor(store: StoreInterface, by?: string): string {
   if (by !== undefined && by.trim() !== "") return by;
-  const claimed = readWriteContext(store)?.identity.claimed;
-  if (claimed === undefined) throw new WriteActorUnresolvedError();
-  return claimed;
+  const identity = readWriteContext(store)?.identity;
+  if (identity === undefined) throw new WriteActorUnresolvedError();
+  // reason: the entry recorded "no name" as a value so reads proceed; THIS is the point a write needs an actor.
+  if (identity.claimed === null) throw new OsUserLookupError(identity.unresolvedReason ?? "the invocation has no resolved name");
+  return identity.claimed;
 }
 
 function stampRecord<T extends object>(record: T, stamp: Stamp): T {

@@ -22,7 +22,7 @@
 
 import { dirname } from "path";
 
-import { defineCommand } from "citty";
+import { defineLoreCommand } from "../cli-exit.js";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatError, formatErrorFor } from "../utils.js";
 import { resolveTrackedWriteRoot } from "../working-tree-root.js";
@@ -33,7 +33,7 @@ import { invocationOf } from "../command-invocation.js";
 /** Valid DocType values for --type validation. */
 const VALID_TYPES = docTypeSchema.options;
 
-export default defineCommand({
+export default defineLoreCommand({
   meta: {
     name: "export-docs",
     description: "Reverse-sync corpus docs to per-doc .md files under docs/requirements/<type>/",
@@ -56,7 +56,7 @@ export default defineCommand({
       description: "Output ExportReport as JSON to stdout",
     },
   },
-  async run(context) {
+  async run(context): Promise<number> {
     const { args } = context;
     const inv = invocationOf(context);
     const dryRun = args["dry-run"] ?? false;
@@ -119,7 +119,7 @@ export default defineCommand({
         if (report.errors.length > 0) {
           return 4;
         }
-        return;
+        return 0;
       }
 
       // ── Human-readable report ─────────────────────────────────────────────
@@ -204,5 +204,6 @@ export default defineCommand({
     } finally {
       app.close();
     }
+    return 0;
   },
 });

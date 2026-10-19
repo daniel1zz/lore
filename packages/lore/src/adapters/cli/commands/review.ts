@@ -65,8 +65,7 @@
  * Source: SPEC-034 §1, §4, §6; SPEC-044 §Design Decisions D6, D7, D9, D11
  */
 
-import { defineCommand } from "citty";
-import { exitCli } from "../cli-exit.js";
+import { defineLoreCommand, exitCli } from "../cli-exit.js";
 import { loadLoreApp } from "../loader.js";
 import {
   exitCode,
@@ -228,7 +227,7 @@ function computeStalenessExitCode(outcomes: StalenessProbeOutcome[], failOnCandi
   return 0;
 }
 
-export default defineCommand({
+export default defineLoreCommand({
   meta: {
     name: "review",
     description: "Structured AI review judgment — judge a document against deterministic checks + an LLM judge; --staleness probes high-value knowledge/adr docs for silent staleness",
@@ -273,7 +272,7 @@ export default defineCommand({
       description: "Output the result as JSON",
     },
   },
-  async run(context) {
+  async run(context): Promise<number> {
     const { args } = context;
     const inv = invocationOf(context);
     // SPEC-103 §Mechanisms M2, §Design Decisions D3 — `lore review backfill-ledger`
@@ -304,7 +303,7 @@ export default defineCommand({
         for (const failure of result.value.failed) {
           inv.io.stderr.write(`Warning: failed to fast-track ${failure.slug}: ${failure.reason}\n`);
         }
-        return;
+        return 0;
       } finally {
         app.close();
       }
@@ -378,12 +377,12 @@ export default defineCommand({
 
           if (args.json) {
             printLine(inv.io.stdout, JSON.stringify({ ok: true, data: buildStalenessListJsonPayload(entries) }, null, 2));
-            return;
+            return 0;
           }
 
           if (entries.length === 0) {
             printLine(inv.io.stdout, "No open stale candidates.");
-            return;
+            return 0;
           }
 
           const rows = entries.map((e) => [
@@ -393,7 +392,7 @@ export default defineCommand({
           ]);
           printLine(inv.io.stdout, formatTable(["Slug", "Title", "Badge"], rows));
           printLine(inv.io.stdout, `\n${entries.length} open stale candidate${entries.length === 1 ? "" : "s"}`);
-          return;
+          return 0;
         }
 
         if (app.stalenessProbeService === undefined) {
@@ -501,7 +500,7 @@ export default defineCommand({
 
         if (docs.length === 0) {
           printLine(inv.io.stdout, "No pending documents.");
-          return;
+          return 0;
         }
 
         const outcomes: Array<{ doc: PendingDoc; result: Result<{ docSlug: string; judgment: ReviewJudgment }, LoreError> }> = [];
@@ -549,7 +548,7 @@ export default defineCommand({
         if (failures.length === outcomes.length) {
           return 6;
         }
-        return;
+        return 0;
       }
 
       // ─── Single-doc mode ───────────────────────────────────────────────────────
@@ -566,7 +565,7 @@ export default defineCommand({
 
       if (args.json) {
         printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { requested_by: actor, judgment } }, null, 2));
-        return;
+        return 0;
       }
 
       const nudgeBlock = await renderSupersededCandidateNudgeBlock(buildStalenessFlowDeps(app), docSlug, judgment);
@@ -574,5 +573,6 @@ export default defineCommand({
     } finally {
       app.close();
     }
+    return 0;
   },
 });

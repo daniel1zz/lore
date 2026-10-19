@@ -28,7 +28,7 @@
  * restored retracted doc as live.
  */
 
-import { defineCommand } from "citty";
+import { defineLoreCommand } from "../cli-exit.js";
 
 import { resolveDetailBase } from "../decision-detail-lines.js";
 import { loadLoreApp } from "../loader.js";
@@ -47,7 +47,7 @@ function isFreshEscalation(judgment: ReviewJudgment | null, docVersion: number):
   return judgment.decision === "escalate" && judgment.doc_version === docVersion;
 }
 
-export default defineCommand({
+export default defineLoreCommand({
   meta: {
     name: "pending",
     description: "List documents in draft status (pending review)",
@@ -85,7 +85,7 @@ export default defineCommand({
       description: "Output as JSON",
     },
   },
-  async run(context) {
+  async run(context): Promise<number> {
     const { args } = context;
     const inv = invocationOf(context);
     const { app, dbPath } = loadLoreApp({ inv });
@@ -137,7 +137,7 @@ export default defineCommand({
           printLine(inv.io.stdout, "No pending documents.");
           if (decisionsBlock !== "") printLine(inv.io.stdout, decisionsBlock);
         }
-        return;
+        return 0;
       }
 
       // reason: one latestFor call per pending doc — acceptable at CLI scale (same
@@ -176,13 +176,13 @@ export default defineCommand({
             2,
           ),
         );
-        return;
+        return 0;
       }
 
       if (visibleDocs.length === 0) {
         printLine(inv.io.stdout, args.escalated ? "No escalated documents." : "No pending documents.");
         if (decisionsBlock !== "") printLine(inv.io.stdout, decisionsBlock);
-        return;
+        return 0;
       }
 
       printLine(inv.io.stdout, formatTable(PENDING_TABLE_HEADERS, buildPendingTableRows(visibleDocs, judgments)));
@@ -204,5 +204,6 @@ export default defineCommand({
     } finally {
       app.close();
     }
+    return 0;
   },
 });

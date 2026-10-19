@@ -3,15 +3,14 @@
  * Source: SPEC-011 §6
  */
 
-import { defineCommand } from "citty";
-import { exitCli } from "../cli-exit.js";
+import { defineLoreCommand, exitCli } from "../cli-exit.js";
 import { invocationOf } from "../command-invocation.js";
 import { loadLoreApp } from "../loader.js";
 import { registerServerForInvocation } from "../live-server-registry.js";
 import { startHttpServer } from "../../http/index.js";
 import { resolveMachineAuthBaseDir } from "../../http/machine-auth.js";
 
-export default defineCommand({
+export default defineLoreCommand({
   meta: {
     name: "serve",
     description: "Start the Lore HTTP API server",
@@ -26,7 +25,7 @@ export default defineCommand({
       description: "Host to bind to (default: localhost)",
     },
   },
-  async run(context) {
+  async run(context): Promise<number> {
     const { args } = context;
     const inv = invocationOf(context);
     // reason: `{surface: "http"}` is load-bearing, not decorative — this boot
@@ -62,5 +61,6 @@ export default defineCommand({
         });
       }
     });
+    return 0;
   },
 });

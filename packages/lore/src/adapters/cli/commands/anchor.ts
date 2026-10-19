@@ -74,7 +74,7 @@
  *         SPEC-045 §Design Decisions D6, §Acceptance Criteria AC-DR-4
  */
 
-import { defineCommand } from "citty";
+import { defineLoreCommand } from "../cli-exit.js";
 
 import type { DocRecord, DocType, LoreError, Result } from "@lore/core";
 import { loadLoreApp } from "../loader.js";
@@ -187,13 +187,13 @@ function isCodeAnchorTarget(docType: DocType): boolean {
   return ANCHOR_SCANNED_DOC_TYPES.includes(docType);
 }
 
-export default defineCommand({
+export default defineLoreCommand({
   meta: {
     name: "anchor",
     description: "Manage a task's file_anchors or a spec's / knowledge doc's code_anchors (add / rm / list)",
   },
   subCommands: {
-    add: defineCommand({
+    add: defineLoreCommand({
       meta: { name: "add", description: "Add one or more anchors to a task, spec, or knowledge doc (union with existing)" },
       args: {
         target: {
@@ -212,7 +212,7 @@ export default defineCommand({
           description: "Output result as JSON",
         },
       },
-      async run(context) {
+      async run(context): Promise<number> {
         const { args } = context;
         const inv = invocationOf(context);
         const { app } = loadLoreApp({ inv });
@@ -243,7 +243,7 @@ export default defineCommand({
             emitFileAnchorAdvisory(inv.io, anchors, result.value.slug, inv.cwd);
             if (args.json) {
               printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { doc: result.value, anchors } }, null, 2));
-              return;
+              return 0;
             }
 
             printLine(inv.io.stdout, `Added ${paths.length} anchor(s) to ${result.value.slug} (v${result.value.version})`);
@@ -263,7 +263,7 @@ export default defineCommand({
             const anchors = result.value;
             if (args.json) {
               printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { anchors } }, null, 2));
-              return;
+              return 0;
             }
 
             printLine(inv.io.stdout, `Added ${paths.length} anchor(s) to ${target.slug}`);
@@ -276,10 +276,11 @@ export default defineCommand({
         } finally {
           app.close();
         }
+        return 0;
       },
     }),
 
-    rm: defineCommand({
+    rm: defineLoreCommand({
       meta: { name: "rm", description: "Remove one or more anchors from a task, spec, or knowledge doc" },
       args: {
         target: {
@@ -297,7 +298,7 @@ export default defineCommand({
           description: "Output result as JSON",
         },
       },
-      async run(context) {
+      async run(context): Promise<number> {
         const { args } = context;
         const inv = invocationOf(context);
         const { app } = loadLoreApp({ inv });
@@ -327,7 +328,7 @@ export default defineCommand({
             const anchors = (result.value.extra["file_anchors"] as string[] | undefined) ?? [];
             if (args.json) {
               printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { doc: result.value, anchors } }, null, 2));
-              return;
+              return 0;
             }
 
             printLine(inv.io.stdout, `Removed ${paths.length} anchor(s) from ${result.value.slug} (v${result.value.version})`);
@@ -347,7 +348,7 @@ export default defineCommand({
             const anchors = result.value;
             if (args.json) {
               printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { anchors } }, null, 2));
-              return;
+              return 0;
             }
 
             printLine(inv.io.stdout, `Removed ${paths.length} anchor(s) from ${target.slug}`);
@@ -360,10 +361,11 @@ export default defineCommand({
         } finally {
           app.close();
         }
+        return 0;
       },
     }),
 
-    list: defineCommand({
+    list: defineLoreCommand({
       meta: { name: "list", description: "List a task's file_anchors or a spec's / knowledge doc's code_anchors" },
       args: {
         target: {
@@ -376,7 +378,7 @@ export default defineCommand({
           description: "Output result as JSON",
         },
       },
-      async run(context) {
+      async run(context): Promise<number> {
         const { args } = context;
         const inv = invocationOf(context);
         const { app } = loadLoreApp({ inv });
@@ -402,7 +404,7 @@ export default defineCommand({
 
           if (args.json) {
             printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { anchors } }, null, 2));
-            return;
+            return 0;
           }
 
           printLine(inv.io.stdout, `${doc.type === "task" ? "File" : "Code"} anchors for ${doc.slug}:`);
@@ -410,6 +412,7 @@ export default defineCommand({
         } finally {
           app.close();
         }
+        return 0;
       },
     }),
   },

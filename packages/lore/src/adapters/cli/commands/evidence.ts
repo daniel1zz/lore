@@ -284,7 +284,7 @@
 import { existsSync, readFileSync } from "fs";
 
 import { dirname } from "path";
-import { defineCommand } from "citty";
+import { defineLoreCommand } from "../cli-exit.js";
 import {
   CAPTURE_TAIL_CHARS,
   ORACLE_KINDS,
@@ -313,7 +313,7 @@ import { printLine } from "../output.js";
 
 const VALID_RESULTS = ["pass", "fail", "expected-fail"] as const;
 
-export default defineCommand({
+export default defineLoreCommand({
   meta: {
     name: "evidence",
     description: "Append an oracle verification record to a task",
@@ -369,7 +369,7 @@ export default defineCommand({
       description: "Output result as JSON",
     },
   },
-  async run(context) {
+  async run(context): Promise<number> {
     const { args } = context;
     const inv = invocationOf(context);
     if (args["output-tail"] !== undefined && args["output-tail-file"] !== undefined) {
@@ -676,7 +676,7 @@ export default defineCommand({
 
       if (args.json) {
         printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { doc: result.value } }, null, 2));
-        return;
+        return 0;
       }
 
       printLine(inv.io.stdout, 
@@ -685,5 +685,6 @@ export default defineCommand({
     } finally {
       app.close();
     }
+    return 0;
   },
 });

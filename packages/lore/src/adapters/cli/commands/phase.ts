@@ -37,7 +37,7 @@
 
 import { ulid } from "ulidx";
 
-import { defineCommand } from "citty";
+import { defineLoreCommand } from "../cli-exit.js";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatError, formatErrorFor, resolveActor } from "../utils.js";
 import { requirePhaseChecklistService, getPhaseStatus } from "../phase-wiring.js";
@@ -47,13 +47,13 @@ import { invocationOf } from "../command-invocation.js";
 import { printLine } from "../output.js";
 import type { CliIo } from "../output.js";
 
-export default defineCommand({
+export default defineLoreCommand({
   meta: {
     name: "phase",
     description: "Manage declared phases on a plan (add / list / rm / rename)",
   },
   subCommands: {
-    add: defineCommand({
+    add: defineLoreCommand({
       meta: { name: "add", description: "Append a new phase to a plan" },
       args: {
         plan: {
@@ -75,7 +75,7 @@ export default defineCommand({
           description: "Output result as JSON",
         },
       },
-      async run(context) {
+      async run(context): Promise<number> {
         const { args } = context;
         const inv = invocationOf(context);
         const { app } = loadLoreApp({ inv });
@@ -95,7 +95,7 @@ export default defineCommand({
 
           if (args.json) {
             printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { phases: result.value } }, null, 2));
-            return;
+            return 0;
           }
 
           printLine(inv.io.stdout, `Added phase "${args.name}" to plan ${args.plan}`);
@@ -103,10 +103,11 @@ export default defineCommand({
         } finally {
           app.close();
         }
+        return 0;
       },
     }),
 
-    list: defineCommand({
+    list: defineLoreCommand({
       meta: { name: "list", description: "List declared phases for a plan" },
       args: {
         plan: {
@@ -119,7 +120,7 @@ export default defineCommand({
           description: "Output result as JSON",
         },
       },
-      async run(context) {
+      async run(context): Promise<number> {
         const { args } = context;
         const inv = invocationOf(context);
         const { app } = loadLoreApp({ inv });
@@ -134,22 +135,23 @@ export default defineCommand({
 
           if (args.json) {
             printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { phases: result.value } }, null, 2));
-            return;
+            return 0;
           }
 
           if (result.value.length === 0) {
             printLine(inv.io.stdout, "No phases declared on this plan.");
-            return;
+            return 0;
           }
 
           renderPhaseList(inv.io, result.value);
         } finally {
           app.close();
         }
+        return 0;
       },
     }),
 
-    rm: defineCommand({
+    rm: defineLoreCommand({
       meta: { name: "rm", description: "Remove a declared phase (fails if tasks still reference it)" },
       args: {
         plan: {
@@ -167,7 +169,7 @@ export default defineCommand({
           description: "Output result as JSON",
         },
       },
-      async run(context) {
+      async run(context): Promise<number> {
         const { args } = context;
         const inv = invocationOf(context);
         const { app } = loadLoreApp({ inv });
@@ -182,7 +184,7 @@ export default defineCommand({
 
           if (args.json) {
             printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { phases: result.value } }, null, 2));
-            return;
+            return 0;
           }
 
           printLine(inv.io.stdout, `Removed phase "${args.name as string}" from plan ${args.plan as string}`);
@@ -194,10 +196,11 @@ export default defineCommand({
         } finally {
           app.close();
         }
+        return 0;
       },
     }),
 
-    rename: defineCommand({
+    rename: defineLoreCommand({
       meta: {
         name: "rename",
         description: "Rename a phase in the plan and all referencing tasks",
@@ -223,7 +226,7 @@ export default defineCommand({
           description: "Output result as JSON",
         },
       },
-      async run(context) {
+      async run(context): Promise<number> {
         const { args } = context;
         const inv = invocationOf(context);
         const { app } = loadLoreApp({ inv });
@@ -242,7 +245,7 @@ export default defineCommand({
 
           if (args.json) {
             printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { phases: result.value } }, null, 2));
-            return;
+            return 0;
           }
 
           printLine(inv.io.stdout, `Renamed phase "${args.old as string}" → "${args.new as string}" on plan ${args.plan as string}`);
@@ -250,12 +253,13 @@ export default defineCommand({
         } finally {
           app.close();
         }
+        return 0;
       },
     }),
 
     // ── SPEC-056 phase execution model ───────────────────────────────────
 
-    status: defineCommand({
+    status: defineLoreCommand({
       meta: {
         name: "status",
         description: "Computed completion scorecard for a phase document (SPEC-056)",
@@ -306,13 +310,13 @@ export default defineCommand({
       },
     }),
 
-    checklist: defineCommand({
+    checklist: defineLoreCommand({
       meta: {
         name: "checklist",
         description: "Manage a phase document's checklist items (add / list / drop / check / edit)",
       },
       subCommands: {
-        add: defineCommand({
+        add: defineLoreCommand({
           meta: { name: "add", description: "Append a new checklist item to a phase" },
           args: {
             phase: { type: "positional", description: "Phase document ID or slug", required: true },
@@ -323,7 +327,7 @@ export default defineCommand({
             command: { type: "string", description: "Exact command that will be run (script bind only)" },
             json: { type: "boolean", description: "Output result as JSON" },
           },
-          async run(context) {
+          async run(context): Promise<number> {
             const { args } = context;
             const inv = invocationOf(context);
             const { app } = loadLoreApp({ inv });
@@ -347,23 +351,24 @@ export default defineCommand({
 
               if (args.json) {
                 printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { checklist: result.value } }, null, 2));
-                return;
+                return 0;
               }
               printLine(inv.io.stdout, `Added checklist item "${args.id as string}" to phase ${args.phase as string}`);
               renderChecklist(inv.io, result.value);
             } finally {
               app.close();
             }
+            return 0;
           },
         }),
 
-        list: defineCommand({
+        list: defineLoreCommand({
           meta: { name: "list", description: "List a phase's declared checklist items" },
           args: {
             phase: { type: "positional", description: "Phase document ID or slug", required: true },
             json: { type: "boolean", description: "Output result as JSON" },
           },
-          async run(context) {
+          async run(context): Promise<number> {
             const { args } = context;
             const inv = invocationOf(context);
             const { app } = loadLoreApp({ inv });
@@ -378,20 +383,21 @@ export default defineCommand({
 
               if (args.json) {
                 printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { checklist: result.value } }, null, 2));
-                return;
+                return 0;
               }
               if (result.value.length === 0) {
                 printLine(inv.io.stdout, "No checklist items declared on this phase.");
-                return;
+                return 0;
               }
               renderChecklist(inv.io, result.value);
             } finally {
               app.close();
             }
+            return 0;
           },
         }),
 
-        drop: defineCommand({
+        drop: defineLoreCommand({
           meta: { name: "drop", description: "Mark a checklist item as dropped (requires --reason)" },
           args: {
             phase: { type: "positional", description: "Phase document ID or slug", required: true },
@@ -399,7 +405,7 @@ export default defineCommand({
             reason: { type: "string", description: "Why this item is being dropped (required)", required: true },
             json: { type: "boolean", description: "Output result as JSON" },
           },
-          async run(context) {
+          async run(context): Promise<number> {
             const { args } = context;
             const inv = invocationOf(context);
             const { app } = loadLoreApp({ inv });
@@ -418,24 +424,25 @@ export default defineCommand({
 
               if (args.json) {
                 printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { checklist: result.value } }, null, 2));
-                return;
+                return 0;
               }
               printLine(inv.io.stdout, `Dropped checklist item "${args.id as string}" on phase ${args.phase as string}`);
               renderChecklist(inv.io, result.value);
             } finally {
               app.close();
             }
+            return 0;
           },
         }),
 
-        check: defineCommand({
+        check: defineLoreCommand({
           meta: { name: "check", description: "Self-attest a manual-bind checklist item as checked" },
           args: {
             phase: { type: "positional", description: "Phase document ID or slug", required: true },
             id: { type: "positional", description: "Checklist item id", required: true },
             json: { type: "boolean", description: "Output result as JSON" },
           },
-          async run(context) {
+          async run(context): Promise<number> {
             const { args } = context;
             const inv = invocationOf(context);
             const { app } = loadLoreApp({ inv });
@@ -451,17 +458,18 @@ export default defineCommand({
 
               if (args.json) {
                 printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { checklist: result.value } }, null, 2));
-                return;
+                return 0;
               }
               printLine(inv.io.stdout, `Checked checklist item "${args.id as string}" on phase ${args.phase as string} by ${by}`);
               renderChecklist(inv.io, result.value);
             } finally {
               app.close();
             }
+            return 0;
           },
         }),
 
-        edit: defineCommand({
+        edit: defineLoreCommand({
           meta: { name: "edit", description: "Edit a checklist item's statement (voids any existing self-attestation)" },
           args: {
             phase: { type: "positional", description: "Phase document ID or slug", required: true },
@@ -469,7 +477,7 @@ export default defineCommand({
             statement: { type: "string", description: "New statement text", required: true },
             json: { type: "boolean", description: "Output result as JSON" },
           },
-          async run(context) {
+          async run(context): Promise<number> {
             const { args } = context;
             const inv = invocationOf(context);
             const { app } = loadLoreApp({ inv });
@@ -488,19 +496,20 @@ export default defineCommand({
 
               if (args.json) {
                 printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { checklist: result.value } }, null, 2));
-                return;
+                return 0;
               }
               printLine(inv.io.stdout, `Edited checklist item "${args.id as string}" statement on phase ${args.phase as string}`);
               renderChecklist(inv.io, result.value);
             } finally {
               app.close();
             }
+            return 0;
           },
         }),
       },
     }),
 
-    track: defineCommand({
+    track: defineLoreCommand({
       meta: {
         name: "track",
         // reason: Scope-Alt (task-skill-implement-cli-mcp-surfaces-checklist-ref-evidence)
@@ -508,14 +517,14 @@ export default defineCommand({
         description: "Manage a phase document's informational work-log entries (add / list)",
       },
       subCommands: {
-        add: defineCommand({
+        add: defineLoreCommand({
           meta: { name: "add", description: "Append a new track note to a phase" },
           args: {
             phase: { type: "positional", description: "Phase document ID or slug", required: true },
             note: { type: "string", description: "Note text", required: true },
             json: { type: "boolean", description: "Output result as JSON" },
           },
-          async run(context) {
+          async run(context): Promise<number> {
             const { args } = context;
             const inv = invocationOf(context);
             const { app } = loadLoreApp({ inv });
@@ -536,23 +545,24 @@ export default defineCommand({
 
               if (args.json) {
                 printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { track: result.value } }, null, 2));
-                return;
+                return 0;
               }
               printLine(inv.io.stdout, `Added track note to phase ${args.phase as string}`);
             } finally {
               app.close();
             }
+            return 0;
           },
         }),
 
         // reason: minimal (plain-text, no badges) — Scope-Alt above.
-        list: defineCommand({
+        list: defineLoreCommand({
           meta: { name: "list", description: "List a phase's track notes (minimal rendering)" },
           args: {
             phase: { type: "positional", description: "Phase document ID or slug", required: true },
             json: { type: "boolean", description: "Output result as JSON" },
           },
-          async run(context) {
+          async run(context): Promise<number> {
             const { args } = context;
             const inv = invocationOf(context);
             const { app } = loadLoreApp({ inv });
@@ -567,11 +577,11 @@ export default defineCommand({
 
               if (args.json) {
                 printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { track: result.value } }, null, 2));
-                return;
+                return 0;
               }
               if (result.value.length === 0) {
                 printLine(inv.io.stdout, "No track notes on this phase.");
-                return;
+                return 0;
               }
               for (const item of result.value) {
                 printLine(inv.io.stdout, `  [${item.at}] ${item.by}: ${item.note}`);
@@ -579,6 +589,7 @@ export default defineCommand({
             } finally {
               app.close();
             }
+            return 0;
           },
         }),
       },

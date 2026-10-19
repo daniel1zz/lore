@@ -16,7 +16,7 @@
  */
 import { spawnSync } from "node:child_process";
 
-import { defineCommand } from "citty";
+import { defineLoreCommand } from "../cli-exit.js";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatErrorFor } from "../utils.js";
 import { SQLiteStore } from "../../../store/sqlite-store.js";
@@ -74,7 +74,7 @@ function gitRunnerFor(repoRoot: string): GitRunner {
   };
 }
 
-const prune = defineCommand({
+const prune = defineLoreCommand({
   meta: {
     name: "prune",
     description: "List stashes with facts; --apply archives each under refs/lore/archive/stash/ then drops it when decide(stash-drop) is auto (AC-AU-4)",
@@ -83,7 +83,7 @@ const prune = defineCommand({
     apply: { type: "boolean", description: "Archive and drop stashes whose decision is auto (default: list only)" },
     json: { type: "boolean", description: "Output the report as JSON" },
   },
-  async run(context) {
+  async run(context): Promise<number> {
     const { args } = context;
     const inv = invocationOf(context);
     const { app, dbPath } = loadLoreApp({ inv });
@@ -119,6 +119,7 @@ const prune = defineCommand({
       store?.close();
       app.close();
     }
+    return 0;
   },
 });
 
@@ -133,7 +134,7 @@ async function dryRun(service: StashPruneService) {
   return { ok: true as const, value: report };
 }
 
-export default defineCommand({
+export default defineLoreCommand({
   meta: { name: "stash", description: "Stash hygiene: `stash prune [--apply]` (AC-AU-4)" },
   subCommands: { prune },
 });
