@@ -81,6 +81,7 @@ describe("task-export-never-falls-back-to-a-title-name-for-an-unnumbered", () =>
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.error.code).toBe("VALIDATION_ERROR");
+    if (result.error.code !== "VALIDATION_ERROR") return;
     expect(result.error.message).toContain("Legacy Unnumbered Spec");
     expect(result.error.message).toContain("01J0000000000000000000U001");
     expect(result.error.message).toContain("lore migrate ordinals");
@@ -97,7 +98,7 @@ describe("task-export-never-falls-back-to-a-title-name-for-an-unnumbered", () =>
     const result = await makeService(store).exportDocs({ projectDir, dryRun: false });
 
     expect(result.ok).toBe(false);
-    if (result.ok) return;
+    if (result.ok || result.error.code !== "VALIDATION_ERROR") return;
     expect(result.error.message).toContain("Legacy Decision");
     expect(result.error.message).toContain("Second Legacy Spec");
   });

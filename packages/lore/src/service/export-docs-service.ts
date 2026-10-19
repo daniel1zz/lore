@@ -46,12 +46,13 @@
  *     from the unpadded `formatDocDisplayId` so the mirror's `human_id` matches its own
  *     zero-padded filename/legacy-allocator convention) and derives `file_path` from that id,
  *     skipping the legacy branch entirely. A numbered-type
- *     doc whose `ordinal` is still `null`/`undefined` (pre-`lore migrate ordinals` legacy, OR
- *     permanently kind-exempt e.g. a `domain-overview` spec) falls through to the UNCHANGED
- *     Amendment A1 legacy path — but when it is NOT kind-exempt, `buildOrExtendIndex` also
- *     appends a LOUD entry to the new `ordinalWarnings` return (surfaced as
- *     `ExportReport.ordinal_warnings`) naming `lore migrate ordinals`, so the gap is visible
- *     in every export run rather than silently perpetuated. Non-numbered types (prd, plan,
+ *     doc whose `ordinal` is `null`/`undefined` and that is NOT permanently kind-exempt (e.g. a
+ *     `domain-overview` spec) is a corpus integrity failure (BR-1284,
+ *     task-export-never-falls-back-to-a-title-name-for-an-unnumbered): `buildOrExtendIndex`
+ *     refuses the whole export up front (VALIDATION_ERROR, exit 4) naming every such doc and
+ *     `lore migrate ordinals --apply`, before any index or file is written — never a title-derived
+ *     or sequential fallback name, never a warning. A kind-exempt doc takes the UNCHANGED
+ *     Amendment A1 legacy path with no number-of-its-own and no warning. Non-numbered types (prd, plan,
  *     task, knowledge, phase) never enter either new branch — `ORDINAL_REGISTRY[doc.type]`
  *     is `undefined` for them — and keep this exact legacy path byte-identical.
  *   - SPEC-084 T5 — existing `.lore/export-index.json` mappings for numbered-type docs
@@ -232,18 +233,6 @@ export interface ExportReport {
    */
   repaired: string[];
   /**
-   * SPEC-084 T5 — loud warnings for numbered-type (spec/adr) docs that are NOT kind-exempt
-   * (see `@lore/core`'s `ORDINAL_REGISTRY[type].exemptKinds`, e.g. `domain-overview` specs)
-   * but still carry a `null`/`undefined` `ordinal` column value at export time — i.e. a doc
-   * predating the SPEC-084 `lore migrate ordinals` repair migration. Such a doc still gets a
-   * human_id via the retired Amendment A1 legacy allocator (title-parse + sequential
-   * fallback) so export never blocks or invents a number silently, but every run names the
-   * exact doc + the repair command instead of quietly perpetuating the gap. Always present,
-   * empty when every numbered-type doc in this run already carries an allocated ordinal (or
-   * is legitimately kind-exempt).
-   */
-  ordinal_warnings: string[];
-  /**
    * task-unify-mirror-identifiers-on-zero-padded-form-export-all (2026-08-11) — file paths
    * whose FRONTMATTER was unconditionally rewritten because this doc's identity was determined
    * stale, by ANY of three independent signals (see the write loop's own comment for the full
@@ -385,7 +374,7 @@ export class ExportDocsService {
   constructor(
     private readonly store: StoreInterface,
     private readonly resolveDocBody: ResolveDocBody,
-    /** Where the exporter's advisory lines go (drift, self-heal, ordinal fallback); absent -> none are printed. */
+    /** Where the exporter's advisory lines go (drift, self-heal); absent -> none are printed. */
     private readonly warn: WarnSink = discardWarnings,
   ) {}
 
@@ -456,7 +445,7 @@ export class ExportDocsService {
 
     const indexResult = await buildOrExtendIndex(this.warn, indexPath, docsBaseDir, allDocs, opts.projectDir, everKnownDocIds);
     if (!indexResult.ok) return indexResult;
-    const { index, repaired, ordinalWarnings, reconciledDocIds } = indexResult.value;
+    const { index, repaired, reconciledDocIds } = indexResult.value;
 
     // Save index (atomically) before writing any files — all human IDs are now allocated.
     if (!opts.dryRun) {
@@ -481,7 +470,6 @@ export class ExportDocsService {
       overwritten: [],
       errors: [],
       repaired,
-      ordinal_warnings: ordinalWarnings,
       identity_repaired: [],
       frontmatter_repaired: [],
       frontmatter_declined: [],
@@ -844,13 +832,10 @@ function maxNumberForPrefix(prefix: string, humanIds: string[]): number {
  *         new filePath deduped against usedFilePaths with a -2/-3/... suffix (mirrors
  *         slugifyWithCollision). Steps b/c are the RETIRED-for-numbered-types legacy path —
  *         still exercised by non-numbered types always, and by numbered types ONLY while
- *         `doc.ordinal` is `null`/`undefined` (pre-migration, or permanently kind-exempt).
- *         SPEC-084 T5 — a numbered-type doc reaching b/c that is NOT kind-exempt (see
- *         `ORDINAL_REGISTRY[doc.type].exemptKinds`) additionally appends a loud entry to the
- *         returned `ordinalWarnings`, naming `lore migrate ordinals` — never a silently
- *         invented number.
- *   6. Return mutated index (caller must save it atomically) plus the repair log and the
- *      ordinal-fallback warning log.
+ *         `doc.ordinal` is `null`/`undefined` AND the doc is permanently kind-exempt. A numbered-type
+ *         doc that is NOT kind-exempt and has no number never reaches b/c: the whole export is
+ *         refused up front (BR-1284, `findUnnumberedNumberedKindDocs`).
+ *   6. Return mutated index (caller must save it atomically) plus the repair log.
  *
  * @param indexPath - Absolute path to .lore/export-index.json.
  * @param docsBaseDir - Absolute path to docs/requirements/.
@@ -860,8 +845,8 @@ function maxNumberForPrefix(prefix: string, humanIds: string[]): number {
  *   SAME type scope `docs` was fetched with — see `retireDeletedDocMappings`'s own doc
  *   comment for why this is the discriminator between a retirable (soft-deleted) mapping and
  *   an inert orphan reservation (docId that never existed).
- * @returns ok({index, repaired, ordinalWarnings, reconciledDocIds}) with all docs mapped; err on
- *   allocation exhaustion or store failure.
+ * @returns ok({index, repaired, reconciledDocIds}) with all docs mapped; err VALIDATION_ERROR (field
+ *   `ordinal`) when a numbered-kind doc has no number (BR-1284), else on allocation exhaustion or store failure.
  */
 async function buildOrExtendIndex(
   warn: WarnSink,
@@ -872,10 +857,25 @@ async function buildOrExtendIndex(
   everKnownDocIds: ReadonlySet<string>,
 ): Promise<
   Result<
-    { index: ExportIndex; repaired: string[]; ordinalWarnings: string[]; reconciledDocIds: Set<string> },
+    { index: ExportIndex; repaired: string[]; reconciledDocIds: Set<string> },
     LoreError
   >
 > {
+  // BR-1284 — refuse BEFORE loading or touching anything: a numbered-kind doc with no number is an
+  // integrity failure, never exported under a title-derived or sequential fallback name.
+  const unnumbered = findUnnumberedNumberedKindDocs(docs);
+  if (unnumbered.length > 0) {
+    return err({
+      code: "VALIDATION_ERROR",
+      field: "ordinal",
+      message:
+        `export refused: ${unnumbered.length} spec/decision record(s) carry no number: ` +
+        unnumbered.map((d) => `${d.type} "${d.title}" (id ${d.id})`).join("; ") +
+        `. Run \`lore migrate ordinals --apply\` to number them, then export again.`,
+      value: unnumbered.map((d) => d.id),
+    });
+  }
+
   const index = loadIndex(warn, indexPath);
 
   // Self-heal BEFORE seeding counters/usedFilePaths so repaired (stripped) doc ids are
@@ -899,8 +899,6 @@ async function buildOrExtendIndex(
   // call can never mistake an OTHER type's mapping for a genuine orphan — that mapping's
   // docId simply never appears in a type-narrowed `everKnownDocIds` at all.
   repaired.push(...retireDeletedDocMappings(warn, index, docs, everKnownDocIds));
-
-  const ordinalWarnings: string[] = [];
 
   // Collect all existing human IDs from the index for next-number seeding.
   const existingHumanIds = Object.values(index.mappings).map((m) => m.human_id);
@@ -968,19 +966,6 @@ async function buildOrExtendIndex(
         index.mappings[doc.id] = { human_id: humanId, file_path: filePath };
         continue;
       }
-    }
-
-    // SPEC-084 T5 — a numbered type still lacking an allocated ordinal (pre-`lore migrate
-    // ordinals`) falls through to the legacy path below like any non-numbered type, but
-    // (unless it is permanently kind-exempt, e.g. a domain-overview spec) the gap is named
-    // loudly rather than silently perpetuated — never a fabricated number.
-    if (isOrdinalEligibleType(doc.type) && !isOrdinalExemptKind(doc)) {
-      const warning =
-        `${doc.type} doc "${doc.title}" (id ${doc.id}) has no store-allocated SPEC-084 ` +
-        `ordinal yet — falling back to legacy title/sequential human_id allocation for this ` +
-        `export run. Run \`lore migrate ordinals\` to backfill its ordinal.`;
-      ordinalWarnings.push(warning);
-      warn(`⚠ ordinal-fallback: ${warning}`);
     }
 
     const typeTitleMap = titleMaps.get(doc.type);
@@ -1060,7 +1045,7 @@ async function buildOrExtendIndex(
     index.mappings[doc.id] = { human_id: humanId, file_path: filePath };
   }
 
-  return ok({ index, repaired, ordinalWarnings, reconciledDocIds });
+  return ok({ index, repaired, reconciledDocIds });
 }
 
 /**
@@ -1103,11 +1088,24 @@ function isOrdinalEligibleType(type: DocType): boolean {
 }
 
 /**
+ * Every doc of a numbered type (spec/adr) that has no allocated ordinal and is not permanently
+ * kind-exempt — the BR-1284 integrity failures `buildOrExtendIndex` refuses on.
+ *
+ * @param docs - Live corpus docs in this export's type scope.
+ * @returns The offending docs in input order (empty when the corpus is whole).
+ */
+function findUnnumberedNumberedKindDocs(docs: readonly DocRecord[]): DocRecord[] {
+  return docs.filter(
+    (d) => isOrdinalEligibleType(d.type) && typeof d.ordinal !== "number" && !isOrdinalExemptKind(d),
+  );
+}
+
+/**
  * True when `doc` is a numbered type but PERMANENTLY exempt from ordinal allocation for its
  * declared `extra.spec_kind` (e.g. a `domain-overview` spec, SPEC-080 taxonomy) — per
  * `@lore/core`'s `ORDINAL_REGISTRY[doc.type].exemptKinds`. Distinguishes a doc that will
  * NEVER receive an ordinal (legitimate, no warning) from one that simply hasn't been
- * migrated yet (SPEC-084 T5's loud `ordinalWarnings` case). Only meaningful when
+ * migrated yet (BR-1284's refusal case). Only meaningful when
  * {@link isOrdinalEligibleType} is already true for `doc.type` — callers check that first.
  *
  * @param doc - The doc to check (reads `doc.type` and `doc.extra["spec_kind"]`).
