@@ -11,8 +11,12 @@
  */
 import { ok } from "@lore/core";
 import type { SessionTrail, TrailHelper } from "@lore/core/node";
-import { describe, expect, it } from "vitest";
-import { reviewHelperScope } from "../../../src/service/helper-scope-review.js";
+import { spawnSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterAll, describe, expect, it } from "vitest";
+import { reviewHelperScope, spawnGitCheckIgnore, type IgnoreProbeFn } from "../../../src/service/helper-scope-review.js";
 import type { RunClaimedTask } from "../../../src/service/run-service.js";
 
 const SESSION = "s-t19";
@@ -237,5 +241,67 @@ describe("AU-T25 an edit already covered by a judged end is not charged again", 
   it("AU-T25 control: a judged file without judged_at_ms (legacy) keeps the old behaviour and judges every edit", async () => {
     const out = await review(twiceEnded(undefined, [{ file: OUTSIDE_OLD, ts: 900 }]), CLAIM_A1);
     expect(out.findings.map((f) => f.kind)).toEqual(["outside-working-copy"]);
+  });
+});
+
+describe("gitignored paths are not judged against anchors (task-skill-fix-turn-end-helper-review-judges-only-repository)", () => {
+  const repo = mkdtempSync(join(tmpdir(), "hsr-ignore-"));
+  const git = (...args: string[]) => {
+    const r = spawnSync("git", args, { cwd: repo, encoding: "utf8" });
+    if (r.status !== 0) throw new Error(`git ${args.join(" ")}: ${r.stderr}`);
+  };
+  mkdirSync(join(repo, "src"), { recursive: true });
+  mkdirSync(join(repo, "other"), { recursive: true });
+  writeFileSync(join(repo, ".gitignore"), ".scratch/\n");
+  writeFileSync(join(repo, "other/tracked.ts"), "x\n");
+  git("init", "-q");
+  git("add", ".gitignore", "other/tracked.ts");
+  afterAll(() => rmSync(repo, { recursive: true, force: true }));
+
+  const claim: Claims = { parent: [{ slug: "task-x", anchors: ["src/"] }] };
+  const run = (files: string[], ignoreProbe: IgnoreProbeFn | undefined) =>
+    reviewHelperScope({
+      trail: trailOf([helper("parent", { files, workingCopy: repo })]),
+      claimedTasks: claims(claim),
+      openClaimsOfWorkingCopy: openClaimsOf({}),
+      projectRoot: repo,
+      realpath: (p) => p,
+      ...(ignoreProbe === undefined ? {} : { ignoreProbe }),
+    }).then((r) => {
+      if (!r.ok) throw new Error("review failed");
+      return r.value;
+    });
+
+  it("AC-1 an edit under an ignored dir is not a finding", async () => {
+    const out = await run([".scratch/tmp.json", "src/a.ts"], spawnGitCheckIgnore);
+    expect(out.findings).toEqual([]);
+    expect(out.not_measured).toEqual([]);
+  });
+
+  it("AC-2 a tracked or untracked-unignored path outside the anchors is still a finding, with the exact wording", async () => {
+    const out = await run([".scratch/tmp.json", "other/tracked.ts", "other/new.ts"], spawnGitCheckIgnore);
+    expect(out.findings.map((f) => [f.kind, f.files])).toEqual([["outside-anchors", ["other/new.ts", "other/tracked.ts"]]]);
+    expect(out.findings[0]?.message).toBe(
+      `Helper parent (cc:${SESSION}:parent) changed files outside the anchors of its task task-x: other/new.ts, other/tracked.ts`,
+    );
+  });
+
+  it("AC-3 a failing ignore probe is reported as not measured naming the path, and the path stays judged", async () => {
+    const out = await run([".scratch/tmp.json"], () => ({ status: 128, stdout: "" }));
+    expect(out.not_measured.join("\n")).toContain(".scratch/tmp.json");
+    expect(out.findings.map((f) => f.kind)).toEqual(["outside-anchors"]);
+  });
+
+  it("AC-3 a status-0 run with empty stdout (cannot account for every path) is not measured, never ignored", async () => {
+    const out = await run([".scratch/tmp.json"], () => ({ status: 0, stdout: "" }));
+    expect(out.not_measured.join("\n")).toContain(".scratch/tmp.json");
+    expect(out.findings.map((f) => f.kind)).toEqual(["outside-anchors"]);
+  });
+
+  it("AC-3 a probe that throws is not measured", async () => {
+    const out = await run([".scratch/tmp.json"], () => {
+      throw new Error("spawn git ENOENT");
+    });
+    expect(out.not_measured.join("\n")).toContain(".scratch/tmp.json");
   });
 });
