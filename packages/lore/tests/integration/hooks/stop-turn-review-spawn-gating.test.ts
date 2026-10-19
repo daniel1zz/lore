@@ -11,7 +11,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { rmSync } from "node:fs";
 import { makeFixture, numberedLines, startTurn, writeRepoFile, type TurnFixture } from "./turn-review-harness";
 import { makeLoreStub, stopTurnWithStub, writeHelperEnd, type LoreStub } from "./trail-review-stub";
-import { writeFileSync } from "node:fs";
+import { patchLoreConfig } from "../../helpers/patch-lore-config.js";
 import { join } from "node:path";
 
 const cleanup: string[] = [];
@@ -24,7 +24,7 @@ const CONFIG_WITH_KEY = `${CONFIG_WITHOUT_KEY}    co_change:\n      - name: asse
 
 function setup(config: string): { f: TurnFixture; stub: LoreStub } {
   const f = makeFixture("S10");
-  writeRepoFile(f.repo, ".lore/config.yaml", config);
+  patchLoreConfig(f.repo, config, { replace: true });
   const stub = makeLoreStub();
   cleanup.push(f.repo, f.base, stub.binDir);
   startTurn(f);
@@ -46,7 +46,7 @@ describe("AC-ST-10 trail-review spawn gating", () => {
     const { f, stub } = setup(CONFIG_WITHOUT_KEY);
     expect(stopTurnWithStub(f, stub).status).toBe(0);
     expect(stub.reviewCalls()).toHaveLength(0);
-    writeFileSync(join(f.repo, ".lore", "config.yaml"), CONFIG_WITH_KEY);
+    patchLoreConfig(f.repo, CONFIG_WITH_KEY, { replace: true });
     startTurn(f);
     expect(stopTurnWithStub(f, stub).status).toBe(0);
     expect(stub.reviewCalls()).toHaveLength(1);

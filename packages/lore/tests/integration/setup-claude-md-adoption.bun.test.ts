@@ -38,6 +38,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parse, stringify } from "yaml";
+import { patchLoreConfig } from "../helpers/patch-lore-config.js";
 
 // ─── Harness ────────────────────────────────────────────────────────────────
 
@@ -133,11 +134,7 @@ function readMemoryFilesConfig(cwd: string): Record<string, unknown> {
 
 /** Writes `context.memory_files.adoption` into an already-initialised corpus config (test seeding only). */
 function seedAdoption(cwd: string, value: "enforce" | "warn"): void {
-  const path = join(cwd, ".lore", "config.yaml");
-  const cfg = (parse(readFileSync(path, "utf-8")) ?? {}) as Record<string, any>;
-  cfg["context"] = cfg["context"] ?? {};
-  cfg["context"]["memory_files"] = { ...(cfg["context"]["memory_files"] ?? {}), adoption: value };
-  writeFileSync(path, stringify(cfg));
+  patchLoreConfig(cwd, { context: { memory_files: { adoption: value } } });
 }
 
 interface AdoptionBlock {

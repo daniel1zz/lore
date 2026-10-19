@@ -28,6 +28,7 @@ import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSy
 import { join } from "path";
 import { tmpdir } from "os";
 import { assertFreshBinary } from "./helpers/assert-fresh-binary";
+import { patchLoreConfig } from "../helpers/patch-lore-config.js";
 
 const REPO_ROOT = new URL("../../../../", import.meta.url).pathname.replace(/\/$/, "");
 const DIST_BINARY = join(REPO_ROOT, "dist", "lore");
@@ -67,8 +68,7 @@ function buildFixture(label: string, adoption: "enforce" | "warn", sections: rea
   const prd = runLore(["create", "prd", "--title", "Fixture Root", "--content", "Root PRD for the structure trip fixture.", "--no-ai"], dir);
   if (prd.exitCode !== 0) throw new Error(`lore create prd failed: ${prd.combined}`);
   writeFileSync(join(dir, "lore.tree.yaml"), "version: 1\nroot:\n  type: prd\n  children: []\n");
-  const configPath = join(dir, ".lore", "config.yaml");
-  writeFileSync(configPath, `${readFileSync(configPath, "utf8")}\ncontext:\n  memory_files:\n    adoption: ${adoption}\n`);
+  patchLoreConfig(dir, `context:\n  memory_files:\n    adoption: ${adoption}\n`);
   const body = sections.map((s) => `## ${s}\n\nContent for ${s}.\n`).join("\n");
   writeFileSync(join(dir, "CLAUDE.md"), `# Fixture\n\n${body}`);
   return dir;

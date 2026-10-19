@@ -8,6 +8,7 @@ import { spawnSync } from "node:child_process";
 import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { git, makeGitRepo, makeTmpDir, runHook, type HookRun } from "./hook-harness";
+import { patchLoreConfig } from "../../helpers/patch-lore-config.js";
 
 export const STOP_HOOK = "stop-turn-review.mjs";
 
@@ -55,12 +56,12 @@ export function stopTurn(f: TurnFixture, extra: Record<string, unknown> = {}): H
 
 /** Writes `.lore/config.yaml` (replacing it) carrying workflow.turn_end.main_session_source_edits. */
 export function writeTurnEndSetting(repo: string, value: string): void {
-  writeRepoFile(repo, ".lore/config.yaml", `project:\n  name: t\n  author: owner\nworkflow:\n  turn_end:\n    main_session_source_edits: ${value}\n`);
+  patchLoreConfig(repo, `project:\n  name: t\n  author: owner\nworkflow:\n  turn_end:\n    main_session_source_edits: ${value}\n`, { replace: true });
 }
 
 /** Appends a workflow block that switches the four service-layer gates off (placeholder spec content). */
 export function disableGates(repo: string): void {
-  appendFileSync(join(repo, ".lore", "config.yaml"), [
+  patchLoreConfig(repo, [
     "workflow:", "  gates:",
     "    spec-create:", "      enabled: false",
     "    spec-promote:", "      enabled: false",

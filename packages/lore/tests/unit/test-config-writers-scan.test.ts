@@ -35,7 +35,12 @@ const RAW_WRITE_ALLOWLIST: Readonly<Record<string, string>> = {
   "packages/lore/tests/unit/core/config-io.test.ts": "loadConfig/saveConfig I/O tests: exact bytes incl. empty and whitespace-only files",
 };
 
-const WRITE_CALL = /\b(?:writeFileSync|appendFileSync|writeFile|appendFile|Bun\.write|write)\s*\(/g;
+// Any callee that writes, appends, copies, renames, seeds, saves or puts — a local helper such as `writeRepoFile(repo,
+// ".lore/config.yaml", ...)` is a writer too. `patchLoreConfig` is the one sanctioned writer and is skipped by name.
+const WRITE_CALL = /\b(?:Bun\.write|\w*(?:[Ww]rite|[Aa]ppend|[Cc]opy|[Cc]p|[Rr]ename|[Ss]eed|[Ss]ave|[Pp]ut)\w*)\s*\(/g;
+const SANCTIONED_WRITER = "patchLoreConfig";
+/** Reads inside a write call's arguments (`join(.., readFileSync(configPath))`) are not writes to the config. */
+const READ_SUBCALL = /\b(?:readFileSync|readFile|existsSync|statSync|readdirSync)\s*\((?:[^()]|\([^()]*\))*\)/g;
 
 function listTestFiles(dir: string, out: string[] = []): string[] {
   for (const name of readdirSync(dir)) {
@@ -87,11 +92,12 @@ function bindings(source: string): Array<readonly [string, string]> {
 function projectConfigIdentifiers(source: string): string[] {
   const all = bindings(source);
   const loreDirIds = all.filter(([, expr]) => /\.lore/.test(expr) && !/config\.yaml/.test(expr)).map(([name]) => name);
-  return [...new Set(all.filter(([, expr]) => namesProjectConfig(expr, loreDirIds)).map(([name]) => name))];
+  // reason: `const text = readFileSync(configPath)` binds the config's CONTENT, not a path to write to.
+  return [...new Set(all.filter(([, expr]) => namesProjectConfig(expr.replace(READ_SUBCALL, ""), loreDirIds)).map(([name]) => name))];
 }
 
-/** First argument text of the call opened at `openParen` (balanced to the first top-level comma). */
-function firstArgument(source: string, openParen: number): string {
+/** Every argument of the call opened at `openParen` (balanced to its closing bracket), as one text. */
+function callArguments(source: string, openParen: number): string {
   let depth = 0;
   for (let i = openParen; i < source.length; i += 1) {
     const ch = source[i];
@@ -99,7 +105,7 @@ function firstArgument(source: string, openParen: number): string {
     else if (ch === ")" || ch === "]" || ch === "}") {
       depth -= 1;
       if (depth === 0) return source.slice(openParen + 1, i);
-    } else if (ch === "," && depth === 1) return source.slice(openParen + 1, i);
+    }
   }
   return source.slice(openParen + 1);
 }
@@ -113,9 +119,10 @@ export function findProjectConfigWrites(rawSource: string): number[] {
   const lines: number[] = [];
   const lineOf = (index: number): number => source.slice(0, index).split("\n").length;
   for (const match of source.matchAll(WRITE_CALL)) {
+    if (match[0].startsWith(SANCTIONED_WRITER)) continue;
     const open = (match.index ?? 0) + match[0].length - 1;
-    const arg = firstArgument(source, open);
-    if (namesProjectConfig(arg, loreDirIds) || mentionsAny(arg, identifiers)) lines.push(lineOf(match.index ?? 0));
+    const args = callArguments(source, open).replace(READ_SUBCALL, "");
+    if (namesProjectConfig(args, loreDirIds) || mentionsAny(args, identifiers)) lines.push(lineOf(match.index ?? 0));
   }
   for (const match of source.matchAll(/>>?\s*["']?[^\s"'|;]*\.lore\/config\.yaml/g)) lines.push(lineOf(match.index ?? 0));
   return lines;
@@ -131,6 +138,12 @@ describe("no test writes .lore/config.yaml except through patchLoreConfig (BR-92
     expect(findProjectConfigWrites(viaVariable)).toEqual([2]);
     const viaLoreDir = 'const loreDir = join(dir, ".lore");\nwriteFileSync(join(loreDir, "config.yaml"), "x");';
     expect(findProjectConfigWrites(viaLoreDir)).toEqual([2]);
+    const viaLocalHelper = 'writeRepoFile(repo, ".lore/config.yaml", "x");';
+    const viaCopy = 'copyFileSync(template, join(dir, ".lore", "config.yaml"));';
+    const readOnly = 'const text = readFileSync(join(dir, ".lore", "config.yaml"), "utf8");\nwriteFileSync(join(dir, "copy.txt"), text);';
+    expect(findProjectConfigWrites(viaLocalHelper)).toEqual([1]);
+    expect(findProjectConfigWrites(viaCopy)).toEqual([1]);
+    expect(findProjectConfigWrites(readOnly)).toEqual([]);
     expect(findProjectConfigWrites(helperCase)).toEqual([]);
     expect(findProjectConfigWrites(globalConfig)).toEqual([]);
   });

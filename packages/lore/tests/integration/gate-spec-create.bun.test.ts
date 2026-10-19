@@ -27,6 +27,7 @@
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { mkdirSync, rmSync, writeFileSync } from "fs";
+import { patchLoreConfig } from "../helpers/patch-lore-config.js";
 import { join } from "path";
 import { tmpdir } from "os";
 
@@ -278,7 +279,7 @@ function writeGatesConfig(tmpDir: string, gatesYaml: string): void {
     "  gates:",
     gatesYaml,
   ].join("\n");
-  writeFileSync(join(tmpDir, ".lore", "config.yaml"), config + "\n", "utf8");
+  patchLoreConfig(tmpDir, config, { replace: true });
 }
 
 describe("lore gate spec-create — AC-Quantifiability Gate CLI parity", () => {

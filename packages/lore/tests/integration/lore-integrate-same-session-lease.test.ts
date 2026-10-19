@@ -13,6 +13,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { patchLoreConfig, readLoreConfig } from "../helpers/patch-lore-config.js";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -81,9 +82,8 @@ class Fixture {
         "exit 0",
       ].join("\n") + "\n",
     );
-    const cfg = join(this.repo, ".lore", "config.yaml");
-    const base = readFileSync(cfg, "utf8").split("\nworkflow:")[0] ?? "";
-    writeFileSync(cfg, `${base.trimEnd()}\nworkflow:\n  integrate:\n    floor_command: ${JSON.stringify(`sh ${script}`)}\n`);
+    const { workflow: _seeded, ...rest } = readLoreConfig(this.repo);
+    patchLoreConfig(this.repo, { ...rest, workflow: { integrate: { floor_command: `sh ${script}` } } }, { replace: true });
   }
 
   env(session: string): NodeJS.ProcessEnv {

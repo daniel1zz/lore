@@ -23,6 +23,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parse } from "yaml";
+import { patchLoreConfig } from "../helpers/patch-lore-config.js";
 
 const PACKAGE_ROOT = new URL("../../", import.meta.url).pathname.replace(/\/$/, "");
 const INDEX_TS = join(PACKAGE_ROOT, "src", "index.ts");
@@ -51,7 +52,7 @@ function makeRepoWithConfig(configText: string): string {
   writeFileSync(join(dir, "CLAUDE.md"), "# Proj\n\n## What This Is\n\nx\n");
   const init = runLore(["init"], dir);
   if (init.exitCode !== 0) throw new Error(`fixture: lore init failed: ${init.all}`);
-  writeFileSync(join(dir, ".lore", "config.yaml"), configText);
+  patchLoreConfig(dir, configText, { replace: true });
   return dir;
 }
 

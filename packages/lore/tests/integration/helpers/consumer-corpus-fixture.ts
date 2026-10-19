@@ -22,6 +22,7 @@ import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { assertFreshBinary } from "./assert-fresh-binary";
+import { patchLoreConfig } from "../../helpers/patch-lore-config.js";
 
 export const WORKTREE_ROOT = resolve(fileURLToPath(new URL(".", import.meta.url)), "..", "..", "..", "..", "..");
 export const DIST_LORE = join(WORKTREE_ROOT, "dist", "lore");
@@ -86,9 +87,7 @@ export function makeConsumerCorpus(options: ConsumerCorpusOptions): string {
   if (prd.exitCode !== 0) throw new Error(`root PRD creation failed (exit ${prd.exitCode}): ${prd.stderr}`);
 
   if (options.feedbackYaml !== null) {
-    const configPath = join(root, ".lore", "config.yaml");
-    const existing = existsSync(configPath) ? readFileSync(configPath, "utf8") : "";
-    writeFileSync(configPath, `${existing}${options.feedbackYaml}\n`);
+    patchLoreConfig(root, options.feedbackYaml);
   }
   return root;
 }
