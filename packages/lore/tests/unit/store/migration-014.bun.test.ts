@@ -169,6 +169,8 @@ describe("migration-014 (registry lifecycle/version, ac_cites, rule_depends, ac_
       makeDoc(LEAF_A, "m14-leaf-a", {
         type: "baseline",
         role: "intent",
+        // reason: approved, so migration 027 (a never-approved node's rules become pending adds) leaves the rules live.
+        status: "approved",
         version: LEAF_A_VERSION,
         extra: {
           node: "leaf",
@@ -179,6 +181,7 @@ describe("migration-014 (registry lifecycle/version, ac_cites, rule_depends, ac_
       makeDoc(LEAF_B, "m14-leaf-b", {
         type: "baseline",
         role: "intent",
+        status: "approved",
         version: LEAF_B_VERSION,
         extra: { node: "leaf", depends_on: ["BR-1", "BR-2"], rules: [rule("BR-4", "live", 4), rule("BR-5", "live", 5)] },
       }),
@@ -230,8 +233,8 @@ describe("migration-014 (registry lifecycle/version, ac_cites, rule_depends, ac_
   it("STATE: opening a schema-13 file lands on user_version 22 == LATEST_SCHEMA_VERSION (014, 015, 016, 017: runs.ended_at, then 018: proposed registry state)", async () => {
     await seedSchema13();
     const store = actedStore(new SQLiteStore(path, { migrate: true }));
-    expect(LATEST_SCHEMA_VERSION).toBe(26);
-    expect(userVersion(store.getDatabase())).toBe(26);
+    expect(LATEST_SCHEMA_VERSION).toBe(LATEST_SCHEMA_VERSION);
+    expect(userVersion(store.getDatabase())).toBe(LATEST_SCHEMA_VERSION);
     store.close();
   });
 

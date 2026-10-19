@@ -7,6 +7,7 @@ import { Database } from "bun:sqlite";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { LATEST_SCHEMA_VERSION } from "../../../src/store/schema-version.js";
 import { SQLiteStore } from "../../../src/store/sqlite-store.js";
 import { MIGRATION_020_SQL } from "../../../src/store/migrations/migration-020.js";
 import { computeDecisionEntryHash, DECISION_GENESIS_HASH, verifyDecisionChain, type DecisionRecordInput } from "../../../src/store/decision-log.js";
@@ -35,7 +36,8 @@ function legacyDb(path: string, version: 21 | 22 = 21): void {
   db.exec(MIGRATION_020_SQL);
   // reason: this fixture models only the tables migration 023 touches; migration-025 indexes `versions` and
   // migration-026 rebuilds it, so the upgrade chain needs that table to exist with every column 026 copies.
-  db.exec("CREATE TABLE docs (id TEXT PRIMARY KEY)"); // `versions.doc_id` references it; the RENAME in 026 resolves that reference
+  // `versions.doc_id` references it; the RENAME in 026 resolves that reference. 027 reads the baseline columns (no row here).
+  db.exec("CREATE TABLE docs (id TEXT PRIMARY KEY, slug TEXT, type TEXT, title TEXT, content TEXT, status TEXT, extra TEXT, tags TEXT)");
   db.exec(
     "CREATE TABLE versions (doc_id TEXT NOT NULL, version INTEGER NOT NULL, content TEXT NOT NULL DEFAULT '', extra TEXT NOT NULL DEFAULT '{}', status TEXT NOT NULL DEFAULT 'draft', title TEXT NOT NULL DEFAULT '', action TEXT NOT NULL, created_at TEXT NOT NULL, created_by TEXT NOT NULL DEFAULT '', change_summary TEXT, slug TEXT, harness_run TEXT)",
   );
@@ -89,7 +91,7 @@ describe("migration 023 decision_log superseded verdict", () => {
         expect(after.ok && verifyDecisionChain(after.value)).toEqual({ clean: true, checked: 4 });
         expect(after.ok && after.value[3]?.verdict).toBe("superseded");
         const db = store.getDatabase();
-        expect((db.query("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(26);
+        expect((db.query("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(LATEST_SCHEMA_VERSION);
         expect(() => db.run("UPDATE decision_log SET score = 1 WHERE id = 1")).toThrow(/append-only/);
         expect(() => db.run("DELETE FROM decision_log WHERE id = 1")).toThrow(/append-only/);
         const bad = await store.appendDecisionRecord({ ...input(5, "auto"), verdict: "bogus" as DecisionRecordInput["verdict"] });

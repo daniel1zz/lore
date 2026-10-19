@@ -19,6 +19,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DOC_TYPE_ROLE_MAP, type DocRecord } from "@lore/core";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
+import { LATEST_SCHEMA_VERSION } from "../../../src/store/schema-version.js";
 import { SQLiteStore } from "../../../src/store/sqlite-store.js";
 import type { StoreInterface } from "../../../src/store/store-interface.js";
 import { TursoStore } from "../../../src/store/turso-store.js";
@@ -252,7 +253,7 @@ describe("migration-018 (SQLite)", () => {
       { id: "BR-2", lifecycle: "retired" },
     ]);
     expect(() => insertRow(upgraded.getDatabase(), "BR-3", 3, "proposed")).not.toThrow();
-    expect((upgraded.getDatabase().query("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(26);
+    expect((upgraded.getDatabase().query("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(LATEST_SCHEMA_VERSION);
     upgraded.close();
   });
 
