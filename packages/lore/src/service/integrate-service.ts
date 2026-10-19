@@ -8,7 +8,11 @@
  * Landing record: after the CAS moved main, `deps.landings.record` writes `extra.landing` ({branch, branch_head,
  *   main_before, main_after, landing_commit}) on every task whose claim recorded the branch, so a task's commit range
  *   is a fact of its landing and a later re-claim cannot replace it (task-commit-range.ts). Never fails the landing.
- * Public surface: IntegrateService.integrate, LandingRecorder, IntegrateOutcome, integrateExitCode, IntegrateRequest,
+ * Own-diff judgment (spec-a-branch-s-own-diff-is-judged-at-integrate-the-turn-end): before the integration worktree exists,
+ *   `deps.ownDiff.judge(branch, tip)` judges the branch's own change (`git diff <merge-base(main, tip)> <tip>`) against its
+ *   tasks and the other live claims; a refusal is `err(VALIDATION_ERROR, field "own-diff")`, exit 4, naming BR-1346/1347/1348,
+ *   with nothing touched. A pass hands `outside_anchors` (own-change paths no task of the branch anchors) to the landing record.
+ * Public surface: IntegrateService.integrate, LandingRecorder, OwnDiffJudge, IntegrateOutcome, integrateExitCode, IntegrateRequest,
  *   IntegrateDeps, IntegrateGit, FloorRunner, CorpusSnapshotter, INTEGRATE_MAX_ATTEMPTS, INTEGRATE_EXIT_LOST_RACES, INTEGRATE_MARKER_ENV,
  *   integrationWorktreePath.
  * Invariants:
@@ -65,6 +69,7 @@ import { join } from "node:path";
 import { err, ok, type LoreError, type Result } from "@lore/core";
 import type { IntegrateLossLedger } from "./integrate-loss-ledger.js";
 import type { AttemptRecord, IntegrateAttemptLedger } from "./integrate-attempt-ledger.js";
+import type { LandedFootprint, OwnDiffVerdict } from "./own-diff-judgment.js";
 import type { LandingFact } from "./task-commit-range.js";
 
 /** Attempts (merge + floor + CAS) one call makes before it gives up with exit 75. */
@@ -145,7 +150,12 @@ export interface IntegrationLease {
  * written. Wired by the CLI to `TaskWorkflowService.recordLanding` (the corpus write route); a failure never un-lands main.
  */
 export interface LandingRecorder {
-  readonly record: (landing: LandingFact) => Promise<Result<readonly string[], LoreError>>;
+  readonly record: (landing: LandingFact & Partial<LandedFootprint>) => Promise<Result<readonly string[], LoreError>>;
+}
+
+/** Judges a branch's own change before it lands (BR-1346, BR-1347, BR-1348); `OwnDiffJudgment` implements it. Reads, never writes. */
+export interface OwnDiffJudge {
+  readonly judge: (branch: string, tip: string) => Promise<Result<OwnDiffVerdict, LoreError>>;
 }
 
 export interface IntegrateDeps {
@@ -156,6 +166,8 @@ export interface IntegrateDeps {
   readonly pid?: number;
   /** Landing records (`extra.landing` on the branch's tasks). Absent in a bare construction: nothing is recorded. */
   readonly landings?: LandingRecorder;
+  /** The own-diff judgment run before the floor. Absent in a bare construction: the branch is not judged. */
+  readonly ownDiff?: OwnDiffJudge;
   /** Floor corpus: the floor reads a snapshot of the shared corpus inside the integration worktree, never the live one. */
   readonly corpus: CorpusSnapshotter;
   readonly runFloor: FloorRunner;
@@ -298,6 +310,11 @@ export class IntegrateService {
     if (!tipResult.ok) return tipResult;
     const tip = tipResult.value;
 
+    // reason: BR-1346/BR-1347/BR-1348 — judged once, before anything is touched (no detach, no worktree, no lease): a
+    // refusal leaves main and every working tree byte-unchanged. An already-integrated branch has no own change to judge.
+    const footprint = await this.judgeOwnDiff(request.branch, tip);
+    if (!footprint.ok) return footprint;
+
     const prepared = this.prepareSharedCheckout();
     if (!prepared.ok) return prepared;
 
@@ -312,14 +329,20 @@ export class IntegrateService {
     if (!granted.ok) return granted;
     if (granted.value.kind === "busy") return ok({ kind: "busy", branch: request.branch, worktree: wt, holder: granted.value.holder });
     try {
-      return await this.landOn(request, request.floorCommand, tip, wt);
+      return await this.landOn(request, request.floorCommand, tip, wt, footprint.value);
     } finally {
       granted.value.release();
     }
   }
 
   /** The attempt loop, run while this process holds the integration worktree's lease. */
-  private async landOn(request: IntegrateRequest, floorCommand: string, tip: string, wt: string): Promise<Result<IntegrateOutcome, LoreError>> {
+  private async landOn(
+    request: IntegrateRequest,
+    floorCommand: string,
+    tip: string,
+    wt: string,
+    footprint: Partial<LandedFootprint>,
+  ): Promise<Result<IntegrateOutcome, LoreError>> {
     const { git, projectRoot, ledger, log } = this.deps;
     const clock = this.deps.clock ?? Date.now;
     const remoteOfBranch = this.remoteOf(request.branch);
@@ -390,7 +413,7 @@ export class IntegrateService {
       const casMs = clock() - casStart;
       if (swapped.status === 0) {
         finish({ outcome: "landed", merge_ms: mergeMs, corpus_snapshot_ms: snapshotMs, floor: floorTimings, cas_ms: casMs });
-        await this.recordLanding({ branch: request.branch, branch_head: tip, main_before: base.value, main_after: merge, landing_commit: merge });
+        await this.recordLanding({ branch: request.branch, branch_head: tip, main_before: base.value, main_after: merge, landing_commit: merge, ...footprint });
         const cleared = ledger.clear(request.branch);
         if (!cleared.ok) return cleared;
         const view = this.refreshSharedView();
@@ -414,6 +437,26 @@ export class IntegrateService {
     const back = this.resetWorktree(wt, final.value);
     if (!back.ok) return back;
     return ok({ kind: "lost_races", branch: request.branch, attempts: INTEGRATE_MAX_ATTEMPTS, moved_by: movedBy, consecutive_losses: lastConsecutiveLosses });
+  }
+
+  /**
+   * Judges the branch's own change (BR-1346, BR-1347, BR-1348) before anything is touched. Skipped, with an empty
+   * footprint, when no judgment is wired (a bare construction, like `landings`) or the tip is already on main (nothing
+   * to land: the re-run only records landings).
+   *
+   * @returns the landed footprint to record, or the refusal (VALIDATION_ERROR on field `own-diff`, exit 4).
+   */
+  private async judgeOwnDiff(branch: string, tip: string): Promise<Result<Partial<LandedFootprint>, LoreError>> {
+    const judgment = this.deps.ownDiff;
+    if (judgment === undefined) return ok({});
+    const main = this.resolveCommit(TARGET_REF);
+    if (!main.ok) return main;
+    const onMain = this.deps.git(this.deps.projectRoot, ["merge-base", "--is-ancestor", tip, main.value]);
+    if (onMain.status === 0) return ok({});
+    if (onMain.status !== 1) return err(gitFailure(`is ${short(tip)} on ${TARGET_NAME}`, onMain));
+    const verdict = await judgment.judge(branch, tip);
+    if (!verdict.ok) return verdict;
+    return ok({ outside_anchors: verdict.value.outside_anchors });
   }
 
   /**
@@ -444,7 +487,7 @@ export class IntegrateService {
    * could not be written is logged loudly, so the missing record is visible; `lore done` refuses that task as
    * `not-landed` until `lore integrate` is run again on the branch (BR-1336).
    */
-  private async recordLanding(landing: LandingFact): Promise<void> {
+  private async recordLanding(landing: LandingFact & Partial<LandedFootprint>): Promise<void> {
     const recorder = this.deps.landings;
     if (recorder === undefined) return;
     const written = await recorder.record(landing);

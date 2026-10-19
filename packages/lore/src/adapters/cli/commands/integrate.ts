@@ -54,6 +54,8 @@ import { removeCorpusSnapshot, takeCorpusSnapshot } from "../../../store/corpus-
 import { sqliteIntegrationLease } from "../../../store/integration-lease.js";
 import { IntegrateLossLedger } from "../../../service/integrate-loss-ledger.js";
 import { IntegrateAttemptLedger } from "../../../service/integrate-attempt-ledger.js";
+import { OwnDiffJudgment } from "../../../service/own-diff-judgment.js";
+import { loadCoChangeRules } from "../../../service/co-change-review.js";
 import {
   IntegrateService,
   integrateExitCode,
@@ -108,6 +110,16 @@ function floorRunnerFor(ambient: AmbientEnv): FloorRunner {
       rmSync(scratch, { recursive: true, force: true });
     }
   };
+}
+
+/** UTF-8 content of `path`, or null when it does not exist; any other fault throws (the co-change loader reports it). */
+function readFileOrNull(path: string): string | null {
+  try {
+    return readFileSync(path, "utf8");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw error;
+  }
 }
 
 /** The main checkout's root, from the git common dir of `cwd` (so a linked session worktree still names the one main checkout). */
@@ -203,6 +215,11 @@ export default defineLoreCommand({
         inv.io.stderr.write(`Error: ${projectRoot} is not inside a non-bare git repository whose common dir is <root>/.git\n`);
         return 1;
       }
+      const ownership = app.branchOwnershipReader;
+      if (ownership === undefined) {
+        inv.io.stderr.write("Error: this composition has no branch ownership reader, so the branch's own change cannot be judged; nothing was landed\n");
+        return 1;
+      }
       const service = new IntegrateService({
         git: runGit,
         lease: sqliteIntegrationLease,
@@ -215,6 +232,14 @@ export default defineLoreCommand({
         attempts: new IntegrateAttemptLedger(corpusDir),
         // the landing is recorded through the corpus write route (TaskWorkflowService -> CorpusService.writeDoc)
         landings: { record: (landing) => app.taskWorkflowService.recordLanding(landing) },
+        // the branch's own change is judged before the floor (BR-1346, BR-1347, BR-1348); it reads the repository and the claims only
+        ownDiff: new OwnDiffJudgment({
+          git: runGit,
+          projectRoot,
+          ownership,
+          loadCoChangeRules: () => loadCoChangeRules(projectRoot, readFileOrNull),
+          matchesGlob: (pattern, path) => new Bun.Glob(pattern).match(path),
+        }),
         projectRoot,
         worktreesRoot: resolvePath(mainRoot, ".claude", "worktrees"),
         log: (line) => inv.io.stdout.write(`${line}\n`),

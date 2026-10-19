@@ -58,6 +58,7 @@ export * from "./doc-type-meta.js";
 export * from "./session.js";
 export * from "./seat.js";
 export * from "./file-anchors.js";
+export * from "./top-level-symbols.js";
 export * from "./validity.js";
 export * from "./staleness.js";
 export * from "./code-anchors.js";

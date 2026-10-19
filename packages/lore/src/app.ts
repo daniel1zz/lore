@@ -74,6 +74,7 @@ import { SyncDocsService } from "./service/sync-docs-service.js";
 import { ExportDocsService } from "./service/export-docs-service.js";
 import { PhaseService } from "./service/phase-service.js";
 import { TaskWorkflowService } from "./service/task-workflow-service.js";
+import { BranchOwnershipReader } from "./service/own-diff-judgment.js";
 import { SpecKindService } from "./service/spec-kind-service.js";
 import { JudgmentService } from "./service/judgment-service.js";
 import { StalenessProbeService } from "./service/staleness-probe-service.js";
@@ -195,6 +196,13 @@ export interface App {
    * Source: SPEC-025 §3 D5, §9.1
    */
   taskWorkflowService: TaskWorkflowService;
+  /**
+   * BranchOwnershipReader — which tasks belong to a branch (claimed on it, or of a plan declaring it the integration
+   * branch) and which other tasks hold work that has not landed; read by `lore integrate`'s own-diff judgment (BR-1346..1348).
+   * Optional only so partial `App` stubs in adapter tests still type-check; both composition roots always set it, and
+   * `lore integrate` refuses loudly when it is absent (never lands unjudged).
+   */
+  branchOwnershipReader?: BranchOwnershipReader;
   /**
    * PhaseWorkflowService — the `phase` doc-type generalization of
    * `TaskWorkflowService`'s claim/release/evidence/ready mechanics (SPEC-056 D2,
@@ -981,6 +989,7 @@ function buildAppFromSqlite(
     }, warnSinkOf(ambient.io.stderr)),
     // reason: PhaseService depends only on StoreInterface — stateless, no AI, no telemetry. SPEC-023 §9.1.
     phaseService: new PhaseService(store, recordLockService, corpusService),
+    branchOwnershipReader: new BranchOwnershipReader(store),
     taskWorkflowService,
     sessionService,
     runService: new RunService(store, undefined, taskWorkflowService, realpathNative, repoRoot, createRealWorktreeProbe(ambient.cwd)),
@@ -1398,6 +1407,7 @@ function buildAppFromTurso(
     }, warnSinkOf(ambient.io.stderr)),
     // reason: PhaseService depends only on StoreInterface — stateless, no AI, no telemetry. SPEC-023 §9.1.
     phaseService: new PhaseService(store, recordLockService, corpusService),
+    branchOwnershipReader: new BranchOwnershipReader(store),
     taskWorkflowService,
     sessionService,
     runService: new RunService(store, undefined, taskWorkflowService, realpathNative, repoRoot, createRealWorktreeProbe(ambient.cwd)),
