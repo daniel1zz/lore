@@ -320,10 +320,18 @@ function requireCheckpointProducedType(checkpoint: string): string {
 const SPEC_CREATE_PRODUCED_TYPE = requireCheckpointProducedType("spec-create");
 
 /** Fallback rule slice used when no approved `knowledge/skill` doc declares `applies_to: "spec"` yet. */
+// reason: BR-587 — names only commands the product ships (`lore init` seeds the rule document on a fresh
+// corpus; `lore create knowledge` files one by hand), never a dev-repo script a consumer does not have.
 const RULE_DOC_MISSING_PLACEHOLDER =
-  `(No approved rule doc found — run \`bun scripts/seed-write-spec-rule.ts\` to seed it. ` +
+  `(No approved rule doc found — \`lore init\` seeds it into a new corpus; in an existing corpus file one with ` +
+  `\`lore create knowledge\`. ` +
   `Expected: type=knowledge, status=approved, extra.sub_type="skill", ` +
   `extra.skill.applies_to="${SPEC_CREATE_PRODUCED_TYPE}".)`;
+
+/** Rule slice shown when the rule lookup itself FAILED — never dressed up as "no rule doc" (BR-587). */
+function ruleLookupFailedPlaceholder(reason: string): string {
+  return `(Rule document lookup failed: ${reason}. The rule text could not be read, which is different from no rule existing.)`;
+}
 
 /**
  * Candidate spec-creation payload, shaped after MCP `lore_create`'s input schema
@@ -1353,14 +1361,20 @@ interface RuleDocLookup {
  */
 async function findFeedingSkill(app: App, appliesTo: string): Promise<RuleDocLookup> {
   const discoveryResult = await app.corpusService.findFeedingSkill(appliesTo);
-  if (!discoveryResult.ok || discoveryResult.value === null) {
+  if (!discoveryResult.ok) {
+    return {
+      source: `applies_to:${appliesTo}`,
+      markdown: ruleLookupFailedPlaceholder(JSON.stringify(discoveryResult.error)),
+    };
+  }
+  if (discoveryResult.value === null) {
     return { source: `applies_to:${appliesTo}`, markdown: RULE_DOC_MISSING_PLACEHOLDER };
   }
 
   const match = discoveryResult.value;
   const getResult = await app.corpusService.get(match.id);
   if (!getResult.ok) {
-    return { source: match.slug, markdown: RULE_DOC_MISSING_PLACEHOLDER };
+    return { source: match.slug, markdown: ruleLookupFailedPlaceholder(JSON.stringify(getResult.error)) };
   }
 
   return { source: match.slug, markdown: await renderDocMarkdown(app, getResult.value.doc) };
