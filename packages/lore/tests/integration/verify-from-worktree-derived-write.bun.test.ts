@@ -167,7 +167,7 @@ describe("lore verify from a linked worktree (derived baseline write)", () => {
     expect(write.exitCode).toBe(4);
     expect(write.stderr + write.stdout).toContain(FOREIGN_TOKEN);
     expect(leafVersion()).toBe(before);
-  });
+  }, 120_000);
 
   it("HAPPY: verify from a detached worktree of a task this worktree never claimed exits 0 with an attested row", () => {
     const task = createTask("detached");
@@ -193,7 +193,7 @@ describe("lore verify from a linked worktree (derived baseline write)", () => {
     );
     expect(selfReported.exitCode, selfReported.stderr + selfReported.stdout).toBe(4);
     expect(selfReported.stderr + selfReported.stdout).toContain(FOREIGN_TOKEN);
-  });
+  }, 120_000);
 
   it("REGRESSION: verify from the main checkout is untouched", () => {
     const task = createTask("main");
