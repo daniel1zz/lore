@@ -124,6 +124,7 @@ import {
   TERMINAL_ISSUE_RESOLUTION_MEMBERS,
   type DocStatus,
   type IssueResolution,
+  type IssueStatus,
   type TerminalIssueResolution,
 } from "@lore/core";
 
@@ -723,4 +724,90 @@ export function computeIssueResolution(
     return "closed";
   }
   return "open";
+}
+
+// ─── deriveIssueStatus: the displayed status (GitHub state x carriers) ──────
+//
+// ⛔ The corpus stores no issue status. This is the ONE function that turns a live
+// GitHub listing row plus the carriers (tasks/plans naming it in `extra.issues`)
+// into the status shown by `lore issues`, the dashboard, MCP and HTTP. It replaces
+// `computeIssueResolution` for every consumer migrated to the carrier model
+// (the legacy function above stays only until its last consumer is migrated).
+// Source: adr-github-owns-issue-report-state-the-corpus-owns-only-the (status table),
+//   spec-github-owns-issue-report-state-no-mirror-task-work-carries D4, AC-GS-3.
+
+/** The GitHub facts of one listed issue that status derivation reads. */
+export interface ListedIssue {
+  /** `open` | `closed` (GitHub's native state). */
+  readonly state: string;
+  /** GitHub's `state_reason`; `null`/`undefined` when GitHub gives none. */
+  readonly state_reason?: string | null | undefined;
+  /** Label names on the issue. */
+  readonly labels?: readonly string[] | undefined;
+}
+
+/** What one carrier (a task or plan naming the issue in `extra.issues`) contributes. */
+export interface CarrierFact {
+  readonly type: "task" | "plan";
+  /** The carrier doc's lifecycle status. */
+  readonly status: DocStatus;
+  /** True when the carrier is invalidated (`isInvalidated`) at the read instant. */
+  readonly invalidated: boolean;
+  /** True when a task carrier holds an open claim; always false for plans. */
+  readonly hasOpenClaim: boolean;
+}
+
+/** Label prefix of the verdict labels maintainers write. */
+const RESOLUTION_LABEL_PREFIX = "resolution:";
+
+/**
+ * Verdicts a `not_planned` close can carry as a label. Derived from the hand-settable
+ * terminal set minus `duplicate` (which has its own state_reason), so no second list of
+ * the tokens exists here.
+ */
+const NOT_PLANNED_VERDICTS: readonly ExplicitTerminalResolution[] = [...EXPLICIT_TERMINAL_RESOLUTIONS].filter(
+  (state) => state !== "duplicate",
+);
+
+const isDeadCarrier = (c: CarrierFact): boolean => c.invalidated || c.status === "deprecated";
+
+/**
+ * The displayed status of one listed issue; total over GitHub state x carriers.
+ *
+ * Precedence (ADR status table):
+ *   - OPEN issue: labels are ignored (a stray verdict label never rejects an open issue).
+ *     An archived carrier wins (`fixed (close pending)`), then a live carrier
+ *     (`resolving` when a task carrier holds a claim, else `adopted`), then carriers that
+ *     are all dead (`adopted (abandoned)`), else `open`.
+ *   - CLOSED issue: the verdict wins over carriers. `duplicate` (state_reason or label),
+ *     then a `not_planned` close with a verdict label (that verdict) or without
+ *     (`closed (no verdict)`); otherwise it was closed as completed: `fixed` ONLY when an
+ *     archived carrier exists, else `closed (unverified)`.
+ *   - ⛔ `fixed` is never read from the `resolution:fixed` label or from state_reason
+ *     alone: it is a joined fact.
+ *   - A closed issue with no `state_reason` is read as completed (GitHub's close default).
+ *
+ * @example
+ *   deriveIssueStatus({ state: "open" }, [])                                  // => "open"
+ *   deriveIssueStatus({ state: "closed", state_reason: "completed" }, [])    // => "closed (unverified)"
+ */
+export function deriveIssueStatus(issue: ListedIssue, carriers: readonly CarrierFact[]): IssueStatus {
+  const alive = carriers.filter((c) => !isDeadCarrier(c));
+  const archived = alive.some((c) => c.status === "archived");
+
+  if (issue.state !== "closed") {
+    if (archived) return "fixed (close pending)";
+    const live = alive.filter((c) => c.status !== "archived");
+    if (live.length > 0) return live.some((c) => c.type === "task" && c.hasOpenClaim) ? "resolving" : "adopted";
+    return carriers.length > 0 ? "adopted (abandoned)" : "open";
+  }
+
+  const labels = new Set(issue.labels ?? []);
+  const labelled = (verdict: string): boolean => labels.has(`${RESOLUTION_LABEL_PREFIX}${verdict}`);
+  if (issue.state_reason === "duplicate" || labelled("duplicate")) return "duplicate";
+  if (issue.state_reason === "not_planned") {
+    const verdict = NOT_PLANNED_VERDICTS.find(labelled);
+    return verdict ?? "closed (no verdict)";
+  }
+  return archived ? "fixed" : "closed (unverified)";
 }
