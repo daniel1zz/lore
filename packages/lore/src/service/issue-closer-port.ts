@@ -63,8 +63,10 @@ export interface IssueCloser {
   /**
    * Removes each named label from the issue (one DELETE per name, no read first: the caller already holds
    * the labels from the live listing). Stops at the first failing call and returns it.
+   * Optional only so a closer fake that predates `--sync` still compiles ({@link GhIssueCloser} always has it);
+   * `IssueCloseOnArchive.applySync` fails LOUD when a strip is planned and the closer lacks it.
    */
-  removeLabels(ref: GithubIssueRef, names: readonly string[]): Promise<Result<void, LoreError>>;
+  removeLabels?(ref: GithubIssueRef, names: readonly string[]): Promise<Result<void, LoreError>>;
 }
 
 const GithubIssueResponseSchema = z

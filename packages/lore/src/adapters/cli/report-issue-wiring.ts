@@ -318,7 +318,7 @@ export type FeedbackUpstreamClassification =
  * `vendor` declares CONSENT, not a destination, and the destination it consents
  * to is a GitHub repository reached through exactly the same
  * `GitHubIntakePort`. Collapsing it here means `fileGithubIssue`,
- * `resolveGithubIssueListing`, `resolveGithubJoinedRows` and the MCP handler
+ * `resolveGithubIssueListing`, `resolveGithubStatusRows` and the MCP handler
  * need ZERO changes and cannot learn a second addressing path — the
  * "capability implemented but not wired" failure mode, closed by construction.
  *

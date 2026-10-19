@@ -621,7 +621,6 @@ const SCENARIOS: readonly Scenario[] = [
         closeIssue: async () => err({ code: "VALIDATION_ERROR", field: "gh", message: "HTTP 502 bad gateway", value: "502" }),
         commentIssue: async () => ok(undefined),
         labelIssue: async () => ok(undefined),
-        removeLabels: async () => ok(undefined),
       };
       const step = new IssueCloseOnArchive(w.raw, closer, "acme/widget", undefined, w.writer);
       return {

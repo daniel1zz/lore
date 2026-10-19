@@ -35,12 +35,13 @@
  */
 
 import type { GithubIssueSnapshot, IssueCloser } from "./issue-closer-port.js";
+import { EXPLICIT_TERMINAL_RESOLUTIONS } from "./issue-resolution.js";
 import type { GithubListedIssue } from "./github-intake-port.js";
 import { joinIssueStatuses } from "./github-issue-listing.js";
 import { labelToResolution, resolutionToLabel } from "./resolution-projector.js";
 import type { GithubIssueRef } from "./resolution-projector.js";
-import { isInvalidated, issueRefSchema } from "@lore/core";
-import type { DocRecord, IssueRef, IssueResolution, LoreError } from "@lore/core";
+import { err, isInvalidated, issueRefSchema } from "@lore/core";
+import type { DocRecord, IssueRef, IssueResolution, LoreError, Result } from "@lore/core";
 import type { StoreInterface } from "../store/store-interface.js";
 import { bareDocWriter, type DocWritePort } from "./corpus-service.js";
 
@@ -131,8 +132,13 @@ const RESOLUTION_LABEL_PREFIX = "resolution:";
 const NOT_CONFIGURED_MESSAGE =
   "GitHub not configured — run lore issues --sync after configuring feedback.upstream";
 
-/** `resolution:*` verdicts a maintainer sets when closing an issue as not-fixed (spec ADR status table). */
-const VERDICT_RESOLUTIONS: ReadonlySet<IssueResolution> = new Set<IssueResolution>(["rejected", "wontfix", "superseded", "duplicate"]);
+/**
+ * Is `resolution` a verdict a maintainer sets when closing an issue as not-fixed (ADR status table)? Those are exactly
+ * the hand-settable terminal states, read from the SSOT set rather than re-listed (AC-DC-9: one construction site).
+ */
+function isVerdictResolution(resolution: IssueResolution): boolean {
+  return [...EXPLICIT_TERMINAL_RESOLUTIONS].some((verdict) => verdict === resolution);
+}
 
 /**
  * The verdict an issue was ALREADY closed with, or `undefined` when it is open or closed as completed.
@@ -146,7 +152,7 @@ function closedVerdictOf(snapshot: GithubIssueSnapshot): string | undefined {
   if (reason !== "not_planned" && reason !== "duplicate") return undefined;
   for (const label of snapshot.labels) {
     const resolution = labelToResolution(label);
-    if (resolution !== undefined && VERDICT_RESOLUTIONS.has(resolution)) return resolution;
+    if (resolution !== undefined && isVerdictResolution(resolution)) return resolution;
   }
   return reason === "duplicate" ? "duplicate" : "not planned";
 }
@@ -299,7 +305,10 @@ export class IssueCloseOnArchive implements ArchiveIssueClosePort {
           applied.push({ number: change.number, action: change.action, lines: [`issue #${change.number}: label FAILED: ${describeError(labelled.error)}${audited}`], failure: labelled.error });
         }
       } else {
-        const removed = await closer.removeLabels(ref, change.removeLabels);
+        const removed: Result<void, LoreError> =
+          closer.removeLabels === undefined
+            ? err({ code: "VALIDATION_ERROR", field: "closer", message: "this closer cannot remove labels", value: change.removeLabels.join(",") })
+            : await closer.removeLabels(ref, change.removeLabels);
         applied.push(
           removed.ok
             ? { number: change.number, action: change.action, lines: [`issue #${change.number}: removed stray label(s) ${change.removeLabels.join(", ")}`] }
