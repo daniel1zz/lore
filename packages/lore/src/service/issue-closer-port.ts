@@ -38,6 +38,12 @@ import type { GithubIssueRef } from "./resolution-projector.js";
 export interface GithubIssueSnapshot {
   readonly state: "open" | "closed";
   readonly labels: readonly string[];
+  /**
+   * GitHub's `state_reason` (`completed`, `not_planned`, `duplicate`, ...); `null` when GitHub gives none.
+   * Optional only so a test fake that predates the field still compiles; {@link GhIssueCloser} always sets it.
+   * Archive-time close reads it to tell a closed-with-verdict issue from a plainly completed one.
+   */
+  readonly stateReason?: string | null;
 }
 
 /**
@@ -58,6 +64,7 @@ export interface IssueCloser {
 const GithubIssueResponseSchema = z
   .object({
     state: z.enum(["open", "closed"]),
+    state_reason: z.string().nullable().optional(),
     labels: z.array(z.object({ name: z.string() }).passthrough()),
   })
   .passthrough();
@@ -95,7 +102,11 @@ export class GhIssueCloser implements IssueCloser {
         value: response.value.stdout,
       });
     }
-    return ok({ state: parsed.data.state, labels: parsed.data.labels.map((label) => label.name) });
+    return ok({
+      state: parsed.data.state,
+      stateReason: parsed.data.state_reason ?? null,
+      labels: parsed.data.labels.map((label) => label.name),
+    });
   }
 
   async closeIssue(ref: GithubIssueRef): Promise<Result<{ readonly alreadyClosed: boolean }, LoreError>> {
