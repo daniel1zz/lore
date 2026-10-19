@@ -247,6 +247,8 @@ interface LeafCoverageReport {
   commands: string[];
   /** Declared commands this tree does not have (pending in an unlanded branch, or stale): reported, never a coverage defect. */
   absent_commands: { command: string; fix: string }[];
+  /** Mappings of a command-measured leaf whose site this tree no longer reaches: removable once main (the corpus checkout) no longer reaches them either. */
+  stale_site_maps: { site: string; fix: string }[];
   /** What measured the leaf: its declared commands' census, the sites it owns (no live command), `absent` (it declares commands, all absent from this tree, and owns no site: pending), or nothing (no command, no owned site: unmeasured). */
   measured_by: "commands" | "owned_sites" | "absent" | "none";
   sites: number;
@@ -338,6 +340,14 @@ async function runCoverage(target: string, json: boolean, inv: Invocation): Prom
         commands,
         measured_by: live.length > 0 ? "commands" : ownedSites.length > 0 ? "owned_sites" : absent.length > 0 ? "absent" : "none",
         absent_commands: absent.map((command) => ({ command, fix: absentCommandFixCommand(leaf.slug, command) })),
+        // reason: only a leaf measured by its commands has a census to compare with; an owned-sites leaf's own keys ARE its sites.
+        stale_site_maps:
+          live.length > 0
+            ? Object.keys(siteMap)
+                .filter((key) => !byKey.has(key) && !bootstrapByKey.has(key))
+                .sort()
+                .map((site) => ({ site, fix: `lore baseline map ${leaf.slug} --remove-site ${site}` }))
+            : [],
         sites: byKey.size,
         gaps: verdict.gaps,
         not_measured: verdict.notMeasured,
@@ -373,6 +383,7 @@ async function runCoverage(target: string, json: boolean, inv: Invocation): Prom
         printLine(inv.io.stdout, `${r.slug}: ${state} - ${r.sites} site(s), ${r.gaps.length} gap(s), ${r.not_measured.length} not_measured, ${r.unresolved_imports.length} unresolved import(s), ${r.bootstrap.length} bootstrap (not counted as gaps)`);
         if (r.measured_by === "absent") printLine(inv.io.stdout, `  all declared commands absent from this tree (pending or stale): ${r.absent_commands.map((a) => a.command).join(", ")}`);
         for (const a of r.absent_commands) printLine(inv.io.stdout, `  declared command not in this tree: ${a.command} (pending in a branch that has not landed, or stale; not counted against coverage)\n    if stale: ${a.fix}`);
+        for (const s of r.stale_site_maps) printLine(inv.io.stdout, `  stale mapping ${s.site} (this tree no longer reaches it; removable once main no longer does, refused until then)\n    fix: ${s.fix}`);
         for (const key of r.unresolved_imports) printLine(inv.io.stdout, `  unresolved  ${key} (census incomplete: sites behind this import are not listed)`);
         for (const key of r.gaps) printLine(inv.io.stdout, `  gap          ${key}\n    fix: ${siteFixCommand(r.slug, key)}`);
         for (const key of r.not_measured) printLine(inv.io.stdout, `  not_measured ${key}\n    fix: ${siteFixCommand(r.slug, key)}`);
