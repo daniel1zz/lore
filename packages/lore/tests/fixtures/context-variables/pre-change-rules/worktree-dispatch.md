@@ -1,4 +1,4 @@
-<!-- lore:managed fragment=worktree-dispatch hash=e6838782 -->
+<!-- lore:managed fragment=worktree-dispatch hash=c8534873 -->
 ## Worktree dispatch
 
 - Actor discipline: identity is per run (`lore run show <id>`); the implementer claims inside its own worktree, the main agent never claims on its behalf; claim conflicts are judged per run (BR-1040), not by name.
@@ -7,5 +7,5 @@
 - Failures: retry at most twice via SendMessage with the failure text; then discard the worktree and redo with a fresh agent given the failure summary as an anti-pattern.
 - The subagent records `lore evidence` and `lore release` and stops; after `lore integrate` lands it, the main agent runs `lore done <task>` (else the task stays in the ready set) and, for script-bound ACs, `lore verify <plan>`. At phase end `git diff` in full and read `lore ready --json` through `counts.ready` (`.records` also holds archived rows); plan done means `lore assess`.
 - Scoped-oracle floor: every file importing the changed module, not just the task's anchors. Run specific test files with `bun run test:file <paths> [-t <name>]` only: it routes Bun and Node-project files to their own runner and fails when a path collects nothing.
-- Post-merge floor: `lore integrate` runs the configured floor (`workflow.integrate.floor_command`, here `bun run check:static`: build, typecheck and every `check:*` script, one exit per step, non-zero if any failed) before main moves; `build` and `typecheck` alone miss red `check:*` steps. The `check:spec-mirror` and `check:live-repo-state` rows are corpus-dependent: they need a fresh mirror export.
+- Post-merge floor: `lore integrate` runs the configured floor (`workflow.integrate.floor_command` in this project's `.lore/config.yaml` is not set: no floor is configured, so `lore integrate` refuses to advance main) before main moves, and refuses to land the branch when it exits non-zero; `build` and `typecheck` alone miss a red check the floor names.
 - The floor runs with the build cache bypassed (`--force`): shared turbo/nx caches replay the agent's own result.

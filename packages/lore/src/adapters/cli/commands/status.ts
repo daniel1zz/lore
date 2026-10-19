@@ -252,6 +252,9 @@ import {
   type CheckClaudeMdRenderInput,
 } from "../claude-md-render.js";
 import { printLine } from "../output.js";
+import { censusRootOfCorpus, measureAbsentDeclarations } from "../absent-declarations.js";
+import { leavesUnder, type AbsentDeclaration } from "../../../service/leaf-coverage.js";
+import { SiteCensusError } from "../../../service/site-census.js";
 import type { CliIo } from "../output.js";
 import type { ExitReport } from "../cli-exit.js";
 
@@ -954,6 +957,16 @@ function resolveUnclaimedOracleScriptPath(execPath: string): string | undefined 
   if (existsSync(compiledCandidate)) return compiledCandidate;
 
   return undefined;
+}
+
+/** `lore status --json`'s `absent_declared_commands`: absent declarations grouped by leaf; `null` = not measured. */
+function absentDeclaredByLeaf(
+  absent: readonly AbsentDeclaration[] | null,
+): { leaf: string; commands: { command: string; fix: string }[] }[] | null {
+  if (absent === null) return null;
+  const byLeaf = new Map<string, { command: string; fix: string }[]>();
+  for (const a of absent) byLeaf.set(a.leaf, [...(byLeaf.get(a.leaf) ?? []), { command: a.command, fix: a.fix }]);
+  return [...byLeaf.entries()].map(([leaf, commands]) => ({ leaf, commands }));
 }
 
 /** `lore status --json`'s `unclaimed_oracle` payload shape (AC-FALS-10). */
@@ -1866,6 +1879,9 @@ export default defineLoreCommand({
       let identitySources: IdentitySourceCounts;
       let orphanedDirty: OrphanedDirtySummary;
       let specCitationCensus: SpecCitationCensus | null = null;
+      // task-approving-a-baseline-leaf-refuses-while-it-declares-a — leaves declaring a command main's tree lacks; `null` = not
+      // measured (no baseline docs, or the corpus checkout holds no lore sources), never "none absent".
+      let absentDeclarations: AbsentDeclaration[] | null = null;
       try {
         const repoRoot = resolveGitRoot(inv.cwd);
         const baselineResult = await computeBaselineStatus(
@@ -1916,6 +1932,16 @@ export default defineLoreCommand({
             return exitCode(censusSpecs.error);
           }
           specCitationCensus = computeSpecCitationCensus(censusSpecs.value, censusBaseline.value);
+          const treeRoot = censusRootOfCorpus(dbPath);
+          if (treeRoot !== undefined) {
+            const declaringLeaves = censusBaseline.value.flatMap((d) => leavesUnder(d, []));
+            try {
+              absentDeclarations = await measureAbsentDeclarations(treeRoot, declaringLeaves);
+            } catch (cause) {
+              if (!(cause instanceof SiteCensusError)) throw cause;
+              inv.io.stderr.write(`Warning: declared commands not measured against main's tree (census:${cause.reason}): ${cause.message}\n`);
+            }
+          }
         }
 
         // baseline slice 3a BL-8 (AC-BLS3-8) — the gate's mode and whether `lore baseline adopt` produced it.
@@ -1985,6 +2011,7 @@ export default defineLoreCommand({
                 identity_sources: identitySources,
                 orphaned_dirty: orphanedDirty,
                 ...(stateBindingSkips.length > 0 ? { state_binding_skips: stateBindingSkips } : {}),
+                absent_declared_commands: absentDeclaredByLeaf(absentDeclarations),
                 ...(baselineStatus !== null ? { baseline: baselineStatus } : {}),
                 ...(acCiteStatus !== null ? { ac_cite: acCiteStatus } : {}),
                 ...(specCitationCensus !== null ? specCitationCensus : {}),
@@ -2193,6 +2220,17 @@ export default defineLoreCommand({
             `${baselineStatus.index_mismatch} index mismatches, ` +
             `${baselineStatus.rules_with_impl_detail} rules with implementation detail (run \`lore status --check-baseline\` / \`lore baseline tree --states\`)`,
         );
+      }
+
+      // task-approving-a-baseline-leaf-refuses-while-it-declares-a — printed only when non-zero (report-only); the fix drops a
+      // stale declaration, and a pending one (its branch has not landed) needs no action.
+      const absentByLeaf = absentDeclaredByLeaf(absentDeclarations);
+      if (absentByLeaf !== null && absentByLeaf.length > 0) {
+        printLine(inv.io.stdout, `\nLeaves declaring a command absent from main's tree: ${absentByLeaf.length} (pending in a branch that has not landed, or stale; approving the leaf is refused until each is removed or lands)`);
+        for (const entry of absentByLeaf) {
+          printLine(inv.io.stdout, `  ${entry.leaf}: ${entry.commands.map((c) => c.command).join(", ")}`);
+          for (const c of entry.commands) printLine(inv.io.stdout, `    if stale: ${c.fix}`);
+        }
       }
 
       // baseline slice 3b BR-1011 — both census counts, printed even at 0 (a count that vanishes at 0 reads as "not measured");

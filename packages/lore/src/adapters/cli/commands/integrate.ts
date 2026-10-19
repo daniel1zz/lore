@@ -15,12 +15,18 @@
  * file named by `LORE_FLOOR_TIMINGS_FILE` that scripts/run-chain.ts writes; a floor command that writes none is recorded
  * as one step named `floor (no per-step timings emitted)`.
  *
+ * After main moved, the landing ({branch, branch_head, main_before, main_after, landing_commit}) is written to
+ * `extra.landing` of every task whose claim (current or historical) recorded the branch, so a later re-claim cannot
+ * replace the task's commit range; a failed write is logged as a WARNING and never un-lands main.
+ *
  * The caller's session: `--session <id>` else `CLAUDE_CODE_SESSION_ID` / `CLAUDE_SESSION_ID`; none is a refusal.
  *
  * Exit codes: 0 = landed, or already integrated (a re-run after a crash past the CAS); 1 = the floor failed (main
  * unchanged) or a git/filesystem failure; 4 = a merge conflict (paths named, nothing changed) or a refused request
  * (unknown branch, missing floor key, missing session); 75 = three lost races (EX_TEMPFAIL, safe to re-run; the
- * integrations that moved main are named).
+ * integrations that moved main are named), or another integrate of the SAME session is still running in the session's
+ * integration worktree (refused at once, before any merge or snapshot, naming its pid, branch and start time; the run
+ * holds an OS lock on the worktree for its whole duration, so a killed run frees it with nothing to clean up).
  *
  * The floor runs against a snapshot of the shared corpus (INT-T12): a consistent `VACUUM INTO` copy written to
  * `<integration worktree>/.lore/lore.db` just before the floor and removed right after, so a branch that adds a DB
@@ -45,6 +51,7 @@ import { loadLoreApp } from "../loader.js";
 import { resolveCallerSession } from "../caller-session.js";
 import { exitCode, formatError } from "../utils.js";
 import { removeCorpusSnapshot, takeCorpusSnapshot } from "../../../store/corpus-snapshot.js";
+import { sqliteIntegrationLease } from "../../../store/integration-lease.js";
 import { IntegrateLossLedger } from "../../../service/integrate-loss-ledger.js";
 import { IntegrateAttemptLedger } from "../../../service/integrate-attempt-ledger.js";
 import {
@@ -154,6 +161,10 @@ function renderOutcome(outcome: IntegrateOutcome): { out?: string; err?: string 
           outcome.paths.map((p) => `  ${p}`).join("\n") +
           `\nintegrate: merge main into ${outcome.branch} in your own worktree, resolve, commit, and re-run`,
       };
+    case "busy": {
+      const who = outcome.holder === undefined ? "holder not yet recorded" : `pid ${outcome.holder.pid}, branch ${outcome.holder.branch}, started ${outcome.holder.started_at}`;
+      return { err: `integrate: another integrate is running in ${outcome.worktree} (${who}); wait for it to finish, then re-run. Nothing was changed` };
+    }
     case "lost_races":
       return {
         err:
@@ -194,6 +205,7 @@ export default defineLoreCommand({
       }
       const service = new IntegrateService({
         git: runGit,
+        lease: sqliteIntegrationLease,
         runFloor: floorRunnerFor(inv.env),
         corpus: {
           take: (worktree) => takeCorpusSnapshot(corpusDir, worktree),
@@ -201,6 +213,8 @@ export default defineLoreCommand({
         },
         ledger: new IntegrateLossLedger(corpusDir),
         attempts: new IntegrateAttemptLedger(corpusDir),
+        // the landing is recorded through the corpus write route (TaskWorkflowService -> CorpusService.writeDoc)
+        landings: { record: (landing) => app.taskWorkflowService.recordLanding(landing) },
         projectRoot,
         worktreesRoot: resolvePath(mainRoot, ".claude", "worktrees"),
         log: (line) => inv.io.stdout.write(`${line}\n`),

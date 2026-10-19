@@ -368,6 +368,8 @@ export interface AdmitAcWriteInput {
   next: readonly AcceptanceCriterion[];
   /** Resolved actor, stamped on any would-refuse audit row. */
   actor: string;
+  /** `true` on `lore create spec`: the refusal's hint re-runs create, since no spec row exists to `ac add` to. */
+  creating?: boolean;
 }
 
 /** What a passing gate hands the write. */
@@ -502,7 +504,7 @@ export async function admitAcWrite(
 
   const violations: AcCiteViolation[] = decision.findings.flatMap((f) => f.violations);
   return err(
-    await buildRefusal(store, input.target, input.existing, input.next, decision.message, violations, decision.findings[0]),
+    await buildRefusal(store, input.target, input.existing, input.next, decision.message, violations, decision.findings[0], input.creating === true),
   );
 }
 
@@ -514,6 +516,7 @@ async function buildRefusal(
   message: string,
   violations: AcCiteViolation[],
   first: CiteGateFinding | undefined,
+  creating = false,
 ): Promise<LoreError> {
   const base = { code: "AC_CITE_REQUIRED" as const, id: target.id, message, violations };
   if (first === undefined) return base;
@@ -533,6 +536,7 @@ async function buildRefusal(
       acId: first.ac_id,
       acStatement: refused?.statement,
       refusedIsNew: !existing.some((c) => c.id === first.ac_id),
+      refusedIsCreate: creating,
       specAnchors: target.anchors,
       branch: placeSpecInBranch(existing.length > 0 ? existing : next, index),
       data: data.value,
