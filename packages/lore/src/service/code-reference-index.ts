@@ -21,7 +21,17 @@
  * Side-effect class: pure (filesystem observations come through the injected `FsProbe`).
  */
 
-import { err, normalizeFileAnchors, ok, type DriftInputEntry, type FsProbe, type LoreError, type Result } from "@lore/core";
+import {
+  err,
+  GOVERNING_PACKAGE_JSON,
+  normalizeFileAnchors,
+  ok,
+  type DriftInputEntry,
+  type FsProbe,
+  type FsReadPort,
+  type LoreError,
+  type Result,
+} from "@lore/core";
 import { extractCodeReferences } from "./claude-md-admission.js";
 
 /** Which kind of document holds a binding. */
@@ -168,5 +178,86 @@ export function findBindings(index: ReferenceIndex, path: string): ReferenceBind
   return index.bindings.filter(
     (binding) => binding.path === path || (binding.folder === true && path.startsWith(`${binding.path}/`)),
   );
+}
+
+/** Repo-relative directories whose `*.md` files are context fragments (project layer, then this repo's shipped layer). */
+export const FRAGMENT_DOCUMENT_DIRS: readonly string[] = [".lore/context", "assets/context"];
+
+/**
+ * Reads every context fragment through an async port as a reference document: raw file text
+ * (frontmatter included, so a reference's line number is its line in the file). A missing
+ * directory is an empty layer (the port lists it as `[]`); a listed `*.md` file the port cannot
+ * read is an error, because a fragment that cannot be read is not a clean one.
+ *
+ * @param port - Read port rooted at the repository.
+ * @returns `{ path, content }` per fragment, project layer first, file names sorted.
+ */
+export async function loadFragmentDocuments(
+  port: FsReadPort,
+): Promise<Result<Array<{ path: string; content: string }>, LoreError>> {
+  const documents: Array<{ path: string; content: string }> = [];
+  for (const dir of FRAGMENT_DOCUMENT_DIRS) {
+    const names = (await port.listDir(dir)).filter((name) => name.endsWith(".md")).sort();
+    for (const name of names) {
+      const path = `${dir}/${name}`;
+      const content = await port.readFile(path);
+      if (content === null) {
+        return err({ code: "VALIDATION_ERROR", field: path, message: `${path}: fragment file could not be read`, value: path });
+      }
+      documents.push({ path, content });
+    }
+  }
+  return ok(documents);
+}
+
+/**
+ * Builds a synchronous {@link FsProbe} from an async port for exactly the paths the given
+ * documents' references can touch (every candidate path, plus the governing package.json), by
+ * observing them up front. A path the probe was not asked about throws, so the resolver reports
+ * a `probe_error` instead of a guess. Used by callers whose filesystem port is async
+ * (`flows/context-flow.ts`) while `runMemoryFileChecks` is synchronous.
+ *
+ * @param port - Read port rooted at the repository.
+ * @param documents - The documents whose references will be resolved (memory files and fragments).
+ * @returns A probe answering from the prefetched observations.
+ */
+export async function prefetchReferenceProbe(
+  port: FsReadPort,
+  documents: ReadonlyArray<{ path: string; content: string }>,
+): Promise<FsProbe> {
+  const wanted = new Set<string>([GOVERNING_PACKAGE_JSON]);
+  for (const document of documents) {
+    for (const reference of extractCodeReferences(document.content, document.path)) {
+      wanted.add(reference.path);
+      for (const alternative of reference.alternativePaths ?? []) wanted.add(alternative);
+    }
+  }
+
+  const observed = new Map<string, { stat: "file" | "dir" | "missing"; content: string | null; children: string[] | null }>();
+  for (const path of wanted) {
+    const content = await port.readFile(path);
+    if (content !== null) {
+      observed.set(path, { stat: "file", content, children: null });
+      continue;
+    }
+    const children = await port.listDir(path);
+    observed.set(
+      path,
+      children.length > 0 ? { stat: "dir", content: null, children } : { stat: "missing", content: null, children: null },
+    );
+  }
+
+  const lookup = (path: string) => {
+    const entry = observed.get(path);
+    if (entry === undefined) {
+      throw new Error(`path "${path}" was not prefetched; the reference probe only knows paths named by the checked documents`);
+    }
+    return entry;
+  };
+  return {
+    stat: (path) => lookup(path).stat,
+    readFile: (path) => lookup(path).content,
+    listDir: (path) => lookup(path).children,
+  };
 }
 

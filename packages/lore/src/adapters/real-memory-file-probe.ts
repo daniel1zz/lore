@@ -53,6 +53,7 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join, relative, sep } from "node:path";
 import type { MemoryFileRecord } from "../service/claude-md-findings.js";
+import { FRAGMENT_DOCUMENT_DIRS } from "../service/code-reference-index.js";
 
 /** Directory basenames never descended into, at any depth. */
 const EXCLUDED_DIR_NAMES: ReadonlySet<string> = new Set([
@@ -224,8 +225,6 @@ function walkRulesDir(repoRoot: string, dir: string, records: MemoryFileRecord[]
   }
 }
 
-/** Repo-relative directories whose `*.md` files are context fragments (project layer, then the shipped layer of this repo). */
-const FRAGMENT_DIRS: readonly string[] = [".lore/context", "assets/context"];
 
 /**
  * Reads every context fragment under `repoRoot` as a reference document: raw file text
@@ -241,7 +240,7 @@ const FRAGMENT_DIRS: readonly string[] = [".lore/context", "assets/context"];
  */
 export function discoverFragmentDocuments(repoRoot: string): Array<{ path: string; content: string }> {
   const documents: Array<{ path: string; content: string }> = [];
-  for (const dir of FRAGMENT_DIRS) {
+  for (const dir of FRAGMENT_DOCUMENT_DIRS) {
     const absoluteDir = join(repoRoot, dir);
     if (!existsSync(absoluteDir)) continue;
     for (const name of readdirSync(absoluteDir).filter((n) => n.endsWith(".md")).sort()) {

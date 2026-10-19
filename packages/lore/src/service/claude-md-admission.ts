@@ -137,6 +137,7 @@
 import {
   docTypeSchema,
   GOVERNING_PACKAGE_JSON,
+  startsWithFragmentFingerprint,
   normalizeFileAnchors,
   parseCodeAnchor,
   resolveCodeReferences,
@@ -252,13 +253,6 @@ function joinPaths(dir: string, rel: string): string {
   return dir === "" ? rel : `${dir}/${rel}`;
 }
 
-/**
- * First line of a lore-managed rules file (a generated projection of a fragment). Mirrors
- * `service/context-fragments/section.ts`'s fingerprint line; that module reads the filesystem, so
- * this pure module cannot import it, and `bind-script-reference.test.ts` pins the two in agreement.
- */
-const MANAGED_PROJECTION_RE = /^<!-- lore:managed fragment=\S+ hash=[0-9a-f]{8} -->\n/;
-
 /** A source file whose `#Symbol` suffix names an export (the only files whose exports the resolver can scan). */
 const CODE_FILE_RE = /\.(?:ts|tsx|mts|cts|js|jsx|mjs|cjs)$/;
 
@@ -296,24 +290,34 @@ function parsePathReference(
   if (!token.includes("/")) return undefined;
   if (URL_SCHEME_RE.test(token)) return undefined;
   if (isExcludedReferenceCandidate(token)) return undefined;
-  // reason: a leading `./` is a module-specifier spelling (`./errors.js` names the `.ts` source
-  // through its emitted extension), not a repo path; checking it would report every such mention.
-  if (token.startsWith("./")) return undefined;
+  // A leading `./` is explicit: the path is relative to the document's own directory, and only there.
+  const explicitlyRelative = token.startsWith("./");
+  const spelled = explicitlyRelative ? token.slice(2) : token;
 
-  const hashIndex = token.indexOf("#");
-  const filePart = hashIndex === -1 ? token : token.slice(0, hashIndex);
+  const hashIndex = spelled.indexOf("#");
+  const filePart = hashIndex === -1 ? spelled : spelled.slice(0, hashIndex);
   if (filePart.length === 0) return undefined;
   if (!looksLikePathCandidate(filePart)) return undefined;
 
-  const withFragment = hashIndex !== -1 && CODE_FILE_RE.test(filePart) ? parseCodeAnchor(token) : undefined;
-  const parsed = withFragment !== undefined && withFragment.ok ? withFragment : parseCodeAnchor(filePart);
+  const resolvedSpelling = explicitlyRelative
+    ? joinPaths(dirnameOf(scannedFilePath ?? ""), spelled)
+    : spelled;
+  const withFragment = hashIndex !== -1 && CODE_FILE_RE.test(filePart) ? parseCodeAnchor(resolvedSpelling) : undefined;
+  const parsed =
+    withFragment !== undefined && withFragment.ok
+      ? withFragment
+      : parseCodeAnchor(explicitlyRelative ? joinPaths(dirnameOf(scannedFilePath ?? ""), filePart) : filePart);
   if (!parsed.ok) return undefined; // not a valid repo-relative path (SPEC-042 grammar): noise, not a finding
 
   const anchor = parsed.value;
   const alternativePaths: string[] = [];
   // Ancestor-relative resolution: module docs name siblings relative to their own directory
   // (`commands/set.ts` in adapters/cli/CLAUDE.md) or to a parent package (`service/x.ts`).
-  for (let dir = dirnameOf(scannedFilePath ?? ""); scannedFilePath !== undefined && dir !== ""; dir = dirnameOf(dir)) {
+  for (
+    let dir = dirnameOf(scannedFilePath ?? "");
+    !explicitlyRelative && scannedFilePath !== undefined && dir !== "";
+    dir = dirnameOf(dir)
+  ) {
     const joined = normalizeFileAnchors([joinPaths(dir, filePart)]);
     const candidate = joined.ok ? joined.value[0]?.replace(/\/$/, "") : undefined;
     if (candidate !== undefined && candidate !== anchor.path && !alternativePaths.includes(candidate)) {
@@ -809,20 +813,18 @@ export function measureTargetDistances(
  */
 export interface AdmissionDeps {
   /**
-   * Filesystem port the one core resolver reads references through. ABSENT means the caller
-   * judges structure/capacity only (the inert call sites in `flows/context-flow.ts` and
-   * `flows/setup-project-flow.ts`): reference checks are then not run at all, never
-   * approximated from a predicate.
+   * Filesystem port the one core resolver reads references through. REQUIRED: a caller that
+   * cannot observe the repository must say so with a probe that reports it (a `probe_error`),
+   * never by omitting the check.
    */
-  probe?: FsProbe;
+  probe: FsProbe;
   /**
    * Other prose that binds to code and is NOT a memory file: context fragments
    * (`.lore/context/*.md`, `assets/context/*.md`). Their references are resolved like a
-   * memory file's, but no ceiling, structure or emphasis check applies to them.
+   * memory file's, but no ceiling, structure or emphasis check applies to them. REQUIRED
+   * (pass `[]` when there are none).
    */
-  referenceDocuments?: ReadonlyArray<{ path: string; content: string }>;
-  /** Retired: no longer consulted (references resolve through `probe`). Accepted so inert callers still compile. */
-  fileExists?: (p: string) => boolean;
+  referenceDocuments: ReadonlyArray<{ path: string; content: string }>;
   /** Caller-owned corpus-slug existence predicate — backs `checkSlugPointers` (Phase 2). */
   docExists: (slug: string) => boolean;
 }
@@ -908,7 +910,7 @@ export function runMemoryFileChecks(
     // reason: a lore-managed rules file is a generated projection of a fragment; its references are
     // checked once, at the fragment (`referenceDocuments`) where they are authored. Checking the copy
     // would also flag shipped default text in a project that never wrote it.
-    if (deps.probe !== undefined && !MANAGED_PROJECTION_RE.test(file.content)) {
+    if (!startsWithFragmentFingerprint(file.content)) {
       wouldBeDeterministic.push(...checkCodeReferences(file, deps.probe));
     }
 
@@ -928,10 +930,8 @@ export function runMemoryFileChecks(
     }
   }
 
-  if (deps.probe !== undefined) {
-    for (const document of deps.referenceDocuments ?? []) {
-      wouldBeDeterministic.push(...checkCodeReferences(document, deps.probe));
-    }
+  for (const document of deps.referenceDocuments) {
+    wouldBeDeterministic.push(...checkCodeReferences(document, deps.probe));
   }
 
   const headroom = computeHeadroom(files, budgets);

@@ -115,12 +115,14 @@
  *     any such finding refuses the whole call with `err(VALIDATION_ERROR)`
  *     naming every breach and performs NO write — a within-budget splice is
  *     unaffected (byte-identical to pre-check behavior). The ADVISORY half
- *     (dangling references, narrative smells) is computed and discarded —
- *     `runMemoryFileChecks` never lets an advisory finding refuse a write,
- *     matching every other consumer of this mechanism — so the
- *     `fileExists`/`docExists` predicates this call supplies are inert
- *     stand-ins (this verb reports no reference/slug advisories; that
- *     surface is `lore status --check-claude-md`'s job). `runContextInit`
+ *     (narrative smells) is computed and discarded — `runMemoryFileChecks`
+ *     never lets an advisory finding refuse a write. Code references are
+ *     DETERMINISTIC findings: the candidate and every context fragment are
+ *     resolved through a probe prefetched from `deps.fs`
+ *     (`prefetchReferenceProbe`), so `refresh --check` reports a dangling
+ *     `path#Symbol` or script exactly as `lore status --check-claude-md`
+ *     does; `docExists` stays an inert `() => true` (slug pointers are
+ *     `--check-memory-pointers`'s job). `runContextInit`
  *     does NOT run this check: its own already-exists refusal is the
  *     narrower, pre-existing guard for that verb (out of this AC's scope),
  *     and `--force` (init-only) never bypasses `runContextRefresh`'s check
@@ -148,6 +150,7 @@ import type { ContextConfigLayer, Fragment, FsWritePort, LoreError, MemoryFileBu
 import type { AdvisoryFinding } from "../service/claude-md-findings.js";
 import { collectContextFacts, type ContextFacts } from "../service/context-facts.js";
 import { runMemoryFileChecks } from "../service/claude-md-admission.js";
+import { loadFragmentDocuments, prefetchReferenceProbe } from "../service/code-reference-index.js";
 import { migrateLegacyAutoBlocks, spliceManagedSections, type ManagedSection, type SpliceResult } from "../service/context-projection.js";
 import { discoverFragments } from "../service/context-fragments/discover.js";
 import { expandFragments } from "../service/context-fragments/expand.js";
@@ -639,6 +642,7 @@ async function planRulesFiles(
 ): Promise<Result<RulesAction[], LoreError>> {
   const actions: RulesAction[] = [];
   const keep = new Set<string>();
+  const rulesReferenceProbe = await prefetchReferenceProbe(deps.fs, []);
 
   for (const fragment of selected) {
     const rendered = renderRulesFile(fragment);
@@ -647,8 +651,12 @@ async function planRulesFiles(
     keep.add(fileName);
     const path = joinPortPath(rulesDir, fileName);
 
+    // A rules file written here is a lore-managed projection of a fragment: its references are
+    // checked at the fragment (the root-CLAUDE.md check below passes the fragments), so no
+    // reference document is checked here and the probe reads nothing.
     const { deterministic: findings } = runMemoryFileChecks([{ path, role: "rules", content }], budgets, {
-      fileExists: () => true,
+      probe: rulesReferenceProbe,
+      referenceDocuments: [],
       docExists: () => true,
     });
     if (findings.length > 0) {
@@ -881,11 +889,19 @@ export async function runContextRefresh(
       // before any write. Only `.deterministic` gates the write. `.advisory` never
       // refuses; only its `kind: "downgraded"` entries are surfaced (the
       // `downgraded:` field of the `ok(...)` return below), the rest dropped
-      // (module header explains why `fileExists`/`docExists` are inert stand-ins here).
+      // (`docExists` is an inert stand-in; see the module header).
+      // The candidate's code references (and every fragment's) resolve against the repository the
+      // port is rooted at, through the same resolver `lore status --check-claude-md` uses.
+      const fragmentsResult = await loadFragmentDocuments(deps.fs);
+      if (!fragmentsResult.ok) return fragmentsResult;
+      const referenceProbe = await prefetchReferenceProbe(deps.fs, [
+        { path: CLAUDE_MD_PATH, content: finalContent },
+        ...fragmentsResult.value,
+      ]);
       const { deterministic: findings, advisory } = runMemoryFileChecks(
         [{ path: CLAUDE_MD_PATH, role: "root", content: finalContent }],
         budgets,
-        { fileExists: () => true, docExists: () => true },
+        { probe: referenceProbe, referenceDocuments: fragmentsResult.value, docExists: () => true },
       );
       if (findings.length > 0) {
         // reason: D16 — the CLAUDE.md refusal must NOT short-circuit the rules-file write set (it is

@@ -1,5 +1,6 @@
 // @spawns packages/lore/src/index.ts
 // @reads packages/lore/src/service/claude-md-admission.ts
+// @reads packages/lore/src/service/context-fragments/section.ts
 /**
  * AC-BIND-1 (spec-prose-about-code-is-bound-to-what-it-describes-one, D1): a memory-file
  * reference to `path#Symbol` whose file exists but does not export `Symbol` is a
@@ -182,6 +183,40 @@ describe("AC-BIND-1: one resolver for prose and spec anchors", () => {
 
     expect(findings).toHaveLength(1);
     expect(findings[0]).toMatchObject({ kind: "probe_error", detail: "EIO" });
+  });
+
+  it("BOUNDARY: a leading `./` names a path relative to the document's own directory, and only there", () => {
+    const docFiles = new Map<string, string>([
+      ["pkg/src/sibling.ts", "export const Here = 1;\n"],
+      ["gone-at-root.ts", "export const Here = 1;\n"],
+    ]);
+    const docProbe: FsProbe = {
+      stat: (p) => (docFiles.has(p) ? "file" : "missing"),
+      readFile: (p) => docFiles.get(p) ?? null,
+      listDir: () => [],
+    };
+    const content = "`./sibling.ts#Here` ok; `./sibling.ts#Gone` bad symbol; `./gone-at-root.ts` must not fall back to the root.";
+
+    const references = extractCodeReferences(content, "pkg/src/CLAUDE.md");
+    const findings = resolveCodeReferences(references, docProbe);
+
+    expect(references.map((r) => r.path)).toEqual(["pkg/src/sibling.ts", "pkg/src/sibling.ts", "pkg/src/gone-at-root.ts"]);
+    expect(references.every((r) => r.alternativePaths === undefined)).toBe(true);
+    expect(findings.map((f) => [f.reference.raw, f.kind])).toEqual([
+      ["./sibling.ts#Gone", "symbol_missing"],
+      ["./gone-at-root.ts", "file_missing"],
+    ]);
+  });
+
+  it("REGRESSION: the lore:managed fingerprint line has ONE definition (core), none in admission or section.ts", () => {
+    const section = readFileSync(join(PACKAGE_ROOT, "src", "service", "context-fragments", "section.ts"), "utf8");
+    const admission = readFileSync(ADMISSION_TS, "utf8");
+
+    expect(admission).toContain("startsWithFragmentFingerprint");
+    expect(section).toContain("FRAGMENT_FINGERPRINT_LINE");
+    for (const source of [section, admission]) {
+      expect(source.replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, "")).not.toMatch(/lore:managed fragment=/);
+    }
   });
 
   it("REGRESSION: the admission module keeps no existence check or export scan of its own", () => {
