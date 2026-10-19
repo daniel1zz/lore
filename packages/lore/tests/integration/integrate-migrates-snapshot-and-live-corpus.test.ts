@@ -211,9 +211,9 @@ describe("integrate migrates the floor's snapshot and then the live corpus, only
 
     expect(r.exitCode, r.out).toBe(0);
     expect(fx.git(["rev-parse", "main"])).not.toBe(before);
-    // the floor script (set -e) asserted: snapshot at LATEST with its own one migrate_schema row
-    expect(r.out).toContain("floor-saw-migrated-snapshot");
-    expect(r.out).toContain(`schema: ${latestVersion - 1} -> ${latestVersion}`);
+    // the floor script (set -e, exit 0 = it passed) asserted: snapshot at LATEST with its own one migrate_schema row
+    expect(r.out).toContain(`integrate: snapshot schema: ${latestVersion - 1} -> ${latestVersion}`);
+    expect(r.out).toContain(`integrate: schema: ${latestVersion - 1} -> ${latestVersion}`);
     expect(fx.dbTool(["getVersion", fx.sharedDb()])).toBe(String(latestVersion));
     expect(fx.dbTool(["auditCount", fx.sharedDb()])).toBe("1");
     expect(fx.dbTool(["hasMarker", fx.sharedDb()])).toBe("0");
@@ -227,7 +227,7 @@ describe("integrate migrates the floor's snapshot and then the live corpus, only
     const r = await fx.integrate(branch, "sess-cur");
 
     expect(r.exitCode, r.out).toBe(0);
-    expect(r.out).toContain("schema: already current");
+    expect(r.out).toContain("integrate: schema: already current");
     expect(fx.dbTool(["auditCount", fx.sharedDb()])).toBe("0");
   }, 240_000);
 
@@ -241,7 +241,8 @@ describe("integrate migrates the floor's snapshot and then the live corpus, only
     expect(r.exitCode, r.out).toBe(1);
     expect(r.out).toContain("migration 999 exploded");
     expect(r.out).toContain(join(fx.integrationWorktree("sess-bad"), ".lore"));
-    expect(r.out).not.toContain("floor-saw-migrated-snapshot");
+    expect(r.out).toContain("the floor did not run and main is unchanged");
+    expect(r.out).not.toContain("integrate: landed");
     expect(fx.git(["rev-parse", "main"])).toBe(before);
     expect(fx.dbTool(["getVersion", fx.sharedDb()])).toBe(String(latestVersion));
     expect(existsSync(join(fx.integrationWorktree("sess-bad"), ".lore", "lore.db"))).toBe(false);
@@ -258,7 +259,7 @@ describe("integrate migrates the floor's snapshot and then the live corpus, only
     expect(fx.git(["rev-parse", "main"])).not.toBe(before);
     expect(fx.git(["merge-base", "--is-ancestor", branch, "main"])).toBe("");
     expect(r.out).toContain("migration 999 exploded");
-    expect(r.out).toContain(fx.sharedDb());
+    expect(r.out).toContain(`on ${join(fx.repo, ".lore")};`);
     expect(r.out).toContain(`sh ${fx.wrapperPath} fail-live migrate schema`);
     expect(r.out).toMatch(/main stays landed/);
   }, 240_000);
