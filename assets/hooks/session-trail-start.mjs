@@ -25,7 +25,7 @@ try {
   if (payload.hook_event_name === 'SessionStart') {
     recordSessionStart(base, sessionId);
   } else if (payload.hook_event_name === 'SubagentStart') {
-    recordHelperStart(base, sessionId, payload.agent_id);
+    recordHelperStart(base, sessionId, payload.agent_id, Date.now(), payload.cwd);
   }
 } catch {
   // reason: spec D13 — a trail hook never speaks; failures surface later as measured:false

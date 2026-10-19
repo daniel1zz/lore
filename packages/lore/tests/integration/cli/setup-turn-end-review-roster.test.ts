@@ -36,6 +36,10 @@ const BUN_BIN = execSync("command -v bun", { encoding: "utf8" }).trim();
 const NEW_HOOK = "stop-turn-review.mjs";
 const USER_COMMAND = "node /opt/user-owned/my-stop-hook.mjs";
 const GIT_SAFETY = "pre-bash-git-safety-gate.mjs";
+/** BR-1092's second permitted per-call refuser: an isolated helper writing into a foreign git working copy. */
+const FOREIGN_WORKING_COPY_GATE = "pre-helper-foreign-working-copy-gate.mjs";
+/** The registered per-call hooks BR-1092 allows to refuse: exactly these two. */
+const ALLOWED_PER_CALL_REFUSERS: readonly string[] = [GIT_SAFETY, FOREIGN_WORKING_COPY_GATE];
 
 interface LegacyRegistration {
   file: string;
@@ -173,14 +177,14 @@ describe("turn-end-review roster swap (AC-TE-5)", () => {
     expect(files).toContain("post-edit-mark.mjs");
   });
 
-  it("AC-TE-5.N1: no registered PreToolUse/PostToolUse hook other than pre-bash-git-safety-gate.mjs can emit a deny/block (BR-1092)", async () => {
+  it("AC-TE-5.N1: the registered PreToolUse/PostToolUse hooks that can emit a deny/block are exactly {pre-bash-git-safety-gate.mjs, pre-helper-foreign-working-copy-gate.mjs} (BR-1092)", async () => {
     const { HOOK_REGISTRATIONS } = await import("@lore/core");
     const perCall = [
       ...new Set(
         HOOK_REGISTRATIONS.filter((reg) => reg.event === "PreToolUse" || reg.event === "PostToolUse").map((reg) => reg.file),
       ),
     ];
-    expect(perCall).toContain(GIT_SAFETY);
+    for (const allowed of ALLOWED_PER_CALL_REFUSERS) expect(perCall).toContain(allowed);
     const DENY_SHAPES: readonly RegExp[] = [
       /permissionDecision["']?\s*:\s*["']deny/,
       /decision["']?\s*:\s*["']block/,
@@ -190,9 +194,9 @@ describe("turn-end-review roster swap (AC-TE-5)", () => {
     for (const file of perCall) {
       const source = readFileSync(join(REPO_ROOT, "assets", "hooks", file), "utf8");
       const hits = DENY_SHAPES.filter((shape) => shape.test(source)).length;
-      if (file === GIT_SAFETY) {
+      if (ALLOWED_PER_CALL_REFUSERS.includes(file)) {
         // Positive control: the scan really detects a refusal, so a zero elsewhere is not vacuous.
-        expect(hits, "the git safety gate must still be detected as a refuser").toBeGreaterThan(0);
+        expect(hits, `${file} must still be detected as a refuser`).toBeGreaterThan(0);
       } else {
         expect(hits, `${file} can emit a deny/block`).toBe(0);
       }
