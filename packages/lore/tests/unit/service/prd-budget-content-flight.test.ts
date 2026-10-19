@@ -82,20 +82,6 @@ import type { PrdBudgetLike } from "../../../src/service/prd-budget-check.js";
 const SPEC_DEFAULT_WHOLE_DOC_CHARS = 24000;
 const SPEC_DEFAULT_EXTRA_PROSE_CHARS = 1000;
 
-/** A stored (read-only history) outline entry — never measured, never flagged. */
-function makeOutlineEntry(overrides: Record<string, unknown> = {}): Record<string, unknown> {
-  return {
-    section: "distribution",
-    title: "Distribution",
-    tier: "core",
-    direction: "",
-    decision_pointers: [],
-    constraints: [],
-    links: [],
-    ...overrides,
-  };
-}
-
 function breachKinds(result: { breaches: Array<{ kind: string }> }): string[] {
   return result.breaches.map((b) => b.kind);
 }
@@ -121,13 +107,12 @@ describe("scanContentFlight", () => {
   });
 
   // NEGATIVE — typed schema keys are NEVER flagged, no matter how long their prose is.
-  it("never flags free text living inside the four typed schema keys (requirements/acceptance_criteria/phases/outline)", () => {
+  it("never flags free text living inside the three typed schema keys (requirements/acceptance_criteria/phases)", () => {
     const hugeProse = "y".repeat(5 * SPEC_DEFAULT_EXTRA_PROSE_CHARS);
     const extra = {
       requirements: [{ id: "R-1", statement: hugeProse, priority: "P0" }],
       acceptance_criteria: [{ id: "AC-1", statement: hugeProse, verify: { mode: "human" } }],
       phases: [{ key: "phase-1", title: hugeProse }],
-      outline: [makeOutlineEntry({ direction: hugeProse })],
     };
     const flags = scanContentFlight(extra, SPEC_DEFAULT_EXTRA_PROSE_CHARS);
     expect(flags).toEqual([]);
@@ -147,15 +132,6 @@ describe("scanContentFlight", () => {
 });
 
 // ─── checkPrdBudget — whole-doc boundary math ──
-
-describe("checkPrdBudget: a stored outline is retired history, never measured", () => {
-  it("reports no breach for an outline entry far over the old 4000-char core budget", () => {
-    const entry = makeOutlineEntry({ tier: "core", direction: "a".repeat(5000) });
-    const result = checkPrdBudget({ raw_body: "short compliant body", extra: { outline: [entry] } });
-    expect(result.consistent).toBe(true);
-    expect(result.breaches).toEqual([]);
-  });
-});
 
 describe("checkPrdBudget: whole rendered body budget (=24000 invariant)", () => {
   it("flags a rendered body one char over the 24000-char whole-doc budget", () => {

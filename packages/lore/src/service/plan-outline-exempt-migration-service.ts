@@ -3,7 +3,7 @@
  * field (`plan.extra.prd_sync_exempt`) from every stored plan (`lore migrate plan-outline-exempt [--apply]`;
  * BL-D2, baseline-close-a-plan BR-250).
  *
- * Purpose: the exemption's writer (`lore outline exempt`) and its reader (the plan-close outline-sync predicate)
+ * Purpose: the exemption's writer (the retired outline exemption verb) and its reader (the plan-close outline-sync predicate)
  * were retired by slice 3a (BR-985); what remained was inert stored data plus a refusal of edits to it and a
  * `lore status` listing of it. This migration deletes the data so the refusal and listing could be deleted too.
  *
