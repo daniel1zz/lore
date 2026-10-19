@@ -426,7 +426,7 @@ export async function resolveGithubIssueListing(io: CliIo,
   const listResult = await port.listIssues();
   if (!listResult.ok) return listResult;
 
-  return ok({ issues: listResult.value, repoId: verifyResult.value.id });
+  return ok({ issues: listResult.value.issues, repoId: verifyResult.value.id });
 }
 
 /**
