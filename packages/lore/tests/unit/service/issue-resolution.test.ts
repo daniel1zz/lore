@@ -34,7 +34,6 @@ import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
 import {
   computeIssueResolution,
-  hasIssueReport,
   checkResolutionPointer,
   isDanglingAdoption,
   ADOPTED_RESOLUTION_POINTER,
@@ -77,21 +76,7 @@ async function createFixingSpec(cs: CorpusService, rootPrdId: string): Promise<D
   } as CreateDocInput);
 }
 
-/** An ad-hoc issue task carrying extra.issue_report — a valid `resolves` target. */
-async function createIssueTask(
-  cs: CorpusService,
-  title = "Filed defect",
-  issueReport: unknown = { reporter_project: "consumer-a", expected: "exit 0", actual: "exit 4" },
-): Promise<DocRecord> {
-  return mustCreate(cs, {
-    type: "task",
-    title,
-    content: `# ${title}`,
-    extra: { adhoc: true, issue_report: issueReport },
-  } as CreateDocInput);
-}
-
-/** An ad-hoc task with NO extra.issue_report — a valid task, but an invalid `resolves` target. */
+/** An ad-hoc task with NO extra.issue_report — a valid task. */
 async function createPlainTask(cs: CorpusService, title = "Ordinary task"): Promise<DocRecord> {
   return mustCreate(cs, {
     type: "task",
@@ -101,88 +86,36 @@ async function createPlainTask(cs: CorpusService, title = "Ordinary task"): Prom
   } as CreateDocInput);
 }
 
-// ─── AC-ICL-1: resolves link type + write-time validation ──────────────────
+// ─── AC-ICL-1 (retired): the `resolves` link type is refused ────────────────
+// reason: spec-github-owns-issue-report-state-no-mirror-task-work-carries D1 retired `resolves` (the carrier is
+// extra.issues). The former AC-ICL-1 HAPPY/NEGATIVE/BOUNDARY/ERROR/STATE cases asserted the write-time target
+// check that no longer exists; the one surviving contract is that no `resolves` edge can be created at all
+// (full refusal matrix: tests/unit/service/issue-carrier-schema.test.ts).
 
-describe("AC-ICL-1: resolves link type", () => {
-  it("AC-ICL-1 HAPPY: linkTypeSchema accepts 'resolves'; CorpusService.link creates the edge to an issue task", async () => {
-    expect(linkTypeSchema.safeParse("resolves").success).toBe(true);
+describe("AC-ICL-1 (retired by the carrier schema): resolves link type", () => {
+  it("AC-ICL-1 NEGATIVE: linkTypeSchema no longer lists 'resolves'; CorpusService.link refuses it whatever the target", async () => {
+    expect(linkTypeSchema.safeParse("resolves").success).toBe(false);
 
-    const { service } = makeService();
-    const rootPrd = await createRootPrd(service);
-    const fixingSpec = await createFixingSpec(service, rootPrd.id);
-    const issueTask = await createIssueTask(service);
-
-    const linkResult = await service.link(fixingSpec.id, issueTask.id, "resolves");
-    expect(linkResult.ok).toBe(true);
-    if (!linkResult.ok) return;
-    expect(linkResult.value.link_type).toBe("resolves");
-    expect(linkResult.value.from_id).toBe(fixingSpec.id);
-    expect(linkResult.value.to_id).toBe(issueTask.id);
-  });
-
-  it("AC-ICL-1 NEGATIVE: resolves edge to a task lacking extra.issue_report is rejected with a named VALIDATION_ERROR", async () => {
-    const { service } = makeService();
+    const { service, store } = makeService();
     const rootPrd = await createRootPrd(service);
     const fixingSpec = await createFixingSpec(service, rootPrd.id);
     const plainTask = await createPlainTask(service);
 
-    const linkResult = await service.link(fixingSpec.id, plainTask.id, "resolves");
-    expect(linkResult.ok).toBe(false);
-    if (linkResult.ok) return;
-    expect(linkResult.error.code).toBe("VALIDATION_ERROR");
-  });
-
-  it("AC-ICL-1 BOUNDARY: resolves edge to a non-task doc is rejected (type check fires independently of the issue_report check)", async () => {
-    const { service } = makeService();
-    const rootPrd = await createRootPrd(service);
-    const fixingSpec = await createFixingSpec(service, rootPrd.id);
-    // The root PRD itself: not a task at all, so hasIssueReport is irrelevant here —
-    // this isolates the `toDoc.type !== "task"` half of the write-time check.
-    const linkResult = await service.link(fixingSpec.id, rootPrd.id, "resolves");
-    expect(linkResult.ok).toBe(false);
-    if (linkResult.ok) return;
-    expect(linkResult.error.code).toBe("VALIDATION_ERROR");
-  });
-
-  it("AC-ICL-1 ERROR: a task whose extra.issue_report is malformed (a string, not an object) is rejected as if absent", async () => {
-    const { service } = makeService();
-    const rootPrd = await createRootPrd(service);
-    const fixingSpec = await createFixingSpec(service, rootPrd.id);
-    const malformedTask = await createIssueTask(service, "Malformed", "not-an-object");
-
-    // Confirms the defensive predicate itself classifies this as absent...
-    expect(hasIssueReport(malformedTask.extra)).toBe(false);
-
-    // ...and that CorpusService.link's write-time check agrees, never throwing.
-    const linkResult = await service.link(fixingSpec.id, malformedTask.id, "resolves");
-    expect(linkResult.ok).toBe(false);
-    if (linkResult.ok) return;
-    expect(linkResult.error.code).toBe("VALIDATION_ERROR");
-  });
-
-  it("AC-ICL-1 STATE: after a successful resolves link, findLinks reflects exactly one resolves edge", async () => {
-    const { service, store } = makeService();
-    const rootPrd = await createRootPrd(service);
-    const fixingSpec = await createFixingSpec(service, rootPrd.id);
-    const issueTask = await createIssueTask(service);
-
-    await service.link(fixingSpec.id, issueTask.id, "resolves");
-
+    for (const target of [plainTask.id, rootPrd.id]) {
+      const linkResult = await service.link(fixingSpec.id, target, "resolves");
+      expect(linkResult.ok).toBe(false);
+      if (linkResult.ok) return;
+      expect(linkResult.error.code).toBe("VALIDATION_ERROR");
+    }
     const findResult = await store.findLinks(fixingSpec.id, "out");
-    expect(findResult.ok).toBe(true);
-    if (!findResult.ok) return;
-    expect(findResult.value.length).toBe(1);
-    expect(findResult.value[0]?.to_id).toBe(issueTask.id);
-    expect(findResult.value[0]?.link_type).toBe("resolves");
+    expect(findResult.ok && findResult.value.length).toBe(0);
   });
 
-  it("AC-ICL-1 REGRESSION: non-resolves link types are unaffected by the new validation", async () => {
+  it("AC-ICL-1 REGRESSION: non-resolves link types are unaffected", async () => {
     const { service } = makeService();
     const rootPrd = await createRootPrd(service);
     const fixingSpec = await createFixingSpec(service, rootPrd.id);
 
-    // A "relates-to" link to the root PRD (not a task, no issue_report) must
-    // still succeed — the D1b check is scoped to type === "resolves" only.
     const linkResult = await service.link(fixingSpec.id, rootPrd.id, "relates-to");
     expect(linkResult.ok).toBe(true);
     if (!linkResult.ok) return;
