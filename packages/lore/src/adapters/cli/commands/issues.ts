@@ -217,6 +217,15 @@ export default defineLoreCommand({
       "List the configured repository's GitHub issues with their displayed status (live listing joined with the work that carries them); --sync repairs GitHub from the carriers",
   },
   args: {
+    action: {
+      type: "positional",
+      required: false,
+      description: "'migrate' runs the one-time mirror-to-carrier migration (dry run unless --apply)",
+    },
+    apply: {
+      type: "boolean",
+      description: "With 'migrate': execute the plan (writes GitHub and the corpus); resumable and idempotent",
+    },
     open: {
       type: "boolean",
       // reason: the member list is RENDERED from the SSOT status array, never typed out, so help cannot drift.
@@ -248,14 +257,27 @@ export default defineLoreCommand({
       description: "Output as JSON",
     },
   },
-  // reason: `lore issues migrate` is the one-time mirror -> carrier conversion (spec D1/Migration, AC-GS-12); a nested
-  // lazy import keeps this listing command's cold start free of the migration's imports.
-  subCommands: {
-    migrate: () => import("./issues-migrate.js").then((module) => module.default),
-  },
   async run(context): Promise<number> {
     const inv = invocationOf(context);
     const { args } = context;
+    // reason: `lore issues migrate` is dispatched on the positional VALUE, not a citty `subCommands` entry — citty runs a
+    // parent's own `run` after a nested subcommand, which would list issues (and reject `--apply`) after the migration ran.
+    if (args.action !== undefined) {
+      if (args.action !== "migrate") {
+        inv.io.stderr.write(`Error: unknown action '${String(args.action)}'; the only action is 'migrate'.\n`);
+        return 2;
+      }
+      if (args.open === true || args.resolved === true || args.all === true || args.severity !== undefined || args.category !== undefined || args.sync === true) {
+        inv.io.stderr.write("Error: 'migrate' takes only --apply and --json.\n");
+        return 2;
+      }
+      const { runIssuesMigrate } = await import("./issues-migrate.js");
+      return runIssuesMigrate({ apply: args.apply === true, json: args.json === true }, inv);
+    }
+    if (args.apply === true) {
+      inv.io.stderr.write("Error: --apply belongs to 'lore issues migrate'.\n");
+      return 2;
+    }
     // reason: usage errors exit 2 BEFORE the corpus is opened or GitHub is contacted.
     if (
       args.sync === true &&

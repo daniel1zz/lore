@@ -26,13 +26,11 @@
  * Side-effect class: IO (SQL read, corpus writes via CorpusService, GitHub via `gh`); `--apply` only for the writes.
  */
 
-import type { DocRecord, IssueRef, LoreError, Result } from "@lore/core";
+import type { DocRecord, Invocation, IssueRef, LoreError, Result } from "@lore/core";
 import { buildUnconfiguredUpstreamRemedy, err, issueRefSchema, MAX_ISSUE_REFS_PER_CARRIER, ok, readIssueTriageLabels } from "@lore/core";
 import { resolveActorWithSource } from "@lore/core/node";
 import { dirname } from "node:path";
 
-import { defineLoreCommand } from "../cli-exit.js";
-import { invocationOf } from "../command-invocation.js";
 import { loadLoreApp } from "../loader.js";
 import { printLine } from "../output.js";
 import {
@@ -371,7 +369,7 @@ async function readCarriers(app: LoadedApp): Promise<Result<DocRecord[], LoreErr
  * The final pass: close every open issue that has an archived carrier (D3), strip stray labels, then remove the retired
  * labels and any `resolution:fixed` an issue is not entitled to. Returns the failures; never aborts on one.
  */
-async function runFinalPasses(inv: ReturnType<typeof invocationOf>, ctx: ApplyContext): Promise<MigrationFailure[]> {
+async function runFinalPasses(inv: Invocation, ctx: ApplyContext): Promise<MigrationFailure[]> {
   const failures: MigrationFailure[] = [];
   const first = await resolveGithubIssueListing(inv.io, ctx.cfg, inv);
   if (!first.ok) return [{ subject: "final pass (listing)", error: first.error }];
@@ -452,7 +450,14 @@ function planToJson(plan: MigrationPlan): Record<string, unknown> {
   };
 }
 
-async function runMigrate(args: { apply: boolean; json: boolean }, inv: ReturnType<typeof invocationOf>): Promise<number> {
+/**
+ * Runs the migration (dry run unless `args.apply`); the entry `lore issues migrate` dispatches to.
+ *
+ * @param args - `apply` executes the plan, `json` selects the JSON rendering
+ * @param inv - the run's invocation
+ * @returns the process exit code (see the module header)
+ */
+export async function runIssuesMigrate(args: { apply: boolean; json: boolean }, inv: Invocation): Promise<number> {
   const { app, dbPath, config } = loadLoreApp({ inv });
   try {
     const classification = classifyFeedbackUpstream(config);
@@ -562,18 +567,3 @@ async function runMigrate(args: { apply: boolean; json: boolean }, inv: ReturnTy
     app.close();
   }
 }
-
-export default defineLoreCommand({
-  meta: {
-    name: "migrate",
-    description:
-      "One-time migration from issue-report mirror tasks and resolves links to carriers (extra.issues) with GitHub owning verdicts; dry run by default, --apply executes",
-  },
-  args: {
-    apply: { type: "boolean", description: "Execute the plan (writes GitHub and the corpus); resumable and idempotent" },
-    json: { type: "boolean", description: "Output as JSON" },
-  },
-  async run(context): Promise<number> {
-    return runMigrate({ apply: context.args.apply === true, json: context.args.json === true }, invocationOf(context));
-  },
-});
