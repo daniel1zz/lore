@@ -4,6 +4,8 @@
 // @reads .serena/**
 // @reads CLAUDE.md
 // @reads adapters/cli
+// @reads adapters/cli/commands/feed.ts
+// @reads adapters/cli/commands/sync.ts
 // @reads adapters/read-side-by-filters.ts
 // @reads ai/assess-template.ts
 // @reads assets/**
@@ -37,6 +39,7 @@
 // @reads service/warn-sink.ts
 // @reads src
 // @reads src/api/mutations.ts
+// @reads src/components/evidence
 // @reads src/components/ui
 // @reads src/index.css
 // @reads src/index.ts
