@@ -142,6 +142,7 @@ export class AcExemptionService {
           version: createHash("sha256").update(`${reason}\n${new Date(expiresMs).toISOString()}`).digest("hex").slice(0, 16),
         },
         summary: `ac exempt ${spec.value.slug} ${input.acId}`,
+        change: { document: spec.value.slug, ac_id: input.acId, reason, expires_at: new Date(expiresMs).toISOString() },
       });
       if (!decided.ok) return decided;
     }
