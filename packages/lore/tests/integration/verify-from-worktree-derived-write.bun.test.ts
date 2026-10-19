@@ -183,6 +183,16 @@ describe("lore verify from a linked worktree (derived baseline write)", () => {
     };
     const rows = taskDoc.data.doc.extra.verification_evidence ?? [];
     expect(rows.some((r) => r.result === "pass" && r.attestation !== undefined)).toBe(true);
+
+    // NEGATIVE: the intent is the verify run's, not a general licence — a SELF-REPORTED evidence row on the same
+    // task from the same lease-less worktree is still refused.
+    const selfReported = runLore(
+      ["evidence", task, "--oracle", "other", "--command", "echo hi", "--result", "pass", "--ac", AC_ID],
+      wt,
+      "agent:vwt-detached",
+    );
+    expect(selfReported.exitCode, selfReported.stderr + selfReported.stdout).toBe(4);
+    expect(selfReported.stderr + selfReported.stdout).toContain(FOREIGN_TOKEN);
   });
 
   it("REGRESSION: verify from the main checkout is untouched", () => {
