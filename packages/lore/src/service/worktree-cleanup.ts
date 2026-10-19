@@ -92,6 +92,11 @@ export interface WorktreeGitProbe {
    * (the first entry of `git worktree list`). Optional: an absent method proves nothing, so the path stays listed.
    */
   ignoredPathIdenticalToMain?(path: string, relPath: string): ProbeResult<boolean>;
+  /**
+   * Whether the repo-relative `path` is a file of the tree at `ref` (`ls-tree --full-tree`), run in `cwd`.
+   * Optional: an absent method cannot measure, so {@link measureAnchorRemoval} reports `not-measured`.
+   */
+  pathExistsAtRef?(cwd: string, ref: string, path: string): ProbeResult<boolean>;
   /** The owner marker of the falsifier scratch worktree at `path`: `null` when the marker file is absent. */
   scratchOwner(path: string): ProbeResult<{ readonly pid: number } | null>;
   /** Whether process `pid` exists (signal 0). A pid that cannot be probed counts as alive (keep wins). */
@@ -338,6 +343,52 @@ export function resolveClaimHead(
   }
   const tip = probe.branchTip(repoCwd, target);
   return tip.ok ? { ok: true, value: { sha: tip.value, source: "branch" } } : tip;
+}
+
+// ── Anchored test files a task deleted ──────────────────────────────────────
+
+/** Whether one anchored path was removed by the task's own branch, kept, or could not be measured. */
+export type AnchorRemovalVerdict =
+  | { readonly kind: "removed" }
+  | { readonly kind: "kept" }
+  | { readonly kind: "not-measured"; readonly reason: string };
+
+/**
+ * THE predicate "this path was deleted by this task" — the `unfiltered-test-file` done floor and its
+ * "removed by this task" message both read this one verdict (never a second copy).
+ *
+ * Removed iff the path is in the tree at `base` (the claim-time `base_sha`), absent at the claim head (the branch deleted it) AND absent on the integration
+ * branch (the deletion landed). A path someone else deleted on main (kept at the head) or a deletion that has
+ * not landed (still on main) is `kept`. Any measurement failure is `not-measured` with its reason — never `removed`.
+ *
+ * @param refs.base - the claim's recorded `base_sha`; `undefined` (a claim that recorded none) is `not-measured`
+ * @example
+ * measureAnchorRemoval(probe, cwd, { base, head, integration: "main" }, "t/x.test.ts") // { kind: "removed" }
+ */
+export function measureAnchorRemoval(
+  probe: Pick<WorktreeGitProbe, "pathExistsAtRef">,
+  cwd: string,
+  refs: { readonly base: string | undefined; readonly head: string; readonly integration: string },
+  path: string,
+): AnchorRemovalVerdict {
+  const exists = probe.pathExistsAtRef;
+  if (exists === undefined) return { kind: "not-measured", reason: "this probe cannot read a path at a ref" };
+  // reason: after landing, merge-base(integration, head) IS the head, so only the claim-time base_sha still marks
+  // where the branch started; a claim that recorded none cannot be measured and is refused, never guessed.
+  const base = refs.base;
+  if (base === undefined) return { kind: "not-measured", reason: "the claim recorded no base commit to compare against" };
+  // Order: a path absent at the base was never there to delete, so that answer ends the walk first.
+  const questions: ReadonlyArray<readonly [label: string, ref: string, wantPresent: boolean]> = [
+    ["the claim base", base, true],
+    ["the claim head", refs.head, false],
+    [refs.integration, refs.integration, false],
+  ];
+  for (const [label, ref, wantPresent] of questions) {
+    const at = exists(cwd, ref, path);
+    if (!at.ok) return { kind: "not-measured", reason: `could not read ${path} at ${label}: ${at.reason}` };
+    if (at.value !== wantPresent) return { kind: "kept" };
+  }
+  return { kind: "removed" };
 }
 
 // ── Worktree resolution: worktree path OR branch name → linked-worktree directory ──
@@ -656,6 +707,10 @@ export function createRealWorktreeProbe(cwd: string): WorktreeGitProbe {
     headSha: (path) => {
       const out = runGit(path, ["rev-parse", "HEAD"]);
       return out.ok ? { ok: true, value: out.value.trim() } : out;
+    },
+    pathExistsAtRef: (cwd, ref, path) => {
+      const out = runGit(cwd, ["ls-tree", "--full-tree", "--name-only", ref, "--", path]);
+      return out.ok ? { ok: true, value: out.value.split("\n").some((line) => line === path) } : out;
     },
     branchTip: (cwd, name) => {
       const out = runGit(cwd, ["rev-parse", "--verify", `refs/heads/${name}`]);

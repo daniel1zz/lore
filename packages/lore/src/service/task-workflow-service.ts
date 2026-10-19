@@ -382,7 +382,9 @@ import {
   buildActiveClaimedPathSet,
   collectRecordedWorktrees,
   evaluateRecordedWorktree,
+  measureAnchorRemoval,
   resolveClaimHead,
+  type AnchorRemovalVerdict,
   type RecordedWorktree,
   type WorktreeGitProbe,
   type WorktreeOutcome,
@@ -694,6 +696,11 @@ export interface DoneResult {
    * error: a kept / not-measured worktree is reported here and `done` still succeeds.
    */
   worktree_outcomes?: WorktreeOutcome[];
+  /**
+   * Anchored test files the `unfiltered-test-file` floor accepted WITHOUT a run because this task's own claimed
+   * branch deleted them (task-done-floor-accepts-an-anchored-test-file-the-task-deleted). Absent when none.
+   */
+  removed_test_anchors?: string[];
   /**
    * The post-archive GitHub issue step's lines (spec-archiving-the-work-that-resolves-a-defect-report-
    * closes D4) — present only after a real archive walk with the archive port wired; possibly empty.
@@ -2596,7 +2603,12 @@ export class TaskWorkflowService {
     // recordVerifiedEvidence's own public contract stays a plain resolved `nowIso: string`
     // (VerifyRunnerService resolves "now" once per verifyPlan() call) — trivially wrapped
     // here rather than widening the public signature back to a thunk.
-    const result = await this.appendEvidenceEntry(idOrSlug, entry, entry.recorded_by, () => nowIso);
+    // reason: foreign-corpus intent (task-skill-fix-lore-verify-from-a-linked-worktree-is-refused-on). A runner-attested
+    // row is DERIVED from a `lore verify` run the caller explicitly aimed at THIS task; running verify from a linked
+    // worktree is the mandated route, and that run is the declared intent — the task need not hold a lease naming the
+    // worktree (it may be claimed from the main checkout, or by nobody). Self-reported `addEvidence` keeps reading its
+    // intent from the persisted lease only.
+    const result = await this.appendEvidenceEntry(idOrSlug, entry, entry.recorded_by, () => nowIso, true);
     this.recordEvent("task.evidence_added", startMs, result, undefined, {
       oracle: entry.oracle,
       result: entry.result,
@@ -2752,6 +2764,7 @@ export class TaskWorkflowService {
     entry: VerifiedEvidenceInput,
     actor: string,
     now: () => string,
+    verifyRunIntent = false,
   ): Promise<Result<DocRecord, LoreError>> {
     // §M5 (AC-DC-8) — fail-loud, NOT a silent strip, and bound to the SHARED chokepoint
     // rather than the self-report path: `ac_oracle_generation` is resolved from the
@@ -2932,6 +2945,7 @@ export class TaskWorkflowService {
         result: entry.result,
         ...(renewedClaim !== null ? { claim_renewed: true } : {}),
       },
+      verifyRunIntent || readClaimRecord(task)?.worktree !== undefined,
     );
   }
 
@@ -3645,9 +3659,12 @@ export class TaskWorkflowService {
     task: DocRecord,
     escapes: { overrideReason?: string; noNewTestsReason?: string },
     stampBinding: StampBindingContext,
+    anchorRemovals: ReadonlyMap<string, AnchorRemovalVerdict>,
   ): Result<
     {
       refusal: DoneFloorRefusal | null;
+      /** Anchored test files accepted as removed by this task; present on every non-refusal. */
+      removedTestAnchors?: string[];
       overrideReason?: string;
       noNewTestsReason?: string;
     },
@@ -3823,8 +3840,21 @@ export class TaskWorkflowService {
     // checked only after BOTH floors above already succeeded, so none of the
     // three can mask another. A task declaring no test-file anchors returns
     // [] here and never fires this branch.
-    const missingUnfilteredRuns = findMissingUnfilteredTestFileRuns(task, evidence, this.repoRoot);
+    const allMissingRuns = findMissingUnfilteredTestFileRuns(task, evidence, this.repoRoot);
+    // reason: task-done-floor-accepts-an-anchored-test-file-the-task-deleted — an anchored test file the task's own
+    // branch deleted has nothing to run; `anchorRemovals` is the ONE verdict (measureAnchorRemoval) for both this
+    // subtraction and the "removed by this task" line `done` prints. Unmeasured stays missing (fail closed).
+    const removedTestAnchors = allMissingRuns.filter((anchor) => anchorRemovals.get(anchor)?.kind === "removed");
+    const missingUnfilteredRuns = allMissingRuns.filter((anchor) => !removedTestAnchors.includes(anchor));
     if (missingUnfilteredRuns.length > 0) {
+      const unmeasured = missingUnfilteredRuns.flatMap((anchor) => {
+        const verdict = anchorRemovals.get(anchor);
+        return verdict?.kind === "not-measured" ? [`${anchor} (${verdict.reason})`] : [];
+      });
+      const measurementNote =
+        unmeasured.length > 0
+          ? ` Whether this task deleted them could NOT be measured, so none is assumed deleted: ${unmeasured.join("; ")}.`
+          : "";
       return doneFloorRefusal("unfiltered-test-file", {
         code: "VALIDATION_ERROR",
         field: "extra.verification_evidence",
@@ -3839,13 +3869,14 @@ export class TaskWorkflowService {
           `\`lore verify <plan>\` on an AC whose declared command runs the file unfiltered; when ` +
           `the file is only reachable from a package directory, \`lore verify --execution-root ` +
           `<that directory>\` — the attested root is joined with the command's paths, so a ` +
-          `package-relative command matches the repo-relative anchor`,
+          `package-relative command matches the repo-relative anchor.${measurementNote}`,
         value: missingUnfilteredRuns,
       });
     }
 
     return ok({
       refusal: null,
+      removedTestAnchors,
       ...(overrideReason !== undefined ? { overrideReason } : {}),
       ...(noNewTestsReason !== undefined ? { noNewTestsReason } : {}),
     });
@@ -3870,7 +3901,9 @@ export class TaskWorkflowService {
     if (task.status === "archived" || task.status === "deprecated") return ok(null);
     const stampBinding = await loadStampBindingContext(this.store, [task]);
     if (!stampBinding.ok) return stampBinding;
-    const evaluated = this.evaluateDoneFloors(task, {}, stampBinding.value);
+    const removals = await this.measureAnchorRemovals(task);
+    if (!removals.ok) return removals;
+    const evaluated = this.evaluateDoneFloors(task, {}, stampBinding.value, removals.value);
     if (!evaluated.ok) return evaluated;
     if (evaluated.value.refusal !== null) return ok(evaluated.value.refusal);
     return this.findAsyncFloor(task);
@@ -4016,6 +4049,45 @@ export class TaskWorkflowService {
     return ok({ floor: "unmerged-branch", error: { ...error, details: { floor: "unmerged-branch" } } });
   }
 
+  /**
+   * One {@link AnchorRemovalVerdict} per anchored test file that still lacks an attested unfiltered run — the
+   * input of the `unfiltered-test-file` floor's "removed by this task" exception. Measured from the claim's
+   * recorded worktree/branch exactly as {@link findUnlandedWorkFloor} picks it; git is spawned only for an
+   * anchor the floor would otherwise refuse, so a fully-attested task costs nothing.
+   *
+   * A task whose claims never recorded a worktree has no branch that could have deleted anything: its anchors
+   * are `kept` (the plain refusal). A recorded branch that cannot be read is `not-measured` for every anchor,
+   * with the reason — never `removed`.
+   *
+   * @returns `err` only when the claim audit history itself is unreadable
+   */
+  private async measureAnchorRemovals(task: DocRecord): Promise<Result<ReadonlyMap<string, AnchorRemovalVerdict>, LoreError>> {
+    const verdicts = new Map<string, AnchorRemovalVerdict>();
+    const unsatisfied = findMissingUnfilteredTestFileRuns(task, readEvidence(task), this.repoRoot);
+    if (unsatisfied.length === 0) return ok(verdicts);
+    const recordedResult = await this.readRecordedWorktrees(task);
+    if (!recordedResult.ok) return recordedResult;
+    const currentWorktree = readClaimRecord(task)?.worktree;
+    const recorded =
+      recordedResult.value.find((r) => r.path === currentWorktree) ?? recordedResult.value[recordedResult.value.length - 1];
+    const settle = (verdict: AnchorRemovalVerdict): ReadonlyMap<string, AnchorRemovalVerdict> => {
+      for (const anchor of unsatisfied) verdicts.set(anchor, verdict);
+      return verdicts;
+    };
+    if (recorded === undefined) return ok(settle({ kind: "kept" }));
+    const probe = this.worktreeProbe;
+    if (probe === undefined) return ok(settle({ kind: "not-measured", reason: NO_WORKTREE_PROBE_REASON }));
+
+    const cwd = probe.currentWorkingDirectory();
+    const head = resolveClaimHead(probe, recorded.path, cwd);
+    if (!head.ok) return ok(settle({ kind: "not-measured", reason: `claim head of ${recorded.path} unreadable: ${head.reason}` }));
+    const integration = probe.integrationBranch(cwd);
+    if (!integration.ok) return ok(settle({ kind: "not-measured", reason: `integration branch unreadable: ${integration.reason}` }));
+    const refs = { base: recorded.baseSha, head: head.value.sha, integration: integration.value };
+    for (const anchor of unsatisfied) verdicts.set(anchor, measureAnchorRemoval(probe, cwd, refs, anchor));
+    return ok(verdicts);
+  }
+
   /** The async floors, in order: landed work, then oracle-file existence. The first refusal wins. */
   private async findAsyncFloor(task: DocRecord): Promise<Result<DoneFloorRefusal | null, LoreError>> {
     const unlanded = await this.findUnlandedWorkFloor(task);
@@ -4042,6 +4114,8 @@ export class TaskWorkflowService {
 
     const stampBinding = await loadStampBindingContext(this.store, [task]);
     if (!stampBinding.ok) return stampBinding;
+    const removals = await this.measureAnchorRemovals(task);
+    if (!removals.ok) return removals;
     const evaluated = this.evaluateDoneFloors(
       task,
       {
@@ -4049,10 +4123,12 @@ export class TaskWorkflowService {
         ...(opts.noNewTestsReason !== undefined ? { noNewTestsReason: opts.noNewTestsReason } : {}),
       },
       stampBinding.value,
+      removals.value,
     );
     if (!evaluated.ok) return evaluated;
     if (evaluated.value.refusal !== null) return err(evaluated.value.refusal.error);
     const { overrideReason, noNewTestsReason } = evaluated.value;
+    const removedTestAnchors = evaluated.value.removedTestAnchors ?? [];
 
     // reason: AC-AU-7 — the attestation override is DECIDED (class override-attestation), not granted. `overrideReason`
     // is set here only when the attested-pass floor actually failed and the escape was consumed, so a task that
@@ -4160,6 +4236,7 @@ export class TaskWorkflowService {
       already_done: false,
       transitions,
       worktree_outcomes: worktreeOutcomes,
+      ...(removedTestAnchors.length > 0 ? { removed_test_anchors: removedTestAnchors } : {}),
       ...(issueClose !== undefined ? { issue_close: issueClose } : {}),
       ...(planFact?.kind === "fully_terminal"
         ? { plan_now_fully_terminal: { plan_slug: planFact.plan_slug } }

@@ -96,6 +96,8 @@ import { resolveTrackedWriteRoot } from "../working-tree-root.js";
 import { resolveAssetsRoot, type SetupPathContext } from "../setup-args.js";
 import { collectContextFacts } from "../../../service/context-facts.js";
 import {
+  CLAUDE_MD_PATH,
+  checkInitAllowed,
   runContextInit,
   runContextRefresh,
   renderWithoutMemoryFileLine,
@@ -369,11 +371,15 @@ function renderOutcome(inv: Invocation,
   }
 
   const narrativeSuffix = "narrative" in result.value ? ` (narrative: ${result.value.narrative})` : "";
-  printLine(inv.io.stdout, `Wrote ${result.value.path}${narrativeSuffix}`);
+  // D26: say what happened — `Wrote` only when a byte changed, `No change to` otherwise.
+  printLine(inv.io.stdout, result.value.changed ? `Wrote ${result.value.path}${narrativeSuffix}` : `No change to ${result.value.path}${narrativeSuffix}`);
   for (const block of result.value.migratedLegacyBlocks) {
     printLine(inv.io.stdout, `  migrated legacy block ${block} into the managed zone`);
   }
   renderSections(inv.io, result.value.sections);
+  for (const section of result.value.sections) {
+    if (section.state === "diverged_skip") printLine(inv.io.stdout, `skipped (diverged): ${section.id}`);
+  }
   if ("rules" in result.value) {
     for (const rule of result.value.rules) {
       printLine(inv.io.stdout, `  ${rule.path}: ${rule.state}`);
@@ -710,11 +716,24 @@ export default defineLoreCommand({
     const { ai: useAi } = resolveAiDefault(explicitAi, surface, config?.ai?.default_per_surface);
     const aiConfig = config?.ai ?? AiConfigSchema.parse({});
 
-    const narrative = await resolveInitNarrative(fsPort, repoRoot, useAi, aiConfig, budgets, { env: inv.env, tmpDir: inv.paths.tmpDir });
-    if (narrative === undefined) {
-      inv.io.stderr.write(
-        "Warning: no usable AI provider — writing a skeleton narrative placeholder instead of an AI-generated one.\n",
-      );
+    // reason: D26 — the existing-file refusal runs BEFORE any AI call (BR-875); an existing CLAUDE.md under
+    // --force also ignores the narrative, so no AI call is spent there either.
+    const existingClaudeMd = await fsPort.readFile(CLAUDE_MD_PATH);
+    const refusal = checkInitAllowed(existingClaudeMd, args.force === true);
+    if (!refusal.ok) return reportFailure(inv, refusal.error);
+
+    const narrative =
+      existingClaudeMd !== null
+        ? undefined
+        : await resolveInitNarrative(fsPort, repoRoot, useAi, aiConfig, budgets, { env: inv.env, tmpDir: inv.paths.tmpDir });
+    if (narrative === undefined && existingClaudeMd === null) {
+      // D26: name the real reason — an explicit --no-ai or a surface default is not "no usable provider".
+      const reason = hasExplicitNoAi
+        ? "AI disabled (--no-ai)"
+        : !useAi
+          ? "AI disabled (default for this surface; pass --ai to enable)"
+          : "no usable AI provider";
+      inv.io.stderr.write(`Warning: ${reason} — writing a skeleton narrative placeholder instead of an AI-generated one.\n`);
     }
 
     const initDeps = buildFragmentDeps();

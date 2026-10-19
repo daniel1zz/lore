@@ -173,7 +173,7 @@ import { checkOverrides, selectFragments } from "../service/context-fragments/se
 // ─── Constants ───────────────────────────────────────────────────────────────
 
 /** Repo-relative path every `context` verb reads/writes — the root project memory file. */
-const CLAUDE_MD_PATH = "CLAUDE.md";
+export const CLAUDE_MD_PATH = "CLAUDE.md";
 
 /** Section ids this module renders, in the order they appear in the managed zone. */
 const MODULE_INDEX_SECTION_ID = "module-index";
@@ -288,6 +288,8 @@ export interface ContextInitReport {
   sections: SpliceResult["perSection"];
   /** Legacy auto-block markers (`auto:module-index`, ...) replaced by the managed zone in this call; empty when none. */
   migratedLegacyBlocks: string[];
+  /** True when the bytes of {@link CLAUDE_MD_PATH} differ from what was on disk before this call (an absent file counts as changed). */
+  changed: boolean;
 }
 
 /** What refresh did with one lore rules file (D15). */
@@ -341,6 +343,12 @@ export interface ContextRefreshReport {
   sections: SpliceResult["perSection"];
   /** Legacy auto-block markers (`auto:module-index`, ...) replaced by the managed zone in this call; empty when none (migration happens once). */
   migratedLegacyBlocks: string[];
+  /**
+   * True when this call changed a byte of the target `path` names: CLAUDE.md (project scope) or any lore rules /
+   * skill file written or pruned (user scope, rules-only). False (always under `--check`) means the CLI must say
+   * `No change to <path>` instead of `Wrote` (D26). Per-file rules outcomes are reported in `rules` / `skills`.
+   */
+  changed: boolean;
   /** Present only for `opts.check`: what a real refresh would change (nothing was written); `null` otherwise. */
   check: ContextRefreshCheck | null;
   /** One entry per lore rules file considered (selected or pruned); empty without fragment deps. */
@@ -456,6 +464,28 @@ function ensureTrailingNewline(content: string): string {
 // ─── runContextInit ──────────────────────────────────────────────────────────
 
 /**
+ * The existing-file refusal of `context init`, as a pure check so the CLI adapter can run the SAME check
+ * BEFORE it spends an AI call (D26: a refused init must never call AI). `existing` is the current CLAUDE.md
+ * bytes or `null` when absent.
+ *
+ * @returns `err(VALIDATION_ERROR)` when the file exists and `force` is false; `ok(undefined)` otherwise.
+ */
+export function checkInitAllowed(existing: string | null, force: boolean): Result<undefined, LoreError> {
+  if (existing !== null && !force) {
+    return err({
+      code: "VALIDATION_ERROR",
+      field: "path",
+      message:
+        `${CLAUDE_MD_PATH} already exists — run \`lore context refresh\` to regenerate its ` +
+        "managed sections, or pass --force to re-run init anyway (existing hand-written " +
+        "content outside the managed zone is preserved either way).",
+      value: CLAUDE_MD_PATH,
+    });
+  }
+  return ok(undefined);
+}
+
+/**
  * Writes a fresh (or `--force`-repeated) root `CLAUDE.md`: the lore-managed
  * (Z1) zone (module index / command table / governance pointer / spec
  * discovery pointer) plus, on a genuinely fresh file, a Z2 narrative
@@ -479,17 +509,8 @@ export async function runContextInit(
 ): Promise<Result<ContextInitReport, LoreError>> {
   const existing = await deps.fs.readFile(CLAUDE_MD_PATH);
 
-  if (existing !== null && opts.force !== true) {
-    return err({
-      code: "VALIDATION_ERROR",
-      field: "path",
-      message:
-        `${CLAUDE_MD_PATH} already exists — run \`lore context refresh\` to regenerate its ` +
-        "managed sections, or pass --force to re-run init anyway (existing hand-written " +
-        "content outside the managed zone is preserved either way).",
-      value: CLAUDE_MD_PATH,
-    });
-  }
+  const refusal = checkInitAllowed(existing, opts.force === true);
+  if (!refusal.ok) return refusal;
 
   // reason: init writes NO fragment content (D15): static fragments live in lore rules files owned by
   // `runContextRefresh`, and CLAUDE.md never carries a fragments section, so init and refresh agree
@@ -510,7 +531,13 @@ export async function runContextInit(
   const written = await deps.fs.writeFile(CLAUDE_MD_PATH, finalContent);
   if (!written.ok) return written;
 
-  return ok({ path: CLAUDE_MD_PATH, narrative, sections: spliceResult.value.perSection, migratedLegacyBlocks: migration.migrated });
+  return ok({
+    path: CLAUDE_MD_PATH,
+    narrative,
+    sections: spliceResult.value.perSection,
+    migratedLegacyBlocks: migration.migrated,
+    changed: finalContent !== existing,
+  });
 }
 
 // ─── Fragment pipeline (lore rules files, D15) ───────────────────────────────
@@ -865,6 +892,7 @@ export async function runContextRefresh(
   const checkMode = opts.check === true;
   const differing: string[] = [];
   let modulesWithoutMemoryFile: number | null = null;
+  let claudeMdChanged = false;
   if (scope === "project" && !rulesOnly) {
     const existing = await deps.fs.readFile(CLAUDE_MD_PATH);
     if (existing === null && checkMode) {
@@ -935,7 +963,8 @@ export async function runContextRefresh(
           claudeMdRefusalMessage = downgradedCeilings.map((finding) => finding.message).join("; ");
         }
       }
-      if (finalContent !== existing) differing.push(CLAUDE_MD_PATH);
+      claudeMdChanged = finalContent !== existing;
+      if (claudeMdChanged) differing.push(CLAUDE_MD_PATH);
   
     }
   }
@@ -969,6 +998,7 @@ export async function runContextRefresh(
       path: (scope === "user" || rulesOnly) && rulesDir !== null ? rulesDir : CLAUDE_MD_PATH,
       sections: sectionOutcomes,
       migratedLegacyBlocks,
+      changed: false,
       check: { differing, findings: checkFindings, modulesWithoutMemoryFile },
       rules: ruleActions.map((action) => action.outcome),
       skills: skillActions.map((action) => action.outcome),
@@ -1030,6 +1060,10 @@ export async function runContextRefresh(
     path: (scope === "user" || rulesOnly) && rulesDir !== null ? rulesDir : CLAUDE_MD_PATH,
     sections: sectionOutcomes,
     migratedLegacyBlocks,
+    // reason: `changed` describes the file `path` names (D26): CLAUDE.md for project scope, otherwise the rules
+    // dir. A first refresh that only creates rules files must not claim it wrote CLAUDE.md; each rules file
+    // reports its own state line.
+    changed: (scope === "user" || rulesOnly) && rulesDir !== null ? actions.some((action) => action.kind !== "none") : claudeMdChanged,
     check: null,
     rules: ruleActions.map((action) => action.outcome),
     skills: skillActions.map((action) => action.outcome),

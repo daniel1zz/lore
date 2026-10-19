@@ -19,23 +19,33 @@ describe("checkCorpusScopedWrite decision table", () => {
   const foreign = { provenance: "git_common_dir", enabled: true } as const;
 
   it("refuses a worktree baseline write no lease covers, carrying the foreign-write token", () => {
-    const verdict = checkCorpusScopedWrite(foreign, false);
+    const verdict = checkCorpusScopedWrite(foreign, false, "baseline");
     expect(verdict.allowed).toBe(false);
-    if (!verdict.allowed) expect(verdict.reason).toContain(FOREIGN_CORPUS_WRITE_TOKEN);
+    if (!verdict.allowed) {
+      expect(verdict.reason).toContain(FOREIGN_CORPUS_WRITE_TOKEN);
+      expect(verdict.reason).toContain("this baseline write");
+    }
+  });
+
+  it("names the refused target's kind (task / document) instead of always 'baseline'", () => {
+    const task = checkCorpusScopedWrite(foreign, false, "task");
+    if (!task.allowed) expect(task.reason).toContain("this task write");
+    const document = checkCorpusScopedWrite(foreign, false, "document");
+    if (!document.allowed) expect(document.reason).toContain("this document write");
   });
 
   it("allows it once the lease's scope covers the target", () => {
-    expect(checkCorpusScopedWrite(foreign, true)).toEqual({ allowed: true });
+    expect(checkCorpusScopedWrite(foreign, true, "baseline")).toEqual({ allowed: true });
   });
 
   it("stays inert for provenance own / undetermined / null", () => {
     for (const provenance of ["own", "undetermined", null] as const) {
-      expect(checkCorpusScopedWrite({ provenance, enabled: true }, false)).toEqual({ allowed: true });
+      expect(checkCorpusScopedWrite({ provenance, enabled: true }, false, "baseline")).toEqual({ allowed: true });
     }
   });
 
   it("stays inert when the gate is disabled by config", () => {
-    expect(checkCorpusScopedWrite({ provenance: "git_common_dir", enabled: false }, false)).toEqual({ allowed: true });
+    expect(checkCorpusScopedWrite({ provenance: "git_common_dir", enabled: false }, false, "baseline")).toEqual({ allowed: true });
   });
 });
 
