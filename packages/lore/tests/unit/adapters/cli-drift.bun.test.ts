@@ -1,4 +1,6 @@
 // @reads scripts/check-unclaimed-oracle.ts
+// @reads assets/project/lore-config-template.yaml
+// @reads assets/governance/write-spec-rule.md
 /**
  * `lore status --check-tree` / `--check-drift` composition, `lore anchor` spec-target
  * dispatch (exercised indirectly via `lore create spec --code-anchor`), and the
@@ -53,7 +55,8 @@
  */
 
 import { describe, expect, it, beforeAll, afterAll } from "vitest";
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync, unlinkSync, appendFileSync } from "fs";
+import { mkdtempSync, rmSync, writeFileSync, mkdirSync, unlinkSync, readFileSync } from "fs";
+import { parseDocument } from "yaml";
 import { join } from "path";
 import { tmpdir } from "os";
 import { runLoreInProcess } from "../../helpers/run-lore-in-process";
@@ -127,30 +130,29 @@ async function initCorpus(tmpDir: string): Promise<void> {
  * key silently breaking YAML parsing.
  */
 function disableAllGates(dir: string): void {
-  appendFileSync(
-    join(dir, ".lore", "config.yaml"),
-    [
-      "workflow:",
-      "  gates:",
-      "    spec-create:",
-      "      enabled: false",
-      "    spec-promote:",
-      "      enabled: false",
-      "    plan-promote:",
-      "      enabled: false",
-      "    task-claim:",
-      "      enabled: false",
-      "",
-    ].join("\n"),
-  );
+  setConfigPaths(dir, [
+    [["workflow", "gates", "spec-create", "enabled"], false],
+    [["workflow", "gates", "spec-promote", "enabled"], false],
+    [["workflow", "gates", "plan-promote", "enabled"], false],
+    [["workflow", "gates", "task-claim", "enabled"], false],
+  ]);
 }
 
 /** Disables ONLY the doc-code drift oracle (workflow.drift.enabled: false, D8). */
 function disableDrift(dir: string): void {
-  appendFileSync(
-    join(dir, ".lore", "config.yaml"),
-    ["workflow:", "  drift:", "    enabled: false", ""].join("\n"),
-  );
+  setConfigPaths(dir, [[["workflow", "drift", "enabled"], false]]);
+}
+
+/**
+ * Sets nested keys in the corpus's `config.yaml` by MERGING into the parsed document. `lore init` now seeds a
+ * top-level `workflow:` block (the verification-profile template, BR-807), so appending a second `workflow:`
+ * block would be a duplicate-key YAML error and the whole config would be ignored.
+ */
+function setConfigPaths(dir: string, entries: ReadonlyArray<readonly [readonly string[], boolean]>): void {
+  const path = join(dir, ".lore", "config.yaml");
+  const doc = parseDocument(readFileSync(path, "utf8"));
+  for (const [keyPath, value] of entries) doc.setIn([...keyPath], value);
+  writeFileSync(path, doc.toString());
 }
 
 async function createPrd(tmpDir: string): Promise<string> {
