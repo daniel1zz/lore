@@ -158,6 +158,12 @@ export interface AcListResult {
    * true})` call whose evidence was deliberately left untouched. Sorted, deduplicated.
    */
   dangling: string[];
+  /**
+   * The spec's live `--allow-missing-path` (red-first) declarations, `{ac_id, reason}`, independent of `coverage`
+   * (which is `null` for a spec with no plan/task yet). Read by `scripts/check-ac-oracle-ownership.ts`.
+   * Optional: list renderers that build an `AcListResult` by hand omit it.
+   */
+  allow_missing_declarations?: { ac_id: string; reason: string }[];
 }
 
 /** Options for {@link AcService.removeCriterion}. */
@@ -684,7 +690,8 @@ export class AcService {
       }
     }
 
-    return ok({ criteria, coverage, dangling: Array.from(danglingSet).sort() });
+    const allowMissing = extractAllowMissingPathDeclarations(spec).map((d) => ({ ac_id: d.ac_id, reason: d.reason }));
+    return ok({ criteria, coverage, dangling: Array.from(danglingSet).sort(), allow_missing_declarations: allowMissing });
   }
 
   // ── removeCriterion ───────────────────────────────────────────────────────
