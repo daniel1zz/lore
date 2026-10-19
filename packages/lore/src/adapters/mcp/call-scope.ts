@@ -103,8 +103,11 @@ export class McpCallScope {
 
   constructor(
     readonly base: App,
-    /** The server's environment (`Invocation` of the MCP entry): read only to word the refusal of a call with no `harness_run`. */
-    private readonly server: Pick<Invocation, "env">,
+    /**
+     * The server's invocation: its environment words the refusal of a call with no `harness_run`; its identity is used
+     * ONLY for a hand-built App double that has no per-call write context (see {@link McpCallScope.run}).
+     */
+    private readonly server: Pick<Invocation, "env" | "identity">,
   ) {
     const resolve = (): App => this.store.getStore()?.app ?? this.base;
     this.view = new Proxy(base, {
@@ -151,7 +154,11 @@ export class McpCallScope {
   async run(input: CallAttestation, body: (context: CallContext) => Promise<CallToolResult>): Promise<CallToolResult> {
     const built = buildCallIdentity(input, this.server);
     if (!built.ok) return errorResult(built.error);
-    const identity = built.value;
+    // reason: an App with no `forWriteContext` is a hand-built test double (every App `createApp` returns has one): it
+    // has no per-call store to stamp, so a call without `harness_run` is made as the server's OWN invocation identity.
+    // A real server (production, any `createApp` App) never takes this branch: there a call without `harness_run` has no
+    // known party and its writes are refused (BR-1351).
+    const identity = this.base.forWriteContext === undefined && input.harness_run === undefined ? this.server.identity : built.value;
 
     let app = this.base;
     let scoped: App | undefined;
@@ -161,7 +168,7 @@ export class McpCallScope {
       scoped = opened.value;
       scoped.callerSurface = this.base.callerSurface;
       app = scoped;
-    } else if (identity.harnessRun !== null) {
+    } else if (input.harness_run !== undefined) {
       return errorResult({
         code: "STORE_ERROR",
         message: "This server cannot attest writes: its App has no per-call write context (harness_run was supplied)",

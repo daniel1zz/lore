@@ -17,13 +17,10 @@
  *     for the SAME barrel-isolation reason as the other two (pinyin-pro is
  *     ~931KB unpacked, must stay unreachable from the browser bundle), even
  *     though this one performs no filesystem IO of its own.
- *   - resolveActorWithSource / ActorSource / ResolvedActor (actor-resolution-
- *     node.ts, SPEC-079 G2) — the session-tier/OS-username
- *     precedence chain, relocated here from the CLI adapter so `CorpusService`
- *     can apply the identical fallback when a caller omits `opts.by`. Grouped
- *     here for the SAME reason (its OS-fallback tier calls `os.userInfo()`).
- *   - resolveInvocationIdentity / RunIdentityArgumentError (run-identity-node.ts,
- *     run-identity-slice-1 D1/D8/D11) — per-invocation harness run + claimed name.
+ *   - ActorSource (actor-resolution-node.ts) — a type only; the precedence chain is gone (BR-1055).
+ *   - resolveInvocationIdentity / RunIdentityArgumentError / UnknownPartyError / HumanSessionBinding
+ *     (run-identity-node.ts, spec-every-write-is-made-by-a-known-party-an-attested-agent-run) —
+ *     per-invocation known party: an attested agent run or the checkout's human session, else the refusal.
  *   - resolveInvocation / InvocationResolvers (invocation-node.ts, spec-ambient-state-is-read-once-at-the-entry-owned-only-prune
  *     D4) — the ONE core file allowed to read ambient process state; builds the `Invocation` type of invocation.ts.
  *

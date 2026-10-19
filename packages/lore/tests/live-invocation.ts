@@ -13,13 +13,14 @@ import { declareWriteActorForTests } from "../src/store/write-context-store.js";
 import type { StoreInterface } from "../src/store/store-interface.js";
 import { CliExit } from "../src/adapters/cli/cli-exit.js";
 import { warnSinkOf, type WarnSink } from "../src/service/warn-sink.js";
+import { LIVE_TEST_RUN as LIVE_TEST_RUN_ID, registerTestRun } from "./helpers/test-run-identity.js";
 
 /**
  * The agent run every live-process test writes as: an attested run of a fixed fake session. A test that WRITES through
  * an App built with {@link liveWriteContext} registers it in that corpus first (`registerTestRun`, test-run-identity.ts),
  * as the installed hooks register a real run.
  */
-export const LIVE_TEST_RUN = "cc:live-test-session" as RunId;
+export const LIVE_TEST_RUN = LIVE_TEST_RUN_ID as RunId;
 
 /** The live process as an Invocation: `env` is the LIVE `process.env` object, so a test's later env edits stay visible. */
 export function liveInvocation(): Invocation {
@@ -39,9 +40,25 @@ export function liveInvocation(): Invocation {
     host: hostname(),
     execPath: process.execPath,
     isCompiled: false,
-    identity: { harnessRun: LIVE_TEST_RUN, claimed: liveWriteActor(), claimedSource: "run" },
+    // reason: a getter, like `cwd`: the live test run is REGISTERED in the corpus under the process's current directory
+    // each time the identity is read (the composition reads it when it opens the corpus, before any write), the way an
+    // installed hook registers a real run. Where there is no corpus (or no Bun runtime) nothing is registered.
+    // The run is the one the process's CURRENT session id names (`asSessionActor` switches it between calls, so one test can
+    // be two callers), else {@link LIVE_TEST_RUN}; its name derives from the run exactly as production derives it.
+    get identity() {
+      const session = process.env["CLAUDE_CODE_SESSION_ID"] ?? process.env["CLAUDE_SESSION_ID"];
+      const run = (session !== undefined && session.trim() !== "" ? `cc:${session}` : LIVE_TEST_RUN) as RunId;
+      registerRunInCurrentCorpus(run);
+      return { harnessRun: run, claimed: nameOfAgentRun(run), claimedSource: "run" as const };
+    },
     io: liveIo(),
   };
+}
+
+/** Register `run` in the corpus holding `process.cwd()`, when there is one and the runtime can. */
+function registerRunInCurrentCorpus(run: RunId): void {
+  if ((globalThis as { Bun?: unknown }).Bun === undefined) return;
+  registerTestRun(process.cwd(), run);
 }
 
 /** The live process streams as the writers of a run: what a test passes where production passes `inv.io`. */

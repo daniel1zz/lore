@@ -21,12 +21,12 @@
  */
 
 import { createRequire } from "node:module";
-import { dirname, join } from "node:path";
+import { dirname, isAbsolute, join, relative } from "node:path";
 
 // reason: the REAL `fs`, reached through `createRequire`, never `import "node:fs"`: that specifier is aliased to the test
 // run's recording wrapper (scripts/test-recorded-fs.ts -> scripts/test-read-log.ts), and this module is imported by
 // scripts/test-known-party-spawn.ts which test-read-log.ts itself imports, so an aliased import here is a load cycle.
-const { existsSync } = createRequire(import.meta.url)("node:fs") as typeof import("node:fs");
+const { existsSync, statSync } = createRequire(import.meta.url)("node:fs") as typeof import("node:fs");
 
 // reason: spelled out here, NOT imported from `@lore/core`: this module is loaded by the test run's own child_process
 // wrapper (scripts/test-read-log.ts -> scripts/test-known-party-spawn.ts), and `@lore/core` itself imports
@@ -42,6 +42,9 @@ function openRegistry(dbPath: string): BunDatabase {
   const { Database } = createRequire(import.meta.url)("bun:sqlite") as typeof import("bun:sqlite");
   return new Database(dbPath);
 }
+
+/** The run every live-process test helper writes as (`liveWriteContext()`, `liveInvocation()` with no session set). */
+export const LIVE_TEST_RUN = "cc:live-test-session";
 
 /** The run a test uses when it names no writer: an agent run of a fixed fake session. */
 export const DEFAULT_TEST_RUN = "cc:lore-test-default";
@@ -100,8 +103,21 @@ export function registerTestRun(cwd: string, runId: string): boolean {
 export function registerRunInDb(dbPath: string, runId: string): boolean {
   const [, session, agent] = runId.split(":");
   if (session === undefined) throw new Error(`registerRunInDb: ${runId} is not a cc:<session>[:<agent>] run id`);
-  const db = openRegistry(dbPath);
+  // reason: NEVER the protected repository's own corpus (`LORE_TEST_SANDBOX_REPO`, root CLAUDE.md "never write the repo's
+  // own .lore/ corpus from tests"): a spawn whose cwd is the checkout must not gain a registry row there.
+  const protectedRepo = process.env["LORE_TEST_SANDBOX_REPO"];
+  if (protectedRepo !== undefined && protectedRepo !== "" && isInside(protectedRepo, dbPath)) return false;
+  const memoKey = `${dbPath}\0${runId}\0${inodeOf(dbPath)}`;
+  if (REGISTERED.has(memoKey)) return true;
+  let db: BunDatabase;
   try {
+    db = openRegistry(dbPath);
+  } catch {
+    // reason: a path that is not (yet) a SQLite file is not a corpus to register in; the command under test reports its own error.
+    return false;
+  }
+  try {
+    db.exec("PRAGMA busy_timeout = 5000");
     const hasRuns = db.query("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'runs'").get() !== null;
     if (!hasRuns) return false;
     db.query(
@@ -117,10 +133,31 @@ export function registerRunInDb(dbPath: string, runId: string): boolean {
       JSON.stringify({ schemaVersion: 1, fragments: [] }),
       new Date().toISOString(),
     );
+    REGISTERED.add(memoKey);
     return true;
+  } catch (error) {
+    // reason: a corrupt file ("file is not a database") is not a corpus to register in: the command under test reports it.
+    if (error instanceof Error && /not a database|malformed/i.test(error.message)) return false;
+    throw error;
   } finally {
     db.close();
   }
+}
+
+/** `(db file, run, inode)` triples already registered by this process: the same file is not reopened per call (a recreated file has a new inode). */
+const REGISTERED = new Set<string>();
+
+function inodeOf(path: string): number {
+  try {
+    return statSync(path).ino;
+  } catch {
+    return -1;
+  }
+}
+
+function isInside(parent: string, child: string): boolean {
+  const rel = relative(parent, child);
+  return rel !== "" && !rel.startsWith("..") && !isAbsolute(rel);
 }
 
 /**

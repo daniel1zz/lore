@@ -24,8 +24,11 @@ import { DEFAULT_TEST_RUN, hasHarnessRunFlag, registerTestRun } from "../package
 /** Env variable a test sets to `none` to start `lore` with no run injected. */
 export const KNOWN_PARTY_OPT_OUT_ENV = "LORE_TEST_IDENTITY";
 
-/** The `lore` entry as a spawn names it: the source entry of any checkout, or the compiled binary. */
-const LORE_ENTRY = /(?:packages\/lore\/src\/index\.ts|\/dist\/lore)$/;
+/**
+ * The `lore` entry as a spawn names it: the source entry of any checkout, the compiled binary, or an operator script that
+ * resolves its identity through `resolveEntryInvocation` exactly as `lore` does (and so accepts `--harness-run`).
+ */
+const LORE_ENTRY = /(?:packages\/lore\/src\/index\.ts|\/dist\/lore|\/scripts\/seed-write-spec-rule\.ts)$/;
 
 /** How far into an argv the entry may sit (`bun run --preload X --bun ENTRY`). */
 const ENTRY_SEARCH_DEPTH = 8;
