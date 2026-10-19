@@ -33,7 +33,7 @@
 
 import { describe, expect, it } from "vitest";
 import { err, ok, resolveMemoryFileBudgets, setupManifestSchema } from "@lore/core";
-import type { LoreError, MemoryFileBudgets, Result } from "@lore/core";
+import type { FsProbe, LoreError, MemoryFileBudgets, Result } from "@lore/core";
 import {
   scaffoldProject,
   type AdoptionWriteOutcome,
@@ -352,6 +352,9 @@ const REAL_SHAPE_SKELETON =
 
 type AdoptionCall = { repoDir: string; mode: "enforce" | "warn" };
 
+/** A probe of an empty repository: every path is missing, nothing is readable. */
+const NO_REPOSITORY_PROBE: FsProbe = { stat: () => "missing", readFile: () => null, listDir: () => null };
+
 function makeAdoptionDeps(
   fs: InMemoryProjectFs,
   calls: AdoptionCall[],
@@ -361,6 +364,8 @@ function makeAdoptionDeps(
   return {
     ...makeDeps(fs, { "CLAUDE.md.template": REAL_SHAPE_TEMPLATE, "CLAUDE.md.skeleton": REAL_SHAPE_SKELETON }),
     resolveMemoryFileBudgets: () => budgets,
+    // An explicit fake probe: this fixture's CLAUDE.md names no code, so nothing is read.
+    resolveReferenceContext: () => ({ probe: NO_REPOSITORY_PROBE, referenceDocuments: [] }),
     writeAdoptionMode: (repoDir, mode) => {
       calls.push({ repoDir, mode });
       return outcome;
