@@ -11,7 +11,7 @@
  *
  * Public surface:
  *   - ModuleIndexEntry — one discovered module directory + memory-file presence
- *   - ContextFacts — `{ moduleIndex, commands }`, the full collected bundle
+ *   - ContextFacts — `{ moduleIndex, memoryModules, commands, packageFile, ... }`, the full collected bundle
  *   - MemoryModuleEntry — a folder with a memory file + its Purpose sentence
  *   - extractPurposeSentence(content) — pure Purpose-section reader
  *   - collectContextFacts(fs, root, budgetsCfg) — the collection entry point
@@ -74,10 +74,10 @@
  *   - `memoryModules` is the subset of discovered folders holding a memory
  *     file, each with the first sentence of its `Purpose` section
  *     (`extractPurposeSentence`); `modulesWithoutMemoryFile` counts the rest.
- *   - An absent, unreadable, or schema-invalid root `package.json` degrades
- *     `commands` to `{}` rather than failing the whole collection — a
- *     missing/malformed manifest must never block `lore context init` from
- *     producing at least the module-index/pointer sections.
+ *   - An ABSENT root `package.json` is the `packageFile: "absent"` state with `commands` `{}` (a project
+ *     with no package file is legitimate; the commands section says so). A package.json that is not valid
+ *     JSON or has a wrong shape FAILS the collection (VALIDATION_ERROR naming the file) — BR-883: a broken
+ *     manifest is never read as "nothing documented".
  *   - `budgetsCfg.filenames` (e.g. `["CLAUDE.md"]`, `resolveMemoryFileBudgets`
  *     defaults) is the ONLY input this module reads off `budgetsCfg` — the
  *     line/byte ceilings themselves are a `claude-md-budget.ts` lint concern,
@@ -125,7 +125,18 @@ export interface ContextFacts {
   modulesWithoutMemoryFile: number;
   /** `true` iff the walk hit {@link MAX_MODULE_INDEX_ENTRIES} and stopped; rendered as a notice so nothing is dropped silently. */
   walkTruncated: boolean;
-  /** The scripts `root`'s `package.json` marks via `lore.documentedScripts` (name -> body plus the one-line description the project wrote), or `{}` when none/absent/unreadable. */
+  /** The scripts `root`'s `package.json` marks via `lore.documentedScripts` (name -> body plus the one-line description the project wrote); `{}` when none are marked or there is no package file. */
+  commands: Record<string, DocumentedCommand>;
+  /** Whether `root` has a `package.json` at all — lets the commands section say "no package file" instead of "nothing documented". */
+  packageFile: PackageFileState;
+}
+
+/** `present`: a valid `package.json` was read; `absent`: `root` has none (an unreadable or malformed one is an error, never `absent`). */
+export type PackageFileState = "present" | "absent";
+
+/** What {@link readCommands} returns: the package-file state plus the documented scripts. */
+interface PackageCommands {
+  packageFile: PackageFileState;
   commands: Record<string, DocumentedCommand>;
 }
 
@@ -231,24 +242,41 @@ function validateRoot(root: string): Result<void, LoreError> {
  * hand-written `## Commands` section, surfaced retirement stubs (`test:bun`), and made every package.json edit
  * a CLAUDE.md edit. Opt-in keeps the table to what a project chose to document; with no marker it is empty and
  * renders a pointer. A marker naming a script that does not exist fails loud (stale marker), never silently dropped.
- * Absence/parse/schema failure still degrades to `{}` (see module header).
+ * A missing package file is the `absent` state; a file that is not JSON or has a wrong shape fails loud naming the file (BR-883).
  */
-async function readCommands(fs: FsReadPort, root: string): Promise<Result<Record<string, DocumentedCommand>, LoreError>> {
-  const raw = await fs.readFile(joinRepoPath(root, "package.json"));
-  if (raw === null) return ok({});
+async function readCommands(fs: FsReadPort, root: string): Promise<Result<PackageCommands, LoreError>> {
+  const packagePath = joinRepoPath(root, "package.json");
+  const raw = await fs.readFile(packagePath);
+  // reason: BR-883 — a project with no package file has no marker to read; that is reported as its own state
+  // (`packageFile: "absent"`), never as an empty scripts list, so the section can say so.
+  if (raw === null) return ok({ packageFile: "absent", commands: {} });
 
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
-  } catch {
-    return ok({});
+  } catch (cause) {
+    return err({
+      code: "VALIDATION_ERROR",
+      field: packagePath,
+      message: `${packagePath} is not valid JSON: ${cause instanceof Error ? cause.message : String(cause)}`,
+      value: packagePath,
+    });
   }
 
   const validated = rootPackageJsonSchema.safeParse(parsed);
-  if (!validated.success) return ok({});
+  if (!validated.success) {
+    return err({
+      code: "VALIDATION_ERROR",
+      field: packagePath,
+      message: `${packagePath} has an invalid shape: ${validated.error.issues
+        .map((issue) => `${issue.path.join(".") || "(root)"}: ${issue.message}`)
+        .join("; ")}`,
+      value: packagePath,
+    });
+  }
   const scripts = validated.data.scripts ?? {};
   const marker = validated.data.lore?.documentedScripts;
-  if (marker === undefined) return ok({});
+  if (marker === undefined) return ok({ packageFile: "present", commands: {} });
   const descriptions = documentedScriptsSchema.safeParse(marker);
   if (!descriptions.success) {
     return err({
@@ -273,7 +301,7 @@ async function readCommands(fs: FsReadPort, root: string): Promise<Result<Record
     }
     documented[name] = { command: body, description };
   }
-  return ok(documented);
+  return ok({ packageFile: "present", commands: documented });
 }
 
 // ─── Module index walk ───────────────────────────────────────────────────────
@@ -472,7 +500,7 @@ export async function collectContextFacts(
 
   const commandsResult = await readCommands(fs, root);
   if (!commandsResult.ok) return commandsResult;
-  const commands = commandsResult.value;
+  const { commands, packageFile } = commandsResult.value;
 
   const rootLayer = await loadGitignoreLayer(fs, root);
   const rootLayers = rootLayer !== null ? [rootLayer] : [];
@@ -486,5 +514,6 @@ export async function collectContextFacts(
     modulesWithoutMemoryFile: walk.withoutMemoryFile,
     walkTruncated: walk.truncated,
     commands,
+    packageFile,
   });
 }

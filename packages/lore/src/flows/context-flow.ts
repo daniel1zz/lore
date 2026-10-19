@@ -401,6 +401,9 @@ function renderModuleIndexBody(facts: ContextFacts): string {
  * changes this section cannot land stale). Z1 contract ("command table (package.json scripts)") is unchanged.
  */
 function renderCommandTableBody(facts: ContextFacts): string {
+  if (facts.packageFile === "absent") {
+    return "This project has no package.json, so there are no documented scripts; see the Commands section above.";
+  }
   const entries = Object.entries(facts.commands);
   if (entries.length === 0) {
     return "No scripts are marked as documented (package.json `lore.documentedScripts`); see package.json `scripts` and the Commands section above.";
