@@ -16,6 +16,15 @@ import { installShippedGuard } from "../integration/support/main-guard-repo.js";
 const PACKAGE_ROOT = new URL("../../", import.meta.url).pathname.replace(/\/$/, "");
 const INDEX_TS = join(PACKAGE_ROOT, "src", "index.ts");
 
+/**
+ * The environment of every lore spawn the fixture makes: the parent's ambient session id is dropped, so a claim's
+ * identity is only what the fixture names (hermetic whether or not the test runs inside an agent session).
+ */
+export function ownDiffFixtureEnv(): NodeJS.ProcessEnv {
+  const { CLAUDE_CODE_SESSION_ID: _ambient, CLAUDE_SESSION_ID: _ambientAlt, ...rest } = process.env;
+  return rest;
+}
+
 export interface LoreRun {
   readonly stdout: string;
   readonly stderr: string;
@@ -65,19 +74,22 @@ export class OwnDiffFixture {
     }
   }
 
-  lore(args: readonly string[]): LoreRun {
+  private readonly sessionIds = new Map<string, number>();
+  private readonly branchOfTask = new Map<string, string>();
+
+  lore(args: readonly string[], extraEnv: Readonly<Record<string, string>> = {}): LoreRun {
     const proc = spawnSync("bun", ["run", INDEX_TS, ...args], {
       cwd: this.dir,
       encoding: "utf8",
-      env: { ...process.env, HOME: FIXTURE_HOME_OUTSIDE_REPO, CLAUDECODE: "1", LORE_ACTOR: "agent:own-diff-fixture" },
+      env: { ...ownDiffFixtureEnv(), HOME: FIXTURE_HOME_OUTSIDE_REPO, CLAUDECODE: "1", LORE_ACTOR: "agent:own-diff-fixture", ...extraEnv },
     });
     const stdout = proc.stdout ?? "";
     const stderr = proc.stderr ?? "";
     return { stdout, stderr, exitCode: proc.status ?? 1, text: `${stdout}\n${stderr}` };
   }
 
-  mustLore(args: readonly string[]): LoreRun {
-    const run = this.lore(args);
+  mustLore(args: readonly string[], extraEnv: Readonly<Record<string, string>> = {}): LoreRun {
+    const run = this.lore(args, extraEnv);
     if (run.exitCode !== 0) throw new Error(`lore ${args.join(" ")} exited ${run.exitCode}: ${run.text}`);
     return run;
   }
@@ -110,7 +122,7 @@ export class OwnDiffFixture {
     this.applyAndCommit(files, message);
     const sha = this.git(["rev-parse", "HEAD"]);
     this.git(["checkout", "-q", "--detach", sha]);
-    execFileSync("git", ["update-ref", "refs/heads/main", sha], { cwd: this.dir, env: { ...process.env, LORE_INTEGRATE: "1" } });
+    execFileSync("git", ["update-ref", "refs/heads/main", sha], { cwd: this.dir, env: { ...ownDiffFixtureEnv(), LORE_INTEGRATE: "1" } });
     this.git(["branch", "-q", "-D", "tmp-main-mover"]);
   }
 
@@ -159,7 +171,24 @@ export class OwnDiffFixture {
 
   /** Claims `task` on branch `branch` (the dispatch protocol records the branch name as the worktree). */
   claim(task: string, branch: string): void {
-    this.mustLore(["claim", task, "--worktree", branch]);
+    // reason: each worktree is its own session. The claim's actor name comes from the session tier (`agent:session-<id8>`);
+    // with none it collapses onto the OS user and lore refuses the second worktree's claim (SPEC-042 D10, ACTOR_IDENTITY_COLLISION).
+    this.branchOfTask.set(task, branch);
+    this.mustLore(["claim", task, "--worktree", branch], this.sessionEnvOf(branch));
+  }
+
+  private sessionEnvOf(branch: string): Record<string, string> {
+    return { CLAUDE_CODE_SESSION_ID: this.sessionIdOf(branch) };
+  }
+
+  /** A session id per branch; its first 8 characters (all the actor name keeps) differ between branches. */
+  private sessionIdOf(branch: string): string {
+    let n = this.sessionIds.get(branch);
+    if (n === undefined) {
+      n = this.sessionIds.size + 1;
+      this.sessionIds.set(branch, n);
+    }
+    return `fx${String(n).padStart(6, "0")}-${branch}`;
   }
 
   integrate(branch: string): LoreRun {
@@ -177,9 +206,12 @@ export class OwnDiffFixture {
 
   /** Marks `task` done after its branch landed (`plan` is approved first, as the existing integrate oracles do). */
   archive(task: string, plan: string = this.planSlug): void {
-    this.mustLore(["evidence", task, "--oracle", "test", "--command", "echo 'Ran 3 tests'", "--result", "pass", "--capture"]);
+    // reason: evidence and done run as the session that holds the claim, or lore refuses to archive it from under that session.
+    const branch = this.branchOfTask.get(task);
+    const asHolder = branch === undefined ? {} : this.sessionEnvOf(branch);
+    this.mustLore(["evidence", task, "--oracle", "test", "--command", "echo 'Ran 3 tests'", "--result", "pass", "--capture"], asHolder);
     this.mustLore(["set", plan, "--status", "approved"]);
-    this.mustLore(["done", task]);
+    this.mustLore(["done", task], asHolder);
   }
 
   /** Everything `lore integrate` must leave byte-unchanged on a refusal: main, the worktree list, the shared checkout. */
