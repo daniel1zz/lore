@@ -43,7 +43,9 @@ export function formatDoneMessage(result: DoneResult): string {
   const archived = `${slug} archived (v${result.task.version}): ${path}`;
   // issue #106: one `worktree: ...` line per claim-recorded worktree (removed / kept <reason> / not-measured).
   const worktreeLines = (result.worktree_outcomes ?? []).map(formatWorktreeOutcomeLine);
-  return [archived, ...worktreeLines].join("\n");
+  // task-done-floor-accepts-an-anchored-test-file-the-task-deleted: a test file accepted WITHOUT a run says so.
+  const removedLines = (result.removed_test_anchors ?? []).map((path) => `test file ${path}: removed by this task (no run needed)`);
+  return [archived, ...removedLines, ...worktreeLines].join("\n");
 }
 
 /**
