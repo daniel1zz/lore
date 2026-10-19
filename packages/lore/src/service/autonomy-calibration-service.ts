@@ -201,6 +201,8 @@ export interface AuditItem {
   /** 1-based position among the class's auto decisions (divisible by AUDIT_EVERY). */
   readonly sequence: number;
   readonly score: number;
+  /** Serialised DecisionDetail of the decision row (HR-T7), or null when it was decided without one. */
+  readonly detail: string | null;
 }
 
 /**
@@ -218,7 +220,7 @@ export function deriveAuditQueue(rows: readonly DecisionLogRow[]): Result<AuditI
     const seq = (sequence.get(row.class) ?? 0) + 1;
     sequence.set(row.class, seq);
     if (seq % AUDIT_EVERY !== 0 || answered.has(row.id)) continue;
-    queue.push({ id: row.id, class: row.class, subject_id: row.subject_id, subject_version: row.subject_version, decided_at: row.ts, sequence: seq, score: row.score });
+    queue.push({ id: row.id, class: row.class, subject_id: row.subject_id, subject_version: row.subject_version, decided_at: row.ts, sequence: seq, score: row.score, detail: row.detail ?? null });
   }
   return ok(queue);
 }
