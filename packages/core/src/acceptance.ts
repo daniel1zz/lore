@@ -463,6 +463,15 @@ export interface AcCoverageFact {
   /** Subset of `fail` whose evidence carries runner attestation (SPEC-039 §2 D8). */
   attested_fail: number;
   /**
+   * The D15 supersession mark of the criterion this fact describes, copied VERBATIM by
+   * {@link computeAcCoverage} (present iff the criterion carries one). {@link deriveAcCoverageState} reads it
+   * through {@link isAcSuperseded} — the same predicate `lore verify`, `ac set|rm` and the `lore done` ac_scope
+   * floor use — and answers `"superseded"` BEFORE any evidence row is looked at: a superseded criterion is
+   * retired, so it is never unverified (`none`) and never green (`pass`). Optional on the type because many
+   * call sites hand-build facts; absent means "not superseded".
+   */
+  superseded_by?: SupersededByRef;
+  /**
    * The fourth coverage dimension (spec-oracle-tier-falsifiability-a-criterion-never-
    * observed-red M1, governed by adr-falsifiability-moves-from-the-task-tier-to-the-
    * oracle-tier): count of `ac_ref` rows whose `result` is `"expected-fail"` or
@@ -693,6 +702,7 @@ export function computeAcCoverage(
         current_refs: refs.length - priorGenerationRefs,
         prior_refs: priorGenerationRefs,
       },
+      ...(isAcSuperseded(criterion) ? { superseded_by: criterion.superseded_by as SupersededByRef } : {}),
     };
   });
 }
@@ -730,6 +740,7 @@ export function computeAcCoverage(
  *
  * | # | State | Condition |
  * |---|---|---|
+ * | 0 | `"superseded"` | the criterion carries the D15 supersession mark ({@link isAcSuperseded}); evidence is not read |
  * | 1 | `"fail"` | `fail > 0` AND NOT superseded |
  * | 2 | `"fail_superseded"` | `fail > 0` AND superseded (see below) |
  * | 3 | `"attested_pass"` | `fail === 0` AND `attested_pass > 0` |
@@ -831,6 +842,9 @@ export function hasPassOnRecord(rows: ReadonlyArray<{ readonly result: string }>
 }
 
 export function deriveAcCoverageState(fact: AcCoverageFact): AcCoverageState {
+  // reason: row 0 — a superseded criterion (D15) is retired: whatever evidence it holds, it is neither unverified nor
+  // green. Checked FIRST and through the one shared predicate, so no reader can count it by reading raw pass/fail.
+  if (isAcSuperseded(fact)) return "superseded";
   if (fact.fail > 0) {
     return isSupersededByNewerAttestedPass(fact.refs) ? "fail_superseded" : "fail";
   }
@@ -877,6 +891,7 @@ export function deriveAcCoverageState(fact: AcCoverageFact): AcCoverageState {
  * the point: the compiler, not a reviewer, is what refuses a silently-unrendered state.
  */
 export const AC_COVERAGE_STATES = [
+  "superseded",
   "fail",
   "fail_superseded",
   "attested_pass",
@@ -941,6 +956,8 @@ export type AcCoverageState = (typeof AC_COVERAGE_STATES)[number];
  */
 export function projectAcCoverageGlyph(state: AcCoverageState): string {
   switch (state) {
+    case "superseded":
+      return "⊖";
     case "fail":
       return "✘";
     case "fail_superseded":
@@ -1091,6 +1108,48 @@ function maxRecordedAt(refs: readonly EvidenceRefLite[]): string | null {
  */
 export function isAcInDeclaredScope(declaredScope: readonly string[], acId: string): boolean {
   return declaredScope.includes(acId);
+}
+
+/** One declared ac_scope id that is satisfied by supersession, with the mark that satisfies it. */
+export interface SupersededScopeEntry {
+  readonly ac_id: string;
+  readonly superseded_by: SupersededByRef;
+}
+
+/** Result of {@link partitionDeclaredScopeBySupersession}: ids retired by supersession vs ids still owed evidence. */
+export interface DeclaredScopeSupersession {
+  /** Declared ids whose criterion is superseded (D15), in declared order. */
+  readonly superseded: readonly SupersededScopeEntry[];
+  /** Declared ids with no superseded criterion — including ids that match no resolved criterion at all. */
+  readonly live: readonly string[];
+}
+
+/**
+ * Splits a task's declared `ac_scope` into ids satisfied by supersession and ids still live — the pure half of the
+ * `lore done` ac_scope floor's supersession rule, reading the one shared {@link isAcSuperseded} predicate.
+ * An id matching no criterion in `criteria` stays `live` (fail closed: an unresolvable id is never assumed retired).
+ *
+ * @param declaredScope - the task's declared ac_scope ids (caller has separated absent from empty)
+ * @param criteria - the governing spec's criteria
+ * @returns the two partitions, each in declared order; `superseded.length + live.length === declaredScope.length`
+ * @example
+ * partitionDeclaredScopeBySupersession(["AC-1", "AC-2"], criteria); // => { superseded: [{ac_id: "AC-1", ...}], live: ["AC-2"] }
+ */
+export function partitionDeclaredScopeBySupersession(
+  declaredScope: readonly string[],
+  criteria: readonly AcceptanceCriterion[],
+): DeclaredScopeSupersession {
+  const superseded: SupersededScopeEntry[] = [];
+  const live: string[] = [];
+  for (const acId of declaredScope) {
+    const criterion = criteria.find((c) => c.id === acId);
+    if (criterion !== undefined && isAcSuperseded(criterion)) {
+      superseded.push({ ac_id: acId, superseded_by: criterion.superseded_by as SupersededByRef });
+    } else {
+      live.push(acId);
+    }
+  }
+  return { superseded, live };
 }
 
 // ─── Governing-Spec Resolution by Declared ac_scope ────────────────────────
