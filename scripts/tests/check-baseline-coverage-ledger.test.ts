@@ -1,3 +1,4 @@
+// @reads scripts/baseline-coverage-debt.json
 /**
  * check:baseline-coverage debt ledger (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline).
  * The three outcomes, plus the CLI-verdict boundary:
