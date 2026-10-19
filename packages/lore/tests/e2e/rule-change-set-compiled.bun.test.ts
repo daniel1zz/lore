@@ -39,7 +39,7 @@ const setDefaultTimeout = (ms: number): void => { vi.setConfig({ testTimeout: ms
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { patchLoreConfig } from "../helpers/patch-lore-config.js";
+import { dropLoreConfigKey, patchLoreConfig } from "../helpers/patch-lore-config.js";
 import { runLoreInProcess } from "../helpers/run-lore-in-process";
 
 setDefaultTimeout(180_000);
@@ -106,10 +106,10 @@ class World {
         // step is the only plan-close refusal under test (it is unconditional, not part of that gate).
         gates: { "ac-cite": { mode: "enforce", armed_branches: [this.branch] }, "plan-close": { enabled: false } },
         review: { judgment_required_types: [] },
-        // `lore init` seeds the verification profiles (a tech spec needs a `test` oracle to be approved); null = vacuous pass.
-        verification_profiles: null,
       },
     });
+    // `lore init` seeds the verification profiles (a tech spec needs a `test` oracle to be approved); an absent profile is a vacuous pass.
+    dropLoreConfigKey(this.dir, ["workflow", "verification_profiles"]);
     return this;
   }
 

@@ -21,7 +21,7 @@ import { join } from "node:path";
 import { LoreConfigSchema, type CreateDocInput } from "@lore/core";
 import { createApp } from "../../src/app.js";
 import { liveAmbient, liveWriteContext } from "../live-invocation.js";
-import { patchLoreConfig } from "../helpers/patch-lore-config.js";
+import { dropLoreConfigKey, patchLoreConfig } from "../helpers/patch-lore-config.js";
 
 vi.setConfig({ testTimeout: 300_000, hookTimeout: 300_000 });
 
@@ -109,8 +109,8 @@ beforeAll(async () => {
   writeFileSync(join(dir, "README.md"), "fixture\n");
   mustRun(["init"]);
   // reason: `lore init` seeds the verification profiles (a feature spec needs a `test` oracle to be approved); this
-  // suite's subject is the citation gate, so the profiles are switched off the documented way (null = vacuous pass).
-  patchLoreConfig(dir, { workflow: { verification_profiles: null } });
+  // suite's subject is the citation gate, so the profiles are removed (an absent profile is a vacuous pass).
+  dropLoreConfigKey(dir, ["workflow", "verification_profiles"]);
   await loosenOverrideClasses(dir, ["override-judgment"]);
   const prd = slugOf(mustRun(["create", "prd", "--title", "DC2-13 PRD", "--content", "root", "--no-ai"]).stdout);
   const root = slugOf(mustRun(["baseline", "add", prd, "--node", "root", "--label", "Root", "--title", "DC2-13 Root"]).stdout);

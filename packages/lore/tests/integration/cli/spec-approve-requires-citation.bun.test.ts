@@ -19,7 +19,7 @@ import { loosenOverrideClasses } from "../fixtures/autonomy-override-helpers.js"
 const setDefaultTimeout = (ms: number): void => { vi.setConfig({ testTimeout: ms, hookTimeout: ms }); };
 import { execFileSync } from "node:child_process";
 import { mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
-import { patchLoreConfig } from "../../helpers/patch-lore-config.js";
+import { dropLoreConfigKey } from "../../helpers/patch-lore-config.js";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -101,8 +101,8 @@ beforeAll(async () => {
   writeFileSync(join(dir, "README.md"), "fixture\n");
   mustRun(["init"], dir);
   // reason: `lore init` seeds the verification profiles (a feature spec needs a `test` oracle to be approved); this
-  // suite's subject is the citation requirement, so the profiles are switched off the documented way (null = vacuous pass).
-  patchLoreConfig(dir, { workflow: { verification_profiles: null } });
+  // suite's subject is the citation requirement, so the profiles are removed (an absent profile is a vacuous pass).
+  dropLoreConfigKey(dir, ["workflow", "verification_profiles"]);
   // AU-T7: `approve --override-no-judgment` is decided; this suite's subject is not the override, so the class is
   // loosened the documented way (a human-tty governance decision on a throwaway corpus), never by a bypass in product code.
   await loosenOverrideClasses(dir, ["override-judgment"]);

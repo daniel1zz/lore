@@ -5,7 +5,7 @@
  * never appends a second copy of a top-level key (`workflow:` is seeded by `lore init`) — a file with a
  * duplicate key does not parse, and the loader refuses it loudly.
  *
- * Public surface: {@link patchLoreConfig}, {@link readLoreConfig}.
+ * Public surface: {@link patchLoreConfig}, {@link readLoreConfig}, {@link dropLoreConfigKey}.
  *
  * Invariants:
  *   - Objects merge recursively; arrays and scalars in the patch REPLACE the existing value
@@ -61,6 +61,30 @@ export function readLoreConfig(projectDir: string): Record<string, unknown> {
   if (parsed === null || parsed === undefined) return {};
   if (!isPlainObject(parsed)) throw new Error(`${configPath} does not hold a YAML mapping`);
   return parsed;
+}
+
+/**
+ * Removes one (possibly nested) key from `<projectDir>/.lore/config.yaml` and writes it back — the way a fixture turns a
+ * seeded block OFF (a merge patch cannot delete a key, and `null` is not a legal value for most keys).
+ *
+ * @param projectDir - the project root (the directory CONTAINING `.lore/`).
+ * @param keyPath - the key's path, e.g. `["workflow", "verification_profiles"]`; an absent key is a no-op.
+ * @throws when the existing file does not parse.
+ * @example
+ *   dropLoreConfigKey(dir, ["workflow", "verification_profiles"]);
+ */
+export function dropLoreConfigKey(projectDir: string, keyPath: readonly string[]): void {
+  if (keyPath.length === 0) throw new Error("dropLoreConfigKey: keyPath must name a key");
+  const config = readLoreConfig(projectDir);
+  let parent: Record<string, unknown> = config;
+  for (const segment of keyPath.slice(0, -1)) {
+    const next = parent[segment];
+    if (!isPlainObject(next)) return;
+    parent = next;
+  }
+  // reason: the last segment is guarded non-empty above; deleting a key of a freshly parsed object mutates no shared state.
+  delete parent[keyPath[keyPath.length - 1]!];
+  writeFileSync(join(projectDir, ".lore", "config.yaml"), yaml.stringify(config), "utf8");
 }
 
 /**
