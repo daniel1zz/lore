@@ -135,6 +135,11 @@ interface IssuesPayload {
   members?: Record<string, string[]>;
 }
 
+/** An ISO instant `days` days and `hours` hours before now. */
+function isoAgo(days: number, hours: number): string {
+  return new Date(Date.now() - (days * 24 + hours) * 3_600_000).toISOString();
+}
+
 async function buildCorpus(): Promise<Corpus> {
   const dir = realpathSync(mkdtempSync(join(tmpdir(), "lore-gs-t8b-corpus-")));
   const stubDir = mkdtempSync(join(tmpdir(), "lore-gs-t8b-stub-"));
@@ -143,7 +148,15 @@ async function buildCorpus(): Promise<Corpus> {
   writeFileSync(
     join(stubDir, "listing.json"),
     JSON.stringify(
-      [20, 21, 22].map((number) => ({ number, title: `Issue ${number}`, state: "open", body: "", labels: [], state_reason: null })),
+      [
+        // #20-#22 carry carriers; their age is irrelevant (the stale rule reads status `open` only).
+        ...[20, 21, 22].map((number) => ({ number, title: `Issue ${number}`, state: "open", body: "", labels: [], state_reason: null, created_at: isoAgo(400, 0) })),
+        // stale rule, default feedback.stale_after_days = 14, INCLUSIVE: #23 is 14d1h old (flagged), #24 13d12h (not).
+        { number: 23, title: "Issue 23", state: "open", body: "", labels: [], state_reason: null, created_at: isoAgo(14, 1) },
+        { number: 24, title: "Issue 24", state: "open", body: "", labels: [], state_reason: null, created_at: isoAgo(13, 12) },
+        // closed and old, no carrier: never a stale OPEN report.
+        { number: 25, title: "Issue 25", state: "closed", body: "", labels: [], state_reason: "completed", created_at: isoAgo(400, 0) },
+      ],
     ),
   );
   const corpus: Corpus = { dir, stubDir };
@@ -207,6 +220,24 @@ describe(`${SPEC}#AC-GS-9 status --check-issues counts live, plain status makes 
       expect(pending.stdout).toContain("close_pending_count: 1 member(s)");
       expect(pending.stdout).toContain("#22");
       expect(pending.stdout).not.toContain("#21");
+    },
+    120_000,
+  );
+
+  it(
+    `${SPEC}#AC-GS-9: stale_open_count counts an open carrier-less issue at the inclusive threshold (#23) and not one day under (#24)`,
+    async () => {
+      const checked = await runLore(corpus, ["status", "--check-issues", "--json"]);
+      expect(checked.exitCode, checked.stderr + checked.stdout).toBe(0);
+      const issues = (JSON.parse(checked.stdout) as { data: { issues: IssuesPayload & { stale_open_count?: number } } }).data.issues;
+      expect(issues.stale_open_count).toBe(1);
+      expect(issues.members?.["stale_open_count"]).toEqual(["#23"]);
+      const listed = await runLore(corpus, ["status", "--enumerate", "stale_open_count"]);
+      expect(listed.exitCode, listed.stderr).toBe(0);
+      expect(listed.stdout).toContain("stale_open_count: 1 member(s)");
+      expect(listed.stdout).toContain("#23");
+      expect(listed.stdout).not.toContain("#24");
+      expect(listed.stdout).not.toContain("#25");
     },
     120_000,
   );

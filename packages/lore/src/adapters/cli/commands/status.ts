@@ -5,7 +5,7 @@
  * With --check-drift: verify spec-declared code_anchors against the working tree
  *   (SPEC-045 §Design Decisions D5) — deterministic, zero LLM calls.
  * With --check-issues: read the LIVE GitHub listing, join it with the carriers, and count issues per derived
- *   status (closed_unverified / adopted_abandoned / close_pending / closed_no_verdict / unknown_ref) — report-only,
+ *   status (closed_unverified / adopted_abandoned / close_pending / closed_no_verdict / unknown_ref / stale_open) — report-only,
  *   mutates nothing. The ONLY status path that contacts GitHub: plain `lore status` makes no gh call and reports
  *   `issues: {checked: false}` (spec-github-owns-issue-report-state-no-mirror-task-work-carries D8, AC-GS-4/9).
  *   Offline → exit 8/9/10 for the whole command.
@@ -180,6 +180,7 @@ import {
   resolveMemoryFileBudgets,
   resolveMemoryFileBudgetsFromConfigResult,
   buildUnconfiguredUpstreamRemedy,
+  resolveStaleAfterDays,
   SPEC_KINDS,
   outlineBudgetSchema,
   resolveBaselineNodeBudgets,
@@ -454,7 +455,9 @@ async function collectLiveIssueCheck(
   if (!joined.ok) return joined;
   const carriers = await listCarrierDocs(app.corpusService);
   if (!carriers.ok) return carriers;
-  return ok(computeIssueCheck(joined.value.rows, carriers.value, joined.value.repoId));
+  return ok(
+    computeIssueCheck(joined.value.rows, carriers.value, joined.value.repoId, resolveStaleAfterDays(config), Date.now()),
+  );
 }
 
 /**
@@ -874,6 +877,8 @@ const COUNT_FIELD_ENUMERATORS: Record<
     liveIssueMembers(inv, app, config, "closed_no_verdict_count"),
   unknown_ref_count: async (app, _dbPath, _cwd, inv, config) =>
     liveIssueMembers(inv, app, config, "unknown_ref_count"),
+  stale_open_count: async (app, _dbPath, _cwd, inv, config) =>
+    liveIssueMembers(inv, app, config, "stale_open_count"),
 };
 
 /**
@@ -1074,7 +1079,7 @@ export default defineLoreCommand({
     enumerate: {
       type: "string",
       description:
-        "Enumerate the MEMBERS behind a count field the plain run reports (e.g. pass_unfalsified_count, ac_other_command_count, ac_oracle_file_missing_count, unredeemed_allow_missing_path_count, capture_source_runner_count, capture_source_self_report_count, capture_source_runner_unattested_count, code_anchor_specs; with a GitHub-shaped feedback.upstream, the live issue counts closed_unverified_count, adopted_abandoned_count, close_pending_count, closed_no_verdict_count, unknown_ref_count, which contact GitHub). Unknown field → exit 4, naming it and the known set.",
+        "Enumerate the MEMBERS behind a count field the plain run reports (e.g. pass_unfalsified_count, ac_other_command_count, ac_oracle_file_missing_count, unredeemed_allow_missing_path_count, capture_source_runner_count, capture_source_self_report_count, capture_source_runner_unattested_count, code_anchor_specs; with a GitHub-shaped feedback.upstream, the live issue counts closed_unverified_count, adopted_abandoned_count, close_pending_count, closed_no_verdict_count, unknown_ref_count, stale_open_count, which contact GitHub). Unknown field → exit 4, naming it and the known set.",
     },
   },
   async run(context): Promise<number> {

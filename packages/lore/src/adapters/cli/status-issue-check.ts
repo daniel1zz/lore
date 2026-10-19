@@ -11,10 +11,9 @@
  *   close_pending_count       status `fixed (close pending)` open, an archived carrier exists
  *   closed_no_verdict_count   status `closed (no verdict)`   closed not_planned without a resolution:* label
  *   unknown_ref_count         carriers naming a number absent from the live listing
- *
- * ⛔ `stale_open_count` (D8) is NOT produced here: the listing row carries no `created_at`
- * (`GithubListedIssue`, `github-intake-port.ts`), so the age rule has no input. Reported as a gap in GS-T8's
- * hand-off rather than faked from the corpus.
+ *   stale_open_count          status `open` (no carrier) whose GitHub `created_at` is at least
+ *                             `feedback.stale_after_days` old (whole days, INCLUSIVE boundary, the rule
+ *                             `staleness.ts` uses); a row with no `created_at` is never counted
  *
  * Each count is `members.length` of the same list `--enumerate <field>` prints (sorted `#<n>`), so
  * `count === enumerate().length` holds by construction (AC-FR-5).
@@ -41,11 +40,12 @@ export const ISSUE_CHECK_FIELDS = [
   "close_pending_count",
   "closed_no_verdict_count",
   "unknown_ref_count",
+  "stale_open_count",
 ] as const;
 export type IssueCheckField = (typeof ISSUE_CHECK_FIELDS)[number];
 
-/** The derived status each status-keyed count reads (`unknown_ref_count` is keyed on carriers, not a status). */
-const STATUS_OF_FIELD: Readonly<Record<Exclude<IssueCheckField, "unknown_ref_count">, IssueStatus>> = {
+/** The derived status each status-keyed count reads (`unknown_ref_count` and `stale_open_count` have their own rules). */
+const STATUS_OF_FIELD: Readonly<Record<Exclude<IssueCheckField, "unknown_ref_count" | "stale_open_count">, IssueStatus>> = {
   closed_unverified_count: "closed (unverified)",
   adopted_abandoned_count: "adopted (abandoned)",
   close_pending_count: "fixed (close pending)",
@@ -83,16 +83,20 @@ function namedRefs(doc: CarrierDoc): Array<{ repoId: number; number: number }> {
  * @param rows - the live join, exactly one row per listed issue
  * @param carriers - every task and plan with `extra.issues` (archived and dead ones included)
  * @param repoId - the configured repository's numeric id (the join key's first half)
- * @returns the five counts with their sorted `#<n>` members
+ * @param staleAfterDays - resolved `feedback.stale_after_days`
+ * @param nowMs - clock seam (the caller passes `Date.now()`)
+ * @returns the six counts with their sorted `#<n>` members
  */
 export function computeIssueCheck(
   rows: readonly IssueStatusRow[],
   carriers: readonly CarrierDoc[],
   repoId: number,
+  staleAfterDays: number,
+  nowMs: number,
 ): IssueCheckPayload {
   const members = {} as Record<IssueCheckField, string[]>;
   for (const field of ISSUE_CHECK_FIELDS) {
-    if (field === "unknown_ref_count") continue;
+    if (field === "unknown_ref_count" || field === "stale_open_count") continue;
     const wanted = STATUS_OF_FIELD[field];
     members[field] = rows
       .filter((row) => row.status === wanted)
@@ -109,6 +113,16 @@ export function computeIssueCheck(
     }
   }
   members["unknown_ref_count"] = [...unknown].sort(byNumber).map(label);
+
+  members["stale_open_count"] = rows
+    .filter((row) => {
+      if (row.status !== "open" || row.issue.created_at === undefined) return false;
+      const ageDays = Math.floor((nowMs - new Date(row.issue.created_at).getTime()) / 86_400_000);
+      return Number.isFinite(ageDays) && ageDays >= staleAfterDays;
+    })
+    .map((row) => row.issue.number)
+    .sort(byNumber)
+    .map(label);
 
   const counts = {} as Record<IssueCheckField, number>;
   for (const field of ISSUE_CHECK_FIELDS) counts[field] = members[field].length;

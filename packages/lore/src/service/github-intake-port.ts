@@ -127,6 +127,8 @@ export interface GithubListedIssue {
   readonly labels?: readonly string[];
   /** GitHub's `state_reason` (`completed`/`not_planned`/`reopened`/...); `null` when GitHub gives none; `undefined` for a synthetically reconstructed record. */
   readonly state_reason?: string | null;
+  /** GitHub's `created_at` ISO instant; present only when the wire entry carried one (the status check's stale-open rule reads it). */
+  readonly created_at?: string;
 }
 
 /** A complete `listIssues` result: every issue (PRs excluded) plus the request count that read it. */
@@ -194,6 +196,7 @@ const GithubIssueListEntrySchema = z
     body: z.string().nullable().optional(),
     labels: z.array(GithubIssueListLabelSchema),
     state_reason: z.string().nullable().optional(),
+    created_at: z.string().optional(),
     pull_request: z.unknown().optional(),
   })
   .passthrough();
@@ -486,6 +489,7 @@ export class GitHubIntakePort {
           body: entry.body ?? "",
           labels: entry.labels.map((label) => label.name),
           state_reason: entry.state_reason ?? null,
+          ...(entry.created_at === undefined ? {} : { created_at: entry.created_at }),
         });
       }
 
