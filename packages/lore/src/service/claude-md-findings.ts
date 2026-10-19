@@ -27,12 +27,11 @@
  *     `MemoryFileFinding`'s own `@remark`) — a union makes those fields
  *     inaccessible without narrowing and fails `tsc --noEmit` against those
  *     files.
- *   - `reference_missing` is an `AdvisoryFindingKind`, NOT a
- *     `MemoryFileFindingKind` (N13 type migration,
- *     spec-claude-md-governance-content-dimension-checks-wire-the): it was
- *     typed deterministic from the day it shipped but had ZERO production
- *     call sites, so this migration retracts a false claim rather than
- *     removing enforcement.
+ *   - `reference_unresolved` is a DETERMINISTIC `MemoryFileFindingKind`
+ *     (spec-prose-about-code-is-bound-to-what-it-describes-one D1). It
+ *     replaces the retired advisory `reference_missing`: a missing path, a
+ *     missing exported symbol and a missing script are one kind, told apart
+ *     by `drift_kind`.
  *   - `line_length`/`target_distance` (N9, spec-claude-md-governance-content-
  *     dimension-checks-wire-the) are the two ALWAYS-ON advisory metrics —
  *     one pair emitted per discovered file by
@@ -41,7 +40,7 @@
  *     `budgets.enabled` (unlike `headroom_warning`) so they never depend on
  *     the capacity ceiling being switched on. Both carry `measured` AND
  *     `path` (the CONTAINER file's path — a different semantic use of
- *     `path` than `reference_missing`'s "the missing target's path", see
+ *     `path` than a finding that points at a target, see
  *     below). Neither ever affects the exit code, at any value, forever —
  *     Anthropic defines the 200-line figure as a target, not a limit.
  *   - `AdvisoryFinding.measured` is OPTIONAL: present for
@@ -49,9 +48,7 @@
  *     (remaining headroom), `line_length` (the file's longest line, in UTF-8
  *     bytes), and `target_distance` (line count minus
  *     `claude-md-admission.ts`'s `OFFICIAL_LINE_TARGET`, negative/zero/
- *     positive); ABSENT for `reference_missing` (one finding per distinct
- *     dangling reference, not a count) — which instead carries
- *     `path`/`reference`.
+ *     positive).
  *   - Adoption (spec-claude-md-root-section-structure-check-and-adoption-mode):
  *     the three `section_*` deterministic kinds come from
  *     `claude-md-structure.ts`; in `warn` mode EVERY deterministic kind is
@@ -106,9 +103,10 @@ export interface MemoryFileRecord {
  * `docExists`, never a line/byte measurement); `emphasis_saturated` fires on
  * a SINGLE marker-density threshold, deliberately NOT the three-band ceiling
  * machinery (N5 — density is not a capacity metric, so its finding carries
- * no warn/evict fraction field). ⛔ `reference_missing` is deliberately NOT
- * here — N13 (spec-claude-md-governance-content-dimension-checks-wire-the)
- * migrated it to {@link AdvisoryFindingKind}; see this module's header.
+ * no warn/evict fraction field). `reference_unresolved` comes from the same
+ * admission module: a backticked path, `path#Symbol` or `bun run <script>`
+ * that the ONE core resolver (`resolveCodeReferences`) could not verify; it
+ * carries `reference`, `line` and `drift_kind`.
  */
 export type MemoryFileFindingKind =
   | "max_lines"
@@ -116,6 +114,7 @@ export type MemoryFileFindingKind =
   | "eviction_required"
   | "slug_pointer_missing"
   | "emphasis_saturated"
+  | "reference_unresolved"
   | "section_missing"
   | "section_order"
   | "section_duplicate";
@@ -150,9 +149,14 @@ export interface MemoryFileFinding {
    * `eviction_required`), or the measured emphasis-marker density in
    * markers-per-KB (`emphasis_saturated`). ABSENT for `slug_pointer_missing`
    * (one finding per distinct dangling slug, not a count — mirrors
-   * `AdvisoryFinding.measured`'s same absence rule for `reference_missing`).
+   * `AdvisoryFinding.measured`'s absence rule for per-target findings; also
+   * ABSENT for `reference_unresolved`).
    */
   measured?: number;
+  /** 1-based line of the unresolved reference in `path` (`reference_unresolved` only). */
+  line?: number;
+  /** Why the core resolver rejected the reference, a `DriftKind` such as `symbol_missing` or `script_missing` (`reference_unresolved` only). */
+  drift_kind?: string;
   /**
    * The ceiling that was exceeded (or, for `eviction_required`, crossed) —
    * line/byte ceiling for the capacity kinds, or the resolved
@@ -163,7 +167,8 @@ export interface MemoryFileFinding {
   ceiling?: number;
   /**
    * Present for `slug_pointer_missing` (the dangling backtick-quoted corpus-slug
-   * token as it appeared in content) and for the structure kinds
+   * token as it appeared in content), `reference_unresolved` (the raw reference,
+   * `#Symbol` or `bun run` form included) and for the structure kinds
    * `section_missing`/`section_order`/`section_duplicate` (the H2 section NAME).
    */
   reference?: string;
@@ -180,11 +185,8 @@ export interface MemoryFileFinding {
  * SEPARATE family, never merged into or mistaken for a deterministic,
  * exit-relevant one). `headroom_warning` is emitted by
  * `claude-md-budget.ts`'s `computeHeadroomWarnings`;
- * `iso_date_density`/`status_word`/`reference_missing` by
- * `claude-md-admission.ts`'s `detectNarrativeSmells`/
- * `checkReferenceExistence`. `reference_missing` joined this union via N13
- * (spec-claude-md-governance-content-dimension-checks-wire-the) — see this
- * module's header. `line_length`/`target_distance` (N9, same spec) are the
+ * `iso_date_density`/`status_word` by
+ * `claude-md-admission.ts`'s `detectNarrativeSmells`. `line_length`/`target_distance` (N9, same spec) are the
  * two ALWAYS-ON advisories emitted by `claude-md-admission.ts`'s
  * `measureLineLengths`/`measureTargetDistances` — one pair per discovered
  * file, on every run, never exit-relevant.
@@ -193,7 +195,6 @@ export type AdvisoryFindingKind =
   | "iso_date_density"
   | "status_word"
   | "headroom_warning"
-  | "reference_missing"
   | "line_length"
   | "target_distance"
   | "section_extra"
@@ -213,21 +214,16 @@ export interface AdvisoryFinding {
    * headroom (`ceiling - used`, same value as `MetricHeadroom.remaining`)
    * for `headroom_warning`; the file's longest physical line in UTF-8 bytes
    * for `line_length`; line count minus `OFFICIAL_LINE_TARGET` (negative,
-   * zero, or positive) for `target_distance`. ABSENT for `reference_missing`
-   * — that check reports one finding per distinct dangling reference, not an
-   * aggregate count.
+   * zero, or positive) for `target_distance`.
    */
   measured?: number;
   /**
-   * Present for `reference_missing` (the missing, normalized reference
-   * target's path) AND for `line_length`/`target_distance` (there, the
-   * CONTAINER file's own path — a different semantic use of the same field:
-   * "what this finding is ABOUT" rather than "what it points AT").
+   * Present for `line_length`/`target_distance`: the CONTAINER file's own
+   * path ("what this finding is ABOUT").
    */
   path?: string;
   /**
-   * Present for `reference_missing` (the raw backtick-quoted token, fragment
-   * included) and for `section_extra`/`section_empty`/`module_section_missing`
+   * Present for `section_extra`/`section_empty`/`module_section_missing`
    * (the H2 section name).
    */
   reference?: string;

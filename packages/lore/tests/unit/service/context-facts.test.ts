@@ -11,10 +11,16 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { InMemoryFsPort, resolveMemoryFileBudgets } from "@lore/core";
+import { InMemoryFsPort, resolveMemoryFileBudgets, type LoreError } from "@lore/core";
 import { collectContextFacts, extractPurposeSentence } from "../../../src/service/context-facts.js";
 
 const DEFAULT_BUDGETS = resolveMemoryFileBudgets(undefined);
+
+/** The message of a VALIDATION_ERROR; fails the test for any other error code. */
+function messageOf(error: LoreError): string {
+  if (error.code !== "VALIDATION_ERROR") throw new Error(`expected VALIDATION_ERROR, got ${error.code}`);
+  return error.message;
+}
 
 describe("collectContextFacts", () => {
   it("HAPPY: discovers nested module directories and their memory-file presence, plus package.json scripts", async () => {
@@ -63,29 +69,49 @@ describe("collectContextFacts", () => {
     expect(result.ok).toBe(false);
   });
 
-  it("NEGATIVE: a malformed (non-JSON) root package.json degrades commands to {} rather than failing collection", async () => {
+  it("ERROR: a malformed (non-JSON) root package.json fails collection naming the file and the parse error (BR-883)", async () => {
     const fs = new InMemoryFsPort({ "package.json": "{ not valid json", "packages/a/CLAUDE.md": "x" });
     const result = await collectContextFacts(fs, "", DEFAULT_BUDGETS);
-    expect(result.ok).toBe(true);
-    if (!result.ok) return;
-    expect(result.value.commands).toEqual({});
-    expect(result.value.moduleIndex.some((e) => e.path === "packages/a")).toBe(true);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe("VALIDATION_ERROR");
+    expect(messageOf(result.error)).toContain("package.json is not valid JSON");
   });
 
-  it("NEGATIVE: a schema-invalid package.json.scripts (non-string values) degrades commands to {}", async () => {
+  it("ERROR: a schema-invalid package.json.scripts (non-string values) fails collection naming the file and the schema error (BR-883)", async () => {
     const fs = new InMemoryFsPort({ "package.json": JSON.stringify({ scripts: { build: 123 } }) });
+    const result = await collectContextFacts(fs, "", DEFAULT_BUDGETS);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe("VALIDATION_ERROR");
+    expect(messageOf(result.error)).toContain("package.json has an invalid shape");
+    expect(messageOf(result.error)).toContain("scripts.build");
+  });
+
+  it("ERROR: a malformed package.json under a nested root names that nested path", async () => {
+    const fs = new InMemoryFsPort({ "sub/package.json": "[" });
+    const result = await collectContextFacts(fs, "sub", DEFAULT_BUDGETS);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(messageOf(result.error)).toContain("sub/package.json");
+  });
+
+  it("STATE: a valid package.json with no marker is packageFile present with no commands", async () => {
+    const fs = new InMemoryFsPort({ "package.json": JSON.stringify({ scripts: { build: "x" } }) });
     const result = await collectContextFacts(fs, "", DEFAULT_BUDGETS);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
+    expect(result.value.packageFile).toBe("present");
     expect(result.value.commands).toEqual({});
   });
 
-  it("BOUNDARY: an absent package.json degrades commands to {} and an empty tree yields an empty moduleIndex", async () => {
+  it("BOUNDARY: an absent package.json is the packageFile 'absent' state, not an empty scripts list; an empty tree yields an empty moduleIndex", async () => {
     const fs = new InMemoryFsPort({});
     const result = await collectContextFacts(fs, "", DEFAULT_BUDGETS);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.value.commands).toEqual({});
+    expect(result.value.packageFile).toBe("absent");
     expect(result.value.moduleIndex).toEqual([]);
   });
 

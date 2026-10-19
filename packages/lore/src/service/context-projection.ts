@@ -27,13 +27,9 @@
  *     section whose stored fingerprint hash no longer matches its stored
  *     body (a hand-edit) rather than silently overwriting it. A pre-existing
  *     marker zone that carries ZERO fingerprint comments anywhere in its
- *     interior (every pre-fingerprinting-era install shape — the template
- *     shipped before this refactor never wrote one) is a recognized LEGACY
- *     zone, not a structural error: the whole interior is discarded and
- *     replaced wholesale by `next`, each section freshly fingerprinted and
- *     reported `"updated"` — a one-way adoption into fingerprinted form (see
- *     the Invariants section below for the exact boundary against a
- *     genuinely malformed fingerprint attempt, which still fails loud).
+ *     interior (an older lore's install shape) is REFUSED with a VALIDATION_ERROR naming the repair (delete
+ *     the zone, re-run refresh): only the fingerprinted format is read (BR-881). A damaged fingerprint
+ *     fails loud with the parser's own message.
  *
  *   - migrateLegacyAutoBlocks(content) — recognises the retired
  *     `<!-- auto:module-index -->` / `<!-- auto:dynamic-context -->` blocks
@@ -71,15 +67,9 @@
  *     comment (starts with the `<!-- lore:managed` prefix) but doesn't fully
  *     match the grammar is structural damage (a corrupted fingerprint, e.g.
  *     a non-hex/wrong-length hash) and also fails loud with
- *     `VALIDATION_ERROR` — this is the ONE case `spliceManagedSections`
- *     never treats as legacy adoption, no matter how many other fingerprints
- *     are absent. A zone whose interior contains no such attempt anywhere is
- *     legacy adoption instead (see the `spliceManagedSections` bullet
- *     above) — `parseManagedSections` itself still reports `VALIDATION_ERROR`
- *     for both shapes (it has no adoption behavior of its own); the
- *     legacy/malformed distinction is drawn only inside
- *     `spliceManagedSections`, which is the sole write path this adoption
- *     applies to.
+ *     `VALIDATION_ERROR` naming the line. A zone whose interior contains no such attempt anywhere
+ *     (the older-lore shape) fails loud too, with the repair message instead (see the
+ *     `spliceManagedSections` bullet above).
  *
  * Side-effect class: pure (no IO, no store, no wall-clock reads). Uses
  * `node:crypto`'s `createHash` for sha256 — safe here because this file is
@@ -410,36 +400,15 @@ function zoneInteriorLines(existing: string, zone: ZoneLocation): string[] {
 }
 
 /**
- * A zone is LEGACY ADOPTION material when its interior contains ZERO lines
- * that even attempt the fingerprint-comment prefix — every pre-fingerprint
- * lore build wrote a zone shaped exactly like this (plain prose between the
- * markers, no per-section bookkeeping at all). The moment ONE interior line
- * attempts the prefix and still fails to fully parse, this is NOT legacy —
- * it's a corrupted fingerprint on an already-fingerprinted zone, and
- * `buildRebuiltZone` must keep surfacing the original `VALIDATION_ERROR`
- * rather than silently discarding whatever partial bookkeeping exists.
+ * A zone is the OLDER-LORE (fingerprint-less) shape when its interior contains ZERO lines
+ * that even attempt the fingerprint-comment prefix — plain prose between the
+ * markers, no per-section bookkeeping at all. It selects the repair message in
+ * `buildRebuiltZone`. The moment ONE interior line attempts the prefix and still
+ * fails to fully parse, this is a corrupted fingerprint instead, and the parser's
+ * own `VALIDATION_ERROR` (naming the line) is surfaced.
  */
 function isLegacyZoneInterior(existing: string, zone: ZoneLocation): boolean {
   return zoneInteriorLines(existing, zone).every((line) => !FINGERPRINT_ATTEMPT_PREFIX.test(line.trim()));
-}
-
-/**
- * Legacy-adoption splice: `existing`'s ENTIRE zone interior is discarded
- * (there is no stored per-section state worth preserving — a legacy zone
- * was never fingerprinted, so there is nothing to diff against) and
- * replaced wholesale by `next`, each section freshly hashed. Every section
- * is reported `"updated"` (never `"created"`) — this is a REPLACE of
- * pre-existing managed content, not the creation of a new zone, mirroring
- * the pre-refactor SPEC-076 D7 wholesale-overwrite behavior this one-way
- * migration path preserves.
- */
-function buildLegacyAdoptedZone(existing: string, zone: ZoneLocation, next: ManagedSection[]): SpliceResult {
-  const zoneText = renderZoneText(hashFresh(next));
-  const z2Before = existing.slice(0, zone.zoneStart);
-  const z2After = existing.slice(zone.zoneEndExclusive + zone.absorbedSeparator.length);
-  const content = `${z2Before}${zoneText}${zone.absorbedSeparator}${z2After}`;
-  const perSection = next.map((section) => ({ id: section.id, state: "updated" as const }));
-  return { content, perSection };
 }
 
 /**
@@ -483,8 +452,18 @@ function resolveSection(
 function buildRebuiltZone(existing: string, zone: ZoneLocation, next: ManagedSection[]): Result<SpliceResult, LoreError> {
   const parsed = parseManagedSections(existing);
   if (!parsed.ok) {
+    // reason: BR-881 — only the fingerprinted managed-part format exists. A zone with no fingerprint at all
+    // (an older lore's install shape) is refused with the repair, never replaced in silence; a zone with a
+    // damaged fingerprint keeps the parser's own error naming the offending line.
     if (isLegacyZoneInterior(existing, zone)) {
-      return ok(buildLegacyAdoptedZone(existing, zone, next));
+      return err({
+        code: "VALIDATION_ERROR",
+        field: "content",
+        message:
+          "the lore-managed zone carries no fingerprint (written by an older lore, whose format this lore no longer reads). " +
+          `Repair: delete the zone — every line from "${CLAUDE_MD_MARKER_START}" through "${CLAUDE_MD_MARKER_END}" — then re-run \`lore context refresh\` ` +
+          "(or `lore setup --project`), which writes a fresh fingerprinted zone; hand-written text outside the markers is kept.",
+      });
     }
     return parsed;
   }

@@ -33,7 +33,7 @@
 
 import { describe, expect, it } from "vitest";
 import { err, ok, resolveMemoryFileBudgets, setupManifestSchema } from "@lore/core";
-import type { LoreError, MemoryFileBudgets, Result } from "@lore/core";
+import type { FsProbe, LoreError, MemoryFileBudgets, Result } from "@lore/core";
 import {
   scaffoldProject,
   type AdoptionWriteOutcome,
@@ -87,8 +87,6 @@ const CLAUDE_MD_SECTIONS: ManagedSection[] = [{ id: CLAUDE_MD_SECTION_ID, body: 
 const EXPECTED_FRESH_CLAUDE_MD = spliceOrThrow(CLAUDE_MD_SKELETON, CLAUDE_MD_SECTIONS);
 /** The zone alone — what lands AFTER an existing user-authored file's bytes (no skeleton). */
 const EXPECTED_APPENDED_ZONE = spliceOrThrow("", CLAUDE_MD_SECTIONS);
-/** What `runClaudeMdStep` writes when adopting a legacy (fingerprint-less) marker zone byte-identical to `CLAUDE_MD_TEMPLATE`. */
-const EXPECTED_ADOPTED_CLAUDE_MD = spliceOrThrow(CLAUDE_MD_TEMPLATE, CLAUDE_MD_SECTIONS);
 
 interface FakeFile {
   content: string;
@@ -233,7 +231,7 @@ describe("setup-project-flow — CLAUDE.md marker-section rewrite (SPEC-076 D7) 
 // ─── BOUNDARY ────────────────────────────────────────────────────────────────
 
 describe("setup-project-flow — CLAUDE.md marker-section rewrite (SPEC-076 D7) — BOUNDARY", () => {
-  it("pre-existing CLAUDE.md is a LEGACY (fingerprint-less) marker zone byte-identical to the template: adopted (done, backed up), never 'failed'", async () => {
+  it("pre-existing CLAUDE.md is a LEGACY (fingerprint-less) marker zone: refused as failed with the named repair, file untouched, nothing backed up (BR-881)", async () => {
     const fs = new InMemoryProjectFs();
     fs.files.set(CLAUDE_MD_PATH, { content: CLAUDE_MD_TEMPLATE, mode: 0o644 });
 
@@ -241,27 +239,13 @@ describe("setup-project-flow — CLAUDE.md marker-section rewrite (SPEC-076 D7) 
     expect(result.ok).toBe(true);
     if (!result.ok) return;
 
-    // Legacy adoption: every pre-fingerprinting-era install has exactly this
-    // shape (marker zone present, no `<!-- lore:managed -->` comment inside).
-    // The zone is discarded and rebuilt fingerprinted, so bytes DO change —
-    // this must never surface as "failed" (the pre-fix VALIDATION_ERROR bug),
-    // and the differing on-disk bytes are backed up before being overwritten
-    // (same rule any other differing pre-existing content gets).
-    expect(result.value.claude_md.status).toBe("done");
-    expect(fs.readFile(CLAUDE_MD_PATH)).toBe(EXPECTED_ADOPTED_CLAUDE_MD);
-    const expectedBackupPath = `.lore/.lore-backups/${FIXED_NOW}/CLAUDE.md`;
-    expect(result.value.backups).toEqual([expectedBackupPath]);
-    expect(fs.readFile(`${REPO_DIR}/${expectedBackupPath}`)).toBe(CLAUDE_MD_TEMPLATE);
-    expect(fs.backupCalls).toBe(1);
-
-    // A second run over the now-fingerprinted output is a normal idempotent
-    // re-converge — proving the adoption is truly one-way.
-    const second = await scaffoldProject(makeDeps(fs), { repoDir: REPO_DIR }, fixedNow);
-    expect(second.ok).toBe(true);
-    if (!second.ok) return;
-    expect(second.value.claude_md.status).toBe("skipped");
-    expect(second.value.backups).toEqual([]);
-    expect(fs.readFile(CLAUDE_MD_PATH)).toBe(EXPECTED_ADOPTED_CLAUDE_MD);
+    // Only the fingerprinted managed-part format is read: an older lore's zone is never replaced in silence.
+    expect(result.value.claude_md.status).toBe("failed");
+    expect(result.value.claude_md.detail).toContain("carries no fingerprint");
+    expect(result.value.claude_md.detail).toContain("Repair: delete the zone");
+    expect(fs.readFile(CLAUDE_MD_PATH)).toBe(CLAUDE_MD_TEMPLATE);
+    expect(result.value.backups).toEqual([]);
+    expect(fs.backupCalls).toBe(0);
   });
 });
 
@@ -352,6 +336,9 @@ const REAL_SHAPE_SKELETON =
 
 type AdoptionCall = { repoDir: string; mode: "enforce" | "warn" };
 
+/** A probe of an empty repository: every path is missing, nothing is readable. */
+const NO_REPOSITORY_PROBE: FsProbe = { stat: () => "missing", readFile: () => null, listDir: () => null };
+
 function makeAdoptionDeps(
   fs: InMemoryProjectFs,
   calls: AdoptionCall[],
@@ -361,6 +348,8 @@ function makeAdoptionDeps(
   return {
     ...makeDeps(fs, { "CLAUDE.md.template": REAL_SHAPE_TEMPLATE, "CLAUDE.md.skeleton": REAL_SHAPE_SKELETON }),
     resolveMemoryFileBudgets: () => budgets,
+    // An explicit fake probe: this fixture's CLAUDE.md names no code, so nothing is read.
+    resolveReferenceContext: () => ({ probe: NO_REPOSITORY_PROBE, referenceDocuments: [] }),
     writeAdoptionMode: (repoDir, mode) => {
       calls.push({ repoDir, mode });
       return outcome;

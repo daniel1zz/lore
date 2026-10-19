@@ -243,7 +243,7 @@ import { BASELINE_ADOPT_AUDIT_ACTION } from "./baseline-adopt.js";
 import { decideAcCiteStatus, ENFORCE_REFUSES_NOTHING_WARNING, lastAdoptedModeOf } from "../../../service/ac-cite-status.js";
 import { AttributionReport, type AttributionShare, type IdentitySourceCounts, type OrphanedDirtySummary } from "../../../service/attribution-report.js";
 import type { AcCiteStatus } from "../../../service/ac-cite-status.js";
-import { discoverMemoryFiles } from "../../real-memory-file-probe.js";
+import { discoverFragmentDocuments, discoverMemoryFiles } from "../../real-memory-file-probe.js";
 import { runMemoryFileChecks } from "../../../service/claude-md-admission.js";
 import type { MemoryFileFinding } from "../../../service/claude-md-findings.js";
 import {
@@ -1222,7 +1222,7 @@ export default defineLoreCommand({
       // route through (AC-COMPOSE-1) — neither calls an individual metric
       // function directly, and that now includes the headroom-reporting pair
       // (N15: they route THROUGH this entry too, no longer a bypass).
-      // `fileExists` resolves candidate paths against THIS process's cwd
+      // `probe` resolves references against THIS process's cwd
       // (the same root `discoverMemoryFiles` walked); `docExists` is
       // hardcoded `() => true` here — every slug "exists" from this
       // branch's point of view, so the slug-pointer metric structurally
@@ -1236,7 +1236,8 @@ export default defineLoreCommand({
         warnings,
         adoption,
       } = runMemoryFileChecks(files, budgets, {
-        fileExists: (p) => existsSync(join(inv.cwd, p)),
+        probe: buildRealFsProbe(inv.cwd),
+        referenceDocuments: discoverFragmentDocuments(inv.cwd),
         docExists: () => true,
       });
 
@@ -1601,7 +1602,8 @@ export default defineLoreCommand({
             advisory: memoryPointerAdvisory,
             adoption: memoryPointerAdoption,
           } = runMemoryFileChecks(files, budgets, {
-            fileExists: (p) => existsSync(join(inv.cwd, p)),
+            probe: buildRealFsProbe(inv.cwd),
+            referenceDocuments: discoverFragmentDocuments(inv.cwd),
             docExists: (slug) => knownSlugs.has(slug),
           });
           memoryPointersPayload = {

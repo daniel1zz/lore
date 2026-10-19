@@ -16,6 +16,7 @@ function harness(remote: GitOutcome) {
     corpus: { take: unused, remove: unused },
     runFloor: unused,
     ledger: {} as IntegrateDeps["ledger"],
+    attempts: {} as IntegrateDeps["attempts"],
     projectRoot: "/nowhere",
     worktreesRoot: "/nowhere/wt",
     log: () => {},

@@ -64,10 +64,8 @@
  *     stderr warning naming both "skeleton" and "provider" is ALWAYS printed
  *     whenever the narrative ends up unresolved, and the command still
  *     exits 0 (D3).
- *   - `refresh` never reads/resolves `--ai`/`--force` at all — those flags
- *     stay declared (for `init`'s use and for strict-flags discoverability)
- *     but are silently inert for this topic (D2: refresh is Z1-only,
- *     deterministic, never AI).
+ *   - `refresh` REFUSES `--force`, `--ai` and `--no-ai` (exit 4, naming each) before any filesystem work:
+ *     they stay declared for `init`, but refresh is Z1-only, deterministic, never AI (D2, BR-889).
  *
  * Side-effect class: IO (`node:fs` reads/writes via the real `FsWritePort`
  *   built here, an optional AI provider subprocess spawn via
@@ -536,6 +534,24 @@ export default defineLoreCommand({
     if (args.check === true && topic !== "refresh") {
       inv.io.stderr.write("Error: --check applies to `refresh` only\n");
       return 2;
+    }
+
+    if (topic === "refresh") {
+      // reason: BR-889 — refresh is deterministic Z1-only work; options that exist for `init` do nothing here,
+      // so naming them is a usage error rather than a silent no-op (exit 4, validation).
+      const unused = [
+        ...(args.force === true ? ["--force"] : []),
+        ...(inv.argv.includes("--ai") ? ["--ai"] : []),
+        ...(inv.argv.includes("--no-ai") ? ["--no-ai"] : []),
+      ];
+      if (unused.length > 0) {
+        return reportFailure(inv, {
+          code: "VALIDATION_ERROR",
+          field: "options",
+          message: `\`lore context refresh\` does not use ${unused.join(", ")} (init-only options); remove ${unused.length === 1 ? "it" : "them"}`,
+          value: unused,
+        });
+      }
     }
 
     const dbPath = findLoreDbPath(inv.io, inv);
