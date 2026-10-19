@@ -152,6 +152,7 @@ import { MIGRATION_022_SQL } from "./migrations/migration-022.js";
 import { MIGRATION_023_SQL } from "./migrations/migration-023.js";
 import { MIGRATION_024_SQL } from "./migrations/migration-024.js";
 import { MIGRATION_025_SQL } from "./migrations/migration-025.js";
+import { MIGRATION_026_SQL } from "./migrations/migration-026.js";
 import { DECISION_GENESIS_HASH, computeDecisionEntryHash } from "./decision-log.js";
 import type { DecisionLogRow, DecisionRecordInput } from "./decision-log.js";
 import type { DecisionSubjectKey } from "./store-interface.js";
@@ -772,6 +773,11 @@ export class SQLiteStore implements StoreInterface {
     if (currentVersion < 25 && 25 <= ceiling) {
       // reason: migration-025 adds the covering index AuditService.verify's narrow key read (listVersionKeys) is answered from.
       this.db.exec(MIGRATION_025_SQL);
+    }
+
+    if (currentVersion < 26 && 26 <= ceiling) {
+      // reason: migration-026 rebuilds `versions` (one BEGIN/COMMIT string) so its action CHECK admits 'undelete'.
+      this.db.exec(MIGRATION_026_SQL);
     }
   }
 

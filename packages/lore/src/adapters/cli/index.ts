@@ -109,6 +109,7 @@ export const COMMAND_LOADERS: Readonly<Record<string, () => Promise<CommandModul
     get: () => import("./commands/get.js"),
     set: () => import("./commands/set.js"),
     delete: () => import("./commands/delete.js"),
+    undelete: () => import("./commands/undelete.js"),
     list: () => import("./commands/list.js"),
     search: () => import("./commands/search.js"),
     tree: () => import("./commands/tree.js"),
